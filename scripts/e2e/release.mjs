@@ -7,12 +7,15 @@
 //   as expected.
 // Environment: THIMBLE_E2E_TREE (the tree thimble runs from), THIMBLE_E2E_CORPUS (the corpus copy), THIMBLE_E2E_WS (what
 // workspace.py printed), THIMBLE_E2E_SHOTS, THIMBLE_E2E_RESULTS, THIMBLE_E2E_FIXTURE (the fixture extension's folder).
-import { spawnSync } from 'node:child_process'
+import { execFile, spawnSync } from 'node:child_process'
+import { randomUUID } from 'node:crypto'
 import { appendFileSync, existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { basename, dirname, join, relative } from 'node:path'
+import { promisify } from 'node:util'
 
 const env = process.env
+const execFileP = promisify(execFile)
 const TREE = env.THIMBLE_E2E_TREE
 const CORPUS = env.THIMBLE_E2E_CORPUS
 const WS = JSON.parse(env.THIMBLE_E2E_WS || '{}')
@@ -36,14 +39,8 @@ const STEP_MS = 120_000
 const PENDING = {
   welcome: 'the first-launch welcome',
   tour: 'the product tour',
-  'transcript-anywhere': 'transcripts for any transcript-like file',
-  pdf: 'PDF as a File browser mode',
-  'pdf-fit': 'PDF as a File browser mode',
   'views-bar': 'worked examples and the PDF viewer kept out of the views',
   'local-views': 'generated views as the workspace\'s local extension',
-  'ext-cli-off': 'thimble extension on/off',
-  'ext-cli-on': 'thimble extension on/off',
-  'ext-orient-offer': 'the offer to run an extension\'s orientation instructions',
   'ext-live': '+ New refreshing its report types when an extension is switched (it loads them once per page)',
   'view-derived': 'the view contract (derived fields as a count in the header)',
   'view-labels': 'the view contract (labels in every view\'s UI)',
@@ -102,14 +99,14 @@ let currentPage = null
 
 /** Run one step: its function returns {detail, shots} or throws; a step never stops the walk. A failing step without a
  * screenshot of its own gets one of the page as the failure left it. */
-async function step(name, title, fn) {
+async function step(name, title, fn, ms = STEP_MS) {
   let timer
   if (currentPage && name !== 'welcome' && name !== 'tour') await dismissTour(currentPage)
   if (currentPage) await hideNotices(currentPage)
   try {
     const res = await Promise.race([
       fn(),
-      new Promise((_, rej) => (timer = setTimeout(() => rej(new StepError(`no result in ${STEP_MS / 1000} s`)), STEP_MS))),
+      new Promise((_, rej) => (timer = setTimeout(() => rej(new StepError(`no result in ${ms / 1000} s`)), ms))),
     ])
     record(name, title, res?.skip ? 'skip' : 'pass', res?.detail ?? '', res?.shots ?? [])
     return true
@@ -298,6 +295,48 @@ async function followsExtension(page, want, what, ms = 10_000) {
   const still = [!s.settings && 'Settings', !s.menu && '+ New'].filter(Boolean)
   const where = row?.present ? `switch ${row.on ? 'on' : 'off'}, ${row.active ? 'running' : 'not running'} here` : 'no row'
   return { ok, how: ok ? `${stale.join(' and ')} only after a reload${greyed()}` : `${still.join(' and ')} still wrong after a reload (Settings: ${where})` }
+}
+
+/** Switch the fixture extension off and on again in Settings, and whether Settings then asks to run its orientation
+ * now: {shown, shot}. Not now is picked when it asks, and the switch is saved on. */
+async function switchOnAndLook(page, name) {
+  let r = await extRow(page)
+  if (r.on) {
+    await r.sw.click()
+    await page.locator('.settings-pop').getByRole('button', { name: 'Save', exact: true }).click()
+    await page.locator('.settings-pop').waitFor({ state: 'detached', timeout: ACTION_MS }).catch(() => undefined)
+    await page.waitForTimeout(800)
+    r = await extRow(page)
+  }
+  await r.sw.click()
+  const row = page.locator(`.settings-pop [data-extension="${EXT}"]`)
+  const shown = await row.getByText(/orientation now/i).first().waitFor({ timeout: 5_000 }).then(() => true, () => false)
+  const s = await shot(page, name)
+  const not = row.getByText(/^not now$/i)
+  if (await not.count()) await not.first().click()
+  await page.locator('.settings-pop').getByRole('button', { name: 'Save', exact: true }).click()
+  await page.locator('.settings-pop').waitFor({ state: 'detached', timeout: ACTION_MS }).catch(() => undefined)
+  return { shown, shot: s }
+}
+
+/** A Claude Code session with a transcript, as an orientation leaves one: one `claude -p` turn in a folder of the run,
+ * on the caller's own login, loading no user settings, plugins or MCP servers. Claude Code keeps its transcript where it
+ * keeps every session's. Tried again after a failure, with a new session id each time. {sid} or {error}. */
+async function claudeSession() {
+  const cwd = join(OUT, 'standin-orientation')
+  mkdirSync(cwd, { recursive: true })
+  const clean = Object.fromEntries(Object.entries(env).filter(([k]) => !k.startsWith('THIMBLE_')))
+  let error = ''
+  for (const wait of [0, 15_000, 45_000]) {
+    if (wait) await new Promise((ok) => setTimeout(ok, wait))
+    const sid = randomUUID()
+    const args = ['-p', 'Reply with the single word ok.', '--setting-sources', 'project', '--strict-mcp-config', '--session-id', sid, '--max-turns', '1']
+    const r = await execFileP('claude', args, { cwd, env: clean, timeout: 180_000 }).then(() => null, (e) => e)
+    if (!r) return { sid }
+    error = `${r.stderr || r.stdout || r.message || ''}`.trim().split('\n')[0].slice(0, 200)
+    if (r.code === 'ENOENT') break
+  }
+  return { error: error || 'claude failed' }
 }
 
 async function waitShell(page) {
@@ -776,6 +815,20 @@ async function main() {
       return { detail: fit.detail }
     })
 
+    await step('api-guard', 'A write to the API without the browser\'s cookie or the token is refused', async () => {
+      const origin = new URL(WS.url).origin
+      const name = 'E2E unsigned write'
+      const r = await fetch(`${origin}/api/ws/${WS.name}/concepts`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ name, kind: 'regex', spec: 'x', labels: ['x', 'other'] }),
+      })
+      const list = await page.request.get(`${origin}/api/ws/${WS.name}/concepts`)
+      const made = JSON.stringify(await list.json().catch(() => null)).includes(name)
+      check(r.status === 403 && !made, `an unsigned POST /api/ws/${WS.name}/concepts answered ${r.status}${made ? ', and the label was made' : ''}`)
+      return { detail: `403 for an unsigned POST /api/ws/${WS.name}/concepts, and no label made` }
+    })
+
     let added = false
     await step('ext-add', '`thimble extension add` adds the fixture extension, on, and the UI shows it', async () => {
       const r = thimble('extension', 'add', FIXTURE, '--yes')
@@ -851,44 +904,33 @@ async function main() {
       return { detail: `on in Settings, back in + New (${f.how})`, shots: [s] }
     })
 
-    await step('ext-orient-offer', 'Switching on an extension with orientation instructions offers to run them', async () => {
+    await step('ext-orient-offer', 'Switching on an extension with orientation instructions offers to run them where an orientation can be resumed, and only there', async () => {
       check(added, 'the extension was not added')
-      // the offer is due only where an orientation ran; with no model here, a run record and its chat stand in for one
+      // a run record and its chat stand in for an orientation; the offer also needs the transcript Claude Code keeps
       const run = join(WS.dir, 'orient', 'run.json')
       const chat = join(WS.dir, 'chats', 'e2e-standin.meta.json')
-      const planted = !existsSync(run)
-      if (planted) {
+      if (existsSync(run)) return { skip: true, detail: 'an orientation ran in this workspace, so no run record can stand in for one' }
+      const plant = (session) => {
         mkdirSync(dirname(run), { recursive: true })
-        writeFileSync(run, JSON.stringify({ session: 'e2e-standin', status: 'done', chats: { orient: 'e2e-standin' } }))
+        writeFileSync(run, JSON.stringify({ session, status: 'done', chats: { orient: 'e2e-standin' } }))
         mkdirSync(dirname(chat), { recursive: true })
         writeFileSync(chat, JSON.stringify({ id: 'e2e-standin', kind: 'agent', role: 'orient', title: 'Orientation', status: 'done' }))
       }
       try {
-        let r = await extRow(page)
-        if (r.on) {
-          await r.sw.click()
-          await page.locator('.settings-pop').getByRole('button', { name: 'Save', exact: true }).click()
-          await page.locator('.settings-pop').waitFor({ state: 'detached', timeout: ACTION_MS }).catch(() => undefined)
-          await page.waitForTimeout(800)
-          r = await extRow(page)
-        }
-        await r.sw.click()
-        const row = page.locator(`.settings-pop [data-extension="${EXT}"]`)
-        const shown = await row.getByText(/orientation now/i).first().waitFor({ timeout: 5_000 }).then(() => true, () => false)
-        const s = await shot(page, 'ext-orient-offer')
-        const not = row.getByText(/^not now$/i)
-        if (await not.count()) await not.first().click()
-        await page.locator('.settings-pop').getByRole('button', { name: 'Save', exact: true }).click()
-        await page.locator('.settings-pop').waitFor({ state: 'detached', timeout: ACTION_MS }).catch(() => undefined)
-        if (!shown) throw new StepError('switching it on in Settings offered no run of its orientation instructions', [s])
-        return { detail: `Settings asks whether to run its orientation now; answered Not now${planted ? ' (a run record stood in for an orientation)' : ''}`, shots: [s] }
+        plant(randomUUID())
+        const without = await switchOnAndLook(page, 'ext-orient-no-transcript')
+        if (without.shown) throw new StepError('Settings offered Run now for an orientation whose transcript Claude Code does not keep', [without.shot])
+        const real = await claudeSession()
+        if (real.error) return { skip: true, detail: `no offer without a transcript, as it should be; the offer itself was not checked, since no Claude Code session could stand in for the orientation: ${real.error}`, shots: [without.shot] }
+        plant(real.sid)
+        const withIt = await switchOnAndLook(page, 'ext-orient-offer')
+        if (!withIt.shown) throw new StepError('switching it on in Settings offered no run of its orientation instructions', [without.shot, withIt.shot])
+        return { detail: `no offer while Claude Code keeps no transcript of the orientation; with one (a one-turn \`claude -p\` session, ${real.sid}), Settings asks whether to run its orientation now; answered Not now`, shots: [without.shot, withIt.shot] }
       } finally {
-        if (planted) {
-          rmSync(run, { force: true })
-          rmSync(chat, { force: true })
-        }
+        rmSync(run, { force: true })
+        rmSync(chat, { force: true })
       }
-    })
+    }, 600_000)
 
     await step('ext-live', 'Settings and + New follow every switch of the extension without a reload', async () => {
       check(added, 'the extension was not added')

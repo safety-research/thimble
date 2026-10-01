@@ -26,7 +26,9 @@
 # start the server and a stand-in for the analyst's Claude Code session (scripts/e2e/standin_session.py: no model runs);
 # walk the UI (scripts/e2e/release.mjs): the first-launch welcome and the tour, the File browser, a transcript, a PDF, the
 # fixture view, Settings > Extensions, then `thimble extension add` of scripts/e2e/fixture-extension switched off and on
-# from the CLI and from Settings. Every process it started is stopped on exit, and <out>/report.md lists each step.
+# from the CLI and from Settings. The one model call is a one-turn `claude -p` in <out>/standin-orientation, loading no
+# user settings, plugins or MCP servers, whose transcript stands in for an orientation's when Settings offers to run the
+# extension's orientation instructions. Every process it started is stopped on exit, and <out>/report.md lists each step.
 #
 # The run keeps the caller's HOME, so thimble and claude use the caller's own Claude login and config, and it leaves
 # them as they were: it puts the `thimble` link in <out>/bin (THIMBLE_BIN_DIR) in place of ~/.local/bin, and installs
