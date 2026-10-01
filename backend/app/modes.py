@@ -4,7 +4,8 @@ builds. Each runs in Manual, Auto or Bypass (MODES). The rows are thimble's conf
 (userconf.MODE_ROWS).
 
 A row the analyst has not set follows main, the Claude Code session that started thimble: the mode Claude Code reports
-to main's hooks (session.note_mode), which this server keeps in memory, Manual before the first report. So an agent runs
+to main's hooks (session.note_mode), which thimble keeps until main reports again, over a restart of the server under the
+same session too, Manual before the first report. So an agent runs
 in Bypass only when main does, or when the analyst chose Bypass for it in thimble's page: in Settings, on Start (the
 orientation's row), or on a session's card (that session alone, agent_session.set_mode), each a write only the
 analyst's browser may make (hook_auth.analyst). A mode the analyst's or the org's Claude Code settings turn off

@@ -24,6 +24,7 @@ import contextlib
 import html
 import json
 import logging
+import os
 import re
 import signal
 import time
@@ -228,6 +229,7 @@ NOT_RUN_KEEP = 2_000
 _shim_pids: dict[tuple[str, str], int] = {}  # (workspace, session) -> the `claude` pid its shim reported (main_pid)
 _shim_configs: dict[tuple[str, str], str] = {}  # (workspace, session) -> the CLAUDE_CONFIG_DIR its shim reported ("": unset)
 _modes: dict[str, tuple[str, str]] = {}  # workspace -> (main's session, the permission mode its hooks reported: note_mode)
+MODES_FILE = "main-modes.json"  # in thimble's home: {workspace: {session, mode}}, the last of _modes kept
 SHIM_PIDS_KEPT = 256  # _shim_pids and _shim_configs keep the newest this many
 STAMP_LINES = 200  # _began_since looks this far into a transcript for its first record with a timestamp
 CURSOR_CALLS = 200  # the cursor keeps the names of main's newest this many tool calls, for results that come later
@@ -416,9 +418,16 @@ def attach(c: str, sid: Any, cwd: Any, transcript_path: str | None = None, pid: 
         meta["ended"] = None
         agents.write_meta(c, meta)
         agents.notify(c, agents.MAIN_ID)
-    elif "permission_mode" in held and _modes.get(c, ("",))[0] != sid:  # an earlier server's report, no longer in force
-        del held["permission_mode"]
-        agents.write_meta(c, meta)
+    elif _modes.get(c, ("",))[0] != sid:  # this server restarted under the session: main's last report, as kept
+        kept = _kept_mode(c, sid)
+        if kept:
+            _modes[c] = (sid, kept)
+        if held.get("permission_mode") != kept:
+            if kept:
+                held["permission_mode"] = kept
+            else:
+                held.pop("permission_mode", None)
+            agents.write_meta(c, meta)
     _persist(lv, keep_subs=restored or bool(lv.subs))
     _cancel_grace(c)
     _ensure_tail(lv)
@@ -430,14 +439,49 @@ def attach(c: str, sid: Any, cwd: Any, transcript_path: str | None = None, pid: 
     return lv
 
 
+def _modes_path() -> Path:
+    return Path(os.environ.get("THIMBLE_HOME") or "~/.thimble").expanduser() / MODES_FILE
+
+
+def _kept_modes() -> dict[str, Any]:
+    try:
+        got = json.loads(_modes_path().read_text("utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return got if isinstance(got, dict) else {}
+
+
+def _kept_mode(c: str, sid: str) -> str | None:
+    """The mode main's hooks last reported for session `sid` of workspace `c`, as MODES_FILE keeps it; None when it
+    keeps none for that session."""
+    rec = _kept_modes().get(c)
+    if not isinstance(rec, dict) or rec.get("session") != sid or rec.get("mode") not in modes.CLAUDE_MODES:
+        return None
+    return str(rec["mode"])
+
+
+def _keep_mode(c: str, sid: str, mode: str) -> None:
+    kept = _kept_modes()
+    if kept.get(c) == {"session": sid, "mode": mode}:
+        return
+    kept[c] = {"session": sid, "mode": mode}
+    try:
+        config.private_dir(_modes_path().parent)
+        atomic_write_text(_modes_path(), json.dumps(kept, indent=1))
+    except OSError as e:
+        log.warning("%s: main's permission mode was not kept in %s: %s", c, _modes_path(), e)
+
+
 def note_mode(c: str, sid: str | None, mode: str) -> None:
     """Main's hooks report the permission mode Claude Code runs the session `sid` in: when `sid` is main, this server
-    keeps it (main_mode), the mode each agent's row follows until the analyst sets it (modes.py), and main's meta shows
-    it (`attached.permission_mode`)."""
+    keeps it (main_mode), in thimble's home too (MODES_FILE) so that a restarted server under the same session follows
+    it until main reports again, the mode each agent's row follows until the analyst sets it (modes.py), and main's
+    meta shows it (`attached.permission_mode`)."""
     lv = _live.get(c)
     if lv is None or not sid or lv.sid != sid or mode not in modes.CLAUDE_MODES:
         return
     _modes[c] = (sid, mode)
+    _keep_mode(c, sid, mode)
     meta = agents.meta_or_none(c, agents.MAIN_ID) or {}
     held = meta.get("attached") or {}
     if held.get("session") == sid and held.get("permission_mode") != mode:
@@ -447,8 +491,8 @@ def note_mode(c: str, sid: str | None, mode: str) -> None:
 
 
 def main_mode(c: str) -> str | None:
-    """The permission mode main's hooks last reported to this server (note_mode), by Claude Code's name; None before
-    the first report."""
+    """The permission mode main's hooks last reported (note_mode), by Claude Code's name, to this server or, for the
+    session it restarted under, to the one before it; None before the first report."""
     lv, got = _live.get(c), _modes.get(c)
     return got[1] if lv is not None and got is not None and got[0] == lv.sid else None
 

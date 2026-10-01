@@ -210,6 +210,36 @@ async def test_each_agent_runs_in_its_row_else_in_main_s_mode_and_nothing_else_p
     assert modes.disabled() == {"auto", "bypass"}, "the managed file with its drop-ins"
 
 
+def test_a_server_restarted_under_main_follows_its_last_reported_mode_until_main_reports_again(fake):
+    """Main's reported mode is kept in thimble's home, not in memory alone: a server restarted under the same session
+    gives each row that follows main that mode, and main's meta shows it, until main reports again. A new session starts
+    from Manual, whatever an earlier session ran in."""
+    cwd = str(config.corpus_dir(CORPUS))
+
+    def restart() -> None:
+        session._live.clear()
+        session._modes.clear()
+
+    session.attach(CORPUS, "sid-main", cwd)
+    session.note_mode(CORPUS, "sid-main", "auto")
+    assert modes.mode_for(CORPUS, "orient") == "auto"
+    restart()
+    session.attach(CORPUS, "sid-main", cwd)
+    assert [modes.mode_for(CORPUS, a) for a in modes.AGENTS] == ["auto"] * len(modes.AGENTS), "the kept report"
+    assert agents.read_meta(CORPUS, agents.MAIN_ID)["attached"]["permission_mode"] == "auto"
+    session.note_mode(CORPUS, "sid-main", "default")
+    assert modes.mode_for(CORPUS, "orient") == "manual", "main's next report wins"
+    restart()
+    session.attach(CORPUS, "sid-main", cwd)
+    assert modes.mode_for(CORPUS, "orient") == "manual", "the newer report is the one kept"
+    session.note_mode(CORPUS, "sid-main", "bypassPermissions")
+    session.detach(CORPUS, "sid-main", "ended")
+    restart()
+    session.attach(CORPUS, "sid-next", cwd)
+    assert modes.mode_for(CORPUS, "orient") == "manual", "another session's mode is not main's"
+    assert "permission_mode" not in agents.read_meta(CORPUS, agents.MAIN_ID)["attached"]
+
+
 def test_a_continued_background_session_keeps_the_mode_it_runs_in(fake, monkeypatch):
     """A background session resumed or sent a message keeps the flags it was launched with (agent_session.BG_AUTO_LINE),
     so its next run takes the mode its chat's meta records, not the row saved since nor a card's switch; a session of
