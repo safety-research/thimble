@@ -1,7 +1,7 @@
 // The ref grammar (backend refs.py keeps it in step):
 //   <path>#L<n> | <path>#L<n>-L<m> | <path>#L<n>.b<k> | <path>#L<n>.b<k>:c<a>-<b> | <path>
 //   <path>.db|.sqlite|.sqlite3#<table>[/<pk>]
-//   <path>.pdf#page=<n> (`#p<n>` reads the same) | <path>.json#/<json pointer> | <path>.csv|.tsv#row=<n>
+//   <path>.pdf#p<n> (`#page=<n>` reads the same) | <path>.json#/<json pointer> | <path>.csv|.tsv#row=<n>
 //                      a page, a JSON document's value, a CSV's row after its header: a record of the file (records.py)
 //   card:<id> | card:<id>@<exec> | card:<id>#<col>/<row> | card:<id>@out<i>#L<n>[-L<m>]   (`cell:` is an alias)
 //   card:<id>#<path>#L<n>…   a file's line cited through the card that shows it: read as the file's line (<path>#L<n>…)
@@ -163,20 +163,20 @@ function locatorLabel(locator: string): string {
 /** The kinds that name one record of a file (backend refs.RECORD_KINDS). */
 const RECORD_KINDS = new Set(['record', 'row', 'page', 'pointer', 'csvrow'])
 
-/** A record's ref as label rows key it (backend records.canon): a PDF's `#p<n>` as `#page=<n>`; any other ref as it is. */
+/** A record's ref as label rows key it (backend records.canon): a PDF's `#page=<n>` as `#p<n>`; any other ref as it is. */
 export function recordKey(ref: string): string {
-  const m = /^(.+\.pdf)#p(\d+)$/i.exec(ref.trim())
-  return m ? `${m[1]}#page=${+m[2]}` : ref.trim()
+  const m = /^(.+\.pdf)#(?:p|page=?)(\d+)$/i.exec(ref.trim())
+  return m ? `${m[1]}#p${+m[2]}` : ref.trim()
 }
 
 /** The file of a ref that names one record of it (a line, a database row, a page, a JSON value, a CSV row, or a
- * `<path>#<locator>` a view's reader names), with the line for a line; null for any other ref (backend
- * records.split). */
+ * `<path>#<locator>` a view's reader names, whose file name has an extension), with the line for a line; null for any
+ * other ref (backend records.split). */
 export function recordOf(ref: string): { path: string; line?: number } | null {
   const p = parseRef(ref)
   if (!p || !('path' in p)) return null
   if (p.kind === 'record') return { path: p.path, line: p.line }
-  return RECORD_KINDS.has(p.kind) || (p.kind === 'path' && p.locator) ? { path: p.path } : null
+  return RECORD_KINDS.has(p.kind) || (p.kind === 'path' && p.locator && /\.[A-Za-z0-9]{1,8}$/.test(p.path)) ? { path: p.path } : null
 }
 
 /** The fragment of a ref into `path` (the text after `#`), or null when the ref names another file or no fragment. */
