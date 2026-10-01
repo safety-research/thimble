@@ -40,7 +40,6 @@ const STEP_MS = 120_000
 const PENDING = {
   welcome: 'the first-launch welcome',
   tour: 'the product tour',
-  'views-bar': 'worked examples and the PDF viewer kept out of the views',
   'view-derived': 'the view contract (derived fields as a count in the header)',
   'view-labels': 'the view contract (labels in every view\'s UI)',
   'labels-any-file': 'records and refs for any file a reader can split (CSV rows, PDF pages, SQLite rows)',
