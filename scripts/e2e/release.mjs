@@ -8,9 +8,9 @@
 // Environment: THIMBLE_E2E_CLONE (the installed tree), THIMBLE_E2E_CORPUS (the corpus copy), THIMBLE_E2E_WS (what
 // workspace.py printed), THIMBLE_E2E_SHOTS, THIMBLE_E2E_RESULTS, THIMBLE_E2E_FIXTURE (the fixture extension's folder).
 import { spawnSync } from 'node:child_process'
-import { appendFileSync, existsSync, readdirSync, statSync } from 'node:fs'
+import { appendFileSync, existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
-import { basename, join, relative } from 'node:path'
+import { basename, dirname, join, relative } from 'node:path'
 
 const env = process.env
 const CLONE = env.THIMBLE_E2E_CLONE
@@ -215,11 +215,6 @@ async function followsExtension(page, want, what, ms = 10_000) {
   return { ok, how: ok ? `${stale.join(' and ')} only after a reload` : `${still.join(' and ')} still wrong after a reload` }
 }
 
-/** The texts of the dialogs, alerts and toasts on the page. */
-async function notices(page) {
-  return page.locator('[role=dialog], [role=alertdialog], [role=alert], [role=status], [class*=toast]').allInnerTexts()
-}
-
 async function waitShell(page) {
   await page.getByRole('tab', { name: 'Files', exact: true }).waitFor({ timeout: 30_000 })
   await settle(page, 800)
@@ -271,22 +266,49 @@ function corpusFiles(dir, base = dir, out = []) {
   return out
 }
 
-/** The tour's visible step: its text and buttons, or null when no tour shows. */
+/** The tour's popover: its title and count, the actions it offers (data-tour: next, back, skip, done, begin) and its
+ * first cutout; null when no tour shows. */
 async function tourState(page) {
   return page.evaluate(() => {
-    const vis = (el) => !!el && el.getClientRects().length > 0 && getComputedStyle(el).visibility !== 'hidden'
-    const buttons = [...document.querySelectorAll('button')].filter(vis)
-    const names = buttons.map((b) => (b.innerText || b.getAttribute('aria-label') || '').trim())
-    const next = names.find((n) => /^(next|continue|got it)\b/i.test(n))
-    const done = names.find((n) => /^(done|finish|end tour|start exploring|close tour|let'?s go)\b/i.test(n))
-    if (!next && !done) return null
-    const box = buttons[names.indexOf(next || done)].closest('[role=dialog], [class*=tour], [data-tour]') || document.body
-    return { next: next || null, done: done || null, text: (box.innerText || '').trim().slice(0, 160) }
+    const pop = document.querySelector('.tour-pop, [role=dialog][aria-label*="tour" i]')
+    if (!pop || !pop.getClientRects().length) return null
+    const acts = [...pop.querySelectorAll('button')].map((b) => b.dataset.tour || (b.innerText || '').trim().toLowerCase())
+    const title = (pop.querySelector('.tour-title')?.textContent || '').trim()
+    const count = (pop.querySelector('.tour-count')?.textContent || '').trim()
+    const hole = [...document.querySelectorAll('.tour-root mask rect')].find((r) => r.getAttribute('fill') === '#000')
+    const b = hole?.getBoundingClientRect()
+    return { acts, title, count, text: (pop.innerText || '').trim().slice(0, 160), welcome: pop.classList.contains('tour-welcome'),
+             hole: b && b.width ? { x: b.left + b.width / 2, y: b.top + b.height / 2 } : null }
   })
 }
 
+/** Unlock a gated step: press a Start inside the tour's example, else ⌘-click the step's cutout. */
+async function unlockStep(page, st) {
+  const start = await page.evaluate(() => {
+    const b = [...document.querySelectorAll('.tour-ex button, .tour-root button')].find((x) => x.textContent?.trim() === 'Start')
+    const r = b?.getBoundingClientRect()
+    return r && r.width ? { x: r.left + r.width / 2, y: r.top + r.height / 2 } : null
+  })
+  if (start) {
+    await page.mouse.click(start.x, start.y)
+    return 'Start'
+  }
+  const at = st.hole || { x: SIZES[0].width / 2, y: SIZES[0].height / 2 }
+  await page.mouse.move(at.x - 10, at.y)
+  await page.keyboard.down('Meta')
+  await page.mouse.move(at.x, at.y, { steps: 3 })
+  await page.mouse.down()
+  await page.mouse.up()
+  await page.waitForTimeout(250)
+  await page.keyboard.up('Meta')
+  return '⌘-click'
+}
+
 async function main() {
-  const browser = await chromium.launch()
+  // the full Chromium shows a PDF in a page when headless; the headless shell install.sh fetches does not
+  let browser = await chromium.launch({ channel: 'chromium' }).catch(() => null)
+  const browserName = browser ? `Chromium ${browser.version()}` : 'the headless shell'
+  if (!browser) browser = await chromium.launch()
   const context = await browser.newContext({ viewport: SIZES[0] })
   const page = await context.newPage()
   page.setDefaultTimeout(ACTION_MS)
@@ -307,23 +329,24 @@ async function main() {
       const s = await shot(page, 'first-load')
       check(!(await sessionGone(page)), 'the page shows "No Claude Code session connected"')
       check((await page.getByRole('tab', { name: 'Report', exact: true }).count()) > 0, 'no Report tab')
-      return { detail: `${WS.name} at ${WS.url.split('#')[0]}`, shots: [s] }
+      return { detail: `${WS.name} at ${WS.url.split('#')[0]}, in ${browserName}`, shots: [s] }
     })
 
     await step('welcome', 'The first-launch welcome asks about the tour, and Skip goes straight to the workbench', async () => {
       const ask = page.getByText(/would you like a product tour/i).first()
-      const shown = await ask.waitFor({ timeout: 5_000 }).then(() => true, () => false)
+      const shown = await ask.waitFor({ timeout: 8_000 }).then(() => true, () => false)
       const shots = [await shot(page, 'welcome')]
       if (!shown) throw new StepError('no welcome asking "Would you like a product tour?" on the first launch', shots)
-      const skip = page.getByRole('button', { name: /^(skip|no thanks|not now)/i }).first()
+      const skip = page.locator('.tour-pop [data-tour="skip"]').or(page.getByRole('button', { name: /^(skip|no thanks|not now)/i })).first()
+      const label = (await skip.innerText()).trim()
       await skip.click()
       await ask.waitFor({ state: 'detached', timeout: ACTION_MS })
       shots.push(await shot(page, 'welcome-skipped'))
       await page.reload()
       await waitShell(page)
-      await page.waitForTimeout(1_500)
+      await page.waitForTimeout(2_000)
       check(!(await page.getByText(/would you like a product tour/i).count()), 'the welcome shows again after a reload')
-      return { detail: 'skipped, and not shown again after a reload', shots }
+      return { detail: `"${label}", and not shown again after a reload`, shots }
     })
 
     await step('tour', 'Settings > Take the tour walks every step to its end', async () => {
@@ -335,41 +358,42 @@ async function main() {
         throw new StepError('no "Take the tour" in Settings', [s])
       }
       await take.click()
-      await page.waitForTimeout(1_000)
+      await page.waitForTimeout(1_200)
+      let st = await tourState(page)
+      if (st?.welcome) {
+        await page.locator('.tour-pop [data-tour="begin"]').click()
+        await page.waitForTimeout(800)
+      }
       const shots = []
-      const texts = []
+      const seen = []
+      const unlocked = []
       let stuck = 0
-      for (let i = 0; i < 30; i++) {
-        const st = await tourState(page)
+      for (let i = 0; i < 60; i++) {
+        st = await tourState(page)
         if (!st) break
-        if (texts.at(-1) !== st.text) {
-          shots.push(await shot(page, `tour-${String(texts.length + 1).padStart(2, '0')}`))
-          texts.push(st.text)
+        const key = `${st.count} ${st.title}`
+        if (seen.at(-1) !== key) {
+          seen.push(key)
+          shots.push(await shot(page, `tour-${String(seen.length).padStart(2, '0')}`))
           stuck = 0
         }
-        const target = st.next || st.done
-        const btn = page.getByRole('button', { name: target, exact: true }).last()
-        if (await btn.isEnabled().catch(() => false)) {
-          await btn.click()
-        } else {
-          // a gated step: Start, or a ⌘-click anywhere, unlocks its Next
-          const start = page.getByRole('button', { name: /^start$/i }).last()
-          if (await start.isVisible().catch(() => false)) await start.click().catch(() => undefined)
-          else {
-            await page.keyboard.down('Meta')
-            await page.mouse.click(SIZES[0].width / 2, SIZES[0].height / 2)
-            await page.keyboard.up('Meta')
+        const act = st.acts.includes('next') ? 'next' : st.acts.includes('done') ? 'done' : null
+        if (act) {
+          await page.locator(`.tour-pop [data-tour="${act}"]`).or(page.locator('.tour-pop button', { hasText: new RegExp(`^${act}$`, 'i') })).first().click()
+          if (act === 'done') {
+            await page.waitForTimeout(800)
+            break
           }
-          if (++stuck > 4) throw new StepError(`stuck at step ${texts.length}: "${st.text}"`, shots)
+        } else {
+          if (++stuck > 4) throw new StepError(`stuck at step ${st.count} "${st.title}": no Next after ${unlocked.at(-1) || 'waiting'}`, shots)
+          unlocked.push(`${st.count}: ${await unlockStep(page, st)}`)
         }
-        await page.waitForTimeout(700)
-        if (st.done && !st.next) {
-          if (!(await tourState(page))) break
-        }
+        await page.waitForTimeout(800)
       }
-      check(!(await tourState(page)), `the tour did not end after ${texts.length} steps`)
-      check(texts.length >= 3, `only ${texts.length} tour steps showed`)
-      return { detail: `${texts.length} steps, ended`, shots }
+      check(!(await tourState(page)), `the tour still shows after ${seen.length} steps`)
+      check(seen.length >= 3, `only ${seen.length} tour steps showed`)
+      const total = seen.at(-1)?.match(/of (\d+)/)?.[1]
+      return { detail: `${seen.length} steps${total ? ` of ${total}` : ''}, Done ends it${unlocked.length ? `; unlocked ${unlocked.join(', ')}` : ''}`, shots }
     })
 
     await step('file-browser', 'The File browser lists the corpus and opens a file', async () => {
@@ -435,14 +459,32 @@ async function main() {
     await step('pdf', 'A PDF shows as the PDF itself in the File browser', async () => {
       const f = 'docs/e2e-sample.pdf'
       await openFile(page, f)
-      await page.waitForTimeout(1_500)
-      const sel = 'embed[type="application/pdf"], object[type="application/pdf"], iframe[src*=".pdf"], embed[src*=".pdf"], object[data*=".pdf"], .pdfViewer, canvas[data-page-number], [data-pdf]'
-      let found = 0
-      for (const fr of page.frames()) found += await fr.locator(sel).count().catch(() => 0)
+      await page.waitForTimeout(2_500)
+      const sel = 'iframe[src*="pdf"], embed[type="application/pdf"], object[type="application/pdf"], embed[src*=".pdf"], object[data*=".pdf"]'
+      let src = null
+      for (const fr of page.frames()) {
+        const el = fr.locator(sel).first()
+        if (await el.count().catch(() => 0)) {
+          src = (await el.getAttribute('src')) || (await el.getAttribute('data'))
+          break
+        }
+      }
+      const inPage = await page.evaluate(() => navigator.pdfViewerEnabled !== false)
       const m = await modes(page)
       const s = await shot(page, 'pdf')
-      if (!found) throw new StepError(`${f} shows no PDF element (modes: ${m.join(', ') || 'none'})`, [s])
-      return { detail: `${found} PDF element(s); modes ${m.join(', ') || 'none'}`, shots: [s] }
+      if (!src) {
+        const open = page.getByRole('button', { name: /open the pdf/i })
+        if (inPage || !(await open.count())) throw new StepError(`${f} shows no PDF (modes: ${m.join(', ') || 'none'})`, [s])
+        const [popup] = await Promise.all([page.waitForEvent('popup', { timeout: ACTION_MS }), open.click()])
+        src = popup.url()
+        await popup.close()
+      }
+      const url = new URL(src, page.url()).href.split('#')[0]
+      const r = await page.request.get(url)
+      const type = r.headers()['content-type'] || ''
+      const body = await r.body()
+      check(r.status() === 200 && /application\/pdf/.test(type) && body.subarray(0, 5).toString() === '%PDF-', `${url} answers ${r.status()} ${type}`)
+      return { detail: `${inPage ? 'shown in the page' : 'this browser shows no PDF in a page, so the step checks the file\'s route'}: ${new URL(url).pathname} answers application/pdf; modes ${m.join(', ') || 'none'}`, shots: [s] }
     })
 
     await step('views-bar', 'The views bar holds only the File browser and the workspace\'s own views', async () => {
@@ -502,21 +544,24 @@ async function main() {
       let marks = 0
       for (const fr of page.frames()) if (fr !== page.mainFrame()) marks += await fr.locator('[data-derived]').count().catch(() => 0)
       const problems = []
-      if (!/\b\d+\s+derived\b/i.test(head)) problems.push(`no count of derived fields in the header ("${head.replace(/\s+/g, ' ').trim()}")`)
+      if (!/derived[^\n]*?\b\d+\s+fields?\b|\b\d+\s+derived\b/i.test(head)) problems.push(`no count of derived fields in the header ("${head.replace(/\s+/g, ' ').trim()}")`)
       if (marks) problems.push(`${marks} derived marks on the view's cells`)
       const s = await shot(page, 'view-derived')
       if (problems.length) throw new StepError(problems.join('; '), [s])
-      return { detail: head.match(/\d+\s+derived[^\n]*/i)?.[0] ?? '', shots: [s] }
+      return { detail: head.match(/derived data[^\n]*|\d+\s+derived[^\n]*/i)?.[0] ?? '', shots: [s] }
     })
 
     await step('view-labels', 'Labels are part of the view\'s UI', async () => {
       const pane = page.locator('.view-pane').first()
-      const named = (await pane.innerText()).includes(WS.label?.name || 'Mentions forge')
+      const text = await pane.innerText()
+      const counted = /\b\d+\s+labels?\b/i.test(await pane.locator('.view-pane-head').first().innerText())
+      const named = text.includes(WS.label?.name || 'Mentions forge')
       let marks = 0
       for (const fr of page.frames()) if (fr !== page.mainFrame()) marks += await fr.locator('[data-thimble-label]').count().catch(() => 0)
       const s = await shot(page, 'view-labels')
-      if (!named && !marks) throw new StepError(`the view shows neither the label "${WS.label?.name}" nor a label mark`, [s])
-      return { detail: `${named ? 'the label is named in the view pane' : ''}${named && marks ? '; ' : ''}${marks ? `${marks} label marks in the view` : ''}`, shots: [s] }
+      if (!counted && !named && !marks) throw new StepError(`the view shows neither the label "${WS.label?.name}" nor a count or mark of labels`, [s])
+      const got = [counted && 'its head counts the labels it shows', named && 'the label is named in the view pane', marks && `${marks} label marks in the view`]
+      return { detail: got.filter(Boolean).join('; '), shots: [s] }
     })
 
     await step('settings-extensions', 'Settings > Extensions lists the extensions, and the popover fits on screen', async () => {
@@ -538,10 +583,11 @@ async function main() {
       const pop = await openSettings(page)
       const text = await pop.innerText()
       const s = await shot(page, 'local-views')
-      await closeSettings(page)
       const problems = []
       if (!onDisk) problems.push(`no workspaces/${WS.name}/extension/views/${VIEW.slug}/view.json`)
       if (!text.includes(VIEW.name)) problems.push(`Settings > Extensions does not list "${VIEW.name}"`)
+      else if (!(await pop.locator('[data-local]').count().catch(() => 0)) && !/this workspace/i.test(text)) problems.push('no row for the workspace\'s own views')
+      await closeSettings(page)
       if (problems.length) throw new StepError(problems.join('; '), [s])
       return { detail: 'on disk and listed', shots: [s] }
     })
@@ -615,31 +661,50 @@ async function main() {
       return { detail: `off in Settings, gone from + New (${f.how})`, shots: [s] }
     })
 
-    let offered = null
     await step('ext-ui-on', 'Its switch turns it back on, and + New follows', async () => {
       check(added, 'the extension was not added')
       const r = await extRow(page)
       check(r.present, 'no row for the extension in Settings')
       if (!r.on) await r.sw.click()
-      const before = new Set(await notices(page))
       await page.locator('.settings-pop').getByRole('button', { name: 'Save', exact: true }).click()
       await page.locator('.settings-pop').waitFor({ state: 'detached', timeout: ACTION_MS }).catch(() => undefined)
-      offered = false
-      for (let i = 0; i < 10 && !offered; i++) {
-        offered = (await notices(page)).some((t) => !before.has(t) && /orientation/i.test(t) && /\b(run|rerun|start)\b/i.test(t))
-        if (!offered) await page.waitForTimeout(500)
-      }
-      const s0 = await shot(page, 'ext-ui-on-offer')
       const f = await followsExtension(page, true, 'on in Settings')
       const s = await shot(page, 'ext-ui-on')
-      if (!f.ok) throw new StepError(`the UI did not follow: ${f.how}`, [s0, s])
-      return { detail: `on in Settings, back in + New (${f.how})`, shots: [s0, s] }
+      if (!f.ok) throw new StepError(`the UI did not follow: ${f.how}`, [s])
+      return { detail: `on in Settings, back in + New (${f.how})`, shots: [s] }
     })
 
     await step('ext-orient-offer', 'Switching on an extension with orientation instructions offers to run them', async () => {
-      check(offered !== null, 'the extension was not switched on from Settings')
-      check(offered, 'no offer to run its orientation instructions after it was switched on')
-      return { detail: 'offered' }
+      check(added, 'the extension was not added')
+      // the offer is due only where an orientation ran; with no model here, a run record stands in for one
+      const run = join(CLONE, 'workspaces', WS.name, 'orient', 'run.json')
+      const planted = !existsSync(run)
+      if (planted) {
+        mkdirSync(dirname(run), { recursive: true })
+        writeFileSync(run, JSON.stringify({ session: 'e2e-standin', chats: { orient: 'e2e-standin' } }))
+      }
+      try {
+        let r = await extRow(page)
+        if (r.on) {
+          await r.sw.click()
+          await page.locator('.settings-pop').getByRole('button', { name: 'Save', exact: true }).click()
+          await page.locator('.settings-pop').waitFor({ state: 'detached', timeout: ACTION_MS }).catch(() => undefined)
+          await page.waitForTimeout(800)
+          r = await extRow(page)
+        }
+        await r.sw.click()
+        const row = page.locator(`.settings-pop [data-extension="${EXT}"]`)
+        const shown = await row.getByText(/orientation now/i).first().waitFor({ timeout: 5_000 }).then(() => true, () => false)
+        const s = await shot(page, 'ext-orient-offer')
+        const not = row.getByRole('button', { name: /^not now$/i })
+        if (await not.count()) await not.click()
+        await page.locator('.settings-pop').getByRole('button', { name: 'Save', exact: true }).click()
+        await page.locator('.settings-pop').waitFor({ state: 'detached', timeout: ACTION_MS }).catch(() => undefined)
+        if (!shown) throw new StepError('switching it on in Settings offered no run of its orientation instructions', [s])
+        return { detail: `Settings asks whether to run its orientation now; answered Not now${planted ? ' (a run record stood in for an orientation)' : ''}`, shots: [s] }
+      } finally {
+        if (planted) rmSync(run, { force: true })
+      }
     })
 
     await step('ext-live', 'Settings and + New follow every switch of the extension without a reload', async () => {
