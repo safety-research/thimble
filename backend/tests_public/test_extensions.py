@@ -5,6 +5,7 @@ also a card type, a card-only type, an agent, a report type and orientation inst
 process, and the quick model call that checks whether a view fits answers from `fit`."""
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import io
 import json
@@ -562,6 +563,26 @@ async def test_an_orient_md_that_replaces_takes_the_place_of_thimble_s_instructi
     assert lines == ["mine and other both replace the orientation's instructions, so thimble's own are used"]
     assert "conflict: mine and other both replace" in extensions.doctor_line()
     assert set(extensions.agent_definitions(CORPUS)) == {"mine:counter", "other:counter"}
+
+
+async def test_an_orientation_starts_with_the_extensions_of_a_workspace_that_never_found_them(corpus):
+    """An orientation started in a workspace that never found its extensions, or while it is finding them again, gets
+    the instructions and agents of the extensions active there."""
+    _add()
+    assert extensions.active(CORPUS) == []
+    await extensions.settle(CORPUS)
+    assert "#### ext-min" in orient_session.instructions_of(CORPUS)
+    assert set(extensions.agent_definitions(CORPUS)) == {"counter"}
+
+    extensions.remove("ext-min")
+    await extensions.refresh(CORPUS)
+    assert extensions.active(CORPUS) == []
+    _add()
+    finding = asyncio.create_task(extensions.connected(CORPUS))
+    await asyncio.sleep(0)
+    await extensions.settle(CORPUS)
+    assert "#### ext-min" in orient_session.instructions_of(CORPUS), "the refresh under way was waited for"
+    await finding
 
 
 async def test_an_extension_written_before_the_spec_settled_still_loads(corpus, tmp_path, fit):
