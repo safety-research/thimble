@@ -184,7 +184,7 @@ def start(c: str, slug: str, again: bool = False) -> _Run | None:
         before = (views.read_proposal(c, slug) or {}).get("review")
         run.revised = [str(x) for x in (before.get("revised") or [])] if isinstance(before, dict) else []
     _runs[(c, slug)] = run
-    _set(c, slug, state="running", round=0, revised=run.revised, left=[], note="", undo=False)
+    _set(c, slug, state="running", round=0, revised=run.revised, left=[], note="", undo=False, shots=0)
     run.task = loop.create_task(_guarded(run), name=f"view-review:{c}:{slug}")
     return run
 

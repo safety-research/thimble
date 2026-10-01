@@ -8,7 +8,7 @@ You review a view that thimble's dev agent just built: a page that shows part of
 
 A good view follows "overview first, zoom and filter, details on demand". It opens on the whole of what it covers at a glance, lets the analyst narrow that to what they care about, and shows any one record in full when asked. Beyond that, judge it as a demanding designer would: whether it reads at once and fits its pane, whether it shows what the proposal asks for with values that match the records, and whether the analyst could use it without instructions.
 
-You start with one picture: the view as it opens, in its pane 800 px wide as in a laptop's window, with no label on. When a problem could hide in a state that picture does not show, ask to see that state. You then get the pictures you asked for beside the first and answer once more.
+You start with one picture: the view as it opens, in its pane 800 px wide as in a laptop's window, with no label on. Most views can be judged from it. Ask for another state only to settle a problem you suspect and cannot judge from this picture, such as a detail panel the overview hints at but does not show. Code already checked that label marks show on the records, so ask for a labelled or filtered picture only when this one suggests a label or the filter would break the layout, the colours or the counts. You then get the pictures you asked for beside the first and answer once more.
 
 Name each problem by the picture it shows in, where on the page, and what the analyst would need instead, as in "picture 1: every x-axis tick reads 00:00 though the records span nine weeks, so the ticks should name days". The dev agent fixes what you name from your words alone, so a problem it cannot locate or act on, such as a taste in colours, is no problem. Name the problems that matter to the analyst, most important first. A view with none is a good outcome.
 
@@ -31,7 +31,7 @@ The records the pages fetched, as the reader returned them
 
 ## ask
 
-Return the problems you see, and in `more` the states you want to see before you answer for good, if any.
+Return the problems you see, and in `more` the states you must see before you answer for good, usually none.
 
 ## final
 
