@@ -216,14 +216,26 @@ def _listed_folder(corpus: Path, rel: str, include_hidden: bool) -> str | None:
     return d
 
 
+COUNT_CHECK_S = 10.0  # how long a folder's check in the tree stands before a stamps request has it checked again
+
+
 def folder_stamp(corpus: Path, rel: str, include_hidden: bool = False) -> str | None:
-    """The folder's modification time in nanoseconds, which an entry added, removed or renamed in it changes, as a
-    string; None for a folder that is not there or that folder_listing leaves out."""
+    """The folder's modification time in nanoseconds, which an entry added, removed or renamed in it changes, then, after
+    a `/`, the count of files under it at any depth where the corpus's folder tree knows it (corpus_tree.Tree.counts,
+    no file system access), which a change in any folder below it changes once the tree has checked that folder; None
+    for a folder that is not there or that folder_listing leaves out."""
     d = _listed_folder(corpus, rel.strip("/"), include_hidden)
     try:
-        return str(os.stat(d).st_mtime_ns) if d is not None else None
+        mtime = os.stat(d).st_mtime_ns if d is not None else None
     except OSError:
         return None
+    if mtime is None:
+        return None
+    return _stamp(str(mtime), corpus_tree.tree(corpus).counts(include_hidden).get(rel.strip("/")))
+
+
+def _stamp(mtime: str, known: tuple[int, int] | None) -> str:
+    return f"{mtime}/{known[0]}" if known is not None else mtime
 
 
 def folder_listing(corpus: Path, rel: str, include_hidden: bool = False) -> dict[str, Any] | None:
@@ -247,7 +259,7 @@ def folder_listing(corpus: Path, rel: str, include_hidden: bool = False) -> dict
         return None
     # a folder changed within its modification time's resolution may change again under the same time, so a listing
     # read that soon carries a stamp no folder_stamp equals, and the tree lists it once more
-    stamp = f"{mtime}~" if 0 <= time.time_ns() - mtime < corpus_tree.RACY_NS else str(mtime)
+    racy = 0 <= time.time_ns() - mtime < corpus_tree.RACY_NS
     files: list[dict[str, Any]] = []
     subs: list[tuple[str, str, bool, str]] = []
     for e in entries:
@@ -284,8 +296,8 @@ def folder_listing(corpus: Path, rel: str, include_hidden: bool = False) -> dict
         if hidden:
             entry["hidden"] = True
         folders.append(entry)
-    out: dict[str, Any] = {"path": rel, "files": files, "folders": folders, "stamp": stamp}
     known = counts.get(rel) if current else None
+    out: dict[str, Any] = {"path": rel, "files": files, "folders": folders, "stamp": _stamp(f"{mtime}~" if racy else str(mtime), known)}
     if known is not None:
         out["n_files"] = known[0]
     return out
@@ -1145,8 +1157,8 @@ STAMPS_MAX = 200  # folders one GET /sources/stamps asks about
 @router.get("/corpora/{c}/sources/stamps")
 def get_stamps(c: str, path: list[str] = Query(default=[]), include_hidden: int = 0) -> dict[str, Any]:
     """`?path=<folder>&path=...`: the `stamp` (folder_stamp) of each folder the Files tree shows, so it lists again only
-    the folders that changed; null for a folder that is gone or not listed ('' or '.' is the root). 400 past STAMPS_MAX
-    folders."""
+    the folders that changed, the root too when a file was added or removed in a folder it does not show; null for a
+    folder that is gone or not listed ('' or '.' is the root). 400 past STAMPS_MAX folders."""
     corpus = _corpus(c)
     if len(path) > STAMPS_MAX:
         raise HTTPException(400, f"at most {STAMPS_MAX} folders at a time")
@@ -1154,6 +1166,8 @@ def get_stamps(c: str, path: list[str] = Query(default=[]), include_hidden: int 
     for p in path:
         rel = p.strip().strip("/")
         out[p] = folder_stamp(corpus, "" if rel == "." else rel, bool(include_hidden))
+    # the folders the tree does not show are checked meanwhile, so a later stamp of a shown folder counts their changes
+    corpus_tree.tree(corpus).check_in_background(hidden=bool(include_hidden), max_age=COUNT_CHECK_S)
     return {"stamps": out}
 
 

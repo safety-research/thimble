@@ -61,6 +61,7 @@ class Tree:
         self._answers: dict[tuple[bool, bool, tuple[str, ...]], tuple[int, list[str], float]] = {}
         self._counts: tuple[int, bool, dict[str, tuple[int, int]]] | None = None
         self._refreshing = False
+        self._checking = False
 
     # ------------------------------------------------------------------ reading folders
 
@@ -189,6 +190,39 @@ class Tree:
                     self._refreshing = False
 
         threading.Thread(target=run, name="corpus-tree", daemon=True).start()
+
+    def check_folders(self, *, hidden: bool, max_age: float = 0.0) -> bool:
+        """Check every real folder an earlier walk read, dot folders only with `hidden`: one stat each, and one read of
+        the entries of each that changed, so counts() holds files added or removed in folders no listing asks about. A
+        folder checked less than `max_age` seconds ago is taken as it is. Nothing before the first walk, and nothing
+        while a walk holds the tree, since it checks the folders itself. Whether it ran."""
+        if not self.top.read or not self.lock.acquire(blocking=False):
+            return False
+        try:
+            now = time.monotonic()
+            for _ in self._nodes(False, hidden, now, max_age):
+                pass
+        finally:
+            self.lock.release()
+        return True
+
+    def check_in_background(self, *, hidden: bool, max_age: float = 0.0) -> None:
+        """check_folders() in a daemon thread, unless one is running already."""
+        with _bg_lock:
+            if self._checking or not self.top.read:
+                return
+            self._checking = True
+
+        def run() -> None:
+            try:
+                self.check_folders(hidden=hidden, max_age=max_age)
+            except Exception:  # noqa: BLE001 — the next caller checks again
+                pass
+            finally:
+                with _bg_lock:
+                    self._checking = False
+
+        threading.Thread(target=run, name="corpus-tree-check", daemon=True).start()
 
     def recheck(self, rel: str, mtime_ns: int) -> bool:
         """Check the real folder `rel` ('' the root) again when an earlier walk read it: one stat and, when it changed,

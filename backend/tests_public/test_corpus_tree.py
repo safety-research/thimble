@@ -105,6 +105,41 @@ def test_a_folder_listed_again_counts_a_file_added_to_it_or_gives_no_count(tree_
     assert _folder(".")["n_files"] == 14
 
 
+def test_the_root_s_count_follows_a_file_added_in_a_folder_the_tree_does_not_show(tree_corpus, monkeypatch):
+    """A file added in a folder no listing asks about (a collapsed folder) changes neither that folder's parents' times
+    nor any shown folder's. A stamps request has the tree check its folders in the background, one stat each and no
+    walk of the files, so a later stamp of the root carries the new count, and the root listed again gives it."""
+    _age(tree_corpus)
+    corpus.list_sources(tree_corpus)
+    root = _folder(".")
+    assert root["n_files"] == 11
+
+    def stamp() -> str:
+        r = client.get(f"/api/corpora/{NAME}/sources/stamps", params={"path": ["."]})
+        assert r.status_code == 200, r.text
+        return r.json()["stamps"]["."]
+
+    assert stamp() == root["stamp"]
+
+    def no_walk(*a, **k):
+        raise AssertionError("the count's check walked the corpus's files")
+
+    monkeypatch.setattr(corpus_tree.Tree, "walk", no_walk)
+    monkeypatch.setattr(corpus, "_walk_sources", no_walk)
+    monkeypatch.setattr(corpus, "COUNT_CHECK_S", 0.0)
+    _write(tree_corpus, "images/d1/z.png")
+    os.utime(tree_corpus / "images" / "d1", ns=(OLD_NS + 10**9, OLD_NS + 10**9))
+    deadline = time.monotonic() + 10
+    now = stamp()
+    while now == root["stamp"] and time.monotonic() < deadline:
+        time.sleep(0.05)
+        now = stamp()
+    assert now != root["stamp"], "the root's stamp did not follow the file"
+    fresh = _folder(".")
+    assert fresh["n_files"] == 12 and fresh["stamp"] == stamp()
+    assert {d["name"]: d.get("n_files") for d in fresh["folders"]}["images"] == 3
+
+
 def test_a_folder_reached_through_a_symlink_is_not_listed(tree_corpus):
     os.symlink(tree_corpus / "runs", tree_corpus / "linked")
     assert "linked" not in [d["name"] for d in _folder(".")["folders"]]
