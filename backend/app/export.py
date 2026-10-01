@@ -469,16 +469,18 @@ def _labels(w: Writer, ws: Path) -> dict[str, int]:
 
 
 def _views(w: Writer, ws: Path) -> int:
-    base = ws / "views"
+    """The views' state (views/) and the workspace's local extension (extension/), which holds the views' files."""
     n = 0
-    if not base.is_dir():
-        return 0
-    for p in sorted(base.rglob("*")):
-        rel = p.relative_to(base)
-        if not p.is_file() or p.is_symlink() or any(part in SKIPPED_DIRS for part in rel.parts):
+    for name in ("views", "extension"):
+        base = ws / name
+        if not base.is_dir() or base.is_symlink():
             continue
-        w.copy(f"views/{rel.as_posix()}", p)
-        n += 1
+        for p in sorted(base.rglob("*")):
+            rel = p.relative_to(base)
+            if not p.is_file() or p.is_symlink() or any(part in SKIPPED_DIRS for part in rel.parts):
+                continue
+            w.copy(f"{name}/{rel.as_posix()}", p)
+            n += 1
     return n
 
 

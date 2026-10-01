@@ -31,6 +31,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from . import cite, config, frames, headless, prompts
+from .kernel_thimble import CARD_MIME  # a card type's graphic, which counts as a chart and is read through its listing
 
 log = logging.getLogger("thimble.tools")
 router = APIRouter()
@@ -171,6 +172,8 @@ REGISTRY: dict[str, Spec] = {
         Spec("clear_filter", (ANALYST,), "app.filters:tool_clear_filter"),
         # the browser's panes, laid out in one of the presets (panes.py); main's, since it answers the analyst
         Spec("set_layout", (ANALYST,), "app.panes:tool_set_layout", sessions=MAIN_ONLY),
+        # a card of a card type opened as its view in Files, as the card's Open as view does (cardtypes.py); main's
+        Spec("open_view", (ANALYST,), "app.cardtypes:tool_open_view", sessions=MAIN_ONLY),
         Spec("propose_view", (ANALYST,), _H + "propose_view"),
         Spec("write_document", (ANALYST,), "app.report_types:tool_write_document"),
         Spec("edit_document", (ANALYST,), "app.report_types:tool_edit_document"),
@@ -240,7 +243,10 @@ def role_of(actor: str) -> str:
 
 def sections() -> dict[str, str]:
     """Every `## <name>` section of prompts/tools.md as written, read fresh; PromptError when the file is unusable."""
-    text = prompts.load(TOOLS_PROMPT)
+    return _sections_of(prompts.load(TOOLS_PROMPT))
+
+
+def _sections_of(text: str) -> dict[str, str]:
     marks = [*_SECTION_RE.finditer(text)]
     return {m.group(1): text[m.end():marks[i + 1].start() if i + 1 < len(marks) else len(text)].strip()
             for i, m in enumerate(marks)}
@@ -257,20 +263,32 @@ def split_section(body: str) -> tuple[str, Any]:
     return (body[:m.start()] + body[m.end():]).strip(), json.loads(m.group(1))
 
 
+# prompts/tools.md as descriptions() last read it, and what it made of it: every hint line of every call and request
+# reads the file, which is cheap, and parses it again only when its text changed
+_described: tuple[str, dict[str, str]] | None = None
+
+
 def descriptions() -> dict[str, str]:
     """Every section of prompts/tools.md by name, a tool's as its description without the schema block and a hint's as
-    written; {} (with a warning) when the file is unusable, so a result still reads without its hint lines."""
+    written; {} (with a warning) when the file is unusable, so a result still reads without its hint lines. The dict is
+    shared, so callers never change it."""
+    global _described
     try:
-        secs = sections()
+        text = prompts.load(TOOLS_PROMPT)
     except prompts.PromptError as e:
         log.warning("prompts/%s.md unusable (%s); results go without their hint lines", TOOLS_PROMPT, e)
         return {}
+    hit = _described
+    if hit is not None and hit[0] == text:
+        return hit[1]
+    secs = _sections_of(text)
     out: dict[str, str] = {}
     for name, body in secs.items():
         try:
             out[name] = split_section(body)[0]
         except ValueError:
             out[name] = body
+    _described = (text, out)
     return out
 
 
@@ -724,6 +742,8 @@ def _outputs_text(cell: dict, addressed: bool = False) -> tuple["builtins.list[s
                 extras.add("chart")
             elif mime in DRAWING_MIMES:
                 extras.add(DRAWING_MIMES[mime])
+            elif mime == CARD_MIME:
+                extras.add("chart")
         if any(k.startswith("image/") or "vega" in k for k in out):
             chart = cite.chart_table(out)
             rows = chart.text() if chart is not None else ""
@@ -1675,10 +1695,16 @@ async def _h_delete_card(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
 
 def _takeaway_missing(ctx: Ctx, nb_id: str, cell: dict) -> str:
     """What a run's result ends with when the card ran clean and has no takeaway: the `## takeaway-missing` line, since
-    the agent that ran the card writes its takeaway. An errored card gets the error's hint instead."""
-    if cell.get("status") != "ok" or str(cell.get("takeaway") or "").strip():
+    the agent that ran the card writes its takeaway, or `## takeaway-stale` when it kept one written before its outputs
+    changed. An errored card gets the error's hint instead."""
+    from . import notebook
+
+    if cell.get("status") != "ok":
         return ""
-    line = hint("takeaway-missing", cid=str(cell.get("id") or ""))
+    if str(cell.get("takeaway") or "").strip():
+        line = hint("takeaway-stale", cid=str(cell.get("id") or "")) if cell.get(notebook.TAKEAWAY_STALE) else ""
+    else:
+        line = hint("takeaway-missing", cid=str(cell.get("id") or ""))
     return f"\n\n{line}" if line else ""
 
 
@@ -2076,6 +2102,8 @@ async def _shot_card(ctx: Ctx, ref: str) -> ToolResult:
     cell = notebook.get_cell(ctx.c, cid, full_outputs=True) if cid else None
     if cell is None:
         return err(f"screenshot: there is no card {cid or ref}")
+    if any(CARD_MIME in b for _, b in cite.iter_outputs(cell.get("outputs"))):
+        return await _shot_type_card(ctx, cid, cell)
     ui = ui_base()
     if ui:
         shot = await _shot_card_in_ui(ctx.c, cid, ui)
@@ -2111,6 +2139,20 @@ async def _shot_card(ctx: Ctx, ref: str) -> ToolResult:
     if not all(p.is_file() for p in VEGA_BUILDS):
         return err(headless.NO_SCREENSHOTS)
     return await _shot_page_file(cid, chart_page(spec))
+
+
+async def _shot_type_card(ctx: Ctx, cid: str, cell: dict) -> ToolResult:
+    """A card of a card type drawn by the card harness (render.py) from the data the card stored, as the card check
+    sees it."""
+    from . import render
+
+    try:
+        res = await render.render_card(ctx.c, cell)
+    except render.Unavailable as e:
+        return err(f"screenshot: card:{cid} is drawn in the browser, and the card harness is off here: {e}")
+    if not res.ok:
+        return err(f"screenshot: card:{cid} did not render: {res.error}")
+    return _image(base64.b64encode(res.png).decode("ascii"), "image/png", f"screenshot of card:{cid}")
 
 
 # The page a card is shot in: 1280 px wide at device scale 2, tall enough for the tallest cards, with the chat closed
@@ -2291,24 +2333,46 @@ async def _h_apply_label(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
     if target:
         _note_group(ctx, target)
     question = " ".join(str(args.get("question") or "").split()) or None
+    within = args.get("within") or None
+    if isinstance(within, str):
+        within = {"label": within}
     s = await concepts.apply_scoped(ctx.c, scope=scope, name=name, kind=kind, text=text, values=values, paths=paths, limit=limit,
                                     comment=bool(args.get("comment")), filter=bool(args.get("filter")),
                                     created_by=ctx.created_by, chat=ctx.chat, group=target, question=question,
-                                    card=not orienting)
+                                    card=not orienting, within=within, show=bool(args.get("show")))
+    if s.get("partial") and not orienting and ctx.session is None:
+        concepts.tell_when_done(ctx.c, str(s["concept"]))
     counts = ", ".join(f"{k} {v}" for k, v in sorted((s.get("counts") or {}).items()))
     unit = UNIT_WORDS.get(str(s.get("unit") or ""), s.get("unit") or "unit")
     line = (f"applied label {s.get('name', name)} [[concept:{s.get('concept')}]] over {s.get('total', 0)} {unit}(s)"
-            f"{' in ' + ', '.join(paths) if scope == 'files' else ''}: {counts or 'no values yet'}.")
+            f"{' in ' + ', '.join(paths) if scope == 'files' else ''}{' within ' + within['label'] if within else ''}: "
+            f"{counts or 'no values yet'}.")
+    if s.get("failed"):
+        line += f" {s['failed']} {unit}(s) failed: {s.get('message') or 'no reason given'}."
+    values = (concepts.find_concept(ctx.ws, s["concept"]) or {}).get("labels") or [None]
+    if kind != "prompt" and s.get("unit") == "record" and not s.get("partial") and (s.get("counts") or {}).get(values[0]):
+        shown = await asyncio.to_thread(concepts.examples, ctx.c, s["concept"], values[0])
+        if shown:
+            line += f" Some it gave {values[0]!r}: " + "; ".join(f"{ref} “{text}”" for ref, text in shown) + "."
+    elif kind == "prompt" and s.get("unit") == "record" and args.get("comment"):
+        said = await asyncio.to_thread(concepts.reasons, ctx.c, s["concept"], values)
+        if said:
+            line += " Reasons it gave so far: " + " | ".join(
+                f"{v}: " + "; ".join(f"{ref} “{why}”" for ref, why in rs) for v, rs in said.items()) + "."
     if s.get("unchanged"):
         line += " " + hint("apply_label-unchanged")
     if s.get("partial"):
-        line += " The run goes on in the background; the counts are final when its card stops spinning."
+        line += (" The run goes on in the background, and a label_done event comes when it finishes."
+                 if not orienting and ctx.session is None else
+                 " The run goes on in the background; the counts are final when its card stops spinning.")
     if s.get("cell"):
         line += f" The label's card is [[card:{s['cell']}]]."
     if s.get("stale"):
         line += " " + hint("apply_label-stale", cards=", ".join(f"[[card:{x}]]" for x in s["stale"]))
     if s.get("filter"):
         line += f" It is the {scope} filter now."
+    elif args.get("show") and scope == "files":
+        line += " It is on in Files and the views."
     if scope == "files" and s.get("labels_path"):
         # the rows a card reads: thimble.labels(name) holds only the first value's units (kernel_thimble.labels), not
         # one row per labeled unit, and the hint says so
@@ -2321,6 +2385,8 @@ async def _h_apply_label(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
         card = notebook.get_cell(ctx.c, str(s["cell"])) or {}
         if not str(card.get("takeaway") or "").strip():
             line += _takeaway_missing(ctx, target, {**card, "status": "ok"})
+        elif prior is not None and not s.get("unchanged"):
+            line += " " + hint("apply_label-takeaway-stale", cid=str(s["cell"]))
     return ok(line)
 
 
@@ -2336,8 +2402,9 @@ async def _h_show_label(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
     on = args.get("on")
     if isinstance(on, str) and on.strip().lower() in ("true", "false"):
         on = on.strip().lower() == "true"
-    if not isinstance(on, bool):
-        return err("show_label: `on` is required, true or false")
+    colours = args.get("colours") if isinstance(args.get("colours"), dict) else None
+    if not isinstance(on, bool) and not (on is None and colours):
+        return err("show_label: `on` is required, true or false, unless it gives `colours`")
     values = args.get("values")
     values = [values] if isinstance(values, str) else values if isinstance(values, builtins.list) else None
     k = concepts.find_concept(ctx.ws, name)
@@ -2346,8 +2413,11 @@ async def _h_show_label(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
         return err(hint("show_label-not-files", label=k["name"], units=f"{UNIT_WORDS.get(k['unit'], k['unit'])}s",
                         where="the canvas" if where == "canvas" else "the report"))
     was = bool(k["shown"]) if k is not None else None
-    k = await asyncio.to_thread(concepts.show_concept, ctx.c, name, on, values)
+    k = await asyncio.to_thread(concepts.show_concept, ctx.c, name, on, values, colours)
     ref = f"[[concept:{k['id']}]]"
+    if on is None:
+        painted = ", ".join(f"{v} {n}" for v, n in colours.items())
+        return ok(f"label {k['name']} {ref} colours {painted}; it is {'on' if k['shown'] else 'off'} in Files and the views.")
     # what it was before, since the analyst may have turned it on or off in Files since the chat last did
     now = f"{'on' if on else 'off'} in Files and the views"
     state = f"was {'on' if was else 'off'} and is now {now}" if was is not None and was != on else f"is {now}, as it was"
@@ -2467,6 +2537,7 @@ class CallBody(BaseModel):
     workspace: str | None = None  # or the workspace by name
     notebook: str | None = None
     session: str | None = None  # the shim's THIMBLE_SESSION: `orient`, `writer:<doc>` or `critique:orient`
+    session_token: str | None = None  # the shim's THIMBLE_SESSION_TOKEN, which proves `session` (hook_auth)
     tool_use_id: str | None = None  # Claude Code's id of the call (Ctx.tool_use_id)
 
 
@@ -2500,15 +2571,34 @@ async def holdings_route(cwd: str | None = None, workspace: str | None = None) -
 async def call_route(name: str, body: CallBody, request: Request) -> dict[str, Any]:
     """Run one tool for the shim: {content, is_error}. 404 for a tool the registry does not have, 400 when the caller's
     directory belongs to no corpus; everything else the model should read is an is_error result, never an HTTP error.
-    A tool marked drop_stops is cancelled when the shim drops the request (until_dropped)."""
+    A tool marked drop_stops is cancelled when the shim drops the request (until_dropped). The call runs as the session
+    it names only with a token that proves it (hook_auth.session_proven): without one it runs as the analyst's, unless
+    it comes from a workspace's own folder, and with a wrong one it does not run."""
     if not known(name):
         raise HTTPException(404, f"no such tool: {name}")
+    from . import harness, hook_auth  # noqa: PLC0415 — harness imports agent_session's helpers lazily
+
+    agent = hook_auth.agent_of(request.scope)
+    run = harness.by_token(agent) if agent else None
+    if agent and run is None:
+        raise HTTPException(401, "the agent's token has ended")
+    if run is not None:  # a program's call runs as its role's session, in its workspace and its thread (harness.py)
+        return await harness.tool_call(run, {"name": name, "args": body.args})
     # a session thimble starts in its workspace's own folder (the orientation's, which runs in its work folder so the
-    # corpus folder can be denied to Bash whole) reaches its workspace from that folder
-    c = body.workspace or workspace_for_cwd(body.cwd) or (config.workspace_for_folder(body.cwd) if body.session else None)
+    # corpus folder can be denied to Bash whole) reaches its workspace from that folder, before any corpus that holds it
+    session = body.session or None
+    folder = config.workspace_for_folder(body.cwd) if session else None
+    if folder and not body.session_token:  # a session there without a token, as one an earlier thimble started
+        return err(hint("session-unproven", tool=name)).as_dict()
+    c = body.workspace or folder or workspace_for_cwd(body.cwd)
     if not c:
         raise HTTPException(400, f"{body.cwd or '(no cwd)'} is not inside a corpus thimble knows; say /thimble to register it")
-    work = call(c, name, body.args, actor=body.actor, notebook=body.notebook, session=body.session or None,
+    if session and not hook_auth.session_proven(c, session, body.session_token or ""):
+        if body.session_token:
+            return err(hint("session-unproven", tool=name)).as_dict()
+        log.info("a call of %s names the session %s without its token; it runs as the analyst's", name, session)
+        session = None
+    work = call(c, name, body.args, actor=body.actor, notebook=body.notebook, session=session,
                 tool_use_id=body.tool_use_id or None)
     if REGISTRY[canonical(name)].drop_stops:
         res = await until_dropped(request.receive, work, name)

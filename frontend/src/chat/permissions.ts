@@ -15,7 +15,7 @@ export interface PendingAsk {
 }
 
 /** Every request on the card: main's, then those of every session thimble started while it runs, the one asked first
- * first, and after them those denied unanswered. Pure. */
+ * first, and after them those declined unanswered. Pure. */
 export function pendingRequests(main: Pick<ChatMeta, 'permissions'> | null | undefined, metas: Iterable<ChatMeta>): PendingAsk[] {
   const out: PendingAsk[] = (main?.permissions ?? []).map((request) => ({ chat: 'main', request }))
   for (const m of metas) {
@@ -24,9 +24,10 @@ export function pendingRequests(main: Pick<ChatMeta, 'permissions'> | null | und
   }
   // a stable order: by when each asked, and in the order read where a time is missing
   const done = (a: PendingAsk) => (a.request.expired ? 1 : 0)
+  const when = (a: PendingAsk) => Date.parse(a.request.since ?? '') || 0
   return out
     .map((a, i) => ({ a, i }))
-    .sort((x, y) => done(x.a) - done(y.a) || (x.a.request.since ?? '').localeCompare(y.a.request.since ?? '') || x.i - y.i)
+    .sort((x, y) => done(x.a) - done(y.a) || when(x.a) - when(y.a) || x.i - y.i)
     .map((x) => x.a)
 }
 
@@ -58,6 +59,7 @@ const ASKS_TO: Readonly<Record<string, string>> = {
   Agent: 'start an agent',
   Task: 'start an agent',
   ThimbleCode: "change thimble's own code",
+  ThimblePackage: 'install a package',
 }
 
 /** What the request asks to do, in words (run a command); another tool is named (use thimble's add_card). Pure. */
@@ -107,7 +109,7 @@ function devTask(title: string, view: boolean): string {
 
 /** A wait in words: `a minute`, `10 minutes`, or `90 seconds` for one that is no whole number of minutes. Pure. */
 export function waitWords(seconds: number): string {
-  if (seconds < 60 || seconds % 60) return `${Math.round(seconds)} seconds`
+  if (seconds < 60 || seconds % 60) return `${Number(seconds.toPrecision(6))} seconds`
   return seconds === 60 ? 'a minute' : `${seconds / 60} minutes`
 }
 
@@ -120,17 +122,11 @@ export function askingAgent(p: Pick<PermissionRequest, 'agent_id' | 'agent_type'
 }
 
 /** Claude Code's reason when auto mode's classifier gave no verdict on a call (backend agent_session.CLASSIFIER_DOWN). */
-const CLASSIFIER_DOWN = /\bclassifier\b.*\bunavailable\b/i
+const CLASSIFIER_DOWN = /\bclassifier\b.*\bunavailable\b|\bno safety verdict\b/i
 
 /** Whether auto mode left the call to the analyst only because its classifier gave no verdict. Pure. */
 export function classifierDown(p: Pick<PermissionRequest, 'refused'>): boolean {
   return !!p.refused && CLASSIFIER_DOWN.test(p.refused)
-}
-
-/** When an unanswered request is denied, as the card says it: "after a minute", "after 10 minutes". Pure. */
-function denyAfter(s: number): string {
-  const min = Math.round(s / 60)
-  return min <= 1 ? 'after a minute' : `after ${min} minutes`
 }
 
 /** The chat whose permission mode the card can switch out of Auto for this request: the asking session's own, when it
@@ -141,30 +137,40 @@ export function modeChat(ask: PendingAsk, metas: ReadonlyMap<string, ChatMeta>):
   return ask.chat !== 'main' && m?.permission_mode && !m.background ? ask.chat : null
 }
 
+/** Why thimble's config sends a call to the analyst whatever the session's permission mode (PermissionRequest.asked_by). */
+const ASKED_BY: Readonly<Record<string, string>> = {
+  data: 'thimble asks before an agent changes your files, in every permission mode.',
+  installs: 'thimble asks before an agent installs software, in every permission mode.',
+  commands: 'thimble asks about each command this agent runs outside its sandbox.',
+}
+
 /** The modes an orientation runs in, as its switcher names them. */
 const MODE_NAMES: Readonly<Record<string, string>> = { manual: 'Manual', auto: 'Auto', bypass: 'Bypass' }
 
+/** The line that says when an unanswered request is declined, '' for one that names no wait. Pure. */
+function declineLine(seconds: number | null | undefined): string {
+  return seconds ? ` If nobody answers within ${waitWords(seconds)}, it is declined.` : ''
+}
+
 /** Why the session asks, in one line: thimble's own reason when it gives one (a code ticket's question), auto mode
- * could not judge the call (and when it is denied unanswered) or left it to the analyst, the session runs in Manual (a
- * writer's or check's request is denied after a minute unanswered, the dev agent's after its wait), or main's prompt
- * also waits in the terminal, where the first answer counts; for a request denied unanswered, that it was. Pure. */
+ * could not judge the call or left it to the analyst, the session runs in Manual, or main's prompt also waits in the
+ * terminal, where the first answer counts; then when an unanswered request is declined. For a request declined
+ * unanswered, that it was, and for one of the session's own calls that the agent went on without it. Pure. */
 export function askWhy(ask: PendingAsk, metas: ReadonlyMap<string, ChatMeta>): string {
   const p = ask.request
-  if (p.expired) return `Nobody answered within ${waitWords(p.wait_s ?? 60)}, so it was denied and the session went on without it.`
+  if (p.expired) return `Nobody answered ${p.wait_s ? `within ${waitWords(p.wait_s)}` : 'in time'}, so thimble declined it${p.why ? '' : ' and the agent went on without it'}.`
   if (p.why) return p.why
   if (classifierDown(p)) {
     const tries = p.rechecked ? `, all ${p.rechecked + 1} times it was asked` : ''
-    const late = p.deny_after_s ? ` Unanswered, it is denied ${denyAfter(p.deny_after_s)}.` : ''
-    return `Auto mode could not judge this call: Claude Code's classifier was unavailable${tries}.${late}`
+    return `Auto mode could not judge this call: Claude Code's classifier was unavailable${tries}.${declineLine(p.deny_after_s)}`
   }
-  if (p.refused) return `Auto mode did not allow it on its own: ${p.refused.replace(/[.\s]+$/, '')}.`
-  if (ask.chat === 'main') return 'Claude Code asks in your terminal too; the first answer counts.'
+  if (p.refused) return `Auto mode did not allow it on its own: ${p.refused.replace(/[.\s]+$/, '')}.${declineLine(p.wait_s)}`
+  if (ask.chat === 'main') return 'Claude Code asks in your terminal too. The first answer counts.'
   const m = metas.get(ask.chat)
-  const kind = m ? threadKind(m) : null
   const name = m?.permission_mode ?? p.mode
   const mode = name ? MODE_NAMES[name] : null
-  const why = mode === 'Manual' ? 'It runs in Manual, which asks before each call.' : mode === 'Auto' ? 'Auto mode asks you about this call.' : 'Its permission mode asks for this call.'
-  if (kind === 'writer' || kind === 'check') return `${why} Unanswered, it is denied after a minute.`
-  if (kind === 'dev' && p.wait_s) return `${why} Unanswered, it is denied after ${waitWords(p.wait_s)} and the work goes on without it.`
-  return why
+  const why =
+    (p.asked_by && ASKED_BY[p.asked_by]) ||
+    (mode === 'Manual' ? 'It runs in Manual, which asks before each call.' : mode === 'Auto' ? 'Auto mode asks you about this call.' : 'Its permission mode asks for this call.')
+  return `${why}${declineLine(p.wait_s)}`
 }

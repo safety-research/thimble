@@ -1,8 +1,10 @@
 """Documents: their types, storage, frames, the tools that save and check them, and routes.
 
-A type is {slug, name, description, renderer, prompt, rubric}; the built-ins (report, story, slides, video) are backed by
-prompts/report-*.md and custom types live under workspaces/<c>/report-types/<slug>/. A document is stored at
-investigations/<inv>/<slug>.json, its frame at <slug>.frame.json, its earlier generations under <slug>/.
+A type is {slug, name, description, renderer, prompt, rubric}; the built-ins (report, story, slides) are backed by
+prompts/report-*.md and custom types live under workspaces/<c>/report-types/<slug>/. A video is a custom type made from
+the video extension's report type, and one written while the video was built in becomes one when it is first read
+(_migrate_video). A document is stored at investigations/<inv>/<slug>.json, its frame at <slug>.frame.json, its earlier
+generations under <slug>/.
 
 No model runs here. The writer (write_session.py) reads a type's form with read_ref("type:<name>") and saves with
 write_document (a whole document in markdown) or edit_document (one passage). Each save runs the citation check
@@ -25,7 +27,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
 from . import cite, config, investigation, notebook, prompts, refs, slides, undo
-from .ledger import read_json, write_json
+from .ledger import atomic_write_text, read_json, unlinked, write_json
 from .report import (_Refs, _collapse, _cut, _new_id, _put_text, _replace_text, _title_ok, plain_text, reopen_comment,
                      settle_carried_comment)
 from .schemas import CELL_REF, SENTENCE_TEXT, TAGS
@@ -34,7 +36,8 @@ from .story import StoryBody
 log = logging.getLogger("thimble.report_types")
 
 RENDERERS = ("document", "slides", "story", "custom", "video")
-BUILTIN_SLUGS = ("report", "story", "slides", "video")
+BUILTIN_SLUGS = ("report", "story", "slides")
+LEGACY_VIDEO = "video"  # the slug of the video while it was built in, and the id of the video extension's report type
 RESERVED = set(BUILTIN_SLUGS) | {"brief", "findings", "run", "investigation", "events", "notes", "critiques", "reports",
                                  "types", "draft", "versions", "presets", "new"}
 SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]{1,40}$")
@@ -191,9 +194,6 @@ def _builtin(slug: str) -> dict[str, Any]:
     elif slug == "slides":
         prompt, renderer = type_paragraph_text("slides"), "slides"
         desc = "A short narrative slideshow over the report's verified material: one point per slide, with the same citations."
-    elif slug == "video":
-        prompt, renderer = type_paragraph_text("video"), "video"
-        desc = "A short narrated video: cited lines the browser reads aloud over a film drawn in HTML in time with them."
     else:
         prompt, renderer = type_paragraph_text("story"), "story"
         desc = "A scrolling story in the style of a newsroom's interactive graphics: a title, a one-sentence answer, then sections, each a headline with its cited text beside the card that carries it."
@@ -202,10 +202,30 @@ def _builtin(slug: str) -> dict[str, Any]:
     return out
 
 
+def _migrate_video(c: str) -> None:
+    """A workspace's video written while the video was built in: its type is made, from the video extension's report
+    type, so it opens, is written and is exported as any video."""
+    d = _type_dir(c, LEGACY_VIDEO)
+    written = (config.workspace_dir(c) / "investigations").glob(f"*/{LEGACY_VIDEO}.json")
+    if (d / "type.json").is_file() or not any(written):
+        return
+    try:
+        unlinked(config.workspace_dir(c), d / "type.json")
+    except ValueError as e:
+        log.warning("%s: the video's type was not made: %s", c, e)
+        return
+    d.mkdir(parents=True, exist_ok=True)
+    atomic_write_text(d / "prompt.md", "")
+    write_json(d / "type.json", {"slug": LEGACY_VIDEO, "created_by": "thimble", "ts": _now(), "name": "Video",
+                                 "description": "", "renderer": "video", "preset": LEGACY_VIDEO})
+
+
 def read_type(c: str, slug: str) -> dict[str, Any] | None:
     """A type record with its prompt and rubric text; None when neither a built-in nor a custom type has the slug."""
     if slug in BUILTIN_SLUGS:
         return _builtin(slug)
+    if slug == LEGACY_VIDEO:
+        _migrate_video(c)
     d = _type_dir(c, slug)
     meta = read_json(d / "type.json", None)
     if not isinstance(meta, dict):
@@ -215,7 +235,7 @@ def read_type(c: str, slug: str) -> dict[str, Any] | None:
         renderer = "document"
     prompt_file, rubric_file, component_file = d / "prompt.md", d / "rubric.md", d / "renderer.tsx"
     prompt = prompt_file.read_text("utf-8") if prompt_file.is_file() else ""
-    made_from = preset(str(meta.get("preset") or "")) if meta.get("preset") else None
+    made_from = preset(str(meta.get("preset") or ""), c) if meta.get("preset") else None
     if made_from and not prompt.strip():
         prompt = made_from["prompt"]
     out = {
@@ -258,6 +278,7 @@ def _require_type(c: str, slug: str) -> dict[str, Any]:
 def list_types(c: str) -> list[dict[str, Any]]:
     """The built-ins in their order, then the workspace's custom types by creation time."""
     out = [_builtin(s) for s in BUILTIN_SLUGS]
+    _migrate_video(c)
     root = types_dir(c)
     customs: list[dict[str, Any]] = []
     for d in sorted(root.iterdir()) if root.is_dir() else ():
@@ -293,9 +314,9 @@ def write_type(c: str, slug: str, *, name: str, description: str, renderer: str,
     if create and isinstance(existing, dict):
         raise HTTPException(409, f"a report type {slug!r} already exists")
     from_preset = preset_id or (existing.get("preset") if isinstance(existing, dict) else None)
-    if from_preset and preset(str(from_preset)) is None:
+    if from_preset and preset(str(from_preset), c) is None:
         raise HTTPException(400, f"no preset {from_preset!r}")
-    if from_preset and (prompt or "").strip() == (preset(str(from_preset)) or {}).get("prompt"):
+    if from_preset and (prompt or "").strip() == (preset(str(from_preset), c) or {}).get("prompt"):
         prompt = ""  # the preset's own text, as read_type gave it: the file stays its one source
     if len(rubric or "") > RUBRIC_MAX:
         raise HTTPException(400, f"rubric is longer than {RUBRIC_MAX} characters")
@@ -311,6 +332,10 @@ def write_type(c: str, slug: str, *, name: str, description: str, renderer: str,
             component = (d / "renderer.tsx").read_text("utf-8")
         if not (component or "").strip():
             raise HTTPException(400, "a custom renderer needs its component source")
+    try:
+        unlinked(config.workspace_dir(c), d / "type.json")
+    except ValueError as e:
+        raise HTTPException(409, f"the type's folder cannot be written: {e}") from None
     d.mkdir(parents=True, exist_ok=True)
     meta = dict(existing) if isinstance(existing, dict) else {"slug": slug, "created_by": created_by, "ts": _now()}
     meta.update(name=_collapse(name) or slug, description=(description or "").strip(), renderer=renderer, updated=_now())
@@ -326,11 +351,10 @@ def write_type(c: str, slug: str, *, name: str, description: str, renderer: str,
         meta.pop("page", None)
     if from_preset:
         meta["preset"] = from_preset
-    (d / "prompt.md").write_text(_clean_prompt(prompt) if not from_preset or (prompt or "").strip() else "", "utf-8")
-    (d / "rubric.md").write_text((rubric or "").replace("\r\n", "\n").strip() + "\n", "utf-8")
+    atomic_write_text(d / "prompt.md", _clean_prompt(prompt) if not from_preset or (prompt or "").strip() else "")
+    atomic_write_text(d / "rubric.md", (rubric or "").replace("\r\n", "\n").strip() + "\n")
     if renderer == "custom" and component is not None:
-        src = component.replace("\r\n", "\n")
-        (d / "renderer.tsx").write_text(src, "utf-8")
+        atomic_write_text(d / "renderer.tsx", component.replace("\r\n", "\n"))
     write_json(d / "type.json", meta)
     return read_type(c, slug) or meta
 
@@ -359,16 +383,35 @@ def delete_type(c: str, slug: str) -> None:
 # --------------------------------------------------------------------------- presets and new documents
 # A preset is a ready-made document type, prompts/types/<id>.md (prompts.TYPES_DIR): name and description as
 # frontmatter, the type's text as the body. A document made from one reads its text from the file each time (read_type).
+# The report types of the workspace's active extensions are presets there too (extensions.report_types).
 
 PRESET_RE = re.compile(r"^[a-z][a-z0-9-]{0,40}$")
 # the kinds of new document besides the presets: a page, and a type of each renderer written from a brief
 NEW_KINDS = ("page", "document", "slides", "story")
 
 
-def preset(pid: str) -> dict[str, Any] | None:
-    """{id, name, description, renderer, prompt} of the preset `pid`; None when there is none."""
-    if not PRESET_RE.match(pid or "") or pid not in prompts.names_in(prompts.TYPES_DIR):
+def _extension_presets(c: str | None) -> list[dict[str, Any]]:
+    if not c:
+        return []
+    from . import extensions  # noqa: PLC0415
+
+    builtin = set(prompts.names_in(prompts.TYPES_DIR))
+    try:
+        return [{k: t[k] for k in ("id", "name", "description", "renderer", "prompt", "extension")}
+                for t in extensions.report_types(c)
+                if PRESET_RE.match(t["id"]) and t["id"] not in builtin and t["id"] not in NEW_KINDS]
+    except Exception:  # noqa: BLE001 — a broken extension leaves thimble's own presets
+        log.warning("%s: the extensions' report types could not be read", c, exc_info=True)
+        return []
+
+
+def preset(pid: str, c: str | None = None) -> dict[str, Any] | None:
+    """{id, name, description, renderer, prompt} of the preset `pid`, or of an active extension's report type in
+    workspace `c` (with its `extension`); None when there is none."""
+    if not PRESET_RE.match(pid or ""):
         return None
+    if pid not in prompts.names_in(prompts.TYPES_DIR):
+        return next((t for t in _extension_presets(c) if t["id"] == pid), None)
     try:
         front, body = prompts.frontmatter(f"{prompts.TYPES_DIR}/{pid}")
     except prompts.PromptError:
@@ -380,14 +423,14 @@ def preset(pid: str) -> dict[str, Any] | None:
             "renderer": renderer, "prompt": body}
 
 
-def presets() -> list[dict[str, Any]]:
-    """Every preset, in the order of their files' names."""
-    return [p for p in (preset(pid) for pid in prompts.names_in(prompts.TYPES_DIR)) if p]
+def presets(c: str | None = None) -> list[dict[str, Any]]:
+    """Every preset, in the order of their files' names, then the report types of workspace `c`'s active extensions."""
+    return [p for p in (preset(pid) for pid in prompts.names_in(prompts.TYPES_DIR)) if p] + _extension_presets(c)
 
 
-def new_kinds() -> list[str]:
+def new_kinds(c: str | None = None) -> list[str]:
     """What a new document can be: each preset's id, then NEW_KINDS."""
-    return [p["id"] for p in presets()] + list(NEW_KINDS)
+    return [p["id"] for p in presets(c)] + list(NEW_KINDS)
 
 
 def _free_slug(c: str, base: str) -> str:
@@ -418,9 +461,9 @@ def create_document_type(c: str, kind: str, *, name: str | None = None, brief: s
     or a
     missing brief; 409 when `slug` is taken."""
     kind = (kind or "").strip().lower()
-    made_from = preset(kind) if kind not in NEW_KINDS else None
+    made_from = preset(kind, c) if kind not in NEW_KINDS else None
     if kind not in NEW_KINDS and made_from is None:
-        raise HTTPException(400, f"no kind of document {kind!r}; the kinds are {', '.join(new_kinds())}")
+        raise HTTPException(400, f"no kind of document {kind!r}; the kinds are {', '.join(new_kinds(c))}")
     default = made_from["name"] if made_from else "Page" if kind == "page" else kind.capitalize()
     name = _free_name(c, _collapse(name) or default)
     slug = _check_slug(slug) if slug else _free_slug(c, _fallback_slug(name))
@@ -430,7 +473,8 @@ def create_document_type(c: str, kind: str, *, name: str | None = None, brief: s
                        created_by=created_by, create=True, page=True)
     elif made_from:
         page = made_from["renderer"] == "page"
-        t = write_type(c, slug, name=name, description=made_from["description"], renderer="custom" if page else "document",
+        renderer = "custom" if page else "video" if made_from["renderer"] == "video" else "document"
+        t = write_type(c, slug, name=name, description=made_from["description"], renderer=renderer,
                        prompt="", rubric="", created_by=created_by, create=True, page=page, preset_id=kind)
     elif not brief:
         raise HTTPException(400, "a document of your own needs its brief, what it is for")
@@ -524,7 +568,7 @@ def read_doc(c: str, inv_id: str, slug: str) -> dict[str, Any] | None:
         doc.setdefault("title_ok", _title_ok(_collapse(doc.get("title"))))
     elif slug == "slides":
         doc.setdefault("renderer", "slides")
-    elif slug == "video":
+    elif slug == LEGACY_VIDEO:
         doc.setdefault("renderer", "video")
     _legacy_comments(doc)
     return _with_defaults(doc)
@@ -2795,6 +2839,8 @@ class _Citations:
             return base + self._record_label(self._resolve(ref))
         if k == "row":
             return f"{p.get('path') or 'forge.db'}#{p['table']}/{p['pk']}"
+        if k in ("page", "pointer", "csvrow"):
+            return refs.format_ref(p) + self._record_label(self._resolve(ref))
         if k == "table":
             return f"{p.get('path') or 'forge.db'}#{p['table']}"
         if k == "path":
@@ -2846,8 +2892,35 @@ def _sentence_refs(x: dict[str, Any]) -> list[str]:
     return out
 
 
+_BARE_REF_RE = re.compile(r"\[\[([^\[\]|]+)\]\]")
+# a bare card ref right after one of these words is read as a noun, as in "the sequence is laid out in [[card:<id>]]"
+_NOUN_AFTER = frozenset("in on at by of from into with within under see as and or the a an this that these those its "
+                        "their our like via per".split())
+
+
+def card_nouns(text: str, cites: _Citations) -> str:
+    """A sentence's bare refs to a whole card that it reads as nouns, right after a word such as "in" or "the"
+    (_NOUN_AFTER), as each card's title in quotes. plain_text drops the others, which cite, as does every ref to a line or
+    a cell of a card."""
+    def name(m: "re.Match[str]") -> str:
+        before = re.search(r"([A-Za-z]+)\s*$", text[: m.start()])
+        ref = m.group(1).strip()
+        try:
+            p = refs.parse_ref(ref)
+        except ValueError:
+            return m.group(0)
+        whole = p.get("kind") == "cell" and "out" not in p and "row" not in p
+        if not (whole and before and before.group(1).lower() in _NOUN_AFTER) or not cites.cite(ref):
+            return m.group(0)
+        cid = str(p["cell_id"])
+        meta = (cites._resolve(f"card:{cid}") or {}).get("meta") or {}
+        return f"“{' '.join(str(meta.get('title') or '').split()) or cites.titles[cid]}”"
+
+    return _BARE_REF_RE.sub(name, text)
+
+
 def _sentence_md(x: dict[str, Any], cites: _Citations) -> tuple[str, str]:
-    prose = plain_text(str(x.get("text") or ""))
+    prose = plain_text(card_nouns(str(x.get("text") or ""), cites))
     text = prose + (f" {UNVERIFIED_MARK}" if "unverified" in (x.get("tags") or []) else "")
     labels: list[str] = []
     for r in _sentence_refs(x):
@@ -2910,7 +2983,7 @@ def render_markdown(c: str, doc: dict[str, Any], *, appendix: bool = False) -> d
                 tldr_words += _words(" ".join(pl for _, pl in rendered))
         for f in u["figures"]:
             raw_caption = str(f.get("caption") or "")
-            caption = plain_text(raw_caption)
+            caption = plain_text(card_nouns(raw_caption, cites))
             labels: list[str] = []
             for r in [str(f.get("cell") or "")] + refs.extract_refs(raw_caption):
                 lab = cites.cite(r) if r else None
@@ -3076,7 +3149,7 @@ class NewDocBody(BaseModel):
 async def presets_route(c: str) -> list[dict[str, Any]]:
     """The presets + New offers, each {id, name, description, renderer, prompt}."""
     _ws_ok(c)
-    return presets()
+    return presets(c)
 
 
 @router.post("/ws/{c}/report-types/new", status_code=201)

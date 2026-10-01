@@ -87,6 +87,27 @@
   --viz-ink-2: #b8b5ad;
   --viz-ink-3: #85827a;
   --viz-ink-4: #4d4b47;
+  /* the nominal hues (below) stepped for Dark */
+  --viz-1: #2275e8;
+  --viz-2: #da7306;
+  --viz-3: #17a973;
+  --viz-4: #0c9edc;
+  --viz-5: #9e8901;
+  --viz-6: #0b9a9e;
+  --viz-7: #ab691c;
+  /* the label colours (below) stepped for Dark */
+  --label-1: #2275e8;
+  --label-2: #da7306;
+  --label-3: #17a973;
+  --label-4: #0c9edc;
+  --label-5: #9e8901;
+  --label-6: #0b9a9e;
+  --label-7: #ab691c;
+  --label-8: #79b4fd;
+  --label-9: #50c14d;
+  --label-10: #0985b4;
+  --label-11: #fd914e;
+  --label-12: #0bb8d6;
 }
 
 /* -------- the accent: one of seven, iris by default. --accent is the fill, --accent-on the text on it (white or ink,
@@ -186,12 +207,12 @@
      at 6:1 or more on every ground. */
   --code-text: var(--ink-900);
   --code-comment: var(--ink-500);
-  --code-keyword: color-mix(in oklab, var(--viz-5) 56%, var(--ink-900));
-  --code-string: color-mix(in oklab, var(--viz-3) 60%, var(--ink-900));
+  --code-keyword: color-mix(in oklab, #cc79a7 56%, var(--ink-900));
+  --code-string: color-mix(in oklab, #009e73 60%, var(--ink-900));
   --code-number: color-mix(in oklab, #d55e00 65%, var(--ink-900));
-  --code-function: color-mix(in oklab, var(--viz-2) 47%, var(--ink-900));
+  --code-function: color-mix(in oklab, #e69f00 47%, var(--ink-900));
   --code-type: color-mix(in oklab, #56b4e9 48%, var(--ink-900));
-  --code-property: color-mix(in oklab, var(--viz-1) 80%, var(--ink-900));
+  --code-property: color-mix(in oklab, #0072b2 80%, var(--ink-900));
   --code-added: var(--status-positive);
   --code-removed: var(--status-negative);
 
@@ -208,11 +229,19 @@
   --accent-wash: color-mix(in oklab, var(--accent) 22%, transparent);
   /* the word under the ⌘ pointer */
   --accent-tint: color-mix(in oklab, var(--accent) 20%, transparent);
-  /* the one chip: the accent's edge at 28%, a 6% tint over the cell, the accent as text */
+  /* the accent chip, for what the agent made (a card, a group, a label, a thread, a document, a view): the accent's
+     edge at 28%, a 6% tint over the cell, the accent as text */
   --chip-edge: color-mix(in oklab, var(--accent) 28%, transparent);
   --chip-bg: color-mix(in oklab, var(--accent) 6%, var(--surface-card));
   --chip-edge-hover: color-mix(in oklab, var(--accent) 45%, transparent);
   --chip-bg-hover: color-mix(in oklab, var(--accent) 11%, var(--surface-card));
+  /* the evidence chip, for the data (a file, a record, a table's cell, printed lines): a hairline on the cell and the
+     secondary text, the primary on hover */
+  --chip-evidence-edge: rgba(var(--ink-rgb), 0.18);
+  --chip-evidence-edge-hover: rgba(var(--ink-rgb), 0.3);
+  --chip-evidence-bg: var(--surface-card);
+  --chip-evidence-text: var(--text-secondary);
+  --chip-evidence-text-hover: var(--text-primary);
   --ai-mark: var(--accent);
 
   --status-positive-soft: color-mix(in oklab, var(--status-positive) 12%, transparent);
@@ -222,38 +251,43 @@
   --status-info-soft: var(--paper-1);
   --status-neutral: var(--ink-500);
   --status-neutral-soft: var(--paper-1);
-  /* the highlight of a span inside a longer text (.hl in base.css), lighter than the selection's wash so the two read
-     apart */
-  --hl-bg: color-mix(in oklab, var(--accent) 16%, transparent);
+  /* the highlight of the evidence, in ink on every accent: a span inside a longer text (.hl in base.css), a cited
+     table cell or output line with its edge, and the stronger wash of the find's current match */
+  --hl-bg: rgba(var(--ink-rgb), 0.08);
+  --hl-bg-strong: rgba(var(--ink-rgb), 0.18);
+  --hl-edge: rgba(var(--ink-rgb), 0.4);
   --hl-unverified: var(--status-warning-soft);
   --hl-unverified-ink: var(--status-warning);
 
-  /* data: the ink ramp for ordered series; for nominal groups and label colours Okabe–Ito with series 4 a red
-     (#d62728) and series 6 a violet (#8c65e8), since sky blue and vermillion are hard to tell from their neighbours.
-     #a09c93 is "no match". The accent is never a series. */
-  --viz-1: #0072b2;
-  --viz-2: #e69f00;
-  --viz-3: #009e73;
-  --viz-4: #d62728;
-  --viz-5: #cc79a7;
-  --viz-6: #8c65e8;
-  --viz-7: #8a6d3b;
+  /* data: the ink ramp for ordered series; for nominal groups seven hues with no red, which reads as an error, and no
+     purple, which is the agents' colour: blue, orange, green, sky, gold, teal, brown. Each reads at 3:1 or more on
+     every paper, neighbours stay apart under protan and deutan vision, and the first three stay apart pairwise. Dark
+     has its own steps of the same hues. The accent is never a series. */
+  --viz-1: #025ac3;
+  --viz-2: #d0750a;
+  --viz-3: #08632f;
+  --viz-4: #1392d4;
+  --viz-5: #897301;
+  --viz-6: #009c85;
+  --viz-7: #844500;
   --viz-8: var(--viz-ink-1);
   --viz-9: var(--viz-ink-3);
-  /* a label's colour, in the order the analyst's labels take them, and the colour of "no match". 9 to 12 give a label
-     with more than eight values a distinct colour for each. */
-  --label-1: #0072b2;
-  --label-2: #e69f00;
-  --label-3: #009e73;
-  --label-4: #cc79a7;
-  --label-5: #d55e00;
-  --label-6: #56b4e9;
-  --label-7: #8a6d3b;
-  --label-8: #6a5acd;
-  --label-9: #aa3377;
-  --label-10: #999933;
-  --label-11: #6a3d9a;
-  --label-12: #d62728;
+  /* a label's colour, in the order the analyst's labels take them, and the colour of "no match". Like the nominal
+     hues, no red and no purple: the seven viz hues, then navy, grass, cerulean, chestnut and cyan, so a label with
+     more than eight values still gets a distinct colour for each. Each reads at 3:1 or more on every paper, and Dark
+     has its own steps of the same hues. */
+  --label-1: #025ac3;
+  --label-2: #d0750a;
+  --label-3: #08632f;
+  --label-4: #1392d4;
+  --label-5: #897301;
+  --label-6: #009c85;
+  --label-7: #844500;
+  --label-8: #013c77;
+  --label-9: #2aa02b;
+  --label-10: #025a7c;
+  --label-11: #622b01;
+  --label-12: #0389a0;
   --label-none: #a09c93;
   /* a multi-class label as a whole: the plain ink */
   --label-multi: var(--text-secondary);
@@ -369,13 +403,17 @@
   --text-on-inverse: var(--paper-2);
   /* Dark's ink is light, so its scrim darkens with black instead */
   --scrim: rgba(0, 0, 0, 0.6);
+  /* a light ink over a dark cell needs more of it to read as the same step */
+  --hl-bg: rgba(var(--ink-rgb), 0.14);
+  --hl-bg-strong: rgba(var(--ink-rgb), 0.26);
+  --hl-edge: rgba(var(--ink-rgb), 0.5);
   /* the code colours lightened toward Dark's text ink */
-  --code-keyword: color-mix(in oklab, var(--viz-5) 70%, var(--ink-900));
-  --code-string: color-mix(in oklab, var(--viz-3) 64%, var(--ink-900));
+  --code-keyword: color-mix(in oklab, #cc79a7 70%, var(--ink-900));
+  --code-string: color-mix(in oklab, #009e73 64%, var(--ink-900));
   --code-number: color-mix(in oklab, #d55e00 59%, var(--ink-900));
-  --code-function: color-mix(in oklab, var(--viz-2) 95%, var(--ink-900));
+  --code-function: color-mix(in oklab, #e69f00 95%, var(--ink-900));
   --code-type: color-mix(in oklab, #56b4e9 93%, var(--ink-900));
-  --code-property: color-mix(in oklab, var(--viz-1) 49%, var(--ink-900));
+  --code-property: color-mix(in oklab, #0072b2 49%, var(--ink-900));
 }
 :root[data-paper='dark'][data-accent='graphite'] {
   --text-accent: color-mix(in oklab, var(--accent) 45%, white);

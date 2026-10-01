@@ -356,6 +356,29 @@
   font: var(--type-body-sm);
 }
 
+/* a folder open in the reader (FolderPane): its entries as the tree's rows, with each one's size or file count at the
+   right */
+.folder-pane {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 6px 8px;
+}
+.folder-pane .files-rows {
+  max-width: 720px;
+}
+.folder-pane .folder-pane-row {
+  padding-left: 10px;
+}
+.folder-pane-meta {
+  flex: none;
+  margin-left: auto;
+  padding-left: 16px;
+  color: var(--text-tertiary);
+  font: var(--type-body-sm);
+  font-variant-numeric: tabular-nums;
+}
+
 /* the search by name under the tree's head: the search field, then the files found as tree rows with the matched
    words in the accent's ink */
 .files-search {
@@ -409,9 +432,11 @@
 .files-found-row {
   padding-left: 8px;
 }
+/* a match in the results: the evidence highlight, as the reader's find draws it */
 .files-found-row mark {
-  background: none;
-  color: var(--accent-ink);
+  border-radius: 2px;
+  background: var(--hl-bg);
+  color: var(--text-primary);
   font-weight: 500;
 }
 .files-found-row .files-name {
@@ -430,6 +455,38 @@
   color: var(--text-tertiary);
   font: var(--type-body-sm);
   font-variant-numeric: tabular-nums;
+}
+/* the text search's progress under the results, with its Stop at the right */
+.files-found-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  color: var(--text-tertiary);
+  font: var(--type-body-sm);
+  font-variant-numeric: tabular-nums;
+}
+.files-found-status-text {
+  min-width: 0;
+}
+.files-found-stop {
+  flex: none;
+  margin-left: auto;
+  padding: 0 6px;
+  border: 0;
+  border-radius: var(--radius-chip);
+  background: none;
+  color: var(--text-secondary);
+  font: inherit;
+  cursor: pointer;
+}
+.files-found-stop:hover {
+  background: var(--files-row-hover);
+  color: var(--text-primary);
+}
+.files-found-stop:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 1.5px var(--accent);
 }
 /* a part of the results: its name and, at the right, its count in the tertiary */
 .files-found-head {
@@ -498,6 +555,26 @@
   padding: 6px 10px 8px;
   border-top: 1px solid var(--border-subtle);
   background: var(--bg-panel);
+}
+/* beside a view built without label controls: the offer to add them, under the pane's head, its text on the rows' left
+   edge */
+.files-labels-note {
+  flex: none;
+  display: flex;
+  padding: 2px 0 6px;
+}
+.files-labels-note .btn {
+  margin-left: -1px;
+  color: var(--text-secondary);
+}
+.files-labels-note-busy {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 24px;
+  padding-left: 6px;
+  font: var(--type-ui-sm);
+  color: var(--text-secondary);
 }
 /* beside a view the sidebar is the Labels pane alone, from the top, on the sidebar's own paper */
 .files-side-labels .files-labels {
@@ -659,6 +736,17 @@
   white-space: nowrap;
 }
 .files-label-count {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* how many records the analyst marked by hand, on a line of its own under the outcome */
+.files-label-status:has(.files-label-marked) {
+  flex-wrap: wrap;
+  row-gap: 0;
+}
+.files-label-marked {
+  flex: 1 0 100%;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -994,14 +1082,11 @@
   font: var(--type-mono-sm);
   font-variant-numeric: tabular-nums;
 }
-/* the links to Files and to the review, at the foot's left when Regenerate Card follows them */
+/* the links to Files and to the review */
 .label-sheet-links {
   display: flex;
   align-items: center;
   gap: 12px;
-}
-.label-sheet-links:not(:last-child) {
-  margin-right: auto;
 }
 
 /* -------- the reader: the cell's paper behind a hairline, square tabs on the sidebar's step -------- */
@@ -1050,23 +1135,63 @@
   margin: 0 6px 0 10px;
   color: var(--text-tertiary);
 }
-.reader-tabs {
+/* the file tabs take the bar's free room (the spacer after them gives way); tabs that do not fit narrow, names cut with
+   an ellipsis, all but the open one, whose name shows up to its max-width; past their narrowest the last ones go in the
+   menu at the strip's end (FilesTab ReaderTabs); clipped, so the hidden copy of the strip, wider than the bar when many
+   tabs are open, leaves the panes around it nothing to scroll */
+.reader-tabs-wrap {
+  position: relative;
   display: flex;
+  flex: 1 1 0;
   align-items: stretch;
   min-width: 0;
-  overflow-x: auto;
-  scrollbar-width: none;
+  overflow: clip;
+}
+.reader-tabs-wrap + .reader-spacer {
+  display: none;
+}
+.reader-tabs {
+  display: flex;
+  flex: 0 1 auto;
+  align-items: stretch;
+  min-width: 0;
+  overflow: hidden;
+}
+/* the strip with every tab whole, where their widths are read */
+.reader-tabs-measure {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: flex;
+  align-items: stretch;
+  height: 100%;
+  visibility: hidden;
+  pointer-events: none;
+}
+.reader-tabs-wrap > .menu-trigger {
+  flex: none;
+}
+.reader-tabs-wrap .reader-tabs-more.btn {
+  flex: none;
+  align-self: center;
+  margin: 0 6px;
+  color: var(--text-secondary);
 }
 .reader-tab {
+  position: relative;
   display: inline-flex;
   align-items: center;
-  flex: none;
+  flex: 0 1 auto;
+  min-width: 0;
   gap: 2px;
-  padding: 0 10px 0 12px;
+  padding: 0 12px;
   box-shadow: inset -1px 0 0 var(--border-hairline);
   color: var(--text-tertiary);
 }
 .reader-tab.active {
+  flex-shrink: 0;
+  max-width: 320px;
+  padding: 0 10px 0 12px;
   background: var(--surface-card);
   box-shadow: inset 1px 0 0 var(--files-rule), inset -1px 0 0 var(--files-rule);
   color: var(--text-primary);
@@ -1075,6 +1200,7 @@
   display: inline-flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
   height: 100%;
   padding: 0;
   border: 0;
@@ -1085,10 +1211,17 @@
   cursor: pointer;
 }
 .reader-tab-glyph {
+  flex: none;
   color: var(--text-tertiary);
+}
+.reader-tab-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .reader-tab-x {
   display: grid;
+  flex: none;
   place-items: center;
   width: 16px;
   height: 16px;
@@ -1108,6 +1241,21 @@
 }
 .reader-tab-x:hover {
   background: var(--surface-pressed);
+}
+/* a tab other than the open one keeps no room for its ×, which shows on hover over the end of its name */
+.reader-tab:not(.active) .reader-tab-x {
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  margin: -8px 0 0;
+  background: var(--files-side-bg);
+  box-shadow: -6px 0 6px var(--files-side-bg);
+}
+.reader-tab:not(.active) .reader-tab-x:hover {
+  background: linear-gradient(var(--surface-pressed), var(--surface-pressed)) var(--files-side-bg);
+}
+.reader-tab:not(.active):not(:hover) .reader-tab-x:not(:focus-visible) {
+  pointer-events: none;
 }
 .reader-spacer {
   flex: 1;
@@ -1197,7 +1345,7 @@
   background-color: var(--hl-bg);
 }
 ::highlight(reader-find-current) {
-  background-color: color-mix(in oklab, var(--accent) 38%, transparent);
+  background-color: var(--hl-bg-strong);
 }
 .reader-fragment {
   align-self: center;
@@ -1234,6 +1382,39 @@
   height: 11px;
   border-radius: 1.5px;
   background: var(--c);
+}
+/* the labels on a PDF's pages, each with the pages it marks, which open the PDF there */
+.reader-pagelabels {
+  flex-wrap: wrap;
+  height: auto;
+  min-height: 30px;
+  padding: 4px 14px;
+}
+.reader-pagelabel {
+  height: auto;
+  min-height: 22px;
+  flex-wrap: wrap;
+  white-space: normal;
+}
+.reader-pagelabel-name {
+  margin-right: 2px;
+}
+.reader-pagelabel-page {
+  padding: 0 4px;
+  border: 0;
+  border-radius: var(--radius-chip);
+  background: none;
+  color: var(--text-secondary);
+  font: var(--type-mono-sm);
+  cursor: pointer;
+}
+.reader-pagelabel-page:hover {
+  color: var(--text-primary);
+  background: rgba(var(--ink-rgb), 0.06);
+}
+.reader-pagelabel-page[aria-current='page'] {
+  color: var(--text-primary);
+  background: rgba(var(--ink-rgb), 0.1);
 }
 .reader-main {
   flex: 1;
@@ -1455,6 +1636,41 @@
 .reader-media audio {
   width: min(560px, 100%);
 }
+/* a PDF in the browser's own viewer, filling the reader */
+.reader-pdf {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+}
+.reader-pdf-frame {
+  flex: 1 1 auto;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: var(--bg-sunken);
+}
+/* a chat log's turn: its lines run on as one text, a blank line as a short gap; a speaker's line with no words after
+   the speaker shows nothing */
+.reader-chatlog .reader-block + .reader-block {
+  margin-top: 0;
+}
+.reader-chatlog .reader-block:empty {
+  height: 0.6em;
+}
+.reader-chatlog .reader-block.reader-chat-empty {
+  display: none;
+}
+.reader-turns-tail {
+  height: 1px;
+}
+/* a conversation one line of a file holds: each turn's speaker over its words */
+.reader-conv-turn + .reader-conv-turn {
+  margin-top: 8px;
+}
+.reader-conv-speaker {
+  font: var(--type-mono-sm);
+  color: var(--text-tertiary);
+}
 .reader-viewbar {
   position: sticky;
   top: 0;
@@ -1483,7 +1699,7 @@
 .reader-record {
   position: relative;
   display: grid;
-  grid-template-columns: 28px minmax(0, 1fr);
+  grid-template-columns: minmax(28px, max-content) minmax(0, 1fr);
   gap: 0 12px;
   padding: 10px 20px 10px 12px;
   border-bottom: 1px solid rgba(var(--ink-rgb), 0.07);
@@ -1574,7 +1790,10 @@
   height: 9px;
   border-radius: 2px;
 }
+/* as wide as the file's largest line number (--digits, set on the reader's body), so every record's text starts at
+   the same place */
 .reader-lineno {
+  min-width: calc(var(--digits, 0) * 1ch);
   font: 400 10.5px / 1.5 var(--font-mono);
   font-variant-numeric: tabular-nums;
   color: var(--text-tertiary);
@@ -1608,6 +1827,22 @@
 .reader-msg-empty {
   color: var(--text-tertiary);
 }
+/* a post with no words (an action among talk): its other fields on one line, each name in the tertiary ink */
+.reader-msg-fields {
+  display: flex;
+  flex-wrap: wrap;
+  column-gap: 14px;
+}
+.reader-msg-field {
+  color: var(--text-tertiary);
+  font-size: var(--text-mono-sm);
+}
+/* the field that holds the words a followed ref quotes shows whole, on lines of its own */
+.reader-msg-field-open {
+  flex-basis: 100%;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
 .reader-record.has-tint .reader-record-body,
 .reader-line.has-tint {
   background: color-mix(in oklab, var(--tint) 16%, transparent);
@@ -1633,13 +1868,24 @@
 .reader-line {
   position: relative;
   display: grid;
-  grid-template-columns: 32px minmax(0, 1fr);
+  grid-template-columns: minmax(32px, max-content) minmax(0, 1fr);
   gap: 0 12px;
   padding: 1px 16px 1px 8px;
 }
+/* the number stays at the top of the view while a line taller than it scrolls past, so a long record's number shows */
 .reader-line > .reader-lineno {
+  position: sticky;
+  top: 0;
+  align-self: start;
   color: var(--text-placeholder);
   line-height: 1.75;
+}
+/* the record a followed ref names keeps an edge and its number in the ink after the wash fades */
+.reader-line.reader-target {
+  box-shadow: inset 2px 0 0 var(--hl-edge);
+}
+.reader-line.reader-target > .reader-lineno {
+  color: var(--text-primary);
 }
 .reader-card-body {
   min-width: 0;
@@ -1724,14 +1970,15 @@
   flex: 1;
   border-top: 1px solid var(--border-hairline);
 }
-/* the record a followed ref points at: a wash that fades out by 1.5 s (views/common.tsx HIT_MS), leaving no edge */
+/* the record a followed ref points at: the evidence highlight, fading out by 1.5 s (views/common.tsx HIT_MS), leaving
+   no edge */
 .reader-card.reader-hit::after,
 .reader-block.reader-hit::after {
   content: '';
   position: absolute;
   inset: 0;
   border-radius: inherit;
-  background: var(--accent-soft);
+  background: var(--hl-bg);
   pointer-events: none;
   animation: hit-fade 1.5s var(--ease-out) forwards;
 }
@@ -1819,6 +2066,49 @@
   padding-left: 12px;
   border-left: 2px solid var(--border-subtle);
   color: var(--text-secondary);
+}
+/* a markdown file's front matter, folded above the document: a button, and when opened its fields one per row, the key
+   in the tertiary ink */
+.reader-md-meta {
+  margin: 0 0 12px;
+}
+.reader-md-meta-toggle.btn {
+  margin-left: -8px;
+  color: var(--text-secondary);
+}
+.reader-md-meta-toggle .dim {
+  margin-left: 6px;
+}
+.reader-md-meta-fields {
+  display: grid;
+  grid-template-columns: minmax(0, max-content) minmax(0, 1fr);
+  column-gap: 16px;
+  row-gap: 4px;
+  margin: 6px 0 0;
+  padding: 8px 0 8px 12px;
+  border-left: 2px solid var(--border-subtle);
+  font: var(--type-ui-sm);
+}
+.reader-md-meta-field {
+  display: contents;
+}
+.reader-md-meta-fields dt {
+  color: var(--text-tertiary);
+  overflow-wrap: anywhere;
+}
+.reader-md-meta-fields dd {
+  margin: 0;
+  min-width: 0;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+.reader-md .reader-md-meta-fields pre {
+  margin: 0;
+  padding: 0;
+  background: none;
+  font: var(--type-mono);
+  color: var(--text-secondary);
+  white-space: pre-wrap;
 }
 
 /* -------- text lines, raw lines: the code's own ink (the primary), syntax colours from styles/code.css -------- */
@@ -1948,11 +2238,30 @@
 @keyframes hit-cell-fade {
   0%,
   30% {
-    box-shadow: inset 0 0 0 100vmax var(--accent-soft);
+    box-shadow: inset 0 0 0 100vmax var(--hl-bg);
   }
   100% {
     box-shadow: inset 0 0 0 100vmax transparent;
   }
+}
+/* the row a followed ref names keeps an edge on its number after the wash fades */
+.reader-table-row.reader-target td.reader-table-gutter {
+  box-shadow: inset 2px 0 0 var(--hl-edge);
+  color: var(--text-primary);
+}
+/* the cell holding the words a followed ref quotes shows them over a few lines, the words highlighted (.hl) */
+.reader-table .reader-table-cell.cited .reader-table-clip {
+  display: -webkit-box;
+  max-width: 44ch;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 6;
+  line-clamp: 6;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  color: var(--text-primary);
+}
+.reader-table-row.reader-target td {
+  vertical-align: top;
 }
 /* the pinned line-number cell mixes the row's tint or hover into the paper, so the columns under it do not show
    through */
@@ -1990,12 +2299,13 @@
   flex-direction: column;
   padding: 20px 24px;
 }
-/* beside the Labels sidebar the mode switch wraps under the name, which keeps at least 180px */
+/* the view's name over one quiet line of thimble's notes, the head's controls level with the pair at its right end;
+   beside the Labels sidebar the controls wrap under the name, which keeps at least 180px */
 .view-pane-head {
   flex: none;
   display: flex;
   flex-wrap: wrap;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 8px 16px;
   padding-bottom: 14px;
@@ -2007,12 +2317,6 @@
   gap: 2px;
   min-width: 0;
 }
-/* with the Labels sidebar hidden, the button that shows it stands before the view's name */
-.view-pane-side-show.btn {
-  flex: none;
-  margin: -1px -4px 0 -8px;
-  color: var(--text-tertiary);
-}
 /* a name longer than that keeps one line and ends in an ellipsis, and a path breaks inside a word where it must, so
    neither runs past the head */
 .view-pane-name {
@@ -2022,21 +2326,25 @@
   font: 500 15px / 1.35 var(--font-body);
   color: var(--text-primary);
 }
-/* under the name: the files the view reads, the file Raw shows, and in red the lines its reader could not read */
+/* under the name: the files the view reads, the file Raw shows, what the view leaves out and what it derived, all in
+   the same ink, apart by dots */
 .view-pane-sub {
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
-  gap: 2px 12px;
+  gap: 2px 6px;
   min-width: 0;
+}
+.view-pane-dot {
+  font: var(--type-ui-sm);
+  color: var(--text-tertiary);
 }
 .view-pane-file {
   overflow-wrap: break-word;
   font: var(--type-mono-sm);
   color: var(--text-tertiary);
 }
-.view-pane-files,
-.view-pane-problems {
+.view-pane-files {
   padding: 0;
   border: 0;
   background: none;
@@ -2051,24 +2359,50 @@
   text-decoration: underline;
   text-underline-offset: 2px;
 }
-.view-pane-problems {
-  color: var(--status-negative);
+.view-pane-list-kind {
+  color: var(--text-secondary);
+  font-style: italic;
 }
-.view-pane-problems:hover,
-.view-pane-problems[aria-expanded='true'] {
-  text-decoration: underline;
-  text-underline-offset: 2px;
+/* what a view leaves out, listed under its head by kind; it scrolls past a few rows so the page keeps the pane */
+.view-pane-residue-list {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 24px;
+  max-height: 200px;
+  margin: -6px 0 14px;
+  padding: 6px 0;
+  overflow-y: auto;
+  border-top: 1px solid var(--border-hairline);
+  border-bottom: 1px solid var(--border-hairline);
+}
+/* each section hangs its rows' padding left of the list's edge, so their text lines up with the head's */
+.view-pane-residue-list section {
+  flex: 1 1 240px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  margin-left: -8px;
+}
+.view-pane-residue-list h4 {
+  margin: 2px 8px 2px;
+  font: var(--type-label);
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+.reader-viewer > .view-pane-residue-list {
+  margin: 0;
+  padding: 6px 14px;
+  border-top: 0;
 }
 .view-pane-list.popover {
   display: flex;
   flex-direction: column;
   max-height: min(360px, calc(100vh - 16px));
 }
-.view-pane-list-head {
-  padding: 4px 8px 6px;
-  color: var(--status-negative);
-}
 .view-pane-list-item {
+  flex: none;
   display: flex;
   flex-direction: column;
   align-items: flex-start;
@@ -2080,6 +2414,7 @@
   color: var(--text-primary);
   font: var(--type-ui-sm);
   text-align: left;
+  white-space: normal;
   overflow-wrap: anywhere;
   cursor: pointer;
 }
@@ -2094,6 +2429,42 @@
 .view-pane-list-why,
 .view-pane-list-more {
   color: var(--text-tertiary);
+}
+/* a row of the Derived data list, which opens nothing */
+.view-pane-list-row {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 4px 8px;
+  font: var(--type-ui-sm);
+  overflow-wrap: anywhere;
+}
+.view-pane-list-row .mono {
+  font: var(--type-mono-sm);
+  color: var(--text-primary);
+}
+.view-pane-list-how {
+  color: var(--text-secondary);
+}
+.view-pane-list-group {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+}
+.view-pane-list-head {
+  margin: 6px 8px 2px;
+  font: var(--type-label);
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+.view-pane-list-rule {
+  flex: none;
+  margin: 4px 8px;
+  border: 0;
+  border-top: 1px solid var(--border-hairline);
 }
 .view-pane-list-more {
   padding: 4px 8px;
@@ -2197,6 +2568,9 @@
 }
 .reader-grid tbody tr.reader-row-selected td {
   background: var(--surface-selected);
+}
+.reader-grid tbody tr.reader-row-marked > td:first-child {
+  box-shadow: inset 3px 0 0 var(--mark);
 }
 .reader-kv {
   width: 100%;
@@ -2367,9 +2741,18 @@
   box-shadow: 0 0 0 2px var(--overlay-bg), 0 0 0 3.5px var(--text-primary);
 }
 /* the Files label filter beside a view's mode switch, which clears it */
-.view-pane-filter {
+.view-pane-filter,
+.reader-viewer-filter {
   flex: none;
   align-self: center;
+}
+/* how many of the view's records the label filter hides, beside its chip */
+.view-pane-hidden {
+  flex: none;
+  align-self: center;
+  font: var(--type-ui-sm);
+  color: var(--text-secondary);
+  white-space: nowrap;
 }
 /* a newer version of the view than the one shown (files/viewVersion.tsx): the accent dot, Updated and Reload, quiet,
    in the head beside the mode switch */
@@ -2391,6 +2774,16 @@
 .reader-viewer {
   position: relative;
 }
+/* thimble's notes on a file-type viewer, above its page (ViewChrome) */
+.reader-viewer-notes {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 12px;
+  padding: 6px 14px;
+  box-shadow: inset 0 -1px 0 var(--files-rule);
+}
 .reader-viewer-updated {
   position: absolute;
   top: 6px;
@@ -2405,6 +2798,21 @@
 .view-pane-head .view-pane-review {
   align-self: center;
   margin: 0;
+}
+.view-review-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.view-review-more {
+  color: var(--text-secondary);
+}
+/* the question a running review's Stop asks, with Cancel and Stop under it */
+.view-review-stop {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 /* while a newer version of a view builds or its review runs, its whole chip in the views bar shimmers, as a card does
    while it is checked (over the chip's own background colour, so a chosen chip keeps its fill) */

@@ -1,5 +1,5 @@
 // The page's typed event bus: the workspace stream fans out here, and the surfaces talk to each other through it.
-import type { FilterScope, WsEvent } from './types'
+import type { FilterScope, ViewQuery, WsEvent } from './types'
 
 export type Tab = 'files' | 'canvas' | 'report'
 
@@ -19,7 +19,8 @@ export type Events = {
   /** `asked`: a view the analyst asked for is built (files/viewReady.ts); `version`: a new version of it passed its checks */
   view: { slug: string; status: string; path?: string; chat?: string; asked?: boolean; version?: string }
   ticket: { id: string; n: number; status: string }
-  concepts: { concept: string; what: string }
+  /** `rows` false: the label's rows stayed as they were (turned on or off, recoloured, a filter set) */
+  concepts: { concept: string; what: string; rows?: boolean }
   filter: { scope: FilterScope; concept?: string; value?: string }
   /** the card main made for a card asked of it from the report (the stream's `card-request` record) */
   cardRequest: { request: string; card: string }
@@ -38,7 +39,15 @@ export type Events = {
      * pane the request came from (lib/surfaces pressedPane), else the pane pressed last */
   showTab: { tab: Tab | `view:${string}`; from?: string | null }
   /** a ref Files places in a view, opened in the pane that shows that view on its own (files/ViewSurface) */
-  openInView: { slug: string; path: string; ref?: string; quote?: { record: string; text: string; span: string } }
+  openInView: { slug: string; path: string; ref?: string; quote?: { record: string; text: string; span: string }; query?: ViewQuery }
+  /** open a view with a card's arguments (a card type's Open as view, canvas/TypeCard, or main's open_view), or with
+   * none (null), in Files or in its own pane */
+  openView: { slug: string; query: ViewQuery | null }
+  /** show the file at `path` in the File browser's mode `mode` (files/Reader pickKey), such as a file viewer's */
+  fileMode: { path: string; mode: string }
+  /** Open in on a file's panel: the file in the view `slug`, or in the File browser for null, kept as the view the
+   * analyst last used for it */
+  openIn: { path: string; ref?: string; slug: string | null }
   /** a layout main asked for with set_layout (the stream's `layout` record): a preset, and the surfaces its panes show
    * in reading order */
   layout: { layout: 'one' | 'columns' | 'rows' | 'three' | 'quadrants'; surfaces: string[] }
@@ -58,8 +67,15 @@ export type Events = {
   askAbout: { el: HTMLElement }
   /** the anchorable element under the pointer inside a view's frame while ⌘ is held; null when it left */
   pointHover: { rect: DOMRect | null }
+  /** a box of a frame's page to bring into view (a frame's `reveal`): the canvas pans to it when the frame is on it */
+  revealBox: { rect: DOMRect; frame: HTMLIFrameElement }
+  /** a citation in a card's text is hovered (`ref`) or left (null), so a card that draws records can show the one it
+   * names */
+  citeHover: { card: string; ref: string | null }
   /** ⌘ went down or up: a view's frame shows the ⌘ arrow (`cursor`, a CSS cursor value) while it is held */
   cmdHeld: { on: boolean; cursor: string }
+  /** run the product tour again (Settings' Take the tour) */
+  tour: Record<string, never>
 }
 
 type Handler<T> = (payload: T) => void

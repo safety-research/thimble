@@ -4,12 +4,9 @@
 // anchors it touches. Report blocks (`data-anchor-cell`) are taken whole (anchors.ts cellOf); inside a card
 // (`data-anchor-parts`) the innermost part is taken (parts.ts). The click also captures a picture (capture.ts), and
 // Enter posts a thread to the analyst's Claude Code session. A view's frame sends its own hover and click through the bus
-// (pointHover, pointAt, cmdHeld). Off a Mac, Ctrl does what ⌘ does (lib/platform). With `inline` (the chat off, Shell)
-// the box stays open after the send and answers in place: the thread's rows show in it as the fork writes them, and a
-// reply typed there goes to the same thread.
+// (pointHover, pointAt, cmdHeld). Off a Mac, Ctrl does what ⌘ does (lib/platform). The send lets go of the highlight
+// and opens the thread in the chat column.
 import { useEffect, useRef, useState } from 'react'
-import { Rows } from '../chat/Rows'
-import { useChat } from '../chat/useChat'
 import { api } from '../lib/api'
 import { bus } from '../lib/bus'
 import { isMacPlatform, isPointKey, pointKeyHeld } from '../lib/platform'
@@ -51,21 +48,18 @@ const pointAt = (el: Element, shot: HTMLElement = el as HTMLElement): Pick<Ask, 
   parent: el.closest('[data-chat-current]')?.getAttribute('data-chat-current') ?? null,
 })
 
-/** Light a card's part: its own box when it has one, else its element. */
-const lightPart = (p: Part) => (p.rect ? highlight.box(p.rect) : highlight.region(p.el))
+/** Light a card's part: its own box, carried along with its element, when it has one, else its element. */
+const lightPart = (p: Part) => (p.rect ? highlight.box(p.rect, p.el) : highlight.region(p.el))
 
 const UNDER: Place = { under: true }
 const BESIDE: Place = { under: false }
 
 const cmdOn = () => document.body.hasAttribute('data-cmd')
 
-export function CmdPointer({ ws, inline = false }: { ws: string; inline?: boolean }) {
+export function CmdPointer({ ws }: { ws: string }) {
   const [box, setBox] = useState<Ask | null>(null)
   const [draft, setDraft] = useState('')
   const [busy, setBusy] = useState(false)
-  // the thread the box's send opened, answered in place (`inline`)
-  const [answer, setAnswer] = useState<string | null>(null)
-  const thread = useChat(ws, answer)
   const boxEl = useRef<HTMLElement>(null)
   // a ⌘-press in flight: where it started, the panel it started in, `dragged` once it moved far enough
   const press = useRef<{ x: number; y: number; root: ParentNode; dragged: boolean } | null>(null)
@@ -92,7 +86,6 @@ export function CmdPointer({ ws, inline = false }: { ws: string; inline?: boolea
     }
     const openBox = (b: Ask) => {
       setDraft('')
-      setAnswer(null)
       setBox(b)
     }
     const inBox = (t: EventTarget | null) => !!boxEl.current?.contains(t as Node)
@@ -223,9 +216,9 @@ export function CmdPointer({ ws, inline = false }: { ws: string; inline?: boolea
       if (rect) highlight.box(rect)
       else highlight.clear()
     })
-    const offPoint = bus.on('pointAt', ({ anchor, text, element, rect, view }) => {
+    const offPoint = bus.on('pointAt', ({ anchor, text, element, rect, frame, view }) => {
       highlight.retarget()
-      highlight.box(rect)
+      highlight.box(rect, frame)
       highlight.hold()
       track('pointer-open', { target: anchor, detail: { frame: true } })
       // inside a viewer's frame, whose sandbox cannot be drawn from here: the element is named by its view (`view:<slug>`),
@@ -267,27 +260,17 @@ export function CmdPointer({ ws, inline = false }: { ws: string; inline?: boolea
 
   const close = () => {
     setBox(null)
-    setAnswer(null)
     highlight.release()
   }
   const submit = async () => {
     const text = draft.trim()
     if (!box || !text || busy) return
     setBusy(true)
-    track('pointer-send', { target: box.anchor, detail: { text, range: box.anchors.length, inline, followUp: !!answer } })
+    track('pointer-send', { target: box.anchor, detail: { text, range: box.anchors.length } })
     try {
-      if (answer) {
-        // a follow-up in the box: the same thread, as its composer would send it
-        if (await thread.send(text)) setDraft('')
-        return
-      }
       const image = await box.image
       const meta = await api.createThread(ws, { anchor: box.anchor, anchor_text: box.text || null, ...box.info, image, parent: box.parent ?? null, text })
       setDraft('')
-      if (inline) {
-        setAnswer(meta.id)
-        return
-      }
       bus.emit('openChat', { chatId: meta.id })
       close()
     } catch (e) {
@@ -310,11 +293,8 @@ export function CmdPointer({ ws, inline = false }: { ws: string; inline?: boolea
           busy={busy}
           onSubmit={() => void submit()}
           onClose={close}
-          attrs={{ 'data-anchors': box.anchors.length, 'data-thread': answer ?? undefined }}
-          replyTo={thread.meta?.name || thread.meta?.title || undefined}
-        >
-          {answer ? <Rows rows={thread.rows} ws={ws} chat={answer} streaming={thread.running || thread.streaming} /> : undefined}
-        </PointerBox>
+          attrs={{ 'data-anchors': box.anchors.length }}
+        />
       )}
     </>
   )

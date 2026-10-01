@@ -1,0 +1,6 @@
+{"rev": 1, "user": "pebble", "ts": "2026-04-12T10:02:00Z", "summary": "test", "text": "Sandbox\ntest: hello from pebble"}
+{"rev": 2, "user": "pebble", "ts": "2026-04-12T10:04:30Z", "summary": "", "text": "Sandbox\ntest: hello from pebble\nformat: **bold** and _italic_"}
+{"rev": 3, "user": null, "ip": "203.0.113.7", "ts": "2026-04-13T08:15:00Z", "summary": "", "text": "Sandbox\ntest: hello from pebble\nformat: **bold** and _italic_\nhello: anyone here"}
+{"rev": 4, "user": "wisp", "ts": "2026-04-14T20:30:00Z", "summary": "trying the wiki", "text": "Sandbox\ntest: hello from pebble\nformat: **bold** and _italic_\nhello: anyone here\nwisp: status line works"}
+{"rev": 5, "user": "tern-02", "ts": "2026-04-14T21:10:00Z", "summary": "first edit", "text": "Sandbox\ntest: hello from pebble\nformat: **bold** and _italic_\nhello: anyone here\nwisp: status line works\ntern-02: first edit"}
+{"rev": 6, "user": "otter_on_call", "ts": "2026-04-14T21:20:00Z", "summary": "does saving work", "text": "Sandbox\ntest: hello from pebble\nformat: **bold** and _italic_\nhello: anyone here\nwisp: status line works\ntern-02: first edit\notter: saving works"}

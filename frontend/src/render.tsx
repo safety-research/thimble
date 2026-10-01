@@ -1,7 +1,8 @@
 // The card harness's page (render.html; backend/app/render.py keeps a few open in headless Chromium): one card drawn
 // with the canvas's own CardFace, width, theme and stylesheet, so the picture the card check reads is what the analyst
 // sees. The page calls no API: each request carries the card with its refs resolved, cited calls, card and label names
-// (and a label card's `label` data), and a fetch stub answers the page's requests from them, listing any it could not.
+// (and a label card's `label` data, a card type's page), and a fetch stub answers the page's requests from them, listing
+// any it could not.
 import { flushSync } from 'react-dom'
 import { createRoot, type Root } from 'react-dom/client'
 import './styles/index.css'
@@ -31,6 +32,8 @@ export interface RenderRequest {
   /** a label card's label as the API returns it: GET /concepts/{id}, the first rows of each value as GET
    * /concepts/{id}/rows?text=1 returns them, and the workspace's settings */
   label?: LabelData | null
+  /** a card type's page by type, as GET /ws/{c}/cardtypes/{type}/frame returns it, for a card of a card type */
+  frames?: Record<string, string>
 }
 
 export interface LabelData {
@@ -43,6 +46,8 @@ type Box = { x: number; y: number; width: number; height: number }
 
 export interface RenderResult {
   box: Box | null
+  /** each frame a card type's page draws in, which the harness checks drew something */
+  frames?: Box[]
   fonts: boolean
   requests: string[]
   error?: string
@@ -89,6 +94,9 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Res
     return json(200, { rows, total: all.length, next: null })
   } else if (current?.label && /^\/api\/ws\/[^/]+\/settings$/.test(url.pathname)) {
     return json(200, current.label.settings ?? {})
+  } else if (/^\/api\/ws\/[^/]+\/cardtypes\/[^/]+\/frame$/.test(url.pathname)) {
+    const doc = current?.frames?.[decodeURIComponent(url.pathname.split('/')[5])]
+    if (doc != null) return new Response(doc, { status: 200, headers: { 'content-type': 'text/html' } })
   }
   unanswered.push(url.pathname + url.search)
   return json(404, { detail: 'the render page answers only what its request carries' })
@@ -191,7 +199,8 @@ async function render(req: RenderRequest): Promise<RenderResult> {
   // a card still drawing after SETTLE_MAX_MS is shot as it stands
   await settled(card)
   const fonts = await fontsLoaded()
-  return { box: boxOf(card), fonts, requests: [...unanswered], ms: { settle: Math.round(now() - t0) } }
+  const frames = Array.from(card.querySelectorAll('iframe.viewer-frame'), boxOf)
+  return { box: boxOf(card), frames, fonts, requests: [...unanswered], ms: { settle: Math.round(now() - t0) } }
 }
 
 declare global {

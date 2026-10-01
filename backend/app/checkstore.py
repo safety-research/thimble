@@ -346,6 +346,7 @@ def apply_fix(c: str, cid: str, check_id: str, patch: dict, cand: dict | None, r
         full = {**cell, "outputs": notebook.hydrate_outputs(ws, cell.get("outputs"))}
         cell["takeaway"] = _resolved(full, str(patch["takeaway"]))
         cell["takeaway_author"] = cell.get("takeaway_author") if cell.get("takeaway_author") in AI_AUTHORS else "model"
+        cell.pop(notebook.TAKEAWAY_STALE, None)
         if notebook.runnable(cell) and cell.get("status") == "ok":
             notebook._verify_hook("takeaway", c, nb, cell)
     after = {f: copy.deepcopy(cell.get(f)) for f in fields}

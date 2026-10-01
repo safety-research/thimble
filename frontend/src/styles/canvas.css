@@ -274,25 +274,6 @@ body[data-cmd] .board-stage * {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* a label with edits not run yet or changed since the card ran: the tag turns red on the negative's soft tint, and
-   the row ends in Regenerate Card */
-.bcell-tag.is-stale,
-.bcell-tag.is-stale.is-plain {
-  background: var(--status-negative-soft);
-  color: var(--status-negative);
-}
-.bcell-tag.is-stale:hover,
-.bcell-tag.is-stale[aria-expanded='true'] {
-  background: color-mix(in oklab, var(--status-negative) 20%, transparent);
-}
-.bcell-tag.is-stale .bcell-tag-icon {
-  color: var(--status-negative);
-}
-.bcell-regen.btn {
-  height: var(--h-chip);
-  padding: 0 6px;
-  color: var(--text-secondary);
-}
 .bcell.is-selected .bcell-q,
 .bcell.is-selected .bcell-take {
   cursor: text;
@@ -539,6 +520,11 @@ body[data-cmd] .board-stage * {
   line-height: 1.55;
   text-wrap: pretty;
 }
+/* a takeaway written before the card's last run changed its outputs, until it is written again */
+.bcell-take-text.is-stale,
+.bfocus-take .is-stale {
+  opacity: 0.55;
+}
 .bcell-take-text p {
   margin: 0;
 }
@@ -546,8 +532,8 @@ body[data-cmd] .board-stage * {
   margin-top: 4px;
 }
 /* -------- the card check on the face (canvas/CardFace, lib/cardCheck) -------- */
-/* while a card is checked its body and citations shimmer faintly with an accent sweep (a static tint under reduced
-   motion) */
+/* while a card is checked, or run again because a label it read changed, its body and citations shimmer faintly with
+   an accent sweep (a static tint under reduced motion); while its code runs (an edit changing it) its body does */
 .bcell-body {
   position: relative;
   display: flex;
@@ -562,7 +548,9 @@ body[data-cmd] .board-stage * {
   min-height: 0;
   overflow: hidden;
 }
-.canvas-card.is-checking .bcell-body::after {
+.canvas-card.is-checking .bcell-body::after,
+.canvas-card.is-regenerating .bcell-body::after,
+.canvas-card.is-running .bcell-body::after {
   content: '';
   position: absolute;
   inset: -4px;
@@ -574,7 +562,9 @@ body[data-cmd] .board-stage * {
   animation: bcell-shimmer 1.8s linear infinite;
 }
 .canvas-card.is-checking .bcell-take .refchip,
-.canvas-card.is-checking .bcell-take .refchip.refchip-value {
+.canvas-card.is-checking .bcell-take .refchip.refchip-value,
+.canvas-card.is-regenerating .bcell-take .refchip,
+.canvas-card.is-regenerating .bcell-take .refchip.refchip-value {
   background-image: linear-gradient(100deg, transparent 30%, color-mix(in oklab, var(--accent) 12%, transparent) 50%, transparent 70%);
   background-size: 300% 100%;
   box-decoration-break: clone;
@@ -591,8 +581,12 @@ body[data-cmd] .board-stage * {
 }
 @media (prefers-reduced-motion: reduce) {
   .canvas-card.is-checking .bcell-body::after,
+  .canvas-card.is-regenerating .bcell-body::after,
+  .canvas-card.is-running .bcell-body::after,
   .canvas-card.is-checking .bcell-take .refchip,
-  .canvas-card.is-checking .bcell-take .refchip.refchip-value {
+  .canvas-card.is-checking .bcell-take .refchip.refchip-value,
+  .canvas-card.is-regenerating .bcell-take .refchip,
+  .canvas-card.is-regenerating .bcell-take .refchip.refchip-value {
     animation: none;
     background-image: none;
     background-color: color-mix(in oklab, var(--accent) 5%, transparent);
@@ -639,12 +633,9 @@ body[data-cmd] .board-stage * {
   cursor: pointer;
   outline-offset: 1px;
 }
-.bcell-check-mark:hover:not([aria-disabled]) {
+.bcell-check-mark:hover {
   color: var(--text-primary);
   background: var(--surface-hover);
-}
-.bcell-check-mark[aria-disabled] {
-  cursor: default;
 }
 /* checked, with numbers its code types in (lib/cardCheck typedLine): a flag in the warning tone */
 .bcell-check-mark.is-flagged {
@@ -929,7 +920,7 @@ body[data-cmd] .board-stage .outputs-vega * {
 .bcell-note p + p {
   margin-top: 6px;
 }
-/* an example: the accent chip with the record's address (which opens Files at the passage), the record behind a faint
+/* an example: the evidence chip with the record's address (which opens Files at the passage), the record behind a faint
    rule, and in it the cited words highlighted (.hl) among the surrounding words in the tertiary. A record quoted
    without a passage reads whole, in ink */
 .bcell-quote {
@@ -1872,6 +1863,9 @@ audio.bcell-media {
   scrollbar-width: thin;
   scrollbar-color: var(--ink-300) transparent;
 }
+.bdetail-out {
+  min-width: 0;
+}
 .bdetail-block {
   display: flex;
   flex-direction: column;
@@ -2026,6 +2020,9 @@ audio.bcell-media {
   width: 100%;
   max-width: 760px;
   margin: 0 auto;
+}
+.bfocus-col.is-wide {
+  max-width: none;
 }
 .bfocus-meta,
 .bfocus-pos {
@@ -2513,4 +2510,39 @@ audio.bcell-media {
 .canvas-diagram-note-ends {
   font: 400 var(--text-mono-sm) / 1.5 var(--font-mono);
   color: var(--text-tertiary);
+}
+
+/* a card type's frame (canvas/TypeCard): as tall as its page asks, or filling a card the analyst sized */
+.bcell-type {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.bcell-type .viewer-frame {
+  flex: none;
+}
+.bcell-type .viewer-frame-loading {
+  min-height: 120px;
+}
+.bcell-type-gone {
+  margin: 0 0 6px;
+  font: var(--type-body-sm);
+  color: var(--text-secondary);
+}
+.bcell.is-sized .bcell-type {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.bcell.is-sized .bcell-type .viewer-frame {
+  flex: 1 1 auto;
+}
+/* Keep and Undo while the analyst reshaped the card in its page, and Open as view at full size */
+.bcell-type-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-top: 8px;
+}
+.bcell-type-view {
+  margin-left: auto;
 }

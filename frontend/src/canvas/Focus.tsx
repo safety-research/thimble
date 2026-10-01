@@ -1,10 +1,12 @@
 // Focus mode: one card at full size over the board, the cards of its frame listed at the left. ↑ and ↓ step through
 // them, Escape goes back to the board. The composer under the card asks about it in the thread that made it; a card an
-// agent made is asked about in a new thread on the card.
+// agent made is asked about in a new thread on the card. A card of a card type takes the stage's whole width, since its
+// type's page draws more at full size.
 import { useContext, useLayoutEffect, useRef, useState, type CSSProperties } from 'react'
 import { ChatMarkdown } from '../chat/markdown'
 import { Button } from '../components/Button'
 import { ComposerFrame } from '../components/Composer'
+import { CARD_MIME, primaryArtifact } from '../components/Outputs'
 import { GlyphCites } from '../components/RefChip'
 import { bus } from '../lib/bus'
 import { track } from '../lib/telemetry'
@@ -41,6 +43,19 @@ export function Focus({ cell, list, frame, onPick, onClose, onAskNew }: FocusPro
   const [draft, setDraft] = useState('')
   const [asked, setAsked] = useState<{ id: string; text: string } | null>(null)
   const i = list.findIndex((c) => c.id === cell.id)
+  const wide = !!primaryArtifact(cell.outputs)?.bundle?.[CARD_MIME]
+  const col = useRef<HTMLDivElement>(null)
+  const [colW, setColW] = useState(FOCUS_W)
+  useLayoutEffect(() => {
+    const el = col.current
+    if (!el || !wide) return
+    const fit = () => setColW(Math.max(FOCUS_W, el.clientWidth))
+    fit()
+    if (typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver(fit)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [wide])
   // the room the composer takes at the bottom of the stage, which the card's scroll area stops above
   const bar = useRef<HTMLDivElement>(null)
   const [barH, setBarH] = useState(0)
@@ -76,16 +91,16 @@ export function Focus({ cell, list, frame, onPick, onClose, onAskNew }: FocusPro
       </nav>
       <div className="bfocus-stage" style={{ '--bfocus-bar-h': `${barH}px` } as CSSProperties}>
         <div className="bfocus-main">
-          <div className="bfocus-col">
+          <div className={'bfocus-col' + (wide ? ' is-wide' : '')} ref={col}>
             <span className="bfocus-meta">{[thread.name, hhmm(cell.created_ts ?? cell.ts)].filter(Boolean).join(' · ')}</span>
             <GlyphCites.Provider value={true}>
-              <article className="bfocus-card" data-anchor={`card:${cell.id}`} data-anchor-text={cell.title} data-anchor-parts="">
+              <article className="bfocus-card" data-anchor={`card:${cell.id}`} data-anchor-text={cell.title} data-anchor-parts="" data-cite-home={cell.id}>
                 <div className="bfocus-q">{kind === 'label' && concept && !(ctx.concepts.has(concept) && asksQuestion(cell.title, conceptName(ctx.concepts, concept))) ? <LabelHead conceptId={concept} /> : cell.title}</div>
                 <CardLabels cell={cell} />
-                <CardBody cell={cell} width={FOCUS_W - FOCUS_PAD_X} label={label} big />
+                <CardBody cell={cell} width={(wide ? colW : FOCUS_W) - FOCUS_PAD_X} label={label} big />
                 {cell.takeaway ? (
                   <div className="bfocus-take">
-                    <div className="chat-text">
+                    <div className={'chat-text' + (cell.takeaway_stale ? ' is-stale' : '')} title={cell.takeaway_stale ? 'Written before the card ran again' : undefined}>
                       <ChatMarkdown text={cell.takeaway} />
                     </div>
                   </div>

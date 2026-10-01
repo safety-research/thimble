@@ -24,6 +24,7 @@ import contextlib
 import html
 import json
 import logging
+import os
 import re
 import signal
 import time
@@ -31,7 +32,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from . import agents, cc_channel, cc_settings, cite, config, modes, orientation, terminal_tools, threads
+from . import agents, cc_channel, cc_settings, cite, config, modes, orientation, terminal_tools, threads, userconf
 from .ledger import atomic_write_text
 
 log = logging.getLogger("thimble.session")
@@ -90,6 +91,7 @@ COMMAND_ARGS_RE = re.compile(r"<command-args>(.*?)</command-args>", re.S)
 LOCAL_CAVEAT = "<local-command-caveat>"  # the meta record before a local command's line (module note, the table)
 CONNECT_COMMANDS = ("/thimble", "/thimble:thimble")  # /thimble's command line, whose turn is not mirrored (module note)
 TASK_FIELD_RE = re.compile(r"<(task-id|tool-use-id|status|result)>(.*?)</\1>", re.S)
+HANDBACK_LEAD = "[Subagent hand-back]"  # how Claude Code's frame around a subagent's last report opens
 ASYNC_RESULT_RE = re.compile(r"^\s*Async agent launched")
 AGENT_ID_RE = re.compile(r"agentId:\s*([A-Za-z0-9_-]+)")
 TASK_DONE = ("completed", "done", "success")
@@ -112,6 +114,7 @@ WAIT_NOTE_S = 2.0  # a wait shorter than this (a prompt the analyst answered at 
 # Main's hook-relayed prompt older than this is ended while Claude Code's record says the session waits on none: the
 # analyst answered it in the terminal. A subagent's or fork's prompt is never released this way.
 ASK_RELEASE_S = 10.0
+RELAYED_IDLE_S = 10.0  # a request the channel relayed this long ago leaves the card when nothing in the session runs
 SAFETY_ALERT = ("Claude Code is waiting in your terminal: Claude's safety check stopped this answer. Choose there whether "
                 "to switch to another model and go on, or to stay on this one and stop the answer.")
 FALLBACK_SUBTYPE = "model_refusal_fallback"
@@ -338,13 +341,26 @@ def find_transcript(sid: str, config_dir: Path | None = None) -> str | None:
     """The session's transcript, `<claude config>/projects/<slug>/<sid>.jsonl`, found by its id; None until the CLI has
     written it. Tries the session's own config dir, then the served one, then this server's CLAUDE_CONFIG_DIR."""
     bases = [config_dir, config.claude_config_dir(), config.config_dir_of(config.own_claude_config())]
+    name = f"{sid}.jsonl"
     for base in dict.fromkeys(Path(b) / "projects" for b in bases if b is not None):
+        # one stat per project folder, not a read of every folder's entries, which takes seconds on the event loop
+        # while another thread computes
         try:
-            hits = sorted(base.glob(f"*/{sid}.jsonl"), key=lambda p: p.stat().st_mtime, reverse=True)
+            with os.scandir(base) as it:
+                folders = [e.path for e in it if e.is_dir()]
         except OSError:
             continue
-        if hits:
-            return str(hits[0])
+        best: tuple[float, str] | None = None
+        for folder in folders:
+            path = os.path.join(folder, name)
+            try:
+                mtime = os.stat(path).st_mtime
+            except OSError:
+                continue
+            if best is None or mtime > best[0]:
+                best = (mtime, path)
+        if best is not None:
+            return best[1]
     return None
 
 
@@ -410,15 +426,23 @@ def attach(c: str, sid: Any, cwd: Any, transcript_path: str | None = None, pid: 
     _restore_subs(lv, stored.get(SUBS_KEY), revive=restored)
     _live[c] = lv
     if not restored:
+        _modes.pop(c, None)  # a session that ended and is resumed may run in another mode than it last reported
         own = cc_settings.analyst_effort(Path(lv.cwd)) if lv.cwd else None
         meta["attached"] = {"session": sid, "cwd": lv.cwd, "since": lv.since, **({"settings_effort": own} if own else {}),
                             **({"after": after} if after else {})}
         meta["ended"] = None
         agents.write_meta(c, meta)
         agents.notify(c, agents.MAIN_ID)
-    elif "permission_mode" in held and _modes.get(c, ("",))[0] != sid:  # an earlier server's report, no longer in force
-        del held["permission_mode"]
-        agents.write_meta(c, meta)
+    elif _modes.get(c, ("",))[0] != sid:  # this server restarted under the session: main's last report, as kept
+        kept = _kept_mode(c, sid)
+        if kept:
+            _modes[c] = (sid, kept)
+        if held.get("permission_mode") != kept:
+            if kept:
+                held["permission_mode"] = kept
+            else:
+                held.pop("permission_mode", None)
+            agents.write_meta(c, meta)
     _persist(lv, keep_subs=restored or bool(lv.subs))
     _cancel_grace(c)
     _ensure_tail(lv)
@@ -430,14 +454,45 @@ def attach(c: str, sid: Any, cwd: Any, transcript_path: str | None = None, pid: 
     return lv
 
 
+def _kept_modes() -> dict[str, Any]:
+    try:
+        got = json.loads(userconf.main_modes_file().read_text("utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return got if isinstance(got, dict) else {}
+
+
+def _kept_mode(c: str, sid: str) -> str | None:
+    """The mode main's hooks last reported for session `sid` of workspace `c`, as userconf.main_modes_file keeps it
+    ({workspace: {session, mode}}); None when it keeps none for that session."""
+    rec = _kept_modes().get(c)
+    if not isinstance(rec, dict) or rec.get("session") != sid or rec.get("mode") not in modes.CLAUDE_MODES:
+        return None
+    return str(rec["mode"])
+
+
+def _keep_mode(c: str, sid: str, mode: str) -> None:
+    kept = _kept_modes()
+    if kept.get(c) == {"session": sid, "mode": mode}:
+        return
+    kept[c] = {"session": sid, "mode": mode}
+    try:
+        config.private_dir(userconf.main_modes_file().parent)
+        atomic_write_text(userconf.main_modes_file(), json.dumps(kept, indent=1))
+    except OSError as e:
+        log.warning("%s: main's permission mode was not kept in %s: %s", c, userconf.main_modes_file(), e)
+
+
 def note_mode(c: str, sid: str | None, mode: str) -> None:
     """Main's hooks report the permission mode Claude Code runs the session `sid` in: when `sid` is main, this server
-    keeps it (main_mode), the mode each agent's row follows until the analyst sets it (modes.py), and main's meta shows
-    it (`attached.permission_mode`)."""
+    keeps it (main_mode), in thimble's home too (userconf.main_modes_file) so that a restarted server under the same
+    session follows it until main reports again, the mode each agent's row follows until the analyst sets it
+    (modes.py), and main's meta shows it (`attached.permission_mode`)."""
     lv = _live.get(c)
     if lv is None or not sid or lv.sid != sid or mode not in modes.CLAUDE_MODES:
         return
     _modes[c] = (sid, mode)
+    _keep_mode(c, sid, mode)
     meta = agents.meta_or_none(c, agents.MAIN_ID) or {}
     held = meta.get("attached") or {}
     if held.get("session") == sid and held.get("permission_mode") != mode:
@@ -447,8 +502,8 @@ def note_mode(c: str, sid: str | None, mode: str) -> None:
 
 
 def main_mode(c: str) -> str | None:
-    """The permission mode main's hooks last reported to this server (note_mode), by Claude Code's name; None before
-    the first report."""
+    """The permission mode main's hooks last reported (note_mode), by Claude Code's name, to this server or, for the
+    session it restarted under, to the one before it; None before the first report."""
     lv, got = _live.get(c), _modes.get(c)
     return got[1] if lv is not None and got is not None and got[0] == lv.sid else None
 
@@ -562,6 +617,7 @@ def detach(c: str, sid: str, reason: str | None = None) -> bool:
     meta["ended"] = {"session": sid, "cwd": str(held.get("cwd") or ""), "at": _now()}
     agents.write_meta(c, meta)
     agents.notify(c, agents.MAIN_ID)
+    _channel_module().drop_relayed(c)  # the session's prompts end with it
     log.info("%s: session %s detached (%s)", c, sid, reason or "ended")
     return True
 
@@ -982,12 +1038,18 @@ def _child_finished(lv: Live, text: str) -> None:
 
 def _peer(lv: Live, *, mid_turn: bool, origin: Any = None) -> None:
     """A message another session sent main (module note), a subagent's hand-back among them: no row of its own, since
-    it is neither the analyst's line nor main's, except one from a background session of thimble's, which main's chat
-    shows as a chip naming it. On its own record it opens main's turn."""
+    it is neither the analyst's line nor main's, except a message from a background session of thimble's, which main's
+    chat shows as a chip naming it. A hand-back, and any message of a tray entry, which writes no words of its own,
+    shows nothing: the session's own chat has its end, and the harness's frame around it is not for the analyst. On its
+    own record it opens main's turn."""
     if not mid_turn:
         _open_turn(lv)
     o = origin if isinstance(origin, dict) else {}
-    name, body = str(o.get("name") or ""), " ".join(cite.prose(str(o.get("body") or "")).split())
+    raw = str(o.get("body") or "")
+    sender = str(o.get("from") or o.get("senderTaskId") or "")
+    if raw.lstrip().startswith(HANDBACK_LEAD) or (sender and _bg().proxy_of(lv.c, sender, None) is not None):
+        return
+    name, body = str(o.get("name") or ""), " ".join(cite.prose(raw).split())
     e = _bg().by_origin(lv.c, name) if name.startswith("thimble") else None
     if e is not None and body:
         with contextlib.suppress(Exception):
@@ -1381,6 +1443,8 @@ def _tail_sub(lv: Live, sub: Sub) -> int:
         sub.on_results(done)
     if done and sub.agent_id and sub.agent_id in _channel_module().asking(lv.c):
         _channel_module().calls_done(lv.c, sub.agent_id, done)
+    if done:
+        _channel_module().relayed_done(lv.c, done)  # a prompt the channel relayed, answered in the terminal
     return n
 
 
@@ -1845,6 +1909,7 @@ def tail_once(lv: Live) -> None:
             _finish_sub(lv, sub, *sub.finish)
     _save_cursor(lv)  # the subagents' places, and the runs that ended
     _watch_wait(lv)
+    _settle_relayed(lv)
 
 
 def _sessions_dir(config_dir: Path | None = None) -> Path:
@@ -1915,9 +1980,20 @@ def _watch_wait(lv: Live) -> None:
     _note(lv, f"{WAITING_TEXT}: {detail}" if detail else WAITING_TEXT)
 
 
+def _settle_relayed(lv: Live) -> None:
+    """Drop the requests the channel relayed at least RELAYED_IDLE_S ago once nothing in the session can still be asking
+    them: no turn is open, no subagent runs and Claude Code's own record shows no prompt. The age covers a prompt whose
+    turn the tail has not read yet."""
+    channel = _channel_module()
+    if lv.busy or not channel.relaying(lv.c) or session_state(lv).get("status") == "waiting":
+        return
+    channel.drop_relayed(lv.c, RELAYED_IDLE_S)
+
+
 def _asked(lv: Live, waiting: bool) -> bool:
-    """While the session waits on a permission prompt: whether the shim relayed it (main's meta holds it). Once the
-    session no longer waits on one, a relayed request left on main's meta (answered in the terminal) is dropped."""
+    """While the session waits on a permission prompt: whether main's meta holds a relayed request. Once the session no
+    longer waits on one, main's own hook-relayed requests are dropped (channel.clear_permissions); those of its agents
+    and those the channel relayed stay."""
     meta = agents.meta_or_none(lv.c, agents.MAIN_ID) or {}
     pending = bool(meta.get("permissions"))
     if not waiting and pending:
@@ -1979,6 +2055,7 @@ def _tail_main(lv: Live) -> None:
     done = _results_in(lv.call_keys, lines)
     if done:
         _channel_module().calls_done(lv.c, None, done)  # main's own prompts answered in the terminal
+        _channel_module().relayed_done(lv.c, done)
 
 
 def _degrade(lv: Live, err: Exception) -> None:

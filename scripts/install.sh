@@ -12,6 +12,8 @@
 # Without a terminal install.sh refuses to run while a question it would ask has no flag, except the browser question
 # when a system Chrome or Edge is found: that browser is then used and nothing is downloaded.
 # --dry-run prints the questions with the flag for each answer, which is how Claude asks them when it runs the install.
+# Another install's plugin registration (a marketplace added from another folder) and a ~/.local/bin/thimble linked into
+# another install are never changed unasked: install.sh names that install, and only on a terminal asks to switch them.
 # Re-running it (after `git pull`, over a newer release, or to answer a question again with its flag) skips the steps that
 # are done: the same release is not copied again, pinned packages already installed are kept, and the browser is fetched
 # only on a yes and only when the build thimble's Playwright needs is missing.
@@ -58,6 +60,7 @@
 #                            and the writers run as Claude Code background agents, which start only in a trusted folder.
 #                            --no-trust-workspaces answers no, and takes back what an earlier yes added
 #   --dry-run                print what it installs, its questions and every step and command; change nothing
+# THIMBLE_BIN_DIR, when set, is the folder the `thimble` link goes into in place of ~/.local/bin.
 set -euo pipefail
 
 usage()  { sed -n '2,/^set -euo/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//'; }
@@ -74,6 +77,7 @@ json_get() {  # json_get FILE KEY — a top-level string value (python3 when pre
 parse_args() {
   src="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
   home="${THIMBLE_HOME:-$HOME/.thimble}"
+  bin_dir="${THIMBLE_BIN_DIR:-$HOME/.local/bin}"
   dir="" mp_name="" dev=0 deps_only=0 plugin="" dry=0 trust="" byo="" browser="" sandbox_deps="" require_pinned=0
   while [ $# -gt 0 ]; do
     case "$1" in
@@ -261,7 +265,7 @@ copy_tree() {  # a release install: the release's entries replace the install's;
   fi
   say "copying the release into $dir (kept there if present: backend/.venv, frontend/node_modules, workspaces/, data/, dev/)"
   run mkdir -p "$dir"
-  for entry in plugin backend prompts frontend .claude-plugin scripts README.md INSTALL.md docs LICENSE THIRD_PARTY_NOTICES RELEASE.json; do
+  for entry in plugin extensions backend prompts frontend .claude-plugin scripts README.md INSTALL.md docs LICENSE THIRD_PARTY_NOTICES RELEASE.json; do
     [ -e "$src/$entry" ] || continue
     keep=""; case "$entry" in backend) keep=.venv;; frontend) keep=node_modules;; esac
     say "+ replace $dir/$entry${keep:+/* except $keep}"
@@ -817,18 +821,18 @@ write_pointer() {  # $THIMBLE_HOME/app-dir: how the plugin copy in Claude Code's
 }
 
 link_cli() {  # ~/.local/bin/thimble → <tree>/plugin/bin/thimble, so `thimble` is a command once that folder is on PATH (finish
-  # says whether it is); a `thimble` there that is not a symlink into a thimble tree (another program) is left alone
+  # says whether it is). What cli_plan found there decides: a link into another install stays unless a yes switched it,
+  # and anything else that is not a link into a thimble tree (another program) is left alone
   step "8/12 thimble on PATH"
-  local bin="$HOME/.local/bin" target="$dir/plugin/bin/thimble" existing=""
-  cli_link="$bin/thimble"; cli_linked=0
-  if [ -L "$cli_link" ]; then existing="$(readlink "$cli_link")"; fi
-  if { [ -e "$cli_link" ] || [ -L "$cli_link" ]; } && [ -z "$existing" ]; then
-    say "$cli_link exists and is not a link into a thimble tree; left alone — the command stays at $target"
-    return 0
-  fi
-  case "$existing" in "" | */plugin/bin/thimble) ;; *)
-    say "$cli_link is a link to $existing, not into a thimble tree; left alone — the command stays at $target"
-    return 0;;
+  local bin="$bin_dir" target="$dir/plugin/bin/thimble"
+  cli_linked=0
+  case "$cli_state" in
+    foreign)
+      say "$cli_link exists and is not a link into a thimble tree; left alone — the command stays at $target"
+      return 0;;
+    other)
+      if [ "$cli_switch" != yes ]; then cli_switch_line; return 0; fi;;
+    gone) say "$cli_link was a link into $cli_other, which is gone; it now runs this install";;
   esac
   # the link is a convenience: when ~/.local/bin cannot be written the install still succeeds, and the command stays in the tree
   { run mkdir -p "$bin" && run ln -sfn "$target" "$cli_link"; } || { say "could not create $cli_link; the command stays at $target"; return 0; }
@@ -845,16 +849,88 @@ marketplace_name() {  # mp_name: the name Claude Code registers the tree under �
   mp_name="${mp_name:-$mp_file_name}"
 }
 
-plugin_record() {  # the earlier answer to the plugin question: $home/plugin.json holds it and the marketplace install.sh
-  # registered thimble under ("" when none). Without the record, a thimble@<marketplace> that Claude Code lists was
-  # registered by an install that did not ask, which counts as an earlier yes
-  plugin_prev="" plugin_reg=""
-  if [ -f "$home/plugin.json" ]; then
-    plugin_prev="$(json_get "$home/plugin.json" answer)"; plugin_reg="$(json_get "$home/plugin.json" registered)"
-  elif [ "$have_claude" = 1 ]; then
-    case "$(claude plugin list --json 2>/dev/null || true)" in *"\"thimble@$mp_name\""*) plugin_prev=yes plugin_reg="$mp_name";; esac
+plugin_regs() {  # the thimble plugins Claude Code lists, a line each: ours or other, the marketplace, and the folder that
+  # marketplace was added from (else what its source is). Only a marketplace added from this install's folder is ours.
+  # Fails when the lists can't be read
+  [ "$have_claude" = 1 ] && command -v python3 >/dev/null 2>&1 || return 1
+  claude plugin list --json > "$tmp/plugins.json" 2>/dev/null || return 1
+  claude plugin marketplace list --json > "$tmp/markets.json" 2>/dev/null || return 1
+  python3 -I - "$tmp/plugins.json" "$tmp/markets.json" "$dir" <<'PY'
+import json, os, sys
+
+
+def rows(path):
+    data = json.load(open(path, encoding="utf-8"))
+    if not isinstance(data, list):
+        raise SystemExit(1)
+    return [r for r in data if isinstance(r, dict)]
+
+
+plugins, markets = rows(sys.argv[1]), rows(sys.argv[2])
+where = {}
+for m in markets:
+    src = m.get("source")
+    kind, path = (src.get("source"), src.get("path")) if isinstance(src, dict) else (src, m.get("path"))
+    if kind == "directory" and isinstance(path, str) and path:
+        where[m.get("name")] = os.path.realpath(path)
+    else:
+        where[m.get("name")] = " ".join(str(v) for v in (kind, m.get("repo") or m.get("url")) if v) or "an unknown source"
+mine = os.path.realpath(sys.argv[3])
+for p in plugins:
+    name, _, market = str(p.get("id", "")).partition("@")
+    if name == "thimble" and market:
+        w = where.get(market, "a marketplace Claude Code does not list")
+        print("ours" if w == mine else "other", market, w, sep="\t")
+PY
+}
+
+plugin_record() {  # the earlier answer to the plugin question ($home/plugin.json) and the thimble plugins Claude Code has:
+  # plugin_reg, the marketplace of the one added from this install's folder, the only registration install.sh changes
+  # unasked; other_reg and other_from, one added from anywhere else, which is another install's. Without the record,
+  # this install's own registration counts as an earlier yes. When Claude Code's lists can't be read, plugin_kept is the
+  # registration the record names, which is then left as it is
+  plugin_prev="" plugin_reg="" plugin_kept="" plugin_switch="" other_reg="" other_from=""
+  local regs kind m w
+  [ ! -f "$home/plugin.json" ] || plugin_prev="$(json_get "$home/plugin.json" answer)"
+  if regs="$(plugin_regs)"; then
+    while IFS=$'\t' read -r kind m w; do
+      if [ "$kind" = ours ]; then plugin_reg="$m"
+      elif [ "$kind" = other ] && [ -z "$other_reg" ]; then other_reg="$m" other_from="$w"; fi
+    done <<< "$regs"
+    [ -f "$home/plugin.json" ] || [ -z "$plugin_reg" ] || plugin_prev=yes
+  elif [ -f "$home/plugin.json" ]; then
+    plugin_kept="$(json_get "$home/plugin.json" registered)"
   fi
 }
+
+other_plugin() {  # the line naming another install's thimble plugin
+  printf '%s\n' "Claude Code's thimble plugin is another install's: thimble@$other_reg, from $other_from."
+}
+
+cli_plan() {  # what ~/.local/bin/thimble is now (cli_state): new (nothing there), ours (a link to this install's command),
+  # gone (a link into a thimble tree that is no longer there), other (a link into another thimble install, cli_other) or
+  # foreign (anything else). It is replaced when new, ours or gone, and when other only on a yes asked on a terminal
+  cli_link="$bin_dir/thimble" cli_other="" cli_switch=""
+  local target="$dir/plugin/bin/thimble" existing=""
+  [ ! -L "$cli_link" ] || existing="$(readlink "$cli_link")"
+  if [ ! -e "$cli_link" ] && [ ! -L "$cli_link" ]; then cli_state=new
+  elif [ -z "$existing" ]; then cli_state=foreign
+  elif [ "$existing" = "$target" ] || [ "$cli_link" -ef "$target" ]; then cli_state=ours
+  else
+    case "$existing" in
+      */plugin/bin/thimble)
+        case "$existing" in /*) cli_other="${existing%/plugin/bin/thimble}";; *) cli_other="$bin_dir/${existing%/plugin/bin/thimble}";; esac
+        if [ -e "$cli_link" ]; then cli_state=other; else cli_state=gone; fi;;
+      *) cli_state=foreign;;
+    esac
+  fi
+}
+
+cli_switch_line() {  # the line saying ~/.local/bin/thimble runs another install, with the command that would switch it
+  printf '%s\n' "$cli_link runs the thimble install in $cli_other, so it is left as it is. To make \`thimble\` run this install: ln -sfn $(printf '%q' "$dir/plugin/bin/thimble") $(printf '%q' "$cli_link")"
+}
+
+asks() { [ "$dry" = 0 ] && [ -t 0 ]; }  # questions are asked on a terminal
 
 yes_no() {  # yes_no DEFAULT: read an answer from the terminal; 0 for yes, DEFAULT (y or n) for an empty one
   local ans; read -r ans || ans=""
@@ -877,7 +953,9 @@ show_plan() {  # what the install puts where, before its questions
     say "  the frontend's packages custom views and the sandbox for card code and code tickets (Anthropic's sandbox runtime) need: $dir/frontend/node_modules$( [ "$has_dist" = 1 ] || echo ', and the UI built into frontend/dist' )"
   fi
   say "  thimble's settings and state: $home"
-  [ "$deps_only" = 1 ] || say "  the \`thimble\` command: a link at ~/.local/bin/thimble"
+  if [ "$cli_state" = other ]; then
+    say "  the \`thimble\` command: ~/.local/bin/thimble runs another install ($cli_other); $(asks && echo 'install.sh asks before switching it' || echo 'it stays as it is')"
+  elif [ "$deps_only" = 0 ]; then say "  the \`thimble\` command: a link at ~/.local/bin/thimble"; fi
   local chosen="${browser:-$browser_was}" asked=()
   case "$chosen" in
     system) [ -z "$sys_path" ] || say "  a browser for screenshots: $sys_name at $sys_path, nothing downloaded";;
@@ -890,7 +968,11 @@ show_plan() {  # what the install puts where, before its questions
     elif [ -z "$sandbox_deps" ]; then asked+=("the sandbox's system packages: $sb_need"); fi
   fi
   if [ "$deps_only" = 0 ]; then
-    if [ "${plugin:-$plugin_prev}" = yes ]; then say "  thimble's plugin in every Claude Code session: $(cc_path settings.json) and $(cc_path plugins)"
+    if [ -n "$other_reg" ] && [ -z "$plugin_reg" ]; then
+      say "  $(other_plugin) $( [ "${plugin:-$plugin_prev}" != no ] && asks && echo 'On a yes install.sh asks before switching it to this install.' || echo 'It stays as it is.')"
+    fi
+    if [ "${plugin:-$plugin_prev}" = yes ] && [ -n "$other_reg" ] && [ -z "$plugin_reg" ]; then :
+    elif [ "${plugin:-$plugin_prev}" = yes ]; then say "  thimble's plugin in every Claude Code session: $(cc_path settings.json) and $(cc_path plugins)"
     elif [ -z "$plugin$plugin_prev" ] && [ "$have_claude" = 1 ]; then asked+=("thimble's plugin in every Claude Code session: $(cc_path settings.json) and $(cc_path plugins)"); fi
     if [ "$trust" = --yes ]; then say "  Claude Code's trust of thimble's workspaces folder: $cc_json"
     elif [ -z "$trust" ] && [ -n "$trust_q" ]; then asked+=("Claude Code's trust of thimble's workspaces folder: $cc_json"); fi
@@ -929,6 +1011,7 @@ earlier_answers() {  # what settles each question before it is asked: the browse
   # install, and the trust question when one is due; for each question that is not asked, why, naming the folder
   # (browser_skip, plugin_skip, trust_skip)
   browser_was="$(browser_prev)" browser_skip="" plugin_prev="" plugin_reg="" plugin_skip="" trust_skip=""
+  plugin_kept="" plugin_switch="" other_reg="" other_from="" cli_state="" cli_other="" cli_switch=""
   if [ -n "$browser_was" ]; then
     if [ -f "$home/config.json" ] && [ "$(json_get "$home/config.json" browser 2>/dev/null)" = "$browser_was" ]; then
       browser_skip="answered $browser_was at your earlier install ($home/config.json); --browser changes it"
@@ -936,12 +1019,12 @@ earlier_answers() {  # what settles each question before it is asked: the browse
       browser_skip="bundled, since your earlier install in $dir downloaded Playwright's headless Chromium; --browser changes it"
     fi
   fi
-  [ "$deps_only" = 1 ] || plugin_record
+  [ "$deps_only" = 1 ] || { plugin_record; cli_plan; }
   if [ -n "$plugin_prev" ]; then
     local other=--no-plugin
     [ "$plugin_prev" = yes ] || other=--plugin
     if [ -f "$home/plugin.json" ]; then plugin_skip="answered $plugin_prev at your earlier install ($home/plugin.json); $other changes it"
-    else plugin_skip="yes, since Claude Code has thimble@$mp_name registered already ($(cc_path plugins)); --no-plugin changes it"; fi
+    else plugin_skip="yes, since Claude Code has thimble@$plugin_reg registered from $dir already ($(cc_path plugins)); --no-plugin changes it"; fi
   fi
   trust_q=""  # the trust question when claude_changes.install_trust would ask it (python3 runs the file before
   # backend/.venv exists; without python3 the trust step asks it)
@@ -979,10 +1062,14 @@ ask() {  # the questions, before anything is installed: the browser, the sandbox
     elif [ -n "$plugin_prev" ]; then say "3. the plugin: $plugin_skip"
     elif [ "$have_claude" = 0 ]; then say "3. the plugin: not asked, since there is no claude CLI"
     else say "3. $(plugin_text)"; say "   - yes: --plugin"; say "   - no: --no-plugin"; fi
+    if [ -n "$other_reg" ] && [ -z "$plugin_reg" ]; then
+      say "   $(other_plugin) It stays as it is unless you agree, on a terminal, to switch it to this install."
+    fi
     if [ -n "$trust" ]; then say "4. the trust: answered by --$( [ "$trust" = --yes ] || echo 'no-' )trust-workspaces"
     elif [ -n "$trust_q" ]; then item 4 "$trust_q"; say "   - yes: --trust-workspaces"; say "   - no: --no-trust-workspaces"
     elif [ -n "$trust_skip" ]; then say "4. the trust: $trust_skip"
     else say "4. the trust: asked at the trust step; --trust-workspaces or --no-trust-workspaces answers it"; fi
+    [ "$cli_state" != other ] || say "5. the \`thimble\` command: ~/.local/bin/thimble runs the install in $cli_other. It stays as it is unless you agree, on a terminal, to switch it to this install."
     return 0
   fi
   [ -t 0 ] && tty=1
@@ -1020,9 +1107,17 @@ $again"
     printf '\n%s [y/N] ' "$(plugin_text)"
     if yes_no n; then plugin=yes; else plugin=no; fi
   fi
+  if [ "${plugin:-$plugin_prev}" = yes ] && [ -n "$other_reg" ] && [ -z "$plugin_reg" ]; then
+    printf '\n%s Switch it to this install? [y/N] ' "$(other_plugin)"
+    if yes_no n; then plugin_switch=yes; fi
+  fi
   if [ -n "$trust_q" ]; then
     printf '\n%s [y/N] ' "$trust_q"
     if yes_no n; then trust=--yes; else trust=--no; fi
+  fi
+  if [ "$cli_state" = other ]; then
+    printf '\n~/.local/bin/thimble runs the thimble install in %s. Make `thimble` run this install instead? [y/N] ' "$cli_other"
+    if yes_no n; then cli_switch=yes; fi
   fi
 }
 
@@ -1040,11 +1135,28 @@ register_plugin() {  # the plugin question's answer: yes registers the tree as a
     if [ -f "$home/plugin.json" ]; then say "answered $answer at an earlier install; install.sh --plugin or --no-plugin changes it"
     else say "registered by an earlier install; kept (install.sh --no-plugin takes it back)"; fi
   fi
+  if [ -n "$other_reg" ] && [ "$plugin_switch" != yes ]; then
+    say "$(other_plugin) It is left as it is."
+    if [ "$answer" = yes ] && [ -z "$plugin_reg" ]; then
+      say "So this install's plugin is not added beside it. To switch to this install, run claude plugin uninstall thimble@$other_reg && claude plugin marketplace remove $other_reg, then this install.sh again"
+      plugin_write yes ""
+      return 0
+    fi
+  fi
   if [ "$answer" = yes ] && [ "$have_claude" = 1 ] && [ "$plugin_reg" = "$mp_name" ] && [ "$(plugin_listed)" = "$version" ]; then
     say "thimble@$mp_name $version is registered already: nothing to do"
     return 0
   fi
   if [ "$answer" = yes ] && [ "$have_claude" = 1 ]; then
+    if [ -n "$plugin_reg" ] && [ "$plugin_reg" != "$mp_name" ]; then  # this folder, registered under another name
+      { run claude plugin uninstall "thimble@$plugin_reg" && run claude plugin marketplace remove "$plugin_reg"; } \
+        || say "(thimble@$plugin_reg, which an earlier install registered, is still there: claude plugin uninstall thimble@$plugin_reg && claude plugin marketplace remove $plugin_reg takes it back)"
+    fi
+    if [ "$plugin_switch" = yes ] && ! { run claude plugin uninstall "thimble@$other_reg" && run claude plugin marketplace remove "$other_reg"; }; then
+      say "(thimble@$other_reg, from $other_from, could not be taken out, so this install's plugin is not added beside it)"
+      plugin_write yes ""
+      return 0
+    fi
     run claude plugin marketplace add "$dir" || die "could not register $dir as marketplace \"$mp_name\". A marketplace of that name may point elsewhere: \`claude plugin marketplace list\`, then \`claude plugin marketplace remove $mp_name\` or re-run with --marketplace-name <other>"
     run claude plugin marketplace update "$mp_name" || say "(marketplace update failed; continuing)"
     run claude plugin install --scope user "thimble@$mp_name" || die "claude plugin install thimble@$mp_name failed"
@@ -1064,11 +1176,9 @@ register_plugin() {  # the plugin question's answer: yes registers the tree as a
     say "not asked ($why), so not registered: the \`thimble\` command loads the plugin for its own sessions. install.sh --plugin adds it to every session, --no-plugin records a no"
     return 0
   fi
-  if [ -n "$plugin_reg" ]; then
-    left="$plugin_reg"
-    if [ "$have_claude" = 1 ] && run claude plugin uninstall "thimble@$plugin_reg" && run claude plugin marketplace remove "$plugin_reg"; then left=""
-    else say "(the registration an earlier yes added is still there: claude plugin uninstall thimble@$plugin_reg && claude plugin marketplace remove $plugin_reg takes it back)"; fi
-  fi
+  left="${plugin_reg:-$plugin_kept}"
+  if [ -n "$plugin_reg" ] && run claude plugin uninstall "thimble@$plugin_reg" && run claude plugin marketplace remove "$plugin_reg"; then left=""; fi
+  [ -z "$left" ] || say "(the registration an earlier yes added is still there: claude plugin uninstall thimble@$left && claude plugin marketplace remove $left takes it back)"
   plugin_write no "$left"
   say "not registered: the \`thimble\` command loads the plugin for its own sessions. install.sh --plugin adds it to every session"
 }
@@ -1096,22 +1206,31 @@ trust_workspaces() {  # the one entry thimble writes into Claude Code's global c
 }
 
 path_has_local_bin() {  # $HOME/.local/bin (or ~/.local/bin) as a PATH entry, a trailing slash on the entry allowed
-  case ":$(printf '%s' "$PATH" | sed 's#/*:#:#g; s#/*$##'):" in *":$HOME/.local/bin:"* | *":~/.local/bin:"*) return 0;; esac; return 1
+  case ":$(printf '%s' "$PATH" | sed 's#/*:#:#g; s#/*$##'):" in *":$bin_dir:"* | *":~/.local/bin:"*) return 0;; esac; return 1
 }
 
 finish() {  # doctor, then the one next step (and the PATH line the link needs)
   step "11/12 thimble doctor"
   run "$dir/plugin/bin/thimble" doctor || say "(doctor exited non-zero; see above)"
   step "12/12 next"
-  local cmd="$dir/plugin/bin/thimble" rc
+  local cmd="$dir/plugin/bin/thimble" rc pid repo
+  # a server started from another tree keeps running that tree's code until it is restarted
+  if [ "$dry" = 0 ] && [ -f "$home/server.json" ]; then
+    pid="$(sed -n 's/.*"pid": *\([0-9][0-9]*\).*/\1/p' "$home/server.json" | head -n 1)"
+    repo="$(json_get "$home/server.json" repo)"
+    if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null && [ -n "$repo" ] && [ "$repo" != "$dir" ]; then
+      say "the thimble server (pid $pid) is running the install in $repo: restart it with: thimble server restart"
+    fi
+  fi
   if [ "$cli_linked" = 1 ]; then
+    local shown_bin="${bin_dir/#$HOME/\~}"
     if path_has_local_bin; then
-      say "thimble on PATH: ~/.local/bin/thimble"
+      say "thimble on PATH: $shown_bin/thimble"
       cmd=thimble
     else
       case "${SHELL:-}" in */zsh) rc='~/.zshrc';; */bash) rc='~/.bashrc';; *) rc="your shell's startup file";; esac
-      say "~/.local/bin is not on your PATH, so typing thimble will not work yet. Add this line to $rc and open a new terminal:"
-      say '  export PATH="$HOME/.local/bin:$PATH"'
+      say "$shown_bin is not on your PATH, so typing thimble will not work yet. Add this line to $rc and open a new terminal:"
+      say "  export PATH=\"${bin_dir/#$HOME/\$HOME}:\$PATH\""
     fi
   fi
   if [ "$custom_home" = 1 ]; then

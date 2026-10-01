@@ -33,6 +33,7 @@ What each link resolves to
 
 Its code
 {{code}}
+{{typed}}{{kept}}
 
 The work that led to the card, most recent last
 {{context}}
@@ -40,6 +41,14 @@ The work that led to the card, most recent last
 ## none
 
 None.
+
+## typed
+
+The card draws the `{{type}}` card type with thimble.card, and the picture shows it at full width. A replacement draws the same type: change the call's arguments, never the kind of card.
+
+## kept
+
+The analyst reshaped this card in its graphic and pressed Keep, which set {{kept}} in its thimble.card call. These are the analyst's choice, so give them back as they are, and make the question and the takeaway fit the records they draw.
 
 ## critique
 

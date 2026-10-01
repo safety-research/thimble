@@ -59,7 +59,7 @@ class HandoffServer(uvicorn.Server):
 def main(argv: list[str]) -> None:
     app = argv[1] if len(argv) > 1 else "app.main:app"
     ctl = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM, 0, 0)
-    HandoffServer(uvicorn.Config(app, timeout_graceful_shutdown=3), ctl).run()
+    HandoffServer(uvicorn.Config(app, loop="asyncio", timeout_graceful_shutdown=3), ctl).run()  # cli.SERVER_LOOP
 
 
 if __name__ == "__main__":

@@ -70,11 +70,12 @@ if os.environ.get("THIMBLE_ACCESS_LOG", "").strip().lower() != "all":
 
 ROUTER_MODULES = [
     # storage and the corpus
-    "corpus", "ledger", "investigation", "notebook", "concepts", "views",
+    "corpus", "transcripts", "pdfs", "ledger", "investigation", "notebook", "concepts", "views", "cardtypes",
+    "extensions",
     # the agent engine (main, threads, background agents) and the tools they call
     "agents", "tools", "jobs", "verify",
     # documents, and the report checks that comment on them (their runs shut down with the server)
-    "report_types", "checks",
+    "report_types", "exports", "checks",
     # the developer agent, telemetry, the workspace export, the problem report
     "dev", "telemetry", "export", "feedback_routes",
     # undo and redo over the workspace's cards and documents
@@ -84,6 +85,8 @@ ROUTER_MODULES = [
     # the Claude Code sessions thimble starts beside main, the orientation's and each writer's: their permission
     # requests (shut down with the server), and the orientation's calls, stored whole and citable
     "agent_session", "calls", "orient_session",
+    # the programs an extension runs a role with (an Agent SDK program or a command), and their sessions
+    "harness",
     # the orientation's, its critic's and the writers' Claude Code background sessions, and their tray entries
     "bg_session",
     # the card harness (a headless Chromium that draws every card offscreen) and the card check that reads it, and
@@ -91,6 +94,8 @@ ROUTER_MODULES = [
     "render", "card_check", "checkstore",
     # the review of a built view's pictures, which sends what it finds back to the view's build session
     "view_review",
+    # whether the product tour was offered on this install's first launch
+    "tour",
 ]
 
 # The backend binds to 127.0.0.1, but a DNS-rebinding page can still reach it as same-origin unless the Host
@@ -223,9 +228,18 @@ async def _lifespan(app: FastAPI):
         st = cli.read_state()
         if st and not st.get("token"):  # a record an older supervisor wrote: the hooks' token (hook_auth.py)
             cli.write_state(st)
+        hook_auth.ensure_session_key()
         config.private_dir(config.WORKSPACES_DIR)
     except Exception:
         log.exception("making thimble's home and workspaces private failed")
+    # the extensions thimble ships added: those it ships on, on its first run (extensions.ship)
+    try:
+        from . import extensions
+
+        for name in extensions.ship():
+            log.info("extension %s added, renamed or updated from thimble's own", name)
+    except Exception:
+        log.exception("adding the extensions thimble ships failed")
     # the records an install tree's data/ holds are brought into the registry once (config.migrate_registry)
     try:
         config.migrate_registry()
@@ -246,8 +260,19 @@ async def _lifespan(app: FastAPI):
             shutil.rmtree(old, ignore_errors=True)
     except Exception:
         log.exception("removing what an older thimble left failed")
+    # the views an older thimble kept in a workspace's views/ moved into its local extension, once
+    try:
+        from . import views
+
+        views.migrate_workspaces()
+    except Exception:
+        log.exception("moving the workspaces' views into their local extensions failed")
     await _startup()
+    from . import loop_watch
+
+    loop_watch.start(asyncio.get_running_loop())
     yield
+    loop_watch.stop()
     # shutdown: modules that own subprocesses expose `shutdown()`, so a restart never leaves an orphan running
     for name in ROUTER_MODULES:
         fn = getattr(sys.modules.get(f"app.{name}"), "shutdown", None)
@@ -332,9 +357,11 @@ def create_app() -> FastAPI:
     install = {"home": str(cli.home().expanduser().resolve()), "app": str(Path(config.REPO_ROOT).resolve())}
 
     @app.get("/api/health")
-    def health() -> dict:
+    async def health() -> dict:
         # `leader` lets `server up`/`stop` find a server whose record was lost, `ui` lets an open tab tell it is stale,
-        # and `home`/`app` let another install's `server up` on the same port refuse it
+        # and `home`/`app` let another install's `server up` on the same port refuse it. Answered on the event loop, not
+        # in a worker thread, which can wait behind threads that compute: the supervisor and the plugin give a health
+        # call 1 to 2 s (cli.HEALTH_TIMEOUT_S) before they take the server for one that is starting or gone.
         return {"ok": True, "leader": os.getsid(0), "boot": config.BOOT_ID, "ui": ui_build(), **install}
 
     @app.post("/api/ui/key")

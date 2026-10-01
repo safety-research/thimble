@@ -75,6 +75,8 @@ export const VIEW_TOKENS = [
   '--radius-card',
   '--transition-color',
   '--accent-soft',
+  '--hl-bg',
+  '--hl-bg-strong',
   '--border-hairline',
   '--border-strong',
   '--bg-panel',

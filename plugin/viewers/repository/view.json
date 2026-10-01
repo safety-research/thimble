@@ -1,16 +1,52 @@
 {
   "name": "Repository",
-  "why": "Several agent runs on one small library, read as a code forge shows them: any run or runs chosen, pull requests with their commits, diffs and reviews, issues, discussions and agents, each run's measures side by side, so the runs' setups can be compared issue by issue and a pull request's whole story is one click away.",
-  "data": "One folder per run, runs/<run>/, matched by runs/*.json, runs/*.jsonl and runs/*.csv: manifest.json (the run's agents, the approvals a merge needs and its brief), events.jsonl (the forge's events: issues, pull requests, pushes with their diffs, reviews, comments, merges, closes and reopens), board.jsonl (the discussion) and agents/<name>.jsonl (each agent's transcript, whose last message is its sign-off note). r3's forge data is an export instead: export/issues.csv, pulls.csv (a row per pull request, with its merge or close), commits.csv (each commit's patch in a cell over several lines), comments.csv and reviews.json. Every run works the same backlog, so issue numbers and titles match across runs. The reader cleans: manifest keys that differ by run; r4's events in a later schema with renamed fields, a push's diff among them; times in ISO 8601 with or without an offset, epoch milliseconds, and local time in the manifest's timezone; redelivered events (a repeated id); events logged out of order; a cut-off last line, reported with any other line that does not parse; a table cell over several lines; an agent the manifest lists with no transcript; numbers written as free text; a pull request with no area label; a review with no reviewer; a post with no time; a force-push; and a reopened pull request. The reader's opening comment names every field.",
-  "claims": ["runs/*.json", "runs/*.jsonl", "runs/*.csv"],
-  "accepts": [{"form": "L<n>", "means": "the record on line <n> of a run's file, shown in its pull request, issue, discussion or agent; a manifest's line opens its run"}],
-  "declares": [
+  "description": "Several agent runs on one small library, read as a code forge shows them: any runs picked or compared issue by issue, pull requests, issues, discussions and agents in tabs filtered on every field, and a pull request's whole story with its commits, diffs, reviews and the file of each entry.",
+  "scope": ["runs/*.json", "runs/*.jsonl", "runs/*.csv"],
+  "records": [
+    {"name": "event", "one": "one opening, push, review, comment, merge, close, reopen, post or sign-off", "fields": [
+      {"name": "at", "type": "time", "derived": "cleaned", "from": "ts, time, created_at, committed_at or submitted_at", "how": "in UTC, a time without an offset in the run's timezone"},
+      {"name": "hours", "type": "number", "derived": "cleaned", "from": "at", "how": "hours since the run started"},
+      {"name": "kind", "type": "category", "derived": "cleaned", "from": "type or event, else the export table", "how": "push read as commit, pr.merged as merge and so on"},
+      {"name": "action", "type": "category", "derived": "cleaned", "from": "kind, and a review's verdict", "how": "opened, pushed, merged and so on, a review by its verdict"},
+      {"name": "verdict", "type": "category", "derived": "cleaned", "from": "a review's state", "how": "in lower case, changes_requested as changes requested"}
+    ]},
+    {"name": "pull request", "one": "one pull request of a run, with its records", "fields": [
+      {"name": "state", "type": "category", "derived": "computed", "from": "its merge, close and reopen records", "how": "open, merged or closed"},
+      {"name": "area", "type": "category", "derived": "computed", "from": "labels or area, else the issue it fixes", "how": "the first label, else the issue's area"},
+      {"name": "closes", "type": "number", "derived": "cleaned", "from": "fixes, closes or linked_issue", "how": "the first number in free text"},
+      {"name": "to_merge", "type": "number", "derived": "computed", "from": "its opening and its merge", "how": "hours between them"},
+      {"name": "first_review", "type": "number", "derived": "computed", "from": "its opening and its first review", "how": "hours between them"},
+      {"name": "flags", "type": "list", "derived": "computed", "from": "its merge, reviews and pushes", "how": "merged by its author, merged over a change request, pushed after its last approval, or waiting for approvals"}
+    ]},
+    {"name": "issue", "one": "one issue of a run, with its records", "fields": [
+      {"name": "state", "type": "category", "derived": "computed", "from": "its close records and the pull requests that fix it", "how": "fixed once a pull request that fixes it merged"},
+      {"name": "area", "type": "category", "derived": "cleaned", "from": "labels or area", "how": "the first label"},
+      {"name": "origin", "type": "category", "derived": "computed", "from": "its opening and the run's start", "how": "backlog when opened before the run started, else found during the run"},
+      {"name": "fixed_by", "type": "number", "derived": "computed", "from": "the pull requests' closes", "how": "the merged pull request that fixes it"},
+      {"name": "prs", "type": "list", "derived": "computed", "from": "the pull requests' closes", "how": "the pull requests that fix it"},
+      {"name": "to_fix", "type": "number", "derived": "computed", "from": "its opening and the merge that fixed it", "how": "hours between them"},
+      {"name": "elsewhere", "type": "list", "derived": "computed", "from": "the issue's number and title", "how": "the same issue in each other run"}
+    ]},
+    {"name": "discussion", "one": "one thread of the board", "fields": [
+      {"name": "mentions", "type": "list", "derived": "cleaned", "from": "the posts' bodies", "how": "the #<n> numbers they name"}
+    ]},
+    {"name": "agent", "one": "one agent of a run", "fields": [
+      {"name": "partners", "type": "list", "derived": "computed", "from": "the reviews it gave", "how": "its approvals and change requests per author"}
+    ]},
+    {"name": "run", "one": "one run's folder", "fields": [
+      {"name": "started", "type": "time", "derived": "cleaned", "from": "the manifest's started, else the first record", "how": "in UTC"},
+      {"name": "hours", "type": "number", "derived": "computed", "from": "its records' times", "how": "hours from its start to its last record"},
+      {"name": "approvals", "type": "number", "derived": "cleaned", "from": "approvals, required_approvals or policy.approvals", "how": "the first number in free text"}
+    ]}
+  ],
+  "accepts": [
+    {"form": "L<n>", "means": "the record on line <n> of a run's file, shown in its pull request, issue, discussion or agent, or a manifest's line, which opens its run"}
+  ],
+  "units": [
     {"form": "<run>", "means": "one run: its measures, with the view narrowed to it"},
     {"form": "<run>/pull/<n>", "means": "one pull request with its commits, reviews, comments and merge or close"},
     {"form": "<run>/issues/<n>", "means": "one issue with its comments and the pull requests that close it"},
     {"form": "<run>/discussions/<n>", "means": "one discussion, every post in time order"},
     {"form": "<run>/agents/<name>", "means": "one agent: its note, its activity and its review partners"}
-  ],
-  "default": true,
-  "libs": []
+  ]
 }

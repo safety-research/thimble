@@ -1,0 +1,6 @@
+{
+  "name": "multiagent-swimlane",
+  "version": "0.4.0",
+  "description": "A card type that draws how the accounts of a swarm acted on each other, a row per account with the actions main picks in event order.",
+  "thimble": ">=0.4"
+}

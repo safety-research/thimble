@@ -26,12 +26,12 @@ log = logging.getLogger("thimble.ledger")
 router = APIRouter()
 
 # GET /settings layers these under what the file stores (tools.RESULT_LINES_KEY: lines of each output a card's result
-# shows). hide_chat: the browser shows no chat column, only a dock (frontend shell/Shell)
-SETTINGS_DEFAULTS: dict[str, Any] = {"run_cell_result_lines": 40, "hide_chat": False}
+# shows).
+SETTINGS_DEFAULTS: dict[str, Any] = {"run_cell_result_lines": 40}
 # Settings earlier builds stored that nothing reads any more: GET leaves them out, a PUT that sends one (a tab still
-# running an earlier build) is taken with the key dropped, and the next PUT removes it from the file. Each picked how
-# an earlier build ran the orientation.
-RETIRED_KEYS = frozenset({"orient_route", "terminal_first"})
+# running an earlier build) is taken with the key dropped, and the next PUT removes it from the file. orient_route and
+# terminal_first picked how the orientation ran, hide_chat hid the browser's chat column.
+RETIRED_KEYS = frozenset({"orient_route", "terminal_first", "hide_chat"})
 
 
 # --------------------------------------------------------------------------- plain-file helpers
@@ -67,16 +67,35 @@ def _own_tmp(path: Path) -> Path:
     return Path(tmp)
 
 
-def atomic_write_text(path: Path, text: str) -> None:
+def atomic_write_bytes(path: Path, data: bytes) -> None:
     """Write-to-temp + os.replace: a reader sees the old file or the new one, never a torn one; concurrent writers both
-    land whole and the later wins; a failed write leaves no temp."""
+    land whole and the later wins; a failed write leaves no temp. A symlink at `path` is replaced, not followed."""
     tmp = _own_tmp(path)
     try:
-        tmp.write_text(text, "utf-8")
+        tmp.write_bytes(data)
         os.replace(tmp, path)
     except BaseException:
         tmp.unlink(missing_ok=True)
         raise
+
+
+def atomic_write_text(path: Path, text: str) -> None:
+    atomic_write_bytes(path, text.encode("utf-8"))
+
+
+def unlinked(base: Path, path: Path) -> Path:
+    """`path`, which must lie under `base` with no symlink among the folders between them, so that a write or removal
+    there stays under `base` (a kernel can plant symlinks in a workspace); ValueError otherwise."""
+    try:
+        rel = path.relative_to(base)
+    except ValueError:
+        raise ValueError(f"{path} is not under {base}") from None
+    at = base
+    for part in rel.parts[:-1]:
+        at = at / part
+        if at.is_symlink():
+            raise ValueError(f"{at} is a symlink")
+    return path
 
 
 def write_json(path: Path, obj: Any) -> None:
@@ -209,17 +228,66 @@ def stored_settings(c: str) -> dict[str, Any]:
 
 def with_features(stored: dict[str, Any], c: str | None = None) -> dict[str, Any]:
     """The effective settings: SETTINGS_DEFAULTS under `stored` less RETIRED_KEYS, `models` as config.models_for resolves
-    them from thimble's config, the permission modes the config sets (modes.rows), `disabled_modes`, those the analyst's
-    Claude Code settings turn off, `config_error`, the config's error or '', and `untrusted`, {folder, command} while
-    Claude Code does not trust the workspaces folder, so the background sessions cannot start (bg_session.trusted);
-    never on a code ticket's test server (dev.STACK_ENABLED off), whose scratch workspaces folder is never trusted."""
-    from . import bg_session, cli, dev, modes, userconf  # noqa: PLC0415 — they import this module
+    them from thimble's config with a row per agent of the active extensions (extensions.agent_models), the permission
+    modes the config sets (modes.rows), `disabled_modes`, those the analyst's Claude Code settings turn off,
+    `config_error`, the config's error or '', and `untrusted`, {folder, command} while Claude Code does not trust the
+    workspaces folder, so the background sessions cannot start (bg_session.trusted); never on a code ticket's test
+    server (dev.STACK_ENABLED off), whose scratch workspaces folder is never trusted; `agents`, agent_rows; `tasks`,
+    task_rows."""
+    from . import bg_session, cli, dev, extensions, modes, userconf  # noqa: PLC0415 — they import this module
 
     kept = {k: v for k, v in stored.items() if k not in RETIRED_KEYS and k != modes.SETTING}
     untrusted = None if c is None or not dev.STACK_ENABLED or bg_session.trusted(c) else {
         "folder": str(config.WORKSPACES_DIR), "command": cli.trust_command()}
-    return {**SETTINGS_DEFAULTS, **kept, config.MODELS_KEY: config.models_for(c), modes.SETTING: modes.rows(c) if c else {},
-            "disabled_modes": sorted(modes.disabled()), "config_error": userconf.problem(c), "untrusted": untrusted}
+    models = {**config.models_for(c), **extensions.agent_models(c)}
+    return {**SETTINGS_DEFAULTS, **kept, config.MODELS_KEY: models, modes.SETTING: modes.rows(c) if c else {},
+            "disabled_modes": sorted(modes.disabled()), "config_error": userconf.problem(c), "untrusted": untrusted,
+            "agents": agent_rows(c), "tasks": task_rows(c)}
+
+
+def agent_rows(c: str | None) -> dict[str, Any]:
+    """Who runs each agent thimble starts and what it may do, by its row of the permission modes (modes.AGENTS): its
+    role's agent (roles.public: thimble's own, or an extension's prompt, Agent SDK program or command, with the
+    extensions that add to its prompt and a conflict), and from thimble's config its sandbox, whether the sandbox can
+    run here, its network, web tools and edits of the corpus; `main` names the extensions that add to main's prompt.
+    `labels` and `cardCheck` (userconf.CALLS) follow, by their config names: who runs their tasks (`tasks`, the first
+    one an extension runs) and the settings a program of those tasks runs under, with the sandbox always on and no web."""
+    from . import roles, tasks, userconf  # noqa: PLC0415
+
+    conf = userconf.load_or_defaults(c)[0]
+    runs = conf["sandbox"]["use"] != "never" and userconf.sandbox_runs()
+    by_role = {r["role"]: r for r in roles.public(c)}
+    out: dict[str, Any] = {"main": {"additions": by_role["main"]["additions"]}}
+    for agent, row in userconf.MODE_ROWS.items():
+        mine = conf["agents"][agent]
+        role = by_role.get(agent) or {"way": "thimble", "extension": "", "additions": [], "conflict": []}
+        out[row] = {"way": role["way"], "extension": role["extension"], "additions": role["additions"],
+                    "conflict": role["conflict"], "sandbox": mine.get("sandbox", "on"), "sandbox_runs": runs,
+                    "network": mine.get("network", "on"), "web": mine.get("web", "ask"), "data": mine.get("data", "ask"),
+                    "config": f"agents.{agent}"}
+    by_task = task_rows(c)
+    for agent in userconf.CALLS:
+        mine = conf["agents"][agent]
+        own = [t for t in by_task if t["task"] in tasks.TASKS and tasks.TASKS[t["task"]].agent == agent]
+        lead = next((t for t in own if t["way"] != "thimble" or t["conflict"]), None)
+        added = list(dict.fromkeys(e for t in own for e in t["additions"]))
+        out[agent] = {"way": lead["way"] if lead else "thimble", "extension": lead["extension"] if lead else "",
+                      "additions": added, "conflict": lead["conflict"] if lead else [], "sandbox": "on",
+                      "sandbox_runs": runs, "network": mine.get("network", "on"), "web": "off",
+                      "data": mine.get("data", "ask"), "config": f"agents.{agent}", "tasks": [t["task"] for t in own]}
+    return out
+
+
+def task_rows(c: str | None) -> list[dict[str, Any]]:
+    """Who runs each of thimble's seven tasks (tasks.public): thimble's own, or an extension's prompt, Agent SDK program
+    or command, with the extensions that add to its prompt and those that all replace it."""
+    from . import tasks  # noqa: PLC0415
+
+    try:
+        return tasks.public(c)
+    except Exception:  # noqa: BLE001 — Settings still shows when an extension's task cannot be read
+        log.exception("%s: the tasks' rows could not be read", c)
+        return []
 
 
 @router.get("/ws/{c}/settings")
@@ -227,10 +295,10 @@ def get_settings(c: str) -> dict[str, Any]:
     return with_features(stored_settings(c), c)
 
 
-# The keys PUT /settings may change: the settings the browser's settings panel and switches save, and the rows of the
-# permission modes, which only the analyst's browser may change (hook_auth.analyst). The models and the permission modes
-# are written to thimble's config (userconf.save), the rest to the workspace's settings.json. Every other key is the
-# server's own or the analyst's to edit in the file (kernel_wrap, orient_instructions), since a kernel cell or a
+# The keys PUT /settings may change: SETTINGS_DEFAULTS, the models the browser's settings panel saves, and the rows of
+# the permission modes, which only the analyst's browser may change (hook_auth.analyst). The models and the permission
+# modes are written to thimble's config (userconf.save), the rest to the workspace's settings.json. Every other key is
+# the server's own or the analyst's to edit in the file (kernel_wrap, orient_instructions), since a kernel cell or a
 # session's command can reach the route on loopback. RETIRED_KEYS are taken too, and dropped.
 PUT_KEYS = frozenset({*SETTINGS_DEFAULTS, config.MODELS_KEY, "permission_modes", *RETIRED_KEYS})
 
@@ -418,7 +486,12 @@ async def restore_workspace(c: str, body: dict[str, Any] = Body(...)) -> dict[st
     replaced = (await archive_workspace(c))["archived"]
     path = config.workspace_path(c).resolve()
     src.rename(path)
-    from . import investigation  # noqa: PLC0415 — lazy: investigation imports this module
+    from . import investigation, views  # noqa: PLC0415 — lazy: investigation imports this module
+
+    try:
+        views.move_to_local(path)  # an archive an older thimble made keeps its views in views/
+    except OSError:
+        log.exception("%s: the restored views were not moved into the local extension", c)
 
     investigation.reset_streams(c)  # an open tab starts over on the restored workspace
     log.info("%s: archive %s restored", c, name)

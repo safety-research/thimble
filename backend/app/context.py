@@ -553,8 +553,8 @@ def views(c: str) -> str:
         return ""
     for v in listed:
         lines.append(f"- view:{v['slug']} · {v['name']} · claims {', '.join(v.get('claims') or [])}")
-        if v.get("why"):
-            lines.append(f"  {v['why']}")
+        if v.get("description"):
+            lines.append(f"  {v['description']}")
     for p in proposed:
         lines.append(f"- proposed, {p.get('status')}: {p.get('name') or p.get('slug')} · claims {', '.join(p.get('claims') or [])}")
         if p.get("why"):

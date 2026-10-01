@@ -1,0 +1,66 @@
+<!doctype html>
+<html>
+<head>
+<style>
+  body { margin: 0; padding: 16px; font: 13px/1.5 "Hanken Grotesk", system-ui, sans-serif; color: #1f1f1f; }
+  table { border-collapse: collapse; width: 100%; }
+  th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid #e6e4df; }
+  th { font-weight: 500; color: #6b6963; }
+  td.n { font-variant-numeric: tabular-nums; text-align: right; }
+  tr[data-anchor] { cursor: pointer; }
+  tr[data-anchor]:hover { background: #f4f3ef; }
+  #labels { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 10px; }
+  #labels button { display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px; border: 1px solid #e6e4df; border-radius: 6px; background: none; font: inherit; color: #6b6963; cursor: pointer; }
+  #labels button[aria-pressed='true'] { color: #1f1f1f; }
+  #labels i { width: 9px; height: 9px; border-radius: 2px; background: var(--c); opacity: .35; }
+  #labels button[aria-pressed='true'] i { opacity: 1; }
+</style>
+</head>
+<body>
+<div id="labels"></div>
+<table>
+  <thead><tr><th>File</th><th>Records</th><th>Not JSON</th><th>Kinds</th></tr></thead>
+  <tbody id="rows"></tbody>
+</table>
+<script>
+  const rows = document.getElementById('rows')
+  async function draw() {
+    const files = await thimble.fetch({})
+    rows.textContent = ''
+    for (const f of files) {
+      const tr = document.createElement('tr')
+      const ref = `view:${thimble.view.slug}/${f.key}`
+      tr.dataset.anchor = ref
+      const cells = [f.path, f.records, f.bad, f.kinds.map((k) => `${k[0]} ${k[1]}`).join(', ')]
+      cells.forEach((v, i) => {
+        const td = document.createElement('td')
+        td.textContent = String(v)
+        if (i === 1 || i === 2) td.className = 'n'
+        if (i === 1) td.dataset.field = 'records'
+        if (i === 3) td.dataset.field = 'kinds'
+        tr.appendChild(td)
+      })
+      tr.onclick = () => thimble.navigate(ref)
+      rows.appendChild(tr)
+    }
+  }
+  // every label over the files, each a switch in its colour that turns it on or off on the analyst's click
+  const labels = document.getElementById('labels')
+  const esc = (t) => String(t ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c])
+  const showLabels = () => {
+    const state = thimble.labels()
+    labels.innerHTML = ((state && state.all) || []).map((l) =>
+      `<button type="button" data-label="${esc(l.id)}" aria-pressed="${!!l.on}"><i style="--c:${esc(l.colour)}"></i>${esc(l.name)}</button>`).join('')
+  }
+  thimble.onMarks(showLabels)
+  labels.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-label]')
+    if (b) thimble.setLabel(b.dataset.label, b.getAttribute('aria-pressed') !== 'true').catch(() => {})
+  })
+  thimble.onOpen(() => {
+    draw()
+    showLabels()
+  })
+</script>
+</body>
+</html>

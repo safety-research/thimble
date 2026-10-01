@@ -26,6 +26,7 @@ import subprocess
 import sys
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -39,8 +40,8 @@ from jupyter_client.connect import write_connection_file
 from pydantic import BaseModel, Field
 from sse_starlette import EventSourceResponse, ServerSentEvent
 
-from . import cite, config, frames, kernel_wrap, page_fonts, procs, srt
-from .ledger import atomic_write_text, read_json, write_json
+from . import cite, config, frames, kernel_wrap, page_fonts, procs, srt, view_calls
+from .ledger import atomic_write_text, read_json, unlinked, write_json
 
 log = logging.getLogger("thimble.notebook")
 
@@ -72,6 +73,8 @@ EXEC_TIMEOUT = 120.0  # seconds a cell may run before the kernel is interrupted;
 # The default allowance for a cell a chat runs, passed as `default_timeout_s` and never stored on the cell.
 CHAT_EXEC_TIMEOUT = 30.0
 STARTUP_TIMEOUT = 60.0
+MSG_INLINE_BYTES = 64 * 1024  # a kernel message up to this size is unpacked on the event loop, a larger one in a thread
+MSG_THREADS = 4
 PANDAS_COLWIDTH = 200  # the widest value a DataFrame shows before it cuts it (kernel_argv)
 ERROR_MIME = "application/vnd.thimble.error+json"
 
@@ -104,46 +107,167 @@ SCRATCH_DIR = "scratch"  # workspace-relative: the kernels' cwd, a symlink mirro
 VCS_DIR = ".git"  # left out of the mirror (mirror_corpus)
 
 
+MIRRORS_DIR = "mirrors"  # under thimble's home, which no kernel reads or writes: each scratch mirror's manifest
+
+
+def _mirror_manifest(scratch: Path) -> Path:
+    return _home() / MIRRORS_DIR / f"{hashlib.sha1(str(scratch.resolve()).encode()).hexdigest()[:16]}.json"
+
+
+def _dir_mtime_ns(path: Path, follow: bool = False) -> int | None:
+    try:
+        st = os.stat(path, follow_symlinks=follow)
+    except OSError:
+        return None
+    return st.st_mtime_ns if stat.S_ISDIR(st.st_mode) else None
+
+
+def _drop_dangling(p: Path) -> None:
+    if os.path.islink(p) and not os.path.exists(p):
+        with contextlib.suppress(OSError):
+            p.unlink()
+
+
+def _mirror_folder(src: Path, dest: Path, names: list[str], links: frozenset[str], dirs: tuple[str, ...] = ()) -> None:
+    """One folder of the mirror: a link in `dest` to each of `names` in `src` (`links`, the names that are links in the
+    corpus, only while their target exists), re-pointed when it points elsewhere, and the links in `dest` whose target
+    is gone removed. A real entry under a corpus name is the kernel's and stays. A link to `src`'s entry under the name of
+    one of its folders `dirs` (a corpus file that became a folder) is removed, so the folder can be mirrored."""
+    have: dict[str, bool] = {}  # name in dest -> whether it is a link
+    with contextlib.suppress(OSError), os.scandir(dest) as it:
+        for e in it:
+            have[e.name] = e.is_symlink()
+    for name in dirs:
+        if have.get(name):
+            with contextlib.suppress(OSError):
+                if os.readlink(dest / name) == str(src / name):
+                    (dest / name).unlink()
+    for name in names:
+        target = src / name
+        if name in links and not os.path.exists(target):
+            continue
+        is_link = have.get(name)
+        if is_link is False:
+            continue  # a real file the kernel wrote under a corpus file's name: left as it is
+        link = dest / name
+        if is_link:
+            try:
+                if os.readlink(link) == str(target):
+                    continue
+                link.unlink()
+            except OSError:
+                continue
+        try:
+            os.symlink(target, link)
+        except OSError:
+            log.exception("scratch mirror: could not link %s", link)
+    wanted = set(names) - links
+    for name, is_link in have.items():
+        if is_link and name not in wanted:
+            _drop_dangling(dest / name)
+
+
 def mirror_corpus(corpus: Path, scratch: Path) -> None:
     """Make `scratch` mirror the tree under `corpus`: every corpus directory a real directory, every file a symlink, so
     a kernel with `scratch` as cwd reads the corpus by the same relative paths and writes only into `scratch`.
     Idempotent: entries the kernel created are left alone, dangling symlinks removed, moved targets re-pointed.
-    Blocking."""
+
+    The corpus's folders come from corpus_walk, and a manifest under thimble's home keeps, for each folder mirrored,
+    its mtime and its scratch folder's mtime as they were right after: a folder whose two mtimes are unchanged is
+    skipped without reading either, so mirroring an unchanged corpus costs two stats per folder. A folder that holds
+    links is mirrored on every pass, since a link's target comes and goes without its folder's mtime moving. Without a
+    manifest for this corpus, the dangling links anywhere in `scratch` are removed first, as no record says which
+    corpus folders went. Blocking."""
+    from . import corpus_walk  # noqa: PLC0415
+
     corpus = corpus.resolve()
     scratch.mkdir(parents=True, exist_ok=True)
-    for root, dirs, files in os.walk(corpus):  # followlinks=False: a symlinked directory in the corpus mirrors as a link
-        rel = Path(root).relative_to(corpus)
-        dest = scratch if rel == Path(".") else scratch / rel
-        if dest != scratch:
-            if dest.is_symlink() or dest.is_file():
-                dirs[:] = []  # a kernel-made file where the corpus has a directory: the kernel's entry wins
+    manifest = _mirror_manifest(scratch)
+    try:
+        saved = read_json(manifest, None)
+    except (OSError, ValueError):
+        saved = None
+    done: dict[str, list[int]] = {}
+    if isinstance(saved, dict) and saved.get("corpus") == str(corpus) and isinstance(saved.get("dirs"), dict):
+        done = {k: v for k, v in saved["dirs"].items() if isinstance(v, list) and len(v) == 2}
+    if not done:
+        for root, dirs, files in os.walk(scratch):
+            for name in [*files, *dirs]:
+                _drop_dangling(Path(root) / name)
+    # a corpus that is a git repository keeps its objects under .git, never data for a card
+    tree = corpus_walk.walk(corpus, frozenset({VCS_DIR}))
+    kept: dict[str, list[int]] = {}
+    skipped: set[str] = set()
+    for rel, folder in tree.items():
+        if rel and rel.rpartition("/")[0] in skipped:
+            skipped.add(rel)
+            continue
+        dest = scratch / rel if rel else scratch
+        now: int | None = None
+        try:
+            st = os.stat(dest, follow_symlinks=not rel)
+        except FileNotFoundError:
+            dest.mkdir()
+        else:
+            if not stat.S_ISDIR(st.st_mode):
+                skipped.add(rel)  # a kernel-made file where the corpus has a directory: the kernel's entry wins
                 continue
-            dest.mkdir(exist_ok=True)
-        # a corpus that is a git repository keeps its objects under .git, never data for a card
-        files = [n for n in files if n != VCS_DIR]
-        dirs[:] = [d for d in dirs if d != VCS_DIR]
-        linked = [n for n in files] + [d for d in dirs if (Path(root) / d).is_symlink()]
-        dirs[:] = [d for d in dirs if not (Path(root) / d).is_symlink()]
-        for name in linked:
-            link, target = dest / name, Path(root) / name
-            if link.is_symlink():
-                if os.readlink(link) == str(target):
-                    continue
-                link.unlink()
-            elif link.exists():
-                continue  # a real file the kernel wrote under a corpus file's name: left as it is
-            try:
-                os.symlink(target, link)
-            except OSError:
-                log.exception("scratch mirror: could not link %s", link)
-    for root, dirs, files in os.walk(scratch):
-        for name in [*files, *dirs]:
-            p = Path(root) / name
-            if p.is_symlink() and not p.exists():  # dangling: the corpus file is gone
-                try:
-                    p.unlink()
-                except OSError:
-                    pass
+            now = st.st_mtime_ns
+        was = done.get(rel)
+        if was is not None and not folder.racy and not folder.links and was == [folder.mtime_ns, now]:
+            kept[rel] = was
+            continue
+        _mirror_folder(corpus / rel if rel else corpus, dest, folder.file_names(), folder.link_names(), folder.dirs)
+        for sub in folder.dirs:  # made now, so that the mtime kept below is the one the next pass finds
+            with contextlib.suppress(FileExistsError):
+                (dest / sub).mkdir()
+        after = _dir_mtime_ns(dest, follow=not rel)
+        # a folder listed in its racy window is kept with times no pass matches: mirrored again, and swept once gone
+        kept[rel] = [folder.mtime_ns, after] if not folder.racy and after is not None else [-1, -1]
+    gone = set(done) - set(tree)
+    for rel in gone:
+        parts = rel.split("/")
+        if any("/".join(parts[:i]) in gone for i in range(1, len(parts))):
+            continue
+        top = scratch / rel
+        try:
+            unlinked(scratch, top)
+        except ValueError:
+            continue
+        if top.is_symlink():
+            continue  # a kernel's link in place of the folder: what it points at is not the mirror's
+        for root, dirs, files in os.walk(top):  # the corpus folder is gone, and so are its files
+            for name in [*files, *dirs]:
+                _drop_dangling(Path(root) / name)
+    try:
+        manifest.parent.mkdir(parents=True, exist_ok=True)
+        atomic_write_text(manifest, json.dumps({"corpus": str(corpus), "scratch": str(scratch.resolve()), "dirs": kept},
+                                               separators=(",", ":")))
+    except OSError:
+        log.warning("scratch mirror: its manifest %s could not be written", manifest)
+    _prune_manifests(manifest)
+
+
+_manifests_pruned = False
+
+
+def _prune_manifests(keep: Path) -> None:
+    """Remove, once per server run, the manifests of scratch mirrors that are gone, such as a deleted workspace's."""
+    global _manifests_pruned
+    if _manifests_pruned:
+        return
+    _manifests_pruned = True
+    for p in keep.parent.glob("*.json"):
+        if p == keep:
+            continue
+        try:
+            saved = read_json(p, None)
+        except (OSError, ValueError):
+            saved = None
+        where = saved.get("scratch") if isinstance(saved, dict) else None
+        if not isinstance(where, str) or not os.path.isdir(where):
+            with contextlib.suppress(OSError):
+                p.unlink()
 
 
 MIRROR_MEMO_S = 30.0  # a mirror this recent serves the next kernel's start too
@@ -151,13 +275,13 @@ _mirrored: dict[Path, float] = {}  # scratch dir -> when its mirror last ran (mo
 _mirror_lock = threading.Lock()  # kernels that start together wait for one walk
 
 
-def scratch_dir(workspace: str, corpus: Path | None = None) -> Path:
+def scratch_dir(workspace: str, corpus: Path | None = None, *, fresh: bool = False) -> Path:
     """workspaces/<c>/scratch, mirrored over the corpus and returned: every kernel's cwd. Blocking; kernels starting
-    within MIRROR_MEMO_S of the last mirror reuse it rather than walking the corpus again."""
+    within MIRROR_MEMO_S of the last mirror reuse it rather than walking the corpus again, unless `fresh`."""
     scratch = config.workspace_dir(workspace) / SCRATCH_DIR
     with _mirror_lock:
         last = _mirrored.get(scratch)
-        if last is None or time.monotonic() - last >= MIRROR_MEMO_S or not scratch.is_dir():
+        if fresh or last is None or time.monotonic() - last >= MIRROR_MEMO_S or not scratch.is_dir():
             mirror_corpus(corpus if corpus is not None else config.corpus_dir(workspace), scratch)
             _mirrored[scratch] = time.monotonic()
     return scratch
@@ -202,6 +326,11 @@ CELL_KINDS = ("plot", "table", "code", "example", "note", "diagram", "timeline",
 RUNNABLE_KINDS = ("plot", "table", "code", "timeline", "diagram")  # carry code and outputs
 DATA_KINDS = ("example", "note", "label", "custom")  # carry a payload
 DEFAULT_KIND = "code"
+KEPT_ARGS = "kept_args"  # a card type's call arguments Keep set, which the card check gives back as they are
+TAKEAWAY_STALE = "takeaway_stale"  # the takeaway was written before the card's last run changed its outputs
+# while thimble runs a card again because labels it read changed (rerun_on_labels), those label ids; gone when the
+# run ends
+REGENERATING_FOR = "regenerating_for"
 # the payload key per data shape; a diagram or a timeline without code carries a dataset
 PAYLOAD_KEYS = {"example": "refs", "note": "text", "label": "concept", "custom": "html", "diagram": "dataset", "timeline": "dataset"}
 # The canvas layout fields. A group's `pos` {x, y} is on the board for a root group, inside its parent's frame for a
@@ -764,6 +893,7 @@ def mark_interrupted_cells(root: Path | None = None) -> list[str]:
             if cell.get("status") != "running":
                 continue
             cell.update(status="error", outputs=[_error_bundle(INTERRUPTED_ENAME, INTERRUPTED_EVALUE)], ts=_now())
+            cell.pop(REGENERATING_FOR, None)
             changed = True
             marked.append(f"{p.parent.parent.name}/{p.stem}/{cell.get('id')}")
         if changed:
@@ -1092,11 +1222,12 @@ def insert_cell(workspace: str, nb_id: str, cell: dict, after: str | None = None
 def edit_cell(workspace: str, cell_id: str, *, code: str | None = None, title: str | None = None,
               takeaway: str | None = None, payload: dict | None = None, locked: bool | None = None,
               by: str | None = None, width: int | None = None, height: int | None = None,
-              starred: bool | None = None, **layout: Any) -> dict:
+              starred: bool | None = None, kept_args: dict | None = None, **layout: Any) -> dict:
     """Change the given fields of a cell and announce it: code on a runnable cell, a payload on a data cell (400
     otherwise). A change to code, payload or title is recorded in `edited`; a takeaway set here is the analyst's.
     `width`, `height`, `starred` and `pos` are layout, not edits. `locked` is the analyst's lock, which no model's tool
-    may get past; only the browser sends it. 404 for an unknown cell."""
+    may get past; only the browser sends it. `kept_args` are the arguments of a card type's call that Keep wrote with
+    the code (cardtypes.keep_route); other new code drops them. 404 for an unknown cell."""
     ws = _ws(workspace)
     hit = _locate(ws, cell_id)
     if hit is None:
@@ -1112,7 +1243,10 @@ def edit_cell(workspace: str, cell_id: str, *, code: str | None = None, title: s
     changed = False
     if code is not None and code != cell.get("code"):
         cell["code"] = code
+        cell.pop(KEPT_ARGS, None)
         changed = True
+    if kept_args:
+        cell[KEPT_ARGS] = kept_args
     if payload is not None:
         new = _payload_of(kind, payload)
         if new != cell.get("payload"):
@@ -1131,6 +1265,7 @@ def edit_cell(workspace: str, cell_id: str, *, code: str | None = None, title: s
     if takeaway is not None:
         cell["takeaway"] = takeaway
         cell["takeaway_author"] = "analyst" if takeaway.strip() else None
+        cell.pop(TAKEAWAY_STALE, None)
         if takeaway.strip() and run:
             _verify_hook("takeaway", workspace, nb, cell)
     if locked is not None:
@@ -1845,9 +1980,13 @@ def _guarded_files(workspace: str) -> None:
     """Each of kernel_wrap.HIDDEN_FILES (`{}`) and READ_ONLY_FILES (empty) made in the workspace when missing: a wrapper
     guards a file that exists, where for a missing one bwrap would guard nothing and srt would leave an empty read-only
     file in its place while the kernel runs, which the server could not write. Each of READ_ONLY_DIRS is made too, since
-    bwrap fails on a missing one."""
+    bwrap fails on a missing one, in place of a link or a file a kernel left there: the wrapper would show it a link's
+    target, and a file stops the folder from being made."""
     for name in kernel_wrap.READ_ONLY_DIRS:
-        (_ws_dir(workspace) / name).mkdir(exist_ok=True)
+        d = _ws_dir(workspace) / name
+        if d.is_symlink() or (d.exists() and not d.is_dir()):
+            d.unlink()
+        config.private_dir(d)
     files = [*((n, "{}\n") for n in kernel_wrap.HIDDEN_FILES), *((n, "") for n in kernel_wrap.READ_ONLY_FILES)]
     for name, text in files:
         p = _ws_dir(workspace) / name
@@ -2060,6 +2199,7 @@ async def shutdown_workspace(workspace: str) -> None:
     names = {None, *[name for w, name in _exec_kernels if w == workspace], *recorded_kernels(workspace)}
     for name in sorted(names, key=lambda n: (n is not None, n or "")):
         await shutdown_kernel(workspace, kernel=name)
+    view_calls.forget_workspace(workspace)
 
 
 async def shutdown_all() -> None:
@@ -2251,6 +2391,31 @@ def positive_timeout(value: Any) -> float | None:
     return t
 
 
+_msg_pool: ThreadPoolExecutor | None = None
+
+
+def _unpack_msg(session: Any, frames: list) -> dict:
+    """A kernel message from its frames: its signature checked and its parts parsed (jupyter_client's Session)."""
+    _, parts = session.feed_identities(frames, copy=False)
+    return session.deserialize(parts, content=True, copy=False)
+
+
+async def _kernel_msg(channel: Any, timeout: float) -> dict:
+    """The next message on a kernel client's channel, as its get_msg gives it; Empty after `timeout` seconds. The frames
+    are read on the event loop, and a message larger than MSG_INLINE_BYTES is unpacked in a thread of its own pool, so
+    checking the signature over a large output and parsing it never holds the loop."""
+    global _msg_pool
+    sock = channel.socket
+    if not await sock.poll(int(timeout * 1000)):
+        raise Empty
+    frames = await sock.recv_multipart(copy=False)
+    if sum(len(f) for f in frames) <= MSG_INLINE_BYTES:
+        return _unpack_msg(channel.session, frames)
+    if _msg_pool is None:
+        _msg_pool = ThreadPoolExecutor(MSG_THREADS, thread_name_prefix="thimble-kernel-msg")
+    return await asyncio.get_running_loop().run_in_executor(_msg_pool, _unpack_msg, channel.session, frames)
+
+
 async def _execute(k: _Kernel, code: str, timeout: float | None = None,
                    user_expressions: dict[str, str] | None = None) -> tuple[list[dict], int | None, str]:
     """Run code on the kernel and collect iopub output into mime bundles. Returns (outputs, exec_count, status).
@@ -2295,7 +2460,7 @@ async def _execute(k: _Kernel, code: str, timeout: float | None = None,
             deadline = time.monotonic() + 10
             continue
         try:
-            msg = await kc.get_iopub_msg(timeout=min(1.0, remaining))
+            msg = await _kernel_msg(kc.iopub_channel, min(1.0, remaining))
         except Empty:
             if not k.alive():
                 dead = True
@@ -2360,7 +2525,7 @@ async def _execute(k: _Kernel, code: str, timeout: float | None = None,
     reply_deadline = time.monotonic() + 5
     while time.monotonic() < reply_deadline:
         try:
-            reply = await kc.get_shell_msg(timeout=1)
+            reply = await _kernel_msg(kc.shell_channel, 1)
         except Empty:
             continue
         except asyncio.CancelledError:
@@ -2451,6 +2616,7 @@ async def _execute_cell(workspace: str, nb: dict, cell: dict, kernel: str | None
     stored = bound_outputs(ws, cell["id"], outputs, fresh=True)
     target.update(outputs=stored, exec_count=exec_count, status=status, ts=_now(),
                   duration_s=round(duration, 3), labels=labels, label_revs=revs)
+    target.pop(REGENERATING_FOR, None)
     if reads is not None:
         target["reads"] = reads["reads"]
         if reads["n"] > len(reads["reads"]):
@@ -2494,6 +2660,10 @@ async def _run_card_code(k: _Kernel, code: str, kind: str | None, timeout_s: flo
     """_execute for a card's code, with the caller holding the kernel's lock: a table card's DataFrame is read in the
     same request and kept in place of pandas' display, and the labels the code read land on k.last_labels and
     k.last_label_revs. `extra_exprs` are more user expressions for the same request."""
+    from . import cardtypes  # noqa: PLC0415 — cardtypes imports views, which imports this module lazily
+
+    if cardtypes.CARD_CALL in code:
+        await cardtypes.refresh_quietly(k.workspace, warm=False)
     exprs = {frames.EXPR_KEY: frames.CAPTURE} if frames.captures(kind) else {}
     exprs[LABELS_EXPR_KEY] = LABELS_EXPR
     exprs.update(extra_exprs or {})
@@ -2625,7 +2795,8 @@ async def edit_and_run(workspace: str, nb_id: str, cell_id: str, code: str, *, b
                        timeout_s: float | None = None, default_timeout_s: float | None = None,
                        title: str | None = None, kind: str | None = None, from_dataset: bool = False) -> dict:
     """Replace a cell's code and run it again in place, for the `edit_card` tool. The replaced code stays as
-    `previous_code`, the edit is recorded in `edited`, the stale takeaway is cleared. `title` and `kind` change in the
+    `previous_code`, the edit is recorded in `edited`, the stale takeaway is cleared. A run of the same code, title and
+    kind keeps the takeaway, marked TAKEAWAY_STALE when the outputs' text changed. `title` and `kind` change in the
     same edit when given. `from_dataset` turns a diagram or timeline stored with a dataset into a card of code. Returns
     the cell with complete outputs. 404 for an unknown cell, 400 for a data cell or a kind without code."""
     nb = load_notebook(workspace, nb_id)
@@ -2639,16 +2810,82 @@ async def edit_and_run(workspace: str, nb_id: str, cell_id: str, code: str, *, b
     if code != cell.get("code"):
         cell["previous_code"] = str(cell.get("code") or "")
         cell["code"] = code
+        cell.pop(KEPT_ARGS, None)
     if title:
         cell["title"] = title
     if kind:
         cell["kind"] = kind
     if changed:
         cell.setdefault("edited", []).append({"by": by, "ts": _now()})
-    cell["takeaway"] = ""
-    cell["takeaway_author"] = None
+    if not changed and (live := _label_reruns.get((workspace, cell_id))) is not None:
+        rerun = await asyncio.shield(live)
+        if rerun is not None:
+            return dict(rerun)
+    kept = "" if changed else str(cell.get("takeaway") or "").strip()
+    before = outputs_text(hydrate_outputs(_ws(workspace), cell.get("outputs"))) if kept else ""
+    if not kept:
+        cell["takeaway"] = ""
+        cell["takeaway_author"] = None
+        cell.pop(TAKEAWAY_STALE, None)
     _, full = await _execute_cell(workspace, nb, cell, None, timeout_s, default_timeout_s)
+    if kept and outputs_text(full.get("outputs") or []) != before:
+        cell[TAKEAWAY_STALE] = True
+        full[TAKEAWAY_STALE] = True
+        write_notebook(_ws(workspace), nb)
+        _emit(workspace, cell)
     return dict(full)  # a copy: the stored cell is the cached object
+
+
+# Each card's reruns for changed labels run one at a time, and the run under way is held here so that an unchanged
+# edit_card made meanwhile takes its result rather than running the card a second time.
+_label_rerun_locks: dict[tuple[str, str], asyncio.Lock] = {}
+_label_reruns: dict[tuple[str, str], asyncio.Future] = {}
+RERUN_POLL_S = 0.5  # how often rerun_on_labels looks whether a run of the card already under way has ended
+
+
+async def rerun_on_labels(workspace: str, cell_id: str) -> dict | None:
+    """Run a card again because labels it read changed since its run (concepts.stale_in), with its code as it is. While
+    it runs the card has REGENERATING_FOR, those labels' ids, and its `label_revs` already name their revisions now, so
+    it no longer counts as stale. The takeaway stays, marked TAKEAWAY_STALE when the outputs' text changed. A run of
+    the card already under way is waited for first, and nothing runs when the card is current after it, is locked or
+    gone, or reads a label still running (that run's end reruns it). Returns the card with complete outputs, or None
+    when nothing ran."""
+    from . import concepts  # noqa: PLC0415 — concepts imports this module
+
+    key = (workspace, cell_id)
+    ws = _ws(workspace)
+    async with _label_rerun_locks.setdefault(key, asyncio.Lock()):
+        while True:
+            hit = _locate(ws, cell_id)
+            if hit is None or not runnable(hit[1]) or hit[1].get("locked") is True:
+                return None
+            nb, cell = hit
+            read = {cid: k for cid in cell.get("label_revs") or {} if (k := concepts.read_concept(ws, str(cid)))}
+            stale = concepts.stale_in(cell, read)
+            if not stale or any(concepts.running_apply(workspace, str(cid)) for cid in cell.get("labels") or []):
+                return None
+            if cell.get("status") != "running":
+                break
+            await asyncio.sleep(RERUN_POLL_S)
+        cell[REGENERATING_FOR] = sorted(stale)
+        cell["label_revs"] = {**cell["label_revs"], **{cid: int(read[cid].get("rev") or 0) for cid in stale}}
+        kept = str(cell.get("takeaway") or "").strip()
+        before = outputs_text(hydrate_outputs(ws, cell.get("outputs"))) if kept else ""
+        live = asyncio.get_running_loop().create_future()
+        _label_reruns[key] = live
+        full = None
+        try:
+            _, full = await _execute_cell(workspace, nb, cell)
+            after = _locate(ws, cell_id)
+            if after is not None and kept and outputs_text(full.get("outputs") or []) != before:
+                after[1][TAKEAWAY_STALE] = True
+                full = {**full, TAKEAWAY_STALE: True}
+                write_notebook(ws, after[0])
+                _emit(workspace, after[1])
+        finally:
+            _label_reruns.pop(key, None)
+            live.set_result(full)
+        return dict(full)
 
 
 # ----------------------------------------------------------------------------------------------------------
@@ -2722,6 +2959,7 @@ def append_takeaway(workspace: str, cell_id: str, text: str, *, only_if_empty: b
     if only_if_empty and existing.strip():
         return True
     cell["takeaway"] = text if overwrite or not existing else (existing + "\n\n" + text).strip()
+    cell.pop(TAKEAWAY_STALE, None)
     if author:
         cell["takeaway_author"] = author
     if runnable(cell):

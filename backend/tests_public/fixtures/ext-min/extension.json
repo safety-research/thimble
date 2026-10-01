@@ -1,0 +1,10 @@
+{
+  "name": "ext-min",
+  "version": "0.1.0",
+  "thimble": ">=0.4",
+  "dependencies": {
+    "python": [],
+    "js": [],
+    "extensions": []
+  }
+}

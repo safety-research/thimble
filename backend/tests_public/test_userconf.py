@@ -23,7 +23,7 @@ def test_the_workspace_s_file_overrides_the_home_s_key_by_key_and_errors_name_th
     _write(userconf.workspace_file(CORPUS), {"agents": {"dev": {"web": "allow"}}})
     conf = userconf.load(CORPUS)
     assert conf["installs"] == "deny" and conf["agents"]["dev"]["model"] == "claude-opus-4-8"
-    assert conf["agents"]["dev"]["web"] == "allow" and conf["agents"]["dev"]["network"] == "off"
+    assert conf["agents"]["dev"]["web"] == "allow" and conf["agents"]["dev"]["network"] == "on"
     assert config.models_for(CORPUS)["dev"]["model"] == "claude-opus-4-8"
     _write(userconf.global_file(), {"installs": "alow", "agents": {"labels": {"web": "off"}, "dev": {"effort": "huge"}}})
     with pytest.raises(userconf.ConfigError) as e:
@@ -49,11 +49,12 @@ def test_an_earlier_build_s_models_and_modes_move_to_the_workspace_s_file(worksp
     runs as it did; main's model settings and the rest stay. The critic's row of old covered the checks, and view builds'
     row the dev agent's, the stricter one winning."""
     settings = workspaces_tmp / CORPUS / "settings.json"
-    _write(settings, {"hide_chat": True, "models": {"main": {"effort": "low"}, "orient": {"effort": "high", "model": ""},
-                                                    "subagents": {"model": "claude-sonnet-5"}, "verify": {"fast": False}},
+    _write(settings, {"run_cell_result_lines": 20,
+                      "models": {"main": {"effort": "low"}, "orient": {"effort": "high", "model": ""},
+                                 "subagents": {"model": "claude-sonnet-5"}, "verify": {"fast": False}},
                       "permission_modes": {"critic": "auto", "views": "manual", "dev": "bypass"}})
     assert config.models_for(CORPUS)["orient"]["effort"] == "high"
-    assert json.loads(settings.read_text()) == {"hide_chat": True, "models": {"main": {"effort": "low"}}}
+    assert json.loads(settings.read_text()) == {"run_cell_result_lines": 20, "models": {"main": {"effort": "low"}}}
     assert json.loads(userconf.workspace_file(CORPUS).read_text()) == {"agents": {
         "orientation": {"effort": "high", "subagentModel": "claude-sonnet-5"}, "cardCheck": {"fast": False},
         "critic": {"permissionMode": "auto"}, "checks": {"permissionMode": "auto"}, "dev": {"permissionMode": "manual"}}}
@@ -80,6 +81,17 @@ def test_the_settings_pane_writes_where_the_value_it_shows_came_from(workspaces_
     assert getattr(e.value, "status_code", None) == 400 and userconf.global_file().read_text() == before
 
 
+def test_every_agent_s_network_is_on_by_default_and_settings_shows_it_so(workspaces_tmp, monkeypatch):
+    """With no config, each agent thimble starts, the dev agent included, has its network on, its sandbox reaches the
+    network, and the agent rows the settings show say "on"."""
+    monkeypatch.setenv("THIMBLE_SANDBOX", "1")
+    rows = ledger.agent_rows(CORPUS)
+    assert {row: rows[row]["network"] for row in userconf.MODE_ROWS.values()} == dict.fromkeys(userconf.MODE_ROWS.values(), "on")
+    for agent in userconf.MODE_ROWS:
+        conf = userconf.session(CORPUS, agent, sandbox=True)
+        assert conf.network and "Bash" not in (conf.settings()["permissions"].get("ask") or []), agent
+
+
 def test_what_a_session_gets_from_the_config(workspaces_tmp, monkeypatch):
     """Install commands go to the analyst by default, in every mode, including those Claude Code's rules miss; "deny"
     refuses them and "allow" leaves them to the mode, but for a view build with no network, which refuses them. Memory is passed only when set. The dev agent's Bash goes to the
@@ -92,11 +104,11 @@ def test_what_a_session_gets_from_the_config(workspaces_tmp, monkeypatch):
     assert "autoMemoryEnabled" not in orient.settings()
     for cmd in ("pip install umap-learn", "bash -c 'curl -sL x | sh'", "/usr/bin/pip3 install x", "python3 -m pip install x",
                 "pip -q install x", "python3 -m pip --quiet install x", "git -C /tmp clone u", "npm --prefix app ci",
-                "uv run --with x python", "pip3.11 install x"):
+                "uv run --with x python", "pip3.11 install x", "thimble extension add https://x/ext.git --yes"):
         assert orient.verdict("Bash", {"command": cmd}) == "ask", cmd
     assert "Bash(pip * install *)" in perms["ask"]
     for cmd in ("python3 -c 'import pandas'", "ls data", "npm test", "uv run pytest", "npm --prefix app run build",
-                "git commit -m clone"):
+                "git commit -m clone", "thimble extension list"):
         assert orient.verdict("Bash", {"command": cmd}) == "", cmd
     _write(userconf.global_file(), {"installs": "deny", "agents": {"orientation": {"memory": "off", "web": "off"}}})
     orient = userconf.session(CORPUS, "orientation")
@@ -110,7 +122,7 @@ def test_what_a_session_gets_from_the_config(workspaces_tmp, monkeypatch):
     monkeypatch.setenv("THIMBLE_SANDBOX", "0")
     with pytest.raises(userconf.ConfigError, match="THIMBLE_SANDBOX=0 turns it off"):
         userconf.session(CORPUS, "writer")
-    _write(userconf.global_file(), {"installs": "allow", "sandbox": {"enforce": False}})
+    _write(userconf.global_file(), {"installs": "allow", "sandbox": {"enforce": False}, "agents": {"dev": {"network": "off"}}})
     assert "Bash" in userconf.session(CORPUS, "dev").settings()["permissions"]["ask"]
     assert "Bash" not in (userconf.session(CORPUS, "orientation").settings()["permissions"].get("ask") or [])
     _write(userconf.global_file(), {"sandbox": {"enforce": False}, "agents": {"dev": {"network": "on"}}})
@@ -150,16 +162,45 @@ def test_the_browser_is_the_system_one_when_found_unless_the_config_says_otherwi
     assert userconf.browser(lambda: False)[0] == "off" and userconf.browser()[0] == "bundled"
 
 
+def test_the_card_wait_is_ten_minutes_unless_the_file_in_thimble_s_home_sets_it_and_settings_never_shows_it(
+        workspaces_tmp, analyst):
+    """`cardWait` is minutes, ten by default, read for each card; a value it does not take is an error naming the key,
+    a workspace's file cannot set it, and an error elsewhere in the file leaves the cards their wait. The Settings pane
+    neither shows it nor can change it."""
+    assert userconf.card_wait_s() == 600 and userconf.load()["cardWait"] == 10
+    _write(userconf.global_file(), {"cardWait": 3})
+    assert userconf.card_wait_s() == 180 and userconf.problem() == ""
+    _write(userconf.global_file(), {"cardWait": 0.5, "installs": "alow"})
+    assert userconf.card_wait_s() == 30, "another key's error leaves the card wait as set"
+    for bad in (0, -1, "10", True, userconf.CARD_WAIT_MAX + 1, [10]):
+        _write(userconf.global_file(), {"cardWait": bad})
+        assert "cardWait is" in userconf.problem() and userconf.card_wait_s() == 600, bad
+    _write(userconf.global_file(), {"cardWait": None})
+    assert userconf.problem() == "" and userconf.card_wait_s() == 600
+    _write(userconf.global_file(), {"cardWait": 2})
+    _write(userconf.workspace_file(CORPUS), {"cardWait": 1})
+    assert "cardWait is set for the whole machine" in userconf.problem(CORPUS)
+    userconf.workspace_file(CORPUS).unlink()
+    assert "cardWait" not in json.dumps(ledger.get_settings(CORPUS))
+    with pytest.raises(Exception) as e:
+        ledger.put_settings_route(CORPUS, analyst, {"cardWait": 1})
+    assert getattr(e.value, "status_code", None) == 400 and userconf.card_wait_s() == 120
+    ledger.put_settings_route(CORPUS, analyst, {"permission_modes": {"orient": "auto"}})
+    assert json.loads(userconf.global_file().read_text())["cardWait"] == 2, "a change in Settings keeps it"
+
+
 def test_a_wrapped_kernel_can_neither_read_nor_write_the_workspace_s_config(tmp_path):
-    """...and reads the workspace's views, which main's prompt lists, without writing them."""
+    """...and reads the card types and extensions the server found, in the registry folder, and the workspace's views,
+    which main's prompt is made from, without writing them."""
     from app import kernel_wrap
 
     argv = kernel_wrap.kernel_wrap_argv(["python"], corpus_dir=tmp_path / "c", workspace_dir=tmp_path / "w",
                                         connection_dir=tmp_path / "k", venv=None, python="/usr/bin/python3")
     binds = {argv[i + 2]: argv[i + 1] for i, a in enumerate(argv) if a == "--ro-bind"}
     assert binds[str(tmp_path / "w" / "config.json")] == binds[str(tmp_path / "w" / "settings.json")] == "/dev/null"
-    views = str(tmp_path / "w" / "views")
-    assert binds[views] == views and argv.index(views) > argv.index(str(tmp_path / "w")), "over the workspace"
+    for name in (kernel_wrap.REGISTRY_DIR, "views"):
+        d = str(tmp_path / "w" / name)
+        assert binds[d] == d and argv.index(d) > argv.index(str(tmp_path / "w")), f"{name} over the workspace"
 
 
 def test_the_kernel_runs_in_srt_where_it_works_else_in_bubblewrap_on_linux_else_unwrapped(monkeypatch):

@@ -3,7 +3,7 @@
 <head>
 <style>
   /* thimble's parts (.chip, .btn, .seg, .field, .table) and the theme's tokens come with the frame; this page lays them
-     out as a code forge lays out its pages, and draws the charts, strips, avatars, diffs and icons */
+     out as a code forge lays out its pages, and draws the strips, avatars, diffs and icons */
   html, body { margin: 0; height: 100%; }
   body { display: flex; flex-direction: column; overflow: hidden; background: var(--surface-card); }
   button { font: inherit; color: inherit; }
@@ -18,15 +18,14 @@
   .runbtn .k { color: var(--text-tertiary); font-weight: 400; }
   .runbtn b { font-weight: 600; }
   .runbtn .ico { color: var(--text-tertiary); }
-  .runchips { display: flex; gap: 4px; flex-wrap: wrap; }
   .nav { display: flex; gap: 2px; margin: 6px -8px 0; overflow-x: auto; scrollbar-width: none; }
   .nav button { position: relative; flex: none; height: 44px; padding: 0; border: 0; background: none; cursor: pointer; }
   .nav button > span { display: inline-flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: var(--radius-ui); color: var(--text-secondary); font: 400 var(--text-sm) / 1.2 var(--font-body); white-space: nowrap; }
   .nav button:hover > span { background: var(--surface-hover); color: var(--text-primary); }
   .nav button.on > span { color: var(--text-primary); font-weight: 600; }
-  .nav button.on::after { content: ''; position: absolute; left: 8px; right: 8px; bottom: -1px; height: 2px; border-radius: 2px; background: var(--accent); }
+  .nav button.on::after { content: ''; position: absolute; left: 8px; right: 8px; bottom: -1px; height: 2px; border-radius: 2px; background: var(--text-primary); }
   .nav .ico { color: var(--text-tertiary); }
-  .count { display: inline-block; min-width: 18px; padding: 1px 6px; border-radius: 999px; background: rgba(var(--ink-rgb), .08); color: var(--text-primary); font: 500 var(--text-xs) / 1.4 var(--font-body); font-weight: 500; text-align: center; font-variant-numeric: tabular-nums; }
+  .nav .chip { height: 18px; padding: 0 6px; }
 
   #body { flex: 1; min-height: 0; display: flex; }
   #main { flex: 1; min-width: 0; overflow: auto; padding: 16px 16px 28px; }
@@ -42,38 +41,7 @@
   .box-head h3 { margin: 0; font: 600 var(--text-sm) / 1.3 var(--font-body); }
   .box > :last-child { border-bottom-left-radius: var(--radius-card); border-bottom-right-radius: var(--radius-card); }
 
-  /* the overview: the runs, which also choose the runs, beside the activity */
-  #overview { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(260px, 1fr); gap: 16px; margin-bottom: 16px; }
-  .compare #overview, .w-xs #overview { grid-template-columns: minmax(0, 1fr); }
-  #runs { overflow-x: auto; }
-  .compare #activity { display: none; }
-  .runs { margin: 0; }
-  .runs td, .runs th { padding: 5px 10px 5px 12px; white-space: nowrap; }
-  .runs th { font-size: 10px; }
-  .runs tbody tr { cursor: pointer; }
-  .runs tbody tr:last-child td { border-bottom: 0; }
-  .runs tr.off td { color: var(--text-tertiary); }
-  .runs tr.off .bars, .runs tr.off svg { opacity: .35; }
-  .runs td.setup { font: 400 var(--text-xs) / 1.3 var(--font-body); color: var(--text-secondary); }
-  .runs td.num, .runs th.num { text-align: right; }
-  .runs td.act { padding-top: 2px; padding-bottom: 2px; width: 100%; }
-  .runs td.act svg { display: block; }
-  .runs tfoot td { border-bottom: 0; padding-top: 0; }
-  .axisrow { position: relative; height: 14px; font: 400 10.5px / 14px var(--font-mono); color: var(--text-tertiary); }
-  .axisrow span { position: absolute; top: 0; }
-  .axisrow span:not(:first-child) { transform: translateX(-50%); }
-  .bars { display: flex; height: 6px; margin: 3px 0; border-radius: 3px; overflow: hidden; background: rgba(var(--ink-rgb), 0.05); }
-  .bars span { display: block; height: 100%; }
-  .words { font: 400 var(--text-mono-sm) / 1.2 var(--font-mono); }
-  .words b { font-weight: 500; }
-  .spread { display: flex; align-items: flex-end; gap: 1px; height: 18px; }
-  .spread span { width: 5px; background: var(--viz-ink-3); }
-  /* the columns a narrow pane leaves out */
-  .w-s .wide1, .w-s .wide2, .w-m .wide2 { display: none; }
-  #activity .body { padding: 8px 14px 10px; }
-
-  .legend { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; margin: 0 0 8px; font: 400 var(--text-xs) / 1 var(--font-body); color: var(--text-secondary); }
-  .legend .per { margin-left: 6px; color: var(--text-tertiary); white-space: nowrap; }
+  .legend { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; margin: 0; font: 400 var(--text-xs) / 1 var(--font-body); color: var(--text-secondary); }
   .legend .btn { margin-left: 4px; }
   .sw { display: inline-block; width: 8px; height: 8px; border-radius: 2px; flex: none; }
   .cbtn { gap: 7px; padding: 0 8px 0 10px; }
@@ -109,14 +77,11 @@
   .lmark { display: inline-block; flex: none; width: 12px; height: 12px; border-radius: 3px; border: 1.5px solid var(--mark); background: transparent; }
   .lmark.on { background: var(--mark); }
   .msep { height: 1px; margin: 4px 0; background: var(--border-hairline); }
+  .mnote { padding: 4px 8px 6px; color: var(--text-tertiary); }
   .pal { position: fixed; z-index: 60; display: grid; grid-template-columns: repeat(7, 20px); gap: 6px; padding: 10px; border-radius: var(--radius-card); background: var(--raised-bg); box-shadow: var(--raised-ring), 0 10px 28px rgba(var(--ink-rgb), .14); }
   .pal button { width: 20px; height: 20px; padding: 0; border: 0; border-radius: 4px; cursor: pointer; }
   .pal button:hover { transform: scale(1.12); }
   .pal button.cur { box-shadow: 0 0 0 2px var(--surface-card), 0 0 0 3.5px var(--text-primary); }
-  svg.chart { display: block; overflow: visible; cursor: crosshair; user-select: none; }
-  svg.chart text { font: 400 10.5px var(--font-mono); fill: var(--text-tertiary); }
-  svg.chart .base { stroke: var(--border-hairline); }
-  svg.chart .brush { fill: rgba(var(--ink-rgb), 0.07); stroke: var(--text-tertiary); stroke-dasharray: 2 2; }
 
   /* the filters over the list */
   #filters { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 12px; }
@@ -143,7 +108,7 @@
   .row > .ico { margin-top: 3px; }
   .row .t { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 6px; min-width: 0; }
   .row .title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 600 calc(var(--text-lg) + 1px) / 1.35 var(--font-body); color: var(--text-primary); }
-  .row:hover .title { color: var(--text-accent); }
+  .row:hover .title { text-decoration: underline; text-decoration-color: var(--border-strong); text-underline-offset: 3px; }
   .row .meta { display: flex; align-items: center; flex-wrap: wrap; gap: 2px 4px; margin-top: 3px; font-size: var(--text-xs); color: var(--text-tertiary); }
   .row .meta .sep::before { content: '·'; margin: 0 6px 0 2px; }
   .row .why { margin-top: 5px; padding-left: 8px; border-left: 2px solid var(--border-subtle); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-xs); color: var(--text-secondary); }
@@ -156,7 +121,7 @@
   .counts span { display: inline-flex; align-items: center; gap: 4px; min-width: 26px; }
   .counts .ico { width: 14px; height: 14px; }
   .lnk { padding: 0; border: 0; background: none; color: inherit; cursor: pointer; font: inherit; }
-  .lnk:hover { color: var(--text-accent); text-decoration: underline; }
+  .lnk:hover { text-decoration: underline; }
   .lnk.strong { color: var(--text-secondary); font-weight: 500; }
   .more { margin: 12px 16px; }
   .empty { padding: 32px 16px; text-align: center; color: var(--text-tertiary); }
@@ -167,13 +132,13 @@
   .lp::before { content: ''; width: 8px; height: 8px; border-radius: 50%; background: var(--c); }
 
   /* avatars: a person's initial on a neutral disc, so the labels keep the colours */
-  .av { position: relative; display: inline-grid; place-items: center; flex: none; width: 20px; height: 20px; border-radius: 50%; background: rgba(var(--ink-rgb), var(--a, .12)); box-shadow: 0 0 0 1.5px var(--surface-card); color: var(--text-primary); font: 600 10px / 1 var(--font-body); text-transform: uppercase; }
-  .av.s16 { width: 16px; height: 16px; font-size: 8.5px; }
-  .av.s32 { width: 32px; height: 32px; font-size: 13px; }
-  .av .v { position: absolute; right: -4px; bottom: -3px; display: grid; place-items: center; width: 12px; height: 12px; border-radius: 50%; background: var(--surface-card); }
-  .av .v .ico { width: 10px; height: 10px; stroke-width: 2; }
+  .avatar { position: relative; width: 20px; height: 20px; box-shadow: 0 0 0 1.5px var(--surface-card); font-size: 10px; }
+  .avatar.s16 { width: 16px; height: 16px; font-size: 8.5px; }
+  .avatar.s32 { width: 32px; height: 32px; font-size: 13px; }
+  .avatar .v { position: absolute; right: -4px; bottom: -3px; display: grid; place-items: center; width: 12px; height: 12px; border-radius: 50%; background: var(--surface-card); }
+  .avatar .v .ico { width: 10px; height: 10px; stroke-width: 2; }
   .avs { display: inline-flex; align-items: center; padding-left: 5px; }
-  .avs .av { margin-left: -5px; }
+  .avs .avatar { margin-left: -5px; }
   .who { display: inline-flex; align-items: center; gap: 6px; }
 
   /* the state of a pull request or an issue: a chip filled with the state's colour, with its icon */
@@ -184,19 +149,19 @@
   .ico { width: 16px; height: 16px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
   .ico.s12 { width: 12px; height: 12px; }
   .s-open { color: var(--status-positive); }
-  .s-merged, .s-fixed { color: var(--viz-6); }
-  .s-closed { color: var(--status-negative); }
+  .s-merged, .s-fixed { color: var(--text-primary); }
+  .s-closed { color: var(--viz-ink-3); }
   .s-thread { color: var(--text-secondary); }
   .inked .matrix td .cr { color: var(--text-secondary); }
 
   /* a diff's size as its added and removed lines, and five blocks in those shares */
   .dstat { display: inline-flex; align-items: center; gap: 6px; font: 500 var(--text-mono-sm) / 1 var(--font-mono); white-space: nowrap; }
   .dstat .p { color: var(--status-positive); }
-  .dstat .m { color: var(--status-negative); }
+  .dstat .m { color: var(--text-secondary); }
   .dstat .blk { display: inline-flex; gap: 1px; }
   .dstat .blk i { width: 7px; height: 7px; border-radius: 1px; background: rgba(var(--ink-rgb), .14); }
   .dstat .blk i.p { background: var(--status-positive); }
-  .dstat .blk i.m { background: var(--status-negative); }
+  .dstat .blk i.m { background: var(--viz-ink-3); }
 
   /* the compare grid: one row per issue, one column per chosen run */
   .grid { width: 100%; border-collapse: collapse; }
@@ -257,7 +222,7 @@
   .timeline::before { content: ''; position: absolute; left: 15px; top: 8px; bottom: 8px; border-left: 2px solid var(--border-hairline); }
   .it { position: relative; display: grid; grid-template-columns: 32px minmax(0, 1fr); column-gap: 12px; align-items: start; padding: 8px 0; }
   .it.focus { background: var(--surface-selected); border-radius: var(--radius-ui); }
-  .it > .av, .it > .badge { justify-self: center; }
+  .it > .avatar, .it > .badge { justify-self: center; }
   .badge { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; background: var(--bg-sub); box-shadow: 0 0 0 3px var(--surface-card); color: var(--text-secondary); }
   .badge.fill { background: var(--c); color: var(--surface-card); }
   .badge .ico { width: 15px; height: 15px; }
@@ -290,9 +255,9 @@
   .diff td.code { white-space: pre-wrap; overflow-wrap: anywhere; padding-left: 22px; text-indent: -14px; color: var(--text-primary); }
   .diff tr.add td { background: color-mix(in oklab, var(--status-positive) 12%, var(--surface-card)); }
   .diff tr.add td.ln { background: color-mix(in oklab, var(--status-positive) 20%, var(--surface-card)); }
-  .diff tr.del td { background: color-mix(in oklab, var(--status-negative) 11%, var(--surface-card)); }
-  .diff tr.del td.ln { background: color-mix(in oklab, var(--status-negative) 18%, var(--surface-card)); }
-  .diff tr.hunk td { background: color-mix(in oklab, var(--accent) 7%, var(--surface-card)); color: var(--text-tertiary); }
+  .diff tr.del td { background: var(--track-bg); }
+  .diff tr.del td.ln { background: rgba(var(--ink-rgb), 0.09); }
+  .diff tr.hunk td { background: var(--bg-sub); color: var(--text-tertiary); }
   .diff tr:last-child td { padding-bottom: 2px; }
   .diff + .diff { border-top: 1px solid var(--border-hairline); }
   .diff tr.by td { font-family: var(--font-body); color: var(--text-secondary); }
@@ -304,20 +269,34 @@
   .facts section:last-child { border-bottom: 0; }
   .facts .fline { display: flex; align-items: center; gap: 8px; min-height: 24px; }
   .facts .fline .grow { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .facts .fline > .chip { flex: none; }
   .facts .kv { display: grid; grid-template-columns: auto 1fr; gap: 4px 10px; }
   .facts .kv span:nth-child(odd) { color: var(--text-tertiary); }
   .facts .kv span:nth-child(even) { font: 400 var(--text-mono-sm) / 1.5 var(--font-mono); }
   .facts .pills { display: flex; flex-wrap: wrap; gap: 4px; }
   .runsgrid { display: grid; grid-template-columns: auto 1fr; gap: 6px 8px; align-items: center; }
   .runsgrid .cell { display: flex; flex-wrap: wrap; gap: 4px; }
+  .fbtn.field { display: inline-flex; align-items: center; gap: 6px; height: var(--control-sm); padding: 0 7px 0 9px; color: var(--text-primary); cursor: pointer; white-space: nowrap; font: 400 var(--text-ui-sm) / 1 var(--font-body); }
+  .fbtn.set { background: var(--surface-selected); }
+  .fbtn .n { color: var(--text-tertiary); font: 400 var(--text-mono-sm) / 1 var(--font-mono); }
+  .fchip { flex: none; gap: 5px; max-width: 280px; overflow: hidden; text-overflow: ellipsis; color: var(--text-secondary); font: 400 var(--text-mono-sm) / 1 var(--font-mono); }
+  .fchip .ico { width: 11px; height: 11px; color: var(--text-tertiary); }
+  .it .line .fchip { margin-left: auto; }
+  .rawlines { padding: 4px 0 16px; }
+  .rawhead { margin: 12px 0 6px; }
+  .rawfile { border: 1px solid var(--border-subtle); border-radius: var(--radius-ui); background: var(--bg-sub); padding: 6px 0; font: 400 var(--text-mono-sm) / 1.55 var(--font-mono); }
+  .rawline { display: grid; grid-template-columns: 44px minmax(0, 1fr); gap: 8px; padding: 1px 10px 1px 0; }
+  .rawline .ln { text-align: right; color: var(--text-tertiary); user-select: none; }
+  .rawline .tx { white-space: pre-wrap; overflow-wrap: anywhere; }
+  #filters .legend { justify-content: flex-end; }
+  .menu.runsmenu { min-width: min(440px, calc(100vw - 16px)); max-width: calc(100vw - 16px); }
+  .menu.runsmenu .mi.run .nm span { white-space: nowrap; }
 </style>
 </head>
 <body>
   <header id="top">
     <div class="toprow">
       <button class="btn btn-secondary btn-sm runbtn" id="runbtn"></button>
-      <div class="runchips" id="runchips"></div>
-      <span class="grow"></span>
       <div class="seg seg-track" id="mode">
         <button class="seg-opt active" data-mode="combined">Combined</button>
         <button class="seg-opt" data-mode="compare">Compare</button>
@@ -327,7 +306,6 @@
   </header>
   <div id="body">
     <main id="main">
-      <section id="overview"><div id="runs" class="box"></div><div id="activity" class="box"></div></section>
       <div id="filters"></div>
       <div id="list"></div>
     </main>
@@ -335,26 +313,23 @@
   </div>
   <div id="pop"></div>
 <script>
-  // Repository: several agent runs on one library, as a code forge shows them. The run selector at the top picks one run
-  // or several (All takes every run), and every panel follows the chosen runs. It opens on the overview: one row per
-  // run with its setup and measures, which also chooses the runs, beside the chosen runs' activity per time bin. The
-  // tabs switch between pull requests, issues, discussions and agents; the filters narrow the tab by any field, each to
-  // one value or several, with the count each value would give, and a drag across the activity narrows it to a time
-  // range. Participant and Activity pick records, so with a time range they keep the units where that agent did that
-  // in that range. The Colour menu colours the records in the activity, on the strips and on a page by their activity,
-  // who did it, their run, or their unit's state or area, and its legend shows a value alone on a click and hides it on
-  // a shift-click. Compare puts the chosen runs side by side: each run's activity in its row, and below it the pull
-  // requests or issues issue by issue, or the discussions and agents run by run. A row opens its unit's page beside the
-  // list (or in its place in a narrow pane): its conversation, and for a pull request its commits and the files they
-  // changed, as diffs.
+  // Repository: several agent runs on one library, as a code forge shows them. The runs menu at the top picks one run or
+  // several (All takes every run), and Combined | Compare beside it puts the chosen runs together or side by side. The
+  // tabs switch between pull requests, issues, discussions and agents; search and the tab's first filters narrow it, and
+  // More filters opens the rest, each to one value or several, with the count each value would give. Participant and
+  // Activity pick records, so they keep the units where that agent did that. The colour control at the end of the row
+  // colours the records on the strips and on a page by the labels or by a field, and its legend shows a value alone on a
+  // click and hides it on a shift-click. Compare puts the pull requests or issues issue by issue, or the discussions and
+  // agents run by run. A row opens its unit's page beside the list (or in its place in a narrow pane): its conversation,
+  // each entry with its file, for a pull request its commits and the files they changed as diffs, and Raw, the lines
+  // its records come from as their files hold them.
   //
-  // Labels: each unit's element carries view:<slug>/<key>, each record on a strip or a page its file ref, and each
-  // run's row view:<slug>/<run>, so thimble marks them. A unit whose records a label marks carries its pill, as the
-  // forge's labels. While a label is on it is the colouring, unless a field is chosen in the Colour menu, which colours
-  // this page alone and leaves the labels on: the page draws the records each of its values marks in that value's
-  // colour in the activity, the strips, the runs' bars and a page's badges, and the other categories in ink, all but
-  // the states' icons, which keep the forge's colours. A value's swatch opens thimble's palette. The filter is applied by the reader, so the page fetches again in
-  // thimble.onLabels.
+  // Labels: each unit's element carries view:<slug>/<key> and each record on a strip or a page its file ref, so thimble
+  // marks them. A unit whose records a label marks carries its pill, as the forge's labels. While a label is on it is
+  // the colouring, unless a field is chosen in the colour menu, which colours this page alone and leaves the labels on:
+  // the page draws the records each of its values marks in that value's colour on the strips and a page's badges, and
+  // the other categories in ink, all but the states' icons. A value's swatch opens thimble's palette. The filter is
+  // applied by the reader, so the page fetches again in thimble.onLabels.
   const slug = (thimble.view && thimble.view.slug) || 'repository'
   const $ = (s, root) => (root || document).querySelector(s)
   const NS = 'http://www.w3.org/2000/svg'
@@ -373,27 +348,31 @@
     agents: { name: 'Agents', icon: 'agent', noun: ['agent', 'agents'], states: null,
       selects: [['agent', 'Agent', 'agents'], ['action', 'Activity', 'activities'], ['reviewed', 'Reviewed', 'agents', 'Reviewed anyone']], sorts: [] },
   }
+  // the filters in the control row on each tab; the others open under More filters
+  const PRIMARY = { pulls: ['author', 'area'], issues: ['author', 'area'], discussions: ['actor'], agents: ['agent'] }
   const STATE_NAMES = { open: 'Open', merged: 'Merged', closed: 'Closed', fixed: 'Closed', thread: 'Discussion' }
   // what each action is drawn in, in the activity, on the strips and on a page's badges (reader.py ACTION)
   const ACTIONS = {
     opened: '--viz-ink-2', pushed: '--viz-ink-3', approved: '--viz-3', 'changes requested': '--viz-2', commented: '--viz-1',
-    posted: '--viz-5', merged: '--viz-6', fixed: '--viz-6', closed: '--viz-4', reopened: '--viz-ink-1', 'signed off': '--viz-ink-4',
+    posted: '--viz-5', merged: '--viz-ink-1', fixed: '--viz-ink-1', closed: '--viz-ink-3', reopened: '--viz-ink-2', 'signed off': '--viz-ink-4',
   }
-  const STATE_COLOURS = { open: '--status-positive', merged: '--viz-6', fixed: '--viz-6', closed: '--status-negative' }
+  const STATE_COLOURS = { open: '--status-positive', merged: '--text-primary', fixed: '--text-primary', closed: '--viz-ink-3' }
   // the states in ink on the runs' bars, while the records are coloured by a field whose colours they would repeat
   const STATE_INKS = { open: '--viz-ink-2', merged: '--viz-ink-3', fixed: '--viz-ink-3', closed: '--viz-ink-4' }
   // the fields the Colour menu offers on each tab (reader.py COLOURS), and the viz colours their values take in order
-  const COLOURS = { pulls: ['action', 'actor', 'run', 'state', 'area'], issues: ['action', 'actor', 'run', 'state', 'area'],
+  const COLOURS = { pulls: ['action', 'actor', 'author', 'reviewer', 'verdict', 'run', 'state', 'area', 'reason', 'flag'],
+    issues: ['action', 'actor', 'author', 'run', 'state', 'area', 'origin', 'reason'],
     discussions: ['action', 'actor', 'run'], agents: ['action', 'actor', 'run'] }
-  const FIELD_NAMES = { action: 'Activity', actor: 'Participant', run: 'Run', state: 'State', area: 'Area' }
-  const CAT = ['--viz-1', '--viz-2', '--viz-3', '--viz-6', '--viz-5', '--viz-7']
+  const FIELD_NAMES = { action: 'Activity', actor: 'Participant', author: 'Author', reviewer: 'Reviewer', verdict: 'Review', run: 'Run',
+    state: 'State', area: 'Area', reason: 'Close reason', origin: 'Origin', flag: 'Flag' }
+  const CAT = ['--viz-1', '--viz-2', '--viz-3', '--viz-4', '--viz-5', '--viz-6', '--viz-7']
   const AGENT_COLS = [['opened', 'Opened'], ['merged', 'Merged'], ['merges', 'Merges done'], ['approved', 'Approvals'], ['changes', 'Changes req.'], ['comments', 'Comments'], ['posts', 'Posts']]
 
   // what the analyst chose; every change refetches the tab. `filters` holds each filter's chosen values, `colour` the
   // field that colours the records, `byField` whether it does while labels are on, `hide` the label values whose records the legend hides ('none' for the records none
   // marks), and `page` the open unit's tab
   const S = { tab: 'pulls', runs: [], compare: false, q: '', filters: {}, sort: '', range: null, agentView: 'table', agentSort: 'merges',
-    colour: 'action', byField: false, hide: [], page: 'conversation' }
+    colour: 'action', byField: false, hide: [], page: 'conversation', more: false }
   let data = null // the reader's answer for the tab (reader.py _view)
   let unit = null // the open unit's page (reader.py _detail)
   let focusRef = null // the record a citation opened
@@ -455,7 +434,8 @@
   }
   const catIndex = (v) => data.colour.order.indexOf(v)
   function valueColour(f, v) {
-    if (f === 'action') return colourOf(v)
+    if (v === '') return 'var(--viz-ink-4)' // a record without the field is ink, as are the values past the viz colours
+    if (f === 'action' || f === 'verdict') return colourOf(v)
     if (f === 'state') return `var(${STATE_COLOURS[v] || '--viz-ink-3'})`
     const i = catIndex(v)
     return i >= 0 && i < CAT.length ? `var(${CAT[i]})` : 'var(--viz-ink-4)'
@@ -463,7 +443,7 @@
   const valueName = (f, v) => (v === '' ? `no ${FIELD_NAMES[f].toLowerCase()}` : String(v))
   // a record's part (reader.py _part) as a colour and a name
   const partColour = (p) => (labelOn() ? (p >= 0 ? classColour(p) : 'var(--viz-ink-4)') : valueColour(field(), p))
-  const partName = (p) => (labelOn() ? (p >= 0 ? className(p) : 'no label') : valueName(field(), p))
+  const partName = (p) => (labelOn() ? (p >= 0 ? className(p) : 'No label') : valueName(field(), p))
   // the actions' own colours stand on the icons only while the records are coloured by activity; the states' while
   // they are coloured by activity or state
   const actionInk = () => labelOn() || field() !== 'action'
@@ -514,7 +494,7 @@
   const ACTION_ICON = { opened: 'pr', pushed: 'commit', approved: 'approved', 'changes requested': 'changes', commented: 'comment', posted: 'comment', merged: 'merged', fixed: 'merged', closed: 'close', reopened: 'pr', 'signed off': 'agent' }
   // a person as the initial of their name on a neutral disc, its shade from the name, so it reads the same everywhere
   function avatar(name, size, verdict) {
-    const a = el('span', 'av' + (size ? ` s${size}` : ''), String(name || '?').replace(/[^a-z0-9]/gi, '').slice(0, 1) || '?')
+    const a = el('span', 'avatar' + (size ? ` s${size}` : ''), String(name || '?').replace(/[^a-z0-9]/gi, '').slice(0, 1) || '?')
     let h = 0
     for (const ch of String(name || '')) h = (h * 31 + ch.charCodeAt(0)) >>> 0
     a.style.setProperty('--a', (0.08 + (h % 5) * 0.04).toFixed(2))
@@ -593,8 +573,6 @@
     document.body.classList.toggle('inked', inked())
     document.body.classList.toggle('compare', S.compare)
     drawTop()
-    drawRuns()
-    drawActivity()
     drawFilters()
     drawList()
     drawPop()
@@ -615,21 +593,11 @@
       pal = null
       drawPop()
     }
-    const chips = $('#runchips')
-    chips.replaceChildren()
-    if (!allChosen()) {
-      const all = el('button', 'btn btn-ghost btn-sm', 'All runs')
-      all.onclick = () => {
-        S.runs = []
-        load()
-      }
-      chips.append(all)
-    }
     const box = $('#tabs')
     box.replaceChildren(...Object.entries(TABS).map(([key, t]) => {
       const btn = el('button', key === S.tab ? 'on' : '')
       const inner = el('span')
-      inner.append(icon(t.icon), t.name, el('span', 'count', String(data.tabs[key])))
+      inner.append(icon(t.icon), t.name, el('span', 'chip chip-tone-neutral', String(data.tabs[key])))
       btn.append(inner)
       btn.onclick = () => {
         if (S.tab === key) return
@@ -645,9 +613,11 @@
     const all = allChosen()
     const rows = data.runs.map((r) => {
       const on = data.chosen.includes(r.run)
-      return `<div class="mi run" data-act="onlyrun" data-run="${esc(r.run)}"><span class="tick ${on ? 'on' : ''}" data-act="togglerun" data-run="${esc(r.run)}" role="checkbox" aria-checked="${on}" title="Add or remove this run">${on ? CHECK : ''}</span><span class="nm"><b>${esc(r.run)}</b><span>${esc(setup(r))}</span></span><span class="n">${Math.round(r.hours * 10) / 10}h</span></div>`
+      const day = r.started ? clock(r.started).split(' ').slice(0, 2).join(' ') : ''
+      const what = `${r.team} agents, ${r.approvals} approval${r.approvals === 1 ? '' : 's'} to merge · from ${r.source}`
+      return `<div class="mi run" data-act="onlyrun" data-run="${esc(r.run)}" title="Click for this run alone"><span class="tick ${on ? 'on' : ''}" data-act="togglerun" data-run="${esc(r.run)}" role="checkbox" aria-checked="${on}" title="Add or remove this run">${on ? CHECK : ''}</span><span class="nm"><b>${esc(r.run)}${day ? ` · ${esc(day)}` : ''}</b><span>${esc(what)}</span></span><span class="n">${plural(r.n || 0, TABS[S.tab].noun)}<br>${plural(r.files, ['file', 'files'])}</span></div>`
     }).join('')
-    return `<div class="menu" id="menu" data-anchor-name="Run selector"><div class="mh">Runs</div><button class="mi" data-act="allruns"><span class="ck">${all ? CHECK : ''}</span>All runs<span class="n">${data.runs.length}</span></button><div class="msep"></div>${rows}</div>`
+    return `<div class="menu runsmenu" id="menu" data-anchor-name="Run selector"><div class="mh">Runs</div><button class="mi" data-act="allruns"><span class="ck">${all ? CHECK : ''}</span>All runs<span class="n">${data.runs.length}</span></button><div class="msep"></div>${rows}</div>`
   }
 
   // A run's row toggles the run; with every run chosen it takes that run alone, as a legend does, and the last run left
@@ -667,278 +637,6 @@
     load()
   }
 
-  // the colour of the number of a run's units a label marks: its value's, while one value alone is on
-  const markedColour = () => (data.classes.length === 1 ? classColour(0) : 'var(--text-primary)')
-  // a run's units as a bar of their states in words, or while a label is on the part each of its values marks
-  function stateBar(parts) {
-    return (r, max) => {
-      const box = el('div')
-      const bars = el('div', 'bars')
-      bars.style.width = `${Math.max(8, Math.round((r.n / Math.max(1, max)) * 100))}%`
-      const words = el('div', 'words')
-      if (labelOn()) {
-        r.classes.forEach((n, i) => {
-          if (!n) return
-          const m = el('span')
-          m.style.cssText = `flex:${n};background:${classColour(i)}`
-          bars.append(m)
-        })
-        const rest = el('span')
-        rest.style.cssText = `flex:${Math.max(0, r.n - r.marked)};background:var(--viz-ink-4)`
-        bars.append(rest)
-        const b = el('b', null, String(r.marked))
-        b.style.color = markedColour()
-        words.append(b, ` of ${r.n}`)
-      } else {
-        for (const p of parts) {
-          if (!r[p]) continue
-          const s = el('span')
-          s.style.cssText = `flex:${r[p]};background:${stateColour(p)}`
-          bars.append(s)
-        }
-        const shown = parts.filter((p) => r[p])
-        shown.forEach((p, i) => {
-          const b = el('b', null, String(r[p]))
-          b.style.color = stateColour(p)
-          words.append(b, ` ${p}${i < shown.length - 1 ? ' · ' : ''}`)
-        })
-        if (!shown.length) words.append('none')
-      }
-      box.append(bars, words)
-      return box
-    }
-  }
-  const num = (key, fmt) => (r) => (r[key] == null ? '–' : fmt ? fmt(r[key]) : String(r[key]))
-  // each tab's measures per run: a head and a cell, or a count that narrows the list to its run and to a flag or a
-  // filter's value; a narrow pane in compare mode leaves out the `wide1` columns, and `wide2` columns need a wide pane
-  const RUN_COLS = {
-    pulls: [
-      { head: 'Pull requests', cell: stateBar(['merged', 'closed', 'open']) },
-      { head: 'To merge', cell: num('to_merge', dur), num: true },
-      { head: 'First review', cell: num('first_review', dur), num: true, cls: 'wide1' },
-      { head: 'Reviews each', cell: num('reviews', (v) => v.toFixed(1)), num: true, cls: 'wide1' },
-      { head: 'Self-merged', flag: 'merged by its author', num: true, cls: 'wide2' },
-      { head: 'Merged over changes', flag: 'merged over a change request', num: true, cls: 'wide2' },
-      { head: 'Pushed after approval', flag: 'pushed after its last approval', num: true, cls: 'wide2' },
-    ],
-    issues: [
-      { head: 'Issues', cell: stateBar(['fixed', 'closed', 'open']) },
-      { head: 'To fix', cell: num('to_fix', dur), num: true },
-      { head: 'Found in run', filter: ['origin', 'found during the run'], key: 'found', num: true, cls: 'wide1' },
-      { head: 'Several PRs', key: 'several', num: true, cls: 'wide1' },
-    ],
-    discussions: [
-      { head: 'Discussions', cell: (r) => countWords(r.n, r.marked) },
-      { head: 'Posts', cell: num('posts'), num: true },
-      { head: 'Posting', cell: (r) => `${r.posters} of ${r.team}`, num: true },
-    ],
-    agents: [
-      { head: 'Reviews by agent', cell: (r) => spread(r.spread) },
-      { head: 'Top share', cell: num('top', (v) => `${Math.round(v * 100)}%`), num: true },
-      { head: 'Merges', cell: num('merges'), num: true, cls: 'wide1' },
-      { head: 'Approved each other', cell: (r) => `${r.mutual} pair${r.mutual === 1 ? '' : 's'}`, num: true, cls: 'wide1' },
-    ],
-  }
-  function countWords(n, marked) {
-    const box = el('div', 'words')
-    if (labelOn()) {
-      const b = el('b', null, String(marked))
-      b.style.color = markedColour()
-      box.append(b, ` of ${n}`)
-    } else box.append(el('b', null, String(n)))
-    return box
-  }
-  function spread(values) {
-    const box = el('div', 'spread')
-    const max = Math.max(1, ...values)
-    for (const v of values) {
-      const s = el('span')
-      s.style.height = `${Math.max(1, Math.round((v / max) * 18))}px`
-      s.title = `${v} reviews`
-      box.append(s)
-    }
-    return box
-  }
-
-  function drawRuns() {
-    const cols = RUN_COLS[S.tab]
-    const table = el('table', 'table runs')
-    const head = el('tr')
-    head.append(el('th', null, 'Run'), el('th', null, 'Setup'))
-    for (const c of cols) head.append(el('th', [c.num ? 'num' : '', c.cls || ''].join(' ').trim(), c.head))
-    if (S.compare) head.append(el('th', null, `Activity, per ${data.activity.bin} min`))
-    const thead = el('thead')
-    thead.append(head)
-    const body = el('tbody')
-    const max = Math.max(1, ...data.runs.map((r) => r.n))
-    const on = chosen()
-    const ymax = S.compare ? activityMax(data.activity.rows) : 0
-    for (const r of data.runs) {
-      const tr = el('tr', on.has(r.run) ? '' : 'off')
-      tr.dataset.anchor = unitRef(r.run)
-      tr.dataset.anchorName = `the run ${r.run}, ${setup(r)}`
-      const chipTd = el('td')
-      const chip = el('button', 'chip chip-sans chip-tone-neutral chip-act' + (on.has(r.run) && !allChosen() ? ' active' : ''), r.run)
-      if (field() === 'run' && !labelOn()) {
-        const sw = el('i', 'sw')
-        sw.style.background = valueColour('run', r.run)
-        chip.prepend(sw)
-      }
-      chipTd.append(chip)
-      tr.append(chipTd, el('td', 'setup', setup(r)))
-      for (const c of cols) {
-        const td = el('td', [c.num ? 'num' : '', c.cls || ''].join(' ').trim())
-        if (c.flag || c.filter) {
-          const n = r[c.flag || c.key]
-          if (n) {
-            const b = el('button', 'btn btn-ghost btn-sm', String(n))
-            b.onclick = (e) => {
-              e.stopPropagation()
-              onlyRun(r.run, c.flag ? { flag: [c.flag] } : { [c.filter[0]]: [c.filter[1]] })
-            }
-            td.append(b)
-          } else td.append(el('span', 'dim', '0'))
-        } else if (c.key) td.append(String(r[c.key]))
-        else td.append(c.cell(r, max))
-        tr.append(td)
-      }
-      if (S.compare) {
-        const td = el('td', 'act')
-        td.append(chart(data.activity.rows.filter((x) => x[0] === r.run), { width: RUN_ACTIVITY_WIDTH, height: 30, ymax, axis: false, fill: true }))
-        tr.append(td)
-      }
-      tr.onclick = () => toggleRun(r.run)
-      body.append(tr)
-    }
-    table.append(thead, body)
-    const box = $('#runs')
-    const bh = el('div', 'box-head')
-    bh.append(el('h3', null, 'Runs'), el('span', 'dim', allChosen() ? `all ${data.runs.length}` : `${data.chosen.length} of ${data.runs.length} chosen`))
-    if (S.compare) {
-      const foot = el('tfoot')
-      const tr = el('tr')
-      tr.append(el('td'), el('td'), ...cols.map((c) => el('td', c.cls || '')))
-      const axis = el('td', 'act')
-      axis.append(axisRow())
-      tr.append(axis)
-      foot.append(tr)
-      table.append(foot)
-      bh.append(el('span', 'grow'), legend())
-    }
-    box.replaceChildren(bh, table)
-    // the columns a narrow pane may leave out go one by one, the last of the wider ones first, while the table is
-    // wider than its box
-    const optional = [...cols.keys()].filter((i) => cols[i].cls).sort((a, b) => cols[b].cls.localeCompare(cols[a].cls) || b - a)
-    for (const i of optional) {
-      if (table.offsetWidth <= box.clientWidth) break
-      for (const row of table.rows) if (row.cells[i + 2]) row.cells[i + 2].style.display = 'none'
-    }
-  }
-
-  // ------------------------------------------------------------------------------------------------ activity
-  // The chosen runs' kept records per time bin since each run started, stacked by their part: the colour field's value,
-  // or while a label is on the first of its values that marks them. A drag across it narrows every panel to that time
-  // range; a click takes one bin.
-  const RUN_ACTIVITY_WIDTH = 400 // the viewBox width of a run's activity in compare mode, drawn at its cell's width
-  function binsOf(rows) {
-    const bins = new Map()
-    for (const [, b, part, n] of rows) {
-      const parts = bins.get(b) || new Map()
-      parts.set(part, (parts.get(part) || 0) + n)
-      bins.set(b, parts)
-    }
-    return bins
-  }
-  function activityMax(rows) {
-    const per = new Map()
-    for (const [run, b, , n] of rows) per.set(run + '/' + b, (per.get(run + '/' + b) || 0) + n)
-    return Math.max(1, ...per.values())
-  }
-  // the parts bottom first: the labels' values in thimble's order, the actions or states in their own, the rest by order
-  function partsOrder(present) {
-    const f = field()
-    const order = labelOn() ? [...data.classes.map((_, i) => i), -1] : f === 'action' ? Object.keys(ACTIONS) : f === 'state' ? Object.keys(STATE_COLOURS) : data.colour.order
-    return [...order.filter((p) => present.has(p)), ...[...present].filter((p) => !order.includes(p))]
-  }
-  function chart(rows, { width, height, ymax, axis, fill }) {
-    const a = data.activity
-    const nb = Math.max(1, Math.ceil((a.hours * 60) / a.bin))
-    const left = axis ? 24 : 0
-    const bottom = axis ? 16 : 0
-    const w = width - left
-    const bw = w / nb
-    const h = height - bottom
-    const bins = binsOf(rows)
-    const max = ymax || Math.max(1, ...[...bins.values()].map((p) => [...p.values()].reduce((s, v) => s + v, 0)))
-    const s = fill
-      ? svg('svg', { class: 'chart', width: '100%', height, viewBox: `0 0 ${width} ${height}`, preserveAspectRatio: 'none' })
-      : svg('svg', { class: 'chart', width, height, viewBox: `0 0 ${width} ${height}` })
-    if (axis) {
-      svg('line', { class: 'base', x1: left, x2: width, y1: h + 0.5, y2: h + 0.5 }, s)
-      svg('text', { x: left - 5, y: 8, 'text-anchor': 'end' }, s).textContent = String(max)
-      svg('text', { x: left - 5, y: h, 'text-anchor': 'end' }, s).textContent = '0'
-      const step = a.hours > 12 ? 4 : a.hours > 6 ? 2 : 1
-      for (let t = 0; t <= a.hours; t += step) {
-        const x = left + ((t * 60) / a.bin) * bw
-        svg('text', { x, y: height - 3, 'text-anchor': t === 0 ? 'start' : 'middle' }, s).textContent = `${t}h`
-      }
-    }
-    const order = partsOrder(new Set(rows.map((r) => r[2])))
-    for (const [b, parts] of bins) {
-      let y = h
-      for (const p of order) {
-        const n = parts.get(p)
-        if (!n) continue
-        const bh = (n / max) * (h - 2)
-        y -= bh
-        const r = svg('rect', { x: left + b * bw + 0.5, y, width: Math.max(1, bw - 1), height: bh, style: `fill:${partColour(p)}` }, s)
-        svg('title', {}, r).textContent = `${since((b * a.bin) / 60)} to ${since(((b + 1) * a.bin) / 60)}: ${n} ${partName(p)}`
-      }
-    }
-    brush(s, { left, h, nb, bw })
-    return s
-  }
-  function brush(s, { left, h, nb, bw }) {
-    const a = data.activity
-    const hoursAt = (x) => Math.max(0, Math.min(nb, (x - left) / bw)) * (a.bin / 60)
-    const xAt = (hours) => left + ((hours * 60) / a.bin) * bw
-    const rect = svg('rect', { class: 'brush', y: 0, height: h, x: 0, width: 0, visibility: 'hidden' }, s)
-    const show = (h0, h1) => {
-      rect.setAttribute('x', xAt(h0))
-      rect.setAttribute('width', Math.max(1, xAt(h1) - xAt(h0)))
-      rect.setAttribute('visibility', 'visible')
-    }
-    if (S.range) show(S.range[0], S.range[1])
-    let from = null
-    // pointer positions in the drawing's own units, which a chart that fills its cell scales
-    const local = (e) => {
-      const box = s.getBoundingClientRect()
-      return ((e.clientX - box.left) * s.viewBox.baseVal.width) / Math.max(1, box.width)
-    }
-    s.addEventListener('pointerdown', (e) => {
-      if (e.button !== 0) return
-      from = local(e)
-      s.setPointerCapture(e.pointerId)
-      e.stopPropagation()
-    })
-    s.addEventListener('pointermove', (e) => {
-      if (from == null) return
-      const x = local(e)
-      show(hoursAt(Math.min(from, x)), hoursAt(Math.max(from, x)))
-    })
-    s.addEventListener('click', (e) => e.stopPropagation())
-    s.addEventListener('pointerup', (e) => {
-      if (from == null) return
-      const x = local(e)
-      const snap = (v, up) => (Math[up ? 'ceil' : 'floor']((v * 60) / a.bin) * a.bin) / 60
-      let h0 = snap(hoursAt(Math.min(from, x)), false)
-      let h1 = snap(hoursAt(Math.max(from, x)), true)
-      if (h1 - h0 < a.bin / 60) h1 = h0 + a.bin / 60
-      from = null
-      S.range = [Math.round(h0 * 1000) / 1000, Math.round(h1 * 1000) / 1000]
-      load()
-    })
-  }
   // the Colour menu's button and the legend of its colours: a click shows one value alone, or every value again when it
   // was alone, and a shift-click hides it or shows it again
   function legend() {
@@ -947,7 +645,7 @@
     let hiding = false
     if (labelOn()) {
       data.classes.forEach((c, i) => box.append(legendItem(classColour(i), className(i), c.n, classKey(c), S.hide.includes(classKey(c)), labelBy(c.label), c.value)))
-      box.append(legendItem('var(--viz-ink-4)', 'no label', data.none, 'none', S.hide.includes('none')))
+      if (data.none || S.hide.includes('none')) box.append(legendItem('var(--viz-ink-4)', 'No label', data.none, 'none', S.hide.includes('none')))
       hiding = S.hide.length > 0
     } else {
       const f = field(), own = data.colour.filter, chose = own ? S.filters[own] || [] : []
@@ -955,8 +653,10 @@
       const can = f === 'run' || !!own
       const ownColours = f === 'action' || f === 'state'
       const rest = []
+      let none = null // the records without the field, last and never folded into the rest
       for (const [v, n] of data.colour.values) {
-        if (!ownColours && (catIndex(v) < 0 || catIndex(v) >= CAT.length)) rest.push(n)
+        if (v === '') none = legendItem(valueColour(f, v), valueName(f, v), n, v, off(v), null, null, can)
+        else if (!ownColours && (catIndex(v) < 0 || catIndex(v) >= CAT.length)) rest.push(n)
         else box.append(legendItem(valueColour(f, v), valueName(f, v), n, v, off(v), null, null, can))
       }
       if (rest.length) {
@@ -966,6 +666,7 @@
         more.append(sw, `${rest.length} more`, el('span', 'n', String(rest.reduce((a, b) => a + b, 0))))
         box.append(more)
       }
+      if (none) box.append(none)
       hiding = f === 'run' ? !allChosen() : chose.length > 0
     }
     if (hiding) {
@@ -979,7 +680,6 @@
       }
       box.append(all)
     }
-    box.append(el('span', 'per', `per ${data.activity.bin} min`))
     return box
   }
   function colourButton() {
@@ -1011,7 +711,7 @@
     it.title = 'Click: only this · Shift-click: hide'
     it.onclick = (e) => {
       e.stopPropagation()
-      legendClick(v, e.shiftKey)
+      legendClick(v, e.shiftKey || e.altKey)
     }
     return it
   }
@@ -1066,6 +766,7 @@
   }
   function previewColours(f) {
     if (f === 'action') return ['opened', 'approved', 'changes requested', 'merged'].map(colourOf)
+    if (f === 'verdict') return ['approved', 'changes requested', 'commented'].map(colourOf)
     if (f === 'state') return ['open', 'merged', 'closed'].map((st) => `var(${STATE_COLOURS[st]})`)
     return CAT.slice(0, 4).map((c) => `var(${c})`)
   }
@@ -1073,25 +774,28 @@
     const fields = COLOURS[S.tab].map((f) => {
       const on = !labelOn() && field() === f
       const sws = previewColours(f).map((c) => `<i class="sw" style="width:5px;border-radius:1px;background:${c}"></i>`).join('')
-      return `<button class="mi" data-act="field" data-f="${f}"><span class="ck">${on ? CHECK : ''}</span>${FIELD_NAMES[f]}<span class="n">${sws}</span></button>`
+      return `<button class="mi" data-act="field" data-f="${f}"><span class="ck">${on ? CHECK : ''}</span>${esc(FIELD_NAMES[f])}<span class="n">${sws}</span></button>`
     }).join('')
-    // every label over files, as thimble lists them; a click turns one on or off in thimble's Labels pane
+    // every label over files, as thimble lists them, those over these files first; a click turns one on or off
     const all = labelState.all || labelState.labels.map((l) => ({ ...l, on: true }))
     const sw = (l, v) => {
       const i = `<i class="sw" style="background:${esc(v.colour)}"></i>`
       return l.id && (labelState.palette || []).length && thimble.setLabelColour
         ? `<span class="swb" role="button" title="Change colour" data-act="palette" data-id="${esc(l.id)}" data-value="${esc(v.name)}">${i}</span>` : i
     }
-    const rows = all.map((l) => {
+    const row = (l) => {
       const lit = (l.values || []).filter((v) => v.highlight !== false)
       const box = `<span class="lmark ${l.on ? 'on' : ''}" style="--mark:${esc(l.colour)}"></span>`
       const main = `<button class="mi" data-act="label" data-id="${esc(l.id || '')}" data-label="${esc(l.id || '')}" ${l.id && thimble.setLabel ? '' : 'disabled'}><span class="ck">${box}</span><span class="nm">${esc(l.name)}</span>
         <span class="n">${l.count == null ? '' : l.count}</span>${lit.length === 1 ? sw(l, lit[0]) : ''}</button>`
       const subs = l.on && lit.length > 1 ? lit.map((v) => `<div class="mi sub" data-label="${esc(l.id || '')}"><span class="nm">${esc(v.name)}</span><span class="n"></span>${sw(l, v)}</div>`).join('') : ''
       return main + subs
-    }).join('')
+    }
+    const here = all.filter((l) => l.here).map(row).join('')
+    const other = all.filter((l) => !l.here).map(row).join('')
+    const rows = `<div class="mh">Labels over these files</div>${here || '<div class="mnote">No label covers these files yet</div>'}${other ? `<div class="mh">Other labels</div>${other}` : ''}`
     const make = thimble.newLabel ? '<div class="msep"></div><button class="mi" data-act="newlabel"><span class="ck"><svg class="ico s12" viewBox="0 0 12 12"><path d="M6 2.5v7M2.5 6h7"/></svg></span>New label…</button>' : ''
-    return `<div class="menu" id="menu" data-anchor-name="Colour menu"><div class="mh">Fields</div>${fields}${rows ? `<div class="msep"></div><div class="mh">Labels</div>${rows}` : ''}${make}</div>`
+    return `<div class="menu" id="menu" data-anchor-name="Colour menu"><div class="mh">Fields</div>${fields}<div class="msep"></div>${rows}${make}</div>`
   }
   function palHtml() {
     const l = (labelState.all || labelState.labels || []).find((x) => x.id === pal.id)
@@ -1127,31 +831,6 @@
       p.style.top = `${Math.max(8, Math.min(y, innerHeight - p.offsetHeight - 8))}px`
     }
   }
-  // the hours under the runs' activity in compare mode, placed as a share of the column's width
-  function axisRow() {
-    const a = data.activity
-    const box = el('div', 'axisrow')
-    const span = Math.max(1, Math.ceil((a.hours * 60) / a.bin)) * (a.bin / 60)
-    const step = a.hours > 12 ? 4 : a.hours > 6 ? 2 : 1
-    for (let t = 0; t <= a.hours; t += step) {
-      const tick = el('span', null, `${t}h`)
-      tick.style.left = `${(t / span) * 100}%`
-      box.append(tick)
-    }
-    return box
-  }
-  function drawActivity() {
-    const box = $('#activity')
-    if (S.compare) return box.replaceChildren()
-    const head = el('div', 'box-head')
-    head.append(el('h3', null, 'Activity'), el('span', 'dim', allChosen() ? 'every run' : data.chosen.join(', ')))
-    const body = el('div', 'body')
-    box.replaceChildren(head, body)
-    const width = Math.max(240, body.clientWidth - 28 || 300)
-    const narrow = $('#main').classList.contains('w-s')
-    body.append(legend(), chart(data.activity.rows, { width, height: narrow ? 92 : 112, axis: true }))
-  }
-
   // ------------------------------------------------------------------------------------------------ filters
   function facet(name) {
     return (data.facets && data.facets[name]) || []
@@ -1178,9 +857,12 @@
     parts.push(wrap)
     // A select adds the value picked to its filter's values, or removes one already chosen (ticked); its closed face
     // names the field and the chosen values, and Any clears them.
-    for (const [name, what, many, any] of t.selects) {
+    const first = PRIMARY[S.tab] || []
+    const rest = t.selects.filter(([name]) => !first.includes(name) && facet(name).length)
+    const set = rest.filter(([name]) => (S.filters[name] || []).length).length
+    for (const [name, what, many, any] of [...t.selects.filter(([n]) => first.includes(n)), ...rest]) {
       const values = facet(name)
-      if (!values.length) continue
+      if (!values.length || (!first.includes(name) && !S.more)) continue
       const picked = S.filters[name] || []
       const sel = el('select', 'field' + (picked.length ? ' set' : ''))
       sel.setAttribute('aria-label', what)
@@ -1198,7 +880,19 @@
       }
       sel.value = picked.length ? 'chosen' : ''
       sel.onchange = () => (sel.value ? toggleFilter(name, sel.value) : setFilter(name, null))
+      if (!first.includes(name)) sel.dataset.rest = '1'
       parts.push(sel)
+    }
+    if (rest.length) {
+      const m = el('button', 'field fbtn' + (set ? ' set' : ''))
+      m.innerHTML = `${S.more ? 'Fewer filters' : 'More filters'}${set ? ` <span class="n">${set}</span>` : ''}${CARET}`
+      m.setAttribute('aria-expanded', String(!!S.more))
+      m.onclick = () => {
+        S.more = !S.more
+        drawFilters()
+      }
+      const firstRest = parts.findIndex((x) => x.dataset && x.dataset.rest)
+      parts.splice(firstRest >= 0 ? firstRest : parts.length, 0, m)
     }
     if (S.range) {
       const c = el('button', 'chip chip-sans chip-tone-neutral chip-act active', `${since(S.range[0])} to ${since(S.range[1])} ✕`)
@@ -1218,6 +912,7 @@
       parts.push(clear)
     }
     const hadFocus = document.activeElement && document.activeElement.type === 'search'
+    parts.push(el('span', 'grow'), legend())
     box.replaceChildren(...parts)
     if (hadFocus) {
       search.focus()
@@ -1274,7 +969,10 @@
     if (t.sorts.length) {
       const sel = el('select', 'field')
       sel.setAttribute('aria-label', 'Sort')
-      for (const [v, text] of t.sorts) sel.append(new Option(`Sort: ${text}`, v, false, (S.sort || t.sorts[0][0]) === v))
+      for (const [v, text] of t.sorts) {
+        const o = new Option(`Sort: ${text}`, v, false, (S.sort || t.sorts[0][0]) === v)
+        sel.append(o)
+      }
       sel.onchange = () => {
         S.sort = sel.value
         load()
@@ -1724,16 +1422,27 @@
     const b = el('span', 'badge')
     const ic = icon(x.kind === 'issue' ? 'issue' : fixes ? 'fixed' : ACTION_ICON[x.action] || 'comment')
     b.append(ic)
-    const unmarked = labelOn() && x.part < 0
+    const unmarked = labelOn() && x.colour_key < 0
     if (!unmarked && !(field() === 'action' && !labelOn() && ['pushed', 'commented', 'opened', 'posted'].includes(x.action))) {
       b.classList.add('fill')
-      b.style.setProperty('--c', partColour(x.part))
+      b.style.setProperty('--c', partColour(x.colour_key))
     }
     return b
   }
   // the label value that marks a record, as its pill on the conversation's line
   function markOf(x) {
-    return labelOn() && x.part >= 0 ? labelPill(x.part) : null
+    return labelOn() && x.colour_key >= 0 ? labelPill(x.colour_key) : null
+  }
+  // a record's file and line, which opens in the File browser at that line
+  function fileChip(ref) {
+    const b = el('button', 'chip chip-tone-neutral chip-act fchip')
+    b.append(icon('file'), ref)
+    b.title = 'Open in the File browser'
+    b.onclick = (e) => {
+      e.stopPropagation()
+      thimble.navigate(ref, { browser: true })
+    }
+    return b
   }
   function event(x, links) {
     const words = x.text && x.kind !== 'commit'
@@ -1748,9 +1457,10 @@
       e.append(avatar(x.author, 32))
       const box = el('div', 'cbox')
       const ch = el('div', 'ch')
-      ch.append(el('b', null, x.author), said(x, links), when)
+      ch.append(el('b', null, x.author), said(x, links), when, el('span', 'grow'))
       const m = markOf(x)
-      if (m) ch.append(el('span', 'grow'), m)
+      if (m) ch.append(m)
+      ch.append(fileChip(x.ref))
       const body = el('div', 'cb')
       body.append(linkText(x.text, links))
       box.append(ch, body)
@@ -1763,6 +1473,7 @@
     line.append(avatar(x.author, 16), el('b', null, x.author), said(x, links), when)
     const m = markOf(x)
     if (m) line.append(m)
+    line.append(fileChip(x.ref))
     col.append(line)
     if (x.kind === 'commit') {
       const c = el('div', 'commit')
@@ -1776,14 +1487,20 @@
     e.append(col)
     return e
   }
+  // a section of a unit's facts; its title is [name, the field it shows] where that field is one the reader made
   function factsSection(title, ...content) {
     const s = el('section')
-    s.append(el('h4', null, title), ...content)
+    const [name, fieldName] = Array.isArray(title) ? title : [title]
+    const h = el('h4', null, name)
+    s.append(h, ...content)
     return s
   }
   function kv(pairs) {
     const box = el('div', 'kv')
-    for (const [k, v] of pairs) box.append(el('span', null, k), el('span', null, v))
+    for (const [k, v, fieldName] of pairs) {
+      const name = el('span', null, k)
+      box.append(name, el('span', null, v))
+    }
     return box
   }
   function unitChip(p, tab) {
@@ -1940,6 +1657,36 @@
     if (!files.length) wrap.append(el('div', 'empty', 'No files changed.'))
     return wrap
   }
+  // the unit's lines as their files hold them, grouped by file, each file's chip opening it in the File browser
+  const rawOf = new Map()
+  function rawLines(u) {
+    const box = el('div', 'rawlines')
+    const got = rawOf.get(u.key)
+    if (!got) {
+      box.append(el('div', 'dim', 'Reading the lines'))
+      thimble.fetch({ op: 'raw', key: u.key }).then((lines) => {
+        rawOf.set(u.key, lines || [])
+        if (unit && unit.key === u.key && S.page === 'raw') drawDetail()
+      })
+      return box
+    }
+    let path = null, pre = null
+    for (const x of got) {
+      const p = x.ref.slice(0, x.ref.lastIndexOf('#'))
+      if (p !== path) {
+        path = p
+        const h = el('div', 'rawhead')
+        h.append(fileChip(p))
+        pre = el('div', 'rawfile')
+        box.append(h, pre)
+      }
+      const line = el('div', 'rawline')
+      line.dataset.anchor = x.ref
+      line.append(el('span', 'ln', x.ref.slice(x.ref.lastIndexOf('#L') + 2)), el('span', 'tx', x.text))
+      pre.append(line)
+    }
+    return box
+  }
   function drawDetail() {
     const box = $('#detail')
     if (!unit) return box.replaceChildren()
@@ -1996,14 +1743,17 @@
     sub.append(runChip)
     head.append(h1, sub)
     // a pull request's own tabs: its conversation, its commits and the files they changed
-    if (u.tab === 'pulls') {
+    {
       const tabs = el('nav', 'nav')
       const conv = u.records.filter((x) => x.kind !== 'commit').length
-      const files = filesOf(u).length
-      for (const [key, name, ic, n] of [['conversation', 'Conversation', 'comment', conv], ['commits', 'Commits', 'commit', cs.length], ['files', 'Files changed', 'file', files]]) {
+      const files = u.tab === 'pulls' ? filesOf(u).length : 0
+      const pages = u.tab === 'pulls' ? [['conversation', 'Conversation', 'comment', conv], ['commits', 'Commits', 'commit', cs.length], ['files', 'Files changed', 'file', files]] : [['conversation', 'Conversation', 'comment', conv]]
+      pages.push(['raw', 'Raw', 'file', null])
+      for (const [key, name, ic, n] of pages) {
         const b = el('button', S.page === key ? 'on' : '')
         const inner = el('span')
-        inner.append(icon(ic), name, el('span', 'count', String(n)))
+        inner.append(icon(ic), name)
+        if (n != null) inner.append(el('span', 'chip chip-tone-neutral', String(n)))
         b.append(inner)
         b.onclick = () => {
           S.page = key
@@ -2012,13 +1762,14 @@
         tabs.append(b)
       }
       head.append(tabs)
-    } else head.style.paddingBottom = '16px'
+    }
 
     const main = el('div')
     const facts = el('div', 'facts')
     const links = u.links || {}
-    const page = u.tab === 'pulls' ? S.page : 'conversation'
-    if (page === 'commits') main.append(commitList(u))
+    const page = u.tab === 'pulls' || S.page === 'raw' ? S.page : 'conversation'
+    if (page === 'raw') main.append(rawLines(u))
+    else if (page === 'commits') main.append(commitList(u))
     else if (page === 'files') main.append(filesChanged(u))
     else {
       if (u.tab === 'agents') {
@@ -2029,7 +1780,7 @@
           n.append(note.text)
           main.append(n)
         }
-        main.append(strip(u.records.filter((x) => x.kind !== 'agent').map((x) => [x.ref, x.hours, x.action, x.part]), 420, 18))
+        main.append(strip(u.records.filter((x) => x.kind !== 'agent').map((x) => [x.ref, x.hours, x.action, x.colour_key]), 420, 18))
         main.lastChild.classList.add('dstrip')
       }
       const tl = el('div', 'timeline')
@@ -2048,41 +1799,41 @@
         revs.append(line)
       }
       if (!revs.childNodes.length) revs.append(el('span', 'dim', 'No reviews'))
-      facts.append(factsSection('Reviewers', revs))
+      facts.append(factsSection(['Reviewers', 'latest'], revs))
     }
     if (u.tab === 'pulls' || u.tab === 'issues' || (u.marks || []).length) {
       const pills = el('div', 'pills')
       if (u.area) pills.append(areaPill(u.area))
       if (data) for (const i of u.marks || []) if (i < data.classes.length) pills.append(labelPill(i))
       if (!pills.childNodes.length) pills.append(el('span', 'dim', 'None'))
-      facts.append(factsSection('Labels', pills))
+      facts.append(factsSection(['Labels', 'area'], pills))
     }
     if (u.tab === 'pulls') {
       if (u.issue) {
         const line = el('div', 'fline')
         line.append(unitChip(u.issue, 'issues'), el('span', 'grow', u.issue.title))
         line.lastChild.title = u.issue.title
-        facts.append(factsSection('Closes', line))
+        facts.append(factsSection(['Closes', 'issue'], line))
       }
-      facts.append(factsSection('Timing', kv([['opened', since(u.at)], ['first review', u.first_review == null ? '–' : `${dur(u.first_review)} later`],
-        [u.state === 'closed' ? 'closed' : 'merged', u.ended == null ? '–' : since(u.ended)], ['commits', String(u.commits.length)], ['changed', `+${u.plus} −${u.minus} in ${plural(u.paths.length, ['file', 'files'])}`]])))
+      facts.append(factsSection('Timing', kv([['opened', since(u.at), 'time'], ['first review', u.first_review == null ? '–' : `${dur(u.first_review)} later`, 'first_review'],
+        [u.state === 'closed' ? 'closed' : 'merged', u.ended == null ? '–' : since(u.ended), 'ended'], ['commits', String(u.commits.length), 'commits'], ['changed', `+${u.plus} −${u.minus} in ${plural(u.paths.length, ['file', 'files'])}`, 'files']])))
       if (u.flags.length) {
         const f = el('div', 'pills')
         for (const x of u.flags) f.append(el('span', `chip chip-sans ${flagTone()}`, x))
-        facts.append(factsSection('Flags', f))
+        facts.append(factsSection(['Flags', 'flags'], f))
       }
     }
     if (u.tab === 'issues') {
       const prs = el('div', 'pills')
       for (const p of u.pulls) prs.append(unitChip(p, 'pulls'))
       if (!u.pulls.length) prs.append(el('span', 'dim', 'None'))
-      facts.append(factsSection('Pull requests', prs), factsSection('Details', kv([['origin', u.origin], ['comments', String(u.comments)]])))
+      facts.append(factsSection(['Pull requests', 'pulls'], prs), factsSection('Details', kv([['origin', u.origin, 'origin'], ['comments', String(u.comments), 'comments']])))
     }
-    if ((u.tab === 'pulls' || u.tab === 'issues') && u.elsewhere && u.elsewhere.length > 1) facts.append(factsSection('In every run', everyRun(u.elsewhere, u.run)))
+    if ((u.tab === 'pulls' || u.tab === 'issues') && u.elsewhere && u.elsewhere.length > 1) facts.append(factsSection(['In every run', 'elsewhere'], everyRun(u.elsewhere, u.run)))
     if (u.tab === 'discussions') {
       const people = el('div', 'avs')
       for (const n of u.posters) people.append(avatar(n, 20))
-      facts.append(factsSection('Posting', people))
+      facts.append(factsSection(['Posting', 'posters'], people))
       if (Object.keys(links).length) {
         const m = el('div', 'pills')
         for (const [n, key] of Object.entries(links)) {
@@ -2091,7 +1842,7 @@
           b.onclick = () => openKey(key)
           m.append(b)
         }
-        facts.append(factsSection('Mentions', m))
+        facts.append(factsSection(['Mentions', 'mentions'], m))
       }
     }
     if (u.tab === 'agents') {
@@ -2102,11 +1853,11 @@
         const got = u.reviewed_by[n] || [0, 0]
         t.append(el('span', null, n), el('span', null, `gave ${gave[0]}✓ ${gave[1]}✗ · got ${got[0]}✓ ${got[1]}✗`))
       }
-      if (names.length) facts.append(factsSection('Review partners', t))
+      if (names.length) facts.append(factsSection(['Review partners', 'partners'], t))
       if (u.pulls.length) {
         const prs = el('div', 'pills')
         for (const p of u.pulls) prs.append(unitChip(p, 'pulls'))
-        facts.append(factsSection('Pull requests opened', prs))
+        facts.append(factsSection(['Pull requests opened', 'pulls'], prs))
       }
     }
     const body = el('div', 'dbody')
@@ -2137,8 +1888,6 @@
     const w = $('#main').clientWidth
     if (data && Math.abs(w - lastWidth) > 4) {
       lastWidth = w
-      drawRuns()
-      drawActivity()
       drawList()
       drawPop()
     }

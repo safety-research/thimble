@@ -1,8 +1,13 @@
 // The frame half of a view's bridge (backend/app/viewer_bridge.js), which a custom view's page loads first and which is
 // the only way the view, sandboxed with no network, talks to thimble. Run in a jsdom window of its own: the bridge says
 // it is ready and reports each data-anchor once; window.thimble.fetch posts a query and resolves with the page's answer
-// to that id; a message from anywhere but the parent page is ignored; and with a label filter on, what the filter drops
-// is hidden.
+// to that id, a newer fetch with its key or its signal drops it and has its call cancelled, its progress reaches the
+// page's onProgress or else thimble's box at the corner, and thimble.lib gives the packages the view bundled; a message
+// from anywhere but the parent page is ignored; with a label filter on, what the filter drops is hidden and the page hears
+// how many; in a card's frame the page draws what `init` brings, says the height it needs, and has what the filter
+// drops dimmed while it filters its own records; a label call with no gesture in the frame is refused there, and the
+// key for label calls reaches the bridge alone. The label calls with a real gesture are
+// tests/public/browser/view-label-calls.test.ts.
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { JSDOM } from 'jsdom'
@@ -26,9 +31,10 @@ const win = () => dom.window as unknown as Window & typeof globalThis & { thimbl
 const fromPage = (data: object, source: unknown = win().parent) => win().dispatchEvent(new dom.window.MessageEvent('message', { data, source: source as any }))
 const of = (type: string) => sent.filter((m) => m.type === `thimble:${type}`)
 
-/** The view loaded in a fresh window. */
-async function load() {
-  dom = new JSDOM(VIEW, { runScripts: 'dangerously', pretendToBeVisual: true, url: 'http://view.invalid/' })
+/** The view loaded in a fresh window; `card` loads it as a card's page. */
+async function load(card = false) {
+  const page = card ? VIEW.replace('<head>', '<head><script>window.__thimbleView = {"slug": "swarm", "name": "Swarm", "card": true}</script>') : VIEW
+  dom = new JSDOM(page, { runScripts: 'dangerously', pretendToBeVisual: true, url: 'http://view.invalid/' })
   sent = []
   // a top-level window is its own parent, so the frame's parent.postMessage lands here, before the bridge is ready
   dom.window.postMessage = ((msg: Msg) => void sent.push(msg)) as typeof dom.window.postMessage
@@ -57,6 +63,59 @@ describe('the view bridge', () => {
     await expect(bad).rejects.toThrow('no such page')
   })
 
+  test('a newer fetch with the same key, or the signal, drops a fetch: it rejects as aborted and its call is cancelled', async () => {
+    const first = win().thimble.fetch({ run: 1 }, { key: 'runs' })
+    const other = win().thimble.fetch({ page: 1 }, { key: 'pages' })
+    const second = win().thimble.fetch({ run: 2 }, { key: 'runs' })
+    const [q1, q2, q3] = of('fetch')
+    expect(of('cancel')).toEqual([{ type: 'thimble:cancel', id: q1.id }])
+    await expect(first).rejects.toMatchObject({ name: 'AbortError' })
+    const ctrl = new (win().AbortController)()
+    const third = win().thimble.fetch({ run: 3 }, { signal: ctrl.signal })
+    ctrl.abort()
+    await expect(third).rejects.toMatchObject({ name: 'AbortError' })
+    expect(of('cancel')).toHaveLength(2)
+    fromPage({ type: 'thimble:result', id: q1.id, data: 'late' })
+    fromPage({ type: 'thimble:result', id: q2.id, data: 'pages' })
+    fromPage({ type: 'thimble:result', id: q3.id, data: 'run 2' })
+    await expect(other).resolves.toBe('pages')
+    await expect(second).resolves.toBe('run 2')
+    await wait()
+    expect(of('error')).toEqual([])
+  })
+
+  test("a fetch's progress reaches onProgress, and a fetch without it shows thimble's box, whose Cancel drops it", async () => {
+    const heard: unknown[] = []
+    const got = win().thimble.fetch({ heavy: true }, { onProgress: (p: unknown) => heard.push(p) })
+    const [q] = of('fetch')
+    expect(q).toMatchObject({ progress: true })
+    fromPage({ type: 'thimble:progress', id: q.id, seconds: 2, phase: 'call', done: 3, total: 10, note: 'counting' })
+    expect(heard).toEqual([{ seconds: 2, phase: 'call', done: 3, total: 10, note: 'counting' }])
+    fromPage({ type: 'thimble:result', id: q.id, data: 'done' })
+    await expect(got).resolves.toBe('done')
+
+    const doc = dom.window.document
+    const slow = win().thimble.fetch({ heavy: true })
+    const [, q2] = of('fetch')
+    await wait(30)
+    expect(doc.querySelector('.thimble-wait')).toBeNull()
+    await wait(1300)
+    fromPage({ type: 'thimble:progress', id: q2.id, seconds: 1, phase: 'index' })
+    const box = doc.querySelector('.thimble-wait') as HTMLElement
+    expect(box.style.display).toBe('')
+    expect(box.textContent).toMatch(/^Reading the files · 1 sCancel$/)
+    ;(box.querySelector('button') as HTMLButtonElement).click()
+    await expect(slow).rejects.toMatchObject({ name: 'AbortError' })
+    expect(of('cancel').at(-1)).toMatchObject({ id: q2.id })
+    expect(box.style.display).toBe('none')
+  })
+
+  test('thimble.lib gives a package the view bundled, and names one it did not', async () => {
+    ;(win() as any).__thimbleLibs = { 'd3-force': { forceSimulation: 1 } }
+    expect(win().thimble.lib('d3-force')).toEqual({ forceSimulation: 1 })
+    expect(() => win().thimble.lib('three')).toThrow('the view loads no library three')
+  })
+
   test('a message from anything but the parent page is ignored', async () => {
     const got = win().thimble.fetch({ page: 1 })
     const [q] = of('fetch')
@@ -67,6 +126,12 @@ describe('the view bridge', () => {
     fromPage({ type: 'thimble:result', id: q.id, data: 'real' })
     expect(seen).toEqual([])
     await expect(got).resolves.toBe('real')
+  })
+
+  test('navigate posts the ref to open, and asks for the File browser only when the page says so', async () => {
+    win().thimble.navigate('board.jsonl#L2')
+    win().thimble.navigate('board.jsonl#L1', { browser: true })
+    expect(of('navigate').map((m) => [m.ref, m.browser])).toEqual([['board.jsonl#L2', false], ['board.jsonl#L1', true]])
   })
 
   test('with a filter on, a page that does not filter hides what the filter drops, and keeps what holds a kept record', async () => {
@@ -87,4 +152,79 @@ describe('the view bridge', () => {
     await wait()
     expect(doc.querySelectorAll('[data-thimble-drop]')).toHaveLength(0)
   })
+
+  test("in a card's frame the page draws what init brings, sizes itself, says how it was reshaped and has what the filter drops dimmed", async () => {
+    dom.window.close()
+    await load(true)
+    const doc = dom.window.document
+    const seen: unknown[] = []
+    win().thimble.onLabels(() => undefined)
+    fromPage({ type: 'thimble:init', mode: 'card', data: { cards: 2 }, args: { rows: 'account' }, width: 692, card: 'c7', key: 'k1' })
+    win().thimble.onInit((x: unknown) => seen.push(x))
+    expect(seen).toEqual([{ mode: 'card', data: { cards: 2 }, args: { rows: 'account' }, width: 692, card: 'c7', key: 'k1' }])
+    expect(win().thimble.card).toMatchObject({ card: 'c7' })
+    win().thimble.size(480)
+    win().thimble.settled()
+    expect(of('size').at(-1)).toMatchObject({ height: 480 })
+    expect(of('settled')).toHaveLength(1)
+    win().thimble.setQuery({ rows: 'signature' })
+    expect(of('setQuery').at(-1)).toMatchObject({ patch: { rows: 'signature' } })
+    let heard = 0
+    win().thimble.onMarks(() => heard++)
+    const marks = { 'board.jsonl#L2': { keep: true }, 'board.jsonl#L1': { bar: '#e69f00', names: ['asks'], spans: [], keep: false } }
+    fromPage({ type: 'thimble:labels', marks, on: [], filter: { label: 'asks', value: 'yes', colour: '#e69f00' } })
+    await wait()
+    expect(heard).toBe(1)
+    expect(win().thimble.markOf('board.jsonl#L1')).toMatchObject({ bar: '#e69f00' })
+    expect(doc.getElementById('one')!.getAttribute('data-thimble-drop')).toBe('dim')
+    expect(doc.getElementById('two')!.hasAttribute('data-thimble-drop')).toBe(false)
+  })
+
+  test('a label call with no gesture in the frame is refused there and said to the page', async () => {
+    fromPage({ type: 'thimble:key', key: 'k-1' })
+    const got = win().thimble.setLabel('asks', true)
+    const marked = win().thimble.mark('board.jsonl#L1', 'asks', 'yes')
+    await expect(got).rejects.toMatchObject({ thimbleRefused: true, message: 'thimble changes labels only while the analyst clicks or types in the view' })
+    await expect(marked).rejects.toMatchObject({ thimbleRefused: true })
+    expect(of('labelCall')).toEqual([])
+    expect(of('labelRefused').map((m) => m.op)).toEqual(['on', 'mark'])
+  })
+
+  test('the key reaches the bridge and none of the view’s own listeners, capturing or not', async () => {
+    const heard: string[] = []
+    win().addEventListener('message', (e: MessageEvent) => heard.push(e.data?.type), true)
+    win().addEventListener('message', (e: MessageEvent) => heard.push(e.data?.type))
+    fromPage({ type: 'thimble:key', key: 'secret' })
+    fromPage({ type: 'thimble:open', open: { ref: null } })
+    expect(heard).toEqual(['thimble:open', 'thimble:open'])
+  })
+
+  test('with a filter on, the page hears how many anchored refs it hides once thimble answered for all of them, and none once the filter is off', async () => {
+    fromPage({ type: 'thimble:open', open: { ref: null } })
+    const seq = of('anchors').at(-1)!.seq
+    expect(seq).toBe(3)
+    const marks = { 'board.jsonl#L2': { keep: true }, 'board.jsonl#L1': { bar: '#e69f00', names: ['asks'], spans: [], keep: false } }
+    const filter = { label: 'asks', value: 'yes', colour: '#e69f00' }
+    // the rows of some refs are still being read, so what is hidden for want of them is no count yet
+    fromPage({ type: 'thimble:labels', marks, on: [], filter, answered: -1 })
+    await wait()
+    expect(of('hidden').at(-1)).toMatchObject({ n: null, self: false })
+    fromPage({ type: 'thimble:labels', marks, on: [], filter, answered: seq })
+    await wait()
+    expect(of('hidden').at(-1)).toMatchObject({ n: 1, self: false })
+    // a record that appears is hidden until thimble answers for it, and the count waits for that answer
+    const three = dom.window.document.createElement('article')
+    three.setAttribute('data-anchor', 'board.jsonl#L3')
+    dom.window.document.querySelector('section')!.appendChild(three)
+    await wait()
+    expect(of('anchors').at(-1)).toMatchObject({ refs: ['board.jsonl#L3'], seq: 4 })
+    expect(of('hidden').at(-1)).toMatchObject({ n: null })
+    fromPage({ type: 'thimble:labels', marks, on: [], filter, answered: 4 })
+    await wait()
+    expect(of('hidden').at(-1)).toMatchObject({ n: 2 })
+    fromPage({ type: 'thimble:labels', marks: {}, on: [], filter: null })
+    await wait()
+    expect(of('hidden').at(-1)).toMatchObject({ n: 0, self: false })
+  })
+
 })

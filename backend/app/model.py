@@ -90,8 +90,9 @@ async def _bind_sdk_off_loop() -> None:
 def __getattr__(name: str) -> Any:
     return sdk_attr(globals(), _SDK_NAMES, name)
 
-# Each call is a CLI subprocess, so the cap is tight.
-MODEL_CONCURRENCY = int(os.environ.get("THIMBLE_MODEL_CONCURRENCY", "12"))
+# Each call is a CLI subprocess, and at most this many run at once. A prompt label runs up to concepts.CONCURRENCY (24)
+# of them, which leaves room for card_check.READ_CONCURRENCY (4) card checks.
+MODEL_CONCURRENCY = int(os.environ.get("THIMBLE_MODEL_CONCURRENCY", "32"))
 # The idle window: a failure detector, not a time limit. The API buffers a tool call's JSON until it is complete, so a
 # long silent generation is normal.
 DEFAULT_IDLE_TIMEOUT_S = float(os.environ.get("THIMBLE_MODEL_IDLE_TIMEOUT_S", "900"))
@@ -203,6 +204,8 @@ class _Turn:
     resets_at: int | None = None
     text_parts: list[str] = field(default_factory=list)
     out_inputs: list[Any] = field(default_factory=list)  # the output tool's calls' inputs, in order (a cut-off one included)
+    recorded_by: str | None = None  # the model named on the message that made the first recorded call
+    interrupted: bool = False  # the turn was interrupted once the CLI returned that call's result
 
 
 class _Stalled(Exception):
@@ -342,12 +345,15 @@ async def _drain(client: Any, state: CallState, tool_name: str, idle_s: float, l
     """Consume one turn's messages, offering every `out` tool call to `state` (idempotent; this scan is what fake
     clients in tests exercise). `cap` gets every assistant block, tool result and result message as they arrive.
 
-    Every message, partial StreamEvents included, resets the idle clock; a gap of idle_s raises _Stalled.
+    Once the CLI has returned a recorded call's result, the turn is interrupted, so the model does not answer it, and read
+    on to its result message. Every message, partial StreamEvents included, resets the idle clock; a gap of idle_s raises
+    _Stalled.
     """
     _bind_sdk()
     turn = _Turn()
     full = f"mcp__{_SERVER}__{tool_name}"
     it = aiter(client.receive_response())
+    recorded: str | None = None  # the id of the first call recorded
     while True:
         try:
             async with asyncio.timeout(idle_s):
@@ -365,22 +371,38 @@ async def _drain(client: Any, state: CallState, tool_name: str, idle_s: float, l
                     turn.text_parts.append(block.text)
                 elif isinstance(block, ToolUseBlock) and block.name == full:
                     turn.out_inputs.append(block.input)
-                    await state.offer_async(block.input)
+                    if await state.offer_async(block.input) == "recorded" and recorded is None:
+                        recorded, turn.recorded_by = block.id, msg.model
             if msg.error == "rate_limit":
                 turn.rate_limited = True
         elif isinstance(msg, ResultMessage):
             turn.result = msg
             cap.result(msg)
-        elif isinstance(msg, UserMessage) and cap.on:
+        elif isinstance(msg, UserMessage):
             for block in (msg.content if isinstance(msg.content, list) else []):
                 if isinstance(block, ToolResultBlock):
                     cap.tool_result(block.tool_use_id, block.content, bool(block.is_error))
+                    if block.tool_use_id == recorded and not turn.interrupted:
+                        turn.interrupted = True
+                        await _interrupt(client)
         elif is_rate_limit_rejection(msg):
             turn.rate_limited = True
             turn.resets_at = resets_at(msg)
         # Anything else — StreamEvent partials, system chatter — carries no classification weight; it already
         # counted as the sign of life above.
     return turn
+
+
+INTERRUPT_WAIT_S = 10.0
+
+
+async def _interrupt(client: Any) -> None:
+    """Ask the CLI to end the turn. A failed interrupt only means the rest of the turn is read as it comes."""
+    try:
+        async with asyncio.timeout(INTERRUPT_WAIT_S):
+            await client.interrupt()
+    except Exception:  # noqa: BLE001
+        log.debug("structured: the interrupt after the recorded call failed", exc_info=True)
 
 
 # CLI children that outlive their call. Every client's CLI child is recorded on connect and killed on close when it
@@ -488,10 +510,11 @@ def _corrective(tool_name: str, state: CallState) -> str:
     return f"Return the output by calling the `{tool_name}` tool exactly once{correcting}. Do not answer in prose."
 
 
-def model_used(requested: str | None, result: ResultMessage | None) -> tuple[str | None, str]:
+def model_used(requested: str | None, result: ResultMessage | None, ran: str | None = None) -> tuple[str | None, str]:
     """(model that actually ran, runtime substitution note or ''). The CLI's model_usage also lists its helper calls, so
-    the test is whether the requested model is among the keys."""
-    used = sorted(k for k in (getattr(result, "model_usage", None) or {}) if isinstance(k, str))
+    the test is whether the requested model is among the keys. `ran`, the model named on the message that made the call,
+    is read in place of model_usage when given."""
+    used = [ran] if ran else sorted(k for k in (getattr(result, "model_usage", None) or {}) if isinstance(k, str))
     if not used:
         return None, ""
     if requested:
@@ -683,12 +706,17 @@ async def _structured(
                     turn = await _drain(client, state, tool.name, idle_timeout_s, life, cap)
                     status, detail = _classify(turn, state)
                     used, run_note = model_used(requested, turn.result)
+                    cost = getattr(turn.result, "total_cost_usd", None)
+                    if run_note and turn.interrupted and turn.recorded_by:
+                        # the interrupt can end the turn before its result counts the model's usage, leaving the CLI's
+                        # helper calls alone in model_usage and in the cost
+                        (used, run_note), cost = model_used(requested, None, turn.recorded_by), None
                     last = CallResult(
                         status=status,
                         output=state.captured if status == "ok" else None,
                         model_used=used,
                         fallback_note=run_note,
-                        cost_usd=getattr(turn.result, "total_cost_usd", None),
+                        cost_usd=cost,
                         usage=usage_of(turn.result),
                         session_id=(turn.result.session_id if turn.result is not None
                                     else getattr(turn.assistant, "session_id", None)),

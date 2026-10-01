@@ -1,4 +1,5 @@
-// The Labels pane at the bottom of the Files sidebar (the whole sidebar beside a view, with the button that hides it):
+// The Labels pane at the bottom of the Files sidebar (the whole sidebar beside a view, with the button that hides it,
+// and beside a view built without label controls the offer to add them, ViewSide AddLabelControls):
 // every label over files with its colour, then the labels over canvas cards and report sentences. A label over files
 // shows its mark (LabelMark), filled while it is on; a click on the mark turns it on or off. A click on the name turns
 // it on, focuses it, or turns the focused label off. An on label with more than two values lists them, and a click on
@@ -6,7 +7,7 @@
 // on hover that changes its colours (LabelPalette). Beside a view, a label's row (and each value's) has a funnel on
 // hover that sets the Files label filter, which the view keeps its records by; the funnel of the filter set stays
 // pressed, and a click on it clears the filter.
-import { useMemo, useRef, useState, type CSSProperties } from 'react'
+import { useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { Button } from '../components/Button'
 import { Icon } from '../components/Icon'
 import { Spinner } from '../components/Spinner'
@@ -14,7 +15,7 @@ import { TipButton } from '../components/Tooltip'
 import { teleport } from '../lib/teleport'
 import { hhmm } from '../lib/time'
 import type { Concept, ConceptRun } from '../lib/types'
-import { classesOf, colourVar, isFilesLabel, isMultiClass, labelStatus, laneTags, mainColour, outcomeText, progressText, type LabelFilter, type LabelStatus } from './labels'
+import { classesOf, colourVar, isFilesLabel, isMultiClass, labelStatus, laneTags, mainColour, outcomeText, progressText, unitWord, type LabelFilter, type LabelStatus } from './labels'
 import { LabelMark } from './LabelMark'
 import { LabelPalette } from './LabelPalette'
 import type { FilesLabels } from './useLabels'
@@ -38,9 +39,11 @@ interface Props {
   onFilter?: (id: string, value: string | null) => void
   /** the Files label filter, whose funnel shows pressed */
   filter?: LabelFilter | null
+  /** under the head, above the labels */
+  note?: ReactNode
 }
 
-export function LabelsPane({ labels, open, onToggleOpen, editing, onEdit, runs, onRetry, onHide, first, onFilter, filter = null }: Props) {
+export function LabelsPane({ labels, open, onToggleOpen, editing, onEdit, runs, onRetry, onHide, first, onFilter, filter = null, note }: Props) {
   const files = labels.all.filter(isFilesLabel)
   const ordered = first ? [...files.filter((k) => first.has(k.id)), ...files.filter((k) => !first.has(k.id))] : files
   const nums = useMemo(() => new Map(laneTags(labels.on).map((t) => [t.id, t.n])), [labels.on])
@@ -54,6 +57,7 @@ export function LabelsPane({ labels, open, onToggleOpen, editing, onEdit, runs, 
         <Button variant="icon" size="sm" icon="plus" title="New label" aria-label="New label" active={editing === 'new'} onClick={() => onEdit(editing === 'new' ? null : 'new')} />
         {onHide && <Button variant="icon" size="sm" icon="sidebar" title="Hide labels" aria-label="Hide labels" onClick={onHide} />}
       </div>
+      {open && note}
       {open && labels.all.length > 0 && (
         <div className="files-labels-list">
           {[...ordered, ...labels.all.filter((k) => !isFilesLabel(k))].map((k) => (
@@ -102,6 +106,7 @@ function LabelRow({ label: k, on, n, focused, marked, editing, status, labels, o
   const classes = classesOf(k)
   const running = status?.state === 'running'
   const files = isFilesLabel(k)
+  const byHand = k.n_marked ?? k.n_reviewed ?? 0
   const colour = mainColour(k)
   const paletteAt = useRef<HTMLButtonElement>(null)
   const [picking, setPicking] = useState(false)
@@ -147,7 +152,14 @@ function LabelRow({ label: k, on, n, focused, marked, editing, status, labels, o
         <Button variant="icon" size="sm" icon="more-horizontal" title="Edit label" aria-label={`Edit ${k.name}`} className="files-label-edit" active={editing} onClick={() => onEdit(editing ? null : k.id)} />
       </div>
       {files && <LabelPalette label={k} anchor={paletteAt} open={picking} onClose={() => setPicking(false)} onPick={(value, n) => labels.setColour(k.id, value, n)} />}
-      {status && <LabelStatusLine status={status} name={k.name} onRetry={() => onRetry(k.id)} />}
+      {status && <LabelStatusLine status={status} name={k.name} marked={byHand} onRetry={() => onRetry(k.id)} />}
+      {!status && files && byHand > 0 && (
+        <div className="files-label-status">
+          <span className="files-label-marked">
+            {byHand.toLocaleString()} {unitWord(k.unit, byHand)} marked by hand
+          </span>
+        </div>
+      )}
       {files && on && classes.length > 2 && (
         <div className="files-label-classes">
           {classes.map((c, i) => (
@@ -179,8 +191,9 @@ function FilterButton({ pressed, label, onClick }: { pressed: boolean; label: st
   return <Button variant="icon" size="sm" icon="filter" title={pressed ? 'Show all records' : 'Show only these records'} aria-label={label} active={pressed} className="files-label-filter" onClick={onClick} />
 }
 
-/** The line under a label's name: the run's progress, its outcome, or its failure with Retry. */
-function LabelStatusLine({ status: s, name, onRetry }: { status: LabelStatus; name: string; onRetry: () => Promise<void> }) {
+/** The line under a label's name: the run's progress, its outcome with how many records the analyst marked by hand (in
+ * a view, the Files reader or the label's card), or its failure with Retry. */
+function LabelStatusLine({ status: s, name, marked, onRetry }: { status: LabelStatus; name: string; marked: number; onRetry: () => Promise<void> }) {
   const [retrying, setRetrying] = useState(false)
   if (s.state === 'running') {
     const share = s.total ? Math.min(1, s.done / s.total) : null
@@ -224,6 +237,11 @@ function LabelStatusLine({ status: s, name, onRetry }: { status: LabelStatus; na
             {hhmm(s.ts)}
           </time>
         </>
+      )}
+      {marked > 0 && (
+        <span className="files-label-marked">
+          {marked.toLocaleString()} {unitWord(s.unit, marked)} marked by hand
+        </span>
       )}
     </div>
   )

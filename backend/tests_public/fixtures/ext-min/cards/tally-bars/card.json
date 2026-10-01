@@ -1,0 +1,7 @@
+{
+  "reader": "tally",
+  "name": "Tally bars",
+  "use": "The records of one person as bars.",
+  "args": {"type": "object", "properties": {"who": {"type": "string"}}, "required": ["who"], "additionalProperties": false},
+  "example": "thimble.card(\"tally-bars\", labels=[\"kind\"], who=\"ana\")"
+}

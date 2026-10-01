@@ -8,8 +8,9 @@ runs inside one of two wrappers, and `config.resolve_kernel_wrap` says which:
 Both draw the same boundary:
   read     the system, the backend venv and its interpreter, the corpus and the page's fonts and matplotlibrc
   write    the workspace directory, except settings.json and config.json (thimble's config for the workspace), which
-           the kernel can neither read nor write, and telemetry.jsonl, viewed.jsonl (the view log, which the
-           telemetry export merges) and the views folder, which it can read only.
+           the kernel can neither read nor write, and telemetry.jsonl, viewed.jsonl (the view log, which the telemetry
+           export merges), the registry folder (REGISTRY_DIR), the views' state (VIEWS_DIR) and the workspace's local
+           extension (LOCAL_DIR), which it can read only.
            HOME and TMPDIR are fresh at each start: a private /tmp under bwrap, the kernel's kernels/<key>.home folder
            under srt
   hidden   the home folder, thimble's own folders (THIMBLE_HOME, the workspaces, the install tree), Claude Code's config
@@ -54,10 +55,13 @@ HIDDEN_FILES = ("settings.json", "config.json")
 EMPTY_FILE = "/dev/null"
 # read-only over the writable workspace (the server writes them from outside)
 READ_ONLY_FILES = ("telemetry.jsonl", "viewed.jsonl")
-# the workspace's views (views.py), which the server and the dev agent's view builds write and main's and the
-# orientation's prompts are made from: read-only, as a folder so that what they write later shows inside. The server
-# creates it before the kernel starts.
-READ_ONLY_DIRS = ("views",)
+# the workspace's folders that main's and the orientation's prompts are made from, which a card's code reads: read-only,
+# each as a folder so that what the server writes later (its atomic rewrites among it) shows inside; the server creates
+# them before the kernel starts
+REGISTRY_DIR = "registry"  # the card types and extensions as the server found them (cardtypes.py, extensions.py)
+VIEWS_DIR = "views"  # thimble's state of the views (views.state_dir): proposals, versions, reviews
+LOCAL_DIR = "extension"  # the workspace's local extension (views.local_dir), whose views the dev agent's builds write
+READ_ONLY_DIRS = (REGISTRY_DIR, VIEWS_DIR, LOCAL_DIR)
 SIGINT_PREFIX = ("/bin/sh", "-c", 'trap "" INT; exec "$@"', "thimble-kernel-wrap")  # shell prefix that ignores SIGINT in bwrap (module docstring)
 
 SRT_LAUNCHER = Path(__file__).with_name("kernel_srt.mjs")

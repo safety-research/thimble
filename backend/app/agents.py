@@ -13,13 +13,16 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import re
 import secrets
+import threading
+from collections import OrderedDict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Response
 from pydantic import BaseModel
 
 from . import config, investigation, tools
@@ -161,15 +164,126 @@ def read_events(log_path: Path) -> list[dict]:
     return out
 
 
+class _Tally:
+    """What has been read of one chat log: up to `offset`, the end of its last whole line, whose last bytes are `tail`;
+    the counts _stats gives, and in `lines`, when kept, the text of each record for the chat's route."""
+
+    __slots__ = ("ino", "offset", "tail", "n", "last", "lines", "seen")
+
+    def __init__(self, ino: int, keep: bool) -> None:
+        self.ino, self.offset, self.tail, self.n, self.last = ino, 0, b"", 0, None
+        self.lines: list[bytes] | None = [] if keep else None
+        self.seen: tuple[int, int, int] | None = None  # the log's (inode, size, mtime) when it was last read
+
+
+_tallies: dict[str, _Tally] = {}
+_kept: OrderedDict[str, None] = OrderedDict()  # the logs whose tallies keep their records' text, least recent first
+_tallies_lock = threading.Lock()
+TALLY_TAIL = 64  # bytes before a tally's offset it compares, to tell a log that grew from one written again
+KEPT_LOGS = 16  # chat logs whose records' text is kept for the chat route
+
+
+def _read_on(log_path: Path, keep: bool = False) -> _Tally | None:
+    """The log's tally brought up to date (None when it cannot be read). A chat's log only grows, so the read goes on
+    from where the last one stopped; a log that is shorter, another file, or changed before that point is read from its
+    start. With `keep` the records' text is kept too."""
+    key = str(log_path)
+    with _tallies_lock:
+        t = _tallies.get(key)
+        try:
+            st = os.stat(log_path)
+        except OSError:
+            _tallies.pop(key, None)
+            return None
+        if t is not None and t.seen == (st.st_ino, st.st_size, st.st_mtime_ns) and not (keep and t.lines is None):
+            if keep and key in _kept:
+                _kept.move_to_end(key)
+            return t
+        try:
+            with log_path.open("rb") as f:
+                st = os.fstat(f.fileno())
+                if t is not None and (t.ino != st.st_ino or st.st_size < t.offset or (keep and t.lines is None)):
+                    t = None
+                if t is not None and t.tail:
+                    f.seek(t.offset - len(t.tail))
+                    if f.read(len(t.tail)) != t.tail:
+                        t = None
+                if t is None:
+                    t = _Tally(st.st_ino, keep)
+                f.seek(t.offset)
+                data = f.read(max(0, st.st_size - t.offset))
+        except OSError:
+            _tallies.pop(key, None)
+            return None
+        whole = data[:data.rfind(b"\n") + 1]
+        for line in whole.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                r = json.loads(line)
+            except ValueError:
+                log.warning("skipping a bad line in %s", log_path)
+                continue
+            if t.lines is not None:
+                t.lines.append(_strict(line, r))
+            if not isinstance(r, dict):
+                continue
+            if r.get("type") in ("user", "done", "chip", "agent"):
+                t.n += 1
+            if r.get("ts"):
+                t.last = r["ts"]
+        if whole:
+            t.tail = (t.tail + whole)[-TALLY_TAIL:]
+            t.offset += len(whole)
+        t.seen = (st.st_ino, st.st_size, st.st_mtime_ns)
+        _tallies[key] = t
+        if t.lines is not None:
+            _kept[key] = None
+            _kept.move_to_end(key)
+            while len(_kept) > KEPT_LOGS:
+                old = _tallies.get(_kept.popitem(last=False)[0])
+                if old is not None:
+                    old.lines = None
+        return t
+
+
+def _finite(v: Any) -> Any:
+    if isinstance(v, float) and (v != v or v in (float("inf"), float("-inf"))):
+        return None
+    if isinstance(v, dict):
+        return {k: _finite(x) for k, x in v.items()}
+    if isinstance(v, list):
+        return [_finite(x) for x in v]
+    return v
+
+
+def _strict(line: bytes, record: Any) -> bytes:
+    """A record's text as strict JSON, which a browser parses: as the log holds it, unless it may hold a NaN or an
+    infinity, which Python writes and reads but JSON has not, and which then read as null."""
+    if b"NaN" not in line and b"Infinity" not in line:
+        return line
+    return json.dumps(_finite(record), ensure_ascii=False).encode("utf-8")
+
+
 def _stats(log_path: Path) -> tuple[int, str | None]:
     """(records that are the analyst's messages or the model's replies, the last timestamp)."""
-    n, last = 0, None
-    for r in read_events(log_path):
-        if r.get("type") in ("user", "done", "chip", "agent"):
-            n += 1
-        if r.get("ts"):
-            last = r["ts"]
-    return n, last
+    t = _read_on(log_path)
+    return (t.n, t.last) if t is not None else (0, None)
+
+
+def events_json(log_path: Path) -> bytes:
+    """The log's records as a JSON array, as read_events reads them, each record's text as the log holds it."""
+    t = _read_on(log_path, keep=True)
+    lines = t.lines if t is not None and t.lines is not None else []
+    return b"[" + b",".join(lines) + b"]"
+
+
+def chat_response(meta: dict, log_path: Path) -> Response:
+    """{meta, events}, the chat route's answer, made from the records' text as the log holds it and kept between reads
+    (events_json), since the browser reads a chat again on every record it gets."""
+    body = b'{"meta":' + json.dumps(meta, ensure_ascii=False).encode("utf-8") + b',"events":' + events_json(log_path) + b"}"
+    return Response(content=body, media_type="application/json")
 
 
 # the /thimble skill's own line in main (the mirror writes a slash command as its command line, `/thimble:thimble`)
@@ -209,7 +323,7 @@ def new_thread(c: str, anchor: str | None, anchor_text: str | None, title: str |
     ensure_main(c)
     cid = secrets.token_hex(4)
     clean = lambda v, n=200: (str(v or "").strip()[:n] or None)  # noqa: E731
-    meta = _defaults({"id": cid, "kind": KIND_THREAD, "role": "thread", "title": (title or "").strip() or _unique_title(c, _title_from(anchor, anchor_text)),
+    meta = _defaults({"id": cid, "kind": KIND_THREAD, "role": "thread", "title": _unique_title(c, (title or "").strip() or _title_from(anchor, anchor_text)),
                       "created_at": _now(), "parent": thread_parent(c, parent, anchor, element), "anchor": clean(anchor, 4000),
                       "anchor_text": clean(anchor_text, ANCHOR_TEXT_CHARS), "anchor_surface": clean(surface, 40),
                       "anchor_element": clean(element, 80), "anchor_selector": clean(selector, 400)})
@@ -273,16 +387,40 @@ def _title_from(anchor: str | None, text: str | None) -> str:
     return {"cell": "card"}.get(a, a) or "thread"  # a card's anchor may be written as `cell:`
 
 
+_meta_texts: dict[str, tuple[tuple[int, int, int], str]] = {}  # meta file -> ((inode, mtime_ns, size), its text)
+META_SUFFIX = ".meta.json"
+
+
+def _meta_text(path: str) -> str:
+    """A meta file's text, read again only when the file changed (write_meta replaces it whole)."""
+    st = os.stat(path)
+    key = (st.st_ino, st.st_mtime_ns, st.st_size)
+    hit = _meta_texts.get(path)
+    if hit is not None and hit[0] == key:
+        return hit[1]
+    with open(path, encoding="utf-8") as f:
+        text = f.read()
+    _meta_texts[path] = (key, text)
+    return text
+
+
 def list_chats(c: str) -> list[dict]:
     ensure_main(c)
     out: list[dict] = []
-    for p in chats_dir(c).glob("*.meta.json"):
+    d = str(chats_dir(c))
+    try:
+        with os.scandir(d) as it:
+            names = [e.name for e in it if e.name.endswith(META_SUFFIX)]
+    except OSError:
+        names = []
+    for name in names:
+        p = f"{d}/{name}"
         try:
-            meta = _defaults(json.loads(p.read_text("utf-8")))
-        except (json.JSONDecodeError, OSError):
+            meta = _defaults(json.loads(_meta_text(p)))
+        except (ValueError, OSError):
             log.warning("bad meta file %s", p)
             continue
-        n, last = _stats(p.with_suffix("").with_suffix(".jsonl"))
+        n, last = _stats(Path(f"{d}/{name[:-len(META_SUFFIX)]}.jsonl"))
         meta["n_messages"] = n
         meta["last_ts"] = last or meta.get("created_at")
         meta["running"] = _running(c, meta["id"])
@@ -641,12 +779,12 @@ async def instance_route(c: str) -> dict:
 
 
 @router.get("/ws/{c}/chats/main")
-async def main_route(c: str) -> dict:
+async def main_route(c: str) -> Response:
     meta = ensure_main(c)
     meta["running"] = _running(c, MAIN_ID)
     meta["orientation"] = _orientation_status(c)
     _, log_path = paths(c, MAIN_ID)
-    return {"meta": meta, "events": read_events(log_path)}
+    return chat_response(meta, log_path)
 
 
 @router.post("/ws/{c}/chats", status_code=201)
@@ -663,7 +801,7 @@ async def create_route(c: str, body: NewThread) -> dict:
                       selector=body.selector, image=body.image, parent=body.parent)
     if not text:
         return meta
-    await threads.warm(c, meta.get("anchor"))
+    await threads.warm(c, meta)
     try:
         posted = channel.post(c, channel.THREAD, {"thread": meta["id"], "text": text})
     except Exception:
@@ -676,13 +814,13 @@ async def create_route(c: str, body: NewThread) -> dict:
 
 
 @router.get("/ws/{c}/chats/{chat_id}")
-async def get_route(c: str, chat_id: str) -> dict:
+async def get_route(c: str, chat_id: str) -> Response:
     meta = ensure_main(c) if chat_id == MAIN_ID else read_meta(c, chat_id)
     _, log_path = paths(c, chat_id)
     meta["running"] = _running(c, chat_id)
     if chat_id == MAIN_ID:
         meta["orientation"] = _orientation_status(c)
-    return {"meta": meta, "events": read_events(log_path)}
+    return chat_response(meta, log_path)
 
 
 @router.put("/ws/{c}/chats/{chat_id}")

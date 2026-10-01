@@ -195,8 +195,8 @@ def test_the_permission_hook_waits_on_main_s_meta_until_the_browser_answers(monk
         # answered in the terminal: the session moved on, and the hook's wait ends with no decision
         t = threading.Thread(target=lambda: answers.append(client.post("/api/channel/permission/hook", json=body)))
         t.start()
-        for _ in range(100):
-            if channel._asks:
+        for _ in range(100):  # the server's loop registers the ask and then puts it on main's meta, apart from this thread
+            if channel._asks and (agents.meta_or_none(CORPUS, agents.MAIN_ID) or {}).get("permissions"):
                 break
             time.sleep(0.05)
         channel.clear_permissions(CORPUS)

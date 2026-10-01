@@ -6,6 +6,7 @@
 # What it produces: <out>/thimble-<version>-<shortsha>.zip (default out: <repo>/release/, gitignored) whose single
 # top-level folder thimble-<version>-<shortsha>/ holds exactly what an install needs and nothing else:
 #   plugin/               the Claude Code plugin (skill, .mcp.json, bin/) — what the marketplace installs
+#   extensions/           the extensions thimble ships, which `thimble extension add <name>` copies into ~/.thimble/extensions
 #   backend/              the server (app/, tests_public/, pyproject.toml, uv.lock); never .venv or __pycache__
 #   backend/requirements.txt  uv.lock's runtime packages with the hashes of their files (uv export), which install.sh
 #                         installs with uv pip or pip from the package index the machine is set up with
@@ -69,16 +70,17 @@ die() { echo "release.sh: $*" >&2; exit 1; }
 need() { command -v "$1" >/dev/null 2>&1 || die "$1 is required"; }
 need git; need zip; need python3
 # the frontend packages a release loads at run time: vega, vega-lite and vega-embed (a view page's libraries,
-# backend/app/views.py LIBS, and a card's chart in its picture, tools.py VEGA_BUILDS), playwright (the headless page of
+# backend/app/views.py LIBS, and a card's chart in its picture, tools.py VEGA_BUILDS), esbuild (which bundles the npm
+# packages a view's page loads, backend/app/view_libs.py), playwright (the headless page of
 # scripts/view_shot.mjs and scripts/ui_shot.mjs), the fonts view_shot.mjs gives a view's page, and Anthropic's sandbox
 # runtime, which the notebook kernel runs in (backend/app/kernel_wrap.py)
-runtime_npm=(vega vega-lite vega-embed playwright @fontsource/geist-mono @fontsource/hanken-grotesk @anthropic-ai/sandbox-runtime)
+runtime_npm=(vega vega-lite vega-embed esbuild playwright @fontsource/geist-mono @fontsource/hanken-grotesk @anthropic-ai/sandbox-runtime)
 
 version="$(python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$repo/plugin/.claude-plugin/plugin.json")"
 [ -n "$version" ] || die "plugin/.claude-plugin/plugin.json has no version"
 sha="$(git -C "$repo" rev-parse --short HEAD)"
 full_sha="$(git -C "$repo" rev-parse HEAD)"
-allow=(plugin backend prompts .claude-plugin README.md INSTALL.md docs/config.md docs/assets/thimble-banner.svg LICENSE
+allow=(plugin extensions backend prompts .claude-plugin README.md INSTALL.md docs/config.md docs/assets/thimble-banner.svg LICENSE
        scripts/install.sh scripts/update.sh scripts/rebuild_ui.sh scripts/view_shot.mjs scripts/ui_shot.mjs
        frontend/src frontend/public frontend/index.html frontend/package.json
        frontend/package-lock.json frontend/vite.config.ts frontend/tsconfig.json frontend/tsconfig.app.json frontend/tsconfig.node.json)
@@ -243,7 +245,7 @@ $bad"
 for top in "$stage"/* "$stage"/.[!.]*; do
   [ -e "$top" ] || continue
   case "$(basename "$top")" in
-    plugin | backend | prompts | frontend | scripts | .claude-plugin | README.md | INSTALL.md | docs | LICENSE | \
+    plugin | extensions | backend | prompts | frontend | scripts | .claude-plugin | README.md | INSTALL.md | docs | LICENSE | \
       THIRD_PARTY_NOTICES | RELEASE.json) ;;
     *) die "unexpected top-level entry in the staged tree: $(basename "$top")";;
   esac

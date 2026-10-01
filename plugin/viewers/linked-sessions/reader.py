@@ -26,7 +26,8 @@
 #   - timestamps come as ISO 8601 with Z or an offset, with or without milliseconds, or as epoch milliseconds;
 #   - a line written twice (the same uuid) counts once, and a session's lines are put in time order;
 #   - a line that is not JSON, such as the last line of a session that was cut off, a line with no time the reader can
-#     read, and an index that is not JSON are left out, and problems() lists them for thimble to show;
+#     read, a tool result for no call before it and an index that is not JSON are left out, and problems() lists them
+#     for thimble to show;
 #   - the files on disk are the sessions: the index only names the team and the agents, and it may miss a session or
 #     list one that is gone;
 #   - r1's harness flags an error with isError and the later ones with is_error, and r3's calls the Task tool Agent;
@@ -54,7 +55,7 @@ from datetime import datetime, timezone
 
 import thimble
 
-FIELDS = ("run", "agent", "tool", "outcome", "ftype", "dur")
+FIELDS = ("run", "agent", "tool", "outcome", "file type", "duration band")
 DURATIONS = ("under 1 s", "1–10 s", "over 10 s")
 NO_FILE = "no file"
 LEAD = "lead"
@@ -178,7 +179,7 @@ def _facts(tool, inp, block, tur):
         files = list(dict.fromkeys(PATH.findall(str(inp.get("command") or "")) + PATH.findall("\n".join(lines))))
     else:
         files = []
-    return {"out": "denied" if denied else "error" if flagged else "ok", "result": first, "exit": int(code[1]) if code else None,
+    return {"outcome": "denied" if denied else "error" if flagged else "ok", "result": first, "exit": int(code[1]) if code else None,
             "text": "\n".join(lines), "output": "\n".join(lines) if len(lines) > 1 else None, "files": files, "matches": matches,
             "old": inp.get("old_string"), "new": inp.get("new_string")}
 
@@ -258,7 +259,8 @@ def _transcript(path, offs, dups, problems):
 def _session_lines(sid, lines, problems):
     """A session's messages, each {ref, s, at, kind, words, text}, and its calls, each {ref, s, at, id, tool, inp} with
     {res, end, block, tur} once its result came. A user's text is a prompt; the last thing the agent said, when no
-    call follows it, is its result. A line whose blocks are of another shape is a problem."""
+    call follows it, is its result. A line whose blocks are of another shape, or a tool result for no call before it,
+    is a problem."""
     msgs, calls, pending = [], [], {}
     for t, _n, ref, r in lines:
         user = (r.get("type") or _msg_of(r).get("role")) == "user"
@@ -269,14 +271,16 @@ def _session_lines(sid, lines, problems):
         for b in blocks:
             kind = b.get("type")
             if kind == "text" and str(b.get("text") or "").strip():
-                msgs.append({"ref": ref, "s": sid, "at": t, "kind": "prompt" if user else "text", "text": str(b["text"])})
+                msgs.append({"ref": ref, "session": sid, "at": t, "kind": "prompt" if user else "text", "text": str(b["text"])})
             elif kind == "tool_use" and b.get("id"):
                 name = str(b.get("name") or "")
-                pending[b["id"]] = {"ref": ref, "s": sid, "at": t, "id": b["id"], "tool": TOOL_NAMES.get(name, name),
+                pending[b["id"]] = {"ref": ref, "session": sid, "at": t, "id": b["id"], "tool": TOOL_NAMES.get(name, name),
                                     "inp": b.get("input") if isinstance(b.get("input"), dict) else {}}
                 calls.append(pending[b["id"]])
             elif kind == "tool_result" and b.get("tool_use_id") in pending:
                 pending.pop(b["tool_use_id"]).update(res=ref, end=t, block=b, tur=r.get("toolUseResult"))
+            elif kind == "tool_result":
+                _problem(problems, ref, "a tool result for no call before it in the session")
     said = [m for m in msgs if m["kind"] == "text"]
     if said and not any(c["at"] > said[-1]["at"] for c in calls):
         said[-1]["kind"] = "result"
@@ -319,11 +323,11 @@ def build_index(paths):
         kid = str(tur.get("agentId") or (said[1] if said else ""))
         if kid not in sessions:
             prompt = str(c["inp"].get("prompt") or "")
-            kid = next((x["id"] for x in sessions.values() if x["lead"] and x["parent"] is None and x["run"] == sessions[c["s"]]["run"]
+            kid = next((x["id"] for x in sessions.values() if x["lead"] and x["parent"] is None and x["run"] == sessions[c["session"]]["run"]
                         and prompt and x["asked"] == prompt), None)
-        if kid in sessions and kid != c["s"] and sessions[kid]["lead"] and sessions[kid]["parent"] is None:
+        if kid in sessions and kid != c["session"] and sessions[kid]["lead"] and sessions[kid]["parent"] is None:
             c["child"] = kid
-            sessions[kid]["parent"] = c["s"]
+            sessions[kid]["parent"] = c["session"]
             sessions[kid]["agent"] = c["inp"].get("subagent_type")
     for s in sessions.values():
         ix = indexes.get(s["run"]) or {}
@@ -347,12 +351,12 @@ def build_index(paths):
 
     calls, held = [], {}
     for r in sorted(raw_calls, key=lambda x: x["at"]):
-        s = sessions[r["s"]]
+        s = sessions[r["session"]]
         d = max(0.0, r["end"] - r["at"]) if "end" in r else 0.0
-        c = {"ref": r["ref"], "refs": [r["ref"]] + ([r["res"]] if r.get("res") else []), "id": r["id"], "i": len(calls), "s": s["id"],
-             "t": round(r["at"] - runs[s["run"]]["start"], 1), "d": round(d, 2), "tool": r["tool"], "out": r["out"], "files": r["files"],
+        c = {"ref": r["ref"], "refs": [r["ref"]] + ([r["res"]] if r.get("res") else []), "id": r["id"], "i": len(calls), "session": s["id"],
+             "time": round(r["at"] - runs[s["run"]]["start"], 1), "duration": round(d, 2), "tool": r["tool"], "outcome": r["outcome"], "files": r["files"],
              "child": r["child"], "input": _input(r["tool"], r["inp"])[:160]}
-        c["ftype"], c["dur"] = _ftype(c["files"]), _dur(d)
+        c["file type"], c["duration band"] = _ftype(c["files"]), _dur(d)
         c["words"] = " ".join(str(x or "") for x in (c["tool"], c["input"], r["text"], r["old"], r["new"])).lower() + " " + " ".join(
             c["files"] + r["matches"]).lower()
         calls.append(c)
@@ -365,10 +369,10 @@ def build_index(paths):
 
     messages = []
     for r in sorted(raw_msgs, key=lambda x: x["at"]):
-        s = sessions[r["s"]]
+        s = sessions[r["session"]]
         held[r["ref"]] = ("message", len(messages))
         s["msgs"].append(len(messages))
-        messages.append({"ref": r["ref"], "s": s["id"], "t": round(r["at"] - runs[s["run"]]["start"], 1), "kind": r["kind"],
+        messages.append({"ref": r["ref"], "session": s["id"], "time": round(r["at"] - runs[s["run"]]["start"], 1), "kind": r["kind"],
                          "words": r["text"].lower()})
     for dup, first in dups.items():
         if first in held:
@@ -379,10 +383,10 @@ def build_index(paths):
                 held[f"{ix['path']}#L{n}"] = ("run", run)
 
     for s in sessions.values():
-        s["waits"] = _merge([(calls[i]["t"], calls[i]["t"] + calls[i]["d"]) for i in s["tasks"]])
+        s["waits"] = _merge([(calls[i]["time"], calls[i]["time"] + calls[i]["duration"]) for i in s["tasks"]])
         # a session's records: its prompt, then its calls' lines and its other messages in time order
-        rest = sorted([(calls[i]["t"], r) for i in s["calls"] for r in calls[i]["refs"]] +
-                      [(messages[i]["t"], messages[i]["ref"]) for i in s["msgs"] if messages[i]["kind"] != "prompt"])
+        rest = sorted([(calls[i]["time"], r) for i in s["calls"] for r in calls[i]["refs"]] +
+                      [(messages[i]["time"], messages[i]["ref"]) for i in s["msgs"] if messages[i]["kind"] != "prompt"])
         s["refs"] = [messages[i]["ref"] for i in s["msgs"] if messages[i]["kind"] == "prompt"] + [r for _, r in rest] or [s["ref"]]
     for run in runs.values():
         def walk(parent, depth):
@@ -408,8 +412,8 @@ def build_index(paths):
         for i in runs[k]["sessions"]:
             if sessions[i]["agent"] not in agents:
                 agents.append(sessions[i]["agent"])
-    values = {"run": order, "agent": agents, "tool": by_count("tool"), "outcome": by_count("out"),
-              "ftype": by_count("ftype", (NO_FILE,)), "dur": [d for d in DURATIONS if any(c["dur"] == d for c in calls)]}
+    values = {"run": order, "agent": agents, "tool": by_count("tool"), "outcome": by_count("outcome"),
+              "file type": by_count("file type", (NO_FILE,)), "duration band": [d for d in DURATIONS if any(c["duration band"] == d for c in calls)]}
     # what every run's lead was asked, when they were all asked the same
     prompts = {_prompt_text(offsets, sessions[runs[k]["sessions"][0]]["prompt"]) for k in order}
     return {"offsets": offsets, "runs": runs, "order": order, "task": prompts.pop() if len(prompts) == 1 else None, "sessions": sessions,
@@ -432,8 +436,8 @@ def _prompt_text(offsets, ref):
 
 
 def _value(index, c, field):
-    s = index["sessions"][c["s"]]
-    return s["run"] if field == "run" else s["agent"] if field == "agent" else c["out"] if field == "outcome" else c[field]
+    s = index["sessions"][c["session"]]
+    return s["run"] if field == "run" else s["agent"] if field == "agent" else c["outcome"] if field == "outcome" else c[field]
 
 
 def _classes():
@@ -447,15 +451,19 @@ def _key(label, value):
 
 class Selection:
     """The page's selection over the index: `filters` {field: [hidden values]}, `search` (words a call's or a message's
-    text holds), `hide`, the label values whose calls are hidden (`label\\nvalue`, or "none" for the calls no label
-    that is on marks), and `win`, the time window the counts keep to. Each call's marks and the label filter's verdict
-    on it are looked up once."""
+    text holds), `range` [from, to], the seconds a call took, `files`, words a path the call touched holds, `hide`, the
+    label values whose calls are hidden (`label\\nvalue`, or "none" for the calls no label that is on marks), and
+    `win`, the time window the counts keep to. Each call's marks and the label filter's verdict on it are looked up
+    once."""
 
     def __init__(self, index, query):
         q = query or {}
         self.index = index
         self.hidden = {f: set(v or []) for f, v in (q.get("filters") or {}).items() if f in FIELDS and v}
         self.search = str(q.get("search") or "").strip().lower()
+        rng = q.get("range")
+        self.range = (float(rng[0]), float(rng[1])) if isinstance(rng, list) and len(rng) == 2 else None
+        self.files = str(q.get("files") or "").strip().lower()
         self.hide = set(q.get("hide") or [])
         win = q.get("win")
         self.win = (float(win[0]), float(win[1])) if isinstance(win, list) and len(win) == 2 else None
@@ -468,10 +476,15 @@ class Selection:
             self.kept[c["i"]] = thimble.kept_unit(c["refs"])
 
     def fields(self, c, but=None):
-        """Whether a call passes the field filters, all or all but the field `but`, and the search."""
+        """Whether a call passes the field filters, all or all but the field `but`, the search, the range of seconds and
+        the paths."""
         for f, hid in self.hidden.items():
             if f != but and _value(self.index, c, f) in hid:
                 return False
+        if self.range and not self.range[0] <= c["duration"] <= self.range[1]:
+            return False
+        if self.files and not any(self.files in p.lower() for p in c["files"]):
+            return False
         return not self.search or self.search in c["words"]
 
     def labelled(self, c):
@@ -489,10 +502,10 @@ class Selection:
 
     def in_window(self, c):
         """Whether a call runs within the time window on its run's clock, which the counts keep to."""
-        return not self.win or (c["t"] + c["d"] >= self.win[0] and c["t"] <= self.win[1])
+        return not self.win or (c["time"] + c["duration"] >= self.win[0] and c["time"] <= self.win[1])
 
     def message(self, m):
-        s = self.index["sessions"][m["s"]]
+        s = self.index["sessions"][m["session"]]
         return s["run"] not in self.hidden.get("run", ()) and s["agent"] not in self.hidden.get("agent", ())
 
     def shown_sessions(self):
@@ -509,17 +522,18 @@ class Selection:
 
 
 def _counts(calls, err="error", den="denied"):
-    return {"n": len(calls), "err": sum(1 for c in calls if c["out"] == err), "den": sum(1 for c in calls if c["out"] == den)}
+    return {"call count": len(calls), "error count": sum(1 for c in calls if c["outcome"] == err),
+            "denied count": sum(1 for c in calls if c["outcome"] == den)}
 
 
 def _overview(index, query):
     sel = Selection(index, query)
     ix = index
     keep = sel.shown_sessions()
-    passing = [c for c in ix["calls"] if c["s"] in keep and sel.passes(c)]
+    passing = [c for c in ix["calls"] if c["session"] in keep and sel.passes(c)]
     by_s = {}
     for c in passing:
-        by_s.setdefault(c["s"], []).append(c)
+        by_s.setdefault(c["session"], []).append(c)
     sessions, runs = [], []
     for k in ix["order"]:
         run = ix["runs"][k]
@@ -532,28 +546,28 @@ def _overview(index, query):
             s = ix["sessions"][i]
             sessions.append({"id": i, "key": i, "ref": s["ref"], "run": k, "agent": s["agent"], "parent": s["parent"] if s["parent"] in keep else None,
                              "depth": s["depth"], "start": s["start"], "end": s["end"], "waits": s["waits"],
-                             "spawn": ix["calls"][s["spawn"]]["t"] if s.get("spawn") is not None else None, **_counts(by_s.get(i, []))})
+                             "spawn": ix["calls"][s["spawn"]]["time"] if s.get("spawn") is not None else None, **_counts(by_s.get(i, []))})
     fields = {}
     for f in FIELDS:
         n = {}
         for c in ix["calls"]:
-            if c["s"] in keep and sel.in_window(c) and sel.passes(c, but=f):
+            if c["session"] in keep and sel.in_window(c) and sel.passes(c, but=f):
                 v = _value(ix, c, f)
                 n[v] = n.get(v, 0) + 1
         fields[f] = [{"v": v, "n": n.get(v, 0)} for v in ix["values"][f]]
     # a legend's counts leave out the label values it hides, so a hidden value still says how many calls it marks
     classes, none = [{**cl, "n": 0} for cl in sel.classes], 0
     for c in ix["calls"]:
-        if c["s"] in keep and sel.in_window(c) and sel.kept[c["i"]] and sel.fields(c):
+        if c["session"] in keep and sel.in_window(c) and sel.kept[c["i"]] and sel.fields(c):
             got = sel.marks.get(c["i"], [])
             for i in got:
                 classes[i]["n"] += 1
             none += not got
-    hits = [{"ref": m["ref"], "s": m["s"], "t": m["t"], "kind": m["kind"]} for m in ix["messages"]
-            if sel.search and m["s"] in keep and sel.message(m) and sel.search in m["words"]]
+    hits = [{"ref": m["ref"], "session": m["session"], "time": m["time"], "kind": m["kind"]} for m in ix["messages"]
+            if sel.search and m["session"] in keep and sel.message(m) and sel.search in m["words"]]
     return {"runs": runs, "sessions": sessions, "span": max([ix["runs"][k]["span"] for k in ix["order"]] or [0]),
-            "calls": [{"ref": c["ref"], "s": c["s"], "t": c["t"], "d": c["d"], "tool": c["tool"], "out": c["out"], "ftype": c["ftype"],
-                       "dur": c["dur"], "files": c["files"], "child": c["child"], "input": c["input"][:80], "m": sel.marks.get(c["i"], [])}
+            "calls": [{"ref": c["ref"], "session": c["session"], "time": c["time"], "duration": c["duration"], "tool": c["tool"], "outcome": c["outcome"], "file type": c["file type"],
+                       "duration band": c["duration band"], "files": c["files"], "child": c["child"], "input": c["input"][:80], "m": sel.marks.get(c["i"], [])}
                       for c in passing],
             "task": ix["task"], "totals": {"runs": len(ix["runs"]), "sessions": len(ix["sessions"])},
             "days": sorted({ix["runs"][k]["started"][:10] for k in ix["order"]}),
@@ -593,18 +607,18 @@ def _session(index, query):
     items = []
     for i in s["msgs"]:
         m = ix["messages"][i]
-        items.append({"kind": m["kind"], "ref": m["ref"], "t": m["t"], "text": _message(ix, m)})
+        items.append({"kind": m["kind"], "ref": m["ref"], "time": m["time"], "text": _message(ix, m)})
     for k, i in enumerate(s["calls"]):
         c = ix["calls"][i]
         if not sel.passes(c):
             continue
         r = _call(ix, c)
         again = next((ix["calls"][j] for j in s["calls"][k + 1:] if ix["calls"][j]["tool"] == c["tool"] == "Bash" and ix["calls"][j]["input"] == c["input"]), None)
-        items.append({"kind": "call", "ref": c["ref"], "t": c["t"], "d": c["d"], "tool": c["tool"], "out": c["out"], "k": k + 1,
+        items.append({"kind": "call", "ref": c["ref"], "refs": c["refs"], "time": c["time"], "duration": c["duration"], "tool": c["tool"], "outcome": c["outcome"], "position": k + 1,
                       "input": r["input"], "result": r["result"], "exit": r["exit"],
                       "files": c["files"], "matches": r["matches"], "old": r["old"], "new": r["new"],
                       "output": r["output"], "child": c["child"], "m": sel.marks.get(c["i"], []),
-                      "again": {"t": again["t"], "out": again["out"]} if again else None})
+                      "again": {"time": again["time"], "outcome": again["outcome"]} if again else None})
     for i in s["tasks"]:
         c = ix["calls"][i]
         kid = ix["sessions"][c["child"]]
@@ -614,13 +628,13 @@ def _session(index, query):
             text, ref = _message(ix, result), result["ref"]
         else:
             text, ref = _call(ix, c)["text"], c["refs"][-1] if len(c["refs"]) > 1 else None
-        items.append({"kind": "return", "t": kid["end"], "child": kid["id"], "ran": round(kid["end"] - kid["start"], 1), "ref": ref, "text": text})
+        items.append({"kind": "return", "time": kid["end"], "child": kid["id"], "ran": round(kid["end"] - kid["start"], 1), "ref": ref, "text": text})
     for a, b in s["waits"]:
-        kids = [ix["sessions"][ix["calls"][i]["child"]]["id"] for i in s["tasks"] if ix["calls"][i]["t"] < b and ix["calls"][i]["t"] + ix["calls"][i]["d"] > a]
-        items.append({"kind": "wait", "t": a + 1.5, "a": a, "b": b, "on": kids})
+        kids = [ix["sessions"][ix["calls"][i]["child"]]["id"] for i in s["tasks"] if ix["calls"][i]["time"] < b and ix["calls"][i]["time"] + ix["calls"][i]["duration"] > a]
+        items.append({"kind": "wait", "time": a + 1.5, "a": a, "b": b, "on": kids})
     order = {"prompt": 0, "call": 1, "text": 1, "wait": 2, "return": 2, "result": 3}
-    items.sort(key=lambda x: (x["t"], order.get(x["kind"], 1)))
-    return {"id": s["id"], "n": len(s["calls"]), "items": items, "classes": sel.classes}
+    items.sort(key=lambda x: (x["time"], order.get(x["kind"], 1)))
+    return {"id": s["id"], "call count": len(s["calls"]), "items": items, "classes": sel.classes}
 
 
 def _moment(index, query):
@@ -641,11 +655,11 @@ def _moment(index, query):
         elif t > s["end"]:
             row.update(state="returned", at=s["end"])
         elif any(a <= t <= b for a, b in s["waits"]):
-            kids = [ix["calls"][i]["child"] for i in s["tasks"] if ix["calls"][i]["t"] <= t <= ix["calls"][i]["t"] + ix["calls"][i]["d"]]
+            kids = [ix["calls"][i]["child"] for i in s["tasks"] if ix["calls"][i]["time"] <= t <= ix["calls"][i]["time"] + ix["calls"][i]["duration"]]
             row.update(state="waiting", on=[ix["sessions"][k]["agent"] for k in kids])
         else:
-            last = next((ix["calls"][i] for i in reversed(s["calls"]) if ix["calls"][i]["t"] <= t), None)
-            row.update(state="call", at=last["t"], tool=last["tool"], input=last["input"], ref=last["ref"]) if last else row.update(state="starting")
+            last = next((ix["calls"][i] for i in reversed(s["calls"]) if ix["calls"][i]["time"] <= t), None)
+            row.update(state="call", at=last["time"], tool=last["tool"], input=last["input"], ref=last["ref"]) if last else row.update(state="starting")
         out.append(row)
     return out
 
@@ -674,7 +688,7 @@ def _compare(index, query):
         else:
             continue
         calls = [ix["calls"][i] for sid in members for i in ix["sessions"][sid]["calls"]]
-        calls = sorted((c for c in calls if sel.passes(c)), key=lambda c: c["t"])
+        calls = sorted((c for c in calls if sel.passes(c)), key=lambda c: c["time"])
         tools, classes, files = {}, [0] * len(sel.classes), {}
         for c in calls:
             tools[c["tool"]] = tools.get(c["tool"], 0) + 1
@@ -686,23 +700,43 @@ def _compare(index, query):
                     use[0] += 1
                 elif c["tool"] == "Read":
                     use[1] += 1
-        errors = [{"ref": c["ref"], "t": round(c["t"] - root["start"], 1), "out": c["out"], "agent": ix["sessions"][c["s"]]["agent"],
-                   "tool": c["tool"], "input": c["input"], "result": _call(ix, c)["result"] or c["out"]}
-                  for c in calls if c["out"] != "ok"]
+        errors = [{"ref": c["ref"], "time": round(c["time"] - root["start"], 1), "outcome": c["outcome"], "agent": ix["sessions"][c["session"]]["agent"],
+                   "tool": c["tool"], "input": c["input"], "result": _call(ix, c)["result"] or c["outcome"]}
+                  for c in calls if c["outcome"] != "ok"]
         groups.append({"id": gid, "run": root["run"], "team": ix["runs"][root["run"]]["team"], "root": root["id"], "sessions": members,
                        "agents": [ix["sessions"][i]["agent"] for i in members], "start": root["start"], "end": root["end"],
                        **_counts(calls), "tools": tools, "classes": classes,
-                       "wall": round(root["end"] - root["start"], 1),
-                       "summed": round(sum(ix["sessions"][i]["end"] - ix["sessions"][i]["start"] for i in members), 1),
-                       "in_tools": round(sum(c["d"] for c in calls if not c["child"]), 1),
+                       "wall clock": round(root["end"] - root["start"], 1),
+                       "summed time": round(sum(ix["sessions"][i]["end"] - ix["sessions"][i]["start"] for i in members), 1),
+                       "in tool calls": round(sum(c["duration"] for c in calls if not c["child"]), 1),
                        "waiting": round(sum(b - a for a, b in root["waits"]), 1) if len(members) > 1 else 0,
                        "files": files, "errors": errors})
     return {"groups": groups, "classes": sel.classes, "tools": ix["values"]["tool"]}
 
 
+RAW_LINES, RAW_CHARS = 4, 6000
+
+
+def _raw(index, query):
+    """The lines a call or a message stands for, as the transcript holds them: [{ref, text}] for the refs asked."""
+    out = []
+    for ref in [r for r in query.get("refs") or [] if isinstance(r, str)][:RAW_LINES]:
+        path, _, frag = ref.partition("#L")
+        offs = index["offsets"].get(path)
+        if not offs or not frag.isdigit() or not 0 < int(frag) <= len(offs):
+            continue
+        with open(path, "rb") as fh:
+            fh.seek(offs[int(frag) - 1])
+            text = fh.readline().decode("utf-8", "replace").rstrip("\r\n")
+        out.append({"ref": ref, "text": text if len(text) <= RAW_CHARS else text[:RAW_CHARS] + "…"})
+    return out
+
+
 def records(index, query):
     q = query or {}
     op = q.get("op", "overview")
+    if op == "raw":
+        return _raw(index, q)
     if op == "session":
         return _session(index, q)
     if op == "moment":
@@ -746,13 +780,13 @@ def resolve(index, locator):
         return {"excerpt": run["team"] or i, "label": f"{i} · {run['team']}".strip(" ·"), "refs": [ref], "key": i, "target": {"run": i}}
     if kind == "call":
         c = ix["calls"][i]
-        r, s = _call(ix, c), ix["sessions"][c["s"]]
-        return {"excerpt": "\n".join(x for x in (r["literal"], r["result"]) if x) or c["tool"], "label": f"{s['agent']} · {c['tool']} {_clock(c['t'])}",
+        r, s = _call(ix, c), ix["sessions"][c["session"]]
+        return {"excerpt": "\n".join(x for x in (r["literal"], r["result"]) if x) or c["tool"], "label": f"{s['agent']} · {c['tool']} {_clock(c['time'])}",
                 "refs": list(dict.fromkeys(c["refs"] + [ref])), "key": s["id"], "target": {"session": s["id"], "call": c["ref"]}}
     if kind == "message":
         mm = ix["messages"][i]
-        s = ix["sessions"][mm["s"]]
-        return {"excerpt": _message(ix, mm), "label": f"{s['agent']} · {mm['kind']} {_clock(mm['t'])}", "refs": list(dict.fromkeys([mm["ref"], ref])),
+        s = ix["sessions"][mm["session"]]
+        return {"excerpt": _message(ix, mm), "label": f"{s['agent']} · {mm['kind']} {_clock(mm['time'])}", "refs": list(dict.fromkeys([mm["ref"], ref])),
                 "key": s["id"], "target": {"session": s["id"], "message": mm["ref"]}}
     return None
 

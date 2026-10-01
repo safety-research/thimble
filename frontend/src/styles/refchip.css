@@ -1,5 +1,6 @@
-/* ref chips (components/RefChip). A standalone ref renders through the shared accent Chip (components.css). Here: the
-   inline citation, its states, the links toggle, the hover label that names the evidence, and a table's cited cell. */
+/* ref chips (components/RefChip). A standalone ref renders through the shared Chip (components.css), the evidence or
+   the accent chip. Here: the inline citation, its states, the links toggle, the hover label that names the evidence,
+   and a table's cited cell. */
 .refchip.refchip-value {
   display: inline;
   margin: 0;
@@ -44,6 +45,12 @@
   justify-content: center;
   min-width: var(--h-chip);
   padding: 0 4px;
+}
+/* a ref chip's glyph (a file's type among them) at the stroke the chip glyphs hold at 10 px */
+.refchip .chip-ico,
+.refchip-pop-chip .chip-ico,
+.refedit-token .chip-ico {
+  stroke-width: 2px;
 }
 /* states: unable to verify, a dashed underline in the negative; not linked and unknown, dotted and quiet */
 .refchip.refchip-value.broken,
@@ -224,12 +231,12 @@ body[data-cmd] .refchip-pop {
   margin-top: 0;
 }
 
-/* a table's cited cell (lib/tableCell): the selection's wash under a 1.5px accent edge, in the label's table and in
+/* a table's cited cell (lib/tableCell): the evidence highlight under a 1.5px ink edge, in the label's table and in
    the card's table while its citation is hovered; after a click it shows for a while, then fades */
 .cite-cell,
 .outputs-html tbody td.cite-cell {
-  background: var(--accent-wash);
-  box-shadow: inset 0 0 0 1.5px var(--accent);
+  background: var(--hl-bg);
+  box-shadow: inset 0 0 0 1.5px var(--hl-edge);
   color: var(--text-primary);
 }
 .outputs-html tbody td.cite-cell-flash {
@@ -238,13 +245,22 @@ body[data-cmd] .refchip-pop {
 @keyframes cite-cell-flash {
   0%,
   60% {
-    background: var(--accent-wash);
-    box-shadow: inset 0 0 0 1.5px var(--accent);
+    background: var(--hl-bg);
+    box-shadow: inset 0 0 0 1.5px var(--hl-edge);
   }
   100% {
     background: transparent;
     box-shadow: inset 0 0 0 1.5px transparent;
   }
+}
+/* a cited line of a card's printed output, after a click opened it (lib/tableCell revealLines): marked as a cited cell
+   is, then fading */
+span[data-line].cite-cell-flash {
+  /* the padding, taken back by the margin, keeps the edge off the glyphs without moving the text */
+  margin: 0 -3px;
+  padding: 2px 3px;
+  border-radius: 2px;
+  animation: cite-cell-flash 2.4s var(--ease-out) forwards;
 }
 /* the label for a table's cell: the table around it at a size that reads, the rows cut at the top or the bottom
    fading out where the table goes on */

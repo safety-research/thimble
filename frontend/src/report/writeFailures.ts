@@ -31,7 +31,7 @@ export function failedText(f: Pick<WriteFailure, 'slug' | 'note'>): string {
 export const failedDetail = (f: Pick<WriteFailure, 'note'>): string => (apiErrorAt(f.note) >= 0 ? f.note.trim() : '')
 
 /** The failure card's line on retrying: nothing writes it again but Retry. */
-export const WRITE_RETRY_NOTE = 'Not retried; the write ended here.'
+export const WRITE_RETRY_NOTE = 'Not retried. The write ended here.'
 
 /** What Report a problem opens with for the failure. */
 export const failedReport = (f: WriteFailure) => ({ description: failureText(`The writer of ${f.slug} failed.`, f.note), focus: f.chat ? [f.chat] : [] })

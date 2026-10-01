@@ -22,12 +22,12 @@ import { bus, type Tab } from '../lib/bus'
 import { useProposals, withoutDropped } from '../lib/proposals'
 import { teleport } from '../lib/teleport'
 import { track } from '../lib/telemetry'
-import type { ChatMeta, ChatRecord } from '../lib/types'
+import type { ChatMeta, ChatRecord, SessionAlert } from '../lib/types'
 import { ApiErrorCard } from './ApiError'
 import { Holds } from './Holds'
 import { ModeSwitch } from './ModeSwitch'
 import { waitingAt } from './waiting'
-import { agentChipName, agentFiles, apiErrorAt, changeSummary, deckCards, durationText, foldRecords, followUpSummary, lastRowTs, madeBy, madeCards, orientMade, orientRuns, orientWriterOf, orientWriters, reviewList, sessionSteps, stripHarness, taskTitle, toolSteps, type Made, type OrientWriter, type Row } from './model'
+import { agentChipName, agentFiles, apiErrorAt, changeSummary, deckCards, durationText, foldRecords, followUpSummary, lastRowTs, leadText, madeBy, madeCards, orientMade, orientRuns, orientWriterOf, orientWriters, reviewList, sessionSteps, stripHarness, taskTitle, toolSteps, type Made, type OrientWriter, type Row } from './model'
 import { openThread, ThreadChip, ThreadsContext } from './Notes'
 import { DocChip, GroupChip, LabelChip } from './SurfaceChips'
 import { ViewChip } from './ViewChip'
@@ -248,6 +248,12 @@ export function stopSession(ws: string, chat: string, role: string): Promise<boo
 }
 
 /** The card of a session thimble started (the orientation, a writer, a check's run), or a subagent's chip. */
+/** The stopped notice of a session that had not finished its task; one that finished shows as done (backend
+ * bg_session._stopped_while_idle). */
+export function stoppedAlert(meta: ChatMeta | null | undefined): SessionAlert | null {
+  return meta?.alert?.kind === 'stopped' && meta.status !== 'done' ? meta.alert : null
+}
+
 /** A background session whose process stopped (a crash, a kill, `claude stop`): what happened, and Resume, which
  * starts it again under its id with its conversation (backend agent_session.resume_chat). */
 export function StoppedHold({ ws, chat, text }: { ws: string; chat: string; text: string }) {
@@ -420,11 +426,12 @@ function AgentCardView({ ws, chat, role, title, ts, log, openWhileRunning = fals
     setStopping(true)
     void stopSession(ws, chat, role).finally(() => setStopping(false))
   }
+  const stopped = stoppedAlert(meta)
   // what holds its session besides its permission requests, which wait on the permission card above the composer
   const holds = running && own ? (
     <Holds alert={meta?.alert} rules={meta?.session_rules} restarted={restartedNow(meta, run, running)} onRetry={() => api.retrySession(ws, chat)} />
-  ) : !running && own && resumeHere && meta?.alert?.kind === 'stopped' ? (
-    <StoppedHold ws={ws} chat={chat} text={meta.alert.text} />
+  ) : !running && own && resumeHere && stopped ? (
+    <StoppedHold ws={ws} chat={chat} text={stopped.text} />
   ) : null
   // waiting for the analyst: on its own prompt, or on its critique's (chat/waiting.ts)
   const waitingFor = useMemo(() => {
@@ -439,7 +446,7 @@ function AgentCardView({ ws, chat, role, title, ts, log, openWhileRunning = fals
   const proposals = useProposals(ws)
   const made = useMemo(() => withoutDropped(role === 'orient' ? orientMade(madeBy(rows)) : madeBy(rows), proposals), [rows, role, proposals])
   const brief = useMemo(
-    () => (followUp ? scoped!.messages.map((m) => m.text.trim()).join('\n\n') : stripHarness(meta?.brief?.trim() || rows.find((r) => r.kind === 'user')?.text.trim() || '') || null),
+    () => (followUp ? scoped!.messages.map(leadText).join('\n\n') : stripHarness(meta?.brief?.trim() || rows.find((r) => r.kind === 'user')?.text.trim() || '') || null),
     [followUp, scoped, meta?.brief, rows],
   )
   // the writer of its report pass, which its Report section carries (the card for a run, that run's; else the latest)
@@ -524,9 +531,10 @@ function useOrientReport(ws: string, since: string | null | undefined): string |
   useEffect(() => {
     if (!since) return
     let alive = true
+    // the written document, or its frame before a write
     const look = () =>
       api
-        .document(ws, 'report')
+        .frame(ws, 'report')
         .then((d) => {
           const at = d.generated_at
           if (alive && at && !d.partial && !d.frame && Date.parse(at) >= Date.parse(since)) setSlug('report')

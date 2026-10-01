@@ -1,29 +1,31 @@
 // A view picked in the views bar: the corpus's view drawing its files in its sandboxed frame (ViewerFrame) at the place a
-// ref names, with Raw one click away. Under the name, the files it reads (a click lists them, and a file picked opens in
-// Raw) and, in red, the lines of them its reader could not read. A view that fails says so with Raw beside it. While a
-// Files label filter is set,
-// the head shows it as a chip that clears it, since the view keeps only the records the filter keeps. At the head's
-// right end, the mark of the review of the view's pictures (ReviewMark).
+// ref names, with Raw one click away when it reads one file. Under the name, one quiet line of thimble's notes on the
+// view (ViewChrome ViewHeadLine): the files it reads (a click lists them, and a file picked opens in Raw), what it leaves
+// out, which opens the list of it under the head, and what it derived. The view draws its own label controls, and
+// thimble draws none in the head. A view that fails says so with Raw beside it. While a Files label filter is set, the
+// head shows it as a chip that clears it, with how many records the filter hides in the view. At the head's right end,
+// for a view of one file, Open in (the other views that claim the file shown, and the File browser) and the mode switch,
+// then the mark of the review of the view's pictures (ReviewMark).
 // The pane keeps the version of the view it opened (usePinnedView): a newer one, from a change, the review or the
 // orientation, never reloads under the analyst. The head says Updated with Reload, which loads it where they were: the
 // element they picked, the scroll positions, the fields and the label filter. Undo in the review's mark loads at once.
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Button, Segmented } from '../components/Button'
 import { CheckMark } from '../components/CheckMark'
-import { FilterChip } from '../components/FilterChip'
-import { Popover } from '../components/Menu'
 import { api } from '../lib/api'
 import { bus } from '../lib/bus'
 import { refreshProposals } from '../lib/proposals'
 import { refPath } from '../lib/refs'
 import { track } from '../lib/telemetry'
 import { hhmm } from '../lib/time'
-import type { ViewProblems, ViewReview } from '../lib/types'
+import type { ViewQuery, ViewReview } from '../lib/types'
 import type { SourceKind } from '../lib/types'
+import { OpenIn } from './OpenIn'
 import { inferKind } from './params'
 import { Reader, ViewFailed } from './Reader'
 import { kindIn, useFolderStore } from './Tree'
 import { useFilesFilter, type FilesLabels } from './useLabels'
+import { ResidueList, useResidueOpen, useShownLabels, useViewNotes, ViewFilter, ViewHeadLine } from './ViewChrome'
 import { ViewerFrame, type ViewLabelActions, type ViewQuote } from './ViewerFrame'
 import { usePinnedView, ViewUpdated } from './viewVersion'
 import type { BuiltView } from './ViewsBar'
@@ -33,6 +35,8 @@ interface Props {
   view: BuiltView
   /** the file Raw shows: the one a ref named, else the first the view claims */
   path: string | null
+  /** the analyst opened the view on `path` (Open in), rather than thimble on its first file */
+  picked?: boolean
   /** the file's kind, from the folder listing */
   kind: SourceKind
   targetRef?: string
@@ -42,15 +46,17 @@ interface Props {
   onQuoteMissing?: () => void
   labels: FilesLabels
   onMode?: (title: string) => void
-  /** before the name: the button that shows the hidden Labels sidebar */
-  lead?: ReactNode
   /** the labels that mark the view's files, which its page lists first */
   first?: ReadonlySet<string>
-  /** open the new-label prompt in the Labels sidebar beside the view */
-  onNewLabel?: () => void
+  /** open the label editor in the Labels sidebar beside the view, on a label or on a new one with null */
+  onEditLabel?: (id: string | null) => void
+  /** the card the view was opened from and its arguments (a card type's Open as view) */
+  query?: ViewQuery
+  /** the view dropped them */
+  onClearQuery?: () => void
 }
 
-export function ViewPane({ ws, view, path, kind, targetRef, quote, onQuoteMissing, labels, onMode, lead, first, onNewLabel }: Props) {
+export function ViewPane({ ws, view, path, picked, kind, targetRef, quote, onQuoteMissing, labels, onMode, first, onEditLabel, query, onClearQuery }: Props) {
   const [mode, setMode] = useState<'view' | 'raw'>('view')
   // a file or line picked in the head, which Raw shows in place of `path`
   const [rawAt, setRawAt] = useState<{ path: string; ref?: string } | null>(null)
@@ -69,15 +75,18 @@ export function ViewPane({ ws, view, path, kind, targetRef, quote, onQuoteMissin
         toggle(id)
       },
       setColour,
-      create: onNewLabel,
+      edit: onEditLabel,
     }),
-    [byId, toggle, setFocus, setColour, onNewLabel],
+    [byId, toggle, setFocus, setColour, onEditLabel],
   )
+  // how many records the label filter hides in the view, null while there is no filter or no exact count yet
+  const [hidden, setHidden] = useState<number | null>(null)
   useEffect(() => {
     setMode('view')
     setFailure(null)
     setRawAt(null)
   }, [view.slug, targetRef])
+  useEffect(() => setHidden(null), [view.slug, pin.pinned])
   const reload = () => {
     track('view-open', { target: `view:${view.slug}`, detail: { from: 'view-pane', to: 'reload' } })
     setFailure(null)
@@ -95,22 +104,38 @@ export function ViewPane({ ws, view, path, kind, targetRef, quote, onQuoteMissin
     pick('raw')
   }
   const rawPath = rawAt?.path ?? path
+  // a view over many files offers neither Raw nor Open in, which are for one file; a file picked in its head still
+  // shows in Raw, with the switch back
+  const oneFile = (view.n_files ?? 0) <= 1
   const rawKind = rawAt ? (kindIn(folders.store, rawAt.path) ?? inferKind(rawAt.path)) : kind
+  const notes = useViewNotes(ws, view.slug, pin.pinned || undefined)
+  const shownLabels = useShownLabels(labels, view.claims)
+  const [residueOpen, toggleResidue] = useResidueOpen(ws, view.slug)
+  const files = view.files ?? (view.first_file ? [view.first_file] : [])
+  const pickRef = (ref: string) => {
+    const p = refPath(ref) ?? ref
+    showRaw(p === ref ? { path: p } : { path: p, ref })
+  }
   return (
     <div className="view-pane">
       <div className="view-pane-head">
-        {lead}
         <div className="view-pane-title">
           <span className="view-pane-name">{view.name}</span>
-          <span className="view-pane-sub">
-            <ViewFiles view={view} current={mode === 'raw' ? rawPath : null} onPick={(f) => showRaw({ path: f })} />
-            {mode === 'raw' && rawPath && (view.n_files ?? 0) > 1 && <span className="view-pane-file mono">{rawPath}</span>}
-            <ReaderProblems ws={ws} slug={view.slug} version={pin.pinned || undefined} onPick={(ref) => showRaw({ path: refPath(ref) ?? rawPath ?? '', ref })} />
-          </span>
+          <ViewHeadLine
+            ws={ws}
+            name={view.name}
+            notes={notes}
+            shownLabels={shownLabels}
+            residueOpen={residueOpen}
+            onResidue={toggleResidue}
+            files={{ list: files, n: view.n_files ?? files.length, current: mode === 'raw' ? rawPath : null, onPick: (f) => showRaw({ path: f }) }}
+            after={mode === 'raw' && rawPath && (view.n_files ?? 0) > 1 ? <span className="view-pane-file mono">{rawPath}</span> : undefined}
+          />
         </div>
         {pin.stale && mode === 'view' && <ViewUpdated onReload={reload} className="view-pane-updated" />}
-        {filter && filterLabel && <FilterChip concept={filter.concept} name={filterLabel.name} value={filter.value} className="view-pane-filter" onClear={() => void api.deleteFilter(ws, 'files').catch(() => undefined)} />}
-        {path && (
+        {filter && filterLabel && <ViewFilter ws={ws} filter={filter} name={filterLabel.name} hidden={mode === 'view' ? hidden : null} className="view-pane-filter" />}
+        {path && oneFile && <OpenIn ws={ws} path={rawAt?.path ?? path} current={view.slug} onOpen={(slug) => bus.emit('openIn', { path: rawAt?.path ?? path, ref: rawAt?.ref ?? targetRef, slug })} />}
+        {path && (oneFile || mode === 'raw') && (
           <Segmented
             label="Mode"
             size="md"
@@ -124,6 +149,7 @@ export function ViewPane({ ws, view, path, kind, targetRef, quote, onQuoteMissin
         )}
         {view.review && <ReviewMark ws={ws} slug={view.slug} review={view.review} onUndo={pin.follow} />}
       </div>
+      {residueOpen && <ResidueList notes={notes} onPick={pickRef} />}
       <div className="view-pane-body">
         {mode === 'raw' && rawPath ? (
           <div className="view-pane-raw">
@@ -132,94 +158,11 @@ export function ViewPane({ ws, view, path, kind, targetRef, quote, onQuoteMissin
         ) : (
           <>
             {failure && <ViewFailed name={view.name} detail={failure} onRaw={path ? () => pick('raw') : undefined} />}
-            <ViewerFrame key={`${view.slug}:${pin.pinned ?? ''}`} ws={ws} slug={view.slug} version={pin.pinned || undefined} restore={pin.restore} handle={pin.frame} targetRef={targetRef} path={path ?? undefined} title={view.name} labels={labels.on} filter={filter} filterFiles={filter ? labels.presence.get(filter.concept) : undefined} byId={labels.byId} first={first} labelActions={labelActions} onError={setFailure} quote={quote} onQuoteMissing={onQuoteMissing} className="view-pane-frame" />
+            <ViewerFrame key={`${view.slug}:${pin.pinned ?? ''}`} ws={ws} slug={view.slug} version={pin.pinned || undefined} restore={pin.restore} handle={pin.frame} targetRef={targetRef} path={path ?? undefined} pathPicked={picked} title={view.name} labels={labels.on} filter={filter} filterFiles={filter ? labels.presence.get(filter.concept) : undefined} byId={labels.byId} first={first} labelActions={labelActions} onHidden={setHidden} onError={setFailure} quote={quote} onQuoteMissing={onQuoteMissing} query={query} onQuery={(p) => !p && onClearQuery?.()} className="view-pane-frame" />
           </>
         )}
       </div>
     </div>
-  )
-}
-
-/** The files a view reads, in its head: their count, or the file's name when it reads one, which a click lists them
- * under; a file picked there opens in Raw. */
-function ViewFiles({ view, current, onPick }: { view: BuiltView; current: string | null; onPick: (path: string) => void }) {
-  const [at, setAt] = useState<HTMLButtonElement | null>(null)
-  const [open, setOpen] = useState(false)
-  const files = view.files ?? (view.first_file ? [view.first_file] : [])
-  const n = view.n_files ?? files.length
-  if (!n) return null
-  return (
-    <>
-      <button ref={setAt} type="button" className="view-pane-files" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
-        {n === 1 ? files[0] : `${n.toLocaleString()} files`}
-      </button>
-      <Popover anchor={at} open={open} onClose={() => setOpen(false)} label={`The files ${view.name} reads`} className="view-pane-list">
-        {files.map((f) => (
-          <button
-            key={f}
-            type="button"
-            className={'view-pane-list-item mono' + (f === current ? ' is-current' : '')}
-            onClick={() => {
-              setOpen(false)
-              onPick(f)
-            }}
-          >
-            {f}
-          </button>
-        ))}
-        {n > files.length && <span className="view-pane-list-more">and {(n - files.length).toLocaleString()} more</span>}
-      </Popover>
-    </>
-  )
-}
-
-/** The lines of a view's files its reader could not read and left out, in red in the view's head: their count, which a
- * click lists the first of, each with why; a line picked there opens in Raw. Nothing while there are none. */
-function ReaderProblems({ ws, slug, version, onPick }: { ws: string; slug: string; version?: string; onPick: (ref: string) => void }) {
-  const [problems, setProblems] = useState<ViewProblems | null>(null)
-  const [at, setAt] = useState<HTMLButtonElement | null>(null)
-  const [open, setOpen] = useState(false)
-  useEffect(() => {
-    let alive = true
-    setProblems(null)
-    api
-      .viewProblems(ws, slug, version)
-      .then((p) => alive && setProblems(p))
-      .catch(() => undefined)
-    return () => {
-      alive = false
-    }
-  }, [ws, slug, version])
-  if (!problems?.count) return null
-  const { count, examples } = problems
-  const lines = `${count.toLocaleString()} ${count === 1 ? 'line' : 'lines'}`
-  return (
-    <>
-      <button ref={setAt} type="button" className="view-pane-problems" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
-        {lines} could not be read
-      </button>
-      <Popover anchor={at} open={open} onClose={() => setOpen(false)} label="Lines the view could not read" className="view-pane-list">
-        <span className="view-pane-list-head">
-          {lines} of the data could not be read and {count === 1 ? 'is' : 'are'} left out of the view
-        </span>
-        {examples.map((x, i) => (
-          <button
-            key={`${x.ref}:${i}`}
-            type="button"
-            className="view-pane-list-item"
-            disabled={!x.ref}
-            onClick={() => {
-              setOpen(false)
-              onPick(x.ref)
-            }}
-          >
-            <span className="mono">{x.ref}</span>
-            <span className="view-pane-list-why">{x.why}</span>
-          </button>
-        ))}
-        {count > examples.length && <span className="view-pane-list-more">and {(count - examples.length).toLocaleString()} more</span>}
-      </Popover>
-    </>
   )
 }
 
@@ -232,10 +175,48 @@ export function reviewLine(r: ViewReview): string {
   return at ? `Checked at ${at}` : 'Checked'
 }
 
-/** The review of a view's pictures as the card check's mark: a spinner while it runs (a click stops it), a check glyph
- * when it is done, a flag when problems are left, and a run-again glyph when it failed or was stopped. Whenever it
- * revised the view and is not running, its hover offers Undo, and `onUndo` runs before it is sent. */
-function ReviewMark({ ws, slug, review: r, onUndo }: { ws: string; slug: string; review: ViewReview; onUndo?: () => void }) {
+/** The running review's Stop in its hover card: a first click asks, and Stop under the question stops it. */
+function ReviewStop({ revising, onStop }: { revising: boolean; onStop: () => void }) {
+  const [asking, setAsking] = useState(false)
+  if (!asking)
+    return (
+      <Button variant="ghost" size="sm" icon="stop" onClick={() => setAsking(true)}>
+        Stop
+      </Button>
+    )
+  return (
+    <span className="view-review-stop" role="group" aria-label="Stop the review">
+      <span className="bcell-check-what">{revising ? 'Stop the review? The view goes back to its last version that passed its checks.' : 'Stop the review?'}</span>
+      <span className="bcell-check-acts">
+        <Button size="sm" onClick={() => setAsking(false)}>
+          Cancel
+        </Button>
+        <Button size="sm" variant="secondary" onClick={onStop}>
+          Stop
+        </Button>
+      </span>
+    </span>
+  )
+}
+
+/** The review's problems under a title, one per line, the first three and how many more. */
+function ReviewList({ title, items }: { title: string; items: string[] }) {
+  return (
+    <span className="view-review-list">
+      <span className="bcell-check-label">{title}</span>
+      {items.slice(0, 3).map((x, i) => (
+        <span key={i}>{x}</span>
+      ))}
+      {items.length > 3 && <span className="view-review-more">and {items.length - 3} more</span>}
+    </span>
+  )
+}
+
+/** The review of a view's pictures as the card check's mark: a spinner while it runs, a check glyph when it is done, a
+ * flag when problems are left, and a run-again glyph when it failed or was stopped. A click on the running mark opens
+ * its hover card, whose Stop asks before it stops the review. Whenever it revised the view and is not running, its
+ * hover offers Undo, and `onUndo` runs before it is sent. */
+export function ReviewMark({ ws, slug, review: r, onUndo }: { ws: string; slug: string; review: ViewReview; onUndo?: () => void }) {
   const running = r.state === 'running'
   const ended = r.state === 'failed' || r.state === 'stopped'
   const left = r.left ?? []
@@ -252,35 +233,21 @@ function ReviewMark({ ws, slug, review: r, onUndo }: { ws: string; slug: string;
     <CheckMark
       state={r.state}
       flagged={r.state === 'done' && left.length > 0}
-      label={[line, running ? 'Stop the review' : ended ? 'Review again' : ''].filter(Boolean).join('. ')}
+      label={[line, ended ? 'Review again' : ''].filter(Boolean).join('. ')}
       popLabel="The view's review"
-      onClick={running ? stop : ended ? again : undefined}
+      onClick={ended ? again : undefined}
       className="view-pane-review"
     >
       {(close) => (
         <>
           <span className="bcell-check-when">{line}</span>
-          {revised.length > 0 && (
-            <span className="bcell-check-what">
-              Revised: {revised.slice(0, 3).join('; ')}
-              {revised.length > 3 ? ` and ${revised.length - 3} more` : ''}
-            </span>
-          )}
-          {r.state === 'done' && left.length > 0 && (
-            <span className="bcell-check-what">
-              Left: {left.slice(0, 3).join('; ')}
-              {left.length > 3 ? ` and ${left.length - 3} more` : ''}
-            </span>
-          )}
+          {revised.length > 0 && <ReviewList title="Revised" items={revised} />}
+          {r.state === 'done' && left.length > 0 && <ReviewList title="Left" items={left} />}
           {r.state === 'done' && r.note && <span className="bcell-check-what">{r.note}</span>}
           {r.state === 'done' && !revised.length && !left.length && !r.undo && <span className="bcell-check-what">Nothing to fix.</span>}
           {(running || ended || revised.length > 0) && (
             <span className="bcell-check-acts">
-              {running && (
-                <Button variant="ghost" size="sm" icon="stop" onClick={() => (close(), stop())}>
-                  Stop
-                </Button>
-              )}
+              {running && <ReviewStop revising={!!r.round} onStop={() => (close(), stop())} />}
               {!running && revised.length > 0 && (
                 <Button variant="ghost" size="sm" icon="undo" onClick={() => (close(), undo())}>
                   Undo

@@ -1,6 +1,8 @@
 // The typed client for every route of the backend's API.
 import type {
   CanvasResponse,
+  Extensions,
+  LocalExtension,
   Cell,
   CellName,
   CellPatch,
@@ -27,18 +29,24 @@ import type {
   FileFind,
   GrepDone,
   GrepFile,
+  GrepProgress,
   SourceFind,
   SourceInfo,
+  SourceLines,
   SourcePage,
+  SourceTurns,
   StoredCall,
   CallIndex,
   Ticket,
   View,
   ViewSuggestion,
   ViewOpen,
+  ViewQuery,
   ViewProblems,
+  ViewShown,
   Writeup,
 } from './types'
+import { heavy } from './limit'
 
 const BASE = '/api'
 
@@ -145,19 +153,43 @@ export interface EventPosted {
 }
 
 export const api = {
+  // ---- the product tour's first-launch state, one for the install (backend tour.py) ----
+  tour: () => j<{ seen: boolean }>(`${BASE}/tour`),
+  tourSeen: () => j<{ seen: boolean }>(`${BASE}/tour/seen`, { method: 'POST' }),
   // ---- corpora and files ----
   corpora: () => j<CorpusInfo[]>(`${BASE}/corpora`),
   sources: (c: string) => j<SourceInfo[]>(`${BASE}/corpora/${enc(c)}/sources`),
   source: (c: string, path: string, start = 1, count = 100) => j<SourcePage>(`${BASE}/corpora/${enc(c)}/source${q({ path, start, count })}`),
-  sourceAround: (c: string, path: string, line: number, before = 50, after = 50) => j<SourcePage>(`${BASE}/corpora/${enc(c)}/source/around${q({ path, line, before, after })}`),
+  /** `clamp`: a line past the end answers with the file's last lines, not a 404 (a move made while the count is an estimate) */
+  sourceAround: (c: string, path: string, line: number, before = 50, after = 50, clamp = false) =>
+    j<SourcePage>(`${BASE}/corpora/${enc(c)}/source/around${q({ path, line, before, after, clamp: clamp ? 1 : undefined })}`),
+  /** `GET /corpora/{c}/source/lines`: a file's line count, an estimate while a big file's line index is being built. */
+  sourceLines: (c: string, path: string) => j<SourceLines>(`${BASE}/corpora/${enc(c)}/source/lines${q({ path })}`),
+  /** `GET /corpora/{c}/source/turns`: `count` turns of a JSON transcript from turn `start`, or around `line`. */
+  sourceTurns: (c: string, path: string, start = 0, count = 200, line?: number) =>
+    j<SourceTurns>(`${BASE}/corpora/${enc(c)}/source/turns${q({ path, start, count, line })}`),
+  /** `GET /corpora/{c}/source/speakers`: the names the corpus gives speaker ids (`ids`, joined by commas) that a file
+   * keeps under `key` (an agents.jsonl beside it, whose records carry an id and a name). */
+  speakerNames: (c: string, path: string, key: string, ids: string) => j<{ names: Record<string, string> }>(`${BASE}/corpora/${enc(c)}/source/speakers${q({ path, key, ids })}`),
+  /** The URL a PDF of the corpus opens from in the browser's viewer, at `page` when given. */
+  pdfUrl: (c: string, path: string, page?: number | null) => `${BASE}/corpora/${enc(c)}/pdf/${path.split('/').map(enc).join('/')}${page ? `#page=${page}` : ''}`,
   /** `GET /corpora/{c}/source/find`: the lines of one file past `after` that hold `text`, searched on the server. */
   findInSource: (c: string, path: string, text: string, after = 0, signal?: AbortSignal) =>
     j<SourceFind>(`${BASE}/corpora/${enc(c)}/source/find${q({ path, q: text, after: after || undefined })}`, { signal }),
   /** `GET /corpora/{c}/sources/find`: the files whose path holds every word of `text`, best first. */
   findFiles: (c: string, text: string, signal?: AbortSignal) => j<FileFind>(`${BASE}/corpora/${enc(c)}/sources/find${q({ q: text })}`, { signal }),
   /** `GET /corpora/{c}/sources/grep`: the files whose text holds `text`, each handed to `onFile` as the server finds it,
-   * then the closing line to `onDone`. Resolves when the stream ends; rejects on a refusal or an abort. */
-  grepFiles: async (c: string, text: string, onFile: (f: GrepFile) => void, onDone: (d: GrepDone) => void, signal?: AbortSignal): Promise<void> => {
+   * how many files it has read to `onProgress`, then the closing line to `onDone`. `onSearch` hears the search's id,
+   * which stopGrep takes, as the stream opens. Resolves when the stream ends; rejects on a refusal or an abort. */
+  grepFiles: async (
+    c: string,
+    text: string,
+    onFile: (f: GrepFile) => void,
+    onDone: (d: GrepDone) => void,
+    signal?: AbortSignal,
+    onProgress?: (p: GrepProgress) => void,
+    onSearch?: (id: number) => void,
+  ): Promise<void> => {
     const res = await fetch(`${BASE}/corpora/${enc(c)}/sources/grep${q({ q: text })}`, { signal })
     if (!res.ok || !res.body) {
       let detail = res.statusText
@@ -168,12 +200,15 @@ export const api = {
       }
       throw new Error(`${res.status} ${detail}`)
     }
+    const id = Number(res.headers.get('x-search'))
+    if (Number.isInteger(id) && id > 0) onSearch?.(id)
     const reader = res.body.getReader()
     const decoder = new TextDecoder()
     let rest = ''
     const take = (line: string) => {
-      const item = JSON.parse(line) as GrepFile | GrepDone
+      const item = JSON.parse(line) as GrepFile | GrepDone | GrepProgress
       if ('done' in item) onDone(item)
+      else if ('progress' in item) onProgress?.(item)
       else if (typeof item.path === 'string') onFile(item)
     }
     for (;;) {
@@ -184,12 +219,19 @@ export const api = {
       if (done) break
     }
   },
+  /** `POST /corpora/{c}/sources/grep/stop`: stop the content search `search` (grepFiles' onSearch); its stream then
+   * ends with its closing line. */
+  stopGrep: (c: string, search: number) =>
+    j<{ stopped: boolean }>(`${BASE}/corpora/${enc(c)}/sources/grep/stop`, { method: 'POST', body: JSON.stringify({ search }) }),
   forgeTables: (c: string, path: string) => j<{ name: string; row_count: number }[]>(`${BASE}/corpora/${enc(c)}/forge/tables${q({ path })}`),
   forgeRows: (c: string, path: string, table: string, offset = 0, limit = 100, order?: string, where?: string) =>
     j<{ table: string; columns: string[]; rows: any[][]; pk: string; total: number }>(`${BASE}/corpora/${enc(c)}/forge/rows${q({ path, table, offset, limit, order, where })}`),
   forgeQuery: (c: string, path: string, sql: string) =>
     j<{ columns: string[]; rows: any[][]; truncated: boolean }>(`${BASE}/corpora/${enc(c)}/forge/query${q({ path })}`, { method: 'POST', body: JSON.stringify({ sql }) }),
   resolveRef: (c: string, ref: string) => j<ResolvedRef>(`${BASE}/corpora/${enc(c)}/ref${q({ ref })}`),
+  /** `GET /corpora/{c}/csv-rows?path=&lines=a-b`: the rows of a CSV or TSV file that start on lines a..b, [line, n] each,
+   * n the number a row is cited by (`<path>#row=<n>`). */
+  csvRows: (c: string, path: string, a: number, b: number) => j<{ rows: [number, number][] }>(`${BASE}/corpora/${enc(c)}/csv-rows${q({ path, lines: `${a}-${b}` })}`),
 
   // ---- chats ----
   chats: (c: string) => j<ChatMeta[]>(`${ws(c)}/chats`),
@@ -254,9 +296,6 @@ export const api = {
   addCell: (c: string, nb: string, body: NewCellBody) => j<Cell>(`${ws(c)}/notebooks/${enc(nb)}/cells`, { method: 'POST', body: JSON.stringify(body) }),
   updateCell: (c: string, id: string, patch: CellPatch) => j<Cell>(`${ws(c)}/cells/${enc(id)}`, { method: 'PUT', body: JSON.stringify(patch) }),
   runCell: (c: string, id: string) => j<Cell>(`${ws(c)}/cells/${enc(id)}/run`, { method: 'POST' }),
-  /** `POST …/cells/{id}/regenerate`: run the card again on its labels as they are now, then let the card check read
-   * it (backend notebook.regenerate_cell); the Regenerate of a card whose label changed. */
-  regenerateCell: (c: string, id: string) => j<Cell>(`${ws(c)}/cells/${enc(id)}/regenerate`, { method: 'POST' }),
   /** `POST …/cells/{id}/fixes/{fix}/undo`: restore the card from before a check's fix (backend checkstore.undo_fix); the
      * fix is marked undone and is not applied again. */
   undoCardFix: (c: string, id: string, fix: string) => j<Cell>(`${ws(c)}/cells/${enc(id)}/fixes/${enc(fix)}/undo`, { method: 'POST' }),
@@ -305,12 +344,14 @@ export const api = {
   /** build a suggested viewer */
   acceptProposal: (c: string, slug: string) => j<Proposal>(`${ws(c)}/views/proposals/${enc(slug)}/accept`, { method: 'POST' }),
   retryProposal: (c: string, slug: string) => j<Proposal>(`${ws(c)}/views/proposals/${enc(slug)}/retry`, { method: 'POST' }),
+  /** Stop the proposal's build (backend views.stop_build): it then fails, with Retry. */
+  stopViewBuild: (c: string, slug: string) => j<{ ok: boolean }>(`${ws(c)}/views/proposals/${enc(slug)}/stop`, { method: 'POST' }),
   /** A message typed in a view build's thread: logged there and queued as a change to the view, whose run goes on in
    * that thread (views.message); answers the proposal. */
   messageView: (c: string, slug: string, text: string) => j<Proposal>(`${ws(c)}/views/proposals/${enc(slug)}/message`, { method: 'POST', body: JSON.stringify({ text }) }),
   deleteProposal: (c: string, slug: string) => j<{ ok: boolean }>(`${ws(c)}/views/proposals/${enc(slug)}`, { method: 'DELETE' }),
-  /** every view of the workspace */
-  views: (c: string) => j<View[]>(`${ws(c)}/views`),
+  /** every view of the workspace; with `wait`, never `files_pending` */
+  views: (c: string, wait = false) => j<View[]>(`${ws(c)}/views${wait ? q({ wait: 1 }) : ''}`),
   /** the working views that claim a file, in the order a citation into it opens them */
   viewsForFile: (c: string, path: string) => j<View[]>(`${ws(c)}/views${q({ path })}`),
   deleteView: (c: string, slug: string) => j<{ ok: boolean }>(`${ws(c)}/views/${enc(slug)}`, { method: 'DELETE' }),
@@ -322,8 +363,26 @@ export const api = {
     if (!res.ok) throw new Error(`${res.status} ${res.statusText}`)
     return res.text()
   },
-  /** reader.records(index, query), for the page's thimble.fetch */
-  viewRecords: (c: string, slug: string, query: unknown, version?: string) => j<{ data: unknown }>(`${ws(c)}/views/${enc(slug)}/records${q({ v: version })}`, { method: 'POST', body: JSON.stringify({ query }) }),
+  /** reader.records(index, query), for the page's thimble.fetch, with no time limit, through the gate of slow calls
+   * (lib/limit.ts heavy): `call` names it for viewCall and viewCancel, and `signal` drops the request; with a label
+   * filter on, `hidden` is how many records the reader left out for it in what the frame shows (the page's fetch `key`,
+   * the `frame` and its `turn`), null when that cannot be counted exactly */
+  viewRecords: (c: string, slug: string, query: unknown, version?: string, opts?: { call?: string; signal?: AbortSignal; key?: string; frame?: string; turn?: number }) =>
+    heavy(
+      () =>
+        j<{ data: unknown; hidden?: number | null }>(`${ws(c)}/views/${enc(slug)}/records${q({ v: version })}`, {
+          method: 'POST',
+          body: JSON.stringify({ query, call: opts?.call, key: opts?.key, frame: opts?.frame, turn: opts?.turn }),
+          signal: opts?.signal,
+        }),
+      opts?.signal,
+    ),
+  /** how far the page's call has got: seconds since it started, whether the reader reads the files (`index`), waits for
+   * a kernel (`wait`) or answers (`call`), and what it reported; {running: false} once it is over */
+  viewCall: (c: string, slug: string, call: string) =>
+    j<{ running: boolean; seconds?: number; phase?: string; done?: number; total?: number; note?: string }>(`${ws(c)}/views/${enc(slug)}/calls/${enc(call)}`),
+  /** cancel the page's call: the reader's kernel is interrupted */
+  viewCancel: (c: string, slug: string, call: string) => j<{ cancelled: boolean }>(`${ws(c)}/views/${enc(slug)}/calls/${enc(call)}/cancel`, { method: 'POST' }),
   /** the `open` message for a ref in the view */
   /** the marks of the labels that are on for refs a view's page shows, its units' above all: {ref: {bar, names, spans, keep?}} */
   viewMarks: (c: string, slug: string, refs: string[], version?: string) => j<Record<string, { bar?: string; names?: string[]; spans?: { text: string; colour: string }[]; keep?: boolean }>>(`${ws(c)}/views/${enc(slug)}/marks${q({ v: version })}`, { method: 'POST', body: JSON.stringify({ refs }) }),
@@ -331,8 +390,30 @@ export const api = {
   viewReviewAgain: (c: string, slug: string) => j<{ ok: boolean }>(`${ws(c)}/views/${enc(slug)}/review`, { method: 'POST' }),
   viewReviewStop: (c: string, slug: string) => j<{ ok: boolean }>(`${ws(c)}/views/${enc(slug)}/review`, { method: 'DELETE' }),
   viewReviewUndo: (c: string, slug: string) => j<{ ok: boolean }>(`${ws(c)}/views/${enc(slug)}/review/undo`, { method: 'POST' }),
-  viewProblems: (c: string, slug: string, version?: string) => j<ViewProblems>(`${ws(c)}/views/${enc(slug)}/problems${q({ v: version })}`),
+  /** with `path`, of that one file, as a file viewer shows it */
+  viewProblems: (c: string, slug: string, version?: string, path?: string) => j<ViewProblems>(`${ws(c)}/views/${enc(slug)}/problems${q({ v: version, path })}`),
+  viewShown: (c: string, slug: string, version?: string, path?: string) => j<ViewShown>(`${ws(c)}/views/${enc(slug)}/shown${q({ v: version, path })}`),
   viewOpen: (c: string, slug: string, ref: string, version?: string) => j<ViewOpen>(`${ws(c)}/views/${enc(slug)}/resolve${q({ ref, v: version })}`),
+  /** a card type's page as a card's frame loads it (backend cardtypes.frame_route) */
+  cardTypeFrame: async (c: string, type: string): Promise<string> => {
+    const res = await fetch(`${ws(c)}/cardtypes/${enc(type)}/frame`)
+    if (!res.ok) throw new Error(`${res.status} ${res.statusText}`)
+    return res.text()
+  },
+  /** reader.records(index, query) for a card's page, under the labels the card names */
+  cardTypeRecords: (c: string, type: string, card: string, query: unknown) =>
+    heavy(() => j<{ data: unknown }>(`${ws(c)}/cardtypes/${enc(type)}/records`, { method: 'POST', body: JSON.stringify({ query, card }) })),
+  /** Keep: a card type's card with its call's arguments changed by `patch`, run again and checked (backend
+   * cardtypes.keep_route); the card as stored */
+  keepCard: (c: string, card: string, patch: Record<string, unknown>) =>
+    j<{ cell: Cell; written: string[] }>(`${ws(c)}/cells/${enc(card)}/keep`, { method: 'POST', body: JSON.stringify({ patch }) }),
+  /** whether Keep can write `patch` into the card's call: the arguments its code computed that it would write out, or
+   * the error it would give */
+  keepCheck: (c: string, card: string, patch: Record<string, unknown>) =>
+    j<{ cell: null; written: string[] }>(`${ws(c)}/cells/${enc(card)}/keep`, { method: 'POST', body: JSON.stringify({ patch, dry: true }) }),
+  /** Open as view: the view of a card's type made ready, with the card's labels on, and the card and arguments it opens
+   * with */
+  cardAsView: (c: string, card: string) => j<{ slug: string; query: ViewQuery }>(`${ws(c)}/cells/${enc(card)}/as-view`, { method: 'POST' }),
   // ---- orientation ----
   /** Ask the analyst's session for the orientation (`POST /ws/{c}/events {kind: start}`): main calls start_orientation
      * with `text` as the brief and the switches `final_notebook`, `propose_views` and `generate_report`; `effort`,
@@ -342,7 +423,6 @@ export const api = {
 
   // ---- documents ----
   frame: (c: string, slug: DocumentType) => j<Writeup>(`${inv(c, slug)}/frame`),
-  document: (c: string, slug: DocumentType) => j<Writeup>(inv(c, slug)),
   addFrameSection: (c: string, slug: DocumentType, heading: string) => j<Writeup>(`${inv(c, slug)}/frame/sections`, { method: 'POST', body: JSON.stringify({ heading }) }),
   addFrameParagraph: (c: string, slug: DocumentType, sid: string, text: string) => j<Writeup>(`${inv(c, slug)}/frame/sections/${enc(sid)}/paragraphs`, { method: 'POST', body: JSON.stringify({ text }) }),
   addFrameFigure: (c: string, slug: DocumentType, sid: string, body: { cell: string; caption?: string; after?: string }) => j<Writeup>(`${inv(c, slug)}/frame/sections/${enc(sid)}/figures`, { method: 'POST', body: JSON.stringify(body) }),
@@ -377,6 +457,20 @@ export const api = {
   // ---- settings ----
   settings: (c: string) => j<Settings>(`${ws(c)}/settings`),
   putSettings: (c: string, patch: SettingsPatch) => j<Settings>(`${ws(c)}/settings`, { method: 'PUT', body: JSON.stringify(patch) }),
+  /** the extensions added, found again for this workspace (backend extensions.list_route) */
+  extensions: (c: string) => j<Extensions>(`${ws(c)}/extensions`),
+  /** this workspace's switch of one extension; the analyst's browser alone may turn it */
+  switchExtension: (c: string, name: string, on: boolean) => j<Extensions>(`${ws(c)}/extensions/${enc(name)}`, { method: 'PUT', body: JSON.stringify({ on }) }),
+  /** adds an extension thimble ships, as `thimble extension add <name>` does */
+  addExtension: (c: string, name: string) => j<Extensions>(`${ws(c)}/extensions/${enc(name)}/add`, { method: 'POST' }),
+  /** this workspace's switch of one extension's view, which overrides the check on whether it fits */
+  switchExtensionView: (c: string, name: string, slug: string, on: boolean) =>
+    j<Extensions>(`${ws(c)}/extensions/${enc(name)}/views/${enc(slug)}`, { method: 'PUT', body: JSON.stringify({ on }) }),
+  /** this workspace's switch of a view built for it; the analyst's browser alone may turn it (backend views.set_view_on) */
+  switchLocalView: (c: string, slug: string, on: boolean) => j<LocalExtension>(`${ws(c)}/views/${enc(slug)}/on`, { method: 'PUT', body: JSON.stringify({ on }) }),
+  /** the answer to Settings' offer to run an extension's orientation instructions now: Run now (true) or Not now */
+  answerExtensionOrientation: (c: string, name: string, run: boolean) =>
+    j<Extensions & { status: string }>(`${ws(c)}/extensions/${enc(name)}/orientation`, { method: 'POST', body: JSON.stringify({ run }) }),
   /** the paper and accent this browser shows, so the card harness draws a card in them (backend/app/render.py) */
   reportTheme: (c: string, paper: string, accent: string) => j<{ paper: string; accent: string }>(`${ws(c)}/render/theme`, { method: 'PUT', body: JSON.stringify({ paper, accent }) }),
 }
@@ -447,8 +541,9 @@ export const labelApi = {
   /** `GET /concepts/{id}/rows?text=1`: one page of rows with the effective value, each with the unit's own text. */
   rows: (c: string, id: string, opts: { value?: string; limit?: number; offset?: number }) =>
     j<{ rows: LabelRowText[]; total: number }>(`${ws(c)}/concepts/${enc(id)}/rows${q({ ...opts, text: 1 })}`),
-  /** `GET /concepts/{id}/coverage`: the corpus files the label covers and the ones it does not. */
-  coverage: (c: string, id: string) => j<ConceptCoverage>(`${ws(c)}/concepts/${enc(id)}/coverage`),
+  /** `GET /concepts/{id}/coverage?offset=`: how many corpus files the label covers, the first covered files, and a page
+   * of the files it does not cover from `offset`. */
+  coverage: (c: string, id: string, offset = 0) => j<ConceptCoverage>(`${ws(c)}/concepts/${enc(id)}/coverage${offset > 0 ? `?offset=${offset}` : ''}`),
   /** `POST /concepts/{id}/labels`: the analyst's verdict on one unit. */
   verdict: (c: string, id: string, ref: string, label: string, note?: string) =>
     j<VerdictResult>(`${ws(c)}/concepts/${enc(id)}/labels`, { method: 'POST', body: JSON.stringify({ ref, label, note }) }),
@@ -491,11 +586,49 @@ export const docsApi = {
 // --- scale: one folder at a time for the tree, one page of labels for the reader ---
 import type { FolderListing, LabelRowsPage } from './types'
 
+/** folders one stamps request asks about (backend corpus.STAMPS_MAX is 200), and the characters of their paths in its
+ * URL, well under the 16 KB a server takes for a request line */
+const STAMPS_AT_ONCE = 100
+const STAMPS_URL_CHARS = 6000
+
+/** `paths` as the `path=` parts of stamps requests, each within STAMPS_AT_ONCE folders and STAMPS_URL_CHARS. */
+export function stampQueries(paths: readonly string[]): string[] {
+  const out: string[] = []
+  let parts: string[] = []
+  let chars = 0
+  for (const p of paths) {
+    const part = `path=${encodeURIComponent(p)}`
+    if (parts.length && (parts.length >= STAMPS_AT_ONCE || chars + part.length > STAMPS_URL_CHARS)) {
+      out.push(parts.join('&'))
+      parts = []
+      chars = 0
+    }
+    parts.push(part)
+    chars += part.length + 1
+  }
+  if (parts.length) out.push(parts.join('&'))
+  return out
+}
+
 export const scaleApi = {
   /** `GET /corpora/{c}/sources?path=<folder>&depth=1`: the folder's own files and subfolders ('' is the root). */
   folder: (c: string, path: string) => j<FolderListing>(`${BASE}/corpora/${enc(c)}/sources${q({ path: path || '.', depth: 1 })}`),
+  /** `GET /corpora/{c}/sources/stamps?path=…`: each folder's stamp now, null for one that is gone, so the tree lists
+   * again only the folders whose stamp is not their listing's; as many requests as stampQueries makes. */
+  stamps: async (c: string, paths: readonly string[]) => {
+    const stamps: Record<string, string | null> = {}
+    for (const query of stampQueries(paths))
+      Object.assign(stamps, (await j<{ stamps: Record<string, string | null> }>(`${BASE}/corpora/${enc(c)}/sources/stamps?${query}`)).stamps)
+    return { stamps }
+  },
   /** `GET /ws/{c}/labels?path=&lines=a-b`: every concept's rows on lines a..b of one file, plus its whole-file rows. */
   labelsForLines: (c: string, path: string, a: number, b: number) => j<LabelsForPath[]>(`${ws(c)}/labels${q({ path, lines: `${a}-${b}` })}`),
+  /** `GET /ws/{c}/labels?path=&lines=a-b,c-d,...`: every concept's rows on each of these ranges of one file's lines, plus
+   * its whole-file rows, in one request. */
+  labelsForSpans: (c: string, path: string, lines: string) => j<LabelsForPath[]>(`${ws(c)}/labels${q({ path, lines })}`),
+  /** `POST /ws/{c}/labels/refs`: every concept's rows on these records that are no lines (a database row, a PDF page, a
+   * JSON value, a CSV row, a view reader's own record). */
+  labelsForRefs: (c: string, refs: string[]) => j<LabelsForPath[]>(`${ws(c)}/labels/refs`, { method: 'POST', body: JSON.stringify({ refs }) }),
   /** `GET /concepts/{id}/rows?after=<cursor>`: the page after the one whose `next` this is (`after` omitted: the first). */
   conceptRowsPage: (c: string, id: string, opts: { value?: string; limit?: number; after?: number | null }) =>
     j<LabelRowsPage>(`${ws(c)}/concepts/${enc(id)}/rows${q({ value: opts.value, limit: opts.limit, after: opts.after ?? undefined })}`),

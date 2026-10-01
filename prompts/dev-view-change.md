@@ -2,7 +2,7 @@
 
 The analyst asked for a change to the view {{name}}. The ticket now reads:
 
-- What the analyst sees in it and why that helps: {{why}}
+- What the analyst sees in it and why that helps: {{description}}
 - The files it reads: {{claims}}
 {{spec}}
 

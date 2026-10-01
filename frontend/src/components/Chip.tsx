@@ -1,15 +1,18 @@
 // The one chip: 20px tall, a 10px icon and a name, radius 4. The name is mono when code-like, else the body face. A chip
-// that points at something is the accent chip (accent edge and text, a light tint); a value or status word is the
-// neutral chip; a tone colours text and edge; `active` inverts it to ink.
+// that points at the data (a file, a record, a table's cell, printed lines) is the evidence chip, a hairline with the
+// secondary text; one that points at what the agent made (a card, a group, a label, a thread, a document, a view) is
+// the accent chip (accent edge and text, a light tint); a value or status word is the neutral chip; a tone colours text
+// and edge; `active` inverts it to ink.
 import type { HTMLAttributes, MouseEvent, ReactNode, Ref } from 'react'
 import { Icon, type IconName } from './Icon'
 
 export type ChipKind = 'ref' | 'label' | 'value' | 'status' | 'plain'
-export type ChipTone = 'neutral' | 'accent' | 'positive' | 'warning' | 'negative' | 'info'
+export type ChipTone = 'neutral' | 'evidence' | 'accent' | 'positive' | 'warning' | 'negative' | 'info'
 export type ChipFace = 'mono' | 'sans'
 
-/** The tone a kind takes when none is given: what points somewhere is the accent chip, a value or a word is ink. */
-export const DEFAULT_TONE: Record<ChipKind, ChipTone> = { ref: 'accent', label: 'accent', value: 'neutral', status: 'neutral', plain: 'neutral' }
+/** The tone a kind takes when none is given: a ref is the evidence chip unless it says `accent` (RefChip refTone), a
+ * label the accent chip, a value or a word ink. */
+export const DEFAULT_TONE: Record<ChipKind, ChipTone> = { ref: 'evidence', label: 'accent', value: 'neutral', status: 'neutral', plain: 'neutral' }
 
 export interface ChipProps extends Omit<HTMLAttributes<HTMLElement>, 'onClick' | 'title' | 'children'> {
   kind: ChipKind

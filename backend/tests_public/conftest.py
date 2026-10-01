@@ -18,16 +18,21 @@ from mini_corpus import write_mini  # noqa: E402
 # No test asks Claude Code about its login (config.auth_status): model calls and Claude Code sessions are faked wherever
 # a test reaches them.
 os.environ.setdefault("THIMBLE_SKIP_KEY", "1")
-# No headless Chromium per test app, no card check after every add_card and no review after every view build.
+# No headless Chromium per test app, no card check after every add_card, no review after every view build and no checks
+# of every extension view installed.
 os.environ.setdefault("THIMBLE_RENDER", "off")
 os.environ.setdefault("THIMBLE_CARD_CHECK", "off")
 os.environ.setdefault("THIMBLE_VIEW_REVIEW", "off")
+os.environ.setdefault("THIMBLE_EXTENSION_VIEW_CHECKS", "off")
 # The suite's corpora are the synthetic ones, always: an inherited THIMBLE_DATA_DIR would point config.DATA_DIR at
 # real corpora. conftest is imported before any app module, so config reads this value.
 DATA = Path(tempfile.mkdtemp(prefix="thimble-tests-data-")).resolve()
 MINI = write_mini(DATA / "mini")
 atexit.register(shutil.rmtree, DATA, True)
 os.environ["THIMBLE_DATA_DIR"] = str(DATA)
+# view builds' temp folders (dev.view_tmp_dir) go under a short folder of the suite's own in /tmp
+VIEW_TMP = Path(tempfile.mkdtemp(prefix="tt-", dir="/tmp")).resolve()
+atexit.register(shutil.rmtree, VIEW_TMP, True)
 # The suite tests the default model speed; a test that wants another value sets it with monkeypatch.
 os.environ.pop("THIMBLE_MODEL_SPEED", None)
 # The Host names httpx.ASGITransport and TestClient send (main.ALLOWED_HOSTS is read at import).
@@ -76,6 +81,14 @@ def claude_global_config(tmp_path, tmp_path_factory, monkeypatch) -> Path:
 
 
 @pytest.fixture(autouse=True)
+def _view_temp_off_the_user(monkeypatch):
+    """View builds' temp folders are the suite's own, never in the user's /tmp/thimble-<uid>."""
+    from app import dev
+
+    monkeypatch.setattr(dev, "VIEW_TMP_ROOT", VIEW_TMP)
+
+
+@pytest.fixture(autouse=True)
 def _thimble_home_off_the_user(tmp_path, monkeypatch):
     """Every test's thimble home is its own tmp dir, so what the server records there never reaches the user's. A test's
     own THIMBLE_HOME still wins."""
@@ -84,6 +97,20 @@ def _thimble_home_off_the_user(tmp_path, monkeypatch):
 
 PLUGIN_TOKEN = "t0ken-of-the-test-server"
 UI_KEY = "ui-key-of-the-test-server"
+
+
+def card_wait(minutes: float | None) -> float:
+    """Set `cardWait` in the test's thimble config, keeping its other keys (None takes it out); the wait in seconds."""
+    import json
+
+    from app import userconf
+
+    p = userconf.global_file()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    data = json.loads(p.read_text()) if p.exists() else {}
+    data.pop("cardWait", None)
+    p.write_text(json.dumps({**data, **({"cardWait": minutes} if minutes is not None else {})}))
+    return userconf.card_wait_s()
 
 
 def _record(**values: str) -> None:
