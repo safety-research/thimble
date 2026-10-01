@@ -202,6 +202,9 @@ const body = (page: Page) => page.evaluate(() => document.querySelector('.tour-b
 const probe = (page: Page): Promise<string[]> => page.evaluate(() => (window as any).__probe.splice(0))
 /** Wait for step `n` (its number) to be drawn: its example in place and the popover shown. */
 async function onStep(page: Page, n: number, title?: string) {
+  // two frames first, so the popover the tour still shows for the step before has been hidden while the step's example
+  // is placed
+  await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))))
   await page.waitForFunction(
     ({ n, title }) => {
       const s = (window as any).__tour()?.state()
