@@ -1304,14 +1304,16 @@ def _row(kind: str, name: str, about: str) -> str:
     return f"  {kind.ljust(12) if len(kind) < 12 else kind + ' '}" + (f"{name}: {about}" if name and about else name or about)
 
 
-WAYS = {"prompt": "adds to the {who}'s prompt", "replace": "replaces the {who}'s prompt",
-        "sdk": "runs the {who} as an Agent SDK program", "command": "runs the {who} as a program of its own"}
+WAYS = {"prompt": "adds to {who}'s prompt", "replace": "replaces {who}'s prompt",
+        "sdk": "runs {who} as an Agent SDK program", "command": "runs {who} as a program of its own"}
+ROLE_NAMES = {"main": "main", "orientation": "the orientation", "critic": "the critic", "writer": "the writer",
+              "dev": "the dev agent"}  # each role as a sentence names it
 NOT_RUN = "This thimble does not run {what} yet, so it is not used."  # tasks and report checks are read, never run
 
 
 def _way(r: dict[str, Any]) -> str:
     """How an extension changes a role or task (_roles, _tasks), in words."""
-    who = r.get("role") or f"{r.get('task')} task"
+    who = ROLE_NAMES.get(str(r.get("role")), f"the {r.get('role')}") if r.get("role") else f"the {r.get('task')} task"
     if r["kind"] == "prompt":
         return WAYS["replace" if r.get("replace") else "prompt"].format(who=who)
     if r["kind"] == "command":
@@ -1397,7 +1399,7 @@ def summary(info: dict[str, Any], how: dict[str, Any]) -> list[str]:
         out.append(f"  It needs the Python {_several(len(info['python']), 'package', 'packages')} "
                    f"{', '.join(info['python'])}, which thimble does not install.")
     if info["views"]:
-        out.append("  Its views show where a quick model check finds they fit the corpus; the rest runs in every "
+        out.append("  Its views show where a quick model check finds they fit the corpus. The rest runs in every "
                    "workspace until it is switched off.")
     if info["agents"]:
         out.append("  Its agents run in the orientation's session and its sandbox, without the web unless thimble's "
@@ -1569,7 +1571,7 @@ def switch(name: str, on: bool, workspaces_dir: Path | None = None) -> dict[str,
     `workspaces_dir` whose own switch in Settings keeps it off (off_in), and why it does not load ('' when it does)."""
     got = added()
     if name not in got:
-        raise SwitchError(f"no extension {name!r} is added; `thimble extension list` lists them")
+        raise SwitchError(f"no extension {name!r} is added. `thimble extension list` lists them.")
     try:
         userconf.set_extension_enabled(name, on)
     except userconf.ConfigError as e:
@@ -1601,10 +1603,10 @@ def list_lines(workspaces_dir: Path) -> list[str]:
     it a line per view, shown or hidden there with its check's reason. Then a line per extension thimble ships that is
     not added."""
     got = added()
-    idle = [f"{n}{' ' + v if v else ''}, built in: not added; `thimble extension add {n}` adds it"
+    idle = [f"{n}{' ' + v if v else ''}, built in, not added. `thimble extension add {n}` adds it."
             for n, v in not_added()]
     if not got:
-        return ["no extensions added; `thimble extension add <folder | git URL | built-in name>` adds one", *idle]
+        return ["No extensions added. `thimble extension add <folder | git URL | built-in name>` adds one.", *idle]
     off = userconf.extensions_off()
     try:
         folders = sorted(d for d in workspaces_dir.iterdir() if d.is_dir() and config._valid_name(d.name))
@@ -1682,7 +1684,7 @@ def parts(e: dict[str, Any]) -> list[str]:
     out += [f"{r.get('name') or r['slug']} report type" for r in _list(e, "reports")]
     roles = {r["role"]: r for r in e.get("roles") or [] if isinstance(r, dict) and r.get("role")}
     for role, r in roles.items():
-        out.append(_changes(f"the {role}", r))
+        out.append(_changes(ROLE_NAMES.get(role, f"the {role}"), r))
     if "orientation" not in roles:
         if e.get("orient"):
             out.append("adds to the orientation")
@@ -1699,7 +1701,7 @@ def parts(e: dict[str, Any]) -> list[str]:
 def _changes(what: str, r: dict[str, Any]) -> str:
     """How an extension changes a role or task, in a few words: "adds to the critic", "its own critic, a program"."""
     if r.get("kind") == "prompt":
-        return f"replaces {what}'s prompt" if r.get("replace") else f"adds to {what}"
+        return f"replaces {what}'s prompt" if r.get("replace") else f"adds to {what}" + ("'s prompt" if what == "main" else "")
     own = what.removeprefix("the ")
     return f"its own {own}, " + ("an Agent SDK program" if r.get("kind") == "sdk" else "a program")
 

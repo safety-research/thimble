@@ -178,7 +178,7 @@ async def test_thimble_adds_the_extensions_it_ships_on_once_and_names_the_others
     assert rows["video"]["on"] and not rows["video"]["locked"]
     for n in ("swarm", "multiagent-swimlane"):
         assert (rows[n]["on"], rows[n]["locked"], rows[n]["note"]) == (False, True, "not added")
-    assert "swarm 0.4.0, built in: not added; `thimble extension add swarm` adds it" in extensions.list_lines(config.WORKSPACES_DIR)
+    assert "swarm 0.4.0, built in, not added. `thimble extension add swarm` adds it." in extensions.list_lines(config.WORKSPACES_DIR)
     extensions.set_enabled(CORPUS, "video", False)
     assert (await extensions.refresh(CORPUS))["extensions"]["video"]["why"] == "off in this workspace"
     assert extensions.remove("video") and extensions.ship() == [] and "video" not in extensions.added()

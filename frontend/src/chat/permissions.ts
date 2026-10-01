@@ -159,7 +159,7 @@ export function askWhy(ask: PendingAsk, metas: ReadonlyMap<string, ChatMeta>): s
     return `Auto mode could not judge this call: Claude Code's classifier was unavailable${tries}.${late}`
   }
   if (p.refused) return `Auto mode did not allow it on its own: ${p.refused.replace(/[.\s]+$/, '')}.`
-  if (ask.chat === 'main') return 'Claude Code asks in your terminal too; the first answer counts.'
+  if (ask.chat === 'main') return 'Claude Code asks in your terminal too. The first answer counts.'
   const m = metas.get(ask.chat)
   const kind = m ? threadKind(m) : null
   const name = m?.permission_mode ?? p.mode

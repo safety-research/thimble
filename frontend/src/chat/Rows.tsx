@@ -828,9 +828,9 @@ export interface ErrorRetry {
 }
 
 /** Main's line under its API error that Retry can send again (model.apiRetry). */
-export const MAIN_RETRY_NOTE = 'Not retried; the turn ended here.'
+export const MAIN_RETRY_NOTE = 'Not retried. The turn ended here.'
 /** A thread's line under the API error that ended its reply, which Retry asks again. */
-export const THREAD_RETRY_NOTE = 'Not retried; the reply ended here.'
+export const THREAD_RETRY_NOTE = 'Not retried. The reply ended here.'
 
 /** The line of a view build's card after an API error it waits out (backend dev.run_view). Pure. */
 export const buildWaitNote = (wait: number): string => `thimble retries the build after ${waitText(wait)}.`
