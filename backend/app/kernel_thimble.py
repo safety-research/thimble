@@ -487,13 +487,13 @@ def _value_of(label: dict, ref: str):
     return next((value for a, b, value in spans.get(path, ()) if a <= line <= b), None)
 
 
-_PDF_PAGE = re.compile(r"^(.+\.[Pp][Dd][Ff])#p(?:age=)?(\d+)$")
+_PDF_PAGE = re.compile(r"^(.+\.[Pp][Dd][Ff])#(?:p|page=?)(\d+)$")
 
 
 def _canon(ref: str) -> str:
-    """A record's ref as label rows key it (records.canon): a PDF's `#p<n>` as `#page=<n>`."""
+    """A record's ref as label rows key it (records.canon): a PDF's `#page=<n>` as `#p<n>`."""
     m = _PDF_PAGE.match(ref)
-    return f"{m[1]}#page={int(m[2])}" if m else ref
+    return f"{m[1]}#p{int(m[2])}" if m else ref
 
 
 def _probed(ref: str, every) -> bool:
@@ -509,7 +509,7 @@ def _probed(ref: str, every) -> bool:
 
 def marked(ref):
     """The marks of the labels that are on for the record `ref` (`<path>#L<n>`, or the ref of a record of another reader
-    such as `<db>#<table>/<key>` or `<pdf>#page=<n>`): each {label, value, colour} whose value
+    such as `<db>#<table>/<key>` or `<pdf>#p<n>`): each {label, value, colour} whose value
     the record takes and the analyst highlights, in the labels' order. [] outside a view's reader call."""
     return _marked(_view_ctx, ref)
 

@@ -3,15 +3,16 @@
     reader   files                                   one record                                  ref
     lines    JSON Lines, text, and any other file    a line                                      <path>#L<n>
              that reads as text
-    json     a .json file that holds one document    an element of an array at its top or one    <path>#/<json pointer>
-                                                     level down, else an entry of its object
+    json     a .json file that holds one document    an element of an array at its top, or of    <path>#/<json pointer>
+                                                     an array of objects or arrays one level
+                                                     down, else an entry of its object
     csv      .csv and .tsv                           a row after the header line, whose cells    <path>#row=<n>
                                                      may hold line breaks
     sqlite   .db, .sqlite and .sqlite3               a row of a table, by its single primary     <path>#<table>/<key>
                                                      key, else its rowid
-    pdf      .pdf                                    a page                                      <path>#page=<n>
+    pdf      .pdf                                    a page                                      <path>#p<n>
 
-`n` counts from 1 in every form, and `#p<n>` reads as `#page=<n>` (canon). A .json file whose lines each hold a value
+`n` counts from 1 in every form, and `#page=<n>` reads as `#p<n>` (canon). A .json file whose lines each hold a value
 reads as lines, as does a document larger than JSON_INDEX_MAX_BYTES. Another binary file has no records. A view's reader
 may split any other file into records named `<path>#<locator>` in its own notation; labels and marks key those by their
 ref as they key these.
@@ -19,11 +20,12 @@ ref as they key these.
 A record is {ref, n, record, text, line, end_line}: `n` its place in the file (a line's number for a line), `record` the
 value a code label gets, `text` what a model or a regex reads, and `line`..`end_line` the lines of the file it spans when
 the file is text, so the File browser opens it there (None for a database row or a PDF page). The byte offsets of a JSON
-document's records and of a CSV's rows, and a PDF's page texts, are kept per path while its size and mtime stay the same,
-in least-recently-used caches of a bounded size.
+document's records and of a CSV's rows are kept per path while its size and mtime stay the same, in least-recently-used
+caches of a bounded size; a PDF's page texts are read and kept by pdfs.page_texts.
 """
 from __future__ import annotations
 
+import contextlib
 import csv
 import json
 import mmap
@@ -36,7 +38,7 @@ from contextlib import closing
 from pathlib import Path
 from typing import Any, Iterator
 
-from . import corpus, refs
+from . import corpus, pdfs, refs
 
 CHUNK = 500  # lines read per corpus.load_records call
 JSON_SNIFF_BYTES = 64 * 1024
@@ -44,7 +46,6 @@ JSON_INDEX_MAX_BYTES = 1024 * 1024 * 1024  # a larger .json file reads as lines
 POINTER_PARSE_MAX_BYTES = 64 * 1024 * 1024  # a pointer to a value no record holds is looked up in a document this size at most
 CACHE_MAX_FILES = 32
 CACHE_MAX_BYTES = 256 * 1024 * 1024
-PDF_CACHE_MAX = 16
 COUNT_BLOCK = 1 << 20
 
 _TOKENS = re.compile(rb'"(?:[^"\\]|\\.)*"|[\[\]{},:]', re.S)
@@ -74,25 +75,28 @@ def is_database(rel: str) -> bool:
 
 
 def canon(ref: str) -> str:
-    """The form a record's ref is keyed by: `<pdf>#p<n>` as `<pdf>#page=<n>`; any other ref as it is."""
+    """The form a record's ref is keyed by: `<pdf>#page=<n>` as `<pdf>#p<n>`; any other ref as it is."""
     ref = str(ref).strip()
     head, sep, frag = ref.partition("#")
     if sep and is_pdf(head):
         m = re.fullmatch(r"(?:p|page=?)(\d+)", frag)
         if m:
-            return f"{head}#page={int(m[1])}"
+            return f"{head}#p{int(m[1])}"
     return ref
+
+
+_EXTENSION = re.compile(r"\.[A-Za-z0-9]{1,8}$")
 
 
 def split(ref: str) -> tuple[str, str] | None:
     """(path, fragment) of a ref that names one record of a file: a line, a database row, a page, a JSON pointer, a CSV
-    row, or a `<path>#<locator>` a view's reader names; None for a whole file, a range or part of a line, and anything
-    that is not a file's."""
+    row, or a `<path>#<locator>` a view's reader names, whose file name has an extension (so `pandas-dev/pandas#12`, an
+    issue, is none); None for a whole file, a range or part of a line, and anything that is not a file's."""
     try:
         p = refs.parse_ref(ref)
     except ValueError:
         return None
-    if p["kind"] in refs.RECORD_KINDS or (p["kind"] == "path" and p.get("locator")):
+    if p["kind"] in refs.RECORD_KINDS or (p["kind"] == "path" and p.get("locator") and _EXTENSION.search(p["path"])):
         r = canon(refs.format_ref(p))
         return p["path"], r.partition("#")[2]
     return None
@@ -148,7 +152,6 @@ class _Cache:
 _KINDS = _Cache(4096, 1 << 62)        # path -> its reader, for a .json file whose sniff or index decided it
 _JSON = _Cache(CACHE_MAX_FILES, CACHE_MAX_BYTES)
 _CSV = _Cache(CACHE_MAX_FILES, CACHE_MAX_BYTES)
-_PDF = _Cache(PDF_CACHE_MAX, CACHE_MAX_BYTES)
 _builds: dict[str, threading.Lock] = {}
 _builds_lock = threading.Lock()
 
@@ -158,9 +161,18 @@ def _key(path: Path) -> tuple[int, int]:
     return (st.st_size, st.st_mtime_ns)
 
 
-def _one_build(path: Path) -> threading.Lock:
+@contextlib.contextmanager
+def _one_build(path: Path) -> Iterator[None]:
+    """Held while the index of `path` is built, so it is built once; the lock is let go of after."""
     with _builds_lock:
-        return _builds.setdefault(str(path), threading.Lock())
+        lock = _builds.setdefault(str(path), threading.Lock())
+    try:
+        with lock:
+            yield
+    finally:
+        with _builds_lock:
+            if _builds.get(str(path)) is lock and not lock.locked():
+                del _builds[str(path)]
 
 
 def reader_of(path: Path, rel: str) -> str | None:
@@ -373,15 +385,14 @@ def _build_json(path: Path) -> _JsonIndex | None:
         if top == _OPEN_A:
             spans = [(f"/{k}", s, e) for k, s, e in children]
         elif top == _OPEN_O:
-            filled = [i for i in range(len(children)) if arrays.get(i)]
-            # the arrays of objects when there are any, else every array: a list of tags beside them is no record
-            of_objects = [i for i in filled if mm[_value_start(mm, *arrays[i][0])] == _OPEN_O]
-            if filled:
-                for i in of_objects or filled:
-                    k = children[i][0]
-                    for j, (s, e) in enumerate(arrays[i]):
-                        spans.append((f"/{pointer_escape(str(k))}/{j}", s, e))
-            else:
+            # the elements of its arrays of objects or arrays, such as a chat's messages; with none, its entries, so a
+            # list of tags or numbers beside other entries leaves none of them out
+            nested = [i for i in range(len(children)) if arrays.get(i) and mm[_value_start(mm, *arrays[i][0])] in (_OPEN_O, _OPEN_A)]
+            for i in nested:
+                k = children[i][0]
+                for j, (s, e) in enumerate(arrays[i]):
+                    spans.append((f"/{pointer_escape(str(k))}/{j}", s, e))
+            if not nested:
                 spans = [(f"/{pointer_escape(str(k))}", s, e) for k, s, e in children]
         bounds = [(p, _value_start(mm, s, e), _value_end(mm, s, e)) for p, s, e in spans]
     marks = sorted({x for _p, s, e in bounds for x in (s, max(s, e - 1))})
@@ -569,62 +580,84 @@ def _csv_record(path: Path, rel: str, idx: _CsvIndex, i: int) -> dict[str, Any]:
 # --------------------------------------------------------------------------- SQLite
 
 
+def quote_id(name: str) -> str:
+    """An SQLite identifier quoted, a double quote in it doubled."""
+    return '"' + str(name).replace('"', '""') + '"'
+
+
 def _tables(con: sqlite3.Connection, under: str | None) -> Iterator[tuple[str, str, list[str]]]:
-    """(table, the column that keys its rows, its columns) of each table a ref can name: by its single primary key,
-    else its rowid; a table with neither is skipped."""
+    """(table, the column that keys its rows, its columns) of each table a ref can name and SQLite can read: by its
+    single primary key, else its rowid; a table with neither, or one that does not read (a virtual table whose module
+    this SQLite lacks), is skipped."""
     for t in corpus.table_names(con):
         if not _TABLE.match(t) or (under and t != under):
             continue
-        columns, pk = corpus.table_info(con, t)
-        if pk is None:
-            try:
-                con.execute(f'SELECT rowid FROM "{t}" LIMIT 0')
-            except sqlite3.Error:
-                continue
+        try:
+            columns, pk = corpus.table_info(con, t)
+            con.execute(f"SELECT {'rowid' if pk is None else '*'} FROM {quote_id(t)} LIMIT 0")
+        except sqlite3.Error:
+            continue
         yield t, pk or "rowid", columns
 
 
 def _db_rows(con: sqlite3.Connection, table: str, key: str, columns: list[str], offset: int = 0,
              limit: int = -1) -> Iterator[tuple[Any, dict[str, Any]]]:
     if key == "rowid":
-        sql, names = f'SELECT rowid, * FROM "{table}" ORDER BY rowid LIMIT ? OFFSET ?', ["rowid", *columns]
+        sql, names = f"SELECT rowid, * FROM {quote_id(table)} ORDER BY rowid LIMIT ? OFFSET ?", ["rowid", *columns]
     else:
-        sql, names = f'SELECT * FROM "{table}" ORDER BY "{key}" LIMIT ? OFFSET ?', columns
+        sql, names = f"SELECT * FROM {quote_id(table)} ORDER BY {quote_id(key)} LIMIT ? OFFSET ?", columns
     for row in con.execute(sql, (limit, offset)):
         record = dict(zip(names, (corpus.jsonable(v) for v in row)))
         yield record[key], record
 
 
-def _db_record(rel: str, table: str, k: Any, record: dict[str, Any], n: int) -> dict[str, Any]:
+def row_by_key(con: sqlite3.Connection, table: str, key: str, k: str, select: str = "*") -> tuple | None:
+    """The row of `table` whose `key` column (or rowid) holds `k`, the text a ref names it by: compared as that text
+    first, which matches a text key such as '007' and, by the column's affinity, an integer one; then as a number, for
+    a column with no type that holds integers."""
+    sql = f"SELECT {select} FROM {quote_id(table)} WHERE {'rowid' if key == 'rowid' else quote_id(key)} = ?"
+    row = con.execute(sql, (k,)).fetchone()
+    if row is None and re.fullmatch(r"-?\d+", k):
+        row = con.execute(sql, (int(k),)).fetchone()
+    return row
+
+
+def _db_record(rel: str, table: str, k: Any, record: dict[str, Any], n: int | None) -> dict[str, Any]:
     return {"ref": f"{rel}#{table}/{k}", "n": n, "record": record, "text": _fields_text(record), "line": None, "end_line": None}
 
 
+def _db_size(con: sqlite3.Connection, table: str) -> int:
+    try:
+        return int(con.execute(f"SELECT COUNT(*) FROM {quote_id(table)}").fetchone()[0])
+    except sqlite3.Error:
+        return 0
+
+
 def _db_count(con: sqlite3.Connection, under: str | None) -> int:
-    return sum(int(con.execute(f'SELECT COUNT(*) FROM "{t}"').fetchone()[0]) for t, _k, _c in _tables(con, under))
+    return sum(_db_size(con, t) for t, _k, _c in _tables(con, under))
 
 
 # --------------------------------------------------------------------------- PDF
 
 
+def pdf_count(path: Path) -> int:
+    """A PDF's pages, 0 for one that does not open."""
+    return int(pdfs.page_texts(path, 1, 0)["count"] or 0)
+
+
 def pdf_pages(path: Path) -> list[str]:
     """The text of each page of a PDF, empty for a page with no text layer; [] for a PDF that does not open."""
-    key = _key(path)
-    hit = _PDF.get(path, key)
-    if hit is not None:
-        return hit
-    try:
-        from pypdf import PdfReader  # noqa: PLC0415
-
-        pages = [(p.extract_text() or "").strip() for p in PdfReader(str(path)).pages]
-    except Exception:  # noqa: BLE001 — a PDF that does not open has no pages
-        pages = []
-    _PDF.put(path, key, pages, sum(len(p) for p in pages))
-    return pages
+    return pdfs.page_texts(path, 1, pdf_count(path))["pages"]
 
 
-def _pdf_record(rel: str, pages: list[str], n: int) -> dict[str, Any]:
-    return {"ref": f"{rel}#page={n}", "n": n, "record": {"page": n, "text": pages[n - 1]}, "text": pages[n - 1],
-            "line": None, "end_line": None}
+def _pdf_page(path: Path, n: int) -> str | None:
+    """The text of page n of a PDF, None past its last page."""
+    got = pdfs.page_texts(path, n, n)["pages"]
+    return got[0] if got else None
+
+
+def _pdf_record(rel: str, text: str, n: int) -> dict[str, Any]:
+    return {"ref": f"{rel}#p{n}", "n": n, "record": {"page": n, "text": text}, "text": text, "line": None, "end_line": None}
 
 
 # --------------------------------------------------------------------------- reading
@@ -673,14 +706,20 @@ def iter_records(path: Path, rel: str, kind: str | None = None, under: str | Non
             return
         with closing(con):
             n = 0
-            for table, key, columns in _tables(con, _table_of(under)):
-                for k, record in _db_rows(con, table, key, columns):
+            for table, key, columns in list(_tables(con, _table_of(under))):
+                rows = _db_rows(con, table, key, columns)
+                while True:
+                    try:
+                        k, record = next(rows)
+                    except StopIteration:
+                        break
+                    except sqlite3.Error:
+                        break  # a table that stops reading part way gives the rows read before
                     n += 1
                     yield _db_record(rel, table, k, record, n)
     elif reader == "pdf":
-        pages = pdf_pages(path)
-        for n in range(1, len(pages) + 1):
-            yield _pdf_record(rel, pages, n)
+        for n, text in enumerate(pdf_pages(path), 1):
+            yield _pdf_record(rel, text, n)
 
 
 def _under(fragment: str, under: str | None) -> bool:
@@ -714,7 +753,7 @@ def count(path: Path, rel: str, under: str | None = None) -> int:
         with closing(con):
             return _db_count(con, _table_of(under))
     if reader == "pdf":
-        return len(pdf_pages(path))
+        return pdf_count(path)
     return 0
 
 
@@ -738,8 +777,7 @@ def records_at(path: Path, rel: str, places: list[int], kind: str | None = None,
         idx = csv_index(path, rel)
         return [_csv_record(path, rel, idx, n - 1) for n in want if n <= len(idx.offsets)]
     if reader == "pdf":
-        pages = pdf_pages(path)
-        return [_pdf_record(rel, pages, n) for n in want if n <= len(pages)]
+        return [_pdf_record(rel, text, n) for n in want if (text := _pdf_page(path, n)) is not None]
     if reader == "sqlite":
         out: list[dict[str, Any]] = []
         try:
@@ -748,12 +786,13 @@ def records_at(path: Path, rel: str, places: list[int], kind: str | None = None,
             return out
         with closing(con):
             base = 0
-            for table, key, columns in _tables(con, _table_of(under)):
-                size = int(con.execute(f'SELECT COUNT(*) FROM "{table}"').fetchone()[0])
+            for table, key, columns in list(_tables(con, _table_of(under))):
+                size = _db_size(con, table)
                 for n in want:
                     if base < n <= base + size:
-                        for k, record in _db_rows(con, table, key, columns, n - base - 1, 1):
-                            out.append(_db_record(rel, table, k, record, n))
+                        with contextlib.suppress(sqlite3.Error):
+                            for k, record in _db_rows(con, table, key, columns, n - base - 1, 1):
+                                out.append(_db_record(rel, table, k, record, n))
                 base += size
         return out
     return []
@@ -784,10 +823,9 @@ def read(path: Path, rel: str, fragment: str, kind: str | None = None) -> dict[s
         n = int(m[1]) if m else 0
         return _csv_record(path, rel, idx, n - 1) if 1 <= n <= len(idx.offsets) else None
     if reader == "pdf":
-        m = re.fullmatch(r"page=(\d+)", fragment)
-        pages = pdf_pages(path)
-        n = int(m[1]) if m else 0
-        return _pdf_record(rel, pages, n) if 1 <= n <= len(pages) else None
+        m = re.fullmatch(r"p(\d+)", fragment)
+        text = _pdf_page(path, int(m[1])) if m and int(m[1]) >= 1 else None
+        return _pdf_record(rel, text, int(m[1])) if text is not None else None
     if reader == "sqlite":
         table, _, k = fragment.partition("/")
         if not k:
@@ -799,9 +837,8 @@ def read(path: Path, rel: str, fragment: str, kind: str | None = None) -> dict[s
         with closing(con):
             for t, key, columns in _tables(con, table):
                 names = ["rowid", *columns] if key == "rowid" else columns
-                select = "rowid, *" if key == "rowid" else "*"
                 try:
-                    row = con.execute(f'SELECT {select} FROM "{t}" WHERE "{key}" = ?', (int(k) if k.isdigit() else k,)).fetchone()
+                    row = row_by_key(con, t, key, k, "rowid, *" if key == "rowid" else "*")
                 except sqlite3.Error:
                     return None
                 if row is not None:

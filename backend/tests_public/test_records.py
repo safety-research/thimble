@@ -84,7 +84,7 @@ def test_each_reader_splits_its_file_into_records_named_by_refs(corpus):
     assert [r["ref"] for r in _all(corpus, "lines.json")] == ["lines.json#L1", "lines.json#L2"], "JSON Lines named .json"
 
     pages = _all(corpus, "report.pdf")
-    assert [r["ref"] for r in pages] == ["report.pdf#page=1", "report.pdf#page=2", "report.pdf#page=3"]
+    assert [r["ref"] for r in pages] == ["report.pdf#p1", "report.pdf#p2", "report.pdf#p3"]
     assert "Crew rest" in pages[1]["text"] and pages[1]["record"]["page"] == 2 and pages[1]["line"] is None
 
     prs = _all(corpus, "forge.db", under="prs")
@@ -102,7 +102,7 @@ def test_each_reader_splits_its_file_into_records_named_by_refs(corpus):
 def test_a_record_is_read_by_its_ref_and_by_its_place(corpus):
     assert records.read(corpus / "orders.csv", "orders.csv", "row=3")["record"]["customer"] == "cy"
     assert records.read(corpus / "orders.csv", "orders.csv", "row=4") is None
-    assert records.read(corpus / "report.pdf", "report.pdf", "p2")["ref"] == "report.pdf#page=2"
+    assert records.read(corpus / "report.pdf", "report.pdf", "page=2")["ref"] == "report.pdf#p2"
     assert records.read(corpus / "runs.json", "runs.json", "/runs/1")["line"] is not None
     inner = records.read(corpus / "runs.json", "runs.json", "/runs/1/outcome")
     assert inner["record"] == "no refund" and inner["line"] is not None, "a value inside a record, on its record's lines"
@@ -110,9 +110,45 @@ def test_a_record_is_read_by_its_ref_and_by_its_place(corpus):
     at = records.records_at(corpus / "forge.db", "forge.db", [2, 99], under="prs")
     assert [r["ref"] for r in at] == ["forge.db#prs/7114"]
     assert [r["ref"] for r in records.records_at(corpus / "orders.csv", "orders.csv", [1, 3])] == ["orders.csv#row=1", "orders.csv#row=3"]
-    assert records.canon("report.pdf#p3") == "report.pdf#page=3" and records.canon("a.jsonl#L3") == "a.jsonl#L3"
-    assert records.split("report.pdf#p3") == ("report.pdf", "page=3") and records.split("orders.csv") is None
+    assert records.canon("report.pdf#page=3") == "report.pdf#p3" and records.canon("a.jsonl#L3") == "a.jsonl#L3"
+    assert records.split("report.pdf#page=3") == ("report.pdf", "p3") and records.split("orders.csv") is None
     assert records.is_record_ref("forge.db#prs/7101") and not records.is_record_ref("view:x/k")
+    assert records.is_record_ref("budget.xlsx#Q3!B2"), "a viewer's own record of a file"
+    assert not records.is_record_ref("pandas-dev/pandas#57012"), "an issue's number, which a view's data holds as text"
+
+
+def test_a_database_s_rows_read_whatever_its_tables_are_keyed_by(corpus):
+    import sqlite3
+
+    db = corpus / "odd.db"
+    con = sqlite3.connect(db)
+    con.executescript("""
+        CREATE TABLE plain (a TEXT, b INTEGER);
+        INSERT INTO plain VALUES ('x', 1), ('y', 2);
+        CREATE TABLE codes (code TEXT PRIMARY KEY, v TEXT);
+        INSERT INTO codes VALUES ('007', 'bond'), ('12', 'twelve');
+        CREATE TABLE quoted ("k""ey" INTEGER PRIMARY KEY, v TEXT);
+        INSERT INTO quoted VALUES (3, 'three');
+        CREATE TABLE pairs (a INTEGER, b INTEGER, v TEXT, PRIMARY KEY (a, b)) WITHOUT ROWID;
+        INSERT INTO pairs VALUES (1, 1, 'p');
+    """)
+    con.commit()
+    con.close()
+    got = [r["ref"] for r in _all(corpus, "odd.db")]
+    assert got == ["odd.db#codes/007", "odd.db#codes/12", "odd.db#plain/1", "odd.db#plain/2", "odd.db#quoted/3"], \
+        "a table keyed by rowid, by text and by a column whose name holds a quote; one with two keys has no refs"
+    assert records.read(db, "odd.db", "codes/007")["record"]["v"] == "bond", "a text key that reads as a number"
+    assert records.read(db, "odd.db", "quoted/3")["record"]["v"] == "three"
+    assert refs.resolve(corpus, "odd.db#codes/007")["record"]["v"] == "bond"
+    assert refs.resolve(corpus, "odd.db#quoted/3")["meta"]["n"] == 1
+    assert refs.resolve(corpus, "odd.db#plain/2")["record"] == {"rowid": 2, "a": "y", "b": 2}
+
+
+def test_an_object_whose_arrays_hold_no_objects_splits_into_its_entries(corpus):
+    (corpus / "config.json").write_text(json.dumps({"name": "sweep", "settings": {"seed": 1}, "tags": ["a", "b"]}, indent=2))
+    assert [r["ref"] for r in _all(corpus, "config.json")] == ["config.json#/name", "config.json#/settings", "config.json#/tags"]
+    (corpus / "grid.json").write_text(json.dumps({"rows": [[1, 2], [3, 4]], "n": 2}, indent=2))
+    assert [r["ref"] for r in _all(corpus, "grid.json")] == ["grid.json#/rows/0", "grid.json#/rows/1"]
 
 
 # --------------------------------------------------------------------------- refs
@@ -143,7 +179,7 @@ def test_records_resolve_with_their_lines_and_line_refs_keep_working(corpus):
     assert e.value.status == 404
     assert refs.span_of_quote(corpus, "report.pdf#page=2", "Average rest between shifts") == "report.pdf#page=2"
     assert refs.span_of_quote(corpus, "forge.db#prs/7114", "Quote the style name") == "forge.db#prs/7114"
-    assert refs.span_of_quote(corpus, "report.pdf", "Average rest between shifts") == "report.pdf#page=2"
+    assert refs.span_of_quote(corpus, "report.pdf", "Average rest between shifts") == "report.pdf#p2"
 
 
 # --------------------------------------------------------------------------- labels
@@ -180,7 +216,7 @@ async def test_a_regex_label_runs_over_the_records_of_every_reader(api, corpus, 
     assert {r: v for r, v in got.items() if not r.startswith("notes.jsonl")} == {
         "orders.csv#row=1": "refund", "orders.csv#row=2": "no", "orders.csv#row=3": "refund",
         "runs.json#/runs/0": "refund", "runs.json#/runs/1": "refund",
-        "report.pdf#page=1": "no", "report.pdf#page=2": "no", "report.pdf#page=3": "no",
+        "report.pdf#p1": "no", "report.pdf#p2": "no", "report.pdf#p3": "no",
         "forge.db#prs/7101": "no", "forge.db#prs/7114": "refund", "forge.db#prs/7123": "refund", "forge.db#prs/7138": "no",
         "forge.db#prs/7152": "refund"}
     assert got["notes.jsonl#L1"] == "refund" and got["notes.jsonl#L2"] == "no", "lines as before, a cover for the rest"
@@ -192,11 +228,11 @@ async def test_a_regex_label_runs_over_the_records_of_every_reader(api, corpus, 
     assert {ref: row.get("line") for ref, row in rows.items()} == {"orders.csv#row=1": 2, "orders.csv#row=2": 4, "orders.csv#row=3": 6}
     r = await api.get(f"/api/ws/{CORPUS}/labels", params={"path": "forge.db", "lines": "1-500"})
     assert r.json() == [], "a page of lines carries no database rows"
-    r = await api.post(f"/api/ws/{CORPUS}/labels/refs", json={"refs": ["forge.db#prs/7114", "report.pdf#p2", "notes.jsonl#L2",
+    r = await api.post(f"/api/ws/{CORPUS}/labels/refs", json={"refs": ["forge.db#prs/7114", "report.pdf#page=2", "notes.jsonl#L2",
                                                                        "forge.db#prs/1"]})
     assert r.status_code == 200, r.text
     rows = {row["ref"]: row["label"] for e in r.json() for row in e["rows"]}
-    assert rows == {"forge.db#prs/7114": "refund", "report.pdf#page=2": "no", "notes.jsonl#L2": "no"}
+    assert rows == {"forge.db#prs/7114": "refund", "report.pdf#p2": "no", "notes.jsonl#L2": "no"}
 
     # the presence of the label on each file, for the tree's dots
     r = await api.get(f"/api/ws/{CORPUS}/labels/presence")
@@ -259,7 +295,7 @@ async def test_a_code_label_gets_each_record_as_its_reader_reads_it(api, corpus,
     got = (await _values(workspaces_tmp / CORPUS, k))
     assert [r for r, v in sorted(got.items()) if v == "refund"] == [
         "forge.db#prs/7114", "forge.db#prs/7123", "forge.db#prs/7152", "notes.jsonl#L1", "orders.csv#row=1", "orders.csv#row=3",
-        "report.pdf#page=2", "runs.json#/runs/0"]
+        "report.pdf#p2", "runs.json#/runs/0"]
     rows = concepts.read_labels(workspaces_tmp / CORPUS, k["id"])
     assert {r["ref"]: r.get("line") for r in rows if r.get("ref", "").startswith("orders.csv")} == {
         "orders.csv#row=1": 2, "orders.csv#row=2": 4, "orders.csv#row=3": 6}
@@ -297,10 +333,10 @@ async def test_a_view_marks_records_that_are_no_lines(api, corpus, workspaces_tm
     concepts.show_concept(CORPUS, k["id"], True)
     ctx = views.labels_context(CORPUS)
     assert kernel_thimble._marked(ctx, "forge.db#prs/7114")[0]["value"] == "refund"
-    assert kernel_thimble._marked(ctx, "report.pdf#p2"), "a page anchored as #p<n> is the record #page=<n>"
+    assert kernel_thimble._marked(ctx, "report.pdf#page=2"), "a page anchored as #page=<n> is the record #p<n>"
     assert kernel_thimble._marked(ctx, "forge.db#prs/7101") == []
-    marks = await views.marks_for(CORPUS, "any", ["forge.db#prs/7114", "forge.db#prs/7101", "report.pdf#page=2", "orders.csv"])
-    assert set(marks) == {"forge.db#prs/7114", "report.pdf#page=2"}
+    marks = await views.marks_for(CORPUS, "any", ["forge.db#prs/7114", "forge.db#prs/7101", "report.pdf#p2", "orders.csv"])
+    assert set(marks) == {"forge.db#prs/7114", "report.pdf#p2"}
     # the checks' test label marks records of every reader, by line or by the ref's checksum
     probe = views.probe_context()
     hit = [f"forge.db#prs/{n}" for n in range(1, 200) if kernel_thimble._marked(probe, f"forge.db#prs/{n}")]

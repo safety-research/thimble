@@ -1,7 +1,7 @@
 # PDF: a file-type viewer, written once for every corpus. A PDF is read with pypdf, one text per page, and cited as
-# <path>#page=<n> (or <path>#p<n>) for a page or <path>#p<n>-p<m> for a run of pages, counting from 1 the way Claude
-# Code's Read counts them. The index holds each page's extracted text, so a page opens and resolves without reading the
-# file again. A scanned page has no text layer, so its excerpt is empty and a value cited on it cannot be checked.
+# <path>#p<n> for a page or <path>#p<n>-p<m> for a run of pages, counting from 1 the way Claude Code's Read counts
+# them. The index holds each page's extracted text, so a page opens and resolves without reading the file again. A
+# scanned page has no text layer, so its excerpt is empty and a value cited on it cannot be checked.
 #
 # The data (sample/): the PDFs of a corpus in its own folders: reports in reports/, one summary per run in runs/<run>/,
 # scans in scans/ and what a download left in uploads/. What the reader meets there:
@@ -81,14 +81,14 @@ def records(index, query):
 
 
 def resolve(index, locator):
-    """page=<n> or p<n>: the page's text. p<n>-p<m>: the texts of those pages, in order."""
+    """p<n>: the page's text. p<n>-p<m>: the texts of those pages, in order."""
     path, fragment = locator.get("path"), str(locator.get("fragment") or "")
     entry = index.get(path)
-    m = re.fullmatch(r"(?:page=(\d+))|p(\d+)(?:-p(\d+))?", fragment)
+    m = re.fullmatch(r"p(\d+)(?:-p(\d+))?", fragment)
     if entry is None or "key" in locator or not m:
         return None
-    first = int(m.group(1) or m.group(2))
-    last = int(m.group(3) or first)
+    first = int(m.group(1))
+    last = int(m.group(2) or first)
     if not 1 <= first <= last <= len(entry["pages"]):
         return None
     text = "\n\n".join(entry["pages"][first - 1:last])

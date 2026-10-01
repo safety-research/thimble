@@ -3,7 +3,6 @@
   "description": "A PDF's pages as the text each page holds, a cited page opened and selected, so a quoted figure is read on its page.",
   "claims": ["*.pdf"],
   "accepts": [
-    {"form": "page=<n>", "means": "page <n> of a PDF, counting from 1"},
     {"form": "p<n>", "means": "page <n> of a PDF, counting from 1"},
     {"form": "p<n>-p<m>", "means": "pages <n> to <m> of a PDF"}
   ],

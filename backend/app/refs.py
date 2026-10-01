@@ -10,7 +10,7 @@
                                   <db> is any path ending in .db, .sqlite or .sqlite3, forge.db included,
                                   e.g. `forge.db#prs/12`, `<run>/forge.db#prs/12`, `runs/x/ehr.db#patients/12`
     <db>#<table>                  a whole table of such a database file
-    <pdf>#page=<n>                page n (1-based) of a file ending in .pdf; `#p<n>` reads the same (records.canon)
+    <pdf>#p<n>                    page n (1-based) of a file ending in .pdf; `#page=<n>` reads the same (records.canon)
     <json>#/<pointer>             a value of a JSON document (a file ending in .json) by its JSON pointer (RFC 6901), such
                                   as one record of it (records.py), e.g. `runs.json#/runs/3`
     <csv>#row=<n>                 row n (1-based, after the header line) of a file ending in .csv or .tsv
@@ -235,7 +235,7 @@ def format_ref(p: dict[str, Any]) -> str:
     if k == "row":
         return f"{p.get('path') or 'forge.db'}#{p['table']}/{p['pk']}"
     if k == "page":
-        return f"{p['path']}#page={p['page']}"
+        return f"{p['path']}#p{p['page']}"
     if k == "pointer":
         return f"{p['path']}#{p['pointer']}"
     if k == "csvrow":
@@ -452,7 +452,9 @@ def resolve_base(corpus_dir: Path, ref: str) -> dict[str, Any]:
         return critique_session.resolve_chat(_workspace_of(corpus_dir), p, ref.strip())
     if kind in ("table", "row"):
         return _resolve_database(corpus_dir, p, ref)
-    if kind in ("page", "pointer", "csvrow"):
+    if kind == "page":
+        return _resolve_page(corpus_dir, p, ref)
+    if kind in ("pointer", "csvrow"):
         return _resolve_record(corpus_dir, p, ref)
     if kind in ("record", "range", "block", "span"):
         return _resolve_lines(corpus_dir, p, ref)
@@ -815,13 +817,30 @@ def _resolve_lines(corpus_dir: Path, p: dict[str, Any], ref: str) -> dict[str, A
     return out
 
 
-NO_TEXT_LAYER = "(no text on this page: a scan or an image)"
+def _resolve_page(corpus_dir: Path, p: dict[str, Any], ref: str) -> dict[str, Any]:
+    """A PDF's page: {ref, kind: page, path, record: {page, text}, blocks, excerpt, meta}, the excerpt and meta as a
+    `<pdf>#p<n>` locator gets them (pdfs.excerpt), with the page's place `n`. A page past the last is 404; a PDF that
+    does not open says so in its excerpt and meta.error."""
+    from . import pdfs  # noqa: PLC0415 — pdfs imports corpus, which imports this module
+
+    path, rel = _locate(corpus_dir, p["path"])
+    if not path.is_file():
+        raise RefError(f"no such file: {rel!r}", 404)
+    n = int(p["page"])
+    excerpt, meta = pdfs.excerpt(path, f"p{n}")
+    if meta.get("missing"):
+        raise RefError(f"p{n} is past the last page ({rel} has {meta['pages']} pages)", 404)
+    got = [] if meta.get("error") else pdfs.page_texts(path, n, n)["pages"]
+    text = got[0] if got else ""
+    meta["n"] = n
+    return {"ref": ref, "kind": "page", "path": rel, "record": {"page": n, "text": text},
+            "blocks": [{"kind": "text", "text": text or excerpt}], "excerpt": excerpt[:EXCERPT_MAX], "meta": meta}
 
 
 def _resolve_record(corpus_dir: Path, p: dict[str, Any], ref: str) -> dict[str, Any]:
-    """A PDF's page, a JSON document's value or a CSV's row (records.read): {ref, kind, path, record, blocks, excerpt,
-    meta}. meta holds the record's place `n` and, in a file of text, the lines it spans (`line`..`end_line`), where the
-    File browser opens it. A row reads as its fields, so it has no blocks."""
+    """A JSON document's value or a CSV's row (records.read): {ref, kind, path, record, blocks, excerpt, meta}. meta
+    holds the record's place `n` and the lines it spans (`line`..`end_line`), where the File browser opens it. A row
+    reads as its fields, so it has no blocks."""
     from . import records  # lazy (import cycle)
 
     path, rel = _locate(corpus_dir, p["path"])
@@ -837,16 +856,9 @@ def _resolve_record(corpus_dir: Path, p: dict[str, Any], ref: str) -> dict[str, 
     if rec is None:
         raise RefError(f"{rel} has no record #{fragment}", 404)
     kind = p["kind"]
-    if kind == "csvrow":
-        blocks: list[dict[str, str]] = []
-    elif kind == "page":
-        blocks = [{"kind": "text", "text": rec["text"]}]
-    else:
-        blocks = record_blocks(rec["record"])
+    blocks: list[dict[str, str]] = [] if kind == "csvrow" else record_blocks(rec["record"])
     meta: dict[str, Any] = {k: rec[k] for k in ("n", "line", "end_line") if rec.get(k) is not None}
-    if kind == "page":
-        meta["pages"] = len(records.pdf_pages(path))
-    excerpt = rec["text"] or (NO_TEXT_LAYER if kind == "page" else _dumps(rec["record"]))
+    excerpt = rec["text"] or _dumps(rec["record"])
     return {"ref": ref, "kind": kind, "path": rel, "record": rec["record"], "blocks": blocks, "excerpt": excerpt[:EXCERPT_MAX],
             "meta": meta}
 
@@ -872,15 +884,15 @@ def _resolve_database(corpus_dir: Path, p: dict[str, Any], ref: str) -> dict[str
             record = {"name": table, "row_count": n, "columns": columns, "pk": pk or "rowid"}
             return {"ref": ref, "kind": "table", "path": rel, "table": table, "record": record,
                     "excerpt": f"{table}: {n} rows", "meta": {"table": table}}
-        key = p["pk"]
+        from .records import row_by_key  # noqa: PLC0415 — records imports this module
+
         if pk is None:
-            select, where, columns = "rowid, *", "rowid = ?", ["rowid", *columns]
+            select, columns = "rowid, *", ["rowid", *columns]
         else:
-            select, where = "*", f'"{pk}" = ?'
-        if key.isdigit():
-            key = int(key)
+            select = "*"
         try:
-            row = con.execute(f'SELECT {select} FROM "{table}" WHERE {where}', (key,)).fetchone()
+            row = row_by_key(con, table, pk or "rowid", p["pk"], select)
+            key = row[columns.index(pk or "rowid")] if row is not None else None
             n = _row_place(con, table, pk, key) if row is not None else None
         except sqlite3.Error as e:
             raise RefError(f"sqlite: {e}", 400)
@@ -897,13 +909,15 @@ def _resolve_database(corpus_dir: Path, p: dict[str, Any], ref: str) -> dict[str
 def _row_place(con: sqlite3.Connection, table: str, pk: str | None, key: Any) -> int | None:
     """Where a row stands (from 1) in its table read in storage order, as the Database view pages it: by rowid, else
     by its primary key in a table without one."""
+    from .records import quote_id  # noqa: PLC0415 — records imports this module
+
+    t, col = quote_id(table), "rowid" if pk is None else quote_id(pk)
     try:
-        got = con.execute(f'SELECT COUNT(*) FROM "{table}" WHERE rowid < (SELECT rowid FROM "{table}" WHERE '
-                          + ("rowid" if pk is None else f'"{pk}"') + " = ?)", (key,)).fetchone()
+        got = con.execute(f"SELECT COUNT(*) FROM {t} WHERE rowid < (SELECT rowid FROM {t} WHERE {col} = ?)", (key,)).fetchone()
     except sqlite3.Error:
         if pk is None:
             return None
-        got = con.execute(f'SELECT COUNT(*) FROM "{table}" WHERE "{pk}" < ?', (key,)).fetchone()
+        got = con.execute(f"SELECT COUNT(*) FROM {t} WHERE {col} < ?", (key,)).fetchone()
     return int(got[0]) + 1 if got else None
 
 
