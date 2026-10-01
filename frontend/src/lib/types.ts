@@ -340,6 +340,8 @@ export interface LabelRow {
   analyst?: string | null
   /** the texts of the record a span label marks */
   spans?: string[]
+  /** the line a record whose ref names none starts on (a CSV row, a JSON document's record) */
+  line?: number
 }
 
 export interface LabelRowsResponse {
@@ -402,6 +404,8 @@ export interface Proposal {
   asked?: boolean
   /** an orientation's proposal whose view has not passed its checks yet: its card shows the build, the views bar not */
   held?: boolean
+  /** its view is switched off in Settings (backend views.views_off): the views bar leaves it out */
+  off?: boolean
   status: ProposalStatus
   ts: string
   error?: string
@@ -471,7 +475,10 @@ export interface View {
   /** the files it claims, the first 500 of them, and how many there are */
   files?: string[]
   n_files?: number
-  /** every claim is one extension's glob: a viewer for a file type, a mode of the File browser for the files it claims */
+  /** "file" for a file viewer; what one unit of a corpus view is otherwise, as view.json gives it */
+  unit?: string | Record<string, string> | null
+  /** a file viewer, a mode of the File browser for the files it claims rather than a view in the views bar: its unit is
+   * "file", or with no unit every claim is one extension's glob (backend views.file_type_viewer) */
   file_type?: boolean
 }
 
@@ -948,8 +955,6 @@ export interface ModelConf {
  * what it is given. */
 export interface Settings {
   models: Record<string, ModelConf>
-  /** the chat column is hidden and main's foot shows in a dock (shell/Shell, chat off) */
-  hide_chat?: boolean
   /** the agents whose permission mode the analyst set; any other runs in the mode of their Claude Code session */
   permission_modes?: Partial<Record<ModeAgent, OrientPermissions>>
   /** the modes the analyst's Claude Code settings turn off */
@@ -1006,12 +1011,29 @@ export interface ExtensionRow {
   offer?: boolean
 }
 
-/** `GET /ws/{c}/extensions`: the extensions added, the conflicts among those that run here, in words, and whether an
- * orientation ran here. */
+/** One view built for this workspace, in its local extension (backend views.local_extension). */
+export interface LocalViewRow {
+  slug: string
+  name: string
+  /** a file viewer, which opens in the File browser */
+  file_viewer: boolean
+  /** its switch in Settings: off, it leaves the views bar and the File browser */
+  on: boolean
+}
+
+/** The workspace's local extension: the views built for this workspace, which no other workspace shows. */
+export interface LocalExtension {
+  name: string
+  views: LocalViewRow[]
+}
+
+/** `GET /ws/{c}/extensions`: the extensions added, the conflicts among those that run here, in words, whether an
+ * orientation ran here, and the workspace's local extension. */
 export interface Extensions {
   extensions: ExtensionRow[]
   conflicts: string[]
   orientation_ran?: boolean
+  local?: LocalExtension | null
 }
 
 // ---- the corpus (backend corpus.py) ----
@@ -1051,12 +1073,61 @@ export interface SourceRecord {
   meta: Record<string, any>
 }
 
+/** The server's sniff of a file that reads as a transcript (backend transcripts.sniff): its format, how sure it is
+ * (0.95 makes Transcript the first mode, 0.5 only offers it), and where a message keeps who speaks, the words and the
+ * time (dotted keys into a record, or a CSV's columns); for whole conversations, `keys.list` is the key of their list of
+ * messages and `pair` the keys of a prompt and its response. `lines`: JSON lines in a file the server pages as text. */
+export interface TranscriptHint {
+  format: 'stream' | 'messages' | 'conversations' | 'json' | 'csv' | 'text'
+  score: number
+  keys?: { speaker: string; text: string; time?: string; list?: string }
+  pair?: [string, string]
+  lines?: boolean
+  style?: string
+  /** who may start a turn in a text chat log, when the style alone would take any heading or `Word:` line */
+  speakers?: string[]
+  delimiter?: string
+}
+
+/** A text chat log's line that starts a turn (`meta.turn`): who speaks, when, and the UTF-16 offset of the words. */
+export interface ChatTurn {
+  speaker: string
+  time?: string
+  at: number
+}
+
+/** One turn of a whole-file JSON transcript (`GET /corpora/{c}/source/turns`), with the line it stands on. */
+export interface SourceTurn {
+  i: number
+  line: number
+  speaker: string
+  role: 'user' | 'assistant' | 'system' | 'tool' | 'other'
+  text: string
+  time?: string
+  group?: number
+  /** the turn's whole length when its text was cut */
+  cut?: number
+}
+
+export interface SourceTurns {
+  path: string
+  total: number
+  start: number
+  turns: SourceTurn[]
+  /** the conversations the page's turns belong to, by index, each with its title and first turn */
+  groups: Record<string, { title: string; first: number }>
+  /** how many conversations the file holds */
+  n_groups: number
+}
+
 export interface SourcePage {
   path: string
   kind: SourceKind
   total_lines: number
   start: number
   records: SourceRecord[]
+  /** the file reads as a transcript */
+  transcript?: TranscriptHint
   /** the file is binary, judged from its first bytes: no records, and its size */
   binary?: boolean
   size_bytes?: number

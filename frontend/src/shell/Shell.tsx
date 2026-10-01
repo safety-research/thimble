@@ -3,11 +3,8 @@
 // its surface in the pane that holds it, else in the focused pane (panes.show). The layout and the chat column's width
 // and fold state are kept per workspace in browser storage (App clears it first when the workspace was replaced by a new
 // one of the same name, lib/workspace.ts syncInstance); a new workspace opens on Files. A folded chat column opens when
-// something asks for a thread. With the chat off (the workspace's `hide_chat` setting, in the settings popover) there is
-// no column at all: main's alert, permission card, orientation strip
-// and Start gate show in the dock at the bottom left (ChatPanel `dock`), a ⌘-click's box answers in place (CmdPointer
-// `inline`), and a request for a thread turns the chat on. When the workspace is replaced (the stream's `reset`), the
-// page reloads. With no Claude Code session attached the shell is inert under SessionGone.
+// something asks for a thread. When the workspace is replaced (the stream's `reset`), the page reloads. With no Claude
+// Code session attached the shell is inert under SessionGone.
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Canvas } from '../canvas/Canvas'
 import { ChatPanel } from '../chat/ChatPanel'
@@ -20,7 +17,6 @@ import { FilesTab } from '../files/FilesTab'
 import { useViews } from '../files/ViewsBar'
 import { ViewSurface } from '../files/ViewSurface'
 import { bus, type Tab } from '../lib/bus'
-import { loadSettings, onSettingsChange, saveSetting } from '../lib/models'
 import { isReplay, useWorkspaceEvents } from '../lib/events'
 import { track } from '../lib/telemetry'
 import { notePress, pressedPane, renewPress, setShownSurfaces, setSurfaceDrag } from '../lib/surfaces'
@@ -59,6 +55,7 @@ import { SessionGone, useSessionGone } from './SessionGone'
 import { Toasts } from './Toasts'
 import { Untrusted } from './Untrusted'
 import { TopBar } from './TopBar'
+import { TourHost } from './TourHost'
 
 export const CHAT_WIDTH = { def: 308, min: 280, max: 640 }
 const BASE: { id: Tab; label: string; icon: IconName }[] = [
@@ -84,32 +81,6 @@ function readLayout(key: string): Layout {
     chatOpen: saved.chatOpen !== false,
     panes,
   }
-}
-
-/** The chat off (the workspace's `hide_chat` setting): whether it is, and its switch, which saves the setting. */
-export function useChatOff(ws: string): [boolean, (off: boolean) => void] {
-  const [off, setOff] = useState(false)
-  useEffect(() => {
-    let alive = true
-    const read = () =>
-      loadSettings(ws)
-        .then((s) => alive && setOff(s.hide_chat === true))
-        .catch(() => undefined)
-    void read()
-    const unsub = onSettingsChange((w) => w === ws && void read())
-    return () => {
-      alive = false
-      unsub()
-    }
-  }, [ws])
-  const set = useCallback(
-    (v: boolean) => {
-      setOff(v)
-      saveSetting(ws, 'hide_chat', v).catch((e: Error) => bus.emit('toast', { text: `Could not save the chat setting: ${e.message}`, kind: 'error' }))
-    },
-    [ws],
-  )
-  return [off, set]
 }
 
 /** The element's size, measured as it changes; `guess` until the first measure. */
@@ -200,15 +171,13 @@ export function Shell({ ws }: { ws: string }) {
     [setPanes, available],
   )
 
-  const [chatOff, setChatOff] = useChatOff(ws)
-  // a request for the chat while its column is folded, or off, opens the column, and the chat panel takes the request
-  // once it has mounted (chat/pending.ts)
-  const chatOpen = useRef(layout.chatOpen && !chatOff)
-  chatOpen.current = layout.chatOpen && !chatOff
+  // a request for the chat while its column is folded opens the column, and the chat panel takes the request once it
+  // has mounted (chat/pending.ts)
+  const chatOpen = useRef(layout.chatOpen)
+  chatOpen.current = layout.chatOpen
   useEffect(() => {
     const open = () => {
       track('panel-open', { target: 'panel:chat', detail: { via: 'request' } })
-      if (chatOff) setChatOff(false)
       patch({ chatOpen: true })
     }
     const offs = [
@@ -224,7 +193,7 @@ export function Shell({ ws }: { ws: string }) {
       }),
     ]
     return () => offs.forEach((off) => off())
-  }, [patch, chatOff, setChatOff])
+  }, [patch])
   // a `?ref=` in the URL opens its element once the surfaces are mounted (their effects run before this one), as a
   // click on its chip would
   useEffect(() => {
@@ -233,9 +202,8 @@ export function Shell({ ws }: { ws: string }) {
   }, [])
   const gone = useSessionGone(ws)
 
-  // the main area's left edge: the window's 12px margin, the chat column and the 12px seam, or the collapsed strip, or
-  // nothing with the chat off
-  const paneX = 12 + (chatOff ? 0 : layout.chatOpen ? liveWidth + 12 : 40)
+  // the main area's left edge: the window's 12px margin, the chat column and the 12px seam, or the collapsed strip
+  const paneX = 12 + (layout.chatOpen ? liveWidth + 12 : 40)
   // the main area: its size, whether it is too small for more than one pane, and each pane's rectangle in it
   const [area, setArea] = useState<HTMLDivElement | null>(null)
   const size = useSize(area, () => ({ w: Math.max(0, window.innerWidth - paneX - 12), h: Math.max(0, window.innerHeight - 52) }))
@@ -293,7 +261,7 @@ export function Shell({ ws }: { ws: string }) {
   const signals = tabSignals(dots, writing(metas))
 
   return (
-    <div className="shell" data-chat={chatOff ? 'off' : layout.chatOpen ? 'open' : 'closed'} data-session={gone ? 'gone' : undefined} inert={!!gone} style={{ '--pane-x': `${paneX}px` } as React.CSSProperties}>
+    <div className="shell" data-chat={layout.chatOpen ? 'open' : 'closed'} data-session={gone ? 'gone' : undefined} inert={!!gone} style={{ '--pane-x': `${paneX}px` } as React.CSSProperties}>
       <TopBar
         ws={ws}
         tabs={BASE.map((t) => ({
@@ -310,7 +278,7 @@ export function Shell({ ws }: { ws: string }) {
         onTabDrag={startDrag}
       />
       <div className="shell-body">
-        {chatOff ? null : layout.chatOpen ? (
+        {layout.chatOpen ? (
           <>
             <aside className="shell-left" style={{ width: liveWidth }}>
               <ChatPanel
@@ -359,9 +327,9 @@ export function Shell({ ws }: { ws: string }) {
         </div>
       </div>
       {drag && <DragGhost drag={drag} />}
-      {chatOff && <ChatPanel ws={ws} dock />}
-      <CmdPointer ws={ws} inline={chatOff} />
+      <CmdPointer ws={ws} />
       <Toasts />
+      <TourHost />
       <ServerDown />
       <NewVersion />
       <Untrusted ws={ws} />

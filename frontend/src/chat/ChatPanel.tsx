@@ -5,9 +5,7 @@
 // thread works, a strip of its steps rides behind the composer, and every permission request waits on one card above
 // it (PermissionCard). The composer sends where threads.composerTarget says, and while the agent a thread shows (or a
 // step's parent) runs and the browser can stop it, the composer's send square is its Stop (composerStopOf). A thread
-// whose run ended without a reply offers Ask again. With `dock` (the chat column hidden, Shell) only main's foot shows,
-// with no composer: its alert, the permission card, the orientation's strip and the Start gate, and nothing at all
-// while none of them has anything.
+// whose run ended without a reply offers Ask again.
 import { Fragment, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Button } from '../components/Button'
 import { Chip } from '../components/Chip'
@@ -245,14 +243,14 @@ export function taskStrip(kind: ThreadKind | null, running: boolean, rows: reado
   return { title: kind === 'thread' && stage ? STAGE_TEXT[stage] : 'Working', steps: [], count: '' }
 }
 
-export function ChatPanel({ ws, onCollapse, dock = false }: { ws: string; onCollapse?: () => void; dock?: boolean }) {
+export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => void }) {
   const [chats, setChats] = useState<ChatMeta[]>([])
-  // the thread shown, kept per workspace so a reload opens the same one; the dock shows main's foot alone
+  // the thread shown, kept per workspace so a reload opens the same one
   const currentKey = storageKey(ws, 'thread-current')
-  const [current, setCurrent] = useState(() => (dock ? 'main' : readStorage<string>(currentKey, 'main') || 'main'))
+  const [current, setCurrent] = useState(() => readStorage<string>(currentKey, 'main') || 'main')
   useEffect(() => {
-    if (!dock) writeStorage(currentKey, current)
-  }, [currentKey, current, dock])
+    writeStorage(currentKey, current)
+  }, [currentKey, current])
   const [seen, setSeen] = useState<SeenMap>(() => readSeen(ws))
   const main = useChat(ws, 'main')
   const other = useChat(ws, current === 'main' ? null : current)
@@ -351,12 +349,11 @@ export function ChatPanel({ ws, onCollapse, dock = false }: { ws: string; onColl
   useEffect(
     () =>
       bus.on('openChat', (e) => {
-        if (dock) return
         if (e.send) setPendingSend({ chatId: e.chatId, text: e.send, n: ++sendSeq.current })
         setCurrent(e.chatId)
         void loadList()
       }),
-    [loadList, dock],
+    [loadList],
   )
 
   // the handed-over message goes once that chat's own meta is loaded, through the normal streaming path
@@ -380,7 +377,7 @@ export function ChatPanel({ ws, onCollapse, dock = false }: { ws: string; onColl
     () =>
       bus.on('openRef', (e) => {
         const p = parseRef(e.ref)
-        if (dock || p?.kind !== 'call') return
+        if (p?.kind !== 'call') return
         track('chip-teleport', { target: e.ref, detail: { kind: 'call' } })
         void fetchCall(ws, p.chat, p.n)
           .then((c) => c.chat || p.chat)
@@ -390,20 +387,20 @@ export function ChatPanel({ ws, onCollapse, dock = false }: { ws: string; onColl
             setFocus((f) => ({ ref: callRef(p.chat, p.n), line: p.line, endLine: p.endLine, seq: (f?.seq ?? 0) + 1 }))
           })
       }),
-    [ws, dock],
+    [ws],
   )
 
   // what asked for the chat while its column was folded (chat/pending.ts), once the listeners above are subscribed
   useEffect(() => {
-    if (!dock) replayHeld()
-  }, [dock])
+    replayHeld()
+  }, [])
 
-  // the shown chat's records are seen; the dock shows none
+  // the shown chat's records are seen
   const nMessages = countMessages(chat.records)
   useEffect(() => {
-    if (chat.loading || dock) return
+    if (chat.loading) return
     setSeen(markSeen(ws, current, nMessages))
-  }, [ws, current, nMessages, chat.loading, dock])
+  }, [ws, current, nMessages, chat.loading])
 
   // follow the newest record while the list is near its end; a thread opens at its end
   const nearEnd = useRef(true)
@@ -679,52 +676,6 @@ export function ChatPanel({ ws, onCollapse, dock = false }: { ws: string; onColl
       <RoleChip ws={ws} role="dev" label="the view build" />
     ) : undefined
   const mainChip = !!attached && !roleChip
-
-  if (dock) {
-    const holds = !!main.meta?.alert
-    if (!holds && asks.length === 0 && !(strip && !showGate) && !showGate) return null
-    return (
-      <ThreadsContext.Provider value={{ labels, metas }}>
-        <section ref={rootRef} className="chat chat-dock" data-panel="chat-dock" aria-label="Chat dock">
-          <div ref={footRef} className="chat-foot chat-dock-foot">
-            <Holds className="chat-main-holds" alert={main.meta?.alert} />
-            {asks.length > 0 && <PermissionCard ws={ws} asks={asks} metas={metaMap} labels={labels} />}
-            {strip && !showGate && (
-              <TaskStrip
-                title={strip.title}
-                steps={strip.steps}
-                count={strip.count}
-                open={stripOpen}
-                onToggle={() => setStripOpen((o) => !o)}
-                waiting={waiting}
-                retry={retryAlert}
-                onRetry={retryMeta ? () => api.retrySession(ws, retryMeta.id) : undefined}
-              />
-            )}
-            {showGate && (
-              <StartGate
-                ws={ws}
-                model={orientConf?.model ?? null}
-                onModel={orientConf ? (model) => saveOrient({ model, fast: !!orientConf.fast && hasFastMode(model) }) : undefined}
-                defaultEffort={orientEffortOf(orientConf) ?? ORIENT_DEFAULT_EFFORT}
-                fast={orientConf ? !!orientConf.fast : null}
-                onEffort={(effort) => saveOrient({ effort })}
-                onFast={orientConf ? (fast) => (track('start-toggle', { target: 'orient:fast', detail: { fast } }), saveOrient({ fast })) : undefined}
-                mode={agentMode(modeRows, 'orient', attached?.permission_mode, offModes)}
-                offModes={offModes}
-                onMode={saveOrientMode}
-                onStarted={() => setStarted(true)}
-                onSkip={() => {
-                  writeStorage(skipKey, true)
-                  setSkipped(true)
-                }}
-              />
-            )}
-          </div>
-        </section>
-      </ThreadsContext.Provider>
-    )
-  }
 
   return (
     <ThreadsContext.Provider value={{ labels, metas }}>

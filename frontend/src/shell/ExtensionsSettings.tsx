@@ -5,10 +5,15 @@
 // the check on whether it fits put it until the analyst moves it, which overrides the check either way; beside it is
 // the check's reason. An extension with orientation instructions that comes on where an orientation ran asks whether
 // to run them now; the answer is sent with the rest on Save. Conflicts among the running extensions are listed under
-// the rows.
+// the rows. The workspace's own views, which thimble built for it and no other workspace shows, come first under "This
+// workspace", which has no switch of its own since it is on here without being added. Each of its views has one.
 import { Segmented } from '../components/Button'
 import { Switch } from '../components/Switch'
-import type { ExtensionRow, Extensions } from '../lib/types'
+import type { ExtensionRow, Extensions, LocalExtension, LocalViewRow } from '../lib/types'
+
+export const LOCAL_LABEL = 'This workspace'
+export const LOCAL_NOTE = 'Views built here. No other workspace shows them.'
+export const FILE_VIEWER_NOTE = 'Opens in the File browser'
 
 /** The key a view's switch has: `<extension>/<view>`. */
 export const viewKey = (name: string, slug: string): string => `${name}/${slug}`
@@ -29,6 +34,11 @@ export function changedViews(loaded: ExtensionRow[], now: Record<string, boolean
       if (k in now && now[k] !== v.on) out.push([e.name, v.slug, now[k]])
     }
   return out
+}
+
+/** The switches of the workspace's own views a save sends, [view, on] for each that differs from the loaded one. Pure. */
+export function changedLocalViews(loaded: LocalViewRow[], now: Record<string, boolean>): [string, boolean][] {
+  return loaded.filter((v) => v.slug in now && now[v.slug] !== v.on).map((v) => [v.slug, now[v.slug]])
 }
 
 /** Whether the row asks to run the extension's orientation instructions now: it is switched on here and either the
@@ -55,15 +65,48 @@ interface Props {
   setOn: (name: string, v: boolean) => void
   viewOn: Record<string, boolean>
   setViewOn: (key: string, v: boolean) => void
+  /** the switches of the workspace's own views, by view */
+  localOn: Record<string, boolean>
+  setLocalOn: (slug: string, v: boolean) => void
   answers: Record<string, boolean>
   setAnswer: (name: string, run: boolean) => void
 }
 
-export function ExtensionsSettings({ data, on, setOn, viewOn, setViewOn, answers, setAnswer }: Props) {
-  if (!data.extensions.length) return null
+function LocalRows({ local, on, setOn }: { local: LocalExtension; on: Record<string, boolean>; setOn: (slug: string, v: boolean) => void }) {
+  return (
+    <div className="settings-extension settings-extension-local" data-extension={local.name} data-local>
+      <div className="settings-switch">
+        <span aria-hidden />
+        <span className="settings-switch-text">
+          <span className="settings-switch-label">{LOCAL_LABEL}</span>
+          <span className="settings-switch-note">{LOCAL_NOTE}</span>
+        </span>
+      </div>
+      {local.views.map((v) => {
+        const id = `settings-local-${v.slug}`
+        return (
+          <div className="settings-switch settings-extension-view" key={v.slug} data-view={v.slug}>
+            <Switch checked={!!on[v.slug]} onChange={(x) => setOn(v.slug, x)} aria-labelledby={id} />
+            <span className="settings-switch-text">
+              <span className="settings-switch-label" id={id}>
+                {v.name}
+              </span>
+              {v.file_viewer && <span className="settings-switch-note">{FILE_VIEWER_NOTE}</span>}
+            </span>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+export function ExtensionsSettings({ data, on, setOn, viewOn, setViewOn, localOn, setLocalOn, answers, setAnswer }: Props) {
+  const local = data.local?.views.length ? data.local : null
+  if (!data.extensions.length && !local) return null
   return (
     <div className="settings-switches settings-extensions" role="group" aria-label="Extensions">
       <span className="label settings-extensions-head">extensions</span>
+      {local && <LocalRows local={local} on={localOn} setOn={setLocalOn} />}
       {data.extensions.map((e) => {
         const asks = asksToRun(e, !!on[e.name], !!data.orientation_ran)
         return (

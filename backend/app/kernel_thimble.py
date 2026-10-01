@@ -20,7 +20,8 @@ it with `WS` (the workspace directory) set and registers it as `thimble`.
                               {label, value, colour}, [] outside a view's call
     thimble.kept(ref)         in a view's reader: whether the record passes the analyst's label filter (True with none)
     thimble.kept_unit(refs)   in a view's reader: whether a unit that gathers the records `refs` passes that filter,
-                              judged by its records in the files the filter's label ran over (True when there are none)
+                              judged by its records in the files the filter's label ran over (True when it has records
+                              and none is in such a file, False when it has no records)
     thimble.view_labels()     in a view's reader: {labels, filter}, the labels that are on with their highlighted values,
                               and the filter {label, value, colour} or None
     thimble.progress(done=None, total=None, note=None)
@@ -50,6 +51,7 @@ import math
 import numbers
 import re
 import sqlite3
+import zlib
 from pathlib import Path
 
 WS = globals().get("WS")  # the workspace directory, set by the injector (notebook.kernel_argv)
@@ -344,7 +346,7 @@ def _jsonl_parts(jsonl: Path):
                 except (TypeError, ValueError):
                     continue
                 if r.get("clear"):
-                    for ref in [ref for ref in model if _ref_parts(ref)[0] == where and a <= (_ref_parts(ref)[1] or 0) <= b]:
+                    for ref in [ref for ref, m in model.items() if _ref_parts(ref)[0] == where and a <= (_row_line(ref, m)[1] or 0) <= b]:
                         del model[ref]
                 covers = _trim(covers, where, a, b)
                 if r.get("cover") and r.get("value") is not None:
@@ -358,13 +360,23 @@ def _jsonl_parts(jsonl: Path):
     out = []
     for ref, r in model.items():
         a = analyst.get(ref)
-        path, line = _ref_parts(ref)
+        path, line = _row_line(ref, r)
         out.append((path, line, r.get("label"), r.get("source"), a.get("label") if a else None, r.get("confidence"), ref))
     for ref, a in analyst.items():
         if ref not in model:
-            path, line = _ref_parts(ref)
+            path, line = _row_line(ref, a)
             out.append((path, line, None, None, a.get("label"), None, ref))
     return out, covers
+
+
+def _row_line(ref: str, row: dict):
+    """_ref_parts, with the line a row names (`line`) for a record whose ref carries none, such as a CSV row
+    (labels_store.row_line)."""
+    path, line = _ref_parts(ref)
+    given = row.get("line")
+    if line is None and path is not None and isinstance(given, int) and not isinstance(given, bool) and given >= 1:
+        line = given
+    return path, line
 
 
 def labels(name=None, negatives=False):
@@ -451,12 +463,17 @@ def _members(jsonl) -> tuple:
     rows, covers = _store_parts(db) if _store_fresh(jsonl, db) else _jsonl_parts(jsonl)
     values = {}
     paths = set()
-    for path, _line, label, _source, verdict, _confidence, ref in rows:
+    starts = {}  # a record of a CSV or a JSON document by the line it starts on, as a view that reads its lines names it
+    for path, line, label, _source, verdict, _confidence, ref in rows:
         v = verdict if verdict is not None else label
         if v is not None:
             values[str(ref)] = str(v)
             if path is not None:
                 paths.add(str(path))
+                if line is not None and _ref_parts(str(ref))[1] is None:
+                    starts.setdefault(f"{path}#L{int(line)}", str(v))
+    for ref, v in starts.items():
+        values.setdefault(ref, v)
     spans: dict = {}
     for c in covers:
         if c[3] is not None:
@@ -479,6 +496,8 @@ def _value_of(label: dict, ref: str):
     """The label's effective value on the record `ref`: its row's, else the value of the cover that holds its line."""
     values, spans, _paths = _label_members(label)
     v = values.get(ref)
+    if v is None:
+        v = values.get(_canon(ref))
     if v is not None:
         return v
     path, line = _ref_parts(ref)
@@ -487,13 +506,29 @@ def _value_of(label: dict, ref: str):
     return next((value for a, b, value in spans.get(path, ()) if a <= line <= b), None)
 
 
+_PDF_PAGE = re.compile(r"^(.+\.[Pp][Dd][Ff])#(?:p|page=?)(\d+)$")
+
+
+def _canon(ref: str) -> str:
+    """A record's ref as label rows key it (records.canon): a PDF's `#page=<n>` as `#p<n>`."""
+    m = _PDF_PAGE.match(ref)
+    return f"{m[1]}#p{int(m[2])}" if m else ref
+
+
 def _probed(ref: str, every) -> bool:
+    """Whether the test label marks the record: a line whose number is a multiple of `every`, or a record of another
+    reader (a database row, a page, a JSON value, a CSV row) whose ref's checksum is."""
     _path, line = _ref_parts(ref)
-    return bool(line) and line % int(every) == 0
+    if line:
+        return line % int(every) == 0
+    if "#" not in ref or ref.startswith(("view:", "card:", "cell:")):
+        return False
+    return zlib.crc32(_canon(ref).encode("utf-8")) % int(every) == 0
 
 
 def marked(ref):
-    """The marks of the labels that are on for the record `ref` (`<path>#L<n>`): each {label, value, colour} whose value
+    """The marks of the labels that are on for the record `ref` (`<path>#L<n>`, or the ref of a record of another reader
+    such as `<db>#<table>/<key>` or `<pdf>#p<n>`): each {label, value, colour} whose value
     the record takes and the analyst highlights, in the labels' order. [] outside a view's reader call."""
     return _marked(_view_ctx, ref)
 
@@ -505,9 +540,10 @@ def kept(ref):
 
 
 def kept_unit(refs):
-    """Whether a unit that gathers the records `refs` passes the analyst's label filter: True with no filter or when the
-    filter's label left no value in any of their files, else whether the label takes the filter's value on one of its
-    records in a file it ran over. Records of other files never keep a unit, since kept holds for all of them."""
+    """Whether a unit that gathers the records `refs` passes the analyst's label filter: True with no filter; with one,
+    False for a unit with no records, True when the filter's label left no value in any of their files, else whether
+    the label takes the filter's value on one of its records in a file it ran over. Records of other files never keep a
+    unit, since kept holds for all of them."""
     return _kept_unit(_view_ctx, refs)
 
 
@@ -572,6 +608,8 @@ def _kept_unit(ctx, refs) -> bool:
     if not f:
         return True
     refs = [str(r) for r in refs]
+    if not refs:
+        return False
     if ctx.get("probe"):
         return any(_probed(r, ctx["probe"]) for r in refs)
     k = next((x for x in ctx.get("labels") or [] if x.get("id") == f.get("id")), None)

@@ -2,6 +2,7 @@
 // stripes a file row carries, the marks over the columns of the labels that are on and the focused one, a record's
 // gutter cells and marks, the marks a custom view's records take, and a text cut into segments at its spans. A class's
 // colour is an index into the label palette, --label-1..LABEL_COLOURS; 0 is --label-none, the grey of "no match".
+import { recordKey, recordOf } from '../lib/refs'
 import type { Concept, ConceptPatch, ConceptRun, ConceptUnit, LabelClass, LabelDraft, LabelMarks, LabelRow } from '../lib/types'
 
 const FILE_UNITS = new Set(['record', 'agent', 'run'])
@@ -385,12 +386,6 @@ export function markSegments(text: string, marks: readonly SpanMark[], find: (sp
   return out
 }
 
-/** The file and line of a record's ref, `<path>#L<n>`; null for any other ref (a span, a range, a view key). */
-export function recordRef(ref: string): { path: string; line: number } | null {
-  const m = /^(.+)#L([1-9]\d*)$/.exec(ref)
-  return m ? { path: m[1], line: Number(m[2]) } : null
-}
-
 export interface ViewMark {
   /** the bar's colour: that of the first label that is on and highlights the record, whatever it marks */
   bar: string
@@ -506,9 +501,9 @@ export function withKeeps(
   if (!filter) return marks
   const out: Record<string, ViewMark | Keep> = {}
   for (const ref of refs) {
-    const at = recordRef(ref)
+    const at = recordOf(ref)
     if (!at) continue
-    const row = rows.get(ref)?.get(filter.concept)
+    const row = rows.get(recordKey(ref))?.get(filter.concept)
     const keep = (!!covered && !(at.path in covered)) || (!!row && valueOf(row) === filter.value)
     if (marks[ref]) out[ref] = { ...marks[ref], keep }
     else if (keep) out[ref] = { keep }
@@ -525,8 +520,8 @@ export function viewMarks(on: readonly Concept[], rows: { get(ref: string): Read
   if (!on.length) return out
   const rank = new Map(on.map((k, i) => [k.id, i]))
   for (const ref of refs) {
-    if (!recordRef(ref)) continue
-    const mine = rows.get(ref)
+    if (!recordOf(ref)) continue
+    const mine = rows.get(recordKey(ref))
     if (!mine) continue
     const m = recordMarks(on, (id) => mine.get(id))
     const lit = [m.bar, m.tint, ...m.spans].filter((x): x is NonNullable<typeof x> => !!x).sort((a, b) => rank.get(a.concept)! - rank.get(b.concept)!)
@@ -608,26 +603,41 @@ export function draftBody(d: LabelDraft, colour: number, used: readonly number[]
   }
 }
 
-/** Whether a corpus path is one a view's claim names, as the server matches claims (backend views.glob_matches): the
- * glob against the whole path or its file name, `*` spanning folders as fnmatch's does; '' or '*' names every file.
- * Pure. */
-export function claimMatches(path: string, claim: string): boolean {
-  if (!claim || claim === '*') return true
-  let re = ''
-  for (let i = 0; i < claim.length; i++) {
-    const ch = claim[i]
-    if (ch === '*') re += '.*'
-    else if (ch === '?') re += '.'
-    else if (ch === '[' && claim.indexOf(']', i + 2) > i) {
-      const end = claim.indexOf(']', i + 2)
-      const body = claim.slice(i + 1, end)
-      re += `[${body.startsWith('!') ? `^${body.slice(1)}` : body}]`
-      i = end
-    } else re += ch.replace(/[.+^${}()|\\]/g, '\\$&')
+/** Whether a corpus path is one a view's claim names, as the server matches claims (globMatches). Pure. */
+export const claimMatches = (path: string, claim: string): boolean => globMatches(path, claim)
+
+const globs = new Map<string, RegExp>()
+
+/** A claim's glob as the server matches it (views.glob_matches, Python's fnmatch): `*` crosses folders, a `**` folder
+ * may also stand for no folder, and a glob matches the whole path or its file name. */
+export function globMatches(path: string, glob: string): boolean {
+  if (!glob || glob === '*') return true
+  let re = globs.get(glob)
+  if (!re) {
+    const src = (g: string) => {
+      let out = ''
+      for (let i = 0; i < g.length; i++) {
+        const ch = g[i]
+        const end = ch === '[' ? g.indexOf(']', i + 2) : -1
+        if (ch === '*') out += '.*'
+        else if (ch === '?') out += '.'
+        else if (end > 0) {
+          const body = g.slice(i + 1, end).replace(/\\/g, '\\\\')
+          out += '[' + (body[0] === '!' ? '^' + body.slice(1) : body) + ']'
+          i = end
+        } else out += ch.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')
+      }
+      return out
+    }
+    re = new RegExp('^(?:' + src(glob) + '|' + src(withoutFolderStars(glob)) + ')$', 's')
+    globs.set(glob, re)
   }
-  const full = new RegExp(`^${re}$`)
-  return full.test(path) || full.test(path.slice(path.lastIndexOf('/') + 1))
+  return re.test(path) || re.test(path.slice(path.lastIndexOf('/') + 1))
 }
+
+/** The glob with each `**` folder taken out, the form that matches where it stands for no folder (backend
+ * views._glob_forms). */
+export const withoutFolderStars = (glob: string): string => glob.replace(/(^|\/)\*\*\//g, '$1')
 
 /** The labels over files that mark a view's files: those whose rows fall in a file the view claims (their presence,
  * GET /labels/presence). Pure. */

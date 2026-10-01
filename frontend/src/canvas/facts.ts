@@ -25,7 +25,7 @@ const TIME_KEYS = ['timestamp', 'time', 'ts', 'created_at', 'createdAt', 'dateti
 const WHO_KEYS = ['author', 'actor_label', 'actor', 'user', 'username', 'user_name', 'sender', 'from', 'speaker', 'editor', 'agent', 'label', 'by']
 const WHERE_KEYS = ['thread_title', 'page_title', 'page', 'title', 'subject', 'channel', 'thread', 'name']
 /** The resolved ref kinds that are one record, which have facts; a range spans several records, so it has none. */
-export const FACT_KINDS: ReadonlySet<string> = new Set(['record', 'block', 'span', 'row'])
+export const FACT_KINDS: ReadonlySet<string> = new Set(['record', 'block', 'span', 'row', 'csvrow', 'pointer'])
 
 /** a value longer than this is text, not a fact */
 const FACT_MAX = 120

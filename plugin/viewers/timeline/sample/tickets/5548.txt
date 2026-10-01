@@ -1,0 +1,15 @@
+Ticket: 5548
+Subject: Receipt for Saturday
+Requester: U. Kaplan <u.kaplan@example.net>
+
+From: U. Kaplan <u.kaplan@example.net>
+Date: Mon, 18 May 2026 09:10:00 +0100
+Status: open
+
+Can I get a receipt for Saturday's booking?
+
+From: Wren <wren@marrowby-ferries.example>
+Date: Mon, 18 May 2026 09:32:15 +0100
+Status: closed
+
+Receipts are under Manage booking. A copy is on its way by email.

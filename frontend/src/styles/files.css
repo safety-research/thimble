@@ -1455,6 +1455,41 @@
 .reader-media audio {
   width: min(560px, 100%);
 }
+/* a PDF in the browser's own viewer, filling the reader */
+.reader-pdf {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+}
+.reader-pdf-frame {
+  flex: 1 1 auto;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: var(--bg-sunken);
+}
+/* a chat log's turn: its lines run on as one text, a blank line as a short gap; a speaker's line with no words after
+   the speaker shows nothing */
+.reader-chatlog .reader-block + .reader-block {
+  margin-top: 0;
+}
+.reader-chatlog .reader-block:empty {
+  height: 0.6em;
+}
+.reader-chatlog .reader-block.reader-chat-empty {
+  display: none;
+}
+.reader-turns-tail {
+  height: 1px;
+}
+/* a conversation one line of a file holds: each turn's speaker over its words */
+.reader-conv-turn + .reader-conv-turn {
+  margin-top: 8px;
+}
+.reader-conv-speaker {
+  font: var(--type-mono-sm);
+  color: var(--text-tertiary);
+}
 .reader-viewbar {
   position: sticky;
   top: 0;
@@ -1483,7 +1518,7 @@
 .reader-record {
   position: relative;
   display: grid;
-  grid-template-columns: 28px minmax(0, 1fr);
+  grid-template-columns: minmax(28px, max-content) minmax(0, 1fr);
   gap: 0 12px;
   padding: 10px 20px 10px 12px;
   border-bottom: 1px solid rgba(var(--ink-rgb), 0.07);
@@ -1574,7 +1609,10 @@
   height: 9px;
   border-radius: 2px;
 }
+/* as wide as the file's largest line number (--digits, set on the reader's body), so every record's text starts at
+   the same place */
 .reader-lineno {
+  min-width: calc(var(--digits, 0) * 1ch);
   font: 400 10.5px / 1.5 var(--font-mono);
   font-variant-numeric: tabular-nums;
   color: var(--text-tertiary);
@@ -1633,7 +1671,7 @@
 .reader-line {
   position: relative;
   display: grid;
-  grid-template-columns: 32px minmax(0, 1fr);
+  grid-template-columns: minmax(32px, max-content) minmax(0, 1fr);
   gap: 0 12px;
   padding: 1px 16px 1px 8px;
 }
@@ -2227,6 +2265,9 @@
 }
 .reader-grid tbody tr.reader-row-selected td {
   background: var(--surface-selected);
+}
+.reader-grid tbody tr.reader-row-marked > td:first-child {
+  box-shadow: inset 3px 0 0 var(--mark);
 }
 .reader-kv {
   width: 100%;

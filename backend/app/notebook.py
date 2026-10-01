@@ -1973,9 +1973,13 @@ def _guarded_files(workspace: str) -> None:
     """Each of kernel_wrap.HIDDEN_FILES (`{}`) and READ_ONLY_FILES (empty) made in the workspace when missing: a wrapper
     guards a file that exists, where for a missing one bwrap would guard nothing and srt would leave an empty read-only
     file in its place while the kernel runs, which the server could not write. Each of READ_ONLY_DIRS is made too, since
-    bwrap fails on a missing one."""
+    bwrap fails on a missing one, in place of a link or a file a kernel left there: the wrapper would show it a link's
+    target, and a file stops the folder from being made."""
     for name in kernel_wrap.READ_ONLY_DIRS:
-        config.private_dir(_ws_dir(workspace) / name)
+        d = _ws_dir(workspace) / name
+        if d.is_symlink() or (d.exists() and not d.is_dir()):
+            d.unlink()
+        config.private_dir(d)
     files = [*((n, "{}\n") for n in kernel_wrap.HIDDEN_FILES), *((n, "") for n in kernel_wrap.READ_ONLY_FILES)]
     for name, text in files:
         p = _ws_dir(workspace) / name

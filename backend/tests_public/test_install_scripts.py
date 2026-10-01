@@ -134,6 +134,16 @@ def test_a_release_install_carries_the_files_the_readme_links(tmp_path):
         assert (dest / rel).read_text() == (tree / rel).read_text(), rel
 
 
+def test_a_release_install_carries_the_extensions_thimble_ships(tmp_path):
+    tree = fake_tree(tmp_path / "release")
+    (tree / "extensions" / "video").mkdir(parents=True)
+    (tree / "extensions" / "video" / "extension.json").write_text('{"name": "video"}\n')
+    dest = tmp_path / "home" / ".thimble" / "app"
+    r = install(tree, dest, tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert (dest / "extensions" / "video" / "extension.json").read_text() == '{"name": "video"}\n'
+
+
 def test_install_sh_copies_only_into_an_empty_folder_or_an_earlier_install(tmp_path):
     tree = fake_tree(tmp_path / "release")
     home = tmp_path / "home"
@@ -673,3 +683,22 @@ def test_uninstall_removes_the_plugin_only_when_it_is_registered_from_this_insta
     assert uninstall() == [] and state.read_text() == registered
     state.write_text(json.dumps({"marketplaces": {"thimble": str(second)}, "plugins": ["thimble@thimble"]}))
     assert uninstall() == ["plugin uninstall thimble@thimble", "plugin marketplace remove thimble"]
+
+
+def test_thimble_bin_dir_moves_the_command_s_link_and_leaves_the_one_in_local_bin_alone(tmp_path):
+    """With THIMBLE_BIN_DIR set, the `thimble` link goes there, and a ~/.local/bin/thimble into another tree stays."""
+    tree = fake_tree(tmp_path / "release")
+    dest = tmp_path / "home" / ".thimble" / "app"
+    bin_ = stub_bin(tmp_path)
+    own = tmp_path / "own-bin"
+    env = env_for(tmp_path, PATH=f"{bin_}:/usr/bin:/bin", THIMBLE_BIN_DIR=str(own))
+    other = tmp_path / "other" / "plugin" / "bin" / "thimble"
+    local = Path(env["HOME"]) / ".local" / "bin" / "thimble"
+    local.parent.mkdir(parents=True)
+    local.symlink_to(other)
+    r = subprocess.run(["bash", str(tree / "scripts" / "install.sh"), "--dir", str(dest), *ANSWERS, "--no-plugin",
+                        "--no-trust-workspaces"], capture_output=True, text=True, env=env, stdin=subprocess.DEVNULL,
+                       timeout=60)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert os.readlink(own / "thimble") == str(dest / "plugin" / "bin" / "thimble")
+    assert os.readlink(local) == str(other)

@@ -301,7 +301,7 @@ const lineText = (rec: SourceRecord | undefined): string | null => (rec && typeo
 
 /** A CSV or TSV file's records as objects keyed by its first line, which is read on its own when the page does not
  * hold it; the first line itself is no row. Any other file's records as they are. */
-function useDelimited(workspace: string, path: string, records: SourceRecord[]): SourceRecord[] {
+export function useDelimited(workspace: string, path: string, records: SourceRecord[]): SourceRecord[] {
   const delimited = DELIMITED.test(path)
   const sep = /\.tsv$/i.test(path) ? '\t' : ','
   const first = records[0]?.line === 1 ? lineText(records[0]) : null
@@ -331,8 +331,30 @@ function useDelimited(workspace: string, path: string, records: SourceRecord[]):
   }, [records, header, delimited, sep])
 }
 
+/** The number each row of a CSV or TSV file shown here is cited by (`<path>#row=<n>`), by the line it starts on, as the
+ * server counts rows (a cell may hold line breaks); empty for any other file and until the answer comes. */
+function useRowNumbers(workspace: string, path: string, records: SourceRecord[]): Map<number, number> {
+  const delimited = DELIMITED.test(path)
+  const a = records[0]?.line ?? 0
+  const b = records[records.length - 1]?.line ?? 0
+  const [rows, setRows] = useState<Map<number, number>>(() => new Map())
+  useEffect(() => {
+    if (!delimited || !a || b < a) return
+    let alive = true
+    api
+      .csvRows(workspace, path, a, b)
+      .then((r) => alive && setRows(new Map(r.rows)))
+      .catch(() => undefined)
+    return () => {
+      alive = false
+    }
+  }, [workspace, path, delimited, a, b])
+  return rows
+}
+
 export function Table({ workspace, path, page, targetRef }: ViewProps) {
   const records = useDelimited(workspace, path, page.records)
+  const rowOf = useRowNumbers(workspace, path, records)
   const rootRef = useRef<HTMLDivElement | null>(null)
   const bodyRef = useRef<HTMLTableSectionElement | null>(null)
   const { target, hit } = useTarget(targetRef, path, rootRef, [records])
@@ -387,7 +409,7 @@ export function Table({ workspace, path, page, targetRef }: ViewProps) {
         <tbody ref={bodyRef}>
           {drawn.above > 0 && pad(drawn.above)}
           {records.slice(drawn.from, drawn.to).map((rec) => (
-            <TableRow key={rec.line} path={path} rec={rec} cols={cols} wide={wide} dots={n} hit={hit && isTargetLine(target, rec.line)} />
+            <TableRow key={rec.line} path={path} rec={rec} row={rowOf.get(rec.line)} cols={cols} wide={wide} dots={n} hit={hit && isTargetLine(target, rec.line)} />
           ))}
           {drawn.below > 0 && pad(drawn.below)}
         </tbody>
@@ -396,15 +418,16 @@ export function Table({ workspace, path, page, targetRef }: ViewProps) {
   )
 }
 
-/** `dots` is how many labels are on: the row's dots take room for that many. */
-const TableRow = memo(function TableRow({ path, rec, cols, wide, dots, hit }: { path: string; rec: SourceRecord; cols: string[]; wide: Set<string>; dots: number; hit: boolean }) {
+/** `dots` is how many labels are on: the row's dots take room for that many. `row` is a CSV row's number, which its
+ * citation names; any other record is cited by its line. */
+const TableRow = memo(function TableRow({ path, rec, row, cols, wide, dots, hit }: { path: string; rec: SourceRecord; row?: number; cols: string[]; wide: Set<string>; dots: number; hit: boolean }) {
   const r = rec.record
   const obj = r && typeof r === 'object' && !Array.isArray(r) ? (r as Record<string, unknown>) : null
   const marks = useMarksAt(path, rec.line)
   const focus = useContext(ReaderLabelsContext)?.focus
   const tint = focus === undefined ? marks.lit[0] : marks.lit.find((l) => l.concept === focus)
   return (
-    <tr className={['reader-card', 'reader-table-row', hit && 'reader-hit', tint && 'has-tint'].filter(Boolean).join(' ')} style={tint ? ({ '--tint': tint.colour } as CSSProperties) : undefined} data-anchor={`${path}#L${rec.line}`} data-line={rec.line}>
+    <tr className={['reader-card', 'reader-table-row', hit && 'reader-hit', tint && 'has-tint'].filter(Boolean).join(' ')} style={tint ? ({ '--tint': tint.colour } as CSSProperties) : undefined} data-anchor={row ? `${path}#row=${row}` : `${path}#L${rec.line}`} data-line={rec.line}>
       <td className="reader-table-gutter mono">
         {dots > 0 && (
           <span className="reader-table-dots" style={{ '--dots': dots } as CSSProperties}>

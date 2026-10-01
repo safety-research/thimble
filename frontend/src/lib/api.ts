@@ -2,6 +2,7 @@
 import type {
   CanvasResponse,
   Extensions,
+  LocalExtension,
   Cell,
   CellName,
   CellPatch,
@@ -31,6 +32,7 @@ import type {
   SourceFind,
   SourceInfo,
   SourcePage,
+  SourceTurns,
   StoredCall,
   CallIndex,
   Ticket,
@@ -148,11 +150,19 @@ export interface EventPosted {
 }
 
 export const api = {
+  // ---- the product tour's first-launch state, one for the install (backend tour.py) ----
+  tour: () => j<{ seen: boolean }>(`${BASE}/tour`),
+  tourSeen: () => j<{ seen: boolean }>(`${BASE}/tour/seen`, { method: 'POST' }),
   // ---- corpora and files ----
   corpora: () => j<CorpusInfo[]>(`${BASE}/corpora`),
   sources: (c: string) => j<SourceInfo[]>(`${BASE}/corpora/${enc(c)}/sources`),
   source: (c: string, path: string, start = 1, count = 100) => j<SourcePage>(`${BASE}/corpora/${enc(c)}/source${q({ path, start, count })}`),
   sourceAround: (c: string, path: string, line: number, before = 50, after = 50) => j<SourcePage>(`${BASE}/corpora/${enc(c)}/source/around${q({ path, line, before, after })}`),
+  /** `GET /corpora/{c}/source/turns`: `count` turns of a JSON transcript from turn `start`, or around `line`. */
+  sourceTurns: (c: string, path: string, start = 0, count = 200, line?: number) =>
+    j<SourceTurns>(`${BASE}/corpora/${enc(c)}/source/turns${q({ path, start, count, line })}`),
+  /** The URL a PDF of the corpus opens from in the browser's viewer, at `page` when given. */
+  pdfUrl: (c: string, path: string, page?: number | null) => `${BASE}/corpora/${enc(c)}/pdf/${path.split('/').map(enc).join('/')}${page ? `#page=${page}` : ''}`,
   /** `GET /corpora/{c}/source/find`: the lines of one file past `after` that hold `text`, searched on the server. */
   findInSource: (c: string, path: string, text: string, after = 0, signal?: AbortSignal) =>
     j<SourceFind>(`${BASE}/corpora/${enc(c)}/source/find${q({ path, q: text, after: after || undefined })}`, { signal }),
@@ -193,6 +203,9 @@ export const api = {
   forgeQuery: (c: string, path: string, sql: string) =>
     j<{ columns: string[]; rows: any[][]; truncated: boolean }>(`${BASE}/corpora/${enc(c)}/forge/query${q({ path })}`, { method: 'POST', body: JSON.stringify({ sql }) }),
   resolveRef: (c: string, ref: string) => j<ResolvedRef>(`${BASE}/corpora/${enc(c)}/ref${q({ ref })}`),
+  /** `GET /corpora/{c}/csv-rows?path=&lines=a-b`: the rows of a CSV or TSV file that start on lines a..b, [line, n] each,
+   * n the number a row is cited by (`<path>#row=<n>`). */
+  csvRows: (c: string, path: string, a: number, b: number) => j<{ rows: [number, number][] }>(`${BASE}/corpora/${enc(c)}/csv-rows${q({ path, lines: `${a}-${b}` })}`),
 
   // ---- chats ----
   chats: (c: string) => j<ChatMeta[]>(`${ws(c)}/chats`),
@@ -415,6 +428,8 @@ export const api = {
   /** this workspace's switch of one extension's view, which overrides the check on whether it fits */
   switchExtensionView: (c: string, name: string, slug: string, on: boolean) =>
     j<Extensions>(`${ws(c)}/extensions/${enc(name)}/views/${enc(slug)}`, { method: 'PUT', body: JSON.stringify({ on }) }),
+  /** this workspace's switch of a view built for it; the analyst's browser alone may turn it (backend views.set_view_on) */
+  switchLocalView: (c: string, slug: string, on: boolean) => j<LocalExtension>(`${ws(c)}/views/${enc(slug)}/on`, { method: 'PUT', body: JSON.stringify({ on }) }),
   /** the answer to Settings' offer to run an extension's orientation instructions now: Run now (true) or Not now */
   answerExtensionOrientation: (c: string, name: string, run: boolean) =>
     j<Extensions & { status: string }>(`${ws(c)}/extensions/${enc(name)}/orientation`, { method: 'POST', body: JSON.stringify({ run }) }),
@@ -537,6 +552,9 @@ export const scaleApi = {
   folder: (c: string, path: string) => j<FolderListing>(`${BASE}/corpora/${enc(c)}/sources${q({ path: path || '.', depth: 1 })}`),
   /** `GET /ws/{c}/labels?path=&lines=a-b`: every concept's rows on lines a..b of one file, plus its whole-file rows. */
   labelsForLines: (c: string, path: string, a: number, b: number) => j<LabelsForPath[]>(`${ws(c)}/labels${q({ path, lines: `${a}-${b}` })}`),
+  /** `POST /ws/{c}/labels/refs`: every concept's rows on these records that are no lines (a database row, a PDF page, a
+   * JSON value, a CSV row, a view reader's own record). */
+  labelsForRefs: (c: string, refs: string[]) => j<LabelsForPath[]>(`${ws(c)}/labels/refs`, { method: 'POST', body: JSON.stringify({ refs }) }),
   /** `GET /concepts/{id}/rows?after=<cursor>`: the page after the one whose `next` this is (`after` omitted: the first). */
   conceptRowsPage: (c: string, id: string, opts: { value?: string; limit?: number; after?: number | null }) =>
     j<LabelRowsPage>(`${ws(c)}/concepts/${enc(id)}/rows${q({ value: opts.value, limit: opts.limit, after: opts.after ?? undefined })}`),

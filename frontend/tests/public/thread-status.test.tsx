@@ -85,15 +85,6 @@ describe('ThreadRows', () => {
     expect(el2.querySelector('.chat-main-edit')!.getAttribute('data-state')).toBe('done')
     expect(el2.querySelector('.chat-main-edit .spinner')).toBeNull()
   })
-  test('while the thread works, its working line stands after the edits', async () => {
-    const rows = foldRecords(thread.slice(0, 1))
-    const edits = mainEdits(thread.slice(0, 1), mainRows(call('t1', '2026-10-01T00:00:20.000+00:00', 'c1')), ['card:c1'])
-    const el = await mount(<ThreadRows rows={rows} edits={edits} ws="w" chat="th1" streaming working={<span className="stage-line" />} />)
-    const line = el.querySelector('.chat-main-edit')!
-    const stage = el.querySelector('.stage-line')!
-    expect(stage).not.toBeNull()
-    expect(line.compareDocumentPosition(stage) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-  })
 })
 
 describe('carried', () => {

@@ -237,7 +237,7 @@ async def shutdown() -> None:
 
 
 def _reviewed_dir(c: str, slug: str, last: bool = False) -> Path:
-    return views.views_dir(c) / REVIEWED_SUBDIR / (f"{slug}.last" if last else slug)
+    return views.state_dir(c) / REVIEWED_SUBDIR / (f"{slug}.last" if last else slug)
 
 
 def _copy_view(src: Path, dst: Path) -> None:

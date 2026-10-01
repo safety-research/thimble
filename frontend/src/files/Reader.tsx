@@ -1,7 +1,8 @@
 // The File browser's reader: a file in the built-in view that fits it best (views/registry.ts), with the others in the
 // mode switch; the pick is remembered per file. Records load a page at a time around the ref's line and as the reader
 // scrolls, up to CAP in memory, with the overview ruler beside them (Ruler.tsx). ⌘F opens the find bar (FindBar.tsx);
-// media files show as themselves (MediaReader) and other binary files show only their size.
+// media files show as themselves (MediaReader), a PDF in the browser's own viewer beside the viewers made for PDFs
+// (PdfReader), and other binary files show only their size.
 import { Component, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ErrorInfo, type ReactNode } from 'react'
 import { flushSync } from 'react-dom'
 import { Button, Segmented } from '../components/Button'
@@ -10,9 +11,9 @@ import { api, scaleApi } from '../lib/api'
 import { bus } from '../lib/bus'
 import { mediaOf, mediaUrl, type MediaRef } from '../lib/media'
 import { refreshProposals } from '../lib/proposals'
-import { fragmentIn, nearestLine } from '../lib/refs'
+import { fragmentIn, nearestLine, parseRef } from '../lib/refs'
 import { track } from '../lib/telemetry'
-import type { Proposal, SourceKind, SourcePage, SourceRecord, View } from '../lib/types'
+import type { Proposal, SourceKind, SourcePage, SourceRecord, TranscriptHint, View } from '../lib/types'
 import { readStorage, storageKey, writeStorage } from '../lib/workspace'
 import { failureText, ReportProblemButton } from '../shell/ProblemReport'
 import { clearMatches, firstMatchFrom, lineAsked, markMatches, markSpots, matchCount, matchNumber, stepInLine, stepMatch, unfoldAt, type MatchAt } from './find'
@@ -26,7 +27,7 @@ import { accepts, slugOf, viewValue } from './viewChoice'
 import { hasNotes, useShownLabels, useViewNotes, ViewNotesLine } from './ViewChrome'
 import { ViewerFrame } from './ViewerFrame'
 import { usePinnedView, ViewUpdated } from './viewVersion'
-import { ProposalOption } from './ViewsBar'
+import { DeleteViewConfirm, ProposalOption } from './ViewsBar'
 import { useTypeViewers } from './typeViewers'
 import { errMsg, LaneHead, targetOf, type ViewDef, type ViewProps } from './views/common'
 import { withoutEscapes } from './views/raw'
@@ -132,11 +133,11 @@ export function ViewFailed({ name, detail, onRaw }: { name: string; detail: stri
   )
 }
 
-/** A viewer for the file's type as its mode: the view's page in the reader, and what failed with Raw beside it. It keeps
- * the version it opened at, with Updated and Reload over its top right corner once a newer one is there. Above the
- * page, thimble's notes on the view (ViewChrome), when there are any; a file or line picked there opens in the File
- * browser. */
-function ReaderViewer({ ws, view, path, targetRef, labels, onRaw }: { ws: string; view: View; path: string; targetRef?: string; labels: FilesLabels; onRaw: () => void }) {
+/** A viewer for the file's type as its mode: the view's page in the reader, and what failed with Raw beside it when the
+ * file has a Raw. It keeps the version it opened at, with Updated and Reload over its top right corner once a newer one
+ * is there. Above the page, thimble's notes on the view (ViewChrome), when there are any; a file or line picked there
+ * opens in the File browser. */
+function ReaderViewer({ ws, view, path, targetRef, labels, onRaw }: { ws: string; view: View; path: string; targetRef?: string; labels: FilesLabels; onRaw?: () => void }) {
   const [failure, setFailure] = useState<string | null>(null)
   const filter = useFilesFilter(ws)
   const pin = usePinnedView(ws, view.slug, view.version || undefined)
@@ -183,8 +184,166 @@ export const Reader = memo(function Reader(props: ReaderProps) {
   }
   const media = mediaOf(props.path)
   if (media) return <MediaReader key={`${props.workspace}|${props.path}`} {...props} media={media} />
+  if (isPdf(props.path)) return <PdfReader key={`${props.workspace}|${props.path}`} {...props} />
   return <FileReader key={`${props.workspace}|${props.path}|${props.kind}`} {...props} />
 })
+
+export const isPdf = (path: string): boolean => /\.pdf$/i.test(path)
+
+/** The page a PDF ref names, counting from 1: `#p4`, the first of `#p4-p6`, `#page=4`; null for none. Pure. */
+export function pdfPage(ref: string | undefined, path: string): number | null {
+  const fragment = fragmentIn(ref, path)
+  const m = fragment ? /^(?:p|page=?)(\d+)(?:-p?\d+)?$/i.exec(fragment.trim()) : null
+  const n = m ? Number(m[1]) : 0
+  return n >= 1 ? n : null
+}
+
+/** Whether the browser draws a PDF in the page; one that would only download it says so (navigator.pdfViewerEnabled). */
+export const pdfInPage = (): boolean => typeof navigator === 'undefined' || (navigator as { pdfViewerEnabled?: boolean }).pdfViewerEnabled !== false
+
+/** The labels over files that are on and mark this file, each with the name of the value it has. */
+function useFileLabels(labels: FilesLabels, path: string): { id: string; name: string; colour: string }[] {
+  return useMemo(
+    () =>
+      labels.on
+        .filter((k) => marksOf(k) === 'file')
+        .flatMap((k) => {
+          const values = labels.presence.get(k.id)?.[path] ?? {}
+          const classes = classesOf(k)
+          const c = classes.find((x) => x.highlight && (values[x.name] ?? 0) > 0)
+          return c ? [{ id: k.id, name: classes.length > 2 ? `${k.name} · ${c.name}` : k.name, colour: colourVar(c.color) }] : []
+        }),
+    [labels.on, labels.presence, path],
+  )
+}
+
+function FileLabels({ items }: { items: { id: string; name: string; colour: string }[] }) {
+  if (!items.length) return null
+  return (
+    <div className="reader-filelabels">
+      {items.map((f) => (
+        <span key={f.id} className="reader-filelabel" style={{ '--c': f.colour } as CSSProperties} data-anchor={`concept:${f.id}`} data-anchor-text={f.name}>
+          <span className="reader-filelabel-bar" />
+          {f.name}
+        </span>
+      ))}
+    </div>
+  )
+}
+
+/** Where the File browser keeps the mode picked for a file: a built-in view's type, or `v:<slug>` for a file viewer. */
+export const pickKey = (workspace: string, path: string): string => storageKey(workspace, `viewOf:${path}`)
+
+/** A proposed view for the file's type, offered beside the modes until the analyst dismisses it. */
+function useOffered(ws: string, proposal: Proposal | null, on: boolean): { offered: Proposal | null; dismiss: (p: Proposal) => void } {
+  const [dismissed, setDismissed] = useState<string | null>(null)
+  const offered = on && proposal && proposal.slug !== dismissed ? proposal : null
+  const dismiss = (p: Proposal) => {
+    track('view-dismiss', { target: `view:${p.slug}` })
+    setDismissed(p.slug)
+    api
+      .deleteProposal(ws, p.slug)
+      .then(() => refreshProposals(ws))
+      .catch((e: Error) => {
+        setDismissed(null)
+        bus.emit('toast', { text: `Could not remove ${p.name}. ${e.message}`, kind: 'error' })
+      })
+  }
+  return { offered, dismiss }
+}
+
+/** The × a file viewer built for the workspace shows on hover in a file's modes, which deletes it once confirmed, as
+ * the views bar's × does a corpus view: `removable` gives a viewer's option its ×, `confirmDelete` goes beside the
+ * modes. */
+function useViewerDelete(ws: string, pickedSlug: string | null, forgetPick: () => void) {
+  const [removing, setRemoving] = useState<{ slug: string; name: string; at: HTMLElement } | null>(null)
+  const remove = async ({ slug, name }: { slug: string; name: string }) => {
+    setRemoving(null)
+    track('view-dismiss', { target: `view:${slug}` })
+    if (pickedSlug === slug) forgetPick()
+    try {
+      await api.deleteView(ws, slug)
+      await refreshProposals(ws)
+    } catch (e) {
+      bus.emit('toast', { text: `Could not delete ${name}. ${(e as Error).message}`, kind: 'error' })
+    }
+  }
+  const removable = (v: View) => (v.origin === 'builtin' ? {} : { removeLabel: `Delete ${v.name}`, onRemove: (at: HTMLElement) => setRemoving({ slug: v.slug, name: v.name, at }) })
+  const confirmDelete = <DeleteViewConfirm asked={removing} onClose={() => setRemoving(null)} onDelete={() => removing && void remove(removing)} />
+  return { removable, confirmDelete }
+}
+
+/** A PDF of the corpus as itself, in the browser's own viewer, opened at the page a ref names. The viewers made for
+ * PDFs stand beside it in the mode switch, and the pick is remembered per file; a ref whose fragment is no page opens in
+ * the first viewer that reads it. The frame is drawn anew for each page asked for, since a viewer reads the page only
+ * when it opens the file. A browser that would only download it gets a line saying so and a link to the file in place
+ * of the frame. */
+function PdfReader({ workspace, path, targetRef, lead, end, labels, only, onMode }: ReaderProps) {
+  const page = pdfPage(targetRef, path)
+  const src = api.pdfUrl(workspace, path, page)
+  const inPage = pdfInPage()
+  const memoryKey = pickKey(workspace, path)
+  const [pick, setPick] = useState<string | null>(() => readStorage<string | null>(memoryKey, null))
+  useEffect(() => bus.on('fileMode', (e) => e.path === path && setPick(e.mode)), [path])
+  const fragment = fragmentIn(targetRef, path)
+  const types = useTypeViewers(workspace, path, !only, true)
+  const autoViewer = fragment != null && page == null ? types.viewers.find((v) => accepts(v, fragment)) : undefined
+  const pickedSlug = slugOf(pick)
+  const viewer = only ? undefined : pickedSlug ? (types.viewers.find((v) => v.slug === pickedSlug) ?? autoViewer) : pick ? undefined : autoViewer
+  const modeTitle = viewer?.name ?? 'PDF'
+  useEffect(() => {
+    onMode?.(modeTitle)
+  }, [modeTitle, onMode])
+  const onPick = (v: string) => {
+    track('view-open', { target: path, detail: { from: 'switcher', to: v } })
+    setPick(v)
+    writeStorage(memoryKey, v)
+  }
+  const forgetPick = () => {
+    setPick(null)
+    writeStorage(memoryKey, null)
+  }
+  const fileLabels = useFileLabels(labels, path)
+  const { removable, confirmDelete } = useViewerDelete(workspace, pickedSlug, forgetPick)
+  const { offered, dismiss } = useOffered(workspace, types.proposal, !only && !viewer)
+  const options = [{ value: PDF_MODE, label: 'PDF' }, ...(only ? [] : types.viewers.map((v) => ({ value: viewValue(v.slug), label: v.name, ...removable(v) })))]
+  return (
+    <div className="reader">
+      {lead !== undefined && (
+        <div className="reader-bar">
+          {lead}
+          <span className="reader-spacer" />
+          {end}
+          {(options.length > 1 || offered) && (
+            <span className="reader-modes">
+              <Segmented label="Mode" size="md" value={viewer ? viewValue(viewer.slug) : PDF_MODE} onChange={onPick} options={options} />
+              {offered && <ProposalOption ws={workspace} p={offered} size="md" onDismiss={() => dismiss(offered)} onAccept={forgetPick} />}
+              {confirmDelete}
+            </span>
+          )}
+        </div>
+      )}
+      <FileLabels items={fileLabels} />
+      {viewer ? (
+        <ReaderViewer key={viewer.slug} ws={workspace} view={viewer} path={path} targetRef={fragment != null && accepts(viewer, fragment) ? targetRef : undefined} labels={labels} />
+      ) : inPage ? (
+        <div className="reader-pdf" data-body="">
+          <iframe key={src} src={src} title={path} className="reader-pdf-frame" allowFullScreen />
+        </div>
+      ) : (
+        <div className="reader-noview">
+          <div className="reader-noview-reason dim">This browser does not show PDFs in a page.</div>
+          <Button size="sm" onClick={() => window.open(src, '_blank', 'noopener')}>
+            Open the PDF
+          </Button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+/** the mode switch's value for a PDF in the browser's own viewer */
+const PDF_MODE = 'pdf'
 
 /** An image, a recording or a video of the corpus, shown as itself from the media route (lib/media), which answers
  * range requests, so a video plays and seeks without loading whole; a ref with a moment (`#t=30:55`) starts it there. */
@@ -213,6 +372,8 @@ interface Builtins {
   /** the one that fits best */
   auto: ViewDef
   loaded: boolean
+  /** the server's sniff, when the file reads as a transcript */
+  transcript: TranscriptHint | null
   /** the first records read as binary (looksBinary), or the server said the file is binary: no text to show */
   binary: boolean
   /** the file's size when the server said it is binary */
@@ -224,6 +385,7 @@ function useBuiltins(ws: string, path: string, kind: SourceKind): Builtins {
   const isDatabase = kind === 'forge'
   const [sample, setSample] = useState<any[] | null>(isDatabase ? [] : null)
   const [binarySize, setBinarySize] = useState<number | null>(null)
+  const [transcript, setTranscript] = useState<TranscriptHint | null>(null)
   useEffect(() => {
     if (isDatabase) return
     let alive = true
@@ -232,6 +394,7 @@ function useBuiltins(ws: string, path: string, kind: SourceKind): Builtins {
       .then((page) => {
         if (!alive) return
         if (page.binary) setBinarySize(page.size_bytes ?? 0)
+        setTranscript(page.transcript ?? null)
         setSample(page.records.map((r) => r.record))
       })
       .catch(() => alive && setSample([]))
@@ -240,15 +403,15 @@ function useBuiltins(ws: string, path: string, kind: SourceKind): Builtins {
     }
   }, [ws, path, isDatabase])
   return useMemo(() => {
-    const scored = scoreViews(path, kind, sample ?? [])
+    const scored = scoreViews(path, kind, sample ?? [], transcript)
     const scoreOf = (t: string) => scored.find((s) => s.def.type === t)?.score ?? 0
     const binary = !isDatabase && (binarySize != null || looksBinary(sample ?? []))
     const listed = (isDatabase ? scored.filter((s) => s.score >= 0.5).map((s) => s.def) : scored.map((s) => s.def).filter((v) => v.type !== 'forge' && (v.type === 'raw' || scoreOf(v.type) > 0)))
       // a file that reads as binary lists Raw alone, and the reader says it is binary in place of its bytes
       .filter((v) => !binary || v.type === 'raw' || isDatabase)
       .sort((a, b) => ORDER.indexOf(a.type) - ORDER.indexOf(b.type))
-    return { listed, auto: pickView(scored), loaded: sample != null, binary, binarySize }
-  }, [path, kind, sample, isDatabase, binarySize])
+    return { listed, auto: pickView(scored), loaded: sample != null, transcript, binary, binarySize }
+  }, [path, kind, sample, isDatabase, binarySize, transcript])
 }
 
 /** The line of the first record the reader shows at its top, or null when it shows none. */
@@ -330,14 +493,42 @@ export function scrollTopFor(body: HTMLElement, a: number): number | null {
   return into <= span ? r.top - base + (into / span) * r.height : r.bottom - base + (into - span) * perLine
 }
 
+/** The lines a record of another reader spans in its file of text (a JSON document's value, a CSV row), as the server
+ * resolves its ref, so the reader opens it there: `at` null until the answer comes, and for any other ref; `pending`
+ * while the answer is awaited. */
+export function useRecordLines(ws: string, ref: string | undefined, path: string): { at: { line: number; endLine: number } | null; pending: boolean } {
+  const p = ref ? parseRef(ref) : null
+  const asks = !!ref && !!p && (p.kind === 'pointer' || p.kind === 'csvrow') && p.path === path
+  const [got, setGot] = useState<{ ref: string; at: { line: number; endLine: number } | null } | null>(null)
+  useEffect(() => {
+    if (!asks || !ref) return
+    let alive = true
+    api
+      .resolveRef(ws, ref)
+      .then((r) => {
+        const meta = (r.meta ?? {}) as { line?: unknown; end_line?: unknown }
+        if (!alive) return
+        const line = typeof meta.line === 'number' ? meta.line : null
+        setGot({ ref, at: line == null ? null : { line, endLine: typeof meta.end_line === 'number' ? meta.end_line : line } })
+      })
+      .catch(() => alive && setGot({ ref, at: null }))
+    return () => {
+      alive = false
+    }
+  }, [ws, ref, asks])
+  const mine = asks && got?.ref === ref ? got : null
+  return { at: mine?.at ?? null, pending: asks && !mine }
+}
+
 const sameShown = (x: Shown, y: Shown) =>
   x.top === y.top && x.height === y.height && x.seen.length === y.seen.length && x.seen.every((s, i) => s.line === y.seen[i].line && s.top === y.seen[i].top && s.bottom === y.seen[i].bottom)
 
 function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only, onMode, findAsk }: ReaderProps) {
   const isDatabase = kind === 'forge'
   const builtins = useBuiltins(workspace, path, kind)
-  const memoryKey = storageKey(workspace, `viewOf:${path}`)
+  const memoryKey = pickKey(workspace, path)
   const [pick, setPick] = useState<string | null>(() => readStorage<string | null>(memoryKey, null))
+  useEffect(() => bus.on('fileMode', (e) => e.path === path && setPick(e.mode)), [path])
   const fragment = fragmentIn(targetRef, path)
   const [records, setRecords] = useState<SourceRecord[]>([])
   const [total, setTotal] = useState<number | null>(null)
@@ -372,8 +563,10 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
   const [bodyHeight, setBodyHeight] = useState(0)
   // the last line after which a page came back empty (the file changed under the reader): no page past it loads by itself
   const dryAfter = useRef<number | null>(null)
-  // the line the ref names; a fragment no view understands opens the file at the line it starts with, if any
-  const targetLine = useMemo(() => targetOf(targetRef, path)?.line ?? nearestLine(fragment), [targetRef, path, fragment])
+  // the line the ref names, or where the record it names starts; a fragment no view understands opens the file at the
+  // line it starts with, if any
+  const { at: recordAt, pending: recordPending } = useRecordLines(workspace, targetRef, path)
+  const targetLine = useMemo(() => targetOf(targetRef, path)?.line ?? recordAt?.line ?? nearestLine(fragment), [targetRef, path, fragment, recordAt])
   const wantLine = jumpLine ?? targetLine
 
   // the labels that are on and left rows on this file
@@ -391,18 +584,7 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
   const fileLanes = useMemo(() => new Set(lanes.filter((k) => marksOf(k) === 'file').map((k) => k.id)), [lanes])
   const ruler = useRuler(workspace, path)
   const columns = useMemo(() => rulerColumns(lanes, ruler, fileOf), [lanes, ruler, fileOf])
-  const fileLabels = useMemo(
-    () =>
-      labels.on
-        .filter((k) => marksOf(k) === 'file')
-        .flatMap((k) => {
-          const values = labels.presence.get(k.id)?.[path] ?? {}
-          const classes = classesOf(k)
-          const c = classes.find((x) => x.highlight && (values[x.name] ?? 0) > 0)
-          return c ? [{ id: k.id, name: classes.length > 2 ? `${k.name} · ${c.name}` : k.name, colour: colourVar(c.color) }] : []
-        }),
-    [labels.on, labels.presence, path],
-  )
+  const fileLabels = useFileLabels(labels, path)
 
   useEffect(() => {
     if (isDatabase) return
@@ -813,40 +995,37 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
     setPick(null)
     writeStorage(memoryKey, null)
   }
-  const [dismissed, setDismissed] = useState<string | null>(null)
-  const offered = !only && !viewer && types.proposal && types.proposal.slug !== dismissed ? types.proposal : null
-  const dismiss = (p: Proposal) => {
-    track('view-dismiss', { target: `view:${p.slug}` })
-    setDismissed(p.slug)
-    api
-      .deleteProposal(workspace, p.slug)
-      .then(() => refreshProposals(workspace))
-      .catch((e: Error) => {
-        setDismissed(null)
-        bus.emit('toast', { text: `Could not remove ${p.name}. ${e.message}`, kind: 'error' })
-      })
-  }
+  const { removable, confirmDelete } = useViewerDelete(workspace, pickedSlug, forgetPick)
+  const { offered, dismiss } = useOffered(workspace, types.proposal, !only && !viewer)
   // a file that could not be read says so, and so does a binary one (an archive, a file of a type no view reads), whose
   // bytes read as text would be noise
   const noViewReason: string | null = isDatabase || !loaded || loading ? null : error && records.length === 0 ? `Could not read it. ${error}` : binary ? binaryReason(binarySize ?? builtins.binarySize) : null
   // the fragment is named when nothing here reads it (a sheet cell of a spreadsheet no view claims)
-  const unread = fragment != null && targetOf(targetRef, path) == null ? fragment : null
+  const unread = fragment != null && targetOf(targetRef, path) == null && !recordAt && !recordPending ? fragment : null
   const page: SourcePage = useMemo(() => ({ path, kind, total_lines: total ?? 0, start: first ?? 1, records }), [path, kind, total, first, records])
   const ViewComponent = view?.component
-  const viewTarget = findRef ?? targetRef
+  // a record the server placed on lines is shown to the view as those lines, which it scrolls to and flashes
+  const viewTarget = findRef ?? (recordAt ? `${path}#L${recordAt.line}` + (recordAt.endLine > recordAt.line ? `-L${recordAt.endLine}` : '') : targetRef)
   const loadPage = useCallback((dir: 'earlier' | 'later') => void loadMore(dir), [loadMore])
   // the view is rendered again only when what it shows changes, not when the reader measures its scroll (the ruler's
   // thumb, the fade at the right edge) as the reader resizes or scrolls
+  const transcript = builtins.transcript
   const viewEl = useMemo(() => {
     if (!ViewComponent) return null
-    const viewProps: ViewProps = { workspace, path, kind, page, loadMore: loadPage, targetRef: viewTarget }
+    const viewProps: ViewProps = { workspace, path, kind, page, loadMore: loadPage, targetRef: viewTarget, transcript }
     return <ViewComponent {...viewProps} />
-  }, [ViewComponent, workspace, path, kind, page, loadPage, viewTarget])
+  }, [ViewComponent, workspace, path, kind, page, loadPage, viewTarget, transcript])
   // the built-in modes, then the file-type viewers, then Raw
   const builtinOptions = builtins.listed.map((v) => ({ value: v.type, label: v.title }))
   const options = [
     ...builtinOptions.filter((o) => o.value !== 'raw'),
-    ...(only ? [] : types.viewers.map((v) => ({ value: viewValue(v.slug), label: v.name }))),
+    ...(only
+      ? []
+      : types.viewers.map((v) => ({
+          value: viewValue(v.slug),
+          label: v.name,
+          ...removable(v),
+        }))),
     ...builtinOptions.filter((o) => o.value === 'raw'),
   ]
   return (
@@ -863,6 +1042,7 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
               <span className="reader-modes">
                 <Segmented label="Mode" size="md" value={viewer ? viewValue(viewer.slug) : view.type} onChange={onPick} options={options} />
                 {offered && <ProposalOption ws={workspace} p={offered} size="md" onDismiss={() => dismiss(offered)} onAccept={forgetPick} />}
+                {confirmDelete}
               </span>
             )}
           </div>
@@ -880,22 +1060,13 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
             ask={finder.ask}
           />
         )}
-        {fileLabels.length > 0 && (
-          <div className="reader-filelabels">
-            {fileLabels.map((f) => (
-              <span key={f.id} className="reader-filelabel" style={{ '--c': f.colour } as CSSProperties} data-anchor={`concept:${f.id}`} data-anchor-text={f.name}>
-                <span className="reader-filelabel-bar" />
-                {f.name}
-              </span>
-            ))}
-          </div>
-        )}
+        <FileLabels items={fileLabels} />
         {viewer ? (
           <ReaderViewer key={viewer.slug} ws={workspace} view={viewer} path={path} targetRef={fragment != null && accepts(viewer, fragment) ? targetRef : undefined} labels={labels} onRaw={() => onPick('raw')} />
         ) : (
           <div className="reader-main">
             <div className="reader-scroll" data-more-right={moreRight || undefined}>
-              <div className={'reader-body' + (isDatabase ? ' reader-body-fill' : '')} ref={bodyRef} onScroll={onScroll} style={tags.length ? ({ '--lanes': tags.length } as CSSProperties) : undefined}>
+              <div className={'reader-body' + (isDatabase ? ' reader-body-fill' : '')} ref={bodyRef} onScroll={onScroll} style={{ ...(tags.length ? { '--lanes': tags.length } : {}), '--digits': String(total ?? 0).length } as CSSProperties}>
                 {tags.length > 0 && view && GUTTERED.has(view.type) && loaded && !noViewReason && <LaneHead tags={tags} />}
                 {error && !noViewReason && <div className="reader-error-text">{error}</div>}
                 {noViewReason && (

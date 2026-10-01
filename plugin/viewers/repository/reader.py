@@ -870,7 +870,10 @@ def _view(index, query):
         us = [u for u in live if u["run"] == r and ok(u)]
         info = index["runs"][r]
         cls = [unit_class(u) for u in us] if labels.colours else []
+        own = [path for path in index["offsets"] if path.split("/")[1:2] == [r]]
         runs.append({"run": r, "team": info["team"], "approvals": info["approvals"],
+                     "started": _iso(info["start"]) if info["start"] is not None else None, "files": len(own),
+                     "source": "an export" if any(path.startswith(f"runs/{r}/export/") for path in own) else "events.jsonl",
                      "hours": round((info["end"] - info["start"]) / 3600, 3), "chosen": r in chosen,
                      "marked": sum(c >= 0 for c in cls), "classes": [cls.count(i) for i in range(len(labels.classes))],
                      **_measures(tab, us, index, r)})
@@ -1010,11 +1013,31 @@ def _detail(index, key, field="action", hide=(), colours=True):
     return out
 
 
+RAW_LINES, RAW_CHARS = 300, 4000
+
+
+def _raw(index, key):
+    """[{ref, text}] of the lines a unit's records come from, in its records' order, as their files hold them."""
+    u = index["units"].get(key)
+    out = []
+    for ref in (u["refs"] if u else [])[:RAW_LINES]:
+        path, _, n = ref.rpartition("#L")
+        with open(path, "rb") as f:
+            f.seek(index["offsets"][path][int(n) - 1])
+            rows = index["files"][path].get("rows", {})
+            text = b"".join(f.readline() for _ in range(rows.get(int(n), int(n)) - int(n) + 1)).decode("utf-8", "replace").rstrip("\r\n")
+        out.append({"ref": ref, "text": text if len(text) <= RAW_CHARS else text[:RAW_CHARS] + "…"})
+    return out
+
+
 def records(index, query):
     """{op: view, tab, runs?, compare?, q?, range?: [h0, h1], filters?: {filter: value or [values]}, colour?, labels?,
     hide?, sort?, offset?}: one tab under that selection, as _view describes. {op: unit, key, colour?, labels?, hide?}:
-    one unit's page (_detail). Times are hours since the run's start."""
+    one unit's page (_detail). {op: raw, key}: the lines its records come from as their files hold them (_raw). Times
+    are hours since the run's start."""
     query = query or {}
+    if query.get("op") == "raw":
+        return _raw(index, str(query.get("key") or ""))
     if query.get("op") == "unit":
         u = index["units"].get(str(query.get("key") or ""))
         field = query.get("colour") if u and query.get("colour") in COLOURS[u["tab"]] else "action"
