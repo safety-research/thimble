@@ -24,6 +24,7 @@ The rest is your judgment. Aim for the page a demanding designer would ship, one
 - Controls the analyst uses often are in view, and rarely used filters fold behind one control, so the page does not open on a wall of selects.
 - Scales and sizes come from the data. First read the claimed files, a jsonl file a few lines at a time since a line can be long, and count what the page must fit: the units, the time span, the longest names.
 - The layout is fluid. The pane is 1048 px wide as the view opens in a laptop's window, 798 px with the Labels pane open beside it, and 1528 px on a large screen.
+- The page explains nothing in words. The analyst learns it by using it, so a line that explains the page, a hint or a caption is clutter, even where the ticket asks for one.
 
 thimble's parts are in every page, so a view can look like the rest of thimble: `chip`, `btn` (`btn-secondary`, `btn-ghost`, `btn-sm`), `seg` with `seg-opt` (`active` on the chosen one), `field`, `table` and `list-row`.
 
