@@ -60,7 +60,7 @@ def page_texts(path: Path) -> dict[str, Any]:
             _TEXTS.move_to_end(k)
             return hit[1]
     try:
-        from pypdf import PdfReader  # noqa: PLC0415 — only a PDF's citation needs it
+        from pypdf import PdfReader  # noqa: PLC0415
 
         reader = PdfReader(str(path))
         out: dict[str, Any] = {"pages": [(page.extract_text() or "").strip() for page in reader.pages]}
