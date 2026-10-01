@@ -48,9 +48,17 @@
 //                          but the marks, which window.thimble.markOf reads and window.thimble.onMarks hears. In a card's
 //                          frame the elements whose records the filter drops are dimmed, never hidden, and the page's
 //                          own filtering is left alone
-//   label {id, on}, labelColour {id, value, colour}, newLabel
-//                          frame to page: the page's label controls (window.thimble.setLabel, setLabelColour and
-//                          newLabel), which thimble does as its Labels pane does them
+//   key {key}              page to frame, once the frame is ready: the key every labelCall carries, which only this
+//                          bridge sees (it stops the message before the view's own listeners)
+//   labelCall {id, key, op, args}
+//                          frame to page, answered by labelDone {id, error?}: the page's label controls (window.thimble
+//                          setLabel, setLabelColour, editLabel, mark and setFilter), each sent only while the frame has
+//                          the analyst's transient user activation, which thimble checks again on its side; ops on,
+//                          colour, edit, mark and filter
+//   labelRefused {op}      frame to page: a label call the bridge refused because the analyst made no gesture in the view
+//   hidden {n, self}       frame to page: how many anchored refs the bridge hides or dims for the label filter, and
+//                          whether the page filters its records itself (it registered onLabels)
+//   labelControls {on}     frame to page: whether the page shows label controls of its own (elements with data-label)
 //   cmd {on, cursor}       page to frame: ⌘ went down or up, and the page's ⌘ arrow as a CSS cursor value, which this
 //                          page shows while ⌘ is held so the pointer over the frame is the same one pointer
 //   state {id}             page to frame, answered by state {id, state}: what the analyst is looking at, before a newer
@@ -84,6 +92,43 @@
   var markFns = []
   var markKey = '{}'
   var ownSize = false // the page said the height it needs, so the document's own height is no longer sent
+  // The analyst's gesture: transient user activation in this frame, read through the getter as it was when the bridge
+  // ran, so a page that redefines it later changes what it reads itself but not what the bridge reads
+  var UA = navigator.userActivation || null
+  var uaActive = null
+  try {
+    var uaDesc = UA && Object.getOwnPropertyDescriptor(Object.getPrototypeOf(UA), 'isActive')
+    uaActive = uaDesc && typeof uaDesc.get === 'function' ? uaDesc.get : null
+  } catch (e) {}
+  function gesture() {
+    try {
+      return !!(UA && uaActive && uaActive.call(UA))
+    } catch (e) {
+      return false
+    }
+  }
+  var callKey = null
+  var calls = {}
+  var NO_GESTURE = 'thimble changes labels only while the analyst clicks or types in the view'
+  function refusal(message) {
+    var err = new Error(message)
+    err.name = 'ThimbleRefused'
+    err.thimbleRefused = true
+    return Promise.reject(err)
+  }
+  // a label change, sent to thimble only during the analyst's gesture; the promise rejects with thimble's reason
+  function labelCall(op, args) {
+    if (!gesture()) {
+      post({ type: P + 'labelRefused', op: op })
+      return refusal(NO_GESTURE)
+    }
+    if (!callKey) return refusal('thimble is not ready for label calls yet')
+    return new Promise(function (resolve, reject) {
+      var id = ++seq
+      calls[id] = { resolve: resolve, reject: reject }
+      post({ type: P + 'labelCall', id: id, key: callKey, op: op, args: args })
+    })
+  }
   var WAIT_SHOWN_MS = 1000
   var waitBox = null
   var waitTimer = null
@@ -217,19 +262,36 @@
         }
       }
       if (dropped.length) paint()
+      else sendHidden()
     },
-    /** turn a label on or off in thimble's Labels pane, by the id onLabels gives it */
+    /** what onLabels last handed over, {labels, filter, all, palette}, or null before thimble sent it */
+    labels: function () {
+      return labelState
+    },
+    // The calls below change what thimble shows or stores, so each takes effect only during the analyst's own click or
+    // key press in the view, never on load or on a timer. Each returns a promise that rejects with thimble's reason.
+    /** turn a label on or off, by the id onLabels' `all` gives it */
     setLabel: function (id, on) {
-      post({ type: P + 'label', id: String(id), on: !!on })
+      return labelCall('on', { id: String(id), on: !!on })
     },
-    /** give a label's value one of the colours onLabels' palette holds; thimble saves it as its Labels pane does, and
-     *  every view hears the new colour through onLabels */
+    /** give a label's value one of the colours onLabels' palette holds; every view hears it through onLabels */
     setLabelColour: function (id, value, colour) {
-      post({ type: P + 'labelColour', id: String(id), value: String(value), colour: String(colour) })
+      return labelCall('colour', { id: String(id), value: String(value), colour: String(colour) })
     },
-    /** open thimble's prompt for a new label */
+    /** open thimble's label editor on the label with this id, or on a new label without one */
+    editLabel: function (id) {
+      return labelCall('edit', { id: id == null ? null : String(id) })
+    },
     newLabel: function () {
-      post({ type: P + 'newLabel' })
+      return labelCall('edit', { id: null })
+    },
+    /** give the record `ref` the value `value` of a label (by id or name), stored as the analyst's own */
+    mark: function (ref, label, value) {
+      return labelCall('mark', { ref: String(ref), label: String(label), value: String(value) })
+    },
+    /** keep only the records that take a label's value (the label filter), or none with setFilter(null) */
+    setFilter: function (label, value) {
+      return labelCall('filter', label == null ? { label: null, value: null } : { label: String(label), value: String(value) })
     },
     /** the answer of reader.records(index, query), as a promise, with no time limit. `opts.key`: a newer fetch with the
      *  same key drops this one; `opts.signal`, an AbortSignal that drops it; a dropped fetch rejects with an AbortError
@@ -324,10 +386,30 @@
       return base + '?path=' + encodeURIComponent(String(path).replace(/^\/+/, ''))
     },
   }
+  // the key arrives before any of the view's listeners hears it: this listener is the first capturing one
+  addEventListener(
+    'message',
+    function (e) {
+      if (e.source !== parent || !e.data || e.data.type !== P + 'key') return
+      e.stopImmediatePropagation()
+      if (callKey == null && typeof e.data.key === 'string' && e.data.key) callKey = e.data.key
+    },
+    true,
+  )
   addEventListener('message', function (e) {
     if (e.source !== parent) return
     var d = e.data || {}
-    if (d.type === P + 'open') {
+    if (d.type === P + 'labelDone') {
+      var c = calls[d.id]
+      if (!c) return
+      delete calls[d.id]
+      if (d.error) {
+        var err = new Error(String(d.error))
+        err.name = 'ThimbleRefused'
+        err.thimbleRefused = true
+        c.reject(err)
+      } else c.resolve(true)
+    } else if (d.type === P + 'open') {
       last = d.open || {}
       picked = null
       for (var i = 0; i < openers.length; i++) {
@@ -412,8 +494,9 @@
   addEventListener('error', function (e) {
     report(e.error || e.message)
   })
+  // a label call thimble refused is the page's to show; left unhandled, it is no error of the view
   addEventListener('unhandledrejection', function (e) {
-    if (e.reason && e.reason.name === 'AbortError') return e.preventDefault()
+    if (e.reason && (e.reason.name === 'AbortError' || e.reason.thimbleRefused)) return e.preventDefault()
     report(e.reason)
   })
   document.addEventListener('securitypolicyviolation', function (e) {
@@ -571,6 +654,37 @@
     }
     return true
   }
+  // how many anchored refs the filter drops in the page, told to thimble whenever it or the page's own filtering changes
+  var hiddenKey = ''
+  function sendHidden() {
+    var refs = {}
+    var n = 0
+    for (var i = 0; i < dropped.length; i++) {
+      var r = dropped[i].getAttribute('data-anchor')
+      if (r && !refs[r]) {
+        refs[r] = true
+        n++
+      }
+    }
+    var self = !!filter && !cardMode && labelFns.length > 0
+    var key = n + ':' + self
+    if (key === hiddenKey) return
+    hiddenKey = key
+    post({ type: P + 'hidden', n: n, self: self })
+  }
+  // whether the page shows label controls of its own, told to thimble when that changes
+  var ownControls = null
+  var controlsTimer = null
+  function sendControls() {
+    var on = !!document.querySelector('[data-label]')
+    if (on === ownControls) return
+    ownControls = on
+    post({ type: P + 'labelControls', on: on })
+  }
+  function checkControls() {
+    controlsTimer = null
+    sendControls()
+  }
   function note(el) {
     var ref = el.getAttribute('data-anchor')
     if (!ref || reported[ref]) return
@@ -698,6 +812,7 @@
       }
     }
     var css = (colours.length ? BARS : '') + (drop() ? DROP : '')
+    sendHidden()
     for (var k = 0; k < colours.length; k++) {
       css += '[data-thimble-bar="' + k + '"]{--thimble-label:' + colours[k] + '}'
       css += '::highlight(thimble-label-' + k + '){background-color:color-mix(in oklab,' + colours[k] + ' 24%,transparent)}'
@@ -893,7 +1008,8 @@
     }
     if (unsent.length && sendTimer == null) sendTimer = setTimeout(sendAnchors, 30)
     if (changed && (hasMarks() || dropping()) && paintTimer == null) paintTimer = setTimeout(paint, 30)
-  }).observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['data-anchor', 'class'] })
+    if (controlsTimer == null) controlsTimer = setTimeout(checkControls, 200)
+  }).observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['data-anchor', 'class', 'data-label'] })
 
   // What the analyst is looking at, for a newer version of the view loaded in this page's place: `ref` the element they
   // last clicked since the last `open`, `scroll` the scroll positions of the page and of each box scrolled, `fields`
@@ -1017,6 +1133,7 @@
     size()
     if (window.ResizeObserver && document.body) new ResizeObserver(size).observe(document.body)
     post({ type: P + 'ready' })
+    sendControls()
     collect(document.documentElement)
     sendAnchors()
   }

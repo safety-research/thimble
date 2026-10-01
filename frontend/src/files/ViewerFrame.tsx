@@ -15,9 +15,14 @@
 //             viewMarks, with the filter's keep) and of its units (the view's marks route), the labels that are on,
 //             the Files label filter, every label over files and the palette, which the page hears through
 //             thimble.onLabels
-//   label, labelColour, newLabel
-//             the page's label controls, done here as the Labels pane does them (`labelActions`): a label turned on or
-//             off, a value given a palette colour, the new-label prompt opened
+//   key       sent once the page is ready: the key the bridge puts on each labelCall
+//   labelCall the page's label controls (labelCalls.ts), answered by labelDone: done here as the Labels pane does them
+//             (`labelActions`), a mark stored as the analyst's verdict and the label filter set, each only during the
+//             analyst's own gesture in the frame; labelRefused says the bridge refused one for want of a gesture
+//   hidden    how many anchored refs the bridge hides for the label filter, which with what the reader left out for
+//             it (the records answers' `hidden`) is the count the view's head shows (onHidden)
+//   labelControls
+//             whether the page shows label controls of its own (onLabelControls)
 //   state     what the analyst is looking at (the element they picked, scroll positions, fields), asked for through
 //             `handle` before a newer version replaces the page, and sent back as `restore` once that version is ready
 // plus ready, error, point and cmd (for the ⌘ pointer). A new ref is sent as a new `open` without reloading the page.
@@ -40,7 +45,8 @@ import { useTheme } from '../lib/theme'
 import { token } from '../lib/vizTheme'
 import { cmdCursors } from '../pointer/cursor'
 import type { Concept, LabelRow, ViewOpen, ViewQuery } from '../lib/types'
-import { PALETTE, pageLabelList, pageLabels, pagePalette, viewMarks, withKeeps, type Keep, type LabelFilter, type PageLabelItem, type ViewMark } from './labels'
+import { callKey, inGesture, NO_GESTURE, runLabelCall, type ViewLabelActions } from './labelCalls'
+import { pageLabelList, pageLabels, pagePalette, viewMarks, withKeeps, type Keep, type LabelFilter, type PageLabelItem, type ViewMark } from './labels'
 import { wantLabels, wantRecordLabels, watchPathLabels } from './marks'
 
 const P = 'thimble:'
@@ -58,15 +64,7 @@ export interface ViewState {
   segs: { path: string; text: string }[]
 }
 
-/** What the page's label controls do, as the Labels pane does it. */
-export interface ViewLabelActions {
-  /** turn a label over files on or off */
-  setOn: (id: string, on: boolean) => void
-  /** give a label's value a palette colour (labels.ts PALETTE) */
-  setColour: (id: string, value: string, colour: number) => void
-  /** open the new-label prompt beside the view */
-  create?: () => void
-}
+export type { ViewLabelActions } from './labelCalls'
 
 /** What a frame's owner can ask of it. */
 export interface ViewerFrameHandle {
@@ -95,8 +93,13 @@ export interface ViewerFrameProps {
   byId?: ReadonlyMap<string, Concept>
   /** the labels that mark the view's files, listed first to the page */
   first?: ReadonlySet<string>
-  /** what the page's label controls do; without it they do nothing */
+  /** what the page's label controls do; without it they can only mark records and set the filter */
   labelActions?: ViewLabelActions
+  /** with a label filter on, how many anchored refs the page and its reader leave out for it; null without a filter or
+   * until the page has said */
+  onHidden?: (n: number | null) => void
+  /** whether the page shows label controls of its own */
+  onLabelControls?: (on: boolean) => void
   onError?: (message: string) => void
   /** the page itself did not load, in place of onError */
   onNoPage?: (message: string) => void
@@ -313,7 +316,7 @@ function useViewLabels(
   return useMemo(() => ({ add, reset, ready }), [add, reset, ready])
 }
 
-export function ViewerFrame({ ws, slug, targetRef, path, pathPicked, title, fit, labels = NO_LABELS, filter = null, filterFiles, byId = NO_CONCEPTS, first, labelActions, onError, onNoPage, className, quote, onQuoteMissing, version, restore, handle, card, onSettled, onQuery, targetPick, query }: ViewerFrameProps) {
+export function ViewerFrame({ ws, slug, targetRef, path, pathPicked, title, fit, labels = NO_LABELS, filter = null, filterFiles, byId = NO_CONCEPTS, first, labelActions, onHidden, onLabelControls, onError, onNoPage, className, quote, onQuoteMissing, version, restore, handle, card, onSettled, onQuery, targetPick, query }: ViewerFrameProps) {
   const ref = useRef<HTMLIFrameElement>(null)
   const [page, setPage] = useState<string | null>(null)
   const [height, setHeight] = useState<number | null>(null)
@@ -394,6 +397,25 @@ export function ViewerFrame({ ws, slug, targetRef, path, pathPicked, title, fit,
   known.current = byId
   const colours = useRef(palette)
   colours.current = palette
+  const pageKey = useRef('')
+  const hiddenFn = useRef(onHidden)
+  hiddenFn.current = onHidden
+  const controlsFn = useRef(onLabelControls)
+  controlsFn.current = onLabelControls
+  const filtering = useRef(!!filter)
+  filtering.current = !!filter
+  // what the bridge hid in the page (null until it said) and what the reader left out, for the current filter
+  const hidden = useRef<{ page: number | null; reader: number }>({ page: null, reader: 0 })
+  const tellHidden = () => {
+    const h = hidden.current
+    hiddenFn.current?.(filtering.current && h.page != null ? h.page + h.reader : null)
+  }
+  const filterKey = filter ? `${filter.concept}\n${filter.value}` : ''
+  useEffect(() => {
+    hidden.current.reader = 0
+    tellHidden()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filterKey])
   useEffect(() => {
     if (!handle) return
     handle.current = {
@@ -416,6 +438,8 @@ export function ViewerFrame({ ws, slug, targetRef, path, pathPicked, title, fit,
     ready.current = false
     marks.reset()
     stopCalls()
+    pageKey.current = callKey()
+    hidden.current = { page: null, reader: 0 }
   }, [doc, marks, stopCalls])
   const sendInit = () => {
     const c = drawn.current
@@ -464,6 +488,7 @@ export function ViewerFrame({ ws, slug, targetRef, path, pathPicked, title, fit,
       switch (d.type) {
         case P + 'ready': {
           ready.current = true
+          post({ type: P + 'key', key: pageKey.current })
           marks.ready()
           sendInit()
           const st = restoring.current
@@ -495,6 +520,11 @@ export function ViewerFrame({ ws, slug, targetRef, path, pathPicked, title, fit,
           try {
             const res = c ? await api.cardTypeRecords(ws, c.type, c.id, d.query) : await api.viewRecords(ws, slug, d.query, version, { call: f.call, signal: f.ctrl.signal })
             if (calls.current.get(id) === f) post({ type: P + 'result', id: d.id, data: res.data })
+            const left = (res as { hidden?: unknown }).hidden
+            if (!c && typeof left === 'number' && left !== hidden.current.reader) {
+              hidden.current.reader = left
+              tellHidden()
+            }
           } catch (err) {
             const message = (err as Error).message
             if (calls.current.get(id) === f) post({ type: P + 'result', id: d.id, error: message, cancelled: message.startsWith('409 ') })
@@ -550,23 +580,23 @@ export function ViewerFrame({ ws, slug, targetRef, path, pathPicked, title, fit,
         case P + 'quoted':
           if (d.found === false) missing.current?.()
           return
-        case P + 'label':
-        case P + 'labelColour': {
-          // the page names a label by the id it heard in `all`; anything else is ignored
-          const act = actions.current
-          const id = typeof d.id === 'string' ? d.id : ''
-          if (!act || !known.current.has(id)) return
+        case P + 'labelCall': {
+          const done = (error?: string) => post({ type: P + 'labelDone', id: d.id, ...(error ? { error } : {}) })
+          if (typeof d.key !== 'string' || !pageKey.current || d.key !== pageKey.current) return done('this label call did not come through thimble')
+          if (!inGesture(frame)) return done(NO_GESTURE)
           notePress(frame)
-          if (d.type === P + 'label') act.setOn(id, !!d.on)
-          else {
-            const at = colours.current.findIndex((c) => c.toLowerCase() === String(d.colour ?? '').toLowerCase())
-            if (at >= 0 && typeof d.value === 'string') act.setColour(id, d.value, PALETTE[at])
-          }
+          runLabelCall(String(d.op), d.args, { ws, byId: known.current, palette: colours.current, actions: actions.current }).then(
+            () => done(),
+            (err: Error) => done(err.message || String(err)),
+          )
           return
         }
-        case P + 'newLabel':
-          notePress(frame)
-          actions.current?.create?.()
+        case P + 'hidden':
+          hidden.current.page = typeof d.n === 'number' && Number.isFinite(d.n) ? d.n : 0
+          tellHidden()
+          return
+        case P + 'labelControls':
+          controlsFn.current?.(!!d.on)
           return
       }
     }
