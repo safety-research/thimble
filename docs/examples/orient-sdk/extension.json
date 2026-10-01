@@ -1,0 +1,6 @@
+{
+  "name": "orient-sdk",
+  "version": "0.1.0",
+  "description": "An orientation written with the Claude Agent SDK: one session surveys the corpus, and the program files the survey as a card.",
+  "thimble": ">=0.4"
+}

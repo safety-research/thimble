@@ -10,6 +10,11 @@ proof with 401. A hook or shim that finds no server.json, no token in it, or no 
 nothing or believes nothing, so a process that holds the recorded port learns nothing from the plugin and cannot answer
 it.
 
+A program thimble runs for one of its agents (harness.py) cannot read server.json. It gets a token of its own instead,
+`<id>.<secret>`, valid while it runs and only on the routes its grant allows (grant): its requests carry AGENT_HEADER
+with the id and prove the whole token the same way, and the answer proves it back. The request's scope then holds the
+id under AGENT_SCOPE, so a route acts for that agent alone.
+
 A change of permission modes, and an answer to a permission request, must come from the analyst's browser (analyst).
 The dashboard link carries the `ui_key` of server.json after `#k=`; the page trades it for an HttpOnly, SameSite=Strict
 cookie named for this server's port (claim, ui_cookie), which such a request must carry. Only the analyst's terminal
@@ -24,6 +29,7 @@ import json
 import os
 import re
 from pathlib import Path
+from typing import Callable
 
 from starlette.datastructures import Headers, MutableHeaders
 from starlette.requests import Request
@@ -37,6 +43,8 @@ SHIM_PATHS = frozenset({"/api/channel", "/api/channel/permission"})
 TOOL_PREFIX = "/api/tools/"  # POST /api/tools/<name>; GET /api/tools/holdings is the CLI's and stays open
 SESSION_HOOK_PATHS = re.compile(r"/api/ws/[^/]+/(sessions/permission|calls/ref)")
 NONCE_HEADER = "x-thimble-nonce"
+AGENT_HEADER = "x-thimble-agent"  # the id of an agent's token (module note)
+AGENT_SCOPE = "thimble_agent"  # where a request proven with an agent's token keeps its id, in the ASGI scope's state
 AUTH_HEADER = "x-thimble-auth"
 PROOF_HEADER = "x-thimble-proof"
 NONCE_MAX = 128  # characters
@@ -60,6 +68,32 @@ WRITE_REFUSED = ("open thimble from the link shown under /thimble's reply, or pr
                  " make changes")
 
 _cache: tuple[tuple[str, int, int], dict] | None = None
+# the tokens of the programs thimble runs, by id: (the whole token, whether its grant allows a method and path)
+_agents: dict[str, tuple[str, Callable[[str, str], bool]]] = {}
+
+
+def grant(token_id: str, token: str, allows: Callable[[str, str], bool]) -> None:
+    """Accept the agent token `token` (`<token_id>.<secret>`) on the requests `allows(method, path)` lets through."""
+    _agents[token_id] = (token, allows)
+
+
+def revoke(token_id: str) -> None:
+    _agents.pop(token_id, None)
+
+
+def _token_for(headers: Headers, method: str, path: str) -> tuple[str, str]:
+    """(the token a request must prove, the agent's id or ''): server.json's, or the token of the agent the request
+    names when its grant allows the request, else ''."""
+    aid = headers.get(AGENT_HEADER, "")
+    if not aid:
+        return token(), ""
+    got = _agents.get(aid)
+    return (got[0], aid) if got is not None and got[1](method, path) else ("", aid)
+
+
+def agent_of(scope: dict) -> str:
+    """The id of the agent token a request was proven with, '' for any other request."""
+    return str((scope.get("state") or {}).get(AGENT_SCOPE) or "")
 
 
 def sign(token: str, role: str, nonce: str) -> str:
@@ -171,7 +205,7 @@ class HookAuth:
             return
         h = Headers(scope=scope)
         nonce = h.get(NONCE_HEADER, "")
-        tok = token()
+        tok, aid = _token_for(h, scope.get("method", ""), scope.get("path", ""))
         if not tok or not nonce or len(nonce) > NONCE_MAX or not hmac.compare_digest(
                 h.get(AUTH_HEADER, ""), sign(tok, "hook", nonce)):
             body = json.dumps({"detail": "only thimble's plugin may call this route"}).encode()
@@ -180,6 +214,8 @@ class HookAuth:
             await send({"type": "http.response.body", "body": body})
             return
         proof = sign(tok, "server", nonce)
+        if aid:
+            scope.setdefault("state", {})[AGENT_SCOPE] = aid
 
         async def with_proof(message) -> None:
             if message["type"] == "http.response.start":
@@ -199,10 +235,10 @@ def _api(path: str) -> bool:
     return path == "/api" or path.startswith("/api/")
 
 
-def hook_proof(headers: Headers) -> bool:
+def hook_proof(headers: Headers, method: str = "", path: str = "") -> bool:
     """Whether `headers` carry a valid hook proof: a local tool that read the token (the plugin, the CLI,
-    view_check.py)."""
-    tok = token()
+    view_check.py), or an agent's token on a request its grant allows."""
+    tok = _token_for(headers, method, path)[0]
     nonce = headers.get(NONCE_HEADER, "")
     return bool(tok and nonce and len(nonce) <= NONCE_MAX
                 and _same(headers.get(AUTH_HEADER, ""), sign(tok, "hook", nonce)))
@@ -227,7 +263,7 @@ class LocalWriteGuard:
             return
         proves, legacy = key_cookie(Request(scope).cookies)
         guarded = write_guarded(scope.get("method", ""), scope["path"])
-        if guarded and not proves and not hook_proof(Headers(scope=scope)):
+        if guarded and not proves and not hook_proof(Headers(scope=scope), scope.get("method", ""), scope["path"]):
             body = json.dumps({"detail": WRITE_REFUSED}).encode()
             await send({"type": "http.response.start", "status": 403,
                         "headers": [(b"content-type", b"application/json"),

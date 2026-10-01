@@ -106,11 +106,15 @@ def current(c: str) -> agent_session.Run | None:
 
 
 def running(c: str) -> bool:
-    return agent_session.running(c, KEY)
+    from . import harness  # noqa: PLC0415
+
+    return agent_session.running(c, KEY) or harness.running(c, KEY)
 
 
 async def stop(c: str) -> bool:
-    return await agent_session.stop(c, KEY)
+    from . import harness  # noqa: PLC0415
+
+    return await agent_session.stop(c, KEY) or await harness.stop(c, KEY)
 
 
 def work_dir(c: str) -> Path:
@@ -199,7 +203,9 @@ def _launch(c: str, brief: str, passes: "list[str]", choices: dict[str, Any]) ->
         name, agent = agent_definition(c, brief, parts)
     from . import extensions  # noqa: PLC0415
 
-    defined = {**extensions.agent_definitions(c), name: agent}
+    from . import roles  # noqa: PLC0415
+
+    defined = {**extensions.agent_definitions(c), **roles.subagents(c, "orientation"), name: agent}
     env = {config.SUBAGENT_MODEL_ENV: subagents["model"]} if subagents["model"] else None
     return dict(role=orientation.ROLE, title=orientation.TITLE,
                 agent_args=["--agents", json.dumps(defined, ensure_ascii=False), "--agent", name], effort=effort,
@@ -227,6 +233,11 @@ async def start(c: str, brief: str, passes: "list[str] | tuple[str, ...]" = ("fi
         choices = {**choices, "ultracode": on, "effort": choices.get("effort") if on else own["effort"]}
     choices = {**choices, **(chosen or {})}
     passes = [p for p in PASSES if p in passes]
+    from . import roles  # noqa: PLC0415
+
+    agent = roles.agent_for(c, "orientation")
+    if agent.code and agent.replacing is not None:
+        return await start_program(c, agent.replacing, brief, passes, choices, call=call)
     failed = _failed_first_run(c, brief, passes)
     if failed is not None:
         return await _restart(c, *failed, call=call)
@@ -241,6 +252,41 @@ async def start(c: str, brief: str, passes: "list[str] | tuple[str, ...]" = ("fi
         c, KEY, prompt=tools.hint("orient-start"), on_start=started, on_end=_ended, on_pid=_moved,
         ultracode=bool(choices.get("ultracode")), critique=bool(choices.get("critique", True)), brief=brief.strip(),
         call=call, **args)
+
+
+async def start_program(c: str, part: Any, brief: str, passes: "list[str]", choices: dict[str, Any],
+                        call: str | None = None, follow_up: bool = False) -> Any:
+    """Start the orientation as an extension's program (harness.py) with the request `brief`, the outputs `passes` and
+    Start's `choices`; `follow_up` for a message to a finished one, which runs the program again with it. Its cards,
+    labels and proposals come through its tools; what it returns is the line main hears."""
+    from . import harness  # noqa: PLC0415
+
+    listed = await tools.call(c, "list_cards", {"group": "all"}, session=KEY)
+    parts = parts_of(choices, passes)
+    own = tuple(n for n in ORIENT_TOOLS if n not in {t for p, names in PART_TOOLS.items() if p not in parts
+                                                      for t in names})
+    job = harness.Job(c, "orientation", KEY, orientation.TITLE,
+                      {"request": brief.strip(), "outputs": list(passes), "follow_up": follow_up,
+                       "choices": {"effort": effort_of(choices), "critique": bool(choices.get("critique", True))},
+                       "cards": listed.text, "corpus": str(config.corpus_dir(c)), "tools": list(own)},
+                      own, work_dir(c), chat_role=orientation.ROLE, patient=True,
+                      fields={"brief": brief.strip(), **({"tool_use_id": call} if call else {})})
+
+    def started(run: Any) -> None:
+        orientation.started(c, run.chat, passes=passes)
+        orientation.record(c, effort=choices.get("effort"), ultracode=bool(choices.get("ultracode")),
+                           critique=bool(choices.get("critique", True)), program=part.extension)
+
+    def ended(run: Any, status: str, summary: str) -> None:
+        try:
+            orientation.finished(c, run.chat, status, summary, report=False)
+        except Exception:  # noqa: BLE001
+            log.exception("%s: the orientation's record was not closed", c)
+        _tell_main(c, status, 0, {}, error=summary if status == "failed" else "")
+        if status == "done":
+            _report(c)
+
+    return harness.start(job, part, on_start=started, on_end=ended)
 
 
 def _failed_first_run(c: str, brief: str, passes: "list[str]") -> tuple[dict[str, Any], str, str] | None:
@@ -331,6 +377,9 @@ async def message(c: str, text: str, by: str = MAIN, call: str | None = None, ex
     text = str(text or "").strip()
     if not text:
         raise ValueError("the message is empty")
+    program = await _program_follow_up(c, text, call)
+    if program is not None:
+        return program
     rec, chat, sid = _chat_of(c)
     entry = {"text": text, "by": by if by in (MAIN, BROWSER, EXTENSION) else MAIN, "ts": _now()}
     if entry["by"] == EXTENSION:
@@ -342,6 +391,23 @@ async def message(c: str, text: str, by: str = MAIN, call: str | None = None, ex
         return {"status": "queued", "chat": chat, "queued": len(queue)}
     run = await resume(c, [entry], call=call)
     return {"status": "resumed", "chat": chat, "run": run.k}
+
+
+async def _program_follow_up(c: str, text: str, call: str | None) -> dict[str, Any] | None:
+    """A message to an orientation an extension's program ran: the program runs again with it, {status: resumed,
+    chat, run: 0}; None when the latest orientation was thimble's own. RuntimeError while it runs."""
+    from . import harness, roles  # noqa: PLC0415
+
+    rec = orientation.read_run(c) or {}
+    agent = roles.agent_for(c, "orientation")
+    if not rec.get("program") or not agent.code or agent.replacing is None:
+        return None
+    if harness.running(c, KEY) or orientation.running(c):
+        raise RuntimeError("the orientation is running")
+    passes = [p for p in PASSES if p in (rec.get("passes") or [])]
+    choices = {"effort": rec.get("effort"), "critique": rec.get("critique", True)}
+    run = await start_program(c, agent.replacing, text, passes, choices, call=call, follow_up=True)
+    return {"status": "resumed", "chat": run.chat, "run": 0}
 
 
 def _show_queue(c: str, chat: str, queue: "list[dict[str, Any]]") -> None:
