@@ -51,6 +51,12 @@ describe('the requests and their words', () => {
     expect(pendingRequests(main, metas).map((a) => `${a.chat}:${a.request.id}`)).toEqual(['or1:o1', 'main:m1', 'or1:o2'])
     expect(pendingRequests(null, [])).toEqual([])
   })
+
+  test("main's request and a session's asked in the same second are in the order they were asked", () => {
+    const main = { permissions: [req('m1', { since: '2026-10-01T00:17:11.900+00:00' })] }
+    const metas = [{ ...ORIENT, permissions: [req('o1', { since: '2026-10-01T00:17:11.500+00:00' }), req('o2', { since: '2026-10-01T00:17:12+00:00' })] }]
+    expect(pendingRequests(main, metas).map((a) => a.request.id)).toEqual(['o1', 'm1', 'o2'])
+  })
 })
 
 describe('the card', () => {

@@ -147,3 +147,18 @@ async def test_a_request_asked_while_the_server_starts_stays_on_the_card():
     assert [q["id"] for q in agents.read_meta(CORPUS, chat)["permissions"]] == [p["id"]]
     agent_session.answer(CORPUS, chat, p["id"], True)
     assert (await asyncio.wait_for(call, 5))["behavior"] == "allow"
+
+
+async def test_main_s_relayed_request_asked_after_a_session_s_is_stamped_after_it():
+    from datetime import datetime
+
+    from app import channel
+
+    chat = _agent("view:a")
+    call = asyncio.ensure_future(agent_session.hook_request(CORPUS, _body("view:a", "first")))
+    [first] = await _pending(chat, 1)
+    channel._hold(CORPUS, "main-1", "Bash", "ls", "{}")
+    [later] = agents.read_meta(CORPUS, agents.MAIN_ID)["permissions"]
+    assert datetime.fromisoformat(later["since"]) >= datetime.fromisoformat(first["since"]), "the card lists it second"
+    agent_session.answer(CORPUS, chat, first["id"], True)
+    await asyncio.wait_for(call, 5)

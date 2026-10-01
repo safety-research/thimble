@@ -24,9 +24,10 @@ export function pendingRequests(main: Pick<ChatMeta, 'permissions'> | null | und
   }
   // a stable order: by when each asked, and in the order read where a time is missing
   const done = (a: PendingAsk) => (a.request.expired ? 1 : 0)
+  const when = (a: PendingAsk) => Date.parse(a.request.since ?? '') || 0
   return out
     .map((a, i) => ({ a, i }))
-    .sort((x, y) => done(x.a) - done(y.a) || (x.a.request.since ?? '').localeCompare(y.a.request.since ?? '') || x.i - y.i)
+    .sort((x, y) => done(x.a) - done(y.a) || when(x.a) - when(y.a) || x.i - y.i)
     .map((x) => x.a)
 }
 
