@@ -63,6 +63,8 @@ async def test_a_finished_session_s_tray_entry_ends_and_main_is_not_asked_for_an
     monkeypatch.setattr(bg_session, "_wake", {"critique": wake})
     e.status = "idle"
     bg_session.run_ended(CORPUS, KEY, "Six problems with the orientation's cards.")
+    assert not bg_session.finished(e), "a run that follows at once keeps the tray entry"
+    e.ended_at -= bg_session.FINISHED_AFTER_S
     assert bg_session.finished(e), "idle, with no run of thimble's and no message waiting"
     told = await bg_session.wait(CORPUS, e.name, "a1")
     assert "finished its task: Six problems" in told

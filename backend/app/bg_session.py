@@ -102,6 +102,9 @@ WAIT_S = 6.0
 PROXY_WAIT_S = 20.0  # how long a message waits for the proxy before main is asked to send it
 PROXY_ALIVE_S = 90.0  # a proxy that has not called wait_session for this long is taken for gone
 PROXY_ASK_S = 120.0  # how long main's start of a proxy is waited for before main is asked again
+# how long after its run ended an idle session counts as still at its task (finished), so a run that follows at once,
+# such as a queued follow-up, keeps its tray entry
+FINISHED_AFTER_S = 15.0
 IDENTIFY_TRIES = 20
 CLI_TIMEOUT_S = 60
 MAX_ARG = 100_000  # bytes of a first message kept on the command line; a longer one goes through a file
@@ -462,9 +465,11 @@ def alive(e: Entry | None) -> bool:
 
 def finished(e: Entry | None) -> bool:
     """Whether a session that runs has finished its task: Claude Code keeps a background session's process after its
-    last turn, idle, so a session listed idle with no run of thimble's following it and no message waiting for it counts
-    as finished until it starts another turn (_tick). Its tray entry ends, and main is not asked for another."""
-    return alive(e) and not e.replacing and e.status == "idle" and not e.run_open and not _pending_out(e)
+    last turn, idle, so a session listed idle, with no run of thimble's following it for FINISHED_AFTER_S and no message
+    waiting for it, counts as finished until it starts another turn (_tick). Its tray entry ends, and main is not asked
+    for another."""
+    return (alive(e) and not e.replacing and e.status == "idle" and not e.run_open and not _pending_out(e)
+            and time.time() - e.ended_at >= FINISHED_AFTER_S)
 
 
 def stopped_in_claude(c: str, key: str) -> bool:
