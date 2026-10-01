@@ -768,7 +768,7 @@ Filed {label}, but it cannot run here, so it failed at once: {why} Tell the anal
 
 ## view-media-unplayable
 
-The browser that takes the checks' and the review's pictures cannot play H.264 video or AAC audio, which most screen recordings hold, so a video or audio player in the pictures stays blank or shows an error. The analyst's browser plays them. A blank player in a picture is not a problem of the view.
+The browser that takes the checks' and the review's pictures cannot play H.264 video or AAC audio, which most MP4, MOV and M4A recordings hold. A player of such a file stays blank or shows an error in the pictures, though the analyst's browser usually plays it, so that is not a problem of the view. A player that stays blank on a WebM, Ogg, MP3 or FLAC file is one.
 
 ## view-built
 
