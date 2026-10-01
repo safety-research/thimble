@@ -265,3 +265,24 @@ def test_a_file_asked_for_at_once_by_many_is_parsed_once(chats, monkeypatch):
     for th in threads:
         th.join()
     assert len(out) == 4 and len(calls) == 1
+
+
+def test_the_sniff_says_where_line_records_keep_their_turns(chats):
+    def sniff(name, content):
+        (chats / "logs" / name).write_text(content)
+        return transcripts.sniff(chats / "logs" / name, f"logs/{name}")
+
+    share = sniff("share.ndjson", FIXTURES["sharegpt.jsonl"][0])
+    assert share["format"] == "conversations" and share["lines"] is True
+    assert share["keys"] == {"list": "conversations", "speaker": "from", "text": "value"}
+    assert sniff("pairs2.jsonl", FIXTURES["pairs.jsonl"][0])["pair"] == ["prompt", "response"]
+    stream = sniff("stream.txt", FIXTURES["stream.jsonl"][0])
+    assert stream["format"] == "stream" and stream["lines"] and stream["keys"]["text"] == "message.content"
+    log = sniff("app.log", FIXTURES["messages.jsonl"][0])
+    assert log["format"] == "messages" and log["lines"] and log["keys"] == {"speaker": "role", "text": "content"}
+
+
+def test_a_whole_json_file_too_large_to_parse_is_not_offered_transcript(chats, monkeypatch):
+    monkeypatch.setattr(transcripts, "JSON_MAX_BYTES", 10)
+    assert transcripts.sniff(chats / "logs" / "eval.json", "logs/eval.json") is None
+    assert transcripts.sniff(chats / "logs" / "sharegpt.jsonl", "logs/sharegpt.jsonl")["format"] == "conversations"

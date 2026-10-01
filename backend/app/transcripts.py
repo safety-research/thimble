@@ -10,13 +10,16 @@ open and no corpus is walked. A false positive costs one more mode beside Raw, s
 The answer, or None:
     {"format": "stream" | "messages" | "conversations" | "json" | "csv" | "text", "score": 0..1,
      "keys"?: {"speaker", "text", "time"}   where a message keeps them (dotted paths into a record, or CSV columns),
+                                             and for whole conversations, "list": the key of their list of messages,
+     "pair"?: [str, str]                     for conversations that are a prompt and its response, their two keys,
      "lines"?: true                          JSON lines in a file the server pages as text (not named .jsonl),
      "style"?: str, "speakers"?: [str]       a text chat log's style of turn line, and who may start a turn in it,
      "delimiter"?: str}
 A score of STRONG makes Transcript the file's first mode; WEAK only offers it.
 
-turns(path, rel, ...) parses a whole JSON transcript (or JSON lines the server pages as text) into turns, each with the
-line of the file it stands on, for the Transcript mode to page through: GET /corpora/{c}/source/turns.
+JSON lines are shown from the records the File browser pages; parse_turns() parses a whole-file JSON transcript into
+turns, each with the line of the file it stands on, for the Transcript mode to page through: GET
+/corpora/{c}/source/turns. A whole-file JSON past JSON_MAX_BYTES is not offered Transcript.
 
 turn_of(line, style) reads one line of a text chat log: who speaks, when, and where the words start.
 """
@@ -336,6 +339,8 @@ def sniff(path: Path, rel: str) -> dict[str, Any] | None:
         got = sniff_bytes(head, rel, complete=key[0] <= len(head))
     except Exception:  # noqa: BLE001 — a file the sniff cannot read is no transcript
         got = None
+    if got is not None and got["format"] == "json" and key[0] > JSON_MAX_BYTES:
+        got = None
     with _lock:
         _SNIFFS[k] = (key, got)
         _SNIFFS.move_to_end(k)
@@ -354,11 +359,12 @@ def sniff_bytes(head: bytes, rel: str, complete: bool = False) -> dict[str, Any]
         text = text[:cut] if cut > 0 else text
     suffix = Path(rel).suffix.lower()
     stripped = text.lstrip("﻿ \t\r\n")
-    if suffix in JSONLISH or (suffix == ".json" and stripped[:1] == "{"):
+    jsonish = suffix == ".json" or (suffix in TEXTISH and suffix not in (".md", ".markdown"))
+    if suffix in JSONLISH or (jsonish and stripped[:1] == "{"):
         got = _sniff_jsonl(stripped, parsed=suffix == ".jsonl")
         if got is not None or suffix in JSONLISH:
             return got
-    if suffix == ".json" or (suffix in TEXTISH and stripped[:1] in ("[", "{") and suffix not in (".md", ".markdown")):
+    if suffix == ".json" or (jsonish and stripped[:1] in ("[", "{")):
         got = _sniff_json(stripped, complete)
         if got is not None or suffix == ".json":
             return got
@@ -386,18 +392,43 @@ def _sniff_jsonl(text: str, parsed: bool) -> dict[str, Any] | None:
         return None
     lines = {} if parsed else {"lines": True}
     n = len(objs)
+    keyed = [k for k in map(message_keys, objs) if k]
     if sum(1 for r in objs if is_stream(r)) * 5 >= n * 3:
-        return {"format": "stream", "score": 1.0, **lines}
+        # a stream in a file paged as text shows as posts, under the keys its messages keep
+        return {"format": "stream", "score": 1.0, **lines, **({"keys": _commonest(keyed)} if lines and keyed else {})}
     convs = sum(1 for r in objs if conversation_of(r))
     if convs * 2 >= n:
-        return {"format": "conversations", "score": STRONG, **lines}
-    keyed = [k for k in map(message_keys, objs) if k]
+        found = [k for k in map(_conversation_keys, objs) if k]
+        return {"format": "conversations", "score": STRONG, **lines, **(_commonest(found) if found else {})}
     if len(keyed) * 2 >= n:
-        keys = max(({json.dumps(k, sort_keys=True) for k in keyed}), key=lambda s: sum(1 for k in keyed if json.dumps(k, sort_keys=True) == s))
-        best = json.loads(keys)
+        best = _commonest(keyed)
         speaker_leaf = best["speaker"].rsplit(".", 1)[-1]
         strong = len(keyed) * 10 >= n * 7 and speaker_leaf in SPEAKER_KEYS
         return {"format": "messages", "score": STRONG if strong else WEAK, "keys": best, **lines}
+    return None
+
+
+def _commonest(items: list[dict[str, Any]]) -> dict[str, Any]:
+    counts: dict[str, int] = {}
+    for it in items:
+        k = json.dumps(it, sort_keys=True)
+        counts[k] = counts.get(k, 0) + 1
+    return json.loads(max(counts, key=counts.__getitem__))
+
+
+def _conversation_keys(obj: Any) -> dict[str, Any] | None:
+    """Where a record holding a whole conversation keeps it, for the Transcript mode to read its turns:
+    {"keys": {"list", "speaker", "text", "time"?}} for a list of messages, {"pair": [prompt key, response key]} for a
+    prompt and its response; None for any other (a ChatGPT export's `mapping`)."""
+    if not isinstance(obj, dict):
+        return None
+    for k in LIST_KEYS:
+        v = obj.get(k)
+        if isinstance(v, list) and v and _mostly(v, lambda x: message_keys(x) is not None):
+            return {"keys": {"list": k, **_commonest([m for m in map(message_keys, v) if m])}}
+    for a, b in PAIR_KEYS:
+        if isinstance(obj.get(a), str) and isinstance(obj.get(b), str):
+            return {"pair": [a, b]}
     return None
 
 
