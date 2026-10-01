@@ -146,11 +146,13 @@ async def test_a_refused_package_or_installs_turned_off_leave_a_problem_and_noth
     monkeypatch.setattr(view_libs, "_installs", lambda c: "ask")
 
     async def late(c, slug, fields):
+        card_wait(5)
         return view_libs.UNANSWERED
 
+    card_wait(3)
     got = await view_libs.ensure("ws", "v", folder, ["tiny-queue@1"], ask=late)
-    assert got["problems"][0].startswith("nobody answered within ") and "tiny-queue 1.4.2" in got["problems"][0], \
-        "a question nobody answered says so, not that the analyst refused"
+    assert got["problems"][0].startswith("nobody answered within 3 minutes") and "tiny-queue 1.4.2" in got["problems"][0], \
+        "a question nobody answered says so, with the wait its card had, not that the analyst refused"
     assert view_libs.approvals() == {} and not [c for c in npm if c[1] == "install"]
 
     got = await view_libs.ensure("ws", "v", folder, ["tiny-queue@1"], ask=nobody)

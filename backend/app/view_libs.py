@@ -421,15 +421,15 @@ async def ensure(c: str, slug: str, folder: Path, libs: Any, *, ask: "Ask | None
                                                 for x in more[:20]) + \
                         (f" and {len(more) - 20} more" if len(more) > 20 else "") + \
                         (f", and more beyond the first {DEPS_MAX}" if extra else "")
+                from . import agent_session, userconf  # noqa: PLC0415
+
+                wait = agent_session.wait_words(userconf.card_wait_s())
                 allowed = await _ask_once(c, slug, f"{e.name}@{version}", fields, ask or _ask_on_card)
                 if allowed is None:
                     out["problems"].append(f"thimble could not ask the analyst about the package {e.name} {version}, "
                                            "since no build of this view is running, so it was not installed")
                     continue
                 if allowed == UNANSWERED:
-                    from . import agent_session, userconf  # noqa: PLC0415
-
-                    wait = agent_session.wait_words(userconf.card_wait_s())
                     out["problems"].append(f"nobody answered within {wait} whether to install the package {e.name} "
                                            f"{version}, so it was not installed. Draw the page without it and take it "
                                            "out of libs")
