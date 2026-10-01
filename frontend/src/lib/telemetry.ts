@@ -495,7 +495,8 @@ function observeRequest(input: RequestInfo | URL, init: RequestInit | undefined)
 
 function onClick(e: MouseEvent): void {
   const el = e.target instanceof Element ? e.target : null
-  if (!el) return
+  // the product tour's own popover and examples (src/tour) are not the analyst's work
+  if (!el || el.closest('.tour-root, .tour-host')) return
   const g = classifyGeneric(gatherGeneric(el))
   if (g) track(g.kind, { target: g.target, detail: g.detail })
 }

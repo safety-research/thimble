@@ -7,7 +7,8 @@
 // cannot take effect are dimmed with the reason in a tooltip. Every row names its model exactly, never `default`. Under
 // the table, the permission mode of each agent thimble starts (MODE_ROWS): the analyst's pick, else the mode of their
 // Claude Code session, as main's hooks report it (backend modes.py). Then the workspace's switches (SWITCHES), each saved
-// with the rest, and the extensions added to thimble, each with its switch for this workspace (ExtensionsSettings).
+// with the rest, and the extensions added to thimble, each with its switch for this workspace (ExtensionsSettings). At the
+// footer's left, Take the tour runs the product tour again (shell/TourHost).
 import { useEffect, useState } from 'react'
 import { Button } from '../components/Button'
 import { Chip } from '../components/Chip'
@@ -362,6 +363,16 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
         )}
         {(error || settings?.config_error) && <div className="settings-error">{error || settings?.config_error}</div>}
         <div className="settings-foot">
+          <Button
+            variant="ghost"
+            className="settings-tour"
+            onClick={() => {
+              onClose()
+              window.setTimeout(() => bus.emit('tour', {}), 250)
+            }}
+          >
+            Take the tour
+          </Button>
           <Button variant="ghost" onClick={onClose} disabled={busy}>
             Cancel
           </Button>

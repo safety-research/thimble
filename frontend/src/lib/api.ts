@@ -148,6 +148,9 @@ export interface EventPosted {
 }
 
 export const api = {
+  // ---- the product tour's first-launch state, one for the install (backend tour.py) ----
+  tour: () => j<{ seen: boolean }>(`${BASE}/tour`),
+  tourSeen: () => j<{ seen: boolean }>(`${BASE}/tour/seen`, { method: 'POST' }),
   // ---- corpora and files ----
   corpora: () => j<CorpusInfo[]>(`${BASE}/corpora`),
   sources: (c: string) => j<SourceInfo[]>(`${BASE}/corpora/${enc(c)}/sources`),
