@@ -56,8 +56,8 @@ Names are lower-case letters, digits and hyphens. A part's name is its folder's 
 
 The roles are `main`, `orientation`, `critic`, `writer` and `dev`. The tasks are `labels`, `label-draft`, `card-check`,
 `view-review`, `view-fit`, `file-viewer` and `checks`. A task's prompt adds to, or replaces, the part of thimble's
-prompt the task runs with; thimble checks a task's SDK program or command but does not run it yet.
-`agent.json` or `task.json` defines one in one of three ways:
+prompt the task runs with; its program runs in place of thimble's own. `agent.json` or `task.json` defines one in one of
+three ways:
 
 | key | what thimble does |
 |---|---|
@@ -68,8 +68,8 @@ prompt the task runs with; thimble checks a task's SDK program or command but do
 Both files take `description` (shown by `add` and Settings), `model` and `effort` (defaults your config overrides).
 `agent.json` also takes `tools` and `disallowedTools`, which can only narrow what the role has, and with `prompt`,
 `subagents`: Claude Code subagents the role can call, in the fields of Claude Code's `--agents` JSON, each prompt in
-its own file. main takes a prompt addition only. [agents.md](agents.md) says what a program that runs a role gets
-and how it answers. Permission modes and hooks are yours, and an extension cannot set them.
+its own file. main takes a prompt addition only. [agents.md](agents.md) says what a program that runs a role or a task
+gets and how it answers. Permission modes and hooks are yours, and an extension cannot set them.
 
 ```json
 {"description": "Has every record of a swarm read by a model before the orientation drafts.",
@@ -81,5 +81,6 @@ and how it answers. Permission modes and hooks are yours, and an extension canno
 Prompts can use `{{default}}` or `{{default#<heading>}}` (thimble's own prompt, or one section of it), `{{dir}}` (the
 extension's folder, read-only) and `{{files}}` (the files its scope, views and card types cover in the workspace).
 
-Switching on an extension that adds to the orientation, in a workspace where the orientation already ran, makes
-Settings ask whether to run it there now.
+Switching on an extension that adds to the orientation or runs it with a program, in a workspace where the orientation
+already ran, makes Settings ask whether to run it there now. A program runs again with the cards as they stand and adds
+to them.
