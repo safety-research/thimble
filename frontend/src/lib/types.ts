@@ -1406,7 +1406,8 @@ export interface ConceptDetail extends Concept {
   run?: ConceptRun | null
 }
 
-/** GET /concepts/{id}/coverage: which corpus files the label's rows cover (file units; a cell or span unit has none). */
+/** GET /concepts/{id}/coverage?offset=: how many corpus files the label's rows cover, with a page of each group (file
+ * units; a cell or span unit has none). */
 export interface CoverageFile {
   path: string
   covered: boolean
@@ -1414,8 +1415,17 @@ export interface CoverageFile {
 }
 export interface ConceptCoverage {
   unit: ConceptUnit | string
+  /** the files the Files tree lists */
+  n_files: number
+  /** the files the label has rows on, and its rows over them */
+  n_covered: number
+  rows: number
+  /** the first covered files, by path */
   files: CoverageFile[]
+  /** a page of the files with no rows, by path, from `offset` */
   not_covered: string[]
+  n_not_covered: number
+  offset: number
 }
 
 /** POST /concepts/{id}/apply */

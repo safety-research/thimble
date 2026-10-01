@@ -913,10 +913,20 @@ def concept_stats(ws: Path, concept: dict) -> dict:
     return _stats(ws, concept["id"])
 
 
-def coverage(ws: Path, concept: dict) -> dict:
-    """{unit, files: [{path, covered, rows}], not_covered: [path, ...]}: every file of the corpus with the rows the label
-    has on it, and the paths with none. A cell or span unit has no files. Blocking (worker thread)."""
-    out: dict[str, Any] = {"unit": concept["unit"], "files": [], "not_covered": []}
+COVERAGE_PAGE = 200  # paths a coverage answer lists of each group, unless the caller asks for fewer or more
+COVERAGE_PAGE_MAX = 2_000
+
+
+def coverage(ws: Path, concept: dict, limit: int = COVERAGE_PAGE, offset: int = 0) -> dict:
+    """{unit, n_files, n_covered, rows, files: [{path, covered, rows}], not_covered: [path, ...], n_not_covered, offset}:
+    how many of the corpus's files the label's rows cover, with how many rows, then the first `limit` covered files and
+    `limit` of the files with none from `offset`, both by path. The files are those the Files tree lists, read from the
+    corpus's folder tree with no file stat'ed (corpus.search_paths). A cell or span unit has no files. Blocking (worker
+    thread)."""
+    limit = max(0, min(int(limit), COVERAGE_PAGE_MAX))
+    offset = max(0, int(offset))
+    out: dict[str, Any] = {"unit": concept["unit"], "n_files": 0, "n_covered": 0, "rows": 0, "files": [], "not_covered": [],
+                           "n_not_covered": 0, "offset": offset}
     if concept["unit"] not in FILE_UNITS:
         return out
     try:
@@ -925,13 +935,22 @@ def coverage(ws: Path, concept: dict) -> dict:
         return out
     st, _building_now = _store(ws, concept["id"])
     rows = st.paths() if st is not None else {}
-    for src in corpus.list_sources(corpus_dir):
-        n = int(rows.get(src["path"], 0))
-        out["files"].append({"path": src["path"], "covered": n > 0, "rows": n})
-        if n == 0:
-            out["not_covered"].append(src["path"])
-    out["files"].sort(key=lambda f: f["path"])
-    out["not_covered"].sort()
+    paths = corpus.search_paths(corpus_dir).paths
+    files, missing = out["files"], out["not_covered"]
+    n_covered = n_rows = n_not = 0
+    end = offset + limit
+    for path in paths:
+        n = rows.get(path)
+        if n:
+            n_covered += 1
+            n_rows += int(n)
+            if len(files) < limit:
+                files.append({"path": path, "covered": True, "rows": int(n)})
+        else:
+            if offset <= n_not < end:
+                missing.append(path)
+            n_not += 1
+    out.update(n_files=len(paths), n_covered=n_covered, rows=n_rows, n_not_covered=n_not)
     return out
 
 
@@ -4209,29 +4228,11 @@ def labels_route(c: str, concept_id: str, path: str | None = None, lines: str | 
 
 
 @router.get("/ws/{c}/concepts/{concept_id}/coverage")
-async def coverage_route(c: str, concept_id: str) -> Response:
-    """{unit, files: [{path, covered, rows}], not_covered}: which corpus files the label's rows cover (file units)."""
+async def coverage_route(c: str, concept_id: str, limit: int = COVERAGE_PAGE, offset: int = 0) -> dict:
+    """{unit, n_files, n_covered, rows, files, not_covered, n_not_covered, offset}: how many corpus files the label's rows
+    cover (file units), with a page of each group (coverage)."""
     ws, concept = load_concept(c, concept_id)
-    return Response(await asyncio.to_thread(_coverage_json, ws, concept), media_type="application/json")
-
-
-JSON_CHUNK = 5_000  # items json.dumps encodes at a time, so a long list lets the other threads run between parts
-
-
-def _coverage_json(ws: Path, concept: dict) -> bytes:
-    """coverage() as JSON, encoded JSON_CHUNK items at a time, so that the other threads, the event loop's too, run
-    between the parts of a long list."""
-    cov = coverage(ws, concept)
-    out = [b'{"unit":', json.dumps(cov["unit"]).encode()]
-    for key in ("files", "not_covered"):
-        items = cov[key]
-        out.append(f',"{key}":['.encode())
-        for i in range(0, len(items), JSON_CHUNK):
-            out.append((b"," if i else b"") + json.dumps(items[i:i + JSON_CHUNK], ensure_ascii=False, separators=(",", ":"))[1:-1].encode())
-            time.sleep(0)
-        out.append(b"]")
-    out.append(b"}")
-    return b"".join(out)
+    return await asyncio.to_thread(coverage, ws, concept, limit, offset)
 
 
 @router.get("/ws/{c}/concepts/{concept_id}/rows")

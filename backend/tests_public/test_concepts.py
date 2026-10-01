@@ -132,6 +132,36 @@ async def test_regex_apply_records_for_real(api, workspaces_tmp):
     assert len(concepts.read_labels(workspaces_tmp / CORPUS, k["id"])) == 3 + 2
 
 
+async def test_a_labels_coverage_counts_every_file_and_lists_a_page_of_each_group(api, workspaces_tmp, monkeypatch):
+    """GET /coverage counts the corpus's files, those the label covers and their rows, and lists only a page of the
+    covered files and of the others, by path, the others paged by offset; it reads the folder tree, never stats each
+    file, and a million-file corpus no longer sends every path."""
+    from app import corpus
+
+    k = await _create(api, kind="regex", spec=PATTERN)
+    r = await api.post(f"/api/ws/{CORPUS}/concepts/{k['id']}/apply", json={"wait": True, "paths": ["board.jsonl"]})
+    assert r.status_code == 200, r.text
+    every = corpus.search_paths(MINI).paths
+    assert len(every) > 6 and "board.jsonl" in every
+    others = sorted(p for p in every if p != "board.jsonl")
+    walks = []
+    real = corpus.list_sources
+    monkeypatch.setattr(corpus, "list_sources", lambda *a, **kw: walks.append(a) or real(*a, **kw))
+    base = f"/api/ws/{CORPUS}/concepts/{k['id']}/coverage"
+    got = (await api.get(base)).json()
+    assert got["unit"] == "record" and got["n_files"] == len(every) and got["n_covered"] == 1 and got["rows"] == 8
+    assert got["files"] == [{"path": "board.jsonl", "covered": True, "rows": 8}]
+    assert got["not_covered"] == others and got["n_not_covered"] == len(others) and got["offset"] == 0
+    page = (await api.get(base, params={"limit": 2, "offset": 3})).json()
+    assert page["not_covered"] == others[3:5] and page["n_not_covered"] == len(others) and page["n_files"] == len(every)
+    assert page["files"] == got["files"] and page["offset"] == 3
+    assert (await api.get(base, params={"limit": 2, "offset": len(others)})).json()["not_covered"] == []
+    assert (await api.get(base, params={"limit": 10**6})).json()["not_covered"] == others  # held to COVERAGE_PAGE_MAX
+    monkeypatch.setattr(concepts, "COVERAGE_PAGE_MAX", 3)
+    assert len((await api.get(base, params={"limit": 50})).json()["not_covered"]) == 3
+    assert not walks
+
+
 async def test_one_labels_request_reads_the_rows_of_several_line_ranges(api, workspaces_tmp, monkeypatch):
     k = await _create(api, kind="regex", spec=PATTERN)
     lf = concepts.labels_file(workspaces_tmp / CORPUS, k["id"])

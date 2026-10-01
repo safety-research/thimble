@@ -19,7 +19,7 @@ import { loadSettings, modelLabel } from '../lib/models'
 import { track } from '../lib/telemetry'
 import type { ConceptCoverage, ConceptDetail, LabelClass, LabelRowText } from '../lib/types'
 import { CanvasContext } from './context'
-import { EXAMPLES_PAGE, effectiveValue, exampleCount, groupCoverage, labelValues, otherValues, pickValue, reapplyPaths, scopeWord, unitTotal } from './details'
+import { COVERAGE_PAGE, EXAMPLES_PAGE, effectiveValue, exampleCount, groupCoverage, labelValues, otherValues, pickValue, reapplyPaths, scopeWord, unitTotal } from './details'
 import { cutExcerpt, excerptOf } from './excerpts'
 
 const fail = (e: unknown) => bus.emit('toast', { text: (e as Error)?.message || String(e), kind: 'error' })
@@ -133,10 +133,12 @@ function Computed({ concept, ws }: { concept: ConceptDetail; ws: string }) {
 }
 
 /** APPLIED TO: the scope, the units covered, what a label over files marks and its glob (else the last run's path
- * globs); under NOT INCLUDED the corpus files with no rows. */
+ * globs); under NOT INCLUDED the corpus files with no rows, a page at a time. */
 function AppliedTo({ concept, paths }: { concept: ConceptDetail; paths: string[] }) {
   const { ws } = useContext(CanvasContext)
   const [cov, setCov] = useState<ConceptCoverage | null>(null)
+  // the pages of files with no rows read after the first, for the coverage answer they follow
+  const [more, setMore] = useState<{ of: ConceptCoverage | null; paths: string[]; loading: boolean }>({ of: null, paths: [], loading: false })
   const stamp = `${concept.n_labeled ?? 0}:${concept.run?.status ?? ''}:${concept.version ?? 0}`
   useEffect(() => {
     let alive = true
@@ -149,15 +151,28 @@ function AppliedTo({ concept, paths }: { concept: ConceptDetail; paths: string[]
     }
   }, [ws, concept.id, stamp])
   const groups = useMemo(() => groupCoverage(cov), [cov])
+  const notCovered = more.of === cov ? [...groups.notCovered, ...more.paths] : groups.notCovered
+  const showMore = () => {
+    const of = cov
+    setMore({ of, paths: more.of === of ? more.paths : [], loading: true })
+    labelApi
+      .coverage(ws, concept.id, notCovered.length)
+      .then((c) => setMore((m) => (m.of === of ? { of, paths: [...m.paths, ...groupCoverage(c).notCovered], loading: false } : m)))
+      .catch((e) => {
+        fail(e)
+        setMore((m) => (m.of === of ? { ...m, loading: false } : m))
+      })
+  }
   const fileUnit = isFilesLabel(concept)
   const globs = fileUnit ? globPatterns(concept.glob) : []
+  const left = groups.nNotCovered - notCovered.length
   return (
     <section className="canvas-details-section">
       <span className="label">applied to</span>
       <div className="canvas-details-run">
         <Chip kind="value">{scopeWord(concept.unit)}</Chip>
         <Chip kind="value">{unitTotal(concept.n_labeled, concept.unit)}</Chip>
-        {fileUnit && cov ? <Chip kind="value">{`${groups.covered.length.toLocaleString()} of ${groups.total.toLocaleString()} files`}</Chip> : null}
+        {fileUnit && cov ? <Chip kind="value">{`${groups.nCovered.toLocaleString()} of ${groups.total.toLocaleString()} files`}</Chip> : null}
         {fileUnit ? <Chip kind="value">{marksWord(concept)}</Chip> : null}
         {(globs.length ? globs : paths).map((p) => (
           <Chip key={p} kind="ref" icon="file">
@@ -165,16 +180,24 @@ function AppliedTo({ concept, paths }: { concept: ConceptDetail; paths: string[]
           </Chip>
         ))}
       </div>
-      {fileUnit && groups.notCovered.length > 0 ? (
+      {fileUnit && notCovered.length > 0 ? (
         <>
           <span className="label canvas-label-sublabel">not included</span>
           <ul className="canvas-label-files">
-            {groups.notCovered.map((p) => (
+            {notCovered.map((p) => (
               <li key={p} className="canvas-label-file">
                 {p}
               </li>
             ))}
           </ul>
+          {left > 0 ? (
+            <div className="canvas-details-actions">
+              <Button size="sm" icon="plus" busy={more.loading && more.of === cov} onClick={showMore}>
+                {`${Math.min(COVERAGE_PAGE, left).toLocaleString()} more`}
+              </Button>
+              <Chip kind="value">{`${notCovered.length.toLocaleString()} of ${groups.nNotCovered.toLocaleString()}`}</Chip>
+            </div>
+          ) : null}
         </>
       ) : null}
     </section>

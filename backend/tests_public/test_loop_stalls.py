@@ -248,21 +248,6 @@ def test_files_named_outright_are_found_without_walking_the_corpus(mini_dir, tmp
         assert walks, odd
 
 
-def test_a_labels_coverage_is_encoded_a_part_at_a_time(workspaces_tmp, monkeypatch):
-    """A label's coverage lists every file of the corpus, 160 MB for a million files, which one encode would hold every
-    thread for: it is encoded in parts off the event loop, and reads as coverage() gives it."""
-    import json
-
-    from app import concepts, config
-
-    ws = config.workspace_dir("mini")
-    concept = concepts.new_concept("covered", kind="regex", spec="x")
-    concepts.write_concept(ws, concept)
-    monkeypatch.setattr(concepts, "JSON_CHUNK", 2)
-    got = json.loads(concepts._coverage_json(ws, concept))
-    assert got == json.loads(json.dumps(concepts.coverage(ws, concept))) and len(got["files"]) > 4
-
-
 async def test_health_answers_while_every_worker_thread_is_taken():
     """`server up` and the plugin give a health call 1 to 2 s: it is answered on the event loop, not after a worker
     thread frees up behind the requests that compute."""

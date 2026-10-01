@@ -535,8 +535,9 @@ export const labelApi = {
   /** `GET /concepts/{id}/rows?text=1`: one page of rows with the effective value, each with the unit's own text. */
   rows: (c: string, id: string, opts: { value?: string; limit?: number; offset?: number }) =>
     j<{ rows: LabelRowText[]; total: number }>(`${ws(c)}/concepts/${enc(id)}/rows${q({ ...opts, text: 1 })}`),
-  /** `GET /concepts/{id}/coverage`: the corpus files the label covers and the ones it does not. */
-  coverage: (c: string, id: string) => j<ConceptCoverage>(`${ws(c)}/concepts/${enc(id)}/coverage`),
+  /** `GET /concepts/{id}/coverage?offset=`: how many corpus files the label covers, the first covered files, and a page
+   * of the files it does not cover from `offset`. */
+  coverage: (c: string, id: string, offset = 0) => j<ConceptCoverage>(`${ws(c)}/concepts/${enc(id)}/coverage${offset > 0 ? `?offset=${offset}` : ''}`),
   /** `POST /concepts/{id}/labels`: the analyst's verdict on one unit. */
   verdict: (c: string, id: string, ref: string, label: string, note?: string) =>
     j<VerdictResult>(`${ws(c)}/concepts/${enc(id)}/labels`, { method: 'POST', body: JSON.stringify({ ref, label, note }) }),
