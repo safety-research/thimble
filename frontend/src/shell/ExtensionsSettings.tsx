@@ -1,10 +1,11 @@
 // The settings' Extensions section: a switch per extension added to thimble, for this workspace, with what it gives and
 // the settings it runs under, and under it a switch per view it gives, saved with the rest. An extension runs in every
 // workspace until its switch turns it off; one that cannot run here whatever the switch says (switched off in
-// thimble's config, or unable to load) has its switch disabled and says why. A view's switch stands where the check on
-// whether it fits put it until the analyst moves it, which overrides the check either way; beside it is the check's
-// reason. An extension with orientation instructions that comes on where an orientation ran asks whether to run them
-// now; the answer is sent with the rest on Save. Conflicts among the running extensions are listed under the rows.
+// thimble's config, or unable to load) has its switch disabled, drawn off, and says why. A view's switch stands where
+// the check on whether it fits put it until the analyst moves it, which overrides the check either way; beside it is
+// the check's reason. An extension with orientation instructions that comes on where an orientation ran asks whether
+// to run them now; the answer is sent with the rest on Save. Conflicts among the running extensions are listed under
+// the rows.
 import { Segmented } from '../components/Button'
 import { Switch } from '../components/Switch'
 import type { ExtensionRow, Extensions } from '../lib/types'
@@ -68,7 +69,7 @@ export function ExtensionsSettings({ data, on, setOn, viewOn, setViewOn, answers
         return (
           <div className="settings-extension" key={e.name} data-extension={e.name} data-active={e.active}>
             <div className="settings-switch">
-              <Switch checked={!!on[e.name]} disabled={e.locked} onChange={(v) => setOn(e.name, v)} aria-labelledby={`settings-ext-${e.name}`} />
+              <Switch checked={!!on[e.name] && !e.locked} disabled={e.locked} onChange={(v) => setOn(e.name, v)} aria-labelledby={`settings-ext-${e.name}`} />
               <span className="settings-switch-text">
                 <span className="settings-switch-label" id={`settings-ext-${e.name}`} title={e.description || undefined}>
                   {e.name}
@@ -97,7 +98,7 @@ export function ExtensionsSettings({ data, on, setOn, viewOn, setViewOn, answers
               const id = `settings-ext-${e.name}-${v.slug}`
               return (
                 <div className="settings-switch settings-extension-view" key={v.slug} data-view={v.slug} data-shown={v.shown}>
-                  <Switch checked={!!viewOn[k]} disabled={v.locked || !on[e.name]} onChange={(x) => setViewOn(k, x)} aria-labelledby={id} />
+                  <Switch checked={!!viewOn[k] && !v.locked && !!on[e.name]} disabled={v.locked || !on[e.name]} onChange={(x) => setViewOn(k, x)} aria-labelledby={id} />
                   <span className="settings-switch-text">
                     <span className="settings-switch-label" id={id}>
                       {v.name}
