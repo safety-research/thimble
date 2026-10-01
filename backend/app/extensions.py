@@ -1557,9 +1557,11 @@ def summary(info: dict[str, Any], how: dict[str, Any]) -> list[str]:
     if info["agents"]:
         out.append("  Its agents run in the orientation's session and its sandbox, without the web unless thimble's "
                    f"config sets agents.\"{info['name']}:<agent>\".web.")
-    if any(r["kind"] != "prompt" for r in [*roles.values(), *(info.get("tasks") or [])]):
-        out.append("  Its programs run in place of thimble's own for the roles and tasks above, with the same consent "
-                   "rules.")
+    coded = [w for w, rs in (("roles", roles.values()), ("tasks", info.get("tasks") or []))
+             if any(r["kind"] != "prompt" for r in rs)]
+    if coded:
+        out.append(f"  Its programs run in place of thimble's own for the {' and '.join(coded)} above, with the same "
+                   "consent rules.")
     if has_code(info):
         out.append("  Its Python (readers, card code, export hooks) runs in thimble's kernels, with the same sandbox and "
                    "network as cells.")

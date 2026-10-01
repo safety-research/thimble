@@ -56,3 +56,17 @@ describe('asksToRun', () => {
     expect(answeredRuns(data, { swarm: true, other: false }, { swarm: true, other: true })).toEqual([['swarm', true]])
   })
 })
+
+describe('tasksLine', () => {
+  const task = (t: string, way: 'thimble' | 'prompt' | 'sdk' | 'command', extension = '', additions: string[] = [], conflict: string[] = []) => ({ task: t, way, extension, additions, conflict })
+
+  it('names only the tasks an extension changes, each with who runs it', async () => {
+    const { tasksLine } = await import('../../src/shell/SettingsPopover')
+    expect(tasksLine([task('labels', 'thimble'), task('card-check', 'thimble')])).toBe('')
+    const line = tasksLine([task('labels', 'command', 'vote-labels'), task('view-fit', 'thimble'), task('checks', 'thimble', '', [], ['a', 'b'])])
+    expect(line).toContain('labels')
+    expect(line).toContain('vote-labels')
+    expect(line).toContain('checks')
+    expect(line).not.toContain('view-fit')
+  })
+})
