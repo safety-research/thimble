@@ -26,6 +26,9 @@ turns, each with the line of the file it stands on, for the Transcript mode to p
 /corpora/{c}/source/turns. A whole-file JSON of any size is offered Transcript; its turns are parsed off the event loop.
 
 turn_of(line, style) reads one line of a text chat log: who speaks, when, and where the words start.
+
+speaker_names() gives the names a corpus has for speakers that a file names only by id (GET
+/corpora/{c}/source/speakers): an agents.jsonl beside the file, whose records each carry an id and a name.
 """
 from __future__ import annotations
 
@@ -34,6 +37,7 @@ import datetime as _dt
 import functools
 import io
 import json
+import os
 import re
 import threading
 from collections import OrderedDict
@@ -41,6 +45,8 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
+
+from . import config
 
 router = APIRouter()
 
@@ -1133,3 +1139,149 @@ def dress(page: dict[str, Any], path: Path, rel: str) -> dict[str, Any]:
             if t is not None and (speakers is None or t["speaker"].lower() in speakers or t["speaker"].lower() in ROLE_WORDS):
                 rec.setdefault("meta", {})["turn"] = t
     return page
+
+
+# --------------------------------------------------------------------------- speakers' names
+
+NAMES_FILE_MAX = 8 * 1024 * 1024  # bytes of a file read for the names it gives ids
+NAMES_SCAN_MAX = 2000  # entries of a folder looked at for such files
+NAMES_PER_FILE = 100_000  # ids one file's names are kept for
+NAMES_IDS_MAX = 200  # ids one request asks names for
+NAMES_CACHE_MAX = 64
+NAMES_EXT = JSONLISH | {".json"} | set(DELIMITED)
+# words of a speaker key that say nothing of whose id it holds
+GENERIC_KEY_WORDS = frozenset({"id", "uuid", "speaker", "data", "message", "msg", "payload", "sender", "author", "from"})
+# an id no other kind of record's id equals by chance (a uuid, a hash), so a file of any name may give its name
+DISTINCT_ID = re.compile(r"(?=[\w-]*\d)(?=[\w-]*[A-Za-z])[\w-]{12,}")
+_NAMES: "OrderedDict[str, tuple[tuple[int, int], dict[str, str]]]" = OrderedDict()
+
+
+def _singular(word: str) -> str:
+    return word[:-1] if len(word) > 3 and word.endswith("s") and not word.endswith("ss") else word
+
+
+def _table_records(path: Path) -> list[dict[str, Any]]:
+    """The records of a small JSON lines, JSON or CSV file that are objects: a JSON file's list, or the first list of
+    objects its top level holds."""
+    text = path.read_text(encoding="utf-8", errors="replace")
+    ext = path.suffix.lower()
+    if ext in DELIMITED:
+        return list(csv.DictReader(io.StringIO(text), delimiter=DELIMITED[ext]))
+    if ext in JSONLISH:
+        out = []
+        for line in text.splitlines():
+            if line.strip():
+                try:
+                    v = json.loads(line)
+                except ValueError:
+                    continue
+                if isinstance(v, dict):
+                    out.append(v)
+        return out
+    data = json.loads(text)
+    if isinstance(data, dict):
+        data = next((v for v in data.values() if isinstance(v, list) and v and isinstance(v[0], dict)), [])
+    return [v for v in data if isinstance(v, dict)] if isinstance(data, list) else []
+
+
+def _own_name(rec: dict[str, Any]) -> str | None:
+    for k in NAME_FIELDS:
+        v = rec.get(k)
+        if isinstance(v, str) and 0 < len(v.strip()) <= 80 and "\n" not in v:
+            return v.strip()
+    for k, v in rec.items():
+        if isinstance(k, str) and _norm(k) in NAME_NORMS and isinstance(v, str) and 0 < len(v.strip()) <= 80 and "\n" not in v:
+            return v.strip()
+    return None
+
+
+def _id_names(path: Path) -> dict[str, str]:
+    """Each id of the file's records to its name: a record's `id`, `uuid` or `<the file's thing>_id` (agent_id in
+    agents.csv) beside its own name (NAME_FIELDS, any case style); {} for a file whose records carry none. Kept per path
+    and (size, mtime_ns)."""
+    key = _stat_key(path)
+    if key is None or key[0] > NAMES_FILE_MAX:
+        return {}
+    k = str(path)
+    with _lock:
+        hit = _NAMES.get(k)
+        if hit is not None and hit[0] == key:
+            _NAMES.move_to_end(k)
+            return hit[1]
+    thing = _singular(_split_key(path.stem)[-1]) if _split_key(path.stem) else ""
+    id_norms = {"id", "uuid", f"{thing}id", f"{thing}uuid"}
+    out: dict[str, str] = {}
+    try:
+        for rec in _table_records(path):
+            ident = next((v for kk, v in rec.items() if isinstance(kk, str) and _norm(kk) in id_norms
+                          and isinstance(v, (str, int)) and not isinstance(v, bool) and str(v).strip()), None)
+            name = _own_name(rec)
+            if ident is not None and name and name != str(ident).strip():
+                out.setdefault(str(ident).strip(), name)
+                if len(out) >= NAMES_PER_FILE:
+                    break
+    except (OSError, ValueError, csv.Error, RecursionError):
+        out = {}
+    with _lock:
+        _NAMES[k] = (key, out)
+        _NAMES.move_to_end(k)
+        while len(_NAMES) > NAMES_CACHE_MAX:
+            _NAMES.popitem(last=False)
+    return out
+
+
+def _name_files(corpus: Path, rel: str) -> list[Path]:
+    """The small JSON lines, JSON and CSV files beside the file `rel` and at the corpus's top, inside the corpus."""
+    folder = rel.rsplit("/", 1)[0] if "/" in rel else ""
+    out: list[Path] = []
+    for sub in dict.fromkeys([folder, ""]):
+        try:
+            base = config.safe_corpus_path(corpus, sub) if sub else corpus
+            with os.scandir(base) as it:
+                names = []
+                for i, e in enumerate(it):
+                    if i >= NAMES_SCAN_MAX:
+                        break
+                    if os.path.splitext(e.name)[1].lower() in NAMES_EXT and f"{sub}/{e.name}".lstrip("/") != rel:
+                        names.append(e.name)
+        except (OSError, ValueError):
+            continue
+        for name in sorted(names):
+            try:
+                p = config.safe_corpus_path(corpus, f"{sub}/{name}".lstrip("/"))
+            except ValueError:
+                continue
+            if p.is_file():
+                out.append(p)
+    return out
+
+
+def speaker_names(corpus: Path, rel: str, key: str, ids: list[str]) -> dict[str, str]:
+    """The names the corpus gives speaker ids that the file `rel` keeps under `key` (`agent_speaker_id|user_speaker_id`):
+    each id's name in a file beside it or at the corpus's top whose records carry that id and a name. A file named for
+    what a word of the key names (agents.jsonl for `agent_speaker_id`, not agent_goals.jsonl) answers for any id, any
+    other file only for a distinct id (DISTINCT_ID), since a small number or a short word is an id in many tables."""
+    words = {_singular(w) for alt in key.split("|") for w in _key_words(alt.rsplit(".", 1)[-1])} - GENERIC_KEY_WORDS
+    files = _name_files(corpus, rel)
+    related = [p for p in files if _split_key(p.stem) and _singular(_split_key(p.stem)[-1]) in words]
+    others = [p for p in files if p not in related]
+    out: dict[str, str] = {}
+    for ident in ids:
+        for p in related + (others if DISTINCT_ID.fullmatch(ident) else []):
+            name = _id_names(p).get(ident)
+            if name:
+                out[ident] = name
+                break
+    return out
+
+
+@router.get("/corpora/{c}/source/speakers")
+def get_speaker_names(c: str, path: str, key: str, ids: str = "") -> dict[str, Any]:
+    """`?path=&key=&ids=a,b`: {names: {id: name}}, the names the corpus gives the file's speaker ids (speaker_names), for
+    up to NAMES_IDS_MAX ids."""
+    from . import corpus  # noqa: PLC0415 — corpus imports nothing from here
+
+    root = corpus._corpus(c)
+    corpus._file(root, path)
+    wanted = [i for i in dict.fromkeys(s.strip() for s in ids.split(",")) if i][:NAMES_IDS_MAX]
+    return {"names": speaker_names(root, path, key, wanted) if wanted else {}}
