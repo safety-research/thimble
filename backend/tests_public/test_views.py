@@ -603,6 +603,40 @@ async def test_the_review_reads_again_for_as_long_as_the_api_stays_at_capacity(w
     assert review["state"] == "done" and not review["left"], review
 
 
+async def test_a_revision_s_waits_for_api_capacity_leave_the_review_s_time_limit_alone(ws, bound, monkeypatch):
+    """A revision that waits out a long streak of 529s keeps its fixes: the review's time limit leaves the wait out
+    while it runs, not only once it ended."""
+    from app import card_check, dev, model, view_review
+
+    views.propose(CORPUS, "Threads", "The posts by thread.", ["board.jsonl"], "Unit: a post", asked=True)
+    views.mark_built(CORPUS, "threads")
+
+    async def shoot_states(c, slug, states, **k):
+        for st in states:
+            Path(st["out"]).parent.mkdir(parents=True, exist_ok=True)
+            Path(st["out"]).write_bytes(b"png")
+        return [{"ok": True, "errors": [], "fonts": True, "png": str(st["out"])} for st in states]
+
+    answers = [{"problems": ["picture 1: the list is cut off"], "more": []}, {"problems": [], "more": []}]
+
+    async def reading(c, system, user, tool, images, effort):
+        return model.CallResult(status="ok", output=answers.pop(0))
+
+    async def review_revision(c, slug, message, on_wait=None):
+        on_wait(300.0)
+        await asyncio.sleep(0.4)
+        return True, "fixed"
+
+    monkeypatch.setattr(views, "shoot_states", shoot_states)
+    monkeypatch.setattr(view_review, "_call", reading)
+    monkeypatch.setattr(dev, "review_revision", review_revision)
+    monkeypatch.setattr(view_review, "REVIEW_TOTAL_S", 0.2)
+    monkeypatch.setattr(card_check, "fit_image", lambda b: b)
+    await view_review._guarded(view_review._Run(CORPUS, "threads"))
+    review = views.read_proposal(CORPUS, "threads")["review"]
+    assert review["state"] == "done" and review["revised"] == ["picture 1: the list is cut off"], review
+
+
 async def test_a_workspace_gets_four_views_from_the_orientation_and_a_deleted_one_stays_deleted(ws, monkeypatch):
     monkeypatch.setattr(views, "_queue", lambda c, slug: None)
 

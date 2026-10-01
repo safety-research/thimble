@@ -3114,7 +3114,8 @@ async def review_revision(c: str, slug: str, message: str, on_wait: Any = None) 
     in the view's thread, the view's checks run after each turn and fed back up to MAX_ATTEMPTS times. (passed, the
     session's report or why it did not pass). A view with no build session gets a new one, started with its ticket. Its
     session asks as a build's does (view_asking). A turn the API ended at capacity is no attempt: the session is woken
-    again after a build's waits (view_capacity_waits), each told to `on_wait(seconds)`."""
+    again after a build's waits (view_capacity_waits), then after the longest of them for as long as the API stays at
+    capacity. Before each wait `on_wait(seconds)` hears the wait plus the time of the turn the API ended."""
     from . import agent_session, tools, views  # noqa: PLC0415
 
     prop = views.read_proposal(c, slug)
@@ -3144,6 +3145,7 @@ async def review_revision(c: str, slug: str, message: str, on_wait: Any = None) 
         views.update_proposal(c, slug, session=short, session_id=sid)
 
     waits, waited = view_capacity_waits(), 0.0
+    longest = max(waits, default=0.0)
     attempt = 0
     checks = views.watch_checks(c, slug)
     try:
@@ -3171,15 +3173,15 @@ async def review_revision(c: str, slug: str, message: str, on_wait: Any = None) 
                 # the view as it was passes the checks too, so a turn the API cut short is not checked
                 if time.monotonic() - turn_start > _retry_streak_s():
                     waits, waited = view_capacity_waits(), 0.0
-                if not waits:
+                if not waits and not longest:
                     why = REVIEW_CAPACITY_WHY.format(why=capacity, waited=_minutes(waited))
                     break
-                wait = waits.pop(0)
+                wait = waits.pop(0) if waits else longest
                 waited += wait
                 run_log.stage(f"{capacity}, so the revision waits {_minutes(wait)} and goes on")
-                await _capacity_sleep(wait)
                 if on_wait is not None:
-                    on_wait(wait)
+                    on_wait(time.monotonic() - turn_start + wait)
+                await _capacity_sleep(wait)
                 attempt -= 1
                 if resume:
                     prompt = tools.hint(agent_session.RETRY_PROMPT)

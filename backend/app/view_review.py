@@ -14,7 +14,7 @@ dev.run_view calls after_built() when a build or a change to a view passes. Each
    a sample of the records the page fetched, and returns its problems and the extra states it wants to see. Those are
    shot and read with the first picture once more, whose problems stand. A refused reading runs again on the fallback
    model, and the review's note says so (FALLBACK_NOTE). While the API is at capacity the reading waits and runs again,
-   for as long as that lasts, and REVIEW_TOTAL_S leaves those waits out.
+   for as long as that lasts, and REVIEW_TOTAL_S leaves those waits out, as it does a revision's.
 3. Revision: with problems left and rounds to go, the build session gets prompts/dev-view-review.md and the view's
    checks run after its turns (dev.review_revision). A revision that passes is the view (views.mark_built), and the
    review runs again; one that does not leaves the view at its last version that passed.
@@ -555,8 +555,10 @@ async def read(c: str, run: _Run, prop: dict[str, Any], view: dict[str, Any], sh
               for s in shots if s.get("png")]
     effort = str(_role(c).get("effort") or config.ROLE_MODELS_DEFAULT["verify"]["effort"])
     wait = CAPACITY_WAIT_S
+    loop = asyncio.get_running_loop()
     while True:
         async with _semaphore():
+            began = loop.time()
             try:
                 res = await asyncio.wait_for(_call(c, _fill(secs["review"], {}), user, tool, images, effort),
                                              READ_TIMEOUT_S.get(effort, 120.0))
@@ -572,8 +574,8 @@ async def read(c: str, run: _Run, prop: dict[str, Any], view: dict[str, Any], sh
         cls = "rate_limited" if res.status == "rate_limited" else retry.transient_class(None, res.detail)
         if cls in CAPACITY:
             log.info("view review %s/%s: %s, so it reads again in %.0f s", c, view["slug"], CAPACITY_WORDS[cls], wait)
+            run.waited += loop.time() - began + wait
             await _capacity_sleep(wait)
-            run.waited += wait
             wait = min(wait * 2, CAPACITY_WAIT_MAX_S)
             continue
         return f"The review did not finish: the reading ended {res.status}" + (f" ({res.detail})" if res.detail else "")
@@ -614,7 +616,8 @@ def revision_prompt(c: str, slug: str, problems: list[str], shots: list[dict[str
 async def revise(c: str, slug: str, prop: dict[str, Any], problems: list[str], shots: list[dict[str, Any]],
                  run: _Run | None = None) -> tuple[bool, str]:
     """One revision by the view's build session (dev.review_revision): whether the view passed its checks after it.
-    The revision's waits for API capacity count toward the review's `waited`."""
+    Each of the revision's waits for API capacity, with the turn the API ended, counts toward the review's `waited`
+    before the wait starts, so REVIEW_TOTAL_S never runs out during one."""
     from . import dev  # noqa: PLC0415
 
     def waited(s: float) -> None:
