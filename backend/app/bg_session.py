@@ -1310,7 +1310,7 @@ def state_words(e: Entry) -> str:
         return "restarting"
     if e.status == "waiting":
         return f"waiting for a {e.waiting_for or 'reply'}"
-    if e.status == "idle":
+    if e.status == "idle" or resting(e):
         return "done, idle" if not e.run_open else "idle"
     return "working"
 
