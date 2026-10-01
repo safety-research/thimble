@@ -340,7 +340,7 @@ class Entry:
     prompts: list[str] = field(default_factory=list)  # the starts of the prompts start() gave it on the command line
     outbox: list[dict[str, Any]] = field(default_factory=list)
     proxy_seen: float = 0.0  # time.monotonic() of the proxy's last wait_session call
-    proxy_asked: float = 0.0  # time.monotonic() when main was last asked to start the proxy
+    proxy_asked: float = 0.0  # time.monotonic() when main was last asked to start the proxy, 0.0 before it is asked
     proxy_agents: list[str] = field(default_factory=list)  # agent ids of the proxies main started for it
     relayed: list[str] = field(default_factory=list)  # typed messages' uuids already sent, and tokens already sent
     blocks: int = 0  # stops of its proxy refused since its last wait_session
@@ -648,7 +648,7 @@ async def _tick(rows: list[dict[str, Any]]) -> None:
                          f"`claude attach {e.short}`.")
             _changed.set()
         if (not proxy_alive(e) and not e.proxy_refused and not resting(e)
-                and time.monotonic() - e.proxy_asked > PROXY_ASK_S):
+                and (not e.proxy_asked or time.monotonic() - e.proxy_asked > PROXY_ASK_S)):
             unshown.setdefault(e.c, []).append(e.key)
         if e.status != "idle" and not e.run_open and e.new_turn and agent_session.current(e.c, e.key) is None:
             fn = _wake.get(kind_of(e.key))
