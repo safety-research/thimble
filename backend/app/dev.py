@@ -26,8 +26,7 @@ session, a pass registers the view. Where an active extension runs the dev agent
 is a run of that program instead (program_view_turn), checked the same way. A turn the API ended at capacity is no
 attempt: the build waits and wakes the session again. An orientation's proposal that runs out of attempts gets up to
 VIEW_REPAIRS new sessions, and is then dropped quietly; a view the analyst asked for fails with Retry. The orientation's Stop stops the
-builds of the views it proposed (stop_orientation_views). The Stop in a build's thread ends that build failed, with Retry
-(views.stop_build, _view_stopped). Main's end stops every build of the workspace
+builds of the views it proposed (stop_orientation_views). Main's end stops every build of the workspace
 (stop_workspace): a view the analyst asked for fails with Retry, and a session's proposal waits, queued, until a session
 is main again (resume_views).
 
