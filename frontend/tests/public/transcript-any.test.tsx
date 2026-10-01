@@ -87,6 +87,7 @@ describe('messages in any shape', () => {
     expect(timeOf(pick(r, 'ts'))).toBe('2023-11-14 22:13')
     expect(timeOf('1700000000.0001')).toBe('2023-11-14 22:13')
     expect(timeOf('2024-10-01T09:00:00Z')).toBe('2024-10-01 09:00')
+    expect(timeOf(12.5)).toBe('12.5')
     expect(textOf({ content_type: 'text', parts: ['a', 'b'] })).toBe('a\n\nb')
   })
   test('a CSV file’s rows show as posts under the columns the sniff named', async () => {

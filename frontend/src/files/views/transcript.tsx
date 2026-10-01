@@ -189,13 +189,15 @@ export function textOf(v: unknown, depth = 0): string | null {
   return null
 }
 
-/** A time value as the head writes it: an ISO stamp as stamp() does, seconds or milliseconds since 1970 in UTC. */
+/** A time value as the head writes it: an ISO stamp as stamp() does, seconds or milliseconds since 1970 in UTC, any
+ * other number as written. */
 export function timeOf(v: unknown): string | null {
   if (typeof v === 'string' && /^\d{9,13}(\.\d+)?$/.test(v.trim())) v = Number(v)
-  if (typeof v === 'number' && v > 0) {
+  if (typeof v === 'number' && v >= 1e8) {
     const d = new Date(v > 1e11 ? v : v * 1000)
     return Number.isNaN(d.getTime()) ? null : stamp(d.toISOString())
   }
+  if (typeof v === 'number') return String(v)
   return typeof v === 'string' && v.trim() ? stamp(v.trim()) : null
 }
 

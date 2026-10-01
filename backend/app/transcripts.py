@@ -142,16 +142,19 @@ def _text_of(v: Any, depth: int = 0) -> str | None:
 
 
 def _time_of(v: Any) -> str | None:
+    """A time value as text: as written, or an ISO stamp in UTC for seconds or milliseconds since 1970."""
     if isinstance(v, str) and re.fullmatch(r"\d{9,13}(?:\.\d+)?", v.strip()):
         v = float(v)
     if isinstance(v, str) and v.strip():
         return v.strip()[:40]
-    if isinstance(v, (int, float)) and not isinstance(v, bool) and v > 0:
+    if isinstance(v, (int, float)) and not isinstance(v, bool) and v >= 1e8:
         secs = v / 1000 if v > 1e11 else v  # milliseconds when it is too large for seconds
         try:
             return _dt.datetime.fromtimestamp(secs, _dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         except (OverflowError, OSError, ValueError):
             return None
+    if isinstance(v, (int, float)) and not isinstance(v, bool):
+        return str(v)
     return None
 
 
