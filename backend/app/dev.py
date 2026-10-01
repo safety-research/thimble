@@ -155,7 +155,7 @@ STATE_GAP_MAX_S = float(os.environ.get("THIMBLE_DEV_STATE_GAP_S", "30") or "30")
 UNLISTED_POLLS = 10  # polls a session just started may be missing from `claude agents` before the run gives up on it
 LOOPBACK = {"127.0.0.1", "::1", "localhost", "testclient"}
 MAX_ATTEMPTS = max(1, int(os.environ.get("THIMBLE_DEV_MAX_ATTEMPTS", "3") or "3"))
-_capacity_sleep = asyncio.sleep  # a view build's wait while the API is at capacity (view_capacity_waits); tests replace it
+_capacity_sleep = asyncio.sleep  # a view build's wait while the API is at capacity (view_capacity_wait); tests replace it
 # the new sessions an orientation's view build gets after its attempts ran out, each told what failed (run_view)
 VIEW_REPAIRS = max(0, int(os.environ.get("THIMBLE_VIEW_REPAIRS", "2") or "2"))
 # A session that has waited ASK_TIMEOUT_S for an answer is stopped and its ticket fails, so one stuck session cannot hold
@@ -165,6 +165,7 @@ VIEW_REPAIRS = max(0, int(os.environ.get("THIMBLE_VIEW_REPAIRS", "2") or "2"))
 ASK_TIMEOUT_S = float(os.environ.get("THIMBLE_DEV_ASK_TIMEOUT_S", "") or 15 * 60)
 QUIET_NOTE_S = max(1.0, float(os.environ.get("THIMBLE_DEV_QUIET_NOTE_S", "") or 10 * 60))
 QUIET_LINE = "no activity for {minutes}"
+ASK_TIMED_OUT = "Stopped because nobody answered the session's question within {wait}. Retry wakes it again."
 # How long a server may take to answer /api/health (boot_check, restart_watch.py) before the change counts as breaking
 # its start.
 BOOT_TIMEOUT_S = float(os.environ.get("THIMBLE_DEV_BOOT_TIMEOUT_S", "") or 90)
@@ -1825,8 +1826,7 @@ async def _worker_turn(run: Run, run_log: Log, cwd: Path, prompt: str, resume: s
     # Stopping an idle session frees its process; a follow-up starts it again (Sessions.resume).
     await asyncio.to_thread(SESSIONS.stop, run.session)
     if state == "unanswered":
-        raise SessionError(f"the session waited {_minutes(ASK_TIMEOUT_S)} for an answer nobody gave, so it was "
-                           f"stopped; `claude attach {run.session}` shows its question, and Retry wakes it again")
+        raise SessionError(ASK_TIMED_OUT.format(wait=_minutes(ASK_TIMEOUT_S)))
     if state != "done":
         # the session's last words are most often the reason, so they go in the error
         last = " ".join(tail.last_text.split())[:SESSION_WORDS_CHARS]
@@ -2679,10 +2679,10 @@ def _change_failed_chip(c: str, prop: dict[str, Any], why: str) -> None:
         log.exception("could not chip the failed change to %s/%s", c, prop.get("slug"))
 
 
-def _view_failed(c: str, slug: str, error: str, chat: str | None = None, *, drop_why: str | None = None) -> None:
+def _view_failed(c: str, slug: str, error: str, chat: str | None = None) -> None:
     """A build that ended without its view: a change to a built view leaves the view as it was (views.end_revision), a
     view the analyst asked for fails, its chip showing why with Retry, and an orientation's proposal is dropped
-    (_view_dropped), with `drop_why` as its line's reason when given."""
+    (_view_dropped)."""
     from . import views  # noqa: PLC0415
 
     current = views.read_proposal(c, slug) or {}
@@ -2694,7 +2694,7 @@ def _view_failed(c: str, slug: str, error: str, chat: str | None = None, *, drop
         _change_failed_chip(c, current, error)
         return
     if not current.get("asked"):
-        _view_dropped(c, slug, drop_why or error, chat)
+        _view_dropped(c, slug, error, chat)
         return
     views.update_proposal(c, slug, status="failed", error=error)
     views._emit(c, slug, "failed", chat=chat)
@@ -2919,12 +2919,12 @@ def view_asking(c: str, slug: str, folder: Path, conf: userconf.Session) -> dict
     return out
 
 
-def view_capacity_waits() -> list[float]:
-    """The waits of a view build whose turns the API keeps ending at capacity: the same schedule as agent_session's
-    retries."""
+def view_capacity_wait(n: int) -> float:
+    """The wait before a view build's turn `n` (from 0) of a streak the API keeps ending at capacity: the same schedule
+    as agent_session's retries, which has no end."""
     from . import agent_session  # noqa: PLC0415
 
-    return agent_session.retry_knobs()
+    return agent_session.retry_wait(n)
 
 
 def _view_failure(report: dict[str, Any] | None, folder: Path, error: str, result_text: str) -> str:
@@ -3010,7 +3010,6 @@ async def _run_view(c: str, slug: str, run: Run) -> None:
     resume = prop.get("session_id")
     report: dict[str, Any] | None = None
     built, error, result_text = False, "", ""
-    capacity = ""  # why the last turn ended, when the API ended it (capacity_failure)
     unchanged = False  # a change to a built view whose session ended its turn with the view's files as they were
 
     def on_session(short: str, sid: str) -> None:
@@ -3040,7 +3039,7 @@ async def _run_view(c: str, slug: str, run: Run) -> None:
         else:
             prompt = build_view_prompt(c, prop, folder, corpus)
         told = prompt  # the last gate report the session was sent
-        waits, waited = view_capacity_waits(), 0.0
+        streak = 0  # the turns in a row the API ended at capacity (view_capacity_wait)
         # an orientation's proposal repairs itself rather than showing a failure
         repairs = 0 if prop.get("asked") or revision else VIEW_REPAIRS
         attempt, broke = 0, False
@@ -3093,19 +3092,15 @@ async def _run_view(c: str, slug: str, run: Run) -> None:
                 built, unchanged = False, True
                 break
             if built or not capacity:
-                capacity = ""
                 if not built:
                     prompt = told = build_gates_prompt("\n".join(views.gate_lines(report)))
                 continue
             if time.monotonic() - turn_start > _retry_streak_s():
-                # the turn worked a while before the API stopped it: a new streak of waits
-                waits, waited = view_capacity_waits(), 0.0
-            if not waits:
-                break  # the API stayed at capacity through every wait, which the failure names (below)
+                streak = 0  # the turn worked a while before the API stopped it: a new streak of waits
             # the turn ended on the API's error rather than the session's work: wake the same session after a wait,
-            # which is no attempt
-            wait = waits.pop(0)
-            waited += wait
+            # which is no attempt, for as long as the API stays at capacity
+            wait = view_capacity_wait(streak)
+            streak += 1
             run_log.stage(f"{capacity}, so the build waits {_minutes(wait)} and goes on")
             await _capacity_sleep(wait)
             attempt -= 1
@@ -3145,13 +3140,7 @@ async def _run_view(c: str, slug: str, run: Run) -> None:
             log.exception("the view event for %s/%s was not sent", c, slug)
         return
     run.status = "failed"
-    drop_why = None
-    if capacity:
-        # the API ended the last turn, so a file the gate found missing or empty is its doing: its error says why
-        api = " ".join((error or result_text).split())
-        drop_why = CAPACITY_WHY.format(why=capacity, waited=_minutes(waited))
-        why = CAPACITY_FAILED.format(why=capacity, waited=_minutes(waited), error=api)[:ERROR_CHARS]
-    elif unchanged:
+    if unchanged:
         said = " ".join(result_text.split())
         why = (UNCHANGED_LINE + (f": {said}" if said else ""))[:ERROR_CHARS]
     else:
@@ -3163,7 +3152,7 @@ async def _run_view(c: str, slug: str, run: Run) -> None:
             _close_chat({"workspace": c, "chat": chat}, "failed", why)
         _change_failed_chip(c, prop, why)
         return
-    _view_failed(c, slug, why, chat, drop_why=drop_why)
+    _view_failed(c, slug, why, chat)
 
 
 def view_program(c: str) -> Any:
@@ -3225,8 +3214,7 @@ async def review_revision(c: str, slug: str, message: str) -> tuple[bool, str]:
     in the view's thread, the view's checks run after each turn and fed back up to MAX_ATTEMPTS times. (passed, the
     session's report or why it did not pass). A view with no build session gets a new one, started with its ticket. Its
     session asks as a build's does (view_asking). A turn the API ended at capacity is no attempt: the session is woken
-    again after a build's waits (view_capacity_waits), then after the longest of them for as long as the API stays at
-    capacity."""
+    again after a build's waits (view_capacity_wait), for as long as the API stays at capacity."""
     from . import agent_session, tools, views  # noqa: PLC0415
 
     prop = views.read_proposal(c, slug)
@@ -3257,8 +3245,7 @@ async def review_revision(c: str, slug: str, message: str) -> tuple[bool, str]:
     def on_session(short: str, sid: str) -> None:
         views.update_proposal(c, slug, session=short, session_id=sid)
 
-    waits, waited = view_capacity_waits(), 0.0
-    longest = max(waits, default=0.0)
+    streak = 0  # the turns in a row the API ended at capacity
     attempt = 0
     checks = views.watch_checks(c, slug)
     try:
@@ -3284,12 +3271,9 @@ async def review_revision(c: str, slug: str, message: str) -> tuple[bool, str]:
             if capacity:
                 # the view as it was passes the checks too, so a turn the API cut short is not checked
                 if time.monotonic() - turn_start > _retry_streak_s():
-                    waits, waited = view_capacity_waits(), 0.0
-                if not waits and not longest:
-                    why = REVIEW_CAPACITY_WHY.format(why=capacity, waited=_minutes(waited))
-                    break
-                wait = waits.pop(0) if waits else longest
-                waited += wait
+                    streak = 0
+                wait = view_capacity_wait(streak)
+                streak += 1
                 run_log.stage(f"{capacity}, so the revision waits {_minutes(wait)} and goes on")
                 await _capacity_sleep(wait)
                 attempt -= 1
@@ -3323,11 +3307,6 @@ async def review_revision(c: str, slug: str, message: str) -> tuple[bool, str]:
 
 CAPACITY_WORDS = {"overloaded": "Anthropic's API was overloaded", "rate_limited": "Anthropic's API rate limit was reached",
                   "server_error": "Anthropic's API had a server error"}
-# a view build whose last turn the API ended once every wait (view_capacity_waits) was spent: the failure on the chip
-# of a view the analyst asked for, and the reason in the line an orientation's dropped proposal gets
-CAPACITY_WHY = "{why} each time the build tried over {waited}"
-REVIEW_CAPACITY_WHY = "{why} each time the revision tried over {waited}"
-CAPACITY_FAILED = CAPACITY_WHY + ", so it stopped; Retry goes on from there. ({error})"
 # the failure of a change to a built view whose session ended its turn with the view's files as they were built
 UNCHANGED_LINE = "the session changed none of the view's files"
 

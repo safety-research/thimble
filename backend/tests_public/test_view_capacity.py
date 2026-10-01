@@ -68,7 +68,7 @@ def turns(monkeypatch):
     monkeypatch.setattr(views, "gate", gate)
     monkeypatch.setattr(views, "gate_lines", lambda rep: list(rep.get("errors") or []) or ["the checks passed"])
     monkeypatch.setattr(dev, "_capacity_sleep", wait)
-    monkeypatch.setattr(dev, "view_capacity_waits", lambda: [30.0, 60.0])
+    monkeypatch.setattr(dev, "view_capacity_wait", lambda n: [30.0, 60.0][min(n, 1)])
     return seen, script
 
 
@@ -90,9 +90,32 @@ def test_a_build_the_api_stops_before_it_writes_a_view_is_told_to_go_on_not_what
     assert seen["gates"] == [True], "no gate runs on a folder the session has not written yet"
 
 
+def test_a_build_waits_for_as_long_as_the_api_stays_at_capacity(board, turns):
+    """A build never gives up at capacity: its waits double up to the longest and go on until a turn gets through."""
+    seen, script = turns
+    slug = views.propose(CORPUS, "Posts", "to read the board", ["board.jsonl"], "one row per post", asked=True)["slug"]
+    script += [lambda p: OVERLOADED] * 8 + [_write]
+    run = dev.Run(ticket_id=f"view:{slug}", title="Posts", ts_start="")
+    asyncio.run(dev._run_view(CORPUS, slug, run))
+    assert run.status == "built"
+    assert seen["waits"] == [30.0] + [60.0] * 7
+    assert seen["prompts"][1:] == [tools.hint("session-retry")] * 8
+
+
+def test_the_schedule_of_capacity_waits_has_no_end():
+    from app import agent_session
+
+    waits = [agent_session.retry_wait(n, 30.0) for n in range(200)]
+    assert waits[:5] == [30.0, 60.0, 120.0, 240.0, 300.0]
+    assert set(waits[4:]) == {agent_session.RETRY_MAX_S}
+    assert dev.view_capacity_wait(500) == agent_session.RETRY_MAX_S
+    assert agent_session.retry_base({agent_session.RETRY_BASE_ENV: "0"}) == agent_session.RETRY_MIN_S
+    assert agent_session.retry_base({agent_session.RETRY_BASE_ENV: "x"}) == agent_session.RETRY_BASE_S
+
+
 def test_a_build_run_again_on_its_session_before_it_wrote_a_view_is_told_to_go_on(board, turns):
-    """Retry after the API stopped a build through every wait, or a server restart mid-build, runs the ticket again on
-    its session: with no view written yet, the session is told to go on, not sent the gate's report on a missing file."""
+    """Retry after a failed build, or a server restart mid-build, runs the ticket again on its session: with no view
+    written yet, the session is told to go on, not sent the gate's report on a missing file."""
     seen, script = turns
     slug = views.propose(CORPUS, "Posts", "to read the board", ["board.jsonl"], "one row per post", asked=True)["slug"]
     views.update_proposal(CORPUS, slug, session_id="sid-1")
@@ -147,7 +170,7 @@ def test_a_review_s_revision_the_api_stops_waits_and_goes_on(board, turns):
 
 
 def test_a_review_s_revision_waits_for_as_long_as_the_api_stays_at_capacity(board, turns):
-    """Past the build's waits a revision goes on waiting the longest of them."""
+    """A revision waits as a build does, for as long as the API stays at capacity."""
     seen, script = turns
     _write("")
     slug = views.propose(CORPUS, "Posts", "to read the board", ["board.jsonl"], "one row per post", asked=True)["slug"]
@@ -156,15 +179,3 @@ def test_a_review_s_revision_waits_for_as_long_as_the_api_stays_at_capacity(boar
     ok, said = asyncio.run(dev.review_revision(CORPUS, slug, "fix it"))
     assert (ok, said) == (True, "fixed it")
     assert seen["waits"] == [30.0, 60.0, 60.0, 60.0] and seen["gates"] == [True]
-
-
-def test_a_review_s_revision_stops_at_capacity_when_the_waits_are_turned_off(board, turns, monkeypatch):
-    seen, script = turns
-    monkeypatch.setattr(dev, "view_capacity_waits", lambda: [])
-    _write("")
-    slug = views.propose(CORPUS, "Posts", "to read the board", ["board.jsonl"], "one row per post", asked=True)["slug"]
-    views.update_proposal(CORPUS, slug, session_id="sid-1", status="built")
-    script += [lambda p: OVERLOADED]
-    ok, why = asyncio.run(dev.review_revision(CORPUS, slug, "fix it"))
-    assert not ok and why == dev.REVIEW_CAPACITY_WHY.format(why=dev.CAPACITY_WORDS["overloaded"], waited=dev._minutes(0.0))
-    assert not seen["waits"] and not seen["gates"]
