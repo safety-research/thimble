@@ -2971,8 +2971,10 @@ def view_env(slug: str, offline: bool = True) -> dict[str, str]:
 
 
 # The thimble code a view's reader and page run against, which a view build's session reads unasked: the kernel's
-# `thimble` module, the page's bridge and styles, the checks, and the rest of the server's code beside them.
-VIEW_CODE = ("backend/app/", "scripts/view_shot.mjs")
+# `thimble` module, the page's bridge and styles, the checks, and the rest of the server's code beside them, the frame
+# the page runs in, and thimble's prompts, whose tools.md describes the tools. The private files (userconf.private_paths)
+# stay denied whatever these allow.
+VIEW_CODE = ("backend/app/", "scripts/view_shot.mjs", "frontend/src/files/ViewerFrame.tsx", "prompts/")
 
 
 def view_key(slug: str) -> str:
