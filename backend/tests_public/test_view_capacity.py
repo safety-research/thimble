@@ -146,12 +146,25 @@ def test_a_review_s_revision_the_api_stops_waits_and_goes_on(board, turns):
     assert seen["waits"] == [30.0] and seen["gates"] == [True], "the turn the API cut short is not checked"
 
 
-def test_a_review_s_revision_stops_once_the_api_stayed_at_capacity_through_every_wait(board, turns):
+def test_a_review_s_revision_waits_for_as_long_as_the_api_stays_at_capacity(board, turns):
+    """Past the build's waits a revision goes on waiting the longest of them."""
     seen, script = turns
     _write("")
     slug = views.propose(CORPUS, "Posts", "to read the board", ["board.jsonl"], "one row per post", asked=True)["slug"]
     views.update_proposal(CORPUS, slug, session_id="sid-1", status="built")
-    script += [lambda p: OVERLOADED] * 3
+    script += [lambda p: OVERLOADED] * 4 + [lambda p: "fixed it"]
+    ok, said = asyncio.run(dev.review_revision(CORPUS, slug, "fix it"))
+    assert (ok, said) == (True, "fixed it")
+    assert seen["waits"] == [30.0, 60.0, 60.0, 60.0] and seen["gates"] == [True]
+
+
+def test_a_review_s_revision_stops_at_capacity_when_the_waits_are_turned_off(board, turns, monkeypatch):
+    seen, script = turns
+    monkeypatch.setattr(dev, "view_capacity_waits", lambda: [])
+    _write("")
+    slug = views.propose(CORPUS, "Posts", "to read the board", ["board.jsonl"], "one row per post", asked=True)["slug"]
+    views.update_proposal(CORPUS, slug, session_id="sid-1", status="built")
+    script += [lambda p: OVERLOADED]
     ok, why = asyncio.run(dev.review_revision(CORPUS, slug, "fix it"))
-    assert not ok and why == dev.REVIEW_CAPACITY_WHY.format(why=dev.CAPACITY_WORDS["overloaded"], waited="2 min")
-    assert seen["waits"] == [30.0, 60.0] and not seen["gates"]
+    assert not ok and why == dev.REVIEW_CAPACITY_WHY.format(why=dev.CAPACITY_WORDS["overloaded"], waited=dev._minutes(0.0))
+    assert not seen["waits"] and not seen["gates"]

@@ -1,5 +1,6 @@
 """A stand-in `claude` for the Agent SDK's stream-json protocol: it answers the SDK's initialize request, replies to
-each user message with FAKE_CLAUDE_REPLY as its result, and writes its argv, folder and THIMBLE_SESSION to
+each user message with FAKE_CLAUDE_REPLY as its result, and writes its argv, folder, THIMBLE_SESSION (its --settings
+`env` over its own environment, as Claude Code reads it) and the THIMBLE_* names of its own environment to
 FAKE_CLAUDE_LOG (one JSON line per start), and each line it reads on stdin to FAKE_CLAUDE_STDIN when that is set. With
 -p and --output-format json it reads the prompt on stdin and prints one result object."""
 import json
@@ -7,8 +8,12 @@ import os
 import sys
 
 argv = sys.argv[1:]
+own = sorted(k for k in os.environ if k.startswith("THIMBLE_"))
+if "--settings" in argv:
+    os.environ.update(json.loads(argv[len(argv) - argv[::-1].index("--settings")]).get("env") or {})
 with open(os.environ["FAKE_CLAUDE_LOG"], "a", encoding="utf-8") as f:
-    f.write(json.dumps({"argv": argv, "cwd": os.getcwd(), "session": os.environ.get("THIMBLE_SESSION")}) + "\n")
+    f.write(json.dumps({"argv": argv, "cwd": os.getcwd(), "session": os.environ.get("THIMBLE_SESSION"),
+                        "token": os.environ.get("THIMBLE_SESSION_TOKEN"), "own_env": own}) + "\n")
 reply = os.environ.get("FAKE_CLAUDE_REPLY", "The corpus holds three runs.")
 
 

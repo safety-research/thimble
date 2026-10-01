@@ -2541,6 +2541,22 @@ def retry(c: str, slug: str) -> dict[str, Any]:
     return prop
 
 
+def stop_build(c: str, slug: str) -> dict[str, Any]:
+    """The Stop in a view's build thread: the build ends with its session stopped and its draft kept, and the proposal
+    fails with Retry; a change to a built view leaves the view as it was, the change kept for Retry (dev._view_stopped,
+    once the session has stopped). 404 for no such proposal, 409 for one that is neither queued nor building."""
+    from . import dev  # noqa: PLC0415
+
+    prop = read_proposal(c, slug)
+    if prop is None:
+        raise HTTPException(404, f"no such proposal: {slug}")
+    if prop.get("status") not in PENDING:
+        raise HTTPException(409, f"the view {prop['name']!r} is {prop.get('status')}, not building")
+    if not dev.stop_view(c, slug, dev.VIEW_STOPPED):
+        dev._view_stopped(c, slug)
+    return {"ok": True}
+
+
 def drop(c: str, slug: str, why: str) -> dict[str, Any] | None:
     """Leave an orientation's proposal out once its build failed through its repairs (dev._view_dropped): the row stays
     as `dropped` with the reason, so every chip that names it knows to hide, its draft folder is removed, and
@@ -4250,6 +4266,15 @@ async def retry_route(c: str, slug: str) -> dict[str, Any]:
     config.workspace_dir(c)
     _bind_loop()
     return retry(c, slug)
+
+
+@router.post("/ws/{c}/views/proposals/{slug}/stop")
+async def stop_build_route(c: str, slug: str) -> dict[str, Any]:
+    """Stop the proposal's build (stop_build); the proposal then fails, with Retry (404 for none, 409 for one that is
+    not queued or building)."""
+    config.workspace_dir(c)
+    _bind_loop()
+    return stop_build(c, slug)
 
 
 class ViewMessage(BaseModel):

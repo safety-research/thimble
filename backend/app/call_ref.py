@@ -1,11 +1,11 @@
 """PostToolUse hook for the orientation's session: asks the server for the ref of the call just made (calls.py) and
 hands it to the model as additionalContext, so the model can cite what it just ran.
 
-Registered on PostToolUse and PostToolUseFailure. Posts {session, tool_use_id, tool_name, tool_input, agent_id} to
-POST {server}/api/ws/{ws}/calls/ref with post, which permission_hook.py uses too: the address and token come from
-<thimble home>/server.json, each request proves it holds the token and each answer must prove the server does
-(app/hook_auth.py). Standard library only, run with `python -S`. Any fault prints nothing: the hook must never block a
-call.
+Registered on PostToolUse and PostToolUseFailure, with the session's key as `--session` (THIMBLE_SESSION without it).
+Posts {session, tool_use_id, tool_name, tool_input, agent_id} to POST {server}/api/ws/{ws}/calls/ref with post, which
+permission_hook.py uses too: the address and token come from <thimble home>/server.json, each request proves it holds
+the token and each answer must prove the server does (app/hook_auth.py). Standard library only, run with `python -S`.
+Any fault prints nothing: the hook must never block a call.
 """
 from __future__ import annotations
 
@@ -60,8 +60,11 @@ def post(path: str, body: dict, timeout: float, home: str = "") -> object:
 
 
 def main(argv: list[str]) -> int:
-    ws = argv[argv.index("--ws") + 1] if "--ws" in argv and argv.index("--ws") + 1 < len(argv) else ""
-    session = os.environ.get("THIMBLE_SESSION", "").strip()
+    def arg(flag: str) -> str:
+        return argv[argv.index(flag) + 1] if flag in argv and argv.index(flag) + 1 < len(argv) else ""
+
+    ws = arg("--ws")
+    session = (arg("--session") or os.environ.get("THIMBLE_SESSION", "")).strip()
     try:
         hook = json.load(sys.stdin)
     except (OSError, ValueError):

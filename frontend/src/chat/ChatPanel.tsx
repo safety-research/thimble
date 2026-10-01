@@ -22,9 +22,9 @@ import { fetchCall } from '../lib/calls'
 import { callRef, parseRef } from '../lib/refs'
 import { track } from '../lib/telemetry'
 import { hhmm } from '../lib/time'
-import type { ChatMeta, ChatRecord, MainEffort, ModelConf, OrientPermissions, QueuedMessage, SessionAlert, Settings, Ticket } from '../lib/types'
+import type { ChatMeta, ChatRecord, MainEffort, ModelConf, OrientPermissions, Proposal, QueuedMessage, SessionAlert, Settings, Ticket } from '../lib/types'
 import { hasFastMode, invalidateSettings, loadSettings, onSettingsChange, saveRole } from '../lib/models'
-import { findProposal, useProposals } from '../lib/proposals'
+import { findProposal, refreshProposals, useProposals } from '../lib/proposals'
 import { readStorage, storageKey, writeStorage } from '../lib/workspace'
 import { Composer } from './Composer'
 import { EFFORT_CHOICES, mainEffort, mainFast, NEXT_LAUNCH, ORIENT_DEFAULT_EFFORT } from './ModelLine'
@@ -54,34 +54,50 @@ const ANCHORS_SHOWN = 6
 const SETTINGS_RETRY_MS = 3000
 
 /** What the composer's stop square stops in the thread shown: the session of the orientation, a writer or a check's
- * run (backend agents.interrupt_route), or the dev ticket the thread runs (dev.stop_ticket). */
-export type ComposerStop = { kind: 'session'; chat: string; role: string; label: string } | { kind: 'ticket'; ticket: string; label: string }
+ * run (backend agents.interrupt_route), the dev ticket the thread runs (dev.stop_ticket), or the view's build
+ * (views.stop_build) or its review's revision (view_review.stop) in the view's thread. */
+export type ComposerStop =
+  | { kind: 'session'; chat: string; role: string; label: string }
+  | { kind: 'ticket'; ticket: string; label: string }
+  | { kind: 'view'; slug: string; review: boolean; label: string }
 
 const STOP_LABELS: Readonly<Record<string, string>> = { orient: 'Stop the orientation', writer: 'Stop the writer', check: 'Stop the check' }
 
-/** The Stop the composer carries for the thread shown, while what it stops runs: a session's (STOP_LABELS) or its dev
- * ticket's. A step, a part of its parent's session whose composer sends to that parent (threads.composerTarget),
- * carries its parent's Stop (`parent`, the step's parent chat) while the parent runs. Null for main and its threads,
- * whose turn the browser cannot stop; for a view's build, which only dismissing its proposal stops; and for a ticket
- * that waits in the queue (its Discard is at the thread's foot) or that an older chat of a retried ticket ran. Pure. */
+/** The Stop the composer carries for the thread shown, while what it stops runs: a session's (STOP_LABELS), its dev
+ * ticket's, or, in a view's thread, the view's build while its proposal is queued or building and else its review's
+ * while the review runs (`view`, the thread's proposal). A step, a part of its parent's session whose composer sends to
+ * that parent (threads.composerTarget), carries its parent's Stop (`parent`, the step's parent chat) while the parent
+ * runs. Null for main and its threads, whose turn the browser cannot stop, and for a ticket that waits in the queue
+ * (its Discard is at the thread's foot) or that an older chat of a retried ticket ran. Pure. */
 export function composerStopOf(
   kind: ThreadKind | null,
   meta: Pick<ChatMeta, 'id' | 'status'> | null,
   ticket: Pick<Ticket, 'id' | 'n' | 'status' | 'chat'> | null,
   parent: Pick<ChatMeta, 'id' | 'status' | 'role'> | null = null,
+  view: Pick<Proposal, 'slug' | 'status' | 'chat' | 'review'> | null = null,
 ): ComposerStop | null {
   if (!meta) return null
   if (kind === 'orient' || kind === 'writer' || kind === 'check') return meta.status === 'running' ? { kind: 'session', chat: meta.id, role: kind, label: STOP_LABELS[kind] } : null
   if (kind === 'step' && parent && parent.status === 'running' && STOP_LABELS[parent.role]) return { kind: 'session', chat: parent.id, role: parent.role, label: STOP_LABELS[parent.role] }
   if (kind === 'dev' && ticket && ticket.chat === meta.id && ticket.status === 'running') return { kind: 'ticket', ticket: ticket.id, label: `Stop ticket #${ticket.n}` }
+  if (kind === 'dev' && view && view.chat === meta.id && meta.status === 'running') {
+    if (view.status === 'queued' || view.status === 'building') return { kind: 'view', slug: view.slug, review: false, label: 'Stop the build' }
+    if (view.review?.state === 'running') return { kind: 'view', slug: view.slug, review: true, label: 'Stop the review' }
+  }
   return null
 }
 
 /** The composer's Stop sent: a session's through stopSession, a ticket's through dev.stop_ticket, whose record then
- * goes to `onTicket`; a failure is a toast, `Could not stop …: <why>` for both. Resolves true when the request went through (the
- * run is ending), false when it failed. */
+ * goes to `onTicket`, a view's build or review through its own route; a failure is a toast, `Could not stop …: <why>`
+ * for each. Resolves true when the request went through (the run is ending), false when it failed. */
 export function stopRun(ws: string, what: ComposerStop, onTicket: (t: Ticket) => void): Promise<boolean> {
   if (what.kind === 'session') return stopSession(ws, what.chat, what.role)
+  if (what.kind === 'view') {
+    const noun = what.review ? 'the review' : 'the build'
+    return (what.review ? api.viewReviewStop(ws, what.slug) : api.stopViewBuild(ws, what.slug))
+      .then(() => (void refreshProposals(ws), true))
+      .catch((e: Error) => (bus.emit('toast', { text: `Could not stop ${noun}: ${e.message}`, kind: 'error' }), false))
+  }
   return api
     .stopTicket(what.ticket)
     .then(() => api.ticket(what.ticket))
@@ -144,9 +160,12 @@ export interface BuildPart {
 }
 
 const CHANGE_ASKED = /^the change asked for: ([\s\S]*)$/
+/** The stage line of a session that has shown no activity for a while (backend dev.QUIET_LINE). */
+const QUIET = /^no activity for \d+ (min|s)$/
 
 /** A view build's thread in parts, one per run of its session: the first build, then each change. Stage lines leave the
- * rows for the part's status line, except a wait after an API error, which stays a row for its error card. Pure. */
+ * rows for the part's status line, except a wait after an API error, which stays a row for its error card. A line
+ * saying the session shows no activity holds only until the next row or the next such line. Pure. */
 export function viewBuildParts(rows: readonly Row[]): BuildPart[] {
   const blank = (): BuildPart => ({ rows: [], stages: [], request: null })
   const parts: BuildPart[] = [blank()]
@@ -157,6 +176,8 @@ export function viewBuildParts(rows: readonly Row[]): BuildPart[] {
   }
   for (const r of rows) {
     let cur = parts[parts.length - 1]
+    const quiet = QUIET.test(cur.stages[cur.stages.length - 1] ?? '')
+    if (quiet && (r.kind !== 'note' || QUIET.test(r.text))) cur.stages.pop()
     if (r.kind === 'user') {
       fresh().rows.push(r)
       continue
@@ -507,8 +528,10 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
   // the dev ticket the thread shows runs (its thread's foot, TicketView), and what the composer's stop square stops
   const [ticket, setTicket] = useTicket<TicketWithShots>(kind === 'dev' && !curMeta?.view ? (curMeta?.ticket ?? null) : null)
   const stepParent = kind === 'step' && curMeta?.parent ? (chats.find((m) => m.id === curMeta.parent) ?? null) : null
-  const stopWhat = composerStopOf(kind, curMeta, ticket, stepParent)
-  const stopKey = stopWhat ? (stopWhat.kind === 'ticket' ? `ticket:${stopWhat.ticket}` : `chat:${stopWhat.chat}`) : null
+  const proposals = useProposals(ws)
+  const threadView = kind === 'dev' && curMeta?.view ? (findProposal(proposals, curMeta.view) ?? null) : null
+  const stopWhat = composerStopOf(kind, curMeta, ticket, stepParent, threadView)
+  const stopKey = stopWhat ? (stopWhat.kind === 'ticket' ? `ticket:${stopWhat.ticket}` : stopWhat.kind === 'view' ? `view:${stopWhat.slug}:${stopWhat.review}` : `chat:${stopWhat.chat}`) : null
   // the Stop that is under way, by stopKey, so another thread's composer is not left busy: from the request until the
   // run ends (its Stop goes, stopKey changes) or STOP_HOLD_MS pass; a failed request clears it at once
   const [stopping, setStopping] = useState<string | null>(null)

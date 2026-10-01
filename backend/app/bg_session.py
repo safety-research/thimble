@@ -15,14 +15,16 @@ name has its workspace shortened (config.session_name), and by_name also takes t
 wrote in place of ` · `. The workspace's own lines (the statusline, the news) show the role alone (config.session_role).
 
 Start. agent_session builds the `claude -p` command as for any session and hands it to start(), which turns it into a
-`claude --bg` command: the first message goes on the command line, and the session's own environment goes in the
---settings `env`, since the background service starts the session with its own environment. `claude --bg` refuses a
-folder Claude Code does not trust; install.sh asks once to trust thimble's workspaces folder (claude_changes). Without
-that trust (trusted) none of these sessions starts, and the refusal says how the analyst can trust the folder (the
-bg-untrusted hint). BgProc stands in for the process agent_session follows: a run ends when the session is idle, its
-transcript's last turn has ended and it has no background work, while the session itself goes on for the analyst. A
-session whose turn ended while a background shell of its own runs on counts as idle once its transcript has been quiet
-for LINGER_S (_lingering), since Claude Code lists it as busy for as long as the shell runs.
+`claude --bg` command: the first message goes on the command line, and the session's own environment is in the
+--settings `env` already, since the background service starts the session with its own environment, the one of the
+`claude` that started the service, and takes only PATH from the `claude --bg` that asks for the session. Every
+`claude` command here runs with config.launch_environ, so the service never keeps a value of thimble's. `claude --bg`
+refuses a folder Claude Code does not trust; install.sh asks once to trust thimble's workspaces folder
+(claude_changes). Without that trust (trusted) none of these sessions starts, and the refusal says how the analyst can
+trust the folder (the bg-untrusted hint). BgProc stands in for the process agent_session follows: a run ends when the
+session is idle, its transcript's last turn has ended and it has no background work, while the session itself goes on
+for the analyst. A session whose turn ended while a background shell of its own runs on counts as idle once its
+transcript has been quiet for LINGER_S (_lingering), since Claude Code lists it as busy for as long as the shell runs.
 
 Messages in place. A session that runs is never resumed with `--resume`, which would copy it under a new id: a message
 for it (a follow-up from the browser, a retry after a capacity failure) waits in its outbox (deliver) and is sent with
@@ -142,7 +144,6 @@ BG_ID_RE = re.compile(r"backgrounded\W+([0-9a-f]{8})\b")
 UNTRUSTED_RE = re.compile(r"not trusted", re.IGNORECASE)  # `claude --bg`'s refusal of a folder it does not trust
 DROP_FLAGS = {"-p", "--print", "--verbose"}
 DROP_WITH_VALUE = {"--output-format", "--session-id", "--input-format"}
-PASSED_ENV = {"PATH"}  # what the background service takes from the caller's environment
 # the provider settings a session gets in its --settings `env`, since the background service passes it only PATH; a
 # credential is never put on a command line, so a session authenticates as the service's environment and the user's
 # settings let it
@@ -245,9 +246,7 @@ def _bin() -> str:
 
 
 def _env() -> dict[str, str]:
-    from . import agent_session  # noqa: PLC0415
-
-    return agent_session.environ("")
+    return config.launch_environ()
 
 
 def listing(bin_: str | None = None, env: dict[str, str] | None = None) -> list[dict[str, Any]]:
@@ -275,15 +274,12 @@ def stop_cli(short: str) -> None:
 # --------------------------------------------------------------------------- the command
 
 
-def bg_argv(argv: list[str], env: dict[str, str], base_env: dict[str, str], name: str, prompt: str,
-            folder: Path) -> list[str]:
+def bg_argv(argv: list[str], env: dict[str, str], name: str, prompt: str, folder: Path) -> list[str]:
     """The `claude --bg` argv for the `claude -p` argv `argv`, named `name`, with `prompt` as the first message and, in
-    its --settings `env`, the variables `env` adds to `base_env` and the provider settings (PROVIDER_ENV) (module note,
-    start)."""
+    its --settings `env`, the provider settings (PROVIDER_ENV) of `env`, the environment the command runs with, and
+    FOREGROUND_ENV (module note, start)."""
     out: list[str] = [argv[0], "--bg", "-n", name]
-    extra_env = {**{k: v for k, v in env.items() if k not in PASSED_ENV | {config.CONFIG_DIR_ENV}
-                    and (k.startswith("THIMBLE_") or PROVIDER_ENV.fullmatch(k) or base_env.get(k) != v)},
-                 **FOREGROUND_ENV}
+    extra_env = {**{k: v for k, v in env.items() if PROVIDER_ENV.fullmatch(k)}, **FOREGROUND_ENV}
     i = 1
     while i < len(argv):
         a = argv[i]
@@ -1607,13 +1603,13 @@ async def start(c: str, key: str, argv: list[str], folder: Path, env: dict[str, 
             return BgProc(c, key, short, resume, int(running["pid"]), expect=bool(prompt.strip()))
         known = session.find_transcript(resume)
         before = session._size(Path(known)) if known else 0  # where the news of this start begins (record)
-        args = bg_argv(argv, env, dict(os.environ), name_of(c, key), prompt.strip() or _nudge(), folder)
+        args = bg_argv(argv, env, name_of(c, key), prompt.strip() or _nudge(), folder)
         args[2:2] = ["--resume", resume]
         code, out = await asyncio.to_thread(_cli, bin_, args[1:], env, folder, CLI_TIMEOUT_S)
     else:
         before = 0
-        code, out = await asyncio.to_thread(_cli, bin_, bg_argv(argv, env, dict(os.environ), name_of(c, key), prompt,
-                                                                folder)[1:], env, folder, CLI_TIMEOUT_S)
+        code, out = await asyncio.to_thread(_cli, bin_, bg_argv(argv, env, name_of(c, key), prompt, folder)[1:], env,
+                                            folder, CLI_TIMEOUT_S)
     if code != 0 and UNTRUSTED_RE.search(out):
         from . import tools  # noqa: PLC0415
 

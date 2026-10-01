@@ -48,6 +48,7 @@ AGENT_SANDBOX = ("on", "off")
 DATA = ("ask", "allow", "off")
 ENV_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,127}$")
 SERVER_JSON = "server.json"  # in thimble's home: the server's address and the token of its local API (hook_auth)
+SESSION_KEY = "session.key"  # in thimble's home: the secret of the sessions' tokens (hook_auth.SESSION_KEY)
 EDIT_TOOLS = ("Edit", "MultiEdit", "Write", "NotebookEdit")
 MEMORY = ("inherit", "on", "off")
 PERMISSION_MODES = ("manual", "auto", "bypass")  # modes.MODES
@@ -100,8 +101,9 @@ def install_rules() -> list[str]:
 
 
 def private_paths() -> list[str]:
-    """The files no agent thimble starts may read: server.json in thimble's home, which holds the local API's token."""
-    return [str(global_file().parent / SERVER_JSON)]
+    """The files no agent thimble starts may read: server.json in thimble's home, which holds the local API's token, and
+    the key the sessions' tokens are signed with."""
+    return [str(global_file().parent / name) for name in (SERVER_JSON, SESSION_KEY)]
 
 
 def private_rules() -> list[str]:

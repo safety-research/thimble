@@ -1,6 +1,7 @@
 // The tour's steps (the shape engine.ts takes): which surface each needs, what it points at, where its popover sits,
-// what it says and what it brings. Every example is the tour's own (examples.json, captured from real thimble markup
-// and marked Example); a step that asks the analyst to act acts only on that example, so nothing reaches the server.
+// what it says and what it brings. Every example is the tour's own (examples.json, captured from real thimble markup;
+// all but the views step's are marked Example); a step that asks the analyst to act acts only on that example, so
+// nothing reaches the server.
 import { setMarkup, type Api, type Example, type Step } from './engine'
 import reportFigs from './report-figs.json'
 
@@ -164,7 +165,7 @@ const viewsExample = (api: Api): Example => {
   body.className = 'tour-ex-viewbody'
   body.style.background = api.groundOf(realBody())
   const frame = document.createElement('iframe')
-  frame.src = `${import.meta.env.BASE_URL}tour/timeline/view.html?v=10`
+  frame.src = `${import.meta.env.BASE_URL}tour/timeline/view.html?v=11`
   frame.title = 'Timeline (example)'
   Object.assign(frame.style, { display: 'block', width: '100%', height: '100%', border: '0' })
   body.append(frame)
@@ -181,13 +182,13 @@ const viewsExample = (api: Api): Example => {
     }
   }
   frame.addEventListener('load', () => escape(frame.contentWindow))
-  // no Example badge on the view: the step's text says it is an example, and a badge would sit on the view's header
   api.ex.append(bar, body)
   const layout = () => {
     const B = api.rectOf(realBar()),
       D = api.rectOf(realBody())
     if (B) Object.assign(bar.style, { left: `${B.x}px`, top: `${B.y}px`, width: `${B.width}px`, height: `${B.height}px` })
     if (D) Object.assign(body.style, { left: `${D.x}px`, top: `${D.y}px`, width: `${D.width}px`, height: `${D.height}px` })
+    return !!(B && D)
   }
   return { els: { bar, body, frame }, layout }
 }
@@ -270,7 +271,8 @@ const labelsExample = (api: Api): Example => {
       Object.assign(lab.style, { left: `${r.x}px`, width: '250px', top: `${r.y + r.height - lab.offsetHeight}px` })
       r = { x: r.x + 251, y: r.y, width: r.width - 251, height: r.height }
     }
-    if (r) Object.assign(rd.style, { left: `${r.x}px`, top: `${r.y}px`, width: `${r.width}px`, height: `${r.height}px` })
+    if (!r) return false
+    Object.assign(rd.style, { left: `${r.x}px`, top: `${r.y}px`, width: `${r.width}px`, height: `${r.height}px` })
     if (L) Object.assign(lab.style, { left: `${L.x}px`, width: `${L.width}px`, top: `${L.y + L.height - lab.offsetHeight}px` })
     const sc = rd.querySelector<HTMLElement>('.reader-body')
     if (!sc || !sc.clientHeight) return
@@ -434,7 +436,7 @@ const reportExample = (api: Api): Example => {
   els.hideChecks()
   const layout = () => {
     const r = api.rectOf(panel())
-    if (!r) return
+    if (!r) return false
     Object.assign(w.style, { left: `${r.x}px`, top: `${r.y}px`, width: `${r.width}px`, height: `${r.height}px` })
     const k = Math.min(1, r.width / w0)
     els.k = k
@@ -463,8 +465,8 @@ const scrollTo = (api: Api, el: Element | null | undefined, above = 120, smooth 
 }
 const inReport = (api: Api, sel: string) => (api.els.root as HTMLElement | undefined)?.querySelector<HTMLElement>(sel) ?? null
 
-/** The tour, for a pointer key written `key` (⌘ on a Mac, Ctrl elsewhere). Without the chat column (`chat` false) the
- * steps about the chat are left out. */
+/** The tour, for a pointer key written `key` (⌘ on a Mac, Ctrl elsewhere). With the chat column folded (`chat` false)
+ * the steps about the chat are left out. */
 export function tourSteps(key: string, chat = true): Step[] {
   const steps: Step[] = [
     {

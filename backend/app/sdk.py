@@ -61,6 +61,10 @@ MAX_BUFFER_SIZE = int(os.environ.get("THIMBLE_CLI_MAX_BUFFER", str(32 * 1024 * 1
 # The server's environment may have no SHLVL, and a CLI whose shells start at level 0 sources the ~/.bashrc it masks,
 # which prints "Permission denied" at the top of every Bash result.
 SHELL_LEVEL_ENV = {"SHLVL": "1"}
+# The SDK runs `claude -v` before each call with this process's whole environment, thimble's variables among them
+# (config.launch_environ says why none may reach a `claude`). This variable turns that off. thimble warns about an old
+# Claude Code itself (cli.claude_code_warning). Its name does not pass to a `claude` thimble starts (config.passes).
+SKIP_VERSION_CHECK_ENV = "CLAUDE_AGENT_SDK_SKIP_VERSION_CHECK"
 
 
 def build(
@@ -76,9 +80,10 @@ def build(
     persist: bool = True,
 ) -> ClaudeAgentOptions:
     """The one constructor of ClaudeAgentOptions (module note). `tools` are the MCP tool names the call may use; `env` is
-    added to the server's environment; `speed` switches on fast mode where the model has it; `persist` False writes no
-    transcript."""
+    added to the server's environment, where every THIMBLE_* variable is "" (config.launch_environ says why); `speed`
+    switches on fast mode where the model has it; `persist` False writes no transcript."""
     _bind_sdk()
+    os.environ.setdefault(SKIP_VERSION_CHECK_ENV, "1")
     return ClaudeAgentOptions(
         cwd=str(cwd),
         tools=[],
@@ -94,7 +99,7 @@ def build(
         include_partial_messages=True,
         setting_sources=["user"],
         strict_mcp_config=True,
-        env={**SHELL_LEVEL_ENV, **(env or {})},
+        env={**SHELL_LEVEL_ENV, **{k: "" for k in os.environ if k.startswith(config.OWN_PREFIX)}, **(env or {})},
         extra_args={"safe-mode": None, **({} if persist else {"no-session-persistence": None})},
     )
 
