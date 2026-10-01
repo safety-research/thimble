@@ -736,7 +736,11 @@ async function main() {
     await step('settings-extensions', 'Settings > Extensions lists the extensions, and the popover fits on screen', async () => {
       const pop = await openSettings(page)
       const group = pop.getByRole('group', { name: 'Extensions' })
-      await group.waitFor({ timeout: ACTION_MS })
+      if (!(await group.waitFor({ timeout: ACTION_MS }).then(() => true, () => false))) {
+        const s = await shot(page, 'settings-extensions')
+        await closeSettings(page)
+        throw new StepError('Settings shows no Extensions group: it lists no extension, not even those thimble ships', [s])
+      }
       const names = await pop.locator('[data-extension]').evaluateAll((els) => els.map((e) => e.getAttribute('data-extension')))
       const s = await shot(page, 'settings-extensions')
       check(names.includes('video'), `video is not listed (${names.join(', ')})`)
