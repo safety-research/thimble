@@ -3749,10 +3749,52 @@ async def check_route(c: str, slug: str, request: Request, body: CheckBody | Non
     _check_slug(slug)
     _bind_loop()
     locators = [str(x).strip() for x in (body.locators if body and body.locators else []) if str(x).strip()]
+    return await check_answer(c, slug, locators, bool(body and body.picture))
+
+
+CHECK_DROP = ".check"  # in a view's folder: the check requests view_check.py leaves where it cannot reach the server
+CHECK_POLL_S = 0.3
+_DROP_NAME = re.compile(r"^[0-9a-f]{8,64}\.json$")
+
+
+async def check_answer(c: str, slug: str, locators: list[str], picture: bool) -> dict[str, Any]:
+    """A session's check of its draft: the gate with `locators` beside the sampled lines, the locators kept on the
+    proposal for the server's gate after the turn. {ok, lines, png}, `png` the picture of the page as it opens when
+    `picture` asks for one."""
     if locators and read_proposal(c, slug) is not None:
         update_proposal(c, slug, locators=locators)
-    report = await gate(c, slug, locators or _kept_locators(c, slug), picture=bool(body and body.picture))
+    report = await gate(c, slug, locators or _kept_locators(c, slug), picture=picture)
     return {"ok": bool(report.get("ok")), "lines": gate_lines(report), "png": (report.get("page") or {}).get("png")}
+
+
+def watch_checks(c: str, slug: str) -> asyncio.Task:
+    """While a session builds or revises the view, answer the check requests view_check.py leaves in the view's
+    CHECK_DROP folder when its post cannot reach the server, as from inside the sandbox: each `<id>.json` {locators,
+    picture} is renamed `<id>.taken` and answered as `<id>.answer.json` with check_answer's answer. Cancel the task to
+    stop; the folder is removed then."""
+    return asyncio.get_running_loop().create_task(_watch_checks(c, slug), name=f"view-checks:{c}:{slug}")
+
+
+async def _watch_checks(c: str, slug: str) -> None:
+    drop = views_dir(c) / slug / CHECK_DROP
+    try:
+        while True:
+            await asyncio.sleep(CHECK_POLL_S)
+            for req in sorted(await asyncio.to_thread(lambda: list(drop.glob("*.json")) if drop.is_dir() else [])):
+                if not _DROP_NAME.match(req.name):
+                    continue
+                taken = req.with_suffix(".taken")
+                try:
+                    await asyncio.to_thread(os.replace, req, taken)
+                    body = json.loads(await asyncio.to_thread(taken.read_text, "utf-8"))
+                    locators = [str(x).strip() for x in body.get("locators") or [] if str(x).strip()]
+                    answer = await check_answer(c, slug, locators, bool(body.get("picture")))
+                except (OSError, ValueError, AttributeError) as e:
+                    answer = {"ok": False, "lines": [f"problem: the check request could not be read: {e}"], "png": None}
+                await asyncio.to_thread(atomic_write_text, drop / f"{req.stem}.answer.json", json.dumps(answer))
+                await asyncio.to_thread(taken.unlink, True)
+    finally:
+        await asyncio.to_thread(shutil.rmtree, drop, True)
 
 
 def _kept_locators(c: str, slug: str) -> list[str] | None:

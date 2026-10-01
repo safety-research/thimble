@@ -666,6 +666,43 @@ async def test_every_worked_example_s_page_loads_headless_at_its_first_place(nam
         assert shown["due"] and shown["drawn"] == shown["due"], "the test label shows on the records a worked example shows"
 
 
+async def test_a_check_run_where_it_cannot_reach_the_server_leaves_its_request_in_the_view_s_folder(ws, monkeypatch):
+    """view_check.py run inside the sandbox reaches neither the server nor server.json: it leaves its request as a file
+    in the view's folder, which the server watches while the session runs, and prints the answer written beside it."""
+    import importlib.util  # noqa: PLC0415
+
+    spec = importlib.util.spec_from_file_location("view_check_t", Path(views.__file__).with_name("view_check.py"))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    asked: list[tuple] = []
+
+    async def answer(c, slug, locators, picture):
+        asked.append((c, slug, locators, picture))
+        return {"ok": True, "lines": ["page: loaded"], "png": None}
+
+    monkeypatch.setattr(views, "check_answer", answer)
+    monkeypatch.setattr(views, "CHECK_POLL_S", 0.05)
+    monkeypatch.setattr(mod, "POLL_S", 0.05)
+    folder = views.views_dir(CORPUS) / "threads"
+    out = io.StringIO()
+    monkeypatch.setattr(sys, "stdout", out)
+    watch = views.watch_checks(CORPUS, "threads")
+    try:
+        code = await asyncio.to_thread(mod.main, ["--home", str(folder / "nowhere"), "--folder", str(folder),
+                                                  "http://127.0.0.1:9/api/ws/boards/views/threads/check", "board.jsonl#L3",
+                                                  "--picture"])
+    finally:
+        watch.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await watch
+    assert code == 0 and json.loads(out.getvalue())["lines"] == ["page: loaded"]
+    assert asked == [(CORPUS, "threads", ["board.jsonl#L3"], True)]
+    assert not (folder / views.CHECK_DROP).exists(), "the folder goes when the session's watch ends"
+    monkeypatch.setattr(mod, "PICKUP_S", 0.2)
+    code = await asyncio.to_thread(mod.main, ["--folder", str(folder), "http://127.0.0.1:9/api/ws/boards/views/threads/check"])
+    assert code == 1 and not list((folder / views.CHECK_DROP).glob("*.json")), "with no server watching it gives up"
+
+
 FIT_HTML = """<!doctype html><html><head><style>body{font:13px sans-serif;margin:8px}</style></head><body>
 <div style="position:relative;height:40px"><span style="position:absolute;left:0;top:0">Overlapping label one</span>
 <span style="position:absolute;left:12px;top:2px">Second label here</span></div>

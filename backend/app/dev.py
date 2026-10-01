@@ -2577,10 +2577,14 @@ def view_network_line(c: str) -> str:
 def view_check_command(c: str, slug: str) -> str:
     """The command a view build's session checks its draft with (view_check.py): this server's interpreter without
     site-packages, the script, thimble's home (whose server.json holds the token the post proves; a background session's
-    environment does not name it) and the view's check URL. The fence runs it outside the sandbox by this prefix."""
+    environment does not name it), the view's folder (where the request goes as a file when the post cannot reach the
+    server) and the view's check URL. The fence runs it outside the sandbox by this prefix."""
+    from . import views  # noqa: PLC0415
+
     url = f"http://127.0.0.1:{config_port()}/api/ws/{c}/views/{slug}/check"
     home = shlex.quote(str(thimble_home()))
-    return f"{shlex.quote(sys.executable)} -S {shlex.quote(str(VIEW_CHECK))} --home {home} {url}"
+    folder = shlex.quote(str(views.views_dir(c) / slug))
+    return f"{shlex.quote(sys.executable)} -S {shlex.quote(str(VIEW_CHECK))} --home {home} --folder {folder} {url}"
 
 
 def build_view_change_prompt(prop: dict[str, Any], folder: Path) -> str:
@@ -2783,10 +2787,14 @@ REPAIR_LINE = "the view did not pass, so a new session builds it again from what
 
 
 async def run_view(c: str, slug: str, run: Run) -> None:
-    """The whole view ticket (_run_view), its session's permission requests answered on its chat meanwhile."""
+    """The whole view ticket (_run_view), its session's permission requests and check requests answered meanwhile."""
+    from . import views  # noqa: PLC0415
+
+    checks = views.watch_checks(c, slug)
     try:
         await _run_view(c, slug, run)
     finally:
+        checks.cancel()
         _unhost(c, view_key(slug))
 
 
@@ -3014,6 +3022,7 @@ async def review_revision(c: str, slug: str, message: str) -> tuple[bool, str]:
     _review_runs[(c, slug)] = run
     asking = view_asking(c, slug, folder, conf)
     _host(c, asking, chat, run_log)
+    checks = views.watch_checks(c, slug)
     resume = prop.get("session_id")
     prompt = message if resume else f"{build_view_prompt(c, prop, folder, corpus)}\n\n{message}"
     run_log.stage(REVIEW_LINE)
@@ -3055,6 +3064,7 @@ async def review_revision(c: str, slug: str, message: str) -> tuple[bool, str]:
             _close_chat({"workspace": c, "chat": chat}, "stopped", "the review was stopped")
         raise
     finally:
+        checks.cancel()
         _unhost(c, view_key(slug))
         if _review_runs.get((c, slug)) is run:
             del _review_runs[(c, slug)]

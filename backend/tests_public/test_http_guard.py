@@ -239,7 +239,8 @@ def test_a_view_builds_check_proves_the_token_so_its_post_passes(app_prod, plugi
     _record(port="8300")  # beside the token plugin_headers recorded, as the supervisor writes them
     home = os.environ["THIMBLE_HOME"]
     words = shlex.split(dev.view_check_command("mini", "posts"))
-    assert words[3:5] == ["--home", home] and words[5].endswith("/api/ws/mini/views/posts/check")
+    assert words[3:5] == ["--home", home] and words[5:7] == ["--folder", str(views.views_dir("mini") / "posts")]
+    assert words[7].endswith("/api/ws/mini/views/posts/check")
     spec = importlib.util.spec_from_file_location("view_check_t", Path(views.__file__).with_name("view_check.py"))
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
