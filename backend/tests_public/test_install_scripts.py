@@ -647,3 +647,29 @@ def test_install_sh_leaves_another_installs_plugin_and_command_as_they_are(tmp_p
         r, changes = run(*flags)
         assert changes == [] and untouched(), (flags, changes, r.stdout)
 
+
+def test_uninstall_removes_the_plugin_only_when_it_is_registered_from_this_install(tmp_path):
+    """thimble uninstall removes thimble@<name> only when Claude Code has it from this install's folder: another
+    checkout's registration under the same name stays, as does the link into that checkout, whether or not a record
+    (here one the other install wrote into a THIMBLE_HOME both share) names it."""
+    first, second, env = two_checkouts(tmp_path)
+    state, log, home = Path(env["CLAUDE_STATE"]), Path(env["STUB_LOG"]), Path(env["THIMBLE_HOME"])
+    link = Path(env["HOME"]) / ".local" / "bin" / "thimble"
+    registered = state.read_text()
+
+    def uninstall() -> list[str]:
+        home.mkdir(exist_ok=True)
+        (home / "app-dir").write_text(f"{second}\n")
+        log.write_text("")
+        r = subprocess.run(["bash", str(second / "plugin" / "bin" / "thimble"), "uninstall", "--yes"],
+                           capture_output=True, text=True, env=env, stdin=subprocess.DEVNULL, timeout=60)
+        assert r.returncode == 0, r.stdout + r.stderr
+        return plugin_changes(log)
+
+    assert uninstall() == [] and state.read_text() == registered
+    assert os.readlink(link) == str(first / "plugin" / "bin" / "thimble")
+    home.mkdir()
+    (home / "plugin.json").write_text(json.dumps({"answer": "yes", "registered": "thimble"}))
+    assert uninstall() == [] and state.read_text() == registered
+    state.write_text(json.dumps({"marketplaces": {"thimble": str(second)}, "plugins": ["thimble@thimble"]}))
+    assert uninstall() == ["plugin uninstall thimble@thimble", "plugin marketplace remove thimble"]
