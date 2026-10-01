@@ -233,11 +233,13 @@ def test_a_view_built_for_a_workspace_switches_off_and_on_in_settings_from_the_a
     assert [v["slug"] for v in views.list_views(CORPUS) if v["origin"] == "workspace"] == []
     assert views.views_for(CORPUS, "board.jsonl") == [] and "one post" not in views.forms_text(CORPUS)
     assert views.read_built(CORPUS, "posts") is not None and views.list_proposals(CORPUS)[0]["status"] == "built"
+    assert asyncio.run(views.list_proposals_route(CORPUS))[0]["off"] is True, "the views bar leaves it out"
+    assert "off" not in views.list_proposals(CORPUS)[0]
     assert views.read_built(OTHER, "posts") is None and views.views_off(OTHER) == set()
 
     asyncio.run(views.view_on_route(CORPUS, "posts", views.OnBody(on=True), analyst))
     assert [v["slug"] for v in views.list_views(CORPUS) if v["origin"] == "workspace"] == ["posts"]
-    assert "one post" in views.forms_text(CORPUS)
+    assert "one post" in views.forms_text(CORPUS) and "off" not in asyncio.run(views.list_proposals_route(CORPUS))[0]
     with pytest.raises(HTTPException) as e:
         asyncio.run(views.view_on_route(CORPUS, "pdf", views.OnBody(on=False), analyst))
     assert e.value.status_code == 404

@@ -402,6 +402,8 @@ export interface Proposal {
   asked?: boolean
   /** an orientation's proposal whose view has not passed its checks yet: its card shows the build, the views bar not */
   held?: boolean
+  /** its view is switched off in Settings (backend views.views_off): the views bar leaves it out */
+  off?: boolean
   status: ProposalStatus
   ts: string
   error?: string

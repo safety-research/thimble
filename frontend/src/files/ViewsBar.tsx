@@ -58,12 +58,13 @@ export function listedAsView(p: Proposal, known: ReadonlySet<string>): boolean {
 }
 
 /** The views the bar lists and the proposals not yet built, from the views list and the proposals. A file viewer
- * (`file_type`) is a mode of the File browser, so the bar leaves it and its proposal out. Pure. */
+ * (`file_type`) is a mode of the File browser, so the bar leaves it and its proposal out, as it leaves out a view
+ * switched off in Settings. Pure. */
 export function barList(list: readonly View[], all: readonly Proposal[]): { views: BuiltView[]; proposals: Proposal[] } {
   const fileViewers = new Set(list.filter((x) => x.file_type).map((x) => x.slug))
   // a file-type viewer thimble ships is listed where the corpus holds a file it opens
   const views = list.filter((x) => x.ok && !x.file_type && (x.origin !== 'builtin' || !!x.first_file))
-  const proposals = all.filter((p) => !fileViewers.has(p.slug))
+  const proposals = all.filter((p) => !fileViewers.has(p.slug) && !p.off)
   const known = new Map(views.map((v) => [v.slug, v]))
   const slugs = new Set(known.keys())
   const listed = proposals.filter((p) => listedAsView(p, slugs))

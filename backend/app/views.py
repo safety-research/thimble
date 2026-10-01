@@ -3341,11 +3341,13 @@ def _recover(c: str) -> None:
 @router.get("/ws/{c}/views/proposals")
 async def list_proposals_route(c: str) -> list[dict[str, Any]]:
     """The proposals. A held one, an orientation's proposal whose view has not passed its checks yet, is listed with
-    `held` for the orientation's card, and the views bar leaves it out."""
+    `held` for the orientation's card, and the views bar leaves it out, as it leaves out one listed with `off`, whose
+    view is switched off in Settings (views_off)."""
     config.workspace_dir(c)
     _bind_loop()
     _recover(c)
-    return list_proposals(c)
+    off = views_off(c)
+    return [{**p, "off": True} if p["slug"] in off else p for p in list_proposals(c)]
 
 
 @router.get("/ws/{c}/views/suggestions")

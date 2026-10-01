@@ -17,4 +17,10 @@ describe('barList', () => {
     expect(got.views.map((v) => v.slug)).toEqual(['timeline'])
     expect(got.proposals).toEqual([])
   })
+
+  it('leaves out a view switched off in Settings', () => {
+    const got = barList([view('board')], [{ ...built('timeline'), off: true }, built('board')])
+    expect(got.views.map((v) => v.slug)).toEqual(['board'])
+    expect(got.proposals).toEqual([])
+  })
 })
