@@ -276,6 +276,7 @@
   .cd-head .cd-status { white-space: nowrap; }
   .rawseg .seg-opt { height: 22px; padding: 0 8px; font-size: var(--text-xs); }
   pre.out.rawline { max-height: 200px; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .rawref { margin: 12px 0 6px; }
   .vtip { position: fixed; z-index: 90; max-width: 300px; padding: 5px 8px; border-radius: var(--radius-ui); background: var(--surface-card); box-shadow: 0 0 0 1px rgba(var(--ink-rgb), .09), 0 8px 24px rgba(var(--ink-rgb), .12); font: 400 var(--text-ui-sm) / 1.35 var(--font-body); color: var(--text-primary); pointer-events: none; }
 </style>
 </head>
@@ -812,7 +813,7 @@ function callDetails(c, s) {
   if (st.raw) {
     const lines = rawOf.get(c.ref)
     if (!lines) loadRaw(c)
-    return `${head}<div>${(lines || []).map((x) => `<h4 class="cap mono">${esc(x.ref.split('/').pop())}</h4><pre class="out rawline">${esc(x.text)}</pre>`).join('') || '<pre class="out rawline t3">Reading the lines</pre>'}</div>`
+    return `${head}<div>${(lines || []).map((x) => `<button class="chip chip-tone-neutral chip-act fchip rawref" data-act="openfile" data-ref="${esc(x.ref)}" data-tip="Open ${esc(x.ref)} in the File browser">${ico.file}${esc(x.ref.split('/').pop())}</button><pre class="out rawline">${esc(x.text)}</pre>`).join('') || '<pre class="out rawline t3">Reading the lines</pre>'}</div>`
   }
   return `${head}<div>
     <div class="kv"><div><span class="k">Call</span><span class="v">${c.position} of ${sess['call count']}</span></div><div><span class="k">Started</span><span class="v">${fmt(c.time)}</span></div><div><span class="k">Duration</span><span class="v">${fmtd(c.duration)}</span></div>
