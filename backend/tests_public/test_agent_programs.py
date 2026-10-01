@@ -459,3 +459,45 @@ thimble.serve(run)
 def agents_list(c: str) -> list[dict]:
     folder = config.workspace_dir(c) / "chats"
     return [json.loads(p.read_text()) for p in folder.glob("*.meta.json")] if folder.is_dir() else []
+
+
+DEV = '''import json, os, thimble
+def run(input):
+    folder = input["folder"]
+    with open(os.path.join(folder, "view.json"), "w") as f:
+        json.dump({"name": input["name"], "scope": ["runs/*.jsonl"]}, f)
+    with open(os.path.join(os.environ["THIMBLE_WORK"], "notes.txt"), "w") as f:
+        f.write(input["message"])
+    thimble.log("wrote the view of " + input["slug"])
+    return "Built " + input["slug"] + " from: " + input["message"][:12]
+thimble.serve(run)
+'''
+
+
+async def test_a_dev_program_takes_each_turn_of_a_view_build_and_writes_only_the_view_s_folder(
+        tmp_path, data_tmp, workspaces_tmp, active, unboxed, monkeypatch):
+    """With an extension's program as the dev agent, a view build's turn runs the program in place of thimble's session:
+    it gets the message the session would get and the view's folder, writes the view there and keeps its own notes in
+    a folder beside it."""
+    from app import dev, views
+
+    active.append(_extension(tmp_path, "builder", {"dev": {"description": "Builds views.", "command": ["python", "d.py"]}},
+                             {"agents/dev/d.py": DEV}))
+    assert dev.view_program(CORPUS) is not None and dev.view_program(CORPUS).extension == "builder"
+
+    def no_session(*a, **k):
+        raise AssertionError("thimble's own session started")
+
+    monkeypatch.setattr(dev.SESSIONS, "start", no_session)
+    monkeypatch.setattr(dev.SESSIONS, "resume", no_session)
+    folder = views.views_dir(CORPUS) / "runs-table"
+    folder.mkdir(parents=True)
+    run = dev.Run(ticket_id="view:runs-table", title="Runs table", ts_start="")
+    said = await dev._worker_turn(run, dev.Log(None), config.corpus_dir(CORPUS), "Build the runs table.", None,
+                                  name="thimble:view-runs-table", workspace=CORPUS, on_session=lambda *a: None,
+                                  add_dirs=(folder,), answered=False, asking={"key": "view:runs-table"})
+    assert said == "Built runs-table from: Build the ru"
+    assert json.loads((folder / "view.json").read_text())["name"] == "runs-table"
+    assert sorted(p.name for p in folder.iterdir()) == ["view.json"]
+    assert (dev.view_program_dir(CORPUS, "runs-table") / "notes.txt").read_text() == "Build the runs table."
+    assert not harness.running(CORPUS, "view:runs-table")

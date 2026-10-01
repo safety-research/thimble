@@ -20,8 +20,9 @@ View tickets. View proposals build at once, each as a ticket on its row of views
 pool of its own (VIEW_POOL). A view is three files of the workspace, so there is no worktree, stack or restart. run_view
 starts a session on prompts/dev-view.md in the corpus folder (which Claude Code trusts) with `--add-dir` for the view's
 folder; the corpus folder and the worked examples are fenced read-only (view_fence). After each turn the server runs the
-view's gate; a failure wakes the session, a pass registers the view. A turn the API ended at capacity is no attempt: the
-build waits and wakes the session again. An orientation's proposal that runs out of attempts gets up to VIEW_REPAIRS new
+view's gate; a failure wakes the session, a pass registers the view. Where an active extension runs the dev agent with a
+program (roles.py), each turn is a run of that program instead (program_view_turn), checked the same way. A turn the
+API ended at capacity is no attempt: the build waits and wakes the session again. An orientation's proposal that runs out of attempts gets up to VIEW_REPAIRS new
 sessions, and is then dropped quietly; a view the analyst asked for fails with Retry. The orientation's Stop stops the
 builds of the views it proposed (stop_orientation_views). Main's end stops every build of the workspace
 (stop_workspace): a view the analyst asked for fails with Retry, and a session's proposal waits, queued, until a session
@@ -1690,6 +1691,8 @@ async def _worker_turn(run: Run, run_log: Log, cwd: Path, prompt: str, resume: s
     fenced = {**({"fence": fence} if fence else {}), **({"asking": asking} if asking else {}),
               **({"models": models} if models else {})}
     key = str((asking or {}).get("key") or "")
+    if workspace and key.startswith("view:") and (program := view_program(workspace)) is not None:
+        return await program_view_turn(workspace, key[len("view:"):], prompt, list(add_dirs), program, run_log.rec)
     if resume:
         tail = Tail(resume, _size(SESSIONS.transcript(resume)))
         sess = await SESSIONS.resume(cwd, resume, prompt, env=env, name=name, workspace=workspace,
@@ -2974,6 +2977,47 @@ async def _run_view(c: str, slug: str, run: Run) -> None:
         _change_failed_chip(c, prop, why)
         return
     _view_failed(c, slug, why, chat, drop_why=drop_why)
+
+
+def view_program(c: str) -> Any:
+    """The program an active extension runs the dev agent with (roles.py), which then takes each turn of the
+    workspace's view builds (program_view_turn); None for thimble's own dev agent."""
+    from . import roles  # noqa: PLC0415
+
+    agent = roles.agent_for(c, "dev")
+    return agent.replacing if agent.code else None
+
+
+VIEW_PROGRAM_TOOLS = ("read_ref",)  # the thimble tools a dev program's view build may call
+
+
+def view_program_dir(c: str, slug: str) -> Path:
+    """A dev program's own folder for the view `slug`, beside the view's folder, which holds only the view."""
+    return config.workspace_dir(c) / "views-work" / slug
+
+
+async def program_view_turn(c: str, slug: str, message: str, folders: list[Path], part: Any,
+                            rec: agents.Recorder | None) -> str:
+    """A turn of a view build, a change or a review's revision taken by the dev agent's program (harness.run_in) in
+    the build's chat, in place of thimble's session: its input is the view's proposal, its folder and the message
+    thimble's session would get this turn (the build's prompt, then what the checks found or what the review asks
+    for). It writes the view's files in its folder, which the build then checks as it checks a session's work. What it
+    returns is the turn's reply; RuntimeError when it fails or may not start."""
+    from . import harness  # noqa: PLC0415
+    from . import views  # noqa: PLC0415
+
+    prop = views.read_proposal(c, slug) or {"slug": slug}
+    folder = folders[0] if folders else views.views_dir(c) / slug
+    job = harness.Job(c, "dev", view_key(slug), f"view: {prop.get('name') or slug}", {
+        "task": "view", "slug": slug, "name": str(prop.get("name") or slug), "description": str(prop.get("why") or ""),
+        "scope": list(prop.get("claims") or []), "spec": views.spec_lines(prop), "change": str(prop.get("change") or ""),
+        "folder": str(folder), "corpus": str(config.corpus_dir(c)), "examples": str(views.EXAMPLES_DIR),
+        "message": message,
+    }, VIEW_PROGRAM_TOOLS, view_program_dir(c, slug), writes=(folder,))
+    try:
+        return await harness.run_in(job, part, rec)
+    except harness.HarnessError as e:
+        raise RuntimeError(str(e)) from e
 
 
 # a turn of a revision the view review asked for, and the stage line its thread gets

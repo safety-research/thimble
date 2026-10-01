@@ -105,6 +105,7 @@ class Job:
     patient: bool = False  # its sessions' permission requests wait for the analyst
     parent: str = agents.MAIN_ID
     fields: dict[str, Any] = field(default_factory=dict)  # land on the chat's meta
+    writes: tuple[Path, ...] = ()  # folders besides `work` the program and its sessions write: a view's folder
 
 
 @dataclass
@@ -179,7 +180,7 @@ def box_rules(run: Run) -> dict[str, Any]:
     if run.conf.conf.get("sandbox") == "off":
         return {"filesystem": {"denyRead": deny, "allowRead": [], "allowWrite": ["/"], "denyWrite": deny}}
     work = run.job.work
-    writes = [str(work), str(work / TMP_DIR)]
+    writes = [str(work), str(work / TMP_DIR), *map(str, run.job.writes)]
     corpus = run.conf.corpus()
     if run.conf.data == "allow" and corpus is not None:
         writes.append(str(corpus))
@@ -407,7 +408,7 @@ def claude_argv(run: Run, argv: list[str]) -> tuple[list[str], Path, dict[str, s
     job, conf = run.job, run.conf
     corpus = conf.corpus() or config.corpus_dir(job.c)
     work = job.work
-    roots = [Path(os.path.realpath(work)), Path(os.path.realpath(corpus)), Path(os.path.realpath(run.part.root))]
+    roots = [Path(os.path.realpath(p)) for p in (work, corpus, run.part.root, *job.writes)]
     kept: list[str] = []
     denied: list[str] = []
     appended: list[str] = []
@@ -452,6 +453,13 @@ def claude_argv(run: Run, argv: list[str]) -> tuple[list[str], Path, dict[str, s
     perms = {**settings["permissions"]}
     for k, rules in fenced["permissions"].items():
         perms[k] = list(dict.fromkeys([*(perms.get(k) or []), *rules])) if isinstance(rules, list) else rules
+    if job.writes:
+        perms["allow"] = list(dict.fromkeys([*(perms.get("allow") or []), *(f"Edit(/{w}/**)" for w in job.writes)]))
+        if isinstance(fenced.get("sandbox"), dict):
+            box = dict(fenced["sandbox"])
+            fs = dict(box.get("filesystem") or {})
+            fs["allowWrite"] = list(dict.fromkeys([*(fs.get("allowWrite") or []), *map(str, job.writes)]))
+            fenced = {**fenced, "sandbox": {**box, "filesystem": fs}}
     settings = {**fenced, "permissions": perms}
     settings = agent_session.with_config(settings, conf.settings())
     if conf.web == "ask":
@@ -465,7 +473,8 @@ def claude_argv(run: Run, argv: list[str]) -> tuple[list[str], Path, dict[str, s
     shared = agent_session.shared_prompt(corpus)
     append = "\n\n".join([*appended, shared])
     deny = list(dict.fromkeys([*denied, *agent_session.not_own(job.tools), *agent_session.LATER_TOOLS]))
-    final = [agent_session.CLAUDE_BIN, *kept, "--plugin-dir", str(agent_session.PLUGIN_DIR), "--add-dir", str(corpus),
+    added = [a for w in job.writes for a in ("--add-dir", str(w))]
+    final = [agent_session.CLAUDE_BIN, *kept, "--plugin-dir", str(agent_session.PLUGIN_DIR), "--add-dir", str(corpus), *added,
              "--settings", json.dumps(settings), "--append-system-prompt", append, "--permission-mode", permission_mode,
              "--allowedTools", ",".join(agent_session.own_rules()), "--disallowedTools", ",".join(deny)]
     work.mkdir(parents=True, exist_ok=True)
@@ -571,6 +580,47 @@ def start(job: Job, part: roles.Part, *, on_start: Callable[[Run], None] | None 
     """Start `part`'s program for `job` in an agent chat (module note, start); `on_start` hears the run once its chat
     exists, `on_end` its status (done, failed or stopped) and its summary. RuntimeError when one runs for the key, or
     the role may not start (its config, or the sandbox it needs)."""
+    run, argv = _prepare(job, part)
+    token_id = run.token_id
+    _register(run)
+
+    async def go(rec: agents.Recorder) -> str:
+        run.rec, run.chat = rec, rec.chat_id
+        status, summary = "failed", ""
+        try:
+            if on_start is not None:
+                on_start(run)
+            summary = await _run(run, argv)
+            status = "done"
+            return summary
+        except asyncio.CancelledError:
+            status, summary = "stopped", agents.STOPPED_LINE
+            raise
+        except Exception as e:
+            summary = str(e)
+            raise
+        finally:
+            _unregister(run)
+            if on_end is not None:
+                try:
+                    on_end(run, status, summary)
+                except Exception:  # noqa: BLE001 — the run has ended either way
+                    log.exception("%s: the end of the %s program could not be told", job.c, job.role)
+
+    try:
+        meta = agents.start_agent(job.c, job.chat_role or job.role, job.title, go, parent=job.parent,
+                                  by=agents.TERMINAL, agent_type=f"{part.extension}:{job.role}",
+                                  extension=part.extension, way=part.way, **job.fields)
+        run.chat = str(meta["id"])
+    except Exception:
+        _unregister(run)
+        raise
+    return run
+
+
+def _prepare(job: Job, part: roles.Part) -> tuple[Run, list[str]]:
+    """The run of `part`'s program for `job` and the argv that starts it, in its box where the box runs. RuntimeError
+    when one runs for the key, or the role may not start (its config, or the sandbox it needs)."""
     if running(job.c, job.key):
         raise RuntimeError(f"the {job.role} program of {job.key} is running")
     try:
@@ -584,44 +634,30 @@ def start(job: Job, part: roles.Part, *, on_start: Callable[[Run], None] | None 
     if wrapped is None and conf.conf.get("sandbox") != "off" and conf.enforced:
         raise RuntimeError(NO_BOX_ENFORCED.format(role=job.role))
     run.boxed = wrapped is not None
-    _runs[token_id] = run
-    _by_key[(job.c, job.key)] = run
+    return run, wrapped or argv
 
-    async def go(rec: agents.Recorder) -> str:
-        run.rec, run.chat = rec, rec.chat_id
-        status, summary = "failed", ""
-        try:
-            if on_start is not None:
-                on_start(run)
-            summary = await _run(run, wrapped or argv)
-            status = "done"
-            return summary
-        except asyncio.CancelledError:
-            status, summary = "stopped", agents.STOPPED_LINE
-            raise
-        except Exception as e:
-            summary = str(e)
-            raise
-        finally:
-            _runs.pop(token_id, None)
-            if _by_key.get((job.c, job.key)) is run:
-                _by_key.pop((job.c, job.key), None)
-            if on_end is not None:
-                try:
-                    on_end(run, status, summary)
-                except Exception:  # noqa: BLE001 — the run has ended either way
-                    log.exception("%s: the end of the %s program could not be told", job.c, job.role)
 
+def _register(run: Run) -> None:
+    _runs[run.token_id] = run
+    _by_key[(run.c, run.job.key)] = run
+
+
+def _unregister(run: Run) -> None:
+    _runs.pop(run.token_id, None)
+    if _by_key.get((run.c, run.job.key)) is run:
+        _by_key.pop((run.c, run.job.key), None)
+
+
+async def run_in(job: Job, part: roles.Part, rec: agents.Recorder | None) -> str:
+    """Run `part`'s program for `job` in a chat its caller already has (`rec`, None for none) and return what it
+    returns: a view build's turn. HarnessError when it fails, RuntimeError when it may not start (_prepare)."""
+    run, argv = _prepare(job, part)
+    run.rec, run.chat = rec, rec.chat_id if rec is not None else ""
+    _register(run)
     try:
-        meta = agents.start_agent(job.c, job.chat_role or job.role, job.title, go, parent=job.parent,
-                                  by=agents.TERMINAL, agent_type=f"{part.extension}:{job.role}",
-                                  extension=part.extension, way=part.way, **job.fields)
-        run.chat = str(meta["id"])
-    except Exception:
-        _runs.pop(token_id, None)
-        _by_key.pop((job.c, job.key), None)
-        raise
-    return run
+        return await _run(run, argv)
+    finally:
+        _unregister(run)
 
 
 async def _run(run: Run, argv: list[str]) -> str:
@@ -634,9 +670,10 @@ async def _run(run: Run, argv: list[str]) -> str:
     if not run.boxed and run.rec is not None:
         run.rec.text(NO_BOX + "\n")
     hook_auth.grant(run.token_id, run.token, run.allows)
-    hosted = agent_session.host(job.c, job.key, run.chat, agent=ROWS[job.role],
-                                wait_s=agent_session.PERMISSION_WAIT_S, conf=run.conf)
-    hosted.patient = job.patient
+    if run.chat:
+        hosted = agent_session.host(job.c, job.key, run.chat, agent=ROWS[job.role],
+                                    wait_s=agent_session.PERMISSION_WAIT_S, conf=run.conf)
+        hosted.patient = job.patient
     try:
         try:
             run.proc = await asyncio.create_subprocess_exec(
