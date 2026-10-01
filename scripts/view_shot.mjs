@@ -89,8 +89,10 @@ function shownCounts({ marks }) {
 }
 // How the page's text fits its pane at the end: `overlaps`, the places where visible text is drawn over other visible
 // text (not under an opaque element, as below a sticky header), with up to EXAMPLES of their pairs of texts; `cut`, the
-// elements whose own text runs past a box that hides it without an ellipsis; `overflow`, how many px the page is wider
-// than its pane; and `used`, the px across that its text and graphics span, of `width`. Runs in the frame.
+// elements whose own text runs past a box that hides it without an ellipsis; `sideways`, the boxes that scroll sideways,
+// with the start of their text; `overflow`, how many px the page is wider than its pane; `used`, the px across that its
+// text and graphics span, of `width`; and `anchored`, the records and units it draws, of which `outside` are out of
+// view until the analyst scrolls. Runs in the frame.
 function layoutCounts() {
   const EXAMPLES = 5
   const ITEMS_MAX = 3000
@@ -209,8 +211,33 @@ function layoutCounts() {
     cut++
     if (cuts.length < EXAMPLES) cuts.push(el.textContent.replace(/\s+/g, ' ').trim().slice(0, 40))
   }
+  let sideways = 0
+  const wide = []
+  for (const el of document.body.querySelectorAll('*')) {
+    const cs = getComputedStyle(el)
+    if (!['auto', 'scroll'].includes(cs.overflowX) || el.scrollWidth <= el.clientWidth + 20 || el.clientWidth < 100 || !visible(el)) continue
+    if (el.parentElement && el.parentElement.closest('[data-thimble-sideways]')) continue
+    el.setAttribute('data-thimble-sideways', '')
+    sideways++
+    if (wide.length < EXAMPLES) wide.push(el.textContent.replace(/\s+/g, ' ').trim().slice(0, 40))
+  }
+  for (const el of document.querySelectorAll('[data-thimble-sideways]')) el.removeAttribute('data-thimble-sideways')
+  let anchored = 0
+  let outside = 0
+  const seen = new Set()
+  for (const el of document.querySelectorAll('[data-anchor]')) {
+    const ref = el.getAttribute('data-anchor')
+    if (!ref || seen.has(ref) || (el.parentElement && el.parentElement.closest(`[data-anchor="${CSS.escape(ref)}"]`))) continue
+    const r = el.getBoundingClientRect()
+    if (r.width <= 0 || r.height <= 0 || !visible(el)) continue
+    seen.add(ref)
+    anchored++
+    const clip = clipOf(el.parentElement)
+    const view = { l: Math.max(clip.l, 0), t: Math.max(clip.t, 0), r: Math.min(clip.r, W), b: Math.min(clip.b, window.innerHeight) }
+    if (Math.min(r.right, view.r) - Math.max(r.left, view.l) <= 0 || Math.min(r.bottom, view.b) - Math.max(r.top, view.t) <= 0) outside++
+  }
   const overflow = Math.max(0, document.documentElement.scrollWidth - W)
-  return { overlaps, pairs, cut, cuts, overflow, used: maxR > minL ? Math.round(maxR - minL) : 0, width: W }
+  return { overlaps, pairs, cut, cuts, sideways, wide, overflow, used: maxR > minL ? Math.round(maxR - minL) : 0, width: W, anchored, outside }
 }
 
 // The audio and video elements that failed on an MP4 or AAC file in a Chromium without the H.264 and AAC decoders, which

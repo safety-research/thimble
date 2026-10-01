@@ -826,6 +826,14 @@ text overlaps other text in {places}, such as {pairs}
 
 {n} run past a box that hides them without an ellipsis, such as {texts}
 
+## view-layout-sideways
+
+{n} scroll sideways, such as the one that starts {texts}
+
+## view-layout-outside
+
+{n} of the {of} records and units it draws are out of view until the analyst scrolls
+
 ## view-layout-overflow
 
 it is {px} px wider than its pane, so it scrolls sideways

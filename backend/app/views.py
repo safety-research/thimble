@@ -2908,8 +2908,8 @@ LAYOUT_NAMED = 3  # texts a layout note quotes of each kind
 
 def layout_parts(lay: dict[str, Any], wide: bool = False) -> list[str]:
     """How a page did not fit its pane, as view_shot.mjs measured it (`layout`), in a few words each: text drawn over
-    other text, text cut off by its box, a page wider than its pane, and, in the `wide` pane, a page whose text and
-    graphics span less than WIDE_USED of it."""
+    other text, text cut off by its box, boxes that scroll sideways, a page wider than its pane, and, in the `wide` pane,
+    a page whose text and graphics span less than WIDE_USED of it."""
     width = int(lay.get("width") or 0)
     parts = []
     if n := int(lay.get("overlaps") or 0):
@@ -2917,6 +2917,8 @@ def layout_parts(lay: dict[str, Any], wide: bool = False) -> list[str]:
         parts.append(_hint("view-layout-overlap", places=_plural(n, "place"), pairs=pairs))
     if n := int(lay.get("cut") or 0):
         parts.append(_hint("view-layout-cut", n=_plural(n, "text"), texts="; ".join(repr(t) for t in (lay.get("cuts") or [])[:LAYOUT_NAMED])))
+    if n := int(lay.get("sideways") or 0):
+        parts.append(_hint("view-layout-sideways", n=_plural(n, "box"), texts="; ".join(repr(t) for t in (lay.get("wide") or [])[:LAYOUT_NAMED])))
     if px := int(lay.get("overflow") or 0):
         parts.append(_hint("view-layout-overflow", px=px))
     used = int(lay.get("used") or 0)

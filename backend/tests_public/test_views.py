@@ -708,8 +708,10 @@ FIT_HTML = """<!doctype html><html><head><style>body{font:13px sans-serif;margin
 <span style="position:absolute;left:12px;top:2px">Second label here</span></div>
 <div style="width:60px;overflow:hidden;white-space:nowrap">A text far too long for its box</div>
 <div style="width:300px">Narrow column</div>
+<div style="width:120px;overflow-x:auto;white-space:nowrap">Lanes that run on past their box</div>
 <button id="more">Show more</button><div id="extra" hidden data-anchor="board.jsonl#L2">bo: Anyone have the build number?</div>
 <video id="clip" width="160" height="90"></video>
+<div style="height:2000px"></div><div data-anchor="board.jsonl#L3">cy: Confirmed</div>
 <script>
 document.getElementById('clip').src = thimble.mediaUrl('clip.mp4')
 document.getElementById('more').onclick = () => { document.getElementById('extra').hidden = false }
@@ -734,8 +736,10 @@ async def test_the_headless_page_measures_how_its_text_fits_and_clicks_a_control
     assert lay["overlaps"] == 1 and lay["pairs"][0] == ["Overlapping label one", "Second label here"], lay
     assert lay["cut"] == 1 and lay["cuts"] == ["A text far too long for its box"], lay
     assert lay["width"] == views.PANE_WIDE[0] and lay["used"] < views.WIDE_USED * lay["width"] and not lay["overflow"]
+    assert lay["sideways"] == 1 and lay["wide"] == ["Lanes that run on past their box"], lay
+    assert (lay["anchored"], lay["outside"]) == (1, 1), "the record far below the pane is out of view"
     assert "Show more" in plain["controls"]
-    assert plain["shown"]["records"] == 0 and clicked["shown"]["records"] == 1, "the click showed the hidden record"
+    assert plain["shown"]["records"] == 1 and clicked["shown"]["records"] == 2, "the click showed the hidden record"
     assert clicked["actions"] == [{"control": "Show more", "found": True}, {"control": "No such control", "found": False}]
     assert plain["unplayable"] == 1, "an MP4 this Chromium cannot decode is named, not taken for the view's fault"
     notes = views.layout_notes([{**plain, "state": "wide"}])
