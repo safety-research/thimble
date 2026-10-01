@@ -67,6 +67,18 @@ describe('the card', () => {
     expect(whole.querySelector('.chat-perm-always')).not.toBeNull()
   })
 
+  test("a corpus edit thimble's config asks about names the config, not Auto mode, and a writer's still says when it is denied", async () => {
+    const auto = chat('or2', { permission_mode: 'auto' })
+    const writer = chat('w2', { role: 'writer', title: 'Report', permission_mode: 'auto' })
+    const edit = req('e1', { tool: 'Write', what: '/corpus/NOTES.md', asked_by: 'data' })
+    const el = await mount(<PermissionCard ws="mini" asks={[{ chat: 'or2', request: edit }]} metas={new Map([['or2', auto]])} labels={new Map()} />)
+    const why = el.querySelector('.chat-perm-why')?.textContent ?? ''
+    expect(why).toMatch(/every permission mode/)
+    expect(why).not.toMatch(/Auto mode/)
+    const w = await mount(<PermissionCard ws="mini" asks={[{ chat: 'w2', request: { ...edit, id: 'e2' } }]} metas={new Map([['w2', writer]])} labels={new Map()} />)
+    expect(w.querySelector('.chat-perm-why')?.textContent).toMatch(/every permission mode\. Unanswered, it is denied after a minute\.$/)
+  })
+
   test("a code ticket's question says what it asks and why thimble asks, in Bypass too, with Allow and Deny", async () => {
     const dev = chat('d1', { role: 'dev', title: 'ticket #3: Fix the chart', permission_mode: 'bypass' })
     const what = "Apply this change to thimble's own code?"
