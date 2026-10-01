@@ -14,6 +14,7 @@ import { Switch } from '../components/Switch'
 import { TipButton } from '../components/Tooltip'
 import { classesOf, colourVar, globPatterns, isFilesLabel, marksWord, nextColour } from '../files/labels'
 import { labelApi } from '../lib/api'
+import { glyphOf } from '../lib/fileGlyph'
 import { bus } from '../lib/bus'
 import { loadSettings, modelLabel } from '../lib/models'
 import { track } from '../lib/telemetry'
@@ -175,7 +176,7 @@ function AppliedTo({ concept, paths }: { concept: ConceptDetail; paths: string[]
         {fileUnit && cov ? <Chip kind="value">{`${groups.nCovered.toLocaleString()} of ${groups.total.toLocaleString()} files`}</Chip> : null}
         {fileUnit ? <Chip kind="value">{marksWord(concept)}</Chip> : null}
         {(globs.length ? globs : paths).map((p) => (
-          <Chip key={p} kind="ref" icon="file">
+          <Chip key={p} kind="ref" icon={glyphOf(p)}>
             {p}
           </Chip>
         ))}

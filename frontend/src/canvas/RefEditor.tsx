@@ -5,13 +5,14 @@
 import { useEffect, useLayoutEffect, useRef, type ClipboardEvent, type KeyboardEvent } from 'react'
 import { BARE_SRC } from '../chat/markdown'
 import { Icon, type IconName } from '../components/Icon'
-import { compactLabel, kindIcon, refTone } from '../components/RefChip'
-import { parseRef, splitValueRef } from '../lib/refs'
+import { compactLabel, refIcon, refTone } from '../components/RefChip'
+import { FILE_GLYPHS } from '../lib/fileGlyph'
+import { splitValueRef } from '../lib/refs'
 
 const BRACKET_SRC = String.raw`\[\[((?:[^\[\]\n]|\[[^\[\]\n]*\])+?)\]\]`
 const TOKEN_RE = new RegExp(`${BRACKET_SRC}|${BARE_SRC}`, 'g')
 /** the glyphs a token may carry, drawn once by React in a hidden template and copied into the tokens */
-const GLYPHS: IconName[] = ['cell', 'group', 'label', 'thread', 'file', 'report', 'view', 'cite']
+const GLYPHS: IconName[] = [...new Set<IconName>(['cell', 'group', 'label', 'thread', 'file', 'report', 'view', 'cite', 'terminal', ...FILE_GLYPHS])]
 
 /** One run of the markup: text as it is, or a ref token with the markup it came from. */
 export type RefPart = { text: string } | { raw: string; ref: string; value?: string }
@@ -63,7 +64,7 @@ function tokenEl(part: Extract<RefPart, { raw: string }>, tpl: HTMLElement | nul
   el.contentEditable = 'false'
   el.dataset.raw = part.raw
   el.dataset.ref = part.ref
-  const icon = kindIcon(parseRef(part.ref)?.kind)
+  const icon = refIcon(part.ref)
   if (part.value != null) {
     el.className = 'refedit-token refchip refchip-value refchip-citation'
     el.append(part.value)

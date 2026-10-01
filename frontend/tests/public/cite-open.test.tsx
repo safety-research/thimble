@@ -6,6 +6,7 @@
 import { act } from 'react'
 import { afterEach, beforeAll, describe, expect, test, vi } from 'vitest'
 import { lineOmitted, Output, OutputText, storedLineNumber } from '../../src/components/Outputs.tsx'
+import { RefEditor } from '../../src/canvas/RefEditor.tsx'
 import { GlyphCites, RefChip } from '../../src/components/RefChip.tsx'
 import { api } from '../../src/lib/api.ts'
 import { bus } from '../../src/lib/bus.ts'
@@ -82,6 +83,16 @@ describe('a bare citation in a card or a reply', () => {
       expect(el.getAttribute('aria-label'), ref).toContain(name)
       expect(el.querySelector('svg.chip-ico')?.classList.contains(`icon-${glyph}`), ref).toBe(true)
     }
+  })
+
+  test('keeps the same glyph while the takeaway is edited', async () => {
+    const el = await mount(<RefEditor value="See [[runs/r1/notes.jsonl#L12]], [[NOTES.md]] and [[card:ab12cd34]]." onDone={() => undefined} label="Takeaway" />)
+    const glyphs = [...el.querySelectorAll<HTMLElement>('.refedit-token')].map((t) => [t.dataset.ref, [...(t.querySelector('svg.chip-ico')?.classList ?? [])].find((c) => c.startsWith('icon-'))])
+    expect(glyphs).toEqual([
+      ['runs/r1/notes.jsonl#L12', 'icon-braces'],
+      ['NOTES.md', 'icon-markdown'],
+      ['card:ab12cd34', 'icon-cell'],
+    ])
   })
 })
 

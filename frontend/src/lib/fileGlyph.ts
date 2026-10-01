@@ -16,6 +16,9 @@ const GLYPHS: [RegExp, IconName][] = [
   [/\.(txt|text|rst|log|pdf|rtf|tex|docx?)$/i, 'doc'],
 ]
 
+/** Every glyph glyphOf gives. */
+export const FILE_GLYPHS: readonly IconName[] = [...GLYPHS.map(([, g]) => g), 'page']
+
 /** The glyph of a file, by its kind as its name says (VS Code's way): braces for JSON and
  * JSON lines, a grid for tables, a cylinder for databases, the markdown mark, a terminal for a shell script, a notebook,
  * a picture, an archive, sliders for configuration, angle brackets for source code, a page with lines for text, and a
