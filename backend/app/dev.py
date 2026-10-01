@@ -165,7 +165,7 @@ VIEW_REPAIRS = max(0, int(os.environ.get("THIMBLE_VIEW_REPAIRS", "2") or "2"))
 ASK_TIMEOUT_S = float(os.environ.get("THIMBLE_DEV_ASK_TIMEOUT_S", "") or 15 * 60)
 QUIET_NOTE_S = max(1.0, float(os.environ.get("THIMBLE_DEV_QUIET_NOTE_S", "") or 10 * 60))
 QUIET_LINE = "no activity for {minutes}"
-ASK_TIMED_OUT = "Stopped because nobody answered the session's question within {wait}. Retry wakes it again."
+ASK_TIMED_OUT = "stopped because nobody answered the session's question within {wait}. Retry wakes it again."
 # How long a server may take to answer /api/health (boot_check, restart_watch.py) before the change counts as breaking
 # its start.
 BOOT_TIMEOUT_S = float(os.environ.get("THIMBLE_DEV_BOOT_TIMEOUT_S", "") or 90)
@@ -1952,12 +1952,14 @@ APPLY_WHY = ("It changes {files}. thimble asks this before any change reaches it
              "Unanswered, it is not applied after {wait}, and it stays on branch {branch}.")
 APPLY_NOT_ALLOWED = ("the analyst did not allow the change into thimble's own code, so it was not applied; it stays on "
                      "branch {branch}")
+APPLY_UNANSWERED = "not applied because nobody answered within {wait}. The change stays on branch {branch}."
 # where the ticket's checks can't run in a box (ticket_box.problem), the question comes before the ticket starts too
 CODE_QUESTION = ("This edits thimble's own code, which then runs outside the sandbox (its test server, its checks and "
                  "git). Allow?")
 CODE_WHY = ("The ticket's checks can't run in a sandbox here ({why}), so thimble asks this before every code ticket, in "
             "every permission mode. Unanswered, the ticket is cancelled after {wait}.")
 CODE_NOT_ALLOWED = "the analyst did not allow it to edit thimble's own code, so it did not start"
+CODE_UNANSWERED = "cancelled because nobody answered within {wait} whether it may edit thimble's own code"
 CODE_NOBODY = ("it has no workspace, so no permission card could ask the analyst about thimble's own code, and it did "
                "not start")
 FILES_SHOWN = 8
@@ -1970,7 +1972,8 @@ def contained(conf: "userconf.Session | str | None") -> bool:
 
 
 async def _code_refusal(t: dict[str, Any]) -> str:
-    """'' once the analyst allowed an uncontained ticket on its chat's card (CODE_QUESTION), else why it did not start."""
+    """'' once the analyst allowed an uncontained ticket on its chat's card (CODE_QUESTION), else why it did not start:
+    a deny, or nobody answering within PERMISSION_WAIT_S."""
     from . import agent_session  # noqa: PLC0415
 
     if not t.get("workspace") or not t.get("chat"):
@@ -1979,7 +1982,10 @@ async def _code_refusal(t: dict[str, Any]) -> str:
                           wait=agent_session.wait_words(PERMISSION_WAIT_S))
     got = await agent_session.ask(str(t["workspace"]), ticket_key(t["id"]), CODE_TOOL, {"description": CODE_QUESTION},
                                   force=True, why=why)
-    return "" if got.get("behavior") == "allow" else CODE_NOT_ALLOWED
+    if got.get("behavior") == "allow":
+        return ""
+    return (CODE_UNANSWERED.format(wait=agent_session.wait_words(PERMISSION_WAIT_S)) if agent_session.timed_out(got)
+            else CODE_NOT_ALLOWED)
 
 
 def files_words(touched: list[str]) -> str:
@@ -2005,6 +2011,8 @@ async def _apply_refusal(t: dict[str, Any], touched: list[str], branch: str, app
         got = await agent_session.ask(str(t["workspace"]), ticket_key(t["id"]), CODE_TOOL,
                                       {"description": APPLY_QUESTION, "files": touched}, force=True, why=why)
         allowed = got.get("behavior") == "allow"
+        if not allowed and agent_session.timed_out(got):
+            return APPLY_UNANSWERED.format(wait=agent_session.wait_words(PERMISSION_WAIT_S), branch=branch)
     return "" if allowed else APPLY_NOT_ALLOWED.format(branch=branch)
 
 

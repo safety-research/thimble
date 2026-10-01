@@ -2329,6 +2329,12 @@ def timed_out_line(seconds: float) -> str:
     return TIMED_OUT_LINE.format(wait=wait_words(seconds))
 
 
+def timed_out(answer: dict[str, Any]) -> bool:
+    """Whether `answer`, what ask returned, denies the call because nobody answered in time (TIMED_OUT_LINE)."""
+    head = TIMED_OUT_LINE.split("{wait}", 1)[0]
+    return answer.get("behavior") == "deny" and str(answer.get("message") or "").startswith(head)
+
+
 async def ask(c: str, key: str | None, tool_name: str, inp: Any, agent_id: str | None = None,
               agent_type: str | None = None, event: str = REQUEST, reason: str = "",
               tool_use_id: str | None = None, suggestions: Any = None, force: bool = False,
