@@ -158,7 +158,7 @@ function declineLine(seconds: number | null | undefined): string {
  * unanswered, that it was, and for one of the session's own calls that the agent went on without it. Pure. */
 export function askWhy(ask: PendingAsk, metas: ReadonlyMap<string, ChatMeta>): string {
   const p = ask.request
-  if (p.expired) return `Nobody answered within ${waitWords(p.wait_s ?? 60)}, so thimble declined it${p.why ? '' : ' and the agent went on without it'}.`
+  if (p.expired) return `Nobody answered ${p.wait_s ? `within ${waitWords(p.wait_s)}` : 'in time'}, so thimble declined it${p.why ? '' : ' and the agent went on without it'}.`
   if (p.why) return p.why
   if (classifierDown(p)) {
     const tries = p.rechecked ? `, all ${p.rechecked + 1} times it was asked` : ''

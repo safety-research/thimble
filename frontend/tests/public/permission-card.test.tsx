@@ -62,6 +62,7 @@ describe('the requests and their words', () => {
     const late = (extra: Partial<PermissionRequest>) => askWhy({ chat: 'or1', request: req('e1', { expired: T(9), wait_s: 600, ...extra }) }, METAS)
     expect(late({})).toBe('Nobody answered within 10 minutes, so thimble declined it and the agent went on without it.')
     expect(late({ why: "This edits thimble's own code." })).toBe('Nobody answered within 10 minutes, so thimble declined it.')
+    expect(late({ wait_s: 180 })).toContain('within 3 minutes')
   })
 })
 
