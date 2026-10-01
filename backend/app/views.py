@@ -278,7 +278,11 @@ def move_to_local(ws: Path) -> list[str]:
     folder (one that holds a view's file, or one a proposal names) is renamed into extension/views/ whole, its files,
     cache and times unchanged, so its proposal, kept versions and indexes find it as before. A slug the local extension
     holds already stays where it is. Paths into the moved folders in the card types' registry are updated. Run again,
-    it moves nothing. Returns the slugs moved."""
+    it moves nothing. A link where the local extension or its views folder goes, which a kernel of an older thimble
+    could leave, is removed. Returns the slugs moved."""
+    for p in (ws / LOCAL_SUBDIR, ws / LOCAL_SUBDIR / VIEWS_SUBDIR):
+        if p.is_symlink():
+            p.unlink()
     old = ws / VIEWS_SUBDIR
     try:
         raw = read_json(old / PROPOSALS_FILE, [])

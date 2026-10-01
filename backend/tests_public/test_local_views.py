@@ -183,6 +183,11 @@ def test_a_link_left_where_the_local_extension_goes_is_replaced_by_a_folder(corp
     views.ensure_local(ws)
     assert not (ws / "extension" / "views" / "planted").exists()
 
+    other = config.workspace_dir(OTHER)
+    (other / "extension").symlink_to(ws / "extension", target_is_directory=True)
+    assert views.migrate_workspaces() == {}
+    assert not (other / "extension").exists(), "a link left by an older kernel goes at the start"
+
     from app import notebook
 
     shutil.rmtree(ws / "extension")
