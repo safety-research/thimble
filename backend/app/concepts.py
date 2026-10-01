@@ -1007,7 +1007,7 @@ def line_source(corpus_dir: Path, src: dict) -> bool:
 
 def text_source(corpus_dir: Path, src: dict) -> bool:
     """Whether a whole file's text can be read line by line, as a unit of a whole file or run reads it: anything but a
-    database, a PDF and another binary file. Blocking."""
+    database, a PDF and another binary file, whose rows or pages it reads instead (concept_scan.group_texts). Blocking."""
     try:
         return records.reader_of(config.safe_corpus_path(corpus_dir, src["path"]), src["path"]) in ("lines", "json", "csv")
     except (OSError, ValueError):
@@ -2369,15 +2369,12 @@ async def _apply_regex_units(c: str, concept: dict, units: Iterable[Unit], out: 
     return done, 0, message
 
 
-def _split_scan(corpus_dir: Path, sources: list[dict], unit: str, index: dict) -> tuple[list[dict], list[dict]]:
-    """(the sources the scan pool reads, the rest): for records the files indexed as lines, for whole files and runs
-    those whose every file reads as text. Blocking."""
-    if unit == "record":
-        return [s for s in sources if s["path"] in index["files"]], [s for s in sources if s["path"] not in index["files"]]
-    text = {s["path"] for s in sources if text_source(corpus_dir, s)}
-    groups = groups_for(sources, unit)
-    rest = {p for g in groups if not all(p in text for p in g["paths"]) for p in g["paths"]}
-    return [s for s in sources if s["path"] not in rest], [s for s in sources if s["path"] in rest]
+def _split_scan(sources: list[dict], unit: str, index: dict) -> tuple[list[dict], list[dict]]:
+    """(the sources the scan pool reads, the rest): for records the files indexed as lines; every file of a whole-file
+    or run unit, whose databases and PDFs the pool reads by their rows and pages (concept_scan.group_texts)."""
+    if unit != "record":
+        return sources, []
+    return [s for s in sources if s["path"] in index["files"]], [s for s in sources if s["path"] not in index["files"]]
 
 
 def implicit_value(labels: list[str]) -> str | None:
@@ -2388,11 +2385,14 @@ def implicit_value(labels: list[str]) -> str | None:
 
 
 def build_code_wrapper(concept: dict, groups: list[dict], limit: int | None, rows_file: Path | str,
-                       units_file: Path | str | None = None, quiet: str | None = None, ts: str = "") -> str:
+                       units_file: Path | str | None = None, quiet: str | None = None, ts: str = "",
+                       parts_file: Path | str | None = None) -> str:
     """The code the code kind runs in the labels kernel: the analyst's spec (defining `label(unit)`) plus a loop over the units
     that writes one JSON line per unit ({ref, label, confidence, spans?}, or {ref, error}) to `rows_file`. File units are
-    read from `groups` (relative to the kernel's cwd); cell and span units come from `units_file`. Both paths must be
-    absolute. With `quiet` (implicit_value), records of whole files that take that value get cover lines instead of rows.
+    read from `groups` (relative to the kernel's cwd), the records of their databases and PDFs from `parts_file`
+    (_write_parts); cell and span units, and records the wrapper does not read itself, come from `units_file`. The
+    paths must be absolute. With `quiet` (implicit_value), records of whole files that take that value get cover lines
+    instead of rows.
 
     The file list goes into the code as one JSON string rather than a list literal: a long list literal makes one huge line,
     and Python 3.12's tokenizer keeps a copy of the line per token, which can exhaust the kernel's memory."""
@@ -2405,12 +2405,16 @@ def build_code_wrapper(concept: dict, groups: list[dict], limit: int | None, row
         f"_limit = {int(limit or 0)}\n"
         f"_rows_file = {str(rows_file)!r}\n"
         f"_units_file = {(str(units_file) if units_file is not None else None)!r}\n"
+        f"_parts_file = {(str(parts_file) if parts_file is not None else None)!r}\n"
         f"_quiet = {quiet!r}\n"
         f"_chunk = {CODE_COVER_LINES}\n"
         f"_ts = {ts!r}\n"
         "_n = 0\n"
         "_stats = {'errors': 0, 'first_error': None}\n\n"
         "def _read(_p):\n"
+        "    if _p in _parts:\n"
+        "        yield from enumerate(_parts[_p], 1)\n"
+        "        return\n"
         "    with open(_p, encoding='utf-8', errors='replace') as _f:\n"
         "        for _i, _line in enumerate(_f, 1):\n"
         "            _line = _line.rstrip('\\n')\n"
@@ -2426,6 +2430,7 @@ def build_code_wrapper(concept: dict, groups: list[dict], limit: int | None, row
         "        for _line in _f:\n"
         "            if _line.strip():\n"
         "                yield _json.loads(_line)\n\n"
+        "_parts = {_x['path']: _x['records'] for _x in _read_units(_parts_file)} if _parts_file else {}\n\n"
         "def _emit(_ref, _rec, _implicit=False, _line=None):\n"
         "    try:\n"
         "        _out = label(_rec)\n"
@@ -2616,28 +2621,39 @@ async def _apply_code(c: str, concept: dict, sources: list[dict], units: list[Un
     stamp = secrets.token_hex(4)
     rows_file = out.with_name(f".{concept['id']}.{stamp}.rows.tmp")
     units_file: Path | None = None
+    parts_file: Path | None = None
     groups: list[dict] = []
     rest: list[dict] = []
     if units is None:
-        # the wrapper reads files of lines itself; the records of the others go to it in the units file
         corpus_dir = config.corpus_dir(c)
-        scanned, rest = await asyncio.to_thread(_split_code, corpus_dir, sources, concept["unit"])
-        groups = groups_for(scanned, concept["unit"])
+        if concept["unit"] == "record":
+            # the wrapper reads files of lines itself; the records of the others go to it in the units file
+            lined = await asyncio.to_thread(lambda: [line_source(corpus_dir, s) for s in sources])
+            rest = [s for s, ok in zip(sources, lined) if not ok]
+            groups = groups_for([s for s, ok in zip(sources, lined) if ok], "record")
+        else:
+            # the wrapper reads the files of each unit, and the rows or pages of its databases and PDFs from a file
+            groups = groups_for(sources, concept["unit"])
+            others = await asyncio.to_thread(lambda: [s for s in sources if not text_source(corpus_dir, s)])
+            if others:
+                parts_file = out.with_name(f".{concept['id']}.{stamp}.parts.tmp")
+                await asyncio.to_thread(_write_parts, parts_file, corpus_dir, others)
     if units is not None or rest:
         units_file = out.with_name(f".{concept['id']}.{stamp}.units.tmp")
-        given = units if units is not None else _code_units(config.corpus_dir(c), rest, concept["unit"])
+        given = units if units is not None else iter_units(config.corpus_dir(c), rest, "record")
         await asyncio.to_thread(_write_units, units_file, given)
     # a run over the records of whole files of lines writes no row for a record that takes the negative (labels_store,
     # covers)
     quiet = implicit_value(concept["labels"]) if units is None and concept["unit"] == "record" and not limit else None
-    code = build_code_wrapper(concept, groups, limit, rows_file, units_file, quiet=quiet, ts=_now())
+    code = build_code_wrapper(concept, groups, limit, rows_file, units_file, quiet=quiet, ts=_now(), parts_file=parts_file)
     try:
         outputs, _n, _status = await notebook.execute_on(c, CODE_KERNEL, code)
         labeled, errors, message, matches = await asyncio.to_thread(_collect_code_rows, outputs, rows_file, out, concept["labels"][0])
     finally:
         rows_file.unlink(missing_ok=True)
-        if units_file is not None:
-            units_file.unlink(missing_ok=True)
+        for f in (units_file, parts_file):
+            if f is not None:
+                f.unlink(missing_ok=True)
     _progress(c, concept["id"], matches=matches)
     return labeled, errors, message
 
@@ -2660,25 +2676,16 @@ def _clear_files(out: Path, paths: list[str]) -> None:
             log.exception("labels store %s: a write failed; the store is rebuilt from the labels file on the next read", out.name)
 
 
-def _split_code(corpus_dir: Path, sources: list[dict], unit: str) -> tuple[list[dict], list[dict]]:
-    """(the sources the code kind's wrapper reads line by line, the rest): for records the files whose records are lines,
-    for whole files and runs those whose every file reads as text. Blocking."""
-    if unit == "record":
-        lined = [line_source(corpus_dir, s) for s in sources]
-        return [s for s, ok in zip(sources, lined) if ok], [s for s, ok in zip(sources, lined) if not ok]
-    return _split_scan(corpus_dir, sources, unit, {"files": {}})
-
-
-def _code_units(corpus_dir: Path, sources: list[dict], unit: str) -> Iterator[Unit]:
-    """The units of sources the wrapper does not read itself: each record for records, else each file or run with its
-    records listed as the wrapper lists a file's (`records`)."""
-    if unit == "record":
-        yield from iter_units(corpus_dir, sources, unit)
-        return
-    by_path = {s["path"]: s for s in sources}
-    for g in groups_for(sources, unit):
-        recs = [r["record"] for p in g["paths"] for r in _iter_records(corpus_dir, by_path[p])]
-        yield Unit(g["ref"], g["paths"], lambda: iter(()), {"ref": g["ref"], "paths": g["paths"], "records": recs})
+def _write_parts(parts_file: Path, corpus_dir: Path, sources: list[dict]) -> None:
+    """The file the code kind's wrapper reads the records of databases, PDFs and other binary files from, for the units
+    of whole files and runs: one JSON line per file, {path, records}, none for a binary file no reader reads. Blocking."""
+    with open(parts_file, "w", encoding="utf-8") as f:
+        for s in sources:
+            try:
+                recs = [r["record"] for r in _iter_records(corpus_dir, s)]
+            except (OSError, ValueError, sqlite3.Error):
+                recs = []
+            f.write(json.dumps({"path": s["path"], "records": recs}, ensure_ascii=False, default=str) + "\n")
 
 
 def _write_units(units_file: Path, units: Iterable[Unit]) -> None:
@@ -2833,7 +2840,7 @@ async def run_apply(c: str, concept_id: str, paths: list[str] | None = None, lim
                 saves = unit == "record" and await asyncio.to_thread(holds_saves, corpus_dir, sources)
                 if unit in FILE_UNITS and not sampled and not saves:
                     # the files the scan pool reads line by line, then the records of the others one by one
-                    scanned, rest = await asyncio.to_thread(_split_scan, corpus_dir, sources, unit, index)
+                    scanned, rest = _split_scan(sources, unit, index)
                     labeled = failed = 0
                     message = None
                     if scanned:

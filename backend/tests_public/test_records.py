@@ -301,6 +301,39 @@ async def test_a_code_label_gets_each_record_as_its_reader_reads_it(api, corpus,
         "orders.csv#row=1": 2, "orders.csv#row=2": 4, "orders.csv#row=3": 6}
 
 
+def _runs_of(corpus: Path) -> None:
+    for run, line in (("r1", "the tests pass"), ("r2", "nothing merged")):
+        (corpus / "runs" / run / "agents").mkdir(parents=True)
+        (corpus / "runs" / run / "agents" / "a.jsonl").write_text(json.dumps({"text": line}) + "\n")
+        (corpus / "runs" / run / "manifest.json").write_text(json.dumps({"run": run}))
+    write_forge_db(corpus / "runs" / "r1" / "forge.db")
+    shutil.copy(PDF_SAMPLE, corpus / "runs" / "r2" / "review.pdf")
+
+
+async def test_a_run_unit_reads_the_rows_of_its_database_and_the_pages_of_its_pdf(api, corpus, workspaces_tmp, monkeypatch):
+    from app import notebook
+
+    _runs_of(corpus)
+    monkeypatch.setattr(notebook, "execute_on", _code_inproc)
+    k = await _label(api, name="merged", kind="regex", spec=r"state: merged|Crew rest", unit="run", labels=["merged", "no"])
+    s = await _apply(api, k, ["runs"])
+    assert s["status"] == "done" and s["failed"] == 0 and s["total"] == 2, s
+    rows = {r["ref"]: r for r in concepts.read_labels(workspaces_tmp / CORPUS, k["id"])}
+    assert rows["runs/r1"]["label"] == "merged" and rows["runs/r1"]["rationale"].startswith("runs/r1/forge.db#prs/")
+    assert rows["runs/r2"]["label"] == "merged" and rows["runs/r2"]["rationale"].startswith("runs/r2/review.pdf#p2")
+
+    spec = ("def label(unit):\n"
+            "    states = [r.get('state') for r in unit['records'] if isinstance(r, dict)]\n"
+            "    pages = [r['page'] for r in unit['records'] if isinstance(r, dict) and 'page' in r]\n"
+            "    return ('merged' if 'merged' in states else 'no', 1.0, [str(len(pages))])\n")
+    code = await _label(api, name="merged code", kind="code", spec=spec, unit="run", labels=["merged", "no"])
+    s = await _apply(api, code, ["runs"])
+    assert s["status"] == "done" and s["failed"] == 0, s
+    rows = {r["ref"]: r for r in concepts.read_labels(workspaces_tmp / CORPUS, code["id"])}
+    assert rows["runs/r1"]["label"] == "merged" and rows["runs/r2"]["label"] == "no"
+    assert rows["runs/r2"]["spans"] == ["3"], "the PDF's three pages, each a record of the run"
+
+
 async def test_a_prompt_label_reads_each_record_s_text(api, corpus, workspaces_tmp, monkeypatch):
     seen: list[tuple[str, str]] = []
 
