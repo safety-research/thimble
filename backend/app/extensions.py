@@ -116,7 +116,6 @@ WEB_TOOLS = userconf.WEB_TOOLS
 SUBAGENT_PASSED = ("mcpServers", "maxTurns", "skills", "color")
 CONFIG_UNREAD = "thimble's config cannot be read"
 NOT_ADDED = "not added"
-ADD_NOTE = "Not added. Turn it on to add it."  # Settings' line beside an extension thimble ships that is not added
 CHECKING = "thimble is checking whether it fits here"
 NO_FILES = "no file here is in its scope"
 BOTH = "another active extension gives it too"
@@ -1901,11 +1900,10 @@ def _settings_words(a: dict[str, Any], data: bool = True) -> str:
     return ", ".join(x for x in (network, web, edits) if x)
 
 
-def consent(e: dict[str, Any], conf: dict[str, Any], wrapped: bool | None = None) -> str:
+def consent(e: dict[str, Any], conf: dict[str, Any]) -> str:
     """The settings what the extension `e` runs runs under, in words: those of thimble's config for each role it changes
-    or adds to, each task its program runs (its config agent's, tasks.Task) and each agent it adds, the MCP servers its
-    agents start, then whether its code runs in a sandbox, as `wrapped` says (left out when None). '' for an extension
-    that runs neither."""
+    or adds to, each task its program runs (its config agent's, tasks.Task) and each agent it adds, and the MCP servers
+    its agents start. '' for an extension that runs neither."""
     agents_conf = conf.get("agents") if isinstance(conf.get("agents"), dict) else {}
     used: dict[str, str] = {}
     roles = [r["role"] for r in e.get("roles") or [] if isinstance(r, dict) and r.get("role")]
@@ -1936,10 +1934,7 @@ def consent(e: dict[str, Any], conf: dict[str, Any], wrapped: bool | None = None
     groups: dict[str, list[str]] = {}
     for who, words in used.items():
         groups.setdefault(words, []).append(who)
-    lines = [f"{' and '.join(who)}: {words}." for words, who in groups.items()]
-    if wrapped is not None and has_code(e):
-        lines.append("Its code runs in a sandbox." if wrapped else "Its code runs without a sandbox.")
-    return " ".join(lines)
+    return " ".join(f"{' and '.join(who)}: {words}." for words, who in groups.items())
 
 
 def kernels_wrapped(c: str) -> bool:
@@ -1950,14 +1945,16 @@ def kernels_wrapped(c: str) -> bool:
 
 
 def public(c: str) -> dict[str, Any]:
-    """Settings' extensions: each one added, whether it runs here and why not, the line Settings shows beside it (why
-    not, unless its switch here turned it off), where its switch stands, whether it cannot run here whatever the switch
-    says (`locked`), what it gives (`parts`), the settings it runs under (`consent`), whether Run now can run its
-    orientation here once it is on (`orients`, _can_run) and whether Settings offers to run it now (`offer`),
-    and its views: each shown here or not, the line Settings shows beside it (`note`), where its switch stands
-    (switched here, else as its check says) and whether that switch can change anything (`locked`: the extension does
-    not run here or no file here matches the view's claims). Then each extension thimble ships that is not added, off
-    and locked. Then the conflicts among those that run, and whether an orientation ran here (`orientation_ran`)."""
+    """Settings' extensions: each one added, whether thimble ships it (`builtin`), whether it runs here and why not, the
+    line Settings shows beside it (why not, unless its switch here turned it off), where its switch stands, whether it
+    cannot run here whatever the switch says (`locked`), what it gives (`parts`), the settings its agents run under
+    (`consent`), whether its code runs in a sandbox (`sandboxed`, None for one with no code), whether Run now can run
+    its orientation here once it is on (`orients`, _can_run) and whether Settings offers to run it now (`offer`), and
+    its views: each shown here or not, the line Settings shows beside it (`note`), where its switch stands (switched
+    here, else as its check says) and whether that switch can change anything (`locked`: the extension does not run
+    here or no file here matches the view's claims). Then each extension thimble ships that is not added, off with no
+    line, its switch adding it (`addable`). Then the conflicts among those that run, and whether an orientation ran
+    here (`orientation_ran`)."""
     state = read_state(c)
     off = userconf.extensions_off()
     conf = userconf.load_or_defaults(c)[0]
@@ -1974,19 +1971,19 @@ def public(c: str) -> dict[str, Any]:
                "locked": not e.get("active") or not v.get("here")} for v in _list(e, "views")]
         why = _one(e.get("why"))
         out.append({"name": name, "version": _one(e.get("version")), "description": _one(e.get("description")),
-                    "active": bool(e.get("active")), "why": why,
+                    "builtin": bool(e.get("builtin")), "active": bool(e.get("active")), "why": why,
                     "note": "" if name in state["off"] else why, "on": name not in state["off"],
                     "locked": bool(config_off(name, off)) or bool(e.get("problems")), "views": vs,
                     "parts": parts(e, _unused(c, name, clash) if e.get("active") else None),
-                    "consent": consent({**e, "name": name}, conf, wrapped),
+                    "consent": consent({**e, "name": name}, conf), "sandboxed": wrapped if has_code(e) else None,
                     "orients": _can_run(c, name, state["extensions"], replacing, ran), "offer": name in offers})
     for n, v in not_added():
         if n in state["extensions"]:
             continue
         info = read_extension(builtins()[n], n, set())
-        out.append({"name": n, "version": v, "description": info["description"], "active": False, "why": NOT_ADDED,
-                    "note": ADD_NOTE, "on": False, "locked": False, "addable": True, "views": [], "parts": parts(info),
-                    "consent": "", "orients": orients(info), "offer": False})
+        out.append({"name": n, "version": v, "description": info["description"], "builtin": True, "active": False,
+                    "why": NOT_ADDED, "note": "", "on": False, "locked": False, "addable": True, "views": [],
+                    "parts": parts(info), "consent": "", "sandboxed": None, "orients": orients(info), "offer": False})
     return {"extensions": out, "conflicts": conflict_lines(clash), "orientation_ran": ran[0]}
 
 
