@@ -732,7 +732,7 @@ async function shootState(browser, opt, doc, state, i) {
     const shown = await frame.evaluate(shownCounts, { marks, record: RECORD_REF.source }).catch(() => null)
     const layout = await frame.evaluate(layoutCounts).catch(() => null)
     const controls = await frame.evaluate(controlList, { sel: CONTROLS, max: CONTROLS_MAX }).catch(() => [])
-    const on = await page.evaluate(() => window.__on || [])
+    const on = await page.evaluate(() => window.__on || []).catch(() => [])
     const labelControls = await frame.evaluate((ids) => [...document.querySelectorAll('[data-label]')].filter((e) => ids.includes(e.getAttribute('data-label'))).length, on).catch(() => 0)
     const painted = ready ? await paintedMarks(page, el, frame, marks).catch((e) => ({ error: plain(e) })) : null
     return {
