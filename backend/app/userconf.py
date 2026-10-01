@@ -351,6 +351,17 @@ def _put(d: dict[str, Any], path: tuple[str, ...], value: Any) -> None:
     d[path[-1]] = value
 
 
+def set_extension_enabled(name: str, on: bool) -> None:
+    """`thimble extension on | off <name>`: `extensions.<name>.enabled: false` in the file in thimble's home for off,
+    the key taken out for on, since an added extension is on. ConfigError when the file cannot be read."""
+    with _lock:
+        data = _raw(global_file())
+        before = copy.deepcopy(data)
+        _put(data, ("extensions", name, "enabled"), _MISSING if on else False)
+        if data != before:
+            _write(global_file(), data)
+
+
 def leaves(patch: dict[str, Any], at: tuple[str, ...] = ()) -> list[tuple[tuple[str, ...], Any]]:
     """Each (path, value) of a nested patch; an object under `agents.<name>` is walked, any other value is a leaf."""
     out: list[tuple[tuple[str, ...], Any]] = []

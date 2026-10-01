@@ -73,8 +73,8 @@ usage: thimble [claude flags...]          start thimble in this folder: a new Cl
                                           delete workspaces or archived runs by id, after asking
        thimble feedback ["what went wrong"] [--no-logs]
                                           write a problem report to send the developer
-       thimble extension add <git URL | folder | name> [--yes] | list | remove <name>
-                                          add, list or remove extensions
+       thimble extension add <folder | git URL | name> [--yes] | on <name> | off <name> | list | remove <name>
+                                          add, switch on or off, list or remove extensions
        thimble update [--from <zip>]      bring the install up to date
        thimble uninstall [--yes] [--keep-home]
 EOF

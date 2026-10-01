@@ -17,7 +17,7 @@ import { Popover } from '../components/Menu'
 import { Spinner } from '../components/Spinner'
 import { useTooltip } from '../components/Tooltip'
 import { api } from '../lib/api'
-import { ExtensionsSettings, changedExtensions, changedViews, viewKey } from './ExtensionsSettings'
+import { ExtensionsSettings, answeredRuns, changedExtensions, changedViews, viewKey } from './ExtensionsSettings'
 import { hasFastMode, invalidateSettings, loadSettings, modelChoices, modelLabel, sameModel } from '../lib/models'
 import { EFFORTS, ROLES, type Attached, type Extensions, type MainEffort, type ModeAgent, type ModelConf, type OrientPermissions, type Settings } from '../lib/types'
 import { bus } from '../lib/bus'
@@ -138,6 +138,8 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
   const [exts, setExts] = useState<Extensions | null>(null)
   const [extOn, setExtOn] = useState<Record<string, boolean>>({})
   const [viewOn, setViewOn] = useState<Record<string, boolean>>({})
+  // each answer to an extension's question whether to run its orientation now, sent on Save
+  const [runAnswers, setRunAnswers] = useState<Record<string, boolean>>({})
 
   useEffect(() => {
     if (!open) return
@@ -150,6 +152,7 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
         setExts(ex)
         setExtOn(Object.fromEntries((ex?.extensions ?? []).map((e) => [e.name, e.on])))
         setViewOn(Object.fromEntries((ex?.extensions ?? []).flatMap((e) => (e.views ?? []).map((v) => [viewKey(e.name, v.slug), v.on]))))
+        setRunAnswers({})
         const a = main?.meta?.attached ?? null
         setSettings(s)
         setModeRows(s.permission_modes ?? {})
@@ -182,6 +185,12 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
       if (effortNow) await api.setEffort(ws, main.effort as MainEffort)
       if (fastNow) await api.setFast(ws, !!main.fast)
       if (effortNow || fastNow) bus.emit('toast', { text: `Main's effort and fast mode: ${NEXT_LAUNCH}.`, kind: 'info' })
+      // last, so an orientation that cannot be sent the instructions leaves the other settings saved
+      for (const [name, run] of exts ? answeredRuns(exts, extOn, runAnswers) : []) {
+        const { status } = await api.answerExtensionOrientation(ws, name, run)
+        if (status === 'resumed') bus.emit('toast', { text: `The orientation is running ${name}'s instructions.`, kind: 'info' })
+        if (status === 'queued') bus.emit('toast', { text: `${name}'s instructions run when the orientation's run ends.`, kind: 'info' })
+      }
       invalidateSettings(ws)
       onClose()
     } catch (e) {
@@ -324,6 +333,8 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
             setOn={(name, v) => setExtOn((cur) => ({ ...cur, [name]: v }))}
             viewOn={viewOn}
             setViewOn={(key, v) => setViewOn((cur) => ({ ...cur, [key]: v }))}
+            answers={runAnswers}
+            setAnswer={(name, run) => setRunAnswers((cur) => ({ ...cur, [name]: run }))}
           />
         )}
         {(error || settings?.config_error) && <div className="settings-error">{error || settings?.config_error}</div>}

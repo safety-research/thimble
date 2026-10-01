@@ -18,6 +18,7 @@ import { fragmentIn, parseRef, refPath } from '../lib/refs'
 import { pressedPane, surfaceShown, useFilesViewsSlot, useShownSurfaces } from '../lib/surfaces'
 import { track } from '../lib/telemetry'
 import type { ConceptRun, LabelDraft, SourceKind, ViewQuery } from '../lib/types'
+import { findView } from '../lib/views'
 import { readSession, readStorage, storageKey, writeSession, writeStorage } from '../lib/workspace'
 import { ReadProbe, useDock, useFoldingSide } from '../shell/dock'
 import { viewSurface } from '../shell/panes'
@@ -315,10 +316,8 @@ export function FilesTab({ ws, active, focused = active }: { ws: string; active:
     () =>
       bus.on('openView', ({ slug, query }) => {
         const from = pressedPane()
-        api
-          .views(ws)
-          .then((all) => {
-            const v = all.find((x) => x.slug === slug)
+        findView(ws, slug)
+          .then((v) => {
             if (!v?.first_file) throw new Error(`there is no view ${slug}`)
             toView(slug, { path: v.first_file, query: query ?? undefined }, from)
           })
@@ -345,7 +344,7 @@ export function FilesTab({ ws, active, focused = active }: { ws: string; active:
       try {
         if (p?.kind === 'view') {
           if (!p.key) {
-            const v = await api.views(ws).then((all) => all.find((x) => x.slug === p.slug))
+            const v = await findView(ws, p.slug)
             if (!v) throw new Error(`there is no view ${p.slug}`)
             toView(p.slug, v.first_file ? { path: v.first_file } : null, from)
             return

@@ -507,6 +507,22 @@
 .settings-extension .settings-switch {
   border-bottom: 0;
 }
+/* what an extension gives and the settings it runs under, quieter than its note */
+.settings-extension-parts,
+.settings-extension-consent {
+  color: var(--text-tertiary);
+}
+/* the question whether to run an extension's orientation now, under its name */
+.settings-extension-ask {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 0 6px 8px 46px;
+}
+.settings-extension-ask .settings-switch-note {
+  margin-right: 2px;
+}
 /* a view of the extension above it, indented under its name */
 .settings-extension-view {
   padding-left: 46px;

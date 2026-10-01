@@ -766,6 +766,10 @@ No view is named {view}. The views are {views}. File the ticket again with one o
 
 Filed {label}, but it cannot run here, so it failed at once: {why} Tell the analyst, since only they can change this.
 
+## view-media-unplayable
+
+The browser that takes the checks' and the review's pictures cannot play H.264 video or AAC audio, which most MP4, MOV and M4A recordings hold. A player of such a file stays blank or shows an error in the pictures, though the analyst's browser usually plays it, so that is not a problem of the view. A player that stays blank on a WebM, Ogg, MP3 or FLAC file is one.
+
 ## view-built
 
 The dev agent built the view {view}, so {claims} now open in it. In it {forms}.
@@ -1084,7 +1088,7 @@ This message is from the analyst, typed in your thread.
 
 ## orient-from-extension
 
-The analyst added the extension {extension}, which gives the orientation these instructions. Follow them as far as the work you did allows.
+The analyst switched on the extension {extension} and asked you to run its instructions for the orientation now. Follow them as far as the work you did allows.
 
 ## orient-followed-up
 
