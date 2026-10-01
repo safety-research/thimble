@@ -69,6 +69,22 @@ def test_a_worktree_counts_as_its_main_checkout(tmp_path):
     assert claude_changes.trusted(wt / "frontend", projects(**{str(tree): T}))
 
 
+def test_a_folder_reached_through_a_symlink_counts_by_real_paths(tmp_path):
+    """An entry for a symlinked folder trusts what the link leads to, and a link inside a trusted folder that leads out
+    of it is not trusted by that folder."""
+    data_disk = tmp_path / "disk"
+    (data_disk / "thimble" / "workspaces").mkdir(parents=True)
+    link = tmp_path / "home" / "Developer"
+    link.parent.mkdir()
+    link.symlink_to(data_disk)
+    ws = link / "thimble" / "workspaces"
+    assert claude_changes.trusted(ws, projects(**{str(link): T}))
+    trusted_folder = tmp_path / "trusted"
+    trusted_folder.mkdir()
+    (trusted_folder / "out").symlink_to(data_disk / "thimble")
+    assert not claude_changes.trusted(trusted_folder / "out" / "workspaces", projects(**{str(trusted_folder): T}))
+
+
 def test_thimble_s_work_folders_stay_trusted_below_a_trusted_workspaces_folder(tmp_path, monkeypatch):
     """Claude Code writes an entry without the trust for every work folder a background session ran in; the workspaces
     folder's entry still covers them, and the next session starts."""
