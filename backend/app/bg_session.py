@@ -371,7 +371,7 @@ _entries: dict[tuple[str, str], Entry] = {}  # (workspace, key) -> the session
 _loaded: set[str] = set()
 _wake: dict[str, Callable[[str, Entry], Awaitable[Any]]] = {}  # kind -> the caller that follows a woken session
 _changed = asyncio.Event()  # set on each news line, state change and outbox message, for wait_session
-_poke = asyncio.Event()  # set when a session is recorded: the watcher lists at once
+_poked = False  # a session was recorded since the watcher's last listing: it lists again within POLL_S
 _task: asyncio.Task | None = None
 _closing = False  # the server is going down: waits return at once
 
@@ -540,8 +540,8 @@ def _news(e: Entry, line: str) -> None:
 
 
 def _ensure_watcher() -> None:
-    global _task
-    _poke.set()
+    global _task, _poked
+    _poked = True
     if _task is not None and not _task.done():
         return
     with contextlib.suppress(RuntimeError):
@@ -567,13 +567,13 @@ def _sizes() -> tuple[int, ...]:
 async def _quiet(wait: float) -> None:
     """Wait up to `wait`, looking every POLL_S for a reason to list sooner: a session that needs following, a transcript
     that grew or a session recorded."""
+    global _poked
     sizes = _sizes()
     end = time.monotonic() + wait
-    _poke.clear()
+    _poked = False
     while (left := end - time.monotonic()) > 0:
-        with contextlib.suppress(asyncio.TimeoutError):
-            await asyncio.wait_for(_poke.wait(), min(left, POLL_S))
-        if _poke.is_set() or _hot() or _sizes() != sizes:
+        await asyncio.sleep(min(left, POLL_S))
+        if _poked or _hot() or _sizes() != sizes:
             return
 
 

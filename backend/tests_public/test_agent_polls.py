@@ -27,7 +27,6 @@ def idle_session(tmp_path, monkeypatch):
     monkeypatch.setattr(bg_session.session, "find_transcript", lambda sid, config_dir=None: str(path))
     monkeypatch.setattr(bg_session, "_closing", False)
     monkeypatch.setattr(bg_session, "_changed", asyncio.Event())
-    monkeypatch.setattr(bg_session, "_poke", asyncio.Event())
     monkeypatch.setattr(bg_session, "_save", lambda c: None)
     monkeypatch.setattr(bg_session, "POLL_S", 0.05)
     monkeypatch.setattr(bg_session, "IDLE_POLL_S", 0.4)
