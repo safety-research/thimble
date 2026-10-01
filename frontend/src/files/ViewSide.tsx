@@ -5,7 +5,7 @@
 // label's editor; beside a view built without label controls it also opens while a label is on or a label marks the
 // view's files, with the offer to add them (AddLabelControls). useLabelRuns keeps the runs of the labels' applies,
 // polled while they run, and Retry.
-import { useCallback, useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { Button } from '../components/Button'
 import { Spinner } from '../components/Spinner'
 import { api, labelApi } from '../lib/api'
@@ -171,7 +171,20 @@ export const ADD_LABEL_CONTROLS = 'Add label controls to this view: the labels o
  * line that asks the dev agent to add them, as a change to the view, which then builds as any change does. */
 export function AddLabelControls({ ws, view }: { ws: string; view: BuiltView }) {
   const [asked, setAsked] = useState(false)
-  useEffect(() => setAsked(false), [view.slug])
+  // whether the change asked for has started building, so its end, with no label controls yet, offers it again
+  const building = useRef(false)
+  useEffect(() => {
+    setAsked(false)
+    building.current = false
+  }, [view.slug])
+  useEffect(() => {
+    if (!asked) return
+    if (view.updating) building.current = true
+    else if (building.current) {
+      building.current = false
+      setAsked(false)
+    }
+  }, [asked, view.updating])
   const ask = () => {
     setAsked(true)
     track('view-build', { target: `view:${view.slug}`, detail: { change: 'label controls' } })

@@ -3,10 +3,10 @@
 // draws none in its head. A view whose page has them keeps the sidebar closed until its controls open a label's editor.
 // Beside a view built without them, the sidebar opens while a label is on or a label marks the view's files, so turning
 // the last label off keeps it, with the offer to add them, which asks for the change in the view's thread.
-import { act } from 'react'
+import { act, useState } from 'react'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import type { FilesLabels } from '../../src/files/useLabels.ts'
-import { ADD_LABEL_CONTROLS, useViewSide } from '../../src/files/ViewSide.tsx'
+import { ADD_LABEL_CONTROLS, AddLabelControls, useViewSide } from '../../src/files/ViewSide.tsx'
 import type { BuiltView } from '../../src/files/ViewsBar.tsx'
 import type { Concept } from '../../src/lib/types.ts'
 import { mount, settle, unmountAll } from './mount.tsx'
@@ -36,6 +36,14 @@ function Side({ own, labels }: { own: boolean; labels: FilesLabels }) {
   const side = useViewSide('w', { ...VIEW, label_controls: own }, labels)
   edit = side.editLabel
   return <div>{side.side}</div>
+}
+
+let setUpdating: ((v: boolean) => void) | null = null
+
+function Offer() {
+  const [updating, set] = useState(false)
+  setUpdating = set
+  return <AddLabelControls ws="w" view={{ ...VIEW, updating }} />
 }
 
 const sent: { url: string; body: string }[] = []
@@ -91,4 +99,14 @@ describe('the Labels sidebar beside a view', () => {
     expect(sidebar(el)).toBeNull()
   })
 
+  test('a change asked for that builds without label controls offers them again once it ends', async () => {
+    const el = await mount(<Offer />)
+    await act(async () => offer(el)!.click())
+    await settle()
+    expect(el.textContent).toBe('Adding label controls to the view')
+    await act(async () => setUpdating!(true))
+    expect(el.textContent).toBe('Adding label controls to the view')
+    await act(async () => setUpdating!(false))
+    expect(offer(el)?.textContent).toBe('Add label controls to the view')
+  })
 })
