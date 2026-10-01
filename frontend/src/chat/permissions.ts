@@ -109,7 +109,7 @@ function devTask(title: string, view: boolean): string {
 
 /** A wait in words: `a minute`, `10 minutes`, or `90 seconds` for one that is no whole number of minutes. Pure. */
 export function waitWords(seconds: number): string {
-  if (seconds < 60 || seconds % 60) return `${Math.round(seconds)} seconds`
+  if (seconds < 60 || seconds % 60) return `${Number(seconds.toPrecision(6))} seconds`
   return seconds === 60 ? 'a minute' : `${seconds / 60} minutes`
 }
 
