@@ -284,7 +284,7 @@ def _stage(name: str, version: str) -> Path:
 
 
 _installing: dict[str, asyncio.Lock] = {}  # name@version -> held while npm installs it
-_asking: dict[tuple[str, str], asyncio.Future] = {}  # (workspace, name@version) -> the analyst's answer to come
+_asking: dict[tuple[str, str], asyncio.Future] = {}  # (workspace, name@version) -> the question waiting
 
 
 async def install(name: str, version: str) -> Path:
@@ -475,26 +475,22 @@ def _write_lock(folder: Path, items: dict[str, dict[str, Any]]) -> None:
 
 
 async def _ask_once(c: str, slug: str, package: str, fields: dict[str, str], ask: Ask) -> bool | None:
-    """The analyst's answer about `package` (None when no one could be asked): a question already waiting in the
-    workspace (a check and the gate after the turn both asking) is answered once for both."""
+    """The analyst's answer about `package` (None when no one could be asked). The question runs in a task of its own,
+    so it outlives a check that asked it and was dropped (the session's command timed out), and a question already
+    waiting in the workspace (a check and the gate after the turn both asking) is answered once for all."""
     key = (c, package)
     waiting = _asking.get(key)
-    if waiting is not None and not waiting.done():
-        return await asyncio.shield(waiting)
-    fut = asyncio.get_running_loop().create_future()
-    _asking[key] = fut
-    try:
-        got = await ask(c, slug, fields)
-        allowed = None if got is None else bool(got)
-        fut.set_result(allowed)
-        return allowed
-    except BaseException:
-        if not fut.done():
-            fut.set_result(False)
-        raise
-    finally:
-        if _asking.get(key) is fut:
-            del _asking[key]
+    if waiting is None or waiting.done():
+        waiting = asyncio.ensure_future(ask(c, slug, fields))
+        _asking[key] = waiting
+
+        def forget(t: asyncio.Future, key: tuple[str, str] = key) -> None:
+            if _asking.get(key) is t:
+                del _asking[key]
+
+        waiting.add_done_callback(forget)
+    got = await asyncio.shield(waiting)
+    return None if got is None else bool(got)
 
 
 def _installs(c: str) -> str:

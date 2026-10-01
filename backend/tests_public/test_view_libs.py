@@ -208,3 +208,35 @@ async def test_a_check_and_the_gate_asking_at_once_ask_the_analyst_once(tmp_path
     assert asked == ["a"], "one question for the package while it waits"
     assert all(g["problems"] == [] for g in got)
     assert len([c for c in npm if c[1] == "install"]) == 1, "one npm install of the version"
+
+
+async def test_a_question_outlives_the_check_that_asked_it(tmp_path, npm):
+    import asyncio  # noqa: PLC0415
+
+    answered = asyncio.Event()
+    asked: list[str] = []
+    cancelled: list[bool] = []
+
+    async def slow_yes(c, slug, fields):
+        asked.append(slug)
+        try:
+            await answered.wait()
+        except asyncio.CancelledError:
+            cancelled.append(True)
+            raise
+        return True
+
+    a, b = tmp_path / "a", tmp_path / "b"
+    a.mkdir()
+    b.mkdir()
+    check = asyncio.ensure_future(view_libs.ensure("ws", "a", a, ["tiny-queue@1"], ask=slow_yes))
+    await asyncio.sleep(0.3)
+    check.cancel()  # the session's check command timed out and dropped its request
+    with pytest.raises(asyncio.CancelledError):
+        await check
+    gate = asyncio.ensure_future(view_libs.ensure("ws", "a", b, ["tiny-queue@1"], ask=slow_yes))
+    await asyncio.sleep(0.3)
+    answered.set()
+    got = await gate
+    assert asked == ["a"] and cancelled == [], "the card stayed up, and the gate after the turn heard its answer"
+    assert got["problems"] == [] and view_libs.vendored(b, "tiny-queue@1") is not None
