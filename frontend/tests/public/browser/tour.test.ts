@@ -1401,3 +1401,36 @@ test('with a view of the workspace open, the Files steps show the File browser a
     }
   }
 }, 120_000)
+
+test('the workspace’s view opens again when the tour ends before a Files step has drawn its example', async () => {
+  const { page, close } = await open({ W: 1440, H: 900, seen: true, views: [OWN_VIEW], surface: 'files' })
+  try {
+    await page.waitForSelector('.files-views .seg-opt[data-anchor="view:pr-review"]', { timeout: 20000 })
+    await page.click('.files-views .seg-opt[data-anchor="view:pr-review"]')
+    await page.waitForFunction(() => document.querySelector('[data-panel="files"] .pane-status')?.textContent?.includes('PR Review Timeline'))
+    await page.click('[data-tel="settings"]')
+    await page.waitForSelector('.settings-foot .settings-tour')
+    await page.click('.settings-foot .settings-tour')
+    for (const n of [1, 2, 3]) {
+      await onStep(page, n)
+      if (n === 3) {
+        const sb = await page.evaluate(() => {
+          const b = [...document.querySelectorAll('.tour-ex-gate button')].find((x) => x.textContent?.trim() === 'Start')!.getBoundingClientRect()
+          return { x: b.x + b.width / 2, y: b.y + b.height / 2 }
+        })
+        await page.mouse.click(sb.x, sb.y)
+        await page.waitForFunction(() => document.querySelector('.tour-body')?.textContent?.startsWith('The orientation has started'), null, { timeout: 3000 })
+      }
+      await next(page)
+    }
+    await onStep(page, 4, 'Files')
+    assert.match(await page.evaluate(() => document.querySelector('.files-views .seg-opt.active')?.textContent ?? ''), /File browser/, 'step 4 shows the File browser')
+    // Next, and Esc at once: the tour ends before the Labels step's example runs
+    await next(page)
+    await page.keyboard.press('Escape')
+    await page.waitForFunction(() => !document.querySelector('.tour-root'))
+    await page.waitForFunction(() => document.querySelector('.files-views .seg-opt.active')?.getAttribute('data-anchor') === 'view:pr-review', null, { timeout: 3000 })
+  } finally {
+    await close()
+  }
+}, 60_000)

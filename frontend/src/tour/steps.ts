@@ -145,7 +145,7 @@ const orientExample = (api: Api): Example => {
 const viewTabs = (bar: Element | null) => [...(bar?.querySelectorAll<HTMLElement>('.seg-opt') ?? [])]
 let held: { el: HTMLElement; anchor: string | null } | null = null
 const holdsBrowser = (s: Step | undefined) => !!s?.example && [filesExample, labelsExample, viewsExample].includes(s.example)
-/** The File browser on for the step; returns the step's cleanup. */
+/** The File browser on for the step. */
 const holdBrowser = (api: Api) => {
   const tabs = viewTabs(api.q('.files-views'))
   const was = tabs.find((e) => e.classList.contains('active'))
@@ -154,17 +154,21 @@ const holdBrowser = (api: Api) => {
     held = { el: was, anchor: was.getAttribute('data-anchor') }
     browser.click()
   }
-  // the engine starts the next step right after a step's cleanup, so the step that follows is known a microtask later
-  return () =>
-    queueMicrotask(() => {
-      if (holdsBrowser(api.step()) || !held) return
-      const { el, anchor } = held
-      held = null
-      const tab = (anchor && api.q(`.files-views .seg-opt[data-anchor="${CSS.escape(anchor)}"]`)) || el
-      if (tab instanceof HTMLElement && tab.isConnected && !tab.classList.contains('active')) tab.click()
-    })
 }
-const filesExample = (api: Api): Example => ({ cleanup: holdBrowser(api) })
+/** A Files step's leave, whether or not its example was drawn: the view opens again unless the next step is a Files
+ * step too. The engine moves to the next step right after a step's leave, so that step is known a microtask later. */
+const releaseBrowser = (api: Api) =>
+  queueMicrotask(() => {
+    if (holdsBrowser(api.step()) || !held) return
+    const { el, anchor } = held
+    held = null
+    const tab = (anchor && api.q(`.files-views .seg-opt[data-anchor="${CSS.escape(anchor)}"]`)) || el
+    if (tab instanceof HTMLElement && tab.isConnected && !tab.classList.contains('active')) tab.click()
+  })
+const filesExample = (api: Api): Example => {
+  holdBrowser(api)
+  return {}
+}
 
 // the Files panel's status strip as an example shows it, saying `meta`, over thimble's own, which names the analyst's
 // open file
@@ -232,7 +236,8 @@ const viewsExample = (api: Api): Example => {
     status.layout()
     return !!(B && D)
   }
-  return { els: { bar, body, frame, status: status.wrap }, layout, cleanup: holdBrowser(api) }
+  holdBrowser(api)
+  return { els: { bar, body, frame, status: status.wrap }, layout }
 }
 
 // ---------- the card steps: the example card (the top card of an orientation's deck, captured, in plain words), scaled
@@ -296,7 +301,7 @@ const labelsExample = (api: Api): Example => {
   const lab = api.snap('txLabels', 'tour-ex-labels')
   lab.style.background = api.groundOf(api.q('.files-labels'))
   Object.assign(api.tag(lab).style, { right: '40px' })
-  const cleanup = holdBrowser(api)
+  holdBrowser(api)
   const status = statusExample(api, 'agent-05.jsonl · Transcript')
   api.ex.append(rd, lab, status.wrap)
   // the transcript opens at line 22 and stays there while the panel's size changes, until anything else scrolls it
@@ -338,7 +343,7 @@ const labelsExample = (api: Api): Example => {
       Object.assign(thumb.style, { height: `${h}px`, transform: `translateY(${span > 0 ? ((bar.clientHeight - h) * sc.scrollTop) / span : 0}px)` })
     }
   }
-  return { els: { reader: rd, labels: lab, status: status.wrap }, layout, cleanup }
+  return { els: { reader: rd, labels: lab, status: status.wrap }, layout }
 }
 
 // ---------- the Report and its checks: the example (a captured report with its figures and the comments of its check
@@ -542,12 +547,12 @@ export function tourSteps(key: string, chat = true): Step[] {
           : 'A background agent explores your files and drafts an analysis for you to review. Press Start to begin it now.',
     },
     {
-      tab: 'files', example: filesExample, anchor: filesPanel, place: 'left', align: 'start', pad: 0, radius: 12,
+      tab: 'files', example: filesExample, leave: releaseBrowser, anchor: filesPanel, place: 'left', align: 'start', pad: 0, radius: 12,
       title: 'Files',
       body: `${chat ? 'In the meantime, you can explore the files and views. ' : ''}The files browser exposes global views on the corpus.`,
     },
     {
-      tab: 'files', example: labelsExample, place: 'left', align: 'end', pad: 0, radius: 0,
+      tab: 'files', example: labelsExample, leave: releaseBrowser, place: 'left', align: 'end', pad: 0, radius: 0,
       anchor: (api) => [api.els.labels, api.els.reader],
       scroll: (api) => api.els.reader?.querySelector('.reader-body') ?? null,
       scrollOver: (api) => api.els.reader?.querySelector('.reader-main') ?? null,
@@ -555,7 +560,7 @@ export function tourSteps(key: string, chat = true): Step[] {
       body: 'Labels are custom classifiers that are applied to files.',
     },
     {
-      tab: 'files', example: viewsExample, anchor: filesPanel, place: 'left', align: 'start', pad: 0, radius: 12,
+      tab: 'files', example: viewsExample, leave: releaseBrowser, anchor: filesPanel, place: 'left', align: 'start', pad: 0, radius: 12,
       interact: (api) => api.els.frame ?? null,
       title: 'Views',
       body: 'The orientation also proposes views, custom-generated just for your corpus, like this Timeline of every event.',
