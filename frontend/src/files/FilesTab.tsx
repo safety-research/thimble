@@ -406,8 +406,9 @@ export function FilesTab({ ws, active, focused = active }: { ws: string; active:
           }
           return
         }
-        const path = refPath(ref)
-        if (path == null) return
+        // a folder may be named with a trailing slash (`agents/`)
+        const path = refPath(ref)?.replace(/\/+$/, '')
+        if (!path) return
         if (browser) return toBrowser({ path, ref }, from)
         const remembered = usedFor(path)
         const claiming = remembered ? await api.viewsForFile(ws, path).then((v) => v.filter((x) => x.ok)).catch(() => []) : []
