@@ -45,6 +45,7 @@ _read_counts: dict[tuple[str, str], dict[str, int]] = {}  # (slug, fingerprint) 
 # a page still on a view's version before a change reads its index beside the new version's
 INDEXES_PER_VIEW = 2
 PROGRESS_EVERY_S = 0.2  # the least time between two writes of a call's progress
+LEFT_OUT_MAX = 200_000  # refs a records answer lists of those kept() refused; beyond them it gives only their count
 
 
 def _reader(slug: str, path: str) -> object:
@@ -383,13 +384,15 @@ def answer(req: dict) -> dict:
     without problems()), shown ({reads, hidden, derived, unplaced}: the bytes build_index read of each claimed file, and
     hidden(), derived() and unplaced() each as {result} or {error}) or applies (the corpus's record files as `arg`). A
     records call runs with `labels`, the labels context, as thimble's _view_ctx, which thimble.marked and thimble.kept
-    read, and the claimed paths as its _view_paths. With `root` the call runs in that folder, a copy of the corpus the
-    paths are relative to. The answer's `held` lists the indexes in memory afterwards (_held) and `dropped` those it let
-    go."""
+    read, and the claimed paths as its _view_paths; its answer's `left_out` lists the refs thimble.kept and kept_unit
+    refused for the filter (the first LEFT_OUT_MAX, sorted) and `left_out_n` counts them. With `root` the call runs in
+    that folder, a copy of the corpus the paths are relative to. The answer's `held` lists the indexes in memory
+    afterwards (_held) and `dropped` those it let go."""
     t0 = time.monotonic()
     th = None
     progress = _Progress(req.get("progress"))
     dropped: list[str] = []
+    left_out: set[str] = set()
     here = os.getcwd() if req.get("root") else None
     try:
         if here is not None:
@@ -413,6 +416,7 @@ def answer(req: dict) -> dict:
             if th is not None:
                 th._view_ctx = req.get("labels")  # type: ignore[attr-defined]
                 th._view_paths = list(req.get("paths") or [])  # type: ignore[attr-defined]
+                th._left_out = left_out  # type: ignore[attr-defined]
             result = mod.records(idx, req.get("arg"))  # type: ignore[attr-defined]
         elif op == "resolve":
             result = mod.resolve(idx, req.get("arg"))  # type: ignore[attr-defined]
@@ -432,7 +436,8 @@ def answer(req: dict) -> dict:
         else:
             raise ValueError(f"unknown operation {op!r}")
         return {"ok": True, "result": result, "built": built, "ms": round((time.monotonic() - t0) * 1000),
-                "held": _held(), **({"dropped": dropped} if dropped else {})}
+                "held": _held(), **({"dropped": dropped} if dropped else {}),
+                **({"left_out": sorted(left_out)[:LEFT_OUT_MAX], "left_out_n": len(left_out)} if left_out else {})}
     except Exception as e:  # noqa: BLE001 — a reader's failure is the answer
         return {"ok": False, "error": f"{type(e).__name__}: {e}", "traceback": traceback.format_exc()[-TRACEBACK_MAX:],
                 "ms": round((time.monotonic() - t0) * 1000)}
@@ -440,6 +445,7 @@ def answer(req: dict) -> dict:
         if th is not None:
             th._view_ctx = None  # type: ignore[attr-defined]
             th._view_paths = []  # type: ignore[attr-defined]
+            th._left_out = None  # type: ignore[attr-defined]
             th._progress = None  # type: ignore[attr-defined]
         if here is not None:
             os.chdir(here)

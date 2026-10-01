@@ -436,6 +436,9 @@ def colours(name, values=None):
 # view's call it is None, and marked() and kept() answer as if no label were on.
 _view_ctx = None
 _view_paths: list = []  # the claimed files of the view whose reader call is running
+# During a view's records call (view_host) a set of the refs kept() and kept_unit() refused, which thimble counts above
+# the view as hidden by the filter; None outside one.
+_left_out = None
 PROBE_NAME = "test label"
 PROBE_ID = "test-label"
 # the colour the analyst's first label takes (--label-1), so the pictures show a view's own colour that clashes with a
@@ -590,7 +593,10 @@ def marked(ref):
 def kept(ref):
     """Whether the record `ref` passes the analyst's label filter: True with no filter or when the filter's label left
     no value in the record's file, else whether the label takes the filter's value on it."""
-    return _kept(_view_ctx, ref)
+    out = _kept(_view_ctx, ref)
+    if not out and _left_out is not None:
+        _left_out.add(str(ref))
+    return out
 
 
 def kept_unit(refs):
@@ -598,7 +604,11 @@ def kept_unit(refs):
     False for a unit with no records, True when the filter's label left no value in any of their files, else whether
     the label takes the filter's value on one of its records in a file it ran over. Records of other files never keep a
     unit, since kept holds for all of them."""
-    return _kept_unit(_view_ctx, refs)
+    refs = [str(r) for r in refs]
+    out = _kept_unit(_view_ctx, refs)
+    if not out and _left_out is not None:
+        _left_out.update(refs)
+    return out
 
 
 # A view's reader call sets _progress (view_host) to the function that records its progress.

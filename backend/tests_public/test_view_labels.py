@@ -200,3 +200,32 @@ async def test_the_filter_drops_a_unit_that_has_no_records(app):
     assert {r: m.get("keep") for r, m in marks.items()} == {"view:units/t1": True}
     probe = await views.reader_call(CORPUS, "units", "records", {}, labels=views.probe_context(True))
     assert probe == [], "the test label's filter keeps no unit without a seventh line either"
+
+
+async def test_the_view_head_counts_the_records_the_reader_left_out_for_the_filter_once_each(app):
+    """A reader that keeps its records by thimble.kept leaves out what the filter drops, and the records route says how
+    many distinct records that is across its calls under the filter, so the view's head can say what the filter hides.
+    A record the analyst marks with the filter's value is counted out again, and with no filter there is no count."""
+    k = await _asks(app)
+    views.write_view(CORPUS, "threads", reader=READER, html=HTML, **VIEW)
+    route = f"/api/ws/{CORPUS}/views/threads/records"
+    assert "hidden" not in (await app.post(route, json={"query": {}})).json()
+    concepts.set_filter(CORPUS, "files", k["id"], "asks")
+    first = (await app.post(route, json={"query": {}})).json()
+    assert first["hidden"] == 9, "the twelve posts but the three that ask for help"
+    assert (await app.post(route, json={"query": {"again": True}})).json()["hidden"] == 9, "each record counted once"
+    r = await app.post(f"/api/ws/{CORPUS}/concepts/{k['id']}/labels", json={"ref": "board.jsonl#L2", "label": "asks"})
+    assert r.status_code == 200, r.text
+    assert (await app.post(route, json={"query": {}})).json()["hidden"] == 8
+    concepts.clear_filter(CORPUS, "files")
+    assert "hidden" not in (await app.post(route, json={"query": {}})).json()
+
+
+def test_a_count_of_what_the_filter_left_out_is_given_only_when_exact():
+    key = ("asks-id", "asks", (1, 2))
+    views._left_out.clear()
+    assert views.note_left_out(CORPUS, "v", None, {"filter_key": key, "left_out": ["a#L1", "a#L2"], "left_out_n": 2}) == 2
+    assert views.note_left_out(CORPUS, "v", None, {"filter_key": key, "left_out": ["a#L2", "a#L3"], "left_out_n": 2}) == 3
+    assert views.note_left_out(CORPUS, "v", None, {"filter_key": key, "left_out": ["a#L4"], "left_out_n": 5}) is None
+    other = ("asks-id", "other", (1, 2))
+    assert views.note_left_out(CORPUS, "v", None, {"filter_key": other, "left_out": ["a#L9"], "left_out_n": 1}) == 1

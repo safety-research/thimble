@@ -339,9 +339,10 @@ export const api = {
     return res.text()
   },
   /** reader.records(index, query), for the page's thimble.fetch, with no time limit: `call` names it for viewCall and
-   * viewCancel, and `signal` drops the request */
+   * viewCancel, and `signal` drops the request; with a label filter on, `hidden` is how many records the reader left
+   * out for it in all its answers under that filter, null when that cannot be counted exactly */
   viewRecords: (c: string, slug: string, query: unknown, version?: string, opts?: { call?: string; signal?: AbortSignal }) =>
-    j<{ data: unknown }>(`${ws(c)}/views/${enc(slug)}/records${q({ v: version })}`, { method: 'POST', body: JSON.stringify({ query, call: opts?.call }), signal: opts?.signal }),
+    j<{ data: unknown; hidden?: number | null }>(`${ws(c)}/views/${enc(slug)}/records${q({ v: version })}`, { method: 'POST', body: JSON.stringify({ query, call: opts?.call }), signal: opts?.signal }),
   /** how far the page's call has got: seconds since it started, whether the reader reads the files (`index`), waits for
    * a kernel (`wait`) or answers (`call`), and what it reported; {running: false} once it is over */
   viewCall: (c: string, slug: string, call: string) =>

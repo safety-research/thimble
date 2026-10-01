@@ -404,11 +404,12 @@ export function ViewerFrame({ ws, slug, targetRef, path, pathPicked, title, fit,
   controlsFn.current = onLabelControls
   const filtering = useRef(!!filter)
   filtering.current = !!filter
-  // what the bridge hid in the page (null until it said) and what the reader left out, for the current filter
-  const hidden = useRef<{ page: number | null; reader: number }>({ page: null, reader: 0 })
+  // what the bridge hid in the page (null until it said) and what the reader left out (null when the server could not
+  // count it exactly), for the current filter
+  const hidden = useRef<{ page: number | null; reader: number | null }>({ page: null, reader: 0 })
   const tellHidden = () => {
     const h = hidden.current
-    hiddenFn.current?.(filtering.current && h.page != null ? h.page + h.reader : null)
+    hiddenFn.current?.(filtering.current && h.page != null && h.reader != null ? h.page + h.reader : null)
   }
   const filterKey = filter ? `${filter.concept}\n${filter.value}` : ''
   useEffect(() => {
@@ -520,9 +521,9 @@ export function ViewerFrame({ ws, slug, targetRef, path, pathPicked, title, fit,
           try {
             const res = c ? await api.cardTypeRecords(ws, c.type, c.id, d.query) : await api.viewRecords(ws, slug, d.query, version, { call: f.call, signal: f.ctrl.signal })
             if (calls.current.get(id) === f) post({ type: P + 'result', id: d.id, data: res.data })
-            const left = (res as { hidden?: unknown }).hidden
-            if (!c && typeof left === 'number' && left !== hidden.current.reader) {
-              hidden.current.reader = left
+            const left = 'hidden' in res ? res.hidden : undefined
+            if (!c && left !== undefined && left !== hidden.current.reader) {
+              hidden.current.reader = typeof left === 'number' ? left : null
               tellHidden()
             }
           } catch (err) {

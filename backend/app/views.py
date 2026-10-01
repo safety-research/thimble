@@ -1225,10 +1225,12 @@ def _prepared(c: str, slug: str, version: str | None = None) -> tuple[dict[str, 
     return view, req, files
 
 
-async def _call(c: str, req: dict[str, Any], op: str, arg: Any = None, *, call: str | None = None) -> Any:
+async def _call(c: str, req: dict[str, Any], op: str, arg: Any = None, *, call: str | None = None,
+                sink: dict[str, Any] | None = None) -> Any:
     """One reader operation, with no time limit but within the checks (_call_limit); ReaderError when it raised, ran
     past that limit or the kernel did not answer. `call` is the id of a call the page named (view_calls.begin), whose
-    progress the kernel writes to its file. Cancelling the awaiting task interrupts the call."""
+    progress the kernel writes to its file. Cancelling the awaiting task interrupts the call. `sink` gets the refs a
+    records call's thimble.kept refused (`left_out`, `left_out_n`)."""
     _bind_loop()
     key = (c, req["slug"], req["fp"])
     by_built = bool(req.get("built"))  # a built view's request (_prepared): pruning keeps its index longest
@@ -1255,21 +1257,29 @@ async def _call(c: str, req: dict[str, Any], op: str, arg: Any = None, *, call: 
         raise ReaderError(str(ans.get("error") or "the reader failed"), str(ans.get("traceback") or ""))
     if op != "applies":
         _ready.add(key)
+    if sink is not None:
+        refused = ans.get("left_out")
+        sink["left_out"] = [str(r) for r in refused] if isinstance(refused, list) else []
+        n = ans.get("left_out_n")
+        sink["left_out_n"] = n if isinstance(n, int) and not isinstance(n, bool) else len(sink["left_out"])
     return ans.get("result")
 
 
 async def reader_call(c: str, slug: str, op: str, arg: Any = None, *, labels: dict[str, Any] | None = None,
-                      version: str | None = None, call: str | None = None) -> Any:
+                      version: str | None = None, call: str | None = None, sink: dict[str, Any] | None = None) -> Any:
     """reader.<op>(index, arg) for the view, op being index, records or resolve (resolve goes through resolve_locator,
     which cleans and memoises the answer). A records call runs with `labels` as the labels context thimble.marked and
     thimble.kept read, by default the workspace's (labels_context); labels apply when records are served, so they are no
     part of the index's fingerprint. `version` is the version a page was loaded at (read_version), `call` the id of a
-    call the page named (_call)."""
+    call the page named (_call). `sink` gets what the records call's filter left out (_call) and the filter's key
+    (filter_key)."""
     _, req = await asyncio.to_thread(_prepare, c, slug, version)
     if op == "records":
         ctx = labels if labels is not None else await asyncio.to_thread(labels_context, c)
         req = {**req, "labels": _wire(ctx)}
-    return await _call(c, req, op, arg, call=call)
+        if sink is not None:
+            sink["filter_key"] = await asyncio.to_thread(filter_key, ctx)
+    return await _call(c, req, op, arg, call=call, sink=sink)
 
 
 def clean_problems(raw: Any) -> dict[str, Any]:
@@ -1437,6 +1447,45 @@ async def shown(c: str, slug: str, version: str | None = None) -> dict[str, Any]
 # ----------------------------------------------------------------------------------------------------------
 # labels in views: what is on and the filter, and the marks of records and units
 # ----------------------------------------------------------------------------------------------------------
+
+# What a view's reader left out for the label filter, by (workspace, slug, version): the filter's key (filter_key) and
+# the refs thimble.kept refused in every records call under it, which the view's head counts as hidden. `exact` turns
+# false once a call refused more refs than its answer could list. At most LEFT_OUT_VIEWS views are kept.
+_left_out: "OrderedDict[tuple[str, str, str], dict[str, Any]]" = OrderedDict()
+LEFT_OUT_VIEWS = 64
+
+
+def filter_key(ctx: dict[str, Any] | None) -> tuple[Any, ...] | None:
+    """The label filter of a labels context as a key that changes when the filter or its label's rows do: (label id,
+    value, the labels file's mtime and size); None without a filter or for the checks' test label."""
+    f = (ctx or {}).get("filter")
+    if not f or (ctx or {}).get("probe"):
+        return None
+    k = next((x for x in (ctx or {}).get("labels") or [] if x.get("id") == f.get("id")), None)
+    sig = None
+    if k and k.get("jsonl"):
+        with contextlib.suppress(OSError):
+            st = os.stat(k["jsonl"])
+            sig = (st.st_mtime_ns, st.st_size)
+    return (f.get("id"), f.get("value"), sig)
+
+
+def note_left_out(c: str, slug: str, version: str | None, sink: dict[str, Any]) -> int | None:
+    """Add what one records call left out for the filter (_call's sink) to what the view's earlier calls under the
+    same filter left out, and answer how many distinct refs that is; None once it cannot be counted exactly."""
+    key = (c, slug, version or "")
+    have = _left_out.get(key)
+    if have is None or have["filter"] != sink["filter_key"]:
+        have = {"filter": sink["filter_key"], "refs": set(), "exact": True}
+    _left_out[key] = have
+    _left_out.move_to_end(key)
+    while len(_left_out) > LEFT_OUT_VIEWS:
+        _left_out.popitem(last=False)
+    refs = sink.get("left_out") or []
+    have["refs"].update(refs)
+    if int(sink.get("left_out_n") or 0) > len(refs):
+        have["exact"] = False
+    return len(have["refs"]) if have["exact"] else None
 
 
 def _label_colour(n: Any) -> str:
@@ -4103,14 +4152,18 @@ async def records_route(c: str, slug: str, body: RecordsBody, request: Request, 
     cid = view_calls.call_id(body.call)
     if view_calls.cancelled_before(c, cid):
         raise HTTPException(409, {"message": "the call was cancelled", "cancelled": True})
-    work = asyncio.ensure_future(reader_call(c, slug, "records", body.query, version=v, call=cid))
+    sink: dict[str, Any] = {}
+    work = asyncio.ensure_future(reader_call(c, slug, "records", body.query, version=v, call=cid, sink=sink))
     call = view_calls.begin(c, slug, cid, indexes_dir(c))
     if call is not None:
         call.task = work
     try:
         if not await until_dropped(request.receive, work, f"view {slug}'s records") and work.cancelled():
             raise HTTPException(409, {"message": "the page dropped the call", "cancelled": True})
-        return {"data": work.result()}
+        out = {"data": work.result()}
+        if sink.get("filter_key") is not None:
+            out["hidden"] = note_left_out(c, slug, v, sink)
+        return out
     except ReaderError as e:
         raise HTTPException(502, {"message": e.message, "traceback": e.detail[-ERROR_MAX:]}) from None
     except asyncio.CancelledError:
