@@ -8,13 +8,19 @@ A viewer's reader.py defines build_index(paths) -> index, records(index, query) 
 ships may also define applies(paths) -> {claims, found} or None, whether it fits a corpus (cardtypes.claims_of), which
 runs with no index. `call` loads reader.py (again when it changed), builds the index or loads it from a pickle keyed by
 the files' and reader's fingerprint, runs one operation and prints SENTINEL followed by the JSON answer. A reader that
-raises answers {ok: false, error, traceback}. Only the last fingerprint per view stays in memory.
+raises answers {ok: false, error, traceback}. The indexes in memory are the most recently used, at most
+INDEXES_PER_VIEW per view and, by the size of their pickles, at most the request's `memory` bytes in all; the one in
+use always stays.
+
+A request's `progress` is a file the call's progress is written to while it runs ({phase, done, total, note}): phase
+`index` while build_index runs, then `call`, with what the reader reports through thimble.progress.
 
 While build_index runs, `open` counts the bytes it takes of each claimed file (_Reads), so thimble knows which files
 the view read to the end. The counts are kept beside the index (`reads`)."""
 from __future__ import annotations
 
 import builtins
+import gc
 import importlib.util
 import io
 import json
@@ -25,16 +31,19 @@ import time
 import traceback
 import types
 import weakref
+from collections import OrderedDict
 from typing import Any
 
 SENTINEL = "\x1ethimble-view\x1e"
 TRACEBACK_MAX = 3000
 
 _readers: dict[str, tuple[tuple[int, int], object]] = {}  # reader.py's path -> ((mtime_ns, size), module)
-_indexes: dict[tuple[str, str], object] = {}  # (slug, fingerprint) -> index
+_indexes: "OrderedDict[tuple[str, str], object]" = OrderedDict()  # (slug, fingerprint) -> index, least recent first
+_sizes: dict[tuple[str, str], int] = {}  # (slug, fingerprint) -> bytes of its pickle (0 when it has none)
 _read_counts: dict[tuple[str, str], dict[str, int]] = {}  # (slug, fingerprint) -> {claimed path: bytes build_index read}
 # a page still on a view's version before a change reads its index beside the new version's
 INDEXES_PER_VIEW = 2
+PROGRESS_EVERY_S = 0.2  # the least time between two writes of a call's progress
 
 
 def _reader(slug: str, path: str) -> object:
@@ -239,11 +248,12 @@ def _load_reads(path: str | None) -> dict[str, int] | None:
 
 
 def _index(slug: str, mod: object, fp: str, paths: list[str], cache: str | None,
-           reads: str | None = None) -> tuple[object, bool]:
+           reads: str | None = None, progress: "_Progress | None" = None) -> tuple[object, bool]:
     """(the index for this fingerprint, whether it was built now): from memory, else the pickle, else build_index. With
     `reads`, the path the byte counts are kept at, a pickle without them is built again."""
     key = (slug, fp)
     if key in _indexes:
+        _indexes.move_to_end(key)
         return _indexes[key], False
     idx = None
     built = False
@@ -255,6 +265,8 @@ def _index(slug: str, mod: object, fp: str, paths: list[str], cache: str | None,
         except Exception:  # noqa: BLE001 — a broken cache is rebuilt
             idx = None
     if idx is None:
+        if progress is not None:
+            progress.set(force=True, phase="index")
         with _Reads(list(paths)) as seen:
             idx = mod.build_index(list(paths))  # type: ignore[attr-defined]
         counts = seen.counts()
@@ -277,13 +289,66 @@ def _index(slug: str, mod: object, fp: str, paths: list[str], cache: str | None,
                 os.replace(tmp, reads)
             except OSError:
                 pass
-    mine = [k for k in _indexes if k[0] == slug]
-    for k in mine[: max(0, len(mine) - INDEXES_PER_VIEW + 1)]:
-        del _indexes[k]
-        _read_counts.pop(k, None)
     _indexes[key] = idx
+    _sizes[key] = _file_size(cache)
     _read_counts[key] = counts or {}
     return idx, built
+
+
+def _file_size(path: str | None) -> int:
+    try:
+        return os.path.getsize(path) if path else 0
+    except OSError:
+        return 0
+
+
+def _evict(key: tuple[str, str], memory: int | None) -> list[str]:
+    """Drop the least recently used indexes but `key`'s: beyond INDEXES_PER_VIEW of one view, then while the pickles of
+    those kept come to more than `memory` bytes. The fingerprints dropped, as `<slug>/<fp>`."""
+    dropped = []
+    mine = [k for k in _indexes if k[0] == key[0] and k != key]
+    gone = mine[: max(0, len(mine) - INDEXES_PER_VIEW + 1)]
+    if memory is not None:
+        total = sum(_sizes.get(k, 0) for k in _indexes if k not in gone)
+        for k in list(_indexes):
+            if total <= memory:
+                break
+            if k != key and k not in gone:
+                gone.append(k)
+                total -= _sizes.get(k, 0)
+    for k in gone:
+        _indexes.pop(k, None)
+        _sizes.pop(k, None)
+        _read_counts.pop(k, None)
+        dropped.append(f"{k[0]}/{k[1]}")
+    if dropped:
+        gc.collect()
+    return dropped
+
+
+class _Progress:
+    """Writes a call's progress to its file, at most every PROGRESS_EVERY_S but for a change of phase."""
+
+    def __init__(self, path: str | None) -> None:
+        self.path = path
+        self.state: dict = {"phase": "call"}
+        self.at = 0.0
+
+    def set(self, force: bool = False, **fields: Any) -> None:
+        if not self.path:
+            return
+        self.state.update(fields)
+        now = time.monotonic()
+        if not force and now - self.at < PROGRESS_EVERY_S:
+            return
+        self.at = now
+        try:
+            tmp = f"{self.path}.{os.getpid()}.tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(self.state, f)
+            os.replace(tmp, self.path)
+        except (OSError, TypeError, ValueError):
+            pass
 
 
 def _optional(mod: object, name: str, idx: object) -> dict:
@@ -312,26 +377,33 @@ def _thimble(req: dict) -> object | None:
 
 
 def answer(req: dict) -> dict:
-    """The answer to one request {slug, reader, fp, paths, cache, reads?, op, arg, labels?}; op is index, records,
-    resolve, resolve_many (a list of locators, answered with a list), problems ([] for a reader without problems()),
-    shown ({reads, hidden, derived}: the bytes build_index read of each claimed file, and hidden() and derived() each as
-    {result} or {error}) or applies (the corpus's record files as `arg`). A records call runs with `labels`, the labels
-    context, as thimble's _view_ctx, which thimble.marked and thimble.kept read."""
+    """The answer to one request {slug, reader, fp, paths, cache, reads?, memory?, progress?, op, arg, labels?}; op is
+    index, records, resolve, resolve_many (a list of locators, answered with a list), problems ([] for a reader without
+    problems()), shown ({reads, hidden, derived}: the bytes build_index read of each claimed file, and hidden() and
+    derived() each as {result} or {error}) or applies (the corpus's record files as `arg`). A records call runs with
+    `labels`, the labels context, as thimble's _view_ctx, which thimble.marked and thimble.kept read. The answer's `held`
+    lists the indexes in memory afterwards (_held) and `dropped` those it let go."""
     t0 = time.monotonic()
     th = None
+    progress = _Progress(req.get("progress"))
+    dropped: list[str] = []
     try:
-        _thimble(req)  # before reader.py loads, since it may import thimble at its top
+        th = _thimble(req)  # before reader.py loads, since it may import thimble at its top
+        if th is not None:
+            th._progress = progress.set  # type: ignore[attr-defined]
         mod = _reader(req["slug"], req["reader"])
         if req.get("op") == "applies":
             fn = getattr(mod, "applies", None)
             result = fn(list(req.get("arg") or [])) if callable(fn) else None
             return {"ok": True, "result": result, "built": False, "ms": round((time.monotonic() - t0) * 1000)}
-        idx, built = _index(req["slug"], mod, req["fp"], req.get("paths") or [], req.get("cache"), req.get("reads"))
+        idx, built = _index(req["slug"], mod, req["fp"], req.get("paths") or [], req.get("cache"), req.get("reads"),
+                            progress)
+        dropped = _evict((req["slug"], req["fp"]), req.get("memory"))
+        progress.set(force=built, phase="call")
         op = req.get("op")
         if op == "index":
             result = None
         elif op == "records":
-            th = _thimble(req)
             if th is not None:
                 th._view_ctx = req.get("labels")  # type: ignore[attr-defined]
             result = mod.records(idx, req.get("arg"))  # type: ignore[attr-defined]
@@ -352,13 +424,20 @@ def answer(req: dict) -> dict:
                     result.append({"ok": False, "error": f"{type(e).__name__}: {e}"})
         else:
             raise ValueError(f"unknown operation {op!r}")
-        return {"ok": True, "result": result, "built": built, "ms": round((time.monotonic() - t0) * 1000)}
+        return {"ok": True, "result": result, "built": built, "ms": round((time.monotonic() - t0) * 1000),
+                "held": _held(), **({"dropped": dropped} if dropped else {})}
     except Exception as e:  # noqa: BLE001 — a reader's failure is the answer
         return {"ok": False, "error": f"{type(e).__name__}: {e}", "traceback": traceback.format_exc()[-TRACEBACK_MAX:],
                 "ms": round((time.monotonic() - t0) * 1000)}
     finally:
         if th is not None:
             th._view_ctx = None  # type: ignore[attr-defined]
+            th._progress = None  # type: ignore[attr-defined]
+
+
+def _held() -> list[list]:
+    """The indexes in memory, least recently used first, as [slug, fingerprint, bytes of its pickle]."""
+    return [[k[0], k[1], _sizes.get(k, 0)] for k in _indexes]
 
 
 def call(req_json: str) -> None:

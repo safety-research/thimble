@@ -45,12 +45,12 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel
 
-from . import config, headless, investigation, prompts, refs, userconf
+from . import config, headless, investigation, prompts, refs, userconf, view_calls, view_indexes
 from .ledger import atomic_write_text, read_json, unlinked, write_json
 
 log = logging.getLogger("thimble.views")
 
-KERNEL = "views"  # the workspace's dedicated kernel for readers
+KERNEL = view_calls.KERNEL  # the first of the workspace's kernels for readers (view_calls)
 VIEWS_SUBDIR = "views"
 CACHE_SUBDIR = "cache"
 PROPOSALS_FILE = "proposals.json"
@@ -59,7 +59,7 @@ KEY_REFS_FILE = "key-refs.json"  # view:<slug>/<key> -> {refs, excerpt, label, n
 # under the workspace, beside the views folder, which a kernel may only read (kernel_wrap.READ_ONLY_DIRS): each view's
 # index as the views kernel pickled it and the bytes build_index read of each claimed file, by fingerprint, and the
 # indexes of the card types (cardtypes.py, extensions.card_types)
-INDEXES_SUBDIR = "view-indexes"
+INDEXES_SUBDIR = view_indexes.INDEXES_SUBDIR
 VIEW_JSON, READER_PY, VIEW_HTML = "view.json", "reader.py", "view.html"
 TOOLS_PROMPT = "tools"  # prompts/tools.md, whose lowercase sections are the lines the view tools' results carry
 # a view ticket's status on its proposal row; `dropped` is an orientation proposal that could not be built through its
@@ -79,8 +79,7 @@ SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,39}$")
 # the route names under /views/ and the Reader's built-in file views, which its switcher keys by
 RESERVED_SLUGS = {"proposals", "forge", "raw", "records", "table", "text", "transcript", "lib", "frame", "resolve",
                   "suggestions", "suggest"}
-BUILD_TIMEOUT_S = 180.0  # a call that may build the index over the claimed files
-CALL_TIMEOUT_S = 15.0  # a call once the index for the fingerprint is known to be built
+RESOLVE_WAIT_S = 180.0  # how long a synchronous caller (resolve_sync) waits for a reader's answer; the call runs on
 LABEL_MAX = 40  # chars of a chip label a reader supplies (chips stay short)
 EXCERPT_MAX = refs.EXCERPT_MAX
 REFS_MAX = 200  # file refs a resolved locator carries
@@ -206,9 +205,34 @@ def _bind_loop() -> None:
 @contextlib.asynccontextmanager
 async def _lifespan(app: Any):
     """The router's lifespan (FastAPI merges it into the app's): the server's loop is bound before the first request,
-    so the first hover over a cited record can reach the views kernel from the /ref route's thread."""
+    so the first hover over a cited record can reach the views kernel from the /ref route's thread; and the indexes on
+    disk are pruned in a thread of their own (prune_indexes)."""
     _bind_loop()
+    threading.Thread(target=prune_indexes, name="view-index-prune", daemon=True).start()
     yield
+
+
+def prune_indexes() -> int:
+    """Every workspace's view indexes pruned (view_indexes.prune_workspace: those of views that are gone deleted, the
+    rest kept to their newest fingerprints), then held to the cap across them; the bytes freed."""
+    freed = 0
+    try:
+        names = sorted(d.name for d in config.WORKSPACES_DIR.iterdir() if d.is_dir() and config._valid_name(d.name))
+    except OSError:
+        names = []
+    for c in names:
+        try:
+            if (config.workspace_dir(c) / INDEXES_SUBDIR).is_dir():
+                freed += view_indexes.prune_workspace(c, lambda slug, c=c: read_view(c, slug) is not None)
+        except Exception:  # noqa: BLE001 — one workspace's failure leaves the others pruned
+            log.exception("%s: pruning view indexes failed", c)
+    try:
+        freed += view_indexes.enforce_cap()
+    except Exception:  # noqa: BLE001
+        log.exception("holding view indexes to their cap failed")
+    if freed:
+        log.info("%.1f MB of old view indexes deleted", freed / 1e6)
+    return freed
 
 
 router = APIRouter(lifespan=_lifespan)
@@ -856,15 +880,9 @@ def snippet(req: dict[str, Any]) -> str:
     return _SNIPPET.format(version=version, src=src, req=json.dumps(req, ensure_ascii=False))
 
 
-async def _kernel_run(c: str, code: str, timeout: float) -> tuple[list[dict], str]:
-    """(outputs, status) of the code on the workspace's views kernel. Tests replace it (views._runner)."""
-    from . import notebook  # lazy: the notebook module loads the kernel machinery
-
-    outputs, _, status = await notebook.execute_on(c, KERNEL, code, timeout_s=timeout)
-    return outputs, status
-
-
-_runner = _kernel_run
+# (outputs, status) of a reader call's code, run on one of the workspace's reader kernels (view_calls) with no time
+# limit (None). Tests replace it with a run in this process.
+_runner = view_calls.execute
 
 
 def _answer_from(outputs: list[dict]) -> dict[str, Any] | None:
@@ -934,36 +952,50 @@ def _prepared(c: str, slug: str, version: str | None = None) -> tuple[dict[str, 
     return view, req, files
 
 
-async def _call(c: str, req: dict[str, Any], op: str, arg: Any = None) -> Any:
-    """One reader operation; ReaderError when it raised, timed out or the kernel did not answer."""
+async def _call(c: str, req: dict[str, Any], op: str, arg: Any = None, *, call: str | None = None) -> Any:
+    """One reader operation, with no time limit; ReaderError when it raised or the kernel did not answer. `call` is the
+    id of a call the page named (view_calls.begin), whose progress the kernel writes to its file. Cancelling the
+    awaiting task interrupts the call."""
     _bind_loop()
     key = (c, req["slug"], req["fp"])
-    timeout = CALL_TIMEOUT_S if key in _ready else BUILD_TIMEOUT_S
+    req = {**req, "memory": view_calls.memory_budget()}
+    if call is not None:
+        req["progress"] = str(view_calls.progress_path(indexes_dir(c), call).resolve())
+    token = view_calls.REQUEST.set({"slug": req["slug"], "fp": req["fp"], "cache": req.get("cache"), "call": call})
     try:
-        outputs, status = await _runner(c, snippet({**req, "op": op, "arg": arg}), timeout)
+        outputs, status = await _runner(c, snippet({**req, "op": op, "arg": arg}), None)
+    except asyncio.CancelledError:
+        raise
     except Exception as e:  # noqa: BLE001 — the kernel did not start
         raise ReaderError(f"the views kernel did not start: {type(e).__name__}: {e}") from e
+    finally:
+        view_calls.REQUEST.reset(token)
     ans = _answer_from(outputs)
     if ans is None:
         raise ReaderError(_kernel_error(outputs))
+    if ans.get("built") and req.get("cache"):
+        view_indexes.built(c, Path(req["cache"]))
+    elif req.get("cache"):
+        view_indexes.used(Path(req["cache"]))
     if not ans.get("ok"):
         raise ReaderError(str(ans.get("error") or "the reader failed"), str(ans.get("traceback") or ""))
-    if op != "applies":  # applies builds no index, so each call gets the time a build does
+    if op != "applies":
         _ready.add(key)
     return ans.get("result")
 
 
 async def reader_call(c: str, slug: str, op: str, arg: Any = None, *, labels: dict[str, Any] | None = None,
-                      version: str | None = None) -> Any:
+                      version: str | None = None, call: str | None = None) -> Any:
     """reader.<op>(index, arg) for the view, op being index, records or resolve (resolve goes through resolve_locator,
     which cleans and memoises the answer). A records call runs with `labels` as the labels context thimble.marked and
     thimble.kept read, by default the workspace's (labels_context); labels apply when records are served, so they are no
-    part of the index's fingerprint. `version` is the version a page was loaded at (read_version)."""
+    part of the index's fingerprint. `version` is the version a page was loaded at (read_version), `call` the id of a
+    call the page named (_call)."""
     _, req = await asyncio.to_thread(_prepare, c, slug, version)
     if op == "records":
         ctx = labels if labels is not None else await asyncio.to_thread(labels_context, c)
         req = {**req, "labels": _wire(ctx)}
-    return await _call(c, req, op, arg)
+    return await _call(c, req, op, arg, call=call)
 
 
 def clean_problems(raw: Any) -> dict[str, Any]:
@@ -1345,7 +1377,7 @@ def resolve_sync(c: str, slug: str, locator: dict[str, Any]) -> tuple[str, dict[
         return "unknown", None
     fut = asyncio.run_coroutine_threadsafe(resolve_locator(c, slug, locator), loop)
     try:
-        return "ok", fut.result(BUILD_TIMEOUT_S + 5)
+        return "ok", fut.result(RESOLVE_WAIT_S)
     except ReaderError as e:
         log.info("view %s/%s could not resolve %s: %s", c, slug, locator, e.message)
         return "error", None
@@ -3259,17 +3291,48 @@ async def card_media_route(c: str, path: str) -> FileResponse:
 
 class RecordsBody(BaseModel):
     query: Any = None
+    call: str | None = None
 
 
 @router.post("/ws/{c}/views/{slug}/records")
 async def records_route(c: str, slug: str, body: RecordsBody, v: str | None = None) -> dict[str, Any]:
-    """reader.records(index, query): what the view's page, loaded at version `v`, asked for with thimble.fetch. 502 with
-    the reader's error."""
+    """reader.records(index, query): what the view's page, loaded at version `v`, asked for with thimble.fetch, with no
+    time limit. `call` names the call, so the page can cancel it (cancel_route) and read its progress (call_route). 502
+    with the reader's error, 409 {cancelled} when it was cancelled."""
     _view_or_404(c, slug, v)
+    cid = view_calls.call_id(body.call)
+    work = asyncio.ensure_future(reader_call(c, slug, "records", body.query, version=v, call=cid))
+    call = view_calls.begin(c, slug, cid, indexes_dir(c))
+    if call is not None:
+        call.task = work
     try:
-        return {"data": await reader_call(c, slug, "records", body.query, version=v)}
+        return {"data": await work}
     except ReaderError as e:
         raise HTTPException(502, {"message": e.message, "traceback": e.detail[-ERROR_MAX:]}) from None
+    except asyncio.CancelledError:
+        task = asyncio.current_task()
+        if work.cancelled() and not (task is not None and task.cancelling()):
+            raise HTTPException(409, {"message": "the call was cancelled", "cancelled": True}) from None
+        work.cancel()
+        raise
+    finally:
+        view_calls.end(call)
+
+
+@router.get("/ws/{c}/views/{slug}/calls/{call}")
+async def call_route(c: str, slug: str, call: str) -> dict[str, Any]:
+    """How far the page's call `call` has got (view_calls.progress), {running: false} once it is over."""
+    config.workspace_dir(c)
+    cid = view_calls.call_id(call)
+    return (view_calls.progress(c, cid) if cid else None) or {"running": False}
+
+
+@router.post("/ws/{c}/views/{slug}/calls/{call}/cancel")
+async def cancel_route(c: str, slug: str, call: str) -> dict[str, Any]:
+    """Cancel the page's call `call`: its kernel is interrupted and the records route answers 409. {cancelled}."""
+    config.workspace_dir(c)
+    cid = view_calls.call_id(call)
+    return {"cancelled": bool(cid) and view_calls.cancel(c, cid)}
 
 
 @router.get("/ws/{c}/views/{slug}/problems")

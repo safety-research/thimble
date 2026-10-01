@@ -23,6 +23,9 @@ it with `WS` (the workspace directory) set and registers it as `thimble`.
                               judged by its records in the files the filter's label ran over (True when there are none)
     thimble.view_labels()     in a view's reader: {labels, filter}, the labels that are on with their highlighted values,
                               and the filter {label, value, colour} or None
+    thimble.progress(done=None, total=None, note=None)
+                              in a view's reader: how far the call has got, which the page can show while it waits;
+                              nothing outside a view's call
     thimble.timeline(events, spacing="time")
                               events on a time axis: (time, label[, lane]) or {time, label, lane, end}; TIMELINE_MIME
                               with a text/plain listing. Clock times ("HH:MM[:SS]") are read on CLOCK_DAY, rolling over
@@ -51,7 +54,7 @@ from pathlib import Path
 
 WS = globals().get("WS")  # the workspace directory, set by the injector (notebook.kernel_argv)
 
-__all__ = ["labels", "colours", "marked", "kept", "view_labels", "diagram", "timeline", "card"]
+__all__ = ["labels", "colours", "marked", "kept", "view_labels", "progress", "diagram", "timeline", "card"]
 
 FRAME_ROWS = 500  # rows of a table card's DataFrame the card keeps and shows (frames.ROWS_MAX)
 
@@ -506,6 +509,24 @@ def kept_unit(refs):
     filter's label left no value in any of their files, else whether the label takes the filter's value on one of its
     records in a file it ran over. Records of other files never keep a unit, since kept holds for all of them."""
     return _kept_unit(_view_ctx, refs)
+
+
+# A view's reader call sets _progress (view_host) to the function that records its progress.
+_progress = None
+
+
+def progress(done=None, total=None, note=None):
+    """Report how far a view's reader call has got: `done` of `total` steps, and a few words of what it does."""
+    fn = _progress
+    if fn is None:
+        return
+    fields = {}
+    for k, v in (("done", done), ("total", total)):
+        if isinstance(v, numbers.Real) and not isinstance(v, bool) and math.isfinite(v):
+            fields[k] = v
+    if note is not None:
+        fields["note"] = " ".join(str(note).split())[:120]
+    fn(**fields)
 
 
 def view_labels():
