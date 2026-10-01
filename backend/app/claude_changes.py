@@ -107,13 +107,58 @@ def trust_folder(tree: Path) -> Path:
 
 
 def trusted(folder: Path, data: dict[str, Any]) -> bool:
-    """Whether Claude Code's config `data` trusts `folder`, by its own entry or a folder's above it."""
-    projects = data.get("projects") if isinstance(data.get("projects"), dict) else {}
-    for f in (folder, *folder.parents):
-        entry = projects.get(str(f))
-        if isinstance(entry, dict) and entry.get(TRUST_KEY) is True:
+    """Whether Claude Code's config `data` trusts `folder`, by the rule `claude --bg` applies to the folder it starts
+    in: the trust of the main checkout of the git repository holding the folder (a worktree's included), else of the
+    folder or a folder above it, up to the root of that repository when there is one. An entry without the trust
+    does not end the search (Claude Code writes one, hasTrustDialogAccepted false, for each folder it runs in), so a
+    trusted folder covers the folders below it, except those inside a repository below it."""
+    for f in dict.fromkeys((Path(os.path.abspath(folder)), Path(folder).resolve())):
+        root = _git_root(f)
+        if own_trust(_main_checkout(root) if root else f, data):
             return True
+        for g in (f, *f.parents):
+            if own_trust(g, data):
+                return True
+            if g == root:
+                break
     return False
+
+
+def own_trust(folder: Path, data: dict[str, Any]) -> bool:
+    """Whether `folder`'s own entry in Claude Code's config `data` holds the trust."""
+    projects = data.get("projects") if isinstance(data.get("projects"), dict) else {}
+    entry = projects.get(str(folder))
+    return isinstance(entry, dict) and entry.get(TRUST_KEY) is True
+
+
+def _git_root(folder: Path) -> Path | None:
+    """The nearest folder at or above `folder` that holds a .git folder or file, as Claude Code finds a repository."""
+    for f in (folder, *folder.parents):
+        try:
+            if (f / ".git").is_dir() or (f / ".git").is_file():
+                return f
+        except OSError:
+            continue
+    return None
+
+
+def _main_checkout(root: Path) -> Path:
+    """The main checkout of the repository whose worktree is `root` (its .git a file naming
+    <repo>/.git/worktrees/<name>), else `root`."""
+    try:
+        line = (root / ".git").read_text("utf-8").strip() if (root / ".git").is_file() else ""
+        if not line.startswith("gitdir:"):
+            return root
+        gitdir = (root / line[len("gitdir:"):].strip()).resolve()
+        common = (gitdir / (gitdir / "commondir").read_text("utf-8").strip()).resolve()
+        back = (gitdir / (gitdir / "gitdir").read_text("utf-8").strip()).resolve()
+        if gitdir.parent != common / "worktrees" or back != (root / ".git").resolve():
+            return root
+        if common.name == ".git":
+            return common.parent
+        return root if (common / ".git").exists() else common
+    except (OSError, ValueError):
+        return root
 
 
 def _set_trust(folder: Path, config: Path, on: bool) -> None:
@@ -137,32 +182,43 @@ def _set_trust(folder: Path, config: Path, on: bool) -> None:
     _write(config, data)
 
 
+def _answer(rec: dict[str, Any], folder: Path, config: Path, data: dict[str, Any]) -> str:
+    """The answer in the trust record `rec` for `folder` and `config`, yes or no, else ''. A yes that added no entry was
+    recorded because the folder was trusted already, so it counts only while the folder is trusted (`data`, the
+    config)."""
+    if rec.get("folder") != str(folder) or rec.get("config") != str(config) or rec.get("answer") not in ("yes", "no"):
+        return ""
+    if rec["answer"] == "yes" and not rec.get("added") and not trusted(folder, data):
+        return ""
+    return rec["answer"]
+
+
 def question(tree: Path) -> str:
     """The trust question for the install at `tree`, which install.sh asks before it installs anything (module note);
     '' when install_trust would not ask it: an answer for this folder and config is recorded, or the folder is trusted."""
     folder, config = trust_folder(tree), global_config()
-    rec = _read(home() / TRUST_FILE)
-    if rec.get("folder") == str(folder) and rec.get("config") == str(config) and rec.get("answer") in ("yes", "no"):
+    data = _read(config)
+    if _answer(_read(home() / TRUST_FILE), folder, config, data) or trusted(folder, data):
         return ""
-    return "" if trusted(folder, _read(config)) else QUESTION.format(folder=folder, config=config)
+    return QUESTION.format(folder=folder, config=config)
 
 
 def skipped(tree: Path) -> str:
     """Why install.sh does not ask the trust question for the install at `tree`, naming the folder; '' when it asks it
     (question)."""
     folder, config = trust_folder(tree), global_config()
-    rec = _read(home() / TRUST_FILE)
-    on = trusted(folder, _read(config))
-    if rec.get("folder") == str(folder) and rec.get("config") == str(config) and rec.get("answer") in ("yes", "no"):
-        if rec["answer"] == "no" and not on:
-            return f"answered no at your earlier install, so {folder} is not trusted; --trust-workspaces changes it"
-        if rec["answer"] == "no":
-            return f"answered no at your earlier install, but {config} trusts {folder} by an entry thimble did not add"
-        if not on:
-            return (f"answered yes at your earlier install, but {config} no longer trusts {folder}; --trust-workspaces "
-                    "trusts it again")
-        if rec.get("added"):
-            return f"already trusted from your earlier install ({folder}); --no-trust-workspaces changes it"
+    rec, data = _read(home() / TRUST_FILE), _read(config)
+    on = trusted(folder, data)
+    answer = _answer(rec, folder, config, data)
+    if answer == "no" and not on:
+        return f"answered no at your earlier install, so {folder} is not trusted; --trust-workspaces changes it"
+    if answer == "no":
+        return f"answered no at your earlier install, but {config} trusts {folder} by an entry thimble did not add"
+    if answer == "yes" and not on:
+        return (f"answered yes at your earlier install, but {config} no longer trusts {folder}; --trust-workspaces "
+                "trusts it again")
+    if answer == "yes" and rec.get("added"):
+        return f"already trusted from your earlier install ({folder}); --no-trust-workspaces changes it"
     if on:
         return f"already trusted in {config} ({folder}), by an entry thimble did not add"
     return ""
@@ -175,10 +231,11 @@ def install_trust(tree: Path, answer: str | None = None) -> str:
     rec = _read(home() / TRUST_FILE)
     same = rec.get("folder") == str(folder) and rec.get("config") == str(config)
     untrusted = UNTRUSTED.format(install=tree / "scripts" / "install.sh")
-    if answer is None and same and rec.get("answer") in ("yes", "no"):
-        if rec["answer"] == "no" and not trusted(folder, _read(config)):
+    recorded = _answer(rec, folder, config, _read(config))
+    if answer is None and recorded:
+        if recorded == "no" and not trusted(folder, _read(config)):
             return f"answered no at an earlier install, so {folder} is not trusted, and {untrusted}"
-        return f"answered {rec['answer']} at an earlier install; {CHANGE}"
+        return f"answered {recorded} at an earlier install; {CHANGE}"
     added = bool(rec.get("added") and rec.get("folder") and rec.get("config"))
     if added and (answer == "no" or not same):  # the entry an earlier yes added: refused now, or for another folder
         try:
@@ -187,7 +244,8 @@ def install_trust(tree: Path, answer: str | None = None) -> str:
             return f"could not write {rec['config']} ({e}); nothing recorded"
         added = False
     record = {"folder": str(folder), "config": str(config), "answer": answer or "yes", "added": added}
-    if trusted(folder, _read(config)):
+    data = _read(config)
+    if trusted(folder, data) and (answer != "yes" or own_trust(folder, data)):  # a yes writes the folder's own entry
         _write(home() / TRUST_FILE, record)
         return f"{folder} is trusted in {config}{' by an entry thimble did not add' if answer == 'no' else ''}"
     if answer is None:
