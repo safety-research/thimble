@@ -94,7 +94,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from . import agents, cc_settings, cli, config, headless, hook_auth, modes, procs, prompts, ticket_box, userconf
+from . import agents, cc_settings, cli, config, headless, hook_auth, modes, procs, prompts, session, ticket_box, userconf
 from .cli import SOURCE_CHANGED, home as thimble_home
 from .ledger import atomic_write_text
 from .session import find_transcript
@@ -155,7 +155,7 @@ STATE_GAP_MAX_S = float(os.environ.get("THIMBLE_DEV_STATE_GAP_S", "30") or "30")
 UNLISTED_POLLS = 10  # polls a session just started may be missing from `claude agents` before the run gives up on it
 LOOPBACK = {"127.0.0.1", "::1", "localhost", "testclient"}
 MAX_ATTEMPTS = max(1, int(os.environ.get("THIMBLE_DEV_MAX_ATTEMPTS", "3") or "3"))
-_capacity_sleep = asyncio.sleep  # a view build's wait while the API is at capacity (view_capacity_waits); tests replace it
+_capacity_sleep = asyncio.sleep  # a view build's wait while the API is at capacity (view_capacity_wait); tests replace it
 # the new sessions an orientation's view build gets after its attempts ran out, each told what failed (run_view)
 VIEW_REPAIRS = max(0, int(os.environ.get("THIMBLE_VIEW_REPAIRS", "2") or "2"))
 # A session that has waited ASK_TIMEOUT_S for an answer is stopped and its ticket fails, so one stuck session cannot hold
@@ -165,6 +165,15 @@ VIEW_REPAIRS = max(0, int(os.environ.get("THIMBLE_VIEW_REPAIRS", "2") or "2"))
 ASK_TIMEOUT_S = float(os.environ.get("THIMBLE_DEV_ASK_TIMEOUT_S", "") or 15 * 60)
 QUIET_NOTE_S = max(1.0, float(os.environ.get("THIMBLE_DEV_QUIET_NOTE_S", "") or 10 * 60))
 QUIET_LINE = "no activity for {minutes}"
+ASK_TIMED_OUT = "stopped because nobody answered the session's question within {wait}. Retry wakes it again."
+# A turn that ends while the session's own workflows or background agents run is not over: their results start its next
+# turn, and stopping the session would lose them (Tail.background). Its thread says so once (BACKGROUND_LINE).
+BACKGROUND_LINE = "the session waits for its background work to finish ({n} running)"
+# the turn_duration record's counts of the session's workflows and background agents still running when its turn ended
+PENDING_COUNTS = ("pendingWorkflowCount", "pendingBackgroundAgentCount")
+# the `claude agents` states of a session that may still run; whether its process does is Sessions.has_process
+LIVE_STATES = ("working", "idle", "blocked", "done")
+LOST_LINE = "the background session ended before its background work finished"
 # How long a server may take to answer /api/health (boot_check, restart_watch.py) before the change counts as breaking
 # its start.
 BOOT_TIMEOUT_S = float(os.environ.get("THIMBLE_DEV_BOOT_TIMEOUT_S", "") or 90)
@@ -1433,6 +1442,9 @@ class Sessions:
     message, and `claude stop` ends its process while keeping the conversation. Tests replace dev.SESSIONS with a fake.
     """
 
+    def __init__(self) -> None:
+        self._process: dict[str, bool] = {}  # by short id: whether the session had a process at the last state()
+
     async def _run(self, args: list[str], cwd: Path) -> tuple[int, str]:
         return await _run([CLAUDE_BIN, *args], cwd=cwd, timeout=CLI_TIMEOUT_S, env=None, environ=_cli_env())
 
@@ -1572,15 +1584,22 @@ class Sessions:
         hit = next((e for e in await self._listing(cwd) if e.get("id") == short), None)
         if hit is None:
             return None
+        self._process[short] = bool(hit.get("pid") or hit.get("status"))
         state = str(hit.get("state") or hit.get("status") or "")
         if state == "working" and hit.get("status") == "idle":
             return "idle"
         return state or None
 
+    def has_process(self, short: str) -> bool:
+        """Whether the session's process ran at the last look at its state: a session that ended stays listed, with
+        its last state but no pid or status."""
+        return self._process.get(short, False)
+
     def stop(self, short: str | None) -> None:
         """End the session's process; its conversation stays. Blocking and quick; never raises."""
         if not short:
             return
+        self._process.pop(short, None)
         try:
             subprocess.run([CLAUDE_BIN, "stop", short], capture_output=True, text=True, timeout=CLI_TIMEOUT_S,
                            env=_cli_env())
@@ -1628,15 +1647,26 @@ class Tail:
         self.copied = copied or set()
         self.after = after.strip() if after else None
         self.sub_mtime = 0  # the latest change to a subagent's transcript seen (subagents_grew), in ns
+        # The session's own background work: what the latest turn_duration counts (PENDING_COUNTS), and the workflows,
+        # background agents and calls moved to the background that this tail saw launched and no task notification or
+        # TaskStop has ended yet, by task id. `names` holds the tool calls' names by id, for their results.
+        self.pending = 0
+        self.tasks: set[str] = set()
+        self.names: dict[str, str] = {}
+
+    def background(self) -> int:
+        """How many of the session's workflows, background agents and moved calls still run (0 when none)."""
+        return max(self.pending, len(self.tasks))
 
     def subagents_grew(self) -> bool:
-        """Whether a transcript of the session's subagents (<session id>/subagents/ beside its own) changed since the
-        last call; True at the first call when the session has one."""
+        """Whether a transcript of the session's subagents or workflow agents, or a workflow's journal (any .jsonl below
+        <session id>/subagents/ beside its own transcript), changed since the last call; True at the first call when
+        the session has one."""
         if self.path is None:
             return False
         try:
-            newest = max((p.stat().st_mtime_ns for p in (self.path.parent / self.session_id / "subagents").iterdir()
-                          if p.suffix == ".jsonl"), default=0)
+            newest = max((p.stat().st_mtime_ns for p in (self.path.parent / self.session_id / "subagents").rglob("*.jsonl")),
+                         default=0)
         except OSError:
             return False
         grew, self.sub_mtime = newest > self.sub_mtime, max(newest, self.sub_mtime)
@@ -1674,13 +1704,22 @@ class Tail:
                 self.after = None
             else:
                 return
+        if rec.get("type") == "attachment":
+            att = rec.get("attachment") if isinstance(rec.get("attachment"), dict) else {}
+            if att.get("type") == "queued_command" and _is_notice(att.get("origin"), att.get("prompt"), att.get("commandMode")):
+                self._noticed(str(att.get("prompt") or ""))
+            return
         if rec.get("type") == "user" and isinstance(content, str):
             self.last_text, self.turn_ended, self.api_error = "", False, False  # a new message opens a new turn
+            self.pending = 0
+            if _is_notice(rec.get("origin"), content):
+                self._noticed(content)
             return
         if rec.get("type") == "assistant":
             self.api_error = bool(rec.get("isApiErrorMessage"))
         if rec.get("type") == "system" and rec.get("subtype") == "turn_duration":
             self.turn_ended = True
+            self.pending = sum(n for k in PENDING_COUNTS if isinstance(n := rec.get(k), int) and n > 0)
             return
         for b in content if isinstance(content, list) else []:
             if not isinstance(b, dict):
@@ -1689,9 +1728,46 @@ class Tail:
                 self.last_text = str(b["text"]).strip()
                 run_log.text(self.last_text + "\n")
             elif rec.get("type") == "assistant" and b.get("type") == "tool_use":
+                self.names[str(b.get("id") or "")] = str(b.get("name") or "")
                 run_log.tool_use(str(b.get("id") or ""), str(b.get("name") or ""), summarize_input(str(b.get("name")), b.get("input")))
             elif rec.get("type") == "user" and b.get("type") == "tool_result":
-                run_log.tool_result(str(b.get("tool_use_id") or ""), _result_text(b.get("content")), is_error=bool(b.get("is_error")))
+                text = _result_text(b.get("content"))
+                if not b.get("is_error"):
+                    self._launched(self.names.get(str(b.get("tool_use_id") or ""), ""), text)
+                run_log.tool_result(str(b.get("tool_use_id") or ""), text, is_error=bool(b.get("is_error")))
+
+    def _launched(self, name: str, text: str) -> None:
+        """A tool result's word on the session's background work, read as agent_session reads it (_steps_of): a
+        Workflow, a background Agent, a SendMessage that continued an agent or a call moved to the background starts a
+        task, and TaskStop ends one."""
+        from . import agent_session  # noqa: PLC0415
+
+        if name == agent_session.STOP_TOOL:
+            if m := agent_session.STOPPED_TASK_RE.search(text):
+                self.tasks.discard(m.group(1))
+            return
+        m = None
+        if name == session.WORKFLOW_TOOL:
+            m = agent_session.LAUNCHED_TASK_RE.search(text)
+        elif name == session.SEND_TOOL:
+            m = agent_session.RESUMED_AGENT_RE.search(text)
+        elif name in session.AGENT_TOOLS and session.ASYNC_RESULT_RE.match(text):
+            m = agent_session.LAUNCHED_AGENT_RE.search(text)
+        m = m or agent_session.MOVED_TASK_RE.search(text)
+        if m:
+            self.tasks.add(m.group(1))
+
+    def _noticed(self, text: str) -> None:
+        """A task notification: the tasks it names have ended."""
+        from . import agent_session  # noqa: PLC0415
+
+        self.tasks.difference_update(agent_session.TASK_ID_RE.findall(text))
+
+
+def _is_notice(origin: Any, text: Any, mode: Any = None) -> bool:
+    """Whether a prompt is one of Claude Code's task notifications, by its origin, its command mode or its text."""
+    kind = origin.get("kind") if isinstance(origin, dict) else None
+    return "task-notification" in (kind, mode) or (isinstance(text, str) and text.lstrip().startswith("<task-notification>"))
 
 
 def _uuids(p: Path | None) -> set[str]:
@@ -1726,7 +1802,10 @@ async def _worker_turn(run: Run, run_log: Log, cwd: Path, prompt: str, resume: s
                        answered: bool = True, fence: dict[str, Any] | None = None,
                        asking: dict[str, Any] | None = None, models: dict[str, Any] | None = None) -> str:
     """One turn of a ticket's background session, started with `prompt` or woken with it when `resume` names the
-    session, then watched until the turn ends, its transcript copied into the chat. The transcript is read every POLL_S;
+    session, then watched until the turn ends, its transcript copied into the chat. A turn that ends while the session's
+    own workflows or background agents run (Tail.background) goes on, since their results start its next turn: the
+    session is not stopped while one of them runs, and the turn ends with the last turn they lead to, or when the
+    session itself ends. The transcript is read every POLL_S;
     while it grows the session works, and once it is quiet `claude agents` is asked for the session's state, at gaps that
     double up to STATE_GAP_MAX_S while that state stays working or blocked. `on_session(short id, full id)` records the
     session. The turn has no time limit: once neither its transcript nor its subagents' have grown for QUIET_NOTE_S, the
@@ -1764,6 +1843,8 @@ async def _worker_turn(run: Run, run_log: Log, cwd: Path, prompt: str, resume: s
     asked_at = 0.0
     gap, looked = POLL_S, 0.0  # between two looks at the session's state, which doubles while it stays the same
     active, quiet_note = time.monotonic(), QUIET_NOTE_S  # the session's last sign of activity; the next QUIET_LINE's time
+    held = False  # the thread has said that the session waits for its own background work (BACKGROUND_LINE)
+    gone = 0  # looks in a row that found no process running the session's background work
     while True:
         await asyncio.sleep(POLL_S)
         pos = tail.pos
@@ -1778,15 +1859,39 @@ async def _worker_turn(run: Run, run_log: Log, cwd: Path, prompt: str, resume: s
         if waiting and time.monotonic() - asked_at > ASK_TIMEOUT_S:
             state = "unanswered"
             break
-        if tail.pos != pos and not tail.turn_ended:
+        held = held and bool(tail.background())
+        ended = tail.turn_ended and not tail.background()  # the turn is over and so is the session's background work
+        if tail.pos != pos and not ended:
             unlisted, gap = 0, POLL_S
             if not waiting:
                 continue  # the transcript grew: the session works
             looked = 0.0  # it grew while the session waited for an answer: its state says whether it still waits
-        if not tail.turn_ended and time.monotonic() - looked < gap:
+        if not ended and time.monotonic() - looked < gap:
             continue
         state = await SESSIONS.state(cwd, run.session)
         looked = time.monotonic()
+        pos = tail.pos
+        tail.read(run_log)
+        if tail.pos != pos and not waiting and not (tail.turn_ended and not tail.background()):
+            continue  # the transcript grew during the look: the session works, or a turn its background work started
+        if tail.background() and state in LIVE_STATES and (tail.turn_ended or state in ("idle", "done")):
+            # its own workflows or background agents run on, and their results start its next turn: the session is not
+            # stopped, whatever its state says of the task, while its process runs them
+            if not SESSIONS.has_process(run.session):
+                gone += 1  # it takes two looks in a row, so that one odd listing fails no build
+                if gone > 1:
+                    state = "lost"
+                    break
+                gap = POLL_S
+                continue
+            gone = 0
+            if not held:
+                run_log.stage(BACKGROUND_LINE.format(n=tail.background()))
+                held = True
+            waiting, unlisted, idle, early = False, 0, 0, 0
+            gap = min(gap * 2, STATE_GAP_MAX_S)
+            continue
+        gone = 0
         gap = min(gap * 2, STATE_GAP_MAX_S) if state in ("working", "blocked") else POLL_S
         if state == "working":
             waiting, unlisted = False, 0
@@ -1825,13 +1930,14 @@ async def _worker_turn(run: Run, run_log: Log, cwd: Path, prompt: str, resume: s
     # Stopping an idle session frees its process; a follow-up starts it again (Sessions.resume).
     await asyncio.to_thread(SESSIONS.stop, run.session)
     if state == "unanswered":
-        raise SessionError(f"the session waited {_minutes(ASK_TIMEOUT_S)} for an answer nobody gave, so it was "
-                           f"stopped; `claude attach {run.session}` shows its question, and Retry wakes it again")
+        raise SessionError(ASK_TIMED_OUT.format(wait=_minutes(ASK_TIMEOUT_S)))
     if state != "done":
         # the session's last words are most often the reason, so they go in the error
         last = " ".join(tail.last_text.split())[:SESSION_WORDS_CHARS]
         if state == "api error":
             raise SessionError(f"Anthropic's API ended the session's turn: {last}")
+        if state == "lost":
+            raise SessionError(LOST_LINE + (f": {last}" if last else ""))
         raise SessionError(f"the background session ended {state or 'without a trace in claude agents'}"
                            + (f": {last}" if last else ""))
     return tail.last_text
@@ -1952,12 +2058,14 @@ APPLY_WHY = ("It changes {files}. thimble asks this before any change reaches it
              "Unanswered, it is not applied after {wait}, and it stays on branch {branch}.")
 APPLY_NOT_ALLOWED = ("the analyst did not allow the change into thimble's own code, so it was not applied; it stays on "
                      "branch {branch}")
+APPLY_UNANSWERED = "not applied because nobody answered within {wait}. The change stays on branch {branch}."
 # where the ticket's checks can't run in a box (ticket_box.problem), the question comes before the ticket starts too
 CODE_QUESTION = ("This edits thimble's own code, which then runs outside the sandbox (its test server, its checks and "
                  "git). Allow?")
 CODE_WHY = ("The ticket's checks can't run in a sandbox here ({why}), so thimble asks this before every code ticket, in "
             "every permission mode. Unanswered, the ticket is cancelled after {wait}.")
 CODE_NOT_ALLOWED = "the analyst did not allow it to edit thimble's own code, so it did not start"
+CODE_UNANSWERED = "cancelled because nobody answered within {wait} whether it may edit thimble's own code"
 CODE_NOBODY = ("it has no workspace, so no permission card could ask the analyst about thimble's own code, and it did "
                "not start")
 FILES_SHOWN = 8
@@ -1970,7 +2078,8 @@ def contained(conf: "userconf.Session | str | None") -> bool:
 
 
 async def _code_refusal(t: dict[str, Any]) -> str:
-    """'' once the analyst allowed an uncontained ticket on its chat's card (CODE_QUESTION), else why it did not start."""
+    """'' once the analyst allowed an uncontained ticket on its chat's card (CODE_QUESTION), else why it did not start:
+    a deny, or nobody answering within PERMISSION_WAIT_S."""
     from . import agent_session  # noqa: PLC0415
 
     if not t.get("workspace") or not t.get("chat"):
@@ -1979,7 +2088,10 @@ async def _code_refusal(t: dict[str, Any]) -> str:
                           wait=agent_session.wait_words(PERMISSION_WAIT_S))
     got = await agent_session.ask(str(t["workspace"]), ticket_key(t["id"]), CODE_TOOL, {"description": CODE_QUESTION},
                                   force=True, why=why)
-    return "" if got.get("behavior") == "allow" else CODE_NOT_ALLOWED
+    if got.get("behavior") == "allow":
+        return ""
+    return (CODE_UNANSWERED.format(wait=agent_session.wait_words(PERMISSION_WAIT_S)) if agent_session.timed_out(got)
+            else CODE_NOT_ALLOWED)
 
 
 def files_words(touched: list[str]) -> str:
@@ -2005,6 +2117,8 @@ async def _apply_refusal(t: dict[str, Any], touched: list[str], branch: str, app
         got = await agent_session.ask(str(t["workspace"]), ticket_key(t["id"]), CODE_TOOL,
                                       {"description": APPLY_QUESTION, "files": touched}, force=True, why=why)
         allowed = got.get("behavior") == "allow"
+        if not allowed and agent_session.timed_out(got):
+            return APPLY_UNANSWERED.format(wait=agent_session.wait_words(PERMISSION_WAIT_S), branch=branch)
     return "" if allowed else APPLY_NOT_ALLOWED.format(branch=branch)
 
 
@@ -2679,10 +2793,10 @@ def _change_failed_chip(c: str, prop: dict[str, Any], why: str) -> None:
         log.exception("could not chip the failed change to %s/%s", c, prop.get("slug"))
 
 
-def _view_failed(c: str, slug: str, error: str, chat: str | None = None, *, drop_why: str | None = None) -> None:
+def _view_failed(c: str, slug: str, error: str, chat: str | None = None) -> None:
     """A build that ended without its view: a change to a built view leaves the view as it was (views.end_revision), a
     view the analyst asked for fails, its chip showing why with Retry, and an orientation's proposal is dropped
-    (_view_dropped), with `drop_why` as its line's reason when given."""
+    (_view_dropped)."""
     from . import views  # noqa: PLC0415
 
     current = views.read_proposal(c, slug) or {}
@@ -2694,7 +2808,7 @@ def _view_failed(c: str, slug: str, error: str, chat: str | None = None, *, drop
         _change_failed_chip(c, current, error)
         return
     if not current.get("asked"):
-        _view_dropped(c, slug, drop_why or error, chat)
+        _view_dropped(c, slug, error, chat)
         return
     views.update_proposal(c, slug, status="failed", error=error)
     views._emit(c, slug, "failed", chat=chat)
@@ -2888,8 +3002,10 @@ def view_env(slug: str, offline: bool = True) -> dict[str, str]:
 
 
 # The thimble code a view's reader and page run against, which a view build's session reads unasked: the kernel's
-# `thimble` module, the page's bridge and styles, the checks, and the rest of the server's code beside them.
-VIEW_CODE = ("backend/app/", "scripts/view_shot.mjs")
+# `thimble` module, the page's bridge and styles, the checks, and the rest of the server's code beside them, the frame
+# the page runs in, and thimble's prompts, whose tools.md describes the tools. The private files (userconf.private_paths)
+# stay denied whatever these allow.
+VIEW_CODE = ("backend/app/", "scripts/view_shot.mjs", "frontend/src/files/ViewerFrame.tsx", "prompts/")
 
 
 def view_key(slug: str) -> str:
@@ -2919,12 +3035,12 @@ def view_asking(c: str, slug: str, folder: Path, conf: userconf.Session) -> dict
     return out
 
 
-def view_capacity_waits() -> list[float]:
-    """The waits of a view build whose turns the API keeps ending at capacity: the same schedule as agent_session's
-    retries."""
+def view_capacity_wait(n: int) -> float:
+    """The wait before a view build's turn `n` (from 0) of a streak the API keeps ending at capacity: the same schedule
+    as agent_session's retries, which has no end."""
     from . import agent_session  # noqa: PLC0415
 
-    return agent_session.retry_knobs()
+    return agent_session.retry_wait(n)
 
 
 def _view_failure(report: dict[str, Any] | None, folder: Path, error: str, result_text: str) -> str:
@@ -3010,7 +3126,6 @@ async def _run_view(c: str, slug: str, run: Run) -> None:
     resume = prop.get("session_id")
     report: dict[str, Any] | None = None
     built, error, result_text = False, "", ""
-    capacity = ""  # why the last turn ended, when the API ended it (capacity_failure)
     unchanged = False  # a change to a built view whose session ended its turn with the view's files as they were
 
     def on_session(short: str, sid: str) -> None:
@@ -3040,7 +3155,7 @@ async def _run_view(c: str, slug: str, run: Run) -> None:
         else:
             prompt = build_view_prompt(c, prop, folder, corpus)
         told = prompt  # the last gate report the session was sent
-        waits, waited = view_capacity_waits(), 0.0
+        streak = 0  # the turns in a row the API ended at capacity (view_capacity_wait)
         # an orientation's proposal repairs itself rather than showing a failure
         repairs = 0 if prop.get("asked") or revision else VIEW_REPAIRS
         attempt, broke = 0, False
@@ -3093,19 +3208,15 @@ async def _run_view(c: str, slug: str, run: Run) -> None:
                 built, unchanged = False, True
                 break
             if built or not capacity:
-                capacity = ""
                 if not built:
                     prompt = told = build_gates_prompt("\n".join(views.gate_lines(report)))
                 continue
             if time.monotonic() - turn_start > _retry_streak_s():
-                # the turn worked a while before the API stopped it: a new streak of waits
-                waits, waited = view_capacity_waits(), 0.0
-            if not waits:
-                break  # the API stayed at capacity through every wait, which the failure names (below)
+                streak = 0  # the turn worked a while before the API stopped it: a new streak of waits
             # the turn ended on the API's error rather than the session's work: wake the same session after a wait,
-            # which is no attempt
-            wait = waits.pop(0)
-            waited += wait
+            # which is no attempt, for as long as the API stays at capacity
+            wait = view_capacity_wait(streak)
+            streak += 1
             run_log.stage(f"{capacity}, so the build waits {_minutes(wait)} and goes on")
             await _capacity_sleep(wait)
             attempt -= 1
@@ -3145,13 +3256,7 @@ async def _run_view(c: str, slug: str, run: Run) -> None:
             log.exception("the view event for %s/%s was not sent", c, slug)
         return
     run.status = "failed"
-    drop_why = None
-    if capacity:
-        # the API ended the last turn, so a file the gate found missing or empty is its doing: its error says why
-        api = " ".join((error or result_text).split())
-        drop_why = CAPACITY_WHY.format(why=capacity, waited=_minutes(waited))
-        why = CAPACITY_FAILED.format(why=capacity, waited=_minutes(waited), error=api)[:ERROR_CHARS]
-    elif unchanged:
+    if unchanged:
         said = " ".join(result_text.split())
         why = (UNCHANGED_LINE + (f": {said}" if said else ""))[:ERROR_CHARS]
     else:
@@ -3163,7 +3268,7 @@ async def _run_view(c: str, slug: str, run: Run) -> None:
             _close_chat({"workspace": c, "chat": chat}, "failed", why)
         _change_failed_chip(c, prop, why)
         return
-    _view_failed(c, slug, why, chat, drop_why=drop_why)
+    _view_failed(c, slug, why, chat)
 
 
 def view_program(c: str) -> Any:
@@ -3225,8 +3330,7 @@ async def review_revision(c: str, slug: str, message: str) -> tuple[bool, str]:
     in the view's thread, the view's checks run after each turn and fed back up to MAX_ATTEMPTS times. (passed, the
     session's report or why it did not pass). A view with no build session gets a new one, started with its ticket. Its
     session asks as a build's does (view_asking). A turn the API ended at capacity is no attempt: the session is woken
-    again after a build's waits (view_capacity_waits), then after the longest of them for as long as the API stays at
-    capacity."""
+    again after a build's waits (view_capacity_wait), for as long as the API stays at capacity."""
     from . import agent_session, tools, views  # noqa: PLC0415
 
     prop = views.read_proposal(c, slug)
@@ -3257,8 +3361,7 @@ async def review_revision(c: str, slug: str, message: str) -> tuple[bool, str]:
     def on_session(short: str, sid: str) -> None:
         views.update_proposal(c, slug, session=short, session_id=sid)
 
-    waits, waited = view_capacity_waits(), 0.0
-    longest = max(waits, default=0.0)
+    streak = 0  # the turns in a row the API ended at capacity
     attempt = 0
     checks = views.watch_checks(c, slug)
     try:
@@ -3284,12 +3387,9 @@ async def review_revision(c: str, slug: str, message: str) -> tuple[bool, str]:
             if capacity:
                 # the view as it was passes the checks too, so a turn the API cut short is not checked
                 if time.monotonic() - turn_start > _retry_streak_s():
-                    waits, waited = view_capacity_waits(), 0.0
-                if not waits and not longest:
-                    why = REVIEW_CAPACITY_WHY.format(why=capacity, waited=_minutes(waited))
-                    break
-                wait = waits.pop(0) if waits else longest
-                waited += wait
+                    streak = 0
+                wait = view_capacity_wait(streak)
+                streak += 1
                 run_log.stage(f"{capacity}, so the revision waits {_minutes(wait)} and goes on")
                 await _capacity_sleep(wait)
                 attempt -= 1
@@ -3323,11 +3423,6 @@ async def review_revision(c: str, slug: str, message: str) -> tuple[bool, str]:
 
 CAPACITY_WORDS = {"overloaded": "Anthropic's API was overloaded", "rate_limited": "Anthropic's API rate limit was reached",
                   "server_error": "Anthropic's API had a server error"}
-# a view build whose last turn the API ended once every wait (view_capacity_waits) was spent: the failure on the chip
-# of a view the analyst asked for, and the reason in the line an orientation's dropped proposal gets
-CAPACITY_WHY = "{why} each time the build tried over {waited}"
-REVIEW_CAPACITY_WHY = "{why} each time the revision tried over {waited}"
-CAPACITY_FAILED = CAPACITY_WHY + ", so it stopped; Retry goes on from there. ({error})"
 # the failure of a change to a built view whose session ended its turn with the view's files as they were built
 UNCHANGED_LINE = "the session changed none of the view's files"
 

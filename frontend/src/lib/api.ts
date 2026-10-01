@@ -46,6 +46,7 @@ import type {
   ViewShown,
   Writeup,
 } from './types'
+import { heavy } from './limit'
 
 const BASE = '/api'
 
@@ -362,16 +363,20 @@ export const api = {
     if (!res.ok) throw new Error(`${res.status} ${res.statusText}`)
     return res.text()
   },
-  /** reader.records(index, query), for the page's thimble.fetch, with no time limit: `call` names it for viewCall and
-   * viewCancel, and `signal` drops the request; with a label filter on, `hidden` is how many records the reader left
-   * out for it in what the frame shows (the page's fetch `key`, the `frame` and its `turn`), null when that cannot be
-   * counted exactly */
+  /** reader.records(index, query), for the page's thimble.fetch, with no time limit, through the gate of slow calls
+   * (lib/limit.ts heavy): `call` names it for viewCall and viewCancel, and `signal` drops the request; with a label
+   * filter on, `hidden` is how many records the reader left out for it in what the frame shows (the page's fetch `key`,
+   * the `frame` and its `turn`), null when that cannot be counted exactly */
   viewRecords: (c: string, slug: string, query: unknown, version?: string, opts?: { call?: string; signal?: AbortSignal; key?: string; frame?: string; turn?: number }) =>
-    j<{ data: unknown; hidden?: number | null }>(`${ws(c)}/views/${enc(slug)}/records${q({ v: version })}`, {
-      method: 'POST',
-      body: JSON.stringify({ query, call: opts?.call, key: opts?.key, frame: opts?.frame, turn: opts?.turn }),
-      signal: opts?.signal,
-    }),
+    heavy(
+      () =>
+        j<{ data: unknown; hidden?: number | null }>(`${ws(c)}/views/${enc(slug)}/records${q({ v: version })}`, {
+          method: 'POST',
+          body: JSON.stringify({ query, call: opts?.call, key: opts?.key, frame: opts?.frame, turn: opts?.turn }),
+          signal: opts?.signal,
+        }),
+      opts?.signal,
+    ),
   /** how far the page's call has got: seconds since it started, whether the reader reads the files (`index`), waits for
    * a kernel (`wait`) or answers (`call`), and what it reported; {running: false} once it is over */
   viewCall: (c: string, slug: string, call: string) =>
@@ -396,7 +401,8 @@ export const api = {
     return res.text()
   },
   /** reader.records(index, query) for a card's page, under the labels the card names */
-  cardTypeRecords: (c: string, type: string, card: string, query: unknown) => j<{ data: unknown }>(`${ws(c)}/cardtypes/${enc(type)}/records`, { method: 'POST', body: JSON.stringify({ query, card }) }),
+  cardTypeRecords: (c: string, type: string, card: string, query: unknown) =>
+    heavy(() => j<{ data: unknown }>(`${ws(c)}/cardtypes/${enc(type)}/records`, { method: 'POST', body: JSON.stringify({ query, card }) })),
   /** Keep: a card type's card with its call's arguments changed by `patch`, run again and checked (backend
    * cardtypes.keep_route); the card as stored */
   keepCard: (c: string, card: string, patch: Record<string, unknown>) =>
@@ -417,7 +423,6 @@ export const api = {
 
   // ---- documents ----
   frame: (c: string, slug: DocumentType) => j<Writeup>(`${inv(c, slug)}/frame`),
-  document: (c: string, slug: DocumentType) => j<Writeup>(inv(c, slug)),
   addFrameSection: (c: string, slug: DocumentType, heading: string) => j<Writeup>(`${inv(c, slug)}/frame/sections`, { method: 'POST', body: JSON.stringify({ heading }) }),
   addFrameParagraph: (c: string, slug: DocumentType, sid: string, text: string) => j<Writeup>(`${inv(c, slug)}/frame/sections/${enc(sid)}/paragraphs`, { method: 'POST', body: JSON.stringify({ text }) }),
   addFrameFigure: (c: string, slug: DocumentType, sid: string, body: { cell: string; caption?: string; after?: string }) => j<Writeup>(`${inv(c, slug)}/frame/sections/${enc(sid)}/figures`, { method: 'POST', body: JSON.stringify(body) }),

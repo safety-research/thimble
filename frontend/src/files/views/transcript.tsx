@@ -6,7 +6,8 @@
 // whole-file JSON transcript (a chat export, an eval log) as the turns the server parses from it, a page at a time.
 // JSON lines in a file the server pages as text are parsed here, line by line. While system records are hidden, a long
 // run of them (HIDDEN_RUN_NOTE or more) says in one line how many it hides, so the view is never blank while the reader
-// pages past them.
+// pages past them. A record with no words to show (a turn that holds only redacted thinking, a post with an empty body)
+// gets no row, unless a citation points at it; Raw shows every line.
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Button } from '../../components/Button'
 import { Chip } from '../../components/Chip'
@@ -115,6 +116,11 @@ function errorBlockIndexes(rec: any): Set<number> {
     k++
   }
   return out
+}
+
+/** Whether a record's blocks hold any words to show. Pure. */
+export function hasWords(blocks: readonly Block[]): boolean {
+  return blocks.some((b) => b.text.trim() !== '')
 }
 
 export function Transcript(props: ViewProps) {
@@ -270,6 +276,7 @@ function Posts({ path, records, targetRef, hint, derived }: { path: string; reco
   const rootRef = useRef<HTMLDivElement | null>(null)
   const { target, hit } = useTarget(targetRef, path, rootRef, [records])
   const keys = useMemo(() => keysFor(hint, records.slice(0, 20).map((r) => r.record)), [hint, records])
+  const asked = targetOf(targetRef, path)?.line
   return (
     <div className="reader-transcript reader-msgboard" ref={rootRef}>
       {records.map((rec) => {
@@ -280,8 +287,10 @@ function Posts({ path, records, targetRef, hint, derived }: { path: string; reco
         const value = pick(r, keys.body)
         const body = textOf(value)
         const header = [author, present(ctx) && typeof ctx !== 'object' ? String(ctx) : null, ts].filter(Boolean).join(' · ')
-        // an empty body leaves the server a raw block of the whole record; the post says it is empty instead
+        // an empty body leaves the server a raw block of the whole record: the post has no row, or, when a citation
+        // points at it, says it is empty
         const empty = typeof body === 'string' && !body.trim()
+        if (empty && rec.line !== asked) return null
         const fields = value == null && rec.blocks.every((b) => b.kind === 'raw') ? restFields(r, keys) : null
         const own = !derived && rec.blocks.length > 0 && !rec.blocks.every((b) => b.kind === 'raw' && body != null)
         return (
@@ -405,16 +414,19 @@ function Conversations({ path, page, targetRef, transcript }: ViewProps) {
     <div className="reader-transcript reader-convs" ref={rootRef}>
       {records.map((rec) => {
         const r = rec.record ?? {}
-        const turns = conversationTurns(r, transcript)
+        // a turn with no words gets no row
+        const turns = conversationTurns(r, transcript)?.filter((t) => t.text.trim())
         const ctx = CONTEXT_KEYS.map((key) => r[key]).find((v) => present(v) && typeof v !== 'object')
-        const first = turns?.find((t) => t.text.trim())?.text ?? ''
+        const first = turns?.[0]?.text ?? ''
         return (
           <RecordCard key={rec.line} path={path} line={rec.line} target={target} hit={hit} className="reader-msg reader-conv" header={ctx != null ? String(ctx) : undefined} text={first.slice(0, 500) || undefined}>
-            {turns ? (
+            {turns && !turns.length ? (
+              <div className="reader-msg-empty">(empty)</div>
+            ) : turns ? (
               turns.map((t, k) => (
                 <div key={k} className="reader-conv-turn">
                   <div className="reader-conv-speaker mono">{[t.speaker, t.time].filter(Boolean).join(' · ') || '(unsigned)'}</div>
-                  {t.text.trim() ? <BlockEl block={{ kind: 'text', text: t.text.slice(0, TURN_TEXT_MAX) }} line={rec.line} index={k} target={null} hit={false} /> : <div className="reader-msg-empty">(empty)</div>}
+                  <BlockEl block={{ kind: 'text', text: t.text.slice(0, TURN_TEXT_MAX) }} line={rec.line} index={k} target={null} hit={false} />
                   {t.text.length > TURN_TEXT_MAX && <div className="reader-msg-empty">Cut at {TURN_TEXT_MAX.toLocaleString()} of {t.text.length.toLocaleString()} characters. Raw shows all of it.</div>}
                 </div>
               ))
@@ -503,15 +515,19 @@ function TurnsTranscript({ workspace, path, targetRef }: ViewProps) {
     )
   const titled = data.n_groups > 1 || Object.values(data.groups).some((g) => g.title)
   const out: ReactNode[] = []
-  turns.forEach((t, k) => {
+  // a turn with no words gets no card, unless a citation points at it; the card before it shows its lines' labels
+  const shown = turns.filter((t) => t.text.trim() || holder?.i === t.i)
+  const last = turns[turns.length - 1]
+  shown.forEach((t, k) => {
     const g = t.group != null ? data.groups[String(t.group)] : undefined
-    if (titled && g && (k === 0 || turns[k - 1].group !== t.group))
+    if (titled && g && (k === 0 || shown[k - 1].group !== t.group))
       out.push(
         <div key={`g${t.i}`} className="reader-session">
           <span>{g.title || `Conversation ${t.group! + 1}`}</span>
         </div>,
       )
-    out.push(<TurnCard key={t.i} path={path} turn={t} end={Math.max(t.line, (turns[k + 1]?.line ?? t.line) - 1)} target={holder?.i === t.i ? target : null} hit={hit} />)
+    const next = shown[k + 1]?.line ?? (last.i !== t.i ? last.line + 1 : t.line)
+    out.push(<TurnCard key={t.i} path={path} turn={t} end={Math.max(t.line, next - 1)} target={holder?.i === t.i ? target : null} hit={hit} />)
   })
   return (
     <div className="reader-transcript reader-turns" ref={rootRef}>
@@ -577,12 +593,33 @@ export function unwrapStream(records: SourceRecord[], wrap: string): SourceRecor
   })
 }
 
+/** The blocks of a conversational stream record the server keeps whole, as one raw block (in a file it types as text),
+ * made here as the server makes them where it reads the file as a transcript; null for any other record. Pure. */
+export function madeBlocks(rec: SourceRecord): Block[] | null {
+  const r = rec.record
+  const whole = rec.blocks.length === 1 && rec.blocks[0].kind === 'raw'
+  return whole && CONVERSATIONAL.has(r?.type) && r?.message && typeof r.message === 'object' ? streamBlocks(r) : null
+}
+
 function StreamTranscript({ path, page, targetRef, transcript }: ViewProps) {
   const wrap = transcript?.wrap
-  const records = useMemo(() => (wrap ? unwrapStream(page.records, wrap) : page.records), [wrap, page.records])
-  // blocks made here from a nested record are not the file's own, so labels' spans and citations' offsets are not
-  // drawn on them
-  const blockPath = wrap ? undefined : path
+  // the lines whose blocks are made here, from a nested record or one the server keeps whole: they are not the file's
+  // own blocks, so labels' spans and citations' offsets are not drawn on them
+  const { records, made } = useMemo(() => {
+    if (wrap) {
+      const out = unwrapStream(page.records, wrap)
+      return { records: out, made: new Set(out.map((r) => r.line)) }
+    }
+    const lines = new Set<number>()
+    const out = page.records.map((r) => {
+      const blocks = madeBlocks(r)
+      if (!blocks) return r
+      lines.add(r.line)
+      return { ...r, blocks }
+    })
+    return { records: out, made: lines }
+  }, [wrap, page.records])
+  const blockPathOf = (line: number) => (made.has(line) ? undefined : path)
   const [showSystem, setShowSystem] = useState(false)
   const rootRef = useRef<HTMLDivElement | null>(null)
   const { target, hit } = useTarget(targetRef, path, rootRef, [records, showSystem])
@@ -592,18 +629,21 @@ function StreamTranscript({ path, page, targetRef, transcript }: ViewProps) {
     if (rec && !CONVERSATIONAL.has(rec.record?.type)) setShowSystem(true)
   }, [target, records, showSystem])
 
+  // a conversational record with no words to show gets no row, unless a citation points at it
+  const asked = targetOf(targetRef, path)?.line
+  const rows = useMemo(() => records.filter((r) => !CONVERSATIONAL.has(r.record?.type) || hasWords(r.blocks) || r.line === asked), [records, asked])
   const runs = useMemo(
     () =>
       hiddenRuns(
-        records.map((r) => r.record?.type),
-        records.map((r) => r.line),
+        rows.map((r) => r.record?.type),
+        rows.map((r) => r.line),
       ),
-    [records],
+    [rows],
   )
   const out: ReactNode[] = []
   let prevSession: string | undefined
   let sessionNo = 1
-  records.forEach((rec, i) => {
+  rows.forEach((rec, i) => {
     const r = rec.record ?? {}
     const sid: string | undefined = rec.meta?.session_id ?? r.session_id
     if (sid && i > 0 && prevSession && sid !== prevSession) {
@@ -617,12 +657,13 @@ function StreamTranscript({ path, page, targetRef, transcript }: ViewProps) {
     if (sid) prevSession = sid
     const type: string = r.type ?? 'record'
     if (!CONVERSATIONAL.has(type)) {
-      if (showSystem) out.push(<SysRow key={rec.line} path={path} blockPath={blockPath} rec={rec} target={target} hit={hit} />)
+      if (showSystem) out.push(<SysRow key={rec.line} path={path} blockPath={blockPathOf(rec.line)} rec={rec} target={target} hit={hit} />)
       else if (runs.has(rec.line)) out.push(<HiddenRun key={`h${rec.line}`} count={runs.get(rec.line)!} onShow={() => setShowSystem(true)} />)
       return
     }
     const ts = rec.meta?.timestamp ?? r.timestamp
     const errorBlocks = errorBlockIndexes(r)
+    const blockPath = blockPathOf(rec.line)
     const header = [type, ts ? stamp(String(ts)) : null].filter(Boolean).join(' · ')
     out.push(
       <RecordCard key={rec.line} path={path} line={rec.line} target={target} hit={hit} className={`reader-rec-${type}`} header={header} text={recordExcerpt(rec)}>

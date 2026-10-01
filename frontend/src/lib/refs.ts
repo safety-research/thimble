@@ -299,7 +299,7 @@ export function refLabel(ref: string): string {
     case 'chat':
       return `chat${p.eventIndex != null ? ` #${p.eventIndex}` : ''}`
     case 'call':
-      return `call ${p.n}${p.line != null ? ` · ${p.endLine != null ? `lines ${p.line}–${p.endLine}` : `line ${p.line}`}` : ''}`
+      return `step ${p.n}${p.line != null ? ` · ${p.endLine != null ? `lines ${p.line}–${p.endLine}` : `line ${p.line}`}` : ''}`
     case 'ui':
       return p.name
     case 'table':

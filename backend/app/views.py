@@ -633,13 +633,13 @@ def _own_views(c: str) -> list[dict[str, Any]]:
 
 def local_extension(c: str) -> dict[str, Any]:
     """Settings' entry for the workspace's local extension: its name and the views built for this workspace, each by the
-    name the views bar gives it (its proposal's), with whether it is a file viewer (file_type_viewer), which opens in
-    the File browser, and whether it is on (views_off). A view an extension or thimble installed here (its proposal's
-    `installed`) is left out, and so is a held one (held_slugs)."""
+    name the views bar gives it (its proposal's), with its description, whether it is a file viewer (file_type_viewer),
+    which opens in the File browser, and whether it is on (views_off). A view an extension or thimble installed here
+    (its proposal's `installed`) is left out, and so is a held one (held_slugs)."""
     props = {p["slug"]: p for p in list_proposals(c)}
     held, off = held_slugs(c), views_off(c)
     vs = [{"slug": v["slug"], "name": str((props.get(v["slug"]) or {}).get("name") or v["name"]),
-           "file_viewer": file_type_viewer(v), "on": v["slug"] not in off}
+           "description": v.get("description") or "", "file_viewer": file_type_viewer(v), "on": v["slug"] not in off}
           for v in _own_views(c)
           if v["ok"] and v["slug"] not in held and not (props.get(v["slug"]) or {}).get("installed")]
     try:

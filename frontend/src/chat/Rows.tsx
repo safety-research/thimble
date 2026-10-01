@@ -23,7 +23,7 @@ import { teleport } from '../lib/teleport'
 import { track } from '../lib/telemetry'
 import { chipIcon, chipPending, docSave, settleChip, settledWord, type Settled } from './chips'
 import { ChatMarkdown, ChipContext, RefText } from './markdown'
-import { API_ERROR_KIND, callLineText, callPieces, capacityNote, corpusRelative, durationText, groupState, groupTools, isRawCall, labelRunName, leadText, madeBy, runTools, stripHarness, toolDisplayName, toolMeta, toolSteps, toolSummary, underCorpus, type AgentRow as AgentRowT, type BranchRow, type CallsRow, type ChipRow as ChipRowT, type ErrorRow as ErrorRowT, type Row, type ToolGroup, type ToolRow as ToolRowT, waitText } from './model'
+import { API_ERROR_KIND, callLineText, callPieces, capacityNote, corpusRelative, durationText, groupState, groupTools, isRawCall, labelRunName, leadText, madeBy, QUIET_RE, runTools, stripHarness, toolDisplayName, toolMeta, toolSteps, toolSummary, underCorpus, type AgentRow as AgentRowT, type BranchRow, type CallsRow, type ChipRow as ChipRowT, type ErrorRow as ErrorRowT, type Row, type ToolGroup, type ToolRow as ToolRowT, waitText } from './model'
 import { Note, ShotCard, ThreadChip, ThreadsContext } from './Notes'
 import { AgentCard, OrientLanding, openLabel } from './AgentCard'
 import { ApiErrorCard } from './ApiError'
@@ -62,8 +62,8 @@ const isLabelRun = (r: { kind: string; role?: string }): r is AgentRowT => r.kin
 
 /** The rows as the transcript shows them: consecutive raw calls (model.isRawCall) as one run of chip lines, other calls
  * of one kind folded into one card, consecutive view chips into one note (duplicates dropped), and consecutive label
- * runs into one card. A view build's capacity wait joins the error row before it. With `each`, every call is a chip
- * line of its own. Pure. */
+ * runs into one card. A view build's capacity wait joins the error row before it. A line saying the session shows no
+ * activity holds only until the next row. With `each`, every call is a chip line of its own. Pure. */
 export function shownRows(rows: readonly (Row | BranchRow)[], each = false): ShownRow[] {
   const out: ShownRow[] = []
   // a view a call of this chat proposed is a chip on that call's card, so its chip note would say it twice
@@ -74,6 +74,8 @@ export function shownRows(rows: readonly (Row | BranchRow)[], each = false): Sho
   const latestRun = new Map<string, number>()
   for (const r of rows) if (isLabelRun(r)) latestRun.set(labelRunName(r.title), r.index)
   for (const r of groupTools(rows as Row[]) as (Exclude<Row, ToolRowT> | ToolGroup | BranchRow)[]) {
+    const before = out[out.length - 1]
+    if (before?.kind === 'note' && QUIET_RE.test(before.text)) out.pop()
     if (r.kind === 'tools' && (each || r.tools.every((t) => isRawCall(t.name)))) {
       const last = out[out.length - 1]
       if (last && last.kind === 'calls') last.tools.push(...r.tools)
@@ -805,8 +807,9 @@ function useChipSettled(ws: string, item: ChipRowT): Settled | null {
     })
     const p = parseRef(ref)
     if (p?.kind === 'report') {
+      // the written document, or its frame before a write
       api
-        .document(ws, p.slug)
+        .frame(ws, p.slug)
         .then((d) => {
           if (alive && d.generated_at && !d.partial && !d.frame) setSettled('done')
         })

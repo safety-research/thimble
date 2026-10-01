@@ -192,7 +192,7 @@ function Figure({ ws, id, cellRef, caption, stored, readOnly, bare = false, onCa
           {readOnly || !onCaption ? (
             <span className="wu-fig-caption wu-fig-caption-read">{take}</span>
           ) : (
-            <TextArea key={width > 0 ? 'laid-out' : 'unmeasured'} bare block autoGrow rows={1} className="wu-fig-caption" value={caption} onChange={(v) => onCaption(v.replace(/\n+/g, ' '))} aria-label="Caption" />
+            <TextArea key={width > 0 ? 'laid-out' : 'unmeasured'} bare block autoGrow rows={1} className="wu-fig-caption" value={caption} onChange={(v) => onCaption(v.replace(/\n+/g, ' '))} aria-label="Caption" spellCheck={false} />
           )}
         </div>
       )}

@@ -178,9 +178,10 @@ async def test_every_session_asks_through_the_permission_hook_and_no_prompt_tool
     assert "ask_permission" not in tools.REGISTRY
 
 
-async def test_manual_waits_for_the_analyst_however_long_while_a_writer_s_request_is_denied_after_a_minute(fake, monkeypatch, analyst):
+async def test_manual_waits_for_the_analyst_longer_while_a_writer_s_request_is_denied_after_a_minute(fake, monkeypatch, analyst):
     """Manual is Claude Code's manual mode: each request it makes waits on the orientation's card, with the agent that
-    asked, until the analyst answers, with no minute's deny. A writer, which is not patient, keeps the minute."""
+    asked, until the analyst answers or PATIENT_WAIT_S passes, with no minute's deny. A writer, which is not patient,
+    keeps the minute."""
     monkeypatch.setenv("FAKE_MODE", "sleep")
     monkeypatch.setattr(agent_session, "PERMISSION_WAIT_S", 0.05)
     run = await orient_session.start(CORPUS, "")
@@ -190,7 +191,7 @@ async def test_manual_waits_for_the_analyst_however_long_while_a_writer_s_reques
     [p] = await _pending(run.chat)
     assert (p["tool"], p["what"], p["agent_id"]) == ("Bash", "Create notes.md", "a1") and "touch notes.md" in p["input"]
     await asyncio.sleep(0.3)
-    assert not call.done(), "no time limit in Manual"
+    assert not call.done() and p["wait_s"] == agent_session.PATIENT_WAIT_S, "not the minute"
     assert (await agent_session.permission_route(CORPUS, run.chat, agent_session.PermissionAnswer(id=p["id"], allow=True), analyst))["allow"]
     assert await call == {"behavior": "allow", "updatedInput": inp}
     call = _ask("Write", {"file_path": "x"})

@@ -1,9 +1,11 @@
 // The nominal chart colours (--viz-1 to --viz-7 in src/styles/tokens.css), which views, cards and charts take for
 // their categories: on every paper none is a red, which reads as an error, or a purple, the agents' colour, each reads
 // at 3:1 on the paper's grounds, and neighbours and the first three stay apart, also under protan and deutan vision.
+// The label colours (--label-1 to --label-12) hold to the same, and all twelve stay apart pairwise.
 import { readFileSync } from 'node:fs'
 import { describe, expect, test } from 'vitest'
 import { MPL_CYCLE, restyle } from '../../src/lib/svg.ts'
+import { token } from '../../src/lib/vizTheme.ts'
 
 const CSS = readFileSync(new URL('../../src/styles/tokens.css', import.meta.url), 'utf8')
 const SLOTS = ['--viz-1', '--viz-2', '--viz-3', '--viz-4', '--viz-5', '--viz-6', '--viz-7']
@@ -122,5 +124,44 @@ describe.each(Object.keys(PAPERS))('the chart colours on the %s paper', (paper) 
       expect(apart(a, b), `${a} and ${b}`).toBeGreaterThanOrEqual(15)
       for (const v of ['protan', 'deutan']) expect(apart(a, b, v), `${a} and ${b} under ${v}`).toBeGreaterThanOrEqual(8)
     }
+  })
+})
+
+const LABELS = Array.from({ length: 12 }, (_, i) => `--label-${i + 1}`)
+
+test("the label colours' copies are the light paper's: the charts' fallbacks and the kernel's", () => {
+  expect(LABELS.map((l) => token(l))).toEqual(LABELS.map((l) => BASE[l]))
+  const py = readFileSync(new URL('../../../backend/app/kernel_thimble.py', import.meta.url), 'utf8')
+  const kernel = [...(/LABEL_COLOURS = \[[^\]]*\]/.exec(py)?.[0] ?? '').matchAll(/"(#[0-9a-fA-F]{6})"/g)].map((m) => m[1].toLowerCase())
+  expect(kernel).toEqual([BASE['--label-none'], ...LABELS.map((l) => BASE[l])])
+})
+
+describe.each(Object.keys(PAPERS))('the label colours on the %s paper', (paper) => {
+  const t = PAPERS[paper]
+  const colours = LABELS.map((s) => t[s])
+
+  test('are twelve colours, none of them a red or a purple', () => {
+    expect(colours.every(Boolean)).toBe(true)
+    for (const c of colours) {
+      const [chroma, hue] = chromaHue(c)
+      expect(chroma, c).toBeGreaterThan(0.085)
+      expect(hue < 45 || hue >= 345, `${c} is a red (hue ${hue.toFixed(0)})`).toBe(false)
+      expect(hue >= 270 && hue < 345, `${c} is a purple (hue ${hue.toFixed(0)})`).toBe(false)
+    }
+  })
+
+  test('each reads at 3:1 or more on every ground of the paper', () => {
+    for (const g of GROUNDS) {
+      for (const c of colours) expect(contrast(c, t[g]), `${c} on ${g} ${t[g]}`).toBeGreaterThanOrEqual(3)
+    }
+  })
+
+  test('neighbours stay apart, also under protan and deutan vision, and no two of the twelve look alike', () => {
+    for (let i = 1; i < colours.length; i++) {
+      const [a, b] = [colours[i - 1], colours[i]]
+      expect(apart(a, b), `${a} and ${b}`).toBeGreaterThanOrEqual(15)
+      for (const v of ['protan', 'deutan']) expect(apart(a, b, v), `${a} and ${b} under ${v}`).toBeGreaterThanOrEqual(8)
+    }
+    for (let i = 0; i < colours.length; i++) for (let j = i + 1; j < colours.length; j++) expect(apart(colours[i], colours[j]), `${colours[i]} and ${colours[j]}`).toBeGreaterThanOrEqual(7.5)
   })
 })

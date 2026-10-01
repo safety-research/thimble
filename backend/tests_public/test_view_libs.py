@@ -143,6 +143,15 @@ async def test_a_refused_package_or_installs_turned_off_leave_a_problem_and_noth
         return None
 
     monkeypatch.setattr(view_libs, "_installs", lambda c: "ask")
+
+    async def late(c, slug, fields):
+        return view_libs.UNANSWERED
+
+    got = await view_libs.ensure("ws", "v", folder, ["tiny-queue@1"], ask=late)
+    assert got["problems"][0].startswith("nobody answered within ") and "tiny-queue 1.4.2" in got["problems"][0], \
+        "a question nobody answered says so, not that the analyst refused"
+    assert view_libs.approvals() == {} and not [c for c in npm if c[1] == "install"]
+
     got = await view_libs.ensure("ws", "v", folder, ["tiny-queue@1"], ask=nobody)
     assert got["problems"] == ["thimble could not ask the analyst about the package tiny-queue 1.4.2, since no build of "
                                "this view is running, so it was not installed"]
@@ -240,3 +249,15 @@ async def test_a_question_outlives_the_check_that_asked_it(tmp_path, npm):
     got = await gate
     assert asked == ["a"] and cancelled == [], "the card stayed up, and the gate after the turn heard its answer"
     assert got["problems"] == [] and view_libs.vendored(b, "tiny-queue@1") is not None
+
+
+async def test_a_package_card_nobody_answers_in_time_is_unanswered_not_refused(tmp_path):
+    from app import agent_session, agents, dev
+
+    meta = agents.new_agent("mini", "dev", "a view build", announce=False)
+    agent_session.host("mini", dev.view_key("v"), str(meta["id"]), agent="dev", wait_s=0.2)
+    try:
+        got = await view_libs._ask_on_card("mini", "v", {"description": "Install the npm package tiny-queue 1.4.2"})
+    finally:
+        agent_session.unhost("mini", dev.view_key("v"))
+    assert got == view_libs.UNANSWERED

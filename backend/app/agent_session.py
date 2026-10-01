@@ -20,9 +20,11 @@ used rather than --permission-prompt-tool because the prompt tool never hears ba
 Each session runs in the mode of its agent's row (modes.py, the caller's `agent`), or in the mode a card switched it to
 (set_mode), which its later runs keep while this server runs (`_switched`); a continued background session keeps the
 mode its chat's meta records, since Claude Code keeps its flags (BG_AUTO_LINE). In Bypass ask allows at once; a patient
-session's request (the orientation's) waits for the analyst, any other is denied after PERMISSION_WAIT_S. A request
-denied unanswered stays on the card, marked `expired`, until the analyst dismisses it or the session ends. thimble's
-own tools and skills are always allowed (own_rules).
+session's request (the orientation's) is denied after PATIENT_WAIT_S unanswered, any other after PERMISSION_WAIT_S, so
+no request waits for good. A request denied unanswered stays on the card, marked `expired`, until the analyst dismisses
+it or the session ends. A request nothing waits on any more leaves the card: one whose hook went away (its process was
+killed), one a previous server left on the chat's meta (recover), and one the analyst answers after its wait ended.
+thimble's own tools and skills are always allowed (own_rules).
 
 Hosted sessions. The dev agent's background sessions (dev.py) are not followed here, yet ask answers their hook's
 requests the same way: host registers one on its chat for the length of its run, with its agent's mode and its wait
@@ -46,8 +48,7 @@ PermissionDenied: the card asks the analyst, and an allow answers `retry` and is
 GRANT_TTL_S) so a PreToolUse hook (before_call) lets the call made again run. The model may reword the call, so an allow
 also covers the same agent's next call of that tool within GRANT_TTL_S. A refusal only because the classifier was
 unavailable (CLASSIFIER_DOWN) is no verdict: after each of CLASSIFIER_WAITS_S the hook answers `retry` with nothing
-remembered, so auto mode judges the call made again, and only then does the card ask; for a patient session that card
-denies the call after CLASSIFIER_ASK_S unanswered, so the session never waits on it for good.
+remembered, so auto mode judges the call made again, and only then does the card ask.
 
 Mode switch. Between Manual and Bypass the switch is instant (both run Claude Code's manual mode). Into or out of Auto,
 the process's --permission-mode must change, so the follower pauses the process when it is quiet (no call without its
@@ -86,7 +87,13 @@ End. The last `result` line on stdout is the summary; the caller's `on_end` hear
 process group and also kills the processes below it, since Claude Code runs each Bash command in a group of its own.
 
 Retry. A session that exits because the API is at capacity (CAPACITY) is started again with `--resume` and
-`## session-retry` after waits from retry_waits, until RETRY_BUDGET_S is spent.
+`## session-retry` after a wait from retry_wait, for as long as the API stays at capacity. Retry now and Stop end the
+wait.
+
+Quiet. A caller that waits for a session's end with wait_done gets QUIET_LINE in the session's chat once neither its
+transcript nor its steps' have grown for QUIET_NOTE_S, and again each time that time doubles. Time while a permission
+request waits on the analyst or a retry waits for capacity does not count. The session runs on until it ends or the
+analyst stops it.
 
 Background work. --print's wait for background agents is uncapped (BG_WAIT_ENV) and the tools that schedule a later turn
 are disallowed (LATER_TOOLS). A process that exits with background work unreported is resumed with
@@ -156,9 +163,11 @@ STEP_ROLE = agents.STEP_ROLE  # a subagent or workflow agent of the session
 STEP_TITLE = "agent"  # a step whose meta names nothing
 POLL_S = 0.5
 STOP_WAIT_S = 4.0  # after SIGINT, then again after SIGTERM, before the next signal
-# an unanswered permission request is denied after this long, unless its session is patient (the orientation's) or
-# hosted with a wait of its own (module note, permissions)
+# an unanswered permission request is denied after this long, unless its session is patient (the orientation's), when
+# it is PATIENT_WAIT_S, or hosted with a wait of its own (module note, permissions)
 PERMISSION_WAIT_S = 60.0
+PATIENT_WAIT_S = 600.0
+HOOK_POLL_S = 1.0  # how often a waiting request checks that its hook is still there
 STDERR_TAIL = 800  # chars of the session's stderr kept as a failed run's error
 # of a request's input the card shows, scrolled; past it the entry's `cut` is the input's length and the card offers
 # no "don't ask again"
@@ -172,6 +181,7 @@ CONFIG_DENIED_LINE = "thimble's config refuses this command."  # userconf: `inst
 TIMED_OUT_LINE = ("Nobody answered in thimble's browser within {wait}, so the call was denied. Carry on without it, "
                   "or find a way that needs no permission.")
 GONE_LINE = "The session ended before it was answered."
+NOBODY_WAITS = "none: nothing waits on it any more"  # the permission log's word for a request taken off unanswered
 NO_ONE_LINE = ("Nobody can answer this session's requests, since the program that started it has no thread in "
                "thimble's browser, so the call was denied. Carry on without it.")
 ALLOWED_LINE = "Allowed in thimble's browser."  # a refused call made again, once allowed (module note, auto mode)
@@ -187,12 +197,11 @@ REQUEST, DENIED, PRE = permission_hook.REQUEST, permission_hook.DENIED, permissi
 # how long the analyst's answer to a call auto mode refused waits for the model to make that call again (module note,
 # auto mode)
 GRANT_TTL_S = 600.0
-# auto mode's reason when its classifier gave no verdict on a call, the waits before each time the call goes back to
-# auto mode, and how long the card that then asks waits for a patient session before it denies the call (module note,
-# auto mode). Claude Code reads only `retry` from a PermissionDenied hook, so a deny carries no message to the model.
+# auto mode's reason when its classifier gave no verdict on a call, and the waits before each time the call goes back to
+# auto mode (module note, auto mode). Claude Code reads only `retry` from a PermissionDenied hook, so a deny carries no
+# message to the model.
 CLASSIFIER_DOWN = re.compile(r"\bclassifier\b.*\bunavailable\b|\bno safety verdict\b", re.I)
 CLASSIFIER_WAITS_S = (10.0, 30.0, 90.0)
-CLASSIFIER_ASK_S = 600.0
 BYPASS = "bypass"
 AUTO = "auto"
 # a background session keeps its --permission-mode, in every run of its chat: bg_session.start sends a running one the
@@ -240,10 +249,9 @@ ALERT_DIALOG = "This session is waiting on a dialog it cannot show. Stop it, or 
 CAPACITY = ("overloaded", "rate_limited")
 RETRY_BASE_S = 30.0
 RETRY_MAX_S = 300.0
-RETRY_BUDGET_S = 1800.0
+RETRY_MIN_S = 1.0  # the shortest base RETRY_BASE_ENV may set, so a long streak never restarts the process at once
 RETRY_JITTER = 0.2
 RETRY_BASE_ENV = "THIMBLE_SESSION_RETRY_BASE_S"
-RETRY_BUDGET_ENV = "THIMBLE_SESSION_RETRY_BUDGET_S"
 RETRY_PROMPT = "session-retry"  # prompts/tools.md: the stdin prompt of a session started again after the wait
 RETRY_REASONS = {"overloaded": "Anthropic's API is overloaded", "rate_limited": "Anthropic's API rate limit was reached"}
 FAILURE_CHARS = 400  # of a failure's text in the one line that says why (failure_line)
@@ -301,7 +309,9 @@ LAUNCHED_AGENT_RE = re.compile(r"\bagentId:\s*(\w+)")  # in a background Agent c
 LAUNCHED_TASK_RE = re.compile(r"\bTask ID:\s*(\S+)")  # in a Workflow call's result
 RESUMED_AGENT_RE = re.compile(r'"resumedAgentId"\s*:\s*"(\w+)"')  # in a SendMessage's result that continued an agent
 TASK_ID_RE = re.compile(r"<task-id>\s*(.*?)\s*</task-id>", re.S)  # a notification may name several tasks
-MOVED_TASK_RE = re.compile(r"\bmoved to the background as task (\w+)")  # a long call Claude Code let run on
+# a long call Claude Code let run on, in its own words at the head of the call's result (an MCP tool's), so a result that
+# only quotes them (a log, a transcript) is none
+MOVED_TASK_RE = re.compile(r'\A\s*MCP tool "[^\n]*?\bmoved to the background as task (\w+)')
 STOP_TOOL = "TaskStop"
 STOPPED_TASK_RE = re.compile(r'"task_id"\s*:\s*"([^"]+)"')  # in a TaskStop's result, which no notification follows
 
@@ -346,7 +356,7 @@ class Run:
     # calls the analyst allowed on the card before they ran (module note, the config), by grant_key: when
     cleared: dict[tuple[str | None, str, str], float] = field(default_factory=dict)
     mode: str = "manual"  # the mode it runs in, one of modes.MODES (module note, permissions)
-    patient: bool = False  # a request waits until the analyst answers, else `wait_s` (module note, permissions)
+    patient: bool = False  # a request waits PATIENT_WAIT_S, else `wait_s` (module note, permissions)
     wait_s: float | None = None  # None for PERMISSION_WAIT_S
     on_expired: Callable[["Run", dict[str, Any]], None] | None = None  # told of each request denied unanswered
     groups: dict[str, str] = field(default_factory=dict)  # web rule -> the id of the request waiting for it (module note, the web)
@@ -379,6 +389,7 @@ class Run:
     api_status: int | None = None  # the `api_error_status` of the last `result` line, when it gave one
     spawned: float = 0.0  # time.monotonic() when the process started
     retries: int = 0  # the retries of the current streak of capacity failures
+    retrying: bool = False  # a retry's wait for capacity runs (_retry)
     wake: asyncio.Event = field(default_factory=asyncio.Event)  # set by Retry now and Stop to end a retry's wait
     nudge: str = ""  # a retry's stdin prompt, whose copy in the transcript the follower leaves out
     on_pid: Callable[["Run"], None] | None = None  # told when the process changes: None during a retry's wait, then the new one
@@ -959,8 +970,7 @@ async def _read_stderr(run: Run) -> None:
 
 async def _follow(run: Run) -> None:
     """Follow the session until it ends, starting it again after a mode-switch pause, after auto mode ended its turn, on the
-    fallback model after a refusal, after each capacity exit while the schedule allows, and after a clean exit that left
-    background work running."""
+    fallback model after a refusal, after each capacity exit, and after a clean exit that left background work running."""
     try:
         while True:
             await _watch(run)
@@ -1018,32 +1028,25 @@ async def _watch(run: Run) -> None:
 # --------------------------------------------------------------------------- retry
 
 
-def retry_waits(base_s: float = RETRY_BASE_S, max_s: float = RETRY_MAX_S, budget_s: float = RETRY_BUDGET_S) -> list[float]:
-    """The waits before each retry of a streak, without jitter (module note, retry): doubling from `base_s`, each at
-    most `max_s`, for as long as their sum stays within `budget_s`; empty when `base_s` or `budget_s` is 0."""
-    out: list[float] = []
-    if base_s <= 0 or budget_s <= 0:
-        return out
-    wait = base_s
-    while sum(out) + min(wait, max_s) <= budget_s:
-        out.append(min(wait, max_s))
-        wait *= 2
-    return out
-
-
-def retry_knobs(environ_: "dict[str, str] | None" = None) -> list[float]:
-    """retry_waits with RETRY_BASE_ENV and RETRY_BUDGET_ENV where they are set, read when a retry is due; a value
-    that is not a number is the default, with a log line."""
+def retry_base(environ_: "dict[str, str] | None" = None) -> float:
+    """The first wait of a streak (module note, retry): RETRY_BASE_ENV where it is set, at least RETRY_MIN_S, else
+    RETRY_BASE_S; a value that is not a number is the default, with a log line."""
     src = os.environ if environ_ is None else environ_
-    knob = {RETRY_BASE_ENV: RETRY_BASE_S, RETRY_BUDGET_ENV: RETRY_BUDGET_S}
-    for name in knob:
-        raw = str(src.get(name, "") or "").strip()
-        if raw:
-            try:
-                knob[name] = max(0.0, float(raw))
-            except ValueError:
-                log.warning("%s=%r is not a number; using %g", name, raw, knob[name])
-    return retry_waits(knob[RETRY_BASE_ENV], RETRY_MAX_S, knob[RETRY_BUDGET_ENV])
+    raw = str(src.get(RETRY_BASE_ENV, "") or "").strip()
+    if not raw:
+        return RETRY_BASE_S
+    try:
+        return max(RETRY_MIN_S, float(raw))
+    except ValueError:
+        log.warning("%s=%r is not a number; using %g", RETRY_BASE_ENV, raw, RETRY_BASE_S)
+        return RETRY_BASE_S
+
+
+def retry_wait(n: int, base_s: float | None = None, max_s: float = RETRY_MAX_S) -> float:
+    """The wait before retry `n` (from 0) of a streak, without jitter: doubling from `base_s` (retry_base when None),
+    each at most `max_s`. The schedule has no end."""
+    base = retry_base() if base_s is None else base_s
+    return min(base * 2 ** min(n, 32), max_s)
 
 
 def capacity(run: Run) -> str | None:
@@ -1087,34 +1090,33 @@ def _set_pid(run: Run, pid: int | None) -> None:
 
 
 async def _retry(run: Run) -> bool:
-    """After the process exited: when it failed at capacity and the schedule has a wait left, wait with the alert on
-    the chat (Retry now and Stop end the wait) and start the process again; True when a new process runs."""
+    """After the process exited: when it failed at capacity, wait with the alert on the chat (Retry now and Stop end
+    the wait) and start the process again; True when a new process runs."""
     cls = capacity(run)
     if cls is None:
         return False
     if time.monotonic() - run.spawned > RETRY_MAX_S:
         run.retries = 0  # it worked a while before this failure: a new streak
-    waits = retry_knobs()
-    if run.retries >= len(waits):
-        log.warning("%s: session %s (%s) failed at capacity (%s) after %d retries; it ends failed", run.c, run.key,
-                    run.sid, cls, run.retries)
-        return False
-    wait = waits[run.retries] * (1 + random.uniform(-RETRY_JITTER, RETRY_JITTER))
+    wait = retry_wait(run.retries) * (1 + random.uniform(-RETRY_JITTER, RETRY_JITTER))
     run.retries += 1
     for sub in run.steps.values():
         _finish_step(run, sub, "failed")  # its agents ended with the process
     reason = RETRY_REASONS[cls]
     until = datetime.now(timezone.utc) + timedelta(seconds=wait)
-    alert = {"kind": "retry", "text": f"{reason}; retrying in {wait_text(wait)}.", "reason": reason,
+    alert = {"kind": "retry", "text": f"{reason}. Retrying in {wait_text(wait)}.", "reason": reason,
              "until": until.isoformat(timespec="seconds"), "since": _now(), "attempt": run.retries}
     _set_pid(run, None)
     with contextlib.suppress(Exception):
         agents.update_agent(run.c, run.chat, alert=alert, permissions=[])
-    log.info("%s: session %s (%s) failed at capacity (%s: %s); retry %d/%d in %.0f s", run.c, run.key, run.sid, cls,
-             failure_line(run.result or run.stderr)[:200], run.retries, len(waits), wait)
+    log.info("%s: session %s (%s) failed at capacity (%s: %s); retry %d in %.0f s", run.c, run.key, run.sid, cls,
+             failure_line(run.result or run.stderr)[:200], run.retries, wait)
     run.wake.clear()
-    with contextlib.suppress(asyncio.TimeoutError):
-        await asyncio.wait_for(run.wake.wait(), wait)
+    run.retrying = True
+    try:
+        with contextlib.suppress(asyncio.TimeoutError):
+            await asyncio.wait_for(run.wake.wait(), wait)
+    finally:
+        run.retrying = False
     with contextlib.suppress(Exception):
         agents.update_agent(run.c, run.chat, alert=None)
     run.alerted = False
@@ -1311,25 +1313,42 @@ async def retry_now(c: str, chat: str) -> bool:
     return True
 
 
-ACTIVE_POLL_S = 5.0  # how often wait_active counts a session's active time
+QUIET_POLL_S = 5.0  # how often wait_done looks for signs of the session's activity
+# a session quiet this long gets QUIET_LINE in its chat, and again each time its quiet time doubles (module note, quiet)
+QUIET_NOTE_S = max(1.0, float(os.environ.get("THIMBLE_QUIET_NOTE_S", "") or 10 * 60))
+QUIET_LINE = "no activity for {minutes}"  # the frontend's chat/model.ts QUIET_RE reads it
 
 
-async def wait_active(run: Run, done: asyncio.Future, limit_s: float, poll_s: float | None = None) -> bool:
-    """Wait for `done` while the session has run for at most `limit_s` seconds of active time (process alive and no permission
-    request waiting). True once `done` is set; False once past the limit, which the caller then stops."""
-    poll = ACTIVE_POLL_S if poll_s is None else poll_s
-    active, last = 0.0, time.monotonic()
+def quiet_minutes(seconds: float) -> str:
+    """A quiet time in QUIET_LINE's words: whole minutes from one minute on, else seconds."""
+    return f"{seconds / 60:.0f} min" if seconds >= 60 else f"{seconds:.0f} s"
+
+
+def _activity(run: Run) -> tuple[int, ...]:
+    """What grows while the session works: the sizes of its transcript and of its steps' transcripts."""
+    subs = [run.main, *run.steps.values()]
+    return tuple(session._size(s.path) if s is not None and s.path is not None else -1 for s in subs)
+
+
+async def wait_done(run: Run, done: asyncio.Future, poll_s: float | None = None) -> None:
+    """Wait for `done`, with no time limit (module note, quiet): while the session shows no activity, its chat gets
+    QUIET_LINE at QUIET_NOTE_S and each time that quiet time doubles. Time while a permission request waits on the analyst,
+    a retry waits for capacity or the run waits for a mode switch (_hold) starts the quiet time again."""
+    poll = QUIET_POLL_S if poll_s is None else poll_s
+    seen, active, note = _activity(run), time.monotonic(), QUIET_NOTE_S
     while not done.done():
         with contextlib.suppress(asyncio.TimeoutError):
             await asyncio.wait_for(asyncio.shield(done), poll)
-        now = time.monotonic()
-        if run.pid is not None and not run.waits:
-            active += now - last
-        last = now
-        if not done.done() and active > limit_s:
-            log.warning("%s: session %s (%s) ran past %.0f s of active time", run.c, run.key, run.sid, limit_s)
-            return False
-    return True
+        if done.done():
+            return
+        now, grown = time.monotonic(), _activity(run)
+        if grown != seen or run.retrying or run.held or run.waits:
+            seen, active, note = grown, now, QUIET_NOTE_S
+        elif now - active >= note:
+            if run.main is not None and run.main.rec is not None:
+                run.main.rec.text(f"\n· {QUIET_LINE.format(minutes=quiet_minutes(note))}\n")
+            log.info("%s: session %s (%s) has shown no activity for %.0f s", run.c, run.key, run.sid, note)
+            note *= 2
 
 
 def follow_once(run: Run) -> None:
@@ -1971,7 +1990,10 @@ async def recover() -> tuple[list[str], list[str]]:
         c = folder.name
         try:
             _load_unheard(c)
-            metas = [m for m in agents.list_chats(c) if _left_running(c, m)]
+            every = agents.list_chats(c)
+            if gone := _clear_left(c, every):
+                log.info("%s: permission requests a previous server left waiting, taken off: %s", c, ", ".join(gone))
+            metas = [m for m in every if _left_running(c, m)]
         except Exception:  # noqa: BLE001 — a workspace whose corpus is gone, or one that cannot be read
             log.debug("%s: its sessions were not checked at start", c, exc_info=True)
             continue
@@ -2320,6 +2342,12 @@ def timed_out_line(seconds: float) -> str:
     return TIMED_OUT_LINE.format(wait=wait_words(seconds))
 
 
+def timed_out(answer: dict[str, Any]) -> bool:
+    """Whether `answer`, what ask returned, denies the call because nobody answered in time (TIMED_OUT_LINE)."""
+    head = TIMED_OUT_LINE.split("{wait}", 1)[0]
+    return answer.get("behavior") == "deny" and str(answer.get("message") or "").startswith(head)
+
+
 async def ask(c: str, key: str | None, tool_name: str, inp: Any, agent_id: str | None = None,
               agent_type: str | None = None, event: str = REQUEST, reason: str = "",
               tool_use_id: str | None = None, suggestions: Any = None, force: bool = False,
@@ -2328,8 +2356,8 @@ async def ask(c: str, key: str | None, tool_name: str, inp: Any, agent_id: str |
     call auto mode refused for `reason`; the answer as Claude Code reads it. In Bypass it is allowed at once, as is a
     Bash call the sandbox rule allows and a web call the workspace's kept rules allow; during a switch pause it is denied
     at once; a call auto mode gave no verdict on goes back to it first (_recheck); a web call joins a waiting request for
-    the same site or for search; otherwise it waits on the chat until the analyst answers (or the session's `wait_s`,
-    unless it is patient, and CLASSIFIER_ASK_S for a call auto mode never judged). `suggestions` become the card's "don't
+    the same site or for search; otherwise it waits on the chat until the analyst answers or its wait passes (the
+    session's `wait_s`, PATIENT_WAIT_S for a patient one). `suggestions` become the card's "don't
     ask again" choice, and a web call's is the site's rule, or web search's, for the workspace. `force` asks the analyst
     in every mode, as a call thimble's config sends to them, with `why` as the card's reason, and nothing noted when it
     is denied unanswered (dev's code-ticket question)."""
@@ -2383,14 +2411,14 @@ async def ask(c: str, key: str | None, tool_name: str, inp: Any, agent_id: str |
     command = _command(tool_name, inp)
     cut = _cut(tool_name, inp, whole)
     updates = [] if cut else web_offer(web) if web else offer(suggestions) if event == REQUEST else []
-    limit = CLASSIFIER_ASK_S if unjudged and run.patient else None if run.patient else run.wait_s or PERMISSION_WAIT_S
+    limit = PATIENT_WAIT_S if run.patient else run.wait_s or PERMISSION_WAIT_S
     entry = {"id": rid, "tool": tool_name, "what": _what(tool_name, inp), "input": whole[:PERMISSION_INPUT_CHARS],
              "since": _now(), **command, **({"cut": cut} if cut else {}),
              **(_asker(run, agent_id, agent_type) if agent_id else {}),
              **({"refused": " ".join(reason.split())[:200] or "no reason given"} if event == DENIED else {}),
              **({"rechecked": len(CLASSIFIER_WAITS_S)} if unjudged else {}),
-             **({"deny_after_s": limit} if unjudged and limit is not None else {}),
-             **_offered(updates), **({"wait_s": limit} if limit else {}), **({"why": why} if why else {}),
+             **({"deny_after_s": limit} if unjudged else {}),
+             **_offered(updates), "wait_s": limit, **({"why": why} if why else {}),
              **({"asked_by": run.config.ask_cause(tool_name, inp)} if verdict == "ask" and not force
                 and run.config is not None else {}),
              "mode": run.mode}
@@ -2417,6 +2445,9 @@ async def ask(c: str, key: str | None, tool_name: str, inp: Any, agent_id: str |
             allow = TIMED_OUT
             if not fut.done():
                 fut.set_result(TIMED_OUT)
+    except asyncio.CancelledError:  # its hook went away, or the server stops
+        agents.log_permission(c, "answered", id=rid, chat=run.chat, answer=NOBODY_WAITS)
+        raise
     finally:
         if not fut.done():
             fut.set_result(None)
@@ -2650,12 +2681,40 @@ def with_rules(argv: list[str], rules: list[dict[str, Any]]) -> list[str]:
 
 
 def dismiss(c: str, chat: str, request_id: str) -> bool:
-    """Take a request that was denied unanswered off the card of the chat `chat`; False when there is none by that id."""
+    """Take a request no session waits on off the card of the chat `chat`: True for one denied unanswered, False for one
+    whose wait is gone (module note, permissions), which no answer reaches, and for none by that id."""
     pending = _pending(c, chat)
-    if not any(p.get("id") == request_id and p.get("expired") for p in pending):
+    hit = next((p for p in pending if p.get("id") == request_id), None)
+    if hit is None:
         return False
     agents.update_agent(c, chat, permissions=[p for p in pending if p.get("id") != request_id])
-    return True
+    if not hit.get("expired"):
+        agents.log_permission(c, "answered", id=request_id, chat=chat, answer=NOBODY_WAITS)
+    return bool(hit.get("expired"))
+
+
+def _clear_left(c: str, metas: "list[dict[str, Any]]") -> list[str]:
+    """Take the requests a previous server left waiting off the chats `metas` of workspace `c` (module note,
+    permissions): their hooks lost the connection, so Claude Code went on without an answer. A request a session of
+    this server waits on stays, and so do main's, which channel.py relays and drops. Returns their ids."""
+    live = {rid for r in [*_runs.values(), *_hosted.values()] for rid in r.waits}
+    gone: list[str] = []
+    for meta in metas:
+        if meta.get("kind") == agents.KIND_MAIN or meta.get("id") == agents.MAIN_ID:
+            continue
+        if not any(isinstance(p, dict) and not p.get("expired") for p in meta.get("permissions") or []):
+            continue
+        chat = str(meta["id"])
+        pending = _pending(c, chat)
+        left = [p for p in pending if p.get("expired") or p.get("id") in live]
+        if len(left) == len(pending):
+            continue
+        agents.update_agent(c, chat, permissions=left)
+        for p in pending:
+            if p not in left:
+                gone.append(str(p.get("id")))
+                agents.log_permission(c, "answered", id=p.get("id"), chat=chat, answer=NOBODY_WAITS)
+    return gone
 
 
 def _add_rules(run: Run, updates: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -2777,8 +2836,8 @@ def _cleared(run: Run, agent_id: str | None, tool_name: str, inp: Any) -> bool:
 def answer(c: str, chat: str, request_id: str, allow: bool, always: bool = False, shown: int = 0) -> bool:
     """The analyst's answer to a pending request of the session whose chat is `chat`, `always` for the card's "don't
     ask again", which allows it with the updates offered for it (module note, don't ask again), covering the first
-    `shown` calls that joined it (module note, the web); for a request denied unanswered, its dismissal from the card.
-    False when there is none by that id."""
+    `shown` calls that joined it (module note, the web); for a request no session waits on, its removal from the card
+    (dismiss). False when no session waits on a request by that id."""
     run = _by_chat(c, chat)
     fut = run.waits.get(request_id) if run is not None else None
     if run is None or fut is None or fut.done():
@@ -3090,10 +3149,26 @@ class PermissionRequestBody(BaseModel):
 
 
 @router.post("/ws/{c}/sessions/permission")
-async def permission_request_route(c: str, body: PermissionRequestBody) -> dict[str, Any]:
-    """A session's permission hook (permission_hook.py), for the session its THIMBLE_SESSION names: a request or a call
-    auto mode refused, answered by ask however long the analyst takes, or a call about to run, answered by before_call
-    at once."""
+async def permission_request_route(c: str, body: PermissionRequestBody, request: Request) -> dict[str, Any]:
+    """A session's permission hook (permission_hook.py): hook_request. A hook that goes away while its request waits
+    (its process was killed) takes the request off the card, as the session's end does."""
+    task = asyncio.ensure_future(hook_request(c, body))
+    try:
+        while not (await asyncio.wait({task}, timeout=HOOK_POLL_S))[0]:
+            if await request.is_disconnected():
+                task.cancel()
+                with contextlib.suppress(asyncio.CancelledError, Exception):
+                    await task
+                return {"behavior": "deny", "message": GONE_LINE}
+        return task.result()
+    finally:
+        task.cancel()
+
+
+async def hook_request(c: str, body: PermissionRequestBody) -> dict[str, Any]:
+    """A permission hook's event, for the session its THIMBLE_SESSION names: a request or a call auto mode refused,
+    answered by ask once the analyst answers or its wait passes, or a call about to run, answered by before_call at
+    once."""
     if body.event == PRE:
         got = before_call(c, body.session, body.tool_name, body.tool_input, body.agent_id)
         run = asker(c, body.session)

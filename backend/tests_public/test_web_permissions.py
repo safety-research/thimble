@@ -51,7 +51,7 @@ async def _until(ok) -> None:
 
 def _request(tool: str, inp: dict, key: str = KEY, **extra) -> "asyncio.Future":
     body = agent_session.PermissionRequestBody(session=key, tool_name=tool, tool_input=inp, **extra)
-    return asyncio.ensure_future(agent_session.permission_request_route(CORPUS, body))
+    return asyncio.ensure_future(agent_session.hook_request(CORPUS, body))
 
 
 async def test_an_unanswered_request_is_denied_after_the_wait_and_its_card_says_so_until_dismissed():

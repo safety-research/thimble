@@ -431,7 +431,7 @@ export function ReportEditor({ ws, slug, doc, flags, filter, client, onSaved, on
   const initial = useMemo(() => editorBlocksFromWire(blocksFromDoc(doc)) as ReportPartialBlock[], []) // eslint-disable-line react-hooks/exhaustive-deps
   // the line where a moved block lands is drawn by report.css as the card's drop line is (`.wu-dropline`), not in
   // BlockNote's pale blue bar, so both drags show one mark and neither reads as Notion's
-  const editor = useCreateBlockNote({ schema, initialContent: initial, dictionary: DICTIONARY as typeof en, extensions: [marksExtension(ctx.current), pointerPressExtension()], trailingBlock: true, dropCursor: { color: false, width: 3 } }, [])
+  const editor = useCreateBlockNote({ schema, initialContent: initial, dictionary: DICTIONARY as typeof en, extensions: [marksExtension(ctx.current), pointerPressExtension()], trailingBlock: true, dropCursor: { color: false, width: 3 }, domAttributes: { editor: { spellcheck: 'false' } } }, [])
 
   const lastSaved = useRef<DocBlocks>(blocksFromDoc(doc))
   const orig = useRef<Map<string, string>>(origTexts(lastSaved.current))

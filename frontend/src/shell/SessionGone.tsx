@@ -1,9 +1,15 @@
 // The Claude Code session behind the workspace, as the whole page shows it. While no session is attached to main, the
 // shell is greyed out and inert under a scrim and one card (portaled to the body, with every other body layer inert
-// too) that gives the command to reconnect. It goes when a session attaches, and is not shown while the stream is down.
-// A session that takes main over from another terminal is followed at once, with a toast.
-import { useEffect, useRef, useState } from 'react'
+// too) that gives the command to reconnect. The sessions thimble started go on without main, so the permission card
+// with their requests shows under it, where it can be answered. It goes when a session attaches, and is not shown while
+// the stream is down. A session that takes main over from another terminal is followed at once, with a toast.
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { ThreadsContext } from '../chat/Notes'
+import { PermissionCard } from '../chat/PermissionCard'
+import { pendingRequests } from '../chat/permissions'
+import { pickItems, threadLabels } from '../chat/threads'
+import { useChatMetas } from '../chat/waiting'
 import { Button } from '../components/Button'
 import { api } from '../lib/api'
 import { bus } from '../lib/bus'
@@ -132,9 +138,21 @@ export function useSessionGone(ws: string): Gone | null {
   return { ended, folder }
 }
 
-export function SessionGone({ gone }: { gone: Gone }) {
+/** The requests of the sessions that go on without main, as the chat panel's card lists them. */
+function useAsks(ws: string) {
+  const metas = useChatMetas(ws)
+  return useMemo(() => {
+    const byId = new Map(metas.map((m) => [m.id, m]))
+    const asks = pendingRequests(metas.find((m) => m.kind === 'main'), metas)
+    const labels = threadLabels(pickItems(metas, (m) => !!m.running, () => false))
+    return { asks, metas: byId, labels }
+  }, [metas])
+}
+
+export function SessionGone({ gone, ws }: { gone: Gone; ws: string }) {
   const [copied, setCopied] = useState(false)
   const scrim = useRef<HTMLDivElement>(null)
+  const { asks, metas, labels } = useAsks(ws)
   useEffect(() => {
     const others = [...document.body.children].filter((el) => el !== scrim.current && !el.hasAttribute('inert'))
     others.forEach((el) => el.setAttribute('inert', ''))
@@ -165,6 +183,13 @@ export function SessionGone({ gone }: { gone: Gone }) {
           </Button>
         </div>
       </div>
+      {asks.length > 0 && (
+        <div className="shell-gone-asks">
+          <ThreadsContext.Provider value={{ labels, metas }}>
+            <PermissionCard ws={ws} asks={asks} metas={metas} labels={labels} />
+          </ThreadsContext.Provider>
+        </div>
+      )}
     </div>,
     document.body,
   )

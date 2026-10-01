@@ -600,12 +600,13 @@ export interface PermissionRequest {
   refused?: string
   /** how many times thimble sent the call back to auto mode after its classifier gave no verdict, before asking */
   rechecked?: number
-  /** how long the request waits unanswered before the call is denied, in seconds; absent when it waits for good */
+  /** how long a request auto mode could not judge waits unanswered before it is declined, in seconds */
   deny_after_s?: number
-  /** when nobody answered it in time and it was denied: it stays on the card until dismissed (backend agent_session,
+  /** when nobody answered it in time and it was declined: it stays on the card until dismissed (backend agent_session,
    * permissions) */
   expired?: string
-  /** the seconds it waits before it is denied unanswered, when it does not wait for the analyst however long */
+  /** the seconds it waits before it is declined unanswered; absent for main's, which Claude Code also asks in the
+   * terminal */
   wait_s?: number
   /** the mode of the session that asks (manual, auto, bypass) */
   mode?: string
@@ -986,7 +987,7 @@ export interface Settings {
   /** while Claude Code does not trust thimble's workspaces folder: the folder and the command that trusts it (shell/Untrusted) */
   untrusted?: { folder: string; command: string } | null
   /** who runs each agent thimble starts and what it may do, by its permission-mode row (backend ledger.agent_rows) */
-  agents?: Partial<Record<ModeAgent, AgentRow>> & { main?: { additions: string[] } }
+  agents?: Partial<Record<ModeAgent | CallAgent, AgentRow>> & { main?: { additions: string[] } }
   /** who runs each of thimble's seven tasks (backend ledger.task_rows) */
   tasks?: TaskRow[]
   [k: string]: unknown
@@ -1002,11 +1003,17 @@ export interface TaskRow {
   conflict: string[]
 }
 
+/** The agents of thimble's config that are one model call each, unless an extension's program runs their tasks (backend
+ * userconf.CALLS). */
+export type CallAgent = 'labels' | 'cardCheck'
+
 /** One agent's row in the settings (backend ledger.agent_rows): thimble's own agent or an extension's (its prompt in
  * place of thimble's, an Agent SDK program or a command), the extensions adding to its prompt, two that both replace
  * it, and its consent settings from thimble's config. */
 export interface AgentRow {
   way: 'thimble' | 'prompt' | 'sdk' | 'command'
+  /** labels and cardCheck only: the tasks whose programs run under its settings (backend tasks.TASKS) */
+  tasks?: string[]
   extension: string
   additions: string[]
   conflict: string[]
@@ -1046,6 +1053,8 @@ export interface ExtensionRow {
   version: string
   /** what it is, from its extension.json */
   description?: string
+  /** one thimble ships, whose version is thimble's */
+  builtin?: boolean
   active: boolean
   why: string
   /** the line Settings shows: why it does not run, unless this workspace's switch turned it off */
@@ -1055,20 +1064,26 @@ export interface ExtensionRow {
   views: ExtensionViewRow[]
   /** what it gives, each in a few words */
   parts?: string[]
-  /** the settings of the agents it changes and whether its code runs sandboxed, in words */
+  /** the settings of the agents it changes or adds, in words */
   consent?: string
+  /** whether its code runs in a sandbox; null for one with no code */
+  sandboxed?: boolean | null
   /** whether Run now can run its orientation here once it is on: its instructions, or its own orientation program */
   orients?: boolean
   /** whether Settings offers to run its orientation now: it came on after an orientation ran here */
   offer?: boolean
   /** an extension thimble ships that is not added: turning its switch on adds it */
   addable?: boolean
+  /** for one not added: the extensions thimble ships that adding it adds with it */
+  needs?: string[]
 }
 
 /** One view built for this workspace, in its local extension (backend views.local_extension). */
 export interface LocalViewRow {
   slug: string
   name: string
+  /** what it shows, from its view.json */
+  description?: string
   /** a file viewer, which opens in the File browser */
   file_viewer: boolean
   /** its switch in Settings: off, it leaves the views bar and the File browser */
@@ -1699,6 +1714,9 @@ export interface ChatMeta {
   /** a session thimble started: its agent's row of the permission modes (backend modes.AGENTS), which a pick its card
    * cannot make while it runs saves to (ModeSwitch) */
   mode_agent?: ModeAgent
+  /** the agent a session or a program runs as: an extension's program's is `<extension>:<role or task>` (backend
+   * harness.start) */
+  agent_type?: string | null
   /** the orientation's session: whether it runs with Ultracode, and its critique */
   ultracode?: boolean
   critique?: boolean

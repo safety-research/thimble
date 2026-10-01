@@ -1026,9 +1026,10 @@ def calls_done(c: str, agent: str | None, done: "list[tuple[tuple[str, str], flo
 
 
 def _now() -> str:
+    """A relayed request's time, as the sessions' requests stamp theirs (session._now), which the card orders them by."""
     from datetime import datetime, timezone  # noqa: PLC0415
 
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+    return datetime.now(timezone.utc).isoformat(timespec="milliseconds")
 
 
 async def shutdown() -> None:

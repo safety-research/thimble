@@ -4,7 +4,7 @@
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { describe, expect, test } from 'vitest'
-import { foldRecords, leadText, madeBy, MCP_PREFIXES, type UserRow } from '../../src/chat/model.ts'
+import { callTarget, foldRecords, leadText, madeBy, MCP_PREFIXES, type UserRow } from '../../src/chat/model.ts'
 import type { ChatRecord } from '../../src/lib/types.ts'
 
 const ROOT = path.resolve(__dirname, '../../..')
@@ -66,5 +66,22 @@ describe('tool names', () => {
     const plugin = JSON.parse(readFileSync(path.join(ROOT, 'plugin/.claude-plugin/plugin.json'), 'utf8')) as { name: string }
     const mcp = JSON.parse(readFileSync(path.join(ROOT, 'plugin/.mcp.json'), 'utf8')) as { mcpServers: Record<string, unknown> }
     for (const server of Object.keys(mcp.mcpServers)) expect(MCP_PREFIXES).toContain(`mcp__plugin_${plugin.name}_${server}__`)
+  })
+})
+
+describe('a cited call', () => {
+  test('is named by what it points at in plain words, never by its tool or its input as JSON', () => {
+    const named = [
+      callTarget('Read', { file_path: '/data/toy/agents/agent-01.jsonl' }, 3, 'toy'),
+      callTarget('Grep', { pattern: 'escalat', path: '/data/toy/tickets' }, 4, 'toy'),
+      callTarget('Bash', { command: 'grep -c refund tickets/*.jsonl', description: 'Count refund tickets' }, 5, 'toy'),
+      callTarget('Bash', { command: 'wc -l notes.jsonl' }, 6, 'toy'),
+      callTarget(`${P}add_card`, { question: 'Reviews per agent', code: 'print(1)' }, 7, 'toy'),
+      callTarget(`${P}critique`, { context: 'The account the drafts present.' }, 8, 'toy'),
+      callTarget('StructuredOutput', { summary: 'What the agent found.' }, 9, 'toy'),
+      callTarget('mcp__other__lookup', { q: 'x' }, 10, 'toy'),
+    ]
+    expect(named).toEqual(['agents/agent-01.jsonl', 'search for “escalat” in tickets', 'Count refund tickets', 'wc -l notes.jsonl', 'Reviews per agent', 'the critic’s report', 'an agent’s report', 'step 10'])
+    for (const n of named) expect(n).not.toMatch(/[{}]|StructuredOutput|critique|Bash|Grep|Read/)
   })
 })

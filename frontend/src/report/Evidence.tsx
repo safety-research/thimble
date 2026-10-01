@@ -3,7 +3,7 @@
 // `EvidenceActions`, ✓ to resolve one. `docComments` gives the Checks pane a document's comments; `useEvidence` gives a
 // view the tints and hover handlers; `EvidencePop` is the card.
 import { createContext, useContext, useMemo, useState, type MouseEvent } from 'react'
-import { compactLabel } from '../components/RefChip'
+import { useRefLabel } from '../components/RefChip'
 import type { AnyDoc } from '../lib/types'
 import { openComments, passageFlags, shownComments, type CheckLook, type DocComment, type Flag } from './checkComments'
 import { Glyph, IconButton } from './icons'
@@ -68,7 +68,13 @@ export function EvidencePop({ comments, look }: { comments: readonly DocComment[
           <span className="wu-evpop-sq" style={{ background: look.colour(c.check) }} />
           <div className="wu-evpop-body">
             <span className="wu-evpop-text">{c.text}</span>
-            {c.evidence.length > 0 && <span className="wu-evpop-src">{c.evidence.map(compactLabel).join(' · ')}</span>}
+            {c.evidence.length > 0 && (
+              <span className="wu-evpop-src">
+                {c.evidence.map((r, i) => (
+                  <EvidenceName key={r} target={r} first={i === 0} />
+                ))}
+              </span>
+            )}
           </div>
           {onResolve && !c.tag && (
             <IconButton label="Resolve" className="wu-cm-resolve" onClick={() => onResolve(c)}>
@@ -78,5 +84,16 @@ export function EvidencePop({ comments, look }: { comments: readonly DocComment[
         </div>
       ))}
     </div>
+  )
+}
+
+/** One ref a comment rests on, by what it points at, as its chip names it. */
+function EvidenceName({ target, first }: { target: string; first: boolean }) {
+  const label = useRefLabel(target)
+  return (
+    <>
+      {first ? '' : ' · '}
+      {label}
+    </>
   )
 }

@@ -116,6 +116,21 @@ def test_settings_show_the_tasks_rows(tmp_path, workspaces_tmp, active):
     assert rows["labels"]["way"] == "thimble"
 
 
+def test_settings_show_labels_and_card_check_as_agents_with_their_tasks_and_consent(tmp_path, workspaces_tmp, active):
+    """Settings has a row for labels and for cardCheck as for the agents: who runs their tasks and the network and
+    data a program of those tasks gets from thimble's config, with the sandbox on and no web."""
+    from app import ledger
+
+    _config({"agents": {"cardCheck": {"network": "off", "data": "allow"}}})
+    active.append(_program(tmp_path, "vote", "view-fit", "print('unused')\n"))
+    rows = ledger.with_features({}, CORPUS)["agents"]
+    labels, card = rows["labels"], rows["cardCheck"]
+    assert labels["tasks"] == ["labels", "label-draft", "view-fit"] and card["tasks"] == ["card-check", "view-review"]
+    assert (labels["way"], labels["extension"]) == ("command", "vote")
+    assert (card["way"], card["network"], card["data"], card["config"]) == ("thimble", "off", "allow", "agents.cardCheck")
+    assert (labels["network"], labels["data"], labels["sandbox"], labels["web"]) == ("on", "ask", "on", "off")
+
+
 @pytest.mark.parametrize("agent,task", [("labels", "labels"), ("cardCheck", "card-check")])
 def test_the_config_can_give_a_task_program_the_network_corpus_edits_and_variables(tmp_path, workspaces_tmp, active,
                                                                                    unboxed, monkeypatch, agent, task):

@@ -234,14 +234,16 @@ async def test_main_hears_when_a_label_it_ran_finishes_and_can_colour_its_values
         assert note["meta"]["kind"] == "label_done" and "label even" in note["content"] and "even 70" in note["content"]
     finally:
         channel._subs.pop(CORPUS, None)
-    concepts.show_concept(CORPUS, "even", None, colours={"odd": "red", "even": "blue"})
+    concepts.show_concept(CORPUS, "even", None, colours={"odd": "cyan", "even": "blue"})
     after = {cl["name"]: cl["color"] for cl in concepts.read_concept(config.workspace_dir(CORPUS), cid)["classes"]}
     assert after == {"even": 1, "odd": 12}
     concepts.show_concept(CORPUS, "even", None, colours={"odd": "blue"})
     swapped = {cl["name"]: cl["color"] for cl in concepts.read_concept(config.workspace_dir(CORPUS), cid)["classes"]}
     assert swapped == {"even": 12, "odd": 1}, "the value that had the colour takes the one the other left"
-    with pytest.raises(HTTPException, match="no label colour is named 'teal'"):
-        concepts.show_concept(CORPUS, "even", None, colours={"odd": "teal"})
+    with pytest.raises(HTTPException, match="no label colour is named 'red'"):
+        concepts.show_concept(CORPUS, "even", None, colours={"odd": "red"})
+    named = tools.schema_of("show_label")["properties"]["colours"]["additionalProperties"]["enum"]
+    assert named == list(concepts.COLOUR_NAMES) and sorted(concepts.COLOUR_NAMES.values()) == list(range(1, concepts.PALETTE + 1))
 
 
 async def test_the_swarm_extension_ships_no_view_and_takes_back_the_one_it_installed(crew, monkeypatch, tmp_path):

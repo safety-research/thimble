@@ -216,10 +216,11 @@ function useDrawnRows(rootRef: RefObject<HTMLElement | null>, bodyRef: RefObject
     const el = scrollParent(rootRef.current)
     scroller.current = el
     if (!el) return
-    // drawn in the same task as the scroll, so the rows are there before the frame is painted
+    // drawn in the same task as the scroll, so the rows are there before the frame is painted; a resize draws them in
+    // the next render, since rows drawn inside the observer's callback change the layout it is reporting
     const onScroll = () => sync(true)
     el.addEventListener('scroll', onScroll, { passive: true })
-    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(onScroll) : null
+    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(() => sync(false)) : null
     ro?.observe(el)
     return () => {
       el.removeEventListener('scroll', onScroll)
