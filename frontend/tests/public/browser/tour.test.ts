@@ -28,6 +28,8 @@
 //     in it, and only then does the page scroll to one; each comment card stands 8 px above its passage, or below the
 //     card above it, before and after the report scrolls; the Example badge sits in the report's bar, level with its
 //     + New, and meets no text, control or picture, on step 9 and at every scroll position of step 10;
+//   - with a view of the workspace open, the Files steps show the File browser and steps 5 and 6 their example's own
+//     status strip, which lies exactly over thimble's and hides it; the view opens again once the tour ends;
 //   - the page is frozen: clicks, keys and the wheel reach nothing, the tour writes nothing but the offer, and telemetry
 //     records nothing while it runs; Enter in the page's ask box sends nothing, and an ask box left open closes when
 //     the tour starts.
@@ -125,21 +127,23 @@ interface Server {
   telemetry: { kind: string; detail?: { label?: string } }[]
   /** the workspace's settings */
   settings: typeof SETTINGS
+  /** the workspace's own views */
+  views: unknown[]
 }
 
 /** A page on the made-up origin, answered by this file: the app, the tour's example view, the workspace's API. */
-async function open(opts: { W: number; H: number; dpr?: number; chat?: number; seen?: boolean; folded?: boolean; paper?: string }): Promise<{ page: Page; server: Server; close: () => Promise<void> }> {
-  const server: Server = { seen: !!opts.seen, writes: [], telemetry: [], settings: { ...SETTINGS } }
+async function open(opts: { W: number; H: number; dpr?: number; chat?: number; seen?: boolean; folded?: boolean; paper?: string; views?: unknown[]; surface?: string }): Promise<{ page: Page; server: Server; close: () => Promise<void> }> {
+  const server: Server = { seen: !!opts.seen, writes: [], telemetry: [], settings: { ...SETTINGS }, views: opts.views ?? [] }
   const ctx = await browser.newContext({ viewport: { width: opts.W, height: opts.H }, deviceScaleFactor: opts.dpr ?? 1 })
   await ctx.addInitScript(
-    ({ ws, chat, open, paper }) => {
+    ({ ws, chat, open, paper, surface }) => {
       if (paper) localStorage.setItem('thimble:paper', paper)
       // a Mac, so ⌘ is the pointer's key
       Object.defineProperty(Navigator.prototype, 'platform', { get: () => 'MacIntel' })
       Object.defineProperty(Navigator.prototype, 'userAgentData', { get: () => undefined })
       localStorage.setItem(`thimble:${ws}:instance`, JSON.stringify('stamp-1'))
       sessionStorage.setItem(`thimble:${ws}:instance`, JSON.stringify('stamp-1'))
-      localStorage.setItem(`thimble:${ws}:layout`, JSON.stringify({ chatWidth: chat, chatOpen: open, panes: { root: { kind: 'pane', id: 'p1', surface: 'report' }, focus: 'p1' } }))
+      localStorage.setItem(`thimble:${ws}:layout`, JSON.stringify({ chatWidth: chat, chatOpen: open, panes: { root: { kind: 'pane', id: 'p1', surface }, focus: 'p1' } }))
       // what reaches the page: every input an app listener on the document would hear, outside the tour
       ;(window as any).__probe = []
       for (const t of ['mousedown', 'click', 'keydown', 'wheel', 'contextmenu'])
@@ -147,7 +151,7 @@ async function open(opts: { W: number; H: number; dpr?: number; chat?: number; s
           if (!(e.target instanceof Element && e.target.closest('.tour-root, .tour-host'))) (window as any).__probe.push(`${t}:${(e as KeyboardEvent).key || ''}`)
         })
     },
-    { ws: WS, chat: opts.chat ?? 308, open: !opts.folded, paper: opts.paper },
+    { ws: WS, chat: opts.chat ?? 308, open: !opts.folded, paper: opts.paper, surface: opts.surface ?? 'report' },
   )
   const page = await ctx.newPage()
   page.on('pageerror', (e) => console.warn('page error:', e.message))
@@ -178,6 +182,7 @@ function answer(route: Route, server: Server) {
     if (p === `/api/corpora/${WS}/source`) return json(sourcePage(url.searchParams.get('path') ?? 'README.md'))
     if (p === `/api/ws/${WS}/labels/ruler`) return json({ path: url.searchParams.get('path') ?? '', total: 3, bins: 400, labels: [] })
     if (method === 'GET' && p === `/api/ws/${WS}/settings`) return json(server.settings)
+    if (method === 'GET' && p === `/api/ws/${WS}/views`) return json(server.views)
     if (method === 'GET' && p in GET) return json(GET[p])
     if (method === 'PUT' && p === `/api/ws/${WS}/render/theme`) return json({ paper: 'warm', accent: 'iris' })
     if (method === 'POST' && p === `/api/ws/${WS}/telemetry`) return json({ recorded: 1 }, 201)
@@ -197,6 +202,9 @@ const body = (page: Page) => page.evaluate(() => document.querySelector('.tour-b
 const probe = (page: Page): Promise<string[]> => page.evaluate(() => (window as any).__probe.splice(0))
 /** Wait for step `n` (its number) to be drawn: its example in place and the popover shown. */
 async function onStep(page: Page, n: number, title?: string) {
+  // two frames first, so the popover the tour still shows for the step before has been hidden while the step's example
+  // is placed
+  await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))))
   await page.waitForFunction(
     ({ n, title }) => {
       const s = (window as any).__tour()?.state()
@@ -1330,6 +1338,101 @@ test('an ask box left open closes when Settings’ Take the tour starts the tour
     await sleep(400)
     assert.equal(await page.$('.tour-root'), null, 'Esc closes the tour')
     assert.deepEqual(server.writes.filter((x) => !ALLOWED.has(x)), [], 'nothing was sent')
+  } finally {
+    await close()
+  }
+}, 60_000)
+
+// a view of the workspace's own, open in the Files panel when the tour starts
+const OWN_VIEW = {
+  slug: 'pr-review', origin: 'workspace', name: 'PR Review Timeline', description: 'Every review of every pull request.', claims: ['deploys.csv'], accepts: [], units: [],
+  libs: [], built: T, ok: true, forms: [], first_file: 'deploys.csv', files: ['deploys.csv'], n_files: 1, unit: null,
+}
+
+/** In the page: the Files panel's status strip as the analyst sees it (the topmost text at its middle), the box of the
+ * example's strip against thimble's own, and the example's elements of the step. */
+const filesStrip = () => {
+  const real = document.querySelector('[data-panel="files"] .pane-status')!
+  const r = real.getBoundingClientRect()
+  const shown = [...document.elementsFromPoint(r.x + r.width / 2, r.y + r.height / 2)].find((e) => e.closest('.pane-status'))?.closest('.pane-status')
+  const ex = document.querySelector('.tour-ex-status')?.getBoundingClientRect()
+  const off = ex ? Math.max(Math.abs(ex.x - r.x), Math.abs(ex.y - r.y), Math.abs(ex.width - r.width), Math.abs(ex.height - r.height)) : null
+  const wrap = document.querySelector('.tour-ex-status')
+  const ground = wrap ? getComputedStyle(wrap).backgroundColor : ''
+  const opaque = /^rgb\(/.test(ground) || /,\s*1\)$/.test(ground)
+  return { shown: shown?.textContent?.trim() ?? '', example: shown?.closest('.tour-ex') != null, off, opaque, reader: !!document.querySelector('.tour-ex-reader')?.getBoundingClientRect().width }
+}
+
+test('with a view of the workspace open, the Files steps show the File browser and the examples’ own status strip, and the view opens again after the tour', async () => {
+  for (const [W, H] of [[1440, 900], [1920, 1080]]) {
+    const { page, close } = await open({ W, H, seen: true, views: [OWN_VIEW], surface: 'files' })
+    const tag = `${W}x${H}`
+    try {
+      await page.waitForSelector('.files-views .seg-opt[data-anchor="view:pr-review"]', { timeout: 20000 })
+      await page.click('.files-views .seg-opt[data-anchor="view:pr-review"]')
+      await page.waitForFunction(() => document.querySelector('[data-panel="files"] .pane-status')?.textContent?.includes('PR Review Timeline'))
+      await page.click('[data-tel="settings"]')
+      await page.waitForSelector('.settings-foot .settings-tour')
+      await page.click('.settings-foot .settings-tour')
+      for (const n of [1, 2, 3, 4]) {
+        await onStep(page, n)
+        if (n === 3) {
+          const sb = await page.evaluate(() => {
+            const b = [...document.querySelectorAll('.tour-ex-gate button')].find((x) => x.textContent?.trim() === 'Start')!.getBoundingClientRect()
+            return { x: b.x + b.width / 2, y: b.y + b.height / 2 }
+          })
+          await page.mouse.click(sb.x, sb.y)
+          await page.waitForFunction(() => document.querySelector('.tour-body')?.textContent?.startsWith('The orientation has started'), null, { timeout: 3000 })
+        }
+        await next(page)
+      }
+      await onStep(page, 5, 'Labels')
+      await measure(page, `${tag} 5`)
+      let st = await page.evaluate(filesStrip)
+      assert.ok(st.reader && st.example && st.shown === 'Filesagent-05.jsonl · Transcript' && st.off! <= 0.5 && st.opaque, `${tag} 5: the labels example and its strip ${JSON.stringify(st)}`)
+      await next(page)
+      await onStep(page, 6, 'Views')
+      await measure(page, `${tag} 6`)
+      st = await page.evaluate(filesStrip)
+      assert.ok(st.example && st.shown === 'Filesview · Timeline' && st.off! <= 0.5 && st.opaque, `${tag} 6: the strip under the example Timeline ${JSON.stringify(st)}`)
+      await page.keyboard.press('Escape')
+      await page.waitForFunction(() => !document.querySelector('.tour-root'))
+      await page.waitForFunction(() => document.querySelector('.files-views .seg-opt.active')?.getAttribute('data-anchor') === 'view:pr-review', null, { timeout: 3000 })
+      assert.match(await page.evaluate(() => document.querySelector('[data-panel="files"] .pane-status')?.textContent ?? ''), /view · PR Review Timeline/, `${tag}: the workspace's view is open again`)
+    } finally {
+      await close()
+    }
+  }
+}, 120_000)
+
+test('the workspace’s view opens again when the tour ends before a Files step has drawn its example', async () => {
+  const { page, close } = await open({ W: 1440, H: 900, seen: true, views: [OWN_VIEW], surface: 'files' })
+  try {
+    await page.waitForSelector('.files-views .seg-opt[data-anchor="view:pr-review"]', { timeout: 20000 })
+    await page.click('.files-views .seg-opt[data-anchor="view:pr-review"]')
+    await page.waitForFunction(() => document.querySelector('[data-panel="files"] .pane-status')?.textContent?.includes('PR Review Timeline'))
+    await page.click('[data-tel="settings"]')
+    await page.waitForSelector('.settings-foot .settings-tour')
+    await page.click('.settings-foot .settings-tour')
+    for (const n of [1, 2, 3]) {
+      await onStep(page, n)
+      if (n === 3) {
+        const sb = await page.evaluate(() => {
+          const b = [...document.querySelectorAll('.tour-ex-gate button')].find((x) => x.textContent?.trim() === 'Start')!.getBoundingClientRect()
+          return { x: b.x + b.width / 2, y: b.y + b.height / 2 }
+        })
+        await page.mouse.click(sb.x, sb.y)
+        await page.waitForFunction(() => document.querySelector('.tour-body')?.textContent?.startsWith('The orientation has started'), null, { timeout: 3000 })
+      }
+      await next(page)
+    }
+    await onStep(page, 4, 'Files')
+    assert.match(await page.evaluate(() => document.querySelector('.files-views .seg-opt.active')?.textContent ?? ''), /File browser/, 'step 4 shows the File browser')
+    // Next, and Esc at once: the tour ends before the Labels step's example runs
+    await next(page)
+    await page.keyboard.press('Escape')
+    await page.waitForFunction(() => !document.querySelector('.tour-root'))
+    await page.waitForFunction(() => document.querySelector('.files-views .seg-opt.active')?.getAttribute('data-anchor') === 'view:pr-review', null, { timeout: 3000 })
   } finally {
     await close()
   }

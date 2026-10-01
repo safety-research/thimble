@@ -333,7 +333,7 @@ export function Shell({ ws }: { ws: string }) {
       <TourHost />
       <ServerDown />
       <NewVersion />
-      {gone && <SessionGone gone={gone} />}
+      {gone && <SessionGone gone={gone} ws={ws} />}
     </div>
   )
 }

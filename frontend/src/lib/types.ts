@@ -599,12 +599,13 @@ export interface PermissionRequest {
   refused?: string
   /** how many times thimble sent the call back to auto mode after its classifier gave no verdict, before asking */
   rechecked?: number
-  /** how long the request waits unanswered before the call is denied, in seconds; absent when it waits for good */
+  /** how long a request auto mode could not judge waits unanswered before it is declined, in seconds */
   deny_after_s?: number
-  /** when nobody answered it in time and it was denied: it stays on the card until dismissed (backend agent_session,
+  /** when nobody answered it in time and it was declined: it stays on the card until dismissed (backend agent_session,
    * permissions) */
   expired?: string
-  /** the seconds it waits before it is denied unanswered, when it does not wait for the analyst however long */
+  /** the seconds it waits before it is declined unanswered; absent for main's, which Claude Code also asks in the
+   * terminal */
   wait_s?: number
   /** the mode of the session that asks (manual, auto, bypass) */
   mode?: string
