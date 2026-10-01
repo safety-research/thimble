@@ -347,3 +347,24 @@ def test_a_held_loop_is_logged_with_where_its_thread_was(monkeypatch, caplog):
         asyncio.run(main())
     lines = [r.getMessage() for r in caplog.records if r.name == "thimble.loop"]
     assert len(lines) == 1 and "hold_the_loop" in lines[0] and "without a turn" in lines[0], lines
+
+
+def test_the_loop_watch_names_the_innermost_frame_and_thimbles_own(tmp_path, monkeypatch):
+    """A loop held inside the standard library is named by the place in thimble's code that called it."""
+    import json
+    import sys
+
+    from app import agents, loop_watch
+
+    log = tmp_path / "x.jsonl"
+    log.write_text('{"a": 1}\n')
+    seen = []
+    real = json.loads
+
+    def loads(s, *a, **k):
+        seen.append(loop_watch.where(sys._getframe()))
+        return real(s, *a, **k)
+
+    monkeypatch.setattr(agents.json, "loads", loads)
+    agents.read_events(log)
+    assert seen and seen[0].startswith("test_loop_stalls.py:") and "agents.py:" in seen[0] and "read_events" in seen[0], seen

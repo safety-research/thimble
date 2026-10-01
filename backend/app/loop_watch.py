@@ -16,7 +16,8 @@ log = logging.getLogger("thimble.loop")
 STALL_S = 1.0  # a loop held this long gets its line
 CHECK_S = 0.25  # how often the loop is asked for a turn
 SAMPLE_S = 0.1  # how often the loop thread's place is taken while the loop is held
-FRAMES = 4  # of the loop thread's innermost frames, those its line names
+FRAMES = 4  # frames of thimble's own code a line names, besides the innermost frame
+APP_DIR = os.path.dirname(os.path.abspath(__file__)) + os.sep
 
 _stop: threading.Event | None = None
 
@@ -36,9 +37,19 @@ def stop() -> None:
 
 
 def where(frame: object) -> str:
-    """The innermost FRAMES frames of a stack as `file:line function`, innermost first."""
-    stack = traceback.StackSummary.extract(traceback.walk_stack(frame), limit=FRAMES, lookup_lines=False)  # type: ignore[arg-type]
-    return " < ".join(f"{os.path.basename(f.filename)}:{f.lineno} {f.name}" for f in stack)
+    """A stack's innermost frame and its innermost FRAMES frames in thimble's own code, as `file:line function`,
+    innermost first."""
+    out: list[str] = []
+    own = 0
+    for f, lineno in traceback.walk_stack(frame):  # type: ignore[arg-type]
+        mine = f.f_code.co_filename.startswith(APP_DIR)
+        if out and not mine:
+            continue
+        out.append(f"{os.path.basename(f.f_code.co_filename)}:{lineno} {f.f_code.co_name}")
+        own += mine
+        if own >= FRAMES:
+            break
+    return " < ".join(out)
 
 
 def _watch(loop: asyncio.AbstractEventLoop, owner: int, stopped: threading.Event) -> None:
