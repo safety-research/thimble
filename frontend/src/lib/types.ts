@@ -1698,6 +1698,9 @@ export interface ChatMeta {
   /** a session thimble started: its agent's row of the permission modes (backend modes.AGENTS), which a pick its card
    * cannot make while it runs saves to (ModeSwitch) */
   mode_agent?: ModeAgent
+  /** the agent a session or a program runs as: an extension's program's is `<extension>:<role or task>` (backend
+   * harness.start) */
+  agent_type?: string | null
   /** the orientation's session: whether it runs with Ultracode, and its critique */
   ultracode?: boolean
   critique?: boolean

@@ -28,7 +28,7 @@ import { findProposal, refreshProposals, useProposals } from '../lib/proposals'
 import { readStorage, storageKey, writeStorage } from '../lib/workspace'
 import { Composer } from './Composer'
 import { EFFORT_CHOICES, mainEffort, mainFast, NEXT_LAUNCH, ORIENT_DEFAULT_EFFORT } from './ModelLine'
-import { API_ERROR_KIND, apiRetry, branchIndex, capacityNote, foldRecords, isFollowUpRow, madeBy, mainSkips, orientRuns, orientSummaries, orientWriters, sessionSteps, stepEnded, toolSteps, withApiErrors, withBranches, withCallNumbers, type MainContext, type Row, type ShotRow } from './model'
+import { API_ERROR_KIND, apiRetry, branchIndex, capacityNote, foldRecords, isFollowUpRow, madeBy, mainSkips, orientRuns, orientSummaries, orientWriters, QUIET_RE, sessionSteps, stepEnded, toolSteps, withApiErrors, withBranches, withCallNumbers, type MainContext, type Row, type ShotRow } from './model'
 import { Holds, useRetryText } from './Holds'
 import { TicketStatus, useTicket } from './TicketStatus'
 import { Divider, Note, ThreadChip, ThreadsContext } from './Notes'
@@ -63,21 +63,31 @@ export type ComposerStop =
 
 const STOP_LABELS: Readonly<Record<string, string>> = { orient: 'Stop the orientation', writer: 'Stop the writer', check: 'Stop the check' }
 
+type StopMeta = Pick<ChatMeta, 'id' | 'status'> & Partial<Pick<ChatMeta, 'role' | 'mode_agent' | 'agent_type'>>
+
+/** Whether a chat is the critique's, a step of the orientation run by the critic's session or an extension's critic
+ * program. Pure. */
+const isCritique = (m: StopMeta | null): boolean => !!m && m.role === 'step' && (m.mode_agent === 'critic' || !!m.agent_type?.endsWith(':critic'))
+const CRITIQUE_STOP = 'Stop the critique'
+
 /** The Stop the composer carries for the thread shown, while what it stops runs: a session's (STOP_LABELS), its dev
  * ticket's, or, in a view's thread, the view's build while its proposal is queued or building and else its review's
  * while the review runs (`view`, the thread's proposal). A step, a part of its parent's session whose composer sends to
  * that parent (threads.composerTarget), carries its parent's Stop (`parent`, the step's parent chat) while the parent
- * runs. Null for main and its threads, whose turn the browser cannot stop, and for a ticket that waits in the queue
+ * runs. The critique's thread, and a step of the critic's, stops only the critique, which the orientation then goes on
+ * without. Null for main and its threads, whose turn the browser cannot stop, and for a ticket that waits in the queue
  * (its Discard is at the thread's foot) or that an older chat of a retried ticket ran. Pure. */
 export function composerStopOf(
   kind: ThreadKind | null,
-  meta: Pick<ChatMeta, 'id' | 'status'> | null,
+  meta: StopMeta | null,
   ticket: Pick<Ticket, 'id' | 'n' | 'status' | 'chat'> | null,
-  parent: Pick<ChatMeta, 'id' | 'status' | 'role'> | null = null,
+  parent: (StopMeta & Pick<ChatMeta, 'role'>) | null = null,
   view: Pick<Proposal, 'slug' | 'status' | 'chat' | 'review'> | null = null,
 ): ComposerStop | null {
   if (!meta) return null
   if (kind === 'orient' || kind === 'writer' || kind === 'check') return meta.status === 'running' ? { kind: 'session', chat: meta.id, role: kind, label: STOP_LABELS[kind] } : null
+  if (kind === 'step' && isCritique(meta)) return meta.status === 'running' ? { kind: 'session', chat: meta.id, role: 'critic', label: CRITIQUE_STOP } : null
+  if (kind === 'step' && parent && isCritique(parent)) return parent.status === 'running' ? { kind: 'session', chat: parent.id, role: 'critic', label: CRITIQUE_STOP } : null
   if (kind === 'step' && parent && parent.status === 'running' && STOP_LABELS[parent.role]) return { kind: 'session', chat: parent.id, role: parent.role, label: STOP_LABELS[parent.role] }
   if (kind === 'dev' && ticket && ticket.chat === meta.id && ticket.status === 'running') return { kind: 'ticket', ticket: ticket.id, label: `Stop ticket #${ticket.n}` }
   if (kind === 'dev' && view && view.chat === meta.id && meta.status === 'running') {
@@ -160,8 +170,6 @@ export interface BuildPart {
 }
 
 const CHANGE_ASKED = /^the change asked for: ([\s\S]*)$/
-/** The stage line of a session that has shown no activity for a while (backend dev.QUIET_LINE). */
-const QUIET = /^no activity for \d+ (min|s)$/
 
 /** A view build's thread in parts, one per run of its session: the first build, then each change. Stage lines leave the
  * rows for the part's status line, except a wait after an API error, which stays a row for its error card. A line
@@ -176,8 +184,8 @@ export function viewBuildParts(rows: readonly Row[]): BuildPart[] {
   }
   for (const r of rows) {
     let cur = parts[parts.length - 1]
-    const quiet = QUIET.test(cur.stages[cur.stages.length - 1] ?? '')
-    if (quiet && (r.kind !== 'note' || QUIET.test(r.text))) cur.stages.pop()
+    const quiet = QUIET_RE.test(cur.stages[cur.stages.length - 1] ?? '')
+    if (quiet && (r.kind !== 'note' || QUIET_RE.test(r.text))) cur.stages.pop()
     if (r.kind === 'user') {
       fresh().rows.push(r)
       continue
