@@ -98,3 +98,21 @@ def test_the_chat_list_reads_each_log_on_from_where_it_stopped(workspaces_tmp, m
     assert (main_row()["n_messages"], main_row()["last_ts"]) == (3, "r2"), "a log written again is read again"
     log_path.write_text(json.dumps({"type": "chip", "ts": "s0"}) + "\n" + json.dumps({"type": "user", "ts": "s1"}) + "\n")
     assert (main_row()["n_messages"], main_row()["last_ts"]) == (2, "s1"), "a log cut short is read again"
+
+
+def test_a_long_command_is_read_word_by_word_only_when_it_names_an_install(monkeypatch):
+    """Every Bash call of every agent is checked for installs on the event loop, up to three times, and shlex takes
+    about a second for a 200 KB script: a command line that names no install word is not read with it, and the answer
+    is the same."""
+    from app import sandbox_allow
+
+    lexed = []
+    real = sandbox_allow.shlex.shlex
+    monkeypatch.setattr(sandbox_allow.shlex, "shlex", lambda *a, **k: lexed.append(1) or real(*a, **k))
+    script = "python3 -c 'import json\n" + "".join(f"rows{i} = [json.loads(l) for l in open(\"f{i}.jsonl\")]\n"
+                                                   for i in range(3000)) + "'"
+    getattr(sandbox_allow.installs, "cache_clear", lambda: None)()
+    assert not sandbox_allow.installs(script) and not lexed
+    for line, want in ((script + " && pip install pandas", True), (script + " && curl$(echo -O) u", True),
+                       ('cd x && "cu"rl -O u', True), ("echo pip-install is a word", False)):
+        assert sandbox_allow.installs(line) is want, line[-40:]

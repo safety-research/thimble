@@ -12,6 +12,7 @@ rules (`--ask <content>`, `*` for a bare `Bash`), or, with `--installs`, install
 run with `python -S`; anything unexpected prints nothing."""
 from __future__ import annotations
 
+import functools
 import json
 import os
 import re
@@ -106,10 +107,23 @@ def _installs(words: list[str], depth: int) -> bool:
     return False
 
 
+# the words that can make a command line an install (installs): each INSTALL_PROGRAMS name, the first word of each
+# INSTALL_COMMANDS and INSTALL_MODULES entry, and pip with a version, standing alone between the places shlex and
+# OPERATORS split a line, or after a `/`
+_INSTALL_WORD = re.compile(r"(?:^|[\s;&|()`$/])(?:%s|pip3?[0-9.]*)(?=$|[\s;&|()`$])" % "|".join(
+    re.escape(w) for w in sorted({*INSTALL_PROGRAMS, *(c.split()[0] for c in (*INSTALL_COMMANDS, *INSTALL_MODULES))},
+                                 key=len, reverse=True)))
+_QUOTES = str.maketrans("", "", "'\"\\")
+
+
+@functools.lru_cache(maxsize=32)
 def installs(command: str, depth: int = 0) -> bool:
     """Whether a command line installs software or downloads files: one of its commands is an INSTALL_* one, after
     variable assignments and WRAPPERS, at a path, or inside `sh -c` or `eval`. A line shlex cannot read counts when an
-    install word appears in it."""
+    install word appears in it. A line in which no install word appears, its quotes and backslashes taken out, is not
+    read with shlex, which takes about a second for a script of 200 KB."""
+    if not _INSTALL_WORD.search(command.translate(_QUOTES)):
+        return False
     try:
         return any(_installs(words, depth) for words in _segments(command))
     except ValueError:
