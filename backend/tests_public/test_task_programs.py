@@ -506,3 +506,31 @@ async def test_an_orientation_program_s_start_marks_only_its_own_extension_as_or
     await _until(lambda: (r := orientation.read_run(CORPUS)) and r.get("program") == "looker"
                  and r.get("status") in ("done", "failed"), what="the program to end")
     assert extensions.offered(CORPUS) == ["notes"]
+
+
+FITS = '''import thimble
+def run(input):
+    return {"fits": True, "reason": "The program read " + input["view"]["name"] + "."}
+thimble.serve(run)
+'''
+
+
+async def test_a_view_s_fit_is_decided_by_the_program_of_an_extension_switched_on_in_the_same_refresh(
+        tmp_path, data_tmp, workspaces_tmp, unboxed, monkeypatch):
+    """The first refresh after an extension is added both switches it on and checks its views; its view-fit program
+    decides that check, rather than thimble's own, which ran before the refresh wrote the extension as active."""
+    async def own(*a, **k):
+        raise AssertionError("thimble's own view-fit ran")
+
+    monkeypatch.setattr(model, "structured", own)
+    folder = _extension(tmp_path, "fitter", {"tasks/view-fit": {"description": "Mine.", "command": ["python", "p.py"]}},
+                        {"tasks/view-fit/p.py": FITS,
+                         "views/posts/view.json": json.dumps({"name": "Posts", "description": "The board's posts.",
+                                                              "claims": ["board.jsonl"]}),
+                         "views/posts/view.html": "<main></main>\n",
+                         "views/posts/reader.py": "def build_index(paths):\n    return []\n\n\n"
+                                                  "def records(index, query):\n    return {'rows': []}\n"})
+    assert extensions.add(str(folder), yes=True, say=lambda _: None) == ["fitter"]
+    state = await extensions.refresh(CORPUS, wait=30)
+    [view] = state["extensions"]["fitter"]["views"]
+    assert view["fit"].get("reason") == "The program read Posts.", view["fit"]

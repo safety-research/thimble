@@ -702,13 +702,20 @@ def _answered(c: str, entry: dict[str, Any]) -> None:
 
 
 def _start(c: str, key: str, at: str, v: dict[str, Any], files: list[tuple[Any, ...]]) -> None:
-    from . import view_fit  # noqa: PLC0415
-
     entry: dict[str, Any] = {"key": at}
-    entry["task"] = asyncio.get_running_loop().create_task(
-        view_fit.decide(c, v["name"], v["description"], files, at), name=f"view-fit-{c}-{key}")
+    entry["task"] = asyncio.get_running_loop().create_task(_decide(c, v, files, at), name=f"view-fit-{c}-{key}")
     entry["task"].add_done_callback(lambda _t: _answered(c, entry))
     _asking[(c, key)] = entry
+
+
+async def _decide(c: str, v: dict[str, Any], files: list[tuple[Any, ...]], at: str) -> dict[str, Any]:
+    """The view-fit task on view `v` once the refresh that started it has written the state, so that an extension
+    switched on in that refresh which runs the task with its program runs it (tasks.call)."""
+    from . import view_fit  # noqa: PLC0415
+
+    async with _lock(c):
+        pass
+    return await view_fit.decide(c, v["name"], v["description"], files, at)
 
 
 async def _fit(c: str, name: str, v: dict[str, Any], files: list[tuple[Any, ...]], kept: dict[str, Any]) -> dict[str, Any]:
