@@ -24,10 +24,11 @@ def board(tmp_path, monkeypatch, workspaces_tmp) -> Path:
     return corpus
 
 
-def test_a_view_build_s_session_may_read_the_corpus_but_not_change_it(board, monkeypatch):
-    """The session runs in the corpus folder with Edit and Bash allowed, so its flags deny edits in the corpus and in
-    the worked examples, and put Bash in the sandbox with no network where it can run, beside the dev role's fast
-    mode, with its check command the one command run outside the sandbox; the prompt names that same command."""
+def test_a_view_build_s_session_may_read_the_corpus_and_asks_before_it_changes_it(board, monkeypatch):
+    """The session runs in the corpus folder with Edit and Bash allowed, so its flags deny edits in the worked examples,
+    ask about each edit in the corpus as the dev agent's `data` says by default (and keep its sandboxed Bash from writing
+    there), and put Bash in the sandbox with no network where it can run, beside the dev role's fast mode, with its
+    check command the one command run outside the sandbox; the prompt names that same command."""
     monkeypatch.setenv("THIMBLE_SANDBOX", "1")
     monkeypatch.setattr(config, "models_for", lambda c=None: {"dev": {"model": "claude-opus-4-8", "fast": True}})
     corpus = config.corpus_dir(CORPUS)
@@ -35,8 +36,18 @@ def test_a_view_build_s_session_may_read_the_corpus_but_not_change_it(board, mon
     conf = dev.dev_config(CORPUS, sandbox=True)
     flags = dev.Sessions()._flags(CORPUS, "thimble view: Posts", (folder,), dev.view_fence(CORPUS, "posts", corpus, folder, conf))
     settings = json.loads(flags[flags.index("--settings") + 1])
-    assert settings["permissions"]["deny"][:2] == [f"Edit(/{corpus}/**)", f"Edit(/{views.EXAMPLES_DIR}/**)"]
+    assert settings["permissions"]["deny"][0] == f"Edit(/{views.EXAMPLES_DIR}/**)"
+    assert f"Edit(/{corpus}/**)" in settings["permissions"]["ask"]
+    assert f"Edit(/{corpus}/**)" not in settings["permissions"]["deny"]
     box = settings["sandbox"]
+    assert str(corpus) in box["filesystem"]["denyWrite"]
+    assert conf.verdict("Write", {"file_path": str(corpus / "board.jsonl")}) == "ask"
+    _config_data = {"agents": {"dev": {"data": "off"}}}
+    userconf.global_file().parent.mkdir(parents=True, exist_ok=True)
+    userconf.global_file().write_text(json.dumps(_config_data))
+    off = dev.view_fence(CORPUS, "posts", corpus, folder, dev.dev_config(CORPUS, sandbox=True))
+    assert off["permissions"]["deny"][:2] == [f"Edit(/{corpus}/**)", f"Edit(/{views.EXAMPLES_DIR}/**)"]
+    userconf.global_file().unlink()
     assert box["network"] == {"deniedDomains": ["*"]} and not box["allowUnsandboxedCommands"]
     check = dev.view_check_command(CORPUS, "posts")
     assert box["excludedCommands"] == [check, f"{check} *"] and check.endswith(f"/api/ws/{CORPUS}/views/posts/check")
@@ -125,7 +136,7 @@ def test_a_view_build_stays_off_the_network_in_every_mode(board, monkeypatch, tm
 
 
 def test_the_dev_agent_s_network_and_web_on_lift_the_fence(board, monkeypatch, tmp_path):
-    """With `network` and `web` set for the dev agent in thimble's config, a view build keeps its read-only folders
+    """With `network` and `web` set for the dev agent in thimble's config, a view build keeps its fence on the corpus
     but gets the network in the sandbox, no offline rules or environment, and the web tools, which ask."""
     monkeypatch.setenv("THIMBLE_SANDBOX", "1")
     userconf.global_file().parent.mkdir(parents=True, exist_ok=True)
@@ -136,7 +147,7 @@ def test_the_dev_agent_s_network_and_web_on_lift_the_fence(board, monkeypatch, t
                                   dev.view_asking(CORPUS, "posts", folder, conf))
     settings = json.loads(flags[flags.index("--settings") + 1])
     assert "network" not in settings["sandbox"] and "Bash(bash -c:*)" not in settings["permissions"]["deny"]
-    assert "UV_OFFLINE" not in settings["env"] and f"Edit(/{corpus}/**)" in settings["permissions"]["deny"]
+    assert "UV_OFFLINE" not in settings["env"] and f"Edit(/{corpus}/**)" in settings["permissions"]["ask"]
     assert "WebFetch" not in flags[flags.index("--disallowedTools") + 1] and "WebFetch" in settings["permissions"]["ask"]
 
 

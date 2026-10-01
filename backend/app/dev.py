@@ -19,7 +19,8 @@ the ticket; a server restart queues an interrupted run again with its worktree (
 View tickets. View proposals build at once, each as a ticket on its row of views/proposals.json, run by queue_view in a
 pool of its own (VIEW_POOL). A view is three files of the workspace, so there is no worktree, stack or restart. run_view
 starts a session on prompts/dev-view.md in the corpus folder (which Claude Code trusts) with `--add-dir` for the view's
-folder; the corpus folder and the worked examples are fenced read-only (view_fence). After each turn the server runs the
+folder; the worked examples are fenced read-only, and an edit of the corpus goes as the dev agent's `data` says, by
+default to the analyst first (view_fence). After each turn the server runs the
 view's gate; a failure wakes the session, a pass registers the view. Where an active extension runs the dev agent with a
 program (roles.py), each turn is a run of that program instead (program_view_turn), checked the same way. A turn the
 API ended at capacity is no attempt: the build waits and wakes the session again. An orientation's proposal that runs out of attempts gets up to VIEW_REPAIRS new
@@ -2699,17 +2700,41 @@ def view_read_only(corpus: Path, folder: Path) -> tuple[Path, ...]:
 
 
 def view_fence(c: str, slug: str, corpus: Path, folder: Path, conf: userconf.Session) -> dict[str, Any]:
-    """The settings that fence a view build's session: the view_read_only folders read-only, its check command run
-    outside the sandbox, where it can reach this server, and while the dev agent's network is off (`conf`),
-    offline_deny and the offline environment (view_env)."""
+    """The settings that fence a view build's session: the view_read_only folders read-only, but for the corpus, whose
+    edits follow the dev agent's `data` (data_fence), its check command run outside the sandbox, where it can reach
+    this server, and while the dev agent's network is off (`conf`), offline_deny and the offline environment
+    (view_env)."""
     check = view_check_command(c, slug)
-    out = read_only_fence(view_read_only(corpus, folder), outside=(check, f"{check} *"), conf=conf)
+    fixed = view_read_only(corpus, folder)
+    out = read_only_fence(fixed, outside=(check, f"{check} *"), conf=conf)
+    if Path(corpus) in fixed:
+        out = data_fence(out, Path(corpus), conf.data)
     if conf.network:
         return {**out, "env": view_env(slug, offline=False)}
     conf.offline = True
     perms = dict(out.get("permissions") or {})
     deny = [*(perms.get("deny") or []), *offline_deny()]
     return {**out, "permissions": {**perms, "deny": deny}, "env": view_env(slug)}
+
+
+def data_fence(fence: dict[str, Any], corpus: Path, data: str) -> dict[str, Any]:
+    """`fence` (read_only_fence) with the corpus's Edit deny as `data` (userconf.Session.data) says: kept for "off", an
+    ask for "ask", whose sandbox then keeps Bash from writing the corpus, and gone for "allow", whose sandbox lets Bash
+    write it."""
+    if data == "off":
+        return fence
+    rule = f"Edit(/{corpus}/**)"
+    perms = dict(fence.get("permissions") or {})
+    perms["deny"] = [r for r in perms.get("deny") or [] if r != rule]
+    if data == "ask":
+        perms["ask"] = [*(perms.get("ask") or []), rule]
+    out = {**fence, "permissions": perms}
+    if isinstance(out.get("sandbox"), dict):
+        key = "denyWrite" if data == "ask" else "allowWrite"
+        fs = dict(out["sandbox"].get("filesystem") or {})
+        fs[key] = [*(fs.get(key) or []), str(corpus)]
+        out["sandbox"] = {**out["sandbox"], "filesystem": fs}
+    return out
 
 
 def offline_deny() -> list[str]:
