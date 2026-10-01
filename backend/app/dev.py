@@ -2841,16 +2841,19 @@ def asker_models(c: str, prop: dict[str, Any]) -> dict[str, Any]:
             "fast": held["fast"] if isinstance(held.get("fast"), bool) else None}
 
 
+VIEW_TMP_ROOT = Path("/tmp")  # where view builds' temp folders go (view_tmp_dir); tests point it elsewhere
+
+
 def _view_tmp_paths(c: str, slug: str) -> tuple[Path, Path]:
-    """(the temp folder of the view `slug`'s build in a private folder of /tmp, the one in its own folder)."""
+    """(the temp folder of the view `slug`'s build in a private folder of VIEW_TMP_ROOT, the one in its own folder)."""
     key = hashlib.sha256(f"{config.workspace_dir(c).resolve()}\0{slug}".encode()).hexdigest()[:12]
-    return Path("/tmp") / f"thimble-{os.getuid()}" / f"view-{key}", view_work_dir(c, slug) / "tmp"
+    return VIEW_TMP_ROOT / f"thimble-{os.getuid()}" / f"view-{key}", view_work_dir(c, slug) / "tmp"
 
 
 def view_tmp_dir(c: str, slug: str) -> Path:
     """The temp folder of the view `slug`'s build, made private: the TMPDIR of its session's Bash (view_tmp_env), where
     the session reads and writes unasked (view_asking). Kept short, since a socket made in a TMPDIR has a short path
-    limit; in the build's own folder when /tmp holds no private folder of this user."""
+    limit; in the build's own folder when VIEW_TMP_ROOT holds no private folder of this user."""
     folder, fallback = _view_tmp_paths(c, slug)
     try:
         folder.parent.mkdir(mode=0o700, exist_ok=True)
@@ -2956,7 +2959,7 @@ async def run_view(c: str, slug: str, run: Run) -> None:
     finally:
         checks.cancel()
         _unhost(c, view_key(slug))
-        await asyncio.to_thread(clear_view_tmp, c, slug)
+        clear_view_tmp(c, slug)
 
 
 async def _run_view(c: str, slug: str, run: Run) -> None:

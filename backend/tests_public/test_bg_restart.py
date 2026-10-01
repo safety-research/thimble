@@ -11,6 +11,7 @@ import time
 
 import pytest
 
+import app
 from app import agent_session, agents, bg_session, config
 
 CORPUS = "mini"
@@ -61,6 +62,7 @@ def restarted(tmp_path, monkeypatch, workspaces_tmp):
 
     monkeypatch.setattr(agent_session, "start", start)
     monkeypatch.delitem(sys.modules, "app.critique_session", raising=False)
+    monkeypatch.delattr(app, "critique_session", raising=False)
     monkeypatch.delitem(agent_session._relaunchers, "critique", raising=False)
     yield path, rows, asked, starts
 
