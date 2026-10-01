@@ -370,3 +370,56 @@ def test_the_example_sdk_orientation_runs_end_to_end_on_a_copy_of_a_corpus(tmp_p
     assert settings["permissions"]["ask"][0].startswith("Edit(") and "hooks" in settings
     assert "--strict-mcp-config" not in argv and "--setting-sources" not in " ".join(argv)
     assert "survey a corpus of files" in argv[argv.index("--append-system-prompt") + 1]
+
+
+async def test_a_program_writes_a_document_and_main_hears_what_it_returns(tmp_path, data_tmp, workspaces_tmp, active,
+                                                                         unboxed):
+    from app import report_types, write_session
+
+    writer = '''import thimble
+def run(input):
+    thimble.log("writing " + input["doc"])
+    return "Wrote the summary of " + input["doc"] + "."
+thimble.serve(run)
+'''
+    active.append(_extension(tmp_path, "pen", {"writer": {"description": "Writes.", "command": ["python", "w.py"]}},
+                             {"agents/writer/w.py": writer}))
+    made = report_types.create_document_type(CORPUS, "document", name="Summary", brief="A short summary.")
+    res = await tools.call(CORPUS, "start_writing", {"doc": made["slug"], "request": "keep it short"})
+    assert not res.is_error, res.text
+    meta = await _until(lambda: next((m for m in agents_list(CORPUS) if m.get("doc") == made["slug"]
+                                      and m.get("status") != "running"), None), what="the writer to end")
+    assert meta["status"] == "done" and meta["result"] == f"Wrote the summary of {made['slug']}."
+    assert meta["role"] == write_session.ROLE and meta["way"] == "command"
+    assert not write_session.running(CORPUS, made["slug"])
+
+
+async def test_a_program_critiques_the_orientation_and_its_report_is_the_call_s_answer(tmp_path, data_tmp,
+                                                                                      workspaces_tmp, active, unboxed,
+                                                                                      monkeypatch):
+    from app import critique_session
+
+    critic = '''import thimble
+def run(input):
+    return "Report: " + input["digest"][:21]
+thimble.serve(run)
+'''
+    active.append(_extension(tmp_path, "crit", {"critic": {"description": "Critiques.", "command": ["python", "c.py"]}},
+                             {"agents/critic/c.py": critic}))
+    caller = agent_session.Run(CORPUS, "orient", "chat-o", "sid", config.corpus_dir(CORPUS), orientation.ROLE)
+    monkeypatch.setattr(critique_session, "orientation_run", lambda c, key: caller)
+    monkeypatch.setattr(critique_session, "write_digest", lambda c, run: None)
+    monkeypatch.setattr(critique_session, "first_message", lambda c, t, ctx, checks=None: "The digest of the run.")
+
+    async def no_checks(c):
+        return None
+
+    monkeypatch.setattr(critique_session, "checks_text", no_checks)
+    res = await tools.call(CORPUS, "critique", {}, session="orient")
+    assert not res.is_error, res.text
+    assert res.text.splitlines()[-1] == "Report: The digest of the run"
+
+
+def agents_list(c: str) -> list[dict]:
+    folder = config.workspace_dir(c) / "chats"
+    return [json.loads(p.read_text()) for p in folder.glob("*.meta.json")] if folder.is_dir() else []

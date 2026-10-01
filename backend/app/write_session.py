@@ -66,7 +66,9 @@ def first_message(c: str, t: dict[str, Any], request: str = "", after: str = "")
 
 
 def running(c: str, doc: str) -> bool:
-    return agent_session.running(c, session_key(doc))
+    from . import harness  # noqa: PLC0415
+
+    return agent_session.running(c, session_key(doc)) or harness.running(c, session_key(doc))
 
 
 async def start(c: str, doc: str, request: str = "", after: str = "") -> agent_session.Run:
@@ -77,17 +79,43 @@ async def start(c: str, doc: str, request: str = "", after: str = "") -> agent_s
     if t is None:
         raise ValueError(f"no document {doc!r}")
     key = session_key(doc)
-    if agent_session.running(c, key):
+    if running(c, doc):
         raise RuntimeError(f"a writer of {doc} is running")
     prompt = await asyncio.to_thread(first_message, c, t, request, after)
-    if agent_session.running(c, key):  # a second call that started while this one rendered
+    if running(c, doc):  # a second call that started while this one rendered
         raise RuntimeError(f"a writer of {doc} is running")
     # the orientation's report pass: the writer carries its chat and run, and its card shows the writer (module note)
     pending = report_types.write_pending(c, doc) or {}
     # `orient: null` on another writer says the analyst asked for it
     orient = {"orient": pending.get("orient") or None, "orient_run": pending.get("orient_run") or 0}
+    from . import roles  # noqa: PLC0415
+
+    agent = roles.agent_for(c, "writer")
+    if agent.code and agent.replacing is not None:
+        return start_program(c, doc, t, request, after, prompt, agent.replacing, orient)
     run = await agent_session.start(c, key, prompt=prompt, **_launch(c, doc), brief=task_text(t, request, after),
                                     **orient)
+    report_types.begin_write(c, doc, request, after)
+    return run
+
+
+def start_program(c: str, doc: str, t: dict[str, Any], request: str, after: str, context_text: str, part: Any,
+                  orient: dict[str, Any]) -> Any:
+    """The writer of `doc` run by an extension's program (harness.py): its input is the document, its type, the
+    request and what thimble's writer reads first; it writes through write_document and edit_document, and main hears
+    what it returns."""
+    from . import harness  # noqa: PLC0415
+
+    job = harness.Job(c, "writer", session_key(doc), f"Write {doc}",
+                      {"doc": doc, "type": {k: t.get(k) for k in ("slug", "name", "kind", "description") if k in t},
+                       "request": request, "after": after, "context": context_text},
+                      OWN_TOOLS, work_dir(c, doc), chat_role=ROLE,
+                      fields={"doc": doc, "brief": task_text(t, request, after), **orient})
+
+    def ended(_run: Any, status: str, summary: str) -> None:
+        agent_session.tell_main(c, WRITTEN_KIND, {"text": summary or "", "status": status, "doc": doc})
+
+    run = harness.start(job, part, on_end=ended)
     report_types.begin_write(c, doc, request, after)
     return run
 
@@ -102,7 +130,10 @@ def _launch(c: str, doc: str) -> dict[str, Any]:
     models = config.models_for(c)
     agent = agent_session.role_agent(agent, models["writer"])
     effort = str(agent.get("effort") or DEFAULT_EFFORT)
-    return dict(role=ROLE, title=f"Write {doc}", agent_args=["--agents", json.dumps({name: agent}, ensure_ascii=False),
+    from . import roles  # noqa: PLC0415
+
+    defined = {**roles.subagents(c, "writer"), name: agent}
+    return dict(role=ROLE, title=f"Write {doc}", agent_args=["--agents", json.dumps(defined, ensure_ascii=False),
                                                               "--agent", name],
                 effort=effort, settings=agent_session.settings_json(effort, fastMode=bool(models["writer"]["fast"])),
                 agent_type=name, on_end=_ended, model=str(agent.get("model") or ""), work=work_dir(c, doc), unasked=True,
