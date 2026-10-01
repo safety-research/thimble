@@ -599,7 +599,8 @@ def _locate(corpus_dir: Path, rel: str) -> tuple[Path, str]:
 def _resolve_path(corpus_dir: Path, p: dict[str, Any], ref: str) -> dict[str, Any]:
     """A whole file (`<path>`, no line): {ref, kind: path, path, excerpt: its first PATH_EXCERPT_LINES lines, meta}. A
     database is named by its tables; a missing file is 404. A `<path>#<locator>` ref is this file with the locator as
-    text; the excerpt stays the file's own. A binary file's excerpt says what it is and meta.binary is true."""
+    text; the excerpt stays the file's own, but for a PDF, whose excerpt is the text of the page the locator names
+    (pdfs.excerpt). A binary file's excerpt says what it is and meta.binary is true."""
     from . import corpus  # lazy (import cycle)
 
     path, rel = _locate(corpus_dir, p["path"])
@@ -621,6 +622,11 @@ def _resolve_path(corpus_dir: Path, p: dict[str, Any], ref: str) -> dict[str, An
     elif media := _media(rel, p.get("locator")):
         meta["media"] = media
         excerpt = _media_excerpt(media)
+    elif rel.lower().endswith(".pdf"):
+        from . import pdfs  # noqa: PLC0415 — pdfs imports corpus, which imports this module
+
+        excerpt, more = pdfs.excerpt(path, p.get("locator"))
+        meta.update(more)
     elif _is_binary(path):
         meta["binary"] = True
         excerpt = "(a binary file, open it in Files)"
