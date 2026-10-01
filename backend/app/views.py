@@ -2089,6 +2089,8 @@ async def gate(c: str, slug: str, locators: list[str] | None = None, *, shot_dir
     if problems:
         return {"ok": False, "view": read_view(c, slug), "problems": problems, "checks": [], "page": None}
     report = await check(c, slug, locators, shot_dir=shot_dir)
+    if note := await media_note(text[VIEW_HTML]):
+        report["notes"] = [*report.get("notes", []), note]
     _prune_shots(shot_dir or (d / CACHE_SUBDIR / "shots"))
     if report.get("ok") and report.get("coverage") and view_review.enabled():
         found = await view_review.derived_review(c, slug, report["coverage"]["derived"])
@@ -2789,6 +2791,21 @@ def locator_of(ref: str) -> dict[str, Any] | None:
         return {"key": p["key"]} if p.get("key") else None
     frag = _fragment_of(ref)
     return {"path": p["path"], "fragment": frag} if "path" in p and frag else None
+
+
+# a page that plays video or audio: an element of its own or a file it loads through thimble.mediaUrl
+MEDIA_PAGE_RE = re.compile(r"<(?:video|audio)\b|createElement\(\s*['\"](?:video|audio)['\"]|\bmediaUrl\b", re.I)
+
+
+async def media_note(html: str) -> str:
+    """The note for a view whose page (`html`) plays video or audio when the pages' browser cannot play H.264 or AAC
+    (headless.plays_recordings), so its players stay blank in the checks' and the review's pictures; '' otherwise."""
+    if not MEDIA_PAGE_RE.search(html or ""):
+        return ""
+    path = headless.launch(headless.PAGES)
+    if path is None or headless.missing(headless.PAGES):
+        return ""
+    return _hint("view-media-unplayable") if await headless.plays_recordings(path) is False else ""
 
 
 # ----------------------------------------------------------------------------------------------------------

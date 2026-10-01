@@ -766,6 +766,10 @@ No view is named {view}. The views are {views}. File the ticket again with one o
 
 Filed {label}, but it cannot run here, so it failed at once: {why} Tell the analyst, since only they can change this.
 
+## view-media-unplayable
+
+The browser that takes the checks' and the review's pictures cannot play H.264 video or AAC audio, which most screen recordings hold, so a video or audio player in the pictures stays blank or shows an error. The analyst's browser plays them. A blank player in a picture is not a problem of the view.
+
 ## view-built
 
 The dev agent built the view {view}, so {claims} now open in it. In it {forms}.
