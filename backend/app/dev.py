@@ -18,9 +18,10 @@ the ticket; a server restart queues an interrupted run again with its worktree (
 
 View tickets. View proposals build at once, each as a ticket on its row of views/proposals.json, run by queue_view in a
 pool of its own (VIEW_POOL). A view is three files of the workspace, so there is no worktree, stack or restart. run_view
-starts a session on prompts/dev-view.md in the corpus folder (which Claude Code trusts) with `--add-dir` for the view's
-folder; the worked examples are fenced read-only, and an edit of the corpus goes as the dev agent's `data` says, by
-default to the analyst first (view_fence). After each turn the server runs the view's gate; a failure wakes the
+starts a session on prompts/dev-view.md in the build's own folder (view_work_dir, below thimble's workspaces folder,
+which Claude Code trusts) with `--add-dir` for the view's folder and the corpus, never in the corpus, where Claude Code's
+sandbox would make its `.claude/.cc-writes/` folder; the worked examples are fenced read-only, and an edit of the corpus
+goes as the dev agent's `data` says, by default to the analyst first (view_fence). After each turn the server runs the view's gate; a failure wakes the
 session, a pass registers the view. Where an active extension runs the dev agent with a program (roles.py), each turn
 is a run of that program instead (program_view_turn), checked the same way. A turn the API ended at capacity is no
 attempt: the build waits and wakes the session again. An orientation's proposal that runs out of attempts gets up to
@@ -1382,9 +1383,13 @@ def _unhost(c: str | None, key: str) -> None:
 
 
 def trust_folder(cwd: Path) -> Path:
-    """The folder the analyst must trust for a session in `cwd`: the live checkout for a ticket's worktree, else cwd."""
+    """The folder the analyst must trust for a session in `cwd`: the live checkout for a ticket's worktree, thimble's
+    workspaces folder for a view build's own folder, else cwd."""
     try:
-        return REPO if Path(cwd).resolve().is_relative_to(worktrees_dir().resolve()) else Path(cwd)
+        here = Path(cwd).resolve()
+        if here.is_relative_to(worktrees_dir().resolve()):
+            return REPO
+        return config.WORKSPACES_DIR if here.is_relative_to(config.WORKSPACES_DIR.resolve()) else Path(cwd)
     except OSError:
         return Path(cwd)
 
@@ -1453,6 +1458,7 @@ class Sessions:
                 pre = agent_session.sandbox_hooks((list(box[0]), list(box[1])), conf.install_asks())[agent_session.PRE]
                 hooks[agent_session.PRE] = [*pre, *hooks.get(agent_session.PRE, [])]
             settings["hooks"] = hooks
+        settings = agent_session.with_home_shell(settings)
         if not hosted or conf.web == "off":
             denied += agent_session.WEB_TOOLS
         allowed = [] if hosted else ["--allowedTools", ",".join(UNHOSTED_TOOLS)]
@@ -1462,8 +1468,7 @@ class Sessions:
             flags += ["--add-dir", str(d)]
         if conf_models.get("effort"):
             flags += ["--effort", str(conf_models["effort"])]
-        if settings:
-            flags += ["--settings", json.dumps(settings)]
+        flags += ["--settings", json.dumps(settings)]
         return flags
 
     async def start(self, cwd: Path, prompt: str, *, name: str, workspace: str | None,
@@ -2573,15 +2578,15 @@ def _view_chat(c: str, prop: dict[str, Any]) -> str | None:
 
 def build_view_prompt(c: str, prop: dict[str, Any], folder: Path, corpus: Path) -> str:
     """The view ticket's first message: prompts/dev.md with prompts/dev-view.md as its task, the proposal's fields (its
-    spec as bullets, views.spec_lines), the slug, the view's folder, the corpus, the worked examples and the check
-    command's URL."""
+    spec as bullets, views.spec_lines), the slug, the view's folder, the build's own folder, the corpus, the worked
+    examples and the check command's URL."""
     from . import views  # noqa: PLC0415
 
     values = {"name": str(prop.get("name") or prop["slug"]), "slug": str(prop["slug"]),
               "description": str(prop.get("why") or ""),
               "claims": ", ".join(prop.get("claims") or []), "spec": views.spec_lines(prop), "folder": str(folder),
-              "corpus": str(corpus), "examples": str(views.EXAMPLES_DIR), "check": view_check_command(c, str(prop["slug"])),
-              "network": view_network_line(c)}
+              "work": str(view_work_dir(c, str(prop["slug"]))), "corpus": str(corpus), "examples": str(views.EXAMPLES_DIR),
+              "check": view_check_command(c, str(prop["slug"])), "network": view_network_line(c)}
     with prompts.custom(userconf.prompt_files(c, "dev")):
         return prompts.render_dev("dev-view", values)
 
@@ -2797,17 +2802,17 @@ def view_key(slug: str) -> str:
 
 def view_asking(c: str, slug: str, folder: Path, conf: userconf.Session) -> dict[str, Any]:
     """How a view build's session asks (Sessions._flags): its key, what thimble's config asks of it (`conf`), and allowed
-    unasked its edits in the view's folder, reads of the worked examples and of the thimble code a view runs against
-    (VIEW_CODE), its check command, and Bash in the sandbox where its Bash runs there, but for the commands the config
-    asks about."""
+    unasked its edits in the view's folder and in its own (view_work_dir), reads of the worked examples and of the
+    thimble code a view runs against (VIEW_CODE), its check command, and Bash in the sandbox where its Bash runs there,
+    but for the commands the config asks about."""
     from . import agent_session, views  # noqa: PLC0415
 
     check = view_check_command(c, slug)
     conf.own_bash = [check]
     code = [f"Read(/{config.REPO_ROOT / rel}{'/**' if rel.endswith('/') else ''})" for rel in VIEW_CODE]
     out: dict[str, Any] = {"key": view_key(slug), "config": conf,
-                           "allow": [*own_work(folder, (views.EXAMPLES_DIR,)), *code, f"Bash({check})",
-                                     f"Bash({check} *)"]}
+                           "allow": [*own_work(folder, (views.EXAMPLES_DIR,)), f"Edit(/{view_work_dir(c, slug)}/**)",
+                                     *code, f"Bash({check})", f"Bash({check} *)"]}
     if conf.sandboxed:
         names, asks = agent_session.sandbox_rule(config.corpus_dir(c))
         out["sandbox"] = [names, asks]
@@ -2891,6 +2896,8 @@ async def _run_view(c: str, slug: str, run: Run) -> None:
     views.ensure_local(config.workspace_dir(c))
     folder = views.views_dir(c) / slug
     folder.mkdir(parents=True, exist_ok=True)
+    work = view_work_dir(c, slug)
+    work.mkdir(parents=True, exist_ok=True)
     corpus = config.corpus_dir(c)
     chat = _view_chat(c, prop)
     prop = views.update_proposal(c, slug, status="building", error=None, chat=chat,
@@ -2957,10 +2964,10 @@ async def _run_view(c: str, slug: str, run: Run) -> None:
             error = ""
             turn_start = time.monotonic()
             try:
-                # the view's folder is its one extra working directory; the worked examples are only read, since as a
-                # working directory they would receive the sandbox's `.claude/.cc-writes/`
-                result_text = await _worker_turn(run, run_log, corpus, prompt, resume, name=view_session_name(c, slug),
-                                                 workspace=c, on_session=on_session, add_dirs=(folder,),
+                # the session runs in its own folder, with the view's folder and the corpus added; the worked examples
+                # are only read, since the sandbox makes a `.claude/.cc-writes/` folder where a command starts
+                result_text = await _worker_turn(run, run_log, work, prompt, resume, name=view_session_name(c, slug),
+                                                 workspace=c, on_session=on_session, add_dirs=(folder, corpus),
                                                  answered=False, fence=view_fence(c, slug, corpus, folder, conf),
                                                  asking=asking, models=view_models(c, prop))
             except RuntimeError as e:
@@ -3067,8 +3074,9 @@ def view_program(c: str) -> Any:
 VIEW_PROGRAM_TOOLS = ("read_ref",)  # the thimble tools a dev program's view build may call
 
 
-def view_program_dir(c: str, slug: str) -> Path:
-    """A dev program's own folder for the view `slug`, beside the view's folder, which holds only the view."""
+def view_work_dir(c: str, slug: str) -> Path:
+    """The own folder of the view `slug`'s build, beside the view's folder, which holds only the view: where its session
+    or the dev agent's program runs."""
     return config.workspace_dir(c) / "views-work" / slug
 
 
@@ -3089,7 +3097,7 @@ async def program_view_turn(c: str, slug: str, message: str, folders: list[Path]
         "scope": list(prop.get("claims") or []), "spec": views.spec_lines(prop), "change": str(prop.get("change") or ""),
         "folder": str(folder), "corpus": str(config.corpus_dir(c)), "examples": str(views.EXAMPLES_DIR),
         "message": message,
-    }, VIEW_PROGRAM_TOOLS, view_program_dir(c, slug), writes=(folder,))
+    }, VIEW_PROGRAM_TOOLS, view_work_dir(c, slug), writes=(folder,))
     try:
         return await harness.run_in(job, part, rec)
     except harness.HarnessError as e:
@@ -3121,6 +3129,8 @@ async def review_revision(c: str, slug: str, message: str, on_wait: Any = None) 
     if prop is None:
         return False, "the view has no proposal"
     folder = views.views_dir(c) / slug
+    work = view_work_dir(c, slug)
+    work.mkdir(parents=True, exist_ok=True)
     corpus = config.corpus_dir(c)
     chat = _view_chat(c, prop)
     if chat and chat != prop.get("chat"):
@@ -3154,8 +3164,8 @@ async def review_revision(c: str, slug: str, message: str, on_wait: Any = None) 
             error = ""
             turn_start = time.monotonic()
             try:
-                result_text = await _worker_turn(run, run_log, corpus, prompt, resume, name=view_session_name(c, slug),
-                                                 workspace=c, on_session=on_session, add_dirs=(folder,),
+                result_text = await _worker_turn(run, run_log, work, prompt, resume, name=view_session_name(c, slug),
+                                                 workspace=c, on_session=on_session, add_dirs=(folder, corpus),
                                                  answered=False, fence=view_fence(c, slug, corpus, folder, conf),
                                                  turn_timeout_s=REVIEW_TURN_TIMEOUT_S, asking=asking,
                                                  models=view_models(c, prop))

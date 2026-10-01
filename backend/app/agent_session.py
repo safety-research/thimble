@@ -3,7 +3,7 @@ writer's (write_session.py), a report check's run (checks.py) and a critique's (
 session of its own with its own system prompt rather than a fork of main.
 
 Start. The server runs `claude -p --agents <json> --agent <name> --session-id <uuid> --output-format stream-json …` in
-the corpus folder (command) and writes the first message on stdin, since Linux refuses an argument over 128 KiB. The
+the session's work folder (command, the fence) and writes the first message on stdin, since Linux refuses an argument over 128 KiB. The
 agent is defined for that session alone with `--agents`. Its file names no tools, so it has every tool of a default
 Claude Code session less the session's --disallowedTools: LATER_TOOLS and the thimble tools that are not its own
 (not_own). shared.md is appended with --append-system-prompt, since Claude Code applies an agent's `skills` to
@@ -51,9 +51,11 @@ the process's --permission-mode must change, so the follower pauses the process 
 result), answers waiting requests with `## session-mode-switching` (_release), ends the process (_halt) and resumes it
 with --resume in the new mode and `## session-mode-changed` on stdin.
 
-The fence. A caller that passes `work` keeps the corpus folder read-only and the session's writes in that work folder.
-The process runs in the work folder with the corpus added via `--add-dir`, since Claude Code's Bash sandbox mounts files
-over dangerous names in the process's own folder, which a write deny of that folder would break. Its --settings deny
+The fence. Every caller passes its session's `work` folder, which keeps the corpus folder read-only and the session's
+writes in that work folder. The process runs in the work folder with the corpus added via `--add-dir`, never in the
+corpus folder, since Claude Code's Bash sandbox mounts files over dangerous names in the process's own folder, which a
+write deny of that folder would break, and makes a `.claude/.cc-writes/` folder there. Its Bash commands start in the
+work folder, whatever folder an earlier command moved to (with_home_shell). Its --settings deny
 Edit in the corpus and exclude the CLAUDE.md files of the work folder's ancestry (memory_excludes). Where the sandbox
 can run it has no network. A SubagentStart hook gives each subagent its own scratch folder, since the sandbox gives all
 agents one $TMPDIR. A caller that passes `unasked` (a writer, a critique, a check's run) also auto-allows Bash in the
@@ -222,6 +224,9 @@ RENDERED_ENV = "THIMBLE_RENDERED_PROMPTS"
 # Claude Code loads an added directory's CLAUDE.md only with this set: the corpus's own, for a fenced session whose
 # process runs in its work folder (module note, the fence)
 MEMORY_ENV = "CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD"
+# each Bash command starts in the process's own folder, since a `cd` would carry over and Claude Code's sandbox makes a
+# `.claude/.cc-writes/` folder in whatever folder a sandboxed command starts in, the corpus folder among them
+HOME_SHELL_ENV = "CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR"
 # the files under a folder that Claude Code loads as memory (claudeMdExcludes takes absolute paths and globs)
 MEMORY_FILES = ("CLAUDE.md", "CLAUDE.local.md", ".claude/CLAUDE.md", ".claude/rules/**")
 ALERT_DIALOG = "This session is waiting on a dialog it cannot show. Stop it, or run it again."
@@ -441,6 +446,12 @@ def settings_json(effort: str, env: dict[str, str] | None = None, **extra: Any) 
     """The session's --settings: the caller's choices, and the effort as CLAUDE_CODE_EFFORT_LEVEL, which a flag
     setting's env gives over one in the folder's local settings (module note), beside the caller's own `env`."""
     return json.dumps({**extra, "env": {**(env or {}), cc_settings.EFFORT_ENV: effort}})
+
+
+def with_home_shell(settings: dict[str, Any]) -> dict[str, Any]:
+    """`settings` with HOME_SHELL_ENV in its `env`, which a background session gets too, since its process starts with
+    the background service's environment."""
+    return {**settings, "env": {**(settings.get("env") or {}), HOME_SHELL_ENV: "1"}}
 
 
 def role_agent(agent: dict[str, Any], conf: dict[str, Any]) -> dict[str, Any]:
@@ -687,7 +698,7 @@ def start_mode(c: str, agent: str, *, chat: str | None = None, background: bool 
 async def start(c: str, key: str, *, role: str, title: str, agent_args: list[str], effort: str, settings: str,
                 prompt: str, agent_type: str, on_start: Callable[[Run], None] | None = None,
                 on_end: Callable[[Run, str, str], None] | None = None, append_shared: bool = True,
-                parent: str = agents.MAIN_ID, model: str = "", work: Path | None = None, calls: bool | str = False,
+                parent: str = agents.MAIN_ID, model: str = "", work: Path, calls: bool | str = False,
                 agent: str, disallowed: "list[str] | tuple[str, ...]" = (), patient: bool = False,
                 unasked: bool = False, call: str | None = None,
                 resume: str | None = None, chat: str | None = None, run_k: int = 0,
@@ -696,8 +707,8 @@ async def start(c: str, key: str, *, role: str, title: str, agent_args: list[str
                 **fields: Any) -> Run:
     """Start the session `key` for workspace `c` with its first message and follow it into an agent chat of `role` under
     `parent`; RuntimeError when it runs already or claude cannot be started. `on_start`/`on_end` hear the run's start and
-    end; `agent` (its row of modes.AGENTS) and `patient` govern permissions; `work` and `unasked` fence it; `calls` numbers its
-    calls; `resume`, `chat`, `run_k` and `leads` continue an earlier session; `restarted` marks a resume after a server
+    end; `agent` (its row of modes.AGENTS) and `patient` govern permissions; `work`, the folder its process runs in, never
+    the corpus folder, and `unasked` fence it; `calls` numbers its calls; `resume`, `chat`, `run_k` and `leads` continue an earlier session; `restarted` marks a resume after a server
     restart; `call` is main's tool call that started it; `announce` False writes no row into the parent chat; `on_pid` hears
     each process change; `background` runs it as a Claude Code background session (module note); `fields` land on the
     chat's meta."""
@@ -708,8 +719,8 @@ async def start(c: str, key: str, *, role: str, title: str, agent_args: list[str
     if background and not bg_session.trusted(c):  # `claude --bg` would refuse the folder
         raise RuntimeError(tools.hint("bg-untrusted", workspaces=str(config.WORKSPACES_DIR)))
     cwd = config.corpus_dir(c)
-    folder = work if work is not None else cwd  # where the process runs (module note, the fence)
-    conf = userconf.session(c, userconf.agent_of_row(agent), sandbox=work is not None)
+    folder = work  # where the process runs (module note, the fence)
+    conf = userconf.session(c, userconf.agent_of_row(agent), sandbox=True)
     sid = resume or str(uuid.uuid4())
     mode = start_mode(c, agent, chat=chat if resume else None, background=background)
     permission_mode = modes.flag(mode)
@@ -717,18 +728,17 @@ async def start(c: str, key: str, *, role: str, title: str, agent_args: list[str
     given = json.loads(settings)
     hooks: dict[str, Any] = {}
     rule: tuple[list[str], list[str]] | None = None
-    if work is not None:
-        work.mkdir(parents=True, exist_ok=True)
-        fenced = fence(cwd, work, sandbox=conf.sandboxed, unasked=unasked, network=conf.network,
-                       auto_allow=not conf.install_asks(), required=conf.enforced, data=conf.data)
-        perms = given.get("permissions") if isinstance(given.get("permissions"), dict) else {}
-        given = {**given, **fenced, "permissions": {**perms, **fenced["permissions"]}}
-        extra_env.update(fence_env(work))
-        extra_env.update(await asyncio.to_thread(skill_prompts_env, cwd, work))
-        hooks.update(scratch_hooks(work))
-        if "sandbox" in fenced and unasked:
-            rule = sandbox_rule(cwd)
-            hooks.update(sandbox_hooks(rule, conf.install_asks()))
+    work.mkdir(parents=True, exist_ok=True)
+    fenced = fence(cwd, work, sandbox=conf.sandboxed, unasked=unasked, network=conf.network,
+                   auto_allow=not conf.install_asks(), required=conf.enforced, data=conf.data)
+    perms = given.get("permissions") if isinstance(given.get("permissions"), dict) else {}
+    given = {**given, **fenced, "permissions": {**perms, **fenced["permissions"]}}
+    extra_env.update(fence_env(work))
+    extra_env.update(await asyncio.to_thread(skill_prompts_env, cwd, work))
+    hooks.update(scratch_hooks(work))
+    if "sandbox" in fenced and unasked:
+        rule = sandbox_rule(cwd)
+        hooks.update(sandbox_hooks(rule, conf.install_asks()))
     given = with_config(given, conf.settings())
     if conf.web == "ask":
         given = with_web_asks(given, permission_mode)
@@ -742,10 +752,10 @@ async def start(c: str, key: str, *, role: str, title: str, agent_args: list[str
         hooks.update(call_hooks(c))
     if hooks:
         given = {**given, "hooks": {**(given.get("hooks") or {}), **hooks}}
-    settings = json.dumps(given)
+    settings = json.dumps(with_home_shell(given))
     argv = await asyncio.to_thread(command, agent_args, sid, effort, settings, cwd, append_shared, model,
                                    resume=bool(resume), permission_mode=permission_mode, disallowed=disallowed,
-                                   add_dirs=[cwd] if work is not None else [])
+                                   add_dirs=[cwd])
     rules = kept_rules(c, chat) if resume else []  # module note, don't ask again
     argv = with_rules(argv, rules)
     env = environ(key, extra_env)

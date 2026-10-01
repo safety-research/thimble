@@ -626,6 +626,7 @@ def claude_argv(run: Run, argv: list[str]) -> tuple[list[str], Path, dict[str, s
     if "sandbox" in fenced and unasked:
         hooks.update(agent_session.sandbox_hooks(agent_session.sandbox_rule(corpus), conf.install_asks()))
     settings["hooks"] = hooks
+    settings = agent_session.with_home_shell(settings)
     shared = agent_session.shared_prompt(corpus)
     append = "\n\n".join([*appended, shared])
     deny = list(dict.fromkeys([*denied, *agent_session.not_own(job.tools), *agent_session.LATER_TOOLS]))

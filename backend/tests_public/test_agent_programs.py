@@ -510,7 +510,7 @@ async def test_a_dev_program_takes_each_turn_of_a_view_build_and_writes_only_the
     assert said == "Built runs-table from: Build the ru"
     assert json.loads((folder / "view.json").read_text())["name"] == "runs-table"
     assert sorted(p.name for p in folder.iterdir()) == ["view.json"]
-    assert (dev.view_program_dir(CORPUS, "runs-table") / "notes.txt").read_text() == "Build the runs table."
+    assert (dev.view_work_dir(CORPUS, "runs-table") / "notes.txt").read_text() == "Build the runs table."
     assert not harness.running(CORPUS, "view:runs-table")
 
 

@@ -1204,7 +1204,7 @@ Your first message is in {path}. Read it whole and follow it.
 
 ## bg-untrusted
 
-Claude Code does not trust thimble's workspaces folder ({workspaces}), so the orientation, its critic and the writers can't start. The analyst trusts it by running thimble's installer again in their own terminal with `--trust-workspaces`, the command their terminal and thimble's browser show, and then starts it again. Tell them so.
+Claude Code does not trust thimble's workspaces folder ({workspaces}), so the orientation, its critic, the writers and view builds can't start. The analyst trusts it by running thimble's installer again in their own terminal with `--trust-workspaces`, the command their terminal and thimble's browser show, and then starts it again. Tell them so.
 
 ## bg-carry-on
 
