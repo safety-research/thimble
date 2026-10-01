@@ -1692,6 +1692,16 @@
 .reader-msg-empty {
   color: var(--text-tertiary);
 }
+/* a post with no words (an action among talk): its other fields on one line, each name in the tertiary ink */
+.reader-msg-fields {
+  display: flex;
+  flex-wrap: wrap;
+  column-gap: 14px;
+}
+.reader-msg-field {
+  color: var(--text-tertiary);
+  font-size: var(--text-mono-sm);
+}
 .reader-record.has-tint .reader-record-body,
 .reader-line.has-tint {
   background: color-mix(in oklab, var(--tint) 16%, transparent);
