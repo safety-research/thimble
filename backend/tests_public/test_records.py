@@ -370,6 +370,14 @@ async def test_a_view_marks_records_that_are_no_lines(api, corpus, workspaces_tm
     assert kernel_thimble._marked(ctx, "forge.db#prs/7101") == []
     marks = await views.marks_for(CORPUS, "any", ["forge.db#prs/7114", "forge.db#prs/7101", "report.pdf#p2", "orders.csv"])
     assert set(marks) == {"forge.db#prs/7114", "report.pdf#p2"}
+    # a view that reads a CSV's lines names a row by the line it starts on, which the row's label marks too
+    rows = await _label(api, name="refund rows", kind="regex", spec=r"(?i)refund")
+    await _apply(api, rows, ["orders.csv"])
+    concepts.show_concept(CORPUS, rows["id"], True)
+    ctx = views.labels_context(CORPUS)
+    assert [m["label"] for m in kernel_thimble._marked(ctx, "orders.csv#L2")] == ["refund rows"]
+    assert kernel_thimble._marked(ctx, "orders.csv#L4") == [] and kernel_thimble._marked(ctx, "orders.csv#L3") == []
+
     # the checks' test label marks records of every reader, by line or by the ref's checksum
     probe = views.probe_context()
     hit = [f"forge.db#prs/{n}" for n in range(1, 200) if kernel_thimble._marked(probe, f"forge.db#prs/{n}")]

@@ -342,7 +342,7 @@ def _jsonl_parts(jsonl: Path):
                 except (TypeError, ValueError):
                     continue
                 if r.get("clear"):
-                    for ref in [ref for ref in model if _ref_parts(ref)[0] == where and a <= (_ref_parts(ref)[1] or 0) <= b]:
+                    for ref in [ref for ref, m in model.items() if _ref_parts(ref)[0] == where and a <= (_row_line(ref, m)[1] or 0) <= b]:
                         del model[ref]
                 covers = _trim(covers, where, a, b)
                 if r.get("cover") and r.get("value") is not None:
@@ -356,13 +356,23 @@ def _jsonl_parts(jsonl: Path):
     out = []
     for ref, r in model.items():
         a = analyst.get(ref)
-        path, line = _ref_parts(ref)
+        path, line = _row_line(ref, r)
         out.append((path, line, r.get("label"), r.get("source"), a.get("label") if a else None, r.get("confidence"), ref))
     for ref, a in analyst.items():
         if ref not in model:
-            path, line = _ref_parts(ref)
+            path, line = _row_line(ref, a)
             out.append((path, line, None, None, a.get("label"), None, ref))
     return out, covers
+
+
+def _row_line(ref: str, row: dict):
+    """_ref_parts, with the line a row names (`line`) for a record whose ref carries none, such as a CSV row
+    (labels_store.row_line)."""
+    path, line = _ref_parts(ref)
+    given = row.get("line")
+    if line is None and path is not None and isinstance(given, int) and not isinstance(given, bool) and given >= 1:
+        line = given
+    return path, line
 
 
 def labels(name=None, negatives=False):
@@ -449,12 +459,17 @@ def _members(jsonl) -> tuple:
     rows, covers = _store_parts(db) if _store_fresh(jsonl, db) else _jsonl_parts(jsonl)
     values = {}
     paths = set()
-    for path, _line, label, _source, verdict, _confidence, ref in rows:
+    starts = {}  # a record of a CSV or a JSON document by the line it starts on, as a view that reads its lines names it
+    for path, line, label, _source, verdict, _confidence, ref in rows:
         v = verdict if verdict is not None else label
         if v is not None:
             values[str(ref)] = str(v)
             if path is not None:
                 paths.add(str(path))
+                if line is not None and _ref_parts(str(ref))[1] is None:
+                    starts.setdefault(f"{path}#L{int(line)}", str(v))
+    for ref, v in starts.items():
+        values.setdefault(ref, v)
     spans: dict = {}
     for c in covers:
         if c[3] is not None:
