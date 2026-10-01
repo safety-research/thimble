@@ -681,3 +681,100 @@ async def test_a_folder_used_in_place_is_read_again_on_each_refresh_and_stays_wh
     assert row["locked"] and 'unknown key "scopes"' in row["note"]
     assert extensions.remove("live") and (d / "extension.json").is_file()
     assert "live" not in (await extensions.refresh(CORPUS))["extensions"]
+
+
+async def test_a_folder_used_in_place_cannot_link_to_files_outside_it(corpus, tmp_path, monkeypatch):
+    """thimble reads a folder used in place where it is, so a link in it that leads outside it (here to the file that
+    holds thimble's local API token) is a problem: add refuses the folder, and a link made after the add unloads it,
+    so the file never reaches the orientation's prompt."""
+    monkeypatch.setattr(orient_session, "message", lambda *a, **k: pytest.fail("nothing is sent"))
+    secret = extensions.home() / "server.json"
+    secret.parent.mkdir(parents=True, exist_ok=True)
+    secret.write_text('{"token": "not-for-agents"}')
+    d = _copy(tmp_path, "linky")
+    (d / "agents" / "orient.md").unlink()
+    (d / "agents" / "orient.md").symlink_to(secret)
+    with pytest.raises(extensions.AddError) as got:
+        extensions.add(str(d), yes=True, say=lambda _: None)
+    assert "agents/orient.md  is a link to a file outside the extension's folder" in str(got.value)
+    assert "linky" not in extensions.added()
+
+    (d / "agents" / "orient.md").unlink()
+    (d / "agents" / "orient.md").write_text("Read every tally record.\n")
+    (d / "views" / "tally" / "notes.md").symlink_to(d / "agents" / "orient.md")
+    _add(d)
+    assert (await extensions.refresh(CORPUS))["extensions"]["linky"]["active"], "a link inside the folder is fine"
+    (d / "agents" / "orient.md").unlink()
+    (d / "agents" / "orient.md").symlink_to(secret)
+    e = (await extensions.refresh(CORPUS))["extensions"]["linky"]
+    assert not e["active"] and "is a link to a file outside" in e["why"]
+    assert "not-for-agents" not in json.dumps(extensions.orient_blocks(CORPUS))
+    assert not extensions._own_file(d, "agents/orient.md")
+
+
+def test_add_refuses_a_folder_that_is_a_copy_thimble_keeps(corpus, tmp_path):
+    """Adding a folder uses it in place and first takes out what thimble held under that name, so one of thimble's own
+    copies (in its extensions folder, or a workspace's) is refused and left as it was."""
+    _add(_copy(tmp_path, "kept"))
+    extensions.remove("kept")
+    copy = extensions.extensions_dir() / "kept"
+    shutil.copytree(tmp_path / "kept", copy)
+    with pytest.raises(extensions.AddError, match="is a copy thimble keeps for itself"):
+        extensions.add(str(copy), yes=True, say=lambda _: None)
+    assert (copy / "extension.json").is_file() and not copy.is_symlink()
+    ws_copy = config.workspace_dir(CORPUS) / extensions.WS_DIR / "kept"
+    shutil.copytree(tmp_path / "kept", ws_copy)
+    with pytest.raises(extensions.AddError, match="is a copy thimble keeps for itself"):
+        extensions.add(str(ws_copy), yes=True, say=lambda _: None)
+    assert (ws_copy / "extension.json").is_file()
+
+
+async def test_the_add_question_and_settings_name_what_runs_outside_the_sandbox(corpus, tmp_path, monkeypatch):
+    """An agent's MCP servers start outside the sandbox, so the add question lists each with its command, and Settings
+    says so beside the agent. Whether the extension's code runs in a sandbox is the kernels' wrapper's to say."""
+    d = _copy(tmp_path, "servers")
+    body = (d / "agents" / "counter.md").read_text()
+    (d / "agents" / "counter.md").write_text(body.replace("---\n", "---\nmcpServers:\n  db:\n    command: node\n"
+                                                                  "    args: [db.js]\n", 1))
+    said: list[str] = []
+    extensions.add(str(d), yes=True, say=said.append)
+    assert "It starts MCP servers outside the sandbox: db (node db.js)." in "\n".join(said)
+    await extensions.refresh(CORPUS)
+    assert extensions.agent_definitions(CORPUS)["counter"]["mcpServers"] == {"db": {"command": "node", "args": ["db.js"]}}
+    monkeypatch.setattr(extensions, "kernels_wrapped", lambda c: False)
+    row = next(r for r in extensions.public(CORPUS)["extensions"] if r["name"] == "servers")
+    assert "counter: no network, no web, MCP servers outside the sandbox." in row["consent"]
+    assert row["consent"].endswith("Its code runs without a sandbox.")
+    monkeypatch.setattr(extensions, "kernels_wrapped", lambda c: True)
+    row = next(r for r in extensions.public(CORPUS)["extensions"] if r["name"] == "servers")
+    assert row["consent"].endswith("Its code runs in a sandbox.")
+
+
+async def test_run_now_is_not_offered_where_a_replacement_would_not_be_sent(corpus, tmp_path, monkeypatch):
+    """A replacement of thimble's orientation instructions stands aside for the analyst's own, so Settings neither
+    offers to run it nor asks when it is switched on, where Run now would send nothing."""
+    monkeypatch.setattr(extensions, "orientation_ran", lambda c: True)
+    write_json(config.workspace_dir(CORPUS) / "settings.json", {orient_session.SETTING: "My own way."})
+    d = _copy(tmp_path, "solo")
+    (d / "agents" / "orient.md").write_text("---\nreplace: true\n---\nLabel everything.\n")
+    _add(d)
+    await extensions.refresh(CORPUS)
+    assert extensions.offered(CORPUS) == []
+    row = next(r for r in extensions.public(CORPUS)["extensions"] if r["name"] == "solo")
+    assert not row["offer"] and not row["orients"]
+    write_json(config.workspace_dir(CORPUS) / "settings.json", {})
+    assert extensions.offered(CORPUS) == ["solo"]
+
+
+def test_shipping_leaves_a_folder_used_in_place_alone(corpus, tmp_path, monkeypatch):
+    """A built-in's name linked to the analyst's own folder is theirs: ship() neither copies over it nor writes in it."""
+    ships = tmp_path / "ships"
+    shutil.copytree(extensions.builtin_dir(), ships)
+    monkeypatch.setattr(extensions, "builtin_dir", lambda: ships)
+    mine = tmp_path / "video"
+    shutil.copytree(ships / "video", mine)
+    write_json(mine / extensions.ADDED, {"kind": "built-in", "digest": extensions.digest(mine)[0]})
+    _add(mine)
+    (ships / "video" / "reports" / "video" / "report.md").write_text("A newer form.\n")
+    assert extensions.ship() == []
+    assert extensions.linked("video") and (mine / "reports" / "video" / "report.md").read_text() != "A newer form.\n"
