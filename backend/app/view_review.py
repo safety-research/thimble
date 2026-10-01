@@ -14,7 +14,7 @@ dev.run_view calls after_built() when a build or a change to a view passes. Each
    a sample of the records the page fetched, and returns its problems and the extra states it wants to see. Those are
    shot and read with the first picture once more, whose problems stand. A refused reading runs again on the fallback
    model, and the review's note says so (FALLBACK_NOTE). While the API is at capacity the reading waits and runs again,
-   for as long as that lasts, and REVIEW_TOTAL_S leaves those waits out.
+   for as long as that lasts.
 3. Revision: with problems left and rounds to go, the build session gets prompts/dev-view-review.md and the view's
    checks run after its turns (dev.review_revision). A revision that passes is the view (views.mark_built), and the
    review runs again; one that does not leaves the view at its last version that passed.
@@ -28,7 +28,6 @@ no trace (forget)."""
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import json
 import logging
 import os
@@ -57,7 +56,6 @@ CAPACITY_WAIT_S = 30.0
 CAPACITY_WAIT_MAX_S = 300.0
 CAPACITY = ("overloaded", "rate_limited")
 CAPACITY_WORDS = {"overloaded": "Anthropic's API is overloaded", "rate_limited": "Anthropic's API rate limit was reached"}
-REVIEW_TOTAL_S = 25 * 60.0  # waits for API capacity, the reading's and a revision's, are left out
 _capacity_sleep = asyncio.sleep  # tests replace it
 REVIEW_CONCURRENCY = max(1, int(os.environ.get("THIMBLE_VIEW_REVIEW_CONCURRENCY", "2") or "2"))
 READ_IDLE_S = 60.0
@@ -71,7 +69,6 @@ FALLBACK_NOTE = "Downgrading {model} to {fallback}"
 FONTS_NOTE = "The view's pictures were drawn without thimble's fonts"
 SHOTS_NOTE = "The view's pictures could not be taken: {why}"
 REVISION_FAILED_NOTE = "A revision did not pass the view's checks, so the view is as it was before it."
-PAST_TIME_NOTE = "The review ran past {minutes} minutes, so the view is at its last version that passed its checks."
 STOPPED_NOTE = "The review was stopped."
 CHANGED_NOTE = "The view changed while it was reviewed."
 # the states the reading may ask to see beside the overview, each with its pane: the overview with the test label on and
@@ -102,7 +99,6 @@ class _Run:
     shots: int = 0  # pictures taken
     forget: bool = False  # the view was replaced or deleted: the review writes nothing more and keeps no copies
     restart: bool = False  # a build passed while the review was being stopped: a fresh review starts once it ends
-    waited: float = 0.0  # seconds spent waiting for API capacity, which REVIEW_TOTAL_S leaves out
 
 
 def enabled() -> bool:
@@ -299,34 +295,10 @@ def undo(c: str, slug: str) -> dict[str, Any]:
 # --------------------------------------------------------------------------- the review
 
 
-async def _timed(run: _Run) -> None:
-    """_review, cancelled with TimeoutError once it ran REVIEW_TOTAL_S plus the time it waited for API capacity."""
-    loop = asyncio.get_running_loop()
-    start = loop.time()
-    task = asyncio.ensure_future(_review(run))
-    try:
-        while True:
-            left = start + REVIEW_TOTAL_S + run.waited - loop.time()
-            if left <= 0:
-                raise asyncio.TimeoutError
-            done, _ = await asyncio.wait({task}, timeout=left)
-            if done:
-                return task.result()
-    finally:
-        if not task.done():
-            task.cancel()
-            with contextlib.suppress(asyncio.CancelledError, Exception):
-                await task
-
-
 async def _guarded(run: _Run) -> None:
     c, slug = run.c, run.slug
     try:
-        await _timed(run)
-    except asyncio.TimeoutError:
-        _settle(run)
-        _set(c, slug, run, state="failed", note=PAST_TIME_NOTE.format(minutes=round(REVIEW_TOTAL_S / 60)),
-             revised=run.revised)
+        await _review(run)
     except asyncio.CancelledError:
         _settle(run)
         _set(c, slug, run, state="stopped", note=run.reason or STOPPED_NOTE, revised=run.revised)
@@ -395,7 +367,7 @@ async def _review(run: _Run) -> None:
         await asyncio.to_thread(_copy_view, d, _reviewed_dir(c, slug, last=True))
         _set(c, slug, run, state="running", round=run.round + 1, revised=run.revised, shots=run.shots)
         run.revising = True
-        ok, why = await revise(c, slug, prop, problems, shots, run)
+        ok, why = await revise(c, slug, prop, problems, shots)
         if not ok:
             _settle(run)
             _set(c, slug, run, state="done", left=[_phrase(p) for p in problems], revised=run.revised,
@@ -573,7 +545,6 @@ async def read(c: str, run: _Run, prop: dict[str, Any], view: dict[str, Any], sh
         if cls in CAPACITY:
             log.info("view review %s/%s: %s, so it reads again in %.0f s", c, view["slug"], CAPACITY_WORDS[cls], wait)
             await _capacity_sleep(wait)
-            run.waited += wait
             wait = min(wait * 2, CAPACITY_WAIT_MAX_S)
             continue
         return f"The review did not finish: the reading ended {res.status}" + (f" ({res.detail})" if res.detail else "")
@@ -611,17 +582,12 @@ def revision_prompt(c: str, slug: str, problems: list[str], shots: list[dict[str
                                             "folder": str(views.views_dir(c) / slug)})
 
 
-async def revise(c: str, slug: str, prop: dict[str, Any], problems: list[str], shots: list[dict[str, Any]],
-                 run: _Run | None = None) -> tuple[bool, str]:
-    """One revision by the view's build session (dev.review_revision): whether the view passed its checks after it.
-    The revision's waits for API capacity count toward the review's `waited`."""
+async def revise(c: str, slug: str, prop: dict[str, Any], problems: list[str],
+                 shots: list[dict[str, Any]]) -> tuple[bool, str]:
+    """One revision by the view's build session (dev.review_revision): whether the view passed its checks after it."""
     from . import dev  # noqa: PLC0415
 
-    def waited(s: float) -> None:
-        if run is not None:
-            run.waited += s
-
-    return await dev.review_revision(c, slug, revision_prompt(c, slug, problems, shots), on_wait=waited)
+    return await dev.review_revision(c, slug, revision_prompt(c, slug, problems, shots))
 
 
 # --------------------------------------------------------------------------- routes
