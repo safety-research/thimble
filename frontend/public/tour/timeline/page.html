@@ -1,0 +1,512 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8">
+<title>Timeline (page)</title>
+<!-- what thimble puts in every view's frame: the theme's tokens and fonts, the kit, and (new) the parts thimble draws
+     inside the page: the colour-and-labels control, More filters and the label marks -->
+<link rel="stylesheet" href="assets/frame-base.css">
+<link rel="stylesheet" href="assets/kit.css">
+<link rel="stylesheet" href="assets/thimble-parts.css">
+<style>
+  /* the page's own layout: one control row, the strip and the lanes, the list */
+  html, body { margin: 0; height: 100%; }
+  body { display: flex; flex-direction: column; overflow: hidden; background: var(--surface-card); }
+  .ico { width: 14px; height: 14px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; }
+
+  #ctl { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; padding: 10px 12px 10px 14px; border-bottom: 1px solid var(--border-hairline); }
+  #ctl .grow { flex: 1 1 auto; min-width: 8px; }
+  #colour { margin-left: auto; }
+  .search { position: relative; flex: 1 1 150px; min-width: 150px; max-width: 230px; }
+  .search .field { width: 100%; padding-left: 27px; }
+  .search .ico { position: absolute; left: 8px; top: 5px; color: var(--text-tertiary); pointer-events: none; }
+  .fbtn.field { display: inline-flex; align-items: center; gap: 6px; flex: none; padding: 0 7px 0 9px; color: var(--text-primary); cursor: pointer; white-space: nowrap; }
+  .fbtn .ico { width: 12px; height: 12px; color: var(--text-tertiary); }
+  .fbtn:hover { border-color: rgba(var(--ink-rgb), 0.28); }
+  .fbtn[aria-expanded='true'] { border-color: rgba(var(--ink-rgb), 0.28); background: var(--surface-hover); }
+  .fbtn.is-set { background: var(--surface-selected); border-color: rgba(var(--ink-rgb), 0.28); }
+  .fbtn .v { font-weight: 500; }
+  .fbtn .n { color: var(--text-tertiary); font: 400 var(--text-mono-sm) / 1 var(--font-mono); }
+  #chips { display: flex; gap: 6px; min-width: 0; }
+
+  #chart { position: relative; flex: none; padding: 10px 14px 4px; border-bottom: 1px solid var(--border-hairline); }
+  svg { display: block; overflow: visible; user-select: none; -webkit-user-select: none; }
+  svg text { font: 400 10.5px var(--font-mono); fill: var(--text-tertiary); font-variant-numeric: tabular-nums; }
+  svg text.lane { font: 400 12.5px var(--font-body); fill: var(--text-primary); }
+  svg text.lane-n { font: 400 10.5px var(--font-mono); fill: var(--text-tertiary); }
+  svg .grid { stroke: var(--border-hairline); }
+  svg .rule { stroke: rgba(var(--ink-rgb), 0.1); }
+  #strip { cursor: crosshair; }
+  .gut { position: absolute; left: 14px; display: flex; flex-direction: column; gap: 2px; width: 116px; font: 400 var(--text-xs) / 1.25 var(--font-body); color: var(--text-secondary); }
+  .gut .n { font: 400 var(--text-mono-sm) / 1.3 var(--font-mono); color: var(--text-tertiary); }
+  .gut .win { display: flex; align-items: center; gap: 2px; color: var(--text-primary); font: 400 var(--text-mono-sm) / 1.3 var(--font-mono); }
+  .gut .win button { display: inline-grid; place-items: center; width: 16px; height: 16px; padding: 0; border: 0; border-radius: 3px; background: none; color: var(--text-tertiary); cursor: pointer; }
+  .gut .win button:hover { background: var(--track-bg); color: var(--text-primary); }
+  #layout.btn { position: absolute; left: 8px; gap: 4px; color: var(--text-secondary); font-weight: 400; }
+  #layout.btn b { font-weight: 500; color: var(--text-primary); }
+  #layout.btn .ico { width: 12px; height: 12px; }
+  .tick { cursor: pointer; }
+  .tick.dim { opacity: 0.18; }
+
+  #list { flex: 1; min-height: 0; overflow: auto; }
+  #tbl { table-layout: fixed; border-collapse: separate; border-spacing: 0; }
+  #tbl td { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
+  #tbl td.t { color: var(--text-secondary); padding-left: 14px; }
+  #tbl th:first-child { padding-left: 14px; }
+  #tbl td.b { font-family: var(--font-body); font-size: var(--text-xs); }
+  #tbl td.k, #tbl td.i { color: var(--text-secondary); }
+  #tbl td.x { font-family: var(--font-body); font-size: var(--text-xs); color: var(--text-primary); }
+  #tbl td.err { color: var(--status-negative); }
+  #tbl td.err .ico { display: inline-block; width: 11px; height: 11px; margin-right: 4px; vertical-align: -1px; stroke-width: 2; }
+  #tbl .none { color: var(--text-tertiary); }
+  /* the neutral selection: the selected fill with a 1.5px ink edge, around the row and its details */
+  #tbl tr.sel > td { background: var(--surface-selected); border-top: 1.5px solid var(--text-primary); border-bottom: 0; }
+  #tbl tr.sel > td:first-child { border-left: 1.5px solid var(--text-primary); }
+  #tbl tr.sel > td:last-child { border-right: 1.5px solid var(--text-primary); }
+  #tbl tr.det > td { padding: 2px 16px 14px 14px; background: var(--surface-selected); border: 1.5px solid var(--text-primary); border-top: 0; white-space: normal; cursor: default; font-family: var(--font-body); }
+  #tbl tbody tr.det:hover { background: none; }
+
+  .d-top { display: flex; align-items: flex-start; gap: 16px; }
+  .d-text { flex: 1; min-width: 0; margin: 4px 0 0; font: 500 var(--text-lg) / 1.4 var(--font-body); color: var(--text-primary); white-space: pre-wrap; overflow-wrap: anywhere; }
+  .d-top .chip { flex: none; margin-top: 4px; gap: 5px; cursor: pointer; }
+  .d-top .chip .ico { width: 11px; height: 11px; stroke-width: 2; }
+  .facts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px 18px; margin: 10px 0 0; }
+  .fact { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+  .fact dt { flex: none; width: 56px; font: 400 var(--text-xs) / 1.4 var(--font-body); color: var(--text-tertiary); }
+  .fact dd { margin: 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 400 var(--text-ui-sm) / 1.4 var(--font-body); color: var(--text-primary); }
+  .fact dd.mono { font: 400 var(--text-mono-sm) / 1.5 var(--font-mono); }
+  .d-sec { margin: 12px 0 2px; font: 500 var(--text-ui-sm) / 1.3 var(--font-body); color: var(--text-primary); }
+  .d-sec .n { margin-left: 6px; font: 400 var(--text-mono-sm) / 1 var(--font-mono); color: var(--text-tertiary); }
+  .link { display: grid; grid-template-columns: 64px 150px minmax(0, 1fr) auto; align-items: baseline; gap: 12px; margin: 0 -6px; padding: 3px 6px; border-radius: var(--radius-chip); font: 400 var(--text-xs) / 1.4 var(--font-body); color: var(--text-primary); cursor: pointer; }
+  .link:hover { background: rgba(var(--ink-rgb), 0.05); }
+  .link:hover .x { text-decoration: underline; text-underline-offset: 2px; }
+  .link .t, .link .tk { font: 400 var(--text-mono-sm) / 1.4 var(--font-mono); color: var(--text-secondary); }
+  .link .tk { color: var(--text-tertiary); text-align: right; }
+  .link .w { color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .link .x { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  #tip { position: fixed; z-index: 60; display: none; max-width: 320px; padding: 7px 9px; border-radius: var(--radius-ui); background: var(--surface-card); box-shadow: 0 0 0 1px rgba(var(--ink-rgb), 0.12), 0 10px 28px -14px rgba(var(--ink-rgb), 0.32); pointer-events: none; font: 400 var(--text-xs) / 1.4 var(--font-body); color: var(--text-primary); }
+  #tip .h { font: 400 var(--text-mono-sm) / 1.4 var(--font-mono); color: var(--text-secondary); }
+</style>
+</head>
+<body>
+<div id="ctl">
+  <label class="search"><svg class="ico" viewBox="0 0 24 24"><path d="M4 10.5a6.5 6.5 0 1 0 13 0a6.5 6.5 0 1 0-13 0M15.2 15.2L20 20"/></svg><input id="q" class="field" type="search" placeholder="Search events" autocomplete="off" spellcheck="false"></label>
+  <button id="f-incident" class="field fbtn" type="button" aria-expanded="false"></button>
+  <button id="f-source" class="field fbtn" type="button" aria-expanded="false"></button>
+  <button id="f-more" class="field fbtn" type="button" aria-expanded="false"></button>
+  <span id="chips"></span>
+  <span id="colour"></span>
+</div>
+<section id="chart">
+  <div class="gut" id="gut-strip" style="top: 12px"></div>
+  <svg id="strip"></svg>
+  <button id="layout" class="btn btn-ghost btn-sm" type="button"></button>
+  <svg id="lanes"></svg>
+</section>
+<section id="list">
+  <table id="tbl" class="table">
+    <colgroup><col style="width: 84px"><col style="width: 74px"><col style="width: 84px"><col style="width: 116px"><col style="width: 82px"><col></colgroup>
+    <thead><tr><th data-field="time">Time</th><th data-field="source">Source</th><th data-field="kind">Kind</th><th data-field="actor">Actor</th><th data-field="incident">Incident</th><th data-field="text">Text</th></tr></thead>
+    <tbody id="tb"></tbody>
+  </table>
+</section>
+<div id="tip"></div>
+<script src="data.js"></script>
+<script>
+'use strict'
+// ---------------------------------------------------------------- thimble's side (mock of the proposed bridge)
+// thimble.colourControl(el) draws the colour-and-labels control; thimble.onColour(fn) hears {by, colours, hidden, iso};
+// thimble.markOf(ref) gives a record's label marks; the More filters panel is built from view.json's schema. In the real
+// bridge thimble counts values from index["tables"]; here the page's rows stand in for them.
+const D = window.DATA
+const LABELS = D.labels
+const ICON = {
+  down: 'M6 9l6 6 6-6', x: 'M6 6l12 12M18 6L6 18', check: 'M5 12.5l4.5 4.5L19 7', file: 'M8 3h6l5 5v11a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2zM14 3v5h5',
+  palette: 'M12 3a9 9 0 0 0 0 18c1.1 0 1.8-.8 1.8-1.7 0-.5-.2-.9-.5-1.2-.3-.3-.5-.7-.5-1.2 0-.9.8-1.7 1.7-1.7H16a5 5 0 0 0 5-5c0-4-4-7.2-9-7.2zM7.5 12h.01M9 7.8h.01M13.5 7h.01M17 10h.01',
+  up: 'M12 19V5M6 11l6-6 6 6', filter: 'M4 5h16l-6.2 7.4V18l-3.6 1.8v-7.4z', err: 'M12 3a9 9 0 1 0 0 18 9 9 0 1 0 0-18zM12 8v5M12 16h.01',
+}
+const ico = (n, c = 'ico') => `<svg class="${c}" viewBox="0 0 24 24"><path d="${ICON[n]}"/></svg>`
+const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c])
+const PALETTE = ['var(--label-1)', 'var(--label-2)', 'var(--label-3)', 'var(--label-4)', 'var(--label-5)', 'var(--label-6)', 'var(--label-7)', 'var(--label-9)', 'var(--label-10)']
+const NONE = 'var(--label-none)'
+
+const thimble = (() => {
+  const colourFns = []
+  const st = { by: 'labels', on: Object.fromEntries(LABELS.map((l) => [l.name, true])), colours: Object.fromEntries(LABELS.map((l) => [l.name, l.colour])), hidden: new Set(), iso: null, fieldColours: {} }
+  let el = null, fields = [], rows = () => [], only = null
+  const marks = {}
+  for (const e of D.events) if (e.marks.length) marks[e.ref] = e.marks
+  const onLabels = () => LABELS.filter((l) => st.on[l.name])
+  function keyOf(e) {
+    if (st.by === 'labels') { const m = onLabels().find((l) => (marks[e.ref] || []).includes(l.name)); return m ? m.name : 'No label' }
+    return e[st.by] || 'No ' + st.by
+  }
+  function values(list) {
+    const n = new Map()
+    for (const e of list) { const k = keyOf(e); n.set(k, (n.get(k) || 0) + 1) }
+    if (st.by === 'labels') return [...onLabels().map((l) => [l.name, n.get(l.name) || 0, st.colours[l.name]]), ['No label', n.get('No label') || 0, NONE]]
+    const all = [...n].sort((a, b) => b[1] - a[1])
+    const top = all.filter(([k]) => !k.startsWith('No ')).slice(0, 6)
+    const cols = top.map(([k, c], i) => [k, c, st.fieldColours[k] || PALETTE[i]])
+    const rest = all.filter(([k]) => !top.some(([t]) => t === k)).reduce((s, [, c]) => s + c, 0)
+    return rest ? [...cols, ['Other', rest, NONE]] : cols
+  }
+  function colourOf(e) {
+    const k = keyOf(e)
+    if (st.by === 'labels') return k === 'No label' ? NONE : st.colours[k]
+    const v = values(rows()).find(([n]) => n === k)
+    return v ? v[2] : NONE
+  }
+  function shown(e) {
+    const k = st.by === 'labels' || values(rows()).some(([n]) => n === keyOf(e)) ? keyOf(e) : 'Other'
+    if (st.hidden.has(k)) return false
+    return !st.iso || st.iso === k
+  }
+  const emit = () => { draw(); for (const f of colourFns) f({ by: st.by, colours: st.colours, hidden: st.hidden, iso: st.iso }) }
+  function draw() {
+    if (!el) return
+    const by = st.by === 'labels' ? 'Labels' : fields.find((f) => f[0] === st.by)[1]
+    const vals = values(rows())
+    const lg = vals.map(([k, n, c]) => {
+      const isLabel = st.by === 'labels' && k !== 'No label'
+      const cls = st.hidden.has(k) ? ' is-off' : st.iso === k ? ' is-iso' : st.iso ? ' is-dim' : ''
+      return `<button class="th-lg${cls}" type="button" data-k="${esc(k)}" title="Click to show only ${esc(k)}, ⌥-click to hide it"><span class="th-swb" data-sw="${esc(k)}" title="Change the colour"><span class="th-sw" style="--c:${c}"></span></span><span class="${isLabel ? 'th-lname' : ''}">${esc(k)}</span><span class="th-n">${n}</span></button>`
+    }).join('')
+    const onlyBtn = st.iso && st.by === 'labels' && st.iso !== 'No label' ? `<button class="btn btn-ghost btn-sm th-only" type="button">Only these</button>` : ''
+    el.innerHTML = `<span class="th-colour"><button class="btn btn-ghost btn-sm th-colour-by" type="button" aria-haspopup="menu">${ico('palette')}Colour by <b>${by}</b>${ico('down')}</button><span class="th-legend">${lg}</span>${onlyBtn}</span>`
+    el.querySelector('.th-colour-by').onclick = (ev) => menu(ev.currentTarget)
+    for (const b of el.querySelectorAll('.th-lg')) b.onclick = (ev) => {
+      const sw = ev.target.closest('[data-sw]')
+      if (sw) return palette(sw, sw.dataset.sw)
+      const k = b.dataset.k
+      if (ev.altKey) { st.hidden.has(k) ? st.hidden.delete(k) : st.hidden.add(k); if (st.iso === k) st.iso = null }
+      else st.iso = st.iso === k ? null : k
+      emit()
+    }
+    const ob = el.querySelector('.th-only')
+    if (ob) ob.onclick = () => { only = st.iso; parent.postMessage({ thimbleMock: 'filter', label: only, colour: st.colours[only] }, '*') }
+  }
+  function menu(anchor) {
+    const vals = new Map()
+    for (const e of D.events) for (const m of e.marks) vals.set(m, (vals.get(m) || 0) + 1)
+    const byRows = [['labels', 'Labels'], ...fields].map(([k, n]) => `<button class="th-item${st.by === k ? ' is-on' : ''}" data-by="${k}"><span class="th-lab">${n}</span>${st.by === k ? ico('check', 'ico th-tick') : ''}</button>`).join('')
+    const labRows = LABELS.map((l) => `<button class="th-item" data-lab="${esc(l.name)}"><span class="th-switch${st.on[l.name] ? ' on' : ''}"></span><span class="th-sw" style="--c:${st.colours[l.name]}"></span><span class="th-lab">${esc(l.name)}</span><span class="th-n">${vals.get(l.name) || 0}</span></button>`).join('')
+    const p = pop(anchor, `<div class="th-head">Colour by</div>${byRows}<div class="th-head">Labels over these files</div>${labRows}<div class="th-sep"></div><form class="th-prompt"><input placeholder="Label from prompt…" aria-label="Label from prompt"><button class="th-prompt-go" type="submit" title="Make the label">${ico('up')}</button></form>`, 'right')
+    p.style.width = '260px'
+    p.onclick = (ev) => {
+      const b = ev.target.closest('[data-by],[data-lab]')
+      if (!b) return
+      if (b.dataset.by) { st.by = b.dataset.by; st.iso = null; st.hidden.clear(); close() }
+      else { st.on[b.dataset.lab] = !st.on[b.dataset.lab]; b.querySelector('.th-switch').classList.toggle('on') }
+      emit()
+    }
+    p.querySelector('form').onsubmit = (ev) => ev.preventDefault()
+  }
+  function palette(anchor, k) {
+    const cur = st.by === 'labels' ? st.colours[k] : values(rows()).find(([n]) => n === k)?.[2]
+    const p = pop(anchor, `<div class="th-palette">${PALETTE.map((c) => `<button style="--c:${c}" data-c="${c}" class="${c === cur ? 'cur' : ''}"></button>`).join('')}</div>`)
+    p.onclick = (ev) => {
+      const b = ev.target.closest('[data-c]')
+      if (!b) return
+      if (st.by === 'labels') st.colours[k] = b.dataset.c; else st.fieldColours[k] = b.dataset.c
+      close(); emit()
+    }
+  }
+  return {
+    colourControl(node, opts) { el = node; fields = opts.fields; rows = opts.rows; draw() },
+    onColour(fn) { colourFns.push(fn) },
+    colourOf, shown, keyOf, redraw: draw,
+    get state() { return st },
+    markOf: (ref) => (marks[ref] ? { names: marks[ref], colours: marks[ref].map((n) => st.colours[n]).filter((c, i) => st.on[marks[ref][i]]) } : null),
+    labels: () => LABELS.filter((l) => st.on[l.name]).map((l) => ({ ...l, colour: st.colours[l.name] })),
+  }
+})()
+
+// popovers: one open at a time, closed by a click outside or Escape
+let openPop = null
+function close() { if (openPop) { openPop.anchor?.setAttribute('aria-expanded', 'false'); openPop.remove(); openPop = null } }
+function pop(anchor, html, align = 'left') {
+  close()
+  const p = document.createElement('div')
+  p.className = 'th-pop'
+  p.innerHTML = html
+  document.body.appendChild(p)
+  const r = anchor.getBoundingClientRect()
+  const w = p.offsetWidth
+  p.style.top = r.bottom + 4 + 'px'
+  p.style.left = Math.max(6, Math.min(innerWidth - w - 6, align === 'right' ? r.right - w : r.left)) + 'px'
+  p.anchor = anchor
+  anchor.setAttribute('aria-expanded', 'true')
+  openPop = p
+  return p
+}
+document.addEventListener('mousedown', (e) => { if (openPop && !openPop.contains(e.target) && !openPop.anchor.contains(e.target)) close() })
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') close() })
+
+// ---------------------------------------------------------------- the page
+// Timeline: every event of the day on one time axis. The strip shows the whole span and picks a window; the lanes lay
+// the window out by source (Layout picks another field); the list holds the window's events, and a click expands one.
+const E = D.events
+const FIELDS = [['source', 'Source'], ['incident', 'Incident'], ['service', 'Service'], ['actor', 'Actor'], ['kind', 'Kind'], ['severity', 'Severity'], ['outcome', 'Outcome']]
+const FNAME = Object.fromEntries(FIELDS)
+const MORE = ['service', 'actor', 'kind', 'severity', 'outcome']
+const SOURCE_ORDER = ['alert', 'agent', 'deploy', 'chat', 'ticket']
+const S = { q: '', f: Object.fromEntries(FIELDS.map(([k]) => [k, new Set()])), took: [null, null], win: null, lanesBy: 'source', basis: 'clock', open: null }
+const G = 132 // the gutter of lane names
+const H0 = Math.floor(E[0].t / 3600) * 3600, H1 = Math.ceil(E[E.length - 1].t / 3600) * 3600
+const hhmm = (t, s) => new Date(t * 1000).toISOString().slice(11, s ? 19 : 16)
+const dur = (s) => (s < 60 ? `${s}s` : s < 3600 ? `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, '0')}s` : `${Math.floor(s / 3600)}h ${String(Math.round((s % 3600) / 60)).padStart(2, '0')}m`)
+const kept = (e, skip) => {
+  if (S.q) { const q = S.q.toLowerCase(); if (![e.text, e.actor, e.id, e.kind, e.source, e.service, e.incident].some((v) => (v || '').toLowerCase().includes(q))) return false }
+  for (const [k, set] of Object.entries(S.f)) if (k !== skip && set.size && !set.has(e[k] || '')) return false
+  if (S.took[0] != null && (e.took == null || e.took < S.took[0] * 60)) return false
+  if (S.took[1] != null && (e.took == null || e.took > S.took[1] * 60)) return false
+  return true
+}
+const oneIncident = () => (S.f.incident.size === 1 ? [...S.f.incident][0] || null : null)
+const tx = (e) => (S.basis === 'incident' && oneIncident() ? e.t - D.incidents[oneIncident()] : e.t)
+const inWin = (e) => !S.win || (e.t >= S.win[0] && e.t <= S.win[1])
+const scoped = () => E.filter((e) => kept(e))
+const shownRows = () => scoped().filter(inWin).filter(thimble.shown)
+const W = () => document.getElementById('chart').clientWidth - 28
+
+// the control row: Search, Incident, Source, More filters, the chips of what More filters set, then thimble's control
+function counts(k) { const n = new Map(); for (const e of E) if (kept(e, k)) n.set(e[k] || '', (n.get(e[k] || '') || 0) + 1); return [...n].sort((a, b) => (a[0] === '') - (b[0] === '') || b[1] - a[1]) }
+function fbtn(k) {
+  const b = document.getElementById('f-' + k), set = S.f[k]
+  const v = set.size === 1 ? ([...set][0] || 'No ' + k) : set.size ? `${set.size}` : ''
+  b.classList.toggle('is-set', set.size > 0)
+  b.innerHTML = `${FNAME[k]}${v ? `: <span class="v">${esc(v)}</span>` : ''}${ico('down')}`
+}
+function checklist(k, max = 99) {
+  const all = counts(k), sel = S.f[k]
+  const rows = all.slice(0, max).map(([v, n]) => `<button class="th-item" data-k="${k}" data-v="${esc(v)}"><span class="th-box${sel.has(v) ? ' on' : ''}"></span><span class="th-lab${v ? '' : ' none'}">${esc(v || 'No ' + k)}</span><span class="th-n">${n}</span></button>`).join('')
+  return rows + (all.length > max ? `<button class="th-more-link" data-all="${k}">${all.length - max} more</button>` : '')
+}
+function toggle(k, v) { const s = S.f[k]; s.has(v) ? s.delete(v) : s.add(v); if (S.basis === 'incident' && !oneIncident()) S.basis = 'clock'; render() }
+function filterMenu(k) {
+  const b = document.getElementById('f-' + k)
+  if (openPop && openPop.anchor === b) return close()
+  const p = pop(b, checklist(k))
+  p.onclick = (ev) => { const it = ev.target.closest('[data-v]'); if (it) { toggle(k, it.dataset.v); it.querySelector('.th-box').classList.toggle('on') } }
+}
+function moreMenu(expand) {
+  const b = document.getElementById('f-more')
+  if (!expand && openPop && openPop.anchor === b) return close()
+  const secs = MORE.map((k) => `<div class="th-head"><span>${FNAME[k]}</span></div>${checklist(k, k === expand ? 99 : 5)}`).join('')
+  const took = `<div class="th-head">Took</div><div class="th-range"><input class="field" data-t="0" placeholder="min" value="${S.took[0] ?? ''}"> to <input class="field" data-t="1" placeholder="max" value="${S.took[1] ?? ''}"> minutes</div>`
+  const p = pop(b, secs + took)
+  p.classList.add('th-more')
+  p.onclick = (ev) => {
+    const all = ev.target.closest('[data-all]')
+    if (all) return moreMenu(all.dataset.all)
+    const it = ev.target.closest('[data-v]')
+    if (it) { toggle(it.dataset.k, it.dataset.v); it.querySelector('.th-box').classList.toggle('on') }
+  }
+  for (const i of p.querySelectorAll('[data-t]')) i.oninput = () => { S.took[+i.dataset.t] = i.value === '' ? null : +i.value; render() }
+}
+function renderCtl() {
+  fbtn('incident'); fbtn('source')
+  const n = MORE.reduce((s, k) => s + S.f[k].size, 0) + (S.took[0] != null || S.took[1] != null ? 1 : 0)
+  document.getElementById('f-more').innerHTML = `More filters${n ? ` <span class="n">${n}</span>` : ''}${ico('down')}`
+  const chips = []
+  for (const k of MORE) for (const v of S.f[k]) chips.push(`<span class="th-chip"><span class="k">${FNAME[k]}</span> ${esc(v || 'none')}<button data-k="${k}" data-v="${esc(v)}" aria-label="Remove">${ico('x')}</button></span>`)
+  if (S.took[0] != null || S.took[1] != null) chips.push(`<span class="th-chip"><span class="k">Took</span> ${S.took[0] ?? 0}–${S.took[1] ?? '∞'} min<button data-took aria-label="Remove">${ico('x')}</button></span>`)
+  const c = document.getElementById('chips')
+  c.innerHTML = chips.join('')
+  c.onclick = (ev) => { const b = ev.target.closest('button'); if (!b) return; if (b.dataset.took != null) S.took = [null, null]; else S.f[b.dataset.k].delete(b.dataset.v); render() }
+}
+
+// the strip: the whole span in 10-minute bins, stacked in the control's colours; a drag picks the window
+function renderStrip() {
+  const svg = document.getElementById('strip'), w = W(), x0 = G, x1 = w - 4
+  const X = (t) => x0 + ((t - H0) / (H1 - H0)) * (x1 - x0)
+  const B = 600, bins = new Map(), rows = scoped().filter(thimble.shown)
+  for (const e of rows) { const b = Math.floor(e.t / B) * B; const m = bins.get(b) || []; m.push(e); bins.set(b, m) }
+  const max = Math.max(4, ...[...bins.values()].map((m) => m.length)), h = 30
+  let s = `<line class="rule" x1="${x0}" x2="${x1}" y1="${h + 0.5}" y2="${h + 0.5}"/>`
+  for (const [b, m] of bins) {
+    let y = h
+    const bw = Math.max(1, X(b + B) - X(b) - 1.2)
+    const groups = new Map()
+    for (const e of m) { const c = thimble.colourOf(e); groups.set(c, (groups.get(c) || 0) + 1) }
+    const order = [...groups].sort((a, b2) => (a[0] === NONE) - (b2[0] === NONE))
+    for (const [c, n] of order) { const hh = (n / max) * (h - 2); y -= hh; s += `<rect x="${X(b) + 0.6}" y="${y}" width="${bw}" height="${hh}" fill="${c}"/>` }
+  }
+  for (let t = Math.ceil(H0 / 7200) * 7200; t <= H1; t += 7200) s += `<text x="${X(t)}" y="${h + 12}" text-anchor="middle">${hhmm(t)}</text>`
+  if (S.win) {
+    const a = X(S.win[0]), b = X(S.win[1])
+    s += `<rect x="${x0}" y="0" width="${a - x0}" height="${h}" fill="var(--surface-card)" opacity=".7"/><rect x="${b}" y="0" width="${x1 - b}" height="${h}" fill="var(--surface-card)" opacity=".7"/>`
+    s += `<rect x="${a}" y="-1.5" width="${b - a}" height="${h + 2}" rx="2" fill="none" stroke="var(--text-primary)" stroke-width="1.5"/>`
+    s += `<rect x="${a - 2.5}" y="${h / 2 - 7}" width="5" height="14" rx="2" fill="var(--surface-card)" stroke="var(--text-primary)" stroke-width="1.2"/><rect x="${b - 2.5}" y="${h / 2 - 7}" width="5" height="14" rx="2" fill="var(--surface-card)" stroke="var(--text-primary)" stroke-width="1.2"/>`
+  }
+  svg.setAttribute('width', w); svg.setAttribute('height', h + 16)
+  svg.innerHTML = s
+  svg.X = X; svg.x0 = x0; svg.x1 = x1
+  const n = shownRows().length
+  document.getElementById('gut-strip').innerHTML = S.win
+    ? `<span class="win">${hhmm(S.win[0])}–${hhmm(S.win[1])}<button id="unwin" title="The whole day">${ico('x')}</button></span><span class="n">${n} events</span>`
+    : `<span>All day</span><span class="n">${n} events</span>`
+  const u = document.getElementById('unwin'); if (u) u.onclick = () => { S.win = null; render() }
+}
+;(() => {
+  const svg = document.getElementById('strip')
+  let drag = null
+  const T = (ev) => { const r = svg.getBoundingClientRect(), x = Math.max(svg.x0, Math.min(svg.x1, ev.clientX - r.left)); return H0 + ((x - svg.x0) / (svg.x1 - svg.x0)) * (H1 - H0) }
+  svg.onpointerdown = (ev) => { const t = T(ev); drag = S.win && t > S.win[0] && t < S.win[1] ? { move: t, w: [...S.win] } : { from: t }; svg.setPointerCapture(ev.pointerId) }
+  svg.onpointermove = (ev) => {
+    if (!drag) return
+    const t = T(ev)
+    if (drag.move != null) { const d = Math.max(H0 - drag.w[0], Math.min(H1 - drag.w[1], t - drag.move)); S.win = [drag.w[0] + d, drag.w[1] + d] }
+    else if (Math.abs(t - drag.from) > 120) S.win = [Math.min(t, drag.from), Math.max(t, drag.from)].map((v) => Math.round(v / 60) * 60)
+    render()
+  }
+  svg.onpointerup = () => { drag = null }
+  svg.ondblclick = () => { S.win = null; render() }
+})()
+
+// the lanes: one per value of the Layout field, the window's events as marks in the control's colours
+function laneValues() {
+  const k = S.lanesBy, n = new Map()
+  for (const e of scoped()) n.set(e[k] || '', (n.get(e[k] || '') || 0) + 1)
+  let vals = [...n.keys()]
+  if (k === 'source') vals = SOURCE_ORDER.filter((v) => n.has(v))
+  else vals.sort((a, b) => (a === '') - (b === '') || n.get(b) - n.get(a))
+  return vals.slice(0, 8)
+}
+function renderLanes() {
+  const rel = S.basis === 'incident' && oneIncident()
+  // the lanes' own time axis only once they are zoomed to a window or timed from an incident; otherwise the strip's axis serves
+  const axis = !!S.win || !!rel
+  const svg = document.getElementById('lanes'), w = W(), x0 = G, x1 = w - 4, LH = 25, top = 22
+  const rows = scoped().filter(inWin)
+  const lo = S.win ? S.win[0] : H0, hi = S.win ? S.win[1] : H1
+  const d0 = rel ? Math.min(...rows.map(tx), 0) : lo, d1 = rel ? Math.max(...rows.map(tx), 60) : hi
+  const X = (v) => x0 + ((v - d0) / (d1 - d0 || 1)) * (x1 - x0)
+  const vals = laneValues()
+  let s = ''
+  const span = d1 - d0, step = [60, 300, 600, 900, 1800, 3600, 7200].find((v) => span / v <= 9) || 7200
+  for (let t = Math.ceil(d0 / step) * step; t <= d1; t += step) {
+    s += `<line class="grid" x1="${X(t)}" x2="${X(t)}" y1="${top - 4}" y2="${top + vals.length * LH}"/>`
+    if (axis) s += `<text x="${X(t)}" y="${top - 8}" text-anchor="middle">${rel ? (t < 0 ? '−' : '+') + dur(Math.abs(t)).replace(/ 00s| 00m/, '') : hhmm(t)}</text>`
+  }
+  const sel = S.open != null ? E[S.open] : null
+  const linked = sel ? new Set([sel.re, ...sel.answered].filter((r) => r >= 0)) : new Set()
+  const pos = {}
+  vals.forEach((v, i) => {
+    const y = top + i * LH, n = rows.filter((e) => (e[S.lanesBy] || '') === v && thimble.shown(e)).length
+    s += `<line class="rule" x1="0" x2="${x1}" y1="${y + LH + 0.5}" y2="${y + LH + 0.5}"/>`
+    s += `<text class="lane" x="0" y="${y + 16.5}">${esc(v || 'No ' + S.lanesBy)}</text><text class="lane-n" x="${G - 14}" y="${y + 16.5}" text-anchor="end">${n}</text>`
+    for (const e of rows) {
+      if ((e[S.lanesBy] || '') !== v || !thimble.shown(e)) continue
+      const x = X(tx(e)), mw = S.win ? 4 : 3
+      pos[e.r] = [x, y + LH / 2]
+      const isSel = sel && e.r === sel.r, isLink = linked.has(e.r)
+      s += `<rect class="tick" data-r="${e.r}" x="${x - mw / 2}" y="${y + (isSel ? 3 : 6)}" width="${mw}" height="${isSel ? LH - 6 : LH - 12}" rx="1" fill="${thimble.colourOf(e)}"${isSel || isLink ? ` stroke="var(--text-primary)" stroke-width="1.5"` : ''}/>`
+    }
+  })
+  if (sel && pos[sel.r]) for (const r of linked) if (pos[r]) {
+    const [ax, ay] = pos[sel.r], [bx, by] = pos[r], my = Math.min(ay, by) - (ay === by ? 16 : 8)
+    s = `<path d="M${ax},${ay} C${ax},${my} ${bx},${my} ${bx},${by}" fill="none" stroke="var(--text-primary)" stroke-opacity=".45" stroke-width="1"/>` + s
+  }
+  svg.setAttribute('width', w); svg.setAttribute('height', top + vals.length * LH + 4)
+  svg.style.marginTop = '8px'
+  svg.innerHTML = s
+  const lb = document.getElementById('layout')
+  lb.innerHTML = `Lanes: <b>${FNAME[S.lanesBy]}</b>${ico('down')}`
+  lb.style.top = (document.getElementById('strip').getBoundingClientRect().height + 10 + 8 + 2) + 'px'
+}
+document.getElementById('lanes').addEventListener('click', (ev) => { const t = ev.target.closest('.tick'); if (t) pick(+t.dataset.r, true) })
+const tip = document.getElementById('tip')
+document.getElementById('lanes').addEventListener('mousemove', (ev) => {
+  const t = ev.target.closest('.tick')
+  if (!t) { tip.style.display = 'none'; return }
+  const e = E[+t.dataset.r]
+  tip.innerHTML = `<div class="h">${hhmm(e.t, 1)} · ${esc(e.source)} · ${esc(e.actor)}</div>${esc(e.text.slice(0, 160))}`
+  tip.style.display = 'block'
+  tip.style.left = Math.min(innerWidth - tip.offsetWidth - 8, ev.clientX + 12) + 'px'
+  tip.style.top = ev.clientY + 14 + 'px'
+})
+document.getElementById('lanes').addEventListener('mouseleave', () => { tip.style.display = 'none' })
+
+// the Layout menu at the chart's corner: lanes by a field; the time basis only once one incident is picked
+document.getElementById('layout').onclick = (ev) => {
+  const b = ev.currentTarget
+  if (openPop && openPop.anchor === b) return close()
+  const lanes = ['source', 'incident', 'service', 'actor'].map((k) => `<button class="th-item${S.lanesBy === k ? ' is-on' : ''}" data-l="${k}"><span class="th-lab">${FNAME[k]}</span>${S.lanesBy === k ? ico('check', 'ico th-tick') : ''}</button>`).join('')
+  const basis = oneIncident() ? `<div class="th-head">Time</div>` + [['clock', 'Clock'], ['incident', `From ${oneIncident()} start`]].map(([k, n]) => `<button class="th-item${S.basis === k ? ' is-on' : ''}" data-b="${k}"><span class="th-lab">${n}</span>${S.basis === k ? ico('check', 'ico th-tick') : ''}</button>`).join('') : ''
+  const p = pop(b, `<div class="th-head">Lanes by</div>${lanes}${basis}`)
+  p.style.width = '200px'
+  p.onclick = (e2) => { const it = e2.target.closest('[data-l],[data-b]'); if (!it) return; if (it.dataset.l) S.lanesBy = it.dataset.l; else S.basis = it.dataset.b; close(); render() }
+}
+
+// the list: the window's events; a click expands one in place
+function marked(text, ref) {
+  const m = thimble.markOf(ref)
+  let h = esc(text)
+  if (!m) return h
+  for (const l of thimble.labels()) if (m.names.includes(l.name)) h = h.replace(new RegExp(l.re, 'gi'), (s) => `<span class="th-span" style="--c:${l.colour}">${s}</span>`)
+  return h
+}
+function linkRow(r, rel) {
+  const e = E[r], took = rel === 'answered' ? e.took : E[S.open].took
+  return `<div class="link" data-go="${r}"><span class="t">${hhmm(e.t, 1)}</span><span class="w">${esc(e.source)} · ${esc(e.actor)}</span><span class="x">${esc(e.text)}</span><span class="tk">${took != null ? '+' + dur(took) : ''}</span></div>`
+}
+function details(e) {
+  const f = (k, v, mono) => (v ? `<div class="fact"><dt>${k}</dt><dd class="${mono ? 'mono' : ''}">${esc(v)}</dd></div>` : '')
+  const facts = [f('time', hhmm(e.t, 1) + ' UTC', 1), f('source', e.source), f('kind', e.kind), f('actor', e.actor), f('service', e.service), f('severity', e.severity), f('outcome', e.outcome), f('incident', e.incident), f('id', e.id, 1)]
+  if (e.took != null) facts.push(f('took', dur(e.took), 1))
+  const ans = e.re >= 0 ? `<div class="d-sec">Answers</div>${linkRow(e.re, 'answers')}` : ''
+  const by = e.answered.length ? `<div class="d-sec">Answered by<span class="n">${e.answered.length}</span></div>${e.answered.map((r) => linkRow(r, 'answered')).join('')}` : ''
+  return `<div class="d-top"><p class="d-text">${marked(e.text, e.ref)}</p><span class="chip chip-act" data-file="${esc(e.ref)}" title="Open ${esc(e.file)} at line ${e.line} in the File browser">${ico('file')}${esc(e.ref)}</span></div><dl class="facts">${facts.join('')}</dl>${ans}${by}`
+}
+function renderList() {
+  const rows = shownRows()
+  let h = ''
+  for (const e of rows) {
+    const m = thimble.markOf(e.ref), lab = m && m.colours.length ? ` data-thimble-label style="--thimble-label:${m.colours[0]}"` : ''
+    const err = e.outcome === 'failed'
+    h += `<tr data-r="${e.r}" data-anchor="${esc(e.ref)}"${lab} class="${S.open === e.r ? 'sel' : ''}"><td class="t">${hhmm(e.t, 1)}</td><td class="b">${esc(e.source)}</td><td class="b k${err ? ' err' : ''}"${err ? ' title="outcome: failed"' : ''}>${err ? ico('err') : ''}${esc(e.kind)}</td><td class="b">${esc(e.actor)}</td><td class="b i${e.incident ? '' : ' none'}">${esc(e.incident || '—')}</td><td class="x">${marked(e.text, e.ref)}</td></tr>`
+    if (S.open === e.r) h += `<tr class="det" data-anchor="${esc(e.ref)}"><td colspan="6">${details(e)}</td></tr>`
+  }
+  document.getElementById('tb').innerHTML = h
+}
+document.getElementById('tb').addEventListener('click', (ev) => {
+  const go = ev.target.closest('[data-go]')
+  if (go) return pick(+go.dataset.go, true)
+  const fc = ev.target.closest('[data-file]')
+  if (fc) return parent.postMessage({ thimbleMock: 'open-file', ref: fc.dataset.file }, '*')
+  const tr = ev.target.closest('tr[data-r]')
+  if (tr) pick(+tr.dataset.r)
+})
+function pick(r, scroll) {
+  const e = E[r]
+  if (S.open === r && !scroll) S.open = null
+  else { S.open = r; if (!inWin(e)) S.win = null }
+  render()
+  if (scroll) document.querySelector(`tr[data-r="${r}"]`)?.scrollIntoView({ block: 'center' })
+}
+
+function render() { renderCtl(); thimble.redraw(); renderStrip(); renderLanes(); renderList() }
+thimble.colourControl(document.getElementById('colour'), { fields: FIELDS, rows: shownRowsForLegend })
+function shownRowsForLegend() { return scoped().filter(inWin) }
+thimble.onColour(() => { renderStrip(); renderLanes(); renderList() })
+document.getElementById('f-incident').onclick = () => filterMenu('incident')
+document.getElementById('f-source').onclick = () => filterMenu('source')
+document.getElementById('f-more').onclick = () => moreMenu()
+document.getElementById('q').oninput = (ev) => { S.q = ev.target.value.trim(); render() }
+addEventListener('resize', render)
+// states for screenshots and links: #win=08:00-09:00&open=53
+function fromHash() {
+  const h = new URLSearchParams(location.hash.slice(1))
+  if (h.get('win')) { const [a, b] = h.get('win').split('-'); const day = Math.floor(E[0].t / 86400) * 86400; const t = (s) => day + (+s.slice(0, 2)) * 3600 + (+s.slice(3, 5)) * 60; S.win = [t(a), t(b)] }
+  if (h.get('open')) S.open = +h.get('open')
+}
+fromHash()
+render()
+if (S.open != null) requestAnimationFrame(() => document.querySelector(`tr[data-r="${S.open}"]`)?.scrollIntoView({ block: 'start' }))
+window.mock = { S, render, pick, thimble, filterMenu, moreMenu }
+</script>
+</body>
+</html>

@@ -55,6 +55,7 @@ import { SessionGone, useSessionGone } from './SessionGone'
 import { Toasts } from './Toasts'
 import { Untrusted } from './Untrusted'
 import { TopBar } from './TopBar'
+import { TourHost } from './TourHost'
 
 export const CHAT_WIDTH = { def: 308, min: 280, max: 640 }
 const BASE: { id: Tab; label: string; icon: IconName }[] = [
@@ -328,6 +329,7 @@ export function Shell({ ws }: { ws: string }) {
       {drag && <DragGhost drag={drag} />}
       <CmdPointer ws={ws} />
       <Toasts />
+      <TourHost />
       <ServerDown />
       <NewVersion />
       <Untrusted ws={ws} />

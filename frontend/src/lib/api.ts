@@ -2,6 +2,7 @@
 import type {
   CanvasResponse,
   Extensions,
+  LocalExtension,
   Cell,
   CellName,
   CellPatch,
@@ -149,6 +150,9 @@ export interface EventPosted {
 }
 
 export const api = {
+  // ---- the product tour's first-launch state, one for the install (backend tour.py) ----
+  tour: () => j<{ seen: boolean }>(`${BASE}/tour`),
+  tourSeen: () => j<{ seen: boolean }>(`${BASE}/tour/seen`, { method: 'POST' }),
   // ---- corpora and files ----
   corpora: () => j<CorpusInfo[]>(`${BASE}/corpora`),
   sources: (c: string) => j<SourceInfo[]>(`${BASE}/corpora/${enc(c)}/sources`),
@@ -413,6 +417,8 @@ export const api = {
   /** this workspace's switch of one extension's view, which overrides the check on whether it fits */
   switchExtensionView: (c: string, name: string, slug: string, on: boolean) =>
     j<Extensions>(`${ws(c)}/extensions/${enc(name)}/views/${enc(slug)}`, { method: 'PUT', body: JSON.stringify({ on }) }),
+  /** this workspace's switch of a view built for it; the analyst's browser alone may turn it (backend views.set_view_on) */
+  switchLocalView: (c: string, slug: string, on: boolean) => j<LocalExtension>(`${ws(c)}/views/${enc(slug)}/on`, { method: 'PUT', body: JSON.stringify({ on }) }),
   /** the answer to Settings' offer to run an extension's orientation instructions now: Run now (true) or Not now */
   answerExtensionOrientation: (c: string, name: string, run: boolean) =>
     j<Extensions & { status: string }>(`${ws(c)}/extensions/${enc(name)}/orientation`, { method: 'POST', body: JSON.stringify({ run }) }),

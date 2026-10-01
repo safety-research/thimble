@@ -92,6 +92,8 @@ ROUTER_MODULES = [
     "render", "card_check", "checkstore",
     # the review of a built view's pictures, which sends what it finds back to the view's build session
     "view_review",
+    # whether the product tour was offered on this install's first launch
+    "tour",
 ]
 
 # The backend binds to 127.0.0.1, but a DNS-rebinding page can still reach it as same-origin unless the Host
@@ -255,6 +257,13 @@ async def _lifespan(app: FastAPI):
             shutil.rmtree(old, ignore_errors=True)
     except Exception:
         log.exception("removing what an older thimble left failed")
+    # the views an older thimble kept in a workspace's views/ moved into its local extension, once
+    try:
+        from . import views
+
+        views.migrate_workspaces()
+    except Exception:
+        log.exception("moving the workspaces' views into their local extensions failed")
     await _startup()
     yield
     # shutdown: modules that own subprocesses expose `shutdown()`, so a restart never leaves an orphan running

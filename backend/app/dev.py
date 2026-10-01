@@ -2844,6 +2844,7 @@ async def _run_view(c: str, slug: str, run: Run) -> None:
             _view_failed(c, slug, why, prop.get("chat"))
         log.warning("view ticket %s/%s cannot build: %s", c, slug, why)
         return
+    views.ensure_local(config.workspace_dir(c))
     folder = views.views_dir(c) / slug
     folder.mkdir(parents=True, exist_ok=True)
     corpus = config.corpus_dir(c)

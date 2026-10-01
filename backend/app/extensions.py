@@ -1775,10 +1775,18 @@ def public(c: str) -> dict[str, Any]:
 
 @router.get("/ws/{c}/extensions")
 async def list_route(c: str) -> dict[str, Any]:
-    """The extensions added, found again for this workspace (refresh)."""
+    """The extensions added, found again for this workspace (refresh), and the workspace's local extension (`local`,
+    views.local_extension)."""
+    from . import views  # noqa: PLC0415
+
     config.workspace_dir(c)
     await refresh_quietly(c)
-    return await asyncio.to_thread(public, c)
+    try:
+        local = await asyncio.to_thread(views.local_extension, c)
+    except (OSError, ValueError, HTTPException):
+        log.exception("%s: the workspace's own views were not listed", c)
+        local = None
+    return {**await asyncio.to_thread(public, c), "local": local}
 
 
 class SwitchBody(BaseModel):

@@ -1,0 +1,15 @@
+Ticket: 5549
+Subject: 16:30 missing from the timetable
+Requester: E. Varga <e.varga@example.net>
+
+From: E. Varga <e.varga@example.net>
+Date: Mon, 18 May 2026 12:30:20 +0100
+Status: open
+
+The 16:30 from Skell isn't on the timetable page.
+
+From: Oona <oona@marrowby-ferries.example>
+Date: Mon, 18 May 2026 12:52:40 +0100
+Status: closed
+
+Fixed: the 16:30 was missing from the holiday timetable. It sails.

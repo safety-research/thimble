@@ -7,6 +7,7 @@ import { Popover } from '../components/Menu'
 import { api } from '../lib/api'
 import type { Concept, ViewProblems, ViewShown } from '../lib/types'
 import { readStorage, storageKey, writeStorage } from '../lib/workspace'
+import { globMatches } from './labels'
 import { fmtSize } from './Tree'
 import type { FilesLabels } from './useLabels'
 
@@ -36,32 +37,6 @@ export function useViewNotes(ws: string, slug: string, version?: string): ViewNo
     }
   }, [ws, slug, version])
   return { problems, shown }
-}
-
-const globs = new Map<string, RegExp>()
-
-/** A claim's glob as the server matches it (views.glob_matches, Python's fnmatch): `*` crosses folders, and a glob
- * matches the whole path or its file name. */
-export function globMatches(path: string, glob: string): boolean {
-  if (!glob || glob === '*') return true
-  let re = globs.get(glob)
-  if (!re) {
-    let src = ''
-    for (let i = 0; i < glob.length; i++) {
-      const ch = glob[i]
-      const end = ch === '[' ? glob.indexOf(']', i + 2) : -1
-      if (ch === '*') src += '.*'
-      else if (ch === '?') src += '.'
-      else if (end > 0) {
-        const body = glob.slice(i + 1, end).replace(/\\/g, '\\\\')
-        src += '[' + (body[0] === '!' ? '^' + body.slice(1) : body) + ']'
-        i = end
-      } else src += ch.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')
-    }
-    re = new RegExp('^' + src + '$', 's')
-    globs.set(glob, re)
-  }
-  return re.test(path) || re.test(path.slice(path.lastIndexOf('/') + 1))
 }
 
 /** The labels on in Files that mark any of the files the view claims: the labels its page shows. */

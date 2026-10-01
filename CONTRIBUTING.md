@@ -24,7 +24,8 @@ thimble doctor                     # the install state, versions, port and the l
 `thimble` alone starts a Claude Code session in the current folder with the plugin loaded. Edits to `prompts/main.md` or
 `prompts/shared.md` reach a session only when it is started again, since they are its system prompt.
 
-State lives under `~/.thimble` (`THIMBLE_HOME`): `server.json`, `server.log` and the registry of opened folders.
+State lives under `~/.thimble` (`THIMBLE_HOME`): `server.json`, `server.log`, the registry of opened folders and
+`tour.json`, which records that the product tour was offered (delete it to see the first-launch welcome again).
 Per-workspace state is `workspaces/<c>/` in the checkout (`THIMBLE_WORKSPACES_DIR`). To run a scratch stack beside the
 live one, set `THIMBLE_HOME`, `THIMBLE_WORKSPACES_DIR`, `THIMBLE_DATA_DIR` and `THIMBLE_DEV_DIR` under /tmp and
 `THIMBLE_PORT` above 8400 (`THIMBLE_UI_PORT` above 5400 with Vite). `scripts/dev/make_toy_corpus.py` writes a synthetic
@@ -57,7 +58,7 @@ synthetic data; a test does not pin wording, copy or layout.
 | every model-facing prompt | `prompts/` (rendered by `backend/app/prompts.py`) |
 | the browser (React, Vite); the types it shares with the backend | `frontend/src/`, `frontend/src/lib/types.ts` |
 | the Claude Code plugin: launcher, MCP server and channel, skills, hooks | `plugin/` |
-| the worked examples of custom views and the built-in PDF viewer | `plugin/viewers/` |
+| the worked examples of custom views, which the dev agent reads and thimble never installs | `plugin/viewers/` |
 | install, update, release and dev scripts | `scripts/` |
 | tests | `backend/tests_public/` (pytest), `frontend/tests/public/` (vitest), `frontend/tests/public/browser/` |
 

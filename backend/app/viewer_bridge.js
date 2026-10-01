@@ -20,7 +20,9 @@
 //   setQuery {patch}       frame to page, in a card's frame: the card's call's arguments the analyst's reshaping would
 //                          change, {} for none, which Keep writes into the call (window.thimble.setQuery); in a view
 //                          opened from a card, null when the page dropped the card's arguments
-//   navigate {ref}         frame to page: open another place, in this view or anywhere in thimble (window.thimble.navigate)
+//   navigate {ref, browser?}
+//                          frame to page: open another place, in this view or anywhere in thimble, a file ref with
+//                          `browser` in the File browser (window.thimble.navigate)
 //   reveal {rect}          frame to page: bring this part of the page into view, which a page as tall as its frame
 //                          cannot scroll to itself (window.thimble.reveal)
 //   size {height}          frame to page: the document's height, for a frame that sizes to its content, or the height a
@@ -45,6 +47,9 @@
 //   state {id}             page to frame, answered by state {id, state}: what the analyst is looking at, before a newer
 //                          version of the view is loaded in its place: {ref, scroll, fields, segs} (pageState)
 //   restore {state}        page to frame: that state put back in the newer version's page, as far as it fits (restore)
+// An anchored element with data-anchor-unmarked takes no mark, where the page draws the labels' colours on it itself,
+// such as a lane whose marks carry them, so the checks never count it as a mark drawn; a ⌘-click on it still asks about
+// its ref.
 // The text of an element marked data-thimble-chrome inside an anchored element is the page's own wording, such as a
 // record's header, which a label's matches never highlight. window.thimble.derived lists the fields the view's reader
 // made rather than read (window.__thimbleView.derived), which thimble lists above the view; nothing in the page is marked.
@@ -190,9 +195,10 @@
     setQuery: function (patch) {
       post({ type: P + 'setQuery', patch: patch && typeof patch === 'object' ? patch : cardMode ? {} : null })
     },
-    /** open another place: a view ref, a file ref or any other ref thimble knows */
-    navigate: function (ref) {
-      post({ type: P + 'navigate', ref: String(ref) })
+    /** open another place: a view ref, a file ref or any other ref thimble knows; with {browser: true} a file ref opens
+     *  in the File browser, as the file shows there, rather than in a view */
+    navigate: function (ref, opts) {
+      post({ type: P + 'navigate', ref: String(ref), browser: !!(opts && opts.browser) })
     },
     /** bring an element, or a {left, top, width, height} box in the page's coordinates, into view in thimble, whose
      *  scrolling a page sized to its content cannot do itself */
@@ -545,7 +551,7 @@
         var el = els[j]
         var ref = el.getAttribute('data-anchor')
         var m = marks[ref]
-        if (!m || el.tagName === 'CANVAS' || typeof m.bar !== 'string' || !COLOUR.test(m.bar)) continue
+        if (!m || el.tagName === 'CANVAS' || el.hasAttribute('data-anchor-unmarked') || typeof m.bar !== 'string' || !COLOUR.test(m.bar)) continue
         var inner = false
         for (var a = el.parentElement; a && !inner; a = a.parentElement) inner = a.getAttribute('data-anchor') === ref
         if (inner) continue

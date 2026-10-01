@@ -239,8 +239,9 @@ describe('a PDF ref', () => {
     const labels = { ...NO_LABELS, on: [audited], presence: new Map([['k1', { 'docs/a.pdf': { yes: 1 } }]]) } as unknown as FilesLabels
     const el = await mount(<Reader workspace="w" path="docs/a.pdf" kind="text" targetRef="docs/a.pdf#p2" labels={labels} lead={<span />} />)
     await settle()
-    const modes = [...el.querySelectorAll('.reader-modes [role="radio"], .reader-modes button')].map((b) => b.textContent)
+    const modes = [...el.querySelectorAll('.reader-modes [role="radio"], .reader-modes button:not(.seg-remove)')].map((b) => b.textContent)
     expect(modes).toEqual(['PDF', 'Pages'])
+    expect(el.querySelector('.reader-modes .seg-remove')?.getAttribute('aria-label')).toBe('Delete Pages')
     expect(el.querySelector('iframe.reader-pdf-frame')).not.toBeNull()
     expect(el.querySelector('.reader-filelabel')?.textContent).toBe('Audited')
     unmountAll()
