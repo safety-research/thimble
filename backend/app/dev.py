@@ -1792,8 +1792,8 @@ async def _worker_turn(run: Run, run_log: Log, cwd: Path, prompt: str, resume: s
     """One turn of a ticket's background session, started with `prompt` or woken with it when `resume` names the
     session, then watched until the turn ends, its transcript copied into the chat. A turn that ends while the session's
     own workflows or background agents run (Tail.background) goes on, since their results start its next turn: the
-    session is not stopped while any of them runs and the session lives, and the turn ends with the last turn they
-    lead to. The transcript is read every POLL_S;
+    session is not stopped while one of them runs, and the turn ends with the last turn they lead to, or when the
+    session itself ends. The transcript is read every POLL_S;
     while it grows the session works, and once it is quiet `claude agents` is asked for the session's state, at gaps that
     double up to STATE_GAP_MAX_S while that state stays working or blocked. `on_session(short id, full id)` records the
     session. The turn has no time limit: once neither its transcript nor its subagents' have grown for QUIET_NOTE_S, the
