@@ -133,6 +133,7 @@ class Pool:
         self._busy = 0  # renders under way
         self._used = 0.0  # when the last render began or ended (monotonic)
         self._idle_task: asyncio.Task[None] | None = None
+        self.resting = False  # closed after IDLE_S with no card drawn: the next render launches it again
 
     @property
     def ready(self) -> bool:
@@ -144,6 +145,7 @@ class Pool:
         async with self._lock:
             if self.ready:
                 return True
+            self.resting = False
             if gone := headless.missing(headless.HARNESS):
                 self.why = gone
                 return False
@@ -207,6 +209,7 @@ class Pool:
                 if self._started and not self._busy and time.monotonic() - self._used >= IDLE_S:
                     log.info("render: no card drawn for %.0f s, so the browser is closed until the next one", IDLE_S)
                     await self._close()
+                    self.resting = True
 
     async def _new_page(self, url: str) -> Any:
         page = await self._context.new_page()
@@ -302,6 +305,7 @@ class Pool:
     async def stop(self) -> None:
         async with self._lock:
             await self._close()
+            self.resting = False
         task, self._idle_task = self._idle_task, None
         if task is not None and not task.done() and task is not asyncio.current_task():
             task.cancel()
@@ -387,8 +391,8 @@ def pool() -> Pool:
 
 
 def available() -> bool:
-    """Whether a render can run now without a launch (the pool is up)."""
-    return enabled() and _pool is not None and _pool.ready
+    """Whether the harness draws cards: its pool is up, or was closed for idleness and launches with the next card."""
+    return enabled() and _pool is not None and (_pool.ready or _pool.resting)
 
 
 def why() -> str:

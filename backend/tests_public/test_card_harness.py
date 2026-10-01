@@ -141,11 +141,14 @@ async def test_the_browser_closes_when_no_card_was_drawn_for_a_while_and_comes_b
     monkeypatch.setattr(playwright.async_api, "async_playwright", lambda: _fake_playwright(log, delay["s"])())
     monkeypatch.setattr(headless, "launch", lambda kind: "")
     monkeypatch.setattr(render, "IDLE_S", 0.3)
+    monkeypatch.setattr(render, "enabled", lambda: True)
     pool = render.Pool(pages=1)
+    monkeypatch.setattr(render, "_pool", pool)
     try:
         assert (await pool.render({})).ok and log == ["launch"]
         await asyncio.sleep(0.6)
         assert log == ["launch", "close", "stop"] and not pool.ready
+        assert render.available() and (await render.status())["ready"], "a browser closed for idleness still draws cards"
         delay["s"] = 0.6  # a render that runs past IDLE_S keeps the browser up
         assert (await pool.render({})).ok and log[3:] == ["launch"]
         await asyncio.sleep(0.15)
