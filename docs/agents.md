@@ -78,7 +78,11 @@ thimble.serve(async (input) => {
 `thimble.options()` (in both languages) hands the Agent SDK thimble's `claude`. Its sessions then start on your own
 Claude Code login, in the role's work folder with the corpus added, under the role's permission mode, sandbox and
 config, with thimble's tools. Your program chooses the prompt, the system prompt, the model, the turns and the
-subagents. thimble keeps the permission mode, the settings, the hooks and the folders.
+subagents. thimble keeps the permission mode, the settings, the hooks and the folders. So a subagent's
+`permissionMode`, `hooks` and `memory` are dropped, and so are MCP servers that would run outside the program (only
+the SDK's own `sdk` servers and servers named by their name stay). A request to change the permission mode, the
+settings, the plugins, the login or the environment is answered with an error, and a hook of yours can deny or ask
+but not allow a call.
 
 The local API takes the program's token on `POST $THIMBLE_API/api/tools/<tool>` for the role's own tools, with
 `{"args": {...}}` as the body. The token is valid while the program runs. Each request carries `x-thimble-agent` (the
