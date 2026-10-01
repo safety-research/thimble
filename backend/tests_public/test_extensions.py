@@ -5,6 +5,7 @@ also a card type, a card-only type, an agent, a report type and orientation inst
 process, and the quick model call that checks whether a view fits answers from `fit`."""
 from __future__ import annotations
 
+import argparse
 import contextlib
 import io
 import json
@@ -211,6 +212,124 @@ async def test_thimble_adds_the_extensions_it_ships_on_once_and_names_the_others
     assert extensions.ship() == ["swarm-orient"] and "multiagent-swimlane" not in extensions.added()
     assert (await extensions.refresh(CORPUS))["extensions"]["swarm-orient"]["why"] == (
         "it needs the extension multiagent-swimlane, which is not added")
+
+
+def _before_the_rename(base: Path) -> Path:
+    """thimble's built-ins as an earlier build shipped them, in `base`: swarm-orient as `swarm`."""
+    shutil.copytree(extensions.builtin_dir(), base)
+    os.replace(base / "swarm-orient", base / "swarm")
+    raw = json.loads((base / "swarm" / "extension.json").read_text())
+    (base / "swarm" / "extension.json").write_text(json.dumps({**raw, "name": "swarm"}))
+    return base
+
+
+async def test_an_install_that_added_swarm_has_it_as_swarm_orient_without_the_analyst_doing_anything(
+        corpus, tmp_path, monkeypatch, capsys):
+    """An earlier build added swarm, set its swarm-reader's model in thimble's config and its effort in the workspace's,
+    and its orientation instructions ran. Once this build runs, all of it is swarm-orient's: the copy, unchanged, is the
+    version thimble ships, the settings are under the new name in both files, the workspace's copy is replaced, and
+    Settings does not offer to run the instructions again. The old name still works in the commands, which say the new
+    one."""
+    ships = extensions.builtin_dir()
+    old = _before_the_rename(tmp_path / "old-ships")
+    monkeypatch.setattr(extensions, "builtin_dir", lambda: old)
+    assert extensions.add("swarm", yes=True, say=lambda _: None) == ["swarm", "multiagent-swimlane"]
+    await extensions.refresh(CORPUS)
+    await extensions.mark_oriented(CORPUS, ["swarm"])
+    write_json(userconf.global_file(), {"agents": {"swarm:swarm-reader": {"model": "claude-opus-4-8"}}})
+    write_json(userconf.workspace_file(CORPUS), {"agents": {"swarm:swarm-reader": {"effort": "low"}}})
+    assert extensions.workspace_path(CORPUS, "swarm").is_dir()
+
+    monkeypatch.setattr(extensions, "builtin_dir", lambda: ships)
+    assert extensions.ship() == ["swarm-orient", "video"] and extensions.ship() == []
+    assert sorted(extensions.added()) == ["multiagent-swimlane", "swarm-orient", "video"]
+    new = extensions.source_path("swarm-orient")
+    assert extensions.digest(new)[0] == extensions.digest(ships / "swarm-orient")[0]
+    rec = json.loads((new / extensions.ADDED).read_text())
+    assert (rec["kind"], rec["source"], rec["digest"]) == ("built-in", "swarm-orient", extensions.digest(new)[0])
+    assert json.loads(userconf.global_file().read_text()) == {
+        "agents": {"swarm-orient:swarm-reader": {"model": "claude-opus-4-8"}}}
+    conf = userconf.load(CORPUS)
+    assert json.loads(userconf.workspace_file(CORPUS).read_text()) == {
+        "agents": {"swarm-orient:swarm-reader": {"effort": "low"}}}
+    assert {k: v for k, v in userconf.extension_agent(conf, "swarm-orient:swarm-reader").items() if v} == {
+        "model": "claude-opus-4-8", "effort": "low", "web": "off", "network": "on"}
+
+    state = await extensions.refresh(CORPUS)
+    assert "swarm" not in state["extensions"] and state["extensions"]["swarm-orient"]["active"]
+    assert state["oriented"] == ["swarm-orient"], "its instructions ran, so Settings does not offer them again"
+    assert not extensions.workspace_path(CORPUS, "swarm").exists()
+    assert extensions.workspace_path(CORPUS, "swarm-orient").is_dir()
+    reader = extensions.agent_definitions(CORPUS)["swarm-reader"]
+    assert (reader["model"], reader["effort"]) == ("claude-opus-4-8", "low")
+
+    monkeypatch.setattr(cli, "healthy", lambda url=None, timeout=1.0: False)
+    assert cli.cmd_extension(argparse.Namespace(ext_cmd="off", name="swarm")) == 0
+    out = capsys.readouterr().out
+    assert "swarm is now called swarm-orient." in out and "swarm-orient is off in every workspace." in out
+    assert userconf.extensions_off() == {"swarm-orient"}
+    assert cli.cmd_extension(argparse.Namespace(ext_cmd="remove", name="swarm")) == 0
+    assert "Removed swarm-orient." in capsys.readouterr().out and "swarm-orient" not in extensions.added()
+    assert cli.cmd_extension(argparse.Namespace(ext_cmd="add", source="swarm", yes=True)) == 0
+    out = capsys.readouterr().out
+    assert "swarm is now called swarm-orient." in out and "swarm-orient is on." in out
+    assert "swarm-orient" in extensions.added() and userconf.extensions_off() == set()
+
+
+async def test_a_changed_copy_of_swarm_keeps_its_changes_and_an_extension_of_the_analyst_s_own_keeps_its_name(
+        corpus, tmp_path, tmp_path_factory, monkeypatch):
+    """A copy of swarm the analyst changed is swarm-orient with their changes, which thimble's versions then leave alone.
+    A workspace's switches of swarm are swarm-orient's. An unchanged copy of swarm beside an added swarm-orient goes. A
+    link to the folder thimble shipped swarm in links to swarm-orient's. An extension of the analyst's own called swarm
+    keeps its name and its settings."""
+    ships = extensions.builtin_dir()
+    old = _before_the_rename(tmp_path / "old-ships")
+    monkeypatch.setattr(extensions, "builtin_dir", lambda: old)
+    extensions.add("swarm", yes=True, say=lambda _: None)
+    prompt = Path("agents") / "orientation" / "prompt.md"
+    (extensions.source_path("swarm") / prompt).write_text("Mine.\n")
+    monkeypatch.setattr(extensions, "builtin_dir", lambda: ships)
+    assert extensions.ship() == ["swarm-orient", "video"] and not extensions.source_path("swarm").exists()
+    new = extensions.source_path("swarm-orient")
+    assert (new / prompt).read_text() == "Mine.\n"
+    assert extensions.read_extension(new, "swarm-orient")["problems"] == []
+    assert extensions.ship() == [] and (new / prompt).read_text() == "Mine.\n"
+
+    write_json(config.registry_dir(CORPUS) / extensions.STATE_FILE, {
+        "off": ["swarm"], "oriented": [], "declined": ["swarm"], "shown": {"swarm/lanes": True},
+        "extensions": {"swarm": {"active": False, "why": "off in this workspace"}}})
+    state = extensions.read_state(CORPUS)
+    assert (state["off"], state["declined"], state["shown"]) == (["swarm-orient"], ["swarm-orient"],
+                                                                 {"swarm-orient/lanes": True})
+    assert list(state["extensions"]) == ["swarm-orient"]
+    assert extensions.off_in("swarm-orient") == [CORPUS]
+    assert (await extensions.refresh(CORPUS))["extensions"]["swarm-orient"]["why"] == "off in this workspace"
+
+    extensions.remove("swarm-orient")
+    monkeypatch.setattr(extensions, "builtin_dir", lambda: old)
+    extensions.add("swarm", yes=True, say=lambda _: None)
+    monkeypatch.setattr(extensions, "builtin_dir", lambda: ships)
+    extensions.add("swarm-orient", yes=True, say=lambda _: None)
+    assert extensions.ship() == [] and "swarm" not in extensions.added(), "an unchanged copy beside the new name goes"
+
+    extensions.remove("swarm-orient")
+    dev =_before_the_rename(tmp_path_factory.mktemp("checkout") / "extensions")
+    monkeypatch.setattr(extensions, "builtin_dir", lambda: dev)
+    assert extensions.add(str(dev / "swarm"), yes=True, say=lambda _: None) == ["swarm"]
+    shutil.rmtree(dev)
+    shutil.copytree(ships, dev)
+    assert extensions.ship() == ["swarm-orient"] and not extensions.source_path("swarm").is_symlink()
+    assert os.path.realpath(extensions.source_path("swarm-orient")) == os.path.realpath(dev / "swarm-orient")
+    assert extensions.read_extension(extensions.source_path("swarm-orient"), "swarm-orient")["problems"] == []
+
+    extensions.remove("swarm-orient")
+    _add(_copy(tmp_path, "swarm"))
+    write_json(userconf.global_file(), {"extensions": {"swarm": {"enabled": False}},
+                                        "agents": {"swarm:counter": {"model": "claude-opus-4-8"}}})
+    assert extensions.foreign("swarm") and extensions.renamed("swarm") == "swarm"
+    assert extensions.ship() == [] and extensions.linked("swarm") and "swarm-orient" not in extensions.added()
+    assert userconf.extensions_off() == {"swarm"} and "swarm:counter" in userconf.load()["agents"]
+    assert "swarm:counter" in json.loads(userconf.global_file().read_text())["agents"]
 
 
 async def test_settings_adds_an_extension_thimble_ships_when_its_switch_is_turned_on(corpus, analyst, tmp_path,
