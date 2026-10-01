@@ -420,6 +420,12 @@ def read_extension(root: Path, expect: str | None = None, have: set[str] | None 
         reader = None if own else str(c.get("reader") or "")
         if not c or not (d / CARD_HTML).is_file():
             continue
+        missing = [x for x in (*js, *view_libs.entries(c.get("libs")))
+                   if view_libs.parse(x) is not None and view_libs.vendored(d, x) is None]
+        if missing:
+            problems.append(f"its card type {d.name!r} loads {', '.join(dict.fromkeys(missing))}, which its "
+                            f"{view_libs.LIB_DIR} folder does not hold; build it in a workspace, where thimble "
+                            "installs packages once the analyst allows them, and copy its folder")
         if not (d / "card.py").is_file():
             problems.append(f"its card type {d.name!r} has no card.py, which thimble needs to draw it")
         elif not own and not reader:

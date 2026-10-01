@@ -130,6 +130,12 @@ async def test_what_an_extension_needs_is_checked_and_what_it_waits_for_leaves_i
         _add(_copy(tmp_path, "d3ish", dependencies={"js": ["d3"]}))
     with pytest.raises(extensions.AddError, match="neither one of vega, vega-lite, vega-embed nor an npm package"):
         _add(_copy(tmp_path, "badlib", dependencies={"js": ["not a package!"]}))
+    half = _copy(tmp_path, "d3half", dependencies={"js": ["d3@7"]})
+    (half / "views" / "tally" / "lib").mkdir()
+    (half / "views" / "tally" / "lib" / "libs.json").write_text(json.dumps({"d3@7": {"file": "d3@7.0.0.js", "kind": "js"}}))
+    (half / "views" / "tally" / "lib" / "d3@7.0.0.js").write_text("window.d3 = {}")
+    with pytest.raises(extensions.AddError, match="its card type 'tally-bars' loads d3@7, which its lib folder"):
+        _add(half)
     with pytest.raises(extensions.AddError, match="no folder, git URL or built-in"):
         extensions.add("no-such-thing", yes=True, say=lambda _: None)
 
