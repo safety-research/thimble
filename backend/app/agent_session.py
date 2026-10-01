@@ -2671,10 +2671,12 @@ def dismiss(c: str, chat: str, request_id: str) -> bool:
 def _clear_left(c: str, metas: "list[dict[str, Any]]") -> list[str]:
     """Take the requests a previous server left waiting off the chats `metas` of workspace `c` (module note,
     permissions): their hooks lost the connection, so Claude Code went on without an answer. A request a session of
-    this server waits on stays. Returns their ids."""
+    this server waits on stays, and so do main's, which channel.py relays and drops. Returns their ids."""
     live = {rid for r in [*_runs.values(), *_hosted.values()] for rid in r.waits}
     gone: list[str] = []
     for meta in metas:
+        if meta.get("kind") == agents.KIND_MAIN or meta.get("id") == agents.MAIN_ID:
+            continue
         if not any(isinstance(p, dict) and not p.get("expired") for p in meta.get("permissions") or []):
             continue
         chat = str(meta["id"])
