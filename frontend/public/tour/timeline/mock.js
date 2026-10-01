@@ -10,7 +10,7 @@
   const row = (f, dir) => ({
     path: f, dir: '', name: dir ? f.slice(dir.length + 1) : f,
     gives: LOOKUP[f] || plural(D.per_file[f] || 0, 'event'),
-    bad: bad[f] ? [`${plural(bad[f], 'line')} could not be read`] : [],
+    bad: bad[f] ? [`${bad[f]} unreadable ${bad[f] === 1 ? 'line' : 'lines'}`] : [],
   })
   function files() {
     const folders = new Map(), top = []

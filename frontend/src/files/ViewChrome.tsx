@@ -144,9 +144,14 @@ export function ViewNotesLine({ ws, name, notes, shownLabels, residueOpen, onRes
   )
 }
 
+/** "1 unreadable line", "3 unreadable files" */
+function unreadable(n: number, one: string, many: string): string {
+  return `${n.toLocaleString()} unreadable ${n === 1 ? one : many}`
+}
+
 /** What the view leaves out, in a few words, which a click opens as the list under the head: the files not read, those
- * hidden, those missing, the records not placed, and in red the lines that could not be parsed. With none it says how
- * many files it read, once that count is known. */
+ * hidden, those missing, the records not placed, and the lines or files that could not be parsed, as unreadable. With
+ * none it says how many files it read, once that count is known. */
 function ResidueLine({ notes, open, onToggle }: { notes: ViewNotes; open: boolean; onToggle: () => void }) {
   if (!notes.shown && !notes.problems?.count) return null
   const r = residueOf(notes)
@@ -155,7 +160,7 @@ function ResidueLine({ notes, open, onToggle }: { notes: ViewNotes; open: boolea
   if (r.hiddenCount) parts.push(`${r.hiddenCount.toLocaleString()} hidden`)
   if (r.missing.length) parts.push(`${r.missing.length.toLocaleString()} missing`)
   if (r.unplaced) parts.push(`${count(r.unplaced.count, 'record', 'records')} not placed`)
-  const failed = r.problems ? `${count(r.problems.count, wholeFiles(r.problems) ? 'file' : 'line', wholeFiles(r.problems) ? 'files' : 'lines')} not parsed` : ''
+  if (r.problems) parts.push(wholeFiles(r.problems) ? unreadable(r.problems.count, 'file', 'files') : unreadable(r.problems.count, 'line', 'lines'))
   if (!hasResidue(r) && notes.shown) {
     const n = notes.shown.files
     return <span className="view-pane-residue-none">{n === 1 ? '1 file read' : `All ${n.toLocaleString()} files read`}</span>
@@ -163,8 +168,6 @@ function ResidueLine({ notes, open, onToggle }: { notes: ViewNotes; open: boolea
   return (
     <button type="button" className="view-pane-files view-pane-residue" aria-expanded={open} onClick={onToggle}>
       {parts.join(' · ')}
-      {parts.length > 0 && failed && ' · '}
-      {failed && <span className="view-pane-residue-failed">{failed}</span>}
     </button>
   )
 }
@@ -222,7 +225,7 @@ export function ResidueList({ notes, onPick }: { notes: ViewNotes; onPick: (ref:
       )}
       {r.problems && (
         <section>
-          <h4>Not parsed</h4>
+          <h4>Unreadable</h4>
           {r.problems.examples.map((x, i) => (
             <button key={`${x.ref}:${i}`} type="button" className="view-pane-list-item" disabled={!x.ref} onClick={() => onPick(x.ref)}>
               <span className="mono">{x.ref}</span>

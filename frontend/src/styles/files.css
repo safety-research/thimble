@@ -2104,10 +2104,6 @@
   text-decoration: underline;
   text-underline-offset: 2px;
 }
-.view-pane-problems,
-.view-pane-residue-failed {
-  color: var(--status-negative);
-}
 .view-pane-list-kind {
   color: var(--text-secondary);
   font-style: italic;

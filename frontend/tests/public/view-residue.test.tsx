@@ -57,12 +57,12 @@ test('the residue line counts what the view leaves out and opens the list of it'
   const picked: string[] = []
   const el = await mount(<Head notes={NOTES} picked={picked} />)
   const line = el.querySelector('.view-pane-residue') as HTMLButtonElement
-  expect(line.textContent).toBe('3 files not read · 1 hidden · 2 missing · 2 records not placed · 3 lines not parsed')
-  expect(line.querySelector('.view-pane-residue-failed')?.textContent).toBe('3 lines not parsed')
+  expect(line.textContent).toBe('3 files not read · 1 hidden · 2 missing · 2 records not placed · 3 unreadable lines')
+  expect(line.querySelector('span'), 'the unreadable lines in the same ink as the rest').toBeNull()
   expect(el.querySelector('.view-pane-residue-list')).toBeNull()
   await act(async () => line.click())
   const list = el.querySelector('.view-pane-residue-list') as HTMLElement
-  expect([...list.querySelectorAll('h4')].map((h) => h.textContent)).toEqual(['Not read', 'Hidden', 'Missing', 'Not placed', 'Not parsed'])
+  expect([...list.querySelectorAll('h4')].map((h) => h.textContent)).toEqual(['Not read', 'Hidden', 'Missing', 'Not placed', 'Unreadable'])
   expect(list.textContent).toContain('the other folders have it')
   expect(list.textContent).toContain('not claimed')
   expect(list.textContent).toContain('and 1 more')

@@ -35,7 +35,7 @@
       }
       h += `<span class="sh-dot">·</span><button type="button" class="view-pane-files" data-pop="files" aria-expanded="${S.open === 'files'}">${plural(files.count, 'file')}</button>`
       h += `<span class="sh-dot">·</span><button type="button" class="view-pane-files" data-pop="derived" aria-expanded="${S.open === 'derived'}">${derivedText()}</button>`
-      if (bad.length) h += `<span class="sh-dot">·</span><button type="button" class="view-pane-problems" data-pop="bad" aria-expanded="${S.open === 'bad'}">${plural(bad.length, 'line')} could not be read</button>`
+      if (bad.length) h += `<span class="sh-dot">·</span><button type="button" class="view-pane-files" data-pop="bad" aria-expanded="${S.open === 'bad'}">${bad.length} unreadable ${bad.length === 1 ? 'line' : 'lines'}</button>`
       host.innerHTML = `${o.side || ''}<div class="sh">${h}</div>`
       for (const b of host.querySelectorAll('[data-pop]')) b.onclick = (e) => { e.stopPropagation(); toggle(b.dataset.pop) }
       for (const b of host.querySelectorAll('[data-compare]')) b.onclick = () => { S.compare = b.dataset.compare === '1'; render(); tell() }
