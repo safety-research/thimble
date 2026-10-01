@@ -81,7 +81,7 @@ Each line the program writes on stdout is one JSON object. thimble answers each 
 | `{"id": 2, "ask": {"prompt": "...", "schema": {...}, "images": [...]}}` | one model call on your own Claude: the object `schema` describes, or text. `images` are paths of PNG, JPEG, GIF or WebP files the model sees, such as a card-check task's `picture` |
 | `{"id": 3, "session": {"prompt": "...", "system": "...", "tools": [...], "model": "..."}}` | runs a Claude Code session as the role or task and answers with its last reply |
 | `{"id": 4, "default": {"input": {...}, "model": "..."}}` | a task only: runs thimble's own implementation of the task on `input` and answers with its output |
-| `{"log": "text"}` | adds a line to the agent's thread |
+| `{"log": "text"}` | adds a line to the agent's thread, or to thimble's log for a task's program, which has no thread |
 | `{"output": ...}` | what the role or task returns; the last line |
 
 A refused or failed request is answered `{"id": 1, "error": "why"}`. Any other line on stdout, and everything on stderr,
