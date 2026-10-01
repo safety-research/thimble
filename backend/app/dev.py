@@ -3109,12 +3109,12 @@ def stop_review_session(c: str, slug: str) -> None:
         SESSIONS.stop(run.session)
 
 
-async def review_revision(c: str, slug: str, message: str) -> tuple[bool, str]:
+async def review_revision(c: str, slug: str, message: str, on_wait: Any = None) -> tuple[bool, str]:
     """A revision the view review asks for: the view's build session woken with `message` (prompts/dev-view-review.md)
     in the view's thread, the view's checks run after each turn and fed back up to MAX_ATTEMPTS times. (passed, the
     session's report or why it did not pass). A view with no build session gets a new one, started with its ticket. Its
     session asks as a build's does (view_asking). A turn the API ended at capacity is no attempt: the session is woken
-    again after a build's waits (view_capacity_waits)."""
+    again after a build's waits (view_capacity_waits), each told to `on_wait(seconds)`."""
     from . import agent_session, tools, views  # noqa: PLC0415
 
     prop = views.read_proposal(c, slug)
@@ -3178,6 +3178,8 @@ async def review_revision(c: str, slug: str, message: str) -> tuple[bool, str]:
                 waited += wait
                 run_log.stage(f"{capacity}, so the revision waits {_minutes(wait)} and goes on")
                 await _capacity_sleep(wait)
+                if on_wait is not None:
+                    on_wait(wait)
                 attempt -= 1
                 if resume:
                     prompt = tools.hint(agent_session.RETRY_PROMPT)

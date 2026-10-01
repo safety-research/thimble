@@ -545,7 +545,7 @@ async def test_the_review_reads_one_picture_asks_for_more_and_sends_its_problems
 
     revisions: list[list[str]] = []
 
-    async def revise(c, slug, prop, problems, shots):
+    async def revise(c, slug, prop, problems, shots, run=None):
         revisions.append(problems)
         return True, "fixed"
 
@@ -562,6 +562,45 @@ async def test_the_review_reads_one_picture_asks_for_more_and_sends_its_problems
     assert revisions == [["picture 2: the filter keeps every post"]]
     review = views.read_proposal(CORPUS, "threads")["review"]
     assert review["state"] == "done" and review["revised"] == revisions[0] and review["shots"] == 4 and not review["left"]
+
+
+async def test_the_review_reads_again_for_as_long_as_the_api_stays_at_capacity(ws, bound, monkeypatch):
+    """A reading the API keeps refusing at capacity waits and reads again, with the waits doubling up to a cap, and
+    the review's time limit leaves those waits out, so a long streak of 429s or 529s never ends the review."""
+    from app import card_check, model, view_review
+
+    views.propose(CORPUS, "Threads", "The posts by thread.", ["board.jsonl"], "Unit: a post", asked=True)
+    views.mark_built(CORPUS, "threads")
+
+    async def shoot_states(c, slug, states, **k):
+        for st in states:
+            Path(st["out"]).parent.mkdir(parents=True, exist_ok=True)
+            Path(st["out"]).write_bytes(b"png")
+        return [{"ok": True, "errors": [], "fonts": True, "png": str(st["out"])} for st in states]
+
+    readings: list[int] = []
+
+    async def reading(c, system, user, tool, images, effort):
+        readings.append(1)
+        if len(readings) <= 7:
+            return model.CallResult(status="rate_limited" if len(readings) % 2 else "error", detail="529 overloaded_error")
+        return model.CallResult(status="ok", output={"problems": [], "more": []})
+
+    slept: list[float] = []
+
+    async def sleep(s):
+        slept.append(s)
+        await asyncio.sleep(0.05)
+
+    monkeypatch.setattr(views, "shoot_states", shoot_states)
+    monkeypatch.setattr(view_review, "_call", reading)
+    monkeypatch.setattr(view_review, "_capacity_sleep", sleep)
+    monkeypatch.setattr(view_review, "REVIEW_TOTAL_S", 0.2)
+    monkeypatch.setattr(card_check, "fit_image", lambda b: b)
+    await view_review._guarded(view_review._Run(CORPUS, "threads"))
+    assert slept == [30.0, 60.0, 120.0, 240.0, 300.0, 300.0, 300.0]
+    review = views.read_proposal(CORPUS, "threads")["review"]
+    assert review["state"] == "done" and not review["left"], review
 
 
 async def test_a_workspace_gets_four_views_from_the_orientation_and_a_deleted_one_stays_deleted(ws, monkeypatch):
