@@ -150,3 +150,26 @@ def test_the_critic_s_start_arguments_are_known_before_any_critique_runs_in_this
     meta = agents.meta_or_none(CORPUS, e.chat)
     kw = agent_session._launch_kw(CORPUS, KEY, meta)
     assert kw is not None and kw["background"] is True
+
+
+async def test_a_finished_session_whose_process_goes_away_stays_done_with_no_stopped_notice(restarted):
+    """Claude Code's background service stops (a reboot): a session that had finished its task shows as done, with no
+    notice that it stopped and no Resume."""
+    path, rows, asked, starts = restarted
+    bg_session._load(CORPUS)
+    e = bg_session.entry(CORPUS, KEY)
+    for _ in range(bg_session.GONE_AFTER):
+        await bg_session._tick([])
+    meta = agents.meta_or_none(CORPUS, e.chat)
+    assert e.status == "stopped" and meta["status"] == "done" and not meta.get("alert")
+
+
+async def test_an_unfinished_session_whose_process_goes_away_says_it_stopped(restarted):
+    path, rows, asked, starts = restarted
+    bg_session._load(CORPUS)
+    e = bg_session.entry(CORPUS, KEY)
+    agents.update_agent(CORPUS, e.chat, status="running")
+    for _ in range(bg_session.GONE_AFTER):
+        await bg_session._tick([])
+    meta = agents.meta_or_none(CORPUS, e.chat)
+    assert meta["status"] == "stopped" and meta["alert"]["kind"] == "stopped"

@@ -37,7 +37,7 @@ import { RefText } from './markdown'
 import { CallFocusContext, MAIN_RETRY_NOTE, Rows, THREAD_RETRY_NOTE, type CallFocus, type ErrorRetry } from './Rows'
 import { countMessages, isUnread, markSeen, readSeen, type SeenMap } from './seen'
 import { SKIPPED_NOTE, StartGate, agentMode, startGateShown } from './StartGate'
-import { AgentCard, StoppedHold, stopSession, useAgentRows } from './AgentCard'
+import { AgentCard, StoppedHold, stoppedAlert, stopSession, useAgentRows } from './AgentCard'
 import { ViewChip } from './ViewChip'
 import { replayHeld } from './pending'
 import { ThreadRows } from './ThreadRows'
@@ -983,6 +983,7 @@ function SessionView({ ws, id, chat, role, title, running, outbox = [], fromMain
   const rows = useMemo(() => withCallNumbers(own, index), [own, index])
   const log = useMemo(() => ({ meta: chat.meta, records: chat.records as ChatRecord[], error: chat.error }), [chat.meta, chat.records, chat.error])
   const queued: QueuedMessage[] = (chat.meta?.id === id ? chat.meta?.queued : null) ?? []
+  const stopped = chat.meta?.id === id ? stoppedAlert(chat.meta) : null
   // a message sent from here is shown until the log (a follow-up's first record) or the queue holds it
   const landed = new Set([...chat.rows.filter(isFollowUpRow).map((r) => r.text.trim()), ...queued.map((q) => q.text.trim())])
   const sending = outbox.filter((t) => !landed.has(t.trim()))
@@ -991,7 +992,7 @@ function SessionView({ ws, id, chat, role, title, running, outbox = [], fromMain
       {fromMain && <Note className="chat-origin" text="Started from main" chips={<ThreadChip id="main" />} />}
       <AgentCard ws={ws} chat={id} role={role} title={title} log={log} openWhileRunning resumeHere={false} stopHere={false} briefAbove={orient} />
       <Rows rows={rows} ws={ws} chat={id} calls={orient ? id : undefined} live={running} />
-      {!running && chat.meta?.id === id && chat.meta?.alert?.kind === 'stopped' && <StoppedHold ws={ws} chat={id} text={chat.meta.alert.text} />}
+      {!running && stopped && <StoppedHold ws={ws} chat={id} text={stopped.text} />}
       {queued.map((q, i) => (
         <PendingMessage key={`q:${i}:${q.text}`} text={q.text} ws={ws} queued />
       ))}

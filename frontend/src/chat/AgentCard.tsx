@@ -22,7 +22,7 @@ import { bus, type Tab } from '../lib/bus'
 import { useProposals, withoutDropped } from '../lib/proposals'
 import { teleport } from '../lib/teleport'
 import { track } from '../lib/telemetry'
-import type { ChatMeta, ChatRecord } from '../lib/types'
+import type { ChatMeta, ChatRecord, SessionAlert } from '../lib/types'
 import { ApiErrorCard } from './ApiError'
 import { Holds } from './Holds'
 import { ModeSwitch } from './ModeSwitch'
@@ -248,6 +248,12 @@ export function stopSession(ws: string, chat: string, role: string): Promise<boo
 }
 
 /** The card of a session thimble started (the orientation, a writer, a check's run), or a subagent's chip. */
+/** The stopped notice of a session that had not finished its task; one that finished shows as done (backend
+ * bg_session._stopped_while_idle). */
+export function stoppedAlert(meta: ChatMeta | null | undefined): SessionAlert | null {
+  return meta?.alert?.kind === 'stopped' && meta.status !== 'done' ? meta.alert : null
+}
+
 /** A background session whose process stopped (a crash, a kill, `claude stop`): what happened, and Resume, which
  * starts it again under its id with its conversation (backend agent_session.resume_chat). */
 export function StoppedHold({ ws, chat, text }: { ws: string; chat: string; text: string }) {
@@ -420,11 +426,12 @@ function AgentCardView({ ws, chat, role, title, ts, log, openWhileRunning = fals
     setStopping(true)
     void stopSession(ws, chat, role).finally(() => setStopping(false))
   }
+  const stopped = stoppedAlert(meta)
   // what holds its session besides its permission requests, which wait on the permission card above the composer
   const holds = running && own ? (
     <Holds alert={meta?.alert} rules={meta?.session_rules} restarted={restartedNow(meta, run, running)} onRetry={() => api.retrySession(ws, chat)} />
-  ) : !running && own && resumeHere && meta?.alert?.kind === 'stopped' ? (
-    <StoppedHold ws={ws} chat={chat} text={meta.alert.text} />
+  ) : !running && own && resumeHere && stopped ? (
+    <StoppedHold ws={ws} chat={chat} text={stopped.text} />
   ) : null
   // waiting for the analyst: on its own prompt, or on its critique's (chat/waiting.ts)
   const waitingFor = useMemo(() => {

@@ -703,15 +703,17 @@ async def _woken(fn: Callable[[str, Entry], Awaitable[Any]], e: Entry) -> bool:
 
 
 def _stopped_while_idle(e: Entry) -> None:
-    """The process of a session with no run open went away (claude stop, a crash): its chat says it stopped."""
+    """The process of a session with no run open went away (claude stop, a crash, the end of Claude Code's background
+    service): its chat says it stopped, with Resume, unless it had finished its task, when it stays done."""
     from . import agent_session  # noqa: PLC0415
 
     with contextlib.suppress(Exception):
         meta = agents.meta_or_none(e.c, e.chat)
-        if meta is not None and meta.get("status") == "running":
+        if meta is None or meta.get("status") == "done":
+            return
+        if meta.get("status") == "running":
             agents.finish_agent(e.c, e.chat, "stopped", e.result or None)
-        if meta is not None:
-            agents.update_agent(e.c, e.chat, alert={**agent_session.STOPPED_ALERT, "since": _iso_now()})
+        agents.update_agent(e.c, e.chat, alert={**agent_session.STOPPED_ALERT, "since": _iso_now()})
 
 
 def _iso_now() -> str:
