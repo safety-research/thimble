@@ -410,6 +410,7 @@ def attach(c: str, sid: Any, cwd: Any, transcript_path: str | None = None, pid: 
     _restore_subs(lv, stored.get(SUBS_KEY), revive=restored)
     _live[c] = lv
     if not restored:
+        _modes.pop(c, None)  # a session that ended and is resumed may run in another mode than it last reported
         own = cc_settings.analyst_effort(Path(lv.cwd)) if lv.cwd else None
         meta["attached"] = {"session": sid, "cwd": lv.cwd, "since": lv.since, **({"settings_effort": own} if own else {}),
                             **({"after": after} if after else {})}

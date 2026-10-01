@@ -212,8 +212,8 @@ async def test_each_agent_runs_in_its_row_else_in_main_s_mode_and_nothing_else_p
 
 def test_a_server_restarted_under_main_follows_its_last_reported_mode_until_main_reports_again(fake):
     """Main's reported mode is kept in thimble's home, not in memory alone: a server restarted under the same session
-    gives each row that follows main that mode, and main's meta shows it, until main reports again. A new session starts
-    from Manual, whatever an earlier session ran in."""
+    gives each row that follows main that mode, and main's meta shows it, until main reports again. A new session, or one
+    resumed after its end, starts from Manual, whatever it or an earlier session ran in."""
     cwd = str(config.corpus_dir(CORPUS))
 
     def restart() -> None:
@@ -236,6 +236,9 @@ def test_a_server_restarted_under_main_follows_its_last_reported_mode_until_main
     session.attach(CORPUS, "sid-main", cwd)
     assert modes.mode_for(CORPUS, "orient") == "manual", "the newer report is the one kept"
     session.note_mode(CORPUS, "sid-main", "bypassPermissions")
+    session.detach(CORPUS, "sid-main", "ended")
+    session.attach(CORPUS, "sid-main", cwd)
+    assert modes.mode_for(CORPUS, "orient") == "manual", "a session resumed after its end reports its mode again"
     session.detach(CORPUS, "sid-main", "ended")
     restart()
     session.attach(CORPUS, "sid-next", cwd)
