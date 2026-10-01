@@ -23,8 +23,10 @@ in the role's work folder with the corpus added, and passes its stdin, stdout an
 only the flags a session may choose (KEEP, KEEP_VALUE): the role's permission mode, sandbox, data rule, private read
 denies and permission hooks are thimble's, its own work goes unasked where thimble's own sessions of the role do
 theirs (UNASKED_ROLES), and the program's allowed tools, plugins, setting sources and MCP servers
-that run outside it are dropped. Its permission requests show on the run's chat (agent_session.host). A run holds at
-most MAX_SESSIONS sessions at once.
+that run outside it are dropped, as are its subagents' permission modes, hooks, memory and such servers (own_agents).
+Its words never name one of claude's commands (SUBCOMMANDS). On a stdin in stream-json, StdinFilter holds the same
+line against the Agent SDK's control requests. Its permission requests show on the run's chat (agent_session.host).
+A run holds at most MAX_SESSIONS sessions at once.
 
 Requests. On stdout a program writes JSON lines (agent_kit/thimble.py): `log` lines go into its thread, `output` is
 what the role returns, and `tool`, `ask` and `session` requests are answered on stdin. Any other line on stdout, and
@@ -89,6 +91,26 @@ KEEP_VALUE = ("--output-format", "--input-format", "--system-prompt", "--append-
               "--resume-session-at", "--resume-drops-turn", "--agents", "--json-schema")
 OWN_VALUE = ("--settings", "--add-dir", "--mcp-config", "--system-prompt-file", "--allowedTools", "--allowed-tools",
              "--permission-mode", "--permission-prompt-tool", "--plugin-dir", "--setting-sources", "--debug")
+# claude's other flags that take a value, dropped with it, so the value is not read as the prompt
+DROP_VALUE = ("--agent", "-n", "--name", "-r", "-d", "--debug-file", "--file", "--plugin-url", "--client-data-url",
+              "--autocompact", "--permission-prompts", "--system-prompt-snapshot", "--thinking-display",
+              "--append-system-prompt-file", "--remote-control-session-name-prefix", "--environment")
+OPTIONAL_VALUE = ("--debug", "-d", "--resume", "-r")  # whose value, when given, is the next word
+# claude's subcommands (`claude --help`): a program's words never start one in place of a session
+SUBCOMMANDS = ("agents", "attach", "auth", "auto-mode", "config", "doctor", "gateway", "help", "import", "install",
+               "kill", "logs", "mcp", "migrate-installer", "plugin", "plugins", "project", "respawn", "rm",
+               "setup-token", "stop", "ultrareview", "update", "upgrade")
+# what a subagent a program defines may not set: the permission mode and hooks are the analyst's, and memory is kept
+# in Claude Code's own folder
+AGENT_DROPPED = ("permissionMode", "hooks", "memory")
+# the control requests a program's session takes on its stdin in stream-json; any other is refused (StdinFilter)
+CONTROL_KEPT = ("initialize", "interrupt", "set_model", "set_max_thinking_tokens", "mcp_status", "get_context_usage",
+                "rewind_files", "mcp_reconnect", "mcp_toggle", "mcp_set_servers", "stop_task", "mirror_error",
+                "cancel_async_message", "end_session", "set_prompt_suggestions_paused")
+STDIN_DROPPED = ("update_environment_variables",)  # messages on a session's stdin that never reach it
+# claude answers a request of a subtype it does not know with an error naming the subtype, so a refused request is
+# sent on under this subtype
+CONTROL_REFUSED = "{subtype}, which thimble refuses since the permission mode, settings, plugins and login are the analyst's"
 
 
 class HarnessError(RuntimeError):
@@ -387,7 +409,9 @@ def _split(argv: list[str]) -> list[tuple[str, str | None]]:
         flag, eq, value = a.partition("=") if a.startswith("--") else (a, "", "")
         if eq:
             out.append((flag, value))
-        elif flag in KEEP_VALUE or flag in OWN_VALUE:
+        elif flag in OPTIONAL_VALUE and (i + 1 >= len(argv) or argv[i + 1].startswith("-")):
+            out.append((flag, None))
+        elif flag in KEEP_VALUE or flag in OWN_VALUE or flag in DROP_VALUE:
             out.append((flag, argv[i + 1] if i + 1 < len(argv) else ""))
             i += 1
         elif a.startswith("-"):
@@ -406,6 +430,121 @@ def _under(path: str, roots: list[Path]) -> bool:
     return any(real == r or r in real.parents for r in roots)
 
 
+def sdk_servers(servers: Any) -> dict[str, Any]:
+    """The MCP servers of `servers` ({name: config}) that run inside the program (the Agent SDK's `sdk` servers); one
+    with a command would run outside its box, where server.json can be read."""
+    if not isinstance(servers, dict):
+        return {}
+    return {str(n): c for n, c in servers.items() if isinstance(c, dict) and c.get("type") == "sdk"}
+
+
+def own_agents(agents: Any) -> dict[str, Any]:
+    """Subagents a program defines, as its sessions get them: without AGENT_DROPPED, and with only the MCP servers named
+    by their name or run inside the program (sdk_servers)."""
+    if not isinstance(agents, dict):
+        return {}
+    out: dict[str, Any] = {}
+    for name, spec in agents.items():
+        if not isinstance(spec, dict):
+            continue
+        spec = {k: v for k, v in spec.items() if k not in AGENT_DROPPED}
+        servers = spec.get("mcpServers")
+        if isinstance(servers, dict):
+            spec["mcpServers"] = sdk_servers(servers)
+        elif isinstance(servers, list):
+            spec["mcpServers"] = [s for s in servers if isinstance(s, str)
+                                  or (isinstance(s, dict) and s and len(sdk_servers(s)) == len(s))]
+        elif servers is not None:
+            spec.pop("mcpServers")
+        out[str(name)] = spec
+    return out
+
+
+def _json_or_file(value: str, roots: list[Path]) -> Any:
+    """`value` as JSON, or the JSON in the file it names when that file lies in `roots`; None otherwise."""
+    text = value
+    if not value.lstrip().startswith("{"):
+        if not _under(value, roots):
+            return None
+        try:
+            text = Path(value).read_text("utf-8")
+        except OSError:
+            return None
+    try:
+        return json.loads(text)
+    except ValueError:
+        return None
+
+
+class StdinFilter:
+    """A session's stdin in stream-json, passed on line by line: a control request whose subtype is not in
+    CONTROL_KEPT goes on renamed (CONTROL_REFUSED), so claude answers it with an error; the subagents of `initialize`
+    and the servers of `mcp_set_servers` keep only what own_agents and sdk_servers keep; a hook's answer loses an
+    `allow` that would approve a call in the analyst's place; STDIN_DROPPED messages are left out."""
+
+    def __init__(self) -> None:
+        self.parts: list[bytes] = []
+
+    def feed(self, chunk: bytes) -> bytes:
+        if b"\n" not in chunk:
+            self.parts.append(chunk)
+            return b""
+        first, *rest = chunk.split(b"\n")
+        last = rest.pop()
+        lines = [b"".join([*self.parts, first]), *rest]
+        self.parts = [last] if last else []
+        return b"".join(out + b"\n" for line in lines if (out := own_line(line)) is not None)
+
+    def flush(self) -> bytes:
+        rest, self.parts = b"".join(self.parts), []
+        return (own_line(rest) or b"") if rest else b""
+
+
+def _no_approval(answer: Any) -> Any:
+    """A hook's answer without a decision that approves the call."""
+    if not isinstance(answer, dict):
+        return answer
+    out = {k: v for k, v in answer.items() if not (k == "decision" and v == "approve")}
+    hso = out.get("hookSpecificOutput")
+    if isinstance(hso, dict):
+        out["hookSpecificOutput"] = {k: v for k, v in hso.items()
+                                     if not (k == "permissionDecision" and v == "allow")
+                                     and not (k == "decision" and isinstance(v, dict) and v.get("behavior") == "allow")}
+    return out
+
+
+def own_line(raw: bytes) -> bytes | None:
+    """One line of a session's stdin as StdinFilter passes it on; None to leave it out."""
+    if b'"type"' not in raw or not any(w in raw for w in (b"control_", *(t.encode() for t in STDIN_DROPPED))):
+        return raw
+    try:
+        msg = json.loads(raw)
+    except ValueError:
+        return raw
+    if not isinstance(msg, dict):
+        return raw
+    kind = msg.get("type")
+    if kind in STDIN_DROPPED:
+        return None
+    if kind == "control_request" and isinstance(msg.get("request"), dict):
+        req = msg["request"]
+        sub = str(req.get("subtype") or "")
+        if sub not in CONTROL_KEPT:
+            req = {"subtype": CONTROL_REFUSED.format(subtype=sub)}
+        elif sub == "initialize" and "agents" in req:
+            req = {**req, "agents": own_agents(req["agents"])}
+        elif sub == "mcp_set_servers":
+            req = {**req, "servers": sdk_servers(req.get("servers"))}
+        msg = {**msg, "request": req}
+    elif kind == "control_response" and isinstance(msg.get("response"), dict):
+        resp = msg["response"]
+        msg = {**msg, "response": {**resp, "response": _no_approval(resp.get("response"))}} if "response" in resp \
+            else msg
+    else:
+        return raw
+    return json.dumps(msg, ensure_ascii=False).encode("utf-8")
+
+
 def claude_argv(run: Run, argv: list[str]) -> tuple[list[str], Path, dict[str, str]]:
     """(the session's argv, the folder it runs in, its environment) for a session a program asked for with `argv`
     (module note, sessions)."""
@@ -419,13 +558,17 @@ def claude_argv(run: Run, argv: list[str]) -> tuple[list[str], Path, dict[str, s
     denied: list[str] = []
     appended: list[str] = []
     asked: dict[str, list[str]] = {}
-    for flag, value in _split(argv):
+    split = _split(argv)
+    streamed = ("--input-format", "stream-json") in split
+    for flag, value in split:
         if flag in KEEP and value is None:
             kept.append(flag)
         elif flag in ("--disallowedTools", "--disallowed-tools") and value is not None:
             denied += [t.strip() for t in value.replace(",", " ").split() if t.strip()]
         elif flag == "--append-system-prompt" and value is not None:
             appended.append(value)
+        elif flag == "--agents" and value:
+            kept += ["--agents", json.dumps(own_agents(_json_or_file(value, roots)), ensure_ascii=False)]
         elif flag in KEEP_VALUE and value is not None:
             kept += [flag, value]
         elif flag == "--system-prompt-file" and value and _under(value, roots):
@@ -441,15 +584,18 @@ def claude_argv(run: Run, argv: list[str]) -> tuple[list[str], Path, dict[str, s
                     asked.setdefault(k, []).extend(str(r) for r in perms[k])
         elif flag == "--mcp-config" and value:
             try:
-                servers = (json.loads(value).get("mcpServers") or {}) if value.strip().startswith("{") else {}
-            except (ValueError, AttributeError):
-                servers = {}
-            own = {n: s for n, s in servers.items() if isinstance(s, dict) and s.get("type") == "sdk"}
+                given = json.loads(value) if value.strip().startswith("{") else {}
+            except ValueError:
+                given = {}
+            own = sdk_servers(given.get("mcpServers") if isinstance(given, dict) else None)
             if own:
                 kept += ["--mcp-config", json.dumps({"mcpServers": own})]
         elif flag == "--add-dir" and value and _under(value, roots):
             kept += ["--add-dir", value]
-        elif flag == "" and value is not None:
+        elif flag == "" and value is not None and not streamed:
+            if value in SUBCOMMANDS:
+                raise HarnessError(f"a session's words may not start with `{value}`, which is one of claude's "
+                                   "commands. Send the prompt on stdin.")
             kept.append(value)
     mode = modes.mode_for(job.c, ROWS[job.role])
     permission_mode = modes.flag(mode)
@@ -530,7 +676,7 @@ async def session_route(ws: WebSocket) -> None:
             proc = await asyncio.create_subprocess_exec(*final, cwd=str(folder), env=env,
                                                         stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
                                                         stderr=asyncio.subprocess.PIPE, start_new_session=True)
-        except (OSError, userconf.ConfigError) as e:
+        except (OSError, userconf.ConfigError, HarnessError) as e:
             await ws.send_bytes(b"e" + f"thimble could not start the session: {e}\n".encode())
             await ws.send_text(json.dumps({"exit": 1}))
             await ws.close()
@@ -541,6 +687,8 @@ async def session_route(ws: WebSocket) -> None:
             while chunk := await stream.read(65536):
                 await ws.send_bytes(tag + chunk)
 
+        lines = StdinFilter() if ("--input-format", "stream-json") in _split(argv) else None
+
         async def feed() -> None:
             assert proc.stdin is not None
             while True:
@@ -548,9 +696,14 @@ async def session_route(ws: WebSocket) -> None:
                 if msg.get("type") == "websocket.disconnect":
                     raise WebSocketDisconnect()
                 if msg.get("bytes") is not None:
-                    proc.stdin.write(msg["bytes"])
-                    await proc.stdin.drain()
+                    data = msg["bytes"] if lines is None else lines.feed(msg["bytes"])
+                    if data:
+                        proc.stdin.write(data)
+                        await proc.stdin.drain()
                 elif msg.get("text") and json.loads(msg["text"]).get("eof"):
+                    if lines is not None and (rest := lines.flush()):
+                        proc.stdin.write(rest)
+                        await proc.stdin.drain()
                     proc.stdin.close()
                     return
 

@@ -563,3 +563,115 @@ def test_a_program_s_sessions_do_their_own_work_unasked_where_thimble_s_own_sess
     view = tmp_path / "views" / "v"
     dev = settings_of("dev", writes=(view,))
     assert f"Edit(/{view}/**)" in dev["permissions"]["allow"] and str(view) in dev["sandbox"]["filesystem"]["allowWrite"]
+
+
+def _session_argv(tmp_path, argv: list[str]) -> list[str]:
+    part = roles.Part("x", "orientation", tmp_path, tmp_path, {"command": ["true"]})
+    job = harness.Job(CORPUS, "orientation", "orient", "Orientation", {}, ("list_cards",), tmp_path / "work")
+    run = harness.Run(job, part, userconf.session(CORPUS, "orientation", sandbox=True), "t", "t.s")
+    return harness.claude_argv(run, argv)[0]
+
+
+def test_a_program_s_session_flags_never_set_what_is_the_analyst_s_nor_start_one_of_claude_s_commands(
+        tmp_path, workspaces_tmp, monkeypatch):
+    """A subagent a program defines loses its permission mode, hooks, memory and MCP servers that would run outside
+    the box; a dropped flag's value is not read as the prompt; words that name a claude command start no session."""
+    monkeypatch.setenv("THIMBLE_SANDBOX", "1")
+    agents = {"helper": {"description": "Helps.", "prompt": "Help.", "permissionMode": "bypassPermissions",
+                         "hooks": {"PreToolUse": []}, "memory": "user", "tools": ["Read"],
+                         "mcpServers": [{"evil": {"command": "cat", "args": ["server.json"]}}, "named",
+                                        {"own": {"type": "sdk", "name": "own"}}]}}
+    argv = _session_argv(tmp_path, ["--output-format", "stream-json", "--thinking-display", "summarized",
+                                    "--agents", json.dumps(agents), "--input-format", "stream-json", "stray"])
+    got = json.loads(argv[argv.index("--agents") + 1])["helper"]
+    assert got == {"description": "Helps.", "prompt": "Help.", "tools": ["Read"],
+                   "mcpServers": ["named", {"own": {"type": "sdk", "name": "own"}}]}
+    assert "summarized" not in argv and "stray" not in argv and "--thinking-display" not in argv
+    (tmp_path / "work").mkdir(exist_ok=True)
+    (tmp_path / "work" / "agents.json").write_text(json.dumps(agents))
+    from_file = _session_argv(tmp_path, ["-p", "--agents", str(tmp_path / "work" / "agents.json")])
+    assert "permissionMode" not in from_file[from_file.index("--agents") + 1]
+    assert "Say hi." in _session_argv(tmp_path, ["-p", "Say hi."])
+    for words in (["auth", "logout"], ["-p", "--", "plugin", "install", "x"], ["update"]):
+        with pytest.raises(harness.HarnessError, match="claude's commands"):
+            _session_argv(tmp_path, words)
+
+
+def test_a_session_s_stdin_refuses_the_sdk_s_requests_that_change_what_is_the_analyst_s():
+    """The permission mode, settings, plugins and environment stay the analyst's: such a control request reaches claude
+    renamed, so claude answers it with an error; subagents and servers keep only what runs in the program; a hook's
+    answer can deny or ask but not approve; every other line goes on byte for byte, however the chunks split it."""
+    def req(sub: str, **fields) -> bytes:
+        return json.dumps({"type": "control_request", "request_id": sub,
+                           "request": {"subtype": sub, **fields}}).encode() + b"\n"
+
+    user = b'{"type": "user", "message": {"role": "user", "content": "say control_ and \\u00e9"}}\n'
+    hook = {"type": "control_response", "response": {"subtype": "success", "request_id": "h1", "response": {
+        "decision": "approve", "hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "allow",
+                                                      "additionalContext": "kept"}}}}
+    deny = {"type": "control_response", "response": {"subtype": "success", "request_id": "h2", "response": {
+        "hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny"}}}}
+    stream = b"".join([
+        req("initialize", hooks=None, agents={"a": {"description": "d", "prompt": "p", "permissionMode": "plan"}}),
+        req("set_permission_mode", mode="bypassPermissions"), req("apply_flag_settings", settings={"hooks": {}}),
+        req("plugin_install", plugin="x"), req("interrupt"),
+        req("mcp_set_servers", servers={"evil": {"command": "cat"}, "own": {"type": "sdk", "name": "own"}}),
+        b'{"type": "update_environment_variables", "variables": {"ANTHROPIC_BASE_URL": "http://x"}}\n',
+        json.dumps(hook).encode() + b"\n", json.dumps(deny).encode() + b"\n", user, b'{"type": "user", "tail": 1}'])
+    filt = harness.StdinFilter()
+    out = b"".join(filt.feed(stream[i:i + 7]) for i in range(0, len(stream), 7)) + filt.flush()
+    lines = out.split(b"\n")
+    assert lines[-1] == b'{"type": "user", "tail": 1}' and user.rstrip(b"\n") in lines
+    msgs = [json.loads(line) for line in lines]
+    subs = [m["request"]["subtype"] for m in msgs if m["type"] == "control_request"]
+    assert subs[0] == "initialize" and subs[4] == "interrupt" and subs[5] == "mcp_set_servers"
+    assert all(s.startswith(f"{w}, which thimble refuses") for s, w in zip(subs[1:4], (
+        "set_permission_mode", "apply_flag_settings", "plugin_install")))
+    assert msgs[0]["request"]["agents"] == {"a": {"description": "d", "prompt": "p"}}
+    assert msgs[5]["request"]["servers"] == {"own": {"type": "sdk", "name": "own"}}
+    assert not any(m["type"] == "update_environment_variables" for m in msgs)
+    approved, denied = [m["response"]["response"] for m in msgs if m["type"] == "control_response"]
+    assert approved == {"hookSpecificOutput": {"hookEventName": "PreToolUse", "additionalContext": "kept"}}
+    assert denied["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+
+def test_an_sdk_program_s_session_gets_its_permission_mode_request_refused_through_thimble(
+        tmp_path, data_tmp, workspaces_tmp, active, unboxed, live_server, plugin_headers, monkeypatch):
+    """Through the shim and the server's session route: the SDK client's set_permission_mode and its subagents'
+    permission modes never reach claude as sent."""
+    base, server = live_server
+    stdin_log = tmp_path / "stdin.log"
+    fake = tmp_path / "claude"
+    fake.write_text(f"#!/bin/sh\nexec {sys.executable} {FAKE} \"$@\"\n")
+    fake.chmod(0o755)
+    monkeypatch.setattr(agent_session, "CLAUDE_BIN", str(fake))
+    monkeypatch.setenv("FAKE_CLAUDE_LOG", str(tmp_path / "claude.log"))
+    monkeypatch.setenv("FAKE_CLAUDE_STDIN", str(stdin_log))
+    program = '''from claude_agent_sdk import AgentDefinition, ClaudeSDKClient
+import thimble
+
+async def run(input):
+    helper = AgentDefinition(description="Helps.", prompt="Help.", permissionMode="bypassPermissions")
+    async with ClaudeSDKClient(options=thimble.options(agents={"helper": helper})) as client:
+        await client.set_permission_mode("bypassPermissions")
+    return "asked"
+'''
+    active.append(_extension(tmp_path, "pushy", {"orientation": {"description": "Pushes.", "sdk": "o.py"}},
+                             {"agents/orientation/o.py": program}))
+    r = httpx.post(f"{base}/api/tools/start_orientation", headers=plugin_headers(), timeout=60,
+                   json={"args": {"brief": "", "propose_views": False}, "workspace": CORPUS, "actor": "analyst"})
+    assert r.status_code == 200 and not r.json()["is_error"], r.text
+    end = time.monotonic() + 90
+    rec: dict = {}
+    while time.monotonic() < end:
+        rec = orientation.read_run(CORPUS) or {}
+        if rec.get("status") in ("done", "failed"):
+            break
+        time.sleep(0.2)
+    assert rec.get("status") == "done", rec
+    seen = [json.loads(line) for line in stdin_log.read_text().splitlines()]
+    reqs = [m["request"] for m in seen if m.get("type") == "control_request"]
+    init = next(q for q in reqs if q["subtype"] == "initialize")
+    assert init["agents"]["helper"].get("permissionMode") is None and init["agents"]["helper"]["prompt"] == "Help."
+    assert not any(q["subtype"] == "set_permission_mode" for q in reqs)
+    assert any(q["subtype"].startswith("set_permission_mode, which thimble refuses") for q in reqs)

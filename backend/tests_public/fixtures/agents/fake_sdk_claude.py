@@ -1,7 +1,7 @@
 """A stand-in `claude` for the Agent SDK's stream-json protocol: it answers the SDK's initialize request, replies to
 each user message with FAKE_CLAUDE_REPLY as its result, and writes its argv, folder and THIMBLE_SESSION to
-FAKE_CLAUDE_LOG (one JSON line per start). With -p and --output-format json it reads the prompt on stdin and prints one
-result object."""
+FAKE_CLAUDE_LOG (one JSON line per start), and each line it reads on stdin to FAKE_CLAUDE_STDIN when that is set. With
+-p and --output-format json it reads the prompt on stdin and prints one result object."""
 import json
 import os
 import sys
@@ -28,6 +28,9 @@ if "-p" in argv and "--output-format" in argv and argv[argv.index("--output-form
     sys.exit(0)
 
 for line in sys.stdin:
+    if os.environ.get("FAKE_CLAUDE_STDIN"):
+        with open(os.environ["FAKE_CLAUDE_STDIN"], "a", encoding="utf-8") as f:
+            f.write(line if line.endswith("\n") else line + "\n")
     try:
         msg = json.loads(line)
     except ValueError:
