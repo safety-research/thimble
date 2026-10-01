@@ -3628,7 +3628,8 @@ def _robust_pick(view: dict[str, Any], files: list[tuple[str, int, int]],
     (any when None). None for either when there is none, and nothing left out of one file."""
     removed = None
     by_path = {f[0]: f for f in files}
-    by_claim = [(g, [by_path[p] for p in match_all([g], list(by_path))]) for g in view["claims"]]
+    order = list(by_path)
+    by_claim = [(g, [by_path[p] for p in match_all([g], order)]) for g in view["claims"]]
     for g, hit in by_claim:
         head, _, base = g.rpartition("/")
         if head and _GLOB_CHARS.search(head) and not _GLOB_CHARS.search(base) and len(hit) >= 2:
