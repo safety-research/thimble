@@ -346,10 +346,12 @@ def _rows_from_jsonl(jsonl: Path, negatives: bool = False):
 
 
 def _jsonl_parts(jsonl: Path):
-    """(rows, covers) of the labels file, as _store_parts gives them for the store."""
+    """(rows, covers) of the labels file, as _store_parts gives them for the store. A clear line finds the rows on its
+    lines through `at`, so a run written as many cleared blocks reads in one pass."""
     model = {}
     analyst = {}
     covers: list = []
+    at: dict = {}  # path -> {line: the ref, or a list of the refs, of the classifier rows there}
     try:
         f = open(jsonl, "r", encoding="utf-8")
     except OSError:
@@ -371,9 +373,14 @@ def _jsonl_parts(jsonl: Path):
                     a, b = int(r.get("from") or 1), (2**62 if r.get("to") is None else int(r["to"]))
                 except (TypeError, ValueError):
                     continue
-                if r.get("clear"):
-                    for ref in [ref for ref, m in model.items() if m[0] == where and a <= (m[1] or 0) <= b]:
-                        del model[ref]
+                if r.get("clear") and (got := at.get(where)):
+                    span = range(a, b + 1) if b - a < len(got) else [n for n in got if a <= n <= b]
+                    for n in span:
+                        slot = got.pop(n, None)
+                        for ref in ([slot] if isinstance(slot, str) else slot or ()):
+                            m = model.get(ref)
+                            if m is not None and m[0] == where and m[1] == n:
+                                del model[ref]
                 covers = _trim(covers, where, a, b)
                 if r.get("cover") and r.get("value") is not None:
                     covers.append((where, a, b, str(r["value"]), r.get("source")))
@@ -385,8 +392,18 @@ def _jsonl_parts(jsonl: Path):
             path, n = _row_line(ref, r)
             if r.get("source") == "analyst":
                 analyst[ref] = (path, n, r.get("label"))
-            else:
-                model[ref] = (path, n, r.get("label"), r.get("source"), r.get("confidence"))
+                continue
+            model[ref] = (path, n, r.get("label"), r.get("source"), r.get("confidence"))
+            if path is not None and n:
+                got = at.setdefault(path, {})
+                slot = got.get(n)
+                if slot is None:
+                    got[n] = ref
+                elif isinstance(slot, str):
+                    if slot != ref:
+                        got[n] = [slot, ref]
+                elif ref not in slot:
+                    slot.append(ref)
     out = []
     for ref, (path, n, label, source, confidence) in model.items():
         a = analyst.get(ref)

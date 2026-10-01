@@ -342,3 +342,37 @@ def test_the_kernel_keeps_the_members_of_a_few_labels_at_once(tmp_path, monkeypa
         kernel_thimble._members(p)
     assert list(kernel_thimble._MEMBERS) == [str(files[0]), str(files[2])]
     kernel_thimble._MEMBERS.clear()
+
+
+def test_a_labels_file_of_many_cleared_blocks_reads_as_its_store_and_in_one_pass(tmp_path):
+    """A code label's run writes each block of records as a clear, its rows and a cover. Read from the file while its
+    store is behind, it gives the rows and covers the store gives, a rerun's clear dropping the rows it covers and the
+    analyst's verdicts staying, and it reads in about the time one pass takes."""
+    import time  # noqa: PLC0415
+
+    from app import labels_store  # noqa: PLC0415
+
+    lines: list[dict] = []
+    for first in range(1, 40_001, 1000):
+        last = first + 999
+        lines.append(labels_store.clear_row("turns.jsonl", first, last))
+        lines += [{"ref": f"turns.jsonl#L{n}", "label": "gui" if n % 2 else "shell", "source": "code"}
+                  for n in range(first, last + 1) if n % 5]
+        lines.append(labels_store.cover_row("turns.jsonl", first, last, "other", "code", "t"))
+    lines.append({"ref": "turns.jsonl#L12", "label": "shell", "source": "analyst"})
+    lines.append(labels_store.clear_row("turns.jsonl", 11, 20))
+    lines += [{"ref": "turns.jsonl#L13", "label": "gui", "source": "code"}, {"ref": "card:x", "label": "gui", "source": "code"}]
+    lines.append(labels_store.clear_row("turns.jsonl", 39_990))
+    jsonl = tmp_path / "k.jsonl"
+    jsonl.write_text("".join(json.dumps(r) + "\n" for r in lines))
+    t0 = time.monotonic()
+    rows, covers = kernel_thimble._jsonl_parts(jsonl)
+    took = time.monotonic() - t0
+    labels_store.rebuild_file(str(jsonl))
+    want_rows, want_covers = kernel_thimble._store_parts(jsonl.with_suffix(".sqlite"))
+    norm = lambda rs: sorted(json.dumps([p, n, lab, src, v, ref]) for p, n, lab, src, v, _c, ref in rs)  # noqa: E731
+    assert norm(rows) == norm(want_rows)
+    assert sorted(covers) == sorted(want_covers)
+    assert ("turns.jsonl", 12, None, None, "shell", None, "turns.jsonl#L12") in rows, "the verdict stays"
+    assert not any(r[6] in ("turns.jsonl#L11", "turns.jsonl#L39995") for r in rows), "the clears dropped them"
+    assert took < 5, took
