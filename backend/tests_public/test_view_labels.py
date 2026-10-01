@@ -401,3 +401,42 @@ async def test_marking_a_views_records_leaves_the_server_free_while_a_label_is_r
     assert time.monotonic() - t0 < 0.5, "the loop ran while the label was read"
     marks = await work
     assert set(marks) == set(_refs((1, 4, 8)))
+
+
+def test_a_context_of_many_labels_reads_each_label_once_and_parallel_reads_share_one(tmp_path, monkeypatch):
+    """Every records call and every marks request looks up each label that is on. A workspace with a dozen labels on
+    reads each one once, not once per call, and four marks requests that come at once read a label once between them."""
+    import threading  # noqa: PLC0415
+    import time  # noqa: PLC0415
+
+    kernel_thimble._MEMBERS.clear()
+    reads: list[str] = []
+    parts = kernel_thimble._jsonl_parts
+
+    def counted(jsonl):
+        reads.append(str(jsonl))
+        time.sleep(0.05)
+        return parts(jsonl)
+
+    monkeypatch.setattr(kernel_thimble, "_jsonl_parts", counted)
+    files = []
+    for i in range(12):
+        p = tmp_path / f"{i}.jsonl"
+        p.write_text(json.dumps({"ref": f"a.jsonl#L{i + 1}", "label": "x", "source": "code"}) + "\n")
+        files.append(p)
+    for _ in range(3):
+        for p in files:
+            assert kernel_thimble._members(p)[0].get(f"a.jsonl#L{files.index(p) + 1}") == "x"
+    assert len(reads) == len(files), "each label read once"
+
+    kernel_thimble._MEMBERS.clear()
+    reads.clear()
+    got: list = []
+    threads = [threading.Thread(target=lambda: got.append(kernel_thimble._members(files[0])[0].get("a.jsonl#L1")))
+               for _ in range(4)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert got == ["x"] * 4 and reads == [str(files[0])]
+    kernel_thimble._MEMBERS.clear()

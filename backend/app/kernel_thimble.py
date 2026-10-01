@@ -53,6 +53,7 @@ import os
 import numbers
 import re
 import sqlite3
+import threading
 import zlib
 from pathlib import Path
 
@@ -489,7 +490,10 @@ PROBE_ID = "test-label"
 PROBE_COLOUR = LABEL_COLOURS[1]
 # labels file -> (the files' signature, (_Values, {path: [(first, last, value)]}, {path})), the most recently used last
 _MEMBERS: dict = {}
-MEMBERS_KEPT = 8
+# above the labels any context holds: labels that do not all fit here are read again on every call
+MEMBERS_KEPT = 64
+_MEMBERS_LOCK = threading.Lock()  # guards _MEMBERS and _READING
+_READING: dict = {}  # labels file -> the lock held while one thread reads its members, which the others wait for
 DENSE_MIN = 1 / 16  # a file's line refs fill at least this share of its lines up to the last: one code per line
 
 
@@ -629,14 +633,30 @@ def _signature(*paths: Path) -> tuple:
 def _members(jsonl) -> tuple:
     """({ref: effective value}, {path: [(first, last, value)]}, {path}) of one label: its rows' values, its covers, and
     the files it left a value on. Read from its store when that is fresh, else its labels file, and kept until either
-    file changes (at most MEMBERS_KEPT labels), so a reader's lookups cost a lookup each."""
+    file changes (at most MEMBERS_KEPT labels), so a reader's lookups cost a lookup each. Threads that ask for the same
+    label at once wait for the first one's read."""
     jsonl = Path(jsonl)
-    db = jsonl.with_suffix(".sqlite")
-    sig = _signature(jsonl, db)
-    hit = _MEMBERS.pop(str(jsonl), None)
-    if hit is not None and hit[0] == sig:
-        _MEMBERS[str(jsonl)] = hit
-        return hit[1]
+    key = str(jsonl)
+    with _MEMBERS_LOCK:
+        reading = _READING.setdefault(key, threading.Lock())
+    with reading:
+        db = jsonl.with_suffix(".sqlite")
+        sig = _signature(jsonl, db)
+        with _MEMBERS_LOCK:
+            hit = _MEMBERS.pop(key, None)
+            if hit is not None and hit[0] == sig:
+                _MEMBERS[key] = hit
+                return hit[1]
+        members = _read_members(jsonl, db)
+        with _MEMBERS_LOCK:
+            _MEMBERS[key] = (sig, members)
+            while len(_MEMBERS) > MEMBERS_KEPT:
+                _READING.pop(gone := next(iter(_MEMBERS)), None)
+                del _MEMBERS[gone]
+        return members
+
+
+def _read_members(jsonl: Path, db: Path) -> tuple:
     rows, covers = _store_rows(db) if _store_fresh(jsonl, db) else _jsonl_parts(jsonl)
     values = _Values()
     paths = set()
@@ -662,9 +682,6 @@ def _members(jsonl) -> tuple:
         if c[3] is not None:
             spans.setdefault(c[0], []).append((int(c[1]), int(c[2]), str(c[3])))
             paths.add(str(c[0]))
-    _MEMBERS[str(jsonl)] = (sig, (values, spans, paths))
-    while len(_MEMBERS) > MEMBERS_KEPT:
-        _MEMBERS.pop(next(iter(_MEMBERS)))
     return values, spans, paths
 
 
