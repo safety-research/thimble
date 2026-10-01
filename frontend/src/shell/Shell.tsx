@@ -277,6 +277,7 @@ export function Shell({ ws }: { ws: string }) {
         }}
         onTabDrag={startDrag}
       />
+      <Untrusted ws={ws} />
       <div className="shell-body">
         {layout.chatOpen ? (
           <>
@@ -332,7 +333,6 @@ export function Shell({ ws }: { ws: string }) {
       <TourHost />
       <ServerDown />
       <NewVersion />
-      <Untrusted ws={ws} />
       {gone && <SessionGone gone={gone} />}
     </div>
   )
