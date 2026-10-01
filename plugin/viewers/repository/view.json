@@ -1,242 +1,52 @@
 {
   "name": "Repository",
   "description": "Several agent runs on one small library, read as a code forge shows them: any runs picked or compared issue by issue, pull requests, issues, discussions and agents in tabs filtered on every field, and a pull request's whole story with its commits, diffs, reviews and the file of each entry.",
-  "claims": [
-    "runs/*.json",
-    "runs/*.jsonl",
-    "runs/*.csv"
+  "scope": ["runs/*.json", "runs/*.jsonl", "runs/*.csv"],
+  "records": [
+    {"name": "event", "one": "one opening, push, review, comment, merge, close, reopen, post or sign-off", "fields": [
+      {"name": "at", "type": "time", "derived": "cleaned", "from": "ts, time, created_at, committed_at or submitted_at", "how": "in UTC, a time without an offset in the run's timezone"},
+      {"name": "hours", "type": "number", "derived": "cleaned", "from": "at", "how": "hours since the run started"},
+      {"name": "kind", "type": "category", "derived": "cleaned", "from": "type or event, else the export table", "how": "push read as commit, pr.merged as merge and so on"},
+      {"name": "action", "type": "category", "derived": "cleaned", "from": "kind, and a review's verdict", "how": "opened, pushed, merged and so on, a review by its verdict"},
+      {"name": "verdict", "type": "category", "derived": "cleaned", "from": "a review's state", "how": "in lower case, changes_requested as changes requested"}
+    ]},
+    {"name": "pull request", "one": "one pull request of a run, with its records", "fields": [
+      {"name": "state", "type": "category", "derived": "computed", "from": "its merge, close and reopen records", "how": "open, merged or closed"},
+      {"name": "area", "type": "category", "derived": "computed", "from": "labels or area, else the issue it fixes", "how": "the first label, else the issue's area"},
+      {"name": "closes", "type": "number", "derived": "cleaned", "from": "fixes, closes or linked_issue", "how": "the first number in free text"},
+      {"name": "to_merge", "type": "number", "derived": "computed", "from": "its opening and its merge", "how": "hours between them"},
+      {"name": "first_review", "type": "number", "derived": "computed", "from": "its opening and its first review", "how": "hours between them"},
+      {"name": "flags", "type": "list", "derived": "computed", "from": "its merge, reviews and pushes", "how": "merged by its author, merged over a change request, pushed after its last approval, or waiting for approvals"}
+    ]},
+    {"name": "issue", "one": "one issue of a run, with its records", "fields": [
+      {"name": "state", "type": "category", "derived": "computed", "from": "its close records and the pull requests that fix it", "how": "fixed once a pull request that fixes it merged"},
+      {"name": "area", "type": "category", "derived": "cleaned", "from": "labels or area", "how": "the first label"},
+      {"name": "origin", "type": "category", "derived": "computed", "from": "its opening and the run's start", "how": "backlog when opened before the run started, else found during the run"},
+      {"name": "fixed_by", "type": "number", "derived": "computed", "from": "the pull requests' closes", "how": "the merged pull request that fixes it"},
+      {"name": "prs", "type": "list", "derived": "computed", "from": "the pull requests' closes", "how": "the pull requests that fix it"},
+      {"name": "to_fix", "type": "number", "derived": "computed", "from": "its opening and the merge that fixed it", "how": "hours between them"},
+      {"name": "elsewhere", "type": "list", "derived": "computed", "from": "the issue's number and title", "how": "the same issue in each other run"}
+    ]},
+    {"name": "discussion", "one": "one thread of the board", "fields": [
+      {"name": "mentions", "type": "list", "derived": "cleaned", "from": "the posts' bodies", "how": "the #<n> numbers they name"}
+    ]},
+    {"name": "agent", "one": "one agent of a run", "fields": [
+      {"name": "partners", "type": "list", "derived": "computed", "from": "the reviews it gave", "how": "its approvals and change requests per author"}
+    ]},
+    {"name": "run", "one": "one run's folder", "fields": [
+      {"name": "started", "type": "time", "derived": "cleaned", "from": "the manifest's started, else the first record", "how": "in UTC"},
+      {"name": "hours", "type": "number", "derived": "computed", "from": "its records' times", "how": "hours from its start to its last record"},
+      {"name": "approvals", "type": "number", "derived": "cleaned", "from": "approvals, required_approvals or policy.approvals", "how": "the first number in free text"}
+    ]}
   ],
   "accepts": [
-    {
-      "form": "L<n>",
-      "means": "the record on line <n> of a run's file, shown in its pull request, issue, discussion or agent, or a manifest's line, which opens its run"
-    }
+    {"form": "L<n>", "means": "the record on line <n> of a run's file, shown in its pull request, issue, discussion or agent, or a manifest's line, which opens its run"}
   ],
   "units": [
-    {
-      "form": "<run>",
-      "means": "one run: its measures, with the view narrowed to it"
-    },
-    {
-      "form": "<run>/pull/<n>",
-      "means": "one pull request with its commits, reviews, comments and merge or close"
-    },
-    {
-      "form": "<run>/issues/<n>",
-      "means": "one issue with its comments and the pull requests that close it"
-    },
-    {
-      "form": "<run>/discussions/<n>",
-      "means": "one discussion, every post in time order"
-    },
-    {
-      "form": "<run>/agents/<name>",
-      "means": "one agent: its note, its activity and its review partners"
-    }
-  ],
-  "derived": [
-    {
-      "record": "pull request",
-      "field": "run",
-      "from": "the folder a file is in, and the manifest's run or id",
-      "how": "runs/<run>/"
-    },
-    {
-      "record": "pull request",
-      "field": "number",
-      "from": "number, a commit's or review's pull",
-      "how": "the first number in it"
-    },
-    {
-      "record": "pull request",
-      "field": "author",
-      "from": "actor, user, author",
-      "how": "user read as actor"
-    },
-    {
-      "record": "pull request",
-      "field": "opened",
-      "from": "ts, time, created_at, timestamp",
-      "how": "ISO 8601, epoch milliseconds or local time read as hours since the run started, a time without an offset in the manifest's timezone, else in UTC"
-    },
-    {
-      "record": "pull request",
-      "field": "merged by",
-      "from": "the merge's actor or user, or merged_by in pulls.csv",
-      "how": "who merged it"
-    },
-    {
-      "record": "pull request",
-      "field": "closes",
-      "from": "fixes, closes or linked_issue",
-      "how": "the first number, where it is free text"
-    },
-    {
-      "record": "pull request",
-      "field": "lines added and removed",
-      "from": "a push's diff or a commit's patch",
-      "how": "the lines it adds and removes"
-    },
-    {
-      "record": "pull request",
-      "field": "area",
-      "from": "labels or area, else the issue it fixes",
-      "how": "the first label",
-      "kind": "inferred"
-    },
-    {
-      "record": "pull request",
-      "field": "state",
-      "from": "its merge, close and reopen records",
-      "how": "open, merged or closed",
-      "kind": "inferred"
-    },
-    {
-      "record": "pull request",
-      "field": "reviews",
-      "from": "each reviewer's last verdict that is not a comment",
-      "how": "how many approved and how many asked for changes",
-      "kind": "inferred"
-    },
-    {
-      "record": "pull request",
-      "field": "time to merge",
-      "from": "its opening and its merge",
-      "how": "hours",
-      "kind": "inferred"
-    },
-    {
-      "record": "pull request",
-      "field": "flags",
-      "from": "its merge, reviews and pushes",
-      "how": "merged by its author, merged over a change request, pushed after its last approval, or waiting for approvals",
-      "kind": "inferred"
-    },
-    {
-      "record": "issue",
-      "field": "reason",
-      "from": "reason or state_reason",
-      "how": "closed where there is none"
-    },
-    {
-      "record": "issue",
-      "field": "state",
-      "from": "its close records and the pull requests that fix it",
-      "how": "fixed when a pull request that fixes it is merged",
-      "kind": "inferred"
-    },
-    {
-      "record": "issue",
-      "field": "origin",
-      "from": "its opening time and the run's start",
-      "how": "backlog when it was opened before the run started, else found during the run",
-      "kind": "inferred"
-    },
-    {
-      "record": "issue",
-      "field": "fixed by",
-      "from": "the pull requests' closes",
-      "how": "the merged pull request that fixes it",
-      "kind": "inferred"
-    },
-    {
-      "record": "issue",
-      "field": "same issue in other runs",
-      "from": "the issue's number and title",
-      "how": "the issue in each other run, with its state and pull requests",
-      "kind": "inferred"
-    },
-    {
-      "record": "event",
-      "field": "kind",
-      "from": "type or event, else the export table a row is in",
-      "how": "commit, review, comment, merge, close or reopen"
-    },
-    {
-      "record": "event",
-      "field": "action",
-      "from": "type or event, and a review's state",
-      "how": "opened, pushed, commented, merged, closed, reopened, posted or signed off, and a review by its verdict"
-    },
-    {
-      "record": "event",
-      "field": "actor",
-      "from": "actor, user, author, user.login in reviews.json",
-      "how": "user read as actor, and a review from a gone account as unknown"
-    },
-    {
-      "record": "event",
-      "field": "hours",
-      "from": "ts, committed_at, submitted_at, merged_at, closed_at",
-      "how": "as for opened, and a post with no time at the time of the line before it"
-    },
-    {
-      "record": "event",
-      "field": "verdict",
-      "from": "a review's state",
-      "how": "approved, changes requested or commented, in lower case"
-    },
-    {
-      "record": "event",
-      "field": "text",
-      "from": "body, text or message",
-      "how": "text read as body"
-    },
-    {
-      "record": "post",
-      "field": "thread",
-      "from": "thread_id",
-      "how": "its first number"
-    },
-    {
-      "record": "post",
-      "field": "title",
-      "from": "the first post's thread_title",
-      "how": "the discussion's title"
-    },
-    {
-      "record": "post",
-      "field": "mentions",
-      "from": "the body",
-      "how": "the #<n> numbers it names",
-      "kind": "inferred"
-    },
-    {
-      "record": "agent",
-      "field": "name",
-      "from": "the manifest's agents or team, and the agents/ transcripts",
-      "how": "the names in either"
-    },
-    {
-      "record": "agent",
-      "field": "note",
-      "from": "its transcript",
-      "how": "its last assistant text"
-    },
-    {
-      "record": "agent",
-      "field": "review partners",
-      "from": "the reviews",
-      "how": "per author it reviewed, its approvals and change requests",
-      "kind": "inferred"
-    },
-    {
-      "record": "run",
-      "field": "started",
-      "from": "the manifest's started, else the first record",
-      "how": "UTC"
-    },
-    {
-      "record": "run",
-      "field": "team size",
-      "from": "the manifest's agents or team",
-      "how": "how many agents"
-    },
-    {
-      "record": "run",
-      "field": "approvals needed",
-      "from": "approvals, required_approvals or policy.approvals",
-      "how": "the first number, where it is written as free text"
-    }
+    {"form": "<run>", "means": "one run: its measures, with the view narrowed to it"},
+    {"form": "<run>/pull/<n>", "means": "one pull request with its commits, reviews, comments and merge or close"},
+    {"form": "<run>/issues/<n>", "means": "one issue with its comments and the pull requests that close it"},
+    {"form": "<run>/discussions/<n>", "means": "one discussion, every post in time order"},
+    {"form": "<run>/agents/<name>", "means": "one agent: its note, its activity and its review partners"}
   ]
 }

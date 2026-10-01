@@ -2387,6 +2387,18 @@
 .view-pane-list-how {
   color: var(--text-secondary);
 }
+.view-pane-list-group {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+}
+.view-pane-list-head {
+  margin: 6px 8px 2px;
+  font: var(--type-label);
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
 .view-pane-list-rule {
   flex: none;
   margin: 4px 8px;

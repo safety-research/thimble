@@ -7,7 +7,7 @@ import { LabelChip } from '../chat/SurfaceChips'
 import { FilterChip } from '../components/FilterChip'
 import { Popover } from '../components/Menu'
 import { api } from '../lib/api'
-import type { Concept, ViewProblems, ViewShown } from '../lib/types'
+import type { Concept, ViewDerived, ViewProblems, ViewShown } from '../lib/types'
 import { readStorage, storageKey, writeStorage } from '../lib/workspace'
 import { globMatches, type LabelFilter } from './labels'
 import { fmtSize } from './Tree'
@@ -239,31 +239,37 @@ export function ResidueList({ notes, onPick }: { notes: ViewNotes; onPick: (ref:
   )
 }
 
-/** "Derived data" with how many fields the view's reader made rather than read, how many of them are inferred, and how
- * many labels it shows, which a click lists: the inferred fields first, each field with how and from what, then each
- * label with its description. */
+/** "Derived data" with how many fields the view's reader made rather than read, how many of them it computed, and how
+ * many labels it shows, which a click lists: the fields of each kind of record under its name, the computed ones first,
+ * each with how and from what, then each label with its description. */
 function DerivedData({ ws, shown, labels, name }: { ws: string; shown: ViewShown | null; labels: readonly Concept[]; name: string }) {
   const [at, setAt] = useState<HTMLButtonElement | null>(null)
   const [open, setOpen] = useState(false)
   const fields = shown?.derived ?? []
   if (!fields.length && !labels.length) return null
-  const inferred = fields.filter((d) => d.kind === 'inferred').length
-  const counts = [fields.length ? count(fields.length, 'field', 'fields') : '', inferred ? `${inferred.toLocaleString()} inferred` : '', labels.length ? count(labels.length, 'label', 'labels') : ''].filter(Boolean)
+  const computed = fields.filter((d) => d.kind === 'inferred').length
+  const counts = [fields.length ? count(fields.length, 'field', 'fields') : '', computed ? `${computed.toLocaleString()} computed` : '', labels.length ? count(labels.length, 'label', 'labels') : ''].filter(Boolean)
+  const groups = byRecord(fields)
   return (
     <>
       <button ref={setAt} type="button" className="view-pane-files" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
         Derived data: {counts.join(', ')}
       </button>
       <Popover anchor={at} open={open} onClose={() => setOpen(false)} label={`What ${name} derived`} className="view-pane-list">
-        {[...fields].sort((a, b) => Number(b.kind === 'inferred') - Number(a.kind === 'inferred')).map((d) => (
-          <div key={d.field} className="view-pane-list-row">
-            <span>
-              <span className="mono">{d.field}</span>
-              {d.kind === 'inferred' && <span className="view-pane-list-kind"> inferred</span>}
-              {d.from && <span className="view-pane-list-why"> from {d.from}</span>}
-            </span>
-            {d.how && <span className="view-pane-list-how">{d.how}</span>}
-          </div>
+        {groups.map(([record, ds]) => (
+          <section key={record} className="view-pane-list-group">
+            {(record || groups.length > 1) && <h4 className="view-pane-list-head">{record ? `Per ${record}` : 'Other fields'}</h4>}
+            {ds.map((d) => (
+              <div key={d.field} className="view-pane-list-row">
+                <span>
+                  <span className="mono">{d.field}</span>
+                  {d.kind === 'inferred' && <span className="view-pane-list-kind"> computed</span>}
+                  {d.from && <span className="view-pane-list-why"> from {d.from}</span>}
+                </span>
+                {d.how && <span className="view-pane-list-how">{d.how}</span>}
+              </div>
+            ))}
+          </section>
         ))}
         {fields.length > 0 && labels.length > 0 && <hr className="view-pane-list-rule" />}
         {labels.map((k) => (
@@ -275,4 +281,15 @@ function DerivedData({ ws, shown, labels, name }: { ws: string; shown: ViewShown
       </Popover>
     </>
   )
+}
+
+/** The derived fields by the kind of record that holds them, in the order the kinds first appear, the computed ones
+ * first in each; fields that name no kind form one group ''. */
+function byRecord(fields: readonly ViewDerived[]): [string, ViewDerived[]][] {
+  const out = new Map<string, ViewDerived[]>()
+  for (const d of fields) {
+    const k = d.record ?? ''
+    out.set(k, [...(out.get(k) ?? []), d])
+  }
+  return [...out].map(([k, ds]) => [k, [...ds].sort((a, b) => Number(b.kind === 'inferred') - Number(a.kind === 'inferred'))])
 }

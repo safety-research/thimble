@@ -37,10 +37,10 @@
 #   <channel>/<ts>), result, and msg, what it did.
 #
 # The records: every source becomes records with the same fields, which the page filters and colours by.
-#   source (alert, deploy, chat, ticket or agent), kind (fired or resolved; started, finished or rollback; message;
-#   opened, updated or closed; an agent's action), actor (the monitor, a person, a customer or an agent), service,
-#   severity (an alert's severity, a ticket's priority), outcome (ok, failed or held), incident, re (the record it
-#   answers), id and text.
+#   time (in UTC), source (alert, deploy, chat, ticket or agent), kind (fired or resolved; started, finished or
+#   rollback; message; opened, updated or closed; an agent's action), actor (the monitor, a person, a customer or an
+#   agent), service, severity (an alert's severity, a ticket's priority), outcome (ok, failed or held), incident,
+#   answers (the id of the record it answers), took (the seconds since that record), id and text.
 #
 # The cleaning:
 #   times       every clock becomes seconds since 1970: epoch milliseconds, epoch seconds in a string, ISO 8601 with or
@@ -61,10 +61,10 @@
 #   people      a login or a chat id becomes the name users.json gives, and a guest takes their profile's name
 #   non-records a chat channel's join notices and the monitor's start line are skipped
 #   links       an alert's resolves, a deploy's later events, a thread's replies, a ticket's later messages and what
-#               set an agent off become `re`, the record answered
+#               set an agent off become `answers`, the record answered
 #
 # The method: the index keeps every record as a row of small integers (time, file, line, each field's value as an
-# index into that field's names, the row `re` points at) in time order, with its id, the lines its record spans, and
+# index into that field's names, the row it answers) in time order, with its id, the lines its record spans, and
 # the byte offset of every line. A record's line is the one that holds its text, so a label, which reads a file line
 # by line, marks that line. `records` sends the rows the label filter keeps as columns, OVERVIEW_ROWS rows a fetch, and
 # the page asks for the next page until it has them all, so it picks days, zooms, filters and lays out lanes without
@@ -490,10 +490,11 @@ def _read(index, rows):
 
 def _record_of(index, i, text):
     row = index["rows"][i]
-    r = {"id": index["ids"][i], "at": datetime.fromtimestamp(row[T], timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}
+    r = {"id": index["ids"][i], "time": datetime.fromtimestamp(row[T], timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}
     r.update((f, index["names"][f][v]) for f, v in zip(FIELDS, row[3:RE], strict=True))
     if row[RE] >= 0:
-        r["re"] = index["ids"][row[RE]]
+        r["answers"] = index["ids"][row[RE]]
+        r["took"] = row[T] - index["rows"][row[RE]][T]
     r["text"] = text
     return {k: v for k, v in r.items() if v != ""}
 
@@ -549,7 +550,7 @@ def _overview(index, keep, start=0):
 
 
 def _strings(r):
-    return " ".join(_text(r, k) for k in r if isinstance(r.get(k), (str, int, float))).lower()
+    return " ".join(r[k] for k in r if isinstance(r[k], str)).lower()
 
 
 def _search(index, q):

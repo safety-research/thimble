@@ -1,11 +1,14 @@
 """Views: viewers written for how a corpus arranges its records, and the proposals they start as.
 
 A view is three files in `workspaces/<c>/extension/views/<slug>/`, the workspace's local extension (local_dir), written
-by the dev agent's session (dev.run_view): view.json {name, description, claims, unit, accepts, units, derived, libs,
+by the dev agent's session (dev.run_view): view.json {name, description, scope, unit, records, accepts, units, libs,
 built}, reader.py (the contract in view_host.py), and view.html, drawn in a sandboxed frame that loads nothing but the
-view's media route. `claims` are globs of the files the view opens, `unit` "file" for a file viewer (file_type_viewer),
-`accepts` the fragment forms it understands (`L<n>`), `units` its own `view:<slug>/<key>` units, `derived` the fields its
-reader made rather than read ({field, from, how}); `why` and `declares` are read for `description` and `units`.
+view's media route. `scope` are globs of the files the view opens (held as `claims`), `unit` "file" for a file viewer
+(file_type_viewer), `records` its kinds of record with the fields its reader made rather than read, each `derived`
+cleaned or computed with `from` and `how`, `accepts` the fragment forms it understands, each {form, means} cited
+`<file>#<form>`, and `units` the forms of its own units, each {form, means} cited `view:<slug>/<form>`. Older names are
+read too: `claims` for `scope`, a `derived` list of {field, from, how} beside `records`, `why` for `description` and
+`declares` for `units`.
 
 Code holds every view to three things the analyst can always see above it. Its residue (shown): each claimed file is
 read to the end by build_index or listed by the reader's hidden() with a why, a claim that matches no file is missing,
@@ -108,7 +111,7 @@ MEMO_MAX = 5000  # resolved locators kept in memory
 ERROR_MAX = 2000
 PROBLEMS_SHOWN = 20  # the lines a reader could not read that thimble lists beside the view (reader_problems)
 DERIVED_MAX = 100  # the derived fields a view lists
-DERIVED_CHARS = {"field": 80, "key": 80, "from": 300, "how": 600}
+DERIVED_CHARS = {"record": 80, "field": 80, "key": 80, "from": 300, "how": 600}
 INFERRED_KINDS = ("inferred", "computed")  # a derived field's `kind` for a value the files do not state
 WHY_CHARS = 300  # of why hidden() leaves a file out
 NOT_SHOWN_NAMED = 5  # the files a failed check names that the view neither read whole nor hid
@@ -464,22 +467,28 @@ def _cut(text: str, n: int) -> str:
 
 
 def _derived(v: Any) -> list[dict[str, str]]:
-    """[{field, key, from, how, kind}] from view.json's `derived` or a reader's derived(index): each with a field name,
-    the first entry of a field kept, `key` the key the field has in the reader's records where it differs ('' else),
-    `kind` "inferred" for a value the files do not state (a join, an estimate, a
-    classification), given as "inferred" or "computed", and "" otherwise. The inferred fields come first, each list in
-    its own order."""
-    out: list[dict[str, str]] = []
-    seen: set[str] = set()
+    """[{record, field, key, from, how, kind}] from view.json's `derived` or a reader's derived(index): each with a
+    field name, `record` the kind of record that holds it ('' when none is given), the first entry of a field of a
+    record kept and one that names no record left out where a record has the field, `key` the key the field has in the
+    reader's records where it differs ('' else), `kind` "inferred" for a value the files do not state (a join, an
+    estimate, a classification), given as "inferred" or "computed", and "" otherwise. The fields are grouped by record
+    in the order the records first appear, the inferred ones first in each group."""
+    given = []
     for x in v if isinstance(v, list) else []:
-        if not isinstance(x, dict):
-            continue
-        d = {k: _cut(" ".join(str(x.get(k) or "").split()), n) for k, n in DERIVED_CHARS.items()}
-        d["kind"] = "inferred" if str(x.get("kind") or "").strip().lower() in INFERRED_KINDS else ""
-        if d["field"] and d["field"] not in seen:
-            seen.add(d["field"])
+        if isinstance(x, dict):
+            d = {k: _cut(" ".join(str(x.get(k) or "").split()), n) for k, n in DERIVED_CHARS.items()}
+            d["kind"] = "inferred" if str(x.get("kind") or "").strip().lower() in INFERRED_KINDS else ""
+            if d["field"]:
+                given.append(d)
+    named = {d["field"] for d in given if d["record"]}
+    out: list[dict[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for d in given:
+        if (d["record"], d["field"]) not in seen and (d["record"] or d["field"] not in named):
+            seen.add((d["record"], d["field"]))
             out.append(d)
-    return sorted(out, key=lambda d: d["kind"] != "inferred")[:DERIVED_MAX]
+    order = {r: i for i, r in enumerate(dict.fromkeys(d["record"] for d in out))}
+    return sorted(out, key=lambda d: (order[d["record"]], d["kind"] != "inferred"))[:DERIVED_MAX]
 
 
 def _unit(v: Any) -> str | dict[str, str] | None:
@@ -506,13 +515,13 @@ def _libs(v: Any) -> list[str]:
 
 def _declared(raw: dict[str, Any]) -> list[Any]:
     """A view.json's derived fields as `derived` entries: its `derived` list, then each field of its `records` that is
-    `derived` "cleaned" or "computed", a computed one inferred."""
+    `derived` "cleaned" or "computed", with the record's name, a computed one inferred."""
     out = list(raw.get("derived")) if isinstance(raw.get("derived"), list) else []
     for rec in raw.get("records") if isinstance(raw.get("records"), list) else []:
         for f in rec.get("fields") if isinstance(rec, dict) and isinstance(rec.get("fields"), list) else []:
             if isinstance(f, dict) and f.get("derived") in ("cleaned", "computed") and f.get("name"):
-                out.append({"field": f["name"], "from": f.get("from") or "", "how": f.get("how") or "",
-                            "kind": "inferred" if f["derived"] == "computed" else ""})
+                out.append({"record": rec.get("name") or "", "field": f["name"], "from": f.get("from") or "",
+                            "how": f.get("how") or "", "kind": "inferred" if f["derived"] == "computed" else ""})
     return out
 
 
@@ -741,12 +750,14 @@ def source_problems(claims: Any, reader: str, html: str, libs: Any) -> list[str]
     return out
 
 
-def write_view(c: str, slug: str, *, name: str, description: str, claims: Any, accepts: Any = None, units: Any = None,
-               derived: Any = None, libs: Any = None, reader: str, html: str, unit: Any = None, records: Any = None,
-               compare: bool = False) -> dict[str, Any]:
+def write_view(c: str, slug: str, *, name: str, description: str, claims: Any = None, accepts: Any = None,
+               units: Any = None, derived: Any = None, libs: Any = None, reader: str, html: str, unit: Any = None,
+               records: Any = None, compare: bool = False, scope: Any = None) -> dict[str, Any]:
     """Write or replace a view's three files, validated (source_problems), and register it built (mark_built): a view
-    of thimble's own making, as the tests make theirs; a view ticket's session writes the files itself."""
+    of thimble's own making, as the tests make theirs; a view ticket's session writes the files itself. `scope` is
+    view.json's name for `claims`."""
     slug = _check_slug(slug)
+    claims = claims if claims is not None else scope
     reader_src = str(reader or "").replace("\r\n", "\n")
     html_src = str(html or "").replace("\r\n", "\n")
     problems = source_problems(claims, reader_src, html_src, libs)
@@ -2696,7 +2707,7 @@ def gate_lines(report: dict[str, Any]) -> list[str]:
                      + f"{ns['count'] - ns['unexplained']} hidden with a why"
                      + (f", {len(cov['missing'])} missing" if cov.get("missing") else "")
                      + (f", {cov['unplaced']['count']} records not placed" if (cov.get("unplaced") or {}).get("count") else "")
-                     + "; derived fields: " + (", ".join(d["field"] for d in cov["derived"]) or "none"))
+                     + "; derived fields: " + (", ".join(dict.fromkeys(d["field"] for d in cov["derived"])) or "none"))
     for p in report.get("problems") or []:
         lines.append(f"problem: {p}")
     if report.get("traceback"):
@@ -3659,7 +3670,8 @@ DERIVED_NAMED = 40  # unlisted fields a note names
 _POSITION_KEYS = {"ref", "refs", "line", "lines", "path", "file", "key", "anchor", "offset", "index", "idx", "n", "id",
                   "uid", "row", "pos", "position", "order", "rank", "i", "k", "seq"}
 _KEY_SUFFIXES = ("_key", "_idx", "_index", "_pos", "_row", "_order", "_rank")
-_COUNT_NAME = re.compile(r"(^|_)(n|num|count|counts|total|totals|size|len|length)(_|$)|^n[A-Z]|Count$|^(num|count)[A-Z]")
+_COUNT_NAME = re.compile(r"(^|[_\s-])(n|num|count|counts|total|totals|size|len|length)([_\s-]|$)"
+                         r"|^n[A-Z]|Count$|^(num|count)[A-Z]")
 # values a reader puts in for a missing one
 _DEFAULTS = {"", "-", "?", "—", "unknown", "none", "null", "n/a", "na", "other", "missing", "(none)", "(unknown)"}
 
