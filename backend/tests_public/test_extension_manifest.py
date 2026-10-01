@@ -155,3 +155,15 @@ def await_refresh(c: str) -> None:
     import asyncio
 
     asyncio.run(extensions.refresh(c))
+
+
+def test_a_view_the_dev_agent_built_can_be_copied_into_an_extension(tmp_path):
+    """A generated view's view.json carries the stamp thimble wrote when it passed its checks (views.mark_built), and
+    copying its folder into an extension is how a view is shared."""
+    root = tmp_path / "shared"
+    _write(root, "extension.json", {"name": "shared", "version": "1"})
+    _write(root, "views/tally/view.json", {"name": "Tally", "description": "Each tally line.", "claims": ["*.jsonl"],
+                                           "accepts": [], "units": [], "libs": [], "built": "2026-10-01T00:00:00Z",
+                                           "version": "abc123def456"})
+    _write(root, "views/tally/view.html", "<div></div>")
+    assert _problems(root) == []
