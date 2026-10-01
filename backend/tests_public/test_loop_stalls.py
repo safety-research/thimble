@@ -155,6 +155,36 @@ def test_the_event_log_is_read_on_from_where_it_was_left(workspaces_tmp, monkeyp
         "a log written again is read from its start"
 
 
+def test_a_record_another_process_appends_right_after_ours_is_seen(workspaces_tmp, monkeypatch):
+    """A record another process appends just after one of this process's own is still seen: the next seq follows it,
+    so the stream's replay never drops a record as one already sent."""
+    import asyncio
+    import json
+
+    from app import investigation
+
+    c = "mini"
+    real = investigation._append_line
+
+    def then_another(path, obj):
+        end = real(path, obj)
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(json.dumps({"type": "chat", "chat": "other", "seq": obj["seq"] + 1}) + "\n")
+        return end
+
+    async def emit_one() -> None:
+        investigation.emit(c, investigation.MAIN, {"type": "chat", "chat": "x"})
+
+    asyncio.run(emit_one())
+    monkeypatch.setattr(investigation, "_append_line", then_another)
+    asyncio.run(emit_one())
+    monkeypatch.setattr(investigation, "_append_line", real)
+    asyncio.run(emit_one())
+    log = investigation.inv_dir(c, investigation.MAIN) / "events.jsonl"
+    seqs = [json.loads(line)["seq"] for line in log.read_text().splitlines()]
+    assert len(seqs) == len(set(seqs)) and seqs == sorted(seqs), seqs
+
+
 def test_a_chat_read_again_is_not_parsed_again(workspaces_tmp, monkeypatch):
     """The browser reads the open chat again on each of its records: the route answers the log's records as read_events
     reads them, NaN as null, and a reload parses only the records added since the last."""

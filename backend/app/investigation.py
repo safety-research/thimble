@@ -22,7 +22,7 @@ from fastapi import APIRouter, HTTPException, Request
 from sse_starlette import EventSourceResponse, ServerSentEvent
 
 from . import config
-from .ledger import append_jsonl, write_json_once
+from .ledger import write_json_once
 
 log = logging.getLogger("thimble.investigation")
 router = APIRouter()
@@ -137,7 +137,7 @@ def _size(path: Path) -> int:
 _subscribers: dict[tuple[str, str], set[asyncio.Queue]] = {}  # (workspace, investigation id) -> queues
 EVENTS_POLL_S = 3.0  # how often an idle SSE subscriber re-reads events.jsonl for another process's events
 _seq: dict[tuple[str, str], int] = {}  # next seq per investigation; recounted from events.jsonl when unknown
-_left: dict[tuple[str, str], int] = {}  # the size events.jsonl had after this process's last append to it
+_left: dict[tuple[str, str], int] = {}  # the offset just after this process's last record in events.jsonl
 _RESET = object()  # queued to a subscriber when the workspace's log was replaced (reset_streams)
 
 
@@ -198,19 +198,20 @@ def _next_seq(key: tuple[str, str], path: Path) -> int:
     return n
 
 
-def _append_line(path: Path, obj: dict) -> None:
-    """append_jsonl, healing a torn tail first, so a new record is not glued onto a fragment left by a crash mid-append.
-    """
+def _append_line(path: Path, obj: dict) -> int:
+    """The record appended as append_jsonl writes it, after a newline when the file ends in a torn line (a crash
+    mid-append), so it is not glued onto that fragment. Returns the offset just after the record: the file's size unless
+    another process appended after it."""
     try:
         with open(path, "rb") as f:
             f.seek(-1, 2)
             torn = f.read(1) != b"\n"
     except OSError:  # no file yet, or an empty one (seek(-1) past the start): nothing to heal
         torn = False
-    if torn:
-        with open(path, "ab") as f:
-            f.write(b"\n")
-    append_jsonl(path, obj)
+    with open(path, "ab") as f:
+        f.write((b"\n" if torn else b"") + (json.dumps(obj, ensure_ascii=False) + "\n").encode("utf-8"))
+        f.flush()
+        return os.lseek(f.fileno(), 0, os.SEEK_CUR)
 
 
 def emit(c: str, inv_id: str, event: dict) -> None:
@@ -220,8 +221,7 @@ def emit(c: str, inv_id: str, event: dict) -> None:
     d = _existing(c, inv_id)
     key = (c, inv_id)
     ev = {**event, "ts": _now(), "seq": _next_seq(key, d / "events.jsonl")}
-    _append_line(d / "events.jsonl", ev)
-    _left[key] = _size(d / "events.jsonl")
+    _left[key] = _append_line(d / "events.jsonl", ev)
     for q in _subscribers.get(key, ()):
         q.put_nowait(ev)
 
