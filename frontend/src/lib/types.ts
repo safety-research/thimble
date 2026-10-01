@@ -504,7 +504,8 @@ export interface TimelineDataset {
 
 /** `GET /ws/{c}/views/{slug}/problems`: the lines of its files a view's reader could not read, the first few of them. */
 export interface ViewProblems {
-  count: number
+  /** null for one file's when the reader did not list them all, so the file's count is not known */
+  count: number | null
   examples: { ref: string; why: string }[]
 }
 

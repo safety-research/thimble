@@ -1,17 +1,17 @@
 // A view picked in the views bar: the corpus's view drawing its files in its sandboxed frame (ViewerFrame) at the place a
-// ref names, with Raw one click away when it reads one file. Under the name, the files it reads (a click lists them, and
-// a file picked opens in Raw), then thimble's notes on the view (ViewChrome): what it leaves out, a line that opens the
-// list of it under the head, and what it derived. A view that fails says so with Raw beside it. While a Files label
-// filter is set, the head shows it as a chip that clears it, with how many records the filter hides in the view. At
-// the head's right end, for a view of one file, Open in (the other views that claim the file shown, and the File
-// browser) and the mode switch, then the mark of the review of the view's pictures (ReviewMark).
+// ref names, with Raw one click away when it reads one file. Under the name, one quiet line of thimble's notes on the
+// view (ViewChrome ViewHeadLine): the files it reads (a click lists them, and a file picked opens in Raw), what it leaves
+// out, which opens the list of it under the head, and what it derived. The view draws its own label controls, and
+// thimble draws none in the head. A view that fails says so with Raw beside it. While a Files label filter is set, the
+// head shows it as a chip that clears it, with how many records the filter hides in the view. At the head's right end,
+// for a view of one file, Open in (the other views that claim the file shown, and the File browser) and the mode switch,
+// then the mark of the review of the view's pictures (ReviewMark).
 // The pane keeps the version of the view it opened (usePinnedView): a newer one, from a change, the review or the
 // orientation, never reloads under the analyst. The head says Updated with Reload, which loads it where they were: the
 // element they picked, the scroll positions, the fields and the label filter. Undo in the review's mark loads at once.
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Button, Segmented } from '../components/Button'
 import { CheckMark } from '../components/CheckMark'
-import { Popover } from '../components/Menu'
 import { api } from '../lib/api'
 import { bus } from '../lib/bus'
 import { refreshProposals } from '../lib/proposals'
@@ -25,7 +25,7 @@ import { inferKind } from './params'
 import { Reader, ViewFailed } from './Reader'
 import { kindIn, useFolderStore } from './Tree'
 import { useFilesFilter, type FilesLabels } from './useLabels'
-import { ResidueList, useResidueOpen, useShownLabels, useViewNotes, ViewFilter, ViewNotesLine } from './ViewChrome'
+import { ResidueList, useResidueOpen, useShownLabels, useViewNotes, ViewFilter, ViewHeadLine } from './ViewChrome'
 import { ViewerFrame, type ViewLabelActions, type ViewQuote } from './ViewerFrame'
 import { usePinnedView, ViewUpdated } from './viewVersion'
 import type { BuiltView } from './ViewsBar'
@@ -46,8 +46,6 @@ interface Props {
   onQuoteMissing?: () => void
   labels: FilesLabels
   onMode?: (title: string) => void
-  /** before the name: thimble's own label control while the Labels sidebar is hidden (LabelsLead) */
-  lead?: ReactNode
   /** the labels that mark the view's files, which its page lists first */
   first?: ReadonlySet<string>
   /** open the label editor in the Labels sidebar beside the view, on a label or on a new one with null */
@@ -58,7 +56,7 @@ interface Props {
   onClearQuery?: () => void
 }
 
-export function ViewPane({ ws, view, path, picked, kind, targetRef, quote, onQuoteMissing, labels, onMode, lead, first, onEditLabel, query, onClearQuery }: Props) {
+export function ViewPane({ ws, view, path, picked, kind, targetRef, quote, onQuoteMissing, labels, onMode, first, onEditLabel, query, onClearQuery }: Props) {
   const [mode, setMode] = useState<'view' | 'raw'>('view')
   // a file or line picked in the head, which Raw shows in place of `path`
   const [rawAt, setRawAt] = useState<{ path: string; ref?: string } | null>(null)
@@ -113,6 +111,7 @@ export function ViewPane({ ws, view, path, picked, kind, targetRef, quote, onQuo
   const notes = useViewNotes(ws, view.slug, pin.pinned || undefined)
   const shownLabels = useShownLabels(labels, view.claims)
   const [residueOpen, toggleResidue] = useResidueOpen(ws, view.slug)
+  const files = view.files ?? (view.first_file ? [view.first_file] : [])
   const pickRef = (ref: string) => {
     const p = refPath(ref) ?? ref
     showRaw(p === ref ? { path: p } : { path: p, ref })
@@ -120,14 +119,18 @@ export function ViewPane({ ws, view, path, picked, kind, targetRef, quote, onQuo
   return (
     <div className="view-pane">
       <div className="view-pane-head">
-        {lead}
         <div className="view-pane-title">
           <span className="view-pane-name">{view.name}</span>
-          <span className="view-pane-sub">
-            <ViewFiles view={view} current={mode === 'raw' ? rawPath : null} onPick={(f) => showRaw({ path: f })} />
-            {mode === 'raw' && rawPath && (view.n_files ?? 0) > 1 && <span className="view-pane-file mono">{rawPath}</span>}
-            <ViewNotesLine ws={ws} name={view.name} notes={notes} shownLabels={shownLabels} residueOpen={residueOpen} onResidue={toggleResidue} />
-          </span>
+          <ViewHeadLine
+            ws={ws}
+            name={view.name}
+            notes={notes}
+            shownLabels={shownLabels}
+            residueOpen={residueOpen}
+            onResidue={toggleResidue}
+            files={{ list: files, n: view.n_files ?? files.length, current: mode === 'raw' ? rawPath : null, onPick: (f) => showRaw({ path: f }) }}
+            after={mode === 'raw' && rawPath && (view.n_files ?? 0) > 1 ? <span className="view-pane-file mono">{rawPath}</span> : undefined}
+          />
         </div>
         {pin.stale && mode === 'view' && <ViewUpdated onReload={reload} className="view-pane-updated" />}
         {filter && filterLabel && <ViewFilter ws={ws} filter={filter} name={filterLabel.name} hidden={mode === 'view' ? hidden : null} className="view-pane-filter" />}
@@ -160,39 +163,6 @@ export function ViewPane({ ws, view, path, picked, kind, targetRef, quote, onQuo
         )}
       </div>
     </div>
-  )
-}
-
-/** The files a view reads, in its head: their count, or the file's name when it reads one, which a click lists them
- * under; a file picked there opens in Raw. */
-function ViewFiles({ view, current, onPick }: { view: BuiltView; current: string | null; onPick: (path: string) => void }) {
-  const [at, setAt] = useState<HTMLButtonElement | null>(null)
-  const [open, setOpen] = useState(false)
-  const files = view.files ?? (view.first_file ? [view.first_file] : [])
-  const n = view.n_files ?? files.length
-  if (!n) return null
-  return (
-    <>
-      <button ref={setAt} type="button" className="view-pane-files" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
-        {n === 1 ? files[0] : `${n.toLocaleString()} files`}
-      </button>
-      <Popover anchor={at} open={open} onClose={() => setOpen(false)} label={`The files ${view.name} reads`} className="view-pane-list">
-        {files.map((f) => (
-          <button
-            key={f}
-            type="button"
-            className={'view-pane-list-item mono' + (f === current ? ' is-current' : '')}
-            onClick={() => {
-              setOpen(false)
-              onPick(f)
-            }}
-          >
-            {f}
-          </button>
-        ))}
-        {n > files.length && <span className="view-pane-list-more">and {(n - files.length).toLocaleString()} more</span>}
-      </Popover>
-    </>
   )
 }
 

@@ -556,6 +556,26 @@
   border-top: 1px solid var(--border-subtle);
   background: var(--bg-panel);
 }
+/* beside a view built without label controls: the offer to add them, under the pane's head, its text on the rows' left
+   edge */
+.files-labels-note {
+  flex: none;
+  display: flex;
+  padding: 2px 0 6px;
+}
+.files-labels-note .btn {
+  margin-left: -1px;
+  color: var(--text-secondary);
+}
+.files-labels-note-busy {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 24px;
+  padding-left: 6px;
+  font: var(--type-ui-sm);
+  color: var(--text-secondary);
+}
 /* beside a view the sidebar is the Labels pane alone, from the top, on the sidebar's own paper */
 .files-side-labels .files-labels {
   flex: 1;
@@ -2276,12 +2296,13 @@
   flex-direction: column;
   padding: 20px 24px;
 }
-/* beside the Labels sidebar the mode switch wraps under the name, which keeps at least 180px */
+/* the view's name over one quiet line of thimble's notes, the head's controls level with the pair at its right end;
+   beside the Labels sidebar the controls wrap under the name, which keeps at least 180px */
 .view-pane-head {
   flex: none;
   display: flex;
   flex-wrap: wrap;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 8px 16px;
   padding-bottom: 14px;
@@ -2293,13 +2314,6 @@
   gap: 2px;
   min-width: 0;
 }
-/* with the Labels sidebar hidden, thimble's label control that shows it stands before the view's name, its glyph on the
-   head's left edge */
-.view-pane-side-show.btn {
-  flex: none;
-  margin: 0 -4px 0 -7px;
-  color: var(--text-tertiary);
-}
 /* a name longer than that keeps one line and ends in an ellipsis, and a path breaks inside a word where it must, so
    neither runs past the head */
 .view-pane-name {
@@ -2309,13 +2323,18 @@
   font: 500 15px / 1.35 var(--font-body);
   color: var(--text-primary);
 }
-/* under the name: the files the view reads, the file Raw shows, and what the view leaves out, all in the same ink */
+/* under the name: the files the view reads, the file Raw shows, what the view leaves out and what it derived, all in
+   the same ink, apart by dots */
 .view-pane-sub {
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
-  gap: 2px 12px;
+  gap: 2px 6px;
   min-width: 0;
+}
+.view-pane-dot {
+  font: var(--type-ui-sm);
+  color: var(--text-tertiary);
 }
 .view-pane-file {
   overflow-wrap: break-word;
@@ -2341,10 +2360,6 @@
   color: var(--text-secondary);
   font-style: italic;
 }
-.view-pane-residue-none {
-  font: var(--type-ui-sm);
-  color: var(--text-tertiary);
-}
 /* what a view leaves out, listed under its head by kind; it scrolls past a few rows so the page keeps the pane */
 .view-pane-residue-list {
   flex: none;
@@ -2358,11 +2373,13 @@
   border-top: 1px solid var(--border-hairline);
   border-bottom: 1px solid var(--border-hairline);
 }
+/* each section hangs its rows' padding left of the list's edge, so their text lines up with the head's */
 .view-pane-residue-list section {
   flex: 1 1 240px;
   min-width: 0;
   display: flex;
   flex-direction: column;
+  margin-left: -8px;
 }
 .view-pane-residue-list h4 {
   margin: 2px 8px 2px;

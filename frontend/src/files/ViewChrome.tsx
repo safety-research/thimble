@@ -1,8 +1,9 @@
-// What thimble draws above every view's page, outside its frame: the view's residue, a line that opens the list of what
-// it leaves out (ResidueList) under the head, which says so when nothing is, the count of the fields its reader
-// derived and the labels it shows (DerivedData), which a click lists, and the label filter with how many records it
-// hides (ViewFilter).
-import { useCallback, useEffect, useMemo, useState } from 'react'
+// What thimble draws above every view's page, outside its frame: one quiet line under the view's name (ViewHeadLine)
+// with the files it reads, what it leaves out, which a click opens as the list under the head (ResidueList), and the
+// count of the fields its reader derived and the labels it shows (DerivedData), which a click lists; and the label
+// filter with how many records it hides (ViewFilter). A file viewer's line says only what it leaves out of the file it
+// shows.
+import { Fragment, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { LabelChip } from '../chat/SurfaceChips'
 import { FilterChip } from '../components/FilterChip'
 import { Popover } from '../components/Menu'
@@ -18,8 +19,9 @@ export interface ViewNotes {
   shown: ViewShown | null
 }
 
-/** The view's reader problems and what it does not show and derived, at `version`, read again when either changes. */
-export function useViewNotes(ws: string, slug: string, version?: string): ViewNotes {
+/** The view's reader problems and what it does not show and derived, at `version`, read again when either changes;
+ * with `path`, of that one file, as a file viewer shows it. */
+export function useViewNotes(ws: string, slug: string, version?: string, path?: string): ViewNotes {
   const [problems, setProblems] = useState<ViewProblems | null>(null)
   const [shown, setShown] = useState<ViewShown | null>(null)
   useEffect(() => {
@@ -27,17 +29,17 @@ export function useViewNotes(ws: string, slug: string, version?: string): ViewNo
     setProblems(null)
     setShown(null)
     api
-      .viewProblems(ws, slug, version)
+      .viewProblems(ws, slug, version, path)
       .then((p) => alive && setProblems(p))
       .catch(() => undefined)
     api
-      .viewShown(ws, slug, version)
+      .viewShown(ws, slug, version, path)
       .then((s) => alive && setShown(s))
       .catch(() => undefined)
     return () => {
       alive = false
     }
-  }, [ws, slug, version])
+  }, [ws, slug, version, path])
   return { problems, shown }
 }
 
@@ -62,9 +64,10 @@ export function ViewFilter({ ws, filter, name, hidden, className }: { ws: string
   )
 }
 
-/** Whether ViewNotesLine draws anything: once the view's notes have come, it always says what the view leaves out. */
-export function hasNotes(notes: ViewNotes, shownLabels: readonly Concept[]): boolean {
-  return !!(notes.shown || notes.problems?.count || shownLabels.length)
+/** Whether a file viewer's ViewHeadLine draws anything: what it leaves out of the file, its derived fields or the
+ * labels it shows. */
+export function fileLineShows(notes: ViewNotes, shownLabels: readonly Concept[]): boolean {
+  return hasResidue(residueOf(notes)) || !!notes.shown?.derived.length || shownLabels.length > 0
 }
 
 type ResidueFile = ViewShown['not_shown']['files'][number]
@@ -92,8 +95,8 @@ export function residueOf(notes: ViewNotes): Residue {
     hidden: files.filter((f) => !!f.why),
     hiddenCount: (ns?.count ?? 0) - (ns?.unexplained ?? 0),
     missing: notes.shown?.missing ?? [],
-    problems: notes.problems?.count ? notes.problems : null,
-    unplaced: notes.shown?.unplaced?.count ? notes.shown.unplaced : null,
+    problems: notes.problems && (notes.problems.count ?? notes.problems.examples.length) ? notes.problems : null,
+    unplaced: notes.shown?.unplaced && (notes.shown.unplaced.count ?? notes.shown.unplaced.examples.length) ? notes.shown.unplaced : null,
   }
 }
 
@@ -124,6 +127,40 @@ export function useResidueOpen(ws: string, slug: string): [boolean, () => void] 
   return [open, toggle]
 }
 
+/** "1 unreadable line", "3 unreadable files", and "Unreadable lines" while the count is not known */
+function unreadable(p: ViewProblems): string {
+  const what = wholeFiles(p) ? 'file' : 'line'
+  return p.count == null ? `Unreadable ${what}s` : `${p.count.toLocaleString()} unreadable ${p.count === 1 ? what : `${what}s`}`
+}
+
+/** What a view leaves out, in a few words each, in the order the list under the head gives them. Of a whole view: the
+ * files not read, those hidden, those missing, the records not placed and the unreadable lines or files. Of one file
+ * (a file viewer): whether it is hidden or read only in part, its records not placed and its unreadable lines. */
+export function residueWords(notes: ViewNotes, file = false): string[] {
+  const r = residueOf(notes)
+  const out: string[] = []
+  if (file) {
+    const own = notes.shown?.not_shown.files[0]
+    if (own) out.push(own.why ? 'Hidden' : 'Partly read')
+  } else {
+    if (r.unreadCount) out.push(`${r.unreadCount.toLocaleString()} not read`)
+    if (r.hiddenCount) out.push(`${r.hiddenCount.toLocaleString()} hidden`)
+    if (r.missing.length) out.push(`${r.missing.length.toLocaleString()} missing`)
+  }
+  if (r.unplaced) out.push(r.unplaced.count == null ? 'Records not placed' : `${count(r.unplaced.count, 'record', 'records')} not placed`)
+  if (r.problems) out.push(unreadable(r.problems))
+  return out
+}
+
+interface FilesProps {
+  /** the files it reads, the first of them, and how many there are */
+  list: readonly string[]
+  n: number
+  /** the file Raw shows, marked in the list */
+  current: string | null
+  onPick: (path: string) => void
+}
+
 interface LineProps {
   ws: string
   name: string
@@ -132,43 +169,76 @@ interface LineProps {
   /** the residue list is open */
   residueOpen: boolean
   onResidue: () => void
+  /** a corpus view's files, first on the line */
+  files?: FilesProps
+  /** after the files, such as the file Raw shows */
+  after?: ReactNode
+  /** a file viewer's line, of the one file it shows */
+  file?: boolean
 }
 
-/** The residue line and the derived data, in the order the view pane's head lists them after its files. */
-export function ViewNotesLine({ ws, name, notes, shownLabels, residueOpen, onResidue }: LineProps) {
+/** The quiet line under a view's name, its items apart by dots: the files it reads ("All 12 files read" once its notes
+ * say it leaves nothing out), what it leaves out, each part opening the list under the head, and its derived data. A
+ * file viewer's line has no files, and says nothing of the file when it reads cleanly. */
+export function ViewHeadLine({ ws, name, notes, shownLabels, residueOpen, onResidue, files, after, file = false }: LineProps) {
+  const words = residueWords(notes, file)
+  // both notes read, so a file count is not called complete before the unreadable lines are known
+  const clean = !!notes.shown && !!notes.problems && !words.length
+  const items: [string, ReactNode][] = []
+  if (files && files.n) items.push(['files', <ViewFiles name={name} {...files} clean={clean} />])
+  if (after) items.push(['after', after])
+  for (const w of words)
+    items.push([
+      w,
+      <button type="button" className="view-pane-files view-pane-residue" aria-expanded={residueOpen} onClick={onResidue}>
+        {w}
+      </button>,
+    ])
+  if (notes.shown?.derived.length || shownLabels.length) items.push(['derived', <DerivedData ws={ws} shown={notes.shown} labels={shownLabels} name={name} />])
+  if (!items.length) return null
   return (
-    <>
-      <ResidueLine notes={notes} open={residueOpen} onToggle={onResidue} />
-      <DerivedData ws={ws} shown={notes.shown} labels={shownLabels} name={name} />
-    </>
+    <span className="view-pane-sub">
+      {items.map(([key, it], i) => (
+        <Fragment key={key}>
+          {i > 0 && (
+            <span className="view-pane-dot" aria-hidden="true">
+              ·
+            </span>
+          )}
+          {it}
+        </Fragment>
+      ))}
+    </span>
   )
 }
 
-/** "1 unreadable line", "3 unreadable files" */
-function unreadable(n: number, one: string, many: string): string {
-  return `${n.toLocaleString()} unreadable ${n === 1 ? one : many}`
-}
-
-/** What the view leaves out, in a few words, which a click opens as the list under the head: the files not read, those
- * hidden, those missing, the records not placed, and the lines or files that could not be parsed, as unreadable. With
- * none it says how many files it read, once that count is known. */
-function ResidueLine({ notes, open, onToggle }: { notes: ViewNotes; open: boolean; onToggle: () => void }) {
-  if (!notes.shown && !notes.problems?.count) return null
-  const r = residueOf(notes)
-  const parts: string[] = []
-  if (r.unreadCount) parts.push(`${count(r.unreadCount, 'file', 'files')} not read`)
-  if (r.hiddenCount) parts.push(`${r.hiddenCount.toLocaleString()} hidden`)
-  if (r.missing.length) parts.push(`${r.missing.length.toLocaleString()} missing`)
-  if (r.unplaced) parts.push(`${count(r.unplaced.count, 'record', 'records')} not placed`)
-  if (r.problems) parts.push(wholeFiles(r.problems) ? unreadable(r.problems.count, 'file', 'files') : unreadable(r.problems.count, 'line', 'lines'))
-  if (!hasResidue(r) && notes.shown) {
-    const n = notes.shown.files
-    return <span className="view-pane-residue-none">{n === 1 ? '1 file read' : `All ${n.toLocaleString()} files read`}</span>
-  }
+/** The files a view reads: their count, the file's name when it reads one, or "All 12 files read" when it leaves
+ * nothing out, which a click lists them under; a file picked there opens in Raw. */
+function ViewFiles({ name, list, n, current, onPick, clean }: FilesProps & { name: string; clean: boolean }) {
+  const [at, setAt] = useState<HTMLButtonElement | null>(null)
+  const [open, setOpen] = useState(false)
   return (
-    <button type="button" className="view-pane-files view-pane-residue" aria-expanded={open} onClick={onToggle}>
-      {parts.join(' · ')}
-    </button>
+    <>
+      <button ref={setAt} type="button" className="view-pane-files" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+        {n === 1 ? list[0] : clean ? `All ${n.toLocaleString()} files read` : `${n.toLocaleString()} files`}
+      </button>
+      <Popover anchor={at} open={open} onClose={() => setOpen(false)} label={`The files ${name} reads`} className="view-pane-list">
+        {list.map((f) => (
+          <button
+            key={f}
+            type="button"
+            className={'view-pane-list-item mono' + (f === current ? ' is-current' : '')}
+            onClick={() => {
+              setOpen(false)
+              onPick(f)
+            }}
+          >
+            {f}
+          </button>
+        ))}
+        {n > list.length && <span className="view-pane-list-more">and {(n - list.length).toLocaleString()} more</span>}
+      </Popover>
+    </>
   )
 }
 
@@ -220,7 +290,7 @@ export function ResidueList({ notes, onPick }: { notes: ViewNotes; onPick: (ref:
               <span className="view-pane-list-why">{x.why}</span>
             </button>
           ))}
-          {r.unplaced.count > r.unplaced.examples.length && <span className="view-pane-list-more">and {(r.unplaced.count - r.unplaced.examples.length).toLocaleString()} more</span>}
+          {r.unplaced.count != null && r.unplaced.count > r.unplaced.examples.length && <span className="view-pane-list-more">and {(r.unplaced.count - r.unplaced.examples.length).toLocaleString()} more</span>}
         </section>
       )}
       {r.problems && (
@@ -232,23 +302,22 @@ export function ResidueList({ notes, onPick }: { notes: ViewNotes; onPick: (ref:
               <span className="view-pane-list-why">{x.why}</span>
             </button>
           ))}
-          {r.problems.count > r.problems.examples.length && <span className="view-pane-list-more">and {(r.problems.count - r.problems.examples.length).toLocaleString()} more</span>}
+          {r.problems.count != null && r.problems.count > r.problems.examples.length && <span className="view-pane-list-more">and {(r.problems.count - r.problems.examples.length).toLocaleString()} more</span>}
         </section>
       )}
     </div>
   )
 }
 
-/** "Derived data" with how many fields the view's reader made rather than read, how many of them it computed, and how
- * many labels it shows, which a click lists: the fields of each kind of record under its name, the computed ones first,
- * each with how and from what, then each label with its description. */
+/** "Derived data" with how many fields the view's reader made rather than read and how many labels it shows, which a
+ * click lists: the fields of each kind of record under its name, the computed ones first and marked so, each with how
+ * and from what, then each label with its description. */
 function DerivedData({ ws, shown, labels, name }: { ws: string; shown: ViewShown | null; labels: readonly Concept[]; name: string }) {
   const [at, setAt] = useState<HTMLButtonElement | null>(null)
   const [open, setOpen] = useState(false)
   const fields = shown?.derived ?? []
   if (!fields.length && !labels.length) return null
-  const computed = fields.filter((d) => d.kind === 'inferred').length
-  const counts = [fields.length ? count(fields.length, 'field', 'fields') : '', computed ? `${computed.toLocaleString()} computed` : '', labels.length ? count(labels.length, 'label', 'labels') : ''].filter(Boolean)
+  const counts = [fields.length ? count(fields.length, 'field', 'fields') : '', labels.length ? count(labels.length, 'label', 'labels') : ''].filter(Boolean)
   const groups = byRecord(fields)
   return (
     <>

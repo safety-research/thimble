@@ -24,7 +24,7 @@ import { FIND_MARK, findColumn, ReaderRuler, rulerColumns, useRuler, type LensTi
 import { fmtSize } from './Tree'
 import { useFilesFilter, type FilesLabels } from './useLabels'
 import { accepts, slugOf, viewValue } from './viewChoice'
-import { hasNotes, ResidueList, useResidueOpen, useShownLabels, useViewNotes, ViewFilter, ViewNotesLine } from './ViewChrome'
+import { fileLineShows, ResidueList, useResidueOpen, useShownLabels, useViewNotes, ViewFilter, ViewHeadLine } from './ViewChrome'
 import { ViewerFrame } from './ViewerFrame'
 import { usePinnedView, ViewUpdated } from './viewVersion'
 import { DeleteViewConfirm, ProposalOption } from './ViewsBar'
@@ -142,25 +142,27 @@ export function ViewFailed({ name, detail, onRaw }: { name: string; detail: stri
 
 /** A viewer for the file's type as its mode: the view's page in the reader, and what failed with Raw beside it when the
  * file has a Raw. It keeps the version it opened at, with Updated and Reload over its top right corner once a newer one
- * is there. Above the page, thimble's notes on the view (ViewChrome), when there are any, and the label filter with how
- * many records it hides; a file or line picked there opens in the File browser. */
+ * is there. Above the page, thimble's notes on the file it shows (ViewChrome), when there are any: what the viewer
+ * leaves out of that file, never of the other files it claims, and what it derived; then the label filter with how many
+ * records it hides. A line picked there opens in the File browser. */
 function ReaderViewer({ ws, view, path, targetRef, labels, onRaw }: { ws: string; view: View; path: string; targetRef?: string; labels: FilesLabels; onRaw?: () => void }) {
   const [failure, setFailure] = useState<string | null>(null)
   const filter = useFilesFilter(ws)
   const pin = usePinnedView(ws, view.slug, view.version || undefined)
-  const notes = useViewNotes(ws, view.slug, pin.pinned || undefined)
-  const shownLabels = useShownLabels(labels, view.claims)
+  const notes = useViewNotes(ws, view.slug, pin.pinned || undefined, path)
+  const own = useMemo(() => [path], [path])
+  const shownLabels = useShownLabels(labels, own)
   const [residueOpen, toggleResidue] = useResidueOpen(ws, view.slug)
   const filterLabel = filter ? labels.byId.get(filter.concept) : undefined
   const [hidden, setHidden] = useState<number | null>(null)
   useEffect(() => setHidden(null), [pin.pinned])
-  const noted = hasNotes(notes, shownLabels)
+  const noted = fileLineShows(notes, shownLabels)
   const pick = (ref: string) => bus.emit('openRef', { ref, browser: true })
   return (
     <div className="reader-main reader-viewer">
       {(noted || (filter && filterLabel)) && (
         <div className="reader-viewer-notes">
-          {noted && <ViewNotesLine ws={ws} name={view.name} notes={notes} shownLabels={shownLabels} residueOpen={residueOpen} onResidue={toggleResidue} />}
+          {noted && <ViewHeadLine ws={ws} name={view.name} notes={notes} shownLabels={shownLabels} residueOpen={residueOpen} onResidue={toggleResidue} file />}
           {filter && filterLabel && <ViewFilter ws={ws} filter={filter} name={filterLabel.name} hidden={hidden} className="reader-viewer-filter" />}
         </div>
       )}

@@ -1,4 +1,5 @@
-// The Labels pane at the bottom of the Files sidebar (the whole sidebar beside a view, with the button that hides it):
+// The Labels pane at the bottom of the Files sidebar (the whole sidebar beside a view, with the button that hides it,
+// and beside a view built without label controls the offer to add them, ViewSide AddLabelControls):
 // every label over files with its colour, then the labels over canvas cards and report sentences. A label over files
 // shows its mark (LabelMark), filled while it is on; a click on the mark turns it on or off. A click on the name turns
 // it on, focuses it, or turns the focused label off. An on label with more than two values lists them, and a click on
@@ -6,7 +7,7 @@
 // on hover that changes its colours (LabelPalette). Beside a view, a label's row (and each value's) has a funnel on
 // hover that sets the Files label filter, which the view keeps its records by; the funnel of the filter set stays
 // pressed, and a click on it clears the filter.
-import { useMemo, useRef, useState, type CSSProperties } from 'react'
+import { useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { Button } from '../components/Button'
 import { Icon } from '../components/Icon'
 import { Spinner } from '../components/Spinner'
@@ -38,9 +39,11 @@ interface Props {
   onFilter?: (id: string, value: string | null) => void
   /** the Files label filter, whose funnel shows pressed */
   filter?: LabelFilter | null
+  /** under the head, above the labels */
+  note?: ReactNode
 }
 
-export function LabelsPane({ labels, open, onToggleOpen, editing, onEdit, runs, onRetry, onHide, first, onFilter, filter = null }: Props) {
+export function LabelsPane({ labels, open, onToggleOpen, editing, onEdit, runs, onRetry, onHide, first, onFilter, filter = null, note }: Props) {
   const files = labels.all.filter(isFilesLabel)
   const ordered = first ? [...files.filter((k) => first.has(k.id)), ...files.filter((k) => !first.has(k.id))] : files
   const nums = useMemo(() => new Map(laneTags(labels.on).map((t) => [t.id, t.n])), [labels.on])
@@ -54,6 +57,7 @@ export function LabelsPane({ labels, open, onToggleOpen, editing, onEdit, runs, 
         <Button variant="icon" size="sm" icon="plus" title="New label" aria-label="New label" active={editing === 'new'} onClick={() => onEdit(editing === 'new' ? null : 'new')} />
         {onHide && <Button variant="icon" size="sm" icon="sidebar" title="Hide labels" aria-label="Hide labels" onClick={onHide} />}
       </div>
+      {open && note}
       {open && labels.all.length > 0 && (
         <div className="files-labels-list">
           {[...ordered, ...labels.all.filter((k) => !isFilesLabel(k))].map((k) => (

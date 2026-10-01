@@ -1,7 +1,8 @@
-// What a view's head says it leaves out (src/files/ViewChrome.tsx ResidueLine), drawn with the app's stylesheets in
+// What a view's head says it leaves out (src/files/ViewChrome.tsx ViewHeadLine), drawn with the app's stylesheets in
 // headless Chromium: the lines or files its reader could not read read "1 unreadable line", "N unreadable lines" or
-// "N unreadable files", in the same ink as the head's other items (the count of files beside it), never in the error
-// colour, in the light and the dark theme.
+// "N unreadable files", in the same ink as the head's other items (the count of files beside it) and the dots between
+// them, never in the error colour, in the light and the dark theme. The line's text starts where the name's does and its
+// items stand on one baseline, apart.
 import assert from 'node:assert/strict'
 import { existsSync, readFileSync } from 'node:fs'
 import path from 'node:path'
@@ -19,14 +20,16 @@ beforeAll(async () => {
       `import '${src('styles/index.css')}'`,
       `import { createRoot } from 'react-dom/client'`,
       `import { flushSync } from 'react-dom'`,
-      `import { ViewNotesLine } from '${src('files/ViewChrome.tsx')}'`,
+      `import { ViewHeadLine } from '${src('files/ViewChrome.tsx')}'`,
       `let root = null`,
+      `const files = { list: ['runs/r1/events.jsonl'], n: 25, current: null, onPick: () => {} }`,
+      `const derived = [{ field: 'time', from: 'ts', how: 'parsed to UTC' }]`,
       `;(window as any).__head = (problems) => flushSync(() => {`,
       `  root ??= createRoot(document.getElementById('root')!)`,
-      `  root.render(<div className="view-pane"><div className="view-pane-head"><div className="view-pane-title"><span className="view-pane-name">Runs</span><span className="view-pane-sub">`,
-      `    <button type="button" className="view-pane-files">25 files</button>`,
-      `    <ViewNotesLine ws="ws" name="Runs" notes={{ shown: null, problems }} shownLabels={[]} residueOpen={false} onResidue={() => {}} />`,
-      `  </span></div></div></div>)`,
+      `  const shown = { files: 25, not_shown: { count: 0, unexplained: 0, files: [] }, missing: [], derived, errors: [] }`,
+      `  root.render(<div className="view-pane"><div className="view-pane-head"><div className="view-pane-title"><span className="view-pane-name">Runs</span>`,
+      `    <ViewHeadLine ws="ws" name="Runs" notes={{ shown, problems }} shownLabels={[]} residueOpen={false} onResidue={() => {}} files={files} />`,
+      `  </div></div></div>)`,
       `})`,
     ],
     { loader: { '.css': 'css', '.woff2': 'empty', '.woff': 'empty' }, conditions: ['style'] },
@@ -71,11 +74,29 @@ for (const theme of ['light', 'dark']) {
           probe.remove()
           return c
         }
-        const inks = new Set([res, ...res.querySelectorAll('*')].map((e) => getComputedStyle(e).color))
-        return { text: res.textContent, inks: [...inks], files: getComputedStyle(document.querySelector('.view-pane-files')!).color, tertiary: token('--text-tertiary'), negative: token('--status-negative') }
+        const inks = new Set([res, ...res.querySelectorAll('*'), ...document.querySelectorAll('.view-pane-dot')].map((e) => getComputedStyle(e).color))
+        const range = document.createRange()
+        const text = (e: Element) => {
+          range.selectNodeContents(e)
+          return range.getBoundingClientRect()
+        }
+        const items = [...document.querySelector('.view-pane-sub')!.children].map(text)
+        const meet = items.some((a, i) => items.some((b, j) => i < j && Math.min(a.right, b.right) - Math.max(a.left, b.left) > 0.5))
+        return {
+          text: res.textContent,
+          inks: [...inks],
+          files: getComputedStyle(document.querySelector('.view-pane-files')!).color,
+          tertiary: token('--text-tertiary'),
+          negative: token('--status-negative'),
+          left: Math.abs(text(document.querySelector('.view-pane-name')!).left - items[0].left),
+          baseline: Math.max(...items.map((r) => r.bottom)) - Math.min(...items.map((r) => r.bottom)),
+          meet,
+          n: items.length,
+        }
       })
       assert.equal(got.text, words)
       assert.deepEqual(got.inks, [got.files], `${words}: in the ink of the files beside it ${JSON.stringify(got)}`)
+      assert.ok(got.n === 5 && got.left <= 0.5 && got.baseline <= 0.5 && !got.meet, `${words}: the line under the name ${JSON.stringify(got)}`)
       assert.equal(got.files, got.tertiary, `${words}: the head's ink is the theme's tertiary text`)
       assert.notEqual(got.files, got.negative, `${words}: not in the error colour`)
     }

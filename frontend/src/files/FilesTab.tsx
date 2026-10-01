@@ -35,7 +35,7 @@ import { OpenIn } from './OpenIn'
 import { chooseView, viewPlace, viewValue } from './viewChoice'
 import { ViewPane } from './ViewPane'
 import { FolderPane } from './FolderPane'
-import { LabelsLead, useLabelRuns, useLabelSide } from './ViewSide'
+import { AddLabelControls, useLabelRuns, useLabelSide } from './ViewSide'
 import type { ViewQuote } from './ViewerFrame'
 import { BROWSER, slugOfKey, useViews, viewKey, ViewsBar, type BuiltView } from './ViewsBar'
 import { markOpened, useOpenAskedViews } from './viewReady'
@@ -224,7 +224,7 @@ function useSessionChoice(ws: string, name: string): [boolean | null, (v: boolea
 
 /** A view's labels by default: the first time the analyst opens a view (per workspace), while no label marking its
  * files is on, the orientation's labels over those files are turned on (labels.viewDefaults), so the view opens
- * coloured with its Labels sidebar as the legend. */
+ * coloured, its own label controls as the legend. */
 function useViewDefaults(ws: string, view: BuiltView | null, labels: FilesLabels) {
   const [orient, setOrient] = useState<Set<string> | null>(null)
   useEffect(() => {
@@ -307,9 +307,10 @@ export function FilesTab({ ws, active, focused = active }: { ws: string; active:
   const searchRef = useRef<HTMLInputElement>(null)
   const [findAsk, setFindAsk] = useState<FindAsk>({ mode: 'find', n: 0 })
   // Sidebars (shell/dock.tsx) dock only while the body holds them beside the view or reader at a readable width. A
-  // view's Labels sidebar starts hidden and shows while a label is on, unless the view draws label controls of its own,
-  // until the analyst hides or shows it for the tab's session; when it cannot dock it lies over the view's left edge.
-  // The File browser's sidebar folds to its show button when it cannot dock.
+  // view draws its own label controls, so its Labels sidebar starts hidden and shows when those controls open a label's
+  // editor; beside a view built without label controls it also shows while a label is on. The analyst's hide or show
+  // holds for the tab's session. When it cannot dock it lies over the view's left edge. The File browser's sidebar folds
+  // to its show button when it cannot dock.
   const dock = useDock(sideWidth)
   const shownView = slugOfKey(bar) ? views.find((v) => v.slug === slugOfKey(bar)) ?? null : null
   const viewSideOpen = viewSideChoice ?? (labels.on.length > 0 && !shownView?.label_controls)
@@ -644,6 +645,7 @@ export function FilesTab({ ws, active, focused = active }: { ws: string; active:
     onHide: shownView ? () => setViewSideChoice(false) : undefined,
     first: marking ?? undefined,
     filterable: !!shownView,
+    note: shownView && !shownView.label_controls && !shownView.builtin ? <AddLabelControls ws={ws} view={shownView} /> : undefined,
   })
   // the bar's lead keeps its identity while the sidebar is dragged, so the reader (a memo) is not rendered again on
   // each move of the drag
@@ -694,7 +696,6 @@ export function FilesTab({ ws, active, focused = active }: { ws: string; active:
             onMode={setMode}
             first={marking ?? undefined}
             onEditLabel={editLabel}
-            lead={!viewSideOpen && <LabelsLead on={labels.on.length} onShow={() => setViewSideChoice(true)} />}
           />
           {viewSideOpen && labelCard}
         </div>

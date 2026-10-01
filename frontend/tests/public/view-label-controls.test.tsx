@@ -1,12 +1,12 @@
 // @vitest-environment jsdom
-// thimble's own label control beside a view (src/files/ViewSide.tsx useViewSide): the Labels sidebar shows while a
-// label is on, and for a view whose page draws label controls of its own (views' label_controls) it does not open by
-// itself, but the head keeps a compact Labels control with how many labels are on, so the label state is always one
-// click away.
+// The Labels sidebar beside a view (src/files/ViewSide.tsx useViewSide): a view draws its own label controls and thimble
+// draws none in its head. A view whose page has them keeps the sidebar closed until its controls open a label's editor.
+// Beside a view built without them, the sidebar opens while a label is on, with the offer to add them, which asks for
+// the change in the view's thread.
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import type { FilesLabels } from '../../src/files/useLabels.ts'
-import { useViewSide } from '../../src/files/ViewSide.tsx'
+import { ADD_LABEL_CONTROLS, useViewSide } from '../../src/files/ViewSide.tsx'
 import type { BuiltView } from '../../src/files/ViewsBar.tsx'
 import type { Concept } from '../../src/lib/types.ts'
 import { mount, settle, unmountAll } from './mount.tsx'
@@ -30,18 +30,22 @@ function labelsWith(on: Concept[]): FilesLabels {
 
 const VIEW: BuiltView = { slug: 'board', name: 'Board', claims: ['board.jsonl'] }
 
+let edit: ((id: string | null) => void) | null = null
+
 function Side({ own, labels }: { own: boolean; labels: FilesLabels }) {
   const side = useViewSide('w', { ...VIEW, label_controls: own }, labels)
-  return (
-    <div>
-      <div data-test="head">{side.lead}</div>
-      {side.side}
-    </div>
-  )
+  edit = side.editLabel
+  return <div>{side.side}</div>
 }
 
+const sent: { url: string; body: string }[] = []
+
 beforeEach(() => {
-  vi.stubGlobal('fetch', async () => new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } }))
+  sent.length = 0
+  vi.stubGlobal('fetch', async (url: string, init?: RequestInit) => {
+    sent.push({ url: String(url), body: String(init?.body ?? '') })
+    return new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } })
+  })
 })
 afterEach(() => {
   unmountAll()
@@ -49,29 +53,34 @@ afterEach(() => {
 })
 
 const sidebar = (el: HTMLElement) => el.querySelector('aside.files-side-labels')
-const lead = (el: HTMLElement) => el.querySelector<HTMLButtonElement>('[data-test="head"] button')
+const offer = (el: HTMLElement) => el.querySelector<HTMLButtonElement>('.files-labels-note button')
 
-describe("thimble's label control beside a view", () => {
-  test('the sidebar shows while a label is on and the view draws no label controls', async () => {
+describe('the Labels sidebar beside a view', () => {
+  test('beside a view built without label controls it shows while a label is on, with the offer to add them', async () => {
     const el = await mount(<Side own={false} labels={labelsWith([asks])} />)
     await settle()
     expect(sidebar(el)).not.toBeNull()
-    expect(lead(el)).toBeNull()
+    expect(offer(el)?.textContent).toBe('Add label controls to the view')
+    await act(async () => offer(el)!.click())
+    await settle()
+    const ask = sent.find((s) => s.url.endsWith('/views/proposals/board/message'))
+    expect(ask && JSON.parse(ask.body)).toEqual({ text: ADD_LABEL_CONTROLS })
+    expect(offer(el)).toBeNull()
+    expect(el.querySelector('.files-labels-note')?.textContent).toBe('Adding label controls to the view')
   })
 
-  test("a view with label controls of its own keeps the sidebar closed, and the head's control opens it", async () => {
+  test('beside a view with label controls of its own it stays closed until they open a label editor', async () => {
     const el = await mount(<Side own labels={labelsWith([asks])} />)
     await settle()
     expect(sidebar(el)).toBeNull()
-    expect(lead(el)?.textContent).toBe('1 label on')
-    await act(async () => lead(el)!.click())
+    await act(async () => edit!('k1'))
     expect(sidebar(el)).not.toBeNull()
+    expect(offer(el), 'no offer beside a view that has them').toBeNull()
   })
 
-  test('with no label on, the control still shows in the head', async () => {
-    const el = await mount(<Side own labels={labelsWith([])} />)
+  test('with no label on, nothing shows beside a view built without label controls', async () => {
+    const el = await mount(<Side own={false} labels={labelsWith([])} />)
     await settle()
     expect(sidebar(el)).toBeNull()
-    expect(lead(el)?.textContent).toBe('Labels')
   })
 })

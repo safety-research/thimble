@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
-// What thimble draws above a view (src/files/ViewChrome.tsx): the residue line says what the view leaves out by kind,
-// opens the list of it under the head, and says how many files it read when there is none; the derived data names its
-// counts and lists the fields of each kind of record under its name, the computed ones first.
+// What thimble draws above a view (src/files/ViewChrome.tsx): one line under the name says what the view leaves out by
+// kind, each part opening the list of it under the head, and says it read all its files when it leaves nothing out; the
+// derived data names its counts and lists the fields of each kind of record under its name, the computed ones first. A
+// file viewer's line speaks only of the file it shows, and of nothing when that file reads cleanly.
 import { act, useState } from 'react'
 import { afterEach, beforeAll, expect, test } from 'vitest'
-import { ResidueList, ViewNotesLine, type ViewNotes } from '../../src/files/ViewChrome.tsx'
+import { ResidueList, ViewHeadLine, type ViewNotes } from '../../src/files/ViewChrome.tsx'
 import { mount, unmountAll } from './mount.tsx'
 
 beforeAll(() => {
@@ -43,24 +44,27 @@ const NOTES: ViewNotes = {
   problems: { count: 3, examples: [{ ref: 'runs/r1/big.jsonl#L9', why: 'not JSON' }] },
 }
 
-function Head({ notes, picked }: { notes: ViewNotes; picked: string[] }) {
+function Head({ notes, picked, file = false, files }: { notes: ViewNotes; picked: string[]; file?: boolean; files?: string[] }) {
   const [open, setOpen] = useState(false)
   return (
     <div>
-      <ViewNotesLine ws="ws" name="Runs" notes={notes} shownLabels={[]} residueOpen={open} onResidue={() => setOpen((o) => !o)} />
+      <ViewHeadLine ws="ws" name="Runs" notes={notes} shownLabels={[]} residueOpen={open} onResidue={() => setOpen((o) => !o)} file={file} files={files ? { list: files, n: files.length, current: null, onPick: () => undefined } : undefined} />
       {open && <ResidueList notes={notes} onPick={(ref) => picked.push(ref)} />}
     </div>
   )
 }
 
-test('the residue line counts what the view leaves out and opens the list of it', async () => {
+test('the line counts what the view leaves out and each part opens the list of it', async () => {
   const picked: string[] = []
-  const el = await mount(<Head notes={NOTES} picked={picked} />)
-  const line = el.querySelector('.view-pane-residue') as HTMLButtonElement
-  expect(line.textContent).toBe('3 files not read · 1 hidden · 2 missing · 2 records not placed · 3 unreadable lines')
-  expect(line.querySelector('span'), 'the unreadable lines in the same ink as the rest').toBeNull()
+  const el = await mount(<Head notes={NOTES} picked={picked} files={['runs/r1/big.jsonl', 'notes.md']} />)
+  expect(el.querySelector('.view-pane-sub')?.textContent).toBe('2 files·3 not read·1 hidden·2 missing·2 records not placed·3 unreadable lines·Derived data: 2 fields')
+  const parts = [...el.querySelectorAll<HTMLButtonElement>('.view-pane-residue')]
+  expect(parts.map((b) => b.textContent)).toEqual(['3 not read', '1 hidden', '2 missing', '2 records not placed', '3 unreadable lines'])
+  expect(parts[4].querySelector('span'), 'the unreadable lines in the same ink as the rest').toBeNull()
   expect(el.querySelector('.view-pane-residue-list')).toBeNull()
+  const line = parts[4]
   await act(async () => line.click())
+  expect(parts.every((b) => b.getAttribute('aria-expanded') === 'true'), 'every part says the list is open').toBe(true)
   const list = el.querySelector('.view-pane-residue-list') as HTMLElement
   expect([...list.querySelectorAll('h4')].map((h) => h.textContent)).toEqual(['Not read', 'Hidden', 'Missing', 'Not placed', 'Unreadable'])
   expect(list.textContent).toContain('the other folders have it')
@@ -71,7 +75,7 @@ test('the residue line counts what the view leaves out and opens the list of it'
   await act(async () => (list.querySelector('.view-pane-list-item') as HTMLButtonElement).click())
   expect(picked).toEqual(['runs/r2/events.jsonl'])
   const derived = [...el.querySelectorAll('.view-pane-files')].find((b) => b.textContent?.startsWith('Derived')) as HTMLButtonElement
-  expect(derived.textContent).toBe('Derived data: 2 fields, 1 computed')
+  expect(derived.textContent).toBe('Derived data: 2 fields')
   await act(async () => derived.click())
   const rows = [...document.querySelectorAll('.view-pane-list-row .mono')].map((x) => x.textContent)
   expect(rows.slice(-2)).toEqual(['outcome', 'time'])
@@ -88,7 +92,7 @@ test('the derived data lists a field of each kind of record that holds it, under
   const notes: ViewNotes = { shown: { files: 2, not_shown: { count: 0, unexplained: 0, files: [] }, missing: [], derived, errors: [] }, problems: { count: 0, examples: [] } }
   const el = await mount(<Head notes={notes} picked={[]} />)
   const button = [...el.querySelectorAll('.view-pane-files')].find((b) => b.textContent?.startsWith('Derived')) as HTMLButtonElement
-  expect(button.textContent).toBe('Derived data: 4 fields, 2 computed')
+  expect(button.textContent).toBe('Derived data: 4 fields')
   await act(async () => button.click())
   const groups = [...document.querySelectorAll('.view-pane-list-group')].slice(-2)
   expect(groups.map((g) => g.querySelector('.view-pane-list-head')?.textContent)).toEqual(['Per pull request', 'Per issue'])
@@ -101,9 +105,21 @@ test('the derived data lists a field of each kind of record that holds it, under
 
 test('a view that leaves nothing out says so, and has no list to open', async () => {
   const notes: ViewNotes = { shown: { files: 2, not_shown: { count: 0, unexplained: 0, files: [] }, missing: [], derived: [], errors: [] }, problems: { count: 0, examples: [] } }
-  const el = await mount(<Head notes={notes} picked={[]} />)
+  const el = await mount(<Head notes={notes} picked={[]} files={['a.jsonl', 'b.jsonl']} />)
   expect(el.querySelector('.view-pane-residue')).toBeNull()
-  expect(el.querySelector('.view-pane-residue-none')?.textContent).toBe('All 2 files read')
+  expect(el.querySelector('.view-pane-sub')?.textContent).toBe('All 2 files read')
   const list = await mount(<ResidueList notes={notes} onPick={() => undefined} />)
   expect(list.innerHTML).toBe('')
+})
+
+test("a file viewer's line speaks of its one file, and of nothing when the file reads cleanly", async () => {
+  const torn: ViewNotes = { shown: { files: 1, not_shown: { count: 0, unexplained: 0, files: [] }, missing: [], derived: [], errors: [] }, problems: { count: 2, examples: [{ ref: 'runs/7.jsonl#L21', why: 'not JSON' }] } }
+  const el = await mount(<Head notes={torn} picked={[]} file />)
+  expect(el.querySelector('.view-pane-sub')?.textContent).toBe('2 unreadable lines')
+  const unknown = await mount(<Head notes={{ ...torn, problems: { count: null, examples: torn.problems!.examples } }} picked={[]} file />)
+  expect(unknown.querySelector('.view-pane-sub')?.textContent, 'no count while it is not known').toBe('Unreadable lines')
+  const partly: ViewNotes = { ...torn, shown: { ...torn.shown!, not_shown: { count: 1, unexplained: 1, files: [{ path: 'runs/7.jsonl', size: 900, read: 300, why: '' }] } }, problems: { count: 0, examples: [] } }
+  expect((await mount(<Head notes={partly} picked={[]} file />)).querySelector('.view-pane-sub')?.textContent).toBe('Partly read')
+  const clean: ViewNotes = { ...torn, problems: { count: 0, examples: [] } }
+  expect((await mount(<Head notes={clean} picked={[]} file />)).innerHTML).toBe('<div></div>')
 })
