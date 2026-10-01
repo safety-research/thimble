@@ -101,19 +101,3 @@ body[data-cmd-drag] ::selection {
 body:has(.pointer-box) .bn-formatting-toolbar {
   display: none;
 }
-/* the thread the box's send opened, answered in place while the chat is off (CmdPointer `inline`): its rows above the
-   field, scrolling within the box */
-.pointer-box-answer {
-  max-height: min(360px, 50vh);
-  margin: -2px -4px 8px;
-  padding: 0 4px 8px;
-  overflow-y: auto;
-  border-bottom: 1px solid var(--border-hairline);
-  font: var(--type-body-sm);
-}
-.pointer-box-answer .chat-msg {
-  margin: 0 0 8px;
-}
-.pointer-box-answer .chat-msg:last-child {
-  margin-bottom: 0;
-}

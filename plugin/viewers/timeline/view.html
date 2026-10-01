@@ -1,0 +1,818 @@
+<!doctype html>
+<html>
+<head>
+<style>
+  /* thimble's parts (.field, .chip, .btn, .seg, .table) and the theme's tokens come with the frame; this page lays out
+     one control row, the strip and the lanes, and the list */
+  html, body { margin: 0; height: 100%; }
+  body { display: flex; flex-direction: column; overflow: hidden; background: var(--surface-card); color: var(--text-primary); font: 400 var(--text-ui-sm) / 1.4 var(--font-body); }
+  .ico { width: 14px; height: 14px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; }
+
+  #ctl { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; padding: 10px 14px; border-bottom: 1px solid var(--border-hairline); }
+  .search { position: relative; flex: 1 1 140px; min-width: 140px; max-width: 220px; }
+  .search .field { width: 100%; box-sizing: border-box; padding-left: 27px; }
+  .search .ico { position: absolute; left: 8px; top: 50%; margin-top: -7px; color: var(--text-tertiary); pointer-events: none; }
+  .fbtn.field { display: inline-flex; align-items: center; gap: 6px; flex: none; padding: 0 7px 0 9px; color: var(--text-primary); cursor: pointer; white-space: nowrap; }
+  .fbtn .ico { width: 12px; height: 12px; color: var(--text-tertiary); }
+  .fbtn:hover, .fbtn[aria-expanded='true'] { border-color: rgba(var(--ink-rgb), 0.28); }
+  .fbtn[aria-expanded='true'] { background: var(--surface-hover); }
+  .fbtn.is-set { background: var(--surface-selected); border-color: rgba(var(--ink-rgb), 0.28); }
+  .fbtn .k { color: var(--text-secondary); }
+  .fbtn .v { font-weight: 500; }
+  .fbtn .n { color: var(--text-tertiary); font: 400 var(--text-mono-sm) / 1 var(--font-mono); }
+  #chips { display: contents; }
+  .fchip { display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 4px 0 8px; border-radius: var(--radius-chip); background: var(--surface-selected); font: 400 var(--text-xs) / 1 var(--font-body); white-space: nowrap; }
+  .fchip .k { color: var(--text-secondary); }
+  .fchip button { display: inline-grid; place-items: center; width: 18px; height: 18px; padding: 0; border: 0; border-radius: 4px; background: none; color: var(--text-tertiary); cursor: pointer; }
+  .fchip button:hover { background: var(--track-bg); color: var(--text-primary); }
+  .fchip .ico { width: 11px; height: 11px; }
+  #colour { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 4px; margin-left: auto; min-width: 0; }
+  #colour .by { gap: 5px; color: var(--text-secondary); font-weight: 400; }
+  #colour .by b { color: var(--text-primary); font-weight: 500; }
+  #colour .by .ico { width: 13px; height: 13px; }
+  .lg { display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 6px; border: 0; border-radius: var(--radius-chip); background: none; color: var(--text-primary); font: 400 var(--text-xs) / 1 var(--font-body); cursor: pointer; white-space: nowrap; }
+  .lg:hover { background: var(--surface-hover); }
+  .lg .n { color: var(--text-tertiary); font: 400 var(--text-mono-sm) / 1 var(--font-mono); }
+  .lg.off { opacity: 0.4; }
+  .lg.off .t { text-decoration: line-through; }
+  .lg.dim { opacity: 0.55; }
+  .sw { display: inline-block; flex: none; width: 10px; height: 10px; border-radius: 2px; background: var(--c); }
+  .swb { display: inline-grid; place-items: center; width: 16px; height: 16px; margin: 0 -3px; border-radius: 3px; }
+  .swb.can:hover { box-shadow: inset 0 0 0 1px rgba(var(--ink-rgb), 0.3); }
+
+  #chart { position: relative; flex: none; padding: 10px 14px 6px; border-bottom: 1px solid var(--border-hairline); }
+  svg { display: block; overflow: visible; user-select: none; -webkit-user-select: none; }
+  svg text { font: 400 10.5px var(--font-mono); fill: var(--text-tertiary); font-variant-numeric: tabular-nums; }
+  svg text.lane { font: 400 12.5px var(--font-body); fill: var(--text-primary); }
+  svg text.lane-n { font: 400 10.5px var(--font-mono); fill: var(--text-tertiary); }
+  svg text.day { fill: var(--text-primary); }
+  svg .midnight { stroke: rgba(var(--ink-rgb), 0.22); }
+  svg .grid { stroke: var(--border-hairline); }
+  svg .rule { stroke: rgba(var(--ink-rgb), 0.1); }
+  #strip { cursor: crosshair; }
+  .gut { position: absolute; left: 14px; top: 12px; display: flex; flex-direction: column; gap: 2px; width: 118px; font: 400 var(--text-xs) / 1.25 var(--font-body); color: var(--text-secondary); }
+  .gut .n { font: 400 var(--text-mono-sm) / 1.3 var(--font-mono); color: var(--text-tertiary); }
+  .gut .win { display: flex; align-items: center; gap: 2px; color: var(--text-primary); font: 400 var(--text-mono-sm) / 1.3 var(--font-mono); white-space: nowrap; }
+  .gut .win button { display: inline-grid; place-items: center; width: 16px; height: 16px; padding: 0; border: 0; border-radius: 3px; background: none; color: var(--text-tertiary); cursor: pointer; }
+  .gut .win button:hover { background: var(--track-bg); color: var(--text-primary); }
+  .gut .win .ico { width: 11px; height: 11px; }
+  #lanesBy.btn { position: absolute; left: 8px; gap: 4px; color: var(--text-secondary); font-weight: 400; }
+  #lanesBy.btn b { font-weight: 500; color: var(--text-primary); }
+  #lanesBy.btn .ico { width: 12px; height: 12px; }
+  .tick { cursor: pointer; }
+  .lanehead { cursor: default; }
+
+  #list { flex: 1; min-height: 0; overflow: auto; }
+  #tbl { width: 100%; table-layout: fixed; border-collapse: separate; border-spacing: 0; }
+  #tbl th:first-child, #tbl td.t { padding-left: 14px; }
+  #tbl td { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
+  #tbl td.t { color: var(--text-secondary); font: 400 var(--text-mono-sm) / 1.4 var(--font-mono); }
+  #tbl td.b { font-family: var(--font-body); font-size: var(--text-xs); }
+  #tbl td.k, #tbl td.i { color: var(--text-secondary); }
+  #tbl td.x { font-family: var(--font-body); font-size: var(--text-xs); color: var(--text-primary); }
+  #tbl td.err { color: var(--status-negative); }
+  #tbl td.err .ico { display: inline-block; width: 11px; height: 11px; margin-right: 4px; vertical-align: -1px; stroke-width: 2; }
+  #tbl .none { color: var(--text-tertiary); }
+  #tbl tr.day > td { padding: 12px 14px 5px; cursor: default; font: 500 var(--text-ui-sm) / 1.3 var(--font-body); color: var(--text-primary); border-bottom: 1px solid var(--border-strong); }
+  #tbl tr.day .n { margin-left: 8px; font: 400 var(--text-mono-sm) / 1 var(--font-mono); color: var(--text-tertiary); }
+  #tbl tbody tr.day:hover, #tbl tbody tr.det:hover, #tbl tbody tr.more:hover { background: none; }
+  /* the neutral selection: the selected fill with a 1.5px ink edge, around the row and its details */
+  #tbl tr.sel > td { background: var(--surface-selected); border-top: 1.5px solid var(--text-primary); border-bottom: 0; }
+  #tbl tr.sel > td:first-child { border-left: 1.5px solid var(--text-primary); }
+  #tbl tr.sel > td:last-child { border-right: 1.5px solid var(--text-primary); }
+  #tbl tr.det > td { padding: 2px 16px 14px 14px; background: var(--surface-selected); border: 1.5px solid var(--text-primary); border-top: 0; white-space: normal; cursor: default; font-family: var(--font-body); }
+  #tbl tr.more > td { padding: 10px 14px; cursor: default; }
+  .empty { padding: 28px 14px; color: var(--text-tertiary); font-size: var(--text-xs); }
+
+  .d-top { display: flex; align-items: flex-start; gap: 16px; }
+  .d-text { flex: 1; min-width: 0; margin: 4px 0 0; font: 500 var(--text-sm) / 1.45 var(--font-body); color: var(--text-primary); white-space: pre-wrap; overflow-wrap: anywhere; }
+  .d-side { display: flex; flex: none; align-items: center; gap: 6px; margin-top: 4px; }
+  .d-side .chip { gap: 5px; border-color: var(--border-hairline); background: var(--surface-card); color: var(--text-secondary); font-family: var(--font-mono); cursor: pointer; }
+  .d-side .chip:hover { border-color: var(--border-strong); color: var(--text-primary); }
+  .d-side .chip .ico { width: 11px; height: 11px; stroke-width: 2; color: var(--text-tertiary); }
+  .facts { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 4px 18px; margin: 10px 0 0; }
+  .fact { display: flex; align-items: baseline; gap: 8px; min-width: 0; margin: 0; }
+  .fact dt { flex: none; width: 58px; font: 400 var(--text-xs) / 1.4 var(--font-body); color: var(--text-tertiary); }
+  .fact dd { margin: 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 400 var(--text-ui-sm) / 1.4 var(--font-body); }
+  .fact dd.mono { font: 400 var(--text-mono-sm) / 1.5 var(--font-mono); }
+  .fact dd.err { color: var(--status-negative); }
+  .fact.wide { grid-column: span 2; }
+  .raw { margin: 10px 0 0; padding: 8px 10px; border-radius: var(--radius-ui); background: var(--surface-card); box-shadow: inset 0 0 0 1px var(--border-hairline); font: 400 var(--text-mono-sm) / 1.55 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+  .raw .ln { display: inline-block; min-width: 34px; color: var(--text-tertiary); user-select: none; }
+  .d-sec { margin: 12px 0 2px; font: 500 var(--text-ui-sm) / 1.3 var(--font-body); }
+  .d-sec .n { margin-left: 6px; font: 400 var(--text-mono-sm) / 1 var(--font-mono); color: var(--text-tertiary); }
+  .link { display: grid; grid-template-columns: 70px 150px minmax(0, 1fr) auto; align-items: baseline; gap: 12px; margin: 0 -6px; padding: 3px 6px; border-radius: var(--radius-chip); font: 400 var(--text-xs) / 1.4 var(--font-body); cursor: pointer; }
+  .link:hover { background: rgba(var(--ink-rgb), 0.05); }
+  .link:hover .x { text-decoration: underline; text-underline-offset: 2px; }
+  .link .t, .link .tk { font: 400 var(--text-mono-sm) / 1.4 var(--font-mono); color: var(--text-secondary); }
+  .link .tk { color: var(--text-tertiary); text-align: right; }
+  .link .w { color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .link .x { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  .pop { position: fixed; z-index: 60; min-width: 190px; max-width: 300px; max-height: 70vh; overflow: auto; padding: 4px; border-radius: var(--radius-ui); background: var(--raised-bg); box-shadow: var(--raised-ring), 0 10px 28px rgba(var(--ink-rgb), 0.14); font: 400 var(--text-ui-sm) / 1.3 var(--font-body); }
+  .pop .head { padding: 8px 8px 4px; font: 500 var(--text-xs) / 1 var(--font-body); color: var(--text-tertiary); }
+  .pop .sep { height: 1px; margin: 4px 0; background: var(--border-hairline); }
+  .item { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 28px; padding: 0 8px; border: 0; border-radius: 4px; background: none; color: var(--text-primary); font: inherit; text-align: left; cursor: pointer; }
+  .item:hover { background: var(--surface-hover); }
+  .item:disabled { cursor: default; }
+  .item .lab { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .item .lab.none { color: var(--text-tertiary); }
+  .item .n { color: var(--text-tertiary); font: 400 var(--text-mono-sm) / 1 var(--font-mono); }
+  .item .tick-on { width: 13px; height: 13px; color: var(--text-primary); }
+  .box { display: inline-grid; place-items: center; flex: none; width: 14px; height: 14px; box-sizing: border-box; border: 1.5px solid rgba(var(--ink-rgb), 0.35); border-radius: 3px; }
+  .box.on { border-color: var(--text-primary); background: var(--text-primary); }
+  .box.on::after { content: ''; width: 6px; height: 3px; margin-top: -2px; border: solid var(--surface-card); border-width: 0 0 1.6px 1.6px; transform: rotate(-45deg); }
+  .switch { position: relative; flex: none; width: 24px; height: 14px; border-radius: 7px; background: rgba(var(--ink-rgb), 0.18); }
+  .switch::after { content: ''; position: absolute; top: 2px; left: 2px; width: 10px; height: 10px; border-radius: 50%; background: var(--surface-card); transition: left 0.12s; }
+  .switch.on { background: var(--text-primary); }
+  .switch.on::after { left: 12px; }
+  .range { display: flex; align-items: center; gap: 6px; padding: 4px 8px 8px; color: var(--text-secondary); font-size: var(--text-xs); }
+  .range .field { width: 64px; }
+  .more-link { display: block; width: 100%; padding: 4px 8px 6px 30px; border: 0; background: none; color: var(--text-secondary); font: inherit; font-size: var(--text-xs); text-align: left; cursor: pointer; }
+  .more-link:hover { color: var(--text-primary); text-decoration: underline; }
+  .pal { display: grid; grid-template-columns: repeat(6, 22px); gap: 4px; padding: 6px; }
+  .pal button { width: 22px; height: 22px; padding: 0; border: 0; border-radius: 4px; background: var(--c); cursor: pointer; }
+  .pal button.cur { box-shadow: 0 0 0 2px var(--surface-card), 0 0 0 3.5px var(--text-primary); }
+
+  #tip { position: fixed; z-index: 70; display: none; max-width: 320px; padding: 7px 9px; border-radius: var(--radius-ui); background: var(--surface-card); box-shadow: 0 0 0 1px rgba(var(--ink-rgb), 0.12), 0 10px 28px -14px rgba(var(--ink-rgb), 0.32); pointer-events: none; font: 400 var(--text-xs) / 1.4 var(--font-body); }
+  #tip .h { font: 400 var(--text-mono-sm) / 1.4 var(--font-mono); color: var(--text-secondary); }
+</style>
+</head>
+<body>
+<div id="ctl">
+  <button id="f-days" class="field fbtn" type="button" aria-expanded="false" aria-haspopup="menu"></button>
+  <label class="search"><svg class="ico" viewBox="0 0 24 24"><path d="M4 10.5a6.5 6.5 0 1 0 13 0a6.5 6.5 0 1 0-13 0M15.2 15.2L20 20"/></svg><input id="q" class="field" type="search" placeholder="Search events" autocomplete="off" spellcheck="false"></label>
+  <button id="f-incident" class="field fbtn" type="button" aria-expanded="false" aria-haspopup="menu"></button>
+  <button id="f-source" class="field fbtn" type="button" aria-expanded="false" aria-haspopup="menu"></button>
+  <button id="f-more" class="field fbtn" type="button" aria-expanded="false" aria-haspopup="menu"></button>
+  <span id="chips"></span>
+  <span id="colour"></span>
+</div>
+<section id="chart">
+  <div class="gut" id="gut"></div>
+  <svg id="strip"></svg>
+  <button id="lanesBy" class="btn btn-ghost btn-sm" type="button" aria-haspopup="menu"></button>
+  <svg id="lanes"></svg>
+</section>
+<section id="list" tabindex="-1">
+  <table id="tbl" class="table">
+    <colgroup><col style="width: 86px"><col style="width: 70px"><col style="width: 88px"><col style="width: 112px"><col style="width: 78px"><col></colgroup>
+    <thead><tr><th>Time</th><th>Source</th><th>Kind</th><th>Actor</th><th>Incident</th><th>Text</th></tr></thead>
+    <tbody id="tb"></tbody>
+  </table>
+</section>
+<div id="tip"></div>
+<script>
+'use strict'
+// Timeline: every event of the days picked, from every source, on one time axis. The strip shows the whole span and a
+// drag on it picks a window; the lanes lay the window's events out by one field (Lanes picks it); the list holds the
+// window's events grouped by day, and a click opens one in place with the event it answers and those that answer it.
+// The control row picks the days, searches, narrows by incident, source and every other field (More filters), and
+// colours every mark by the labels or by a field, with a legend that shows a value alone or hides it.
+// Labels: the reader keeps only the events the label filter keeps and hands each its marks, which colour the strip
+// and the lanes; the list's rows and the open event carry their file ref as data-anchor, so thimble marks them. The
+// colour menu turns labels on and off in thimble and opens thimble's prompt for a new one, and a legend swatch opens
+// thimble's palette.
+const slug = (thimble.view && thimble.view.slug) || 'timeline'
+const FIELDS = [['source', 'Source'], ['incident', 'Incident'], ['service', 'Service'], ['actor', 'Actor'], ['kind', 'Kind'], ['severity', 'Severity'], ['outcome', 'Outcome']]
+const KEYS = FIELDS.map((f) => f[0])
+const FNAME = Object.fromEntries(FIELDS)
+const MORE = ['service', 'actor', 'kind', 'severity', 'outcome']
+const LANE_FIELDS = ['source', 'incident', 'service', 'actor', 'kind']
+const SOURCE_ORDER = ['alert', 'agent', 'deploy', 'chat', 'ticket']
+const MONTH = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+const WEEKDAY = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+const VIZ = ['--viz-1', '--viz-2', '--viz-3', '--viz-5', '--viz-7', '--viz-ink-2']
+const LANES = 8 // lanes drawn; the rest of the values share the last one
+const ROWS = 300 // list rows drawn before Show more
+const G = 132 // the gutter of lane names
+const ICON = {
+  down: 'M6 9l6 6 6-6', x: 'M6 6l12 12M18 6L6 18', check: 'M5 12.5l4.5 4.5L19 7',
+  file: 'M8 3h6l5 5v11a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2zM14 3v5h5',
+  palette: 'M12 3a9 9 0 0 0 0 18c1.1 0 1.8-.8 1.8-1.7 0-.5-.2-.9-.5-1.2-.3-.3-.5-.7-.5-1.2 0-.9.8-1.7 1.7-1.7H16a5 5 0 0 0 5-5c0-4-4-7.2-9-7.2zM7.5 12h.01M9 7.8h.01M13.5 7h.01M17 10h.01',
+  plus: 'M12 5v14M5 12h14', err: 'M12 3a9 9 0 1 0 0 18 9 9 0 1 0 0-18zM12 8v5M12 16h.01',
+}
+const ico = (n, c = 'ico') => `<svg class="${c}" viewBox="0 0 24 24"><path d="${ICON[n]}"/></svg>`
+const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c])
+const token = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim()
+const plural = (n, one, many = one + 's') => `${n.toLocaleString('en-US')} ${n === 1 ? one : many}`
+const pad2 = (n) => String(n).padStart(2, '0')
+
+// ---------------------------------------------------------------- time
+// t is seconds since 1970 in UTC; a day is its UTC date, YYYY-MM-DD
+const dayOf = (t) => new Date(t * 1000).toISOString().slice(0, 10)
+const dm = (k) => `${+k.slice(8, 10)} ${MONTH[+k.slice(5, 7) - 1]}`
+const midnight = (k) => Date.parse(k + 'T00:00:00Z') / 1000
+const hhmm = (t, s) => new Date(t * 1000).toISOString().slice(11, s ? 19 : 16)
+const weekday = (k) => WEEKDAY[new Date(midnight(k) * 1000).getUTCDay()]
+function dur(s) {
+  s = Math.round(Math.abs(s))
+  if (s < 60) return `${s}s`
+  if (s < 3600) return `${Math.floor(s / 60)}m ${pad2(s % 60)}s`
+  return `${Math.floor(s / 3600)}h ${pad2(Math.round((s % 3600) / 60))}m`
+}
+
+// ---------------------------------------------------------------- data
+// The reader sends every event the label filter keeps as columns, a page at a time: r t f ln, a column per field (an
+// index into names), re (the row it answers), tk (seconds since that row), m and mb (its label marks).
+let D = null, N = 0, C = null, T = new Float64Array(0)
+let rowAt = new Map() // reader row -> index into the columns
+let ALLDAYS = [] // every day with events, in order
+let loadSeq = 0
+let labelState = { labels: [], filter: null, all: null, palette: null }
+const texts = new Map() // reader row -> its text
+
+const S = {
+  days: null, // the picked days, a Set; null for every day
+  lastDay: null, // the day clicked last, for a shift-click range
+  q: '', found: null, // the search and the reader rows that hold it
+  f: Object.fromEntries(KEYS.map((k) => [k, new Set()])), // field -> the value indices it is narrowed to
+  took: [null, null], // minutes
+  win: null, // [a, b] in seconds since 1970
+  lanesBy: 'source',
+  by: null, // what colours the marks: 'labels' or a field; null until the first load picks
+  hide: new Set(), iso: null, // legend: the values hidden, and the value shown alone
+  open: null, // the open event's reader row
+  detail: null, raw: false,
+  limit: ROWS,
+  keepRow: null, // the row a citation opened, shown whatever the label filter keeps
+}
+
+async function load() {
+  const my = ++loadSeq
+  const COLS = ['r', 't', 'f', 'ln', ...KEYS, 're', 'tk', 'm', 'mb']
+  const c = Object.fromEntries(COLS.map((k) => [k, []]))
+  let first = null, from = 0
+  do {
+    const page = await thimble.fetch({ op: 'overview', from, ...(S.keepRow != null ? { keep: [S.keepRow] } : {}) })
+    if (my !== loadSeq) return false
+    if (!first) first = page
+    for (const k of COLS) for (const v of page.cols[k] || []) c[k].push(v)
+    from = page.next
+  } while (from != null)
+  D = first
+  N = c.r.length
+  C = Object.fromEntries(COLS.map((k) => [k, Int32Array.from(c[k])]))
+  T = Float64Array.from(c.t, (t) => D.t0 + t)
+  rowAt = new Map()
+  for (let i = 0; i < N; i++) rowAt.set(C.r[i], i)
+  ALLDAYS = [...new Set(Array.from(T, dayOf))].sort()
+  if (S.days) S.days = new Set([...S.days].filter((d) => ALLDAYS.includes(d)))
+  if (S.days && !S.days.size) S.days = null
+  if (S.by == null) S.by = D.marks.length ? 'labels' : 'source'
+  if (S.by === 'labels' && !D.marks.length) S.by = 'source'
+  return true
+}
+
+const name = (k, v) => (D.names[k] && D.names[k][v]) || ''
+const refOf = (i) => `${D.files[C.f[i]]}#L${C.ln[i]}`
+const picked = () => S.days ? ALLDAYS.filter((d) => S.days.has(d)) : ALLDAYS
+const multi = () => picked().length > 1
+const inDays = (i) => !S.days || S.days.has(dayOf(T[i]))
+const inWin = (i) => !S.win || (T[i] >= S.win[0] && T[i] <= S.win[1])
+function passes(i, skip) {
+  if (S.found && !S.found.has(C.r[i])) return false
+  for (const k of KEYS) if (k !== skip && S.f[k].size && !S.f[k].has(C[k][i])) return false
+  const tk = C.tk[i]
+  if (S.took[0] != null && (tk < 0 || tk < S.took[0] * 60)) return false
+  if (S.took[1] != null && (tk < 0 || tk > S.took[1] * 60)) return false
+  return true
+}
+// the events of the picked days that pass every filter, by time, and the strip's span
+let scoped = []
+let H0 = 0, H1 = 1
+function compute() {
+  scoped = []
+  for (let i = 0; i < N; i++) if (inDays(i) && passes(i)) scoped.push(i)
+  const days = picked()
+  if (days.length > 1) { H0 = midnight(days[0]); H1 = midnight(days[days.length - 1]) + 86400 }
+  else if (days.length) {
+    let lo = Infinity, hi = -Infinity
+    for (let i = 0; i < N; i++) if (dayOf(T[i]) === days[0]) { lo = Math.min(lo, T[i]); hi = Math.max(hi, T[i]) }
+    H0 = Math.floor(lo / 3600) * 3600
+    H1 = Math.max(H0 + 3600, Math.ceil((hi + 1) / 3600) * 3600)
+  }
+  if (S.win && (S.win[1] < H0 || S.win[0] > H1)) S.win = null
+}
+
+// ---------------------------------------------------------------- colour
+// By the labels: each event's first mark, in its label's colour. By a field: its six most common values in the viz
+// colours, the rest in one ink.
+const NONE = () => token('--viz-ink-4') || '#cfcbc2'
+const labelBy = (n) => (labelState.all || labelState.labels || []).find((l) => l.name === n)
+const markKey = (j) => `${D.marks[j].label}\n${D.marks[j].value}`
+function markColour(j) {
+  const m = D.marks[j], l = labelBy(m.label), v = l && (l.values || []).find((x) => x.name === m.value)
+  return (v && v.colour) || m.colour
+}
+function markName(j) {
+  const m = D.marks[j], l = labelBy(m.label)
+  const many = l ? (l.values || []).filter((v) => v.highlight !== false).length > 1 : m.value !== m.label
+  return many ? `${m.label}: ${m.value}` : m.label
+}
+let topVals = [] // by a field: its coloured values, most common first
+function keyOf(i) {
+  if (S.by === 'labels') {
+    const mb = C.mb[i]
+    for (let j = 0; j < D.marks.length; j++) if (mb & (1 << j)) return markKey(j)
+    return 'none'
+  }
+  const v = C[S.by][i]
+  return topVals.includes(v) ? String(v) : 'other'
+}
+function colourOf(i) {
+  const k = keyOf(i)
+  if (S.by === 'labels') { const j = D.marks.findIndex((_, x) => markKey(x) === k); return j >= 0 ? markColour(j) : NONE() }
+  return k === 'other' ? NONE() : token(VIZ[topVals.indexOf(+k)])
+}
+const shown = (i) => { const k = keyOf(i); return !S.hide.has(k) && (!S.iso || S.iso === k) }
+function legend() {
+  const rows = scoped.filter(inWin), n = new Map()
+  if (S.by !== 'labels') {
+    const by = new Map()
+    for (const i of rows) by.set(C[S.by][i], (by.get(C[S.by][i]) || 0) + 1)
+    topVals = [...by].filter(([v]) => v).sort((a, b) => b[1] - a[1]).slice(0, VIZ.length).map(([v]) => v)
+  }
+  for (const i of rows) { const k = keyOf(i); n.set(k, (n.get(k) || 0) + 1) }
+  if (S.by === 'labels') return [...D.marks.map((_, j) => ({ k: markKey(j), t: markName(j), c: markColour(j), n: n.get(markKey(j)) || 0, j })), { k: 'none', t: 'No label', c: NONE(), n: n.get('none') || 0 }]
+  const out = topVals.map((v, x) => ({ k: String(v), t: name(S.by, v), c: token(VIZ[x]), n: n.get(String(v)) || 0 }))
+  return n.get('other') ? [...out, { k: 'other', t: 'Other', c: NONE(), n: n.get('other') }] : out
+}
+
+// ---------------------------------------------------------------- popovers: one at a time, closed by a click outside or Escape
+let openPop = null
+function close() { if (openPop) { openPop.anchor.setAttribute('aria-expanded', 'false'); openPop.remove(); openPop = null } }
+function pop(anchor, html, align = 'left') {
+  close()
+  const p = document.createElement('div')
+  p.className = 'pop'
+  p.setAttribute('role', 'menu')
+  p.innerHTML = html
+  document.body.appendChild(p)
+  const r = anchor.getBoundingClientRect(), w = p.offsetWidth
+  p.style.top = Math.max(6, Math.min(r.bottom + 4, innerHeight - p.offsetHeight - 6)) + 'px'
+  p.style.left = Math.max(6, Math.min(innerWidth - w - 6, align === 'right' ? r.right - w : r.left)) + 'px'
+  p.anchor = anchor
+  anchor.setAttribute('aria-expanded', 'true')
+  openPop = p
+  return p
+}
+document.addEventListener('mousedown', (e) => { if (openPop && !openPop.contains(e.target) && !openPop.anchor.contains(e.target)) close() })
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') close() })
+const toggled = (anchor) => (openPop && openPop.anchor === anchor ? (close(), true) : false)
+
+// ---------------------------------------------------------------- the control row
+function daysText() {
+  const days = picked()
+  if (!days.length) return ''
+  if (days.length === 1) return `<span class="k">Day</span> <span class="v">${dm(days[0])}</span>`
+  const idx = days.map((d) => ALLDAYS.indexOf(d))
+  const run = idx.every((v, i) => i === 0 || v === idx[i - 1] + 1)
+  const sameMonth = days[0].slice(0, 7) === days[days.length - 1].slice(0, 7)
+  const v = run ? `${sameMonth ? +days[0].slice(8, 10) : dm(days[0])}–${dm(days[days.length - 1])}`
+    : days.length <= 3 && sameMonth ? `${days.map((d) => +d.slice(8, 10)).join(', ')} ${MONTH[+days[0].slice(5, 7) - 1]}` : `${days.length} days`
+  return `<span class="k">Days</span> <span class="v">${v}</span>`
+}
+function daysMenu() {
+  const b = document.getElementById('f-days')
+  if (toggled(b)) return
+  const per = new Map()
+  for (let i = 0; i < N; i++) if (passes(i)) per.set(dayOf(T[i]), (per.get(dayOf(T[i])) || 0) + 1)
+  const all = !S.days
+  const rows = ALLDAYS.map((d) => `<button class="item" data-day="${d}" title="Click for this day alone, ⇧-click for a range"><span class="box${all || S.days.has(d) ? ' on' : ''}" title="Add or remove this day"></span><span class="lab">${weekday(d).slice(0, 3)} ${dm(d)}</span><span class="n">${per.get(d) || 0}</span></button>`).join('')
+  const p = pop(b, `<button class="item" data-day="*"><span class="box${all ? ' on' : ''}"></span><span class="lab">All days</span></button><div class="sep"></div>${rows}`)
+  p.onclick = (ev) => {
+    const it = ev.target.closest('[data-day]')
+    if (!it) return
+    const d = it.dataset.day
+    if (d === '*') S.days = null
+    else if (ev.shiftKey && S.lastDay) {
+      const a = ALLDAYS.indexOf(S.lastDay), z = ALLDAYS.indexOf(d)
+      S.days = new Set(ALLDAYS.slice(Math.min(a, z), Math.max(a, z) + 1))
+    } else if (ev.target.closest('.box')) {
+      const set = new Set(S.days || ALLDAYS)
+      set.has(d) ? set.delete(d) : set.add(d)
+      S.days = set.size ? set : null
+    } else S.days = new Set([d])
+    if (S.days && S.days.size === ALLDAYS.length) S.days = null
+    if (d !== '*') S.lastDay = d
+    S.win = null
+    if (S.open != null && rowAt.has(S.open) && !inDays(rowAt.get(S.open))) { S.open = null; S.detail = null }
+    close(); rescope()
+  }
+}
+function counts(k) {
+  const n = new Map()
+  for (let i = 0; i < N; i++) if (inDays(i) && passes(i, k)) n.set(C[k][i], (n.get(C[k][i]) || 0) + 1)
+  for (const v of S.f[k]) if (!n.has(v)) n.set(v, 0)
+  return [...n].sort((a, b) => (a[0] === 0) - (b[0] === 0) || b[1] - a[1])
+}
+function fbtn(k) {
+  const b = document.getElementById('f-' + k), set = S.f[k]
+  const v = set.size === 1 ? (name(k, [...set][0]) || 'none') : set.size ? `${set.size}` : ''
+  b.classList.toggle('is-set', set.size > 0)
+  b.innerHTML = `${FNAME[k]}${v ? `: <span class="v">${esc(v)}</span>` : ''}${ico('down')}`
+}
+function checklist(k, max = 99) {
+  const all = counts(k), sel = S.f[k]
+  const rows = all.slice(0, max).map(([v, n]) => `<button class="item" data-k="${k}" data-v="${v}"><span class="box${sel.has(v) ? ' on' : ''}"></span><span class="lab${v ? '' : ' none'}">${esc(name(k, v) || 'No ' + FNAME[k].toLowerCase())}</span><span class="n">${n}</span></button>`).join('')
+  return rows + (all.length > max ? `<button class="more-link" data-all="${k}">${all.length - max} more</button>` : '')
+}
+function toggle(k, v) { const s = S.f[k]; s.has(v) ? s.delete(v) : s.add(v); rescope() }
+function filterMenu(k) {
+  const b = document.getElementById('f-' + k)
+  if (toggled(b)) return
+  const p = pop(b, checklist(k))
+  p.onclick = (ev) => { const it = ev.target.closest('[data-v]'); if (it) { toggle(k, +it.dataset.v); it.querySelector('.box').classList.toggle('on') } }
+}
+function moreMenu(expand) {
+  const b = document.getElementById('f-more')
+  if (!expand && toggled(b)) return
+  const secs = MORE.map((k) => `<div class="head">${FNAME[k]}</div>${checklist(k, k === expand ? 99 : 5)}`).join('')
+  const took = `<div class="head">Took to answer</div><div class="range"><input class="field" data-t="0" inputmode="numeric" placeholder="min" value="${S.took[0] ?? ''}"> to <input class="field" data-t="1" inputmode="numeric" placeholder="max" value="${S.took[1] ?? ''}"> minutes</div>`
+  const p = pop(b, secs + took)
+  p.onclick = (ev) => {
+    const all = ev.target.closest('[data-all]')
+    if (all) return moreMenu(all.dataset.all)
+    const it = ev.target.closest('[data-v]')
+    if (it) { toggle(it.dataset.k, +it.dataset.v); it.querySelector('.box').classList.toggle('on') }
+  }
+  for (const i of p.querySelectorAll('[data-t]')) i.oninput = () => { S.took[+i.dataset.t] = i.value === '' || isNaN(+i.value) ? null : +i.value; render() }
+}
+function renderCtl() {
+  const days = document.getElementById('f-days')
+  days.innerHTML = `${daysText()}${ico('down')}`
+  days.classList.toggle('is-set', !!S.days)
+  fbtn('incident'); fbtn('source')
+  const n = MORE.reduce((s, k) => s + S.f[k].size, 0) + (S.took[0] != null || S.took[1] != null ? 1 : 0)
+  const more = document.getElementById('f-more')
+  more.innerHTML = `More filters${n ? ` <span class="n">${n}</span>` : ''}${ico('down')}`
+  more.classList.toggle('is-set', n > 0)
+  const chips = []
+  for (const k of MORE) for (const v of S.f[k]) chips.push(`<span class="fchip"><span class="k">${FNAME[k]}</span>${esc(name(k, v) || 'none')}<button data-k="${k}" data-v="${v}" aria-label="Remove">${ico('x')}</button></span>`)
+  if (S.took[0] != null || S.took[1] != null) chips.push(`<span class="fchip"><span class="k">Took</span>${S.took[0] ?? 0}–${S.took[1] ?? '∞'} min<button data-took aria-label="Remove">${ico('x')}</button></span>`)
+  document.getElementById('chips').innerHTML = chips.join('')
+  renderColour()
+}
+document.getElementById('chips').onclick = (ev) => {
+  const b = ev.target.closest('button')
+  if (!b) return
+  if (b.dataset.took != null) S.took = [null, null]
+  else S.f[b.dataset.k].delete(+b.dataset.v)
+  rescope()
+}
+
+// the colour control: what colours the marks, then its legend; a legend value alone on a click, hidden on a shift-click
+const allLabels = () => labelState.all || labelState.labels.map((l) => ({ ...l, on: true }))
+function renderColour() {
+  const by = S.by === 'labels' ? 'Labels' : FNAME[S.by]
+  const items = legend().map((x) => {
+    const cls = S.hide.has(x.k) ? ' off' : S.iso === x.k ? '' : S.iso ? ' dim' : ''
+    const l = x.j != null ? labelBy(D.marks[x.j].label) : null
+    const can = !!(l && l.id && (labelState.palette || []).length && thimble.setLabelColour)
+    const sw = `<span class="swb${can ? ' can' : ''}"${can ? ` data-pal="${esc(l.id)}" data-value="${esc(D.marks[x.j].value)}" data-label="${esc(l.id)}" title="Change the colour"` : ''}><span class="sw" style="--c:${x.c}"></span></span>`
+    return `<button class="lg${cls}" type="button" data-k="${esc(x.k)}" title="Click: only this · Shift-click: hide">${sw}<span class="t">${esc(x.t)}</span><span class="n">${x.n}</span></button>`
+  }).join('')
+  const el = document.getElementById('colour')
+  el.innerHTML = `<button class="btn btn-ghost btn-sm by" id="colourBy" type="button" aria-haspopup="menu">${ico('palette')}Colour by <b>${by}</b>${ico('down')}</button>${items}`
+  el.querySelector('#colourBy').onclick = (ev) => colourMenu(ev.currentTarget)
+  for (const b of el.querySelectorAll('.lg')) b.onclick = (ev) => {
+    const sw = ev.target.closest('[data-pal]')
+    if (sw) return palette(sw, sw.dataset.pal, sw.dataset.value)
+    const k = b.dataset.k
+    if (ev.shiftKey || ev.altKey) { S.hide.has(k) ? S.hide.delete(k) : S.hide.add(k); if (S.iso === k) S.iso = null }
+    else S.iso = S.iso === k ? null : k
+    renderView()
+  }
+}
+function colourMenu(anchor) {
+  if (toggled(anchor)) return
+  const bys = [['labels', 'Labels'], ...FIELDS].map(([k, n]) => `<button class="item" data-by="${k}"${k === 'labels' && !D.marks.length ? ' disabled' : ''}><span class="lab${k === 'labels' && !D.marks.length ? ' none' : ''}">${n}</span>${S.by === k ? ico('check', 'ico tick-on') : ''}</button>`).join('')
+  const labs = allLabels().map((l) => `<button class="item" data-lab="${esc(l.id || '')}" data-label="${esc(l.id || '')}"${l.id && thimble.setLabel ? '' : ' disabled'}><span class="switch${l.on ? ' on' : ''}"></span><span class="sw" style="--c:${esc(l.colour || NONE())}"></span><span class="lab">${esc(l.name)}</span></button>`).join('')
+  const add = thimble.newLabel ? `<div class="sep"></div><button class="item" data-new>${ico('plus')}<span class="lab">New label</span></button>` : ''
+  const p = pop(anchor, `<div class="head">Colour by</div>${bys}${labs ? `<div class="head">Labels over these files</div>${labs}` : ''}${add}`, 'right')
+  p.onclick = (ev) => {
+    const b = ev.target.closest('[data-by],[data-lab],[data-new]')
+    if (!b || b.disabled) return
+    if (b.dataset.by) { S.by = b.dataset.by; S.iso = null; S.hide.clear(); close(); return renderView() }
+    if (b.dataset.new != null) { close(); return thimble.newLabel() }
+    const l = allLabels().find((x) => x.id === b.dataset.lab)
+    if (l) { thimble.setLabel(l.id, !l.on); b.querySelector('.switch').classList.toggle('on') }
+  }
+}
+function palette(anchor, id, value) {
+  const l = allLabels().find((x) => x.id === id)
+  const cur = String((l && ((l.values || []).find((v) => v.name === value) || {}).colour) || '').toLowerCase()
+  const p = pop(anchor, `<div class="pal" data-label="${esc(id)}">${labelState.palette.map((c) => `<button style="--c:${esc(c)}" data-c="${esc(c)}" class="${c.toLowerCase() === cur ? 'cur' : ''}" aria-label="Colour ${esc(c)}"></button>`).join('')}</div>`)
+  p.onclick = (ev) => { const b = ev.target.closest('[data-c]'); if (b) { thimble.setLabelColour(id, value, b.dataset.c); close() } }
+}
+
+// ---------------------------------------------------------------- the strip
+// The whole span in bins stacked in the marks' colours; a drag picks the window, a drag inside it moves it, a double
+// click lets it go.
+const W = () => document.getElementById('chart').clientWidth - 28
+const binSize = (span) => [300, 600, 900, 1800, 3600, 7200, 10800, 21600, 43200, 86400].find((b) => span / b <= 160) || 86400
+const tickStep = (span, px) => [600, 1800, 3600, 7200, 10800, 21600, 43200, 86400, 172800, 604800].find((s) => px / (span / s) >= 64) || 604800
+function renderStrip() {
+  const svg = document.getElementById('strip'), w = W(), x0 = G, x1 = w - 4, h = 30
+  const X = (t) => x0 + ((t - H0) / (H1 - H0)) * (x1 - x0)
+  const B = binSize(H1 - H0), bins = new Map()
+  for (const i of scoped) if (shown(i)) { const b = Math.floor(T[i] / B) * B; const m = bins.get(b) || []; m.push(i); bins.set(b, m) }
+  const max = Math.max(4, ...[...bins.values()].map((m) => m.length)), none = NONE()
+  let s = `<line class="rule" x1="${x0}" x2="${x1}" y1="${h + 0.5}" y2="${h + 0.5}"/>`
+  for (const [b, m] of bins) {
+    let y = h
+    const bw = Math.max(1, X(b + B) - X(b) - 1.2), groups = new Map()
+    for (const i of m) { const c = colourOf(i); groups.set(c, (groups.get(c) || 0) + 1) }
+    for (const [c, n] of [...groups].sort((p, q) => (p[0] === none) - (q[0] === none))) { const hh = (n / max) * (h - 2); y -= hh; s += `<rect x="${X(b) + 0.6}" y="${y}" width="${bw}" height="${hh}" fill="${c}"/>` }
+  }
+  const TK = tickStep(H1 - H0, x1 - x0)
+  for (let t = Math.ceil(H0 / TK) * TK; t <= H1; t += TK) {
+    const mid = multi() && t % 86400 === 0
+    if (mid) s += `<line class="midnight" x1="${X(t)}" x2="${X(t)}" y1="0" y2="${h}"/>`
+    if (t === H1 && multi()) continue
+    s += `<text x="${X(t)}" y="${h + 12}" text-anchor="${t === H0 ? 'start' : t === H1 ? 'end' : 'middle'}"${mid ? ' class="day"' : ''}>${mid ? dm(dayOf(t)) : hhmm(t)}</text>`
+  }
+  if (S.win) {
+    const a = X(S.win[0]), b = X(S.win[1])
+    s += `<rect x="${x0}" y="0" width="${Math.max(0, a - x0)}" height="${h}" fill="var(--surface-card)" opacity=".7"/><rect x="${b}" y="0" width="${Math.max(0, x1 - b)}" height="${h}" fill="var(--surface-card)" opacity=".7"/>`
+    s += `<rect x="${a}" y="-1.5" width="${b - a}" height="${h + 2}" rx="2" fill="none" stroke="var(--text-primary)" stroke-width="1.5"/>`
+  }
+  svg.setAttribute('width', w); svg.setAttribute('height', h + 16)
+  svg.innerHTML = s
+  svg.X = X; svg.x0 = x0; svg.x1 = x1
+  const n = scoped.filter((i) => inWin(i) && shown(i)).length
+  const whole = multi() ? `${picked().length} days` : 'All day'
+  document.getElementById('gut').innerHTML = S.win
+    ? `<span class="win">${multi() ? dm(dayOf(S.win[0])) + ' ' : ''}${hhmm(S.win[0])}–${hhmm(S.win[1])}<button id="unwin" type="button" title="Show the whole span" aria-label="Show the whole span">${ico('x')}</button></span><span class="n">${plural(n, 'event')}</span>`
+    : `<span>${whole}</span><span class="n">${plural(n, 'event')}</span>`
+  const u = document.getElementById('unwin')
+  if (u) u.onclick = () => { S.win = null; renderView() }
+}
+;(() => {
+  const svg = document.getElementById('strip')
+  let drag = null
+  const tAt = (ev) => { const r = svg.getBoundingClientRect(), x = Math.max(svg.x0, Math.min(svg.x1, ev.clientX - r.left)); return H0 + ((x - svg.x0) / (svg.x1 - svg.x0)) * (H1 - H0) }
+  svg.onpointerdown = (ev) => {
+    if (ev.clientX - svg.getBoundingClientRect().left < svg.x0 - 4) return
+    const t = tAt(ev)
+    drag = S.win && t > S.win[0] && t < S.win[1] ? { move: t, w: [...S.win] } : { from: t }
+    svg.setPointerCapture(ev.pointerId)
+  }
+  svg.onpointermove = (ev) => {
+    if (!drag) return
+    const t = tAt(ev)
+    if (drag.move != null) { const d = Math.max(H0 - drag.w[0], Math.min(H1 - drag.w[1], t - drag.move)); S.win = [drag.w[0] + d, drag.w[1] + d] }
+    else if (Math.abs(t - drag.from) > (H1 - H0) / 400) S.win = [Math.min(t, drag.from), Math.max(t, drag.from)].map((v) => Math.round(v / 60) * 60)
+    else return
+    S.limit = ROWS
+    renderView()
+  }
+  svg.onpointerup = () => { drag = null }
+  svg.ondblclick = () => { S.win = null; renderView() }
+})()
+
+// ---------------------------------------------------------------- the lanes
+// One lane per value of the Lanes field, the window's events as marks in their colours. While an event is open, the
+// event it answers and those that answer it are linked to it.
+function laneValues(rows) {
+  const k = S.lanesBy, n = new Map()
+  for (const i of rows) n.set(C[k][i], (n.get(C[k][i]) || 0) + 1)
+  const vals = [...n.keys()]
+  if (k === 'source') vals.sort((a, b) => SOURCE_ORDER.indexOf(name(k, a)) - SOURCE_ORDER.indexOf(name(k, b)))
+  else vals.sort((a, b) => (a === 0) - (b === 0) || n.get(b) - n.get(a))
+  return vals.length > LANES ? [...vals.slice(0, LANES - 1), -1] : vals
+}
+function renderLanes() {
+  const svg = document.getElementById('lanes'), w = W(), x0 = G, x1 = w - 4, LH = 24, top = S.win ? 22 : 6
+  const rows = scoped.filter(inWin)
+  const lo = S.win ? S.win[0] : H0, hi = S.win ? S.win[1] : H1
+  const X = (t) => x0 + ((t - lo) / (hi - lo || 1)) * (x1 - x0)
+  const vals = laneValues(rows), lane = (i) => { const v = C[S.lanesBy][i]; return vals.includes(v) ? v : -1 }
+  let s = ''
+  const step = tickStep(hi - lo, x1 - x0)
+  for (let t = Math.ceil(lo / step) * step; t <= hi; t += step) {
+    const mid = multi() && t % 86400 === 0
+    s += `<line class="${mid ? 'midnight' : 'grid'}" x1="${X(t)}" x2="${X(t)}" y1="${top - 4}" y2="${top + vals.length * LH}"/>`
+    if (S.win) s += `<text x="${X(t)}" y="${top - 8}" text-anchor="middle">${mid ? dm(dayOf(t)) : hhmm(t)}</text>`
+  }
+  const sel = S.open != null && rowAt.has(S.open) ? rowAt.get(S.open) : null
+  const linked = new Set()
+  if (sel != null) {
+    if (C.re[sel] >= 0 && rowAt.has(C.re[sel])) linked.add(rowAt.get(C.re[sel]))
+    for (const b of (S.detail && S.detail.answered) || []) if (rowAt.has(b.r)) linked.add(rowAt.get(b.r))
+  }
+  const pos = new Map(), mw = S.win ? 4 : 3
+  vals.forEach((v, li) => {
+    const y = top + li * LH
+    const mine = rows.filter((i) => lane(i) === v && shown(i))
+    const label = v === -1 ? 'Other' : name(S.lanesBy, v) || 'No ' + FNAME[S.lanesBy].toLowerCase()
+    const anchor = S.lanesBy === 'incident' && v > 0 ? ` data-anchor="view:${slug}/${esc(label)}" data-anchor-text="${esc(label)}"` : ''
+    s += `<line class="rule" x1="0" x2="${x1}" y1="${y + LH + 0.5}" y2="${y + LH + 0.5}"/>`
+    s += `<g class="lanehead"${anchor}><text class="lane" x="0" y="${y + 16}">${esc(label.length > 15 ? label.slice(0, 14) + '…' : label)}<title>${esc(label)}</title></text><text class="lane-n" x="${G - 14}" y="${y + 16}" text-anchor="end">${mine.length}</text></g>`
+    for (const i of mine) {
+      const x = X(T[i])
+      pos.set(i, [x, y + LH / 2])
+      const isSel = i === sel, isLink = linked.has(i)
+      s += `<rect class="tick" data-i="${i}" x="${x - mw / 2}" y="${y + (isSel ? 3 : 6)}" width="${mw}" height="${isSel ? LH - 6 : LH - 12}" rx="1" fill="${colourOf(i)}"${isSel || isLink ? ' stroke="var(--text-primary)" stroke-width="1.5"' : ''}/>`
+    }
+  })
+  if (sel != null && pos.has(sel)) for (const i of linked) if (pos.has(i)) {
+    const [ax, ay] = pos.get(sel), [bx, by] = pos.get(i), my = Math.min(ay, by) - (ay === by ? 16 : 8)
+    s = `<path d="M${ax},${ay} C${ax},${my} ${bx},${my} ${bx},${by}" fill="none" stroke="var(--text-primary)" stroke-opacity=".45" stroke-width="1"/>` + s
+  }
+  svg.setAttribute('width', w); svg.setAttribute('height', top + vals.length * LH + 4)
+  svg.style.marginTop = '26px'
+  svg.innerHTML = s
+  const lb = document.getElementById('lanesBy')
+  lb.innerHTML = `Lanes: <b>${FNAME[S.lanesBy]}</b>${ico('down')}`
+  lb.style.top = (document.getElementById('strip').getBoundingClientRect().bottom - document.getElementById('chart').getBoundingClientRect().top + 2) + 'px'
+}
+document.getElementById('lanesBy').onclick = (ev) => {
+  const b = ev.currentTarget
+  if (toggled(b)) return
+  const p = pop(b, `<div class="head">Lanes by</div>${LANE_FIELDS.map((k) => `<button class="item" data-l="${k}"><span class="lab">${FNAME[k]}</span>${S.lanesBy === k ? ico('check', 'ico tick-on') : ''}</button>`).join('')}`)
+  p.onclick = (e2) => { const it = e2.target.closest('[data-l]'); if (it) { S.lanesBy = it.dataset.l; close(); renderLanes() } }
+}
+const lanesSvg = document.getElementById('lanes')
+lanesSvg.addEventListener('click', (ev) => { const t = ev.target.closest('.tick'); if (t) pick(C.r[+t.dataset.i], true) })
+const tip = document.getElementById('tip')
+let tipFor = null
+lanesSvg.addEventListener('mousemove', async (ev) => {
+  const t = ev.target.closest('.tick')
+  if (!t) { tipFor = null; tip.style.display = 'none'; return }
+  const i = +t.dataset.i, r = C.r[i]
+  tipFor = i
+  if (!texts.has(r)) { await fetchTexts([r]); if (tipFor !== i) return }
+  tip.innerHTML = `<div class="h">${multi() ? dm(dayOf(T[i])) + ' ' : ''}${hhmm(T[i], 1)} · ${esc(name('source', C.source[i]))} · ${esc(name('actor', C.actor[i]))}</div>${esc((texts.get(r) || '').slice(0, 200))}`
+  tip.style.display = 'block'
+  tip.style.left = Math.max(4, Math.min(innerWidth - tip.offsetWidth - 8, ev.clientX + 12)) + 'px'
+  tip.style.top = Math.min(innerHeight - tip.offsetHeight - 8, ev.clientY + 14) + 'px'
+})
+lanesSvg.addEventListener('mouseleave', () => { tipFor = null; tip.style.display = 'none' })
+
+// ---------------------------------------------------------------- the list
+async function fetchTexts(rows) {
+  const want = rows.filter((r) => !texts.has(r))
+  for (let p = 0; p < want.length; p += 1000) {
+    const res = await thimble.fetch({ op: 'texts', rows: want.slice(p, p + 1000) })
+    for (const [row, t] of res.texts) texts.set(row, t)
+  }
+}
+let listSeq = 0
+async function renderList() {
+  const my = ++listSeq
+  const rows = scoped.filter((i) => inWin(i) && shown(i))
+  const drawn = rows.slice(0, S.limit)
+  await fetchTexts(drawn.map((i) => C.r[i]))
+  if (my !== listSeq) return
+  const perDay = new Map()
+  for (const i of rows) perDay.set(dayOf(T[i]), (perDay.get(dayOf(T[i])) || 0) + 1)
+  let h = '', day = null
+  for (const i of drawn) {
+    const d = dayOf(T[i])
+    if (multi() && d !== day) {
+      day = d
+      h += `<tr class="day" data-anchor="view:${slug}/${d}" data-anchor-text="${weekday(d)} ${dm(d)}"><td colspan="6">${weekday(d)} ${dm(d)}<span class="n">${plural(perDay.get(d), 'event')}</span></td></tr>`
+    }
+    const r = C.r[i], ref = refOf(i), failed = name('outcome', C.outcome[i]) === 'failed', inc = name('incident', C.incident[i])
+    const text = texts.get(r) || ''
+    h += `<tr data-r="${r}" data-anchor="${esc(ref)}" data-anchor-text="${esc(text)}" class="${S.open === r ? 'sel' : ''}"><td class="t">${hhmm(T[i], 1)}</td><td class="b">${esc(name('source', C.source[i]))}</td><td class="b k${failed ? ' err' : ''}"${failed ? ' title="Outcome: failed"' : ''}>${failed ? ico('err') : ''}${esc(name('kind', C.kind[i]))}</td><td class="b">${esc(name('actor', C.actor[i]))}</td><td class="b i${inc ? '' : ' none'}">${esc(inc || '—')}</td><td class="x">${esc(text)}</td></tr>`
+    if (S.open === r) h += `<tr class="det" data-anchor="${esc(ref)}" data-anchor-text="${esc(text)}"><td colspan="6">${details(i)}</td></tr>`
+  }
+  if (rows.length > drawn.length) h += `<tr class="more"><td colspan="6"><button class="btn btn-secondary btn-sm" id="showMore" type="button">Show ${Math.min(ROWS, rows.length - drawn.length)} more of ${rows.length - drawn.length}</button></td></tr>`
+  if (!rows.length) h = `<tr class="day"><td colspan="6" class="empty">No events pass these filters</td></tr>`
+  document.getElementById('tb').innerHTML = h
+  const more = document.getElementById('showMore')
+  if (more) more.onclick = () => { S.limit += ROWS; renderList() }
+}
+function linkRow(b, took) {
+  const sameDay = S.detail && dayOf(b.t) === dayOf(S.detail.t)
+  return `<div class="link" data-go="${b.r}" data-anchor="${esc(b.ref)}" data-anchor-text="${esc(b.text)}"><span class="t">${sameDay ? hhmm(b.t, 1) : dm(dayOf(b.t)) + ' ' + hhmm(b.t)}</span><span class="w">${esc(b.source)} · ${esc(b.actor)}</span><span class="x">${esc(b.text)}</span><span class="tk">${took != null ? '+' + dur(took) : ''}</span></div>`
+}
+function details(i) {
+  const d = S.detail
+  if (!d || d.r !== C.r[i]) return '<div class="empty">Reading the event</div>'
+  const rec = d.record || {}
+  const f = (k, v, cls = '', wide = false) => (v ? `<div class="fact${wide ? ' wide' : ''}"><dt>${k}</dt><dd class="${cls}">${esc(v)}</dd></div>` : '')
+  const facts = [f('time', `${dm(dayOf(d.t))} ${hhmm(d.t, 1)} UTC`, 'mono', true), f('source', rec.source), f('kind', rec.kind), f('actor', rec.actor),
+    f('service', rec.service), f('severity', rec.severity), f('outcome', rec.outcome, rec.outcome === 'failed' ? 'err' : ''),
+    f('incident', rec.incident), f('id', rec.id, 'mono'), C.tk[i] >= 0 ? f('took', dur(C.tk[i]), 'mono') : '']
+  const raw = S.raw ? `<div class="raw">${(d.raw || []).map(([n, s]) => `<span class="ln">${n}</span>${esc(s)}`).join('\n')}</div>` : ''
+  const ans = d.answers ? `<div class="d-sec">Answers</div>${linkRow(d.answers, C.tk[i] >= 0 ? C.tk[i] : null)}` : ''
+  const by = d.answered.length ? `<div class="d-sec">Answered by<span class="n">${d.answered.length}</span></div>${d.answered.map((b) => linkRow(b, b.t - d.t)).join('')}` : ''
+  return `<div class="d-top"><p class="d-text">${esc(rec.text || '')}</p><span class="d-side"><span class="seg seg-track"><button class="seg-opt${S.raw ? '' : ' active'}" data-raw="0" type="button">Fields</button><button class="seg-opt${S.raw ? ' active' : ''}" data-raw="1" type="button">Raw</button></span><span class="chip chip-sans chip-act" data-file="${esc(d.ref)}" title="Open in the File browser">${ico('file')}${esc(d.ref)}</span></span></div>${S.raw ? raw : `<dl class="facts">${facts.join('')}</dl>`}${ans}${by}`
+}
+document.getElementById('tb').addEventListener('click', (ev) => {
+  const go = ev.target.closest('[data-go]')
+  if (go) return pick(+go.dataset.go, true)
+  const fc = ev.target.closest('[data-file]')
+  if (fc) return thimble.navigate(fc.dataset.file, { browser: true })
+  const rw = ev.target.closest('[data-raw]')
+  if (rw) { S.raw = rw.dataset.raw === '1'; return renderList() }
+  if (ev.target.closest('tr.det')) return
+  const tr = ev.target.closest('tr[data-r]')
+  if (tr) pick(+tr.dataset.r)
+})
+async function pick(r, scroll) {
+  if (S.open === r && !scroll) { S.open = null; S.detail = null; return renderView() }
+  const i = rowAt.get(r)
+  if (i == null) return
+  S.open = r
+  if (!inDays(i)) S.days = null
+  if (!inWin(i)) S.win = null
+  if (!passes(i)) clearFilters()
+  compute()
+  if (!shown(i)) { S.hide.clear(); S.iso = null }
+  const at = scoped.filter((j) => inWin(j) && shown(j)).indexOf(i)
+  if (at >= S.limit) S.limit = at + 1
+  S.detail = null
+  renderCtl(); renderStrip(); renderLanes(); await renderList()
+  if (scroll) document.querySelector(`tr[data-r="${r}"]`)?.scrollIntoView({ block: 'center' })
+  const d = await thimble.fetch({ op: 'record', r, ...(S.keepRow != null ? { keep: [S.keepRow] } : {}) })
+  if (S.open !== r) return
+  S.detail = d
+  renderLanes(); await renderList()
+  if (scroll) document.querySelector(`tr[data-r="${r}"]`)?.scrollIntoView({ block: 'nearest' })
+}
+
+// ---------------------------------------------------------------- render
+function renderView() { renderColour(); renderStrip(); renderLanes(); renderList() }
+function render() { if (!D) return; compute(); renderCtl(); renderStrip(); renderLanes(); renderList() }
+// a change of what is in scope starts the list again at its top
+function rescope() { S.limit = ROWS; document.getElementById('list').scrollTop = 0; render() }
+document.getElementById('f-days').onclick = () => daysMenu()
+document.getElementById('f-incident').onclick = () => filterMenu('incident')
+document.getElementById('f-source').onclick = () => filterMenu('source')
+document.getElementById('f-more').onclick = () => moreMenu()
+let typing = null
+document.getElementById('q').addEventListener('input', (e) => {
+  clearTimeout(typing)
+  typing = setTimeout(async () => {
+    const q = e.target.value.trim()
+    S.q = q
+    if (!q) S.found = null
+    else {
+      const res = await thimble.fetch({ op: 'search', q })
+      if (S.q !== q) return
+      S.found = new Set(res.rows)
+    }
+    rescope()
+  }, 200)
+})
+let resizeTimer = null
+addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(render, 120) })
+
+// ---------------------------------------------------------------- places
+// An event opens in place, its day picked and the filters that would drop it cleared; an incident opens narrowed to
+// it, zoomed to its span; a day opens alone; a window opens zoomed to it.
+function clearFilters() { for (const k of KEYS) S.f[k].clear(); S.found = null; S.q = ''; document.getElementById('q').value = ''; S.hide.clear(); S.iso = null; S.took = [null, null] }
+async function openPlace(t) {
+  if (t.r != null) return pick(t.r, true)
+  if (t.incident) {
+    const v = D.names.incident.indexOf(t.incident)
+    if (v < 0) return render()
+    clearFilters()
+    S.f.incident = new Set([v])
+    let a = Infinity, b = -Infinity
+    const days = new Set()
+    for (let i = 0; i < N; i++) if (C.incident[i] === v) { a = Math.min(a, T[i]); b = Math.max(b, T[i]); days.add(dayOf(T[i])) }
+    S.days = days.size && days.size < ALLDAYS.length ? days : null
+    compute()
+    const padT = Math.max(300, (b - a) * 0.05)
+    S.win = [Math.max(H0, a - padT), Math.min(H1, b + padT)]
+    return render()
+  }
+  if (t.day) { clearFilters(); S.days = ALLDAYS.includes(t.day) && ALLDAYS.length > 1 ? new Set([t.day]) : null; S.win = null; return render() }
+  if (t.from && t.to) {
+    clearFilters()
+    const a = Date.parse(t.from + ':00Z') / 1000, b = Date.parse(t.to + ':00Z') / 1000
+    const days = new Set(ALLDAYS.filter((d) => midnight(d) + 86400 > a && midnight(d) <= b))
+    S.days = days.size && days.size < ALLDAYS.length ? days : null
+    S.win = b > a ? [a, b] : null
+    return render()
+  }
+  render()
+}
+thimble.onOpen(async (place) => {
+  const t = (place && place.target) || {}
+  if (t.r != null) S.keepRow = t.r
+  if (!D || (t.r != null && !rowAt.has(t.r))) { if (!(await load())) return }
+  await openPlace(t)
+})
+thimble.onLabels(async (state) => {
+  const was = JSON.stringify([labelState.labels, labelState.filter])
+  const before = new Set(labelState.labels.map((l) => l.name))
+  labelState = { labels: state.labels || [], filter: state.filter || null, all: state.all || null, palette: state.palette || null }
+  if (!D) return
+  if (JSON.stringify([labelState.labels, labelState.filter]) === was) return renderView()
+  const added = labelState.labels.some((l) => !before.has(l.name))
+  if (!(await load())) return
+  if (added && D.marks.length) S.by = 'labels'
+  S.hide.clear(); S.iso = null
+  if (S.open != null && !rowAt.has(S.open)) { S.open = null; S.detail = null }
+  render()
+})
+</script>
+</body>
+</html>

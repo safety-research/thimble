@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { openInItems } from '../../src/files/OpenIn'
 import { chooseView } from '../../src/files/viewChoice'
+import { claimMatches } from '../../src/files/labels'
 
 const views = [{ slug: 'threads', name: 'Threads' }, { slug: 'timeline', name: 'Timeline' }]
 
@@ -18,5 +19,16 @@ describe('openInItems', () => {
     const none = () => undefined
     expect(openInItems(views, 'threads', none).map((i) => ('label' in i ? i.label : i.id))).toEqual(['Timeline', 'File browser'])
     expect(openInItems(views, null, none).map((i) => ('label' in i ? i.label : i.id))).toEqual(['Threads', 'Timeline'])
+  })
+})
+
+describe('claimMatches', () => {
+  it('lets a ** folder stand for no folder, as the server does', () => {
+    expect(claimMatches('talk.vtt', '**/*.vtt')).toBe(true)
+    expect(claimMatches('a/b/talk.vtt', '**/*.vtt')).toBe(true)
+    expect(claimMatches('runs/events.jsonl', 'runs/**/events.jsonl')).toBe(true)
+    expect(claimMatches('runs/r1/events.jsonl', 'runs/**/events.jsonl')).toBe(true)
+    expect(claimMatches('other/events.jsonl', 'runs/**/events.jsonl')).toBe(false)
+    expect(claimMatches('talk.srt', '**/*.vtt')).toBe(false)
   })
 })

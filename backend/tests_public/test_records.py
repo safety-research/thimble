@@ -3,8 +3,8 @@ of a JSON document, a PDF's pages and a database's rows each have a ref, resolve
 prompt kinds, and are marked in a view, while `<path>#L<n>` keeps working in the same files.
 
 The corpus is invented: orders.csv has three orders after its header, the first with a two-line note; runs.json holds
-two runs in an array under `runs` beside its metadata; report.pdf is the three-page safety review the built-in PDF
-viewer ships as its sample; forge.db is the mini corpus's database (prs 7101, 7114, 7123, 7138, 7152)."""
+two runs in an array under `runs` beside its metadata; report.pdf is a three-page safety review whose second page is
+about crew rest; forge.db is the mini corpus's database (prs 7101, 7114, 7123, 7138, 7152)."""
 from __future__ import annotations
 
 import asyncio
@@ -12,7 +12,6 @@ import contextlib
 import io
 import json
 import os
-import shutil
 from pathlib import Path
 
 import httpx
@@ -23,7 +22,32 @@ from app import concepts, config, kernel_thimble, labels_store, records, refs, v
 from mini_corpus import write_forge_db
 
 CORPUS = "records"
-PDF_SAMPLE = config.REPO_ROOT / "plugin" / "viewers" / "pdf" / "sample" / "reports" / "harbor-line-safety-2026.pdf"
+PAGES = ["Section 1. Overview of the harbor line", "Section 2. Crew rest. Average rest between shifts: 10.4 hours",
+         "Section 3. Fuel and delays"]
+
+
+def tiny_pdf(pages: list[str]) -> bytes:
+    """A valid PDF whose pages each hold one line of text in Helvetica."""
+    objs = ["<< /Type /Catalog /Pages 2 0 R >>", ""]
+    kids = []
+    for text in pages:
+        stream = f"BT /F1 12 Tf 72 700 Td ({text}) Tj ET"
+        content = len(objs) + 1
+        objs.append(f"<< /Length {len(stream)} >>\nstream\n{stream}\nendstream")
+        kids.append(len(objs) + 1)
+        objs.append(f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents {content} 0 R "
+                    f"/Resources << /Font << /F1 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> >> >> >>")
+    objs[1] = f"<< /Type /Pages /Kids [{' '.join(f'{k} 0 R' for k in kids)}] /Count {len(kids)} >>"
+    out = bytearray(b"%PDF-1.4\n")
+    offsets = []
+    for i, body in enumerate(objs, 1):
+        offsets.append(len(out))
+        out += f"{i} 0 obj\n{body}\nendobj\n".encode()
+    xref = len(out)
+    out += f"xref\n0 {len(objs) + 1}\n0000000000 65535 f \n".encode()
+    out += "".join(f"{o:010d} 00000 n \n" for o in offsets).encode()
+    out += f"trailer\n<< /Size {len(objs) + 1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n".encode()
+    return bytes(out)
 CSV = 'id,customer,note\n1,ana,"refund asked\nafter two days"\n2,ben,charger works\n\n3,cy,"refund, again"\n'
 RUNS = {"meta": {"n": 2}, "runs": [{"id": "r1", "outcome": "refund given"}, {"id": "r2", "outcome": "no refund"}],
         "tags": ["a", "b"]}
@@ -38,7 +62,7 @@ def _write(root: Path) -> Path:
     (root / "lines.json").write_text('{"a": 1}\n{"a": 2}\n')
     (root / "notes.jsonl").write_text(json.dumps({"text": "refund please"}) + "\n" + json.dumps({"text": "thanks"}) + "\n")
     (root / "blob.bin").write_bytes(b"\x00\x01\x02" * 10)
-    shutil.copy(PDF_SAMPLE, root / "report.pdf")
+    (root / "report.pdf").write_bytes(tiny_pdf(PAGES))
     write_forge_db(root / "forge.db")
     return root
 
@@ -347,7 +371,7 @@ def _runs_of(corpus: Path) -> None:
         (corpus / "runs" / run / "agents" / "a.jsonl").write_text(json.dumps({"text": line}) + "\n")
         (corpus / "runs" / run / "manifest.json").write_text(json.dumps({"run": run}))
     write_forge_db(corpus / "runs" / "r1" / "forge.db")
-    shutil.copy(PDF_SAMPLE, corpus / "runs" / "r2" / "review.pdf")
+    (corpus / "runs" / "r2" / "review.pdf").write_bytes(tiny_pdf(PAGES))
 
 
 async def test_a_run_unit_reads_the_rows_of_its_database_and_the_pages_of_its_pdf(api, corpus, workspaces_tmp, monkeypatch):

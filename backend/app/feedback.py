@@ -853,7 +853,7 @@ def _views(b: Bundle, ws: Path) -> None:
     if props:
         room -= b.rows("workspace/views.jsonl", [trimmed(r) for r in props], min(STATE_MAX, room),
                        "the view proposals and their builds")
-    d = ws / "views"
+    d = ws / "extension" / "views"  # the workspace's local extension (views.views_dir)
     files, views = 0, set()
     for p in sorted(d.glob("*/*")) if d.is_dir() else []:
         if p.suffix not in VIEW_SUFFIXES or not _own_file(p, ws):

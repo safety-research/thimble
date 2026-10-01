@@ -1,5 +1,5 @@
 // Chart theming from the design tokens, read from the document when a chart is built (fallbacks are the light tokens'
-// values). Single and ordered series take the ink ramp; nominal groups of more than two take Okabe–Ito hues (tokens.css),
+// values). Single and ordered series take the ink ramp; nominal groups of more than two take the nominal hues (tokens.css),
 // distinct under common colour-vision deficiencies, and every series is named in the legend. Axis and legend labels are
 // mono at 11 px. The accent is never a series.
 const FALLBACK: Record<string, string> = {
@@ -13,13 +13,13 @@ const FALLBACK: Record<string, string> = {
   '--viz-ink-2': '#6b675f',
   '--viz-ink-3': '#a19d94',
   '--viz-ink-4': '#cfcbc2',
-  '--viz-1': '#0072b2',
-  '--viz-2': '#e69f00',
-  '--viz-3': '#009e73',
-  '--viz-4': '#d62728',
-  '--viz-5': '#cc79a7',
-  '--viz-6': '#8c65e8',
-  '--viz-7': '#8a6d3b',
+  '--viz-1': '#025ac3',
+  '--viz-2': '#d0750a',
+  '--viz-3': '#08632f',
+  '--viz-4': '#1392d4',
+  '--viz-5': '#897301',
+  '--viz-6': '#009c85',
+  '--viz-7': '#844500',
   '--viz-8': '#1b1a18',
   '--viz-9': '#a19d94',
   '--label-1': '#0072b2',
@@ -37,8 +37,8 @@ const FALLBACK: Record<string, string> = {
   '--label-none': '#a09c93',
 }
 export const LABEL_LIMIT = 240
-/** the nominal palette (tokens.css): Okabe–Ito with its vermillion and sky blue replaced by a red and a violet, five,
- * then two more when a chart needs them */
+/** the nominal palette (tokens.css): seven hues with no red and no purple, blue, orange, green, sky, gold, teal and
+ * brown, in that order */
 export const VIZ_SERIES = ['--viz-1', '--viz-2', '--viz-3', '--viz-4', '--viz-5', '--viz-6', '--viz-7']
 /** the ink ramp, darkest first */
 export const VIZ_INK = ['--viz-ink-1', '--viz-ink-2', '--viz-ink-3', '--viz-ink-4']
@@ -84,7 +84,7 @@ export function vegaConfig(): Record<string, unknown> {
     header: { labelColor: ink[0], labelFont: font, labelFontSize: 11.5, labelFontWeight: 500, titleColor: label, titleFont: font, titleFontSize: 11, titleFontWeight: 500 },
     headerRow: { labelAngle: 0, labelOrient: 'top', labelAnchor: 'start', labelAlign: 'left', labelPadding: 4 },
     title: { color: ink[0], font, fontSize: 13, fontWeight: 500, anchor: 'start' },
-    // nominal groups: Okabe–Ito; an ordered scale climbs the ink ramp from light to dark, so the top is the darkest
+    // nominal groups: the nominal hues; an ordered scale climbs the ink ramp from light to dark, so the top is the darkest
     range: { category: VIZ_SERIES.map(token), ordinal: [...ink].reverse(), ramp: [ink[3], ink[0]] },
     mark: { color: ink[0] },
     line: { strokeWidth: 1.5, stroke: ink[0] },

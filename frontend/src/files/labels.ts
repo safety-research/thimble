@@ -603,26 +603,41 @@ export function draftBody(d: LabelDraft, colour: number, used: readonly number[]
   }
 }
 
-/** Whether a corpus path is one a view's claim names, as the server matches claims (backend views.glob_matches): the
- * glob against the whole path or its file name, `*` spanning folders as fnmatch's does; '' or '*' names every file.
- * Pure. */
-export function claimMatches(path: string, claim: string): boolean {
-  if (!claim || claim === '*') return true
-  let re = ''
-  for (let i = 0; i < claim.length; i++) {
-    const ch = claim[i]
-    if (ch === '*') re += '.*'
-    else if (ch === '?') re += '.'
-    else if (ch === '[' && claim.indexOf(']', i + 2) > i) {
-      const end = claim.indexOf(']', i + 2)
-      const body = claim.slice(i + 1, end)
-      re += `[${body.startsWith('!') ? `^${body.slice(1)}` : body}]`
-      i = end
-    } else re += ch.replace(/[.+^${}()|\\]/g, '\\$&')
+/** Whether a corpus path is one a view's claim names, as the server matches claims (globMatches). Pure. */
+export const claimMatches = (path: string, claim: string): boolean => globMatches(path, claim)
+
+const globs = new Map<string, RegExp>()
+
+/** A claim's glob as the server matches it (views.glob_matches, Python's fnmatch): `*` crosses folders, a `**` folder
+ * may also stand for no folder, and a glob matches the whole path or its file name. */
+export function globMatches(path: string, glob: string): boolean {
+  if (!glob || glob === '*') return true
+  let re = globs.get(glob)
+  if (!re) {
+    const src = (g: string) => {
+      let out = ''
+      for (let i = 0; i < g.length; i++) {
+        const ch = g[i]
+        const end = ch === '[' ? g.indexOf(']', i + 2) : -1
+        if (ch === '*') out += '.*'
+        else if (ch === '?') out += '.'
+        else if (end > 0) {
+          const body = g.slice(i + 1, end).replace(/\\/g, '\\\\')
+          out += '[' + (body[0] === '!' ? '^' + body.slice(1) : body) + ']'
+          i = end
+        } else out += ch.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')
+      }
+      return out
+    }
+    re = new RegExp('^(?:' + src(glob) + '|' + src(withoutFolderStars(glob)) + ')$', 's')
+    globs.set(glob, re)
   }
-  const full = new RegExp(`^${re}$`)
-  return full.test(path) || full.test(path.slice(path.lastIndexOf('/') + 1))
+  return re.test(path) || re.test(path.slice(path.lastIndexOf('/') + 1))
 }
+
+/** The glob with each `**` folder taken out, the form that matches where it stands for no folder (backend
+ * views._glob_forms). */
+export const withoutFolderStars = (glob: string): string => glob.replace(/(^|\/)\*\*\//g, '$1')
 
 /** The labels over files that mark a view's files: those whose rows fall in a file the view claims (their presence,
  * GET /labels/presence). Pure. */

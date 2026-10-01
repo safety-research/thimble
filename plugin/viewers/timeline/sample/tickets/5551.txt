@@ -1,0 +1,15 @@
+Ticket: 5551
+Subject: Refund arrived
+Requester: M. Farrow <m.farrow@example.net>
+
+From: M. Farrow <m.farrow@example.net>
+Date: Tue, 19 May 2026 11:12:30 +0100
+Status: open
+
+The refund for my double charge arrived, thank you.
+
+From: Wren <wren@marrowby-ferries.example>
+Date: Tue, 19 May 2026 11:20:00 +0100
+Status: closed
+
+Glad it arrived.
