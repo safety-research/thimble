@@ -1,6 +1,8 @@
 // The scope header thimble draws above every corpus view (the same code for every view): the unit picker, Combined |
 // Compare, the files the view reads, its derived data per record type, and the lines it could not read. A view gives
-// its unit, files, schema and labels; the header sends the unit's selection back to the view (thimble.onScope).
+// its unit, files, schema and labels, and may add a lead before the strip (`side`, markup or a function of none) and
+// parts after it (`tail`, wired by `wire(host)` once drawn); the header sends the unit's selection back to the view
+// (thimble.onScope).
 ;(function () {
   const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c])
   const svg = (d, size = 14) => `<svg class="icon" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${d}"></path></svg>`
@@ -35,10 +37,14 @@
       }
       h += `<span class="sh-dot">·</span><button type="button" class="view-pane-files" data-pop="files" aria-expanded="${S.open === 'files'}">${plural(files.count, 'file')}</button>`
       h += `<span class="sh-dot">·</span><button type="button" class="view-pane-files" data-pop="derived" aria-expanded="${S.open === 'derived'}">${derivedText()}</button>`
-      if (bad.length) h += `<span class="sh-dot">·</span><button type="button" class="view-pane-files" data-pop="bad" aria-expanded="${S.open === 'bad'}">${bad.length} unreadable ${bad.length === 1 ? 'line' : 'lines'}</button>`
-      host.innerHTML = `${o.side || ''}<div class="sh">${h}</div>`
+      // the lines (or, for a reader of whole files, the files) it could not read, in the strip's ink
+      const what = bad.length > 0 && bad.every((p) => p.ref && !p.ref.includes('#')) ? 'file' : 'line'
+      if (bad.length) h += `<span class="sh-dot">·</span><button type="button" class="view-pane-files view-pane-residue" data-pop="bad" aria-expanded="${S.open === 'bad'}">${bad.length} unreadable ${bad.length === 1 ? what : what + 's'}</button>`
+      if (o.tail) h += o.tail()
+      host.innerHTML = `${(typeof o.side === 'function' ? o.side() : o.side) || ''}<div class="sh">${h}</div>`
       for (const b of host.querySelectorAll('[data-pop]')) b.onclick = (e) => { e.stopPropagation(); toggle(b.dataset.pop) }
       for (const b of host.querySelectorAll('[data-compare]')) b.onclick = () => { S.compare = b.dataset.compare === '1'; render(); tell() }
+      if (o.wire) o.wire(host)
     }
     const tell = () => o.onScope && o.onScope(S.keys.slice(), S.compare && S.keys.length >= 2)
 
@@ -131,6 +137,7 @@
 
     render()
     return {
+      render,
       setScope(keys, compare = false) { S.keys = keys.slice(); S.compare = compare; render(); tell() },
       open(name) { toggle(name) },
       close,

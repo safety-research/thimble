@@ -1,6 +1,6 @@
 /* The scope header thimble draws above every corpus view, the same in every view: the unit picker, Combined | Compare,
-   the files, the derived data, the lines not read. Built from the app's own parts (.btn, .seg, .popover, .menu-item,
-   .view-pane-files, .view-pane-problems). */
+   the files, the derived data, the lines not read, and a label filter's chip with what it hides. Built from the app's
+   own parts (.btn, .seg, .popover, .menu-item, .chip, .view-pane-files, .view-pane-hidden). */
 .view-pane-head.scope-head { flex-wrap: nowrap; align-items: center; justify-content: flex-start; gap: 10px; min-height: 28px; padding-bottom: 12px; }
 .scope-head .view-pane-side-show.btn { flex: none; margin: 0 -2px 0 -8px; }
 .sh { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; font: var(--type-ui-sm); }
@@ -11,7 +11,7 @@
 .sh-unit .icon { color: var(--text-tertiary); }
 .sh-unit[aria-expanded='true'] { background: var(--surface-hover); }
 .sh .seg { flex: none; }
-.sh .view-pane-files, .sh .view-pane-problems { white-space: nowrap; line-height: 28px; }
+.sh .view-pane-files { white-space: nowrap; line-height: 28px; }
 .sh .view-pane-files { color: var(--text-secondary); }
 
 /* popovers, under their trigger */

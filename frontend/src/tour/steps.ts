@@ -164,7 +164,7 @@ const viewsExample = (api: Api): Example => {
   body.className = 'tour-ex-viewbody'
   body.style.background = api.groundOf(realBody())
   const frame = document.createElement('iframe')
-  frame.src = `${import.meta.env.BASE_URL}tour/timeline/view.html?v=10`
+  frame.src = `${import.meta.env.BASE_URL}tour/timeline/view.html?v=11`
   frame.title = 'Timeline (example)'
   Object.assign(frame.style, { display: 'block', width: '100%', height: '100%', border: '0' })
   body.append(frame)
