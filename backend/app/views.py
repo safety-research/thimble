@@ -3859,14 +3859,20 @@ def watch_checks(c: str, slug: str) -> asyncio.Task:
     return asyncio.get_running_loop().create_task(_watch_checks(c, slug), name=f"view-checks:{c}:{slug}")
 
 
+def _drop_requests(drop: Path) -> list[Path]:
+    """The requests waiting in a view's CHECK_DROP folder: regular files named `<id>.json`, and none when the folder or
+    the view's folder is a symlink, since the session that writes there could point it at files of thimble's own."""
+    if drop.parent.is_symlink() or drop.is_symlink() or not drop.is_dir():
+        return []
+    return sorted(p for p in drop.glob("*.json") if _DROP_NAME.match(p.name) and not p.is_symlink() and p.is_file())
+
+
 async def _watch_checks(c: str, slug: str) -> None:
     drop = views_dir(c) / slug / CHECK_DROP
     try:
         while True:
             await asyncio.sleep(CHECK_POLL_S)
-            for req in sorted(await asyncio.to_thread(lambda: list(drop.glob("*.json")) if drop.is_dir() else [])):
-                if not _DROP_NAME.match(req.name):
-                    continue
+            for req in await asyncio.to_thread(_drop_requests, drop):
                 taken = req.with_suffix(".taken")
                 try:
                     await asyncio.to_thread(os.replace, req, taken)

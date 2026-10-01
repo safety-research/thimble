@@ -770,6 +770,16 @@ async def test_a_check_run_where_it_cannot_reach_the_server_leaves_its_request_i
     monkeypatch.setattr(mod, "PICKUP_S", 0.2)
     code = await asyncio.to_thread(mod.main, ["--folder", str(folder), "http://127.0.0.1:9/api/ws/boards/views/threads/check"])
     assert code == 1 and not list((folder / views.CHECK_DROP).glob("*.json")), "with no server watching it gives up"
+    elsewhere = folder.parent / "elsewhere"
+    elsewhere.mkdir()
+    (elsewhere / "0123abcd.json").write_text("{}")
+    shutil.rmtree(folder / views.CHECK_DROP, ignore_errors=True)
+    (folder / views.CHECK_DROP).symlink_to(elsewhere)
+    assert views._drop_requests(folder / views.CHECK_DROP) == [], "a drop folder that is a symlink is not read"
+    (folder / views.CHECK_DROP).unlink()
+    (folder / views.CHECK_DROP).mkdir()
+    (folder / views.CHECK_DROP / "4567abcd.json").symlink_to(elsewhere / "0123abcd.json")
+    assert views._drop_requests(folder / views.CHECK_DROP) == [], "nor a request that is a symlink"
 
 
 FIT_HTML = """<!doctype html><html><head><style>body{font:13px sans-serif;margin:8px}</style></head><body>
