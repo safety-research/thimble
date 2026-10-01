@@ -42,9 +42,9 @@ def passes(monkeypatch) -> list[str]:
     seen: list[str] = []
     real = notebook._mirror_folder
 
-    def spy(src, dest, names, links):
+    def spy(src, dest, names, links, dirs=()):
         seen.append(str(dest))
-        return real(src, dest, names, links)
+        return real(src, dest, names, links, dirs)
 
     monkeypatch.setattr(notebook, "_mirror_folder", spy)
     return seen
@@ -180,3 +180,27 @@ def test_last_used_counts_a_workspace_s_files_and_folders_but_not_its_mirror_lin
     os.utime(ws, (t, t))
     os.utime(made, (t + 60, t + 60))
     assert runs.last_used(ws) == pytest.approx(t + 60)
+
+
+def test_a_folder_removed_soon_after_it_was_made_takes_its_links(corpus, tmp_path):
+    scratch = tmp_path / "scratch"
+    (corpus / "runs" / "c").mkdir()
+    (corpus / "runs" / "c" / "manifest.json").write_text("{}")  # made just now: within the walk's racy window
+    notebook.mirror_corpus(corpus, scratch)
+    assert (scratch / "runs/c/manifest.json").is_symlink()
+    (corpus / "runs" / "c" / "manifest.json").unlink()
+    (corpus / "runs" / "c").rmdir()
+    notebook.mirror_corpus(corpus, scratch)
+    assert not os.path.lexists(scratch / "runs/c/manifest.json")
+
+
+def test_a_corpus_file_that_becomes_a_folder_is_mirrored_as_a_folder(corpus, tmp_path):
+    scratch = tmp_path / "scratch"
+    notebook.mirror_corpus(corpus, scratch)
+    assert (scratch / "README.md").is_symlink()
+    (corpus / "README.md").unlink()
+    (corpus / "README.md").mkdir()
+    (corpus / "README.md" / "part.md").write_text("one")
+    notebook.mirror_corpus(corpus, scratch)
+    assert not (scratch / "README.md").is_symlink() and (scratch / "README.md").is_dir()
+    assert (scratch / "README.md/part.md").read_text() == "one"

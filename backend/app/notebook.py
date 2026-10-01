@@ -125,14 +125,20 @@ def _drop_dangling(p: Path) -> None:
             p.unlink()
 
 
-def _mirror_folder(src: Path, dest: Path, names: list[str], links: frozenset[str]) -> None:
+def _mirror_folder(src: Path, dest: Path, names: list[str], links: frozenset[str], dirs: tuple[str, ...] = ()) -> None:
     """One folder of the mirror: a link in `dest` to each of `names` in `src` (`links`, the names that are links in the
     corpus, only while their target exists), re-pointed when it points elsewhere, and the links in `dest` whose target
-    is gone removed. A real entry under a corpus name is the kernel's and stays."""
+    is gone removed. A real entry under a corpus name is the kernel's and stays. A link to `src`'s entry under the name of
+    one of its folders `dirs` (a corpus file that became a folder) is removed, so the folder can be mirrored."""
     have: dict[str, bool] = {}  # name in dest -> whether it is a link
     with contextlib.suppress(OSError), os.scandir(dest) as it:
         for e in it:
             have[e.name] = e.is_symlink()
+    for name in dirs:
+        if have.get(name):
+            with contextlib.suppress(OSError):
+                if os.readlink(dest / name) == str(src / name):
+                    (dest / name).unlink()
     for name in names:
         target = src / name
         if name in links and not os.path.exists(target):
@@ -201,13 +207,13 @@ def mirror_corpus(corpus: Path, scratch: Path) -> None:
         if was is not None and not folder.racy and was == [folder.mtime_ns, now]:
             kept[rel] = was
             continue
-        _mirror_folder(corpus / rel if rel else corpus, dest, folder.file_names(), folder.link_names())
+        _mirror_folder(corpus / rel if rel else corpus, dest, folder.file_names(), folder.link_names(), folder.dirs)
         for sub in folder.dirs:  # made now, so that the mtime kept below is the one the next pass finds
             with contextlib.suppress(FileExistsError):
                 (dest / sub).mkdir()
         after = _dir_mtime_ns(dest, follow=not rel)
-        if not folder.racy and after is not None:
-            kept[rel] = [folder.mtime_ns, after]
+        # a folder listed in its racy window is kept with times no pass matches: mirrored again, and swept once gone
+        kept[rel] = [folder.mtime_ns, after] if not folder.racy and after is not None else [-1, -1]
     gone = set(done) - set(tree)
     for rel in gone:
         parts = rel.split("/")
