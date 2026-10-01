@@ -35,10 +35,10 @@ a session is main again (resume_views).
 Permissions. A session of a workspace asks the analyst like the other agents: its --settings carry agent_session's
 permission hook with the session's key (`view:<slug>`, `ticket:<id>`), and the run hosts that key on its chat
 (agent_session.host), so each request shows on the card and is answered by the mode of the dev agent's row (modes.py),
-or denied after PERMISSION_WAIT_S unanswered. Allowed unasked is only its work in its own folder: edits there, reads of
-the folders its task names, and Bash in the sandbox (sandbox_allow's rule, before each call and on each request) with
-its check command. A session with no workspace (`thimble fix`, while the server is down) has nobody to ask, so it keeps
-UNHOSTED_TOOLS, has no web tools, and is refused what thimble's config would have it ask for.
+or denied unanswered after the card's wait (userconf.card_wait_s). Allowed unasked is only its work in its own folder:
+edits there, reads of the folders its task names, and Bash in the sandbox (sandbox_allow's rule, before each call and on
+each request) with its check command. A session with no workspace (`thimble fix`, while the server is down) has nobody
+to ask, so it keeps UNHOSTED_TOOLS, has no web tools, and is refused what thimble's config would have it ask for.
 
 Containment. A code ticket whose session's Bash runs in the sandbox is contained where thimble's sandbox runtime works
 (ticket_box): its gates, and the server that shows its before and after shots, run in the ticket's box, with no network,
@@ -117,8 +117,6 @@ GATE_TIMEOUT_S = 900
 # Bash, skills and workflows (module note, permissions). The session has every tool of a default Claude Code session
 # less the ones _flags takes away.
 UNHOSTED_TOOLS = ["Read", "Edit", "Write", "NotebookEdit", "Bash", "Grep", "Glob", "Skill", "Workflow"]
-# how long a request of a session with a workspace waits for the analyst before it is denied (module note, permissions)
-PERMISSION_WAIT_S = float(os.environ.get("THIMBLE_DEV_PERMISSION_WAIT_S", "") or 10 * 60)
 # the thread's line for a request denied unanswered
 EXPIRED_LINE = "nobody answered the request to use {tool} ({what}) within {wait}, so it was denied and the session went on"
 WEB_TOOLS = ("WebFetch", "WebSearch")  # agent_session.WEB_TOOLS
@@ -1386,12 +1384,11 @@ def _host(c: str | None, asking: dict[str, Any], chat: str | None, run_log: "Log
 
     def expired(_run: Any, entry: dict[str, Any]) -> None:
         run_log.stage(EXPIRED_LINE.format(tool=entry.get("tool"), what=entry.get("what"),
-                                          wait=agent_session.wait_words(PERMISSION_WAIT_S)))
+                                          wait=agent_session.wait_words(entry["wait_s"])))
 
     box = asking.get("sandbox")
-    agent_session.host(c, str(asking["key"]), chat, agent=agent_row(str(asking["key"])), wait_s=PERMISSION_WAIT_S,
-                       on_expired=expired, sandbox=(list(box[0]), list(box[1])) if box else None,
-                       conf=asking.get("config"))
+    agent_session.host(c, str(asking["key"]), chat, agent=agent_row(str(asking["key"])), on_expired=expired,
+                       sandbox=(list(box[0]), list(box[1])) if box else None, conf=asking.get("config"))
 
 
 def _unhost(c: str | None, key: str) -> None:
@@ -2079,19 +2076,18 @@ def contained(conf: "userconf.Session | str | None") -> bool:
 
 async def _code_refusal(t: dict[str, Any]) -> str:
     """'' once the analyst allowed an uncontained ticket on its chat's card (CODE_QUESTION), else why it did not start:
-    a deny, or nobody answering within PERMISSION_WAIT_S."""
+    a deny, or nobody answering within the card's wait."""
     from . import agent_session  # noqa: PLC0415
 
     if not t.get("workspace") or not t.get("chat"):
         return CODE_NOBODY
-    why = CODE_WHY.format(why=ticket_box.problem() or "Claude Code's sandbox is off for the dev agent",
-                          wait=agent_session.wait_words(PERMISSION_WAIT_S))
+    wait = agent_session.wait_words(userconf.card_wait_s())
+    why = CODE_WHY.format(why=ticket_box.problem() or "Claude Code's sandbox is off for the dev agent", wait=wait)
     got = await agent_session.ask(str(t["workspace"]), ticket_key(t["id"]), CODE_TOOL, {"description": CODE_QUESTION},
                                   force=True, why=why)
     if got.get("behavior") == "allow":
         return ""
-    return (CODE_UNANSWERED.format(wait=agent_session.wait_words(PERMISSION_WAIT_S)) if agent_session.timed_out(got)
-            else CODE_NOT_ALLOWED)
+    return CODE_UNANSWERED.format(wait=wait) if agent_session.timed_out(got) else CODE_NOT_ALLOWED
 
 
 def files_words(touched: list[str]) -> str:
@@ -2112,13 +2108,13 @@ async def _apply_refusal(t: dict[str, Any], touched: list[str], branch: str, app
     elif not t.get("workspace") or not t.get("chat"):
         return CODE_NOBODY
     else:
-        why = APPLY_WHY.format(files=files_words(touched), wait=agent_session.wait_words(PERMISSION_WAIT_S),
-                               branch=branch)
+        wait = agent_session.wait_words(userconf.card_wait_s())
+        why = APPLY_WHY.format(files=files_words(touched), wait=wait, branch=branch)
         got = await agent_session.ask(str(t["workspace"]), ticket_key(t["id"]), CODE_TOOL,
                                       {"description": APPLY_QUESTION, "files": touched}, force=True, why=why)
         allowed = got.get("behavior") == "allow"
         if not allowed and agent_session.timed_out(got):
-            return APPLY_UNANSWERED.format(wait=agent_session.wait_words(PERMISSION_WAIT_S), branch=branch)
+            return APPLY_UNANSWERED.format(wait=wait, branch=branch)
     return "" if allowed else APPLY_NOT_ALLOWED.format(branch=branch)
 
 

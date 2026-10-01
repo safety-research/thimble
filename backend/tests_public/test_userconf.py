@@ -162,6 +162,33 @@ def test_the_browser_is_the_system_one_when_found_unless_the_config_says_otherwi
     assert userconf.browser(lambda: False)[0] == "off" and userconf.browser()[0] == "bundled"
 
 
+def test_the_card_wait_is_ten_minutes_unless_the_file_in_thimble_s_home_sets_it_and_settings_never_shows_it(
+        workspaces_tmp, analyst):
+    """`cardWait` is minutes, ten by default, read for each card; a value it does not take is an error naming the key,
+    a workspace's file cannot set it, and an error elsewhere in the file leaves the cards their wait. The Settings pane
+    neither shows it nor can change it."""
+    assert userconf.card_wait_s() == 600 and userconf.load()["cardWait"] == 10
+    _write(userconf.global_file(), {"cardWait": 3})
+    assert userconf.card_wait_s() == 180 and userconf.problem() == ""
+    _write(userconf.global_file(), {"cardWait": 0.5, "installs": "alow"})
+    assert userconf.card_wait_s() == 30, "another key's error leaves the card wait as set"
+    for bad in (0, -1, "10", True, userconf.CARD_WAIT_MAX + 1, [10]):
+        _write(userconf.global_file(), {"cardWait": bad})
+        assert "cardWait is" in userconf.problem() and userconf.card_wait_s() == 600, bad
+    _write(userconf.global_file(), {"cardWait": None})
+    assert userconf.problem() == "" and userconf.card_wait_s() == 600
+    _write(userconf.global_file(), {"cardWait": 2})
+    _write(userconf.workspace_file(CORPUS), {"cardWait": 1})
+    assert "cardWait is set for the whole machine" in userconf.problem(CORPUS)
+    userconf.workspace_file(CORPUS).unlink()
+    assert "cardWait" not in json.dumps(ledger.get_settings(CORPUS))
+    with pytest.raises(Exception) as e:
+        ledger.put_settings_route(CORPUS, analyst, {"cardWait": 1})
+    assert getattr(e.value, "status_code", None) == 400 and userconf.card_wait_s() == 120
+    ledger.put_settings_route(CORPUS, analyst, {"permission_modes": {"orient": "auto"}})
+    assert json.loads(userconf.global_file().read_text())["cardWait"] == 2, "a change in Settings keeps it"
+
+
 def test_a_wrapped_kernel_can_neither_read_nor_write_the_workspace_s_config(tmp_path):
     """...and reads the card types and extensions the server found, in the registry folder, and the workspace's views,
     which main's prompt is made from, without writing them."""

@@ -215,7 +215,7 @@ def _launch(c: str, brief: str, passes: "list[str]", choices: dict[str, Any]) ->
                 agent_args=["--agents", json.dumps(defined, ensure_ascii=False), "--agent", name], effort=effort,
                 settings=agent_session.settings_json(effort, env, ultracode=ultracode, fastMode=bool(own["fast"])),
                 agent_type=name, append_shared=False, model=own["model"], work=work_dir(c), calls=True,
-                agent="orient", patient=True, disallowed=disallowed(parts), background=True)
+                agent="orient", disallowed=disallowed(parts), background=True)
 
 
 _starting: set[str] = set()  # the workspaces whose orientation is starting now (start)
@@ -297,7 +297,7 @@ async def start_program(c: str, part: Any, brief: str, passes: "list[str]", choi
                       {"request": brief.strip(), "outputs": list(passes), "follow_up": follow_up,
                        "choices": {"effort": effort_of(choices), "critique": bool(choices.get("critique", True))},
                        "cards": listed.text, "corpus": str(config.corpus_dir(c)), "tools": list(own)},
-                      own, work_dir(c), chat_role=orientation.ROLE, patient=True,
+                      own, work_dir(c), chat_role=orientation.ROLE,
                       fields={"brief": brief.strip(), **({"tool_use_id": call} if call else {})})
 
     def started(run: Any) -> None:

@@ -427,9 +427,9 @@ async def ensure(c: str, slug: str, folder: Path, libs: Any, *, ask: "Ask | None
                                            "since no build of this view is running, so it was not installed")
                     continue
                 if allowed == UNANSWERED:
-                    from . import agent_session, dev  # noqa: PLC0415
+                    from . import agent_session, userconf  # noqa: PLC0415
 
-                    wait = agent_session.wait_words(dev.PERMISSION_WAIT_S)
+                    wait = agent_session.wait_words(userconf.card_wait_s())
                     out["problems"].append(f"nobody answered within {wait} whether to install the package {e.name} "
                                            f"{version}, so it was not installed. Draw the page without it and take it "
                                            "out of libs")
@@ -515,10 +515,10 @@ def _installs(c: str) -> str:
 async def _ask_on_card(c: str, slug: str, fields: dict[str, str]) -> bool | str | None:
     """Ask the analyst on the card of the view build's session, in every permission mode; UNANSWERED when nobody
     answered in time, None when no build of the view runs, whose card could ask."""
-    from . import agent_session, dev  # noqa: PLC0415
+    from . import agent_session, dev, userconf  # noqa: PLC0415
 
     if agent_session.asker(c, dev.view_key(slug)) is None:
         return None
-    why = PACKAGE_WHY.format(wait=agent_session.wait_words(dev.PERMISSION_WAIT_S))
+    why = PACKAGE_WHY.format(wait=agent_session.wait_words(userconf.card_wait_s()))
     got = await agent_session.ask(c, dev.view_key(slug), PACKAGE_TOOL, fields, force=True, why=why)
     return UNANSWERED if agent_session.timed_out(got) else got.get("behavior") == "allow"

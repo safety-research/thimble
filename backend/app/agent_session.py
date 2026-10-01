@@ -19,16 +19,16 @@ the session, its subagents and workflow agents to ask, which shows it on the cha
 used rather than --permission-prompt-tool because the prompt tool never hears background or workflow agents' requests.
 Each session runs in the mode of its agent's row (modes.py, the caller's `agent`), or in the mode a card switched it to
 (set_mode), which its later runs keep while this server runs (`_switched`); a continued background session keeps the
-mode its chat's meta records, since Claude Code keeps its flags (BG_AUTO_LINE). In Bypass ask allows at once; a patient
-session's request (the orientation's) is denied after PATIENT_WAIT_S unanswered, any other after PERMISSION_WAIT_S, so
-no request waits for good. A request denied unanswered stays on the card, marked `expired`, until the analyst dismisses
-it or the session ends. A request nothing waits on any more leaves the card: one whose hook went away (its process was
-killed), one a previous server left on the chat's meta (recover), and one the analyst answers after its wait ended.
+mode its chat's meta records, since Claude Code keeps its flags (BG_AUTO_LINE). In Bypass ask allows at once; a request
+nobody answers is denied after the card's wait, `cardWait` in thimble's config (userconf.card_wait_s), the same for
+every session, so no request waits for good. A request denied unanswered stays on the card, marked `expired`, until the
+analyst dismisses it or the session ends. A request nothing waits on any more leaves the card: one whose hook went away
+(its process was killed), one a previous server left on the chat's meta (recover), and one the analyst answers after its
+wait ended.
 thimble's own tools and skills are always allowed (own_rules).
 
 Hosted sessions. The dev agent's background sessions (dev.py) are not followed here, yet ask answers their hook's
-requests the same way: host registers one on its chat for the length of its run, with its agent's mode and its wait
-before an unanswered request is denied.
+requests the same way: host registers one on its chat for the length of its run, with its agent's mode.
 
 The web. WebFetch and WebSearch follow the mode in every session: in manual mode an `ask` rule sends each call to ask
 (web_asks), over the analyst's own allow rules and Claude Code's list of documentation sites it fetches unasked, and in
@@ -163,10 +163,6 @@ STEP_ROLE = agents.STEP_ROLE  # a subagent or workflow agent of the session
 STEP_TITLE = "agent"  # a step whose meta names nothing
 POLL_S = 0.5
 STOP_WAIT_S = 4.0  # after SIGINT, then again after SIGTERM, before the next signal
-# an unanswered permission request is denied after this long, unless its session is patient (the orientation's), when
-# it is PATIENT_WAIT_S, or hosted with a wait of its own (module note, permissions)
-PERMISSION_WAIT_S = 60.0
-PATIENT_WAIT_S = 600.0
 HOOK_POLL_S = 1.0  # how often a waiting request checks that its hook is still there
 STDERR_TAIL = 800  # chars of the session's stderr kept as a failed run's error
 # of a request's input the card shows, scrolled; past it the entry's `cut` is the input's length and the card offers
@@ -356,8 +352,6 @@ class Run:
     # calls the analyst allowed on the card before they ran (module note, the config), by grant_key: when
     cleared: dict[tuple[str | None, str, str], float] = field(default_factory=dict)
     mode: str = "manual"  # the mode it runs in, one of modes.MODES (module note, permissions)
-    patient: bool = False  # a request waits PATIENT_WAIT_S, else `wait_s` (module note, permissions)
-    wait_s: float | None = None  # None for PERMISSION_WAIT_S
     on_expired: Callable[["Run", dict[str, Any]], None] | None = None  # told of each request denied unanswered
     groups: dict[str, str] = field(default_factory=dict)  # web rule -> the id of the request waiting for it (module note, the web)
     shown: dict[str, int] = field(default_factory=dict)  # answered request id -> how many joined calls its card listed
@@ -734,15 +728,14 @@ async def start(c: str, key: str, *, role: str, title: str, agent_args: list[str
                 prompt: str, agent_type: str, on_start: Callable[[Run], None] | None = None,
                 on_end: Callable[[Run, str, str], None] | None = None, append_shared: bool = True,
                 parent: str = agents.MAIN_ID, model: str = "", work: Path, calls: bool | str = False,
-                agent: str, disallowed: "list[str] | tuple[str, ...]" = (), patient: bool = False,
-                unasked: bool = False, call: str | None = None,
-                resume: str | None = None, chat: str | None = None, run_k: int = 0,
+                agent: str, disallowed: "list[str] | tuple[str, ...]" = (), unasked: bool = False,
+                call: str | None = None, resume: str | None = None, chat: str | None = None, run_k: int = 0,
                 leads: "list[dict[str, Any]] | None" = None, announce: bool = True,
                 on_pid: Callable[[Run], None] | None = None, restarted: bool = False, background: bool = False,
                 **fields: Any) -> Run:
     """Start the session `key` for workspace `c` with its first message and follow it into an agent chat of `role` under
     `parent`; RuntimeError when it runs already or claude cannot be started. `on_start`/`on_end` hear the run's start
-    and end; `agent` (its row of modes.AGENTS) and `patient` govern permissions; `work`, the folder its process runs in,
+    and end; `agent` (its row of modes.AGENTS) governs permissions; `work`, the folder its process runs in,
     never the corpus folder, and `unasked` fence it; `calls` numbers its calls; `resume`, `chat`, `run_k` and `leads`
     continue an earlier session; `restarted` marks a resume after a server restart; `call` is main's tool call that
     started it; `announce` False writes no row into the parent chat; `on_pid` hears each process change; `background`
@@ -800,7 +793,7 @@ async def start(c: str, key: str, *, role: str, title: str, agent_args: list[str
         _launches[(c, key)] = {"role": role, "title": title, "agent_args": agent_args, "effort": effort,
                                "settings": asked, "agent_type": agent_type, "on_end": on_end, "append_shared": append_shared,
                                "parent": parent, "model": model, "work": work, "calls": calls, "agent": agent,
-                               "disallowed": disallowed, "patient": patient, "unasked": unasked, "on_pid": on_pid,
+                               "disallowed": disallowed, "unasked": unasked, "on_pid": on_pid,
                                "background": True, **fields}
         old = bg_session.entry(c, key)
         if old is not None and bg_session.alive(old) and old.sid != (resume or ""):
@@ -837,7 +830,7 @@ async def start(c: str, key: str, *, role: str, title: str, agent_args: list[str
             e.chat = run.chat
             bg_session._save(c)
     run.calls = (run.chat if calls is True else str(calls)) if calls else None
-    run.sandbox_rule, run.config, run.mode, run.patient = rule, conf, mode, patient
+    run.sandbox_rule, run.config, run.mode = rule, conf, mode
     run.rules = rules
     run.lv = session.Live(c, sid, str(cwd), None, proc.pid)
     run.main = session.Sub(c, run.chat, None, None, role=role)
@@ -2250,15 +2243,15 @@ def _by_chat(c: str, chat: str) -> Run | None:
     return by_chat(c, chat) or next((r for (cc, _), r in list(_hosted.items()) if cc == c and r.chat == chat), None)
 
 
-def host(c: str, key: str, chat: str, *, agent: str, wait_s: float,
+def host(c: str, key: str, chat: str, *, agent: str,
          on_expired: Callable[[Run, dict[str, Any]], None] | None = None,
          sandbox: "tuple[list[str], list[str]] | None" = None, conf: userconf.Session | None = None) -> Run:
     """Answer the permission hook's requests of the session `key`, which this module does not follow, on the chat `chat`
-    (module note, hosted sessions): by the mode of the row `agent` (modes.AGENTS), each denied after `wait_s`
+    (module note, hosted sessions): by the mode of the row `agent` (modes.AGENTS), each denied after the card's wait
     unanswered, when `on_expired` hears of it. With `sandbox` (sandbox_rule) a Bash call that runs in the sandbox is
     allowed at once; `conf` is what thimble's config asks of it (module note, the config)."""
-    run = Run(c, key, chat, "", config.corpus_dir(c), "dev", mode=modes.mode_for(c, agent), wait_s=wait_s,
-              on_expired=on_expired, sandbox_rule=sandbox, config=conf)
+    run = Run(c, key, chat, "", config.corpus_dir(c), "dev", mode=modes.mode_for(c, agent), on_expired=on_expired,
+              sandbox_rule=sandbox, config=conf)
     _hosted[(c, key)] = run
     return run
 
@@ -2356,11 +2349,11 @@ async def ask(c: str, key: str | None, tool_name: str, inp: Any, agent_id: str |
     call auto mode refused for `reason`; the answer as Claude Code reads it. In Bypass it is allowed at once, as is a
     Bash call the sandbox rule allows and a web call the workspace's kept rules allow; during a switch pause it is denied
     at once; a call auto mode gave no verdict on goes back to it first (_recheck); a web call joins a waiting request for
-    the same site or for search; otherwise it waits on the chat until the analyst answers or its wait passes (the
-    session's `wait_s`, PATIENT_WAIT_S for a patient one). `suggestions` become the card's "don't
-    ask again" choice, and a web call's is the site's rule, or web search's, for the workspace. `force` asks the analyst
-    in every mode, as a call thimble's config sends to them, with `why` as the card's reason, and nothing noted when it
-    is denied unanswered (dev's code-ticket question)."""
+    the same site or for search; otherwise it waits on the chat until the analyst answers or the card's wait passes
+    (userconf.card_wait_s). `suggestions` become the card's "don't ask again" choice, and a web call's is the site's
+    rule, or web search's, for the workspace. `force` asks the analyst in every mode, as a call thimble's config sends
+    to them, with `why` as the card's reason, and nothing noted when it is denied unanswered (dev's code-ticket
+    question)."""
     run = asker(c, key)
     if run is None:
         return {"behavior": "deny", "message": NO_ONE_LINE if (c, key or "") in _unanswered else GONE_LINE}
@@ -2411,7 +2404,7 @@ async def ask(c: str, key: str | None, tool_name: str, inp: Any, agent_id: str |
     command = _command(tool_name, inp)
     cut = _cut(tool_name, inp, whole)
     updates = [] if cut else web_offer(web) if web else offer(suggestions) if event == REQUEST else []
-    limit = PATIENT_WAIT_S if run.patient else run.wait_s or PERMISSION_WAIT_S
+    limit = userconf.card_wait_s()
     entry = {"id": rid, "tool": tool_name, "what": _what(tool_name, inp), "input": whole[:PERMISSION_INPUT_CHARS],
              "since": _now(), **command, **({"cut": cut} if cut else {}),
              **(_asker(run, agent_id, agent_type) if agent_id else {}),
@@ -2537,6 +2530,7 @@ async def _join(run: Run, first: str, what: str, tool_name: str, inp: Any, agent
     not be listed, or the analyst allowed `first` before the card showed it."""
     fut = run.waits[first]
     at = len(_also(run, first))
+    wait = next((p.get("wait_s") for p in _pending(run.c, run.chat) if p.get("id") == first), None)
     try:
         agents.update_agent(run.c, run.chat, permissions=[
             {**p, "also": [*(p.get("also") or []), what]} if p.get("id") == first else p
@@ -2551,14 +2545,15 @@ async def _join(run: Run, first: str, what: str, tool_name: str, inp: Any, agent
         return None
     if event == DENIED and isinstance(allow, bool):
         _remember(run, agent_id, tool_name, inp, allow, tool_use_id)
-    return granted if allow is True else {"behavior": "deny", "message": _deny_message(run, allow)}
+    return granted if allow is True else {"behavior": "deny",
+                                          "message": _deny_message(run, allow, wait or userconf.card_wait_s())}
 
 
-def _deny_message(run: Run, allow: Any, wait_s: float | None = None) -> str:
+def _deny_message(run: Run, allow: Any, wait_s: float) -> str:
     """What Claude Code tells the model of a request that ended with `allow` (when it is a deny), one that waited
-    `wait_s` (else the session's wait) when nobody answered it in time."""
+    `wait_s` when nobody answered it in time."""
     if allow == TIMED_OUT:
-        return timed_out_line(wait_s or run.wait_s or PERMISSION_WAIT_S)
+        return timed_out_line(wait_s)
     return {None: GONE_LINE, SWITCHING: tools.hint(MODE_SWITCHING), ELSEWHERE: ELSEWHERE_LINE}.get(allow, DENIED_LINE)
 
 

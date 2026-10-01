@@ -137,7 +137,6 @@ class Job:
     tools: tuple[str, ...]  # its thimble tools
     work: Path
     chat_role: str = ""  # the agent chat's role, the role's own when ''
-    patient: bool = False  # its sessions' permission requests wait agent_session.PATIENT_WAIT_S, not the minute
     parent: str = agents.MAIN_ID
     fields: dict[str, Any] = field(default_factory=dict)  # land on the chat's meta
     writes: tuple[Path, ...] = ()  # folders besides `work` the program and its sessions write: a view's folder
@@ -973,9 +972,7 @@ async def _run(run: Run, argv: list[str]) -> Any:
     if run.chat:
         corpus = run.conf.corpus() or config.corpus_dir(job.c)
         rule = agent_session.sandbox_rule(corpus) if job.unasked and run.conf.sandboxed else None
-        hosted = agent_session.host(job.c, job.key, run.chat, agent=job.mode_row,
-                                    wait_s=agent_session.PERMISSION_WAIT_S, sandbox=rule, conf=run.conf)
-        hosted.patient = job.patient
+        agent_session.host(job.c, job.key, run.chat, agent=job.mode_row, sandbox=rule, conf=run.conf)
     else:
         agent_session.unanswered(job.c, job.key, True)
     try:

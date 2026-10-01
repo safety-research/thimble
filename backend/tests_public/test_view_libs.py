@@ -13,6 +13,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from conftest import card_wait
 
 from app import config, view_libs, views
 
@@ -255,7 +256,8 @@ async def test_a_package_card_nobody_answers_in_time_is_unanswered_not_refused(t
     from app import agent_session, agents, dev
 
     meta = agents.new_agent("mini", "dev", "a view build", announce=False)
-    agent_session.host("mini", dev.view_key("v"), str(meta["id"]), agent="dev", wait_s=0.2)
+    card_wait(0.003)
+    agent_session.host("mini", dev.view_key("v"), str(meta["id"]), agent="dev")
     try:
         got = await view_libs._ask_on_card("mini", "v", {"description": "Install the npm package tiny-queue 1.4.2"})
     finally:
