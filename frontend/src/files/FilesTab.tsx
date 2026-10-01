@@ -5,10 +5,11 @@
 // the view the analyst last used for its file (kept per workspace), else in the File browser; Open in on the file's
 // panel lists the other views that claim it. Tree folders are fetched one at a time (Tree.useFolderStore). While the pane has the
 // focus, ⌘P focuses the search, ⌘F opens the find bar and Ctrl+G go to line (find.ts findKey).
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { createPortal } from 'react-dom'
 import { Button } from '../components/Button'
 import { Icon } from '../components/Icon'
+import { Menu } from '../components/Menu'
 import { PaneStatus } from '../components/PaneStatus'
 import { TipButton, useTooltip } from '../components/Tooltip'
 import { api } from '../lib/api'
@@ -38,6 +39,7 @@ import { LabelsLead, useLabelRuns, useLabelSide } from './ViewSide'
 import type { ViewQuote } from './ViewerFrame'
 import { BROWSER, slugOfKey, useViews, viewKey, ViewsBar, type BuiltView } from './ViewsBar'
 import { markOpened, useOpenAskedViews } from './viewReady'
+import { fitTabs } from './viewsFit'
 
 interface Open {
   path: string
@@ -73,49 +75,88 @@ interface TabsProps {
   isDir: (path: string) => boolean
 }
 
-/** how wide the fade at a scrolled strip's edge is (files.css .reader-tabs[data-more-…]) */
-const TAB_FADE_PX = 28
+/** px: the narrowest a tab other than the open one is drawn, its glyph and about twelve characters of its name */
+export const TAB_MIN_PX = 132
+/** px: the widest the open tab is drawn (files.css .reader-tab.active) */
+export const TAB_MAX_PX = 320
 
-/** The open files as square tabs, VS Code's way: the open one on the cell's paper between hairlines with its ×. Tabs that
- * do not fit narrow, their names cut with an ellipsis, all but the open one, and past their narrowest the strip
- * scrolls, its edge faded on the side where tabs are hidden. */
-function ReaderTabs({ tabs, current, onPick, onClose, isDir }: TabsProps) {
-  const strip = useRef<HTMLSpanElement>(null)
-  // the strip scrolls with its scrollbar hidden, so the open tab is brought into it whenever it changes and whenever
-  // the strip narrows, as when the file's modes show beside it
-  useEffect(() => {
-    const box = strip.current
-    if (!box) return
-    const edges = () => {
-      box.toggleAttribute('data-more-left', box.scrollLeft > 1)
-      box.toggleAttribute('data-more-right', box.scrollLeft + box.clientWidth < box.scrollWidth - 1)
+/** The open files as square tabs, VS Code's way: the open one on the cell's paper between hairlines with its ×, the
+ * others with theirs on hover, over the end of the name. Tabs that do not fit narrow, their names cut with an ellipsis,
+ * all but the open one, down to TAB_MIN_PX; past that the last ones go in a menu at the strip's end (viewsFit
+ * fitTabs), the open tab always shown whole. Each tab's width is read from a hidden copy of the strip. */
+export function ReaderTabs({ tabs, current, onPick, onClose, isDir }: TabsProps) {
+  const wrap = useRef<HTMLSpanElement>(null)
+  const measureRef = useRef<HTMLSpanElement>(null)
+  const [fit, setFit] = useState<{ shown: number[]; mins: number[]; room: number; more: number } | null>(null)
+  const active = tabs.findIndex((t) => t.path === current)
+  const key = tabs.map((t) => t.path).join('\n')
+  useLayoutEffect(() => {
+    const box = wrap.current
+    const row = measureRef.current
+    if (!box || !row) return
+    const measure = () => {
+      // a strip not laid out (hidden, or no layout at all) shows every tab
+      if (!box.clientWidth) return setFit(null)
+      const kids = [...row.children] as HTMLElement[]
+      const moreEl = kids.pop()!
+      const mcs = getComputedStyle(moreEl)
+      const more = moreEl.offsetWidth + (parseFloat(mcs.marginLeft) || 0) + (parseFloat(mcs.marginRight) || 0)
+      const widths = kids.map((k, i) => (i === active ? Math.min(k.offsetWidth, TAB_MAX_PX) : k.offsetWidth))
+      const mins = widths.map((w, i) => (i === active ? w : Math.min(w, TAB_MIN_PX)))
+      const room = box.clientWidth
+      const shown = fitTabs({ widths, mins, room, more, active })
+      setFit((cur) =>
+        cur && cur.room === room && cur.more === more && cur.shown.join() === shown.join() && cur.mins.join() === mins.join() ? cur : { shown, mins, room, more },
+      )
     }
-    const show = () => {
-      const tab = box.querySelector<HTMLElement>('.reader-tab.active')
-      if (tab) {
-        const b = box.getBoundingClientRect()
-        const t = tab.getBoundingClientRect()
-        // clear of the fade on either side, where the strip can scroll that far
-        const pad = t.width + 2 * TAB_FADE_PX <= b.width ? TAB_FADE_PX : 0
-        if (t.left < b.left + pad) box.scrollLeft -= b.left + pad - t.left
-        else if (t.right > b.right - pad) box.scrollLeft += t.right - (b.right - pad)
-      }
-      edges()
-    }
-    show()
-    box.addEventListener('scroll', edges, { passive: true })
-    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(show) : null
+    measure()
+    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(measure) : null
     ro?.observe(box)
-    return () => {
-      box.removeEventListener('scroll', edges)
-      ro?.disconnect()
-    }
-  }, [current, tabs.length])
+    ro?.observe(row)
+    return () => ro?.disconnect()
+  }, [key, active])
+  const shows = (i: number) => !fit || fit.shown.includes(i)
+  const hidden = tabs.filter((_, i) => !shows(i))
+  // the open tab gives up its name's end only in a strip too narrow for it beside the menu's button
+  const activeMax = fit ? Math.max(0, Math.min(TAB_MAX_PX, fit.room - (hidden.length ? fit.more : 0))) : undefined
   return (
-    <span ref={strip} className="reader-tabs" role="tablist" aria-label="Open files">
-      {tabs.map((t) => (
-        <ReaderTab key={t.path} path={t.path} active={t.path === current} folder={isDir(t.path)} onPick={onPick} onClose={onClose} />
-      ))}
+    <span ref={wrap} className="reader-tabs-wrap">
+      {/* the strip as it would be with every tab whole, out of sight, where the widths are read */}
+      <span ref={measureRef} className="reader-tabs-measure" aria-hidden="true" inert>
+        {tabs.map((t, i) => (
+          <span key={t.path} className={'reader-tab' + (i === active ? ' active' : '')}>
+            <span className="reader-tab-pick">
+              <Icon name={isDir(t.path) ? 'folder' : glyphOf(baseName(t.path))} size={13} className="reader-tab-glyph" />
+              <span className="reader-tab-name">{baseName(t.path)}</span>
+            </span>
+            {i === active && <span className="reader-tab-x" />}
+          </span>
+        ))}
+        <Button size="sm" className="reader-tabs-more" tabIndex={-1}>{`${tabs.length} more`}</Button>
+      </span>
+      <span className="reader-tabs" role="tablist" aria-label="Open files">
+        {tabs.map((t, i) =>
+          shows(i) ? (
+            <ReaderTab
+              key={t.path}
+              path={t.path}
+              active={i === active}
+              folder={isDir(t.path)}
+              onPick={onPick}
+              onClose={onClose}
+              style={i === active ? { maxWidth: activeMax } : fit ? { minWidth: fit.mins[i] } : undefined}
+            />
+          ) : null,
+        )}
+      </span>
+      {hidden.length > 0 && (
+        <Menu
+          label="More tabs"
+          align="end"
+          items={hidden.map((t) => ({ id: t.path, label: baseName(t.path), note: parentOf(t.path) || undefined, icon: isDir(t.path) ? ('folder' as const) : glyphOf(baseName(t.path)), onSelect: () => onPick(t.path) }))}
+          trigger={<Button size="sm" className="reader-tabs-more">{`${hidden.length} more`}</Button>}
+        />
+      )}
     </span>
   )
 }
@@ -127,12 +168,14 @@ function ReaderTab({
   folder,
   onPick,
   onClose,
+  style,
 }: {
   path: string
   active: boolean
   folder: boolean
   onPick: (path: string) => void
   onClose: (path: string) => void
+  style?: CSSProperties
 }) {
   const nameRef = useRef<HTMLSpanElement>(null)
   const [cut, setCut] = useState(false)
@@ -146,7 +189,7 @@ function ReaderTab({
   const { props: tipProps, tip } = useTooltip(cut ? path : null)
   const name = baseName(path)
   return (
-    <span className={'reader-tab' + (active ? ' active' : '')}>
+    <span className={'reader-tab' + (active ? ' active' : '')} style={style}>
       <button type="button" role="tab" aria-selected={active} className="reader-tab-pick" onClick={() => onPick(path)} data-anchor={path} data-anchor-text={path} {...tipProps}>
         <Icon name={folder ? 'folder' : glyphOf(name)} size={13} className="reader-tab-glyph" />
         <span ref={nameRef} className="reader-tab-name">

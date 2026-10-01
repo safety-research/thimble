@@ -1118,37 +1118,61 @@
   margin: 0 6px 0 10px;
   color: var(--text-tertiary);
 }
-/* tabs that do not fit narrow to their min-width, names cut with an ellipsis, all but the open one, whose name shows up
-   to its max-width; past that the strip scrolls, its edge faded where tabs are hidden (FilesTab ReaderTabs sets data-more-left/right) */
-.reader-tabs {
+/* the file tabs take the bar's free room (the spacer after them gives way); tabs that do not fit narrow, names cut with
+   an ellipsis, all but the open one, whose name shows up to its max-width; past their narrowest the last ones go in the
+   menu at the strip's end (FilesTab ReaderTabs) */
+.reader-tabs-wrap {
+  position: relative;
   display: flex;
+  flex: 1 1 0;
   align-items: stretch;
   min-width: 0;
-  overflow-x: auto;
-  scrollbar-width: none;
 }
-.reader-tabs[data-more-right] {
-  mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
+.reader-tabs-wrap + .reader-spacer {
+  display: none;
 }
-.reader-tabs[data-more-left] {
-  mask-image: linear-gradient(to left, #000 calc(100% - 28px), transparent);
+.reader-tabs {
+  display: flex;
+  flex: 0 1 auto;
+  align-items: stretch;
+  min-width: 0;
+  overflow: hidden;
 }
-.reader-tabs[data-more-left][data-more-right] {
-  mask-image: linear-gradient(to right, transparent, #000 28px, #000 calc(100% - 28px), transparent);
+/* the strip with every tab whole, where their widths are read */
+.reader-tabs-measure {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: flex;
+  align-items: stretch;
+  height: 100%;
+  visibility: hidden;
+  pointer-events: none;
+}
+.reader-tabs-wrap > .menu-trigger {
+  flex: none;
+}
+.reader-tabs-wrap .reader-tabs-more.btn {
+  flex: none;
+  align-self: center;
+  margin: 0 6px;
+  color: var(--text-secondary);
 }
 .reader-tab {
+  position: relative;
   display: inline-flex;
   align-items: center;
   flex: 0 1 auto;
-  min-width: 104px;
+  min-width: 0;
   gap: 2px;
-  padding: 0 10px 0 12px;
+  padding: 0 12px;
   box-shadow: inset -1px 0 0 var(--border-hairline);
   color: var(--text-tertiary);
 }
 .reader-tab.active {
   flex-shrink: 0;
   max-width: 320px;
+  padding: 0 10px 0 12px;
   background: var(--surface-card);
   box-shadow: inset 1px 0 0 var(--files-rule), inset -1px 0 0 var(--files-rule);
   color: var(--text-primary);
@@ -1198,6 +1222,21 @@
 }
 .reader-tab-x:hover {
   background: var(--surface-pressed);
+}
+/* a tab other than the open one keeps no room for its ×, which shows on hover over the end of its name */
+.reader-tab:not(.active) .reader-tab-x {
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  margin: -8px 0 0;
+  background: var(--files-side-bg);
+  box-shadow: -6px 0 6px var(--files-side-bg);
+}
+.reader-tab:not(.active) .reader-tab-x:hover {
+  background: linear-gradient(var(--surface-pressed), var(--surface-pressed)) var(--files-side-bg);
+}
+.reader-tab:not(.active):not(:hover) .reader-tab-x:not(:focus-visible) {
+  pointer-events: none;
 }
 .reader-spacer {
   flex: 1;
