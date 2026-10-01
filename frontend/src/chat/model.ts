@@ -1,6 +1,6 @@
 // The fold of a chat log into rows the panel renders. `index` is the record's position in the log.
 import type { StepState, ToolState, ToolStep } from '../components/ToolCard'
-import { parseRef } from '../lib/refs'
+import { parseRef, refLabel } from '../lib/refs'
 import type { ChatRecord } from '../lib/types'
 import { shortStepNames, stepParts } from './threads'
 
@@ -252,6 +252,75 @@ export function underCorpus(text: string, ws: string): string {
 export function callLineText(name: string, input: unknown, ws: string): string {
   const target = underCorpus(toolSummary(name, input, ws), ws)
   return target ? `${toolDisplayName(name)} ${target}` : toolDisplayName(name)
+}
+
+/** The tools that read or write one file, and the input keys that name it. */
+const FILE_TOOLS: Record<string, string[]> = {
+  Read: ['file_path', 'path'],
+  Edit: ['file_path', 'path'],
+  MultiEdit: ['file_path', 'path'],
+  Write: ['file_path', 'path'],
+  NotebookEdit: ['notebook_path', 'file_path'],
+}
+
+/** The file a call read or wrote, relative to the corpus; '' for a call of another kind. Pure. */
+export function callFile(name: string, input: unknown, ws = ''): string {
+  const keys = FILE_TOOLS[toolDisplayName(name)]
+  const inp = (input && typeof input === 'object' ? input : {}) as Record<string, unknown>
+  const key = keys?.find((k) => typeof inp[k] === 'string' && inp[k])
+  return key ? underCorpus(corpusRelative(str(inp[key])), ws) : ''
+}
+
+/** What a cited call points at, in plain words, as a citation's chip names it: the file it read or wrote, the search it
+ * ran, what its command did, the card it made, the task it handed on, the critic's report. Never a tool's name or its
+ * input as JSON: a call none of these fit reads as its step number `n`. Pure. */
+export function callTarget(name: string, input: unknown, n: number, ws = ''): string {
+  const inp = (input && typeof input === 'object' ? input : {}) as Record<string, unknown>
+  const file = callFile(name, input, ws)
+  if (file) return file
+  const step = `step ${n}`
+  const where = inp.path ? ` in ${underCorpus(corpusRelative(str(inp.path)), ws)}` : ''
+  switch (toolDisplayName(name)) {
+    case 'Grep':
+      return inp.pattern ? `search for “${oneLine(str(inp.pattern), 60)}”${where}` : step
+    case 'Glob':
+      return inp.pattern ? `files matching ${oneLine(str(inp.pattern), 60)}${where}` : step
+    case 'Bash':
+      return oneLine(str(inp.description)) || oneLine(underCorpus(str(inp.command), ws)) || step
+    case 'add_card':
+    case 'edit_card':
+      return oneLine(str(inp.question ?? inp.title)) || 'a card'
+    case 'Agent':
+    case 'Task':
+      return oneLine(str(inp.description)) || 'a subagent’s task'
+    case 'Workflow':
+      return workflowTitle(inp) || 'a workflow'
+    case 'WebFetch':
+      return str(inp.url) || step
+    case 'WebSearch':
+      return inp.query ? `web search for “${oneLine(str(inp.query), 60)}”` : step
+    case 'read_ref': {
+      const ref = str(inp.ref ?? inp.span)
+      return ref && parseRef(ref) ? refLabel(ref) : step
+    }
+    case 'apply_label':
+    case 'show_label':
+      return inp.name ? `label “${oneLine(str(inp.name), 60)}”` : step
+    case 'critique':
+      return 'the critic’s report'
+    case 'StructuredOutput':
+      return 'an agent’s report'
+    default:
+      return step
+  }
+}
+
+/** What a citation's hover adds under a cited call's name: the command behind a shell call, which the chip names by what
+ * it did; undefined for a call of another kind. Pure. */
+export function callDetail(name: string, input: unknown, ws = ''): string | undefined {
+  if (toolDisplayName(name) !== 'Bash') return undefined
+  const inp = (input && typeof input === 'object' ? input : {}) as Record<string, unknown>
+  return oneLine(underCorpus(str(inp.command), ws), 240) || undefined
 }
 
 /** The SDK's Read paths are absolute; show them relative to the corpus root. */
