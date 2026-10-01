@@ -779,11 +779,19 @@
   inset: 0;
   z-index: var(--z-scrim);
   display: grid;
-  place-items: center;
+  grid-template-columns: minmax(0, 1fr);
+  align-content: center;
+  justify-items: center;
+  gap: 12px;
   padding: 16px;
+  overflow-y: auto;
   background: var(--scrim);
   -webkit-backdrop-filter: grayscale(1);
   backdrop-filter: grayscale(1);
+}
+/* the permission requests of the sessions that go on without main, under the reconnect card */
+.shell-gone-asks {
+  width: min(560px, 100%);
 }
 .shell-gone-card {
   display: flex;
