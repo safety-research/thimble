@@ -57,3 +57,44 @@ def test_starting_children_does_not_hold_the_servers_loop():
     assert r.returncode == 0, r.stderr[-2000:]
     gap = float(r.stdout.strip().splitlines()[-1])
     assert gap < 0.15, f"the loop went {gap:.2f} s without a turn while 24 children started"
+
+
+def test_the_chat_list_reads_each_log_on_from_where_it_stopped(workspaces_tmp, monkeypatch):
+    """The chat list is read again on every change to any chat, from the browser and from permission requests, so each
+    log is read on from where the last read stopped and not parsed whole each time; a log written again, cut short or
+    holding a torn last line is still counted right."""
+    import json
+
+    from app import agents
+
+    c = "mini"
+    agents.ensure_main(c)
+    _, log_path = agents.paths(c, agents.MAIN_ID)
+    for i in range(500):
+        agents.append(log_path, {"type": "user" if i % 2 else "text", "ts": f"t{i}", "text": "x" * 200})
+    parsed = []
+    loads = json.loads
+    monkeypatch.setattr(agents.json, "loads", lambda s, *a, **k: parsed.append(1) or loads(s, *a, **k))
+
+    def main_row() -> dict:
+        return next(m for m in agents.list_chats(c) if m["id"] == agents.MAIN_ID)
+
+    row = main_row()
+    assert (row["n_messages"], row["last_ts"]) == (250, "t499")
+    before = len(parsed)
+    for _ in range(5):
+        main_row()
+    assert len(parsed) - before < 20, "a log that did not change is not parsed again"
+    agents.append(log_path, {"type": "done", "ts": "t500"})
+    with log_path.open("a") as f:
+        f.write('{"type": "user", "ts": "t5')
+    assert (main_row()["n_messages"], main_row()["last_ts"]) == (251, "t500"), "a torn last line waits for its end"
+    with log_path.open("a") as f:
+        f.write('01"}\n')
+    assert (main_row()["n_messages"], main_row()["last_ts"]) == (252, "t501")
+    rewritten = log_path.with_name("rewritten.tmp")
+    rewritten.write_text("".join(json.dumps({"type": "user", "ts": f"r{i}"}) + "\n" for i in range(3)))
+    rewritten.replace(log_path)
+    assert (main_row()["n_messages"], main_row()["last_ts"]) == (3, "r2"), "a log written again is read again"
+    log_path.write_text(json.dumps({"type": "chip", "ts": "s0"}) + "\n" + json.dumps({"type": "user", "ts": "s1"}) + "\n")
+    assert (main_row()["n_messages"], main_row()["last_ts"]) == (2, "s1"), "a log cut short is read again"

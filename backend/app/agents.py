@@ -13,8 +13,10 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import re
 import secrets
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Awaitable, Callable
@@ -161,15 +163,63 @@ def read_events(log_path: Path) -> list[dict]:
     return out
 
 
+class _Tally:
+    """What _stats has counted of one log: up to `offset`, the end of its last whole line, whose last bytes are `tail`."""
+
+    __slots__ = ("ino", "offset", "tail", "n", "last")
+
+    def __init__(self, ino: int) -> None:
+        self.ino, self.offset, self.tail, self.n, self.last = ino, 0, b"", 0, None
+
+
+_tallies: dict[str, _Tally] = {}
+_tallies_lock = threading.Lock()
+TALLY_TAIL = 64  # bytes before a tally's offset it compares, to tell a log that grew from one written again
+
+
 def _stats(log_path: Path) -> tuple[int, str | None]:
-    """(records that are the analyst's messages or the model's replies, the last timestamp)."""
-    n, last = 0, None
-    for r in read_events(log_path):
-        if r.get("type") in ("user", "done", "chip", "agent"):
-            n += 1
-        if r.get("ts"):
-            last = r["ts"]
-    return n, last
+    """(records that are the analyst's messages or the model's replies, the last timestamp). A chat's log only grows,
+    so each call reads on from where the last one stopped; a log that is shorter, another file, or changed before that
+    point is read from its start."""
+    key = str(log_path)
+    with _tallies_lock:
+        try:
+            with log_path.open("rb") as f:
+                st = os.fstat(f.fileno())
+                t = _tallies.get(key)
+                if t is not None and (t.ino != st.st_ino or st.st_size < t.offset):
+                    t = None
+                if t is not None and t.tail:
+                    f.seek(t.offset - len(t.tail))
+                    if f.read(len(t.tail)) != t.tail:
+                        t = None
+                if t is None:
+                    t = _Tally(st.st_ino)
+                f.seek(t.offset)
+                data = f.read(max(0, st.st_size - t.offset))
+        except OSError:
+            _tallies.pop(key, None)
+            return 0, None
+        whole = data[:data.rfind(b"\n") + 1]
+        for line in whole.splitlines():
+            if not line.strip():
+                continue
+            try:
+                r = json.loads(line)
+            except ValueError:
+                log.warning("skipping a bad line in %s", log_path)
+                continue
+            if not isinstance(r, dict):
+                continue
+            if r.get("type") in ("user", "done", "chip", "agent"):
+                t.n += 1
+            if r.get("ts"):
+                t.last = r["ts"]
+        if whole:
+            t.tail = (t.tail + whole)[-TALLY_TAIL:]
+            t.offset += len(whole)
+        _tallies[key] = t
+        return t.n, t.last
 
 
 # the /thimble skill's own line in main (the mirror writes a slash command as its command line, `/thimble:thimble`)
