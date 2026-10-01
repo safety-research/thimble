@@ -12,7 +12,8 @@
 #   --zip-file ZIP   install this release zip as a Global install; nothing is cloned
 #   --out DIR        where the run goes: report.md, shots/, logs/, and the clone, THIMBLE_HOME and corpus copy it
 #                    installs and runs on (default: a new folder under $TMPDIR). It must be empty or missing
-#   --port N         the server's port (default 8470); N+1 is its UI port, which only dev mode listens on
+#   --port N         the server's port (default: the first of 8470, 8472, ... 8498 that is free with the one after it);
+#                    N+1 is its UI port, which only dev mode listens on
 #   --corpus DIR     the folder to copy and open (default: the synthetic corpus scripts/dev/make_toy_corpus.py writes)
 #   --own-caches     download into <out>/caches (uv, npm, Playwright's browsers); by default those caches are the
 #                    caller's, so packages and the browser already downloaded are not fetched again
@@ -44,7 +45,7 @@ die() { printf 'e2e_release.sh: %s\n' "$*" >&2; exit 2; }
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 src="$(cd "$here/.." && pwd -P)"
-ref="" repo="" out="" port=8470 corpus="" own_caches=0 strict=0 keep_install=0 zip=0 zip_file=""
+ref="" repo="" out="" port="" corpus="" own_caches=0 strict=0 keep_install=0 zip=0 zip_file=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --ref) ref="$2"; shift 2;;
@@ -71,7 +72,12 @@ else
   [ -n "$ref" ] || ref="$(git -C "$repo" symbolic-ref --short -q HEAD || git -C "$repo" rev-parse HEAD)"
   commit="$(git -C "$repo" rev-parse --verify -q "$ref^{commit}")" || die "no commit $ref in $repo"
 fi
-case "$port" in ''|*[!0-9]*) die "--port takes a number";; esac
+busy() { (exec 3<>"/dev/tcp/127.0.0.1/$1") 2>/dev/null; }
+if [ -z "$port" ]; then
+  for p in $(seq 8470 2 8498); do if ! busy "$p" && ! busy $((p + 1)); then port=$p; break; fi; done
+  [ -n "$port" ] || die "no free pair of ports from 8470 to 8499; pick one with --port"
+fi
+case "$port" in *[!0-9]*) die "--port takes a number";; esac
 command -v node >/dev/null || die "node is required"
 command -v python3 >/dev/null || die "python3 is required"
 [ -z "$corpus" ] || [ -d "$corpus" ] || die "--corpus $corpus is not a folder"
@@ -80,7 +86,7 @@ mkdir -p "$out"
 out="$(cd "$out" && pwd -P)"
 [ -z "$(ls -A "$out")" ] || die "--out $out is not empty"
 for p in "$port" $((port + 1)); do
-  if (exec 3<>"/dev/tcp/127.0.0.1/$p") 2>/dev/null; then die "port $p is in use; pick another with --port"; fi
+  if busy "$p"; then die "port $p is in use; pick another with --port"; fi
 done
 
 clone="$out/clone" thome="$out/thimble-home" bin="$out/bin" logs="$out/logs" shots="$out/shots" results="$out/results.jsonl"
