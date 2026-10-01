@@ -477,6 +477,8 @@ export interface View {
   /** the files it claims, the first 500 of them, and how many there are */
   files?: string[]
   n_files?: number
+  /** its claims are globs and the corpus has not been walked yet: no files are known (the list read again shortly) */
+  files_pending?: boolean
   /** "file" for a file viewer; what one unit of a corpus view is otherwise, as view.json gives it */
   unit?: string | Record<string, string> | null
   /** a file viewer, a mode of the File browser for the files it claims rather than a view in the views bar: its unit is
@@ -1150,6 +1152,8 @@ export interface SourcePage {
   path: string
   kind: SourceKind
   total_lines: number
+  /** `total_lines` is an estimate: the file is big and its line index is still being built (GET /source/lines) */
+  total_estimated?: boolean
   start: number
   records: SourceRecord[]
   /** the file reads as a transcript */
@@ -1157,6 +1161,15 @@ export interface SourcePage {
   /** the file is binary, judged from its first bytes: no records, and its size */
   binary?: boolean
   size_bytes?: number
+}
+
+/** `GET /corpora/{c}/source/lines`: a file's line count; while a big file's line index is being built, an estimate and
+ * the share of the file indexed so far. */
+export interface SourceLines {
+  path: string
+  total_lines: number
+  estimated: boolean
+  indexed: number
 }
 
 /** `GET /corpora/{c}/source/find`: the lines of a file that hold the text, the first 5,000 of them listed; `complete`
@@ -1682,22 +1695,24 @@ export type RecordBy = 'terminal' | 'browser'
 
 // ---- scale: the tree fetches one folder at a time; the rows route pages by cursor ----
 
-/** A subfolder in `GET /corpora/{c}/sources?path=&depth=1`: the files under it at any depth, its direct subfolders, the tree's run mark. */
+/** A subfolder in `GET /corpora/{c}/sources?path=&depth=1`: the files under it at any depth and its direct subfolders
+ * (where the server knows them already), the tree's run mark. */
 export interface FolderEntry {
   path: string
   name: string
-  n_files: number
-  n_folders: number
+  n_files?: number
+  n_folders?: number
   is_run: boolean
   hidden?: boolean
 }
 
-/** One folder's own entries (`path` '' is the corpus root): its files as SourceInfo and its subfolders with counts. */
+/** One folder's own entries (`path` '' is the corpus root): its files as SourceInfo and its subfolders, and the files
+ * under it at any depth where the server knows them already. */
 export interface FolderListing {
   path: string
   files: SourceInfo[]
   folders: FolderEntry[]
-  n_files: number
+  n_files?: number
 }
 
 /** `GET /concepts/{id}/rows` with `next`, the rowid cursor for the page after this one (null at the end). */

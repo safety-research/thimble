@@ -723,7 +723,7 @@ async def start(c: str, key: str, *, role: str, title: str, agent_args: list[str
         perms = given.get("permissions") if isinstance(given.get("permissions"), dict) else {}
         given = {**given, **fenced, "permissions": {**perms, **fenced["permissions"]}}
         extra_env.update(fence_env(work))
-        extra_env.update(skill_prompts_env(cwd, work))
+        extra_env.update(await asyncio.to_thread(skill_prompts_env, cwd, work))
         hooks.update(scratch_hooks(work))
         if "sandbox" in fenced and unasked:
             rule = sandbox_rule(cwd)
@@ -742,8 +742,9 @@ async def start(c: str, key: str, *, role: str, title: str, agent_args: list[str
     if hooks:
         given = {**given, "hooks": {**(given.get("hooks") or {}), **hooks}}
     settings = json.dumps(given)
-    argv = command(agent_args, sid, effort, settings, cwd, append_shared, model, resume=bool(resume),
-                   permission_mode=permission_mode, disallowed=disallowed, add_dirs=[cwd] if work is not None else [])
+    argv = await asyncio.to_thread(command, agent_args, sid, effort, settings, cwd, append_shared, model,
+                                   resume=bool(resume), permission_mode=permission_mode, disallowed=disallowed,
+                                   add_dirs=[cwd] if work is not None else [])
     rules = kept_rules(c, chat) if resume else []  # module note, don't ask again
     argv = with_rules(argv, rules)
     env = environ(key, extra_env)

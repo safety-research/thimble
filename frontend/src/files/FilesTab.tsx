@@ -1,7 +1,7 @@
 // The Files pane: the views bar across the top (File browser first), under it the sidebar (the files tree with the
 // Labels pane pinned to its bottom) and the reader for the open tab, or a picked view with a Labels-only sidebar; the
 // status strip along the bottom. Open files are tabs kept per workspace in browser storage; a workspace with none opens
-// its largest data file beside the README (Tree.defaultTabs). A ref opens where it belongs: in the view it names, else in
+// its README, with its largest data file in the tab beside it (Tree.defaultTabs). A ref opens where it belongs: in the view it names, else in
 // the view the analyst last used for its file (kept per workspace), else in the File browser; Open in on the file's
 // panel lists the other views that claim it. Tree folders are fetched one at a time (Tree.useFolderStore). While the pane has the
 // focus, ⌘P focuses the search, ⌘F opens the find bar and Ctrl+G go to line (find.ts findKey).
@@ -470,6 +470,7 @@ export function FilesTab({ ws, active, focused = active }: { ws: string; active:
   const totals = useMemo(() => {
     if (!listing) return ''
     const n = listing.n_files
+    if (n == null) return ''
     const size = listing.folders.length ? null : listing.files.reduce((a, f) => a + (f.size_bytes || 0), 0)
     return `${n.toLocaleString()} ${n === 1 ? 'file' : 'files'}${size != null ? ` · ${fmtSize(size)}` : ''}`
   }, [listing])

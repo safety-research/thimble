@@ -31,6 +31,7 @@ import type {
   GrepFile,
   SourceFind,
   SourceInfo,
+  SourceLines,
   SourcePage,
   SourceTurns,
   StoredCall,
@@ -157,7 +158,11 @@ export const api = {
   corpora: () => j<CorpusInfo[]>(`${BASE}/corpora`),
   sources: (c: string) => j<SourceInfo[]>(`${BASE}/corpora/${enc(c)}/sources`),
   source: (c: string, path: string, start = 1, count = 100) => j<SourcePage>(`${BASE}/corpora/${enc(c)}/source${q({ path, start, count })}`),
-  sourceAround: (c: string, path: string, line: number, before = 50, after = 50) => j<SourcePage>(`${BASE}/corpora/${enc(c)}/source/around${q({ path, line, before, after })}`),
+  /** `clamp`: a line past the end answers with the file's last lines, not a 404 (a move made while the count is an estimate) */
+  sourceAround: (c: string, path: string, line: number, before = 50, after = 50, clamp = false) =>
+    j<SourcePage>(`${BASE}/corpora/${enc(c)}/source/around${q({ path, line, before, after, clamp: clamp ? 1 : undefined })}`),
+  /** `GET /corpora/{c}/source/lines`: a file's line count, an estimate while a big file's line index is being built. */
+  sourceLines: (c: string, path: string) => j<SourceLines>(`${BASE}/corpora/${enc(c)}/source/lines${q({ path })}`),
   /** `GET /corpora/{c}/source/turns`: `count` turns of a JSON transcript from turn `start`, or around `line`. */
   sourceTurns: (c: string, path: string, start = 0, count = 200, line?: number) =>
     j<SourceTurns>(`${BASE}/corpora/${enc(c)}/source/turns${q({ path, start, count, line })}`),
@@ -325,8 +330,8 @@ export const api = {
    * that thread (views.message); answers the proposal. */
   messageView: (c: string, slug: string, text: string) => j<Proposal>(`${ws(c)}/views/proposals/${enc(slug)}/message`, { method: 'POST', body: JSON.stringify({ text }) }),
   deleteProposal: (c: string, slug: string) => j<{ ok: boolean }>(`${ws(c)}/views/proposals/${enc(slug)}`, { method: 'DELETE' }),
-  /** every view of the workspace */
-  views: (c: string) => j<View[]>(`${ws(c)}/views`),
+  /** every view of the workspace; with `wait`, never `files_pending` */
+  views: (c: string, wait = false) => j<View[]>(`${ws(c)}/views${wait ? q({ wait: 1 }) : ''}`),
   /** the working views that claim a file, in the order a citation into it opens them */
   viewsForFile: (c: string, path: string) => j<View[]>(`${ws(c)}/views${q({ path })}`),
   deleteView: (c: string, slug: string) => j<{ ok: boolean }>(`${ws(c)}/views/${enc(slug)}`, { method: 'DELETE' }),

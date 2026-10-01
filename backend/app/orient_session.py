@@ -219,7 +219,7 @@ async def start(c: str, brief: str, passes: "list[str] | tuple[str, ...]" = ("fi
     """Start the orientation session for workspace `c` with the parts `passes` names (PASSES) and follow it, `call`
     being main's start_orientation call (agent_session.start); `chosen` holds the critique choice the call made, over
     Start's. RuntimeError when one runs or claude cannot be started. A check on whether an extension's view fits that
-    is still being made is waited for first (extensions.settle)."""
+    is still being made is waited for first (extensions.settle). The prompt is rendered off the event loop."""
     from . import extensions  # noqa: PLC0415
 
     if running(c):
@@ -241,7 +241,9 @@ async def start(c: str, brief: str, passes: "list[str] | tuple[str, ...]" = ("fi
     failed = _failed_first_run(c, brief, passes)
     if failed is not None:
         return await _restart(c, *failed, call=call)
-    args = _launch(c, brief, passes, choices)
+    args = await asyncio.to_thread(_launch, c, brief, passes, choices)
+    if running(c):  # a second start that began while this one rendered
+        raise RuntimeError("an orientation is running")
 
     def started(run: agent_session.Run) -> None:
         orientation.started(c, run.chat, session=run.sid, pid=run.pid, passes=passes)
@@ -318,7 +320,7 @@ async def _restart(c: str, rec: dict[str, Any], chat: str, sid: str, call: str |
     choices = {"effort": rec.get("effort") or meta.get("effort") or orientation.DEFAULT_EFFORT,
                "ultracode": rec.get("ultracode"), "critique": rec.get("critique", True)}
     passes = [p for p in PASSES if p in (rec.get("passes") or [])]
-    args = _launch(c, str(meta.get("brief") or ""), passes, choices)
+    args = await asyncio.to_thread(_launch, c, str(meta.get("brief") or ""), passes, choices)
     log.info("%s: the orientation's first run failed (%s); resuming its session %s", c,
              agent_session.failure_line(rec.get("error"))[:200], sid)
 
@@ -438,7 +440,7 @@ async def resume(c: str, messages: "list[dict[str, Any]]", call: str | None = No
     if choices["effort"] is None:  # a record without stored choices: the ones its chat names
         choices["effort"] = meta.get("effort") or orientation.DEFAULT_EFFORT
     passes = [p for p in PASSES if p in (rec.get("passes") or [])]
-    args = _launch(c, str(meta.get("brief") or ""), passes, choices)
+    args = await asyncio.to_thread(_launch, c, str(meta.get("brief") or ""), passes, choices)
     lead = _lead(messages) if messages else ""
 
     def started(run: agent_session.Run) -> None:
@@ -742,7 +744,7 @@ async def _resume_left(c: str, meta: dict[str, Any], prompt: str) -> agent_sessi
     choices = {"effort": rec.get("effort") or meta.get("effort") or orientation.DEFAULT_EFFORT,
                "ultracode": rec.get("ultracode"), "critique": rec.get("critique", True)}
     passes = [p for p in PASSES if p in (rec.get("passes") or [])]
-    args = _launch(c, str(meta.get("brief") or ""), passes, choices)
+    args = await asyncio.to_thread(_launch, c, str(meta.get("brief") or ""), passes, choices)
     return await agent_session.start(c, KEY, prompt=prompt, on_start=_moved, on_end=_ended, on_pid=_moved,
                                      resume=str(meta.get("session") or ""), chat=chat, run_k=k, restarted=True, **args)
 

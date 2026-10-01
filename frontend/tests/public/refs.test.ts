@@ -1,7 +1,7 @@
 // The ref grammar (src/lib/refs.ts), which backend/app/refs.py keeps in step: every form a citation can take parses to
 // its parts, and each ref maps to the surface its chip opens.
 import { describe, expect, test } from 'vitest'
-import { parseRef, surfaceOf } from '../../src/lib/refs.ts'
+import { isEvidenceRef, parseRef, surfaceOf } from '../../src/lib/refs.ts'
 
 describe('file refs', () => {
   test('a record, a range, a block and a span of a line', () => {
@@ -45,5 +45,29 @@ describe('surfaces and values', () => {
       ['not a ref', null],
     ]
     for (const [ref, surface] of cases) expect(surfaceOf(ref), ref).toBe(surface)
+  })
+})
+
+describe('evidence and agent work', () => {
+  test('a ref to the data is evidence, a ref to what the agent made is not', () => {
+    const cases: [string, boolean][] = [
+      ['a.jsonl#L1', true],
+      ['a.jsonl#L1-L2', true],
+      ['a.jsonl#L1.b0:c0-4', true],
+      ['README.md', true],
+      ['forge.db#prs/1', true],
+      ['card:ab12cd34#merged/total', true],
+      ['card:ab12cd34@out0#L3', true],
+      ['call:or1/3', true],
+      ['card:ab12cd34', false],
+      ['card:ab12cd34@3', false],
+      ['group:g1', false],
+      ['concept:c1/yes', false],
+      ['chat:t1', false],
+      ['report:report#p3', false],
+      ['view:review-threads/42', false],
+      ['ui:x', false],
+    ]
+    for (const [ref, evidence] of cases) expect(isEvidenceRef(ref), ref).toBe(evidence)
   })
 })

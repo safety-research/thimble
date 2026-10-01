@@ -2638,11 +2638,16 @@ body .bn-mantine .bn-form-popover .mantine-TextInput-input {
 .wu-step .wu-step-col {
   background: var(--hl-bg);
 }
+/* a lit column's header: the wash over the head's own opaque fill, which a table's head keeps */
+.wu-step table thead th.wu-step-col,
+.wu-step .frame-table-box table thead th.wu-step-col {
+  background-image: linear-gradient(var(--hl-bg), var(--hl-bg));
+}
 .wu-step-cols tr > :not(.wu-step-col):not(:first-child) {
   opacity: 0.3;
 }
 .wu-step .canvas-diagram-node.wu-step-on rect {
-  stroke: var(--accent);
+  stroke: var(--hl-edge);
   stroke-width: 2;
 }
 .wu-step-callout {

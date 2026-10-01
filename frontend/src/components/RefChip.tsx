@@ -1,11 +1,12 @@
-// A ref on every surface. Standalone (no `value`) it is the accent Chip: the icon of what it points to and a short
-// name. Inside prose (`value`) it is an inline citation: the text itself is the link, with a quiet accent underline.
-// `cite` marks a citation; in GlyphCites contexts a standalone citation is its target's glyph alone. The links toggle
-// hides every citation (lib/links). Hovering shows the evidence in a label: the excerpt with the record's facts and the
-// cited words highlighted; for a table cell (`card:<id>#<col>/<row>`) the table around it, or in place when the table is
-// drawn right above; for printed output lines (`@out<i>#L<n>`) the lines around it; for a call (`call:<chat>/<n>`) its
-// chip line over the cited output lines (lib/calls). A click, on the citation or on the chip that heads its label,
-// teleports to the ref's surface (lib/teleport); a ⌘-click asks about it.
+// A ref on every surface. Standalone (no `value`) it is a Chip: the icon of what it points to and a short name, the
+// evidence chip for the data and the accent chip for the agent's work (refTone). Inside prose (`value`) it is an inline
+// citation: the text itself is the link, with a quiet accent underline. `cite` marks a citation; in GlyphCites contexts
+// a standalone citation is its target's glyph alone. The links toggle hides every citation (lib/links). Hovering shows
+// the evidence in a label: the excerpt with the record's facts and the cited words highlighted; for a table cell
+// (`card:<id>#<col>/<row>`) the table around it, or in place when the table is drawn right above; for printed output
+// lines (`@out<i>#L<n>`) the lines around it; for a call (`call:<chat>/<n>`) its chip line over the cited output lines
+// (lib/calls). A click, on the citation or on the chip that heads its label, teleports to the ref's surface
+// (lib/teleport); a ⌘-click asks about it.
 import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { createPortal } from 'react-dom'
 import { api } from '../lib/api'
@@ -15,12 +16,12 @@ import { callOutput, callWords, fetchCall, onCallWords, outputLines } from '../l
 import { cellLabel, conceptLabel, ensureCellName, ensureConceptName, hasCellName, hasConceptName, onCellNames } from '../lib/cellName'
 import { callLineText } from '../chat/model'
 import { pointKeyHeld } from '../lib/platform'
-import { cardPartLabel, cellSpanLabel, decodeLabel, hiddenPath, parseRef, refLabel, shownValue } from '../lib/refs'
+import { cardPartLabel, cellSpanLabel, decodeLabel, hiddenPath, isEvidenceRef, parseRef, refLabel, shownValue } from '../lib/refs'
 import { CITED, cellShown, cellWindow, citedLines, findCell, locateCell, readTable, restoreScroll, scrollWithin, valueSpan, visibleWithin, type At, type Grid, type Scrolled } from '../lib/tableCell'
 import { teleport } from '../lib/teleport'
 import type { Cell, ResolvedRef } from '../lib/types'
 import { workspaceFromUrl } from '../lib/workspace'
-import { Chip } from './Chip'
+import { Chip, type ChipTone } from './Chip'
 import type { IconName } from './Icon'
 import { chartLabels, Output, isNumericCell, primaryArtifact } from './Outputs'
 import { useConcepts } from '../canvas/concepts'
@@ -36,6 +37,9 @@ const INTERNAL = new Set(['cell', 'group', 'concept', 'report', 'view', 'call'])
  * face; a card's id, a file, its lines and a call stay in mono. */
 const NAME_KINDS = new Set(['concept', 'group', 'view', 'chat', 'report'])
 export const kindIcon = (kind?: string): IconName => (kind && KIND_ICON[kind]) || 'file'
+/** A ref's chip tone: the evidence chip for the data, the accent chip for what the agent made (lib/refs
+ * isEvidenceRef). */
+export const refTone = (ref: string): ChipTone => (isEvidenceRef(ref) ? 'evidence' : 'accent')
 
 export { decodeLabel }
 
@@ -424,7 +428,7 @@ export function RefChip({ ref, value, compact, workspace, broken, brokenWhy, qui
           {shownValue(value ?? '')}
         </span>
       ) : (
-        <Chip kind="ref" as="span" ref={chipEl} icon={broken ? 'x' : icon} face={kind && NAME_KINDS.has(kind) ? 'sans' : 'mono'} className={cls} data-ref={ref} {...anchorAttrs} aria-label={iconOnly ? label : undefined} tabIndex={interactive ? -1 : undefined} role={interactive ? 'link' : undefined} {...handlers}>
+        <Chip kind="ref" tone={refTone(ref)} as="span" ref={chipEl} icon={broken ? 'x' : icon} face={kind && NAME_KINDS.has(kind) ? 'sans' : 'mono'} className={cls} data-ref={ref} {...anchorAttrs} aria-label={iconOnly ? label : undefined} tabIndex={interactive ? -1 : undefined} role={interactive ? 'link' : undefined} {...handlers}>
           {iconOnly ? null : label}
         </Chip>
       )}
@@ -434,7 +438,7 @@ export function RefChip({ ref, value, compact, workspace, broken, brokenWhy, qui
             {/* an inline citation's label names the evidence: the chip, then the value; a standalone chip's name is already under the cursor, except a glyph alone's */}
             {(asText || (iconOnly && !(pop.state === 'ok' && pop.cell))) && (
               <div className="refchip-pop-head">
-                <Chip kind="ref" icon={icon} className="refchip-pop-chip" onClick={interactive ? onClick : undefined}>
+                <Chip kind="ref" tone={refTone(ref)} icon={icon} className="refchip-pop-chip" onClick={interactive ? onClick : undefined}>
                   {label}
                 </Chip>
                 {value && !tableFrame ? <span className="refchip-pop-value">{value}</span> : null}
