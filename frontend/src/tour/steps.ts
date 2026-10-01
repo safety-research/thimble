@@ -2,6 +2,7 @@
 // what it says and what it brings. Every example is the tour's own (examples.json, captured from real thimble markup
 // and marked Example); a step that asks the analyst to act acts only on that example, so nothing reaches the server.
 import { setMarkup, type Api, type Example, type Step } from './engine'
+import reportFigs from './report-figs.json'
 
 const canvasPanel = '[data-panel="canvas"].shell-panel'
 const filesPanel = '[data-panel="files"].shell-panel'
@@ -163,7 +164,7 @@ const viewsExample = (api: Api): Example => {
   body.className = 'tour-ex-viewbody'
   body.style.background = api.groundOf(realBody())
   const frame = document.createElement('iframe')
-  frame.src = `${import.meta.env.BASE_URL}tour/timeline/view.html`
+  frame.src = `${import.meta.env.BASE_URL}tour/timeline/view.html?v=10`
   frame.title = 'Timeline (example)'
   Object.assign(frame.style, { display: 'block', width: '100%', height: '100%', border: '0' })
   body.append(frame)
@@ -180,7 +181,7 @@ const viewsExample = (api: Api): Example => {
     }
   }
   frame.addEventListener('load', () => escape(frame.contentWindow))
-  Object.assign(api.tag(body).style, { top: '10px', left: '50%', right: 'auto', transform: 'translateX(-50%)' })
+  // no Example badge on the view: the step's text says it is an example, and a badge would sit on the view's header
   api.ex.append(bar, body)
   const layout = () => {
     const B = api.rectOf(realBar()),
@@ -224,12 +225,14 @@ const cardExample = (api: Api): Example => {
     if (cs.overflowX !== 'visible' || cs.overflowY !== 'visible') el.style.overflow = 'visible'
   }
   let key = ''
+  // placed again whenever the window, the Canvas panel or the card's height changes; false until it can be placed
   const layout = () => {
-    const size = `${innerWidth}x${innerHeight}`
-    if (size === key) return
     const h0 = art.offsetHeight || cell.offsetHeight
+    const P = api.rectOf(api.q(canvasPanel))
+    const size = P ? `${innerWidth}x${innerHeight}|${[P.x, P.y, P.width, P.height].map(Math.round).join()}|${h0}` : ''
+    if (size && size === key) return
     const f = fitCard(api, 720, h0)
-    if (!f || !h0) return
+    if (!f || !h0) return false
     key = size
     Object.assign(w.style, { left: `${f.x}px`, top: `${f.y}px`, height: `${h0}px`, transform: `scale(${f.w / 720})` })
   }
@@ -328,10 +331,50 @@ const reportExample = (api: Api): Example => {
       cap.textContent = text
       if ('value' in cap) cap.value = text
     }
+    if (table) table.style.width = '100%'
     first.replaceWith(fig)
   }
   api.ex.append(w)
+  // each chart drawn at the width its figure has, as thimble's Report draws a chart to its figure's width: of the
+  // drawings captured at figure widths from 391 to 688 px (report-figs.json), the nearest, sized to the figure
+  type Cap = { content: number; svg: string }
+  const charts = Object.entries(reportFigs as Record<string, Cap[]>)
+    .map(([id, caps]) => {
+      const fig = w.querySelector(`figure.wu-fig[data-tour-anchor="card:${id}"]`)
+      const box = fig?.querySelector<HTMLElement>('.outputs-vega'),
+        body = fig?.querySelector<HTMLElement>('.wu-fig-body')
+      return box && body && caps.length ? { box, body, caps, at: null as Cap | null, cw: 0 } : null
+    })
+    .filter((c): c is NonNullable<typeof c> => !!c)
+  const fitCharts = () => {
+    for (const c of charts) {
+      const cs = getComputedStyle(c.body)
+      const cw = c.body.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight)
+      if (!(cw > 0) || Math.abs(cw - c.cw) < 0.5) continue
+      c.cw = cw
+      const cap = c.caps.reduce((a, b) => (Math.abs(b.content - cw) < Math.abs(a.content - cw) ? b : a))
+      if (cap !== c.at) {
+        setMarkup(c.box, cap.svg)
+        c.at = cap
+      }
+      const svg = c.box.querySelector('svg')
+      if (!svg) continue
+      const vb = (svg.getAttribute('viewBox') || `0 0 ${svg.getAttribute('width')} ${svg.getAttribute('height')}`).split(/[\s,]+/).map(Number)
+      Object.assign(svg.style, { width: `${cw}px`, height: `${(cw * vb[3]) / vb[2]}px` })
+    }
+  }
   const rail = w.querySelector<HTMLElement>('.wu-rail')
+  // the page's ruler: with no comments thimble draws it plain (a 10 px bar and a plain thumb), with them a lane of marks
+  const rulerBar = w.querySelector<HTMLElement>('.wu-report > .reader-ruler .reader-ruler-bar'),
+    rulerThumb = rulerBar?.querySelector<HTMLElement>('.reader-ruler-thumb'),
+    rulerMarks = rulerBar?.querySelector<HTMLElement>('img.reader-ruler-marks')
+  const rulerWith = { bar: rulerBar?.style.width || '', thumb: rulerThumb?.className || '' }
+  const rulerPlain = (plain: boolean) => {
+    if (!rulerBar) return
+    rulerBar.style.width = plain ? '10px' : rulerWith.bar
+    if (rulerMarks) rulerMarks.style.display = plain ? 'none' : ''
+    if (rulerThumb) rulerThumb.className = plain ? 'reader-ruler-thumb plain' : rulerWith.thumb
+  }
   const checkRow = [...w.querySelectorAll<HTMLElement>('.wu-check')].find((e) => /Alternative explanations/.test(e.textContent ?? ''))
   const checksCount = w.querySelector('.wu-checks-head .wu-count')
   const els = {
@@ -343,6 +386,7 @@ const reportExample = (api: Api): Example => {
     checksCount,
     checksShown: false,
     hideChecks: () => {},
+    showMargin: () => {},
     showChecks: () => {},
   }
   // the check's comment cards, placed as thimble's margin places them (report/Margin.tsx): each 8px above its passage's
@@ -365,15 +409,25 @@ const reportExample = (api: Api): Example => {
       floor = top + it.h + 8
     }
   }
+  // with no check comments, thimble's Report has no margin (ReportPage.tsx draws .wu-rail only for comments, or for a
+  // check that is on), so the text column takes the page's width; the margin comes with the comments on the next step
   els.hideChecks = () => {
     els.checksShown = false
     w.classList.add('tour-checks-hidden')
+    if (rail) rail.style.display = 'none'
+    rulerPlain(true)
     if (checkRow) checkRow.style.display = 'none'
     if (checksCount) checksCount.textContent = '3'
+  }
+  // the margin alone, empty, as thimble stands it while a check is on and before its comments come
+  els.showMargin = () => {
+    if (rail) rail.style.display = ''
   }
   els.showChecks = () => {
     els.checksShown = true
     w.classList.remove('tour-checks-hidden')
+    if (rail) rail.style.display = ''
+    rulerPlain(false)
     if (checkRow) checkRow.style.display = ''
     if (checksCount) checksCount.textContent = '4'
   }
@@ -385,7 +439,17 @@ const reportExample = (api: Api): Example => {
     const k = Math.min(1, r.width / w0)
     els.k = k
     Object.assign(inner.style, { width: `${r.width / k}px`, height: `${r.height / k}px`, transform: k < 1 ? `scale(${k})` : '' })
+    fitCharts()
     placeComments()
+    // the ruler's thumb frames the span of the page on screen, as thimble's does
+    const pg = els.page
+    if (rulerBar && rulerThumb && pg?.scrollHeight) {
+      const span = pg.scrollHeight - pg.clientHeight,
+        H = rulerBar.clientHeight
+      const h = Math.min(H, Math.max(els.checksShown ? 96 : 32, (H * pg.clientHeight) / pg.scrollHeight))
+      const at = `translateY(${span > 0 ? ((H - h) * pg.scrollTop) / span : 0}px)`
+      if (rulerThumb.style.transform !== at) Object.assign(rulerThumb.style, { height: `${h}px`, transform: at })
+    }
   }
   return { els, layout }
 }
@@ -424,7 +488,10 @@ export function tourSteps(key: string, chat = true): Step[] {
         return [foot, api.els.note]
       },
       title: 'The orientation',
-      body: (api) => (api.els.started ? 'The orientation has started. It can take a while, depending on your dataset, prompt and model.' : 'Press Start to begin it now.'),
+      body: (api) =>
+        api.els.started
+          ? 'The orientation has started. It can take a while, depending on your dataset, prompt and model.'
+          : 'A background agent explores your files and drafts an analysis for you to review. Press Start to begin it now.',
     },
     {
       tab: 'files', example: filesExample, anchor: filesPanel, place: 'left', align: 'start', pad: 0, radius: 12,
@@ -464,7 +531,11 @@ export function tourSteps(key: string, chat = true): Step[] {
           if (!chip || !c) return
           api.cursor.show(c.x + c.width / 2 + 170, c.y - 90)
           await api.sleep(450)
-          await api.cursor.move(c.x + c.width / 2, c.y + c.height * 0.6, 950)
+          // the pointer follows the value while it glides, should the card move meanwhile
+          await api.cursor.move(() => {
+            const r = api.rectOf(chip)
+            return r && { x: r.x + r.width / 2, y: r.y + r.height * 0.6 }
+          }, undefined, 950)
           await api.sleep(300)
           const src = api.showSource(chip, { demo: true })
           await api.sleep(2600)
@@ -482,6 +553,13 @@ export function tourSteps(key: string, chat = true): Step[] {
       title: `${key}-click to ask`,
       body: `Hold <span class="kbd">${key}</span> and click on anything in thimble to chat about it.`,
       after: 'Now try it yourself: Next unlocks once you have.',
+      // once the demo is over, a cue on the card points at an entry to try it on
+      cue: (api) => {
+        const card = api.els.card as HTMLElement | undefined
+        const row = card && [...card.querySelectorAll('.canvas-tl-row')].find((r) => r.querySelector('.canvas-tl-time')?.textContent?.trim() === '08:29')
+        const target = row?.querySelector('.canvas-tl-label')
+        return card && target ? { target, within: card, label: `${key}-click here` } : null
+      },
       // as the real app does it: the pointer holds ⌘ (its key shown held down) and drags over a few words of one entry of
       // the timeline; the words are selected, lit as thimble lights a selection, and the ask box opens under them with a
       // question typed; then it is the analyst's turn
@@ -623,6 +701,9 @@ export function tourSteps(key: string, chat = true): Step[] {
         }
         card.remove()
         api.cursor.hide()
+        // the check is on: thimble stands the margin at once, empty until the comments come
+        api.els.showMargin()
+        await api.sleep(700)
         // the check is in the pane and its comments appear beside their passages, and stay; then the page goes to the first
         api.els.showChecks()
         const row = api.els.checkRow as HTMLElement | undefined

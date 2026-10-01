@@ -22,7 +22,7 @@
   }
   const counts = {}
   for (const e of D.events) for (const m of e.marks) counts[m] = (counts[m] || 0) + 1
-  const SIDE = '<button type="button" class="btn btn-ghost btn-sm btn-square view-pane-side-show" aria-label="Show labels" title="Show labels"><svg class="icon icon-sidebar btn-ico" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5h16a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1zM9 5v14"></path></svg></button>'
+  const SIDE = `<button type="button" class="btn btn-ghost btn-sm view-pane-side-show"><svg class="icon icon-label btn-ico" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 4h8l8 8-8 8-8-8zM8 8h.01"></path></svg><span class="btn-label">${plural(D.labels.length, 'label')} on</span></button>`
   const head = window.ScopeHead.mount({
     host: document.querySelector('.view-pane-head.scope-head'),
     side: SIDE,

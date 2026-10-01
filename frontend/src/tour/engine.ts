@@ -29,12 +29,21 @@ export interface Box {
 export type Anchor = string | Element | Rect | null | undefined
 type Place = 'right' | 'left' | 'top' | 'bottom'
 
-/** What an example puts on the page: its elements (steps read them through api.els), a layout run every frame, and
+/** What an example puts on the page: its elements (steps read them through api.els), a layout run every frame, which
+ * returns false while it cannot place the example yet (as while a tab shown for the first time is still drawing), and
  * what to undo when it is removed. */
 export interface Example {
   els?: Els
-  layout?: () => void
+  layout?: () => void | boolean
   cleanup?: () => void
+}
+
+/** A step's cue: a short label with an arrow that points at the end of `target`'s text, its label clear of every line
+ * of `within` beside it. */
+export interface Cue {
+  target: Element
+  within?: Element
+  label: string
 }
 export type Els = Record<string, any>
 
@@ -88,6 +97,8 @@ export interface Step {
   terminal?: boolean
   /** the step shows the chat column, so a layout without one leaves it out */
   needsChat?: boolean
+  /** a cue shown once the demo is over and until the analyst's first try */
+  cue?: (api: Api) => Cue | null
 }
 
 type Demo = 'none' | 'waiting' | 'playing' | 'done' | 'stopped'
@@ -96,13 +107,14 @@ interface Run {
   ac: AbortController
   demoAc: AbortController | null
   cleanups: (() => void)[]
-  layout: (() => void) | null
+  layout: (() => void | boolean) | null
   els: Els
   demo: Demo
   after: boolean
   ready: boolean
   tried?: boolean
   warned?: boolean
+  cueWarned?: boolean
 }
 
 export interface StartOptions {
@@ -160,11 +172,13 @@ interface Mock {
   remove: () => void
 }
 
+type Point = { x: number; y: number }
 interface Cursor {
   show: (x: number, y: number) => void
-  move: (x: number, y: number, ms?: number) => Promise<void>
+  /** to (x, y), or to where `x()` says on each frame (a point on the page that may move meanwhile) */
+  move: (x: number | (() => Point | null), y?: number, ms?: number, signal?: AbortSignal | null) => Promise<void>
   cmd: (on: boolean, at?: { x: number; y: number } | null) => void
-  click: () => Promise<void>
+  click: (signal?: AbortSignal | null) => Promise<void>
   hide: () => void
   readonly pos: { x: number; y: number }
 }
@@ -297,6 +311,8 @@ export function createTour(snaps: Snaps): Tour {
   // the example and demo of the step group on screen
   let run: Run | null = null
   let opts: StartOptions = {}
+  // the step the popover was last drawn for
+  let drawnI = -1
 
   const realBox = () => q('.pointer-box')
   const liveMock = () => (fx ? fx.querySelector<HTMLElement>('.pointer-box.tour-mock.tour-live') : null)
@@ -437,8 +453,8 @@ export function createTour(snaps: Snaps): Tour {
     open = null
     pop.classList.add('tour-welcome')
     const html = `<div class="tour-head"><div class="tour-title">Welcome to thimble</div></div>
-      <p class="tour-body">Would you like a product tour?</p>
-      <div class="tour-foot">${btn('skip', 'btn-ghost tour-skip', 'Skip to the workbench')}<span class="tour-spacer"></span>${btn('begin', 'btn-primary', 'Take the tour')}</div>`
+      <p class="tour-body">Would you like a short tour?</p>
+      <div class="tour-foot">${btn('skip', 'btn-ghost tour-skip', 'Skip')}<span class="tour-spacer"></span>${btn('begin', 'btn-primary', 'Take the tour')}</div>`
     if (pop.dataset.html !== html) {
       setMarkup(pop, html)
       pop.dataset.html = html
@@ -480,12 +496,18 @@ export function createTour(snaps: Snaps): Tour {
     r.demo = s.demo ? 'waiting' : 'none'
     r.after = !s.demo
     if (!s.demo) return
+    // the demo starts once its step is on screen: two frames after the popover and cutout are drawn for it
+    const k0 = i
+    for (let t = 0; drawnI !== k0 && t < 120; t++) {
+      await frames(1)
+      if (run !== r || i !== k0) return
+    }
     await frames(2)
-    if (run !== r) return
+    if (run !== r || i !== k0) return
     const ac = new AbortController()
     r.demoAc = ac
     r.demo = 'playing'
-    await s.demo(api, ac.signal)
+    await s.demo(demoApi(ac.signal), ac.signal)
     if (run === r && r.demoAc === ac) {
       r.demoAc = null
       r.demo = 'done'
@@ -493,6 +515,73 @@ export function createTour(snaps: Snaps): Tour {
       fx.querySelectorAll('[data-demo]').forEach((e) => e.remove())
       cursor.hide()
       last = ''
+    }
+  }
+  // the api a demo gets: once the demo is stopped, its waits, typing, pointer and other calls end it, so a stopped demo
+  // never carries on into the next one's (they share the one pointer)
+  const demoApi = (sig: AbortSignal): Api => {
+    const live = () => {
+      if (sig.aborted) throw abortError()
+    }
+    const c = cursor
+    const own: Partial<Api> = {
+      sleep: (ms) => sleepFor(ms, sig),
+      async type(input, text, ms = 55) {
+        for (const ch of text) {
+          live()
+          input.value += ch
+          await sleepFor(ms, sig)
+        }
+      },
+      showSource(chip, o) {
+        live()
+        return showSource(chip, o)
+      },
+      cursor: {
+        show: (x, y) => (live(), c.show(x, y)),
+        move: (x, y, ms, s2) => (live(), c.move(x, y, ms, s2 ?? sig)),
+        cmd: (on, at) => (live(), c.cmd(on, at)),
+        click: (s2) => (live(), c.click(s2 ?? sig)),
+        hide: () => {
+          if (!sig.aborted) c.hide()
+        },
+        get pos() {
+          return c.pos
+        },
+      },
+    }
+    return new Proxy(api, {
+      get(t, k) {
+        if (Object.prototype.hasOwnProperty.call(own, k)) return own[k as keyof Api]
+        const v = Reflect.get(t, k)
+        return typeof v === 'function'
+          ? (...a: unknown[]) => {
+              live()
+              return (v as (...x: unknown[]) => unknown).apply(t, a)
+            }
+          : v
+      },
+    })
+  }
+  // an example is shown, and its demo starts, only once it is in place: its layout has placed it (it returns false
+  // until it can) and its cutout has stood still two frames
+  const settle = async (r: Run, s: Step, maxMs = 6000) => {
+    const t0 = performance.now()
+    let prev: string | null = null,
+      still = 0
+    while (performance.now() - t0 < maxMs) {
+      if (run !== r || r.ac.signal.aborted) throw abortError()
+      let key: string | null = null
+      try {
+        if (!r.layout || r.layout() !== false) key = holesOf(s).map((h) => [h.x, h.y, h.width, h.height].map(Math.round).join()).join(';')
+      } catch {
+        key = ''
+      }
+      if (key !== null && key === prev) {
+        if (++still >= 2) return
+      } else still = 0
+      prev = key
+      await frames(1)
     }
   }
   const quiet = (p: Promise<unknown>) =>
@@ -513,7 +602,7 @@ export function createTour(snaps: Snaps): Tour {
           r.els = res.els || {}
           r.layout = res.layout || null
           if (res.cleanup) r.cleanups.push(res.cleanup)
-          if (r.layout) r.layout()
+          await settle(r, s)
           r.ready = true
         }
         last = ''
@@ -561,17 +650,18 @@ export function createTour(snaps: Snaps): Tour {
         y = ny
         put()
       },
-      async move(nx, ny, ms = 800) {
+      async move(nx, ny, ms = 800, sig = run?.demoAc?.signal) {
         const sx = x,
           sy = y,
-          t0 = performance.now(),
-          sig = run?.demoAc?.signal
+          t0 = performance.now()
+        const to = typeof nx === 'function' ? nx : () => ({ x: nx, y: ny ?? sy })
         for (;;) {
           if (sig?.aborted) throw abortError()
           const t = Math.min(1, (performance.now() - t0) / ms),
             e = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2
-          x = sx + (nx - sx) * e
-          y = sy + (ny - sy) * e
+          const d = to() || { x: sx, y: sy }
+          x = sx + (d.x - sx) * e
+          y = sy + (d.y - sy) * e
           put()
           if (t >= 1) break
           await frames(1)
@@ -595,7 +685,7 @@ export function createTour(snaps: Snaps): Tour {
         }
         put()
       },
-      async click() {
+      async click(sig = run?.demoAc?.signal) {
         const r = document.createElement('div')
         r.className = 'tour-ripple'
         r.dataset.demo = '1'
@@ -604,7 +694,7 @@ export function createTour(snaps: Snaps): Tour {
         fx.append(r)
         if (el) el.animate([{ transform: el.style.transform + ' scale(1)' }, { transform: el.style.transform + ' scale(0.86)' }, { transform: el.style.transform + ' scale(1)' }], { duration: 220 })
         window.setTimeout(() => r.remove(), 700)
-        await sleepFor(120, run?.demoAc?.signal)
+        await sleepFor(120, sig)
       },
       hide() {
         el?.remove()
@@ -787,6 +877,11 @@ export function createTour(snaps: Snaps): Tour {
     last = ''
     seen = false
     escaped = false
+    drawnI = -1
+    window.clearTimeout(hoverT)
+    window.clearTimeout(hideT)
+    closeSource()
+    setHot(null)
     const tab = steps[i].tab
     if (tab) opts.showTab?.(tab)
     if (same && run) {
@@ -816,10 +911,17 @@ export function createTour(snaps: Snaps): Tour {
         pop.style.visibility = 'hidden'
         block.style.clipPath = ''
         open = null
+        // the example, while it is being placed, is not seen either
+        ex.style.visibility = 'hidden'
+        host.style.visibility = 'hidden'
       }
       return
     }
     if (pop.style.visibility) pop.style.visibility = ''
+    if (ex.style.visibility) {
+      ex.style.visibility = ''
+      host.style.visibility = ''
+    }
     if (run?.layout) {
       try {
         run.layout()
@@ -828,6 +930,14 @@ export function createTour(snaps: Snaps): Tour {
           run.warned = true
           console.warn('tour layout', e)
         }
+      }
+    }
+    try {
+      cueTick(s)
+    } catch (e) {
+      if (run && !run.cueWarned) {
+        run.cueWarned = true
+        console.warn('tour cue', e)
       }
     }
     if (s.advanceOn && steps[i + 1]?.sub) {
@@ -846,6 +956,60 @@ export function createTour(snaps: Snaps): Tour {
     holes = rs
     placed = rs[0] || null
     draw(s, rs, numberOf(i), numbered())
+    drawnI = i
+  }
+
+  // ---- a step's cue (`cue`): shown once the demo is over and until the analyst's first try. It stands on the target's
+  // last line, CUE_GAP px past its text, and its label starts past every line of `within` beside it, so it covers no
+  // text
+  let cueEl: HTMLDivElement | null = null,
+    cueKey = ''
+  const CUE_GAP = 6,
+    CUE_CLEAR = 10,
+    CUE_MIN = 18
+  const cueTick = (s: Step) => {
+    const c = s.cue && run?.ready && run.after && !run.tried && !realBox() && !liveMock() ? s.cue(api) : null
+    let end: DOMRect | null = null
+    if (c?.target) {
+      const q0 = document.createRange()
+      q0.selectNodeContents(c.target)
+      for (const b of q0.getClientRects())
+        if (b.width > 1 && (!end || b.bottom > end.bottom + 1 || (Math.abs(b.bottom - end.bottom) <= 1 && b.right > end.right))) end = b
+    }
+    if (!c || !end) {
+      cueEl?.remove()
+      cueEl = null
+      cueKey = ''
+      return
+    }
+    if (!cueEl || !cueEl.isConnected) {
+      cueEl = document.createElement('div')
+      cueEl.className = 'tour-cue tour-in'
+      setMarkup(cueEl, '<div class="tour-cue-in"><span class="tour-cue-arrow"></span><span class="tour-cue-label"></span></div>')
+      fx.append(cueEl)
+      cueKey = ''
+    }
+    const label = cueEl.querySelector<HTMLElement>('.tour-cue-label')!
+    if (label.textContent !== c.label) label.textContent = c.label
+    const W = (c.within || c.target).getBoundingClientRect()
+    const key = [end.left, end.top, end.right, end.bottom, W.left, W.top, W.width, W.height, innerWidth, innerHeight].map(Math.round).join()
+    if (key === cueKey) return
+    cueKey = key
+    const H = label.offsetHeight,
+      cy = end.top + end.height / 2
+    // the furthest right any text of the example reaches within the label's band
+    let right = end.right
+    const walk = document.createTreeWalker(c.within || c.target, NodeFilter.SHOW_TEXT)
+    for (let n = walk.nextNode(); n; n = walk.nextNode()) {
+      if (!n.textContent?.trim()) continue
+      const q1 = document.createRange()
+      q1.selectNodeContents(n)
+      for (const b of q1.getClientRects()) if (b.width > 0 && b.bottom > cy - H / 2 - 3 && b.top < cy + H / 2 + 3) right = Math.max(right, b.right)
+    }
+    const x = end.right + CUE_GAP
+    cueEl.querySelector<HTMLElement>('.tour-cue-arrow')!.style.width = `${Math.max(CUE_MIN, right + CUE_CLEAR - x)}px`
+    cueEl.style.transform = `translate(${Math.round(x)}px, ${Math.round(cy - H / 2)}px)`
+    cueEl.dataset.target = [end.left, end.top, end.right, end.bottom].map(Math.round).join()
   }
 
   // ---- the values of a `chips` step's card: the one under a point (the card may sit under the block, so every layer at

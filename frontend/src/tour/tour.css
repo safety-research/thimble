@@ -89,6 +89,56 @@
 .tour-fx > .tour-ripple {
   z-index: 3;
 }
+/* a step's cue: a label in the inverse ink with an arrow pointing at a spot of the example */
+.tour-fx > .tour-cue {
+  left: 0;
+  top: 0;
+  z-index: 2;
+}
+.tour-cue-in {
+  display: flex;
+  align-items: center;
+  animation: tour-cue-nudge 1.8s ease-in-out infinite;
+}
+.tour-cue-arrow {
+  position: relative;
+  height: 0;
+  border-top: 1.5px solid var(--text-primary);
+}
+.tour-cue-arrow::before {
+  content: '';
+  position: absolute;
+  left: -1px;
+  top: -5.75px;
+  border-style: solid;
+  border-width: 5px 7px 5px 0;
+  border-color: transparent var(--text-primary) transparent transparent;
+}
+.tour-cue-label {
+  padding: 4px 9px;
+  border-radius: var(--radius-ui);
+  font: var(--type-ui-sm);
+  line-height: 1.35;
+  white-space: nowrap;
+  color: var(--text-on-inverse);
+  background: var(--surface-inverse);
+  box-shadow: var(--shadow-popover);
+}
+@keyframes tour-cue-nudge {
+  0%,
+  55%,
+  100% {
+    transform: translateX(0);
+  }
+  27% {
+    transform: translateX(-4px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .tour-cue-in {
+    animation: none;
+  }
+}
 .tour-tag {
   position: absolute;
   z-index: 5;

@@ -2,7 +2,7 @@
 // and fonts, against a made-up workspace whose every API answer this file gives, at 1440x900, 1920x1080 and a chat
 // column 355 px wide at DPR 2 (in a 1200 and a 1100 px window, where the Files sidebar folds). What it proves, measured
 // with getBoundingClientRect:
-//   - the first launch asks first (a welcome with Skip to the workbench and Take the tour) and records the offer in
+//   - the first launch asks first (a welcome with Skip and Take the tour) and records the offer in
 //     thimble's own state (POST /api/tour/seen); a page loaded after that offers nothing; Settings' Take the tour
 //     replays the tour from step 1;
 //   - every step: each cutout lies inside the window, everything an example shows in a cutout lies inside that cutout,
@@ -328,6 +328,7 @@ async function walk(page: Page, tag: string, folds?: boolean, send = false) {
   // 3 the orientation: no Next until Start, which only shows the started state
   await onStep(page, 3, 'The orientation')
   await measure(page, `${tag} 3`)
+  assert.match(await body(page), /^A background agent explores your files and drafts an analysis for you to review\. Press Start/, `${tag} 3: what the orientation does`)
   assert.deepEqual(await buttons(page), ['back'], `${tag} 3: no Next before Start`)
   const start = await page.evaluate(() => {
     const b = [...document.querySelectorAll('.tour-ex-gate button')].find((x) => x.textContent?.trim() === 'Start')!.getBoundingClientRect()
@@ -392,6 +393,7 @@ async function walk(page: Page, tag: string, folds?: boolean, send = false) {
   await onStep(page, 6, 'Views')
   await measure(page, `${tag} 6`)
   assert.equal(await page.evaluate(() => document.querySelector('.tour-ex-viewsbar .seg-opt.active')?.textContent?.trim()), 'Timeline', `${tag} 6: the Timeline example is on`)
+  assert.equal(await page.evaluate(() => !!document.querySelector('.tour-ex-viewbody .tour-tag')), false, `${tag} 6: no Example badge on the view`)
   await page.waitForFunction(() => {
     const f = document.querySelector<HTMLIFrameElement>('.tour-ex-viewbody iframe')
     return !!f?.contentDocument?.querySelector<HTMLIFrameElement>('.view-pane-frame')?.contentDocument?.getElementById('list')
@@ -489,6 +491,30 @@ async function walk(page: Page, tag: string, folds?: boolean, send = false) {
   await measure(page, `${tag} 8`)
   assert.deepEqual(await buttons(page), ['back'], `${tag} 8: no Next before the try`)
   assert.match(await body(page), /Now try it yourself/, `${tag} 8: try it yourself`)
+  // the cue points at the end of the 08:29 entry's text, past it and level with its last line, and covers no text
+  const cue = await page.evaluate(() => {
+    const el = document.querySelector('.tour-cue')
+    const card = (window as any).__tour().api.els.card as Element
+    const label = [...card.querySelectorAll('.canvas-tl-row')].find((r) => r.querySelector('.canvas-tl-time')?.textContent?.trim() === '08:29')?.querySelector('.canvas-tl-label')
+    if (!el || !label) return null
+    const q = document.createRange()
+    q.selectNodeContents(label)
+    const rows = [...q.getClientRects()].filter((b) => b.width > 1)
+    const end = rows.reduce((a, b) => (b.bottom > a.bottom + 1 || (Math.abs(b.bottom - a.bottom) <= 1 && b.right > a.right) ? b : a))
+    const arrow = el.querySelector('.tour-cue-arrow')!.getBoundingClientRect(),
+      tag = el.querySelector('.tour-cue-label')!
+    const T = tag.getBoundingClientRect()
+    let over = ''
+    const w = document.createTreeWalker(card, NodeFilter.SHOW_TEXT)
+    for (let n = w.nextNode(); n && !over; n = w.nextNode()) {
+      if (!n.textContent?.trim()) continue
+      const r = document.createRange()
+      r.selectNodeContents(n)
+      for (const b of r.getClientRects()) if (b.right > T.left && b.left < T.right && b.bottom > T.top && b.top < T.bottom) over = n.textContent.slice(0, 40)
+    }
+    return { text: tag.textContent, gap: arrow.left - end.right, level: Math.abs(arrow.top - (end.top + end.height / 2)), over }
+  })
+  assert.ok(cue && cue.text === '⌘-click here' && cue.gap >= 0 && cue.gap <= 10 && cue.level <= 3 && !cue.over, `${tag} 8: the cue points at the entry and covers no text ${JSON.stringify(cue)}`)
   const span = await page.evaluate(() => {
     const card = (window as any).__tour().api.els.card as Element
     const label = [...card.querySelectorAll('.canvas-tl-row')].find((r) => r.querySelector('.canvas-tl-time')?.textContent?.trim() === '08:29')!.querySelector('.canvas-tl-label')!
@@ -562,6 +588,22 @@ async function walk(page: Page, tag: string, folds?: boolean, send = false) {
   })
   assert.deepEqual(fig, { q: 'How close did the database come to its limit of 200 connections?', rows: 4, check: 0 }, `${tag} 9: the first figure is the small table, and the check is not made yet`)
   assert.ok(r9.k <= 1 && r9.top === 0, `${tag} 9: the report at its own size or smaller, at its top`)
+  // no comment margin until the check is made, and each chart as wide as its figure
+  const r9w = await page.evaluate(() => {
+    const root = document.querySelector('.tour-ex-report')!
+    const rail = root.querySelector<HTMLElement>('.wu-rail')
+    const widths = [...root.querySelectorAll<HTMLElement>('figure.wu-fig')].flatMap((f) => {
+      const body = f.querySelector<HTMLElement>('.wu-fig-body'),
+        svg = f.querySelector<SVGElement>('.outputs-vega svg')
+      if (!body || !svg) return []
+      const cs = getComputedStyle(body)
+      const k = (window as any).__tour().api.els.k || 1
+      return [{ chart: svg.getBoundingClientRect().width / k, body: body.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight) }]
+    })
+    return { rail: rail ? getComputedStyle(rail).display : 'none', widths }
+  })
+  assert.equal(r9w.rail, 'none', `${tag} 9: no comment margin before the check is made`)
+  assert.ok(r9w.widths.length >= 2 && r9w.widths.every((x) => Math.abs(x.chart - x.body) <= 3), `${tag} 9: each chart as wide as its figure ${JSON.stringify(r9w.widths)}`)
   await next(page)
   // 10 Checks: the demo makes the check; its comments appear and stay, each level with its passage, before and after a
   // scroll
@@ -618,12 +660,12 @@ test('the first launch asks first, records the offer in thimble’s own state, a
       count: !!document.querySelector('.tour-count'),
       holes: document.querySelectorAll('.tour-dim mask rect').length,
     }))
-    assert.deepEqual(w, { title: 'Welcome to thimble', text: 'Would you like a product tour?', buttons: ['Skip to the workbench', 'Take the tour'], count: false, holes: 1 })
+    assert.deepEqual(w, { title: 'Welcome to thimble', text: 'Would you like a short tour?', buttons: ['Skip', 'Take the tour'], count: false, holes: 1 })
     assert.ok(await fontOk(page), 'the tour is drawn in Hanken Grotesk, loaded')
     assert.ok(server.seen, 'the offer is recorded once it shows')
     await page.click('.tour-pop [data-tour="skip"]')
     await sleep(300)
-    assert.equal(await page.$('.tour-root'), null, 'Skip to the workbench closes it')
+    assert.equal(await page.$('.tour-root'), null, 'Skip closes it')
     await page.reload()
     await page.waitForSelector('.shell .chat-foot')
     await sleep(2500)
