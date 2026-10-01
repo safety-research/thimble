@@ -2801,6 +2801,13 @@
 .view-review-more {
   color: var(--text-secondary);
 }
+/* the question a running review's Stop asks, with Cancel and Stop under it */
+.view-review-stop {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
 /* while a newer version of a view builds or its review runs, its whole chip in the views bar shimmers, as a card does
    while it is checked (over the chip's own background colour, so a chosen chip keeps its fill) */
 .files-views .seg-opt.is-updating {
