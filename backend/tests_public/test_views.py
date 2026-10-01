@@ -384,6 +384,8 @@ def test_a_file_one_folder_lacks_beside_the_others_is_missing():
     paths = [m["path"] for m in out]
     assert "runs/r3/manifest.json" in paths and "notes/*.md" in paths
     assert "runs/r1/manifest.json" not in paths and not any("agents" in x for x in paths), "one run's agents set no rule"
+    assert views.missing_files(["**/*.jsonl", "docs/*.md"], ["a/x.jsonl", "b/y.jsonl", "docs/r.md"]) == [], \
+        "a claim of any file of a type in any folder names nothing a folder lacks"
 
 
 def test_files_beside_a_claimed_folder_are_named_only_where_the_view_reads_their_like():

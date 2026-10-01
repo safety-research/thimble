@@ -1102,8 +1102,9 @@ def sibling_files(claimed: list[str], every: list[str]) -> list[str]:
 
 def missing_files(claims: list[str], claimed: list[str]) -> list[dict[str, str]]:
     """What the claims expect and the corpus lacks, each {path, why}: a claim that matches no file, and, for a claim of
-    files in each of several folders (`runs/*/manifest.json`), what it names in a folder that holds other claimed files
-    and none it matches, as `runs/r3/manifest.json`. The folder is the claim's path up to its last wildcard folder."""
+    one named file in each of several folders (`runs/*/manifest.json`), that file in a folder that holds other claimed
+    files and none it matches, as `runs/r3/manifest.json`. The folder is the claim's path up to its last wildcard
+    folder; a claim with a wildcard after it (`runs/*/*.jsonl`, `**/*.md`) names no file a folder lacks."""
     out: list[dict[str, str]] = []
     for g in claims:
         hit = [p for p in claimed if glob_matches(p, g)]
@@ -1112,7 +1113,7 @@ def missing_files(claims: list[str], claimed: list[str]) -> list[dict[str, str]]
             continue
         parts = g.split("/")
         wild = [i for i, x in enumerate(parts[:-1]) if _GLOB_CHARS.search(x)]
-        if not wild:
+        if not wild or any(_GLOB_CHARS.search(x) for x in parts[wild[-1] + 1:]):
             continue
         depth = wild[-1] + 1
         unit, rest = "/".join(parts[:depth]), "/".join(parts[depth:])
