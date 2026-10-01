@@ -1,6 +1,6 @@
 // The nominal chart colours (--viz-1 to --viz-7 in src/styles/tokens.css), which views, cards and charts take for
 // their categories: on every paper none is a red, which reads as an error, or a purple, the agents' colour, each reads
-// at 3:1 on the paper's grounds, and neighbours stay apart, also under protan and deutan vision.
+// at 3:1 on the paper's grounds, and neighbours and the first three stay apart, also under protan and deutan vision.
 import { readFileSync } from 'node:fs'
 import { describe, expect, test } from 'vitest'
 import { MPL_CYCLE, restyle } from '../../src/lib/svg.ts'
@@ -111,6 +111,14 @@ describe.each(Object.keys(PAPERS))('the chart colours on the %s paper', (paper) 
   test('neighbours stay apart, also under protan and deutan vision', () => {
     for (let i = 1; i < colours.length; i++) {
       const [a, b] = [colours[i - 1], colours[i]]
+      expect(apart(a, b), `${a} and ${b}`).toBeGreaterThanOrEqual(15)
+      for (const v of ['protan', 'deutan']) expect(apart(a, b, v), `${a} and ${b} under ${v}`).toBeGreaterThanOrEqual(8)
+    }
+  })
+
+  test('the first three, which a scatter or a map of three groups shows side by side, stay apart pairwise', () => {
+    const [x, y, z] = colours
+    for (const [a, b] of [[x, y], [x, z], [y, z]]) {
       expect(apart(a, b), `${a} and ${b}`).toBeGreaterThanOrEqual(15)
       for (const v of ['protan', 'deutan']) expect(apart(a, b, v), `${a} and ${b} under ${v}`).toBeGreaterThanOrEqual(8)
     }
