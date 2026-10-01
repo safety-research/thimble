@@ -26,4 +26,13 @@
 2026-05-16T09:34:02Z INFO  autoheal action=resume incident=INC-312 service=payments via=inc-312/1778924000.000320 result=ok msg="Resumed for payments: at most 2 restarts in 15 min"
 2026-05-16 09:34:10 INFO  scaler   action=resume incident=INC-312 service=payments via=inc-312/1778924000.000320 result=ok msg="Resumed for payments: at most 4 replicas"
 2026-05-16T11:28:30Z INFO  pagerbot action=close incident=INC-312 service=payments result=ok msg="Closed INC-312"
-2026-05-16T13:41:17Z INFO  autoheal action=restart service=web alert=alr-63 result=ok msg="Restarted web-2 (log di
+2026-05-17T08:30:40Z INFO  autoheal action=restart service=passes alert=alr-64 result=ok msg="Restarted passes-worker-1 (queue over limit)"
+2026-05-18T06:10:20Z INFO  scaler   action=scale service=web result=ok msg="Scaled web from 3 to 4 replicas (scheduled for the holiday)"
+2026-05-18 06:49:02 INFO  pagerbot action=open incident=INC-313 service=web alert=alr-68 result=ok msg="Opened INC-313: web latency on /timetable"
+2026-05-18T06:49:30Z INFO  scaler   action=scale incident=INC-313 service=web alert=alr-68 result=ok msg="Scaled web from 4 to 6 replicas (p95 latency 2.8 s, target 1 s)"
+2026-05-18T06:50:10Z INFO  pagerbot action=page incident=INC-313 service=web alert=alr-68 result=ok msg="Paged Dara (high urgency)"
+2026-05-18T09:05:40Z INFO  autoheal action=restart incident=INC-313 service=web result=ok msg="Restarted web-5 (memory 92%)"
+2026-05-18 09:40:25 INFO  pagerbot action=close incident=INC-313 service=web result=ok msg="Closed INC-313"
+2026-05-18T10:15:00Z INFO  scaler   action=scale service=web result=ok msg="Scaled web from 6 to 4 replicas (p95 latency 0.3 s)"
+2026-05-19T11:46:00Z INFO  autoheal action=restart service=payments alert=alr-74 result=ok msg="Restarted payments-2 (connections over 90% of the cap)"
+2026-05-19T14:20:31Z INFO  autoheal action=restart service=payments alert=alr-75 result=ok msg="Restarted paym

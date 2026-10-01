@@ -372,15 +372,15 @@ async def test_no_thread_is_read_as_a_question_from_a_view_s_own_box(ws, inproc,
 
 # ------------------------------------------------------------------------------------------------- worked examples
 #
-# plugin/viewers/linked-sessions, incident-timeline and repository are the worked examples a view ticket's session reads
+# plugin/viewers/timeline, linked-sessions and repository are the worked examples a view ticket's session reads
 # (prompts/dev-view.md), and never views of a workspace. Each ships an invented sample of the files it claims under
 # sample/, and passes over it the checks a view a session writes must pass. Each sample is copied into the temp DATA_DIR
 # as a corpus named after its example.
 
 # the example, the slug it is saved under, and a key of each unit it gives
 EXAMPLES = {
-    "incident-timeline": ("incident-timeline", ["view:incident-timeline/INC-312",
-                                                "view:incident-timeline/2026-05-16T08:00..2026-05-16T09:00"]),
+    "timeline": ("timeline", ["view:timeline/INC-312", "view:timeline/2026-05-18",
+                              "view:timeline/2026-05-16T08:00..2026-05-16T09:00"]),
     "repository": ("repository", ["view:repository/r1/pull/11", "view:repository/r3", "view:repository/r2/issues/6",
                                   "view:repository/r3/discussions/2", "view:repository/r4/agents/moss"]),
     "linked-sessions": ("linked-sessions", ["view:linked-sessions/r1", "view:linked-sessions/a07a4da7"]),
@@ -414,10 +414,10 @@ def _save_example(name: str) -> str:
 # per example, lines a sample file gets appended that its reader must report rather than fail on: (file, text, problems
 # they add); a file that is not there, or a .json file, is written whole
 BROKEN = {
-    "incident-timeline": [("agents.log", '2026-05-16T05:00:00Z INFO autoheal action=scan result=ok msg="matched \\d+"\n', 1),
-                          ("deploys.csv", '2026-05-16T03:10:00+01:00,dep-90,started,api,1.2.0,ops,,,"two\nlines"\n', 0),
-                          ("alerts/monitor-20260516-0431.jsonl", '{"ts": 1778910000000, "state": "firing"}\n', 1),
-                          ("chat/random.json", "[1, 2]", 1)],
+    "timeline": [("agents.log", '2026-05-16T05:00:00Z INFO autoheal action=scan result=ok msg="matched \\d+"\n', 1),
+                 ("deploys.csv", '2026-05-16T03:10:00+01:00,dep-90,started,api,1.2.0,ops,,,"two\nlines"\n', 0),
+                 ("alerts/monitor-20260516-0431.jsonl", '{"ts": 1778910000000, "state": "firing"}\n', 1),
+                 ("chat/random.json", "[1, 2]", 1)],
     "repository": [("runs/r3/export/comments.csv", '4,hazel,2026-05-20T10:00:00,"Repro:\n2 failures"\n', 0),
                    ("runs/r2/manifest.json", "{", 1),
                    ("runs/r1/events.jsonl",

@@ -40,11 +40,11 @@ A label marks records, such as the posts that ask for help. The analyst turns la
 
 ## Worked examples
 
-Three views in {{examples}} show methods on invented data, each with its files described at the top of its `reader.py`. Each sample is several files with the mess a real corpus has, such as renamed fields, mixed time formats, duplicates and a torn last line, and the reader cleans it. A line the reader cannot parse is left out and reported with `problems` (below). Read the one closest to your task. Take the method, not their domain, fields or layout.
+Three example views in {{examples}} show methods on invented data, each with its files described at the top of its `reader.py`. They are examples only, never views of this corpus. Each sample is several files with the mess a real corpus has, such as renamed fields, mixed time formats, duplicates and a torn last line, and the reader cleans it. A line the reader cannot parse is left out and reported with `problems` (below). Read the one closest to your task. Take the method, not their domain, fields or layout.
 
-- `linked-sessions` is for agent transcripts, sessions and subagents: one lane per session with each subagent under the session that spawned it, a session's transcript in a panel beside the lanes, and sessions or runs compared side by side.
-- `incident-timeline` is for events over time from several sources: an overview of the whole span to zoom into, a select for every field, and sources or incidents compared side by side as lanes.
-- `repository` is for work items across runs, such as pull requests and issues: the runs' measures side by side, any runs chosen and compared unit by unit, and filters on each unit's facts and on who did what.
+- `timeline` is for events over time from several sources: any days picked, an overview of the whole span to zoom into, filters on every field, the events in lanes by a field, and an event opened in place with what it answers.
+- `linked-sessions` is for agent transcripts, sessions and subagents: any runs picked or compared, one lane per session with each subagent under the session that spawned it, and a session's calls beside the lanes with the file each comes from.
+- `repository` is for work items across runs, such as pull requests and issues: any runs picked or compared, the items in tabs as a code forge shows them, and an item opened as its whole story with the file of each entry.
 
 ## The three files
 
