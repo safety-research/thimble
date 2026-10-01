@@ -4,8 +4,8 @@
 // thimble's config, or unable to load) has its switch disabled, drawn off, and says why. An extension thimble ships
 // that is not added has its switch off, and turning it on adds it on Save. A view's switch stands where
 // the check on whether it fits put it until the analyst moves it, which overrides the check either way; beside it is
-// the check's reason. An extension with orientation instructions that comes on where an orientation ran asks whether
-// to run them now; the answer is sent with the rest on Save. Conflicts among the running extensions are listed under
+// the check's reason. An extension with orientation instructions or an orientation program that comes on where an
+// orientation ran asks whether to run it now; the answer is sent with the rest on Save. Conflicts among the running extensions are listed under
 // the rows. The workspace's own views, which thimble built for it and no other workspace shows, come first under "This
 // workspace", which has no switch of its own since it is on here without being added. Each of its views has one.
 import { Segmented } from '../components/Button'
@@ -51,8 +51,8 @@ export function changedLocalViews(loaded: LocalViewRow[], now: Record<string, bo
   return loaded.filter((v) => v.slug in now && now[v.slug] !== v.on).map((v) => [v.slug, now[v.slug]])
 }
 
-/** Whether the row asks to run the extension's orientation instructions now: it is switched on here and either the
- * server offers it, or it gives instructions, an orientation ran here, and this switch was just turned on. Pure. */
+/** Whether the row asks to run the extension's orientation now: it is switched on here and either the server offers
+ * it, or Run now can run it here, an orientation ran here, and this switch was just turned on. Pure. */
 export function asksToRun(e: ExtensionRow, on: boolean, orientationRan: boolean): boolean {
   if (!on || e.locked) return false
   return !!e.offer || (!!e.orients && orientationRan && !e.on)

@@ -34,9 +34,8 @@ and the extensions it needs are added. It is active in a
 workspace when it loads, neither thimble's config (`extensions.<name>.enabled: false`, which `thimble extension off`
 writes) nor the workspace's switch in Settings turns it off, and the extensions it needs are active there. An active
 extension's agents and orientation instructions join the orientation, its card types join main's prompt where their
-claims match files, and its report types are offered in + New. Its roles (roles.py, harness.py), its tasks' prompts
-(tasks.py) and its report checks (checks.py) are read here (`roles`, `tasks`, `checks`) for the code that uses them; a
-task's SDK program or command is not run.
+claims match files, and its report types are offered in + New. Its roles (roles.py, harness.py), its tasks (tasks.py,
+harness.py) and its report checks (checks.py) are read here (`roles`, `tasks`, `checks`) for the code that uses them.
 
 Only its views check whether they fit (_fit): one quick model call per view and workspace, from the view's description
 and a few records of the files it claims (view_fit.py), kept until those files change. Until it answers, and when it
@@ -50,22 +49,26 @@ the corpus, and writes STATE_FILE in the workspace's registry folder, which a ke
 (kernel_wrap.READ_ONLY_DIRS). Its shown views are installed, outside the orientation's four, and one it installed that
 nobody changed goes when it is no longer shown. An orientation that starts reads the active extensions' instructions in
 its prompt. Where one already ran, an extension with orientation instructions that comes on is never sent to it on its
-own: Settings offers to run them now (offered), and Run now sends them as one follow-up (run_orientation). The offer
-returns each time the extension is switched on again. A view thimble installed from a viewer it no longer ships,
-unchanged since, gives way to an active extension's view of its slug, and goes when none gives one.
+own: Settings offers to run them now (offered), and Run now sends them as one follow-up (run_orientation). An extension
+whose program runs the orientation is offered the same way, and Run now runs its program again as a follow-up with the
+earlier request and the cards as they stand. The offer returns each time the extension is switched on again. A view
+thimble installed from a viewer it no longer ships, unchanged since, gives way to an active extension's view of its
+slug, and goes when none gives one.
 
-Two active extensions that give the same view or card type, or that both replace the orientation's instructions or one
-role, lose it both (the instructions and the role stay thimble's), and `add`, Settings and `thimble doctor` name the
-conflict. Settings also says when another extension's program runs a role, so an addition to it is not used.
+Two active extensions that give the same view or card type, or that both replace the orientation's instructions, one
+role or one task, lose it both (the instructions, the role and the task stay thimble's), and `add`, Settings and
+`thimble doctor` name the conflict. Settings also says when another extension's program runs a role, so an addition to
+it is not used.
 
 thimble ships some extensions (builtin_dir()); `add` adds one by name, and those of SHIPPED_ON are added on thimble's
 first run (ship()). A built-in thimble added, or the analyst added by name, follows the version this thimble ships while
 its copy is unchanged.
 
 Extension code runs in thimble's kernels (readers on the views kernel, card.py in a card's kernel) and, for a program
-that runs one of the roles, in that role's box (harness.py, roles.py). The server reads only its JSON and markdown,
-from its folder rather than the copy a kernel can write, and its agents run inside the orientation's session, under
-that session's sandbox and rules, with the settings thimble's config gives them (agent_definitions)."""
+that runs one of the roles or tasks, in that role's or task's box (harness.py, roles.py, tasks.py). The server reads
+only its JSON and markdown, from its folder rather than the copy a kernel can write, and its agents run inside the
+orientation's session, under that session's sandbox and rules, with the settings thimble's config gives them
+(agent_definitions)."""
 from __future__ import annotations
 
 import asyncio
@@ -607,9 +610,9 @@ def _list(e: dict[str, Any], key: str) -> list[dict[str, Any]]:
 
 def conflicts(exts: dict[str, dict[str, Any]]) -> dict[str, dict[str, list[str]]]:
     """{kind: {slug: [extension, ...]}} of what two or more of the active extensions `exts` give: `view` and `card`
-    slugs, the orientation's `instructions` they replace (block), and the roles they replace with a prompt or a
-    program (`role`), each of which then runs thimble's own."""
-    seen: dict[str, dict[str, list[str]]] = {"view": {}, "card": {}, "block": {}, "role": {}}
+    slugs, the orientation's `instructions` they replace (block), and the roles and tasks they replace with a prompt
+    or a program (`role`, `task`), each of which then runs thimble's own."""
+    seen: dict[str, dict[str, list[str]]] = {"view": {}, "card": {}, "block": {}, "role": {}, "task": {}}
     for n, e in sorted(exts.items()):
         if not e.get("active"):
             continue
@@ -624,6 +627,9 @@ def conflicts(exts: dict[str, dict[str, Any]]) -> dict[str, dict[str, list[str]]
         for r in e.get("roles") or []:
             if isinstance(r, dict) and r.get("role") and (r.get("kind") != "prompt" or r.get("replace")):
                 seen["role"].setdefault(str(r["role"]), []).append(n)
+        for r in e.get("tasks") or []:
+            if isinstance(r, dict) and r.get("task") and (r.get("kind") != "prompt" or r.get("replace")):
+                seen["task"].setdefault(str(r["task"]), []).append(n)
     return {k: {s: ns for s, ns in m.items() if len(ns) > 1} for k, m in seen.items()}
 
 
@@ -637,6 +643,8 @@ def conflict_lines(clash: dict[str, dict[str, list[str]]]) -> list[str]:
                 out.append(f"{both} both replace the orientation's instructions, so thimble's own are used")
             elif kind == "role":
                 out.append(f"{both} both replace {ROLE_NAMES.get(slug, 'the ' + slug)}, so thimble's own runs")
+            elif kind == "task":
+                out.append(f"{both} both replace the {slug} task, so thimble's own runs")
             else:
                 out.append(f"{both} both give the {'view' if kind == 'view' else 'card type'} {slug!r}, so neither "
                            f"is used")
@@ -1037,14 +1045,71 @@ def orientation_ran(c: str) -> bool:
     return bool(sid and chat and agents.meta_or_none(c, chat) is not None and session.find_transcript(sid))
 
 
+def oriented_here(c: str) -> bool:
+    """Whether an orientation ran in workspace `c` with a thread, thimble's own or a program's, which an orientation
+    program runs again after (orient_session.run_program_now)."""
+    from . import agents, orientation  # noqa: PLC0415
+
+    rec = orientation.read_run(c) or {}
+    chat = str((rec.get("chats") or {}).get(orientation.ROLE) or "")
+    return bool(chat and rec.get("status") != "requested" and agents.meta_or_none(c, chat) is not None)
+
+
+def orient_program(e: dict[str, Any]) -> bool:
+    """Whether the extension `e` (read_extension, or a workspace's entry) runs the orientation with a program (sdk or
+    command) of its own."""
+    return any(isinstance(r, dict) and r.get("role") == "orientation" and r.get("kind") in ("sdk", "command")
+               for r in e.get("roles") or [])
+
+
+def _replaces_orientation(e: dict[str, Any]) -> bool:
+    return any(isinstance(r, dict) and r.get("role") == "orientation"
+               and (r.get("kind") != "prompt" or r.get("replace")) for r in e.get("roles") or [])
+
+
+def _program_runs(name: str, exts: dict[str, Any]) -> bool:
+    """Whether extension `name`'s orientation program runs the orientation once it is on: no other active extension
+    replaces the orientation role (roles.agent_for)."""
+    e = exts.get(name) or {}
+    return orient_program(e) and not any(n != name and x.get("active") and _replaces_orientation(x)
+                                         for n, x in exts.items())
+
+
+def _can_run(c: str, name: str, exts: dict[str, Any], replacing: bool, ran: tuple[bool, bool, bool]) -> bool:
+    """Whether Run now can run extension `name`'s orientation here (`ran`, as _ran gives it): its program runs again
+    with the earlier cards wherever an orientation ran, and its instructions go to an orientation a follow-up reaches,
+    thimble's own session that can be resumed or the program that ran it, which runs again with them
+    (orient_session.message)."""
+    e = exts.get(name) or {}
+    if orient_program(e):
+        return _program_runs(name, exts) and ran[0]
+    if not runs_orientation(e, replacing):
+        return False
+    from . import roles  # noqa: PLC0415
+
+    return ran[1] or (ran[2] and roles.agent_for(c, "orientation").code)
+
+
+def _ran(c: str) -> tuple[bool, bool, bool]:
+    """(whether an orientation ran here with a thread, whether thimble's own session of it can be resumed, whether
+    an extension's program ran it)."""
+    from . import orientation  # noqa: PLC0415
+
+    resumable = orientation_ran(c)
+    anyhow = resumable or oriented_here(c)
+    return anyhow, resumable, anyhow and bool((orientation.read_run(c) or {}).get("program"))
+
+
 def offered(c: str, state: dict[str, Any] | None = None) -> list[str]:
-    """The active extensions whose orientation instructions Settings offers to run now: an orientation ran here, and it
-    has not had them since the extension was last switched on, nor did the analyst answer Not now."""
+    """The active extensions whose orientation Settings offers to run now: Run now can run it here (_can_run), and the
+    orientation has not had it since the extension was last switched on, nor did the analyst answer Not now."""
     state = read_state(c) if state is None else state
-    if not orientation_ran(c):
+    ran = _ran(c)
+    if not ran[0]:
         return []
     replacing = _replacing(c, state["extensions"])
-    return [n for n, e in sorted(state["extensions"].items()) if e.get("active") and runs_orientation(e, replacing)
+    return [n for n, e in sorted(state["extensions"].items()) if e.get("active")
+            and _can_run(c, n, state["extensions"], replacing, ran)
             and n not in state["oriented"] and n not in state["declined"]]
 
 
@@ -1095,12 +1160,19 @@ def _instructions(c: str, name: str, exts: dict[str, Any]) -> str:
 
 
 async def run_orientation(c: str, name: str) -> dict[str, Any]:
-    """Run now: the orientation is sent the extension's instructions as a follow-up, resumed or queued behind the run
-    going (orient_session.message). {status: resumed | queued | nothing}; NoOrientation, Gone or RuntimeError when it
-    cannot be sent."""
+    """Run now: an extension whose program runs the orientation runs it again as a follow-up, with the earlier request
+    and the cards as they stand, so it adds to them (orient_session.run_program_now); any other extension's
+    instructions are sent to the orientation as a follow-up, resumed or queued behind the run going
+    (orient_session.message). {status: resumed | queued | nothing}; NoOrientation, Gone or RuntimeError when it cannot
+    run."""
     from . import orient_session  # noqa: PLC0415
 
-    text = _instructions(c, name, read_state(c)["extensions"])
+    exts = read_state(c)["extensions"]
+    if orient_program(exts.get(name) or {}):
+        got = await orient_session.run_program_now(c, name)
+        await mark_oriented(c, [name])
+        return {"status": str(got.get("status") or "resumed")}
+    text = _instructions(c, name, exts)
     if not text:
         return {"status": "nothing"}
     got = await orient_session.message(c, text, orient_session.EXTENSION, extension=name)
@@ -1388,7 +1460,6 @@ WAYS = {"prompt": "adds to {who}'s prompt", "replace": "replaces {who}'s prompt"
         "sdk": "runs {who} as an Agent SDK program", "command": "runs {who} as a program of its own"}
 ROLE_NAMES = {"main": "main", "orientation": "the orientation", "critic": "the critic", "writer": "the writer",
               "dev": "the dev agent"}  # each role as a sentence names it
-NOT_RUN = "This thimble does not run {what} yet, so it is not used."  # a task's SDK program or command
 
 
 def _way(r: dict[str, Any]) -> str:
@@ -1466,8 +1537,7 @@ def summary(info: dict[str, Any], how: dict[str, Any]) -> list[str]:
                 out.append(_row("orientation", "", f"{about} It {what}." if about else f"It {what}."))
     for t in info.get("tasks") or []:
         about = f"{t['description']} It {_way(t)}." if t["description"] else f"It {_way(t)}."
-        unused = "" if t["kind"] == "prompt" else " " + NOT_RUN.format(what="a task's program")
-        out.append(_row("task", t["task"], about + unused))
+        out.append(_row("task", t["task"], about))
     for r in info["reports"]:
         out.append(_row("report type", r["slug"], r["description"]) + (" With its own exports." if r["export"] else ""))
     for k in info.get("checks") or []:
@@ -1485,8 +1555,9 @@ def summary(info: dict[str, Any], how: dict[str, Any]) -> list[str]:
     if info["agents"]:
         out.append("  Its agents run in the orientation's session and its sandbox, without the web unless thimble's "
                    f"config sets agents.\"{info['name']}:<agent>\".web.")
-    if any(r["kind"] != "prompt" for r in roles.values()):
-        out.append("  Its programs run in place of thimble's own for the roles above, with the same consent rules.")
+    if any(r["kind"] != "prompt" for r in [*roles.values(), *(info.get("tasks") or [])]):
+        out.append("  Its programs run in place of thimble's own for the roles and tasks above, with the same consent "
+                   "rules.")
     if has_code(info):
         out.append("  Its Python (readers, card code, export hooks) runs in thimble's kernels, with the same sandbox and "
                    "network as cells.")
@@ -1648,8 +1719,9 @@ class SwitchError(Exception):
 
 def switch(name: str, on: bool, workspaces_dir: Path | None = None) -> dict[str, Any]:
     """`thimble extension on | off <name>`: switch an added extension on or off in every workspace, in thimble's config.
-    Returns {orients, off_in, problem}: whether it gives the orientation instructions, the workspaces under
-    `workspaces_dir` whose own switch in Settings keeps it off (off_in), and why it does not load ('' when it does)."""
+    Returns {orients, orient_program, off_in, problem}: whether it changes the orientation (orients) and whether its own
+    program runs it, the workspaces under `workspaces_dir` whose own switch in Settings keeps it off (off_in), and why
+    it does not load ('' when it does)."""
     got = added()
     if name not in got:
         raise SwitchError(f"no extension {name!r} is added. `thimble extension list` lists them.")
@@ -1658,7 +1730,7 @@ def switch(name: str, on: bool, workspaces_dir: Path | None = None) -> dict[str,
     except userconf.ConfigError as e:
         raise SwitchError(str(e)) from e
     info = read_extension(got[name], name, set(got))
-    return {"orients": orients(info), "off_in": off_in(name, workspaces_dir),
+    return {"orients": orients(info), "orient_program": orient_program(info), "off_in": off_in(name, workspaces_dir),
             "problem": info["problems"][0] if info["problems"] else ""}
 
 
@@ -1674,8 +1746,8 @@ def off_in(name: str, workspaces_dir: Path | None = None) -> list[str]:
 
 def orients(e: dict[str, Any]) -> bool:
     """Whether the extension `e` (read_extension, or a workspace's entry) gives the orientation instructions, which
-    bring its agents with them."""
-    return bool(e.get("orient") or e.get("replaces"))
+    bring its agents with them, or runs the orientation with a program of its own."""
+    return bool(e.get("orient") or e.get("replaces")) or orient_program(e)
 
 
 def list_lines(workspaces_dir: Path) -> list[str]:
@@ -1759,8 +1831,9 @@ CONFIG_AGENT = {"orientation": "orientation", "critic": "critic", "writer": "wri
 
 
 def parts(e: dict[str, Any], unused: dict[str, str] | None = None) -> list[str]:
-    """What the extension `e` gives, each in a few words, for Settings. `unused` {role: why} says why its change to a
-    role is not used here: another extension replaces the same role, or another's program runs it."""
+    """What the extension `e` gives, each in a few words, for Settings. `unused` {role, or `task:<task>`: why} says why
+    its change to a role or task is not used here: another extension replaces the same one, or another's program runs
+    it."""
     unused = unused or {}
 
     def but(role: str, words: str) -> str:
@@ -1780,7 +1853,7 @@ def parts(e: dict[str, Any], unused: dict[str, str] | None = None) -> list[str]:
     out += [but("orientation", f"{a} agent") for a in _words(e.get("agents"))]
     for t in e.get("tasks") or []:
         if isinstance(t, dict) and t.get("task"):
-            out.append(_changes(f"the {t['task']} task", t) + ("" if t.get("kind") == "prompt" else ", not used yet"))
+            out.append(but(f"task:{t['task']}", _changes(f"the {t['task']} task", t)))
     out += [f"{k.get('name') or k['slug']} report check" for k in _list(e, "checks")]
     return out
 
@@ -1803,8 +1876,9 @@ def _settings_words(a: dict[str, Any], data: bool = True) -> str:
 
 def consent(e: dict[str, Any], conf: dict[str, Any], wrapped: bool | None = None) -> str:
     """The settings what the extension `e` runs runs under, in words: those of thimble's config for each role it changes
-    or adds to and each agent it adds, the MCP servers its agents start, then whether its code runs in a sandbox, as
-    `wrapped` says (left out when None). '' for an extension that runs neither."""
+    or adds to, each task its program runs (its config agent's, tasks.Task) and each agent it adds, the MCP servers its
+    agents start, then whether its code runs in a sandbox, as `wrapped` says (left out when None). '' for an extension
+    that runs neither."""
     agents_conf = conf.get("agents") if isinstance(conf.get("agents"), dict) else {}
     used: dict[str, str] = {}
     roles = [r["role"] for r in e.get("roles") or [] if isinstance(r, dict) and r.get("role")]
@@ -1815,6 +1889,13 @@ def consent(e: dict[str, Any], conf: dict[str, Any], wrapped: bool | None = None
             used["main"] = "your own settings"
         elif (a := agents_conf.get(CONFIG_AGENT.get(role, ""))) and isinstance(a, dict):
             used[role] = _settings_words(a)
+    from . import tasks  # noqa: PLC0415 — tasks reads this module
+
+    for r in e.get("tasks") or []:
+        if isinstance(r, dict) and r.get("kind") in ("sdk", "command") and r.get("task") in tasks.TASKS:
+            a = agents_conf.get(tasks.TASKS[r["task"]].agent)
+            used[f"{r['task']} task"] = _settings_words({"network": "on", "data": "ask",
+                                                             **(a if isinstance(a, dict) else {})})
     root = source_path(str(e.get("name") or ""))
     for name in _words(e.get("agents")):
         words = _settings_words(userconf.extension_agent(conf, f"{e.get('name')}:{name}"), data=False)
@@ -1840,8 +1921,8 @@ def kernels_wrapped(c: str) -> bool:
 def public(c: str) -> dict[str, Any]:
     """Settings' extensions: each one added, whether it runs here and why not, the line Settings shows beside it (why
     not, unless its switch here turned it off), where its switch stands, whether it cannot run here whatever the switch
-    says (`locked`), what it gives (`parts`), the settings it runs under (`consent`), whether Run now would send its
-    orientation instructions here (`orients`, runs_orientation) and whether Settings offers to run them now (`offer`),
+    says (`locked`), what it gives (`parts`), the settings it runs under (`consent`), whether Run now can run its
+    orientation here once it is on (`orients`, _can_run) and whether Settings offers to run it now (`offer`),
     and its views: each shown here or not, the line Settings shows beside it (`note`), where its switch stands
     (switched here, else as its check says) and whether that switch can change anything (`locked`: the extension does
     not run here or no file here matches the view's claims). Then each extension thimble ships that is not added, off
@@ -1851,6 +1932,7 @@ def public(c: str) -> dict[str, Any]:
     conf = userconf.load_or_defaults(c)[0]
     offers = set(offered(c, state))
     replacing = _replacing(c, state["extensions"])
+    ran = _ran(c)
     wrapped = kernels_wrapped(c)
     out = []
     clash = conflicts(state["extensions"])
@@ -1866,7 +1948,7 @@ def public(c: str) -> dict[str, Any]:
                     "locked": bool(config_off(name, off)) or bool(e.get("problems")), "views": vs,
                     "parts": parts(e, _unused(c, name, clash) if e.get("active") else None),
                     "consent": consent({**e, "name": name}, conf, wrapped),
-                    "orients": runs_orientation(e, replacing), "offer": name in offers})
+                    "orients": _can_run(c, name, state["extensions"], replacing, ran), "offer": name in offers})
     for n, v in not_added():
         if n in state["extensions"]:
             continue
@@ -1874,20 +1956,22 @@ def public(c: str) -> dict[str, Any]:
         out.append({"name": n, "version": v, "description": info["description"], "active": False, "why": NOT_ADDED,
                     "note": ADD_NOTE, "on": False, "locked": False, "addable": True, "views": [], "parts": parts(info),
                     "consent": "", "orients": orients(info), "offer": False})
-    return {"extensions": out, "conflicts": conflict_lines(clash), "orientation_ran": orientation_ran(c)}
+    return {"extensions": out, "conflicts": conflict_lines(clash), "orientation_ran": ran[0]}
 
 
 def _unused(c: str, name: str, clash: dict[str, dict[str, list[str]]]) -> dict[str, str]:
     """{role: why} for each role whose change by extension `name` is not used in workspace `c`: another active
     extension replaces the same role, so thimble's own runs, or another's program runs the role, which gets no
-    prompt additions or subagents."""
+    prompt additions or subagents. A task another extension replaces too is `task:<task>`."""
     from . import roles  # noqa: PLC0415
 
     out: dict[str, str] = {}
-    for role, names in clash.get("role", {}).items():
-        if name in names:
-            others = [n for n in names if n != name]
-            out[role] = f"{' and '.join(others)} {'replace' if len(others) > 1 else 'replaces'} it too"
+    for kind in ("role", "task"):
+        for slug, names in clash.get(kind, {}).items():
+            if name in names:
+                others = [n for n in names if n != name]
+                out[slug if kind == "role" else f"task:{slug}"] = \
+                    f"{' and '.join(others)} {'replace' if len(others) > 1 else 'replaces'} it too"
     for role in extension_manifest.ROLES:
         if role in out:
             continue
@@ -1973,9 +2057,10 @@ class OrientBody(BaseModel):
 
 @router.post("/ws/{c}/extensions/{name}/orientation")
 async def orientation_route(c: str, name: str, body: OrientBody, request: Request) -> dict[str, Any]:
-    """Settings' answer to its offer to run an extension's orientation instructions now: Run now sends them to the
-    orientation (run_orientation), Not now stops the offer until the extension is switched on again. The analyst's
-    browser alone may answer. {status, extensions, conflicts, orientation_ran}."""
+    """Settings' answer to its offer to run an extension's orientation now: Run now sends its instructions to the
+    orientation, or runs its orientation program again with the earlier cards (run_orientation), Not now stops the
+    offer until the extension is switched on again. The analyst's browser alone may answer. {status, extensions,
+    conflicts, orientation_ran}."""
     from . import hook_auth, orient_session  # noqa: PLC0415
 
     config.workspace_dir(c)
@@ -1993,7 +2078,7 @@ async def orientation_route(c: str, name: str, body: OrientBody, request: Reques
         except orient_session.NoOrientation:
             raise HTTPException(409, "No orientation has run here yet. It reads the extension when it starts.") from None
         except (orient_session.Gone, RuntimeError, ValueError) as err:
-            raise HTTPException(409, f"the orientation could not be sent {name}'s instructions: {err}") from None
+            raise HTTPException(409, f"{name}'s orientation could not run now: {err}") from None
     else:
         await decline(c, name)
     return {"status": status, **await asyncio.to_thread(public, c)}

@@ -984,7 +984,19 @@ export interface Settings {
   untrusted?: { folder: string; command: string } | null
   /** who runs each agent thimble starts and what it may do, by its permission-mode row (backend ledger.agent_rows) */
   agents?: Partial<Record<ModeAgent, AgentRow>> & { main?: { additions: string[] } }
+  /** who runs each of thimble's seven tasks (backend ledger.task_rows) */
+  tasks?: TaskRow[]
   [k: string]: unknown
+}
+
+/** One of thimble's tasks in the settings (backend tasks.public): thimble's own or an extension's prompt, Agent SDK
+ * program or command, the extensions adding to its prompt, and those that all replace it. */
+export interface TaskRow {
+  task: string
+  way: AgentRow['way']
+  extension: string
+  additions: string[]
+  conflict: string[]
 }
 
 /** One agent's row in the settings (backend ledger.agent_rows): thimble's own agent or an extension's (its prompt in
@@ -1042,9 +1054,9 @@ export interface ExtensionRow {
   parts?: string[]
   /** the settings of the agents it changes and whether its code runs sandboxed, in words */
   consent?: string
-  /** whether it gives the orientation instructions */
+  /** whether Run now can run its orientation here once it is on: its instructions, or its own orientation program */
   orients?: boolean
-  /** whether Settings offers to run those instructions now: it came on after an orientation ran here */
+  /** whether Settings offers to run its orientation now: it came on after an orientation ran here */
   offer?: boolean
   /** an extension thimble ships that is not added: turning its switch on adds it */
   addable?: boolean

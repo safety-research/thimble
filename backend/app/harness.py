@@ -881,8 +881,8 @@ def task_work(c: str) -> Path:
     return config.workspace_dir(c).joinpath(*TASK_WORK) / secrets.token_hex(6)
 
 
-def task_job(c: str, task: str, input: dict[str, Any], *, key: str = "", title: str = "", work: Path | None = None,  # noqa: A002
-             **fields: Any) -> Job:
+def task_job(c: str, task: str, input: dict[str, Any], *, key: str = "", title: str = "",  # noqa: A002
+             work: Path | None = None, **fields: Any) -> Job:
     """The job of a run of `task`'s program on `input`, under its config agent's settings, with its tools; `key` is the
     THIMBLE_SESSION its tool calls and sessions run as (a fresh `task:<task>:<id>` by default), `work` its work folder
     (a fresh one under TASK_WORK by default)."""

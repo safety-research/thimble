@@ -232,7 +232,8 @@ def with_features(stored: dict[str, Any], c: str | None = None) -> dict[str, Any
     modes the config sets (modes.rows), `disabled_modes`, those the analyst's Claude Code settings turn off,
     `config_error`, the config's error or '', and `untrusted`, {folder, command} while Claude Code does not trust the
     workspaces folder, so the background sessions cannot start (bg_session.trusted); never on a code ticket's test
-    server (dev.STACK_ENABLED off), whose scratch workspaces folder is never trusted; `agents`, agent_rows."""
+    server (dev.STACK_ENABLED off), whose scratch workspaces folder is never trusted; `agents`, agent_rows; `tasks`,
+    task_rows."""
     from . import bg_session, cli, dev, extensions, modes, userconf  # noqa: PLC0415 — they import this module
 
     kept = {k: v for k, v in stored.items() if k not in RETIRED_KEYS and k != modes.SETTING}
@@ -241,7 +242,7 @@ def with_features(stored: dict[str, Any], c: str | None = None) -> dict[str, Any
     models = {**config.models_for(c), **extensions.agent_models(c)}
     return {**SETTINGS_DEFAULTS, **kept, config.MODELS_KEY: models, modes.SETTING: modes.rows(c) if c else {},
             "disabled_modes": sorted(modes.disabled()), "config_error": userconf.problem(c), "untrusted": untrusted,
-            "agents": agent_rows(c)}
+            "agents": agent_rows(c), "tasks": task_rows(c)}
 
 
 def agent_rows(c: str | None) -> dict[str, Any]:
@@ -263,6 +264,18 @@ def agent_rows(c: str | None) -> dict[str, Any]:
                     "network": mine.get("network", "on"), "web": mine.get("web", "ask"), "data": mine.get("data", "ask"),
                     "config": f"agents.{agent}"}
     return out
+
+
+def task_rows(c: str | None) -> list[dict[str, Any]]:
+    """Who runs each of thimble's seven tasks (tasks.public): thimble's own, or an extension's prompt, Agent SDK program
+    or command, with the extensions that add to its prompt and those that all replace it."""
+    from . import tasks  # noqa: PLC0415
+
+    try:
+        return tasks.public(c)
+    except Exception:  # noqa: BLE001 — Settings still shows when an extension's task cannot be read
+        log.exception("%s: the tasks' rows could not be read", c)
+        return []
 
 
 @router.get("/ws/{c}/settings")

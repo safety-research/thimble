@@ -41,6 +41,9 @@ Follow-ups. Messages from main's `message_orientation` tool or the thread's comp
 orientation's session is resumed with the message in `## orient-follow-up`; a message sent while a run goes waits in the
 record's `queue`. A follow-up's cards land in place as one undo batch; when it changes a card the report cites, the
 report pass runs again as a revision. When Claude Code has deleted the session's transcript, message() raises Gone.
+An orientation an extension's program runs takes a follow-up by running again with it (_program_follow_up); Settings'
+Run now for an extension whose program runs the orientation runs it again with the latest orientation's request and
+the cards as they stand (run_program_now).
 """
 from __future__ import annotations
 
@@ -237,7 +240,9 @@ async def start(c: str, brief: str, passes: "list[str] | tuple[str, ...]" = ("fi
 
     agent = roles.agent_for(c, "orientation")
     if agent.code and agent.replacing is not None:
-        return await start_program(c, agent.replacing, brief, passes, choices, call=call)
+        program = await start_program(c, agent.replacing, brief, passes, choices, call=call)
+        await extensions.mark_oriented(c)
+        return program
     failed = _failed_first_run(c, brief, passes)
     if failed is not None:
         return await _restart(c, *failed, call=call)
@@ -412,6 +417,30 @@ async def _program_follow_up(c: str, text: str, call: str | None) -> dict[str, A
     passes = [p for p in PASSES if p in (rec.get("passes") or [])]
     choices = {"effort": rec.get("effort"), "critique": rec.get("critique", True)}
     run = await start_program(c, agent.replacing, text, passes, choices, call=call, follow_up=True)
+    return {"status": "resumed", "chat": run.chat, "run": 0}
+
+
+async def run_program_now(c: str, name: str) -> dict[str, Any]:
+    """Settings' Run now for extension `name`, whose program runs the orientation here: the program runs again as a
+    follow-up of the latest orientation, thimble's own or a program's, with that orientation's request, outputs and
+    choices and the cards as they stand, so it adds to them rather than starting over. {status: resumed, chat, run: 0};
+    NoOrientation when no orientation ran here, RuntimeError while one runs or when another agent runs the
+    orientation."""
+    from . import roles  # noqa: PLC0415
+
+    agent = roles.agent_for(c, "orientation")
+    if not agent.code or agent.replacing is None or agent.extension != name:
+        raise RuntimeError(f"{name}'s program does not run the orientation here")
+    if running(c) or orientation.running(c):
+        raise RuntimeError("the orientation is running. Run it again once it ends")
+    rec = orientation.read_run(c) or {}
+    chat = str((rec.get("chats") or {}).get(orientation.ROLE) or "")
+    meta = agents.meta_or_none(c, chat) if chat else None
+    if meta is None:
+        raise NoOrientation("no orientation has run in this workspace")
+    passes = [p for p in PASSES if p in (rec.get("passes") or [])]
+    choices = {"effort": rec.get("effort"), "critique": rec.get("critique", True)}
+    run = await start_program(c, agent.replacing, str(meta.get("brief") or ""), passes, choices, follow_up=True)
     return {"status": "resumed", "chat": run.chat, "run": 0}
 
 

@@ -2877,8 +2877,15 @@ def cmd_feedback(args: argparse.Namespace) -> int:
     return feedback.run(" ".join(args.description), cwd=cwd, logs=not args.no_logs)
 
 
-ORIENT_HINT = ("{name} adds to the orientation. Where an orientation already ran, Settings > Extensions asks whether "
-               "to run it there now.")
+ORIENT_HINT = ("{name} {does}. Where an orientation already ran, Settings > Extensions asks whether to run it there "
+               "now.")
+
+
+def orient_hint(name: str, program: bool) -> str:
+    """The line `add` and `on` print for an extension that changes the orientation (extensions.orients): `program`
+    when its own program runs the orientation."""
+    does = "runs the orientation with its own program" if program else "adds to the orientation"
+    return ORIENT_HINT.format(name=name, does=does)
 
 
 def cmd_extension(args: argparse.Namespace) -> int:
@@ -2910,8 +2917,9 @@ def cmd_extension(args: argparse.Namespace) -> int:
         for n in names:
             if kept := extensions.off_in(n, workspaces):
                 print(f"{n} stays off where its switch in Settings keeps it off: {', '.join(kept)}.")
-            if extensions.orients(extensions.read_extension(extensions.source_path(n), n)):
-                print(ORIENT_HINT.format(name=n))
+            info = extensions.read_extension(extensions.source_path(n), n)
+            if extensions.orients(info):
+                print(orient_hint(n, extensions.orient_program(info)))
         for line in extensions.conflicts_with(name):
             print(f"Conflict: {line}.")
     elif args.ext_cmd in ("on", "off"):
@@ -2927,7 +2935,7 @@ def cmd_extension(args: argparse.Namespace) -> int:
         if args.ext_cmd == "on" and got["problem"]:
             print(f"It does not run until this is fixed: {got['problem']}")
         elif args.ext_cmd == "on" and got["orients"]:
-            print(ORIENT_HINT.format(name=args.name))
+            print(orient_hint(args.name, got["orient_program"]))
     else:
         needing = extensions.dependents(args.name)
         if not extensions.remove(args.name):

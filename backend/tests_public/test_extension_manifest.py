@@ -167,13 +167,12 @@ def test_the_new_layout_gives_roles_tasks_subagents_and_report_types(tmp_path, c
     assert info["tasks"] == [{"task": "labels", "kind": "command", "description": "Three models vote.", "file": "",
                               "command": ["python", "labels.py"], "replace": False}]
     assert extensions.parts(info) == ["One pager report type", "adds to the orientation", "its own critic, an Agent SDK program",
-                                      "reader agent", "its own labels task, a program, not used yet",
+                                      "reader agent", "its own labels task, a program",
                                       "Tone report check"]
     lines = "\n".join(extensions.summary(info, {"source": str(root), "kind": "folder"}))
     assert "orientation Reads all. It adds to the orientation's prompt." in lines
     assert "critic      Two critics. It runs the critic as an Agent SDK program (critic.py)." in lines
-    assert ("task        labels: Three models vote. It runs the labels task as a program of its own (python labels.py). "
-            "This thimble does not run a task's program yet, so it is not used.") in lines
+    assert "task        labels: Three models vote. It runs the labels task as a program of its own (python labels.py)." in lines
     assert "report check tone: Tone. It is offered in the report's Checks." in lines
     assert "kernels" not in lines, "it has no Python for the kernels to run"
 
@@ -187,7 +186,8 @@ def test_the_new_layout_gives_roles_tasks_subagents_and_report_types(tmp_path, c
     assert brief["prompt"] == "Lead with the answer.\n\nA one-page brief." and brief["renderer"] == "document"
     row = next(r for r in extensions.public(c)["extensions"] if r["name"] == "kit")
     assert row["description"] == "A kit." and "reader agent" in row["parts"]
-    assert row["consent"] == "orientation and critic: network, web asks first, corpus edits ask first. reader: network, no web."
+    assert row["consent"] == ("orientation and critic: network, web asks first, corpus edits ask first. labels task: network, "
+                              "corpus edits ask first. reader: network, no web.")
 
 
 def test_files_in_a_prompt_lists_the_extension_s_scope_where_it_matches(tmp_path, corpus):

@@ -19,7 +19,7 @@ import { useTooltip } from '../components/Tooltip'
 import { api } from '../lib/api'
 import { ExtensionsSettings, answeredRuns, changedLocalViews, changedViews, extensionCalls, viewKey } from './ExtensionsSettings'
 import { hasFastMode, invalidateSettings, loadSettings, modelChoices, modelLabel, sameModel } from '../lib/models'
-import { EFFORTS, ROLES, type AgentRow, type Attached, type Extensions, type MainEffort, type ModeAgent, type ModelConf, type OrientPermissions, type Settings } from '../lib/types'
+import { EFFORTS, ROLES, type AgentRow, type Attached, type Extensions, type MainEffort, type ModeAgent, type ModelConf, type OrientPermissions, type Settings, type TaskRow } from '../lib/types'
 import { bus } from '../lib/bus'
 import { EFFORT_CHOICES, FastBolt, MODEL_TIP, NEXT_LAUNCH, effortWord, mainEffort, mainFast, noFastTip } from '../chat/ModelLine'
 import { BYPASS_LINE } from '../chat/ModeSwitch'
@@ -44,8 +44,8 @@ const DATA_TIP: Record<AgentRow['data'], string> = {
   off: 'It never changes a file of your data.',
 }
 
-/** Who runs an agent, in a few words: thimble, or the extension and how. Pure. */
-export function runsWords(row: AgentRow): string {
+/** Who runs an agent or a task, in a few words: thimble, or the extension and how. Pure. */
+export function runsWords(row: Pick<AgentRow, 'way' | 'extension' | 'additions' | 'conflict'>): string {
   if (row.conflict.length) return `thimble, since ${row.conflict.join(' and ')} both replace it`
   const added = row.additions.length ? ` + ${row.additions.join(', ')}` : ''
   if (row.way === 'sdk') return `${row.extension}, Agent SDK`
@@ -58,6 +58,12 @@ export function runsWords(row: AgentRow): string {
 export function agentLine(row: AgentRow): string {
   const box = row.sandbox === 'off' ? 'sandbox off' : row.sandbox_runs ? 'sandbox on' : 'no sandbox here'
   return [runsWords(row), box, `network ${row.network}`, DATA_WORDS[row.data]].join(' · ')
+}
+
+/** The tasks an extension changes, each with who runs it; '' when thimble runs every task as it ships. Pure. */
+export function tasksLine(rows: TaskRow[] | undefined): string {
+  const changed = (rows ?? []).filter((t) => t.way !== 'thimble' || t.additions.length || t.conflict.length)
+  return changed.map((t) => `${t.task} by ${runsWords(t)}`).join(' · ')
 }
 
 /** What an agent's line means, one sentence per line, for its tooltip. Pure. */
@@ -380,6 +386,11 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
             {!!settings.agents?.main?.additions.length && (
               <p className="settings-agent-main" role="note">
                 Main: your own session, with {settings.agents.main.additions.join(', ')}'s prompt from its next start
+              </p>
+            )}
+            {!!tasksLine(settings.tasks) && (
+              <p className="settings-agent-main settings-agent-tasks" role="note">
+                Tasks: {tasksLine(settings.tasks)}
               </p>
             )}
             {MODE_ROWS.some(({ agent }) => agentMode(modeRows, agent, attached?.permission_mode, off) === 'bypass') && (

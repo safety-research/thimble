@@ -134,7 +134,8 @@ def _implementation(task: str) -> Any:
     return getattr(importlib.import_module(f"app.{module}"), name)
 
 
-async def default(c: str, task: str, input: dict[str, Any], *, model: str | None = None, **kw: Any) -> Any:  # noqa: A002
+async def default(c: str, task: str, input: dict[str, Any], *, model: str | None = None,  # noqa: A002
+                  **kw: Any) -> Any:
     """thimble's own implementation of `task` on `input`: a model.CallResult (never raises for a failed model call)."""
     return await _implementation(task)(c, input, model=model, **kw)
 
