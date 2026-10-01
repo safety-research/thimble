@@ -40,7 +40,7 @@ Code checks three things in every view and shows them to the analyst above it, o
 
 - The filter. The reader keeps only the records for which `thimble.kept(ref)` holds, in every list and count, and the page fetches again in `thimble.onLabels(fn)`, which runs when the labels or the filter change. A unit stays when `thimble.kept_unit(refs)` holds for the refs of the records it gathers. A page that registers no `onLabels` has thimble hide the anchored elements the filter drops instead.
 - Charts. thimble cannot see inside a chart, so the reader counts what each label marks with `thimble.marked(ref)`, and the page draws the marked part in the label's colour, such as part of each bar.
-- Colour. Label colours repeat the theme's viz colours, so while a label is on, draw the view's own categories in the viz inks (`--viz-ink-*`).
+- Colour. Label colours resemble the theme's viz colours, so while a label is on, draw the view's own categories in the viz inks (`--viz-ink-*`).
 - Controls. `thimble.onLabels` also sends `all`, every label over files with its id, colour and values, and `palette`. `thimble.setLabel(id, on)` turns a label on or off beside the view, `thimble.newLabel()` opens the prompt for a new one and `thimble.setLabelColour(id, value, colour)` saves a value's colour. Give each such control `data-label` with the label's id. The page never hardcodes a label's name or colour.
 
 ## Worked examples
