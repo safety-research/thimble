@@ -17,6 +17,11 @@ ACK_S. Permission prompts on the hook route come from the PermissionRequest hook
 hook when the analyst answers in the terminal, the server ends the wait itself (clear_permissions, release_asks,
 agent_moved).
 
+A prompt the channel relays names no agent: it may be main's or any of its subagents', background ones included, which
+ask while main's turn is over. It stays on the card until the analyst answers it here, its call's result shows in a
+transcript of the session (relayed_done: answered in the terminal), or nothing in the session can still be asking
+(drop_relayed), never because main's own turn ended or stopped waiting.
+
 Main's terminal shows each event as one line (terminal_line): the analyst's words after SAID, with the thread or button
 they belong to, else a short line saying what happened. On the channel route Claude Code shows the start of the body
 itself. On the hook route it shows only the watcher's fixed summary, so the watcher's acknowledgment keeps the event's
@@ -75,6 +80,8 @@ ACK_S = 15.0  # an event taken and not acknowledged within this goes back to the
 GONE = "gone"  # _pull_state: another session is main now
 DORMANT = "dormant"  # _pull_state: another session is main now, and this one is main again when that one ends
 HOOK_ASK_PREFIX = "h"  # the ids of the permission requests the PermissionRequest hook relays
+HOOK_ASK_RE = re.compile(rf"^{HOOK_ASK_PREFIX}[0-9a-f]{{8}}$")
+RESULT_SLACK_S = 1.0  # a call's result stamped this much before its relayed request was logged still answers it
 SAID = "› "  # opens the analyst's own words in main's terminal (terminal_line)
 LINE_CHARS = 160  # of an event's line in main's terminal: about two lines
 _KEY_RE = re.compile(r"[^A-Za-z0-9_]")
@@ -86,6 +93,8 @@ _pending: dict[tuple[str, str], deque] = {}  # (workspace, session or "") -> eve
 _taken: dict[str, tuple[str, str, dict[str, Any], float]] = {}  # event id -> (workspace, session, note, when taken)
 _waiters: dict[str, set[tuple[asyncio.AbstractEventLoop, asyncio.Future]]] = {}  # workspace -> its waiting pulls
 _asks: dict[str, "Ask"] = {}  # hook permission id -> the request waiting for the analyst
+_relayed: dict[str, set[str]] = {}  # workspace -> ids of the requests on main's meta the channel relayed (_relayed_ids)
+_relayed_answered: dict[str, list[tuple[str, str]]] = {}  # workspace -> call_keys of relayed requests answered here
 _lines: dict[tuple[str, str], list[str]] = {}  # (workspace, session) -> lines of events its watcher wrote out, to print
 _observers: dict[str, list[Callable[[str, dict[str, Any], dict[str, Any]], None]]] = {}  # kind -> observe()'s functions
 
@@ -797,6 +806,7 @@ async def permission_request_route(body: PermissionRequest) -> dict[str, Any]:
     c = config.workspace_for_cwd(body.cwd)
     if not c:
         raise HTTPException(404, f"{body.cwd} is not a thimble workspace")
+    _relayed_ids(c).add(body.request_id)
     _hold(c, body.request_id, body.tool_name, body.description or body.tool_name, body.input_preview)
     return {"waiting": body.request_id}
 
@@ -844,6 +854,8 @@ def _drop(c: str, ids: set[str] | None = None, keep: set[str] | frozenset[str] =
     meta = agents.meta_or_none(c, agents.MAIN_ID)
     held = [p for p in (meta or {}).get("permissions") or [] if isinstance(p, dict)]
     left = [p for p in held if p.get("id") in keep or (ids is not None and p.get("id") not in ids)]
+    if c in _relayed:
+        _relayed[c].intersection_update(p.get("id") for p in left)
     if meta and len(left) != len(held):
         meta["permissions"] = left
         agents.write_meta(c, meta)
@@ -941,6 +953,10 @@ async def permission_route(c: str, body: PermissionAnswer, request: Request) -> 
     if not any(p.get("id") == body.id for p in pending):
         raise HTTPException(404, "no such permission request is waiting")
     behavior = "allow" if body.allow else "deny"
+    if body.id in _relayed_ids(c):
+        key = next((_entry_key(p) for p in pending if p.get("id") == body.id), None)
+        if key is not None:
+            _relayed_answered.setdefault(c, []).append(key)
     _drop(c, {body.id}, answer=behavior)
     if not _answer_ask(body.id, behavior):
         _publish_verdict(c, {"request_id": body.id, "behavior": behavior})
@@ -948,12 +964,105 @@ async def permission_route(c: str, body: PermissionAnswer, request: Request) -> 
 
 
 def clear_permissions(c: str) -> None:
-    """Drop main's relayed permission requests and end the hooks that wait on them: the session is no longer waiting on a
-    prompt. A subagent's or fork's request stays; agent_moved ends it."""
+    """Main's session is no longer waiting on a prompt of its own: end the hooks of main's own requests and drop them,
+    and any a previous server's hook left. A subagent's or fork's request stays, as agent_moved ends it, and so does a
+    request the channel relayed (module note)."""
     agents_asking = {i for i, a in _asks.items() if a.c == c and a.agent}
     for request_id in [i for i, a in _asks.items() if a.c == c and not a.agent]:
         _answer_ask(request_id, None)
-    _drop(c, keep=agents_asking)
+    _drop(c, keep=agents_asking | _relayed_ids(c))
+
+
+def _relayed_ids(c: str) -> set[str]:
+    """The ids of the requests on main's meta the channel relayed. Read from the meta once per server, as every id
+    there that is not a hook's, since the requests a previous server took stay on the card."""
+    ids = _relayed.get(c)
+    if ids is None:
+        from . import agents  # noqa: PLC0415
+
+        meta = agents.meta_or_none(c, agents.MAIN_ID) or {}
+        ids = _relayed[c] = {str(p["id"]) for p in meta.get("permissions") or []
+                             if isinstance(p, dict) and isinstance(p.get("id"), str) and not HOOK_ASK_RE.match(p["id"])}
+    return ids
+
+
+def relaying(c: str) -> bool:
+    """Whether main's meta holds a request the channel relayed."""
+    return bool(_relayed_ids(c))
+
+
+def _entry_key(entry: dict[str, Any]) -> tuple[str, str] | None:
+    """The call a relayed request asks about, as call_key names it, from its tool and the input Claude Code previewed:
+    the whole preview when it is JSON, else the field that names the call when the preview holds it whole. None when
+    neither can be read."""
+    tool, preview = str(entry.get("tool") or ""), str(entry.get("input") or "")
+    try:
+        inp = json.loads(preview)
+    except ValueError:
+        inp = None
+    if isinstance(inp, dict):
+        return call_key(tool, inp)
+    field = CALL_FIELDS.get(tool)
+    m = re.search(rf'"{re.escape(field)}": ?("(?:[^"\\]|\\.)*")', preview) if field else None
+    try:
+        return call_key(tool, {field: json.loads(m.group(1))}) if m and field else None
+    except ValueError:
+        return None
+
+
+def _asked_at(entry: dict[str, Any]) -> float:
+    """When a request went on the card, as time.time(); 0 when its stamp can't be read."""
+    from datetime import datetime  # noqa: PLC0415
+
+    try:
+        return datetime.fromisoformat(str(entry.get("since") or "")).timestamp()
+    except ValueError:
+        return 0.0
+
+
+def _relayed_entries(c: str) -> list[dict[str, Any]]:
+    """The requests the channel relayed on main's meta, oldest first."""
+    from . import agents  # noqa: PLC0415
+
+    ids = _relayed_ids(c)
+    meta = agents.meta_or_none(c, agents.MAIN_ID) or {}
+    held = [p for p in meta.get("permissions") or [] if isinstance(p, dict) and p.get("id") in ids]
+    ids.intersection_update(p.get("id") for p in held)
+    return sorted(held, key=_asked_at)
+
+
+def relayed_done(c: str, done: "list[tuple[tuple[str, str], float]]") -> None:
+    """Calls of main or of any of its agents got their results (call_key, the result's time): a request the channel
+    relayed for the same call and asked before the result was answered in the terminal, so the card drops it. A result
+    of a call the analyst answered here (_relayed_answered) answers no other request."""
+    if not done or not relaying(c):
+        return
+    entries = [(p, _entry_key(p), _asked_at(p)) for p in _relayed_entries(c)]
+    answered = _relayed_answered.get(c, [])
+    gone: set[str] = set()
+    for key, at in done:
+        if key in answered:
+            answered.remove(key)
+            continue
+        hit = next((str(p["id"]) for p, k, asked in entries
+                    if k == key and p["id"] not in gone and asked <= at + RESULT_SLACK_S), None)
+        if hit is not None:
+            gone.add(hit)
+    if gone:
+        _drop(c, gone)
+
+
+def drop_relayed(c: str, older_than: float = 0.0) -> None:
+    """Drop the requests the channel relayed that went on the card at least `older_than` seconds ago: nothing in main's
+    session can still be asking them."""
+    if not relaying(c):
+        return
+    now = time.time()
+    gone = {str(p["id"]) for p in _relayed_entries(c) if now - _asked_at(p) >= older_than}
+    if gone:
+        _drop(c, gone)
+    if not _relayed_ids(c):
+        _relayed_answered.pop(c, None)
 
 
 def release_asks(c: str, older_than: float) -> None:
@@ -1042,3 +1151,5 @@ async def shutdown() -> None:
     for request_id in list(_asks):
         _answer_ask(request_id, None)
     _answered.clear()
+    _relayed.clear()
+    _relayed_answered.clear()

@@ -114,6 +114,7 @@ WAIT_NOTE_S = 2.0  # a wait shorter than this (a prompt the analyst answered at 
 # Main's hook-relayed prompt older than this is ended while Claude Code's record says the session waits on none: the
 # analyst answered it in the terminal. A subagent's or fork's prompt is never released this way.
 ASK_RELEASE_S = 10.0
+RELAYED_IDLE_S = 10.0  # a request the channel relayed this long ago leaves the card when nothing in the session runs
 SAFETY_ALERT = ("Claude Code is waiting in your terminal: Claude's safety check stopped this answer. Choose there whether "
                 "to switch to another model and go on, or to stay on this one and stop the answer.")
 FALLBACK_SUBTYPE = "model_refusal_fallback"
@@ -616,6 +617,7 @@ def detach(c: str, sid: str, reason: str | None = None) -> bool:
     meta["ended"] = {"session": sid, "cwd": str(held.get("cwd") or ""), "at": _now()}
     agents.write_meta(c, meta)
     agents.notify(c, agents.MAIN_ID)
+    _channel_module().drop_relayed(c)  # the session's prompts end with it
     log.info("%s: session %s detached (%s)", c, sid, reason or "ended")
     return True
 
@@ -1441,6 +1443,8 @@ def _tail_sub(lv: Live, sub: Sub) -> int:
         sub.on_results(done)
     if done and sub.agent_id and sub.agent_id in _channel_module().asking(lv.c):
         _channel_module().calls_done(lv.c, sub.agent_id, done)
+    if done:
+        _channel_module().relayed_done(lv.c, done)  # a prompt the channel relayed, answered in the terminal
     return n
 
 
@@ -1905,6 +1909,7 @@ def tail_once(lv: Live) -> None:
             _finish_sub(lv, sub, *sub.finish)
     _save_cursor(lv)  # the subagents' places, and the runs that ended
     _watch_wait(lv)
+    _settle_relayed(lv)
 
 
 def _sessions_dir(config_dir: Path | None = None) -> Path:
@@ -1975,9 +1980,20 @@ def _watch_wait(lv: Live) -> None:
     _note(lv, f"{WAITING_TEXT}: {detail}" if detail else WAITING_TEXT)
 
 
+def _settle_relayed(lv: Live) -> None:
+    """Drop the requests the channel relayed at least RELAYED_IDLE_S ago once nothing in the session can still be asking
+    them: no turn is open, no subagent runs and Claude Code's own record shows no prompt. The age covers a prompt whose
+    turn the tail has not read yet."""
+    channel = _channel_module()
+    if lv.busy or not channel.relaying(lv.c) or session_state(lv).get("status") == "waiting":
+        return
+    channel.drop_relayed(lv.c, RELAYED_IDLE_S)
+
+
 def _asked(lv: Live, waiting: bool) -> bool:
-    """While the session waits on a permission prompt: whether the shim relayed it (main's meta holds it). Once the
-    session no longer waits on one, a relayed request left on main's meta (answered in the terminal) is dropped."""
+    """While the session waits on a permission prompt: whether main's meta holds a relayed request. Once the session no
+    longer waits on one, main's own hook-relayed requests are dropped (channel.clear_permissions); those of its agents
+    and those the channel relayed stay."""
     meta = agents.meta_or_none(lv.c, agents.MAIN_ID) or {}
     pending = bool(meta.get("permissions"))
     if not waiting and pending:
@@ -2039,6 +2055,7 @@ def _tail_main(lv: Live) -> None:
     done = _results_in(lv.call_keys, lines)
     if done:
         _channel_module().calls_done(lv.c, None, done)  # main's own prompts answered in the terminal
+        _channel_module().relayed_done(lv.c, done)
 
 
 def _degrade(lv: Live, err: Exception) -> None:
