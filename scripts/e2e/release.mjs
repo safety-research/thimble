@@ -41,8 +41,6 @@ const PENDING = {
   welcome: 'the first-launch welcome',
   tour: 'the product tour',
   'views-bar': 'worked examples and the PDF viewer kept out of the views',
-  'local-views': 'generated views as the workspace\'s local extension',
-  'ext-live': '+ New refreshing its report types when an extension is switched (it loads them once per page)',
   'view-derived': 'the view contract (derived fields as a count in the header)',
   'view-labels': 'the view contract (labels in every view\'s UI)',
   'labels-any-file': 'records and refs for any file a reader can split (CSV rows, PDF pages, SQLite rows)',
@@ -684,13 +682,27 @@ async function main() {
       return { detail: lines.join(', ') }
     })
 
-    await step('views-bar', 'The views bar holds only the File browser and the workspace\'s own views', async () => {
+    await step('views-bar', 'Worked examples are no views: the views bar holds only the workspace\'s own, and no example is listed or claims the PDF', async () => {
       await showFiles(page)
       const bar = (await page.locator('[data-anchor^="view:"]').allInnerTexts()).map((t) => t.trim())
       const s = await shot(page, 'views-bar')
+      const origin = new URL(WS.url).origin
+      const shelf = join(TREE, 'plugin', 'viewers')
+      const examples = existsSync(shelf) ? readdirSync(shelf, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name) : []
+      const slugs = async (q) => {
+        const r = await page.request.get(`${origin}/api/ws/${WS.name}/views${q}`)
+        const got = await r.json().catch(() => null)
+        return Array.isArray(got) ? got.map((v) => String(v?.slug ?? '')) : []
+      }
+      const listed = (await slugs('')).filter((x) => examples.includes(x))
+      const forPdf = (await slugs('?path=docs/e2e-sample.pdf')).filter((x) => examples.includes(x))
+      const problems = []
       const others = bar.filter((t) => t && t !== VIEW.name)
-      if (others.length) throw new StepError(`views that are not the workspace's: ${others.join(', ')}`, [s])
-      return { detail: `views: ${bar.join(', ') || 'none'}`, shots: [s] }
+      if (others.length) problems.push(`views that are not the workspace's: ${others.join(', ')}`)
+      if (listed.length) problems.push(`worked examples in the views list: ${listed.join(', ')}`)
+      if (forPdf.length) problems.push(`worked examples that claim docs/e2e-sample.pdf: ${forPdf.join(', ')}`)
+      if (problems.length) throw new StepError(problems.join('; '), [s])
+      return { detail: `views: ${bar.join(', ') || 'none'}; none of the ${examples.length} worked examples listed`, shots: [s] }
     })
 
     await step('view', 'The fixture view opens and draws a row per file it reads', async () => {
