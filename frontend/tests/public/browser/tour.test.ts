@@ -65,7 +65,7 @@ const MAIN = {
   attached: { session: 'session-1', cwd: '/home/analyst/demo', since: T }, ended: null, alert: null, running: false,
 }
 const SETTINGS = {
-  run_cell_result_lines: 40, hide_chat: false,
+  run_cell_result_lines: 40,
   models: Object.fromEntries(['orient', 'critic', 'writer', 'checks', 'verify', 'labels', 'dev'].map((r) => [r, { model: 'claude-opus-5-5', effort: 'high', fast: false }])),
   permission_modes: {}, disabled_modes: [], config_error: '', untrusted: null,
 }
