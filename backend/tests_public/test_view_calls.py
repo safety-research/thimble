@@ -602,3 +602,22 @@ def test_an_index_pickled_by_one_reader_version_loads_with_that_versions_classes
     finally:
         for k in ("_indexes", "_sizes", "_readers", "_reader_of"):
             getattr(view_host, k).clear()
+
+
+def test_a_kernels_python_process_is_found_by_its_command_line_not_its_size(monkeypatch):
+    """Inside the sandbox wrapper the kernel is the process started as `python -m ipykernel_launcher`. A worker it
+    forked has the same command line and may be larger, and the wrapper names the kernel's command among its own
+    arguments: neither is taken for it."""
+    from app import procs  # noqa: PLC0415
+
+    kernel = ["/venv/bin/python", "-m", "ipykernel_launcher", "-f", "k.json"]
+    tree = {10: ["/usr/bin/node", "kernel_srt.mjs", "srt", "{}", *kernel], 11: ["bwrap", "--ro-bind", "/", "/"],
+            12: ["apply-seccomp", "/usr/bin/bash", "-c", " ".join(kernel)], 13: kernel, 14: kernel}
+    sizes = {10: 70, 11: 2, 12: 1, 13: 900, 14: 3000}
+    monkeypatch.setattr(procs, "descendants", lambda pid: [11, 12, 13, 14] if pid == 10 else [])
+    monkeypatch.setattr(procs, "argv", lambda pid: tree.get(pid, []))
+    monkeypatch.setattr(procs, "rss", lambda pid: sizes.get(pid, 0))
+    assert view_calls._kernel_process(10) == 13
+    tree[13] = tree[14] = ["/venv/bin/python", "-c", "pass"]
+    assert view_calls._kernel_process(10) == 14, "with no kernel's command line, the largest descendant"
+    assert view_calls._kernel_process(99) == 99

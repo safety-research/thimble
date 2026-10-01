@@ -171,9 +171,22 @@ async def _stop(c: str, name: str) -> None:
 _inner: dict[int, int] = {}  # the pid a kernel was started as -> the pid of its Python process
 
 
+def _kernel_process(pid: int) -> int:
+    """The kernel's Python process among `pid` and its descendants: the first, nearest `pid`, started as
+    `python -m ipykernel_launcher` (a process it forked has the same command line, further down), else the largest
+    descendant, else `pid`."""
+    tree = [pid, *procs.descendants(pid)]
+    for p in tree:
+        a = procs.argv(p)
+        if len(a) > 2 and a[1:3] == ["-m", "ipykernel_launcher"]:
+            return p
+    return max(tree[1:], key=procs.rss) if len(tree) > 1 else pid
+
+
 def _rss(c: str, name: str) -> int:
     """The resident size in bytes of the kernel's Python process, 0 when it is not running. Under a sandbox wrapper the
-    process started is the wrapper, so its largest descendant is read (found once). Tests replace it."""
+    process started is the wrapper, so the Python process is found inside it (once, _kernel_process). Tests replace
+    it."""
     from . import notebook  # noqa: PLC0415
 
     k = notebook._exec_kernels.get((c, name))
@@ -181,8 +194,7 @@ def _rss(c: str, name: str) -> int:
         return 0
     inner = _inner.get(k.pid)
     if inner is None or not procs.alive(inner):
-        tree = procs.descendants(k.pid)
-        inner = max(tree, key=procs.rss) if tree else k.pid
+        inner = _kernel_process(k.pid)
         for p in [p for p in _inner if not procs.alive(p)]:
             del _inner[p]
         _inner[k.pid] = inner
