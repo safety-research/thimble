@@ -77,7 +77,8 @@ def test_a_code_ticket_s_session_runs_in_the_sandbox_writing_its_worktree_and_it
     assert box["filesystem"]["allowWrite"] == [str(common / "objects"), str(common / "refs" / "heads" / "dev"),
                                                str(common / "logs" / "refs" / "heads" / "dev"), str(common / "worktrees" / "7")]
     flags = dev.Sessions()._flags(CORPUS, "thimble ticket 7: x", fence=fence, asking={"key": "ticket:7", "config": conf})
-    assert json.loads(flags[flags.index("--settings") + 1])["sandbox"] == box
+    secret = {**box, "filesystem": {**box["filesystem"], "denyRead": userconf.private_paths()}}
+    assert json.loads(flags[flags.index("--settings") + 1])["sandbox"] == secret, "and it never reads server.json"
     t = {"id": "7", "title": "x", "body": "y", "workspace": CORPUS}
     boxed = dev.build_prompt(t, worktree=wt, ui_url="u", api_url="a", before_shot=None, sandboxed=True)
     assert dev.TICKET_STACK_LINES[True].split(":")[0] in boxed and "ui_shot" not in boxed

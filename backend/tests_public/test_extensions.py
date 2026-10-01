@@ -568,7 +568,8 @@ async def test_thimble_s_config_switches_extensions_off_and_sets_their_agents(co
     await extensions.refresh(CORPUS)
     counter = extensions.agent_definitions(CORPUS)["counter"]
     assert counter["disallowedTools"] == ["WebFetch", "WebSearch"] and counter["tools"] == ["Read", "Grep"]
-    _config({"agents": {"ext-min:counter": {"web": "ask", "effort": "low"}, "orientation": {"network": "on"}}})
+    _config({"agents": {"ext-min:counter": {"web": "ask", "effort": "low", "network": "off"},
+                        "orientation": {"network": "on"}}})
     assert userconf.problem(CORPUS) == ""
     counter = extensions.agent_definitions(CORPUS)["counter"]
     assert counter["tools"] == ["Read", "Grep", "WebFetch"] and counter["effort"] == "low"
@@ -576,8 +577,8 @@ async def test_thimble_s_config_switches_extensions_off_and_sets_their_agents(co
     row = ledger.with_features({}, CORPUS)["models"]["ext-min:counter"]
     assert row == {"model": "claude-sonnet-5", "effort": "low", "fast": False, "extension": "ext-min"}, "a Settings row"
     ledger.put_settings(CORPUS, {"models": {"ext-min:counter": {"model": "claude-opus-5-5", "effort": ""}}})
-    assert json.loads(userconf.global_file().read_text())["agents"]["ext-min:counter"] == {"web": "ask",
-                                                                                           "model": "claude-opus-5-5"}
+    assert json.loads(userconf.global_file().read_text())["agents"]["ext-min:counter"] == {
+        "web": "ask", "network": "off", "model": "claude-opus-5-5"}
     assert extensions.agent_definitions(CORPUS)["counter"]["model"] == "claude-opus-5-5"
     _config({"extensions": {"ext-min": {"enabled": False, "on": 1}}, "agents": {"ext-min:counter": {"web": "always",
                                                                                                    "fast": True}}})
