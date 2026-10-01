@@ -2841,7 +2841,9 @@ def asker_models(c: str, prop: dict[str, Any]) -> dict[str, Any]:
             "fast": held["fast"] if isinstance(held.get("fast"), bool) else None}
 
 
-VIEW_TMP_ROOT = Path("/tmp")  # where view builds' temp folders go (view_tmp_dir); tests point it elsewhere
+# where view builds' temp folders go (view_tmp_dir), by its real path, since the sandbox and the allow rules match real
+# paths and /tmp is a link on macOS; tests point it elsewhere
+VIEW_TMP_ROOT = Path("/tmp").resolve()
 
 
 def _view_tmp_paths(c: str, slug: str) -> tuple[Path, Path]:
