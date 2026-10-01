@@ -301,7 +301,7 @@ function PdfReader({ workspace, path, targetRef, lead, end, labels, only, onMode
         <ReaderViewer key={viewer.slug} ws={workspace} view={viewer} path={path} targetRef={fragment != null && accepts(viewer, fragment) ? targetRef : undefined} labels={labels} />
       ) : inPage ? (
         <div className="reader-pdf" data-body="">
-          <iframe key={src} src={src} title={path} className="reader-pdf-frame" />
+          <iframe key={src} src={src} title={path} className="reader-pdf-frame" allowFullScreen />
         </div>
       ) : (
         <div className="reader-noview">
