@@ -330,13 +330,6 @@ async def test_a_workspace_gets_four_views_from_the_orientation_and_a_deleted_on
     assert [p["name"] for p in views.list_proposals(CORPUS)] == ["Two", "Three", "Four", "One"]
 
 
-def test_a_viewer_thimble_ships_runs_from_a_copy_in_the_workspace(ws):
-    """The views kernel's sandbox holds the workspace, not thimble's own folder."""
-    _, req = views._prepare(CORPUS, "pdf")
-    assert Path(req["reader"]).is_relative_to(ws.resolve())
-    assert Path(req["reader"]).read_text("utf-8") == (views.VIEWERS_DIR / "pdf" / "reader.py").read_text("utf-8")
-
-
 def test_the_frame_document_blocks_every_host_before_any_script(ws):
     doc = views.frame_document(views.read_view(CORPUS, "threads"))
     assert doc.lower().startswith("<!doctype html>")
@@ -380,18 +373,17 @@ async def test_no_thread_is_read_as_a_question_from_a_view_s_own_box(ws, inproc,
 # ------------------------------------------------------------------------------------------------- worked examples
 #
 # plugin/viewers/linked-sessions, incident-timeline and repository are the worked examples a view ticket's session reads
-# (prompts/dev-view.md), and pdf the file-type viewer thimble ships. Each ships an invented sample of the files it
-# claims under sample/, and passes over it the checks a view a session writes must pass. Each sample is copied into the
-# temp DATA_DIR as a corpus named after its example.
+# (prompts/dev-view.md), and never views of a workspace. Each ships an invented sample of the files it claims under
+# sample/, and passes over it the checks a view a session writes must pass. Each sample is copied into the temp DATA_DIR
+# as a corpus named after its example.
 
-# the example, the slug it is saved under, and a key of each unit it gives (for pdf, pages it cites)
+# the example, the slug it is saved under, and a key of each unit it gives
 EXAMPLES = {
     "incident-timeline": ("incident-timeline", ["view:incident-timeline/INC-312",
                                                 "view:incident-timeline/2026-05-16T08:00..2026-05-16T09:00"]),
     "repository": ("repository", ["view:repository/r1/pull/11", "view:repository/r3", "view:repository/r2/issues/6",
                                   "view:repository/r3/discussions/2", "view:repository/r4/agents/moss"]),
     "linked-sessions": ("linked-sessions", ["view:linked-sessions/r1", "view:linked-sessions/a07a4da7"]),
-    "pdf": ("pdf", ["reports/harbor-line-safety-2026.pdf#p2", "runs/r2/summary.pdf#p1-p2"]),
 }
 
 
@@ -420,7 +412,7 @@ def _save_example(name: str) -> str:
 
 
 # per example, lines a sample file gets appended that its reader must report rather than fail on: (file, text, problems
-# they add); a file that is not there, or a .json or .pdf file, is written whole
+# they add); a file that is not there, or a .json file, is written whole
 BROKEN = {
     "incident-timeline": [("agents.log", '2026-05-16T05:00:00Z INFO autoheal action=scan result=ok msg="matched \\d+"\n', 1),
                           ("deploys.csv", '2026-05-16T03:10:00+01:00,dep-90,started,api,1.2.0,ops,,,"two\nlines"\n', 0),
@@ -436,8 +428,19 @@ BROKEN = {
                          '{"type": "user", "uuid": "x9", "timestamp": "2026-09-12T14:50:00Z", "message": {"role": '
                          '"user", "content": [{"type": "tool_result", "tool_use_id": "toolu_gone", "content": "ok"}]}}\n',
                          1)],
-    "pdf": [("uploads/half.pdf", "%PDF-1.4\n1 0 obj\n", 1)],
 }
+
+
+def test_the_worked_examples_are_never_views_of_a_workspace(samples):
+    """A corpus that holds an example's own sample gets none of the examples as views: none is listed, none opens a
+    citation of its files, and none adds a citation form to main's table."""
+    for name in EXAMPLES:
+        slugs = {v["slug"] for v in views.list_views(name)}
+        assert not slugs & {p.name for p in views.EXAMPLES_DIR.iterdir()}, name
+        assert not views.forms_text(name), name
+        for p in sorted((samples / name).rglob("*"))[:20]:
+            if p.is_file():
+                assert not views.views_for(name, p.relative_to(samples / name).as_posix(), "L1"), (name, p)
 
 
 @pytest.mark.parametrize("name", sorted(EXAMPLES))
@@ -461,13 +464,13 @@ async def test_every_worked_example_answers_the_checks_over_its_sample(name, sam
     before = (await views.reader_problems(name, slug))["count"]
     for rel, text, _ in BROKEN[name]:
         path = samples / name / rel
-        old = path.read_text("utf-8") if path.is_file() and not rel.endswith((".json", ".pdf")) else ""
+        old = path.read_text("utf-8") if path.is_file() and not rel.endswith(".json") else ""
         path.write_text(old + ("\n" if old and not old.endswith("\n") else "") + text, "utf-8")
     rep = await views.check(name, slug, EXAMPLES[name][1], shot_dir=tmp_path)
     assert rep["ok"], views.gate_lines(rep)
     checked = [r["locator"] for r in rep["checks"]]
     assert set(EXAMPLES[name][1]) <= set(checked)
-    assert name == "pdf" or any(re.search(r"#L\d+$", c) for c in checked), "sampled lines were checked beside the keys"
+    assert any(re.search(r"#L\d+$", c) for c in checked), "sampled lines were checked beside the keys"
     problems = await views.reader_problems(name, slug)
     assert problems["count"] == before + sum(n for *_, n in BROKEN[name]), problems
     assert not rep["coverage"]["not_shown"]["count"] and rep["coverage"]["derived"], "every file is read, and what the reader made is listed"

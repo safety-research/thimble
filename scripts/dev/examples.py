@@ -1,10 +1,10 @@
-"""Open the worked examples of custom views, each on its own sample with its sample labels on.
+"""Open the worked examples of custom views, each on its own sample with its sample labels on, to look at them.
 
     backend/.venv/bin/python scripts/dev/examples.py <folder>
 
-For each example in plugin/viewers that has a sample/, this copies the sample to <folder>/<example>, registers the copy
-as a workspace, saves the example as a built view of it (a file-type viewer thimble ships, such as pdf, is there
-already, in the File browser), and applies the labels its labels.json defines, turned on in Files. The labels are regex
+The examples are few-shot examples for the dev agent, which thimble never installs as views. For each example in
+plugin/viewers this copies its sample to <folder>/<example>, registers the copy as a workspace, saves the example as a
+built view of it, and applies the labels its labels.json defines, turned on in Files. The labels are regex
 labels, so no model is called. A copy an earlier run made is replaced; any other folder of that name stops the script
 before it changes anything. Run it in the environment of the stack it is for (THIMBLE_HOME, THIMBLE_DATA_DIR,
 THIMBLE_WORKSPACES_DIR); a server already running picks the views and labels up.
@@ -59,8 +59,7 @@ async def main(folder: Path) -> None:
             shutil.copytree(src / "sample", dst)
             (dst / MARK).touch()
             c = config.register_corpus(dst)["name"]
-            if src.name not in views.BUILTIN_VIEWERS:
-                save_view(c, src)
+            save_view(c, src)
             await apply_labels(c, src)
     finally:
         concepts._pool_shutdown()
