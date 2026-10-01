@@ -1,85 +1,257 @@
 {
   "name": "Repository",
-  "description": "Several agent runs on one small library, read as a code forge shows them: any run or runs chosen, pull requests with their commits, diffs and reviews, issues, discussions and agents, each run's measures side by side, so the runs' setups can be compared issue by issue and a pull request's whole story is one click away.",
-  "claims": ["runs/*.json", "runs/*.jsonl", "runs/*.csv"],
-  "accepts": [{"form": "L<n>", "means": "the record on line <n> of a run's file, shown in its pull request, issue, discussion or agent; a manifest's line opens its run"}],
+  "description": "Several agent runs on one small library, read as a code forge shows them: any runs picked or compared issue by issue, pull requests, issues, discussions and agents in tabs filtered on every field, and a pull request's whole story with its commits, diffs, reviews and the file of each entry.",
+  "unit": "run",
+  "claims": [
+    "runs/*.json",
+    "runs/*.jsonl",
+    "runs/*.csv"
+  ],
+  "accepts": [
+    {
+      "form": "L<n>",
+      "means": "the record on line <n> of a run's file, shown in its pull request, issue, discussion or agent; a manifest's line opens its run"
+    }
+  ],
   "units": [
-    {"form": "<run>", "means": "one run: its measures, with the view narrowed to it"},
-    {"form": "<run>/pull/<n>", "means": "one pull request with its commits, reviews, comments and merge or close"},
-    {"form": "<run>/issues/<n>", "means": "one issue with its comments and the pull requests that close it"},
-    {"form": "<run>/discussions/<n>", "means": "one discussion, every post in time order"},
-    {"form": "<run>/agents/<name>", "means": "one agent: its note, its activity and its review partners"}
+    {
+      "form": "<run>",
+      "means": "one run: its measures, with the view narrowed to it"
+    },
+    {
+      "form": "<run>/pull/<n>",
+      "means": "one pull request with its commits, reviews, comments and merge or close"
+    },
+    {
+      "form": "<run>/issues/<n>",
+      "means": "one issue with its comments and the pull requests that close it"
+    },
+    {
+      "form": "<run>/discussions/<n>",
+      "means": "one discussion, every post in time order"
+    },
+    {
+      "form": "<run>/agents/<name>",
+      "means": "one agent: its note, its activity and its review partners"
+    }
   ],
   "derived": [
-    {"field": "time", "from": "ts, time, created_at, committed_at, submitted_at, merged_at, closed_at, started and timestamp", "how": "ISO 8601, epoch milliseconds or local time read onto one clock, as hours since the run started; a time without an offset is in the manifest's timezone, else UTC; a post with no time takes the time of the line before it"},
-    {"field": "run", "from": "the folder a file is in, and the manifest's run or id", "how": "runs/<run>/"},
-    {"field": "agents", "from": "the manifest's agents or team, and the agents/ transcripts", "how": "the names in either"},
-    {"field": "team", "from": "agents", "how": "how many agents a run has"},
-    {"field": "hours", "from": "time", "how": "a run's length, from its start, else its first record, to its last record"},
-    {"field": "approvals needed", "from": "approvals, required_approvals or policy.approvals", "how": "the first number, where it is written as free text"},
-    {"field": "action", "from": "type or event, and a review's state", "how": "opened, pushed, commented, merged, closed, reopened, posted or signed off, and a review by its verdict in lower case"},
-    {"field": "actor", "from": "actor, user, author, merged_by, closed_by, and user.login in reviews.json", "how": "user read as actor; a review from a gone account is unknown"},
-    {"field": "closes", "from": "fixes, closes or linked_issue", "how": "the first number, where it is written as free text"},
-    {"field": "area", "from": "labels, area or an export's labels", "how": "the first label; a pull request without one takes the area of the issue it fixes"},
-    {"field": "state", "from": "a unit's merge, close and reopen records", "how": "open, merged or closed for a pull request; fixed when a pull request that fixes the issue is merged"},
-    {"field": "reason", "from": "reason or state_reason", "how": "closed where there is none"},
-    {"field": "why", "from": "a close's text, else the closer's comment in the same minute", "how": "the words a close ended with"},
-    {"field": "latest", "from": "the reviews", "how": "each reviewer's last verdict that is not a comment"},
-    {"field": "approvals", "from": "latest", "how": "how many reviewers approved last"},
-    {"field": "changes", "from": "latest, or an agent's reviews", "how": "how many reviewers asked for changes last; for an agent, its change requests"},
-    {"field": "first_review", "from": "time", "how": "hours from the opening to the first review"},
-    {"field": "to_merge", "from": "time", "how": "hours from the opening to the merge"},
-    {"field": "to_fix", "from": "time", "how": "the median hours from an issue's opening to its fix"},
-    {"field": "flags", "from": "a pull request's merge, reviews and pushes", "how": "merged by its author, merged over a change request, pushed after its last approval, or waiting for approvals"},
-    {"field": "merged by its author", "from": "flags", "how": "how many of a run's pull requests carry the flag"},
-    {"field": "merged over a change request", "from": "flags", "how": "how many of a run's pull requests carry the flag"},
-    {"field": "pushed after its last approval", "from": "flags", "how": "how many of a run's pull requests carry the flag"},
-    {"field": "plus", "from": "a push's diff or a commit's patch", "how": "the lines it adds"},
-    {"field": "minus", "from": "a push's diff or a commit's patch", "how": "the lines it removes"},
-    {"field": "files", "from": "a push's diff or a commit's patch", "how": "how many files the diffs change"},
-    {"field": "commits", "from": "the pushes", "how": "how many pushes a pull request has"},
-    {"field": "reviews", "from": "the reviews", "how": "how many reviews a pull request has; per run, the mean"},
-    {"field": "comments", "from": "the comments", "how": "how many comments a unit has"},
-    {"field": "origin", "from": "an issue's opening time", "how": "backlog when it was opened before the run started, else found during the run"},
-    {"field": "prs", "from": "closes", "how": "the pull requests that fix the issue"},
-    {"field": "posts", "from": "board.jsonl", "how": "how many posts a discussion or agent has"},
-    {"field": "posters", "from": "author", "how": "who posted in a discussion; per run, how many"},
-    {"field": "mentions", "from": "a post's body", "how": "the #<n> numbers it names"},
-    {"field": "note", "from": "an agent's transcript", "how": "its last assistant text"},
-    {"field": "opened", "from": "the pull requests", "how": "how many an agent opened"},
-    {"field": "merged", "from": "state", "how": "how many pull requests are merged, per agent or per run"},
-    {"field": "merges", "from": "merged_by", "how": "how many pull requests an agent merged"},
-    {"field": "approved", "from": "an agent's reviews", "how": "how many approvals it gave"},
-    {"field": "issues", "from": "the issues", "how": "how many an agent opened"},
-    {"field": "partners", "from": "the reviews", "how": "per author an agent reviewed, its approvals and change requests"},
-    {"field": "mutual", "from": "partners", "how": "the pairs of agents who each approved a pull request of the other"},
-    {"field": "spread", "from": "approved and changes", "how": "each agent's reviews, most first"},
-    {"field": "top", "from": "spread", "how": "the share of a run's reviews the busiest reviewer gave"},
-    {"field": "fixed", "from": "state", "how": "how many issues are fixed"},
-    {"field": "open", "from": "state", "how": "how many units are open"},
-    {"field": "closed", "from": "state", "how": "how many units are closed without a merge or fix"},
-    {"field": "found", "from": "origin", "how": "how many issues were found during the run"},
-    {"field": "several", "from": "prs", "how": "how many issues have more than one pull request"},
-    {"field": "n", "from": "the units that pass the filters", "how": "how many units of the tab a run has"},
-    {"field": "fixed_by", "from": "closes", "how": "the merged pull request that fixes the issue"},
-    {"field": "paths", "from": "a push's diff or a commit's patch", "how": "the files named on its +++ b/ lines"},
-    {"field": "text", "from": "body, text or message", "how": "text read as body or message, a commit's message in the export"},
-    {"field": "diff", "from": "diff or patch", "how": "patch read as diff"},
-    {"field": "verdict", "from": "a review's state", "how": "approved, changes requested or commented, in lower case, commented when it is missing"},
-    {"field": "kind", "from": "type or event, else the export table a row is in", "how": "issue, pr, commit, review, comment, merge, close, reopen, post or agent"},
-    {"field": "links", "from": "the #<n> in a record's text", "how": "the pull requests and issues of the run it names"},
-    {"field": "number", "from": "number, a commit's or review's pull, or a post's thread_id", "how": "the first number in it"},
-    {"field": "thread", "from": "thread_id", "how": "its first number"},
-    {"field": "title", "from": "a discussion's first post's thread_title", "how": "the discussion's title"},
-    {"field": "pulls", "from": "prs, or the pull requests' authors", "how": "an issue's pull requests, or the ones an agent opened"},
-    {"field": "issue", "from": "closes", "how": "the issue a pull request closes, with its title and state"},
-    {"field": "elsewhere", "from": "an issue's number and title", "how": "the same issue in each other run, with its state and pull requests"},
-    {"field": "reviewed_by", "from": "partners", "how": "per agent that reviewed an agent's pull requests, its approvals and change requests"},
-    {"field": "ended", "from": "time", "how": "when a unit was merged or closed, and an issue when the pull request that fixes it was merged"},
-    {"field": "reviewed", "from": "partners", "how": "the authors whose pull requests an agent approved or asked changes on"},
-    {"field": "at", "from": "time", "how": "a record's time in UTC"},
-    {"field": "merged_by", "from": "the merge's actor or user, or merged_by in pulls.csv", "how": "who merged a pull request"},
-    {"field": "closed_by", "from": "the close's actor or user, or closed_by in pulls.csv", "how": "who closed a unit, none again once it is reopened"},
-    {"field": "reviewer", "from": "latest", "how": "who reviewed a pull request"}
+    {
+      "record": "pull request",
+      "field": "run",
+      "kind": "cleaned",
+      "from": "the folder a file is in, and the manifest's run or id",
+      "how": "runs/<run>/"
+    },
+    {
+      "record": "pull request",
+      "field": "number",
+      "kind": "cleaned",
+      "from": "number, a commit's or review's pull",
+      "how": "the first number in it"
+    },
+    {
+      "record": "pull request",
+      "field": "author",
+      "kind": "cleaned",
+      "from": "actor, user, author",
+      "how": "user read as actor"
+    },
+    {
+      "record": "pull request",
+      "field": "opened",
+      "kind": "cleaned",
+      "from": "ts, time, created_at, timestamp",
+      "how": "ISO 8601, epoch milliseconds or local time read as hours since the run started; a time without an offset is in the manifest's timezone, else UTC"
+    },
+    {
+      "record": "pull request",
+      "field": "merged by",
+      "kind": "cleaned",
+      "from": "the merge's actor or user, or merged_by in pulls.csv",
+      "how": "who merged it"
+    },
+    {
+      "record": "pull request",
+      "field": "closes",
+      "kind": "cleaned",
+      "from": "fixes, closes or linked_issue",
+      "how": "the first number, where it is free text"
+    },
+    {
+      "record": "pull request",
+      "field": "lines added and removed",
+      "kind": "cleaned",
+      "from": "a push's diff or a commit's patch",
+      "how": "the lines it adds and removes"
+    },
+    {
+      "record": "pull request",
+      "field": "area",
+      "kind": "computed",
+      "from": "labels or area, else the issue it fixes",
+      "how": "the first label"
+    },
+    {
+      "record": "pull request",
+      "field": "state",
+      "kind": "computed",
+      "from": "its merge, close and reopen records",
+      "how": "open, merged or closed"
+    },
+    {
+      "record": "pull request",
+      "field": "reviews",
+      "kind": "computed",
+      "from": "each reviewer's last verdict that is not a comment",
+      "how": "how many approved and how many asked for changes"
+    },
+    {
+      "record": "pull request",
+      "field": "time to merge",
+      "kind": "computed",
+      "from": "its opening and its merge",
+      "how": "hours"
+    },
+    {
+      "record": "pull request",
+      "field": "flags",
+      "kind": "computed",
+      "from": "its merge, reviews and pushes",
+      "how": "merged by its author, merged over a change request, pushed after its last approval, or waiting for approvals"
+    },
+    {
+      "record": "issue",
+      "field": "reason",
+      "kind": "cleaned",
+      "from": "reason or state_reason",
+      "how": "closed where there is none"
+    },
+    {
+      "record": "issue",
+      "field": "state",
+      "kind": "computed",
+      "from": "its close records and the pull requests that fix it",
+      "how": "fixed when a pull request that fixes it is merged"
+    },
+    {
+      "record": "issue",
+      "field": "origin",
+      "kind": "computed",
+      "from": "its opening time and the run's start",
+      "how": "backlog when it was opened before the run started, else found during the run"
+    },
+    {
+      "record": "issue",
+      "field": "fixed by",
+      "kind": "computed",
+      "from": "the pull requests' closes",
+      "how": "the merged pull request that fixes it"
+    },
+    {
+      "record": "issue",
+      "field": "same issue in other runs",
+      "kind": "computed",
+      "from": "the issue's number and title",
+      "how": "the issue in each other run, with its state and pull requests"
+    },
+    {
+      "record": "event",
+      "field": "kind",
+      "kind": "cleaned",
+      "from": "type or event, else the export table a row is in",
+      "how": "commit, review, comment, merge, close or reopen"
+    },
+    {
+      "record": "event",
+      "field": "actor",
+      "kind": "cleaned",
+      "from": "actor, user, author, user.login in reviews.json",
+      "how": "user read as actor; a review from a gone account is unknown"
+    },
+    {
+      "record": "event",
+      "field": "time",
+      "kind": "cleaned",
+      "from": "ts, committed_at, submitted_at, merged_at, closed_at",
+      "how": "as for opened; a post with no time takes the time of the line before it"
+    },
+    {
+      "record": "event",
+      "field": "verdict",
+      "kind": "cleaned",
+      "from": "a review's state",
+      "how": "approved, changes requested or commented, in lower case"
+    },
+    {
+      "record": "event",
+      "field": "text",
+      "kind": "cleaned",
+      "from": "body, text or message",
+      "how": "text read as body"
+    },
+    {
+      "record": "post",
+      "field": "thread",
+      "kind": "cleaned",
+      "from": "thread_id",
+      "how": "its first number"
+    },
+    {
+      "record": "post",
+      "field": "title",
+      "kind": "cleaned",
+      "from": "the first post's thread_title",
+      "how": "the discussion's title"
+    },
+    {
+      "record": "post",
+      "field": "mentions",
+      "kind": "computed",
+      "from": "the body",
+      "how": "the #<n> numbers it names"
+    },
+    {
+      "record": "agent",
+      "field": "name",
+      "kind": "cleaned",
+      "from": "the manifest's agents or team, and the agents/ transcripts",
+      "how": "the names in either"
+    },
+    {
+      "record": "agent",
+      "field": "note",
+      "kind": "cleaned",
+      "from": "its transcript",
+      "how": "its last assistant text"
+    },
+    {
+      "record": "agent",
+      "field": "review partners",
+      "kind": "computed",
+      "from": "the reviews",
+      "how": "per author it reviewed, its approvals and change requests"
+    },
+    {
+      "record": "run",
+      "field": "started",
+      "kind": "cleaned",
+      "from": "the manifest's started, else the first record",
+      "how": "UTC"
+    },
+    {
+      "record": "run",
+      "field": "team size",
+      "kind": "cleaned",
+      "from": "the manifest's agents or team",
+      "how": "how many agents"
+    },
+    {
+      "record": "run",
+      "field": "approvals needed",
+      "kind": "cleaned",
+      "from": "approvals, required_approvals or policy.approvals",
+      "how": "the first number, where it is written as free text"
+    }
   ]
 }
