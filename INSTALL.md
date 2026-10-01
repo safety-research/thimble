@@ -78,23 +78,25 @@ link and run install.sh again.
 
 ## Extensions
 
-An extension adds views, card types, agents, orientation instructions or report types. Add one from a git URL, a
-folder, or by the name of one thimble ships:
+An extension adds views, card types, report types or changes to thimble's agents. Add a folder (used in place), a git
+URL, or one thimble ships by name. Adding it switches it on:
 
 ```bash
-thimble extension add swarm        # lists what it adds and asks first; --yes for scripts
+thimble extension add swarm        # checks it, lists what it adds and asks first; --yes for scripts
+thimble extension off swarm        # in every workspace; Settings > Extensions switches it for one workspace
+thimble extension on swarm
 thimble extension list
-thimble extension remove swarm
+thimble extension remove swarm     # a folder used in place stays where it is
 ```
 
 thimble ships three. `video`, the Video document with its video export, comes added. `swarm` and
 `multiagent-swimlane` are added with `thimble extension add`; Settings and `thimble extension list` name them until
-then. An added extension runs in every workspace until you remove it or switch it off (Settings > Extensions for one
-workspace, or `"extensions": {"swarm": {"enabled": false}}` in `~/.thimble/config.json`). One you remove stays removed. Its Python runs only in
-thimble's kernels. Its `extension.json` names the thimble versions it works with and the Python packages and other
-extensions it needs: thimble installs no package, and while one is missing, or thimble is outside that range, the
-extension stays unloaded and `thimble extension list`, `thimble doctor` and Settings say why. `add` adds the extensions
-it needs that thimble ships on the same yes, and an extension runs only where those run.
+then. One you remove stays removed. Its Python runs only in thimble's kernels. Its `extension.json` names the thimble
+versions it works with and the Python packages and other extensions it needs: thimble installs no package, and while
+one is missing, or thimble is outside that range, the extension stays unloaded and `thimble extension list`, `thimble
+doctor` and Settings say why. `add` adds the extensions it needs that thimble ships on the same yes, and an extension
+runs only where those run. Switching on one that adds to the orientation, where the orientation already ran, makes
+Settings ask whether to run it now. To write your own, see [docs/extensions.md](docs/extensions.md).
 
 Only its views check whether they fit: once per workspace, and again when their files change, a quick call to the
 labels model reads the view's description and a few records of the files it claims. Settings > Extensions shows each
