@@ -3,8 +3,9 @@ agents/<role>/agent.json names (roles.py). docs/agents.md documents what a progr
 
 Start. run() opens the role's agent chat and starts the program from its agent folder: an SDK program through
 agent_kit/run_sdk.py on thimble's Python, a command as written, with thimble's Python first on PATH and
-agent_kit/ (the `thimble` module) on PYTHONPATH. The input goes on stdin as {"input": ...} and in the file
-THIMBLE_INPUT. The program writes only in its work folder (THIMBLE_WORK).
+agent_kit/ (the `thimble` module) on PYTHONPATH; a JavaScript or TypeScript program imports agent_kit/thimble.mjs
+from THIMBLE_KIT_JS. The input goes on stdin as {"input": ...} and in the file THIMBLE_INPUT. The program writes only
+in its work folder (THIMBLE_WORK) and the job's other folders (Job.writes).
 
 The box. Where Anthropic's sandbox runtime runs (kernel_wrap.srt_works), the program runs in it. It can never read
 server.json or Claude Code's credentials file (userconf.private_paths, CREDENTIALS). With the role's sandbox on it
@@ -57,6 +58,7 @@ router = APIRouter()
 KIT = Path(__file__).resolve().parent.parent / "agent_kit"
 SHIM = KIT / "claude_shim.py"
 RUN_SDK = KIT / "run_sdk.py"
+KIT_JS = KIT / "thimble.mjs"  # the `thimble` module of a JavaScript or TypeScript program
 SESSION_PATH = "/agent/claude"
 TOOL_PREFIX = "/api/tools/"
 CREDENTIALS = ".credentials.json"  # in Claude Code's config folder
@@ -213,6 +215,7 @@ def program_env(run: Run) -> dict[str, str]:
         "THIMBLE_ROLE": job.role, "THIMBLE_WORKSPACE": job.c, "THIMBLE_WORK": str(job.work),
         "THIMBLE_CORPUS": str(corpus or ""), "THIMBLE_INPUT": str(job.work / INPUT_FILE),
         "THIMBLE_AGENT_DIR": str(part.folder), "THIMBLE_CLAUDE": str(SHIM), "THIMBLE_PYTHON": sys.executable,
+        "THIMBLE_KIT_JS": str(KIT_JS),
         "CLAUDE_AGENT_SDK_SKIP_VERSION_CHECK": "1", "TMPDIR": str(job.work / TMP_DIR),
         "XDG_CACHE_HOME": str(job.work / CACHE_DIR),
     })

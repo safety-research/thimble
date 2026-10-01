@@ -501,3 +501,36 @@ async def test_a_dev_program_takes_each_turn_of_a_view_build_and_writes_only_the
     assert sorted(p.name for p in folder.iterdir()) == ["view.json"]
     assert (dev.view_program_dir(CORPUS, "runs-table") / "notes.txt").read_text() == "Build the runs table."
     assert not harness.running(CORPUS, "view:runs-table")
+
+
+JS_HARNESS = '''const thimble = await import(process.env.THIMBLE_KIT_JS)
+thimble.serve(async (input) => {
+  await thimble.log("reading " + input.corpus)
+  console.log("a stray console.log goes to stderr")
+  await thimble.tool("add_card", { question: "What did the JavaScript harness see?", kind: "note",
+                                   text: "Three runs.", takeaway: "Three runs." })
+  try {
+    await thimble.tool("propose_view", { name: "x" })
+  } catch (e) {
+    await thimble.log("refused: " + (e instanceof thimble.ThimbleError))
+  }
+  return "The JavaScript harness found three runs."
+})
+'''
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="no Node here")
+async def test_a_javascript_command_harness_runs_the_orientation_with_thimble_s_js_module(
+        tmp_path, data_tmp, workspaces_tmp, active, unboxed):
+    active.append(_extension(tmp_path, "jsharn", {"orientation": {"description": "A JavaScript harness.",
+                                                                  "command": ["node", "orient.mjs"]}},
+                             {"agents/orientation/orient.mjs": JS_HARNESS}))
+    res = await tools.call(CORPUS, "start_orientation", {"brief": "count the runs", "propose_views": False})
+    assert not res.is_error, res.text
+    rec = await _until(lambda: (r := orientation.read_run(CORPUS)) and r.get("status") in ("done", "failed") and r,
+                       what="the orientation to end")
+    assert rec["status"] == "done", rec
+    assert orientation.summary(CORPUS).strip() == "The JavaScript harness found three runs."
+    assert any(c.get("title") == "What did the JavaScript harness see?" for c in _cards(CORPUS))
+    log_text = (config.workspace_dir(CORPUS) / "chats" / f"{rec['chats'][orientation.ROLE]}.jsonl").read_text()
+    assert "refused: true" in log_text and "stray console.log" not in log_text
