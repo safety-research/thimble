@@ -11,7 +11,9 @@ Code holds every view to three things the analyst can always see above it. Its r
 read to the end by build_index or listed by the reader's hidden() with a why, a claim that matches no file is missing,
 and the lines the reader could not parse are its problems(); the checks fail on a file neither read nor hidden. Its
 derived fields, counted above the view. Its labels: the checks load the page with a test label and fail when the marks
-do not show on the records it shows (label_problems).
+do not show on the records it shows (label_problems), and the label state stays one click away in the view's head. A
+page may draw label controls of its own, but a label call it makes by itself, not on the analyst's click, is refused
+and fails the checks (self_label_problems).
 thimble also ships file-type viewers under the same contract (BUILTIN_VIEWERS). Readers run on the workspace's
 `views`
 kernel with a cached index; refs.resolve hands file refs with a fragment to enrich_file_ref, and resolve_sync bridges
