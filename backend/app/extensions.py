@@ -879,8 +879,9 @@ async def settle(c: str) -> None:
 async def _refresh(c: str) -> dict[str, Any]:
     """The workspace's extensions found again in extensions_dir(), each active one copied in, whether each of its views
     fits checked (_fit) and which of its card types read files here found, written to STATE_FILE; then the views no
-    active extension shows any more withdrawn, the shown ones installed, and the orientation told of the newly active
-    extensions. Returns the state."""
+    active extension shows any more withdrawn and the shown ones installed, all under the workspace's lock, so that two
+    refreshes never write a view's files at once; then the orientation told of the newly active extensions. Returns
+    the state."""
     from . import views  # noqa: PLC0415
 
     async with _lock(c):
@@ -948,10 +949,10 @@ async def _refresh(c: str) -> dict[str, Any]:
                 log.warning("%s: the copy of the removed extension %s was left: %s", c, name, e)
                 continue
             await asyncio.to_thread(shutil.rmtree, gone, True)
-    await asyncio.to_thread(_withdraw_given_up, c, exts)
-    await asyncio.to_thread(install_views, c)
-    for slug in await asyncio.to_thread(views.orphaned, c):
-        await asyncio.to_thread(views.withdraw, c, slug, None)
+        await asyncio.to_thread(_withdraw_given_up, c, exts)
+        await asyncio.to_thread(install_views, c)
+        for slug in await asyncio.to_thread(views.orphaned, c):
+            await asyncio.to_thread(views.withdraw, c, slug, None)
     _gate_installed(c, exts, gates)
     return new_state
 
