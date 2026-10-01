@@ -1,11 +1,12 @@
 // @vitest-environment jsdom
 // The workspace's views list (src/lib/views.ts) is read once for every component that lists it, read again once after
-// a `view` event, and a lookup of a view the list lacks reads it again.
+// a `view` event, and a lookup of a view the list lacks reads it again. The views of one file are read once for the
+// callers that ask in the same task.
 import { afterEach, expect, test, vi } from 'vitest'
 import { api } from '../../src/lib/api.ts'
 import { bus } from '../../src/lib/bus.ts'
 import type { View } from '../../src/lib/types.ts'
-import { findView, useViewList } from '../../src/lib/views.ts'
+import { findView, useViewList, viewsForFile } from '../../src/lib/views.ts'
 import { mount, settle, unmountAll } from './mount.tsx'
 
 afterEach(() => {
@@ -52,4 +53,14 @@ test('a lookup of a view the list lacks reads the list again', async () => {
   expect(views).toHaveBeenCalledTimes(1)
   expect((await findView('ws-find', 'inbox'))?.slug).toBe('inbox')
   expect(views).toHaveBeenCalledTimes(2)
+})
+
+test('callers that ask for the views of a file in the same task share one read, and a later ask reads again', async () => {
+  const forFile = vi.spyOn(api, 'viewsForFile').mockResolvedValue([view('timeline')])
+  const [a, b] = await Promise.all([viewsForFile('ws-file', 'a.jsonl'), viewsForFile('ws-file', 'a.jsonl')])
+  expect(forFile).toHaveBeenCalledTimes(1)
+  expect(a).toBe(b)
+  await viewsForFile('ws-file', 'a.jsonl')
+  await viewsForFile('ws-file', 'b.jsonl')
+  expect(forFile).toHaveBeenCalledTimes(3)
 })

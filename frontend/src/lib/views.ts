@@ -1,6 +1,7 @@
 // The workspace's views (GET /ws/{c}/views), read once and shared by every component that lists them: the shell and
 // Files both do, and on a large corpus each read of the list costs the server a walk of the claimed files. A `view`
-// event on the bus reads it again shortly after; a lookup by slug that misses reads it again at once.
+// event on the bus reads it again shortly after; a lookup by slug that misses reads it again at once. The views that
+// claim one file (viewsForFile) are read once for the callers that ask in the same task.
 import { useSyncExternalStore } from 'react'
 import { api } from './api'
 import { bus } from './bus'
@@ -91,4 +92,19 @@ export async function findView(ws: string, slug: string): Promise<View | undefin
   const s = storeOf(ws)
   const known = (s.views ?? (await (s.reading ?? refreshViews(ws)))).find((v) => v.slug === slug)
   return known ?? (await refreshViews(ws)).find((v) => v.slug === slug)
+}
+
+const joinable = new Map<string, Promise<View[]>>()
+
+/** The views that claim `path` (GET /views?path=). Callers in the same task share one read: the File browser's modes and
+ * Open in ask together when a file opens and on each view event. */
+export function viewsForFile(ws: string, path: string): Promise<View[]> {
+  const key = `${ws}\n${path}`
+  let reading = joinable.get(key)
+  if (!reading) {
+    reading = api.viewsForFile(ws, path)
+    joinable.set(key, reading)
+    queueMicrotask(() => joinable.delete(key))
+  }
+  return reading
 }
