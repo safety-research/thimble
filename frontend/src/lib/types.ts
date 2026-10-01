@@ -1066,12 +1066,16 @@ export interface ExtensionRow {
   offer?: boolean
   /** an extension thimble ships that is not added: turning its switch on adds it */
   addable?: boolean
+  /** for one not added: the extensions thimble ships that adding it adds with it */
+  needs?: string[]
 }
 
 /** One view built for this workspace, in its local extension (backend views.local_extension). */
 export interface LocalViewRow {
   slug: string
   name: string
+  /** what it shows, from its view.json */
+  description?: string
   /** a file viewer, which opens in the File browser */
   file_viewer: boolean
   /** its switch in Settings: off, it leaves the views bar and the File browser */

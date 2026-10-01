@@ -1,15 +1,16 @@
 // The settings' Extensions section, in two groups, each under a heading: the views built for this workspace, which no
 // other workspace shows and which are on here without being added, then the extensions added to thimble or shipped with
 // it. Every row is the same: its name, one line under it, and its switch in one column at the right. The line says why
-// an extension does not run here when that is known, else what it is. What it gives and the settings it runs under
-// open under its name. An extension runs in every workspace until its switch turns it off; one that cannot run here
-// whatever the switch says (switched off in thimble's config, or unable to load) has its switch disabled and drawn off.
-// One thimble ships that is not added reads as off, and turning it on adds it on Save. An extension's views follow it,
-// each with its own switch, which stands where the check on whether it fits put it until the analyst moves it, and the
-// check's reason as its line. An extension with orientation instructions or an orientation program that comes on where
-// an orientation ran asks whether to run it now; the answer is sent with the rest on Save. Conflicts among the running
-// extensions are listed under the rows.
-import { useState, type ReactNode } from 'react'
+// an extension does not run here when that is known, else what it is, and a view's line what it shows, or that it opens
+// in the File browser. A line too long for its row is cut, and shows in full when the row opens under its name, as do
+// what an extension gives, what it adds with it and the settings it runs under. An extension runs in every workspace
+// until its switch turns it off; one that cannot run here whatever the switch says (switched off in thimble's config,
+// or unable to load) has its switch disabled and drawn off. One thimble ships that is not added reads as off, and
+// turning it on adds it on Save. An extension's views follow it, each with its own switch, which stands where the check
+// on whether it fits put it until the analyst moves it, and the check's reason as its line. An extension with
+// orientation instructions or an orientation program that comes on where an orientation ran asks whether to run it now;
+// the answer is sent with the rest on Save. Conflicts among the running extensions are listed under the rows.
+import { useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { Segmented } from '../components/Button'
 import { Icon } from '../components/Icon'
 import { Switch } from '../components/Switch'
@@ -77,19 +78,28 @@ export function extensionLine(e: ExtensionRow): string {
 export type Detail = [string, string]
 
 /** What opens under an extension's name: its description when its line says something else, what it gives, the
- * settings its agents run under, and whether its code runs in a sandbox. Pure. */
+ * extensions turning it on adds with it, the settings its agents run under, and whether its code runs in a sandbox.
+ * Pure. */
 export function extensionDetails(e: ExtensionRow): Detail[] {
   const line = extensionLine(e)
   const gives = (e.parts ?? []).join(' · ')
+  const needs = e.addable && e.needs?.length ? `${e.needs.join(', ')}, added with it` : ''
   const code = e.sandboxed == null ? '' : e.sandboxed ? 'Runs in a sandbox' : 'Runs without a sandbox'
   const out: Detail[] = [
     ['', e.description && e.description !== line ? e.description : ''],
     ['Gives', gives !== line ? gives : ''],
+    ['Needs', needs],
     ['Agents', e.consent ?? ''],
     ['Code', code],
   ]
   return out.filter(([, words]) => words)
 }
+
+/** The line under a view built here: that it opens in the File browser for a file viewer, else what it shows. Pure. */
+export const localViewLine = (v: LocalViewRow): string => (v.file_viewer ? FILE_VIEWER_NOTE : (v.description ?? ''))
+
+/** What opens under a view built here: a file viewer's description, which its line leaves out. Pure. */
+export const localViewDetails = (v: LocalViewRow): Detail[] => (v.file_viewer && v.description ? [['', v.description]] : [])
 
 /** The version beside an extension's name: only for one thimble does not ship, since a shipped one has thimble's. Pure. */
 export const extensionVersion = (e: ExtensionRow): string => (e.builtin ? '' : e.version)
@@ -116,14 +126,39 @@ interface RowProps {
   children?: ReactNode
 }
 
-/** One row: the name, with a caret that opens `details` when there are any, the switch at the right of the name, the
- * line under it, cut to one line until the details open unless it is a reason, and `children` under all that. */
+/** One row: the name, the switch at the right of the name, the line under it, cut to one line unless it is a reason,
+ * and `children` under all that. When there are `details`, or the line is cut, a caret after the name opens the row:
+ * the line in full, then the details. */
 function SwitchRow({ row, kind, labelId, name, version, line, wrap, details = [], control, children }: RowProps) {
   const [open, setOpen] = useState(false)
+  const [cut, setCut] = useState(false)
+  const [nameCut, setNameCut] = useState(false)
+  const lineRef = useRef<HTMLSpanElement>(null)
+  const nameRef = useRef<HTMLSpanElement>(null)
+  useLayoutEffect(() => {
+    const el = nameRef.current
+    if (el) setNameCut(el.scrollWidth > el.clientWidth + 1)
+  }, [name, version])
+  useLayoutEffect(() => {
+    const el = lineRef.current
+    if (!el || wrap || open) return
+    const measure = () => setCut(el.scrollWidth > el.clientWidth + 1)
+    measure()
+    let live = true
+    document.fonts?.ready.then(() => live && measure())
+    const ro = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure)
+    ro?.observe(el)
+    return () => {
+      live = false
+      ro?.disconnect()
+    }
+  }, [line, wrap, open])
+  const expandable = details.length > 0 || (cut && !!line && !wrap)
+  const lineId = `${labelId}-line`
   const moreId = `${labelId}-more`
   const label = (
     <>
-      <span className="settings-ext-label" id={labelId}>
+      <span ref={nameRef} className="settings-ext-label" id={labelId} title={nameCut ? name : undefined}>
         {name}
       </span>
       {version && <span className="settings-ext-version">{version}</span>}
@@ -131,8 +166,8 @@ function SwitchRow({ row, kind, labelId, name, version, line, wrap, details = []
   )
   return (
     <div className={`settings-ext-row settings-ext-row-${kind}`} data-row={row} data-kind={kind}>
-      {details.length ? (
-        <button type="button" className={`settings-ext-name${open ? ' open' : ''}`} aria-expanded={open} aria-controls={moreId} onClick={() => setOpen((o) => !o)}>
+      {expandable ? (
+        <button type="button" className={`settings-ext-name${open ? ' open' : ''}`} aria-expanded={open} aria-controls={[line ? lineId : '', details.length ? moreId : ''].join(' ').trim()} onClick={() => setOpen((o) => !o)}>
           {label}
           <Icon name="chevron-down" size={12} className="settings-ext-caret" />
         </button>
@@ -141,11 +176,11 @@ function SwitchRow({ row, kind, labelId, name, version, line, wrap, details = []
       )}
       <span className="settings-ext-switch">{control}</span>
       {line && (
-        <span className={`settings-ext-line${open ? ' open' : ''}${wrap ? ' wrap' : ''}`} title={open || wrap ? undefined : line}>
+        <span ref={lineRef} id={lineId} className={`settings-ext-line${open ? ' open' : ''}${wrap ? ' wrap' : ''}`} title={cut && !open && !wrap ? line : undefined}>
           {line}
         </span>
       )}
-      {open && (
+      {open && details.length > 0 && (
         <div className="settings-ext-more" id={moreId}>
           {details
             .filter(([key]) => !key)
@@ -199,7 +234,8 @@ function LocalGroup({ local, on, setOn }: { local: LocalExtension; on: Record<st
             kind="local-view"
             labelId={id}
             name={v.name}
-            line={v.file_viewer ? FILE_VIEWER_NOTE : undefined}
+            line={localViewLine(v)}
+            details={localViewDetails(v)}
             control={<Switch checked={!!on[v.slug]} onChange={(x) => setOn(v.slug, x)} aria-labelledby={id} />}
           />
         )

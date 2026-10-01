@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { answeredRuns, asksToRun, changedExtensions, changedLocalViews, changedViews, extensionCalls, extensionDetails, extensionLine, extensionVersion } from '../../src/shell/ExtensionsSettings'
+import { answeredRuns, asksToRun, changedExtensions, changedLocalViews, changedViews, extensionCalls, extensionDetails, extensionLine, extensionVersion, localViewDetails, localViewLine } from '../../src/shell/ExtensionsSettings'
 
 const view = { name: 'Tally', shown: true, note: '', locked: false }
 const row = { version: '', active: true, why: '', note: '', locked: false }
@@ -78,6 +78,22 @@ describe('an extension row', () => {
   it('shows a version only for an extension thimble does not ship', () => {
     expect(extensionVersion({ ...ext, version: '1.2.0', builtin: false })).toBe('1.2.0')
     expect(extensionVersion({ ...ext, version: '0.4.0', builtin: true })).toBe('')
+  })
+  it('names in its details what turning it on adds with it, while it is not added', () => {
+    const swarm = { ...ext, on: false, addable: true, builtin: true, needs: ['multiagent-swimlane'] }
+    expect(extensionDetails(swarm).some(([, words]) => words.includes('multiagent-swimlane'))).toBe(true)
+    expect(extensionDetails({ ...swarm, addable: false }).some(([, words]) => words.includes('multiagent-swimlane'))).toBe(false)
+  })
+})
+
+describe('a view built here', () => {
+  const v = { slug: 'pages', name: 'Pages', description: 'Each page with its edits.', file_viewer: false, on: true }
+  it('shows what it shows under its name, or that a file viewer opens in the File browser with its description in its details', () => {
+    expect(localViewLine(v)).toBe(v.description)
+    expect(localViewDetails(v)).toEqual([])
+    expect(localViewLine({ ...v, file_viewer: true })).not.toBe(v.description)
+    expect(localViewDetails({ ...v, file_viewer: true })).toEqual([['', v.description]])
+    expect(localViewLine({ ...v, description: undefined })).toBe('')
   })
 })
 
