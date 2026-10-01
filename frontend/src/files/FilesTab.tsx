@@ -10,7 +10,7 @@ import { createPortal } from 'react-dom'
 import { Button } from '../components/Button'
 import { Icon } from '../components/Icon'
 import { PaneStatus } from '../components/PaneStatus'
-import { TipButton } from '../components/Tooltip'
+import { TipButton, useTooltip } from '../components/Tooltip'
 import { api } from '../lib/api'
 import { bus } from '../lib/bus'
 import { mediaOf } from '../lib/media'
@@ -70,7 +70,9 @@ interface TabsProps {
   onClose: (path: string) => void
 }
 
-/** The open files as square tabs, VS Code's way: the open one on the cell's paper between hairlines with its ×. */
+/** The open files as square tabs, VS Code's way: the open one on the cell's paper between hairlines with its ×. Tabs that
+ * do not fit narrow, their names cut with an ellipsis, all but the open one, and past their narrowest the strip
+ * scrolls, its edge faded on the side where tabs are hidden. */
 function ReaderTabs({ tabs, current, onPick, onClose }: TabsProps) {
   const strip = useRef<HTMLSpanElement>(null)
   // the strip scrolls with its scrollbar hidden, so the open tab is brought into it whenever it changes and whenever
@@ -78,36 +80,63 @@ function ReaderTabs({ tabs, current, onPick, onClose }: TabsProps) {
   useEffect(() => {
     const box = strip.current
     if (!box) return
+    const edges = () => {
+      box.toggleAttribute('data-more-left', box.scrollLeft > 1)
+      box.toggleAttribute('data-more-right', box.scrollLeft + box.clientWidth < box.scrollWidth - 1)
+    }
     const show = () => {
       const tab = box.querySelector<HTMLElement>('.reader-tab.active')
-      if (!tab) return
-      const b = box.getBoundingClientRect()
-      const t = tab.getBoundingClientRect()
-      if (t.left < b.left) box.scrollLeft -= b.left - t.left
-      else if (t.right > b.right) box.scrollLeft += t.right - b.right
+      if (tab) {
+        const b = box.getBoundingClientRect()
+        const t = tab.getBoundingClientRect()
+        if (t.left < b.left) box.scrollLeft -= b.left - t.left
+        else if (t.right > b.right) box.scrollLeft += t.right - b.right
+      }
+      edges()
     }
     show()
+    box.addEventListener('scroll', edges, { passive: true })
     const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(show) : null
     ro?.observe(box)
-    return () => ro?.disconnect()
+    return () => {
+      box.removeEventListener('scroll', edges)
+      ro?.disconnect()
+    }
   }, [current, tabs.length])
   return (
     <span ref={strip} className="reader-tabs" role="tablist" aria-label="Open files">
-      {tabs.map((t) => {
-        const active = t.path === current
-        const name = baseName(t.path)
-        return (
-          <span key={t.path} className={'reader-tab' + (active ? ' active' : '')}>
-            <button type="button" role="tab" aria-selected={active} className="reader-tab-pick" onClick={() => onPick(t.path)} data-anchor={t.path} data-anchor-text={t.path}>
-              <Icon name={glyphOf(name)} size={13} className="reader-tab-glyph" />
-              <span className="reader-tab-name">{name}</span>
-            </button>
-            <TipButton tip="Close" className="reader-tab-x" aria-label={`Close ${name}`} onClick={() => onClose(t.path)}>
-              <Icon name="x" size={12} />
-            </TipButton>
-          </span>
-        )
-      })}
+      {tabs.map((t) => (
+        <ReaderTab key={t.path} path={t.path} active={t.path === current} onPick={onPick} onClose={onClose} />
+      ))}
+    </span>
+  )
+}
+
+/** One tab: the file's glyph and name, and its ×; a name cut short shows the file's path in the tooltip. */
+function ReaderTab({ path, active, onPick, onClose }: { path: string; active: boolean; onPick: (path: string) => void; onClose: (path: string) => void }) {
+  const nameRef = useRef<HTMLSpanElement>(null)
+  const [cut, setCut] = useState(false)
+  useEffect(() => {
+    const el = nameRef.current
+    if (!el || typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver(() => setCut(el.scrollWidth > el.clientWidth + 1))
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
+  const { props: tipProps, tip } = useTooltip(cut ? path : null)
+  const name = baseName(path)
+  return (
+    <span className={'reader-tab' + (active ? ' active' : '')}>
+      <button type="button" role="tab" aria-selected={active} className="reader-tab-pick" onClick={() => onPick(path)} data-anchor={path} data-anchor-text={path} {...tipProps}>
+        <Icon name={glyphOf(name)} size={13} className="reader-tab-glyph" />
+        <span ref={nameRef} className="reader-tab-name">
+          {name}
+        </span>
+      </button>
+      {tip}
+      <TipButton tip="Close" className="reader-tab-x" aria-label={`Close ${name}`} onClick={() => onClose(path)}>
+        <Icon name="x" size={12} />
+      </TipButton>
     </span>
   )
 }
