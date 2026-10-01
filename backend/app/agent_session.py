@@ -1097,7 +1097,7 @@ async def _retry(run: Run) -> bool:
         _finish_step(run, sub, "failed")  # its agents ended with the process
     reason = RETRY_REASONS[cls]
     until = datetime.now(timezone.utc) + timedelta(seconds=wait)
-    alert = {"kind": "retry", "text": f"{reason}; retrying in {wait_text(wait)}.", "reason": reason,
+    alert = {"kind": "retry", "text": f"{reason}. Retrying in {wait_text(wait)}.", "reason": reason,
              "until": until.isoformat(timespec="seconds"), "since": _now(), "attempt": run.retries}
     _set_pid(run, None)
     with contextlib.suppress(Exception):
