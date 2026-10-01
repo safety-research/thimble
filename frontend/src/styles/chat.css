@@ -1282,10 +1282,10 @@ button.model-line-part[aria-expanded='true'] {
 }
 
 /* -------- the permission card (chat/PermissionCard): every request that waits for the analyst, pinned above the
-   composer, opaque and bold: a warning tint under a 1.5px warning edge, 6px clear of what is under it. One request at a
-   time with `1 of 3` and arrows; the call's description, its input as code, why it asks, then Allow, Always allow and
-   Deny in one row. At most 45% of the window tall: the head and the buttons stay, and the body between them scrolls.
-   -------- */
+   composer, opaque and bold: a warning tint under a 1.5px warning edge, 12px clear of what is under it, which leaves
+   room for the edges of the cards behind it, so its buttons stay put as the stack shrinks. One request at a time with
+   `1 of 3` and arrows; the call's description, its input as code, why it asks, then Allow, Always allow and Deny in one
+   row. At most 45% of the window tall: the head and the buttons stay, and the body between them scrolls. -------- */
 .chat-perm {
   position: relative;
   display: flex;
@@ -1295,7 +1295,7 @@ button.model-line-part[aria-expanded='true'] {
   min-width: 0;
   max-width: 100%;
   max-height: 45vh;
-  margin-bottom: 6px;
+  margin-bottom: 12px;
   padding: 9px 12px 10px;
   overflow: hidden;
   border: 1.5px solid var(--status-warning);
@@ -1307,7 +1307,6 @@ button.model-line-part[aria-expanded='true'] {
 }
 /* several requests wait: the edges of the cards behind this one show below it */
 .chat-perm-stack {
-  margin-bottom: 12px;
   overflow: visible;
   box-shadow:
     0 4px 0 -1px color-mix(in oklab, var(--status-warning) 10%, var(--surface-card)),
