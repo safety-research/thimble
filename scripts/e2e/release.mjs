@@ -761,9 +761,11 @@ async function main() {
       const counted = /\b\d+\s+labels?\b/i.test(await pane.locator('.view-pane-head').first().innerText())
       const named = text.includes(WS.label?.name || 'Mentions forge')
       let marks = 0
-      for (const fr of page.frames()) if (fr !== page.mainFrame()) marks += await fr.locator('[data-thimble-label]').count().catch(() => 0)
+      for (const until = Date.now() + ACTION_MS; !marks && Date.now() < until; await page.waitForTimeout(250)) {
+        for (const fr of page.frames()) if (fr !== page.mainFrame()) marks += await fr.locator('[data-thimble-label]').count().catch(() => 0)
+      }
       const s = await shot(page, 'view-labels')
-      if (!counted && !named && !marks) throw new StepError(`the view shows neither the label "${WS.label?.name}" nor a count or mark of labels`, [s])
+      if (!marks) throw new StepError(`the label "${WS.label?.name}" is on, but no row of the view carries its mark`, [s])
       const got = [counted && 'its head counts the labels it shows', named && 'the label is named in the view pane', marks && `${marks} label marks in the view`]
       return { detail: got.filter(Boolean).join('; '), shots: [s] }
     })

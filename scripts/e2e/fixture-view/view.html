@@ -23,7 +23,8 @@
     rows.textContent = ''
     for (const f of files) {
       const tr = document.createElement('tr')
-      tr.dataset.anchor = f.ref
+      const ref = `view:${thimble.view.slug}/${f.key}`
+      tr.dataset.anchor = ref
       const cells = [f.path, f.records, f.bad, f.kinds.map((k) => `${k[0]} ${k[1]}`).join(', ')]
       cells.forEach((v, i) => {
         const td = document.createElement('td')
@@ -33,7 +34,7 @@
         if (i === 3) td.dataset.field = 'kinds'
         tr.appendChild(td)
       })
-      tr.onclick = () => thimble.navigate(f.ref)
+      tr.onclick = () => thimble.navigate(ref)
       rows.appendChild(tr)
     }
   }

@@ -977,6 +977,32 @@ async def test_the_checks_look_for_the_label_s_colour_in_a_picture_of_the_page(n
         assert p["seen"] == 0 and len(problems) == 1, (p, problems)
         assert f"does not show the test label's colour on {n} of the {n}" in problems[0], problems
 
+async def test_the_end_to_end_test_s_fixture_view_passes_the_checks(workspaces_tmp, tmp_path, monkeypatch, inproc, bound):
+    """scripts/e2e/fixture-view, the view the release test opens with a label on, passes the whole check: its rows are
+    anchored as units, so the test label marks them."""
+    if why := views.build_problem():
+        if os.environ.get("CI") == "true":
+            pytest.fail(why)
+        pytest.skip(why)
+    corpus = tmp_path / "data" / "e2e"
+    (corpus / "agents").mkdir(parents=True)
+    for i in range(3):
+        rows = [json.dumps({"type": "message" if n % 3 else "tool", "text": f"post {n} about the forge"}) for n in range(12)]
+        (corpus / "agents" / f"agent-{i}.jsonl").write_text("\n".join(rows) + "\n" + ("{torn\n" if i == 2 else ""))
+    (corpus / "manifest.json").write_text(json.dumps({"name": "e2e", "description": "agents' posts"}))
+    monkeypatch.setattr(config, "DATA_DIR", (tmp_path / "data").resolve())
+    fixture = config.REPO_ROOT / "scripts" / "e2e" / "fixture-view"
+    raw = json.loads((fixture / "view.json").read_text("utf-8"))
+    views.write_view("e2e", "record-counts", reader=(fixture / "reader.py").read_text("utf-8"),
+                     html=(fixture / "view.html").read_text("utf-8"),
+                     **{k: raw.get(k) for k in ("name", "description", "claims", "accepts", "units", "derived", "libs")})
+    rep = await views.check("e2e", "record-counts", ["view:record-counts/agents/agent-1.jsonl"], shot_dir=tmp_path)
+    assert rep["ok"], views.gate_lines(rep)
+    shown = rep["shots"][0]["shown"]
+    assert shown["units"] == 3 and shown["due"] == shown["drawn"] == 3, shown
+    assert rep["shots"][0]["painted"]["seen"] == 3, rep["shots"][0]["painted"]
+
+
 SELF_LABEL_HTML = """<!doctype html><html><head><style>body{font:13px sans-serif;margin:8px}</style></head><body>
 <button id="on" data-label="asks">Turn on asks</button><div data-anchor="board.jsonl#L1">one</div>
 <script>
