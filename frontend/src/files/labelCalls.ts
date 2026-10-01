@@ -82,9 +82,19 @@ export async function runLabelCall(op: string, args: unknown, ctx: LabelCallCont
     }
     case 'mark': {
       const ref = str(a.ref)
-      if (!recordOf(ref)) throw new Error(`mark takes a record's ref, such as data.jsonl#L12, not ${JSON.stringify(ref)}`)
+      const at = recordOf(ref)
       const k = filesLabel(byId, str(a.label))
-      await labelApi.verdict(ws, k.id, recordKey(ref), valueOf(k, str(a.value)))
+      const value = valueOf(k, str(a.value))
+      // a label of whole files takes its value on the file a record is in
+      if (k.unit === 'agent') {
+        const path = at?.path ?? (ref && !ref.includes('#') ? ref : '')
+        if (!path) throw new Error(`mark takes a file's path or a record's ref for ${k.name}, not ${JSON.stringify(ref)}`)
+        await labelApi.verdict(ws, k.id, path, value)
+        return
+      }
+      if (k.unit !== 'record') throw new Error(`${k.name} labels whole runs, not records`)
+      if (!at) throw new Error(`mark takes a record's ref, such as data.jsonl#L12, not ${JSON.stringify(ref)}`)
+      await labelApi.verdict(ws, k.id, recordKey(ref), value)
       return
     }
     case 'filter': {
