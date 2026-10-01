@@ -203,7 +203,9 @@ export function pdfPage(ref: string | undefined, path: string): number | null {
 function PdfReader({ workspace, path, targetRef, lead, end, onMode }: ReaderProps) {
   const page = pdfPage(targetRef, path)
   const src = api.pdfUrl(workspace, path, page)
-  useEffect(() => onMode?.('PDF'), [onMode])
+  useEffect(() => {
+    onMode?.('PDF')
+  }, [onMode])
   return (
     <div className="reader">
       {lead !== undefined && (

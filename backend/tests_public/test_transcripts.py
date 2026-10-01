@@ -44,6 +44,9 @@ FIXTURES = {
     "discord.json": (json.dumps({"channel": {"name": "general"}, "messages": [
         {"author": {"name": "amy" if r == "user" else "ben"}, "content": t, "timestamp": "2024-10-01"} for r, t in LINES]},
         indent=2), "json"),
+    # a pretty-printed document whose last message sits on one line of its own is still read whole
+    "pretty.json": ('{\n  "messages": [\n    {\n      "role": "user",\n      "content": "hi"\n    },\n'
+                    '    {"role": "assistant", "content": "hello"}\n  ]\n}\n', "json"),
     # not transcripts
     "notes.md": ("# Notes\n\nNote: slow.\n\n## Plan\n\n- fix\n\nWarning: check.\n\nname: x\nversion: 2\n", None),
     "prices.csv": ("id,price,qty\n1,2,3\n4,5,6\n", None),

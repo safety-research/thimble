@@ -140,10 +140,12 @@ export function messageKeys(objs: unknown[]): MessageKeys {
 
 const present = (v: unknown) => v != null && v !== ''
 
-/** The keys the server's sniff named for a message, else those messageKeys finds in the records. */
+/** The keys the server's sniff named for a message, else those messageKeys finds in the records; the context (a
+ * thread's title) is always messageKeys'. */
 function keysFor(hint: TranscriptHint | null | undefined, objs: unknown[]): MessageKeys {
+  const found = messageKeys(objs)
   const k = hint?.keys
-  return k ? { author: k.speaker, time: k.time, body: k.text } : messageKeys(objs)
+  return k ? { author: k.speaker, time: k.time ?? found.time, body: k.text, context: found.context } : found
 }
 
 /** A record's value at a key, dotted for a nested one (`message.author`). */

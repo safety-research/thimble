@@ -353,7 +353,7 @@ def sniff_bytes(head: bytes, rel: str, complete: bool = False) -> dict[str, Any]
         got = _sniff_jsonl(stripped, parsed=suffix == ".jsonl")
         if got is not None or suffix in JSONLISH:
             return got
-    if suffix == ".json" or (suffix in TEXTISH and stripped[:1] in "[{" and suffix not in (".md", ".markdown")):
+    if suffix == ".json" or (suffix in TEXTISH and stripped[:1] in ("[", "{") and suffix not in (".md", ".markdown")):
         got = _sniff_json(stripped, complete)
         if got is not None or suffix == ".json":
             return got
@@ -365,15 +365,16 @@ def sniff_bytes(head: bytes, rel: str, complete: bool = False) -> dict[str, Any]
 
 
 def _sniff_jsonl(text: str, parsed: bool) -> dict[str, Any] | None:
-    """JSON lines: a Claude Code stream, messages, or whole conversations, by what most of the head's records are."""
+    """JSON lines: a Claude Code stream, messages, or whole conversations, by what most of the head's records are. In
+    a file not named as JSON lines, the first line must be a record of its own, so a pretty-printed document is not
+    read by the few lines that hold a whole object."""
     recs = []
-    for ln in text.split("\n")[:JSONL_HEAD_LINES]:
-        ln = ln.strip()
-        if not ln:
-            continue
+    for k, ln in enumerate(x for x in text.split("\n")[:JSONL_HEAD_LINES] if x.strip()):
         try:
             recs.append(json.loads(ln))
         except ValueError:
+            if k == 0 and not parsed:
+                return None
             continue
     objs = [r for r in recs if isinstance(r, dict)]
     if len(objs) < 1 or (len(recs) > 1 and len(objs) < 2):
