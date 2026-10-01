@@ -673,6 +673,16 @@ class Session:
             return "own" if allow_own(command, self.own_bash) else "ask"
         return ""
 
+    def ask_cause(self, tool: str, inp: Any) -> str:
+        """What makes verdict() send a call to the analyst: `data` for an edit of the corpus, `installs` for an install
+        command, `commands` for any other command while bash_asks."""
+        if self.data != "allow" and self.edits_corpus(tool, inp):
+            return "data"
+        command = inp.get("command") if tool == "Bash" and isinstance(inp, dict) else None
+        if isinstance(command, str) and sandbox_allow.installs(command):
+            return "installs"
+        return "commands"
+
 
 _CONTROL = re.compile(r"[;&|`$<>(){}\n\\]")
 

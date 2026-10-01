@@ -271,6 +271,8 @@ async def test_a_switch_to_bypass_leaves_the_config_s_asks_waiting_for_the_analy
     await asyncio.sleep(0.1)
     assert not held.done(), "the install still waits"
     rid = next(p["id"] for p in pending if "pip install" in p.get("command", ""))
+    assert [p.get("asked_by") for p in pending if p["id"] == rid] == ["installs"]
+    assert all(not p.get("asked_by") for p in pending if p["id"] != rid), "a call the mode asks about names no config"
     assert agent_session.answer(CORPUS, run.chat, rid, False)
     assert (await held)["behavior"] == "deny"
     await orient_session.stop(CORPUS)

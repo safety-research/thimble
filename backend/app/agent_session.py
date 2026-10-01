@@ -2349,6 +2349,8 @@ async def ask(c: str, key: str | None, tool_name: str, inp: Any, agent_id: str |
              **({"rechecked": len(CLASSIFIER_WAITS_S)} if unjudged else {}),
              **({"deny_after_s": limit} if unjudged and limit is not None else {}),
              **_offered(updates), **({"wait_s": limit} if limit else {}), **({"why": why} if why else {}),
+             **({"asked_by": run.config.ask_cause(tool_name, inp)} if verdict == "ask" and not force
+                and run.config is not None else {}),
              "mode": run.mode}
     fut: asyncio.Future = asyncio.get_running_loop().create_future()
     run.waits[rid] = fut

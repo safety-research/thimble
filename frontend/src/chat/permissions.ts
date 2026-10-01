@@ -142,6 +142,13 @@ export function modeChat(ask: PendingAsk, metas: ReadonlyMap<string, ChatMeta>):
   return ask.chat !== 'main' && m?.permission_mode && !m.background ? ask.chat : null
 }
 
+/** Why thimble's config sends a call to the analyst whatever the session's permission mode (PermissionRequest.asked_by). */
+const ASKED_BY: Readonly<Record<string, string>> = {
+  data: 'thimble asks before an agent changes your files, in every permission mode.',
+  installs: 'thimble asks before an agent installs software, in every permission mode.',
+  commands: 'thimble asks about each command this agent runs outside its sandbox.',
+}
+
 /** The modes an orientation runs in, as its switcher names them. */
 const MODE_NAMES: Readonly<Record<string, string>> = { manual: 'Manual', auto: 'Auto', bypass: 'Bypass' }
 
@@ -164,7 +171,9 @@ export function askWhy(ask: PendingAsk, metas: ReadonlyMap<string, ChatMeta>): s
   const kind = m ? threadKind(m) : null
   const name = m?.permission_mode ?? p.mode
   const mode = name ? MODE_NAMES[name] : null
-  const why = mode === 'Manual' ? 'It runs in Manual, which asks before each call.' : mode === 'Auto' ? 'Auto mode asks you about this call.' : 'Its permission mode asks for this call.'
+  const why =
+    (p.asked_by && ASKED_BY[p.asked_by]) ||
+    (mode === 'Manual' ? 'It runs in Manual, which asks before each call.' : mode === 'Auto' ? 'Auto mode asks you about this call.' : 'Its permission mode asks for this call.')
   if (kind === 'writer' || kind === 'check') return `${why} Unanswered, it is denied after a minute.`
   if (kind === 'dev' && p.wait_s) return `${why} Unanswered, it is denied after ${waitWords(p.wait_s)} and the work goes on without it.`
   return why

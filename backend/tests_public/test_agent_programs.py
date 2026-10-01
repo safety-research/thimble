@@ -189,6 +189,7 @@ def test_an_edit_of_the_corpus_asks_by_default_and_the_config_can_allow_or_refus
     target = {"file_path": str(corpus / "runs" / "r1.jsonl"), "old_string": "a", "new_string": "b"}
     conf = userconf.session(CORPUS, "orientation")
     assert conf.data == "ask" and conf.network and conf.verdict("Edit", target) == "ask" and conf.may_ask()
+    assert conf.ask_cause("Edit", target) == "data", "the card says the config asks, not the permission mode"
     assert conf.verdict("Write", {"file_path": "/elsewhere/x.txt"}) == ""
     fenced = agent_session.fence(corpus, workspaces_tmp / "w", sandbox=True, data="ask")
     assert fenced["permissions"]["ask"] == [f"Edit(/{corpus}/**)"] and "deny" not in fenced["permissions"]
