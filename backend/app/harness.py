@@ -232,6 +232,7 @@ def program_argv(part: roles.Part) -> list[str]:
 
 def box_rules(run: Run) -> dict[str, Any]:
     """srt's rules for the program's box (module note, the box)."""
+    hook_auth.ensure_session_key()
     deny = [p for p in private_paths() if Path(p).exists()]
     if run.conf.conf.get("sandbox") == "off":
         return {"filesystem": {"denyRead": deny, "allowRead": [], "allowWrite": ["/"], "denyWrite": deny}}
@@ -731,13 +732,14 @@ def claude_argv(run: Run, argv: list[str]) -> tuple[list[str], Path, dict[str, s
     append = "\n\n".join([*appended, shared])
     deny = list(dict.fromkeys([*denied, *agent_session.not_own(job.tools), *agent_session.LATER_TOOLS]))
     added = [a for w in job.writes for a in ("--add-dir", str(w))]
+    work.mkdir(parents=True, exist_ok=True)
+    settings["env"] = agent_session.settings_env(job.c, job.key, {**agent_session.fence_env(work),
+                                                                  **agent_session.skill_prompts_env(corpus, work)})
+    settings = agent_session.with_home_shell(settings)
     final = [agent_session.CLAUDE_BIN, *kept, "--plugin-dir", str(agent_session.PLUGIN_DIR), "--add-dir", str(corpus), *added,
              "--settings", json.dumps(settings), "--append-system-prompt", append, "--permission-mode", permission_mode,
              "--allowedTools", ",".join(agent_session.own_rules()), "--disallowedTools", ",".join(deny)]
-    work.mkdir(parents=True, exist_ok=True)
-    env = agent_session.environ(job.key, {**agent_session.fence_env(work),
-                                          **agent_session.skill_prompts_env(corpus, work)})
-    return final, work, env
+    return final, work, agent_session.environ()
 
 
 def _proven(headers: Any) -> Run | None:
@@ -766,7 +768,7 @@ async def session_route(ws: WebSocket) -> None:
     argv = [str(a) for a in first.get("argv") or []] if isinstance(first, dict) else []
     if argv in (["-v"], ["--version"]):
         proc = await asyncio.create_subprocess_exec(config.CLAUDE_BIN, "-v", stdout=asyncio.subprocess.PIPE,
-                                                    stderr=asyncio.subprocess.PIPE)
+                                                    stderr=asyncio.subprocess.PIPE, env=config.launch_environ())
         out, _ = await proc.communicate()
         await ws.send_bytes(b"o" + out)
         await ws.send_text(json.dumps({"exit": proc.returncode or 0}))

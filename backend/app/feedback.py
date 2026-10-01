@@ -387,8 +387,10 @@ def claude_version() -> str:
     exe = cfg.CLI_PATH if cfg is not None else shutil.which("claude")
     if not exe:
         return "not found"
+    env = cfg.launch_environ() if cfg is not None else {k: v for k, v in os.environ.items()
+                                                         if not k.startswith("THIMBLE_")}
     try:
-        out = subprocess.run([exe, "--version"], capture_output=True, text=True, timeout=CLAUDE_TIMEOUT_S)
+        out = subprocess.run([exe, "--version"], capture_output=True, text=True, timeout=CLAUDE_TIMEOUT_S, env=env)
     except (OSError, subprocess.SubprocessError) as e:
         return f"? ({type(e).__name__})"
     lines = (out.stdout or out.stderr).strip().splitlines()

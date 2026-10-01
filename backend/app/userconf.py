@@ -48,6 +48,8 @@ AGENT_SANDBOX = ("on", "off")
 DATA = ("ask", "allow", "off")
 ENV_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,127}$")
 SERVER_JSON = "server.json"  # in thimble's home: the server's address and the token of its local API (hook_auth)
+MAIN_MODES = "main-modes.json"  # in thimble's home: the permission mode main last reported, per workspace (session.note_mode)
+SESSION_KEY = "session.key"  # in thimble's home: the secret of the sessions' tokens (hook_auth.SESSION_KEY)
 EDIT_TOOLS = ("Edit", "MultiEdit", "Write", "NotebookEdit")
 MEMORY = ("inherit", "on", "off")
 PERMISSION_MODES = ("manual", "auto", "bypass")  # modes.MODES
@@ -100,8 +102,9 @@ def install_rules() -> list[str]:
 
 
 def private_paths() -> list[str]:
-    """The files no agent thimble starts may read: server.json in thimble's home, which holds the local API's token."""
-    return [str(global_file().parent / SERVER_JSON)]
+    """The files no agent thimble starts may read: server.json in thimble's home, which holds the local API's token, and
+    the key the sessions' tokens are signed with."""
+    return [str(global_file().parent / name) for name in (SERVER_JSON, SESSION_KEY)]
 
 
 def private_rules() -> list[str]:
@@ -119,6 +122,11 @@ class ConfigError(RuntimeError):
 def global_file() -> Path:
     """$THIMBLE_HOME/config.json, read fresh from the environment."""
     return Path(os.environ.get("THIMBLE_HOME") or "~/.thimble").expanduser() / FILE
+
+
+def main_modes_file() -> Path:
+    """$THIMBLE_HOME/main-modes.json, which every row that follows main reads its mode from after a restart (modes.py)."""
+    return global_file().parent / MAIN_MODES
 
 
 def workspace_file(c: str) -> Path:
@@ -629,8 +637,9 @@ class Session:
 
     def settings(self) -> dict[str, Any]:
         """The --settings keys of the config for the session: the install rules, Bash asked when bash_asks, the web
-        allowed or denied, auto memory when not inherited, and a deny of edits to the config's files."""
-        files = [global_file(), *([workspace_file(self.c)] if self.c else [])]
+        allowed or denied, auto memory when not inherited, and a deny of edits to the config's files and to main's kept
+        mode (main_modes_file)."""
+        files = [global_file(), main_modes_file(), *([workspace_file(self.c)] if self.c else [])]
         perms: dict[str, list[str]] = {"deny": [*(f"Edit(/{f})" for f in files), *private_rules()]}
         rules = [f"Bash({r})" for r in install_rules()]
         if self.installs == "ask" and self.hosted:

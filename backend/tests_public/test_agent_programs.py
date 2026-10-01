@@ -409,6 +409,8 @@ def test_the_example_sdk_orientation_runs_end_to_end_on_a_copy_of_a_corpus(tmp_p
     [start] = [json.loads(line) for line in log_file.read_text().splitlines()]
     argv = start["argv"]
     assert start["session"] == "orient" and Path(start["cwd"]) == orientation.orient_dir(CORPUS) / "work"
+    assert hook_auth.session_proven(CORPUS, "orient", start["token"]) and start["own_env"] == [], \
+        "the session's name, proven, comes in its settings and none of thimble's variables in its own environment"
     assert argv[argv.index("--permission-mode") + 1] in ("default", "auto")
     assert str(agent_session.PLUGIN_DIR) in argv and str(config.corpus_dir(CORPUS)) in argv
     settings = json.loads(argv[argv.index("--settings") + 1])
@@ -510,7 +512,7 @@ async def test_a_dev_program_takes_each_turn_of_a_view_build_and_writes_only_the
     assert said == "Built runs-table from: Build the ru"
     assert json.loads((folder / "view.json").read_text())["name"] == "runs-table"
     assert sorted(p.name for p in folder.iterdir()) == ["view.json"]
-    assert (dev.view_program_dir(CORPUS, "runs-table") / "notes.txt").read_text() == "Build the runs table."
+    assert (dev.view_work_dir(CORPUS, "runs-table") / "notes.txt").read_text() == "Build the runs table."
     assert not harness.running(CORPUS, "view:runs-table")
 
 

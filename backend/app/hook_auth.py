@@ -15,6 +15,13 @@ A program thimble runs for one of its agents (harness.py) cannot read server.jso
 with the id and prove the whole token the same way, and the answer proves it back. The request's scope then holds the
 id under AGENT_SCOPE, so a route acts for that agent alone.
 
+A session thimble starts tells its tool calls apart from main's by THIMBLE_SESSION, which its shim sends with each
+call. Claude Code's background service hands one session's environment on to others (config.session_env), so that
+name alone proves nothing: each session also gets THIMBLE_SESSION_TOKEN in its --settings `env`, a nonce and its
+HMAC-SHA256 under SESSION_KEY with the workspace and the session's key (session_token), and the server believes the
+name only with a token it signed for that workspace (session_proven). The key is a file in thimble's home that no agent
+may read (userconf.private_paths), and it outlives a restart, as the background sessions do.
+
 A change of permission modes, and an answer to a permission request, must come from the analyst's browser (analyst).
 The dashboard link carries the `ui_key` of server.json after `#k=`; the page trades it for an HttpOnly, SameSite=Strict
 cookie named for this server's port (claim, ui_cookie), which such a request must carry. Only the analyst's terminal
@@ -23,11 +30,15 @@ notebook kernel in bubblewrap that the model writes cells for, can do neither.
 """
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import hmac
 import json
 import os
 import re
+import secrets
+import tempfile
+import threading
 from pathlib import Path
 from typing import Callable
 
@@ -48,6 +59,9 @@ AGENT_SCOPE = "thimble_agent"  # where a request proven with an agent's token ke
 AUTH_HEADER = "x-thimble-auth"
 PROOF_HEADER = "x-thimble-proof"
 NONCE_MAX = 128  # characters
+SESSION_KEY = "session.key"  # in thimble's home: the secret session tokens are signed with (module note)
+SESSION_TOKEN_ENV = "THIMBLE_SESSION_TOKEN"
+_secret_lock = threading.Lock()
 UI_COOKIE = "thimble-ui"  # the cookie's name before the port was added to it (ui_cookie), which browsers still hold
 UI_COOKIE_AGE_S = 400 * 24 * 3600  # the longest a browser keeps a cookie
 # The cookie the browser holds (claim) and analyst() and LocalWriteGuard check. A cookie is not bound to a port, so the
@@ -115,7 +129,7 @@ def guarded(method: str, path: str) -> bool:
 def _state() -> dict:
     """<home>/server.json, read again whenever the file changes; {} when there is none."""
     global _cache
-    p = Path(os.environ.get("THIMBLE_HOME") or "~/.thimble").expanduser() / "server.json"
+    p = home() / "server.json"
     try:
         st = p.stat()
     except OSError:
@@ -140,6 +154,67 @@ def _field(name: str) -> str:
 def token() -> str:
     """The token in <home>/server.json ('' when there is none)."""
     return _field("token")
+
+
+def home() -> Path:
+    return Path(os.environ.get("THIMBLE_HOME") or "~/.thimble").expanduser()
+
+
+def _read_secret(path: Path) -> bytes:
+    try:
+        return path.read_bytes().strip()
+    except OSError:
+        return b""
+
+
+def _session_secret(create: bool) -> bytes:
+    """The bytes of <home>/SESSION_KEY; b"" when there is none. With `create` and no key, fresh random bytes go in place
+    whole, readable by their owner alone, unless another start put a key there first, which is then the one used."""
+    path = home() / SESSION_KEY
+    got = _read_secret(path)
+    if got or not create:
+        return got
+    with _secret_lock:
+        got = _read_secret(path)
+        if got:
+            return got
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{SESSION_KEY}.")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(secrets.token_hex(32))
+            try:
+                os.link(tmp, path)
+            except FileExistsError:
+                if not _read_secret(path):  # an empty or unreadable file in its place
+                    os.replace(tmp, path)
+        finally:
+            with contextlib.suppress(OSError):
+                os.unlink(tmp)
+        return _read_secret(path)
+
+
+def ensure_session_key() -> None:
+    """Write <home>/SESSION_KEY when there is none, so the sessions' sandbox hides a file that is in place and the first
+    sessions to start find one key."""
+    _session_secret(True)
+
+
+def _session_mac(secret: bytes, c: str, key: str, nonce: str) -> str:
+    return hmac.new(secret, f"session\n{c}\n{key}\n{nonce}".encode("utf-8"), hashlib.sha256).hexdigest()
+
+
+def session_token(c: str, key: str) -> str:
+    """A new THIMBLE_SESSION_TOKEN for the session `key` of workspace `c` (module note): `<nonce>.<mac>`."""
+    nonce = secrets.token_hex(8)
+    return f"{nonce}.{_session_mac(_session_secret(True), c, key, nonce)}"
+
+
+def session_proven(c: str, key: str, token: str) -> bool:
+    """Whether `token` is one session_token gave for the session `key` of workspace `c`."""
+    nonce, _, mac = (token or "").partition(".")
+    secret = _session_secret(False)
+    return bool(secret and nonce and mac and key) and _same(mac, _session_mac(secret, c, key, nonce))
 
 
 def _same(a: str, b: str) -> bool:

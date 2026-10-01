@@ -1,12 +1,12 @@
 // A ref on every surface. Standalone (no `value`) it is a Chip: the icon of what it points to and a short name, the
 // evidence chip for the data and the accent chip for the agent's work (refTone). Inside prose (`value`) it is an inline
 // citation: the text itself is the link, with a quiet accent underline. `cite` marks a citation; in GlyphCites contexts
-// a standalone citation is its target's glyph alone. The links toggle hides every citation (lib/links). Hovering shows
-// the evidence in a label: the excerpt with the record's facts and the cited words highlighted; for a table cell
-// (`card:<id>#<col>/<row>`) the table around it, or in place when the table is drawn right above; for printed output
-// lines (`@out<i>#L<n>`) the lines around it; for a call (`call:<chat>/<n>`) its chip line over the cited output lines
-// (lib/calls). A click, on the citation or on the chip that heads its label, teleports to the ref's surface
-// (lib/teleport); a ⌘-click asks about it.
+// a standalone citation is its target's glyph alone, a whole file's its name. The links toggle hides every citation
+// (lib/links). Hovering shows the evidence in a label: the excerpt with the record's facts and the cited words
+// highlighted; for a table cell (`card:<id>#<col>/<row>`) the table around it, or in place when the table is drawn right
+// above; for printed output lines (`@out<i>#L<n>`) the lines around it; for a call (`call:<chat>/<n>`) its chip line over
+// the cited output lines (lib/calls). A click, on the citation or on the chip that heads its label, teleports to the
+// ref's surface (lib/teleport); a ⌘-click asks about it.
 import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { createPortal } from 'react-dom'
 import { api } from '../lib/api'
@@ -18,6 +18,7 @@ import { callLineText } from '../chat/model'
 import { pointKeyHeld } from '../lib/platform'
 import { cardPartLabel, cellSpanLabel, decodeLabel, hiddenPath, isEvidenceRef, parseRef, refLabel, shownValue } from '../lib/refs'
 import { CITED, cellShown, cellWindow, citedLines, findCell, locateCell, readTable, restoreScroll, scrollWithin, valueSpan, visibleWithin, type At, type Grid, type Scrolled } from '../lib/tableCell'
+import { quoteSpanRef } from '../lib/quoteFind'
 import { teleport } from '../lib/teleport'
 import type { Cell, ResolvedRef } from '../lib/types'
 import { workspaceFromUrl } from '../lib/workspace'
@@ -45,7 +46,7 @@ export { decodeLabel }
 
 /** True where a standalone citation is its target's glyph alone, its name in the hover, so a long name does not crowd
  * the text: chat replies, inside a card's content wherever the card is drawn, and a report's text. A cited number stays
- * the link's text. */
+ * the link's text, and a whole file's citation its name. */
 export const GlyphCites = createContext(false)
 
 const ID_TOKEN = /\b(cell|concept|chat|group|report|view|call)[:]([A-Za-z0-9_-]{4,})(?:\/\d+)?(?:#[A-Za-z0-9_@.-]*)?/g
@@ -250,9 +251,11 @@ export function RefChip({ ref, value, compact, workspace, broken, brokenWhy, qui
   const asText = value != null
   const icon = kindIcon(parsed?.kind)
   // a standalone citation of a card, or inside a card or report text (GlyphCites), is its glyph alone with its name in
-  // the hover; a chip that lists what a step made keeps its name
+  // the hover; a whole file's keeps its name, which a file's glyph does not tell, and so does a chip that lists what a
+  // step made
   const glyphCites = useContext(GlyphCites)
-  const iconOnly = !asText && !broken && !!cite && (glyphCites || parsed?.kind === 'cell')
+  const wholeFile = parsed?.kind === 'path' && !parsed.locator
+  const iconOnly = !asText && !broken && !!cite && !wholeFile && (glyphCites || parsed?.kind === 'cell')
 
   const call = parsed?.kind === 'call' ? parsed : null
   useEffect(() => {
@@ -295,6 +298,20 @@ export function RefChip({ ref, value, compact, workspace, broken, brokenWhy, qui
     if (visibleWithin(hit.td, home)) return { td: hit.td, scrolled }
     restoreScroll(scrolled)
     return null
+  }
+
+  // the record behind an inline citation, kept from its hover, so a click can open it at the words the citation quotes
+  const resolved = useRef<{ ref: string; r: ResolvedRef } | null>(null)
+  /** Where a click opens: the span of the words in quotation marks in the citation's text (else of its whole text)
+   * inside the record it cites, when the record holds them; the ref itself otherwise. */
+  const clickTarget = async (): Promise<string> => {
+    if (!value || parsed?.kind !== 'record' || !ws) return ref
+    try {
+      if (resolved.current?.ref !== ref) resolved.current = { ref, r: await api.resolveRef(ws, ref) }
+      return quoteSpanRef(resolved.current.r, value) ?? ref
+    } catch {
+      return ref
+    }
   }
 
   const cancelHide = () => window.clearTimeout(hideTimer.current)
@@ -342,6 +359,7 @@ export function RefChip({ ref, value, compact, workspace, broken, brokenWhy, qui
     }
     try {
       const r = await api.resolveRef(ws, ref)
+      resolved.current = { ref, r }
       if (seq !== reqSeq.current) return
       if (parsed.kind === 'cell' && parsed.col != null && parsed.row != null) {
         // a table's cell: the table around it, never its column and row in words
@@ -395,7 +413,7 @@ export function RefChip({ ref, value, compact, workspace, broken, brokenWhy, qui
     unmark()
     if (unresolved) return
     if (home && openCited(home, ref)) return
-    teleport(ref)
+    void clickTarget().then((to) => teleport(to))
   }
 
   const kind = asText ? undefined : parsed?.kind

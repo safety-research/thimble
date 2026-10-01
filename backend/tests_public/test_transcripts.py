@@ -16,6 +16,38 @@ CHATS = "/api/corpora/chats"
 LINES = [("user", "Why does the nightly build fail?"), ("assistant", "The groupby test drops the NaN key.\nIt started with the patch."),
          ("user", "Draft a fix."), ("assistant", "Done, with a test.")]
 
+
+def jsonl(records: list[dict]) -> str:
+    return "\n".join(json.dumps(r) for r in records) + "\n"
+
+
+# A village's logs, as a database export writes them: people's and agents' talk beside agents' actions, chat rows whose
+# speaker is an agent's or a person's id, and Agent SDK messages each kept under `content` beside the row's columns
+VILLAGE = jsonl([
+    {"day": 1, "timestamp": "2026-04-02T17:47:10.816Z", "type": "USER_TALK", "speakerName": "host", "content": "Welcome, all."},
+    {"day": 1, "timestamp": "2026-04-02T17:47:42.909Z", "type": "AGENT_TALK", "speakerName": "Agent A", "content": "Hello."},
+    {"day": 1, "timestamp": "2026-04-02T17:48:02.001Z", "type": "START_USING_COMPUTER", "agentName": "Agent A", "goal": "Look up charities"},
+    {"day": 1, "timestamp": "2026-04-02T17:49:30.500Z", "type": "AGENT_TALK", "speakerName": "Agent B", "content": "I can help."},
+    {"day": 1, "timestamp": "2026-04-02T17:50:11.250Z", "type": "USER_TALK", "speakerName": "host", "content": "Thanks."},
+])
+CHAT_ROWS = jsonl([
+    {"id": f"m{i}", "agent_speaker_id": None if i == 2 else f"a-{i % 3}", "user_speaker_id": "u-1" if i == 2 else None,
+     "speaker_type": "user" if i == 2 else "agent", "content": f"message {i}", "room_id": "r1",
+     "created_at": f"2026-0{(i * 5) % 9 + 1}-10 21:09:27.837523", "has_been_approved": None} for i in range(8)])
+SDK_ROWS = jsonl([
+    {"id": "c1", "agent_id": "a-1", "sdk_session_id": "s1", "message_type": "system", "created_at": "2026-03-24 20:51:20.1",
+     "content": {"type": "system", "subtype": "status", "session_id": "s1"}},
+    {"id": "c2", "agent_id": "a-1", "sdk_session_id": "s1", "message_type": "assistant", "created_at": "2026-03-24 20:51:25.9",
+     "content": {"type": "assistant", "uuid": "u2", "session_id": "s1", "message": {"role": "assistant", "content": [
+         {"type": "text", "text": "I'll list the files."}, {"type": "tool_use", "id": "t1", "name": "Bash", "input": {"command": "ls"}}]}}},
+    {"id": "c3", "agent_id": "a-1", "sdk_session_id": "s1", "message_type": "user", "created_at": "2026-03-24 20:51:27.0",
+     "content": {"type": "user", "uuid": "u3", "session_id": "s1", "message": {"role": "user", "content": [
+         {"type": "tool_result", "tool_use_id": "t1", "content": "notes.txt"}]}}},
+])
+FRONT_MATTER = ("---\npretty_name: Toy village\nlicense: other\nconfigs:\n" + "".join(
+    f"  - config_name: {n}\n    data_files: {n}.jsonl.gz\n" for n in ("events", "chat", "turns", "memories", "goals"))
+    + "---\n\n# Toy village\n\nLogs of a few agents.\n\n## Files\n\n- events.jsonl\n- chat.jsonl\n")
+
 # name -> (content, the format the sniff gives, or None for a file that is no transcript)
 FIXTURES = {
     "chat.txt": ("User: hi there\nAssistant: hello, how can I help?\nUser: a joke\nAssistant: why did the chicken...\n", "text"),
@@ -66,6 +98,15 @@ FIXTURES = {
     "langchain.jsonl": ("\n".join(json.dumps({"type": "human" if r == "user" else "ai", "data": {"content": t}}) for r, t in LINES)
                         + "\n", "messages"),
     "tagged.log": ("".join(f"2026-09-01 10:0{i}:00 [{r}] {t.splitlines()[0]}\n" for i, (r, t) in enumerate(LINES)), "text"),
+    "village-transcript.jsonl": (VILLAGE, "messages"),
+    "chat_messages.jsonl": (CHAT_ROWS, "messages"),
+    "sdk_messages.jsonl": (SDK_ROWS, "stream"),
+    "rows.csv": ("Created At,Agent Speaker Id,Message Text\n2026-01-01,a1,hi\n2026-01-02,a2,yo\n2026-01-03,a1,ok\n", "csv"),
+    "camel.jsonl": (jsonl([{"Speaker-Name": n, "messageText": t, "sentAt": f"2026-01-01T10:0{i}:00Z"}
+                           for i, (n, t) in enumerate([("amy", "hi"), ("ben", "yo"), ("amy", "ok")])]), "messages"),
+    "indented.txt": ("  alice: hi there\n  bob: hello\n  alice: how are you\n  bob: fine\n", "text"),
+    "snippet.txt": ("User: q\nAssistant: a\n" * 6 + "Assistant: set it to\n    host: x\n    port: 80\n    host: y\n    port: 81\n", "text"),
+    "rules.md": ("---\n\nAn intro set between two rules.\n\n---\n\nUser: hi\nAssistant: hello\nUser: a joke\nAssistant: no\n", "text"),
     # not transcripts
     "service.log": ("2026-09-01 10:00:00 [INFO] started\n2026-09-01 10:00:05 [WARN] slow\n2026-09-01 10:01:00 [INFO] done\n", None),
     "quotes.md": ("# Notes\n\n> a quote\n\nSome text.\n\n> another quote\n\n> a third\n", None),
@@ -75,6 +116,14 @@ FIXTURES = {
     "config.json": (json.dumps({"name": "x", "version": "1", "scripts": {"a": "b"}}, indent=2), None),
     "events.jsonl": ("\n".join(json.dumps({"ts": "t", "agent": "a", "action": "b", "params": {}}) for _ in range(3)) + "\n", None),
     "script.py": ("User: hi\nAssistant: hello\nUser: ok\n", None),
+    "README.md": (FRONT_MATTER, None),
+    "dataset.yaml.txt": ("configs:\n" + "".join(f"  - name: {n}\n    data_files: {n}.gz\n" for n in "abcd"), None),
+    "nested.yaml.txt": ("server:\n  host: a\n  port: 1\nclient:\n  host: b\n  port: 2\n", None),
+    "servers.yaml.txt": ("servers:\n  alpha:\n    host: a\n    port: 1\n  beta:\n    host: b\n    port: 2\n", None),
+    # documents, each by its own author: no one takes turns
+    "authors.csv": ("Writer Handle,Essay Text\nann,one\nbob,two\ncat,three\ndan,four\n", None),
+    "essays.jsonl": (jsonl([{"author": f"writer {i}", "text": f"essay {i}"} for i in range(6)]), None),
+    "one.jsonl": (jsonl([{"speakerName": "amy", "content": "hi"}]), None),
 }
 
 
@@ -227,6 +276,30 @@ def test_the_turns_of_other_tools_chat_logs(chats):
     assert transcripts.sniff(chats / "logs" / "langchain.jsonl", "logs/langchain.jsonl")["score"] == transcripts.STRONG
 
 
+def test_a_chat_log_s_time_after_the_speaker_is_the_turn_s_time_not_its_words():
+    """A time in brackets after the speaker, bold or not, with a date or a zone or neither, is the turn's time, and the
+    turn's words start after it; a bracket of words in a bold turn stays in its words."""
+    log = ("**Alice** (2026-06-22T08:45:55Z): Hello there\n\n**Bob** (2026-06-22 08:46): Fine.\n\n"
+           "**Alice (10:32):** Morning\n\n**Bob:** (laughs) finally\n")
+    hint = transcripts.sniff_text(log, markdown=True)
+    assert hint and hint["style"] == "bold"
+    turns = [(t["speaker"], t.get("time"), ln[t["at"]:]) for ln in log.split("\n") if (t := transcripts.turn_of(ln, "bold"))]
+    assert turns == [("Alice", "2026-06-22T08:45:55Z", "Hello there"), ("Bob", "2026-06-22 08:46", "Fine."),
+                     ("Alice", "10:32", "Morning"), ("Bob", None, "(laughs) finally")]
+    plain = "Alice (2026-06-22 08:45): hi\nBob (2026-06-22 08:46): yo\nAlice (2026-06-22 08:47): ok\nBob (2026-06-22 08:48): bye\n"
+    assert (transcripts.sniff_text(plain) or {}).get("style") == "name-clock"
+    t = transcripts.turn_of("Bob (1/2/24, 10:35 PM): Done.", "name-clock")
+    assert t and t["time"] == "1/2/24, 10:35 PM" and "Bob (1/2/24, 10:35 PM): Done."[t["at"]:] == "Done."
+
+
+def test_a_record_with_a_page_s_name_and_an_author_s_label_is_spoken_by_the_author():
+    """A wiki's revisions name the page under `name` and its author under `label`: the author speaks."""
+    revs = [{"name": "Main_Page", "seq": i, "body": f"edit {i}", "label": who, "time": f"2026-06-22T08:4{i}:00Z"}
+            for i, who in enumerate(["Ada", "Bo", "Ada", "Cy"])]
+    hint = transcripts.sniff_bytes("".join(json.dumps(r) + "\n" for r in revs).encode(), "revisions.jsonl", complete=True)
+    assert hint and hint["format"] == "messages" and hint["keys"]["speaker"] == "label", hint
+
+
 def test_the_pdf_route_serves_the_file_for_the_browsers_viewer(chats):
     r = client.get(f"{CHATS}/pdf/docs/postmortem.pdf")
     assert r.status_code == 200 and r.headers["content-type"] == "application/pdf"
@@ -321,6 +394,60 @@ def test_the_sniff_says_where_line_records_keep_their_turns(chats):
     assert stream["format"] == "stream" and stream["lines"] and stream["keys"]["text"] == "message.content"
     log = sniff("app.log", FIXTURES["messages.jsonl"][0])
     assert log["format"] == "messages" and log["lines"] and log["keys"] == {"speaker": "role", "text": "content"}
+
+
+def test_the_sniff_reads_who_speaks_under_any_key_and_nesting(chats):
+    """Speaker keys in any case style, a second key where some records keep who speaks, and a stream nested under a
+    key; a head of turns out of time order offers Transcript but leaves the table first."""
+    def sniff(name):
+        return transcripts.sniff(chats / "logs" / name, f"logs/{name}")
+
+    village = sniff("village-transcript.jsonl")
+    assert village == {"format": "messages", "score": transcripts.STRONG,
+                       "keys": {"speaker": "speakerName|agentName", "text": "content", "time": "timestamp"}}
+    chat = sniff("chat_messages.jsonl")
+    assert chat["keys"] == {"speaker": "agent_speaker_id|user_speaker_id", "text": "content", "time": "created_at"}
+    assert chat["score"] == transcripts.WEAK, "rows out of time order read better as a table"
+    assert sniff("sdk_messages.jsonl") == {"format": "stream", "score": 1.0, "wrap": "content"}
+    assert sniff("camel.jsonl")["keys"] == {"speaker": "Speaker-Name", "text": "messageText", "time": "sentAt"}
+    nested = jsonl([{"id": i, "data": {"speakerId": f"a{i % 2}", "speakerType": "agent", "content": f"said {i}"},
+                    "created_at": f"2026-01-0{i + 1} 10:00"} for i in range(4)]
+                   + [{"id": 9, "data": {"agentId": "a1", "actionType": "WAIT"}, "created_at": "2026-01-09 10:00"}])
+    (chats / "logs" / "events2.jsonl").write_text(nested)
+    assert sniff("events2.jsonl")["keys"] == {"speaker": "data.speakerId|data.agentId", "text": "data.content",
+                                              "time": "created_at"}
+    for key in ("reply_to_user", "user_agent", "is_user", "message_type"):
+        assert transcripts._speaker_rank(key) is None, key
+    assert transcripts._speaker_rank("agent_speaker_id") < transcripts._speaker_rank("speaker_type")
+    assert transcripts._speaker_rank("speakerName") < transcripts._speaker_rank("agent_speaker_id")
+
+
+def test_a_speaker_key_that_holds_ids_offers_transcript_but_leaves_the_table_first(chats):
+    """A log whose records carry a user's id and a message is no sure transcript; role words under such a key are."""
+    log = jsonl([{"ts": f"2026-01-01T10:00:0{i}Z", "level": "info", "user_id": i % 2, "message": f"request {i}"}
+                 for i in range(6)])
+    got = transcripts.sniff_bytes(log.encode(), "app.jsonl", complete=True)
+    assert got["keys"]["speaker"] == "user_id" and got["score"] == transcripts.WEAK
+    roles = jsonl([{"speaker_type": ["user", "assistant"][i % 2], "content": f"turn {i}"} for i in range(4)])
+    assert transcripts.sniff_bytes(roles.encode(), "r.jsonl", complete=True)["score"] == transcripts.STRONG
+    rows = [json.loads(ln) for ln in log.splitlines()]
+    whole = transcripts.sniff_bytes(json.dumps(rows).encode(), "app.json", complete=True)
+    assert whole == {"format": "json", "score": transcripts.WEAK}
+    products = [{"name": f"Part {i}", "text": "a spec", "updated_time": f"2026-01-0{i + 1}"} for i in range(6)]
+    assert transcripts.sniff_bytes(json.dumps(products).encode(), "parts.json", complete=True) is None
+
+
+def test_a_long_key_is_read_as_no_speaker_at_once():
+    assert transcripts._key_words("A" * 20_000) == ()
+    assert transcripts._speaker_rank("Speaker" * 20) is None
+
+
+def test_whole_file_turns_read_who_speaks_under_either_key(chats):
+    (chats / "logs" / "village.txt").write_text(VILLAGE)
+    got = transcripts.sniff(chats / "logs" / "village.txt", "logs/village.txt")
+    assert got["lines"] and got["keys"]["speaker"] == "speakerName|agentName"
+    turns = client.get(f"{CHATS}/source/turns", params={"path": "logs/village-transcript.jsonl"}).json()["turns"]
+    assert [t["speaker"] for t in turns] == ["host", "Agent A", "Agent B", "host"]
 
 
 def test_markdown_quoting_an_example_exchange_keeps_rendered_first(chats):

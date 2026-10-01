@@ -15,14 +15,16 @@ name has its workspace shortened (config.session_name), and by_name also takes t
 wrote in place of ` · `. The workspace's own lines (the statusline, the news) show the role alone (config.session_role).
 
 Start. agent_session builds the `claude -p` command as for any session and hands it to start(), which turns it into a
-`claude --bg` command: the first message goes on the command line, and the session's own environment goes in the
---settings `env`, since the background service starts the session with its own environment. `claude --bg` refuses a
-folder Claude Code does not trust; install.sh asks once to trust thimble's workspaces folder (claude_changes). Without
-that trust (trusted) none of these sessions starts, and the refusal says how the analyst can trust the folder (the
-bg-untrusted hint). BgProc stands in for the process agent_session follows: a run ends when the session is idle, its
-transcript's last turn has ended and it has no background work, while the session itself goes on for the analyst. A
-session whose turn ended while a background shell of its own runs on counts as idle once its transcript has been quiet
-for LINGER_S (_lingering), since Claude Code lists it as busy for as long as the shell runs.
+`claude --bg` command: the first message goes on the command line, and the session's own environment is in the
+--settings `env` already, since the background service starts the session with its own environment, the one of the
+`claude` that started the service, and takes only PATH from the `claude --bg` that asks for the session. Every
+`claude` command here runs with config.launch_environ, so the service never keeps a value of thimble's. `claude --bg`
+refuses a folder Claude Code does not trust; install.sh asks once to trust thimble's workspaces folder
+(claude_changes). Without that trust (trusted) none of these sessions starts, and the refusal says how the analyst can
+trust the folder (the bg-untrusted hint). BgProc stands in for the process agent_session follows: a run ends when the
+session is idle, its transcript's last turn has ended and it has no background work, while the session itself goes on
+for the analyst. A session whose turn ended while a background shell of its own runs on counts as idle once its
+transcript has been quiet for LINGER_S (_lingering), since Claude Code lists it as busy for as long as the shell runs.
 
 Messages in place. A session that runs is never resumed with `--resume`, which would copy it under a new id: a message
 for it (a follow-up from the browser, a retry after a capacity failure) waits in its outbox (deliver) and is sent with
@@ -32,13 +34,14 @@ all of its start flags, since Claude Code keeps none of a session's options when
 starts under a new id is recorded as the session's new id.
 
 The proxy. For each session main runs a thin background subagent of the plugin (plugin/agents: thimble:orient,
-thimble:writer, thimble:critic), which reads its instructions from proxy_file and loops on the `wait_session` tool for
-the session's life: the tool returns the session's news (below) as one block of lines, which the proxy copies into its
-reply word for word, one reply per call, and the outbox's messages as tokens. Two plugin hooks keep it reliable: before
-a SendMessage (relay_check) the server swaps a token for its message, prefixes a message the analyst typed in the
-proxy's view, and refuses a message sent twice; when the proxy would stop while its session runs (proxy_stop), the hook
-sends it back to waiting. Main is asked to start a proxy again while none runs, unless Claude Code refused its call for
-that session, as auto mode can (proxy_refused).
+thimble:writer, thimble:critic), which reads its instructions from proxy_file and loops on the `wait_session` tool
+until the session ends or finishes its task (finished): the tool returns the session's news (below) as one block of
+lines, which the proxy copies into its reply word for word, one reply per call, and the outbox's messages as tokens.
+Two plugin hooks keep it reliable: before a SendMessage (relay_check) the server swaps a token for its message, prefixes
+a message the analyst typed in the proxy's view, and refuses a message sent twice; when the proxy would stop while its
+session works (proxy_stop), the hook sends it back to waiting. Main is asked to start a proxy again while none runs and
+the session has a task (not resting), unless Claude Code refused its call for that session, as auto mode can
+(proxy_refused). A resting session shows in the tray again once it starts another turn.
 
 The news. What the analyst would see of a subagent, read from the session's transcript in its order (_read_news, which
 keeps an offset past the last whole line it read, so no line shows twice): each reply as `<name>: <text>` (NEWS_CHARS, a
@@ -101,6 +104,9 @@ WAIT_S = 6.0
 PROXY_WAIT_S = 20.0  # how long a message waits for the proxy before main is asked to send it
 PROXY_ALIVE_S = 90.0  # a proxy that has not called wait_session for this long is taken for gone
 PROXY_ASK_S = 120.0  # how long main's start of a proxy is waited for before main is asked again
+# how long after its run ended an idle session counts as still at its task (finished), so a run that follows at once,
+# such as a queued follow-up, keeps its tray entry
+FINISHED_AFTER_S = 15.0
 IDENTIFY_TRIES = 20
 CLI_TIMEOUT_S = 60
 MAX_ARG = 100_000  # bytes of a first message kept on the command line; a longer one goes through a file
@@ -138,7 +144,6 @@ BG_ID_RE = re.compile(r"backgrounded\W+([0-9a-f]{8})\b")
 UNTRUSTED_RE = re.compile(r"not trusted", re.IGNORECASE)  # `claude --bg`'s refusal of a folder it does not trust
 DROP_FLAGS = {"-p", "--print", "--verbose"}
 DROP_WITH_VALUE = {"--output-format", "--session-id", "--input-format"}
-PASSED_ENV = {"PATH"}  # what the background service takes from the caller's environment
 # the provider settings a session gets in its --settings `env`, since the background service passes it only PATH; a
 # credential is never put on a command line, so a session authenticates as the service's environment and the user's
 # settings let it
@@ -241,9 +246,7 @@ def _bin() -> str:
 
 
 def _env() -> dict[str, str]:
-    from . import agent_session  # noqa: PLC0415
-
-    return agent_session.environ("")
+    return config.launch_environ()
 
 
 def listing(bin_: str | None = None, env: dict[str, str] | None = None) -> list[dict[str, Any]]:
@@ -271,15 +274,12 @@ def stop_cli(short: str) -> None:
 # --------------------------------------------------------------------------- the command
 
 
-def bg_argv(argv: list[str], env: dict[str, str], base_env: dict[str, str], name: str, prompt: str,
-            folder: Path) -> list[str]:
+def bg_argv(argv: list[str], env: dict[str, str], name: str, prompt: str, folder: Path) -> list[str]:
     """The `claude --bg` argv for the `claude -p` argv `argv`, named `name`, with `prompt` as the first message and, in
-    its --settings `env`, the variables `env` adds to `base_env` and the provider settings (PROVIDER_ENV) (module note,
-    start)."""
+    its --settings `env`, the provider settings (PROVIDER_ENV) of `env`, the environment the command runs with, and
+    FOREGROUND_ENV (module note, start)."""
     out: list[str] = [argv[0], "--bg", "-n", name]
-    extra_env = {**{k: v for k, v in env.items() if k not in PASSED_ENV | {config.CONFIG_DIR_ENV}
-                    and (k.startswith("THIMBLE_") or PROVIDER_ENV.fullmatch(k) or base_env.get(k) != v)},
-                 **FOREGROUND_ENV}
+    extra_env = {**{k: v for k, v in env.items() if PROVIDER_ENV.fullmatch(k)}, **FOREGROUND_ENV}
     i = 1
     while i < len(argv):
         a = argv[i]
@@ -459,6 +459,19 @@ def alive(e: Entry | None) -> bool:
     return e is not None and (e.status != "stopped" or e.replacing)
 
 
+def resting(e: Entry | None) -> bool:
+    """Whether a session that runs has no task now: Claude Code keeps a background session's process after its last
+    turn, idle, so a session listed idle, with no run of thimble's following it and no message waiting for it, rests
+    until it starts another turn (_tick). Main is not asked to show it in the tray."""
+    return alive(e) and not e.replacing and e.status == "idle" and not e.run_open and not _pending_out(e)
+
+
+def finished(e: Entry | None) -> bool:
+    """Whether a resting session has finished its task: it has rested for FINISHED_AFTER_S since its run ended, so a run
+    that follows at once keeps its tray entry. Its tray entry ends."""
+    return resting(e) and time.time() - e.ended_at >= FINISHED_AFTER_S
+
+
 def stopped_in_claude(c: str, key: str) -> bool:
     """Whether the session's process went away because Claude Code stopped it, as with `claude stop` or the agent view,
     which the analyst does, rather than a crash."""
@@ -627,7 +640,8 @@ async def _tick(rows: list[dict[str, Any]]) -> None:
                 _news(e, f"{e.shown} waits for a {e.waiting_for or 'reply'}; answer it in the browser or with "
                          f"`claude attach {e.short}`.")
             _changed.set()
-        if not proxy_alive(e) and not e.proxy_refused and time.monotonic() - e.proxy_asked > PROXY_ASK_S:
+        if (not proxy_alive(e) and not e.proxy_refused and not resting(e)
+                and time.monotonic() - e.proxy_asked > PROXY_ASK_S):
             unshown.setdefault(e.c, []).append(e.key)
         if e.status != "idle" and not e.run_open and agent_session.current(e.c, e.key) is None:
             fn = _wake.get(kind_of(e.key))
@@ -1157,11 +1171,11 @@ def new_main(c: str) -> None:
 
 
 def proxy_ended(c: str, agent_id: str | None) -> None:
-    """A proxy's task ended: while its session runs, main is asked for a new one."""
+    """A proxy's task ended: while its session runs and has a task (not resting), main is asked for a new one."""
     for e in entries(c):
         if agent_id and agent_id in e.proxy_agents and e.owner in (None, agent_id):
             e.proxy_seen, e.proxy_starting, e.owner = 0.0, 0.0, None
-            if alive(e) and not e.proxy_refused:
+            if alive(e) and not resting(e) and not e.proxy_refused:
                 log.info("%s: %s's proxy %s ended while its session runs; main is asked for another", c, e.name, agent_id)
                 ask_main_for_proxy(c, e.key)
 
@@ -1211,7 +1225,8 @@ async def wait(c: str, name: str, agent_id: str | None = None, path: Path | None
     so that the lines which come together (a call and its result) come in one answer. One answer holds the oldest
     lines up to NEWS_RETURN_CHARS (at least one); the rest wait for the next call, which returns them at once. The
     messages this proxy, or an earlier one of the session that ended, got for the session go to the outbox first
-    (_capture). A second proxy of a session whose proxy is alive is told to stop."""
+    (_capture). A second proxy of a session whose proxy is alive is told to stop, and the proxy of a session that ended
+    or finished its task is told to end once it has all the news."""
     from . import tools  # noqa: PLC0415
 
     e = by_name(c, name)
@@ -1230,7 +1245,7 @@ async def wait(c: str, name: str, agent_id: str | None = None, path: Path | None
     e.blocks = 0
     carried = bool(e.news)  # lines an earlier answer left, which go out without waiting for more
     deadline = time.monotonic() + WAIT_S
-    while alive(e) and not _closing:
+    while alive(e) and not finished(e) and not _closing:
         _read_news(e)
         if e.news or _pending_out(e):
             break
@@ -1258,6 +1273,9 @@ async def wait(c: str, name: str, agent_id: str | None = None, path: Path | None
         out.append(tools.hint("wait_session-send", session=e.name, token=item["token"]))
     if not alive(e):
         out.append(tools.hint("wait_session-ended", session=e.name))
+        return "\n\n".join(out)
+    if finished(e) and not e.news:
+        out.append(tools.hint("wait_session-finished", session=e.name))
         return "\n\n".join(out)
     if not out:
         out.append(tools.hint("wait_session-quiet", session=e.name, state=state_words(e)))
@@ -1392,8 +1410,8 @@ def _chat_line(e: Entry, text: str, by: str | None) -> None:
 
 
 def proxy_stop(c: str, agent_type: str, agent_path: Path | None, active: bool, agent_id: str | None = None) -> str | None:
-    """The SubagentStop hook of a proxy: the reason to keep it going while its session runs or a message it got waits
-    to be passed on, or None to let it stop."""
+    """The SubagentStop hook of a proxy: the reason to keep it going while its session works or has news left for it,
+    or a message it got waits to be passed on, or None to let it stop."""
     from . import tools  # noqa: PLC0415
 
     if not agent_type.startswith(f"{_plugin()}:") or agent_path is None:
@@ -1401,7 +1419,7 @@ def proxy_stop(c: str, agent_type: str, agent_path: Path | None, active: bool, a
     e = proxy_of(c, agent_id, agent_path)
     if e is None or (agent_id and e.owner and agent_id != e.owner and proxy_alive(e)):
         return None
-    if not alive(e) and not _fresh(e, agent_path):
+    if (not alive(e) or (finished(e) and not e.news)) and not _fresh(e, agent_path):
         return None
     e.blocks += 1
     if e.blocks > BLOCKS_MAX:
@@ -1420,7 +1438,7 @@ def agent_check(c: str, tool_input: dict[str, Any], tool_use_id: str | None = No
         if proxy_alive(e) or (e.proxy_starting and now - e.proxy_starting < PROXY_ASK_S):
             if tool_use_id:
                 _own_refusals.add(tool_use_id)
-            return f"{e.name} already shows in the agent tray."
+            return f"{e.name} already shows in the agent tray, so this call is not needed. End the turn with no text."
         e.proxy_starting = now
         return None
     if str(agent_type or "") != "fork":
@@ -1585,13 +1603,13 @@ async def start(c: str, key: str, argv: list[str], folder: Path, env: dict[str, 
             return BgProc(c, key, short, resume, int(running["pid"]), expect=bool(prompt.strip()))
         known = session.find_transcript(resume)
         before = session._size(Path(known)) if known else 0  # where the news of this start begins (record)
-        args = bg_argv(argv, env, dict(os.environ), name_of(c, key), prompt.strip() or _nudge(), folder)
+        args = bg_argv(argv, env, name_of(c, key), prompt.strip() or _nudge(), folder)
         args[2:2] = ["--resume", resume]
         code, out = await asyncio.to_thread(_cli, bin_, args[1:], env, folder, CLI_TIMEOUT_S)
     else:
         before = 0
-        code, out = await asyncio.to_thread(_cli, bin_, bg_argv(argv, env, dict(os.environ), name_of(c, key), prompt,
-                                                                folder)[1:], env, folder, CLI_TIMEOUT_S)
+        code, out = await asyncio.to_thread(_cli, bin_, bg_argv(argv, env, name_of(c, key), prompt, folder)[1:], env,
+                                            folder, CLI_TIMEOUT_S)
     if code != 0 and UNTRUSTED_RE.search(out):
         from . import tools  # noqa: PLC0415
 

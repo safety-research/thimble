@@ -98,9 +98,11 @@ def _emit(c: str, event: dict) -> None:
     _do()
 
 
-def _notify(c: str, concept_id: str, what: str) -> None:
-    """`concepts {concept, what}` on the workspace stream after a label is defined, changed, applied or deleted."""
-    _emit(c, {"type": "concepts", "concept": concept_id, "what": what})
+def _notify(c: str, concept_id: str, what: str, rows: bool = True) -> None:
+    """`concepts {concept, what, rows}` on the workspace stream after a label is defined, changed, applied or deleted;
+    `rows` False when its rows stay as they were (turned on or off, recoloured, a filter set), so the marks read from
+    them need not be read again."""
+    _emit(c, {"type": "concepts", "concept": concept_id, "what": what, "rows": rows})
 
 
 KINDS = ("prompt", "regex", "code")
@@ -617,12 +619,13 @@ def _store_ready(ws: Path, concept_id: str, *, wait: bool = True) -> labels_stor
             log.warning("labels store %s: still being rebuilt after %.0f s; the writer keeps waiting", p.name, BUILD_WAIT_S)
 
 
-def _jsonl_answer(p: Path, path: str | None, lines: tuple[int, int] | None = None) -> list[dict]:
-    """While a store is rebuilt: the rows on `path` (on `lines` of it) from one pass over the jsonl, memoised for the build."""
+def _jsonl_answer(p: Path, path: str | None, spans: tuple[tuple[int, int], ...] | None = None) -> list[dict]:
+    """While a store is rebuilt: the rows on `path` (on the line `spans` of it) from one pass over the jsonl, memoised
+    for the build."""
     memo = _building_answers.setdefault(p, {})
-    key = (path, lines)
+    key = (path, spans)
     if key not in memo:
-        memo[key] = labels_store.scan_jsonl(p, path, lines)
+        memo[key] = labels_store.scan_jsonl(p, path, spans)
     return memo[key]
 
 
@@ -658,11 +661,24 @@ def rows_for_path(ws: Path, concept_id: str, path: str | None, lines: tuple[int,
     """The merged rows (latest classifier row per ref with the analyst's verdict) on one corpus path; every row when
     `path` is None; with `lines` (a, b) those on lines a..b of the path and its whole-file rows, so the reader asks for
     its page and never for every row of a large labelled file."""
+    if path is not None and lines is not None:
+        return rows_on_lines(ws, concept_id, path, [lines])
     st, building = _store(ws, concept_id)
     if st is not None:
-        return st.rows_for_path(path, lines)
+        return st.rows_for_path(path)
     if building:
-        return _jsonl_answer(labels_file(ws, concept_id), path, lines)
+        return _jsonl_answer(labels_file(ws, concept_id), path)
+    return []
+
+
+def rows_on_lines(ws: Path, concept_id: str, path: str, spans: list[tuple[int, int]]) -> list[dict]:
+    """rows_for_path for the lines several (a, b) spans of one path cover, read at once: the pages a view's records
+    fall on."""
+    st, building = _store(ws, concept_id)
+    if st is not None:
+        return st.rows_on_lines(path, spans)
+    if building:
+        return _jsonl_answer(labels_file(ws, concept_id), path, tuple(labels_store.merge_spans(spans)))
     return []
 
 
@@ -3243,7 +3259,7 @@ def _files_label_off(c: str, ws: Path, concept_id: str) -> None:
     if concept is not None and concept["shown"]:
         concept["shown"] = False
         write_concept(ws, coloured(ws, concept))
-        _notify(c, concept["id"], "changed")
+        _notify(c, concept["id"], "changed", rows=False)
 
 
 def set_filter(c: str, scope: str, concept_id: str, value: str) -> dict:
@@ -3270,7 +3286,7 @@ def set_filter(c: str, scope: str, concept_id: str, value: str) -> dict:
                 for cl in concept["classes"]:
                     cl["highlight"] = cl["name"] == value
             write_concept(ws, coloured(ws, concept))
-            _notify(c, concept["id"], "changed")
+            _notify(c, concept["id"], "changed", rows=False)
     _emit(c, _filter_event(scope, filters[scope]))
     return filters
 
@@ -3786,7 +3802,7 @@ def show_concept(c: str, id_or_name: str, on: bool | None, values: list[str] | N
         f = read_filters(ws).get("files")
         if f and f["concept"] == concept["id"]:
             clear_filter(c, "files")
-    _notify(c, concept["id"], "changed")
+    _notify(c, concept["id"], "changed", rows=False)
     return concept
 
 
@@ -3982,6 +3998,7 @@ def update_concept_route(c: str, concept_id: str, body: ConceptPatch) -> dict:
     colour and highlight. Turning a label off in Files drops a Files filter that names it."""
     ws, concept = load_concept(c, concept_id)
     before = {k: concept[k] for k in DEFINITION}
+    name_before = concept["name"]
     if body.name is not None and body.name.strip():
         concept["name"] = " ".join(body.name.split())
     if body.description is not None:
@@ -4029,7 +4046,7 @@ def update_concept_route(c: str, concept_id: str, body: ConceptPatch) -> dict:
         f = read_filters(ws).get("files")
         if f and f["concept"] == concept_id:
             clear_filter(c, "files")
-    _notify(c, concept_id, "changed")
+    _notify(c, concept_id, "changed", rows={k: concept[k] for k in DEFINITION} != before or concept["name"] != name_before)
     return with_stats(ws, concept)
 
 
@@ -4142,6 +4159,24 @@ def parse_lines(lines: str | None) -> tuple[int, int] | None:
     return int(m[1]), int(m[2])
 
 
+LINE_SPANS_MAX = 200  # ranges one labels request may name
+
+
+def parse_spans(lines: str | None) -> list[tuple[int, int]] | None:
+    """`?lines=a-b,c-d,...` as [(a, b), (c, d), ...] (LINE_SPANS_MAX at most); None when absent; 400 for anything
+    else."""
+    if lines is None or not lines.strip():
+        return None
+    parts = lines.split(",")
+    if len(parts) > LINE_SPANS_MAX:
+        raise HTTPException(400, f"lines names {len(parts)} ranges; at most {LINE_SPANS_MAX} fit in one request")
+    try:
+        return [span for part in parts if (span := parse_lines(part)) is not None]
+    except HTTPException:
+        raise HTTPException(400, "lines must be ranges a-b of 1-based line numbers with a <= b, comma-separated, e.g. "
+                                 "lines=1-500,2001-2500") from None
+
+
 @router.get("/ws/{c}/concepts/{concept_id}/labels")
 def labels_route(c: str, concept_id: str, path: str | None = None, lines: str | None = None) -> dict:
     """Latest label per ref (with the analyst's verdict); `?path=` narrows to one file, `&lines=a-b` to the rows on
@@ -4180,12 +4215,13 @@ async def rows_route(c: str, concept_id: str, value: str | None = None, limit: i
 @router.get("/ws/{c}/labels")
 def all_labels_route(c: str, path: str, lines: str | None = None) -> list[dict]:
     """Every concept's rows on one file in a single request (the reader opens one file, many concepts); `&lines=a-b`
-    keeps the rows on those lines (the reader's page) plus the file's whole-file rows."""
+    keeps the rows on those lines (the reader's page) plus the file's whole-file rows, and `&lines=a-b,c-d,...` the
+    rows on each range, so a view whose records fall on many pages of a file asks for them at once."""
     ws = _ws(c)
-    span = parse_lines(lines)
+    spans = parse_spans(lines)
     out = []
     for concept in list_concepts(ws):
-        rows = rows_for_path(ws, concept["id"], path, span)
+        rows = rows_for_path(ws, concept["id"], path) if spans is None else rows_on_lines(ws, concept["id"], path, spans)
         if rows:
             out.append({"concept_id": concept["id"], "name": concept["name"], "labels": concept["labels"], "unit": concept["unit"],
                         "created_by": concept.get("created_by"), "rows": rows,
@@ -4201,9 +4237,31 @@ class RefsBody(BaseModel):
 
 
 def rows_for_refs(ws: Path, concept_id: str, wanted: list[str]) -> list[dict]:
-    """The merged rows of these record refs (labels_store.Store.rows_for_refs); [] while the store is rebuilt."""
-    st, _building = _store(ws, concept_id)
-    return st.rows_for_refs(wanted) if st is not None else []
+    """The merged rows of these record refs (labels_store.Store.rows_for_refs). While the store is rebuilt, those of
+    the refs that name a file's line, read from the labels file as a page of lines is."""
+    st, building = _store(ws, concept_id)
+    if st is not None:
+        return st.rows_for_refs(wanted)
+    if not building:
+        return []
+    lines: dict[str, set[int]] = {}
+    for ref in wanted:
+        path, line = labels_store.ref_parts(ref)
+        if path is not None and line is not None:
+            lines.setdefault(path, set()).add(line)
+    found: dict[str, dict] = {}
+    starts: dict[tuple[str, int], dict] = {}
+    for path, ns in lines.items():
+        for row in _jsonl_answer(labels_file(ws, concept_id), path, tuple(labels_store.merge_spans((n, n) for n in ns))):
+            found.setdefault(row["ref"], row)
+            if isinstance(row.get("line"), int):
+                starts.setdefault((path, row["line"]), row)
+    out = []
+    for ref in wanted:
+        row = found.get(ref) or starts.get(labels_store.ref_parts(ref))
+        if row is not None:
+            out.append(row)
+    return out
 
 
 @router.post("/ws/{c}/labels/refs")

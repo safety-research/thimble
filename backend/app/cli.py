@@ -135,11 +135,12 @@ LINKS_DIR = "links"  # under <home>: the link each session's Stop hook shows onc
 # while Claude Code does not trust thimble's workspaces folder (untrusted): the line for the analyst's terminal, with the
 # command that trusts it, and the line for a model, which leaves that command to the analyst
 UNTRUSTED_LINE = ("thimble: WARNING - Claude Code does not trust thimble's workspaces folder {folder}, so the orientation, "
-                  "its critic and the writers can't start. To trust it, run this in a terminal:\n  {command}")
+                  "its critic, the writers and view builds can't start. To trust it, run this in a terminal:\n"
+                  "  {command}")
 UNTRUSTED_MODEL_LINE = ("thimble: WARNING - Claude Code does not trust thimble's workspaces folder, so the orientation, "
-                        "its critic and the writers can't start. The analyst trusts it by running thimble's installer "
-                        "again in their own terminal with --trust-workspaces, the command their terminal and thimble's "
-                        "browser show.")
+                        "its critic, the writers and view builds can't start. The analyst trusts it by running "
+                        "thimble's installer again in their own terminal with --trust-workspaces, the command their "
+                        "terminal and thimble's browser show.")
 FRESH_LINE = ("thimble: Cleared the session at {cwd}. The last run is archived at {path}. To bring it back, run: "
               "/thimble restore {name}")
 NOTHING_ARCHIVED_LINE = "thimble: this folder had no workspace to archive"
@@ -1200,21 +1201,48 @@ def workspace_for(cwd: Path, data_dir: Path, url: str | None, *, here: bool = Fa
     return open_workspace(cwd, data_dir, url, here=here)[0]
 
 
+def caller_alias(cwd: Path) -> tuple[bool, str | None]:
+    """How the analyst named the folder `cwd`: (whether thimble can tell, the path they used when it is another path to
+    the folder, through a symlink). plugin/bin/thimble passes the caller's logical working directory ($PWD, which keeps
+    the symlink a shell went through) as THIMBLE_CALLER_CWD; when that is not the folder (main's shell moved on), thimble
+    cannot tell."""
+    raw = os.environ.get("THIMBLE_CALLER_CWD") or ""
+    if not os.path.isabs(raw):
+        return False, None
+    try:
+        same = Path(raw).resolve() == cwd.resolve()
+    except OSError:
+        return False, None
+    return (True, config.shown_alias(raw, cwd.resolve())) if same else (False, None)
+
+
+def _sidecar_shown(data_dir: Path, name: str) -> str | None:
+    rec = config.read_sidecar(name, data_dir)
+    return rec.get("shown") if rec else None
+
+
 def open_workspace(cwd: Path, data_dir: Path, url: str | None, *, here: bool = False) -> tuple[str | None, bool]:
-    """workspace_for with whether the folder was opened anew: (name, registered just now)."""
+    """workspace_for with whether the folder was opened anew: (name, registered just now). A registered folder the
+    analyst opened through a symlink, or no longer through one, is registered again so that the dashboard shows the path
+    they used (caller_alias)."""
+    told, alias = caller_alias(cwd)
     cwd = cwd.resolve()
     data_dir = data_dir.resolve()
     known = known_corpus(cwd, data_dir)
     if known is not None and (known[1] == cwd or not here or known[1].parent == data_dir):
-        return known[0], False
+        stale = told and known[1] == cwd and known[1].parent != data_dir and _sidecar_shown(data_dir, known[0]) != alias
+        if not (stale and url):
+            return known[0], False
     if not url:
         return (known[0] if known else None), False
     body: dict[str, Any] = {"path": str(cwd)}
     if here:
         body["exact"] = True
+    if told:
+        body["shown"] = alias
     status, resp = _request("POST", f"{url}/api/corpora/register", body)
     if status in (200, 201) and isinstance(resp, dict) and resp.get("name"):
-        return str(resp["name"]), True
+        return str(resp["name"]), known is None or known[0] != str(resp["name"])
     _log(f"register {cwd} → {status} {str(resp)[:200]}")
     return None, False
 
@@ -1385,7 +1413,7 @@ class Installed(NamedTuple):
 def _claude_json(claude: str, args: list[str], cwd: Path) -> list[Any]:
     """The list a `claude ... --json` listing prints, [] when it fails or prints something else."""
     r = subprocess.run([claude, *args, "--json"], cwd=cwd, capture_output=True, text=True,
-                       timeout=PLUGIN_LIST_TIMEOUT_S, stdin=subprocess.DEVNULL, check=False)
+                       timeout=PLUGIN_LIST_TIMEOUT_S, stdin=subprocess.DEVNULL, check=False, env=config.launch_environ())
     out = json.loads(r.stdout) if r.returncode == 0 and r.stdout.strip() else []
     return out if isinstance(out, list) else []
 
@@ -1905,7 +1933,7 @@ def sandbox_lines(commands: bool = True) -> list[str]:
     """The doctor's `bash sandbox` line: whether Claude Code's Bash sandbox can run (cc_settings.sandbox_ok), which the
     agents' Bash then uses unless thimble's config says `sandbox.use` "never", and, when it cannot run, what it lacks and
     with `commands` the root commands that install it. Where it runs, the line names the empty `.claude/.cc-writes/`
-    folder Claude Code creates in the folder a sandboxed command runs in."""
+    folder Claude Code creates in the folder a sandboxed command starts in, which is the agent's own folder."""
     from . import cc_settings, userconf  # noqa: PLC0415
 
     try:
@@ -1930,7 +1958,7 @@ def sandbox_lines(commands: bool = True) -> list[str]:
                    f"a code ticket runs its checks and test server outside it, so it asks you before it starts: {why}")
         return ["  bash sandbox: runs (every agent's Bash runs in it: no writes outside the agent's folder and no "
                 f"network unless the agent's network is \"on\"; {tickets}; Claude Code's sandbox adds an empty "
-                ".claude/.cc-writes/ folder where its commands run, the corpus folder among them)"]
+                ".claude/.cc-writes/ folder to the agent's own folder, where its commands start)"]
     after = ("thimble's config (sandbox.enforce) refuses to start the agents" if box.get("enforce") else
              "the agents' Bash runs outside it, under each agent's permission mode")
     head = "  bash sandbox: off, missing " + ", ".join(missing) + "; " + after
@@ -1965,7 +1993,7 @@ def claude_code_version() -> str | None:
     if not exe:
         return None
     try:
-        out = subprocess.run([exe, "--version"], capture_output=True, text=True, timeout=10)
+        out = subprocess.run([exe, "--version"], capture_output=True, text=True, timeout=10, env=config.launch_environ())
     except (OSError, subprocess.SubprocessError):
         return None
     v = version_tuple(out.stdout or out.stderr)
@@ -2069,7 +2097,8 @@ def trust_command() -> str:
 
 def untrusted(workspaces: Path) -> Path | None:
     """The workspaces folder when Claude Code does not trust it, by its own entry or one above it, so the background
-    sessions of the orientation, its critic and the writers cannot start (bg_session.trusted); None when it does."""
+    sessions of the orientation, its critic, the writers and view builds cannot start (bg_session.trusted); None when
+    it does."""
     from . import bg_session, claude_changes  # noqa: PLC0415
 
     data = claude_changes._read(bg_session.claude_json())
@@ -2077,15 +2106,15 @@ def untrusted(workspaces: Path) -> Path | None:
 
 
 def trust_line(workspaces: Path, commands: bool = True) -> str:
-    """Whether Claude Code trusts the workspaces folder, which the orientation's, its critic's and the writers'
-    background sessions need (untrusted), and with `commands` the command that trusts it."""
+    """Whether Claude Code trusts the workspaces folder, which the background sessions of the orientation, its critic,
+    the writers and view builds need (untrusted), and with `commands` the command that trusts it."""
     from . import bg_session  # noqa: PLC0415
 
     path = bg_session.claude_json()
     if not untrusted(workspaces):
         return f"Claude Code trusts {workspaces} ({path})"
-    return (f"Claude Code does not trust {workspaces} ({path}), so the orientation, its critic and the writers can't "
-            "start" + (f"; `{trust_command()}` trusts it" if commands else ""))
+    return (f"Claude Code does not trust {workspaces} ({path}), so the orientation, its critic, the writers and view "
+            "builds can't start" + (f"; `{trust_command()}` trusts it" if commands else ""))
 
 
 def human_bytes(n: float) -> str:
@@ -2920,8 +2949,6 @@ def cmd_extension(args: argparse.Namespace) -> int:
             info = extensions.read_extension(extensions.source_path(n), n)
             if extensions.orients(info):
                 print(orient_hint(n, extensions.orient_program(info)))
-        for line in extensions.conflicts_with(name):
-            print(f"Conflict: {line}.")
     elif args.ext_cmd in ("on", "off"):
         try:
             got = extensions.switch(args.name, args.ext_cmd == "on", workspaces)

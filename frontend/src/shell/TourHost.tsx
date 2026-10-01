@@ -8,8 +8,9 @@ import { api } from '../lib/api'
 import { bus, type Tab } from '../lib/bus'
 import { hold } from '../lib/telemetry'
 
+/** The chat column is open, not folded. */
 const chatOn = () => !!document.querySelector('.chat[data-panel="chat"]')
-/** The shell is drawn, a Claude Code session is attached, and the chat, when it is on, shows its foot. */
+/** The shell is drawn, a Claude Code session is attached, and the chat, when its column is open, shows its foot. */
 const ready = () => {
   const shell = document.querySelector<HTMLElement>('.shell')
   return !!shell && shell.dataset.session !== 'gone' && (shell.dataset.chat !== 'open' || !!document.querySelector('.chat[data-panel="chat"] .chat-foot'))

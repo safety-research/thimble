@@ -210,6 +210,42 @@ async def test_each_agent_runs_in_its_row_else_in_main_s_mode_and_nothing_else_p
     assert modes.disabled() == {"auto", "bypass"}, "the managed file with its drop-ins"
 
 
+def test_a_server_restarted_under_main_follows_its_last_reported_mode_until_main_reports_again(fake):
+    """Main's reported mode is kept in thimble's home, not in memory alone: a server restarted under the same session
+    gives each row that follows main that mode, and main's meta shows it, until main reports again. A new session, or one
+    resumed after its end, starts from Manual, whatever it or an earlier session ran in."""
+    cwd = str(config.corpus_dir(CORPUS))
+
+    def restart() -> None:
+        session._live.clear()
+        session._modes.clear()
+
+    session.attach(CORPUS, "sid-main", cwd)
+    session.note_mode(CORPUS, "sid-main", "auto")
+    assert modes.mode_for(CORPUS, "orient") == "auto"
+    restart()
+    session.attach(CORPUS, "sid-main", cwd)
+    assert [modes.mode_for(CORPUS, a) for a in modes.AGENTS] == ["auto"] * len(modes.AGENTS), "the kept report"
+    assert agents.read_meta(CORPUS, agents.MAIN_ID)["attached"]["permission_mode"] == "auto"
+    kept = userconf.main_modes_file()
+    assert kept.is_file() and f"Edit(/{kept})" in userconf.session(CORPUS, "orientation").settings()["permissions"]["deny"], \
+        "no agent edits the mode the rows follow"
+    session.note_mode(CORPUS, "sid-main", "default")
+    assert modes.mode_for(CORPUS, "orient") == "manual", "main's next report wins"
+    restart()
+    session.attach(CORPUS, "sid-main", cwd)
+    assert modes.mode_for(CORPUS, "orient") == "manual", "the newer report is the one kept"
+    session.note_mode(CORPUS, "sid-main", "bypassPermissions")
+    session.detach(CORPUS, "sid-main", "ended")
+    session.attach(CORPUS, "sid-main", cwd)
+    assert modes.mode_for(CORPUS, "orient") == "manual", "a session resumed after its end reports its mode again"
+    session.detach(CORPUS, "sid-main", "ended")
+    restart()
+    session.attach(CORPUS, "sid-next", cwd)
+    assert modes.mode_for(CORPUS, "orient") == "manual", "another session's mode is not main's"
+    assert "permission_mode" not in agents.read_meta(CORPUS, agents.MAIN_ID)["attached"]
+
+
 def test_a_continued_background_session_keeps_the_mode_it_runs_in(fake, monkeypatch):
     """A background session resumed or sent a message keeps the flags it was launched with (agent_session.BG_AUTO_LINE),
     so its next run takes the mode its chat's meta records, not the row saved since nor a card's switch; a session of
@@ -240,8 +276,8 @@ async def test_auto_is_claude_code_s_auto_mode_and_a_call_it_refuses_waits_for_t
     run = await orient_session.start(CORPUS, "")
     assert run.mode == "auto" and _flag(run.argv) == "auto"
     settings = json.loads(run.argv[run.argv.index("--settings") + 1])
-    assert settings["hooks"]["PreToolUse"] == agent_session.permission_hooks(CORPUS, auto=True, wait=True)["PreToolUse"]
-    assert settings["hooks"]["PermissionDenied"] == agent_session.permission_hooks(CORPUS)["PermissionDenied"]
+    assert settings["hooks"]["PreToolUse"] == agent_session.session_hooks(CORPUS, KEY, auto=True, wait=True)["PreToolUse"]
+    assert settings["hooks"]["PermissionDenied"] == agent_session.session_hooks(CORPUS, KEY)["PermissionDenied"]
     inp = {"command": "python3 -c 'print(6*7)'", "description": "Multiply"}
     body = dict(session=KEY, event="PermissionDenied", tool_name="Bash", tool_input=inp, agent_id="a2",
                 tool_use_id="toolu_r1", reason="Runs code the analyst did not ask for")
@@ -328,7 +364,7 @@ async def test_a_switch_into_auto_keeps_the_config_s_asks_waiting_for_the_analys
         return json.loads(run.argv[run.argv.index("--settings") + 1])["hooks"].get("PreToolUse")
 
     agent_session._set_flag(run, "auto")
-    assert pre() == agent_session.permission_hooks(CORPUS, auto=True, wait=True)["PreToolUse"]
+    assert pre() == agent_session.session_hooks(CORPUS, KEY, auto=True, wait=True)["PreToolUse"]
     agent_session._set_flag(run, "default")
     assert not pre()
     await orient_session.stop(CORPUS)

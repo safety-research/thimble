@@ -7,6 +7,7 @@ its next step, as SIGINT does in a kernel."""
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import io
 import json
 import os
@@ -400,11 +401,17 @@ def test_a_kernel_keeps_the_indexes_it_used_last_within_its_memory():
     view_host._sizes.clear()
 
 
+def _taken(name: str) -> int:
+    """A kernel's resident size that is just what its indexes take."""
+    w = next(w for w in view_calls._pools[CORPUS] if w.name == name)
+    return view_calls.KERNEL_BASE + sum(w.holds.values())
+
+
 async def test_a_kernel_above_its_memory_that_holds_several_indexes_is_restarted(ws, kernels, monkeypatch):
-    monkeypatch.setattr(view_calls, "_rss", lambda c, name: 10 * 1024**3)
-    monkeypatch.setattr(view_calls, "rss_max", lambda: 1024**3)
+    monkeypatch.setattr(view_calls, "_rss", lambda c, name: _taken(name))
+    monkeypatch.setattr(view_calls, "rss_max", lambda: 1024)
     await views.reader_call(CORPUS, "count", "records", {})
-    assert kernels.stopped == [], "one index alone is kept, however large"
+    assert kernels.stopped == [], "one index alone is kept when the kernel's memory is what it takes, however large"
     await views.reader_call(CORPUS, "other", "records", {})
     for _ in range(20):
         if kernels.stopped:
@@ -412,3 +419,205 @@ async def test_a_kernel_above_its_memory_that_holds_several_indexes_is_restarted
         await asyncio.sleep(0.05)
     assert kernels.stopped == ["views"]
     assert view_calls._pools[CORPUS] == []
+
+
+async def test_a_kernel_far_above_what_its_one_index_takes_is_restarted(ws, kernels, monkeypatch):
+    """Building an index or answering a call can leave a kernel holding gigabytes its index does not need, which the
+    system never gets back: once free it is restarted, and its index is loaded again from the pickle."""
+    monkeypatch.setattr(view_calls, "_rss", lambda c, name: 10 * 1024**3)
+    monkeypatch.setattr(view_calls, "rss_max", lambda: 1024**3)
+    assert await views.reader_call(CORPUS, "count", "records", {}) == {"n": 5, "steps": 0}
+    for _ in range(20):
+        if kernels.stopped:
+            break
+        await asyncio.sleep(0.05)
+    assert kernels.stopped == ["views"]
+    assert await views.reader_call(CORPUS, "count", "records", {}) == {"n": 5, "steps": 0}
+
+
+def _answer(held: list, **more) -> list[dict]:
+    from app.view_host import SENTINEL  # noqa: PLC0415
+
+    return [{"_stream": "stdout", "text/plain": SENTINEL + json.dumps({"ok": True, "held": held, **more}) + "\n"}]
+
+
+def test_a_kernel_holding_an_index_with_no_pickle_is_not_restarted(monkeypatch):
+    """An index that does not pickle would be built again from the corpus after a restart, which can take far longer
+    than the memory is worth."""
+    monkeypatch.setattr(view_calls, "_rss", lambda c, name: 10 * 1024**3)
+    monkeypatch.setattr(view_calls, "rss_max", lambda: 1024**3)
+    w = view_calls.Worker(CORPUS, "views")
+    view_calls._note_answer(w, _answer([["count", "fp", 1000]], unpickled=True))
+    assert not w.restart and w.unpickled
+    view_calls._note_answer(w, _answer([["count", "fp", 1000]]))
+    assert w.restart
+
+
+def test_the_kernels_memory_limits_stay_within_bounds_on_any_machine(monkeypatch):
+    """The limits are shares of the machine's memory, so a laptop keeps room for everything else, and fixed bounds keep
+    a machine with hundreds of gigabytes from letting the views' kernels take tens of them."""
+    gb = 1024**3
+    for env in ("THIMBLE_VIEW_MEMORY_MB", "THIMBLE_VIEW_RSS_MB", "THIMBLE_VIEW_TOTAL_RSS_MB"):
+        monkeypatch.delenv(env, raising=False)
+    for phys, want in ((16 * gb, (1 * gb, 2 * gb, 4 * gb)), (256 * gb, (2 * gb, 6 * gb, 12 * gb)),
+                       (4 * gb, (256 * 1024**2, 1 * gb, 2 * gb))):
+        monkeypatch.setattr(view_calls, "physical_memory", lambda phys=phys: phys)
+        assert (view_calls.memory_budget(), view_calls.rss_max(), view_calls.total_rss_max()) == want, phys
+    monkeypatch.setenv("THIMBLE_VIEW_RSS_MB", "20000")
+    assert view_calls.rss_max() == 20000 * 1024**2
+
+
+def test_a_wrapped_kernels_memory_is_its_python_process(monkeypatch):
+    """Under the sandbox the process thimble starts is the wrapper, a few megabytes; the memory that matters is the
+    kernel's process inside it."""
+    import subprocess  # noqa: PLC0415
+
+    from app import notebook, procs  # noqa: PLC0415
+
+    if not procs.HAVE_PROC:
+        pytest.skip("reads /proc")
+    child = "x = bytearray(120 * 1024 * 1024); import time; time.sleep(30)"
+    wrapper = subprocess.Popen(["/bin/sh", "-c", f'"{sys.executable}" -c "{child}" & wait'])
+    kernel = type("K", (), {"pid": wrapper.pid})()
+    notebook._exec_kernels[(CORPUS, "views")] = kernel
+    try:
+        got = 0
+        for _ in range(100):
+            view_calls._inner.pop(wrapper.pid, None)
+            got = view_calls._rss(CORPUS, "views")
+            if got > 100 * 1024**2:
+                break
+            time.sleep(0.05)
+        assert got > 100 * 1024**2 > procs.rss(wrapper.pid)
+    finally:
+        notebook._exec_kernels.pop((CORPUS, "views"), None)
+        for pid in procs.descendants(wrapper.pid):
+            with contextlib.suppress(OSError):
+                os.kill(pid, 9)
+        wrapper.kill()
+        wrapper.wait()
+
+
+def test_an_index_counts_what_loading_it_took_and_says_when_it_has_no_pickle(tmp_path, monkeypatch):
+    """A kernel's budget counts an index by the memory it took, at least its pickle's size, and an index that does
+    not pickle is named, so the pool never restarts the kernel that holds it."""
+    reader = tmp_path / "reader.py"
+    reader.write_text("def build_index(paths):\n    return {'f': (lambda: 1) if paths else 1, 'big': list(range(10))}\n"
+                      "def records(index, query):\n    return 1\n"
+                      "def resolve(index, locator):\n    return None\n")
+    steps = iter([100, 100, 100 + 50 * 1024**2, 100 + 50 * 1024**2, 200, 200, 200, 200])  # call, before, after, end
+    monkeypatch.setattr(view_host, "_rss", lambda: next(steps))
+    view_host._indexes.clear()
+    view_host._sizes.clear()
+    view_host._unpickled.clear()
+    try:
+        out = view_host.answer({"slug": "s", "reader": str(reader), "fp": "a", "paths": ["x"],
+                                "cache": str(tmp_path / "a.pickle"), "op": "records"})
+        assert out["ok"] and out["unpickled"] is True and out["held"] == [["s", "a", 50 * 1024**2]]
+        out = view_host.answer({"slug": "t", "reader": str(reader), "fp": "b", "paths": [],
+                                "cache": str(tmp_path / "b.pickle"), "op": "records"})
+        assert out["ok"] and (tmp_path / "b.pickle").is_file()
+        assert out["held"][-1] == ["t", "b", (tmp_path / "b.pickle").stat().st_size], "at least the pickle's size"
+    finally:
+        view_host._indexes.clear()
+        view_host._sizes.clear()
+        view_host._unpickled.clear()
+
+
+async def test_deleting_a_view_lets_go_of_the_kernel_that_holds_its_index(ws, kernels):
+    await views.reader_call(CORPUS, "count", "records", {})
+    assert [w.name for w in view_calls._pools[CORPUS]] == ["views"]
+    views.delete_view(CORPUS, "count")
+    for _ in range(20):
+        if kernels.stopped:
+            break
+        await asyncio.sleep(0.05)
+    assert kernels.stopped == ["views"] and view_calls._pools[CORPUS] == []
+    assert await views.reader_call(CORPUS, "other", "records", {}) == {"n": 3, "steps": 0}
+
+
+def test_a_reader_version_whose_index_is_let_go_is_let_go_with_what_its_globals_hold(tmp_path):
+    """A reader that caches its state in a module global (an object that keeps the index) would hold that index long
+    after the kernel let it go, once for every version of the reader a build tried: its module goes with its index."""
+    import gc  # noqa: PLC0415
+    import weakref  # noqa: PLC0415
+
+    src = ("_CACHE = {}\n"
+           "class Index(dict):\n    pass\n"
+           "def build_index(paths):\n    return Index(n=len(paths))\n"
+           "def records(index, query):\n    _CACHE['last'] = index\n    return index['n']\n"
+           "def resolve(index, locator):\n    return None\n")
+    view_host._indexes.clear()
+    view_host._sizes.clear()
+    view_host._readers.clear()
+    view_host._reader_of.clear()
+    try:
+        first = tmp_path / "v1" / "reader.py"
+        first.parent.mkdir()
+        first.write_text(src)
+        out = view_host.answer({"slug": "s", "reader": str(first), "fp": "a", "paths": [], "op": "records"})
+        assert out["ok"]
+        old = weakref.ref(view_host._indexes[("s", "a")])
+        for i, fp in enumerate(("b", "c"), 2):
+            again = tmp_path / f"v{i}" / "reader.py"
+            again.parent.mkdir()
+            again.write_text(src)
+            assert view_host.answer({"slug": "s", "reader": str(again), "fp": fp, "paths": [], "op": "records"})["ok"]
+        gc.collect()
+        assert str(first) not in view_host._readers and len(view_host._readers) == 2
+        assert old() is None, "the first version's module and the index its global kept are gone"
+    finally:
+        view_host._indexes.clear()
+        view_host._sizes.clear()
+        view_host._readers.clear()
+        view_host._reader_of.clear()
+
+
+def test_an_index_pickled_by_one_reader_version_loads_with_that_versions_classes(tmp_path):
+    """Two versions of a view's reader share one module name. A pickle of the first's index, read while the second was
+    loaded last, is made of the first's classes."""
+    import pickle  # noqa: PLC0415
+
+    def src(tag: str) -> str:
+        return (f"class Index(dict):\n    tag = {tag!r}\n"
+                "def build_index(paths):\n    return Index(n=len(paths))\n"
+                "def records(index, query):\n    return type(index).tag\n"
+                "def resolve(index, locator):\n    return None\n")
+
+    for k in ("_indexes", "_sizes", "_readers", "_reader_of"):
+        getattr(view_host, k).clear()
+    try:
+        old, new = tmp_path / "v1" / "reader.py", tmp_path / "v2" / "reader.py"
+        for p, tag in ((old, "v1"), (new, "v2")):
+            p.parent.mkdir()
+            p.write_text(src(tag))
+        assert view_host.answer({"slug": "s", "reader": str(old), "fp": "a", "paths": [], "op": "records"})["result"] == "v1"
+        pickled = tmp_path / "b.pickle"
+        with open(pickled, "wb") as f:
+            pickle.dump(view_host._indexes[("s", "a")], f)
+        assert view_host.answer({"slug": "s", "reader": str(new), "fp": "c", "paths": [], "op": "records"})["result"] == "v2"
+        out = view_host.answer({"slug": "s", "reader": str(old), "fp": "b", "paths": ["x"], "cache": str(pickled),
+                                "op": "records"})
+        assert out["ok"] and out["built"] is False and out["result"] == "v1", out
+    finally:
+        for k in ("_indexes", "_sizes", "_readers", "_reader_of"):
+            getattr(view_host, k).clear()
+
+
+def test_a_kernels_python_process_is_found_by_its_command_line_not_its_size(monkeypatch):
+    """Inside the sandbox wrapper the kernel is the process started as `python -m ipykernel_launcher`. A worker it
+    forked has the same command line and may be larger, and the wrapper names the kernel's command among its own
+    arguments: neither is taken for it."""
+    from app import procs  # noqa: PLC0415
+
+    kernel = ["/venv/bin/python", "-m", "ipykernel_launcher", "-f", "k.json"]
+    tree = {10: ["/usr/bin/node", "kernel_srt.mjs", "srt", "{}", *kernel], 11: ["bwrap", "--ro-bind", "/", "/"],
+            12: ["apply-seccomp", "/usr/bin/bash", "-c", " ".join(kernel)], 13: kernel, 14: kernel}
+    sizes = {10: 70, 11: 2, 12: 1, 13: 900, 14: 3000}
+    monkeypatch.setattr(procs, "descendants", lambda pid: [11, 12, 13, 14] if pid == 10 else [])
+    monkeypatch.setattr(procs, "argv", lambda pid: tree.get(pid, []))
+    monkeypatch.setattr(procs, "rss", lambda pid: sizes.get(pid, 0))
+    assert view_calls._kernel_process(10) == 13
+    tree[13] = tree[14] = ["/venv/bin/python", "-c", "pass"]
+    assert view_calls._kernel_process(10) == 14, "with no kernel's command line, the largest descendant"
+    assert view_calls._kernel_process(99) == 99

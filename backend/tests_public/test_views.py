@@ -22,7 +22,7 @@ from pathlib import Path
 
 import pytest
 
-from app import config, headless, tools, userconf, views
+from app import config, dev, headless, tools, userconf, views
 
 CORPUS = "boards"
 POSTS = [  # (thread, author, time, body); line n of board.jsonl is POSTS[n-1]
@@ -365,7 +365,7 @@ async def test_a_field_whose_values_the_cited_lines_do_not_hold_fails_the_checks
     views.write_view(CORPUS, "threads", reader=DERIVING_READER, html=THREADS_HTML, **VIEW)
     rep = await views.gate(CORPUS, "threads", ["board.jsonl#L3"])
     assert not rep["ok"], views.gate_lines(rep)
-    noted = [n for n in rep["problems"] if "`derived`" in n]
+    noted = [n for n in rep["problems"] if "listed as derived" in n]
     assert len(noted) == 1 and "author ('ADA' on board.jsonl#L1)" in noted[0] and "score (" in noted[0], noted
     assert "flagged (" in noted[0] and "topics (" in noted[0], "a true or false and a list the lines do not hold"
     for field in ("body", "replies", "thread_key", "mood", "words"):
@@ -376,8 +376,25 @@ async def test_a_field_whose_values_the_cited_lines_do_not_hold_fails_the_checks
                                             {"field": "flagged", "from": "body", "how": "a classifier", "kind": "inferred"},
                                             {"field": "topics", "from": "body", "how": "a classifier", "kind": "inferred"}]})
     rep = await views.gate(CORPUS, "threads", ["board.jsonl#L3"])
-    assert rep["ok"] and not [n for n in rep["problems"] + rep["notes"] if "`derived`" in n], views.gate_lines(rep)
+    assert rep["ok"] and not [n for n in rep["problems"] + rep["notes"] if "listed as derived" in n], views.gate_lines(rep)
     assert [d["field"] for d in rep["coverage"]["derived"]] == ["score", "flagged", "topics", "author"], "inferred first"
+    # the schema's form: `scope`, and each derived field marked in `records`
+    d = views.views_dir(CORPUS) / "threads"
+    old = json.loads((d / "view.json").read_text())
+    (d / "view.json").write_text(json.dumps({
+        "name": old["name"], "description": old["description"], "scope": old["claims"], "accepts": old["accepts"],
+        "units": old["units"], "libs": [],
+        "records": [{"name": "post", "one": "one post", "fields": [
+            {"name": "ref", "type": "ref"}, {"name": "body", "type": "text"},
+            {"name": "author", "type": "category", "derived": "cleaned", "from": "author", "how": "upper-cased"},
+            {"name": "score", "type": "number", "derived": "computed", "from": "body", "how": "its length"},
+            {"name": "flagged", "type": "category", "derived": "computed", "from": "body", "how": "a classifier"},
+            {"name": "topics", "type": "list", "derived": "computed", "from": "body", "how": "a classifier"}]}]}))
+    views._memo.clear()
+    rep = await views.gate(CORPUS, "threads", ["board.jsonl#L3"])
+    assert rep["ok"], views.gate_lines(rep)
+    assert [d["field"] for d in rep["coverage"]["derived"]] == ["score", "flagged", "topics", "author"]
+    assert [d["kind"] for d in rep["coverage"]["derived"]] == ["inferred"] * 3 + [""]
     assert views._exempt("files", 3) and views._exempt("n_calls", 2), "a count needs no entry"
     assert not views._exempt("ts", 1781741180000) and not views._exempt("status", 200), "a short or singular name is no count"
 
@@ -545,7 +562,7 @@ async def test_the_review_reads_one_picture_asks_for_more_and_sends_its_problems
 
     revisions: list[list[str]] = []
 
-    async def revise(c, slug, prop, problems, shots, run=None):
+    async def revise(c, slug, prop, problems, shots):
         revisions.append(problems)
         return True, "fixed"
 
@@ -565,8 +582,8 @@ async def test_the_review_reads_one_picture_asks_for_more_and_sends_its_problems
 
 
 async def test_the_review_reads_again_for_as_long_as_the_api_stays_at_capacity(ws, bound, monkeypatch):
-    """A reading the API keeps refusing at capacity waits and reads again, with the waits doubling up to a cap, and
-    the review's time limit leaves those waits out, so a long streak of 429s or 529s never ends the review."""
+    """A reading the API keeps refusing at capacity waits and reads again, with the waits doubling up to a cap, so a
+    long streak of 429s or 529s never ends the review."""
     from app import card_check, model, view_review
 
     views.propose(CORPUS, "Threads", "The posts by thread.", ["board.jsonl"], "Unit: a post", asked=True)
@@ -595,12 +612,55 @@ async def test_the_review_reads_again_for_as_long_as_the_api_stays_at_capacity(w
     monkeypatch.setattr(views, "shoot_states", shoot_states)
     monkeypatch.setattr(view_review, "_call", reading)
     monkeypatch.setattr(view_review, "_capacity_sleep", sleep)
-    monkeypatch.setattr(view_review, "REVIEW_TOTAL_S", 0.2)
     monkeypatch.setattr(card_check, "fit_image", lambda b: b)
     await view_review._guarded(view_review._Run(CORPUS, "threads"))
     assert slept == [30.0, 60.0, 120.0, 240.0, 300.0, 300.0, 300.0]
     review = views.read_proposal(CORPUS, "threads")["review"]
     assert review["state"] == "done" and not review["left"], review
+
+
+async def test_a_review_runs_until_it_ends_and_the_analyst_s_stop_puts_the_view_back(ws, bound, monkeypatch):
+    """A review has no time limit: a revision that takes long is waited for, and the analyst's Stop ends the review
+    `stopped`, its revision's session stopped and the view back at its last version that passed."""
+    from app import card_check, dev, model, view_review  # noqa: PLC0415
+
+    monkeypatch.setattr(views, "_queue", lambda c, slug: None)
+    views.propose(CORPUS, "Threads", "The posts by thread.", ["board.jsonl"], "Unit: a post", asked=True)
+    views.mark_built(CORPUS, "threads")
+    page = views.views_dir(CORPUS) / "threads" / "view.html"
+    built = page.read_text("utf-8")
+
+    async def shoot_states(c, slug, states, **k):
+        for st in states:
+            Path(st["out"]).parent.mkdir(parents=True, exist_ok=True)
+            Path(st["out"]).write_bytes(b"png")
+        return [{"ok": True, "errors": [], "fonts": True, "png": str(st["out"])} for st in states]
+
+    async def reading(c, system, user, tool, images, effort):
+        return model.CallResult(status="ok", output={"problems": ["the list is cut off"], "more": []})
+
+    revising = asyncio.Event()
+
+    async def revise(c, slug, prop, problems, shots):
+        page.write_text("<p>half a revision</p>", "utf-8")
+        revising.set()
+        await asyncio.Event().wait()
+
+    stopped: list[tuple[str, str]] = []
+    monkeypatch.setattr(views, "shoot_states", shoot_states)
+    monkeypatch.setattr(view_review, "_call", reading)
+    monkeypatch.setattr(view_review, "revise", revise)
+    monkeypatch.setattr(dev, "stop_review_session", lambda c, slug: stopped.append((c, slug)))
+    monkeypatch.setattr(card_check, "fit_image", lambda b: b)
+    run = view_review.start(CORPUS, "threads")
+    await asyncio.wait_for(revising.wait(), 5)
+    await asyncio.sleep(0.2)
+    assert view_review.running(CORPUS, "threads") and view_review.revising(CORPUS, "threads")
+    assert view_review.stop(CORPUS, "threads")
+    await asyncio.wait_for(run.task, 5)
+    review = views.read_proposal(CORPUS, "threads")["review"]
+    assert (review["state"], review["note"]) == ("stopped", view_review.STOPPED_NOTE)
+    assert stopped == [(CORPUS, "threads")] and page.read_text("utf-8") == built
 
 
 async def test_a_workspace_gets_four_views_from_the_orientation_and_a_deleted_one_stays_deleted(ws, monkeypatch):
@@ -615,8 +675,12 @@ async def test_a_workspace_gets_four_views_from_the_orientation_and_a_deleted_on
     assert e.value.status_code == 409
     assert propose("Two", orientation=True)["slug"] == first[1]["slug"], "one of the four is improved under its name"
     # the analyst deletes a proposal and a view: neither frees a place or comes back, and their own asks still build
+    for slug in (first[0]["slug"], "threads"):
+        dev.view_work_dir(CORPUS, slug).mkdir(parents=True, exist_ok=True)
+        (dev.view_work_dir(CORPUS, slug) / "sample.jsonl").write_text("{}\n")
     views.delete_proposal(CORPUS, first[0]["slug"])
     views.delete_view(CORPUS, "threads")
+    assert not any(dev.view_work_dir(CORPUS, s).exists() for s in (first[0]["slug"], "threads")), "the builds' folders go"
     for name in ("One", "Threads", "Five"):
         with pytest.raises(views.HTTPException) as e:
             propose(name, orientation=True)

@@ -35,7 +35,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from . import agent_session, config, investigation, prompts, tools, userconf
+from . import agent_session, config, investigation, prompts, tools, userconf, work_files
 from .ledger import read_json, write_json
 
 log = logging.getLogger("thimble.checks")
@@ -504,6 +504,7 @@ async def _go(act: _Active) -> None:
     done: asyncio.Future = asyncio.get_running_loop().create_future()
 
     def ended(run: agent_session.Run, status: str, summary: str) -> None:
+        work_files.after_run(c, work_dir(c, act.check, act.doc), status)
         _finish(act, status, summary)
         if not done.done():
             done.set_result(status)

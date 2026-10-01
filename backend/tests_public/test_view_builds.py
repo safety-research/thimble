@@ -25,10 +25,11 @@ def board(tmp_path, monkeypatch, workspaces_tmp) -> Path:
 
 
 def test_a_view_build_s_session_may_read_the_corpus_and_asks_before_it_changes_it(board, monkeypatch):
-    """The session runs in the corpus folder with Edit and Bash allowed, so its flags deny edits in the worked examples,
-    ask about each edit in the corpus as the dev agent's `data` says by default (and keep its sandboxed Bash from writing
-    there), and put Bash in the sandbox, with no network when its network is off, beside the dev role's fast mode, with
-    its check command the one command run outside the sandbox; the prompt names that same command."""
+    """The session runs in its own folder with the corpus added, Edit and Bash allowed, so its flags deny edits in the
+    worked examples, ask about each edit in the corpus as the dev agent's `data` says by default (and keep its sandboxed
+    Bash from writing there), and put Bash in the sandbox, with no network when its network is off, beside the dev
+    role's fast mode, with its check command the one command run outside the sandbox; the prompt names that same
+    command."""
     monkeypatch.setenv("THIMBLE_SANDBOX", "1")
     offline = {"agents": {"dev": {"network": "off"}}}
     userconf.global_file().parent.mkdir(parents=True, exist_ok=True)
