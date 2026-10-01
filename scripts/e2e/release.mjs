@@ -38,6 +38,7 @@ const PENDING = {
   tour: 'the product tour',
   'transcript-anywhere': 'transcripts for any transcript-like file',
   pdf: 'PDF as a File browser mode',
+  'pdf-fit': 'PDF as a File browser mode',
   'views-bar': 'worked examples and the PDF viewer kept out of the views',
   'local-views': 'generated views as the workspace\'s local extension',
   'ext-cli-off': 'thimble extension on/off',
@@ -587,6 +588,37 @@ async function main() {
       const body = await r.body()
       check(r.status() === 200 && /application\/pdf/.test(type) && body.subarray(0, 5).toString() === '%PDF-', `${url} answers ${r.status()} ${type}`)
       return { detail: `${inPage ? 'shown in the page' : 'this browser shows no PDF in a page, so the step checks the file\'s route'}: ${new URL(url).pathname} answers application/pdf; modes ${m.join(', ') || 'none'}`, shots: [s] }
+    })
+
+    await step('pdf-fit', 'The PDF\'s frame fits its pane and the window at 1440x900 and 1920x1080 (measured)', async () => {
+      const sel = 'iframe[src*="pdf"], embed[type="application/pdf"], object[type="application/pdf"], embed[src*=".pdf"], object[data*=".pdf"]'
+      check(await page.locator(sel).count(), 'no PDF frame in the page to measure')
+      const bad = []
+      const lines = []
+      for (const size of SIZES) {
+        await page.setViewportSize(size)
+        await page.waitForTimeout(500)
+        const m = await page.evaluate((sel) => {
+          const el = document.querySelector(sel)
+          const r = el.getBoundingClientRect()
+          const box = (x) => ({ l: Math.round(x.left), t: Math.round(x.top), r: Math.round(x.right), b: Math.round(x.bottom) })
+          // the pane is the nearest box that clips what overflows it
+          let clip = el.parentElement
+          while (clip && clip !== document.body && getComputedStyle(clip).overflowX === 'visible') clip = clip.parentElement
+          const p = (clip || document.body).getBoundingClientRect()
+          return { el: box(r), pane: box(p), vw: window.innerWidth, vh: window.innerHeight }
+        }, sel)
+        const tag = `${size.width}x${size.height}`
+        const inPane = m.el.l >= m.pane.l - 1 && m.el.r <= m.pane.r + 1 && m.el.t >= m.pane.t - 1 && m.el.b <= m.pane.b + 1
+        const inView = m.el.l >= -1 && m.el.t >= -1 && m.el.r <= m.vw + 1 && m.el.b <= m.vh + 1
+        if (!inPane) bad.push(`${tag}: the frame ${m.el.l}-${m.el.r} x ${m.el.t}-${m.el.b} leaves its pane ${m.pane.l}-${m.pane.r} x ${m.pane.t}-${m.pane.b}`)
+        if (!inView) bad.push(`${tag}: the frame ${m.el.l}-${m.el.r} x ${m.el.t}-${m.el.b} leaves the window`)
+        lines.push(`${tag}: frame ${m.el.r - m.el.l}x${m.el.b - m.el.t} inside`)
+      }
+      await page.setViewportSize(SIZES[0])
+      await page.waitForTimeout(300)
+      check(!bad.length, bad.join('; '))
+      return { detail: lines.join(', ') }
     })
 
     await step('views-bar', 'The views bar holds only the File browser and the workspace\'s own views', async () => {
