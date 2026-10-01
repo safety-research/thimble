@@ -4215,9 +4215,31 @@ class RefsBody(BaseModel):
 
 
 def rows_for_refs(ws: Path, concept_id: str, wanted: list[str]) -> list[dict]:
-    """The merged rows of these record refs (labels_store.Store.rows_for_refs); [] while the store is rebuilt."""
-    st, _building = _store(ws, concept_id)
-    return st.rows_for_refs(wanted) if st is not None else []
+    """The merged rows of these record refs (labels_store.Store.rows_for_refs). While the store is rebuilt, those of
+    the refs that name a file's line, read from the labels file as a page of lines is."""
+    st, building = _store(ws, concept_id)
+    if st is not None:
+        return st.rows_for_refs(wanted)
+    if not building:
+        return []
+    lines: dict[str, set[int]] = {}
+    for ref in wanted:
+        path, line = labels_store.ref_parts(ref)
+        if path is not None and line is not None:
+            lines.setdefault(path, set()).add(line)
+    found: dict[str, dict] = {}
+    starts: dict[tuple[str, int], dict] = {}
+    for path, ns in lines.items():
+        for row in _jsonl_answer(labels_file(ws, concept_id), path, tuple(labels_store.merge_spans((n, n) for n in ns))):
+            found.setdefault(row["ref"], row)
+            if isinstance(row.get("line"), int):
+                starts.setdefault((path, row["line"]), row)
+    out = []
+    for ref in wanted:
+        row = found.get(ref) or starts.get(labels_store.ref_parts(ref))
+        if row is not None:
+            out.append(row)
+    return out
 
 
 @router.post("/ws/{c}/labels/refs")

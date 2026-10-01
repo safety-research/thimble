@@ -132,7 +132,7 @@ async def test_regex_apply_records_for_real(api, workspaces_tmp):
     assert len(concepts.read_labels(workspaces_tmp / CORPUS, k["id"])) == 3 + 2
 
 
-async def test_one_labels_request_reads_the_rows_of_several_line_ranges(api, workspaces_tmp):
+async def test_one_labels_request_reads_the_rows_of_several_line_ranges(api, workspaces_tmp, monkeypatch):
     k = await _create(api, kind="regex", spec=PATTERN)
     lf = concepts.labels_file(workspaces_tmp / CORPUS, k["id"])
     lf.parent.mkdir(parents=True, exist_ok=True)
@@ -169,6 +169,13 @@ async def test_one_labels_request_reads_the_rows_of_several_line_ranges(api, wor
     assert r.status_code == 200, r.text
     by_ref = {row["ref"]: row["label"] for e in r.json() if e["concept_id"] == k["id"] for row in e["rows"]}
     assert by_ref == {"big.jsonl#L600": "yes", "big.jsonl#L1005": "no", "rows.csv#row=2": "yes"}
+    # while the store is rebuilt, the records a view asks for by ref read the same rows from the labels file
+    monkeypatch.setattr(concepts, "_store", lambda ws, concept_id: (None, True))
+    r = await api.post(f"/api/ws/{CORPUS}/labels/refs", json={"refs": ["big.jsonl#L600", "big.jsonl#L1005", "big.jsonl#L7",
+                                                                       "rows.csv#L4", "rows.csv#L5"]})
+    assert r.status_code == 200, r.text
+    assert {row["ref"]: row["label"] for e in r.json() if e["concept_id"] == k["id"] for row in e["rows"]} == by_ref
+    monkeypatch.undo()
 
     for bad in ("1-500,x", "1-500,600-500", ",".join(f"{i * 10 + 1}-{i * 10 + 5}" for i in range(concepts.LINE_SPANS_MAX + 1))):
         r = await api.get(f"/api/ws/{CORPUS}/labels", params={"path": "big.jsonl", "lines": bad})
