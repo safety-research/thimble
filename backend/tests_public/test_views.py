@@ -346,6 +346,54 @@ async def test_a_claim_that_matches_no_file_is_listed_as_missing(ws, inproc, bou
     assert rep["ok"] and any("logs/*.log" in n for n in rep["notes"]), views.gate_lines(rep)
 
 
+async def test_the_review_reads_one_picture_asks_for_more_and_sends_its_problems_for_a_revision(ws, bound, monkeypatch):
+    """The review starts from one picture of the view as it opens; the reading may ask for other states, which are shot
+    and read once more with the first, and that reading's problems go to a revision. The view revised, it is reviewed
+    again from one picture, and a reading with no problems ends it."""
+    from app import card_check, model, view_review  # noqa: PLC0415
+
+    monkeypatch.setattr(views, "_queue", lambda c, slug: None)
+    views.propose(CORPUS, "Threads", "The posts by thread.", ["board.jsonl"], "Unit: a post", asked=True)
+    views.mark_built(CORPUS, "threads")
+    taken: list[list[str]] = []
+
+    async def shoot_states(c, slug, states, **k):
+        taken.append([("filtered" if (st.get("labels") or {}).get("filter") else "on" if (st.get("labels") or {}).get("probe")
+                       else "plain") for st in states])
+        for st in states:
+            Path(st["out"]).parent.mkdir(parents=True, exist_ok=True)
+            Path(st["out"]).write_bytes(b"png")
+        return [{"ok": True, "errors": [], "fonts": True, "png": str(st["out"]), "answers": [[{"ref": "board.jsonl#L1"}]]}
+                for st in states]
+
+    answers = [{"problems": ["picture 1: the list is cut off"], "more": [{"state": "filtered", "why": "the filter"}]},
+               {"problems": ["picture 2: the filter keeps every post"]},
+               {"problems": [], "more": []}]
+    readings: list[tuple[int, bool, str]] = []
+
+    async def reading(c, system, user, tool, images, effort):
+        readings.append((len(images), "more" in tool.input_schema["properties"], user))
+        return model.CallResult(status="ok", output=answers[len(readings) - 1])
+
+    revisions: list[list[str]] = []
+
+    async def revise(c, slug, prop, problems, shots):
+        revisions.append(problems)
+        return True, "fixed"
+
+    monkeypatch.setattr(views, "shoot_states", shoot_states)
+    monkeypatch.setattr(view_review, "_call", reading)
+    monkeypatch.setattr(view_review, "revise", revise)
+    monkeypatch.setattr(card_check, "fit_image", lambda b: b)
+    await view_review._review(view_review._Run(CORPUS, "threads"))
+    assert taken == [["plain"], ["filtered"], ["plain"]]
+    assert [(n, more) for n, more, _ in readings] == [(1, True), (2, False), (1, True)]
+    assert "2: the overview filtered to the test label (asked for: the filter)" in readings[1][2]
+    assert revisions == [["picture 2: the filter keeps every post"]]
+    review = views.read_proposal(CORPUS, "threads")["review"]
+    assert review["state"] == "done" and review["revised"] == revisions[0] and review["shots"] == 3 and not review["left"]
+
+
 async def test_a_workspace_gets_four_views_from_the_orientation_and_a_deleted_one_stays_deleted(ws, monkeypatch):
     monkeypatch.setattr(views, "_queue", lambda c, slug: None)
 

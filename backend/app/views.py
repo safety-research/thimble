@@ -2095,7 +2095,17 @@ async def gate(c: str, slug: str, locators: list[str] | None = None, *, shot_dir
     report = await check(c, slug, locators, shot_dir=shot_dir, picture=picture)
     if picture:
         _prune_shots(shot_dir or (d / CACHE_SUBDIR / "shots"))
+    _gate_notes[(c, slug)] = [ln for ln in gate_lines(report) if ln.startswith(("unread: ", "files: ", "page: ", "note: "))]
     return report
+
+
+_gate_notes: dict[tuple[str, str], list[str]] = {}
+
+
+def gate_notes(c: str, slug: str) -> list[str]:
+    """What the view's last checks found, as gate_lines' lines on its files, its page and its notes, which the review
+    reads beside its pictures; [] before any check in this process."""
+    return _gate_notes.get((c, slug), [])
 
 
 def _prune_shots(d: Path) -> None:
