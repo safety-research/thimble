@@ -2,7 +2,8 @@
    the files, the derived data, the lines not read, and a label filter's chip with what it hides. Built from the app's
    own parts (.btn, .seg, .popover, .menu-item, .chip, .view-pane-files, .view-pane-hidden). */
 .view-pane-head.scope-head { flex-wrap: nowrap; align-items: center; justify-content: flex-start; gap: 10px; min-height: 28px; padding-bottom: 12px; }
-.scope-head .view-pane-side-show.btn { flex: none; margin: 0 -2px 0 -8px; }
+/* thimble's label control stays level with the strip's first row when the strip wraps */
+.scope-head .view-pane-side-show.btn { flex: none; align-self: flex-start; margin: 2px -2px 0 -8px; }
 .sh { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; font: var(--type-ui-sm); }
 .sh .sh-dot { color: var(--text-placeholder, var(--text-tertiary)); }
 .sh-unit.btn { gap: 6px; padding: 0 8px 0 10px; font-weight: 400; color: var(--text-primary); }
