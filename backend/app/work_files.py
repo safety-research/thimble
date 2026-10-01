@@ -1,13 +1,15 @@
 """What an agent's work folder keeps once its run ends. A session over a large corpus can leave gigabytes of extracts
-there (pickled indexes, copies of big files), so when the run ends thimble deletes its subagents' scratch folders
-(`tmp_*`, scratch_hook) and every other file of at least EXTRACT_MIN bytes that nothing uses.
+there (pickled indexes, copies of big files), so when a run finishes thimble deletes its subagents' scratch folders
+(`tmp_*`, scratch_hook) and every other file of at least EXTRACT_MIN bytes that nothing uses. A run that goes on (the
+analyst stopped it, or a message waits for it) loses only its scratch folders, and a failed run, which is resumed,
+keeps everything (the callers decide which).
 
-A file is used when a card's code (any version a notebook keeps) or a stored document (a report) names it, by its
-path in the work folder or by its name, in a text that also names the work folder; or when a used script or note
-(SCRIPT_SUFFIXES, at most TEXT_MAX bytes) names it, so a script a card names keeps the files it reads. Always kept:
-smaller files, the folder's entries whose names start with a dot (the session's rendered prompts, caches and Claude
-Code's own files) and Python environments (a folder that holds pyvenv.cfg). Links are removed as links, never followed.
-Blocking."""
+A file is used when a card's code (any version a notebook keeps, a deleted group's too), a stored document (a report),
+a label's definition (a code label's script) or a check names it, by its path in the work folder or by its name, in a
+text that also names the work folder; or when a used script or note (SCRIPT_SUFFIXES, at most TEXT_MAX bytes) names it,
+so a script a card names keeps the files it reads. Always kept: smaller files, the folder's entries whose names start
+with a dot (the session's rendered prompts, caches and Claude Code's own files) and Python environments (a folder that
+holds pyvenv.cfg). Links are removed as links, never followed. Blocking."""
 from __future__ import annotations
 
 import json
@@ -27,8 +29,11 @@ TEMP_PREFIX = "tmp_"  # scratch_hook.PREFIX
 SCRIPT_SUFFIXES = (".py", ".sh", ".sql", ".r", ".jl", ".js", ".mjs", ".ipynb", ".md", ".txt", ".json", ".yaml",
                    ".yml", ".toml", ".cfg", ".ini")
 CODE_KEYS = ("code", "previous_code")
-NOTEBOOKS_DIR = "notebooks"  # notebook's storage: one JSON file per notebook, its cards' code among it
-DOCS_DIR = "investigations"  # report_types.doc_file: investigations/<inv>/<doc>.json
+# where the texts that may name a work folder's files are kept, the keys whose strings count (None for all), and
+# their files: notebooks and the groups deleted to notebook.TRASH_DIR, report_types.doc_file, concepts.concepts_dir and
+# the checks' records
+TEXT_SOURCES = (("notebooks", CODE_KEYS, "*.json"), ("notebooks/trash", CODE_KEYS, "*.json"),
+                ("investigations", None, "*/*.json"), ("concepts", None, "*.json"), ("checks", None, "*.json"))
 
 
 def _strings(x: Any, out: list[str], keys: tuple[str, ...] | None) -> None:
@@ -44,9 +49,10 @@ def _strings(x: Any, out: list[str], keys: tuple[str, ...] | None) -> None:
 
 
 def _texts(ws: Path) -> list[str]:
-    """Every card's code the workspace's notebooks keep, and the text of each stored document."""
+    """Every card's code the workspace's notebooks keep, and the text of each stored document, label and check."""
     out: list[str] = []
-    for folder, keys, pattern in ((ws / NOTEBOOKS_DIR, CODE_KEYS, "*.json"), (ws / DOCS_DIR, None, "*/*.json")):
+    for sub, keys, pattern in TEXT_SOURCES:
+        folder = ws / sub
         for p in sorted(folder.glob(pattern)) if folder.is_dir() else []:
             try:
                 _strings(json.loads(p.read_text("utf-8")), out, keys)
@@ -127,13 +133,15 @@ def used(c: str, work: Path, files: dict[str, int]) -> set[str]:
     return out
 
 
-def clear(c: str, work: Path) -> dict[str, int]:
-    """Delete from the work folder `work` of workspace `c` what the module note says it does not keep; {files, bytes}
-    deleted."""
+def clear(c: str, work: Path, extracts: bool = True) -> dict[str, int]:
+    """Delete from the work folder `work` of workspace `c` what the module note says it does not keep, its large files
+    only with `extracts`; {files, bytes} deleted."""
     freed = {"files": 0, "bytes": 0}
     if not work.is_dir() or work.is_symlink():
         return freed
     files, temp = _files(work)
+    if not extracts:
+        files = {}
     for p in temp:
         try:
             if p.is_dir() and not p.is_symlink():
@@ -175,20 +183,29 @@ def clear(c: str, work: Path) -> dict[str, int]:
     return freed
 
 
-def _clear_logged(c: str, work: Path) -> None:
+def _clear_logged(c: str, work: Path, extracts: bool) -> None:
     try:
-        clear(c, work)
+        clear(c, work, extracts)
     except Exception:  # noqa: BLE001 — a cleanup that fails leaves the files, never the run's end
         log.exception("%s: the files the agent left in %s were not cleared", c, work)
 
 
-def clear_soon(c: str, work: Path) -> None:
+def clear_soon(c: str, work: Path, extracts: bool = True) -> None:
     """clear() in a worker thread when an event loop runs here, else now."""
     import asyncio  # noqa: PLC0415
 
     try:
         loop = asyncio.get_running_loop()
     except RuntimeError:
-        _clear_logged(c, work)
+        _clear_logged(c, work, extracts)
         return
-    loop.run_in_executor(None, _clear_logged, c, work)
+    loop.run_in_executor(None, _clear_logged, c, work, extracts)
+
+
+def after_run(c: str, work: Path, status: str) -> None:
+    """What the end of a run with this status clears (module note): everything it may once it finished, its scratch
+    folders once it was stopped, nothing when it failed."""
+    if status == "done":
+        clear_soon(c, work)
+    elif status == "stopped":
+        clear_soon(c, work, extracts=False)

@@ -17,8 +17,9 @@ Tools. orient.md names no tools, so the session has every tool the analyst's Cla
 the thimble tools that are not the orientation's (ORIENT_TOOLS) and those of each part switched off (PART_TOOLS).
 
 The fence. The session writes only into `workspaces/<c>/orient/work/`; where Claude Code's Bash sandbox runs, Bash runs
-there with no network and no write into the corpus. When a run ends (unless it failed) its subagents' `tmp_*` folders
-and the large files no card or document uses are deleted (work_files).
+there with no network and no write into the corpus. When a run finishes, its subagents' `tmp_*` folders and the large
+files no card or document uses are deleted; a run that goes on (stopped, or with a message waiting) loses only the
+`tmp_*` folders, and a failed one keeps its folder as it left it (work_files).
 
 Permissions. The session runs in the orientation's row of the permission modes (modes.py), which Start's switcher shows
 and edits. Manual and Bypass pass `--permission-mode default` (requests wait on the card, or are granted at once); Auto
@@ -526,7 +527,8 @@ def _ended(run: agent_session.Run, status: str, summary: str) -> None:
     messages start the next run, or the report pass is asked for. A run the analyst stopped stops the builds of the
     views the orientation proposed (dev.stop_orientation_views) before main hears what it made."""
     c = run.c
-    if _analyst_stopped(run, status):
+    stopped = _analyst_stopped(run, status)
+    if stopped:
         from . import dev  # noqa: PLC0415 — dev imports the modules that import this one
 
         try:
@@ -548,10 +550,10 @@ def _ended(run: agent_session.Run, status: str, summary: str) -> None:
         log.exception("%s: the orientation's record was not closed", c)
         made = {}
     _tell_main(c, status, run.k, made, error=summary if status == "failed" else "")
-    if status != "failed":  # a failed run is resumed with its work folder as it left it
-        work_files.clear_soon(c, work_dir(c))
     rec = orientation.read_run(c) or {}
     queue = [m for m in rec.get("queue") or [] if isinstance(m, dict)]
+    # a run stopped by the analyst, or that a waiting message resumes, goes on with its extracts
+    work_files.after_run(c, work_dir(c), "stopped" if status != "failed" and (stopped or queue) else status)
     if queue:
         orientation.record(c, queue=[])
         _show_queue(c, run.chat, [])

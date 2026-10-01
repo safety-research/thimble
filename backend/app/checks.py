@@ -503,7 +503,7 @@ async def _go(act: _Active) -> None:
     done: asyncio.Future = asyncio.get_running_loop().create_future()
 
     def ended(run: agent_session.Run, status: str, summary: str) -> None:
-        work_files.clear_soon(c, work_dir(c, act.check, act.doc))
+        work_files.after_run(c, work_dir(c, act.check, act.doc), status)
         _finish(act, status, summary)
         if not done.done():
             done.set_result(status)
