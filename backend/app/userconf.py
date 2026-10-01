@@ -27,7 +27,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
-from . import config, sandbox_allow
+from . import config, permission_hook, sandbox_allow
 
 log = logging.getLogger("thimble.userconf")
 
@@ -49,6 +49,10 @@ NETWORK = ("off", "on")
 AGENT_SANDBOX = ("on", "off")
 DATA = ("ask", "allow", "off")
 ENV_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,127}$")
+# `cardWait`: the minutes a permission card waits for the analyst before an unanswered request is declined
+# (card_wait_s), at most half the permission hook's own timeout, so the hook is never ended first
+CARD_WAIT_MINUTES = 10
+CARD_WAIT_MAX = permission_hook.TIMEOUT // 120
 SERVER_JSON = "server.json"  # in thimble's home: the server's address and the token of its local API (hook_auth)
 MAIN_MODES = "main-modes.json"  # in thimble's home: the permission mode main last reported, per workspace (session.note_mode)
 SESSION_KEY = "session.key"  # in thimble's home: the secret of the sessions' tokens (hook_auth.SESSION_KEY)
@@ -70,6 +74,7 @@ DEFAULTS: dict[str, Any] = {
     "installs": "ask",
     "sandbox": {"use": "when-available", "enforce": True},
     "browser": None,
+    "cardWait": CARD_WAIT_MINUTES,
     "extensions": {},
     "agents": {
         "orientation": {**_session_agent("ask"), "subagentModel": None},
@@ -226,6 +231,23 @@ def _written(path: Path) -> dict[str, Any]:
     return data
 
 
+def _card_wait(value: Any) -> float | None:
+    """A `cardWait` value in minutes, None when it is not a number above 0 and up to CARD_WAIT_MAX."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not 0 < value <= CARD_WAIT_MAX:
+        return None
+    return float(value)
+
+
+def card_wait_s() -> float:
+    """How long a permission card waits for the analyst before an unanswered request is declined, in seconds:
+    `cardWait` of the file in thimble's home, else CARD_WAIT_MINUTES, also when the file has an error."""
+    try:
+        got = _card_wait(_raw(global_file()).get("cardWait"))
+    except ConfigError:
+        got = None
+    return (got if got is not None else CARD_WAIT_MINUTES) * 60.0
+
+
 def _words(values: tuple[str, ...]) -> str:
     quoted = [f'"{v}"' for v in values]
     return ", ".join(quoted[:-1]) + f" or {quoted[-1]}" if len(quoted) > 1 else quoted[0]
@@ -251,7 +273,7 @@ def _problems(data: dict[str, Any], scope: str, base: Path) -> list[str]:
                            f"{', '.join(known)}{more}")
         return True
 
-    keys("", data, ("installs", "sandbox", "browser", "extensions", "agents"))
+    keys("", data, ("installs", "sandbox", "browser", "cardWait", "extensions", "agents"))
     if "installs" in data:
         one_of("installs", data["installs"], INSTALLS)
     if "browser" in data:
@@ -259,6 +281,12 @@ def _problems(data: dict[str, Any], scope: str, base: Path) -> list[str]:
             out.append("browser is set for the whole machine, in the config in thimble's home, not per workspace")
         else:
             one_of("browser", data["browser"], BROWSERS, null=True)
+    if "cardWait" in data:
+        if scope != "global":
+            out.append("cardWait is set for the whole machine, in the config in thimble's home, not per workspace")
+        elif data["cardWait"] is not None and _card_wait(data["cardWait"]) is None:
+            out.append(f"cardWait is {json.dumps(data['cardWait'])}; it takes a number of minutes above 0 and up to "
+                       f"{CARD_WAIT_MAX}, or null")
     box = data.get("sandbox")
     if "sandbox" in data and keys("sandbox", box, ("use", "enforce")):
         if "use" in box:

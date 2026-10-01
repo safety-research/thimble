@@ -14,7 +14,7 @@ import sys
 from pathlib import Path
 
 import pytest
-from conftest import print_sessions
+from conftest import card_wait, print_sessions
 from fastapi import HTTPException
 
 from app import agent_session, agents, cc_channel, channel, config, ledger, modes, orient_session, session, tools, userconf
@@ -285,7 +285,7 @@ async def test_auto_is_claude_code_s_auto_mode_and_a_call_it_refuses_waits_for_t
     [p] = await _pending(run.chat)
     assert p["refused"] == "Runs code the analyst did not ask for" and p["agent_id"] == "a2"
     assert "rechecked" not in p and "deny_after_s" not in p, "a refusal auto mode judged is asked at once"
-    assert p["wait_s"] == agent_session.PATIENT_WAIT_S, "the orientation's request waits ten minutes"
+    assert p["wait_s"] == 600, "the orientation's request waits the card wait, ten minutes by default"
     await asyncio.sleep(0.2)
     assert not call.done(), "it waits for the analyst"
     agent_session.answer(CORPUS, run.chat, p["id"], True)
@@ -316,10 +316,10 @@ async def test_auto_is_claude_code_s_auto_mode_and_a_call_it_refuses_waits_for_t
 
 async def test_a_call_auto_mode_gave_no_safety_verdict_on_goes_back_to_it_then_waits_a_while(fake, monkeypatch):
     """Both ways Claude Code says auto mode gave no verdict are no refusal: the call goes back to auto mode, and only
-    then does the card ask, denying it unanswered after PATIENT_WAIT_S rather than waiting for good."""
+    then does the card ask, denying it unanswered after the card wait rather than waiting for good."""
     monkeypatch.setenv("FAKE_MODE", "sleep")
     monkeypatch.setattr(agent_session, "CLASSIFIER_WAITS_S", (0.01,))
-    monkeypatch.setattr(agent_session, "PATIENT_WAIT_S", 0.2)
+    assert card_wait(0.004) == 0.24
     _listen()
     ledger.put_settings(CORPUS, {modes.SETTING: {"orient": "auto"}})
     run = await orient_session.start(CORPUS, "")
@@ -332,7 +332,7 @@ async def test_a_call_auto_mode_gave_no_safety_verdict_on_goes_back_to_it_then_w
         assert f"toolu_c{i}" in session._not_run
         call = asyncio.ensure_future(agent_session.hook_request(CORPUS, body))
         p = (await _pending(run.chat, i))[-1]
-        assert p["refused"] == reason and p["deny_after_s"] == 0.2
+        assert p["refused"] == reason and p["deny_after_s"] == 0.24
         assert (await asyncio.wait_for(call, 5))["behavior"] == "deny"
     await orient_session.stop(CORPUS)
     await _done()

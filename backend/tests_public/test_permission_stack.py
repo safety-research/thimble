@@ -8,6 +8,7 @@ import asyncio
 import json
 
 import pytest
+from conftest import card_wait
 from fastapi import HTTPException
 
 from app import agent_session, agents, config
@@ -25,10 +26,9 @@ def _fresh(workspaces_tmp):
     agent_session._runs.clear()
 
 
-def _agent(key: str, role: str = "dev", title: str = "view: Posts", wait_s: float = 600.0, patient: bool = False) -> str:
+def _agent(key: str, role: str = "dev", title: str = "view: Posts") -> str:
     chat = str(agents.new_agent(CORPUS, role, title)["id"])
-    run = agent_session.host(CORPUS, key, chat, agent="dev", wait_s=wait_s)
-    run.patient = patient
+    agent_session.host(CORPUS, key, chat, agent="dev")
     return chat
 
 
@@ -89,16 +89,16 @@ async def test_requests_from_one_agent_at_once_are_all_on_its_card_and_each_answ
     assert agents.read_meta(CORPUS, chat)["permissions"] == []
 
 
-async def test_a_patient_session_s_request_is_declined_unanswered_after_a_while_rather_than_waiting_for_good(monkeypatch):
-    monkeypatch.setattr(agent_session, "PATIENT_WAIT_S", 0.2)
-    chat = _agent("orient", role="orient", title="Orientation", wait_s=0.05, patient=True)
+async def test_a_request_is_declined_unanswered_after_the_card_wait_rather_than_waiting_for_good():
+    assert card_wait(0.004) == 0.24
+    chat = _agent("orient", role="orient", title="Orientation")
     call = asyncio.ensure_future(agent_session.hook_request(CORPUS, _body("orient", "venv")))
     [p] = await _pending(chat, 1)
-    assert p["wait_s"] == 0.2
+    assert p["wait_s"] == 0.24
     await asyncio.sleep(0.1)
-    assert not call.done(), "longer than the minute other sessions get"
+    assert not call.done(), "it waits the whole card wait"
     got = await asyncio.wait_for(call, 5)
-    assert got == {"behavior": "deny", "message": agent_session.timed_out_line(0.2)}
+    assert got == {"behavior": "deny", "message": agent_session.timed_out_line(0.24)}
     [p] = agents.read_meta(CORPUS, chat)["permissions"]
     assert p["expired"], "it stays on the card, declined, until dismissed"
     assert agent_session.answer(CORPUS, chat, p["id"], False)
