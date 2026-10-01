@@ -12,7 +12,11 @@ took another value, plus a `cover` line per labeled range (records `from`..`to` 
 stay). The store keeps covers in their own table and adds their records where a read needs them (implicit rows).
 
 A torn last line is handled at both ends: `meta.parsed` is the offset after the last whole line ingested, and every
-writer calls mend_tail before its first append. Nothing here imports concepts, so a scan-pool worker can rebuild a store
+writer calls mend_tail before its first append.
+
+Size. A label over millions of records makes a store of hundreds of megabytes, mostly the rows and their indexes, so
+the store keeps no index another one covers, and a rebuild of more than COMPACT_BYTES is copied compacted
+(`VACUUM INTO`), its indexes written in order rather than grown row by row. Nothing here imports concepts, so a scan-pool worker can rebuild a store
 with this module alone.
 """
 from __future__ import annotations
@@ -28,7 +32,8 @@ from typing import Any, Iterable, Iterator
 
 log = logging.getLogger("thimble.labels_store")
 
-SCHEMA = 5
+SCHEMA = 6
+COMPACT_BYTES = 64 * 1024 * 1024  # a rebuilt store larger than this is copied compacted before it goes into place
 SYNC_INLINE_BYTES = 16 * 1024 * 1024  # a jsonl, or its unread tail, up to this size is ingested by the reader that finds it behind
 BATCH = 5_000                         # rows per transaction when ingesting a file
 YIELD_EVERY = 200                     # rows parsed between two yields of the interpreter
@@ -57,7 +62,6 @@ CREATE TABLE IF NOT EXISTS current (
 CREATE TABLE IF NOT EXISTS covers (path TEXT, first INTEGER, last INTEGER, value TEXT, source TEXT, ts TEXT);
 """
 _INDEX_SQL = """
-CREATE INDEX IF NOT EXISTS current_path ON current(path);
 CREATE INDEX IF NOT EXISTS current_path_line ON current(path, line);
 CREATE INDEX IF NOT EXISTS current_label ON current(label);
 CREATE INDEX IF NOT EXISTS current_effective ON current(effective);
@@ -97,9 +101,11 @@ def store_path(jsonl: Path) -> Path:
 
 
 def side_files(jsonl: Path) -> list[Path]:
-    """The store's files for a labels file: the database, SQLite's WAL and shm, a rebuild in progress."""
+    """The store's files for a labels file: the database, SQLite's WAL and shm, a rebuild in progress and its
+    compacted copy."""
     db = store_path(jsonl)
-    return [db, db.with_name(db.name + "-wal"), db.with_name(db.name + "-shm"), db.with_name(db.name + ".building")]
+    return [db, db.with_name(db.name + "-wal"), db.with_name(db.name + "-shm"), db.with_name(db.name + ".building"),
+            db.with_name(db.name + ".building.compact")]
 
 
 def remove(jsonl: Path) -> None:
@@ -225,8 +231,11 @@ def implicit_row(path: str, line: int, value: str, source: str | None, ts: str |
 
 
 def _migrate(conn: sqlite3.Connection, have: str) -> None:
-    """A store of an older schema opened for write: add and fill `effective`, add `spans` and the covers table, and
-    stamp the schema; connect creates the indexes after this."""
+    """A store of an older schema opened for write: add and fill `effective`, add `spans` and the covers table, drop
+    the index on `path` alone (the one on path and line serves its queries), and stamp the schema; connect creates the
+    indexes after this."""
+    if have in ("0", "1", "2", "3", "4", "5"):
+        conn.execute("DROP INDEX IF EXISTS current_path")
     if have in ("0", "1", "2", "3", "4"):
         cols = {r[1] for r in conn.execute("PRAGMA table_info(current)")}
         if "effective" not in cols:
@@ -236,6 +245,7 @@ def _migrate(conn: sqlite3.Connection, have: str) -> None:
             conn.execute("UPDATE current SET effective = COALESCE(analyst, label)")
         if "spans" not in cols:
             conn.execute("ALTER TABLE current ADD COLUMN spans TEXT")
+    if have in ("0", "1", "2", "3", "4", "5"):
         conn.execute("INSERT OR REPLACE INTO meta (key, value) VALUES ('schema', ?)", (str(SCHEMA),))
 
 
@@ -496,6 +506,7 @@ class Store:
             conn.close()
         for p in (tmp.with_name(tmp.name + "-wal"), tmp.with_name(tmp.name + "-shm")):
             p.unlink(missing_ok=True)
+        self._compact(tmp)
         now = file_key(self.jsonl)
         if now is None or (key is not None and now[0] < key[0]):
             tmp.unlink(missing_ok=True)
@@ -505,6 +516,28 @@ class Store:
             p.unlink(missing_ok=True)
         os.replace(tmp, self.db)
         return n
+
+    @staticmethod
+    def _compact(db: Path) -> None:
+        """Replace a rebuilt store larger than COMPACT_BYTES with a compacted copy of it; left as it is when the copy
+        cannot be made."""
+        try:
+            if db.stat().st_size <= COMPACT_BYTES:
+                return
+        except OSError:
+            return
+        out = db.with_name(db.name + ".compact")
+        out.unlink(missing_ok=True)
+        try:
+            conn = sqlite3.connect(str(db), timeout=BUSY_TIMEOUT_S, isolation_level=None)
+            try:
+                conn.execute("VACUUM INTO ?", (str(out),))
+            finally:
+                conn.close()
+            os.replace(out, db)
+        except (sqlite3.Error, OSError) as e:
+            out.unlink(missing_ok=True)
+            log.info("labels store %s: not compacted (%s)", db.name, e)
 
     # ----------------------------------------------------------------------- reads
 
