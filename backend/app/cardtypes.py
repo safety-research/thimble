@@ -95,7 +95,7 @@ def own_types() -> list[str]:
 
 
 def types_dir(c: str) -> Path:
-    return views.views_dir(c) / TYPES_DIR
+    return views.state_dir(c) / TYPES_DIR
 
 
 def _copy_changed(c: str, src: Path, dst: Path) -> None:
