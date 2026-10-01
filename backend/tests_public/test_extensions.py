@@ -369,7 +369,7 @@ async def test_an_extension_switched_off_does_not_run_and_its_unchanged_view_goe
     assert views.read_proposal(CORPUS, "tally") is not None
 
 
-async def test_switching_on_an_extension_offers_to_run_its_orientation_instructions(corpus, monkeypatch):
+async def test_switching_on_an_extension_offers_to_run_its_orientation_instructions(corpus, monkeypatch, analyst):
     """Where an orientation ran, an extension with orientation instructions that comes on is offered, never sent on its
     own: Run now sends its instructions once as a follow-up, Not now stops the offer, and switching it off and on again
     offers it again. An orientation that starts reads them in its prompt, so nothing is offered after it."""
@@ -396,7 +396,14 @@ async def test_switching_on_an_extension_offers_to_run_its_orientation_instructi
     assert extensions.offered(CORPUS) == ["ext-min"] and sent == []
     row = next(r for r in extensions.public(CORPUS)["extensions"] if r["name"] == "ext-min")
     assert row["offer"] and row["orients"]
-    assert await extensions.run_orientation(CORPUS, "ext-min") == {"status": "resumed"}
+    from starlette.requests import Request
+
+    with pytest.raises(HTTPException) as refused:
+        await extensions.orientation_route(CORPUS, "ext-min", extensions.OrientBody(run=True),
+                                           Request({"type": "http", "headers": []}))
+    assert refused.value.status_code == 403 and sent == [], "only the analyst's browser answers"
+    got = await extensions.orientation_route(CORPUS, "ext-min", extensions.OrientBody(run=True), analyst)
+    assert got["status"] == "resumed" and not next(r for r in got["extensions"] if r["name"] == "ext-min")["offer"]
     assert sent == [("ext-min", "Read every tally record in `tally/*.jsonl` before you draft.")]
     assert extensions.offered(CORPUS) == []
     await extensions.refresh(CORPUS)
@@ -634,5 +641,43 @@ async def test_the_extension_command_adds_lists_and_removes(corpus, capsys, monk
     await extensions.refresh(CORPUS)
     assert cli.main(["extension", "list"]) == 0
     assert re.search(r"^  tallies +off  off in this workspace$", capsys.readouterr().out, re.M)
+
+    assert cli.main(["extension", "off", "ext-min"]) == 0
+    assert capsys.readouterr().out == "ext-min is off in every workspace.\n"
+    assert json.loads(userconf.global_file().read_text()) == {"extensions": {"ext-min": {"enabled": False}}}
+    assert (await extensions.refresh(CORPUS))["extensions"]["ext-min"]["why"] == "off in thimble's config"
+    assert cli.main(["extension", "on", "ext-min"]) == 0
+    out = capsys.readouterr().out
+    assert out.startswith("ext-min is on in every workspace.\nIts switch in Settings keeps it off in tallies.\n")
+    assert "ext-min adds to the orientation." in out
+    assert json.loads(userconf.global_file().read_text()) == {}
+    assert cli.main(["extension", "off", "no-such"]) == 1
+    assert "no extension 'no-such' is added" in capsys.readouterr().err
+    assert cli.main(["extension", "off", "ext-min"]) == 0
+    assert cli.main(["extension", "add", str(FIXTURE), "--yes"]) == 0
+    assert json.loads(userconf.global_file().read_text()) == {}, "adding it again switches it on"
+
     assert cli.main(["extension", "remove", "ext-min"]) == 0
     assert cli.main(["extension", "remove", "ext-min"]) == 1
+
+
+async def test_a_folder_used_in_place_is_read_again_on_each_refresh_and_stays_when_removed(corpus, tmp_path):
+    """An edit to a folder added in place reaches the workspace on the next refresh, a file that breaks unloads it
+    with its file and line in Settings, and removing it takes out only thimble's link."""
+    d = _copy(tmp_path, "live")
+    _add(d)
+    assert (await extensions.refresh(CORPUS))["extensions"]["live"]["active"]
+    view = d / "views" / "tally" / "view.json"
+    raw = json.loads(view.read_text())
+    view.write_text(json.dumps({**raw, "description": "Counts per person."}))
+    e = (await extensions.refresh(CORPUS))["extensions"]["live"]
+    assert e["views"][0]["description"] == "Counts per person."
+    assert json.loads((extensions.workspace_path(CORPUS, "live") / "views" / "tally" / "view.json").read_text())[
+        "description"] == "Counts per person."
+    view.write_text(json.dumps({**raw, "scopes": ["x"]}, indent=2))
+    e = (await extensions.refresh(CORPUS))["extensions"]["live"]
+    assert not e["active"] and e["why"].startswith('views/tally/view.json:') and 'unknown key "scopes"' in e["why"]
+    row = next(r for r in extensions.public(CORPUS)["extensions"] if r["name"] == "live")
+    assert row["locked"] and 'unknown key "scopes"' in row["note"]
+    assert extensions.remove("live") and (d / "extension.json").is_file()
+    assert "live" not in (await extensions.refresh(CORPUS))["extensions"]
