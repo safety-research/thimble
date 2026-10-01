@@ -572,10 +572,11 @@ class _Values:
 
     def get(self, ref, default=None):
         ref = str(ref)
-        path, line = _ref_parts(ref)
-        if line is not None and path is not None and ref == f"{path}#L{line}":
-            c = self._line_code(path, line)
-            return self._names[c] if c else default
+        path, sep, tail = ref.rpartition("#L")
+        if sep and tail.isascii() and tail.isdigit() and tail[0] != "0":
+            c = self._line_code(path, int(tail))
+            if c:
+                return self._names[c]
         return self._other.get(ref, default)
 
     def __getitem__(self, ref):
