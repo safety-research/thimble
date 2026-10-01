@@ -1136,14 +1136,13 @@ GREP_SKIP = (".pdf", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".ico", "
 
 class _SearchPaths:
     """The corpus's files as the Files search reads them, for one version of its folder tree: their corpus-relative
-    paths sorted, the same lowercased, and (made when first asked for) the paths in the listing's order, kind first."""
+    paths sorted and (made when first asked for) the same in the listing's order, kind first."""
 
-    __slots__ = ("version", "paths", "lows", "_ordered")
+    __slots__ = ("version", "paths", "_ordered")
 
     def __init__(self, version: int, paths: list[str]) -> None:
         self.version = version
         self.paths = paths
-        self.lows = [p.lower() for p in paths]
         self._ordered: list[str] | None = None
 
     @property
@@ -1180,15 +1179,16 @@ def source_record(corpus: Path, rel: str) -> dict[str, Any] | None:
     return {"path": rel, "kind": kind, "size_bytes": size, "title": source_title(rel, kind)}
 
 
-def find_paths(paths: list[str], lows: list[str], query: str, limit: int = FIND_FILES_MAX) -> tuple[list[str], int]:
-    """The paths that hold every word of `query` (case-insensitive; `lows` is `paths` lowercased), best match first,
-    falling back to fuzzy in-order letter matches. Returns the first `limit` and how many matched."""
+def find_paths(paths: list[str], query: str, limit: int = FIND_FILES_MAX) -> tuple[list[str], int]:
+    """The paths that hold every word of `query` (case-insensitive), best match first, falling back to fuzzy in-order
+    letter matches. Returns the first `limit` and how many matched."""
     q = query.strip().lower()
     if not q:
         return [], 0
     words = q.split()
     ranked: list[tuple[int, int, str, str]] = []
-    for path, low in zip(paths, lows):
+    for path in paths:
+        low = path.lower()
         if not all(w in low for w in words):
             continue
         name = low.rsplit("/", 1)[-1]
@@ -1198,7 +1198,8 @@ def find_paths(paths: list[str], lows: list[str], query: str, limit: int = FIND_
         letters = q.replace(" ", "")
         fuzzy = re.compile(".*?".join(re.escape(ch) for ch in letters))
         need = set(letters)
-        for path, low in zip(paths, lows):
+        for path in paths:
+            low = path.lower()
             if not need.issubset(low):
                 continue
             name = low.rsplit("/", 1)[-1]
@@ -1348,8 +1349,7 @@ def find_sources(c: str, q: str = "", limit: int = FIND_FILES_MAX) -> dict[str, 
     """The Files tree's name search: {q, files, total}, over the paths of the corpus's folder tree without dot entries
     (search_paths); only the files it lists are stat'ed."""
     corpus = _corpus(c)
-    sp = search_paths(corpus)
-    found, total = find_paths(sp.paths, sp.lows, q, max(1, min(limit, FIND_FILES_MAX)))
+    found, total = find_paths(search_paths(corpus).paths, q, max(1, min(limit, FIND_FILES_MAX)))
     files = [r for r in (source_record(corpus, rel) for rel in found) if r is not None]
     return {"q": q, "files": files, "total": total}
 
