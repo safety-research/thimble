@@ -99,7 +99,7 @@ runs only where those run. Switching on one that adds to the orientation, where 
 Settings ask whether to run it now. To write your own, see [docs/extensions.md](docs/extensions.md).
 
 Only its views check whether they fit: once per workspace, and again when their files change, a quick call to the
-labels model reads the view's description and a few records of the files it claims. Settings > Extensions shows each
+labels model reads the view's description and a few records of the files in its scope. Settings > Extensions shows each
 view's reason, and its switch there overrides the check.
 
 The Swarm extension is for corpora where many agents act on shared pages and channels and address each other. It adds
