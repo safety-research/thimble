@@ -24,6 +24,7 @@ import contextlib
 import html
 import json
 import logging
+import os
 import re
 import signal
 import time
@@ -338,13 +339,26 @@ def find_transcript(sid: str, config_dir: Path | None = None) -> str | None:
     """The session's transcript, `<claude config>/projects/<slug>/<sid>.jsonl`, found by its id; None until the CLI has
     written it. Tries the session's own config dir, then the served one, then this server's CLAUDE_CONFIG_DIR."""
     bases = [config_dir, config.claude_config_dir(), config.config_dir_of(config.own_claude_config())]
+    name = f"{sid}.jsonl"
     for base in dict.fromkeys(Path(b) / "projects" for b in bases if b is not None):
+        # one stat per project folder, not a read of every folder's entries, which takes seconds on the event loop
+        # while another thread computes
         try:
-            hits = sorted(base.glob(f"*/{sid}.jsonl"), key=lambda p: p.stat().st_mtime, reverse=True)
+            with os.scandir(base) as it:
+                folders = [e.path for e in it if e.is_dir()]
         except OSError:
             continue
-        if hits:
-            return str(hits[0])
+        best: tuple[float, str] | None = None
+        for folder in folders:
+            path = os.path.join(folder, name)
+            try:
+                mtime = os.stat(path).st_mtime
+            except OSError:
+                continue
+            if best is None or mtime > best[0]:
+                best = (mtime, path)
+        if best is not None:
+            return best[1]
     return None
 
 

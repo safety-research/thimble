@@ -368,3 +368,31 @@ def test_the_loop_watch_names_the_innermost_frame_and_thimbles_own(tmp_path, mon
     monkeypatch.setattr(agents.json, "loads", loads)
     agents.read_events(log)
     assert seen and seen[0].startswith("test_loop_stalls.py:") and "agents.py:" in seen[0] and "read_events" in seen[0], seen
+
+
+def test_a_sessions_transcript_is_found_without_reading_every_project_folder(tmp_path, monkeypatch):
+    """The session tail and the background sessions look a transcript up on the event loop: one stat per project
+    folder finds the newest `<sid>.jsonl`, rather than a read of every folder's entries, which holds the loop while
+    another thread computes."""
+    import os
+
+    from app import session
+
+    cc = tmp_path / "cc"
+    for k in range(30):
+        d = cc / "projects" / f"-proj-{k}"
+        d.mkdir(parents=True)
+        for j in range(20):
+            (d / f"other-{j}.jsonl").write_text("")
+    older, newer = cc / "projects" / "-proj-3" / "sid-1.jsonl", cc / "projects" / "-proj-7" / "sid-1.jsonl"
+    older.write_text("{}\n")
+    newer.write_text("{}\n")
+    os.utime(older, (1, 1))
+    monkeypatch.setattr(session.config, "claude_config_dir", lambda: cc)
+    monkeypatch.setattr(session.config, "config_dir_of", lambda value: cc)
+    reads = []
+    real = os.scandir
+    monkeypatch.setattr(os, "scandir", lambda *a: reads.append(a) or real(*a))
+    assert session.find_transcript("sid-1") == str(newer)
+    assert session.find_transcript("sid-2") is None
+    assert len(reads) == 2, reads
