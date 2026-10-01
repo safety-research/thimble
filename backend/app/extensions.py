@@ -1516,9 +1516,9 @@ def _plan(root: Path, how: dict[str, Any], into: Path) -> list[tuple[Path, dict[
 
 def add(source: str, *, yes: bool = False, ask: Any = input, say: Any = print) -> list[str] | None:
     """`thimble extension add`: fetch the extension and the extensions it needs that thimble ships and are not added,
-    show what each gives (summary), and copy them into extensions_dir() once the analyst says yes (or `yes`). Returns
-    their names, its own first, None when the analyst said no. AddError for an extension that cannot load for a reason
-    of its own folder."""
+    show what each gives (summary) and the conflicts adding them brings (conflicts_of), and copy them into
+    extensions_dir() once the analyst says yes (or `yes`). Returns their names, its own first, None when the analyst
+    said no. AddError for an extension that cannot load for a reason of its own folder."""
     import tempfile  # noqa: PLC0415
 
     with tempfile.TemporaryDirectory(prefix="thimble-ext-") as tmp:
@@ -1546,6 +1546,8 @@ def add(source: str, *, yes: bool = False, ask: Any = input, say: Any = print) -
                 old = read_extension(dest, info["name"])
                 say(f"  It replaces the {info['name']} already added"
                     f"{' (' + old['version'] + ')' if old['version'] else ''}.")
+        for line in conflicts_of([info for _d, _h, info in plan]):
+            say(f"Conflict: {line}.")
         if not yes:
             try:
                 answer = ask("Add it? [y/N] " if len(plan) == 1 else f"Add these {len(plan)}? [y/N] ")
@@ -1903,17 +1905,24 @@ def dependents(name: str) -> list[str]:
     return sorted(n for n, root in got.items() if n != name and name in read_extension(root, n, set(got)).get("needs", []))
 
 
-def conflicts_with(name: str) -> list[str]:
-    """The conflicts (conflict_lines) between extension `name` and the other added extensions that load, as `thimble
-    extension add` names them."""
+def conflicts_of(infos: list[dict[str, Any]]) -> list[str]:
+    """The conflicts (conflict_lines) that the extensions `infos` (read_extension) would have with the other added
+    extensions that load, each added one of the same name replaced, as `thimble extension add` names them before it
+    asks."""
+    names = {i["name"] for i in infos}
     got = added()
     loadable = {}
     for n, root in got.items():
-        info = read_extension(root, n, set(got))
+        if n in names:
+            continue
+        info = read_extension(root, n, set(got) | names)
         if not info["problems"]:
             loadable[n] = {**info, "active": True}
+    for info in infos:
+        if not info["problems"]:
+            loadable[info["name"]] = {**info, "active": True}
     clash = conflicts(loadable)
-    return conflict_lines({k: {s: ns for s, ns in m.items() if name in ns} for k, m in clash.items()})
+    return conflict_lines({k: {s: ns for s, ns in m.items() if names & set(ns)} for k, m in clash.items()})
 
 
 @router.get("/ws/{c}/extensions")

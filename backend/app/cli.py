@@ -2912,8 +2912,6 @@ def cmd_extension(args: argparse.Namespace) -> int:
                 print(f"{n} stays off where its switch in Settings keeps it off: {', '.join(kept)}.")
             if extensions.orients(extensions.read_extension(extensions.source_path(n), n)):
                 print(ORIENT_HINT.format(name=n))
-        for line in extensions.conflicts_with(name):
-            print(f"Conflict: {line}.")
     elif args.ext_cmd in ("on", "off"):
         try:
             got = extensions.switch(args.name, args.ext_cmd == "on", workspaces)
