@@ -20,6 +20,7 @@ from __future__ import annotations
 import difflib
 import functools
 import json
+import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -39,6 +40,7 @@ SET_BY_ANALYST = {"permissionMode": "the permission mode is the analyst's, and a
 PLACEHOLDER_RE = re.compile(r"\{\{\s*([^{}]*?)\s*\}\}")
 PLACEHOLDERS = ("default", "dir", "files")  # and default#<heading>
 PROMPT_DIRS = ("agents", "tasks")  # whose Markdown files are prompts, as is reports/<name>/writer.md
+WALK_SKIPPED = (".git", "__pycache__", "node_modules")
 
 
 @dataclass(frozen=True)
@@ -238,12 +240,29 @@ def _name_problem(rel: str, name: str, what: str) -> list[Problem]:
     return [Problem(rel, 0, f"{what} {name!r} is no name thimble can use (lower-case letters, digits and hyphens)")]
 
 
+def _links_out(root: Path) -> list[Problem]:
+    """Each link in the folder that leads outside it."""
+    top = root.resolve()
+    out = []
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = sorted(n for n in dirnames if n not in WALK_SKIPPED)
+        for n in sorted([*dirnames, *filenames]):
+            p = Path(dirpath, n)
+            if p.is_symlink() and not p.resolve().is_relative_to(top):
+                out.append(Problem(str(p.relative_to(root)), 0, "is a link to a file outside the extension's folder"))
+    return out
+
+
 def check(root: Path, expect: str | None = None) -> list[Problem]:
-    """Every problem of the extension in folder `root`: its JSON files against the schema, the folders of its parts,
-    the files they name and the placeholders of its prompts. `expect` is the name its folder gives it."""
+    """Every problem of the extension in folder `root`: links that lead outside it, its JSON files against the schema,
+    the folders of its parts, the files they name and the placeholders of its prompts. `expect` is the name its folder
+    gives it."""
     root = Path(root)
     if not (root / MANIFEST).is_file():
         return [Problem(MANIFEST, 0, "is missing")]
+    links = _links_out(root)
+    if links:
+        return links
     raw, text, out = _load(root, MANIFEST)
     scope = None
     if raw is not None:

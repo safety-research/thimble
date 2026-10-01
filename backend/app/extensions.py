@@ -302,8 +302,9 @@ def _subdirs(d: Path) -> list[Path]:
 
 
 def _own_file(root: Path, rel: Any) -> bool:
+    """Whether `rel` names a file inside the folder `root`, links included only while they stay inside it."""
     return (isinstance(rel, str) and bool(rel) and not Path(rel).is_absolute() and ".." not in Path(rel).parts
-            and (root / rel).is_file())
+            and (root / rel).is_file() and (root / rel).resolve().is_relative_to(root.resolve()))
 
 
 def _several(n: int, one: str, many: str) -> str:
@@ -1227,6 +1228,9 @@ def fetch(source: str, into: Path) -> tuple[Path, dict[str, Any]]:
         return builtin_dir() / src, {"source": src, "kind": "built-in"}
     local = Path(src).expanduser()
     if local.is_dir():
+        if _thimbles_copy(local.resolve()):
+            raise AddError(f"{local.resolve()} is a copy thimble keeps for itself. Add the folder you write the "
+                           f"extension in, or the extension's name if thimble ships it")
         return local.resolve(), {"source": str(local.resolve()), "kind": "folder"}
     if not GIT_RE.search(src):
         names = ", ".join(sorted(d.name for d in _subdirs(builtin_dir()) if (d / MANIFEST).is_file())) or "none"
@@ -1243,6 +1247,14 @@ def fetch(source: str, into: Path) -> tuple[Path, dict[str, Any]]:
         raise AddError(f"git could not clone {src}: {(run.stderr or run.stdout).strip()[-400:]}")
     commit = subprocess.run(["git", "-C", str(dest), "rev-parse", "--short", "HEAD"], capture_output=True, text=True)
     return dest, {"source": src, "kind": "git", "commit": commit.stdout.strip()}
+
+
+def _thimbles_copy(d: Path) -> bool:
+    """Whether folder `d` is in thimble's own extensions folder or among a workspace's copies of extensions."""
+    if d.is_relative_to(extensions_dir().resolve()):
+        return True
+    ws = config.WORKSPACES_DIR.resolve()
+    return d.is_relative_to(ws) and d.relative_to(ws).parts[1:2] == (WS_DIR,)
 
 
 def _row(kind: str, name: str, about: str) -> str:
@@ -1443,15 +1455,15 @@ def ship() -> list[str]:
         if name in done or name not in ships:
             continue
         dest = source_path(name)
-        if not (dest / MANIFEST).is_file():
+        if not dest.is_symlink() and not (dest / MANIFEST).is_file():
             copy_tree(ships[name], dest)
             write_json(dest / ADDED, {"source": name, "kind": "built-in", "shipped": True,
                                       "digest": digest(ships[name])[0], "ts": _now()})
             out.append(name)
         done.append(name)
     for name, dest in added().items():
-        rec = _json(dest / ADDED)
-        if rec.get("kind") != "built-in" or name not in ships or name in out:
+        rec = _json(_record_file(name))
+        if rec.get("kind") != "built-in" or name not in ships or name in out or dest.is_symlink():
             continue
         now = digest(ships[name])[0]
         if now != rec.get("digest") and digest(dest)[0] == rec.get("digest"):
