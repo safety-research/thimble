@@ -343,8 +343,8 @@ export function onPaper(spec: unknown): unknown {
 const COLOR_CHANNELS = ['color', 'fill', 'stroke']
 
 /**
- * One or two nominal groups take the ink ramp, not colour (`ramp`); Okabe–Ito is for three or more. A spec that names
- * its own range or scheme, or whose cardinality cannot be read, is left alone.
+ * One or two nominal groups take the ink ramp, not colour (`ramp`); the nominal hues are for three or more. A spec
+ * that names its own range or scheme, or whose cardinality cannot be read, is left alone.
  */
 export function inkSmallNominal(spec: unknown, ramp: readonly string[]): unknown {
   const s = obj(spec)

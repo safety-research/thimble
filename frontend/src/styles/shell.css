@@ -60,11 +60,6 @@
 .shell[data-chat='closed'] .shell-corpus-name {
   display: none;
 }
-/* with the chat off no column sets the brand's width, so the brand takes the folder's name whole, up to a limit */
-.shell[data-chat='off'] .shell-brand {
-  width: auto;
-  max-width: 360px;
-}
 .shell-tabs {
   align-self: stretch;
 }
@@ -475,7 +470,7 @@
   color: var(--status-warning);
   font: var(--type-body-sm);
 }
-/* the workspace's switches under the table (SettingsPopover's SWITCHES): the switch, then its name and what it does */
+/* a group of switches under the tables (ExtensionsSettings): the switch, then its name and what it does */
 .settings-switches {
   display: flex;
   flex-direction: column;
@@ -524,6 +519,22 @@
 .settings-extension .settings-switch {
   border-bottom: 0;
 }
+/* what an extension gives and the settings it runs under, quieter than its note */
+.settings-extension-parts,
+.settings-extension-consent {
+  color: var(--text-tertiary);
+}
+/* the question whether to run an extension's orientation now, under its name */
+.settings-extension-ask {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 0 6px 8px 46px;
+}
+.settings-extension-ask .settings-switch-note {
+  margin-right: 2px;
+}
 /* a view of the extension above it, indented under its name */
 .settings-extension-view {
   padding-left: 46px;
@@ -537,6 +548,10 @@
   align-items: center;
   justify-content: flex-end;
   gap: 6px;
+}
+.settings-foot .settings-tour {
+  margin-right: auto;
+  margin-left: -6px;
 }
 
 /* -------- Report a problem (shell/ProblemReport, inside a glass Popover): the form, then where the bundle is and where

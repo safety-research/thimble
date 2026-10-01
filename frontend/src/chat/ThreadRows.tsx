@@ -1,7 +1,7 @@
 // A thread's rows with the edits main made itself to the cards the thread is anchored on (threadStatus.mainEdits), each
 // a line under the question it answered: `Main is editing` with the card's chip while the call runs, then `Main edited`.
 // The thread's own calls, its fork's, show as everywhere else.
-import { Fragment, type ReactNode } from 'react'
+import { Fragment } from 'react'
 import { RefChip } from '../components/RefChip'
 import type { Row, ToolRow } from './model'
 import { Note } from './Notes'
@@ -16,8 +16,8 @@ export function MainEdit({ row, ws }: { row: ToolRow; ws: string }) {
   return <Note className="chat-main-edit" data-state={state} spin={state === 'running'} text={text} chips={card ? <RefChip ref={`card:${card}`} compact workspace={ws} /> : undefined} />
 }
 
-export function ThreadRows({ rows, edits, ws, chat, streaming = false, working, retry }: { rows: readonly Row[]; edits: ReadonlyMap<number, ToolRow[]>; ws: string; chat: string; streaming?: boolean; working?: ReactNode; retry?: ErrorRetry }) {
-  // the rows cut after each question main edited a card for; the working line goes after the last part
+export function ThreadRows({ rows, edits, ws, chat, streaming = false, retry }: { rows: readonly Row[]; edits: ReadonlyMap<number, ToolRow[]>; ws: string; chat: string; streaming?: boolean; retry?: ErrorRetry }) {
+  // the rows cut after each question main edited a card for
   const parts: { key: string; rows: Row[]; edits: ToolRow[] }[] = []
   let start = 0
   let key = 'start'
@@ -35,7 +35,7 @@ export function ThreadRows({ rows, edits, ws, chat, streaming = false, working, 
         const last = k === parts.length - 1
         return (
           <Fragment key={p.key}>
-            <Rows rows={p.rows} ws={ws} chat={chat} streaming={last && streaming} working={last ? working : undefined} retry={retry} />
+            <Rows rows={p.rows} ws={ws} chat={chat} streaming={last && streaming} retry={retry} />
             {p.edits.map((e) => (
               <MainEdit key={e.id} row={e} ws={ws} />
             ))}

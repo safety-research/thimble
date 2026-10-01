@@ -23,7 +23,6 @@
   #side .cd { flex: 1 1 42%; min-height: 120px; }
   #side .tr { padding: 6px 14px; grid-template-columns: 40px 78px minmax(0, 1fr) auto; gap: 0 8px; }
   /* in the panel a call's outcome shows in its tint, its result line and its details, which leaves the command room */
-  #side .tr .rt .o-err, #side .tr .rt .o-den { display: none; }
   * { box-sizing: border-box; }
   button { font-family: inherit; }
   .mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
@@ -42,7 +41,6 @@
 
   #ds { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 12px; padding: 14px 16px 0; }
   #ds h1 { margin: 0; min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 500 var(--text-lg) / 1.3 var(--font-body); }
-  #ds .stats { font-size: var(--text-ui-sm); color: var(--text-tertiary); white-space: nowrap; }
   #ds b, .counts b, .legend b { font-weight: 500; color: var(--text-primary); font-variant-numeric: tabular-nums; }
   #bar { padding: 12px 16px 0; border-bottom: 1px solid var(--border-subtle); }
   .r1, .r2 { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
@@ -91,11 +89,6 @@
   .pal button.cur { box-shadow: 0 0 0 2px var(--surface-card), 0 0 0 3.5px var(--text-primary); }
 
   #ov { padding: 0 16px; }
-  .cmpbar { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; margin: 10px 0 2px; padding: 5px 6px 5px 12px; border-radius: var(--radius-ui); background: var(--bg-sub); }
-  .cmpbar .k { font-size: var(--text-ui-sm); color: var(--text-secondary); margin-right: 2px; }
-  .chip-x { gap: 6px; padding-right: 5px; }
-  .chip-x .run { color: var(--text-tertiary); }
-  .chip-x .x { display: inline-flex; cursor: pointer; }
   .lanes { position: relative; display: flex; }
   .rowbg { position: absolute; left: -16px; right: -16px; }
   .rowbg.hl { background: var(--surface-selected); }
@@ -103,10 +96,6 @@
   .lcol { position: relative; flex: none; }
   .lhead, .lrow { position: relative; display: flex; align-items: center; }
   .lhead > span { position: absolute; }
-  .cb { position: absolute; left: 2px; width: 14px; height: 14px; border-radius: 3.5px; border: 1px solid var(--border-strong); background: var(--surface-card); display: grid; place-items: center; cursor: pointer; }
-  .cb:hover { border-color: var(--text-secondary); }
-  .cb.on { background: var(--surface-inverse); border-color: var(--surface-inverse); color: var(--text-on-inverse); }
-  .cb .ico { width: 10px; height: 10px; stroke-width: 2; }
   .ln { position: absolute; font: 400 var(--text-ui-sm) / 1 var(--font-body); color: var(--text-primary); white-space: nowrap; cursor: pointer; overflow: hidden; text-overflow: ellipsis; }
   .lrow .ln:hover { text-decoration: underline; text-decoration-color: var(--border-strong); text-underline-offset: 3px; }
   .lrow.open .ln { font-weight: 500; }
@@ -147,7 +136,7 @@
   .tx { overflow: auto; border-right: 1px solid var(--border-hairline); position: relative; scrollbar-width: thin; }
   .tr { display: grid; grid-template-columns: 44px 86px minmax(0, 1fr) auto; gap: 0 10px; align-items: baseline; padding: 6px 16px; border-bottom: 1px solid var(--border-hairline); cursor: pointer; }
   .tr:hover { background: rgba(var(--ink-rgb), .03); }
-  .tr.sel { box-shadow: inset 0 0 0 1.5px rgba(var(--ink-rgb), .55); }
+  .tr.sel, .tr.sel:hover { background: var(--surface-selected); box-shadow: inset 0 0 0 1.5px var(--text-primary); --thimble-own: inset 0 0 0 1.5px var(--text-primary); }
   .tr .tm { font: 400 var(--text-mono-sm) / 1.5 var(--font-mono); color: var(--text-tertiary); font-variant-numeric: tabular-nums; }
   .tr .tl { display: inline-flex; align-items: center; gap: 6px; font: 500 var(--text-xs) / 1.5 var(--font-body); color: var(--text-primary); white-space: nowrap; }
   .tr .tl.q { font-weight: 400; color: var(--text-tertiary); }
@@ -155,6 +144,7 @@
   .tr .sub { grid-column: 3 / 5; font: 400 var(--text-mono-sm) / 1.5 var(--font-mono); color: var(--text-tertiary); margin-top: 1px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .tr .sub.prose { white-space: normal; font-family: var(--font-body); font-size: var(--text-xs); color: var(--text-secondary); }
   .tr .sub .chip { margin: 2px 4px 0 0; }
+  .tr .sub.fl { display: flex; flex-wrap: wrap; white-space: normal; overflow: visible; }
   .tr .rt { font: 400 var(--text-mono-sm) / 1.5 var(--font-mono); color: var(--text-tertiary); white-space: nowrap; text-align: right; font-variant-numeric: tabular-nums; }
   .tr .rt .o-err { color: var(--status-negative); margin-right: 8px; }
   .tr .rt .o-den { color: var(--status-warning); margin-right: 8px; }
@@ -163,12 +153,10 @@
   .tr.wait { cursor: default; }
   .tr.wait .txt { color: var(--text-tertiary); font-size: var(--text-xs); }
   .adot { width: 5px; height: 5px; border-radius: 50%; background: var(--text-primary); display: inline-block; }
-  .tr.err { background: color-mix(in oklab, var(--status-negative) 7%, transparent); }
   .tr.err .sub { color: var(--status-negative); }
-  .tr.den { background: color-mix(in oklab, var(--status-warning) 8%, transparent); }
-  .diff .del { color: var(--status-negative); }
+  .diff .del { color: var(--text-tertiary); }
   .diff .add { color: var(--status-positive); }
-  .lnk { display: inline-flex; align-items: center; gap: 4px; color: var(--text-accent); font: 500 var(--text-xs) / 1.5 var(--font-body); white-space: nowrap; cursor: pointer; }
+  .lnk { display: inline-flex; align-items: center; gap: 4px; color: var(--text-primary); font: 500 var(--text-xs) / 1.5 var(--font-body); white-space: nowrap; cursor: pointer; }
   .mix { display: inline-flex; flex-direction: column; width: 8px; height: 8px; border-radius: 2px; overflow: hidden; flex: none; }
   .mix i { flex: 1; }
   .cd { overflow: auto; padding: 14px 16px 16px; scrollbar-width: thin; }
@@ -184,6 +172,7 @@
   pre.out { margin: 0; padding: 8px 10px; border-radius: var(--radius-ui); background: var(--bg-sub); font: 400 var(--text-mono-sm) / 1.55 var(--font-mono); color: var(--text-secondary); overflow: hidden; white-space: pre-wrap; overflow-wrap: anywhere; }
   pre.out .e { color: var(--status-negative); }
   pre.out .a { color: var(--status-positive); }
+  pre.out .del { color: var(--text-tertiary); }
   .chips { display: flex; flex-wrap: wrap; gap: 4px; }
   .labrow { display: inline-flex; align-items: center; gap: 6px; font-size: var(--text-ui-sm); margin-right: 12px; }
   .conc { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 0 8px; align-items: baseline; padding: 3px 0; cursor: pointer; }
@@ -193,11 +182,8 @@
   .conc .what.q { font-family: var(--font-body); font-size: var(--text-xs); color: var(--text-tertiary); }
 
   #cmp { padding: 0 16px 20px; }
-  .chead { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 10px; padding: 12px 0; border-bottom: 1px solid var(--border-hairline); }
   .badge { display: inline-grid; place-items: center; width: 16px; height: 16px; border-radius: 3.5px; background: var(--surface-inverse); color: var(--text-on-inverse); font: 500 10px / 1 var(--font-mono); flex: none; }
   .chip .badge { width: 14px; height: 14px; font-size: 9.5px; border-radius: 3px; }
-  .tick { display: inline-flex; align-items: center; gap: 7px; font-size: var(--text-ui-sm); color: var(--text-primary); cursor: pointer; white-space: nowrap; }
-  .tick .cb { position: static; }
   .cmp-lanes { padding: 4px 0 8px; border-bottom: 1px solid var(--border-subtle); }
   .cgrid { display: grid; }
   .cgrid > div { min-width: 0; }
@@ -232,6 +218,56 @@
   .errl .e .m.den { color: var(--status-warning); }
   .errl .e .c { grid-column: 2; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .errl .e .c .who { font-family: var(--font-body); color: var(--text-tertiary); margin-right: 6px; }
+
+  /* ---- the model: the control row, thimble's colour-and-labels control, More filters, Layout, the session's file */
+  #bar { padding: 10px 16px 0; }
+  .r1 { gap: 6px; }
+  .r2 { padding: 8px 0 10px; }
+  .chip-sans .ico-f { width: 12px; height: 12px; color: var(--text-tertiary); margin-right: -1px; }
+  .cc { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; }
+  .menu .mh.cap { padding: 8px 8px 4px; }
+  .mi .nm.lk { cursor: pointer; }
+  .mi .nm.lk:hover { text-decoration: underline; text-decoration-color: var(--border-strong); text-underline-offset: 3px; }
+  .mi .ck.tog { cursor: pointer; }
+  .more { min-width: 280px; max-width: 300px; }
+  .more .sec2 { padding: 2px 4px 6px; }
+  .more .rng { display: flex; align-items: center; gap: 8px; padding: 4px 8px 6px; font-size: var(--text-ui-sm); color: var(--text-secondary); }
+  .more .rng .field { width: 72px; font-family: var(--font-mono); font-size: var(--text-mono-sm); }
+  .more .hist { display: flex; align-items: flex-end; gap: 2px; height: 26px; padding: 0 8px; }
+  .more .hist i { flex: 1; background: rgba(var(--ink-rgb), .22); border-radius: 1px 1px 0 0; }
+  .more .txt2 { padding: 2px 8px 8px; }
+  .more .txt2 .field { width: 100%; }
+  .lay { position: absolute; right: 10px; top: 4px; z-index: 3; }
+  #cmp { position: relative; padding-top: 30px; }
+  #ov { position: relative; }
+  .lay .btn { gap: 4px; color: var(--text-secondary); }
+  .fchip { gap: 6px; height: 22px; padding: 0 8px; font-size: var(--text-mono-sm); }
+  .fchip .ico { width: 12px; height: 12px; color: var(--text-tertiary); }
+  .dhead h2 .fchip { margin-left: 2px; }
+  #side .dhead { gap: 6px 10px; }
+  .dhead .grp .chip .ico-s { color: var(--text-tertiary); }
+  .cd-status { font: 400 var(--text-mono-sm) / 1 var(--font-mono); color: var(--text-tertiary); }
+  .cd-status.err { color: var(--status-negative); }
+  .cd-status.den { color: var(--status-warning); }
+  .sum h4:first-child { margin-top: 0; }
+  .sum .out { max-height: 220px; }
+  .fbtn.field { display: inline-flex; align-items: center; gap: 6px; flex: none; height: var(--control-sm); padding: 0 7px 0 9px; color: var(--text-primary); cursor: pointer; white-space: nowrap; font: 400 var(--text-ui-sm) / 1 var(--font-body); }
+  .fbtn .k { color: var(--text-secondary); }
+  .fbtn .v { font-weight: 500; }
+  .fbtn.is-set { background: var(--surface-selected); border-color: rgba(var(--ink-rgb), 0.28); }
+  .seg.scope { flex: none; }
+  .seg-opt:disabled { opacity: 0.45; cursor: default; }
+  .menu.runs .mi.run { align-items: flex-start; height: auto; padding-top: 6px; padding-bottom: 6px; }
+  .menu.runs .mi.run .cbx { margin-top: 1px; }
+  .menu.runs .sub2 { display: block; margin-top: 2px; font: 400 var(--text-mono-sm) / 1.3 var(--font-mono); color: var(--text-tertiary); }
+  .menu.runs .task { padding: 6px 10px 8px; max-width: 320px; font-size: var(--text-xs); color: var(--text-secondary); }
+  .menu.runs .task .cap { display: block; margin-bottom: 3px; }
+  .rawseg { flex: none; }
+  .cd-head .cd-status { white-space: nowrap; }
+  .rawseg .seg-opt { height: 22px; padding: 0 8px; font-size: var(--text-xs); }
+  pre.out.rawline { max-height: 200px; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .rawref { margin: 12px 0 6px; }
+  .vtip { position: fixed; z-index: 90; max-width: 300px; padding: 5px 8px; border-radius: var(--radius-ui); background: var(--surface-card); box-shadow: 0 0 0 1px rgba(var(--ink-rgb), .09), 0 8px 24px rgba(var(--ink-rgb), .12); font: 400 var(--text-ui-sm) / 1.35 var(--font-body); color: var(--text-primary); pointer-events: none; }
 </style>
 </head>
 <body>
@@ -240,16 +276,16 @@
 // ------------------------------------------------------------------------------------------------------------ setup
 const slug = (thimble.view && thimble.view.slug) || 'linked-sessions'
 const unitRef = (key) => `view:${slug}/${key}`
-const FIELD_NAME = { run: 'Run', agent: 'Agent', tool: 'Tool', outcome: 'Outcome', ftype: 'File type', dur: 'Duration' }
-const CHIPS = ['run', 'agent', 'tool', 'outcome', 'ftype', 'dur']
-const MENU = ['tool', 'agent', 'outcome', 'run', 'ftype', 'dur']
+const FIELD_NAME = { run: 'Run', agent: 'Agent', tool: 'Tool', outcome: 'Outcome', 'file type': 'File type', 'duration band': 'Duration' }
+const CHIPS = ['run', 'agent', 'tool', 'outcome', 'file type', 'duration band']
+const MENU = ['tool', 'agent', 'outcome', 'run', 'file type', 'duration band']
 const AX = 28, LH = 30, RH = 30, BAND = [7, 21], MID = 14
 const MAX_TICKED = 4
 const root = getComputedStyle(document.documentElement)
 const tok = (name, fallback) => root.getPropertyValue(name).trim() || fallback
 // the page's own categories in the theme's viz colours, all but the red, which errors take; while a label is on, the
 // labels colour the calls instead
-const CAT = [tok('--viz-1', '#0072b2'), tok('--viz-2', '#e69f00'), tok('--viz-3', '#009e73'), tok('--viz-6', '#8c65e8'), tok('--viz-7', '#8a6d3b'),
+const CAT = [tok('--viz-1', '#0072b2'), tok('--viz-2', '#e69f00'), tok('--viz-3', '#009e73'), '#56b4e9', tok('--viz-7', '#8a6d3b'),
   tok('--viz-5', '#cc79a7'), tok('--viz-ink-2', '#6b675f'), tok('--viz-ink-1', '#1b1a18')]
 const QUIET = tok('--viz-ink-3', '#a19d94')
 const NEG = tok('--status-negative', '#c93a28'), WARN = tok('--status-warning', '#9a6512')
@@ -272,7 +308,7 @@ const durT = (d) => Math.max(0, Math.min(1, (Math.log10(Math.max(d, 0.05)) + 1) 
 const st = {
   field: 'tool', byField: false, filters: {}, search: '', hide: new Set(), win: null, ticked: [], view: 'overview', collapsed: new Set(),
   open: null, sel: null, msg: null, menu: null, pal: null, includeSubs: true, align: 'start', narrow: false,
-  side: false, compact: false, panelW: 0, leftW: 0, // the open session beside the lanes, and the widths render worked out
+  side: false, compact: false, panelW: 0, leftW: 0, range: null, ftext: '', raw: false, // the open session beside the lanes, and the widths render worked out
 }
 const SIDE_MIN = 760 // the page width from which an open session sits in a panel beside the lanes rather than below them
 const PANEL_MIN = 300, LANES_MIN = 360
@@ -304,6 +340,10 @@ const ico = {
   ret: '<svg class="ico ico-s" viewBox="0 0 12 12"><path d="M9.5 2.5v3.5a1.5 1.5 0 0 1-1.5 1.5H3M5 5.5 3 7.5l2 2"/></svg>',
   check: '<svg class="ico" viewBox="0 0 12 12"><path d="M2.5 6.2 5 8.5l4.5-5"/></svg>',
   close: '<svg class="ico" viewBox="0 0 16 16"><path d="M4.5 4.5l7 7M11.5 4.5l-7 7"/></svg>',
+  filter: '<svg class="ico ico-f" viewBox="0 0 16 16"><path d="M2.5 4h11M4.5 8h7M6.5 12h3"/></svg>',
+  file: '<svg class="ico" viewBox="0 0 24 24" style="stroke-width:1.75"><path d="M8 3H7a2 2 0 0 0-2 2v5a2 2 0 0 1-2 2 2 2 0 0 1 2 2v5a2 2 0 0 0 2 2h1M16 3h1a2 2 0 0 1 2 2v5a2 2 0 0 0 2 2 2 2 0 0 0-2 2v5a2 2 0 0 1-2 2h-1"/></svg>',
+  arrow: '<svg class="ico" viewBox="0 0 16 16"><path d="M8 13V3.5M4 7.5l4-4 4 4"/></svg>',
+  open: '<svg class="ico ico-s" viewBox="0 0 12 12"><path d="M5 3H3v6h6V7M7 2.5h2.5V5M9.5 2.5 5.5 6.5"/></svg>',
 }
 const MK = {
   spawn: `<svg class="mk" viewBox="0 0 14 12"><path d="M4 1v6.5h6" fill="none" stroke="rgba(${inkRgb},.55)"/><circle cx="10" cy="7.5" r="1.6" fill="rgba(${inkRgb},.6)"/></svg>`,
@@ -312,14 +352,14 @@ const MK = {
 }
 
 // the fields every call carries, and their colours in the order the reader gives their values
-const fieldOf = (c, f) => (f === 'run' ? S[c.s].run : f === 'agent' ? S[c.s].agent : f === 'tool' ? c.tool : f === 'outcome' ? c.out : c[f])
+const fieldOf = (c, f) => (f === 'run' ? S[c.session].run : f === 'agent' ? S[c.session].agent : f === 'tool' ? c.tool : f === 'outcome' ? c.outcome : c[f])
 const valuesOf = (f) => (ov ? ov.fields[f].map((x) => x.v) : [])
 const valueName = (f, v) => (f === 'run' ? runName(v) : v)
 function colourOf(f, v) {
   const vs = valuesOf(f), i = Math.max(0, vs.indexOf(v))
   if (f === 'outcome') return v === 'ok' ? QUIET : OUTC[v] || CAT[i % CAT.length]
-  if (f === 'dur') return ramp(vs.length > 1 ? i / (vs.length - 1) : 0.5)
-  if (f === 'ftype' && v === 'no file') return QUIET
+  if (f === 'duration band') return ramp(vs.length > 1 ? i / (vs.length - 1) : 0.5)
+  if (f === 'file type' && v === 'no file') return QUIET
   return CAT[i % CAT.length]
 }
 
@@ -333,18 +373,17 @@ const classKey = (c) => `${c.label}\n${c.value}`
 const classColour = (i) => { const c = classes()[i], l = c && labelBy(c.label), v = l && (l.values || []).find((x) => x.name === c.value); return (v && v.colour) || (c && c.colour) || UNMARKED }
 function coloursOf(c) {
   if (labelOn()) return c.m.length ? c.m.map(classColour) : [UNMARKED]
-  return [st.field === 'dur' ? ramp(durT(c.d)) : colourOf(st.field, fieldOf(c, st.field))]
+  return [st.field === 'duration band' ? ramp(durT(c.duration)) : colourOf(st.field, fieldOf(c, st.field))]
 }
 const swatch = (cols, size = 8) => (cols.length > 1 ? `<span class="mix" style="width:${size}px;height:${size}px">${cols.map((x) => `<i style="background:${x}"></i>`).join('')}</span>` : `<i class="sw" style="width:${size}px;height:${size}px;background:${cols[0]}"></i>`)
 
-const inWin = (c) => !st.win || (c.t + c.d >= st.win[0] && c.t <= st.win[1])
+const inWin = (c) => !st.win || (c.time + c.duration >= st.win[0] && c.time <= st.win[1])
 const full = () => !st.win
 const winOf = () => st.win || [0, ov ? ov.span : 1]
 const agentName = (s) => s.label || s.agent
-const tag = (id) => (RUN[id] ? `${esc(runName(id))} <span class="run">all sessions</span>` : S[id] ? `${esc(agentName(S[id]))} <span class="run">${esc(runName(S[id].run))}</span>` : esc(id))
 
 // ------------------------------------------------------------------------------------------------------------ fetches
-const selection = () => ({ filters: Object.fromEntries(Object.entries(st.filters).map(([f, h]) => [f, [...h]])), search: st.search, hide: [...st.hide], win: st.win })
+const selection = () => ({ filters: Object.fromEntries(Object.entries(st.filters).map(([f, h]) => [f, [...h]])), search: st.search, hide: [...st.hide], win: st.win, range: st.range, files: st.ftext })
 
 async function loadOverview() {
   const my = ++seq
@@ -352,13 +391,17 @@ async function loadOverview() {
   if (my !== seq) return false
   ov = got
   S = {}, RUN = {}, CALL = {}
-  for (const r of ov.runs) RUN[r.id] = r
+  for (const r of ov.runs) {
+    RUN[r.id] = r
+    RUNINFO[r.id] = { team: r.team, sessions: r.sessions.length, started: r.started ? new Date(r.started).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'UTC' }).replace(',', '') : '' }
+  }
+  if (ov.task) RUNINFO.task = ov.task
   for (const s of ov.sessions) { S[s.id] = { ...s, calls: [], tasks: [] } }
   for (const r of ov.runs) {
     const seen = {}
     for (const id of r.sessions) { const a = S[id].agent; seen[a] = (seen[a] || 0) + 1; S[id].label = seen[a] > 1 ? `${a} ${seen[a]}` : a }
   }
-  for (const c of ov.calls) { CALL[c.ref] = c; if (S[c.s]) { S[c.s].calls.push(c); if (c.child) S[c.s].tasks.push(c) } }
+  for (const c of ov.calls) { CALL[c.ref] = c; if (S[c.session]) { S[c.session].calls.push(c); if (c.child) S[c.session].tasks.push(c) } }
   // the label values hidden or the field values filtered that no longer exist are let go
   st.hide = new Set([...st.hide].filter((k) => k === 'none' || classes().some((c) => classKey(c) === k)))
   if (!labelOn()) st.hide = new Set()
@@ -374,7 +417,7 @@ async function loadSession() {
   if (st.open !== id) return
   sess = got
   const calls = sess ? sess.items.filter((i) => i.kind === 'call') : []
-  if (!calls.some((c) => c.ref === st.sel)) st.sel = (calls.find((c) => c.out !== 'ok') || calls[0] || {}).ref || null
+  if (!calls.some((c) => c.ref === st.sel)) st.sel = null
   await loadMoment()
 }
 async function loadMoment() {
@@ -382,7 +425,7 @@ async function loadMoment() {
   moment = null
   if (!c) return
   const at = c.ref
-  const got = await thimble.fetch({ op: 'moment', run: S[st.open].run, t: c.t, session: st.open })
+  const got = await thimble.fetch({ op: 'moment', run: S[st.open].run, t: c.time, session: st.open, at: c.ref })
   if (selCall() && selCall().ref === at) moment = got
 }
 async function loadCompare() {
@@ -394,19 +437,15 @@ async function reload({ session = true } = {}) {
   await Promise.all([session ? loadSession() : null, loadCompare()])
   render()
 }
+const rawOf = new Map() // a call's ref -> its lines as the transcript holds them
+async function loadRaw(c) {
+  const got = await thimble.fetch({ op: 'raw', refs: c.refs || [c.ref] })
+  rawOf.set(c.ref, got || [])
+  if (st.raw && selCall() && selCall().ref === c.ref) render()
+}
 const selCall = () => (sess && st.sel ? sess.items.find((i) => i.kind === 'call' && i.ref === st.sel) : null)
 
 // ------------------------------------------------------------------------------------------------------------ the head
-function dataset() {
-  if (!ov) return ''
-  const days = [...ov.days].sort()
-  const d0 = new Date(days[0] + 'T00:00:00Z'), d1 = new Date(days[days.length - 1] + 'T00:00:00Z')
-  const day = (d, month) => d.toLocaleDateString('en-GB', { day: 'numeric', ...(month ? { month: 'short', year: 'numeric' } : {}), timeZone: 'UTC' })
-  const span = days.length > 1 && d0.getUTCMonth() === d1.getUTCMonth() ? `${day(d0)}–${day(d1, true)}` : days.length > 1 ? `${day(d0, true)} – ${day(d1, true)}` : day(d0, true)
-  const n = (k, one, many) => `<b>${k}</b> ${k === 1 ? one : many}`
-  return `<header id="ds">${ov.task ? `<h1 title="${esc(ov.task)}">${esc(ov.task.split(/(?<=\.)\s/)[0])}</h1>` : ''}
-    <span class="stats">${n(ov.totals.runs, 'run', 'runs')} · ${n(ov.totals.sessions, 'session', 'sessions')} · ${n(ov.total, 'call', 'calls')} · ${span}</span></header>`
-}
 function chipText(f) {
   const vs = valuesOf(f), hid = st.filters[f]
   const vis = vs.filter((v) => !hid.has(v))
@@ -438,11 +477,11 @@ function legend() {
       const multi = l && (l.values || []).filter((v) => v.highlight !== false).length > 1
       out.push(`<span class="lg ${st.hide.has(key) ? 'off' : ''}" role="button" data-act="legend" data-v="${esc(key)}" data-label="${esc((l && l.id) || '')}" title="Click: only this · Shift-click: hide">${swatchButton(c.label, c.value, classColour(i))}${esc(multi ? `${c.label}: ${c.value}` : c.label)}<span class="n">${c.n}</span></span>`)
     })
-    if (ov.none || st.hide.has('none')) out.push(`<span class="lg ${st.hide.has('none') ? 'off' : ''}" role="button" data-act="legend" data-v="none" title="Click: only this · Shift-click: hide"><i class="sw" style="background:${UNMARKED}"></i>no label<span class="n">${ov.none}</span></span>`)
+    if (ov.none || st.hide.has('none')) out.push(`<span class="lg ${st.hide.has('none') ? 'off' : ''}" role="button" data-act="legend" data-v="none" title="Click: only this · Shift-click: hide"><i class="sw" style="background:${UNMARKED}"></i>No label<span class="n">${ov.none}</span></span>`)
     if (st.hide.size) out.push('<button class="btn btn-ghost btn-sm" data-act="showall">Show all</button>')
   } else {
     const hid = st.filters[st.field] || new Set()
-    if (st.field === 'dur') out.push(`<span class="st">0.1 s<i class="grad" style="background:linear-gradient(90deg,${ramp(0)},${ramp(0.5)},${ramp(1)})"></i>50 s</span>`)
+    if (st.field === 'duration band') out.push(`<span class="st">0.1 s<i class="grad" style="background:linear-gradient(90deg,${ramp(0)},${ramp(0.5)},${ramp(1)})"></i>50 s</span>`)
     for (const { v, n } of ov.fields[st.field]) {
       out.push(`<span class="lg ${hid.has(v) ? 'off' : ''}" role="button" data-act="legend" data-v="${esc(v)}" title="Click: only this · Shift-click: hide"><i class="sw" style="background:${colourOf(st.field, v)}"></i>${esc(valueName(st.field, v))}<span class="n">${n}</span></span>`)
     }
@@ -450,50 +489,113 @@ function legend() {
   }
   return out.join('')
 }
-function topBar() {
+const PRIMARY = ['agent', 'tool', 'outcome']
+function moreCount() { return (st.filters['file type'] && st.filters['file type'].size ? 1 : 0) + (st.range ? 1 : 0) + (st.ftext ? 1 : 0) }
+function filterChip(f) {
+  const hid = st.filters[f]
+  if (hid && hid.size) return `<button class="chip chip-sans active" data-act="menu" data-menu="f:${f}">${esc(chipText(f))}<span class="x" data-act="clearf" data-f="${f}" style="display:inline-flex">${ico.x}</span></button>`
+  return `<button class="chip chip-sans chip-tone-neutral chip-act" data-act="menu" data-menu="f:${f}">${esc(FIELD_NAME[f])}${ico.caret}</button>`
+}
+// the Error, Denied, Spawned, Returned and Waiting glyphs, with counts over the calls that pass
+function glyphs() {
   const calls = ov.calls.filter((c) => st.view === 'compare' || inWin(c))
-  const files = new Set(calls.flatMap((c) => c.files))
-  const nErr = calls.filter((c) => c.out === 'error').length, nDen = calls.filter((c) => c.out === 'denied').length
-  const chips = CHIPS.map((f) => {
-    const hid = st.filters[f]
-    if (hid && hid.size) return `<button class="chip chip-sans active" data-act="menu" data-menu="f:${f}">${esc(chipText(f))}<span class="x" data-act="clearf" data-f="${f}" style="display:inline-flex">${ico.x}</span></button>`
-    return `<button class="chip chip-sans chip-tone-neutral chip-act" data-act="menu" data-menu="f:${f}">${thimble.field(f, FIELD_NAME[f])}${ico.caret}</button>`
+  const nErr = calls.filter((c) => c.outcome === 'error').length, nDen = calls.filter((c) => c.outcome === 'denied').length
+  const spawned = calls.filter((c) => c.child).length
+  const returned = ov.sessions.filter((s) => s.parent).length
+  const waits = ov.sessions.reduce((n, s) => n + s.waits.length, 0)
+  return `<span class="st"><i class="rail" style="background:${NEG}"></i>Error <b>${nErr}</b></span><span class="st"><i class="rail" style="background:${WARN}"></i>Denied <b>${nDen}</b></span>
+    <span class="st">${MK.spawn}Spawned <b>${spawned}</b></span><span class="st">${MK.ret}Returned <b>${returned}</b></span><span class="st">${MK.wait}Waiting on subagents <b>${waits}</b></span>`
+}
+// the runs in scope: every run the overview's run field lists, with each run's team as the last overview gave it
+const RUNINFO = {}
+const allRuns = () => valuesOf('run')
+const pickedRuns = () => allRuns().filter((r) => !(st.filters.run || new Set()).has(r))
+function runsText() {
+  const all = allRuns(), on = pickedRuns()
+  if (on.length === all.length) return `<span class="k">Runs</span> <span class="v">All ${all.length}</span>`
+  if (on.length === 1) return `<span class="k">Run</span> <span class="v">${esc(on[0])}</span>`
+  return `<span class="k">Runs</span> <span class="v">${on.length <= 3 ? on.map(esc).join(', ') : on.length}</span>`
+}
+function scopeControls() {
+  const can = pickedRuns().length >= 2
+  return `<button class="field fbtn ${pickedRuns().length < allRuns().length ? 'is-set' : ''}" data-act="menu" data-menu="runs" aria-haspopup="menu">${runsText()}${ico.caret}</button>
+    <div class="seg seg-track scope"><button class="seg-opt ${st.view !== 'compare' ? 'active' : ''}" data-act="combined">Combined</button><button class="seg-opt ${st.view === 'compare' ? 'active' : ''}" data-act="cmpruns" ${can ? '' : 'disabled title="Pick two runs or more to compare them"'}>Compare</button></div>`
+}
+function runsMenu() {
+  const on = new Set(pickedRuns()), all = allRuns()
+  const n = Object.fromEntries((ov.fields.run || []).map((x) => [x.v, x.n]))
+  const rows = all.map((r) => {
+    const info = RUNINFO[r] || {}
+    return `<button class="mi run" data-act="runonly" data-v="${esc(r)}" title="Click for this run alone"><span class="cbx ${on.has(r) ? 'on' : ''}" data-act="runbox" data-v="${esc(r)}" title="Add or remove this run">${on.has(r) ? ico.check : ''}</span><span class="nm"><b>${esc(runName(r))}</b> <span class="t3">${esc(info.team || '')}</span>${info.started ? `<span class="sub2">${esc(info.started)}${info.sessions ? ` · ${info.sessions} sessions` : ''}</span>` : ''}</span><span class="n">${n[r] || 0}</span></button>`
   }).join('')
+  return `<div class="menu runs" id="menu" data-for="runs" style="min-width:260px"><button class="mi" data-act="runall"><span class="cbx ${on.size === all.length ? 'on' : ''}">${on.size === all.length ? ico.check : ''}</span><span class="nm">All runs</span></button><div class="msep"></div>${rows}${RUNINFO.task ? `<div class="msep"></div><div class="task"><span class="cap">Task</span>${esc(RUNINFO.task)}</div>` : ''}</div>`
+}
+async function setRuns(on) {
+  const all = allRuns()
+  st.filters.run = new Set(all.filter((r) => !on.includes(r)))
+  if (on.length < 2 && st.view === 'compare') st.view = 'overview'
+  if (st.view === 'compare') st.ticked = on.slice(0, MAX_TICKED)
+  render.toTop = true
+  await reload()
+}
+function topBar() {
+  const n = moreCount()
+  const moreChips = (st.filters['file type'] && st.filters['file type'].size ? filterChip('file type') : '') +
+    (st.range ? `<button class="chip chip-sans active" data-act="rangeclear">Duration <span class="v">${st.range[0]}–${st.range[1]} s</span>${ico.x}</button>` : '') +
+    (st.ftext ? `<button class="chip chip-sans active" data-act="ftextclear">Files touched: <span class="v">${esc(st.ftext)}</span>${ico.x}</button>` : '')
   const timeChip = st.view === 'compare' || full() ? '' : `<button class="chip chip-sans active" data-act="fullwin">Time <span class="v">${Math.round(st.win[0] / 60)}–${Math.round(st.win[1] / 60)} min</span>${ico.x}</button>`
-  const anyFilter = Object.values(st.filters).some((h) => h.size) || st.hide.size || !full() || st.search
+  const anyFilter = Object.entries(st.filters).some(([f, h]) => f !== 'run' && h.size) || st.hide.size || !full() || st.search || st.range || st.ftext
   return `<header id="bar">
-    <div class="r1"><label class="search">${ico.search}<input class="field" id="q" placeholder="Search messages, commands, paths" value="${esc(st.search)}" autocomplete="off" spellcheck="false"></label>
-      <div class="filters">${chips}${timeChip}<button class="btn btn-ghost btn-sm" data-act="clearall" ${anyFilter ? '' : 'disabled'}>Clear</button></div>
-      <div class="grow"></div><div class="counts"><span><b>${calls.length}</b> of ${ov.total} calls</span><span><b>${files.size}</b> files</span></div></div>
-    <div class="r2"><div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">${colourButton()}<div class="legend">${legend()}</div></div>
-      <div class="vsep"></div>
-      <div class="legend"><span class="st"><i class="rail" style="background:${NEG}"></i>${thimble.field('err', 'Error')} <b>${nErr}</b></span><span class="st"><i class="rail" style="background:${WARN}"></i>${thimble.field('den', 'Denied')} <b>${nDen}</b></span>
-        <span class="st">${MK.spawn}${thimble.field('spawn', 'Spawned')}</span><span class="st">${MK.ret}Returned</span><span class="st">${MK.wait}${thimble.field('waits', 'Waiting on subagents')}</span></div></div>
+    <div class="r1">${scopeControls()}<label class="search">${ico.search}<input class="field" id="q" placeholder="Search messages, commands, paths" value="${esc(st.search)}" autocomplete="off" spellcheck="false"></label>
+      <div class="filters">${PRIMARY.map(filterChip).join('')}<button class="chip chip-sans chip-tone-neutral chip-act" data-act="menu" data-menu="more">${ico.filter}More filters${n ? ` (${n})` : ''}${ico.caret}</button>${moreChips}${timeChip}${anyFilter ? '<button class="btn btn-ghost btn-sm" data-act="clearall">Clear</button>' : ''}</div></div>
+    <div class="r2 cc" id="cc" data-thimble="colour-and-labels">${colourButton()}<div class="legend">${legend()}</div>
+      <div class="vsep"></div><div class="legend">${glyphs()}</div></div>
   </header>`
 }
 function menus() {
   if (st.menu === 'colour') {
     const fields = MENU.map((f) => {
       const on = !labelOn() && st.field === f
-      const sw = f === 'dur' ? `<i class="sw" style="width:22px;background:linear-gradient(90deg,${ramp(0)},${ramp(1)})"></i>` : `<span style="display:inline-flex;gap:1px">${valuesOf(f).slice(0, 4).map((v) => `<i class="sw" style="width:5px;border-radius:1px;background:${colourOf(f, v)}"></i>`).join('')}</span>`
-      return `<button class="mi" data-act="field" data-f="${f}"><span class="ck">${on ? ico.check : ''}</span>${thimble.field(f, FIELD_NAME[f])}<span class="n">${sw}</span></button>`
+      const sw = f === 'duration band' ? `<i class="sw" style="width:22px;background:linear-gradient(90deg,${ramp(0)},${ramp(1)})"></i>` : `<span style="display:inline-flex;gap:1px">${valuesOf(f).slice(0, 4).map((v) => `<i class="sw" style="width:5px;border-radius:1px;background:${colourOf(f, v)}"></i>`).join('')}</span>`
+      return `<button class="mi" data-act="field" data-f="${f}"><span class="ck">${on ? ico.check : ''}</span>${esc(FIELD_NAME[f])}<span class="n">${sw}</span></button>`
     }).join('')
     // every label over files, as thimble lists them; a click turns one on or off in thimble's Labels pane
     const all = labels.all || labels.labels.map((l) => ({ ...l, on: true }))
     const rows = all.map((l) => {
       const lit = (l.values || []).filter((v) => v.highlight !== false)
       const box = `<span class="box ${l.on ? 'on' : ''}" style="--mark:${l.colour}"></span>`
-      const main = `<button class="mi" data-act="label" data-id="${esc(l.id || '')}" data-label="${esc(l.id || '')}" ${l.id ? '' : 'disabled'}><span class="ck">${box}</span><span class="nm">${esc(l.name)}</span>
-        <span class="n">${l.count == null ? '' : l.count}</span>${lit.length === 1 ? swatchButton(l.name, lit[0].name, lit[0].colour) : ''}</button>`
+      const main = `<div class="mi" data-label="${esc(l.id || '')}"><span class="ck tog" data-act="label" data-id="${esc(l.id || '')}" title="${l.on ? 'Turn off' : 'Turn on'}">${box}</span><span class="nm lk" data-act="label" data-id="${esc(l.id || '')}">${esc(l.name)}</span>
+        <span class="n">${l.count == null ? '' : l.count}</span>${lit.length === 1 ? swatchButton(l.name, lit[0].name, lit[0].colour) : ''}</div>`
       const subs = l.on && lit.length > 1 ? lit.map((v) => `<div class="mi sub" data-label="${esc(l.id || '')}"><span class="nm">${esc(v.name)}</span><span class="n"></span>${swatchButton(l.name, v.name, v.colour)}</div>`).join('') : ''
       return main + subs
     }).join('')
-    const make = thimble.newLabel ? `<div class="msep"></div><button class="mi" data-act="newlabel"><span class="ck">${ico.plusS}</span>New label…</button>` : ''
-    return `<div class="menu" id="menu" data-anchor-name="Colour menu" data-for="colour"><div class="mh cap">Fields</div>${fields}${rows ? `<div class="msep"></div><div class="mh cap">Labels</div>${rows}` : ''}${make}</div>`
+    const make = thimble.newLabel ? `<div class="msep"></div><button class="mi" data-act="newlabel"><span class="ck">${ico.plusS}</span>New label</button>` : ''
+    const byLabels = `<button class="mi" data-act="bylabels"><span class="ck">${labelOn() ? ico.check : ''}</span>Labels<span class="n"><span style="display:inline-flex;gap:1px">${classes().slice(0, 4).map((c, i) => `<i class="sw" style="width:5px;border-radius:1px;background:${classColour(i)}"></i>`).join('')}</span></span></button>`
+    return `<div class="menu" id="menu" data-anchor-name="Colour menu" data-for="colour"><div class="mh cap">Colour by</div>${byLabels}${fields}${rows ? `<div class="msep"></div><div class="mh cap">Labels over these files</div>${rows}` : ''}${make}</div>`
+  }
+  if (st.menu === 'more') {
+    const f = 'file type', hid = st.filters[f] || new Set()
+    const types = ov.fields[f].map(({ v, n }) => `<button class="mi" data-act="fval" data-f="${f}" data-v="${esc(v)}"><span class="cbx ${hid.has(v) ? '' : 'on'}" data-act="fval" data-f="${f}" data-v="${esc(v)}">${hid.has(v) ? '' : ico.check}</span><span class="nm">${esc(v)}</span><span class="n">${n}</span></button>`).join('')
+    const bins = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    for (const c of ov.calls) if (!c.child) bins[Math.min(11, Math.floor(durT(c.duration) * 12))]++
+    const mx = Math.max(1, ...bins)
+    const [a, b] = st.range || ['0.1', '50']
+    return `<div class="menu more" id="menu" data-for="more">
+      <div class="mh cap">File type</div><div class="sec2">${types}</div><div class="msep"></div>
+      <div class="mh cap">Duration</div><div class="hist">${bins.map((n) => `<i style="height:${Math.max(2, (n / mx) * 26)}px"></i>`).join('')}</div>
+      <div class="rng"><input class="field" id="rmin" value="${esc(a)}" aria-label="From"> to <input class="field" id="rmax" value="${esc(b)}" aria-label="To"> s<button class="btn btn-secondary btn-sm" data-act="rangeset" style="margin-left:auto">Apply</button></div><div class="msep"></div>
+      <div class="mh cap">Files touched</div><div class="txt2"><input class="field" id="ftext" placeholder="Path contains" value="${esc(st.ftext)}" autocomplete="off" spellcheck="false"></div></div>`
+  }
+  if (st.menu === 'runs') return runsMenu()
+  if (st.menu === 'layout') {
+    return `<div class="menu" id="menu" data-for="layout" style="min-width:220px"><div class="mh cap">Align</div>
+      <button class="mi" data-act="align" data-v="clock"><span class="ck">${st.align === 'clock' ? ico.check : ''}</span>Run clock</button>
+      <button class="mi" data-act="align" data-v="start"><span class="ck">${st.align === 'start' ? ico.check : ''}</span>Session start</button>
+      <div class="msep"></div><button class="mi" data-act="subs"><span class="ck">${st.includeSubs ? ico.check : ''}</span>Include subagents</button></div>`
   }
   if (st.menu && st.menu.startsWith('f:')) {
     const f = st.menu.slice(2), hid = st.filters[f] || new Set()
-    return `<div class="menu" id="menu" data-for="f:${f}" style="min-width:210px"><div class="mh cap">${thimble.field(f, FIELD_NAME[f])}</div>${ov.fields[f].map(({ v, n }) => `<button class="mi" data-act="fonly" data-f="${f}" data-v="${esc(v)}" title="Click: only this · Box: show or hide"><span class="cbx ${hid.has(v) ? '' : 'on'}" data-act="fval" data-f="${f}" data-v="${esc(v)}">${hid.has(v) ? '' : ico.check}</span><i class="sw" style="background:${colourOf(f, v)}"></i><span class="nm">${esc(valueName(f, v))}</span><span class="n">${n}</span></button>`).join('')}
+    return `<div class="menu" id="menu" data-for="f:${f}" style="min-width:210px"><div class="mh cap">${esc(FIELD_NAME[f])}</div>${ov.fields[f].map(({ v, n }) => `<button class="mi" data-act="fonly" data-f="${f}" data-v="${esc(v)}" title="Click: only this · Box: show or hide"><span class="cbx ${hid.has(v) ? '' : 'on'}" data-act="fval" data-f="${f}" data-v="${esc(v)}">${hid.has(v) ? '' : ico.check}</span><i class="sw" style="background:${colourOf(f, v)}"></i><span class="nm">${esc(valueName(f, v))}</span><span class="n">${n}</span></button>`).join('')}
       <div class="msep"></div><button class="mi" data-act="clearf" data-f="${f}"><span class="ck"></span>Show all</button></div>`
   }
   return ''
@@ -518,7 +620,7 @@ function laneSvg({ rows, dom, width, sel = null, compare = false }) {
   for (const r of rows) if (r.kind === 'lane') rowOf[r.s.id] = r
   const out = [], g = [], heads = []
   const step = niceStep(pxs * 60)
-  const selX = sel && rowOf[sel.s] ? X(sel.t - rowOf[sel.s].off + sel.d / 2) : null
+  const selX = sel && rowOf[sel.session] ? X(sel.time - rowOf[sel.session].off + sel.duration / 2) : null
   for (let t = Math.ceil(dom[0] / step) * step; t <= dom[1]; t += step) {
     const x = X(t)
     out.push(`<line x1="${x}" x2="${x}" y1="${AX - 4}" y2="${H}" stroke="rgba(${inkRgb},.08)"/>`)
@@ -538,16 +640,16 @@ function laneSvg({ rows, dom, width, sel = null, compare = false }) {
   }
   const drawCalls = (calls, y, off, summary) => {
     for (const c of calls) {
-      const t = c.t - off
-      if (t + c.d < dom[0] || t > dom[1]) continue
+      const t = c.time - off
+      if (t + c.duration < dom[0] || t > dom[1]) continue
       const x = X(t), cols = coloursOf(c)
-      const w = c.child ? 3 : Math.max(cols.length > 1 ? 5 : cols[0] !== UNMARKED && labelOn() ? 3 : 2, c.d * pxs)
+      const w = c.child ? 3 : Math.max(cols.length > 1 ? 5 : cols[0] !== UNMARKED && labelOn() ? 3 : 2, c.duration * pxs)
       const h = (BAND[1] - BAND[0]) / cols.length
-      const tip = `${c.tool} · ${fmt(c.t)}${c.out !== 'ok' ? ' · ' + c.out : ''}\n${c.input || ''}`
+      const tip = `${c.tool} · ${fmt(c.time)}${c.outcome !== 'ok' ? ' · ' + c.outcome : ''}\n${c.input || ''}`
       const anchor = summary ? '' : ` data-anchor="${esc(c.ref)}"`
       if (cols.length === 1) g.push(`<rect${anchor} x="${x}" y="${y + BAND[0]}" width="${w}" height="${h}" fill="${cols[0]}"><title>${esc(tip)}</title></rect>`)
       else g.push(`<g${anchor}>${cols.map((col, i) => `<rect x="${x}" y="${y + BAND[0] + i * h}" width="${w}" height="${h}" fill="${col}"/>`).join('')}<title>${esc(tip)}</title></g>`)
-      if (c.out !== 'ok') g.push(`<rect x="${x - 1}" y="${y + BAND[1] + 2}" width="${Math.max(4, w + 2)}" height="3" rx="1" fill="${OUTC[c.out] || NEG}" pointer-events="none"/>`)
+      if (c.outcome !== 'ok') g.push(`<rect x="${x - 1}" y="${y + BAND[1] + 2}" width="${Math.max(4, w + 2)}" height="3" rx="1" fill="${OUTC[c.outcome] || NEG}" pointer-events="none"/>`)
       if (sel && c.ref === sel.ref) g.push(`<rect x="${x - 2.5}" y="${y + BAND[0] - 2.5}" width="${w + 5}" height="${BAND[1] - BAND[0] + 5}" rx="2" fill="none" stroke="var(--text-primary)" stroke-width="1.5" pointer-events="none"/>`)
     }
   }
@@ -571,25 +673,25 @@ function laneSvg({ rows, dom, width, sel = null, compare = false }) {
       const te = kid.end - r.off
       if (te >= dom[0] && te <= dom[1]) g.push(`<circle cx="${X(te)}" cy="${r.y + MID}" r="3.6" fill="var(--surface-card)" stroke="var(--text-primary)" stroke-width="1.3"><title>${esc(agentName(kid))} returned · ${fmt(kid.end)}</title></circle>`)
     }
-    if (!compare) for (const m of (ov.messages || []).filter((m) => m.s === r.s.id)) {
-      const t = m.t - r.off
-      if (t >= dom[0] && t <= dom[1]) g.push(`<path class="msg" data-anchor="${esc(m.ref)}" data-act="openmsg" data-s="${esc(m.s)}" data-ref="${esc(m.ref)}" d="M${X(t)} ${r.y + 1.5}l3.5 3.5-3.5 3.5-3.5-3.5z" fill="var(--text-primary)"><title>${esc(m.kind)} · ${fmt(m.t)}</title></path>`)
+    if (!compare) for (const m of (ov.messages || []).filter((m) => m.session === r.s.id)) {
+      const t = m.time - r.off
+      if (t >= dom[0] && t <= dom[1]) g.push(`<path class="msg" data-anchor="${esc(m.ref)}" data-act="openmsg" data-s="${esc(m.session)}" data-ref="${esc(m.ref)}" d="M${X(t)} ${r.y + 1.5}l3.5 3.5-3.5 3.5-3.5-3.5z" fill="var(--text-primary)"><title>${esc(m.kind)} · ${fmt(m.time)}</title></path>`)
     }
   }
   out.push(`<g clip-path="url(#${clip})">${g.join('')}</g>`, heads.join(''))
   out.push(`<line x1="${plotL}" x2="${plotL + W}" y1="${AX - 0.5}" y2="${AX - 0.5}" stroke="var(--border-subtle)"/>`)
   if (selX != null) {
     const runOf = (r) => (r.kind === 'run' || r.kind === 'sum' ? r.run.id : r.s.run)
-    const rr = rows.filter((r) => runOf(r) === S[sel.s].run)
+    const rr = rows.filter((r) => runOf(r) === S[sel.session].run)
     out.push(`<line x1="${selX}" x2="${selX}" y1="${AX}" y2="${rr[rr.length - 1].y + LH}" stroke="var(--text-primary)" stroke-opacity=".45" stroke-dasharray="3 3"/>`)
-    out.push(`<rect x="${selX - 21}" y="${AX - 21}" width="42" height="16" rx="3" fill="var(--surface-inverse)"/><text x="${selX}" y="${AX - 9.5}" font-size="10.5" fill="var(--text-on-inverse)" text-anchor="middle">${fmt(sel.t - rowOf[sel.s].off)}</text>`)
+    out.push(`<rect x="${selX - 21}" y="${AX - 21}" width="42" height="16" rx="3" fill="var(--surface-inverse)"/><text x="${selX}" y="${AX - 9.5}" font-size="10.5" fill="var(--text-on-inverse)" text-anchor="middle">${fmt(sel.time - rowOf[sel.session].off)}</text>`)
   }
   return `<svg class="plot" width="${width}" height="${H}">${out.join('')}</svg>`
 }
-function labelCol(rows, { w, compareCol = true, badges = null, cols }) {
-  const CX = compareCol ? (st.narrow ? 26 : 66) : 0, IND = 16
+function labelCol(rows, { w, badges = null, cols }) {
+  const CX = 0, IND = 16
   const nameX = (r) => (r.kind !== 'lane' ? CX : badges ? 24 + r.s.depth * IND : CX + 16 + r.s.depth * IND)
-  const out = [`<div class="lhead cap" style="height:${AX}px">${compareCol && !st.narrow ? '<span style="left:0">Compare</span>' : ''}<span style="left:${CX}px">Session</span>${cols.map((c) => `<span class="num" style="right:${c.r}px">${c.name}</span>`).join('')}</div>`]
+  const out = [`<div class="lhead cap" style="height:${AX}px"><span style="left:${CX}px">Session</span>${cols.map((c) => `<span class="num" style="right:${c.r}px">${c.name}</span>`).join('')}</div>`]
   const tl = []
   for (const r of rows) {
     if (r.kind !== 'lane' || !r.s.parent) continue
@@ -603,22 +705,20 @@ function labelCol(rows, { w, compareCol = true, badges = null, cols }) {
   const numW = cols.length ? cols[0].r + 48 : 0
   for (const r of rows) {
     const id = r.kind === 'lane' ? r.s.id : r.run.id
-    const on = st.ticked.includes(id)
-    const cb = compareCol && r.kind !== 'sum' ? `<span class="cb ${on ? 'on' : ''}" role="checkbox" aria-checked="${on}" data-act="tick" data-id="${esc(id)}" title="Select to compare">${on ? ico.check : ''}</span>` : ''
     const badge = badges && badges[id] ? `<span class="badge" style="position:absolute;left:0">${badges[id]}</span>` : ''
     let name, nums = '', act = '', anchor = ''
     if (r.kind === 'run') { name = `${st.collapsed.has(r.run.id) ? ico.right : ico.caret}${esc(runName(r.run.id))}<span class="setup">${esc(r.run.team)}</span>`; nums = numOf(r.run); act = `data-act="collapse" data-id="${esc(r.run.id)}"`; anchor = `data-anchor="${esc(unitRef(r.run.key))}"` }
     else if (r.kind === 'sum') name = `${r.run.sessions.length} sessions, collapsed`
     else { name = esc(agentName(r.s)) + (badges && badges[id] ? ` <span class="t3">${esc(runName(r.s.run))}</span>` : ''); nums = numOf(r.s); act = `data-act="open" data-id="${esc(r.s.id)}"`; anchor = `data-anchor="${esc(unitRef(r.s.key))}"` }
     const maxW = w - nameX(r) - numW
-    out.push(`<div class="lrow ${r.kind} ${r.kind === 'lane' && id === st.open && st.view === 'overview' ? 'open' : ''}" ${anchor} style="height:${r.kind === 'run' ? RH : LH}px">${cb}${badge}<span class="ln" ${act} style="left:${nameX(r)}px;max-width:${Math.max(40, maxW)}px" title="${esc(r.kind === 'lane' ? agentName(r.s) : r.kind === 'run' ? `${runName(r.run.id)} · ${r.run.team}` : '')}">${name}</span>${nums}</div>`)
+    out.push(`<div class="lrow ${r.kind} ${r.kind === 'lane' && id === st.open && st.view === 'overview' ? 'open' : ''}" ${anchor} data-anchor-unmarked style="height:${r.kind === 'run' ? RH : LH}px">${badge}<span class="ln" ${act} style="left:${nameX(r)}px;max-width:${Math.max(40, maxW)}px" title="${esc(r.kind === 'lane' ? agentName(r.s) : r.kind === 'run' ? `${runName(r.run.id)} · ${r.run.team}` : '')}">${name}</span>${nums}</div>`)
   }
   return `<div class="lcol" style="width:${w}px">${out.join('')}</div>`
 }
 // the lanes' width, left of an open session's panel; beside a narrow panel the session column drops its counts
 const viewWidth = () => Math.max(st.side ? 300 : 560, st.leftW - 44)
 const labelWidth = () => (st.compact ? 170 : st.narrow ? 250 : 320)
-const COLS = () => (st.compact ? [] : [{ name: thimble.field('n', 'Calls'), r: st.narrow ? 64 : 74, v: (s) => s.n }, { name: thimble.field('err', 'Errors'), r: 6, v: (s) => s.err || '–', cls: (s) => (s.err ? 'err' : 'zero') }])
+const COLS = () => (st.compact ? [] : [{ name: esc('Calls'), r: st.narrow ? 64 : 74, v: (s) => s['call count'] }, { name: esc('Errors'), r: 6, v: (s) => s['error count'] || '–', cls: (s) => (s['error count'] ? 'err' : 'zero') }])
 function overview() {
   const rows = []
   for (const run of ov.runs) {
@@ -627,11 +727,8 @@ function overview() {
     else for (const id of run.sessions) rows.push({ kind: 'lane', s: S[id], run, off: 0 })
   }
   const lw = labelWidth(), pw = viewWidth() - lw
-  const n = st.ticked.length
-  const bar = n ? `<div class="cmpbar"><span class="k">${n} selected</span>${st.ticked.map((id) => `<span class="chip chip-sans chip-tone-neutral chip-x">${tag(id)}<span class="x" data-act="tick" data-id="${esc(id)}">${ico.x}</span></span>`).join('')}
-    <button class="btn btn-primary btn-sm" data-act="compare" ${n < 2 && !counterparts(st.ticked[0]).length ? 'disabled' : ''}>${n < 2 ? 'Compare across runs' : 'Compare'}</button><button class="btn btn-ghost btn-sm" data-act="untick">Clear</button></div>` : ''
-  if (!rows.length) return `<section id="ov">${bar}<div class="empty">No session has a call that passes.</div></section>`
-  const svg = laneSvg({ rows, dom: winOf(), width: pw, sel: st.open ? selCall() && { ...selCall(), s: st.open } : null })
+  if (!rows.length) return `<section id="ov"><div class="empty">No session has a call that passes.</div></section>`
+  const svg = laneSvg({ rows, dom: winOf(), width: pw, sel: st.open ? selCall() && { ...selCall(), session: st.open } : null })
   const bgs = rows.map((r) => (r.kind === 'run' ? `<div class="rowbg run" style="top:${r.y}px;height:${RH}px"></div>` : r.kind === 'lane' && r.s.id === st.open ? `<div class="rowbg hl" style="top:${r.y}px;height:${LH}px"></div>` : '')).join('')
   // the context strip: every run's calls over the whole span, and the brush that sets the lanes' window
   const cl = 6, CW = pw - cl - 10, span = ov.span || 1, cx = (t) => cl + (t / span) * CW
@@ -640,7 +737,7 @@ function overview() {
   ov.runs.forEach((run, i) => {
     const y = i * (rowH + gap)
     cs.push(`<rect x="${cx(0)}" y="${y}" width="${cx(run.span) - cx(0)}" height="${rowH}" fill="rgba(${inkRgb},.06)"/>`)
-    for (const id of run.sessions) for (const c of S[id].calls) if (!c.child) cs.push(`<rect x="${cx(c.t)}" y="${y}" width="${Math.max(1, (c.d / span) * CW)}" height="${rowH}" fill="${coloursOf(c)[0]}" fill-opacity=".75"/>`)
+    for (const id of run.sessions) for (const c of S[id].calls) if (!c.child) cs.push(`<rect x="${cx(c.time)}" y="${y}" width="${Math.max(1, (c.duration / span) * CW)}" height="${rowH}" fill="${coloursOf(c)[0]}" fill-opacity=".75"/>`)
   })
   const [w0, w1] = winOf(), bx1 = cx(w0), bx2 = cx(w1)
   cs.push(`<rect x="${cl}" y="-4" width="${Math.max(0, bx1 - cl)}" height="${ch + 8}" fill="var(--surface-card)" fill-opacity=".7"/><rect x="${bx2}" y="-4" width="${Math.max(0, cl + CW - bx2)}" height="${ch + 8}" fill="var(--surface-card)" fill-opacity=".7"/>`)
@@ -648,7 +745,7 @@ function overview() {
   for (const x of [bx1, bx2]) cs.push(`<rect x="${x - 2.5}" y="${ch / 2 - 7}" width="5" height="14" rx="1.5" fill="var(--surface-card)" stroke="rgba(${inkRgb},.55)"/>`)
   const tstep = niceStep((CW / span) * 60)
   for (let t = 0; t <= span; t += tstep) cs.push(`<text x="${cx(t)}" y="${ch + 17}" font-size="10" fill="var(--text-tertiary)" text-anchor="${t === 0 ? 'start' : 'middle'}">${mins(t)}</text>`)
-  return `<section id="ov">${bar}<div class="lanes">${bgs}${labelCol(rows, { w: lw, cols: COLS() })}${svg}</div>
+  return `<section id="ov"><div class="lanes">${bgs}${labelCol(rows, { w: lw, cols: COLS() })}${svg}</div>
     <div class="ctx"><div class="lab" style="width:${lw}px">Zoom</div><svg class="plot" id="zoom" width="${pw}" height="${ch + 22}" data-cl="${cl}" data-cw="${CW}">${cs.join('')}</svg></div></section>`
 }
 
@@ -656,40 +753,40 @@ function overview() {
 function transcript(s) {
   return sess.items.map((it) => {
     const msgAttrs = st.msg && it.ref === st.msg ? 'class="tr sel" id="selrow"' : 'class="tr"'
-    if (it.kind === 'prompt') return `<div ${msgAttrs} data-anchor="${esc(it.ref)}"><span class="tm">${fmt(it.t)}</span><span class="tl q">Prompt</span><span class="txt q">${esc(it.text)}</span></div>`
-    if (it.kind === 'text' || it.kind === 'result') return `<div ${msgAttrs} data-anchor="${esc(it.ref)}"><span class="tm">${fmt(it.t)}</span><span class="tl${it.kind === 'result' ? ' q' : ''}">${it.kind === 'result' ? 'Result' : '<i class="adot"></i>'}</span><span class="txt">${esc(it.text)}</span></div>`
+    if (it.kind === 'prompt') return `<div ${msgAttrs} data-anchor="${esc(it.ref)}"><span class="tm">${fmt(it.time)}</span><span class="tl q">Prompt</span><span class="txt q">${esc(it.text)}</span></div>`
+    if (it.kind === 'text' || it.kind === 'result') return `<div ${msgAttrs} data-anchor="${esc(it.ref)}"><span class="tm">${fmt(it.time)}</span><span class="tl${it.kind === 'result' ? ' q' : ''}">${it.kind === 'result' ? 'Result' : '<i class="adot"></i>'}</span><span class="txt">${esc(it.text)}</span></div>`
     if (it.kind === 'wait') return `<div class="tr wait"><span class="tm"></span><span class="tl q">Waiting</span><span class="txt">${esc(it.on.map((id) => (S[id] ? agentName(S[id]) : id)).join(' and '))} running · ${fmtd(it.b - it.a)}</span></div>`
     if (it.kind === 'return') {
       const kid = S[it.child]
-      return `<div class="tr" data-act="open" data-id="${esc(it.child)}" ${it.ref ? `data-anchor="${esc(it.ref)}"` : ''}><span class="tm">${fmt(it.t)}</span><span class="tl q">${ico.ret}Returned</span><span class="arg"><span class="lnk">${esc(kid ? agentName(kid) : it.child)}${ico.child}</span></span><span class="rt">ran ${fmtd(it.ran)}</span>${it.text ? `<span class="sub prose">${esc(it.text)}</span>` : ''}</div>`
+      return `<div class="tr" data-act="open" data-id="${esc(it.child)}" ${it.ref ? `data-anchor="${esc(it.ref)}"` : ''}><span class="tm">${fmt(it.time)}</span><span class="tl q">${ico.ret}Returned</span><span class="arg"><span class="lnk">${esc(kid ? agentName(kid) : it.child)}${ico.child}</span></span><span class="rt">ran ${fmtd(it.ran)}</span>${it.text ? `<span class="sub prose">${esc(it.text)}</span>` : ''}</div>`
     }
     const c = it
-    const cols = coloursOf({ ...c, s: s.id })
+    const cols = coloursOf({ ...c, session: s.id })
     const on = c.ref === st.sel && !st.msg
-    const cl = ['tr', c.out === 'error' ? 'err' : '', c.out === 'denied' ? 'den' : '', on ? 'sel' : ''].join(' ')
+    const cl = ['tr', c.outcome === 'error' ? 'err' : '', c.outcome === 'denied' ? 'den' : '', on ? 'sel' : ''].join(' ')
     const attrs = `class="${cl}" data-act="sel" data-ref="${esc(c.ref)}" data-anchor="${esc(c.ref)}" ${on ? 'id="selrow"' : ''}`
     const tl = `<span class="tl">${swatch(cols)}${esc(c.tool)}</span>`
     if (c.child) {
       const kid = S[c.child]
-      return `<div ${attrs}><span class="tm">${fmt(c.t)}</span>${tl}<span class="arg"><span class="lnk" data-act="open" data-id="${esc(c.child)}">${esc(kid ? agentName(kid) : c.child)}${ico.child}</span> <span style="font-family:var(--font-body);font-size:var(--text-sm);color:var(--text-secondary);margin-left:4px">${esc(c.input)}</span></span><span class="rt">spawned</span></div>`
+      return `<div ${attrs}><span class="tm">${fmt(c.time)}</span>${tl}<span class="arg"><span class="lnk" data-act="open" data-id="${esc(c.child)}">${esc(kid ? agentName(kid) : c.child)}${ico.child}</span> <span style="font-family:var(--font-body);font-size:var(--text-sm);color:var(--text-secondary);margin-left:4px">${esc(c.input)}</span></span><span class="rt">spawned</span></div>`
     }
-    const outc = c.out === 'error' ? `<span class="o-err">error${c.exit != null ? ' · exit ' + esc(c.exit) : ''}</span>` : c.out === 'denied' ? '<span class="o-den">denied</span>' : ''
-    const chips = (fs) => `<span style="margin-left:8px">${fs.map((f) => `<span class="chip chip-tone-neutral chip-act" data-act="searchfor" data-v="${esc(f)}" title="${esc(f)}">${esc(f.split('/').pop())}</span>`).join('')}</span>`
+    const outc = c.outcome === 'error' ? `<span class="o-err">error${c.exit != null ? ' · exit ' + esc(c.exit) : ''}</span>` : c.outcome === 'denied' ? '<span class="o-den">denied</span>' : ''
+    const chips = (fs) => `<span class="sub fl">${fs.map((f) => `<span class="chip chip-tone-neutral chip-act" data-act="searchfor" data-v="${esc(f)}" title="${esc(f)}">${esc(f.split('/').pop())}</span>`).join('')}</span>`
     let sub = ''
     if (c.new != null) sub = `<span class="sub diff">${c.old ? `<span class="del">− ${esc(c.old)}</span>&nbsp;&nbsp;&nbsp;` : ''}<span class="add">+ ${esc(c.new)}</span></span>`
-    else if (c.matches.length) sub = `<span class="sub">${esc(c.result)}${chips(c.matches)}</span>`
-    else if (c.tool !== 'Read' && c.tool !== 'Edit' && c.files.length && c.result) sub = `<span class="sub">${esc(c.result)}${chips(c.files)}</span>`
+    else if (c.matches.length) sub = `<span class="sub">${esc(c.result)}</span>${chips(c.matches)}`
+    else if (c.tool !== 'Read' && c.tool !== 'Edit' && c.files.length && c.result) sub = `<span class="sub">${esc(c.result)}</span>${chips(c.files)}`
     else if (c.tool !== 'Read' && c.tool !== 'Edit' && c.result) sub = `<span class="sub">${esc(c.result)}</span>`
     const size = c.tool === 'Read' && c.result ? esc(c.result) + ' · ' : ''
-    return `<div ${attrs}><span class="tm">${fmt(c.t)}</span>${tl}<span class="arg" title="${esc(c.input)}">${esc(c.input)}</span><span class="rt">${outc}${size}${fmtd(c.d)}</span>${sub}</div>`
+    return `<div ${attrs}><span class="tm">${fmt(c.time)}</span>${tl}<span class="arg" title="${esc(c.input)}">${esc(c.input)}</span><span class="rt">${outc}${size}${fmtd(c.duration)}</span>${sub}</div>`
   }).join('')
 }
 function callDetails(c, s) {
   const cls = classes()
-  const chip = c.out === 'error' ? `<span class="chip chip-sans chip-tone-negative">error${c.exit != null ? ' · exit ' + esc(c.exit) : ''}</span>` : c.out === 'denied' ? '<span class="chip chip-sans chip-tone-warning">denied</span>' : '<span class="chip chip-sans chip-tone-positive">ok</span>'
-  const output = c.output ? esc(c.output) : c.new != null ? `${c.old ? `<span class="e">− ${esc(c.old)}</span>\n` : ''}<span class="a">+ ${esc(c.new)}</span>` : c.out === 'ok' ? esc(c.result || 'done') : `<span class="e">${esc(c.result)}</span>`
+  const chip = c.outcome === 'error' ? `<span class="cd-status err">error${c.exit != null ? ' · exit ' + esc(c.exit) : ''}</span>` : c.outcome === 'denied' ? '<span class="cd-status den">denied</span>' : '<span class="cd-status">ok</span>'
+  const output = c.output ? esc(c.output) : c.new != null ? `${c.old ? `<span class="del">− ${esc(c.old)}</span>\n` : ''}<span class="a">+ ${esc(c.new)}</span>` : c.outcome === 'ok' ? esc(c.result || 'done') : `<span class="e">${esc(c.result)}</span>`
   const labs = c.m.map((i) => `<span class="labrow"><span class="box on" style="--mark:${classColour(i)}"></span>${esc(cls[i].label)}${labelBy(cls[i].label) && (labelBy(cls[i].label).values || []).filter((v) => v.highlight !== false).length > 1 ? `: ${esc(cls[i].value)}` : ''}</span>`).join('')
-  const cols = coloursOf({ ...c, s: s.id })
+  const cols = coloursOf({ ...c, session: s.id })
   const conc = (moment || []).map((o) => {
     let what
     if (o.state === 'starts') what = `<span class="what q">starts at ${fmt(o.at)}</span>`
@@ -699,15 +796,29 @@ function callDetails(c, s) {
     else what = '<span class="what q">starting</span>'
     return `<div class="conc" data-act="open" data-id="${esc(o.id)}" ${o.ref ? `data-call="${esc(o.ref)}"` : ''}><span class="who">${esc(S[o.id] ? agentName(S[o.id]) : o.agent)}</span>${what}</div>`
   })
-  return `<div data-anchor="${esc(c.ref)}"><div class="cd-head">${swatch(cols, 10)}<span class="tool">${esc(c.tool)}</span>${chip}<div class="grow"></div><span class="mono t3" style="font-size:var(--text-mono-sm)">call ${c.k} of ${sess.n}</span></div>
-    <div class="cd-cmd">${esc(c.child ? `${S[c.child] ? agentName(S[c.child]) : c.child}: ${c.input}` : c.input)}</div></div><div>
-    <div class="kv"><div><span class="k" data-field="t">Started</span><span class="v">${fmt(c.t)}</span></div><div><span class="k" data-field="d">Duration</span><span class="v">${fmtd(c.d)}</span></div>
-      ${c.out !== 'ok' ? `<div><span class="k" data-field="result">Result</span><span class="v err" title="${esc(c.result)}">${esc(c.result)}</span></div>` : ''}
-      ${c.again ? `<div><span class="k" data-field="again">Same command next</span><span class="v">${fmt(c.again.t)} · ${esc(c.again.out)}</span></div>` : ''}</div>
+  const rawSeg = `<span class="seg seg-track rawseg"><button class="seg-opt ${st.raw ? '' : 'active'}" data-act="raw" data-v="0">Fields</button><button class="seg-opt ${st.raw ? 'active' : ''}" data-act="raw" data-v="1">Raw</button></span>`
+  const head = `<div data-anchor="${esc(c.ref)}"><div class="cd-head">${swatch(cols, 10)}<span class="tool">${esc(c.tool)}</span>${chip}<div class="grow"></div>${rawSeg}</div>
+    <div class="cd-cmd">${esc(c.child ? `${S[c.child] ? agentName(S[c.child]) : c.child}: ${c.input}` : c.input)}</div></div>`
+  // Raw: the call's tool_use and tool_result lines as the transcript holds them
+  if (st.raw) {
+    const lines = rawOf.get(c.ref)
+    if (!lines) loadRaw(c)
+    return `${head}<div>${(lines || []).map((x) => `<button class="chip chip-tone-neutral chip-act fchip rawref" data-act="openfile" data-ref="${esc(x.ref)}" data-tip="Open ${esc(x.ref)} in the File browser">${ico.file}${esc(x.ref.split('/').pop())}</button><pre class="out rawline">${esc(x.text)}</pre>`).join('') || '<pre class="out rawline t3">Reading the lines</pre>'}</div>`
+  }
+  return `${head}<div>
+    <div class="kv"><div><span class="k">Call</span><span class="v">${c.position} of ${sess['call count']}</span></div><div><span class="k">Started</span><span class="v">${fmt(c.time)}</span></div><div><span class="k">Duration</span><span class="v">${fmtd(c.duration)}</span></div>
+      ${c.outcome !== 'ok' ? `<div><span class="k">Result</span><span class="v err" title="${esc(c.result)}">${esc(c.result)}</span></div>` : ''}
+      ${c.again ? `<div><span class="k">Same command next</span><span class="v">${fmt(c.again.time)} · ${esc(c.again.outcome)}</span></div>` : ''}</div>
     ${labs ? `<h4 class="cap">Labels</h4><div>${labs}</div>` : ''}
-    <h4 class="cap">${c.child ? thimble.field('text', 'Returned') : thimble.field('output', 'Output')}</h4><pre class="out">${output}</pre>
-    ${c.files.length ? `<h4 class="cap">${thimble.field('files', 'Files')}</h4><div class="chips">${c.files.map((f) => `<span class="chip chip-act" data-act="searchfor" data-v="${esc(f)}">${esc(f)}</span>`).join('')}</div>` : ''}</div>
-    ${conc.length ? `<h4 class="cap">${esc(runName(s.run))} at ${fmt(c.t)}</h4>${conc.join('')}` : ''}`
+    <h4 class="cap">${c.child ? esc('Returned') : esc('Output')}</h4><pre class="out">${output}</pre>
+    ${c.files.length ? `<h4 class="cap">${esc('Files')}</h4><div class="chips">${c.files.map((f) => `<span class="chip chip-tone-neutral chip-act" data-act="searchfor" data-v="${esc(f)}">${esc(f)}</span>`).join('')}</div>` : ''}</div>
+    ${conc.length ? `<h4 class="cap">${esc(runName(s.run))} at ${fmt(c.time)}</h4>${conc.join('')}` : ''}`
+}
+function sessionSummary(s) {
+  const result = sess.items.find((i) => i.kind === 'result')
+  const waited = s.waits.reduce((n, [a, b]) => n + (b - a), 0)
+  return `<div class="sum"><div class="kv"><div><span class="k">Started</span><span class="v">${fmt(s.start)}</span></div><div><span class="k">Ended</span><span class="v">${fmt(s.end)}</span></div><div><span class="k">Ran</span><span class="v">${fmtd(s.end - s.start)}</span></div>${waited ? `<div><span class="k">Waiting on subagents</span><span class="v">${fmtd(waited)}</span></div>` : ''}</div>
+    ${result ? `<h4 class="cap">Returned</h4><pre class="out">${esc(result.text)}</pre>` : ''}</div>`
 }
 function details() {
   if (!st.open || !S[st.open] || !sess) return ''
@@ -717,18 +828,21 @@ function details() {
   const task = parent ? parent.tasks.find((x) => x.child === s.id) : null
   const kids = Object.values(S).filter((k) => k.parent === s.id).sort((a, b) => a.start - b.start)
   const run = RUN[s.run]
+  const path = s.ref.slice(0, s.ref.lastIndexOf('#'))
+  const at = c ? c.ref : null
   const close = `<button class="btn btn-ghost btn-sm" data-act="closedet" aria-label="Close">${ico.close}</button>`
-  return `<section id="det"><div class="dhead" data-anchor="${esc(unitRef(s.key))}">
-      <h2>${esc(agentName(s))}<span class="run">${esc(runName(s.run))} · ${esc(run.team)}</span></h2>${st.side ? `${close}<span class="brk"></span>` : ''}
-      ${parent ? `<span class="grp"><span class="lab" data-field="parent">Spawned by</span><button class="chip chip-sans chip-act" data-act="open" data-id="${esc(parent.id)}" ${task ? `data-call="${esc(task.ref)}"` : ''}>${ico.parent}${esc(agentName(parent))}${s.spawn != null ? ` · Task <span class="v">${fmt(s.spawn)}</span>` : ''}</button></span>` : ''}
-      ${kids.length ? `<span class="grp"><span class="lab" data-field="child">Subagents</span>${kids.map((k) => `<button class="chip chip-sans chip-act" data-act="open" data-id="${esc(k.id)}">${esc(agentName(k))}${ico.child}</button>`).join('')}</span>` : ''}
-      <span class="dstats"><span><b>${s.n}</b> ${thimble.field('n', s.n === 1 ? 'call' : 'calls')}</span><span>${thimble.field('ran', 'ran')} <b>${fmtd(s.end - s.start)}</b></span><span class="err"><b>${s.err}</b> ${thimble.field('err', s.err === 1 ? 'error' : 'errors')}</span></span>
+  const file = `<button class="chip chip-tone-neutral chip-act fchip" data-act="openfile" data-path="${esc(path)}" ${at ? `data-ref="${esc(at)}"` : ''} data-tip="Open ${esc(path)} in the File browser${c ? `, at the ${esc(c.tool)} call at ${fmt(c.time)}` : ''}">${ico.file}${esc(path.split('/').pop())}${ico.open}</button>`
+  return `<section id="det"><div class="dhead" data-anchor="${esc(unitRef(s.key))}" data-anchor-unmarked>
+      <h2>${esc(agentName(s))}</h2>${file}<div class="grow"></div>${st.side ? `${close}<span class="brk"></span>` : ''}
+      <span class="dstats"><span>${esc(runName(s.run))} · ${esc(run.team)}</span><span><b>${s['call count']}</b> ${s['call count'] === 1 ? 'call' : 'calls'}</span><span>ran <b>${fmtd(s.end - s.start)}</b></span><span class="err"><b>${s['error count']}</b> ${s['error count'] === 1 ? 'error' : 'errors'}</span></span>
+      ${st.side ? '<span class="brk"></span>' : ''}
+      ${parent ? `<span class="grp"><span class="lab">Spawned by</span><button class="chip chip-sans chip-tone-neutral chip-act" data-act="open" data-id="${esc(parent.id)}" ${task ? `data-call="${esc(task.ref)}"` : ''} data-tip="Select ${esc(agentName(parent))}'s lane at its Task call, ${s.spawn != null ? fmt(s.spawn) : ''}">${ico.parent}${esc(agentName(parent))}${s.spawn != null ? ` · Task <span class="v">${fmt(s.spawn)}</span>` : ''}</button></span>` : ''}
+      ${kids.length ? `<span class="grp"><span class="lab">Subagents</span>${kids.map((k) => `<button class="chip chip-sans chip-tone-neutral chip-act" data-act="open" data-id="${esc(k.id)}" data-tip="Select ${esc(agentName(k))}'s lane, spawned at ${k.spawn != null ? fmt(k.spawn) : ''}">${esc(agentName(k))}${ico.child}</button>`).join('')}</span>` : ''}
       <div class="grow"></div>
       <span class="grp"><button class="btn btn-ghost btn-sm" data-act="err" data-dir="-1">${ico.up}Previous error</button><button class="btn btn-ghost btn-sm" data-act="err" data-dir="1">${ico.down}Next error</button></span>
       ${st.side ? '' : close}</div>
-    <div class="dbody"><div class="tx" id="tx">${transcript(s)}</div><div class="cd">${c ? callDetails(c, s) : ''}</div></div></section>`
+    <div class="dbody"><div class="tx" id="tx">${transcript(s)}</div><div class="cd">${c ? callDetails(c, s) : sessionSummary(s)}</div></div></section>`
 }
-
 // ------------------------------------------------------------------------------------------------------------ compare
 function compare() {
   if (!cmp) return '<section id="cmp"></section>'
@@ -744,14 +858,10 @@ function compare() {
   const lw = labelWidth(), pw = viewWidth() - lw
   const dom = st.align === 'start' ? [0, Math.max(...groups.map((g) => g.end - g.start)) + 15] : [Math.min(...groups.map((g) => g.start)) - 15, Math.max(...groups.map((g) => g.end)) + 15]
   const svg = rows.length ? laneSvg({ rows, dom, width: pw, compare: true }) : ''
-  const head = `<div class="chead"><button class="btn btn-secondary btn-sm" data-act="overview">${ico.back}Overview</button><div class="vsep"></div>
-      ${groups.map((g) => `<span class="chip chip-sans chip-tone-neutral chip-x"><span class="badge">${letters[g.root]}</span>${tag(g.id)}<span class="x" data-act="tick" data-id="${esc(g.id)}">${ico.x}</span></span>`).join('')}
-      ${groups.length < MAX_TICKED ? `<button class="chip chip-sans chip-tone-neutral chip-act" data-act="overview">${ico.plusS}Add ${groups.every((g) => RUN[g.id]) ? 'run' : 'session'}</button>` : ''}<div class="grow"></div>
-      <span class="tick" data-act="subs"><span class="cb ${st.includeSubs ? 'on' : ''}">${st.includeSubs ? ico.check : ''}</span>Include subagents</span><div class="vsep"></div>
-      <span class="lab">Align</span><div class="seg seg-track"><button class="seg-opt ${st.align === 'clock' ? 'active' : ''}" data-act="align" data-v="clock">Run clock</button><button class="seg-opt ${st.align === 'start' ? 'active' : ''}" data-act="align" data-v="start">Session start</button></div></div>`
-  const lanes = `<div class="cmp-lanes"><div class="lanes">${labelCol(rows, { w: lw, compareCol: false, badges: letters, cols: COLS() })}${svg}</div></div>`
+  const head = `<div class="lay"><button class="btn btn-ghost btn-sm" data-act="menu" data-menu="layout">Layout${ico.caret}</button></div>`
+  const lanes = `<div class="cmp-lanes"><div class="lanes">${labelCol(rows, { w: lw, badges: letters, cols: COLS() })}${svg}</div></div>`
   const cells = []
-  cells.push('<div class="ch"></div>', ...groups.map((g) => `<div class="ch" data-anchor="${esc(unitRef(g.id))}"><div class="top"><span class="badge">${letters[g.root]}</span><b>${RUN[g.id] ? esc(runName(g.id)) : esc(S[g.root] ? agentName(S[g.root]) : g.root)}</b><span class="run">${RUN[g.id] ? '' : esc(runName(g.run)) + ' · '}${esc(g.team)}</span></div>
+  cells.push('<div class="ch"></div>', ...groups.map((g) => `<div class="ch" data-anchor="${esc(unitRef(g.id))}" data-anchor-unmarked><div class="top"><span class="badge">${letters[g.root]}</span><b>${RUN[g.id] ? esc(runName(g.id)) : esc(S[g.root] ? agentName(S[g.root]) : g.root)}</b><span class="run">${RUN[g.id] ? '' : esc(runName(g.run)) + ' · '}${esc(g.team)}</span></div>
     <div class="path">${g.sessions.length > 1 ? `with ${esc([...new Set(g.agents.slice(1))].join(', '))}` : 'no subagents'} · <span class="mono">${fmt(g.start)}–${fmt(g.end)}</span> into the run</div></div>`))
   const barRow = (label, vals, max, colour, fmtv = (v) => v, sw = '') => {
     cells.push(`<div class="ml">${sw}${label}</div>`)
@@ -759,30 +869,30 @@ function compare() {
   }
   const sec = (name, extra = '') => cells.push(`<div class="sec cap">${name}${extra}</div>`, ...groups.map(() => '<div class="sec"></div>'))
   const line = () => cells.push('<div class="secline"></div>')
-  const maxN = Math.max(1, ...groups.map((g) => g.n))
+  const maxN = Math.max(1, ...groups.map((g) => g['call count']))
   if (cls.length) {
-    sec(thimble.field('classes', 'Labels'))
+    sec(esc('Labels'))
     cls.forEach((c, i) => barRow(esc(c.label) + (labelBy(c.label) && (labelBy(c.label).values || []).filter((v) => v.highlight !== false).length > 1 ? `: ${esc(c.value)}` : ''), groups.map((g) => g.classes[i]), maxN, classColour(i), (v) => v, `<span class="box on" style="--mark:${classColour(i)};width:10px;height:10px"></span>`))
     line()
   }
-  sec(thimble.field('tools', 'Calls by tool'))
-  barRow(thimble.field('n', 'All calls'), groups.map((g) => g.n), maxN, `rgba(${inkRgb},.55)`)
+  sec(esc('Calls by tool'))
+  barRow(esc('All calls'), groups.map((g) => g['call count']), maxN, `rgba(${inkRgb},.55)`)
   for (const t of cmp.tools) barRow(esc(t), groups.map((g) => g.tools[t] || 0), maxN, colourOf('tool', t), (v) => v, `<i class="sw" style="background:${colourOf('tool', t)}"></i>`)
   line()
   sec('Outcomes')
-  const maxO = Math.max(1, ...groups.map((g) => Math.max(g.err, g.den))) * 2.5
-  barRow(thimble.field('err', 'Error'), groups.map((g) => g.err), maxO, NEG, (v) => v, `<i class="rail" style="background:${NEG}"></i>`)
-  barRow(thimble.field('den', 'Denied'), groups.map((g) => g.den), maxO, WARN, (v) => v, `<i class="rail" style="background:${WARN}"></i>`)
+  const maxO = Math.max(1, ...groups.map((g) => Math.max(g['error count'], g['denied count']))) * 2.5
+  barRow(esc('Error'), groups.map((g) => g['error count']), maxO, NEG, (v) => v, `<i class="rail" style="background:${NEG}"></i>`)
+  barRow(esc('Denied'), groups.map((g) => g['denied count']), maxO, WARN, (v) => v, `<i class="rail" style="background:${WARN}"></i>`)
   line()
   sec('Time')
-  const maxT = Math.max(1, ...groups.map((g) => Math.max(g.wall, g.summed)))
-  barRow(thimble.field('wall', 'Wall clock'), groups.map((g) => g.wall), maxT, `rgba(${inkRgb},.55)`, fmtd)
-  barRow(thimble.field('summed', 'Summed over sessions'), groups.map((g) => g.summed), maxT, `rgba(${inkRgb},.35)`, fmtd)
-  barRow(thimble.field('in_tools', 'In tool calls'), groups.map((g) => g.in_tools), maxT, `rgba(${inkRgb},.35)`, fmtd)
-  barRow(thimble.field('waiting', 'Waiting on subagents'), groups.map((g) => g.waiting), maxT, `rgba(${inkRgb},.35)`, fmtd)
+  const maxT = Math.max(1, ...groups.map((g) => Math.max(g['wall clock'], g['summed time'])))
+  barRow(esc('Wall clock'), groups.map((g) => g['wall clock']), maxT, `rgba(${inkRgb},.55)`, fmtd)
+  barRow(esc('Summed over sessions'), groups.map((g) => g['summed time']), maxT, `rgba(${inkRgb},.35)`, fmtd)
+  barRow(esc('In tool calls'), groups.map((g) => g['in tool calls']), maxT, `rgba(${inkRgb},.35)`, fmtd)
+  barRow(esc('Waiting on subagents'), groups.map((g) => g.waiting), maxT, `rgba(${inkRgb},.35)`, fmtd)
   line()
   const EDIT = colourOf('tool', 'Edit'), READ = colourOf('tool', 'Read')
-  sec(thimble.field('files', 'Files touched'), `<span class="fkey"><i class="sq" style="background:${EDIT}"></i>edits<i class="sq hollow" style="border-color:${READ};margin-left:8px"></i>reads</span>`)
+  sec(esc('Files touched'), `<span class="fkey"><i class="sq" style="background:${EDIT}"></i>edits<i class="sq hollow" style="border-color:${READ};margin-left:8px"></i>reads</span>`)
   const use = (g, f) => ({ e: (g.files[f] || [0, 0])[0], r: (g.files[f] || [0, 0])[1] })
   const glyph = (u) => `<span class="g">${u.e ? `<i class="sq" style="background:${EDIT}"></i>${u.e}` : ''}</span><span class="g">${u.r ? `<i class="sq hollow" style="border-color:${READ}"></i>${u.r}` : ''}</span>`
   cells.push('<div class="ml">Files</div>', ...groups.map((g) => `<div class="mc"><span class="v">${Object.keys(g.files).length}</span></div>`))
@@ -797,9 +907,9 @@ function compare() {
     cells.push(`<div class="own">${own.map(({ f, u }) => `<div class="f"><span class="p" title="${esc(f)}">${esc(f)}</span>${glyph(u)}</div>`).join('') || '<div class="f"><span class="p t3">–</span></div>'}</div>`)
   }
   line()
-  sec(thimble.field('errors', 'Errors and denials'))
+  sec(esc('Errors and denials'))
   cells.push('<div></div>')
-  for (const g of groups) cells.push(`<div class="errl">${g.errors.map((e) => `<div class="e" data-anchor="${esc(e.ref)}" data-act="opencall" data-ref="${esc(e.ref)}"><span class="tm">+${fmt(e.t)}</span><span class="m ${e.out === 'denied' ? 'den' : ''}">${esc(e.result)}</span><span class="c">${g.sessions.length > 1 ? `<span class="who">${esc(e.agent)}</span>` : ''}${esc(e.tool)} ${esc(e.input)}</span></div>`).join('') || '<span class="t3">–</span>'}</div>`)
+  for (const g of groups) cells.push(`<div class="errl">${g.errors.map((e) => `<div class="e" data-anchor="${esc(e.ref)}" data-act="opencall" data-ref="${esc(e.ref)}"><span class="tm">+${fmt(e.time)}</span><span class="m ${e.outcome === 'denied' ? 'den' : ''}">${esc(e.result)}</span><span class="c">${g.sessions.length > 1 ? `<span class="who">${esc(e.agent)}</span>` : ''}${esc(e.tool)} ${esc(e.input)}</span></div>`).join('') || '<span class="t3">–</span>'}</div>`)
   return `<section id="cmp">${head}${lanes}<div class="cgrid" style="grid-template-columns:${st.narrow ? 170 : 300}px repeat(${groups.length}, minmax(0,1fr))">${cells.join('')}</div></section>`
 }
 
@@ -821,9 +931,9 @@ function render() {
   render.toTop = false
   const left = st.view === 'compare' ? compare() : overview() + (st.side ? '' : details())
   const side = st.side ? `<div id="grip" title="Drag to resize"></div><aside id="side" style="width:${st.panelW}px">${details()}</aside>` : ''
-  view.innerHTML = dataset() + topBar() + `<div id="area"><div id="left">${left}</div>${side}</div>` + menus() + palette()
+  view.innerHTML = topBar() + `<div id="area"><div id="left">${left}</div>${side}</div>` + menus() + palette()
   document.getElementById('left').scrollTop = leftScroll
-  place('menu', `[data-menu="${st.menu && st.menu.startsWith('f:') ? st.menu : 'colour'}"]`)
+  place('menu', `[data-menu="${st.menu ? CSS.escape(st.menu) : 'colour'}"]`)
   if (st.pal) place('pal', `[data-act="palette"][data-id="${CSS.escape(st.pal.id)}"][data-value="${CSS.escape(st.pal.value)}"]`, st.pal.from)
   const tx = document.getElementById('tx'), row = document.getElementById('selrow')
   if (tx && row) {
@@ -845,24 +955,15 @@ function place(id, sel, from) {
   m.style.left = `${Math.max(8, id === 'pal' && from === 'menu' ? ar.right - vr.left + 6 : left)}px`
   m.style.top = `${(id === 'pal' && from === 'menu' ? ar.top - 10 : ar.bottom + 4) - vr.top}px`
 }
-// a run's counterparts are the other runs; a session's, the first session of the same agent in each other run
-function counterparts(id) {
-  if (!ov || !id) return []
-  if (RUN[id]) return ov.runs.map((r) => r.id).filter((r) => r !== id)
-  const s = S[id]
-  if (!s) return []
-  return ov.runs.filter((r) => r.id !== s.run).map((r) => r.sessions.find((x) => S[x].agent === s.agent)).filter(Boolean)
-}
-function firstCallOf(id) { const s = S[id]; return s ? (s.calls.find((c) => c.out !== 'ok') || s.calls[0] || {}).ref || null : null }
 async function openSession(id, call, message = null) {
   if (!S[id]) return
-  st.open = id; st.sel = call || firstCallOf(id); st.msg = message; st.view = 'overview'; render.scrollToSel = true
+  st.open = id; st.sel = call || null; st.msg = message; st.view = 'overview'; render.scrollToSel = true
   await loadSession()
   if (call) st.sel = call
   // a cited message is chosen in the transcript, with the call before it (else the one after it) in the details
   const m = message && sess ? sess.items.find((i) => i.ref === message && i.kind !== 'call') : null
   const calls = sess ? sess.items.filter((i) => i.kind === 'call') : []
-  if (m) st.sel = (calls.filter((i) => i.t <= m.t).pop() || calls.find((i) => i.t > m.t) || {}).ref || st.sel
+  if (m) st.sel = (calls.filter((i) => i.time <= m.time).pop() || calls.find((i) => i.time > m.time) || {}).ref || st.sel
   else st.msg = null
   await loadMoment()
   render()
@@ -888,7 +989,7 @@ function toggleLabel(id) {
 
 document.addEventListener('click', async (e) => {
   const el = e.target.closest('[data-act]')
-  if (!el) { if ((st.menu && !e.target.closest('#menu')) || (st.pal && !e.target.closest('#pal'))) { st.menu = null; st.pal = null; render() } return }
+  if (!el) { if ((st.menu && !e.target.closest('#menu')) || (st.pal && !e.target.closest('#pal')) ) { st.menu = null; st.pal = null; render() } return }
   const act = el.dataset.act, id = el.dataset.id
   e.preventDefault()
   let refetch = false
@@ -897,6 +998,11 @@ document.addEventListener('click', async (e) => {
     case 'menu': st.menu = st.menu === el.dataset.menu ? null : el.dataset.menu; break
     case 'field': st.field = el.dataset.f; st.byField = true; st.menu = null; st.hide = new Set(); refetch = true; break
     case 'label': e.stopPropagation(); toggleLabel(id); return
+    case 'bylabels': st.byField = false; st.menu = null; st.hide = new Set(); refetch = true; break
+    case 'rangeset': { const a = parseFloat(document.getElementById('rmin').value), b = parseFloat(document.getElementById('rmax').value); if (a >= 0 && b > a) st.range = [a, b]; st.menu = null; refetch = true; break }
+    case 'rangeclear': st.range = null; refetch = true; break
+    case 'ftextclear': st.ftext = ''; refetch = true; break
+    case 'openfile': e.stopPropagation(); thimble.navigate(el.dataset.ref || el.dataset.path, { browser: true }); return
     case 'newlabel': st.menu = null; render(); if (thimble.newLabel) thimble.newLabel(); return
     case 'palette': e.stopPropagation(); st.pal = st.pal && st.pal.id === id && st.pal.value === el.dataset.value ? null : { id, value: el.dataset.value, from: el.closest('#menu') ? 'menu' : 'bar' }; break
     case 'colour': if (st.pal && thimble.setLabelColour) thimble.setLabelColour(st.pal.id, st.pal.value, el.dataset.colour); st.pal = null; break
@@ -905,11 +1011,11 @@ document.addEventListener('click', async (e) => {
       if (labelOn()) {
         // the label values are hidden in this view only; thimble's label filter stays the Labels pane's
         const keys = [...classes().map(classKey), 'none']
-        if (e.shiftKey) { const h = new Set(st.hide); h.has(v) ? h.delete(v) : h.add(v); if (h.size < keys.length) st.hide = h }
+        if (e.shiftKey || e.altKey) { const h = new Set(st.hide); h.has(v) ? h.delete(v) : h.add(v); if (h.size < keys.length) st.hide = h }
         else { const only = st.hide.size === keys.length - 1 && !st.hide.has(v); st.hide = only ? new Set() : new Set(keys.filter((x) => x !== v)) }
       } else {
         const vs = valuesOf(st.field), h = new Set(st.filters[st.field] || [])
-        if (e.shiftKey) { h.has(v) ? h.delete(v) : h.add(v); if (h.size < vs.length) st.filters[st.field] = h }
+        if (e.shiftKey || e.altKey) { h.has(v) ? h.delete(v) : h.add(v); if (h.size < vs.length) st.filters[st.field] = h }
         else { const only = h.size === vs.length - 1 && !h.has(v); st.filters[st.field] = only ? new Set() : new Set(vs.filter((x) => x !== v)) }
       }
       refetch = true
@@ -930,36 +1036,35 @@ document.addEventListener('click', async (e) => {
       break
     }
     case 'clearf': e.stopPropagation(); st.filters[el.dataset.f] = new Set(); st.menu = null; refetch = true; break
-    case 'clearall': st.filters = {}; st.hide = new Set(); st.win = null; st.search = ''; refetch = true; break
+    case 'clearall': st.filters = st.filters.run ? { run: st.filters.run } : {}; st.hide = new Set(); st.win = null; st.search = ''; st.range = null; st.ftext = ''; refetch = true; break
     case 'fullwin': st.win = null; refetch = true; break
     case 'searchfor': e.stopPropagation(); st.search = el.dataset.v; refetch = true; break
-    case 'tick': {
+    case 'raw': st.raw = el.dataset.v === '1'; break
+    case 'runall': await setRuns(allRuns()); return
+    case 'runonly': await setRuns([el.dataset.v]); return
+    case 'runbox': {
       e.stopPropagation()
-      st.ticked = st.ticked.includes(id) ? st.ticked.filter((x) => x !== id) : [...st.ticked, id].slice(-MAX_TICKED)
-      if (st.view === 'compare') { if (st.ticked.length < 2) st.view = 'overview'; else { await loadCompare() } }
-      break
+      const on = new Set(pickedRuns()), v = el.dataset.v
+      on.has(v) ? on.delete(v) : on.add(v)
+      if (on.size) await setRuns(allRuns().filter((r) => on.has(r)))
+      return
     }
-    case 'untick': st.ticked = []; break
-    case 'compare':
-      // one run or session alone is compared with its counterparts in the other runs
-      if (st.ticked.length === 1) st.ticked = [st.ticked[0], ...counterparts(st.ticked[0])].slice(0, MAX_TICKED)
-      if (st.ticked.length >= 2) { st.view = 'compare'; st.menu = null; await loadCompare(); render.toTop = true }
-      break
-    case 'overview': st.view = 'overview'; break
+    case 'combined': if (st.view === 'compare') { st.view = 'overview'; st.ticked = []; render.toTop = true } break
+    case 'cmpruns': if (pickedRuns().length >= 2) { st.view = 'compare'; st.ticked = pickedRuns().slice(0, MAX_TICKED); st.menu = null; await loadCompare(); render.toTop = true } break
     case 'collapse': st.collapsed.has(id) ? st.collapsed.delete(id) : st.collapsed.add(id); break
     case 'open': e.stopPropagation(); await openSession(id, el.dataset.call); return
-    case 'opencall': { const c = CALL[el.dataset.ref]; if (c) await openSession(c.s, c.ref); return }
+    case 'opencall': { const c = CALL[el.dataset.ref]; if (c) await openSession(c.session, c.ref); return }
     case 'openmsg': await openSession(el.dataset.s, null); return
     case 'sel': st.sel = el.dataset.ref; st.msg = null; await loadMoment(); break
     case 'err': {
-      const calls = sess.items.filter((i) => i.kind === 'call'), errs = calls.filter((c) => c.out !== 'ok'), cur = selCall()
-      const nx = +el.dataset.dir > 0 ? errs.find((c) => !cur || c.t > cur.t) : errs.filter((c) => cur && c.t < cur.t).pop()
+      const calls = sess.items.filter((i) => i.kind === 'call'), errs = calls.filter((c) => c.outcome !== 'ok'), cur = selCall()
+      const nx = +el.dataset.dir > 0 ? errs.find((c) => !cur || c.time > cur.time) : errs.filter((c) => cur && c.time < cur.time).pop()
       if (nx) { st.sel = nx.ref; st.msg = null; render.scrollToSel = true; await loadMoment() }
       break
     }
     case 'closedet': st.open = null; st.sel = null; st.msg = null; sess = null; break
-    case 'subs': st.includeSubs = !st.includeSubs; await loadCompare(); break
-    case 'align': st.align = el.dataset.v; break
+    case 'subs': st.includeSubs = !st.includeSubs; st.menu = null; await loadCompare(); break
+    case 'align': st.align = el.dataset.v; st.menu = null; break
   }
   if (refetch) { await reload(); return }
   render()
@@ -968,9 +1073,10 @@ document.addEventListener('click', async (e) => {
   const r = e.target.closest('svg.plot [data-anchor]')
   if (!r || r.dataset.act) return
   const c = CALL[r.getAttribute('data-anchor')]
-  if (c) await openSession(c.s, c.ref)
+  if (c) await openSession(c.session, c.ref)
 })
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && (st.menu || st.pal)) { st.menu = null; st.pal = null; render() } })
+document.addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target.id === 'ftext') { st.ftext = e.target.value.trim(); st.menu = null; reload() } })
 let typing = null
 document.addEventListener('input', (e) => {
   if (e.target.id !== 'q') return
@@ -1036,6 +1142,19 @@ thimble.onLabels(async (state) => {
   // the reader applies the labels that are on and the filter; the list of labels and the palette only redraw the menu
   if (JSON.stringify([labels.labels, labels.filter]) === was) render()
   else await reload()
+})
+// a control's tip, as thimble's Tip draws it: under the control after a moment's rest
+let tipT = null, tipEl = null
+document.addEventListener('mouseover', (e) => {
+  const a = e.target.closest('[data-tip]')
+  clearTimeout(tipT)
+  if (!a) { if (tipEl) { tipEl.remove(); tipEl = null } return }
+  tipT = setTimeout(() => {
+    if (tipEl) tipEl.remove()
+    tipEl = document.createElement('div'); tipEl.className = 'vtip'; tipEl.textContent = a.dataset.tip; document.body.appendChild(tipEl)
+    const r = a.getBoundingClientRect()
+    tipEl.style.left = `${Math.max(8, Math.min(r.left, innerWidth - tipEl.offsetWidth - 8))}px`; tipEl.style.top = `${r.bottom + 6}px`
+  }, 350)
 })
 ;(async () => { if (await ensureOverview()) render() })()
 </script>

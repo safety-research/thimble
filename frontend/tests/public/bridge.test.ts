@@ -71,6 +71,12 @@ describe('the view bridge', () => {
     await expect(got).resolves.toBe('real')
   })
 
+  test('navigate posts the ref to open, and asks for the File browser only when the page says so', async () => {
+    win().thimble.navigate('board.jsonl#L2')
+    win().thimble.navigate('board.jsonl#L1', { browser: true })
+    expect(of('navigate').map((m) => [m.ref, m.browser])).toEqual([['board.jsonl#L2', false], ['board.jsonl#L1', true]])
+  })
+
   test('with a filter on, a page that does not filter hides what the filter drops, and keeps what holds a kept record', async () => {
     const doc = dom.window.document
     fromPage({ type: 'thimble:open', open: { ref: null } })

@@ -250,10 +250,12 @@ async def start(c: str, brief: str, passes: "list[str] | tuple[str, ...]" = ("fi
         orientation.record(c, effort=choices.get("effort"), ultracode=bool(choices.get("ultracode")),
                            critique=bool(choices.get("critique", True)))
 
-    return await agent_session.start(
+    run = await agent_session.start(
         c, KEY, prompt=tools.hint("orient-start"), on_start=started, on_end=_ended, on_pid=_moved,
         ultracode=bool(choices.get("ultracode")), critique=bool(choices.get("critique", True)), brief=brief.strip(),
         call=call, **args)
+    await extensions.mark_oriented(c)
+    return run
 
 
 async def start_program(c: str, part: Any, brief: str, passes: "list[str]", choices: dict[str, Any],

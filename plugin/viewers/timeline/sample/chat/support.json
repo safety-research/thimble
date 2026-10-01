@@ -1,0 +1,45 @@
+{
+  "channel": "support",
+  "messages": [
+    {
+      "ts": "1778911337.000303",
+      "user": "U03A14",
+      "text": "Morning all, support desk is open. Holiday rush today: 14 sailings."
+    },
+    {
+      "ts": "1778916000.000305",
+      "user": "U03A11",
+      "text": "Holiday traffic expected from 07:30. Bookings usually peak between 08:00 and 09:00."
+    },
+    {
+      "ts": "1778926020.000321",
+      "user": "U04B20",
+      "text": "The timetable banner is live. Thanks Mateo for passing on the question."
+    },
+    {
+      "ts": "1778997910.000330",
+      "user": "U03A14",
+      "text": "Support desk open. Sunday timetable, 9 sailings."
+    },
+    {
+      "ts": "1779023710.000332",
+      "user": "U04B20",
+      "text": "Monday's holiday timetable is on the site: 16 sailings, the first at 07:30."
+    },
+    {
+      "ts": "1779083400.000335",
+      "user": "U03A11",
+      "text": "Holiday Monday: 16 sailings, the first at 07:30. Expect a busy morning."
+    },
+    {
+      "ts": "1779122700.000342",
+      "user": "U03A14",
+      "text": "34 tickets today, all answered. Busiest morning since Easter."
+    },
+    {
+      "ts": "1779170410.000344",
+      "user": "U03A14",
+      "text": "Back to the weekday timetable: 11 sailings."
+    }
+  ]
+}

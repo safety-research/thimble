@@ -37,6 +37,21 @@ async def test_start_orientation_runs_the_session_in_the_background(launched):
     assert "route" not in (orientation.read_run(CORPUS) or {})
 
 
+async def test_settings_of_earlier_builds_load_and_change_nothing(launched):
+    """A workspace's settings.json from an earlier build that still holds terminal_first (off: the orientation ran as a
+    subagent of main) and hide_chat (on: no chat column) loads as one that never held them, and the orientation still
+    starts as the background session."""
+    default = ledger.get_settings(CORPUS)
+    old = {"terminal_first": False, "hide_chat": True}
+    (config.workspace_dir(CORPUS) / "settings.json").write_text(json.dumps(old))
+    assert ledger.get_settings(CORPUS) == default
+    orientation.start_requested(CORPUS, {"text": "", "final_notebook": True, "propose_views": True}, {"id": "e1"})
+    res = await tools.call(CORPUS, "start_orientation", {"brief": ""})
+    assert not res.is_error, res
+    [call] = launched
+    assert call["key"] == orient_session.KEY and call["background"] is True
+
+
 async def test_without_claude_code_s_trust_the_orientation_does_not_start_and_the_settings_say_how_to_trust(
         workspaces_tmp, claude_global_config, monkeypatch):
     """`claude --bg` refuses a folder Claude Code does not trust. Where the workspaces folder is not trusted (install.sh's
