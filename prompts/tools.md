@@ -770,6 +770,10 @@ Filed {label}, but it cannot run here, so it failed at once: {why} Tell the anal
 
 The browser that takes the checks' and the review's pictures cannot play H.264 video or AAC audio, which most MP4, MOV and M4A recordings hold. A player of such a file stays blank or shows an error in the pictures, though the analyst's browser usually plays it, so that is not a problem of the view. A player that stays blank on a WebM, Ogg, MP3 or FLAC file is one.
 
+## view-purple
+
+The page writes purple colours: {colours}. Purple is thimble's colour for agents' work, so if any of them colours a category of the view, such as a speaker or a kind of record, give that category a viz colour (`--viz-*`) instead.
+
 ## view-built
 
 The dev agent built the view {view}, so {claims} now open in it. In it {forms}.
@@ -1382,6 +1386,10 @@ It could not be resumed: {why}
 ## session-scratch
 
 Your own scratch folder is {folder}. Put the files you make for your own work there, such as a script or an intermediate result, rather than in $TMPDIR or /tmp, which the session's other agents share.
+
+## work-budget
+
+The session's work folder {folder} now holds {size}, more than {budget}. Delete the extracts and copies there that you no longer need, and read the corpus in place rather than copying it.
 
 ## session-mode-switching
 

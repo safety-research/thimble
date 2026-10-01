@@ -1,6 +1,7 @@
 """A view build or a review's revision whose turn Anthropic's API ends at capacity (app/dev.py): the session is woken
 again after a wait, with a plain prompt to go on rather than a report on files it has not written yet, and the turn
-counts as no attempt. Every session turn and gate is faked."""
+counts as no attempt. A build that passes clears the large extracts its session left in its own folder. Every session
+turn and gate is faked."""
 from __future__ import annotations
 
 import asyncio
@@ -88,6 +89,24 @@ def test_a_build_the_api_stops_before_it_writes_a_view_is_told_to_go_on_not_what
     assert seen["waits"] == [30.0]
     assert seen["prompts"][1] == tools.hint("session-retry"), "the session hears it was stopped and goes on"
     assert seen["gates"] == [True], "no gate runs on a folder the session has not written yet"
+
+
+def test_a_build_that_passes_keeps_its_scripts_and_clears_the_large_extracts_in_its_own_folder(board, turns):
+    seen, script = turns
+    slug = views.propose(CORPUS, "Posts", "to read the board", ["board.jsonl"], "one row per post", asked=True)["slug"]
+    work = dev.view_work_dir(CORPUS, slug)
+
+    def write_with_extracts(prompt: str) -> str:
+        (work / "cache").mkdir(parents=True, exist_ok=True)
+        (work / "cache" / "index.pickle").write_bytes(b"x" * (2 * 1024 * 1024))
+        (work / "harness.py").write_text("print('checks')\n")
+        return _write(prompt)
+
+    script.append(write_with_extracts)
+    run = dev.Run(ticket_id=f"view:{slug}", title="Posts", ts_start="")
+    asyncio.run(dev._run_view(CORPUS, slug, run))
+    assert run.status == "built"
+    assert (work / "harness.py").is_file() and not (work / "cache").exists()
 
 
 def test_a_build_waits_for_as_long_as_the_api_stays_at_capacity(board, turns):

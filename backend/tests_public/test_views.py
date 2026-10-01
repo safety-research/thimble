@@ -343,6 +343,92 @@ def test_a_view_of_one_run_leaves_the_other_runs_files_not_shown():
     assert views.sibling_files([p for p in every if p.startswith("runs/")], every) == []
 
 
+SHOTS_READER = '''
+def build_index(paths):
+    posts = []
+    for path in paths:
+        if path.endswith(".jsonl"):
+            with open(path) as f:
+                posts += [f"{path}#L{n}" for n, _ in enumerate(f, 1)]
+    return {"posts": posts, "media": [p for p in paths if not p.endswith(".jsonl")]}
+
+
+def records(index, query):
+    return [{"ref": ref, "shot": index["media"][i]} for i, ref in enumerate(index["posts"])]
+
+
+def resolve(index, locator):
+    return None
+'''
+
+
+async def test_images_and_pdfs_a_page_shows_count_as_shown_unopened_and_their_paths_go_to_the_kernel_only_to_build(
+        ws, inproc, bound, monkeypatch):
+    """A view of many screenshots and a PDF beside the records it parses: the images and the PDF count as shown without
+    a stat or a read each, the residue rule still holds for the records file, and once the index is built a reader call
+    no longer names every claimed file. The damaged copy the checks run on links a bounded number of them."""
+    async def no_page(c, slug, states, **k):
+        return [{"ok": True, "errors": [], "fetches": 0, "records": 1} for _ in states]
+
+    from app import view_host  # noqa: PLC0415
+
+    assert set(views.MEDIA_TYPES) | {".pdf"} == set(view_host.SHOWN_SUFFIXES)
+    monkeypatch.setattr(views, "shoot_states", no_page)
+    corpus = config.corpus_dir(CORPUS)
+    (corpus / "shots").mkdir()
+    n = views.PATHS_SENT + 10
+    for i in range(n):
+        (corpus / "shots" / f"{i:05d}.png").write_bytes(b"\x89PNG\r\n\x1a\n" + b"\0" * 32)
+    (corpus / "slides.pdf").write_bytes(b"%PDF-1.4\n" + b"\0" * 64)
+    sent: list[dict] = []
+
+    async def counted(c, code, timeout):
+        import ast  # noqa: PLC0415
+
+        sent.append(json.loads(ast.literal_eval(code.rsplit(".call(", 1)[1].rstrip().removesuffix(")"))))
+        return await _inproc_run(c, code, timeout)
+
+    monkeypatch.setattr(views, "_runner", counted)
+    views.write_view(CORPUS, "shots", name="Shots", description="Posts beside their screenshots.",
+                     claims=["board.jsonl", "shots/*.png", "*.pdf"], accepts=VIEW["accepts"], reader=SHOTS_READER,
+                     html=THREADS_HTML)
+    view = views.read_view(CORPUS, "shots")
+    files = views.claimed_files(CORPUS, view)
+    assert len(files) == n + 2 and {f[1] for f in files if f[0] != "board.jsonl"} == {0}, "images are not stat'ed"
+    assert dict((f[0], f[1]) for f in files)["board.jsonl"] == (corpus / "board.jsonl").stat().st_size
+
+    out = await views.shown(CORPUS, "shots")
+    assert out["files"] == n + 2 and out["not_shown"]["count"] == 0, out["not_shown"]
+    assert "paths" not in sent[0] and len(sent[1]["paths"]) == n + 2, "the paths go again only for the kernel to build"
+    reads = json.loads(Path(sent[1]["reads"]).read_text())
+    assert list(reads) == ["board.jsonl"], "the reads of images and PDFs are not counted"
+
+    sent.clear()
+    got = await views.reader_call(CORPUS, "shots", "records", None, labels=views.probe_context())
+    assert len(got) == len(POSTS) and len(sent) == 1 and "paths" not in sent[0]
+    assert sent[0]["view_paths"] == ["board.jsonl"], "the test label gives lines of the parsed files only"
+
+    sys.modules.pop("_thimble_views", None)  # a new kernel loads the pickle without the paths
+    sent.clear()
+    assert len(await views.reader_call(CORPUS, "shots", "records", None)) == len(POSTS)
+    assert len(sent) == 1 and "paths" not in sent[0]
+
+    (corpus / "board.jsonl").write_text((corpus / "board.jsonl").read_text() + "{torn\n")
+    rep = await views.check(CORPUS, "shots", need_locators=False)
+    assert not any("neither read to the end" in p for p in rep["problems"]), rep["problems"]
+    (corpus / "board.jsonl").write_text("".join(json.dumps({"n": i}) + "\n" for i in range(3)))
+    views.write_view(CORPUS, "shots", name="Shots", description="Posts beside their screenshots.",
+                     claims=["board.jsonl", "shots/*.png", "*.pdf"], accepts=VIEW["accepts"], html=THREADS_HTML,
+                     reader=SHOTS_READER.replace('if path.endswith(".jsonl"):', 'if path.endswith(".none"):'))
+    rep = await views.check(CORPUS, "shots", need_locators=False)
+    assert any("neither read to the end" in p and "board.jsonl" in p for p in rep["problems"]), rep["problems"]
+
+    monkeypatch.setattr(views, "ROBUST_SHOWN", 5)
+    copy = views.robust_copy(CORPUS, "shots", view, views.claimed_files(CORPUS, view))
+    assert copy["cut"] and sum(1 for f in copy["files"] if f[0].endswith(".png")) <= 5
+    assert any(f[0] == "board.jsonl" for f in copy["files"]), "the records file goes in before the images"
+
+
 def test_the_count_is_what_the_reader_takes_not_what_the_buffers_read(tmp_path):
     """A file counts as read to the end only when the reader took all of it: one line of a small file, or a stop in a
     file's last buffer, counts as far as the reader got. An unbuffered read counts too."""

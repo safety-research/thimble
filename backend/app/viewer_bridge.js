@@ -51,7 +51,8 @@
 //                          `seq` of the anchors whose every ref those marks answer for the filter (-1 while some are
 //                          still being read); on [{id, name, colour,
 //                          values}], the labels that are on; filter {label, value, colour} or null; all [{id, name, on,
-//                          colour, values: [{name, colour, highlight}], count}], every label over files; palette, the
+//                          here, colour, values: [{name, colour, highlight}], count}], every label over files, those
+//                          that mark records in the view's files first with `here` true; palette, the
 //                          colours a label's value can take. Each replaces the last; window.thimble.onLabels hears all
 //                          but the marks, which window.thimble.markOf reads and window.thimble.onMarks hears. In a card's
 //                          frame the elements whose records the filter drops are dimmed, never hidden, and the page's

@@ -414,12 +414,14 @@ export interface PageLabel {
   values: { name: string; colour: string }[]
 }
 
-/** A label over files as a view's page lists it (thimble.onLabels `all`): whether it is on, every value with its colour
- * and highlight, and how many records it marks once a run is done. */
+/** A label over files as a view's page lists it (thimble.onLabels `all`): whether it is on, whether it marks records in
+ * the view's files (`here`), every value with its colour and highlight, and how many records it marks once a run is
+ * done. */
 export interface PageLabelItem {
   id: string
   name: string
   on: boolean
+  here: boolean
   colour: string
   values: { name: string; colour: string; highlight: boolean }[]
   count: number | null
@@ -451,7 +453,7 @@ export function pageLabels(
 }
 
 /** Every label over files as a view's page lists it, in the Labels pane's order, with those that mark the view's files
- * (`first`) ahead. Pure. */
+ * (`first`) ahead and `here`. Pure. */
 export function pageLabelList(all: Iterable<Concept>, resolve: (token: string) => string, first?: ReadonlySet<string>): PageLabelItem[] {
   const files = [...all].filter(isFilesLabel)
   const ordered = first ? [...files.filter((k) => first.has(k.id)), ...files.filter((k) => !first.has(k.id))] : files
@@ -463,6 +465,7 @@ export function pageLabelList(all: Iterable<Concept>, resolve: (token: string) =
       id: k.id,
       name: k.name,
       on: !!k.shown,
+      here: !!first?.has(k.id),
       colour: resolve(colourToken((lit[0] ?? cls[0])?.color ?? 1)),
       values: cls.map((c) => ({ name: c.name, colour: resolve(colourToken(c.color)), highlight: c.highlight })),
       count: status?.state === 'done' ? status.matches : null,

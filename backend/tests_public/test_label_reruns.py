@@ -1,6 +1,6 @@
-"""When a run of a label ends, thimble runs the cards that read it again (concepts.rerun_readers,
-notebook.rerun_on_labels): each card once per label revision, with `regenerating_for` while it runs, and main hears
-which of them need a new takeaway. A label edited but not run starts nothing, and an unchanged edit_card made while
+"""When a run of a label ends, or a moment after the analyst's last verdict on it, thimble runs the cards that read it
+again (concepts.rerun_readers, notebook.rerun_on_labels): each card once per label revision, with `regenerating_for`
+while it runs, and main hears which of them need a new takeaway. A label edited but not run starts nothing, and an unchanged edit_card made while
 thimble reruns the card takes that run's result rather than running it twice.
 
 The kernel is a stand-in: a card's code names the labels it reads as `reads <id>`, and its output is the revision it
@@ -188,3 +188,40 @@ async def test_a_rerun_waits_for_a_run_under_way_and_skips_a_card_it_left_curren
     await _rerun_ends(cid)
     assert len(kernel.ran) == 1, "the card ran once, whichever run reached it first"
     assert not concepts.stale_in(_cell(a), {cid: concepts.read_concept(config.workspace_dir(CORPUS), cid)})
+
+
+async def test_three_verdicts_in_a_row_rerun_each_card_once_after_the_last(kernel, monkeypatch):
+    monkeypatch.setattr(concepts, "VERDICT_RERUN_DELAY_S", 0.3)
+    cid = await _label("even", r"value \d*[02468]$")
+    await _rerun_ends(cid)
+    a = await _card(f"count reads {cid}", "Ten records are even.")
+    b = await _card(f"share reads {cid}")
+    locked = await _card(f"locked reads {cid}")
+    notebook.edit_cell(CORPUS, locked, locked=True)
+    before = concepts._reruns[(CORPUS, cid)]
+    kernel.ran.clear()
+    seen: list[tuple[str, object, object]] = []
+    real_emit = notebook._emit
+
+    def emit(workspace, cell, **kw):
+        seen.append((str(cell.get("id")), cell.get("status"), cell.get(notebook.REGENERATING_FOR)))
+        real_emit(workspace, cell, **kw)
+
+    monkeypatch.setattr(notebook, "_emit", emit)
+    for n in (2, 4, 6):
+        concepts.verdict_route(CORPUS, cid, concepts.VerdictBody(ref=f"log.jsonl#L{n}", label="no"))
+        await asyncio.sleep(0.1)
+    assert kernel.ran == [] and concepts._reruns[(CORPUS, cid)] is before, "each verdict restarts the wait"
+    for _ in range(100):
+        if concepts._reruns[(CORPUS, cid)] is not before:
+            break
+        await asyncio.sleep(0.02)
+    await _rerun_ends(cid)
+    await asyncio.sleep(0.5)
+    assert sorted(kernel.ran) == sorted([f"count reads {cid}", f"share reads {cid}"]), "each reader ran once, the locked card not"
+    rev = concepts._rev_of(config.workspace_dir(CORPUS), cid)
+    for card in (a, b):
+        assert (card, "running", [cid]) in seen, "while it runs the card says which label it runs again for"
+        stored = _cell(card)
+        assert stored["status"] == "ok" and notebook.REGENERATING_FOR not in stored and stored["label_revs"][cid] == rev
+    assert _cell(locked)["label_revs"][cid] < rev

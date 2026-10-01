@@ -112,6 +112,7 @@
   .pop { position: fixed; z-index: 60; min-width: 190px; max-width: 300px; max-height: 70vh; overflow: auto; padding: 4px; border-radius: var(--radius-ui); background: var(--raised-bg); box-shadow: var(--raised-ring), 0 10px 28px rgba(var(--ink-rgb), 0.14); font: 400 var(--text-ui-sm) / 1.3 var(--font-body); }
   .pop .head { padding: 8px 8px 4px; font: 500 var(--text-xs) / 1 var(--font-body); color: var(--text-tertiary); }
   .pop .sep { height: 1px; margin: 4px 0; background: var(--border-hairline); }
+  .pop .note { padding: 4px 8px 6px; color: var(--text-tertiary); }
   .item { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 28px; padding: 0 8px; border: 0; border-radius: 4px; background: none; color: var(--text-primary); font: inherit; text-align: left; cursor: pointer; }
   .item:hover { background: var(--surface-hover); }
   .item:disabled { cursor: default; }
@@ -488,9 +489,12 @@ function renderColour() {
 function colourMenu(anchor) {
   if (toggled(anchor)) return
   const bys = [['labels', 'Labels'], ...FIELDS].map(([k, n]) => `<button class="item" data-by="${k}"${k === 'labels' && !D.marks.length ? ' disabled' : ''}><span class="lab${k === 'labels' && !D.marks.length ? ' none' : ''}">${n}</span>${S.by === k ? ico('check', 'ico tick-on') : ''}</button>`).join('')
-  const labs = allLabels().map((l) => `<button class="item" data-lab="${esc(l.id || '')}" data-label="${esc(l.id || '')}"${l.id && thimble.setLabel ? '' : ' disabled'}><span class="switch${l.on ? ' on' : ''}"></span><span class="sw" style="--c:${esc(l.colour || NONE())}"></span><span class="lab">${esc(l.name)}</span></button>`).join('')
+  const lab = (l) => `<button class="item" data-lab="${esc(l.id || '')}" data-label="${esc(l.id || '')}"${l.id && thimble.setLabel ? '' : ' disabled'}><span class="switch${l.on ? ' on' : ''}"></span><span class="sw" style="--c:${esc(l.colour || NONE())}"></span><span class="lab">${esc(l.name)}</span></button>`
+  const here = allLabels().filter((l) => l.here).map(lab).join('')
+  const other = allLabels().filter((l) => !l.here).map(lab).join('')
+  const labs = `<div class="head">Labels over these files</div>${here || '<div class="note">No label covers these files yet</div>'}${other ? `<div class="head">Other labels</div>${other}` : ''}`
   const add = thimble.newLabel ? `<div class="sep"></div><button class="item" data-new>${ico('plus')}<span class="lab">New label</span></button>` : ''
-  const p = pop(anchor, `<div class="head">Colour by</div>${bys}${labs ? `<div class="head">Labels over these files</div>${labs}` : ''}${add}`, 'right')
+  const p = pop(anchor, `<div class="head">Colour by</div>${bys}${labs}${add}`, 'right')
   p.onclick = (ev) => {
     const b = ev.target.closest('[data-by],[data-lab],[data-new]')
     if (!b || b.disabled) return

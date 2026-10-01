@@ -633,12 +633,9 @@ body[data-cmd] .board-stage * {
   cursor: pointer;
   outline-offset: 1px;
 }
-.bcell-check-mark:hover:not([aria-disabled]) {
+.bcell-check-mark:hover {
   color: var(--text-primary);
   background: var(--surface-hover);
-}
-.bcell-check-mark[aria-disabled] {
-  cursor: default;
 }
 /* checked, with numbers its code types in (lib/cardCheck typedLine): a flag in the warning tone */
 .bcell-check-mark.is-flagged {
