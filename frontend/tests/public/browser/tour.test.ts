@@ -1,11 +1,12 @@
 // The product tour (src/tour, shell/TourHost) over the whole app, in headless Chromium: the real App, its stylesheets
 // and fonts, against a made-up workspace whose every API answer this file gives, at 1440x900, 1920x1080 and a chat
-// column 355 px wide at DPR 2. What it proves, measured with getBoundingClientRect:
+// column 355 px wide at DPR 2 (in a 1200 and a 1100 px window, where the Files sidebar folds). What it proves, measured
+// with getBoundingClientRect:
 //   - the first launch asks first (a welcome with Skip to the workbench and Take the tour) and records the offer in
 //     thimble's own state (POST /api/tour/seen); a page loaded after that offers nothing; Settings' Take the tour
 //     replays the tour from step 1;
 //   - every step: each cutout lies inside the window, everything an example shows in a cutout lies inside that cutout,
-//     the popover lies inside the window and its caret points at the first cutout;
+//     the popover lies inside the window, covers no cutout, and its caret points at the first cutout;
 //   - step 1's example sits 8 px or more inside its cutout, which lies inside the chat panel; the orientation's Start
 //     only shows the started state; the labels' transcript and the report scroll under the wheel; a real ⌘-drag on the
 //     example card picks only the words dragged over and its ask box lies inside the cutout; the report shows no check
@@ -238,6 +239,11 @@ async function measure(page: Page, label: string) {
   })
   const p = g.pop
   assert.ok(p && p.x >= -0.5 && p.y >= -0.5 && p.x + p.w <= vw + 0.5 && p.y + p.h <= vh + 0.5, `${label}: the popover lies inside the window ${JSON.stringify(p)}`)
+  g.holes.forEach((h: { x: number; y: number; w: number; h: number }, k: number) => {
+    const w = Math.min(p.x + p.w, h.x + h.w) - Math.max(p.x, h.x),
+      ht = Math.min(p.y + p.h, h.y + h.h) - Math.max(p.y, h.y)
+    assert.ok(w <= 1 || ht <= 1, `${label}: the popover covers cutout ${k} (${Math.round(w)} x ${Math.round(ht)}px)`)
+  })
   if (g.caret && g.holes[0]) {
     const h = g.holes[0],
       c = { x: g.caret.x + g.caret.w / 2, y: g.caret.y + g.caret.h / 2 }
@@ -275,7 +281,7 @@ const commentsLevel = (page: Page) =>
   })
 
 /** The whole tour from step 1, with the assertions of each step. */
-async function walk(page: Page, tag: string) {
+async function walk(page: Page, tag: string, folds?: boolean) {
   // 1 the chat
   await onStep(page, 1, 'Your Claude Code session')
   let g = await measure(page, `${tag} 1`)
@@ -334,6 +340,15 @@ async function walk(page: Page, tag: string) {
   await onStep(page, 5, 'Labels')
   await sleep(400)
   await measure(page, `${tag} 5`)
+  // the example's Labels pane and transcript side by side inside the Files panel, whether its sidebar docks or folds
+  const lay = await page.evaluate(() => {
+    const r = (sel: string) => document.querySelector(sel)!.getBoundingClientRect()
+    const P = r('[data-panel="files"].shell-panel'), lab = r('.tour-ex-labels'), rd = r('.tour-ex-reader')
+    const inside = (b: DOMRect) => b.left >= P.left - 0.5 && b.right <= P.right + 0.5 && b.top >= P.top - 0.5 && b.bottom <= P.bottom + 0.5
+    return { folded: ![...document.querySelectorAll('.files-labels')].some((e) => !e.closest('.tour-root')), inside: inside(lab) && inside(rd), apart: lab.right <= rd.left + 0.5 }
+  })
+  assert.ok(lay.inside && lay.apart, `${tag} 5: the labels pane and the transcript lie apart inside the Files panel ${JSON.stringify(lay)}`)
+  if (folds !== undefined) assert.equal(lay.folded, folds, `${tag} 5: the Files sidebar ${folds ? 'folds' : 'docks'}`)
   const rd = await page.evaluate(() => {
     const e = document.querySelector('.tour-ex-reader .reader-body')!
     const b = e.getBoundingClientRect()
@@ -506,9 +521,11 @@ test('the first launch asks first, records the offer in thimble’s own state, a
 }, 60_000)
 
 for (const cfg of [
-  { W: 1440, H: 900, dpr: 1, chat: 308 },
-  { W: 1920, H: 1080, dpr: 1, chat: 308 },
+  { W: 1440, H: 900, dpr: 1, chat: 308, folds: false },
+  { W: 1920, H: 1080, dpr: 1, chat: 308, folds: false },
   { W: 1200, H: 800, dpr: 2, chat: 355 },
+  // a Files panel too narrow for its sidebar, which folds
+  { W: 1100, H: 800, dpr: 2, chat: 355, folds: true },
 ]) {
   const tag = `${cfg.W}x${cfg.H}@${cfg.dpr}${cfg.chat !== 308 ? ` chat ${cfg.chat}` : ''}`
   test(`every step at ${tag}: the cutouts, the popover and what they show line up, and the page stays frozen`, async () => {
@@ -518,7 +535,7 @@ for (const cfg of [
       const panel = await page.evaluate(() => Math.round(document.querySelector('.chat[data-panel="chat"]')!.getBoundingClientRect().width))
       assert.ok(Math.abs(panel - cfg.chat) <= 2, `the chat column is ${panel}px`)
       await page.click('.tour-pop [data-tour="begin"]')
-      await walk(page, tag)
+      await walk(page, tag, cfg.folds)
       // the layout's own surface again (the stored layout was on the Report)
       assert.equal(await page.evaluate(() => document.querySelector<HTMLElement>('.shell-tabs .tab.active')?.dataset.tab), 'report')
       assert.deepEqual(server.writes.filter((x) => !ALLOWED.has(x)), [], 'the tour wrote nothing to the workspace')
