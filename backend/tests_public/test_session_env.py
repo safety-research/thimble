@@ -237,6 +237,39 @@ def test_the_session_key_is_private_to_thimble_and_outlives_a_restart(monkeypatc
     assert hook_auth.session_token(CORPUS, "orient") != token, "each start gets a token of its own"
 
 
+def test_sessions_that_start_together_on_a_new_home_share_one_key(monkeypatch, tmp_path):
+    """The first sessions of a new home start at once, as an orientation and view builds do: each gets a token, and
+    every token proves its session."""
+    import threading
+
+    for i in range(20):
+        monkeypatch.setenv("THIMBLE_HOME", str(tmp_path / f"home{i}"))
+        barrier, tokens = threading.Barrier(8), []
+
+        def start() -> None:
+            barrier.wait()
+            tokens.append(hook_auth.session_token(CORPUS, "orient"))
+
+        threads = [threading.Thread(target=start) for _ in range(8)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        assert len(tokens) == 8 and all(hook_auth.session_proven(CORPUS, "orient", t) for t in tokens)
+        assert os.listdir(tmp_path / f"home{i}") == [hook_auth.SESSION_KEY]
+
+
+def test_the_server_writes_the_session_key_as_it_starts(monkeypatch, tmp_path, workspaces_tmp):
+    """The key is in place before any session starts, so the sessions' sandbox hides a file that is there."""
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+
+    monkeypatch.setenv("THIMBLE_HOME", str(tmp_path / "home"))
+    with TestClient(app):
+        assert (tmp_path / "home" / hook_auth.SESSION_KEY).stat().st_mode & 0o777 == 0o600
+
+
 def test_launch_and_session_environments(monkeypatch):
     """launch_environ keeps none of thimble's variables; session_env gives a session its own values over every name a
     service could hold from another session."""

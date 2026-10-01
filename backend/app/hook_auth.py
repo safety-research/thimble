@@ -30,12 +30,15 @@ notebook kernel in bubblewrap that the model writes cells for, can do neither.
 """
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import hmac
 import json
 import os
 import re
 import secrets
+import tempfile
+import threading
 from pathlib import Path
 from typing import Callable
 
@@ -58,6 +61,7 @@ PROOF_HEADER = "x-thimble-proof"
 NONCE_MAX = 128  # characters
 SESSION_KEY = "session.key"  # in thimble's home: the secret session tokens are signed with (module note)
 SESSION_TOKEN_ENV = "THIMBLE_SESSION_TOKEN"
+_secret_lock = threading.Lock()
 UI_COOKIE = "thimble-ui"  # the cookie's name before the port was added to it (ui_cookie), which browsers still hold
 UI_COOKIE_AGE_S = 400 * 24 * 3600  # the longest a browser keeps a cookie
 # The cookie the browser holds (claim) and analyst() and LocalWriteGuard check. A cookie is not bound to a port, so the
@@ -156,29 +160,43 @@ def home() -> Path:
     return Path(os.environ.get("THIMBLE_HOME") or "~/.thimble").expanduser()
 
 
-def _session_secret(create: bool) -> bytes:
-    """The bytes of <home>/SESSION_KEY, written with fresh random bytes, readable by its owner alone, when `create` and
-    there is none; b"" when there is none."""
-    path = home() / SESSION_KEY
+def _read_secret(path: Path) -> bytes:
     try:
-        got = path.read_bytes().strip()
+        return path.read_bytes().strip()
     except OSError:
-        got = b""
+        return b""
+
+
+def _session_secret(create: bool) -> bytes:
+    """The bytes of <home>/SESSION_KEY; b"" when there is none. With `create` and no key, fresh random bytes go in place
+    whole, readable by their owner alone, unless another start put a key there first, which is then the one used."""
+    path = home() / SESSION_KEY
+    got = _read_secret(path)
     if got or not create:
         return got
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.unlink(missing_ok=True)
-    try:
-        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-    except FileExistsError:
-        return path.read_bytes().strip()
-    with os.fdopen(fd, "w", encoding="utf-8") as f:
-        f.write(secrets.token_hex(32))
-    return path.read_bytes().strip()
+    with _secret_lock:
+        got = _read_secret(path)
+        if got:
+            return got
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{SESSION_KEY}.")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(secrets.token_hex(32))
+            try:
+                os.link(tmp, path)
+            except FileExistsError:
+                if not _read_secret(path):  # an empty or unreadable file in its place
+                    os.replace(tmp, path)
+        finally:
+            with contextlib.suppress(OSError):
+                os.unlink(tmp)
+        return _read_secret(path)
 
 
 def ensure_session_key() -> None:
-    """Write <home>/SESSION_KEY when there is none, so a box that hides it finds it in place."""
+    """Write <home>/SESSION_KEY when there is none, so the sessions' sandbox hides a file that is in place and the first
+    sessions to start find one key."""
     _session_secret(True)
 
 
