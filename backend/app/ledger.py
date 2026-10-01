@@ -248,10 +248,10 @@ def get_settings(c: str) -> dict[str, Any]:
     return with_features(stored_settings(c), c)
 
 
-# The keys PUT /settings may change: the settings the browser's settings panel and switches save, and the rows of the
-# permission modes, which only the analyst's browser may change (hook_auth.analyst). The models and the permission modes
-# are written to thimble's config (userconf.save), the rest to the workspace's settings.json. Every other key is the
-# server's own or the analyst's to edit in the file (kernel_wrap, orient_instructions), since a kernel cell or a
+# The keys PUT /settings may change: SETTINGS_DEFAULTS, the models the browser's settings panel saves, and the rows of
+# the permission modes, which only the analyst's browser may change (hook_auth.analyst). The models and the permission
+# modes are written to thimble's config (userconf.save), the rest to the workspace's settings.json. Every other key is
+# the server's own or the analyst's to edit in the file (kernel_wrap, orient_instructions), since a kernel cell or a
 # session's command can reach the route on loopback. RETIRED_KEYS are taken too, and dropped.
 PUT_KEYS = frozenset({*SETTINGS_DEFAULTS, config.MODELS_KEY, "permission_modes", *RETIRED_KEYS})
 
