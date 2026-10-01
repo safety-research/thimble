@@ -16,7 +16,7 @@
     {"field": "d", "from": "the tool_use's and the tool_result's timestamps", "how": "the seconds between them"},
     {"field": "dur", "from": "d", "how": "under 1 s, 1–10 s or over 10 s"},
     {"field": "tool", "from": "a tool_use block's name", "how": "Agent read as Task"},
-    {"field": "outcome", "from": "the tool_result's is_error or isError, and its text", "how": "denied when the result says permission was denied, error when it is flagged, else ok"},
+    {"field": "outcome", "key": "out", "from": "the tool_result's is_error or isError, and its text", "how": "denied when the result says permission was denied, error when it is flagged, else ok"},
     {"field": "result", "from": "the tool_result's text", "how": "its first line, a denial's or an error's prefix and an Exit code line dropped"},
     {"field": "exit", "from": "the tool_result's text", "how": "the number after Exit code"},
     {"field": "input", "from": "the tool_use's input", "how": "the one value that names the call: a path, a command, a Grep's pattern with its path and mode, a query or a Task's description"},

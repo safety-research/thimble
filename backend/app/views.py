@@ -94,7 +94,7 @@ MEMO_MAX = 5000  # resolved locators kept in memory
 ERROR_MAX = 2000
 PROBLEMS_SHOWN = 20  # the lines a reader could not read that thimble lists beside the view (reader_problems)
 DERIVED_MAX = 100  # the derived fields a view lists
-DERIVED_CHARS = {"field": 80, "from": 300, "how": 600}
+DERIVED_CHARS = {"field": 80, "key": 80, "from": 300, "how": 600}
 INFERRED_KINDS = ("inferred", "computed")  # a derived field's `kind` for a value the files do not state
 WHY_CHARS = 300  # of why hidden() leaves a file out
 NOT_SHOWN_NAMED = 5  # the files a failed check names that the view neither read whole nor hid
@@ -104,7 +104,11 @@ SOURCE_MAX = 400_000  # chars of reader.py or view.html a view may hold
 # the checks: sample lines per claimed file, files sampled, keys followed, cited records read per key
 CHECK_LINES, CHECK_FILES, CHECK_KEYS, CHECK_KEY_REFS = 3, 3, 3, 30
 SHOT_TIMEOUT_S, SHOT_STATE_S = 30.0, 30.0  # a headless run's time: the browser's start, then each state's
-SHOT_SIZE = (800, 700)  # the view's pane in a 1440×900 window, beside the chat and the Labels sidebar
+# the view's pane: in a 1440×900 window beside the chat, as it opens and with the Labels pane open beside it, and in a
+# 1920×1080 window as it opens
+PANE_SIZE, PANE_NARROW, PANE_WIDE = (1048, 676), (798, 676), (1528, 856)
+SHOT_SIZE = PANE_SIZE
+WIDE_USED = 0.7  # of the wide pane, the share a page's text and graphics must span not to be noted as left empty
 # a page anchoring fewer than one in ANCHORED_SHARE of the record refs its fetches returned is noted by the gate
 # (unmarked); the strings of each answer read for them, FETCHED_SCAN_MAX at most
 ANCHORED_SHARE = 10
@@ -263,8 +267,9 @@ def _cut(text: str, n: int) -> str:
 
 
 def _derived(v: Any) -> list[dict[str, str]]:
-    """[{field, from, how, kind}] from view.json's `derived` or a reader's derived(index): each with a field name, the
-    first entry of a field kept, `kind` "inferred" for a value the files do not state (a join, an estimate, a
+    """[{field, key, from, how, kind}] from view.json's `derived` or a reader's derived(index): each with a field name,
+    the first entry of a field kept, `key` the key the field has in the reader's records where it differs ('' else),
+    `kind` "inferred" for a value the files do not state (a join, an estimate, a
     classification), given as "inferred" or "computed", and "" otherwise. The inferred fields come first, each list in
     its own order."""
     out: list[dict[str, str]] = []
@@ -2196,8 +2201,9 @@ def gate_lines(report: dict[str, Any]) -> list[str]:
         if s.get("ok"):
             x = s.get("shown") or {}
             lines.append(f"page: {s.get('state')}, {int(x.get('records') or 0)} records and {int(x.get('units') or 0)} "
-                         f"units shown, {int(x.get('drawn') or 0)} of the {int(x.get('due') or 0)} the test label marks "
-                         "drawn marked"
+                         "units shown"
+                         + (f", {int(x.get('drawn') or 0)} of the {int(x.get('due') or 0)} the test label marks drawn marked"
+                            if s.get("state", "overview") in LABELLED_STATES else "")
                          + (f", {int(x.get('unkept') or 0)} records shown that the filter drops"
                             if s.get("state") == "filtered" else ""))
         else:
@@ -2345,11 +2351,12 @@ async def shoot(c: str, slug: str, open_place: dict[str, Any] | None, out_png: P
 async def shoot_states(c: str, slug: str, states: list[dict[str, Any]], *, width: int = SHOT_SIZE[0],
                        height: int = SHOT_SIZE[1], answers: int = 0,
                        prepared: dict[str, Any] | None = None) -> list[dict[str, Any]]:
-    """Load the view's page headless once per state (shoot_page), each state {out, open, labels}: send it `open`,
-    answer its fetches from the reader and its marks requests under the state's labels context (NO_LABELS, a
-    probe_context or labels_context), serve its media requests with the file media_file names, and write a picture of it
-    to `out`, when it names one. Returns one result per state, {ok, errors, fetches, height, refs, records, units,
-    marked, hidden, shown, fonts, fetched_records, png?}, and with `answers` the first that many reader answers each
+    """Load the view's page headless once per state (shoot_page), each state {out, open, labels, size?, actions?}: send
+    it `open`, click the controls `actions` names in turn, answer its fetches from the reader and its marks requests
+    under the state's labels context (NO_LABELS, a probe_context or labels_context), serve its media requests with the
+    file media_file names, and write a picture of it to `out`, when it names one, at its `size` (width, height) or at
+    `width` by `height`. Returns one result per state, {ok, errors, fetches, height, refs, records, units, marked, hidden,
+    shown, layout, controls, actions, fonts, fetched_records, png?}, and with `answers` the first that many reader answers each
     state's page got; without Node or the frontend's packages each has build_problem's line as its one error. With
     `prepared`, a reader request of its own (robust_check's), the page's fetches are answered from it."""
     view = read_view(c, slug)
@@ -2389,7 +2396,9 @@ async def shoot_states(c: str, slug: str, states: list[dict[str, Any]], *, width
         except (HTTPException, OSError) as e:
             return {"error": str(getattr(e, "detail", e))}
 
-    shot_states = [{"out": s.get("out"), "open": s.get("open") or {}} for s in states]
+    shot_states = [{"out": s.get("out"), "open": s.get("open") or {}, "actions": [str(a) for a in s.get("actions") or []],
+                    **({"viewport": {"width": s["size"][0], "height": s["size"][1]}} if s.get("size") else {})}
+                   for s in states]
     doc = frame_document(view, media, derived=await derived_fields(c, slug, view))
     out = await shoot_page(doc, shot_states, answer, width=width, height=height, media=media)
     for i, r in enumerate(out):
@@ -2402,7 +2411,8 @@ async def shoot_states(c: str, slug: str, states: list[dict[str, Any]], *, width
 async def shoot_page(doc: str, states: list[dict[str, Any]], answer: Any, *, width: int, height: int,
                      media: str | None = None) -> list[dict[str, Any]]:
     """Load a frame document headless once per state (scripts/view_shot.mjs, in the frontend's Playwright Chromium),
-    each state {out, open}, send it `open` once it says ready, and write a picture of it to `out` when it names one. Every
+    each state {out, open, actions?, viewport?}, send it `open` once it says ready, click the controls `actions` names,
+    and write a picture of it to `out` when it names one. Every
     request the page makes, `fetch`, `marks` or `media`, is answered by `await answer(kind, state index, message)`, a
     dict of the answer's fields. Returns one result per state, {ok, errors, fetches, fonts, png?, ...} as view_shot.mjs
     reports it; without Node or the frontend's packages each has build_problem's line as its one error, and without the
@@ -2770,19 +2780,23 @@ async def check(c: str, slug: str, locators: list[str] | None = None, *, shot_di
         problems, notes = await robust_check(c, slug, view, files, overview.get("shown"))
         report["problems"] += problems
         report["notes"] += notes
-    declared = {d["field"] for d in (report.get("coverage") or {}).get("derived") or view["derived"]}
+    declared = {k for d in (report.get("coverage") or {}).get("derived") or view["derived"] for k in (d["field"], d.get("key"))
+                if k}
     if unlisted := await asyncio.to_thread(unlisted_derived, c, shots, declared):
-        report["notes"].append(_hint("view-derived-unlisted", fields="; ".join(
+        report["problems"].append(_hint("view-derived-unlisted", fields="; ".join(
             f"{x['field']} ({x['value']!r} on {x['ref']})" for x in unlisted)))
+    report["notes"] += layout_notes(shots)
     page = report["page"]
     report["ok"] = (not report["problems"] and all(r["ok"] for r in report["checks"])
                     and bool(page.get("ok") or page.get("unavailable")))
     return report
 
 
-# the states the checks load the page in, with the test label on: the page as the Views bar opens it, the same filtered
-# to the test label, and the first place that resolved
-CHECK_STATES = ("overview", "filtered", "detail")
+# the states the checks load the page in: with the test label on, in the pane beside the Labels pane, the page as the
+# Views bar opens it, the same filtered to the test label, and the first place that resolved; then with no label, the
+# page as it opens in its pane and in the pane of a 1920 px window
+CHECK_STATES = ("overview", "filtered", "detail", "opened", "wide")
+LABELLED_STATES = ("overview", "filtered", "detail")
 ANSWERS_KEPT = 2  # reader answers per state the checks keep, for unlisted_derived and the review
 
 
@@ -2799,14 +2813,18 @@ async def first_place(c: str, slug: str, checks: list[dict[str, Any]]) -> dict[s
 
 async def shoot_checks(c: str, slug: str, view: dict[str, Any], files: list[tuple[str, int, int]],
                        checks: list[dict[str, Any]], base: Path, stem: str, *, picture: bool = False) -> list[dict[str, Any]]:
-    """The page loaded in CHECK_STATES with the test label on: the overview, opened on its first claimed file as the
-    Views bar opens it, the same filtered to the test label, and the detail, the first place that resolved. Only with
-    `picture` is anything pictured: the overview. Each result carries its `state` name."""
+    """The page loaded in CHECK_STATES: with the test label on, at PANE_NARROW, the overview, opened on its first claimed
+    file as the Views bar opens it, the same filtered to the test label, and the detail, the first place that resolved;
+    then with no label the overview at PANE_SIZE and at PANE_WIDE. Only with `picture` is anything pictured: the
+    overview at PANE_SIZE, as the review's first picture shows it. Each result carries its `state` name."""
     overview = {"ref": None, "path": files[0][0]} if files else {"ref": None}
     detail = await first_place(c, slug, checks) or overview
-    states = [{"out": base / f"{stem}-overview.png" if picture else None, "open": overview, "labels": probe_context()},
-              {"out": None, "open": overview, "labels": probe_context(True)},
-              {"out": None, "open": detail, "labels": probe_context()}]
+    states = [{"out": None, "open": overview, "labels": probe_context(), "size": PANE_NARROW},
+              {"out": None, "open": overview, "labels": probe_context(True), "size": PANE_NARROW},
+              {"out": None, "open": detail, "labels": probe_context(), "size": PANE_NARROW},
+              {"out": base / f"{stem}-overview.png" if picture else None, "open": overview, "labels": NO_LABELS,
+               "size": PANE_SIZE},
+              {"out": None, "open": overview, "labels": NO_LABELS, "size": PANE_WIDE}]
     shots = await shoot_states(c, slug, states, answers=ANSWERS_KEPT)
     return [{**s, "state": name} for s, name in zip(shots, CHECK_STATES)]
 
@@ -2821,7 +2839,7 @@ def _page_of(shots: list[dict[str, Any]]) -> dict[str, Any]:
             "refs": max(int(s.get("refs") or 0) for s in shots), "records": max(int(s.get("records") or 0) for s in shots),
             "units": max(int(s.get("units") or 0) for s in shots),
             "fetched_records": max(int(s.get("fetched_records") or 0) for s in shots)}
-    png = shots[-1].get("png") or shots[0].get("png")
+    png = next((s["png"] for s in shots if s.get("png")), None)
     if png:
         page["png"] = png
     return page
@@ -2857,7 +2875,8 @@ def label_problems(view: dict[str, Any], files: list[tuple[str, int, int]],
     not keep are noted, since a record the page draws for several lines is anchored by one of them."""
     if not lined(view, files):
         return [], []
-    loaded = {str(s.get("state")): s.get("shown") for s in shots if s.get("ok") and isinstance(s.get("shown"), dict)}
+    loaded = {str(s.get("state")): s.get("shown") for s in shots
+              if s.get("ok") and isinstance(s.get("shown"), dict) and s.get("state", "overview") in LABELLED_STATES}
     seen = [(name, x) for name, x in loaded.items() if name != "filtered"]
     if not seen:
         return [], []
@@ -2867,7 +2886,8 @@ def label_problems(view: dict[str, Any], files: list[tuple[str, int, int]],
     units = max(int(x.get("units") or 0) for _, x in seen)
     if not records and not units:
         return [_hint("view-no-anchors", slug=view["slug"])], []
-    fetched = max(int(s.get("fetched_records") or 0) for s in shots if s.get("state") != "filtered")
+    fetched = max([int(s.get("fetched_records") or 0) for s in shots if s.get("state", "overview") in ("overview", "detail")]
+                  or [0])
     if not units and records < max(1, fetched // ANCHORED_SHARE):
         problems.append(_hint("view-few-anchors", fetched=fetched, records=records))
     for name, x in seen:
@@ -2878,6 +2898,43 @@ def label_problems(view: dict[str, Any], files: list[tuple[str, int, int]],
     if (f := loaded.get("filtered")) is not None and (unkept := int(f.get("unkept") or 0)):
         notes.append(_hint("view-filter-unkept", unkept=unkept, records=int(f.get("records") or 0)))
     return problems, notes
+
+
+# how layout_notes names each state it measures, at the pane's width {w}
+LAYOUT_WHERE = {"opened": "as it opens in its {w} px pane", "overview": "with the test label on, in the {w} px pane beside the Labels pane",
+                "detail": "at the first place that resolved, {w} px wide", "wide": "in the {w} px pane of a 1920 px window"}
+LAYOUT_NAMED = 3  # texts a layout note quotes of each kind
+
+
+def layout_parts(lay: dict[str, Any], wide: bool = False) -> list[str]:
+    """How a page did not fit its pane, as view_shot.mjs measured it (`layout`), in a few words each: text drawn over
+    other text, text cut off by its box, a page wider than its pane, and, in the `wide` pane, a page whose text and
+    graphics span less than WIDE_USED of it."""
+    width = int(lay.get("width") or 0)
+    parts = []
+    if n := int(lay.get("overlaps") or 0):
+        pairs = "; ".join(f"{a!r} and {b!r}" for a, b in (lay.get("pairs") or [])[:LAYOUT_NAMED])
+        parts.append(_hint("view-layout-overlap", n=n, pairs=pairs))
+    if n := int(lay.get("cut") or 0):
+        parts.append(_hint("view-layout-cut", n=n, texts="; ".join(repr(t) for t in (lay.get("cuts") or [])[:LAYOUT_NAMED])))
+    if px := int(lay.get("overflow") or 0):
+        parts.append(_hint("view-layout-overflow", px=px))
+    used = int(lay.get("used") or 0)
+    if wide and width and 0 < used < WIDE_USED * width:
+        parts.append(_hint("view-layout-empty", used=used, width=width))
+    return parts
+
+
+def layout_notes(shots: list[dict[str, Any]]) -> list[str]:
+    """One note per state of LAYOUT_WHERE whose page did not fit its pane (layout_parts). Fit is noted, never failed."""
+    out = []
+    for s in shots:
+        lay, where = s.get("layout"), LAYOUT_WHERE.get(str(s.get("state")))
+        if not s.get("ok") or not isinstance(lay, dict) or where is None:
+            continue
+        if parts := layout_parts(lay, wide=s.get("state") == "wide"):
+            out.append(_hint("view-layout", where=where.format(w=int(lay.get("width") or 0)), parts="; ".join(parts)))
+    return out
 
 
 ROBUST_SUBDIR = "robust"  # under the view's index folder: the corpus copy robust_check runs the view on
@@ -3055,8 +3112,8 @@ def unlisted_derived(c: str, shots: list[dict[str, Any]], declared: set[str]) ->
     does not hold, for at least two records and most of those that have the field, and that `declared` does not name:
     [{field, value, ref}], each with one such value. A record is an object of an answer with a record ref among its
     values. Left out as needing no entry: positions and the page's own keys, counts, values put in for missing ones
-    (_exempt), a field whose missed values are all one value (a default), values that are lists or objects, and a value
-    the line holds under another name (a rename). Blocking."""
+    (_exempt), a field whose missed values are all one value (a default), values that are lists or objects, a value the
+    line holds under another name (a rename), and one the record's ref holds, as a run's folder. Blocking."""
     recs: dict[str, dict[str, Any]] = {}
     for s in shots:
         for a in s.get("answers") or []:
@@ -3084,7 +3141,7 @@ def unlisted_derived(c: str, shots: list[dict[str, Any]], declared: set[str]) ->
         for k, v in rec.items():
             if k in declared or v is None or isinstance(v, (bool, dict, list)) or _exempt(k, v):
                 continue
-            if v == ref or v == line or (isinstance(v, str) and (len(v.strip()) < 2 or _RECORD_REF.match(v))):
+            if v == ref or v == line or (isinstance(v, str) and (len(v.strip()) < 2 or _RECORD_REF.match(v) or v in ref)):
                 continue
             seen[k] = seen.get(k, 0) + 1
             if not _held(v, text, numbers):

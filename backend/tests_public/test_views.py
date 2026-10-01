@@ -293,10 +293,11 @@ DERIVING_READER = THREADS_READER.replace(
     ' "mood": "unknown"}')
 
 
-async def test_a_field_whose_values_the_cited_lines_do_not_hold_is_noted_until_the_view_lists_it(
+async def test_a_field_whose_values_the_cited_lines_do_not_hold_fails_the_checks_until_the_view_lists_it(
         ws, inproc, bound, monkeypatch):
-    """The checks compare the records the reader hands the page with the lines they cite, by code: a field whose values
-    are not in those lines and that `derived` does not list is noted, with no model call, and a listed one is not."""
+    """The checks compare the records the reader hands the page with the lines they cite, by code: every field whose
+    values are not in those lines and that `derived` does not list is named in one problem, with no model call, and a
+    listed one is not."""
     async def page(c, slug, states, **k):
         answer = await views.reader_call(c, slug, "records", {"thread": "t1"})
         return [{"ok": True, "errors": [], "fetches": 1, "answers": [answer], "shown": {"records": 3, "due": 0}}
@@ -305,8 +306,8 @@ async def test_a_field_whose_values_the_cited_lines_do_not_hold_is_noted_until_t
     monkeypatch.setattr(views, "shoot_states", page)
     views.write_view(CORPUS, "threads", reader=DERIVING_READER, html=THREADS_HTML, **VIEW)
     rep = await views.gate(CORPUS, "threads", ["board.jsonl#L3"])
-    assert rep["ok"], views.gate_lines(rep)
-    noted = [n for n in rep["notes"] if "`derived`" in n]
+    assert not rep["ok"], views.gate_lines(rep)
+    noted = [n for n in rep["problems"] if "`derived`" in n]
     assert len(noted) == 1 and "author ('ADA' on board.jsonl#L1)" in noted[0] and "score (" in noted[0], noted
     for field in ("body", "replies", "thread_key", "mood"):
         assert f"{field} (" not in noted[0], f"{field}: a raw value, a count, a key or a default needs no entry"
@@ -314,7 +315,7 @@ async def test_a_field_whose_values_the_cited_lines_do_not_hold_is_noted_until_t
                      **{**VIEW, "derived": [{"field": "author", "from": "author", "how": "upper-cased"},
                                             {"field": "score", "from": "body", "how": "its length", "kind": "inferred"}]})
     rep = await views.gate(CORPUS, "threads", ["board.jsonl#L3"])
-    assert rep["ok"] and not [n for n in rep["notes"] if "`derived`" in n], views.gate_lines(rep)
+    assert rep["ok"] and not [n for n in rep["problems"] + rep["notes"] if "`derived`" in n], views.gate_lines(rep)
     assert [d["field"] for d in rep["coverage"]["derived"]] == ["score", "author"], "an inferred field comes first"
 
 
@@ -469,7 +470,7 @@ async def test_the_review_reads_one_picture_asks_for_more_and_sends_its_problems
     await view_review._review(view_review._Run(CORPUS, "threads"))
     assert taken == [["plain"], ["filtered"], ["plain"]]
     assert [(n, more) for n, more, _ in readings] == [(1, True), (2, False), (1, True)]
-    assert "2: the overview filtered to the test label (asked for: the filter)" in readings[1][2]
+    assert f"2: the overview filtered to the test label, {views.PANE_NARROW[0]} px wide (asked for: the filter)" in readings[1][2]
     assert revisions == [["picture 2: the filter keeps every post"]]
     review = views.read_proposal(CORPUS, "threads")["review"]
     assert review["state"] == "done" and review["revised"] == revisions[0] and review["shots"] == 3 and not review["left"]
@@ -653,7 +654,7 @@ async def test_every_worked_example_s_page_loads_headless_at_its_first_place(nam
     assert rep["ok"], views.gate_lines(rep)
     assert rep["page"]["fetches"] >= 1 and Path(rep["page"]["png"]).is_file()
     assert [s["state"] for s in rep["shots"]] == list(views.CHECK_STATES)
-    assert [s for s in rep["shots"] if s.get("png")] == rep["shots"][:1], "only the picture asked for is taken"
+    assert [s["state"] for s in rep["shots"] if s.get("png")] == ["opened"], "only the picture asked for is taken"
     if name != "pdf":
         shown = rep["shots"][0]["shown"]
         assert shown["due"] and shown["drawn"] == shown["due"], "the test label shows on the records a worked example shows"

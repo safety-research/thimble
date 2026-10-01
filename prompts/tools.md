@@ -810,6 +810,26 @@ With {what}, the page failed: {errors}. One missing file or bad line must leave 
 
 With {what}, the page shows no record, though over the whole corpus it shows records. One missing file or bad line must leave the rest of the view working.
 
+## view-layout
+
+The page {where}: {parts}.
+
+## view-layout-overlap
+
+text overlaps other text in {n} places, such as {pairs}
+
+## view-layout-cut
+
+{n} texts run past a box that hides them without an ellipsis, such as {texts}
+
+## view-layout-overflow
+
+it is {px} px wider than its pane, so it scrolls sideways
+
+## view-layout-empty
+
+its text and graphics span {used} of its {width} px, so the rest of the pane is empty
+
 ## view-not-shown
 
 {count} claimed files are neither read to the end by build_index nor listed with a why by hidden(index): {files}. The analyst sees each one above the view as not shown. Read each file whole in build_index, with Python's `open()`, or return it from hidden(index) with its `path` and a `why` that says why the view leaves it out.
@@ -820,7 +840,7 @@ With {what}, the page shows no record, though over the whole corpus it shows rec
 
 ## view-derived-unlisted
 
-Fields of the records the reader answered hold values that the lines they cite do not, and `derived` does not list them: {fields}. The analyst counts on that list to tell what the files say from what the reader made of them. List each field the reader made in `derived` in view.json, with `from` and `how`, or from the reader's derived(index).
+Fields of the records the reader answered hold values that the lines they cite do not, and `derived` does not list them: {fields}. The analyst counts on that list to tell what the files say from what the reader made of them. List each of these fields in `derived` in view.json, with `from` and `how`, `"kind": "inferred"` for a value the files do not state, and `key` when the analyst knows the field by another name, or return it from the reader's derived(index).
 
 ## check-unread
 

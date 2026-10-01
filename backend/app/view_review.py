@@ -1,7 +1,8 @@
 """The view review: once a view the dev agent built passes its checks, which code runs without pictures (views.check),
-one picture of its page as it opens goes to one model reading (prompts/view-review.md). The reading names the problems
-it sees and may ask for up to EXTRA_SHOTS pictures of other states (EXTRA_STATES), which are taken and read once more
-with the first. The problems go back to the view's build session to fix, up to ROUNDS times. The view reaches the
+one picture of its page as it opens in its pane (views.PANE_SIZE) goes to one model reading (prompts/view-review.md),
+with what the checks found, how the page's text fits (views.layout_notes) and the controls it shows. The reading names
+the problems it sees and may ask for up to EXTRA_SHOTS pictures of other states (EXTRA_STATES), such as a control
+clicked or another pane width, which are taken and read once more with the first. The problems go back to the view's build session to fix, up to ROUNDS times. The view reaches the
 analyst at once and the review runs beside it; each revision that passes the view's checks replaces it, with Undo back
 to the view as it was built.
 
@@ -67,11 +68,15 @@ REVISION_FAILED_NOTE = "A revision did not pass the view's checks, so the view i
 PAST_TIME_NOTE = "The review ran past {minutes} minutes, so the view is at its last version that passed its checks."
 STOPPED_NOTE = "The review was stopped."
 CHANGED_NOTE = "The view changed while it was reviewed."
-# the states the reading may ask to see beside the overview: the overview with the test label on, filtered to it, the
-# first place a citation opens, the place a ref names, and the overview in the pane of a 1920 px window
-EXTRA_STATES = ("labels", "filtered", "detail", "open", "wide")
+# the states the reading may ask to see beside the overview, each with its pane: the overview with the test label on and
+# filtered to it, beside the Labels pane; the first place a citation opens and the place a ref names, with the test
+# label on; the overview in the pane of a 1920 px window and beside the Labels pane; and the overview after clicking
+# the controls it names
+EXTRA_STATES = {"labels": views.PANE_NARROW, "filtered": views.PANE_NARROW, "detail": views.PANE_NARROW,
+                "open": views.PANE_NARROW, "wide": views.PANE_WIDE, "narrow": views.PANE_NARROW,
+                "control": views.PANE_SIZE}
 EXTRA_SHOTS = 3
-WIDE_SIZE = (1280, 880)
+CONTROLS_CLICKED = 3  # controls one `control` state clicks in turn
 
 _runs: dict[tuple[str, str], "_Run"] = {}
 _sem: asyncio.Semaphore | None = None
@@ -389,38 +394,35 @@ def _unusable(shots: list[dict[str, Any]]) -> str:
 
 async def shoot(c: str, slug: str, view: dict[str, Any], files: list[tuple[str, int, int]], wanted: list[dict[str, Any]],
                 run: _Run) -> list[dict[str, Any]]:
-    """Pictures of the states `wanted`, each {state, ref?, why?}: `overview` with no label, as the Views bar opens the
-    view, or one of EXTRA_STATES. Each result carries its state, its ref and the reading's why."""
+    """Pictures of the states `wanted`, each {state, ref?, controls?, why?}: `overview` with no label, as the Views bar
+    opens the view in its pane, or one of EXTRA_STATES in its pane. Each result carries its state, ref, controls, the
+    reading's why and the pane's size."""
     base = views.cache_dir(c, view) / "review"
     overview = {"ref": None, "path": files[0][0]} if files else {"ref": None}
     stem = f"round-{run.round}-{int(time.time())}"
-    narrow: list[tuple[dict[str, Any], dict[str, Any]]] = []
-    wide: list[tuple[dict[str, Any], dict[str, Any]]] = []
+    states: list[dict[str, Any]] = []
     for i, w in enumerate(wanted):
         state, out = str(w.get("state")), base / f"{stem}-{run.shots + i + 1}.png"
+        st: dict[str, Any] = {"out": out, "open": overview, "labels": views.NO_LABELS,
+                              "size": EXTRA_STATES.get(state, views.PANE_SIZE)}
         if state == "labels":
-            narrow.append((w, {"out": out, "open": overview, "labels": views.probe_context()}))
+            st["labels"] = views.probe_context()
         elif state == "filtered":
-            narrow.append((w, {"out": out, "open": overview, "labels": views.probe_context(True)}))
+            st["labels"] = views.probe_context(True)
         elif state == "detail":
             locs = views._kept_locators(c, slug) or ([f"{files[0][0]}#L1"] if files else [])
             place = await views.first_place(c, slug, [{"ok": True, "locator": loc} for loc in locs]) if locs else None
-            narrow.append((w, {"out": out, "open": place or overview, "labels": views.probe_context()}))
+            st.update(open=place or overview, labels=views.probe_context())
         elif state == "open":
             ref = str(w.get("ref") or "")
             place = await views.open_place(c, slug, ref, views.locator_of(ref)) if views.locator_of(ref) else overview
-            narrow.append((w, {"out": out, "open": place, "labels": views.probe_context()}))
-        elif state == "wide":
-            wide.append((w, {"out": out, "open": overview, "labels": views.NO_LABELS}))
-        else:
-            narrow.append((w, {"out": out, "open": overview, "labels": views.NO_LABELS}))
-    results: list[dict[str, Any]] = []
-    for group, size in ((narrow, views.SHOT_SIZE), (wide, WIDE_SIZE)):
-        if not group:
-            continue
-        got = await views.shoot_states(c, slug, [st for _, st in group], width=size[0], height=size[1],
-                                       answers=ANSWERS_PER_STATE)
-        results += [{**r, "state": w.get("state"), "ref": w.get("ref"), "why": w.get("why")} for (w, _), r in zip(group, got)]
+            st.update(open=place, labels=views.probe_context())
+        elif state == "control":
+            st["actions"] = list(w.get("controls") or [])[:CONTROLS_CLICKED]
+        states.append(st)
+    got = await views.shoot_states(c, slug, states, answers=ANSWERS_PER_STATE) if states else []
+    results = [{**r, "state": w.get("state"), "ref": w.get("ref"), "controls": w.get("controls"), "why": w.get("why"),
+                "size": st["size"]} for w, st, r in zip(wanted, states, got)]
     run.shots += sum(1 for r in results if r.get("png"))
     return results
 
@@ -444,15 +446,26 @@ def _fill(template: str, values: dict[str, str]) -> str:
 
 
 def pictures_text(shots: list[dict[str, Any]]) -> str:
-    """One line per picture: its number, its state, the ref it opened and why the reading asked for it."""
+    """One line per picture: its number, its state and pane, the ref it opened or the controls it clicked, why the
+    reading asked for it, and how its text fits as layout_notes words it; then the controls the first picture shows."""
     words = {"overview": "the view as it opens, with no label on", "labels": "the overview with the test label on",
              "filtered": "the overview filtered to the test label", "detail": "the place the first citation opens",
-             "open": "the place {ref} opens, with the test label on",
-             "wide": "the view as it opens in the pane of a 1920 px window"}
+             "open": "the place {ref} opens, with the test label on", "wide": "the view as it opens",
+             "narrow": "the view as it opens, with no label on", "control": "the overview after clicking {controls}"}
     lines = []
     for i, s in enumerate(shots, 1):
-        what = words.get(str(s.get("state")), words["overview"]).format(ref=s.get("ref") or "the ref")
-        lines.append(f"{i}: {what}" + (f" (asked for: {s['why']})" if s.get("why") else ""))
+        clicked = [a for a in s.get("actions") or [] if isinstance(a, dict)]
+        controls = ", then ".join(repr(a.get("control")) + ("" if a.get("found") else " (not found)") for a in clicked)
+        what = words.get(str(s.get("state")), words["overview"]).format(ref=s.get("ref") or "the ref",
+                                                                         controls=controls or "nothing")
+        lay = s.get("layout") if isinstance(s.get("layout"), dict) else {}
+        size = s.get("size") or views.PANE_SIZE
+        line = f"{i}: {what}, {size[0]} px wide" + (f" (asked for: {s['why']})" if s.get("why") else "")
+        fit = views.layout_parts(lay, wide=s.get("state") == "wide") if s.get("ok") else []
+        lines.append(line + (f". Measured: {'; '.join(fit)}" if fit else ""))
+    first = shots[0].get("controls") if shots else None
+    if first:
+        lines.append("The controls picture 1 shows, by their text: " + "; ".join(str(x) for x in first))
     return "\n".join(lines)
 
 
@@ -536,8 +549,9 @@ async def read(c: str, run: _Run, prop: dict[str, Any], view: dict[str, Any], sh
 
 
 def _findings(raw: dict[str, Any], ask: bool) -> tuple[list[str], list[dict[str, Any]]] | None:
-    """The reading's problems as sentences and, with `ask`, the extra states it asks for, each {state, ref?, why} of
-    EXTRA_STATES (an `open` with a ref), EXTRA_SHOTS at most; None for a malformed answer."""
+    """The reading's problems as sentences and, with `ask`, the extra states it asks for, each {state, ref?, controls?,
+    why} of EXTRA_STATES (an `open` with a ref, a `control` with the controls to click), EXTRA_SHOTS at most; None for a
+    malformed answer."""
     problems = raw.get("problems")
     if not isinstance(problems, list) or not all(isinstance(p, str) for p in problems):
         return None
@@ -545,7 +559,11 @@ def _findings(raw: dict[str, Any], ask: bool) -> tuple[list[str], list[dict[str,
     for m in raw.get("more") or [] if ask else []:
         if not isinstance(m, dict) or m.get("state") not in EXTRA_STATES or (m["state"] == "open" and not m.get("ref")):
             continue
-        more.append({"state": m["state"], "ref": str(m.get("ref") or "") or None, "why": " ".join(str(m.get("why") or "").split())})
+        controls = [" ".join(str(x).split()) for x in m.get("controls") or [] if str(x).strip()][:CONTROLS_CLICKED]
+        if m["state"] == "control" and not controls:
+            continue
+        more.append({"state": m["state"], "ref": str(m.get("ref") or "") or None, "controls": controls or None,
+                     "why": " ".join(str(m.get("why") or "").split())})
     return [" ".join(p.split()) for p in problems if p.strip()], more[:EXTRA_SHOTS]
 
 
