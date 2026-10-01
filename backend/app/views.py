@@ -277,9 +277,10 @@ def move_to_local(ws: Path) -> list[str]:
     """The views an older thimble kept in views/ of the workspace folder `ws` moved into its local extension: each view's
     folder (one that holds a view's file, or one a proposal names) is renamed into extension/views/ whole, its files,
     cache and times unchanged, so its proposal, kept versions and indexes find it as before. A slug the local extension
-    holds already stays where it is. Paths into the moved folders in the card types' registry are updated. Run again,
-    it moves nothing. A link where the local extension or its views folder goes, which a kernel of an older thimble
-    could leave, is removed. Returns the slugs moved."""
+    holds already stays where it is. Paths into the moved folders in the card types' registry are updated, and a link
+    is left at each old place (old_link), so an older thimble run on the workspace again finds its views rather than
+    building them again. Run again, it moves nothing. A link where the local extension or its views folder goes, which
+    a kernel of an older thimble could leave, is removed. Returns the slugs moved."""
     for p in (ws / LOCAL_SUBDIR, ws / LOCAL_SUBDIR / VIEWS_SUBDIR):
         if p.is_symlink():
             p.unlink()
@@ -306,11 +307,20 @@ def move_to_local(ws: Path) -> list[str]:
         src = str(d.resolve())
         os.replace(d, to)
         moved[src] = str(to.resolve())
+        try:
+            os.symlink(Path("..") / LOCAL_SUBDIR / VIEWS_SUBDIR / d.name, d, target_is_directory=True)
+        except OSError as e:
+            log.warning("%s: no link was left at the old place of the view %s: %s", ws.name, d.name, e)
     if moved:
         _move_registry_paths(ws, moved)
         _new_sessions(old / PROPOSALS_FILE, raw, {Path(p).name for p in moved.values()})
         log.info("%s: %d view(s) moved into the workspace's local extension", ws.name, len(moved))
     return sorted(Path(p).name for p in moved.values())
+
+
+def old_link(c: str, slug: str) -> Path:
+    """Where an older thimble kept the view `slug`, which move_to_local leaves a link at."""
+    return state_dir(c) / slug
 
 
 def _new_sessions(path: Path, raw: Any, slugs: set[str]) -> None:
@@ -768,6 +778,8 @@ def delete_view(c: str, slug: str) -> None:
     drop_built_copy(c, slug)
     _forget(c, slug)
     _write_off(c, slug, True)
+    if old_link(c, slug).is_symlink():
+        old_link(c, slug).unlink()
     items = list_proposals(c)
     if any(p.get("slug") == slug for p in items):
         _save_proposals(c, [p for p in items if p.get("slug") != slug])
@@ -1919,6 +1931,8 @@ def withdraw(c: str, slug: str, extension: str | None) -> bool:
     _stop_review(c, slug, forget=True)
     shutil.rmtree(d, ignore_errors=True)
     shutil.rmtree(_versions_dir(c, slug), ignore_errors=True)
+    if old_link(c, slug).is_symlink():
+        old_link(c, slug).unlink()
     _forget(c, slug)
     with _proposals_lock:
         _save_proposals(c, [p for p in list_proposals(c) if p.get("slug") != slug])

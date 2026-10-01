@@ -17,7 +17,7 @@ import pytest
 from fastapi import HTTPException
 from starlette.requests import Request
 
-from app import config, extensions, ledger, views
+from app import config, export, extensions, ledger, views
 from app.kernel_thimble import CARD_TYPES_FILE
 
 CORPUS, OTHER = "boards", "notes"
@@ -155,7 +155,11 @@ def test_an_older_workspace_s_views_move_into_its_local_extension_once(corpora):
     assert views.list_proposals(CORPUS)[0]["status"] == "built"
     moved = views.read_built(CORPUS, "posts")
     assert moved is not None and Path(moved["dir"]) == new and moved["version"] == v["version"]
-    assert (new / "cache" / "shots" / "a.png").read_bytes() == b"png" and not old.exists()
+    assert (new / "cache" / "shots" / "a.png").read_bytes() == b"png"
+    assert old.is_symlink() and old.resolve() == new.resolve(), "an older thimble run again finds the view there"
+    exported = []
+    export._views(type("Writer", (), {"copy": lambda self, name, path: exported.append(name)})(), ws)
+    assert "extension/views/posts/view.json" in exported and not any(n.startswith("views/posts/") for n in exported)
     assert views.read_version(CORPUS, "posts", v["version"]) is not None
     assert json.loads((ws / "extension" / "extension.json").read_text())["version"] == "local"
     assert json.loads(registry.read_text())["types"]["posts"] == {"dir": str(new.resolve()),
@@ -167,6 +171,8 @@ def test_an_older_workspace_s_views_move_into_its_local_extension_once(corpora):
 
     assert views.migrate_workspaces() == {}
     assert views.read_built(CORPUS, "posts")["dir"] == str(new)
+    views.delete_view(CORPUS, "posts")
+    assert not old.is_symlink() and not new.exists()
 
 
 def test_a_link_left_where_the_local_extension_goes_is_replaced_by_a_folder(corpora, tmp_path):
