@@ -416,7 +416,6 @@ export const api = {
 
   // ---- documents ----
   frame: (c: string, slug: DocumentType) => j<Writeup>(`${inv(c, slug)}/frame`),
-  document: (c: string, slug: DocumentType) => j<Writeup>(inv(c, slug)),
   addFrameSection: (c: string, slug: DocumentType, heading: string) => j<Writeup>(`${inv(c, slug)}/frame/sections`, { method: 'POST', body: JSON.stringify({ heading }) }),
   addFrameParagraph: (c: string, slug: DocumentType, sid: string, text: string) => j<Writeup>(`${inv(c, slug)}/frame/sections/${enc(sid)}/paragraphs`, { method: 'POST', body: JSON.stringify({ text }) }),
   addFrameFigure: (c: string, slug: DocumentType, sid: string, body: { cell: string; caption?: string; after?: string }) => j<Writeup>(`${inv(c, slug)}/frame/sections/${enc(sid)}/figures`, { method: 'POST', body: JSON.stringify(body) }),

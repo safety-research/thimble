@@ -524,9 +524,10 @@ function useOrientReport(ws: string, since: string | null | undefined): string |
   useEffect(() => {
     if (!since) return
     let alive = true
+    // the frame route answers the document once it is written and a frame before, where the document's answers 404
     const look = () =>
       api
-        .document(ws, 'report')
+        .frame(ws, 'report')
         .then((d) => {
           const at = d.generated_at
           if (alive && at && !d.partial && !d.frame && Date.parse(at) >= Date.parse(since)) setSlug('report')
