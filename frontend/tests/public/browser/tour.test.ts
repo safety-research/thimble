@@ -2,19 +2,31 @@
 // and fonts, against a made-up workspace whose every API answer this file gives, at 1440x900, 1920x1080 and a chat
 // column 355 px wide at DPR 2 (in a 1200 and a 1100 px window, where the Files sidebar folds). What it proves, measured
 // with getBoundingClientRect:
-//   - the first launch asks first (a welcome with Skip and Take the tour) and records the offer in
-//     thimble's own state (POST /api/tour/seen); a page loaded after that offers nothing; Settings' Take the tour
-//     replays the tour from step 1;
+//   - the first launch asks first (a welcome, "Would you like a short tour?", with Skip and Take the tour) and records
+//     the offer in thimble's own state (POST /api/tour/seen); a page loaded after that offers nothing; Settings' Take
+//     the tour replays the tour from step 1; with the chat column folded the tour leaves out its chat steps;
 //   - every step: each cutout lies inside the window, everything an example shows in a cutout lies inside that cutout,
 //     the popover lies inside the window, covers no cutout wherever the window has room for it beside the first, and its
 //     caret points at the first cutout;
-//   - step 1's example sits 8 px or more inside its cutout, which lies inside the chat panel; the orientation's Start
-//     only shows the started state; the wheel scrolls the labels' transcript, steadily, and the report; inside the
-//     example view the wheel and a click work and reach nothing else; the card demo shows a value's source and the card
-//     is in plain words; in the ⌘-click demo the key badge stands inside the card and over none of its text; a real
-//     ⌘-drag on the example card picks only the words dragged over and its ask box lies inside the cutout; the report's
-//     first figure is the small table and it shows no check comment until the demo makes the check, and then each
-//     comment card stands 8 px above its passage, or below the card above it, before and after the report scrolls;
+//   - step 1's example sits 8 px or more inside its cutout, which lies inside the chat panel; step 3 says what the
+//     orientation does, and its Start only shows the started state;
+//   - step 5: the wheel scrolls the labels' transcript in steps with every record moving by exactly the scroll, its
+//     height, the cutout and the Labels pane still and the ruler's thumb following, and the wheel over the ruler too;
+//   - step 6: inside the example view the wheel and a click work and reach nothing else; in its header strip no item
+//     meets another or anything of the view, nothing of the tour (a badge, the popover, the views bar) meets it, the
+//     label control counts the labels on, the unreadable line is counted in the strip's ink, and the page's Only these
+//     shows as thimble's filter chip with how many events it hides, which the chip clears;
+//   - step 7: the card is in plain words; on its first entry the demo plays once the card is in place, comes to rest on
+//     08:04 as its source shows and the card holds still, also with the Canvas drawn 1.5 s late; a real hover on a value
+//     shows its source, and a hover that stops the demo leaves the ⌘ demo to play at once on step 8;
+//   - step 8: in the ⌘-click demo the key badge stands inside the card and over none of its text; then "⌘-click here"
+//     points at the end of an entry and covers no text and not the popover, until the first try; a real ⌘-drag on the
+//     example card picks only the words dragged over and its ask box lies inside the cutout;
+//   - step 9: the report's first figure is the small table, every chart and table is as wide as its figure, and with no
+//     check made there is no comment margin, so its text column is as wide as thimble's own Report draws it, also after
+//     Back from step 10; step 10: the demo makes the check, the margin stands at Run and not before, the comments appear
+//     in it, and only then does the page scroll to one; each comment card stands 8 px above its passage, or below the
+//     card above it, before and after the report scrolls;
 //   - the page is frozen: clicks, keys and the wheel reach nothing, the tour writes nothing but the offer, and telemetry
 //     records nothing while it runs; Enter in the page's ask box sends nothing, and an ask box left open closes when
 //     the tour starts.
@@ -295,6 +307,227 @@ const commentsLevel = (page: Page) =>
     })
   })
 
+// in the page, from Next on step 6 on, every frame: the step, the demo pointer's tip, the card's box, the centre of the
+// card's 08:04 and whether the demo's source shows
+const LOG7 = () => {
+  const w = window as any
+  w.__log7 = []
+  const t0 = performance.now()
+  const f = () => {
+    if (!w.__log7) return
+    const c = document.querySelector<HTMLElement>('.tour-cursor'),
+      m = c && /translate\(([-\d.]+)px, ([-\d.]+)px\)/.exec(c.style.transform)
+    const card = w.__tour().api.els.card as Element | undefined,
+      b = card?.getBoundingClientRect()
+    const chip = card && [...card.querySelectorAll('.refchip-value')].find((x) => x.textContent?.trim() === '08:04')?.getBoundingClientRect()
+    w.__log7.push({
+      t: Math.round(performance.now() - t0),
+      n: w.__tour().state().n,
+      at: m ? [+m[1] + 8, +m[2] + 7] : null,
+      card: b ? [b.x, b.y, b.width].map(Math.round).join() : null,
+      chip: chip ? [chip.x + chip.width / 2, chip.y + chip.height * 0.6] : null,
+      src: !!document.querySelector('.tour-fx .refchip-pop[data-demo]'),
+    })
+    if (w.__log7.length < 2400) requestAnimationFrame(f)
+  }
+  requestAnimationFrame(f)
+}
+type Log7 = { t: number; n: number; at: number[] | null; card: string | null; chip: number[] | null; src: boolean }
+const takeLog7 = (page: Page): Promise<Log7[]> =>
+  page.evaluate(() => {
+    const l = (window as any).__log7
+    ;(window as any).__log7 = null
+    return l
+  })
+/** The cards demo, from the log of its entry: the pointer showed within `maxMs` of Next, got 100 px or more from where
+ * it was first seen through 3 or more places, and stood within 3 px of 08:04 when the source first showed, the card not
+ * moving from the pointer's first frame on. */
+const judge7 = (log: Log7[], maxMs = 2000) => {
+  const on = log.filter((x) => x.n === 7)
+  const firstAt = on.find((x) => x.at)
+  const srcAt = on.find((x) => x.src && x.at)
+  const pts = on.filter((x) => x.at).map((x) => x.at!)
+  const places = new Set(pts.map((q) => q.map(Math.round).join())).size
+  const moved = pts.length ? Math.round(Math.max(...pts.map((q) => Math.hypot(q[0] - pts[0][0], q[1] - pts[0][1])))) : 0
+  const cards = new Set(on.filter((x) => firstAt && x.t >= firstAt.t && x.card).map((x) => x.card))
+  const rest = srcAt?.chip ? { dx: Math.round((srcAt.at![0] - srcAt.chip[0]) * 10) / 10, dy: Math.round((srcAt.at![1] - srcAt.chip[1]) * 10) / 10 } : null
+  const firstMs = firstAt ? firstAt.t : null
+  return { ok: firstMs != null && firstMs <= maxMs && places >= 3 && moved >= 100 && !!rest && Math.abs(rest.dx) <= 3 && Math.abs(rest.dy) <= 3 && cards.size === 1, firstMs, places, moved, rest, cardBoxes: cards.size }
+}
+
+// in the page: the ⌘-click cue over a little more than one pulse of its nudge, against the end of the 08:29 entry's text
+const CUE = async () => {
+  const out: ({ gap: number; dy: number; hits: string[]; overPop: boolean; text: string | null } | null)[] = []
+  for (let n = 0; n < 8; n++) {
+    const cue = document.querySelector('.tour-cue')
+    if (!cue) out.push(null)
+    else {
+      const card = (window as any).__tour().api.els.card as Element
+      const label = [...card.querySelectorAll('.canvas-tl-row')].find((r) => r.querySelector('.canvas-tl-time')?.textContent?.trim() === '08:29')!.querySelector('.canvas-tl-label')!
+      const q = document.createRange()
+      q.selectNodeContents(label)
+      const end = [...q.getClientRects()].filter((b) => b.width > 1).reduce((a, b) => (b.bottom > a.bottom + 1 || (Math.abs(b.bottom - a.bottom) <= 1 && b.right > a.right) ? b : a))
+      const ar = cue.querySelector('.tour-cue-arrow')!.getBoundingClientRect(),
+        lb = cue.querySelector('.tour-cue-label')!.getBoundingClientRect(),
+        tip = ar.left - 1
+      const hits: string[] = []
+      const zones: [string, { left: number; right: number; top: number; bottom: number }][] = [
+        ['arrow', { left: tip, right: ar.right, top: ar.top - 5, bottom: ar.bottom + 5 }],
+        ['label', lb],
+      ]
+      const w = document.createTreeWalker(card, NodeFilter.SHOW_TEXT)
+      for (let t = w.nextNode(); t; t = w.nextNode()) {
+        if (!t.textContent?.trim()) continue
+        const r = document.createRange()
+        r.selectNodeContents(t)
+        for (const b of r.getClientRects())
+          for (const [nm, c] of zones) if (b.width > 0 && b.right > c.left + 0.5 && b.left < c.right - 0.5 && b.bottom > c.top + 0.5 && b.top < c.bottom - 0.5) hits.push(`${nm}: ${t.textContent.slice(0, 24)}`)
+      }
+      const p = document.querySelector('.tour-pop')!.getBoundingClientRect()
+      out.push({
+        gap: Math.round((tip - end.right) * 10) / 10,
+        dy: Math.round(((ar.top + ar.bottom) / 2 - (end.top + end.bottom) / 2) * 10) / 10,
+        hits,
+        overPop: lb.right > p.left && lb.left < p.right && lb.bottom > p.top && lb.top < p.bottom,
+        text: cue.textContent,
+      })
+    }
+    await new Promise((r) => setTimeout(r, 230))
+  }
+  return out
+}
+
+/** The example view's header, the strip thimble draws above every view, inside the example's frame: none of its items
+ * meets another, nothing else of the view meets them, the item drawn at each item's centre is the item itself, the
+ * label control is level with the strip's first row, and nothing of the tour (a badge, the popover, the views bar)
+ * meets the strip. Also its label control's words, its
+ * residue's words and ink against the ink of its files, and a filter's chip with what it hides. */
+async function viewHead(page: Page) {
+  const hf = page.frames().find((f) => f.url().includes('/tour/timeline/view.html'))
+  if (!hf) return { ok: false, why: 'no view header' } as const
+  const inner = await hf.evaluate(() => {
+    const h = document.querySelector('.scope-head')!
+    const vis = (e: Element) => {
+      const cs = getComputedStyle(e),
+        b = e.getBoundingClientRect()
+      return cs.visibility !== 'hidden' && cs.display !== 'none' && +cs.opacity > 0 && b.width > 0.5 && b.height > 0.5
+    }
+    const name = (e: Element) => (e.textContent?.trim() || String((e as HTMLElement).className)).slice(0, 24)
+    const R = (e: Element) => {
+      const b = e.getBoundingClientRect()
+      return { l: b.left, t: b.top, r: b.right, b: b.bottom, n: name(e) }
+    }
+    const meet = (a: ReturnType<typeof R>, b: ReturnType<typeof R>) => Math.min(a.r, b.r) - Math.max(a.l, b.l) > 0.5 && Math.min(a.b, b.b) - Math.max(a.t, b.t) > 0.5
+    const items = [...h.querySelectorAll('button, .sh-dot, .seg, .view-pane-hidden')].filter((e) => vis(e) && !e.parentElement!.closest('.seg'))
+    const ri = items.map(R)
+    const bad: string[] = []
+    for (let i = 0; i < ri.length; i++) for (let j = i + 1; j < ri.length; j++) if (meet(ri[i], ri[j])) bad.push(`${ri[i].n} / ${ri[j].n}`)
+    for (const e of (h.closest('.files-body.is-view') || document.body).querySelectorAll('*')) {
+      if (h.contains(e) || e.contains(h) || e.closest('.sh-pop') || !vis(e)) continue
+      const r = R(e)
+      for (const it of ri)
+        if (meet(r, it)) {
+          bad.push(`${it.n} / ${r.n}`)
+          break
+        }
+    }
+    for (const e of items) {
+      const b = e.getBoundingClientRect(),
+        top = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2)
+      if (top && !e.contains(top) && !top.contains(e)) bad.push(`${name(e)} under ${name(top)}`)
+    }
+    const res = h.querySelector('[data-pop="bad"]'),
+      files = h.querySelector('[data-pop="files"]')!
+    const all = ri.concat([R(h)])
+    return {
+      bad: bad.slice(0, 6),
+      n: ri.length,
+      u: { l: Math.min(...all.map((r) => r.l)), t: Math.min(...all.map((r) => r.t)), r: Math.max(...all.map((r) => r.r)), b: Math.max(...all.map((r) => r.b)) },
+      lead: h.querySelector('.view-pane-side-show')?.textContent?.trim() ?? null,
+      // the label control's centre against the strip's first item's, in px
+      level: (() => {
+        const a = h.querySelector('.view-pane-side-show')!.getBoundingClientRect(),
+          b = h.querySelector('.sh-unit')!.getBoundingClientRect()
+        return Math.round(Math.abs(a.top + a.height / 2 - (b.top + b.height / 2)) * 10) / 10
+      })(),
+      residueText: res?.textContent?.trim() ?? null,
+      residue: res ? getComputedStyle(res).color : null,
+      ink: getComputedStyle(files).color,
+      negative: (() => {
+        const probe = document.createElement('span')
+        probe.style.color = 'var(--status-negative)'
+        h.append(probe)
+        const c = getComputedStyle(probe).color
+        probe.remove()
+        return c
+      })(),
+      filter: h.querySelector('.view-pane-filter .chip-text')?.textContent ?? null,
+      hidden: h.querySelector('.view-pane-hidden')?.textContent ?? null,
+    }
+  })
+  const fb = (await (await hf.frameElement()).boundingBox())!
+  const H = { l: fb.x + inner.u.l, t: fb.y + inner.u.t, r: fb.x + inner.u.r, b: fb.y + inner.u.b }
+  const outer = await page.evaluate((H) => {
+    const frame = document.querySelector('.tour-ex-viewbody iframe')!,
+      bad: string[] = []
+    for (const e of document.querySelectorAll('.tour-root *, .tour-host *')) {
+      if (e === frame || e.contains(frame) || e.matches('.tour-ex, .tour-fx, .tour-block, svg.tour-dim, svg.tour-dim *')) continue
+      const cs = getComputedStyle(e)
+      if (cs.visibility === 'hidden' || cs.display === 'none' || +cs.opacity === 0) continue
+      const b = e.getBoundingClientRect()
+      if (b.width < 0.5 || b.height < 0.5) continue
+      if (Math.min(b.right, H.r) - Math.max(b.left, H.l) > 0.5 && Math.min(b.bottom, H.b) - Math.max(b.top, H.t) > 0.5) bad.push(String((e as HTMLElement).className || e.tagName).slice(0, 30))
+    }
+    return bad.slice(0, 6)
+  }, H)
+  const residueOk = /^(1 unreadable (line|file)|\d+ unreadable (lines|files))$/.test(inner.residueText || '') && inner.residue === inner.ink && inner.residue !== inner.negative
+  return { ok: !inner.bad.length && !outer.length && inner.n >= 5 && residueOk && inner.level <= 1, inner: inner.bad, outer, items: inner.n, lead: inner.lead, level: inner.level, residueText: inner.residueText, residue: inner.residue, ink: inner.ink, filter: inner.filter, hidden: inner.hidden }
+}
+
+// in the page: the report example's inner width, its text column's width, and whether its comment margin shows
+const REPORTCOL = () => {
+  const root = document.querySelector('.tour-ex-report')!,
+    rail = root.querySelector<HTMLElement>('.wu-rail')
+  return { inner: (root.firstElementChild as HTMLElement).offsetWidth, col: root.querySelector<HTMLElement>('.wu-page-col')!.offsetWidth, margin: !!rail && getComputedStyle(rail).display !== 'none' && rail.offsetWidth > 0 }
+}
+// in the page: each figure of the report example, its chart's or table's width on screen against its content's width
+const FIGS = () => {
+  const root = document.querySelector('.tour-ex-report')!,
+    k = (window as any).__tour().api.els.k || 1
+  return [...root.querySelectorAll('figure.wu-fig')].map((f) => {
+    const body = f.querySelector<HTMLElement>('.wu-fig-body')!,
+      cs = getComputedStyle(body)
+    const el = f.querySelector('.outputs-vega svg') || f.querySelector('table')
+    return {
+      id: (f.getAttribute('data-tour-anchor') || '').slice(5),
+      content: Math.round((body.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight)) * k * 10) / 10,
+      width: el ? Math.round(el.getBoundingClientRect().width * 10) / 10 : null,
+    }
+  })
+}
+const OWN = new Map<number, { panel: number; col: number; margin: boolean }>()
+/** thimble's own Report on this made-up workspace, which has no comments and no check on: its text column's width for a
+ * Report panel `panel` px wide (beside a 308 px chat column) */
+async function ownReport(panel: number) {
+  const known = OWN.get(panel)
+  if (known) return known
+  const { page, close } = await open({ W: panel + 344, H: 900, seen: true })
+  try {
+    await page.waitForSelector('[data-panel="report"] .wu-page-col', { timeout: 20000 })
+    await sleep(1500)
+    const own = await page.evaluate(() => ({
+      panel: Math.round(document.querySelector('[data-panel="report"].shell-panel')!.getBoundingClientRect().width),
+      col: document.querySelector<HTMLElement>('[data-panel="report"] .wu-page-col')!.offsetWidth,
+      margin: !!document.querySelector('[data-panel="report"] .wu-rail'),
+    }))
+    assert.ok(own.panel === panel && !own.margin, `thimble's own Report measured with a ${panel} px panel and no margin ${JSON.stringify(own)}`)
+    OWN.set(panel, own)
+    return own
+  } finally {
+    await close()
+  }
+}
+
 /** The whole tour from step 1, with the assertions of each step. */
 async function walk(page: Page, tag: string, folds?: boolean, send = false) {
   // 1 the chat
@@ -365,28 +598,54 @@ async function walk(page: Page, tag: string, folds?: boolean, send = false) {
   })
   assert.ok(lay.inside && lay.apart, `${tag} 5: the labels pane and the transcript lie apart inside the Files panel ${JSON.stringify(lay)}`)
   if (folds !== undefined) assert.equal(lay.folded, folds, `${tag} 5: the Files sidebar ${folds ? 'folds' : 'docks'}`)
-  const rd = await page.evaluate(() => {
-    const e = document.querySelector('.tour-ex-reader .reader-body')!
-    const b = e.getBoundingClientRect()
-    return { x: b.x + b.width / 2, y: b.y + b.height / 2, top: e.scrollTop }
-  })
+  // in wheel steps of 100 px down and back up, every record on screen moves by exactly the scroll, and the transcript's
+  // height, the cutout and the Labels pane hold still while the ruler's thumb follows
+  const look5 = () =>
+    page.evaluate(() => {
+      const sc = document.querySelector('.tour-ex-reader .reader-body')!,
+        b = sc.getBoundingClientRect(),
+        rows: Record<string, number> = {}
+      for (const r of sc.querySelectorAll('.reader-record')) {
+        const q = r.getBoundingClientRect()
+        if (q.bottom > b.top + 10 && q.top < b.bottom - 10) rows[r.querySelector('[data-line]')?.getAttribute('data-line') ?? ''] = q.top
+      }
+      const L = document.querySelector('.tour-ex-labels')!.getBoundingClientRect()
+      const holes = (window as any).__tour().geometry().holes as { x: number; y: number; w: number; h: number }[]
+      const fixed = [[L.x, L.y, L.width, L.height], ...holes.map((h) => [h.x, h.y, h.w, h.h])].map((v) => v.map(Math.round).join()).join(';')
+      return { top: sc.scrollTop, sh: sc.scrollHeight, rows, fixed, thumb: document.querySelector('.tour-ex-reader .reader-ruler-thumb')?.getBoundingClientRect().top ?? null, mid: { x: b.x + b.width / 2, y: b.y + b.height / 2 } }
+    })
   await probe(page)
-  await page.mouse.move(rd.x, rd.y)
+  const first5 = await look5()
+  let prev5 = first5,
+    worst = 0
+  const off: unknown[] = []
+  for (const dy of [100, 100, 100, 100, 100, 100, -100, -100, -100, -100, -100, -100]) {
+    await page.mouse.move(first5.mid.x, first5.mid.y)
+    await page.mouse.wheel(0, dy)
+    await sleep(120)
+    const cur = await look5(),
+      d = cur.top - prev5.top
+    for (const [id, y] of Object.entries(prev5.rows)) if (cur.rows[id] != null) worst = Math.max(worst, Math.abs(cur.rows[id] - y + d))
+    if (Math.abs(d) < 1 || cur.sh !== first5.sh || cur.fixed !== first5.fixed || cur.thumb == null || prev5.thumb == null || Math.sign(cur.thumb - prev5.thumb) !== Math.sign(d))
+      off.push({ dy, d, sh: [first5.sh, cur.sh], fixed: cur.fixed === first5.fixed, thumb: [prev5.thumb, cur.thumb] })
+    prev5 = cur
+  }
+  assert.ok(worst <= 1 && !off.length, `${tag} 5: the transcript scrolls in steps with no record jumping (worst ${Math.round(worst * 10) / 10} px), its height, the cutout and the Labels pane still, the thumb following ${JSON.stringify(off.slice(0, 3))}`)
+  // the wheel over the ruler scrolls the transcript too, and a long wheel scrolls it far
+  const rb = await page.evaluate(() => {
+    const b = document.querySelector('.tour-ex-reader .reader-ruler')!.getBoundingClientRect()
+    return { x: b.x + b.width / 2, y: b.y + b.height / 2, top: document.querySelector('.tour-ex-reader .reader-body')!.scrollTop }
+  })
+  await page.mouse.move(rb.x, rb.y)
+  await page.mouse.wheel(0, 240)
+  await sleep(300)
+  const overRuler = (await page.evaluate(() => document.querySelector('.tour-ex-reader .reader-body')!.scrollTop)) - rb.top
+  assert.ok(overRuler >= 100, `${tag} 5: the wheel over the ruler scrolls the transcript (${overRuler})`)
+  await page.mouse.move(first5.mid.x, first5.mid.y)
   await page.mouse.wheel(0, 600)
   await sleep(500)
   const rdTop = await page.evaluate(() => document.querySelector('.tour-ex-reader .reader-body')!.scrollTop)
-  assert.ok(rdTop > rd.top + 100, `${tag} 5: the wheel scrolls the transcript (${rd.top} to ${rdTop})`)
-  // in small steps the transcript scrolls steadily: its height holds still and it never jumps back
-  const steps: { top: number; h: number }[] = []
-  for (let k = 0; k < 12; k++) {
-    await page.mouse.wheel(0, 80)
-    await sleep(60)
-    steps.push(await page.evaluate(() => {
-      const e = document.querySelector('.tour-ex-reader .reader-body')!
-      return { top: e.scrollTop, h: e.scrollHeight }
-    }))
-  }
-  assert.ok(new Set(steps.map((x) => x.h)).size === 1 && steps.every((x, k) => !k || x.top > steps[k - 1].top), `${tag} 5: the transcript scrolls steadily ${JSON.stringify(steps)}`)
+  assert.ok(rdTop > rb.top + overRuler + 100, `${tag} 5: the wheel scrolls the transcript (${rb.top + overRuler} to ${rdTop})`)
   assert.deepEqual(await probe(page), [], `${tag} 5: the wheel reached nothing else`)
   await next(page)
   // 6 Views: the example view takes the pointer
@@ -421,10 +680,40 @@ async function walk(page: Page, tag: string, folds?: boolean, send = false) {
   assert.equal(await view.evaluate(() => (window as any).__clicks), 1, `${tag} 6: a click reaches the example view`)
   assert.deepEqual(await probe(page), [], `${tag} 6: nothing reached the app`)
   assert.equal((await state(page))!.title, 'Views', `${tag} 6: still on Views`)
+  // the view's header strip: nothing in it meets anything, its label control says how many labels are on, and the
+  // line the reader could not read is counted in the strip's ink
+  let hv = await viewHead(page)
+  assert.ok(hv.ok && hv.lead === '2 labels on' && hv.residueText === '1 unreadable line' && !hv.filter, `${tag} 6: the view's header ${JSON.stringify(hv)}`)
+  // a label switched off in the page's colour menu leaves one on
+  await view.evaluate(() => document.querySelector<HTMLElement>('.th-colour-by')!.click())
+  await view.evaluate(() => document.querySelector<HTMLElement>('.th-item[data-lab="Charged twice"]')!.click())
+  await sleep(200)
+  assert.equal((await viewHead(page)).lead, '1 label on', `${tag} 6: one label on`)
+  await view.evaluate(() => document.querySelector<HTMLElement>('.th-item[data-lab="Charged twice"]')!.click())
+  await view.evaluate(() => document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })))
+  // the page's Only these shows as thimble's filter chip with how many events it hides, beside the strip's items, and
+  // the chip clears it
+  await view.evaluate(() => document.querySelector<HTMLElement>('.th-lg[data-k="Database connections"] .th-lname')!.click())
+  await view.evaluate(() => document.querySelector<HTMLElement>('.th-only')!.click())
+  await sleep(300)
+  hv = await viewHead(page)
+  const lacking = await view.evaluate(() => (window as any).DATA.events.filter((e: { marks: string[] }) => !e.marks.includes('Database connections')).length)
+  assert.ok(hv.ok && hv.lead === '2 labels on' && hv.filter === 'Database connections · connections' && hv.hidden === `${lacking} hidden`, `${tag} 6: the filter in the view's header ${JSON.stringify(hv)}`)
+  const hf = page.frames().find((f) => f.url().includes('/tour/timeline/view.html'))!
+  await hf.evaluate(() => document.querySelector<HTMLElement>('.view-pane-filter')!.click())
+  await sleep(200)
+  hv = await viewHead(page)
+  assert.ok(hv.ok && !hv.filter && !hv.hidden && (await view.evaluate(() => (window as any).mock.thimble.state.iso)) === null, `${tag} 6: the chip clears the filter ${JSON.stringify(hv)}`)
+  assert.equal((await state(page))!.title, 'Views', `${tag} 6: still on Views`)
+  await page.evaluate(LOG7)
   await next(page)
   // 7 Cards: the demo shows the source of 08:04; the card is in plain words; a real hover on a value shows its source
   await onStep(page, 7, 'Cards on the Canvas')
   await page.waitForFunction(() => document.querySelector('.tour-fx .refchip-pop[data-demo] .hl')?.textContent === '08:04', null, { timeout: 8000 })
+  // on its first entry the demo plays once the card is in place: the pointer shows soon after Next, glides and comes to
+  // rest on 08:04 as its source shows, and the card holds still
+  const r7 = judge7(await takeLog7(page))
+  assert.ok(r7.ok, `${tag} 7: the cards demo plays onto 08:04 ${JSON.stringify(r7)}`)
   const words = await page.evaluate(() => {
     const c = (window as any).__tour().api.els.card as Element
     return { text: [...c.querySelectorAll('.canvas-tl-label, .bcell-take-text')].map((e) => e.textContent ?? ''), check: !!c.querySelector('.bcell-check') }
@@ -491,30 +780,14 @@ async function walk(page: Page, tag: string, folds?: boolean, send = false) {
   await measure(page, `${tag} 8`)
   assert.deepEqual(await buttons(page), ['back'], `${tag} 8: no Next before the try`)
   assert.match(await body(page), /Now try it yourself/, `${tag} 8: try it yourself`)
-  // the cue points at the end of the 08:29 entry's text, past it and level with its last line, and covers no text
-  const cue = await page.evaluate(() => {
-    const el = document.querySelector('.tour-cue')
-    const card = (window as any).__tour().api.els.card as Element
-    const label = [...card.querySelectorAll('.canvas-tl-row')].find((r) => r.querySelector('.canvas-tl-time')?.textContent?.trim() === '08:29')?.querySelector('.canvas-tl-label')
-    if (!el || !label) return null
-    const q = document.createRange()
-    q.selectNodeContents(label)
-    const rows = [...q.getClientRects()].filter((b) => b.width > 1)
-    const end = rows.reduce((a, b) => (b.bottom > a.bottom + 1 || (Math.abs(b.bottom - a.bottom) <= 1 && b.right > a.right) ? b : a))
-    const arrow = el.querySelector('.tour-cue-arrow')!.getBoundingClientRect(),
-      tag = el.querySelector('.tour-cue-label')!
-    const T = tag.getBoundingClientRect()
-    let over = ''
-    const w = document.createTreeWalker(card, NodeFilter.SHOW_TEXT)
-    for (let n = w.nextNode(); n && !over; n = w.nextNode()) {
-      if (!n.textContent?.trim()) continue
-      const r = document.createRange()
-      r.selectNodeContents(n)
-      for (const b of r.getClientRects()) if (b.right > T.left && b.left < T.right && b.bottom > T.top && b.top < T.bottom) over = n.textContent.slice(0, 40)
-    }
-    return { text: tag.textContent, gap: arrow.left - end.right, level: Math.abs(arrow.top - (end.top + end.height / 2)), over }
-  })
-  assert.ok(cue && cue.text === '⌘-click here' && cue.gap >= 0 && cue.gap <= 10 && cue.level <= 3 && !cue.over, `${tag} 8: the cue points at the entry and covers no text ${JSON.stringify(cue)}`)
+  // once the demo is over, "⌘-click here" points at the end of the 08:29 entry's text, 0 to 8 px past it and level
+  // with its last line, through its nudge, and covers no text of the card and not the popover
+  const cue = await page.evaluate(CUE)
+  const cues = cue.filter((c): c is NonNullable<typeof c> => !!c)
+  assert.ok(
+    cues.length === cue.length && cues.every((c) => c.text === '⌘-click here' && c.gap >= 0 && c.gap <= 8 && Math.abs(c.dy) <= 2 && !c.hits.length && !c.overPop),
+    `${tag} 8: the cue points at the entry and covers no text ${JSON.stringify(cue)}`,
+  )
   const span = await page.evaluate(() => {
     const card = (window as any).__tour().api.els.card as Element
     const label = [...card.querySelectorAll('.canvas-tl-row')].find((r) => r.querySelector('.canvas-tl-time')?.textContent?.trim() === '08:29')!.querySelector('.canvas-tl-label')!
@@ -540,6 +813,7 @@ async function walk(page: Page, tag: string, folds?: boolean, send = false) {
   await page.waitForFunction(() => [...document.querySelectorAll('.pointer-box')].some((b) => !b.closest('.tour-root')), null, { timeout: 5000 })
   await sleep(700)
   const asking = await measure(page, `${tag} 8 (asking)`)
+  assert.equal(await page.$('.tour-cue'), null, `${tag} 8: the cue is gone once the analyst tried`)
   const picked = await page.evaluate((h) => {
     const box = [...document.querySelectorAll('.pointer-box')].find((b) => !b.closest('.tour-root'))!
     const hl = [...document.querySelectorAll('.pointer-hl[data-on]')].find((x) => !x.closest('.tour-root'))!
@@ -562,6 +836,7 @@ async function walk(page: Page, tag: string, folds?: boolean, send = false) {
     await page.waitForFunction(() => ![...document.querySelectorAll('.pointer-box')].some((b) => !b.closest('.tour-root')))
     await sleep(600)
     assert.equal((await state(page))!.n, 8, `${tag} 8: Esc closes the box and stays on the step`)
+    assert.equal(await page.$('.tour-cue'), null, `${tag} 8: the cue stays gone after Esc`)
     assert.deepEqual(await buttons(page), ['back', 'next'], `${tag} 8: Next once tried`)
     await next(page)
   }
@@ -588,25 +863,48 @@ async function walk(page: Page, tag: string, folds?: boolean, send = false) {
   })
   assert.deepEqual(fig, { q: 'How close did the database come to its limit of 200 connections?', rows: 4, check: 0 }, `${tag} 9: the first figure is the small table, and the check is not made yet`)
   assert.ok(r9.k <= 1 && r9.top === 0, `${tag} 9: the report at its own size or smaller, at its top`)
-  // no comment margin until the check is made, and each chart as wide as its figure
-  const r9w = await page.evaluate(() => {
-    const root = document.querySelector('.tour-ex-report')!
-    const rail = root.querySelector<HTMLElement>('.wu-rail')
-    const widths = [...root.querySelectorAll<HTMLElement>('figure.wu-fig')].flatMap((f) => {
-      const body = f.querySelector<HTMLElement>('.wu-fig-body'),
-        svg = f.querySelector<SVGElement>('.outputs-vega svg')
-      if (!body || !svg) return []
-      const cs = getComputedStyle(body)
-      const k = (window as any).__tour().api.els.k || 1
-      return [{ chart: svg.getBoundingClientRect().width / k, body: body.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight) }]
-    })
-    return { rail: rail ? getComputedStyle(rail).display : 'none', widths }
-  })
-  assert.equal(r9w.rail, 'none', `${tag} 9: no comment margin before the check is made`)
-  assert.ok(r9w.widths.length >= 2 && r9w.widths.every((x) => Math.abs(x.chart - x.body) <= 3), `${tag} 9: each chart as wide as its figure ${JSON.stringify(r9w.widths)}`)
+  // every chart and table as wide as its figure; no comment margin until the check is made, so the text column is as
+  // wide as thimble's own Report draws it with no check on, for a panel as wide as the example is laid out
+  const figs = await page.evaluate(FIGS)
+  assert.ok(figs.length === 5 && figs.every((f) => f.width != null && Math.abs(f.width - f.content) <= 3), `${tag} 9: every chart and table as wide as its figure ${JSON.stringify(figs)}`)
+  const col9 = await page.evaluate(REPORTCOL)
+  const own = await ownReport(col9.inner)
+  assert.ok(!col9.margin && Math.abs(col9.col - own.col) <= 1, `${tag} 9: no comment margin, and the column as wide as thimble's own Report ${JSON.stringify({ col9, own })}`)
+  // 10 Checks: the demo opens a new check, named, and runs it; the margin stands at Run and not before, the comments
+  // appear in it, and only then does the page scroll to one
   await next(page)
-  // 10 Checks: the demo makes the check; its comments appear and stay, each level with its passage, before and after a
-  // scroll
+  const watch10 = async () => {
+    const seen: { n: number; card: boolean; name: string | null; hidden: boolean; margin: boolean; top: number; demo: string }[] = []
+    for (let k = 0; k < 400; k++) {
+      const f = await page.evaluate(() => {
+        const t = (window as any).__tour(),
+          st = t.state()
+        const c = document.querySelector('.tour-fx .check-card')
+        const root = t.api.els.root as HTMLElement | undefined,
+          pg = t.api.els.page as HTMLElement | undefined
+        const rail = root?.querySelector<HTMLElement>('.wu-rail')
+        return { n: st.n, card: !!c, name: c?.querySelector('input')?.value ?? null, hidden: !!root?.classList.contains('tour-checks-hidden'), margin: !!rail && getComputedStyle(rail).display !== 'none' && rail.offsetWidth > 0, top: Math.round(pg?.scrollTop || 0), demo: st.demo }
+      })
+      if (f.n === 10) seen.push(f)
+      if (f.n === 10 && f.demo === 'done') break
+      await sleep(80)
+    }
+    const shownAt = seen.findIndex((f) => !f.hidden)
+    const marginAt = seen.findIndex((f) => f.margin)
+    const movedAt = shownAt > 0 ? seen.findIndex((f, k) => k > shownAt && Math.abs(f.top - seen[shownAt].top) > 20) : -1
+    return { ok: seen.some((f) => f.card && f.name === 'Alternative explanations') && !!seen.length && !seen[0].margin && marginAt > 0 && marginAt <= shownAt && shownAt > 0 && movedAt > shownAt && seen[seen.length - 1].demo === 'done', marginAt, shownAt, movedAt, frames: seen.length }
+  }
+  const d10 = await watch10()
+  assert.ok(d10.ok, `${tag} 10: the check is named and run; the margin stands, then the comments show in it, then the page scrolls ${JSON.stringify(d10)}`)
+  await onStep(page, 10, 'Checks')
+  // Back to the Report: the margin goes again and the column is thimble's own again; Next makes the check again
+  const m10 = await page.evaluate(REPORTCOL)
+  await page.click('.tour-pop [data-tour="back"]')
+  await onStep(page, 9, 'The Report')
+  await sleep(500)
+  const b9 = await page.evaluate(REPORTCOL)
+  assert.ok(m10.margin && !b9.margin && Math.abs(b9.col - own.col) <= 1, `${tag} 9/10: the margin with the comments on step 10 and none after Back ${JSON.stringify({ m10, b9, own })}`)
+  await next(page)
   await onStep(page, 10, 'Checks')
   await page.waitForFunction(() => (window as any).__tour().state().demo === 'done', null, { timeout: 25000 })
   await sleep(700)
@@ -719,6 +1017,85 @@ for (const cfg of [
     }
   }, 150_000)
 }
+
+test('the cards demo waits for a Canvas drawn late, and a hover that stops it leaves the ⌘ demo to play at once', async () => {
+  const { page, close } = await open({ W: 1440, H: 900 })
+  try {
+    await page.waitForSelector('.tour-pop.tour-welcome', { timeout: 20000 })
+    await page.click('.tour-pop [data-tour="begin"]')
+    await onStep(page, 1)
+    await next(page)
+    await onStep(page, 2)
+    await next(page)
+    await onStep(page, 3)
+    const sb = await page.evaluate(() => {
+      const b = [...document.querySelectorAll('.tour-ex-gate button')].find((x) => x.textContent?.trim() === 'Start')!.getBoundingClientRect()
+      return { x: b.x + b.width / 2, y: b.y + b.height / 2 }
+    })
+    await page.mouse.click(sb.x, sb.y)
+    await page.waitForFunction(() => document.querySelector('.tour-body')?.textContent?.startsWith('The orientation has started'), null, { timeout: 3000 })
+    for (const n of [4, 5, 6]) {
+      await next(page)
+      await onStep(page, n)
+    }
+    // the Canvas panel shows only 1.5 s after Next, as a slow first draw would
+    await page.evaluate(() => {
+      const st = document.createElement('style')
+      st.textContent = '[data-panel="canvas"].shell-panel { display: none !important }'
+      document.head.append(st)
+      setTimeout(() => st.remove(), 1500)
+    })
+    await page.evaluate(LOG7)
+    await next(page)
+    await page.waitForFunction(() => document.querySelector('.tour-fx .refchip-pop[data-demo] .hl')?.textContent === '08:04', null, { timeout: 10000 })
+    const r7 = judge7(await takeLog7(page), 3000)
+    assert.ok(r7.ok && r7.firstMs! >= 1500, `the demo waits for the card and plays onto 08:04 ${JSON.stringify(r7)}`)
+    // a hover on a value stops the demo and shows that value's source
+    const c = await page.evaluate(() => {
+      const el = [...(window as any).__tour().api.els.card.querySelectorAll('.refchip-value')].find((x: Element) => x.textContent?.trim() === '08:29') as Element
+      const b = el.getBoundingClientRect()
+      return { x: b.x + b.width / 2, y: b.y + b.height / 2 }
+    })
+    await page.mouse.move(c.x + 60, c.y - 60, { steps: 4 })
+    await page.mouse.move(c.x, c.y, { steps: 6 })
+    await sleep(1200)
+    const hov = await page.evaluate(() => ({ demo: (window as any).__tour().state().demo, src: document.querySelectorAll('.tour-fx [data-src]:not([data-demo])').length }))
+    assert.deepEqual(hov, { demo: 'stopped', src: 1 }, 'the hover stopped the demo and shows the source')
+    // Next plays the ⌘ demo at once, and the hovered source is closed
+    await page.evaluate(() => {
+      const w = window as any
+      w.__log8 = []
+      const t0 = performance.now()
+      const f = () => {
+        if (!w.__log8) return
+        const el = document.querySelector<HTMLElement>('.tour-cursor'),
+          m = el && /translate\(([-\d.]+)px, ([-\d.]+)px\)/.exec(el.style.transform)
+        w.__log8.push({ t: Math.round(performance.now() - t0), n: w.__tour().state().n, at: m ? `${Math.round(+m[1])},${Math.round(+m[2])}` : null, key: !!document.querySelector('.tour-key'), src: document.querySelectorAll('.tour-fx [data-src]:not([data-demo])').length })
+        if (w.__log8.length < 600) requestAnimationFrame(f)
+      }
+      requestAnimationFrame(f)
+    })
+    const nb = await page.evaluate(() => {
+      const b = document.querySelector('.tour-pop [data-tour="next"]')!.getBoundingClientRect()
+      return { x: b.x + b.width / 2, y: b.y + b.height / 2 }
+    })
+    await page.mouse.move(nb.x, nb.y, { steps: 6 })
+    await page.mouse.down()
+    await page.mouse.up()
+    await sleep(2500)
+    const l8 = ((await page.evaluate(() => {
+      const l = (window as any).__log8
+      ;(window as any).__log8 = null
+      return l
+    })) as { t: number; n: number; at: string | null; key: boolean; src: number }[]).filter((x) => x.n === 8)
+    const first8 = l8.find((x) => x.at)
+    const r8 = { first: first8?.t ?? null, places: new Set(l8.filter((x) => x.at).map((x) => x.at)).size, key: l8.some((x) => x.key), src: l8.length ? l8[l8.length - 1].src : null }
+    assert.ok(r8.first != null && r8.first <= 1000 && r8.places >= 10 && r8.key && r8.src === 0, `the ⌘ demo plays at once and the hovered source is closed ${JSON.stringify(r8)}`)
+    await page.keyboard.press('Escape')
+  } finally {
+    await close()
+  }
+}, 90_000)
 
 test('Settings’ Take the tour replays the tour from step 1, without the welcome', async () => {
   const { page, close } = await open({ W: 1440, H: 900, seen: true })
