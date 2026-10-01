@@ -15,8 +15,8 @@ let browser: Browser
 let page: Page
 
 // a view as a dev agent writes one: a unit with a key of its own, records inside it anchored by file ref, one of them a
-// table row whose text starts at its edge, a marked word split over two elements, and a canvas whose data-anchor is
-// the drawn mark under the pointer
+// table row whose text starts at its edge, a marked word split over two elements, a canvas whose data-anchor is the
+// drawn mark under the pointer, and a lane of another unit that draws its labels' colours itself
 const VIEW = `<!doctype html><html><head>
 <style>:root{--label-2:#e69f00;--label-6:#56b4e9} article{padding-left:12px} td{padding:2px 8px 2px 0}</style>
 <script>${BRIDGE.replace(/<\/script/g, '<\\/script')}</script></head><body>
@@ -26,12 +26,14 @@ const VIEW = `<!doctype html><html><head>
   <article id="five" data-anchor="a.jsonl#L5">nothing marks this</article>
   <canvas width="40" height="10" data-anchor="a.jsonl#L2"></canvas>
 </section>
+<div id="lane" data-anchor="view:board/p2" data-anchor-unmarked style="padding-left:12px">lane</div>
 </body></html>`
 
 const MARKS = {
   'a.jsonl#L1': { bar: 'var(--label-2)', names: ['coord'], spans: [{ text: 'deadline', colour: 'var(--label-2)' }] },
   'a.jsonl#L2': { bar: 'var(--label-6)', names: ['lang', 'coord'], spans: [] },
   'a.jsonl#L3': { bar: 'var(--label-6)', names: ['lang'], spans: [] },
+  'view:board/p2': { bar: 'var(--label-6)', names: ['lang'], spans: [] },
 }
 
 beforeAll(async () => {
@@ -61,7 +63,7 @@ const state = () =>
     const hl = [...CSS.highlights.keys()].filter((k) => k.startsWith('thimble-label-'))
     return {
       labels: [...document.querySelectorAll('[data-thimble-label]')].map((e) => [e.getAttribute('data-anchor'), e.getAttribute('data-thimble-label')]),
-      shadow: { one: getComputedStyle(el('one')).boxShadow, two: getComputedStyle(el('two')).boxShadow, five: getComputedStyle(el('five')).boxShadow },
+      shadow: { one: getComputedStyle(el('one')).boxShadow, two: getComputedStyle(el('two')).boxShadow, five: getComputedStyle(el('five')).boxShadow, lane: getComputedStyle(el('lane')).boxShadow },
       ranges: hl.flatMap((k) => [...CSS.highlights.get(k)!].map((r) => [k, r.toString()])),
       html: el('one').innerHTML,
     }
@@ -72,10 +74,11 @@ test('labels draws a bar in the label colour and highlights the marked text with
   await send(MARKS)
   await frame().waitForFunction(() => document.querySelectorAll('[data-thimble-label]').length === 2)
   const s = await state()
-  assert.deepEqual(s.labels, [['a.jsonl#L1', 'coord'], ['a.jsonl#L2', 'lang, coord']], 'no bar across a whole canvas')
+  assert.deepEqual(s.labels, [['a.jsonl#L1', 'coord'], ['a.jsonl#L2', 'lang, coord']], 'no bar across a whole canvas, and no mark on a lane that draws its own')
   assert.match(s.shadow.one, /rgb\(230, 159, 0\) 3px 0px 0px 0px inset/, 'the bar of --label-2 inside the left edge, in the padding')
   assert.match(s.shadow.two, /rgb\(86, 180, 233\) -6px 0px 0px -3px/, 'a table row whose text starts at its edge: the bar just outside it')
   assert.equal(s.shadow.five, 'none', 'a record no label marks')
+  assert.equal(s.shadow.lane, 'none', 'an element marked data-anchor-unmarked')
   assert.deepEqual(s.ranges, [['thimble-label-0', 'deadline'], ['thimble-label-0', 'deadline']], 'both occurrences, one across two elements')
   assert.equal(s.html, before, "the view's own DOM is as it wrote it")
 })

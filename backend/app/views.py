@@ -133,10 +133,11 @@ NO_LABELS: dict[str, Any] = {"labels": [], "filter": None}
 SHOT_SCRIPT = config.REPO_ROOT / "scripts" / "view_shot.mjs"
 SHOT_LINE_MAX = 16 * 1024 * 1024  # bytes of one message line from the headless page, such as a marks request
 NODE_MIN = 20  # the Node major the checks need, as scripts/install.sh asks for it
-# plugin/viewers holds the worked examples a view ticket's session reads and the file-type viewers thimble ships
+# plugin/viewers holds the worked examples a view ticket's session reads. They are examples for the dev agent only:
+# nothing registers, proposes or lists them as views, and their globs never run against a corpus.
 VIEWERS_DIR = config.REPO_ROOT / "plugin" / "viewers"
 EXAMPLES_DIR = VIEWERS_DIR
-BUILTIN_VIEWERS = ("pdf",)
+BUILTIN_VIEWERS: tuple[str, ...] = ()  # file-type viewers thimble ships under the view contract
 BUILTIN_CACHE = ".builtin"  # under the workspace's views folder: a built-in viewer's index cache and check shots
 # Scripts and styles inline (the bridge, the vendored libraries, the view's own), images as data or blob URLs, workers
 # from blob URLs, and eval for vega's expression parser. `{media}` is the view's own media route (frame_document),

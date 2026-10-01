@@ -235,7 +235,8 @@ def test_a_first_build_a_restart_cut_off_in_a_moved_folder_starts_a_new_session(
     assert [p["slug"] for p in kept.values()] == ["drafting", "posts", "changing"]
 
 
-def test_a_view_built_for_a_workspace_switches_off_and_on_in_settings_from_the_analyst_s_browser_only(corpora, analyst):
+def test_a_view_built_for_a_workspace_switches_off_and_on_in_settings_from_the_analyst_s_browser_only(
+        corpora, analyst, tmp_path, monkeypatch):
     """Off, a view built for the workspace leaves the views list, and so the views bar, the File browser and the
     prompts, with its files and its proposal kept; on, it is back. Only the analyst's browser turns the switch, and only
     for a view built for the workspace."""
@@ -259,8 +260,16 @@ def test_a_view_built_for_a_workspace_switches_off_and_on_in_settings_from_the_a
     asyncio.run(views.view_on_route(CORPUS, "posts", views.OnBody(on=True), analyst))
     assert [v["slug"] for v in views.list_views(CORPUS) if v["origin"] == "workspace"] == ["posts"]
     assert "one post" in views.forms_text(CORPUS) and "off" not in asyncio.run(views.list_proposals_route(CORPUS))[0]
+    shipped = tmp_path / "viewers" / "board"
+    shipped.mkdir(parents=True)
+    (shipped / "view.json").write_text(json.dumps({"name": "Board", "claims": ["*.jsonl"]}))
+    (shipped / "reader.py").write_text(READER)
+    (shipped / "view.html").write_text("<p>board</p>")
+    monkeypatch.setattr(views, "VIEWERS_DIR", shipped.parent)
+    monkeypatch.setattr(views, "BUILTIN_VIEWERS", ("board",))
+    assert views.read_builtin("board") is not None
     with pytest.raises(HTTPException) as e:
-        asyncio.run(views.view_on_route(CORPUS, "pdf", views.OnBody(on=False), analyst))
+        asyncio.run(views.view_on_route(CORPUS, "board", views.OnBody(on=False), analyst))
     assert e.value.status_code == 404
 
 

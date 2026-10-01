@@ -1,8 +1,9 @@
-# Incident timeline: a ferry operator's ops export for one day, every source on one time axis.
+# Timeline: a ferry operator's ops export over several days, every source on one time axis.
 #
 # The data (sample/): what each system exported, in its own format and on its own clock. The reader turns every
 # record into the same fields (below, "The records") and cleans what the sources get wrong ("The cleaning").
-# alerts/*.jsonl, the monitor's alerts, one JSON object per line, a file per start of the monitor:
+# alerts/*.jsonl, the monitor's alerts, one JSON object per line, a file per start of the monitor (it starts again
+#   each midnight), named for the day and time it started:
 #   id         the alert's id, such as alr-44
 #   ts         when, in milliseconds since 1970
 #   state      firing or resolved; FIRING or RESOLVED since the monitor's 4.0 upgrade
@@ -19,16 +20,19 @@
 # deploys.csv, the deploy tool's events, a header row and then one row per event: time (local time, with an offset
 #   when deploybot wrote the row and without one when a person ran the tool), deploy (the deploy's id, the same on
 #   each of its events), event (started, finished or rollback), service, version, by (a login), reason (free text,
-#   naming an incident on some), result (ok or failed, sometimes with words after it) and notes.
+#   naming an incident on some), result (ok or failed, sometimes with words after it) and notes, every day's rows in
+#   the one file.
 # chat/*.json, one file per channel, {channel, messages}: each message has ts (seconds since 1970, as a string, and
 #   its id in the channel), user (an id), text, and on some thread_ts (the ts of the thread's first message), edited,
 #   subtype (bot_message with a username, or channel_join) and user_profile (a guest's name). A channel named like
-#   inc-312 is one incident's. chat/users.json names the people: id, name (their login) and display_name.
+#   inc-312 is one incident's, and every day's messages are in the channel's one file. chat/users.json names the
+#   people: id, name (their login) and display_name.
 # tickets/*.txt, one support ticket per file, like an email thread: the headers Ticket, Subject and Requester, then
 #   each message's From, Date (an email date, in the sender's time zone) and Status (open, pending or closed), a blank
 #   line and its text, a signature after "-- " on some. tickets/index.csv lists the tickets as the helpdesk last
 #   exported them: ticket, subject, priority, service and incident.
-# agents.log, the automated agents' actions, one line each: a UTC time, a level, the agent, and key=value pairs:
+# agents.log, the automated agents' actions over every day, one line each: a UTC time, a level, the agent, and
+#   key=value pairs:
 #   action, incident, service, what set it off (alert, ticket, or via, the chat message that asked, as
 #   <channel>/<ts>), result, and msg, what it did.
 #
@@ -63,9 +67,12 @@
 # index into that field's names, the row `re` points at) in time order, with its id, the lines its record spans, and
 # the byte offset of every line. A record's line is the one that holds its text, so a label, which reads a file line
 # by line, marks that line. `records` sends the rows the label filter keeps as columns, OVERVIEW_ROWS rows a fetch, and
-# the page asks for the next page until it has them all, so it zooms, filters, groups and compares without asking
-# again; text, search and a record's details are read back from the files by seeking to the record's lines and parsing
-# them again.
+# the page asks for the next page until it has them all, so it picks days, zooms, filters and lays out lanes without
+# asking again; text, search and a record's details are read back from the files by seeking to the record's lines and
+# parsing them again. A record's details carry its lines as the file holds them, which the page shows beside the
+# fields the reader made of them.
+#
+# Units: an incident (INC-312), a day (2026-05-16) and a window of time (2026-05-16T08:00..2026-05-16T09:00).
 #
 # Labels: they apply when records are served, never in the index. Every answer keeps only the records thimble.kept(ref)
 # holds for. `marks` lists the values of the labels that are on, in thimble's order, and each row carries the ones
@@ -89,7 +96,6 @@ LOCAL = timezone(timedelta(hours=1))  # the operator's clock in May, which deplo
 OUTCOMES = ("ok", "failed", "held")
 PRIORITIES = ("urgent", "high", "normal", "low")
 TEXT_MAX = 400  # characters of a record's text a list row gets
-NEAR = 4  # records before and after the chosen one, across every source
 UNIT_REFS = 200  # refs a unit's citation carries
 EXCERPT_RECORDS = 12  # records whose text a unit's excerpt quotes
 MARKS_MAX = 24  # label values the page tells apart, as bits of one number per record
@@ -569,38 +575,29 @@ def _brief(index, i, r):
 
 
 def _record(index, i, keep):
-    """One record in full: its fields, the record it answers, the kept records that answer it, and the NEAR kept
-    records before and after it in time across every source."""
+    """One record in full: its fields, its lines as the file holds them (`raw`, [[line, text]]), the record it answers
+    and the kept records that answer it."""
     rows = index["rows"]
     if not isinstance(i, int) or not 0 <= i < len(rows):
         return None
     answers = [j for j in index["answered"].get(i, []) if _kept(index, j, keep)]
-    before, after = [], []
-    j = i - 1
-    while j >= 0 and len(before) < NEAR:
-        if _kept(index, j, keep):
-            before.append(j)
-        j -= 1
-    j = i + 1
-    while j < len(rows) and len(after) < NEAR:
-        if _kept(index, j, keep):
-            after.append(j)
-        j += 1
-    near = [*sorted(before), i, *after]
     parent = rows[i][RE]
-    got = _read(index, [i, *answers, *near, *([parent] if parent >= 0 else [])])
-    rec = got.get(i, {})
-    return {"r": i, "ref": _ref(index, i), "t": rows[i][T], "record": rec,
+    got = _read(index, [i, *answers, *([parent] if parent >= 0 else [])])
+    a, b = index["spans"][i]
+    fi = rows[i][F]
+    with open(index["files"][fi], "rb") as fh:
+        fh.seek(index["offsets"][fi][a - 1])
+        raw = [[n, fh.readline().decode("utf-8", "replace").rstrip("\r\n")] for n in range(a, b + 1)]
+    return {"r": i, "ref": _ref(index, i), "t": rows[i][T], "record": got.get(i, {}), "raw": raw,
             "answers": _brief(index, parent, got.get(parent, {})) if parent >= 0 else None,
-            "answered": [_brief(index, j, got.get(j, {})) for j in answers],
-            "near": [_brief(index, j, got.get(j, {})) for j in near]}
+            "answered": [_brief(index, j, got.get(j, {})) for j in answers]}
 
 
 def records(index, query):
     """{op: overview, from?, keep?}: a page of the kept rows as columns (_overview), from row `from` on, `keep` rows
     kept whatever the filter.
     {op: texts, rows}: the rows' texts. {op: search, q}: the kept rows holding q. {op: record, r, keep?}: one row in
-    full with its neighbours (_record)."""
+    full (_record)."""
     query = query or {}
     keep = {int(x) for x in query.get("keep") or () if isinstance(x, int)}
     op = query.get("op")
@@ -637,8 +634,8 @@ def _at_line(index, fi, n):
 
 def resolve(index, locator):
     """<file>#L<n>: the record on that line, or the nearest one, chosen in the time around it.
-    view:<slug>/<incident>: every record of the incident, filtered to it. view:<slug>/<from>..<to>: the records between
-    two UTC times, zoomed to them."""
+    view:<slug>/<incident>: every record of the incident, filtered to it. view:<slug>/<YYYY-MM-DD>: the records of one
+    day in UTC, that day picked. view:<slug>/<from>..<to>: the records between two UTC times, zoomed to them."""
     rows = index["rows"]
     if "key" in locator:
         key = str(locator["key"])
@@ -648,6 +645,13 @@ def resolve(index, locator):
             a, b = index["units"][key]
             found = [i for i in range(a, b + 1) if rows[i][col] == inc]
             return _unit(index, found, f"{key} · {len(found)} records", key, {"incident": key})
+        if re.fullmatch(r"\d{4}-\d\d-\d\d", key):
+            a = _epoch(key + "T00:00:00Z")
+            found = [] if a is None else list(range(bisect.bisect_left(rows, a, key=itemgetter(T)),
+                                                    bisect.bisect_left(rows, a + 86400, key=itemgetter(T))))
+            if not found:
+                return None
+            return _unit(index, found, f"{_when(a)[:-6]} · {len(found)} records", key, {"day": key})
         m = re.fullmatch(r"(\d{4}-\d\d-\d\dT\d\d:\d\d)\.\.(\d{4}-\d\d-\d\dT\d\d:\d\d)", key)
         if not m or (a := _epoch(m.group(1))) is None or (b := _epoch(m.group(2))) is None or b <= a:
             return None
