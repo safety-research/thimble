@@ -5,7 +5,7 @@
 // whether it fits put it until the analyst moves it, which overrides the check either way; beside it is the check's
 // reason. An extension with orientation instructions that comes on where an orientation ran asks whether to run them
 // now; the answer is sent with the rest on Save. Conflicts among the running extensions are listed under the rows.
-import { Button } from '../components/Button'
+import { Segmented } from '../components/Button'
 import { Switch } from '../components/Switch'
 import type { ExtensionRow, Extensions } from '../lib/types'
 
@@ -42,6 +42,12 @@ export function answeredRuns(data: Extensions, on: Record<string, boolean>, answ
   return data.extensions.filter((e) => e.name in answers && asksToRun(e, !!on[e.name], !!data.orientation_ran)).map((e) => [e.name, answers[e.name]])
 }
 
+type RunAnswer = 'run' | 'not' | ''
+const RUN_OPTIONS = [
+  { value: 'run', label: 'Run now' },
+  { value: 'not', label: 'Not now' },
+] as const
+
 interface Props {
   data: Extensions
   on: Record<string, boolean>
@@ -74,14 +80,16 @@ export function ExtensionsSettings({ data, on, setOn, viewOn, setViewOn, answers
               </span>
             </div>
             {asks && (
-              <div className="settings-extension-ask" role="group" aria-label={`Run ${e.name}'s orientation now`}>
+              <div className="settings-extension-ask">
                 <span className="settings-switch-note">Run its orientation now?</span>
-                <Button size="sm" active={answers[e.name] === true} onClick={() => setAnswer(e.name, true)}>
-                  Run now
-                </Button>
-                <Button size="sm" active={answers[e.name] === false} onClick={() => setAnswer(e.name, false)}>
-                  Not now
-                </Button>
+                <Segmented<RunAnswer>
+                  size="sm"
+                  track
+                  label={`Run ${e.name}'s orientation now?`}
+                  options={RUN_OPTIONS}
+                  value={e.name in answers ? (answers[e.name] ? 'run' : 'not') : ''}
+                  onChange={(v) => setAnswer(e.name, v === 'run')}
+                />
               </div>
             )}
             {(e.views ?? []).map((v) => {
