@@ -150,3 +150,23 @@ async def test_a_session_that_ends_while_its_workflow_runs_fails_the_turn(turn):
     fake.now = "stopped"
     with pytest.raises(dev.SessionError, match="ended stopped"):
         await asyncio.wait_for(task, 2)
+
+
+async def test_a_result_that_only_quotes_a_moved_call_is_no_background_work(turn):
+    """Only Claude Code's own word that it moved a call to the background starts a task, not a log or a transcript
+    that a Read, Grep or Bash result quotes."""
+    from app import agent_session
+
+    start, fake, write, _ = turn
+    task = start()
+    quoted = ('19:14:28 RESULT MCP tool "plugin:x:x/critique" is still running after 120s. It was moved to the '
+              "background as task kpmn7kn7f and keeps running")
+    write(call("toolu_g", "Bash", {"command": "grep RESULT run.log"}), result("toolu_g", quoted),
+          call("toolu_r", "Read", {"file_path": "/x/t.jsonl"}), result("toolu_r", "  12\t" + quoted[16:]),
+          said("Read the log."), turn_end())
+    fake.now = "idle"
+    assert await asyncio.wait_for(task, 2) == "Read the log."
+    own = ('MCP tool "plugin:x:x/critique" is still running after 120s. It was moved to the background as task '
+           "kpmn7kn7f and keeps running; you'll receive a notification with the result when it completes.")
+    assert agent_session.MOVED_TASK_RE.search(own).group(1) == "kpmn7kn7f"
+    assert not agent_session.MOVED_TASK_RE.search(quoted)

@@ -301,7 +301,9 @@ LAUNCHED_AGENT_RE = re.compile(r"\bagentId:\s*(\w+)")  # in a background Agent c
 LAUNCHED_TASK_RE = re.compile(r"\bTask ID:\s*(\S+)")  # in a Workflow call's result
 RESUMED_AGENT_RE = re.compile(r'"resumedAgentId"\s*:\s*"(\w+)"')  # in a SendMessage's result that continued an agent
 TASK_ID_RE = re.compile(r"<task-id>\s*(.*?)\s*</task-id>", re.S)  # a notification may name several tasks
-MOVED_TASK_RE = re.compile(r"\bmoved to the background as task (\w+)")  # a long call Claude Code let run on
+# a long call Claude Code let run on, in its own words at the head of the call's result (an MCP tool's), so a result that
+# only quotes them (a log, a transcript) is none
+MOVED_TASK_RE = re.compile(r'\A\s*MCP tool "[^\n]*?\bmoved to the background as task (\w+)')
 STOP_TOOL = "TaskStop"
 STOPPED_TASK_RE = re.compile(r'"task_id"\s*:\s*"([^"]+)"')  # in a TaskStop's result, which no notification follows
 
