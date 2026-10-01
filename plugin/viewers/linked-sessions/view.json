@@ -24,27 +24,42 @@
   "derived": [
     {
       "record": "call",
-      "field": "run",
-      "from": "the folder a transcript is in",
-      "how": "runs/<run>/"
-    },
-    {
-      "record": "call",
-      "field": "s",
+      "field": "session",
       "from": "the transcript's file name",
-      "how": "the session the call is in: its transcript's name without .jsonl, and agent-<id> read as <id>"
+      "how": "the session the call is in: the name without .jsonl, and agent-<id> read as <id>"
     },
     {
       "record": "call",
       "field": "time",
       "from": "timestamp",
-      "how": "ISO 8601 or epoch milliseconds read as seconds since the run's first line; a time without an offset is UTC"
+      "how": "the time on the run's clock: ISO 8601 or epoch milliseconds read as seconds since the run's first line, a time without an offset in UTC"
+    },
+    {
+      "record": "call",
+      "field": "duration",
+      "from": "the tool_use's and the tool_result's timestamps",
+      "how": "the seconds between them",
+      "kind": "inferred"
+    },
+    {
+      "record": "call",
+      "field": "duration band",
+      "from": "duration",
+      "how": "under 1 s, 1–10 s or over 10 s",
+      "kind": "inferred"
     },
     {
       "record": "call",
       "field": "tool",
       "from": "a tool_use block's name",
       "how": "Agent read as Task"
+    },
+    {
+      "record": "call",
+      "field": "outcome",
+      "from": "the tool_result's is_error or isError, and its text",
+      "how": "denied when the result says permission was denied, error when it is flagged, else ok",
+      "kind": "inferred"
     },
     {
       "record": "call",
@@ -66,23 +81,21 @@
     },
     {
       "record": "call",
-      "field": "matches",
-      "from": "a Grep's toolUseResult filenames, else its result's lines",
-      "how": "the files a Grep matched"
+      "field": "output",
+      "from": "the tool_result's text",
+      "how": "the text without its Exit code and agentId lines, when it runs to more than one line"
     },
     {
       "record": "call",
-      "field": "duration",
-      "from": "the tool_use's and the tool_result's timestamps",
-      "how": "the seconds between them",
-      "kind": "inferred"
+      "field": "old",
+      "from": "an Edit's old_string",
+      "how": "the lines it replaces"
     },
     {
       "record": "call",
-      "field": "outcome",
-      "from": "the tool_result's is_error or isError, and its text",
-      "how": "denied when the result says permission was denied, error when it is flagged, else ok",
-      "kind": "inferred"
+      "field": "new",
+      "from": "an Edit's new_string",
+      "how": "the lines it writes"
     },
     {
       "record": "call",
@@ -100,14 +113,27 @@
     },
     {
       "record": "call",
-      "field": "spawned",
+      "field": "matches",
+      "from": "a Grep's toolUseResult filenames, else its result's lines",
+      "how": "the files a Grep matched"
+    },
+    {
+      "record": "call",
+      "field": "child",
       "from": "the Task call's toolUseResult agentId, else its result's agentId: <id> line, else the prompt a session got",
       "how": "the session a Task call spawned",
       "kind": "inferred"
     },
     {
       "record": "call",
-      "field": "same command next",
+      "field": "position",
+      "from": "the session's calls",
+      "how": "the call's place among them, counting from 1",
+      "kind": "inferred"
+    },
+    {
+      "record": "call",
+      "field": "again",
       "from": "the session's later Bash calls",
       "how": "the time and outcome of the next call that ran the same command",
       "kind": "inferred"
@@ -120,10 +146,22 @@
       "kind": "inferred"
     },
     {
+      "record": "message",
+      "field": "text",
+      "from": "a message's content",
+      "how": "its text blocks joined"
+    },
+    {
       "record": "session",
       "field": "id",
       "from": "the transcript's file name",
-      "how": "its name without .jsonl, and agent-<id> read as <id>"
+      "how": "the name without .jsonl, and agent-<id> read as <id>"
+    },
+    {
+      "record": "session",
+      "field": "run",
+      "from": "the folder a transcript is in",
+      "how": "runs/<run>/"
     },
     {
       "record": "session",
@@ -140,10 +178,17 @@
     },
     {
       "record": "session",
-      "field": "spawn",
-      "kind": "inferred",
+      "field": "depth",
       "from": "parent",
-      "how": "the time of the Task call that spawned it, on the run's clock"
+      "how": "how many sessions above it in its run's tree",
+      "kind": "inferred"
+    },
+    {
+      "record": "session",
+      "field": "spawn",
+      "from": "parent",
+      "how": "the time of the Task call that spawned it, on the run's clock",
+      "kind": "inferred"
     },
     {
       "record": "session",
@@ -159,23 +204,37 @@
     },
     {
       "record": "session",
-      "field": "returned",
-      "from": "a subagent's last message, else its Task call's result",
-      "how": "what the subagent returned, the Exit code and agentId lines dropped"
-    },
-    {
-      "record": "session",
-      "field": "waiting",
+      "field": "waits",
       "from": "the Task calls it waited on",
       "how": "the spans it waited on its subagents, overlapping spans merged",
       "kind": "inferred"
     },
     {
       "record": "session",
-      "field": "calls and errors",
+      "field": "call count",
       "from": "the calls that pass the filters",
-      "how": "how many calls a session has, and how many ended in an error",
+      "how": "how many calls a session, a run or a compared group has",
       "kind": "inferred"
+    },
+    {
+      "record": "session",
+      "field": "error count",
+      "from": "outcome",
+      "how": "how many of its calls ended in an error",
+      "kind": "inferred"
+    },
+    {
+      "record": "session",
+      "field": "denied count",
+      "from": "outcome",
+      "how": "how many of its calls were denied",
+      "kind": "inferred"
+    },
+    {
+      "record": "run",
+      "field": "team",
+      "from": "sessions-index.json's team",
+      "how": "as the index names it, version 1 or 2"
     },
     {
       "record": "run",
@@ -185,9 +244,44 @@
     },
     {
       "record": "run",
+      "field": "span",
+      "from": "its sessions' times",
+      "how": "how long the run ran, from its first line to its last",
+      "kind": "inferred"
+    },
+    {
+      "record": "run",
       "field": "task",
       "from": "the leads' first prompts",
       "how": "the prompt every run's lead got, when they all got the same one",
+      "kind": "inferred"
+    },
+    {
+      "record": "compared group",
+      "field": "wall clock",
+      "from": "its first session's start and end",
+      "how": "how long its first session ran",
+      "kind": "inferred"
+    },
+    {
+      "record": "compared group",
+      "field": "summed time",
+      "from": "its sessions' starts and ends",
+      "how": "the times its sessions ran, added up",
+      "kind": "inferred"
+    },
+    {
+      "record": "compared group",
+      "field": "in tool calls",
+      "from": "duration",
+      "how": "the durations of its calls other than Task, added up",
+      "kind": "inferred"
+    },
+    {
+      "record": "compared group",
+      "field": "waiting",
+      "from": "the Task calls its first session waited on",
+      "how": "how long it waited, overlapping waits counted once",
       "kind": "inferred"
     }
   ]
