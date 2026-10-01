@@ -190,3 +190,24 @@ def test_an_archive_an_older_thimble_made_has_its_views_moved_in_when_it_is_rest
     asyncio.run(ledger.restore_workspace(CORPUS, {"archive": Path(archived).name}))
     assert views.read_built(CORPUS, "posts")["dir"] == str(ws / "extension" / "views" / "posts")
     assert views.list_proposals(CORPUS)[0]["status"] == "built"
+
+
+def test_a_first_build_a_restart_cut_off_in_a_moved_folder_starts_a_new_session(corpora):
+    """A first build cut off by the restart that moved its folder starts a new session, given the folder's new place,
+    rather than resuming one whose earlier turns name the old place; a built view and a change keep their sessions."""
+    ws = config.workspace_dir(CORPUS)
+    rows = []
+    for slug, status, changed in (("drafting", "building", None), ("posts", "built", None), ("changing", "queued", True)):
+        d = ws / "views" / slug
+        d.mkdir(parents=True)
+        (d / "view.json").write_text(json.dumps({"name": slug, "claims": ["board.jsonl"]}))
+        rows.append({"slug": slug, "name": slug, "why": "", "claims": ["board.jsonl"], "arrangement": "",
+                     "proposed_by": "analyst", "status": status, "ts": "t", "session": "s", "session_id": f"id-{slug}",
+                     **({"changed": True} if changed else {})})
+    (ws / "views" / "proposals.json").write_text(json.dumps(rows))
+
+    assert views.migrate_workspaces() == {CORPUS: ["changing", "drafting", "posts"]}
+    kept = {p["slug"]: p for p in json.loads((ws / "views" / "proposals.json").read_text())}
+    assert "session_id" not in kept["drafting"] and "session" not in kept["drafting"]
+    assert kept["posts"]["session_id"] == "id-posts" and kept["changing"]["session_id"] == "id-changing"
+    assert [p["slug"] for p in kept.values()] == ["drafting", "posts", "changing"]

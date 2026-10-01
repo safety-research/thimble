@@ -303,8 +303,24 @@ def move_to_local(ws: Path) -> list[str]:
         moved[src] = str(to.resolve())
     if moved:
         _move_registry_paths(ws, moved)
+        _new_sessions(old / PROPOSALS_FILE, raw, {Path(p).name for p in moved.values()})
         log.info("%s: %d view(s) moved into the workspace's local extension", ws.name, len(moved))
     return sorted(Path(p).name for p in moved.values())
+
+
+def _new_sessions(path: Path, raw: Any, slugs: set[str]) -> None:
+    """Each first build of `slugs` that a restart cut off starts a new session rather than resuming its own, whose
+    earlier turns name the folder's old place: its session is dropped from the proposals in `raw`, written to `path`. A
+    change keeps its session, since the message that resumes it names the folder."""
+    if not isinstance(raw, list) or path.is_symlink():
+        return
+    cut = [x for x in raw if isinstance(x, dict) and x.get("slug") in slugs and x.get("status") in PENDING
+           and not x.get("changed") and x.get("session_id")]
+    for x in cut:
+        x.pop("session_id", None)
+        x.pop("session", None)
+    if cut:
+        write_json(path, raw)
 
 
 def _move_registry_paths(ws: Path, moved: dict[str, str]) -> None:
