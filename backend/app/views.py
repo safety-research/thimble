@@ -1715,22 +1715,26 @@ async def marks_for(c: str, slug: str, ref_list: list[str], ctx: dict[str, Any] 
     page, a JSON value, a CSV row, a reader's own `<path>#<locator>`) and of the view's unit refs
     (`view:<slug>/<key>`, resolved in one kernel round trip by the view at `version` and marked from their first
     REFS_MAX records) under the labels context `ctx` (default the workspace's). A ref no label marks and no filter keeps
-    is left out."""
+    is left out. The marks are worked out in a worker thread, since a label's first use reads its rows."""
     ctx = ctx if ctx is not None else await asyncio.to_thread(labels_context, c)
     if not ctx.get("probe") and not ctx.get("labels"):
         return {}
     records = [r for r in ref_list if is_record(r)]
     prefix = f"view:{slug}/"
     units = [r for r in ref_list if r.startswith(prefix) and len(r) > len(prefix)]
-    out: dict[str, dict[str, Any]] = {}
-    for r in records:
-        if (m := _record_mark(ctx, r)) is not None:
-            out[r] = m
+
+    def of_records() -> dict[str, dict[str, Any]]:
+        return {r: m for r in records if (m := _record_mark(ctx, r)) is not None}
+
+    out = await asyncio.to_thread(of_records)
     if units:
         answers = await resolve_many(c, slug, [{"key": r[len(prefix):]} for r in units], version)
-        for r, res in zip(units, answers):
-            if res is not None and (m := _unit_mark(ctx, res["refs"][:REFS_MAX])) is not None:
-                out[r] = m
+
+        def of_units() -> dict[str, dict[str, Any]]:
+            return {r: m for r, res in zip(units, answers)
+                    if res is not None and (m := _unit_mark(ctx, res["refs"][:REFS_MAX])) is not None}
+
+        out.update(await asyncio.to_thread(of_units))
     return out
 
 

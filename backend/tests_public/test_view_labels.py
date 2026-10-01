@@ -376,3 +376,28 @@ def test_a_labels_file_of_many_cleared_blocks_reads_as_its_store_and_in_one_pass
     assert ("turns.jsonl", 12, None, None, "shell", None, "turns.jsonl#L12") in rows, "the verdict stays"
     assert not any(r[6] in ("turns.jsonl#L11", "turns.jsonl#L39995") for r in rows), "the clears dropped them"
     assert took < 5, took
+
+
+async def test_marking_a_views_records_leaves_the_server_free_while_a_label_is_read(app, monkeypatch):
+    """A label's first use reads all its rows, seconds for millions of them, so the marks are worked out off the event
+    loop, which goes on serving other requests."""
+    import asyncio  # noqa: PLC0415
+    import time  # noqa: PLC0415
+
+    k = await _asks(app)
+    r = await app.put(f"/api/ws/{CORPUS}/concepts/{k['id']}", json={"shown": True})
+    assert r.status_code == 200, r.text
+    views.write_view(CORPUS, "threads", reader=READER, html=HTML, **VIEW)
+    read = kernel_thimble._members
+
+    def slow(jsonl):
+        time.sleep(1.0)
+        return read(jsonl)
+
+    monkeypatch.setattr(kernel_thimble, "_members", slow)
+    work = asyncio.create_task(views.marks_for(CORPUS, "threads", _refs(range(1, 13))))
+    t0 = time.monotonic()
+    await asyncio.sleep(0.05)
+    assert time.monotonic() - t0 < 0.5, "the loop ran while the label was read"
+    marks = await work
+    assert set(marks) == set(_refs((1, 4, 8)))
