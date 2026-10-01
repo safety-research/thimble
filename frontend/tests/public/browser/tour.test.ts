@@ -26,7 +26,8 @@
 //     check made there is no comment margin, so its text column is as wide as thimble's own Report draws it, also after
 //     Back from step 10; step 10: the demo makes the check, the margin stands at Run and not before, the comments appear
 //     in it, and only then does the page scroll to one; each comment card stands 8 px above its passage, or below the
-//     card above it, before and after the report scrolls;
+//     card above it, before and after the report scrolls; the Example badge sits in the report's bar and meets no text,
+//     control or picture, on step 9 and at every scroll position of step 10;
 //   - the page is frozen: clicks, keys and the wheel reach nothing, the tour writes nothing but the offer, and telemetry
 //     records nothing while it runs; Enter in the page's ask box sends nothing, and an ask box left open closes when
 //     the tour starts.
@@ -491,6 +492,56 @@ const REPORTCOL = () => {
     rail = root.querySelector<HTMLElement>('.wu-rail')
   return { inner: (root.firstElementChild as HTMLElement).offsetWidth, col: root.querySelector<HTMLElement>('.wu-page-col')!.offsetWidth, margin: !!rail && getComputedStyle(rail).display !== 'none' && rail.offsetWidth > 0 }
 }
+// in the page: the report example's Example badge against everything else the example shows: each line box of its text
+// and each control, glyph and picture, clipped by the boxes that scroll or clip it, that meets the badge; and whether the
+// badge lies inside the example's bar, which does not scroll
+const REPORTBADGE = () => {
+  const root = document.querySelector<HTMLElement>('.tour-ex-report')!
+  const tag = root.querySelector<HTMLElement>('.tour-tag')
+  const bar = root.querySelector('.wu-bar')!.getBoundingClientRect()
+  if (!tag) return { shown: false, inBar: false, hits: [] as string[], texts: 0 }
+  const t = tag.getBoundingClientRect()
+  type R = { l: number; t: number; r: number; b: number }
+  const clip = (el: Element, r: R): R => {
+    for (let p: Element | null = el; p && p !== root.parentElement; p = p.parentElement) {
+      const cs = getComputedStyle(p)
+      if (p !== el && (cs.overflowX !== 'visible' || cs.overflowY !== 'visible')) {
+        const q = p.getBoundingClientRect()
+        r = { l: Math.max(r.l, q.left), t: Math.max(r.t, q.top), r: Math.min(r.r, q.right), b: Math.min(r.b, q.bottom) }
+      }
+    }
+    return r
+  }
+  const shown = (el: Element) => {
+    const cs = getComputedStyle(el)
+    if (cs.visibility === 'hidden') return false
+    for (let p: Element | null = el; p && p !== root; p = p.parentElement) if (+getComputedStyle(p).opacity === 0) return false
+    return true
+  }
+  const hits: string[] = []
+  let texts = 0
+  const meet = (r: R, what: string) => {
+    if (Math.min(r.r, t.right) - Math.max(r.l, t.left) > 0.5 && Math.min(r.b, t.bottom) - Math.max(r.t, t.top) > 0.5) hits.push(what)
+  }
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+    const el = n.parentElement
+    if (!el || !n.textContent?.trim() || el.closest('.tour-tag') || !shown(el)) continue
+    const range = document.createRange()
+    range.selectNodeContents(n)
+    for (const b of range.getClientRects()) {
+      texts++
+      meet(clip(el, { l: b.left, t: b.top, r: b.right, b: b.bottom }), `text "${n.textContent.trim().slice(0, 30)}"`)
+    }
+  }
+  for (const el of root.querySelectorAll('button, input, textarea, svg, img, canvas')) {
+    if (el.closest('.tour-tag') || !shown(el)) continue
+    const b = el.getBoundingClientRect()
+    if (b.width < 1 || b.height < 1) continue
+    meet(clip(el, { l: b.left, t: b.top, r: b.right, b: b.bottom }), `${el.tagName.toLowerCase()} ${String((el as HTMLElement).className?.toString() || '').slice(0, 30)}`)
+  }
+  return { shown: t.width > 0 && t.height > 0, inBar: t.top >= bar.top - 0.5 && t.bottom <= bar.bottom + 0.5 && t.left >= bar.left - 0.5 && t.right <= bar.right + 0.5, hits: hits.slice(0, 5), texts }
+}
 // in the page: each figure of the report example, its chart's or table's width on screen against its content's width
 const FIGS = () => {
   const root = document.querySelector('.tour-ex-report')!,
@@ -910,6 +961,13 @@ async function walk(page: Page, tag: string, folds?: boolean, send = false) {
   })
   assert.deepEqual(fig, { q: 'How close did the database come to its limit of 200 connections?', rows: 4, check: 0 }, `${tag} 9: the first figure is the small table, and the check is not made yet`)
   assert.ok(r9.k <= 1 && r9.top === 0, `${tag} 9: the report at its own size or smaller, at its top`)
+  // the example's text is laid out a moment after the step shows
+  let badge9 = await page.evaluate(REPORTBADGE)
+  for (let k = 0; k < 20 && badge9.texts <= 50; k++) {
+    await sleep(150)
+    badge9 = await page.evaluate(REPORTBADGE)
+  }
+  assert.ok(badge9.shown && badge9.inBar && !badge9.hits.length && badge9.texts > 50, `${tag} 9: the Example badge sits in the report's bar and covers nothing ${JSON.stringify(badge9)}`)
   // every chart and table as wide as its figure; no comment margin until the check is made, so the text column is as
   // wide as thimble's own Report draws it with no check on, for a panel as wide as the example is laid out
   const figs = await page.evaluate(FIGS)
@@ -974,6 +1032,32 @@ async function walk(page: Page, tag: string, folds?: boolean, send = false) {
   assert.ok(scrolled > 300, `${tag} 10: the wheel scrolls the report (${scrolled})`)
   const after = await commentsLevel(page)
   assert.ok(after.every((c) => c.ok), `${tag} 10: still level once scrolled ${JSON.stringify(after)}`)
+  // the Example badge covers nothing at any scroll position of the report, from its top to its end a third of the page
+  // at a time
+  const scrollOf = () =>
+    page.evaluate(() => {
+      const p = document.querySelector('.tour-ex-report .wu-page')!
+      return { span: p.scrollHeight - p.clientHeight, step: Math.max(40, Math.floor(p.clientHeight / 3)) }
+    })
+  const { span: reach, step } = await scrollOf()
+  assert.ok(reach > 1000, `${tag} 10: the report scrolls (${reach})`)
+  const covered: unknown[] = []
+  let at = 0
+  for (let y = 0; ; y = Math.min(reach, y + step)) {
+    await page.evaluate((y) => {
+      document.querySelector('.tour-ex-report .wu-page')!.scrollTop = y
+    }, y)
+    await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))))
+    let b = await page.evaluate(REPORTBADGE)
+    for (let k = 0; k < 10 && b.texts <= 50; k++) {
+      await sleep(100)
+      b = await page.evaluate(REPORTBADGE)
+    }
+    at++
+    if (!b.shown || !b.inBar || b.hits.length || b.texts <= 50) covered.push({ y, ...b })
+    if (y >= reach) break
+  }
+  assert.deepEqual(covered, [], `${tag} 10: the Example badge covers nothing at any of ${at} scroll positions`)
   assert.deepEqual(await buttons(page), ['back', 'done'], `${tag} 10: Back and Done`)
   await page.click('.tour-pop [data-tour="done"]')
   await sleep(500)

@@ -49,6 +49,17 @@
 .tour-ex-report .wu-cm {
   transition: opacity 400ms ease-out;
 }
+/* the example report's badge in the empty middle of its bar, which never scrolls, kept at least as wide as the badge */
+.tour-ex-report .wu-bar-spacer {
+  display: flex;
+  flex: 1 0 auto;
+  align-items: center;
+  justify-content: center;
+  padding: 0 8px;
+}
+.tour-ex-report .wu-bar-spacer > .tour-tag {
+  position: static;
+}
 .tour-checks-hidden .wu-cm {
   opacity: 0;
   visibility: hidden;

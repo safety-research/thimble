@@ -305,7 +305,8 @@ const reportExample = (api: Api): Example => {
   const [w0, h0] = (inner.getAttribute('data-size') || '1096x848').split('x').map(Number)
   Object.assign(inner.style, { position: 'absolute', left: '0', top: '0', margin: '0', width: `${w0}px`, height: `${h0}px`, transformOrigin: '0 0' })
   Object.assign(w.style, { background: api.groundOf(panel()), overflow: 'hidden' })
-  Object.assign(api.tag(w).style, { top: '20px', left: '50%', right: 'auto', transform: 'translateX(-50%)' })
+  const spacer = w.querySelector<HTMLElement>('.wu-bar-spacer')
+  api.tag(spacer ?? w)
   // the report's first figure, a dense timeline chart, becomes a small table that makes one point in plain words (the
   // figure markup is the report's own, from its table figure)
   const first = w.querySelector('figure.wu-fig[data-tour-anchor="card:fb1d3ae9"]'),
