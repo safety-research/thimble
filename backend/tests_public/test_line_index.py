@@ -1,6 +1,7 @@
 """Big files' line indexes (corpus.INDEX_BIG and up): a page is read before the file's index is ready, from its start or
 the nearest mark the background build has made, with an estimated line count that turns exact once the index is built;
-and the ruler's count shares that build."""
+the ruler's count shares that build; and the index is kept on disk, keyed by path, size and mtime, for the next
+server."""
 import json
 import threading
 from pathlib import Path
@@ -150,3 +151,54 @@ def test_the_ruler_counts_lines_with_the_build_the_pages_started(big, gate, monk
     gate.release()
     t.join(20)
     assert counted["n"] == N and builds == [path]
+
+
+def test_a_big_files_index_is_kept_on_disk_for_the_next_server(big, monkeypatch, tmp_path):
+    path, data = big
+    idx = corpus.line_offsets(path)
+    kept = list((tmp_path / "thimble-home" / corpus.INDEX_DIR).glob("*.idx"))
+    assert len(kept) == 1
+    # a restart: nothing in memory, and no pass over the file allowed
+    corpus._INDEX.pop(path)
+    corpus._COUNTS.pop(path)
+
+    def no_build(p, progress=None):
+        raise AssertionError("indexed again")
+
+    monkeypatch.setattr(corpus, "build_index", no_build)
+    again = corpus.line_offsets(path)
+    assert (again.key, again.lines, list(again.marks_list())) == (idx.key, idx.lines, list(idx.marks_list()))
+    corpus._INDEX.pop(path)
+    assert corpus.page_lines(path, N - 9, N) == (lines_of(data)[-10:], N, False)
+    # a changed file is indexed again
+    monkeypatch.undo()
+    monkeypatch.setattr(corpus, "INDEX_BIG", 1024)
+    with open(path, "ab") as f:
+        f.write(b"\n{\"i\": \"one more\"}\n")
+    assert len(corpus.line_offsets(path)) == N + 1
+
+
+def test_an_index_file_that_does_not_match_is_not_used(big):
+    path, data = big
+    idx = corpus.line_offsets(path)
+    f = corpus._index_file(path)
+    good = f.read_bytes()
+    assert corpus.load_index(path, idx.key) is not None
+    assert corpus.load_index(path, (idx.key[0], idx.key[1] + 1)) is None  # another mtime
+    other = path.with_name("other.jsonl")
+    f.with_name(corpus._index_file(other).name).write_bytes(good)
+    assert corpus.load_index(other, idx.key) is None  # another file's index
+    for bad in (b"", b"junk", good[:-3], good.replace(b'"marks": ', b'"marks": 1'), good.replace(b'"order": "', b'"order": "x')):
+        f.write_bytes(bad)
+        assert corpus.load_index(path, idx.key) is None
+
+
+def test_the_disk_keeps_the_most_recently_used_indexes(big, monkeypatch, tmp_path):
+    path, data = big
+    monkeypatch.setattr(corpus, "INDEX_DISK_MAX", 2)
+    paths = [path.with_name(f"big-{i}.jsonl") for i in range(3)]
+    for p in paths:
+        p.write_bytes(data)
+        corpus.line_offsets(p)
+    kept = {f.name for f in (tmp_path / "thimble-home" / corpus.INDEX_DIR).glob("*.idx")}
+    assert kept == {corpus._index_file(p).name for p in paths[1:]}

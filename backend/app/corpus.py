@@ -12,18 +12,21 @@ the analyst's view of it (viewlog.record). The Files view's name, in-file and cr
 The one write: `PUT /corpora/{c}/source?path=…` replaces an existing .txt / .md / .markdown file atomically, keeping its
 line ending and trailing-newline convention.
 
-A big file's line index (INDEX_BIG and up) is built in a background thread. Until it is ready a page is read on from the
-nearest mark the build has made (the file's start at once), with the line count estimated (`total_estimated`);
-`GET /source/lines` says when it is exact.
+A big file's line index (INDEX_BIG and up) is built in a background thread and kept on disk in thimble's home, keyed by
+path, size and mtime, so a restarted server reads it back. Until it is ready a page is read on from the nearest mark the
+build has made (the file's start at once), with the line count estimated (`total_estimated`); `GET /source/lines` says
+when it is exact.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
 import re
 import shutil
 import sqlite3
+import sys
 import tempfile
 import threading
 import time
@@ -240,8 +243,11 @@ def folder_listing(corpus: Path, rel: str, include_hidden: bool = False) -> dict
 INDEX_MAX_FILES = 64                 # line indexes kept, least recently used out first
 INDEX_MAX_BYTES = 256 * 1024 * 1024  # ... or until their marks add up to this
 INDEX_BUF = 8 * 1024 * 1024          # bytes read at a time while marking
-INDEX_BIG = 32 * 1024 * 1024         # a file this large is indexed in the background
+INDEX_BIG = 32 * 1024 * 1024         # a file this large is indexed in the background, and its index is kept on disk
 INDEX_BUILDS = 2                     # background index builds at a time
+INDEX_DISK_MAX = 256                 # indexes kept on disk, least recently used out first
+INDEX_DIR = "line-index"             # in thimble's home
+INDEX_MAGIC = b"thimble line index 1\n"
 FORWARD_BUF = 1024 * 1024            # bytes read at a time by a page read before its file's index is ready
 FORWARD_SKIP = 16 * 1024 * 1024      # ... and the most it reads past the nearest mark before its first line
 _INDEX: "OrderedDict[Path, LineIndex]" = OrderedDict()  # path -> its sparse index; test hooks read `p in _INDEX`
@@ -463,6 +469,75 @@ def _keep(path: Path, idx: LineIndex) -> None:
     _index_trim()
 
 
+def _index_home() -> Path:
+    return Path(os.environ.get("THIMBLE_HOME") or "~/.thimble").expanduser() / INDEX_DIR
+
+
+def _index_file(path: Path) -> Path:
+    return _index_home() / (hashlib.sha256(os.fsencode(path)).hexdigest()[:32] + ".idx")
+
+
+def _index_header(path: Path, idx: LineIndex) -> dict[str, Any]:
+    from . import concept_scan  # lazy: concept_scan imports this module
+
+    return {"path": str(path), "size": idx.key[0], "mtime_ns": idx.key[1], "lines": idx.lines, "marks": idx.n_marks,
+            "chunk": [concept_scan.CHUNK_LINES, concept_scan.CHUNK_BYTES], "order": sys.byteorder}
+
+
+def save_index(path: Path, idx: LineIndex) -> None:
+    """Keep a big file's index on disk in thimble's home, so a restarted server reads it in place of a pass over the
+    file; the least recently used past INDEX_DISK_MAX go. Never fails."""
+    folder = _index_home()
+    tmp = None
+    try:
+        config.private_dir(folder.parent)
+        config.private_dir(folder)
+        fd, tmp = tempfile.mkstemp(dir=folder, suffix=".tmp")
+        with os.fdopen(fd, "wb") as f:
+            f.write(INDEX_MAGIC + json.dumps(_index_header(path, idx)).encode() + b"\n")
+            f.write(idx.mark_lines.tobytes())
+            f.write(idx.mark_offsets.tobytes())
+        os.replace(tmp, _index_file(path))
+        tmp = None
+        kept = sorted(folder.glob("*.idx"), key=lambda p: p.stat().st_mtime)
+        for old in kept[:max(0, len(kept) - INDEX_DISK_MAX)]:
+            old.unlink(missing_ok=True)
+    except OSError as e:
+        log.warning("line index: could not keep the index of %s: %s", path, e)
+    finally:
+        if tmp is not None:
+            Path(tmp).unlink(missing_ok=True)
+
+
+def load_index(path: Path, key: tuple[int, int]) -> LineIndex | None:
+    """The index save_index kept for this file at this (size, mtime_ns), else None."""
+    f = _index_file(path)
+    try:
+        data = f.read_bytes()
+    except OSError:
+        return None
+    try:
+        if not data.startswith(INDEX_MAGIC):
+            return None
+        nl = data.index(b"\n", len(INDEX_MAGIC))
+        head = json.loads(data[len(INDEX_MAGIC):nl])
+        n = head["marks"]
+        body = data[nl + 1:]
+        mark_lines, mark_offsets = array("q"), array("q")
+        mark_lines.frombytes(body[:8 * n])
+        mark_offsets.frombytes(body[8 * n:])
+        idx = LineIndex(key, head["lines"], mark_lines, mark_offsets)
+        if head != _index_header(path, idx) or len(mark_offsets) != n:
+            return None
+    except (ValueError, KeyError, TypeError):
+        return None
+    try:
+        os.utime(f)  # recently used
+    except OSError:
+        pass
+    return idx
+
+
 def _run_build(path: Path, b: _Build) -> None:
     with _build_slots:
         try:
@@ -478,16 +553,25 @@ def _run_build(path: Path, b: _Build) -> None:
             _keep(path, idx)
         if _builds.get(path) is b:
             del _builds[path]
+    save_index(path, idx)
     b.finish(idx)
 
 
 def _big_index(path: Path, key: tuple[int, int]) -> "LineIndex | _Build":
-    """A big file's index from memory, else its background build (started now when none runs)."""
+    """A big file's index from memory or disk, else its background build (started now when none runs)."""
     with _index_lock:
         hit = _INDEX.get(path)
         if hit is not None and hit.key == key:
             _INDEX.move_to_end(path)
             return hit
+        b = _builds.get(path)
+        if b is not None and b.key == key:
+            return b
+    idx = load_index(path, key)
+    with _index_lock:
+        if idx is not None:
+            _keep(path, idx)
+            return idx
         b = _builds.get(path)
         if b is not None and b.key == key:
             return b
@@ -498,7 +582,7 @@ def _big_index(path: Path, key: tuple[int, int]) -> "LineIndex | _Build":
 
 def line_offsets(path: Path) -> LineIndex:
     """The file's sparse line index, built on first access and kept in an LRU keyed on (size, mtime_ns) so a changed
-    file is indexed again. A big file's (INDEX_BIG) is built in the background; this waits for it."""
+    file is indexed again. A big file's (INDEX_BIG) is built in the background and kept on disk; this waits for it."""
     st = path.stat()
     key = (st.st_size, st.st_mtime_ns)
     if st.st_size >= INDEX_BIG:
