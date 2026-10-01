@@ -1727,8 +1727,10 @@ async def _worker_turn(run: Run, run_log: Log, cwd: Path, prompt: str, resume: s
             state = "unanswered"
             break
         if tail.pos != pos and not tail.turn_ended:
-            waiting, unlisted, gap = False, 0, POLL_S  # the transcript grew: the session works
-            continue
+            unlisted, gap = 0, POLL_S
+            if not waiting:
+                continue  # the transcript grew: the session works
+            looked = 0.0  # it grew while the session waited for an answer: its state says whether it still waits
         if not tail.turn_ended and time.monotonic() - looked < gap:
             continue
         state = await SESSIONS.state(cwd, run.session)

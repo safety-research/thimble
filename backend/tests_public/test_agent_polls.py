@@ -142,3 +142,34 @@ async def test_a_dev_turn_asks_for_its_session_s_state_only_while_the_transcript
     with tx.open("a") as f:
         f.write(json.dumps({"type": "system", "subtype": "turn_duration"}) + "\n")
     assert await asyncio.wait_for(turn, 2) == "step 29"
+
+
+async def test_a_dev_turn_waiting_for_an_answer_keeps_its_wait_while_the_transcript_grows(tmp_path, monkeypatch):
+    tx = tmp_path / "ab12cd34-0000.jsonl"
+    tx.write_text("")
+    fake = _Sessions(tx)
+    fake.now = "blocked"
+    monkeypatch.setattr(dev, "SESSIONS", fake)
+    monkeypatch.setattr(dev, "POLL_S", 0.01)
+    monkeypatch.setattr(dev, "STATE_GAP_MAX_S", 0.04)
+    monkeypatch.setattr(dev, "ASK_TIMEOUT_S", 0.6)
+    stages: list[str] = []
+
+    class Log(dev.Log):
+        def stage(self, line: str) -> None:
+            stages.append(line)
+
+    run = dev.Run("t1", "a ticket", "now")
+    turn = asyncio.get_running_loop().create_task(dev._worker_turn(run, Log(None), tmp_path, "do it", None,
+                                                                    name="thimble:dev", workspace=None,
+                                                                    on_session=lambda a, b: None))
+    began = time.monotonic()
+    with tx.open("a") as f:
+        while not turn.done() and time.monotonic() - began < 3:
+            await asyncio.sleep(0.15)  # a line now and then while the session still waits on its question
+            f.write(json.dumps({"type": "attachment", "attachment": {"type": "hook_progress"}}) + "\n")
+            f.flush()
+    with pytest.raises(dev.SessionError, match="for an answer"):
+        await asyncio.wait_for(turn, 1)
+    assert time.monotonic() - began < 1.5, "each line restarted the wait for an answer"
+    assert sum("waiting for an answer" in s for s in stages) == 1
