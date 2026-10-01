@@ -46,6 +46,7 @@ TURN_TEXT_MAX = 20_000  # characters of one turn's text a page carries
 TURNS_PAGE_MAX = 500
 SNIFF_CACHE_MAX = 4096
 TURNS_CACHE_MAX = 4
+PARSING_MAX = 64
 
 SPEAKER_KEYS = ("role", "speaker", "sender", "author", "from", "user", "username", "participant", "character", "who",
                 "nick", "persona")
@@ -103,6 +104,7 @@ DISTINCT_STYLES = {"whatsapp", "bracket", "irc", "vtt", "clock-name", "name-cloc
 _lock = threading.Lock()
 _SNIFFS: "OrderedDict[str, tuple[tuple[int, int], dict[str, Any] | None]]" = OrderedDict()
 _TURNS: "OrderedDict[str, tuple[tuple[int, int], dict[str, Any]]]" = OrderedDict()
+_PARSING: dict[str, threading.Lock] = {}  # per file, so a file asked for twice at once is parsed once
 
 
 # --------------------------------------------------------------------------- messages
@@ -617,8 +619,21 @@ def _role(speaker: str) -> str:
 
 def parse_turns(path: Path, rel: str) -> dict[str, Any]:
     """Every turn of a whole-file JSON transcript, or of JSON lines the server pages as text, with the groups
-    (conversations) they belong to; kept for the last few files read. Raises HTTPException 413 past JSON_MAX_BYTES, 415
-    when the file holds no turns."""
+    (conversations) they belong to; kept for the last few files read, and read once however many ask for it at the same
+    time. Raises HTTPException 413 past JSON_MAX_BYTES, 415 when the file holds no turns."""
+    k = str(path)
+    with _lock:
+        busy = _PARSING.get(k)
+        if busy is None:
+            if len(_PARSING) >= PARSING_MAX:
+                for name in [n for n, lk in _PARSING.items() if not lk.locked()]:
+                    del _PARSING[name]
+            busy = _PARSING[k] = threading.Lock()
+    with busy:
+        return _parse_turns(path, rel)
+
+
+def _parse_turns(path: Path, rel: str) -> dict[str, Any]:
     key = _stat_key(path)
     if key is None:
         raise HTTPException(404, f"no such file: {rel}")

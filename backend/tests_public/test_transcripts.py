@@ -243,3 +243,25 @@ def test_turns_whose_words_are_not_found_cost_a_few_passes(chats, monkeypatch):
     t0 = time.monotonic()
     got = transcripts.parse_turns(chats / "logs" / "missed.json", "logs/missed.json")
     assert time.monotonic() - t0 < 3 and {t["line"] for t in got["turns"]} == {1}
+
+
+def test_a_file_asked_for_at_once_by_many_is_parsed_once(chats, monkeypatch):
+    import threading
+    import time
+
+    calls = []
+    real = transcripts.conversations_in
+
+    def slow(data, *a):
+        calls.append(1)
+        time.sleep(0.2)
+        return real(data, *a)
+
+    monkeypatch.setattr(transcripts, "conversations_in", slow)
+    out = []
+    threads = [threading.Thread(target=lambda: out.append(transcripts.parse_turns(chats / "logs" / "eval.json", "e"))) for _ in range(4)]
+    for th in threads:
+        th.start()
+    for th in threads:
+        th.join()
+    assert len(out) == 4 and len(calls) == 1
