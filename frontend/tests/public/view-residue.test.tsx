@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 // What thimble draws above a view (src/files/ViewChrome.tsx): the residue line says what the view leaves out by kind,
 // opens the list of it under the head, and says how many files it read when there is none; the derived data names its
-// counts and lists the inferred fields first.
+// counts and lists the fields of each kind of record under its name, the computed ones first.
 import { act, useState } from 'react'
 import { afterEach, beforeAll, expect, test } from 'vitest'
 import { ResidueList, ViewNotesLine, type ViewNotes } from '../../src/files/ViewChrome.tsx'
@@ -71,10 +71,32 @@ test('the residue line counts what the view leaves out and opens the list of it'
   await act(async () => (list.querySelector('.view-pane-list-item') as HTMLButtonElement).click())
   expect(picked).toEqual(['runs/r2/events.jsonl'])
   const derived = [...el.querySelectorAll('.view-pane-files')].find((b) => b.textContent?.startsWith('Derived')) as HTMLButtonElement
-  expect(derived.textContent).toBe('Derived data: 2 fields, 1 inferred')
+  expect(derived.textContent).toBe('Derived data: 2 fields, 1 computed')
   await act(async () => derived.click())
   const rows = [...document.querySelectorAll('.view-pane-list-row .mono')].map((x) => x.textContent)
   expect(rows.slice(-2)).toEqual(['outcome', 'time'])
+  expect(document.querySelector('.view-pane-list-head'), 'fields that name no kind of record have no heading').toBeNull()
+})
+
+test('the derived data lists a field of each kind of record that holds it, under the kind', async () => {
+  const derived = [
+    { record: 'pull request', field: 'state', from: 'its merge and close', how: 'open, merged or closed', kind: 'inferred' as const },
+    { record: 'pull request', field: 'closes', from: 'fixes', how: 'the first number in it' },
+    { record: 'issue', field: 'state', from: 'its close and the pull requests that fix it', how: 'fixed once one merged', kind: 'inferred' as const },
+    { record: 'issue', field: 'area', from: 'labels', how: 'the first label' },
+  ]
+  const notes: ViewNotes = { shown: { files: 2, not_shown: { count: 0, unexplained: 0, files: [] }, missing: [], derived, errors: [] }, problems: { count: 0, examples: [] } }
+  const el = await mount(<Head notes={notes} picked={[]} />)
+  const button = [...el.querySelectorAll('.view-pane-files')].find((b) => b.textContent?.startsWith('Derived')) as HTMLButtonElement
+  expect(button.textContent).toBe('Derived data: 4 fields, 2 computed')
+  await act(async () => button.click())
+  const groups = [...document.querySelectorAll('.view-pane-list-group')].slice(-2)
+  expect(groups.map((g) => g.querySelector('.view-pane-list-head')?.textContent)).toEqual(['Per pull request', 'Per issue'])
+  expect(groups.map((g) => [...g.querySelectorAll('.view-pane-list-row .mono')].map((x) => x.textContent))).toEqual([
+    ['state', 'closes'],
+    ['state', 'area'],
+  ])
+  expect(groups[1].textContent).toContain('fixed once one merged')
 })
 
 test('a view that leaves nothing out says so, and has no list to open', async () => {

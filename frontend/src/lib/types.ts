@@ -509,8 +509,10 @@ export interface ViewProblems {
 }
 
 /** A field a view's reader made rather than read as the files hold it, `kind` "inferred" for a value the files do not
- * state (a join, an estimate, a classification), `key` the key the reader's records hold it under where that differs. */
+ * state (a join, an estimate, a classification), shown as computed, `key` the key the reader's records hold it under
+ * where that differs, `record` the kind of record that holds it ('' or absent when the view names none). */
 export interface ViewDerived {
+  record?: string
   field: string
   from: string
   how: string
@@ -521,7 +523,7 @@ export interface ViewDerived {
 /** `GET /ws/{c}/views/{slug}/shown`: of the files a view claims, those it does not show whole, the first 500 of them,
  * each with why its reader hides it ('' when it gives no why) and how many of its bytes were read, with `claimed`
  * false for a file of a folder beside the claimed ones; what the claims expect and the corpus lacks; the records its
- * reader could not place; and the fields its reader derived, the inferred ones first. */
+ * reader could not place; and the fields its reader derived, by kind of record, the inferred ones first in each. */
 export interface ViewShown {
   files: number
   not_shown: { count: number; unexplained: number; files: { path: string; size: number; read: number; why: string; claimed?: boolean }[] }
