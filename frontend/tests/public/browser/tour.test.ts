@@ -660,6 +660,17 @@ async function walk(page: Page, tag: string, folds?: boolean, send = false) {
   })
   // inside the example view the wheel scrolls its list and a click reaches its page; the app sees none of it
   const view = page.frames().find((f) => new URL(f.url()).pathname.endsWith('/tour/timeline/page.html'))!
+  // the page's text cells clip at their content edge, so a mark on a word past the ellipsis does not show in the padding
+  const unclipped = await view.evaluate(() =>
+    [...document.querySelectorAll('#tbl td.x')].flatMap((td) => {
+      const xt = td.querySelector('.xt'),
+        cs = getComputedStyle(td),
+        b = td.getBoundingClientRect(),
+        x = xt?.getBoundingClientRect()
+      return !xt || !x || getComputedStyle(xt).overflow !== 'hidden' || x.right > b.right - parseFloat(cs.paddingRight) + 0.5 ? [td.textContent!.slice(0, 30)] : []
+    }),
+  )
+  assert.deepEqual(unclipped.slice(0, 3), [], `${tag} 6: the example's text cells clip at their content edge`)
   const listTop = () => view.evaluate(() => document.getElementById('list')!.scrollTop)
   const top0 = await listTop()
   await view.evaluate(() => {

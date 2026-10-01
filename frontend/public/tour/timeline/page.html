@@ -78,6 +78,8 @@
   #tbl td.b { font-family: var(--font-body); font-size: var(--text-xs); }
   #tbl td.k, #tbl td.i { color: var(--text-secondary); }
   #tbl td.x { font-family: var(--font-body); font-size: var(--text-xs); color: var(--text-primary); }
+  /* the text clips at the cell's content edge, so a mark on a word past the ellipsis does not show in the padding */
+  #tbl td.x .xt { display: block; overflow: hidden; text-overflow: ellipsis; }
   #tbl td.err { color: var(--status-negative); }
   #tbl td.err .ico { display: inline-block; width: 11px; height: 11px; margin-right: 4px; vertical-align: -1px; stroke-width: 2; }
   #tbl .none { color: var(--text-tertiary); }
@@ -489,7 +491,7 @@ function renderList() {
   for (const e of rows) {
     const m = thimble.markOf(e.ref), lab = m && m.colours.length ? ` data-thimble-label style="--thimble-label:${m.colours[0]}"` : ''
     const err = e.outcome === 'failed'
-    h += `<tr data-r="${e.r}" data-anchor="${esc(e.ref)}"${lab} class="${S.open === e.r ? 'sel' : ''}"><td class="t">${hhmm(e.t, 1)}</td><td class="b">${esc(e.source)}</td><td class="b k${err ? ' err' : ''}"${err ? ' title="outcome: failed"' : ''}>${err ? ico('err') : ''}${esc(e.kind)}</td><td class="b">${esc(e.actor)}</td><td class="b i${e.incident ? '' : ' none'}">${esc(e.incident || '—')}</td><td class="x">${marked(e.text, e.ref)}</td></tr>`
+    h += `<tr data-r="${e.r}" data-anchor="${esc(e.ref)}"${lab} class="${S.open === e.r ? 'sel' : ''}"><td class="t">${hhmm(e.t, 1)}</td><td class="b">${esc(e.source)}</td><td class="b k${err ? ' err' : ''}"${err ? ' title="outcome: failed"' : ''}>${err ? ico('err') : ''}${esc(e.kind)}</td><td class="b">${esc(e.actor)}</td><td class="b i${e.incident ? '' : ' none'}">${esc(e.incident || '—')}</td><td class="x"><span class="xt">${marked(e.text, e.ref)}</span></td></tr>`
     if (S.open === e.r) h += `<tr class="det" data-anchor="${esc(e.ref)}"><td colspan="6">${details(e)}</td></tr>`
   }
   document.getElementById('tb').innerHTML = h
