@@ -12,7 +12,7 @@ import { segmentsFor, segmentsFrom } from '../../src/files/views/common.tsx'
 import { pickView, scoreViews, viewByType } from '../../src/files/views/registry.ts'
 import { OBJECTS_SCORE, tableScore } from '../../src/files/views/table.tsx'
 import { frontMatterLines, metaFields } from '../../src/files/views/text.tsx'
-import transcript, { chatTurns, conversationTurns, nameOf, parsedLines, pick, shownLines, textOf, timeOf, unwrapStream } from '../../src/files/views/transcript.tsx'
+import transcript, { chatTurns, conversationTurns, madeBlocks, nameOf, parsedLines, pick, shownLines, textOf, timeOf, unwrapStream } from '../../src/files/views/transcript.tsx'
 import { api } from '../../src/lib/api.ts'
 import type { Concept, SourcePage, SourceRecord, TranscriptHint, View } from '../../src/lib/types.ts'
 import { mount, settle, unmountAll } from './mount.tsx'
@@ -209,6 +209,22 @@ describe('JSON lines', () => {
     const board: SourcePage = { path: 'b.jsonl', kind: 'text', total_lines: 2, start: 1, records: posts }
     const hint: TranscriptHint = { format: 'messages', score: 0.95, keys: { speaker: 'author', text: 'body' } }
     expect(lines(await mount(<View workspace="w" path="b.jsonl" kind="text" page={board} loadMore={() => undefined} transcript={hint} />))).toEqual(['1'])
+  })
+  test('a stream the server keeps whole, one raw block per record, shows its turns as words', async () => {
+    const rows = [
+      { type: 'user', sessionId: 's1', message: { role: 'user', content: 'Which pages were reverted?' } },
+      { type: 'assistant', sessionId: 's1', message: { role: 'assistant', content: [{ type: 'thinking', thinking: '', signature: 'x' }] } },
+      { type: 'assistant', sessionId: 's1', message: { role: 'assistant', content: [{ type: 'text', text: 'The policy pages.' }] } },
+    ]
+    const records: SourceRecord[] = rows.map((r, i) => ({ line: i + 1, record: r, blocks: [{ kind: 'raw', text: JSON.stringify(r, null, 2) }], meta: {} }))
+    expect(madeBlocks(records[2])).toEqual([{ kind: 'text', text: 'The policy pages.' }])
+    expect(madeBlocks({ line: 4, record: { type: 'system' }, blocks: [{ kind: 'raw', text: '{}' }], meta: {} })).toBeNull()
+    const page: SourcePage = { path: 'run.jsonl', kind: 'text', total_lines: 3, start: 1, records }
+    const el = await mount(<View workspace="w" path="run.jsonl" kind="text" page={page} loadMore={() => undefined} transcript={{ format: 'stream', score: 1 }} />)
+    const cards = [...el.querySelectorAll('.reader-card')]
+    expect(cards.map((c) => c.getAttribute('data-line'))).toEqual(['1', '3'])
+    expect(cards[1].textContent).toContain('The policy pages.')
+    expect(el.textContent).not.toContain('"type"')
   })
   test('lines that each hold a conversation show one card per line, its turns inside', async () => {
     const records: SourceRecord[] = [1, 2].map((n) => ({

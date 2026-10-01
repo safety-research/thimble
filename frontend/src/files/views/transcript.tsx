@@ -587,12 +587,33 @@ export function unwrapStream(records: SourceRecord[], wrap: string): SourceRecor
   })
 }
 
+/** The blocks of a conversational stream record the server keeps whole, as one raw block (in a file it types as text),
+ * made here as the server makes them where it reads the file as a transcript; null for any other record. Pure. */
+export function madeBlocks(rec: SourceRecord): Block[] | null {
+  const r = rec.record
+  const whole = rec.blocks.length === 1 && rec.blocks[0].kind === 'raw'
+  return whole && CONVERSATIONAL.has(r?.type) && r?.message && typeof r.message === 'object' ? streamBlocks(r) : null
+}
+
 function StreamTranscript({ path, page, targetRef, transcript }: ViewProps) {
   const wrap = transcript?.wrap
-  const records = useMemo(() => (wrap ? unwrapStream(page.records, wrap) : page.records), [wrap, page.records])
-  // blocks made here from a nested record are not the file's own, so labels' spans and citations' offsets are not
-  // drawn on them
-  const blockPath = wrap ? undefined : path
+  // the lines whose blocks are made here, from a nested record or one the server keeps whole: they are not the file's
+  // own blocks, so labels' spans and citations' offsets are not drawn on them
+  const { records, made } = useMemo(() => {
+    if (wrap) {
+      const out = unwrapStream(page.records, wrap)
+      return { records: out, made: new Set(out.map((r) => r.line)) }
+    }
+    const lines = new Set<number>()
+    const out = page.records.map((r) => {
+      const blocks = madeBlocks(r)
+      if (!blocks) return r
+      lines.add(r.line)
+      return { ...r, blocks }
+    })
+    return { records: out, made: lines }
+  }, [wrap, page.records])
+  const blockPathOf = (line: number) => (made.has(line) ? undefined : path)
   const [showSystem, setShowSystem] = useState(false)
   const rootRef = useRef<HTMLDivElement | null>(null)
   const { target, hit } = useTarget(targetRef, path, rootRef, [records, showSystem])
@@ -630,12 +651,13 @@ function StreamTranscript({ path, page, targetRef, transcript }: ViewProps) {
     if (sid) prevSession = sid
     const type: string = r.type ?? 'record'
     if (!CONVERSATIONAL.has(type)) {
-      if (showSystem) out.push(<SysRow key={rec.line} path={path} blockPath={blockPath} rec={rec} target={target} hit={hit} />)
+      if (showSystem) out.push(<SysRow key={rec.line} path={path} blockPath={blockPathOf(rec.line)} rec={rec} target={target} hit={hit} />)
       else if (runs.has(rec.line)) out.push(<HiddenRun key={`h${rec.line}`} count={runs.get(rec.line)!} onShow={() => setShowSystem(true)} />)
       return
     }
     const ts = rec.meta?.timestamp ?? r.timestamp
     const errorBlocks = errorBlockIndexes(r)
+    const blockPath = blockPathOf(rec.line)
     const header = [type, ts ? stamp(String(ts)) : null].filter(Boolean).join(' · ')
     out.push(
       <RecordCard key={rec.line} path={path} line={rec.line} target={target} hit={hit} className={`reader-rec-${type}`} header={header} text={recordExcerpt(rec)}>
