@@ -25,7 +25,6 @@ in least-recently-used caches of a bounded size.
 from __future__ import annotations
 
 import csv
-import io
 import json
 import mmap
 import re
@@ -39,7 +38,6 @@ from typing import Any, Iterator
 
 from . import corpus, refs
 
-READERS = ("lines", "json", "csv", "sqlite", "pdf")
 CHUNK = 500  # lines read per corpus.load_records call
 JSON_SNIFF_BYTES = 64 * 1024
 JSON_INDEX_MAX_BYTES = 1024 * 1024 * 1024  # a larger .json file reads as lines
@@ -311,7 +309,12 @@ def _scan_json(mm: Any) -> tuple[int | None, list, dict] | None:
     return top, children, arrays
 
 
+SCALAR_MAX_BYTES = 1024 * 1024  # a document with no array, object or string is read whole to check it up to this size
+
+
 def _scalar(mm: Any) -> bool:
+    if len(mm) > SCALAR_MAX_BYTES:
+        return False
     try:
         json.loads(bytes(mm[:]))
         return True
@@ -477,10 +480,11 @@ def _dialect(rel: str) -> dict[str, Any]:
 
 
 def _columns(cells: list[str]) -> list[str]:
-    """Column names from a header line: blank ones as `column <i>`, a repeated one with its number after it."""
+    """Column names from a header line: blank ones as `column <i>`, a repeated one with its number after it, and a byte
+    order mark left off."""
     out: list[str] = []
     for i, c in enumerate(cells, 1):
-        name = c.strip() or f"column {i}"
+        name = c.replace("\ufeff", "").strip() or f"column {i}"
         base, k = name, 2
         while name in out:
             name, k = f"{base} {k}", k + 1
