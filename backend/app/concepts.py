@@ -946,7 +946,7 @@ def match_paths(corpus_dir: Path, patterns: list[str]) -> list[dict]:
         return []
     out = []
     if not any(GLOB_CHARS.search(p) for p, _ in pats):
-        # files named outright are found by name: a walk of a corpus of a million files takes seconds
+        # files named outright are found by name, without a walk of the corpus
         found: dict[str, tuple[dict, list[str | None]]] = {}
         for p, frag in pats:
             src = found[p][0] if p in found else corpus.source_of(corpus_dir, p)
@@ -4162,8 +4162,8 @@ JSON_CHUNK = 5_000  # items json.dumps encodes at a time, so a long list lets th
 
 
 def _coverage_json(ws: Path, concept: dict) -> bytes:
-    """coverage() as JSON, made a part at a time: a corpus of a million files makes a list of 160 MB, which one
-    json.dumps would make while every other thread, the event loop's too, waits for the interpreter."""
+    """coverage() as JSON, encoded JSON_CHUNK items at a time, so that the other threads, the event loop's too, run
+    between the parts of a long list."""
     cov = coverage(ws, concept)
     out = [b'{"unit":', json.dumps(cov["unit"]).encode()]
     for key in ("files", "not_covered"):

@@ -561,9 +561,8 @@ def spawn(cmd: list[str], *, cwd: Path, env: dict[str, str], log_file: Path) -> 
     return proc.pid
 
 
-# The server's event loop. uvloop starts each child process with a full fork of the server, which holds the loop while
-# the kernel copies the server's memory map (about 0.2 s at 3 GB, for every model call, kernel and browser it starts);
-# the standard loop starts children with vfork, in about a millisecond whatever the server's size.
+# The server's event loop: Python's own, which starts a child process with vfork. uvloop forks the whole server for each
+# child, which holds the loop for as long as the kernel takes to copy the server's memory map.
 SERVER_LOOP = "asyncio"
 
 

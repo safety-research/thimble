@@ -37,8 +37,8 @@ def stop() -> None:
 
 def where(frame: object) -> str:
     """The innermost FRAMES frames of a stack as `file:line function`, innermost first."""
-    stack = traceback.extract_stack(frame)[-FRAMES:]  # type: ignore[arg-type]
-    return " < ".join(f"{os.path.basename(f.filename)}:{f.lineno} {f.name}" for f in reversed(stack))
+    stack = traceback.StackSummary.extract(traceback.walk_stack(frame), limit=FRAMES, lookup_lines=False)  # type: ignore[arg-type]
+    return " < ".join(f"{os.path.basename(f.filename)}:{f.lineno} {f.name}" for f in stack)
 
 
 def _watch(loop: asyncio.AbstractEventLoop, owner: int, stopped: threading.Event) -> None:
