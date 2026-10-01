@@ -43,8 +43,6 @@ const PENDING = {
   'view-derived': 'the view contract (derived fields as a count in the header)',
   'view-labels': 'the view contract (labels in every view\'s UI)',
   'labels-any-file': 'records and refs for any file a reader can split (CSV rows, PDF pages, SQLite rows)',
-  'view-fullscreen': 'view frames that may go fullscreen',
-  'view-slow-call': 'view calls with no time limit that hold up no other request',
 }
 const MARKS = '.reader-gutter-cell.is-lit, .reader-span[data-concept], [data-concept], [data-thimble-label]'
 const SLOW_S = 20
