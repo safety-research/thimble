@@ -60,9 +60,9 @@ def test_starting_children_does_not_hold_the_servers_loop():
 
 
 def test_the_chat_list_reads_each_log_on_from_where_it_stopped(workspaces_tmp, monkeypatch):
-    """The chat list is read again on every change to any chat, from the browser and from permission requests, so each
-    log is read on from where the last read stopped and not parsed whole each time; a log written again, cut short or
-    holding a torn last line is still counted right."""
+    """The chat list is read again on every change to any chat, from the browser and from permission requests: each log
+    is read on from where the last read stopped, and a log written again, cut short or holding a torn last line is still
+    counted right."""
     import json
 
     from app import agents
@@ -103,7 +103,7 @@ def test_the_chat_list_reads_each_log_on_from_where_it_stopped(workspaces_tmp, m
 def test_a_long_command_is_read_word_by_word_only_when_it_names_an_install(monkeypatch):
     """Every Bash call of every agent is checked for installs on the event loop, up to three times, and shlex takes
     about a second for a 200 KB script: a command line that names no install word is not read with it, and the answer
-    is the same."""
+    stays the same."""
     from app import sandbox_allow
 
     lexed = []
@@ -119,9 +119,9 @@ def test_a_long_command_is_read_word_by_word_only_when_it_names_an_install(monke
 
 
 def test_the_event_log_is_read_on_from_where_it_was_left(workspaces_tmp, monkeypatch):
-    """Every record on the workspace stream read the log's tail again for another process's records, and every open
-    stream parsed the whole log every 3 s for them: the log is read again only when another process wrote to it, and a
-    stream reads only what was appended since its last read."""
+    """Each record on the workspace stream and each open stream look for records another process appended to the log:
+    the log is read again only when another process wrote to it, and a stream reads only what was appended since its
+    last read."""
     import asyncio
     import json
 
@@ -184,9 +184,9 @@ def test_a_chat_read_again_is_not_parsed_again(workspaces_tmp, monkeypatch):
 
 
 def test_files_named_outright_are_found_without_walking_the_corpus(mini_dir, tmp_path, monkeypatch):
-    """A label over named files walked every file of the corpus to find them, seconds of a worker thread holding the
-    interpreter on a corpus of a million files: files named outright are found by name, as the walk would find them,
-    and a name the walk would treat otherwise still goes through it."""
+    """A walk of a corpus of a million files keeps a worker thread on the interpreter for seconds: files a label names
+    outright are found by name, as the walk would find them, and a name the walk would treat otherwise still goes
+    through it."""
     import shutil
 
     from app import concepts, corpus
@@ -217,8 +217,8 @@ def test_files_named_outright_are_found_without_walking_the_corpus(mini_dir, tmp
 
 
 def test_a_labels_coverage_is_encoded_a_part_at_a_time(workspaces_tmp, monkeypatch):
-    """A label's coverage lists every file of the corpus, 160 MB for a million files, which one encode held every thread
-    for: it is encoded in parts off the event loop, and reads as coverage() gives it."""
+    """A label's coverage lists every file of the corpus, 160 MB for a million files, which one encode would hold every
+    thread for: it is encoded in parts off the event loop, and reads as coverage() gives it."""
     import json
 
     from app import concepts, config
@@ -259,9 +259,8 @@ async def test_health_answers_while_every_worker_thread_is_taken():
 
 
 def test_lines_read_from_a_chunk_are_the_lines_a_whole_split_gives(tmp_path):
-    """Lines are found a newline at a time rather than by splitting their whole chunk (up to 8 MB, which held the
-    interpreter for every record read): any range reads as the split read it, CRLF and a last line without its newline
-    included."""
+    """Lines are found a newline at a time rather than by splitting their whole chunk, which runs to 8 MB: any range
+    reads as the split reads it, CRLF and a last line without its newline included."""
     import random
 
     from app import corpus

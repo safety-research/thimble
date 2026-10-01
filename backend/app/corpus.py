@@ -670,8 +670,8 @@ def line_count(path: Path) -> int:
 
 
 def _index_lines(idx: LineIndex, path: Path, start: int, end: int) -> list[bytes]:
-    """Lines start..end of the chunks that hold them, found a newline at a time: a chunk runs to 8 MB, and splitting it
-    whole for a few of its lines held the interpreter, and with it every other thread, for each record read."""
+    """Lines start..end of the chunks that hold them, found a newline at a time rather than by splitting the chunk (up
+    to 8 MB), which holds the interpreter, and so every other thread, for as long as the split runs."""
     n = len(idx)
     start, end = max(1, start), min(end, n)
     if start > end:

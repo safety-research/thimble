@@ -280,8 +280,8 @@ def events_json(log_path: Path) -> bytes:
 
 
 def chat_response(meta: dict, log_path: Path) -> Response:
-    """{meta, events}, the chat route's answer, made from the log's records as it holds them: the browser reads a chat
-    again on every record it gets, and a long chat parsed and encoded again each time held the event loop."""
+    """{meta, events}, the chat route's answer, made from the records' text as the log holds it and kept between reads
+    (events_json), since the browser reads a chat again on every record it gets."""
     body = b'{"meta":' + json.dumps(meta, ensure_ascii=False).encode("utf-8") + b',"events":' + events_json(log_path) + b"}"
     return Response(content=body, media_type="application/json")
 
