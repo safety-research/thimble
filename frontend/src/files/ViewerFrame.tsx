@@ -343,9 +343,11 @@ export function ViewerFrame({ ws, slug, targetRef, path, pathPicked, title, fit,
   const queryKey = query ? JSON.stringify(query) : ''
   const cardType = card?.type
 
-  // the page's fetches still running, by the page's id: what drops the request, the call's name, the progress timer
+  // the page's fetches still running, by the page's id: what drops the request, the call's name, the progress timer.
+  // A call's name is unique for the frame's life, since a new page in the frame counts its fetches from 1 again.
   const calls = useRef(new Map<number, { ctrl: AbortController; call: string; view: boolean; timer: number | null }>())
   const frameId = useMemo(() => Math.random().toString(36).slice(2, 10), [])
+  const callSeq = useRef(0)
   const stopCall = useCallback(
     (id: number) => {
       const f = calls.current.get(id)
@@ -479,7 +481,7 @@ export function ViewerFrame({ ws, slug, targetRef, path, pathPicked, title, fit,
         case P + 'fetch': {
           const id = Number(d.id)
           const c = drawn.current
-          const f = { ctrl: new AbortController(), call: `${frameId}-${id}`, view: !c, timer: null as number | null }
+          const f = { ctrl: new AbortController(), call: `${frameId}-${++callSeq.current}`, view: !c, timer: null as number | null }
           calls.current.set(id, f)
           if (!c)
             f.timer = window.setInterval(() => {

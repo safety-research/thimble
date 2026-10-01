@@ -153,7 +153,7 @@ def data(tmp_path, monkeypatch) -> Path:
 
 @pytest.fixture(autouse=True)
 def _fresh(monkeypatch):
-    for d in (view_calls._pools, view_calls._affinity, view_calls._calls):
+    for d in (view_calls._pools, view_calls._affinity, view_calls._calls, view_calls._cancelled):
         d.clear()
     views._memo.clear()
     views._ready.clear()
@@ -163,7 +163,7 @@ def _fresh(monkeypatch):
     views._folder_cache.clear()
     sys.modules.pop("_thimble_views", None)
     yield
-    for d in (view_calls._pools, view_calls._affinity, view_calls._calls):
+    for d in (view_calls._pools, view_calls._affinity, view_calls._calls, view_calls._cancelled):
         d.clear()
     sys.modules.pop("_thimble_views", None)
 
@@ -218,6 +218,65 @@ async def test_a_small_index_is_answered_beside_its_own_busy_kernel_and_a_large_
     assert slow.done(), "a large index's second call waited for the kernel that holds it"
     assert second["n"] == 5
     assert {name for name, _ in kernels.ran} == {"views"}
+
+
+APPLIES = """
+def applies(paths):
+    return {"claims": list(paths), "found": len(paths)}
+
+
+def build_index(paths):
+    return []
+
+
+def records(index, query):
+    return None
+
+
+def resolve(index, locator):
+    return None
+"""
+
+
+async def test_a_call_that_needs_no_index_runs_beside_a_busy_kernel(ws, kernels, tmp_path):
+    reader = tmp_path / "reader.py"
+    reader.write_text(APPLIES)
+    req = {"slug": "builtin-tally", "reader": str(reader), "fp": "applies", "paths": [], "cache": None,
+           "thimble": str(views.KERNEL_THIMBLE)}
+    assert (await views._call(CORPUS, req, "applies", ["a.jsonl"]))["found"] == 1
+    slow = asyncio.create_task(views.reader_call(CORPUS, "count", "records", {"steps": 40}))
+    await asyncio.sleep(0.2)
+    assert [w.busy for w in view_calls._pools[CORPUS]] == [True], "the slow call holds the kernel applies ran on"
+    t0 = time.monotonic()
+    assert (await views._call(CORPUS, req, "applies", ["a.jsonl", "b.jsonl"]))["found"] == 2
+    assert time.monotonic() - t0 < 1.0 and not slow.done(), "applies did not wait for the slow call"
+    await slow
+
+
+async def test_a_page_s_cancel_that_comes_before_its_call_refuses_the_call(ws, kernels):
+    from app.main import app  # noqa: PLC0415
+
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://127.0.0.1") as client:
+        base = f"/api/ws/{CORPUS}/views/count"
+        assert (await client.post(f"{base}/calls/page-7/cancel")).json() == {"cancelled": False}
+        r = await client.post(f"{base}/records", json={"query": {"steps": 2}, "call": "page-7"})
+        assert r.status_code == 409 and r.json()["detail"]["cancelled"] is True
+        assert kernels.ran == [], "the cancelled call never ran"
+        r = await client.post(f"{base}/records", json={"query": {"steps": 2}, "call": "page-7"})
+        assert r.status_code == 200, "the cancel refuses one call"
+
+
+async def test_a_workspace_s_kernels_shut_down_elsewhere_are_forgotten(ws, kernels, monkeypatch):
+    from app import notebook  # noqa: PLC0415
+
+    async def shut(workspace, kernel=None):
+        return None
+
+    monkeypatch.setattr(notebook, "shutdown_kernel", shut)
+    await views.reader_call(CORPUS, "count", "records", {})
+    assert [w.name for w in view_calls._pools[CORPUS]] == ["views"]
+    await notebook.shutdown_workspace(CORPUS)
+    assert CORPUS not in view_calls._pools and not any(k[0] == CORPUS for k in view_calls._affinity)
 
 
 async def test_cancelling_a_call_interrupts_its_kernel_which_settles_before_its_next_call(ws, kernels):

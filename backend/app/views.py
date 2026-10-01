@@ -79,7 +79,7 @@ SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,39}$")
 # the route names under /views/ and the Reader's built-in file views, which its switcher keys by
 RESERVED_SLUGS = {"proposals", "forge", "raw", "records", "table", "text", "transcript", "lib", "frame", "resolve",
                   "suggestions", "suggest"}
-RESOLVE_WAIT_S = 180.0  # how long a synchronous caller (resolve_sync) waits for a reader's answer; the call runs on
+RESOLVE_WAIT_S = 180.0  # how long a synchronous caller (resolve_sync) waits for a reader's answer, which runs on after it
 LABEL_MAX = 40  # chars of a chip label a reader supplies (chips stay short)
 EXCERPT_MAX = refs.EXCERPT_MAX
 REFS_MAX = 200  # file refs a resolved locator carries
@@ -3329,6 +3329,8 @@ async def records_route(c: str, slug: str, body: RecordsBody, v: str | None = No
     with the reader's error, 409 {cancelled} when it was cancelled."""
     _view_or_404(c, slug, v)
     cid = view_calls.call_id(body.call)
+    if view_calls.cancelled_before(c, cid):
+        raise HTTPException(409, {"message": "the call was cancelled", "cancelled": True})
     work = asyncio.ensure_future(reader_call(c, slug, "records", body.query, version=v, call=cid))
     call = view_calls.begin(c, slug, cid, indexes_dir(c))
     if call is not None:

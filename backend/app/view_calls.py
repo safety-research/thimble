@@ -1,11 +1,12 @@
 """The kernels that answer view readers' calls (views._call), a few per workspace, so a slow call holds up only itself.
 
 Each workspace has up to POOL_MAX kernels for readers, named `views`, `views-2`, ... (notebook's dedicated kernels).
-A call goes to the kernel that last held its view's index (its index then stays in one kernel's memory) when that one is
-free. When it is busy, a call whose index pickle is at most SMALL_INDEX bytes may load it on another free kernel, or on a
-new one while the pool has room; a call whose index is larger, or still being built, waits for its own kernel. A call
-has no time limit. Cancelling the task that awaits it interrupts its kernel, which takes no other call until it is idle
-again (or, when the interrupt does not stop it within DRAIN_S, until it has been restarted).
+A call goes to the kernel that last held its view's index (its index then stays in one kernel's memory) when that one
+is free. When it is busy, a call whose index pickle is at most SMALL_INDEX bytes may load it on another free kernel, or
+on a new one while the pool has room; a call whose index is larger, or still being built, waits for its own kernel. A
+call that needs no index (a card type's applies) runs on any free kernel. A call has no time limit. Cancelling the task
+that awaits it interrupts its kernel, which takes no other call until it is idle again (or, when the interrupt does not
+stop it within DRAIN_S, until it has been restarted).
 
 Memory: each kernel keeps the indexes it uses most within memory_budget() bytes of pickles (view_host). After a call
 the kernel's resident memory is read; a kernel above rss_max() that holds more than one index is restarted once free,
@@ -14,6 +15,8 @@ shut down. A kernel beyond the first unused for IDLE_S is shut down, the first t
 
 A call the page names (`call`) is registered with the task that runs it, so a newer request or the page's closing can
 cancel it (cancel), and its progress, which view_host writes to a file under the indexes folder, can be read (progress).
+A cancel that comes before its call is registered (the page dropped a fetch whose request was still on its way) is kept
+for CANCELLED_S, and that call is refused when it comes (cancelled_before).
 """
 from __future__ import annotations
 
@@ -43,6 +46,7 @@ IDLE_S = 600.0  # unused this long, a kernel beyond the first is shut down
 KEEP_RSS = 512 * 1024 * 1024  # the first kernel is shut down when idle only above this resident size
 SPARE_AFTER_S = 1.0  # a call running this long starts a spare kernel when none is free
 CALL_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+CANCELLED_S = 60.0  # how long a cancel that came before its call is kept
 PROGRESS_SUBDIR = ".calls"  # under the workspace's indexes folder: one progress file per running call
 
 
@@ -109,6 +113,7 @@ _pools: dict[str, list[Worker]] = {}
 _affinity: dict[tuple[str, str, str], str] = {}  # (workspace, slug, fp) -> the kernel that holds or builds its index
 _waiters: list[asyncio.Future] = []
 _calls: dict[tuple[str, str], Call] = {}  # (workspace, call id) -> the call
+_cancelled: dict[tuple[str, str], float] = {}  # (workspace, call id) -> when a cancel came for a call not yet registered
 _reaper: "tuple[asyncio.AbstractEventLoop, asyncio.TimerHandle] | None" = None
 
 
@@ -194,11 +199,11 @@ def _choose(c: str, slug: str, fp: str, cache: str | None) -> Worker | None:
     if mine is not None and not mine.busy:
         return mine
     if mine is not None:
-        size = _index_bytes(cache)
         holder = next((w for w in free if key in w.holds), None)
         if holder is not None:
             return holder
-        if size is None or size > SMALL_INDEX:
+        size = _index_bytes(cache)
+        if cache and (size is None or size > SMALL_INDEX):
             return None
     if free:
         return min(free, key=lambda w: (key not in w.holds, sum(w.holds.values()), -w.used))
@@ -291,7 +296,10 @@ def _note_answer(w: Worker, outputs: list[dict]) -> None:
     """Keep what the kernel said it holds (view_host's `held`) and read its resident size."""
     from .views import _answer_from  # noqa: PLC0415 — views imports this module
 
-    ans = _answer_from(outputs) or {}
+    ans = _answer_from(outputs)
+    if ans is None and any(_error_name(b) in STUCK for b in outputs):
+        w.holds.clear()  # the kernel died or did not settle, and holds nothing now
+    ans = ans or {}
     held = ans.get("held")
     if isinstance(held, list):
         w.holds = OrderedDict(((str(h[0]), str(h[1])), int(h[2] or 0)) for h in held
@@ -394,7 +402,7 @@ def _reap() -> None:
 
 
 def forget_workspace(c: str) -> None:
-    """The workspace's kernels were shut down elsewhere (a reset, a restore): forget them."""
+    """The workspace's kernels were shut down elsewhere (notebook.shutdown_workspace: a reset, a restore): forget them."""
     _pools.pop(c, None)
     for k in [k for k in _affinity if k[0] == c]:
         del _affinity[k]
@@ -442,12 +450,24 @@ def end(call: Call | None) -> None:
 
 
 def cancel(c: str, cid: str) -> bool:
-    """Cancel the page's call `cid`; False when no such call runs."""
+    """Cancel the page's call `cid`; False when no such call runs, which is then refused should it come within
+    CANCELLED_S."""
     call = _calls.get((c, cid))
     if call is None or call.task is None or call.task.done():
+        if call is None:
+            now = time.monotonic()
+            for k in [k for k, at in _cancelled.items() if now - at > CANCELLED_S]:
+                del _cancelled[k]
+            _cancelled[(c, cid)] = now
         return False
     call.task.cancel()
     return True
+
+
+def cancelled_before(c: str, cid: str | None) -> bool:
+    """Whether the page cancelled its call `cid` before the call came (cancel)."""
+    at = _cancelled.pop((c, cid), None) if cid else None
+    return at is not None and time.monotonic() - at <= CANCELLED_S
 
 
 def progress(c: str, cid: str) -> dict[str, Any] | None:
