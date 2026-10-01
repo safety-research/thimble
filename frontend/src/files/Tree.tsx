@@ -27,7 +27,9 @@ export type FolderStore = ReadonlyMap<string, FolderState>
 /** What the tree says when the root holds no files: an empty folder is most often the wrong one, so it says where
  * thimble looks. Null otherwise. */
 export function emptyFolderNote(root: FolderState | undefined): string | null {
-  if (root?.state !== 'ok' || root.listing.n_files > 0) return null
+  if (root?.state !== 'ok') return null
+  const { n_files: n, files, folders } = root.listing
+  if (n != null ? n > 0 : files.length > 0 || folders.length > 0) return null
   return 'This folder has no files. thimble shows the folder it was started in; to look at another folder, run thimble there.'
 }
 

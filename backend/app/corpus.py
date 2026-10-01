@@ -1,8 +1,9 @@
 """Corpora, sources, jsonl/text paging, database (sqlite) browsing and the ref endpoint.
 
-Everything reads raw corpus files lazily. Two per-process caches keep a large corpus cheap: a sparse line index per
-opened file (LineIndex, in an LRU), so a page seeks to the nearest mark and scans one chunk; and a SOURCES_MEMO_S memo
-of each corpus's source list with a per-folder view for `GET /sources?path=&depth=1`.
+Everything reads raw corpus files lazily. Per-process caches keep a large corpus cheap: a sparse line index per opened
+file (LineIndex, in an LRU), so a page seeks to the nearest mark and scans one chunk; each corpus's folder tree by name
+(corpus_tree), which a walk reads again only where a folder changed; and a SOURCES_MEMO_S memo of each corpus's source
+list. `GET /sources?path=&depth=1` reads only the folder asked for.
 
 A file ending in .db, .sqlite or .sqlite3 is a database (internal kind 'forge'): the /forge/* routes open it read-only
 and it is never paged as text. A binary file (sniff_binary) pages as no records. Serving a file or database page records
@@ -34,7 +35,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from . import config, hook_auth, refs, viewlog
+from . import config, corpus_tree, hook_auth, refs, viewlog
 
 log = logging.getLogger("thimble.corpus")
 
@@ -53,9 +54,7 @@ EDITABLE_SUFFIXES = (".txt", ".md", ".markdown")  # the files PUT /source may re
 # --------------------------------------------------------------------------- sources
 
 
-DB_SUFFIXES = (".db", ".sqlite", ".sqlite3")  # a file so named is a database (kind 'forge'), forge.db included
-SIDE_SUFFIXES = ("-wal", "-shm", "-journal")  # sqlite side files of a database opened read-write elsewhere
-SKIPPED_SUFFIXES = tuple(db + side for db in DB_SUFFIXES for side in SIDE_SUFFIXES)
+DB_SUFFIXES, SIDE_SUFFIXES, SKIPPED_SUFFIXES = corpus_tree.DB_SUFFIXES, corpus_tree.SIDE_SUFFIXES, corpus_tree.SKIPPED_SUFFIXES
 
 
 def source_kind(rel: str) -> str:
@@ -104,74 +103,38 @@ _sources_walks: dict[tuple[Path, bool], threading.Lock] = {}  # one walk at a ti
 
 
 class _Listing:
-    """One walk of a corpus: its sources as list_sources returns them and the per-folder view built alongside
-    (`folders`: folder path, '' the root -> {"files": [source, ...], "subs": {name: files under that subfolder}};
-    only folders with a file somewhere under them, as the tree derived them from the paths)."""
+    """One walk of a corpus: its sources as list_sources returns them, and when the walk ended."""
 
-    __slots__ = ("ts", "sources", "folders")
+    __slots__ = ("ts", "sources")
 
-    def __init__(self, ts: float, sources: list[dict[str, Any]], folders: dict[str, dict[str, Any]]) -> None:
+    def __init__(self, ts: float, sources: list[dict[str, Any]]) -> None:
         self.ts = ts
         self.sources = sources
-        self.folders = folders
 
 
-def _walk_sources(corpus: Path, include_hidden: bool) -> tuple[list[dict[str, Any]], dict[str, dict[str, Any]]]:
-    """One scandir pass over the corpus. Symlinked files are listed, symlinked directories are not entered; dot
-    directories are pruned unless `include_hidden`. Returns the sorted sources and the folder view."""
+def _is_hidden(rel: str) -> bool:
+    return rel.startswith(".") or "/." in rel
+
+
+def _walk_sources(corpus: Path, include_hidden: bool) -> list[dict[str, Any]]:
+    """Every file of the corpus, sorted, from its folder tree (corpus_tree: a folder is read again only when it changed)
+    with each file stat'ed for its size. Symlinked files are listed, symlinked directories are not entered; dot names
+    are left out unless `include_hidden`."""
+    _, paths = corpus_tree.tree(corpus).walk(links=False, hidden=include_hidden, skip=SKIPPED_SUFFIXES)
+    base = str(corpus)
     out: list[dict[str, Any]] = []
-    folders: dict[str, dict[str, Any]] = {"": {"files": [], "subs": {}}}
-    order: list[str] = [""]  # folders in visiting order, parents before children
-    stack = [(corpus, "", False)]
-    while stack:
-        d, prefix, hidden_dir = stack.pop()
-        me = prefix[:-1] if prefix else ""
-        here = folders[me]
+    for rel in paths:
         try:
-            entries = list(os.scandir(d))
+            size = os.stat(f"{base}/{rel}").st_size
         except OSError:
             continue
-        for e in entries:
-            name = e.name
-            hidden = hidden_dir or name.startswith(".")
-            if hidden and not include_hidden:
-                continue
-            rel = f"{prefix}{name}"
-            try:
-                if e.is_dir(follow_symlinks=False):
-                    folders[rel] = {"files": [], "subs": {}}
-                    order.append(rel)
-                    here["subs"][name] = 0
-                    stack.append((Path(e.path), rel + "/", hidden))
-                    continue
-                if not e.is_file():
-                    continue
-                size = e.stat().st_size
-            except OSError:
-                continue
-            if rel.endswith(SKIPPED_SUFFIXES):
-                continue
-            kind = source_kind(rel)
-            rec: dict[str, Any] = {"path": rel, "kind": kind, "size_bytes": size, "title": source_title(rel, kind)}
-            if hidden:
-                rec["hidden"] = True
-            out.append(rec)
-            here["files"].append(rec)
-    # totals bottom-up (children were visited after their parents), then folders with nothing under them go
-    totals: dict[str, int] = {}
-    for rel in reversed(order):
-        f = folders[rel]
-        n = len(f["files"]) + sum(totals.get(f"{rel}/{name}" if rel else name, 0) for name in f["subs"])
-        totals[rel] = n
-        f["subs"] = {name: totals[f"{rel}/{name}" if rel else name] for name in sorted(f["subs"]) if totals.get(f"{rel}/{name}" if rel else name, 0)}
-    key = lambda s: (KIND_ORDER[s["kind"]], s["path"])  # noqa: E731
-    for rel in order:
-        if rel and not totals.get(rel):
-            folders.pop(rel, None)
-        else:
-            folders[rel]["files"].sort(key=key)
-    out.sort(key=key)
-    return out, folders
+        kind = source_kind(rel)
+        rec: dict[str, Any] = {"path": rel, "kind": kind, "size_bytes": size, "title": source_title(rel, kind)}
+        if include_hidden and _is_hidden(rel):
+            rec["hidden"] = True
+        out.append(rec)
+    out.sort(key=lambda s: (KIND_ORDER[s["kind"]], s["path"]))
+    return out
 
 
 def _listing(corpus: Path, include_hidden: bool) -> _Listing:
@@ -187,7 +150,8 @@ def _listing(corpus: Path, include_hidden: bool) -> _Listing:
             hit = _SOURCES.get(key)
             if hit is not None and time.monotonic() - hit.ts < SOURCES_MEMO_S:
                 return hit
-        listing = _Listing(time.monotonic(), *_walk_sources(corpus, include_hidden))
+        sources = _walk_sources(corpus, include_hidden)
+        listing = _Listing(time.monotonic(), sources)  # timed at the walk's end, so a long walk is not stored expired
         with _sources_lock:
             _SOURCES[key] = listing
         return listing
@@ -200,36 +164,71 @@ def list_sources(corpus: Path, include_hidden: bool = False) -> list[dict[str, A
 
 
 def forget_sources(corpus: Path | None = None) -> None:
-    """Drop the source-list memo of one corpus (every corpus when None): a saved file, a working-directory change."""
+    """Drop the source-list memo of one corpus (every corpus when None), and have the next walk of its folder tree check
+    every folder: a saved file, a working-directory change."""
     with _sources_lock:
         for key in [k for k in _SOURCES if corpus is None or k[0] == corpus]:
             _SOURCES.pop(key, None)
-
-
-def _is_run(folder: dict[str, Any]) -> bool:
-    """The Files tree's rule for a run folder: it holds an `agents/` folder or a `manifest.json`."""
-    return "agents" in folder["subs"] or any(f["path"].rsplit("/", 1)[-1] == "manifest.json" for f in folder["files"])
+    corpus_tree.forget(corpus)
 
 
 def folder_listing(corpus: Path, rel: str, include_hidden: bool = False) -> dict[str, Any] | None:
-    """`GET /sources?path=<rel>&depth=1`: the folder's own files and subfolders (with counts and run mark) from the
-    memoised listing. None when the listing knows no such folder."""
-    listing = _listing(corpus, include_hidden)
-    folders = listing.folders
+    """`GET /sources?path=<rel>&depth=1`: the folder's own files and subfolders, read from that folder alone. A
+    subfolder is a run (`is_run`) when it holds an `agents/` folder or a `manifest.json`. The counts of files at any
+    depth (`n_files`, the folder's own and each subfolder's) and a subfolder's `n_folders` are given only where earlier
+    walks of the corpus's folder tree know them (corpus_tree.Tree.counts). None for a folder that is not there, or one
+    the listing leaves out: under a dot name without `include_hidden`, or reached through a symlinked folder."""
     rel = rel.strip("/")
-    me = folders.get(rel)
-    if me is None:
+    hidden_here = _is_hidden(rel) if rel else False
+    if hidden_here and not include_hidden:
         return None
-    hidden_here = any(part.startswith(".") for part in rel.split("/")) if rel else False
-    subs = []
-    for name, n_files in sorted(me["subs"].items()):
-        sub_path = f"{rel}/{name}" if rel else name
-        entry: dict[str, Any] = {"path": sub_path, "name": name, "n_files": n_files, "n_folders": len(folders[sub_path]["subs"]),
-                                 "is_run": _is_run(folders[sub_path])}
-        if hidden_here or name.startswith("."):
+    d = f"{corpus}/{rel}" if rel else str(corpus)
+    if rel and (os.path.normpath(rel) != rel or os.path.realpath(d) != os.path.join(os.path.realpath(corpus), rel)):
+        return None
+    try:
+        with os.scandir(d) as it:
+            entries = list(it)
+    except OSError:
+        return None
+    files: list[dict[str, Any]] = []
+    subs: list[tuple[str, str, bool, str]] = []
+    for e in entries:
+        name = e.name
+        hidden = hidden_here or name.startswith(".")
+        if hidden and not include_hidden:
+            continue
+        path = f"{rel}/{name}" if rel else name
+        try:
+            if e.is_dir(follow_symlinks=False):
+                subs.append((name, path, hidden, e.path))
+                continue
+            if not e.is_file() or name.endswith(SKIPPED_SUFFIXES):
+                continue
+            size = e.stat().st_size
+        except OSError:
+            continue
+        kind = source_kind(path)
+        rec: dict[str, Any] = {"path": path, "kind": kind, "size_bytes": size, "title": source_title(path, kind)}
+        if hidden:
+            rec["hidden"] = True
+        files.append(rec)
+    files.sort(key=lambda s: (KIND_ORDER[s["kind"]], s["path"]))
+    counts = corpus_tree.tree(corpus).counts(include_hidden)
+    folders = []
+    for name, path, hidden, full in sorted(subs):
+        is_run = os.path.isfile(f"{full}/manifest.json") or os.path.isdir(f"{full}/agents") and not os.path.islink(f"{full}/agents")
+        entry: dict[str, Any] = {"path": path, "name": name, "is_run": is_run}
+        known = counts.get(path)
+        if known is not None:
+            entry["n_files"], entry["n_folders"] = known
+        if hidden:
             entry["hidden"] = True
-        subs.append(entry)
-    return {"path": rel, "files": list(me["files"]), "folders": subs, "n_files": len(me["files"]) + sum(me["subs"].values())}
+        folders.append(entry)
+    out: dict[str, Any] = {"path": rel, "files": files, "folders": folders}
+    known = counts.get(rel)
+    if known is not None:
+        out["n_files"] = known[0]
+    return out
 
 
 # --------------------------------------------------------------------------- line access

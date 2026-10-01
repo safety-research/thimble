@@ -23,6 +23,7 @@ Progress is `view {slug, status, chat?}` on the workspace stream."""
 from __future__ import annotations
 
 import asyncio
+import bisect
 import contextlib
 import fnmatch
 import functools
@@ -39,13 +40,13 @@ import time
 from collections import OrderedDict
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel
 
-from . import config, headless, investigation, prompts, refs, userconf
+from . import config, corpus_tree, headless, investigation, prompts, refs, userconf
 from .ledger import atomic_write_text, read_json, unlinked, write_json
 
 log = logging.getLogger("thimble.views")
@@ -103,7 +104,8 @@ SHOT_SIZE = (800, 700)  # the view's pane in a 1440×900 window, beside the chat
 ANCHORED_SHARE = 10
 FETCHED_SCAN_MAX = 200_000
 _RECORD_REF = re.compile(r"^[^\s#][^#\n]*#L[1-9]\d*$")  # a record ref, `<path>#L<n>` (frontend files/labels recordRef)
-FOLDER_CACHE_S = 5.0
+FOLDER_CACHE_S = 5.0  # the corpus's folders, and the files a glob claims, are checked again after this long
+CLAIMED_MEMO_MAX = 64  # claims whose matching paths are kept, per corpus folder tree version
 _NODE_MODULES = config.REPO_ROOT / "frontend" / "node_modules"
 # The libraries a view page may use, served by thimble and inlined into the page. vega-embed needs vega and vega-lite
 # before it, so a view that names it gets all three in this order.
@@ -558,8 +560,10 @@ def delete_view(c: str, slug: str) -> None:
 # ----------------------------------------------------------------------------------------------------------
 
 
-_folder_cache: dict[tuple[Path, str], dict[str, Any]] = {}  # (corpus, folder) -> {ts, files}
+_folder_cache: dict[tuple[Path, tuple[str, ...]], dict[str, Any]] = {}  # (corpus, glob claims) -> {ts, files}
+_claimed_memo: OrderedDict[tuple[str, tuple[str, ...]], tuple[int, list[str]]] = OrderedDict()  # -> (tree version, paths)
 _folder_lock = threading.Lock()
+VIEW_SKIP = corpus_tree.SIDE_SUFFIXES  # sqlite side files, which no view claims
 
 
 def folder_path(corpus: Path, rel: str) -> Path:
@@ -575,53 +579,16 @@ def folder_path(corpus: Path, rel: str) -> Path:
     return p
 
 
-def _walk_folder(corpus: Path, rel: str) -> list[tuple[str, int, int]]:
-    """Every regular file under the folder, recursively, as (corpus-relative path, size, mtime_ns), sorted by path.
-    Dot-files
-    and sqlite side files are left out; symlinks are followed. Uses scandir and string joins for speed on large
-    corpora."""
+def folder_paths(corpus: Path, rel: str = "") -> list[str]:
+    """Every file under the folder at any depth, by corpus-relative path in path order: dot names and sqlite side files
+    left out, symlinked folders followed. From the corpus's folder tree (corpus_tree), whose folders are checked again
+    after FOLDER_CACHE_S. The list is shared, so callers never mutate it. 404 for a missing folder."""
     root = folder_path(corpus, rel)
+    _, paths = corpus_tree.tree(corpus).walk(links=True, hidden=False, skip=VIEW_SKIP, max_age=FOLDER_CACHE_S)
     base = root.relative_to(corpus).as_posix()
-    prefix = "" if base in ("", ".") else base + "/"
-    out: list[tuple[str, int, int]] = []
-    stack: list[tuple[str, str]] = [(str(root), prefix)]
-    while stack:
-        d, pre = stack.pop()
-        try:
-            entries = list(os.scandir(d))
-        except OSError:
-            continue
-        for e in entries:
-            name = e.name
-            if name.startswith("."):
-                continue
-            try:
-                if e.is_dir():
-                    stack.append((e.path, f"{pre}{name}/"))
-                    continue
-                if name.endswith(("-wal", "-shm", "-journal")) or not e.is_file():
-                    continue
-                st = e.stat()
-            except OSError:
-                continue
-            out.append((f"{pre}{name}", st.st_size, st.st_mtime_ns))
-    out.sort()
-    return out
-
-
-def folder_files(corpus: Path, rel: str) -> list[tuple[str, int, int]]:
-    """_walk_folder, cached FOLDER_CACHE_S per (corpus, folder): the list is shared, so callers never mutate it. A
-    404 for a missing folder is raised on every call (the walk is not cached for it)."""
-    key = (corpus, (rel or "").strip("/"))
-    now = time.monotonic()
-    with _folder_lock:
-        hit = _folder_cache.get(key)
-        if hit is not None and now - hit["ts"] < FOLDER_CACHE_S:
-            return hit["files"]
-    files = _walk_folder(corpus, rel)
-    with _folder_lock:
-        _folder_cache[key] = {"ts": time.monotonic(), "files": files}
-    return files
+    if base in ("", "."):
+        return paths
+    return paths[bisect.bisect_left(paths, base + "/"):bisect.bisect_left(paths, base + "0")]  # '0' follows '/'
 
 
 def glob_matches(rel_file: str, pattern: str | None) -> bool:
@@ -655,23 +622,85 @@ def claims_path(view: dict[str, Any], rel: str) -> bool:
 _GLOB_CHARS = re.compile(r"[*?\[]")
 
 
-def claimed_files(c: str, view: dict[str, Any]) -> list[tuple[str, int, int]]:
-    """(path, size, mtime_ns) of every corpus file the view claims, in path order. Claims that name files outright
-    are stat'ed; a glob walks the corpus (folder_files, cached)."""
+def _matcher(pattern: str) -> Callable[[str], bool]:
+    """glob_matches(path, pattern) as one test made once, for matching a whole corpus's paths."""
+    if not pattern or pattern == "*":
+        return lambda p: True
+    if pattern.startswith("*") and "/" not in pattern and not _GLOB_CHARS.search(pattern[1:]):
+        tail = pattern[1:]  # `*.pdf`: the path and its basename match alike
+        return lambda p: p.endswith(tail)
+    whole = re.compile(fnmatch.translate(pattern)).match
+    return lambda p: whole(p) is not None or whole(p.rsplit("/", 1)[-1]) is not None
+
+
+def claimed_paths(c: str, view: dict[str, Any], *, wait: bool = True) -> list[str] | None:
+    """The corpus-relative paths of every file the view claims, in path order, without stat'ing them. Claims that name
+    files outright are checked one by one; globs are matched against the corpus's folder tree (folder_paths). Without
+    `wait`, globs are matched against the tree as last walked, however long ago, and a walk starts in the background
+    when that was FOLDER_CACHE_S ago or more; None when the corpus has not been walked yet."""
     corpus = config.corpus_dir(c)
-    claims = view.get("claims") or []
-    if claims and not any(_GLOB_CHARS.search(g) for g in claims):
+    claims = list(view.get("claims") or [])
+    if not claims:
+        return []
+    if not any(_GLOB_CHARS.search(g) for g in claims):
         out = []
         for g in sorted(set(claims)):
             try:
-                p = config.safe_corpus_path(corpus, g)
-                st = p.stat()
+                if config.safe_corpus_path(corpus, g).is_file():
+                    out.append(g)
             except (ValueError, OSError):
                 continue
-            if p.is_file():
-                out.append((g, st.st_size, st.st_mtime_ns))
         return out
-    return [f for f in folder_files(corpus, "") if claims_path(view, f[0])]
+    tree = corpus_tree.tree(corpus)
+    if wait:
+        folder_path(corpus, "")
+        version, paths = tree.walk(links=True, hidden=False, skip=VIEW_SKIP, max_age=FOLDER_CACHE_S)
+    else:
+        last = tree.peek(links=True, hidden=False, skip=VIEW_SKIP)
+        if last is None or time.monotonic() - last[2] >= FOLDER_CACHE_S:
+            tree.refresh_in_background(links=True, hidden=False, skip=VIEW_SKIP, max_age=FOLDER_CACHE_S)
+        if last is None:
+            return None
+        version, paths = last[0], last[1]
+    key = (str(corpus), tuple(claims))
+    with _folder_lock:
+        hit = _claimed_memo.get(key)
+        if hit is not None and hit[0] == version:
+            _claimed_memo.move_to_end(key)
+            return hit[1]
+    tests = [_matcher(g) for g in claims]
+    out = [p for p in paths if any(t(p) for t in tests)]
+    with _folder_lock:
+        _claimed_memo[key] = (version, out)
+        while len(_claimed_memo) > CLAIMED_MEMO_MAX:
+            _claimed_memo.popitem(last=False)
+    return out
+
+
+def claimed_files(c: str, view: dict[str, Any]) -> list[tuple[str, int, int]]:
+    """(path, size, mtime_ns) of every corpus file the view claims, in path order: claimed_paths, each file stat'ed.
+    Files claimed by name are stat'ed on every call, the files of glob claims at most every FOLDER_CACHE_S."""
+    corpus = config.corpus_dir(c)
+    claims = tuple(view.get("claims") or [])
+    globbed = any(_GLOB_CHARS.search(g) for g in claims)
+    key = (corpus, claims)
+    if globbed:
+        now = time.monotonic()
+        with _folder_lock:
+            hit = _folder_cache.get(key)
+            if hit is not None and now - hit["ts"] < FOLDER_CACHE_S:
+                return hit["files"]
+    out = []
+    for rel in claimed_paths(c, view) or []:
+        try:
+            st = (config.safe_corpus_path(corpus, rel) if not globbed else Path(f"{corpus}/{rel}")).stat()
+        except (ValueError, OSError):
+            continue
+        out.append((rel, st.st_size, st.st_mtime_ns))
+    if globbed:
+        with _folder_lock:
+            _folder_cache[key] = {"ts": time.monotonic(), "files": out}
+    return out
 
 
 def unmatched_claims(c: str, claims: Any, near: int = 3) -> dict[str, list[str]]:
@@ -686,7 +715,7 @@ def unmatched_claims(c: str, claims: Any, near: int = 3) -> dict[str, list[str]]
     def walk() -> list[str]:
         nonlocal files
         if files is None:
-            files = [f for f, _, _ in folder_files(corpus, "")]
+            files = folder_paths(corpus)
         return files
 
     out: dict[str, list[str]] = {}
@@ -697,7 +726,8 @@ def unmatched_claims(c: str, claims: Any, near: int = 3) -> dict[str, list[str]]
             except (ValueError, OSError):
                 hit = False
         else:
-            hit = any(glob_matches(f, g) for f in walk())
+            test = _matcher(g)
+            hit = any(test(f) for f in walk())
         if not hit:
             out[g] = _paths_near(walk(), g, near)
     return out
@@ -1060,6 +1090,13 @@ def sibling_files(claimed: list[str], every: list[str]) -> list[str]:
     return sorted(out)
 
 
+def _size(corpus: Path, rel: str) -> int:
+    try:
+        return os.stat(f"{corpus}/{rel}").st_size
+    except OSError:
+        return 0
+
+
 async def shown(c: str, slug: str, version: str | None = None) -> dict[str, Any]:
     """What thimble draws above the view: {files, not_shown: {count, unexplained, unclaimed, files}, derived, errors}.
     `files` is the count of claimed files and not_shown the ones the view does not show whole (not_shown), then the
@@ -1068,7 +1105,8 @@ async def shown(c: str, slug: str, version: str | None = None) -> dict[str, Any]
     view.json's list, then the fields the reader's derived(index) adds; errors say what failed of hidden() and
     derived()."""
     view, req, files = await asyncio.to_thread(_prepared, c, slug, version)
-    every = await asyncio.to_thread(folder_files, config.corpus_dir(c), "")
+    corpus = config.corpus_dir(c)
+    every = await asyncio.to_thread(folder_paths, corpus)
     ans = await _call(c, req, "shown")
     ans = ans if isinstance(ans, dict) else {}
     reads = ans.get("reads") if isinstance(ans.get("reads"), dict) else {}
@@ -1081,9 +1119,10 @@ async def shown(c: str, slug: str, version: str | None = None) -> dict[str, Any]
         parts[name] = part.get("result")
     hidden = _hidden(parts["hidden"])
     rows = not_shown(files, reads, hidden)
-    sizes = {f[0]: f[1] for f in every}
-    rows += [{"path": p, "size": sizes.get(p, 0), "read": 0, "why": hidden.get(p, ""), "claimed": False}
-             for p in sibling_files([f[0] for f in files], list(sizes))]
+    siblings = await asyncio.to_thread(sibling_files, [f[0] for f in files], every)
+    listed = max(0, FILES_LISTED - len(rows))
+    rows += [{"path": p, "size": _size(corpus, p) if i < listed else 0, "read": 0, "why": hidden.get(p, ""),
+              "claimed": False} for i, p in enumerate(siblings)]
     return {"files": len(files),
             "not_shown": {"count": len(rows), "unexplained": sum(1 for r in rows if not r["why"]),
                           "unclaimed": sum(1 for r in rows if r.get("claimed") is False), "files": rows[:FILES_LISTED]},
@@ -1487,7 +1526,7 @@ def forms_text(c: str | None) -> str:
     rows: list[str] = []
     try:
         listed = [v for v in list_views(c) if v["ok"]] if c else []
-        listed = [v for v in listed if v["origin"] != "builtin" or claimed_files(c, v)]
+        listed = [v for v in listed if v["origin"] != "builtin" or claimed_paths(c, v)]
     except (ValueError, OSError, HTTPException):
         listed = []
     for v in listed:
@@ -3042,7 +3081,7 @@ async def suggest(c: str, rel: str) -> str | None:
     suffix = got["suffix"]
     p = config.safe_corpus_path(config.corpus_dir(c), got["path"])
     what, head = await asyncio.to_thread(file_head, p)
-    count = sum(1 for f, _, _ in await asyncio.to_thread(folder_files, config.corpus_dir(c), "") if suffix_of(f) == suffix)
+    count = sum(1 for f in await asyncio.to_thread(folder_paths, config.corpus_dir(c)) if suffix_of(f) == suffix)
     secs = {name: prompts.section(SUGGEST_PROMPT, name).strip() for name in ("suggest", "file", "proposal")}
     system = prompts._fill(secs["suggest"], {}, f"{SUGGEST_PROMPT}.md")
     user = prompts._fill(secs["file"], {"path": got["path"], "size": _fmt_size(p.stat().st_size), "count": str(count),
@@ -3099,20 +3138,25 @@ def _view_or_404(c: str, slug: str, version: str | None = None) -> dict[str, Any
     return v
 
 
-def _public(v: dict[str, Any], c: str | None = None) -> dict[str, Any]:
+def _public(v: dict[str, Any], c: str | None = None, *, wait: bool = True) -> dict[str, Any]:
     """A view record for a route's answer: everything but the on-disk directory, with its forms, and with `c` the files
-    it claims, `files` (the first FILES_LISTED) and `n_files`, and the first of them (what Raw shows of a view opened on
-    its own). Blocking when a claim is a glob (the corpus walk)."""
+    it claims (claimed_paths), `files` (the first FILES_LISTED) and `n_files`, and the first of them (what Raw shows of
+    a view opened on its own). Blocking. Without `wait`, a view with glob claims in a corpus not walked yet answers
+    `files_pending` and no files."""
     out = {k: x for k, x in v.items() if k != "dir"}
     out["forms"] = [{"form": f, "means": m} for f, m in view_forms(v)]
     out["file_type"] = file_type_viewer(v)
     if c is not None:
         try:
-            files = claimed_files(c, v) if v["ok"] else []
+            files = claimed_paths(c, v, wait=wait) if v["ok"] else []
         except (ValueError, OSError, HTTPException):
             files = []
-        out["first_file"] = files[0][0] if files else None
-        out["files"] = [f[0] for f in files[:FILES_LISTED]]
+        if files is None:
+            out["first_file"] = None
+            out["files_pending"] = True
+            return out
+        out["first_file"] = files[0] if files else None
+        out["files"] = files[:FILES_LISTED]
         out["n_files"] = len(files)
     return out
 
@@ -3199,13 +3243,15 @@ async def delete_proposal_route(c: str, slug: str) -> dict[str, Any]:
 
 
 @router.get("/ws/{c}/views")
-async def list_views_route(c: str, path: str | None = None) -> list[dict[str, Any]]:
-    """Every view; with `path` (a corpus-relative file) the working views that claim it (views_for)."""
+async def list_views_route(c: str, path: str | None = None, wait: int = 0) -> list[dict[str, Any]]:
+    """Every view with the files it claims, glob claims matched against the corpus's folder tree as last walked: before
+    the corpus's first walk, which then starts in the background, such a view answers `files_pending` unless `wait`
+    (_public). With `path` (a corpus-relative file) the working views that claim it (views_for)."""
     config.workspace_dir(c)
     _bind_loop()
     _recover(c)
     if path is None:
-        return await asyncio.to_thread(lambda: [_public(v, c) for v in list_views(c)])
+        return await asyncio.to_thread(lambda: [_public(v, c, wait=bool(wait)) for v in list_views(c)])
     return [_public(v) for v in views_for(c, path.strip().strip("/"))]
 
 

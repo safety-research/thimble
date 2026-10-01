@@ -312,8 +312,8 @@ export const api = {
    * that thread (views.message); answers the proposal. */
   messageView: (c: string, slug: string, text: string) => j<Proposal>(`${ws(c)}/views/proposals/${enc(slug)}/message`, { method: 'POST', body: JSON.stringify({ text }) }),
   deleteProposal: (c: string, slug: string) => j<{ ok: boolean }>(`${ws(c)}/views/proposals/${enc(slug)}`, { method: 'DELETE' }),
-  /** every view of the workspace */
-  views: (c: string) => j<View[]>(`${ws(c)}/views`),
+  /** every view of the workspace; with `wait`, never `files_pending` */
+  views: (c: string, wait = false) => j<View[]>(`${ws(c)}/views${wait ? q({ wait: 1 }) : ''}`),
   /** the working views that claim a file, in the order a citation into it opens them */
   viewsForFile: (c: string, path: string) => j<View[]>(`${ws(c)}/views${q({ path })}`),
   deleteView: (c: string, slug: string) => j<{ ok: boolean }>(`${ws(c)}/views/${enc(slug)}`, { method: 'DELETE' }),

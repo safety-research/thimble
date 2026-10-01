@@ -471,6 +471,8 @@ export interface View {
   /** the files it claims, the first 500 of them, and how many there are */
   files?: string[]
   n_files?: number
+  /** its claims are globs and the corpus has not been walked yet: no files are known (the list read again shortly) */
+  files_pending?: boolean
   /** every claim is one extension's glob: a viewer for a file type, a mode of the File browser for the files it claims */
   file_type?: boolean
 }
@@ -1572,22 +1574,24 @@ export type RecordBy = 'terminal' | 'browser'
 
 // ---- scale: the tree fetches one folder at a time; the rows route pages by cursor ----
 
-/** A subfolder in `GET /corpora/{c}/sources?path=&depth=1`: the files under it at any depth, its direct subfolders, the tree's run mark. */
+/** A subfolder in `GET /corpora/{c}/sources?path=&depth=1`: the files under it at any depth and its direct subfolders
+ * (where the server knows them already), the tree's run mark. */
 export interface FolderEntry {
   path: string
   name: string
-  n_files: number
-  n_folders: number
+  n_files?: number
+  n_folders?: number
   is_run: boolean
   hidden?: boolean
 }
 
-/** One folder's own entries (`path` '' is the corpus root): its files as SourceInfo and its subfolders with counts. */
+/** One folder's own entries (`path` '' is the corpus root): its files as SourceInfo and its subfolders, and the files
+ * under it at any depth where the server knows them already. */
 export interface FolderListing {
   path: string
   files: SourceInfo[]
   folders: FolderEntry[]
-  n_files: number
+  n_files?: number
 }
 
 /** `GET /concepts/{id}/rows` with `next`, the rowid cursor for the page after this one (null at the end). */

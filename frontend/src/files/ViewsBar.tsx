@@ -57,17 +57,26 @@ export function listedAsView(p: Proposal, known: ReadonlySet<string>): boolean {
   return (p.status === 'queued' || p.status === 'building') && !p.held && (!!p.revision || known.has(p.slug))
 }
 
+/** How soon the views are read again while the server is still walking the corpus for the files they claim. */
+const PENDING_MS = 1000
+
 /** The views the bar lists and the proposals not yet built, read and kept fresh. */
 export function useViews(ws: string): { views: BuiltView[]; proposals: Proposal[] } {
   const proposals = useProposals(ws) ?? []
   const [views, setViews] = useState<View[]>([])
   useEffect(() => {
     let alive = true
+    let again: number | undefined
     const read = () => {
+      window.clearTimeout(again)
       api
         .views(ws)
-        // a file-type viewer thimble ships is listed where the corpus holds a file it opens
-        .then((v) => alive && setViews(v.filter((x) => x.ok && (x.origin !== 'builtin' || !!x.first_file))))
+        .then((v) => {
+          if (!alive) return
+          // a file-type viewer thimble ships is listed where the corpus holds a file it opens
+          setViews(v.filter((x) => x.ok && (x.origin !== 'builtin' || !!x.first_file)))
+          if (v.some((x) => x.files_pending)) again = window.setTimeout(read, PENDING_MS)
+        })
         .catch(() => {
           /* no views */
         })
@@ -76,6 +85,7 @@ export function useViews(ws: string): { views: BuiltView[]; proposals: Proposal[
     const off = bus.on('view', () => read())
     return () => {
       alive = false
+      window.clearTimeout(again)
       off()
     }
   }, [ws])

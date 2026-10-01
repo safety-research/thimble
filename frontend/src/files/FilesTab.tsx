@@ -316,7 +316,7 @@ export function FilesTab({ ws, active, focused = active }: { ws: string; active:
       bus.on('openView', ({ slug, query }) => {
         const from = pressedPane()
         api
-          .views(ws)
+          .views(ws, true)
           .then((all) => {
             const v = all.find((x) => x.slug === slug)
             if (!v?.first_file) throw new Error(`there is no view ${slug}`)
@@ -345,7 +345,7 @@ export function FilesTab({ ws, active, focused = active }: { ws: string; active:
       try {
         if (p?.kind === 'view') {
           if (!p.key) {
-            const v = await api.views(ws).then((all) => all.find((x) => x.slug === p.slug))
+            const v = await api.views(ws, true).then((all) => all.find((x) => x.slug === p.slug))
             if (!v) throw new Error(`there is no view ${p.slug}`)
             toView(p.slug, v.first_file ? { path: v.first_file } : null, from)
             return
@@ -447,6 +447,7 @@ export function FilesTab({ ws, active, focused = active }: { ws: string; active:
   const totals = useMemo(() => {
     if (!listing) return ''
     const n = listing.n_files
+    if (n == null) return ''
     const size = listing.folders.length ? null : listing.files.reduce((a, f) => a + (f.size_bytes || 0), 0)
     return `${n.toLocaleString()} ${n === 1 ? 'file' : 'files'}${size != null ? ` · ${fmtSize(size)}` : ''}`
   }, [listing])
