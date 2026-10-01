@@ -227,3 +227,30 @@ def test_a_labels_coverage_is_encoded_a_part_at_a_time(workspaces_tmp, monkeypat
     monkeypatch.setattr(concepts, "JSON_CHUNK", 2)
     got = json.loads(concepts._coverage_json(ws, concept))
     assert got == json.loads(json.dumps(concepts.coverage(ws, concept))) and len(got["files"]) > 4
+
+
+async def test_health_answers_while_every_worker_thread_is_taken():
+    """`server up` and the plugin give a health call 1 to 2 s: it is answered on the event loop, not after a worker
+    thread frees up behind the requests that compute."""
+    import asyncio
+    import time
+
+    import anyio
+    import httpx
+
+    from app.main import app
+
+    limiter = anyio.to_thread.current_default_thread_limiter()
+    tokens = limiter.total_tokens
+    limiter.total_tokens = 1
+    try:
+        hold = asyncio.ensure_future(anyio.to_thread.run_sync(time.sleep, 3))
+        await asyncio.sleep(0.2)
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://127.0.0.1") as client:
+            t0 = time.monotonic()
+            r = await client.get("/api/health")
+            took = time.monotonic() - t0
+        await hold
+    finally:
+        limiter.total_tokens = tokens
+    assert r.status_code == 200 and r.json()["ok"] and took < 1.0, f"health took {took:.1f} s"

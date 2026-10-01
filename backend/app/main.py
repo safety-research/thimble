@@ -352,9 +352,11 @@ def create_app() -> FastAPI:
     install = {"home": str(cli.home().expanduser().resolve()), "app": str(Path(config.REPO_ROOT).resolve())}
 
     @app.get("/api/health")
-    def health() -> dict:
+    async def health() -> dict:
         # `leader` lets `server up`/`stop` find a server whose record was lost, `ui` lets an open tab tell it is stale,
-        # and `home`/`app` let another install's `server up` on the same port refuse it
+        # and `home`/`app` let another install's `server up` on the same port refuse it. Answered on the event loop, not
+        # in a worker thread, which can wait behind threads that compute: the supervisor and the plugin give a health
+        # call 1 to 2 s (cli.HEALTH_TIMEOUT_S) before they take the server for one that is starting or gone.
         return {"ok": True, "leader": os.getsid(0), "boot": config.BOOT_ID, "ui": ui_build(), **install}
 
     @app.post("/api/ui/key")
