@@ -26,8 +26,8 @@
 //     check made there is no comment margin, so its text column is as wide as thimble's own Report draws it, also after
 //     Back from step 10; step 10: the demo makes the check, the margin stands at Run and not before, the comments appear
 //     in it, and only then does the page scroll to one; each comment card stands 8 px above its passage, or below the
-//     card above it, before and after the report scrolls; the Example badge sits in the report's bar and meets no text,
-//     control or picture, on step 9 and at every scroll position of step 10;
+//     card above it, before and after the report scrolls; the Example badge sits in the report's bar, level with its
+//     + New, and meets no text, control or picture, on step 9 and at every scroll position of step 10;
 //   - the page is frozen: clicks, keys and the wheel reach nothing, the tour writes nothing but the offer, and telemetry
 //     records nothing while it runs; Enter in the page's ask box sends nothing, and an ask box left open closes when
 //     the tour starts.
@@ -499,7 +499,7 @@ const REPORTBADGE = () => {
   const root = document.querySelector<HTMLElement>('.tour-ex-report')!
   const tag = root.querySelector<HTMLElement>('.tour-tag')
   const bar = root.querySelector('.wu-bar')!.getBoundingClientRect()
-  if (!tag) return { shown: false, inBar: false, hits: [] as string[], texts: 0 }
+  if (!tag) return { shown: false, inBar: false, hits: [] as string[], texts: 0, dy: null as number | null }
   const t = tag.getBoundingClientRect()
   type R = { l: number; t: number; r: number; b: number }
   const clip = (el: Element, r: R): R => {
@@ -540,7 +540,9 @@ const REPORTBADGE = () => {
     if (b.width < 1 || b.height < 1) continue
     meet(clip(el, { l: b.left, t: b.top, r: b.right, b: b.bottom }), `${el.tagName.toLowerCase()} ${String((el as HTMLElement).className?.toString() || '').slice(0, 30)}`)
   }
-  return { shown: t.width > 0 && t.height > 0, inBar: t.top >= bar.top - 0.5 && t.bottom <= bar.bottom + 0.5 && t.left >= bar.left - 0.5 && t.right <= bar.right + 0.5, hits: hits.slice(0, 5), texts }
+  const nb = root.querySelector('.wu-bar .wu-new')?.getBoundingClientRect()
+  const dy = nb ? Math.round(((t.top + t.bottom) / 2 - (nb.top + nb.bottom) / 2) * 10) / 10 : null
+  return { shown: t.width > 0 && t.height > 0, inBar: t.top >= bar.top - 0.5 && t.bottom <= bar.bottom + 0.5 && t.left >= bar.left - 0.5 && t.right <= bar.right + 0.5, hits: hits.slice(0, 5), texts, dy }
 }
 // in the page: each figure of the report example, its chart's or table's width on screen against its content's width
 const FIGS = () => {
@@ -967,7 +969,7 @@ async function walk(page: Page, tag: string, folds?: boolean, send = false) {
     await sleep(150)
     badge9 = await page.evaluate(REPORTBADGE)
   }
-  assert.ok(badge9.shown && badge9.inBar && !badge9.hits.length && badge9.texts > 50, `${tag} 9: the Example badge sits in the report's bar and covers nothing ${JSON.stringify(badge9)}`)
+  assert.ok(badge9.shown && badge9.inBar && badge9.dy != null && Math.abs(badge9.dy) <= 1 && !badge9.hits.length && badge9.texts > 50, `${tag} 9: the Example badge sits in the report's bar, level with its + New, and covers nothing ${JSON.stringify(badge9)}`)
   // every chart and table as wide as its figure; no comment margin until the check is made, so the text column is as
   // wide as thimble's own Report draws it with no check on, for a panel as wide as the example is laid out
   const figs = await page.evaluate(FIGS)
@@ -1054,7 +1056,7 @@ async function walk(page: Page, tag: string, folds?: boolean, send = false) {
       b = await page.evaluate(REPORTBADGE)
     }
     at++
-    if (!b.shown || !b.inBar || b.hits.length || b.texts <= 50) covered.push({ y, ...b })
+    if (!b.shown || !b.inBar || b.dy == null || Math.abs(b.dy) > 1 || b.hits.length || b.texts <= 50) covered.push({ y, ...b })
     if (y >= reach) break
   }
   assert.deepEqual(covered, [], `${tag} 10: the Example badge covers nothing at any of ${at} scroll positions`)
