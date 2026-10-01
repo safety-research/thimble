@@ -165,7 +165,9 @@ def system_prompt(c: str, brief: str, parts: "list[str] | tuple[str, ...]", inst
               "card_types": cardtypes.prompt_text(c), **_MARKS}
     lines = [s for p, s in LINES.items() if p not in parts] + ([] if any(p in parts for p in PARTS) else list(OUTPUT_LINES))
     lines += [] if "views" in parts else list(VIEWS_LINES)
-    text = prompts.without(prompts.agent_prompt(PROMPT, values), [h for p, h in PARTS.items() if p not in parts], lines)
+    replaced = bool(userconf.prompt_files(c, "orientation"))  # a prompt that replaces thimble's may lack its parts
+    text = prompts.without(prompts.agent_prompt(PROMPT, values), [h for p, h in PARTS.items() if p not in parts], lines,
+                           strict=not replaced)
     # The request and the instructions go in after the parts are left out, so a heading in either cannot cut the
     # analyst's own text or a part of the suffix.
     fills = {"request": brief.strip() or tools.hint("orient-no-request"), "instructions": instructions_of(c, instructions)}

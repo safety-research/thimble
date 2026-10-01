@@ -45,7 +45,6 @@ NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,39}$")
 # the prompt file under prompts/ each role's prompt is built from (userconf.PROMPT_FILES); main's is main.md
 PROMPT_FILES = {"main": "main", "orientation": "orient", "critic": "critic", "writer": "writer", "dev": "dev"}
 PROMPTS_DIR = "agents"  # in the workspace: each role's prompt as its extensions change it (prompt_file)
-DEFAULT_RE = re.compile(r"\{\{default(?:#([^}\n]+))?\}\}")
 FRONT_RE = re.compile(r"\A---\n.*?\n---\n", re.S)
 ADDED_HEADING = "## From the {name} extension"
 
@@ -212,11 +211,36 @@ def agent_for(c: str | None, role: str) -> RoleAgent:
 # --------------------------------------------------------------------------- the prompt way
 
 
-def _fill(text: str, part: Part, default: str, role: str) -> str:
-    """An extension's prompt text with its placeholders filled (module note)."""
+PLACEHOLDER_RE = re.compile(r"\{\{default(?:#([^}\n]+))?\}\}|\{\{dir\}\}|\{\{files\}\}")
+SLOT_RE = re.compile(r"\{\{([a-z_][a-z0-9_]*)\}\}")
+
+
+def _literal(text: str) -> str:
+    """`text` with its double braces taken apart, so prompts.render reads none of it as a slot."""
+    return text.replace("{{", "{ {").replace("}}", "} }")
+
+
+def _keep_slots(text: str, slots: set[str]) -> str:
+    """`text` with each `{{slot}}` of `slots` kept for prompts.render to fill and every other double brace literal."""
+    out, at = [], 0
+    for m in SLOT_RE.finditer(text):
+        out += [_literal(text[at:m.start()]), m.group(0) if m.group(1) in slots else _literal(m.group(0))]
+        at = m.end()
+    return "".join([*out, _literal(text[at:])])
+
+
+def _fill(text: str, part: Part, default: str, role: str, slots: set[str] | None = None) -> str:
+    """An extension's prompt text with its placeholders filled (module note). With `slots`, the text goes into one of
+    thimble's prompt files: the slots of the role's own file stay for prompts.render, every other double brace of the
+    extension's text is literal, and thimble's own text keeps its slots. Without, the text is sent as it is."""
     from . import prompts  # noqa: PLC0415
 
-    def one(m: re.Match[str]) -> str:
+    def value(m: re.Match[str]) -> str:
+        token = m.group(0)
+        if token == "{{dir}}":
+            return str(part.root)
+        if token == "{{files}}":
+            return ", ".join(f"`{x}`" for x in part.files) or "(none)"
         heading = (m.group(1) or "").strip()
         if not heading:
             return default
@@ -227,9 +251,18 @@ def _fill(text: str, part: Part, default: str, role: str) -> str:
                         part.extension, role, heading)
             return ""
 
-    files = ", ".join(f"`{x}`" for x in part.files) or "(none)"
-    text = DEFAULT_RE.sub(one, text)
-    return text.replace("{{dir}}", str(part.root)).replace("{{files}}", files)
+    out, at = [], 0
+    for m in PLACEHOLDER_RE.finditer(text):
+        got = value(m)
+        own = text[at:m.start()]
+        if slots is None:
+            out += [own, got]
+        else:
+            thimbles = m.group(0).startswith("{{default")
+            out += [_keep_slots(own, slots), got if thimbles else _literal(got)]
+        at = m.end()
+    rest = text[at:]
+    return "".join([*out, rest if slots is None else _keep_slots(rest, slots)])
 
 
 def _body(part: Part, rel: Any) -> str:
@@ -249,20 +282,14 @@ def _default_text(role: str) -> tuple[str, str]:
     return (m.group(0), text[m.end():].strip()) if m else ("", text.strip())
 
 
-def additions_text(agent: RoleAgent, default: str = "") -> str:
-    """The additions of `agent`, each under its extension's name, placeholders filled."""
+def additions_text(agent: RoleAgent, default: str = "", slots: set[str] | None = None) -> str:
+    """The additions of `agent`, each under its extension's name, placeholders filled as _fill fills them."""
     out = []
     for part in agent.additions:
-        body = _fill(_body(part, part.spec.get("prompt")), part, default, agent.role)
+        body = _fill(_body(part, part.spec.get("prompt")), part, default, agent.role, slots)
         if body:
             out.append(f"{ADDED_HEADING.format(name=part.extension)}\n\n{body}")
     return "\n\n".join(out)
-
-
-def _escape_slots(text: str) -> str:
-    """Text an extension wrote, with braces that would read as a prompt slot taken apart, since prompts.render fills
-    the file's own slots."""
-    return text.replace("{{", "{ {").replace("}}", "} }")
 
 
 def prompt_text(c: str | None, role: str) -> str | None:
@@ -275,13 +302,14 @@ def prompt_text(c: str | None, role: str) -> str | None:
     if agent.code or (agent.replacing is None and not agent.additions):
         return None
     front, default = _default_text(role)
+    slots = set(SLOT_RE.findall(default))
     body = default
     if agent.replacing is not None:
         own = _body(agent.replacing, agent.replacing.spec.get("prompt"))
-        body = _fill(_escape_slots(own), agent.replacing, default, role) if own else default
-    added = additions_text(agent, default)
+        body = _fill(own, agent.replacing, default, role, slots) if own else default
+    added = additions_text(agent, default, slots)
     if added:
-        body = f"{body}\n\n{_escape_slots(added)}"
+        body = f"{body}\n\n{added}"
     return f"{front}{body}\n"
 
 

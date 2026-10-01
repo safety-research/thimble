@@ -128,14 +128,33 @@ def test_a_prompt_addition_or_replacement_reaches_the_role_s_prompt_and_the_conf
     assert body.startswith(own[:200]) and "## From the dates extension" in body
     assert "`runs/r1.jsonl`" in body and str(active[0]) in body
     active[0] = _extension(tmp_path, "whole", {"critic": {"description": "Whole.", "prompt": "p.md", "replace": True}},
-                           {"agents/critic/p.md": "Read the digest.\n\n{{default#What a good critique does}}"})
+                           {"agents/critic/p.md": "Read the digest.\n\n{{default#What to look for}}"})
     with prompts.custom(userconf.prompt_files(CORPUS, "critic")):
         front, body = prompts.agent_file("critic")
-    assert body.startswith("Read the digest.") and front.get("name")
+    section = prompts.section("critic", "What to look for").strip()
+    assert body.startswith("Read the digest.") and front.get("name") and section[:120] in body
     mine = tmp_path / "mine.md"
     mine.write_text((REPO / "prompts" / "critic.md").read_text())
     _config({"agents": {"critic": {"prompt": str(mine)}}})
     assert userconf.prompt_files(CORPUS, "critic") == {"critic": mine}
+
+
+def test_a_replacing_orientation_prompt_keeps_thimble_s_slots_and_needs_none_of_its_parts(tmp_path, data_tmp,
+                                                                                         workspaces_tmp, active):
+    """A replacement may use the slots thimble's own prompt for the role fills ({{request}}); any other double brace
+    is literal, and a prompt without the parts Start's switches leave out still renders."""
+    from app import orient_session
+
+    active.append(_extension(tmp_path, "lean", {"orientation": {"description": "Lean.", "prompt": "p.md",
+                                                                "replace": True}},
+                             {"agents/orientation/p.md": "Survey {{files}} for this request: {{request}}. "
+                                                         "Keep {{braces}} as they are."}))
+    from app import prompts
+
+    with prompts.custom(userconf.prompt_files(CORPUS, "orientation")):
+        text = orient_session.system_prompt(CORPUS, "count the runs", ["final"])
+    assert text.startswith("Survey `runs/r1.jsonl` for this request: count the runs.")
+    assert "{ {braces} }" in text
 
 
 # --------------------------------------------------------------------------- guardrails for every agent
