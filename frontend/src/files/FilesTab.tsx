@@ -70,6 +70,9 @@ interface TabsProps {
   onClose: (path: string) => void
 }
 
+/** how wide the fade at a scrolled strip's edge is (files.css .reader-tabs[data-more-…]) */
+const TAB_FADE_PX = 28
+
 /** The open files as square tabs, VS Code's way: the open one on the cell's paper between hairlines with its ×. Tabs that
  * do not fit narrow, their names cut with an ellipsis, all but the open one, and past their narrowest the strip
  * scrolls, its edge faded on the side where tabs are hidden. */
@@ -89,8 +92,10 @@ function ReaderTabs({ tabs, current, onPick, onClose }: TabsProps) {
       if (tab) {
         const b = box.getBoundingClientRect()
         const t = tab.getBoundingClientRect()
-        if (t.left < b.left) box.scrollLeft -= b.left - t.left
-        else if (t.right > b.right) box.scrollLeft += t.right - b.right
+        // clear of the fade on either side, where the strip can scroll that far
+        const pad = t.width + 2 * TAB_FADE_PX <= b.width ? TAB_FADE_PX : 0
+        if (t.left < b.left + pad) box.scrollLeft -= b.left + pad - t.left
+        else if (t.right > b.right - pad) box.scrollLeft += t.right - (b.right - pad)
       }
       edges()
     }
