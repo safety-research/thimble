@@ -26,6 +26,7 @@ import os
 import re
 import shutil
 import sqlite3
+import stat
 import sys
 import tempfile
 import threading
@@ -168,6 +169,30 @@ def list_sources(corpus: Path, include_hidden: bool = False) -> list[dict[str, A
     """The corpus's files as the Files tab lists them. Paths with a dot component are left out unless `include_hidden`,
     which marks them `hidden: True`. Memoised per corpus; callers must not mutate the shared list."""
     return _listing(corpus, include_hidden).sources
+
+
+def source_of(corpus: Path, rel: str) -> dict[str, Any] | None:
+    """The record list_sources gives the regular file at `rel`, read from that file alone, without walking the corpus;
+    None for a path it may list otherwise or not at all: one that is not a regular file, under a dot name, reached
+    through a symlinked folder, or one of SKIPPED_SUFFIXES."""
+    if not rel or _is_hidden(rel) or rel.endswith(SKIPPED_SUFFIXES) or os.path.normpath(rel) != rel or rel.startswith("/"):
+        return None
+    here = str(corpus)
+    for part in rel.split("/")[:-1]:
+        here = f"{here}/{part}"
+        try:
+            if not stat.S_ISDIR(os.lstat(here).st_mode):
+                return None
+        except OSError:
+            return None
+    try:
+        st = os.stat(f"{corpus}/{rel}")
+    except OSError:
+        return None
+    if not stat.S_ISREG(st.st_mode):
+        return None
+    kind = source_kind(rel)
+    return {"path": rel, "kind": kind, "size_bytes": st.st_size, "title": source_title(rel, kind)}
 
 
 def forget_sources(corpus: Path | None = None) -> None:

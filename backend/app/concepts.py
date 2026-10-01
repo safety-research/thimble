@@ -945,6 +945,20 @@ def match_paths(corpus_dir: Path, patterns: list[str]) -> list[dict]:
     if not pats:
         return []
     out = []
+    if not any(GLOB_CHARS.search(p) for p, _ in pats):
+        # files named outright are found by name: a walk of a corpus of a million files takes seconds
+        found: dict[str, tuple[dict, list[str | None]]] = {}
+        for p, frag in pats:
+            src = found[p][0] if p in found else corpus.source_of(corpus_dir, p)
+            if src is None:
+                break
+            found.setdefault(p, (src, []))[1].append(frag)
+        else:
+            for src, frags in found.values():
+                under = None if None in frags else list(dict.fromkeys(frags))
+                out.append({**src, "under": under} if under else src)
+            out.sort(key=lambda s: s["path"])
+            return out
     for src in corpus.list_sources(corpus_dir):
         rel = src["path"]
         hits = [frag for p, frag in pats if rel == p or fnmatch.fnmatchcase(rel, p) or rel.startswith(p + "/")]
@@ -956,6 +970,7 @@ def match_paths(corpus_dir: Path, patterns: list[str]) -> list[dict]:
     return out
 
 
+GLOB_CHARS = re.compile(r"[*?\[]")  # what makes a path pattern a glob for fnmatch
 PROMPT_APPLY_MAX = 50_000  # units a prompt apply over the whole corpus may cover without a limit
 WHOLE_CORPUS = frozenset({"", ".", "*", "**", "**/*", "./*"})  # path patterns that narrow nothing
 

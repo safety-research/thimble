@@ -179,3 +179,36 @@ def test_a_chat_read_again_is_not_parsed_again(workspaces_tmp, monkeypatch):
         got = client.get(f"/api/ws/{c}/chats/{agents.MAIN_ID}").json()
     assert got["events"][-1]["text"] == "one more" and len(got["events"]) == 302
     assert len(parsed) < 10, "the records read before are not parsed again"
+
+
+def test_files_named_outright_are_found_without_walking_the_corpus(mini_dir, tmp_path, monkeypatch):
+    """A label over named files walked every file of the corpus to find them, seconds of a worker thread holding the
+    interpreter on a corpus of a million files: files named outright are found by name, as the walk would find them,
+    and a name the walk would treat otherwise still goes through it."""
+    import shutil
+
+    from app import concepts, corpus
+
+    root = tmp_path / "c"
+    shutil.copytree(mini_dir, root)
+    (root / ".hidden").mkdir()
+    (root / ".hidden" / "x.jsonl").write_text("{}\n")
+    (root / "linked").symlink_to(root / "agents")
+    corpus.forget_sources(root)
+    named = [["board.jsonl"], ["agents/agent-01.jsonl", "board.jsonl#x", "board.jsonl"], ["forge.db#prs"],
+             ["agents/agent-02.jsonl#a", "agents/agent-02.jsonl#b"]]
+    by_name = getattr(corpus, "source_of", None)
+    monkeypatch.setattr(corpus, "source_of", lambda *a: None, raising=False)
+    want = [concepts.match_paths(root, p) for p in named]
+    monkeypatch.setattr(corpus, "source_of", by_name, raising=False)
+    walks = []
+    real = corpus.list_sources
+    monkeypatch.setattr(corpus, "list_sources", lambda *a, **k: walks.append(a) or real(*a, **k))
+    assert [concepts.match_paths(root, p) for p in named] == want and not walks
+    assert want[3][0]["under"] == ["a", "b"] and "under" not in want[1][1]
+    for odd in (["agents"], [".hidden/x.jsonl"], ["linked/agent-01.jsonl"], ["agents/*.jsonl"], ["nothing.jsonl"]):
+        walks.clear()
+        assert concepts.match_paths(root, odd) == [s for s in real(root) if s["path"] == odd[0] or
+                                                  s["path"].startswith(odd[0] + "/") or
+                                                  (odd[0] == "agents/*.jsonl" and s["path"].startswith("agents/"))]
+        assert walks, odd
