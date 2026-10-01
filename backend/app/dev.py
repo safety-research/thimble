@@ -1318,6 +1318,9 @@ class SessionError(RuntimeError):
 UNTRUSTED_RE = re.compile(r"not trusted", re.IGNORECASE)
 UNTRUSTED_LINE = ("Claude Code does not trust {folder}, so the dev agent's session could not start. Run `claude` in "
                   "{folder} once and accept its trust prompt, then Retry.")
+# for a view build, whose folder is below thimble's workspaces folder, which thimble's installer trusts
+UNTRUSTED_WORKSPACES_LINE = ("Claude Code does not trust thimble's workspaces folder {folder}, so the view can't be "
+                             "built. To trust it, run this in a terminal, then Retry: {command}")
 
 
 def read_only_fence(folders: "tuple[Path, ...] | list[Path]", outside: "tuple[str, ...] | list[str]" = (),
@@ -1392,6 +1395,15 @@ def trust_folder(cwd: Path) -> Path:
         return config.WORKSPACES_DIR if here.is_relative_to(config.WORKSPACES_DIR.resolve()) else Path(cwd)
     except OSError:
         return Path(cwd)
+
+
+def untrusted_line(cwd: Path) -> str:
+    """Why a session in `cwd` could not start while Claude Code does not trust its folder (trust_folder), and how the
+    analyst trusts it."""
+    folder = trust_folder(cwd)
+    if folder == config.WORKSPACES_DIR:
+        return UNTRUSTED_WORKSPACES_LINE.format(folder=folder, command=cli.trust_command())
+    return UNTRUSTED_LINE.format(folder=folder)
 
 
 def ticket_fence(wt: Path, network: bool = False, required: bool = False) -> dict[str, Any]:
@@ -1482,7 +1494,7 @@ class Sessions:
         flags = self._flags(workspace, name, add_dirs, fence, asking, models)
         code, out = await self._run(["--bg", *flags, "--", prompt], cwd, env)
         if code != 0 and UNTRUSTED_RE.search(out):
-            raise SessionError(UNTRUSTED_LINE.format(folder=trust_folder(cwd)))
+            raise SessionError(untrusted_line(cwd))
         if code != 0:
             raise SessionError(f"`claude --bg` failed (exit {code}): {out.strip()[-400:]}")
         return await self._identify(cwd, _bg_id(out), since)
