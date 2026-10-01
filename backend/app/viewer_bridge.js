@@ -614,6 +614,7 @@
   var sheet = null
   var sendTimer = null
   var paintTimer = null
+  var paintFrame = null
   var HL = typeof CSS !== 'undefined' && !!CSS.highlights && typeof Highlight === 'function'
   var BAR = 3 // px, the file view's bar
   // --thimble-own is reset on every marked element, since a custom property is inherited and a record marked inside
@@ -796,8 +797,18 @@
     if (room(el)) return 'in'
     return el.getBoundingClientRect().left - BAR >= clipLeft(el, cut) ? 'out' : 'in'
   }
+  // drawn again before the browser draws the changed page, so records a redraw brings never show unmarked; a frame
+  // the browser does not draw (hidden) gets the marks on the timer
+  function paintSoon() {
+    if (paintTimer != null) return
+    paintTimer = setTimeout(paint, 100)
+    if (typeof requestAnimationFrame === 'function') paintFrame = requestAnimationFrame(paint)
+  }
   function paint() {
+    if (paintTimer != null) clearTimeout(paintTimer)
+    if (paintFrame != null) cancelAnimationFrame(paintFrame)
     paintTimer = null
+    paintFrame = null
     for (var i = 0; i < marked.length; i++) {
       marked[i].removeAttribute('data-thimble-label')
       marked[i].removeAttribute('data-thimble-bar')
@@ -1056,7 +1067,7 @@
     }
     if (unsent.length && sendTimer == null) sendTimer = setTimeout(sendAnchors, 30)
     else if (changed) seenSoon()
-    if (changed && (hasMarks() || dropping()) && paintTimer == null) paintTimer = setTimeout(paint, 30)
+    if (changed && (hasMarks() || dropping())) paintSoon()
   }).observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['data-anchor', 'class'] })
 
   // What the analyst is looking at, for a newer version of the view loaded in this page's place: `ref` the element they
