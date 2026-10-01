@@ -355,8 +355,8 @@ class Entry:
     tx_ended: bool | None = None  # whether the transcript's last turn had ended at that offset, once read
     proxy_refused: bool = False  # Claude Code refused main's Agent call that would start its proxy (proxy_refused)
     ended_state: str = ""  # the state `claude agents` listed for it when its process went away (stopped_in_claude)
-    # a line of a turn (a prompt, a reply, an attachment) was read from its transcript since its last run ended, or since
-    # this server loaded it
+    # a prompt or a reply was read from its transcript since its last run ended, or since this server loaded it: a turn
+    # began
     new_turn: bool = False
 
     KEEP = ("c", "key", "name", "short", "sid", "chat", "role", "folder", "started", "status", "run_open", "result",
@@ -775,7 +775,7 @@ def _news_lines(e: Entry, line: bytes) -> list[str]:
     if rec.get("isSidechain"):
         return []
     t = rec.get("type")
-    if t in ("user", "assistant", "attachment"):
+    if t in ("user", "assistant"):
         e.new_turn = True
     if t == "assistant":
         return _said(e, rec)
