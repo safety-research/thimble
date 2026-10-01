@@ -9,7 +9,9 @@ and what it takes. No agent session starts while the config has one (session); t
 show it. The models and efforts are read leniently (load_or_defaults), so the pages still show.
 
 Earlier builds kept the agents' models and permission modes in the workspace's settings.json. migrate moves them into
-that workspace's override the first time the workspace's config is read, so each workspace runs as it did.
+that workspace's override the first time the workspace's config is read, so each workspace runs as it did. The settings
+of an extension thimble renamed (RENAMED_EXTENSIONS) are read under its new name, and written so when a file is
+rewritten (rename_extensions).
 """
 from __future__ import annotations
 
@@ -25,7 +27,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
-from . import config, sandbox_allow
+from . import config, permission_hook, sandbox_allow
 
 log = logging.getLogger("thimble.userconf")
 
@@ -47,6 +49,10 @@ NETWORK = ("off", "on")
 AGENT_SANDBOX = ("on", "off")
 DATA = ("ask", "allow", "off")
 ENV_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,127}$")
+# `cardWait`: the minutes a permission card waits for the analyst before an unanswered request is declined
+# (card_wait_s), at most half the permission hook's own timeout, so the hook is never ended first
+CARD_WAIT_MINUTES = 10
+CARD_WAIT_MAX = permission_hook.TIMEOUT // 120
 SERVER_JSON = "server.json"  # in thimble's home: the server's address and the token of its local API (hook_auth)
 MAIN_MODES = "main-modes.json"  # in thimble's home: the permission mode main last reported, per workspace (session.note_mode)
 SESSION_KEY = "session.key"  # in thimble's home: the secret of the sessions' tokens (hook_auth.SESSION_KEY)
@@ -68,6 +74,7 @@ DEFAULTS: dict[str, Any] = {
     "installs": "ask",
     "sandbox": {"use": "when-available", "enforce": True},
     "browser": None,
+    "cardWait": CARD_WAIT_MINUTES,
     "extensions": {},
     "agents": {
         "orientation": {**_session_agent("ask"), "subagentModel": None},
@@ -88,6 +95,8 @@ EXTENSION_AGENT_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,39}:[a-z0-9][a-z0-9-]{0,3
 EXTENSION_AGENT: dict[str, Any] = {"model": None, "effort": None, "web": "off", "network": "on", "prompt": None}
 EXTENSION_KEYS = ("enabled",)  # of `extensions.<name>`
 EXTENSION_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,39}$")
+# the extensions thimble ships under a new name, by their old name: a config's settings of an old name are the new one's
+RENAMED_EXTENSIONS = {"swarm": "swarm-orient"}
 
 def install_rules() -> list[str]:
     """The contents of Claude Code's Bash rules for every install or download command (sandbox_allow.INSTALL_*), a
@@ -144,7 +153,63 @@ LINKED_FILE = ("thimble's config {path} is a link or has another name in the wor
                "it, so thimble does not read it; replace it with a plain file")
 
 
+def renamed_extensions() -> dict[str, str]:
+    """RENAMED_EXTENSIONS less each old name that an extension of the analyst's own still has (extensions.foreign)."""
+    from . import extensions  # noqa: PLC0415 — extensions imports this module
+
+    return {old: new for old, new in RENAMED_EXTENSIONS.items() if not extensions.foreign(old)}
+
+
+def _renamed(data: dict[str, Any]) -> dict[str, Any]:
+    """A file's object with the settings of each renamed extension (renamed_extensions) under its new name,
+    `extensions.<old>` and `agents."<old>:<agent>"`; where the new name has a setting of its own, that one stays."""
+    exts, agents = data.get("extensions"), data.get("agents")
+    named = [*(exts if isinstance(exts, dict) else ()), *(k.partition(":")[0] for k in
+                                                          (agents if isinstance(agents, dict) else ()))]
+    if not any(n in RENAMED_EXTENSIONS for n in named) or not (names := renamed_extensions()):
+        return data
+
+    def rename(obj: dict[str, Any], new_key: Callable[[str], str]) -> dict[str, Any]:
+        return {new_key(k): v for k, v in obj.items() if new_key(k) == k or new_key(k) not in obj}
+
+    def agent_key(k: str) -> str:
+        ext, sep, agent = k.partition(":")
+        return f"{names[ext]}:{agent}" if sep and ext in names else k
+
+    out = dict(data)
+    if isinstance(exts, dict):
+        out["extensions"] = rename(exts, lambda k: names.get(k, k))
+    if isinstance(agents, dict):
+        out["agents"] = rename(agents, agent_key)
+    return out
+
+
 def _raw(path: Path) -> dict[str, Any]:
+    """The file's object (_written) with each renamed extension's settings under its new name (_renamed)."""
+    return _renamed(_written(path))
+
+
+def rename_extensions(path: Path) -> bool:
+    """Write the config file at `path` with each renamed extension's settings under its new name (_renamed); True when
+    it changed. A file that cannot be read or written is left as it is, and _raw still reads it under the new names."""
+    with _lock:
+        try:
+            data = _written(path)
+        except ConfigError:
+            return False
+        got = _renamed(data)
+        if got == data:
+            return False
+        try:
+            _write(path, got)
+        except OSError as e:
+            log.warning("thimble's config %s keeps the old names of renamed extensions: %s", path, e)
+            return False
+    log.info("thimble's config %s: the settings of renamed extensions are under their new names", path)
+    return True
+
+
+def _written(path: Path) -> dict[str, Any]:
     """The file's object as written, {} when there is none; ConfigError when it cannot be read or is not an object, or
     is a workspace's file that another name can change (config.linked)."""
     if path.parent.parent == config.WORKSPACES_DIR and config.linked(path):
@@ -164,6 +229,23 @@ def _raw(path: Path) -> dict[str, Any]:
     if not isinstance(data, dict):
         raise ConfigError(f"thimble's config {path} must hold one JSON object")
     return data
+
+
+def _card_wait(value: Any) -> float | None:
+    """A `cardWait` value in minutes, None when it is not a number above 0 and up to CARD_WAIT_MAX."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not 0 < value <= CARD_WAIT_MAX:
+        return None
+    return float(value)
+
+
+def card_wait_s() -> float:
+    """How long a permission card waits for the analyst before an unanswered request is declined, in seconds:
+    `cardWait` of the file in thimble's home, else CARD_WAIT_MINUTES, also when the file has an error."""
+    try:
+        got = _card_wait(_raw(global_file()).get("cardWait"))
+    except ConfigError:
+        got = None
+    return (got if got is not None else CARD_WAIT_MINUTES) * 60.0
 
 
 def _words(values: tuple[str, ...]) -> str:
@@ -191,7 +273,7 @@ def _problems(data: dict[str, Any], scope: str, base: Path) -> list[str]:
                            f"{', '.join(known)}{more}")
         return True
 
-    keys("", data, ("installs", "sandbox", "browser", "extensions", "agents"))
+    keys("", data, ("installs", "sandbox", "browser", "cardWait", "extensions", "agents"))
     if "installs" in data:
         one_of("installs", data["installs"], INSTALLS)
     if "browser" in data:
@@ -199,6 +281,12 @@ def _problems(data: dict[str, Any], scope: str, base: Path) -> list[str]:
             out.append("browser is set for the whole machine, in the config in thimble's home, not per workspace")
         else:
             one_of("browser", data["browser"], BROWSERS, null=True)
+    if "cardWait" in data:
+        if scope != "global":
+            out.append("cardWait is set for the whole machine, in the config in thimble's home, not per workspace")
+        elif data["cardWait"] is not None and _card_wait(data["cardWait"]) is None:
+            out.append(f"cardWait is {json.dumps(data['cardWait'])}; it takes a number of minutes above 0 and up to "
+                       f"{CARD_WAIT_MAX}, or null")
     box = data.get("sandbox")
     if "sandbox" in data and keys("sandbox", box, ("use", "enforce")):
         if "use" in box:
@@ -519,11 +607,19 @@ def pane_patch(models: dict[str, Any] | None, rows: dict[str, Any] | None) -> di
 
 
 def migrate(c: str) -> bool:
+    """Bring workspace `c`'s config up to date: each renamed extension's settings in its override under the new name
+    (rename_extensions), and an earlier build's models and permission modes moved into it (_move_settings). True when
+    something moved."""
+    if not config._valid_name(c):
+        return False
+    renamed = rename_extensions(workspace_file(c))
+    return _move_settings(c) or renamed
+
+
+def _move_settings(c: str) -> bool:
     """Move an earlier build's models and permission modes out of workspaces/<c>/settings.json into the workspace's
     override (legacy_patch), where a value the override already holds stays; True when something moved. A settings
     file that cannot be read, or an override with an error, is left for a later read."""
-    if not config._valid_name(c):
-        return False
     settings = config.WORKSPACES_DIR / c / "settings.json"
     try:
         stored = json.loads(settings.read_text("utf-8"))

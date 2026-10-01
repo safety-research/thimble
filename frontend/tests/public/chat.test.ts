@@ -56,8 +56,8 @@ describe('the fold', () => {
 })
 
 test('an extension\'s orientation instructions lead its follow-up as a line naming the extension', () => {
-  const [row] = foldRecords(records([{ type: 'user', text: 'Read every record in `*.jsonl`.', by: 'extension', extension: 'swarm', run: 1 }]))
-  expect(leadText(row as UserRow)).toBe('swarm added: its orientation instructions')
+  const [row] = foldRecords(records([{ type: 'user', text: 'Read every record in `*.jsonl`.', by: 'extension', extension: 'swarm-orient', run: 1 }]))
+  expect(leadText(row as UserRow)).toBe('swarm-orient added: its orientation instructions')
   expect(leadText({ kind: 'user', index: 0, text: ' Count them. ', by: 'browser' })).toBe('Count them.')
 })
 

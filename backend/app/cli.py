@@ -2936,11 +2936,21 @@ def orient_hint(name: str, program: bool) -> str:
 
 def cmd_extension(args: argparse.Namespace) -> int:
     """`thimble extension add | on | off | list | remove`, then every workspace a session has open finds its extensions
-    again."""
+    again. The old name of a built-in thimble renamed names the new one (extensions.renamed)."""
     from . import extensions  # noqa: PLC0415
+
+    def now_called(name: str) -> str:
+        new = extensions.renamed(name)
+        if new != name:
+            print(f"{name} is now called {new}.")
+        return new
 
     ship_extensions()
     workspaces = Path(resolve_env()["workspaces_dir"])
+    if getattr(args, "name", None):
+        args.name = now_called(args.name)
+    if args.ext_cmd == "add" and not Path(args.source).expanduser().exists():
+        args.source = now_called(args.source)
     if args.ext_cmd == "list":
         for ln in extensions.list_lines(workspaces):
             print(ln)

@@ -17,7 +17,7 @@ import urllib.request
 from pathlib import Path
 
 import pytest
-from conftest import print_sessions
+from conftest import card_wait, print_sessions
 from fastapi import HTTPException
 
 from app import (agent_session, agents, channel, config, hook_auth, ledger, modes, orient_session, permission_hook,
@@ -178,20 +178,20 @@ async def test_every_session_asks_through_the_permission_hook_and_no_prompt_tool
     assert "ask_permission" not in tools.REGISTRY
 
 
-async def test_manual_waits_for_the_analyst_longer_while_a_writer_s_request_is_denied_after_a_minute(fake, monkeypatch, analyst):
+async def test_manual_waits_for_the_analyst_and_every_agent_s_card_waits_the_one_card_wait(fake, monkeypatch, analyst):
     """Manual is Claude Code's manual mode: each request it makes waits on the orientation's card, with the agent that
-    asked, until the analyst answers or PATIENT_WAIT_S passes, with no minute's deny. A writer, which is not patient,
-    keeps the minute."""
+    asked, until the analyst answers or the card's wait passes, ten minutes with no `cardWait` in thimble's config. A
+    writer's card waits the same time, not a minute of its own, and once `cardWait` is set, its unanswered request is
+    declined after that wait and stays on the card saying so."""
     monkeypatch.setenv("FAKE_MODE", "sleep")
-    monkeypatch.setattr(agent_session, "PERMISSION_WAIT_S", 0.05)
     run = await orient_session.start(CORPUS, "")
-    assert run.patient and agents.read_meta(CORPUS, run.chat)["permission_mode"] == "manual"
+    assert agents.read_meta(CORPUS, run.chat)["permission_mode"] == "manual"
     inp = {"command": "touch notes.md", "description": "Create notes.md"}
     call = _ask("Bash", inp, agent_id="a1")
     [p] = await _pending(run.chat)
     assert (p["tool"], p["what"], p["agent_id"]) == ("Bash", "Create notes.md", "a1") and "touch notes.md" in p["input"]
     await asyncio.sleep(0.3)
-    assert not call.done() and p["wait_s"] == agent_session.PATIENT_WAIT_S, "not the minute"
+    assert not call.done() and p["wait_s"] == 600, "the default card wait, ten minutes"
     assert (await agent_session.permission_route(CORPUS, run.chat, agent_session.PermissionAnswer(id=p["id"], allow=True), analyst))["allow"]
     assert await call == {"behavior": "allow", "updatedInput": inp}
     call = _ask("Write", {"file_path": "x"})
@@ -209,13 +209,20 @@ async def test_manual_waits_for_the_analyst_longer_while_a_writer_s_request_is_d
     agent_session._runs[(CORPUS, run.key)] = run
     try:
         run.chat = str(agents.new_agent(CORPUS, "writer", "Write report")["id"])
-        assert not run.patient
+        call = asyncio.ensure_future(agent_session.ask(CORPUS, run.key, "Bash", inp))
+        [p] = await _pending(run.chat)
+        assert not call.done() and p["wait_s"] == 600, "a writer's card waits the card wait too, not a minute"
+        agent_session.answer(CORPUS, run.chat, p["id"], True)
+        assert (await call)["behavior"] == "allow"
+        assert card_wait(0.001) == 0.06
         assert await agent_session.ask(CORPUS, run.key, "Bash", inp) == {
-            "behavior": "deny", "message": agent_session.timed_out_line(0.05)}
+            "behavior": "deny", "message": agent_session.timed_out_line(0.06)}
+        assert "within 0.06 seconds" in agent_session.timed_out_line(0.06)
         last = json.loads((config.workspace_dir(CORPUS) / agents.PERMISSIONS_LOG).read_text().splitlines()[-1])
         assert last["answer"] == "deny: nobody answered in time" and last["chat"] == run.chat
         [expired] = agents.read_meta(CORPUS, run.chat)["permissions"]
         assert expired["expired"] and expired["tool"] == "Bash", "it stays on the card, marked denied unanswered"
+        assert expired["wait_s"] == 0.06, "the card says how long it waited"
         assert agent_session.answer(CORPUS, run.chat, expired["id"], False), "Dismiss takes it off"
         assert agents.read_meta(CORPUS, run.chat)["permissions"] == []
     finally:

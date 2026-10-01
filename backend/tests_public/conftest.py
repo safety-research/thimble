@@ -99,6 +99,20 @@ PLUGIN_TOKEN = "t0ken-of-the-test-server"
 UI_KEY = "ui-key-of-the-test-server"
 
 
+def card_wait(minutes: float | None) -> float:
+    """Set `cardWait` in the test's thimble config, keeping its other keys (None takes it out); the wait in seconds."""
+    import json
+
+    from app import userconf
+
+    p = userconf.global_file()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    data = json.loads(p.read_text()) if p.exists() else {}
+    data.pop("cardWait", None)
+    p.write_text(json.dumps({**data, **({"cardWait": minutes} if minutes is not None else {})}))
+    return userconf.card_wait_s()
+
+
 def _record(**values: str) -> None:
     """`values` into the test's server.json, keeping what it holds."""
     import json

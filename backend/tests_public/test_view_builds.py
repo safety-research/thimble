@@ -256,6 +256,7 @@ def test_a_view_build_reads_thimble_s_view_code_unasked_but_never_server_json(bo
     """A view build's session reads the code its view runs against (the kernel's thimble module, the page's bridge and
     the frame it runs in, the checks) and thimble's prompts without a permission card, and still cannot read server.json
     or the sessions' key in thimble's home."""
+    monkeypatch.setenv("THIMBLE_SANDBOX", "1")
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "cc"))
     corpus, folder = config.corpus_dir(CORPUS), views.views_dir(CORPUS) / "posts"
     conf = dev.dev_config(CORPUS, sandbox=True)

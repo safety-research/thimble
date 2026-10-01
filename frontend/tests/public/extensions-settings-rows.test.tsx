@@ -12,7 +12,7 @@ import { mount, unmountAll } from './mount.tsx'
 const LONG = 'A description far too long for one line of the popover, which the row cuts short and opens in full.'
 const base = { version: '', active: true, why: '', note: '', locked: false, on: true, views: [], parts: [], consent: '', sandboxed: null, orients: false, offer: false }
 const rows: ExtensionRow[] = [
-  { ...base, name: 'swarm', version: '0.4.0', builtin: true, description: 'Reads every message.', active: false, why: 'not added', on: false, addable: true, parts: ['swarm-reader agent'], consent: 'swarm-reader: network.', needs: ['multiagent-swimlane'], orients: true },
+  { ...base, name: 'swarm-orient', version: '0.4.0', builtin: true, description: 'Reads every message.', active: false, why: 'not added', on: false, addable: true, parts: ['swarm-reader agent'], consent: 'swarm-reader: network.', needs: ['multiagent-swimlane'], orients: true },
   {
     ...base,
     name: 'tally',
@@ -30,7 +30,7 @@ const rows: ExtensionRow[] = [
 ]
 const DATA: Extensions = {
   extensions: rows,
-  conflicts: ['tally and swarm both replace the critic: thimble runs its own.'],
+  conflicts: ['tally and swarm-orient both replace the critic: thimble runs its own.'],
   orientation_ran: true,
   local: { name: 'here', views: [{ slug: 'pages', name: 'Pages', description: 'Each page with its edits.', file_viewer: false, on: true }] },
 }
@@ -101,7 +101,7 @@ test("an extension's views follow its switch, and a view's failed check shows in
 
 test("an extension's name opens what it gives and runs under, and closes it again", async () => {
   const el = await mount(<Section />)
-  const r = row(el, 'ext:swarm')
+  const r = row(el, 'ext:swarm-orient')
   const name = r.querySelector<HTMLButtonElement>('button.settings-ext-name')!
   expect(r.querySelector('.settings-ext-more')).toBeNull()
   await click(name)
@@ -126,7 +126,7 @@ test('a line too long for its row opens in full under its name, with nothing els
 
 test('a shipped extension not added reads as off, and switched on asks to run its orientation', async () => {
   const el = await mount(<Section />)
-  const r = row(el, 'ext:swarm')
+  const r = row(el, 'ext:swarm-orient')
   expect(sw(r).getAttribute('aria-checked')).toBe('false')
   expect(r.textContent).not.toMatch(/not added/i)
   expect(r.textContent).not.toMatch(/orientation now/i)
@@ -134,5 +134,5 @@ test('a shipped extension not added reads as off, and switched on asks to run it
   expect(r.textContent).toMatch(/orientation now/i)
   const not = [...r.querySelectorAll('button')].find((b) => b.textContent === 'Not now')!
   await click(not)
-  expect(answers).toEqual({ swarm: false })
+  expect(answers).toEqual({ 'swarm-orient': false })
 })

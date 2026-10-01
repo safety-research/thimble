@@ -62,7 +62,8 @@ it is not used.
 
 thimble ships some extensions (builtin_dir()); `add` adds one by name, and those of SHIPPED_ON are added on thimble's
 first run (ship()). A built-in thimble added, or the analyst added by name, follows the version this thimble ships while
-its copy is unchanged.
+its copy is unchanged. One thimble renamed (RENAMED) is carried over to its new name, with its settings in thimble's
+config and in each workspace (_rename_shipped, userconf.rename_extensions, _renamed_state).
 
 Extension code runs in thimble's kernels (readers on the views kernel, card.py in a card's kernel) and, for a program
 that runs one of the roles or tasks, in that role's or task's box (harness.py, roles.py, tasks.py). The server reads
@@ -95,6 +96,7 @@ MANIFEST = "extension.json"
 ADDED = ".added.json"  # written by `thimble extension add`, or by ship(): {source, kind, commit?, digest, ts, shipped?}
 SHIPPED = ".shipped.json"  # in extensions_dir(): {"added": [each built-in ship() added once]}
 SHIPPED_ON = ("video",)  # the built-in extensions thimble ships added
+RENAMED = userconf.RENAMED_EXTENSIONS  # {old name: new name} of the built-ins thimble renamed
 NAME_RE = userconf.EXTENSION_NAME_RE
 RESERVED = ("thimble",)
 WS_DIR = "extensions"  # under the workspace: each active extension's copy
@@ -585,7 +587,7 @@ def read_state(c: str | None) -> dict[str, Any]:
             got = read_json(_state_path(c), {})
         except (OSError, ValueError, HTTPException):
             got = {}
-    got = got if isinstance(got, dict) else {}
+    got = _renamed_state(got) if isinstance(got, dict) else {}
     exts = got.get("extensions") if isinstance(got.get("extensions"), dict) else {}
     names = {k: [n for n in _words(got.get(k)) if NAME_RE.match(n)] for k in ("off", "oriented", "declined")}
     shown = got.get("shown") if isinstance(got.get("shown"), dict) else {}
@@ -593,6 +595,30 @@ def read_state(c: str | None) -> dict[str, Any]:
              and k.count("/") == 1}
     return {**names, "shown": shown,
             "extensions": {n: e for n, e in exts.items() if NAME_RE.match(n) and isinstance(e, dict)}}
+
+
+def _renamed_state(got: dict[str, Any]) -> dict[str, Any]:
+    """A workspace's STATE_FILE object with each extension thimble renamed (userconf.renamed_extensions) under its new
+    name: in `off`, `oriented` and `declined`, its views' switches in `shown`, and its entry in `extensions`, where the
+    new name has none of its own."""
+    exts, shown = got.get("extensions"), got.get("shown")
+    named = [*_words(got.get("off")), *_words(got.get("oriented")), *_words(got.get("declined")),
+             *(exts if isinstance(exts, dict) else ()), *(str(k).split("/", 1)[0] for k in
+                                                          (shown if isinstance(shown, dict) else ()))]
+    if not any(n in RENAMED for n in named) or not (names := userconf.renamed_extensions()):
+        return got
+    out = dict(got)
+    for k in ("off", "oriented", "declined"):
+        if k in got:
+            out[k] = list(dict.fromkeys(names.get(n, n) for n in _words(got.get(k))))
+    if isinstance(exts, dict):
+        out["extensions"] = {names.get(n, n): e for n, e in exts.items() if n not in names or names[n] not in exts}
+    if isinstance(shown, dict):
+        def key(k: str) -> str:
+            ext, sep, slug = str(k).partition("/")
+            return f"{names[ext]}/{slug}" if sep and ext in names else k
+        out["shown"] = {key(k): v for k, v in shown.items() if key(k) == k or key(k) not in shown}
+    return out
 
 
 def active(c: str | None) -> list[dict[str, Any]]:
@@ -910,7 +936,8 @@ async def _refresh(c: str) -> dict[str, Any]:
                      "oriented": [n for n in state["oriented"] if n in on],
                      "declined": [n for n in state["declined"] if n in on], "extensions": exts}
         await asyncio.to_thread(write_json, _state_path(c), new_state)
-        for name in sorted(set(state["extensions"]) - set(exts)):
+        old = {n for n in RENAMED if os.path.lexists(workspace_path(c, n))}
+        for name in sorted((set(state["extensions"]) | old) - set(exts)):
             try:
                 gone = unlinked(config.workspace_dir(c), workspace_path(c, name))
             except ValueError as e:
@@ -1681,16 +1708,80 @@ def not_added() -> list[tuple[str, str]]:
     return [(n, _one(_json(d / MANIFEST).get("version"))) for n, d in builtins().items() if n not in have]
 
 
+def foreign(old: str) -> bool:
+    """Whether an added extension has the old name `old` of a built-in thimble renamed (RENAMED) and is not thimble's
+    copy of that built-in, nor a link to the folder thimble shipped it in, so its name and settings stay its own."""
+    dest = source_path(old)
+    if dest.is_symlink():
+        return os.path.realpath(dest) != os.path.realpath(builtin_dir() / old)
+    return dest.is_dir() and _json(dest / ADDED).get("kind") != "built-in"
+
+
+def renamed(name: str) -> str:
+    """The new name of the built-in that thimble renamed from `name` (RENAMED), unless an extension of the analyst's own
+    has that name (foreign); `name` otherwise."""
+    return userconf.renamed_extensions().get(name, name)
+
+
+def _rename_shipped() -> list[str]:
+    """Carry each built-in thimble renamed (RENAMED) over to its new name where it was added under the old one: a copy
+    unchanged since becomes the new version thimble ships, a changed copy keeps the analyst's changes under the new
+    name, and a link to the folder thimble shipped it in links to its new folder; then thimble's config takes the new
+    name (userconf.rename_extensions). An extension of the analyst's own with the old name stays (foreign). Where the
+    new name is added already, an unchanged copy or a link under the old name goes, and a changed copy stays. One that
+    cannot be carried over stays as it is until the next run. Returns the new names carried over."""
+    ships = builtins()
+    out = []
+    for old, new in RENAMED.items():
+        try:
+            if _carry_over(old, new, ships):
+                out.append(new)
+        except OSError as e:
+            log.warning("the extension %s could not be carried over to %s: %s", old, new, e)
+    userconf.rename_extensions(userconf.global_file())
+    return out
+
+
+def _carry_over(old: str, new: str, ships: dict[str, Path]) -> bool:
+    """_rename_shipped for the built-in `old`, now `new`; True when it is carried over."""
+    dest, target = source_path(old), source_path(new)
+    if not (dest.is_symlink() or dest.is_dir()) or foreign(old) or new not in ships:
+        return False
+    rec = _json(_record_file(old))
+    unchanged = dest.is_symlink() or digest(dest)[0] == rec.get("digest")
+    if target.is_symlink() or target.exists():
+        if unchanged:
+            _clear(old)
+        return False
+    now = digest(ships[new])[0]
+    if dest.is_symlink():
+        _clear(old)
+        target.symlink_to(ships[new].resolve(), target_is_directory=True)
+        write_json(_record_file(new), {**rec, "source": str(ships[new].resolve()), "digest": now, "ts": _now()})
+    elif unchanged:
+        copy_tree(ships[new], target)
+        write_json(target / ADDED, {**rec, "source": new, "digest": now, "ts": _now()})
+        _clear(old)
+    else:
+        os.replace(dest, target)
+        manifest = _json(target / MANIFEST)
+        write_json(target / MANIFEST, {**manifest, "name": new})
+        write_json(target / ADDED, {**rec, "source": new})
+    log.info("the extension %s is now %s", old, new)
+    return True
+
+
 def ship() -> list[str]:
-    """Add each built-in of SHIPPED_ON that thimble has not added before, unless the analyst already added it: one the
-    analyst removes stays removed. Then bring each built-in added by name whose copy is unchanged since to the version
-    this thimble ships; one that needs an extension that is not added stays unloaded until it is added. Returns the
-    names added or brought up to date."""
+    """Carry the built-ins thimble renamed over to their new names (_rename_shipped). Add each built-in of SHIPPED_ON
+    that thimble has not added before, unless the analyst already added it: one the analyst removes stays removed. Then
+    bring each built-in added by name whose copy is unchanged since to the version this thimble ships; one that needs an
+    extension that is not added stays unloaded until it is added. Returns the names carried over, added or brought up to
+    date."""
+    out = _rename_shipped()
     base = extensions_dir()
     mark = _json(base / SHIPPED)
     done = [n for n in _words(mark.get("added")) if NAME_RE.match(n)]
     ships = builtins()
-    out = []
     for name in SHIPPED_ON:
         if name in done or name not in ships:
             continue
@@ -1753,7 +1844,8 @@ def off_in(name: str, workspaces_dir: Path | None = None) -> list[str]:
         folders = sorted(d for d in base.iterdir() if d.is_dir() and config._valid_name(d.name))
     except OSError:
         return []
-    return [d.name for d in folders if name in _words(_json(d / kernel_wrap.REGISTRY_DIR / STATE_FILE).get("off"))]
+    return [d.name for d in folders
+            if name in _words(_renamed_state(_json(d / kernel_wrap.REGISTRY_DIR / STATE_FILE)).get("off"))]
 
 
 def orients(e: dict[str, Any]) -> bool:
@@ -1777,7 +1869,7 @@ def list_lines(workspaces_dir: Path) -> list[str]:
         folders = sorted(d for d in workspaces_dir.iterdir() if d.is_dir() and config._valid_name(d.name))
     except OSError:
         folders = []
-    states = {d.name: _json(d / kernel_wrap.REGISTRY_DIR / STATE_FILE) for d in folders}
+    states = {d.name: _renamed_state(_json(d / kernel_wrap.REGISTRY_DIR / STATE_FILE)) for d in folders}
     width = max((len(d.name) for d in folders), default=0)
     out = []
     for name, root in got.items():

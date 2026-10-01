@@ -16,9 +16,9 @@ describe('changedExtensions', () => {
 
 describe('extensionCalls', () => {
   it('adds an extension thimble ships when its switch goes on, and switches the others', () => {
-    const swarm = { ...row, name: 'swarm', on: false, views: [], addable: true }
-    expect(extensionCalls([...loaded, swarm], { a: false, b: true, swarm: true })).toEqual([['a', 'off'], ['b', 'on'], ['swarm', 'add']])
-    expect(extensionCalls([swarm], { swarm: false })).toEqual([])
+    const swarmOrient = { ...row, name: 'swarm-orient', on: false, views: [], addable: true }
+    expect(extensionCalls([...loaded, swarmOrient], { a: false, b: true, 'swarm-orient': true })).toEqual([['a', 'off'], ['b', 'on'], ['swarm-orient', 'add']])
+    expect(extensionCalls([swarmOrient], { 'swarm-orient': false })).toEqual([])
   })
 })
 
@@ -39,21 +39,21 @@ describe('changedLocalViews', () => {
 })
 
 describe('asksToRun', () => {
-  const swarm = { ...row, name: 'swarm', on: false, views: [], orients: true }
+  const swarmOrient = { ...row, name: 'swarm-orient', on: false, views: [], orients: true }
   it('asks when a switch with orientation instructions goes on where an orientation ran', () => {
-    expect(asksToRun(swarm, true, true)).toBe(true)
-    expect(asksToRun(swarm, true, false)).toBe(false)
-    expect(asksToRun(swarm, false, true)).toBe(false)
-    expect(asksToRun({ ...swarm, orients: false }, true, true)).toBe(false)
+    expect(asksToRun(swarmOrient, true, true)).toBe(true)
+    expect(asksToRun(swarmOrient, true, false)).toBe(false)
+    expect(asksToRun(swarmOrient, false, true)).toBe(false)
+    expect(asksToRun({ ...swarmOrient, orients: false }, true, true)).toBe(false)
   })
   it('asks while the server offers it, and never for a locked row', () => {
-    expect(asksToRun({ ...swarm, on: true, offer: true }, true, true)).toBe(true)
-    expect(asksToRun({ ...swarm, on: true, offer: false }, true, true)).toBe(false)
-    expect(asksToRun({ ...swarm, locked: true }, true, true)).toBe(false)
+    expect(asksToRun({ ...swarmOrient, on: true, offer: true }, true, true)).toBe(true)
+    expect(asksToRun({ ...swarmOrient, on: true, offer: false }, true, true)).toBe(false)
+    expect(asksToRun({ ...swarmOrient, locked: true }, true, true)).toBe(false)
   })
   it('sends only the answers of rows that still ask', () => {
-    const data = { extensions: [swarm, { ...swarm, name: 'other' }], conflicts: [], orientation_ran: true }
-    expect(answeredRuns(data, { swarm: true, other: false }, { swarm: true, other: true })).toEqual([['swarm', true]])
+    const data = { extensions: [swarmOrient, { ...swarmOrient, name: 'other' }], conflicts: [], orientation_ran: true }
+    expect(answeredRuns(data, { 'swarm-orient': true, other: false }, { 'swarm-orient': true, other: true })).toEqual([['swarm-orient', true]])
   })
 })
 
@@ -72,17 +72,17 @@ describe('an extension row', () => {
     expect(extensionDetails(broken).some(([, words]) => words === ext.description)).toBe(true)
   })
   it('reads as simply off when thimble ships it and it is not added', () => {
-    const swarm = { ...ext, on: false, addable: true, builtin: true, note: 'Not added', why: 'not added' }
-    expect(extensionLine(swarm)).toBe(ext.description)
+    const swarmOrient = { ...ext, on: false, addable: true, builtin: true, note: 'Not added', why: 'not added' }
+    expect(extensionLine(swarmOrient)).toBe(ext.description)
   })
   it('shows a version only for an extension thimble does not ship', () => {
     expect(extensionVersion({ ...ext, version: '1.2.0', builtin: false })).toBe('1.2.0')
     expect(extensionVersion({ ...ext, version: '0.4.0', builtin: true })).toBe('')
   })
   it('names in its details what turning it on adds with it, while it is not added', () => {
-    const swarm = { ...ext, on: false, addable: true, builtin: true, needs: ['multiagent-swimlane'] }
-    expect(extensionDetails(swarm).some(([, words]) => words.includes('multiagent-swimlane'))).toBe(true)
-    expect(extensionDetails({ ...swarm, addable: false }).some(([, words]) => words.includes('multiagent-swimlane'))).toBe(false)
+    const swarmOrient = { ...ext, on: false, addable: true, builtin: true, needs: ['multiagent-swimlane'] }
+    expect(extensionDetails(swarmOrient).some(([, words]) => words.includes('multiagent-swimlane'))).toBe(true)
+    expect(extensionDetails({ ...swarmOrient, addable: false }).some(([, words]) => words.includes('multiagent-swimlane'))).toBe(false)
   })
 })
 
