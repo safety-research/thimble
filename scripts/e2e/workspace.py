@@ -5,7 +5,7 @@
 Registers the folder with the running server (POST /api/corpora/register, signed as the CLI signs it), saves
 fixture-view/ as a built view of the workspace (views.write_view, as scripts/dev/examples.py saves the worked examples),
 creates a regex label over the JSONL files and applies it through the server's API (no model runs), and prints one JSON
-line: {name, url, view: {slug, ok, error?}, label: {name, ok, counts?, error?}}. Run it in the throwaway environment
+line: {name, url, dir (the workspace's folder), view: {slug, ok, error?}, label: {name, ok, counts?, error?}}. Run it in the throwaway environment
 (THIMBLE_HOME, THIMBLE_PORT) the server runs in.
 """
 import inspect
@@ -16,7 +16,7 @@ from pathlib import Path
 tree, corpus = Path(sys.argv[1]).resolve(), Path(sys.argv[2]).resolve()
 sys.path.insert(0, str(tree / "backend"))
 
-from app import cli, views  # noqa: E402
+from app import cli, config, views  # noqa: E402
 
 FIXTURE = Path(__file__).resolve().parent / "fixture-view"
 SLUG = "record-counts"
@@ -61,7 +61,8 @@ def main() -> int:
         label = apply_label(name)
     except Exception as e:  # noqa: BLE001 — the labels step reports it
         label = {"name": LABEL["name"], "ok": False, "error": f"{type(e).__name__}: {e}"}
-    print(json.dumps({"name": name, "url": cli.ui_url(name), "view": view, "label": label}))
+    print(json.dumps({"name": name, "url": cli.ui_url(name), "dir": str(config.workspace_dir(name)), "view": view,
+                      "label": label}))
     return 0
 
 

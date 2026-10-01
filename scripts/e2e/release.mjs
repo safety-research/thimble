@@ -5,7 +5,7 @@
 // step to $THIMBLE_E2E_RESULTS: {step, title, status, detail, shots, pending?}.
 //   status: pass | fail | skip. A step with `pending` waits for work that is not merged yet; report.py reports its failure
 //   as expected.
-// Environment: THIMBLE_E2E_CLONE (the installed tree), THIMBLE_E2E_CORPUS (the corpus copy), THIMBLE_E2E_WS (what
+// Environment: THIMBLE_E2E_TREE (the tree thimble runs from), THIMBLE_E2E_CORPUS (the corpus copy), THIMBLE_E2E_WS (what
 // workspace.py printed), THIMBLE_E2E_SHOTS, THIMBLE_E2E_RESULTS, THIMBLE_E2E_FIXTURE (the fixture extension's folder).
 import { spawnSync } from 'node:child_process'
 import { appendFileSync, existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
@@ -13,14 +13,14 @@ import { createRequire } from 'node:module'
 import { basename, dirname, join, relative } from 'node:path'
 
 const env = process.env
-const CLONE = env.THIMBLE_E2E_CLONE
+const TREE = env.THIMBLE_E2E_TREE
 const CORPUS = env.THIMBLE_E2E_CORPUS
 const WS = JSON.parse(env.THIMBLE_E2E_WS || '{}')
 const SHOTS = env.THIMBLE_E2E_SHOTS
 const RESULTS = env.THIMBLE_E2E_RESULTS
 const FIXTURE = env.THIMBLE_E2E_FIXTURE
 const OUT = join(SHOTS, '..')
-const require = createRequire(join(CLONE, 'frontend', 'package.json'))
+const require = createRequire(join(TREE, 'frontend', 'package.json'))
 const { chromium } = require('playwright')
 
 const SIZES = [
@@ -66,9 +66,24 @@ class StepError extends Error {
   }
 }
 
+/** End a tour or welcome a failed step left open, which would freeze the page under every later step. */
+async function dismissTour(page) {
+  for (let i = 0; i < 3; i++) {
+    const st = await tourState(page).catch(() => null)
+    if (!st) return
+    const act = ['skip', 'done', 'back'].find((a) => st.acts.includes(a))
+    if (act === 'back' || !act) await page.keyboard.press('Escape')
+    else await page.locator(`.tour-pop [data-tour="${act}"]`).first().click({ timeout: 3_000 }).catch(() => undefined)
+    await page.waitForTimeout(500)
+  }
+}
+
+let currentPage = null
+
 /** Run one step: its function returns {detail, shots} or throws; a step never stops the walk. */
 async function step(name, title, fn) {
   let timer
+  if (currentPage && name !== 'welcome' && name !== 'tour') await dismissTour(currentPage)
   try {
     const res = await Promise.race([
       fn(),
@@ -282,7 +297,7 @@ async function tourState(page) {
   })
 }
 
-/** Unlock a gated step: press a Start inside the tour's example, else ⌘-click the step's cutout. */
+/** Unlock a gated step: press a Start inside the tour's example, else ⌘-click (Ctrl-click off macOS) the step's cutout. */
 async function unlockStep(page, st) {
   const start = await page.evaluate(() => {
     const b = [...document.querySelectorAll('.tour-ex button, .tour-root button')].find((x) => x.textContent?.trim() === 'Start')
@@ -295,12 +310,12 @@ async function unlockStep(page, st) {
   }
   const at = st.hole || { x: SIZES[0].width / 2, y: SIZES[0].height / 2 }
   await page.mouse.move(at.x - 10, at.y)
-  await page.keyboard.down('Meta')
+  await page.keyboard.down('ControlOrMeta')
   await page.mouse.move(at.x, at.y, { steps: 3 })
   await page.mouse.down()
   await page.mouse.up()
   await page.waitForTimeout(250)
-  await page.keyboard.up('Meta')
+  await page.keyboard.up('ControlOrMeta')
   return '⌘-click'
 }
 
@@ -311,6 +326,7 @@ async function main() {
   if (!browser) browser = await chromium.launch()
   const context = await browser.newContext({ viewport: SIZES[0] })
   const page = await context.newPage()
+  currentPage = page
   page.setDefaultTimeout(ACTION_MS)
   const consoleErrors = []
   page.on('console', (m) => m.type() === 'error' && consoleErrors.push(m.text()))
@@ -337,7 +353,8 @@ async function main() {
       const shown = await ask.waitFor({ timeout: 8_000 }).then(() => true, () => false)
       const shots = [await shot(page, 'welcome')]
       if (!shown) throw new StepError('no welcome asking "Would you like a product tour?" on the first launch', shots)
-      const skip = page.locator('.tour-pop [data-tour="skip"]').or(page.getByRole('button', { name: /^(skip|no thanks|not now)/i })).first()
+      const own = page.locator('.tour-pop [data-tour="skip"]')
+      const skip = (await own.count()) ? own.first() : page.getByRole('dialog').getByRole('button', { name: /^(skip|no thanks|not now)/i }).first()
       const label = (await skip.innerText()).trim()
       await skip.click()
       await ask.waitFor({ state: 'detached', timeout: ACTION_MS })
@@ -379,7 +396,8 @@ async function main() {
         }
         const act = st.acts.includes('next') ? 'next' : st.acts.includes('done') ? 'done' : null
         if (act) {
-          await page.locator(`.tour-pop [data-tour="${act}"]`).or(page.locator('.tour-pop button', { hasText: new RegExp(`^${act}$`, 'i') })).first().click()
+          const own = page.locator(`.tour-pop [data-tour="${act}"]`)
+          await ((await own.count()) ? own.first() : page.getByRole('dialog').getByRole('button', { name: new RegExp(`^${act}$`, 'i') }).first()).click()
           if (act === 'done') {
             await page.waitForTimeout(800)
             break
@@ -520,7 +538,7 @@ async function main() {
       const head = page.locator('.view-pane .view-pane-head').first()
       await head.waitFor({ timeout: ACTION_MS })
       const shots = []
-      let listed = (await head.innerText()).includes('broken.jsonl')
+      let listed = (await page.locator('.view-pane').first().innerText()).includes('broken.jsonl')
       let control = ''
       if (!listed) {
         for (const b of await head.locator('button[aria-expanded]').all()) {
@@ -529,9 +547,11 @@ async function main() {
           control = t
           await b.click()
           await page.waitForTimeout(400)
-          listed = (await page.locator('.view-pane-list').allInnerTexts()).some((x) => x.includes('broken.jsonl'))
+          const lists = [await page.locator('.view-pane').first().innerText(), ...(await page.locator('.view-pane-list').allInnerTexts())]
+          listed = lists.some((x) => x.includes('broken.jsonl'))
           shots.push(await shot(page, 'view-residue'))
-          await page.keyboard.press('Escape')
+          if (await page.locator('.view-pane-list').count()) await page.keyboard.press('Escape')
+          else await b.click()
           if (listed) break
         }
       }
@@ -578,7 +598,7 @@ async function main() {
     })
 
     await step('local-views', 'The fixture view is the workspace\'s local extension in Settings > Extensions', async () => {
-      const dir = join(CLONE, 'workspaces', WS.name, 'extension', 'views', VIEW.slug)
+      const dir = join(WS.dir, 'extension', 'views', VIEW.slug)
       const onDisk = existsSync(join(dir, 'view.json'))
       const pop = await openSettings(page)
       const text = await pop.innerText()
@@ -677,7 +697,7 @@ async function main() {
     await step('ext-orient-offer', 'Switching on an extension with orientation instructions offers to run them', async () => {
       check(added, 'the extension was not added')
       // the offer is due only where an orientation ran; with no model here, a run record stands in for one
-      const run = join(CLONE, 'workspaces', WS.name, 'orient', 'run.json')
+      const run = join(WS.dir, 'orient', 'run.json')
       const planted = !existsSync(run)
       if (planted) {
         mkdirSync(dirname(run), { recursive: true })

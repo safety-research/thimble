@@ -2,11 +2,14 @@
 # scripts/e2e_release.sh — the release's end-to-end test: a clean install from a fresh clone, then thimble's UI walked
 # in a headless browser on a copy of a corpus, with a screenshot and a pass or fail for each step.
 #
-#   scripts/e2e_release.sh [--ref REF] [--repo PATH] [--out DIR] [--port N] [--corpus DIR] [--no-plugin]
-#                          [--own-caches] [--strict] [--keep-install]
+#   scripts/e2e_release.sh [--ref REF] [--repo PATH] [--zip | --zip-file ZIP] [--out DIR] [--port N] [--corpus DIR]
+#                          [--no-plugin] [--own-caches] [--strict] [--keep-install]
 #
 #   --ref REF        the branch or commit to clone (default: the branch this checkout has out)
 #   --repo PATH      the git repository to clone it from (default: this checkout)
+#   --zip            install the release zip scripts/release.sh builds from the clone, as a Global install into the
+#                    throwaway THIMBLE_HOME/app, in place of installing the clone itself (a Dev install)
+#   --zip-file ZIP   install this release zip as a Global install; nothing is cloned
 #   --out DIR        where the run goes: report.md, shots/, logs/, and the clone, home and corpus copy it installs
 #                    and runs on (default: a new folder under $TMPDIR). It must be empty or missing
 #   --port N         the server's port (default 8470); N+1 is its UI port, which only dev mode listens on
@@ -17,8 +20,8 @@
 #   --strict         count a failing step that waits for unmerged work (`pending` in the report) as a failure
 #   --keep-install   leave the clone and the throwaway home in --out (the report, shots and logs always stay)
 #
-# Steps: clone REF into <out>/clone; install it with install.sh's flags, non-interactive, into a throwaway HOME and
-# THIMBLE_HOME (<out>/home, never the caller's ~/.claude or ~/.thimble); `thimble doctor`; copy the corpus to
+# Steps: clone REF into <out>/clone; install it (or the zip) with install.sh's flags, non-interactive, into a throwaway
+# HOME and THIMBLE_HOME (<out>/home, never the caller's ~/.claude or ~/.thimble); `thimble doctor`; copy the corpus to
 # <out>/corpus, add a few files the UI steps open (a chat log in Markdown, one in CSV, a PDF) and a fixture view;
 # start the server and a stand-in for the analyst's Claude Code session (scripts/e2e/standin_session.py: no model runs);
 # walk the UI (scripts/e2e/release.mjs): the first-launch welcome and the tour, the File browser, a transcript, a PDF, the
@@ -35,11 +38,13 @@ die() { printf 'e2e_release.sh: %s\n' "$*" >&2; exit 2; }
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 src="$(cd "$here/.." && pwd -P)"
-ref="" repo="" out="" port=8470 corpus="" plugin="" own_caches=0 strict=0 keep_install=0
+ref="" repo="" out="" port=8470 corpus="" plugin="" own_caches=0 strict=0 keep_install=0 zip=0 zip_file=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --ref) ref="$2"; shift 2;;
     --repo) repo="$2"; shift 2;;
+    --zip) zip=1; shift;;
+    --zip-file) zip_file="$2"; shift 2;;
     --out) out="$2"; shift 2;;
     --port) port="$2"; shift 2;;
     --corpus) corpus="$2"; shift 2;;
@@ -52,9 +57,15 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-repo="$(cd "${repo:-$src}" && git rev-parse --show-toplevel)" || die "--repo ${repo:-$src} is not a git checkout"
-[ -n "$ref" ] || ref="$(git -C "$repo" symbolic-ref --short -q HEAD || git -C "$repo" rev-parse HEAD)"
-commit="$(git -C "$repo" rev-parse --verify -q "$ref^{commit}")" || die "no commit $ref in $repo"
+if [ -n "$zip_file" ]; then
+  [ -f "$zip_file" ] || die "--zip-file $zip_file is not a file"
+  zip_file="$(cd "$(dirname "$zip_file")" && pwd -P)/$(basename "$zip_file")"
+  ref="$(basename "$zip_file" .zip)" commit="$(unzip -p "$zip_file" '*/RELEASE.json' 2>/dev/null | python3 -I -c 'import json,sys; print(json.load(sys.stdin).get("commit", ""))' 2>/dev/null || true)"
+else
+  repo="$(cd "${repo:-$src}" && git rev-parse --show-toplevel)" || die "--repo ${repo:-$src} is not a git checkout"
+  [ -n "$ref" ] || ref="$(git -C "$repo" symbolic-ref --short -q HEAD || git -C "$repo" rev-parse HEAD)"
+  commit="$(git -C "$repo" rev-parse --verify -q "$ref^{commit}")" || die "no commit $ref in $repo"
+fi
 case "$port" in ''|*[!0-9]*) die "--port takes a number";; esac
 command -v node >/dev/null || die "node is required"
 command -v python3 >/dev/null || die "python3 is required"
@@ -68,6 +79,9 @@ for p in "$port" $((port + 1)); do
 done
 
 clone="$out/clone" home="$out/home" logs="$out/logs" shots="$out/shots" results="$out/results.jsonl"
+# the tree thimble runs from: the clone itself, or the Global install a zip makes
+tree="$clone"
+if [ "$zip" = 1 ] || [ -n "$zip_file" ]; then tree="$home/.thimble/app"; fi
 mkdir -p "$home" "$logs" "$shots"
 : > "$results"
 started="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -100,10 +114,10 @@ envs=(env -i "PATH=$home/.local/bin:$PATH" "HOME=$home" "THIMBLE_HOME=$home/.thi
 in_env() { "${envs[@]}" "$@"; }
 
 ours() {  # the processes this run started that may still run: the server's session (it starts as its own session
-  # leader) and anything running from the clone or the throwaway home
+  # leader) and anything running from the clone, the unzipped release or the throwaway home
   local sid="$1"
   { [ -z "$sid" ] || ps -eo pid=,sid= | awk -v s="$sid" '$2 == s {print $1}'
-    pgrep -f -- "$clone/" || true; pgrep -f -- "$home/" || true; } | sort -u | grep -vx "$$" || true
+    pgrep -f -- "$clone/" || true; pgrep -f -- "$home/" || true; pgrep -f -- "$out/release/" || true; } | sort -u | grep -vx "$$" || true
 }
 
 cleanup() {
@@ -111,8 +125,8 @@ cleanup() {
   set +e
   if [ -n "$standin_pid" ]; then kill "$standin_pid" 2>/dev/null; wait "$standin_pid" 2>/dev/null; fi
   sid="$(sed -n 's/.*"pid": *\([0-9][0-9]*\).*/\1/p' "$home/.thimble/server.json" 2>/dev/null | head -n 1)"
-  if [ -x "$clone/plugin/bin/thimble" ]; then
-    (cd "$out" && in_env "$clone/plugin/bin/thimble" server stop --yes) > "$logs/stop.log" 2>&1
+  if [ -x "$tree/plugin/bin/thimble" ]; then
+    (cd "$out" && in_env "$tree/plugin/bin/thimble" server stop --yes) > "$logs/stop.log" 2>&1
   fi
   left="$(ours "$sid")"
   for pid in $left; do kill "$pid" 2>/dev/null; done
@@ -121,7 +135,7 @@ cleanup() {
   left="$(ours "$sid" | tr '\n' ' ')"
   if [ -z "${left// /}" ]; then record cleanup pass "no process of this run is left"
   else record cleanup fail "still running: $left"; fi
-  if [ "$keep_install" = 0 ]; then rm -rf "$clone" "$home"; fi
+  if [ "$keep_install" = 0 ]; then rm -rf "$clone" "$home" "$out/release"; fi
   python3 -I "$here/e2e/report.py" "$results" "$out/report.md" --ref "$ref" --commit "$commit" --started "$started" \
     --seconds "$((SECONDS - t0))" $([ "$strict" = 1 ] && echo --strict)
   local verdict=$?
@@ -132,23 +146,39 @@ cleanup() {
 trap cleanup EXIT
 trap 'exit 130' INT TERM
 
-say "thimble $ref ($commit) from $repo → $out"
+say "thimble $ref (${commit:-no commit recorded}) from ${zip_file:-$repo} → $out"
 
-# 1. a fresh clone
-if git -C "$repo" show-ref --verify -q "refs/heads/$ref"; then
-  git clone -q --branch "$ref" --single-branch "$repo" "$clone" > "$logs/clone.log" 2>&1
-else
-  git clone -q "$repo" "$clone" > "$logs/clone.log" 2>&1 && git -C "$clone" checkout -q --detach "$commit"
+# 1. a fresh clone, and the release zip when one is asked for
+if [ -z "$zip_file" ]; then
+  if git -C "$repo" show-ref --verify -q "refs/heads/$ref"; then
+    git clone -q --branch "$ref" --single-branch "$repo" "$clone" > "$logs/clone.log" 2>&1
+  else
+    git clone -q "$repo" "$clone" > "$logs/clone.log" 2>&1 && git -C "$clone" checkout -q --detach "$commit"
+  fi
+  if [ "$(git -C "$clone" rev-parse HEAD 2>/dev/null)" = "$commit" ]; then record clone pass "$(git -C "$clone" log -1 --format='%h %s')"
+  else record clone fail "see logs/clone.log"; exit 1; fi
 fi
-if [ "$(git -C "$clone" rev-parse HEAD 2>/dev/null)" = "$commit" ]; then record clone pass "$(git -C "$clone" log -1 --format='%h %s')"
-else record clone fail "see logs/clone.log"; exit 1; fi
+if [ "$zip" = 1 ]; then
+  if (cd "$clone" && in_env bash scripts/release.sh --out "$out/release") > "$logs/release.log" 2>&1 \
+     && zip_file="$(ls "$out"/release/thimble-*.zip 2>/dev/null | head -n 1)" && [ -n "$zip_file" ]; then
+    record zip pass "$(basename "$zip_file") from scripts/release.sh"
+  else
+    record zip fail "scripts/release.sh made no zip (logs/release.log)"; exit 1
+  fi
+fi
+src_tree="$clone"
+if [ -n "$zip_file" ]; then
+  mkdir -p "$out/release/unzipped"
+  unzip -q "$zip_file" -d "$out/release/unzipped" || { record zip fail "could not unzip $zip_file"; exit 1; }
+  src_tree="$(ls -d "$out"/release/unzipped/thimble-* | head -n 1)"
+fi
 
 # 2. install.sh, every question answered by its flag
 if [ -z "$plugin" ]; then if command -v claude >/dev/null; then plugin=yes; else plugin=no; fi; fi
 flags=(--browser bundled --no-sandbox-deps --trust-workspaces "--$([ "$plugin" = yes ] && echo plugin || echo no-plugin)")
-if (cd "$clone" && in_env bash scripts/install.sh "${flags[@]}") < /dev/null > "$logs/install.log" 2>&1; then
-  if [ -L "$home/.local/bin/thimble" ] && [ -f "$clone/frontend/dist/index.html" ] && [ -x "$clone/backend/.venv/bin/python" ]; then
-    record install pass "install.sh ${flags[*]}"
+if (cd "$src_tree" && in_env bash scripts/install.sh "${flags[@]}") < /dev/null > "$logs/install.log" 2>&1; then
+  if [ -L "$home/.local/bin/thimble" ] && [ -f "$tree/frontend/dist/index.html" ] && [ -x "$tree/backend/.venv/bin/python" ]; then
+    record install pass "install.sh ${flags[*]}$([ "$tree" = "$clone" ] && echo ', a Dev install of the clone' || echo ", a Global install at home/.thimble/app")"
   else
     record install fail "install.sh exited 0 without ~/.local/bin/thimble, frontend/dist or backend/.venv; see logs/install.log"; exit 1
   fi
@@ -156,17 +186,17 @@ else
   record install fail "install.sh exited non-zero; see logs/install.log"; exit 1
 fi
 if [ "$plugin" = yes ]; then
-  if grep -q '"thimble@thimble"' "$home/.claude/settings.json" 2>/dev/null; then record plugin pass "thimble@thimble in the throwaway ~/.claude/settings.json"
-  else record plugin fail "install.sh --plugin left no thimble@thimble in the throwaway ~/.claude/settings.json"; fi
+  if grep -q '"thimble@thimble' "$home/.claude/settings.json" 2>/dev/null; then record plugin pass "thimble's plugin in the throwaway ~/.claude/settings.json"
+  else record plugin fail "install.sh --plugin left no thimble plugin in the throwaway ~/.claude/settings.json"; fi
 fi
 
 # 3. thimble doctor
 if (cd "$out" && in_env thimble doctor) > "$logs/doctor.txt" 2>&1; then
   missing=""
-  grep -q "^  versions: thimble git" "$logs/doctor.txt" || missing="$missing versions"
-  grep -q "^  ui: .*the built UI at $clone/frontend/dist" "$logs/doctor.txt" || missing="$missing ui"
+  grep -q "^  versions: thimble " "$logs/doctor.txt" || missing="$missing versions"
+  grep -q "^  ui: .*the built UI at $tree/frontend/dist" "$logs/doctor.txt" || missing="$missing ui"
   grep -q "^  home: $home/.thimble (THIMBLE_HOME)" "$logs/doctor.txt" || missing="$missing home"
-  grep -q "^  python: $clone/backend/.venv" "$logs/doctor.txt" || missing="$missing python"
+  grep -q "^  python: $tree/backend/.venv" "$logs/doctor.txt" || missing="$missing python"
   if [ -z "$missing" ]; then record doctor pass "logs/doctor.txt; $(grep -m1 '^  auth:' "$logs/doctor.txt" | sed 's/^ *//')"
   else record doctor fail "doctor's lines missing or wrong:$missing (logs/doctor.txt)"; fi
 else
@@ -180,25 +210,25 @@ if [ -n "$corpus" ]; then
   cp -R "$corpus" "$work"
 else
   work="$out/corpus/toy-incident"
-  python3 -I "$clone/scripts/dev/make_toy_corpus.py" --out "$work" > "$logs/corpus.log" 2>&1
+  python3 -I "$src/scripts/dev/make_toy_corpus.py" --out "$work" > "$logs/corpus.log" 2>&1
 fi
 python3 -I "$here/e2e/extra_files.py" "$work" >> "$logs/corpus.log" 2>&1
 record corpus pass "$(find "$work" -type f | wc -l | tr -d ' ') files in a copy at corpus/$(basename "$work")"
 
 # 5. the server, the workspace and the stand-in session
 if (cd "$work" && in_env thimble server up) > "$logs/server-up.log" 2>&1 && grep -q "^thimble: http" "$logs/server-up.log"; then
-  ws="$(cd "$clone/backend" && in_env "$clone/backend/.venv/bin/python" -I "$here/e2e/workspace.py" "$clone" "$work" 2> "$logs/workspace.log")" || ws=""
+  ws="$(cd "$tree/backend" && in_env "$tree/backend/.venv/bin/python" -I "$here/e2e/workspace.py" "$tree" "$work" 2> "$logs/workspace.log")" || ws=""
   if [ -n "$ws" ]; then record server pass "the server on port $port, workspace $(printf '%s' "$ws" | python3 -I -c 'import json,sys; print(json.load(sys.stdin)["name"])')"
   else record server fail "the workspace was not registered (logs/workspace.log)"; exit 1; fi
 else
   record server fail "thimble server up printed no URL (logs/server-up.log)"; exit 1
 fi
-in_env "$clone/backend/.venv/bin/python" -I "$here/e2e/standin_session.py" "$clone" "$work" > "$logs/standin.log" 2>&1 &
+in_env "$tree/backend/.venv/bin/python" -I "$here/e2e/standin_session.py" "$tree" "$work" > "$logs/standin.log" 2>&1 &
 standin_pid=$!
 
 # 6. the UI, the extension commands among its steps
 ui=0
-(cd "$out" && in_env THIMBLE_E2E_CLONE="$clone" THIMBLE_E2E_CORPUS="$work" THIMBLE_E2E_WS="$ws" \
+(cd "$out" && in_env THIMBLE_E2E_TREE="$tree" THIMBLE_E2E_CORPUS="$work" THIMBLE_E2E_WS="$ws" \
   THIMBLE_E2E_SHOTS="$shots" THIMBLE_E2E_RESULTS="$results" THIMBLE_E2E_FIXTURE="$here/e2e/fixture-extension" \
   node "$here/e2e/release.mjs") > "$logs/ui.log" 2>&1 || ui=$?
 [ "$ui" = 0 ] || say "the UI walk exited $ui (logs/ui.log)"
