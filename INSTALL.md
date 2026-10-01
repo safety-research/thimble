@@ -137,7 +137,8 @@ that one and prints each path it deleted. The folder it read and your Claude Cod
   session's settings as they are, and `thimble doctor` says when that sandbox is on.
 - thimble warns that Claude Code does not trust its workspaces folder: the orientation, its critic, the writers and
   view builds can't start until it does, while your own session keeps working. Run the command the warning gives,
-  `bash <install dir>/scripts/install.sh --trust-workspaces`.
+  `bash <install dir>/scripts/install.sh --trust-workspaces`. Claude Code reads trust only up to the root of a git
+  clone, so a trusted folder above a Dev install's clone doesn't count.
 - Cards are not checked, views are checked without loading their page, or screenshots are unavailable: there is no
   browser (the install's answer, or no Chrome or Edge found), or the machine lacks the headless Chromium's system
   libraries. thimble never downloads a browser by itself. `install.sh --browser system` or `--browser bundled` sets one
