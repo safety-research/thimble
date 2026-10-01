@@ -18,6 +18,7 @@ import { callLineText } from '../chat/model'
 import { pointKeyHeld } from '../lib/platform'
 import { cardPartLabel, cellSpanLabel, decodeLabel, hiddenPath, isEvidenceRef, parseRef, refLabel, shownValue } from '../lib/refs'
 import { CITED, cellShown, cellWindow, citedLines, findCell, locateCell, readTable, restoreScroll, scrollWithin, valueSpan, visibleWithin, type At, type Grid, type Scrolled } from '../lib/tableCell'
+import { quoteSpanRef } from '../lib/quoteFind'
 import { teleport } from '../lib/teleport'
 import type { Cell, ResolvedRef } from '../lib/types'
 import { workspaceFromUrl } from '../lib/workspace'
@@ -297,6 +298,20 @@ export function RefChip({ ref, value, compact, workspace, broken, brokenWhy, qui
     return null
   }
 
+  // the record behind an inline citation, kept from its hover, so a click can open it at the words the citation quotes
+  const resolved = useRef<ResolvedRef | null>(null)
+  /** Where a click opens: the span of the words in quotation marks in the citation's text (else of its whole text)
+   * inside the record it cites, when the record holds them; the ref itself otherwise. */
+  const clickTarget = async (): Promise<string> => {
+    if (!value || parsed?.kind !== 'record' || !ws) return ref
+    try {
+      resolved.current ??= await api.resolveRef(ws, ref)
+      return quoteSpanRef(resolved.current, value) ?? ref
+    } catch {
+      return ref
+    }
+  }
+
   const cancelHide = () => window.clearTimeout(hideTimer.current)
   const scheduleHide = () => {
     cancelHide()
@@ -342,6 +357,7 @@ export function RefChip({ ref, value, compact, workspace, broken, brokenWhy, qui
     }
     try {
       const r = await api.resolveRef(ws, ref)
+      resolved.current = r
       if (seq !== reqSeq.current) return
       if (parsed.kind === 'cell' && parsed.col != null && parsed.row != null) {
         // a table's cell: the table around it, never its column and row in words
@@ -395,7 +411,7 @@ export function RefChip({ ref, value, compact, workspace, broken, brokenWhy, qui
     unmark()
     if (unresolved) return
     if (home && openCited(home, ref)) return
-    teleport(ref)
+    void clickTarget().then((to) => teleport(to))
   }
 
   const kind = asText ? undefined : parsed?.kind

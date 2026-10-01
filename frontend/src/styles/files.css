@@ -1721,9 +1721,20 @@
   gap: 0 12px;
   padding: 1px 16px 1px 8px;
 }
+/* the number stays at the top of the view while a line taller than it scrolls past, so a long record's number shows */
 .reader-line > .reader-lineno {
+  position: sticky;
+  top: 0;
+  align-self: start;
   color: var(--text-placeholder);
   line-height: 1.75;
+}
+/* the record a followed ref names keeps an edge and its number in the ink after the wash fades */
+.reader-line.reader-target {
+  box-shadow: inset 2px 0 0 var(--hl-edge);
+}
+.reader-line.reader-target > .reader-lineno {
+  color: var(--text-primary);
 }
 .reader-card-body {
   min-width: 0;
@@ -2038,6 +2049,25 @@
   100% {
     box-shadow: inset 0 0 0 100vmax transparent;
   }
+}
+/* the row a followed ref names keeps an edge on its number after the wash fades */
+.reader-table-row.reader-target td.reader-table-gutter {
+  box-shadow: inset 2px 0 0 var(--hl-edge);
+  color: var(--text-primary);
+}
+/* the cell holding the words a followed ref quotes shows them over a few lines, the words highlighted (.hl) */
+.reader-table .reader-table-cell.cited .reader-table-clip {
+  display: -webkit-box;
+  max-width: 44ch;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 6;
+  line-clamp: 6;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  color: var(--text-primary);
+}
+.reader-table-row.reader-target td {
+  vertical-align: top;
 }
 /* the pinned line-number cell mixes the row's tint or hover into the paper, so the columns under it do not show
    through */
