@@ -3,8 +3,9 @@
 // Drawn with the app's stylesheets and Hanken Grotesk in headless Chromium, with six tabs and each in turn open, it
 // proves with getBoundingClientRect that every tab shown and the button of the menu that holds the others lie inside
 // the strip, before the bar's own buttons; the open tab's name shows whole; every other tab shown is at least
-// TAB_MIN_PX wide or shows its whole name; the menu lists exactly the tabs not shown and opens one; and the × of a tab
-// other than the open one shows on hover without changing any tab's width.
+// TAB_MIN_PX wide or shows its whole name; the menu lists exactly the tabs not shown and opens one; the × of a tab
+// other than the open one shows on hover without changing any tab's width; and with thirty tabs open nothing around the
+// strip can scroll sideways.
 import assert from 'node:assert/strict'
 import { existsSync, readFileSync } from 'node:fs'
 import path from 'node:path'
@@ -15,7 +16,7 @@ import { bundle, cleanup, launch, ORIGIN, src } from './page.ts'
 let browser: Browser
 let page: Page
 
-const TABS = ['README.md', 'chat_messages.jsonl', 'claude_code_messages.jsonl', 'computer_use_turns.jsonl', 'village-transcript.jsonl', 'notes/day1/NOTES.md']
+const TABS = ['README.md', 'chat_messages.jsonl', 'claude_code_messages.jsonl', 'computer_use_turns.jsonl', 'session-transcript.jsonl', 'notes/day1/NOTES.md']
 const MIME: Record<string, string> = { '.js': 'text/javascript', '.css': 'text/css', '.woff2': 'font/woff2', '.woff': 'font/woff' }
 
 beforeAll(async () => {
@@ -139,7 +140,7 @@ for (const [label, width] of [['1440x900', 845], ['1920x1080', 1325], ['1100 wid
 }
 
 test('the menu lists the tabs not shown and opens one, which then shows whole', async () => {
-  await page.evaluate(([w, paths, f]) => (window as any).__bar(w, paths, f), [845, TABS, 'village-transcript.jsonl'] as const)
+  await page.evaluate(([w, paths, f]) => (window as any).__bar(w, paths, f), [845, TABS, 'session-transcript.jsonl'] as const)
   await frames(3)
   const before = await page.evaluate(GEO)
   const shown = new Set(before.tabs.map((t) => t.name))
@@ -173,4 +174,20 @@ test('the × of a tab other than the open one shows on hover, over its name, and
   assert.equal(x0, '0', 'hidden until hover')
   assert.ok(got.opacity === '1' && got.inside, `the × shows inside the tab ${JSON.stringify(got)}`)
   assert.deepEqual(await widths(), before, 'no tab changes width on hover')
+})
+
+test('with thirty tabs open nothing around the strip overflows sideways, so no pane can be scrolled to the hidden copy', async () => {
+  const many = Array.from({ length: 30 }, (_, i) => `runs/r1/messages-${i + 1}.jsonl`)
+  await page.evaluate(([w, paths, f]) => (window as any).__bar(w, paths, f), [845, many, many[2]] as const)
+  await frames(3)
+  const over = await page.evaluate(() => {
+    const out: string[] = []
+    for (let p = document.querySelector('.reader-tabs-wrap')!.parentElement; p && p !== document.body; p = p.parentElement) {
+      if (p.scrollWidth > p.clientWidth + 1) out.push(`${p.className}: ${p.scrollWidth} > ${p.clientWidth}`)
+    }
+    return out
+  })
+  assert.deepEqual(over, [], 'no box around the strip is wider inside than it shows')
+  const g = await page.evaluate(GEO)
+  assert.ok(g.more && g.more.inside && g.tabs.every((t) => t.inside), `the strip and its menu button fit ${JSON.stringify(g.more)}`)
 })

@@ -1120,13 +1120,15 @@
 }
 /* the file tabs take the bar's free room (the spacer after them gives way); tabs that do not fit narrow, names cut with
    an ellipsis, all but the open one, whose name shows up to its max-width; past their narrowest the last ones go in the
-   menu at the strip's end (FilesTab ReaderTabs) */
+   menu at the strip's end (FilesTab ReaderTabs); clipped, so the hidden copy of the strip, wider than the bar when many
+   tabs are open, leaves the panes around it nothing to scroll */
 .reader-tabs-wrap {
   position: relative;
   display: flex;
   flex: 1 1 0;
   align-items: stretch;
   min-width: 0;
+  overflow: clip;
 }
 .reader-tabs-wrap + .reader-spacer {
   display: none;
