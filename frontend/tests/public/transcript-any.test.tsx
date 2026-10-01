@@ -3,7 +3,8 @@
 // log reads as turns whose lines keep their own records, and a PDF ref opens at its page
 // (src/files/views/transcript.tsx, src/files/views/registry.ts, src/files/Reader.tsx).
 import { afterEach, describe, expect, test } from 'vitest'
-import { pdfPage } from '../../src/files/Reader.tsx'
+import { pdfPage, Reader } from '../../src/files/Reader.tsx'
+import type { FilesLabels } from '../../src/files/useLabels.ts'
 import { segmentsFor, segmentsFrom } from '../../src/files/views/common.tsx'
 import { pickView, scoreViews } from '../../src/files/views/registry.ts'
 import transcript, { chatTurns, nameOf, pick, shownLines, textOf, timeOf } from '../../src/files/views/transcript.tsx'
@@ -108,5 +109,16 @@ describe('a PDF ref', () => {
     expect(pdfPage('docs/a.pdf', 'docs/a.pdf')).toBeNull()
     expect(pdfPage('docs/b.pdf#p3', 'docs/a.pdf')).toBeNull()
     expect(pdfPage('docs/a.pdf#p0', 'docs/a.pdf')).toBeNull()
+  })
+  test('the File browser shows the PDF itself in the browser’s viewer, at the page, or says the browser cannot', async () => {
+    const show = async (inPage: boolean) => {
+      Object.defineProperty(navigator, 'pdfViewerEnabled', { value: inPage, configurable: true })
+      return mount(<Reader workspace="w" path="docs/a b.pdf" kind="text" targetRef="docs/a b.pdf#p3" labels={{} as FilesLabels} lead={<span />} />)
+    }
+    const frame = (await show(true)).querySelector('iframe.reader-pdf-frame')
+    expect(frame?.getAttribute('src')).toBe('/api/corpora/w/pdf/docs/a%20b.pdf#page=3')
+    const none = await show(false)
+    expect(none.querySelector('iframe')).toBeNull()
+    expect(none.textContent).toContain('Open the PDF')
   })
 })

@@ -198,11 +198,16 @@ export function pdfPage(ref: string | undefined, path: string): number | null {
   return n >= 1 ? n : null
 }
 
+/** Whether the browser draws a PDF in the page; one that would only download it says so (navigator.pdfViewerEnabled). */
+export const pdfInPage = (): boolean => typeof navigator === 'undefined' || (navigator as { pdfViewerEnabled?: boolean }).pdfViewerEnabled !== false
+
 /** A PDF of the corpus as itself, in the browser's own viewer, opened at the page a ref names. The frame is drawn anew
- * for each page asked for, since a viewer reads the page only when it opens the file. */
+ * for each page asked for, since a viewer reads the page only when it opens the file. A browser that would only
+ * download it gets a line saying so and a link to the file in place of the frame. */
 function PdfReader({ workspace, path, targetRef, lead, end, onMode }: ReaderProps) {
   const page = pdfPage(targetRef, path)
   const src = api.pdfUrl(workspace, path, page)
+  const inPage = pdfInPage()
   useEffect(() => {
     onMode?.('PDF')
   }, [onMode])
@@ -215,9 +220,18 @@ function PdfReader({ workspace, path, targetRef, lead, end, onMode }: ReaderProp
           {end}
         </div>
       )}
-      <div className="reader-pdf" data-body="">
-        <iframe key={src} src={src} title={path} className="reader-pdf-frame" />
-      </div>
+      {inPage ? (
+        <div className="reader-pdf" data-body="">
+          <iframe key={src} src={src} title={path} className="reader-pdf-frame" />
+        </div>
+      ) : (
+        <div className="reader-noview">
+          <div className="reader-noview-reason dim">This browser does not show PDFs in a page.</div>
+          <Button size="sm" onClick={() => window.open(src, '_blank', 'noopener')}>
+            Open the PDF
+          </Button>
+        </div>
+      )}
     </div>
   )
 }
