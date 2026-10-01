@@ -136,6 +136,8 @@ def test_the_event_log_is_read_on_from_where_it_was_left(workspaces_tmp, monkeyp
         for i in range(n):
             investigation.emit(c, investigation.MAIN, {"type": "chat", "chat": f"x{i}"})
 
+    asyncio.run(emit_some(1))
+    tails.clear()
     asyncio.run(emit_some(30))
     assert len(tails) == 0, "records of this process alone read no tail"
     log = investigation.inv_dir(c, investigation.MAIN) / "events.jsonl"
