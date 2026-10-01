@@ -61,7 +61,7 @@ async def test_an_unanswered_request_is_denied_after_the_wait_and_its_card_says_
     was clicked, as many as the card says it listed; a later one is asked on its own."""
     chat = _chat()
     heard: list[dict] = []
-    agent_session.host(CORPUS, KEY, chat, agent="views", wait_s=0.1, on_expired=lambda run, entry: heard.append(entry))
+    run = agent_session.host(CORPUS, KEY, chat, agent="views", wait_s=0.1, on_expired=lambda run, entry: heard.append(entry))
     one = _request("WebFetch", PAGE)
     await _waiting(chat)
     two = _request("WebFetch", OTHER_PAGE)
@@ -78,6 +78,7 @@ async def test_an_unanswered_request_is_denied_after_the_wait_and_its_card_says_
     assert not agent_session.answer(CORPUS, chat, p["id"], False)
     log = [json.loads(ln) for ln in (config.workspace_dir(CORPUS) / agents.PERMISSIONS_LOG).read_text().splitlines()]
     assert log[-1]["answer"] == "deny: nobody answered in time"
+    run.wait_s = 10  # a request still waiting when its session ends, however slowly the test runs
     waiting = _request("Bash", {"command": "curl example.org"})
     await _waiting(chat)
     assert agent_session.asking(CORPUS, KEY)
