@@ -41,7 +41,6 @@
 
   #ds { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 12px; padding: 14px 16px 0; }
   #ds h1 { margin: 0; min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 500 var(--text-lg) / 1.3 var(--font-body); }
-  #ds .stats { font-size: var(--text-ui-sm); color: var(--text-tertiary); white-space: nowrap; }
   #ds b, .counts b, .legend b { font-weight: 500; color: var(--text-primary); font-variant-numeric: tabular-nums; }
   #bar { padding: 12px 16px 0; border-bottom: 1px solid var(--border-subtle); }
   .r1, .r2 { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
@@ -90,9 +89,6 @@
   .pal button.cur { box-shadow: 0 0 0 2px var(--surface-card), 0 0 0 3.5px var(--text-primary); }
 
   #ov { padding: 0 16px; }
-  .chip-x { gap: 6px; padding-right: 5px; }
-  .chip-x .run { color: var(--text-tertiary); }
-  .chip-x .x { display: inline-flex; cursor: pointer; }
   .lanes { position: relative; display: flex; }
   .rowbg { position: absolute; left: -16px; right: -16px; }
   .rowbg.hl { background: var(--surface-selected); }
@@ -229,15 +225,10 @@
   .r2 { padding: 8px 0 10px; }
   .chip-sans .ico-f { width: 12px; height: 12px; color: var(--text-tertiary); margin-right: -1px; }
   .cc { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; }
-  .lg .nm2 { cursor: pointer; }
   .menu .mh.cap { padding: 8px 8px 4px; }
   .mi .nm.lk { cursor: pointer; }
   .mi .nm.lk:hover { text-decoration: underline; text-decoration-color: var(--border-strong); text-underline-offset: 3px; }
   .mi .ck.tog { cursor: pointer; }
-  .lp { display: flex; align-items: center; gap: 6px; padding: 6px 6px 4px 8px; }
-  .lp .field { flex: 1; height: 28px; }
-  .lp .send { display: inline-grid; place-items: center; width: 28px; height: 28px; border-radius: var(--radius-ui); border: 1px solid var(--border-strong); background: var(--surface-card); color: var(--accent); cursor: pointer; }
-  .lp .send .ico { width: 14px; height: 14px; stroke-width: 1.8; }
   .more { min-width: 280px; max-width: 300px; }
   .more .sec2 { padding: 2px 4px 6px; }
   .more .rng { display: flex; align-items: center; gap: 8px; padding: 4px 8px 6px; font-size: var(--text-ui-sm); color: var(--text-secondary); }
@@ -255,7 +246,6 @@
   .dhead h2 .fchip { margin-left: 2px; }
   #side .dhead { gap: 6px 10px; }
   .dhead .grp .chip .ico-s { color: var(--text-tertiary); }
-  .dstats .sepd { color: var(--text-placeholder); }
   .cd-status { font: 400 var(--text-mono-sm) / 1 var(--font-mono); color: var(--text-tertiary); }
   .cd-status.err { color: var(--status-negative); }
   .cd-status.den { color: var(--status-warning); }
@@ -485,9 +475,9 @@ function legend() {
     classes().forEach((c, i) => {
       const l = labelBy(c.label), key = classKey(c)
       const multi = l && (l.values || []).filter((v) => v.highlight !== false).length > 1
-      out.push(`<span class="lg ${st.hide.has(key) ? 'off' : ''}" role="button" data-act="legend" data-v="${esc(key)}" data-label="${esc((l && l.id) || '')}" title="Click: only this · Option-click: hide">${swatchButton(c.label, c.value, classColour(i))}${esc(multi ? `${c.label}: ${c.value}` : c.label)}<span class="n">${c.n}</span></span>`)
+      out.push(`<span class="lg ${st.hide.has(key) ? 'off' : ''}" role="button" data-act="legend" data-v="${esc(key)}" data-label="${esc((l && l.id) || '')}" title="Click: only this · Shift-click: hide">${swatchButton(c.label, c.value, classColour(i))}${esc(multi ? `${c.label}: ${c.value}` : c.label)}<span class="n">${c.n}</span></span>`)
     })
-    if (ov.none || st.hide.has('none')) out.push(`<span class="lg ${st.hide.has('none') ? 'off' : ''}" role="button" data-act="legend" data-v="none" title="Click: only this · Shift-click: hide"><i class="sw" style="background:${UNMARKED}"></i>no label<span class="n">${ov.none}</span></span>`)
+    if (ov.none || st.hide.has('none')) out.push(`<span class="lg ${st.hide.has('none') ? 'off' : ''}" role="button" data-act="legend" data-v="none" title="Click: only this · Shift-click: hide"><i class="sw" style="background:${UNMARKED}"></i>No label<span class="n">${ov.none}</span></span>`)
     if (st.hide.size) out.push('<button class="btn btn-ghost btn-sm" data-act="showall">Show all</button>')
   } else {
     const hid = st.filters[st.field] || new Set()

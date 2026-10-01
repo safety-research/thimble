@@ -447,7 +447,7 @@
   const valueName = (f, v) => (v === '' ? `no ${FIELD_NAMES[f].toLowerCase()}` : String(v))
   // a record's part (reader.py _part) as a colour and a name
   const partColour = (p) => (labelOn() ? (p >= 0 ? classColour(p) : 'var(--viz-ink-4)') : valueColour(field(), p))
-  const partName = (p) => (labelOn() ? (p >= 0 ? className(p) : 'no label') : valueName(field(), p))
+  const partName = (p) => (labelOn() ? (p >= 0 ? className(p) : 'No label') : valueName(field(), p))
   // the actions' own colours stand on the icons only while the records are coloured by activity; the states' while
   // they are coloured by activity or state
   const actionInk = () => labelOn() || field() !== 'action'
@@ -649,7 +649,7 @@
     let hiding = false
     if (labelOn()) {
       data.classes.forEach((c, i) => box.append(legendItem(classColour(i), className(i), c.n, classKey(c), S.hide.includes(classKey(c)), labelBy(c.label), c.value)))
-      if (data.none || S.hide.includes('none')) box.append(legendItem('var(--viz-ink-4)', 'no label', data.none, 'none', S.hide.includes('none')))
+      if (data.none || S.hide.includes('none')) box.append(legendItem('var(--viz-ink-4)', 'No label', data.none, 'none', S.hide.includes('none')))
       hiding = S.hide.length > 0
     } else {
       const f = field(), own = data.colour.filter, chose = own ? S.filters[own] || [] : []
@@ -715,7 +715,7 @@
     it.title = 'Click: only this · Shift-click: hide'
     it.onclick = (e) => {
       e.stopPropagation()
-      legendClick(v, e.shiftKey)
+      legendClick(v, e.shiftKey || e.altKey)
     }
     return it
   }

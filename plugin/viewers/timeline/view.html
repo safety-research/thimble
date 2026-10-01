@@ -462,7 +462,7 @@ document.getElementById('chips').onclick = (ev) => {
   rescope()
 }
 
-// the colour control: what colours the marks, then its legend; a legend value alone on a click, hidden on ⌥-click
+// the colour control: what colours the marks, then its legend; a legend value alone on a click, hidden on a shift-click
 const allLabels = () => labelState.all || labelState.labels.map((l) => ({ ...l, on: true }))
 function renderColour() {
   const by = S.by === 'labels' ? 'Labels' : FNAME[S.by]
@@ -471,7 +471,7 @@ function renderColour() {
     const l = x.j != null ? labelBy(D.marks[x.j].label) : null
     const can = !!(l && l.id && (labelState.palette || []).length && thimble.setLabelColour)
     const sw = `<span class="swb${can ? ' can' : ''}"${can ? ` data-pal="${esc(l.id)}" data-value="${esc(D.marks[x.j].value)}" data-label="${esc(l.id)}" title="Change the colour"` : ''}><span class="sw" style="--c:${x.c}"></span></span>`
-    return `<button class="lg${cls}" type="button" data-k="${esc(x.k)}" title="Click to show only this, ⌥-click to hide it">${sw}<span class="t">${esc(x.t)}</span><span class="n">${x.n}</span></button>`
+    return `<button class="lg${cls}" type="button" data-k="${esc(x.k)}" title="Click: only this · Shift-click: hide">${sw}<span class="t">${esc(x.t)}</span><span class="n">${x.n}</span></button>`
   }).join('')
   const el = document.getElementById('colour')
   el.innerHTML = `<button class="btn btn-ghost btn-sm by" id="colourBy" type="button" aria-haspopup="menu">${ico('palette')}Colour by <b>${by}</b>${ico('down')}</button>${items}`
@@ -480,7 +480,7 @@ function renderColour() {
     const sw = ev.target.closest('[data-pal]')
     if (sw) return palette(sw, sw.dataset.pal, sw.dataset.value)
     const k = b.dataset.k
-    if (ev.altKey) { S.hide.has(k) ? S.hide.delete(k) : S.hide.add(k); if (S.iso === k) S.iso = null }
+    if (ev.shiftKey || ev.altKey) { S.hide.has(k) ? S.hide.delete(k) : S.hide.add(k); if (S.iso === k) S.iso = null }
     else S.iso = S.iso === k ? null : k
     renderView()
   }
