@@ -362,8 +362,8 @@ export function Shell({ ws }: { ws: string }) {
       {drag && <DragGhost drag={drag} />}
       {chatOff && <ChatPanel ws={ws} dock />}
       <CmdPointer ws={ws} inline={chatOff} />
-      <TourHost />
       <Toasts />
+      <TourHost />
       <ServerDown />
       <NewVersion />
       <Untrusted ws={ws} />
