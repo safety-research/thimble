@@ -768,7 +768,7 @@ async def test_the_add_question_and_settings_name_what_runs_outside_the_sandbox(
     assert extensions.agent_definitions(CORPUS)["counter"]["mcpServers"] == {"db": {"command": "node", "args": ["db.js"]}}
     monkeypatch.setattr(extensions, "kernels_wrapped", lambda c: False)
     row = next(r for r in extensions.public(CORPUS)["extensions"] if r["name"] == "servers")
-    assert "counter: no network, no web, MCP servers outside the sandbox." in row["consent"]
+    assert "counter: network, no web, MCP servers outside the sandbox." in row["consent"]
     assert row["consent"].endswith("Its code runs without a sandbox.")
     monkeypatch.setattr(extensions, "kernels_wrapped", lambda c: True)
     row = next(r for r in extensions.public(CORPUS)["extensions"] if r["name"] == "servers")

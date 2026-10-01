@@ -32,7 +32,7 @@ NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,39}$")
 ROLES = ("main", "orientation", "critic", "writer", "dev")
 TASKS = ("labels", "label-draft", "card-check", "view-review", "view-fit", "file-viewer", "checks")
 KINDS = ("prompt", "sdk", "command")
-PROMPT_ONLY = {"main": "main takes a prompt addition only", "dev": "dev takes a prompt only"}
+PROMPT_ONLY = {"main": "main takes a prompt addition only"}
 PARTS = {"views": ("view", "view.json"), "cards": ("card", "card.json"), "reports": ("report", "report.json"),
          "agents": ("agent", "agent.json"), "tasks": ("task", "task.json"), "checks": ("check", "check.json")}
 SET_BY_ANALYST = {"permissionMode": "the permission mode is the analyst's, and an extension cannot set it",
