@@ -1284,7 +1284,7 @@ async def resolve_locator(c: str, slug: str, locator: dict[str, Any], version: s
     out = clean_resolved(await _call(c, req, "resolve", locator))
     _memo_put(mk, out)
     if out is not None and "key" in locator and not view["draft"]:
-        _keep_key_refs(c, slug, str(locator["key"]), out)
+        await asyncio.to_thread(_keep_key_refs, c, slug, [(str(locator["key"]), out)])
     return out
 
 
@@ -1304,6 +1304,7 @@ async def resolve_many(c: str, slug: str, locators: list[dict[str, Any]],
     if not todo:
         return out
     answers = await _call(c, req, "resolve_many", [locators[i] for i in todo])
+    keep: list[tuple[str, dict[str, Any]]] = []
     for i, ans in zip(todo, answers if isinstance(answers, list) else []):
         if not isinstance(ans, dict) or not ans.get("ok"):
             continue
@@ -1314,7 +1315,9 @@ async def resolve_many(c: str, slug: str, locators: list[dict[str, Any]],
         _memo_put((c, slug, req["fp"], _locator_key(locators[i])), value)
         out[i] = value
         if value is not None and "key" in locators[i] and not view["draft"]:
-            _keep_key_refs(c, slug, str(locators[i]["key"]), value)
+            keep.append((str(locators[i]["key"]), value))
+    if keep:
+        await asyncio.to_thread(_keep_key_refs, c, slug, keep)
     return out
 
 
@@ -1373,17 +1376,24 @@ def key_refs(c: str) -> dict[str, dict[str, Any]]:
     return raw if isinstance(raw, dict) else {}
 
 
-def _keep_key_refs(c: str, slug: str, key: str, out: dict[str, Any]) -> None:
-    """A view key's answer, kept so the ref keeps naming its file lines after the view is gone."""
+def _keep_key_refs(c: str, slug: str, answers: list[tuple[str, dict[str, Any]]]) -> None:
+    """View keys' answers, (key, answer) each, kept so their refs keep naming their file lines after the view is gone:
+    key-refs.json read once and written once, and only when an answer differs from the one it holds. Blocking."""
     view = read_view(c, slug)
-    rec = {"refs": out["refs"][:REFS_MAX], "excerpt": out["excerpt"], "label": out["label"],
-           "name": view["name"] if view else slug, "ts": _now()}
+    name, ts = (view["name"] if view else slug), _now()
     with _key_lock:
         allk = key_refs(c)
-        ref = f"view:{slug}/{key}"
-        if allk.get(ref, {}).get("refs") == rec["refs"] and allk.get(ref, {}).get("excerpt") == rec["excerpt"]:
+        changed = False
+        for key, out in answers:
+            ref = f"view:{slug}/{key}"
+            rec = {"refs": out["refs"][:REFS_MAX], "excerpt": out["excerpt"], "label": out["label"], "name": name, "ts": ts}
+            old = allk.get(ref) or {}
+            if old.get("refs") == rec["refs"] and old.get("excerpt") == rec["excerpt"]:
+                continue
+            allk[ref] = rec
+            changed = True
+        if not changed:
             return
-        allk[ref] = rec
         p = _key_refs_path(c)
         p.parent.mkdir(parents=True, exist_ok=True)
         write_json(p, allk)
