@@ -35,6 +35,9 @@ function alwaysChoice(p: PermissionRequest): { label: string; tip: string } | nu
   return null
 }
 
+/** The title of a request declined because nobody answered it in time. */
+export const EXPIRED_TITLE = 'Not answered in time'
+
 /** The line a request the card shows only the start of carries: how much shows, and that Allow approves all of it. */
 export function cutLine(p: Pick<PermissionRequest, 'cut' | 'command' | 'input'>): string | null {
   if (!p.cut) return null
@@ -56,7 +59,6 @@ export const SLOW_MS = 1000
 
 export const ENDED_TEXT = 'That request had already ended.'
 export const SENDING_TEXT = 'Sending your answer…'
-export const DECLINED_TITLE = 'Declined because nobody answered'
 
 /** A set with `id` added or taken out. Pure. */
 const plus = (set: ReadonlySet<string>, id: string): ReadonlySet<string> => new Set([...set, id])
@@ -199,10 +201,10 @@ export function PermissionCard({ ws, asks, metas, labels }: {
   }
   const gate = { 'aria-disabled': !ready || undefined }
   return (
-    <div ref={root} tabIndex={-1} className={`chat-perm${shown.length > 1 ? ' chat-perm-stack' : ''}`} role="alertdialog" aria-label={expired ? DECLINED_TITLE : 'Permission needed'} data-chat={ask.chat} data-request={p.id} data-count={shown.length} data-expired={expired || undefined} data-armed={ready || undefined}>
+    <div ref={root} tabIndex={-1} className={`chat-perm${shown.length > 1 ? ' chat-perm-stack' : ''}`} role="alertdialog" aria-label={expired ? EXPIRED_TITLE : 'Permission needed'} data-chat={ask.chat} data-request={p.id} data-count={shown.length} data-expired={expired || undefined} data-armed={ready || undefined}>
       <div className="chat-perm-head">
         <Icon name="warning" size={13} className="chat-perm-ico" />
-        <span className="chat-perm-title">{expired ? DECLINED_TITLE : 'Permission needed'}</span>
+        <span className="chat-perm-title">{expired ? EXPIRED_TITLE : 'Permission needed'}</span>
         <span className="chat-perm-from">
           <span className="chat-perm-from-word">from</span>
           <ThreadChip id={askThread(ask, metas, labels)} />

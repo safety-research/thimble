@@ -56,6 +56,7 @@ ASSET_LOADERS = ("png", "jpg", "jpeg", "gif", "svg", "webp", "woff", "woff2", "t
 PACKAGE_WHY = ("thimble installs it with npm, without running its install scripts, into the view's folder, so the page "
                "still loads nothing from the network. Each version is asked about once. Unanswered, it is refused after "
                "{wait}.")
+UNANSWERED = "unanswered"  # an Ask's answer when nobody answered the card in time
 
 
 @dataclass
@@ -380,7 +381,7 @@ def _file_name(name: str, version: str, path: str, kind: str) -> str:
 
 # ---------------------------------------------------------------------------------------------------- vendoring
 
-Ask = Any  # async (workspace, slug, fields) -> True or False, the analyst's answer, or None when no one could be asked
+Ask = Any  # async (workspace, slug, fields) -> True or False, the analyst's answer, UNANSWERED, or None when no one could be asked
 
 
 async def ensure(c: str, slug: str, folder: Path, libs: Any, *, ask: "Ask | None" = None) -> dict[str, list[str]]:
@@ -425,7 +426,15 @@ async def ensure(c: str, slug: str, folder: Path, libs: Any, *, ask: "Ask | None
                     out["problems"].append(f"thimble could not ask the analyst about the package {e.name} {version}, "
                                            "since no build of this view is running, so it was not installed")
                     continue
-                if not allowed:
+                if allowed == UNANSWERED:
+                    from . import agent_session, dev  # noqa: PLC0415
+
+                    wait = agent_session.wait_words(dev.PERMISSION_WAIT_S)
+                    out["problems"].append(f"nobody answered within {wait} whether to install the package {e.name} "
+                                           f"{version}, so it was not installed. Draw the page without it and take it "
+                                           "out of libs")
+                    continue
+                if allowed is not True:
                     out["problems"].append(f"the analyst did not allow the package {e.name} {version}, so draw the page "
                                            "without it and take it out of libs")
                     continue
@@ -474,8 +483,9 @@ def _write_lock(folder: Path, items: dict[str, dict[str, Any]]) -> None:
                 f.unlink()
 
 
-async def _ask_once(c: str, slug: str, package: str, fields: dict[str, str], ask: Ask) -> bool | None:
-    """The analyst's answer about `package` (None when no one could be asked). The question runs in a task of its own,
+async def _ask_once(c: str, slug: str, package: str, fields: dict[str, str], ask: Ask) -> bool | str | None:
+    """The analyst's answer about `package` (UNANSWERED when nobody answered in time, None when no one could be asked).
+    The question runs in a task of its own,
     so it outlives a check that asked it and was dropped (the session's command timed out), and a question already
     waiting in the workspace (a check and the gate after the turn both asking) is answered once for all."""
     key = (c, package)
@@ -490,7 +500,7 @@ async def _ask_once(c: str, slug: str, package: str, fields: dict[str, str], ask
 
         waiting.add_done_callback(forget)
     got = await asyncio.shield(waiting)
-    return None if got is None else bool(got)
+    return None if got is None else got if got == UNANSWERED else bool(got)
 
 
 def _installs(c: str) -> str:
@@ -502,13 +512,13 @@ def _installs(c: str) -> str:
         return "ask"
 
 
-async def _ask_on_card(c: str, slug: str, fields: dict[str, str]) -> bool | None:
-    """Ask the analyst on the card of the view build's session, in every permission mode; None when no build of the
-    view runs, whose card could ask."""
+async def _ask_on_card(c: str, slug: str, fields: dict[str, str]) -> bool | str | None:
+    """Ask the analyst on the card of the view build's session, in every permission mode; UNANSWERED when nobody
+    answered in time, None when no build of the view runs, whose card could ask."""
     from . import agent_session, dev  # noqa: PLC0415
 
     if agent_session.asker(c, dev.view_key(slug)) is None:
         return None
     why = PACKAGE_WHY.format(wait=agent_session.wait_words(dev.PERMISSION_WAIT_S))
     got = await agent_session.ask(c, dev.view_key(slug), PACKAGE_TOOL, fields, force=True, why=why)
-    return got.get("behavior") == "allow"
+    return UNANSWERED if agent_session.timed_out(got) else got.get("behavior") == "allow"

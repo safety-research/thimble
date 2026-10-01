@@ -6,8 +6,8 @@
 // sends only the changed fields so defaults stay defaults, and applies to the next session or subagent. Choices that
 // cannot take effect are dimmed with the reason in a tooltip. Every row names its model exactly, never `default`. Under
 // the table, the permission mode of each agent thimble starts (MODE_ROWS): the analyst's pick, else the mode of their
-// Claude Code session, as main's hooks report it (backend modes.py). Then the extensions added to thimble, each with its
-// switch for this workspace (ExtensionsSettings).
+// Claude Code session, as main's hooks report it (backend modes.py), then labels and the card check (CALL_ROWS), which
+// have no mode. Then the extensions added to thimble, each with its switch for this workspace (ExtensionsSettings).
 import { useEffect, useState } from 'react'
 import { Button } from '../components/Button'
 import { Chip } from '../components/Chip'
@@ -19,7 +19,7 @@ import { useTooltip } from '../components/Tooltip'
 import { api } from '../lib/api'
 import { ExtensionsSettings, answeredRuns, changedLocalViews, changedViews, extensionCalls, viewKey } from './ExtensionsSettings'
 import { hasFastMode, invalidateSettings, loadSettings, modelChoices, modelLabel, sameModel } from '../lib/models'
-import { EFFORTS, ROLES, type AgentRow, type Attached, type Extensions, type MainEffort, type ModeAgent, type ModelConf, type OrientPermissions, type Settings, type TaskRow } from '../lib/types'
+import { EFFORTS, ROLES, type AgentRow, type Attached, type CallAgent, type Extensions, type MainEffort, type ModeAgent, type ModelConf, type OrientPermissions, type Settings, type TaskRow } from '../lib/types'
 import { bus } from '../lib/bus'
 import { EFFORT_CHOICES, FastBolt, MODEL_TIP, NEXT_LAUNCH, effortWord, mainEffort, mainFast, noFastTip } from '../chat/ModelLine'
 import { BYPASS_LINE } from '../chat/ModeSwitch'
@@ -36,6 +36,16 @@ export const MODE_ROWS: { agent: ModeAgent; label: string }[] = [
   { agent: 'dev', label: 'Dev agent' },
 ]
 const MODE_NAME: Record<OrientPermissions, string> = { manual: 'Manual', auto: 'Auto', bypass: 'Bypass' }
+
+/** The agents of thimble's config that are one model call each, listed after MODE_ROWS with the same line; their
+ * settings reach an extension's program that runs their tasks (backend userconf.CALLS). */
+export const CALL_ROWS: { agent: CallAgent; label: string }[] = [
+  { agent: 'labels', label: 'Labels' },
+  { agent: 'cardCheck', label: 'Card check' },
+]
+/** What a CALL_ROWS row shows where the others show their permission mode, and why. */
+export const CALL_CELL = 'Asks nothing'
+const CALL_CELL_TIP = "It has no permission mode. thimble runs it as one model call with no tools, and an extension's program that runs its tasks has no thread to ask you in."
 
 const DATA_WORDS: Record<AgentRow['data'], string> = { ask: 'asks to edit data', allow: 'may edit data', off: 'never edits data' }
 const DATA_TIP: Record<AgentRow['data'], string> = {
@@ -54,10 +64,14 @@ export function runsWords(row: Pick<AgentRow, 'way' | 'extension' | 'additions' 
   return `thimble${added}`
 }
 
+/** What an agent may do with the data, in words: a labels or card check row (one with `tasks`) has no thread to ask in,
+ * so at `ask` it never edits it. Pure. */
+const dataWords = (row: AgentRow): string => (row.tasks && row.data === 'ask' ? DATA_WORDS.off : DATA_WORDS[row.data])
+
 /** An agent's line under its permission mode: who runs it and what it may do, from thimble's config. Pure. */
 export function agentLine(row: AgentRow): string {
   const box = row.sandbox === 'off' ? 'sandbox off' : row.sandbox_runs ? 'sandbox on' : 'no sandbox here'
-  return [runsWords(row), box, `network ${row.network}`, DATA_WORDS[row.data]].join(' · ')
+  return [runsWords(row), box, `network ${row.network}`, dataWords(row)].join(' · ')
 }
 
 /** The tasks an extension changes, with who runs them, the tasks one runner runs named together; '' when thimble runs
@@ -82,7 +96,11 @@ export function agentTip(row: AgentRow): string {
     : 'The sandbox cannot run on this machine.'
   const net = row.network === 'on' ? 'Network on: it can reach the internet.' : 'Network off: it reaches no host.'
   const added = row.additions.length ? [`${row.additions.join(', ')} add${row.additions.length > 1 ? '' : 's'} to its prompt.`] : []
-  return [who, ...added, box, net, DATA_TIP[row.data], "It never reads thimble's key.", `Change these under ${row.config} in thimble's config.`].join('\n')
+  const tasks = row.tasks ?? []
+  const names = tasks.length > 1 ? `${tasks.slice(0, -1).join(', ')} or ${tasks[tasks.length - 1]}` : tasks[0]
+  const reach = tasks.length ? [`Its sandbox, network and data apply to an extension's program that runs ${names}.`] : []
+  const data = row.tasks && row.data === 'ask' ? 'It has no thread to ask you in, so it never changes a file of your data.' : DATA_TIP[row.data]
+  return [who, ...added, ...reach, box, net, data, "It never reads thimble's key.", `Change these under ${row.config} in thimble's config.`].join('\n')
 }
 
 function AgentLine({ row }: { row: AgentRow }) {
@@ -92,6 +110,19 @@ function AgentLine({ row }: { row: AgentRow }) {
       <span className="settings-agent-line" data-way={row.way} tabIndex={0} {...props}>
         {agentLine(row)}
       </span>
+      {tip}
+    </>
+  )
+}
+
+/** A CALL_ROWS row's cell where the others have their permission mode. */
+function CallCell({ label }: { label: string }) {
+  const { props, tip } = useTooltip(CALL_CELL_TIP, 'tip-lines', 'start')
+  return (
+    <>
+      <Chip kind="plain" face="sans" className="settings-cell settings-mode settings-mode-none" tabIndex={0} aria-label={`${label}: ${CALL_CELL}`} {...props}>
+        {CALL_CELL}
+      </Chip>
       {tip}
     </>
   )
@@ -387,6 +418,16 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
                   {row && <AgentLine row={row} />}
                 </div>
               )
+            })}
+            {CALL_ROWS.map(({ agent, label }) => {
+              const row = settings.agents?.[agent]
+              return row ? (
+                <div className="settings-row" role="row" key={agent} data-call-agent={agent}>
+                  <span className="settings-role">{label}</span>
+                  <CallCell label={label} />
+                  <AgentLine row={row} />
+                </div>
+              ) : null
             })}
             {!!settings.agents?.main?.additions.length && (
               <p className="settings-agent-main" role="note">

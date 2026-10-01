@@ -13,8 +13,8 @@ export function retryText(alert: SessionAlert, now: number): string {
   const until = alert.until ? Date.parse(alert.until) : NaN
   if (!alert.reason || Number.isNaN(until)) return alert.text
   const s = Math.max(0, Math.round((until - now) / 1000))
-  if (s === 0) return `${alert.reason}; retrying now.`
-  return `${alert.reason}; retrying in ${s < 120 ? `${s} s` : `${Math.round(s / 60)} min`}.`
+  if (s === 0) return `${alert.reason}. Retrying now.`
+  return `${alert.reason}. Retrying in ${s < 120 ? `${s} s` : `${Math.round(s / 60)} min`}.`
 }
 
 /** The line of a retry alert's card at `now` (ms): when thimble starts the session again, and that its work is kept

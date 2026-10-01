@@ -7,8 +7,8 @@
 import { act, useState } from 'react'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { ThreadsContext } from '../../src/chat/Notes.tsx'
-import { ARM_MS, DECLINED_TITLE, PermissionCard } from '../../src/chat/PermissionCard.tsx'
-import { pendingRequests, type PendingAsk } from '../../src/chat/permissions.ts'
+import { ARM_MS, EXPIRED_TITLE, PermissionCard } from '../../src/chat/PermissionCard.tsx'
+import { askWhy, pendingRequests, type PendingAsk } from '../../src/chat/permissions.ts'
 import { bus } from '../../src/lib/bus.ts'
 import { newest, STALE } from '../../src/lib/newest.ts'
 import type { ChatMeta, PermissionRequest } from '../../src/lib/types.ts'
@@ -56,6 +56,12 @@ describe('the requests and their words', () => {
     const main = { permissions: [req('m1', { since: '2026-10-01T00:17:11.900+00:00' })] }
     const metas = [{ ...ORIENT, permissions: [req('o1', { since: '2026-10-01T00:17:11.500+00:00' }), req('o2', { since: '2026-10-01T00:17:12+00:00' })] }]
     expect(pendingRequests(main, metas).map((a) => a.request.id)).toEqual(['o1', 'm1', 'o2'])
+  })
+
+  test('a request nobody answered in time says so, and only a session that asked for a call went on without it', () => {
+    const late = (extra: Partial<PermissionRequest>) => askWhy({ chat: 'or1', request: req('e1', { expired: T(9), wait_s: 600, ...extra }) }, METAS)
+    expect(late({})).toBe('Nobody answered within 10 minutes, so thimble declined it and the agent went on without it.')
+    expect(late({ why: "This edits thimble's own code." })).toBe('Nobody answered within 10 minutes, so thimble declined it.')
   })
 })
 
@@ -134,7 +140,7 @@ describe('the card', () => {
     expect(el.querySelector('.chat-perm-count')?.textContent).toBe('1 of 2')
     await click(el.querySelectorAll('.chat-perm-page')[1])
     await click(el.querySelectorAll('.chat-perm-page')[1])
-    expect(el.querySelector('.chat-perm-title')?.textContent).toBe(DECLINED_TITLE)
+    expect(el.querySelector('.chat-perm-title')?.textContent).toBe(EXPIRED_TITLE)
     expect(el.querySelector('.chat-perm-count')?.textContent).toBe('1 of 3')
   })
 
@@ -189,7 +195,7 @@ describe('several requests at once', () => {
     await armed()
     await act(async () => setAsks([ask('d2', 'b', 2), { ...a, request: { ...a.request, expired: T(9) } }]))
     expect(shownId(el)).toBe('a')
-    expect(el.querySelector('.chat-perm-title')?.textContent).toBe(DECLINED_TITLE)
+    expect(el.querySelector('.chat-perm-title')?.textContent).toBe(EXPIRED_TITLE)
     await click(el.querySelector('.chat-perm-dismiss'))
     expect(posted).toEqual([])
     await armed()
@@ -269,7 +275,7 @@ describe('several requests at once', () => {
   test('several requests declined unanswered are dismissed at once, and the card says why they were declined', async () => {
     const gone = [ask('d1', 'x1', 1, { expired: T(11) }), ask('d2', 'x2', 2, { expired: T(12) }), ask('d3', 'x3', 3, { expired: T(13) })]
     const el = await mount(<Live initial={gone} />)
-    expect(el.querySelector('.chat-perm-title')?.textContent).toBe('Declined because nobody answered')
+    expect(el.querySelector('.chat-perm-title')?.textContent).toBe(EXPIRED_TITLE)
     expect(el.querySelector('.chat-perm-why')?.textContent).toBe('Nobody answered within 10 minutes, so thimble declined it and the agent went on without it.')
     await armed()
     await click(el.querySelector('.chat-perm-dismiss-all'))

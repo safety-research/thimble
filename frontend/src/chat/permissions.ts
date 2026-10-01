@@ -155,10 +155,10 @@ function declineLine(seconds: number | null | undefined): string {
 /** Why the session asks, in one line: thimble's own reason when it gives one (a code ticket's question), auto mode
  * could not judge the call or left it to the analyst, the session runs in Manual, or main's prompt also waits in the
  * terminal, where the first answer counts; then when an unanswered request is declined. For a request declined
- * unanswered, that it was. Pure. */
+ * unanswered, that it was, and for one of the session's own calls that the agent went on without it. Pure. */
 export function askWhy(ask: PendingAsk, metas: ReadonlyMap<string, ChatMeta>): string {
   const p = ask.request
-  if (p.expired) return `Nobody answered within ${waitWords(p.wait_s ?? 60)}, so thimble declined it and the agent went on without it.`
+  if (p.expired) return `Nobody answered within ${waitWords(p.wait_s ?? 60)}, so thimble declined it${p.why ? '' : ' and the agent went on without it'}.`
   if (p.why) return p.why
   if (classifierDown(p)) {
     const tries = p.rechecked ? `, all ${p.rechecked + 1} times it was asked` : ''
