@@ -413,6 +413,9 @@ export const api = {
   /** this workspace's switch of one extension's view, which overrides the check on whether it fits */
   switchExtensionView: (c: string, name: string, slug: string, on: boolean) =>
     j<Extensions>(`${ws(c)}/extensions/${enc(name)}/views/${enc(slug)}`, { method: 'PUT', body: JSON.stringify({ on }) }),
+  /** the answer to Settings' offer to run an extension's orientation instructions now: Run now (true) or Not now */
+  answerExtensionOrientation: (c: string, name: string, run: boolean) =>
+    j<Extensions & { status: string }>(`${ws(c)}/extensions/${enc(name)}/orientation`, { method: 'POST', body: JSON.stringify({ run }) }),
   /** the paper and accent this browser shows, so the card harness draws a card in them (backend/app/render.py) */
   reportTheme: (c: string, paper: string, accent: string) => j<{ paper: string; accent: string }>(`${ws(c)}/render/theme`, { method: 'PUT', body: JSON.stringify({ paper, accent }) }),
 }
