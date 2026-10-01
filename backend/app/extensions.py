@@ -848,10 +848,11 @@ async def _refresh(c: str) -> dict[str, Any]:
         for k, entry in _checks(c).items():
             if k not in checked and entry["task"].done():
                 _asking.pop((c, k))  # an answer for a view removed or switched off meanwhile
-        now = {n for n, e in exts.items() if e.get("active")}
+        # what was sent or declined stands until the extension is switched off or removed, not through a problem
+        on = {n for n in exts if n not in state["off"] and n not in (off or set())}
         new_state = {"off": state["off"], "shown": state["shown"],
-                     "oriented": [n for n in state["oriented"] if n in now],
-                     "declined": [n for n in state["declined"] if n in now], "extensions": exts}
+                     "oriented": [n for n in state["oriented"] if n in on],
+                     "declined": [n for n in state["declined"] if n in on], "extensions": exts}
         await asyncio.to_thread(write_json, _state_path(c), new_state)
         for name in sorted(set(state["extensions"]) - set(exts)):
             try:

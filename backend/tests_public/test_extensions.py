@@ -18,8 +18,8 @@ import pytest
 
 from fastapi import HTTPException
 
-from app import (card_check, cardtypes, cli, config, extensions, ledger, model, orient_session, prompts, report_types,
-                 userconf, view_fit, views)
+from app import (card_check, cardtypes, cli, config, extension_manifest, extensions, ledger, model, orient_session,
+                 prompts, report_types, userconf, view_fit, views)
 from app import corpus as corpus_mod
 from app.ledger import write_json
 
@@ -408,6 +408,15 @@ async def test_switching_on_an_extension_offers_to_run_its_orientation_instructi
     assert extensions.offered(CORPUS) == []
     await extensions.refresh(CORPUS)
     assert extensions.offered(CORPUS) == [] and len(sent) == 1
+
+    broken = {"yes": True}
+    check = extension_manifest.check
+    monkeypatch.setattr(extension_manifest, "check", lambda root, expect=None: [
+        extension_manifest.Problem("extension.json", 1, "is not JSON")] if broken["yes"] else check(root, expect))
+    assert not (await extensions.refresh(CORPUS))["extensions"]["ext-min"]["active"]
+    broken["yes"] = False
+    await extensions.refresh(CORPUS)
+    assert extensions.offered(CORPUS) == [] and len(sent) == 1, "a problem fixed is not a switch turned on"
 
     assert extensions.remove("ext-min")
     await extensions.refresh(CORPUS)
