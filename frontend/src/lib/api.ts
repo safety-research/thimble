@@ -168,6 +168,9 @@ export const api = {
   /** `GET /corpora/{c}/source/turns`: `count` turns of a JSON transcript from turn `start`, or around `line`. */
   sourceTurns: (c: string, path: string, start = 0, count = 200, line?: number) =>
     j<SourceTurns>(`${BASE}/corpora/${enc(c)}/source/turns${q({ path, start, count, line })}`),
+  /** `GET /corpora/{c}/source/speakers`: the names the corpus gives speaker ids (`ids`, joined by commas) that a file
+   * keeps under `key` (an agents.jsonl beside it, whose records carry an id and a name). */
+  speakerNames: (c: string, path: string, key: string, ids: string) => j<{ names: Record<string, string> }>(`${BASE}/corpora/${enc(c)}/source/speakers${q({ path, key, ids })}`),
   /** The URL a PDF of the corpus opens from in the browser's viewer, at `page` when given. */
   pdfUrl: (c: string, path: string, page?: number | null) => `${BASE}/corpora/${enc(c)}/pdf/${path.split('/').map(enc).join('/')}${page ? `#page=${page}` : ''}`,
   /** `GET /corpora/{c}/source/find`: the lines of one file past `after` that hold `text`, searched on the server. */

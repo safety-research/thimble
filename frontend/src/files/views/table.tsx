@@ -14,7 +14,7 @@ import { cellFill, laneTags, markSegments, type SpanMark } from '../labels'
 import { ReaderLabelsContext, useMarksAt } from '../marks'
 import { LabelMark } from '../LabelMark'
 import { findQuote } from '../../lib/quoteFind'
-import { cellTitle, compact, isJsonlFile, isTargetLine, LANE_GLYPH_PX, SpanEl, useTarget, type Target, type ViewDef, type ViewProps } from './common'
+import { cellTitle, citedQuote, compact, isJsonlFile, isTargetLine, LANE_GLYPH_PX, SpanEl, useTarget, type Target, type ViewDef, type ViewProps } from './common'
 import { messageKeys, stamp, transcriptScore } from './transcript'
 
 const MAX_COLS = 40
@@ -84,6 +84,11 @@ function cell(v: unknown): string {
   return compact(v, CELL_MAX)
 }
 
+/** A value as a cited cell searches and shows it: a nested one whole, as indented JSON, else as its cell shows it. */
+function citedText(v: unknown): string {
+  return v && typeof v === 'object' ? JSON.stringify(v, null, 2) ?? '' : cell(v)
+}
+
 /** The whole value for the cell's title, when the cell may not show all of it. */
 function titleOf(v: unknown): string | undefined {
   if (v == null || typeof v === 'number' || typeof v === 'boolean') return undefined
@@ -127,21 +132,21 @@ export function columnChars(records: SourceRecord[], cols: string[], wide: Set<s
   return out
 }
 
-/** The cell of the target's record that holds the words a span ref quotes, and where they sit in its text: its
- * column (null for a record drawn as one cell), else null. Pure. */
+/** The cell of the target's record that holds the words a span ref quotes, and where they sit in its text (citedText,
+ * so a nested value is searched whole): its column (null for a record drawn as one cell), else null. Pure. */
 export function citedCell(records: SourceRecord[], cols: string[], target: Target | null): { line: number; col: string | null; at: [number, number] } | null {
-  if (!target || target.start == null || target.end == null || target.end <= target.start) return null
+  if (!target) return null
   const rec = records[indexOfLine(records, target.line)]
   if (!rec || rec.line !== target.line) return null
-  const quote = rec.blocks?.[target.block ?? 0]?.text?.slice(target.start, target.end) ?? ''
-  if (!quote.trim()) return null
+  const quote = citedQuote([rec], target)
+  if (!quote) return null
   const r = rec.record
   if (!r || typeof r !== 'object' || Array.isArray(r)) {
-    const at = findQuote(cell(r), quote)
+    const at = findQuote(citedText(r), quote)
     return at ? { line: rec.line, col: null, at } : null
   }
   for (const c of cols) {
-    const at = findQuote(cell((r as Record<string, unknown>)[c]), quote)
+    const at = findQuote(citedText((r as Record<string, unknown>)[c]), quote)
     if (at) return { line: rec.line, col: c, at }
   }
   return null
@@ -474,13 +479,13 @@ const TableRow = memo(function TableRow({ path, rec, row, cols, wide, dots, targ
           const quoted = cited && cited.col === c ? cited.at : null
           return (
             <td key={c} className={cellClass(v, wide.has(c)) + (quoted ? ' cited' : '')} title={titleOf(v)}>
-              <span className="reader-table-clip">{quoted ? <Quoted text={cell(v)} at={quoted} spans={marks.spans} /> : <Marked text={cell(v)} spans={marks.spans} />}</span>
+              <span className="reader-table-clip">{quoted ? <Quoted text={citedText(v)} at={quoted} spans={marks.spans} /> : <Marked text={cell(v)} spans={marks.spans} />}</span>
             </td>
           )
         })
       ) : (
         <td className={'reader-table-cell mono' + (cited ? ' cited' : '')} colSpan={cols.length} title={titleOf(r)}>
-          <span className="reader-table-clip">{cited ? <Quoted text={cell(r)} at={cited.at} spans={marks.spans} /> : <Marked text={cell(r)} spans={marks.spans} />}</span>
+          <span className="reader-table-clip">{cited ? <Quoted text={citedText(r)} at={cited.at} spans={marks.spans} /> : <Marked text={cell(r)} spans={marks.spans} />}</span>
         </td>
       )}
     </tr>

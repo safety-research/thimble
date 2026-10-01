@@ -1837,6 +1837,12 @@
   color: var(--text-tertiary);
   font-size: var(--text-mono-sm);
 }
+/* the field that holds the words a followed ref quotes shows whole, on lines of its own */
+.reader-msg-field-open {
+  flex-basis: 100%;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
 .reader-record.has-tint .reader-record-body,
 .reader-line.has-tint {
   background: color-mix(in oklab, var(--tint) 16%, transparent);

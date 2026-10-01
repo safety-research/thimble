@@ -27,4 +27,15 @@ describe('a span ref into a long record in the Table view', () => {
     expect(citedCell([rec], ['id', 'agent', 'content'], { line: 12 })).toBeNull()
     expect(citedCell([rec], ['id', 'agent', 'content'], { line: 13, block: 0, start, end: start + 5 })).toBeNull()
   })
+  test('finds them deep in a nested field, past what its cell shows', () => {
+    const letter = `${'Some earlier lines. '.repeat(30)}It was tested under "pressure"\nin May.`
+    const record = { id: 'e2', data: { agentId: 'a-1', medium: 'Email', messageContent: letter } }
+    const block = JSON.stringify(record, null, 2)
+    const words = 'tested under \\"pressure\\"\\nin May'
+    const start = block.indexOf(words)
+    const rec = { line: 4, record, blocks: [{ kind: 'raw', text: block }], meta: {} } as unknown as SourceRecord
+    const got = citedCell([rec], ['id', 'data'], { line: 4, block: 0, start, end: start + words.length })
+    const shown = JSON.stringify(record.data, null, 2)
+    expect(got).toEqual({ line: 4, col: 'data', at: [shown.indexOf(words), shown.indexOf(words) + words.length] })
+  })
 })
