@@ -585,12 +585,13 @@ def quote_id(name: str) -> str:
     return '"' + str(name).replace('"', '""') + '"'
 
 
-def _tables(con: sqlite3.Connection, under: str | None) -> Iterator[tuple[str, str, list[str]]]:
-    """(table, the column that keys its rows, its columns) of each table a ref can name and SQLite can read: by its
-    single primary key, else its rowid; a table with neither, or one that does not read (a virtual table whose module
-    this SQLite lacks), is skipped."""
+def _tables(con: sqlite3.Connection, only: str | set[str] | None) -> Iterator[tuple[str, str, list[str]]]:
+    """(table, the column that keys its rows, its columns) of each table a ref can name and SQLite can read, of those
+    `only` names when given: by its single primary key, else its rowid; a table with neither, or one that does not read
+    (a virtual table whose module this SQLite lacks), is skipped."""
+    only = {only} if isinstance(only, str) else only
     for t in corpus.table_names(con):
-        if not _TABLE.match(t) or (under and t != under):
+        if not _TABLE.match(t) or (only and t not in only):
             continue
         try:
             columns, pk = corpus.table_info(con, t)
@@ -670,11 +671,26 @@ def _lines(path: Path, rel: str, kind: str, start: int, end: int) -> Iterator[di
                "blocks": r["blocks"], "meta": r["meta"]}
 
 
-def iter_records(path: Path, rel: str, kind: str | None = None, under: str | None = None) -> Iterator[dict[str, Any]]:
+Under = str | list[str] | tuple[str, ...] | None  # one fragment or several (iter_records)
+
+
+def iter_records(path: Path, rel: str, kind: str | None = None, under: Under = None) -> Iterator[dict[str, Any]]:
     """Every record of the file in order (module note). `kind` is the source kind (corpus.source_kind) a line's blocks
-    are read by; `under` keeps the records whose fragment is it or lies below it (`prs` keeps the rows of a
-    database's table prs, `/messages` the elements of a document's messages)."""
-    kind = kind or corpus.source_kind(rel)
+    are read by; `under`, one fragment or several, keeps the records whose fragment is one of them or lies below it
+    (`prs` keeps the rows of a database's table prs, `/messages` the elements of a document's messages, `row=3` that
+    row of a CSV)."""
+    wants = _wants(rel, under)
+    records = _all_records(path, rel, kind or corpus.source_kind(rel), wants)
+    if not wants:
+        yield from records
+        return
+    for r in records:
+        if _under(r["ref"].partition("#")[2], wants):
+            yield r
+
+
+def _all_records(path: Path, rel: str, kind: str, wants: tuple[str, ...]) -> Iterator[dict[str, Any]]:
+    """iter_records before its fragments are kept, a database read only in the tables they name."""
     reader = reader_of(path, rel)
     if reader == "json" and json_index(path) is None:
         reader = "lines"
@@ -685,7 +701,7 @@ def iter_records(path: Path, rel: str, kind: str | None = None, under: str | Non
     elif reader == "json":
         idx = json_index(path)
         for i, p in enumerate(idx.pointers):
-            if _under(p, under):
+            if _under(p, wants):
                 yield _json_record(path, rel, idx, i)
     elif reader == "csv":
         csv.field_size_limit(1 << 30)
@@ -706,7 +722,7 @@ def iter_records(path: Path, rel: str, kind: str | None = None, under: str | Non
             return
         with closing(con):
             n = 0
-            for table, key, columns in list(_tables(con, _table_of(under))):
+            for table, key, columns in list(_tables(con, _tables_of(wants))):
                 rows = _db_rows(con, table, key, columns)
                 while True:
                     try:
@@ -722,27 +738,43 @@ def iter_records(path: Path, rel: str, kind: str | None = None, under: str | Non
             yield _pdf_record(rel, text, n)
 
 
-def _under(fragment: str, under: str | None) -> bool:
-    if not under:
+def _wants(rel: str, under: Under) -> tuple[str, ...]:
+    """The fragments `under` names, each as its record's ref is keyed (canon)."""
+    given = [under] if isinstance(under, str) else list(under or ())
+    return tuple(dict.fromkeys(canon(f"{rel}#{u}").partition("#")[2] for u in given if isinstance(u, str) and u.strip()))
+
+
+def _under(fragment: str, wants: tuple[str, ...]) -> bool:
+    if not wants:
         return True
-    w = under.rstrip("/") or "/"
-    return fragment == w or fragment.startswith(w if w.endswith("/") else w + "/")
+    for under in wants:
+        w = under.rstrip("/") or "/"
+        if fragment == w or fragment.startswith(w if w.endswith("/") else w + "/"):
+            return True
+    return False
 
 
-def _table_of(under: str | None) -> str | None:
-    return under.split("/", 1)[0] if under else None
+def _tables_of(wants: tuple[str, ...]) -> set[str] | None:
+    return {w.split("/", 1)[0] for w in wants} if wants else None
 
 
-def count(path: Path, rel: str, under: str | None = None) -> int:
+def _whole_tables(wants: tuple[str, ...]) -> bool:
+    return all("/" not in w for w in wants)
+
+
+def count(path: Path, rel: str, under: Under = None) -> int:
     """How many records iter_records gives."""
+    wants = _wants(rel, under)
     reader = reader_of(path, rel)
     if reader == "json" and json_index(path) is None:
         reader = "lines"
+    if wants and not (reader == "json" or (reader == "sqlite" and _whole_tables(wants))):
+        return sum(1 for _r in iter_records(path, rel, None, wants))
     if reader == "lines":
         return corpus.line_count(path)
     if reader == "json":
         idx = json_index(path)
-        return len(idx.pointers) if not under else sum(1 for p in idx.pointers if _under(p, under))
+        return sum(1 for p in idx.pointers if _under(p, wants))
     if reader == "csv":
         return len(csv_index(path, rel).offsets)
     if reader == "sqlite":
@@ -751,27 +783,32 @@ def count(path: Path, rel: str, under: str | None = None) -> int:
         except sqlite3.Error:
             return 0
         with closing(con):
-            return _db_count(con, _table_of(under))
+            return _db_count(con, _tables_of(wants))
     if reader == "pdf":
         return pdf_count(path)
     return 0
 
 
-def records_at(path: Path, rel: str, places: list[int], kind: str | None = None, under: str | None = None) -> list[dict[str, Any]]:
-    """The records at these places (1-based, as `n` counts them) in place order; places past the end are left out."""
+def records_at(path: Path, rel: str, places: list[int], kind: str | None = None, under: Under = None) -> list[dict[str, Any]]:
+    """The records at these places (1-based, as `n` counts them among those iter_records gives) in place order; places
+    past the end are left out."""
     want = sorted({int(n) for n in places if int(n) >= 1})
     if not want:
         return []
     kind = kind or corpus.source_kind(rel)
+    wants = _wants(rel, under)
     reader = reader_of(path, rel)
     if reader == "json" and json_index(path) is None:
         reader = "lines"
+    if wants and not (reader == "json" or (reader == "sqlite" and _whole_tables(wants))):
+        picked = set(want)
+        return [r for i, r in enumerate(iter_records(path, rel, kind, wants), 1) if i in picked]
     if reader == "lines":
         total = len(corpus.line_offsets(path))
         return [r for n in want if n <= total for r in _lines(path, rel, kind, n, n)]
     if reader == "json":
         idx = json_index(path)
-        kept = [i for i, p in enumerate(idx.pointers) if _under(p, under)]
+        kept = [i for i, p in enumerate(idx.pointers) if _under(p, wants)]
         return [_json_record(path, rel, idx, kept[n - 1]) for n in want if n <= len(kept)]
     if reader == "csv":
         idx = csv_index(path, rel)
@@ -786,7 +823,7 @@ def records_at(path: Path, rel: str, places: list[int], kind: str | None = None,
             return out
         with closing(con):
             base = 0
-            for table, key, columns in list(_tables(con, _table_of(under))):
+            for table, key, columns in list(_tables(con, _tables_of(wants))):
                 size = _db_size(con, table)
                 for n in want:
                     if base < n <= base + size:

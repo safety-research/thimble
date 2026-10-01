@@ -263,6 +263,15 @@ async def test_a_trial_and_a_label_within_another_pick_records_of_any_reader(api
     assert all("state: merged" in t for _r, t in quoted), "each quoted by the line of its text that matched"
 
 
+async def test_paths_with_fragments_keep_the_records_under_each(api, corpus, workspaces_tmp):
+    k = await _label(api, name="any", kind="regex", spec=r".")
+    s = await _apply(api, k, ["forge.db#prs", "forge.db#agents", "orders.csv#row=2", "report.pdf#page=3"])
+    got = set(await _values(workspaces_tmp / CORPUS, k))
+    assert {r.split("#")[1].split("/")[0] for r in got if r.startswith("forge.db")} == {"prs", "agents"}, "both tables"
+    assert {r for r in got if not r.startswith("forge.db")} == {"orders.csv#row=2", "report.pdf#p3"}
+    assert s["total"] == len(got) == 5 + records.count(corpus / "forge.db", "forge.db", "agents") + 2
+
+
 async def _code_inproc(c: str, kernel: str, code: str, timeout_s: float | None = None) -> tuple[list[dict], int, str]:
     buf = io.StringIO()
     here = os.getcwd()

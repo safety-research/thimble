@@ -930,7 +930,7 @@ def match_paths(corpus_dir: Path, patterns: list[str]) -> list[dict]:
     """Sources whose corpus-relative path matches any pattern (fnmatch, `*` may span `/`), equals it, or lies under it
     when the pattern names a directory. A pattern with a fragment, such as `forge.db#prs` or `runs.json#/runs`, matches
     its files and keeps only the records under the fragment (records.iter_records `under`), which the source carries as
-    `under`. Sorted by path."""
+    `under`, the list of every such pattern's fragment that matches it. Sorted by path."""
     pats: list[tuple[str, str | None]] = []
     for raw in patterns:
         text = str(raw).strip()
@@ -946,7 +946,7 @@ def match_paths(corpus_dir: Path, patterns: list[str]) -> list[dict]:
         hits = [frag for p, frag in pats if rel == p or fnmatch.fnmatchcase(rel, p) or rel.startswith(p + "/")]
         if not hits:
             continue
-        under = None if None in hits else hits[0]
+        under = None if None in hits else list(dict.fromkeys(hits))
         out.append({**src, "under": under} if under else src)
     out.sort(key=lambda s: s["path"])
     return out
