@@ -26,7 +26,8 @@ session, a pass registers the view. Where an active extension runs the dev agent
 is a run of that program instead (program_view_turn), checked the same way. A turn the API ended at capacity is no
 attempt: the build waits and wakes the session again. An orientation's proposal that runs out of attempts gets up to
 VIEW_REPAIRS new sessions, and is then dropped quietly; a view the analyst asked for fails with Retry. The orientation's Stop stops the
-builds of the views it proposed (stop_orientation_views). Main's end stops every build of the workspace
+builds of the views it proposed (stop_orientation_views). The Stop in a build's thread ends that build failed, with Retry
+(views.stop_build, _view_stopped). Main's end stops every build of the workspace
 (stop_workspace): a view the analyst asked for fails with Retry, and a session's proposal waits, queued, until a session
 is main again (resume_views).
 
@@ -2516,6 +2517,8 @@ async def stop_views(c: str) -> None:
 
 # why the builds of the views an orientation proposed stopped (stop_orientation_views)
 ORIENTATION_STOPPED = "the orientation was stopped"
+# a build the analyst stopped in its thread (views.stop_build): the reason its chat ends with and its proposal's error
+VIEW_STOPPED = "The build was stopped."
 
 
 def stop_orientation_views(c: str) -> list[str]:
@@ -2672,6 +2675,23 @@ def _view_failed(c: str, slug: str, error: str, chat: str | None = None, *, drop
     views._emit(c, slug, "failed", chat=chat)
     if chat:
         _close_chat({"workspace": c, "chat": chat}, "failed", error)
+
+
+def _view_stopped(c: str, slug: str, chat: str | None = None) -> None:
+    """A build the analyst stopped (views.stop_build), once its session has stopped: a new view fails with VIEW_STOPPED,
+    an orientation's as well as one the analyst asked for, and its chip's Retry goes on from its draft; a change to a
+    built view leaves the view as it was, with the change kept for Retry."""
+    from . import views  # noqa: PLC0415
+
+    current = views.read_proposal(c, slug) or {}
+    chat = chat or current.get("chat")
+    if current.get("revision"):
+        views.end_revision(c, slug, VIEW_STOPPED, failed_change=str(current.get("change") or ""))
+    elif current:
+        views.update_proposal(c, slug, status="failed", error=VIEW_STOPPED)
+        views._emit(c, slug, "failed", chat=chat)
+    if chat:
+        _close_chat({"workspace": c, "chat": chat}, "stopped", VIEW_STOPPED)
 
 
 # the line an orientation's thread gets for a proposal of its own that could not be built
@@ -3023,6 +3043,9 @@ async def _run_view(c: str, slug: str, run: Run) -> None:
         await asyncio.to_thread(SESSIONS.stop, run.session)
         if run.status == MAIN_ENDED:
             _view_failed(c, slug, MAIN_ENDED, chat)
+            raise
+        if run.status == VIEW_STOPPED:
+            _view_stopped(c, slug, chat)
             raise
         why = run.status if run.status not in ("running",) else "server shut down during the run"
         if chat:
