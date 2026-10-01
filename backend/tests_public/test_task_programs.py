@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import json
 import shutil
+import sys
 import time
 from pathlib import Path
 
@@ -20,6 +21,7 @@ from app import agents, checks, concepts, config, extensions, harness, kernel_wr
 
 REPO = Path(__file__).resolve().parents[2]
 EXAMPLE = REPO / "docs" / "examples" / "vote-labels"
+FAKE = Path(__file__).parent / "fixtures" / "agents" / "fake_sdk_claude.py"
 CORPUS = "mini"
 
 
@@ -312,6 +314,35 @@ async def test_a_checks_program_comments_as_its_run_and_what_it_returns_is_the_s
     assert comment["text"].startswith("Which source says so?") and comment["run"] == done["run"]
     meta = agents.meta_or_none(CORPUS, done["chat"])
     assert meta is not None and meta["role"] == checks.ROLE and meta["way"] == "command"
+
+
+async def test_a_checks_program_gets_thimble_s_own_check_as_a_session_of_its_run(tmp_path, data_tmp, workspaces_tmp,
+                                                                                active, unboxed, monkeypatch):
+    """thimble.default(input) of the checks task runs a session as the check agent on the run's first message, as
+    the run's own session, so its add_comment calls belong to the run."""
+    from app import agent_session
+
+    r = await tools.call(CORPUS, "write_document", {"doc": "report", "text": "# Runs\n\n## Counts\n\nThree runs ended.\n"},
+                         actor="analyst")
+    assert not r.is_error, r.text
+    log_file = tmp_path / "claude.log"
+    fake = tmp_path / "claude"
+    fake.write_text(f"#!/bin/sh\nexec {sys.executable} {FAKE} \"$@\"\n")
+    fake.chmod(0o755)
+    monkeypatch.setattr(agent_session, "CLAUDE_BIN", str(fake))
+    monkeypatch.setenv("FAKE_CLAUDE_LOG", str(log_file))
+    monkeypatch.setenv("FAKE_CLAUDE_REPLY", "No sentence needed a comment.")
+    active.append(_extension(tmp_path, "own", {"tasks/checks": {"description": "Mine.", "command": ["python", "c.py"]}},
+                             {"tasks/checks/c.py": DEFAULT}))
+    assert await checks.start_run(CORPUS, "judgment", "report", force=True) is not None
+    done = await _until(lambda: (x := ((checks.read(CORPUS, "judgment") or {}).get("runs") or {}).get("report"))
+                        and x.get("status") != "running" and x, what="the check's run to end")
+    assert done["status"] == "done" and done["summary"].startswith("No sentence needed a comment."), done
+    [start] = [json.loads(line) for line in log_file.read_text().splitlines()]
+    argv = start["argv"]
+    assert start["session"] == checks.session_key("judgment", "report")
+    assert "comment" in argv[argv.index("--system-prompt") + 1].lower()
+    assert argv[argv.index("--model") + 1] and "--effort" in argv
 
 
 # --------------------------------------------------------------------------- Run now for an orientation program

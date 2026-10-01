@@ -899,7 +899,7 @@ async def run_task(c: str, task: str, part: roles.Part, input: dict[str, Any]) -
     HarnessError when it fails, RuntimeError when it may not start (_prepare). Its work folder goes when it ends."""
     job = task_job(c, task, input)
     try:
-        run, argv = _prepare(job, part)
+        run, argv = await asyncio.to_thread(_prepare, job, part)
         _register(run)
         try:
             return await _run(run, argv)
