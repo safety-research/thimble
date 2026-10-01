@@ -22,6 +22,7 @@ import json
 import logging
 import os
 import sqlite3
+import threading
 import time
 from pathlib import Path
 from typing import Any, Iterable, Iterator
@@ -35,6 +36,9 @@ YIELD_EVERY = 200                     # rows parsed between two yields of the in
 BUSY_TIMEOUT_S = 10.0                 # a connection waits this long for a lock
 CACHE_KB = 65_536                     # the writer's page cache
 _REF_KINDS_WITHOUT_PATH = ("card:", "cell:", "chat:", "concept:", "report:")
+# The marks' reads (rows_on_lines, rows_for_refs) take turns: Python's sqlite3 hands the GIL back and forth for every row
+# it steps, so a few such reads in parallel threads each take twenty times as long as one alone.
+_MARK_READS = threading.Lock()
 OLD_CARD, CARD = "cell:", "card:"  # a card unit's ref prefix: `cell:` is read as `card:` (cite.CARD_PREFIXES)
 
 
@@ -533,29 +537,45 @@ class Store:
             conn.close()
 
     def rows_for_refs(self, wanted: list[str]) -> list[dict]:
-        """The merged rows of these refs, in the order asked; a ref with no row of its own reads as the cover that
-        holds its line, when one does."""
-        conn = self.connect()
+        """The merged rows of these refs, in the order asked. A line's ref with no row of its own reads as the row of a
+        record that starts on that line without naming it (a CSV row, a JSON document's record), as a page of lines
+        finds it, else as the cover that holds its line, when one does."""
         out: list[dict] = []
-        try:
-            for i in range(0, len(wanted), 500):
-                part = [canon_ref(r) for r in wanted[i:i + 500]]
-                got = {r[0]: _merged(r) for r in conn.execute(
-                    f"SELECT {_MERGED_COLS} FROM current WHERE ref IN ({','.join('?' * len(part))})", part)}
-                for ref in part:
-                    if ref in got:
-                        out.append(got[ref])
-                        continue
-                    path, line = ref_parts(ref)
-                    if path is None or line is None:
-                        continue
-                    cover = conn.execute("SELECT value, source, ts FROM covers WHERE path = ? AND ? BETWEEN first AND last "
-                                         "ORDER BY rowid DESC LIMIT 1", (path, line)).fetchone()
-                    if cover is not None:
-                        out.append(implicit_row(path, line, str(cover[0]), cover[1], cover[2]))
-            return out
-        finally:
-            conn.close()
+        with _MARK_READS:
+            conn = self.connect()
+            try:
+                for i in range(0, len(wanted), 500):
+                    part = [canon_ref(r) for r in wanted[i:i + 500]]
+                    got = {r[0]: _merged(r) for r in conn.execute(
+                        f"SELECT {_MERGED_COLS} FROM current WHERE ref IN ({','.join('?' * len(part))})", part)}
+                    lines: dict[str, set[int]] = {}
+                    for ref in part:
+                        path, line = ref_parts(ref) if ref not in got else (None, None)
+                        if path is not None and line is not None:
+                            lines.setdefault(path, set()).add(line)
+                    starts: dict[tuple[str, int], dict] = {}
+                    for path, ns in lines.items():
+                        marks = ",".join("?" * len(ns))
+                        for r in conn.execute(f"SELECT {_MERGED_COLS} FROM current WHERE path = ? AND line IN ({marks}) "
+                                              "ORDER BY rowid", (path, *ns)):
+                            starts.setdefault((path, int(r[-1])), _merged(r))
+                    for ref in part:
+                        if ref in got:
+                            out.append(got[ref])
+                            continue
+                        path, line = ref_parts(ref)
+                        if path is None or line is None:
+                            continue
+                        if (path, line) in starts:
+                            out.append(starts[(path, line)])
+                            continue
+                        cover = conn.execute("SELECT value, source, ts FROM covers WHERE path = ? AND ? BETWEEN first AND last "
+                                             "ORDER BY rowid DESC LIMIT 1", (path, line)).fetchone()
+                        if cover is not None:
+                            out.append(implicit_row(path, line, str(cover[0]), cover[1], cover[2]))
+                return out
+            finally:
+                conn.close()
 
     def rows_for_path(self, path: str | None, lines: tuple[int, int] | None = None) -> list[dict]:
         """The merged rows on one corpus path, in first-labelled order, then the implicit rows of its covers in line
@@ -583,6 +603,10 @@ class Store:
         Each span is one search of the (path, line) index, so a page of a file with millions of rows reads only its
         own."""
         spans = merge_spans(spans)
+        with _MARK_READS:
+            return self._rows_on_lines(path, spans)
+
+    def _rows_on_lines(self, path: str, spans: list[tuple[int, int]]) -> list[dict]:
         conn = self.connect()
         try:
             got: dict[str, tuple] = {}

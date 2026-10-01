@@ -98,9 +98,11 @@ def _emit(c: str, event: dict) -> None:
     _do()
 
 
-def _notify(c: str, concept_id: str, what: str) -> None:
-    """`concepts {concept, what}` on the workspace stream after a label is defined, changed, applied or deleted."""
-    _emit(c, {"type": "concepts", "concept": concept_id, "what": what})
+def _notify(c: str, concept_id: str, what: str, rows: bool = True) -> None:
+    """`concepts {concept, what, rows}` on the workspace stream after a label is defined, changed, applied or deleted;
+    `rows` False when its rows stay as they were (turned on or off, recoloured, a filter set), so the marks read from
+    them need not be read again."""
+    _emit(c, {"type": "concepts", "concept": concept_id, "what": what, "rows": rows})
 
 
 KINDS = ("prompt", "regex", "code")
@@ -3235,7 +3237,7 @@ def _files_label_off(c: str, ws: Path, concept_id: str) -> None:
     if concept is not None and concept["shown"]:
         concept["shown"] = False
         write_concept(ws, coloured(ws, concept))
-        _notify(c, concept["id"], "changed")
+        _notify(c, concept["id"], "changed", rows=False)
 
 
 def set_filter(c: str, scope: str, concept_id: str, value: str) -> dict:
@@ -3262,7 +3264,7 @@ def set_filter(c: str, scope: str, concept_id: str, value: str) -> dict:
                 for cl in concept["classes"]:
                     cl["highlight"] = cl["name"] == value
             write_concept(ws, coloured(ws, concept))
-            _notify(c, concept["id"], "changed")
+            _notify(c, concept["id"], "changed", rows=False)
     _emit(c, _filter_event(scope, filters[scope]))
     return filters
 
@@ -3778,7 +3780,7 @@ def show_concept(c: str, id_or_name: str, on: bool | None, values: list[str] | N
         f = read_filters(ws).get("files")
         if f and f["concept"] == concept["id"]:
             clear_filter(c, "files")
-    _notify(c, concept["id"], "changed")
+    _notify(c, concept["id"], "changed", rows=False)
     return concept
 
 
@@ -3974,6 +3976,7 @@ def update_concept_route(c: str, concept_id: str, body: ConceptPatch) -> dict:
     colour and highlight. Turning a label off in Files drops a Files filter that names it."""
     ws, concept = load_concept(c, concept_id)
     before = {k: concept[k] for k in DEFINITION}
+    name_before = concept["name"]
     if body.name is not None and body.name.strip():
         concept["name"] = " ".join(body.name.split())
     if body.description is not None:
@@ -4021,7 +4024,7 @@ def update_concept_route(c: str, concept_id: str, body: ConceptPatch) -> dict:
         f = read_filters(ws).get("files")
         if f and f["concept"] == concept_id:
             clear_filter(c, "files")
-    _notify(c, concept_id, "changed")
+    _notify(c, concept_id, "changed", rows={k: concept[k] for k in DEFINITION} != before or concept["name"] != name_before)
     return with_stats(ws, concept)
 
 

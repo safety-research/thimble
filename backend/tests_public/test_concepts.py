@@ -139,6 +139,7 @@ async def test_one_labels_request_reads_the_rows_of_several_line_ranges(api, wor
     rows = [{"ref": f"big.jsonl#L{n}", "label": "yes", "source": "regex", "ts": "t"} for n in (3, 600, 1200, 5000, 9000)]
     rows += [{"ref": "big.jsonl", "label": "yes", "source": "regex", "ts": "t"},
              {"ref": "other.jsonl#L3", "label": "yes", "source": "regex", "ts": "t"},
+             {"ref": "rows.csv#row=2", "line": 4, "label": "yes", "source": "regex", "ts": "t"},
              labels_store.cover_row("big.jsonl", 1000, 1010, "no", "regex", "t")]
     lf.write_text("".join(json.dumps(r) + "\n" for r in rows))
 
@@ -160,6 +161,14 @@ async def test_one_labels_request_reads_the_rows_of_several_line_ranges(api, wor
                                                                                *(f"big.jsonl#L{n}" for n in range(1000, 1006))])
     scanned = labels_store.scan_jsonl(lf, "big.jsonl", [(1, 500), (1001, 1500), (4501, 5000)])
     assert sorted(r["ref"] for r in scanned) == sorted(refs_got)
+
+    # a view asks for its records by ref: a line with no row of its own reads as the row of a record starting there,
+    # else as its cover
+    r = await api.post(f"/api/ws/{CORPUS}/labels/refs", json={"refs": ["big.jsonl#L600", "big.jsonl#L1005", "big.jsonl#L7",
+                                                                       "rows.csv#L4", "rows.csv#L5"]})
+    assert r.status_code == 200, r.text
+    by_ref = {row["ref"]: row["label"] for e in r.json() if e["concept_id"] == k["id"] for row in e["rows"]}
+    assert by_ref == {"big.jsonl#L600": "yes", "big.jsonl#L1005": "no", "rows.csv#row=2": "yes"}
 
     for bad in ("1-500,x", "1-500,600-500", ",".join(f"{i * 10 + 1}-{i * 10 + 5}" for i in range(concepts.LINE_SPANS_MAX + 1))):
         r = await api.get(f"/api/ws/{CORPUS}/labels", params={"path": "big.jsonl", "lines": bad})
