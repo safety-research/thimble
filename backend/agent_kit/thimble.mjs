@@ -1,4 +1,4 @@
-// The `thimble` module of a JavaScript or TypeScript program that runs one of thimble's agents, the twin of
+// The `thimble` module of a JavaScript or TypeScript program that runs one of thimble's roles or tasks, the twin of
 // thimble.py. A program loads it from the path thimble gives it:
 //
 //   const thimble = await import(process.env.THIMBLE_KIT_JS)
@@ -15,6 +15,7 @@ import { createInterface } from 'node:readline'
 export const WORK = process.env.THIMBLE_WORK || '.'
 export const CORPUS = process.env.THIMBLE_CORPUS || '.'
 export const ROLE = process.env.THIMBLE_ROLE || ''
+export const TASK = process.env.THIMBLE_TASK || ''
 export const AGENT_DIR = process.env.THIMBLE_AGENT_DIR || '.'
 const SLOT_RE = /\{\{([a-z_][a-z0-9_]*)\}\}/g
 
@@ -56,7 +57,7 @@ function send(obj) {
   return new Promise((resolve) => process.stdout.write(JSON.stringify(obj) + '\n', () => resolve()))
 }
 
-/** The role's input, which thimble sends first. */
+/** The role's or task's input, which thimble sends first. */
 export async function getInput() {
   const got = await input
   if (!got) throw new ThimbleError('thimble sent no input')
@@ -77,7 +78,7 @@ export function log(text) {
   return send({ log: String(text) })
 }
 
-/** What the role returns: for the orientation, the one line main hears. */
+/** What the role or task returns: for the orientation, the one line main hears; for a task, its output object. */
 export function output(value) {
   return send({ output: value })
 }
@@ -92,10 +93,17 @@ export function ask(prompt, { schema, model } = {}) {
   return request('ask', { prompt, ...(schema ? { schema } : {}), ...(model ? { model } : {}) })
 }
 
-/** A Claude Code session thimble runs as the role, in its sandbox and permission mode; its last reply. */
-export function session(prompt, { system, tools, agents } = {}) {
-  return request('session', { prompt, ...(system ? { system } : {}), ...(tools ? { tools } : {}), ...(agents ? { agents } : {}) })
+/** A Claude Code session thimble runs as the role or task, in its sandbox and permission mode; its last reply. */
+export function session(prompt, { system, tools, agents, model } = {}) {
+  return request('session', { prompt, ...(system ? { system } : {}), ...(tools ? { tools } : {}), ...(agents ? { agents } : {}), ...(model ? { model } : {}) })
 }
+
+/** thimble's own implementation of the task on `input`, on `model` in place of the task's own when given: the output
+ * it returns. A role has none to lend. */
+export function default_(input, { model } = {}) {
+  return request('default', { input, ...(model ? { model } : {}) })
+}
+export { default_ as default }
 
 /** The text of `path` (relative to the program's agent folder) with each {{slot}} filled from `slots`. */
 export function prompt(path, slots = {}) {

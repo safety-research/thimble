@@ -1,14 +1,28 @@
-"""Extensions' changes to thimble's seven tasks by the prompt way: tasks/<task>/task.json with `prompt`, and `replace`,
-in an active extension (extensions._tasks). Each task's prompt is one part of a prompt file under prompts/
-(TASK_PROMPTS): the whole file, its head (the text above its first `## ` section) or one `## ` section. files(c,
-name) writes the prompt file `name` as the active extensions change it, into the workspace's registry folder, which
-a kernel cannot write: a replacement in place of its task's part, then each addition after that part under its
-extension's name. The call sites read it through prompts.custom. In an extension's text `{{default}}` is thimble's own
-part, `{{default#<section>}}` a `## ` section of the same file, `{{dir}}` the extension's folder and `{{files}}` the
-files its views and card types cover here; any other double brace is kept as text. Two extensions that replace one task leave it thimble's. A task's SDK program or command is
-read but not run (extensions.NOT_RUN)."""
+"""thimble's seven tasks, each a fixed job with one input and one output (TASKS), and how an active extension's
+tasks/<task>/task.json changes one: by a prompt, an Agent SDK program (`sdk`) or a command (`command`), as a role's
+agent.json does (roles.py). docs/agents.md documents each task's input and output.
+
+Each task is a function from its input to its output: thimble's own implementation (Task.implementation), which
+call() runs unless an extension's program replaces the task here (program()). A program runs through harness.py in
+the box of the config agent its task names (Task.agent), with the same consent rules and the same deny of server.json
+as every agent, and returns the object thimble's own implementation returns. thimble's own is lent to it as
+`thimble.default(input)` (default()). call() answers with a model.CallResult either way, so the callers' handling of a
+failed or refused call stays one path. The checks task is a session with tools rather than one call, so checks.py
+starts its program in an agent chat of its own (harness.start).
+
+The prompt way: each task's prompt is one part of a prompt file under prompts/ (TASK_PROMPTS): the whole file, its
+head (the text above its first `## ` section) or one `## ` section. files(c, name) writes the prompt file `name` as the
+active extensions change it, into the workspace's registry folder, which a kernel cannot write: a replacement in
+place of its task's part, then each addition after that part under its extension's name. The call sites read it
+through prompts.custom. In an extension's text `{{default}}` is thimble's own part, `{{default#<section>}}` a `## `
+section of the same file, `{{dir}}` the extension's folder and `{{files}}` the files its views and card types cover
+here; any other double brace is kept as text.
+
+A replacing prompt and a program each replace the task. Two extensions that replace one task leave it thimble's, and
+Settings names both."""
 from __future__ import annotations
 
+import importlib
 import json
 import logging
 import re
@@ -20,6 +34,29 @@ from . import config, roles
 
 log = logging.getLogger("thimble.tasks")
 
+
+@dataclass(frozen=True)
+class Task:
+    """One of thimble's tasks: its own implementation, `module:function` under app/, an async function (c, input, *,
+    model=None, ...) that returns a model.CallResult whose output is the task's output; the agent of thimble's config
+    whose sandbox, network, data and env settings a program of the task runs under; and the thimble tools a program
+    may call."""
+
+    implementation: str
+    agent: str
+    tools: tuple[str, ...] = ("read_ref",)
+    session: bool = False  # a session with tools rather than one model call
+
+
+TASKS: dict[str, Task] = {
+    "labels": Task("concepts:labels_task", "labels"),
+    "label-draft": Task("concepts:draft_task", "labels"),
+    "card-check": Task("card_check:check_task", "cardCheck"),
+    "view-review": Task("view_review:review_task", "cardCheck"),
+    "view-fit": Task("view_fit:fit_task", "labels"),
+    "file-viewer": Task("views:file_viewer_task", "dev"),
+    "checks": Task("checks:check_task", "checks", ("read_ref", "list_cards", "add_comment"), session=True),
+}
 WHOLE, HEAD = "", "^"  # a task's part of its prompt file: the whole file, or the text above its first `## ` section
 TASK_PROMPTS = {
     "labels": ("labels", HEAD),
@@ -34,6 +71,113 @@ TASK_JSON = "task.json"
 PROMPTS_DIR = "prompts"  # in the workspace's registry folder
 SECTION_RE = re.compile(r"^## (.+?)[ \t]*$", re.M)
 PLACEHOLDER_RE = re.compile(r"\{\{default(?:#([^}\n]+))?\}\}|\{\{dir\}\}|\{\{files\}\}")
+TASK_FIELDS = ("description", "prompt", "replace", "sdk", "command", "model", "effort")
+
+
+# --------------------------------------------------------------------------- programs
+
+
+def _spec(root: Path, task: str) -> dict[str, Any] | None:
+    try:
+        spec = json.loads((root / "tasks" / task / TASK_JSON).read_text("utf-8"))
+    except (OSError, ValueError):
+        return None
+    return spec if isinstance(spec, dict) else None
+
+
+def code_parts(c: str | None, task: str) -> list[roles.Part]:
+    """The task.json of `task` of each active extension in workspace `c` that runs the task with a program (sdk or
+    command) whose file is in its folder, as a roles.Part harness.py runs."""
+    if not c:
+        return []
+    from . import extension_manifest, extensions  # noqa: PLC0415 — extensions imports the views module
+
+    out = []
+    for e in extensions.active(c):
+        root = Path(str(e["src"]))
+        spec = _spec(root, task)
+        if spec is None or extension_manifest.kind(spec) not in roles.CODE_WAYS:
+            continue
+        part = roles.Part(str(e["name"]), task, root / "tasks" / task, root, spec,
+                          [str(x) for x in e.get("files") or [] if isinstance(x, str)])
+        if part.way == "sdk" and (part.path(spec["sdk"]) is None or not part.path(spec["sdk"]).is_file()):
+            log.warning("%s: %s's %s task names an SDK program that is not in its folder", c, part.extension, task)
+            continue
+        if part.way == "command" and not (isinstance(spec["command"], list) and spec["command"]
+                                          and all(isinstance(a, str) and a for a in spec["command"])):
+            log.warning("%s: %s's %s task's command is not a list of words", c, part.extension, task)
+            continue
+        out.append(part)
+    return out
+
+
+def replacing(c: str | None, task: str) -> list[str]:
+    """The active extensions in workspace `c` that replace `task`: by a program, or by a prompt with `replace`."""
+    return [p.extension for p in code_parts(c, task)] + [p.extension for p in parts(c, task) if p.replace]
+
+
+def program(c: str | None, task: str) -> roles.Part | None:
+    """The program that runs `task` in workspace `c` in place of thimble's own: the one extension that replaces the
+    task does so with a program. None when thimble's own runs it, or when two extensions replace it."""
+    code = code_parts(c, task)
+    if not code:
+        return None
+    if len(replacing(c, task)) > 1:
+        log.warning("%s: %s all replace the %s task, so thimble's own runs it", c, " and ".join(replacing(c, task)),
+                    task)
+        return None
+    return code[0]
+
+
+def _implementation(task: str) -> Any:
+    module, _, name = TASKS[task].implementation.partition(":")
+    return getattr(importlib.import_module(f"app.{module}"), name)
+
+
+async def default(c: str, task: str, input: dict[str, Any], *, model: str | None = None, **kw: Any) -> Any:  # noqa: A002
+    """thimble's own implementation of `task` on `input`: a model.CallResult (never raises for a failed model call)."""
+    return await _implementation(task)(c, input, model=model, **kw)
+
+
+def output_problem(output: Any, schema: dict[str, Any] | None) -> str:
+    """Why a program's output does not fit `schema` (the output thimble's own implementation gives), '' when it does."""
+    if schema is None:
+        return ""
+    import jsonschema  # noqa: PLC0415
+
+    if not isinstance(output, dict):
+        return f"{type(output).__name__} where an object is expected"
+    err = next(iter(sorted(jsonschema.Draft202012Validator(schema).iter_errors(output), key=lambda e: e.path)), None)
+    if err is None:
+        return ""
+    at = "/".join(str(x) for x in err.absolute_path)
+    return f"{err.message}" + (f" at {at}" if at else "")
+
+
+async def call(c: str, task: str, input: dict[str, Any], *, schema: dict[str, Any] | None = None,  # noqa: A002
+               **kw: Any) -> Any:
+    """Run `task` on `input` in workspace `c`: the program that replaces it here (program()), else thimble's own with
+    `kw`. A model.CallResult: a program's output that fits `schema` is `ok`, and a program that fails, or whose output
+    does not fit, is `error` with why in its detail."""
+    from . import harness, model  # noqa: PLC0415 — harness imports agent_session's helpers lazily
+
+    part = program(c, task)
+    if part is None:
+        return await default(c, task, input, **kw)
+    who = f"{part.extension}'s {task} program"
+    try:
+        out = await harness.run_task(c, task, part, input)
+    except (harness.HarnessError, RuntimeError, OSError) as e:
+        log.warning("%s: %s failed: %s", c, who, e)
+        return model.CallResult(status="error", detail=str(e)[:1200], model_requested=who)
+    if why := output_problem(out, schema):
+        log.warning("%s: %s returned an output thimble cannot use: %s", c, who, why)
+        return model.CallResult(status="error", detail=f"{who} returned an output thimble cannot use: {why}",
+                                model_requested=who)
+    return model.CallResult(status="ok", output=out, model_requested=who, model_used=who)
+
+
+# --------------------------------------------------------------------------- the prompt way
 
 
 @dataclass
@@ -133,13 +277,14 @@ def text_of(c: str | None, name: str) -> str | None:
             continue
         a, b = span
         default = text[a:b].strip()
-        replacing = [p for p in found if p.replace]
+        prompts_replacing = [p for p in found if p.replace]
+        others = [p.extension for p in code_parts(c, t)]
         body = default
-        if len(replacing) == 1:
-            body = _fill(replacing[0].text, replacing[0], default, whole, slots) or default
-        elif len(replacing) > 1:
-            log.warning("%s: %s all replace the %s task's prompt, so thimble's own is used", c,
-                        " and ".join(p.extension for p in replacing), t)
+        if len(prompts_replacing) == 1 and not others:
+            body = _fill(prompts_replacing[0].text, prompts_replacing[0], default, whole, slots) or default
+        elif prompts_replacing:
+            log.warning("%s: %s all replace the %s task, so thimble's own prompt is used", c,
+                        " and ".join([*(p.extension for p in prompts_replacing), *others]), t)
         added = [f"{roles.ADDED_HEADING.format(name=p.extension).replace('## ', '#### ')}\n\n{_fill(p.text, p, default, whole, slots)}"
                  for p in found if not p.replace]
         if added:
@@ -170,13 +315,17 @@ def files(c: str | None, name: str) -> dict[str, Path]:
 
 
 def public(c: str | None) -> list[dict[str, Any]]:
-    """Per task an extension changes here: {task, additions, replacing, conflict}, for Settings."""
+    """Each task's row in Settings: who runs it here (`way`: thimble, prompt for an extension's prompt in place of
+    thimble's, sdk or command), that extension, the extensions that add to its prompt, and the extensions that all
+    replace it, in which case thimble's own runs."""
     out = []
-    for t in TASK_PROMPTS:
+    for t in TASKS:
         found = parts(c, t)
-        if not found:
-            continue
-        rep = [p.extension for p in found if p.replace]
-        out.append({"task": t, "additions": [p.extension for p in found if not p.replace],
-                    "replacing": rep[0] if len(rep) == 1 else "", "conflict": rep if len(rep) > 1 else []})
+        code = code_parts(c, t)
+        rep = [*code, *(p for p in found if p.replace)]
+        row = {"task": t, "way": "thimble", "extension": "", "additions": [p.extension for p in found if not p.replace],
+               "conflict": [p.extension for p in rep] if len(rep) > 1 else []}
+        if len(rep) == 1:
+            row.update(way=getattr(rep[0], "way", "prompt"), extension=rep[0].extension)
+        out.append(row)
     return out

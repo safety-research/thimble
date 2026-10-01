@@ -1707,34 +1707,44 @@ def few_shot_examples(ws: Path, concept: dict, corpus_dir: Path | None = None, l
     return out
 
 
-def build_classify_prompt(concept: dict, items: list[tuple[str, str]], comment: bool = True) -> tuple[str, str]:
-    """(system, user) for one batch of (ref, text) items; `comment` asks for the one-line rationale; the concept's
-    `examples` (few_shot_examples, attached by run_apply for the run) fill the prompt's examples slot."""
+def label_input(concept: dict, items: list[tuple[str, str]], comment: bool = True) -> dict:
+    """The labels task's input (tasks.py) for one batch of (ref, text) items: the label's name, unit, definition (''
+    for none), values, marks, the analyst's examples (few_shot_examples, attached by run_apply for the run) and whether
+    a one-line rationale is asked for; then the items, numbered from 1."""
+    return {"label": {"name": str(concept["name"]), "unit": str(concept["unit"]), "definition": definition_text(concept),
+                      "values": [str(v) for v in concept["labels"]], "marks": str(concept.get("marks") or ""),
+                      "examples": list(concept.get("examples") or []), "comment": bool(comment)},
+            "items": [{"i": n, "ref": ref, "text": text} for n, (ref, text) in enumerate(items, 1)]}
+
+
+def build_classify_prompt(inp: dict) -> tuple[str, str]:
+    """(system, user) for the labels task's input (label_input)."""
     from . import prompts
 
+    label = inp["label"]
     system = prompts.render_head("labels", {
-        "name": str(concept["name"]), "unit": UNIT_WORDS.get(concept["unit"], concept["unit"]),
-        "definition": definition_text(concept) or labels_part("no-definition"),
-        "labels": ", ".join(concept["labels"]), "comment": labels_part("comment") if comment else "",
-        "examples": render_examples(concept.get("examples") or [])})
-    user = [f"### item {n} [{ref}]\n{text}" for n, (ref, text) in enumerate(items, 1)]
+        "name": str(label["name"]), "unit": UNIT_WORDS.get(label["unit"], label["unit"]),
+        "definition": str(label.get("definition") or "") or labels_part("no-definition"),
+        "labels": ", ".join(label["values"]), "comment": labels_part("comment") if label.get("comment", True) else "",
+        "examples": render_examples(label.get("examples") or [])})
+    user = [f"### item {it['i']} [{it['ref']}]\n{it['text']}" for it in inp["items"]]
     return system.strip(), "\n\n".join(user)
 
 
-def labels_tool(concept: dict, comment: bool = True) -> Any:
-    """The classifier's output schema as a model.ToolSpec: one {i, label, confidence, rationale?, quote?} entry per
-    item. `label` is a free string (an off-list value is kept as data) and `confidence` also accepts a string; `quote`
-    is asked for when the label marks spans."""
+def labels_tool(label: dict) -> Any:
+    """The classifier's output schema as a model.ToolSpec for the labels task's `label` (label_input): one {i, label,
+    confidence, rationale?, quote?} entry per item. `label` is a free string (an off-list value is kept as data) and
+    `confidence` also accepts a string; `quote` is asked for when the label marks spans."""
     from . import model
 
     props: dict[str, Any] = {
         "i": {"type": "integer", "description": "The item number, exactly as given."},
-        "label": {"type": "string", "description": f"One of the allowed values: {', '.join(concept['labels'])}."},
+        "label": {"type": "string", "description": f"One of the allowed values: {', '.join(label['values'])}."},
         "confidence": {"type": ["number", "string"], "description": "0..1: how sure you are the value is right."},
     }
-    if comment:
+    if label.get("comment", True):
         props["rationale"] = {"type": "string", "description": "One short sentence: why this value."}
-    if concept.get("marks") == "span":
+    if label.get("marks") == "span":
         props["quote"] = {"type": "string", "description": "The words of the item that carry the value, copied exactly; empty when no words do."}
     return model.ToolSpec(
         name="labels",
@@ -1749,29 +1759,41 @@ def labels_tool(concept: dict, comment: bool = True) -> Any:
     )
 
 
-async def classify_structured(c: str, concept: dict, items: list[tuple[str, str]], comment: bool = True,
-                              on_retry: Callable[[int, float, str, BaseException | None], Any] | None = None) -> Any:
-    """One classifier batch through model.structured (never raises; read the CallResult's status), on the concept's
-    `model` when it names one, else the labels role's. `on_retry` hears each retry model.structured waits for."""
-    from . import model
+async def labels_task(c: str, inp: dict, *, model: str | None = None,
+                      on_retry: Callable[[int, float, str, BaseException | None], Any] | None = None) -> Any:
+    """thimble's own labels task (tasks.py): one classifier batch through model.structured (never raises; read the
+    CallResult's status), on `model` when given, else the label's own model, else the labels role's."""
+    from . import model as model_mod
 
     from . import prompts, userconf  # noqa: PLC0415
 
     with prompts.custom(userconf.prompt_files(c, "labels")):
-        system, user = build_classify_prompt(concept, items, comment)
+        system, user = build_classify_prompt(inp)
     model_name, effort = labels_model(c)
-    if concept.get("model"):
-        model_name = concept["model"]
+    model_name = model or str(inp["label"].get("model") or "") or model_name
     with capture.scope("concepts labels", keep=True):
-        return await model.structured(
+        return await model_mod.structured(
             user,
-            tool=labels_tool(concept, comment),
+            tool=labels_tool(inp["label"]),
             model=model_name,
             effort=effort,
             system_append=system,
             cwd=config.corpus_dir(c),
             on_retry=on_retry,
         )
+
+
+async def classify_structured(c: str, concept: dict, items: list[tuple[str, str]], comment: bool = True,
+                              on_retry: Callable[[int, float, str, BaseException | None], Any] | None = None) -> Any:
+    """One classifier batch as the labels task (tasks.call: an extension's program, else labels_task, on the concept's
+    `model` when it names one); never raises, read the CallResult's status. `on_retry` hears each retry
+    model.structured waits for."""
+    from . import tasks  # noqa: PLC0415
+
+    inp = label_input(concept, items, comment)
+    if concept.get("model"):
+        inp["label"]["model"] = str(concept["model"])
+    return await tasks.call(c, "labels", inp, schema=labels_tool(inp["label"]).input_schema, on_retry=on_retry)
 
 
 def parse_labels(output: dict | None, concept: dict, n_items: int, comment: bool = True) -> dict[int, dict]:
@@ -4356,13 +4378,21 @@ def draft_of(output: dict | None, paths: list[str]) -> dict:
             "kind": kind, "text": text, "values": values[:8]}
 
 
-async def _labels_call(c: str, prompt: str, tool: Any) -> Any:
-    """One structured call of the labels role (never raises; read the CallResult's status)."""
-    from . import model
+async def draft_task(c: str, inp: dict, *, model: str | None = None) -> Any:
+    """thimble's own label-draft task (tasks.py): from the analyst's `description` and the `records` of the files the
+    label would apply to (sample_records), one structured call of the labels role, on `model` when given, whose output
+    is a label definition (draft_tool). Never raises; read the CallResult's status."""
+    from . import model as model_mod, prompts, tasks  # noqa: PLC0415
 
+    records = inp.get("records") if isinstance(inp.get("records"), dict) else {}
+    slots = {k: str(records.get(k) or "") for k in ("paths", "path", "cut", "lines")}
+    with prompts.custom(tasks.files(c, "labels")):
+        prompt = labels_part("draft", description=str(inp.get("description") or ""),
+                             records=labels_part("records", **slots) if slots["lines"] else "")
     model_name, effort = labels_model(c)
     with capture.scope("concepts draft", keep=True):
-        return await model.structured(prompt, tool=tool, model=model_name, effort=effort, cwd=config.corpus_dir(c))
+        return await model_mod.structured(prompt, tool=draft_tool(), model=model or model_name, effort=effort,
+                                          cwd=config.corpus_dir(c))
 
 
 def _call_failed(call: Any) -> HTTPException:
@@ -4384,11 +4414,10 @@ async def draft_route(c: str, body: DraftBody) -> dict:
         records = await asyncio.to_thread(sample_records, c, body.paths)
     except ValueError as e:
         raise HTTPException(404, str(e)) from e
-    from . import prompts, tasks  # noqa: PLC0415
+    from . import tasks  # noqa: PLC0415
 
-    with prompts.custom(tasks.files(c, "labels")):
-        prompt = labels_part("draft", description=text, records=labels_part("records", **records) if records["lines"] else "")
-    call = await _labels_call(c, prompt, draft_tool())
+    call = await tasks.call(c, "label-draft", {"description": text, "paths": list(body.paths), "records": records},
+                            schema=draft_tool().input_schema)
     if call.status != "ok":
         raise _call_failed(call)
     return draft_of(call.output, body.paths)

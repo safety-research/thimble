@@ -1,5 +1,10 @@
-"""Programs that run one of thimble's roles: the Agent SDK program (`sdk`) or the command (`command`) an extension's
-agents/<role>/agent.json names (roles.py). docs/agents.md documents what a program gets and how it answers.
+"""Programs that run one of thimble's roles or tasks: the Agent SDK program (`sdk`) or the command (`command`) an
+extension's agents/<role>/agent.json (roles.py) or tasks/<task>/task.json (tasks.py) names. docs/agents.md documents
+what a program gets and how it answers.
+
+A task's program (Job.task) runs under the settings of the config agent its task names (tasks.Task.agent), with that
+agent's model and permission mode, and returns the task's output (run_task); a `default` request runs thimble's own
+implementation of the task on the input it carries (tasks.default). A role has no implementation to lend.
 
 Start. run() opens the role's agent chat and starts the program from its agent folder: an SDK program through
 agent_kit/run_sdk.py on thimble's Python, a command as written, with thimble's Python first on PATH and
@@ -33,7 +38,7 @@ what the role returns, and `tool`, `ask` and `session` requests are answered on 
 everything on stderr, goes to the server's log; the end of stderr is the error of a run that fails.
 
 End. A run is done when the program exits 0, and failed otherwise. Stop ends the program's process group and its
-sessions.
+sessions. A task's work folder goes when its run ends.
 """
 from __future__ import annotations
 
@@ -44,6 +49,7 @@ import json
 import logging
 import os
 import secrets
+import shutil
 import signal
 import sys
 from collections import deque
@@ -82,6 +88,7 @@ NO_BOX_ENFORCED = ("thimble runs an agent's program only in its sandbox (sandbox
                    "this machine, so the {role} agent did not start. `thimble doctor` says what is missing.")
 NO_DEFAULT = ("thimble lends no implementation of the {role} role to a program. Run the role's work in your program, "
               "or add to thimble's prompt for it with the prompt way.")
+TASK_WORK = ("tasks", "work")  # under the workspace: each task run's work folder, removed when the run ends
 # a session's flags a program may choose, without and with a value; any other flag is dropped (claude_argv)
 KEEP = ("-p", "--print", "--verbose", "--include-partial-messages", "--include-hook-events", "--continue",
         "--fork-session", "--replay-user-messages", "--session-mirror", "--debug-to-stderr")
@@ -123,7 +130,7 @@ class Job:
     """What a role's caller asks a program to do."""
 
     c: str
-    role: str  # one of roles.SESSION_ROLES
+    role: str  # one of roles.SESSION_ROLES; for a task, the config agent whose settings it runs under (tasks.Task)
     key: str  # the THIMBLE_SESSION its tool calls and sessions run as: `orient`, `critique:<caller>`, `writer:<doc>`
     title: str
     input: dict[str, Any]
@@ -134,6 +141,27 @@ class Job:
     parent: str = agents.MAIN_ID
     fields: dict[str, Any] = field(default_factory=dict)  # land on the chat's meta
     writes: tuple[Path, ...] = ()  # folders besides `work` the program and its sessions write: a view's folder
+    task: str = ""  # one of tasks.TASKS when the program runs a task
+
+    @property
+    def what(self) -> str:
+        """The program in words: `the critic program`, `the labels task's program`."""
+        return f"the {self.task} task's program" if self.task else f"the {self.role} program"
+
+    @property
+    def model_role(self) -> str:
+        """Its role among config.MODEL_ROLES, whose model `ask` uses."""
+        return ROWS.get(self.role) or userconf.ROLES.get(self.role, self.role)
+
+    @property
+    def mode_row(self) -> str:
+        """Its row of the permission modes (modes.AGENTS); a task whose agent has none runs in main's mode."""
+        return ROWS.get(self.role) or userconf.MODE_ROWS.get(self.role, self.role)
+
+    @property
+    def unasked(self) -> bool:
+        """Whether its sessions do their own work unasked (UNASKED_ROLES); a task's always do."""
+        return bool(self.task) or self.role in UNASKED_ROLES
 
 
 @dataclass
@@ -238,7 +266,8 @@ def program_env(run: Run) -> dict[str, str]:
         "PYTHONPATH": os.pathsep.join([str(KIT), *([str(lib)] if lib.is_dir() else []), str(part.folder)]),
         "PYTHONDONTWRITEBYTECODE": "1", "PYTHONUNBUFFERED": "1",
         "THIMBLE_API": api_url(), "THIMBLE_AGENT_TOKEN": run.token, "THIMBLE_SESSION": job.key,
-        "THIMBLE_ROLE": job.role, "THIMBLE_WORKSPACE": job.c, "THIMBLE_WORK": str(job.work),
+        "THIMBLE_ROLE": "" if job.task else job.role, "THIMBLE_TASK": job.task, "THIMBLE_WORKSPACE": job.c,
+        "THIMBLE_WORK": str(job.work),
         "THIMBLE_CORPUS": str(corpus or ""), "THIMBLE_INPUT": str(job.work / INPUT_FILE),
         "THIMBLE_AGENT_DIR": str(part.folder), "THIMBLE_CLAUDE": str(SHIM), "THIMBLE_PYTHON": sys.executable,
         "THIMBLE_KIT_JS": str(KIT_JS), "THIMBLE_NETWORK": "on" if run.conf.network else "off",
@@ -268,7 +297,7 @@ async def _read_stdout(run: Run) -> None:
         try:
             raw = await run.proc.stdout.readline()
         except ValueError:  # a line over the limit
-            log.warning("%s: %s's program wrote a line over %d bytes; it is dropped", run.c, run.job.role, LINE_LIMIT)
+            log.warning("%s: %s wrote a line over %d bytes; it is dropped", run.c, run.job.what, LINE_LIMIT)
             continue
         if not raw:
             return
@@ -279,12 +308,14 @@ async def _read_stdout(run: Run) -> None:
             msg = None
         if not isinstance(msg, dict):
             if text.strip():
-                log.info("%s: %s program: %s", run.c, run.job.role, text[:2000])
+                log.info("%s: %s: %s", run.c, run.job.what, text[:2000])
             continue
         if "log" in msg:
             line = str(msg["log"]).rstrip("\n")
             if run.rec is not None and line:
                 run.rec.text(line + "\n")
+            elif line:
+                log.info("%s: %s: %s", run.c, run.job.what, line[:2000])
         elif "output" in msg:
             run.output, run.has_output = msg["output"], True
         elif isinstance(msg.get("id"), (int, str)):
@@ -302,7 +333,7 @@ async def _read_stderr(run: Run) -> None:
             return
         text = _line_text(raw)
         run.stderr.append(text)
-        log.info("%s: %s program (stderr): %s", run.c, run.job.role, text[:2000])
+        log.info("%s: %s (stderr): %s", run.c, run.job.what, text[:2000])
 
 
 async def _answer(run: Run, rid: Any, kind: str, payload: Any) -> None:
@@ -316,12 +347,14 @@ async def _answer(run: Run, rid: Any, kind: str, payload: Any) -> None:
         elif kind == "session":
             result = await session_call(run, payload)
         elif kind == "default":
-            raise HarnessError(NO_DEFAULT.format(role=run.job.role))
+            if not run.job.task:
+                raise HarnessError(NO_DEFAULT.format(role=run.job.role))
+            result = await task_default(run, payload)
         else:
             raise HarnessError("a request names tool, ask, session or default")
     except Exception as e:  # noqa: BLE001 — every failure is the program's to read
         if not isinstance(e, HarnessError):
-            log.exception("%s: a %s request of the %s program failed", run.c, kind, run.job.role)
+            log.exception("%s: a %s request of %s failed", run.c, kind, run.job.what)
         await _say(run, {"id": rid, "error": str(e) or type(e).__name__})
         return
     await _say(run, {"id": rid, "result": result})
@@ -332,8 +365,8 @@ async def tool_call(run: Run, payload: dict[str, Any]) -> dict[str, Any]:
 
     name = str(payload.get("name") or "")
     if name not in run.job.tools:
-        raise HarnessError(f"{name or 'a tool with no name'} is not one of the {run.job.role}'s tools: "
-                           f"{', '.join(run.job.tools)}")
+        raise HarnessError(f"{name or 'a tool with no name'} is not one of {run.job.what}'s tools: "
+                           f"{', '.join(run.job.tools) or 'none'}")
     args = payload.get("args") if isinstance(payload.get("args"), dict) else {}
     run.calls += 1
     cid = f"h{run.calls}"
@@ -357,13 +390,30 @@ async def ask(run: Run, payload: dict[str, Any]) -> Any:
     schema = payload.get("schema")
     plain = not isinstance(schema, dict)
     spec = model.ToolSpec("answer", "Give your answer with this tool.", ANSWER_TOOL if plain else schema)
-    role = config.models_for(run.c).get(ROWS[run.job.role]) or {}
+    role = config.models_for(run.c).get(run.job.model_role) or {}
     chosen = str(payload.get("model") or role.get("model") or config.FALLBACK_MODEL)
     res = await model.structured(prompt, tool=spec, model=chosen, effort=role.get("effort") or None,
                                  cwd=str(run.job.work))
     if res.status != "ok" or res.output is None:
         raise HarnessError(f"the model call ended {res.status}: {res.detail or res.text[:300]}")
     return res.output.get("text", "") if plain else res.output
+
+
+async def task_default(run: Run, payload: dict[str, Any]) -> Any:
+    """thimble's own implementation of the run's task on the input the request carries, with the request's model in
+    place of the task's own when it names one: the task's output, or HarnessError when it fails."""
+    from . import tasks  # noqa: PLC0415 — tasks reads the extensions
+
+    inp = payload.get("input")
+    if not isinstance(inp, dict):
+        raise HarnessError(f"default needs the {run.job.task} task's input, an object")
+    chosen = payload.get("model")
+    kw: dict[str, Any] = {"program": run} if tasks.TASKS[run.job.task].session else {}
+    res = await tasks.default(run.c, run.job.task, inp, model=str(chosen) if chosen else None, **kw)
+    if res.status != "ok":
+        raise HarnessError(f"thimble's {run.job.task} task ended {res.status.replace('_', ' ')}"
+                           + (f": {res.detail}" if res.detail else ""))
+    return res.output
 
 
 async def session_call(run: Run, payload: dict[str, Any]) -> str:
@@ -377,6 +427,9 @@ async def session_call(run: Run, payload: dict[str, Any]) -> str:
         argv += ["--tools", ",".join(str(t) for t in payload["tools"])]
     if isinstance(payload.get("agents"), dict):
         argv += ["--agents", json.dumps(payload["agents"])]
+    for key, flag in (("model", "--model"), ("effort", "--effort")):
+        if isinstance(payload.get(key), str) and payload[key].strip():
+            argv += [flag, payload[key].strip()]
     async with run.slots:
         final, folder, env = claude_argv(run, argv)
         proc = await asyncio.create_subprocess_exec(*final, cwd=str(folder), env=env, stdin=asyncio.subprocess.PIPE,
@@ -598,10 +651,10 @@ def claude_argv(run: Run, argv: list[str]) -> tuple[list[str], Path, dict[str, s
                 raise HarnessError(f"a session's words may not start with `{value}`, which is one of claude's "
                                    "commands. Send the prompt on stdin.")
             kept.append(value)
-    mode = modes.mode_for(job.c, ROWS[job.role])
+    mode = modes.mode_for(job.c, job.mode_row)
     permission_mode = modes.flag(mode)
     settings: dict[str, Any] = {"permissions": dict(asked)}
-    unasked = job.role in UNASKED_ROLES
+    unasked = job.unasked
     fenced = agent_session.fence(corpus, work, sandbox=conf.sandboxed, unasked=unasked, network=conf.network,
                                  auto_allow=not conf.install_asks(), required=conf.enforced, data=conf.data)
     perms = {**settings["permissions"]}
@@ -753,7 +806,7 @@ def start(job: Job, part: roles.Part, *, on_start: Callable[[Run], None] | None 
         try:
             if on_start is not None:
                 on_start(run)
-            summary = await _run(run, argv)
+            summary = as_text(await _run(run, argv))
             status = "done"
             return summary
         except asyncio.CancelledError:
@@ -768,11 +821,11 @@ def start(job: Job, part: roles.Part, *, on_start: Callable[[Run], None] | None 
                 try:
                     on_end(run, status, summary)
                 except Exception:  # noqa: BLE001 — the run has ended either way
-                    log.exception("%s: the end of the %s program could not be told", job.c, job.role)
+                    log.exception("%s: the end of %s could not be told", job.c, job.what)
 
     try:
         meta = agents.start_agent(job.c, job.chat_role or job.role, job.title, go, parent=job.parent,
-                                  by=agents.TERMINAL, agent_type=f"{part.extension}:{job.role}",
+                                  by=agents.TERMINAL, agent_type=f"{part.extension}:{job.task or job.role}",
                                   extension=part.extension, way=part.way, **job.fields)
         run.chat = str(meta["id"])
     except Exception:
@@ -785,7 +838,7 @@ def _prepare(job: Job, part: roles.Part) -> tuple[Run, list[str]]:
     """The run of `part`'s program for `job` and the argv that starts it, in its box where the box runs. RuntimeError
     when one runs for the key, or the role may not start (its config, or the sandbox it needs)."""
     if running(job.c, job.key):
-        raise RuntimeError(f"the {job.role} program of {job.key} is running")
+        raise RuntimeError(f"{job.what} of {job.key} is running")
     try:
         conf = userconf.session(job.c, job.role, sandbox=True)
     except userconf.ConfigError as e:
@@ -795,7 +848,7 @@ def _prepare(job: Job, part: roles.Part) -> tuple[Run, list[str]]:
     argv = program_argv(part)
     wrapped = boxed(run, argv)
     if wrapped is None and conf.conf.get("sandbox") != "off" and conf.enforced:
-        raise RuntimeError(NO_BOX_ENFORCED.format(role=job.role))
+        raise RuntimeError(NO_BOX_ENFORCED.format(role=job.task or job.role))
     run.boxed = wrapped is not None
     return run, wrapped or argv
 
@@ -818,9 +871,42 @@ async def run_in(job: Job, part: roles.Part, rec: agents.Recorder | None) -> str
     run.rec, run.chat = rec, rec.chat_id if rec is not None else ""
     _register(run)
     try:
-        return await _run(run, argv)
+        return as_text(await _run(run, argv))
     finally:
         _unregister(run)
+
+
+def task_work(c: str) -> Path:
+    """A fresh work folder for one run of a task's program."""
+    return config.workspace_dir(c).joinpath(*TASK_WORK) / secrets.token_hex(6)
+
+
+def task_job(c: str, task: str, input: dict[str, Any], *, key: str = "", title: str = "", work: Path | None = None,  # noqa: A002
+             **fields: Any) -> Job:
+    """The job of a run of `task`'s program on `input`, under its config agent's settings, with its tools; `key` is the
+    THIMBLE_SESSION its tool calls and sessions run as (a fresh `task:<task>:<id>` by default), `work` its work folder
+    (a fresh one under TASK_WORK by default)."""
+    from . import tasks  # noqa: PLC0415 — tasks reads the extensions
+
+    spec = tasks.TASKS[task]
+    work = work or task_work(c)
+    return Job(c, spec.agent, key or f"task:{task}:{work.name}", title or f"{task} task", input, spec.tools, work,
+               task=task, **fields)
+
+
+async def run_task(c: str, task: str, part: roles.Part, input: dict[str, Any]) -> Any:  # noqa: A002
+    """Run `part`'s program for one input of `task`, with no chat, and return its output as the program wrote it.
+    HarnessError when it fails, RuntimeError when it may not start (_prepare). Its work folder goes when it ends."""
+    job = task_job(c, task, input)
+    try:
+        run, argv = _prepare(job, part)
+        _register(run)
+        try:
+            return await _run(run, argv)
+        finally:
+            _unregister(run)
+    finally:
+        await asyncio.to_thread(shutil.rmtree, job.work, True)
 
 
 async def _run(run: Run, argv: list[str]) -> str:
@@ -835,8 +921,8 @@ async def _run(run: Run, argv: list[str]) -> str:
     hook_auth.grant(run.token_id, run.token, run.allows)
     if run.chat:
         corpus = run.conf.corpus() or config.corpus_dir(job.c)
-        rule = agent_session.sandbox_rule(corpus) if job.role in UNASKED_ROLES and run.conf.sandboxed else None
-        hosted = agent_session.host(job.c, job.key, run.chat, agent=ROWS[job.role],
+        rule = agent_session.sandbox_rule(corpus) if job.unasked and run.conf.sandboxed else None
+        hosted = agent_session.host(job.c, job.key, run.chat, agent=job.mode_row,
                                     wait_s=agent_session.PERMISSION_WAIT_S, sandbox=rule, conf=run.conf)
         hosted.patient = job.patient
     try:
@@ -846,8 +932,8 @@ async def _run(run: Run, argv: list[str]) -> str:
                 stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, start_new_session=True,
                 limit=LINE_LIMIT)
         except OSError as e:
-            raise HarnessError(f"the {job.role} program of {run.part.extension} could not start: {e}") from e
-        log.info("%s: %s program of %s started (pid %s, %s)", job.c, job.role, run.part.extension, run.proc.pid,
+            raise HarnessError(f"{job.what} of {run.part.extension} could not start: {e}") from e
+        log.info("%s: %s of %s started (pid %s, %s)", job.c, job.what, run.part.extension, run.proc.pid,
                  "in its sandbox" if run.boxed else "without a sandbox")
         await _say(run, {"input": job.input})
         readers = [asyncio.ensure_future(_read_stdout(run)), asyncio.ensure_future(_read_stderr(run))]
@@ -861,9 +947,15 @@ async def _run(run: Run, argv: list[str]) -> str:
         await _stop_all(run)
     if code != 0:
         tail = "\n".join(run.stderr).strip()[-1200:]
-        raise HarnessError(f"the {job.role} program of {run.part.extension} ended with code {code}"
+        raise HarnessError(f"{job.what} of {run.part.extension} ended with code {code}"
                            + (f": {tail}" if tail else ""))
-    out = run.output
+    if job.task and not run.has_output:
+        raise HarnessError(f"{job.what} of {run.part.extension} ended without an output")
+    return run.output
+
+
+def as_text(out: Any) -> str:
+    """What a program returned as the line its caller hears."""
     return out if isinstance(out, str) else "" if out is None else json.dumps(out, ensure_ascii=False)
 
 

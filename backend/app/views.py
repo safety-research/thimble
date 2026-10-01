@@ -4052,14 +4052,38 @@ def _fmt_size(n: int) -> str:
     return f"{n} bytes"
 
 
-async def _suggest_call(c: str, system: str, user: str, tool: Any) -> Any:
-    """The proposal's one model call: the `dev` role's model at low effort (the fallback model after a refusal, as
-    model.structured runs it). Tests replace it."""
-    from . import model  # noqa: PLC0415
+async def _suggest_call(c: str, system: str, user: str, tool: Any, model: str | None = None) -> Any:
+    """The proposal's one model call: `model`, else the `dev` role's model, at low effort (the fallback model after a
+    refusal, as model.structured runs it). Tests replace it."""
+    from . import model as model_mod  # noqa: PLC0415
 
     role = config.models_for(c).get("dev") or dict(config.ROLE_MODELS_DEFAULT["dev"])
-    return await model.structured(user, tool=tool, model=role.get("model") or config.ROLE_MODELS_DEFAULT["dev"]["model"],
-                                  effort="low", system_append=system, cwd=config.corpus_dir(c))
+    return await model_mod.structured(user, tool=tool,
+                                      model=model or role.get("model") or config.ROLE_MODELS_DEFAULT["dev"]["model"],
+                                      effort="low", system_append=system, cwd=config.corpus_dir(c))
+
+
+def _suggest_sections(c: str) -> tuple[dict[str, str], Any]:
+    """file-viewer.md's sections as the active extensions change them, and the proposal's model.ToolSpec."""
+    from . import model, prompts, tasks, tools  # noqa: PLC0415
+
+    with prompts.custom(tasks.files(c, SUGGEST_PROMPT)):
+        secs = {name: prompts.section(SUGGEST_PROMPT, name).strip() for name in ("suggest", "file", "proposal")}
+    desc, schema = tools.split_section(secs["proposal"])
+    return secs, model.ToolSpec(name="proposal", description=desc, input_schema=schema)
+
+
+async def file_viewer_task(c: str, inp: dict[str, Any], *, model: str | None = None) -> Any:
+    """thimble's own file-viewer task (tasks.py): from a file's path, size, how many files share its suffix, and its
+    start (file_head), one call says whether a viewer would help and proposes one (the `proposal` tool). Never raises
+    for a failed call; read the CallResult's status."""
+    from . import prompts  # noqa: PLC0415
+
+    secs, tool = await asyncio.to_thread(_suggest_sections, c)
+    system = prompts._fill(secs["suggest"], {}, f"{SUGGEST_PROMPT}.md")
+    user = prompts._fill(secs["file"], {k: str(inp.get(k) or "") for k in ("path", "size", "count", "suffix", "what",
+                                                                          "head")}, f"{SUGGEST_PROMPT}.md")
+    return await _suggest_call(c, system, user, tool, **({"model": model} if model else {}))
 
 
 async def suggest(c: str, rel: str) -> str | None:
@@ -4067,7 +4091,7 @@ async def suggest(c: str, rel: str) -> str | None:
     model call reads the file's start (prompts/file-viewer.md) and says whether a viewer would help; a yes is stored as
     a `suggested` proposal claiming the suffix's glob, a no as the suffix's answer, so it is never asked again. The
     proposal's slug, or None. A call that fails caches nothing, so the next file of the type asks again."""
-    from . import model, prompts, tools  # noqa: PLC0415
+    from . import tasks  # noqa: PLC0415
 
     got = await asyncio.to_thread(suggestion_for, c, rel)
     if not got["eligible"]:
@@ -4076,17 +4100,11 @@ async def suggest(c: str, rel: str) -> str | None:
     p = config.safe_corpus_path(config.corpus_dir(c), got["path"])
     what, head = await asyncio.to_thread(file_head, p)
     count = sum(1 for f in await asyncio.to_thread(folder_paths, config.corpus_dir(c)) if suffix_of(f) == suffix)
-    from . import tasks  # noqa: PLC0415
-
-    with prompts.custom(tasks.files(c, SUGGEST_PROMPT)):
-        secs = {name: prompts.section(SUGGEST_PROMPT, name).strip() for name in ("suggest", "file", "proposal")}
-    system = prompts._fill(secs["suggest"], {}, f"{SUGGEST_PROMPT}.md")
-    user = prompts._fill(secs["file"], {"path": got["path"], "size": _fmt_size(p.stat().st_size), "count": str(count),
-                                        "suffix": suffix, "what": what, "head": head}, f"{SUGGEST_PROMPT}.md")
-    desc, schema = tools.split_section(secs["proposal"])
-    tool = model.ToolSpec(name="proposal", description=desc, input_schema=schema)
+    inp = {"path": got["path"], "size": _fmt_size(p.stat().st_size), "count": str(count), "suffix": suffix,
+           "what": what, "head": head}
+    _, tool = await asyncio.to_thread(_suggest_sections, c)
     try:
-        res = await asyncio.wait_for(_suggest_call(c, system, user, tool), SUGGEST_TIMEOUT_S)
+        res = await asyncio.wait_for(tasks.call(c, "file-viewer", inp, schema=tool.input_schema), SUGGEST_TIMEOUT_S)
     except (asyncio.TimeoutError, Exception) as e:  # noqa: BLE001 — a failed call asks again next time
         log.info("no viewer suggestion for %s/%s: %s", c, rel, e)
         return None

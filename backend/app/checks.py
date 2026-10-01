@@ -343,6 +343,7 @@ class _Active:
     after_writer: bool = False  # queued until the document's writer ends, what it covers read then
     task: asyncio.Task | None = None
     session: agent_session.Run | None = None
+    program: bool = False  # an extension's program runs the checks task (tasks.program), in harness.py
     comments: int = 0
     ended: bool = False
     effort: str = ""
@@ -526,6 +527,12 @@ async def _go(act: _Active) -> None:
             effort = str(agent.get("effort") or DEFAULT_EFFORT)
             if act.ended:
                 return
+            from . import tasks  # noqa: PLC0415 — tasks reads the extensions
+
+            part = tasks.program(c, "checks")
+            if part is not None:
+                await _program(act, check, cover or [], prompt, part, done, effort)
+                return
             try:
                 run = await agent_session.start(
                     c, session_key(act.check, act.doc), role=ROLE, title=str(check["name"]),
@@ -552,11 +559,80 @@ async def _go(act: _Active) -> None:
         if act.session is not None and not act.ended:
             with contextlib.suppress(Exception):
                 await agent_session.stop_run(act.session)
+        if act.program and not act.ended:
+            from . import harness  # noqa: PLC0415
+
+            with contextlib.suppress(Exception):
+                await harness.stop(c, session_key(act.check, act.doc))
         _finish(act, "stopped", "")
         raise
     except Exception as e:  # noqa: BLE001 — a run that cannot start is failed, never left running
         log.exception("%s: the run of check %s on %s failed", c, act.check, act.doc)
         _finish(act, "failed", f"{type(e).__name__}: {e}")
+
+
+def check_input(check: dict[str, Any], doc: str, cover: list[dict[str, Any]], context: str) -> dict[str, Any]:
+    """The checks task's input (tasks.py): the check (its id, name and prompt), the document, the passages the run
+    covers ({ref, kind, anchor}, the id a comment on the whole passage goes on) and the run's first message, which
+    holds the document and the context engine's part."""
+    return {"check": {"id": str(check["id"]), "name": str(check["name"]), "prompt": str(check.get("prompt") or "").strip()},
+            "doc": doc, "passages": [{"ref": p["ref"], "kind": p["kind"], "anchor": p["anchor"]} for p in cover],
+            "context": context}
+
+
+async def check_task(c: str, inp: dict[str, Any], *, model: str | None = None, program: Any = None) -> Any:
+    """thimble's own checks task (tasks.py), lent to a program that runs it: a Claude Code session as the check agent
+    (prompts/check.md) on the input's `context`, run as the program's run (harness.session_call), which comments
+    with add_comment as thimble's own run does. A model.CallResult whose output is the session's last reply."""
+    from . import harness, model as model_mod  # noqa: PLC0415
+
+    if program is None:
+        return model_mod.CallResult(status="error", detail="the checks task runs only in a program's run")
+    with prompts.custom(userconf.prompt_files(c, "checks")):
+        _, agent = agent_definition()
+    conf = config.models_for(c)[MODEL_ROLE]
+    agent = agent_session.role_agent(agent, conf)
+    payload = {"prompt": str(inp.get("context") or ""), "system": str(agent.get("prompt") or ""),
+               "model": model or str(agent.get("model") or ""), "effort": str(agent.get("effort") or DEFAULT_EFFORT)}
+    try:
+        reply = await harness.session_call(program, payload)
+    except harness.HarnessError as e:
+        return model_mod.CallResult(status="error", detail=str(e))
+    return model_mod.CallResult(status="ok", output=reply)
+
+
+async def _program(act: _Active, check: dict[str, Any], cover: list[dict[str, Any]], prompt: str, part: Any,
+                   done: asyncio.Future, effort: str) -> None:
+    """The run as an extension's program of the checks task, in an agent chat of its own; it comments through
+    add_comment as the run's session, and what it returns is the run's summary. Held to the run's limit."""
+    from . import harness  # noqa: PLC0415
+
+    c = act.c
+    job = harness.task_job(c, "checks", check_input(check, act.doc, cover, prompt), key=session_key(act.check, act.doc),
+                           title=str(check["name"]), work=work_dir(c, act.check, act.doc), chat_role=ROLE,
+                           fields={"check": act.check, "doc": act.doc, "run_id": act.run})
+
+    def ended(run: harness.Run, status: str, summary: str) -> None:
+        _finish(act, status, summary)
+        if not done.done():
+            done.set_result(status)
+
+    try:
+        run = harness.start(job, part, on_end=ended)
+    except RuntimeError as e:
+        _finish(act, "failed", str(e))
+        return
+    act.program = True
+    act.effort = effort
+    _chat(act, run.chat)
+    limit = run_limit(effort)
+    try:
+        await asyncio.wait_for(asyncio.shield(done), limit)
+    except asyncio.TimeoutError:
+        act.timed_out = limit
+        await harness.stop(c, session_key(act.check, act.doc))
+        if not act.ended:
+            _finish(act, "stopped", "")
 
 
 async def _after_writer(act: _Active) -> bool:
@@ -656,9 +732,13 @@ def _finish(act: _Active, status: str, summary: str) -> None:
 
 
 async def stop(act: _Active) -> None:
-    """Stop a run: its session when it has one, which ends it as stopped, else its place in the queue."""
+    """Stop a run: its session or program when it has one, which ends it as stopped, else its place in the queue."""
     if act.session is not None and not act.ended:
         await agent_session.stop_run(act.session)
+    elif act.program and not act.ended:
+        from . import harness  # noqa: PLC0415
+
+        await harness.stop(act.c, session_key(act.check, act.doc))
     elif act.task is not None and not act.task.done():
         act.task.cancel()
         with contextlib.suppress(asyncio.CancelledError, Exception):

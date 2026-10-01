@@ -459,14 +459,14 @@ async def _check(run: _Run) -> None:
     if typed:
         timing["typed"] = len(typed)
         log.info("card check: card:%s shows numbers its code types in: %s", cid, ", ".join(typed))
+    kept = _keep(c, cid, f"{run.check}-card.png", drawn.png)
     if not checkstore.stage(c, cid, run.check, "render", {
-            "status": "ok", "ms": timing["render_ms"],
-            **({"image": p} if (p := _keep(c, cid, f"{run.check}-card.png", drawn.png)) else {}),
+            "status": "ok", "ms": timing["render_ms"], **({"image": kept} if kept else {}),
             **({"typed": typed} if typed else {})}):
         _gone(run)
         return
     tr = time.perf_counter()
-    reading = await _read(c, cell, drawn.png, run)
+    reading = await _read(c, cell, drawn.png, run, str(config.workspace_dir(c) / kept) if kept else None)
     timing["critique_ms"] = _ms(tr)
     if isinstance(reading, str):
         if not checkstore.stage(c, cid, run.check, "critique", {"status": "error", "ms": timing["critique_ms"],
@@ -1014,15 +1014,17 @@ def read_effort(c: str) -> str:
     return str(_role(c).get("effort") or config.ROLE_MODELS_DEFAULT["verify"]["effort"])
 
 
-async def _call(c: str, system: str, user: str, tool: Any, images: list[tuple[bytes, str]], *, effort: str) -> Any:
-    """The reading: one model.structured call on the `verify` role's model and fast mode at `effort`. Retry waits and a
-    refused reading before the fallback are left out of the check's time (_on_retry, _on_fallback)."""
-    from . import model  # noqa: PLC0415
+async def _call(c: str, system: str, user: str, tool: Any, images: list[tuple[bytes, str]], *, effort: str,
+                model: str | None = None) -> Any:
+    """The reading: one model.structured call on `model`, else the `verify` role's model, and that role's fast mode at
+    `effort`. Retry waits and a refused reading before the fallback are left out of the check's time (_on_retry,
+    _on_fallback)."""
+    from . import model as model_mod  # noqa: PLC0415
 
     role = _role(c)
     run = _current.get()
-    return await model.structured(
-        user, tool=tool, model=role.get("model") or config.ROLE_MODELS_DEFAULT["verify"]["model"],
+    return await model_mod.structured(
+        user, tool=tool, model=model or role.get("model") or config.ROLE_MODELS_DEFAULT["verify"]["model"],
         effort=effort or None,
         system_append=system, cwd=config.corpus_dir(c),
         speed="fast" if role.get("fast") else "standard", images=images, idle_timeout_s=READ_IDLE_S,
@@ -1044,35 +1046,71 @@ def _assessment(raw: Any) -> list[dict[str, Any]] | None:
     return out
 
 
-async def _read(c: str, cell: dict[str, Any], png: bytes | None,
-                run: _Run) -> tuple[list[dict[str, Any]], dict[str, str], str] | str:
-    """(assessment, the replacement card {question, code, takeaway}, model) from the model's reading of the card's
-    picture; why not, as a sentence, when the call failed or its output lacks a part. _Capacity when the API is at
-    capacity after model.structured's own retries."""
+async def card_input(c: str, cell: dict[str, Any], run: _Run, picture: str | None,
+                     secs: dict[str, str]) -> dict[str, Any]:
+    """The card-check task's input (tasks.py): the card's id, kind, question, takeaway, citations, code and the
+    context it was made in, each '' for none; the `typed` and `kept` parts of the reading's card (_typed_text,
+    _kept_text); the path of its picture, None when it was not drawn; and the effort the check reads at."""
+    code = str(cell.get("code") or "").strip()
+    return {"card": {"id": run.cid, "kind": str(cell.get("kind") or "code"), "question": str(cell.get("title") or ""),
+                     "takeaway": str(cell.get("takeaway") or "").strip(),
+                     "citations": await asyncio.to_thread(_citations_text, c, cell) or "",
+                     "code": code[:CODE_CHARS], "context": await asyncio.to_thread(_context_text, c, cell, run.author) or "",
+                     "typed": _typed_text(c, cell, secs), "kept": await asyncio.to_thread(_kept_text, c, cell, secs)},
+            "picture": picture, "effort": run.effort or await asyncio.to_thread(read_effort, c)}
+
+
+async def check_task(c: str, inp: dict[str, Any], *, model: str | None = None) -> Any:
+    """thimble's own card-check task (tasks.py): the model reads the card and its picture against card-check.md's
+    criteria, on `model` when given, and returns its assessment and a replacement card (the `critique` tool). Never
+    raises; read the CallResult's status."""
     from . import prompts, userconf  # noqa: PLC0415
 
     with prompts.custom(userconf.prompt_files(c, "cardCheck")):
         secs = _sections()
     none = secs.get("none", "")
-    code = str(cell.get("code") or "").strip()
+    card = inp.get("card") if isinstance(inp.get("card"), dict) else {}
+    code = str(card.get("code") or "").strip()
     user = _fill(secs["card"], {
-        "card": run.cid,
-        "kind": str(cell.get("kind") or "code"),
-        "question": str(cell.get("title") or ""),
-        "takeaway": str(cell.get("takeaway") or "").strip() or none,
-        "citations": await asyncio.to_thread(_citations_text, c, cell) or none,
-        "code": f"```python\n{code[:CODE_CHARS]}\n```" if code else none,
-        "context": await asyncio.to_thread(_context_text, c, cell, run.author) or none,
-        "typed": _typed_text(c, cell, secs),
-        "kept": await asyncio.to_thread(_kept_text, c, cell, secs),
+        "card": str(card.get("id") or ""), "kind": str(card.get("kind") or "code"),
+        "question": str(card.get("question") or ""),
+        "takeaway": str(card.get("takeaway") or "").strip() or none,
+        "citations": str(card.get("citations") or "") or none,
+        "code": f"```python\n{code}\n```" if code else none,
+        "context": str(card.get("context") or "") or none,
+        "typed": str(card.get("typed") or ""), "kept": str(card.get("kept") or ""),
     })
-    images = [(await asyncio.to_thread(fit_image, png), "image/png")] if png else []
-    effort = run.effort or await asyncio.to_thread(read_effort, c)
+    images = []
+    if isinstance(inp.get("picture"), str) and inp["picture"]:
+        try:
+            png = await asyncio.to_thread(Path(inp["picture"]).read_bytes)
+            images = [(await asyncio.to_thread(fit_image, png), "image/png")]
+        except OSError:
+            log.warning("card check: the picture %s could not be read", inp["picture"])
+    effort = str(inp.get("effort") or "") or await asyncio.to_thread(read_effort, c)
+    return await _call(c, _fill(secs["check"], {}), user, _tool(secs, "critique"), images, effort=effort, model=model)
+
+
+async def _read(c: str, cell: dict[str, Any], png: bytes | None, run: _Run,
+                picture: str | None = None) -> tuple[list[dict[str, Any]], dict[str, str], str] | str:
+    """(assessment, the replacement card {question, code, takeaway}, model) from the card-check task's reading of the
+    card's picture (tasks.call: an extension's program, else check_task); why not, as a sentence, when the call failed
+    or its output lacks a part. _Capacity when the API is at capacity after model.structured's own retries. `picture`
+    is where `png` is kept."""
+    from . import prompts, tasks, userconf  # noqa: PLC0415
+
+    with prompts.custom(userconf.prompt_files(c, "cardCheck")):
+        secs = _sections()
+    if png and not picture:
+        picture = str(_shot_path(c, run.cid, f"{run.check}-card.png"))
+        await asyncio.to_thread(Path(picture).write_bytes, png)
+    inp = await card_input(c, cell, run, picture, secs)
+    effort = str(inp["effort"])
     t0, outcome = time.perf_counter(), "stopped"  # stopped: the check ran past its time, or the card changed
     try:
         async with _slot(run):
             t0 = time.perf_counter()
-            res = await _call(c, _fill(secs["check"], {}), user, _tool(secs, "critique"), images, effort=effort)
+            res = await tasks.call(c, "card-check", inp, schema=_tool(secs, "critique").input_schema)
         outcome = res.status
     finally:
         log.info("card check: the reading of card:%s at %s effort ended %s after %.1f s (the check's limit %.0f s)",

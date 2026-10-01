@@ -1,4 +1,5 @@
-"""Whether an extension's view fits a workspace's corpus, as one quick model call decides it (decide).
+"""Whether an extension's view fits a workspace's corpus, as one quick model call decides it (decide): the view-fit
+task (tasks.py), which an extension's program may run instead (fit_input, fit_task).
 
 thimble sends the view's description, the files it claims folded into patterns (groups) and a few records of the files
 likeliest to hold records (samples) to the labels role's model at its effort (low unless thimble's config sets
@@ -166,36 +167,64 @@ def samples(c: str, gs: list[dict[str, Any]]) -> str:
     return "\n\n".join(parts) or "(no file holds records thimble can show)"
 
 
-def prompt(c: str, name: str, description: str, files: list[tuple[Any, ...]]) -> str:
+def fit_input(c: str, name: str, description: str, files: list[tuple[Any, ...]]) -> dict[str, Any]:
+    """The view-fit task's input (tasks.py): the view's name and description, the files it claims folded into
+    patterns (listing) and a few records of the likeliest of them (samples). Blocking (a thread)."""
+    gs = groups(files)
+    return {"view": {"name": name, "description": description or name}, "files": listing(gs), "samples": samples(c, gs)}
+
+
+def _render(c: str, inp: dict[str, Any]) -> str:
     from . import tasks  # noqa: PLC0415
 
-    gs = groups(files)
+    view = inp.get("view") if isinstance(inp.get("view"), dict) else {}
+    name = str(view.get("name") or "")
     with prompts.custom(tasks.files(c, PROMPT)):
-        return prompts.render(PROMPT, {"name": name, "description": description or name, "files": listing(gs),
-                                       "samples": samples(c, gs)})
+        return prompts.render(PROMPT, {"name": name, "description": str(view.get("description") or "") or name,
+                                       "files": str(inp.get("files") or ""), "samples": str(inp.get("samples") or "")})
 
 
-async def ask(c: str, text: str) -> Any:
-    """The call: model.structured on the labels role's model, effort and fast mode (config.models_for). Never raises."""
-    from . import model  # noqa: PLC0415
+def prompt(c: str, name: str, description: str, files: list[tuple[Any, ...]]) -> str:
+    return _render(c, fit_input(c, name, description, files))
+
+
+async def ask(c: str, text: str, model: str | None = None) -> Any:
+    """The call: model.structured on `model`, else the labels role's model, at the labels role's effort and fast mode
+    (config.models_for). Never raises."""
+    from . import model as model_mod  # noqa: PLC0415
 
     role = config.models_for(c)["labels"]
-    tool = model.ToolSpec(name=TOOL_NAME, description="Your decision on whether the view fits this corpus.",
-                          input_schema=SCHEMA)
+    tool = model_mod.ToolSpec(name=TOOL_NAME, description="Your decision on whether the view fits this corpus.",
+                              input_schema=SCHEMA)
     with capture.scope("view fit", keep=True):
-        return await model.structured(text, tool=tool, model=str(role["model"]), effort=role.get("effort") or None,
-                                      cwd=config.corpus_dir(c), speed="fast" if role.get("fast") else "standard")
+        return await model_mod.structured(text, tool=tool, model=model or str(role["model"]),
+                                          effort=role.get("effort") or None, cwd=config.corpus_dir(c),
+                                          speed="fast" if role.get("fast") else "standard")
+
+
+async def fit_task(c: str, inp: dict[str, Any], *, model: str | None = None) -> Any:
+    """thimble's own view-fit task (tasks.py): one call decides whether the view fits, {fits, reason}. Never raises;
+    read the CallResult's status."""
+    try:
+        text = await asyncio.to_thread(_render, c, inp)
+    except (OSError, ValueError, prompts.PromptError) as e:
+        from . import model as model_mod  # noqa: PLC0415
+
+        return model_mod.CallResult(status="error", detail=f"its prompt could not be made ({e})")
+    return await ask(c, text, **({"model": model} if model else {}))
 
 
 async def decide(c: str, name: str, description: str, files: list[tuple[Any, ...]], at: str) -> dict[str, Any]:
     """The decision on one view in workspace `c`: {key, fits, reason, by: "model", ts} or, when the call failed, {key,
     error, ts}. `files` are the files it claims here, `at` the key it is made for (key)."""
+    from . import tasks  # noqa: PLC0415
+
     ts = datetime.now(timezone.utc).isoformat(timespec="seconds")
     try:
-        text = await asyncio.to_thread(prompt, c, name, description, files)
-    except (OSError, ValueError, prompts.PromptError) as e:
+        inp = await asyncio.to_thread(fit_input, c, name, description, files)
+    except (OSError, ValueError) as e:
         return {"key": at, "error": f"its prompt could not be made ({e})", "ts": ts}
-    res = await ask(c, text)
+    res = await tasks.call(c, "view-fit", inp, schema=SCHEMA)
     if res.status != "ok" or not isinstance(res.output, dict):
         log.warning("%s: whether the view %s fits is not known: %s %s", c, name, res.status, res.detail)
         return {"key": at, "error": res.detail or f"the model call ended {res.status.replace('_', ' ')}", "ts": ts}

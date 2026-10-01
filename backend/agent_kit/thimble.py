@@ -1,5 +1,6 @@
-"""The `thimble` module of a program that runs one of thimble's agents: an Agent SDK program, whose `run(input)`
-run_sdk.py calls, or a command harness that calls `thimble.serve(run)`. docs/agents.md documents the contract.
+"""The `thimble` module of a program that runs one of thimble's roles or tasks: an Agent SDK program, whose
+`run(input)` run_sdk.py calls, or a command harness that calls `thimble.serve(run)`. docs/agents.md documents the
+contract.
 
 The program and thimble talk in JSON lines. thimble writes the input on the program's stdin, then the answer to each
 request; the program writes its requests, its log lines and its output on stdout. Once this module is set up, anything
@@ -10,9 +11,11 @@ itself.
                        {"id": 4, "result": ...}       the answer to request 4, or {"id": 4, "error": "..."}
   program -> thimble   {"id": 4, "tool": {"name", "args"}}                 one of thimble's tools, as the role
                        {"id": 5, "ask": {"prompt", "schema"?, "model"?}}   one model call
-                       {"id": 6, "session": {"prompt", "system"?, "tools"?, "agents"?}}   a Claude Code session
+                       {"id": 6, "session": {"prompt", "system"?, "tools"?, "agents"?, "model"?}}   a Claude Code
+                                                                           session
+                       {"id": 7, "default": {"input", "model"?}}           a task: thimble's own implementation
                        {"log": "text"}                                     a line in the agent's thread
-                       {"output": ...}                                     last: what the role returns
+                       {"output": ...}                                     last: what the role or task returns
 """
 from __future__ import annotations
 
@@ -29,7 +32,8 @@ from typing import Any, Callable
 
 WORK = Path(os.environ.get("THIMBLE_WORK") or ".")  # the folder the program may write in
 CORPUS = Path(os.environ.get("THIMBLE_CORPUS") or ".")  # the analyst's corpus, read-only unless they allow edits
-ROLE = os.environ.get("THIMBLE_ROLE", "")
+ROLE = os.environ.get("THIMBLE_ROLE", "")  # '' for a task
+TASK = os.environ.get("THIMBLE_TASK", "")  # '' for a role
 AGENT_DIR = Path(os.environ.get("THIMBLE_AGENT_DIR") or ".")  # the folder of the program's agent.json
 SLOT_RE = re.compile(r"\{\{([a-z_][a-z0-9_]*)\}\}")
 
@@ -89,7 +93,7 @@ def _read() -> None:
 
 
 def get_input() -> Any:
-    """The role's input, which thimble sends first."""
+    """The role's or task's input, which thimble sends first."""
     _setup()
     _given.wait()
     if not _input:
@@ -126,7 +130,7 @@ def log(text: Any) -> None:
 
 
 def output(value: Any) -> None:
-    """What the role returns: for the orientation, the one line main hears."""
+    """What the role or task returns: for the orientation, the one line main hears; for a task, its output object."""
     _send({"output": value})
 
 
@@ -146,17 +150,18 @@ def ask(prompt: str, schema: dict[str, Any] | None = None, model: str | None = N
 
 
 async def session(prompt: str, system: str | None = None, tools: list[str] | None = None,
-                  agents: dict[str, Any] | None = None) -> str:
-    """A Claude Code session thimble runs as the role, in its sandbox and permission mode; its last reply."""
+                  agents: dict[str, Any] | None = None, model: str | None = None) -> str:
+    """A Claude Code session thimble runs as the role or task, in its sandbox and permission mode; its last reply."""
     payload: dict[str, Any] = {"prompt": prompt}
-    for k, v in (("system", system), ("tools", tools), ("agents", agents)):
+    for k, v in (("system", system), ("tools", tools), ("agents", agents), ("model", model)):
         if v is not None:
             payload[k] = v
     return await arequest("session", payload)
 
 
 def default(input: Any, model: str | None = None) -> Any:  # noqa: A002 — the protocol's name
-    """thimble's own implementation of the role, where it has one to lend."""
+    """thimble's own implementation of the task on `input`, on `model` in place of the task's own when given: the
+    output it returns. A role has none to lend."""
     return request("default", {"input": input, **({"model": model} if model else {})})
 
 

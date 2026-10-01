@@ -475,27 +475,33 @@ def _fill(template: str, values: dict[str, str]) -> str:
 def pictures_text(shots: list[dict[str, Any]]) -> str:
     """One line per picture: its number, its state and pane, the ref it opened or the controls it clicked, why the
     reading asked for it, and how its text fits as layout_notes words it; then the controls the first picture shows."""
+    return _pictures_lines([_about(s) for s in shots], shots[0].get("controls") if shots else None)
+
+
+def _pictures_lines(about: list[str], controls: Any) -> str:
+    lines = [f"{i}: {a}" for i, a in enumerate(about, 1)]
+    if controls:
+        lines.append("The controls picture 1 shows, by their text: " + "; ".join(str(x) for x in controls))
+    return "\n".join(lines)
+
+
+def _about(s: dict[str, Any]) -> str:
+    """One picture's line of pictures_text, without its number."""
     words = {"overview": "the view as it opens, with no label on", "labels": "the overview with the test label on",
              "filtered": "the overview filtered to the test label", "detail": "the place the first citation opens",
              "open": "the place {ref} opens, with the test label on", "wide": "the view as it opens",
              "narrow": "the view as it opens, with no label on", "control": "the overview after clicking {controls}"}
-    lines = []
-    for i, s in enumerate(shots, 1):
-        clicked = [a for a in s.get("actions") or [] if isinstance(a, dict)]
-        controls = ", then ".join(repr(a.get("control")) + ("" if a.get("found") else " (not found)") for a in clicked)
-        what = words.get(str(s.get("state")), words["overview"]).format(ref=s.get("ref") or "the ref",
-                                                                         controls=controls or "nothing")
-        lay = s.get("layout") if isinstance(s.get("layout"), dict) else {}
-        size = s.get("size") or views.PANE_SIZE
-        line = f"{i}: {what}, {size[0]} px wide" + (f" (asked for: {s['why']})" if s.get("why") else "")
-        fit = views.layout_parts(lay, wide=s.get("state") == "wide") if s.get("ok") else []
-        if (n := int(lay.get("outside") or 0)) and s.get("ok"):
-            fit.append(views._hint("view-layout-outside", n=f"{n:,}", of=f"{int(lay.get('anchored') or 0):,}"))
-        lines.append(line + (f". Measured: {'; '.join(fit)}" if fit else ""))
-    first = shots[0].get("controls") if shots else None
-    if first:
-        lines.append("The controls picture 1 shows, by their text: " + "; ".join(str(x) for x in first))
-    return "\n".join(lines)
+    clicked = [a for a in s.get("actions") or [] if isinstance(a, dict)]
+    controls = ", then ".join(repr(a.get("control")) + ("" if a.get("found") else " (not found)") for a in clicked)
+    what = words.get(str(s.get("state")), words["overview"]).format(ref=s.get("ref") or "the ref",
+                                                                     controls=controls or "nothing")
+    lay = s.get("layout") if isinstance(s.get("layout"), dict) else {}
+    size = s.get("size") or views.PANE_SIZE
+    line = f"{what}, {size[0]} px wide" + (f" (asked for: {s['why']})" if s.get("why") else "")
+    fit = views.layout_parts(lay, wide=s.get("state") == "wide") if s.get("ok") else []
+    if (n := int(lay.get("outside") or 0)) and s.get("ok"):
+        fit.append(views._hint("view-layout-outside", n=f"{n:,}", of=f"{int(lay.get('anchored') or 0):,}"))
+    return line + (f". Measured: {'; '.join(fit)}" if fit else "")
 
 
 def records_text(shots: list[dict[str, Any]]) -> str:
@@ -520,45 +526,92 @@ def _semaphore() -> asyncio.Semaphore:
     return _sem
 
 
-async def _call(c: str, system: str, user: str, tool: Any, images: list[tuple[bytes, str]], effort: str) -> Any:
-    """The reading: one model.structured call on the `verify` role's model at `effort`. Tests replace it."""
-    from . import model  # noqa: PLC0415
+async def _call(c: str, system: str, user: str, tool: Any, images: list[tuple[bytes, str]], effort: str,
+                model: str | None = None) -> Any:
+    """The reading: one model.structured call on `model`, else the `verify` role's model, at `effort`. Tests replace
+    it."""
+    from . import model as model_mod  # noqa: PLC0415
 
     role = _role(c)
-    return await model.structured(
-        user, tool=tool, model=role.get("model") or config.ROLE_MODELS_DEFAULT["verify"]["model"], effort=effort or None,
+    return await model_mod.structured(
+        user, tool=tool, model=model or role.get("model") or config.ROLE_MODELS_DEFAULT["verify"]["model"],
+        effort=effort or None,
         system_append=system, cwd=config.corpus_dir(c),
         speed="fast" if role.get("fast") else "standard", images=images, idle_timeout_s=READ_IDLE_S)
+
+
+def review_input(c: str, prop: dict[str, Any], view: dict[str, Any], shots: list[dict[str, Any]], ask: bool) -> dict[str, Any]:
+    """The view-review task's input (tasks.py): the view (its name, description, the files it claims, its spec and
+    what its checks found), each picture's path and what it shows (_about), the controls the first picture shows, the
+    first records the pages fetched, and `ask`, whether the reading may ask for more pictures."""
+    return {"view": {"slug": str(view["slug"]), "name": str(prop.get("name") or view["name"]),
+                     "description": str(prop.get("why") or view["description"]),
+                     "claims": [str(x) for x in prop.get("claims") or view["claims"]], "spec": views.spec_lines(prop),
+                     "checks": list(views.gate_notes(c, view["slug"]))},
+            "pictures": [{"path": str(s["png"]), "about": _about(s)} for s in shots if s.get("png")],
+            "controls": [str(x) for x in (shots[0].get("controls") or [])] if shots else [],
+            "records": records_text(shots), "ask": ask}
+
+
+def findings_tool(c: str, ask: bool) -> Any:
+    """The reading's output as a model.ToolSpec: its problems and, with `ask`, the extra states it asks to see."""
+    from . import model, prompts, tasks, tools  # noqa: PLC0415
+
+    with prompts.custom(tasks.files(c, PROMPT)):
+        secs = _sections()
+    desc, schema = tools.split_section(secs["findings"])
+    if not ask:
+        schema["properties"].pop("more", None)
+    return model.ToolSpec(name="findings", description=desc, input_schema=schema)
+
+
+async def review_task(c: str, inp: dict[str, Any], *, model: str | None = None) -> Any:
+    """thimble's own view-review task (tasks.py): the `verify` role's model, or `model`, reads the pictures and returns
+    the problems it sees and, when the input's `ask` allows, the extra states it wants pictures of (findings_tool).
+    Never raises; read the CallResult's status."""
+    from . import card_check, prompts, tasks  # noqa: PLC0415
+
+    with prompts.custom(tasks.files(c, PROMPT)):
+        secs = _sections()
+    view = inp.get("view") if isinstance(inp.get("view"), dict) else {}
+    pictures = [x for x in inp.get("pictures") or [] if isinstance(x, dict)]
+    ask = bool(inp.get("ask"))
+    user = _fill(secs["view"], {"name": str(view.get("name") or ""), "description": str(view.get("description") or ""),
+                                "claims": ", ".join(str(x) for x in view.get("claims") or []),
+                                "spec": str(view.get("spec") or ""),
+                                "checks": "\n".join(str(x) for x in view.get("checks") or []) or "-",
+                                "pictures": _pictures_lines([str(x.get("about") or "") for x in pictures],
+                                                            inp.get("controls")),
+                                "records": str(inp.get("records") or "") or "-"})
+    user += "\n\n" + secs["ask" if ask else "final"]
+    images = []
+    for x in pictures:
+        try:
+            png = await asyncio.to_thread(Path(str(x.get("path") or "")).read_bytes)
+        except OSError:
+            continue
+        images.append((await asyncio.to_thread(card_check.fit_image, png), "image/png"))
+    effort = str(_role(c).get("effort") or config.ROLE_MODELS_DEFAULT["verify"]["effort"])
+    kw = {"model": model} if model else {}
+    return await _call(c, _fill(secs["review"], {}), user, findings_tool(c, ask), images, effort, **kw)
 
 
 async def read(c: str, run: _Run, prop: dict[str, Any], view: dict[str, Any], shots: list[dict[str, Any]], *,
                ask: bool) -> tuple[list[str], list[dict[str, Any]]] | str:
     """(problems, the extra states it asks to see, EXTRA_SHOTS at most and none unless `ask`) from one reading of the
-    pictures; why not, as the note the check mark shows, when the reading failed. While the API is at capacity it waits,
-    outside the reading slots, and reads again, for as long as that lasts."""
-    from . import card_check, model, prompts, tasks, tools  # noqa: PLC0415
+    pictures, the view-review task (tasks.call: an extension's program, else review_task); why not, as the note the
+    check mark shows, when the reading failed. While the API is at capacity it waits, outside the reading slots, and
+    reads again, for as long as that lasts."""
+    from . import tasks  # noqa: PLC0415
 
-    with prompts.custom(tasks.files(c, PROMPT)):
-        secs = _sections()
-    user = _fill(secs["view"], {"name": str(prop.get("name") or view["name"]),
-                                "description": str(prop.get("why") or view["description"]),
-                                "claims": ", ".join(prop.get("claims") or view["claims"]),
-                                "spec": views.spec_lines(prop),
-                                "checks": "\n".join(views.gate_notes(c, view["slug"])) or "-",
-                                "pictures": pictures_text(shots), "records": records_text(shots) or "-"})
-    user += "\n\n" + secs["ask" if ask else "final"]
-    desc, schema = tools.split_section(secs["findings"])
-    if not ask:
-        schema["properties"].pop("more", None)
-    tool = model.ToolSpec(name="findings", description=desc, input_schema=schema)
-    images = [(await asyncio.to_thread(card_check.fit_image, Path(s["png"]).read_bytes()), "image/png")
-              for s in shots if s.get("png")]
+    inp = review_input(c, prop, view, shots, ask)
+    schema = findings_tool(c, ask).input_schema
     effort = str(_role(c).get("effort") or config.ROLE_MODELS_DEFAULT["verify"]["effort"])
     wait = CAPACITY_WAIT_S
     while True:
         async with _semaphore():
             try:
-                res = await asyncio.wait_for(_call(c, _fill(secs["review"], {}), user, tool, images, effort),
+                res = await asyncio.wait_for(tasks.call(c, "view-review", inp, schema=schema),
                                              READ_TIMEOUT_S.get(effort, 120.0))
             except asyncio.TimeoutError:
                 return f"The review did not finish: the reading ran past {READ_TIMEOUT_S.get(effort, 120.0):.0f} s"
