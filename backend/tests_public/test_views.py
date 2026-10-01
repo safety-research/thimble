@@ -709,7 +709,9 @@ FIT_HTML = """<!doctype html><html><head><style>body{font:13px sans-serif;margin
 <div style="width:60px;overflow:hidden;white-space:nowrap">A text far too long for its box</div>
 <div style="width:300px">Narrow column</div>
 <button id="more">Show more</button><div id="extra" hidden data-anchor="board.jsonl#L2">bo: Anyone have the build number?</div>
+<video id="clip" width="160" height="90"></video>
 <script>
+document.getElementById('clip').src = thimble.mediaUrl('clip.mp4')
 document.getElementById('more').onclick = () => { document.getElementById('extra').hidden = false }
 thimble.onOpen(() => {})
 </script></body></html>"""
@@ -722,7 +724,9 @@ async def test_the_headless_page_measures_how_its_text_fits_and_clicks_a_control
         if os.environ.get("CI") == "true":
             pytest.fail(why)
         pytest.skip(why)
-    views.write_view(CORPUS, "fit", reader=THREADS_READER, html=FIT_HTML, **{**VIEW, "name": "Fit"})
+    (config.corpus_dir(CORPUS) / "clip.mp4").write_bytes(b"\0\0\0\x18ftypmp42" + bytes(64))
+    views.write_view(CORPUS, "fit", reader=THREADS_READER, html=FIT_HTML,
+                     **{**VIEW, "name": "Fit", "claims": ["board.jsonl", "clip.mp4"]})
     plain, clicked = await views.shoot_states(CORPUS, "fit", [
         {"open": {}, "size": views.PANE_WIDE}, {"open": {}, "actions": ["Show more", "No such control"]}])
     assert plain["ok"] and clicked["ok"], (plain["errors"], clicked["errors"])
@@ -733,8 +737,10 @@ async def test_the_headless_page_measures_how_its_text_fits_and_clicks_a_control
     assert "Show more" in plain["controls"]
     assert plain["shown"]["records"] == 0 and clicked["shown"]["records"] == 1, "the click showed the hidden record"
     assert clicked["actions"] == [{"control": "Show more", "found": True}, {"control": "No such control", "found": False}]
+    assert plain["unplayable"] == 1, "an MP4 this Chromium cannot decode is named, not taken for the view's fault"
     notes = views.layout_notes([{**plain, "state": "wide"}])
-    assert len(notes) == 1 and "overlaps other text in 1 place," in notes[0] and "rest of the pane is empty" in notes[0]
+    assert len(notes) == 2 and "1 audio or video player stayed blank" in notes[0]
+    assert "overlaps other text in 1 place," in notes[1] and "rest of the pane is empty" in notes[1]
 
 
 # what Playwright's own error says to run, which never reaches a model

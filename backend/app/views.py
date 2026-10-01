@@ -2930,8 +2930,11 @@ def _plural(n: int, word: str) -> str:
 
 
 def layout_notes(shots: list[dict[str, Any]]) -> list[str]:
-    """One note per state of LAYOUT_WHERE whose page did not fit its pane (layout_parts). Fit is noted, never failed."""
+    """One note per state of LAYOUT_WHERE whose page did not fit its pane (layout_parts), and one when a state's page
+    held audio or video the headless Chromium cannot decode. Fit is noted, never failed."""
     out = []
+    if n := max([int(s.get("unplayable") or 0) for s in shots] or [0]):
+        out.append(_hint("view-unplayable", players=_plural(n, "audio or video player")))
     for s in shots:
         lay, where = s.get("layout"), LAYOUT_WHERE.get(str(s.get("state")))
         if not s.get("ok") or not isinstance(lay, dict) or where is None:

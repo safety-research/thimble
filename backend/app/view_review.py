@@ -462,6 +462,8 @@ def pictures_text(shots: list[dict[str, Any]]) -> str:
         size = s.get("size") or views.PANE_SIZE
         line = f"{i}: {what}, {size[0]} px wide" + (f" (asked for: {s['why']})" if s.get("why") else "")
         fit = views.layout_parts(lay, wide=s.get("state") == "wide") if s.get("ok") else []
+        if s.get("unplayable"):
+            fit.append(views._hint("view-unplayable", players=views._plural(int(s["unplayable"]), "audio or video player")))
         lines.append(line + (f". Measured: {'; '.join(fit)}" if fit else ""))
     first = shots[0].get("controls") if shots else None
     if first:
