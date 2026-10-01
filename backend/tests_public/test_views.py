@@ -88,6 +88,9 @@ thimble.onOpen(async (place) => {
   document.getElementById('out').textContent = posts.map((p) => p.author + ': ' + p.body).join('\\n')
 })
 </script></body></html>"""
+# THREADS_HTML with a label switch, as a view of many files draws its own label controls
+SWITCHED_HTML = THREADS_HTML.replace(
+    "</body>", "<button data-label=\"asks\" onclick=\"thimble.setLabel('asks', true)\">asks</button></body>")
 
 VIEW = dict(name="Threads", description="The board's posts grouped by thread.", claims=["board.jsonl"],
             accepts=[{"form": "L<n>", "means": "one post"}], units=[{"form": "<thread>", "means": "one whole thread"}],
@@ -384,7 +387,7 @@ async def test_a_field_whose_values_the_cited_lines_do_not_hold_fails_the_checks
                  "label_controls": 1} for _ in states]
 
     monkeypatch.setattr(views, "shoot_states", page)
-    views.write_view(CORPUS, "threads", reader=DERIVING_READER, html=THREADS_HTML, **VIEW)
+    views.write_view(CORPUS, "threads", reader=DERIVING_READER, html=SWITCHED_HTML, **VIEW)
     rep = await views.gate(CORPUS, "threads", ["board.jsonl#L3"])
     assert not rep["ok"], views.gate_lines(rep)
     noted = [n for n in rep["problems"] if "listed as derived" in n]
@@ -392,7 +395,7 @@ async def test_a_field_whose_values_the_cited_lines_do_not_hold_fails_the_checks
     assert "flagged (" in noted[0] and "topics (" in noted[0], "a true or false and a list the lines do not hold"
     for field in ("body", "replies", "thread_key", "mood", "words"):
         assert f"{field} (" not in noted[0], f"{field}: a raw value, a count, a key or a default needs no entry"
-    views.write_view(CORPUS, "threads", reader=DERIVING_READER, html=THREADS_HTML,
+    views.write_view(CORPUS, "threads", reader=DERIVING_READER, html=SWITCHED_HTML,
                      **{**VIEW, "derived": [{"field": "author", "from": "author", "how": "upper-cased"},
                                             {"field": "score", "from": "body", "how": "its length", "kind": "inferred"},
                                             {"field": "flagged", "from": "body", "how": "a classifier", "kind": "inferred"},
