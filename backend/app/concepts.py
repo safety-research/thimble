@@ -617,12 +617,13 @@ def _store_ready(ws: Path, concept_id: str, *, wait: bool = True) -> labels_stor
             log.warning("labels store %s: still being rebuilt after %.0f s; the writer keeps waiting", p.name, BUILD_WAIT_S)
 
 
-def _jsonl_answer(p: Path, path: str | None, lines: tuple[int, int] | None = None) -> list[dict]:
-    """While a store is rebuilt: the rows on `path` (on `lines` of it) from one pass over the jsonl, memoised for the build."""
+def _jsonl_answer(p: Path, path: str | None, spans: tuple[tuple[int, int], ...] | None = None) -> list[dict]:
+    """While a store is rebuilt: the rows on `path` (on the line `spans` of it) from one pass over the jsonl, memoised
+    for the build."""
     memo = _building_answers.setdefault(p, {})
-    key = (path, lines)
+    key = (path, spans)
     if key not in memo:
-        memo[key] = labels_store.scan_jsonl(p, path, lines)
+        memo[key] = labels_store.scan_jsonl(p, path, spans)
     return memo[key]
 
 
@@ -658,11 +659,24 @@ def rows_for_path(ws: Path, concept_id: str, path: str | None, lines: tuple[int,
     """The merged rows (latest classifier row per ref with the analyst's verdict) on one corpus path; every row when
     `path` is None; with `lines` (a, b) those on lines a..b of the path and its whole-file rows, so the reader asks for
     its page and never for every row of a large labelled file."""
+    if path is not None and lines is not None:
+        return rows_on_lines(ws, concept_id, path, [lines])
     st, building = _store(ws, concept_id)
     if st is not None:
-        return st.rows_for_path(path, lines)
+        return st.rows_for_path(path)
     if building:
-        return _jsonl_answer(labels_file(ws, concept_id), path, lines)
+        return _jsonl_answer(labels_file(ws, concept_id), path)
+    return []
+
+
+def rows_on_lines(ws: Path, concept_id: str, path: str, spans: list[tuple[int, int]]) -> list[dict]:
+    """rows_for_path for the lines several (a, b) spans of one path cover, read at once: the pages a view's records
+    fall on."""
+    st, building = _store(ws, concept_id)
+    if st is not None:
+        return st.rows_on_lines(path, spans)
+    if building:
+        return _jsonl_answer(labels_file(ws, concept_id), path, tuple(labels_store.merge_spans(spans)))
     return []
 
 
@@ -4120,6 +4134,24 @@ def parse_lines(lines: str | None) -> tuple[int, int] | None:
     return int(m[1]), int(m[2])
 
 
+LINE_SPANS_MAX = 200  # ranges one labels request may name
+
+
+def parse_spans(lines: str | None) -> list[tuple[int, int]] | None:
+    """`?lines=a-b,c-d,...` as [(a, b), (c, d), ...] (LINE_SPANS_MAX at most); None when absent; 400 for anything
+    else."""
+    if lines is None or not lines.strip():
+        return None
+    parts = lines.split(",")
+    if len(parts) > LINE_SPANS_MAX:
+        raise HTTPException(400, f"lines names {len(parts)} ranges; at most {LINE_SPANS_MAX} fit in one request")
+    try:
+        return [span for part in parts if (span := parse_lines(part)) is not None]
+    except HTTPException:
+        raise HTTPException(400, "lines must be ranges a-b of 1-based line numbers with a <= b, comma-separated, e.g. "
+                                 "lines=1-500,2001-2500") from None
+
+
 @router.get("/ws/{c}/concepts/{concept_id}/labels")
 def labels_route(c: str, concept_id: str, path: str | None = None, lines: str | None = None) -> dict:
     """Latest label per ref (with the analyst's verdict); `?path=` narrows to one file, `&lines=a-b` to the rows on
@@ -4158,12 +4190,13 @@ async def rows_route(c: str, concept_id: str, value: str | None = None, limit: i
 @router.get("/ws/{c}/labels")
 def all_labels_route(c: str, path: str, lines: str | None = None) -> list[dict]:
     """Every concept's rows on one file in a single request (the reader opens one file, many concepts); `&lines=a-b`
-    keeps the rows on those lines (the reader's page) plus the file's whole-file rows."""
+    keeps the rows on those lines (the reader's page) plus the file's whole-file rows, and `&lines=a-b,c-d,...` the
+    rows on each range, so a view whose records fall on many pages of a file asks for them at once."""
     ws = _ws(c)
-    span = parse_lines(lines)
+    spans = parse_spans(lines)
     out = []
     for concept in list_concepts(ws):
-        rows = rows_for_path(ws, concept["id"], path, span)
+        rows = rows_for_path(ws, concept["id"], path) if spans is None else rows_on_lines(ws, concept["id"], path, spans)
         if rows:
             out.append({"concept_id": concept["id"], "name": concept["name"], "labels": concept["labels"], "unit": concept["unit"],
                         "created_by": concept.get("created_by"), "rows": rows,

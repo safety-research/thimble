@@ -13,7 +13,7 @@ import httpx
 import pytest
 from fastapi import FastAPI
 
-from app import concepts, config, refs
+from app import concepts, config, labels_store, refs
 from app import model as model_mod
 
 CORPUS = "mini"
@@ -130,6 +130,40 @@ async def test_regex_apply_records_for_real(api, workspaces_tmp):
     r = await api.post(f"/api/ws/{CORPUS}/concepts/{k['id']}/apply", json={"wait": True, "paths": ["board.jsonl"], "limit": 2})
     assert r.json()["total"] == 2 and r.json()["labeled"] == 2 and r.json()["n_labeled"] == 8 and r.json()["counts"] == s["counts"]
     assert len(concepts.read_labels(workspaces_tmp / CORPUS, k["id"])) == 3 + 2
+
+
+async def test_one_labels_request_reads_the_rows_of_several_line_ranges(api, workspaces_tmp):
+    k = await _create(api, kind="regex", spec=PATTERN)
+    lf = concepts.labels_file(workspaces_tmp / CORPUS, k["id"])
+    lf.parent.mkdir(parents=True, exist_ok=True)
+    rows = [{"ref": f"big.jsonl#L{n}", "label": "yes", "source": "regex", "ts": "t"} for n in (3, 600, 1200, 5000, 9000)]
+    rows += [{"ref": "big.jsonl", "label": "yes", "source": "regex", "ts": "t"},
+             {"ref": "other.jsonl#L3", "label": "yes", "source": "regex", "ts": "t"},
+             labels_store.cover_row("big.jsonl", 1000, 1010, "no", "regex", "t")]
+    lf.write_text("".join(json.dumps(r) + "\n" for r in rows))
+
+    async def page(lines: str) -> list[dict]:
+        r = await api.get(f"/api/ws/{CORPUS}/labels", params={"path": "big.jsonl", "lines": lines})
+        assert r.status_code == 200, r.text
+        return next((e["rows"] for e in r.json() if e["concept_id"] == k["id"]), [])
+
+    got = await page("1-500,1001-1500,4501-5000")
+    refs_got = [row["ref"] for row in got]
+    implicit = [f"big.jsonl#L{n}" for n in range(1001, 1011)]
+    assert sorted(refs_got) == sorted(["big.jsonl#L3", "big.jsonl#L1200", "big.jsonl#L5000", "big.jsonl", *implicit])
+    assert len(refs_got) == len(set(refs_got)), "the whole-file row comes once, not once per range"
+    singles = [row["ref"] for lines in ("1-500", "1001-1500", "4501-5000") for row in await page(lines)]
+    assert set(singles) == set(refs_got)
+    assert {row["ref"]: row["label"] for row in got if row["ref"] in implicit} == dict.fromkeys(implicit, "no")
+    # ranges that overlap or touch read as one; the answer while the store is rebuilt is the same rows
+    assert sorted(row["ref"] for row in await page("1-700,500-1005")) == sorted(["big.jsonl#L3", "big.jsonl#L600", "big.jsonl",
+                                                                               *(f"big.jsonl#L{n}" for n in range(1000, 1006))])
+    scanned = labels_store.scan_jsonl(lf, "big.jsonl", [(1, 500), (1001, 1500), (4501, 5000)])
+    assert sorted(r["ref"] for r in scanned) == sorted(refs_got)
+
+    for bad in ("1-500,x", "1-500,600-500", ",".join(f"{i * 10 + 1}-{i * 10 + 5}" for i in range(concepts.LINE_SPANS_MAX + 1))):
+        r = await api.get(f"/api/ws/{CORPUS}/labels", params={"path": "big.jsonl", "lines": bad})
+        assert r.status_code == 400, bad
 
 
 async def test_prompt_apply_batches_rows(api, workspaces_tmp, fake_classify, monkeypatch):

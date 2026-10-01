@@ -171,6 +171,23 @@ def row_line(ref: str, row: dict) -> tuple[str | None, int | None]:
     return path, line
 
 
+def merge_spans(spans: Iterable[tuple[int, int]]) -> list[tuple[int, int]]:
+    """Line spans (a, b), 1-based and inclusive, sorted, with those that overlap or touch joined into one."""
+    out: list[tuple[int, int]] = []
+    for a, b in sorted((int(a), int(b)) for a, b in spans):
+        if out and a <= out[-1][1] + 1:
+            out[-1] = (out[-1][0], max(out[-1][1], b))
+        else:
+            out.append((a, b))
+    return out
+
+
+def in_spans(spans: list[tuple[int, int]], line: int) -> bool:
+    """Whether `line` falls in one of `spans`, sorted and disjoint as merge_spans leaves them."""
+    i = bisect.bisect_right(spans, (line, LAST_LINE)) - 1
+    return i >= 0 and spans[i][0] <= line <= spans[i][1]
+
+
 # covers
 
 
@@ -543,22 +560,41 @@ class Store:
     def rows_for_path(self, path: str | None, lines: tuple[int, int] | None = None) -> list[dict]:
         """The merged rows on one corpus path, in first-labelled order, then the implicit rows of its covers in line
         order; `None` returns every row. `lines` (a, b) keeps the rows on lines a..b (row_line) plus whole-file rows."""
+        if path is not None and lines is not None:
+            return self.rows_on_lines(path, [lines])
         conn = self.connect()
         try:
             if path is None:
                 rows = conn.execute(f"SELECT {_MERGED_COLS} FROM current ORDER BY rowid").fetchall()
                 paths = [str(p) for (p,) in conn.execute("SELECT DISTINCT path FROM covers ORDER BY path")]
-            elif lines is None:
+            else:
                 rows = conn.execute(f"SELECT {_MERGED_COLS} FROM current WHERE path = ? ORDER BY rowid", (path,)).fetchall()
                 paths = [path]
-            else:
-                rows = conn.execute(f"SELECT {_MERGED_COLS} FROM current WHERE path = ? AND (line BETWEEN ? AND ? OR ref = path) "
-                                    "ORDER BY rowid", (path, int(lines[0]), int(lines[1]))).fetchall()
-                paths = [path]
             out = [_merged(r) for r in rows]
-            lo, hi = (int(lines[0]), int(lines[1])) if lines is not None else (1, LAST_LINE)
             for p in paths:
-                out.extend(self._implicit(conn, p, lo, hi))
+                out.extend(self._implicit(conn, p))
+            return out
+        finally:
+            conn.close()
+
+    def rows_on_lines(self, path: str, spans: Iterable[tuple[int, int]]) -> list[dict]:
+        """The merged rows on the lines of `path` that `spans` ((a, b) pairs, 1-based, inclusive) cover, plus its
+        whole-file rows, in first-labelled order, then the implicit rows of its covers on those lines in line order.
+        Each span is one search of the (path, line) index, so a page of a file with millions of rows reads only its
+        own."""
+        spans = merge_spans(spans)
+        conn = self.connect()
+        try:
+            got: dict[str, tuple] = {}
+            for a, b in spans:
+                for r in conn.execute(f"SELECT rowid, {_MERGED_COLS} FROM current WHERE path = ? AND line BETWEEN ? AND ?", (path, a, b)):
+                    got.setdefault(r[1], r)
+            whole = conn.execute(f"SELECT rowid, {_MERGED_COLS} FROM current WHERE ref = ? AND path = ?", (path, path)).fetchone()
+            if whole is not None:
+                got.setdefault(whole[1], whole)
+            out = [_merged(r[1:]) for r in sorted(got.values(), key=lambda r: r[0])]
+            for a, b in spans:
+                out.extend(self._implicit(conn, path, a, b))
             return out
         finally:
             conn.close()
@@ -773,9 +809,11 @@ def _read_rows(jsonl: Path, start: int, end: int, mark: list[int] | None = None,
                 time.sleep(0)
 
 
-def scan_jsonl(jsonl: Path, path: str | None, lines: tuple[int, int] | None = None) -> list[dict]:
+def scan_jsonl(jsonl: Path, path: str | None, lines: Iterable[tuple[int, int]] | None = None) -> list[dict]:
     """One streaming pass over a labels file while its store is being rebuilt: the merged rows on `path` (or every row;
-    with `lines`, lines a..b and whole-file rows), then its covers' implicit rows, as the store would answer them."""
+    with `lines`, (a, b) spans, the rows on those lines and whole-file rows), then its covers' implicit rows, as the
+    store would answer them."""
+    spans = merge_spans(lines) if lines is not None else None
     model: dict[str, dict] = {}
     analyst: dict[str, dict] = {}
     covers: dict[str, list[tuple[int, int, Any]]] = {}
@@ -797,7 +835,7 @@ def scan_jsonl(jsonl: Path, path: str | None, lines: tuple[int, int] | None = No
         ref = str(r["ref"])
         if path is not None:
             ref_path, line = row_line(ref, r)
-            if ref_path != path or (lines is not None and (not lines[0] <= line <= lines[1] if line is not None else ref != path)):
+            if ref_path != path or (spans is not None and (not in_spans(spans, line) if line is not None else ref != path)):
                 continue
         (analyst if r.get("source") == "analyst" else model)[ref] = r
 
@@ -822,17 +860,17 @@ def scan_jsonl(jsonl: Path, path: str | None, lines: tuple[int, int] | None = No
             cover = held(ref)
             rows.append({"ref": ref, "label": cover[0] if cover else None, "confidence": None, "rationale": None,
                          "source": None, "ts": a.get("ts"), "analyst": a.get("label")})
-    lo, hi = lines if lines is not None else (1, LAST_LINE)
     have: dict[str, set[int]] = {}
     for ref in [*model, *analyst]:
         where, line = ref_parts(ref)
         if where is not None and line is not None:
             have.setdefault(where, set()).add(line)
-    for where in sorted(covers) if path is None else [path]:
-        for first, last, (value, source, ts) in sorted(covers.get(where, []), key=lambda c: c[0]):
-            for n in range(max(first, lo), min(last, hi) + 1):
-                if n not in have.get(where, ()):
-                    rows.append(implicit_row(where, n, value, source, ts))
+    for lo, hi in spans if spans is not None else [(1, LAST_LINE)]:
+        for where in sorted(covers) if path is None else [path]:
+            for first, last, (value, source, ts) in sorted(covers.get(where, []), key=lambda c: c[0]):
+                for n in range(max(first, lo), min(last, hi) + 1):
+                    if n not in have.get(where, ()):
+                        rows.append(implicit_row(where, n, value, source, ts))
     return rows
 
 
