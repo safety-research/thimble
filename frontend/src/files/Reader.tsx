@@ -10,7 +10,7 @@ import { api, scaleApi } from '../lib/api'
 import { bus } from '../lib/bus'
 import { mediaOf, mediaUrl, type MediaRef } from '../lib/media'
 import { refreshProposals } from '../lib/proposals'
-import { fragmentIn, nearestLine } from '../lib/refs'
+import { fragmentIn, nearestLine, parseRef } from '../lib/refs'
 import { track } from '../lib/telemetry'
 import type { Proposal, SourceKind, SourcePage, SourceRecord, View } from '../lib/types'
 import { readStorage, storageKey, writeStorage } from '../lib/workspace'
@@ -330,6 +330,30 @@ export function scrollTopFor(body: HTMLElement, a: number): number | null {
   return into <= span ? r.top - base + (into / span) * r.height : r.bottom - base + (into - span) * perLine
 }
 
+/** The lines a record of another reader spans in its file of text (a JSON document's value, a CSV row), as the server
+ * resolves its ref, so the reader opens it there; null until the answer comes, and for any other ref. */
+export function useRecordLines(ws: string, ref: string | undefined, path: string): { line: number; endLine: number } | null {
+  const p = ref ? parseRef(ref) : null
+  const asks = !!ref && !!p && (p.kind === 'pointer' || p.kind === 'csvrow') && p.path === path
+  const [got, setGot] = useState<{ ref: string; line: number; endLine: number } | null>(null)
+  useEffect(() => {
+    if (!asks || !ref) return
+    let alive = true
+    api
+      .resolveRef(ws, ref)
+      .then((r) => {
+        const meta = (r.meta ?? {}) as { line?: unknown; end_line?: unknown }
+        if (!alive || typeof meta.line !== 'number') return
+        setGot({ ref, line: meta.line, endLine: typeof meta.end_line === 'number' ? meta.end_line : meta.line })
+      })
+      .catch(() => undefined)
+    return () => {
+      alive = false
+    }
+  }, [ws, ref, asks])
+  return asks && got?.ref === ref ? { line: got.line, endLine: got.endLine } : null
+}
+
 const sameShown = (x: Shown, y: Shown) =>
   x.top === y.top && x.height === y.height && x.seen.length === y.seen.length && x.seen.every((s, i) => s.line === y.seen[i].line && s.top === y.seen[i].top && s.bottom === y.seen[i].bottom)
 
@@ -372,8 +396,10 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
   const [bodyHeight, setBodyHeight] = useState(0)
   // the last line after which a page came back empty (the file changed under the reader): no page past it loads by itself
   const dryAfter = useRef<number | null>(null)
-  // the line the ref names; a fragment no view understands opens the file at the line it starts with, if any
-  const targetLine = useMemo(() => targetOf(targetRef, path)?.line ?? nearestLine(fragment), [targetRef, path, fragment])
+  // the line the ref names, or where the record it names starts; a fragment no view understands opens the file at the
+  // line it starts with, if any
+  const recordAt = useRecordLines(workspace, targetRef, path)
+  const targetLine = useMemo(() => targetOf(targetRef, path)?.line ?? recordAt?.line ?? nearestLine(fragment), [targetRef, path, fragment, recordAt])
   const wantLine = jumpLine ?? targetLine
 
   // the labels that are on and left rows on this file
@@ -830,10 +856,11 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
   // bytes read as text would be noise
   const noViewReason: string | null = isDatabase || !loaded || loading ? null : error && records.length === 0 ? `Could not read it. ${error}` : binary ? binaryReason(binarySize ?? builtins.binarySize) : null
   // the fragment is named when nothing here reads it (a sheet cell of a spreadsheet no view claims)
-  const unread = fragment != null && targetOf(targetRef, path) == null ? fragment : null
+  const unread = fragment != null && targetOf(targetRef, path) == null && !recordAt ? fragment : null
   const page: SourcePage = useMemo(() => ({ path, kind, total_lines: total ?? 0, start: first ?? 1, records }), [path, kind, total, first, records])
   const ViewComponent = view?.component
-  const viewTarget = findRef ?? targetRef
+  // a record the server placed on lines is shown to the view as those lines, which it scrolls to and flashes
+  const viewTarget = findRef ?? (recordAt ? `${path}#L${recordAt.line}` + (recordAt.endLine > recordAt.line ? `-L${recordAt.endLine}` : '') : targetRef)
   const loadPage = useCallback((dir: 'earlier' | 'later') => void loadMore(dir), [loadMore])
   // the view is rendered again only when what it shows changes, not when the reader measures its scroll (the ruler's
   // thumb, the fade at the right edge) as the reader resizes or scrolls
