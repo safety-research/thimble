@@ -948,3 +948,53 @@ async def test_settings_add_and_doctor_name_what_another_extension_keeps_from_ru
     assert cli.main(["extension", "remove", "ext-min"]) == 0
     out = capsys.readouterr().out
     assert "Removed ext-min.\nneedy needs it, so it does not run until ext-min is added again" in out
+
+
+async def test_an_extension_s_task_prompts_and_report_checks_are_used(corpus, tmp_path):
+    """A task's prompt adds to thimble's part of the task's prompt file, or takes its place with `replace` and pulls
+    thimble's back in with {{default}}, wherever that part is (a whole file, its head or one section); two replacements
+    leave thimble's own. A report check of an extension is offered among the checks, off, after the built-ins."""
+    from app import checks, prompts, tasks
+
+    ext = _role_ext(tmp_path, "tuned", {}, {
+        "tasks/view-fit/task.json": json.dumps({"description": "Stricter.", "prompt": "fit.md"}),
+        "tasks/view-fit/fit.md": "Say no for a view of logs.",
+        "tasks/card-check/task.json": json.dumps({"description": "Axes.", "prompt": "check.md", "replace": True}),
+        "tasks/card-check/check.md": "{{default}}\n\nAlso read every axis title of {{files}}.",
+        "tasks/labels/task.json": json.dumps({"description": "Careful.", "prompt": "labels.md"}),
+        "tasks/labels/labels.md": "Read the whole record twice.",
+        "tasks/label-draft/task.json": json.dumps({"description": "Short.", "prompt": "draft.md"}),
+        "tasks/label-draft/draft.md": "Keep the definition to two sentences.",
+        "checks/tone/check.json": json.dumps({"name": "Tone", "colour": "3"}),
+        "checks/tone/check.md": "Comment on each sentence whose tone is stronger than its evidence."})
+    _add(ext)
+    await extensions.refresh(CORPUS)
+    assert [p.extension for p in tasks.parts(CORPUS, "view-fit")] == ["tuned"]
+
+    fit = view_fit.prompt(CORPUS, "Tally", "Counts records.", [("tally/a.jsonl", 10, 0)])
+    assert fit.rstrip().endswith("#### From the tuned extension\n\nSay no for a view of logs."), fit[-300:]
+    with prompts.custom(tasks.files(CORPUS, "card-check")):
+        secs = card_check._sections()
+    default = prompts.section("card-check", "check").strip()
+    assert secs["check"].startswith(default[:200]) and "Also read every axis title of (none)." in secs["check"]
+    assert "card" in secs and "## " not in secs["check"], "the other sections stay apart"
+    with prompts.custom(userconf.prompt_files(CORPUS, "labels")):
+        head = prompts.render_head("labels", {"name": "x", "unit": "record", "definition": "d", "labels": "a, b",
+                                              "comment": "", "examples": ""})
+        draft = prompts.section("labels", "draft")
+    assert "Read the whole record twice." in head and "Keep the definition to two sentences." not in head
+    assert "Keep the definition to two sentences." in draft and "Read the whole record twice." not in draft
+
+    other = _role_ext(tmp_path, "tuned2", {}, {
+        "tasks/card-check/task.json": json.dumps({"description": "Mine.", "prompt": "c.md", "replace": True}),
+        "tasks/card-check/c.md": "Only my own words."})
+    _add(other)
+    await extensions.refresh(CORPUS)
+    with prompts.custom(tasks.files(CORPUS, "card-check")):
+        assert card_check._sections()["check"] == default, "two replacements leave thimble's own"
+
+    listed = {x["id"]: x for x in checks.list_checks(CORPUS)}
+    tone = listed["tuned-tone"]
+    assert (tone["name"], tone["colour"], tone["shown"], tone["builtin"], tone["created_by"]) == ("Tone", 3, False, True, "tuned")
+    assert list(listed).index("tuned-tone") == len(checks.BUILTINS), "after the built-ins"
+    assert checks.read(CORPUS, "tuned-tone")["prompt"].startswith("Comment on each sentence whose tone")

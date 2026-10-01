@@ -34,8 +34,9 @@ and the extensions it needs are added. It is active in a
 workspace when it loads, neither thimble's config (`extensions.<name>.enabled: false`, which `thimble extension off`
 writes) nor the workspace's switch in Settings turns it off, and the extensions it needs are active there. An active
 extension's agents and orientation instructions join the orientation, its card types join main's prompt where their
-claims match files, and its report types are offered in + New. Its roles and tasks other than the orientation's prompt,
-and its report checks, are read here (`roles`, `tasks`, `checks`) for the code that runs them.
+claims match files, and its report types are offered in + New. Its roles (roles.py, harness.py), its tasks' prompts
+(tasks.py) and its report checks (checks.py) are read here (`roles`, `tasks`, `checks`) for the code that uses them; a
+task's SDK program or command is not run.
 
 Only its views check whether they fit (_fit): one quick model call per view and workspace, from the view's description
 and a few records of the files it claims (view_fit.py), kept until those files change. Until it answers, and when it
@@ -1387,7 +1388,7 @@ WAYS = {"prompt": "adds to {who}'s prompt", "replace": "replaces {who}'s prompt"
         "sdk": "runs {who} as an Agent SDK program", "command": "runs {who} as a program of its own"}
 ROLE_NAMES = {"main": "main", "orientation": "the orientation", "critic": "the critic", "writer": "the writer",
               "dev": "the dev agent"}  # each role as a sentence names it
-NOT_RUN = "This thimble does not run {what} yet, so it is not used."  # tasks and report checks are read, never run
+NOT_RUN = "This thimble does not run {what} yet, so it is not used."  # a task's SDK program or command
 
 
 def _way(r: dict[str, Any]) -> str:
@@ -1465,11 +1466,12 @@ def summary(info: dict[str, Any], how: dict[str, Any]) -> list[str]:
                 out.append(_row("orientation", "", f"{about} It {what}." if about else f"It {what}."))
     for t in info.get("tasks") or []:
         about = f"{t['description']} It {_way(t)}." if t["description"] else f"It {_way(t)}."
-        out.append(_row("task", t["task"], f"{about} {NOT_RUN.format(what='tasks')}"))
+        unused = "" if t["kind"] == "prompt" else " " + NOT_RUN.format(what="a task's program")
+        out.append(_row("task", t["task"], about + unused))
     for r in info["reports"]:
         out.append(_row("report type", r["slug"], r["description"]) + (" With its own exports." if r["export"] else ""))
     for k in info.get("checks") or []:
-        out.append(_row("report check", k["slug"], f"{k['name']}. {NOT_RUN.format(what='report checks')}"))
+        out.append(_row("report check", k["slug"], f"{k['name']}. It is offered in the report's Checks."))
     if info["thimble"]:
         out.append(f"  It works with thimble {info['thimble']}.")
     if info["js"]:
@@ -1778,8 +1780,8 @@ def parts(e: dict[str, Any], unused: dict[str, str] | None = None) -> list[str]:
     out += [but("orientation", f"{a} agent") for a in _words(e.get("agents"))]
     for t in e.get("tasks") or []:
         if isinstance(t, dict) and t.get("task"):
-            out.append(_changes(f"the {t['task']} task", t) + ", not used yet")
-    out += [f"{k.get('name') or k['slug']} report check, not used yet" for k in _list(e, "checks")]
+            out.append(_changes(f"the {t['task']} task", t) + ("" if t.get("kind") == "prompt" else ", not used yet"))
+    out += [f"{k.get('name') or k['slug']} report check" for k in _list(e, "checks")]
     return out
 
 

@@ -536,9 +536,10 @@ async def read(c: str, run: _Run, prop: dict[str, Any], view: dict[str, Any], sh
     """(problems, the extra states it asks to see, EXTRA_SHOTS at most and none unless `ask`) from one reading of the
     pictures; why not, as the note the check mark shows, when the reading failed. While the API is at capacity it waits,
     outside the reading slots, and reads again, for as long as that lasts."""
-    from . import card_check, model, tools  # noqa: PLC0415
+    from . import card_check, model, prompts, tasks, tools  # noqa: PLC0415
 
-    secs = _sections()
+    with prompts.custom(tasks.files(c, PROMPT)):
+        secs = _sections()
     user = _fill(secs["view"], {"name": str(prop.get("name") or view["name"]),
                                 "description": str(prop.get("why") or view["description"]),
                                 "claims": ", ".join(prop.get("claims") or view["claims"]),

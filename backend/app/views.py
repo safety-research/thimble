@@ -4076,7 +4076,10 @@ async def suggest(c: str, rel: str) -> str | None:
     p = config.safe_corpus_path(config.corpus_dir(c), got["path"])
     what, head = await asyncio.to_thread(file_head, p)
     count = sum(1 for f in await asyncio.to_thread(folder_paths, config.corpus_dir(c)) if suffix_of(f) == suffix)
-    secs = {name: prompts.section(SUGGEST_PROMPT, name).strip() for name in ("suggest", "file", "proposal")}
+    from . import tasks  # noqa: PLC0415
+
+    with prompts.custom(tasks.files(c, SUGGEST_PROMPT)):
+        secs = {name: prompts.section(SUGGEST_PROMPT, name).strip() for name in ("suggest", "file", "proposal")}
     system = prompts._fill(secs["suggest"], {}, f"{SUGGEST_PROMPT}.md")
     user = prompts._fill(secs["file"], {"path": got["path"], "size": _fmt_size(p.stat().st_size), "count": str(count),
                                         "suffix": suffix, "what": what, "head": head}, f"{SUGGEST_PROMPT}.md")

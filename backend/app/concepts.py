@@ -4384,7 +4384,10 @@ async def draft_route(c: str, body: DraftBody) -> dict:
         records = await asyncio.to_thread(sample_records, c, body.paths)
     except ValueError as e:
         raise HTTPException(404, str(e)) from e
-    prompt = labels_part("draft", description=text, records=labels_part("records", **records) if records["lines"] else "")
+    from . import prompts, tasks  # noqa: PLC0415
+
+    with prompts.custom(tasks.files(c, "labels")):
+        prompt = labels_part("draft", description=text, records=labels_part("records", **records) if records["lines"] else "")
     call = await _labels_call(c, prompt, draft_tool())
     if call.status != "ok":
         raise _call_failed(call)

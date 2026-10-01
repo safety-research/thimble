@@ -167,9 +167,12 @@ def samples(c: str, gs: list[dict[str, Any]]) -> str:
 
 
 def prompt(c: str, name: str, description: str, files: list[tuple[Any, ...]]) -> str:
+    from . import tasks  # noqa: PLC0415
+
     gs = groups(files)
-    return prompts.render(PROMPT, {"name": name, "description": description or name, "files": listing(gs),
-                                   "samples": samples(c, gs)})
+    with prompts.custom(tasks.files(c, PROMPT)):
+        return prompts.render(PROMPT, {"name": name, "description": description or name, "files": listing(gs),
+                                       "samples": samples(c, gs)})
 
 
 async def ask(c: str, text: str) -> Any:

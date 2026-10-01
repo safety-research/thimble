@@ -168,13 +168,13 @@ def test_the_new_layout_gives_roles_tasks_subagents_and_report_types(tmp_path, c
                               "command": ["python", "labels.py"], "replace": False}]
     assert extensions.parts(info) == ["One pager report type", "adds to the orientation", "its own critic, an Agent SDK program",
                                       "reader agent", "its own labels task, a program, not used yet",
-                                      "Tone report check, not used yet"]
+                                      "Tone report check"]
     lines = "\n".join(extensions.summary(info, {"source": str(root), "kind": "folder"}))
     assert "orientation Reads all. It adds to the orientation's prompt." in lines
     assert "critic      Two critics. It runs the critic as an Agent SDK program (critic.py)." in lines
     assert ("task        labels: Three models vote. It runs the labels task as a program of its own (python labels.py). "
-            "This thimble does not run tasks yet, so it is not used.") in lines
-    assert "report check tone: Tone. This thimble does not run report checks yet, so it is not used." in lines
+            "This thimble does not run a task's program yet, so it is not used.") in lines
+    assert "report check tone: Tone. It is offered in the report's Checks." in lines
     assert "kernels" not in lines, "it has no Python for the kernels to run"
 
     assert extensions.add(str(root), yes=True, say=lambda _: None) == ["kit"]

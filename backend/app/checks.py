@@ -4,7 +4,9 @@ cached: a passage whose text did not change, or that is locked, is not checked a
 
 A check is `workspaces/<c>/checks/<id>.json` = {id, name, prompt, colour, shown, builtin, created_by, ts, version,
 runs: {doc: Run}}. The built-ins (`unverified`, `verified`, `judgment`) are prompts/checks/<id>.md, read from the
-prompt file until first changed. A run is a Claude Code session of its own (agent_session.start) running as the check
+prompt file until first changed. An active extension's report checks, checks/<slug>/check.json (its name and colour)
+and check.md (its prompt) in its folder, follow the built-ins as `<extension>-<slug>`, off and read from the extension
+until first changed, as the built-ins are. A run is a Claude Code session of its own (agent_session.start) running as the check
 agent (prompts/check.md) with the corpus read-only and a work folder of its own; its first message is the context
 engine's (context.render) plus the document, the check's prompt and the passages it covers. At most MAX_SESSIONS run
 at once; a session past RUN_LIMIT_S of active time is stopped and the run ends `failed`.
@@ -105,22 +107,53 @@ def builtin(cid: str) -> dict[str, Any] | None:
             "created_by": "thimble", "ts": "", "version": 1, "runs": {}}
 
 
+def from_extensions(c: str) -> dict[str, dict[str, Any]]:
+    """{id: check} of the report checks of the active extensions in workspace `c`, each off and never run, by
+    `<extension>-<slug>`; one whose check.md is empty or missing is left out."""
+    from . import extensions  # noqa: PLC0415 — extensions imports the views module
+
+    out: dict[str, dict[str, Any]] = {}
+    for e in extensions.active(c):
+        for k in e.get("checks") or []:
+            slug = str(k.get("slug") or "") if isinstance(k, dict) else ""
+            cid = f"{e['name']}-{slug}"
+            folder = Path(str(e["src"])) / "checks" / slug
+            try:
+                prompt = (folder / "check.md").read_text("utf-8").strip()[:PROMPT_CHARS]
+            except OSError:
+                prompt = ""
+            raw = read_json(folder / "check.json", {})
+            raw = raw if isinstance(raw, dict) else {}
+            colour = raw.get("colour")
+            colour = int(colour) if isinstance(colour, (int, str)) and str(colour).isdigit() else None
+            if not slug or not prompt or not ID_RE.match(cid) or cid in BUILTINS:
+                continue
+            out[cid] = {"id": cid, "name": _collapse(raw.get("name") or slug)[:NAME_CHARS], "prompt": prompt,
+                        "colour": colour if colour in COLOURS else COLOURS[len(out) % len(COLOURS)], "shown": False,
+                        "builtin": True, "created_by": str(e["name"]), "ts": "", "version": 1, "runs": {}}
+    return out
+
+
 def read(c: str, cid: str) -> dict[str, Any] | None:
-    """The check `cid`: its workspace file, else the built-in of that id; None when neither exists."""
+    """The check `cid`: its workspace file, else the built-in of that id, else an active extension's; None when none
+    exists."""
     stored = read_json(_path(c, cid), None)
     if isinstance(stored, dict):
         stored.setdefault("runs", {})
         return stored
-    return builtin(cid)
+    return builtin(cid) or from_extensions(c).get(cid)
 
 
 def list_checks(c: str) -> list[dict[str, Any]]:
-    """Every check, the built-ins first in their order, then the others in the order they were made."""
+    """Every check, the built-ins first in their order, then the active extensions' checks, then the others in the
+    order they were made."""
     out = [x for cid in BUILTINS if (x := read(c, cid)) is not None]
+    theirs = from_extensions(c)
+    out += [x for cid in theirs if (x := read(c, cid)) is not None]
     d = _dir(c)
     others = []
     for p in sorted(d.glob("*.json")) if d.is_dir() else []:
-        if p.stem in BUILTINS:
+        if p.stem in BUILTINS or p.stem in theirs:
             continue
         x = read_json(p, None)
         if isinstance(x, dict) and x.get("id") == p.stem:

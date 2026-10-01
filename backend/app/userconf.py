@@ -720,14 +720,21 @@ def session(c: str | None, agent: str, *, sandbox: bool = True) -> Session:
 # --------------------------------------------------------------------------- prompts
 
 
+# the agents whose prompt file is a task's (tasks.TASK_PROMPTS), which the active extensions' tasks change
+TASK_AGENTS = ("labels", "cardCheck", "checks")
+
+
 def prompt_files(c: str | None, agent: str) -> dict[str, Path]:
     """{prompt file: the file that replaces it} for `agent` in workspace `c` (prompts.custom): the config's `prompt`,
-    else the role's prompt as the active extensions change it (roles.prompt_file); {} for none."""
+    else the role's prompt, or the task's, as the active extensions change it (roles.prompt_file, tasks.files); {} for
+    none."""
     value = load_or_defaults(c)[0]["agents"][agent].get("prompt")
     if isinstance(value, str) and value:
         return {PROMPT_FILES[agent]: Path(value)}
-    from . import roles  # noqa: PLC0415 — roles reads the extensions, which import this module
+    from . import roles, tasks  # noqa: PLC0415 — roles reads the extensions, which import this module
 
+    if agent in TASK_AGENTS:
+        return tasks.files(c, PROMPT_FILES[agent])
     if agent in roles.SESSION_ROLES:
         try:
             made = roles.prompt_file(c, agent)
