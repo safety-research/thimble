@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// The UI half of the release's end-to-end test (scripts/e2e_release.sh runs it in the throwaway environment, with the
+// The UI half of the release's end-to-end test (scripts/e2e_release.sh runs it in the run's environment, with the
 // server and the stand-in session already up). It walks the UI in headless Chromium at 1440x900, takes a screenshot of
 // each step once Hanken Grotesk has loaded, runs the extension commands between UI checks, and appends one JSON line per
 // step to $THIMBLE_E2E_RESULTS: {step, title, status, detail, shots, pending?}.
@@ -46,7 +46,12 @@ const PENDING = {
   'ext-live': '+ New refreshing its report types when an extension is switched (it loads them once per page)',
   'view-derived': 'the view contract (derived fields as a count in the header)',
   'view-labels': 'the view contract (labels in every view\'s UI)',
+  'labels-any-file': 'records and refs for any file a reader can split (CSV rows, PDF pages, SQLite rows)',
+  'view-fullscreen': 'view frames that may go fullscreen',
+  'view-slow-call': 'view calls with no time limit that hold up no other request',
 }
+const MARKS = '.reader-gutter-cell.is-lit, .reader-span[data-concept], [data-concept], [data-thimble-label]'
+const SLOW_S = 20
 
 let shotN = 0
 const fontMisses = []
@@ -78,12 +83,28 @@ async function dismissTour(page) {
   }
 }
 
+// the notices hidden so far (a notice with a Hide button sits over the views bar), for the first-load step's detail
+const notices = []
+
+/** Press Hide on each notice that shows one, as the analyst would to get at what is under it. */
+async function hideNotices(page) {
+  for (const b of await page.getByRole('button', { name: 'Hide', exact: true }).all()) {
+    if (!(await b.isVisible().catch(() => false))) continue
+    const text = await b.evaluate((el) => (el.closest('[role=alert], [role=status], [class*="alert"], [class*="notice"], [class*="toast"]') || el.parentElement)?.innerText || '').catch(() => '')
+    const line = text.replace(/\s+/g, ' ').replace(/\s*Hide\s*$/, '').trim()
+    if (line && !notices.includes(line)) notices.push(line)
+    await b.click({ timeout: 3_000 }).catch(() => undefined)
+  }
+}
+
 let currentPage = null
 
-/** Run one step: its function returns {detail, shots} or throws; a step never stops the walk. */
+/** Run one step: its function returns {detail, shots} or throws; a step never stops the walk. A failing step without a
+ * screenshot of its own gets one of the page as the failure left it. */
 async function step(name, title, fn) {
   let timer
   if (currentPage && name !== 'welcome' && name !== 'tour') await dismissTour(currentPage)
+  if (currentPage) await hideNotices(currentPage)
   try {
     const res = await Promise.race([
       fn(),
@@ -93,7 +114,8 @@ async function step(name, title, fn) {
     return true
   } catch (e) {
     const msg = String(e?.message || e).split('\n')[0]
-    record(name, title, 'fail', msg, e?.shots ?? [])
+    const shots = e?.shots?.length ? e.shots : currentPage ? [await shot(currentPage, `fail-${name}`).catch(() => null)].filter(Boolean) : []
+    record(name, title, 'fail', msg, shots)
     return false
   } finally {
     clearTimeout(timer)
@@ -119,10 +141,22 @@ async function shot(page, name) {
   return relative(OUT, file)
 }
 
-/** Run `thimble <args>` in the corpus copy: {status, out}. */
+/** Run the installed tree's `thimble <args>` in the corpus copy: {status, out}. */
 function thimble(...args) {
-  const r = spawnSync('thimble', args, { cwd: CORPUS, env, encoding: 'utf8', timeout: 120_000 })
+  const r = spawnSync(join(TREE, 'plugin', 'bin', 'thimble'), args, { cwd: CORPUS, env, encoding: 'utf8', timeout: 120_000 })
   return { status: r.status, out: `${r.stdout || ''}${r.stderr || ''}`.trim() }
+}
+
+/** The label marks on the open file, polled for up to `ms`. */
+async function countMarks(page, ms) {
+  const until = Date.now() + ms
+  let marks = 0
+  while (Date.now() < until) {
+    marks = await page.locator(MARKS).count()
+    if (marks) break
+    await page.waitForTimeout(500)
+  }
+  return marks
 }
 
 async function settle(page, ms = 400) {
@@ -135,6 +169,7 @@ async function sessionGone(page) {
 }
 
 async function openSettings(page) {
+  await hideNotices(page)
   if (!(await page.locator('.settings-pop').count())) await page.getByRole('button', { name: 'Settings', exact: true }).click()
   await page.locator('.settings-pop').waitFor({ timeout: ACTION_MS })
   await page.locator('.settings-loading').waitFor({ state: 'detached', timeout: ACTION_MS }).catch(() => undefined)
@@ -166,7 +201,24 @@ async function openFile(page, path) {
     if ((await dir.getAttribute('aria-expanded')) !== 'true') await dir.click()
   }
   const row = page.locator(`[role=tree] [data-anchor="${path}"]`)
+  // a long tree draws only the rows in sight: scroll it from the top until the row is drawn
+  if (!(await row.count())) {
+    const tree = page.locator('[role=tree]').first()
+    for (let i = 0; i < 60 && !(await row.count()); i++) {
+      const moved = await tree.evaluate((el, first) => {
+        let sc = el
+        while (sc && !(sc.scrollHeight > sc.clientHeight + 1 && /(auto|scroll)/.test(getComputedStyle(sc).overflowY))) sc = sc.parentElement
+        if (!sc) return false
+        const before = sc.scrollTop
+        sc.scrollTop = first ? 0 : before + sc.clientHeight * 0.7
+        return first || sc.scrollTop !== before
+      }, i === 0)
+      if (!moved) break
+      await page.waitForTimeout(150)
+    }
+  }
   await row.waitFor({ timeout: ACTION_MS })
+  await row.scrollIntoViewIfNeeded()
   await row.click()
   await settle(page)
 }
@@ -179,6 +231,7 @@ const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
 /** The entries of Report's + New menu, the menu closed again. */
 async function newMenu(page) {
+  await hideNotices(page)
   await page.getByRole('tab', { name: 'Report', exact: true }).click()
   const btn = page.getByRole('button', { name: 'New', exact: true }).first()
   await btn.waitFor({ timeout: ACTION_MS })
@@ -190,28 +243,34 @@ async function newMenu(page) {
   return { items, close: () => page.keyboard.press('Escape') }
 }
 
-/** The fixture extension's row in Settings > Extensions: {present, on, active}. */
+/** The fixture extension's row in Settings > Extensions: {present, on (its switch), active (it runs here), row, sw}. */
 async function extRow(page) {
   const pop = await openSettings(page)
   const row = pop.locator(`[data-extension="${EXT}"]`)
   if (!(await row.count())) return { present: false }
   const sw = row.locator('[role=switch]').first()
   const on = (await sw.getAttribute('aria-checked')) === 'true'
-  return { present: true, on, active: (await row.getAttribute('data-active')) === 'true', row, sw }
+  return { present: true, on, active: (await row.getAttribute('data-active')) !== 'false', row, sw }
 }
+
+/** Whether a Settings row shows the extension as `want`: on is its switch on and the extension running here; off is
+ * either one off. */
+const showsAs = (r, want) => r.present && (want ? r.on && r.active : !r.on || !r.active)
 
 // each switch of the fixture extension, and the parts of the UI that showed it only after a reload
 const lagged = []
+let followed = 0
 
 /** Whether the UI shows the fixture extension as `want` (on or off) in Settings and in + New: within `ms` on the live
  * page, else after one reload, which is noted in `lagged` for the ext-live step. */
 async function followsExtension(page, want, what, ms = 10_000) {
+  let row = null
   const seen = async () => {
-    const r = await extRow(page)
+    row = await extRow(page)
     await closeSettings(page)
     const m = await newMenu(page)
     await m.close()
-    return { settings: r.present && r.on === want, menu: m.items.includes(EXT_REPORT) === want }
+    return { settings: showsAs(row, want), menu: m.items.includes(EXT_REPORT) === want }
   }
   const until = Date.now() + ms
   let s = await seen()
@@ -219,20 +278,29 @@ async function followsExtension(page, want, what, ms = 10_000) {
     await page.waitForTimeout(1_000)
     s = await seen()
   }
-  if (s.settings && s.menu) return { ok: true, how: 'live' }
+  const greyed = () => (!want && row?.on && !row?.active ? ', Settings showing it inactive with its switch still on' : '')
+  if (s.settings && s.menu) {
+    followed++
+    return { ok: true, how: `live${greyed()}` }
+  }
   const stale = [!s.settings && 'Settings', !s.menu && '+ New'].filter(Boolean)
   await page.reload()
   await waitShell(page)
   s = await seen()
   const ok = s.settings && s.menu
-  if (ok) lagged.push(`${what}: ${stale.join(' and ')}`)
+  if (ok) {
+    followed++
+    lagged.push(`${what}: ${stale.join(' and ')}`)
+  }
   const still = [!s.settings && 'Settings', !s.menu && '+ New'].filter(Boolean)
-  return { ok, how: ok ? `${stale.join(' and ')} only after a reload` : `${still.join(' and ')} still wrong after a reload` }
+  const where = row?.present ? `switch ${row.on ? 'on' : 'off'}, ${row.active ? 'running' : 'not running'} here` : 'no row'
+  return { ok, how: ok ? `${stale.join(' and ')} only after a reload${greyed()}` : `${still.join(' and ')} still wrong after a reload (Settings: ${where})` }
 }
 
 async function waitShell(page) {
   await page.getByRole('tab', { name: 'Files', exact: true }).waitFor({ timeout: 30_000 })
   await settle(page, 800)
+  await hideNotices(page)
 }
 
 /** Measured layout at each size: no sideways scroll, and each selector's box inside the viewport. */
@@ -345,7 +413,9 @@ async function main() {
       const s = await shot(page, 'first-load')
       check(!(await sessionGone(page)), 'the page shows "No Claude Code session connected"')
       check((await page.getByRole('tab', { name: 'Report', exact: true }).count()) > 0, 'no Report tab')
-      return { detail: `${WS.name} at ${WS.url.split('#')[0]}, in ${browserName}`, shots: [s] }
+      await hideNotices(page)
+      const shown = notices.length ? `; hid the notice "${notices.join('" and "')}"` : ''
+      return { detail: `${WS.name} at ${WS.url.split('#')[0]}, in ${browserName}${shown}`, shots: [s] }
     })
 
     await step('welcome', 'The first-launch welcome asks about the tour, and Skip goes straight to the workbench', async () => {
@@ -446,17 +516,31 @@ async function main() {
       const jsonl = files.find((f) => /agent-01\.jsonl$/.test(f)) || files.find((f) => f.endsWith('.jsonl'))
       await openFile(page, jsonl)
       const listed = await page.getByText(WS.label.name, { exact: true }).count()
-      let marks = 0
-      const until = Date.now() + 15_000
-      while (Date.now() < until) {
-        marks = await page.locator('.reader-gutter-cell.is-lit, .reader-span[data-concept]').count()
-        if (marks) break
-        await page.waitForTimeout(500)
-      }
+      const marks = await countMarks(page, 15_000)
       const s = await shot(page, 'labels')
       if (!listed) throw new StepError(`"${WS.label.name}" is not listed in Files`, [s])
       if (!marks) throw new StepError(`no label marks on the records of ${jsonl}`, [s])
       return { detail: `"${WS.label.name}" listed, ${marks} marks in ${jsonl}; counts ${JSON.stringify(WS.label.counts ?? {})}`, shots: [s] }
+    })
+
+    await step('labels-any-file', 'Labels find records in a CSV, a PDF and a SQLite database, by refs, and mark the CSV\'s rows', async () => {
+      const got = WS.any_file || []
+      check(got.length, 'workspace.py made no labels on those files')
+      const problems = []
+      const seen = []
+      for (const r of got) {
+        const refs = r.refs || []
+        if (!r.ok) problems.push(`${r.kind}: ${r.error}`)
+        else if (!refs.length) problems.push(`${r.kind}: no record of ${r.path} matched`)
+        else if (r.kind !== 'CSV rows' && refs.every((x) => /#L\d+(-L?\d+)?$/.test(x))) problems.push(`${r.kind}: matched by lines of the raw file (${refs.slice(0, 2).join(', ')})`)
+        seen.push(`${r.kind}: ${refs.slice(0, 2).join(', ') || 'none'}`)
+      }
+      await openFile(page, 'exports/chat-export.csv')
+      const marks = await countMarks(page, 8_000)
+      const s = await shot(page, 'labels-any-file')
+      if (!marks) problems.push('no label marks on the rows of exports/chat-export.csv')
+      if (problems.length) throw new StepError(problems.join('; '), [s])
+      return { detail: `${seen.join('; ')}; ${marks} marks on the CSV's rows`, shots: [s] }
     })
 
     await step('transcript-anywhere', 'Chat logs outside runs/ (Markdown, CSV) are offered as transcripts', async () => {
@@ -547,7 +631,9 @@ async function main() {
           control = t
           await b.click()
           await page.waitForTimeout(400)
-          const lists = [await page.locator('.view-pane').first().innerText(), ...(await page.locator('.view-pane-list').allInnerTexts())]
+          const lists = [await page.locator('.view-pane').first().innerText(),
+            ...(await page.locator('.view-pane-list, .view-pane-residue-list').allInnerTexts()),
+            await page.evaluate(() => document.body.innerText)]
           listed = lists.some((x) => x.includes('broken.jsonl'))
           shots.push(await shot(page, 'view-residue'))
           if (await page.locator('.view-pane-list').count()) await page.keyboard.press('Escape')
@@ -582,6 +668,37 @@ async function main() {
       if (!counted && !named && !marks) throw new StepError(`the view shows neither the label "${WS.label?.name}" nor a count or mark of labels`, [s])
       const got = [counted && 'its head counts the labels it shows', named && 'the label is named in the view pane', marks && `${marks} label marks in the view`]
       return { detail: got.filter(Boolean).join('; '), shots: [s] }
+    })
+
+    await step('view-fullscreen', 'The view\'s frame may go fullscreen', async () => {
+      const frame = page.locator(`iframe[src*="/views/${VIEW.slug}/"], .view-pane iframe`).first()
+      await frame.waitFor({ timeout: ACTION_MS })
+      const got = await frame.evaluate((el) => ({ allow: el.getAttribute('allow') || '', full: el.allowFullscreen || /\bfullscreen\b/.test(el.getAttribute('allow') || '') }))
+      check(got.full, `the view's iframe allows ${got.allow ? `"${got.allow}"` : 'nothing'}, not fullscreen`)
+      return { detail: got.allow ? `allow="${got.allow}"` : 'allowfullscreen' }
+    })
+
+    await step('view-slow-call', `A view call of ${SLOW_S} s ends with its data, and holds up neither the File browser nor another view call`, async () => {
+      const r = await page.evaluate(async ({ ws, slug, sleep }) => {
+        const post = (query) => fetch(`/api/ws/${ws}/views/${slug}/records`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ query }) })
+        const timed = async (f) => {
+          const t = performance.now()
+          const res = await f()
+          return { status: res.status, ms: Math.round(performance.now() - t), rows: Array.isArray((await res.json().catch(() => null))?.data) }
+        }
+        const slow = timed(() => post({ sleep }))
+        await new Promise((ok) => setTimeout(ok, 1_000))
+        const list = await timed(() => fetch(`/api/corpora/${ws}/sources?path=&depth=1`))
+        const other = await timed(() => post({}))
+        return { slow: await slow, list, other }
+      }, { ws: WS.name, slug: VIEW.slug, sleep: SLOW_S })
+      const problems = []
+      if (r.slow.status !== 200 || !r.slow.rows) problems.push(`the slow call answered ${r.slow.status} after ${(r.slow.ms / 1000).toFixed(1)} s without its data`)
+      if (r.list.status !== 200 || r.list.ms > 3_000) problems.push(`the File browser's listing took ${(r.list.ms / 1000).toFixed(1)} s (${r.list.status}) during it`)
+      if (r.other.status !== 200 || r.other.ms > 3_000) problems.push(`another call of the view took ${(r.other.ms / 1000).toFixed(1)} s (${r.other.status}) during it`)
+      const detail = `slow call ${r.slow.status} in ${(r.slow.ms / 1000).toFixed(1)} s; listing ${r.list.ms} ms, another view call ${r.other.ms} ms meanwhile`
+      check(!problems.length, `${problems.join('; ')} (${detail})`)
+      return { detail }
     })
 
     await step('settings-extensions', 'Settings > Extensions lists the extensions, and the popover fits on screen', async () => {
@@ -696,12 +813,15 @@ async function main() {
 
     await step('ext-orient-offer', 'Switching on an extension with orientation instructions offers to run them', async () => {
       check(added, 'the extension was not added')
-      // the offer is due only where an orientation ran; with no model here, a run record stands in for one
+      // the offer is due only where an orientation ran; with no model here, a run record and its chat stand in for one
       const run = join(WS.dir, 'orient', 'run.json')
+      const chat = join(WS.dir, 'chats', 'e2e-standin.meta.json')
       const planted = !existsSync(run)
       if (planted) {
         mkdirSync(dirname(run), { recursive: true })
-        writeFileSync(run, JSON.stringify({ session: 'e2e-standin', chats: { orient: 'e2e-standin' } }))
+        writeFileSync(run, JSON.stringify({ session: 'e2e-standin', status: 'done', chats: { orient: 'e2e-standin' } }))
+        mkdirSync(dirname(chat), { recursive: true })
+        writeFileSync(chat, JSON.stringify({ id: 'e2e-standin', kind: 'agent', role: 'orient', title: 'Orientation', status: 'done' }))
       }
       try {
         let r = await extRow(page)
@@ -716,21 +836,25 @@ async function main() {
         const row = page.locator(`.settings-pop [data-extension="${EXT}"]`)
         const shown = await row.getByText(/orientation now/i).first().waitFor({ timeout: 5_000 }).then(() => true, () => false)
         const s = await shot(page, 'ext-orient-offer')
-        const not = row.getByRole('button', { name: /^not now$/i })
-        if (await not.count()) await not.click()
+        const not = row.getByText(/^not now$/i)
+        if (await not.count()) await not.first().click()
         await page.locator('.settings-pop').getByRole('button', { name: 'Save', exact: true }).click()
         await page.locator('.settings-pop').waitFor({ state: 'detached', timeout: ACTION_MS }).catch(() => undefined)
         if (!shown) throw new StepError('switching it on in Settings offered no run of its orientation instructions', [s])
         return { detail: `Settings asks whether to run its orientation now; answered Not now${planted ? ' (a run record stood in for an orientation)' : ''}`, shots: [s] }
       } finally {
-        if (planted) rmSync(run, { force: true })
+        if (planted) {
+          rmSync(run, { force: true })
+          rmSync(chat, { force: true })
+        }
       }
     })
 
     await step('ext-live', 'Settings and + New follow every switch of the extension without a reload', async () => {
       check(added, 'the extension was not added')
       check(lagged.length === 0, `shown only after a reload: ${lagged.join('; ')}`)
-      return { detail: 'every switch shown on the live page' }
+      check(followed >= 3, `the UI showed only ${followed} of the switches at all`)
+      return { detail: `all ${followed} switches shown on the live page` }
     })
 
     await step('fonts', 'Every screenshot rendered in Hanken Grotesk', async () => {

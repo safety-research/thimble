@@ -1,4 +1,5 @@
 import json
+import time
 from collections import Counter
 
 KIND_KEYS = ("type", "kind", "action")
@@ -28,7 +29,10 @@ def build_index(paths):
 
 
 def records(index, query):
-    """One row per file: {ref, path, records, bad, kinds}."""
+    """One row per file: {ref, path, records, bad, kinds}; {"sleep": seconds} first waits that long, as a heavy call
+    would."""
+    if isinstance(query, dict) and isinstance(query.get("sleep"), (int, float)):
+        time.sleep(query["sleep"])
     return [{"ref": p, "path": p, **e} for p, e in index.items()]
 
 
