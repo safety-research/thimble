@@ -40,7 +40,7 @@ from pydantic import BaseModel, Field
 from sse_starlette import EventSourceResponse, ServerSentEvent
 
 from . import cite, config, frames, kernel_wrap, page_fonts, procs, srt
-from .ledger import atomic_write_text, read_json, write_json
+from .ledger import atomic_write_text, read_json, unlinked, write_json
 
 log = logging.getLogger("thimble.notebook")
 
@@ -171,7 +171,10 @@ def mirror_corpus(corpus: Path, scratch: Path) -> None:
 
     The corpus's folders come from corpus_walk, and a manifest under thimble's home keeps, for each folder mirrored,
     its mtime and its scratch folder's mtime as they were right after: a folder whose two mtimes are unchanged is
-    skipped without reading either, so mirroring an unchanged corpus costs two stats per folder. Blocking."""
+    skipped without reading either, so mirroring an unchanged corpus costs two stats per folder. A folder that holds
+    links is mirrored on every pass, since a link's target comes and goes without its folder's mtime moving. Without a
+    manifest for this corpus, the dangling links anywhere in `scratch` are removed first, as no record says which
+    corpus folders went. Blocking."""
     from . import corpus_walk  # noqa: PLC0415
 
     corpus = corpus.resolve()
@@ -184,6 +187,10 @@ def mirror_corpus(corpus: Path, scratch: Path) -> None:
     done: dict[str, list[int]] = {}
     if isinstance(saved, dict) and saved.get("corpus") == str(corpus) and isinstance(saved.get("dirs"), dict):
         done = {k: v for k, v in saved["dirs"].items() if isinstance(v, list) and len(v) == 2}
+    if not done:
+        for root, dirs, files in os.walk(scratch):
+            for name in [*files, *dirs]:
+                _drop_dangling(Path(root) / name)
     # a corpus that is a git repository keeps its objects under .git, never data for a card
     tree = corpus_walk.walk(corpus, frozenset({VCS_DIR}))
     kept: dict[str, list[int]] = {}
@@ -204,7 +211,7 @@ def mirror_corpus(corpus: Path, scratch: Path) -> None:
                 continue
             now = st.st_mtime_ns
         was = done.get(rel)
-        if was is not None and not folder.racy and was == [folder.mtime_ns, now]:
+        if was is not None and not folder.racy and not folder.links and was == [folder.mtime_ns, now]:
             kept[rel] = was
             continue
         _mirror_folder(corpus / rel if rel else corpus, dest, folder.file_names(), folder.link_names(), folder.dirs)
@@ -217,15 +224,47 @@ def mirror_corpus(corpus: Path, scratch: Path) -> None:
     gone = set(done) - set(tree)
     for rel in gone:
         parts = rel.split("/")
-        if not any("/".join(parts[:i]) in gone for i in range(1, len(parts))):
-            for root, dirs, files in os.walk(scratch / rel):  # the corpus folder is gone, and so are its files
-                for name in [*files, *dirs]:
-                    _drop_dangling(Path(root) / name)
+        if any("/".join(parts[:i]) in gone for i in range(1, len(parts))):
+            continue
+        top = scratch / rel
+        try:
+            unlinked(scratch, top)
+        except ValueError:
+            continue
+        if top.is_symlink():
+            continue  # a kernel's link in place of the folder: what it points at is not the mirror's
+        for root, dirs, files in os.walk(top):  # the corpus folder is gone, and so are its files
+            for name in [*files, *dirs]:
+                _drop_dangling(Path(root) / name)
     try:
         manifest.parent.mkdir(parents=True, exist_ok=True)
-        atomic_write_text(manifest, json.dumps({"corpus": str(corpus), "dirs": kept}, separators=(",", ":")))
+        atomic_write_text(manifest, json.dumps({"corpus": str(corpus), "scratch": str(scratch.resolve()), "dirs": kept},
+                                               separators=(",", ":")))
     except OSError:
         log.warning("scratch mirror: its manifest %s could not be written", manifest)
+    _prune_manifests(manifest)
+
+
+_manifests_pruned = False
+
+
+def _prune_manifests(keep: Path) -> None:
+    """Remove, once per server run, the manifests of scratch mirrors that are gone, such as a deleted workspace's."""
+    global _manifests_pruned
+    if _manifests_pruned:
+        return
+    _manifests_pruned = True
+    for p in keep.parent.glob("*.json"):
+        if p == keep:
+            continue
+        try:
+            saved = read_json(p, None)
+        except (OSError, ValueError):
+            saved = None
+        where = saved.get("scratch") if isinstance(saved, dict) else None
+        if not isinstance(where, str) or not os.path.isdir(where):
+            with contextlib.suppress(OSError):
+                p.unlink()
 
 
 MIRROR_MEMO_S = 30.0  # a mirror this recent serves the next kernel's start too

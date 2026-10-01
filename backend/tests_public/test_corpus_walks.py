@@ -5,6 +5,7 @@ of a view's folder walk at the same time share one walk, and `thimble list` does
 from __future__ import annotations
 
 import os
+import shutil
 import threading
 import time
 from pathlib import Path
@@ -204,3 +205,52 @@ def test_a_corpus_file_that_becomes_a_folder_is_mirrored_as_a_folder(corpus, tmp
     notebook.mirror_corpus(corpus, scratch)
     assert not (scratch / "README.md").is_symlink() and (scratch / "README.md").is_dir()
     assert (scratch / "README.md/part.md").read_text() == "one"
+
+
+def test_a_corpus_link_whose_target_appears_later_is_mirrored(corpus, tmp_path):
+    target = tmp_path / "elsewhere.txt"
+    (corpus / "runs" / "a" / "late").symlink_to(target)
+    _age(corpus)
+    scratch = tmp_path / "scratch"
+    notebook.mirror_corpus(corpus, scratch)
+    assert not os.path.lexists(scratch / "runs/a/late")
+    target.write_text("here now")  # the folder holding the link keeps its mtime
+    notebook.mirror_corpus(corpus, scratch)
+    assert (scratch / "runs/a/late").read_text() == "here now"
+
+
+def test_a_gone_folder_s_sweep_does_not_follow_a_kernel_s_link(corpus, tmp_path):
+    scratch = tmp_path / "scratch"
+    notebook.mirror_corpus(corpus, scratch)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "dangling").symlink_to(tmp_path / "nothing")
+    shutil.rmtree(scratch / "runs" / "b")
+    (scratch / "runs" / "b").symlink_to(outside)  # a cell put a link where the mirror had runs/b
+    shutil.rmtree(corpus / "runs" / "b")
+    notebook.mirror_corpus(corpus, scratch)
+    assert os.path.lexists(outside / "dangling")
+
+
+def test_without_a_manifest_the_links_of_a_gone_folder_are_removed(corpus, tmp_path):
+    scratch = tmp_path / "scratch"
+    notebook.mirror_corpus(corpus, scratch)
+    notebook._mirror_manifest(scratch).unlink()
+    shutil.rmtree(corpus / "runs" / "b")
+    corpus_walk.forget()
+    notebook.mirror_corpus(corpus, scratch)
+    assert _links(scratch / "runs" / "b") == set()
+    assert (scratch / "runs/a/manifest.json").is_symlink()
+
+
+def test_the_manifest_of_a_mirror_that_is_gone_is_removed(corpus, tmp_path, monkeypatch):
+    monkeypatch.setattr(notebook, "_manifests_pruned", False)
+    old = tmp_path / "old-scratch"
+    notebook.mirror_corpus(corpus, old)
+    old_manifest = notebook._mirror_manifest(old)
+    shutil.rmtree(old)  # its workspace was deleted
+    monkeypatch.setattr(notebook, "_manifests_pruned", False)
+    scratch = tmp_path / "scratch"
+    notebook.mirror_corpus(corpus, scratch)
+    assert not old_manifest.exists()
+    assert notebook._mirror_manifest(scratch).is_file()
