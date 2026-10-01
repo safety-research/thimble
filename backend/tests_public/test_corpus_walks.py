@@ -1,15 +1,17 @@
-"""The kernels' scratch mirror of the corpus (notebook.mirror_corpus) and the shared walk under it (corpus_walk): every
-corpus file is linked, a change reaches the mirror on its next pass, what a kernel wrote stays, and an unchanged corpus
-is mirrored again without reading any folder, also after a restart (the manifest under thimble's home)."""
+"""The walks of the corpus. The kernels' scratch mirror (notebook.mirror_corpus) and the walk under it (corpus_walk):
+every corpus file is linked, a change reaches the mirror on its next pass, what a kernel wrote stays, and an unchanged
+corpus is mirrored again without reading any folder, also after a restart (the manifest under thimble's home). Callers
+of a view's folder walk at the same time share one walk, and `thimble list` does not stat a workspace's mirror links."""
 from __future__ import annotations
 
 import os
+import threading
 import time
 from pathlib import Path
 
 import pytest
 
-from app import corpus_walk, notebook
+from app import corpus_walk, notebook, runs, views
 
 
 def _age(root: Path, seconds: float = 60) -> None:
@@ -138,3 +140,43 @@ def test_the_walk_lists_again_only_the_folders_that_changed(corpus, monkeypatch)
     assert again["runs/b/agents"].file_names() == ["agent-1.jsonl", "agent-2.jsonl"]
     assert again["runs/b/agents"].racy  # changed just now: listed again by the next walk
     assert set(corpus_walk.walk(corpus, frozenset({".git"}))) == set(first) - {".git", ".git/objects"}
+
+
+def test_callers_of_a_folder_walk_at_the_same_time_share_one_walk(corpus, monkeypatch):
+    walks: list[str] = []
+    gate = threading.Event()
+    real = views._walk_folder
+
+    def slow(c, rel):
+        walks.append(rel)
+        gate.wait(5)
+        return real(c, rel)
+
+    monkeypatch.setattr(views, "_walk_folder", slow)
+    views._folder_cache.clear()
+    got: list[int] = []
+    threads = [threading.Thread(target=lambda: got.append(len(views.folder_files(corpus, "")))) for _ in range(4)]
+    for t in threads:
+        t.start()
+    time.sleep(0.2)
+    gate.set()
+    for t in threads:
+        t.join()
+    assert walks == [""] and got == [5, 5, 5, 5]
+
+
+def test_last_used_counts_a_workspace_s_files_and_folders_but_not_its_mirror_links(corpus, tmp_path):
+    ws = tmp_path / "ws"
+    notebook.mirror_corpus(corpus, ws / "scratch")
+    made = ws / "notebooks" / "main.json"
+    made.parent.mkdir(parents=True)
+    made.write_text("{}")
+    t = time.time() - 3600
+    for d, ds, fs in os.walk(ws):
+        for n in [*ds, *fs]:
+            p = Path(d) / n
+            later = t + 600 if p.is_symlink() else t  # a link's own time is never read
+            os.utime(p, (later, later), follow_symlinks=False)
+    os.utime(ws, (t, t))
+    os.utime(made, (t + 60, t + 60))
+    assert runs.last_used(ws) == pytest.approx(t + 60)
