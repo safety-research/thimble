@@ -10,7 +10,16 @@
 //                          is the file the view opened on, and `picked` holds when the analyst chose it (Open in)
 //                          rather than thimble opening the view on its first file
 //   quoted {found}         frame to page: whether the quoted passage showed in the page
-//   fetch {id, query}      frame to page, answered by result {id, data} from reader.records (window.thimble.fetch)
+//   fetch {id, query, progress}
+//                          frame to page, answered by result {id, data} from reader.records (window.thimble.fetch), with
+//                          no time limit; `progress` when the page shows the wait itself (onProgress)
+//   cancel {id}            frame to page: the page dropped that fetch (a newer one with its key, or its signal), so
+//                          thimble cancels the reader's call
+//   progress {id, seconds, phase, done?, total?, note?}
+//                          page to frame, about once a second while a fetch runs: how long it has run, whether the
+//                          reader is reading the files (`index`) or answering, and what the reader reported
+//                          (thimble.progress). A fetch without onProgress shows it in thimble's own small box at the
+//                          page's corner, with a Cancel button, after WAIT_SHOWN_MS
 //   cite {ref, text, ...}  frame to page: a ⌘-click on an element with data-anchor, or on any other part of the view
 //                          (its legend, a control, the empty page), asked about as the view itself, `view:<slug>`
 //   init {mode, data, args, width, card, key}
@@ -75,6 +84,9 @@
   var markFns = []
   var markKey = '{}'
   var ownSize = false // the page said the height it needs, so the document's own height is no longer sent
+  var WAIT_SHOWN_MS = 1000
+  var waitBox = null
+  var waitTimer = null
   var derivedList = (window.__thimbleView && Array.isArray(window.__thimbleView.derived) && window.__thimbleView.derived) || []
   var derivedBy = {}
   for (var dv = 0; dv < derivedList.length; dv++) if (derivedList[dv] && derivedList[dv].field) derivedBy[derivedList[dv].field] = derivedList[dv]
@@ -99,6 +111,76 @@
   }
   function report(err) {
     post({ type: P + 'error', message: String((err && (err.message || err.reason)) || err) })
+  }
+  function aborted() {
+    var err = new Error('the fetch was cancelled')
+    err.name = 'AbortError'
+    return err
+  }
+  // drop a pending fetch: its promise rejects with an AbortError and thimble cancels the reader's call
+  function dropFetch(id) {
+    var p = pending[id]
+    if (!p) return
+    delete pending[id]
+    post({ type: P + 'cancel', id: id })
+    p.reject(aborted())
+    showWait()
+  }
+  // The box at the page's corner while a fetch without onProgress has run WAIT_SHOWN_MS: what the reader does, how long
+  // it has run, and Cancel, which drops those fetches.
+  function waiting() {
+    var now = Date.now()
+    var first = null
+    for (var k in pending) {
+      var p = pending[k]
+      if (!p.onProgress && now - p.started >= WAIT_SHOWN_MS && (!first || p.started < first.started)) first = p
+    }
+    return first
+  }
+  function showWait() {
+    var p = waiting()
+    if (!p) {
+      if (waitBox) waitBox.style.display = 'none'
+      var later = false
+      for (var k in pending) if (!pending[k].onProgress) later = true
+      if (waitTimer && !later) {
+        clearInterval(waitTimer)
+        waitTimer = null
+      }
+      return
+    }
+    if (!waitBox) {
+      var sheet = document.createElement('style')
+      sheet.textContent =
+        '.thimble-wait{position:fixed;right:8px;bottom:8px;z-index:2147483646;display:flex;align-items:center;gap:8px;' +
+        'padding:3px 3px 3px 10px;border:1px solid rgba(var(--ink-rgb,0,0,0),0.14);border-radius:var(--radius-ui,6px);' +
+        'background:var(--surface-card,#fff);color:var(--text-secondary,#555);font:400 var(--text-ui-sm,12px)/1.2 ' +
+        'var(--font-body,sans-serif);font-variant-numeric:tabular-nums}'
+      ;(document.head || document.documentElement).appendChild(sheet)
+      waitBox = document.createElement('div')
+      waitBox.className = 'thimble-wait'
+      waitBox.setAttribute('data-thimble-chrome', '')
+      waitBox.setAttribute('role', 'status')
+      var text = document.createElement('span')
+      var stop = document.createElement('button')
+      stop.type = 'button'
+      stop.className = 'btn btn-ghost btn-sm'
+      stop.textContent = 'Cancel'
+      stop.addEventListener('click', function () {
+        for (var k in pending) if (!pending[k].onProgress) dropFetch(+k)
+      })
+      waitBox.appendChild(text)
+      waitBox.appendChild(stop)
+      ;(document.body || document.documentElement).appendChild(waitBox)
+    }
+    var info = p.progress || {}
+    var what = info.note || (info.phase === 'index' ? 'Reading the files' : 'Loading')
+    var count = typeof info.done === 'number' && typeof info.total === 'number' ? ' · ' + info.done + ' of ' + info.total : ''
+    waitBox.firstChild.textContent = what + count + ' · ' + Math.floor((Date.now() - p.started) / 1000) + ' s'
+    waitBox.style.display = ''
+  }
+  function watchWait() {
+    if (!waitTimer) waitTimer = setInterval(showWait, 250)
   }
   function escapeHtml(v) {
     return String(v).replace(/[&<>"']/g, function (ch) {
@@ -149,13 +231,30 @@
     newLabel: function () {
       post({ type: P + 'newLabel' })
     },
-    /** the answer of reader.records(index, query), as a promise */
-    fetch: function (query) {
+    /** the answer of reader.records(index, query), as a promise, with no time limit. `opts.key`: a newer fetch with the
+     *  same key drops this one; `opts.signal`, an AbortSignal that drops it; a dropped fetch rejects with an AbortError
+     *  and its reader's call is cancelled. `opts.onProgress(p)` hears {seconds, phase, done?, total?, note?} about once a
+     *  second while it runs, and the page then shows the wait itself */
+    fetch: function (query, opts) {
+      opts = opts || {}
       return new Promise(function (resolve, reject) {
         var id = ++seq
-        pending[id] = { resolve: resolve, reject: reject }
-        post({ type: P + 'fetch', id: id, query: query === undefined ? null : query })
+        var key = opts.key == null ? null : String(opts.key)
+        if (key != null) for (var k in pending) if (pending[k].key === key) dropFetch(+k)
+        if (opts.signal && opts.signal.aborted) return reject(aborted())
+        var onProgress = typeof opts.onProgress === 'function' ? opts.onProgress : null
+        pending[id] = { resolve: resolve, reject: reject, key: key, onProgress: onProgress, started: Date.now(), progress: null }
+        if (opts.signal && opts.signal.addEventListener) opts.signal.addEventListener('abort', function () { dropFetch(id) })
+        post({ type: P + 'fetch', id: id, query: query === undefined ? null : query, progress: !!onProgress })
+        if (!onProgress) watchWait()
       })
+    },
+    /** a package the view's libs name, by its name (`d3-force`, or `three/examples/jsm/controls/OrbitControls.js` for a
+     *  file inside one), as thimble bundled it into the view (backend view_libs) */
+    lib: function (name) {
+      var libs = window.__thimbleLibs || {}
+      if (!Object.prototype.hasOwnProperty.call(libs, String(name))) throw new Error('the view loads no library ' + name + ': name it in libs')
+      return libs[String(name)]
     },
     /** ask about a place, as a ⌘-click on an element with data-anchor does */
     cite: function (ref, text, element, el) {
@@ -244,8 +343,23 @@
       var p = pending[d.id]
       if (!p) return
       delete pending[d.id]
-      if (d.error) p.reject(new Error(d.error))
+      if (d.error) p.reject(d.cancelled ? aborted() : new Error(d.error))
       else p.resolve(d.data)
+      showWait()
+    } else if (d.type === P + 'progress') {
+      var q = pending[d.id]
+      if (!q) return
+      q.progress = { seconds: Number(d.seconds) || 0, phase: String(d.phase || 'call') }
+      if (typeof d.done === 'number') q.progress.done = d.done
+      if (typeof d.total === 'number') q.progress.total = d.total
+      if (typeof d.note === 'string' && d.note) q.progress.note = d.note
+      if (q.onProgress) {
+        try {
+          q.onProgress(q.progress)
+        } catch (err) {
+          report(err)
+        }
+      } else showWait()
     } else if (d.type === P + 'init') {
       init = { mode: String(d.mode || 'card'), data: d.data, args: d.args || {}, width: Number(d.width) || 0, card: d.card ? String(d.card) : null, key: String(d.key || '') }
       window.thimble.card = init
@@ -299,6 +413,7 @@
     report(e.error || e.message)
   })
   addEventListener('unhandledrejection', function (e) {
+    if (e.reason && e.reason.name === 'AbortError') return e.preventDefault()
     report(e.reason)
   })
   document.addEventListener('securitypolicyviolation', function (e) {

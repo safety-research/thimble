@@ -2,7 +2,10 @@
 // The page may reach only the view's media route; everything else comes through these messages:
 //   open      the place to show (ref, locator, resolved answer, quoted passage to highlight)
 //   quoted    whether that passage showed; when it did not, onQuoteMissing
-//   fetch     answered with reader.records(index, query)
+//   fetch     answered with reader.records(index, query), with no time limit; while it runs the page hears `progress`
+//             about once a second (the call's seconds, phase and what the reader reported)
+//   cancel    the page dropped a fetch, so its reader's call is cancelled; closing the frame or loading another page in
+//             it cancels every fetch still running
 //   cite      a ⌘-click inside the frame opens the pointer's box on that element
 //   navigate  another place, opened the way a chip opens it (lib/teleport)
 //   size      the height the page needs, used when the frame sizes to its content (`fit`)
@@ -44,6 +47,7 @@ const P = 'thimble:'
 const FIT_MIN = 80
 const FIT_MAX = 1600
 const STATE_WAIT_MS = 400 // how long a page has to say what the analyst is looking at
+const PROGRESS_MS = 1000 // how often a running fetch's progress is asked for
 
 /** What the analyst is looking at in a view's page (backend/app/viewer_bridge.js pageState), put back in a newer version
  * of the page: `ref` is opened there, the rest restored as far as it fits. */
@@ -341,6 +345,27 @@ export function ViewerFrame({ ws, slug, targetRef, path, pathPicked, title, fit,
   const queryKey = query ? JSON.stringify(query) : ''
   const cardType = card?.type
 
+  // the page's fetches still running, by the page's id: what drops the request, the call's name, the progress timer.
+  // A call's name is unique for the frame's life, since a new page in the frame counts its fetches from 1 again.
+  const calls = useRef(new Map<number, { ctrl: AbortController; call: string; view: boolean; timer: number | null }>())
+  const frameId = useMemo(() => Math.random().toString(36).slice(2, 10), [])
+  const callSeq = useRef(0)
+  const stopCall = useCallback(
+    (id: number) => {
+      const f = calls.current.get(id)
+      if (!f) return
+      calls.current.delete(id)
+      if (f.timer != null) window.clearInterval(f.timer)
+      f.ctrl.abort()
+      if (f.view) void api.viewCancel(ws, slug, f.call).catch(() => {})
+    },
+    [ws, slug],
+  )
+  const stopCalls = useCallback(() => {
+    for (const id of [...calls.current.keys()]) stopCall(id)
+  }, [stopCall])
+  useEffect(() => stopCalls, [stopCalls])
+
   const [fonts, setFonts] = useState<string | null>(null)
   useEffect(() => {
     let alive = true
@@ -390,7 +415,8 @@ export function ViewerFrame({ ws, slug, targetRef, path, pathPicked, title, fit,
   useLayoutEffect(() => {
     ready.current = false
     marks.reset()
-  }, [doc, marks])
+    stopCalls()
+  }, [doc, marks, stopCalls])
   const sendInit = () => {
     const c = drawn.current
     if (c) post({ type: P + 'init', mode: c.mode, data: c.data, args: c.args, width: c.width, card: c.id, key: c.key })
@@ -455,15 +481,34 @@ export function ViewerFrame({ ws, slug, targetRef, path, pathPicked, title, fit,
           return
         }
         case P + 'fetch': {
+          const id = Number(d.id)
+          const c = drawn.current
+          const f = { ctrl: new AbortController(), call: `${frameId}-${++callSeq.current}`, view: !c, timer: null as number | null }
+          calls.current.set(id, f)
+          if (!c)
+            f.timer = window.setInterval(() => {
+              void api
+                .viewCall(ws, slug, f.call)
+                .then((p) => p.running && calls.current.get(id) === f && post({ type: P + 'progress', id, ...p }))
+                .catch(() => {})
+            }, PROGRESS_MS)
           try {
-            const c = drawn.current
-            const res = c ? await api.cardTypeRecords(ws, c.type, c.id, d.query) : await api.viewRecords(ws, slug, d.query, version)
-            post({ type: P + 'result', id: d.id, data: res.data })
+            const res = c ? await api.cardTypeRecords(ws, c.type, c.id, d.query) : await api.viewRecords(ws, slug, d.query, version, { call: f.call, signal: f.ctrl.signal })
+            if (calls.current.get(id) === f) post({ type: P + 'result', id: d.id, data: res.data })
           } catch (err) {
-            post({ type: P + 'result', id: d.id, error: (err as Error).message })
+            const message = (err as Error).message
+            if (calls.current.get(id) === f) post({ type: P + 'result', id: d.id, error: message, cancelled: message.startsWith('409 ') })
+          } finally {
+            if (calls.current.get(id) === f) {
+              calls.current.delete(id)
+              if (f.timer != null) window.clearInterval(f.timer)
+            }
           }
           return
         }
+        case P + 'cancel':
+          stopCall(Number(d.id))
+          return
         case P + 'cite': {
           if (typeof d.ref !== 'string' || !d.ref) return
           const rect = d.rect ? toPage(frame, d.rect) : frame.getBoundingClientRect()
@@ -532,7 +577,7 @@ export function ViewerFrame({ ws, slug, targetRef, path, pathPicked, title, fit,
       offCmd()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ws, slug, marks, version])
+  }, [ws, slug, marks, version, frameId, stopCall])
 
   if (doc == null) return <div className={'viewer-frame viewer-frame-loading' + (className ? ` ${className}` : '')} />
   return (
@@ -540,6 +585,8 @@ export function ViewerFrame({ ws, slug, targetRef, path, pathPicked, title, fit,
       ref={ref}
       className={'viewer-frame' + (className ? ` ${className}` : '')}
       sandbox="allow-scripts"
+      allow="fullscreen"
+      allowFullScreen
       srcDoc={doc}
       title={title}
       style={fit && height ? { height } : undefined}

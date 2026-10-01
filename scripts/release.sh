@@ -70,10 +70,11 @@ die() { echo "release.sh: $*" >&2; exit 1; }
 need() { command -v "$1" >/dev/null 2>&1 || die "$1 is required"; }
 need git; need zip; need python3
 # the frontend packages a release loads at run time: vega, vega-lite and vega-embed (a view page's libraries,
-# backend/app/views.py LIBS, and a card's chart in its picture, tools.py VEGA_BUILDS), playwright (the headless page of
+# backend/app/views.py LIBS, and a card's chart in its picture, tools.py VEGA_BUILDS), esbuild (which bundles the npm
+# packages a view's page loads, backend/app/view_libs.py), playwright (the headless page of
 # scripts/view_shot.mjs and scripts/ui_shot.mjs), the fonts view_shot.mjs gives a view's page, and Anthropic's sandbox
 # runtime, which the notebook kernel runs in (backend/app/kernel_wrap.py)
-runtime_npm=(vega vega-lite vega-embed playwright @fontsource/geist-mono @fontsource/hanken-grotesk @anthropic-ai/sandbox-runtime)
+runtime_npm=(vega vega-lite vega-embed esbuild playwright @fontsource/geist-mono @fontsource/hanken-grotesk @anthropic-ai/sandbox-runtime)
 
 version="$(python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$repo/plugin/.claude-plugin/plugin.json")"
 [ -n "$version" ] || die "plugin/.claude-plugin/plugin.json has no version"

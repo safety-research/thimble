@@ -59,6 +59,23 @@ def alive(pid: object) -> bool:
     return bool(state) and not state.startswith("Z")
 
 
+def rss(pid: object) -> int:
+    """The process's resident memory in bytes; 0 when it is gone or cannot be read."""
+    if not _valid(pid):
+        return 0
+    if HAVE_PROC:
+        try:
+            pages = int(Path(f"/proc/{pid}/statm").read_text().split()[1])
+            return pages * os.sysconf("SC_PAGE_SIZE")
+        except (OSError, ValueError, IndexError):
+            return 0
+    out = _run(["ps", "-o", "rss=", "-p", str(pid)])
+    try:
+        return int((out or "").strip() or 0) * 1024
+    except ValueError:
+        return 0
+
+
 def argv(pid: object) -> list[str]:
     """The process's command line as arguments; [] when gone or unreadable. Without /proc, `ps -o command=` output is
     split on whitespace: enough for the tokens callers look for, not a faithful argv."""

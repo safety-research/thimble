@@ -1,0 +1,11 @@
+{
+  "name": "Record counts",
+  "description": "Every JSONL file of the corpus with how many records it holds, how many lines are not JSON, and the kinds of record it holds, one row per file.",
+  "claims": ["*.jsonl"],
+  "unit": "a JSONL file of the corpus, keyed by its path, one row each",
+  "units": [{"form": "<path>", "means": "one file's row"}],
+  "derived": [
+    {"field": "records", "from": "each line of the file", "how": "the lines that parse as JSON"},
+    {"field": "kinds", "from": "each record's type, kind or action", "how": "the distinct values, most common first"}
+  ]
+}

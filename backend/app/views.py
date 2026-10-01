@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import contextvars
 import fnmatch
 import functools
 import hashlib
@@ -52,13 +53,13 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel
 
-from . import config, headless, investigation, prompts, refs, userconf
+from . import config, headless, investigation, prompts, refs, userconf, view_calls, view_indexes, view_libs
 from .records import is_record_ref as is_record
 from .ledger import atomic_write_text, read_json, unlinked, write_json, write_json_once
 
 log = logging.getLogger("thimble.views")
 
-KERNEL = "views"  # the workspace's dedicated kernel for readers
+KERNEL = view_calls.KERNEL  # the first of the workspace's kernels for readers (view_calls)
 VIEWS_SUBDIR = "views"
 # under the workspace: its local extension, which holds the views built for it in views/<slug>/ beside its manifest; on
 # in its workspace without `thimble extension add`, and read-only to a kernel (kernel_wrap.READ_ONLY_DIRS)
@@ -73,7 +74,7 @@ KEY_REFS_FILE = "key-refs.json"  # view:<slug>/<key> -> {refs, excerpt, label, n
 # under the workspace, beside the views folder, which a kernel may only read (kernel_wrap.READ_ONLY_DIRS): each view's
 # index as the views kernel pickled it and the bytes build_index read of each claimed file, by fingerprint, and the
 # indexes of the card types (cardtypes.py, extensions.card_types)
-INDEXES_SUBDIR = "view-indexes"
+INDEXES_SUBDIR = view_indexes.INDEXES_SUBDIR
 VIEW_JSON, READER_PY, VIEW_HTML = "view.json", "reader.py", "view.html"
 TOOLS_PROMPT = "tools"  # prompts/tools.md, whose lowercase sections are the lines the view tools' results carry
 # a view ticket's status on its proposal row; `dropped` is an orientation proposal that could not be built through its
@@ -93,8 +94,9 @@ SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,39}$")
 # the route names under /views/ and the Reader's built-in file views, which its switcher keys by
 RESERVED_SLUGS = {"proposals", "forge", "raw", "records", "table", "text", "transcript", "lib", "frame", "resolve",
                   "suggestions", "suggest"}
-BUILD_TIMEOUT_S = 180.0  # a call that may build the index over the claimed files
-CALL_TIMEOUT_S = 15.0  # a call once the index for the fingerprint is known to be built
+RESOLVE_WAIT_S = 180.0  # how long a synchronous caller (resolve_sync) waits for a reader's answer, which runs on after it
+# the most one reader call of the checks may take (gate); a page's calls have no limit
+CHECK_CALL_S = 600.0
 LABEL_MAX = 40  # chars of a chip label a reader supplies (chips stay short)
 EXCERPT_MAX = refs.EXCERPT_MAX
 REFS_MAX = 200  # file refs a resolved locator carries
@@ -108,7 +110,6 @@ WHY_CHARS = 300  # of why hidden() leaves a file out
 NOT_SHOWN_NAMED = 5  # the files a failed check names that the view neither read whole nor hid
 FILES_LISTED = 500  # the claimed files a view's record lists (_public)
 SIBLING_SAMPLE = 200  # of a claimed folder's paths, those looked for in a folder beside it (sibling_files)
-SOURCE_MAX = 400_000  # chars of reader.py or view.html a view may hold
 # the checks: sample lines per claimed file, files sampled, keys followed, cited records read per key
 CHECK_LINES, CHECK_FILES, CHECK_KEYS, CHECK_KEY_REFS = 3, 3, 3, 30
 SHOT_TIMEOUT_S, SHOT_STATE_S = 30.0, 30.0  # a headless run's time: the browser's start, then each state's
@@ -126,8 +127,9 @@ ANCHORED_SHARE = 10
 FETCHED_SCAN_MAX = 200_000
 FOLDER_CACHE_S = 5.0
 _NODE_MODULES = config.REPO_ROOT / "frontend" / "node_modules"
-# The libraries a view page may use, served by thimble and inlined into the page. vega-embed needs vega and vega-lite
-# before it, so a view that names it gets all three in this order.
+# thimble's own builds of the libraries a view page may name, inlined into the page; any other library is an npm
+# package vendored into the view's folder (view_libs). vega-embed needs vega and vega-lite before it, so a view that
+# names it gets all three in this order.
 LIBS: dict[str, Path] = {
     "vega": _NODE_MODULES / "vega" / "build" / "vega.min.js",
     "vega-lite": _NODE_MODULES / "vega-lite" / "build" / "vega-lite.min.js",
@@ -228,9 +230,34 @@ def _bind_loop() -> None:
 @contextlib.asynccontextmanager
 async def _lifespan(app: Any):
     """The router's lifespan (FastAPI merges it into the app's): the server's loop is bound before the first request,
-    so the first hover over a cited record can reach the views kernel from the /ref route's thread."""
+    so the first hover over a cited record can reach the views kernel from the /ref route's thread; and the indexes on
+    disk are pruned in a thread of their own (prune_indexes)."""
     _bind_loop()
+    threading.Thread(target=prune_indexes, name="view-index-prune", daemon=True).start()
     yield
+
+
+def prune_indexes() -> int:
+    """Every workspace's view indexes pruned (view_indexes.prune_workspace: those of views that are gone deleted, the
+    rest kept to their newest fingerprints), then held to the cap across them; the bytes freed."""
+    freed = 0
+    try:
+        names = sorted(d.name for d in config.WORKSPACES_DIR.iterdir() if d.is_dir() and config._valid_name(d.name))
+    except OSError:
+        names = []
+    for c in names:
+        try:
+            if (config.workspace_dir(c) / INDEXES_SUBDIR).is_dir():
+                freed += view_indexes.prune_workspace(c, lambda slug, c=c: read_view(c, slug) is not None)
+        except Exception:  # noqa: BLE001 — one workspace's failure leaves the others pruned
+            log.exception("%s: pruning view indexes failed", c)
+    try:
+        freed += view_indexes.enforce_cap()
+    except Exception:  # noqa: BLE001
+        log.exception("holding view indexes to their cap failed")
+    if freed:
+        log.info("%.1f MB of old view indexes deleted", freed / 1e6)
+    return freed
 
 
 router = APIRouter(lifespan=_lifespan)
@@ -463,11 +490,13 @@ def _unit(v: Any) -> str | dict[str, str] | None:
 
 
 def _libs(v: Any) -> list[str]:
-    """The named libraries with what each needs ahead of it, in LIBS order."""
-    wanted = set(_str_list(v)) & set(LIBS)
+    """The libraries a page loads: thimble's own it names, with what each needs ahead of it, in LIBS order, then the
+    npm packages it names (view_libs), in its order."""
+    named = view_libs.entries(v)
+    wanted = set(named) & set(LIBS)
     for name in list(wanted):
         wanted.update(LIB_NEEDS.get(name, ()))
-    return [n for n in LIBS if n in wanted]
+    return [n for n in LIBS if n in wanted] + [n for n in named if view_libs.parse(n) is not None]
 
 
 def _normalize_view(slug: str, raw: Any, *, where: Path | None = None, origin: str = "workspace") -> dict[str, Any]:
@@ -671,16 +700,14 @@ def _check_slug(slug: str) -> str:
 
 
 def source_problems(claims: Any, reader: str, html: str, libs: Any) -> list[str]:
-    """What makes a view's files unable to run, as lines for whoever wrote them: no claims, an empty or oversized reader
-    or page, a reader that does not parse or lacks one of its three functions, a library thimble does not have."""
+    """What makes a view's files unable to run, as lines for whoever wrote them: no claims, an empty reader or page, a
+    reader that does not parse or lacks one of its three functions, a library that is no package."""
     out: list[str] = []
     if not _str_list(claims):
         out.append("a view claims at least one file: give `claims` in view.json as corpus-relative globs")
     for label, text in ((READER_PY, reader), (VIEW_HTML, html)):
         if not text.strip():
             out.append(f"{label} is empty")
-        elif len(text) > SOURCE_MAX:
-            out.append(f"{label} is {len(text):,} characters; the most a view holds is {SOURCE_MAX:,}")
     if reader.strip():
         try:
             compile(reader, READER_PY, "exec")
@@ -690,9 +717,7 @@ def source_problems(claims: Any, reader: str, html: str, libs: Any) -> list[str]
             missing = [fn for fn in ("build_index", "records", "resolve") if not re.search(rf"^def {fn}\s*\(", reader, re.M)]
             if missing:
                 out.append(f"{READER_PY} defines no {', '.join(f'{m}()' for m in missing)} at its top level")
-    unknown = sorted(set(_str_list(libs)) - set(LIBS))
-    if unknown:
-        out.append(f"no library {', '.join(unknown)}; a view may use {', '.join(LIBS)}")
+    out += view_libs.problems(libs)
     return out
 
 
@@ -757,6 +782,7 @@ def _publish(c: str, slug: str, version: str) -> None:
         for f in (views_dir(c) / slug).iterdir():
             if f.is_file() and not f.is_symlink():
                 shutil.copy2(f, tmp / f.name)
+        view_libs.copy_lib(views_dir(c) / slug, tmp)
         os.replace(tmp, dst)
     os.utime(dst)
     kept = sorted((x for x in root.iterdir() if x.is_dir() and VERSION_RE.match(x.name)),
@@ -1125,15 +1151,11 @@ def snippet(req: dict[str, Any]) -> str:
     return _SNIPPET.format(version=version, src=src, req=json.dumps(req, ensure_ascii=False))
 
 
-async def _kernel_run(c: str, code: str, timeout: float) -> tuple[list[dict], str]:
-    """(outputs, status) of the code on the workspace's views kernel. Tests replace it (views._runner)."""
-    from . import notebook  # lazy: the notebook module loads the kernel machinery
-
-    outputs, _, status = await notebook.execute_on(c, KERNEL, code, timeout_s=timeout)
-    return outputs, status
-
-
-_runner = _kernel_run
+# (outputs, status) of a reader call's code, run on one of the workspace's reader kernels (view_calls) within a limit
+# in seconds, None for none. Tests replace it with a run in this process.
+_runner = view_calls.execute
+# the limit of the reader calls made in this context: CHECK_CALL_S within gate(), else none
+_call_limit: contextvars.ContextVar[float | None] = contextvars.ContextVar("view_call_limit", default=None)
 
 
 def _answer_from(outputs: list[dict]) -> dict[str, Any] | None:
@@ -1199,40 +1221,55 @@ def _prepared(c: str, slug: str, version: str | None = None) -> tuple[dict[str, 
     index = index_dir(c, slug)
     req = {"slug": slug, "reader": str(reader_path.resolve()), "fp": fp, "paths": [f[0] for f in files],
            "cache": str((index / f"{fp}.index.pickle").resolve()), "reads": str((index / f"{fp}.reads.json").resolve()),
-           "thimble": str(KERNEL_THIMBLE)}
+           "thimble": str(KERNEL_THIMBLE), "built": not view["draft"]}
     return view, req, files
 
 
-async def _call(c: str, req: dict[str, Any], op: str, arg: Any = None) -> Any:
-    """One reader operation; ReaderError when it raised, timed out or the kernel did not answer."""
+async def _call(c: str, req: dict[str, Any], op: str, arg: Any = None, *, call: str | None = None) -> Any:
+    """One reader operation, with no time limit but within the checks (_call_limit); ReaderError when it raised, ran
+    past that limit or the kernel did not answer. `call` is the id of a call the page named (view_calls.begin), whose
+    progress the kernel writes to its file. Cancelling the awaiting task interrupts the call."""
     _bind_loop()
     key = (c, req["slug"], req["fp"])
-    timeout = CALL_TIMEOUT_S if key in _ready else BUILD_TIMEOUT_S
+    by_built = bool(req.get("built"))  # a built view's request (_prepared): pruning keeps its index longest
+    req = {**{k: x for k, x in req.items() if k != "built"}, "memory": view_calls.memory_budget()}
+    if call is not None:
+        req["progress"] = str(view_calls.progress_path(indexes_dir(c), call).resolve())
+    token = view_calls.REQUEST.set({"slug": req["slug"], "fp": req["fp"], "cache": req.get("cache"), "call": call})
     try:
-        outputs, status = await _runner(c, snippet({**req, "op": op, "arg": arg}), timeout)
+        outputs, status = await _runner(c, snippet({**req, "op": op, "arg": arg}), _call_limit.get())
+    except asyncio.CancelledError:
+        raise
     except Exception as e:  # noqa: BLE001 — the kernel did not start
         raise ReaderError(f"the views kernel did not start: {type(e).__name__}: {e}") from e
+    finally:
+        view_calls.REQUEST.reset(token)
     ans = _answer_from(outputs)
     if ans is None:
         raise ReaderError(_kernel_error(outputs))
+    if ans.get("built") and req.get("cache"):
+        view_indexes.built(c, Path(req["cache"]), by_built)
+    elif req.get("cache"):
+        view_indexes.used(Path(req["cache"]), by_built)
     if not ans.get("ok"):
         raise ReaderError(str(ans.get("error") or "the reader failed"), str(ans.get("traceback") or ""))
-    if op != "applies":  # applies builds no index, so each call gets the time a build does
+    if op != "applies":
         _ready.add(key)
     return ans.get("result")
 
 
 async def reader_call(c: str, slug: str, op: str, arg: Any = None, *, labels: dict[str, Any] | None = None,
-                      version: str | None = None) -> Any:
+                      version: str | None = None, call: str | None = None) -> Any:
     """reader.<op>(index, arg) for the view, op being index, records or resolve (resolve goes through resolve_locator,
     which cleans and memoises the answer). A records call runs with `labels` as the labels context thimble.marked and
     thimble.kept read, by default the workspace's (labels_context); labels apply when records are served, so they are no
-    part of the index's fingerprint. `version` is the version a page was loaded at (read_version)."""
+    part of the index's fingerprint. `version` is the version a page was loaded at (read_version), `call` the id of a
+    call the page named (_call)."""
     _, req = await asyncio.to_thread(_prepare, c, slug, version)
     if op == "records":
         ctx = labels if labels is not None else await asyncio.to_thread(labels_context, c)
         req = {**req, "labels": _wire(ctx)}
-    return await _call(c, req, op, arg)
+    return await _call(c, req, op, arg, call=call)
 
 
 def clean_problems(raw: Any) -> dict[str, Any]:
@@ -1655,7 +1692,7 @@ def resolve_sync(c: str, slug: str, locator: dict[str, Any]) -> tuple[str, dict[
         return "unknown", None
     fut = asyncio.run_coroutine_threadsafe(resolve_locator(c, slug, locator), loop)
     try:
-        return "ok", fut.result(BUILD_TIMEOUT_S + 5)
+        return "ok", fut.result(RESOLVE_WAIT_S)
     except ReaderError as e:
         log.info("view %s/%s could not resolve %s: %s", c, slug, locator, e.message)
         return "error", None
@@ -1973,6 +2010,7 @@ def install_viewer(c: str, slug: str, d: Path, claims: Any, *, why: str, propose
             prop["extension"] = extension
         items.append(prop)
         _save_proposals(c, items)
+    view_libs.copy_lib(d, views_dir(c) / slug)
     write_view(c, slug, name=raw.get("name") or slug, description=v["description"], claims=_str_list(claims),
                accepts=v["accepts"], units=v["units"], derived=v["derived"], libs=raw.get("libs") if libs is None else libs,
                reader=(d / READER_PY).read_text("utf-8"), html=(d / VIEW_HTML).read_text("utf-8"), unit=v["unit"])
@@ -2210,11 +2248,14 @@ def drop_built_copy(c: str, slug: str) -> None:
 
 
 def view_digest(d: Path) -> str:
-    """A digest of the view's files in `d`: the files at the folder's top level, view.json read without the `built`
-    and `version` stamps; subfolders (the cache, Python's bytecode) are left out."""
+    """A digest of the view's files in `d`: the files at the folder's top level and its vendored packages (view_libs),
+    view.json read without the `built` and `version` stamps; other subfolders (the cache, Python's bytecode) are left
+    out."""
     h = hashlib.sha256()
     try:
         files = sorted(p for p in d.iterdir() if p.is_file())
+        lib = d / view_libs.LIB_DIR
+        files += sorted(p for p in lib.iterdir() if p.is_file()) if lib.is_dir() and not lib.is_symlink() else []
     except OSError:
         return ""
     for p in files:
@@ -2226,7 +2267,7 @@ def view_digest(d: Path) -> str:
                     raw.pop("built", None)
                     raw.pop("version", None)
                 data = json.dumps(raw, sort_keys=True).encode()
-        h.update(p.name.encode() + b"\0" + hashlib.sha256(data).digest())
+        h.update(p.relative_to(d).as_posix().encode() + b"\0" + hashlib.sha256(data).digest())
     return h.hexdigest()
 
 
@@ -2383,7 +2424,17 @@ async def gate(c: str, slug: str, locators: list[str] | None = None, *, shot_dir
     """Whether the view in the slug's folder may be registered: its files' own problems (source_problems; view.json
     written by thimble alone once it names `built`), then, when there are none, check() with `locators` beside the
     sampled lines. The report check() returns, with the files' problems among its `problems`. With `picture` the page
-    as it opens is pictured for the session."""
+    as it opens is pictured for the session. Each reader call of the gate may take CHECK_CALL_S, so a reader that never
+    answers fails the checks rather than holding its kernel."""
+    token = _call_limit.set(CHECK_CALL_S)
+    try:
+        return await _gate(c, slug, locators, shot_dir=shot_dir, picture=picture)
+    finally:
+        _call_limit.reset(token)
+
+
+async def _gate(c: str, slug: str, locators: list[str] | None, *, shot_dir: Path | None,
+                picture: bool) -> dict[str, Any]:
     d = views_dir(c) / slug
     if not (d / VIEW_JSON).is_file():
         return {"ok": False, "view": None, "problems": [f"{d / VIEW_JSON} does not exist yet"], "checks": [], "page": None}
@@ -2397,7 +2448,13 @@ async def gate(c: str, slug: str, locators: list[str] | None = None, *, shot_dir
         problems.append("view.json names `built`, which thimble adds when the view passes; remove it")
     if problems:
         return {"ok": False, "view": read_view(c, slug), "problems": problems, "checks": [], "page": None}
+    vendored = await view_libs.ensure(c, slug, d, raw.get("libs"))
+    if vendored["problems"]:
+        return {"ok": False, "view": read_view(c, slug), "problems": vendored["problems"], "checks": [], "page": None,
+                "notes": vendored["notes"]}
     report = await check(c, slug, locators, shot_dir=shot_dir, picture=picture)
+    if vendored["notes"]:
+        report["notes"] = [*vendored["notes"], *report.get("notes", [])]
     if note := await media_note(text[VIEW_HTML]):
         report["notes"] = [*report.get("notes", []), note]
     if picture:
@@ -2519,6 +2576,11 @@ def _script_text(js: str) -> str:
     return js.replace("</script", "<\\/script").replace("</SCRIPT", "<\\/SCRIPT")
 
 
+def _style_text(css: str) -> str:
+    """Style text safe inside an inline <style>."""
+    return re.sub(r"</(style)", r"<\\/\1", css, flags=re.I)
+
+
 def frame_document(view: dict[str, Any], media: str | None = None, *, card: bool = False,
                    derived: list[dict[str, str]] | None = None) -> str:
     """The view's page as a frame loads it: the policy that blocks every load but the view's media route, the bridge
@@ -2544,8 +2606,12 @@ def frame_document(view: dict[str, Any], media: str | None = None, *, card: bool
             f"<style>{KIT_CSS.read_text('utf-8')}</style>"]
     for name in view.get("libs") or []:
         p = LIBS.get(name)
-        if p is not None and p.is_file():
-            head.append(f"<script>{_script_text(p.read_text('utf-8'))}</script>")
+        got = ("js", p.read_text("utf-8")) if p is not None and p.is_file() else \
+            view_libs.vendored(Path(view["dir"]), name) if p is None else None
+        if got is not None and got[0] == "css":
+            head.append(f"<style>{_style_text(got[1])}</style>")
+        elif got is not None:
+            head.append(f"<script>{_script_text(got[1])}</script>")
         else:
             head.append(f"<script>console.error({json.dumps(f'the library {name} is not installed here')})</script>")
     # the policy comes first, before any markup of the view: a meta policy only governs what is parsed after it. The
@@ -4022,17 +4088,55 @@ async def card_media_route(c: str, path: str) -> FileResponse:
 
 class RecordsBody(BaseModel):
     query: Any = None
+    call: str | None = None
 
 
 @router.post("/ws/{c}/views/{slug}/records")
-async def records_route(c: str, slug: str, body: RecordsBody, v: str | None = None) -> dict[str, Any]:
-    """reader.records(index, query): what the view's page, loaded at version `v`, asked for with thimble.fetch. 502 with
-    the reader's error."""
+async def records_route(c: str, slug: str, body: RecordsBody, request: Request, v: str | None = None) -> dict[str, Any]:
+    """reader.records(index, query): what the view's page, loaded at version `v`, asked for with thimble.fetch, with no
+    time limit. `call` names the call, so the page can cancel it (cancel_route) and read its progress (call_route); a
+    request the page drops (a reload, a closed tab) cancels it too. 502 with the reader's error, 409 {cancelled} when it
+    was cancelled."""
+    from .tools import until_dropped  # noqa: PLC0415 — tools imports this module
+
     _view_or_404(c, slug, v)
+    cid = view_calls.call_id(body.call)
+    if view_calls.cancelled_before(c, cid):
+        raise HTTPException(409, {"message": "the call was cancelled", "cancelled": True})
+    work = asyncio.ensure_future(reader_call(c, slug, "records", body.query, version=v, call=cid))
+    call = view_calls.begin(c, slug, cid, indexes_dir(c))
+    if call is not None:
+        call.task = work
     try:
-        return {"data": await reader_call(c, slug, "records", body.query, version=v)}
+        if not await until_dropped(request.receive, work, f"view {slug}'s records") and work.cancelled():
+            raise HTTPException(409, {"message": "the page dropped the call", "cancelled": True})
+        return {"data": work.result()}
     except ReaderError as e:
         raise HTTPException(502, {"message": e.message, "traceback": e.detail[-ERROR_MAX:]}) from None
+    except asyncio.CancelledError:
+        task = asyncio.current_task()
+        if work.cancelled() and not (task is not None and task.cancelling()):
+            raise HTTPException(409, {"message": "the call was cancelled", "cancelled": True}) from None
+        work.cancel()
+        raise
+    finally:
+        view_calls.end(call)
+
+
+@router.get("/ws/{c}/views/{slug}/calls/{call}")
+async def call_route(c: str, slug: str, call: str) -> dict[str, Any]:
+    """How far the page's call `call` has got (view_calls.progress), {running: false} once it is over."""
+    config.workspace_dir(c)
+    cid = view_calls.call_id(call)
+    return (view_calls.progress(c, cid) if cid else None) or {"running": False}
+
+
+@router.post("/ws/{c}/views/{slug}/calls/{call}/cancel")
+async def cancel_route(c: str, slug: str, call: str) -> dict[str, Any]:
+    """Cancel the page's call `call`: its kernel is interrupted and the records route answers 409. {cancelled}."""
+    config.workspace_dir(c)
+    cid = view_calls.call_id(call)
+    return {"cancelled": bool(cid) and view_calls.cancel(c, cid)}
 
 
 @router.get("/ws/{c}/views/{slug}/problems")
@@ -4101,8 +4205,14 @@ async def check_route(c: str, slug: str, request: Request, body: CheckBody | Non
     config.workspace_dir(c)
     _check_slug(slug)
     _bind_loop()
+    from .tools import until_dropped  # noqa: PLC0415 — tools imports this module
+
     locators = [str(x).strip() for x in (body.locators if body and body.locators else []) if str(x).strip()]
-    return await check_answer(c, slug, locators, bool(body and body.picture))
+    answer = await until_dropped(request.receive, check_answer(c, slug, locators, bool(body and body.picture)),
+                                 f"view {slug}'s check")
+    if answer is None:
+        raise HTTPException(409, "the check was dropped by its caller")
+    return answer
 
 
 CHECK_DROP = ".check"  # in a view's folder: the check requests view_check.py leaves where it cannot reach the server
