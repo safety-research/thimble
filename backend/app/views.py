@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import asyncio
 import bisect
+import colorsys
 import contextlib
 import contextvars
 import fnmatch
@@ -2698,6 +2699,8 @@ async def _gate(c: str, slug: str, locators: list[str] | None, *, shot_dir: Path
         report["notes"] = [*vendored["notes"], *report.get("notes", [])]
     if note := await media_note(text[VIEW_HTML]):
         report["notes"] = [*report.get("notes", []), note]
+    if note := purple_note(text[VIEW_HTML]):
+        report["notes"] = [*report.get("notes", []), note]
     if picture:
         _prune_shots(shot_dir or (d / CACHE_SUBDIR / "shots"))
     _gate_notes[(c, slug)] = [ln for ln in gate_lines(report) if ln.startswith(("unread: ", "files: ", "page: ", "note: "))]
@@ -3900,6 +3903,58 @@ async def media_note(html: str) -> str:
     if path is None or headless.missing(headless.PAGES):
         return ""
     return _hint("view-media-unplayable") if await headless.plays_recordings(path) is False else ""
+
+
+# colours written in a view's page: hex, rgb() and hsl() literals, and the CSS names of purples where a colour goes
+_HEX_COLOUR_RE = re.compile(r"(?<![&\w])#([0-9a-fA-F]{8}|[0-9a-fA-F]{6}|[0-9a-fA-F]{3,4})\b")
+_RGB_COLOUR_RE = re.compile(r"rgba?\(\s*(\d{1,3})[\s,]+(\d{1,3})[\s,]+(\d{1,3})", re.I)
+_HSL_COLOUR_RE = re.compile(r"hsla?\(\s*(-?\d+(?:\.\d+)?)(?:deg)?[\s,]+(\d+(?:\.\d+)?)%[\s,]+(\d+(?:\.\d+)?)%", re.I)
+_PURPLE_NAMES = ("purple", "violet", "magenta", "fuchsia", "orchid", "plum", "indigo", "darkviolet", "mediumpurple",
+                 "rebeccapurple", "blueviolet", "darkorchid", "mediumorchid", "darkmagenta", "mediumslateblue")
+_PURPLE_NAME_RE = re.compile(r"(?:(?:color|fill|stroke|background|background-color|border-color)\s*[:=]\s*[\"']?|[\"'])("
+                             + "|".join(_PURPLE_NAMES) + r")\b(?![\w-])", re.I)
+PURPLE_HUES = (245.0, 320.0)  # degrees: violet to magenta, the agents' iris accent included
+
+
+def _purplish(hue: float, sat: float, light: float) -> bool:
+    """Whether an HSL colour (hue in degrees, saturation and lightness 0..1) reads as purple: a purple hue, saturated,
+    neither near black nor near white."""
+    return PURPLE_HUES[0] <= hue % 360 <= PURPLE_HUES[1] and sat >= 0.25 and 0.12 <= light <= 0.93
+
+
+def _rgb_hsl(r: int, g: int, b: int) -> tuple[float, float, float]:
+    hue, light, sat = colorsys.rgb_to_hls(min(r, 255) / 255, min(g, 255) / 255, min(b, 255) / 255)
+    return hue * 360, sat, light
+
+
+def purple_colours(html: str) -> list[str]:
+    """The purple colours a view's page (`html`) writes in its CSS, SVG or script, each once, in the page's order."""
+    found: dict[str, None] = {}
+    for m in _HEX_COLOUR_RE.finditer(html or ""):
+        x = m.group(1)
+        rgb = [int(c * 2, 16) for c in x[:3]] if len(x) in (3, 4) else [int(x[i:i + 2], 16) for i in (0, 2, 4)]
+        if _purplish(*_rgb_hsl(*rgb)):
+            found.setdefault(m.group(0).lower(), None)
+    for m in _RGB_COLOUR_RE.finditer(html or ""):
+        r, g, b = (int(v) for v in m.groups())
+        if _purplish(*_rgb_hsl(r, g, b)):
+            found.setdefault(f"rgb({r}, {g}, {b})", None)
+    for m in _HSL_COLOUR_RE.finditer(html or ""):
+        hue, sat, light = (float(v) for v in m.groups())
+        if _purplish(hue, sat / 100, light / 100):
+            found.setdefault(f"hsl({m.group(1)}, {m.group(2)}%, {m.group(3)}%)", None)
+    for m in _PURPLE_NAME_RE.finditer(html or ""):
+        found.setdefault(m.group(1).lower(), None)
+    return list(found)
+
+
+def purple_note(html: str) -> str:
+    """The note for a view whose page writes purple colours, which thimble keeps for agents' work; '' otherwise."""
+    colours = purple_colours(html)
+    if not colours:
+        return ""
+    shown = ", ".join(colours[:4]) + (f" and {len(colours) - 4} more" if len(colours) > 4 else "")
+    return _hint("view-purple", colours=shown)
 
 
 # ----------------------------------------------------------------------------------------------------------
