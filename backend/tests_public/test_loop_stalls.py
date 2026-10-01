@@ -114,7 +114,7 @@ def test_a_long_command_is_read_word_by_word_only_when_it_names_an_install(monke
     getattr(sandbox_allow.installs, "cache_clear", lambda: None)()
     assert not sandbox_allow.installs(script) and not lexed
     for line, want in ((script + " && pip install pandas", True), (script + " && curl$(echo -O) u", True),
-                       ('cd x && "cu"rl -O u', True), ("echo pip-install is a word", False)):
+                       ('cd x && "cu"rl -O u', True), ("curl#x u", True), ("echo pip-install is a word", False)):
         assert sandbox_allow.installs(line) is want, line[-40:]
 
 

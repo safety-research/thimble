@@ -109,8 +109,8 @@ def _installs(words: list[str], depth: int) -> bool:
 
 # the words that can make a command line an install (installs): each INSTALL_PROGRAMS name, the first word of each
 # INSTALL_COMMANDS and INSTALL_MODULES entry, and pip with a version, standing alone between the places shlex and
-# OPERATORS split a line, or after a `/`
-_INSTALL_WORD = re.compile(r"(?:^|[\s;&|()`$/])(?:%s|pip3?[0-9.]*)(?=$|[\s;&|()`$])" % "|".join(
+# OPERATORS split a line (shlex ends a word at a `#`, which starts a comment), or after a `/`
+_INSTALL_WORD = re.compile(r"(?:^|[\s;&|()`$/])(?:%s|pip3?[0-9.]*)(?=$|[\s;&|()`$#])" % "|".join(
     re.escape(w) for w in sorted({*INSTALL_PROGRAMS, *(c.split()[0] for c in (*INSTALL_COMMANDS, *INSTALL_MODULES))},
                                  key=len, reverse=True)))
 _QUOTES = str.maketrans("", "", "'\"\\")
@@ -121,7 +121,7 @@ def installs(command: str, depth: int = 0) -> bool:
     """Whether a command line installs software or downloads files: one of its commands is an INSTALL_* one, after
     variable assignments and WRAPPERS, at a path, or inside `sh -c` or `eval`. A line shlex cannot read counts when an
     install word appears in it. A line in which no install word appears, its quotes and backslashes taken out, is not
-    read with shlex, which takes about a second for a script of 200 KB."""
+    read with shlex, which is slow on a long script."""
     if not _INSTALL_WORD.search(command.translate(_QUOTES)):
         return False
     try:
