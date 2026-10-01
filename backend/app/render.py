@@ -34,7 +34,7 @@ log = logging.getLogger("thimble.render")
 POOL_PAGES = max(1, int(os.environ.get("THIMBLE_RENDER_PAGES", "4") or "4"))
 RECYCLE_AFTER = 200  # renders a page serves before it is replaced
 RENDER_TIMEOUT_S = float(os.environ.get("THIMBLE_RENDER_TIMEOUT_S", "8") or "8")
-# the browser is closed once no card was drawn for this long, and launched again by the next render
+# the browser is closed once no card was drawn for this long (0: never), and launched again by the next render
 IDLE_S = float(os.environ.get("THIMBLE_RENDER_IDLE_S", "300") or "300")
 PAGE_LOAD_TIMEOUT_S = 30.0
 SCALE = 2  # device pixels per CSS pixel, what a retina display shows
