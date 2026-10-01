@@ -13,7 +13,8 @@
 //     example card picks only the words dragged over and its ask box lies inside the cutout; the report shows no check
 //     comment until the check is made, and then each comment card stands 8 px above its passage, or below the card
 //     above it, before and after the report scrolls;
-//   - the page is frozen: clicks, keys and the wheel reach nothing, and the tour writes nothing but the offer.
+//   - the page is frozen: clicks, keys and the wheel reach nothing, the tour writes nothing but the offer, and telemetry
+//     records nothing while it runs.
 import assert from 'node:assert/strict'
 import { existsSync, readFileSync } from 'node:fs'
 import path from 'node:path'
@@ -502,6 +503,8 @@ const fontOk = (page: Page) =>
 const ALLOWED = new Set(['POST /api/ui/key', `PUT /api/ws/${WS}/render/theme`, 'POST /api/tour/seen', `POST /api/ws/${WS}/telemetry`])
 /** The telemetry of a click in the tour, which is not the analyst's work and is never sent. */
 const tourClicks = (s: Server) => s.telemetry.filter((t) => t.kind === 'ui-click')
+/** Everything telemetry sent but the page's load, which comes before the tour: while the tour runs, nothing. */
+const tourTelemetry = (s: Server) => s.telemetry.filter((t) => t.kind !== 'page-load').map((t) => t.kind)
 
 test('the first launch asks first, records the offer in thimble’s own state, and offers nothing once answered', async () => {
   const { page, server, close } = await open({ W: 1440, H: 900 })
@@ -550,7 +553,9 @@ for (const cfg of [
       // the layout's own surface again (the stored layout was on the Report)
       assert.equal(await page.evaluate(() => document.querySelector<HTMLElement>('.shell-tabs .tab.active')?.dataset.tab), 'report')
       assert.deepEqual(server.writes.filter((x) => !ALLOWED.has(x)), [], 'the tour wrote nothing to the workspace')
-      assert.deepEqual(tourClicks(server), [], 'no click in the tour reaches telemetry')
+      // past telemetry's flush delay, so anything recorded during the tour has been sent
+      await sleep(2500)
+      assert.deepEqual(tourTelemetry(server), [], 'telemetry recorded nothing of the tour, ⌘-click on the example included')
     } finally {
       await close()
     }

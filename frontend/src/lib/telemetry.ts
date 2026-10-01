@@ -454,11 +454,17 @@ const queue = makeQueue({
   },
 })
 
+let held = false
+/** While held (the product tour runs), nothing is recorded: what the page does then is not the analyst's work. */
+export function hold(on: boolean): void {
+  held = on
+}
+
 /** Record one action of the analyst in the current workspace. Never throws; nothing when the page names no workspace. */
 export function track(kind: TelemetryKind, opts: { target?: string | null; detail?: Detail | null; duration_ms?: number | null; ts?: string } = {}): void {
   try {
     const ws = workspaceFromUrl()
-    if (!ws) return
+    if (!ws || held) return
     noteWorkspace(ws)
     const record: TelemetryRecord = { kind, ts: opts.ts ?? new Date().toISOString(), session: SESSION, seq: nextSeq++ }
     if (opts.target !== undefined) record.target = opts.target
