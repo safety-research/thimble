@@ -681,7 +681,8 @@ CSV_TIME = ("timestamp", "ts", "time", "date", "datetime", "createdat", "sentat"
 
 
 def _sniff_csv(text: str, sep: str) -> dict[str, Any] | None:
-    """A CSV or TSV file whose first line names a speaker column and a text column."""
+    """A CSV or TSV file whose first line names a speaker column and a text column; a speaker column named in another
+    way (Speaker Name, agent_speaker_id) counts when its speakers take turns (_takes_turns)."""
     try:
         rows = list(csv.reader(io.StringIO(text), delimiter=sep))[:200]
     except csv.Error:
@@ -697,13 +698,22 @@ def _sniff_csv(text: str, sep: str) -> dict[str, Any] | None:
                 return norm.index(name)
         return None
 
-    s, t = col(CSV_SPEAKER), col(CSV_TEXT)
+    s, t, w = col(CSV_SPEAKER), col(CSV_TEXT), col(CSV_TIME)
+    lenient = s is None
+    if s is None:
+        # a speaker column named in any case style (Speaker Name, agent_speaker_id), a weak one beside a time column
+        ranked = sorted((r, i) for i, h in enumerate(header) if (r := _speaker_rank(h)) is not None and (not r[0] or w is not None))
+        s = ranked[0][1] if ranked else None
+    if t is None:
+        t = next((i for i, h in enumerate(header) if 2 <= len(ws := _key_words(h)) <= 3 and ws[-1] in TEXT_TAILS), None)
     if s is None or t is None or s == t:
         return None
     keys = {"speaker": header[s], "text": header[t]}
-    if (w := col(CSV_TIME)) is not None:
+    if w is not None:
         keys["time"] = header[w]
     values = [r[s].strip() for r in rows[1:] if len(r) > max(s, t)]
+    if lenient and not _takes_turns([v for v in values if v]):
+        return None
     recurs = len(values) >= 2 and len(set(values)) < len(values)
     strong = norm[s] in CSV_SPEAKER[:12] and recurs
     return {"format": "csv", "score": STRONG if strong else WEAK, "keys": keys, "delimiter": sep}

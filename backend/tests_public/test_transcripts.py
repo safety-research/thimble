@@ -101,6 +101,7 @@ FIXTURES = {
     "village-transcript.jsonl": (VILLAGE, "messages"),
     "chat_messages.jsonl": (CHAT_ROWS, "messages"),
     "sdk_messages.jsonl": (SDK_ROWS, "stream"),
+    "rows.csv": ("Created At,Agent Speaker Id,Message Text\n2026-01-01,a1,hi\n2026-01-02,a2,yo\n2026-01-03,a1,ok\n", "csv"),
     "camel.jsonl": (jsonl([{"Speaker-Name": n, "messageText": t, "sentAt": f"2026-01-01T10:0{i}:00Z"}
                            for i, (n, t) in enumerate([("amy", "hi"), ("ben", "yo"), ("amy", "ok")])]), "messages"),
     # not transcripts
@@ -115,6 +116,7 @@ FIXTURES = {
     "README.md": (FRONT_MATTER, None),
     "dataset.yaml.txt": ("configs:\n" + "".join(f"  - name: {n}\n    data_files: {n}.gz\n" for n in "abcd"), None),
     # documents, each by its own author: no one takes turns
+    "authors.csv": ("Writer Handle,Essay Text\nann,one\nbob,two\ncat,three\ndan,four\n", None),
     "essays.jsonl": (jsonl([{"author": f"writer {i}", "text": f"essay {i}"} for i in range(6)]), None),
     "one.jsonl": (jsonl([{"speakerName": "amy", "content": "hi"}]), None),
 }
