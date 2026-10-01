@@ -249,8 +249,10 @@ def agent_rows(c: str | None) -> dict[str, Any]:
     """Who runs each agent thimble starts and what it may do, by its row of the permission modes (modes.AGENTS): its
     role's agent (roles.public: thimble's own, or an extension's prompt, Agent SDK program or command, with the
     extensions that add to its prompt and a conflict), and from thimble's config its sandbox, whether the sandbox can
-    run here, its network, web tools and edits of the corpus; `main` names the extensions that add to main's prompt."""
-    from . import roles, userconf  # noqa: PLC0415
+    run here, its network, web tools and edits of the corpus; `main` names the extensions that add to main's prompt.
+    `labels` and `cardCheck` (userconf.CALLS) follow, by their config names: who runs their tasks (`tasks`, the first
+    one an extension runs) and the settings a program of those tasks runs under, with the sandbox always on and no web."""
+    from . import roles, tasks, userconf  # noqa: PLC0415
 
     conf = userconf.load_or_defaults(c)[0]
     runs = conf["sandbox"]["use"] != "never" and userconf.sandbox_runs()
@@ -263,6 +265,16 @@ def agent_rows(c: str | None) -> dict[str, Any]:
                     "conflict": role["conflict"], "sandbox": mine.get("sandbox", "on"), "sandbox_runs": runs,
                     "network": mine.get("network", "on"), "web": mine.get("web", "ask"), "data": mine.get("data", "ask"),
                     "config": f"agents.{agent}"}
+    by_task = task_rows(c)
+    for agent in userconf.CALLS:
+        mine = conf["agents"][agent]
+        own = [t for t in by_task if t["task"] in tasks.TASKS and tasks.TASKS[t["task"]].agent == agent]
+        lead = next((t for t in own if t["way"] != "thimble" or t["conflict"]), None)
+        added = list(dict.fromkeys(e for t in own for e in t["additions"]))
+        out[agent] = {"way": lead["way"] if lead else "thimble", "extension": lead["extension"] if lead else "",
+                      "additions": added, "conflict": lead["conflict"] if lead else [], "sandbox": "on",
+                      "sandbox_runs": runs, "network": mine.get("network", "on"), "web": "off",
+                      "data": mine.get("data", "ask"), "config": f"agents.{agent}", "tasks": [t["task"] for t in own]}
     return out
 
 

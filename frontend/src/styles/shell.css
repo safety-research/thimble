@@ -453,6 +453,10 @@
 .settings-mode {
   justify-self: start;
 }
+/* labels' and the card check's cell where the others have their mode's menu (SettingsPopover's CALL_ROWS) */
+.chip.settings-mode-none {
+  color: var(--text-secondary);
+}
 /* under an agent's mode: who runs it and what it may do (SettingsPopover's agentLine) */
 .settings-agent-line {
   grid-column: 2;

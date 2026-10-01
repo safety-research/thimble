@@ -74,3 +74,18 @@ describe('tasksLine', () => {
     expect(one).toContain('checks')
   })
 })
+
+describe('the labels and card check rows', () => {
+  const agent = (over: Record<string, unknown> = {}) => ({ way: 'thimble', extension: '', additions: [], conflict: [], sandbox: 'on', sandbox_runs: true, network: 'on', web: 'off', data: 'ask', config: 'agents.labels', ...over }) as import('../../src/lib/types').AgentRow
+
+  it('say what a program of their tasks may do, and that with no thread to ask in it never edits the data at ask', async () => {
+    const { agentLine, agentTip, CALL_ROWS } = await import('../../src/shell/SettingsPopover')
+    expect(CALL_ROWS.map((r) => r.agent)).toEqual(['labels', 'cardCheck'])
+    const labels = agent({ tasks: ['labels', 'label-draft', 'view-fit'] })
+    expect(agentLine(labels)).toContain('never edits data')
+    expect(agentLine(agent())).toContain('asks to edit data')
+    expect(agentLine(agent({ tasks: ['card-check'], data: 'allow' }))).toContain('may edit data')
+    expect(agentTip(labels)).toContain('labels, label-draft or view-fit')
+    expect(agentTip(labels)).toContain('agents.labels')
+  })
+})

@@ -985,7 +985,7 @@ export interface Settings {
   /** while Claude Code does not trust thimble's workspaces folder: the folder and the command that trusts it (shell/Untrusted) */
   untrusted?: { folder: string; command: string } | null
   /** who runs each agent thimble starts and what it may do, by its permission-mode row (backend ledger.agent_rows) */
-  agents?: Partial<Record<ModeAgent, AgentRow>> & { main?: { additions: string[] } }
+  agents?: Partial<Record<ModeAgent | CallAgent, AgentRow>> & { main?: { additions: string[] } }
   /** who runs each of thimble's seven tasks (backend ledger.task_rows) */
   tasks?: TaskRow[]
   [k: string]: unknown
@@ -1001,11 +1001,17 @@ export interface TaskRow {
   conflict: string[]
 }
 
+/** The agents of thimble's config that are one model call each, unless an extension's program runs their tasks (backend
+ * userconf.CALLS). */
+export type CallAgent = 'labels' | 'cardCheck'
+
 /** One agent's row in the settings (backend ledger.agent_rows): thimble's own agent or an extension's (its prompt in
  * place of thimble's, an Agent SDK program or a command), the extensions adding to its prompt, two that both replace
  * it, and its consent settings from thimble's config. */
 export interface AgentRow {
   way: 'thimble' | 'prompt' | 'sdk' | 'command'
+  /** labels and cardCheck only: the tasks whose programs run under its settings (backend tasks.TASKS) */
+  tasks?: string[]
   extension: string
   additions: string[]
   conflict: string[]
