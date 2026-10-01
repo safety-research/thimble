@@ -1925,7 +1925,7 @@ def consent(e: dict[str, Any], conf: dict[str, Any]) -> str:
                 words.update(web="off" if words.get("web") in (None, "ask") else words["web"],
                              data=None if words.get("data") == "ask" else words["data"])
             used[f"{r['task']} task"] = _settings_words(words)
-    root = source_path(str(e.get("name") or ""))
+    root = Path(e["root"]) if e.get("root") else source_path(str(e.get("name") or ""))
     for name in _words(e.get("agents")):
         words = _settings_words(userconf.extension_agent(conf, f"{e.get('name')}:{name}"), data=False)
         if mcp_servers(_subagent_fields(root, e, name)):
@@ -1953,8 +1953,9 @@ def public(c: str) -> dict[str, Any]:
     its views: each shown here or not, the line Settings shows beside it (`note`), where its switch stands (switched
     here, else as its check says) and whether that switch can change anything (`locked`: the extension does not run
     here or no file here matches the view's claims). Then each extension thimble ships that is not added, off with no
-    line, its switch adding it (`addable`). Then the conflicts among those that run, and whether an orientation ran
-    here (`orientation_ran`)."""
+    line, its switch adding it (`addable`), with the settings its agents would run under, whether its code would run in
+    a sandbox and the extensions thimble ships that adding it adds with it (`needs`). Then the conflicts among those
+    that run, and whether an orientation ran here (`orientation_ran`)."""
     state = read_state(c)
     off = userconf.extensions_off()
     conf = userconf.load_or_defaults(c)[0]
@@ -1977,14 +1978,31 @@ def public(c: str) -> dict[str, Any]:
                     "parts": parts(e, _unused(c, name, clash) if e.get("active") else None),
                     "consent": consent({**e, "name": name}, conf), "sandboxed": wrapped if has_code(e) else None,
                     "orients": _can_run(c, name, state["extensions"], replacing, ran), "offer": name in offers})
-    for n, v in not_added():
+    absent = dict(not_added())
+    for n, v in absent.items():
         if n in state["extensions"]:
             continue
         info = read_extension(builtins()[n], n, set())
         out.append({"name": n, "version": v, "description": info["description"], "builtin": True, "active": False,
                     "why": NOT_ADDED, "note": "", "on": False, "locked": False, "addable": True, "views": [],
-                    "parts": parts(info), "consent": "", "sandboxed": None, "orients": orients(info), "offer": False})
+                    "parts": parts(info), "consent": consent({**info, "name": n}, conf),
+                    "sandboxed": wrapped if has_code(info) else None, "needs": _added_with(n, set(absent)),
+                    "orients": orients(info), "offer": False})
     return {"extensions": out, "conflicts": conflict_lines(clash), "orientation_ran": ran[0]}
+
+
+def _added_with(name: str, absent: set[str]) -> list[str]:
+    """The extensions in `absent` (thimble ships them, none added) that adding the shipped extension `name` adds with
+    it, however deep its needs go, as `add` adds them."""
+    ships = builtins()
+    out: list[str] = []
+    todo = [name]
+    while todo:
+        for n in read_extension(ships[todo.pop()], None, set())["needs"]:
+            if n in absent and n in ships and n != name and n not in out:
+                out.append(n)
+                todo.append(n)
+    return out
 
 
 def _unused(c: str, name: str, clash: dict[str, dict[str, list[str]]]) -> dict[str, str]:
