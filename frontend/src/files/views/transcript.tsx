@@ -171,13 +171,19 @@ export function pick(r: unknown, key: string | undefined): unknown {
   return v
 }
 
-/** Who a speaker value names: a string, or a person object's name. */
+/** the keys of a person object that hold a name in any case style (`displayName`, `full_name`), as the server's sniff
+ * reads them (backend transcripts.NAME_NORMS) */
+const NAME_NORMS = new Set(['name', 'displayname', 'username', 'realname', 'fullname', 'nickname', 'nick', 'handle', 'login'])
+
+/** Who a speaker value names: a string, or a person object's name (its name keys, then its role or id). */
 export function nameOf(v: unknown): string | null {
   if (typeof v === 'string') return v.trim() || null
   if (typeof v === 'number') return String(v)
   if (v && typeof v === 'object' && !Array.isArray(v)) {
-    for (const k of ['name', 'display_name', 'username', 'real_name', 'role', 'id']) {
-      const got = nameOf((v as Record<string, unknown>)[k])
+    const o = v as Record<string, unknown>
+    const named = Object.entries(o).filter(([k]) => NAME_NORMS.has(k.toLowerCase().replace(/[^a-z0-9]/g, ''))).map(([k]) => k)
+    for (const k of ['name', 'display_name', 'username', 'real_name', ...named, 'role', 'id']) {
+      const got = nameOf(o[k])
       if (got) return got
     }
   }

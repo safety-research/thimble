@@ -127,6 +127,8 @@ describe('messages in any shape', () => {
   test('who speaks, the words and the time, wherever a record keeps them', () => {
     const r = { message: { author: { name: 'bob' }, content: [{ type: 'text', text: 'hey' }, { type: 'text', text: 'there' }] }, ts: 1700000000 }
     expect(nameOf(pick(r, 'message.author'))).toBe('bob')
+    expect(nameOf({ displayName: 'Ann', id: 7 })).toBe('Ann')
+    expect(nameOf({ Full_Name: 'Ben' })).toBe('Ben')
     expect(textOf(pick(r, 'message.content'))).toBe('hey\n\nthere')
     expect(timeOf(pick(r, 'ts'))).toBe('2023-11-14 22:13')
     expect(timeOf('1700000000.0001')).toBe('2023-11-14 22:13')

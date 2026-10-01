@@ -86,8 +86,11 @@ LIST_KEYS = ("messages", "chat_messages", "conversation", "conversations", "turn
 PAIR_KEYS = (("prompt", "response"), ("prompt", "completion"), ("question", "answer"), ("instruction", "output"),
              ("input", "output"))
 STREAM_TYPES = {"assistant", "user", "system", "tool_progress", "result"}
-NAME_FIELDS = ("name", "display_name", "username", "real_name", "role", "id")
+# where a person object keeps its name: these keys, then a key of NAME_NORMS in any case style (`displayName`), then
+# its role or id
+NAME_FIELDS = ("name", "display_name", "username", "real_name")
 NAME_NORMS = frozenset({"name", "displayname", "username", "realname", "fullname", "nickname", "nick", "handle", "login"})
+NAME_LAST = ("role", "id")
 
 ROLE_WORDS = {"user", "assistant", "human", "ai", "system", "bot", "claude", "chatgpt", "gpt", "model", "agent", "me",
               "you", "interviewer", "interviewee", "q", "a", "question", "answer", "customer", "support", "operator",
@@ -162,6 +165,10 @@ def _name_of(v: Any) -> str | None:
                 got = _name_of(x)
                 if got:
                     return got
+        for k in NAME_LAST:
+            got = _name_of(v.get(k))
+            if got:
+                return got
     return None
 
 
