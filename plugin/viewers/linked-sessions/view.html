@@ -283,10 +283,11 @@ const AX = 28, LH = 30, RH = 30, BAND = [7, 21], MID = 14
 const MAX_TICKED = 4
 const root = getComputedStyle(document.documentElement)
 const tok = (name, fallback) => root.getPropertyValue(name).trim() || fallback
-// the page's own categories in the theme's viz colours, all but the red, which errors take; while a label is on, the
-// labels colour the calls instead
-const CAT = [tok('--viz-1', '#0072b2'), tok('--viz-2', '#e69f00'), tok('--viz-3', '#009e73'), '#56b4e9', tok('--viz-7', '#8a6d3b'),
-  tok('--viz-5', '#cc79a7'), tok('--viz-ink-2', '#6b675f'), tok('--viz-ink-1', '#1b1a18')]
+// the page's own categories in the theme's seven viz colours, then two inks; errors take the red. While a label is on,
+// the labels colour the calls instead
+const CAT = [tok('--viz-1', '#025ac3'), tok('--viz-2', '#d0750a'), tok('--viz-3', '#08632f'), tok('--viz-4', '#1392d4'),
+  tok('--viz-5', '#897301'), tok('--viz-6', '#009c85'), tok('--viz-7', '#844500'), tok('--viz-ink-2', '#6b675f'),
+  tok('--viz-ink-1', '#1b1a18')]
 const QUIET = tok('--viz-ink-3', '#a19d94')
 const NEG = tok('--status-negative', '#c93a28'), WARN = tok('--status-warning', '#9a6512')
 const PAPER = tok('--surface-card', '#ffffff')

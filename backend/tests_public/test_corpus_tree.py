@@ -88,10 +88,52 @@ def test_a_folder_listing_counts_what_a_walk_already_read(tree_corpus):
     assert _folder(".", include_hidden=1).get("n_files") is None  # the dot folders were never read
 
 
+def test_a_folder_listed_again_counts_a_file_added_to_it_or_gives_no_count(tree_corpus):
+    """A folder listing checks that folder in the tree again, so the tree's count holds a file an agent just wrote there,
+    and the root's count a file written in a subfolder listed before it. While a walk holds the tree, a folder that
+    changed gets no count, since the one the tree holds is no longer exact."""
+    corpus.list_sources(tree_corpus)
+    _write(tree_corpus, "NOTES.md")
+    assert _folder(".")["n_files"] == 12
+    _write(tree_corpus, "runs/r3/more.txt")
+    assert _folder("runs/r3")["n_files"] == 2 and _folder(".")["n_files"] == 13
+    tree = corpus_tree.tree(tree_corpus)
+    with tree.lock:
+        _write(tree_corpus, "LATER.md")
+        os.utime(tree_corpus, ns=(OLD_NS, OLD_NS))
+        assert "n_files" not in _folder(".")
+    assert _folder(".")["n_files"] == 14
+
+
 def test_a_folder_reached_through_a_symlink_is_not_listed(tree_corpus):
     os.symlink(tree_corpus / "runs", tree_corpus / "linked")
     assert "linked" not in [d["name"] for d in _folder(".")["folders"]]
     assert _folder("linked")["files"] == [] and _folder("linked")["folders"] == []
+
+
+def test_the_tree_asks_which_folders_changed_by_their_stamps_and_lists_only_those_again(tree_corpus):
+    """A listing carries its folder's stamp, and GET /sources/stamps answers the stamps of the folders the tree shows
+    with no listing read: a file added to a folder changes that folder's stamp alone, and a folder gone or left out
+    has none. A listing read within the time's resolution of a change carries a stamp no later answer equals."""
+    _age(tree_corpus)
+    root, runs = _folder("."), _folder("runs")
+
+    def stamps(*paths: str) -> dict:
+        r = client.get(f"/api/corpora/{NAME}/sources/stamps", params={"path": list(paths)})
+        assert r.status_code == 200, r.text
+        return r.json()["stamps"]
+
+    assert stamps(".", "runs") == {".": root["stamp"], "runs": runs["stamp"]}
+    _write(tree_corpus, "NOTES.md")
+    got = stamps(".", "runs", "runs/r9", ".git", "../outside")
+    assert got["."] != root["stamp"] and got["runs"] == runs["stamp"]
+    assert got["runs/r9"] is None and got[".git"] is None and got["../outside"] is None
+    fresh = _folder(".")
+    assert "NOTES.md" in [f["path"] for f in fresh["files"]]
+    assert fresh["stamp"] != stamps(".")["."], "a folder changed just now is listed once more"
+    _age(tree_corpus)
+    assert _folder(".")["stamp"] == stamps(".")["."]
+    assert client.get(f"/api/corpora/{NAME}/sources/stamps", params={"path": ["x"] * 201}).status_code == 400
 
 
 def test_the_source_list_is_stamped_when_its_walk_ends(tree_corpus, monkeypatch):

@@ -14,7 +14,7 @@
 //   anchors   the data-anchor refs the page shows, answered with `labels`: the marks of its records (labels.ts
 //             viewMarks, with the filter's keep) and of its units (the view's marks route), the labels that are on,
 //             the Files label filter, every label over files and the palette, which the page hears through
-//             thimble.onLabels
+//             thimble.onLabels; the rows of the records in view (`seen`, and later `seen` messages) are read first
 //   key       sent once the page is ready: the key the bridge puts on each labelCall
 //   labelCall the page's label controls (labelCalls.ts), answered by labelDone: done here as the Labels pane does them
 //             (`labelActions`), a mark stored as the analyst's verdict and the label filter set, each only during the
@@ -45,7 +45,7 @@ import { cmdCursors } from '../pointer/cursor'
 import type { Concept, LabelRow, ViewOpen, ViewQuery } from '../lib/types'
 import { callKey, inGesture, NO_GESTURE, runLabelCall, type ViewLabelActions } from './labelCalls'
 import { pageLabelList, pageLabels, pagePalette, viewMarks, withKeeps, type Keep, type LabelFilter, type PageLabelItem, type ViewMark } from './labels'
-import { labelsArrived, wantLabels, wantRecordLabels, watchPathLabels } from './marks'
+import { labelsArrived, wantRecordLabels, watchPathLabels } from './marks'
 
 const P = 'thimble:'
 const FIT_MIN = 80
@@ -196,8 +196,10 @@ function useViewLabels(
   palette: string[],
   post: (msg: unknown) => void,
   withUnits: boolean,
-): { add: (refs: unknown, seq?: unknown) => void; reset: () => void; ready: () => void } {
+): { add: (refs: unknown, seq?: unknown) => void; see: (refs: unknown) => void; reset: () => void; ready: () => void } {
   const refs = useRef(new Set<string>())
+  /** the refs the page reported in view, whose rows are asked for before the others' */
+  const inView = useRef(new Set<string>())
   const units = useRef(new Set<string>())
   const unitMarks = useRef<Record<string, ViewMark | Keep>>({})
   /** the units whose marks have arrived under the current filter, and that filter's turn */
@@ -220,6 +222,7 @@ function useViewLabels(
       watching.current.clear()
       rows.current.clear()
       asked.current.clear()
+      inView.current.clear()
     },
     [ws],
   )
@@ -276,8 +279,22 @@ function useViewLabels(
     },
     [askUnits, unitPrefix],
   )
+  const see = useCallback(
+    (list: unknown) => {
+      if (!Array.isArray(list)) return
+      for (const ref of list) {
+        if (typeof ref !== 'string' || inView.current.has(ref)) continue
+        inView.current.add(ref)
+        // a ref asked for already moves ahead of the others still waiting
+        const at = asked.current.has(ref) ? recordOf(ref) : null
+        if (at) wantRecordLabels(ws, at.path, ref, true)
+      }
+    },
+    [ws],
+  )
   const reset = useCallback(() => {
     refs.current.clear()
+    inView.current.clear()
     units.current.clear()
     unitMarks.current = {}
     unitsAnswered.current.clear()
@@ -327,8 +344,7 @@ function useViewLabels(
               setTick((t) => t + 1)
             }),
           )
-        if (at.line != null) wantLabels(ws, at.path, at.line)
-        else wantRecordLabels(ws, at.path, ref)
+        wantRecordLabels(ws, at.path, ref, inView.current.has(ref))
       }
     }
     const rowsOf = { get: (ref: string) => rows.current.get(recordOf(ref)?.path ?? '')?.get(ref) }
@@ -340,7 +356,7 @@ function useViewLabels(
     sent.current = text
     send.current({ type: P + 'labels', marks, on: state.on, filter: state.filter, all, palette, answered })
   }, [ws, on, filter, filterFiles, filterLabel, byId, all, palette, labelled, tick])
-  return useMemo(() => ({ add, reset, ready }), [add, reset, ready])
+  return useMemo(() => ({ add, see, reset, ready }), [add, see, reset, ready])
 }
 
 export function ViewerFrame({ ws, slug, targetRef, path, pathPicked, title, fit, labels = NO_LABELS, filter = null, filterFiles, byId = NO_CONCEPTS, first, labelActions, onHidden, onError, onNoPage, className, quote, onQuoteMissing, version, restore, handle, card, onSettled, onQuery, targetPick, query }: ViewerFrameProps) {
@@ -616,7 +632,11 @@ export function ViewerFrame({ ws, slug, targetRef, path, pathPicked, title, fit,
           queryFn.current?.(d.patch && typeof d.patch === 'object' && Object.keys(d.patch).length ? (d.patch as Record<string, unknown>) : null)
           return
         case P + 'anchors':
+          marks.see(d.seen)
           marks.add(d.refs, d.seq)
+          return
+        case P + 'seen':
+          marks.see(d.refs)
           return
         case P + 'quoted':
           if (d.found === false) missing.current?.()

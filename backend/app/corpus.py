@@ -19,6 +19,7 @@ when it is exact.
 """
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import logging
@@ -35,10 +36,10 @@ from bisect import bisect_right
 from collections import OrderedDict
 from contextlib import closing
 from pathlib import Path
-from typing import Any, Callable, Iterator
+from typing import Any, AsyncIterator, Callable, Iterator
 from urllib.parse import quote
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
@@ -179,24 +180,49 @@ def forget_sources(corpus: Path | None = None) -> None:
     corpus_tree.forget(corpus)
 
 
-def folder_listing(corpus: Path, rel: str, include_hidden: bool = False) -> dict[str, Any] | None:
-    """`GET /sources?path=<rel>&depth=1`: the folder's own files and subfolders, read from that folder alone. A
-    subfolder is a run (`is_run`) when it holds an `agents/` folder or a `manifest.json`. The counts of files at any
-    depth (`n_files`, the folder's own and each subfolder's) and a subfolder's `n_folders` are given only where earlier
-    walks of the corpus's folder tree know them (corpus_tree.Tree.counts). None for a folder that is not there, or one
-    the listing leaves out: under a dot name without `include_hidden`, or reached through a symlinked folder."""
-    rel = rel.strip("/")
-    hidden_here = _is_hidden(rel) if rel else False
-    if hidden_here and not include_hidden:
+def _listed_folder(corpus: Path, rel: str, include_hidden: bool) -> str | None:
+    """The path of corpus folder `rel` (stripped of slashes) as folder_listing reads it, or None for one it leaves out:
+    under a dot name without `include_hidden`, or reached through a symlinked folder."""
+    if rel and _is_hidden(rel) and not include_hidden:
         return None
     d = f"{corpus}/{rel}" if rel else str(corpus)
     if rel and (os.path.normpath(rel) != rel or os.path.realpath(d) != os.path.join(os.path.realpath(corpus), rel)):
         return None
+    return d
+
+
+def folder_stamp(corpus: Path, rel: str, include_hidden: bool = False) -> str | None:
+    """The folder's modification time in nanoseconds, which an entry added, removed or renamed in it changes, as a
+    string; None for a folder that is not there or that folder_listing leaves out."""
+    d = _listed_folder(corpus, rel.strip("/"), include_hidden)
     try:
+        return str(os.stat(d).st_mtime_ns) if d is not None else None
+    except OSError:
+        return None
+
+
+def folder_listing(corpus: Path, rel: str, include_hidden: bool = False) -> dict[str, Any] | None:
+    """`GET /sources?path=<rel>&depth=1`: the folder's own files and subfolders, read from that folder alone, with its
+    `stamp` (folder_stamp) as of before the read, so a later change shows as another stamp. A subfolder is a run
+    (`is_run`) when it holds an `agents/` folder or a `manifest.json`. The counts of files at any depth (`n_files`, the
+    folder's own and each subfolder's) and a subfolder's `n_folders` are given only where earlier walks of the corpus's
+    folder tree know them (corpus_tree.Tree.counts), after the tree checks this folder again (Tree.recheck), and the
+    folder's own only when the tree holds its entries as read. None for a folder that is not there, or one the listing
+    leaves out: under a dot name without `include_hidden`, or reached through a symlinked folder."""
+    rel = rel.strip("/")
+    hidden_here = _is_hidden(rel) if rel else False
+    d = _listed_folder(corpus, rel, include_hidden)
+    if d is None:
+        return None
+    try:
+        mtime = os.stat(d).st_mtime_ns
         with os.scandir(d) as it:
             entries = list(it)
     except OSError:
         return None
+    # a folder changed within its modification time's resolution may change again under the same time, so a listing
+    # read that soon carries a stamp no folder_stamp equals, and the tree lists it once more
+    stamp = f"{mtime}~" if 0 <= time.time_ns() - mtime < corpus_tree.RACY_NS else str(mtime)
     files: list[dict[str, Any]] = []
     subs: list[tuple[str, str, bool, str]] = []
     for e in entries:
@@ -220,7 +246,9 @@ def folder_listing(corpus: Path, rel: str, include_hidden: bool = False) -> dict
             rec["hidden"] = True
         files.append(rec)
     files.sort(key=lambda s: (KIND_ORDER[s["kind"]], s["path"]))
-    counts = corpus_tree.tree(corpus).counts(include_hidden)
+    tree = corpus_tree.tree(corpus)
+    current = tree.recheck(rel, mtime)
+    counts = tree.counts(include_hidden)
     folders = []
     for name, path, hidden, full in sorted(subs):
         is_run = os.path.isfile(f"{full}/manifest.json") or os.path.isdir(f"{full}/agents") and not os.path.islink(f"{full}/agents")
@@ -231,8 +259,8 @@ def folder_listing(corpus: Path, rel: str, include_hidden: bool = False) -> dict
         if hidden:
             entry["hidden"] = True
         folders.append(entry)
-    out: dict[str, Any] = {"path": rel, "files": files, "folders": folders}
-    known = counts.get(rel)
+    out: dict[str, Any] = {"path": rel, "files": files, "folders": folders, "stamp": stamp}
+    known = counts.get(rel) if current else None
     if known is not None:
         out["n_files"] = known[0]
     return out
@@ -1027,13 +1055,17 @@ def list_corpora() -> list[dict[str, Any]]:
     for rec in config.registered_corpora():
         if rec["name"] in seen:
             continue
-        out.append({"name": rec["name"], "manifest": rec["manifest"], "path": rec["path"], "registered": True})
+        row = {"name": rec["name"], "manifest": rec["manifest"], "path": rec["path"], "registered": True}
+        if rec.get("shown"):
+            row["shown"] = rec["shown"]
+        out.append(row)
     return out
 
 
 class RegisterBody(BaseModel):
     path: str
     exact: bool = False  # register this folder even inside a registered one
+    shown: str | None = None  # the folder as the analyst named it, through a symlink; null clears it, absent keeps it
 
 
 @router.post("/corpora/register", status_code=201)
@@ -1041,8 +1073,9 @@ def register_corpus(body: RegisterBody) -> dict[str, Any]:
     """Register a directory as a corpus: writes the sidecar DATA_DIR/<name>.corpus.json, never into the directory. 400
     for a non-directory. A taken basename gets the next free name (`logs-2`); a path inside a corpus returns that corpus
     unless `exact`."""
+    shown = body.shown if "shown" in body.model_fields_set else config.KEEP_SHOWN
     try:
-        return config.register_corpus(body.path, exact=body.exact)
+        return config.register_corpus(body.path, exact=body.exact, shown=shown)
     except ValueError as e:
         raise HTTPException(400, str(e))
 
@@ -1070,6 +1103,24 @@ def get_sources(c: str, include_hidden: int = 0, path: str | None = None, depth:
             raise HTTPException(404, f"no such folder: {rel!r}")
         listing = {"path": rel, "files": [], "folders": [], "n_files": 0}
     return listing
+
+
+STAMPS_MAX = 200  # folders one GET /sources/stamps asks about
+
+
+@router.get("/corpora/{c}/sources/stamps")
+def get_stamps(c: str, path: list[str] = Query(default=[]), include_hidden: int = 0) -> dict[str, Any]:
+    """`?path=<folder>&path=...`: the `stamp` (folder_stamp) of each folder the Files tree shows, so it lists again only
+    the folders that changed; null for a folder that is gone or not listed ('' or '.' is the root). 400 past STAMPS_MAX
+    folders."""
+    corpus = _corpus(c)
+    if len(path) > STAMPS_MAX:
+        raise HTTPException(400, f"at most {STAMPS_MAX} folders at a time")
+    out: dict[str, str | None] = {}
+    for p in path:
+        rel = p.strip().strip("/")
+        out[p] = folder_stamp(corpus, "" if rel == "." else rel, bool(include_hidden))
+    return {"stamps": out}
 
 
 @router.get("/corpora/{c}/source")
@@ -1122,36 +1173,85 @@ SNIP_BEFORE = 48             # bytes of a matching line a snippet keeps before t
 SNIP_AFTER = 120             # and after it
 GREP_FILES_MAX = 100         # files with a match one content search lists; it stops there
 GREP_SHOWN = 5               # matching lines listed per file (its count goes on past them)
-GREP_SCAN_S = 15.0           # a content search stops after this long and says how far it read
+GREP_PROGRESS_S = 0.5        # how often a content search says how many files it has read
 GREP_SKIP = (".pdf", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".ico", ".tif", ".tiff", ".mp4", ".mov", ".webm",
              ".mkv", ".avi", ".mp3", ".wav", ".m4a", ".ogg", ".flac", ".zip", ".gz", ".tgz", ".tar", ".bz2", ".xz", ".7z",
              ".zst", ".whl", ".parquet", ".feather", ".arrow", ".xlsx", ".xls", ".docx")  # media and packed files: no text lines
 
 
-def find_files(sources: list[dict[str, Any]], query: str, limit: int = FIND_FILES_MAX) -> tuple[list[dict[str, Any]], int]:
-    """The files whose path holds every word of `query` (case-insensitive), best match first, falling back to fuzzy
-    in-order letter matches. Returns the first `limit` and how many matched."""
+class _SearchPaths:
+    """The corpus's files as the Files search reads them, for one version of its folder tree: their corpus-relative
+    paths sorted and (made when first asked for) the same in the listing's order, kind first."""
+
+    __slots__ = ("version", "paths", "_ordered")
+
+    def __init__(self, version: int, paths: list[str]) -> None:
+        self.version = version
+        self.paths = paths
+        self._ordered: list[str] | None = None
+
+    @property
+    def ordered(self) -> list[str]:
+        if self._ordered is None:
+            self._ordered = sorted(self.paths, key=lambda rel: (KIND_ORDER[source_kind(rel)], rel))
+        return self._ordered
+
+
+_search_memo: dict[Path, _SearchPaths] = {}
+
+
+def search_paths(corpus: Path) -> _SearchPaths:
+    """The files the Files tree lists, from the corpus's folder tree (corpus_tree) with no file stat'ed, so a search
+    over a large corpus costs one pass over its paths; folders read less than SOURCES_MEMO_S ago are taken as read."""
+    version, paths = corpus_tree.tree(corpus).walk(links=False, hidden=False, skip=SKIPPED_SUFFIXES, max_age=SOURCES_MEMO_S)
+    with _sources_lock:
+        hit = _search_memo.get(corpus)
+    if hit is not None and hit.version == version and hit.paths is paths:
+        return hit
+    made = _SearchPaths(version, paths)
+    with _sources_lock:
+        _search_memo[corpus] = made
+    return made
+
+
+def source_record(corpus: Path, rel: str) -> dict[str, Any] | None:
+    """One file as the Files tab lists it ({path, kind, size_bytes, title}), None when it is gone."""
+    try:
+        size = os.stat(f"{corpus}/{rel}").st_size
+    except OSError:
+        return None
+    kind = source_kind(rel)
+    return {"path": rel, "kind": kind, "size_bytes": size, "title": source_title(rel, kind)}
+
+
+def find_paths(paths: list[str], query: str, limit: int = FIND_FILES_MAX) -> tuple[list[str], int]:
+    """The paths that hold every word of `query` (case-insensitive), best match first, falling back to fuzzy in-order
+    letter matches. Returns the first `limit` and how many matched."""
     q = query.strip().lower()
     if not q:
         return [], 0
     words = q.split()
-    ranked: list[tuple[int, int, str, dict[str, Any]]] = []
-    for s in sources:
-        low = s["path"].lower()
+    ranked: list[tuple[int, int, str, str]] = []
+    for path in paths:
+        low = path.lower()
         if not all(w in low for w in words):
             continue
         name = low.rsplit("/", 1)[-1]
         rank = 0 if name == q else 1 if name.startswith(q) else 2 if q in name else 3 if all(w in name for w in words) else 4
-        ranked.append((rank, len(low), low, s))
+        ranked.append((rank, len(low), low, path))
     if not ranked:
-        letters = re.compile(".*?".join(re.escape(ch) for ch in q.replace(" ", "")))
-        for s in sources:
-            low = s["path"].lower()
+        letters = q.replace(" ", "")
+        fuzzy = re.compile(".*?".join(re.escape(ch) for ch in letters))
+        need = set(letters)
+        for path in paths:
+            low = path.lower()
+            if not need.issubset(low):
+                continue
             name = low.rsplit("/", 1)[-1]
-            if letters.search(name):
-                ranked.append((5, len(low), low, s))
-            elif letters.search(low):
-                ranked.append((6, len(low), low, s))
+            if fuzzy.search(name):
+                ranked.append((5, len(low), low, path))
+            elif fuzzy.search(low):
+                ranked.append((6, len(low), low, path))
     ranked.sort(key=lambda r: r[:3])
     return [r[3] for r in ranked[:limit]], len(ranked)
 
@@ -1291,9 +1391,11 @@ def find_lines(path: Path, needles: list[bytes], after: int = 0, limit: int = FI
 
 @router.get("/corpora/{c}/sources/find")
 def find_sources(c: str, q: str = "", limit: int = FIND_FILES_MAX) -> dict[str, Any]:
-    """The Files tree's name search: {q, files, total}, over the memoised listing without dot entries."""
+    """The Files tree's name search: {q, files, total}, over the paths of the corpus's folder tree without dot entries
+    (search_paths); only the files it lists are stat'ed."""
     corpus = _corpus(c)
-    files, total = find_files(list_sources(corpus), q, max(1, min(limit, FIND_FILES_MAX)))
+    found, total = find_paths(search_paths(corpus).paths, q, max(1, min(limit, FIND_FILES_MAX)))
+    files = [r for r in (source_record(corpus, rel) for rel in found) if r is not None]
     return {"q": q, "files": files, "total": total}
 
 
@@ -1302,20 +1404,24 @@ _grep_gen: dict[str, int] = {}
 _grep_lock = threading.Lock()
 
 
-def grep_files(corpus: Path, sources: list[dict[str, Any]], q: str, *, files_max: int = GREP_FILES_MAX,
-               shown: int = GREP_SHOWN, budget_s: float = GREP_SCAN_S,
-               stop: Callable[[], bool] | None = None) -> Iterator[dict[str, Any]]:
-    """The Files search's content half: each file of `sources` whose bytes hold `q` as {path, total, complete, matches},
-    then one closing {done: true, ...}. Databases, media, packed and binary files are skipped. Stops after `files_max`
-    files, `budget_s` seconds or `stop()`, with `complete` false."""
-    deadline = time.monotonic() + budget_s
+def grep_files(corpus: Path, paths: list[str], q: str, *, files_max: int = GREP_FILES_MAX,
+               shown: int = GREP_SHOWN, stop: Callable[[], bool] | None = None,
+               progress_s: float = GREP_PROGRESS_S) -> Iterator[dict[str, Any]]:
+    """The Files search's content half: each file of `paths` whose bytes hold `q` as {path, total, complete, matches},
+    a {progress: true, scanned, of} line at most every `progress_s` seconds while it reads, then one closing
+    {done: true, ...}. Databases, media, packed and binary files are skipped. It has no time limit: it stops after
+    `files_max` files or once `stop()` is true, with `complete` false and `scanned` the files it read whole."""
     files = hits = scanned = 0
     complete = True
-    for src in sources:
-        if files >= files_max or time.monotonic() > deadline or (stop is not None and stop()):
+    told = time.monotonic()
+    yield {"progress": True, "scanned": 0, "of": len(paths)}
+    for path in paths:
+        if files >= files_max or (stop is not None and stop()):
             complete = False
             break
-        path = src["path"]
+        if time.monotonic() - told >= progress_s:
+            told = time.monotonic()
+            yield {"progress": True, "scanned": scanned, "of": len(paths)}
         scanned += 1
         kind = source_kind(path)
         if kind == "forge" or path.lower().endswith(GREP_SKIP):
@@ -1327,34 +1433,69 @@ def grep_files(corpus: Path, sources: list[dict[str, Any]], q: str, *, files_max
         if not p.is_file() or sniff_binary(p):
             continue
         jsonl = kind in ("agent", "board", "events") or path.endswith(".jsonl")
-        found = find_lines(p, find_needles(q, jsonl), 0, shown, max(0.0, deadline - time.monotonic()), snippets=True, stop=stop)
+        found = find_lines(p, find_needles(q, jsonl), 0, shown, float("inf"), snippets=True, stop=stop)
         if found["total"]:
             files += 1
             hits += found["matches"]
             yield {"path": path, "total": found["matches"], "complete": found["complete"],
                    "matches": [{"line": n, **snip} for n, snip in zip(found["lines"], found["snippets"])]}
         if not found["complete"]:
+            scanned -= 1  # stopped inside this file: it was not read whole
             complete = False
             break
-    yield {"done": True, "files": files, "hits": hits, "scanned": scanned, "of": len(sources), "complete": complete}
+    yield {"done": True, "files": files, "hits": hits, "scanned": scanned, "of": len(paths), "complete": complete}
 
 
 @router.get("/corpora/{c}/sources/grep")
-def grep_sources(c: str, q: str = "") -> StreamingResponse:
-    """Content search over the files the tree lists, streamed as JSON lines, one per matching file and a closing `done`
-    line. A newer search of the same corpus stops this one. An empty or multi-line query is 400."""
+async def grep_sources(c: str, q: str = "") -> StreamingResponse:
+    """Content search over the files the tree lists, streamed as JSON lines: one per matching file, progress lines,
+    and a closing `done` line. The search's id is the X-Search header, which POST /sources/grep/stop takes. It runs in
+    a thread of its own and stops when it is asked to, when the browser drops the stream, or when a newer search of the
+    same corpus starts. An empty or multi-line query is 400."""
     corpus = _corpus(c)
     if not q.strip() or "\n" in q:
         raise HTTPException(400, "q must be text on one line")
     with _grep_lock:
         gen = _grep_gen[c] = _grep_gen.get(c, 0) + 1
-    sources = list_sources(corpus)
+    dropped = threading.Event()
+    loop = asyncio.get_running_loop()
+    items: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
 
-    def lines() -> Iterator[str]:
-        for item in grep_files(corpus, sources, q, stop=lambda: _grep_gen.get(c) != gen):
-            yield json.dumps(item, ensure_ascii=False) + "\n"
+    def run() -> None:
+        try:
+            paths = search_paths(corpus).ordered
+            for item in grep_files(corpus, paths, q, stop=lambda: dropped.is_set() or _grep_gen.get(c) != gen):
+                loop.call_soon_threadsafe(items.put_nowait, item)
+        except Exception:  # noqa: BLE001
+            log.exception("content search of %s failed", c)
+        finally:
+            loop.call_soon_threadsafe(items.put_nowait, None)
 
-    return StreamingResponse(lines(), media_type="application/x-ndjson")
+    async def lines() -> AsyncIterator[str]:
+        threading.Thread(target=run, name=f"grep:{c}", daemon=True).start()
+        try:
+            while (item := await items.get()) is not None:
+                yield json.dumps(item, ensure_ascii=False) + "\n"
+        finally:
+            dropped.set()
+
+    return StreamingResponse(lines(), media_type="application/x-ndjson", headers={"X-Search": str(gen)})
+
+
+class GrepStopBody(BaseModel):
+    search: int  # the X-Search header of the search's stream
+
+
+@router.post("/corpora/{c}/sources/grep/stop")
+def stop_grep(c: str, body: GrepStopBody) -> dict[str, bool]:
+    """Stop the content search `search` of corpus c if it still runs: its stream ends with its `done` line, which says
+    how many files it read. {stopped: false} when that search has ended or a newer one took its place."""
+    _corpus(c)
+    with _grep_lock:
+        stopped = _grep_gen.get(c) == body.search
+        if stopped:
+            _grep_gen[c] = body.search + 1
+    return {"stopped": stopped}
 
 
 @router.get("/corpora/{c}/source/find")

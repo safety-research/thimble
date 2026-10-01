@@ -495,22 +495,26 @@ export const DEFAULT_VIEW: View = { x: 0, y: 40, scale: 0.8 }
 export const MIN_SCALE = 0.2
 export const MAX_SCALE = 2
 export const ZOOM_STEP = 0.1
+/** the lowest zoom Fit goes to, so that it shows a board whole that MIN_SCALE does not; zooming out goes no further
+ * than the view already is, and zooming in goes back up through MIN_SCALE */
+export const FIT_MIN_SCALE = 0.02
 
-/** `s` held to [MIN_SCALE, MAX_SCALE]; 1 for anything that is not a number. */
-export const clampScale = (s: number): number => Math.min(MAX_SCALE, Math.max(MIN_SCALE, Number.isFinite(s) ? s : 1))
+/** `s` held to [min, MAX_SCALE]; 1 for anything that is not a number. */
+export const clampScale = (s: number, min = MIN_SCALE): number => Math.min(MAX_SCALE, Math.max(min, Number.isFinite(s) ? s : 1))
 
 /** The zoom control's reading: the zoom as a whole percentage. */
 export const zoomLabel = (scale: number): string => `${Math.round(scale * 100)}%`
 
 /** The view after zooming to `scale` about the screen point (px, py), which stays put. */
 export function zoomTo(view: View, scale: number, px: number, py: number): View {
-  const s = clampScale(scale)
+  const s = clampScale(scale, Math.min(MIN_SCALE, view.scale))
   const k = s / view.scale
   return { scale: s, x: px - (px - view.x) * k, y: py - (py - view.y) * k }
 }
 
-/** One step of the − and + buttons: a tenth, on the tenths. */
-export const stepZoom = (scale: number, dir: 1 | -1): number => clampScale(Math.round((scale + dir * ZOOM_STEP) * 10) / 10)
+/** One step of the − and + buttons: a tenth, on the tenths; − below MIN_SCALE, where only Fit goes, keeps the zoom. */
+export const stepZoom = (scale: number, dir: 1 | -1): number =>
+  dir < 0 && scale <= MIN_SCALE ? scale : clampScale(Math.round((scale + dir * ZOOM_STEP) * 10) / 10)
 
 export const panBy = (view: View, dx: number, dy: number): View => ({ ...view, x: view.x + dx, y: view.y + dy })
 export const toPlane = (view: View, px: number, py: number): Pos => ({ x: (px - view.x) / view.scale, y: (py - view.y) / view.scale })
@@ -537,11 +541,12 @@ export function wheelView(view: View, e: WheelLike, px: number, py: number): Vie
   return panBy(view, -dx, -dy)
 }
 
-/** The view that shows `content` whole in the viewport (vw × vh, less `right` for the controls), centred, at most 100%. */
+/** The view that shows `content` whole in the viewport (vw × vh, less `right` for the controls), centred, at most 100%
+ * and at least FIT_MIN_SCALE. */
 export function fitView(content: Rect | null, vw: number, vh: number, pad = 48, right = 0): View {
   if (!content || content.w <= 0 || content.h <= 0) return DEFAULT_VIEW
   const w = Math.max(100, vw - right)
-  const scale = clampScale(Math.min((w - 2 * pad) / content.w, (vh - 2 * pad) / content.h, 1))
+  const scale = clampScale(Math.min((w - 2 * pad) / content.w, (vh - 2 * pad) / content.h, 1), FIT_MIN_SCALE)
   const x = content.w * scale > w - 2 * pad ? pad - content.x * scale : (w - content.w * scale) / 2 - content.x * scale
   const y = content.h * scale > vh - 2 * pad ? pad - content.y * scale : (vh - content.h * scale) / 2 - content.y * scale
   return { scale, x, y }

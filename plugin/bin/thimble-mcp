@@ -6,12 +6,17 @@ The first two lines make this file both a shell script and a Python program: `sh
 the file under backend/.venv's Python through bin/thimble-python; Python reads that line as a string literal.
 
 Tools are listed from disk (app.tools.list, schemas from prompts/tools.md), so the list is the same whether the server
-is up or down. A call is POST {server}/api/tools/<name> with {args, actor, cwd, session, tool_use_id}; calls run
-concurrently and report MCP progress every PROGRESS_S, since Claude Code aborts a call that is silent for its idle
-timeout. The server's address and token are read per call from $THIMBLE_HOME/server.json. Every request to a tool or
-channel route proves the shim holds the token, and an answer is believed only when it proves the server does, as the
-plugin's hooks do (app/hook_auth.py). Without server.json or a token the shim reaches no port: a call reports that no
-server is recorded, and the channel waits.
+is up or down. A call is POST {server}/api/tools/<name> with {args, actor, cwd, session, session_token, tool_use_id};
+calls run concurrently and report MCP progress every PROGRESS_S, since Claude Code aborts a call that is silent for
+its idle timeout. The server's address and token are read per call from $THIMBLE_HOME/server.json. Every request to a
+tool or channel route proves the shim holds the token, and an answer is believed only when it proves the server does,
+as the plugin's hooks do (app/hook_auth.py). Without server.json or a token the shim reaches no port: a call reports
+that no server is recorded, and the channel waits.
+
+Session: a session thimble starts names itself in THIMBLE_SESSION and proves it with THIMBLE_SESSION_TOKEN, which the
+server checks (app/hook_auth.py). Claude Code's background service can hand one session's environment on to the
+user's other sessions, so THIMBLE_SESSION without a token is not believed: the shim then serves the analyst's session
+(own_session).
 
 Channel: the shim declares Claude Code's experimental `claude/channel` capability and, in the analyst's session,
 subscribes to GET {server}/api/channel (server-sent events) with the session's CLAUDE_CONFIG_DIR, which attaches the
@@ -79,6 +84,7 @@ RETRY_ENV = "THIMBLE_MCP_RETRY_S"
 PROGRESS_S = 60.0  # how often a call in flight reports progress (with_progress)
 PROGRESS_ENV = "THIMBLE_MCP_PROGRESS_S"
 SESSION_ENV = "THIMBLE_SESSION"  # the session this shim serves: `orient`, `writer:<doc>` or `critique:<id>` for a session thimble started (agent_session.py)
+TOKEN_ENV = hook_auth.SESSION_TOKEN_ENV  # what proves SESSION_ENV (module note, session)
 CHANNEL_CAPABILITY = "claude/channel"
 CHANNEL_METHOD = "notifications/claude/channel"
 PERMISSION_CAPABILITY = "claude/channel/permission"
@@ -89,6 +95,13 @@ RETRY_S = 2.0
 TOOL_USE_META = "claudecode/toolUseId"  # the key of Claude Code's id for a call in the request's `_meta`
 CTX_PARAM = "thimble_mcp_context"  # the generated handler's MCP context parameter (_tool), which no tool's schema lists
 _JSON_TYPES = {"string": str, "number": float, "integer": int, "boolean": bool, "array": list, "object": dict}
+
+
+def own_session() -> tuple[str | None, str | None]:
+    """(the session this shim serves, the token that proves it), or (None, None) for the analyst's session: a session
+    name without a token (module note, session)."""
+    name, token = os.environ.get(SESSION_ENV) or None, os.environ.get(TOKEN_ENV) or None
+    return (name, token) if name and token else (None, None)
 
 
 def server_json() -> Path:
@@ -209,7 +222,8 @@ async def call_server(name: str, args: dict[str, Any], tool_use_id: str | None =
     A refused connection, a missing server.json or a refused proof (a restart writes a new token) is retried for up
     to CALL_RETRY_S, then SERVER_DOWN, NO_RECORD or UNPROVEN. A call cut off mid-flight is not resent, since it may
     have taken effect: when the server's `boot` token changed the answer is RESTARTED, else DROPPED."""
-    body = {"args": args, "actor": ROLE, "cwd": cwd(), "session": os.environ.get(SESSION_ENV) or None,
+    session, token = own_session()
+    body = {"args": args, "actor": ROLE, "cwd": cwd(), "session": session, "session_token": token,
             "tool_use_id": tool_use_id}
     retry = _env_s(RETRY_ENV, CALL_RETRY_S)
     until = anyio.current_time() + retry
@@ -458,7 +472,7 @@ async def serve(server: MCPServer) -> None:
     """MCPServer.run_stdio_async with the channel capability declared and, in the analyst's session, the subscription
     held beside the MCP session on the same stdout."""
     low = server._lowlevel_server
-    session_kind = os.environ.get(SESSION_ENV) or None
+    session_kind = own_session()[0]
     caps: dict[str, Any] = {CHANNEL_CAPABILITY: {}}
     # the parent is the `claude` process; a session thimble starts itself hears no browser events (its main does)
     route = None if session_kind else cc_channel.delivery(os.getppid(), HERE.parents[1], cwd()).mode
@@ -480,7 +494,7 @@ async def serve(server: MCPServer) -> None:
 
 def tool_entries() -> list[dict[str, Any]]:
     """The tools this shim lists (module note): its session kind's."""
-    return tools.list(ROLE, session=os.environ.get(SESSION_ENV) or None)
+    return tools.list(ROLE, session=own_session()[0])
 
 
 def build_server() -> MCPServer:

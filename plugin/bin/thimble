@@ -82,11 +82,12 @@ EOF
 
 # rendered_prompts NAME… [--cwd P]: `prompt` in a session thimble started in a work folder of its own. The server has
 # rendered the prompts for the session's corpus into $THIMBLE_RENDERED_PROMPTS/<name>.md; print them from there.
-# Returns 1 with nothing printed (so the supervisor answers) when the variable is unset, a name has no file, or another
-# option is given.
+# Returns 1 with nothing printed (so the supervisor answers) when the variable is unset, the session has no
+# THIMBLE_SESSION_TOKEN (a variable Claude Code's background service handed on from another session), a name has no
+# file, or another option is given.
 rendered_prompts() {
   local dir="${THIMBLE_RENDERED_PROMPTS:-}" names="" n sep=""
-  [ -n "$dir" ] || return 1
+  [ -n "$dir" ] && [ -n "${THIMBLE_SESSION_TOKEN:-}" ] || return 1
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --cwd) [ "$#" -ge 2 ] || return 1; shift 2;;

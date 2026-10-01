@@ -101,7 +101,8 @@ its own included.
 - **Your data** (`data`, `ask` by default): an edit of a file in the corpus goes to you first in every permission mode.
   `allow` leaves it to the permission mode, and `off` refuses it. The program itself can't ask, so in its sandbox it
   writes the corpus only with `allow`. Its sessions' edits are asked.
-- **thimble's key**: no agent, program or session can read `server.json`, which holds the local API's token. A program
-  uses its own token instead, and can't read Claude Code's credentials file either.
+- **thimble's key**: no agent, program or session can read `server.json`, which holds the local API's token, or
+  `session.key`, which proves which session a call comes from. A program uses its own token instead, and can't read
+  Claude Code's credentials file either.
 - A program's sessions ask for permission as thimble's agents do: on the agent's card in the browser, by its row of the
   permission modes in Settings.
