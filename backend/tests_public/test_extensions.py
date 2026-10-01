@@ -624,7 +624,7 @@ async def test_thimble_s_config_switches_extensions_off_and_sets_their_agents(co
     assert (await extensions.refresh(CORPUS))["extensions"]["ext-min"]["active"]
 
 
-async def test_the_extension_command_adds_lists_and_removes(corpus, capsys, monkeypatch):
+async def test_the_extension_command_adds_lists_and_removes(corpus, capsys, monkeypatch, tmp_path):
     """`thimble extension list` says per workspace whether each extension runs there, and whether each view shows."""
     monkeypatch.setenv("THIMBLE_WORKSPACES_DIR", str(config.WORKSPACES_DIR))
     (config.WORKSPACES_DIR / "later").mkdir(parents=True)
@@ -654,8 +654,20 @@ async def test_the_extension_command_adds_lists_and_removes(corpus, capsys, monk
     assert cli.main(["extension", "off", "no-such"]) == 1
     assert "no extension 'no-such' is added" in capsys.readouterr().err
     assert cli.main(["extension", "off", "ext-min"]) == 0
+    capsys.readouterr()
     assert cli.main(["extension", "add", str(FIXTURE), "--yes"]) == 0
     assert json.loads(userconf.global_file().read_text()) == {}, "adding it again switches it on"
+    assert "ext-min stays off where its switch in Settings keeps it off: tallies." in capsys.readouterr().out
+
+    broken = tmp_path / "ext-min"
+    shutil.copytree(FIXTURE, broken)
+    assert cli.main(["extension", "add", str(broken), "--yes"]) == 0
+    capsys.readouterr()
+    (broken / "extension.json").write_text("{")
+    assert cli.main(["extension", "on", "ext-min"]) == 0
+    out = capsys.readouterr().out
+    assert "It does not run until this is fixed: extension.json:1  is not JSON" in out
+    assert "adds to the orientation" not in out
 
     assert cli.main(["extension", "remove", "ext-min"]) == 0
     assert cli.main(["extension", "remove", "ext-min"]) == 1

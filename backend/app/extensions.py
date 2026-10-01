@@ -1542,8 +1542,8 @@ class SwitchError(Exception):
 
 def switch(name: str, on: bool, workspaces_dir: Path | None = None) -> dict[str, Any]:
     """`thimble extension on | off <name>`: switch an added extension on or off in every workspace, in thimble's config.
-    Returns {orients, off_in}: whether it gives the orientation instructions, and the workspaces under `workspaces_dir`
-    whose own switch in Settings keeps it off."""
+    Returns {orients, off_in, problem}: whether it gives the orientation instructions, the workspaces under
+    `workspaces_dir` whose own switch in Settings keeps it off (off_in), and why it does not load ('' when it does)."""
     got = added()
     if name not in got:
         raise SwitchError(f"no extension {name!r} is added; `thimble extension list` lists them")
@@ -1552,17 +1552,18 @@ def switch(name: str, on: bool, workspaces_dir: Path | None = None) -> dict[str,
     except userconf.ConfigError as e:
         raise SwitchError(str(e)) from e
     info = read_extension(got[name], name, set(got))
-    off_in = []
+    return {"orients": orients(info), "off_in": off_in(name, workspaces_dir),
+            "problem": info["problems"][0] if info["problems"] else ""}
+
+
+def off_in(name: str, workspaces_dir: Path | None = None) -> list[str]:
+    """The workspaces under `workspaces_dir` whose own switch in Settings keeps extension `name` off."""
     try:
         base = workspaces_dir or config.WORKSPACES_DIR
         folders = sorted(d for d in base.iterdir() if d.is_dir() and config._valid_name(d.name))
     except OSError:
-        folders = []
-    for d in folders:
-        state = _json(d / kernel_wrap.REGISTRY_DIR / STATE_FILE)
-        if name in _words(state.get("off")):
-            off_in.append(d.name)
-    return {"orients": orients(info), "off_in": off_in}
+        return []
+    return [d.name for d in folders if name in _words(_json(d / kernel_wrap.REGISTRY_DIR / STATE_FILE).get("off"))]
 
 
 def orients(e: dict[str, Any]) -> bool:

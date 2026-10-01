@@ -2908,6 +2908,8 @@ def cmd_extension(args: argparse.Namespace) -> int:
         print(f"{name}{' and ' + ' and '.join(more) if more else ''} {'are' if more else 'is'} on. "
               f"`thimble extension off {name}` switches it off.")
         for n in names:
+            if kept := extensions.off_in(n, workspaces):
+                print(f"{n} stays off where its switch in Settings keeps it off: {', '.join(kept)}.")
             if extensions.orients(extensions.read_extension(extensions.source_path(n), n)):
                 print(ORIENT_HINT.format(name=n))
     elif args.ext_cmd in ("on", "off"):
@@ -2920,7 +2922,9 @@ def cmd_extension(args: argparse.Namespace) -> int:
             print(f"{args.name} is on, except where its switch in Settings keeps it off: {', '.join(got['off_in'])}.")
         else:
             print(f"{args.name} is {args.ext_cmd} in every workspace.")
-        if args.ext_cmd == "on" and got["orients"]:
+        if args.ext_cmd == "on" and got["problem"]:
+            print(f"It does not run until this is fixed: {got['problem']}")
+        elif args.ext_cmd == "on" and got["orients"]:
             print(ORIENT_HINT.format(name=args.name))
     else:
         if not extensions.remove(args.name):
