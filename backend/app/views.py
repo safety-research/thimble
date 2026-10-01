@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import contextvars
 import fnmatch
 import functools
 import hashlib
@@ -80,6 +81,8 @@ SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,39}$")
 RESERVED_SLUGS = {"proposals", "forge", "raw", "records", "table", "text", "transcript", "lib", "frame", "resolve",
                   "suggestions", "suggest"}
 RESOLVE_WAIT_S = 180.0  # how long a synchronous caller (resolve_sync) waits for a reader's answer, which runs on after it
+# the most one reader call of the checks may take (gate); a page's calls have no limit
+CHECK_CALL_S = 600.0
 LABEL_MAX = 40  # chars of a chip label a reader supplies (chips stay short)
 EXCERPT_MAX = refs.EXCERPT_MAX
 REFS_MAX = 200  # file refs a resolved locator carries
@@ -889,9 +892,11 @@ def snippet(req: dict[str, Any]) -> str:
     return _SNIPPET.format(version=version, src=src, req=json.dumps(req, ensure_ascii=False))
 
 
-# (outputs, status) of a reader call's code, run on one of the workspace's reader kernels (view_calls) with no time
-# limit (None). Tests replace it with a run in this process.
+# (outputs, status) of a reader call's code, run on one of the workspace's reader kernels (view_calls) within a limit
+# in seconds, None for none. Tests replace it with a run in this process.
 _runner = view_calls.execute
+# the limit of the reader calls made in this context: CHECK_CALL_S within gate(), else none
+_call_limit: contextvars.ContextVar[float | None] = contextvars.ContextVar("view_call_limit", default=None)
 
 
 def _answer_from(outputs: list[dict]) -> dict[str, Any] | None:
@@ -962,9 +967,9 @@ def _prepared(c: str, slug: str, version: str | None = None) -> tuple[dict[str, 
 
 
 async def _call(c: str, req: dict[str, Any], op: str, arg: Any = None, *, call: str | None = None) -> Any:
-    """One reader operation, with no time limit; ReaderError when it raised or the kernel did not answer. `call` is the
-    id of a call the page named (view_calls.begin), whose progress the kernel writes to its file. Cancelling the
-    awaiting task interrupts the call."""
+    """One reader operation, with no time limit but within the checks (_call_limit); ReaderError when it raised, ran
+    past that limit or the kernel did not answer. `call` is the id of a call the page named (view_calls.begin), whose
+    progress the kernel writes to its file. Cancelling the awaiting task interrupts the call."""
     _bind_loop()
     key = (c, req["slug"], req["fp"])
     by_built = bool(req.get("built"))  # a built view's request (_prepared): pruning keeps its index longest
@@ -973,7 +978,7 @@ async def _call(c: str, req: dict[str, Any], op: str, arg: Any = None, *, call: 
         req["progress"] = str(view_calls.progress_path(indexes_dir(c), call).resolve())
     token = view_calls.REQUEST.set({"slug": req["slug"], "fp": req["fp"], "cache": req.get("cache"), "call": call})
     try:
-        outputs, status = await _runner(c, snippet({**req, "op": op, "arg": arg}), None)
+        outputs, status = await _runner(c, snippet({**req, "op": op, "arg": arg}), _call_limit.get())
     except asyncio.CancelledError:
         raise
     except Exception as e:  # noqa: BLE001 — the kernel did not start
@@ -2108,7 +2113,16 @@ async def gate(c: str, slug: str, locators: list[str] | None = None, *, shot_dir
     written by thimble alone once it names `built`), then, when there are none, check() with `locators` beside the
     sampled lines, and once that passes, the review of its derived fields (view_review.derived_review), where a field
     its reader derives and does not list fails it. The report check() returns, with the files' problems among its
-    `problems`, and a reading of the derived fields that failed among its `notes`."""
+    `problems`, and a reading of the derived fields that failed among its `notes`. Each reader call of the gate may take
+    CHECK_CALL_S, so a reader that never answers fails the checks rather than holding its kernel."""
+    token = _call_limit.set(CHECK_CALL_S)
+    try:
+        return await _gate(c, slug, locators, shot_dir=shot_dir)
+    finally:
+        _call_limit.reset(token)
+
+
+async def _gate(c: str, slug: str, locators: list[str] | None, *, shot_dir: Path | None) -> dict[str, Any]:
     from . import view_review  # noqa: PLC0415 — the review imports this module
 
     d = views_dir(c) / slug
@@ -3436,10 +3450,15 @@ async def check_route(c: str, slug: str, request: Request, body: CheckBody | Non
     config.workspace_dir(c)
     _check_slug(slug)
     _bind_loop()
+    from .tools import until_dropped  # noqa: PLC0415 — tools imports this module
+
     locators = [str(x).strip() for x in (body.locators if body and body.locators else []) if str(x).strip()]
     if locators and read_proposal(c, slug) is not None:
         update_proposal(c, slug, locators=locators)
-    report = await gate(c, slug, locators or _kept_locators(c, slug))
+    report = await until_dropped(request.receive, gate(c, slug, locators or _kept_locators(c, slug)),
+                                 f"view {slug}'s check")
+    if report is None:
+        raise HTTPException(409, "the check was dropped by its caller")
     return {"ok": bool(report.get("ok")), "lines": gate_lines(report), "png": (report.get("page") or {}).get("png"),
             "pngs": [s["png"] for s in report.get("shots") or [] if s.get("png")]}
 

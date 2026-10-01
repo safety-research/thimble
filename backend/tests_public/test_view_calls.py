@@ -74,7 +74,12 @@ class FakeKernels:
         self.ran.append((name, timeout))
         flag = self.flags.setdefault(name, threading.Event())
         lock = self.locks.setdefault(name, threading.Lock())
-        return await asyncio.to_thread(self._run, c, code, flag, lock)
+        run = asyncio.ensure_future(asyncio.to_thread(self._run, c, code, flag, lock))
+        try:
+            return await asyncio.wait_for(asyncio.shield(run), timeout)
+        except asyncio.TimeoutError:  # as notebook._execute does at its limit: an interrupt, and the limit's error
+            self.interrupt(c, name)
+            return [{"application/vnd.thimble.error+json": {"ename": "TimeoutError", "evalue": "past its limit"}}], "error"
 
     def _run(self, c: str, code: str, flag: threading.Event, lock: threading.Lock) -> tuple[list[dict], str]:
         with lock:  # a kernel runs one request at a time, a cancelled one to its end
@@ -350,6 +355,30 @@ async def test_a_request_the_page_drops_cancels_its_call(ws, kernels):
     assert time.monotonic() - t0 < 5, "the call stopped when the page dropped it, not after its 200 steps"
     assert kernels.interrupted == ["views"]
     assert next(m for m in out if m["type"] == "http.response.start")["status"] == 409
+
+
+async def test_a_check_s_reader_call_has_a_limit_and_its_kernel_settles_after_it(ws, kernels, monkeypatch):
+    seen = []
+
+    async def body(c, slug, locators, *, shot_dir):
+        seen.append(views._call_limit.get())
+        try:
+            await views.reader_call(c, slug, "records", {"steps": 400})
+        except views.ReaderError as e:
+            return {"ok": False, "problems": [e.message]}
+        return {"ok": True}
+
+    monkeypatch.setattr(views, "CHECK_CALL_S", 0.5)
+    monkeypatch.setattr(views, "_gate", body)
+    got = await views.gate(CORPUS, "count")
+    assert seen == [0.5] and got["ok"] is False and "TimeoutError" in got["problems"][0]
+    assert views._call_limit.get() is None, "a page's calls outside the gate have no limit"
+    for _ in range(50):
+        if not any(w.busy for w in view_calls._pools[CORPUS]):
+            break
+        await asyncio.sleep(0.05)
+    assert kernels.interrupted == ["views"] and kernels.ran[-1] == ("views", view_calls.DRAIN_S)
+    assert await views.reader_call(CORPUS, "count", "records", {}) == {"n": 5, "steps": 0}
 
 
 def test_a_kernel_keeps_the_indexes_it_used_last_within_its_memory():

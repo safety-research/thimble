@@ -333,7 +333,8 @@ def _spare(c: str) -> None:
 
 async def execute(c: str, code: str, timeout: float | None) -> tuple[list[dict], str]:
     """Run one reader call's code (views.snippet) on a kernel of the workspace's pool, for the request in REQUEST.
-    `timeout` None is no limit. Cancelling the awaiting task interrupts the call (module note)."""
+    `timeout` None is no limit; a call past its limit is interrupted, and its kernel takes no other call until it is
+    idle again, as after a cancel. Cancelling the awaiting task interrupts the call (module note)."""
     req = REQUEST.get() or {}
     slug, fp = str(req.get("slug") or ""), str(req.get("fp") or "")
     w = await _acquire(c, slug, fp, req.get("cache"))
@@ -356,7 +357,10 @@ async def execute(c: str, code: str, timeout: float | None) -> tuple[list[dict],
         raise
     spare.cancel()
     _note_answer(w, outputs)
-    _release(w)
+    if any(_error_name(b) in STUCK for b in outputs):
+        loop.create_task(_drain(w), name=f"view-kernel-drain-{w.name}")  # interrupted at its limit, or gone
+    else:
+        _release(w)
     _trim_total(w)
     return outputs, status
 
