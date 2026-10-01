@@ -3132,9 +3132,12 @@ def _page_of(shots: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def lined(view: dict[str, Any], files: list[tuple[str, int, int]]) -> bool:
-    """Whether the view claims a file with lines, whose records labels can mark (not only binary or media files)."""
-    return any(Path(f[0]).suffix.lower() not in BINARY_SUFFIXES and Path(f[0]).suffix.lower() not in MEDIA_TYPES
-               for f in files)
+    """Whether the view claims a file that splits into records labels can mark: a file with lines, a PDF (its pages) or
+    a database (its rows), not only other binary or media files."""
+    from . import records  # noqa: PLC0415
+
+    return any((Path(f[0]).suffix.lower() not in BINARY_SUFFIXES and Path(f[0]).suffix.lower() not in MEDIA_TYPES)
+               or records.is_pdf(f[0]) or records.is_database(f[0]) for f in files)
 
 
 SNIFF_BYTES = 4096
@@ -3155,9 +3158,9 @@ def _texty(corpus: Path, rel: str) -> bool:
 def label_problems(view: dict[str, Any], files: list[tuple[str, int, int]],
                    shots: list[dict[str, Any]]) -> tuple[list[str], list[str]]:
     """(problems, notes) of labels in the page, from what each loaded state shows at its end (view_shot.mjs `shown`),
-    for a view of files with lines. It fails when no record or unit is shown anchored; when fewer than one in
-    ANCHORED_SHARE of the records the reader answered are shown anchored and no unit is; and when a record or unit the
-    test label marks is shown without its mark. Records shown, filtered to the test label, whose anchor the filter does
+    for a view of files that split into records (lined). It fails when no record or unit is shown anchored; when fewer
+    than one in ANCHORED_SHARE of the records the reader answered are shown anchored and no unit is; and when a record or
+    unit the test label marks is shown without its mark. Records shown, filtered to the test label, whose anchor the filter does
     not keep are noted, since a record the page draws for several lines is anchored by one of them."""
     if not lined(view, files):
         return [], []
