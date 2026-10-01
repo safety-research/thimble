@@ -2793,8 +2793,8 @@ def locator_of(ref: str) -> dict[str, Any] | None:
     return {"path": p["path"], "fragment": frag} if "path" in p and frag else None
 
 
-# a page that plays video or audio: an element of its own or a file it loads through thimble.mediaUrl
-MEDIA_PAGE_RE = re.compile(r"<(?:video|audio)\b|createElement\(\s*['\"](?:video|audio)['\"]|\bmediaUrl\b", re.I)
+# a page that plays video or audio: a <video> or <audio> element, written in its HTML or made by its script
+MEDIA_PAGE_RE = re.compile(r"<(?:video|audio)\b|createElement\(\s*['\"](?:video|audio)['\"]|\bnew\s+Audio\(", re.I)
 
 
 async def media_note(html: str) -> str:
