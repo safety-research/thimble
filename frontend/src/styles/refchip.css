@@ -250,6 +250,9 @@ body[data-cmd] .refchip-pop {
 /* a cited line of a card's printed output, after a click opened it (lib/tableCell revealLines): marked as a cited cell
    is, then fading */
 span[data-line].cite-cell-flash {
+  /* the padding, taken back by the margin, keeps the edge off the glyphs without moving the text */
+  margin: 0 -3px;
+  padding: 2px 3px;
   border-radius: 2px;
   animation: cite-cell-flash 2.4s var(--ease-out) forwards;
 }

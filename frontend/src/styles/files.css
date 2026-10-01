@@ -409,9 +409,11 @@
 .files-found-row {
   padding-left: 8px;
 }
+/* a match in the results: the evidence highlight, as the reader's find draws it */
 .files-found-row mark {
-  background: none;
-  color: var(--accent-ink);
+  border-radius: 2px;
+  background: var(--hl-bg);
+  color: var(--text-primary);
   font-weight: 500;
 }
 .files-found-row .files-name {
