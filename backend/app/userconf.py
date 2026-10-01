@@ -710,9 +710,22 @@ def session(c: str | None, agent: str, *, sandbox: bool = True) -> Session:
 
 
 def prompt_files(c: str | None, agent: str) -> dict[str, Path]:
-    """{prompt file: the file that replaces it} for `agent` in workspace `c` (prompts.custom); {} for none."""
+    """{prompt file: the file that replaces it} for `agent` in workspace `c` (prompts.custom): the config's `prompt`,
+    else the role's prompt as the active extensions change it (roles.prompt_file); {} for none."""
     value = load_or_defaults(c)[0]["agents"][agent].get("prompt")
-    return {PROMPT_FILES[agent]: Path(value)} if isinstance(value, str) and value else {}
+    if isinstance(value, str) and value:
+        return {PROMPT_FILES[agent]: Path(value)}
+    from . import roles  # noqa: PLC0415 — roles reads the extensions, which import this module
+
+    if agent in roles.SESSION_ROLES:
+        try:
+            made = roles.prompt_file(c, agent)
+        except Exception:  # noqa: BLE001 — an extension's broken prompt leaves the role on thimble's own
+            log.exception("%s: the %s prompt of the active extensions could not be made", c, agent)
+            made = None
+        if made is not None:
+            return {PROMPT_FILES[agent]: made}
+    return {}
 
 
 # --------------------------------------------------------------------------- the browser
