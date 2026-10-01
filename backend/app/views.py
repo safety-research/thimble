@@ -3124,12 +3124,12 @@ async def _shoot_in(work: Path, doc: str, states: list[dict[str, Any]], answer: 
 def _state_labels(ctx: dict[str, Any]) -> dict[str, Any]:
     """The `on`, `filter`, `all` and `palette` of a labels message, as ViewerFrame sends them: the labels that are on,
     each {id, name, colour, values}, the filter {label, value, colour} or None, every label over files, here those that
-    are on, each {id, name, on, colour, values: [{name, colour, highlight}], count}, and the colours a label's value can
-    take, so the page can draw its label controls."""
+    are on, which mark the view's files, each {id, name, on, here, colour, values: [{name, colour, highlight}], count},
+    and the colours a label's value can take, so the page can draw its label controls."""
     from .kernel_thimble import LABEL_COLOURS  # noqa: PLC0415
 
     st = labels_state(ctx)
-    every = [{"id": k.get("id"), "name": k.get("name"), "on": True, "colour": k.get("colour"),
+    every = [{"id": k.get("id"), "name": k.get("name"), "on": True, "here": True, "colour": k.get("colour"),
               "values": [{"name": v.get("name"), "colour": v.get("colour"), "highlight": True} for v in k.get("values") or []],
               "count": None} for k in st["labels"]]
     return {"on": st["labels"], "filter": st["filter"], "all": every, "palette": [*LABEL_COLOURS[1:], LABEL_COLOURS[0]]}

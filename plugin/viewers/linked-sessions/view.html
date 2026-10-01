@@ -80,6 +80,7 @@
   .box { display: inline-block; flex: none; width: 12px; height: 12px; border-radius: 3px; border: 1.5px solid var(--mark); background: transparent; }
   .box.on { background: var(--mark); }
   .msep { height: 1px; margin: 4px 0; background: var(--border-hairline); }
+  .mnote { padding: 4px 8px 6px; color: var(--text-tertiary); }
   .cbx { width: 13px; height: 13px; border-radius: 3px; border: 1px solid var(--border-strong); display: inline-grid; place-items: center; background: var(--surface-card); flex: none; }
   .cbx.on { background: var(--surface-inverse); border-color: var(--surface-inverse); color: var(--text-on-inverse); }
   .cbx .ico { width: 9px; height: 9px; stroke-width: 2; }
@@ -560,19 +561,22 @@ function menus() {
       const sw = f === 'duration band' ? `<i class="sw" style="width:22px;background:linear-gradient(90deg,${ramp(0)},${ramp(1)})"></i>` : `<span style="display:inline-flex;gap:1px">${valuesOf(f).slice(0, 4).map((v) => `<i class="sw" style="width:5px;border-radius:1px;background:${colourOf(f, v)}"></i>`).join('')}</span>`
       return `<button class="mi" data-act="field" data-f="${f}"><span class="ck">${on ? ico.check : ''}</span>${esc(FIELD_NAME[f])}<span class="n">${sw}</span></button>`
     }).join('')
-    // every label over files, as thimble lists them; a click turns one on or off
+    // every label over files, as thimble lists them, those over these files first; a click turns one on or off
     const all = labels.all || labels.labels.map((l) => ({ ...l, on: true }))
-    const rows = all.map((l) => {
+    const row = (l) => {
       const lit = (l.values || []).filter((v) => v.highlight !== false)
       const box = `<span class="box ${l.on ? 'on' : ''}" style="--mark:${l.colour}"></span>`
       const main = `<div class="mi" data-label="${esc(l.id || '')}"><span class="ck tog" data-act="label" data-id="${esc(l.id || '')}" title="${l.on ? 'Turn off' : 'Turn on'}">${box}</span><span class="nm lk" data-act="label" data-id="${esc(l.id || '')}">${esc(l.name)}</span>
         <span class="n">${l.count == null ? '' : l.count}</span>${lit.length === 1 ? swatchButton(l.name, lit[0].name, lit[0].colour) : ''}</div>`
       const subs = l.on && lit.length > 1 ? lit.map((v) => `<div class="mi sub" data-label="${esc(l.id || '')}"><span class="nm">${esc(v.name)}</span><span class="n"></span>${swatchButton(l.name, v.name, v.colour)}</div>`).join('') : ''
       return main + subs
-    }).join('')
+    }
+    const here = all.filter((l) => l.here).map(row).join('')
+    const other = all.filter((l) => !l.here).map(row).join('')
+    const rows = `<div class="mh cap">Labels over these files</div>${here || '<div class="mnote">No label covers these files yet</div>'}${other ? `<div class="mh cap">Other labels</div>${other}` : ''}`
     const make = thimble.newLabel ? `<div class="msep"></div><button class="mi" data-act="newlabel"><span class="ck">${ico.plusS}</span>New label</button>` : ''
     const byLabels = `<button class="mi" data-act="bylabels"><span class="ck">${labelOn() ? ico.check : ''}</span>Labels<span class="n"><span style="display:inline-flex;gap:1px">${classes().slice(0, 4).map((c, i) => `<i class="sw" style="width:5px;border-radius:1px;background:${classColour(i)}"></i>`).join('')}</span></span></button>`
-    return `<div class="menu" id="menu" data-anchor-name="Colour menu" data-for="colour"><div class="mh cap">Colour by</div>${byLabels}${fields}${rows ? `<div class="msep"></div><div class="mh cap">Labels over these files</div>${rows}` : ''}${make}</div>`
+    return `<div class="menu" id="menu" data-anchor-name="Colour menu" data-for="colour"><div class="mh cap">Colour by</div>${byLabels}${fields}<div class="msep"></div>${rows}${make}</div>`
   }
   if (st.menu === 'more') {
     const f = 'file type', hid = st.filters[f] || new Set()
