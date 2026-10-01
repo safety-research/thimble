@@ -108,7 +108,7 @@ export type WsEvent = { ts?: string; seq?: number } & (
   | { type: 'report'; slug: string; status: 'generating' | 'generated' | 'failed' | 'verified' | 'figures' | 'rewritten' | string; span?: string; run?: string }
   | { type: 'view'; slug: string; status: 'queued' | 'building' | 'built' | 'failed' | 'deleted' | string; path?: string; chat?: string; version?: string }
   | { type: 'ticket'; id: string; n: number; status: string }
-  | { type: 'concepts'; concept: string; what: 'defined' | 'applied' | 'deleted' | string }
+  | { type: 'concepts'; concept: string; what: 'defined' | 'applied' | 'deleted' | string; rows?: boolean }
   | { type: 'filter'; scope: FilterScope; concept?: string; value?: string }
   | { type: 'check'; id: string; doc: string; status: CheckRunStatus | string; run?: string; chat?: string }
   | { type: 'job'; status: string }
@@ -1088,6 +1088,8 @@ export interface CorpusInfo {
   manifest: Manifest
   /** the folder the corpus was opened from */
   path?: string
+  /** the same folder as the analyst named it, through a symlink, which the dashboard shows in place of `path` */
+  shown?: string
 }
 
 export type SourceKind = 'agent' | 'board' | 'events' | 'forge' | 'prompt' | 'text' | 'dir'
@@ -1119,9 +1121,13 @@ export interface SourceRecord {
 export interface TranscriptHint {
   format: 'stream' | 'messages' | 'conversations' | 'json' | 'csv' | 'text'
   score: number
+  /** where a message keeps who speaks, its words and its time: dotted keys into a record (`message.author`), and for
+   * who speaks, alternatives the first of which a record holds counts (`speakerName|agentName`) */
   keys?: { speaker: string; text: string; time?: string; list?: string }
   pair?: [string, string]
   lines?: boolean
+  /** a stream whose records each nest a Claude Code stream record under this key */
+  wrap?: string
   style?: string
   /** who may start a turn in a text chat log, when the style alone would take any heading or `Word:` line */
   speakers?: string[]
@@ -1216,6 +1222,13 @@ export interface GrepFile {
   /** false when the search stopped inside this file, so its count is a floor */
   complete: boolean
   matches: { line: number; text: string; hit: [number, number] }[]
+}
+
+/** A line of that stream while it reads: how many of the files it has read. */
+export interface GrepProgress {
+  progress: true
+  scanned: number
+  of: number
 }
 
 /** The closing line of that stream: how many files matched and how many lines, and how far the search read. */
