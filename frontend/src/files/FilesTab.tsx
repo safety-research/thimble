@@ -72,8 +72,27 @@ interface TabsProps {
 
 /** The open files as square tabs, VS Code's way: the open one on the cell's paper between hairlines with its ×. */
 function ReaderTabs({ tabs, current, onPick, onClose }: TabsProps) {
+  const strip = useRef<HTMLSpanElement>(null)
+  // the strip scrolls with its scrollbar hidden, so the open tab is brought into it whenever it changes and whenever
+  // the strip narrows, as when the file's modes show beside it
+  useEffect(() => {
+    const box = strip.current
+    if (!box) return
+    const show = () => {
+      const tab = box.querySelector<HTMLElement>('.reader-tab.active')
+      if (!tab) return
+      const b = box.getBoundingClientRect()
+      const t = tab.getBoundingClientRect()
+      if (t.left < b.left) box.scrollLeft -= b.left - t.left
+      else if (t.right > b.right) box.scrollLeft += t.right - b.right
+    }
+    show()
+    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(show) : null
+    ro?.observe(box)
+    return () => ro?.disconnect()
+  }, [current, tabs.length])
   return (
-    <span className="reader-tabs" role="tablist" aria-label="Open files">
+    <span ref={strip} className="reader-tabs" role="tablist" aria-label="Open files">
       {tabs.map((t) => {
         const active = t.path === current
         const name = baseName(t.path)
