@@ -95,6 +95,19 @@ function markTargets({ marks, record, bar, max, scroll }) {
     const m = /rgba?\(([^)]+)\)/.exec(getComputedStyle(probe).color || '')
     return m ? m[1].split(',').slice(0, 3).map((x) => Math.round(Number(x))) : null
   }
+  const alpha = (c) => {
+    const m = /rgba?\(([^)]+)\)/.exec(c || '')
+    if (!m) return 0
+    const p = m[1].split(/[\s,/]+/).filter(Boolean)
+    return p.length > 3 ? Number(p[3]) : 1
+  }
+  // whether an element draws anything over what lies under it: a background, an image or media, or an SVG shape's fill
+  const paints = (e) => {
+    const cs = getComputedStyle(e)
+    if (cs.visibility === 'hidden' || !(Number(cs.opacity) > 0)) return false
+    if (e instanceof SVGElement) return !(e instanceof SVGTextContentElement) && e instanceof SVGGeometryElement && alpha(cs.fill) * Number(cs.fillOpacity || 1) > 0
+    return /^(IMG|VIDEO|CANVAS|IFRAME)$/.test(e.tagName) || alpha(cs.backgroundColor) > 0 || cs.backgroundImage !== 'none'
+  }
   const tops = new Map()
   for (const el of document.querySelectorAll('[data-anchor]')) {
     const ref = el.getAttribute('data-anchor')
@@ -119,12 +132,14 @@ function markTargets({ marks, record, bar, max, scroll }) {
     let box = body
     if (svg) box = cut({ l: r.left - 4, t: r.top - 4, r: r.right + 4, b: r.bottom + 4 })
     else if (!own) box = cut({ l: r.left - bar - 1, t: r.top, r: r.left + bar + 1, b: r.bottom })
-    // in view where a part of it is left by the boxes that clip it and no other element, such as a sticky header the
-    // list scrolls under, covers that part's centre
+    // in view where a part of it is left by the boxes that clip it and no element that paints over it, such as a
+    // sticky header the list scrolls under or another mark drawn on top, covers that part's centre; a clear layer, such
+    // as one that catches a chart's zoom, covers nothing
     let inView = body.r - body.l > 1 && body.b - body.t > 1
     if (inView) {
-      const hit = document.elementFromPoint((body.l + body.r) / 2, (body.t + body.b) / 2)
-      inView = !hit || hit === el || el.contains(hit) || hit.contains(el)
+      const stack = document.elementsFromPoint((body.l + body.r) / 2, (body.t + body.b) / 2)
+      const at = stack.findIndex((e) => e === el || el.contains(e) || e.contains(el))
+      if (at > 0) inView = !stack.slice(0, at).some(paints)
     }
     list.push({ ref, own, svg, record: RECORD.test(ref), box, body, rgb: rgbOf(colour), inView, el })
   }

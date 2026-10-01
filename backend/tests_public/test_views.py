@@ -1114,6 +1114,9 @@ MARK_PAGES = {  # name: (style, extra attribute on each row, script), and whethe
         " th{position:sticky;top:0;height:60px;background:#fff}", "",
         "const h = document.getElementById('t').createTHead().insertRow(); h.innerHTML = '<th>post</th><th>by</th>';"
         " document.querySelector('.wrap').scrollTop = 150", True),
+    "rows under a clear layer that takes the pointer, which are in view, with the bar turned off": (
+        "td{padding:10px} #t tr,#t td{box-shadow:none!important} .cover{position:fixed;inset:0;z-index:5}", "",
+        "document.body.insertAdjacentHTML('beforeend', '<div class=cover></div>')", False),
     "rows that draw the label's colour themselves": (
         "td{padding:10px}", " data-anchor-unmarked",
         "const paint = () => { for (const r of document.querySelectorAll('tr')) { const m = thimble.markOf(r.dataset.anchor);"
@@ -1126,7 +1129,7 @@ async def test_the_checks_look_for_the_label_s_colour_in_a_picture_of_the_page(n
     """The checks count a mark only where a picture of the page shows the test label's colour on the record: a bar a
     box hiding overflow would cut is drawn inside the row, and a page that turns the bar off, or an element marked
     data-anchor-unmarked that draws no colour, fails. A row the list scrolls under a sticky header is not in view, so
-    it is not looked at."""
+    it is not looked at, but a row under a clear layer, such as one that catches a chart's zoom, is."""
     if why := views.build_problem():
         if os.environ.get("CI") == "true":
             pytest.fail(why)
