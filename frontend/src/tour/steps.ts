@@ -205,8 +205,8 @@ const fitCard = (api: Api, w0: number, h0: number) => {
 }
 const cardExample = (api: Api): Example => {
   // placed in the layer thimble's own ⌘ pointer reaches, with the card's anchors and parts as thimble drew them, so a
-  // ⌘-click picks a row, a click on text picks its line and a ⌘-drag picks the words, as on a real card; the ask box
-  // on it sends nothing (noSend)
+  // ⌘-click picks a row, a click on text picks its line and a ⌘-drag picks the words, as on a real card. The ask box
+  // on it sends nothing (the engine's guard)
   const w = api.snap('card', 'tour-ex-card', undefined, { keepAnchors: true })
   const art = w.querySelector('article')!
   const cell = document.createElement('div')
@@ -544,7 +544,6 @@ export function tourSteps(key: string, chat = true): Step[] {
     },
     {
       sub: true, tab: 'canvas', try: true, nextWhenGone: true, backOnEsc: true, place: ['right', 'left', 'bottom', 'top'], align: 'center', pad: 6,
-      noSend: () => true,
       // the card with its highlight and the ask box the page's own pointer drew on it
       anchor: (api) => {
         const real = api.realBox()

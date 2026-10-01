@@ -16,7 +16,8 @@
 //     figure is the small table and it shows no check comment until the demo makes the check, and then each comment
 //     card stands 8 px above its passage, or below the card above it, before and after the report scrolls;
 //   - the page is frozen: clicks, keys and the wheel reach nothing, the tour writes nothing but the offer, and telemetry
-//     records nothing while it runs.
+//     records nothing while it runs; Enter in the page's ask box sends nothing, and an ask box left open closes when
+//     the tour starts.
 import assert from 'node:assert/strict'
 import { existsSync, readFileSync } from 'node:fs'
 import path from 'node:path'
@@ -295,7 +296,7 @@ const commentsLevel = (page: Page) =>
   })
 
 /** The whole tour from step 1, with the assertions of each step. */
-async function walk(page: Page, tag: string, folds?: boolean) {
+async function walk(page: Page, tag: string, folds?: boolean, send = false) {
   // 1 the chat
   await onStep(page, 1, 'Your Claude Code session')
   let g = await measure(page, `${tag} 1`)
@@ -514,12 +515,19 @@ async function walk(page: Page, tag: string, folds?: boolean) {
   assert.ok(picked.box >= -0.5 && picked.hl >= -0.5, `${tag} 8: the ask box and the highlight lie inside the cutout ${JSON.stringify(picked)}`)
   assert.ok(picked.w > 10 && picked.w < span.cardW * 0.5, `${tag} 8: only the words dragged over are picked (${Math.round(picked.w)} of ${Math.round(span.cardW)}px)`)
   await page.keyboard.type('What happened here?')
-  await page.keyboard.press('Escape')
-  await page.waitForFunction(() => ![...document.querySelectorAll('.pointer-box')].some((b) => !b.closest('.tour-root')))
-  await sleep(600)
-  assert.equal((await state(page))!.n, 8, `${tag} 8: Esc closes the box and stays on the step`)
-  assert.deepEqual(await buttons(page), ['back', 'next'], `${tag} 8: Next once tried`)
-  await next(page)
+  if (send) {
+    // Enter sends nothing while the tour runs (the walk's writes are checked after it): the box closes and the tour
+    // moves on
+    await page.keyboard.press('Enter')
+    await page.waitForFunction(() => ![...document.querySelectorAll('.pointer-box')].some((b) => !b.closest('.tour-root')))
+  } else {
+    await page.keyboard.press('Escape')
+    await page.waitForFunction(() => ![...document.querySelectorAll('.pointer-box')].some((b) => !b.closest('.tour-root')))
+    await sleep(600)
+    assert.equal((await state(page))!.n, 8, `${tag} 8: Esc closes the box and stays on the step`)
+    assert.deepEqual(await buttons(page), ['back', 'next'], `${tag} 8: Next once tried`)
+    await next(page)
+  }
   // 9 the Report: at most its own size, no comment yet, the wheel scrolls it
   await onStep(page, 9, 'The Report')
   await measure(page, `${tag} 9`)
@@ -633,7 +641,7 @@ test('Esc on the welcome closes it, and the offer stays recorded', async () => {
 
 for (const cfg of [
   { W: 1440, H: 900, dpr: 1, chat: 308, folds: false },
-  { W: 1920, H: 1080, dpr: 1, chat: 308, folds: false },
+  { W: 1920, H: 1080, dpr: 1, chat: 308, folds: false, send: true },
   { W: 1200, H: 800, dpr: 2, chat: 355 },
   // a Files panel too narrow for its sidebar, which folds
   { W: 1100, H: 800, dpr: 2, chat: 355, folds: true },
@@ -646,7 +654,7 @@ for (const cfg of [
       const panel = await page.evaluate(() => Math.round(document.querySelector('.chat[data-panel="chat"]')!.getBoundingClientRect().width))
       assert.ok(Math.abs(panel - cfg.chat) <= 2, `the chat column is ${panel}px`)
       await page.click('.tour-pop [data-tour="begin"]')
-      await walk(page, tag, cfg.folds)
+      await walk(page, tag, cfg.folds, cfg.send)
       // the layout's own surface again (the stored layout was on the Report)
       assert.equal(await page.evaluate(() => document.querySelector<HTMLElement>('.shell-tabs .tab.active')?.dataset.tab), 'report')
       assert.deepEqual(server.writes.filter((x) => !ALLOWED.has(x)), [], 'the tour wrote nothing to the workspace')
@@ -691,6 +699,41 @@ test('with the chat off the tour leaves out its three chat steps and starts on F
     assert.equal(await body(page), 'The files browser exposes global views on the corpus.', 'no orientation to wait for')
     await measure(page, 'chat off 1')
     assert.deepEqual(await buttons(page), ['skip', 'next'])
+  } finally {
+    await close()
+  }
+}, 60_000)
+
+test('an ask box left open closes when Settings’ Take the tour starts the tour, and sends nothing', async () => {
+  const { page, server, close } = await open({ W: 1440, H: 900, seen: true })
+  try {
+    await page.waitForSelector('.shell .chat-foot')
+    // something on the page that a ⌘-click asks about, as a file's row or a card is
+    await page.evaluate(() => {
+      const el = document.createElement('div')
+      el.setAttribute('data-anchor', 'README.md')
+      el.setAttribute('data-anchor-text', 'README.md')
+      el.textContent = 'README.md'
+      Object.assign(el.style, { position: 'fixed', left: '700px', top: '400px', width: '200px', height: '30px', zIndex: '10' })
+      document.querySelector('.shell')!.append(el)
+    })
+    const b = { x: 700, y: 400, height: 30 }
+    await page.mouse.move(b.x + 20, b.y + b.height / 2)
+    await page.keyboard.down('Meta')
+    await page.mouse.click(b.x + 20, b.y + b.height / 2)
+    await page.keyboard.up('Meta')
+    await page.waitForSelector('.pointer-box')
+    await page.keyboard.type('A draft')
+    await page.click('[data-tel="settings"]')
+    await page.click('.settings-foot .settings-tour')
+    await onStep(page, 1, 'Your Claude Code session')
+    assert.equal(await page.evaluate(() => [...document.querySelectorAll('.pointer-box')].some((x) => !x.closest('.tour-root'))), false, 'the ask box closed')
+    await page.keyboard.press('Enter')
+    await sleep(300)
+    await page.keyboard.press('Escape')
+    await sleep(400)
+    assert.equal(await page.$('.tour-root'), null, 'Esc closes the tour')
+    assert.deepEqual(server.writes.filter((x) => !ALLOWED.has(x)), [], 'nothing was sent')
   } finally {
     await close()
   }

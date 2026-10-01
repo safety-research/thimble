@@ -76,8 +76,6 @@ export interface Step {
   interact?: (api: Api) => Element | null
   /** the cutout takes a ⌘-click or ⌘-drag */
   try?: boolean
-  /** true when Enter in the page's ask box must send nothing */
-  noSend?: (api: Api) => boolean
   /** a hover on an underlined value of the example's card */
   chips?: (api: Api, chip: Element) => void
   /** no Next until the try was made */
@@ -982,8 +980,8 @@ export function createTour(snaps: Snaps): Tour {
         return
       }
       if (inTour) return
-      // the ask box on an example sends nothing: Enter closes it, and the tour moves on
-      if (inReal && ke.key === 'Enter' && !ke.shiftKey && s.noSend?.(api)) {
+      // while the tour runs the page's ask box sends nothing: Enter closes it, and the tour moves on
+      if (inReal && ke.key === 'Enter' && !ke.shiftKey) {
         stop(ev)
         if (ev.type === 'keydown') document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
         return
@@ -1065,6 +1063,8 @@ export function createTour(snaps: Snaps): Tour {
     host.className = 'tour-host'
     document.body.append(host, root)
     if (document.activeElement instanceof HTMLElement && document.activeElement !== document.body) document.activeElement.blur()
+    // an ask box the analyst left open closes, so the ⌘-click step starts with none
+    if (realBox()) document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
     setGuard(guard)
     window.addEventListener('mousemove', onHover, { capture: true, passive: true })
     welcome = !!o.welcome
