@@ -1000,7 +1000,7 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
         ) : (
           <div className="reader-main">
             <div className="reader-scroll" data-more-right={moreRight || undefined}>
-              <div className={'reader-body' + (isDatabase ? ' reader-body-fill' : '')} ref={bodyRef} onScroll={onScroll} style={tags.length ? ({ '--lanes': tags.length } as CSSProperties) : undefined}>
+              <div className={'reader-body' + (isDatabase ? ' reader-body-fill' : '')} ref={bodyRef} onScroll={onScroll} style={{ ...(tags.length ? { '--lanes': tags.length } : {}), '--digits': String(total ?? 0).length } as CSSProperties}>
                 {tags.length > 0 && view && GUTTERED.has(view.type) && loaded && !noViewReason && <LaneHead tags={tags} />}
                 {error && !noViewReason && <div className="reader-error-text">{error}</div>}
                 {noViewReason && (
