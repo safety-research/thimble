@@ -35,8 +35,9 @@ bash scripts/install.sh
 ```
 
 Either install links the `thimble` command into `~/.local/bin` (and prints the line to add to your shell startup file
-when that folder is not on your PATH) and runs `thimble doctor`. Before it installs anything, it shows what it installs
-and where, then asks its questions:
+when that folder is not on your PATH) and runs `thimble doctor`. A `thimble` command or Claude Code plugin that another
+thimble install set up stays as it is unless you agree, on a terminal, to switch it. Before it installs anything, it
+shows what it installs and where, then asks its questions:
 
 - **A browser for screenshots.** thimble takes screenshots of the cards and views it draws, to check and improve them.
   For the best experience, download Playwright's headless Chromium (about 210 MB, 650 MB on disk). With a no, thimble
