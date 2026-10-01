@@ -142,7 +142,8 @@ def test_a_view_build_runs_in_its_own_folder_with_the_view_s_folder_and_the_corp
     assert str(config.WORKSPACES_DIR) in str(e.value) and cli.trust_command() in str(e.value)
 
 
-def test_a_program_s_session_runs_in_the_role_s_work_folder(corpus, tmp_path):
+def test_a_program_s_session_runs_in_the_role_s_work_folder(corpus, tmp_path, monkeypatch):
+    monkeypatch.setenv("THIMBLE_SANDBOX", "1")
     part = roles.Part("x", "writer", tmp_path, tmp_path, {"command": ["true"]})
     work = write_session.work_dir(CORPUS, "report")
     job = harness.Job(CORPUS, "writer", "writer:report", "Write", {}, ("list_cards",), work)

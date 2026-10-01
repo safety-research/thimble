@@ -28,7 +28,7 @@ Instructions for agents installing thimble on the user's behalf are in [CLAUDE.m
 2. Unzip it.
 3. Run `bash scripts/install.sh` inside the unzipped folder.
 
-For a development build, clone the repo and run `bash scripts/install.sh` (requires Node 20.19+, 22.13+ or 24+). To add an extension such as Swarm, see [INSTALL.md](INSTALL.md#extensions).
+For a development build, clone the repo and run `bash scripts/install.sh` (requires Node 20.19+, 22.13+ or 24+). To add an extension such as swarm-orient, see [INSTALL.md](INSTALL.md#extensions).
 
 [INSTALL.md](INSTALL.md) covers requirements, updating and troubleshooting.
 

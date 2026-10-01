@@ -12,6 +12,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from conftest import card_wait
 
 from app import agent_session, agents, dev, ledger, modes, ticket_box
 
@@ -224,7 +225,7 @@ async def test_a_ticket_the_box_cannot_run_asks_before_it_starts_and_a_no_stops_
     reason; a no stops the ticket before its worktree exists, and a ticket with no workspace never starts."""
     ledger.put_settings(CORPUS, {modes.SETTING: {"dev": "bypass"}})
     t = dev.file_ticket(CORPUS, "Fix the chart", "the bars are cut off", start=False)
-    agent_session.host(CORPUS, dev.ticket_key(t["id"]), t["chat"], agent="dev", wait_s=10)
+    agent_session.host(CORPUS, dev.ticket_key(t["id"]), t["chat"], agent="dev")
     allowed = asyncio.ensure_future(dev._code_refusal(t))
     q = await _question(t["chat"])
     assert (q["tool"], q["what"]) == (dev.CODE_TOOL, dev.CODE_QUESTION) and "every permission mode" in q["why"]
@@ -233,9 +234,9 @@ async def test_a_ticket_the_box_cannot_run_asks_before_it_starts_and_a_no_stops_
     denied = asyncio.ensure_future(dev._code_refusal(t))
     assert agent_session.answer(CORPUS, t["chat"], (await _question(t["chat"]))["id"], False)
     assert await denied == dev.CODE_NOT_ALLOWED
-    monkeypatch.setattr(dev, "PERMISSION_WAIT_S", 0.3)
-    agent_session.host(CORPUS, dev.ticket_key(t["id"]), t["chat"], agent="dev", wait_s=dev.PERMISSION_WAIT_S)
-    assert await dev._code_refusal(t) == dev.CODE_UNANSWERED.format(wait=agent_session.wait_words(0.3)), \
+    wait = card_wait(0.005)
+    agent_session.host(CORPUS, dev.ticket_key(t["id"]), t["chat"], agent="dev")
+    assert await dev._code_refusal(t) == dev.CODE_UNANSWERED.format(wait=agent_session.wait_words(wait)), \
         "a question nobody answers says so, not that the analyst refused"
 
     async def no(_t):

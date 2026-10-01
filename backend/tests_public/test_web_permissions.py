@@ -1,11 +1,12 @@
 """The dev agent's permission requests (agent_session, dev.py, permissions): a dev session's request shows on the card
-and is denied after dev.PERMISSION_WAIT_S unanswered."""
+and is denied unanswered after the card wait (`cardWait` in thimble's config)."""
 from __future__ import annotations
 
 import asyncio
 import json
 
 import pytest
+from conftest import card_wait
 
 from app import agent_session, agents, config
 
@@ -61,14 +62,15 @@ async def test_an_unanswered_request_is_denied_after_the_wait_and_its_card_says_
     was clicked, as many as the card says it listed; a later one is asked on its own."""
     chat = _chat()
     heard: list[dict] = []
-    run = agent_session.host(CORPUS, KEY, chat, agent="views", wait_s=0.1, on_expired=lambda run, entry: heard.append(entry))
+    wait = card_wait(0.002)
+    agent_session.host(CORPUS, KEY, chat, agent="views", on_expired=lambda run, entry: heard.append(entry))
     one = _request("WebFetch", PAGE)
     await _waiting(chat)
     two = _request("WebFetch", OTHER_PAGE)
     long = _request("WebFetch", {"url": f"{PAGE['url']}?q={'x' * agent_session.ALSO_CHARS}"})
     [first, own] = await _waiting(chat, 2)
     assert first["also"] == [OTHER_PAGE["url"]] and "also" not in own, "a call the card cannot list whole asks on its own"
-    denied = {"behavior": "deny", "message": agent_session.timed_out_line(0.1)}
+    denied = {"behavior": "deny", "message": agent_session.timed_out_line(wait)}
     assert await one == denied and await two == denied and await long == denied
     assert agent_session.answer(CORPUS, chat, own["id"], False)
     [p] = _card(chat)
@@ -78,14 +80,14 @@ async def test_an_unanswered_request_is_denied_after_the_wait_and_its_card_says_
     assert not agent_session.answer(CORPUS, chat, p["id"], False)
     log = [json.loads(ln) for ln in (config.workspace_dir(CORPUS) / agents.PERMISSIONS_LOG).read_text().splitlines()]
     assert log[-1]["answer"] == "deny: nobody answered in time"
-    run.wait_s = 10  # a request still waiting when its session ends, however slowly the test runs
+    card_wait(None)  # a request still waiting when its session ends, however slowly the test runs
     waiting = _request("Bash", {"command": "curl example.org"})
     await _waiting(chat)
     assert agent_session.asking(CORPUS, KEY)
     agent_session.unhost(CORPUS, KEY)
 
     chat, key, late = _chat("view: Other"), "view:other", {"url": f"{PAGE['url']}?late"}
-    agent_session.host(CORPUS, key, chat, agent="views", wait_s=10)
+    agent_session.host(CORPUS, key, chat, agent="views")
     one = _request("WebFetch", PAGE, key=key)
     [first] = await _waiting(chat)
     two = _request("WebFetch", OTHER_PAGE, key=key)

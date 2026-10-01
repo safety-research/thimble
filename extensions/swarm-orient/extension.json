@@ -1,0 +1,9 @@
+{
+  "name": "swarm-orient",
+  "version": "0.4.0",
+  "description": "Adds to the orientation for multi-agent swarms: many swarm-reader agents read every record, a coordination label marks each one, the counts are checked, and the episodes are drawn as multiagent-swimlane cards.",
+  "thimble": ">=0.4",
+  "needs": [
+    "multiagent-swimlane"
+  ]
+}

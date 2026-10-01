@@ -20,7 +20,10 @@ FRAME = ("[Subagent hand-back] The text below is the final report of a subagent 
 @pytest.fixture()
 def bg(tmp_path, monkeypatch, workspaces_tmp):
     """A followed background session of the critic whose tray entry is the proxy `a1`, and the asks main got to start a
-    tray entry."""
+    tray entry. The clock is that of a machine started a minute ago, as a CI runner is, where time.monotonic() is still
+    below bg_session.PROXY_ASK_S."""
+    real_monotonic, booted = time.monotonic, time.monotonic() - 60.0
+    monkeypatch.setattr(time, "monotonic", lambda: real_monotonic() - booted)
     path = tmp_path / "projects" / "-work" / "ab12cd34-0000.jsonl"
     path.parent.mkdir(parents=True)
     path.write_text("")

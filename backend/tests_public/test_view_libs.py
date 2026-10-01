@@ -13,6 +13,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from conftest import card_wait
 
 from app import config, view_libs, views
 
@@ -145,11 +146,13 @@ async def test_a_refused_package_or_installs_turned_off_leave_a_problem_and_noth
     monkeypatch.setattr(view_libs, "_installs", lambda c: "ask")
 
     async def late(c, slug, fields):
+        card_wait(5)
         return view_libs.UNANSWERED
 
+    card_wait(3)
     got = await view_libs.ensure("ws", "v", folder, ["tiny-queue@1"], ask=late)
-    assert got["problems"][0].startswith("nobody answered within ") and "tiny-queue 1.4.2" in got["problems"][0], \
-        "a question nobody answered says so, not that the analyst refused"
+    assert got["problems"][0].startswith("nobody answered within 3 minutes") and "tiny-queue 1.4.2" in got["problems"][0], \
+        "a question nobody answered says so, with the wait its card had, not that the analyst refused"
     assert view_libs.approvals() == {} and not [c for c in npm if c[1] == "install"]
 
     got = await view_libs.ensure("ws", "v", folder, ["tiny-queue@1"], ask=nobody)
@@ -255,7 +258,8 @@ async def test_a_package_card_nobody_answers_in_time_is_unanswered_not_refused(t
     from app import agent_session, agents, dev
 
     meta = agents.new_agent("mini", "dev", "a view build", announce=False)
-    agent_session.host("mini", dev.view_key("v"), str(meta["id"]), agent="dev", wait_s=0.2)
+    card_wait(0.003)
+    agent_session.host("mini", dev.view_key("v"), str(meta["id"]), agent="dev")
     try:
         got = await view_libs._ask_on_card("mini", "v", {"description": "Install the npm package tiny-queue 1.4.2"})
     finally:
