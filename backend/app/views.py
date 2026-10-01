@@ -14,9 +14,9 @@ Code holds every view to three things the analyst can always see above it. Its r
 read to the end by build_index or listed by the reader's hidden() with a why, a claim that matches no file is missing,
 and the lines the reader could not parse are its problems(); the checks fail on a file neither read nor hidden. Its
 derived fields, counted above the view. Its labels: the checks load the page with a test label and fail when the marks
-do not show on the records it shows (label_problems), and the label state stays one click away in the view's head. A
-page may draw label controls of its own, but a label call it makes by itself, not on the analyst's click, is refused
-and fails the checks (self_label_problems).
+do not show on the records it shows, or when a corpus view draws no label controls of its own (label_problems), since
+thimble draws none above it. A label call the page makes by itself, not on the analyst's click, is refused and fails the
+checks (self_label_problems).
 thimble also ships file-type viewers under the same contract (BUILTIN_VIEWERS). Readers run on the workspace's
 `views`
 kernel with a cached index; refs.resolve hands file refs with a fragment to enrich_file_ref, and resolve_sync bridges
@@ -1398,10 +1398,34 @@ def clean_problems(raw: Any) -> dict[str, Any]:
     return {"count": count, "examples": examples}
 
 
-async def reader_problems(c: str, slug: str, version: str | None = None) -> dict[str, Any]:
+def _ref_file(ref: str) -> str:
+    """The file a residue ref names: the part before its fragment, without a leading ./."""
+    return str(ref or "").split("#", 1)[0].strip().removeprefix("./")
+
+
+def problems_of_file(raw: Any, path: str) -> dict[str, Any]:
+    """clean_problems of a reader's answer kept to the refs into `path`. Its count is exact when the reader listed its
+    problems whole; when it gave {count, examples} with fewer examples than its count, the file's count is unknown and
+    None."""
+    whole = not isinstance(raw, dict)
+    items = raw.get("examples") if isinstance(raw, dict) and isinstance(raw.get("examples"), list) else raw
+    items = items if isinstance(items, list) else []
+    if isinstance(raw, dict):
+        n = raw.get("count")
+        whole = not isinstance(n, int) or isinstance(n, bool) or n <= len(items)
+    want = path.strip().removeprefix("./")
+    mine = [x for x in items if _ref_file(x.get("ref") if isinstance(x, dict) else "") == want]
+    out = clean_problems(mine)
+    if not whole:
+        out["count"] = None
+    return out
+
+
+async def reader_problems(c: str, slug: str, version: str | None = None, path: str | None = None) -> dict[str, Any]:
     """The lines of the claimed files the view's reader could not read (reader.problems), which thimble shows beside
-    the view's page."""
-    return clean_problems(await reader_call(c, slug, "problems", version=version))
+    the view's page; with `path`, those of that one file (problems_of_file), as a file viewer shows them."""
+    raw = await reader_call(c, slug, "problems", version=version)
+    return problems_of_file(raw, path) if path else clean_problems(raw)
 
 
 def _hidden(raw: Any) -> dict[str, str]:
@@ -1516,17 +1540,22 @@ def _size(corpus: Path, rel: str) -> int:
         return 0
 
 
-async def shown(c: str, slug: str, version: str | None = None) -> dict[str, Any]:
+async def shown(c: str, slug: str, version: str | None = None, path: str | None = None) -> dict[str, Any]:
     """What thimble draws above the view: {files, not_shown: {count, unexplained, unclaimed, files}, missing, derived,
     errors}. `files` is the count of claimed files and not_shown the ones the view does not show whole (not_shown),
     then the files of folders like the claimed ones that the claims leave out (sibling_files, `claimed` false, counted
     in `unclaimed`), the first FILES_LISTED of them, `unexplained` counting those hidden() gives no why for; missing is
     what the claims expect and the corpus lacks (missing_files); unplaced the records the reader's unplaced(index) says
     it could not place, as clean_problems gives them; derived is view.json's list, then the fields the reader's
-    derived(index) adds; errors say what failed of hidden(), derived() and unplaced()."""
+    derived(index) adds; errors say what failed of hidden(), derived() and unplaced(). With `path`, as a file viewer
+    shows one file: only that file, whether the view shows it whole and the records of it not placed, with no other
+    files, siblings or missing ones."""
     view, req, files = await asyncio.to_thread(_prepared, c, slug, version)
     corpus = config.corpus_dir(c)
-    every = await asyncio.to_thread(folder_paths, corpus)
+    if path:
+        want = path.strip().removeprefix("./")
+        files = [f for f in files if f[0] == want]
+    every = await asyncio.to_thread(folder_paths, corpus) if not path else []
     ans = await _call(c, req, "shown")
     ans = ans if isinstance(ans, dict) else {}
     reads = ans.get("reads") if isinstance(ans.get("reads"), dict) else {}
@@ -1539,6 +1568,13 @@ async def shown(c: str, slug: str, version: str | None = None) -> dict[str, Any]
         parts[name] = part.get("result")
     hidden = _hidden(parts["hidden"])
     rows = not_shown(files, reads, hidden)
+    if path:
+        return {"files": len(files),
+                "not_shown": {"count": len(rows), "unexplained": sum(1 for r in rows if not r["why"]), "unclaimed": 0,
+                              "files": rows},
+                "missing": [], "unplaced": problems_of_file(parts["unplaced"], path),
+                "derived": _derived([*view["derived"], *(parts["derived"] if isinstance(parts["derived"], list) else [])]),
+                "errors": errors}
     siblings = await asyncio.to_thread(sibling_files, [f[0] for f in files], every)
     listed = max(0, FILES_LISTED - len(rows))
     rows += [{"path": p, "size": _size(corpus, p) if i < listed else 0, "read": 0, "why": hidden.get(p, ""),
@@ -3086,10 +3122,17 @@ async def _shoot_in(work: Path, doc: str, states: list[dict[str, Any]], answer: 
 
 
 def _state_labels(ctx: dict[str, Any]) -> dict[str, Any]:
-    """The `on` and `filter` of a labels message, as ViewerFrame sends them: the labels that are on, each {name,
-    colour, values}, and the filter {label, value, colour} or None."""
+    """The `on`, `filter`, `all` and `palette` of a labels message, as ViewerFrame sends them: the labels that are on,
+    each {id, name, colour, values}, the filter {label, value, colour} or None, every label over files, here those that
+    are on, each {id, name, on, colour, values: [{name, colour, highlight}], count}, and the colours a label's value can
+    take, so the page can draw its label controls."""
+    from .kernel_thimble import LABEL_COLOURS  # noqa: PLC0415
+
     st = labels_state(ctx)
-    return {"on": st["labels"], "filter": st["filter"]}
+    every = [{"id": k.get("id"), "name": k.get("name"), "on": True, "colour": k.get("colour"),
+              "values": [{"name": v.get("name"), "colour": v.get("colour"), "highlight": True} for v in k.get("values") or []],
+              "count": None} for k in st["labels"]]
+    return {"on": st["labels"], "filter": st["filter"], "all": every, "palette": [*LABEL_COLOURS[1:], LABEL_COLOURS[0]]}
 
 
 def _strings(v: Any, out: list[str]) -> None:
@@ -3437,9 +3480,11 @@ def label_problems(view: dict[str, Any], files: list[tuple[str, int, int]],
     than one in ANCHORED_SHARE of the records the reader answered are shown anchored and no unit is; when a record or
     unit the test label marks is shown without its mark; and when a picture of the page shows the label's colour on
     fewer of the marked records in view than it checked (view_shot.mjs `painted`), as when a box that hides overflow
-    cuts the bar, or for an element with data-anchor-unmarked that draws no colour of its own. Records shown, filtered
-    to the test label, whose anchor the filter does
-    not keep are noted, since a record the page draws for several lines is anchored by one of them."""
+    cuts the bar, or for an element with data-anchor-unmarked that draws no colour of its own. A corpus view, not a file
+    viewer, also fails when no element of its page, shown or not, has a data-label naming the test label while it is on
+    (view_shot.mjs `label_controls`): the view draws its own label controls, since thimble draws none above it. Records
+    shown, filtered to the test label, whose anchor the filter does not keep are noted, since a record the page draws for
+    several lines is anchored by one of them."""
     if not lined(view, files):
         return [], []
     loaded = {str(s.get("state")): s.get("shown") for s in shots
@@ -3471,6 +3516,9 @@ def label_problems(view: dict[str, Any], files: list[tuple[str, int, int]],
                 problems.append(_hint("view-marks-unseen", state=name, unseen=len(unseen), checked=int(p["checked"]),
                                       refs=", ".join(f"`{r}`" for r in unseen[:3])))
                 break
+    if not file_type_viewer(view) and not any(int(s.get("label_controls") or 0) for s in shots
+                                              if s.get("ok") and s.get("state", "overview") in LABELLED_STATES):
+        problems.append(_hint("view-no-label-controls"))
     if (f := loaded.get("filtered")) is not None and (unkept := int(f.get("unkept") or 0)):
         notes.append(_hint("view-filter-unkept", unkept=unkept, records=int(f.get("records") or 0)))
     return problems, notes
@@ -4197,7 +4245,8 @@ _controls_seen: dict[tuple[str, int, int], bool] = {}
 
 def label_controls(v: dict[str, Any]) -> bool:
     """Whether the view's page draws label controls of its own: its view.html gives an element `data-label`
-    (prompts/dev-view.md), even one only a menu shows, so thimble's Labels sidebar need not open beside it."""
+    (prompts/dev-view.md), even one only a menu shows, and calls `thimble.setLabel`. thimble draws no label control
+    above a view, so beside a view without them its Labels sidebar opens while a label is on."""
     d = v.get("dir")
     if not d:
         return False
@@ -4211,7 +4260,8 @@ def label_controls(v: dict[str, Any]) -> bool:
         if len(_controls_seen) > 256:
             _controls_seen.clear()
         try:
-            _controls_seen[key] = "data-label" in page.read_text("utf-8", "replace")
+            text = page.read_text("utf-8", "replace")
+            _controls_seen[key] = "data-label" in text and "setLabel" in text
         except OSError:
             return False
     return _controls_seen[key]
@@ -4475,23 +4525,23 @@ async def cancel_route(c: str, slug: str, call: str) -> dict[str, Any]:
 
 
 @router.get("/ws/{c}/views/{slug}/problems")
-async def problems_route(c: str, slug: str, v: str | None = None) -> dict[str, Any]:
-    """The lines the view's reader could not read, {count, examples: [{ref, why}]} (reader_problems). 502 with the
-    reader's error."""
+async def problems_route(c: str, slug: str, v: str | None = None, path: str | None = None) -> dict[str, Any]:
+    """The lines the view's reader could not read, {count, examples: [{ref, why}]} (reader_problems), with `path` those
+    of that file, whose count is None when the reader did not list them all. 502 with the reader's error."""
     _view_or_404(c, slug, v)
     try:
-        return await reader_problems(c, slug, v)
+        return await reader_problems(c, slug, v, path)
     except ReaderError as e:
         raise HTTPException(502, {"message": e.message, "traceback": e.detail[-ERROR_MAX:]}) from None
 
 
 @router.get("/ws/{c}/views/{slug}/shown")
-async def shown_route(c: str, slug: str, v: str | None = None) -> dict[str, Any]:
-    """What the view does not show and what it derived, the two menus above its page (shown). 502 with the reader's
-    error."""
+async def shown_route(c: str, slug: str, v: str | None = None, path: str | None = None) -> dict[str, Any]:
+    """What the view does not show and what it derived, the two menus above its page (shown), with `path` of that one
+    file as a file viewer shows it. 502 with the reader's error."""
     _view_or_404(c, slug, v)
     try:
-        return await shown(c, slug, v)
+        return await shown(c, slug, v, path)
     except ReaderError as e:
         raise HTTPException(502, {"message": e.message, "traceback": e.detail[-ERROR_MAX:]}) from None
 

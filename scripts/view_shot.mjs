@@ -12,8 +12,9 @@
 // page with the bridge, views.frame_document) in a sandboxed iframe with the theme's tokens and the app's two faces, and
 // asks the server over stdin and stdout, one JSON line each way, for what the page needs:
 //   {"fetch": id, "state": i, "query": ...}   answered {"id", "data"} or {"id", "error"}: reader.records for the state
-//   {"marks": id, "state": i, "refs": [...]}  answered {"id", "marks", "on", "filter"}: the marks of those refs and the
-//                                             labels that are on in the state, sent to the page as `labels`
+//   {"marks": id, "state": i, "refs": [...]}  answered {"id", "marks", "on", "filter", "all", "palette"}: the marks of
+//                                             those refs, the labels that are on in the state and the palette, sent
+//                                             to the page as `labels`
 //   {"media": id, "path": ...}                answered {"id", "file", "type", "size"} or {"id", "error"}: the file a
 //                                             request to the --media URL (thimble.mediaUrl) names, served from here,
 //                                             a Range request with the bytes it asks for (at most MEDIA_CHUNK)
@@ -21,10 +22,11 @@
 // browser. A state is measured when its page has been quiet (no fetch or marks request in flight) for QUIET_MS after
 // `open`, or HARD_MS has passed with no request in flight, and again after each action. One line ends the run:
 // {"done": true, "states": [{ok, errors, fetches, height, refs, records, units, marked, hidden, shown, layout, controls,
-// painted, actions, fonts}]}: `refs` the distinct data-anchor refs the page reported, `records` those naming a record of a file
+// label_controls, painted, actions, fonts}]}: `refs` the distinct data-anchor refs the page reported, `records` those naming a record of a file
 // (RECORD_REF: `<path>#L<n>`, `<db>#<table>/<key>`, `<pdf>#p<n>`, any `<path>#<fragment>`), `units` those naming one of
 // the view's units (`view:<slug>/<key>`), `marked` the elements carrying a label's mark, `hidden` those the bridge hid or dimmed for the filter, `shown` what is on screen at the end
-// (shownCounts), `layout` how its text fits (layoutCounts), `controls` the controls it shows (controlList), `painted`
+// (shownCounts), `layout` how its text fits (layoutCounts), `controls` the controls it shows (controlList),
+// `label_controls` the elements whose data-label names a label that is on, shown or not, `painted`
 // how many of the marked records in view show the label's colour in a picture of the frame (paintedMarks), `actions`
 // each action with whether its control was found, `fonts` whether Hanken Grotesk was loaded in the frame, and
 // `self_labels` the ops of the label calls the page made by itself, outside the actions (the bridge's labelRefused, or
@@ -623,16 +625,18 @@ async function shootState(browser, opt, doc, state, i) {
         window.__refs = new Set()
         window.__acting = false
         window.__selfLabels = []
+        window.__on = []
         let marks = {}
         window.__marks = marks
-        let state = { on: [], filter: null }
+        let state = { on: [], filter: null, all: [], palette: [] }
         const post = (msg) => f.contentWindow.postMessage(msg, '*')
-        const labels = () => post({ type: 'thimble:labels', marks, on: state.on, filter: state.filter })
+        const labels = () => post({ type: 'thimble:labels', marks, on: state.on, filter: state.filter, all: state.all, palette: state.palette })
         const ask = async (refs) => {
           const got = await window.thimbleMarks(refs)
           marks = { ...marks, ...(got.marks || {}) }
           window.__marks = marks
-          state = { on: got.on || [], filter: got.filter || null }
+          state = { on: got.on || [], filter: got.filter || null, all: got.all || [], palette: got.palette || [] }
+          window.__on = state.on.map((l) => String(l.id || ''))
           labels()
         }
         addEventListener('message', async (e) => {
@@ -722,6 +726,8 @@ async function shootState(browser, opt, doc, state, i) {
     const shown = await frame.evaluate(shownCounts, { marks, record: RECORD_REF.source }).catch(() => null)
     const layout = await frame.evaluate(layoutCounts).catch(() => null)
     const controls = await frame.evaluate(controlList, { sel: CONTROLS, max: CONTROLS_MAX }).catch(() => [])
+    const on = await page.evaluate(() => window.__on || [])
+    const labelControls = await frame.evaluate((ids) => [...document.querySelectorAll('[data-label]')].filter((e) => ids.includes(e.getAttribute('data-label'))).length, on).catch(() => 0)
     const painted = ready ? await paintedMarks(page, el, frame, marks).catch((e) => ({ error: plain(e) })) : null
     return {
       ok: ready && errors.length === 0,
@@ -736,6 +742,7 @@ async function shootState(browser, opt, doc, state, i) {
       shown,
       layout,
       controls,
+      label_controls: labelControls,
       painted,
       actions,
       fonts,

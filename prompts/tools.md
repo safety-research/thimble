@@ -794,6 +794,10 @@ In the {state} state, {missing} of the {due} shown records or units the test lab
 
 In the {state} state, a picture of the page does not show the test label's colour on {unseen} of the {checked} marked records or units in view, such as {refs}. thimble draws a mark as a 3 px bar in the label's colour along the left edge of the outermost element whose `data-anchor` names the record, inside the element when its left padding is 6 px or more or when a box that hides overflow would cut a bar outside it, else just outside. The bar does not show when the page's CSS sets `box-shadow` on that element with `!important`, or when another element or a cell's background covers the element's left edge. An element with `data-anchor-unmarked` gets no bar, so the page must draw the label's colour on it itself, at full strength, such as a dot or a fill in the colour `thimble.markOf(ref).bar` gives, redrawn in `thimble.onMarks`.
 
+## view-no-label-controls
+
+With the test label on, no element of the page has `data-label` naming it, so the page draws no label controls. thimble draws none above a view, so the page shows the labels `thimble.onLabels` lists in `all`, each in a control such as a legend entry or a switch that carries `data-label` with the label's id, and keeps that element in the page while a menu that holds it is closed.
+
 ## view-labels-by-itself
 
 The page made {made} by itself, on load, on a timer or from its own script: {calls}. thimble refuses a label change outside the analyst's own click or key press in the view, so call these only from a control's click or key handler.

@@ -263,13 +263,16 @@ async def test_every_record_the_analyst_marks_counts_as_marked_by_hand(app, corp
 
 
 async def test_the_views_list_says_which_pages_draw_label_controls_of_their_own(app):
-    """A page whose source gives an element `data-label`, even one only a menu shows, draws label controls of its own,
-    so the Labels sidebar need not open beside it; the list says so from the source, before the page loads."""
-    menu = HTML.replace("</body>", "<script>const item = (id) => `<button data-label=\"${id}\">on</button>`</script></body>")
+    """A page whose source gives an element `data-label`, even one only a menu shows, and switches labels draws label
+    controls of its own, so the Labels sidebar need not open beside it; the list says so from the source, before the
+    page loads. A legend's `data-label` alone, with no switch, is not one."""
+    menu = HTML.replace("</body>", "<script>const item = (id) => `<button data-label=\"${id}\" onclick=\"thimble.setLabel('${id}', true)\">on</button>`</script></body>")
+    legend = HTML.replace("</body>", "<script>const item = (id) => `<span data-label=\"${id}\">a</span>`</script></body>")
     views.write_view(CORPUS, "threads", reader=READER, html=HTML, **VIEW)
     views.write_view(CORPUS, "menu", reader=READER, html=menu, **{**VIEW, "name": "Menu"})
+    views.write_view(CORPUS, "legend", reader=READER, html=legend, **{**VIEW, "name": "Legend"})
     got = {v["slug"]: v["label_controls"] for v in (await app.get(f"/api/ws/{CORPUS}/views")).json()}
-    assert got == {"threads": False, "menu": True}
+    assert got == {"threads": False, "menu": True, "legend": False}
 
 
 def _old_members(rows: list[tuple]) -> dict[str, str]:

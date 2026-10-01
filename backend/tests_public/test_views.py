@@ -305,6 +305,27 @@ async def test_the_harness_counts_what_build_index_reads_and_the_checks_fail_on_
     assert not any("(read" in p for p in rep["problems"]), rep["problems"]
 
 
+async def test_a_file_viewer_s_notes_are_those_of_the_file_it_shows(ws, inproc, bound):
+    """A file viewer open on one file says what it leaves out of that file only: its unreadable lines, and nothing of the
+    other files it claims, so a clean file has nothing to say. Where the reader gives a count beyond the lines it lists,
+    one file's count is not known."""
+    corpus = config.corpus_dir(CORPUS)
+    (corpus / "more.jsonl").write_text((corpus / "board.jsonl").read_text() + "{torn\nnot json\n")
+    views.write_view(CORPUS, "posts", name="Posts", description="One file of posts.", claims=["*.jsonl"], unit="file",
+                     accepts=VIEW["accepts"], reader=THREADS_READER, html=THREADS_HTML)
+    whole = await views.reader_problems(CORPUS, "posts")
+    torn = await views.reader_problems(CORPUS, "posts", path="more.jsonl")
+    clean = await views.reader_problems(CORPUS, "posts", path="board.jsonl")
+    assert whole["count"] == torn["count"] == 2 and clean == {"count": 0, "examples": []}, (whole, torn, clean)
+    assert [x["ref"] for x in torn["examples"]] == [f"more.jsonl#L{len(POSTS) + 1}", f"more.jsonl#L{len(POSTS) + 2}"]
+    one = await views.shown(CORPUS, "posts", path="board.jsonl")
+    assert one["files"] == 1 and one["not_shown"]["files"] == [] and one["missing"] == [], one
+    assert (await views.shown(CORPUS, "posts"))["files"] == 2
+    many = {"count": 5, "examples": [{"ref": "more.jsonl#L3", "why": "bad"}, {"ref": "board.jsonl#L1", "why": "bad"}]}
+    assert views.problems_of_file(many, "more.jsonl") == {"count": None, "examples": [{"ref": "more.jsonl#L3", "why": "bad"}]}
+    assert views.problems_of_file({**many, "count": 2}, "more.jsonl")["count"] == 1
+
+
 def test_a_view_of_one_run_leaves_the_other_runs_files_not_shown():
     """Folders beside a claimed one that hold the same files, as runs do, have their files counted as not shown; a
     folder of another kind is left alone though some of its names match."""
@@ -359,8 +380,8 @@ async def test_a_field_whose_values_the_cited_lines_do_not_hold_fails_the_checks
     listed one is not."""
     async def page(c, slug, states, **k):
         answer = await views.reader_call(c, slug, "records", {"thread": "t1"})
-        return [{"ok": True, "errors": [], "fetches": 1, "answers": [answer], "shown": {"records": 3, "due": 0}}
-                for _ in states]
+        return [{"ok": True, "errors": [], "fetches": 1, "answers": [answer], "shown": {"records": 3, "due": 0},
+                 "label_controls": 1} for _ in states]
 
     monkeypatch.setattr(views, "shoot_states", page)
     views.write_view(CORPUS, "threads", reader=DERIVING_READER, html=THREADS_HTML, **VIEW)
@@ -490,7 +511,8 @@ def test_the_test_label_answers_thimble_labels_as_a_label_would(tmp_path):
 
 
 def _shot(state: str, **shown) -> dict:
-    return {"ok": True, "state": state, "fetched_records": shown.pop("fetched", 0), "shown": shown}
+    return {"ok": True, "state": state, "fetched_records": shown.pop("fetched", 0), "label_controls": shown.pop("controls", 1),
+            "shown": shown}
 
 
 def test_the_checks_fail_a_page_whose_records_do_not_show_the_test_label():
@@ -514,6 +536,13 @@ def test_the_checks_fail_a_page_whose_records_do_not_show_the_test_label():
     assert not problems and "anchors 8 of them" in notes[0] and "shows 10 records" in notes[0]
     assert run(*good[:1]) == ([], []) and views.label_problems(view, [("talk.mp4", 9, 0)], [_shot("overview")]) == ([], [])
     assert views.label_problems(view, [("doc.pdf", 9, 0)], [_shot("overview")])[0], "a PDF's pages are records labels mark"
+    bare = [_shot("overview", records=40, units=0, due=6, drawn=6, fetched=40, controls=0),
+            _shot("filtered", records=6, units=0, due=6, drawn=6, controls=0)]
+    (problem,) = run(*bare)[0]
+    assert "draws no label controls" in problem, "a corpus view draws its own label controls"
+    assert run(bare[0], {**bare[1], "label_controls": 2})[0] == [], "one state that shows them is enough"
+    viewer = {"slug": "logs", "claims": ["**/*.log"]}
+    assert views.label_problems(viewer, [("a.log", 9, 0)], bare) == ([], []), "a file viewer beside the Labels pane need not"
 
 
 async def test_a_claim_that_matches_no_file_is_listed_as_missing(ws, inproc, bound, monkeypatch):
@@ -1092,9 +1121,11 @@ async def test_the_checks_look_for_the_label_s_colour_in_a_picture_of_the_page(n
             pytest.fail(why)
         pytest.skip(why)
     style, own, script, seen = MARK_PAGES[name]
+    legend = ("thimble.onLabels((s) => { document.getElementById('labs').innerHTML = (s.all || [])"
+              ".map((l) => `<span data-label=\"${l.id}\">${l.name}</span>`).join('') })")
     html = (f"<!doctype html><html><head><style>body{{font:13px sans-serif}} table{{border-collapse:collapse}} {style}"
-            f"</style></head><body><div class=wrap><table id=t>{ROWS.replace('{own}', own)}</table></div>"
-            f"<script>thimble.onOpen(() => {{}}); {script}</script></body></html>")
+            f"</style></head><body><div id=labs></div><div class=wrap><table id=t>{ROWS.replace('{own}', own)}</table></div>"
+            f"<script>thimble.onOpen(() => {{}}); {legend}; {script}</script></body></html>")
     views.write_view(CORPUS, "rows", reader=THREADS_READER, html=html, **{**VIEW, "name": "Rows"})
     (s,) = await views.shoot_states(CORPUS, "rows", [{"open": {}, "labels": views.probe_context(), "size": views.PANE_NARROW}])
     assert s["ok"], s["errors"]
