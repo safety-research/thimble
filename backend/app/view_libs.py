@@ -49,7 +49,8 @@ NPM_TIMEOUT_S = 300.0
 DEPS_MAX = 200  # packages looked up for the size of what a package needs
 LOOKUPS_AT_ONCE = 8
 ENTRY_RE = re.compile(r"^(?P<name>(?:@[a-z0-9][a-z0-9._~-]*/)?[a-z0-9][a-z0-9._~-]*)"
-                      r"(?:@(?P<range>[^/\s@][^/\s]*))?(?P<path>(?:/[A-Za-z0-9._@+-]+)+)?$")
+                      r"(?:@(?P<range>[0-9A-Za-z.^~<>=*|+-]+))?(?P<path>(?:/[A-Za-z0-9._@+-]+)+)?$")
+VERSION_RE = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.+-]+)?$")
 ASSET_LOADERS = ("png", "jpg", "jpeg", "gif", "svg", "webp", "woff", "woff2", "ttf", "otf", "eot")
 
 PACKAGE_WHY = ("thimble installs it with npm, without running its install scripts, into the view's folder, so the page "
@@ -218,7 +219,7 @@ async def lookup(name: str, rng: str) -> dict[str, Any]:
         raw = None
     if isinstance(raw, list):
         raw = raw[-1] if raw else None
-    if not isinstance(raw, dict) or not raw.get("version"):
+    if not isinstance(raw, dict) or not VERSION_RE.match(str(raw.get("version") or "")):
         raise LookupError(f"npm has no version of {name} that {rng} allows")
     deps = raw.get("dependencies") if isinstance(raw.get("dependencies"), dict) else {}
     size = raw.get("dist.unpackedSize")
@@ -264,6 +265,18 @@ def size_words(n: int) -> str:
     if n >= 1000:
         return f"{round(n / 1000)} kB"
     return f"{n} bytes"
+
+
+def _size_line(own: int, more: list[dict[str, Any]], extra: bool) -> str:
+    """The card's size of a package with the packages it needs (needs): their sum when npm gave every size, else the
+    package's own size alone, so the card shows no total that is not exact."""
+    if not more:
+        return size_words(own)
+    count = f"more than {DEPS_MAX}" if extra else str(len(more))
+    noun = "package" if count == "1" else "packages"
+    if extra or any(x["version"] == "?" for x in more):
+        return f"{size_words(own)} for the package itself, plus the {count} {noun} it needs"
+    return f"{size_words(own + sum(int(x.get('bytes') or 0) for x in more))}, with {count} {noun} it needs"
 
 
 def _stage(name: str, version: str) -> Path:
@@ -367,7 +380,7 @@ def _file_name(name: str, version: str, path: str, kind: str) -> str:
 
 # ---------------------------------------------------------------------------------------------------- vendoring
 
-Ask = Any  # async (name, version, fields) -> bool
+Ask = Any  # async (workspace, slug, fields) -> True or False, the analyst's answer, or None when no one could be asked
 
 
 async def ensure(c: str, slug: str, folder: Path, libs: Any, *, ask: "Ask | None" = None) -> dict[str, list[str]]:
@@ -401,13 +414,17 @@ async def ensure(c: str, slug: str, folder: Path, libs: Any, *, ask: "Ask | None
             total = info["bytes"] + sum(int(x.get("bytes") or 0) for x in more)
             if setting != "allow":
                 fields = {"description": f"Install the npm package {e.name} {version} for the view's page",
-                          "size": size_words(total) + (f", with {len(more)}{' or more' if extra else ''} "
-                                                       f"package{'s' if len(more) > 1 or extra else ''} it needs"
-                                                       if more else "")}
+                          "size": _size_line(info["bytes"], more, extra)}
                 if more:
-                    fields["needs"] = ", ".join(f"{x['name']} {x['version']}" for x in more[:20]) + \
-                        (f" and {len(more) - 20} more" if len(more) > 20 else "")
+                    fields["needs"] = ", ".join(x["name"] + (f" {x['version']}" if x["version"] != "?" else "")
+                                                for x in more[:20]) + \
+                        (f" and {len(more) - 20} more" if len(more) > 20 else "") + \
+                        (f", and more beyond the first {DEPS_MAX}" if extra else "")
                 allowed = await _ask_once(c, slug, f"{e.name}@{version}", fields, ask or _ask_on_card)
+                if allowed is None:
+                    out["problems"].append(f"thimble could not ask the analyst about the package {e.name} {version}, "
+                                           "since no build of this view is running, so it was not installed")
+                    continue
                 if not allowed:
                     out["problems"].append(f"the analyst did not allow the package {e.name} {version}; draw the page "
                                            "without it and take it out of libs")
@@ -457,17 +474,18 @@ def _write_lock(folder: Path, items: dict[str, dict[str, Any]]) -> None:
                 f.unlink()
 
 
-async def _ask_once(c: str, slug: str, package: str, fields: dict[str, str], ask: Ask) -> bool:
-    """The analyst's answer about `package`: a question already waiting in the workspace (a check and the gate after the
-    turn both asking) is answered once for both."""
+async def _ask_once(c: str, slug: str, package: str, fields: dict[str, str], ask: Ask) -> bool | None:
+    """The analyst's answer about `package` (None when no one could be asked): a question already waiting in the
+    workspace (a check and the gate after the turn both asking) is answered once for both."""
     key = (c, package)
     waiting = _asking.get(key)
     if waiting is not None and not waiting.done():
-        return bool(await asyncio.shield(waiting))
+        return await asyncio.shield(waiting)
     fut = asyncio.get_running_loop().create_future()
     _asking[key] = fut
     try:
-        allowed = bool(await ask(c, slug, fields))
+        got = await ask(c, slug, fields)
+        allowed = None if got is None else bool(got)
         fut.set_result(allowed)
         return allowed
     except BaseException:
@@ -488,10 +506,13 @@ def _installs(c: str) -> str:
         return "ask"
 
 
-async def _ask_on_card(c: str, slug: str, fields: dict[str, str]) -> bool:
-    """Ask the analyst on the card of the view build's session, in every permission mode."""
+async def _ask_on_card(c: str, slug: str, fields: dict[str, str]) -> bool | None:
+    """Ask the analyst on the card of the view build's session, in every permission mode; None when no build of the
+    view runs, whose card could ask."""
     from . import agent_session, dev  # noqa: PLC0415
 
+    if agent_session.asker(c, dev.view_key(slug)) is None:
+        return None
     why = PACKAGE_WHY.format(wait=agent_session.wait_words(dev.PERMISSION_WAIT_S))
     got = await agent_session.ask(c, dev.view_key(slug), PACKAGE_TOOL, fields, force=True, why=why)
     return got.get("behavior") == "allow"

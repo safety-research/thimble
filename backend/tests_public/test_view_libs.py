@@ -135,8 +135,27 @@ async def test_a_refused_package_or_installs_turned_off_leave_a_problem_and_noth
 
     got = await view_libs.ensure("ws", "v", folder, ["no-such-package@1"], ask=no)
     assert got["problems"][0].startswith("the package no-such-package@1 could not be found")
-    assert view_libs.problems(["vega", "d3-force@3", "not a package!"]) == [
-        "`libs` names 'not a package!', which is neither vega, vega-lite, vega-embed nor an npm package as name@version"]
+    assert view_libs.problems(["vega", "d3-force@3", "d3@>=7.8", "d3-array@7.x", "not a package!", "x@file:../y", "x@git+ssh:h"]) == [
+        "`libs` names 'not a package!', 'x@file:../y', 'x@git+ssh:h', which is neither vega, vega-lite, vega-embed nor an "
+        "npm package as name@version"]
+
+    async def nobody(c, slug, fields):
+        return None
+
+    monkeypatch.setattr(view_libs, "_installs", lambda c: "ask")
+    got = await view_libs.ensure("ws", "v", folder, ["tiny-queue@1"], ask=nobody)
+    assert got["problems"] == ["thimble could not ask the analyst about the package tiny-queue 1.4.2, since no build of "
+                               "this view is running, so it was not installed"]
+
+
+def test_the_card_shows_a_total_size_only_when_npm_gave_every_size():
+    more = [{"name": "a", "version": "1.0.0", "bytes": 1000}, {"name": "b", "version": "2.0.0", "bytes": 500}]
+    assert view_libs._size_line(2500, more, False) == "4 kB, with 2 packages it needs"
+    assert view_libs._size_line(2500, [*more, {"name": "c", "version": "?", "bytes": 0}], False) == \
+        "2 kB for the package itself, plus the 3 packages it needs"
+    assert view_libs._size_line(2500, more, True) == \
+        f"2 kB for the package itself, plus the more than {view_libs.DEPS_MAX} packages it needs"
+    assert view_libs._size_line(2500, [], False) == "2 kB"
 
 
 async def test_the_page_inlines_its_packages_and_a_new_package_is_a_new_version(tmp_path, npm, workspaces_tmp, monkeypatch):
