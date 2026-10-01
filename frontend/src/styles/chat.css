@@ -1282,9 +1282,10 @@ button.model-line-part[aria-expanded='true'] {
 }
 
 /* -------- the permission card (chat/PermissionCard): every request that waits for the analyst, pinned above the
-   composer, opaque and bold: a warning tint under a 1.5px warning edge, 6px clear of what is under it. One request at a
-   time with `1 of 3` and arrows; the call's description, its input as code, why it asks, then Allow, Always allow and
-   Deny in one row. -------- */
+   composer, opaque and bold: a warning tint under a 1.5px warning edge, 12px clear of what is under it, which leaves
+   room for the edges of the cards behind it, so its buttons stay put as the stack shrinks. One request at a time with
+   `1 of 3` and arrows; the call's description, its input as code, why it asks, then Allow, Always allow and Deny in one
+   row. At most 45% of the window tall: the head and the buttons stay, and the body between them scrolls. -------- */
 .chat-perm {
   position: relative;
   display: flex;
@@ -1293,7 +1294,8 @@ button.model-line-part[aria-expanded='true'] {
   box-sizing: border-box;
   min-width: 0;
   max-width: 100%;
-  margin-bottom: 6px;
+  max-height: 45vh;
+  margin-bottom: 12px;
   padding: 9px 12px 10px;
   overflow: hidden;
   border: 1.5px solid var(--status-warning);
@@ -1305,12 +1307,24 @@ button.model-line-part[aria-expanded='true'] {
 }
 /* several requests wait: the edges of the cards behind this one show below it */
 .chat-perm-stack {
-  margin-bottom: 12px;
   overflow: visible;
   box-shadow:
     0 4px 0 -1px color-mix(in oklab, var(--status-warning) 10%, var(--surface-card)),
     0 4px 0 0.5px var(--status-warning),
     var(--shadow-composer);
+}
+.chat-perm-body {
+  display: flex;
+  flex: 0 1 auto;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 0;
+  overflow-y: auto;
+}
+.chat-perm-head,
+.chat-perm-acts,
+.chat-perm-body > * {
+  flex: none;
 }
 .chat-perm-head {
   display: flex;
@@ -1453,10 +1467,22 @@ button.model-line-part[aria-expanded='true'] {
   list-style: none;
   overflow-wrap: anywhere;
 }
-/* denied unanswered: the card says so in a neutral edge, with Dismiss */
-.chat-perm[data-expired] {
+/* the card takes focus after an answer, so Tab reaches the next request's buttons */
+.chat-perm:focus {
+  outline: none;
+}
+/* declined unanswered, with Dismiss, and an answer still on its way: a neutral edge */
+.chat-perm[data-expired],
+.chat-perm-sending {
   border-color: var(--border-strong);
   background: var(--surface-card);
+}
+.chat-perm-sending {
+  color: var(--text-secondary);
+}
+.chat-perm-sent {
+  margin: 0;
+  color: var(--text-secondary);
 }
 .chat-perm[data-expired] .chat-perm-head {
   color: var(--text-secondary);

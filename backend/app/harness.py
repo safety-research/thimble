@@ -137,7 +137,7 @@ class Job:
     tools: tuple[str, ...]  # its thimble tools
     work: Path
     chat_role: str = ""  # the agent chat's role, the role's own when ''
-    patient: bool = False  # its sessions' permission requests wait for the analyst
+    patient: bool = False  # its sessions' permission requests wait agent_session.PATIENT_WAIT_S, not the minute
     parent: str = agents.MAIN_ID
     fields: dict[str, Any] = field(default_factory=dict)  # land on the chat's meta
     writes: tuple[Path, ...] = ()  # folders besides `work` the program and its sessions write: a view's folder
