@@ -439,7 +439,12 @@ async def restore_workspace(c: str, body: dict[str, Any] = Body(...)) -> dict[st
     replaced = (await archive_workspace(c))["archived"]
     path = config.workspace_path(c).resolve()
     src.rename(path)
-    from . import investigation  # noqa: PLC0415 — lazy: investigation imports this module
+    from . import investigation, views  # noqa: PLC0415 — lazy: investigation imports this module
+
+    try:
+        views.move_to_local(path)  # an archive an older thimble made keeps its views in views/
+    except OSError:
+        log.exception("%s: the restored views were not moved into the local extension", c)
 
     investigation.reset_streams(c)  # an open tab starts over on the restored workspace
     log.info("%s: archive %s restored", c, name)

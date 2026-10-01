@@ -27,7 +27,7 @@ import { accepts, slugOf, viewValue } from './viewChoice'
 import { hasNotes, useShownLabels, useViewNotes, ViewNotesLine } from './ViewChrome'
 import { ViewerFrame } from './ViewerFrame'
 import { usePinnedView, ViewUpdated } from './viewVersion'
-import { ProposalOption } from './ViewsBar'
+import { DeleteViewConfirm, ProposalOption } from './ViewsBar'
 import { useTypeViewers } from './typeViewers'
 import { errMsg, LaneHead, targetOf, type ViewDef, type ViewProps } from './views/common'
 import { withoutEscapes } from './views/raw'
@@ -231,6 +231,9 @@ function FileLabels({ items }: { items: { id: string; name: string; colour: stri
   )
 }
 
+/** Where the File browser keeps the mode picked for a file: a built-in view's type, or `v:<slug>` for a file viewer. */
+export const pickKey = (workspace: string, path: string): string => storageKey(workspace, `viewOf:${path}`)
+
 /** A proposed view for the file's type, offered beside the modes until the analyst dismisses it. */
 function useOffered(ws: string, proposal: Proposal | null, on: boolean): { offered: Proposal | null; dismiss: (p: Proposal) => void } {
   const [dismissed, setDismissed] = useState<string | null>(null)
@@ -249,6 +252,27 @@ function useOffered(ws: string, proposal: Proposal | null, on: boolean): { offer
   return { offered, dismiss }
 }
 
+/** The × a file viewer built for the workspace shows on hover in a file's modes, which deletes it once confirmed, as
+ * the views bar's × does a corpus view: `removable` gives a viewer's option its ×, `confirmDelete` goes beside the
+ * modes. */
+function useViewerDelete(ws: string, pickedSlug: string | null, forgetPick: () => void) {
+  const [removing, setRemoving] = useState<{ slug: string; name: string; at: HTMLElement } | null>(null)
+  const remove = async ({ slug, name }: { slug: string; name: string }) => {
+    setRemoving(null)
+    track('view-dismiss', { target: `view:${slug}` })
+    if (pickedSlug === slug) forgetPick()
+    try {
+      await api.deleteView(ws, slug)
+      await refreshProposals(ws)
+    } catch (e) {
+      bus.emit('toast', { text: `Could not delete ${name}. ${(e as Error).message}`, kind: 'error' })
+    }
+  }
+  const removable = (v: View) => (v.origin === 'builtin' ? {} : { removeLabel: `Delete ${v.name}`, onRemove: (at: HTMLElement) => setRemoving({ slug: v.slug, name: v.name, at }) })
+  const confirmDelete = <DeleteViewConfirm asked={removing} onClose={() => setRemoving(null)} onDelete={() => removing && void remove(removing)} />
+  return { removable, confirmDelete }
+}
+
 /** A PDF of the corpus as itself, in the browser's own viewer, opened at the page a ref names. The viewers made for
  * PDFs stand beside it in the mode switch, and the pick is remembered per file; a ref whose fragment is no page opens in
  * the first viewer that reads it. The frame is drawn anew for each page asked for, since a viewer reads the page only
@@ -258,8 +282,9 @@ function PdfReader({ workspace, path, targetRef, lead, end, labels, only, onMode
   const page = pdfPage(targetRef, path)
   const src = api.pdfUrl(workspace, path, page)
   const inPage = pdfInPage()
-  const memoryKey = storageKey(workspace, `viewOf:${path}`)
+  const memoryKey = pickKey(workspace, path)
   const [pick, setPick] = useState<string | null>(() => readStorage<string | null>(memoryKey, null))
+  useEffect(() => bus.on('fileMode', (e) => e.path === path && setPick(e.mode)), [path])
   const fragment = fragmentIn(targetRef, path)
   const types = useTypeViewers(workspace, path, !only, true)
   const autoViewer = fragment != null && page == null ? types.viewers.find((v) => accepts(v, fragment)) : undefined
@@ -279,8 +304,9 @@ function PdfReader({ workspace, path, targetRef, lead, end, labels, only, onMode
     writeStorage(memoryKey, null)
   }
   const fileLabels = useFileLabels(labels, path)
+  const { removable, confirmDelete } = useViewerDelete(workspace, pickedSlug, forgetPick)
   const { offered, dismiss } = useOffered(workspace, types.proposal, !only && !viewer)
-  const options = [{ value: PDF_MODE, label: 'PDF' }, ...(only ? [] : types.viewers.map((v) => ({ value: viewValue(v.slug), label: v.name })))]
+  const options = [{ value: PDF_MODE, label: 'PDF' }, ...(only ? [] : types.viewers.map((v) => ({ value: viewValue(v.slug), label: v.name, ...removable(v) })))]
   return (
     <div className="reader">
       {lead !== undefined && (
@@ -292,6 +318,7 @@ function PdfReader({ workspace, path, targetRef, lead, end, labels, only, onMode
             <span className="reader-modes">
               <Segmented label="Mode" size="md" value={viewer ? viewValue(viewer.slug) : PDF_MODE} onChange={onPick} options={options} />
               {offered && <ProposalOption ws={workspace} p={offered} size="md" onDismiss={() => dismiss(offered)} onAccept={forgetPick} />}
+              {confirmDelete}
             </span>
           )}
         </div>
@@ -472,8 +499,9 @@ const sameShown = (x: Shown, y: Shown) =>
 function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only, onMode, findAsk }: ReaderProps) {
   const isDatabase = kind === 'forge'
   const builtins = useBuiltins(workspace, path, kind)
-  const memoryKey = storageKey(workspace, `viewOf:${path}`)
+  const memoryKey = pickKey(workspace, path)
   const [pick, setPick] = useState<string | null>(() => readStorage<string | null>(memoryKey, null))
+  useEffect(() => bus.on('fileMode', (e) => e.path === path && setPick(e.mode)), [path])
   const fragment = fragmentIn(targetRef, path)
   const [records, setRecords] = useState<SourceRecord[]>([])
   const [total, setTotal] = useState<number | null>(null)
@@ -938,6 +966,7 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
     setPick(null)
     writeStorage(memoryKey, null)
   }
+  const { removable, confirmDelete } = useViewerDelete(workspace, pickedSlug, forgetPick)
   const { offered, dismiss } = useOffered(workspace, types.proposal, !only && !viewer)
   // a file that could not be read says so, and so does a binary one (an archive, a file of a type no view reads), whose
   // bytes read as text would be noise
@@ -960,7 +989,13 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
   const builtinOptions = builtins.listed.map((v) => ({ value: v.type, label: v.title }))
   const options = [
     ...builtinOptions.filter((o) => o.value !== 'raw'),
-    ...(only ? [] : types.viewers.map((v) => ({ value: viewValue(v.slug), label: v.name }))),
+    ...(only
+      ? []
+      : types.viewers.map((v) => ({
+          value: viewValue(v.slug),
+          label: v.name,
+          ...removable(v),
+        }))),
     ...builtinOptions.filter((o) => o.value === 'raw'),
   ]
   return (
@@ -977,6 +1012,7 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
               <span className="reader-modes">
                 <Segmented label="Mode" size="md" value={viewer ? viewValue(viewer.slug) : view.type} onChange={onPick} options={options} />
                 {offered && <ProposalOption ws={workspace} p={offered} size="md" onDismiss={() => dismiss(offered)} onAccept={forgetPick} />}
+                {confirmDelete}
               </span>
             )}
           </div>

@@ -43,7 +43,8 @@ def test_on_macos_srt_hides_the_home_and_user_data_and_shows_the_kernel_its_own_
     """The kernel under srt on macOS reads neither the home folder, other users' folders, other volumes, the temp
     folders nor thimble's and Claude Code's folders; it reads the corpus, the workspace, the venv, each folder its
     interpreter resolves through and the fonts; it writes only the workspace; the workspace's config stays hidden and
-    read-only inside the workspace, telemetry.jsonl, the view log, the registry folder and the views folder read-only."""
+    read-only inside the workspace, telemetry.jsonl, the view log, the registry folder, the views' state and the
+    workspace's local extension read-only."""
     rules, (venv, minor, real) = _rules(tmp_path, "darwin")
     fs = rules["filesystem"]
     hidden = {f"{WS}/settings.json", f"{WS}/config.json"}
@@ -52,7 +53,7 @@ def test_on_macos_srt_hides_the_home_and_user_data_and_shows_the_kernel_its_own_
     assert {CORPUS, WS, str(venv), str(minor), str(real), "/app/backend/app/fonts"} <= set(fs["allowRead"])
     assert not any("sandbox-runtime" in p for p in fs["allowRead"]), "apply-seccomp runs only on Linux"
     assert fs["allowWrite"] == [WS]
-    read_only = {f"{WS}/telemetry.jsonl", f"{WS}/viewed.jsonl", f"{WS}/registry", f"{WS}/views"}
+    read_only = {f"{WS}/telemetry.jsonl", f"{WS}/viewed.jsonl", f"{WS}/registry", f"{WS}/views", f"{WS}/extension"}
     assert set(fs["denyWrite"]) == {*hidden, *read_only, "/tmp/claude", "/private/tmp/claude"}
     linux = _rules(tmp_path / "l", "linux")[0]["filesystem"]
     assert {"/home", "/tmp", "/mnt", "/run/user"} <= set(linux["denyRead"]) and "/Users" not in linux["denyRead"]
@@ -154,26 +155,34 @@ def resolve(index, locator):
     return None
 """
 CARD = """
-import json, pathlib
+import json, os, pathlib
 ws = pathlib.Path.cwd().parent
-views, registry = ws / "views", ws / "registry"
+local, state, registry = ws / "extension", ws / "views", ws / "registry"
+views = local / "views"
 said = [json.loads((views / "posts" / "view.json").read_text())["accepts"][0]["means"]]
 forged = {"name": "x", "claims": ["board.jsonl"], "accepts": [{"form": "L<n>", "means": "WRITTEN-BY-A-CARD"}], "built": "x"}
-for path in (views / "posts" / "view.json", views / "planted" / "view.json", registry / "card_types.json",
-             registry / "extensions.json"):
+for path in (views / "posts" / "view.json", views / "planted" / "view.json", local / "extension.json",
+             state / "proposals.json", registry / "card_types.json", registry / "extensions.json"):
     try:
         path.parent.mkdir(exist_ok=True)
         path.write_text(json.dumps(forged))
         said.append("wrote")
     except OSError:
         said.append("refused")
+for folder in (local, state):
+    try:
+        os.rename(folder, ws / "moved")
+        said.append("moved")
+    except OSError:
+        said.append("kept")
 print(*said)
 """
 
 
 @pytest.mark.parametrize("wrap", ["srt", "bwrap"])
 async def test_card_code_reads_the_views_but_can_t_change_the_forms_main_s_prompt_lists(wrap, monkeypatch, workspaces_tmp):
-    """In the wrapped kernel a card's code reads a view's view.json but can neither change it nor plant a view, so nothing
+    """In the wrapped kernel a card's code reads a view's view.json in the workspace's local extension but can neither
+    change it, plant a view, rewrite the extension's manifest or the proposals, nor move either folder away, so nothing
     it writes reaches the citation forms of main's prompt, nor rewrite the card types and extensions of the registry
     folder; the views kernel still reads the reader and keeps its index and the bytes it read outside the views."""
     if not _wrap_works(wrap):
@@ -186,7 +195,8 @@ async def test_card_code_reads_the_views_but_can_t_change_the_forms_main_s_promp
         (registry / name).write_text("{}\n")
     try:
         cell = await notebook.run_code("mini", CARD, "main")
-        assert "".join(b.get("text/plain", "") for b in cell["outputs"]).split() == ["one", "post", *["refused"] * 4]
+        said = "".join(b.get("text/plain", "") for b in cell["outputs"]).split()
+        assert said == ["one", "post", *["refused"] * 6, "kept", "kept"], said
         assert all((registry / name).read_text() == "{}\n" for name in ("card_types.json", "extensions.json"))
         prompt = channel.session_prompt(str(config.corpus_dir("mini")))
         assert "one post (Posts)" in views.forms_text("mini") and "one post" in prompt and "WRITTEN-BY-A-CARD" not in prompt
