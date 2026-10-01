@@ -57,28 +57,13 @@ export function listedAsView(p: Proposal, known: ReadonlySet<string>): boolean {
   return (p.status === 'queued' || p.status === 'building') && !p.held && (!!p.revision || known.has(p.slug))
 }
 
-/** The views the bar lists and the proposals not yet built, read and kept fresh. */
-export function useViews(ws: string): { views: BuiltView[]; proposals: Proposal[] } {
-  const proposals = useProposals(ws) ?? []
-  const [views, setViews] = useState<View[]>([])
-  useEffect(() => {
-    let alive = true
-    const read = () => {
-      api
-        .views(ws)
-        // a file-type viewer thimble ships is listed where the corpus holds a file it opens
-        .then((v) => alive && setViews(v.filter((x) => x.ok && (x.origin !== 'builtin' || !!x.first_file))))
-        .catch(() => {
-          /* no views */
-        })
-    }
-    read()
-    const off = bus.on('view', () => read())
-    return () => {
-      alive = false
-      off()
-    }
-  }, [ws])
+/** The views the bar lists and the proposals not yet built, from the views list and the proposals. A file viewer
+ * (`file_type`) is a mode of the File browser, so the bar leaves it and its proposal out. Pure. */
+export function barList(list: readonly View[], all: readonly Proposal[]): { views: BuiltView[]; proposals: Proposal[] } {
+  const fileViewers = new Set(list.filter((x) => x.file_type).map((x) => x.slug))
+  // a file-type viewer thimble ships is listed where the corpus holds a file it opens
+  const views = list.filter((x) => x.ok && !x.file_type && (x.origin !== 'builtin' || !!x.first_file))
+  const proposals = all.filter((p) => !fileViewers.has(p.slug))
   const known = new Map(views.map((v) => [v.slug, v]))
   const slugs = new Set(known.keys())
   const listed = proposals.filter((p) => listedAsView(p, slugs))
@@ -95,6 +80,30 @@ export function useViews(ws: string): { views: BuiltView[]; proposals: Proposal[
   // a viewer the File browser suggests for a file type shows there alone until it is accepted, and an orientation's
   // view appears once it is built
   return { views: built, proposals: proposals.filter((p) => !listed.includes(p) && p.status !== 'built' && p.status !== 'dropped' && p.status !== 'suggested' && !p.held) }
+}
+
+/** The views the bar lists and the proposals not yet built, read and kept fresh (barList). */
+export function useViews(ws: string): { views: BuiltView[]; proposals: Proposal[] } {
+  const proposals = useProposals(ws) ?? []
+  const [list, setList] = useState<View[]>([])
+  useEffect(() => {
+    let alive = true
+    const read = () => {
+      api
+        .views(ws)
+        .then((v) => alive && setList(v))
+        .catch(() => {
+          /* no views */
+        })
+    }
+    read()
+    const off = bus.on('view', () => read())
+    return () => {
+      alive = false
+      off()
+    }
+  }, [ws])
+  return barList(list, proposals)
 }
 
 /** The spinner's words for a proposal's build: queued, building, or waiting for permission while a request of its

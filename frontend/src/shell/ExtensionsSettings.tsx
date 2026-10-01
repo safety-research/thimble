@@ -3,9 +3,14 @@
 // cannot run here whatever the switch says (switched off in thimble's config, or unable to load) has its switch
 // disabled and says why. A view's switch stands where the check on whether it fits put it until the analyst moves it,
 // which overrides the check either way; beside it is the check's reason. Conflicts among the running extensions are
-// listed under the rows.
+// listed under the rows. The workspace's own views, which thimble built for it and no other workspace shows, come first
+// under "This workspace", with no switch, since they are on here without being added.
 import { Switch } from '../components/Switch'
-import type { ExtensionRow, Extensions } from '../lib/types'
+import type { ExtensionRow, Extensions, LocalExtension } from '../lib/types'
+
+export const LOCAL_LABEL = 'This workspace'
+export const LOCAL_NOTE = 'Views built here. No other workspace shows them.'
+export const FILE_VIEWER_NOTE = 'Opens in the File browser'
 
 /** The key a view's switch has: `<extension>/<view>`. */
 export const viewKey = (name: string, slug: string): string => `${name}/${slug}`
@@ -36,11 +41,36 @@ interface Props {
   setViewOn: (key: string, v: boolean) => void
 }
 
+function LocalRows({ local }: { local: LocalExtension }) {
+  return (
+    <div className="settings-extension settings-extension-local" data-extension={local.name} data-local>
+      <div className="settings-switch">
+        <span aria-hidden />
+        <span className="settings-switch-text">
+          <span className="settings-switch-label">{LOCAL_LABEL}</span>
+          <span className="settings-switch-note">{LOCAL_NOTE}</span>
+        </span>
+      </div>
+      {local.views.map((v) => (
+        <div className="settings-switch settings-extension-view" key={v.slug} data-view={v.slug}>
+          <span aria-hidden />
+          <span className="settings-switch-text">
+            <span className="settings-switch-label">{v.name}</span>
+            {v.file_viewer && <span className="settings-switch-note">{FILE_VIEWER_NOTE}</span>}
+          </span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 export function ExtensionsSettings({ data, on, setOn, viewOn, setViewOn }: Props) {
-  if (!data.extensions.length) return null
+  const local = data.local?.views.length ? data.local : null
+  if (!data.extensions.length && !local) return null
   return (
     <div className="settings-switches settings-extensions" role="group" aria-label="Extensions">
       <span className="label settings-extensions-head">extensions</span>
+      {local && <LocalRows local={local} />}
       {data.extensions.map((e) => (
         <div className="settings-extension" key={e.name} data-extension={e.name} data-active={e.active}>
           <div className="settings-switch">

@@ -471,7 +471,10 @@ export interface View {
   /** the files it claims, the first 500 of them, and how many there are */
   files?: string[]
   n_files?: number
-  /** every claim is one extension's glob: a viewer for a file type, a mode of the File browser for the files it claims */
+  /** "file" for a file viewer; what one unit of a corpus view is otherwise, as view.json gives it */
+  unit?: string | Record<string, string> | null
+  /** a file viewer, a mode of the File browser for the files it claims rather than a view in the views bar: its unit is
+   * "file", or with no unit every claim is one extension's glob (backend views.file_type_viewer) */
   file_type?: boolean
 }
 
@@ -995,10 +998,26 @@ export interface ExtensionRow {
   views: ExtensionViewRow[]
 }
 
-/** `GET /ws/{c}/extensions`: the extensions added, and the conflicts among those that run here, in words. */
+/** One view built for this workspace, in its local extension (backend views.local_extension). */
+export interface LocalViewRow {
+  slug: string
+  name: string
+  /** a file viewer, which opens in the File browser */
+  file_viewer: boolean
+}
+
+/** The workspace's local extension: the views built for this workspace, which no other workspace shows. */
+export interface LocalExtension {
+  name: string
+  views: LocalViewRow[]
+}
+
+/** `GET /ws/{c}/extensions`: the extensions added, the conflicts among those that run here, in words, and the
+ * workspace's local extension. */
 export interface Extensions {
   extensions: ExtensionRow[]
   conflicts: string[]
+  local?: LocalExtension | null
 }
 
 // ---- the corpus (backend corpus.py) ----
