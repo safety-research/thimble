@@ -187,7 +187,7 @@ def test_the_new_layout_gives_roles_tasks_subagents_and_report_types(tmp_path, c
     row = next(r for r in extensions.public(c)["extensions"] if r["name"] == "kit")
     assert row["description"] == "A kit." and "reader agent" in row["parts"]
     assert row["consent"] == ("orientation and critic: network, web asks first, corpus edits ask first. labels task: network, "
-                              "corpus edits ask first. reader: network, no web.")
+                              "no web, corpus read-only. reader: network, no web.")
 
 
 def test_files_in_a_prompt_lists_the_extension_s_scope_where_it_matches(tmp_path, corpus):

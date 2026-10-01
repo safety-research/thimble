@@ -167,6 +167,8 @@ CONFIG_DENIED_LINE = "thimble's config refuses this command."  # userconf: `inst
 TIMED_OUT_LINE = ("Nobody answered in thimble's browser within {wait}, so the call was denied. Carry on without it, "
                   "or find a way that needs no permission.")
 GONE_LINE = "The session ended before it was answered."
+NO_ONE_LINE = ("Nobody can answer this session's requests, since the program that started it has no thread in "
+               "thimble's browser, so the call was denied. Carry on without it.")
 ALLOWED_LINE = "Allowed in thimble's browser."  # a refused call made again, once allowed (module note, auto mode)
 CALL_REF_HOOK = Path(__file__).with_name("call_ref.py")  # module note, calls
 CALL_REF_EVENTS = ("PostToolUse", "PostToolUseFailure")
@@ -398,6 +400,7 @@ class Run:
 
 _runs: dict[tuple[str, str], Run] = {}  # by (workspace, key): the sessions that run
 _hosted: dict[tuple[str, str], Run] = {}  # by (workspace, key): the hosted sessions (module note, hosted sessions)
+_unanswered: set[tuple[str, str]] = set()  # (workspace, key) of sessions nobody can answer, denied with NO_ONE_LINE
 _switched: dict[tuple[str, str], str] = {}  # by (workspace, chat): the mode a card switched the chat's session to
 # by (workspace, key): the start arguments of a background session's last run, for a turn it starts on its own
 # (bg_session.on_wake, revive)
@@ -2207,6 +2210,14 @@ def host(c: str, key: str, chat: str, *, agent: str, wait_s: float,
     return run
 
 
+def unanswered(c: str, key: str, on: bool) -> None:
+    """Mark the sessions of `key` as ones nobody can answer (a program's run with no chat), or no longer."""
+    if on:
+        _unanswered.add((c, key))
+    else:
+        _unanswered.discard((c, key))
+
+
 def unhost(c: str, key: str) -> None:
     """The hosted session `key`'s run is over: what still waits is denied, and its chat's card is cleared."""
     run = _hosted.pop((c, key), None)
@@ -2293,7 +2304,7 @@ async def ask(c: str, key: str | None, tool_name: str, inp: Any, agent_id: str |
     is denied unanswered (dev's code-ticket question)."""
     run = asker(c, key)
     if run is None:
-        return {"behavior": "deny", "message": GONE_LINE}
+        return {"behavior": "deny", "message": NO_ONE_LINE if (c, key or "") in _unanswered else GONE_LINE}
     granted = {"behavior": "allow", "updatedInput": inp if isinstance(inp, dict) else {}}
     verdict = "ask" if force else run.config.verdict(tool_name, inp) if run.config is not None else ""
     if verdict == "deny":

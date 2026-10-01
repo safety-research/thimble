@@ -51,8 +51,9 @@ answers or check one.
 
 A task's program runs under the settings of an agent in thimble's config: `labels` for labels, label-draft and
 view-fit, `cardCheck` for card-check and view-review, `dev` for file-viewer and `checks` for checks. Where that agent
-has no `sandbox`, `network` or `data` of its own, the defaults hold: the sandbox on, the network on, the corpus
-read-only.
+has no `sandbox` or `network` of its own, the sandbox and the network are on. Only the checks task's program has a
+thread, so nobody can answer what another task's program would ask: it never edits the corpus unless that agent's
+`data` is `allow`, its sessions use the web only when its `web` is `allow`, and any other permission request is denied.
 
 The environment:
 

@@ -1895,9 +1895,13 @@ def consent(e: dict[str, Any], conf: dict[str, Any], wrapped: bool | None = None
 
     for r in e.get("tasks") or []:
         if isinstance(r, dict) and r.get("kind") in ("sdk", "command") and r.get("task") in tasks.TASKS:
-            a = agents_conf.get(tasks.TASKS[r["task"]].agent)
-            used[f"{r['task']} task"] = _settings_words({"network": "on", "data": "ask",
-                                                             **(a if isinstance(a, dict) else {})})
+            spec = tasks.TASKS[r["task"]]
+            a = agents_conf.get(spec.agent)
+            words = {"network": "on", "data": "ask", **(a if isinstance(a, dict) else {})}
+            if not spec.session:  # no thread, so nobody answers what it would ask (harness.claude_argv)
+                words.update(web="off" if words.get("web") in (None, "ask") else words["web"],
+                             data=None if words.get("data") == "ask" else words["data"])
+            used[f"{r['task']} task"] = _settings_words(words)
     root = source_path(str(e.get("name") or ""))
     for name in _words(e.get("agents")):
         words = _settings_words(userconf.extension_agent(conf, f"{e.get('name')}:{name}"), data=False)

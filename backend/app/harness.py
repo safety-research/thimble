@@ -655,8 +655,11 @@ def claude_argv(run: Run, argv: list[str]) -> tuple[list[str], Path, dict[str, s
     permission_mode = modes.flag(mode)
     settings: dict[str, Any] = {"permissions": dict(asked)}
     unasked = job.unasked
+    # a run with no chat (a task's program) has nobody to ask, so what would ask is refused
+    data = conf.data if run.chat or conf.data != "ask" else "off"
+    web = conf.web if run.chat or conf.web != "ask" else "off"
     fenced = agent_session.fence(corpus, work, sandbox=conf.sandboxed, unasked=unasked, network=conf.network,
-                                 auto_allow=not conf.install_asks(), required=conf.enforced, data=conf.data)
+                                 auto_allow=not conf.install_asks(), required=conf.enforced, data=data)
     perms = {**settings["permissions"]}
     for k, rules in fenced["permissions"].items():
         perms[k] = list(dict.fromkeys([*(perms.get(k) or []), *rules])) if isinstance(rules, list) else rules
@@ -669,9 +672,9 @@ def claude_argv(run: Run, argv: list[str]) -> tuple[list[str], Path, dict[str, s
             fenced = {**fenced, "sandbox": {**box, "filesystem": fs}}
     settings = {**fenced, "permissions": perms}
     settings = agent_session.with_config(settings, conf.settings())
-    if conf.web == "ask":
+    if web == "ask":
         settings = agent_session.with_web_asks(settings, permission_mode)
-    elif conf.web == "off":
+    elif web == "off":
         denied += list(agent_session.WEB_TOOLS)
     hooks = agent_session.permission_hooks(job.c, permission_mode == "auto", session=job.key,
                                            home=str(userconf.global_file().parent), wait=conf.may_ask())
@@ -900,6 +903,7 @@ async def run_task(c: str, task: str, part: roles.Part, input: dict[str, Any]) -
     job = task_job(c, task, input)
     try:
         run, argv = await asyncio.to_thread(_prepare, job, part)
+        run.conf.hosted = False
         _register(run)
         try:
             return await _run(run, argv)
@@ -925,6 +929,8 @@ async def _run(run: Run, argv: list[str]) -> Any:
         hosted = agent_session.host(job.c, job.key, run.chat, agent=job.mode_row,
                                     wait_s=agent_session.PERMISSION_WAIT_S, sandbox=rule, conf=run.conf)
         hosted.patient = job.patient
+    else:
+        agent_session.unanswered(job.c, job.key, True)
     try:
         try:
             run.proc = await asyncio.create_subprocess_exec(
@@ -944,6 +950,7 @@ async def _run(run: Run, argv: list[str]) -> Any:
     finally:
         hook_auth.revoke(run.token_id)
         agent_session.unhost(job.c, job.key)
+        agent_session.unanswered(job.c, job.key, False)
         await _stop_all(run)
     if code != 0:
         tail = "\n".join(run.stderr).strip()[-1200:]

@@ -16,8 +16,8 @@ from pathlib import Path
 
 import pytest
 
-from app import agents, checks, concepts, config, extensions, harness, kernel_wrap, model, notebook, orientation, \
-    tasks, tools, userconf
+from app import agent_session, agents, checks, concepts, config, extensions, harness, kernel_wrap, model, notebook, \
+    orientation, tasks, tools, userconf
 
 REPO = Path(__file__).resolve().parents[2]
 EXAMPLE = REPO / "docs" / "examples" / "vote-labels"
@@ -281,6 +281,46 @@ thimble.serve(run)
     assert res.status == "ok", res.detail
     assert res.output["secret"] == "PermissionError" and res.output["corpus"] != "ok" and res.output["work"] == "ok"
     assert not (config.corpus_dir(CORPUS) / "x.txt").exists()
+
+
+SESSION = '''import thimble
+async def run(input):
+    await thimble.session("Read the items.")
+    return {"labels": []}
+thimble.serve(run)
+'''
+
+
+async def test_a_task_program_s_sessions_refuse_what_they_would_ask_since_nobody_can_answer(
+        tmp_path, data_tmp, workspaces_tmp, active, unboxed, monkeypatch):
+    """A task's program has no thread, so its sessions are refused what they would ask: corpus edits, the web and
+    installs, and any other request is denied with a line that says why, not one about an ended session."""
+    log_file = tmp_path / "claude.log"
+    fake = tmp_path / "claude"
+    fake.write_text(f"#!/bin/sh\nexec {sys.executable} {FAKE} \"$@\"\n")
+    fake.chmod(0o755)
+    monkeypatch.setattr(agent_session, "CLAUDE_BIN", str(fake))
+    monkeypatch.setenv("FAKE_CLAUDE_LOG", str(log_file))
+    active.append(_program(tmp_path, "asker", "labels", SESSION))
+    res = await tasks.call(CORPUS, "labels", {"items": []})
+    assert res.status == "ok", res.detail
+    [start] = [json.loads(line) for line in log_file.read_text().splitlines()]
+    argv = start["argv"]
+    settings = json.loads(argv[argv.index("--settings") + 1])
+    corpus = Path(userconf.session(CORPUS, "labels", sandbox=False).corpus() or config.corpus_dir(CORPUS))
+    assert f"Edit(/{corpus}/**)" in settings["permissions"]["deny"]
+    asked = settings["permissions"].get("ask") or []
+    assert not any(str(corpus) in r or r.startswith("Bash(") or r.startswith("Web") for r in asked), asked
+    assert {"WebFetch", "WebSearch"} <= set(argv[argv.index("--disallowedTools") + 1].split(","))
+    key = start["session"]
+    assert key.startswith("task:labels:")
+    agent_session.unanswered(CORPUS, key, True)
+    try:
+        got = await agent_session.ask(CORPUS, key, "Bash", {"command": "ls"})
+    finally:
+        agent_session.unanswered(CORPUS, key, False)
+    assert got == {"behavior": "deny", "message": agent_session.NO_ONE_LINE}
+    assert (await agent_session.ask(CORPUS, key, "Bash", {"command": "ls"}))["message"] == agent_session.GONE_LINE
 
 
 # --------------------------------------------------------------------------- the checks task
