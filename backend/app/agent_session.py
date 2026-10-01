@@ -424,7 +424,14 @@ def on_relaunch(kind: str, fn: Callable[[str, dict[str, Any]], dict[str, Any]]) 
     _relaunchers[kind] = fn
 
 
+def callers() -> None:
+    """Import the callers that register how their sessions start again (on_resume, on_left, on_relaunch): the server
+    imports a writer's and a critique's module only when the first of them starts."""
+    from . import critique_session, orient_session, write_session  # noqa: F401, PLC0415
+
+
 def _launch_kw(c: str, key: str, meta: dict[str, Any]) -> dict[str, Any] | None:
+    callers()
     kw = _launches.get((c, key))
     fn = _relaunchers.get(bg_session.kind_of(key)) if kw is None else None
     return fn(c, meta) if fn is not None else kw
@@ -1796,6 +1803,7 @@ async def resume_chat(c: str, chat: str) -> Run:
     its conversation, as the chat's next run. RuntimeError when the chat is no such chat or runs."""
     from . import orient_session, write_session  # noqa: PLC0415 — both import this module
 
+    callers()
     meta = agents.meta_or_none(c, chat)
     if meta is None or not meta.get("background"):
         raise RuntimeError("this chat is no background session of thimble's")
@@ -1953,10 +1961,7 @@ async def recover() -> tuple[list[str], list[str]]:
     """Server start: every run a previous server left running has its process ended when it still runs and is resumed by its
     caller, or closed as failed with the reason; and the ends main did not hear are told once a session listens. Returns
     (closed, resumed), `<workspace>/<chat>` per run."""
-    # the callers whose ends a run left running needs register them when imported (on_left, on_resume), and the server
-    # imports a writer's module only when the first write starts
-    from . import orient_session, write_session  # noqa: F401, PLC0415
-
+    callers()
     closed: list[str] = []
     resumed: list[str] = []
     root = config.WORKSPACES_DIR

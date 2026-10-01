@@ -36,6 +36,7 @@ def idle_session(tmp_path, monkeypatch):
     e.tx_path, e.tx_sid = str(path), e.sid
     monkeypatch.setattr(bg_session, "_loaded", {CORPUS})  # the sessions of other tests are not this one's watcher's
     monkeypatch.setattr(bg_session, "_entries", {(CORPUS, KEY): e})
+    monkeypatch.setattr(bg_session, "_wake", {})  # no run follows a turn, so the session stays one that works
     listed: list[float] = []
     state = {"status": "idle"}
 

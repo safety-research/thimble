@@ -59,6 +59,7 @@ async def test_a_finished_session_s_tray_entry_ends_and_main_is_not_asked_for_an
     async def wake(c, entry):
         woken.append(entry.key)
         entry.run_open = True
+        return object()  # the run that follows it
 
     monkeypatch.setattr(bg_session, "_wake", {"critique": wake})
     e.status = "idle"
@@ -77,7 +78,11 @@ async def test_a_finished_session_s_tray_entry_ends_and_main_is_not_asked_for_an
     await bg_session._tick([_row(e, "idle")])
     assert asked == [] and woken == [], "main is not asked to show a finished session again"
 
-    await bg_session._tick([_row(e, "busy")])  # a message typed in its terminal starts another turn
+    await bg_session._tick([_row(e, "busy")])
+    assert woken == [] and bg_session.finished(e), "listed busy with no turn in its transcript: a background shell runs"
+    with path.open("a") as f:  # a message typed in its terminal starts another turn
+        f.write(json.dumps({"type": "user", "message": {"role": "user", "content": "And April?"}}) + "\n")
+    await bg_session._tick([_row(e, "busy")])
     await asyncio.sleep(0)
     assert woken == [KEY] and not bg_session.finished(e)
     assert asked == [(KEY,)], "a session that works again shows in the tray again"
