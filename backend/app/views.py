@@ -1,11 +1,14 @@
 """Views: viewers written for how a corpus arranges its records, and the proposals they start as.
 
 A view is three files in `workspaces/<c>/extension/views/<slug>/`, the workspace's local extension (local_dir), written
-by the dev agent's session (dev.run_view): view.json {name, description, claims, unit, accepts, units, derived, libs,
+by the dev agent's session (dev.run_view): view.json {name, description, scope, unit, records, accepts, units, libs,
 built}, reader.py (the contract in view_host.py), and view.html, drawn in a sandboxed frame that loads nothing but the
-view's media route. `claims` are globs of the files the view opens, `unit` "file" for a file viewer (file_type_viewer),
-`accepts` the fragment forms it understands (`L<n>`), `units` its own `view:<slug>/<key>` units, `derived` the fields its
-reader made rather than read ({field, from, how}); `why` and `declares` are read for `description` and `units`.
+view's media route. `scope` are globs of the files the view opens (held as `claims`), `unit` "file" for a file viewer
+(file_type_viewer), `records` its kinds of record with the fields its reader made rather than read, each `derived`
+cleaned or computed with `from` and `how`, `accepts` the fragment forms it understands, each {form, means} cited
+`<file>#<form>`, and `units` the forms of its own units, each {form, means} cited `view:<slug>/<form>`. Older names are
+read too: `claims` for `scope`, a `derived` list of {field, from, how} beside `records`, `why` for `description` and
+`declares` for `units`.
 
 Code holds every view to three things the analyst can always see above it. Its residue (shown): each claimed file is
 read to the end by build_index or listed by the reader's hidden() with a why, a claim that matches no file is missing,
