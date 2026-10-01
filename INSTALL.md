@@ -106,11 +106,11 @@ view's reason, and its switch there overrides the check.
 The views thimble builds for a workspace are that workspace's own extension, in `workspaces/<workspace>/extension/`.
 No other workspace shows them. Settings > Extensions lists them under This workspace's views, each with its switch.
 
-`swarm-orient` adds to the orientation for corpora where many agents act on shared pages and channels and address
-each other. Many swarm-reader agents read every record, a coordination label marks each one, the counts are checked,
-and the episodes are drawn as `multiagent-swimlane` cards, the card type that draws a swimlane of the actions main
-chose. Test builds called it `swarm`: the commands still take that name for this release, and what was set for it
-carries over.
+`swarm-orient` adds to the orientation for corpora where many agents act on shared pages and channels and address each
+other. Many swarm-reader agents read every record, a label that fits the analyst's request marks each one, the counts
+are checked, and the episodes are drawn as `multiagent-swimlane` cards, the card type that draws a swimlane of the
+actions main chose. Test builds called it `swarm`: the commands still take that name for this release, and what was
+set for it carries over.
 
 ## Update
 
