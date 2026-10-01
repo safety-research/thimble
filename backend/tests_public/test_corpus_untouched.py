@@ -128,6 +128,9 @@ def test_a_view_build_runs_in_its_own_folder_with_the_view_s_folder_and_the_corp
     settings = _settings(flags)
     assert settings["env"][agent_session.HOME_SHELL_ENV] == "1"
     assert f"Edit(/{work}/**)" in settings["permissions"]["allow"]
+    assert settings["env"][agent_session.MEMORY_ENV] == "1", "the corpus's CLAUDE.md is read"
+    assert {f"{work}/CLAUDE.md", f"{config.WORKSPACES_DIR}/CLAUDE.md"} <= set(settings["claudeMdExcludes"]), \
+        "no memory file above the build's own folder, such as thimble's own, is read"
     assert dev.trust_folder(work) == config.WORKSPACES_DIR, "an untrusted build names the folder install.sh trusts"
 
     async def untrusted(args, cwd, env=None):

@@ -2728,18 +2728,23 @@ def view_fence(c: str, slug: str, corpus: Path, folder: Path, conf: userconf.Ses
     """The settings that fence a view build's session: the view_read_only folders read-only, but for the corpus, whose
     edits follow the dev agent's `data` (data_fence), its check command run outside the sandbox, where it can reach
     this server, and while the dev agent's network is off (`conf`), offline_deny and the offline environment
-    (view_env)."""
+    (view_env). As for the other agents' sessions (agent_session.fence), the memory files above the build's own folder
+    (view_work_dir), such as thimble's own CLAUDE.md, are left out, and the corpus's CLAUDE.md is read."""
+    from . import agent_session  # noqa: PLC0415
+
     check = view_check_command(c, slug)
     fixed = view_read_only(corpus, folder)
     out = read_only_fence(fixed, outside=(check, f"{check} *"), conf=conf)
     if Path(corpus) in fixed:
         out = data_fence(out, Path(corpus), conf.data)
+    out = {**out, "claudeMdExcludes": agent_session.memory_excludes(Path(corpus), view_work_dir(c, slug))}
+    memory = {agent_session.MEMORY_ENV: "1"}
     if conf.network:
-        return {**out, "env": view_env(slug, offline=False)}
+        return {**out, "env": {**view_env(slug, offline=False), **memory}}
     conf.offline = True
     perms = dict(out.get("permissions") or {})
     deny = [*(perms.get("deny") or []), *offline_deny()]
-    return {**out, "permissions": {**perms, "deny": deny}, "env": view_env(slug)}
+    return {**out, "permissions": {**perms, "deny": deny}, "env": {**view_env(slug), **memory}}
 
 
 def data_fence(fence: dict[str, Any], corpus: Path, data: str) -> dict[str, Any]:
