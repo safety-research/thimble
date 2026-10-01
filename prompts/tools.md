@@ -792,7 +792,23 @@ Filtered to the test label, the page shows {records} records, and the filter kee
 
 ## view-missing
 
-These claims match no file of the corpus, which the analyst sees above the view as missing: {claims}.
+The claims expect files the corpus lacks, which the analyst sees above the view as missing: {files}.
+
+## view-robust-reader
+
+With {what}, the reader failed: {error}. A real corpus can lack a file or hold a line cut short, so read what is there, and report each line you cannot parse with problems().
+
+## view-robust-torn
+
+thimble added a line cut short at {ref}, and problems() does not report it. Report each line the reader cannot parse with problems(), so the analyst sees it above the view.
+
+## view-robust-page
+
+With {what}, the page failed: {errors}. One missing file or bad line must leave the rest of the view working.
+
+## view-robust-empty
+
+With {what}, the page shows no record, though over the whole corpus it shows records. One missing file or bad line must leave the rest of the view working.
 
 ## view-not-shown
 
@@ -800,7 +816,7 @@ These claims match no file of the corpus, which the analyst sees above the view 
 
 ## view-not-claimed
 
-{count} files sit in folders beside the ones the view claims and hold the same files, such as another run's: {files}. The analyst sees each one above the view as not shown. Claim them too and show them, with a way to choose among the folders if the page shows one at a time, or claim them and return them from hidden(index) with a `why`.
+{count} files sit in folders beside the ones the view claims and hold the same files, such as another run's: {files}. The analyst sees each one above the view as not read. If the view is for all of them, claim them and let the analyst choose among the folders.
 
 ## view-derived-unlisted
 

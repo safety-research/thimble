@@ -4,7 +4,8 @@ kernel and calls `call` there).
 A viewer's reader.py defines build_index(paths) -> index, records(index, query) -> JSON, and resolve(index, locator) ->
 {excerpt, label, refs, key?, target?} or None, and may define problems(index) -> the lines it could not read, as
 [{ref, why}] or {count, examples: [{ref, why}]}, hidden(index) -> the claimed files it leaves out on purpose, as
-[{path, why}], and derived(index) -> the fields it made rather than read, as [{field, from, how}]; a card type thimble
+[{path, why}], unplaced(index) -> the records it read but could not place in the page, as problems() gives them, and
+derived(index) -> the fields it made rather than read, as [{field, from, how, kind?}]; a card type thimble
 ships may also define applies(paths) -> {claims, found} or None, whether it fits a corpus (cardtypes.claims_of), which
 runs with no index. `call` loads reader.py (again when it changed), builds the index or loads it from a pickle keyed by
 the files' and reader's fingerprint, runs one operation and prints SENTINEL followed by the JSON answer. A reader that
@@ -312,14 +313,19 @@ def _thimble(req: dict) -> object | None:
 
 
 def answer(req: dict) -> dict:
-    """The answer to one request {slug, reader, fp, paths, cache, reads?, op, arg, labels?}; op is index, records,
-    resolve, resolve_many (a list of locators, answered with a list), problems ([] for a reader without problems()),
-    shown ({reads, hidden, derived}: the bytes build_index read of each claimed file, and hidden() and derived() each as
-    {result} or {error}) or applies (the corpus's record files as `arg`). A records call runs with `labels`, the labels
-    context, as thimble's _view_ctx, which thimble.marked and thimble.kept read."""
+    """The answer to one request {slug, reader, fp, paths, cache, reads?, op, arg, labels?, root?}; op is index,
+    records, resolve, resolve_many (a list of locators, answered with a list), problems ([] for a reader without
+    problems()), shown ({reads, hidden, derived, unplaced}: the bytes build_index read of each claimed file, and
+    hidden(), derived() and unplaced() each as {result} or {error}) or applies (the corpus's record files as `arg`). A
+    records call runs with `labels`, the labels context, as thimble's _view_ctx, which thimble.marked and thimble.kept
+    read, and the claimed paths as its _view_paths. With `root` the call runs in that folder, a copy of the corpus the
+    paths are relative to."""
     t0 = time.monotonic()
     th = None
+    here = os.getcwd() if req.get("root") else None
     try:
+        if here is not None:
+            os.chdir(req["root"])
         _thimble(req)  # before reader.py loads, since it may import thimble at its top
         mod = _reader(req["slug"], req["reader"])
         if req.get("op") == "applies":
@@ -334,6 +340,7 @@ def answer(req: dict) -> dict:
             th = _thimble(req)
             if th is not None:
                 th._view_ctx = req.get("labels")  # type: ignore[attr-defined]
+                th._view_paths = list(req.get("paths") or [])  # type: ignore[attr-defined]
             result = mod.records(idx, req.get("arg"))  # type: ignore[attr-defined]
         elif op == "resolve":
             result = mod.resolve(idx, req.get("arg"))  # type: ignore[attr-defined]
@@ -342,7 +349,7 @@ def answer(req: dict) -> dict:
             result = fn(idx) if callable(fn) else []
         elif op == "shown":
             result = {"reads": _read_counts.get((req["slug"], req["fp"]), {}), "hidden": _optional(mod, "hidden", idx),
-                      "derived": _optional(mod, "derived", idx)}
+                      "derived": _optional(mod, "derived", idx), "unplaced": _optional(mod, "unplaced", idx)}
         elif op == "resolve_many":
             result = []
             for loc in req.get("arg") or []:
@@ -359,6 +366,9 @@ def answer(req: dict) -> dict:
     finally:
         if th is not None:
             th._view_ctx = None  # type: ignore[attr-defined]
+            th._view_paths = []  # type: ignore[attr-defined]
+        if here is not None:
+            os.chdir(here)
 
 
 def call(req_json: str) -> None:

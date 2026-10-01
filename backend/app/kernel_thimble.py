@@ -42,8 +42,10 @@ Rows come from labels/<id>.sqlite when it reflects the labels file, else from la
 A cover over a range of records supplies their negative value. Only the standard library at import; pandas is imported
 when a DataFrame is made.
 """
+import io
 import json
 import math
+import os
 import numbers
 import re
 import sqlite3
@@ -369,6 +371,8 @@ def labels(name=None, negatives=False):
     negatives=True)."""
     import pandas as pd
 
+    if (_view_ctx or {}).get("probe") and (name is None or name == PROBE_NAME):
+        return _probe_labels(pd, name, negatives)
     if name is None:
         ks = [k for k in _concepts() if not k["superseded_by"]]
         return pd.DataFrame([{"name": k["name"], "id": k["id"], "kind": k["kind"], "unit": k["unit"], "values": k["values"],
@@ -416,6 +420,7 @@ def colours(name, values=None):
 # probe {"probe": n, "filter": bool}, a test label that marks every record whose line is a multiple of n. Outside a
 # view's call it is None, and marked() and kept() answer as if no label were on.
 _view_ctx = None
+_view_paths: list = []  # the claimed files of the view whose reader call is running
 PROBE_NAME = "test label"
 PROBE_ID = "test-label"
 # the colour the analyst's first label takes (--label-1), so the pictures show a view's own colour that clashes with a
@@ -482,6 +487,55 @@ def _value_of(label: dict, ref: str):
     if path is None or line is None:
         return None
     return next((value for a, b, value in spans.get(path, ()) if a <= line <= b), None)
+
+
+_LINES: dict = {}  # path -> ((mtime_ns, size), line count)
+
+
+def _line_count(path: str) -> int:
+    try:
+        st = os.stat(path)
+    except OSError:
+        return 0
+    sig = (st.st_mtime_ns, st.st_size)
+    hit = _LINES.get(path)
+    if hit is not None and hit[0] == sig:
+        return hit[1]
+    n = 0
+    with io.open(path, "rb") as f:
+        head = f.read(4096)
+        if b"\0" in head:
+            n = 0
+        else:
+            f.seek(0)
+            last = b""
+            for block in iter(lambda: f.read(1 << 20), b""):
+                n += block.count(b"\n")
+                last = block
+            if last and not last.endswith(b"\n"):
+                n += 1
+    _LINES[path] = (sig, n)
+    return n
+
+
+def _probe_labels(pd, name, negatives):
+    """thimble.labels() under the test label: the list holds it alone, and its matches are the lines of the view's
+    claimed files whose number is a multiple of the probe's, with every other line under negatives=True."""
+    every = int(_view_ctx["probe"])
+    if name is None:
+        return pd.DataFrame([{"name": PROBE_NAME, "id": PROBE_ID, "kind": "regex", "unit": "line", "values": [PROBE_NAME],
+                              "n_labeled": None}], columns=["name", "id", "kind", "unit", "values", "n_labeled"])
+    out = []
+    for path in _view_paths:
+        for line in range(1, _line_count(path) + 1):
+            hit = line % every == 0
+            if hit or negatives:
+                value = PROBE_NAME if hit else None
+                out.append((path, line, value, value, "probe", None, None, f"{path}#L{line}"))
+    df = pd.DataFrame(out, columns=_COLUMNS, dtype=object)
+    df["line"] = pd.array(df["line"].tolist(), dtype="Int64")
+    df["confidence"] = pd.to_numeric(df["confidence"], errors="coerce")
+    return df
 
 
 def _probed(ref: str, every) -> bool:

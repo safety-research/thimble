@@ -38,14 +38,22 @@ import json
 
 
 def build_index(paths):
-    threads, lines = {}, {}
+    threads, lines, bad = {}, {}, []
     for path in paths:
         with open(path) as f:
             for n, line in enumerate(f, 1):
-                r = json.loads(line)
+                try:
+                    r = json.loads(line)
+                except ValueError:
+                    bad.append({"ref": f"{path}#L{n}", "why": "not JSON"})
+                    continue
                 threads.setdefault(r["thread"], []).append([path, n, r["author"], r["body"]])
                 lines[f"{path}#L{n}"] = r["thread"]
-    return {"threads": threads, "lines": lines}
+    return {"threads": threads, "lines": lines, "bad": bad}
+
+
+def problems(index):
+    return index["bad"]
 
 
 def records(index, query):
@@ -281,7 +289,8 @@ def test_the_count_is_what_the_reader_takes_not_what_the_buffers_read(tmp_path):
 
 DERIVING_READER = THREADS_READER.replace(
     '[{"ref": f"{p}#L{n}", "author": a, "body": b}',
-    '[{"ref": f"{p}#L{n}", "author": a.upper(), "body": b, "words": len(b.split()) * 1000}')
+    '[{"ref": f"{p}#L{n}", "author": a.upper(), "body": b, "score": len(b) * 1.5, "replies": 7, "thread_key": "k" + a,'
+    ' "mood": "unknown"}')
 
 
 async def test_a_field_whose_values_the_cited_lines_do_not_hold_is_noted_until_the_view_lists_it(
@@ -297,14 +306,86 @@ async def test_a_field_whose_values_the_cited_lines_do_not_hold_is_noted_until_t
     views.write_view(CORPUS, "threads", reader=DERIVING_READER, html=THREADS_HTML, **VIEW)
     rep = await views.gate(CORPUS, "threads", ["board.jsonl#L3"])
     assert rep["ok"], views.gate_lines(rep)
-    noted = [n for n in rep["notes"] if "derived" in n]
-    assert len(noted) == 1 and "author ('ADA' on board.jsonl#L1)" in noted[0] and "words (" in noted[0], noted
-    assert "body" not in noted[0], "a field the line holds is no derived field"
+    noted = [n for n in rep["notes"] if "`derived`" in n]
+    assert len(noted) == 1 and "author ('ADA' on board.jsonl#L1)" in noted[0] and "score (" in noted[0], noted
+    for field in ("body", "replies", "thread_key", "mood"):
+        assert f"{field} (" not in noted[0], f"{field}: a raw value, a count, a key or a default needs no entry"
     views.write_view(CORPUS, "threads", reader=DERIVING_READER, html=THREADS_HTML,
                      **{**VIEW, "derived": [{"field": "author", "from": "author", "how": "upper-cased"},
-                                            {"field": "words", "from": "body", "how": "its words, in thousands"}]})
+                                            {"field": "score", "from": "body", "how": "its length", "kind": "inferred"}]})
     rep = await views.gate(CORPUS, "threads", ["board.jsonl#L3"])
-    assert rep["ok"] and not [n for n in rep["notes"] if "derived" in n], views.gate_lines(rep)
+    assert rep["ok"] and not [n for n in rep["notes"] if "`derived`" in n], views.gate_lines(rep)
+    assert [d["field"] for d in rep["coverage"]["derived"]] == ["score", "author"], "an inferred field comes first"
+
+
+def test_a_file_one_folder_lacks_beside_the_others_is_missing():
+    """A claim of a file in each of several folders names the file a folder lacks that holds other claimed files."""
+    claimed = ["runs/r1/events.jsonl", "runs/r1/manifest.json", "runs/r2/events.jsonl", "runs/r2/manifest.json",
+               "runs/r3/events.jsonl", "runs/r3/agents/a1.jsonl"]
+    out = views.missing_files(["runs/*/events.jsonl", "runs/*/manifest.json", "runs/*/agents/*.jsonl", "notes/*.md"], claimed)
+    paths = [m["path"] for m in out]
+    assert "runs/r3/manifest.json" in paths and "notes/*.md" in paths
+    assert "runs/r1/manifest.json" not in paths and not any("agents" in x for x in paths), "one run's agents set no rule"
+
+
+def test_files_beside_a_claimed_folder_are_named_only_where_the_view_reads_their_like():
+    """In a folder beside a claimed one, a file is named when a claimed file has its path below the claimed folder, or
+    when the claimed folder holds only claimed files of its subfolder and type; other files of that type are not."""
+    every = ["P7/transcript.md", "P7/return/events.jsonl", "P7/return/hooks.jsonl", "P7/return/dialogs.jsonl",
+             "P8/transcript.md", "P8/return/events.jsonl", "P8/return/hooks.jsonl", "P8/return/dialogs.jsonl"]
+    assert views.sibling_files(["P7/transcript.md", "P7/return/events.jsonl"], every) == [
+        "P8/return/events.jsonl", "P8/transcript.md"]
+    assert views.sibling_files(["P7/transcript.md", *[p for p in every if p.startswith("P7/return/")]], every) == [
+        "P8/return/dialogs.jsonl", "P8/return/events.jsonl", "P8/return/hooks.jsonl", "P8/transcript.md"]
+
+
+async def test_the_checks_run_the_view_on_a_copy_with_a_file_missing_and_a_line_cut_short(ws, inproc, bound, monkeypatch):
+    """The gate runs the reader on a copy of the corpus with one claimed file left out and a torn line after the last
+    of a JSON lines file: a reader that fails there, or does not report the torn line, fails the gate."""
+    pages = []
+
+    async def page(c, slug, states, **k):
+        pages.append(k.get("prepared"))
+        return [{"ok": True, "errors": [], "fetches": 1, "shown": {"records": 3, "due": 0}} for _ in states]
+
+    monkeypatch.setattr(views, "shoot_states", page)
+    corpus = config.corpus_dir(CORPUS)
+    (corpus / "more.jsonl").write_text((corpus / "board.jsonl").read_text())
+    view = {**VIEW, "claims": ["*.jsonl"]}
+    views.write_view(CORPUS, "threads", reader=THREADS_READER, html=THREADS_HTML, **view)
+    rep = await views.gate(CORPUS, "threads", ["board.jsonl#L3"])
+    assert rep["ok"], views.gate_lines(rep)
+    copy = pages[-1]
+    assert copy and copy["root"].endswith("/robust/corpus") and len(copy["paths"]) == 1
+    assert not (views.index_dir(CORPUS, "threads") / views.ROBUST_SUBDIR).exists(), "the copy is removed after"
+    strict = THREADS_READER.replace("                try:\n                    r = json.loads(line)\n                except ValueError:\n"
+                                    "                    bad.append({\"ref\": f\"{path}#L{n}\", \"why\": \"not JSON\"})\n"
+                                    "                    continue\n", "                r = json.loads(line)\n")
+    assert strict != THREADS_READER
+    views.write_view(CORPUS, "threads", reader=strict, html=THREADS_HTML, **view)
+    rep = await views.gate(CORPUS, "threads", ["board.jsonl#L3"])
+    assert not rep["ok"] and any("missing and a torn line at" in p and "the reader failed" in p for p in rep["problems"]), rep["problems"]
+    quiet = THREADS_READER.replace("    return index[\"bad\"]", "    return []")
+    views.write_view(CORPUS, "threads", reader=quiet, html=THREADS_HTML, **view)
+    rep = await views.gate(CORPUS, "threads", ["board.jsonl#L3"])
+    assert not rep["ok"] and any("does not report it" in p for p in rep["problems"]), rep["problems"]
+
+
+def test_the_test_label_answers_thimble_labels_as_a_label_would(tmp_path):
+    """Under the test label, thimble.labels() lists it and thimble.labels("test label") gives the lines it marks of the
+    view's files, every line with negatives."""
+    from app import kernel_thimble as kt  # noqa: PLC0415
+
+    path = tmp_path / "board.jsonl"
+    path.write_text("".join(f'{{"n": {i}}}\n' for i in range(1, 16)))
+    kt._view_ctx, kt._view_paths = views.probe_context(), [str(path)]
+    try:
+        assert list(kt.labels()["name"]) == [kt.PROBE_NAME]
+        df = kt.labels(kt.PROBE_NAME)
+        assert list(df["line"]) == [7, 14] and set(df["effective"]) == {kt.PROBE_NAME}
+        assert len(kt.labels(kt.PROBE_NAME, negatives=True)) == 15
+    finally:
+        kt._view_ctx, kt._view_paths = None, []
 
 
 def _shot(state: str, **shown) -> dict:
@@ -341,7 +422,7 @@ async def test_a_claim_that_matches_no_file_is_listed_as_missing(ws, inproc, bou
     monkeypatch.setattr(views, "shoot_states", no_page)
     views.write_view(CORPUS, "two", name="Two", description="Posts and a log.", claims=["board.jsonl", "logs/*.log"],
                      accepts=VIEW["accepts"], reader=THREADS_READER, html=THREADS_HTML)
-    assert (await views.shown(CORPUS, "two"))["missing"] == ["logs/*.log"]
+    assert (await views.shown(CORPUS, "two"))["missing"] == [{"path": "logs/*.log", "why": "no file matches it"}]
     rep = await views.check(CORPUS, "two", ["board.jsonl#L3"])
     assert rep["ok"] and any("logs/*.log" in n for n in rep["notes"]), views.gate_lines(rep)
 

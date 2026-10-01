@@ -262,18 +262,20 @@ def _cut(text: str, n: int) -> str:
 
 
 def _derived(v: Any) -> list[dict[str, str]]:
-    """[{field, from, how}] from view.json's `derived` or a reader's derived(index): each with a field name, the first
-    entry of a field kept."""
+    """[{field, from, how, kind}] from view.json's `derived` or a reader's derived(index): each with a field name, the
+    first entry of a field kept, `kind` "inferred" for a value the files do not state (a join, an estimate, a
+    classification) and "" otherwise. The inferred fields come first, each list in its own order."""
     out: list[dict[str, str]] = []
     seen: set[str] = set()
     for x in v if isinstance(v, list) else []:
         if not isinstance(x, dict):
             continue
         d = {k: _cut(" ".join(str(x.get(k) or "").split()), n) for k, n in DERIVED_CHARS.items()}
+        d["kind"] = "inferred" if str(x.get("kind") or "").strip().lower() == "inferred" else ""
         if d["field"] and d["field"] not in seen:
             seen.add(d["field"])
             out.append(d)
-    return out[:DERIVED_MAX]
+    return sorted(out, key=lambda d: d["kind"] != "inferred")[:DERIVED_MAX]
 
 
 def _unit(v: Any) -> Any:
@@ -1039,8 +1041,9 @@ def _alike(a: str, b: str) -> bool:
 def sibling_files(claimed: list[str], every: list[str]) -> list[str]:
     """The files the claims leave out of each folder beside a claimed file's folder that holds the same files, such as
     another run's beside the one run a view claims. Such a folder has a name of the claimed one's kind (_alike) and
-    holds at least half of the paths the claimed files have below the claimed folder (of SIBLING_SAMPLE of them); its
-    files returned are those in the same subfolders and of the same types as the claimed ones."""
+    holds at least half of the paths the claimed files have below the claimed folder (of SIBLING_SAMPLE of them). Of its
+    files, those returned have a path below it that a claimed file has below the claimed folder, or are in the same
+    subfolder and of the same type as files the claimed folder holds only claimed ones of."""
     mine = set(claimed)
     under: dict[tuple[str, str], set[str]] = {}
     for p in mine:
@@ -1050,29 +1053,61 @@ def sibling_files(claimed: list[str], every: list[str]) -> list[str]:
     if not under:
         return []
     parents = {q for q, _ in under}
-    left: dict[str, dict[tuple[str, str], dict[str, list[str]]]] = {}  # parent -> kind -> folder -> unclaimed rests
+    # parent -> folder -> kind -> (rests of every file, rests of the unclaimed ones)
+    tree: dict[str, dict[str, dict[tuple[str, str], tuple[list[str], list[str]]]]] = {}
     for p in every:
-        if p in mine:
-            continue
         parts = p.split("/")
         for i in range(len(parts) - 1):
             q = "/".join(parts[:i])
             if q in parents:
                 rest = "/".join(parts[i + 1:])
                 kind = (os.path.dirname(rest), os.path.splitext(rest)[1])
-                left.setdefault(q, {}).setdefault(kind, {}).setdefault(parts[i], []).append(rest)
+                both = tree.setdefault(q, {}).setdefault(parts[i], {}).setdefault(kind, ([], []))
+                both[0].append(rest)
+                if p not in mine:
+                    both[1].append(rest)
     have = set(every)
     out: set[str] = set()
     for (q, r), rests in under.items():
         kinds = {(os.path.dirname(x), os.path.splitext(x)[1]) for x in rests}
-        by_kind = left.get(q) or {}
+        own = tree.get(q, {}).get(r, {})
+        whole = {k for k in kinds if not own.get(k, ([], []))[1]}  # kinds the claimed folder holds only claimed files of
         sample = sorted(rests)[:SIBLING_SAMPLE]
-        for s in {s for k in kinds for s in by_kind.get(k, {})} - {r}:
+        for s, by_kind in (tree.get(q) or {}).items():
+            if s == r or not kinds & set(by_kind):
+                continue
             base = f"{q}/{s}" if q else s
             if not _alike(r, s) or sum(f"{base}/{x}" in have for x in sample) * 2 < len(sample):
                 continue
-            out |= {f"{base}/{x}" for k in kinds for x in by_kind.get(k, {}).get(s, [])}
+            out |= {f"{base}/{x}" for k in kinds for x in by_kind.get(k, ([], []))[1] if x in rests or k in whole}
     return sorted(out)
+
+
+def missing_files(claims: list[str], claimed: list[str]) -> list[dict[str, str]]:
+    """What the claims expect and the corpus lacks, each {path, why}: a claim that matches no file, and, for a claim of
+    files in each of several folders (`runs/*/manifest.json`), what it names in a folder that holds other claimed files
+    and none it matches, as `runs/r3/manifest.json`. The folder is the claim's path up to its last wildcard folder."""
+    out: list[dict[str, str]] = []
+    for g in claims:
+        hit = [p for p in claimed if glob_matches(p, g)]
+        if not hit:
+            out.append({"path": g, "why": "no file matches it"})
+            continue
+        parts = g.split("/")
+        wild = [i for i, x in enumerate(parts[:-1]) if _GLOB_CHARS.search(x)]
+        if not wild:
+            continue
+        depth = wild[-1] + 1
+        unit, rest = "/".join(parts[:depth]), "/".join(parts[depth:])
+        def folder(p: str) -> str | None:
+            q = p.split("/")
+            return "/".join(q[:depth]) if len(q) > depth and fnmatch.fnmatch("/".join(q[:depth]), unit) else None
+        have = {f for p in hit if (f := folder(p))}
+        if len(have) < 2:
+            continue
+        for f in sorted({f for p in claimed if (f := folder(p))} - have):
+            out.append({"path": f"{f}/{rest}", "why": "the other folders have it"})
+    return out
 
 
 async def shown(c: str, slug: str, version: str | None = None) -> dict[str, Any]:
@@ -1080,8 +1115,9 @@ async def shown(c: str, slug: str, version: str | None = None) -> dict[str, Any]
     errors}. `files` is the count of claimed files and not_shown the ones the view does not show whole (not_shown),
     then the files of folders like the claimed ones that the claims leave out (sibling_files, `claimed` false, counted
     in `unclaimed`), the first FILES_LISTED of them, `unexplained` counting those hidden() gives no why for; missing is
-    the claims that match no file; derived is view.json's list, then the fields the reader's derived(index) adds;
-    errors say what failed of hidden() and derived()."""
+    what the claims expect and the corpus lacks (missing_files); unplaced the records the reader's unplaced(index) says
+    it could not place, as clean_problems gives them; derived is view.json's list, then the fields the reader's
+    derived(index) adds; errors say what failed of hidden(), derived() and unplaced()."""
     view, req, files = await asyncio.to_thread(_prepared, c, slug, version)
     every = await asyncio.to_thread(folder_files, config.corpus_dir(c), "")
     ans = await _call(c, req, "shown")
@@ -1089,7 +1125,7 @@ async def shown(c: str, slug: str, version: str | None = None) -> dict[str, Any]
     reads = ans.get("reads") if isinstance(ans.get("reads"), dict) else {}
     errors = []
     parts = {}
-    for name in ("hidden", "derived"):
+    for name in ("hidden", "derived", "unplaced"):
         part = ans.get(name) if isinstance(ans.get(name), dict) else {}
         if part.get("error"):
             errors.append(f"{name}() failed: {part['error']}")
@@ -1102,7 +1138,8 @@ async def shown(c: str, slug: str, version: str | None = None) -> dict[str, Any]
     return {"files": len(files),
             "not_shown": {"count": len(rows), "unexplained": sum(1 for r in rows if not r["why"]),
                           "unclaimed": sum(1 for r in rows if r.get("claimed") is False), "files": rows[:FILES_LISTED]},
-            "missing": [g for g in view["claims"] if not any(glob_matches(f[0], g) for f in files)],
+            "missing": missing_files(view["claims"], [f[0] for f in files]),
+            "unplaced": clean_problems(parts["unplaced"]),
             "derived": _derived([*view["derived"], *(parts["derived"] if isinstance(parts["derived"], list) else [])]),
             "errors": errors}
 
@@ -2136,7 +2173,8 @@ def gate_lines(report: dict[str, Any]) -> list[str]:
         lines.append(f"files: {cov['files'] - (ns['count'] - beside)} of {cov['files']} read to the end, "
                      + (f"{beside} unclaimed beside them, " if beside else "")
                      + f"{ns['count'] - ns['unexplained']} hidden with a why"
-                     + (f", claims matching no file: {', '.join(cov['missing'])}" if cov.get("missing") else "")
+                     + (f", {len(cov['missing'])} missing" if cov.get("missing") else "")
+                     + (f", {cov['unplaced']['count']} records not placed" if (cov.get("unplaced") or {}).get("count") else "")
                      + "; derived fields: " + (", ".join(d["field"] for d in cov["derived"]) or "none"))
     for p in report.get("problems") or []:
         lines.append(f"problem: {p}")
@@ -2303,13 +2341,15 @@ async def shoot(c: str, slug: str, open_place: dict[str, Any] | None, out_png: P
 
 
 async def shoot_states(c: str, slug: str, states: list[dict[str, Any]], *, width: int = SHOT_SIZE[0],
-                       height: int = SHOT_SIZE[1], answers: int = 0) -> list[dict[str, Any]]:
+                       height: int = SHOT_SIZE[1], answers: int = 0,
+                       prepared: dict[str, Any] | None = None) -> list[dict[str, Any]]:
     """Load the view's page headless once per state (shoot_page), each state {out, open, labels}: send it `open`,
     answer its fetches from the reader and its marks requests under the state's labels context (NO_LABELS, a
     probe_context or labels_context), serve its media requests with the file media_file names, and write a picture of it
     to `out`, when it names one. Returns one result per state, {ok, errors, fetches, height, refs, records, units,
     marked, hidden, shown, fonts, fetched_records, png?}, and with `answers` the first that many reader answers each
-    state's page got; without Node or the frontend's packages each has build_problem's line as its one error."""
+    state's page got; without Node or the frontend's packages each has build_problem's line as its one error. With
+    `prepared`, a reader request of its own (robust_check's), the page's fetches are answered from it."""
     view = read_view(c, slug)
     if view is None:
         return [{"ok": False, "errors": [f"no view {slug!r}"], "fetches": 0} for _ in states]
@@ -2321,7 +2361,10 @@ async def shoot_states(c: str, slug: str, states: list[dict[str, Any]], *, width
     async def answer(kind: str, i: int, msg: dict[str, Any]) -> dict[str, Any]:
         if kind == "fetch":
             try:
-                data = await reader_call(c, slug, "records", msg.get("query"), labels=ctxs[i])
+                if prepared is not None:
+                    data = await _call(c, {**prepared, "labels": _wire(ctxs[i])}, "records", msg.get("query"))
+                else:
+                    data = await reader_call(c, slug, "records", msg.get("query"), labels=ctxs[i])
             except ReaderError as e:
                 return {"error": e.message}
             strings: list[str] = []
@@ -2635,18 +2678,22 @@ async def check(c: str, slug: str, locators: list[str] | None = None, *, shot_di
                 report["problems"].append(_hint("view-not-shown", count=len(rows), files="; ".join(
                     f"{r['path']} (read {r['read']:,} of {r['size']:,} bytes)" for r in rows[:NOT_SHOWN_NAMED])
                     + (" and more" if len(rows) > NOT_SHOWN_NAMED else "")))
-            beside = [r["path"] for r in cov["not_shown"]["files"] if not r["why"] and not r.get("claimed", True)]
-            if beside:
-                report["problems"].append(_hint("view-not-claimed", count=len(beside), files="; ".join(
-                    beside[:NOT_SHOWN_NAMED]) + (" and more" if len(beside) > NOT_SHOWN_NAMED else "")))
+        beside = [r["path"] for r in cov["not_shown"]["files"] if not r["why"] and not r.get("claimed", True)]
+        if beside:
+            report["notes"].append(_hint("view-not-claimed", count=cov["not_shown"]["unclaimed"], files="; ".join(
+                beside[:NOT_SHOWN_NAMED]) + (" and more" if len(beside) > NOT_SHOWN_NAMED else "")))
         if cov["missing"]:
-            report["notes"].append(_hint("view-missing", claims=", ".join(cov["missing"])))
+            report["notes"].append(_hint("view-missing", files="; ".join(
+                f"{m['path']} ({m['why']})" for m in cov["missing"][:NOT_SHOWN_NAMED])
+                + (" and more" if len(cov["missing"]) > NOT_SHOWN_NAMED else "")))
 
     wanted: list[str] = list(dict.fromkeys(str(x).strip() for x in (locators or []) if str(x).strip()))
     # sampled lines beside the locators, so a view is never checked only on the refs its author chose; a binary file
-    # (a workbook) has no lines to sample, its rows are cited in its own notation
+    # (a workbook, a video) has no lines to sample, its rows are cited in its own notation
     if any(_is_line_form(f["form"]) for f in view["accepts"]):
-        for rel in _sample_files([f for f in files if Path(f[0]).suffix.lower() not in BINARY_SUFFIXES]):
+        corpus = config.corpus_dir(c)
+        texts = await asyncio.to_thread(lambda: [f for f in files if _texty(corpus, f[0])])
+        for rel in _sample_files(texts):
             wanted += [loc for n in await asyncio.to_thread(_sample_lines, c, rel) if (loc := f"{rel}#L{n}") not in wanted]
     keys: list[str] = []
 
@@ -2715,6 +2762,12 @@ async def check(c: str, slug: str, locators: list[str] | None = None, *, shot_di
     problems, notes = label_problems(view, files, shots)
     report["problems"] += problems
     report["notes"] += notes
+    page = report["page"]
+    if not report["problems"] and all(r["ok"] for r in report["checks"]) and (page.get("ok") or page.get("unavailable")):
+        overview = next((s for s in shots if s.get("state") == "overview"), {})
+        problems, notes = await robust_check(c, slug, view, files, overview.get("shown"))
+        report["problems"] += problems
+        report["notes"] += notes
     declared = {d["field"] for d in (report.get("coverage") or {}).get("derived") or view["derived"]}
     if unlisted := await asyncio.to_thread(unlisted_derived, c, shots, declared):
         report["notes"].append(_hint("view-derived-unlisted", fields="; ".join(
@@ -2773,8 +2826,24 @@ def _page_of(shots: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def lined(view: dict[str, Any], files: list[tuple[str, int, int]]) -> bool:
-    """Whether the view claims a file with lines, whose records labels can mark (not only binary files)."""
-    return any(Path(f[0]).suffix.lower() not in BINARY_SUFFIXES for f in files)
+    """Whether the view claims a file with lines, whose records labels can mark (not only binary or media files)."""
+    return any(Path(f[0]).suffix.lower() not in BINARY_SUFFIXES and Path(f[0]).suffix.lower() not in MEDIA_TYPES
+               for f in files)
+
+
+SNIFF_BYTES = 4096
+
+
+def _texty(corpus: Path, rel: str) -> bool:
+    """Whether a corpus file has lines: not of a binary or media type, and no NUL byte in its first SNIFF_BYTES."""
+    suffix = Path(rel).suffix.lower()
+    if suffix in BINARY_SUFFIXES or suffix in MEDIA_TYPES:
+        return False
+    try:
+        with config.safe_corpus_path(corpus, rel).open("rb") as f:
+            return b"\0" not in f.read(SNIFF_BYTES)
+    except (OSError, ValueError):
+        return False
 
 
 def label_problems(view: dict[str, Any], files: list[tuple[str, int, int]],
@@ -2809,9 +2878,125 @@ def label_problems(view: dict[str, Any], files: list[tuple[str, int, int]],
     return problems, notes
 
 
-DERIVED_SAMPLE = 30  # records of the checks' reader answers compared with the lines they cite
-DERIVED_NAMED = 6  # unlisted fields a note names
-_POSITION_KEYS = {"ref", "refs", "line", "lines", "path", "file", "key", "anchor", "offset", "index", "idx", "n"}
+ROBUST_SUBDIR = "robust"  # under the view's index folder: the corpus copy robust_check runs the view on
+ROBUST_BYTES = 256 * 1024 * 1024  # of the claimed files the copy links, smallest first
+TORN_MAX = 64 * 1024 * 1024  # bytes of the file the copy tears, which it copies whole
+TORN_SUFFIXES = (".jsonl", ".ndjson")
+TORN_LINE = '{"torn": "a line cut short'
+
+
+def _robust_pick(view: dict[str, Any], files: list[tuple[str, int, int]]) -> tuple[str | None, str | None]:
+    """(the claimed file the copy leaves out, the one it adds a torn line to): first a file of a claim of one file in
+    each of several folders (`runs/*/manifest.json`), else the smallest of a claim of several files; and the smallest
+    JSON lines file of at most TORN_MAX bytes. None for either when there is none, and nothing left out of one file."""
+    removed = None
+    by_claim = [(g, [f for f in files if glob_matches(f[0], g)]) for g in view["claims"]]
+    for g, hit in by_claim:
+        head, _, base = g.rpartition("/")
+        if head and _GLOB_CHARS.search(head) and not _GLOB_CHARS.search(base) and len(hit) >= 2:
+            removed = hit[-1][0]
+            break
+    if removed is None:
+        removed = next((min(hit, key=lambda f: f[1])[0] for _, hit in by_claim if len(hit) >= 2), None)
+    torn = min((f for f in files if f[0] != removed and Path(f[0]).suffix.lower() in TORN_SUFFIXES and f[1] <= TORN_MAX),
+               key=lambda f: f[1], default=None)
+    return removed, torn[0] if torn else None
+
+
+def robust_copy(c: str, slug: str, view: dict[str, Any], files: list[tuple[str, int, int]]) -> dict[str, Any] | None:
+    """The corpus copy robust_check runs the view on, in the view's index folder, which the views kernel reads: every
+    claimed file linked but the one _robust_pick leaves out, and the one it tears copied with a torn line after its
+    last. Past ROBUST_BYTES the largest files are left out too (`cut`). {root, files, removed, torn (the torn line's
+    ref), cut}, or None when there is nothing to leave out or tear. Blocking."""
+    removed, torn = _robust_pick(view, files)
+    if removed is None and torn is None:
+        return None
+    corpus = config.corpus_dir(c)
+    d = index_dir(c, slug) / ROBUST_SUBDIR
+    shutil.rmtree(d, ignore_errors=True)
+    root = d / "corpus"
+    out: list[tuple[str, int, int]] = []
+    total, cut, torn_ref = 0, False, None
+    for rel, size, mtime in sorted(files, key=lambda f: (f[1], f[0])):
+        if rel == removed:
+            continue
+        if total + size > ROBUST_BYTES and rel != torn:
+            cut = True
+            continue
+        src = config.safe_corpus_path(corpus, rel).resolve()
+        dst = root / rel
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        if rel == torn:
+            shutil.copyfile(src, dst)
+            with dst.open("rb+") as fh:
+                fh.seek(0, os.SEEK_END)
+                if fh.tell():
+                    fh.seek(-1, os.SEEK_END)
+                    if fh.read(1) != b"\n":
+                        fh.write(b"\n")
+                fh.write(TORN_LINE.encode("utf-8"))
+            with dst.open("rb") as fh:
+                newlines = sum(block.count(b"\n") for block in iter(lambda: fh.read(1 << 20), b""))
+            torn_ref = f"{rel}#L{newlines + 1}"
+            st = dst.stat()
+            size, mtime = st.st_size, st.st_mtime_ns
+        else:
+            os.symlink(src, dst)
+        total += size
+        out.append((rel, size, mtime))
+    return {"root": root, "files": sorted(out), "removed": removed, "torn": torn_ref, "cut": cut}
+
+
+async def robust_check(c: str, slug: str, view: dict[str, Any], files: list[tuple[str, int, int]],
+                       shown: dict[str, Any] | None) -> tuple[list[str], list[str]]:
+    """(problems, notes) of the view run on a copy of its files with one missing and a torn line (robust_copy), as a
+    real corpus may be: build_index and problems() must not fail, problems() must report the torn line, and the page
+    must load without errors and, when `shown` (what the overview showed over the whole corpus) anchored records or
+    units and the copy left nothing else out, show some too."""
+    copy = await asyncio.to_thread(robust_copy, c, slug, view, files)
+    if copy is None or not copy["files"]:
+        return [], []
+    try:
+        _, req = await asyncio.to_thread(_prepare, c, slug)
+        d = index_dir(c, slug) / ROBUST_SUBDIR
+        req = {**req, "slug": f"{slug}_robust", "fp": "r" + fingerprint(copy["files"], req["fp"]),
+               "paths": [f[0] for f in copy["files"]], "cache": str((d / "index.pickle").resolve()),
+               "reads": str((d / "reads.json").resolve()), "root": str(copy["root"].resolve())}
+        what = " and ".join([*([f"{copy['removed']} missing"] if copy["removed"] else []),
+                             *([f"a torn line at {copy['torn']}"] if copy["torn"] else [])])
+        try:
+            await _call(c, req, "index")
+            got = clean_problems(await _call(c, req, "problems"))
+        except ReaderError as e:
+            return [_hint("view-robust-reader", what=what, error=e.message)], []
+        problems: list[str] = []
+        if copy["torn"] and not got["count"]:
+            problems.append(_hint("view-robust-torn", ref=copy["torn"]))
+        overview = {"ref": None, "path": copy["files"][0][0]}
+        s = (await shoot_states(c, slug, [{"out": None, "open": overview, "labels": probe_context()}], prepared=req))[0]
+        if s.get("unavailable"):
+            return problems, []
+        if not s.get("ok"):
+            problems.append(_hint("view-robust-page", what=what, errors="; ".join(s.get("errors") or ["it did not load"])[:600]))
+        else:
+            before = int((shown or {}).get("records") or 0) + int((shown or {}).get("units") or 0)
+            after = int((s.get("shown") or {}).get("records") or 0) + int((s.get("shown") or {}).get("units") or 0)
+            if before and not after and not copy["cut"]:
+                problems.append(_hint("view-robust-empty", what=what))
+        return problems, []
+    finally:
+        await asyncio.to_thread(shutil.rmtree, index_dir(c, slug) / ROBUST_SUBDIR, True)
+
+
+DERIVED_SAMPLE = 60  # records of the checks' reader answers compared with the lines they cite
+DERIVED_NAMED = 40  # unlisted fields a note names
+# fields that need no entry in `derived`: a record's place and the page's own keys
+_POSITION_KEYS = {"ref", "refs", "line", "lines", "path", "file", "key", "anchor", "offset", "index", "idx", "n", "id",
+                  "uid", "row", "pos", "position", "order", "rank", "i", "k", "seq"}
+_KEY_SUFFIXES = ("_key", "_idx", "_index", "_pos", "_row", "_order", "_rank")
+_COUNT_NAME = re.compile(r"(^|_)(n|num|count|counts|total|totals|size|len|length)(_|$)|^n[A-Z]|Count$|^(num|count)[A-Z]")
+# values a reader puts in for a missing one
+_DEFAULTS = {"", "-", "?", "—", "unknown", "none", "null", "n/a", "na", "other", "missing", "(none)", "(unknown)"}
 
 
 def _answer_records(v: Any, out: dict[str, dict[str, Any]]) -> None:
@@ -2852,12 +3037,24 @@ def _held(value: Any, text: str, numbers: set[float]) -> bool:
     return not v or v[:80] in text
 
 
+def _exempt(field: str, value: Any) -> bool:
+    """Whether a field needs no entry in `derived`: a record's place or a key of the page's own, a count, or a value put
+    in for a missing one."""
+    low = field.lower()
+    if low in _POSITION_KEYS or low.endswith(_KEY_SUFFIXES):
+        return True
+    if isinstance(value, int) and (_COUNT_NAME.search(field) or (low.endswith("s") and not low.endswith("ss"))):
+        return True
+    return isinstance(value, str) and value.strip().lower() in _DEFAULTS
+
+
 def unlisted_derived(c: str, shots: list[dict[str, Any]], declared: set[str]) -> list[dict[str, str]]:
-    """Fields of the records the checks' reader answers handed the page whose values the line each record cites does not
-    hold, for at least two records and most of those that have the field, and that `declared` does not name:
-    [{field, value, ref}], each with one such value, DERIVED_NAMED at most. A record is an object of an answer with a
-    record ref among its values; positions such as its ref, line or path, and values that are lists or objects, are left
-    out. Blocking."""
+    """Every field of the records the checks' reader answers handed the page whose values the line each record cites
+    does not hold, for at least two records and most of those that have the field, and that `declared` does not name:
+    [{field, value, ref}], each with one such value. A record is an object of an answer with a record ref among its
+    values. Left out as needing no entry: positions and the page's own keys, counts, values put in for missing ones
+    (_exempt), a field whose missed values are all one value (a default), values that are lists or objects, and a value
+    the line holds under another name (a rename). Blocking."""
     recs: dict[str, dict[str, Any]] = {}
     for s in shots:
         for a in s.get("answers") or []:
@@ -2883,7 +3080,7 @@ def unlisted_derived(c: str, shots: list[dict[str, Any]], declared: set[str]) ->
                 numbers.add(float(x))
         line = refs.parse_ref(ref).get("line")
         for k, v in rec.items():
-            if k in declared or k.lower() in _POSITION_KEYS or v is None or isinstance(v, (bool, dict, list)):
+            if k in declared or v is None or isinstance(v, (bool, dict, list)) or _exempt(k, v):
                 continue
             if v == ref or v == line or (isinstance(v, str) and (len(v.strip()) < 2 or _RECORD_REF.match(v))):
                 continue
@@ -2892,7 +3089,7 @@ def unlisted_derived(c: str, shots: list[dict[str, Any]], declared: set[str]) ->
                 missed.setdefault(k, []).append((v, ref))
     out = []
     for k, xs in missed.items():
-        if len(xs) >= 2 and len(xs) * 2 > seen[k]:
+        if len(xs) >= 2 and len(xs) * 2 > seen[k] and len({json.dumps(v, default=str) for v, _ in xs}) > 1:
             v, ref = xs[0]
             out.append({"field": k, "value": _cut(str(v), 60), "ref": ref})
     return out[:DERIVED_NAMED]
