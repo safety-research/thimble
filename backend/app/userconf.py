@@ -186,7 +186,7 @@ def _raw(path: Path) -> dict[str, Any]:
 
 def rename_extensions(path: Path) -> bool:
     """Write the config file at `path` with each renamed extension's settings under its new name (_renamed); True when
-    it changed. A file that cannot be read is left as it is."""
+    it changed. A file that cannot be read or written is left as it is, and _raw still reads it under the new names."""
     with _lock:
         try:
             data = _written(path)
@@ -195,7 +195,11 @@ def rename_extensions(path: Path) -> bool:
         got = _renamed(data)
         if got == data:
             return False
-        _write(path, got)
+        try:
+            _write(path, got)
+        except OSError as e:
+            log.warning("thimble's config %s keeps the old names of renamed extensions: %s", path, e)
+            return False
     log.info("thimble's config %s: the settings of renamed extensions are under their new names", path)
     return True
 

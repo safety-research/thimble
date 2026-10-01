@@ -313,7 +313,7 @@ async def test_a_changed_copy_of_swarm_keeps_its_changes_and_an_extension_of_the
     assert extensions.ship() == [] and "swarm" not in extensions.added(), "an unchanged copy beside the new name goes"
 
     extensions.remove("swarm-orient")
-    dev =_before_the_rename(tmp_path_factory.mktemp("checkout") / "extensions")
+    dev = _before_the_rename(tmp_path_factory.mktemp("checkout") / "extensions")
     monkeypatch.setattr(extensions, "builtin_dir", lambda: dev)
     assert extensions.add(str(dev / "swarm"), yes=True, say=lambda _: None) == ["swarm"]
     shutil.rmtree(dev)
@@ -330,6 +330,42 @@ async def test_a_changed_copy_of_swarm_keeps_its_changes_and_an_extension_of_the
     assert extensions.ship() == [] and extensions.linked("swarm") and "swarm-orient" not in extensions.added()
     assert userconf.extensions_off() == {"swarm"} and "swarm:counter" in userconf.load()["agents"]
     assert "swarm:counter" in json.loads(userconf.global_file().read_text())["agents"]
+
+
+def test_a_swarm_that_cannot_be_carried_over_yet_leaves_thimble_starting_and_its_settings_read_as_swarm_orient_s(
+        workspaces_tmp, tmp_path, monkeypatch):
+    """While thimble's extensions folder and its config cannot be written, ship() still adds what thimble ships, swarm
+    stays as it was, and the config's settings of swarm read as swarm-orient's. The next run carries it over."""
+    ships = extensions.builtin_dir()
+    old = _before_the_rename(tmp_path / "old-ships")
+    monkeypatch.setattr(extensions, "builtin_dir", lambda: old)
+    extensions.add("swarm", yes=True, say=lambda _: None)
+    before = {"agents": {"swarm:swarm-reader": {"model": "claude-opus-4-8"}}}
+    write_json(userconf.global_file(), before)
+    monkeypatch.setattr(extensions, "builtin_dir", lambda: ships)
+    copy_tree, write = extensions.copy_tree, userconf._write
+
+    def no_copy(src: Path, dst: Path) -> None:
+        if dst.name == "swarm-orient":
+            raise PermissionError(13, "Permission denied", str(dst))
+        copy_tree(src, dst)
+
+    def no_write(path: Path, data: dict) -> None:
+        raise PermissionError(13, "Permission denied", str(path))
+
+    monkeypatch.setattr(extensions, "copy_tree", no_copy)
+    monkeypatch.setattr(userconf, "_write", no_write)
+    assert extensions.ship() == ["video"]
+    assert sorted(extensions.added()) == ["multiagent-swimlane", "swarm", "video"]
+    assert json.loads(userconf.global_file().read_text()) == before
+    assert userconf.extension_agent(userconf.load(), "swarm-orient:swarm-reader")["model"] == "claude-opus-4-8"
+
+    monkeypatch.setattr(extensions, "copy_tree", copy_tree)
+    monkeypatch.setattr(userconf, "_write", write)
+    assert extensions.ship() == ["swarm-orient"]
+    assert sorted(extensions.added()) == ["multiagent-swimlane", "swarm-orient", "video"]
+    assert json.loads(userconf.global_file().read_text()) == {
+        "agents": {"swarm-orient:swarm-reader": {"model": "claude-opus-4-8"}}}
 
 
 async def test_settings_adds_an_extension_thimble_ships_when_its_switch_is_turned_on(corpus, analyst, tmp_path,

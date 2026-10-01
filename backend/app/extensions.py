@@ -1728,38 +1728,47 @@ def _rename_shipped() -> list[str]:
     unchanged since becomes the new version thimble ships, a changed copy keeps the analyst's changes under the new
     name, and a link to the folder thimble shipped it in links to its new folder; then thimble's config takes the new
     name (userconf.rename_extensions). An extension of the analyst's own with the old name stays (foreign). Where the
-    new name is added already, an unchanged copy or a link under the old name goes, and a changed copy stays. Returns
-    the new names carried over."""
+    new name is added already, an unchanged copy or a link under the old name goes, and a changed copy stays. One that
+    cannot be carried over stays as it is until the next run. Returns the new names carried over."""
     ships = builtins()
     out = []
     for old, new in RENAMED.items():
-        dest, target = source_path(old), source_path(new)
-        if not (dest.is_symlink() or dest.is_dir()) or foreign(old) or new not in ships:
-            continue
-        rec = _json(_record_file(old))
-        unchanged = dest.is_symlink() or digest(dest)[0] == rec.get("digest")
-        if target.is_symlink() or target.exists():
-            if unchanged:
-                _clear(old)
-            continue
-        now = digest(ships[new])[0]
-        if dest.is_symlink():
-            _clear(old)
-            target.symlink_to(ships[new].resolve(), target_is_directory=True)
-            write_json(_record_file(new), {**rec, "source": str(ships[new].resolve()), "digest": now, "ts": _now()})
-        elif unchanged:
-            copy_tree(ships[new], target)
-            write_json(target / ADDED, {**rec, "source": new, "digest": now, "ts": _now()})
-            _clear(old)
-        else:
-            os.replace(dest, target)
-            manifest = _json(target / MANIFEST)
-            write_json(target / MANIFEST, {**manifest, "name": new})
-            write_json(target / ADDED, {**rec, "source": new})
-        log.info("the extension %s is now %s", old, new)
-        out.append(new)
+        try:
+            if _carry_over(old, new, ships):
+                out.append(new)
+        except OSError as e:
+            log.warning("the extension %s could not be carried over to %s: %s", old, new, e)
     userconf.rename_extensions(userconf.global_file())
     return out
+
+
+def _carry_over(old: str, new: str, ships: dict[str, Path]) -> bool:
+    """_rename_shipped for the built-in `old`, now `new`; True when it is carried over."""
+    dest, target = source_path(old), source_path(new)
+    if not (dest.is_symlink() or dest.is_dir()) or foreign(old) or new not in ships:
+        return False
+    rec = _json(_record_file(old))
+    unchanged = dest.is_symlink() or digest(dest)[0] == rec.get("digest")
+    if target.is_symlink() or target.exists():
+        if unchanged:
+            _clear(old)
+        return False
+    now = digest(ships[new])[0]
+    if dest.is_symlink():
+        _clear(old)
+        target.symlink_to(ships[new].resolve(), target_is_directory=True)
+        write_json(_record_file(new), {**rec, "source": str(ships[new].resolve()), "digest": now, "ts": _now()})
+    elif unchanged:
+        copy_tree(ships[new], target)
+        write_json(target / ADDED, {**rec, "source": new, "digest": now, "ts": _now()})
+        _clear(old)
+    else:
+        os.replace(dest, target)
+        manifest = _json(target / MANIFEST)
+        write_json(target / MANIFEST, {**manifest, "name": new})
+        write_json(target / ADDED, {**rec, "source": new})
+    log.info("the extension %s is now %s", old, new)
+    return True
 
 
 def ship() -> list[str]:
