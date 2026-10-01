@@ -2724,11 +2724,17 @@ async def check(c: str, slug: str, locators: list[str] | None = None, *, shot_di
 
     wanted: list[str] = list(dict.fromkeys(str(x).strip() for x in (locators or []) if str(x).strip()))
     # sampled lines beside the locators, so a view is never checked only on the refs its author chose; a binary file
-    # (a workbook, a video) has no lines to sample, its rows are cited in its own notation
+    # (a workbook, a video) has no lines to sample, its rows are cited in its own notation, and a file hidden() leaves
+    # out has no records in the view
     if any(_is_line_form(f["form"]) for f in view["accepts"]):
         corpus = config.corpus_dir(c)
-        texts = await asyncio.to_thread(lambda: [f for f in files if _texty(corpus, f[0])])
+        hid = {r["path"] for r in (report.get("coverage") or {}).get("not_shown", {}).get("files", [])
+               if r["why"] and r.get("claimed", True)}
+        texts = [f for f in files if f[0] not in hid and Path(f[0]).suffix.lower() not in BINARY_SUFFIXES
+                 and Path(f[0]).suffix.lower() not in MEDIA_TYPES]
         for rel in _sample_files(texts):
+            if not await asyncio.to_thread(_texty, corpus, rel):
+                continue
             wanted += [loc for n in await asyncio.to_thread(_sample_lines, c, rel) if (loc := f"{rel}#L{n}") not in wanted]
     keys: list[str] = []
 
@@ -2973,10 +2979,12 @@ TORN_SUFFIXES = (".jsonl", ".ndjson")
 TORN_LINE = '{"torn": "a line cut short'
 
 
-def _robust_pick(view: dict[str, Any], files: list[tuple[str, int, int]]) -> tuple[str | None, str | None]:
+def _robust_pick(view: dict[str, Any], files: list[tuple[str, int, int]],
+                 whole: set[str] | None = None) -> tuple[str | None, str | None]:
     """(the claimed file the copy leaves out, the one it adds a torn line to): first a file of a claim of one file in
     each of several folders (`runs/*/manifest.json`), else the smallest of a claim of several files; and the smallest
-    JSON lines file of at most TORN_MAX bytes. None for either when there is none, and nothing left out of one file."""
+    JSON lines file of at most TORN_MAX bytes among `whole`, the files the reader reads to the end and does not hide
+    (any when None). None for either when there is none, and nothing left out of one file."""
     removed = None
     by_claim = [(g, [f for f in files if glob_matches(f[0], g)]) for g in view["claims"]]
     for g, hit in by_claim:
@@ -2986,17 +2994,18 @@ def _robust_pick(view: dict[str, Any], files: list[tuple[str, int, int]]) -> tup
             break
     if removed is None:
         removed = next((min(hit, key=lambda f: f[1])[0] for _, hit in by_claim if len(hit) >= 2), None)
-    torn = min((f for f in files if f[0] != removed and Path(f[0]).suffix.lower() in TORN_SUFFIXES and f[1] <= TORN_MAX),
-               key=lambda f: f[1], default=None)
+    torn = min((f for f in files if f[0] != removed and Path(f[0]).suffix.lower() in TORN_SUFFIXES and f[1] <= TORN_MAX
+                and (whole is None or f[0] in whole)), key=lambda f: f[1], default=None)
     return removed, torn[0] if torn else None
 
 
-def robust_copy(c: str, slug: str, view: dict[str, Any], files: list[tuple[str, int, int]]) -> dict[str, Any] | None:
+def robust_copy(c: str, slug: str, view: dict[str, Any], files: list[tuple[str, int, int]],
+                whole: set[str] | None = None) -> dict[str, Any] | None:
     """The corpus copy robust_check runs the view on, in the view's index folder, which the views kernel reads: every
-    claimed file linked but the one _robust_pick leaves out, and the one it tears copied with a torn line after its
-    last. Past ROBUST_BYTES the largest files are left out too (`cut`). {root, files, removed, torn (the torn line's
-    ref), cut}, or None when there is nothing to leave out or tear. Blocking."""
-    removed, torn = _robust_pick(view, files)
+    claimed file linked but the one _robust_pick leaves out, and the one it tears (of `whole`) copied with a torn line
+    after its last. Past ROBUST_BYTES the largest files are left out too (`cut`). {root, files, removed, torn (the torn
+    line's ref), cut}, or None when there is nothing to leave out or tear. Blocking."""
+    removed, torn = _robust_pick(view, files, whole)
     if removed is None and torn is None:
         return None
     corpus = config.corpus_dir(c)
@@ -3040,12 +3049,21 @@ async def robust_check(c: str, slug: str, view: dict[str, Any], files: list[tupl
     """(problems, notes) of the view run on a copy of its files with one missing and a torn line (robust_copy), as a
     real corpus may be: build_index and problems() must not fail, problems() must report the torn line, and the page
     must load without errors and, when `shown` (what the overview showed over the whole corpus) anchored records or
-    units and the copy left nothing else out, show some too."""
-    copy = await asyncio.to_thread(robust_copy, c, slug, view, files)
+    units and the copy left nothing else out, show some too. The torn line goes in a file the reader reads to the end
+    and does not hide, since one it leaves out has no line to report."""
+    try:
+        _, req = await asyncio.to_thread(_prepare, c, slug)
+        ans = await _call(c, req, "shown")
+    except ReaderError:
+        return [], []
+    ans = ans if isinstance(ans, dict) else {}
+    reads = ans.get("reads") if isinstance(ans.get("reads"), dict) else {}
+    hidden = _hidden((ans.get("hidden") or {}).get("result") if isinstance(ans.get("hidden"), dict) else None)
+    whole = {p for p, size, _ in files if int(reads.get(p) or 0) >= size and p not in hidden}
+    copy = await asyncio.to_thread(robust_copy, c, slug, view, files, whole)
     if copy is None or not copy["files"]:
         return [], []
     try:
-        _, req = await asyncio.to_thread(_prepare, c, slug)
         d = index_dir(c, slug) / ROBUST_SUBDIR
         req = {**req, "slug": f"{slug}_robust", "fp": "r" + fingerprint(copy["files"], req["fp"]),
                "paths": [f[0] for f in copy["files"]], "cache": str((d / "index.pickle").resolve()),

@@ -430,6 +430,14 @@ async def test_the_checks_run_the_view_on_a_copy_with_a_file_missing_and_a_line_
     rep = await views.gate(CORPUS, "threads", ["board.jsonl#L3"])
     assert not rep["ok"] and any("does not report it" in p for p in rep["problems"]), rep["problems"]
 
+    (corpus / "a-small.jsonl").write_text('{"thread": "t1", "author": "a", "body": "b"}\n')
+    (corpus / "a-skipped.jsonl").write_text('{"thread": "t9", "author": "x", "body": "an export of last year"}\n')
+    skipping = THREADS_READER.replace("    for path in paths:\n", "    for path in [p for p in paths if 'skipped' not in p]:\n") \
+        + "\n\ndef hidden(index):\n    return [{\"path\": \"a-skipped.jsonl\", \"why\": \"an old export\"}]\n"
+    views.write_view(CORPUS, "threads", reader=skipping, html=THREADS_HTML, **view)
+    rep = await views.gate(CORPUS, "threads", ["board.jsonl#L3"])
+    assert rep["ok"], "the torn line goes in a file the reader reads, not one it hides: " + "; ".join(views.gate_lines(rep))
+
 
 def test_the_test_label_answers_thimble_labels_as_a_label_would(tmp_path):
     """Under the test label, thimble.labels() lists it and thimble.labels("test label") gives the lines it marks of the
