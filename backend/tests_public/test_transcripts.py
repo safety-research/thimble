@@ -211,7 +211,8 @@ def test_a_citation_of_a_pdf_page_resolves_to_the_page_text(chats):
     span = ref("docs/postmortem.pdf#p2-p3")
     assert span["excerpt"] == "Root cause in reindex\n\nThe fix" and span["meta"]["last_page"] == 3
     assert ref("docs/postmortem.pdf")["excerpt"] == "Timeline of the failures"
-    assert ref("docs/postmortem.pdf#p9")["meta"]["missing"] is True
+    gone = client.get(f"{CHATS}/ref", params={"ref": "docs/postmortem.pdf#p9"})
+    assert gone.status_code == 404 and "3 pages" in gone.json()["detail"], "a page past the last is a broken citation"
     broken = ref("docs/broken.pdf#p1")
     assert broken["meta"]["error"] and broken["excerpt"] == "(a PDF that does not open)"
 
