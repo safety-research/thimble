@@ -24,7 +24,8 @@ thimble doctor                     # the install state, versions, port and the l
 `thimble` alone starts a Claude Code session in the current folder with the plugin loaded. Edits to `prompts/main.md` or
 `prompts/shared.md` reach a session only when it is started again, since they are its system prompt.
 
-State lives under `~/.thimble` (`THIMBLE_HOME`): `server.json`, `server.log` and the registry of opened folders.
+State lives under `~/.thimble` (`THIMBLE_HOME`): `server.json`, `server.log`, the registry of opened folders and
+`tour.json`, which records that the product tour was offered (delete it to see the first-launch welcome again).
 Per-workspace state is `workspaces/<c>/` in the checkout (`THIMBLE_WORKSPACES_DIR`). To run a scratch stack beside the
 live one, set `THIMBLE_HOME`, `THIMBLE_WORKSPACES_DIR`, `THIMBLE_DATA_DIR` and `THIMBLE_DEV_DIR` under /tmp and
 `THIMBLE_PORT` above 8400 (`THIMBLE_UI_PORT` above 5400 with Vite). `scripts/dev/make_toy_corpus.py` writes a synthetic

@@ -1,11 +1,14 @@
-// The Database view: a sqlite file's tables, paged rows, a row's detail and a free SQL box.
-import { useEffect, useRef, useState, type RefObject } from 'react'
+// The Database view: a sqlite file's tables, paged rows, a row's detail and a free SQL box. A cited row opens on its
+// page, selected, and the labels that are on mark the rows they highlight with a bar in the label's colour.
+import { useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type RefObject } from 'react'
 import { Button, Segmented } from '../../components/Button'
 import { Chip } from '../../components/Chip'
 import { TextArea } from '../../components/Field'
 import { Spinner } from '../../components/Spinner'
 import { api } from '../../lib/api'
 import type { SourceKind } from '../../lib/types'
+import { recordMarks } from '../labels'
+import { ReaderLabelsContext, wantRecordLabels } from '../marks'
 import { compact, errMsg, type ViewDef, type ViewProps } from './common'
 
 const PAGE = 100
@@ -31,7 +34,34 @@ export function dbRefInto(ref: string, path: string): DbRef | null {
 const toObj = (columns: string[], row: any[]): Row => Object.fromEntries(columns.map((c, i) => [c, row[i]]))
 const quoteId = (name: string) => `"${name.replace(/"/g, '""')}"`
 
-function Grid({ path, table, columns, rows, keyIdx, selectedKey, onRow, tableRef }: { path: string; table?: string; columns: string[]; rows: any[][]; keyIdx?: number; selectedKey?: any; onRow?: (row: any[]) => void; tableRef?: RefObject<HTMLTableElement | null> }) {
+/** The colour of the first label that is on and highlights a row, by the row's ref; the labels of the rows asked for are
+ * read by ref (marks wantRecordLabels). */
+function useRowMarks(ws: string, path: string, anchors: string[]): (anchor: string) => { colour: string } | undefined {
+  const ctx = useContext(ReaderLabelsContext)
+  const on = ctx?.on.length ? ctx.on : null
+  const key = anchors.join('\n')
+  useEffect(() => {
+    if (!on) return
+    for (const a of anchors) wantRecordLabels(ws, path, a)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ws, path, key, on])
+  const rows = ctx?.rows
+  return useCallback(
+    (anchor: string) => {
+      const mine = on && rows?.get(anchor)
+      if (!mine) return undefined
+      const m = recordMarks(on, (id) => mine.get(id))
+      const lit = m.bar ?? m.tint ?? m.lit[0]
+      return lit ? { colour: lit.colour } : undefined
+    },
+    [on, rows],
+  )
+}
+
+function Grid({ workspace, path, table, columns, rows, keyIdx, selectedKey, onRow, tableRef }: { workspace?: string; path: string; table?: string; columns: string[]; rows: any[][]; keyIdx?: number; selectedKey?: any; onRow?: (row: any[]) => void; tableRef?: RefObject<HTMLTableElement | null> }) {
+  const anchorOf = (r: any[]) => (table && keyIdx != null && keyIdx >= 0 ? `${path}#${table}/${String(r[keyIdx])}` : undefined)
+  const anchors = useMemo(() => (workspace ? rows.map(anchorOf).filter((a): a is string => !!a) : []), [workspace, rows, path, table, keyIdx]) // eslint-disable-line react-hooks/exhaustive-deps
+  const markOf = useRowMarks(workspace ?? '', path, anchors)
   return (
     <table className="reader-grid" ref={tableRef}>
       <thead>
@@ -44,9 +74,16 @@ function Grid({ path, table, columns, rows, keyIdx, selectedKey, onRow, tableRef
       <tbody>
         {rows.map((r, i) => {
           const selected = keyIdx != null && selectedKey !== undefined && r[keyIdx] === selectedKey
-          const anchor = table && keyIdx != null && keyIdx >= 0 ? `${path}#${table}/${String(r[keyIdx])}` : undefined
+          const anchor = anchorOf(r)
+          const mark = anchor ? markOf(anchor) : undefined
           return (
-            <tr key={i} className={selected ? 'reader-row-selected' : undefined} onClick={onRow ? () => onRow(r) : undefined} data-anchor={anchor}>
+            <tr
+              key={i}
+              className={[selected && 'reader-row-selected', mark && 'reader-row-marked'].filter(Boolean).join(' ') || undefined}
+              style={mark ? ({ '--mark': mark.colour } as CSSProperties) : undefined}
+              onClick={onRow ? () => onRow(r) : undefined}
+              data-anchor={anchor}
+            >
               {r.map((v, j) => (
                 <td key={j} className={j === keyIdx ? 'reader-grid-key' : undefined}>
                   {cell(v)}
@@ -98,7 +135,12 @@ export function ForgeBrowser({ workspace, path, targetRef }: ViewProps) {
     if (forRef.kind === 'row') {
       api
         .resolveRef(workspace, targetRef!)
-        .then((res) => res.record && typeof res.record === 'object' && setDetail({ table: forRef.table, row: res.record }))
+        .then((res) => {
+          if (res.record && typeof res.record === 'object') setDetail({ table: forRef.table, row: res.record })
+          // the page that holds the row, so it shows selected in its table
+          const n = (res.meta as { n?: unknown } | undefined)?.n
+          if (typeof n === 'number' && n >= 1) setOffset(Math.floor((n - 1) / PAGE) * PAGE)
+        })
         .catch(() => undefined)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -136,6 +178,17 @@ export function ForgeBrowser({ workspace, path, targetRef }: ViewProps) {
   const detailKey = detail && pk && detail.table === table ? detail.row[pk] : undefined
   const pages = data ? Math.max(1, Math.ceil(data.total / PAGE)) : 1
   const page = Math.floor(offset / PAGE) + 1
+  // the cited row scrolls into view once its page is drawn
+  const shownKey = forRef?.kind === 'row' ? `${forRef.table}/${forRef.pk}` : null
+  const scrolled = useRef<string | null>(null)
+  useLayoutEffect(() => {
+    if (!shownKey || scrolled.current === `${targetRef}` || detailKey === undefined) return
+    const el = gridRef.current?.querySelector<HTMLElement>('tr.reader-row-selected')
+    const box = el?.closest<HTMLElement>('.reader-forge-rows')
+    if (!el || !box) return
+    scrolled.current = `${targetRef}`
+    box.scrollTop += el.getBoundingClientRect().top - box.getBoundingClientRect().top - box.clientHeight / 2 + el.offsetHeight / 2
+  }, [shownKey, targetRef, detailKey, data])
   return (
     <div className="reader-forge">
       <div className="reader-bar reader-forge-bar">
@@ -211,7 +264,7 @@ export function ForgeBrowser({ workspace, path, targetRef }: ViewProps) {
                   <Button variant="icon" size="sm" icon="chevron-right" title="Next" aria-label="Next page" disabled={offset + PAGE >= data.total} onClick={() => setOffset(offset + PAGE)} />
                 </div>
               )}
-              <Grid path={path} table={table} columns={data.columns} rows={data.rows} keyIdx={pkIdx} selectedKey={detailKey} tableRef={gridRef} onRow={(r) => setDetail({ table: table!, row: toObj(data.columns, r) })} />
+              <Grid workspace={workspace} path={path} table={table} columns={data.columns} rows={data.rows} keyIdx={pkIdx} selectedKey={detailKey} tableRef={gridRef} onRow={(r) => setDetail({ table: table!, row: toObj(data.columns, r) })} />
             </>
           )}
           {!data && !error && <Spinner size={10} label="Loading" />}

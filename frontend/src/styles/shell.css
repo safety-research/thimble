@@ -537,6 +537,10 @@
   justify-content: flex-end;
   gap: 6px;
 }
+.settings-foot .settings-tour {
+  margin-right: auto;
+  margin-left: -6px;
+}
 
 /* -------- Report a problem (shell/ProblemReport, inside a glass Popover): the form, then where the bundle is and where
    to send it. While the tab is captured the dialog is transparent, so the picture shows the page. -------- */

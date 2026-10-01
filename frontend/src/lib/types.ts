@@ -340,6 +340,8 @@ export interface LabelRow {
   analyst?: string | null
   /** the texts of the record a span label marks */
   spans?: string[]
+  /** the line a record whose ref names none starts on (a CSV row, a JSON document's record) */
+  line?: number
 }
 
 export interface LabelRowsResponse {

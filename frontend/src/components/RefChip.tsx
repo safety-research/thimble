@@ -219,7 +219,7 @@ export function placePop(el: HTMLElement, rect: DOMRect): void {
 const pointing = (): boolean => document.body.hasAttribute('data-cmd')
 
 /** the ref kinds that are a record or part of one in a file, whose hover shows the record as it reads */
-const FILE_KINDS = new Set(['record', 'range', 'block', 'span'])
+const FILE_KINDS = new Set(['record', 'range', 'block', 'span', 'page', 'pointer'])
 
 /** the ref kinds with nothing to excerpt: the label names them and the click teleports */
 const NAME_ONLY = new Set(['group', 'report', 'view', 'ui', 'chat'])
@@ -356,7 +356,7 @@ export function RefChip({ ref, value, compact, workspace, broken, brokenWhy, qui
       const where = [hiddenPath(ref), spanWhere(ref), whereOf(r)].filter(Boolean).join(' · ') || undefined
       // a record of a file reads as the record (canvas/quotes), never its JSON or markdown source, with the cited words
       // marked and its facts over it (canvas/facts)
-      const quoted = !cell && ((FILE_KINDS.has(r.kind) && (r.blocks?.length || r.view)) || r.kind === 'row') ? quoteParts(r) : undefined
+      const quoted = !cell && ((FILE_KINDS.has(r.kind) && (r.blocks?.length || r.view)) || r.kind === 'row' || r.kind === 'csvrow') ? quoteParts(r) : undefined
       const parts = quoted ? markValue(quoted, value) : undefined
       const facts = !cell && FACT_KINDS.has(r.kind) ? markFacts(recordFacts(r), value) : undefined
       setPop(cell ? { state: 'ok', rect, excerpt: r.excerpt ?? '', kind: 'cell', cell } : { state: 'ok', rect, excerpt: r.excerpt ?? '', kind: r.kind, where, parts, facts })

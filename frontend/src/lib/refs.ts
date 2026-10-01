@@ -1,6 +1,8 @@
 // The ref grammar (backend refs.py keeps it in step):
 //   <path>#L<n> | <path>#L<n>-L<m> | <path>#L<n>.b<k> | <path>#L<n>.b<k>:c<a>-<b> | <path>
 //   <path>.db|.sqlite|.sqlite3#<table>[/<pk>]
+//   <path>.pdf#p<n> (`#page=<n>` reads the same) | <path>.json#/<json pointer> | <path>.csv|.tsv#row=<n>
+//                      a page, a JSON document's value, a CSV's row after its header: a record of the file (records.py)
 //   card:<id> | card:<id>@<exec> | card:<id>#<col>/<row> | card:<id>@out<i>#L<n>[-L<m>]   (`cell:` is an alias)
 //   card:<id>#<path>#L<n>…   a file's line cited through the card that shows it: read as the file's line (<path>#L<n>…)
 //   group:<id> | report:<slug>#<sid> | report:<slug>#p<pid> | concept:<id> | chat:<id>[#<index>] | ui:<name>
@@ -24,6 +26,9 @@ export type ParsedRef =
   | { kind: 'ui'; name: string }
   | { kind: 'table'; path: string; table: string }
   | { kind: 'row'; path: string; table: string; pk: string }
+  | { kind: 'page'; path: string; page: number }
+  | { kind: 'pointer'; path: string; pointer: string }
+  | { kind: 'csvrow'; path: string; row: number }
   | { kind: 'record'; path: string; line: number }
   | { kind: 'range'; path: string; line: number; endLine: number }
   | { kind: 'block'; path: string; line: number; block: number }
@@ -91,6 +96,9 @@ export function callRef(chat: string, n: number, line?: number, endLine?: number
 // read as a path.
 const FP = String.raw`[^#\s](?:[^#\n]*[^#\s])?`
 const DATABASE_RE = new RegExp(String.raw`^(${FP}\.(?:db|sqlite|sqlite3))#([A-Za-z_][A-Za-z0-9_]*)(?:\/(.+))?$`)
+const PAGE_RE = new RegExp(String.raw`^(${FP}\.[Pp][Dd][Ff])#(?:page=|p)(\d+)$`)
+const POINTER_RE = new RegExp(String.raw`^(${FP}\.[Jj][Ss][Oo][Nn])#(\/[^\n]*)$`)
+const CSV_ROW_RE = new RegExp(String.raw`^(${FP}\.(?:[Cc][Ss][Vv]|[Tt][Ss][Vv]))#row=(\d+)$`)
 const SPAN_RE = new RegExp(String.raw`^(${FP})#L(\d+)\.b(\d+):c(\d+)-(\d+)$`)
 const BLOCK_RE = new RegExp(String.raw`^(${FP})#L(\d+)\.b(\d+)$`)
 const RANGE_RE = new RegExp(String.raw`^(${FP})#L(\d+)-L(\d+)$`)
@@ -130,6 +138,9 @@ export function parseRef(ref: string): ParsedRef | null {
   if ((m = ref.match(DATABASE_RE))) {
     return m[3] ? { kind: 'row', path: m[1], table: m[2], pk: m[3] } : { kind: 'table', path: m[1], table: m[2] }
   }
+  if ((m = ref.match(PAGE_RE)) && +m[2] >= 1) return { kind: 'page', path: m[1], page: +m[2] }
+  if ((m = ref.match(POINTER_RE))) return { kind: 'pointer', path: m[1], pointer: m[2] }
+  if ((m = ref.match(CSV_ROW_RE)) && +m[2] >= 1) return { kind: 'csvrow', path: m[1], row: +m[2] }
   const line = fileLine(ref)
   if (line) return line
   if ((m = ref.match(PATH_RE)) && !ref.includes(':') && fileLike(m[1])) return { kind: 'path', path: m[1] }
@@ -139,9 +150,33 @@ export function parseRef(ref: string): ParsedRef | null {
 
 const LOCATOR_LABEL_MAX = 18
 
+/** A record of another reader than lines as a chip names it after its file: `p. 4`, `row 12`, `/runs/3`. */
+function recordPart(p: Extract<ParsedRef, { kind: 'page' | 'pointer' | 'csvrow' }>): string {
+  return p.kind === 'page' ? `p. ${p.page}` : p.kind === 'csvrow' ? `row ${p.row}` : locatorLabel(p.pointer)
+}
+
 /** A locator as a chip shows it, cut to LOCATOR_LABEL_MAX characters (chips stay short; the hover has the whole ref). */
 function locatorLabel(locator: string): string {
   return locator.length > LOCATOR_LABEL_MAX ? `${locator.slice(0, LOCATOR_LABEL_MAX - 1)}…` : locator
+}
+
+/** The kinds that name one record of a file (backend refs.RECORD_KINDS). */
+const RECORD_KINDS = new Set(['record', 'row', 'page', 'pointer', 'csvrow'])
+
+/** A record's ref as label rows key it (backend records.canon): a PDF's `#page=<n>` as `#p<n>`; any other ref as it is. */
+export function recordKey(ref: string): string {
+  const m = /^(.+\.pdf)#(?:p|page=?)(\d+)$/i.exec(ref.trim())
+  return m ? `${m[1]}#p${+m[2]}` : ref.trim()
+}
+
+/** The file of a ref that names one record of it (a line, a database row, a page, a JSON value, a CSV row, or a
+ * `<path>#<locator>` a view's reader names, whose file name has an extension), with the line for a line; null for any
+ * other ref (backend records.split). */
+export function recordOf(ref: string): { path: string; line?: number } | null {
+  const p = parseRef(ref)
+  if (!p || !('path' in p)) return null
+  if (p.kind === 'record') return { path: p.path, line: p.line }
+  return RECORD_KINDS.has(p.kind) || (p.kind === 'path' && p.locator && /\.[A-Za-z0-9]{1,8}$/.test(p.path)) ? { path: p.path } : null
 }
 
 /** The fragment of a ref into `path` (the text after `#`), or null when the ref names another file or no fragment. */
@@ -271,6 +306,10 @@ export function refLabel(ref: string): string {
       return `${runOf(p.path)}${p.table}`
     case 'row':
       return `${runOf(p.path)}${p.table}/${p.pk}`
+    case 'page':
+    case 'pointer':
+    case 'csvrow':
+      return `${base(p.path)} ${recordPart(p)}`
     case 'record':
       return `${base(p.path)} L${p.line}`
     case 'range':
@@ -291,10 +330,12 @@ export function refLabel(ref: string): string {
  */
 export function addressLabel(ref: string): string {
   const p = parseRef(ref)
-  if (!p || !(p.kind === 'record' || p.kind === 'range' || p.kind === 'block' || p.kind === 'span' || p.kind === 'path')) return refLabel(ref)
+  if (!p || !(p.kind === 'record' || p.kind === 'range' || p.kind === 'block' || p.kind === 'span' || p.kind === 'path' || p.kind === 'page' || p.kind === 'pointer' || p.kind === 'csvrow'))
+    return refLabel(ref)
   const { rest } = splitRun(p.path)
   const file = `${runPrefix(p.path)}${rest.split('/').pop() ?? rest}`
   if (p.kind === 'path') return p.locator ? `${file} · ${locatorLabel(p.locator)}` : file
+  if (p.kind === 'page' || p.kind === 'pointer' || p.kind === 'csvrow') return `${file} ${recordPart(p)}`
   return p.kind === 'range' ? `${file} L${p.line}-${p.endLine}` : `${file} L${p.line}`
 }
 
@@ -367,6 +408,9 @@ export function surfaceOf(ref: string): Surface | null {
     case 'view':
     case 'table':
     case 'row':
+    case 'page':
+    case 'pointer':
+    case 'csvrow':
     case 'record':
     case 'range':
     case 'block':

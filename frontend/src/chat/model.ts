@@ -609,6 +609,12 @@ export function refWords(ref: string, questions: ReadonlyMap<string, string>): s
     case 'table':
     case 'row':
       return `${corpusRelative(p.path)}, table ${p.table}`
+    case 'page':
+      return `${corpusRelative(p.path)} page ${p.page}`
+    case 'csvrow':
+      return `${corpusRelative(p.path)} row ${p.row}`
+    case 'pointer':
+      return `${corpusRelative(p.path)} ${p.pointer}`
     case 'record':
     case 'range':
     case 'block':

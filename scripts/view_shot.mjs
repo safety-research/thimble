@@ -19,7 +19,7 @@
 // browser. A state is shot when its page has been quiet (no fetch or marks request in flight) for QUIET_MS after
 // `open`, or HARD_MS has passed. One line ends the run: {"done": true, "states": [{ok, errors, fetches, height, refs,
 // records, units, marked, hidden, controls, pills, fonts}]}: `refs` the distinct data-anchor refs the page reported, `records`
-// those naming a record (`<path>#L<n>`), `units` those naming one of the view's units (`view:<slug>/<key>`), `marked`
+// those naming a record of a file (`<path>#L<n>`, `<db>#<table>/<key>`, `<pdf>#p<n>`, any `<path>#<fragment>`), `units` those naming one of the view's units (`view:<slug>/<key>`), `marked`
 // the elements carrying a label's mark in the shot, `hidden` those the bridge hid or dimmed for the filter, `controls`
 // the page's own controls whose short text names a label that is on (labelControls), `pills` the chips and buttons it
 // drew as rounded pills of its own rather than with thimble's parts (ownPills), and `fonts` whether Hanken Grotesk was
@@ -38,6 +38,9 @@ const HARD_MS = 25_000
 const READY_MS = 10_000
 const MEDIA_CHUNK = 4 * 1024 * 1024 // bytes of one Range answer
 const MEDIA_WHOLE_MAX = 32 * 1024 * 1024 // a request without Range (an <img>) gets a file up to this size whole
+// a ref naming one record of a file: a line of any file, or a fragment of a file whose name has an extension (backend
+// records.is_record_ref)
+const RECORD_REF = /^(?!(?:view|card|cell|concept|report|chat|call|group|ui):)[^\s#][^#\n]*(?:#L[1-9]\d*|\.[A-Za-z0-9]{1,8}#\S+)$/
 // A control's text longer than this is a row or a card that shows a label's mark, not a control for the label.
 const CONTROL_TEXT_MAX = 60
 const CONTROLS = 'button, select, option, input, label, summary, [role=button], [role=checkbox], [role=switch], [role=menuitemcheckbox], [role=option], [role=tab]'
@@ -328,7 +331,7 @@ async function shootState(browser, opt, doc, state, i) {
       fetches,
       height,
       refs: refs.length,
-      records: refs.filter((r) => /^.+#L[1-9]\d*$/.test(r)).length,
+      records: refs.filter((r) => RECORD_REF.test(r)).length,
       units: refs.filter((r) => /^view:[^/]+\/.+/.test(r)).length,
       marked: await count('[data-thimble-label]'),
       hidden: await count('[data-thimble-drop]'),
