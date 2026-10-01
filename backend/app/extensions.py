@@ -1248,9 +1248,10 @@ def fetch(source: str, into: Path) -> tuple[Path, dict[str, Any]]:
         return builtin_dir() / src, {"source": src, "kind": "built-in"}
     local = Path(src).expanduser()
     if local.is_dir():
-        if _thimbles_copy(local.resolve()):
-            raise AddError(f"{local.resolve()} is a copy thimble keeps for itself. Add the folder you write the "
-                           f"extension in, or the extension's name if thimble ships it")
+        if _thimbles_folder(local.resolve()):
+            raise AddError(f"{local.resolve()} is in thimble's own folders, which its agents and kernels write. Copy "
+                           f"the extension's folder to one of your own and add that, or add the extension's name if "
+                           f"thimble ships it")
         return local.resolve(), {"source": str(local.resolve()), "kind": "folder"}
     if not GIT_RE.search(src):
         names = ", ".join(sorted(d.name for d in _subdirs(builtin_dir()) if (d / MANIFEST).is_file())) or "none"
@@ -1269,12 +1270,13 @@ def fetch(source: str, into: Path) -> tuple[Path, dict[str, Any]]:
     return dest, {"source": src, "kind": "git", "commit": commit.stdout.strip()}
 
 
-def _thimbles_copy(d: Path) -> bool:
-    """Whether folder `d` is in thimble's own extensions folder or among a workspace's copies of extensions."""
-    if d.is_relative_to(extensions_dir().resolve()):
+def _thimbles_folder(d: Path) -> bool:
+    """Whether folder `d` is in thimble's home (its extensions folder included) or inside a workspace, which a folder
+    used in place must not be: thimble replaces its own copies there, and its agents and kernels write the rest."""
+    if d.is_relative_to(home().resolve()):
         return True
     ws = config.WORKSPACES_DIR.resolve()
-    return d.is_relative_to(ws) and d.relative_to(ws).parts[1:2] == (WS_DIR,)
+    return d.is_relative_to(ws) and len(d.relative_to(ws).parts) >= 2
 
 
 def _row(kind: str, name: str, about: str) -> str:

@@ -724,21 +724,24 @@ async def test_a_folder_used_in_place_cannot_link_to_files_outside_it(corpus, tm
     assert not extensions._own_file(d, "agents/orient.md")
 
 
-def test_add_refuses_a_folder_that_is_a_copy_thimble_keeps(corpus, tmp_path):
+def test_add_refuses_a_folder_in_thimble_s_own_folders(corpus, tmp_path):
     """Adding a folder uses it in place and first takes out what thimble held under that name, so one of thimble's own
-    copies (in its extensions folder, or a workspace's) is refused and left as it was."""
+    copies (in its extensions folder, or a workspace's) is refused and left as it was. So is any other folder of a
+    workspace, which thimble's agents and kernels write, such as the workspace's own extension."""
     _add(_copy(tmp_path, "kept"))
     extensions.remove("kept")
     copy = extensions.extensions_dir() / "kept"
     shutil.copytree(tmp_path / "kept", copy)
-    with pytest.raises(extensions.AddError, match="is a copy thimble keeps for itself"):
+    with pytest.raises(extensions.AddError, match="is in thimble's own folders"):
         extensions.add(str(copy), yes=True, say=lambda _: None)
     assert (copy / "extension.json").is_file() and not copy.is_symlink()
-    ws_copy = config.workspace_dir(CORPUS) / extensions.WS_DIR / "kept"
-    shutil.copytree(tmp_path / "kept", ws_copy)
-    with pytest.raises(extensions.AddError, match="is a copy thimble keeps for itself"):
-        extensions.add(str(ws_copy), yes=True, say=lambda _: None)
-    assert (ws_copy / "extension.json").is_file()
+    for rel in (f"{extensions.WS_DIR}/kept", "extension"):
+        inside = config.workspace_dir(CORPUS) / rel
+        shutil.copytree(tmp_path / "kept", inside)
+        with pytest.raises(extensions.AddError, match="is in thimble's own folders"):
+            extensions.add(str(inside), yes=True, say=lambda _: None)
+        assert (inside / "extension.json").is_file()
+    assert not extensions.linked("kept")
 
 
 async def test_the_add_question_and_settings_name_what_runs_outside_the_sandbox(corpus, tmp_path, monkeypatch):
