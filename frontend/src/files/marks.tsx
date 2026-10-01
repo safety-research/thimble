@@ -8,7 +8,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 import { scaleApi } from '../lib/api'
 import { bus } from '../lib/bus'
 import type { Concept, LabelRow, LabelsForPath } from '../lib/types'
-import { laneCells, recordMarks, type LaneCell, type RecordMarks } from './labels'
+import { laneCells, recordMarks, type LaneCell, type LaneValue, type RecordMarks } from './labels'
 
 /** lines per labels request: the source route's largest page, so one block covers a reader page and its neighbours */
 export const LABEL_BLOCK = 500
@@ -233,6 +233,35 @@ export type MarksAt = RecordMarks & { cells: LaneCell[] }
 const NO_CELLS: LaneCell[] = []
 const NONE: MarksAt = { spans: [], lit: [], cells: NO_CELLS }
 const noFile = () => undefined
+
+/** The marks of the records from `line` to `end` as one: each label's cell holds the classes any of them has, and the
+ * tint is the first one's that has one. A card that stands for several records (a chat turn) shows a label on any of
+ * them this way. */
+export function useMarksOver(path: string, line: number, end: number): MarksAt {
+  const ctx = useContext(ReaderLabelsContext)
+  const want = ctx?.want
+  useEffect(() => {
+    if (line < 1) return
+    for (let b = blockOf(line); b <= blockOf(Math.max(line, end)); b++) want?.(b * LABEL_BLOCK + 1)
+  }, [want, line, end])
+  return useMemo(() => {
+    if (!ctx) return NONE
+    const all: MarksAt[] = []
+    for (let n = line; n <= Math.max(line, end); n++) {
+      const mine = ctx.rows.get(`${path}#L${n}`)
+      const rowOf = (id: string) => mine?.get(id)
+      const cells = ctx.lanes?.length ? laneCells(ctx.lanes, rowOf, ctx.fileOf ?? noFile) : NO_CELLS
+      all.push(!ctx.on.length || !mine ? (cells === NO_CELLS ? NONE : { ...NONE, cells }) : { ...recordMarks(ctx.on, rowOf, ctx.focus), cells })
+    }
+    if (all.length === 1) return all[0]
+    const cells = all[0].cells.map((c, i) => {
+      const values = new Map<string, LaneValue>()
+      for (const m of all) for (const v of m.cells[i]?.values ?? []) if (!values.has(v.value)) values.set(v.value, v)
+      return { ...c, values: [...values.values()] }
+    })
+    return { spans: all[0].spans, lit: all.flatMap((m) => m.lit), cells, bar: all.find((m) => m.bar)?.bar, tint: all.find((m) => m.tint)?.tint }
+  }, [ctx, path, line, end])
+}
 
 /** The marks of the record at `line`; mounting a record asks for its block of labels. */
 export function useMarksAt(path: string, line: number): MarksAt {

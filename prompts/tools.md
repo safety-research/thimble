@@ -1088,7 +1088,7 @@ This message is from the analyst, typed in your thread.
 
 ## orient-from-extension
 
-The analyst added the extension {extension}, which gives the orientation these instructions. Follow them as far as the work you did allows.
+The analyst switched on the extension {extension} and asked you to run its instructions for the orientation now. Follow them as far as the work you did allows.
 
 ## orient-followed-up
 
