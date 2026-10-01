@@ -116,3 +116,36 @@ def test_a_long_command_is_read_word_by_word_only_when_it_names_an_install(monke
     for line, want in ((script + " && pip install pandas", True), (script + " && curl$(echo -O) u", True),
                        ('cd x && "cu"rl -O u', True), ("echo pip-install is a word", False)):
         assert sandbox_allow.installs(line) is want, line[-40:]
+
+
+def test_the_event_log_is_read_on_from_where_it_was_left(workspaces_tmp, monkeypatch):
+    """Every record on the workspace stream read the log's tail again for another process's records, and every open
+    stream parsed the whole log every 3 s for them: the log is read again only when another process wrote to it, and a
+    stream reads only what was appended since its last read."""
+    import asyncio
+    import json
+
+    from app import investigation
+
+    c = "mini"
+    tails = []
+    real = investigation._last_stored_seq
+    monkeypatch.setattr(investigation, "_last_stored_seq", lambda p: tails.append(1) or real(p))
+
+    async def emit_some(n: int) -> None:
+        for i in range(n):
+            investigation.emit(c, investigation.MAIN, {"type": "chat", "chat": f"x{i}"})
+
+    asyncio.run(emit_some(30))
+    assert len(tails) == 0, "records of this process alone read no tail"
+    log = investigation.inv_dir(c, investigation.MAIN) / "events.jsonl"
+    pos = log.stat().st_size
+    with log.open("a") as f:
+        f.write(json.dumps({"type": "chat", "chat": "other", "seq": 100}) + "\n" + '{"type": "chat", "se')
+    fresh, end = investigation._read_jsonl_after(log, pos)
+    assert [e["seq"] for e in fresh] == [100] and end == pos + len(json.dumps({"type": "chat", "chat": "other", "seq": 100})) + 1
+    asyncio.run(emit_some(1))
+    assert len(tails) == 1 and json.loads(log.read_text().splitlines()[-1])["seq"] == 101, \
+        "a record another process wrote is seen, and the next seq follows it"
+    assert investigation._read_jsonl_after(log, log.stat().st_size + 10)[1] == log.stat().st_size, \
+        "a log written again is read from its start"
