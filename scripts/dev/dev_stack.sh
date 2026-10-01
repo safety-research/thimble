@@ -183,7 +183,7 @@ do_start() {
   seed_home "$DEV/stack.home" "$API_PORT"
   local backend_pid vite_pid=""
   backend_pid="$(cd "$WORKTREE/backend" && spawn "$BACKEND_LOG" "${common[@]}" .venv/bin/python -m uvicorn app.main:app \
-      --host 127.0.0.1 --port "$API_PORT" --reload --reload-dir app --timeout-graceful-shutdown 3)"
+      --host 127.0.0.1 --port "$API_PORT" --loop asyncio --reload --reload-dir app --timeout-graceful-shutdown 3)"
   if [ -d "$WORKTREE/frontend/node_modules" ]; then
     local vite_env=(BACKEND_PORT="$API_PORT")
     [ -n "${THIMBLE_STACK_VITE_CACHE:-}" ] && vite_env+=(VITE_CACHE_DIR="$THIMBLE_STACK_VITE_CACHE")

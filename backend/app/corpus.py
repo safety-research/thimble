@@ -27,6 +27,7 @@ import os
 import re
 import shutil
 import sqlite3
+import stat
 import sys
 import tempfile
 import threading
@@ -169,6 +170,30 @@ def list_sources(corpus: Path, include_hidden: bool = False) -> list[dict[str, A
     """The corpus's files as the Files tab lists them. Paths with a dot component are left out unless `include_hidden`,
     which marks them `hidden: True`. Memoised per corpus; callers must not mutate the shared list."""
     return _listing(corpus, include_hidden).sources
+
+
+def source_of(corpus: Path, rel: str) -> dict[str, Any] | None:
+    """The record list_sources gives the regular file at `rel`, read from that file alone, without walking the corpus;
+    None for a path it may list otherwise or not at all: one that is not a regular file, under a dot name, reached
+    through a symlinked folder, or one of SKIPPED_SUFFIXES."""
+    if not rel or _is_hidden(rel) or rel.endswith(SKIPPED_SUFFIXES) or os.path.normpath(rel) != rel or rel.startswith("/"):
+        return None
+    here = str(corpus)
+    for part in rel.split("/")[:-1]:
+        here = f"{here}/{part}"
+        try:
+            if not stat.S_ISDIR(os.lstat(here).st_mode):
+                return None
+        except OSError:
+            return None
+    try:
+        st = os.stat(f"{corpus}/{rel}")
+    except OSError:
+        return None
+    if not stat.S_ISREG(st.st_mode):
+        return None
+    kind = source_kind(rel)
+    return {"path": rel, "kind": kind, "size_bytes": st.st_size, "title": source_title(rel, kind)}
 
 
 def forget_sources(corpus: Path | None = None) -> None:
@@ -672,14 +697,9 @@ def line_count(path: Path) -> int:
     return n
 
 
-def _split_lines(buf: bytes) -> list[bytes]:
-    lines = buf.split(b"\n")
-    if lines and lines[-1] == b"":
-        lines.pop()
-    return [ln[:-1] if ln.endswith(b"\r") else ln for ln in lines]
-
-
 def _index_lines(idx: LineIndex, path: Path, start: int, end: int) -> list[bytes]:
+    """Lines start..end of the chunks that hold them, found a newline at a time rather than by splitting the chunk (up
+    to 8 MB), which holds the interpreter, and so every other thread, for as long as the split runs."""
     n = len(idx)
     start, end = max(1, start), min(end, n)
     if start > end:
@@ -688,8 +708,22 @@ def _index_lines(idx: LineIndex, path: Path, start: int, end: int) -> list[bytes
     with open(path, "rb") as f:
         f.seek(begin)
         buf = f.read(stop - begin)
-    lines = _split_lines(buf)
-    return lines[start - first:end - first + 1]
+    pos = 0
+    for _ in range(start - first):
+        pos = buf.find(b"\n", pos) + 1
+        if pos == 0:
+            return []
+    out: list[bytes] = []
+    for _ in range(end - start + 1):
+        if pos >= len(buf):
+            break
+        nl = buf.find(b"\n", pos)
+        line = buf[pos:] if nl < 0 else buf[pos:nl]
+        out.append(line[:-1] if line.endswith(b"\r") else line)
+        if nl < 0:
+            break
+        pos = nl + 1
+    return out
 
 
 def read_lines(path: Path, start: int, end: int) -> list[bytes]:

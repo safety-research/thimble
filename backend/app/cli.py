@@ -562,11 +562,16 @@ def spawn(cmd: list[str], *, cwd: Path, env: dict[str, str], log_file: Path) -> 
     return proc.pid
 
 
+# The server's event loop: Python's own, which starts a child process with vfork. uvloop forks the whole server for each
+# child, which holds the loop for as long as the kernel takes to copy the server's memory map.
+SERVER_LOOP = "asyncio"
+
+
 def backend_cmd(p: int, dev: bool = False) -> list[str]:
     """In dev mode the backend reloads on edits to app/, as Vite does for the frontend; THIMBLE_NO_AUTORESTART turns
     it off."""
     cmd = [sys.executable, "-m", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", str(p),
-           "--timeout-graceful-shutdown", "3"]
+           "--loop", SERVER_LOOP, "--timeout-graceful-shutdown", "3"]
     return cmd + ["--reload", "--reload-dir", "app"] if dev else cmd
 
 

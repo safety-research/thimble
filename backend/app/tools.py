@@ -243,7 +243,10 @@ def role_of(actor: str) -> str:
 
 def sections() -> dict[str, str]:
     """Every `## <name>` section of prompts/tools.md as written, read fresh; PromptError when the file is unusable."""
-    text = prompts.load(TOOLS_PROMPT)
+    return _sections_of(prompts.load(TOOLS_PROMPT))
+
+
+def _sections_of(text: str) -> dict[str, str]:
     marks = [*_SECTION_RE.finditer(text)]
     return {m.group(1): text[m.end():marks[i + 1].start() if i + 1 < len(marks) else len(text)].strip()
             for i, m in enumerate(marks)}
@@ -260,20 +263,32 @@ def split_section(body: str) -> tuple[str, Any]:
     return (body[:m.start()] + body[m.end():]).strip(), json.loads(m.group(1))
 
 
+# prompts/tools.md as descriptions() last read it, and what it made of it: every hint line of every call and request
+# reads the file, which is cheap, and parses it again only when its text changed
+_described: tuple[str, dict[str, str]] | None = None
+
+
 def descriptions() -> dict[str, str]:
     """Every section of prompts/tools.md by name, a tool's as its description without the schema block and a hint's as
-    written; {} (with a warning) when the file is unusable, so a result still reads without its hint lines."""
+    written; {} (with a warning) when the file is unusable, so a result still reads without its hint lines. The dict is
+    shared, so callers never change it."""
+    global _described
     try:
-        secs = sections()
+        text = prompts.load(TOOLS_PROMPT)
     except prompts.PromptError as e:
         log.warning("prompts/%s.md unusable (%s); results go without their hint lines", TOOLS_PROMPT, e)
         return {}
+    hit = _described
+    if hit is not None and hit[0] == text:
+        return hit[1]
+    secs = _sections_of(text)
     out: dict[str, str] = {}
     for name, body in secs.items():
         try:
             out[name] = split_section(body)[0]
         except ValueError:
             out[name] = body
+    _described = (text, out)
     return out
 
 

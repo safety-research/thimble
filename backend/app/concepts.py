@@ -961,6 +961,20 @@ def match_paths(corpus_dir: Path, patterns: list[str]) -> list[dict]:
     if not pats:
         return []
     out = []
+    if not any(GLOB_CHARS.search(p) for p, _ in pats):
+        # files named outright are found by name, without a walk of the corpus
+        found: dict[str, tuple[dict, list[str | None]]] = {}
+        for p, frag in pats:
+            src = found[p][0] if p in found else corpus.source_of(corpus_dir, p)
+            if src is None:
+                break
+            found.setdefault(p, (src, []))[1].append(frag)
+        else:
+            for src, frags in found.values():
+                under = None if None in frags else list(dict.fromkeys(frags))
+                out.append({**src, "under": under} if under else src)
+            out.sort(key=lambda s: s["path"])
+            return out
     for src in corpus.list_sources(corpus_dir):
         rel = src["path"]
         hits = [frag for p, frag in pats if rel == p or fnmatch.fnmatchcase(rel, p) or rel.startswith(p + "/")]
@@ -972,6 +986,7 @@ def match_paths(corpus_dir: Path, patterns: list[str]) -> list[dict]:
     return out
 
 
+GLOB_CHARS = re.compile(r"[*?\[]")  # what makes a path pattern a glob for fnmatch
 PROMPT_APPLY_MAX = 50_000  # units a prompt apply over the whole corpus may cover without a limit
 WHOLE_CORPUS = frozenset({"", ".", "*", "**", "**/*", "./*"})  # path patterns that narrow nothing
 
@@ -4194,10 +4209,29 @@ def labels_route(c: str, concept_id: str, path: str | None = None, lines: str | 
 
 
 @router.get("/ws/{c}/concepts/{concept_id}/coverage")
-async def coverage_route(c: str, concept_id: str) -> dict:
+async def coverage_route(c: str, concept_id: str) -> Response:
     """{unit, files: [{path, covered, rows}], not_covered}: which corpus files the label's rows cover (file units)."""
     ws, concept = load_concept(c, concept_id)
-    return await asyncio.to_thread(coverage, ws, concept)
+    return Response(await asyncio.to_thread(_coverage_json, ws, concept), media_type="application/json")
+
+
+JSON_CHUNK = 5_000  # items json.dumps encodes at a time, so a long list lets the other threads run between parts
+
+
+def _coverage_json(ws: Path, concept: dict) -> bytes:
+    """coverage() as JSON, encoded JSON_CHUNK items at a time, so that the other threads, the event loop's too, run
+    between the parts of a long list."""
+    cov = coverage(ws, concept)
+    out = [b'{"unit":', json.dumps(cov["unit"]).encode()]
+    for key in ("files", "not_covered"):
+        items = cov[key]
+        out.append(f',"{key}":['.encode())
+        for i in range(0, len(items), JSON_CHUNK):
+            out.append((b"," if i else b"") + json.dumps(items[i:i + JSON_CHUNK], ensure_ascii=False, separators=(",", ":"))[1:-1].encode())
+            time.sleep(0)
+        out.append(b"]")
+    out.append(b"}")
+    return b"".join(out)
 
 
 @router.get("/ws/{c}/concepts/{concept_id}/rows")
