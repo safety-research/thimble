@@ -127,13 +127,15 @@ function check(ok, message) {
   if (!ok) throw new StepError(message)
 }
 
-/** A screenshot of the viewport once the fonts are ready; a shot taken without Hanken Grotesk is listed for the fonts
- * step. Returns its path relative to the report. */
+/** A screenshot of the viewport once the fonts are ready; a shot taken while the page has no loaded Hanken Grotesk face
+ * or its body is set in another family is listed for the fonts step. document.fonts.check() would not do: it is true
+ * for a family the page never declared. Returns its path relative to the report. */
 async function shot(page, name) {
   const fonts = await page
     .evaluate(async () => {
       await document.fonts.ready
-      return document.fonts.check('16px "Hanken Grotesk"')
+      const loaded = [...document.fonts].some((f) => f.family.replace(/["']/g, '') === 'Hanken Grotesk' && f.status === 'loaded')
+      return loaded && /^\s*["']?Hanken Grotesk\b/.test(getComputedStyle(document.body).fontFamily)
     })
     .catch(() => false)
   if (!fonts) fontMisses.push(name)
