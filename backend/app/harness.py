@@ -21,7 +21,8 @@ Sessions. thimble.options() sets the SDK's cli_path to agent_kit/claude_shim.py,
 WebSocket on SESSION_PATH, to start the session. The server starts it on the analyst's own claude, outside the box,
 in the role's work folder with the corpus added, and passes its stdin, stdout and stderr through. claude_argv keeps
 only the flags a session may choose (KEEP, KEEP_VALUE): the role's permission mode, sandbox, data rule, private read
-denies and permission hooks are thimble's, and the program's allowed tools, plugins, setting sources and MCP servers
+denies and permission hooks are thimble's, its own work goes unasked where thimble's own sessions of the role do
+theirs (UNASKED_ROLES), and the program's allowed tools, plugins, setting sources and MCP servers
 that run outside it are dropped. Its permission requests show on the run's chat (agent_session.host). A run holds at
 most MAX_SESSIONS sessions at once.
 
@@ -70,6 +71,8 @@ TMP_DIR = ".tmp"  # in the work folder: the program's TMPDIR
 CACHE_DIR = ".cache"
 ENV_KEEP = ("PATH", "LANG", "LC_ALL", "LC_CTYPE", "TZ", "USER", "LOGNAME", "TERM", "HOME", "SHELL")
 ROWS = {"orientation": "orient", "critic": "critic", "writer": "writer", "dev": "dev"}  # modes.AGENTS
+# the roles whose sessions do their own work unasked, as thimble's own sessions of them do (agent_session.fence)
+UNASKED_ROLES = ("critic", "writer", "dev")
 STOP_WAIT_S = 5.0
 NO_BOX = ("The role's sandbox could not run here, so its program runs without one and can read what you can, "
           "thimble's token among it.")
@@ -451,7 +454,8 @@ def claude_argv(run: Run, argv: list[str]) -> tuple[list[str], Path, dict[str, s
     mode = modes.mode_for(job.c, ROWS[job.role])
     permission_mode = modes.flag(mode)
     settings: dict[str, Any] = {"permissions": dict(asked)}
-    fenced = agent_session.fence(corpus, work, sandbox=conf.sandboxed, network=conf.network,
+    unasked = job.role in UNASKED_ROLES
+    fenced = agent_session.fence(corpus, work, sandbox=conf.sandboxed, unasked=unasked, network=conf.network,
                                  auto_allow=not conf.install_asks(), required=conf.enforced, data=conf.data)
     perms = {**settings["permissions"]}
     for k, rules in fenced["permissions"].items():
@@ -472,6 +476,8 @@ def claude_argv(run: Run, argv: list[str]) -> tuple[list[str], Path, dict[str, s
     hooks = agent_session.permission_hooks(job.c, permission_mode == "auto", session=job.key,
                                            home=str(userconf.global_file().parent), wait=conf.may_ask())
     hooks.update(agent_session.scratch_hooks(work))
+    if "sandbox" in fenced and unasked:
+        hooks.update(agent_session.sandbox_hooks(agent_session.sandbox_rule(corpus), conf.install_asks()))
     settings["hooks"] = hooks
     shared = agent_session.shared_prompt(corpus)
     append = "\n\n".join([*appended, shared])
@@ -674,8 +680,10 @@ async def _run(run: Run, argv: list[str]) -> str:
         run.rec.text(NO_BOX + "\n")
     hook_auth.grant(run.token_id, run.token, run.allows)
     if run.chat:
+        corpus = run.conf.corpus() or config.corpus_dir(job.c)
+        rule = agent_session.sandbox_rule(corpus) if job.role in UNASKED_ROLES and run.conf.sandboxed else None
         hosted = agent_session.host(job.c, job.key, run.chat, agent=ROWS[job.role],
-                                    wait_s=agent_session.PERMISSION_WAIT_S, conf=run.conf)
+                                    wait_s=agent_session.PERMISSION_WAIT_S, sandbox=rule, conf=run.conf)
         hosted.patient = job.patient
     try:
         try:

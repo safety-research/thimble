@@ -534,3 +534,24 @@ async def test_a_javascript_command_harness_runs_the_orientation_with_thimble_s_
     assert any(c.get("title") == "What did the JavaScript harness see?" for c in _cards(CORPUS))
     log_text = (config.workspace_dir(CORPUS) / "chats" / f"{rec['chats'][orientation.ROLE]}.jsonl").read_text()
     assert "refused: true" in log_text and "stray console.log" not in log_text
+
+
+def test_a_program_s_sessions_do_their_own_work_unasked_where_thimble_s_own_sessions_of_the_role_do(
+        tmp_path, workspaces_tmp, monkeypatch):
+    monkeypatch.setenv("THIMBLE_SANDBOX", "1")
+    part = roles.Part("x", "writer", tmp_path, tmp_path, {"command": ["true"]})
+
+    def settings_of(role: str, writes: tuple = ()) -> dict:
+        job = harness.Job(CORPUS, role, f"{role}:k", role, {}, ("list_cards",), tmp_path / role, writes=writes)
+        run = harness.Run(job, part, userconf.session(CORPUS, role, sandbox=True), "t", "t.s")
+        argv = harness.claude_argv(run, ["-p"])[0]
+        return json.loads(argv[argv.index("--settings") + 1])
+
+    writer = settings_of("writer")
+    assert f"Edit(/{tmp_path / 'writer'}/**)" in writer["permissions"]["allow"]
+    assert any("sandbox_allow" in json.dumps(h) for h in writer["hooks"].get("PreToolUse") or [])
+    orient = settings_of("orientation")
+    assert f"Edit(/{tmp_path / 'orientation'}/**)" not in (orient["permissions"].get("allow") or [])
+    view = tmp_path / "views" / "v"
+    dev = settings_of("dev", writes=(view,))
+    assert f"Edit(/{view}/**)" in dev["permissions"]["allow"] and str(view) in dev["sandbox"]["filesystem"]["allowWrite"]
