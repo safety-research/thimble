@@ -161,7 +161,7 @@ VIEW_REPAIRS = max(0, int(os.environ.get("THIMBLE_VIEW_REPAIRS", "2") or "2"))
 # has shown no activity for QUIET_NOTE_S (nothing new in its transcript or its subagents'), its thread says so
 # (QUIET_LINE), and again each time that quiet time doubles.
 ASK_TIMEOUT_S = float(os.environ.get("THIMBLE_DEV_ASK_TIMEOUT_S", "") or 15 * 60)
-QUIET_NOTE_S = float(os.environ.get("THIMBLE_DEV_QUIET_NOTE_S", "") or 10 * 60)
+QUIET_NOTE_S = max(1.0, float(os.environ.get("THIMBLE_DEV_QUIET_NOTE_S", "") or 10 * 60))
 QUIET_LINE = "no activity for {minutes}"
 # How long a server may take to answer /api/health (boot_check, restart_watch.py) before the change counts as breaking
 # its start.
