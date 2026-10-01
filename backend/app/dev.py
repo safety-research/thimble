@@ -1687,7 +1687,8 @@ async def _worker_turn(run: Run, run_log: Log, cwd: Path, prompt: str, resume: s
     while it grows the session works, and once it is quiet `claude agents` is asked for the session's state, at gaps that
     double up to STATE_GAP_MAX_S while that state stays working or blocked. `on_session(short id, full id)` records the
     session. Returns the session's report; SessionError when it ended any way but done, ran past
-    TURN_TIMEOUT_S, or waited ASK_TIMEOUT_S on a question (the session is then stopped). With `answered` False, a
+    TURN_TIMEOUT_S (not counting the time its permission requests wait on the card), or waited ASK_TIMEOUT_S on a
+    question (the session is then stopped). With `answered` False, a
     `blocked` session whose transcript shows its turn ended counts as ended, since Claude Code lists a finished turn
     `blocked` when its last message reads as a question. A turn that ended on an API error is not a question: a view
     ticket's turn returns the error text, a code ticket's raises it. `asking` is how it asks and `models` its model
@@ -1720,11 +1721,18 @@ async def _worker_turn(run: Run, run_log: Log, cwd: Path, prompt: str, resume: s
     limit = TURN_TIMEOUT_S if turn_timeout_s is None else turn_timeout_s
     asked_at = 0.0
     gap, looked = POLL_S, 0.0  # between two looks at the session's state, which doubles while it stays the same
+    carded, card_from = 0.0, None  # time with a permission request on the card, which the turn's limit leaves out
     while True:
         await asyncio.sleep(POLL_S)
         pos = tail.pos
         tail.read(run_log)
-        if time.monotonic() - started > limit:
+        now = time.monotonic()
+        on_card = bool(key and workspace and agent_session.asking(workspace, key))
+        if on_card and card_from is None:
+            card_from = now
+        elif not on_card and card_from is not None:
+            carded, card_from = carded + now - card_from, None
+        if now - started - carded - (now - card_from if card_from is not None else 0.0) > limit:
             state = "timed out"
             break
         if waiting and time.monotonic() - asked_at > ASK_TIMEOUT_S:
