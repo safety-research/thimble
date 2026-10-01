@@ -15,9 +15,10 @@ A folder you add is used in place, so later edits take effect without adding it 
 When a file has a problem, `add` names the file and line of each one and adds nothing.
 
 A view shows in a workspace where a quick model check finds it fits the files, and once there it runs the checks a view
-the dev agent builds passes: every file it reads is read or hidden with a reason, its derived fields are declared, and
-a test label's marks show on its records. A view that fails them is hidden there, and Settings > Extensions names the
-first failure.
+the dev agent builds passes: every file it reads is read or hidden with a reason, its derived fields are declared, a
+test label's marks show on its records, and a view that is a tab in Files draws its own label controls
+([prompts/dev-view.md](../prompts/dev-view.md)), since thimble draws none above it. A view that fails them is hidden
+there, and Settings > Extensions names the first failure.
 
 The JSON files follow [backend/app/extension.schema.json](../backend/app/extension.schema.json).
 
