@@ -2264,8 +2264,8 @@ def frame_document(view: dict[str, Any], media: str | None = None, *, card: bool
     route's absolute URL (media_url), which the policy allows for images, audio and video and thimble.mediaUrl builds
     on; without it the page loads no URL at all. `card` marks the page as a card's (cardtypes.py), which draws what the
     bridge's `init` brings; `page` names a page file other than view.html (a card type's own card.html). `derived` is
-    the view's derived fields (derived_fields), view.json's when not given, which the bridge marks wherever the page
-    names one with data-field."""
+    the view's derived fields (derived_fields), view.json's when not given, which the bridge hands the page as
+    thimble.derived."""
     page = Path(view["dir"]) / (view.get("page") or VIEW_HTML)
     if page.is_symlink() or Path(view["dir"]).is_symlink():
         raise HTTPException(404, f"the page of {view['slug']!r} is a symlink")
