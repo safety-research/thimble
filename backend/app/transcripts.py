@@ -371,7 +371,7 @@ def sniff_bytes(head: bytes, rel: str, complete: bool = False) -> dict[str, Any]
     if suffix in DELIMITED:
         return _sniff_csv(text, DELIMITED[suffix])
     if suffix in TEXTISH:
-        return sniff_text(text)
+        return sniff_text(text, markdown=suffix in (".md", ".markdown"))
     return None
 
 
@@ -524,9 +524,10 @@ def _speaker_ok(speaker: str) -> bool:
     return bool(low) and low not in NOT_SPEAKERS and len(low.split()) <= 4 and not low.startswith(("http", "www."))
 
 
-def sniff_text(text: str) -> dict[str, Any] | None:
+def sniff_text(text: str, markdown: bool = False) -> dict[str, Any] | None:
     """A text or markdown chat log: the style whose turn lines recur most in the head, with at least two speakers who
-    take turns, one of them more than once."""
+    take turns, one of them more than once. In markdown, which reads well rendered, the sniff is sure only when turn
+    lines are at least a fifth of the head's lines, so a document quoting an example exchange keeps Rendered first."""
     lines = [ln for ln in text.split("\n") if ln.strip()][:TEXT_HEAD_LINES]
     if len(lines) < 2:
         return None
@@ -557,7 +558,7 @@ def sniff_text(text: str) -> dict[str, Any] | None:
         return None
     _, name, turns, counts = best
     roles = sum(n for s, n in counts.items() if s in ROLE_WORDS)
-    strong = roles >= 2 or (name in DISTINCT_STYLES and turns >= 4)
+    strong = (roles >= 2 or (name in DISTINCT_STYLES and turns >= 4)) and (not markdown or turns * 5 >= len(lines))
     out: dict[str, Any] = {"format": "text", "score": STRONG if strong else WEAK, "style": name}
     if name not in DISTINCT_STYLES:
         # a heading, a bold label or a `Word:` line starts a turn only for a speaker the head shows taking turns

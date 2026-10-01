@@ -286,3 +286,15 @@ def test_a_whole_json_file_too_large_to_parse_is_not_offered_transcript(chats, m
     monkeypatch.setattr(transcripts, "JSON_MAX_BYTES", 10)
     assert transcripts.sniff(chats / "logs" / "eval.json", "logs/eval.json") is None
     assert transcripts.sniff(chats / "logs" / "sharegpt.jsonl", "logs/sharegpt.jsonl")["format"] == "conversations"
+
+
+def test_markdown_quoting_an_example_exchange_keeps_rendered_first(chats):
+    prose = "\n".join(f"Paragraph {i} on why the support bot asks for an order number." for i in range(40))
+    doc = f"# Prompting guide\n\n## Example\n\nUser: my order is late\nAssistant: what is its number?\n\n{prose}\n\n" \
+          "## Another\n\nUser: where is my refund\nAssistant: it takes five days\n"
+    (chats / "logs" / "guide.md").write_text(doc)
+    got = transcripts.sniff(chats / "logs" / "guide.md", "logs/guide.md")
+    assert got["format"] == "text" and got["score"] == transcripts.WEAK
+    (chats / "logs" / "guide.txt").write_text(doc)
+    assert transcripts.sniff(chats / "logs" / "guide.txt", "logs/guide.txt")["score"] == transcripts.STRONG
+    assert transcripts.sniff(chats / "logs" / "session.md", "logs/session.md")["score"] == transcripts.STRONG
