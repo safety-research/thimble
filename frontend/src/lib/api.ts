@@ -30,6 +30,7 @@ import type {
   GrepFile,
   SourceFind,
   SourceInfo,
+  SourceLines,
   SourcePage,
   StoredCall,
   CallIndex,
@@ -152,7 +153,11 @@ export const api = {
   corpora: () => j<CorpusInfo[]>(`${BASE}/corpora`),
   sources: (c: string) => j<SourceInfo[]>(`${BASE}/corpora/${enc(c)}/sources`),
   source: (c: string, path: string, start = 1, count = 100) => j<SourcePage>(`${BASE}/corpora/${enc(c)}/source${q({ path, start, count })}`),
-  sourceAround: (c: string, path: string, line: number, before = 50, after = 50) => j<SourcePage>(`${BASE}/corpora/${enc(c)}/source/around${q({ path, line, before, after })}`),
+  /** `clamp`: a line past the end answers with the file's last lines, not a 404 (a move made while the count is an estimate) */
+  sourceAround: (c: string, path: string, line: number, before = 50, after = 50, clamp = false) =>
+    j<SourcePage>(`${BASE}/corpora/${enc(c)}/source/around${q({ path, line, before, after, clamp: clamp ? 1 : undefined })}`),
+  /** `GET /corpora/{c}/source/lines`: a file's line count, an estimate while a big file's line index is being built. */
+  sourceLines: (c: string, path: string) => j<SourceLines>(`${BASE}/corpora/${enc(c)}/source/lines${q({ path })}`),
   /** `GET /corpora/{c}/source/find`: the lines of one file past `after` that hold `text`, searched on the server. */
   findInSource: (c: string, path: string, text: string, after = 0, signal?: AbortSignal) =>
     j<SourceFind>(`${BASE}/corpora/${enc(c)}/source/find${q({ path, q: text, after: after || undefined })}`, { signal }),

@@ -11,6 +11,10 @@ the analyst's view of it (viewlog.record). The Files view's name, in-file and cr
 
 The one write: `PUT /corpora/{c}/source?path=…` replaces an existing .txt / .md / .markdown file atomically, keeping its
 line ending and trailing-newline convention.
+
+A big file's line index (INDEX_BIG and up) is built in a background thread. Until it is ready a page is read on from the
+nearest mark the build has made (the file's start at once), with the line count estimated (`total_estimated`);
+`GET /source/lines` says when it is exact.
 """
 from __future__ import annotations
 
@@ -236,10 +240,16 @@ def folder_listing(corpus: Path, rel: str, include_hidden: bool = False) -> dict
 INDEX_MAX_FILES = 64                 # line indexes kept, least recently used out first
 INDEX_MAX_BYTES = 256 * 1024 * 1024  # ... or until their marks add up to this
 INDEX_BUF = 8 * 1024 * 1024          # bytes read at a time while marking
+INDEX_BIG = 32 * 1024 * 1024         # a file this large is indexed in the background
+INDEX_BUILDS = 2                     # background index builds at a time
+FORWARD_BUF = 1024 * 1024            # bytes read at a time by a page read before its file's index is ready
+FORWARD_SKIP = 16 * 1024 * 1024      # ... and the most it reads past the nearest mark before its first line
 _INDEX: "OrderedDict[Path, LineIndex]" = OrderedDict()  # path -> its sparse index; test hooks read `p in _INDEX`
 _COUNTS: dict[Path, tuple[tuple[int, int], int]] = {}  # path -> ((size, mtime_ns), line count): filled by line_offsets and remember_line_count
 _index_lock = threading.Lock()
 _index_builds: dict[Path, threading.Lock] = {}  # one build at a time per file; a second reader waits for it
+_builds: dict[Path, "_Build"] = {}  # a big file's index being built in the background
+_build_slots = threading.BoundedSemaphore(INDEX_BUILDS)
 
 
 class LineIndex:
@@ -300,10 +310,14 @@ class LineIndex:
         raise TypeError("a LineIndex holds marks, not every line start: use offset(path, line_no) or read_lines")
 
 
-def build_index(path: Path) -> LineIndex:
+Progress = Callable[[array, array, int, int], None]
+
+
+def build_index(path: Path, progress: Progress | None = None) -> LineIndex:
     """One pass over the file: the marks concept_scan.index_file makes and the line count, without a Python step per
     line. Newlines are counted with bytes.count over a window sized from the average line so far; a line longer than the
-    window falls to the byte rule."""
+    window falls to the byte rule. `progress(mark_lines, mark_offsets, lines, bytes)` is called after each buffer with
+    the marks so far and the lines and bytes the scan has passed."""
     from . import concept_scan  # lazy: concept_scan imports this module
 
     chunk_lines, chunk_bytes = concept_scan.CHUNK_LINES, concept_scan.CHUNK_BYTES
@@ -323,6 +337,8 @@ def build_index(path: Path) -> LineIndex:
                 if not buf:
                     break
                 b0 += len(buf)
+                if progress is not None:
+                    progress(mark_lines, mark_offsets, n, b0)
                 buf = f.read(INDEX_BUF)
                 rel = 0
                 if not buf:
@@ -383,6 +399,54 @@ def build_index(path: Path) -> LineIndex:
     return LineIndex((size, st.st_mtime_ns), n, mark_lines, mark_offsets)
 
 
+class _Build:
+    """A big file's line index being built in a background thread. Until it is done, the marks the scan has made so far
+    (`n_marks` of them) and the lines and bytes it has passed are published as it goes, so a page can be read from the
+    nearest mark before its first line."""
+
+    __slots__ = ("key", "cond", "mark_lines", "mark_offsets", "n_marks", "lines", "passed", "index", "error")
+
+    def __init__(self, key: tuple[int, int]) -> None:
+        self.key = key
+        self.cond = threading.Condition()
+        self.mark_lines: array = array("q")
+        self.mark_offsets: array = array("q")
+        self.n_marks = 0
+        self.lines = 0
+        self.passed = 0
+        self.index: LineIndex | None = None
+        self.error: BaseException | None = None
+
+    def progress(self, mark_lines: array, mark_offsets: array, lines: int, passed: int) -> None:
+        with self.cond:
+            self.mark_lines, self.mark_offsets = mark_lines, mark_offsets
+            self.n_marks = len(mark_lines)
+            self.lines, self.passed = lines, passed
+            self.cond.notify_all()
+
+    def finish(self, index: LineIndex | None, error: BaseException | None = None) -> None:
+        with self.cond:
+            self.index, self.error = index, error
+            self.cond.notify_all()
+
+    def done(self) -> bool:
+        return self.index is not None or self.error is not None
+
+    def mark_before(self, line: int) -> tuple[int, int]:
+        """(line, byte offset) of the last published mark at or before `line`; line 1 at byte 0 before the first. Under
+        `cond`."""
+        i = bisect_right(self.mark_lines, line, 0, self.n_marks) - 1
+        return (self.mark_lines[i], self.mark_offsets[i]) if i >= 0 else (1, 0)
+
+    def wait(self) -> LineIndex:
+        with self.cond:
+            self.cond.wait_for(self.done)
+        if self.error is not None:
+            raise self.error
+        assert self.index is not None
+        return self.index
+
+
 def _index_trim() -> None:
     """Least recently used indexes out until INDEX_MAX_FILES and INDEX_MAX_BYTES hold (under _index_lock)."""
     total = sum(idx.nbytes for idx in _INDEX.values())
@@ -391,11 +455,55 @@ def _index_trim() -> None:
         total -= gone.nbytes
 
 
+def _keep(path: Path, idx: LineIndex) -> None:
+    """The index into the LRU and its count into _COUNTS (under _index_lock)."""
+    _INDEX[path] = idx
+    _INDEX.move_to_end(path)
+    _COUNTS[path] = (idx.key, idx.lines)
+    _index_trim()
+
+
+def _run_build(path: Path, b: _Build) -> None:
+    with _build_slots:
+        try:
+            idx = build_index(path, b.progress)
+        except Exception as e:  # noqa: BLE001 — handed to every reader waiting on the build
+            with _index_lock:
+                if _builds.get(path) is b:
+                    del _builds[path]
+            b.finish(None, e)
+            return
+    with _index_lock:
+        if _builds.get(path) in (b, None):
+            _keep(path, idx)
+        if _builds.get(path) is b:
+            del _builds[path]
+    b.finish(idx)
+
+
+def _big_index(path: Path, key: tuple[int, int]) -> "LineIndex | _Build":
+    """A big file's index from memory, else its background build (started now when none runs)."""
+    with _index_lock:
+        hit = _INDEX.get(path)
+        if hit is not None and hit.key == key:
+            _INDEX.move_to_end(path)
+            return hit
+        b = _builds.get(path)
+        if b is not None and b.key == key:
+            return b
+        b = _builds[path] = _Build(key)
+    threading.Thread(target=_run_build, args=(path, b), name="line-index", daemon=True).start()
+    return b
+
+
 def line_offsets(path: Path) -> LineIndex:
     """The file's sparse line index, built on first access and kept in an LRU keyed on (size, mtime_ns) so a changed
-    file is indexed again."""
+    file is indexed again. A big file's (INDEX_BIG) is built in the background; this waits for it."""
     st = path.stat()
     key = (st.st_size, st.st_mtime_ns)
+    if st.st_size >= INDEX_BIG:
+        got = _big_index(path, key)
+        return got if isinstance(got, LineIndex) else got.wait()
     with _index_lock:
         hit = _INDEX.get(path)
         if hit is not None and hit.key == key:
@@ -410,10 +518,7 @@ def line_offsets(path: Path) -> LineIndex:
                 return hit
         idx = build_index(path)
         with _index_lock:
-            _INDEX[path] = idx
-            _INDEX.move_to_end(path)
-            _COUNTS[path] = (idx.key, idx.lines)
-            _index_trim()
+            _keep(path, idx)
             _index_builds.pop(path, None)
         return idx
 
@@ -430,7 +535,8 @@ def remember_line_count(path: Path, key: tuple[int, int], n: int) -> None:
 
 def line_count(path: Path) -> int:
     """The number of lines of a file: from the line index or a remembered count when either matches the file's (size,
-    mtime), else one counting pass (cached as a count only, so counting many files leaves no index behind)."""
+    mtime); a big file's from its line index (built once, in the background, and shared with the pages read meanwhile);
+    else one counting pass (cached as a count only, so counting many files leaves no index behind)."""
     st = path.stat()
     key = (st.st_size, st.st_mtime_ns)
     with _index_lock:
@@ -440,6 +546,8 @@ def line_count(path: Path) -> int:
     known = _COUNTS.get(path)
     if known is not None and known[0] == key:
         return known[1]
+    if st.st_size >= INDEX_BIG:
+        return len(line_offsets(path))
     n = 0
     last = b""
     with open(path, "rb") as f:
@@ -459,10 +567,7 @@ def _split_lines(buf: bytes) -> list[bytes]:
     return [ln[:-1] if ln.endswith(b"\r") else ln for ln in lines]
 
 
-def read_lines(path: Path, start: int, end: int) -> list[bytes]:
-    """Raw lines start..end (1-based, inclusive), without terminators; bounds are clamped. Seeks to the chunk holding
-    `start` and reads through the chunk holding `end`, never the whole file."""
-    idx = line_offsets(path)
+def _index_lines(idx: LineIndex, path: Path, start: int, end: int) -> list[bytes]:
     n = len(idx)
     start, end = max(1, start), min(end, n)
     if start > end:
@@ -473,6 +578,104 @@ def read_lines(path: Path, start: int, end: int) -> list[bytes]:
         buf = f.read(stop - begin)
     lines = _split_lines(buf)
     return lines[start - first:end - first + 1]
+
+
+def read_lines(path: Path, start: int, end: int) -> list[bytes]:
+    """Raw lines start..end (1-based, inclusive), without terminators; bounds are clamped. Seeks to the chunk holding
+    `start` and reads through the chunk holding `end`, never the whole file."""
+    return _index_lines(line_offsets(path), path, start, end)
+
+
+def _read_on(path: Path, size: int, mark: tuple[int, int], start: int, end: int,
+             skip_max: int | None) -> tuple[list[bytes], int, int, int | None] | None:
+    """Lines start..end read on from a line start (`mark`: line, byte offset; its line <= start). Returns (those lines,
+    the bytes and the whole lines read from the mark, the file's line count when the read reached its end, else None);
+    None when more than `skip_max` bytes lie between the mark and line `start`."""
+    mark_line, mark_off = mark
+    want = end - mark_line + 1  # lines through line `end`
+    skip = start - mark_line    # of them, the lines before `start`
+    data = bytearray()
+    found = 0
+    with open(path, "rb") as f:
+        f.seek(mark_off)
+        while found < want:
+            buf = f.read(FORWARD_BUF)
+            if not buf:
+                break
+            data += buf
+            found += buf.count(b"\n")
+            if skip_max is not None and found < skip and len(data) > skip_max:
+                return None
+    parts = bytes(data).split(b"\n", want)
+    if len(parts) > want or (parts and parts[-1] == b""):  # the bytes after line `end`, or after the last newline
+        parts.pop()
+    total = None
+    if mark_off + len(data) >= size:  # the read reached the file's end
+        total = mark_line - 1 + found + (bool(data) and not data.endswith(b"\n"))
+    lines = [ln[:-1] if ln.endswith(b"\r") else ln for ln in parts[skip:]]
+    return lines, data.rfind(b"\n") + 1, found, total
+
+
+def _estimate(size: int, rates: list[tuple[int, int]], at_least: int) -> int:
+    """The line count of a file of `size` bytes from the largest (bytes, lines) sample, never under `at_least`."""
+    used, lines = max(rates)
+    return max(at_least, round(size * lines / used)) if used and lines else at_least
+
+
+def page_lines(path: Path, start: int, end: int) -> tuple[list[bytes], int, bool]:
+    """read_lines for a page, with the file's line count and whether that count is an estimate. A big file whose index
+    is not ready is read on from the nearest mark its background build has published (line 1 before the first), so a
+    page near its start, or anywhere the build has passed, needs no wait; its count is then estimated from the bytes per
+    line read so far."""
+    start = max(1, start)
+    st = path.stat()
+    key = (st.st_size, st.st_mtime_ns)
+    got: LineIndex | _Build = line_offsets(path) if st.st_size < INDEX_BIG else _big_index(path, key)
+    while isinstance(got, _Build):
+        b = got
+        with b.cond:
+            if b.index is not None:
+                got = b.index
+                break
+            if b.error is not None:
+                raise b.error
+            mark = b.mark_before(start)
+            passed = b.lines >= start
+            scan = (b.passed, b.lines)
+        read = _read_on(path, st.st_size, mark, start, max(start, end), None if passed else FORWARD_SKIP)
+        if read is None:  # the line lies past what the build has passed: wait until it gets there
+            with b.cond:
+                b.cond.wait_for(lambda: b.done() or b.lines >= start, timeout=1.0)
+            continue
+        lines, used, n_read, total = read
+        lines = lines[:max(0, end - start + 1)]
+        if total is not None:
+            return lines, total, False
+        at_least = max(max(start, end) + 1, mark[0] - 1 + n_read, scan[1] + (scan[0] < st.st_size))
+        return lines, _estimate(st.st_size, [scan, (used, n_read)], at_least), True
+    return _index_lines(got, path, start, end), len(got), False
+
+
+def line_total(path: Path) -> tuple[int, bool, float]:
+    """(the file's line count, whether it is an estimate, the share of the file indexed so far). A big file whose index
+    is not ready gets its count estimated as page_lines does, without waiting."""
+    st = path.stat()
+    if st.st_size < INDEX_BIG:
+        return len(line_offsets(path)), False, 1.0
+    got = _big_index(path, (st.st_size, st.st_mtime_ns))
+    if isinstance(got, _Build):
+        with got.cond:
+            idx, error, scan = got.index, got.error, (got.passed, got.lines)
+        if error is not None:
+            raise error
+        if idx is None:
+            if not scan[1]:  # the scan has not reported yet: the bytes per line of the file's start
+                with open(path, "rb") as f:
+                    head = f.read(FORWARD_BUF)
+                scan = (head.rfind(b"\n") + 1, head.count(b"\n"))
+            return _estimate(st.st_size, [scan], scan[1] + 1), True, round(got.passed / st.st_size, 3)
+        got = idx
+    return len(got), False, 1.0
 
 
 def record_meta(record: Any, rel: str, kind: str) -> dict[str, Any]:
@@ -680,7 +883,11 @@ def binary_page(p: Path, rel: str, kind: str, start: int) -> dict[str, Any]:
             "size_bytes": p.stat().st_size}
 
 
-def _page(corpus: Path, rel: str, start: int, end: int, clip: int = 0) -> dict[str, Any]:
+def _page(corpus: Path, rel: str, start: int, end: int, clip: int = 0,
+          around: tuple[int, bool] | None = None) -> dict[str, Any]:
+    """A page of lines start..end; `total_estimated` when page_lines estimated the count (a big file whose line index is
+    being built). With `around` (line, clamp), the page /source/around answers: 404 when the file has no such line,
+    unless `clamp` moves a line past the end to the file's last lines."""
     p = _file(corpus, rel)
     kind = source_kind(rel)
     if kind == "forge":  # never page sqlite bytes as text
@@ -689,11 +896,21 @@ def _page(corpus: Path, rel: str, start: int, end: int, clip: int = 0) -> dict[s
         raise HTTPException(400, f"{rel!r} is a sqlite side file ({'/'.join(SIDE_SUFFIXES)}) of a database, not text")
     if sniff_binary(p):
         return binary_page(p, rel, kind, start)
-    total = len(line_offsets(p))
-    records = load_records(p, rel, kind, start, end)
+    lines, total, estimated = page_lines(p, start, end)
+    if around is not None:
+        line, clamp = around
+        if line < 1 or (not estimated and line > total):
+            if not (clamp and line > total > 0):
+                raise HTTPException(404, f"line {line} out of range ({rel} has {total} lines)")
+            start, end = max(1, total - (line - start)), total
+            lines, total, estimated = page_lines(p, start, end)
+    records = records_from_lines(lines, rel, kind, start)
     if clip > 0:
         records = clip_records(records, max(CLIP_MIN, clip))
-    return {"path": rel, "kind": kind, "total_lines": total, "start": start, "records": records}
+    page = {"path": rel, "kind": kind, "total_lines": total, "start": start, "records": records}
+    if estimated:
+        page["total_estimated"] = True
+    return page
 
 
 # --------------------------------------------------------------------------- routes
@@ -781,20 +998,31 @@ def get_source(c: str, path: str, request: Request, start: int = 1, count: int =
 
 @router.get("/corpora/{c}/source/around")
 def get_source_around(c: str, path: str, line: int, request: Request, before: int = 50, after: int = 50,
-                      clip: int = 0) -> dict[str, Any]:
+                      clip: int = 0, clamp: int = 0) -> dict[str, Any]:
+    """The page around one line: 404 for a line the file does not have, unless `clamp`, which answers a line past the
+    end with the file's last lines (the reader's own moves, made while its line count is an estimate)."""
     corpus = _corpus(c)
     p = _file(corpus, path)
     if source_kind(path) != "forge" and not path.endswith(SKIPPED_SUFFIXES) and sniff_binary(p):
         _viewed(c, path, request)
         return binary_page(p, path, source_kind(path), 1)
-    total = len(line_offsets(p))
-    if line < 1 or line > total:
-        raise HTTPException(404, f"line {line} out of range ({path} has {total} lines)")
     before = max(0, min(before, AROUND_MAX))
     after = max(0, min(after, AROUND_MAX))
-    page = _page(corpus, path, max(1, line - before), line + after, clip)
+    page = _page(corpus, path, max(1, line - before), line + after, clip, around=(line, bool(clamp)))
     _viewed(c, path, request)
     return page
+
+
+@router.get("/corpora/{c}/source/lines")
+def get_source_lines(c: str, path: str) -> dict[str, Any]:
+    """{path, total_lines, estimated, indexed}: a file's line count. While a big file's line index is built in the
+    background the count is an estimate and `indexed` the share of the file the build has passed; the reader asks again
+    until it is exact."""
+    p = _file(_corpus(c), path)
+    if source_kind(path) == "forge" or path.endswith(SKIPPED_SUFFIXES) or sniff_binary(p):
+        return {"path": path, "total_lines": 0, "estimated": False, "indexed": 1.0}
+    total, estimated, indexed = line_total(p)
+    return {"path": path, "total_lines": total, "estimated": estimated, "indexed": indexed}
 
 
 # --------------------------------------------------------------------------- find: files by name, text in a file

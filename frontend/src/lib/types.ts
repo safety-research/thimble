@@ -1044,11 +1044,22 @@ export interface SourcePage {
   path: string
   kind: SourceKind
   total_lines: number
+  /** `total_lines` is an estimate: the file is big and its line index is still being built (GET /source/lines) */
+  total_estimated?: boolean
   start: number
   records: SourceRecord[]
   /** the file is binary, judged from its first bytes: no records, and its size */
   binary?: boolean
   size_bytes?: number
+}
+
+/** `GET /corpora/{c}/source/lines`: a file's line count; while a big file's line index is being built, an estimate and
+ * the share of the file indexed so far. */
+export interface SourceLines {
+  path: string
+  total_lines: number
+  estimated: boolean
+  indexed: number
 }
 
 /** `GET /corpora/{c}/source/find`: the lines of a file that hold the text, the first 5,000 of them listed; `complete`

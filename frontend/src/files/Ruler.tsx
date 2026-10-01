@@ -252,9 +252,12 @@ export function rulerWidths(n: number): { lanes: number; bar: number } {
   return { lanes: n * LANE_PX + (n - 1) * LANE_GAP_PX, bar: n * ZOOM_LANE_PX + (n - 1) * ZOOM_GAP_PX + 2 * ZOOM_EDGE_PX }
 }
 
-export function useRuler(ws: string, path: string): LabelRuler | null {
+/** Where the labels' values fall on the file, asked only while `on` (some label is on: with none the ruler draws no
+ * lane, and the route would count the file's lines for nothing). */
+export function useRuler(ws: string, path: string, on = true): LabelRuler | null {
   const [ruler, setRuler] = useState<LabelRuler | null>(null)
   useEffect(() => {
+    if (!on) return
     let alive = true
     let timer: number | null = null
     const read = () =>
@@ -272,7 +275,7 @@ export function useRuler(ws: string, path: string): LabelRuler | null {
       off()
       if (timer != null) window.clearTimeout(timer)
     }
-  }, [ws, path])
+  }, [ws, path, on])
   return ruler
 }
 
