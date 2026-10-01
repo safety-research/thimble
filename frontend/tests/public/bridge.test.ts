@@ -3,9 +3,11 @@
 // it is ready and reports each data-anchor once; window.thimble.fetch posts a query and resolves with the page's answer
 // to that id, a newer fetch with its key or its signal drops it and has its call cancelled, its progress reaches the
 // page's onProgress or else thimble's box at the corner, and thimble.lib gives the packages the view bundled; a message
-// from anywhere but the parent page is ignored; with a label filter on, what the filter drops is
-// hidden; and in a card's frame the page draws what `init` brings, says the height it needs, and has what the filter
-// drops dimmed while it filters its own records.
+// from anywhere but the parent page is ignored; with a label filter on, what the filter drops is hidden and the page hears
+// how many; in a card's frame the page draws what `init` brings, says the height it needs, and has what the filter
+// drops dimmed while it filters its own records; a label call with no gesture in the frame is refused there, the key
+// for label calls reaches the bridge alone, and the page hears whether the view shows label controls of its own. The
+// label calls with a real gesture are tests/public/browser/view-label-calls.test.ts.
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { JSDOM } from 'jsdom'
@@ -176,5 +178,44 @@ describe('the view bridge', () => {
     expect(win().thimble.markOf('board.jsonl#L1')).toMatchObject({ bar: '#e69f00' })
     expect(doc.getElementById('one')!.getAttribute('data-thimble-drop')).toBe('dim')
     expect(doc.getElementById('two')!.hasAttribute('data-thimble-drop')).toBe(false)
+  })
+
+  test('a label call with no gesture in the frame is refused there and said to the page', async () => {
+    fromPage({ type: 'thimble:key', key: 'k-1' })
+    const got = win().thimble.setLabel('asks', true)
+    const marked = win().thimble.mark('board.jsonl#L1', 'asks', 'yes')
+    await expect(got).rejects.toMatchObject({ thimbleRefused: true, message: 'thimble changes labels only while the analyst clicks or types in the view' })
+    await expect(marked).rejects.toMatchObject({ thimbleRefused: true })
+    expect(of('labelCall')).toEqual([])
+    expect(of('labelRefused').map((m) => m.op)).toEqual(['on', 'mark'])
+  })
+
+  test('the key reaches the bridge and none of the view’s own listeners, capturing or not', async () => {
+    const heard: string[] = []
+    win().addEventListener('message', (e: MessageEvent) => heard.push(e.data?.type), true)
+    win().addEventListener('message', (e: MessageEvent) => heard.push(e.data?.type))
+    fromPage({ type: 'thimble:key', key: 'secret' })
+    fromPage({ type: 'thimble:open', open: { ref: null } })
+    expect(heard).toEqual(['thimble:open', 'thimble:open'])
+  })
+
+  test('with a filter on, the page hears how many anchored refs it hides, and none once the filter is off', async () => {
+    fromPage({ type: 'thimble:open', open: { ref: null } })
+    const marks = { 'board.jsonl#L2': { keep: true }, 'board.jsonl#L1': { bar: '#e69f00', names: ['asks'], spans: [], keep: false } }
+    fromPage({ type: 'thimble:labels', marks, on: [], filter: { label: 'asks', value: 'yes', colour: '#e69f00' } })
+    await wait()
+    expect(of('hidden').at(-1)).toMatchObject({ n: 1, self: false })
+    fromPage({ type: 'thimble:labels', marks: {}, on: [], filter: null })
+    await wait()
+    expect(of('hidden').at(-1)).toMatchObject({ n: 0, self: false })
+  })
+
+  test('the page hears whether it shows label controls of its own', async () => {
+    expect(of('labelControls').at(-1)).toMatchObject({ on: false })
+    const b = dom.window.document.createElement('button')
+    b.setAttribute('data-label', 'asks')
+    dom.window.document.body.appendChild(b)
+    await wait(300)
+    expect(of('labelControls').at(-1)).toMatchObject({ on: true })
   })
 })
