@@ -23,7 +23,8 @@ starts a session on prompts/dev-view.md in the build's own folder (view_work_dir
 which Claude Code trusts) with `--add-dir` for the view's folder and the corpus, never in the corpus, where Claude
 Code's sandbox would make a folder of its own; the worked examples are fenced read-only, and an edit of the corpus goes
 as the dev agent's `data` says, by default to the analyst first (view_fence). After each turn the server runs the view's
-gate; a failure wakes the session, a pass registers the view. Where an active extension runs the dev agent with a
+gate; a failure wakes the session, a pass registers the view and clears the extracts the session left in its own folder
+(work_files). Where an active extension runs the dev agent with a
 program (roles.py), each turn is a run of that program instead (program_view_turn), checked the same way. A turn the API
 ended at capacity is no attempt: the build waits and wakes the session again. An orientation's proposal that runs out of
 attempts gets up to VIEW_REPAIRS new sessions, and is then dropped quietly; a view the analyst asked for fails with
@@ -95,6 +96,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from . import agents, cc_settings, cli, config, headless, hook_auth, modes, procs, prompts, session, ticket_box, userconf
+from . import work_files
 from .cli import SOURCE_CHANGED, home as thimble_home
 from .ledger import atomic_write_text
 from .session import find_transcript
@@ -3241,6 +3243,7 @@ async def _run_view(c: str, slug: str, run: Run) -> None:
         view = views.mark_built(c, slug)
         views.update_proposal(c, slug, changed=None, change=None, revision=None)
         views.drop_built_copy(c, slug)
+        work_files.after_run(c, work, "done")
         run.status = "built"
         log.info("view ticket %s/%s built%s", c, slug, " (a change)" if revision else "")
         if chat:
@@ -3395,6 +3398,7 @@ async def review_revision(c: str, slug: str, message: str) -> tuple[bool, str]:
             rep = await views.gate(c, slug, views._kept_locators(c, slug))
             if rep.get("ok"):
                 run_log.stage(f"checks passed: {len(rep.get('checks') or [])} ref(s), the page loaded")
+                work_files.after_run(c, work, "done")
                 if chat:
                     _close_chat({"workspace": c, "chat": chat}, "done", result_text[:400] or None)
                 return True, result_text

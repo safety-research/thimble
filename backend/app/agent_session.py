@@ -62,7 +62,8 @@ write deny of that folder would break, and makes a folder of its own there. Its 
 whatever folder an earlier command moved to (with_home_shell). Its --settings deny Edit in the corpus and exclude the
 CLAUDE.md files of the work folder's ancestry (memory_excludes). Where the sandbox can run, it reaches the network only
 while the agent's `network` is on, as it is by default. A SubagentStart hook gives each subagent its own scratch folder,
-since the sandbox gives all agents one $TMPDIR. A caller that passes `unasked` (a writer, a critique, a check's run)
+since the sandbox gives all agents one $TMPDIR, and a PostToolUse hook tells the session when its work folder grows past
+WORK_BUDGET, so it deletes the extracts it no longer needs before its run ends (work_budget.py). A caller that passes `unasked` (a writer, a critique, a check's run)
 also auto-allows Bash in the sandbox and edits in the work folder (sandbox_allow.py).
 
 The config. thimble's config (userconf.py) adds its rules to the session's --settings (userconf.Session.settings): an
@@ -188,6 +189,9 @@ SANDBOX_HOOK = Path(__file__).with_name("sandbox_allow.py")  # module note, the 
 SANDBOX_HOOK_TIMEOUT_S = 10
 SCRATCH_HOOK = Path(__file__).with_name("scratch_hook.py")  # module note, the fence: a subagent's own scratch folder
 SCRATCH_PROMPT = "session-scratch"  # prompts/tools.md: the line that names it
+WORK_BUDGET_HOOK = Path(__file__).with_name("work_budget.py")  # the warning when a work folder grows past WORK_BUDGET
+WORK_BUDGET = 2 * 1000 ** 3  # bytes
+WORK_BUDGET_PROMPT = "work-budget"  # prompts/tools.md: the warning's line
 PERMISSION_HOOK = Path(__file__).with_name("permission_hook.py")  # module note, permissions
 REQUEST, DENIED, PRE = permission_hook.REQUEST, permission_hook.DENIED, permission_hook.PRE  # its events
 # how long the analyst's answer to a call auto mode refused waits for the model to make that call again (module note,
@@ -668,12 +672,18 @@ def sandbox_hooks(rule: tuple[list[str], list[str]], installs: bool = False) -> 
 
 def scratch_hooks(work: Path) -> dict[str, Any]:
     """The `hooks` that give each subagent of a fenced session a scratch folder of its own in the work folder
-    (scratch_hook.py, module note, the fence), with `## session-scratch` of prompts/tools.md as the line naming it."""
+    (scratch_hook.py, module note, the fence), with `## session-scratch` of prompts/tools.md as the line naming it, and
+    that warn the session after a Bash call once the work folder holds more than WORK_BUDGET (work_budget.py)."""
     text = tools.hint(SCRATCH_PROMPT, folder="{folder}")
     command = (f"{shlex.quote(sys.executable)} -S {shlex.quote(str(SCRATCH_HOOK))} --work {shlex.quote(str(work))} "
                f"--text {shlex.quote(text)}")
+    warn = tools.hint(WORK_BUDGET_PROMPT, folder="{folder}", size="{size}", budget="{budget}")
+    budget = (f"{shlex.quote(sys.executable)} -S {shlex.quote(str(WORK_BUDGET_HOOK))} --work {shlex.quote(str(work))} "
+              f"--budget {WORK_BUDGET} --text {shlex.quote(warn)}")
     return {"SubagentStart": [{"matcher": "*", "hooks": [{"type": "command", "command": command,
-                                                          "timeout": SANDBOX_HOOK_TIMEOUT_S}]}]}
+                                                          "timeout": SANDBOX_HOOK_TIMEOUT_S}]}],
+            "PostToolUse": [{"matcher": "Bash", "hooks": [{"type": "command", "command": budget,
+                                                           "timeout": SANDBOX_HOOK_TIMEOUT_S}]}]}
 
 
 def permission_hooks(c: str, auto: bool = False, session: str = "", home: str = "", wait: bool = False) -> dict[str, Any]:
@@ -778,7 +788,8 @@ async def start(c: str, key: str, *, role: str, title: str, agent_args: list[str
         # both hooks run
         hooks[event] = [*hooks.get(event, []), *entries] if event == PRE else entries
     if calls:
-        hooks.update(call_hooks(c, key))
+        for event, entries in call_hooks(c, key).items():
+            hooks[event] = [*hooks.get(event, []), *entries]
     if hooks:
         given = {**given, "hooks": {**(given.get("hooks") or {}), **hooks}}
     given["env"] = {**await asyncio.to_thread(settings_env, c, key, extra_env), **(given.get("env") or {})}

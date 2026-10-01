@@ -1,15 +1,18 @@
 """app.work_files: when an agent's run ends, its work folder lets go of its subagents' scratch folders and of the large
 files nothing uses, and keeps what a card or a document names, the files a named script reads, small files, its
-dot-entries and Python environments. The work folder and the notebook are invented."""
+dot-entries and Python environments. While it runs, the session hears when the folder grows past a budget
+(app/work_budget.py). The work folder and the notebook are invented."""
 from __future__ import annotations
 
 import json
 import os
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 
-from app import config, orient_session, work_files
+from app import agent_session, config, orient_session, work_budget, work_files
 
 C = "board"
 MB = 1024 * 1024
@@ -146,3 +149,43 @@ def test_a_file_a_deleted_group_or_a_label_names_is_kept(workspaces_tmp):
         {"kind": "code", "spec": f"import json\nSTAFF = set(json.load(open('{work}/staff_ids.json')))\n"}))
     work_files.clear(C, work)
     assert by_trash.is_file() and by_label.is_file() and not orphan.exists()
+
+
+def test_a_session_hears_once_each_time_its_work_folder_grows_past_another_budget(tmp_path):
+    """The hook a fenced session's Bash calls run after (agent_session.scratch_hooks) says nothing under the budget,
+    once past it, nothing more until the folder grows past the next whole budget, and again after it shrank and grew."""
+    work = tmp_path / "work"
+    work.mkdir()
+    hooks = agent_session.scratch_hooks(work)["PostToolUse"]
+    assert hooks[0]["matcher"] == "Bash" and "work_budget.py" in hooks[0]["hooks"][0]["command"]
+
+    def call() -> str:
+        state = work / work_budget.STATE_FILE
+        if state.is_file():  # as if CHECK_S went by
+            state.write_text(json.dumps({**json.loads(state.read_text()), "checked": 0}))
+        done = subprocess.run([sys.executable, "-S", str(Path(work_budget.__file__)), "--work", str(work), "--budget",
+                               str(2 * MB), "--text", "{folder} holds {size} of {budget}"],
+                              input=json.dumps({"hook_event_name": "PostToolUse"}), capture_output=True, text=True,
+                              timeout=60)
+        assert done.returncode == 0, done.stderr
+        return json.loads(done.stdout)["hookSpecificOutput"]["additionalContext"] if done.stdout.strip() else ""
+
+    _write(work / "tmp_a1" / "small.pkl", MB)
+    assert call() == ""
+    _write(work / "tmp_a1" / "extract.pkl", 2 * MB)
+    assert call() == f"{work} holds 3 MB of 2 MB"
+    assert call() == "", "said once"
+    _write(work / "copy.jsonl", 2 * MB)
+    assert call(), "past the next budget"
+    (work / "copy.jsonl").unlink()
+    (work / "tmp_a1" / "extract.pkl").unlink()
+    assert call() == ""
+    _write(work / "copy.jsonl", 2 * MB)
+    assert call(), "grown back"
+    state = json.loads((work / work_budget.STATE_FILE).read_text())
+    (work / work_budget.STATE_FILE).write_text(json.dumps({**state, "warned": 0}))
+    assert call(), "the step is kept in the folder"
+    (work / work_budget.STATE_FILE).write_text(json.dumps({**state, "warned": 0, "checked": 9e12}))
+    done = subprocess.run([sys.executable, "-S", str(Path(work_budget.__file__)), "--work", str(work), "--budget",
+                           str(2 * MB), "--text", "x"], input="{}", capture_output=True, text=True, timeout=60)
+    assert done.stdout == "", "measured at most every CHECK_S"
