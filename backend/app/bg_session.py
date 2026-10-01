@@ -371,7 +371,7 @@ _entries: dict[tuple[str, str], Entry] = {}  # (workspace, key) -> the session
 _loaded: set[str] = set()
 _wake: dict[str, Callable[[str, Entry], Awaitable[Any]]] = {}  # kind -> the caller that follows a woken session
 _changed = asyncio.Event()  # set on each news line, state change and outbox message, for wait_session
-_poked = False  # a session was recorded since the watcher's last listing: it lists again within POLL_S
+_poked = False  # a session was recorded since the watcher's last listing began: it lists again within POLL_S
 _task: asyncio.Task | None = None
 _closing = False  # the server is going down: waits return at once
 
@@ -559,18 +559,16 @@ def _hot() -> bool:
                for e in entries())
 
 
-def _sizes() -> tuple[int, ...]:
+def _sizes() -> dict[tuple[str, str], int]:
     """The sizes of the transcripts of the sessions alive, found already: a turn begins with a line there."""
-    return tuple(session._size(Path(e.tx_path)) for e in entries() if alive(e) and e.tx_path)
+    return {(e.c, e.key): session._size(Path(e.tx_path)) for e in entries() if alive(e) and e.tx_path}
 
 
-async def _quiet(wait: float) -> None:
+async def _quiet(wait: float, sizes: dict[tuple[str, str], int]) -> None:
     """Wait up to `wait`, looking every POLL_S for a reason to list sooner: a session that needs following, a transcript
-    that grew or a session recorded."""
-    global _poked
-    sizes = _sizes()
+    that is no longer of its size in `sizes` (taken before the last listing) or a session recorded since that
+    listing began."""
     end = time.monotonic() + wait
-    _poked = False
     while (left := end - time.monotonic()) > 0:
         await asyncio.sleep(min(left, POLL_S))
         if _poked or _hot() or _sizes() != sizes:
@@ -578,8 +576,10 @@ async def _quiet(wait: float) -> None:
 
 
 async def _watch() -> None:
+    global _poked
     wait = POLL_S
     while any(alive(e) for e in entries()):
+        sizes, _poked = _sizes(), False
         try:
             rows = await asyncio.to_thread(listing)
             await _tick(rows)
@@ -588,7 +588,7 @@ async def _watch() -> None:
         except Exception:  # noqa: BLE001 — the watcher never stops for one bad pass
             log.exception("the background sessions' watcher failed a pass")
         wait = POLL_S if _hot() else min(wait * 2, IDLE_POLL_S)
-        await _quiet(wait)
+        await _quiet(wait, sizes)
 
 
 async def _tick(rows: list[dict[str, Any]]) -> None:

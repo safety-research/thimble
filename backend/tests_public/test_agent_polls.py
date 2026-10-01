@@ -34,8 +34,8 @@ def idle_session(tmp_path, monkeypatch):
                          "writer", "/work/report", started=time.time() - 600, status="idle", run_open=False,
                          proxy_refused=True)
     e.tx_path, e.tx_sid = str(path), e.sid
-    bg_session._loaded.add(CORPUS)
-    bg_session._entries[(CORPUS, KEY)] = e
+    monkeypatch.setattr(bg_session, "_loaded", {CORPUS})  # the sessions of other tests are not this one's watcher's
+    monkeypatch.setattr(bg_session, "_entries", {(CORPUS, KEY): e})
     listed: list[float] = []
     state = {"status": "idle"}
 
@@ -44,9 +44,7 @@ def idle_session(tmp_path, monkeypatch):
         return [{"id": "ab12cd34", "sessionId": "ab12cd34-0000", "pid": 1, "status": state["status"]}]
 
     monkeypatch.setattr(bg_session, "listing", listing)
-    yield e, path, listed, state
-    bg_session._entries.pop((CORPUS, KEY), None)
-    bg_session._loaded.discard(CORPUS)
+    return e, path, listed, state
 
 
 async def test_the_watcher_backs_off_while_every_session_is_idle_and_lists_soon_after_a_turn_begins(idle_session):
@@ -65,6 +63,34 @@ async def test_the_watcher_backs_off_while_every_session_is_idle_and_lists_soon_
         assert listed[idle] - began < 0.3
         await asyncio.sleep(0.5)
         assert e.status == "working" and len(listed) - idle >= 6, "a working session is listed every POLL_S"
+    finally:
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+
+async def test_a_turn_that_begins_while_the_watcher_lists_is_not_missed(idle_session, monkeypatch):
+    e, path, listed, state = idle_session
+    monkeypatch.setattr(bg_session, "IDLE_POLL_S", 5.0)
+    real = bg_session.listing
+
+    def listing(*a):
+        rows = real(*a)
+        if len(listed) == 5:  # the analyst typed while `claude agents` ran, which still showed the session idle
+            with path.open("a") as f:
+                f.write(json.dumps({"type": "user", "message": {"role": "user", "content": "go on"}}) + "\n")
+        return rows
+
+    monkeypatch.setattr(bg_session, "listing", listing)
+    task = asyncio.get_running_loop().create_task(bg_session._watch())
+    try:
+        began = time.monotonic()
+        while len(listed) < 5 and time.monotonic() - began < 5:
+            await asyncio.sleep(0.01)
+        fifth = listed[4]
+        while len(listed) < 6 and time.monotonic() - fifth < 3:
+            await asyncio.sleep(0.01)
+        assert len(listed) == 6 and listed[5] - fifth < 0.4, "the line written during the listing went unseen"
     finally:
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
