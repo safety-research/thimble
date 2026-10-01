@@ -19,6 +19,7 @@ import { StepGlyph, type StepState, type ToolStep } from '../components/ToolCard
 import { api } from '../lib/api'
 import { bus } from '../lib/bus'
 import { fetchCall } from '../lib/calls'
+import { newest, STALE } from '../lib/newest'
 import { callRef, parseRef } from '../lib/refs'
 import { track } from '../lib/telemetry'
 import { hhmm } from '../lib/time'
@@ -341,18 +342,19 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
   }
   // a kept thread that is gone (deleted, or the workspace archived) falls back to main at the first load of the list
   const restored = useRef(false)
+  const fresh = useMemo(() => newest<ChatMeta[]>(), [ws])
   const loadList = useCallback(
     () =>
-      api
-        .chats(ws)
+      fresh(api.chats(ws))
         .then((list) => {
+          if (list === STALE) return
           setChats(list)
           if (restored.current) return
           restored.current = true
           setCurrent((cur) => (cur === 'main' || list.some((m) => m.id === cur) ? cur : 'main'))
         })
         .catch(() => undefined),
-    [ws],
+    [ws, fresh],
   )
   useEffect(() => {
     void loadList()

@@ -15,7 +15,7 @@ export interface PendingAsk {
 }
 
 /** Every request on the card: main's, then those of every session thimble started while it runs, the one asked first
- * first, and after them those denied unanswered. Pure. */
+ * first, and after them those declined unanswered. Pure. */
 export function pendingRequests(main: Pick<ChatMeta, 'permissions'> | null | undefined, metas: Iterable<ChatMeta>): PendingAsk[] {
   const out: PendingAsk[] = (main?.permissions ?? []).map((request) => ({ chat: 'main', request }))
   for (const m of metas) {
@@ -128,12 +128,6 @@ export function classifierDown(p: Pick<PermissionRequest, 'refused'>): boolean {
   return !!p.refused && CLASSIFIER_DOWN.test(p.refused)
 }
 
-/** When an unanswered request is denied, as the card says it: "after a minute", "after 10 minutes". Pure. */
-function denyAfter(s: number): string {
-  const min = Math.round(s / 60)
-  return min <= 1 ? 'after a minute' : `after ${min} minutes`
-}
-
 /** The chat whose permission mode the card can switch out of Auto for this request: the asking session's own, when it
  * runs one (its card's switcher is ModeSwitch); null for main, the dev agent's sessions and a background session, which
  * cannot leave Auto while it runs (backend agent_session.BG_AUTO_LINE). Pure. */
@@ -152,29 +146,30 @@ const ASKED_BY: Readonly<Record<string, string>> = {
 /** The modes an orientation runs in, as its switcher names them. */
 const MODE_NAMES: Readonly<Record<string, string>> = { manual: 'Manual', auto: 'Auto', bypass: 'Bypass' }
 
+/** The line that says when an unanswered request is declined, '' for one that names no wait. Pure. */
+function declineLine(seconds: number | null | undefined): string {
+  return seconds ? ` If nobody answers within ${waitWords(seconds)}, it is declined.` : ''
+}
+
 /** Why the session asks, in one line: thimble's own reason when it gives one (a code ticket's question), auto mode
- * could not judge the call (and when it is denied unanswered) or left it to the analyst, the session runs in Manual (a
- * writer's or check's request is denied after a minute unanswered, the dev agent's after its wait), or main's prompt
- * also waits in the terminal, where the first answer counts; for a request denied unanswered, that it was. Pure. */
+ * could not judge the call or left it to the analyst, the session runs in Manual, or main's prompt also waits in the
+ * terminal, where the first answer counts; then when an unanswered request is declined. For a request declined
+ * unanswered, that it was. Pure. */
 export function askWhy(ask: PendingAsk, metas: ReadonlyMap<string, ChatMeta>): string {
   const p = ask.request
-  if (p.expired) return `Nobody answered within ${waitWords(p.wait_s ?? 60)}, so it was denied and the session went on without it.`
+  if (p.expired) return `Nobody answered within ${waitWords(p.wait_s ?? 60)}, so thimble declined it and the agent went on without it.`
   if (p.why) return p.why
   if (classifierDown(p)) {
     const tries = p.rechecked ? `, all ${p.rechecked + 1} times it was asked` : ''
-    const late = p.deny_after_s ? ` Unanswered, it is denied ${denyAfter(p.deny_after_s)}.` : ''
-    return `Auto mode could not judge this call: Claude Code's classifier was unavailable${tries}.${late}`
+    return `Auto mode could not judge this call: Claude Code's classifier was unavailable${tries}.${declineLine(p.deny_after_s)}`
   }
-  if (p.refused) return `Auto mode did not allow it on its own: ${p.refused.replace(/[.\s]+$/, '')}.`
+  if (p.refused) return `Auto mode did not allow it on its own: ${p.refused.replace(/[.\s]+$/, '')}.${declineLine(p.wait_s)}`
   if (ask.chat === 'main') return 'Claude Code asks in your terminal too. The first answer counts.'
   const m = metas.get(ask.chat)
-  const kind = m ? threadKind(m) : null
   const name = m?.permission_mode ?? p.mode
   const mode = name ? MODE_NAMES[name] : null
   const why =
     (p.asked_by && ASKED_BY[p.asked_by]) ||
     (mode === 'Manual' ? 'It runs in Manual, which asks before each call.' : mode === 'Auto' ? 'Auto mode asks you about this call.' : 'Its permission mode asks for this call.')
-  if (kind === 'writer' || kind === 'check') return `${why} Unanswered, it is denied after a minute.`
-  if (kind === 'dev' && p.wait_s) return `${why} Unanswered, it is denied after ${waitWords(p.wait_s)} and the work goes on without it.`
-  return why
+  return `${why}${declineLine(p.wait_s)}`
 }
