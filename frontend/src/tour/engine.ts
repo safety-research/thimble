@@ -48,7 +48,7 @@ export interface Step {
   pad?: number
   radius?: number
   /** where the popover sits beside the first cutout; a list is tried in order, and the first side where the popover
-   * fits in the window without covering a cutout wins (else the first, kept inside the window) */
+   * fits in the window without covering a cutout wins (else the side, of all four, where it covers least) */
   place?: Place | Place[]
   align?: 'start' | 'center' | 'end'
   title: string
@@ -392,12 +392,18 @@ export function createTour(snaps: Snaps): Tour {
       const y = side === 'bottom' ? box.y + box.h + gap : side === 'top' ? box.y - gap - ph : align === 'center' ? box.y + box.h / 2 - ph / 2 : align === 'end' ? box.y + box.h - ph : box.y
       return { x: Math.max(M, Math.min(vw - pw - M, x)), y: Math.max(M, Math.min(vh - ph - M, y)), fits: x >= M && x + pw <= vw - M }
     }
-    const covers = (q: { x: number; y: number }) => boxes.some((b) => q.x < b.x + b.w - 1 && q.x + pw > b.x + 1 && q.y < b.y + b.h - 1 && q.y + ph > b.y + 1)
-    const sides = ([] as Place[]).concat(s.place ?? 'right')
-    const place = sides.find((side) => {
-      const q = at(side)
-      return q.fits && !covers(q)
-    }) ?? sides[0]
+    // the area of the cutouts the popover would cover there
+    const covered = (q: { x: number; y: number }) =>
+      boxes.reduce((a, b) => a + Math.max(0, Math.min(q.x + pw, b.x + b.w) - Math.max(q.x, b.x)) * Math.max(0, Math.min(q.y + ph, b.y + b.h) - Math.max(q.y, b.y)), 0)
+    const listed = ([] as Place[]).concat(s.place ?? 'right')
+    const sides = [...listed, ...(['right', 'left', 'bottom', 'top'] as Place[]).filter((x) => !listed.includes(x))]
+    // the first listed side where it fits and covers nothing, else the side where it covers least (a cutout as large as
+    // the window leaves none free)
+    const place =
+      listed.find((side) => {
+        const q = at(side)
+        return q.fits && covered(q) < 1
+      }) ?? sides.reduce((best, side) => (covered(at(side)) < covered(at(best)) - 1 ? side : best), sides[0])
     const { x: px, y: py } = at(place)
     Object.assign(pop.style, { left: `${px}px`, top: `${py}px` })
     const cy = Math.max(14, Math.min(ph - 24, (Math.max(box.y, py) + Math.min(box.y + box.h, py + ph)) / 2 - py - 5))
