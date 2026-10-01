@@ -541,6 +541,8 @@ def test_the_checks_fail_a_page_whose_records_do_not_show_the_test_label():
     (problem,) = run(*bare)[0]
     assert "draws no label controls" in problem, "a corpus view draws its own label controls"
     assert run(bare[0], {**bare[1], "label_controls": 2})[0] == [], "one state that shows them is enough"
+    (problem,) = views.label_problems(view, files, list(good), switch=False)[0]
+    assert "never calls `thimble.setLabel`" in problem, "a legend's data-label with no switch is not a label control"
     viewer = {"slug": "logs", "claims": ["**/*.log"]}
     assert views.label_problems(viewer, [("a.log", 9, 0)], bare) == ([], []), "a file viewer beside the Labels pane need not"
 

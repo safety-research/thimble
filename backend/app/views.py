@@ -3375,7 +3375,7 @@ async def check(c: str, slug: str, locators: list[str] | None = None, *, shot_di
         report["shots"], report["page"] = [], {"ok": False, "unavailable": True, "errors": [], "fetches": 0}
     else:
         report["shots"], report["page"] = shots, _page_of(shots)
-    problems, notes = label_problems(view, files, shots)
+    problems, notes = label_problems(view, files, shots, switch=label_controls(view))
     report["problems"] += problems + self_label_problems(shots)
     report["notes"] += notes
     page = report["page"]
@@ -3474,7 +3474,7 @@ def _texty(corpus: Path, rel: str) -> bool:
 
 
 def label_problems(view: dict[str, Any], files: list[tuple[str, int, int]],
-                   shots: list[dict[str, Any]]) -> tuple[list[str], list[str]]:
+                   shots: list[dict[str, Any]], switch: bool = True) -> tuple[list[str], list[str]]:
     """(problems, notes) of labels in the page, from what each loaded state shows at its end (view_shot.mjs `shown`),
     for a view of files that split into records (lined). It fails when no record or unit is shown anchored; when fewer
     than one in ANCHORED_SHARE of the records the reader answered are shown anchored and no unit is; when a record or
@@ -3482,9 +3482,10 @@ def label_problems(view: dict[str, Any], files: list[tuple[str, int, int]],
     fewer of the marked records in view than it checked (view_shot.mjs `painted`), as when a box that hides overflow
     cuts the bar, or for an element with data-anchor-unmarked that draws no colour of its own. A corpus view, not a file
     viewer, also fails when no element of its page, shown or not, has a data-label naming the test label while it is on
-    (view_shot.mjs `label_controls`): the view draws its own label controls, since thimble draws none above it. Records
-    shown, filtered to the test label, whose anchor the filter does not keep are noted, since a record the page draws for
-    several lines is anchored by one of them."""
+    (view_shot.mjs `label_controls`), or when its page has no `switch`, a call of thimble.setLabel (label_controls): the
+    view draws its own label controls, since thimble draws none above it. Records shown, filtered to the test label,
+    whose anchor the filter does not keep are noted, since a record the page draws for several lines is anchored by one
+    of them."""
     if not lined(view, files):
         return [], []
     loaded = {str(s.get("state")): s.get("shown") for s in shots
@@ -3516,9 +3517,13 @@ def label_problems(view: dict[str, Any], files: list[tuple[str, int, int]],
                 problems.append(_hint("view-marks-unseen", state=name, unseen=len(unseen), checked=int(p["checked"]),
                                       refs=", ".join(f"`{r}`" for r in unseen[:3])))
                 break
-    if not file_type_viewer(view) and not any(int(s.get("label_controls") or 0) for s in shots
-                                              if s.get("ok") and s.get("state", "overview") in LABELLED_STATES):
-        problems.append(_hint("view-no-label-controls"))
+    if not file_type_viewer(view):
+        if not any(int(s.get("label_controls") or 0) for s in shots
+                   if s.get("ok") and s.get("state", "overview") in LABELLED_STATES):
+            problems.append(_hint("view-no-label-controls",
+                                  why="with the test label on, no element of the page has `data-label` naming it"))
+        elif not switch:
+            problems.append(_hint("view-no-label-controls", why="view.html never calls `thimble.setLabel`"))
     if (f := loaded.get("filtered")) is not None and (unkept := int(f.get("unkept") or 0)):
         notes.append(_hint("view-filter-unkept", unkept=unkept, records=int(f.get("records") or 0)))
     return problems, notes
