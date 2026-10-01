@@ -95,6 +95,19 @@
   --viz-5: #9e8901;
   --viz-6: #0b9a9e;
   --viz-7: #ab691c;
+  /* the label colours (below) stepped for Dark */
+  --label-1: #2275e8;
+  --label-2: #da7306;
+  --label-3: #17a973;
+  --label-4: #0c9edc;
+  --label-5: #9e8901;
+  --label-6: #0b9a9e;
+  --label-7: #ab691c;
+  --label-8: #79b4fd;
+  --label-9: #50c14d;
+  --label-10: #0985b4;
+  --label-11: #fd914e;
+  --label-12: #0bb8d6;
 }
 
 /* -------- the accent: one of seven, iris by default. --accent is the fill, --accent-on the text on it (white or ink,
@@ -259,20 +272,22 @@
   --viz-7: #844500;
   --viz-8: var(--viz-ink-1);
   --viz-9: var(--viz-ink-3);
-  /* a label's colour, in the order the analyst's labels take them, and the colour of "no match". 9 to 12 give a label
-     with more than eight values a distinct colour for each. */
-  --label-1: #0072b2;
-  --label-2: #e69f00;
-  --label-3: #009e73;
-  --label-4: #cc79a7;
-  --label-5: #d55e00;
-  --label-6: #56b4e9;
-  --label-7: #8a6d3b;
-  --label-8: #6a5acd;
-  --label-9: #aa3377;
-  --label-10: #999933;
-  --label-11: #6a3d9a;
-  --label-12: #d62728;
+  /* a label's colour, in the order the analyst's labels take them, and the colour of "no match". Like the nominal
+     hues, no red and no purple: the seven viz hues, then navy, grass, cerulean, chestnut and cyan, so a label with
+     more than eight values still gets a distinct colour for each. Each reads at 3:1 or more on every paper, and Dark
+     has its own steps of the same hues. */
+  --label-1: #025ac3;
+  --label-2: #d0750a;
+  --label-3: #08632f;
+  --label-4: #1392d4;
+  --label-5: #897301;
+  --label-6: #009c85;
+  --label-7: #844500;
+  --label-8: #013c77;
+  --label-9: #2aa02b;
+  --label-10: #025a7c;
+  --label-11: #622b01;
+  --label-12: #0389a0;
   --label-none: #a09c93;
   /* a multi-class label as a whole: the plain ink */
   --label-multi: var(--text-secondary);
