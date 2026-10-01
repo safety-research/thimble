@@ -494,12 +494,13 @@ export interface ViewProblems {
 }
 
 /** A field a view's reader made rather than read as the files hold it, `kind` "inferred" for a value the files do not
- * state (a join, an estimate, a classification). */
+ * state (a join, an estimate, a classification), `key` the key the reader's records hold it under where that differs. */
 export interface ViewDerived {
   field: string
   from: string
   how: string
   kind?: 'inferred' | ''
+  key?: string
 }
 
 /** `GET /ws/{c}/views/{slug}/shown`: of the files a view claims, those it does not show whole, the first 500 of them,
