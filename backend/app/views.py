@@ -3646,6 +3646,18 @@ def _scalars(v: Any, out: list[str]) -> None:
         out.append(json.dumps(v))
 
 
+def _flags(v: Any, out: dict[str, set[bool]], key: str = "") -> None:
+    """The true-or-false values in a record, by their field's name in lower case."""
+    if isinstance(v, dict):
+        for k, x in v.items():
+            _flags(x, out, str(k).lower())
+    elif isinstance(v, list):
+        for x in v:
+            _flags(x, out, key)
+    elif isinstance(v, bool):
+        out.setdefault(key, set()).add(v)
+
+
 def _held(value: Any, text: str, numbers: set[float]) -> bool:
     """Whether a field's value is in the text of the line it cites: a string, without an ellipsis it was cut at, or its
     first 80 characters; a number as written or equal to one of the line's."""
@@ -3677,8 +3689,10 @@ def unlisted_derived(c: str, shots: list[dict[str, Any]], declared: set[str]) ->
     does not hold, for at least two records and most of those that have the field, and that `declared` does not name:
     [{field, value, ref}], each with one such value. A record is an object of an answer with a record ref among its
     values. Left out as needing no entry: positions and the page's own keys, counts, values put in for missing ones
-    (_exempt), a field whose missed values are all one value (a default), values that are lists or objects, a value the
-    line holds under another name (a rename), and one the record's ref holds, as a run's folder. Blocking."""
+    (_exempt), a field whose missed values are all one value (a default), objects and lists that hold more than plain
+    values, a value the line holds under another name (a rename), and one the record's ref holds, as a run's folder. A
+    true or false is held where the line has it under the field's name, or is its only true-or-false field; a list of
+    plain values where the line holds each of them. Blocking."""
     recs: dict[str, dict[str, Any]] = {}
     for s in shots:
         for a in s.get("answers") or []:
@@ -3693,9 +3707,11 @@ def unlisted_derived(c: str, shots: list[dict[str, Any]], declared: set[str]) ->
         if (res.get("meta") or {}).get("binary"):
             continue
         parts: list[str] = []
+        flags: dict[str, set[bool]] = {}
         for r in res.get("records") or ([{"record": res.get("record")}] if res.get("record") is not None else []):
             _scalars(r.get("record"), parts)
-        if not parts:
+            _flags(r.get("record"), flags)
+        if not parts and not flags:
             continue
         text = _squeeze("\n".join(parts))
         numbers: set[float] = set()
@@ -3704,12 +3720,21 @@ def unlisted_derived(c: str, shots: list[dict[str, Any]], declared: set[str]) ->
                 numbers.add(float(x))
         line = refs.parse_ref(ref).get("line")
         for k, v in rec.items():
-            if k in declared or v is None or isinstance(v, (bool, dict, list)) or _exempt(k, v):
+            if k in declared or v is None or isinstance(v, dict) or _exempt(k, v):
+                continue
+            if isinstance(v, list) and (not v or not all(isinstance(x, (str, int, float)) and not isinstance(x, bool)
+                                                          for x in v)):
                 continue
             if v == ref or v == line or (isinstance(v, str) and (len(v.strip()) < 2 or is_record(v) or v in ref)):
                 continue
             seen[k] = seen.get(k, 0) + 1
-            if not _held(v, text, numbers):
+            if isinstance(v, bool):
+                held = v in flags.get(k.lower(), set()) or (len(flags) == 1 and flags.get(next(iter(flags))) == {v})
+            elif isinstance(v, list):
+                held = all(_held(x, text, numbers) for x in v)
+            else:
+                held = _held(v, text, numbers)
+            if not held:
                 missed.setdefault(k, []).append((v, ref))
     out = []
     for k, xs in missed.items():

@@ -347,7 +347,8 @@ def test_the_count_is_what_the_reader_takes_not_what_the_buffers_read(tmp_path):
 DERIVING_READER = THREADS_READER.replace(
     '[{"ref": f"{p}#L{n}", "author": a, "body": b}',
     '[{"ref": f"{p}#L{n}", "author": a.upper(), "body": b, "score": len(b) * 1.5, "replies": 7, "thread_key": "k" + a,'
-    ' "mood": "unknown"}')
+    ' "mood": "unknown", "flagged": n % 3 == 0, "topics": ["deploy"] if n % 3 else ["ops", "bug"],'
+    ' "words": b.split()[:2]}')
 
 
 async def test_a_field_whose_values_the_cited_lines_do_not_hold_fails_the_checks_until_the_view_lists_it(
@@ -366,14 +367,17 @@ async def test_a_field_whose_values_the_cited_lines_do_not_hold_fails_the_checks
     assert not rep["ok"], views.gate_lines(rep)
     noted = [n for n in rep["problems"] if "`derived`" in n]
     assert len(noted) == 1 and "author ('ADA' on board.jsonl#L1)" in noted[0] and "score (" in noted[0], noted
-    for field in ("body", "replies", "thread_key", "mood"):
+    assert "flagged (" in noted[0] and "topics (" in noted[0], "a true or false and a list the lines do not hold"
+    for field in ("body", "replies", "thread_key", "mood", "words"):
         assert f"{field} (" not in noted[0], f"{field}: a raw value, a count, a key or a default needs no entry"
     views.write_view(CORPUS, "threads", reader=DERIVING_READER, html=THREADS_HTML,
                      **{**VIEW, "derived": [{"field": "author", "from": "author", "how": "upper-cased"},
-                                            {"field": "score", "from": "body", "how": "its length", "kind": "inferred"}]})
+                                            {"field": "score", "from": "body", "how": "its length", "kind": "inferred"},
+                                            {"field": "flagged", "from": "body", "how": "a classifier", "kind": "inferred"},
+                                            {"field": "topics", "from": "body", "how": "a classifier", "kind": "inferred"}]})
     rep = await views.gate(CORPUS, "threads", ["board.jsonl#L3"])
     assert rep["ok"] and not [n for n in rep["problems"] + rep["notes"] if "`derived`" in n], views.gate_lines(rep)
-    assert [d["field"] for d in rep["coverage"]["derived"]] == ["score", "author"], "an inferred field comes first"
+    assert [d["field"] for d in rep["coverage"]["derived"]] == ["score", "flagged", "topics", "author"], "inferred first"
     assert views._exempt("files", 3) and views._exempt("n_calls", 2), "a count needs no entry"
     assert not views._exempt("ts", 1781741180000) and not views._exempt("status", 200), "a short or singular name is no count"
 
