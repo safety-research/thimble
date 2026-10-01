@@ -31,6 +31,7 @@ import hashlib
 import itertools
 import json
 import logging
+import operator
 import os
 import re
 import shutil
@@ -626,11 +627,49 @@ def _matcher(pattern: str) -> Callable[[str], bool]:
     """glob_matches(path, pattern) as one test made once, for matching a whole corpus's paths."""
     if not pattern or pattern == "*":
         return lambda p: True
-    if pattern.startswith("*") and "/" not in pattern and not _GLOB_CHARS.search(pattern[1:]):
+    if _suffix_glob(pattern):
         tail = pattern[1:]  # `*.pdf`: the path and its basename match alike
         return lambda p: p.endswith(tail)
     whole = re.compile(fnmatch.translate(pattern)).match
     return lambda p: whole(p) is not None or whole(p.rsplit("/", 1)[-1]) is not None
+
+
+def _suffix_glob(g: str) -> bool:
+    return g.startswith("*") and "/" not in g and not _GLOB_CHARS.search(g[1:])
+
+
+def match_all(claims: list[str], paths: list[str]) -> list[str]:
+    """The sorted `paths` that any of the claims matches (glob_matches), in their order, in as few passes as the claims
+    allow: names and globs such as `*.pdf` together by endswith, and a glob that only a whole path can match by regex
+    over the paths that start with its literal head."""
+    if any(not g or g == "*" for g in claims):
+        return list(paths)
+    names = [g for g in claims if not _GLOB_CHARS.search(g)]
+    tails = tuple(g[1:] for g in claims if _suffix_glob(g)) + tuple(f"/{g}" for g in names if "/" not in g)
+    globs = [g for g in claims if _GLOB_CHARS.search(g) and not _suffix_glob(g)]
+    # a basename a glob starting with `*` matches, the whole path matches too; no basename can match a glob with a `/`
+    whole = [g for g in globs if g.startswith("*") or ("/" in g and "[" not in g)]
+    either = [g for g in globs if g not in whole]
+    passes = []
+    if tails:
+        passes.append(list(filter(operator.methodcaller("endswith", tails), paths)))
+    for g in names:
+        i = bisect.bisect_left(paths, g)
+        if i < len(paths) and paths[i] == g:
+            passes.append([g])
+    for g in whole:
+        head = _GLOB_CHARS.split(g, 1)[0]
+        lo = bisect.bisect_left(paths, head)
+        hi = bisect.bisect_left(paths, head[:-1] + chr(ord(head[-1]) + 1)) if head else len(paths)
+        passes.append(list(filter(re.compile(fnmatch.translate(g)).match, paths[lo:hi])))
+    if either:
+        rx = re.compile("|".join(f"(?:{fnmatch.translate(g)})" for g in either)).match
+        passes.append([p for p in paths if rx(p) or rx(p.rsplit("/", 1)[-1])])
+    passes = [x for x in passes if x]
+    if len(passes) <= 1:
+        return passes[0] if passes else []
+    hit = set().union(*passes)
+    return [p for p in paths if p in hit]
 
 
 def claimed_paths(c: str, view: dict[str, Any], *, wait: bool = True) -> list[str] | None:
@@ -668,8 +707,7 @@ def claimed_paths(c: str, view: dict[str, Any], *, wait: bool = True) -> list[st
         if hit is not None and hit[0] == version:
             _claimed_memo.move_to_end(key)
             return hit[1]
-    tests = [_matcher(g) for g in claims]
-    out = [p for p in paths if any(t(p) for t in tests)]
+    out = match_all(claims, paths)
     with _folder_lock:
         _claimed_memo[key] = (version, out)
         while len(_claimed_memo) > CLAIMED_MEMO_MAX:

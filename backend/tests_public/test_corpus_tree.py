@@ -214,10 +214,20 @@ def test_the_views_list_with_wait_answers_the_files_at_once(tree_corpus, workspa
     assert "files_pending" not in v and v["first_file"] == "docs/paper.pdf"
 
 
-@pytest.mark.parametrize("pattern", ["*", "", "*.pdf", "*.jsonl", "big.jsonl", "runs/*/agents/*.jsonl", "r?n*/*",
-                                     "*/x.png", "[ab]*.md", "a.json*", "*agents*"])
+PATTERNS = ["*", "", "*.pdf", "*.jsonl", "big.jsonl", "runs/*/agents/*.jsonl", "r?n*/*", "*/x.png", "[ab]*.md",
+            "a.json*", "*agents*", "runs/r1/manifest.json", "*a?b", "[!/]*.md"]
+PATHS = sorted(["big.jsonl", "README.md", "docs/paper.pdf", "runs/r1/agents/a.jsonl", "runs/r1/manifest.json",
+                "images/d1/x.png", "deep/big.jsonl", "a.md", "b.md", "a.json", "agents.txt", "a/b", "sub/a.md"])
+
+
+@pytest.mark.parametrize("pattern", PATTERNS)
 def test_a_claims_matcher_agrees_with_glob_matches(pattern):
-    paths = ["big.jsonl", "README.md", "docs/paper.pdf", "runs/r1/agents/a.jsonl", "runs/r1/manifest.json",
-             "images/d1/x.png", "deep/big.jsonl", "a.md", "b.md", "a.json", "agents.txt"]
     test = views._matcher(pattern)
-    assert [p for p in paths if test(p)] == [p for p in paths if views.glob_matches(p, pattern)]
+    assert [p for p in PATHS if test(p)] == [p for p in PATHS if views.glob_matches(p, pattern)]
+    assert views.match_all([pattern], PATHS) == [p for p in PATHS if views.glob_matches(p, pattern)]
+
+
+@pytest.mark.parametrize("claims", [["*.pdf", "*.md"], ["big.jsonl", "runs/*/agents/*.jsonl"], ["[ab]*.md", "*.json"],
+                                    ["README.md", "nope.txt", "a?b"]])
+def test_claims_together_match_what_each_matches(claims):
+    assert views.match_all(claims, PATHS) == [p for p in PATHS if any(views.glob_matches(p, g) for g in claims)]

@@ -10,6 +10,7 @@ every folder again.
 """
 from __future__ import annotations
 
+import operator
 import os
 import threading
 import time
@@ -22,6 +23,8 @@ SKIPPED_SUFFIXES = tuple(db + side for db in DB_SUFFIXES for side in SIDE_SUFFIX
 # read again at its next check.
 RACY_NS = 2_000_000_000
 KEPT_ANSWERS = 8  # a tree's sorted path lists kept, one per kind of walk
+_skipped = operator.methodcaller("endswith", SKIPPED_SUFFIXES)
+_dotted = operator.methodcaller("startswith", ".")
 
 
 def _hidden(name: str) -> bool:
@@ -33,7 +36,7 @@ class Node:
     name. A read replaces these containers rather than changing them, so a reader without the lock sees one read whole.
     """
 
-    __slots__ = ("read", "stamp", "checked", "racy", "dirs", "links", "files", "n_shown", "n_all")
+    __slots__ = ("read", "stamp", "checked", "racy", "dirs", "links", "files", "n_dots", "n_shown", "n_all")
 
     def __init__(self) -> None:
         self.read = False
@@ -43,6 +46,7 @@ class Node:
         self.dirs: dict[str, Node] = {}
         self.links: dict[str, Node] = {}
         self.files: tuple[str, ...] = ()
+        self.n_dots = 0  # files with a dot name
         self.n_shown = 0  # files without a dot name, sqlite side files left out
         self.n_all = 0  # files, sqlite side files left out
 
@@ -80,15 +84,15 @@ class Tree:
                 for e in it:
                     name = e.name
                     try:
-                        if e.is_dir(follow_symlinks=False):
+                        if e.is_file(follow_symlinks=False):
+                            files.append(name)
+                        elif e.is_dir(follow_symlinks=False):
                             dirs[name] = node.dirs.get(name) or Node()
                         elif e.is_symlink():
                             if e.is_dir():
                                 links[name] = node.links.get(name) or Node()
                             elif e.is_file():
                                 files.append(name)
-                        elif e.is_file(follow_symlinks=False):
-                            files.append(name)
                     except OSError:
                         continue
         except OSError:
@@ -103,10 +107,10 @@ class Tree:
         changed = not node.read or files != node.files or dirs.keys() != node.dirs.keys() or links.keys() != node.links.keys()
         node.stamp = stamp
         if changed:
-            counted = [f for f in files if not f.endswith(SKIPPED_SUFFIXES)]
             node.dirs, node.links, node.files = dirs, links, files
-            node.n_all = len(counted)
-            node.n_shown = sum(1 for f in counted if not _hidden(f))
+            node.n_dots = sum(map(_dotted, files))
+            node.n_all = len(files) - sum(map(_skipped, files))
+            node.n_shown = node.n_all - (sum(1 for f in files if _hidden(f) and not _skipped(f)) if node.n_dots else 0)
             node.read = True
             self.version += 1
 
@@ -126,6 +130,7 @@ class Tree:
                 above = above | {me}
             yield node, path, prefix, hid
             subs = list(node.dirs.items()) + (list(node.links.items()) if links else [])
+            subs.sort(reverse=True)  # popped in name order, so walk() collects paths nearly sorted
             for name, child in subs:
                 h = hid or _hidden(name)
                 if h and not hidden:
@@ -147,8 +152,15 @@ class Tree:
             if hit is not None and hit[0] == self.version:
                 self._answers[key] = (hit[0], hit[1], time.monotonic())
                 return hit[0], hit[1]
-            out = [prefix + f for node, _, prefix, hid in self._nodes(links, hidden, None, 0.0) for f in node.files
-                   if (hidden or not (hid or _hidden(f))) and not (skip and f.endswith(skip))]
+            ends = operator.methodcaller("endswith", skip)
+            out: list[str] = []
+            for node, _, prefix, _ in self._nodes(links, hidden, None, 0.0):  # without `hidden` no dot folder is reached
+                names = node.files
+                if not hidden and node.n_dots:
+                    names = [f for f in names if not _hidden(f)]
+                if skip and any(map(ends, names)):
+                    names = [f for f in names if not ends(f)]
+                out.extend(map(prefix.__add__, names))
             out.sort()
             self._answers[key] = (self.version, out, time.monotonic())
             while len(self._answers) > KEPT_ANSWERS:
