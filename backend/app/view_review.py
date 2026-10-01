@@ -464,8 +464,6 @@ def pictures_text(shots: list[dict[str, Any]]) -> str:
         fit = views.layout_parts(lay, wide=s.get("state") == "wide") if s.get("ok") else []
         if (n := int(lay.get("outside") or 0)) and s.get("ok"):
             fit.append(views._hint("view-layout-outside", n=f"{n:,}", of=f"{int(lay.get('anchored') or 0):,}"))
-        if s.get("unplayable"):
-            fit.append(views._hint("view-unplayable", players=views._plural(int(s["unplayable"]), "audio or video player")))
         lines.append(line + (f". Measured: {'; '.join(fit)}" if fit else ""))
     first = shots[0].get("controls") if shots else None
     if first:

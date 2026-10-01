@@ -814,10 +814,6 @@ With {what}, the page shows no record, though over the whole corpus it shows rec
 
 The page {where}: {parts}.
 
-## view-unplayable
-
-{players} stayed blank on an MP4 or AAC file, likely because the headless browser that loads the page has no H.264 or AAC decoder, which the analyst's browser has. Check that the file plays in a browser before you change the player.
-
 ## view-layout-overlap
 
 text overlaps other text in {places}, such as {pairs}

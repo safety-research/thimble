@@ -25,8 +25,7 @@
 // one of the view's units (`view:<slug>/<key>`), `marked` the elements carrying a label's mark, `hidden` those the
 // bridge hid or dimmed for the filter, `shown` what is on screen at the end (shownCounts), `layout` how its text fits
 // (layoutCounts), `controls` the controls it shows (controlList), `actions` each action with whether its control was
-// found, `unplayable` its players this Chromium cannot decode (unplayable), and `fonts` whether Hanken Grotesk was
-// loaded in the frame.
+// found, and `fonts` whether Hanken Grotesk was loaded in the frame.
 import { createRequire } from 'node:module'
 import { readFileSync } from 'node:fs'
 import { open } from 'node:fs/promises'
@@ -238,21 +237,6 @@ function layoutCounts() {
   }
   const overflow = Math.max(0, document.documentElement.scrollWidth - W)
   return { overlaps, pairs, cut, cuts, sideways, wide, overflow, used: maxR > minL ? Math.round(maxR - minL) : 0, width: W, anchored, outside }
-}
-
-// The audio and video elements that failed on an MP4 or AAC file in a Chromium without the H.264 and AAC decoders, which
-// the analyst's browser has. Runs in the frame.
-function unplayable() {
-  if (document.createElement('video').canPlayType('video/mp4; codecs="avc1.42E01E"') !== '') return 0
-  return [...document.querySelectorAll('video,audio')].filter((m) => {
-    if (!m.error || (m.error.code !== 3 && m.error.code !== 4)) return false
-    const src = m.currentSrc || m.src || (m.querySelector('source') || {}).src || ''
-    let path = src
-    try {
-      path = new URL(src).searchParams.get('path') || src
-    } catch {}
-    return /\.(mp4|m4v|mov|m4a|aac)$/i.test(path)
-  }).length
 }
 
 const CONTROLS = 'button,[role=button],[role=tab],[role=radio],[role=switch],[role=checkbox],[role=menuitem],[role=option],select,input[type=checkbox],input[type=radio],summary,.seg-opt,a[href]'
@@ -587,7 +571,6 @@ async function shootState(browser, opt, doc, state, i) {
       layout: await frame.evaluate(layoutCounts).catch(() => null),
       controls: await frame.evaluate(controlList, { sel: CONTROLS, max: CONTROLS_MAX }).catch(() => []),
       actions,
-      unplayable: await frame.evaluate(unplayable).catch(() => 0),
       fonts,
     }
   } finally {
