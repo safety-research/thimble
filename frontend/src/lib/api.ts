@@ -31,6 +31,7 @@ import type {
   SourceFind,
   SourceInfo,
   SourcePage,
+  SourceTurns,
   StoredCall,
   CallIndex,
   Ticket,
@@ -153,6 +154,11 @@ export const api = {
   sources: (c: string) => j<SourceInfo[]>(`${BASE}/corpora/${enc(c)}/sources`),
   source: (c: string, path: string, start = 1, count = 100) => j<SourcePage>(`${BASE}/corpora/${enc(c)}/source${q({ path, start, count })}`),
   sourceAround: (c: string, path: string, line: number, before = 50, after = 50) => j<SourcePage>(`${BASE}/corpora/${enc(c)}/source/around${q({ path, line, before, after })}`),
+  /** `GET /corpora/{c}/source/turns`: `count` turns of a JSON transcript from turn `start`, or around `line`. */
+  sourceTurns: (c: string, path: string, start = 0, count = 200, line?: number) =>
+    j<SourceTurns>(`${BASE}/corpora/${enc(c)}/source/turns${q({ path, start, count, line })}`),
+  /** The URL a PDF of the corpus opens from in the browser's viewer, at `page` when given. */
+  pdfUrl: (c: string, path: string, page?: number | null) => `${BASE}/corpora/${enc(c)}/pdf/${path.split('/').map(enc).join('/')}${page ? `#page=${page}` : ''}`,
   /** `GET /corpora/{c}/source/find`: the lines of one file past `after` that hold `text`, searched on the server. */
   findInSource: (c: string, path: string, text: string, after = 0, signal?: AbortSignal) =>
     j<SourceFind>(`${BASE}/corpora/${enc(c)}/source/find${q({ path, q: text, after: after || undefined })}`, { signal }),

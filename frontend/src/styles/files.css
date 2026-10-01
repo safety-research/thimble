@@ -1455,6 +1455,33 @@
 .reader-media audio {
   width: min(560px, 100%);
 }
+/* a PDF in the browser's own viewer, filling the reader */
+.reader-pdf {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+}
+.reader-pdf-frame {
+  flex: 1 1 auto;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: var(--bg-sunken);
+}
+/* a chat log's turn: its lines run on as one text, a blank line as a short gap; a speaker's line with no words after
+   the speaker shows nothing */
+.reader-chatlog .reader-block + .reader-block {
+  margin-top: 0;
+}
+.reader-chatlog .reader-block:empty {
+  height: 0.6em;
+}
+.reader-chatlog .reader-block.reader-chat-empty {
+  display: none;
+}
+.reader-turns-tail {
+  height: 1px;
+}
 .reader-viewbar {
   position: sticky;
   top: 0;

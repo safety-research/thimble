@@ -1,7 +1,8 @@
 // The File browser's reader: a file in the built-in view that fits it best (views/registry.ts), with the others in the
 // mode switch; the pick is remembered per file. Records load a page at a time around the ref's line and as the reader
 // scrolls, up to CAP in memory, with the overview ruler beside them (Ruler.tsx). ⌘F opens the find bar (FindBar.tsx);
-// media files show as themselves (MediaReader) and other binary files show only their size.
+// media files show as themselves (MediaReader), a PDF in the browser's own viewer (PdfReader), and other binary files
+// show only their size.
 import { Component, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ErrorInfo, type ReactNode } from 'react'
 import { flushSync } from 'react-dom'
 import { Button, Segmented } from '../components/Button'
@@ -12,7 +13,7 @@ import { mediaOf, mediaUrl, type MediaRef } from '../lib/media'
 import { refreshProposals } from '../lib/proposals'
 import { fragmentIn, nearestLine } from '../lib/refs'
 import { track } from '../lib/telemetry'
-import type { Proposal, SourceKind, SourcePage, SourceRecord, View } from '../lib/types'
+import type { Proposal, SourceKind, SourcePage, SourceRecord, TranscriptHint, View } from '../lib/types'
 import { readStorage, storageKey, writeStorage } from '../lib/workspace'
 import { failureText, ReportProblemButton } from '../shell/ProblemReport'
 import { clearMatches, firstMatchFrom, lineAsked, markMatches, markSpots, matchCount, matchNumber, stepInLine, stepMatch, unfoldAt, type MatchAt } from './find'
@@ -183,8 +184,41 @@ export const Reader = memo(function Reader(props: ReaderProps) {
   }
   const media = mediaOf(props.path)
   if (media) return <MediaReader key={`${props.workspace}|${props.path}`} {...props} media={media} />
+  if (isPdf(props.path)) return <PdfReader key={`${props.workspace}|${props.path}`} {...props} />
   return <FileReader key={`${props.workspace}|${props.path}|${props.kind}`} {...props} />
 })
+
+export const isPdf = (path: string): boolean => /\.pdf$/i.test(path)
+
+/** The page a PDF ref names, counting from 1: `#p4`, the first of `#p4-p6`, `#page=4`; null for none. Pure. */
+export function pdfPage(ref: string | undefined, path: string): number | null {
+  const fragment = fragmentIn(ref, path)
+  const m = fragment ? /^(?:p|page=?)(\d+)(?:-p?\d+)?$/i.exec(fragment.trim()) : null
+  const n = m ? Number(m[1]) : 0
+  return n >= 1 ? n : null
+}
+
+/** A PDF of the corpus as itself, in the browser's own viewer, opened at the page a ref names. The frame is drawn anew
+ * for each page asked for, since a viewer reads the page only when it opens the file. */
+function PdfReader({ workspace, path, targetRef, lead, end, onMode }: ReaderProps) {
+  const page = pdfPage(targetRef, path)
+  const src = api.pdfUrl(workspace, path, page)
+  useEffect(() => onMode?.('PDF'), [onMode])
+  return (
+    <div className="reader">
+      {lead !== undefined && (
+        <div className="reader-bar">
+          {lead}
+          <span className="reader-spacer" />
+          {end}
+        </div>
+      )}
+      <div className="reader-pdf" data-body="">
+        <iframe key={src} src={src} title={path} className="reader-pdf-frame" />
+      </div>
+    </div>
+  )
+}
 
 /** An image, a recording or a video of the corpus, shown as itself from the media route (lib/media), which answers
  * range requests, so a video plays and seeks without loading whole; a ref with a moment (`#t=30:55`) starts it there. */
@@ -213,6 +247,8 @@ interface Builtins {
   /** the one that fits best */
   auto: ViewDef
   loaded: boolean
+  /** the server's sniff, when the file reads as a transcript */
+  transcript: TranscriptHint | null
   /** the first records read as binary (looksBinary), or the server said the file is binary: no text to show */
   binary: boolean
   /** the file's size when the server said it is binary */
@@ -224,6 +260,7 @@ function useBuiltins(ws: string, path: string, kind: SourceKind): Builtins {
   const isDatabase = kind === 'forge'
   const [sample, setSample] = useState<any[] | null>(isDatabase ? [] : null)
   const [binarySize, setBinarySize] = useState<number | null>(null)
+  const [transcript, setTranscript] = useState<TranscriptHint | null>(null)
   useEffect(() => {
     if (isDatabase) return
     let alive = true
@@ -232,6 +269,7 @@ function useBuiltins(ws: string, path: string, kind: SourceKind): Builtins {
       .then((page) => {
         if (!alive) return
         if (page.binary) setBinarySize(page.size_bytes ?? 0)
+        setTranscript(page.transcript ?? null)
         setSample(page.records.map((r) => r.record))
       })
       .catch(() => alive && setSample([]))
@@ -240,15 +278,15 @@ function useBuiltins(ws: string, path: string, kind: SourceKind): Builtins {
     }
   }, [ws, path, isDatabase])
   return useMemo(() => {
-    const scored = scoreViews(path, kind, sample ?? [])
+    const scored = scoreViews(path, kind, sample ?? [], transcript)
     const scoreOf = (t: string) => scored.find((s) => s.def.type === t)?.score ?? 0
     const binary = !isDatabase && (binarySize != null || looksBinary(sample ?? []))
     const listed = (isDatabase ? scored.filter((s) => s.score >= 0.5).map((s) => s.def) : scored.map((s) => s.def).filter((v) => v.type !== 'forge' && (v.type === 'raw' || scoreOf(v.type) > 0)))
       // a file that reads as binary lists Raw alone, and the reader says it is binary in place of its bytes
       .filter((v) => !binary || v.type === 'raw' || isDatabase)
       .sort((a, b) => ORDER.indexOf(a.type) - ORDER.indexOf(b.type))
-    return { listed, auto: pickView(scored), loaded: sample != null, binary, binarySize }
-  }, [path, kind, sample, isDatabase, binarySize])
+    return { listed, auto: pickView(scored), loaded: sample != null, transcript, binary, binarySize }
+  }, [path, kind, sample, isDatabase, binarySize, transcript])
 }
 
 /** The line of the first record the reader shows at its top, or null when it shows none. */
@@ -837,11 +875,12 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
   const loadPage = useCallback((dir: 'earlier' | 'later') => void loadMore(dir), [loadMore])
   // the view is rendered again only when what it shows changes, not when the reader measures its scroll (the ruler's
   // thumb, the fade at the right edge) as the reader resizes or scrolls
+  const transcript = builtins.transcript
   const viewEl = useMemo(() => {
     if (!ViewComponent) return null
-    const viewProps: ViewProps = { workspace, path, kind, page, loadMore: loadPage, targetRef: viewTarget }
+    const viewProps: ViewProps = { workspace, path, kind, page, loadMore: loadPage, targetRef: viewTarget, transcript }
     return <ViewComponent {...viewProps} />
-  }, [ViewComponent, workspace, path, kind, page, loadPage, viewTarget])
+  }, [ViewComponent, workspace, path, kind, page, loadPage, viewTarget, transcript])
   // the built-in modes, then the file-type viewers, then Raw
   const builtinOptions = builtins.listed.map((v) => ({ value: v.type, label: v.title }))
   const options = [

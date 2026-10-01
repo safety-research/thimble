@@ -183,17 +183,17 @@ def test_a_json_file_too_large_to_parse_is_refused(chats, monkeypatch):
 
 
 def test_the_pdf_route_serves_the_file_for_the_browsers_viewer(chats):
-    r = client.get(f"{CHATS}/pdf", params={"path": "docs/postmortem.pdf"})
+    r = client.get(f"{CHATS}/pdf/docs/postmortem.pdf")
     assert r.status_code == 200 and r.headers["content-type"] == "application/pdf"
     assert r.content == (chats / "docs" / "postmortem.pdf").read_bytes()
     csp = r.headers["content-security-policy"]
     assert "sandbox" not in csp and "default-src 'none'" in csp and "frame-ancestors 'self'" in csp
     assert r.headers["x-content-type-options"] == "nosniff"
-    ranged = client.get(f"{CHATS}/pdf", params={"path": "docs/postmortem.pdf"}, headers={"Range": "bytes=0-7"})
+    ranged = client.get(f"{CHATS}/pdf/docs/postmortem.pdf", headers={"Range": "bytes=0-7"})
     assert ranged.status_code == 206 and ranged.content == b"%PDF-1.4"
-    assert client.get(f"{CHATS}/pdf", params={"path": "logs/chat.txt"}).status_code == 415
-    assert client.get(f"{CHATS}/pdf", params={"path": "docs/gone.pdf"}).status_code == 404
-    assert client.get(f"{CHATS}/pdf", params={"path": "../../etc/x.pdf"}).status_code == 400
+    assert client.get(f"{CHATS}/pdf/logs/chat.txt").status_code == 415
+    assert client.get(f"{CHATS}/pdf/docs/gone.pdf").status_code == 404
+    assert client.get(f"{CHATS}/pdf/..%2F..%2Fetc%2Fx.pdf").status_code == 400
 
 
 def test_a_citation_of_a_pdf_page_resolves_to_the_page_text(chats):

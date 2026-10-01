@@ -1,7 +1,7 @@
 """PDFs of the corpus as themselves: the File browser shows the real file in the browser's own PDF viewer, and a
 citation `<path>#p<n>` (or `#p<n>-p<m>`, pages counted from 1) opens it at that page.
 
-GET /corpora/{c}/pdf serves the file as application/pdf. Its policy lets the browser's viewer draw it in a frame of the
+GET /corpora/{c}/pdf/<path> serves the file as application/pdf. Its policy lets the browser's viewer draw it in a frame of the
 app and nothing else: no script of the page's own, nothing loaded from elsewhere, and nosniff so it is never read as
 another type. page_texts() reads each page's text with pypdf, kept per path while its size and mtime_ns stay the same,
 for the excerpt a citation of a page resolves to.
@@ -95,10 +95,10 @@ def excerpt(path: Path, locator: str | None) -> tuple[str, dict[str, Any]]:
     return (text[:EXCERPT_CHARS] if text else "(no text on this page: a scan or an image)"), meta
 
 
-@router.get("/corpora/{c}/pdf")
+@router.get("/corpora/{c}/pdf/{path:path}")
 def get_pdf(c: str, path: str, request: Request) -> FileResponse:
-    """The PDF itself, for the browser's viewer: 415 for a file not named .pdf. Ranges are answered, so a large file
-    opens at a page without loading whole."""
+    """The PDF itself, for the browser's viewer, at a URL that ends in its name, which the viewer shows as its title: 415
+    for a file not named .pdf. Ranges are answered, so a large file opens at a page without loading whole."""
     if not is_pdf(path):
         raise HTTPException(415, f"{path} is not a PDF")
     p = corpus._file(corpus._corpus(c), path)
