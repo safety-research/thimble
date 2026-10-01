@@ -94,7 +94,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from . import agents, cc_settings, cli, config, headless, hook_auth, modes, procs, prompts, ticket_box, userconf
+from . import agents, cc_settings, cli, config, headless, hook_auth, modes, procs, prompts, session, ticket_box, userconf
 from .cli import SOURCE_CHANGED, home as thimble_home
 from .ledger import atomic_write_text
 from .session import find_transcript
@@ -165,6 +165,13 @@ VIEW_REPAIRS = max(0, int(os.environ.get("THIMBLE_VIEW_REPAIRS", "2") or "2"))
 ASK_TIMEOUT_S = float(os.environ.get("THIMBLE_DEV_ASK_TIMEOUT_S", "") or 15 * 60)
 QUIET_NOTE_S = max(1.0, float(os.environ.get("THIMBLE_DEV_QUIET_NOTE_S", "") or 10 * 60))
 QUIET_LINE = "no activity for {minutes}"
+# A turn that ends while the session's own workflows or background agents run is not over: their results start its next
+# turn, and stopping the session would lose them (Tail.background). Its thread says so once (BACKGROUND_LINE).
+BACKGROUND_LINE = "the session waits for its own background work ({n} running) before its turn ends"
+# the turn_duration record's counts of the session's workflows and background agents still running when its turn ended
+PENDING_COUNTS = ("pendingWorkflowCount", "pendingBackgroundAgentCount")
+# the `claude agents` states of a session whose process goes on (Sessions.state); any other means it has ended
+LIVE_STATES = ("working", "idle", "blocked", "done")
 # How long a server may take to answer /api/health (boot_check, restart_watch.py) before the change counts as breaking
 # its start.
 BOOT_TIMEOUT_S = float(os.environ.get("THIMBLE_DEV_BOOT_TIMEOUT_S", "") or 90)
@@ -1628,15 +1635,26 @@ class Tail:
         self.copied = copied or set()
         self.after = after.strip() if after else None
         self.sub_mtime = 0  # the latest change to a subagent's transcript seen (subagents_grew), in ns
+        # The session's own background work: what the latest turn_duration counts (PENDING_COUNTS), and the workflows,
+        # background agents and calls moved to the background that this tail saw launched and no task notification or
+        # TaskStop has ended yet, by task id. `names` holds the tool calls' names by id, for their results.
+        self.pending = 0
+        self.tasks: set[str] = set()
+        self.names: dict[str, str] = {}
+
+    def background(self) -> int:
+        """How many of the session's workflows, background agents and moved calls still run (0 when none)."""
+        return max(self.pending, len(self.tasks))
 
     def subagents_grew(self) -> bool:
-        """Whether a transcript of the session's subagents (<session id>/subagents/ beside its own) changed since the
-        last call; True at the first call when the session has one."""
+        """Whether a transcript of the session's subagents or workflow agents, or a workflow's journal (any .jsonl below
+        <session id>/subagents/ beside its own transcript), changed since the last call; True at the first call when
+        the session has one."""
         if self.path is None:
             return False
         try:
-            newest = max((p.stat().st_mtime_ns for p in (self.path.parent / self.session_id / "subagents").iterdir()
-                          if p.suffix == ".jsonl"), default=0)
+            newest = max((p.stat().st_mtime_ns for p in (self.path.parent / self.session_id / "subagents").rglob("*.jsonl")),
+                         default=0)
         except OSError:
             return False
         grew, self.sub_mtime = newest > self.sub_mtime, max(newest, self.sub_mtime)
@@ -1674,13 +1692,22 @@ class Tail:
                 self.after = None
             else:
                 return
+        if rec.get("type") == "attachment":
+            att = rec.get("attachment") if isinstance(rec.get("attachment"), dict) else {}
+            if att.get("type") == "queued_command" and _is_notice(att.get("origin"), att.get("prompt"), att.get("commandMode")):
+                self._noticed(str(att.get("prompt") or ""))
+            return
         if rec.get("type") == "user" and isinstance(content, str):
             self.last_text, self.turn_ended, self.api_error = "", False, False  # a new message opens a new turn
+            self.pending = 0
+            if _is_notice(rec.get("origin"), content):
+                self._noticed(content)
             return
         if rec.get("type") == "assistant":
             self.api_error = bool(rec.get("isApiErrorMessage"))
         if rec.get("type") == "system" and rec.get("subtype") == "turn_duration":
             self.turn_ended = True
+            self.pending = sum(n for k in PENDING_COUNTS if isinstance(n := rec.get(k), int) and n > 0)
             return
         for b in content if isinstance(content, list) else []:
             if not isinstance(b, dict):
@@ -1689,9 +1716,46 @@ class Tail:
                 self.last_text = str(b["text"]).strip()
                 run_log.text(self.last_text + "\n")
             elif rec.get("type") == "assistant" and b.get("type") == "tool_use":
+                self.names[str(b.get("id") or "")] = str(b.get("name") or "")
                 run_log.tool_use(str(b.get("id") or ""), str(b.get("name") or ""), summarize_input(str(b.get("name")), b.get("input")))
             elif rec.get("type") == "user" and b.get("type") == "tool_result":
-                run_log.tool_result(str(b.get("tool_use_id") or ""), _result_text(b.get("content")), is_error=bool(b.get("is_error")))
+                text = _result_text(b.get("content"))
+                if not b.get("is_error"):
+                    self._launched(self.names.get(str(b.get("tool_use_id") or ""), ""), text)
+                run_log.tool_result(str(b.get("tool_use_id") or ""), text, is_error=bool(b.get("is_error")))
+
+    def _launched(self, name: str, text: str) -> None:
+        """A tool result's word on the session's background work, read as agent_session reads it (_steps_of): a
+        Workflow, a background Agent, a SendMessage that continued an agent or a call moved to the background starts a
+        task, and TaskStop ends one."""
+        from . import agent_session  # noqa: PLC0415
+
+        if name == agent_session.STOP_TOOL:
+            if m := agent_session.STOPPED_TASK_RE.search(text):
+                self.tasks.discard(m.group(1))
+            return
+        m = None
+        if name == session.WORKFLOW_TOOL:
+            m = agent_session.LAUNCHED_TASK_RE.search(text)
+        elif name == session.SEND_TOOL:
+            m = agent_session.RESUMED_AGENT_RE.search(text)
+        elif name in session.AGENT_TOOLS and session.ASYNC_RESULT_RE.match(text):
+            m = agent_session.LAUNCHED_AGENT_RE.search(text)
+        m = m or agent_session.MOVED_TASK_RE.search(text)
+        if m:
+            self.tasks.add(m.group(1))
+
+    def _noticed(self, text: str) -> None:
+        """A task notification: the tasks it names have ended."""
+        from . import agent_session  # noqa: PLC0415
+
+        self.tasks.difference_update(agent_session.TASK_ID_RE.findall(text))
+
+
+def _is_notice(origin: Any, text: Any, mode: Any = None) -> bool:
+    """Whether a prompt is one of Claude Code's task notifications, by its origin, its command mode or its text."""
+    kind = origin.get("kind") if isinstance(origin, dict) else None
+    return "task-notification" in (kind, mode) or (isinstance(text, str) and text.lstrip().startswith("<task-notification>"))
 
 
 def _uuids(p: Path | None) -> set[str]:
@@ -1726,7 +1790,10 @@ async def _worker_turn(run: Run, run_log: Log, cwd: Path, prompt: str, resume: s
                        answered: bool = True, fence: dict[str, Any] | None = None,
                        asking: dict[str, Any] | None = None, models: dict[str, Any] | None = None) -> str:
     """One turn of a ticket's background session, started with `prompt` or woken with it when `resume` names the
-    session, then watched until the turn ends, its transcript copied into the chat. The transcript is read every POLL_S;
+    session, then watched until the turn ends, its transcript copied into the chat. A turn that ends while the session's
+    own workflows or background agents run (Tail.background) goes on, since their results start its next turn: the
+    session is not stopped while any of them runs and the session lives, and the turn ends with the last turn they
+    lead to. The transcript is read every POLL_S;
     while it grows the session works, and once it is quiet `claude agents` is asked for the session's state, at gaps that
     double up to STATE_GAP_MAX_S while that state stays working or blocked. `on_session(short id, full id)` records the
     session. The turn has no time limit: once neither its transcript nor its subagents' have grown for QUIET_NOTE_S, the
@@ -1764,6 +1831,7 @@ async def _worker_turn(run: Run, run_log: Log, cwd: Path, prompt: str, resume: s
     asked_at = 0.0
     gap, looked = POLL_S, 0.0  # between two looks at the session's state, which doubles while it stays the same
     active, quiet_note = time.monotonic(), QUIET_NOTE_S  # the session's last sign of activity; the next QUIET_LINE's time
+    held = False  # the thread has said that the session waits for its own background work (BACKGROUND_LINE)
     while True:
         await asyncio.sleep(POLL_S)
         pos = tail.pos
@@ -1778,15 +1846,30 @@ async def _worker_turn(run: Run, run_log: Log, cwd: Path, prompt: str, resume: s
         if waiting and time.monotonic() - asked_at > ASK_TIMEOUT_S:
             state = "unanswered"
             break
-        if tail.pos != pos and not tail.turn_ended:
+        held = held and bool(tail.background())
+        ended = tail.turn_ended and not tail.background()  # the turn is over and so is the session's background work
+        if tail.pos != pos and not ended:
             unlisted, gap = 0, POLL_S
             if not waiting:
                 continue  # the transcript grew: the session works
             looked = 0.0  # it grew while the session waited for an answer: its state says whether it still waits
-        if not tail.turn_ended and time.monotonic() - looked < gap:
+        if not ended and time.monotonic() - looked < gap:
             continue
         state = await SESSIONS.state(cwd, run.session)
         looked = time.monotonic()
+        pos = tail.pos
+        tail.read(run_log)
+        if tail.pos != pos and not waiting and not (tail.turn_ended and not tail.background()):
+            continue  # the transcript grew during the look: the session works, or a turn its background work started
+        if tail.background() and state in LIVE_STATES and (tail.turn_ended or state in ("idle", "done")):
+            # its own workflows or background agents run on, and their results start its next turn: the session is not
+            # stopped, whatever its state says of the task
+            if not held:
+                run_log.stage(BACKGROUND_LINE.format(n=tail.background()))
+                held = True
+            waiting, unlisted, idle, early = False, 0, 0, 0
+            gap = min(gap * 2, STATE_GAP_MAX_S)
+            continue
         gap = min(gap * 2, STATE_GAP_MAX_S) if state in ("working", "blocked") else POLL_S
         if state == "working":
             waiting, unlisted = False, 0
