@@ -191,8 +191,7 @@ def test_the_pdf_route_serves_the_file_for_the_browsers_viewer(chats):
     r = client.get(f"{CHATS}/pdf/docs/postmortem.pdf")
     assert r.status_code == 200 and r.headers["content-type"] == "application/pdf"
     assert r.content == (chats / "docs" / "postmortem.pdf").read_bytes()
-    csp = r.headers["content-security-policy"]
-    assert "sandbox" not in csp and "default-src 'none'" in csp and "frame-ancestors 'self'" in csp
+    assert r.headers["content-security-policy"] == "frame-ancestors 'self'" and r.headers["x-frame-options"] == "SAMEORIGIN"
     assert r.headers["x-content-type-options"] == "nosniff"
     ranged = client.get(f"{CHATS}/pdf/docs/postmortem.pdf", headers={"Range": "bytes=0-7"})
     assert ranged.status_code == 206 and ranged.content == b"%PDF-1.4"

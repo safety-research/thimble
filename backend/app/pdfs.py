@@ -1,10 +1,9 @@
 """PDFs of the corpus as themselves: the File browser shows the real file in the browser's own PDF viewer, and a
 citation `<path>#p<n>` (or `#p<n>-p<m>`, pages counted from 1) opens it at that page.
 
-GET /corpora/{c}/pdf/<path> serves the file as application/pdf. Its policy lets the browser's viewer draw it in a frame of the
-app and nothing else: no script of the page's own, nothing loaded from elsewhere, and nosniff so it is never read as
-another type. page_texts() reads each page's text with pypdf, kept per path while its size and mtime_ns stay the same,
-for the excerpt a citation of a page resolves to.
+GET /corpora/{c}/pdf/<path> serves the file as application/pdf with nosniff, so a browser reads it only as a PDF, in
+its own viewer, and with a policy that lets only the app's pages frame it. page_texts() reads each page's text with
+pypdf, kept per path while its size and mtime_ns stay the same, for the excerpt a citation of a page resolves to.
 """
 from __future__ import annotations
 
@@ -23,7 +22,7 @@ router = APIRouter()
 
 PDF_HEADERS = {
     "X-Content-Type-Options": "nosniff",
-    "Content-Security-Policy": "default-src 'none'; object-src 'self'; frame-ancestors 'self'",
+    "Content-Security-Policy": "frame-ancestors 'self'",
     "Content-Disposition": "inline",
     "Cache-Control": "no-cache",
 }
