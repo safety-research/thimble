@@ -8,7 +8,7 @@ import { parseRef } from '../../lib/refs'
 import type { Block, SourceKind, SourcePage, SourceRecord, TranscriptHint } from '../../lib/types'
 import { UNFOLD_EVENT } from '../find'
 import { cellFill, markSegments, type LaneCell, type LaneTag, type RecordMarks, type Segment, type SpanMark } from '../labels'
-import { useMarksAt } from '../marks'
+import { useMarksAt, useMarksOver } from '../marks'
 import { LabelMark } from '../LabelMark'
 
 export interface ViewProps {
@@ -132,6 +132,8 @@ interface RecordProps {
   /** the record's text for a thread's anchor_text (data-anchor-text), so a ⌘-click quotes the record, not its head */
   text?: string
   children?: ReactNode
+  /** the last line of the records the card stands for (a chat turn's lines), whose labels its gutter shows too */
+  end?: number
 }
 
 /** The tint of a highlighted value with nothing to mark, as style. */
@@ -178,9 +180,9 @@ export const LANE_GLYPH_PX = 13
 
 /** One record as a row: the label gutter, the line number, the head in mono, the blocks under it; a highlighted value
  * with nothing to mark as a tint behind the text. */
-export function RecordCard({ path, line, target, hit, className, header, text, children }: RecordProps) {
+export function RecordCard({ path, line, target, hit, className, header, text, children, end }: RecordProps) {
   const isT = isTargetLine(target, line)
-  const marks = useMarksAt(path, line)
+  const marks = useMarksOver(path, line, end ?? line)
   const cls = ['reader-card', 'reader-record', className, isT && 'reader-target', isT && hit && 'reader-hit', marks.cells.length && 'has-gutter', marks.tint && 'has-tint'].filter(Boolean).join(' ')
   return (
     <div className={cls} data-line={line} data-anchor={`${path}#L${line}`} data-anchor-text={text || undefined} style={markStyle(marks)}>

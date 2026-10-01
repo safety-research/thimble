@@ -5,6 +5,7 @@
 import { act } from 'react'
 import { afterEach, describe, expect, test, vi } from 'vitest'
 import { pdfPage, Reader } from '../../src/files/Reader.tsx'
+import { ReaderLabelsContext, type ReaderLabels } from '../../src/files/marks.tsx'
 import type { FilesLabels } from '../../src/files/useLabels.ts'
 import { segmentsFor, segmentsFrom } from '../../src/files/views/common.tsx'
 import { pickView, scoreViews } from '../../src/files/views/registry.ts'
@@ -85,6 +86,28 @@ describe('a text chat log as turns', () => {
     expect(cards[2].textContent).toContain('the groupby test drops a key.It started with the patch.')
     expect(cards[2].textContent).not.toContain('Assistant:')
     expect([...cards[2].querySelectorAll('.reader-block')].map((b) => b.getAttribute('data-line'))).toEqual(['3', '4'])
+  })
+  test('a label on a line inside a turn shows in the gutter of the turn’s card', async () => {
+    const flagged = { id: 'k1', name: 'Blames the patch', unit: 'record', labels: ['yes', 'no'], classes: [] } as unknown as Concept
+    const ctx: ReaderLabels = {
+      path: 'logs/chat.md',
+      on: [flagged],
+      lanes: [flagged],
+      focus: 'k1',
+      rows: new Map([['logs/chat.md#L4', new Map([['k1', { ref: 'logs/chat.md#L4', label: 'yes', confidence: null, source: null }]])]]),
+      want: () => undefined,
+    }
+    const page: SourcePage = { path: 'logs/chat.md', kind: 'text', total_lines: 8, start: 1, records }
+    const View = transcript.component
+    const el = await mount(
+      <ReaderLabelsContext.Provider value={ctx}>
+        <View workspace="w" path="logs/chat.md" kind="text" page={page} loadMore={() => undefined} transcript={{ format: 'text', score: 0.95, style: 'colon' }} />
+      </ReaderLabelsContext.Provider>,
+    )
+    const lit = (line: string) => !!el.querySelector(`.reader-card[data-line="${line}"] > .reader-gutter .reader-gutter-cell.is-lit`)
+    expect(lit('3')).toBe(true)
+    expect(lit('2')).toBe(false)
+    expect(lit('6')).toBe(false)
   })
 })
 

@@ -285,7 +285,7 @@ export function chatTurns(records: readonly SourceRecord[]): { line: number; end
 
 /** A text or markdown chat log as one card per turn: the speaker and time in the head, the turn's lines under it, the
  * first from where its words start. Each line keeps its own record, so a span label or a citation of a line inside a
- * turn marks it there. */
+ * turn marks it there, and the card's gutter shows the labels of every line of the turn. */
 function ChatLog({ path, page, targetRef }: ViewProps) {
   const records = page.records
   const turns = useMemo(() => chatTurns(records), [records])
@@ -297,12 +297,12 @@ function ChatLog({ path, page, targetRef }: ViewProps) {
   const { target, hit } = useTarget(cardRef, path, rootRef, [records])
   return (
     <div className="reader-transcript reader-chatlog" ref={rootRef}>
-      {turns.map(({ line, turn, recs }) => {
+      {turns.map(({ line, end, turn, recs }) => {
         const header = turn ? [turn.speaker, turn.time ? stamp(turn.time) : null].filter(Boolean).join(' · ') : undefined
         const lines = shownLines(recs, turn)
         const text = lines.map((r, i) => (i === 0 && turn ? lineText(r).slice(turn.at) : lineText(r))).join('\n').trim()
         return (
-          <RecordCard key={line} path={path} line={line} target={target} hit={hit} className={turn ? 'reader-msg' : 'reader-msg reader-chat-lead'} header={header} text={text.slice(0, 500)}>
+          <RecordCard key={line} path={path} line={line} end={end} target={target} hit={hit} className={turn ? 'reader-msg' : 'reader-msg reader-chat-lead'} header={header} text={text.slice(0, 500)}>
             {lines.map((r, i) =>
               r.blocks.length ? (
                 r.blocks.map((b, k) => <BlockEl key={`${r.line}.${k}`} block={b} path={path} line={r.line} index={k} target={asked} hit={hit} from={i === 0 && turn && k === 0 ? turn.at : 0} className={i === 0 && turn && turn.at >= b.text.length ? 'reader-chat-empty' : undefined} />)
