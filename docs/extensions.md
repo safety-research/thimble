@@ -26,7 +26,7 @@ The JSON files follow [backend/app/extension.schema.json](../backend/app/extensi
 | `reports/<name>/report.json`, `report.md`, `writer.md` | a report type: `report.md` is the form the writer follows, `writer.md` is added to the writer's prompt |
 | `agents/<role>/agent.json` and the files it names | a change to one of the five roles |
 | `tasks/<task>/task.json` and the files it names | a change to one of the seven tasks; test inputs in `fixtures/*.json` |
-| `checks/<name>/check.json`, `check.md` | a report check |
+| `checks/<name>/check.json`, `check.md` | a report check (not run yet) |
 | `lib/`, `sample/` | code every part can import, and a small corpus to try the parts on |
 
 Names are lower-case letters, digits and hyphens. A part's name is its folder's name.
@@ -50,7 +50,8 @@ Names are lower-case letters, digits and hyphens. A part's name is its folder's 
 ## Roles and tasks
 
 The roles are `main`, `orientation`, `critic`, `writer` and `dev`. The tasks are `labels`, `label-draft`, `card-check`,
-`view-review`, `view-fit`, `file-viewer` and `checks`. `agent.json` or `task.json` defines one in one of three ways:
+`view-review`, `view-fit`, `file-viewer` and `checks`. thimble checks a `task.json` but does not run tasks yet.
+`agent.json` or `task.json` defines one in one of three ways:
 
 | key | what thimble does |
 |---|---|
