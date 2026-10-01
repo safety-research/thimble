@@ -6,7 +6,8 @@ with a stub canvas context. Each request carries everything the page needs (the 
 label names, cited calls, the theme), so the page never calls the API. The page comes from THIMBLE_RENDER_URL, the
 Vite dev server in dev mode, or the built UI served from memory at RENDER_ORIGIN. A page is replaced after
 RECYCLE_AFTER renders or any failure; without Playwright or its Chromium, available() is False, why() says why, and
-the harness stays down until the server restarts (headless.py). A card type's frame that is one flat colour in the
+the harness stays down until the server restarts (headless.py). The browser and its driver close once no card was drawn
+for IDLE_S, and the next render launches them again. A card type's frame that is one flat colour in the
 picture is shot again twice, then the render fails, so the check never reads a card whose graphic did not draw."""
 from __future__ import annotations
 
@@ -33,6 +34,8 @@ log = logging.getLogger("thimble.render")
 POOL_PAGES = max(1, int(os.environ.get("THIMBLE_RENDER_PAGES", "4") or "4"))
 RECYCLE_AFTER = 200  # renders a page serves before it is replaced
 RENDER_TIMEOUT_S = float(os.environ.get("THIMBLE_RENDER_TIMEOUT_S", "8") or "8")
+# the browser is closed once no card was drawn for this long (0: never), and launched again by the next render
+IDLE_S = float(os.environ.get("THIMBLE_RENDER_IDLE_S", "300") or "300")
 PAGE_LOAD_TIMEOUT_S = 30.0
 SCALE = 2  # device pixels per CSS pixel, what a retina display shows
 VIEWPORT = {"width": 1280, "height": 1000}  # a taller card is shot beyond the viewport
@@ -127,6 +130,10 @@ class Pool:
         self.launch_ms = 0.0
         self._warned_fonts = False
         self._warned: set[str] = set()  # the launch failures logged, each once
+        self._busy = 0  # renders under way
+        self._used = 0.0  # when the last render began or ended (monotonic)
+        self._idle_task: asyncio.Task[None] | None = None
+        self.resting = False  # closed after IDLE_S with no card drawn: the next render launches it again
 
     @property
     def ready(self) -> bool:
@@ -138,6 +145,7 @@ class Pool:
         async with self._lock:
             if self.ready:
                 return True
+            self.resting = False
             if gone := headless.missing(headless.HARNESS):
                 self.why = gone
                 return False
@@ -186,7 +194,22 @@ class Pool:
             self.why = ""
             self.launch_ms = round((time.perf_counter() - t0) * 1000, 1)
             log.info("render: %d pages ready from %s in %.0f ms", self.size, url, self.launch_ms)
+            self._used = time.monotonic()
+            if IDLE_S > 0 and (self._idle_task is None or self._idle_task.done()):
+                self._idle_task = asyncio.get_running_loop().create_task(self._close_when_idle(), name="render-idle")
             return True
+
+    async def _close_when_idle(self) -> None:
+        """Close the browser once no render ran for IDLE_S; ends with the browser."""
+        while self._started:
+            await asyncio.sleep(max(0.05, min(IDLE_S, self._used + IDLE_S - time.monotonic())))
+            if self._busy or time.monotonic() - self._used < IDLE_S:
+                continue
+            async with self._lock:
+                if self._started and not self._busy and time.monotonic() - self._used >= IDLE_S:
+                    log.info("render: no card drawn for %.0f s, so the browser is closed until the next one", IDLE_S)
+                    await self._close()
+                    self.resting = True
 
     async def _new_page(self, url: str) -> Any:
         page = await self._context.new_page()
@@ -215,6 +238,15 @@ class Pool:
     async def render(self, request: dict[str, Any], *, timeout_s: float = RENDER_TIMEOUT_S) -> Rendered:
         """Draw one card (module note, a render). Raises Unavailable when the harness cannot run; any other failure is a
         Rendered with `error`."""
+        self._busy += 1
+        self._used = time.monotonic()
+        try:
+            return await self._render(request, timeout_s)
+        finally:
+            self._busy -= 1
+            self._used = time.monotonic()
+
+    async def _render(self, request: dict[str, Any], timeout_s: float) -> Rendered:
         if not self.ready and not await self.start():
             raise Unavailable(self.why or "the harness is not running")
         assert self._free is not None
@@ -273,6 +305,10 @@ class Pool:
     async def stop(self) -> None:
         async with self._lock:
             await self._close()
+            self.resting = False
+        task, self._idle_task = self._idle_task, None
+        if task is not None and not task.done() and task is not asyncio.current_task():
+            task.cancel()
 
     async def _close(self) -> None:
         self._started = False
@@ -355,8 +391,8 @@ def pool() -> Pool:
 
 
 def available() -> bool:
-    """Whether a render can run now without a launch (the pool is up)."""
-    return enabled() and _pool is not None and _pool.ready
+    """Whether the harness draws cards: its pool is up, or was closed for idleness and launches with the next card."""
+    return enabled() and _pool is not None and (_pool.ready or _pool.resting)
 
 
 def why() -> str:

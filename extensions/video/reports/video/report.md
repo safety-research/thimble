@@ -1,8 +1,3 @@
----
-name: Video
-description: A short narrated video, cited lines read aloud over a film drawn in HTML in time with them.
-renderer: video
----
 The video is a narrated explainer of about a minute and a half that tells someone who has not seen the data what the workspace found. The browser reads its lines aloud with a system voice while the film, a page you draw in HTML, runs in time with them. How to tell it is yours: the story, its order, what is on screen and how it looks. Aim for a video a bright fifteen-year-old could follow on one viewing, with pictures that make each point easier to grasp than the words alone.
 
 Your material is the workspace: the cards, the report when one is written (`read_ref` on `report:report`), the records and the notebook through `read_ref`, and the corpus, read-only. The cards and the report are material, not a template. Use a card's numbers, redraw its figure or leave it out.

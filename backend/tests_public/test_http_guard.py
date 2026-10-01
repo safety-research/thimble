@@ -256,6 +256,7 @@ def test_a_view_builds_check_proves_the_token_so_its_post_passes(app_prod, plugi
 EXTENSION_WRITES = [
     ("PUT", "/api/ws/mini/extensions/video", {"on": False}),
     ("PUT", "/api/ws/mini/extensions/video/views/none", {"on": False}),
+    ("POST", "/api/ws/mini/extensions/video/orientation", {"run": False}),
     ("POST", "/api/extensions/refresh", {}),
     ("POST", "/api/ws/mini/cardtypes/none/records", {"query": None}),
     ("POST", "/api/ws/mini/cells/none/keep", {"patch": {}, "dry": True}),
