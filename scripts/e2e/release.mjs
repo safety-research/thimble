@@ -39,11 +39,13 @@ const PENDING = {
   'transcript-anywhere': 'transcripts for any transcript-like file',
   pdf: 'PDF as a File browser mode',
   'views-bar': 'worked examples and the PDF viewer kept out of the views',
-  'view-contract': 'the view contract (residue list, derived count, labels)',
   'local-views': 'generated views as the workspace\'s local extension',
   'ext-cli-off': 'thimble extension on/off',
   'ext-cli-on': 'thimble extension on/off',
   'ext-orient-offer': 'the offer to run an extension\'s orientation instructions',
+  'ext-live': '+ New refreshing its report types when an extension is switched (it loads them once per page)',
+  'view-derived': 'the view contract (derived fields as a count in the header)',
+  'view-labels': 'the view contract (labels in every view\'s UI)',
 }
 
 let shotN = 0
@@ -168,6 +170,7 @@ async function newMenu(page) {
   await btn.click()
   const menu = page.getByRole('menu').last()
   await menu.waitFor({ timeout: ACTION_MS })
+  await page.waitForTimeout(300)
   const items = (await menu.getByRole('menuitem').allInnerTexts()).map((t) => t.trim().split('\n')[0])
   return { items, close: () => page.keyboard.press('Escape') }
 }
@@ -182,29 +185,39 @@ async function extRow(page) {
   return { present: true, on, active: (await row.getAttribute('data-active')) === 'true', row, sw }
 }
 
-/** Whether the UI shows the fixture extension as `want` (on or off) in Settings and in + New, within `ms`, reloading
- * the page once when the live page has not followed. Returns what it saw. */
-async function followsExtension(page, want, ms = 15_000) {
+// each switch of the fixture extension, and the parts of the UI that showed it only after a reload
+const lagged = []
+
+/** Whether the UI shows the fixture extension as `want` (on or off) in Settings and in + New: within `ms` on the live
+ * page, else after one reload, which is noted in `lagged` for the ext-live step. */
+async function followsExtension(page, want, what, ms = 10_000) {
   const seen = async () => {
     const r = await extRow(page)
     await closeSettings(page)
     const m = await newMenu(page)
     await m.close()
-    const listed = m.items.includes(EXT_REPORT)
-    return { row: r.present, on: r.present && r.on, listed }
+    return { settings: r.present && r.on === want, menu: m.items.includes(EXT_REPORT) === want }
   }
-  const ok = (s) => (want ? s.row && s.on && s.listed : !s.listed && (!s.row || !s.on))
   const until = Date.now() + ms
   let s = await seen()
-  while (!ok(s) && Date.now() < until) {
+  while (!(s.settings && s.menu) && Date.now() < until) {
     await page.waitForTimeout(1_000)
     s = await seen()
   }
-  if (ok(s)) return { ok: true, how: 'live', s }
+  if (s.settings && s.menu) return { ok: true, how: 'live' }
+  const stale = [!s.settings && 'Settings', !s.menu && '+ New'].filter(Boolean)
   await page.reload()
   await waitShell(page)
   s = await seen()
-  return { ok: ok(s), how: 'after a reload', s }
+  const ok = s.settings && s.menu
+  if (ok) lagged.push(`${what}: ${stale.join(' and ')}`)
+  const still = [!s.settings && 'Settings', !s.menu && '+ New'].filter(Boolean)
+  return { ok, how: ok ? `${stale.join(' and ')} only after a reload` : `${still.join(' and ')} still wrong after a reload` }
+}
+
+/** The texts of the dialogs, alerts and toasts on the page. */
+async function notices(page) {
+  return page.locator('[role=dialog], [role=alertdialog], [role=alert], [role=status], [class*=toast]').allInnerTexts()
 }
 
 async function waitShell(page) {
@@ -386,6 +399,24 @@ async function main() {
       return { detail: `${jsonl}: modes ${m.join(', ')}`, shots: [s] }
     })
 
+    await step('labels', 'A regex label is listed in Files and marks the records it matched in the transcript', async () => {
+      check(WS.label?.ok, `the label was not applied: ${WS.label?.error || 'unknown'}`)
+      const jsonl = files.find((f) => /agent-01\.jsonl$/.test(f)) || files.find((f) => f.endsWith('.jsonl'))
+      await openFile(page, jsonl)
+      const listed = await page.getByText(WS.label.name, { exact: true }).count()
+      let marks = 0
+      const until = Date.now() + 15_000
+      while (Date.now() < until) {
+        marks = await page.locator('.reader-gutter-cell.is-lit, .reader-span[data-concept]').count()
+        if (marks) break
+        await page.waitForTimeout(500)
+      }
+      const s = await shot(page, 'labels')
+      if (!listed) throw new StepError(`"${WS.label.name}" is not listed in Files`, [s])
+      if (!marks) throw new StepError(`no label marks on the records of ${jsonl}`, [s])
+      return { detail: `"${WS.label.name}" listed, ${marks} marks in ${jsonl}; counts ${JSON.stringify(WS.label.counts ?? {})}`, shots: [s] }
+    })
+
     await step('transcript-anywhere', 'Chat logs outside runs/ (Markdown, CSV) are offered as transcripts', async () => {
       const shots = []
       const got = []
@@ -443,34 +474,49 @@ async function main() {
       return { detail: `${rows} rows, one per JSONL file`, shots: [s] }
     })
 
-    await step('view-contract', 'The view lists what it could not read, counts its derived fields, and shows labels', async () => {
-      const pane = page.locator('.view-pane').first()
-      await pane.waitFor({ timeout: ACTION_MS })
-      const head = pane.locator('.view-pane-head').first()
-      let headText = await head.innerText().catch(() => '')
+    await step('view-residue', 'The view lists the file it could not read in full', async () => {
+      const head = page.locator('.view-pane .view-pane-head').first()
+      await head.waitFor({ timeout: ACTION_MS })
       const shots = []
-      const problems = []
-      if (!headText.includes('broken.jsonl')) {
+      let listed = (await head.innerText()).includes('broken.jsonl')
+      let control = ''
+      if (!listed) {
         for (const b of await head.locator('button[aria-expanded]').all()) {
           const t = (await b.innerText()).trim()
           if (!/not|could|unread|missing|problem|skipped|residue/i.test(t)) continue
+          control = t
           await b.click()
           await page.waitForTimeout(400)
-          const listed = await page.locator('.view-pane-list').allInnerTexts()
+          listed = (await page.locator('.view-pane-list').allInnerTexts()).some((x) => x.includes('broken.jsonl'))
           shots.push(await shot(page, 'view-residue'))
           await page.keyboard.press('Escape')
-          if (listed.some((x) => x.includes('broken.jsonl'))) headText += ' broken.jsonl'
+          if (listed) break
         }
       }
-      if (!headText.includes('broken.jsonl')) problems.push('exports/broken.jsonl, whose lines are not all JSON, is not listed')
-      if (!/\b\d+\s+derived\b/i.test(headText)) problems.push('no count of derived fields in the header')
+      if (!listed) throw new StepError('exports/broken.jsonl, whose lines are not all JSON, is not listed in the view\'s header', shots)
+      return { detail: control ? `"${control}" lists exports/broken.jsonl` : 'the header names exports/broken.jsonl', shots }
+    })
+
+    await step('view-derived', 'The view counts its derived fields in its header, with no marks on its cells', async () => {
+      const head = await page.locator('.view-pane .view-pane-head').first().innerText()
       let marks = 0
       for (const fr of page.frames()) if (fr !== page.mainFrame()) marks += await fr.locator('[data-derived]').count().catch(() => 0)
+      const problems = []
+      if (!/\b\d+\s+derived\b/i.test(head)) problems.push(`no count of derived fields in the header ("${head.replace(/\s+/g, ' ').trim()}")`)
       if (marks) problems.push(`${marks} derived marks on the view's cells`)
-      if (!/label/i.test(await pane.innerText())) problems.push('no labels in the view\'s UI')
-      shots.unshift(await shot(page, 'view-contract'))
-      if (problems.length) throw new StepError(problems.join('; '), shots)
-      return { detail: 'residue listed, derived fields counted, labels shown', shots }
+      const s = await shot(page, 'view-derived')
+      if (problems.length) throw new StepError(problems.join('; '), [s])
+      return { detail: head.match(/\d+\s+derived[^\n]*/i)?.[0] ?? '', shots: [s] }
+    })
+
+    await step('view-labels', 'Labels are part of the view\'s UI', async () => {
+      const pane = page.locator('.view-pane').first()
+      const named = (await pane.innerText()).includes(WS.label?.name || 'Mentions forge')
+      let marks = 0
+      for (const fr of page.frames()) if (fr !== page.mainFrame()) marks += await fr.locator('[data-thimble-label]').count().catch(() => 0)
+      const s = await shot(page, 'view-labels')
+      if (!named && !marks) throw new StepError(`the view shows neither the label "${WS.label?.name}" nor a label mark`, [s])
+      return { detail: `${named ? 'the label is named in the view pane' : ''}${named && marks ? '; ' : ''}${marks ? `${marks} label marks in the view` : ''}`, shots: [s] }
     })
 
     await step('settings-extensions', 'Settings > Extensions lists the extensions, and the popover fits on screen', async () => {
@@ -514,7 +560,7 @@ async function main() {
       const l = thimble('extension', 'list')
       check(l.out.includes(EXT), `thimble extension list does not name ${EXT}: ${l.out.slice(0, 300)}`)
       added = true
-      const f = await followsExtension(page, true)
+      const f = await followsExtension(page, true, 'add')
       const shots = []
       await extRow(page)
       shots.push(await shot(page, 'ext-added-settings'))
@@ -522,7 +568,7 @@ async function main() {
       const m = await newMenu(page)
       shots.push(await shot(page, 'ext-added-new-menu'))
       await m.close()
-      if (!f.ok) throw new StepError(`the UI did not follow: ${JSON.stringify(f.s)}`, shots)
+      if (!f.ok) throw new StepError(`the UI did not follow: ${f.how}`, shots)
       return { detail: `added; Settings switch on and "${EXT_REPORT}" in + New (${f.how})`, shots }
     })
 
@@ -540,9 +586,9 @@ async function main() {
       check(added, 'the extension was not added')
       const r = cli('off')
       check(r.status === 0, `thimble extension ${r.word} ${EXT}: exit ${r.status}: ${r.out.slice(0, 200)}`)
-      const f = await followsExtension(page, false)
+      const f = await followsExtension(page, false, 'off from the CLI')
       const s = await shot(page, 'ext-cli-off')
-      if (!f.ok) throw new StepError(`the UI did not follow: ${JSON.stringify(f.s)}`, [s])
+      if (!f.ok) throw new StepError(`the UI did not follow: ${f.how}`, [s])
       return { detail: `thimble extension ${r.word}: off in Settings, gone from + New (${f.how})`, shots: [s] }
     })
 
@@ -550,9 +596,9 @@ async function main() {
       check(added, 'the extension was not added')
       const r = cli('on')
       check(r.status === 0, `thimble extension ${r.word} ${EXT}: exit ${r.status}: ${r.out.slice(0, 200)}`)
-      const f = await followsExtension(page, true)
+      const f = await followsExtension(page, true, 'on from the CLI')
       const s = await shot(page, 'ext-cli-on')
-      if (!f.ok) throw new StepError(`the UI did not follow: ${JSON.stringify(f.s)}`, [s])
+      if (!f.ok) throw new StepError(`the UI did not follow: ${f.how}`, [s])
       return { detail: `thimble extension ${r.word}: on in Settings, back in + New (${f.how})`, shots: [s] }
     })
 
@@ -563,9 +609,9 @@ async function main() {
       if (r.on) await r.sw.click()
       await page.locator('.settings-pop').getByRole('button', { name: 'Save', exact: true }).click()
       await page.locator('.settings-pop').waitFor({ state: 'detached', timeout: ACTION_MS }).catch(() => undefined)
-      const f = await followsExtension(page, false)
+      const f = await followsExtension(page, false, 'off in Settings')
       const s = await shot(page, 'ext-ui-off')
-      if (!f.ok) throw new StepError(`the UI did not follow: ${JSON.stringify(f.s)}`, [s])
+      if (!f.ok) throw new StepError(`the UI did not follow: ${f.how}`, [s])
       return { detail: `off in Settings, gone from + New (${f.how})`, shots: [s] }
     })
 
@@ -575,18 +621,18 @@ async function main() {
       const r = await extRow(page)
       check(r.present, 'no row for the extension in Settings')
       if (!r.on) await r.sw.click()
+      const before = new Set(await notices(page))
       await page.locator('.settings-pop').getByRole('button', { name: 'Save', exact: true }).click()
       await page.locator('.settings-pop').waitFor({ state: 'detached', timeout: ACTION_MS }).catch(() => undefined)
-      offered = await page
-        .getByText(/orientation/i)
-        .filter({ hasText: /\b(run|rerun|start)\b/i })
-        .first()
-        .waitFor({ timeout: 5_000 })
-        .then(() => true, () => false)
+      offered = false
+      for (let i = 0; i < 10 && !offered; i++) {
+        offered = (await notices(page)).some((t) => !before.has(t) && /orientation/i.test(t) && /\b(run|rerun|start)\b/i.test(t))
+        if (!offered) await page.waitForTimeout(500)
+      }
       const s0 = await shot(page, 'ext-ui-on-offer')
-      const f = await followsExtension(page, true)
+      const f = await followsExtension(page, true, 'on in Settings')
       const s = await shot(page, 'ext-ui-on')
-      if (!f.ok) throw new StepError(`the UI did not follow: ${JSON.stringify(f.s)}`, [s0, s])
+      if (!f.ok) throw new StepError(`the UI did not follow: ${f.how}`, [s0, s])
       return { detail: `on in Settings, back in + New (${f.how})`, shots: [s0, s] }
     })
 
@@ -594,6 +640,12 @@ async function main() {
       check(offered !== null, 'the extension was not switched on from Settings')
       check(offered, 'no offer to run its orientation instructions after it was switched on')
       return { detail: 'offered' }
+    })
+
+    await step('ext-live', 'Settings and + New follow every switch of the extension without a reload', async () => {
+      check(added, 'the extension was not added')
+      check(lagged.length === 0, `shown only after a reload: ${lagged.join('; ')}`)
+      return { detail: 'every switch shown on the live page' }
     })
 
     await step('fonts', 'Every screenshot rendered in Hanken Grotesk', async () => {

@@ -4,7 +4,8 @@
 
 Registers the folder with the running server (POST /api/corpora/register, signed as the CLI signs it), saves
 fixture-view/ as a built view of the workspace (views.write_view, as scripts/dev/examples.py saves the worked examples),
-and prints one JSON line: {name, url, view: {slug, ok, error?}}. Run it in the throwaway environment
+creates a regex label over the JSONL files and applies it through the server's API (no model runs), and prints one JSON
+line: {name, url, view: {slug, ok, error?}, label: {name, ok, counts?, error?}}. Run it in the throwaway environment
 (THIMBLE_HOME, THIMBLE_PORT) the server runs in.
 """
 import inspect
@@ -19,6 +20,8 @@ from app import cli, views  # noqa: E402
 
 FIXTURE = Path(__file__).resolve().parent / "fixture-view"
 SLUG = "record-counts"
+LABEL = {"name": "Mentions forge", "kind": "regex", "spec": r"(?i)\bforge\b", "labels": ["forge", "other"],
+         "shown": True, "glob": "*.jsonl"}
 
 
 def save_view(name: str) -> dict:
@@ -32,6 +35,18 @@ def save_view(name: str) -> dict:
     return {"slug": v.get("slug", SLUG), "ok": bool(v.get("ok", True))}
 
 
+def apply_label(name: str) -> dict:
+    base = f"{cli.api_url()}/api/ws/{name}/concepts"
+    status, body = cli._request("POST", base, LABEL)
+    if status not in (200, 201) or not isinstance(body, dict) or not body.get("id"):
+        return {"name": LABEL["name"], "ok": False, "error": f"create → {status} {str(body)[:200]}"}
+    status, run = cli._request("POST", f"{base}/{body['id']}/apply", {"paths": [LABEL["glob"]], "wait": True}, timeout=120)
+    if status not in (200, 201, 202):
+        return {"name": LABEL["name"], "ok": False, "error": f"apply → {status} {str(run)[:200]}"}
+    counts = run.get("counts") if isinstance(run, dict) else None
+    return {"name": LABEL["name"], "ok": True, "counts": counts}
+
+
 def main() -> int:
     status, body = cli._request("POST", f"{cli.api_url()}/api/corpora/register", {"path": str(corpus)})
     if status not in (200, 201) or not isinstance(body, dict) or not body.get("name"):
@@ -42,7 +57,11 @@ def main() -> int:
         view = save_view(name)
     except Exception as e:  # noqa: BLE001 — the view step reports it; the workspace stands without the view
         view = {"slug": SLUG, "ok": False, "error": f"{type(e).__name__}: {e}"}
-    print(json.dumps({"name": name, "url": cli.ui_url(name), "view": view}))
+    try:
+        label = apply_label(name)
+    except Exception as e:  # noqa: BLE001 — the labels step reports it
+        label = {"name": LABEL["name"], "ok": False, "error": f"{type(e).__name__}: {e}"}
+    print(json.dumps({"name": name, "url": cli.ui_url(name), "view": view, "label": label}))
     return 0
 
 
