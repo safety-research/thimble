@@ -371,9 +371,11 @@ async def test_a_prompt_label_reads_each_record_s_text(api, corpus, workspaces_t
             for n, (_ref, t) in enumerate(items, 1)]})
 
     monkeypatch.setattr(concepts, "classify_structured", classify)
+    monkeypatch.setattr(concepts, "BATCH_ITEMS", 1)
+    monkeypatch.setattr(concepts, "CONCURRENCY", 1)
     k = await _label(api, name="refund", kind="prompt", description="asks for a refund")
-    s = await _apply(api, k, ["runs.json", "orders.csv"])
-    assert s["status"] == "done" and s["labeled"] == 5
+    s = await _apply(api, k, ["runs.json", "orders.csv", "forge.db#prs"])
+    assert s["status"] == "done" and s["labeled"] == 5 + 5, "a database's rows read one call at a time, in other threads"
     texts = dict(seen)
     assert "after two days" in texts["orders.csv#row=1"] and '"outcome": "refund given"' in texts["runs.json#/runs/0"]
     rows = concepts.read_labels(workspaces_tmp / CORPUS, k["id"])
