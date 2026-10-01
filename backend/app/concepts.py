@@ -21,8 +21,9 @@ on the concept), such as a prompt label over the few records a regex or code lab
 The analyst's labels: a label run from the browser gets a card and main hears of it (`labeled`, tell_main) once per
 version. A label that ran before without a card (such as the orientation's) keeps having none.
 Revisions: `rev` counts changes to a label's rows (redefinition, correction, a finished run; note_change). A card that
-read an older revision than the label's is stale (stale_in). When a run of a label ends, not stopped, thimble runs
-every card that read it again (rerun_readers), and main hears which of them it should write a takeaway for again
+read an older revision than the label's is stale (stale_in). When a run of a label ends, not stopped, or a moment after
+the analyst's last correction of it (rerun_after_verdicts), thimble runs every card that read it again (rerun_readers),
+and main hears which of them it should write a takeaway for again
 (`rerun`, or inside `label_done`). bring_current reruns labels whose rows were made under another definition before a
 card runs on POST .../regenerate.
 """
@@ -3159,6 +3160,8 @@ async def cancel_workspace(c: str) -> list[str]:
         out.append(key[1])
     for key in [k for k in list(_reruns) if k[0] == c]:
         _reruns.pop(key).cancel()
+    for key in [k for k in list(_verdict_timers) if k[0] == c]:
+        _verdict_timers.pop(key).cancel()
     for table in (_runs, _cancels, _locks):
         for key in [k for k in list(table) if k[0] == c]:
             table.pop(key, None)
@@ -3852,6 +3855,8 @@ RERUN_KIND = "rerun"  # the channel event that tells main which cards thimble ra
 _watching: set[asyncio.Task] = set()  # the tasks of tell_when_done, held until they end
 _reruns: dict[tuple[str, str], asyncio.Task] = {}  # (workspace, label id) -> the reruns of its readers after its last run
 _told_in_label_done: set[tuple[str, str]] = set()  # labels whose reruns label_done reports, so no `rerun` event goes
+VERDICT_RERUN_DELAY_S = 2.0  # quiet after the analyst's last verdict on a label before the cards that read it run again
+_verdict_timers: dict[tuple[str, str], asyncio.TimerHandle] = {}  # (workspace, label id) -> its pending rerun_after_verdicts
 RERUN_OUTPUT_CHARS = 1500  # of each card's new output in what main hears of a rerun
 SCOPE_OF_UNIT = {**{u: "files" for u in FILE_UNITS}, "cell": "canvas", "span": "report"}
 
@@ -3860,6 +3865,34 @@ def _start_reruns(c: str, concept_id: str) -> None:
     key = (c, concept_id)
     task = asyncio.get_running_loop().create_task(rerun_readers(c, concept_id), name=f"thimble-rerun-{concept_id}")
     _reruns[key] = task
+
+
+def rerun_after_verdicts(c: str, concept_id: str) -> None:
+    """Run the cards that read the label again (rerun_readers) VERDICT_RERUN_DELAY_S after the analyst's last verdict on
+    it, so a burst of corrections reruns each card once. While the label runs or its readers are running again it waits
+    for them to end. Callable from a sync route's worker thread. Never raises."""
+    key = (c, concept_id)
+
+    def arm() -> None:
+        if (old := _verdict_timers.pop(key, None)) is not None:
+            old.cancel()
+        _verdict_timers[key] = asyncio.get_running_loop().call_later(VERDICT_RERUN_DELAY_S, fire)
+
+    def fire() -> None:
+        _verdict_timers.pop(key, None)
+        if running_apply(c, concept_id) or ((task := _reruns.get(key)) is not None and not task.done()):
+            arm()
+            return
+        _start_reruns(c, concept_id)
+
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        loop = _loop
+        if loop is not None and loop.is_running() and not loop.is_closed():
+            loop.call_soon_threadsafe(arm)
+        return
+    arm()
 
 
 async def rerun_readers(c: str, concept_id: str) -> list[dict]:
@@ -4268,6 +4301,7 @@ def verdict_route(c: str, concept_id: str, body: VerdictBody) -> dict:
     ws, concept = load_concept(c, concept_id)
     row, concept = record_verdict(ws, concept, body.ref, body.label, body.note)
     _notify(c, concept_id, "changed")  # its revision stepped, so the cards that count by it show they are stale
+    rerun_after_verdicts(c, concept_id)
     out = {"row": row, "calibration": concept["calibration"]}
     if index_building(ws, concept_id):
         out["building"] = True
