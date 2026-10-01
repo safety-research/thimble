@@ -147,7 +147,7 @@ export function residueWords(notes: ViewNotes, file = false): string[] {
   const out: string[] = []
   if (file) {
     const own = notes.shown?.not_shown.files[0]
-    if (own) out.push(own.why ? 'Hidden' : 'Partly read')
+    if (own) out.push(own.why ? 'Hidden' : own.read ? 'Partly read' : 'Not read')
   } else {
     if (r.unreadCount) out.push(`${r.unreadCount.toLocaleString()} not read`)
     if (r.hiddenCount) out.push(`${r.hiddenCount.toLocaleString()} hidden`)

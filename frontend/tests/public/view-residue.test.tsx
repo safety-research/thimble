@@ -120,6 +120,8 @@ test("a file viewer's line speaks of its one file, and of nothing when the file 
   expect(unknown.querySelector('.view-pane-sub')?.textContent, 'no count while it is not known').toBe('Unreadable lines')
   const partly: ViewNotes = { ...torn, shown: { ...torn.shown!, not_shown: { count: 1, unexplained: 1, files: [{ path: 'runs/7.jsonl', size: 900, read: 300, why: '' }] } }, problems: { count: 0, examples: [] } }
   expect((await mount(<Head notes={partly} picked={[]} file />)).querySelector('.view-pane-sub')?.textContent).toBe('Partly read')
+  const unread: ViewNotes = { ...partly, shown: { ...partly.shown!, not_shown: { count: 1, unexplained: 1, files: [{ path: 'runs/7.jsonl', size: 900, read: 0, why: '' }] } } }
+  expect((await mount(<Head notes={unread} picked={[]} file />)).querySelector('.view-pane-sub')?.textContent).toBe('Not read')
   const clean: ViewNotes = { ...torn, problems: { count: 0, examples: [] } }
   expect((await mount(<Head notes={clean} picked={[]} file />)).innerHTML).toBe('<div></div>')
 })
