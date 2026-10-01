@@ -385,9 +385,10 @@ export function createTour(snaps: Snaps): Tour {
       return
     }
     const align = s.align || 'start'
-    const at = (side: Place) => {
-      const x = side === 'right' ? box.x + box.w + gap : side === 'left' ? box.x - gap - pw : align === 'center' ? box.x + box.w / 2 - pw / 2 : align === 'end' ? box.x + box.w - pw : box.x
-      const y = side === 'bottom' ? box.y + box.h + gap : side === 'top' ? box.y - gap - ph : align === 'center' ? box.y + box.h / 2 - ph / 2 : align === 'end' ? box.y + box.h - ph : box.y
+    type Align = NonNullable<Step['align']>
+    const at = (side: Place, al: Align = align) => {
+      const x = side === 'right' ? box.x + box.w + gap : side === 'left' ? box.x - gap - pw : al === 'center' ? box.x + box.w / 2 - pw / 2 : al === 'end' ? box.x + box.w - pw : box.x
+      const y = side === 'bottom' ? box.y + box.h + gap : side === 'top' ? box.y - gap - ph : al === 'center' ? box.y + box.h / 2 - ph / 2 : al === 'end' ? box.y + box.h - ph : box.y
       return { x: Math.max(M, Math.min(vw - pw - M, x)), y: Math.max(M, Math.min(vh - ph - M, y)), fits: x >= M && x + pw <= vw - M }
     }
     // the area of the cutouts the popover would cover there
@@ -395,14 +396,26 @@ export function createTour(snaps: Snaps): Tour {
       boxes.reduce((a, b) => a + Math.max(0, Math.min(q.x + pw, b.x + b.w) - Math.max(q.x, b.x)) * Math.max(0, Math.min(q.y + ph, b.y + b.h) - Math.max(q.y, b.y)), 0)
     const listed = ([] as Place[]).concat(s.place ?? 'right')
     const sides = [...listed, ...(['right', 'left', 'bottom', 'top'] as Place[]).filter((x) => !listed.includes(x))]
-    // the first listed side where it fits and covers nothing, else the side where it covers least (a cutout as large as
-    // the window leaves none free)
-    const place =
-      listed.find((side) => {
-        const q = at(side)
-        return q.fits && covered(q) < 1
-      }) ?? sides.reduce((best, side) => (covered(at(side)) < covered(at(best)) - 1 ? side : best), sides[0])
-    const { x: px, y: py } = at(place)
+    const aligns = [align, ...(['start', 'center', 'end'] as Align[]).filter((x) => x !== align)]
+    // the first listed side where it fits and covers nothing, else, of every side and alignment and the window's four
+    // corners, the place where it covers least (a cutout as large as the window leaves none free); a corner's caret
+    // points up or down into the cutout
+    const free = listed.find((side) => {
+      const q = at(side)
+      return q.fits && covered(q) < 1
+    })
+    let place: Place = free ?? sides[0]
+    let spot = at(place)
+    if (!free) {
+      let least = covered(spot)
+      const tries: { side: Place; q: { x: number; y: number } }[] = sides.flatMap((side) => aligns.map((a) => ({ side, q: at(side, a) })))
+      for (const y of [M, vh - ph - M]) for (const x of [M, vw - pw - M]) tries.push({ side: y === M ? 'top' : 'bottom', q: { x, y } })
+      for (const t of tries) {
+        const c = covered(t.q)
+        if (c < least - 1) [place, spot, least] = [t.side, { ...t.q, fits: true }, c]
+      }
+    }
+    const { x: px, y: py } = spot
     Object.assign(pop.style, { left: `${px}px`, top: `${py}px` })
     const cy = Math.max(14, Math.min(ph - 24, (Math.max(box.y, py) + Math.min(box.y + box.h, py + ph)) / 2 - py - 5))
     const cx = Math.max(14, Math.min(pw - 24, (Math.max(box.x, px) + Math.min(box.x + box.w, px + pw)) / 2 - px - 5))

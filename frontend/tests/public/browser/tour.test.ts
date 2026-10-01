@@ -115,17 +115,17 @@ interface Server {
 }
 
 /** A page on the made-up origin, answered by this file: the app, the tour's example view, the workspace's API. */
-async function open(opts: { W: number; H: number; dpr?: number; chat?: number; seen?: boolean; hideChat?: boolean }): Promise<{ page: Page; server: Server; close: () => Promise<void> }> {
-  const server: Server = { seen: !!opts.seen, writes: [], telemetry: [], settings: { ...SETTINGS, hide_chat: !!opts.hideChat } }
+async function open(opts: { W: number; H: number; dpr?: number; chat?: number; seen?: boolean; folded?: boolean }): Promise<{ page: Page; server: Server; close: () => Promise<void> }> {
+  const server: Server = { seen: !!opts.seen, writes: [], telemetry: [], settings: { ...SETTINGS } }
   const ctx = await browser.newContext({ viewport: { width: opts.W, height: opts.H }, deviceScaleFactor: opts.dpr ?? 1 })
   await ctx.addInitScript(
-    ({ ws, chat }) => {
+    ({ ws, chat, open }) => {
       // a Mac, so ⌘ is the pointer's key
       Object.defineProperty(Navigator.prototype, 'platform', { get: () => 'MacIntel' })
       Object.defineProperty(Navigator.prototype, 'userAgentData', { get: () => undefined })
       localStorage.setItem(`thimble:${ws}:instance`, JSON.stringify('stamp-1'))
       sessionStorage.setItem(`thimble:${ws}:instance`, JSON.stringify('stamp-1'))
-      localStorage.setItem(`thimble:${ws}:layout`, JSON.stringify({ chatWidth: chat, chatOpen: true, panes: { root: { kind: 'pane', id: 'p1', surface: 'report' }, focus: 'p1' } }))
+      localStorage.setItem(`thimble:${ws}:layout`, JSON.stringify({ chatWidth: chat, chatOpen: open, panes: { root: { kind: 'pane', id: 'p1', surface: 'report' }, focus: 'p1' } }))
       // what reaches the page: every input an app listener on the document would hear, outside the tour
       ;(window as any).__probe = []
       for (const t of ['mousedown', 'click', 'keydown', 'wheel', 'contextmenu'])
@@ -133,7 +133,7 @@ async function open(opts: { W: number; H: number; dpr?: number; chat?: number; s
           if (!(e.target instanceof Element && e.target.closest('.tour-root, .tour-host'))) (window as any).__probe.push(`${t}:${(e as KeyboardEvent).key || ''}`)
         })
     },
-    { ws: WS, chat: opts.chat ?? 308 },
+    { ws: WS, chat: opts.chat ?? 308, open: !opts.folded },
   )
   const page = await ctx.newPage()
   page.on('pageerror', (e) => console.warn('page error:', e.message))
@@ -689,15 +689,15 @@ test('Settings’ Take the tour replays the tour from step 1, without the welcom
   }
 }, 60_000)
 
-test('with the chat off the tour leaves out its three chat steps and starts on Files, without In the meantime', async () => {
-  const { page, close } = await open({ W: 1440, H: 900, hideChat: true })
+test('with the chat column folded the tour leaves out its three chat steps and starts on Files, without In the meantime', async () => {
+  const { page, close } = await open({ W: 1440, H: 900, folded: true })
   try {
     await page.waitForSelector('.tour-pop.tour-welcome', { timeout: 20000 })
     await page.click('.tour-pop [data-tour="begin"]')
     await onStep(page, 1, 'Files')
     assert.equal((await state(page))!.total, 7)
     assert.equal(await body(page), 'The files browser exposes global views on the corpus.', 'no orientation to wait for')
-    await measure(page, 'chat off 1')
+    await measure(page, 'chat folded 1')
     assert.deepEqual(await buttons(page), ['skip', 'next'])
   } finally {
     await close()
