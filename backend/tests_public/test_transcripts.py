@@ -393,6 +393,21 @@ def test_the_sniff_reads_who_speaks_under_any_key_and_nesting(chats):
     assert transcripts._speaker_rank("speakerName") < transcripts._speaker_rank("agent_speaker_id")
 
 
+def test_a_speaker_key_that_holds_ids_offers_transcript_but_leaves_the_table_first(chats):
+    """A log whose records carry a user's id and a message is no sure transcript; role words under such a key are."""
+    log = jsonl([{"ts": f"2026-01-01T10:00:0{i}Z", "level": "info", "user_id": i % 2, "message": f"request {i}"}
+                 for i in range(6)])
+    got = transcripts.sniff_bytes(log.encode(), "app.jsonl", complete=True)
+    assert got["keys"]["speaker"] == "user_id" and got["score"] == transcripts.WEAK
+    roles = jsonl([{"speaker_type": ["user", "assistant"][i % 2], "content": f"turn {i}"} for i in range(4)])
+    assert transcripts.sniff_bytes(roles.encode(), "r.jsonl", complete=True)["score"] == transcripts.STRONG
+    rows = [json.loads(ln) for ln in log.splitlines()]
+    whole = transcripts.sniff_bytes(json.dumps(rows).encode(), "app.json", complete=True)
+    assert whole == {"format": "json", "score": transcripts.WEAK}
+    products = [{"name": f"Part {i}", "text": "a spec", "updated_time": f"2026-01-0{i + 1}"} for i in range(6)]
+    assert transcripts.sniff_bytes(json.dumps(products).encode(), "parts.json", complete=True) is None
+
+
 def test_a_long_key_is_read_as_no_speaker_at_once():
     assert transcripts._key_words("A" * 20_000) == []
     assert transcripts._speaker_rank("Speaker" * 20) is None

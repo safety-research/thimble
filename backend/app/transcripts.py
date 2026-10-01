@@ -566,11 +566,41 @@ def _sniff_jsonl(text: str, parsed: bool) -> dict[str, Any] | None:
     if others:
         best = {**best, "speaker": "|".join([best["speaker"], *others])}
     with_speaker = sum(1 for r in objs if _name_of(_get(r, best["speaker"])))
-    words = _key_words(best["speaker"].split("|")[0].rsplit(".", 1)[-1])
-    sure_key = any(w in SPEAKER_WORDS for w in words) or (len(words) == 1 and words[0] in ROLE_TYPE_KEYS)
+    roles = sum(1 for s in speakers if s.lower() in ROLE_WORDS) * 2 >= len(speakers)
+    sure_key = roles or _sure_speaker_key(best["speaker"].split("|")[0].rsplit(".", 1)[-1])
     strong = (len(keyed_objs) * 2 >= n and with_speaker * 10 >= n * 7 and sure_key
               and _in_time_order([_get(r, best["time"]) for r in objs] if "time" in best else []))
     return {"format": "messages", "score": STRONG if strong else WEAK, "keys": best, **lines}
+
+
+def _sure_speaker_key(leaf: str) -> bool:
+    """Whether a key names who speaks by name or role (`author`, `speakerName`, `role`), not by an id or a type
+    (`user_id`, `speaker_type`)."""
+    words, rank = _key_words(leaf), _speaker_rank(leaf)
+    return (rank is not None and rank[:2] == (0, 0)) or (len(words) == 1 and words[0] in ROLE_TYPE_KEYS)
+
+
+def _speaker_leaf(data: Any, sample: int = 200) -> str | None:
+    """The commonest key (its last part) under which the first `sample` messages a parsed JSON document holds keep who
+    speaks, or None."""
+    leaves: dict[str, int] = {}
+    stack: list[tuple[Any, int]] = [(data, 0)]
+    while stack and sum(leaves.values()) < sample:
+        x, depth = stack.pop()
+        if isinstance(x, dict):
+            keys = message_keys(x)
+            if keys:
+                leaf = keys["speaker"].rsplit(".", 1)[-1]
+                leaves[leaf] = leaves.get(leaf, 0) + 1
+                continue
+            items: Any = x.values()
+        elif isinstance(x, list):
+            items = reversed(x)
+        else:
+            continue
+        if depth < 6:
+            stack.extend((v, depth + 1) for v in items if isinstance(v, (dict, list)))
+    return max(leaves, key=leaves.__getitem__) if leaves else None
 
 
 def _takes_turns(speakers: list[str]) -> bool:
@@ -659,9 +689,19 @@ def _sniff_json(text: str, complete: bool) -> dict[str, Any] | None:
         if data is not None:
             convs = conversations_in(data)
             n = sum(len(t) for _, t in convs)
-            if n >= 1:
-                return {"format": "json", "score": STRONG if n >= 2 else WEAK}
-            return None
+            if n < 2:
+                return {"format": "json", "score": WEAK} if n else None
+            # messages under a key that names no speaker outright (`user_id`, `label`, `agentName`) are a transcript
+            # only when their speakers take turns, and a sure one only under a key that names them
+            speakers = [t["speaker"] for _, turns in convs for t in turns if t.get("speaker")][:400]
+            if sum(1 for sp in speakers if _role(sp) != "other") * 2 >= len(speakers):
+                return {"format": "json", "score": STRONG}
+            leaf = _speaker_leaf(data)
+            if leaf in SPEAKER_KEYS:
+                return {"format": "json", "score": STRONG}
+            if not _takes_turns(speakers):
+                return None
+            return {"format": "json", "score": STRONG if leaf and _sure_speaker_key(leaf) else WEAK}
     roles = len(re.findall(r'"(?:role|sender|speaker|author|from)"\s*:\s*(?:\{[^{}]{0,200}?"role"\s*:\s*)?"(?:user|assistant|system|human|ai|tool|model|bot|gpt|claude)"', text, re.I))
     speakers = len(re.findall(r'"(?:role|sender|speaker|author|from|user|username|[A-Za-z_]*(?:[Ss]peaker|[Aa]uthor|[Ss]ender)[A-Za-z_]*)"\s*:\s*[\{"]', text))
     texts = len(re.findall(r'"(?:content|text|message|body|parts|value|utterance)"\s*:', text))
