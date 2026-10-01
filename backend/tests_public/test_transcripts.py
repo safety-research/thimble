@@ -393,6 +393,11 @@ def test_the_sniff_reads_who_speaks_under_any_key_and_nesting(chats):
     assert transcripts._speaker_rank("speakerName") < transcripts._speaker_rank("agent_speaker_id")
 
 
+def test_a_long_key_is_read_as_no_speaker_at_once():
+    assert transcripts._key_words("A" * 20_000) == []
+    assert transcripts._speaker_rank("Speaker" * 20) is None
+
+
 def test_whole_file_turns_read_who_speaks_under_either_key(chats):
     (chats / "logs" / "village.txt").write_text(VILLAGE)
     got = transcripts.sniff(chats / "logs" / "village.txt", "logs/village.txt")

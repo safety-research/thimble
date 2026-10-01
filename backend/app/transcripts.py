@@ -46,6 +46,7 @@ router = APIRouter()
 HEAD_BYTES = 256 * 1024  # of a file's head that the sniff reads
 TEXT_HEAD_LINES = 400  # non-empty lines of a text file's head the sniff looks at
 FRONT_MATTER_MAX = 400  # lines a front matter may take before its closing fence
+KEY_MAX = 64  # characters of a key whose words the sniff reads (_key_words)
 JSONL_HEAD_LINES = 60
 STRONG = 0.95
 WEAK = 0.5
@@ -164,7 +165,10 @@ def _name_of(v: Any) -> str | None:
 
 
 def _key_words(key: str) -> list[str]:
-    """A key's words, in any case style: `agent_speaker_id`, `speakerName`, `Speaker-Type`, `userID`."""
+    """A key's words, in any case style: `agent_speaker_id`, `speakerName`, `Speaker-Type`, `userID`; none for a key
+    longer than KEY_MAX, which names no speaker, text or time."""
+    if len(key) > KEY_MAX:
+        return []
     s = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", key)
     s = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1 \2", s)
     return re.findall(r"[a-z0-9]+", s.lower())
