@@ -132,3 +132,58 @@ def test_a_file_read_counts_as_the_analysts_view_only_with_the_analysts_cookie(m
     c.cookies.set(hook_auth.ui_cookie(), UI_KEY)
     assert c.get("/api/corpora/mini/source", params={"path": "agents/agent-01.jsonl"}).status_code == 200
     assert [(r["actor"], r["path"]) for r in viewlog.rows("mini")] == [("analyst", "agents/agent-01.jsonl")]
+
+
+# --------------------------------------------------------------------------- the Files search
+
+
+def test_the_name_search_reads_the_folder_tree_and_stats_only_the_files_it_lists(data_tmp, monkeypatch):
+    """A search by name matches the paths of the corpus's folder tree, so a large corpus is not listed whole with every
+    file stat'ed first; a dot folder stays out, as it does in the tree."""
+    import os
+
+    from app import corpus
+
+    mini = data_tmp / "mini"
+    (mini / ".hidden").mkdir()
+    (mini / ".hidden" / "agent-99.jsonl").write_text("{}\n")
+    corpus.forget_sources()
+    monkeypatch.setattr(corpus, "list_sources", lambda *a, **k: pytest.fail("the name search listed the corpus"))
+    size = (mini / AGENT).stat().st_size
+    stats: list[str] = []
+    real = os.stat
+    monkeypatch.setattr(corpus.os, "stat", lambda p, *a, **k: (stats.append(str(p)), real(p, *a, **k))[1])
+    body = client.get(f"{MINI}/sources/find", params={"q": "agent-01"}).json()
+    assert [f["path"] for f in body["files"]] == [AGENT] and body["total"] == 1
+    assert [s for s in stats if s.endswith(".jsonl")] == [f"{mini}/{AGENT}"]
+    assert body["files"][0]["kind"] == "agent" and body["files"][0]["size_bytes"] == size
+    assert client.get(f"{MINI}/sources/find", params={"q": "agent-99"}).json()["total"] == 0
+    fuzzy = client.get(f"{MINI}/sources/find", params={"q": "agnt01"}).json()
+    assert AGENT in [f["path"] for f in fuzzy["files"]]
+
+
+def test_the_content_search_has_no_time_limit_says_how_far_it_read_and_stops_when_asked():
+    from app import config, corpus
+
+    root = config.corpus_dir("mini")
+    paths = corpus.search_paths(root).ordered
+    items = list(corpus.grep_files(root, paths, "the", progress_s=0.0))
+    done = items[-1]
+    assert done["done"] and done["complete"] and done["scanned"] == done["of"] == len(paths)
+    progress = [i for i in items if i.get("progress")]
+    assert progress and all(p["of"] == len(paths) for p in progress)
+    assert [p["scanned"] for p in progress] == sorted(p["scanned"] for p in progress)
+    found = [i for i in items if "path" in i]
+    assert found and done["files"] == len(found)
+    asked: list[int] = []
+    stopped = list(corpus.grep_files(root, paths, "the", stop=lambda: (asked.append(1), len(asked) > 2)[1]))
+    assert stopped[-1]["done"] and not stopped[-1]["complete"] and stopped[-1]["scanned"] < len(paths)
+
+
+def test_the_content_search_route_streams_its_lines_and_a_closing_line():
+    import json
+
+    lines = [json.loads(x) for x in client.get(f"{MINI}/sources/grep", params={"q": "the build"}).text.splitlines() if x]
+    assert lines[-1]["done"] is True and lines[-1]["complete"] is True
+    assert any(x.get("path") == AGENT for x in lines)
+    assert client.get(f"{MINI}/sources/grep", params={"q": " "}).status_code == 400
