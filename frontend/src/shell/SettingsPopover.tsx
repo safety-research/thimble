@@ -197,11 +197,6 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
         await api.putSettings(ws, { ...(Object.keys(changed).length ? { models: changed } : {}), ...(Object.keys(modes).length ? { permission_modes: modes } : {}), ...flipped })
       for (const [name, on] of Object.entries(changedExtensions(exts?.extensions ?? [], extOn))) await api.switchExtension(ws, name, on)
       for (const [name, slug, on] of changedViews(exts?.extensions ?? [], viewOn)) await api.switchExtensionView(ws, name, slug, on)
-      for (const [name, run] of exts ? answeredRuns(exts, extOn, runAnswers) : []) {
-        const { status } = await api.answerExtensionOrientation(ws, name, run)
-        if (status === 'resumed') bus.emit('toast', { text: `The orientation is running ${name}'s instructions.`, kind: 'info' })
-        if (status === 'queued') bus.emit('toast', { text: `${name}'s instructions run when the orientation's run ends.`, kind: 'info' })
-      }
       const was = { effort: mainEffort(attached), fast: !!mainFast(attached) }
       const main = models.main
       const effortNow = !!main && !!attached && main.effort !== was.effort
@@ -209,6 +204,12 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
       if (effortNow) await api.setEffort(ws, main.effort as MainEffort)
       if (fastNow) await api.setFast(ws, !!main.fast)
       if (effortNow || fastNow) bus.emit('toast', { text: `Main's effort and fast mode: ${NEXT_LAUNCH}.`, kind: 'info' })
+      // last, so an orientation that cannot be sent the instructions leaves the other settings saved
+      for (const [name, run] of exts ? answeredRuns(exts, extOn, runAnswers) : []) {
+        const { status } = await api.answerExtensionOrientation(ws, name, run)
+        if (status === 'resumed') bus.emit('toast', { text: `The orientation is running ${name}'s instructions.`, kind: 'info' })
+        if (status === 'queued') bus.emit('toast', { text: `${name}'s instructions run when the orientation's run ends.`, kind: 'info' })
+      }
       invalidateSettings(ws)
       onClose()
     } catch (e) {
