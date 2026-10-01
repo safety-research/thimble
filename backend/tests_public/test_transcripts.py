@@ -105,6 +105,7 @@ FIXTURES = {
     "camel.jsonl": (jsonl([{"Speaker-Name": n, "messageText": t, "sentAt": f"2026-01-01T10:0{i}:00Z"}
                            for i, (n, t) in enumerate([("amy", "hi"), ("ben", "yo"), ("amy", "ok")])]), "messages"),
     "indented.txt": ("  alice: hi there\n  bob: hello\n  alice: how are you\n  bob: fine\n", "text"),
+    "snippet.txt": ("User: q\nAssistant: a\n" * 6 + "Assistant: set it to\n    host: x\n    port: 80\n    host: y\n    port: 81\n", "text"),
     "rules.md": ("---\n\nAn intro set between two rules.\n\n---\n\nUser: hi\nAssistant: hello\nUser: a joke\nAssistant: no\n", "text"),
     # not transcripts
     "service.log": ("2026-09-01 10:00:00 [INFO] started\n2026-09-01 10:00:05 [WARN] slow\n2026-09-01 10:01:00 [INFO] done\n", None),
@@ -118,6 +119,7 @@ FIXTURES = {
     "README.md": (FRONT_MATTER, None),
     "dataset.yaml.txt": ("configs:\n" + "".join(f"  - name: {n}\n    data_files: {n}.gz\n" for n in "abcd"), None),
     "nested.yaml.txt": ("server:\n  host: a\n  port: 1\nclient:\n  host: b\n  port: 2\n", None),
+    "servers.yaml.txt": ("servers:\n  alpha:\n    host: a\n    port: 1\n  beta:\n    host: b\n    port: 2\n", None),
     # documents, each by its own author: no one takes turns
     "authors.csv": ("Writer Handle,Essay Text\nann,one\nbob,two\ncat,three\ndan,four\n", None),
     "essays.jsonl": (jsonl([{"author": f"writer {i}", "text": f"essay {i}"} for i in range(6)]), None),

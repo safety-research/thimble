@@ -834,7 +834,7 @@ def sniff_text(text: str, markdown: bool = False) -> dict[str, Any] | None:
     """A text or markdown chat log: the style whose turn lines recur most in the head, with at least two speakers who
     take turns, one of them more than once. In markdown, which reads well rendered, the sniff is sure only when turn
     lines are at least a fifth of the head's lines, so a document quoting an example exchange keeps Rendered first. A
-    front matter's lines are no turns, and `Word:` lines at several indents are a YAML file's keys, no turns."""
+    front matter's lines are no turns, nor are `Word:` lines indented deeper than others (a YAML file's nested keys)."""
     raw = text.split("\n")
     lines = [ln for ln in raw[front_matter_lines(raw):] if ln.strip()][:TEXT_HEAD_LINES]
     if len(lines) < 2:
@@ -845,16 +845,12 @@ def sniff_text(text: str, markdown: bool = False) -> dict[str, Any] | None:
         turns = 0
         hits = [(ln, t) for ln in lines if (t := turn_of(ln, name)) is not None]
         if name == "colon" and hits:
-            # a chat log's turns start at one indent, a YAML file's keys at several: lines off the commonest indent
-            # don't count, and more than a tenth of them say the file is no chat log
-            indents: dict[int, int] = {}
-            for ln, _ in hits:
-                n = len(ln) - len(ln.lstrip())
-                indents[n] = indents.get(n, 0) + 1
-            modal = max(indents, key=lambda n: (indents[n], -n))
-            if (len(hits) - indents[modal]) * 10 > len(hits):
-                continue
-            hits = [(ln, t) for ln, t in hits if len(ln) - len(ln.lstrip()) == modal]
+            # a chat log's turns start at its shallowest indent, a YAML file's repeated keys under parents shallower
+            # than them: only the shallowest indent that two `Word:` lines share counts
+            by_indent: dict[int, list[tuple[str, dict[str, Any]]]] = {}
+            for ln, t in hits:
+                by_indent.setdefault(len(ln) - len(ln.lstrip()), []).append((ln, t))
+            hits = next((by_indent[n] for n in sorted(by_indent) if len(by_indent[n]) >= 2), [])
         for _, t in hits:
             turns += 1
             low = t["speaker"].lower()
