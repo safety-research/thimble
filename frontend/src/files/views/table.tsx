@@ -48,7 +48,8 @@ export function orderColumns(cols: string[], sample: unknown[]): string[] {
   return [...lead, ...cols.filter((c) => !lead.includes(c))]
 }
 
-/** The columns holding a long text (over 40 characters, or a line break) in any record: their cells cut at one width. */
+/** The columns holding a long text (over 40 characters, or a line break) or a nested value that compacts past 40 in any
+ * record: their cells cut at one width. */
 function wideColumns(records: SourceRecord[], cols: string[]): Set<string> {
   const out = new Set<string>()
   for (const rec of records) {
@@ -57,6 +58,7 @@ function wideColumns(records: SourceRecord[], cols: string[]): Set<string> {
     for (const c of cols) {
       const v = (r as Record<string, unknown>)[c]
       if (typeof v === 'string' && (v.length > 40 || v.includes('\n'))) out.add(c)
+      else if (v && typeof v === 'object' && compact(v, 41).length > 41) out.add(c)
     }
   }
   return out
@@ -512,10 +514,15 @@ function Marked({ text, spans }: { text: string; spans: SpanMark[] }) {
 
 const isScalar = (v: unknown) => v == null || typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean'
 
+/** the score of records that are objects but not flat (a widely shared key holding objects, mostly nested values, more
+ * keys than columns, or few keys in common): Table is offered, under Raw's 0.1 */
+export const OBJECTS_SCORE = 0.05
+
 /**
  * How well the sample reads as a table: every record a plain object, keys within the column cap, values mostly
  * scalars, and no widely shared key mostly holding objects. Uniform records (fill >= 0.7) score 0.85; records sharing
- * a spine of keys (fill >= 0.4, at least two keys in every record) score 0.7; anything else 0.
+ * a spine of keys (fill >= 0.4, at least two keys in every record) score 0.7; any other records that are all objects
+ * OBJECTS_SCORE, whose nested values the cells show compacted; else 0.
  */
 export function tableScore(sample: any[]): number {
   if (!sample.length) return 0
@@ -533,15 +540,15 @@ export function tableScore(sample: any[]): number {
       else if (!Array.isArray(v)) nested.set(k, (nested.get(k) ?? 0) + 1)
     }
   }
-  if (count.size === 0 || count.size > MAX_COLS || present === 0) return 0
-  if (scalars / present < 0.5) return 0
-  for (const [k, n] of count) if (n * 2 >= objs.length && (nested.get(k) ?? 0) * 2 >= n) return 0
+  if (count.size === 0 || present === 0) return 0
+  if (count.size > MAX_COLS || scalars / present < 0.5) return OBJECTS_SCORE
+  for (const [k, n] of count) if (n * 2 >= objs.length && (nested.get(k) ?? 0) * 2 >= n) return OBJECTS_SCORE
   const fill = present / (objs.length * count.size)
   let shared = 0
   for (const n of count.values()) if (n === objs.length) shared++
   if (fill >= 0.7) return 0.85
   if (fill >= 0.4 && shared >= 2) return 0.7
-  return 0
+  return OBJECTS_SCORE
 }
 
 function match(path: string, kind: SourceKind, sample: any[]): number {
