@@ -268,6 +268,37 @@ async def test_a_view_json_in_the_schema_s_form_keeps_its_scope_and_derived_fiel
     assert [x["field"] for x in await views.derived_fields(CORPUS, "tally", v)] == ["busy", "person"]
 
 
+async def test_an_extension_view_that_fails_the_view_checks_is_hidden_and_settings_says_why(corpus, tmp_path, monkeypatch):
+    """Once an extension's view is installed in a workspace it runs the checks a built view passes; a page that
+    anchors no record, so no label could mark it, fails them and is hidden there with the first failure in Settings,
+    and the view's switch still shows it."""
+    if why := views.build_problem():
+        if os.environ.get("CI") == "true":
+            pytest.fail(why)
+        pytest.skip(why)
+    import asyncio
+
+    monkeypatch.setenv("THIMBLE_EXTENSION_VIEW_CHECKS", "on")
+    views._bind_loop()
+    _add()
+    await extensions.refresh(CORPUS, wait=10)
+    assert views.read_built(CORPUS, "tally")["ok"], "installed while its checks run"
+    for _ in range(600):
+        if "ext-min/tally" in extensions.read_gates(CORPUS) and not any(not t.done() for t in extensions._gating.values()):
+            break
+        await asyncio.sleep(0.05)
+    gate = extensions.read_gates(CORPUS)["ext-min/tally"]
+    assert gate["ok"] is False and "data-anchor" in gate["why"], gate
+    await extensions.refresh(CORPUS)
+    row = extensions.public(CORPUS)["extensions"][0]
+    (v,) = row["views"]
+    assert not v["shown"] and v["note"].startswith("its checks failed here: "), v
+    assert views.read_built(CORPUS, "tally") is None, "the failed view is taken out"
+    extensions.set_view(CORPUS, "ext-min", "tally", True)
+    await extensions.refresh(CORPUS)
+    assert extensions.public(CORPUS)["extensions"][0]["views"][0]["shown"], "the switch overrides the checks"
+
+
 async def test_a_view_shows_where_its_check_finds_it_fits_and_its_switch_overrides_the_check(corpus, fit):
     """The check is asked once per view and workspace and again only when the files it claims change, the last answer
     standing meanwhile. Until it first answers, when it says no and when it fails, the view is hidden and Settings says

@@ -3164,14 +3164,15 @@ def _is_line_form(form: str) -> bool:
 
 
 async def check(c: str, slug: str, locators: list[str] | None = None, *, shot_dir: Path | None = None,
-                picture: bool = False) -> dict[str, Any]:
+                picture: bool = False, need_locators: bool = True) -> dict[str, Any]:
     """A view's checks, all by code: the index builds, every claimed file is read or hidden with a why, locators and
     sampled lines round-trip (the answer cites the line back and its excerpt is literal source), declared keys resolve,
     the page loads headless without errors, and the test label's marks show on the records it shows (label_problems).
     Fields of the fetched records that the lines they cite do not hold and `derived` does not list are noted
     (unlisted_derived). Without the headless browser the page is not loaded (its `page` is `unavailable`) and the other
-    checks decide. With `picture` the page as it opens is pictured. Returns {ok, view, index, checks, page, shots,
-    coverage, unread, problems, notes}."""
+    checks decide. With `picture` the page as it opens is pictured. Without `need_locators`, a view that no locator
+    or sampled line opens passes the rest. Returns {ok, view, index, checks, page, shots, coverage, unread, problems,
+    notes}."""
     view = read_view(c, slug)
     if view is None:
         return {"ok": False, "view": None, "problems": [f"no view {slug!r}"], "checks": [], "page": None}
@@ -3285,7 +3286,7 @@ async def check(c: str, slug: str, locators: list[str] | None = None, *, shot_di
     if view["units"]:
         for key in keys[:CHECK_KEYS]:
             report["checks"].append(await check_one(f"view:{slug}/{key}"))
-    if not report["checks"]:
+    if not report["checks"] and need_locators:
         report["problems"].append("no locator was checked: pass `locators` with refs the view should open")
 
     base = shot_dir or (cache_dir(c, view) / "shots")

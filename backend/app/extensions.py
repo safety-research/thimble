@@ -40,6 +40,9 @@ and its report checks, are read here (`roles`, `tasks`, `checks`) for the code t
 Only its views check whether they fit (_fit): one quick model call per view and workspace, from the view's description
 and a few records of the files it claims (view_fit.py), kept until those files change. Until it answers, and when it
 says no or fails, the view is hidden here and Settings says why; the view's switch in Settings overrides the answer.
+Once installed, a view runs the checks a built view passes (views.check) on the workspace's files, once per version of
+the extension (_gate); one that fails them is hidden here, and Settings names the first failure, which the view's
+switch overrides too.
 
 refresh() copies an active extension into workspaces/<c>/extensions/<name>/, since a kernel sees only the workspace and
 the corpus, and writes STATE_FILE in the workspace's registry folder, which a kernel cannot write
@@ -112,6 +115,8 @@ CHECKING = "thimble is checking whether it fits here"
 NO_FILES = "no file here is in its scope"
 BOTH = "another active extension gives it too"
 DECIDE_WAIT_S = 180  # what an orientation's start waits for a view's check still being made
+CHECKS_FILE = "extension-checks.json"  # in the workspace's registry folder: the view checks of installed views (_gate)
+CHECKS_FAILED = "its checks failed here: {why}"
 RETRY_S = 300  # a failed check stands this long before a refresh asks again
 
 _locks: dict[str, tuple[asyncio.AbstractEventLoop, asyncio.Lock]] = {}  # workspace -> (its loop, the lock)
@@ -635,6 +640,9 @@ def views_of(c: str) -> list[dict[str, Any]]:
             for e in active(c) for v in _list(e, "views") if v.get("shown")]
 
 
+_gating: dict[tuple[str, str], asyncio.Task] = {}  # the checks of installed extension views running (_gate)
+
+
 def _lock(c: str) -> asyncio.Lock:
     loop = asyncio.get_running_loop()
     got = _locks.get(c)
@@ -729,17 +737,22 @@ def _note(fit: dict[str, Any]) -> str:
     return _one(fit.get("reason"))
 
 
-def _settle_views(name: str, e: dict[str, Any], shown: dict[str, bool], clash: dict[str, dict[str, list[str]]]) -> None:
-    """Each view of extension `name` marked `shown` (active, its files here, no other extension giving it, and fitting
-    or switched on here) with the `note` Settings shows; then `files`, the claims of the views it shows, of its card
-    types whose claims match files here and its own scope where it matches files here, which `{{files}}` in its
-    orientation instructions stands for."""
+def _settle_views(name: str, e: dict[str, Any], shown: dict[str, bool], clash: dict[str, dict[str, list[str]]],
+                  gates: dict[str, Any] | None = None) -> None:
+    """Each view of extension `name` marked `shown` (active, its files here, no other extension giving it, fitting or
+    switched on here, and not failing its checks here, `gates`, unless switched on) with the `note` Settings shows;
+    then `files`, the claims of the views it shows, of its card types whose claims match files here and its own scope
+    where it matches files here, which `{{files}}` in its orientation instructions stands for."""
     files: list[str] = []
     for v in _list(e, "views"):
         fit = v.get("fit") or {}
-        on = shown.get(_view_key(name, v["slug"]), bool(fit.get("fits")))
+        key = _view_key(name, v["slug"])
+        g = (gates or {}).get(key) or {}
+        failed = g.get("digest") == e.get("digest") and g.get("ok") is False
+        on = shown.get(key, bool(fit.get("fits")) and not failed)
         v["shown"] = bool(e.get("active") and v.get("here") and on and v["slug"] not in clash["view"])
-        v["note"] = BOTH if e.get("active") and v["slug"] in clash["view"] else _note(fit)
+        v["note"] = (BOTH if e.get("active") and v["slug"] in clash["view"]
+                     else CHECKS_FAILED.format(why=g.get("why") or "") if failed else _note(fit))
         card = bool(e.get("active") and v.get("card") and v.get("here") and v["slug"] not in clash["card"])
         if v["shown"] or card:
             files += v["claims"]
@@ -861,8 +874,9 @@ async def _refresh(c: str) -> dict[str, Any]:
             exts[name] = {**{k: v for k, v in info.items() if k != "name"}, "active": not why, "why": why}
         _needs_running(exts)
         clash = conflicts(exts)
+        gates = await asyncio.to_thread(read_gates, c)
         for name, e in exts.items():
-            _settle_views(name, e, state["shown"], clash)
+            _settle_views(name, e, state["shown"], clash, gates)
         _needed_files(exts)
         for k, entry in _checks(c).items():
             if k not in checked and entry["task"].done():
@@ -884,7 +898,64 @@ async def _refresh(c: str) -> dict[str, Any]:
     await asyncio.to_thread(install_views, c)
     for slug in await asyncio.to_thread(views.orphaned, c):
         await asyncio.to_thread(views.withdraw, c, slug, None)
+    _gate_installed(c, exts, gates)
     return new_state
+
+
+def gates_on() -> bool:
+    """THIMBLE_EXTENSION_VIEW_CHECKS unset or on (the test suite turns it off in conftest.py)."""
+    return os.environ.get("THIMBLE_EXTENSION_VIEW_CHECKS", "on").strip().lower() not in ("0", "off", "false", "no")
+
+
+def read_gates(c: str) -> dict[str, Any]:
+    """{"<extension>/<view>": {digest, ok, why, ts}}: the checks of each view an extension installed here, by the
+    version of the extension (its digest) they ran on."""
+    try:
+        got = read_json(config.registry_dir(c) / CHECKS_FILE, {})
+    except (OSError, ValueError, HTTPException):
+        got = {}
+    return {k: v for k, v in got.items() if isinstance(v, dict)} if isinstance(got, dict) else {}
+
+
+def _gate_installed(c: str, exts: dict[str, Any], gates: dict[str, Any]) -> None:
+    """Start the checks (_gate) of each view an active extension shows and installed here that has none for this version
+    of the extension."""
+    from . import views  # noqa: PLC0415
+
+    if not gates_on():
+        return
+    for name, e in exts.items():
+        if not e.get("active"):
+            continue
+        for v in _list(e, "views"):
+            key = _view_key(name, v["slug"])
+            prop = views.read_proposal(c, v["slug"]) or {}
+            if (not v.get("shown") or prop.get("extension") != name or (gates.get(key) or {}).get("digest") == e.get("digest")
+                    or ((c, key) in _gating and not _gating[(c, key)].done())):
+                continue
+            _gating[(c, key)] = asyncio.get_running_loop().create_task(_gate(c, key, v["slug"], str(e.get("digest") or "")),
+                                                                      name=f"extension-check-{c}-{key}")
+
+
+async def _gate(c: str, key: str, slug: str, dig: str) -> None:
+    """The checks of an installed extension view (views.check), kept in CHECKS_FILE; a failure has the workspace find
+    its extensions again, which hides the view."""
+    from . import views  # noqa: PLC0415
+
+    try:
+        rep = await views.check(c, slug, need_locators=False)
+        why = "" if rep.get("ok") else (views.first_failure(rep) or "the checks did not pass")[:400]
+        got = {"digest": dig, "ok": bool(rep.get("ok")), "why": why, "ts": _now()}
+    except Exception:  # noqa: BLE001 — a check that could not run decides nothing
+        log.exception("%s: the checks of the extension view %s did not run", c, key)
+        return
+    async with _lock(c):
+        gates = await asyncio.to_thread(read_gates, c)
+        gates[key] = got
+        await asyncio.to_thread(write_json, config.registry_dir(c) / CHECKS_FILE, gates)
+    if not got["ok"]:
+        log.warning("%s: the extension view %s failed its checks: %s", c, key, got["why"])
+        await refresh_quietly(c)
 
 
 async def refresh_quietly(c: str, wait: float = 0.0) -> dict[str, Any]:
@@ -1399,8 +1470,8 @@ def summary(info: dict[str, Any], how: dict[str, Any]) -> list[str]:
         out.append(f"  It needs the Python {_several(len(info['python']), 'package', 'packages')} "
                    f"{', '.join(info['python'])}, which thimble does not install.")
     if info["views"]:
-        out.append("  Its views show where a quick model check finds they fit the corpus. The rest runs in every "
-                   "workspace until it is switched off.")
+        out.append("  Its views show where a quick model check finds they fit the corpus and they pass thimble's view "
+                   "checks on its files. The rest runs in every workspace until it is switched off.")
     if info["agents"]:
         out.append("  Its agents run in the orientation's session and its sandbox, without the web unless thimble's "
                    f"config sets agents.\"{info['name']}:<agent>\".web.")

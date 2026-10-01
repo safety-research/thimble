@@ -14,6 +14,11 @@ thimble extension remove tally    # the folder stays where it is
 A folder you add is used in place, so later edits take effect without adding it again. One from a git URL is copied.
 When a file has a problem, `add` names the file and line of each one and adds nothing.
 
+A view shows in a workspace where a quick model check finds it fits the files, and once there it runs the checks a view
+the dev agent builds passes: every file it reads is read or hidden with a reason, its derived fields are declared, and
+a test label's marks show on its records. A view that fails them is hidden there, and Settings > Extensions names the
+first failure.
+
 The JSON files follow [backend/app/extension.schema.json](../backend/app/extension.schema.json).
 
 ## The folder
