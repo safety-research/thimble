@@ -108,36 +108,21 @@ def trust_folder(tree: Path) -> Path:
 
 def trusted(folder: Path, data: dict[str, Any]) -> bool:
     """Whether Claude Code's config `data` trusts `folder`, by the rule `claude --bg` applies to the folder it starts
-    in: the trust of the main checkout of the git repository holding the folder (a worktree's included), else of the
-    folder or a folder above it, up to the root of that repository when there is one. An entry without the trust
-    does not end the search (Claude Code writes one, hasTrustDialogAccepted false, for each folder it runs in), so a
-    trusted folder covers the folders below it, except those inside a repository below it. The folder's real path is
-    searched first; an entry found along the path as given, through a symlink, counts when its real path holds the
-    folder's and lies within the folder's repository."""
+    in, which it reads by its real path: the trust of the main checkout of the git repository holding the folder (a
+    worktree's included), else of the folder or a folder above it, up to the root of that repository when there is
+    one. An entry without the trust does not end the search (Claude Code writes one, hasTrustDialogAccepted false,
+    for each folder it runs in), so a trusted folder covers the folders below it, except those inside a repository
+    below it. An entry for a path through a symlink does not trust the folder the link leads to."""
     real = Path(os.path.realpath(folder))
-    if _trusted_by(real, data):
+    root = _git_root(real)
+    if root and own_trust(_main_checkout(root), data):
         return True
-    given = Path(os.path.abspath(folder))
-    by = _trusted_by(given, data) if given != real else None
-    if by is None:
-        return False
-    by_real, root = Path(os.path.realpath(by)), _git_root(real)
-    return real.is_relative_to(by_real) and (root is None or by_real.is_relative_to(os.path.realpath(root)))
-
-
-def _trusted_by(folder: Path, data: dict[str, Any]) -> Path | None:
-    """The folder whose entry in `data` trusts `folder` by trusted's rule, with `folder`'s path taken as it is; None
-    when none does."""
-    root = _git_root(folder)
-    main = _main_checkout(root) if root else folder
-    if own_trust(main, data):
-        return main
-    for f in (folder, *folder.parents):
+    for f in (real, *real.parents):
         if own_trust(f, data):
-            return f
+            return True
         if f == root:
             break
-    return None
+    return False
 
 
 def own_trust(folder: Path, data: dict[str, Any]) -> bool:
