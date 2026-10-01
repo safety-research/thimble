@@ -9,7 +9,7 @@ const label = (id: string, name: string) =>
 
 const elsewhere = label('k1', 'elsewhere')
 const asks = label('k2', 'asks')
-const presence = new Map([
+const presence = new Map<string, Record<string, Record<string, number>>>([
   [elsewhere.id, { 'runs/other.jsonl': { elsewhere: 3 } }],
   [asks.id, { 'board/posts.jsonl': { asks: 2 } }],
 ])
