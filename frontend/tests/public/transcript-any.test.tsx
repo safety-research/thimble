@@ -7,7 +7,7 @@ import { pdfPage, Reader } from '../../src/files/Reader.tsx'
 import type { FilesLabels } from '../../src/files/useLabels.ts'
 import { segmentsFor, segmentsFrom } from '../../src/files/views/common.tsx'
 import { pickView, scoreViews } from '../../src/files/views/registry.ts'
-import transcript, { chatTurns, nameOf, pick, shownLines, textOf, timeOf } from '../../src/files/views/transcript.tsx'
+import transcript, { chatTurns, conversationTurns, nameOf, parsedLines, pick, shownLines, textOf, timeOf } from '../../src/files/views/transcript.tsx'
 import type { SourcePage, SourceRecord, TranscriptHint } from '../../src/lib/types.ts'
 import { mount, unmountAll } from './mount.tsx'
 
@@ -99,6 +99,45 @@ describe('messages in any shape', () => {
     const heads = [...el.querySelectorAll('.reader-record-head')].map((h) => h.textContent)
     expect(heads).toEqual(['customer · 2024-10-01 09:00', 'agent · 2024-10-01 09:01'])
     expect(el.querySelector('.reader-card[data-line="2"]')?.textContent).toContain('hello, there')
+  })
+})
+
+describe('JSON lines', () => {
+  const View = transcript.component
+  test('lines that each hold a conversation show one card per line, its turns inside', async () => {
+    const records: SourceRecord[] = [1, 2].map((n) => ({
+      line: n,
+      record: { title: `chat ${n}`, messages: [{ role: 'user', content: `question ${n}` }, { role: 'assistant', content: [{ type: 'text', text: 'an answer' }] }] },
+      blocks: [],
+      meta: {},
+    }))
+    const hint: TranscriptHint = { format: 'conversations', score: 0.95, keys: { list: 'messages', speaker: 'role', text: 'content' } }
+    const page: SourcePage = { path: 'sft.jsonl', kind: 'text', total_lines: 2, start: 1, records }
+    const el = await mount(<View workspace="w" path="sft.jsonl" kind="text" page={page} loadMore={() => undefined} transcript={hint} />)
+    const cards = [...el.querySelectorAll('.reader-card')]
+    expect(cards.map((c) => c.getAttribute('data-line'))).toEqual(['1', '2'])
+    expect(cards.map((c) => c.querySelector('.reader-record-head')?.textContent)).toEqual(['chat 1', 'chat 2'])
+    expect([...cards[1].querySelectorAll('.reader-conv-speaker')].map((s) => s.textContent)).toEqual(['user', 'assistant'])
+    expect(cards[1].textContent).toContain('question 2')
+    expect(cards[1].textContent).toContain('an answer')
+  })
+  test('a prompt and its response read as two turns', () => {
+    expect(conversationTurns({ prompt: 'p', response: 'r' }, { format: 'conversations', score: 0.95, pair: ['prompt', 'response'] })).toEqual([
+      { speaker: 'prompt', text: 'p', time: null },
+      { speaker: 'response', text: 'r', time: null },
+    ])
+    expect(conversationTurns({ other: 1 }, { format: 'conversations', score: 0.95, keys: { list: 'messages', speaker: 'role', text: 'content' } })).toBeNull()
+  })
+  test('JSON lines in a file the server pages as text are parsed here and show as posts', async () => {
+    const texts = [JSON.stringify({ role: 'user', content: 'why does it fail?' }), 'not json', JSON.stringify({ role: 'assistant', content: 'a missing key' })]
+    const records = texts.map((t, i) => line(i + 1, t))
+    expect(parsedLines(records).map((r) => r.record.role ?? null)).toEqual(['user', null, 'assistant'])
+    const hint: TranscriptHint = { format: 'messages', score: 0.95, lines: true, keys: { speaker: 'role', text: 'content' } }
+    const page: SourcePage = { path: 'app.log', kind: 'text', total_lines: 3, start: 1, records }
+    const el = await mount(<View workspace="w" path="app.log" kind="text" page={page} loadMore={() => undefined} transcript={hint} />)
+    const heads = [...el.querySelectorAll('.reader-record-head')].map((h) => h.textContent)
+    expect(heads).toEqual(['user', '(unsigned)', 'assistant'])
+    expect(el.querySelector('.reader-card[data-line="3"]')?.textContent).toContain('a missing key')
   })
 })
 

@@ -1040,11 +1040,13 @@ export interface SourceRecord {
 
 /** The server's sniff of a file that reads as a transcript (backend transcripts.sniff): its format, how sure it is
  * (0.95 makes Transcript the first mode, 0.5 only offers it), and where a message keeps who speaks, the words and the
- * time (dotted keys into a record, or a CSV's columns). `lines`: JSON lines in a file the server pages as text. */
+ * time (dotted keys into a record, or a CSV's columns); for whole conversations, `keys.list` is the key of their list of
+ * messages and `pair` the keys of a prompt and its response. `lines`: JSON lines in a file the server pages as text. */
 export interface TranscriptHint {
   format: 'stream' | 'messages' | 'conversations' | 'json' | 'csv' | 'text'
   score: number
-  keys?: { speaker: string; text: string; time?: string }
+  keys?: { speaker: string; text: string; time?: string; list?: string }
+  pair?: [string, string]
   lines?: boolean
   style?: string
   /** who may start a turn in a text chat log, when the style alone would take any heading or `Word:` line */

@@ -1,10 +1,11 @@
 // The Transcript view, for any file the server's sniff (backend transcripts.py) reads as close to a transcript: a
 // Claude Code stream as cards by record, the system records behind a toggle; messages (JSON lines, a CSV or TSV file's
-// rows) as posts with their authors and times; a text or markdown chat log as one card per turn, a turn's lines under
-// its speaker; and a whole-file JSON transcript (a chat export, an eval log), or JSON lines in a file read as text, as
-// the turns the server parses from it, a page at a time. While system records are hidden, a long run of them
-// (HIDDEN_RUN_NOTE or more) says in one line how many it hides, so the view is never blank while the reader pages past
-// them.
+// rows) as posts with their authors and times; JSON lines that each hold a whole conversation as one card per line,
+// its turns inside; a text or markdown chat log as one card per turn, a turn's lines under its speaker; and a
+// whole-file JSON transcript (a chat export, an eval log) as the turns the server parses from it, a page at a time.
+// JSON lines in a file the server pages as text are parsed here, line by line. While system records are hidden, a long
+// run of them (HIDDEN_RUN_NOTE or more) says in one line how many it hides, so the view is never blank while the reader
+// pages past them.
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Button } from '../../components/Button'
 import { Chip } from '../../components/Chip'
@@ -117,7 +118,9 @@ function errorBlockIndexes(rec: any): Set<number> {
 
 export function Transcript(props: ViewProps) {
   const hint = props.transcript
-  if (hint && (hint.format === 'json' || hint.format === 'conversations' || hint.lines)) return <TurnsTranscript {...props} />
+  if (hint?.format === 'json') return <TurnsTranscript {...props} />
+  if (hint?.format === 'conversations') return <Conversations {...props} />
+  if (hint?.lines) return <MessageBoard {...props} />
   if (hint?.format === 'stream' || props.page.records.some((rec) => isStreamRec(rec.record))) return <StreamTranscript {...props} />
   if (hint?.format === 'text') return <ChatLog {...props} />
   if (hint?.format === 'csv') return <DelimitedTranscript {...props} />
@@ -201,8 +204,24 @@ export function timeOf(v: unknown): string | null {
   return typeof v === 'string' && v.trim() ? stamp(v.trim()) : null
 }
 
+/** A JSON line's record parsed from its text, for a file the server pages as text; any other record as it is. Pure. */
+export function parsedLines(records: SourceRecord[]): SourceRecord[] {
+  return records.map((rec) => {
+    const text = rec.record?.text
+    if (typeof text !== 'string' || !text.trim().startsWith('{')) return rec
+    try {
+      const v = JSON.parse(text)
+      return v && typeof v === 'object' && !Array.isArray(v) ? { ...rec, record: v, blocks: [] } : rec
+    } catch {
+      return rec
+    }
+  })
+}
+
 function MessageBoard({ path, page, targetRef, transcript }: ViewProps) {
-  return <Posts path={path} records={page.records} targetRef={targetRef} hint={transcript} />
+  const lines = !!transcript?.lines
+  const records = useMemo(() => (lines ? parsedLines(page.records) : page.records), [lines, page.records])
+  return <Posts path={path} records={records} targetRef={targetRef} hint={transcript} derived={lines} />
 }
 
 /** A CSV or TSV file's rows as posts, under the columns the sniff named. The words are the row's cell, so a span label
@@ -310,12 +329,70 @@ export function shownLines(recs: SourceRecord[], turn: ChatTurn | null): SourceR
   return [out[0], ...out.slice(k)]
 }
 
+/** The turns of a record that holds a whole conversation, where the sniff found them: its list of messages
+ * (`keys.list`), or a prompt and its response (`pair`); null when the record keeps none there. Pure. */
+export function conversationTurns(r: unknown, hint: TranscriptHint | null | undefined): { speaker: string; text: string; time: string | null }[] | null {
+  if (hint?.pair) {
+    const [a, b] = hint.pair
+    const pa = pick(r, a)
+    const pb = pick(r, b)
+    return typeof pa === 'string' && typeof pb === 'string'
+      ? [
+          { speaker: a, text: pa, time: null },
+          { speaker: b, text: pb, time: null },
+        ]
+      : null
+  }
+  const k = hint?.keys
+  const list = k?.list ? pick(r, k.list) : undefined
+  if (!k || !Array.isArray(list)) return null
+  return list.map((m) => ({ speaker: nameOf(pick(m, k.speaker)) ?? '', text: textOf(pick(m, k.text)) ?? '', time: timeOf(pick(m, k.time)) }))
+}
+
+/** characters of one turn's words a conversation shows; Raw shows the rest */
+const TURN_TEXT_MAX = 20_000
+
+/** JSON lines that each hold a whole conversation (a fine-tuning set, ShareGPT, prompt and response pairs) as one card
+ * per line: its title in the head, then each turn's speaker over its words. A label or a citation of the line marks the
+ * card. The words are the parsed text, which span labels do not mark. */
+function Conversations({ path, page, targetRef, transcript }: ViewProps) {
+  const lines = !!transcript?.lines
+  const records = useMemo(() => (lines ? parsedLines(page.records) : page.records), [lines, page.records])
+  const rootRef = useRef<HTMLDivElement | null>(null)
+  const { target, hit } = useTarget(targetRef, path, rootRef, [records])
+  return (
+    <div className="reader-transcript reader-convs" ref={rootRef}>
+      {records.map((rec) => {
+        const r = rec.record ?? {}
+        const turns = conversationTurns(r, transcript)
+        const ctx = CONTEXT_KEYS.map((key) => r[key]).find((v) => present(v) && typeof v !== 'object')
+        const first = turns?.find((t) => t.text.trim())?.text ?? ''
+        return (
+          <RecordCard key={rec.line} path={path} line={rec.line} target={target} hit={hit} className="reader-msg reader-conv" header={ctx != null ? String(ctx) : undefined} text={first.slice(0, 500) || undefined}>
+            {turns ? (
+              turns.map((t, k) => (
+                <div key={k} className="reader-conv-turn">
+                  <div className="reader-conv-speaker mono">{[t.speaker, t.time].filter(Boolean).join(' · ') || '(unsigned)'}</div>
+                  {t.text.trim() ? <BlockEl block={{ kind: 'text', text: t.text.slice(0, TURN_TEXT_MAX) }} line={rec.line} index={k} target={null} hit={false} /> : <div className="reader-msg-empty">(empty)</div>}
+                  {t.text.length > TURN_TEXT_MAX && <div className="reader-msg-empty">Cut at {TURN_TEXT_MAX.toLocaleString()} of {t.text.length.toLocaleString()} characters. Raw shows all of it.</div>}
+                </div>
+              ))
+            ) : (
+              <BlockEl block={{ kind: 'text', text: typeof r.text === 'string' ? r.text : JSON.stringify(r) }} line={rec.line} index={0} target={null} hit={false} />
+            )}
+          </RecordCard>
+        )
+      })}
+    </div>
+  )
+}
+
 const TURNS_PAGE = 200
 /** turns kept in memory; past it, the ones at the far end from the reader's move are let go */
 const TURNS_CAP = 2000
 
-/** A whole-file JSON transcript (a chat export, an eval log, conversations one per line), or JSON lines in a file the
- * server reads as text, as the turns the server parses from it (GET /source/turns): a page at a time from the start, or
+/** A whole-file JSON transcript (a chat export, an eval log) as the turns the server parses from it (GET
+ * /source/turns): a page at a time from the start, or
  * around a cited line, more as the reader nears either end, up to TURNS_CAP at a time. Each turn stands on the line of
  * the file that holds its words, so a label or a citation of that line finds it; the words are the parsed text, which
  * span labels do not mark. */

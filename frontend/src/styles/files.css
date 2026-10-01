@@ -1482,6 +1482,14 @@
 .reader-turns-tail {
   height: 1px;
 }
+/* a conversation one line of a file holds: each turn's speaker over its words */
+.reader-conv-turn + .reader-conv-turn {
+  margin-top: 8px;
+}
+.reader-conv-speaker {
+  font: var(--type-mono-sm);
+  color: var(--text-tertiary);
+}
 .reader-viewbar {
   position: sticky;
   top: 0;
