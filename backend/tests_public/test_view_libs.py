@@ -91,8 +91,9 @@ async def test_a_package_is_asked_for_once_per_version_bundled_into_the_view_and
     got = await view_libs.ensure("ws", "graph", folder, libs, ask=yes)
     assert got["problems"] == []
     assert len(got["notes"]) == 4 and "`tinyGraph`" in got["notes"][0]
-    assert [a["package"] for a in asked] == ["tiny-graph", "default-only"], "one question per package version"
-    assert asked[0]["version"] == "2.1.0" and asked[0]["size"] == "6 kB, with 1 package it needs"
+    assert [a["description"] for a in asked] == ["Install the npm package tiny-graph 2.1.0 for the view's page",
+                                                 "Install the npm package default-only 0.3.0 for the view's page"]
+    assert asked[0]["size"] == "6 kB, with 1 package it needs"
     assert asked[0]["needs"] == "tiny-queue 1.4.2"
     assert set(view_libs.approvals()) == {"tiny-graph@2.1.0", "default-only@0.3.0"}
 
@@ -164,3 +165,27 @@ async def test_the_page_inlines_its_packages_and_a_new_package_is_a_new_version(
     assert second != first, "the vendored packages are part of the view's version"
     kept = views.read_version("boards", "graph", second)
     assert view_libs.vendored(Path(kept["dir"]), "tiny-graph@2") is not None, "a kept version holds its packages"
+
+
+async def test_a_check_and_the_gate_asking_at_once_ask_the_analyst_once(tmp_path, npm):
+    import asyncio  # noqa: PLC0415
+
+    answered = asyncio.Event()
+    asked: list[str] = []
+
+    async def slow_yes(c, slug, fields):
+        asked.append(slug)
+        await answered.wait()
+        return True
+
+    a, b = tmp_path / "a", tmp_path / "b"
+    a.mkdir()
+    b.mkdir()
+    both = asyncio.gather(view_libs.ensure("ws", "a", a, ["tiny-queue@1"], ask=slow_yes),
+                          view_libs.ensure("ws", "a", b, ["tiny-queue@1"], ask=slow_yes))
+    await asyncio.sleep(0.5)
+    answered.set()
+    got = await both
+    assert asked == ["a"], "one question for the package while it waits"
+    assert all(g["problems"] == [] for g in got)
+    assert len([c for c in npm if c[1] == "install"]) == 1, "one npm install of the version"

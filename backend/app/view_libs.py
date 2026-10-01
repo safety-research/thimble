@@ -52,10 +52,9 @@ ENTRY_RE = re.compile(r"^(?P<name>(?:@[a-z0-9][a-z0-9._~-]*/)?[a-z0-9][a-z0-9._~
                       r"(?:@(?P<range>[^/\s@][^/\s]*))?(?P<path>(?:/[A-Za-z0-9._@+-]+)+)?$")
 ASSET_LOADERS = ("png", "jpg", "jpeg", "gif", "svg", "webp", "woff", "woff2", "ttf", "otf", "eot")
 
-PACKAGE_WHY = ("The view's page loads this package. thimble installs it with npm, without running its install scripts, "
-               "bundles it into the view's folder, and the page reads it from there, so the page still loads nothing "
-               "from the network. Once allowed, this version is never asked about again. Unanswered, it is refused "
-               "after {wait}.")
+PACKAGE_WHY = ("thimble installs it with npm, without running its install scripts, into the view's folder, so the page "
+               "still loads nothing from the network. Each version is asked about once. Unanswered, it is refused after "
+               "{wait}.")
 
 
 @dataclass
@@ -271,9 +270,19 @@ def _stage(name: str, version: str) -> Path:
     return _home() / PACKAGES_DIR / f"{name.replace('/', '+')}@{version}"
 
 
+_installing: dict[str, asyncio.Lock] = {}  # name@version -> held while npm installs it
+_asking: dict[tuple[str, str], asyncio.Future] = {}  # (workspace, name@version) -> the analyst's answer to come
+
+
 async def install(name: str, version: str) -> Path:
-    """The folder npm installed `name@version` in (PACKAGES_DIR), installing it when it is not there. RuntimeError with
-    npm's words when it fails."""
+    """The folder npm installed `name@version` in (PACKAGES_DIR), installing it when it is not there, one install of a
+    version at a time. RuntimeError with npm's words when it fails."""
+    lock = _installing.setdefault(f"{name}@{version}", asyncio.Lock())
+    async with lock:
+        return await _install(name, version)
+
+
+async def _install(name: str, version: str) -> Path:
     stage = _stage(name, version)
     done = stage / "node_modules" / name / "package.json"
     if done.is_file():
@@ -392,14 +401,13 @@ async def ensure(c: str, slug: str, folder: Path, libs: Any, *, ask: "Ask | None
             total = info["bytes"] + sum(int(x.get("bytes") or 0) for x in more)
             if setting != "allow":
                 fields = {"description": f"Install the npm package {e.name} {version} for the view's page",
-                          "package": e.name, "version": version,
                           "size": size_words(total) + (f", with {len(more)}{' or more' if extra else ''} "
                                                        f"package{'s' if len(more) > 1 or extra else ''} it needs"
                                                        if more else "")}
                 if more:
                     fields["needs"] = ", ".join(f"{x['name']} {x['version']}" for x in more[:20]) + \
                         (f" and {len(more) - 20} more" if len(more) > 20 else "")
-                allowed = await (ask or _ask_on_card)(c, slug, fields)
+                allowed = await _ask_once(c, slug, f"{e.name}@{version}", fields, ask or _ask_on_card)
                 if not allowed:
                     out["problems"].append(f"the analyst did not allow the package {e.name} {version}; draw the page "
                                            "without it and take it out of libs")
@@ -447,6 +455,28 @@ def _write_lock(folder: Path, items: dict[str, dict[str, Any]]) -> None:
         if f.name not in keep and f.is_file():
             with contextlib.suppress(OSError):
                 f.unlink()
+
+
+async def _ask_once(c: str, slug: str, package: str, fields: dict[str, str], ask: Ask) -> bool:
+    """The analyst's answer about `package`: a question already waiting in the workspace (a check and the gate after the
+    turn both asking) is answered once for both."""
+    key = (c, package)
+    waiting = _asking.get(key)
+    if waiting is not None and not waiting.done():
+        return bool(await asyncio.shield(waiting))
+    fut = asyncio.get_running_loop().create_future()
+    _asking[key] = fut
+    try:
+        allowed = bool(await ask(c, slug, fields))
+        fut.set_result(allowed)
+        return allowed
+    except BaseException:
+        if not fut.done():
+            fut.set_result(False)
+        raise
+    finally:
+        if _asking.get(key) is fut:
+            del _asking[key]
 
 
 def _installs(c: str) -> str:

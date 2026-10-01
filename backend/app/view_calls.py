@@ -109,7 +109,7 @@ _pools: dict[str, list[Worker]] = {}
 _affinity: dict[tuple[str, str, str], str] = {}  # (workspace, slug, fp) -> the kernel that holds or builds its index
 _waiters: list[asyncio.Future] = []
 _calls: dict[tuple[str, str], Call] = {}  # (workspace, call id) -> the call
-_reaper: asyncio.TimerHandle | None = None
+_reaper: "tuple[asyncio.AbstractEventLoop, asyncio.TimerHandle] | None" = None
 
 
 # ------------------------------------------------------------------------------------------------- the kernels' work
@@ -367,13 +367,13 @@ def _trim_total(current: Worker) -> None:
 
 def _schedule_reaper() -> None:
     global _reaper
-    if _reaper is not None:
-        return
     try:
         loop = asyncio.get_running_loop()
     except RuntimeError:
         return
-    _reaper = loop.call_later(IDLE_S / 4, _reap)
+    if _reaper is not None and _reaper[0] is loop:
+        return
+    _reaper = (loop, loop.call_later(IDLE_S / 4, _reap))
 
 
 def _reap() -> None:

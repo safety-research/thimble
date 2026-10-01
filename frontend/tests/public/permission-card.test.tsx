@@ -78,6 +78,19 @@ describe('the card', () => {
     expect([...el.querySelectorAll('.chat-perm-acts button')].map((b) => b.textContent)).toEqual(['Allow', 'Deny'])
   })
 
+  test("a view build's package question names the package, its version, its size and what it needs", async () => {
+    const dev = chat('d2', { role: 'dev', title: 'view: Persona Graph', view: 'persona-graph' })
+    const what = "Install the npm package d3-force 3.0.0 for the view's page"
+    const fields = { description: what, size: '167 kB, with 3 packages it needs', needs: 'd3-dispatch 3.0.1, d3-quadtree 3.0.1, d3-timer 3.0.1' }
+    const q = req('q2', { tool: 'ThimblePackage', what, input: JSON.stringify(fields), why: "The view's page loads this package." })
+    const el = await mount(<PermissionCard ws="mini" asks={[{ chat: 'd2', request: q }]} metas={new Map([['d2', dev]])} labels={new Map()} />)
+    expect(el.querySelector('.chat-perm-who')?.textContent).toBe('dev · view Persona Graphasks to install a package')
+    expect(el.querySelector('.chat-perm-what')?.textContent).toBe(what)
+    const text = el.textContent ?? ''
+    for (const v of ['167 kB, with 3 packages it needs', 'd3-timer 3.0.1']) expect(text).toContain(v)
+    expect([...el.querySelectorAll('.chat-perm-acts button')].map((b) => b.textContent)).toEqual(['Allow', 'Deny'])
+  })
+
   test('the count is of the requests that still wait, and on one denied unanswered of those denied unanswered', async () => {
     const live = [req('l1', { since: T(1) }), req('l2', { since: T(2) })]
     const gone = [1, 2, 3].map((n) => req(`x${n}`, { since: T(0), expired: T(9) }))
