@@ -1,18 +1,21 @@
 """The indexes view readers keep on disk (workspaces/<c>/view-indexes), held to a bounded size.
 
 A reader's index is pickled by fingerprint (views._prepare): `<dir>/<fp>.index.pickle`, with `<fp>.reads.json` beside
-it, where `<dir>` is a view's slug or `.cardtypes/<slug>` for a card type thimble ships. The fingerprint changes with
-the claimed files and with reader.py, so every change to either leaves a new pickle beside the old ones. thimble keeps:
+it, where `<dir>` is a view's slug, or a folder below a dot-folder for a card type: `.cardtypes/<slug>` for one thimble
+ships, `.extensions/<extension>/<view>` or `.extensions/<extension>/cards/<slug>` for an extension's. The fingerprint
+changes with the claimed files and with reader.py, so every change to either leaves a new pickle beside the old ones.
+thimble keeps:
 
 - in each folder, the KEEP_PER_DIR most recently used fingerprints (a page still on the version before a change uses
   the older one);
-- no folder of a view that no longer exists;
+- no folder of a view that no longer exists (a dot-folder is no view's, so it is never deleted whole);
 - across every workspace, at most cap() bytes of pickles, the least recently used deleted first, but never one used in
   the last IN_USE_S.
 
-A pickle's mtime is its last use, which `used` sets at most once per TOUCH_S. The folder of a new index is pruned when it
-is built (`built`), a deleted view's when it is deleted (`drop`), and everything at the server's start (prune_all).
-Pickles a cancelled build left half-written (`*.tmp`) go once they are TMP_AGE_S old.
+A pickle's mtime is its last use, which `used` sets at most once per TOUCH_S. The folder of a new index is pruned
+when it is built (`built`), a deleted view's when it is deleted (`drop`), and everything at the server's start
+(views.prune_indexes). Pickles a cancelled build left half-written (`*.tmp`), and the progress files of calls
+(CALLS_DIR) that a cancelled call wrote after it ended, go once they are TMP_AGE_S old.
 """
 from __future__ import annotations
 
@@ -35,8 +38,7 @@ KEEP_PER_DIR = 2
 IN_USE_S = 600.0
 TOUCH_S = 60.0
 TMP_AGE_S = 3600.0
-CARD_TYPES_DIR = ".cardtypes"  # cardtypes.TYPES_DIR
-SPECIAL = {CARD_TYPES_DIR, ".calls"}  # folders under view-indexes that are no view's
+CALLS_DIR = ".calls"  # view_calls.PROGRESS_SUBDIR
 
 _lock = threading.Lock()
 _touched: dict[str, float] = {}
@@ -120,20 +122,22 @@ def prune_dir(d: Path, keep: str | None = None) -> int:
 
 
 def _folders(root: Path) -> list[Path]:
-    """The folders under a workspace's indexes folder that hold indexes: one per view, one per card type."""
+    """The folders under a workspace's indexes folder that may hold indexes: one per view, and every folder below a
+    dot-folder (the card types'), at any depth, without following links."""
     out: list[Path] = []
     try:
         subs = [d for d in root.iterdir() if d.is_dir() and not d.is_symlink()]
     except OSError:
         return out
     for d in subs:
-        if d.name == CARD_TYPES_DIR:
-            try:
-                out += [x for x in d.iterdir() if x.is_dir() and not x.is_symlink()]
-            except OSError:
-                pass
-        elif d.name not in SPECIAL:
+        if d.name == CALLS_DIR:
+            continue
+        if not d.name.startswith("."):
             out.append(d)
+            continue
+        for here, dirs, _ in os.walk(d):
+            dirs[:] = [x for x in dirs if not os.path.islink(os.path.join(here, x))]
+            out.append(Path(here))
     return out
 
 
@@ -204,10 +208,21 @@ def prune_workspace(c: str, alive: Any) -> int:
     root = config.workspace_dir(c) / INDEXES_SUBDIR
     freed = 0
     for d in _folders(root):
-        if d.parent == root and not alive(d.name):
+        if d.parent == root and not d.name.startswith(".") and not alive(d.name):
             freed += drop(c, d.name)
         else:
             freed += prune_dir(d)
+    now = time.time()
+    try:
+        stale = [p for p in (root / CALLS_DIR).iterdir() if p.is_file() and now - _mtime(p) > TMP_AGE_S]
+    except OSError:
+        stale = []
+    for p in stale:
+        try:
+            freed += p.stat().st_size
+            p.unlink()
+        except OSError:
+            pass
     return freed
 
 

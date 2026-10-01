@@ -74,7 +74,7 @@ def test_the_cap_deletes_the_least_recently_used_but_none_in_use(workspaces_tmp,
     a = workspaces_tmp / "a" / view_indexes.INDEXES_SUBDIR
     b = workspaces_tmp / "b" / view_indexes.INDEXES_SUBDIR
     oldest = _pickle(a / "v1", "f1", 100, 7200)
-    middle = _pickle(b / ".cardtypes" / "t1", "f2", 100, 5400)
+    middle = _pickle(b / ".extensions" / "kit" / "views" / "t1", "f2", 100, 5400)
     newest = _pickle(a / "v2", "f3", 100, 3600)
     live = _pickle(b / "v3", "f4", 100, 10)
     freed = view_indexes.enforce_cap(limit=150)
@@ -123,7 +123,17 @@ async def test_a_new_fingerprint_prunes_its_folder_and_the_start_drops_deleted_v
     gone = views.indexes_dir(CORPUS) / "deleted-view"
     _pickle(gone, "f", 10, 10)
     types = _pickle(views.indexes_dir(CORPUS) / ".cardtypes" / "swarm", "f", 10, 10)
+    ext = views.indexes_dir(CORPUS) / ".extensions" / "kit" / "cards" / "tally"
+    ext_old = [_pickle(ext, f"e{i}", 10, 3600 * (4 - i)) for i in range(3)]
+    calls = views.indexes_dir(CORPUS) / ".calls"
+    calls.mkdir()
+    (calls / "old.json").write_text("{}")
+    os.utime(calls / "old.json", (time.time() - 2 * view_indexes.TMP_AGE_S,) * 2)
+    (calls / "new.json").write_text("{}")
     views.prune_indexes()
     assert not gone.exists(), "a folder whose view is gone is deleted"
     assert types.exists() and folder.is_dir()
+    assert [p.exists() for p in ext_old] == [False, True, True], "an extension's card type keeps its newest indexes"
+    assert sorted(p.name for p in calls.iterdir()) == ["new.json"], "an old call's progress file goes"
+    assert view_indexes.usage(CORPUS)["indexes"] == 5
     sys.modules.pop("_thimble_views", None)
