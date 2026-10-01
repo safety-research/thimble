@@ -470,10 +470,10 @@ async function main() {
     })
 
     await step('welcome', 'The first-launch welcome asks about the tour, and Skip goes straight to the workbench', async () => {
-      const ask = page.getByText(/would you like a product tour/i).first()
+      const ask = page.getByText(/would you like a short tour/i).first()
       const shown = await ask.waitFor({ timeout: 8_000 }).then(() => true, () => false)
       const shots = [await shot(page, 'welcome')]
-      if (!shown) throw new StepError('no welcome asking "Would you like a product tour?" on the first launch', shots)
+      if (!shown) throw new StepError('no welcome asking "Would you like a short tour?" on the first launch', shots)
       const own = page.locator('.tour-pop [data-tour="skip"]')
       const skip = (await own.count()) ? own.first() : page.getByRole('dialog').getByRole('button', { name: /^(skip|no thanks|not now)/i }).first()
       const label = (await skip.innerText()).trim()
@@ -483,7 +483,7 @@ async function main() {
       await page.reload()
       await waitShell(page)
       await page.waitForTimeout(2_000)
-      check(!(await page.getByText(/would you like a product tour/i).count()), 'the welcome shows again after a reload')
+      check(!(await page.getByText(/would you like a short tour/i).count()), 'the welcome shows again after a reload')
       return { detail: `"${label}", and not shown again after a reload`, shots }
     })
 
