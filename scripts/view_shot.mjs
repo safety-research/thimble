@@ -25,7 +25,9 @@
 // (RECORD_REF: `<path>#L<n>`, `<db>#<table>/<key>`, `<pdf>#p<n>`, any `<path>#<fragment>`), `units` those naming one of
 // the view's units (`view:<slug>/<key>`), `marked` the elements carrying a label's mark, `hidden` those the bridge hid or dimmed for the filter, `shown` what is on screen at the end
 // (shownCounts), `layout` how its text fits (layoutCounts), `controls` the controls it shows (controlList), `actions`
-// each action with whether its control was found, and `fonts` whether Hanken Grotesk was loaded in the frame.
+// each action with whether its control was found, `fonts` whether Hanken Grotesk was loaded in the frame, and
+// `self_labels` the ops of the label calls the page made by itself, outside the actions (the bridge's labelRefused, or
+// a labelCall while no action was clicked), which the page answers as refused.
 import { createRequire } from 'node:module'
 import { readFileSync } from 'node:fs'
 import { open } from 'node:fs/promises'
@@ -491,6 +493,8 @@ async function shootState(browser, opt, doc, state, i) {
         window.__ready = false
         window.__height = null
         window.__refs = new Set()
+        window.__acting = false
+        window.__selfLabels = []
         let marks = {}
         window.__marks = marks
         let state = { on: [], filter: null }
@@ -512,6 +516,7 @@ async function shootState(browser, opt, doc, state, i) {
             if (fresh.length) await ask(fresh)
           } else if (d.type === 'thimble:ready') {
             window.__ready = true
+            post({ type: 'thimble:key', key: 'check' })
             await ask([])
             post({ type: 'thimble:open', open: place })
           } else if (d.type === 'thimble:fetch') {
@@ -521,6 +526,14 @@ async function shootState(browser, opt, doc, state, i) {
             window.thimbleNote('error', d.message)
           } else if (d.type === 'thimble:size') {
             window.__height = d.height
+          } else if (d.type === 'thimble:labelRefused') {
+            window.__selfLabels.push(String(d.op || ''))
+          } else if (d.type === 'thimble:labelCall') {
+            if (window.__acting) post({ type: 'thimble:labelDone', id: d.id })
+            else {
+              window.__selfLabels.push(String(d.op || ''))
+              post({ type: 'thimble:labelDone', id: d.id, error: 'thimble changes labels only while the analyst clicks or types in the view' })
+            }
           }
         })
         f.srcdoc = framed
@@ -549,6 +562,8 @@ async function shootState(browser, opt, doc, state, i) {
     for (const want of ready ? state.actions || [] : []) {
       const how = await frame.evaluate(findControl, { want: String(want), sel: CONTROLS }).catch(() => '')
       const target = frame.locator('[data-thimble-act]').first()
+      // a label call while the action is clicked and the page settles is the analyst's
+      await page.evaluate(() => (window.__acting = true))
       try {
         if (how === 'select') await target.selectOption(await target.getAttribute('data-thimble-act'), { timeout: 3000 })
         else if (how === 'click') await target.click({ timeout: 3000 }).catch(() => target.evaluate((x) => x.click()))
@@ -557,6 +572,7 @@ async function shootState(browser, opt, doc, state, i) {
       }
       actions.push({ control: String(want), found: !!how })
       if (how) await settle(Date.now(), QUIET_MS)
+      await page.evaluate(() => (window.__acting = false))
     }
     if (inflight > 0) errors.push(`${inflight} request(s) still unanswered after ${ANSWER_MS / 1000} s`)
     const fonts = await frame
@@ -586,6 +602,7 @@ async function shootState(browser, opt, doc, state, i) {
       controls: await frame.evaluate(controlList, { sel: CONTROLS, max: CONTROLS_MAX }).catch(() => []),
       actions,
       fonts,
+      self_labels: await page.evaluate(() => window.__selfLabels),
     }
   } finally {
     await page.close()

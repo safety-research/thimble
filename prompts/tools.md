@@ -790,6 +790,10 @@ The reader handed the page {fetched} records, but only {records} shown elements 
 
 In the {state} state, {missing} of the {due} shown records or units the test label marks do not show its mark. thimble draws a mark on the outermost visible element whose `data-anchor` names the record, but not on a canvas: draw records as HTML or SVG elements, or put the `data-anchor` on an element beside the canvas drawing.
 
+## view-labels-by-itself
+
+The page made {count} label calls by itself, on load, on a timer or from its own script: {calls}. thimble refused them, since a label change takes effect only during the analyst's own click or key press in the view. Call these only from a control's click or key handler.
+
 ## view-filter-unkept
 
 Filtered to the test label, the page shows {records} records, and the filter keeps the line that anchors {unkept} of them. That is right for a record the page draws for several lines, one of which the label marks. Otherwise keep only the records for which `thimble.kept(ref)` holds in the reader's answers and fetch again in `thimble.onLabels`, or leave the filtering to thimble by registering no `onLabels`.

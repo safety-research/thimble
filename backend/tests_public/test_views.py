@@ -890,6 +890,34 @@ async def test_a_record_the_page_marks_itself_is_not_held_to_thimble_s_mark(ws, 
     assert s["ok"], s["errors"]
     assert s["shown"]["records"] == 4 and s["shown"]["due"] == s["shown"]["drawn"] >= 1, s["shown"]
 
+SELF_LABEL_HTML = """<!doctype html><html><head><style>body{font:13px sans-serif;margin:8px}</style></head><body>
+<button id="on" data-label="asks">Turn on asks</button><div data-anchor="board.jsonl#L1">one</div>
+<script>
+thimble.onOpen(() => {})
+thimble.setLabel('asks', true).catch(() => {})
+setTimeout(() => thimble.setFilter('asks', 'yes').catch(() => {}), 300)
+document.getElementById('on').onclick = () => thimble.setLabel('asks', true).catch(() => {})
+</script></body></html>"""
+
+
+async def test_a_page_that_changes_labels_by_itself_fails_the_checks_and_a_click_does_not(ws, inproc, bound):
+    """A view may draw label controls of its own, but a label call it makes on load or on a timer is refused, and the
+    checks name the calls as a problem; the same call from a control the analyst clicks is not counted."""
+    if why := views.build_problem():
+        if os.environ.get("CI") == "true":
+            pytest.fail(why)
+        pytest.skip(why)
+    views.write_view(CORPUS, "selfish", reader=THREADS_READER, html=SELF_LABEL_HTML, **{**VIEW, "name": "Selfish"})
+    plain, clicked = await views.shoot_states(CORPUS, "selfish", [{"open": {}}, {"open": {}, "actions": ["Turn on asks"]}])
+    assert plain["ok"] and clicked["ok"], (plain["errors"], clicked["errors"])
+    assert plain["self_labels"] == ["on", "filter"], plain["self_labels"]
+    assert clicked["actions"] == [{"control": "Turn on asks", "found": True}]
+    assert clicked["self_labels"] == ["on", "filter"], "the click's call is the analyst's"
+    (problem,) = views.self_label_problems([plain])
+    assert "`thimble.setLabel`, `thimble.setFilter`" in problem and "2 label calls by itself" in problem
+    assert views.self_label_problems([{**plain, "self_labels": []}]) == []
+
+
 # what Playwright's own error says to run, which never reaches a model
 INSTALL_WORDS = re.compile(r"playwright install|npx|download new browsers|Executable doesn't exist|install\.sh", re.I)
 

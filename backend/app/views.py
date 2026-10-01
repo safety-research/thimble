@@ -3173,7 +3173,7 @@ async def check(c: str, slug: str, locators: list[str] | None = None, *, shot_di
     else:
         report["shots"], report["page"] = shots, _page_of(shots)
     problems, notes = label_problems(view, files, shots)
-    report["problems"] += problems
+    report["problems"] += problems + self_label_problems(shots)
     report["notes"] += notes
     page = report["page"]
     if not report["problems"] and all(r["ok"] for r in report["checks"]) and (page.get("ok") or page.get("unavailable")):
@@ -3302,6 +3302,21 @@ def label_problems(view: dict[str, Any], files: list[tuple[str, int, int]],
     if (f := loaded.get("filtered")) is not None and (unkept := int(f.get("unkept") or 0)):
         notes.append(_hint("view-filter-unkept", unkept=unkept, records=int(f.get("records") or 0)))
     return problems, notes
+
+
+# the bridge's label calls by the op view_shot.mjs reports
+LABEL_CALLS = {"on": "thimble.setLabel", "colour": "thimble.setLabelColour", "edit": "thimble.editLabel",
+               "mark": "thimble.mark", "filter": "thimble.setFilter"}
+
+
+def self_label_problems(shots: list[dict[str, Any]]) -> list[str]:
+    """A problem when the page made label calls by itself in any state it was loaded in (view_shot.mjs `self_labels`):
+    on load, on a timer or from its script, outside the analyst's clicks, which thimble refuses."""
+    ops = [str(o) for s in shots for o in s.get("self_labels") or []]
+    if not ops:
+        return []
+    calls = ", ".join(dict.fromkeys(f"`{LABEL_CALLS.get(o, o)}`" for o in ops))
+    return [_hint("view-labels-by-itself", count=len(ops), calls=calls)]
 
 
 # how layout_notes names each state it measures, at the pane's width {w}
