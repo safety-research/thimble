@@ -13,8 +13,9 @@ while an orientation runs. Only a supervised server (`thimble server up`) restar
 `fix_offline` is `thimble fix`, `revert_last_apply` is `thimble revert`.
 
 Recovery. The live checkout changes only in the fast-forward, after every gate passed. A restart runs under
-restart_watch.py, which rolls the apply back when the server does not come back. A turn or question past its limit fails
-the ticket; a server restart queues an interrupted run again with its worktree (_recover).
+restart_watch.py, which rolls the apply back when the server does not come back. A turn has no time limit, and a question
+left unanswered for ASK_TIMEOUT_S fails the ticket; a server restart queues an interrupted run again with its worktree
+(_recover).
 
 View tickets. View proposals build at once, each as a ticket on its row of views/proposals.json, run by queue_view in a
 pool of its own (VIEW_POOL). A view is three files of the workspace, so there is no worktree, stack or restart. run_view
