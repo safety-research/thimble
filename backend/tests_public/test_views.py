@@ -440,6 +440,14 @@ async def test_the_checks_run_the_view_on_a_copy_with_a_file_missing_and_a_line_
     rep = await views.gate(CORPUS, "threads", ["board.jsonl#L3"])
     assert rep["ok"], "the torn line goes in a file the reader reads, not one it hides: " + "; ".join(views.gate_lines(rep))
 
+    planted = views.index_dir(CORPUS, "threads") / views.ROBUST_SUBDIR
+    outside = config.workspace_dir(CORPUS).parent / "outside"
+    outside.mkdir()
+    planted.symlink_to(outside)
+    v = views.read_view(CORPUS, "threads")
+    copy = views.robust_copy(CORPUS, "threads", v, views.claimed_files(CORPUS, v))
+    assert copy and not list(outside.iterdir()) and not planted.is_symlink(), "a symlink a reader left is not followed"
+
 
 def test_the_test_label_answers_thimble_labels_as_a_label_would(tmp_path):
     """Under the test label, thimble.labels() lists it and thimble.labels("test label") gives the lines it marks of the

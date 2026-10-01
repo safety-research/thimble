@@ -3024,14 +3024,18 @@ def robust_copy(c: str, slug: str, view: dict[str, Any], files: list[tuple[str, 
     """The corpus copy robust_check runs the view on, in the view's index folder, which the views kernel reads: every
     claimed file linked but the one _robust_pick leaves out, and the one it tears (of `whole`) copied with a torn line
     after its last. Past ROBUST_BYTES the largest files are left out too (`cut`). {root, files, removed, torn (the torn
-    line's ref), cut}, or None when there is nothing to leave out or tear. Blocking."""
+    line's ref), cut}, or None when there is nothing to leave out or tear; ValueError when a folder between the
+    workspace and the copy is a symlink. Blocking."""
     removed, torn = _robust_pick(view, files, whole)
     if removed is None and torn is None:
         return None
     corpus = config.corpus_dir(c)
     d = index_dir(c, slug) / ROBUST_SUBDIR
+    # the views kernel writes in the index folder, so a reader could leave a symlink there for this copy to follow
+    if d.is_symlink():
+        d.unlink()
     shutil.rmtree(d, ignore_errors=True)
-    root = d / "corpus"
+    root = unlinked(config.workspace_dir(c), d / "corpus")
     out: list[tuple[str, int, int]] = []
     total, cut, torn_ref = 0, False, None
     for rel, size, mtime in sorted(files, key=lambda f: (f[1], f[0])):
@@ -3080,7 +3084,10 @@ async def robust_check(c: str, slug: str, view: dict[str, Any], files: list[tupl
     reads = ans.get("reads") if isinstance(ans.get("reads"), dict) else {}
     hidden = _hidden((ans.get("hidden") or {}).get("result") if isinstance(ans.get("hidden"), dict) else None)
     whole = {p for p, size, _ in files if int(reads.get(p) or 0) >= size and p not in hidden}
-    copy = await asyncio.to_thread(robust_copy, c, slug, view, files, whole)
+    try:
+        copy = await asyncio.to_thread(robust_copy, c, slug, view, files, whole)
+    except ValueError as e:
+        return [f"the checks could not copy the view's files to run it on a damaged copy: {e}"], []
     if copy is None or not copy["files"]:
         return [], []
     try:
