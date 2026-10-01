@@ -1331,7 +1331,12 @@ async def list_route(c: str) -> dict[str, Any]:
 
     config.workspace_dir(c)
     await refresh_quietly(c)
-    return {**await asyncio.to_thread(public, c), "local": await asyncio.to_thread(views.local_extension, c)}
+    try:
+        local = await asyncio.to_thread(views.local_extension, c)
+    except (OSError, ValueError, HTTPException):
+        log.exception("%s: the workspace's own views were not listed", c)
+        local = None
+    return {**await asyncio.to_thread(public, c), "local": local}
 
 
 class SwitchBody(BaseModel):
