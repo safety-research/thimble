@@ -3,6 +3,9 @@
 // returns its lines and a hit test from a cell to an item.
 import { fmt } from './lib'
 import type { Run, TableRuns } from './lib'
+import { COLORS } from './paint'
+
+export { COLORS }
 
 export type Seg = { s: string; fg?: string; bg?: string; b?: boolean; d?: boolean; i?: boolean; u?: boolean; inv?: boolean }
 export type Line = Seg[]
@@ -12,6 +15,8 @@ export type ChipView = { label: string; status: string; mark: string; tip: strin
 export type BarRow = { label: string; value: number; group: string }
 export type Cell = string | number | boolean | null
 export type CardParam = { name: string; value: string | number; default: string | number; choices: (string | number)[] }
+export type DiagramNode = { id: string; label: string; ref?: string; detail?: string }
+export type DiagramEdge = { source: string; target: string; label?: string }
 export type CardData = {
   id: string
   kind: string
@@ -27,26 +32,18 @@ export type CardData = {
   series?: { name: string; points: [string | number, number][] }[]
   events?: { time: string; label: string; ref: string }[]
   examples?: { ref: string; quote: string; note: string }[]
+  nodes?: DiagramNode[]
+  edges?: DiagramEdge[]
 }
 
-/** What the analyst did to a card, from .thimble-chat/notes/<id>.json, and what the mod is doing to it now. */
-export type CardMeta = { starred?: boolean; hidden?: boolean; edited?: boolean; busy?: string; error?: string }
+/** What the mod is doing to a card now: running its script, or why the last run failed. */
+export type CardMeta = { busy?: string; error?: string }
 
-/** One thing a pointer can pick on a card: what the readout says and what a click puts in the prompt or opens. */
-export type Item = { label: string; value: string; cite: string; open: string }
+/** What a pointer can pick on a card: what the readout says, the citation a click puts in the prompt, the place it
+ *  opens, and how it reaches the gestures (`kind` and `text`, the shown value or words, of its Target). */
+export type Item = { label: string; value: string; cite: string; open: string; kind: 'mark' | 'row' | 'record' | 'node'; text: string }
 
 export type Layout = { lines: Line[]; items: Item[]; hit: (x: number, y: number) => number }
-
-export const COLORS = {
-  series: ['#5ba3e0', '#e8a33d', '#6cc644', '#d16ba5', '#9f8fef', '#4ec9b0'],
-  accent: '#ffd166',
-  dim: '#8b949e',
-  rule: '#3d444d',
-  cursor: '#30363d',
-  code: '#e6b450',
-  chip: { ok: '#2d7d46', differs: '#a8730f', missing: '#b3392f', unchecked: '#57606a', pending: '#57606a' } as Record<string, string>,
-  chipFg: '#ffffff',
-}
 
 export function statusColor(status: string): string {
   return COLORS.chip[status] ?? COLORS.chip.pending!
@@ -291,15 +288,17 @@ function barLayout(card: CardData, cols: number, hover: number): Layout {
     value: `${fmt(r.value)} ${col}`,
     cite: cite(fmt(r.value), `card:${card.id}#${col}/${r.label}`),
     open: `card:${card.id}#${col}/${r.label}`,
+    kind: 'mark',
+    text: fmt(r.value),
   }))
   rows.forEach((r, i) => {
     const on = i === hover
-    const color = on ? COLORS.accent : COLORS.series[Math.max(0, groups.indexOf(r.group)) % COLORS.series.length]!
+    const color = on ? COLORS.accent : r.value < 0 ? COLORS.negative : COLORS.series[Math.max(0, groups.indexOf(r.group)) % COLORS.series.length]!
     const b = bar(r.value, max, barW)
     lines.push([
-      { s: pad(r.label, labelW), d: !on, b: on },
+      { s: pad(r.label, labelW), fg: on ? COLORS.accent : COLORS.dim, b: on },
       { s: ' ' },
-      { s: b, fg: r.value < 0 ? '#e5534b' : color },
+      { s: b, fg: color },
       { s: ' '.repeat(Math.max(1, barW - width(b) + 1)) },
       { s: pad(fmt(r.value), valueW, true), b: on },
     ])
@@ -380,7 +379,7 @@ function lineLayout(card: CardData, cols: number, hover: number, plotRows = 10):
   series.forEach((s, si) =>
     s.points.forEach((p, i) => {
       const xLabel = String(p[0])
-      items.push({ label: xLabel, value: `${s.name} ${fmt(p[1])}`, cite: cite(fmt(p[1]), `card:${card.id}#${s.name}/${xLabel}`), open: `card:${card.id}#${s.name}/${xLabel}` })
+      items.push({ label: xLabel, value: `${s.name} ${fmt(p[1])}`, cite: cite(fmt(p[1]), `card:${card.id}#${s.name}/${xLabel}`), open: `card:${card.id}#${s.name}/${xLabel}`, kind: 'mark', text: fmt(p[1]) })
       at.push({ s: si, i, cx: px(xOf(p, i)) >> 1, cy: py(p[1]) >> 2 })
     }),
   )
@@ -410,7 +409,7 @@ function lineLayout(card: CardData, cols: number, hover: number, plotRows = 10):
       const isPoint = hot && c === hot.cx && r === hot.cy
       row.push({
         s: b ? String.fromCodePoint(0x2800 + b) : isHot ? '┊' : ' ',
-        fg: isPoint ? COLORS.accent : b ? COLORS.series[Math.max(0, o) % COLORS.series.length] : COLORS.rule,
+        fg: isPoint ? COLORS.accent : b ? COLORS.series[Math.max(0, o) % COLORS.series.length] : COLORS.dim,
         bg: isHot ? COLORS.cursor : undefined,
         b: Boolean(isPoint),
       })
@@ -438,6 +437,8 @@ function timelineLayout(card: CardData, cols: number, hover: number): Layout {
     value: e.label,
     cite: e.ref ? `[[${e.ref}]]` : cite(e.time, `card:${card.id}#time/${i + 1}`),
     open: e.ref || `card:${card.id}#time/${i + 1}`,
+    kind: e.ref ? 'record' : 'mark',
+    text: e.ref ? e.label : e.time,
   }))
   let axisRows = 0
   if (isTime && evs.length > 1) {
@@ -463,7 +464,7 @@ function timelineLayout(card: CardData, cols: number, hover: number): Layout {
     const on = i === hover
     lines.push([
       { s: on ? '▶ ' : '  ', fg: COLORS.accent },
-      { s: pad(e.time, tW), fg: on ? COLORS.accent : COLORS.dim },
+      { s: pad(e.time, tW), fg: on ? COLORS.accent : COLORS.dim, b: on },
       { s: '  ' },
       { s: cut(e.label, Math.max(8, cols - tW - 6)), b: on },
       ...(e.ref ? [{ s: ' ↗', fg: COLORS.dim }] : []),
@@ -490,7 +491,8 @@ function tableLayout(card: CardData, cols: number, hover: number): Layout {
   rows.forEach(r =>
     heads.forEach((h, c) => {
       const v = fmt(r[c])
-      items.push({ label: `${fmt(r[0])} · ${h}`, value: v, cite: c === 0 ? v : cite(v, `card:${card.id}#${h}/${fmt(r[0])}`), open: `card:${card.id}#${h}/${fmt(r[0])}` })
+      const ref = `card:${card.id}#${h}/${fmt(r[0])}`
+      items.push({ label: `${fmt(r[0])} · ${h}`, value: v, cite: c === 0 ? v : cite(v, ref), open: ref, kind: c === 0 ? 'row' : 'mark', text: v })
     }),
   )
   const hr = hover >= 0 ? Math.floor(hover / Math.max(1, heads.length)) : -1
@@ -502,7 +504,7 @@ function tableLayout(card: CardData, cols: number, hover: number): Layout {
   rows.forEach((r, ri) => {
     lines.push(
       heads.flatMap((_, c): Seg[] => [
-        { s: cell(fmt(r[c]), c), bg: ri === hr ? COLORS.cursor : undefined, fg: ri === hr && c === hc ? COLORS.accent : c === 0 ? undefined : undefined, b: ri === hr && c === hc },
+        { s: cell(fmt(r[c]), c), bg: ri === hr ? COLORS.cursor : undefined, b: ri === hr && c === hc, u: ri === hr && c === hc },
         ...(c < heads.length - 1 ? [{ s: '  ', bg: ri === hr ? COLORS.cursor : undefined }] : []),
       ]),
     )
@@ -525,11 +527,11 @@ function exampleLayout(card: CardData, cols: number, hover: number): Layout {
   const exs = (card.examples ?? []).slice(0, 8)
   const lines: Line[] = []
   const owner: number[] = []
-  const items: Item[] = exs.map(e => ({ label: e.ref, value: e.note || e.quote.slice(0, 60), cite: `[[${e.ref}]]`, open: e.ref }))
+  const items: Item[] = exs.map(e => ({ label: e.ref, value: e.note || e.quote.slice(0, 60), cite: `[[${e.ref}]]`, open: e.ref, kind: 'record', text: e.note || e.quote }))
   exs.forEach((e, i) => {
     const on = i === hover
     const color = on ? COLORS.accent : COLORS.series[0]
-    lines.push([{ s: '▍ ', fg: color }, ...(e.note ? [{ s: cut(e.note, cols - 4 - width(e.ref) - 2), b: true }, { s: '  ' }] : []), { s: e.ref, fg: COLORS.dim, u: on }])
+    lines.push([{ s: '▍ ', fg: color }, ...(e.note ? [{ s: cut(e.note, cols - 4 - width(e.ref) - 2), b: true }, { s: '  ' }] : []), { s: e.ref, fg: on ? COLORS.link : COLORS.dim, u: on }])
     owner.push(i)
     const words = e.quote.replace(/\s+/g, ' ').trim()
     const room = Math.max(10, cols - 4)
@@ -554,6 +556,442 @@ function exampleLayout(card: CardData, cols: number, hover: number): Layout {
   return { lines, items, hit: (_x, y) => owner[y] ?? -1 }
 }
 
+// ---------------------------------------------------------------------------------------- diagrams
+
+export const MAX_NODES = 40
+export const MAX_EDGES = 80
+const NODE_LABEL = 24 // characters of a node's label its box shows; the readout has the whole label
+const NODE_LABEL_MIN = 12
+const EDGE_INLINE = 24 // a longer edge label, or one with no room beside its edge, is a numbered note under the drawing
+
+/**
+ * Nodes in layers by dependency, as thimble's canvas lays out a diagram: a node with no incoming edge sits in layer 0,
+ * every other one layer past its furthest predecessor. A cycle is broken at the node with the fewest unplaced
+ * predecessors.
+ */
+export function layerGraph(ids: readonly string[], edges: readonly DiagramEdge[]): Map<string, number> {
+  const known = new Set(ids)
+  const preds = new Map<string, Set<string>>(ids.map(id => [id, new Set<string>()]))
+  for (const e of edges) if (known.has(e.source) && known.has(e.target) && e.source !== e.target) preds.get(e.target)!.add(e.source)
+  const layer = new Map<string, number>()
+  const left = new Set(ids)
+  while (left.size) {
+    let placed = 0
+    for (const id of [...left]) {
+      const ps = [...preds.get(id)!]
+      if (ps.every(p => layer.has(p))) {
+        layer.set(id, ps.reduce((m, p) => Math.max(m, layer.get(p)! + 1), 0))
+        left.delete(id)
+        placed++
+      }
+    }
+    if (placed) continue
+    const unplaced = (id: string) => [...preds.get(id)!].filter(p => !layer.has(p)).length
+    const pick = [...left].sort((a, b) => unplaced(a) - unplaced(b))[0]!
+    layer.set(pick, [...preds.get(pick)!].reduce((m, p) => (layer.has(p) ? Math.max(m, layer.get(p)! + 1) : m), 0))
+    left.delete(pick)
+  }
+  return layer
+}
+
+/** Lefts for a row of boxes of widths `w`, each as near its wanted centre as the gaps allow, inside [0, room]. */
+function placeRow(w: readonly number[], want: readonly number[], room: number, gap: readonly number[]): number[] {
+  const x = w.map((wi, i) => Math.round(want[i]! - wi / 2))
+  for (let i = 0; i < x.length; i++) x[i] = Math.max(x[i]!, i ? x[i - 1]! + w[i - 1]! + gap[i - 1]! : 0)
+  for (let i = x.length - 1; i >= 0; i--) x[i] = Math.min(x[i]!, i < x.length - 1 ? x[i + 1]! - gap[i]! - w[i]! : room - w[i]!)
+  for (let i = 0; i < x.length; i++) x[i] = Math.max(x[i]!, i ? x[i - 1]! + w[i - 1]! + gap[i - 1]! : 0)
+  return x
+}
+
+const U = 1
+const D = 2
+const L = 4
+const R = 8
+const JOIN: Record<number, string> = {
+  [U | D]: '│', [L | R]: '─', [D | R]: '╭', [D | L]: '╮', [U | R]: '╰', [U | L]: '╯',
+  [U | D | R]: '├', [U | D | L]: '┤', [D | L | R]: '┬', [U | L | R]: '┴', [U | D | L | R]: '┼',
+  [U]: '│', [D]: '│', [L]: '─', [R]: '─',
+}
+
+/**
+ * A diagram drawn with box-drawing characters, top to bottom, a layer of nodes to a row (layerGraph). A row too wide
+ * for the card cuts its labels, then moves nodes to a row of their own. An edge runs from a port on its source's bottom
+ * border to its target's top border, where the arrow is (an edge drawn against the layers has its arrow at the top
+ * end); an edge across several rows passes each one as a vertical line. Between two rows each edge that bends takes a
+ * track of its own. A short edge label is written beside its edge, a long one is a numbered note under the drawing.
+ * Items: the nodes in order, then the edges.
+ */
+function diagramLayout(card: CardData, cols: number, hover: number): Layout {
+  const nodes = (card.nodes ?? []).slice(0, MAX_NODES)
+  const ids = nodes.map(n => n.id)
+  const at = new Map(ids.map((id, i) => [id, i]))
+  const edges = (card.edges ?? []).slice(0, MAX_EDGES).filter(e => at.has(e.source) && at.has(e.target) && e.source !== e.target)
+  const N = nodes.length
+  const layer = layerGraph(ids, edges)
+  const depth = () => Math.max(0, ...layer.values())
+  const insertRow = (after: number) => {
+    for (const [id, l] of layer) if (l > after) layer.set(id, l + 1)
+  }
+  // an edge between two nodes of one row (left by a broken cycle): its target moves to a row of its own below
+  for (let guard = 0; guard < N; guard++) {
+    const flat = edges.find(e => layer.get(e.source) === layer.get(e.target))
+    if (!flat) break
+    const l = layer.get(flat.source)!
+    insertRow(l)
+    layer.set(flat.target, l + 1)
+  }
+
+  // boxes: a row too wide for the card cuts its labels down to NODE_LABEL_MIN characters first
+  const labelW = nodes.map(n => Math.max(1, Math.min(width(n.label), NODE_LABEL, cols - 4)))
+  const boxW = (i: number) => labelW[i]! + 4
+  const GAP = 3
+  for (let l = 0; l <= depth(); l++) {
+    const row = ids.map((_, i) => i).filter(i => layer.get(ids[i]!) === l)
+    if (row.reduce((a, i) => a + boxW(i), 0) + GAP * Math.max(0, row.length - 1) <= cols) continue
+    const each = Math.max(NODE_LABEL_MIN, Math.floor((cols - GAP * (row.length - 1)) / row.length) - 4)
+    for (const i of row) labelW[i] = Math.min(labelW[i]!, each)
+  }
+
+  // entries of each row: nodes and the points where longer edges pass; segments join entries of adjacent rows
+  type Entry = { key: string; node: number; edge: number; w: number; x: number }
+  type SegT = { edge: number; up: Entry; low: Entry; xa: number; xb: number; track: number }
+  const gaps = (r: Entry[]) => r.slice(0, -1).map((en, i) => (en.node < 0 || r[i + 1]!.node < 0 ? 2 : GAP))
+  const rowWidth = (r: Entry[]) => r.reduce((a, en) => a + en.w, 0) + gaps(r).reduce((a, b) => a + b, 0)
+  const build = () => {
+    const rows: Entry[][] = Array.from({ length: depth() + 1 }, () => [])
+    nodes.forEach((_, i) => rows[layer.get(ids[i]!)!]!.push({ key: `n${i}`, node: i, edge: -1, w: boxW(i), x: 0 }))
+    const dirs = edges.map(e => {
+      const rev = layer.get(e.source)! > layer.get(e.target)!
+      return { rev, top: at.get(rev ? e.target : e.source)!, bottom: at.get(rev ? e.source : e.target)! }
+    })
+    const entryOf = new Map<string, Entry>()
+    for (const r of rows) for (const en of r) entryOf.set(en.key, en)
+    const segs: SegT[] = []
+    edges.forEach((_, k) => {
+      const { top, bottom } = dirs[k]!
+      const l0 = layer.get(ids[top]!)!
+      const l1 = layer.get(ids[bottom]!)!
+      let prev = entryOf.get(`n${top}`)!
+      for (let l = l0 + 1; l <= l1; l++) {
+        let cur: Entry
+        if (l === l1) cur = entryOf.get(`n${bottom}`)!
+        else {
+          cur = { key: `d${k}.${l}`, node: -1, edge: k, w: 1, x: 0 }
+          rows[l]!.push(cur)
+        }
+        segs.push({ edge: k, up: prev, low: cur, xa: 0, xb: 0, track: -1 })
+        prev = cur
+      }
+    })
+    return { rows, dirs, segs }
+  }
+  // then a row still too wide, with the lines passing it, moves nodes to a row of its own below: nodes with no edge
+  // onward first, each taking its box off the row and adding a line for each edge reaching it from above
+  let built = build()
+  for (let guard = 0; guard < N; guard++) {
+    const over = built.rows.findIndex(r => r.filter(en => en.node >= 0).length > 1 && rowWidth(r) > cols)
+    if (over < 0) break
+    const r = built.rows[over]!
+    const onward = (i: number) => edges.some((e, k) => at.get(e.source) === i && built.dirs[k]!.top === i)
+    const order = r.filter(en => en.node >= 0).map(en => en.node).sort((a, b) => Number(onward(b)) - Number(onward(a)) || a - b)
+    let w = rowWidth(r)
+    const move: number[] = []
+    while (w > cols && order.length > 1) {
+      const i = order.pop()!
+      const reaching = edges.filter((e, k) => built.dirs[k]!.bottom === i && layer.get(ids[built.dirs[k]!.top]!)! < over).length
+      w -= boxW(i) + GAP - reaching * 3
+      move.push(i)
+    }
+    insertRow(over)
+    for (const i of move) layer.set(ids[i]!, over + 1)
+    built = build()
+  }
+  const { rows, dirs, segs } = built
+  const rowOf = new Map<string, number>()
+  rows.forEach((r, l) => r.forEach(en => rowOf.set(en.key, l)))
+  const ups = new Map<string, SegT[]>()
+  const lows = new Map<string, SegT[]>()
+  for (const s of segs) {
+    lows.set(s.up.key, [...(lows.get(s.up.key) ?? []), s])
+    ups.set(s.low.key, [...(ups.get(s.low.key) ?? []), s])
+  }
+
+  // order each row by the mean position of its neighbours, a few sweeps down and up
+  const pos = new Map<string, number>()
+  const index = () => rows.forEach(r => r.forEach((en, i) => pos.set(en.key, i)))
+  index()
+  const mean = (xs: number[], dflt: number) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : dflt)
+  for (let sweep = 0; sweep < 4; sweep++) {
+    for (let l = 1; l < rows.length; l++) {
+      rows[l]!.sort((a, b) => mean((ups.get(a.key) ?? []).map(s => pos.get(s.up.key)!), pos.get(a.key)!) - mean((ups.get(b.key) ?? []).map(s => pos.get(s.up.key)!), pos.get(b.key)!))
+      index()
+    }
+    for (let l = rows.length - 2; l >= 0; l--) {
+      rows[l]!.sort((a, b) => mean((lows.get(a.key) ?? []).map(s => pos.get(s.low.key)!), pos.get(a.key)!) - mean((lows.get(b.key) ?? []).map(s => pos.get(s.low.key)!), pos.get(b.key)!))
+      index()
+    }
+  }
+
+  // x: packed, then each row pulled toward its neighbours' centres
+  const centre = (en: Entry) => en.x + (en.w - 1) / 2
+  for (const r of rows) placeRow(r.map(en => en.w), r.map(() => 0), Number.POSITIVE_INFINITY, gaps(r)).forEach((x, i) => (r[i]!.x = x))
+  const room = Math.max(cols, ...rows.map(rowWidth))
+  const pull = (l: number, near: Map<string, SegT[]>, other: (s: SegT) => Entry) => {
+    const r = rows[l]!
+    const want = r.map(en => mean((near.get(en.key) ?? []).map(s => centre(other(s))), centre(en)) + 0.5)
+    placeRow(r.map(en => en.w), want, room, gaps(r)).forEach((x, i) => (r[i]!.x = x))
+  }
+  for (let pass = 0; pass < 2; pass++) {
+    for (let l = 1; l < rows.length; l++) pull(l, ups, s => s.up)
+    for (let l = rows.length - 2; l >= 0; l--) pull(l, lows, s => s.low)
+  }
+  for (let l = 1; l < rows.length; l++) pull(l, ups, s => s.up)
+  // left-aligned, with up to 12 columns kept free on the left for labels where the width allows
+  const minX = Math.min(...rows.flatMap(r => r.map(en => en.x)))
+  const maxX = Math.max(...rows.flatMap(r => r.map(en => en.x + en.w)))
+  const shift = Math.max(0, minX - Math.max(0, Math.min(12, cols - (maxX - minX))))
+  for (const r of rows) for (const en of r) en.x -= shift
+
+  // ports: a node's edges leave its bottom border and reach its top border at columns spread about its centre, or
+  const spread = (en: Entry, list: SegT[], other: (s: SegT) => Entry, set: (s: SegT, x: number) => void) => {
+    const sorted = [...list].sort((a, b) => centre(other(a)) - centre(other(b)))
+    if (en.node < 0) {
+      for (const s of sorted) set(s, en.x)
+      return
+    }
+    // more than three edges share one port, so they fan out from one track as a bus
+    const k = sorted.length
+    const step = k > 1 && k <= 3 ? Math.max(0, Math.min(4, Math.floor((en.w - 3) / (k - 1)))) : 0
+    const first = Math.round(centre(en) - (step * (k - 1)) / 2)
+    sorted.forEach((s, j) => set(s, Math.min(en.x + en.w - 2, Math.max(en.x + 1, first + j * step))))
+  }
+  for (const r of rows) {
+    for (const en of r) {
+      spread(en, lows.get(en.key) ?? [], s => s.low, (s, x) => (s.xa = x))
+      spread(en, ups.get(en.key) ?? [], s => s.up, (s, x) => (s.xb = x))
+    }
+  }
+
+  // tracks: a bending segment's horizontal run, on a row of the channel no other unrelated run overlaps; a segment whose
+  // top column another's bottom column shares runs above it, so their verticals do not meet
+  const related = (a: SegT, b: SegT) => a.edge === b.edge || (a.up === b.up && a.xa === b.xa) || (a.low === b.low && a.xb === b.xb)
+  const channels = rows.slice(0, -1).map((_, l) => {
+    const mine = segs.filter(s => rowOf.get(s.up.key) === l)
+    let left = mine.filter(s => s.xa !== s.xb).sort((a, b) => Math.min(a.xa, a.xb) - Math.min(b.xa, b.xb))
+    let tracks = 0
+    while (left.length) {
+      let free = left.filter(s => !left.some(o => o !== s && o.xa === s.xb && !related(o, s)))
+      if (!free.length) free = [left[0]!]
+      const on: SegT[] = []
+      for (const s of free) {
+        const [a0, a1] = [Math.min(s.xa, s.xb), Math.max(s.xa, s.xb)]
+        const fits = on.every(o => related(o, s) || a1 < Math.min(o.xa, o.xb) || Math.max(o.xa, o.xb) < a0)
+        if (fits) {
+          s.track = tracks
+          on.push(s)
+        }
+      }
+      left = left.filter(s => s.track < 0)
+      tracks++
+    }
+    return { segs: mine, tracks }
+  })
+  const lastSeg = edges.map((_, k) => segs.filter(s => s.edge === k).at(-1)!)
+  const labelled = (l: number) => channels[l]!.segs.some(s => s === lastSeg[s.edge] && edges[s.edge]!.label)
+  const heights = channels.map((c, l) => Math.max(1, c.tracks + (labelled(l) ? 1 : 0)))
+  const top: number[] = []
+  let y = 0
+  rows.forEach((_, l) => {
+    top.push(y)
+    y += 3 + (heights[l] ?? 0)
+  })
+  const H = y
+  const Wd = Math.max(1, ...rows.flatMap(r => r.map(en => en.x + en.w)))
+
+  // the grid: each cell's line directions per segment, then boxes and text over them
+  type Mark = { seg: number; d: number }
+  type CellT = { marks: Mark[]; ch?: string; item: number; kind: 'line' | 'box' | 'label' | 'arrow' | 'text' | '' ; b?: boolean; i?: boolean }
+  const grid: CellT[][] = Array.from({ length: H }, () => Array.from({ length: Wd }, () => ({ marks: [], item: -1, kind: '' as const })))
+  const mark = (x: number, yy: number, seg: number, d: number) => {
+    const c = grid[yy]?.[x]
+    if (!c) return
+    const m = c.marks.find(q => q.seg === seg)
+    if (m) m.d |= d
+    else c.marks.push({ seg, d })
+  }
+  segs.forEach((s, si) => {
+    const l = rowOf.get(s.up.key)!
+    const y0 = top[l]! + 3
+    const h = heights[l]!
+    if (s.up.node < 0) for (let k = 0; k < 3; k++) mark(s.xa, top[l]! + k, si, U | D)
+    if (s.xa === s.xb) {
+      for (let k = 0; k < h; k++) mark(s.xa, y0 + k, si, U | D)
+      return
+    }
+    const t = y0 + s.track
+    for (let yy = y0; yy < t; yy++) mark(s.xa, yy, si, U | D)
+    const dir = s.xb > s.xa ? 1 : -1
+    mark(s.xa, t, si, U | (dir > 0 ? R : L))
+    for (let x = s.xa + dir; x !== s.xb; x += dir) mark(x, t, si, L | R)
+    mark(s.xb, t, si, D | (dir > 0 ? L : R))
+    for (let yy = t + 1; yy < y0 + h; yy++) mark(s.xb, yy, si, U | D)
+  })
+  for (const c of grid.flat()) {
+    if (!c.marks.length) continue
+    c.kind = 'line'
+    c.item = N + segs[c.marks[0]!.seg]!.edge
+    const groups: Mark[][] = []
+    for (const m of c.marks) {
+      const g = groups.find(gr => gr.some(o => related(segs[o.seg]!, segs[m.seg]!)))
+      if (g) g.push(m)
+      else groups.push([m])
+    }
+    const bits = groups.map(g => g.reduce((a, m) => a | m.d, 0))
+    // two unrelated lines crossing: the vertical one is drawn whole, so it does not read as a junction
+    const vert = groups.findIndex((_, j) => bits[j] === (U | D))
+    if (groups.length > 1 && vert >= 0 && bits.some(b => b === (L | R))) {
+      c.ch = '│'
+      c.item = N + segs[groups[vert]![0]!.seg]!.edge
+    } else c.ch = JOIN[bits.reduce((a, b) => a | b, 0)] ?? '┼'
+  }
+  // boxes
+  rows.forEach((r, l) => {
+    for (const en of r) {
+      if (en.node < 0) continue
+      const i = en.node
+      const label = cut(nodes[i]!.label, labelW[i]!)
+      const inner = en.w - 2
+      const lines = ['╭' + '─'.repeat(inner) + '╮', '│ ' + label + ' '.repeat(Math.max(0, inner - 1 - width(label))) + '│', '╰' + '─'.repeat(inner) + '╯']
+      lines.forEach((text, k) => {
+        let x = en.x
+        for (const ch of text) {
+          const c = grid[top[l]! + k]?.[x]
+          if (c) Object.assign(c, { ch, item: i, kind: k === 1 && x > en.x + 1 && x < en.x + en.w - 2 ? 'text' : 'box', marks: [] })
+          x += 1
+        }
+      })
+    }
+  })
+  // ports and arrows on the borders
+  segs.forEach(s => {
+    const k = s.edge
+    const { rev } = dirs[k]!
+    const lu = rowOf.get(s.up.key)!
+    if (s.up.node >= 0) {
+      const c = grid[top[lu]! + 2]![s.xa]!
+      Object.assign(c, rev ? { ch: '▲', kind: 'arrow', item: N + k } : { ch: c.ch === '▲' ? '▲' : '┬', kind: c.ch === '▲' ? 'arrow' : 'box' })
+    }
+    if (s.low.node >= 0) {
+      const c = grid[top[lu + 1]!]![s.xb]!
+      Object.assign(c, rev ? { ch: c.ch === '▼' ? '▼' : '┴', kind: c.ch === '▼' ? 'arrow' : 'box' } : { ch: '▼', kind: 'arrow', item: N + k })
+    }
+  })
+
+  // edge labels: on the edge's horizontal run when it is long enough, else beside its last vertical in the channel's
+  // label row, else a numbered note
+  const free = (x: number, yy: number) => x >= 0 && x < cols && (grid[yy]?.[x] === undefined || (grid[yy]![x]!.kind === '' && !grid[yy]![x]!.marks.length))
+  const write = (x: number, yy: number, text: string, item: number) => {
+    let cx = x
+    for (const ch of text) {
+      while (grid[yy]!.length <= cx) grid[yy]!.push({ marks: [], item: -1, kind: '' })
+      Object.assign(grid[yy]![cx]!, { ch, item, kind: 'label', i: true, marks: [] })
+      cx += 1
+    }
+  }
+  const notes: { n: number; edge: number }[] = []
+  edges.forEach((e, k) => {
+    if (!e.label) return
+    const s = lastSeg[k]!
+    const l = rowOf.get(s.up.key)!
+    const y0 = top[l]! + 3
+    const text = e.label
+    const w = width(text)
+    let placed = false
+    if (w <= EDGE_INLINE && s.xa !== s.xb && Math.abs(s.xb - s.xa) - 1 >= w + 2) {
+      const t = y0 + s.track
+      const x = Math.min(s.xa, s.xb) + 1 + Math.floor((Math.abs(s.xb - s.xa) - 1 - (w + 2)) / 2)
+      let clear = true
+      for (let cx = x; cx < x + w + 2; cx++) clear &&= grid[t]![cx]!.marks.every(m => segs[m.seg]!.edge === k && m.d === (L | R))
+      if (clear) {
+        write(x, t, ` ${text} `, N + k)
+        placed = true
+      }
+    }
+    const row = y0 + heights[l]! - 1
+    // a place beside the vertical with a blank cell on each side of the text
+    const fits = (x0: number, n: number) => {
+      if (x0 < 0 || x0 + n > cols) return false
+      for (let cx = x0 - 1; cx <= x0 + n; cx++) if (cx >= 0 && cx < cols && !free(cx, row)) return false
+      return true
+    }
+    const beside = (n: number) => (fits(s.xb + 2, n) ? s.xb + 2 : fits(s.xb - 1 - n, n) ? s.xb - 1 - n : -1)
+    if (!placed && w <= EDGE_INLINE) {
+      const x = beside(w)
+      if (x >= 0) {
+        write(x, row, text, N + k)
+        placed = true
+      }
+    }
+    if (placed) return
+    const n = notes.length + 1
+    notes.push({ n, edge: k })
+    const x = beside(String(n).length)
+    if (x >= 0) write(x, row, String(n), N + k)
+  })
+
+  // the grid as lines; the hovered node or edge drawn in the accent colour
+  const hotNode = hover >= 0 && hover < N ? hover : -1
+  const hotEdge = hover >= N ? hover - N : -1
+  const owners: number[][] = grid.map(r => r.map(c => c.item))
+  const lines: Line[] = grid.map(r => {
+    const line: Line = []
+    for (const c of r) {
+      const ch = c.ch ?? ' '
+      let seg: Seg
+      if (c.kind === 'text') seg = { s: ch, b: c.item === hotNode, fg: c.item === hotNode ? COLORS.accent : undefined }
+      else if (c.kind === 'box') seg = { s: ch, fg: c.item === hotNode ? COLORS.accent : COLORS.dim, b: c.item === hotNode }
+      else if (c.kind === 'line' || c.kind === 'arrow' || c.kind === 'label') {
+        const on = c.item - N === hotEdge && hotEdge >= 0
+        seg = { s: ch, fg: on ? COLORS.accent : COLORS.dim, b: on, i: c.kind === 'label' }
+      } else seg = { s: ch }
+      const prev = line.at(-1)
+      if (prev && prev.fg === seg.fg && prev.b === seg.b && prev.i === seg.i) prev.s += seg.s
+      else line.push(seg)
+    }
+    return line
+  })
+  for (const { n, edge } of notes) {
+    const e = edges[edge]!
+    const on = edge === hotEdge
+    const head = `${n}  ${cut(nodes[at.get(e.source)!]!.label, 28)} → ${cut(nodes[at.get(e.target)!]!.label, 28)}: `
+    lines.push([{ s: head, fg: on ? COLORS.accent : COLORS.dim, b: on }, { s: cut(e.label ?? '', Math.max(10, cols - width(head))), i: true, fg: on ? COLORS.accent : undefined }])
+    owners.push(new Array<number>(cols).fill(N + edge))
+  }
+  const items: Item[] = [
+    ...nodes.map(
+      (n): Item => ({
+        label: n.label,
+        value: [n.detail, n.ref].filter(Boolean).join(' · '),
+        cite: n.ref ? `[[${n.ref}]]` : cite(n.label, `card:${card.id}#node/${n.id}`),
+        open: n.ref || `card:${card.id}#node/${n.id}`,
+        kind: 'node',
+        text: n.label,
+      }),
+    ),
+    ...edges.map(
+      (e, k): Item => ({
+        label: `${nodes[at.get(e.source)!]!.label} → ${nodes[at.get(e.target)!]!.label}`,
+        value: e.label ?? '',
+        cite: `[[card:${card.id}#edge/${k + 1}]]`,
+        open: `card:${card.id}#edge/${k + 1}`,
+        kind: 'mark',
+        text: '',
+      }),
+    ),
+  ]
+  return { lines, items, hit: (x, yy) => owners[yy]?.[x] ?? -1 }
+}
+
 export function cardLayout(card: CardData, cols: number, hover: number, plotRows?: number): Layout {
   switch (card.kind) {
     case 'bar':
@@ -566,25 +1004,9 @@ export function cardLayout(card: CardData, cols: number, hover: number, plotRows
       return tableLayout(card, cols, hover)
     case 'example':
       return exampleLayout(card, cols, hover)
+    case 'diagram':
+      return diagramLayout(card, cols, hover)
     default:
       return { lines: [[{ s: `unknown card kind ${card.kind}`, fg: COLORS.dim }]], items: [], hit: () => -1 }
-  }
-}
-
-/** What a card's readout says when nothing is under the pointer. */
-export function cardHint(card: CardData): string {
-  switch (card.kind) {
-    case 'bar':
-      return 'hover a bar to read it, click to cite it'
-    case 'line':
-      return 'hover the line to read a point, click to cite it'
-    case 'table':
-      return 'hover a cell to read it, click to cite it'
-    case 'timeline':
-      return 'hover an event, click to open its record'
-    case 'example':
-      return 'click a record to open it'
-    default:
-      return ''
   }
 }

@@ -384,14 +384,16 @@ export function sentenceOf(text: string, raw: string): string {
 
 // ---------------------------------------------------------------------------------------- card files
 
-export const CARD_KINDS = ['bar', 'line', 'timeline', 'table', 'example'] as const
+export const CARD_KINDS = ['bar', 'line', 'timeline', 'table', 'example', 'diagram'] as const
+export const MAX_DIAGRAM_NODES = 40
+export const MAX_DIAGRAM_EDGES = 80
 
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v)
 const isNum = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v)
 const isStr = (v: unknown): v is string => typeof v === 'string'
 const isCell = (v: unknown) => v === null || isStr(v) || isNum(v) || typeof v === 'boolean'
 
-/** Why a card file cannot be drawn, or null when it fits its kind's spec. The mod draws only these five typed specs;
+/** Why a card file cannot be drawn, or null when it fits its kind's spec. The mod draws only these six typed specs;
  *  a card that fails is drawn as this error, and main is asked to fix it. */
 export function validateCard(c: unknown, id?: string): string | null {
   if (!isObj(c)) return 'the file is not a JSON object'
@@ -439,6 +441,21 @@ export function validateCard(c: unknown, id?: string): string | null {
       if (!exs?.length) return 'an example card needs examples'
       const bad = exs.findIndex(e => !isObj(e) || !isStr(e.ref) || !/#L\d+/.test(e.ref) || !isStr(e.quote))
       if (bad >= 0) return `example ${bad + 1} needs a ref to lines (file#L12) and a quote`
+      break
+    }
+    case 'diagram': {
+      const nodes = list('nodes')
+      const edges = list('edges') ?? []
+      if (!nodes?.length) return 'a diagram card needs nodes'
+      if (nodes.length > MAX_DIAGRAM_NODES) return `a diagram card shows at most ${MAX_DIAGRAM_NODES} nodes`
+      if (edges.length > MAX_DIAGRAM_EDGES) return `a diagram card shows at most ${MAX_DIAGRAM_EDGES} edges`
+      const opt = (v: unknown) => v === undefined || isStr(v)
+      const bad = nodes.findIndex(n => !isObj(n) || !isStr(n.id) || !n.id || !isStr(n.label) || !n.label.trim() || !opt(n.ref) || !opt(n.detail))
+      if (bad >= 0) return `node ${bad + 1} needs an id and a label (ref and detail are optional text)`
+      const ids = new Set(nodes.map(n => (n as { id: string }).id))
+      if (ids.size !== nodes.length) return 'each node needs an id of its own'
+      const badE = edges.findIndex(e => !isObj(e) || !isStr(e.source) || !isStr(e.target) || !ids.has(e.source) || !ids.has(e.target) || !opt(e.label))
+      if (badE >= 0) return `edge ${badE + 1} needs a source and a target among the node ids`
       break
     }
   }

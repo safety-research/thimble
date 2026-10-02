@@ -5,17 +5,18 @@
 //   code, every number cited.
 // - Cards: main's Python writes a card with helper/tcard.py (.thimble-chat/cards/<id>.json); a reply line holding only
 //   [[card:<id>]] is drawn as the card's panel there, between the reply's text, by the Client card.tsx. A card is one
-//   of five typed specs; one that does not validate is drawn as an error, and main is asked to fix it.
+//   of six typed specs; one that does not validate is drawn as an error, and main is asked to fix it. The helper
+//   writes cards to the session's folder (THIMBLE_CHAT_ROOT, set at session.start), wherever the script runs.
 // - Citations: every [[...]] of a reply is a chip coloured by what helper/resolve.py found at the ref (para.tsx).
 //   A click opens the citation panel (the cited lines, highlighted), which can ask main for a verification script and
 //   then runs it; the chip shows the outcome.
-// - Direct manipulation: a card's params re-run its script; rerun, star, hide, edit the takeaway, ask a side thread.
+// - Direct manipulation: a card's params re-run its script; presses on a card go to the gestures (gestures.tsx).
 // - Side threads (threads.tsx): a subagent answers out of main's chat; its result is offered back as one line.
 // - Bash results: each output is saved (.thimble-chat/calls/<id>.json) and main is told its ref, so it can cite a line.
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, RenderElement, ResolveInput } from 'claude-code'
 
-import type { ChatNote, ChatRun, ChatThread, ChatVerdict, ChatVerify } from '../types'
+import type { ChatRun, ChatThread, ChatVerdict, ChatVerify } from '../types'
 import { COLORS, blockLayout, cardLayout, cut, statusColor } from './draw'
 import type { CardData, CardMeta, ChipView } from './draw'
 import { chipLabel, cid, citations, clip, embeddedCards, forMain, fromMod, needsDrawing, parseReply, scriptResult, sentenceOf, shownMatches, takeawayAfter, threadBody, unframed, validateCard, valueIn } from './lib'
@@ -27,7 +28,6 @@ type Dollar = EngineInterface
 
 const VERDICTS = { plugin: 'thimble-chat', key: 'verdicts' } as const
 const VERIFY = { plugin: 'thimble-chat', key: 'verify' } as const
-const NOTES = { plugin: 'thimble-chat', key: 'notes' } as const
 const RUNS = { plugin: 'thimble-chat', key: 'runs' } as const
 const THREADS = { plugin: 'thimble-chat', key: 'threads' } as const
 const ENDS = { plugin: 'thimble-chat', key: 'ends' } as const
@@ -39,14 +39,12 @@ const paneCardA = atom({ plugin: 'thimble-chat', key: 'paneCard' } as const, '')
 const paneModeA = atom({ plugin: 'thimble-chat', key: 'paneMode' } as const, '')
 const pickedA = atom({ plugin: 'thimble-chat', key: 'picked' } as const, '')
 const hoverA = atom({ plugin: 'thimble-chat', key: 'hover' } as const, '')
-const editA = atom({ plugin: 'thimble-chat', key: 'edit' } as const, null)
 const bandA = atom({ plugin: 'thimble-chat', key: 'band' } as const, false)
 const threadA = atom({ plugin: 'thimble-chat', key: 'thread' } as const, '')
 const threadListA = atom({ plugin: 'thimble-chat', key: 'threadList' } as const, [])
 
 const CITE_PANE = 'thimble-cite'
 const CARD_PANE = 'thimble-card'
-const EDIT_PANE = 'thimble-edit'
 const THREAD_PANE = 'thimble-thread'
 const HOME = '.thimble-chat'
 const CARD_MAX_COLS = 120
@@ -69,9 +67,10 @@ let cwd = ''
 const known = new Map<string, Citation>() // every citation seen, by id
 const replyOf = new Map<string, string>() // a citation's id -> the reply text it was seen in
 const cardReply = new Map<string, string>() // a card's id -> the reply text that embeds it
-const cards = new Map<string, { mtime: number; data: CardData | null; error: string }>()
+const cards = new Map<string, { mtime: number; data: CardData | null; error: string; why: string }>()
 const pointerLog: string[] = []
 const byAgent = new Map<string, string>() // a side thread's subagent id -> the thread's id
+let lastCards: string[] = [] // the cards of main's last reply that embeds any, in order
 
 async function paths($: Dollar): Promise<void> {
   if (!root) root = $.plugin.root
@@ -91,8 +90,11 @@ async function ensureGuide($: Dollar): Promise<string> {
   return guide
 }
 
-/** A card file, read again when it changed; `error` says why it cannot be drawn (missing, not JSON, off its spec). */
-async function cardFile($: Dollar, id: string): Promise<{ data: CardData | null; error: string }> {
+type CardFile = { data: CardData | null; error: string; why: string }
+
+/** A card file, read again when it changed. `error` says why it cannot be drawn (missing, not JSON, off its spec) for
+ *  main, with the card's id; `why` says it for the analyst, without the id. */
+async function cardFile($: Dollar, id: string): Promise<CardFile> {
   await paths($)
   const file = `${cwd}/${HOME}/cards/${id}.json`
   let mtime = 0
@@ -100,17 +102,17 @@ async function cardFile($: Dollar, id: string): Promise<{ data: CardData | null;
     const st = await $.fs.stat(file)
     mtime = Number((st as { mtimeMs?: number }).mtimeMs ?? 0)
   } catch {
-    return { data: null, error: `no card ${id} (${HOME}/cards/${id}.json)` }
+    return { data: null, error: `no card ${id} (${HOME}/cards/${id}.json)`, why: 'its card file was not written' }
   }
   const hit = cards.get(id)
   if (hit && hit.mtime === mtime) return hit
-  let got: { mtime: number; data: CardData | null; error: string }
+  let got: CardFile & { mtime: number }
   try {
     const raw = JSON.parse(await $.fs.read(file)) as unknown
     const why = validateCard(raw, id)
-    got = why ? { mtime, data: null, error: `card ${id} does not validate: ${why}` } : { mtime, data: raw as CardData, error: '' }
+    got = why ? { mtime, data: null, error: `card ${id} does not validate: ${why}`, why } : { mtime, data: raw as CardData, error: '', why: '' }
   } catch {
-    got = { mtime, data: null, error: `card ${id}: the file is not JSON` }
+    got = { mtime, data: null, error: `card ${id}: the file is not JSON`, why: 'its card file is not JSON' }
   }
   cards.set(id, got)
   return got
@@ -120,51 +122,12 @@ async function loadCard($: Dollar, id: string): Promise<CardData | null> {
   return (await cardFile($, id)).data
 }
 
-// ------------------------------------------------------------------------------------------------ card notes
-
-async function noteOf($: Dollar, id: string): Promise<ChatNote> {
-  return (await $.state.get({ ...NOTES, id })).value ?? {}
-}
-
-async function setNote($: Dollar, id: string, patch: Partial<ChatNote>): Promise<ChatNote> {
-  await paths($)
-  const note = { ...(await noteOf($, id)), ...patch }
-  await $.state.set({ ...NOTES, id }, note)
-  try {
-    await $.fs.write(`${cwd}/${HOME}/notes/${id}.json`, JSON.stringify(note, null, 1))
-  } catch {
-    // the note stays in the session
-  }
-  return note
-}
-
-async function loadNotes($: Dollar): Promise<void> {
-  await paths($)
-  let names: string[] = []
-  try {
-    names = (await $.fs.list(`${cwd}/${HOME}/notes`)).map(x => (typeof x === 'string' ? x : (x as { name: string }).name))
-  } catch {
-    return
-  }
-  for (const name of names) {
-    const m = /^([A-Za-z0-9_-]+)\.json$/.exec(name.split('/').at(-1) ?? '')
-    if (!m) continue
-    try {
-      await $.state.set({ ...NOTES, id: m[1]! }, JSON.parse(await $.fs.read(`${cwd}/${HOME}/notes/${m[1]}.json`)) as ChatNote)
-    } catch {
-      // a broken note is skipped
-    }
-  }
-}
+// ------------------------------------------------------------------------------------------------ card runs
 
 async function metaOf($: Dollar, id: string): Promise<CardMeta> {
-  const note = await noteOf($, id)
   const run = (await $.state.get({ ...RUNS, id })).value
   // a Client's props are plain data: no undefined values
   const meta: CardMeta = {}
-  if (note.starred) meta.starred = true
-  if (note.hidden) meta.hidden = true
-  if (note.takeaway) meta.edited = true
   if (run?.busy) meta.busy = run.busy
   if (run?.error) meta.error = run.error
   return meta
@@ -349,7 +312,7 @@ async function rerunCard($: Dollar, id: string, change?: { name: string; value: 
   const script = card?.source?.script
   const prev = (await $.state.get({ ...RUNS, id })).value ?? { rev: 0 }
   if (!card || !script) {
-    $.ui.toast(`card ${id} has no script to run`)
+    $.ui.toast('this card has no script to run')
     return
   }
   if (prev.busy) return
@@ -360,7 +323,7 @@ async function rerunCard($: Dollar, id: string, change?: { name: string; value: 
   try {
     const r = await $.process.run(['python3', script], {
       cwd,
-      env: { THIMBLE_CHAT_PARAMS: JSON.stringify(values), THIMBLE_CHAT_ONLY: `${card.source.index ?? 0}:${id}` },
+      env: { THIMBLE_CHAT_PARAMS: JSON.stringify(values), THIMBLE_CHAT_ONLY: `${card.source.index ?? 0}:${id}`, THIMBLE_CHAT_ROOT: cwd },
       timeoutMs: 180000,
     })
     const f = await cardFile($, id)
@@ -484,16 +447,6 @@ async function chipView($: Dollar, c: Citation): Promise<{ view: ChipView; id: s
 
 // ------------------------------------------------------------------------------------------------ drawing a reply
 
-/** A reply's text with the analyst's edits: an edited takeaway replaces the paragraph it was written as. */
-async function withEdits($: Dollar, text: string): Promise<string> {
-  let out = text
-  for (const id of embeddedCards(text)) {
-    const note = await noteOf($, id)
-    if (note.takeaway && note.original && out.includes(note.original)) out = out.replace(note.original, `${note.takeaway} ✎`)
-  }
-  return out
-}
-
 /** A reply's blocks as thimble-chat draws them: Markdown as the engine would, cards as panels, paragraphs that hold
  *  citations as chips. Interactive (Clients) on the terminal and desktop, static elsewhere. */
 async function drawReply($: Dollar, e: ResolveInput, text: string, width: number, prefix = ''): Promise<RenderElement[]> {
@@ -503,6 +456,7 @@ async function drawReply($: Dollar, e: ResolveInput, text: string, width: number
   const out: RenderElement[] = []
   const blocks = parseReply(text)
   let n = 0
+  let order = 0 // the card's place among the reply's cards, its name for the analyst ("Card 2")
   const push = (el: RenderElement) => out.push(blocks[n - 1]?.gap ? <Box marginTop={1}>{el}</Box> : el)
   for (const block of blocks) {
     n++
@@ -511,11 +465,12 @@ async function drawReply($: Dollar, e: ResolveInput, text: string, width: number
       continue
     }
     if (block.type === 'card') {
+      order++
       cardReply.set(block.id, text)
       await $.state.get({ ...RUNS, id: block.id }) // a finished run redraws the card
       const f = await cardFile($, block.id)
       if (!f.data) {
-        push(<Text color={COLORS.chip.missing} wrap="wrap">{`▍ ${f.error}`}</Text>)
+        push(<Text color={COLORS.problem} wrap="wrap">{`▍ Card ${order} cannot be drawn: ${f.why}`}</Text>)
         continue
       }
       const card = f.data
@@ -523,7 +478,7 @@ async function drawReply($: Dollar, e: ResolveInput, text: string, width: number
       const w = Math.min(cols, CARD_MAX_COLS)
       if (live) {
         const { Client } = $.ui.resolve(e as ResolveInput<'AssistantMessage', 'terminal'>)
-        push(<Client key={`${prefix}card-${n}-${card.id}`} module="./card.tsx" width={meta.hidden ? '100%' : w} props={{ card, cols: w, debug, meta }} />)
+        push(<Client key={`${prefix}card-${n}-${card.id}`} module="./card.tsx" width={w} props={{ card, cols: w, debug, meta }} />)
       } else {
         const lay = cardLayout(card, w - 4, -1)
         push(
@@ -575,39 +530,10 @@ async function openCitation($: Dollar, c: Citation): Promise<void> {
 }
 
 async function openCardPane($: Dollar, id: string, mode: string): Promise<void> {
+  const card = await loadCard($, id)
   await $.state.set({ plugin: 'thimble-chat', key: 'paneCard' }, id)
   await $.state.set({ plugin: 'thimble-chat', key: 'paneMode' }, mode)
-  await openPane($, { id: CARD_PANE, title: `card:${id}`, focus: true, closeOnEscape: true, columns: 100 })
-}
-
-async function openEdit($: Dollar, id: string): Promise<void> {
-  const note = await noteOf($, id)
-  const reply = cardReply.get(id) ?? ''
-  const original = note.original ?? takeawayAfter(reply, id)
-  if (!original && !note.takeaway) {
-    $.ui.toast(`no takeaway follows card ${id} in its reply`)
-    return
-  }
-  await $.state.set({ plugin: 'thimble-chat', key: 'edit' }, { card: id, text: note.takeaway ?? original, original })
-  await openPane($, { id: EDIT_PANE, title: 'Edit takeaway', focus: true, closeOnEscape: true, holdToasts: true, rows: 8 })
-}
-
-async function saveTakeaway($: Dollar, id: string, original: string, text: string): Promise<void> {
-  const value = text.trim()
-  await $.ui.close({ id: EDIT_PANE })
-  if (!value || value === original) {
-    await setNote($, id, { takeaway: undefined, original: undefined, editedAt: undefined })
-    return
-  }
-  await setNote($, id, { takeaway: value, original, editedAt: await $.clock.now() })
-  const cs = citations(value)
-  remember(cs, value)
-  enqueue($, cs)
-  // main reads the edit with its next request; the analyst sees it in place
-  await $.session
-    .append({ message: { type: 'user', content: [{ type: 'text', text: `thimble-chat: the analyst edited the takeaway of [[card:${id}]]. It now reads: ${value}` }] } })
-    .catch((err: unknown) => $.ui.log(`thimble-chat: could not tell main about the edit: ${String(err).slice(0, 200)}`))
-  $.ui.toast('takeaway saved; Claude reads the edit with your next message')
+  await openPane($, { id: CARD_PANE, title: clip(card?.question ?? 'Card', 60), focus: true, closeOnEscape: true, columns: 100 })
 }
 
 function lineRow(els: { Text: (p: object) => RenderElement }, w: { n: number; text: string; hit: boolean; spans?: number[][] }, gutter: number, cols: number): RenderElement {
@@ -625,7 +551,7 @@ function lineRow(els: { Text: (p: object) => RenderElement }, w: { n: number; te
   for (const [a, b] of spans.filter(([a, b]) => a! >= 0 && b! <= text.length).sort((x, y) => x[0]! - y[0]!)) {
     if (a! < at) continue
     parts.push(Text({ children: text.slice(at, a) }))
-    parts.push(Text({ backgroundColor: '#9e6a03', color: '#ffffff', bold: true, children: text.slice(a, b) }))
+    parts.push(Text({ backgroundColor: COLORS.highlight, bold: true, children: text.slice(a, b) }))
     at = b!
   }
   parts.push(Text({ children: text.slice(at) || ' ' }))
@@ -633,7 +559,7 @@ function lineRow(els: { Text: (p: object) => RenderElement }, w: { n: number; te
     wrap: 'truncate-end',
     children: [
       Text({ color: w.hit ? COLORS.accent : COLORS.dim, children: `${String(w.n).padStart(gutter)} ${w.hit ? '▶' : '│'} ` }),
-      Text({ backgroundColor: w.hit ? '#22303c' : undefined, children: parts }),
+      Text({ backgroundColor: w.hit ? COLORS.cursor : undefined, children: parts }),
     ],
   })
 }
@@ -656,12 +582,11 @@ async function citationContext($: Dollar, id: string): Promise<{ label: string; 
 /** What a side thread about a card is told: its question, script, data in brief and the takeaway. */
 async function cardContext($: Dollar, id: string): Promise<{ label: string; context: string; ref: string }> {
   const card = await loadCard($, id)
-  const note = await noteOf($, id)
-  const takeaway = note.takeaway ?? takeawayAfter(cardReply.get(id) ?? '', id)
-  const data = card ? clip(JSON.stringify(card.rows ?? card.series ?? card.events ?? card.examples ?? []), 1500) : ''
+  const takeaway = takeawayAfter(cardReply.get(id) ?? '', id)
+  const data = card ? clip(JSON.stringify(card.rows ?? card.series ?? card.events ?? card.examples ?? (card.nodes ? { nodes: card.nodes, edges: card.edges } : [])), 1500) : ''
   return {
     ref: `[[card:${id}]]`,
-    label: card ? `the card "${card.question}"` : `card ${id}`,
+    label: card ? `the card "${card.question}"` : 'a card',
     context: [
       card?.source?.script && `Made by ${card.source.script}${card.params?.length ? ` with ${card.params.map(p => `${p.name} = ${p.value}`).join(', ')}` : ''}.`,
       data && `Its data (${HOME}/cards/${id}.json): ${data}`,
@@ -682,9 +607,10 @@ export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     const started = await next(e)
     await ensureGuide($)
-    await loadNotes($)
+    // the card helper writes cards here, wherever a script runs: every Bash command and process started after inherits it
+    await $.env.set('THIMBLE_CHAT_ROOT', cwd).catch((err: unknown) => $.ui.log(`thimble-chat: could not set THIMBLE_CHAT_ROOT: ${String(err).slice(0, 120)}`))
     $.clock.every(150, () => void flushQueue($))
-    await $.command.register({ name: 'thimble-card', description: 'Open a thimble-chat card in a pane: /thimble-card <id>' })
+    await $.command.register({ name: 'thimble-card', description: 'Open a card of the last reply in a pane: /thimble-card <n>' })
     await $.command.register({ name: 'thimble-cite', description: 'Open the panel of a citation of the last reply: /thimble-cite <n>', immediate: true })
     await $.command.register({ name: 'thimble-check', description: 'Check the citations of the last reply again', immediate: true })
     await $.command.register({ name: 'thimble-ask', description: 'Ask a side thread about the last reply, out of the main chat: /thimble-ask <question>', immediate: true })
@@ -700,6 +626,7 @@ export const register: Register = on => {
         if (r.role === 'assistant' && r.text.trim()) last.unshift(r.text)
       }
       const text = last.join('\n\n')
+      if (embeddedCards(text).length) lastCards = embeddedCards(text)
       const cs = citations(text)
       if (cs.length) {
         remember(cs, text)
@@ -797,6 +724,7 @@ export const register: Register = on => {
     }
     // the answer as a file the analyst owns, and a summary line under its last row
     const cardsOf = embeddedCards(text)
+    if (cardsOf.length) lastCards = cardsOf
     if (text.trim() && (cs.length || cardsOf.length) && !fromMod(turnPrompt)) {
       await paths($)
       const stamp = new Date(await $.clock.now()).toISOString().replace(/[-:]/g, '').replace(/\..*$/, '').replace('T', '-')
@@ -841,7 +769,7 @@ export const register: Register = on => {
   on('ui.render', { component: 'AssistantMessage' }, async ($, e, next) => {
     const end = (await $.state.get({ ...ENDS, id: e.requestId })).value
     if (!needsDrawing(e.props.text) && !end) return next(e)
-    const text = await withEdits($, e.props.text)
+    const text = e.props.text
     const cs = citations(text)
     remember(cs, text)
     const unchecked: Citation[] = []
@@ -964,20 +892,6 @@ export const register: Register = on => {
         case 'rerun':
           void rerunCard($, id)
           break
-        case 'star': {
-          const note = await setNote($, id, { starred: !(await noteOf($, id)).starred })
-          $.ui.toast(`card ${id} ${note.starred ? 'starred' : 'unstarred'}`)
-          break
-        }
-        case 'hide':
-          await setNote($, id, { hidden: true })
-          break
-        case 'show':
-          await setNote($, id, { hidden: false })
-          break
-        case 'edit':
-          await openEdit($, id)
-          break
         case 'ask': {
           const about = await cardContext($, id)
           await $.ui.close({ id: CITE_PANE })
@@ -1021,7 +935,7 @@ export const register: Register = on => {
         const rows = lay.lines.map((l, i) => {
           const item = lay.items[card.kind === 'table' ? (i - 2) * (card.columns?.length ?? 1) : i]
           const isHit = v.kind === 'value' && item !== undefined && item.open === c.ref
-          return isHit ? l.map(s => ({ ...s, bg: '#22303c' })) : l
+          return isHit ? l.map(s => ({ ...s, bg: COLORS.cursor })) : l
         })
         body.push(paintLines(Box, Text, rows))
         body.push(<Text dimColor wrap="truncate-end">{card.source?.script ? `made by ${card.source.script}` : 'no script recorded'}</Text>)
@@ -1101,31 +1015,6 @@ export const register: Register = on => {
     return <Box flexDirection="column">{body}</Box>
   })
 
-  // ---------------------------------------------------------------------------------------------- edit pane
-
-  on('ui.render', { component: 'Pane', requestId: EDIT_PANE }, async ($, e) => {
-    if (e.surface === 'mobile') {
-      const { Text } = $.ui.resolve(e)
-      return <Text dimColor>Editing needs a surface with text fields.</Text>
-    }
-    const { Box, Text, Button, Input } = $.ui.resolve(e)
-    const ed = await read($, editA)
-    if (!ed) return <Text dimColor>Nothing to edit.</Text>
-    return (
-      <Box flexDirection="column">
-        <Text wrap="truncate-end">
-          <Text bold>{`takeaway of card:${ed.card}`}</Text>
-          <Text dimColor> · Enter saves · Esc cancels · citations stay as [[value|ref]] and are checked again</Text>
-        </Text>
-        <Input key="takeaway" value={ed.text} autoFocus submitLabel="save" onSubmit={v => void saveTakeaway($, ed.card, ed.original, v)} />
-        <Box flexDirection="row" columnGap={2}>
-          <Button key="restore" label="restore the reply's text" onPress={() => void saveTakeaway($, ed.card, ed.original, ed.original)} />
-          <Button key="cancel" label="cancel" role="dismiss" onPress={() => void $.ui.close({ id: EDIT_PANE })} />
-        </Box>
-      </Box>
-    )
-  })
-
   // ---------------------------------------------------------------------------------------------- side thread pane
 
   on('ui.render', { component: 'Pane', requestId: THREAD_PANE }, async ($, e) => {
@@ -1136,7 +1025,7 @@ export const register: Register = on => {
     const { Box, Text, Button, Input } = $.ui.resolve(e)
     const t = await getThread($, await read($, threadA))
     const cols = Math.max(30, e.props.bodyColumns - 1)
-    if (!t) return <Text dimColor>No side thread. Click "? ask" on a card, or "ask about this" on a citation.</Text>
+    if (!t) return <Text dimColor>No side thread.</Text>
     const g = await ensureGuide($)
     const body: RenderElement[] = []
     body.push(
@@ -1308,13 +1197,15 @@ export const register: Register = on => {
     return { text: `${ok} of ${cs.length} citations resolve with their value` }
   })
 
+  // a card by its place in the last reply (/thimble-card 2), or by the citation of it
   on('command.run', { command: 'thimble-card' }, async ($, e) => {
-    const id = e.args.trim().replace(/^\[\[|\]\]$/g, '').replace(/^card:/, '')
-    if (!id) return { text: 'usage: /thimble-card <id>' }
-    const card = await loadCard($, id)
-    if (!card) return { text: `no card ${id} in ${HOME}/cards` }
+    const arg = e.args.trim().replace(/^\[\[|\]\]$/g, '').replace(/^card:/, '')
+    const listed = lastCards
+    const id = /^\d+$/.test(arg) ? listed[Number(arg) - 1] : arg || listed[0]
+    const card = id ? await loadCard($, id) : null
+    if (!id || !card) return { text: listed.length ? `the last reply has ${listed.length} card${listed.length === 1 ? '' : 's'}: /thimble-card 1 to ${listed.length}` : 'the last reply has no card' }
     await openCardPane($, id, '')
-    return { text: `card:${id} is open in a pane. Hover to read a value, click to cite it.` }
+    return { text: `opened "${clip(card.question, 80)}"` }
   })
 
   // the card pane: the card at the pane's width, and in script mode its script and last run
@@ -1359,7 +1250,7 @@ export const register: Register = on => {
       }
       body.push(cardEl)
     } else {
-      body.push(<Text dimColor wrap="truncate-end">{picked ? `last cited: ${picked}` : 'Esc returns the keys to the prompt'}</Text>)
+      if (picked) body.push(<Text dimColor wrap="truncate-end">{`last cited: ${picked}`}</Text>)
     }
     return <Box flexDirection="column">{body}</Box>
   })
