@@ -228,7 +228,7 @@ export function menuLines(lay: ParaLayout, raws: readonly string[], menu: unknow
     }
     for (const [line, c] of byLine) cells.push({ line, ...c })
   }
-  return cells.length ? shade(lay.lines, cells, COLORS.cursor) : lay.lines
+  return cells.length ? shade(lay.lines, cells, COLORS.menu) : lay.lines
 }
 
 // ------------------------------------------------------------------------------------------------ Markdown block
@@ -241,7 +241,7 @@ const Region: ClientModule<RegionProps> = (props, surface) => {
   const target: Target = { kind: 'sentence', text: props.text.slice(0, 1200) }
   surface.onPointer(ev => onPointer(target, ev, surface))
   const md = Markdown({ text: props.text })
-  return isMenuTarget(target, props.menu) ? Box({ backgroundColor: COLORS.cursor, children: md }) : md
+  return isMenuTarget(target, props.menu) ? Box({ backgroundColor: COLORS.menu, children: md }) : md
 }
 
 export default Region

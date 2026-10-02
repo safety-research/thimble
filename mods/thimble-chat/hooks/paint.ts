@@ -26,6 +26,8 @@ export const COLORS = {
   cursor: 'userMessageBackground',
   /** the background of a cited value in the lines a citation panel shows */
   highlight: 'selectionBg',
+  /** the background of the open menu's target (a passage, a card's title, a mark), clear on light and dark themes */
+  menu: 'selectionBg',
   code: 'permission',
   link: 'remember',
   problem: 'error',
