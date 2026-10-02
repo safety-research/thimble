@@ -87,7 +87,8 @@ but do not respond. iTerm2 shows the colours in full; macOS Terminal shows 256 c
 ## Known limits
 
 - Charts are text: eighth-block bars, braille lines and box-drawing diagrams, at most 120 columns wide. A diagram
-  shows at most 40 nodes and 80 edges.
+  shows at most 40 nodes and 80 edges, but past about 8 edges its lines cross into a tangle, so the prompt asks
+  Claude to split a larger graph into two cards.
 - cmd+click, fn+click and option+click never reach the mod on macOS. macOS Terminal and iTerm2 may send ctrl+click as
   a plain right-click, which opens the menu.
 - A click on the transcript's bottom row while "Jump to bottom" shows goes to that button.
@@ -109,6 +110,7 @@ From `mods/thimble-chat`:
     claude plugin test .
     python3 tests/test_helpers.py
     python3 tests/test_cards.py
+    python3 tests/test_guidance.py
     npx -p typescript tsc -p . --noEmit
 
 `tsc` needs the type declarations Claude Code writes into `.claude-plugin/types/` when it loads the mod from a folder,
