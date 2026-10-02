@@ -4,7 +4,7 @@ import type { On } from 'claude-code'
 import { expect, mock, test } from 'claude-code/testing'
 import type { Mounted } from 'claude-code/testing'
 
-import { SPIN, answerFile, applyCorrections, blockLayout, chipLook, chipSegs, chipState, claimsIn, fixItems, fixPrompt, paraLayout, parseFix, passageAt, quoteSpan, sentenceAt, sentenceIn, settleFix, streamLink, streamStep, streaming, wrapAround } from '../hooks/cite'
+import { SPIN, answerFile, applyCorrections, blockLayout, capLine, chipLook, chipSegs, chipState, claimsIn, fixItems, fixPrompt, paraLayout, parseFix, passageAt, quoteSpan, quotedWords, sentenceAt, sentenceIn, settleFix, streamLink, streamStep, streaming, wrapAround } from '../hooks/cite'
 import type { ChipView } from '../hooks/cite'
 import { lineWidth } from '../hooks/draw'
 import { fixName, threadName, verifyName } from '../hooks/threads'
@@ -558,6 +558,56 @@ test('a side thread about a citation shows it as its words, never its markup', a
   expect(await pane.find({ type: 'Text', text: /side thread about/ })).toBeDefined()
   expect(await pane.find({ type: 'Text', text: /^13403$/ })).toBeDefined()
   expect(await pane.find({ type: 'Text', text: /\[\[/ })).toBeUndefined()
+  await pane.unmount()
+})
+
+test('a passage quoted inline far into a long record is shown and lit; the line kept around it', async ($, on) => {
+  const w = world(on)
+  const body = 'w '.repeat(1300)
+  const line = `{"body": "${body}", "label": "CountyAgentX", "time": "2026-06-18"}`
+  const at = line.indexOf('CountyAgentX')
+  w.lines = [{ n: 3, text: line, hit: true, spans: [[at, at + 12]] } as never]
+  expect(capLine({ text: line, spans: [[at, at + 12]] }).text).toContain('"label": "CountyAgentX"')
+  expect(quotedWords('"CountyAgentX"')).toBe('CountyAgentX')
+  expect(quotedWords('this record')).toBe('')
+  const text = 'The label is [["CountyAgentX"|pages.jsonl#L3]].'
+  await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
+  const c = citations(text)[0]!
+  const ui = (await $.ui.mount(MESSAGE(text))) as unknown as M
+  await ui.post({ type: 'gesture', origin: 'o1', gestures: [{ seq: 1, gesture: 'primary', target: { kind: 'citation', ref: c.raw, claim: claimOf(text, 'm1', c.raw) }, ev: PRESS }] }, { in: 'para-1' })
+  await ui.unmount()
+  await w.clock!.advance(200)
+  const pane = (await $.ui.mount(PANE)) as unknown as M
+  expect(await pane.find({ type: 'Text', text: /^CountyAgentX$/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^quoted: $/ })).toBeUndefined()
+  await pane.unmount()
+})
+
+test("a side thread about a reply's table row is headed by its words, never cut markup", async ($, on) => {
+  world(on)
+  await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
+  const row = 'probier | 1013 | [[1013|card:abc123#revisions/probier]] of [[14416|card:abc123#revisions/all]]'
+  const ui = (await $.ui.mount(MESSAGE(REPLY))) as unknown as M
+  await ui.post({ type: 'gesture', origin: 'o1', gestures: [{ seq: 1, gesture: 'thread', target: { kind: 'sentence', text: row }, ev: { ...PRESS, shift: true } }] }, { in: 'para-2' })
+  await ui.unmount()
+  const pane = (await $.ui.mount({ ...(PANE as object), requestId: 'thimble-thread' } as never)) as unknown as M
+  const head = JSON.stringify(await pane.find({ type: 'Text', text: /side thread about/ }))
+  expect(head).toContain('probier | 1013 | 1013 of 14416')
+  expect(head).not.toContain('[[')
+  await pane.unmount()
+})
+
+test('the card pane names the value last cited from it in words, with no id', async ($, on) => {
+  world(on)
+  await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
+  const ui = (await $.ui.mount(MESSAGE(REPLY))) as unknown as M
+  const mark = { kind: 'mark', ref: 'card:abc123#revisions/dse', cardId: 'abc123', text: '13403' }
+  await ui.post({ type: 'gesture', origin: 'o1', gestures: [{ seq: 1, gesture: 'cite', target: mark, ev: { ...PRESS, type: 'double' } }] } as never, { in: 'card-1-abc123' })
+  await ui.unmount()
+  await $.command.run({ command: 'thimble-card', args: 'abc123' } as never)
+  const pane = (await $.ui.mount({ ...(PANE as object), requestId: 'thimble-card' } as never)) as unknown as M
+  expect(await pane.find({ type: 'Text', text: /^last cited: 13403 · revisions dse$/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /abc123|\[\[/ })).toBeUndefined()
   await pane.unmount()
 })
 

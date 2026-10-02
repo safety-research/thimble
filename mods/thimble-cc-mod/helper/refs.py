@@ -382,9 +382,61 @@ def _resolve_call(cwd: str, cid: str, frag: str, display: str | None, out: dict,
     return _check(out, display, out["text"])
 
 
-def cap_window(res: dict, cap: int = LINE_CAP) -> dict:
-    """Long lines (a JSONL record can be 100 KB) cut for display, around the first span of the shown value."""
+STR_RE = re.compile(r'"(?:[^"\\]|\\.)*"')
+RECORD_FIT = 600  # characters a JSON record's line is shortened to, so every field shows in the record panel
+
+
+def compact_record(t: str, spans: list, fit: int = RECORD_FIT) -> tuple[str, list] | None:
+    """A JSON line longer than `fit` with each long string cut to its start, or to the part around a span in it, so
+    every field shows; the spans moved with it. None for a line that is not JSON or has no long string."""
+    if len(t) <= fit or not t.lstrip().startswith(("{", "[")):
+        return None
+    long = [(m.start() + 1, m.end() - 1) for m in STR_RE.finditer(t) if m.end() - m.start() - 2 > 60]
+    if not long:
+        return None
+    each = max(60, (fit - (len(t) - sum(b - a for a, b in long))) // len(long))
+    cuts = []
+    for a, b in long:
+        if b - a <= each:
+            continue
+        hit = next(((s, e) for s, e in spans if a <= s < b), None)
+        lo = max(a, min(hit[0] - each // 3, b - each)) if hit else a
+        hi = min(b, max(lo + each, hit[1])) if hit else a + each
+        while lo > a and t[lo - 1] == "\\":
+            lo -= 1
+        while hi < b and t[hi - 1] == "\\":
+            hi += 1
+        cuts += [c for c in ((a, lo), (hi, b)) if c[1] > c[0]]
+    parts, at = [], 0
+    for a, b in cuts:
+        parts += [t[at:a], "…"]
+        at = b
+    moved = lambda p: p - sum(b - a - 1 for a, b in cuts if b <= p)  # noqa: E731
+    kept = [[moved(s), moved(e)] for s, e in spans if not any(a < e and s < b for a, b in cuts)]
+    return "".join(parts) + t[at:], kept
+
+
+def quote_spans(quote: str, text: str) -> list[list[int]]:
+    """Where an example's quoted passage stands in a line, as written or JSON-escaped."""
+    q = quote.strip()
+    for form in (q, json.dumps(q, ensure_ascii=False)[1:-1], json.dumps(q)[1:-1]) if q else ():
+        i = text.find(form)
+        if i >= 0:
+            return [[i, i + len(form)]]
+    return []
+
+
+def cap_window(res: dict, cap: int = LINE_CAP, quote: str = "") -> dict:
+    """Long lines (a JSONL record can be 100 KB) cut for display, around the first span of the shown value or of the
+    passage an example quotes; a JSON record shortened string by string, so each of its fields shows."""
     for w in res.get("window", []):
+        if w.get("hit") and quote and not w.get("spans"):
+            w["spans"] = quote_spans(quote, w["text"])
+        short = compact_record(w["text"], w.get("spans") or [])
+        if short:
+            w["text"] = short[0]
+            if "spans" in w:
+                w["spans"] = short[1]
         t = w["text"]
         if len(t) <= cap:
             continue
@@ -400,7 +452,7 @@ def cap_window(res: dict, cap: int = LINE_CAP) -> dict:
 def resolve_many(cwd: str, items: list[dict], around: int = 6) -> list[dict]:
     out = []
     for it in items:
-        r = cap_window(resolve(cwd, str(it.get("ref", "")), it.get("display"), around))
+        r = cap_window(resolve(cwd, str(it.get("ref", "")), it.get("display"), around), quote=str(it.get("quote") or ""))
         r["id"] = it.get("id")
         out.append(r)
     return out
