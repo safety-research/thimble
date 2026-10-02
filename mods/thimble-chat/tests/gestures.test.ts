@@ -273,7 +273,7 @@ test('the open menu\'s sentence or citation is shaded in its paragraph', () => {
   const chips = [{ label: '13403', state: 'link' as const, mark: '', tip: '', spin: false }]
   const lay = blockLayout(block, chips, 80, -1)
   const raws = ['[[13403|card:abc123#revisions/dse]]']
-  const lit = (menu: unknown) => menuLines(lay, raws, menu)[0]!.filter(s => s.bg === COLORS.cursor).map(s => s.s).join('')
+  const lit = (menu: unknown) => menuLines(lay, raws, menu)[0]!.filter(s => s.bg === COLORS.menu).map(s => s.s).join('')
   expect(lit(null)).toBe('')
   expect(lit({ kind: 'citation', ref: raws[0], text: '13403' })).toBe('13403')
   const second = lit({ kind: 'sentence', text: 'The others are small.' })
@@ -286,7 +286,7 @@ test('a right-click lights its target in the reply while the menu is open', asyn
   on('ui.panes', () => ({ value: panes }) as never)
   await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
   const ui = (await $.ui.mount(MESSAGE as never)) as unknown as M
-  const lit = async () => JSON.stringify(await ui.drawn({ in: 'md-2' })).includes(COLORS.cursor)
+  const lit = async () => JSON.stringify(await ui.drawn({ in: 'md-2' })).includes(COLORS.menu)
   expect(await lit()).toBe(false)
   await ui.pointer({ type: 'down', x: 3, y: 0, button: 'right', in: 'md-2' } as never)
   await ui.pointer({ type: 'up', x: 3, y: 0, button: 'right', in: 'md-2' } as never)

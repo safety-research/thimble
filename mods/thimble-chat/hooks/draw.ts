@@ -112,6 +112,27 @@ export function shade(lines: readonly Line[], spans: readonly { line: number; x0
   })
 }
 
+/** A layout's lines with item `i` shaded as the open menu's target: the row or column the layout lights for it, or
+ *  else the cells that hit it. */
+export function menuShade(lay: Layout, i: number): Line[] {
+  if (i < 0) return lay.lines
+  if (lay.lines.some(l => l.some(s => s.bg === COLORS.cursor))) return lay.lines.map(l => l.map(s => (s.bg === COLORS.cursor ? { ...s, bg: COLORS.menu } : s)))
+  const spans: { line: number; x0: number; x1: number }[] = []
+  lay.lines.forEach((l, y) => {
+    const w = lineWidth(l)
+    let x0 = -1
+    for (let x = 0; x <= w; x++) {
+      const on = x < w && lay.hit(x, y) === i
+      if (on && x0 < 0) x0 = x
+      if (!on && x0 >= 0) {
+        spans.push({ line: y, x0, x1: x })
+        x0 = -1
+      }
+    }
+  })
+  return shade(lay.lines, spans, COLORS.menu)
+}
+
 // ---------------------------------------------------------------------------------------- cards
 
 const EIGHTHS = ['', '▏', '▎', '▍', '▌', '▋', '▊', '▉']
@@ -544,22 +565,23 @@ const JOIN: Record<number, string> = {
 }
 
 /**
- * A diagram drawn with box-drawing characters, top to bottom, a layer of nodes to a row (layerGraph). A row too wide
- * for the card wraps its labels to two lines, then cuts them, then moves nodes to a row of their own. Each edge has a
+ * A diagram drawn with box-drawing characters, top to bottom, a layer of nodes to a row (layerGraph), each node then
+ * moved to the row between its neighbours that makes its edges shortest. A row too wide for the card wraps its labels
+ * to two lines, then cuts them, then moves nodes to a row of their own; a drawing still too wide is laid out again
+ * with narrower gaps and labels (FITS). Each edge has a
  * port of its own on its source's bottom border and its target's top border, where the arrow is (an edge drawn
  * against the layers has its arrow at the top end); a box with many edges is widened to keep its ports apart. An edge
  * across several rows passes each one as a vertical line. Between two rows each edge that bends takes a track of its
- * own, ordered so that verticals cross no horizontal run where an order allows it.
+ * own, ordered so that verticals cross no horizontal run where an order allows it. Rows are ordered to cross as few
+ * edges as the heuristics find: sweeps by the mean place of neighbours, then swaps and moves within a row.
  *
  * An edge's label stands where it can belong to no other edge: on the edge's own horizontal run, or beside its own last
  * vertical with clear space around it. Otherwise it is a numbered note under the drawing, and the number is written on
  * the edge's own line. Items: the nodes in order, then the edges.
  */
-function diagramLayout(card: CardData, cols: number, hover: number): Layout {
-  const nodes = (card.nodes ?? []).slice(0, MAX_NODES)
+function diagramGrid(nodes: DiagramNode[], edges: DiagramEdge[], cols: number, fit: Fit): Grid {
   const ids = nodes.map(n => n.id)
   const at = new Map(ids.map((id, i) => [id, i]))
-  const edges = (card.edges ?? []).slice(0, MAX_EDGES).filter(e => at.has(e.source) && at.has(e.target) && e.source !== e.target)
   const N = nodes.length
   const layer = layerGraph(ids, edges)
   const depth = () => Math.max(0, ...layer.values())
@@ -574,10 +596,30 @@ function diagramLayout(card: CardData, cols: number, hover: number): Layout {
     insertRow(l)
     layer.set(flat.target, l + 1)
   }
+  // a node with more edges below it than above moves down to just above its nearest neighbour below, and one with more
+  // above moves up, so fewer lines pass rows
+  const nbrs = ids.map((id, i) => edges.flatMap(e => (at.get(e.source) === i ? [e.target] : at.get(e.target) === i ? [e.source] : [])))
+  for (let pass = 0, moved = true; pass < N && moved; pass++) {
+    moved = false
+    ids.forEach((id, i) => {
+      const l = layer.get(id)!
+      const ls = nbrs[i]!.map(o => layer.get(o)!)
+      const up = ls.filter(x => x < l)
+      const down = ls.filter(x => x > l)
+      const to = down.length > up.length ? Math.min(...down) - 1 : up.length > down.length && up.length ? Math.max(...up) + 1 : l
+      if (to !== l) {
+        layer.set(id, to)
+        moved = true
+      }
+    })
+  }
+  // rows left empty close up
+  const used = [...new Set(layer.values())].sort((a, b) => a - b)
+  for (const [id, l] of layer) layer.set(id, used.indexOf(l))
 
   // boxes: wide enough for the label and for a blank column between ports; a row too wide for the card wraps its
   // labels to two lines of at least NODE_LABEL_MIN columns, then cuts them
-  const lab = nodes.map(n => wrapLabel(n.label, Math.max(1, Math.min(NODE_LABEL, cols - 4))))
+  const lab = nodes.map(n => wrapLabel(n.label, Math.max(1, Math.min(fit.label, cols - 4))))
   const labW = (i: number) => Math.max(1, ...lab[i]!.map(width))
   const portW = nodes.map((_, i) => {
     let up = 0
@@ -591,18 +633,18 @@ function diagramLayout(card: CardData, cols: number, hover: number): Layout {
     return k > 1 ? Math.min(cols, 2 * k + 1) : 0
   })
   const boxW = (i: number) => Math.max(labW(i) + 4, portW[i]!)
-  const GAP = 3
+  const GAP = fit.gap
   for (let l = 0; l <= depth(); l++) {
     const row = ids.map((_, i) => i).filter(i => layer.get(ids[i]!) === l)
     if (row.reduce((a, i) => a + boxW(i), 0) + GAP * Math.max(0, row.length - 1) <= cols) continue
-    const each = Math.max(NODE_LABEL_MIN, Math.floor((cols - GAP * (row.length - 1)) / row.length) - 4)
+    const each = Math.max(Math.min(NODE_LABEL_MIN, fit.label), Math.floor((cols - GAP * (row.length - 1)) / row.length) - 4)
     for (const i of row) lab[i] = wrapLabel(nodes[i]!.label, Math.min(labW(i), each))
   }
 
   // entries of each row: nodes and the points where longer edges pass; segments join entries of adjacent rows
   type Entry = { key: string; node: number; edge: number; w: number; x: number }
   type SegT = { edge: number; up: Entry; low: Entry; xa: number; xb: number; track: number }
-  const gaps = (r: Entry[]) => r.slice(0, -1).map((en, i) => (en.node < 0 && r[i + 1]!.node < 0 ? 1 : en.node < 0 || r[i + 1]!.node < 0 ? 2 : GAP))
+  const gaps = (r: Entry[]) => r.slice(0, -1).map((en, i) => (en.node < 0 && r[i + 1]!.node < 0 ? fit.pass : en.node < 0 || r[i + 1]!.node < 0 ? fit.side : GAP))
   const rowWidth = (r: Entry[]) => r.reduce((a, en) => a + en.w, 0) + gaps(r).reduce((a, b) => a + b, 0)
   const build = () => {
     const rows: Entry[][] = Array.from({ length: depth() + 1 }, () => [])
@@ -633,15 +675,17 @@ function diagramLayout(card: CardData, cols: number, hover: number): Layout {
     return { rows, dirs, segs }
   }
   // then a row still too wide, with the lines passing it, moves nodes to a row of their own below: nodes with no edge
-  // onward first, each taking its box off the row and adding a line for each edge reaching it from above
+  // onward first, each taking its box off the row and adding a line for each edge reaching it from above. A strict fit
+  // counts the widest gap between every two entries, as their order may put a line between each two boxes.
+  const wrapWidth = (r: Entry[]) => (fit.strict ? r.reduce((a, en) => a + en.w, 0) + Math.max(fit.gap, fit.side) * (r.length - 1) : rowWidth(r))
   let built = build()
-  for (let guard = 0; guard < N; guard++) {
-    const over = built.rows.findIndex(r => r.filter(en => en.node >= 0).length > 1 && rowWidth(r) > cols)
+  for (let guard = 0; guard < 2 * N; guard++) {
+    const over = built.rows.findIndex(r => r.filter(en => en.node >= 0).length > 1 && wrapWidth(r) > cols)
     if (over < 0) break
     const r = built.rows[over]!
     const onward = (i: number) => edges.some((e, k) => at.get(e.source) === i && built.dirs[k]!.top === i)
     const order = r.filter(en => en.node >= 0).map(en => en.node).sort((a, b) => Number(onward(b)) - Number(onward(a)) || a - b)
-    let w = rowWidth(r)
+    let w = wrapWidth(r)
     const move: number[] = []
     while (w > cols && order.length > 1) {
       const i = order.pop()!
@@ -665,51 +709,128 @@ function diagramLayout(card: CardData, cols: number, hover: number): Layout {
   // a row of boxes is as tall as its tallest label
   const bh = rows.map(r => Math.max(3, ...r.filter(en => en.node >= 0).map(en => lab[en.node]!.length + 2)))
 
-  // order each row by the mean position of its neighbours, a few sweeps down and up, then swap neighbours in a row
-  // while that removes crossings
+  // order each row by the mean position of its neighbours, sweeps down and up, keeping the order that crosses fewest
+  // edges; then swap neighbours in a row, and move each entry to its best place in its row, while that removes
+  // crossings. From a few starting orders (as given, reversed, depth first from the top row, shuffled), the best kept.
   const pos = new Map<string, number>()
-  const index = () => rows.forEach(r => r.forEach((en, i) => pos.set(en.key, i)))
-  index()
+  const indexRow = (r: Entry[]) => r.forEach((en, i) => pos.set(en.key, i))
+  const index = () => rows.forEach(indexRow)
   const mean = (xs: number[], dflt: number) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : dflt)
-  for (let sweep = 0; sweep < 4; sweep++) {
-    for (let l = 1; l < rows.length; l++) {
-      rows[l]!.sort((a, b) => mean((ups.get(a.key) ?? []).map(s => pos.get(s.up.key)!), pos.get(a.key)!) - mean((ups.get(b.key) ?? []).map(s => pos.get(s.up.key)!), pos.get(b.key)!))
-      index()
-    }
-    for (let l = rows.length - 2; l >= 0; l--) {
-      rows[l]!.sort((a, b) => mean((lows.get(a.key) ?? []).map(s => pos.get(s.low.key)!), pos.get(a.key)!) - mean((lows.get(b.key) ?? []).map(s => pos.get(s.low.key)!), pos.get(b.key)!))
-      index()
-    }
-  }
   const between = rows.slice(0, -1).map((_, l) => segs.filter(s => rowOf.get(s.up.key) === l))
+  // pairs of segments between rows l and l + 1 whose ends lie in opposite orders
   const crossings = (l: number) => {
     const list = between[l]
-    if (!list) return 0
+    if (!list?.length) return 0
+    const pairs = list.map(s => [pos.get(s.up.key)!, pos.get(s.low.key)!] as const).sort((a, b) => a[0] - b[0] || a[1] - b[1])
+    const seen: number[] = new Array<number>(rows[l + 1]!.length).fill(0)
     let n = 0
-    for (let a = 0; a < list.length; a++) {
-      for (let b = a + 1; b < list.length; b++) {
-        const s = list[a]!
-        const t = list[b]!
-        if (s.up !== t.up && s.low !== t.low && (pos.get(s.up.key)! - pos.get(t.up.key)!) * (pos.get(s.low.key)! - pos.get(t.low.key)!) < 0) n++
-      }
+    for (let i = 0, j = 0; i < pairs.length; i = j) {
+      while (j < pairs.length && pairs[j]![0] === pairs[i]![0]) j++
+      for (let k = i; k < j; k++) for (let p = pairs[k]![1] + 1; p < seen.length; p++) n += seen[p]!
+      for (let k = i; k < j; k++) seen[pairs[k]![1]] = seen[pairs[k]![1]]! + 1
     }
     return n
   }
-  for (let pass = 0, better = true; pass < 6 && better; pass++) {
-    better = false
-    rows.forEach((r, l) => {
-      for (let i = 0; i + 1 < r.length; i++) {
-        const before = crossings(l - 1) + crossings(l)
-        ;[r[i], r[i + 1]] = [r[i + 1]!, r[i]!]
-        index()
-        if (crossings(l - 1) + crossings(l) < before) better = true
-        else {
-          ;[r[i], r[i + 1]] = [r[i + 1]!, r[i]!]
-          index()
-        }
-      }
-    })
+  const total = () => rows.reduce((n, _, l) => n + crossings(l), 0)
+  const sortBy = (r: Entry[], near: Map<string, SegT[]>, other: (s: SegT) => Entry) => {
+    const key = new Map(r.map(en => [en, mean((near.get(en.key) ?? []).map(s => pos.get(other(s).key)!), pos.get(en.key)!)]))
+    r.sort((a, b) => key.get(a)! - key.get(b)!)
+    indexRow(r)
   }
+  // within one row, with the rows above and below fixed: the crossings among the segments of u and v when u stands left
+  // of v, from the places of their other ends
+  const improveRow = (r: Entry[]): boolean => {
+    const k = r.length
+    if (k < 2) return false
+    const ends = r.map(en => [(ups.get(en.key) ?? []).map(s => pos.get(s.up.key)!), (lows.get(en.key) ?? []).map(s => pos.get(s.low.key)!)])
+    const id = new Map(r.map((en, i) => [en, i]))
+    const memo = new Int32Array(k * k).fill(-1)
+    const c = (u: Entry, v: Entry) => {
+      const i = id.get(u)!
+      const j = id.get(v)!
+      if (memo[i * k + j]! >= 0) return memo[i * k + j]!
+      let n = 0
+      for (let side = 0; side < 2; side++) for (const x of ends[i]![side]!) for (const y of ends[j]![side]!) if (x > y) n++
+      memo[i * k + j] = n
+      return n
+    }
+    let better = false
+    for (let i = 0; i + 1 < r.length; i++) {
+      if (c(r[i + 1]!, r[i]!) < c(r[i]!, r[i + 1]!)) {
+        ;[r[i], r[i + 1]] = [r[i + 1]!, r[i]!]
+        better = true
+      }
+    }
+    for (const en of [...r]) {
+      const from = r.indexOf(en)
+      r.splice(from, 1)
+      let cost = r.reduce((n, w) => n + c(en, w), 0)
+      const costs = [cost]
+      for (const w of r) costs.push((cost += c(w, en) - c(en, w)))
+      let to = from
+      costs.forEach((n, i) => {
+        if (n < costs[to]!) to = i
+      })
+      r.splice(to, 0, en)
+      if (to !== from) better = true
+    }
+    indexRow(r)
+    return better
+  }
+  const orderFrom = (start: Entry[][]) => {
+    rows.forEach((r, l) => r.splice(0, r.length, ...start[l]!))
+    index()
+    let best = rows.map(r => [...r])
+    let least = total()
+    for (let sweep = 0; sweep < 8 && least > 0; sweep++) {
+      for (let l = 1; l < rows.length; l++) sortBy(rows[l]!, ups, s => s.up)
+      for (let l = rows.length - 2; l >= 0; l--) sortBy(rows[l]!, lows, s => s.low)
+      const n = total()
+      if (n < least) {
+        least = n
+        best = rows.map(r => [...r])
+      }
+    }
+    rows.forEach((r, l) => r.splice(0, r.length, ...best[l]!))
+    index()
+    for (let pass = 0, better = least > 0; pass < 10 && better; pass++) {
+      better = false
+      for (const r of rows) better = improveRow(r) || better
+    }
+    return { rows: rows.map(r => [...r]), n: total() }
+  }
+  const given = rows.map(r => [...r])
+  const dfs: Entry[][] = rows.map(() => [])
+  const seenKeys = new Set<string>()
+  const visit = (en: Entry) => {
+    if (seenKeys.has(en.key)) return
+    seenKeys.add(en.key)
+    dfs[rowOf.get(en.key)!]!.push(en)
+    for (const s of lows.get(en.key) ?? []) visit(s.low)
+  }
+  for (const r of given) for (const en of r) visit(en)
+  let seed = 1
+  const shuffled = () =>
+    given.map(r => {
+      const out = [...r]
+      for (let i = out.length - 1; i > 0; i--) {
+        seed = (seed * 1103515245 + 12345) % 2147483648
+        const j = seed % (i + 1)
+        ;[out[i], out[j]] = [out[j]!, out[i]!]
+      }
+      return out
+    })
+  // fewer starts for a large drawing, so its first draw stays quick
+  const entries = given.reduce((n, r) => n + r.length, 0)
+  const starts = [() => given.map(r => [...r].reverse()), () => dfs, shuffled, shuffled, shuffled, shuffled].slice(0, entries <= 150 ? 6 : entries <= 400 ? 2 : 0)
+  let found = orderFrom(given)
+  for (const start of starts) {
+    if (!found.n) break
+    const o = orderFrom(start())
+    if (o.n < found.n) found = o
+  }
+  rows.forEach((r, l) => r.splice(0, r.length, ...found.rows[l]!))
+  index()
 
   // x: packed, then each row pulled toward its neighbours' centres
   const centre = (en: Entry) => en.x + (en.w - 1) / 2
@@ -826,6 +947,16 @@ function diagramLayout(card: CardData, cols: number, hover: number): Layout {
     }
   }
 
+  // a drawing that moved past the card's right edge moves back into the columns left free on its left
+  const over = Math.min(Math.min(...rows.flatMap(r => r.map(en => en.x))), Math.max(...rows.flatMap(r => r.map(en => en.x + en.w))) - cols)
+  if (over > 0) {
+    for (const r of rows) for (const en of r) en.x -= over
+    for (const sg of segs) {
+      sg.xa -= over
+      sg.xb -= over
+    }
+  }
+
   // tracks: a bending segment's horizontal run, on a row of the channel no other unrelated run overlaps. A segment whose
   // top column lies within another's run runs above it, and one whose bottom column does runs below it, so their lines
   // do not cross; where both hold, a crossing cannot be avoided
@@ -849,7 +980,24 @@ function diagramLayout(card: CardData, cols: number, hover: number): Layout {
       const placed = new Set(bend.filter(s => s.track >= 0))
       const waiting = (s: SegT) => [...above.get(s)!].filter(q => !placed.has(q)).length
       let ready = left.filter(s => waiting(s) === 0)
-      if (!ready.length) ready = [left.reduce((a, b) => (waiting(b) < waiting(a) ? b : a))]
+      if (!ready.length) {
+        // every segment waits: one on a cycle of waits goes first (its crossing cannot be avoided), not one that only
+        // waits for a cycle, which would cross a line it need not
+        const onCycle = (s: SegT) => {
+          const seen = new Set<SegT>()
+          const stack = [...above.get(s)!].filter(q => !placed.has(q))
+          while (stack.length) {
+            const q = stack.pop()!
+            if (q === s) return true
+            if (seen.has(q)) continue
+            seen.add(q)
+            for (const r of above.get(q)!) if (!placed.has(r)) stack.push(r)
+          }
+          return false
+        }
+        const cyc = left.filter(onCycle)
+        ready = [(cyc.length ? cyc : left).reduce((a, b) => (waiting(b) < waiting(a) ? b : a))]
+      }
       const on: SegT[] = []
       for (const s of ready) {
         if (on.every(o => related(o, s) || hi(s) < lo(o) || hi(o) < lo(s))) {
@@ -1034,6 +1182,62 @@ function diagramLayout(card: CardData, cols: number, hover: number): Layout {
     }
   })
 
+  return { grid, notes, width: Math.max(Wd, ...grid.map(r => r.length)) }
+}
+
+/** `text` in lines broken at spaces: the first `first` columns wide (0: none), the rest `w`, at most `max` in all, the
+ *  last cut. */
+function noteLines(text: string, first: number, w: number, max: number): string[] {
+  const out: string[] = first ? [] : ['']
+  let rest = text.replace(/\s+/g, ' ').trim()
+  while (rest && out.length < max) {
+    const room = out.length || !first ? w : first
+    if (out.length === max - 1 || width(rest) <= room) {
+      out.push(cut(rest, room))
+      break
+    }
+    const sp = rest.lastIndexOf(' ', room)
+    const take = sp > room / 2 ? rest.slice(0, sp) : cut(rest, room).slice(0, -1)
+    out.push(take)
+    rest = rest.slice(take.length).trimStart()
+  }
+  return out
+}
+
+type GridCell = { ch?: string; item: number; kind: 'line' | 'box' | 'label' | 'arrow' | 'text' | ''; num?: boolean }
+type Grid = { grid: GridCell[][]; notes: { n: number; edge: number }[]; width: number }
+
+/** Gaps between boxes, between a box and a passing line, and between two passing lines; the widest label line; and
+ *  whether a row wraps by its widest possible width. */
+type Fit = { gap: number; side: number; pass: number; label: number; strict?: boolean }
+const FITS: Fit[] = [
+  { gap: 3, side: 2, pass: 1, label: NODE_LABEL },
+  { gap: 2, side: 1, pass: 1, label: 16 },
+  { gap: 1, side: 1, pass: 1, label: NODE_LABEL_MIN },
+  { gap: 1, side: 1, pass: 0, label: 8 },
+  { gap: 1, side: 1, pass: 0, label: 8, strict: true },
+]
+
+// the last few drawings, so a pointer move repaints without laying the diagram out again
+const grids = new Map<string, Grid>()
+
+function diagramLayout(card: CardData, cols: number, hover: number): Layout {
+  const nodes = (card.nodes ?? []).slice(0, MAX_NODES)
+  const at = new Map(nodes.map((n, i) => [n.id, i]))
+  const edges = (card.edges ?? []).slice(0, MAX_EDGES).filter(e => at.has(e.source) && at.has(e.target) && e.source !== e.target)
+  const N = nodes.length
+  const key = JSON.stringify([cols, nodes, edges])
+  let g = grids.get(key)
+  if (!g) {
+    for (const fit of FITS) {
+      g = diagramGrid(nodes, edges, cols, fit)
+      if (g.width <= cols) break
+    }
+    grids.set(key, g!)
+    if (grids.size > 16) grids.delete(grids.keys().next().value!)
+  }
+  const { grid, notes } = g!
+
   // the grid as lines; the hovered node or edge drawn in the accent colour
   const hotNode = hover >= 0 && hover < N ? hover : -1
   const hotEdge = hover >= N ? hover - N : -1
@@ -1055,12 +1259,24 @@ function diagramLayout(card: CardData, cols: number, hover: number): Layout {
     }
     return line
   })
+  // a note: its number, its edge's ends and its label, the label wrapped under the ends to three lines in all
   for (const { n, edge } of notes) {
     const e = edges[edge]!
     const on = edge === hotEdge
-    const head = `${n}  ${cut(nodes[at.get(e.source)!]!.label, 28)} → ${cut(nodes[at.get(e.target)!]!.label, 28)}: `
-    lines.push([{ s: head, fg: on ? COLORS.accent : COLORS.dim, b: on }, { s: cut(e.label ?? '', Math.max(10, cols - width(head))), i: true, fg: on ? COLORS.accent : undefined }])
-    owners.push(new Array<number>(cols).fill(N + edge))
+    const num = `${n}  `
+    const room = Math.max(8, cols - width(num))
+    const [src, tgt] = [nodes[at.get(e.source)!]!.label, nodes[at.get(e.target)!]!.label]
+    let ends = `${cut(src, 28)} → ${cut(tgt, 28)}: `
+    if (width(ends) > room) ends = `${cut(src, Math.max(3, Math.floor((room - 5) / 2)))} → ${cut(tgt, Math.max(3, Math.floor((room - 5) / 2)))}: `
+    const left = room - width(ends)
+    const first = left >= 10 || left >= width(e.label ?? '') ? left : 0
+    const label = noteLines(e.label ?? '', first, room, first ? 3 : 2)
+    const style = { fg: on ? COLORS.accent : COLORS.dim, b: on }
+    const text = { i: true, fg: on ? COLORS.accent : undefined }
+    lines.push([{ s: num + ends, ...style }, ...(first && label[0] ? [{ s: label.shift()!, ...text }] : [])])
+    if (!first) label.shift()
+    for (const l of label) lines.push([{ s: ' '.repeat(width(num)) + l, ...text }])
+    for (let k = 0; k <= label.length; k++) owners.push(new Array<number>(cols).fill(N + edge))
   }
   const items: Item[] = [
     ...nodes.map(

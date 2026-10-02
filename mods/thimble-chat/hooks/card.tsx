@@ -5,7 +5,7 @@
 // one control row is the card's params: a choice runs the card's script again with it.
 import type { ClientModule } from 'claude-code'
 
-import { cardLayout, cut, width } from './draw'
+import { cardLayout, cut, menuShade, width } from './draw'
 import type { CardData, CardMeta, Item, Line, Seg } from './draw'
 import { isMenuTarget, onPointer, send } from './gestures'
 import type { Target } from './gestures'
@@ -68,7 +68,8 @@ const Card: ClientModule<Props, S> = (props, surface) => {
   const card = props.card
   const meta = props.meta ?? {}
 
-  // while a right-click's menu is open on the card its border is lit; on one of its marks, that mark is drawn hovered
+  // while a right-click's menu is open on the card its border is lit and its title shaded; on one of its marks, that
+  // mark is drawn hovered and shaded
   const menuOnCard = isMenuTarget(cardTarget(card), props.menu)
   let lay = cardLayout(card, inner, st.hover, props.plotRows)
   const menuItem = props.menu ? lay.items.findIndex(it => isMenuTarget(itemTarget(it, card), props.menu)) : -1
@@ -131,11 +132,11 @@ const Card: ClientModule<Props, S> = (props, surface) => {
         : null
   const rw = right ? width(right.s) + 2 : 0
   const title = cut(card.question, Math.max(8, inner - rw))
-  const head: Line = [{ s: title, b: true }]
+  const head: Line = [{ s: title, b: true, ...(menuOnCard ? { bg: COLORS.menu } : {}) }]
   if (right) head.push({ s: ' '.repeat(Math.max(2, inner - width(title) - width(right.s))) }, right)
   const rows = [paintLine(Text, head)]
   if (prow) rows.push(paintLine(Text, prow.line))
-  rows.push(...lay.lines.map(l => paintLine(Text, l)))
+  rows.push(...(menuItem >= 0 && shown === menuItem ? menuShade(lay, menuItem) : lay.lines).map(l => paintLine(Text, l)))
   return Box({
     flexDirection: 'column',
     borderStyle: 'round',

@@ -4,7 +4,7 @@ import type { On } from 'claude-code'
 import { expect, mock, test } from 'claude-code/testing'
 import type { Mounted } from 'claude-code/testing'
 
-import { cardLayout, layerGraph, shortTimes, wrapLabel } from '../hooks/draw'
+import { cardLayout, layerGraph, menuShade, shortTimes, wrapLabel } from '../hooks/draw'
 import type { CardData } from '../hooks/draw'
 import { validateCard } from '../hooks/lib'
 import { COLORS, SERIES } from '../hooks/paint'
@@ -45,7 +45,7 @@ const DIAGRAM: CardData = {
   ],
 }
 
-type World = { files: Map<string, string>; filled: string[]; opened: string[]; envSet: [string, string | undefined][] }
+type World = { files: Map<string, string>; filled: string[]; opened: string[]; envSet: [string, string | undefined][]; clock?: ReturnType<typeof mock.clock> }
 
 function world(on: On): World {
   const w: World = {
@@ -58,7 +58,7 @@ function world(on: On): World {
     envSet: [],
   }
   mock.env(on, {})
-  mock.clock(on, { now: 1_790_000_000_000 })
+  w.clock = mock.clock(on, { now: 1_790_000_000_000 })
   on('env.set', ($, e) => {
     w.envSet.push([e.name, e.value])
     return { value: undefined } as never
@@ -236,8 +236,10 @@ test('colours: theme keys for text and highlights, a series palette that reads o
       expect(contrast(resolve(name, COLORS.code), bg)).toBeGreaterThanOrEqual(4)
       for (const c of [...SERIES, COLORS.negative]) expect(contrast(c, bg)).toBeGreaterThanOrEqual(3)
     }
-    // the hovered row's background and a cited value's keep the theme's text readable
-    for (const bg of [COLORS.cursor, COLORS.highlight]) expect(contrast(resolve(name, COLORS.text), resolve(name, bg))).toBeGreaterThanOrEqual(4.5)
+    // the hovered row's background, a cited value's and the open menu's target's keep the theme's text readable
+    for (const bg of [COLORS.cursor, COLORS.highlight, COLORS.menu]) expect(contrast(resolve(name, COLORS.text), resolve(name, bg))).toBeGreaterThanOrEqual(4.5)
+    // the open menu's target stands out from every background of the theme
+    for (const bg of t.bg) expect(contrast(resolve(name, COLORS.menu), bg)).toBeGreaterThanOrEqual(1.3)
   }
   // every token that is not a raw colour is a key of Claude Code's theme
   const tokens: string[] = Object.values(COLORS).flatMap(v => (typeof v === 'string' ? [v] : v))
@@ -389,4 +391,94 @@ test('a diagram in a reply is a Client card; a press on a node with a record ope
   await ui.advance(400) // a click acts once no second click followed
   expect(w.opened).toContain('thimble-cite')
   await ui.unmount()
+})
+
+// ------------------------------------------------------------------------------------------------ round 4: menu shading, dense diagrams
+
+test('the open menu\'s mark is shaded in the menu colour: a bar\'s row, a table\'s row, a diagram\'s box', () => {
+  const lit = (lines: { s: string; bg?: string }[][]) => lines.map(l => l.filter(s => s.bg === COLORS.menu).map(s => s.s).join(''))
+  const bars = menuShade(cardLayout(BAR, 60, 1), 1)
+  expect(lit(bars)[0]).toBe('')
+  expect(lit(bars)[1]).toContain('probier')
+  const table: CardData = { ...BAR, kind: 'table', columns: ['wiki', 'revisions'], rows: [['dse', 13403], ['probier', 1013]] }
+  const rows = menuShade(cardLayout(table, 60, 2), 2) // the second row's first cell
+  expect(lit(rows)[3]).toContain('probier')
+  expect(rows.flat().some(s => s.bg === COLORS.cursor)).toBe(false)
+  const nodes = menuShade(cardLayout(DIAGRAM, 70, 0), 0)
+  const box = nodes.findIndex(l => l.map(s => s.s).join('').includes('Planner'))
+  expect(lit(nodes)[box]).toContain('Planner')
+  expect(lit(nodes).filter(Boolean).length).toBe(3) // the box's three rows, nothing else
+  expect(menuShade(cardLayout(BAR, 60, -1), -1).flat().some(s => s.bg === COLORS.menu)).toBe(false)
+})
+
+test('a right-click on a card shades its title while the menu is open', async ($, on) => {
+  const w = world(on)
+  let panes = [{ id: 'thimble-menu', title: 'Actions', isShown: true, isFocused: true, isPlaced: true }]
+  on('ui.panes', () => ({ value: panes }) as never)
+  await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
+  const ui = (await $.ui.mount(MESSAGE('[[card:d1a9e0]]'))) as unknown as M
+  await ui.resize({ columns: 80, rows: 30, in: 'card-1-d1a9e0' })
+  const lit = async () => JSON.stringify(await ui.drawn({ in: 'card-1-d1a9e0' })).includes(COLORS.menu)
+  expect(await lit()).toBe(false)
+  await ui.pointer({ type: 'down', x: 4, y: 1, button: 'right', in: 'card-1-d1a9e0' } as never)
+  await ui.pointer({ type: 'up', x: 4, y: 1, button: 'right', in: 'card-1-d1a9e0' } as never)
+  await w.clock!.advance(300)
+  expect(await lit()).toBe(true)
+  panes = [] // closed by a choice or Esc
+  await w.clock!.advance(300)
+  expect(await lit()).toBe(false)
+  await ui.unmount()
+})
+
+const graph = (id: string, edges: [string, string, string?][]): CardData => {
+  const ids = [...new Set(edges.flatMap(e => [e[0], e[1]]))]
+  return { ...DIAGRAM, id, nodes: ids.map(n => ({ id: n, label: n })), edges: edges.map(([source, target, label]) => ({ source, target, ...(label ? { label } : {}) })) }
+}
+const COLLUSION = graph('c0ll', [
+  ['Orchestrator', 'AgentRelent'], ['Orchestrator', 'AgentMassPointer13'], ['Orchestrator', 'MapHelper'], ['Orchestrator', 'LinkHelper771'], ['Orchestrator', 'AgentTestLearnXYZ'],
+  ['AgentRelent', 'wiki dse', '317'], ['AgentRelent', 'wiki meta', '12'], ['AgentMassPointer13', 'wiki dse', '187'], ['AgentMassPointer13', 'wiki probier', '40'],
+  ['MapHelper', 'wiki dse', '184'], ['MapHelper', 'wiki meta', '9'], ['LinkHelper771', 'wiki probier', '176'], ['AgentTestLearnXYZ', 'wiki dse', '130'], ['AgentTestLearnXYZ', 'wiki meta'],
+  ['wiki dse', 'Reviewer bot'], ['wiki probier', 'Reviewer bot'], ['wiki meta', 'Reviewer bot'], ['Reviewer bot', 'Orchestrator', 'reverts'],
+])
+const DENSE = graph('d3nse', [
+  ['Wiki F', 'Agent I'], ['Bot D', 'Agent I'], ['Agent A', 'Bot D'], ['Wiki B', 'Bot H'], ['Tool G', 'Bot H'], ['Wiki B', 'Bot D', '91'], ['Tool C', 'Wiki F'], ['Bot D', 'Agent E'],
+  ['Bot H', 'Wiki J'], ['Wiki B', 'Wiki J'], ['Wiki B', 'Tool C', '118'], ['Wiki B', 'Tool G'], ['Agent A', 'Agent E'], ['Tool C', 'Agent E'], ['Wiki B', 'Tool C'], ['Wiki B', 'Wiki F'],
+  ['Agent A', 'Bot H'], ['Agent E', 'Agent I'],
+])
+const drawn = (card: CardData, cols: number) => cardLayout(card, cols, -1).lines.map(l => l.map(s => s.s).join(''))
+/** Cells where a vertical line crosses a horizontal run. */
+const crossings = (text: string[]) => text.reduce((n, t) => n + (t.match(/(?<=─)│(?=─)|┼/g) ?? []).length, 0)
+
+test('a dense diagram crosses as few lines as its graph needs', () => {
+  // agents to wikis need three crossings at best (wiki probier first, then dse, then meta)
+  for (const cols of [56, 72, 116]) expect(crossings(drawn(COLLUSION, cols))).toBeLessThanOrEqual(3)
+  // two sources each to the same two targets: one crossing, not one per line its run passes
+  const k22 = graph('k22', [['Final', 'Link'], ['Link', 'welcome page'], ['Pointer', 'welcome page'], ['Pointer', 'Agent13SecSmallEssential'], ['Link', 'Agent13SecSmallEssential']])
+  expect(crossings(drawn(k22, 72))).toBe(1)
+  expect(crossings(drawn(DENSE, 72))).toBeLessThanOrEqual(5)
+})
+
+test('a dense diagram in a narrow card fits the card: rows wrap and gaps narrow, nothing is cut at the edge', () => {
+  for (const cols of [26, 36, 46, 56]) {
+    for (const card of [COLLUSION, DENSE]) {
+      const text = drawn(card, cols)
+      expect(Math.max(...text.map(t => [...t].length))).toBeLessThanOrEqual(cols)
+      for (const n of card.nodes!) expect(text.join('\n')).toContain(n.label.slice(0, 3))
+    }
+  }
+  // a note too long for the card wraps under its edge's ends
+  const long = graph('l0ng', [['one run: 48 workers on a pandas backlog', 'forge.db: 176 PRs, reviews and merges', 'issues only in PRs + issues runs, never in the others']])
+  const text = drawn(long, 46)
+  expect(Math.max(...text.map(t => [...t].length))).toBeLessThanOrEqual(46)
+  const note = text.findIndex(t => t.startsWith('1  '))
+  expect(note).toBeGreaterThan(0)
+  expect(text.slice(note).join(' ')).toContain('never in')
+})
+
+test('a pointer move repaints a diagram without laying it out again', () => {
+  const big = graph('b1g', Array.from({ length: 40 }, (_, k): [string, string] => [`Node ${(k * 7) % 20}`, `Node ${20 + ((k * 11) % 8)}`]))
+  cardLayout(big, 76, -1)
+  const t = Date.now()
+  for (let i = 0; i < 20; i++) cardLayout(big, 76, i)
+  expect(Date.now() - t).toBeLessThan(200)
 })
