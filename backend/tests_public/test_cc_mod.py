@@ -1,6 +1,6 @@
 """thimble-cc-mod, the second plugin of thimble's marketplace: the marketplace lists it, `thimble cc-mod on|off|status`
-switches it in the current folder through `claude plugin` alone (stubbed here: no test runs Claude Code), and every
-session the launcher starts turns it off."""
+switches it, and only it, in the current folder through `claude plugin` alone (stubbed here: no test runs Claude Code),
+main's session loads it where it is on, and thimble's background sessions turn it off."""
 from __future__ import annotations
 
 import json
@@ -68,24 +68,24 @@ def _status(capsys) -> str:
     return capsys.readouterr().out
 
 
-def test_on_asks_then_installs_the_mod_and_turns_thimble_off_and_off_undoes_both(claude, capsys):
+def test_on_asks_then_installs_only_the_mod_and_off_uninstalls_only_the_mod(claude, capsys):
     assert cli.main(["cc-mod", "on"]) == 0
     out = capsys.readouterr().out
-    assert claude.runs == [["plugin", "install", MOD, "--scope", "project"], ["plugin", "disable", OWN, "--scope", "project"]]
+    assert claude.runs == [["plugin", "install", MOD, "--scope", "project"]]
     assert claude.asked == [cli.MOD_QUESTION]
     assert f"claude plugin install {MOD} --scope project" in out.split(cli.MOD_QUESTION)[0]
     assert str(claude.folder / ".claude" / "settings.json") in out and "`thimble cc-mod off`" in out
     status = _status(capsys)
-    assert f"thimble-cc-mod is on in {claude.folder}" in status and f"thimble plugin is off in {claude.folder}" in status
+    assert f"thimble-cc-mod is on in {claude.folder}" in status and f"thimble plugin is on in {claude.folder}" in status
     claude.runs.clear()
+    assert cli.main(["cc-mod", "on"]) == 0 and claude.runs == [], "on already"
     assert cli.main(["cc-mod", "off"]) == 0
-    assert claude.runs == [["plugin", "uninstall", MOD, "--scope", "project"], ["plugin", "enable", OWN, "--scope", "project"]]
-    assert "on here again" in capsys.readouterr().out
+    assert claude.runs == [["plugin", "uninstall", MOD, "--scope", "project"]]
     status = _status(capsys)
     assert "thimble-cc-mod is off" in status and "thimble plugin is on" in status
-    assert json.loads((cli.home() / cli.MOD_STATE).read_text()) == []
     claude.runs.clear()
     assert cli.main(["cc-mod", "off"]) == 0 and claude.runs == [], "nothing left to undo"
+    assert not (cli.home() / "cc-mod.json").exists()
 
 
 def test_on_changes_nothing_without_a_yes_and_yes_skips_the_question(claude, capsys, monkeypatch):
@@ -95,16 +95,23 @@ def test_on_changes_nothing_without_a_yes_and_yes_skips_the_question(claude, cap
         assert line in capsys.readouterr().out and claude.runs == []
     monkeypatch.setattr(cli, "confirm", lambda q: pytest.fail("--yes asks nothing"))
     assert cli.main(["cc-mod", "on", "--yes"]) == 0
-    assert [r[1] for r in claude.runs] == ["install", "disable"]
+    assert [r[1] for r in claude.runs] == ["install"]
 
 
-def test_off_turns_thimble_on_only_where_on_turned_it_off(claude):
-    claude.listed = [{"id": OWN, "scope": "user", "enabled": False}]
+def test_a_thimble_plugin_off_here_stays_off_and_an_old_cc_mod_json_is_ignored(claude, capsys):
+    """A test build turned thimble off where it turned the mod on and listed the folder in cc-mod.json; off leaves
+    thimble off now, and status says how to turn it on."""
+    claude.listed = [{"id": OWN, "scope": "project", "projectPath": str(claude.folder), "enabled": False}]
+    old = cli.ensure_home() / "cc-mod.json"
+    old.write_text(json.dumps([str(claude.folder)]))
     assert cli.main(["cc-mod", "on", "--yes"]) == 0
-    assert claude.runs == [["plugin", "install", MOD, "--scope", "project"]], "thimble was off here already"
-    claude.runs.clear()
     assert cli.main(["cc-mod", "off"]) == 0
-    assert claude.runs == [["plugin", "uninstall", MOD, "--scope", "project"]]
+    assert claude.runs == [["plugin", "install", MOD, "--scope", "project"], ["plugin", "uninstall", MOD, "--scope", "project"]]
+    status = _status(capsys)
+    assert "thimble plugin is off" in status and f"`claude plugin enable {OWN} --scope project`" in status
+    assert json.loads(old.read_text()) == [str(claude.folder)]
+    old.write_text("not json")
+    assert cli.main(["cc-mod", "on", "--yes"]) == 0
 
 
 def test_on_without_the_marketplace_registered_says_how_and_runs_nothing(claude, capsys):
@@ -114,12 +121,11 @@ def test_on_without_the_marketplace_registered_says_how_and_runs_nothing(claude,
     assert f'marketplace "{MP}"' in out and "claude plugin marketplace add" in out and claude.runs == []
 
 
-def test_a_failed_install_leaves_thimble_on(claude, capsys):
+def test_a_failed_install_says_why(claude, capsys):
     claude.fail = {"install"}
     assert cli.main(["cc-mod", "on", "--yes"]) == 1
     assert claude.runs == [["plugin", "install", MOD, "--scope", "project"]]
     assert "it went wrong" in capsys.readouterr().out
-    assert not (cli.home() / cli.MOD_STATE).exists()
 
 
 def test_status_counts_only_this_folder_s_project_install(claude, capsys, tmp_path):
@@ -128,12 +134,16 @@ def test_status_counts_only_this_folder_s_project_install(claude, capsys, tmp_pa
     assert "thimble-cc-mod is off" in status and "thimble plugin is on" in status
 
 
-def test_every_launch_turns_the_mod_off_and_keeps_the_analyst_s_own_plugins(claude):
-    settings = json.loads(cli.launch_settings(claude.folder))
-    assert settings["enabledPlugins"] == {MOD: False}
+def test_main_s_session_leaves_the_mod_to_the_folder_s_settings(claude):
+    assert "enabledPlugins" not in json.loads(cli.launch_settings(claude.folder))
     given = json.dumps({"enabledPlugins": {"other@market": True, MOD: True}})
-    assert json.loads(cli.launch_settings(claude.folder, given))["enabledPlugins"] == {"other@market": True, MOD: False}
-    assert json.loads(cli.launch_args(claude.folder).split("\n")[3])["enabledPlugins"] == {MOD: False}
+    assert json.loads(cli.launch_settings(claude.folder, given))["enabledPlugins"] == {"other@market": True, MOD: True}
+    assert "enabledPlugins" not in json.loads(cli.launch_args(claude.folder).split("\n")[3])
+
+
+def test_background_sessions_turn_the_mod_off_and_keep_the_analyst_s_own_plugins(claude):
+    given = {"fastMode": True, "enabledPlugins": {"other@market": True, MOD: True}}
+    assert config.without_mod(given) == {"fastMode": True, "enabledPlugins": {"other@market": True, MOD: False}}
 
 
 def test_without_a_marketplace_name_the_settings_stay_as_they_are(monkeypatch, tmp_path):

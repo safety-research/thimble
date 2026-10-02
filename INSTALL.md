@@ -118,8 +118,10 @@ thimble-cc-mod is a single-agent thimble inside Claude Code, an exploration that
 of its marketplace. Claude answers with cards drawn in the chat and citations you can check, with no server, browser or
 background agents. Switch it on in a folder with `thimble cc-mod on`, which asks first, then writes the folder's
 `.claude/settings.json` through `claude plugin`; then run `claude` there. `thimble cc-mod off` undoes it, and `thimble
-cc-mod status` says which plugin is on in the folder. The two never run in the same session: `thimble cc-mod on` turns
-the thimble plugin off in that folder, and every session the `thimble` command starts turns thimble-cc-mod off.
+cc-mod status` says whether each of the two plugins is on in the folder. They are switched independently: `on` and `off`
+leave the thimble plugin as it is, and a session the `thimble` command starts where the mod is on loads it too.
+thimble's own background sessions (the orientation, critic, writers, checks, task programs and builds) run without it.
+To use it without installing thimble, see the [README](README.md#thimble-cc-mod).
 
 ## Update
 

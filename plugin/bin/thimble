@@ -19,8 +19,8 @@
 #   thimble purge <id>… [-y] [--dry-run] delete workspaces or archived runs by id, printing what went; never the folder a
 #                                        workspace read or Claude Code's transcripts (backend/app/runs.py)
 #   thimble cc-mod on [--yes] | off | status
-#                                        thimble-cc-mod in this folder, by `claude plugin` at project scope; on turns the
-#                                        thimble plugin off here (backend/app/cli.py cmd_cc_mod)
+#                                        thimble-cc-mod in this folder, by `claude plugin` at project scope; the thimble
+#                                        plugin stays as it is (backend/app/cli.py cmd_cc_mod)
 #   thimble launch-args [--cwd <p>] [--settings <s>]
 #                                        what a session starts with: the channel entry, the --allowedTools, --effort and
 #                                        --settings values, the tools that end a turn without text, main's --name, then
@@ -80,7 +80,7 @@ usage: thimble [claude flags...]          start thimble in this folder: a new Cl
                                           add, switch on or off, list or remove extensions
        thimble cc-mod on [--yes] | off | status
                                           thimble-cc-mod (a single-agent thimble inside Claude Code) in this
-                                          folder; on turns the thimble plugin off here
+                                          folder
        thimble update [--from <zip>]      bring the install up to date
        thimble uninstall [--yes] [--keep-home]
 EOF
@@ -459,11 +459,11 @@ esac
 # folder; it is passed on -c/--continue and -r/--resume too, so a resumed main keeps that name (one an earlier build
 # left unnamed takes it, and so does one the analyst renamed with /rename), and an -n/--name among the analyst's own
 # flags wins.
-# --settings carries thimble's statusline, the composer's fast mode and thimble-cc-mod off (the two plugins never run in
-# one session), merged into the analyst's own --settings, since Claude Code reads only the last one. --allowedTools lets the thimble
-# tools and the plugin's skills run without a permission prompt, since a fork answering the browser must not wait on a
-# terminal nobody watches; nothing is denied. THIMBLE_CHANNEL tells the MCP shim to subscribe. The session opens with
-# /thimble, which starts the server and opens this folder as a workspace.
+# --settings carries thimble's statusline and the composer's fast mode, merged into the analyst's own --settings, since
+# Claude Code reads only the last one. --allowedTools lets the thimble tools and the plugin's skills run without a
+# permission prompt, since a fork answering the browser must not wait on a terminal nobody watches; nothing is denied.
+# THIMBLE_CHANNEL tells the MCP shim to subscribe. The session opens with /thimble, which starts the server and opens
+# this folder as a workspace.
 command -v claude >/dev/null 2>&1 || {
   printf 'thimble: the `claude` CLI is not on PATH. thimble runs inside Claude Code: install it (https://docs.anthropic.com/en/docs/claude-code), then run thimble again.\n' >&2
   exit 1; }

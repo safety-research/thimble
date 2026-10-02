@@ -14,6 +14,8 @@ https://github.com/user-attachments/assets/3c21e405-6b8d-4ba6-85a8-24211800596c
 
 ## Installation
 
+thimble comes as two plugins, and you can turn on either one without the other: **thimble**, the workbench (installed as below), and **thimble-cc-mod**, thimble inside a plain Claude Code session ([below](#thimble-cc-mod)).
+
 ### Installing with Claude
 
 ```
@@ -31,6 +33,23 @@ Instructions for agents installing thimble on the user's behalf are in [CLAUDE.m
 For a development build, clone the repo and run `bash scripts/install.sh`. 
 
 [INSTALL.md](INSTALL.md) covers requirements, updating and troubleshooting.
+
+### thimble-cc-mod
+
+thimble-cc-mod draws cards and citations you can check in the Claude Code chat itself, with no server, browser or background agents. It is an exploration and may change or break.
+
+- **With thimble installed:** run `thimble cc-mod on` in a folder (`thimble cc-mod off` undoes it). The thimble plugin stays as it is.
+- **Without thimble:**
+
+  ```
+  git clone https://github.com/safety-research/thimble <dir>
+  claude plugin marketplace add <dir>
+  cd <folder> && claude plugin install thimble-cc-mod@thimble --scope project
+  ```
+
+  Don't install the `thimble` plugin from this marketplace without running thimble's installer: it needs the thimble server.
+
+Then run `claude` in that folder. [mods/thimble-cc-mod/README.md](mods/thimble-cc-mod/README.md) covers its requirements and how to use it.
 
 ## Usage
 
