@@ -136,7 +136,7 @@ const Card: ClientModule<Props, S> = (props, surface) => {
   if (right) head.push({ s: ' '.repeat(Math.max(2, inner - width(title) - width(right.s))) }, right)
   const rows = [paintLine(Text, head)]
   if (prow) rows.push(paintLine(Text, prow.line))
-  rows.push(...(shown === menuItem && st.hover < 0 ? menuShade(lay, menuItem) : lay.lines).map(l => paintLine(Text, l)))
+  rows.push(...(menuItem >= 0 && shown === menuItem ? menuShade(lay, menuItem) : lay.lines).map(l => paintLine(Text, l)))
   return Box({
     flexDirection: 'column',
     borderStyle: 'round',
