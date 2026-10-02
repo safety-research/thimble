@@ -13,12 +13,12 @@ This is an exploration that ships with thimble as the second plugin of its marke
 
 ## Install
 
-With thimble installed, run `thimble cc-mod on` in a folder; `thimble cc-mod off` undoes it. `on` turns the thimble
-plugin off in that folder, and the sessions the `thimble` command starts turn this mod off.
+With thimble installed, run `thimble cc-mod on` in a folder; `thimble cc-mod off` undoes it. Both switch this mod
+alone: the thimble plugin stays as it is, and thimble's own background sessions run without the mod.
 
 Without installing thimble:
 
-    git clone -b explore/thimble-cc-mod https://github.com/safety-research/thimble <dir>
+    git clone https://github.com/safety-research/thimble <dir>
     claude plugin marketplace add <dir>
     cd <folder> && claude plugin install thimble-cc-mod@thimble --scope project
 
@@ -59,7 +59,8 @@ paragraphs for a question that takes several steps, such as a why question.
   thread: a forked subagent answers in a panel, and nothing is added to the main conversation. `m` puts the thread's
   one-line result into the prompt. Each subagent the mod starts shows in the main chat as one dim line at most, named
   for what it does: "verification · correcting citations", "verification · checking <value>", "side thread · <the
-  question's first words>".
+  question's first words>". The mod stops each one once its answer is in, a side thread's also when its panel closes,
+  and any still running at /exit, so /exit exits.
 
 ## Gestures
 
@@ -75,7 +76,8 @@ record, a diagram node.
 
 If a gesture misbehaves, run `/thimble-cc-mod debug on` (or start Claude Code with `THIMBLE_CC_MOD_DEBUG=1`) and send
 `.thimble-cc-mod/mouse.log`: one line per press and release the mod received, with its button, modifiers, gesture and
-target. `/thimble-cc-mod debug off` stops it.
+target, then what the mod did: the action, the panel it opened (or why it waits) and the subagents it stopped.
+`/thimble-cc-mod debug off` stops it.
 
 Commands: `/thimble-card <n>` (the last answer's n-th card in a panel), `/thimble-cite <n>` (its n-th citation),
 `/thimble-check` (check the last answer again), `/thimble-ask <question>`, `/thimble-band` (a row above the prompt
@@ -85,7 +87,9 @@ The mod and Claude write only under `.thimble-cc-mod/` in the folder: scripts, c
 verification scripts, corrections and saved Bash outputs.
 
 Display: the mouse needs Claude Code's fullscreen view (`/tui fullscreen`); without it cards and citations are drawn
-but do not respond. iTerm2 shows the colours in full; macOS Terminal shows 256 colours. In tmux, set
+but do not respond. Below 144 columns Claude Code keeps a panel a click opens undrawn, since it does not count a click
+on the reply as asking for one: a row above the prompt names the panel, and its "open" button opens it. From then on a
+click opens that panel directly at 110 columns or more. iTerm2 shows the colours in full; macOS Terminal shows 256 colours. In tmux, set
 `set -g mouse on`, and `CLAUDE_CODE_TMUX_TRUECOLOR=1` for full colour.
 
 ## Known limits

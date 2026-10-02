@@ -88,7 +88,7 @@ function world(on: On): World {
   })
   on('ui.open', ($, e) => {
     w.opened.push({ id: e.id, focus: (e as { focus?: boolean }).focus })
-    return { value: { isOpen: true } } as never
+    return { value: { isPlaced: true } } as never
   })
   on('ui.close', () => ({ value: undefined }) as never)
   on('ui.toast', () => ({ value: undefined }) as never)
