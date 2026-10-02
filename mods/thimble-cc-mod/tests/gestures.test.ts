@@ -1,15 +1,17 @@
-// The gestures (hooks/gestures.tsx): one set on every target. Click opens the place a target cites (a sentence's first
-// citation's, a card's script), double-click puts its citation into the prompt, shift-, ctrl- or middle-click opens a
-// side thread, right-click opens the menu.
+// The gestures (hooks/gestures.tsx): one set on every target a Client draws. A click (or a double-click) opens the place
+// a target cites, or on a card itself a side thread about the card; right-click opens the menu; modifier clicks and the
+// middle button make no gesture. A reply's paragraph with citations is a Client (hooks/para.tsx): a click there acts on
+// its release, a drag selects and copies. Every view opens in one panel, `thimble`, which shows the view `panelView` names.
 import type { JsonValue, On } from 'claude-code'
 import { expect, mock, test } from 'claude-code/testing'
 import type { Mounted } from 'claude-code/testing'
 
 import { blockLayout } from '../hooks/cite'
-import { DOUBLE_MS, citationOf, citeText, classify, menuItems, menuLines, onPointer, placeOf, send, targetLabel } from '../hooks/gestures'
+import { citationOf, classify, menuItems, menuLines, onPointer, placeOf, send, targetLabel } from '../hooks/gestures'
 import type { PointerEv, Sent, Target } from '../hooks/gestures'
-import { parseReply } from '../hooks/lib'
+import { parseReply, sectionsOf } from '../hooks/lib'
 import { COLORS } from '../hooks/paint'
+import { selectedText } from '../hooks/para'
 
 const CWD = '/corpus/wiki'
 const CARD = {
@@ -28,14 +30,14 @@ const CARD = {
 }
 const REPLY = ['[[card:abc123]]', '', 'The wikis differ a lot in size.', '', 'dse has [[13403|card:abc123#revisions/dse]] revisions, see [[pages.jsonl#L3]].'].join('\n')
 const MESSAGE = { plugin: 'thimble-cc-mod', component: 'AssistantMessage', requestId: 'm1', surface: 'terminal', viewport: { columns: 140, rows: 40 }, props: { text: REPLY, isFirstOfReply: true } }
-const MENU = { plugin: 'thimble-cc-mod', component: 'Pane', requestId: 'thimble-menu', surface: 'terminal', viewport: { columns: 100, rows: 30 }, props: { bodyColumns: 34, bodyRows: 8 } }
+const MENU = { plugin: 'thimble-cc-mod', component: 'Pane', requestId: 'thimble', surface: 'terminal', viewport: { columns: 100, rows: 30 }, props: { bodyColumns: 34, bodyRows: 8 } }
 
-type World = { files: Map<string, string>; filled: string[]; opened: string[]; runs: string[]; submitted: string[]; clock: ReturnType<typeof mock.clock> }
+type World = { files: Map<string, string>; filled: string[]; opened: string[]; closed: string[]; copied: string[]; toasts: string[]; runs: string[]; submitted: string[]; clock: ReturnType<typeof mock.clock>; placed: boolean }
 
 function world(on: On, env: Record<string, string> = {}): World {
   mock.env(on, env)
   const clock = mock.clock(on, { now: 1_790_000_000_000 })
-  const w: World = { files: new Map([[`${CWD}/.thimble-cc-mod/cards/abc123.json`, JSON.stringify(CARD)]]), filled: [], opened: [], runs: [], submitted: [], clock }
+  const w: World = { files: new Map([[`${CWD}/.thimble-cc-mod/cards/abc123.json`, JSON.stringify(CARD)]]), filled: [], opened: [], closed: [], copied: [], toasts: [], runs: [], submitted: [], clock, placed: true }
   on('session.start', ($, e) => ({ cwd: e.cwd }))
   on('session.cwd', () => ({ value: CWD }))
   on('session.messages', () => ({ value: [] }) as never)
@@ -77,10 +79,20 @@ function world(on: On, env: Record<string, string> = {}): World {
   on('agent.spawn', () => ({ model: 'm', agentId: 'agent-1' }))
   on('ui.open', ($, e) => {
     w.opened.push(e.id)
-    return { value: { isPlaced: true } } as never
+    return { value: w.placed ? { isPlaced: true } : { isPlaced: false, reason: 'the terminal is too narrow' } } as never
   })
-  on('ui.close', () => ({ value: undefined }) as never)
-  on('ui.toast', () => ({ value: undefined }) as never)
+  on('ui.close', ($, e) => {
+    w.closed.push(e.id)
+    return { value: undefined } as never
+  })
+  on('ui.copy', ($, e) => {
+    w.copied.push(e.text)
+    return { value: { isCopied: true } } as never
+  })
+  on('ui.toast', ($, e) => {
+    w.toasts.push(JSON.stringify(e))
+    return { value: undefined } as never
+  })
   on('ui.log', () => ({ value: undefined }) as never)
   on('ui.render', ($, e) => $.ui.resolve(e).Text({ children: ['(the engine row)'] }))
   return w
@@ -119,16 +131,17 @@ function port() {
 
 // ------------------------------------------------------------------------------------------------ pure
 
-test('each button and modifier makes one gesture, the same on every target', () => {
+test('a left press, once or twice, is the one action; right is the menu; modifiers and middle make none', () => {
   expect(classify(press('left'))).toBe('primary')
-  expect(classify(press('left'), true)).toBe('cite')
-  expect(classify({ ...press('left'), type: 'double' })).toBe('cite')
-  expect(classify(press('left', { shift: true }))).toBe('thread')
-  expect(classify(press('left', { ctrl: true }))).toBe('thread')
-  expect(classify(press('middle'))).toBe('thread')
+  expect(classify({ ...press('left'), type: 'double' })).toBe('primary')
   expect(classify(press('right'))).toBe('menu')
-  expect(classify(press('right', { ctrl: true }))).toBe('thread')
+  // terminals keep these for their own selection: no gesture, whatever the target
+  expect(classify(press('left', { shift: true }))).toBe(null)
+  expect(classify(press('left', { ctrl: true }))).toBe(null)
+  expect(classify(press('left', { alt: true }))).toBe(null)
+  expect(classify(press('middle'))).toBe(null)
   expect(classify({ ...press('right'), type: 'release' })).toBe(null)
+  expect(classify({ ...press('left'), type: 'release' })).toBe(null)
 })
 
 test('a target names its citation, the place a click opens and the actions of its menu', () => {
@@ -138,42 +151,48 @@ test('a target names its citation, the place a click opens and the actions of it
   const chip: Target = { kind: 'citation', ref: '[[13403|card:abc123#revisions/dse]]' }
   const sentence: Target = { kind: 'sentence', text: 'The wikis differ   a lot.' }
   const card: Target = { kind: 'card', cardId: 'abc123', text: 'Which wikis?', script }
-  expect(citeText(mark)).toBe('[[13403|card:abc123#revisions/dse]]')
-  expect(citeText(chip)).toBe('[[13403|card:abc123#revisions/dse]]')
-  expect(citeText(sentence)).toBe('"The wikis differ a lot."')
-  expect(citeText(card)).toBe('[[card:abc123]]')
+  expect(citationOf(mark)?.raw).toBe('[[13403|card:abc123#revisions/dse]]')
+  expect(citationOf(chip)?.raw).toBe('[[13403|card:abc123#revisions/dse]]')
+  expect(citationOf(card)?.raw).toBe('[[card:abc123]]')
   expect(citationOf({ kind: 'node', ref: 'a.md', text: 'x|y' })?.raw).toBe('[[a.md]]')
   // a click opens a place outside the cards, and a citation's place wherever it is
   expect(placeOf(mark)).toBe(null)
   expect(placeOf(record)?.ref).toBe('pages.jsonl#L3')
   expect(placeOf(chip)?.ref).toBe('card:abc123#revisions/dse')
   expect(placeOf(sentence)).toBe(null)
-  expect(placeOf({ kind: 'sentence', text: 'dse has [[13403|card:abc123#revisions/dse]] revisions, see [[pages.jsonl#L3]].' })?.ref).toBe('card:abc123#revisions/dse')
-  expect(placeOf({ kind: 'row', text: 'dse | [[13403|pages.jsonl#L3]]' })?.ref).toBe('pages.jsonl#L3')
+  // plain words open nothing: only what is drawn as a link opens a panel
+  expect(placeOf({ kind: 'row', text: 'dse | [[13403|pages.jsonl#L3]]' })).toBe(null)
   expect(placeOf(card)).toBe(null)
-  expect(menuItems(mark).map(m => m.act)).toEqual(['thread', 'verify', 'script', 'rerun', 'cite'])
-  expect(menuItems(record).map(m => m.act)).toEqual(['open', 'thread', 'script', 'rerun', 'cite'])
-  expect(menuItems(chip).map(m => m.act)).toEqual(['open', 'thread', 'verify', 'cite'])
-  expect(menuItems(sentence).map(m => m.act)).toEqual(['thread', 'cite'])
-  expect(menuItems(card).map(m => m.act)).toEqual(['thread', 'script', 'rerun', 'cite'])
+  // no menu has a "cite": nothing fills main's prompt
+  expect(menuItems(mark).map(m => m.act)).toEqual(['thread', 'verify', 'script', 'rerun'])
+  expect(menuItems(record).map(m => m.act)).toEqual(['open', 'thread', 'script', 'rerun'])
+  expect(menuItems(chip).map(m => m.act)).toEqual(['open', 'thread', 'verify'])
+  expect(menuItems(card).map(m => m.act)).toEqual(['thread', 'script', 'rerun'])
   // a card made without a script has nothing to open or rerun
-  expect(menuItems({ ...record, script: undefined }).map(m => m.act)).toEqual(['open', 'thread', 'cite'])
+  expect(menuItems({ ...record, script: undefined }).map(m => m.act)).toEqual(['open', 'thread'])
 })
 
-test('a click acts once no second click follows; a double-click cites and does not open', () => {
+test('a click acts at once, a double-click is the same action; a modifier or middle click posts no gesture', () => {
   const chip: Target = { kind: 'citation', ref: 'pages.jsonl#L3' }
   const p = port()
   onPointer(chip, { type: 'down', x: 1, y: 0, button: 'left' }, p)
+  expect(p.gestures()).toEqual(['primary'])
   onPointer(chip, { type: 'up', x: 1, y: 0, button: 'left' }, p)
-  expect(p.gestures()).toEqual([])
-  p.advance(DOUBLE_MS)
   expect(p.gestures()).toEqual(['primary'])
   p.advance(1000)
 
   const q = port()
   for (const type of ['down', 'up', 'down', 'up'] as const) onPointer(chip, { type, x: 1, y: 0, button: 'left' }, q)
-  q.advance(DOUBLE_MS * 2)
-  expect(q.gestures()).toEqual(['cite'])
+  expect(q.gestures()).toEqual(['primary', 'primary'])
+  q.advance(1000)
+
+  const r = port()
+  onPointer(chip, { type: 'down', x: 1, y: 0, button: 'left', shift: true }, r)
+  onPointer(chip, { type: 'down', x: 1, y: 0, button: 'left', ctrl: true }, r)
+  onPointer(chip, { type: 'down', x: 1, y: 0, button: 'left', alt: true }, r)
+  onPointer(chip, { type: 'down', x: 1, y: 0, button: 'middle' }, r)
+  expect(r.gestures()).toEqual([])
+  r.advance(1000)
 })
 
 test('right-click opens the menu on its press, or on a release whose press went elsewhere; a later post keeps an earlier gesture', () => {
@@ -209,77 +228,293 @@ test('a right release that the reflowed transcript puts on another target leaves
 
 // ------------------------------------------------------------------------------------------------ in a reply
 
-test('a plain paragraph of a reply is a Client: right-click opens the menu, whose cite puts the passage in the prompt', async ($, on) => {
+/** The cells of the paragraph with citations (para-3) where its citations are drawn: [13403, pages:3]. */
+function chipXs(): number[] {
+  const block = parseReply(REPLY).find(b => b.type === 'rich')
+  if (block?.type !== 'rich') throw new Error('expected a paragraph with citations')
+  const chips = [0, 1].map(() => ({ label: '13403', state: 'link' as const, mark: '', tip: '', spin: false }))
+  return blockLayout(block, chips, 136, -1).spans.map(s => s.x0 + 1)
+}
+
+const PANEL = { ...MENU, props: { bodyColumns: 96, bodyRows: 28 } }
+
+test('a plain paragraph is the engine\'s Markdown with an "ask ›" shown on hover; one with citations is a Client of para.tsx', async ($, on) => {
   const w = world(on)
   await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
   const ui = (await $.ui.mount(MESSAGE as never)) as unknown as M
-  expect(await ui.find({ key: 'md-2' })).toBeDefined()
-  await ui.pointer({ type: 'down', x: 3, y: 0, button: 'right', in: 'md-2' } as never)
-  await ui.pointer({ type: 'up', x: 3, y: 0, button: 'right', in: 'md-2' } as never)
-  expect(w.opened).toEqual(['thimble-menu'])
-  const menu = (await $.ui.mount(MENU as never)) as unknown as M
-  expect(await menu.find({ key: 'menu-thread' })).toBeDefined()
-  expect(await menu.find({ key: 'menu-verify' })).toBeUndefined()
-  await menu.press({ key: 'menu-cite' })
-  expect(w.filled).toEqual(['"The wikis differ a lot in size." '])
-  await menu.unmount()
+  expect(await ui.find({ type: 'Markdown', text: 'The wikis differ a lot in size.' })).toBeDefined()
+  const para = (await ui.find({ key: 'para-3' })) as { type: string; props: { module: string; props: { raws: string[] } } }
+  expect(para.type).toBe('Client')
+  expect(para.props.module).toMatch(/para\.tsx$/)
+  expect(para.props.props.raws).toEqual(['[[13403|card:abc123#revisions/dse]]', '[[pages.jsonl#L3]]'])
+  // the paragraph's "ask ›" opens a side thread about it, as the person's own press
+  expect(await ui.find({ key: 'ask-md:2-0' })).toBeDefined()
+  await ui.press({ key: 'ask-md:2-0' })
+  expect(w.opened).toEqual(['thimble'])
+  expect(w.filled).toEqual([])
   await ui.unmount()
+  const pane = (await $.ui.mount(PANEL as never)) as unknown as M
+  expect(await pane.find({ type: 'Text', text: /side thread about/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /The wikis differ a lot in size/ })).toBeDefined()
+  await pane.unmount()
 })
 
-test('double-click pastes the citation, shift-click opens a side thread, a plain click on a passage does nothing', async ($, on) => {
+test('a reply with no citation is the engine\'s Markdown, a paragraph and its code block one "?" each, shown on hover; elsewhere the engine draws it alone', async ($, on) => {
+  world(on)
+  await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
+  const text = 'Run it like this:\n\n```sh\npython3 count.py --wiki dse\n\npython3 count.py --wiki en\n```\n\nThat prints one line.'
+  const ui = (await $.ui.mount({ ...MESSAGE, requestId: 'm2', props: { text, isFirstOfReply: true } } as never)) as unknown as M
+  expect(await ui.find({ type: 'Client' })).toBeUndefined()
+  expect(await ui.find({ type: 'Markdown', text: 'Run it like this:' })).toBeDefined()
+  // a blank line inside a fence does not cut it
+  expect(await ui.find({ type: 'Markdown', text: '```sh\npython3 count.py --wiki dse\n\npython3 count.py --wiki en\n```' })).toBeDefined()
+  expect(await ui.find({ type: 'Markdown', text: 'That prints one line.' })).toBeDefined()
+  expect((await ui.findAll({ type: 'Button' })).map(b => (b as { props: { label?: string } }).props.label)).toEqual(['?', '?', '?'])
+  // each in its block's own margin, in the row's flow (a press reaches it), hidden until the pointer is on the block;
+  // the reply's ⏺ in the first block's margin
+  const hidden = JSON.stringify(await ui.find({ key: 'md-1-0' }))
+  expect(hidden).toContain('"display":"none"')
+  expect(hidden).not.toContain('"position":"absolute"')
+  expect(hidden).toContain('⏺')
+  expect(JSON.stringify(await ui.find({ key: 'md-3-0' }))).not.toContain('⏺')
+  await ui.unmount()
+  const vs = (await $.ui.mount({ ...MESSAGE, requestId: 'm3', surface: 'vscode', props: { text, isFirstOfReply: true } } as never)) as unknown as M
+  expect(await vs.find({ type: 'Button' })).toBeUndefined()
+  await vs.unmount()
+})
+
+test('a click on a citation in a paragraph opens the Citation view on its release, not on its press', async ($, on) => {
   const w = world(on)
   await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
   const ui = (await $.ui.mount(MESSAGE as never)) as unknown as M
-  for (const type of ['down', 'up', 'down', 'up'] as const) await ui.pointer({ type, x: 3, y: 0, button: 'left', in: 'md-2' } as never)
-  expect(w.filled).toEqual(['"The wikis differ a lot in size." '])
-  await ui.advance(DOUBLE_MS * 2)
-  await ui.pointer({ type: 'down', x: 3, y: 0, button: 'left', in: 'md-2' } as never)
-  await ui.advance(DOUBLE_MS * 2)
-  expect(w.opened).toEqual([])
-  await ui.pointer({ type: 'down', x: 3, y: 0, button: 'left', shift: true, in: 'md-2' } as never)
-  expect(w.opened).toEqual(['thimble-thread'])
+  const [, pages] = chipXs()
+  await ui.pointer({ type: 'down', x: pages!, y: 0, button: 'left', in: 'para-3' } as never)
+  expect(w.opened).toEqual([]) // the press only starts a click or a drag
+  await ui.pointer({ type: 'up', x: pages!, y: 0, button: 'left', in: 'para-3' } as never)
+  expect(w.opened).toEqual(['thimble'])
+  await ui.unmount()
+  const pane = (await $.ui.mount(PANEL as never)) as unknown as M
+  expect(await pane.find({ type: 'Text', text: /pages:3/ })).toBeDefined()
+  await pane.unmount()
+  expect(w.filled).toEqual([])
   expect(w.submitted).toEqual([])
+})
+
+test('a left drag in a paragraph lights the cells it covers and copies their text on release; nothing opens', async ($, on) => {
+  const w = world(on)
+  await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
+  const ui = (await $.ui.mount(MESSAGE as never)) as unknown as M
+  const lit = async () => JSON.stringify(await ui.drawn({ in: 'para-3' })).includes(COLORS.highlight)
+  expect(await lit()).toBe(false)
+  await ui.pointer({ type: 'down', x: 0, y: 0, button: 'left', in: 'para-3' } as never)
+  await ui.pointer({ type: 'move', x: 6, y: 0, button: 'left', in: 'para-3' } as never)
+  expect(await lit()).toBe(true)
+  await ui.pointer({ type: 'up', x: 6, y: 0, button: 'left', in: 'para-3' } as never)
+  expect(w.copied).toEqual(['dse has'])
+  expect(w.toasts.some(t => t.includes('copied 7 characters'))).toBe(true)
+  expect(w.opened).toEqual([])
+  // the next press clears the selection
+  await ui.pointer({ type: 'down', x: 1, y: 0, button: 'left', in: 'para-3' } as never)
+  expect(await lit()).toBe(false)
   await ui.unmount()
 })
 
-test('a gesture posted from a chip or a mark is handled once: click opens, menu acts on the card', async ($, on) => {
+test('a selection offers "ask about this", whose press opens a side thread about the selected words', async ($, on) => {
+  const w = world(on)
+  await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
+  const ui = (await $.ui.mount(MESSAGE as never)) as unknown as M
+  expect(await ui.find({ key: 'sel-ask', in: 'para-3' })).toBeUndefined()
+  await ui.pointer({ type: 'down', x: 0, y: 0, button: 'left', in: 'para-3' } as never)
+  await ui.pointer({ type: 'move', x: 6, y: 0, button: 'left', in: 'para-3' } as never)
+  // not while the drag goes on
+  expect(await ui.find({ key: 'sel-ask', in: 'para-3' })).toBeUndefined()
+  await ui.pointer({ type: 'up', x: 6, y: 0, button: 'left', in: 'para-3' } as never)
+  expect(await ui.find({ key: 'sel-ask', in: 'para-3' })).toBeDefined()
+  expect(w.opened).toEqual([])
+  await ui.press({ key: 'sel-ask', in: 'para-3' })
+  expect(w.opened).toEqual(['thimble'])
+  expect(w.filled).toEqual([])
+  await ui.unmount()
+  const pane = (await $.ui.mount(PANEL as never)) as unknown as M
+  expect(await pane.find({ type: 'Text', text: /side thread about/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /dse has/ })).toBeDefined()
+  await pane.unmount()
+})
+
+test('the selected text joins wrapped lines by a space and a table\'s rows by a newline', () => {
+  const lines = [[{ s: 'dse has ' }, { s: '13403' }], [{ s: 'revisions, see' }]]
+  expect(selectedText(lines, { y0: 0, x0: 4, y1: 1, x1: 8 }, false)).toBe('has 13403 revisions')
+  // either direction
+  expect(selectedText(lines, { y0: 1, x0: 8, y1: 0, x1: 4 }, false)).toBe('has 13403 revisions')
+  const table = [[{ s: 'wiki  revisions' }], [{ s: 'dse   13403' }]]
+  expect(selectedText(table, { y0: 0, x0: 0, y1: 1, x1: 10 }, true)).toBe('wiki  revisions\ndse   13403')
+})
+
+test('a hovered citation loses its tip when the pointer moves off it, presses, or the paragraph reflows', async ($, on) => {
+  world(on)
+  await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
+  const ui = (await $.ui.mount(MESSAGE as never)) as unknown as M
+  const [x] = chipXs()
+  const tip = async () => JSON.stringify(await ui.drawn({ in: 'para-3' })).includes('"position":"absolute"')
+  const move = (px: number, py: number) => ui.pointer({ type: 'move', x: px, y: py, in: 'para-3' } as never)
+  await move(x!, 0)
+  expect(await tip()).toBe(true)
+  await move(x!, 6) // below the paragraph's one line: a move the engine reports while the region holds the pointer
+  expect(await tip()).toBe(false)
+  await move(x!, 0)
+  expect(await tip()).toBe(true)
+  await ui.pointer({ type: 'down', x: x!, y: 0, button: 'right', in: 'para-3' } as never)
+  await ui.pointer({ type: 'up', x: x!, y: 0, button: 'right', in: 'para-3' } as never)
+  expect(await tip()).toBe(false)
+  await move(x!, 0)
+  expect(await tip()).toBe(true)
+  await ui.resize({ columns: 90, rows: 2, in: 'para-3' })
+  expect(await tip()).toBe(false)
+  await ui.unmount()
+})
+
+test('the open menu\'s sentence or citation is shaded in its paragraph', () => {
+  const block = parseReply('dse has [[13403|card:abc123#revisions/dse]] revisions. The others are small.')[0]
+  if (block?.type !== 'rich') throw new Error('expected a paragraph with a citation')
+  const chips = [{ label: '13403', state: 'link' as const, mark: '', tip: '', spin: false }]
+  const lay = blockLayout(block, chips, 80, -1)
+  const raws = ['[[13403|card:abc123#revisions/dse]]']
+  const lit = (menu: unknown) => menuLines(lay, raws, menu)[0]!.filter(s => s.bg === COLORS.menu).map(s => s.s).join('')
+  expect(lit(null)).toBe('')
+  expect(lit({ kind: 'citation', ref: raws[0], text: '13403' })).toBe('13403')
+  expect(lit({ kind: 'sentence', text: 'The others are small.' })).toBe('The others are small.')
+})
+
+test('a right-click on a citation opens the menu view in the panel and lights the citation until the panel shows another view', async ($, on) => {
+  const w = world(on)
+  on('ui.panes', () => ({ value: [{ id: 'thimble', title: 'Actions', isShown: true, isFocused: true, isPlaced: true }] }) as never)
+  await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
+  const ui = (await $.ui.mount(MESSAGE as never)) as unknown as M
+  const [, pages] = chipXs()
+  const lit = async () => JSON.stringify(await ui.drawn({ in: 'para-3' })).includes(COLORS.menu)
+  expect(await lit()).toBe(false)
+  await ui.pointer({ type: 'down', x: pages!, y: 0, button: 'right', in: 'para-3' } as never)
+  await ui.pointer({ type: 'up', x: pages!, y: 0, button: 'right', in: 'para-3' } as never)
+  expect(w.opened).toEqual(['thimble'])
+  await w.clock.advance(300)
+  expect(await lit()).toBe(true)
+  // its "open" replaces the menu with the Citation view in the same panel; nothing closes
+  const menu = (await $.ui.mount(MENU as never)) as unknown as M
+  expect(await menu.find({ type: 'Text', text: /pages:3/ })).toBeDefined()
+  await menu.press({ key: 'menu-open' })
+  await menu.unmount()
+  expect(w.opened).toEqual(['thimble', 'thimble'])
+  expect(w.closed).toEqual([])
+  await w.clock.advance(300)
+  expect(await lit()).toBe(false)
+  await ui.unmount()
+  const pane = (await $.ui.mount(PANEL as never)) as unknown as M
+  expect(await pane.find({ key: 'menu-open' })).toBeUndefined()
+  expect(await pane.find({ key: 'ask' })).toBeDefined()
+  await pane.unmount()
+})
+
+test('a gesture posted from a card is handled once: a click on a record opens it, the menu acts on the card', async ($, on) => {
   const w = world(on)
   await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
   const ui = (await $.ui.mount(MESSAGE as never)) as unknown as M
   const ev = press('left')
-  const chip: Sent = { seq: 1, gesture: 'primary', target: { kind: 'citation', ref: 'pages.jsonl#L3' }, ev }
-  await ui.post({ type: 'gesture', origin: 'o1', gestures: [chip] } as never, { in: 'para-3' })
-  await ui.post({ type: 'hover', id: '', origin: 'o1', gestures: [chip] } as never, { in: 'para-3' })
-  expect(w.opened).toEqual(['thimble-cite'])
+  const record: Sent = { seq: 1, gesture: 'primary', target: { kind: 'record', ref: 'pages.jsonl#L3', text: 'Main', cardId: 'abc123' }, ev }
+  await ui.post({ type: 'gesture', origin: 'o1', gestures: [record] } as never, { in: 'card-1-abc123' })
+  await ui.post({ type: 'hover', id: '', origin: 'o1', gestures: [record] } as never, { in: 'card-1-abc123' })
+  expect(w.opened).toEqual(['thimble'])
   const mark: Sent = { seq: 2, gesture: 'menu', target: { kind: 'mark', ref: 'card:abc123#revisions/dse', text: '13403', cardId: 'abc123', script: CARD.source.script }, ev: press('right') }
-  await ui.post({ type: 'gesture', origin: 'o1', gestures: [chip, mark] } as never, { in: 'card-1-abc123' })
-  expect(w.opened).toEqual(['thimble-cite', 'thimble-menu'])
+  await ui.post({ type: 'gesture', origin: 'o1', gestures: [record, mark] } as never, { in: 'card-1-abc123' })
+  // the menu replaces the Citation view in the one panel, which stays open
+  expect(w.opened).toEqual(['thimble', 'thimble'])
+  expect(w.closed).toEqual([])
   const menu = (await $.ui.mount(MENU as never)) as unknown as M
+  expect(await menu.find({ key: 'menu-cite' })).toBeUndefined()
+  // a choice that only runs closes the panel
   await menu.press({ key: 'menu-rerun' })
+  expect(w.closed).toEqual(['thimble'])
   expect(w.runs).toContain('.thimble-cc-mod/scripts/by.py')
   await menu.unmount()
   await ui.unmount()
 })
 
-test('a click on a card opens its script, on a sentence its first citation', async ($, on) => {
+test('a press on a card\'s title opens a side thread about it in the panel; so does a click on its frame; a click on a bar opens one about the bar', async ($, on) => {
   const w = world(on)
   await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
   const ui = (await $.ui.mount(MESSAGE as never)) as unknown as M
-  const click = async (x: number, y: number, inside: string) => {
-    await ui.pointer({ type: 'down', x, y, button: 'left', in: inside } as never)
-    await ui.pointer({ type: 'up', x, y, button: 'left', in: inside } as never)
-    await ui.advance(DOUBLE_MS * 2)
+  await ui.resize({ columns: 100, rows: 12, in: 'card-1-abc123' })
+  const title = (await ui.find({ type: 'Button', key: 'card-title:abc123', in: 'card-1-abc123' })) as { props: { label: string; plain?: boolean } } | undefined
+  expect(title?.props.label).toBe(CARD.question)
+  expect(title?.props.plain).toBe(true)
+  const click = async (x: number, y: number, mods: { button?: PointerEv['button']; shift?: boolean; ctrl?: boolean; alt?: boolean } = {}) => {
+    await ui.pointer({ type: 'down', x, y, button: 'left', ...mods, in: 'card-1-abc123' } as never)
+    await ui.pointer({ type: 'up', x, y, button: 'left', ...mods, in: 'card-1-abc123' } as never)
   }
-  await click(4, 1, 'card-1-abc123') // the title
-  expect(w.opened).toEqual(['thimble-card'])
-  await click(1, 0, 'para-3') // "dse", before the first citation
-  expect(w.opened).toEqual(['thimble-card', 'thimble-cite'])
+  // the card leaves a left click on its title row to the Button
+  await click(4, 1)
+  expect(w.opened).toEqual([])
+  for (const mods of [{ shift: true }, { ctrl: true }, { alt: true }, { button: 'middle' as const }]) await click(50, 0, mods)
+  expect(w.opened).toEqual([])
+  await click(10, 3) // probier's bar (border, title, then the bars): "what was going on here?"
+  expect(await ui.find({ type: 'Text', text: /probier: 1013/, in: 'card-1-abc123' })).toBeDefined()
+  expect(w.opened).toEqual(['thimble'])
+  let pane = (await $.ui.mount(PANEL as never)) as unknown as M
+  expect(await pane.find({ type: 'Text', text: /side thread about/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /probier: 1013/ })).toBeDefined()
+  await pane.unmount()
+  await ui.press({ key: 'card-title:abc123', in: 'card-1-abc123' })
+  expect(w.opened).toEqual(['thimble', 'thimble'])
+  await click(50, 0) // the frame
+  expect(w.opened).toEqual(['thimble', 'thimble', 'thimble'])
+  expect(w.filled).toEqual([])
   await ui.unmount()
+  pane = (await $.ui.mount(PANEL as never)) as unknown as M
+  expect(await pane.find({ type: 'Text', text: /side thread about/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /Which wikis have the most revisions\?/ })).toBeDefined()
+  // the threads list holds the three, the latest first; a press shows the bar's again
+  await pane.press({ key: 'threads' })
+  await pane.unmount()
+  pane = (await $.ui.mount(PANEL as never)) as unknown as M
+  const rows = (await pane.findAll({ type: 'Button' })).map(b => (b as { key?: string; props: { label?: string } }).props.label ?? '').filter(l => l !== 'close')
+  expect(rows).toHaveLength(3)
+  expect(rows[2]).toMatch(/probier: 1013/)
+  await pane.unmount()
+})
+
+test('the panel a click opened that waits undrawn is offered above the prompt; its button opens it', async ($, on) => {
+  const w = world(on)
+  let panes = [{ id: 'thimble', title: 'Citation', isShown: false, isFocused: false, isPlaced: false }]
+  on('ui.panes', () => ({ value: panes }) as never)
+  await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
+  const band = { plugin: 'thimble-cc-mod', component: 'AbovePrompt', requestId: 'above', surface: 'terminal', viewport: { columns: 100, rows: 30 }, props: { hasSurvey: false, view: {} } } as never
+  let above = (await $.ui.mount(band)) as unknown as M
+  expect(await above.find({ key: 'pending' })).toBeUndefined()
+  await above.unmount()
+  w.placed = false // the engine leaves an open no person asked for undrawn on a narrow terminal
+  const ui = (await $.ui.mount(MESSAGE as never)) as unknown as M
+  const [, pages] = chipXs()
+  await ui.pointer({ type: 'down', x: pages!, y: 0, button: 'left', in: 'para-3' } as never)
+  await ui.pointer({ type: 'up', x: pages!, y: 0, button: 'left', in: 'para-3' } as never)
+  await ui.unmount()
+  expect(w.opened).toEqual(['thimble'])
+  above = (await $.ui.mount(band)) as unknown as M
+  expect(await above.find({ type: 'Text', text: '▸ Citation is ready' })).toBeDefined()
+  expect(await above.find({ type: 'Button', key: 'pending', text: 'open panel' })).toBeDefined()
+  expect(await above.find({ type: 'Button', key: 'pending-x', text: 'dismiss' })).toBeDefined()
+  expect(await above.find({ type: 'Text', text: /opens by itself in windows 144\+ columns wide/ })).toBeDefined()
+  w.placed = true
+  await above.press({ key: 'pending' })
+  expect(w.opened).toEqual(['thimble', 'thimble'])
+  await above.unmount()
+  panes = [{ ...panes[0]!, isShown: true, isPlaced: true }]
+  above = (await $.ui.mount(band)) as unknown as M
+  expect(await above.find({ key: 'pending' })).toBeUndefined()
+  await above.unmount()
 })
 
 test('the menu keeps the pressed target when the release arrives as a menu on another', async ($, on) => {
   world(on)
-  on('ui.panes', () => ({ value: [{ id: 'thimble-menu', title: 'Actions', isShown: true, isFocused: true, isPlaced: true }] }) as never)
+  on('ui.panes', () => ({ value: [{ id: 'thimble', title: 'Actions', isShown: true, isFocused: true, isPlaced: true }] }) as never)
   await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
   const ui = (await $.ui.mount(MESSAGE as never)) as unknown as M
   const record: Sent = { seq: 1, gesture: 'menu', target: { kind: 'record', ref: 'pages.jsonl#L3', text: 'Main', cardId: 'abc123' }, ev: press('right') }
@@ -292,32 +527,6 @@ test('the menu keeps the pressed target when the release arrives as a menu on an
   await ui.unmount()
 })
 
-test('a hovered citation loses its tip when the pointer moves off it, presses, or the paragraph reflows', async ($, on) => {
-  world(on)
-  await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
-  const ui = (await $.ui.mount(MESSAGE as never)) as unknown as M
-  const block = parseReply(REPLY).find(b => b.type === 'rich')
-  if (block?.type !== 'rich') throw new Error('expected a paragraph with citations')
-  const chips = [0, 1].map(() => ({ label: '13403', state: 'link' as const, mark: '', tip: '', spin: false }))
-  const x = blockLayout(block, chips, 136, -1).spans[0]!.x0 + 1
-  const tip = async () => JSON.stringify(await ui.drawn({ in: 'para-3' })).includes('"position":"absolute"')
-  const move = (px: number, py: number) => ui.pointer({ type: 'move', x: px, y: py, in: 'para-3' } as never)
-  await move(x, 0)
-  expect(await tip()).toBe(true)
-  await move(x, 6) // below the paragraph's one line: a move the engine reports while the region holds the pointer
-  expect(await tip()).toBe(false)
-  await move(x, 0)
-  expect(await tip()).toBe(true)
-  await ui.pointer({ type: 'down', x, y: 0, button: 'right', in: 'para-3' } as never)
-  await ui.pointer({ type: 'up', x, y: 0, button: 'right', in: 'para-3' } as never)
-  expect(await tip()).toBe(false)
-  await move(x, 0)
-  expect(await tip()).toBe(true)
-  await ui.resize({ columns: 90, rows: 2, in: 'para-3' })
-  expect(await tip()).toBe(false)
-  await ui.unmount()
-})
-
 test('/thimble-cc-mod debug on turns the mouse log on without the variable', async ($, on) => {
   const w = world(on)
   await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
@@ -325,7 +534,7 @@ test('/thimble-cc-mod debug on turns the mouse log on without the variable', asy
   expect(r.text).toContain('the mouse log is on')
   expect(w.files.get(`${CWD}/.thimble-cc-mod/debug`)).toBe('on\n')
   const ui = (await $.ui.mount(MESSAGE as never)) as unknown as M
-  await ui.pointer({ type: 'down', x: 3, y: 0, button: 'right', in: 'md-2' } as never)
+  await ui.pointer({ type: 'down', x: 4, y: 1, button: 'right', in: 'card-1-abc123' } as never)
   expect(w.files.get(`${CWD}/.thimble-cc-mod/mouse.log`)).toContain('"gesture":"menu"')
   await ui.unmount()
   await $.command.run({ command: 'thimble-cc-mod', args: 'debug off' } as never)
@@ -336,19 +545,29 @@ test('THIMBLE_CC_MOD_DEBUG=1 logs each press and release with its button, modifi
   const w = world(on, { THIMBLE_CC_MOD_DEBUG: '1' })
   await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
   const ui = (await $.ui.mount(MESSAGE as never)) as unknown as M
-  await ui.pointer({ type: 'down', x: 3, y: 0, button: 'left', ctrl: true, in: 'md-2' } as never)
-  await ui.pointer({ type: 'up', x: 3, y: 0, button: 'left', in: 'md-2' } as never)
+  await ui.pointer({ type: 'down', x: 50, y: 0, button: 'left', ctrl: true, in: 'card-1-abc123' } as never)
+  await ui.pointer({ type: 'up', x: 50, y: 0, button: 'left', in: 'card-1-abc123' } as never)
   const log = (w.files.get(`${CWD}/.thimble-cc-mod/mouse.log`) ?? '').trim().split('\n').map(l => JSON.parse(l) as Record<string, string>)
-  expect(log.map(l => l.event)).toEqual(['press', 'act', 'pane', 'release'])
-  expect([log[0]?.button, log[0]?.mods, log[0]?.gesture]).toEqual(['left', 'ctrl', 'thread'])
-  expect([log[3]?.button, log[3]?.mods, log[3]?.gesture]).toEqual(['left', 'none', 'none'])
-  // what the press did next: the action it ran and the pane that action opened
-  expect([log[1]?.act, log[2]?.pane, log[2]?.result]).toEqual(['thread', 'thimble-thread', 'placed'])
-  expect(log[0]?.target).toBe('sentence: "The wikis differ a lot in size."')
+  expect(log.map(l => [l.event, l.button, l.mods, l.gesture])).toEqual([
+    ['press', 'left', 'ctrl', 'none'],
+    ['release', 'left', 'none', 'none'],
+  ])
+  expect(log[0]?.target).toBe('card: card "Which wikis have the most revisions?"')
+  // a plain click: the action it ran and the view of the panel it opened follow its press
+  await ui.pointer({ type: 'down', x: 50, y: 0, button: 'left', in: 'card-1-abc123' } as never)
+  await ui.pointer({ type: 'up', x: 50, y: 0, button: 'left', in: 'card-1-abc123' } as never)
+  const more = (w.files.get(`${CWD}/.thimble-cc-mod/mouse.log`) ?? '').trim().split('\n').slice(2).map(l => JSON.parse(l) as Record<string, string>)
+  expect(more.map(l => [l.event, l.gesture ?? l.act ?? l.view])).toEqual([
+    ['press', 'primary'],
+    ['act', 'thread'],
+    ['pane', 'thread'],
+    ['release', 'none'],
+  ])
+  expect(more[2]?.result).toBe('placed')
   await ui.unmount()
 })
 
-test('the menu names its target in the room it has, its quote closed', () => {
+test('the menu names its target in the room it has, its quote closed; a mark by its label', () => {
   const card: Target = { kind: 'card', ref: 'card:abc123', text: 'Which labels wrote the most revisions on the busiest wiki?', cardId: 'abc123' }
   expect(targetLabel(card, 32)).toBe('card "Which labels wrote the…"')
   const sentence: Target = { kind: 'sentence', text: 'All five of the largest labels wrote only on dse.' }
@@ -358,36 +577,52 @@ test('the menu names its target in the room it has, its quote closed', () => {
   // a citation shows by its label, never by a ref that names a card's id
   expect(targetLabel({ kind: 'sentence', text: 'dse has [[13403|card:abc123#revisions/dse]] revisions.' })).toBe('"dse has 13403 revisions."')
   expect(targetLabel({ kind: 'citation', ref: '[[card:abc123#revisions/dse]]' })).toBe('card dse')
+  // a card's mark by what it is called (its label and value), before its bare value
+  const mark: Target = { kind: 'mark', ref: 'card:abc123#revisions/dse', text: '13403', cardId: 'abc123', label: 'dse: 13403' }
+  expect(targetLabel(mark)).toBe('dse: 13403')
+  expect(targetLabel({ ...mark, label: undefined })).toBe('13403')
 })
 
-test('the open menu\'s sentence or citation is shaded in its paragraph', () => {
-  const block = parseReply('dse has [[13403|card:abc123#revisions/dse]] revisions. The others are small.')[0]
-  if (block?.type !== 'rich') throw new Error('expected a paragraph with a citation')
-  const chips = [{ label: '13403', state: 'link' as const, mark: '', tip: '', spin: false }]
-  const lay = blockLayout(block, chips, 80, -1)
-  const raws = ['[[13403|card:abc123#revisions/dse]]']
-  const lit = (menu: unknown) => menuLines(lay, raws, menu)[0]!.filter(s => s.bg === COLORS.menu).map(s => s.s).join('')
-  expect(lit(null)).toBe('')
-  expect(lit({ kind: 'citation', ref: raws[0], text: '13403' })).toBe('13403')
-  const second = lit({ kind: 'sentence', text: 'The others are small.' })
-  expect(second).toBe('The others are small.')
+test('a section is its heading and everything up to the next heading of its level or higher; a heading in a fence is none', () => {
+  const text = '## Who edits\n\nAgents do.\n\n### Mostly bots\n\nYes.\n\n```md\n## not a heading\n```\n\n## When\n\nAt night.'
+  const s = sectionsOf(text)
+  expect([...s.keys()]).toEqual(['## Who edits', '### Mostly bots', '## When'])
+  expect(s.get('## Who edits')).toBe('## Who edits\n\nAgents do.\n\n### Mostly bots\n\nYes.\n\n```md\n## not a heading\n```')
+  expect(s.get('### Mostly bots')).toMatch(/^### Mostly bots[\s\S]*```$/)
+  expect(s.get('## When')).toBe('## When\n\nAt night.')
 })
 
-test('a right-click lights its target in the reply while the menu is open', async ($, on) => {
+test('"ask ›" beside a heading opens a side thread about its whole section, out of main\'s chat', async ($, on) => {
   const w = world(on)
-  let panes = [{ id: 'thimble-menu', title: 'Actions', isShown: true, isFocused: true, isPlaced: true }]
-  on('ui.panes', () => ({ value: panes }) as never)
+  await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
+  const text = '## Who edits the wiki\n\nMostly agents, at night.\n\nSome humans too.\n\n## When\n\nAfter midnight.'
+  const ui = (await $.ui.mount({ ...MESSAGE, requestId: 'm4', props: { text, isFirstOfReply: true } } as never)) as unknown as M
+  await ui.press({ key: 'ask-md:1-0' }) // the heading's
+  expect(w.opened).toEqual(['thimble'])
+  expect(w.filled).toEqual([])
+  await ui.unmount()
+  const pane = (await $.ui.mount(PANEL as never)) as unknown as M
+  expect(await pane.find({ type: 'Text', text: /the section "Who edits the wiki"/ })).toBeDefined()
+  await pane.unmount()
+})
+
+test('a paragraph with citations and a card take the "?" too: the card\'s asks about the card, the paragraph\'s about its words', async ($, on) => {
+  const w = world(on)
   await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
   const ui = (await $.ui.mount(MESSAGE as never)) as unknown as M
-  const lit = async () => JSON.stringify(await ui.drawn({ in: 'md-2' })).includes(COLORS.menu)
-  expect(await lit()).toBe(false)
-  await ui.pointer({ type: 'down', x: 3, y: 0, button: 'right', in: 'md-2' } as never)
-  await ui.pointer({ type: 'up', x: 3, y: 0, button: 'right', in: 'md-2' } as never)
-  expect(w.opened).toEqual(['thimble-menu'])
-  await w.clock.advance(300)
-  expect(await lit()).toBe(true)
-  panes = [] // closed by a choice or Esc
-  await w.clock.advance(300)
-  expect(await lit()).toBe(false)
+  const keys = (await ui.findAll({ type: 'Button', label: '?' })).map(b => (b as { key?: string; props: { key?: string } }).props.key ?? (b as { key?: string }).key)
+  expect(keys.some(k => /^ask-para:/.test(k ?? ''))).toBe(true)
+  expect(keys.some(k => /^ask-card:/.test(k ?? ''))).toBe(true)
+  await ui.press({ key: keys.find(k => /^ask-card:/.test(k ?? ''))! })
+  expect(w.opened).toEqual(['thimble'])
   await ui.unmount()
+  let pane = (await $.ui.mount(PANEL as never)) as unknown as M
+  expect(await pane.find({ type: 'Text', text: /Which wikis have the most revisions\?/ })).toBeDefined()
+  await pane.unmount()
+  const again = (await $.ui.mount(MESSAGE as never)) as unknown as M
+  await again.press({ key: keys.find(k => /^ask-para:/.test(k ?? ''))! })
+  await again.unmount()
+  pane = (await $.ui.mount(PANEL as never)) as unknown as M
+  expect(await pane.find({ type: 'Text', text: /dse has/ })).toBeDefined()
+  await pane.unmount()
 })

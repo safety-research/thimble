@@ -1,14 +1,15 @@
-// One set of gestures for every target the mod draws (a card, a mark, a sentence, a citation, a row, a record, a node):
+// One set of gestures for every target a Client of the mod draws (a card, a mark, a row, a record, a node):
 //
-//   click            the target's one action: open the place it cites, a sentence's or a row's first citation's place,
-//                    or a card's script (a card value has none: its Client selects it)
-//   double-click     put the target's citation into the prompt
-//   shift+click      a side thread about the target; ctrl+click and middle-click do the same where they arrive as such
+//   click            the target's one action: open the place it cites, or a side thread about a card
+//   double-click     the same as a click
 //   right-click      a menu of every action
 //
+// Modifier clicks and the middle button are left alone: terminals keep them for their own selection, and a gesture
+// that works in one terminal and not the next is worse than none. A reply's paragraphs are the engine's Markdown, each
+// citation a link a plain click presses (register.tsx), so their text selects as usual.
+//
 // A Client calls onPointer from its pointer listener with the target under the pointer; the gesture is posted to the
-// hooks module (register.tsx), which acts on it. The default export is the Client for a block of Markdown, so plain
-// paragraphs of a reply are targets too.
+// hooks module (register.tsx), which acts on it.
 import type { ClientModule, ClientPointerEvent, JsonValue } from 'claude-code'
 
 import type { ChatTarget } from '../types'
@@ -24,20 +25,16 @@ export type Target = ChatTarget
 
 export type PointerEv = { button: 'left' | 'middle' | 'right'; shift: boolean; ctrl: boolean; alt: boolean; type: 'press' | 'release' | 'double' }
 
-export type Gesture = 'primary' | 'cite' | 'thread' | 'menu'
+export type Gesture = 'primary' | 'menu'
 
 /** One pointer event as posted: what it was, which gesture it made (null: none), and on what. */
 export type Sent = { seq: number; gesture: Gesture | null; target: Target; ev: PointerEv }
-
-/** Two presses on one target within this many milliseconds are a double-click; a click acts once it has passed. */
-export const DOUBLE_MS = 350
 
 type Port = { post: (data: JsonValue) => void; every?: (ms: number, fn: () => void) => () => void }
 
 const origin = Math.random().toString(36).slice(2, 10)
 let seq = 0
 let outbox: Sent[] = []
-const waiting = new Map<string, () => void>() // a clicked target -> what cancels its pending click
 let rightDown = false // a right press reached this module and its release has not
 
 function portOf(ctx: unknown): Port | null {
@@ -54,16 +51,12 @@ export function normalize(ev: PointerEv | ClientPointerEvent): PointerEv | null 
   return { type: t, button: ev.button ?? 'left', shift: Boolean(ev.shift), ctrl: Boolean(ev.ctrl), alt: Boolean(ev.alt) }
 }
 
-/** The gesture a press makes; `again` when the same target was pressed within DOUBLE_MS. */
-export function classify(ev: PointerEv, again = false): Gesture | null {
-  if (ev.type === 'double') return 'cite'
+/** The gesture a press makes: a left press (once or twice) its one action, a right press the menu; the rest none. */
+export function classify(ev: PointerEv): Gesture | null {
+  if (ev.type === 'double') return 'primary'
   if (ev.type !== 'press') return null
-  if (ev.button === 'middle') return 'thread'
-  const mod = ev.shift || ev.ctrl || ev.alt
-  // macOS Terminal and iTerm2 can turn ctrl+click into a right-click: one that still carries a modifier is a thread
-  if (ev.button === 'right') return mod ? 'thread' : 'menu'
-  if (mod) return 'thread'
-  return again ? 'cite' : 'primary'
+  if (ev.button === 'right') return 'menu'
+  return ev.button === 'left' && !ev.shift && !ev.ctrl && !ev.alt ? 'primary' : null
 }
 
 export function targetKey(t: Target): string {
@@ -96,7 +89,6 @@ export function onPointer(target: Target, ev: PointerEv | ClientPointerEvent, ct
   const port = portOf(ctx)
   const e = normalize(ev)
   if (!port || !e) return
-  const key = targetKey(target)
   if (e.type === 'release') {
     // The press picks the menu's target. The menu's pane can reflow the transcript before the release, which then lands
     // on another target; only a right release whose press never reached this module opens the menu.
@@ -106,24 +98,7 @@ export function onPointer(target: Target, ev: PointerEv | ClientPointerEvent, ct
     return
   }
   if (e.type === 'press' && e.button === 'right') rightDown = true
-  const cancel = waiting.get(key)
-  const g = classify(e, Boolean(cancel) && e.button === 'left' && !e.shift && !e.ctrl && !e.alt)
-  if (cancel) {
-    cancel()
-    waiting.delete(key)
-  }
-  if (g === 'primary' && port.every) {
-    // a click acts once no second click followed, so a double-click does not also open the place
-    emit(port, { gesture: null, target, ev: e })
-    const stop = port.every(DOUBLE_MS, () => {
-      stop()
-      waiting.delete(key)
-      emit(port, { gesture: 'primary', target, ev: e })
-    })
-    waiting.set(key, stop)
-    return
-  }
-  emit(port, { gesture: g, target, ev: e })
+  emit(port, { gesture: classify(e), target, ev: e })
 }
 
 // ------------------------------------------------------------------------------------------------ what a target means
@@ -153,17 +128,16 @@ export function citeText(t: Target): string {
   return s ? `"${s.length > 300 ? `${s.slice(0, 299)}…` : s}"` : ''
 }
 
-/** The place a click opens: a citation's; a sentence's or a reply's table row's first citation's; a mark's, row's,
- *  record's or node's when it lies outside the cards. */
+/** The place a click opens: a citation's; a mark's, row's, record's or node's when it lies outside the cards. Plain
+ *  words (a sentence, a reply's table row) open nothing: only what is drawn as a link opens a panel. */
 export function placeOf(t: Target): Citation | null {
-  if (t.kind === 'card') return null
-  if (t.kind === 'sentence' || (t.kind === 'row' && !t.ref)) return citations(t.text ?? '')[0] ?? null
+  if (t.kind === 'card' || t.kind === 'sentence' || (t.kind === 'row' && !t.ref)) return null
   const c = citationOf(t)
   if (!c) return null
   return t.kind === 'citation' || !CARD_REF.test(c.ref) ? c : null
 }
 
-export type Act = 'open' | 'thread' | 'verify' | 'script' | 'rerun' | 'cite'
+export type Act = 'open' | 'thread' | 'verify' | 'script' | 'rerun'
 export type MenuItem = { act: Act; label: string; hotkey: string }
 
 /** The menu a right-click opens: every action the target has. */
@@ -172,10 +146,9 @@ export function menuItems(t: Target): MenuItem[] {
   const card = cardOf(t)
   const out: MenuItem[] = []
   if (placeOf(t)) out.push({ act: 'open', label: 'open', hotkey: 'o' })
-  out.push({ act: 'thread', label: 'ask about this', hotkey: 'a' })
+  out.push({ act: 'thread', label: 'ask', hotkey: 'a' })
   if (c?.display && t.kind !== 'card' && t.kind !== 'sentence') out.push({ act: 'verify', label: 'verify', hotkey: 'v' })
   if (card && t.script) out.push({ act: 'script', label: 'open the script', hotkey: 's' }, { act: 'rerun', label: 'rerun', hotkey: 'r' })
-  if (citeText(t)) out.push({ act: 'cite', label: 'cite', hotkey: 'c' })
   return out
 }
 
@@ -208,7 +181,7 @@ export function targetLabel(t: Target, max = 48): string {
     case 'citation':
       return shorten(c ? citeLabel(c) : 'citation', n)
     default:
-      return shorten(s || (c ? citeLabel(c) : t.kind), n)
+      return shorten(t.label || s || (c ? citeLabel(c) : t.kind), n)
   }
 }
 
@@ -243,18 +216,3 @@ export function menuLines(lay: ParaLayout, raws: readonly string[], menu: unknow
   }
   return cells.length ? shade(lay.lines, cells, COLORS.menu) : lay.lines
 }
-
-// ------------------------------------------------------------------------------------------------ Markdown block
-
-type RegionProps = { text: string; menu?: Target | null }
-
-/** A block of a reply drawn as Markdown, with the gestures of a sentence target, shaded while its menu is open. */
-const Region: ClientModule<RegionProps> = (props, surface) => {
-  const { Box, Markdown } = surface.elements
-  const target: Target = { kind: 'sentence', text: props.text.slice(0, 1200) }
-  surface.onPointer(ev => onPointer(target, ev, surface))
-  const md = Markdown({ text: props.text })
-  return isMenuTarget(target, props.menu) ? Box({ backgroundColor: COLORS.menu, children: md }) : md
-}
-
-export default Region

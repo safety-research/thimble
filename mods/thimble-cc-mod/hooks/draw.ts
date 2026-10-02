@@ -449,7 +449,8 @@ function tableLayout(card: CardData, cols: number, hover: number): Layout {
   const parts = (r: string[]) => r.map((s, c) => (numeric[c] ? [s] : fold(s, ws[c]!)))
   const lines: Line[] = []
   const owner: number[] = []
-  const head = parts(heads)
+  // a header folds whatever its column holds, so a number column's name is not cut
+  const head = heads.map((h, c) => fold(h, ws[c]!))
   for (let k = 0; k < Math.max(...head.map(p => p.length)); k++) {
     lines.push(heads.flatMap((_, c): Seg[] => [{ s: cell(head[c]![k] ?? '', c), b: true }, ...(c < heads.length - 1 ? [{ s: '  ' }] : [])]))
     owner.push(-1)

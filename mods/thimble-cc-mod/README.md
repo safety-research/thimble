@@ -51,45 +51,56 @@ paragraphs for a question that takes several steps, such as a why question.
   subagent rewrites each sentence whole, the mod puts the fixed sentence in place of the old one without a mark, and
   Claude gets a note you do not see. A citation it could not fix stays red with ✗ after it, and its tip and panel say
   why.
-- **Verification.** "verify" (in the menu, or `w` in the citation panel) has a forked subagent write a standalone
+- **Verification.** "verify" (in the menu, or `v` in the citation panel) has a forked subagent write a standalone
   script that recomputes the value from the raw files, with a spinner after the citation meanwhile. The mod runs the
   script and shows it and its output in the panel; the citation gets ✓ when the script recomputed the cited value, and
   ✗ and turns red when it recomputed another.
-- **Side threads.** shift+click on anything, "ask about this" in the menu, or `/thimble-ask <question>` opens a side
-  thread: a forked subagent answers in a panel, and nothing is added to the main conversation. `m` puts the thread's
-  one-line result into the prompt. Each subagent the mod starts shows in the main chat as one dim line at most, named
-  for what it does: "verification · correcting citations", "verification · checking <value>", "side thread · <the
-  question's first words>". The mod stops each one once its answer is in, a side thread's also when its panel closes,
-  and any still running at /exit, so /exit exits.
+- **Side threads.** A side thread asks a forked subagent about anything on the screen; it answers in the panel and
+  nothing is added to the main conversation (see Gestures for the ways to start one, and `/thimble-ask <question>`).
+  A thread about a card may change the card in place when its values stay the same; otherwise it makes a new card,
+  and the reply's citations of the card are checked again. Threads are saved under `.thimble-cc-mod/threads/` and
+  listed across sessions by `/thimble-threads` or "all threads" (`t`) in a thread, where one reopens to continue.
+  Each subagent the mod starts shows in the main chat as one dim line at most, named for what it does:
+  "verification · correcting citations", "verification · checking <value>", "side thread · <the question's first
+  words>". The mod stops each one once its answer is in, a side thread's also when the panel shows something else or
+  closes, and any still running at /exit, so /exit exits.
 
-## Gestures
+## Gestures and the panel
 
-The same on every target: a card, a bar, point or cell, a sentence of a reply, a citation, a table row, an example
-record, a diagram node.
+One panel shows a citation, a card's script, a side thread, a target's menu or the threads list; a click only changes
+what it shows. It closes by its own "close" button (`x`); Esc does not close it.
 
 | Gesture | Does |
 | --- | --- |
-| click | opens the place the target cites; a sentence or a table row opens its first citation's place, a card its script (or the card in a panel when it has none); a chart value has none: it is selected |
-| double-click | puts the target's citation into the prompt (a sentence: quoted) |
-| shift+click | opens a side thread about the target (also ctrl+click and middle-click, where the terminal reports them) |
-| right-click | a menu: open, ask about this, verify, open the script, rerun, cite (a letter key each; Esc closes); the target is shaded while it is open |
+| click (a double-click is the same) | on a citation or an example record: its place in the panel. On a card's bar, point, row or node, or the card itself: a side thread about it |
+| right-click | the menu in the panel: open, ask, verify, open the script, rerun (a letter key each); the target is shaded while it shows |
+| "?" in a block's margin (shown on hover) | a side thread about that paragraph, code block or card; beside a heading, about its whole section |
+| a card's title | a side thread about the card |
+| "ask about this answer ›" under an answer | a side thread about the whole answer |
+| drag in a paragraph with citations | selects and copies the text; "ask about this" beside the selection starts a side thread about it |
+
+Clicks with a modifier (shift, ctrl, alt) and middle clicks are left to the terminal. Nothing a gesture does writes
+into the main prompt. Paragraphs without citations are Claude Code's own Markdown, so their text selects and their
+links open as in any reply.
 
 If a gesture misbehaves, run `/thimble-cc-mod debug on` (or start Claude Code with `THIMBLE_CC_MOD_DEBUG=1`) and send
 `.thimble-cc-mod/mouse.log`: one line per press and release the mod received, with its button, modifiers, gesture and
 target, then what the mod did: the action, the panel it opened (or why it waits) and the subagents it stopped.
 `/thimble-cc-mod debug off` stops it.
 
-Commands: `/thimble-card <n>` (the last answer's n-th card in a panel), `/thimble-cite <n>` (its n-th citation),
-`/thimble-check` (check the last answer again), `/thimble-ask <question>`, `/thimble-band` (a row above the prompt
-listing the last answer's citations, opened with the digits 1-9), `/thimble-cc-mod` (status).
+Commands: `/thimble-card <n>` (the last answer's n-th card in the panel), `/thimble-cite <n>` (its n-th citation),
+`/thimble-check` (check the last answer again), `/thimble-ask <question>`, `/thimble-threads` (every side thread),
+`/thimble-band` (a row above the prompt listing the last answer's citations, opened with the digits 1-9),
+`/thimble-cc-mod` (status).
 
 The mod and Claude write only under `.thimble-cc-mod/` in the folder: scripts, cards, answers, side threads,
 verification scripts, corrections and saved Bash outputs.
 
 Display: the mouse needs Claude Code's fullscreen view (`/tui fullscreen`); without it cards and citations are drawn
-but do not respond. Below 144 columns Claude Code keeps a panel a click opens undrawn, since it does not count a click
-on the reply as asking for one: a row above the prompt names the panel, and its "open" button opens it. From then on a
-click opens that panel directly at 110 columns or more. iTerm2 shows the colours in full; macOS Terminal shows 256 colours. In tmux, set
+but do not respond. Below 144 columns Claude Code keeps the panel a click opens undrawn, since it does not count a
+click on the reply as asking for one: a row above the prompt says the panel is ready, and its "open panel" button
+opens it. The buttons ("?", a card's title, "ask about this answer ›") are the person's own presses and open the panel
+at any width. iTerm2 shows the colours in full; macOS Terminal shows 256 colours. In tmux, set
 `set -g mouse on`, and `CLAUDE_CODE_TMUX_TRUECOLOR=1` for full colour.
 
 ## Known limits
@@ -97,10 +108,9 @@ click opens that panel directly at 110 columns or more. iTerm2 shows the colours
 - Charts are text: eighth-block bars, braille lines and box-drawing diagrams, at most 120 columns wide. A diagram
   shows at most 40 nodes and 80 edges, but past about 8 edges its lines cross into a tangle, so the prompt asks
   Claude to split a larger graph into two cards.
-- cmd+click, fn+click and option+click never reach the mod on macOS. macOS Terminal and iTerm2 may send ctrl+click as
-  a plain right-click, which opens the menu.
+- macOS Terminal and iTerm2 may send ctrl+click as a plain right-click, which opens the menu.
 - A click on the transcript's bottom row while "Jump to bottom" shows goes to that button.
-- In the fullscreen view at 110 or more columns the menu and panels dock on the right and narrow the transcript.
+- In the fullscreen view at 110 or more columns the panel docks on the right and narrows the transcript.
 - While the prompt holds a draft, a panel that opens does not take the keys: click it first.
 - A hover tip shows on a neighbouring line, since a tip cannot be drawn outside its paragraph.
 - A side thread's Bash outputs cannot be cited, and each follow-up starts a new subagent given the exchange so far.

@@ -269,6 +269,43 @@ export function parseReply(text: string): Block[] {
   return out
 }
 
+/** A chunk of Markdown cut into its paragraphs (at blank lines outside a fence), each whole: what one "ask ›" asks
+ *  about. A fence, a table or a list stays one piece. */
+export function mdPieces(text: string): string[] {
+  const out: string[] = []
+  let cur: string[] = []
+  let fence = false
+  for (const line of text.split('\n')) {
+    if (/^\s*```/.test(line)) fence = !fence
+    if (!fence && !line.trim()) {
+      if (cur.length) out.push(cur.join('\n'))
+      cur = []
+    } else cur.push(line)
+  }
+  if (cur.length) out.push(cur.join('\n'))
+  return out
+}
+
+/** Each heading of a reply text and its section: the heading, and every line up to the next heading of its level or
+ *  higher (its paragraphs, lists, tables and cards), keyed by the heading line as written. What "ask ›" beside a
+ *  heading asks about. Headings inside a fence are not headings. */
+export function sectionsOf(text: string): Map<string, string> {
+  const lines = text.split('\n')
+  const heads: { at: number; level: number }[] = []
+  let fence = false
+  lines.forEach((l, i) => {
+    if (/^\s*```/.test(l)) fence = !fence
+    const m = fence ? null : /^(#{1,6})\s+\S/.exec(l)
+    if (m) heads.push({ at: i, level: m[1]!.length })
+  })
+  const out = new Map<string, string>()
+  heads.forEach((h, k) => {
+    const end = heads.slice(k + 1).find(x => x.level <= h.level)?.at ?? lines.length
+    out.set(lines[h.at]!.trim(), lines.slice(h.at, end).join('\n').trim())
+  })
+  return out
+}
+
 /** Whether a reply block needs thimble-cc-mod's drawing: it embeds a card or holds a citation. */
 export function needsDrawing(text: string): boolean {
   return text.split('\n').some(l => EMBED_RE.test(l)) || citations(text).length > 0

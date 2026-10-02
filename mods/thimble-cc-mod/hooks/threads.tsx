@@ -1,6 +1,6 @@
 // Side threads: a question about a card, a citation or the last answer, answered by a subagent the mod starts, so
 // the exchange stays out of main's chat. register.tsx draws the pane (the exchange, its answers drawn like replies:
-// links and cards) and offers the result back to main as one line in the prompt, which the analyst sends or not.
+// links and cards); nothing goes back to main's prompt. A thread about a card may change the card in place.
 //
 // This file holds the prompts and the record; the engine is in register.tsx (the validator follows `$` only into
 // functions of the hooks module's own file). The mod's other subagents (a fix round, a verification) start the same
@@ -9,12 +9,25 @@
 // fork given the exchange so far (a resumed subagent's end would reach main as a task notification, and main would
 // answer it in its chat).
 import type { ChatFixItem, ChatThread, ChatThreadTurn } from '../types'
+import { plainCites } from './cite'
 
 const RULES = [
   'Answer here, briefly, the way thimble-cc-mod answers in the main conversation: numbers from code (run Python with Bash; a card with the helper when a chart or table answers it), every number and record cited as [[value|ref]].',
   'Do not change the corpus, and write only under .thimble-cc-mod/.',
-  'End with one line `FOR MAIN: <one sentence>` stating what you found; the analyst may pass that line to the main conversation.',
 ].join(' ')
+
+const CARD_REF = /^\[\[card:([A-Za-z0-9_-]+)\]\]$/
+
+/** What a thread about a card may do besides answer: change the card where it stands in the reply. */
+function cardRule(t: ChatThread): string {
+  const id = CARD_REF.exec(t.ref)?.[1]
+  return id
+    ? [
+        `The main reply cites values of this card, so change it in place only when every value it shows stays the same: another sort order, chart kind or wording of its labels. Then edit the script that made it and run it again with python3, keeping the card's question exactly as it is (the id comes from the question, so .thimble-cc-mod/cards/${id}.json is replaced and redrawn where it stands in the reply), and say in one sentence what changed.`,
+        'For a view that changes its values (another grouping, cutoff, field or filter), make a new card with its own question and show it here, and leave this card as it is.',
+      ].join(' ')
+    : ''
+}
 
 function history(t: ChatThread): string {
   return t.turns
@@ -35,6 +48,7 @@ export function forkPrompt(t: ChatThread, q: string): string {
     `The analyst asks: ${q}`,
     '',
     RULES,
+    ...(cardRule(t) ? [cardRule(t)] : []),
   ].join('\n')
 }
 
@@ -64,7 +78,7 @@ export function verifyName(value: string): string {
 
 /** A side thread's name, by the first words of its question. */
 export function threadName(q: string): string {
-  return `side thread · ${firstWords(q, 40)}`
+  return `side thread · ${firstWords(plainCites(q), 40)}`
 }
 
 function firstWords(s: string, n: number): string {
@@ -85,4 +99,26 @@ export function lastTurn(t: ChatThread, patch: Partial<ChatThreadTurn>): ChatThr
 /** A thread as the markdown file it is saved to. */
 export function threadFile(t: ChatThread): string {
   return [`# Side thread: ${t.label}`, '', t.context, '', ...t.turns.flatMap(x => [`## ${x.q}`, '', x.a || `(${x.state})`, ''])].join('\n')
+}
+
+/** A thread as data, saved beside its markdown file so a later session can list and continue it. */
+export function threadJson(t: ChatThread): string {
+  return JSON.stringify({ ...t, agentId: '' }, null, 1)
+}
+
+/** A thread read back from its .json, or null when it is not one; a turn left running when its session ended is
+ *  marked so. */
+export function parseThread(raw: string): ChatThread | null {
+  let v: unknown
+  try {
+    v = JSON.parse(raw)
+  } catch {
+    return null
+  }
+  const t = v as Partial<ChatThread> | null
+  if (!t || typeof t.id !== 'string' || typeof t.label !== 'string' || !Array.isArray(t.turns)) return null
+  const turns = t.turns
+    .filter(x => x && typeof x.q === 'string')
+    .map(x => (x.state === 'running' ? { ...x, state: 'error', a: x.a || '(the session ended before it answered)' } : x))
+  return { id: t.id, label: t.label, ref: t.ref ?? '', context: t.context ?? '', agentId: '', engine: t.engine ?? '', turns, file: t.file ?? `.thimble-cc-mod/threads/${t.id}.md` }
 }

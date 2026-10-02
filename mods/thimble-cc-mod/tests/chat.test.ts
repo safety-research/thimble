@@ -5,10 +5,10 @@ import type { On } from 'claude-code'
 import { expect, mock, test } from 'claude-code/testing'
 import type { Mounted } from 'claude-code/testing'
 
-import { blockLayout, paraLayout } from '../hooks/cite'
+import { paraLayout, richMarkdown } from '../hooks/cite'
 import { cardLayout } from '../hooks/draw'
 import type { CardData } from '../hooks/draw'
-import { citations, embeddedCards, forMain, fromMod, parseReply, scriptResult, shownMatches, tableCells, takeawayAfter, threadBody, unframed, validateCard, valueIn } from '../hooks/lib'
+import { citations, embeddedCards, fromMod, parseReply, scriptResult, shownMatches, tableCells, takeawayAfter, threadBody, unframed, validateCard, valueIn } from '../hooks/lib'
 
 const CWD = '/corpus/wiki'
 const BAR: CardData = {
@@ -44,8 +44,6 @@ type World = {
   sent: string[]
   appended: string[]
   opened: string[]
-  /** false: a pane the mod opens waits undrawn, as Claude Code keeps one a click opened on a narrow terminal */
-  placed: boolean
 }
 
 /** What the resolver says of a ref: the bar card's values as its file holds them, one line of pages.jsonl, nothing else. */
@@ -64,7 +62,7 @@ function resolveOne(ref: string, display: string | null, card: CardData = BAR) {
 }
 
 function world(on: On, extra: Record<string, string> = {}): World {
-  const w: World = { files: new Map(Object.entries({ [`${CWD}/.thimble-cc-mod/cards/abc123.json`]: JSON.stringify(BAR), ...extra })), writes: [], runs: [], filled: [], submitted: [], spawned: [], sent: [], appended: [], opened: [], placed: true }
+  const w: World = { files: new Map(Object.entries({ [`${CWD}/.thimble-cc-mod/cards/abc123.json`]: JSON.stringify(BAR), ...extra })), writes: [], runs: [], filled: [], submitted: [], spawned: [], sent: [], appended: [], opened: [] }
   mock.env(on, {})
   on('env.set', () => ({ value: undefined }) as never)
   mock.clock(on, { now: 1_790_000_000_000 })
@@ -126,9 +124,8 @@ function world(on: On, extra: Record<string, string> = {}): World {
   })
   on('ui.open', ($, e) => {
     w.opened.push(e.id)
-    return { value: w.placed ? { isPlaced: true } : { isPlaced: false, reason: 'unasked below 144 columns (120 now): placed when the person opens it, or when the terminal is widened to 144 columns' } }
+    return { value: { isPlaced: true } } as never
   })
-  on('ui.panes', () => ({ value: [...new Set(w.opened)].map(id => ({ id, title: id, isShown: w.placed, isFocused: false, isPlaced: w.placed })) }))
   on('ui.close', () => ({ value: undefined }) as never)
   on('ui.toast', () => ({ value: undefined }) as never)
   on('ui.log', () => ({ value: undefined }) as never)
@@ -173,7 +170,6 @@ test('numbers: rounding of shown decimals, whole tokens only; a script prints RE
   expect(valueIn('6,500', 'peak = 6543')).toBe(false)
   expect(shownMatches('2.5', '2.45')).toBe(true)
   expect(scriptResult('total 3\nRESULT: 317\n')).toBe('317')
-  expect(forMain('Text.\nFOR MAIN: 3908 pages.')).toBe('3908 pages.')
   expect(threadBody('Text.\nFOR MAIN: 3908 pages.')).toBe('Text.')
 })
 
@@ -186,7 +182,7 @@ test('layouts: a bar row is hit by its line, a chip by its cells', () => {
   expect(para.spans[0]!.x0).toBe('dse has '.length)
 })
 
-test('a table whose cells hold citations is a rich block in columns, its chips hit by their cells', () => {
+test('a table whose cells hold citations is a rich block, drawn as a Markdown table with a link per citation', () => {
   expect(tableCells('| AgentRelent | [[314|call:a#L1]] of [[317|call:a#L1]] | `a|b` |')).toEqual(['AgentRelent', '[[314|call:a#L1]] of [[317|call:a#L1]]', '`a|b`'])
   const text = ['Intro.', '', '| Name | Revisions |', '|---|--:|', '| A | [[314|call:a#L1]] |', '| B | none |', '', '| x | y |', '|---|---|', '| 1 | 2 |'].join('\n')
   const blocks = parseReply(text)
@@ -195,9 +191,18 @@ test('a table whose cells hold citations is a rich block in columns, its chips h
   expect(table.table?.rows.length).toBe(3)
   expect(table.table?.align).toEqual(['left', 'right'])
   expect(table.runs.filter(r => r.cite).length).toBe(1)
-  const lay = blockLayout(table, [{ label: '314', state: 'link', mark: '', spin: false, tip: '' }], 80, -1)
-  expect(lay.lines.length).toBe(4) // header, rule, two rows
-  expect(lay.spans).toEqual([{ line: 2, x0: 'Name'.length + 2 + 'Revisions'.length - '314'.length, x1: 'Name'.length + 2 + 'Revisions'.length, chip: 0 }])
+  const md = richMarkdown(table, (c, n) => `[${c.display}](#c${n})`)
+  // header, rule (its alignment kept), two rows; a citation a link, the cell without one as written
+  expect(md).toBe(['| Name | Revisions |', '| --- | --: |', '| A | [314](#c0) |', '| B | none |'].join('\n'))
+  // a paragraph keeps its code, bold and italic; a heading its level; a quote its marker; a pipe in a cell is escaped
+  const para = parseReply('A **big** *gap* in `x` at [[5|a.md#L1]] and [[6|a.md#L2]].')[0] as typeof table
+  expect(richMarkdown(para, (c, n) => `[${c.display}](#c${n})`)).toBe('A **big** *gap* in `x` at [5](#c0) and [6](#c1).')
+  const head = parseReply('## Size: [[5|a.md#L1]]')[0] as typeof table
+  expect(richMarkdown(head, c => `[${c.display}](#)`)).toBe('## Size: [5](#)')
+  const quote = parseReply('> said [[5|a.md#L1]]')[0] as typeof table
+  expect(richMarkdown(quote, c => `[${c.display}](#)`)).toBe('> said [5](#)')
+  const piped = parseReply(['| a | b |', '|---|---|', '| x \\| y | [[5|a.md#L1]] |'].join('\n'))[0] as typeof table
+  expect(richMarkdown(piped, c => `[${c.display}](#)`).split('\n')[2]).toBe('| x \\| y | [5](#) |')
 })
 
 test('the mod knows its own prompts under the engine framing', () => {
@@ -209,17 +214,25 @@ test('the mod knows its own prompts under the engine framing', () => {
 
 // ------------------------------------------------------------------------------------------------ the reply
 
-test('a reply draws its card as a Client panel and its citations as chips, static where no Client runs', async ($, on) => {
+test('a reply draws its card and its paragraphs with citations as Clients; elsewhere the paragraphs are Markdown with a link per citation', async ($, on) => {
   world(on)
   await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
   for (const surface of ['terminal', 'desktop'] as const) {
     const ui = await $.ui.mount({ ...MESSAGE(REPLY), surface } as never)
-    expect(await ui.find({ key: 'card-1-abc123' })).toBeDefined()
-    expect(await ui.find({ key: 'para-2' })).toBeDefined()
+    expect(await ui.find({ type: 'Client', key: 'card-1-abc123' })).toBeDefined()
+    const para = (await ui.find({ key: 'para-2' })) as { type: string; props: { module: string; props: { raws: string[]; chips: { label: string }[] } } }
+    expect(para.type).toBe('Client')
+    expect(para.props.module).toMatch(/para\.tsx$/)
+    expect(para.props.props.raws.length).toBe(2)
+    expect(para.props.props.chips.map(c => c.label)).toEqual(['13403', '14416'])
     await ui.unmount()
   }
   const flat = await $.ui.mount({ ...MESSAGE(REPLY), surface: 'vscode' } as never)
   expect(await flat.find({ type: 'Text', text: /Which wikis have the most revisions\?/ })).toBeDefined()
+  expect(await flat.find({ type: 'Client' })).toBeUndefined()
+  const md = (await flat.find({ type: 'Markdown', text: /^dse has \[13403\]/ })) as { props: { text: string; pressableLinks?: string[] } } | undefined
+  expect(md?.props.text).toMatch(/^dse has \[13403\]\(file:\/\/\/corpus\/wiki\/\.thimble-cc-mod\/cards\/abc123\.json\) of \[14416\]\(file:[^)]+\) revisions\.$/)
+  expect(md?.props.pressableLinks).toBeUndefined()
   await flat.unmount()
 })
 
@@ -228,17 +241,6 @@ test('a card that does not validate is drawn as an error', async ($, on) => {
   await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
   const ui = await $.ui.mount({ ...MESSAGE('[[card:bad111]]\n\nsee [[card:bad111]]'), surface: 'terminal' } as never)
   expect(await ui.find({ type: 'Text', text: /Card 1 cannot be drawn: a bar card needs rows/ })).toBeDefined()
-  await ui.unmount()
-})
-
-test('double-clicking a bar puts its value citation in the prompt', async ($, on) => {
-  const w = world(on)
-  await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
-  const ui = (await $.ui.mount({ ...MESSAGE(REPLY), surface: 'terminal' } as never)) as unknown as M
-  await ui.resize({ columns: 100, rows: 12, in: 'card-1-abc123' })
-  // border, title, params row: the bars start at row 3 of the region, probier is row 4
-  for (const type of ['down', 'up', 'down', 'up']) await ui.pointer({ type, x: 10, y: 4, button: 'left', in: 'card-1-abc123' } as never)
-  expect(w.filled).toEqual(['[[1013|card:abc123#revisions/probier]] '])
   await ui.unmount()
 })
 
@@ -273,10 +275,11 @@ test('a param picked on the card runs its script again for that card, and the ca
   const target = { kind: 'card', ref: 'card:abc123', cardId: 'abc123', text: BAR.question, script: BAR.source!.script }
   await card.post({ type: 'gesture', origin: 'o9', gestures: [{ seq: 1, gesture: 'menu', target, ev: { button: 'right', shift: false, ctrl: false, alt: false, type: 'press' } }] } as never, { in: 'card-1-abc123' })
   await card.unmount()
-  const menu = (await $.ui.mount({ plugin: 'thimble-cc-mod', component: 'Pane', requestId: 'thimble-menu', surface: 'terminal', viewport: { columns: 40, rows: 10 }, props: { bodyColumns: 34, bodyRows: 8 } } as never)) as unknown as M
+  const menu = (await $.ui.mount({ plugin: 'thimble-cc-mod', component: 'Pane', requestId: 'thimble', surface: 'terminal', viewport: { columns: 40, rows: 10 }, props: { bodyColumns: 34, bodyRows: 8 } } as never)) as unknown as M
   await menu.press({ key: 'menu-script' })
   await menu.unmount()
-  const pane = (await $.ui.mount({ plugin: 'thimble-cc-mod', component: 'Pane', requestId: 'thimble-card', surface: 'terminal', viewport: { columns: 100, rows: 30 }, props: { bodyColumns: 96, bodyRows: 28 } } as never)) as unknown as M
+  // the card view replaces the menu in the one panel
+  const pane = (await $.ui.mount({ plugin: 'thimble-cc-mod', component: 'Pane', requestId: 'thimble', surface: 'terminal', viewport: { columns: 100, rows: 30 }, props: { bodyColumns: 96, bodyRows: 28 } } as never)) as unknown as M
   expect(await pane.find({ type: 'Text', text: /output of the last run \(exit 0\): nothing printed/ })).toBeDefined()
   expect(await pane.find({ type: 'Text', text: /thimble-cc-mod card abc123/ })).toBeUndefined()
   await pane.unmount()
@@ -296,53 +299,52 @@ test('a Bash output is saved and main is told how to cite its lines', async ($, 
 
 // ------------------------------------------------------------------------------------------------ side threads
 
-test('a side thread asks a forked subagent, out of main\'s chat, and its pane takes the question', async ($, on) => {
+test('a press on a card\'s title asks a forked subagent about it, out of main\'s chat, and its pane takes the question', async ($, on) => {
   const w = world(on)
   await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
   const ui = (await $.ui.mount({ ...MESSAGE(REPLY), surface: 'terminal' } as never)) as unknown as M
-  // shift+click on the card's title row
-  await ui.pointer({ type: 'down', x: 10, y: 1, button: 'left', shift: true, in: 'card-1-abc123' } as never)
-  expect(w.opened).toContain('thimble-thread')
+  // a press on the card's title, a Button
+  await ui.press({ key: 'card-title:abc123', in: 'card-1-abc123' })
+  expect(w.opened).toEqual(['thimble'])
   await ui.unmount()
   for (const surface of ['terminal', 'desktop'] as const) {
-    const pane = (await $.ui.mount({ plugin: 'thimble-cc-mod', component: 'Pane', requestId: 'thimble-thread', surface, viewport: { columns: 100, rows: 30 }, props: { bodyColumns: 96, bodyRows: 28 } } as never)) as unknown as M
+    const pane = (await $.ui.mount({ plugin: 'thimble-cc-mod', component: 'Pane', requestId: 'thimble', surface, viewport: { columns: 100, rows: 30 }, props: { bodyColumns: 96, bodyRows: 28 } } as never)) as unknown as M
     expect(await pane.find({ type: 'Text', text: /side thread about/ })).toBeDefined()
     expect(await pane.find({ key: 'ask' })).toBeDefined()
+    expect(await pane.find({ key: 'main' })).toBeUndefined() // nothing is offered to main's prompt
     await pane.unmount()
   }
-  const pane = (await $.ui.mount({ plugin: 'thimble-cc-mod', component: 'Pane', requestId: 'thimble-thread', surface: 'terminal', viewport: { columns: 100, rows: 30 }, props: { bodyColumns: 96, bodyRows: 28 } } as never)) as unknown as M
+  const pane = (await $.ui.mount({ plugin: 'thimble-cc-mod', component: 'Pane', requestId: 'thimble', surface: 'terminal', viewport: { columns: 100, rows: 30 }, props: { bodyColumns: 96, bodyRows: 28 } } as never)) as unknown as M
   await pane.input({ key: 'ask', text: 'Why is dse so large?' })
   expect(w.spawned[0]?.subagentType).toBe('fork')
   expect(w.spawned[0]?.prompt).toContain('Why is dse so large?')
   expect(w.spawned[0]?.prompt).toContain('Which wikis have the most revisions?')
-  expect(w.spawned[0]?.prompt).toContain('FOR MAIN:')
+  expect(w.spawned[0]?.prompt).not.toContain('FOR MAIN')
+  // a thread about a card may change it: edit and rerun its script, the question kept so the card is replaced in place
+  expect(w.spawned[0]?.prompt).toContain('edit the script that made it and run it again')
+  expect(w.spawned[0]?.prompt).toContain("keeping the card's question exactly as it is")
+  expect(w.spawned[0]?.prompt).toContain('.thimble-cc-mod/cards/abc123.json')
+  // a view that changes the values the reply cites is a new card, never this one changed
+  expect(w.spawned[0]?.prompt).toContain('make a new card with its own question')
   // the kit starts no subagent, so the mod falls back to a general-purpose one given the guidance, then reports it
   expect(w.spawned[1]?.subagentType).toBe('general-purpose')
   expect(w.spawned[1]?.prompt).toContain('# thimble-cc-mod')
   expect(await pane.find({ type: 'Text', text: /could not start a subagent/ })).toBeDefined()
   expect(w.submitted.length).toBe(0) // nothing of the thread reached main's chat
+  expect(w.filled.length).toBe(0)
   await pane.unmount()
 })
 
-test('a pane a click opens that waits undrawn on a narrow terminal is offered above the prompt, and its button opens it', async ($, on) => {
+test('a side thread about a citation asks for no change to a card', async ($, on) => {
   const w = world(on)
-  w.placed = false
   await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
-  const ui = (await $.ui.mount({ ...MESSAGE(REPLY), surface: 'terminal' } as never)) as unknown as M
-  await ui.pointer({ type: 'down', x: 10, y: 1, button: 'left', shift: true, in: 'card-1-abc123' } as never)
-  await ui.unmount()
-  expect(w.opened).toEqual(['thimble-thread'])
-  const above = { plugin: 'thimble-cc-mod', component: 'AbovePrompt', requestId: 'above', surface: 'terminal', viewport: { columns: 120, rows: 40 }, props: { hasSurvey: false, view: {} } }
-  const band = (await $.ui.mount(above as never)) as unknown as M
-  expect(await band.find({ type: 'Text', text: /needs 144 columns here \(120 now\)/ })).toBeDefined()
-  // the button is the person's ask, so Claude Code places the pane at any width
-  w.placed = true
-  await band.press({ key: 'open-waiting' })
-  expect(w.opened).toEqual(['thimble-thread', 'thimble-thread'])
-  await band.unmount()
-  const after = (await $.ui.mount(above as never)) as unknown as M
-  expect(await after.find({ key: 'open-waiting' })).toBeUndefined()
-  await after.unmount()
+  await $.command.run({ command: 'thimble-ask', args: 'why is dse so large?' } as never)
+  const pane = (await $.ui.mount({ plugin: 'thimble-cc-mod', component: 'Pane', requestId: 'thimble', surface: 'terminal', viewport: { columns: 100, rows: 30 }, props: { bodyColumns: 96, bodyRows: 28 } } as never)) as unknown as M
+  if (!w.spawned.length) await pane.input({ key: 'ask', text: 'why is dse so large?' })
+  await pane.unmount()
+  expect(w.spawned[0]?.prompt).toContain('why is dse so large?')
+  expect(w.spawned[0]?.prompt).not.toContain('edit the script that made it')
+  expect(w.spawned[0]?.prompt).not.toContain('FOR MAIN')
 })
 
 test('/exit and the end of the session stop the mod\'s subagents that still run, and no other', async ($, on) => {

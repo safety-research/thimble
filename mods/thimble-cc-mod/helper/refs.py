@@ -316,6 +316,15 @@ def _check(out: dict, display: str | None, text: str) -> dict:
             if w.get("hit"):
                 w["spans"] = number_spans(display, w["text"])
         return out
+    if is_quote(display):
+        # a quote as the file spells it: JSON-escaped, or across whitespace and escaped line breaks
+        found = False
+        for w in out["window"]:
+            if w.get("hit") and (sp := quote_spans(display.strip()[1:-1], w["text"])):
+                w["spans"], found = sp, True
+        if found:
+            out.update(status="ok", why=f"{display} is there")
+            return out
     if NUM_RE.fullmatch(display.strip()) or is_quote(display):
         out.update(status="differs", why=f"{display} is not there")
     else:
@@ -417,13 +426,21 @@ def compact_record(t: str, spans: list, fit: int = RECORD_FIT) -> tuple[str, lis
 
 
 def quote_spans(quote: str, text: str) -> list[list[int]]:
-    """Where an example's quoted passage stands in a line, as written or JSON-escaped."""
+    """Where a quoted passage stands in a line: as written, JSON-escaped, or its words apart by any whitespace or
+    escaped line break (hooks/cite.ts quoteSpan)."""
     q = quote.strip()
-    for form in (q, json.dumps(q, ensure_ascii=False)[1:-1], json.dumps(q)[1:-1]) if q else ():
+    if not q:
+        return []
+
+    def forms(w: str) -> list[str]:
+        return list(dict.fromkeys((w, json.dumps(w, ensure_ascii=False)[1:-1], json.dumps(w)[1:-1])))
+
+    for form in forms(q):
         i = text.find(form)
         if i >= 0:
             return [[i, i + len(form)]]
-    return []
+    m = re.search(r"(?:\s|\\[nrt])+".join("(?:" + "|".join(map(re.escape, forms(w))) + ")" for w in q.split()), text)
+    return [[m.start(), m.end()]] if m else []
 
 
 def cap_window(res: dict, cap: int = LINE_CAP, quote: str = "") -> dict:
