@@ -1,0 +1,9 @@
+{
+  "name": "thimble-chat",
+  "version": "0.1.0",
+  "description": "Single-agent thimble inside Claude Code: answers drawn as cards between the reply's text, citations as coloured chips that open the cited place, and verification scripts on request (an exploration, not part of thimble's release)",
+  "author": {
+    "name": "thimble exploration"
+  },
+  "types": "./types/index.d.ts"
+}

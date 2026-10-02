@@ -1,0 +1,351 @@
+// thimble-chat's tests: `claude plugin test mods/thimble-chat`. The hooks the tests register sit beneath the plugin
+// and stand for the engine: a filesystem in memory, process.run as the resolver and the card scripts, the prompt,
+// subagents and panes. Drawings are mounted on the terminal and the desktop (both have Client) and on vscode (static).
+import type { On } from 'claude-code'
+import { expect, mock, test } from 'claude-code/testing'
+import type { Mounted } from 'claude-code/testing'
+
+import { blockLayout, cardLayout, paraLayout } from '../hooks/draw'
+import type { CardData } from '../hooks/draw'
+import { citations, embeddedCards, forMain, fromMod, parseReply, scriptResult, shownMatches, tableCells, takeawayAfter, threadBody, unframed, validateCard, valueIn } from '../hooks/lib'
+
+const CWD = '/corpus/wiki'
+const BAR: CardData = {
+  id: 'abc123',
+  kind: 'bar',
+  question: 'Which wikis have the most revisions?',
+  x: 'wiki',
+  y: 'revisions',
+  note: '',
+  source: { script: '.thimble-chat/scripts/by.py', index: 0 },
+  rows: [
+    { label: 'dse', value: 13403, group: '' },
+    { label: 'probier', value: 1013, group: '' },
+  ],
+  total: 14416,
+  params: [{ name: 'by', value: 'wiki', default: 'wiki', choices: ['wiki', 'label'] }],
+}
+const REPLY = [
+  '[[card:abc123]]',
+  '',
+  'dse has [[13403|card:abc123#revisions/dse]] of [[14416|card:abc123#revisions/all]] revisions.',
+  '',
+  'probier has [[1014|card:abc123#revisions/probier]], see [[pages.jsonl#L3]].',
+].join('\n')
+
+type World = {
+  files: Map<string, string>
+  writes: { path: string; text: string }[]
+  runs: { argv: readonly string[]; env?: Record<string, string> }[]
+  filled: string[]
+  submitted: string[]
+  spawned: { prompt: string; subagentType?: string }[]
+  sent: string[]
+  appended: string[]
+  opened: string[]
+}
+
+/** What the resolver says of a ref: the bar card's values, one line of pages.jsonl, nothing else. */
+function resolveOne(ref: string, display: string | null) {
+  const values: Record<string, string> = { 'card:abc123#revisions/dse': '13403', 'card:abc123#revisions/probier': '1013', 'card:abc123#revisions/all': '14416' }
+  if (ref in values) {
+    const v = values[ref]!
+    const ok = display === null || display === v
+    return { ref, kind: 'value', card: 'abc123', column: 'revisions', row: ref.split('/').at(-1), value: v, status: ok ? 'ok' : 'differs', why: ok ? `the card shows ${v}` : `the card shows ${v}, not ${display}`, window: [] }
+  }
+  if (ref === 'card:abc123') return { ref, kind: 'card', card: 'abc123', status: 'ok', why: 'the card exists', window: [] }
+  if (ref === 'pages.jsonl#L3') return { ref, kind: 'lines', file: 'pages.jsonl', start: 3, end: 3, status: 'ok', why: 'resolves', window: [{ n: 3, text: '{"name": "Main"}', hit: true }] }
+  return { ref, kind: 'file', status: 'missing', why: `no file ${ref}`, window: [] }
+}
+
+function world(on: On, extra: Record<string, string> = {}): World {
+  const w: World = { files: new Map(Object.entries({ [`${CWD}/.thimble-chat/cards/abc123.json`]: JSON.stringify(BAR), ...extra })), writes: [], runs: [], filled: [], submitted: [], spawned: [], sent: [], appended: [], opened: [] }
+  mock.env(on, {})
+  mock.clock(on, { now: 1_790_000_000_000 })
+  on('session.start', ($, e) => ({ cwd: e.cwd }))
+  on('session.cwd', () => ({ value: CWD }))
+  on('session.messages', () => ({ value: [] }) as never)
+  on('command.register', ($, e) => ({ value: { command: e.name } }) as never)
+  on('fs.read', ($, e) => {
+    if (e.path.endsWith('/prompt/chat.md')) return { value: '# thimble-chat\nguidance {{helper}}' }
+    const text = w.files.get(e.path)
+    if (text === undefined) throw new Error(`ENOENT: ${e.path}`)
+    return { value: text }
+  })
+  on('fs.stat', ($, e) => {
+    if (!w.files.has(e.path)) throw new Error(`ENOENT: ${e.path}`)
+    return { value: { kind: 'file', size: w.files.get(e.path)!.length, mtimeMs: w.writes.length + 1, isLink: false } }
+  })
+  on('fs.exists', ($, e) => ({ value: w.files.has(e.path) }))
+  on('fs.list', ($, e) => {
+    const names = [...w.files.keys()].filter(p => p.startsWith(`${e.path}/`)).map(p => ({ name: p.slice(e.path.length + 1), kind: 'file' as const, size: 1, mtimeMs: 1, isLink: false }))
+    return { value: names }
+  })
+  on('fs.write', ($, e) => {
+    w.files.set(e.path, e.text)
+    w.writes.push({ path: e.path, text: e.text })
+    return { value: undefined }
+  })
+  on('process.run', ($, e) => {
+    w.runs.push({ argv: e.argv, env: e.init?.env })
+    if (String(e.argv[1]).endsWith('/helper/resolve.py')) {
+      const req = JSON.parse(e.init?.stdin ?? '{}') as { items: { id: string; ref: string; display: string | null }[] }
+      const out = req.items.map(it => ({ ...resolveOne(it.ref, it.display), id: it.id }))
+      return { value: { exitCode: 0, stdout: JSON.stringify(out), stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+    }
+    // a card's script, run again with a param: it writes the card with the new rows
+    const params = JSON.parse(e.init?.env?.THIMBLE_CHAT_PARAMS ?? '{}') as Record<string, string>
+    const rows = params.by === 'label' ? [{ label: 'AgentRelent', value: 317, group: '' }] : BAR.rows
+    w.files.set(`${CWD}/.thimble-chat/cards/abc123.json`, JSON.stringify({ ...BAR, rows, params: [{ ...BAR.params![0]!, value: params.by ?? 'wiki' }] }))
+    w.writes.push({ path: 'card', text: '' })
+    return { value: { exitCode: 0, stdout: 'thimble-chat card abc123', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+  })
+  on('prompt.fill', ($, e) => {
+    w.filled.push(e.text)
+    return { isFilled: true, text: e.text, cursor: e.text.length } as never
+  })
+  on('prompt.submit', ($, e) => {
+    w.submitted.push(e.text)
+    return { text: e.text } as never
+  })
+  on('agent.spawn', ($, e) => {
+    // the kit hands the Agent tool's spelling (subagent_type), and strips the id a hook answers: only core starts one
+    w.spawned.push({ prompt: e.prompt, subagentType: e.subagentType ?? (e as { subagent_type?: string }).subagent_type })
+    return { model: 'm', agentId: `agent-${w.spawned.length}` }
+  })
+  on('session.send', ($, e) => {
+    w.sent.push(e.text)
+    return { isDelivered: true }
+  })
+  on('ui.open', ($, e) => {
+    w.opened.push(e.id)
+    return { value: { isOpen: true } } as never
+  })
+  on('ui.close', () => ({ value: undefined }) as never)
+  on('ui.toast', () => ({ value: undefined }) as never)
+  on('ui.log', () => ({ value: undefined }) as never)
+  on('turn.complete', () => ({ text: '' }))
+  on('turn.start', ($, e) => ({ turnId: e.turnId }))
+  on('ui.render', ($, e) => {
+    const { Text } = $.ui.resolve(e)
+    return Text({ children: ['(the engine row)'] })
+  })
+  return w
+}
+
+type M = Mounted<'terminal'>
+
+const MESSAGE = (text: string) => ({ plugin: 'thimble-chat', component: 'AssistantMessage', requestId: 'm1', viewport: { columns: 140, rows: 40 }, props: { text, isFirstOfReply: true } }) as const
+
+// ------------------------------------------------------------------------------------------------ pure helpers
+
+test('citations and the reply blocks: a card embed, rich paragraphs, code left alone', () => {
+  const cs = citations(REPLY + '\n`[[card:zzz]]`')
+  expect(cs.map(c => c.ref)).toEqual(['card:abc123', 'card:abc123#revisions/dse', 'card:abc123#revisions/all', 'card:abc123#revisions/probier', 'pages.jsonl#L3'])
+  const blocks = parseReply(REPLY)
+  expect(blocks.map(b => b.type)).toEqual(['card', 'rich', 'rich'])
+  expect(embeddedCards(REPLY)).toEqual(['abc123'])
+  expect(takeawayAfter(REPLY, 'abc123')).toBe('dse has [[13403|card:abc123#revisions/dse]] of [[14416|card:abc123#revisions/all]] revisions.')
+})
+
+test('validateCard holds each kind to its spec', () => {
+  expect(validateCard(BAR, 'abc123')).toBe(null)
+  expect(validateCard({ ...BAR, kind: 'pie' })).toContain('kind must be one of')
+  expect(validateCard({ ...BAR, rows: [{ label: 'x', value: 'many' }] })).toContain('bar row 1')
+  expect(validateCard({ ...BAR, id: 'other' }, 'abc123')).toContain('not abc123')
+  expect(validateCard({ id: 'l', kind: 'line', question: 'q', series: [{ name: 's', points: [['2026-01-01', 3], ['2026-01-02', null]] }] })).toContain('point 2')
+  expect(validateCard({ id: 't', kind: 'table', question: 'q', columns: ['a', 'b'], rows: [['x']] })).toContain('2 plain values')
+  expect(validateCard({ id: 'e', kind: 'example', question: 'q', examples: [{ ref: 'pages.jsonl', quote: 'x' }] })).toContain('file#L12')
+  expect(validateCard({ ...BAR, params: [{ name: 'by', value: 'user', choices: ['wiki'] }] })).toContain('param')
+})
+
+test('numbers: rounding of shown decimals, whole tokens only; a script prints RESULT', () => {
+  expect(valueIn('3,908', 'pages = 3908')).toBe(true)
+  expect(valueIn('91%', 'rate = 91.2%')).toBe(true)
+  expect(valueIn('6,500', 'peak = 6543')).toBe(false)
+  expect(shownMatches('2.5', '2.45')).toBe(true)
+  expect(scriptResult('total 3\nRESULT: 317\n')).toBe('317')
+  expect(forMain('Text.\nFOR MAIN: 3908 pages.')).toBe('3908 pages.')
+  expect(threadBody('Text.\nFOR MAIN: 3908 pages.')).toBe('Text.')
+})
+
+test('layouts: a bar row is hit by its line, a chip by its cells', () => {
+  const lay = cardLayout(BAR, 60, -1)
+  expect(lay.items[1]!.cite).toBe('[[1013|card:abc123#revisions/probier]]')
+  expect(lay.hit(10, 1)).toBe(1)
+  const para = paraLayout(parseReply(REPLY)[1] as never, [{ label: '13403', status: 'ok', mark: '', tip: '' }, { label: '14416', status: 'ok', mark: '', tip: '' }], 80, -1)
+  expect(para.spans.length).toBe(2)
+  expect(para.spans[0]!.x0).toBe('dse has '.length)
+})
+
+test('a table whose cells hold citations is a rich block in columns, its chips hit by their cells', () => {
+  expect(tableCells('| AgentRelent | [[314|call:a#L1]] of [[317|call:a#L1]] | `a|b` |')).toEqual(['AgentRelent', '[[314|call:a#L1]] of [[317|call:a#L1]]', '`a|b`'])
+  const text = ['Intro.', '', '| Name | Revisions |', '|---|--:|', '| A | [[314|call:a#L1]] |', '| B | none |', '', '| x | y |', '|---|---|', '| 1 | 2 |'].join('\n')
+  const blocks = parseReply(text)
+  expect(blocks.map(b => b.type)).toEqual(['md', 'rich', 'md'])
+  const table = blocks[1] as Extract<(typeof blocks)[number], { type: 'rich' }>
+  expect(table.table?.rows.length).toBe(3)
+  expect(table.table?.align).toEqual(['left', 'right'])
+  expect(table.runs.filter(r => r.cite).length).toBe(1)
+  const lay = blockLayout(table, [{ label: '314', status: 'ok', mark: '', tip: '' }], 80, -1)
+  expect(lay.lines.length).toBe(4) // header, rule, two rows
+  expect(lay.spans).toEqual([{ line: 2, x0: 'Name'.length + 2 + 'Revisions'.length - ' 314 '.length, x1: 'Name'.length + 2 + 'Revisions'.length, chip: 0 }])
+})
+
+test('the mod knows its own prompts under the engine framing', () => {
+  const framed = 'The thimble-chat plugin sent a message:\nthimble-chat found problems in your last reply\n- x\n\nThis is how Claude Code surfaces a prompt a plugin submits between turns.'
+  expect(fromMod(framed)).toBe(true)
+  expect(unframed(framed)).toBe('thimble-chat found problems in your last reply\n- x')
+  expect(fromMod('Which wikis have the most revisions?')).toBe(false)
+})
+
+// ------------------------------------------------------------------------------------------------ the reply
+
+test('a reply draws its card as a Client panel and its citations as chips, static where no Client runs', async ($, on) => {
+  world(on)
+  await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
+  for (const surface of ['terminal', 'desktop'] as const) {
+    const ui = await $.ui.mount({ ...MESSAGE(REPLY), surface } as never)
+    expect(await ui.find({ key: 'card-1-abc123' })).toBeDefined()
+    expect(await ui.find({ key: 'para-2' })).toBeDefined()
+    await ui.unmount()
+  }
+  const flat = await $.ui.mount({ ...MESSAGE(REPLY), surface: 'vscode' } as never)
+  expect(await flat.find({ type: 'Text', text: /Which wikis have the most revisions\?/ })).toBeDefined()
+  await flat.unmount()
+})
+
+test('a card that does not validate is drawn as an error', async ($, on) => {
+  world(on, { [`${CWD}/.thimble-chat/cards/bad111.json`]: JSON.stringify({ id: 'bad111', kind: 'bar', question: 'q', rows: [] }) })
+  await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
+  const ui = await $.ui.mount({ ...MESSAGE('[[card:bad111]]\n\nsee [[card:bad111]]'), surface: 'terminal' } as never)
+  expect(await ui.find({ type: 'Text', text: /card bad111 does not validate: a bar card needs rows/ })).toBeDefined()
+  await ui.unmount()
+})
+
+test('clicking a bar puts its value citation in the prompt', async ($, on) => {
+  const w = world(on)
+  await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
+  const ui = (await $.ui.mount({ ...MESSAGE(REPLY), surface: 'terminal' } as never)) as unknown as M
+  await ui.resize({ columns: 100, rows: 12, in: 'card-1-abc123' })
+  // border, title, readout, params row: the bars start at row 4 of the region, probier is row 5
+  await ui.pointer({ type: 'down', x: 10, y: 5, button: 'left', in: 'card-1-abc123' } as never)
+  expect(w.filled).toEqual(['[[1013|card:abc123#revisions/probier]] '])
+  await ui.unmount()
+})
+
+test('a param picked on the card runs its script again for that card, and the card redraws', async ($, on) => {
+  const w = world(on)
+  await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
+  const ui = (await $.ui.mount({ ...MESSAGE(REPLY), surface: 'terminal' } as never)) as unknown as M
+  await ui.post({ type: 'param', card: 'abc123', name: 'by', value: 'label' }, { in: 'card-1-abc123' })
+  const run = w.runs.find(r => r.argv[1] === '.thimble-chat/scripts/by.py')
+  expect(run?.env).toEqual({ THIMBLE_CHAT_PARAMS: '{"by":"label"}', THIMBLE_CHAT_ONLY: '0:abc123' })
+  expect(await ui.find({ type: 'Text', text: /AgentRelent/, in: 'card-1-abc123' })).toBeDefined()
+  await ui.unmount()
+})
+
+test('star and hide write the card note; a hidden card keeps one line', async ($, on) => {
+  const w = world(on)
+  await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
+  const ui = (await $.ui.mount({ ...MESSAGE(REPLY), surface: 'terminal' } as never)) as unknown as M
+  await ui.post({ type: 'act', card: 'abc123', act: 'star' }, { in: 'card-1-abc123' })
+  expect(JSON.parse(w.files.get(`${CWD}/.thimble-chat/notes/abc123.json`)!)).toEqual({ starred: true })
+  await ui.post({ type: 'act', card: 'abc123', act: 'hide' }, { in: 'card-1-abc123' })
+  expect(await ui.find({ type: 'Text', text: /hidden card: Which wikis/, in: 'card-1-abc123' })).toBeDefined()
+  await ui.unmount()
+})
+
+test('an edited takeaway replaces the paragraph in place and is saved', async ($, on) => {
+  const w = world(on)
+  await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
+  const ui = (await $.ui.mount({ ...MESSAGE(REPLY), surface: 'terminal' } as never)) as unknown as M
+  await ui.post({ type: 'act', card: 'abc123', act: 'edit' }, { in: 'card-1-abc123' })
+  expect(w.opened).toContain('thimble-edit')
+  const pane = (await $.ui.mount({ plugin: 'thimble-chat', component: 'Pane', requestId: 'thimble-edit', surface: 'terminal', viewport: { columns: 100, rows: 20 }, props: { bodyColumns: 96, bodyRows: 10 } } as never)) as unknown as M
+  await pane.input({ key: 'takeaway', text: 'dse has most of them: [[13403|card:abc123#revisions/dse]].' })
+  const note = JSON.parse(w.files.get(`${CWD}/.thimble-chat/notes/abc123.json`)!) as { takeaway: string; original: string }
+  expect(note.takeaway).toBe('dse has most of them: [[13403|card:abc123#revisions/dse]].')
+  expect(note.original).toContain('of [[14416|card:abc123#revisions/all]] revisions.')
+  // the note to main ($.session.append) has no stand-in in the kit ("no implementation for session.append"), so
+  // it is not checked here
+  await pane.unmount()
+  await ui.redraw()
+  expect(await ui.find({ key: 'para-2' })).toBeDefined()
+  await ui.unmount()
+})
+
+// ------------------------------------------------------------------------------------------------ turns
+
+test('a reply whose citation shows another value goes back to main as a fix prompt, once', async ($, on) => {
+  const w = world(on)
+  await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
+  await $.turn.start({ text: 'which wiki?', turnId: 't1' } as never)
+  await $.turn.complete({ turnId: 't1', answer: REPLY, durationMs: 5, reason: 'answer' } as never)
+  expect(w.submitted.length).toBe(1)
+  expect(w.submitted[0]).toContain('thimble-chat found problems')
+  expect(w.submitted[0]).toContain('[[1014|card:abc123#revisions/probier]]: the card shows 1013, not 1014')
+  expect([...w.files.keys()].some(p => p.includes('/.thimble-chat/answers/'))).toBe(true)
+  // the fix turn itself is not sent back again, nor saved as an answer; the engine frames a plugin's prompt
+  const answers = () => [...w.files.keys()].filter(p => p.includes('/.thimble-chat/answers/')).length
+  const saved = answers()
+  await $.turn.start({ text: `The thimble-chat plugin sent a message:\n${w.submitted[0]!}`, turnId: 't2' } as never)
+  await $.turn.complete({ turnId: 't2', answer: 'probier has [[1014|card:abc123#revisions/probier]].', durationMs: 5, reason: 'answer' } as never)
+  expect(w.submitted.length).toBe(1)
+  expect(answers()).toBe(saved)
+})
+
+test('the mod\'s own prompt is one line that unfolds on a click, static where no Client runs', async ($, on) => {
+  world(on)
+  await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
+  const text = 'The thimble-chat plugin sent a message:\nthimble-chat found problems in your last reply, which the analyst sees in red or amber:\n- [[1014|card:abc123#revisions/probier]]: the card shows 1013, not 1014\nFix each one.'
+  const row = (surface: string, isExpanded: boolean) => ({ plugin: 'thimble-chat', component: 'UserMessage', requestId: 'u1', surface, viewport: { columns: 140, rows: 40 }, props: { text, origin: { kind: 'plugin', name: 'thimble-chat' }, isExpanded } }) as never
+  // the engine calls a short row under its speaker label expanded, so the fold ignores isExpanded where it can draw
+  const ui = (await $.ui.mount(row('terminal', true))) as unknown as M
+  const fold = await ui.find({ key: 'fold' })
+  expect(fold).toBeDefined()
+  expect(JSON.stringify(fold)).toContain('asked Claude to fix 1 problem')
+  await ui.unmount()
+  const flat = await $.ui.mount(row('vscode', false))
+  expect(await flat.find({ type: 'Text', text: /asked Claude to fix 1 problem in the last reply · ctrl\+o shows the message/ })).toBeDefined()
+  await flat.unmount()
+})
+
+test('a Bash output is saved and main is told how to cite its lines', async ($, on) => {
+  const w = world(on)
+  on('tool.call', () => ({ result: { content: [{ type: 'text', text: 'a\nb' }] }, text: 'a\nb' }) as never)
+  await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
+  const ran = await $.tool.call({ tool: 'Bash', command: 'wc -l pages.jsonl' } as never)
+  const context = ((ran as { context?: readonly string[] }).context ?? []).join('\n')
+  expect(context).toMatch(/this output is call:\w+\. To cite a line of it, write \[\[<value>\|call:\w+#L<n>\]\]/)
+  expect(w.writes.some(x => x.path.includes('/.thimble-chat/calls/'))).toBe(true)
+})
+
+// ------------------------------------------------------------------------------------------------ side threads
+
+test('a side thread asks a forked subagent, out of main\'s chat, and its pane takes the question', async ($, on) => {
+  const w = world(on)
+  await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
+  const ui = (await $.ui.mount({ ...MESSAGE(REPLY), surface: 'terminal' } as never)) as unknown as M
+  await ui.post({ type: 'act', card: 'abc123', act: 'ask' }, { in: 'card-1-abc123' })
+  expect(w.opened).toContain('thimble-thread')
+  await ui.unmount()
+  for (const surface of ['terminal', 'desktop'] as const) {
+    const pane = (await $.ui.mount({ plugin: 'thimble-chat', component: 'Pane', requestId: 'thimble-thread', surface, viewport: { columns: 100, rows: 30 }, props: { bodyColumns: 96, bodyRows: 28 } } as never)) as unknown as M
+    expect(await pane.find({ type: 'Text', text: /side thread about/ })).toBeDefined()
+    expect(await pane.find({ key: 'ask' })).toBeDefined()
+    await pane.unmount()
+  }
+  const pane = (await $.ui.mount({ plugin: 'thimble-chat', component: 'Pane', requestId: 'thimble-thread', surface: 'terminal', viewport: { columns: 100, rows: 30 }, props: { bodyColumns: 96, bodyRows: 28 } } as never)) as unknown as M
+  await pane.input({ key: 'ask', text: 'Why is dse so large?' })
+  expect(w.spawned[0]?.subagentType).toBe('fork')
+  expect(w.spawned[0]?.prompt).toContain('Why is dse so large?')
+  expect(w.spawned[0]?.prompt).toContain('Which wikis have the most revisions?')
+  expect(w.spawned[0]?.prompt).toContain('FOR MAIN:')
+  // the kit starts no subagent, so the mod falls back to a general-purpose one given the guidance, then reports it
+  expect(w.spawned[1]?.subagentType).toBe('general-purpose')
+  expect(w.spawned[1]?.prompt).toContain('# thimble-chat')
+  expect(await pane.find({ type: 'Text', text: /could not start a subagent/ })).toBeDefined()
+  expect(w.submitted.length).toBe(0) // nothing of the thread reached main's chat
+  await pane.unmount()
+})

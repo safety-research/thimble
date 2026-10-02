@@ -1,0 +1,229 @@
+"""thimble-chat cards: write a card's data from Python, so every number a card shows comes from code.
+
+    import sys; sys.path.insert(0, "<plugin>/helper"); from tcard import card
+
+    card("bar", "Which agents made the most edits?", rows=[("Agent 3", 412), ("Agent 7", 288)], x="agent", y="edits")
+    card("line", "How many edits were made each day?", series={"edits": [("2026-09-01", 41), ...]}, x="day", y="edits")
+    card("timeline", "What happened to the pricing page?", events=[("2026-09-01 10:02", "Agent 3 creates it", "events.jsonl#L12")])
+    card("table", "Which pages were reverted most?", columns=["page", "reverts", "editors"], rows=[["Pricing", 9, 4]])
+    card("example", "How does a revert read?", examples=[{"ref": "revisions.jsonl#L88", "field": "comment", "quote": "rv"}])
+
+    by = param("by", "wiki", ["wiki", "label"])   # a control on the card: picking a choice runs the script again
+
+Each call writes .thimble-chat/cards/<id>.json in the current folder and prints the line that embeds the card in a
+reply and the citation of each value. The id comes from the question, so running the script again replaces the card.
+
+When the analyst picks another choice of a param on the card, thimble-chat runs the script again with
+THIMBLE_CHAT_PARAMS (the values, as JSON) and THIMBLE_CHAT_ONLY ("<index>:<id>"): only that card is written, under its
+own id, so the reply that embeds it shows the new data.
+"""
+from __future__ import annotations
+
+import datetime as _dt
+import hashlib
+import json
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from refs import HOME, LINES_RE, fmt, read_lines, record_text, safe_path, split_ref  # noqa: E402
+
+KINDS = ("bar", "line", "timeline", "table", "example")
+MAX_ROWS = 2000
+MAX_QUOTE = 600
+MAX_CHOICES = 12
+
+_params: list[dict] = []  # the params this script declared, in order
+_count = 0  # card() calls so far in this run
+
+
+def _env_json(name: str) -> dict:
+    try:
+        v = json.loads(os.environ.get(name) or "{}")
+        return v if isinstance(v, dict) else {}
+    except json.JSONDecodeError:
+        return {}
+
+
+def param(name: str, default, choices):
+    """A value the analyst can change on the card, from `choices` (at most 12 strings or numbers). Returns `default`,
+    or the choice the analyst picked when thimble-chat runs the script again."""
+    choices = [_plain(c) for c in choices]
+    if not choices or len(choices) > MAX_CHOICES:
+        raise ValueError(f"param {name!r}: give 1 to {MAX_CHOICES} choices")
+    if any(not isinstance(c, (str, int, float)) or isinstance(c, bool) for c in choices):
+        raise TypeError(f"param {name!r}: choices must be strings or numbers")
+    default = _plain(default)
+    if default not in choices:
+        raise ValueError(f"param {name!r}: the default {default!r} is not among the choices")
+    if any(p["name"] == name for p in _params):
+        raise ValueError(f"param {name!r} is declared twice")
+    want = _env_json("THIMBLE_CHAT_PARAMS").get(name, default)
+    value = next((c for c in choices if str(c) == str(want)), default)
+    _params.append({"name": str(name), "value": value, "default": default, "choices": choices})
+    return value
+
+
+def _num(v: object, what: str) -> float | int:
+    if isinstance(v, bool) or not isinstance(v, (int, float)):
+        try:
+            import numpy as np  # noqa: PLC0415
+
+            if isinstance(v, np.generic):
+                return v.item()
+        except ImportError:
+            pass
+        raise TypeError(f"{what} must be a number, got {v!r}")
+    return v
+
+
+def _plain(v: object) -> object:
+    """A value JSON can hold: numpy scalars and dates as Python values, the rest as text."""
+    if v is None or isinstance(v, (str, bool, int, float)):
+        return v
+    if hasattr(v, "item"):
+        return v.item()
+    if isinstance(v, (_dt.date, _dt.datetime)):
+        return v.isoformat(sep=" ") if isinstance(v, _dt.datetime) else v.isoformat()
+    return str(v)
+
+
+def _source() -> dict:
+    main = sys.modules.get("__main__")
+    path = getattr(main, "__file__", None)
+    if not path or not os.path.isfile(path):
+        print("thimble-chat: this card has no script file. Write the code to .thimble-chat/scripts/<name>.py and run it, "
+              "so the analyst can read how the card was made.", file=sys.stderr)
+        return {}
+    with open(path, "rb") as f:
+        sha = hashlib.sha1(f.read()).hexdigest()[:12]
+    rel = os.path.relpath(os.path.abspath(path), os.getcwd())
+    return {"script": rel, "sha1": sha}
+
+
+def _example(cwd: str, ex: dict) -> dict:
+    ref = str(ex["ref"])
+    base, frag = split_ref(ref)
+    path = safe_path(cwd, base)
+    if path is None or not os.path.isfile(path):
+        raise FileNotFoundError(f"example {ref}: no file {base} in this folder")
+    m = LINES_RE.match(frag)
+    if not m:
+        raise ValueError(f"example {ref}: cite lines, as {base}#L12 or {base}#L12-L14")
+    a, b = int(m.group(1)), int(m.group(2) or m.group(1))
+    lines = read_lines(path, a, b)
+    if lines is None:
+        raise ValueError(f"example {ref}: {base} has fewer than {b} lines")
+    field = ex.get("field")
+    text = "\n".join(record_text(ln, field) for ln in lines)
+    quote = ex.get("quote")
+    if quote:
+        flat = " ".join(text.split())
+        if quote not in text and " ".join(str(quote).split()) not in flat:
+            raise ValueError(f"example {ref}: the quote is not in the record{' field ' + field if field else ''}: {quote!r}")
+    else:
+        quote = text if len(text) <= MAX_QUOTE else text[:MAX_QUOTE] + "…"
+    return {"ref": ref, "quote": str(quote), "note": str(ex.get("note", "")), "field": field or ""}
+
+
+def card(kind: str, question: str, *, rows=None, columns=None, series=None, points=None, events=None, examples=None,
+         x: str = "", y: str = "", total: bool | float | int = False, note: str = "", id: str | None = None) -> str:
+    """Write a card and print how to embed and cite it. Returns the card's id."""
+    global _count
+    if kind not in KINDS:
+        raise ValueError(f"kind must be one of {', '.join(KINDS)}")
+    if not question or not str(question).strip():
+        raise ValueError("a card needs its question")
+    cwd = os.getcwd()
+    index = _count
+    _count += 1
+    cid = id or hashlib.sha1(f"{kind}:{question}".encode()).hexdigest()[:6]
+    only = os.environ.get("THIMBLE_CHAT_ONLY", "")
+    if only:
+        # a run by thimble-chat for one card: the others of this script are left as they are
+        at, _, keep = only.partition(":")
+        if str(index) != at:
+            return cid
+        cid = keep or cid
+    data: dict = {"id": cid, "kind": kind, "question": str(question).strip(), "x": x, "y": y, "note": note,
+                  "created": _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds"),
+                  "source": {**_source(), "index": index}}
+    if _params:
+        data["params"] = [dict(p) for p in _params]
+    cites: list[str] = []
+    if kind == "bar":
+        out = []
+        for r in rows or []:
+            label, value, group = (r["label"], r["value"], r.get("group", "")) if isinstance(r, dict) else (list(r) + [""])[:3]
+            out.append({"label": str(_plain(label)), "value": _num(_plain(value), f"the value of {label!r}"), "group": str(group or "")})
+        if not out:
+            raise ValueError("a bar card needs rows, as [(label, value), ...]")
+        data["rows"] = out[:MAX_ROWS]
+        col = y or "value"
+        data["y"] = col
+        if total is True:
+            data["total"] = sum(r["value"] for r in out)
+        elif total is not False:
+            data["total"] = _num(total, "total")
+        cites = [f"[[{fmt(r['value'])}|card:{cid}#{col}/{r['label']}]]" for r in out]
+        if "total" in data:
+            cites.append(f"[[{fmt(data['total'])}|card:{cid}#{col}/all]]")
+    elif kind == "line":
+        if points is not None:
+            series = {y or "value": points}
+        if not series:
+            raise ValueError("a line card needs series={name: [(x, y), ...]} or points=[(x, y), ...]")
+        data["series"] = [{"name": str(name), "points": [[_plain(px), _num(_plain(py), f"{name} at {px}")] for px, py in pts][:MAX_ROWS]}
+                          for name, pts in series.items()]
+        for s in data["series"]:
+            pts = s["points"]
+            pick = pts if len(pts) <= 6 else [pts[0], max(pts, key=lambda p: p[1]), min(pts, key=lambda p: p[1]), pts[-1]]
+            cites += [f"[[{fmt(py)}|card:{cid}#{s['name']}/{px}]]" for px, py in pick]
+    elif kind == "timeline":
+        evs = []
+        for e in events or []:
+            t, label, ref = (e["time"], e["label"], e.get("ref", "")) if isinstance(e, dict) else (list(e) + [""])[:3]
+            evs.append({"time": str(_plain(t)), "label": str(label), "ref": str(ref or "")})
+        if not evs:
+            raise ValueError("a timeline card needs events, as [(time, label, ref), ...]")
+        data["events"] = evs[:200]
+        cites = [f"[[{e['ref']}]]" if e["ref"] else f"[[{e['time']}|card:{cid}#time/{i + 1}]]" for i, e in enumerate(evs)]
+    elif kind == "table":
+        if not columns or rows is None:
+            raise ValueError("a table card needs columns=[...] and rows=[[...], ...]; the first column names each row")
+        data["columns"] = [str(c) for c in columns]
+        data["rows"] = [[_plain(v) for v in r] for r in rows][:MAX_ROWS]
+        for r in data["rows"][:8]:
+            cites += [f"[[{fmt(v)}|card:{cid}#{c}/{r[0]}]]" for c, v in zip(data["columns"][1:], r[1:]) if isinstance(v, (int, float))]
+    elif kind == "example":
+        data["examples"] = [_example(cwd, ex) for ex in examples or []]
+        if not data["examples"]:
+            raise ValueError("an example card needs examples, as [{'ref': 'file.jsonl#L12', 'quote': '...'}]")
+        cites = [f"[[{ex['ref']}]]" for ex in data["examples"]]
+    folder = os.path.join(cwd, HOME, "cards")
+    os.makedirs(folder, exist_ok=True)
+    with open(os.path.join(folder, f"{cid}.json"), "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=1)
+    n = len(data.get("rows") or data.get("series") or data.get("events") or data.get("examples") or [])
+    print(f"thimble-chat card {cid} ({kind}, {n} {'series' if kind == 'line' else 'rows'}) -> {HOME}/cards/{cid}.json")
+    if _params:
+        print("controls on the card: " + "; ".join(f"{p['name']} = {p['value']} of {', '.join(map(str, p['choices']))}" for p in _params))
+    print(f"embed it on a line of its own: [[card:{cid}]]")
+    if cites:
+        print("cite its values as:" if kind != "example" else "cite its records as:")
+        for c in cites[:24]:
+            print(f"  {c}")
+        if len(cites) > 24:
+            print(f"  ... {len(cites) - 24} more, in the same form")
+    return cid
+
+
+if __name__ == "__main__":
+    if len(sys.argv) >= 2 and sys.argv[1] == "list":
+        folder = os.path.join(os.getcwd(), HOME, "cards")
+        for name in sorted(os.listdir(folder)) if os.path.isdir(folder) else []:
+            with open(os.path.join(folder, name), encoding="utf-8") as f:
+                c = json.load(f)
+            print(f"{c['id']}  {c['kind']:<8}  {c['question']}")
+    else:
+        print(__doc__)

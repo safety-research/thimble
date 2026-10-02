@@ -1,0 +1,84 @@
+"""Tests of the Python helpers: `python3 tests/test_helpers.py` (no dependencies)."""
+from __future__ import annotations
+
+import json
+import os
+import subprocess
+import sys
+import tempfile
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+HELPER = os.path.join(os.path.dirname(HERE), "helper")
+sys.path.insert(0, HELPER)
+from refs import resolve, shown_matches, value_in  # noqa: E402
+
+
+def test_numbers() -> None:
+    assert value_in("3,908", "pages = 3908")
+    assert value_in("91%", "rate = 91.2%")
+    assert not value_in("6,500", "peak = 6543")
+    assert shown_matches("2.5", "2.45")
+
+
+def test_lines_quotes_and_link_words() -> None:
+    with tempfile.TemporaryDirectory() as d:
+        with open(os.path.join(d, "ev.jsonl"), "w") as f:
+            f.write('{"note": "Seite gelöscht.", "n": 7}\n')
+        assert resolve(d, "ev.jsonl#L1", "7")["status"] == "ok"
+        assert resolve(d, "ev.jsonl#L1", "8")["status"] == "differs"
+        assert resolve(d, "ev.jsonl#L1", '"Seite gelöscht."')["status"] == "ok"
+        assert resolve(d, "ev.jsonl#L1", '"Seite weg"')["status"] == "differs"
+        assert resolve(d, "ev.jsonl#L1", "this record")["status"] == "unchecked"
+        assert resolve(d, "ev.jsonl#L2", None)["status"] == "missing"
+        assert resolve(d, "nope.jsonl#L1", None)["status"] == "missing"
+
+
+def test_card_params_and_single_card_rerun() -> None:
+    with tempfile.TemporaryDirectory() as d:
+        os.makedirs(os.path.join(d, ".thimble-chat", "scripts"))
+        script = os.path.join(d, ".thimble-chat", "scripts", "by.py")
+        with open(script, "w") as f:
+            f.write(
+                f"import sys; sys.path.insert(0, {HELPER!r}); from tcard import card, param\n"
+                "by = param('by', 'wiki', ['wiki', 'label'])\n"
+                "rows = [('dse', 3), ('probier', 1)] if by == 'wiki' else [('Agent', 2)]\n"
+                "card('bar', 'How many revisions per group?', rows=rows, y='revisions', total=True)\n"
+                "card('table', 'Totals', columns=['what', 'n'], rows=[['all', 4]])\n"
+            )
+        run = lambda env: subprocess.run([sys.executable, script], cwd=d, env={**os.environ, **env}, capture_output=True, text=True, check=True)  # noqa: E731
+        out = run({}).stdout
+        assert "[[3|card:" in out and "controls on the card: by = wiki" in out
+        cards = sorted(os.listdir(os.path.join(d, ".thimble-chat", "cards")))
+        assert len(cards) == 2
+        run({"THIMBLE_CHAT_PARAMS": json.dumps({"by": "label"}), "THIMBLE_CHAT_ONLY": "0:keep01"})
+        with open(os.path.join(d, ".thimble-chat", "cards", "keep01.json")) as f:
+            c = json.load(f)
+        assert [r["label"] for r in c["rows"]] == ["Agent"] and c["params"][0]["value"] == "label"
+        assert c["source"]["index"] == 0
+        assert len(os.listdir(os.path.join(d, ".thimble-chat", "cards"))) == 3  # the table was not written again
+
+
+def test_example_quotes_are_checked() -> None:
+    with tempfile.TemporaryDirectory() as d:
+        with open(os.path.join(d, "r.jsonl"), "w") as f:
+            f.write('{"body": "rv vandalism"}\n')
+        cwd = os.getcwd()
+        os.chdir(d)
+        try:
+            from tcard import card
+            card("example", "How does a revert read?", examples=[{"ref": "r.jsonl#L1", "field": "body", "quote": "rv"}])
+            try:
+                card("example", "Bad quote", examples=[{"ref": "r.jsonl#L1", "field": "body", "quote": "not there"}])
+            except ValueError as err:
+                assert "not in the record" in str(err)
+            else:
+                raise AssertionError("a quote that is not in the record was accepted")
+        finally:
+            os.chdir(cwd)
+
+
+if __name__ == "__main__":
+    for name, fn in list(globals().items()):
+        if name.startswith("test_") and callable(fn):
+            fn()
+            print(f"ok {name}")
