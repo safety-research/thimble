@@ -1,12 +1,13 @@
 // Side threads: a question about a card, a citation or the last answer, answered by a subagent the mod starts, so
 // the exchange stays out of main's chat. register.tsx draws the pane (the exchange, its answers drawn like replies:
-// chips and cards) and offers the result back to main as one line in the prompt, which the analyst sends or not.
+// links and cards) and offers the result back to main as one line in the prompt, which the analyst sends or not.
 //
 // This file holds the prompts and the record; the engine is in register.tsx (the validator follows `$` only into
-// functions of the hooks module's own file). Engine: $.agent.spawn with the `fork` type, which inherits main's
-// conversation, so it knows the cards and the reply; where a fork is refused, a general-purpose subagent given the
-// guidance and the context. Each follow-up starts a new fork given the exchange so far (a resumed subagent's end would
-// reach main as a task notification, and main would answer it in its chat).
+// functions of the hooks module's own file). The mod's other subagents (a fix round, a verification) start the same
+// way: $.agent.spawn with the `fork` type, which inherits main's conversation, so it knows the cards and the reply;
+// where a fork is refused, a general-purpose subagent given the guidance and the context. Each follow-up starts a new
+// fork given the exchange so far (a resumed subagent's end would reach main as a task notification, and main would
+// answer it in its chat).
 import type { ChatThread, ChatThreadTurn } from '../types'
 
 const RULES = [
@@ -37,9 +38,17 @@ export function forkPrompt(t: ChatThread, q: string): string {
   ].join('\n')
 }
 
-export function freshPrompt(t: ChatThread, q: string, guide: string): string {
-  return [guide, '', '---', forkPrompt(t, q)].join('\n')
+/** A prompt for a general-purpose subagent, which has neither main's conversation nor its guidance. */
+export function withGuide(guide: string, prompt: string): string {
+  return [guide, '', '---', prompt].join('\n')
 }
+
+export function freshPrompt(t: ChatThread, q: string, guide: string): string {
+  return withGuide(guide, forkPrompt(t, q))
+}
+
+/** How every subagent of the mod is described, so its rows in main's chat are known as the mod's. */
+export const AGENT_PREFIX = 'thimble-chat'
 
 export function lastTurn(t: ChatThread, patch: Partial<ChatThreadTurn>): ChatThread {
   const turns = t.turns.slice()

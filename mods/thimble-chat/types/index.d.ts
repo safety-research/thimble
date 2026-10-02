@@ -27,7 +27,7 @@ export type ChatVerdict = {
   call?: string
 }
 
-/** A verification script for one citation: asked of main, then run by the mod. */
+/** A verification script for one citation: written by a forked subagent, then run by the mod. */
 export type ChatVerify = {
   id: string
   state: string
@@ -53,6 +53,20 @@ export type ChatThreadTurn = { q: string; a: string; state: string; tools: numbe
 /** A side thread: what it is about, the subagent answering it, its exchange, and the file it is saved to. */
 export type ChatThread = { id: string; label: string; ref: string; context: string; agentId: string; engine: string; turns: ChatThreadTurn[]; file: string }
 
+/** A citation (by its id) or a card (`card-<id>`) a fix round works on: `fixing` while its subagent runs, then `fixed`
+ *  or `failed` with why. */
+export type ChatFix = { state: string; why?: string }
+
+/** One passage a fix round asks to correct: the reply's text as it stands (a sentence, or a card's embed line), what
+ *  is wrong in it, and the citations whose chips follow it. */
+export type ChatFixItem = { old: string; problems: { raw: string; why: string }[]; cites: string[]; card?: string }
+
+/** A subagent the mod started: a side thread's, a fix round's or a verification's, with what its end updates. */
+export type ChatAgent = { kind: string; label: string; thread?: string; cite?: string; items?: ChatFixItem[]; reply?: string; endRow?: string }
+
+/** A passage of a reply a fix round corrected: drawn as `new` in place of `old`, marked. */
+export type ChatCorrection = { old: string; new: string; at: number }
+
 /** The last text row of an answer, which carries the answer's summary line. */
 export type ChatEnd = { ids: string[]; cards: string[]; file: string }
 
@@ -64,7 +78,6 @@ declare module 'claude-code' {
       open: string
       turn: ChatTurn | null
       hidden: string
-      pending: string[]
       paneCard: string
       picked: string
       hover: string
@@ -75,6 +88,9 @@ declare module 'claude-code' {
       ends: StateFamily<ChatEnd>
       band: boolean
       paneMode: string
+      fixes: StateFamily<ChatFix>
+      agents: StateFamily<ChatAgent>
+      corrections: ChatCorrection[]
     }
   }
 }
