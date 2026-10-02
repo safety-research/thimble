@@ -78,8 +78,12 @@ export type ChatEnd = { rows: ChatRow[]; cards: string[]; file: string; head: st
 
 /** What a gesture acts on (hooks/gestures.tsx): `ref` the place it cites (bare, or a whole `[[value|ref]]`), `text` its
  *  shown value or its words, `cardId` the card it is on, `script` that card's script, `claim` the key of a reply
- *  citation's claim (its sentence and answer). */
-export type ChatTarget = { kind: 'card' | 'mark' | 'sentence' | 'citation' | 'row' | 'record' | 'node'; ref?: string; text?: string; cardId?: string; script?: string; claim?: string }
+ *  citation's claim (its sentence and answer), `label` what a card's mark is called besides its value. */
+export type ChatTarget = { kind: 'card' | 'mark' | 'sentence' | 'citation' | 'row' | 'record' | 'node'; ref?: string; text?: string; cardId?: string; script?: string; claim?: string; label?: string }
+
+/** A pane a click opened that the engine left undrawn (an open no person asked for, on a terminal under its floor):
+ *  the band offers it as a button, whose press opens it at any width. */
+export type ChatPendingPane = { id: string; title: string; columns?: number; rows?: number; focus?: true; closeOnEscape?: true }
 
 declare module 'claude-code' {
   interface PluginState {
@@ -103,6 +107,8 @@ declare module 'claude-code' {
       agents: StateFamily<ChatAgent>
       corrections: ChatCorrection[]
       menu: ChatTarget | null
+      pending: ChatPendingPane | null
+      panelView: string
     }
   }
 }

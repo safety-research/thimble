@@ -95,7 +95,7 @@ function world(on: On): World {
   on('prompt.read', () => ({ text: '', cursor: 0 }) as never)
   on('ui.open', ($, e) => {
     w.opened.push(e.id)
-    return { value: { isOpen: true } } as never
+    return { value: { isPlaced: true } } as never
   })
   on('ui.close', () => ({ value: undefined }) as never)
   on('ui.toast', () => ({ value: undefined }) as never)
@@ -113,14 +113,16 @@ type M = Mounted<'terminal'>
 const MESSAGE = (text: string) =>
   ({ plugin: 'thimble-cc-mod', component: 'AssistantMessage', requestId: 'm1', surface: 'terminal', viewport: { columns: 140, rows: 40 }, props: { text, isFirstOfReply: true } }) as never
 
-/** Every string a drawn tree shows, joined. */
+/** Every string a drawn tree shows (a Button's label too), joined. */
 function shown(tree: unknown): string {
   const out: string[] = []
   const walk = (n: unknown) => {
     if (typeof n === 'string') out.push(n)
     else if (Array.isArray(n)) n.forEach(walk)
     else if (n && typeof n === 'object') {
-      const o = n as { children?: unknown; props?: { children?: unknown } }
+      const o = n as { label?: unknown; children?: unknown; props?: { label?: unknown; children?: unknown } }
+      const label = o.label ?? o.props?.label
+      if (typeof label === 'string') out.push(label)
       walk(o.children ?? o.props?.children)
     }
   }
@@ -142,18 +144,36 @@ test('a card shows its question, its params and its chart: no action row, hint l
   await ui.unmount()
 })
 
-test('the value under the pointer shows at the right of the title, and a double-click is not two clicks', async ($, on) => {
+test('the value under the pointer shows at the right of the title; a click or double-click on it keeps it there, opens a thread about it and fills nothing', async ($, on) => {
   const w = world(on)
   await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
   const ui = (await $.ui.mount(MESSAGE('[[card:abc123]]'))) as unknown as M
   await ui.resize({ columns: 100, rows: 12, in: 'card-1-abc123' })
   await ui.pointer({ type: 'move', x: 10, y: 4, in: 'card-1-abc123' } as never)
   expect(await ui.find({ type: 'Text', text: /probier: 1013 revisions/, in: 'card-1-abc123' })).toBeDefined()
-  await ui.pointer({ type: 'down', x: 10, y: 4, button: 'left', in: 'card-1-abc123' } as never)
-  await ui.pointer({ type: 'up', x: 10, y: 4, button: 'left', in: 'card-1-abc123' } as never)
-  await ui.pointer({ type: 'down', x: 10, y: 4, button: 'left', in: 'card-1-abc123' } as never)
-  expect(w.filled).toEqual(['[[1013|card:abc123#revisions/probier]] '])
+  for (const type of ['down', 'up', 'down', 'up']) await ui.pointer({ type, x: 10, y: 4, button: 'left', in: 'card-1-abc123' } as never)
+  expect(await ui.find({ type: 'Text', text: /probier: 1013 revisions/, in: 'card-1-abc123' })).toBeDefined()
+  // a card value cites the card itself: a click is a side thread about it (twice for a double-click, the one panel);
+  // nothing reaches main's prompt
+  expect(w.opened).toEqual(['thimble', 'thimble'])
+  expect(w.filled).toEqual([])
   await ui.unmount()
+})
+
+test('a right-click on a bar names it in the menu by its label and value; the menu has no "cite"', async ($, on) => {
+  const w = world(on)
+  await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
+  const ui = (await $.ui.mount(MESSAGE('[[card:abc123]]'))) as unknown as M
+  await ui.resize({ columns: 100, rows: 12, in: 'card-1-abc123' })
+  await ui.pointer({ type: 'down', x: 10, y: 4, button: 'right', in: 'card-1-abc123' } as never)
+  await ui.pointer({ type: 'up', x: 10, y: 4, button: 'right', in: 'card-1-abc123' } as never)
+  await ui.unmount()
+  expect(w.opened).toEqual(['thimble'])
+  const menu = (await $.ui.mount({ plugin: 'thimble-cc-mod', component: 'Pane', requestId: 'thimble', surface: 'terminal', viewport: { columns: 40, rows: 10 }, props: { bodyColumns: 34, bodyRows: 8 } } as never)) as unknown as M
+  expect(await menu.find({ type: 'Text', text: /^probier: 1013/ })).toBeDefined()
+  expect(await menu.find({ key: 'menu-verify' })).toBeDefined()
+  expect(await menu.find({ key: 'menu-cite' })).toBeUndefined()
+  await menu.unmount()
 })
 
 test('a card that cannot be drawn is named by its place in the reply, not its id', async ($, on) => {
@@ -179,7 +199,11 @@ test('/thimble-card takes a card by its place in the last reply', async ($, on) 
   await $.turn.complete({ turnId: 't1', answer: '[[card:abc123]]\n\n[[card:d1a9e0]]', durationMs: 5, reason: 'answer' } as never)
   const r = await $.command.run({ command: 'thimble-card', args: '2' } as never)
   expect(JSON.stringify(r)).toContain('Who hands work to whom?')
-  expect(w.opened).toContain('thimble-card')
+  expect(w.opened).toContain('thimble')
+  // the panel shows the card view
+  const pane = (await $.ui.mount({ plugin: 'thimble-cc-mod', component: 'Pane', requestId: 'thimble', surface: 'terminal', viewport: { columns: 140, rows: 40 }, props: { bodyColumns: 96, bodyRows: 30 } } as never)) as unknown as M
+  expect(await pane.find({ type: 'Client', key: 'pane-d1a9e0' })).toBeDefined()
+  await pane.unmount()
 })
 
 // ------------------------------------------------------------------------------------------------ colours
@@ -388,8 +412,7 @@ test('a diagram in a reply is a Client card; a press on a node with a record ope
   const col = lay.lines[row]!.map(s => s.s).join('').indexOf('Planner')
   await ui.pointer({ type: 'down', x: col + 2, y: row + 2, button: 'left', in: 'card-1-d1a9e0' } as never)
   await ui.pointer({ type: 'up', x: col + 2, y: row + 2, button: 'left', in: 'card-1-d1a9e0' } as never)
-  await ui.advance(400) // a click acts once no second click followed
-  expect(w.opened).toContain('thimble-cite')
+  expect(w.opened).toEqual(['thimble']) // the Citation view, at once: a click waits for no second one
   await ui.unmount()
 })
 
@@ -413,7 +436,7 @@ test('the open menu\'s mark is shaded in the menu colour: a bar\'s row, a table\
 
 test('a right-click on a card shades its title while the menu is open', async ($, on) => {
   const w = world(on)
-  let panes = [{ id: 'thimble-menu', title: 'Actions', isShown: true, isFocused: true, isPlaced: true }]
+  let panes = [{ id: 'thimble', title: 'Actions', isShown: true, isFocused: true, isPlaced: true }]
   on('ui.panes', () => ({ value: panes }) as never)
   await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
   const ui = (await $.ui.mount(MESSAGE('[[card:d1a9e0]]'))) as unknown as M
@@ -424,7 +447,7 @@ test('a right-click on a card shades its title while the menu is open', async ($
   await ui.pointer({ type: 'up', x: 4, y: 1, button: 'right', in: 'card-1-d1a9e0' } as never)
   await w.clock!.advance(300)
   expect(await lit()).toBe(true)
-  panes = [] // closed by a choice or Esc
+  panes = [] // closed by its button
   await w.clock!.advance(300)
   expect(await lit()).toBe(false)
   await ui.unmount()

@@ -641,3 +641,33 @@ export function streamStep(st: Streaming, more: string, end: boolean, look: Stre
   st.shown = now
   return out
 }
+
+// ---------------------------------------------------------------------------------------- a rich block as Markdown
+
+/** A run as Markdown: code, bold and italic kept; a citation drawn by `link` with its `n` (its place among the
+ *  block's citations). */
+function runMarkdown(r: Run, n: number, link: (c: Citation, n: number) => string, cell: boolean): string {
+  if (r.cite) return link(r.cite, n)
+  let s = r.code ? `\`${r.text}\`` : cell ? r.text.replace(/\|/g, '\\|') : r.text
+  if (r.i) s = `*${s}*`
+  if (r.b) s = `**${s}**`
+  return s
+}
+
+/** A block thimble-cc-mod used to draw itself (a paragraph, heading, list item, quote or table holding citations) as
+ *  Markdown the engine draws, each citation a link, so its text selects like any reply's and a plain click on a
+ *  citation is a press. */
+export function richMarkdown(block: { prefix: string; heading: number; quote: boolean; runs: Run[]; table?: TableRuns }, link: (c: Citation, n: number) => string): string {
+  let n = 0
+  const md = (runs: Run[], cell = false) => runs.map(r => runMarkdown(r, r.cite ? n++ : -1, link, cell)).join('')
+  if (block.table) {
+    const [head = [], ...body] = block.table.rows
+    const cols = Math.max(1, ...block.table.rows.map(r => r.length))
+    const row = (cells: Run[][]) => `| ${Array.from({ length: cols }, (_, i) => md(cells[i] ?? [], true).trim() || ' ').join(' | ')} |`
+    const rule = `| ${Array.from({ length: cols }, (_, i) => ({ left: '---', right: '--:', center: ':-:' })[block.table!.align[i] ?? 'left']).join(' | ')} |`
+    return [row(head), rule, ...body.map(row)].join('\n')
+  }
+  const text = md(block.runs)
+  const lead = block.heading ? `${'#'.repeat(block.heading)} ` : block.prefix
+  return block.quote ? text.split('\n').map(l => `> ${l}`).join('\n') : `${lead}${text}`
+}

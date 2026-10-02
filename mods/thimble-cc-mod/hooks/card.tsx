@@ -65,6 +65,8 @@ function paramRow(card: CardData, hoverKey: string): { line: Line; hots: Hot[] }
 function itemTarget(item: Item, card: CardData): Target {
   const t: Target = { kind: item.kind, ref: item.open, cardId: card.id }
   if (item.text) t.text = item.text
+  // what the mark is called besides its value (a bar's label, a point's date), for the menu and a thread's header
+  if (item.label && item.label !== item.text) t.label = item.value ? `${item.label}: ${item.value}` : item.label
   if (card.source?.script) t.script = card.source.script
   return t
 }
@@ -76,7 +78,7 @@ function cardTarget(card: CardData): Target {
 }
 
 const Card: ClientModule<Props, S> = (props, surface) => {
-  const { Box, Text } = surface.elements
+  const { Box, Text, Button } = surface.elements
   const cols = surface.columns || props.cols || 80
   const inner = Math.max(20, cols - 4)
   const fresh: S = { hover: -1, act: '', cols }
@@ -114,6 +116,8 @@ const Card: ClientModule<Props, S> = (props, surface) => {
     const i = hot ? -1 : lay.hit(cx, ev.y - top)
     const act = hot ? `${hot.param}=${hot.value}` : ''
     const plain = !ev.shift && !ev.ctrl && !ev.alt
+    // the title is a Button (its press opens the card's thread, as the person's own click): a left click there is its
+    if (ev.y === 1 && (ev.button ?? 'left') === 'left' && (ev.type === 'down' || ev.type === 'up')) return
     if (ev.type === 'down' || ev.type === 'up') {
       if (hot && plain && (ev.button ?? 'left') === 'left') {
         if (ev.type === 'down') send(surface, { type: 'param', card: card.id, name: hot.param, value: hot.value })
@@ -158,9 +162,17 @@ const Card: ClientModule<Props, S> = (props, surface) => {
         : null
   const rw = right ? width(right.s) + 2 : 0
   const title = cut(card.question, Math.max(8, inner - rw))
-  const head: Line = [{ s: title, b: true, ...(menuOnCard ? { bg: COLORS.menu } : {}) }]
-  if (right) head.push({ s: ' '.repeat(Math.max(2, inner - width(title) - width(right.s))) }, right)
-  const rows = [paintLine(Text, head)]
+  // the title: a Button, lit and underlined under the pointer, whose press register.tsx answers (ui.press) with a side
+  // thread about the card; at its right the value under the pointer
+  const tail: Line = right ? [{ s: ' '.repeat(Math.max(2, inner - width(title) - width(right.s))) }, right] : []
+  const titleButton = Button({
+    key: `card-title:${card.id}`,
+    label: title,
+    plain: true,
+    hover: { scope: `card-title-${card.id}`, color: COLORS.accent, underline: true },
+    onPress: () => undefined,
+  })
+  const rows = [Box({ flexDirection: 'row', ...(menuOnCard ? { backgroundColor: COLORS.menu } : {}), children: [titleButton, paintLine(Text, tail)] })]
   if (prow) rows.push(paintLine(Text, prow.line))
   rows.push(...(menuItem >= 0 && shown === menuItem ? menuShade(lay, menuItem) : lay.lines).map(l => paintLine(Text, l)))
   return Box({
