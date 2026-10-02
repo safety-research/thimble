@@ -1565,8 +1565,8 @@ def launch_settings(cwd: Path, given: str = "") -> str:
     """The one `--settings` value the launcher passes main, since Claude Code reads only the last one: the analyst's own
     `given` (inline JSON, or a file relative to `cwd`) with thimble's statusline, chained to theirs (from `given`, else
     their own settings, cc_settings.own_statusline) at their refresh interval, and the composer's fast mode and
-    ultracode where they name none. thimble-cc-mod loads where the analyst turned it on: only thimble's background
-    sessions turn it off (config.without_mod). `given` as it is when it cannot be read."""
+    ultracode where they name none, and thimble-cc-mod off (config.without_mod), as in thimble's background sessions,
+    whatever the folder's settings say. `given` as it is when it cannot be read."""
     from . import bg_session, cc_settings  # noqa: PLC0415
 
     own: Any = {}
@@ -1576,8 +1576,8 @@ def launch_settings(cwd: Path, given: str = "") -> str:
         except (OSError, ValueError):
             own = None
         if not isinstance(own, dict):
-            print(f"thimble: WARNING - --settings {given} could not be read, so thimble's statusline is left out",
-                  file=sys.stderr)
+            print(f"thimble: WARNING - --settings {given} could not be read, so thimble's statusline is left out and "
+                  "thimble-cc-mod is not turned off", file=sys.stderr)
             return given.replace("\n", " ")
     line = own.get("statusLine")
     theirs = line if isinstance(line, dict) and isinstance(line.get("command"), str) else cc_settings.own_statusline()
@@ -1588,7 +1588,7 @@ def launch_settings(cwd: Path, given: str = "") -> str:
         out.setdefault("fastMode", choice["fast"])
     if choice.get("effort") == cc_settings.ULTRACODE:
         out.setdefault("ultracode", True)
-    return json.dumps(out)
+    return json.dumps(config.without_mod(out))
 
 
 def main_name(cwd: Path) -> str:
@@ -3113,8 +3113,9 @@ def cmd_cc_mod(args: argparse.Namespace) -> int:
         print(f"thimble cc-mod: `claude {shlex.join(step)}` failed{': ' + out if out else ''}")
         return 1
     if args.mod_cmd == "on":
-        print(f"thimble cc-mod: thimble-cc-mod is on in {cwd}: sessions started here, by `claude` or `thimble`, load it "
-              "(in an open session, /reload-plugins). `thimble cc-mod off` turns it off again.")
+        print(f"thimble cc-mod: thimble-cc-mod is on in {cwd}: sessions `claude` starts here load it (in an open "
+              "session, /reload-plugins); sessions `thimble` starts run without it. `thimble cc-mod off` turns it off "
+              "again.")
     else:
         print(f"thimble cc-mod: thimble-cc-mod is off in {cwd}.")
     return 0

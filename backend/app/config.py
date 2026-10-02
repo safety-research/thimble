@@ -101,8 +101,9 @@ NO_CLAUDE = f"{NO_CLAUDE_FOUND}: install Claude Code, or name its path with THIM
 
 # thimble's marketplace (install.sh registers this tree under its name: thimble in a checkout, thimble-local from a
 # release zip) lists two plugins: thimble and thimble-cc-mod (mods/thimble-cc-mod), a single-agent thimble inside
-# Claude Code. They are switched on independently (`thimble cc-mod on|off` changes only the mod), and main loads the mod
-# where the analyst turned it on; thimble's background sessions turn it off (without_mod), being thimble's own.
+# Claude Code. They are switched on independently (`thimble cc-mod on|off` changes only the mod, in the folder's
+# settings). Every session thimble starts, main and the background sessions, turns the mod off in its --settings
+# (without_mod), so the two never run in one session; `claude` started in a folder where the mod is on loads it.
 MARKETPLACE_FILE = REPO_ROOT / ".claude-plugin" / "marketplace.json"
 MOD_PLUGIN = "thimble-cc-mod"
 
@@ -117,8 +118,8 @@ def marketplace_name() -> str:
 
 
 def without_mod(settings: dict[str, Any]) -> dict[str, Any]:
-    """`settings` (a background session's --settings) with thimble-cc-mod of this install's marketplace off in
-    `enabledPlugins`."""
+    """`settings` (the --settings of a session thimble starts: main's or a background session's) with thimble-cc-mod of
+    this install's marketplace off in `enabledPlugins`, the analyst's other entries kept."""
     name = marketplace_name()
     if not name:
         return settings

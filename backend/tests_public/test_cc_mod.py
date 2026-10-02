@@ -1,6 +1,6 @@
 """thimble-cc-mod, the second plugin of thimble's marketplace: the marketplace lists it, `thimble cc-mod on|off|status`
 switches it, and only it, in the current folder through `claude plugin` alone (stubbed here: no test runs Claude Code),
-main's session loads it where it is on, and thimble's background sessions turn it off."""
+and every session thimble starts, main's and the background sessions, turns it off."""
 from __future__ import annotations
 
 import json
@@ -134,11 +134,12 @@ def test_status_counts_only_this_folder_s_project_install(claude, capsys, tmp_pa
     assert "thimble-cc-mod is off" in status and "thimble plugin is on" in status
 
 
-def test_main_s_session_leaves_the_mod_to_the_folder_s_settings(claude):
-    assert "enabledPlugins" not in json.loads(cli.launch_settings(claude.folder))
-    given = json.dumps({"enabledPlugins": {"other@market": True, MOD: True}})
-    assert json.loads(cli.launch_settings(claude.folder, given))["enabledPlugins"] == {"other@market": True, MOD: True}
-    assert "enabledPlugins" not in json.loads(cli.launch_args(claude.folder).split("\n")[3])
+def test_main_s_session_turns_the_mod_off_and_keeps_the_analyst_s_own_plugins(claude):
+    assert json.loads(cli.launch_settings(claude.folder))["enabledPlugins"] == {MOD: False}
+    given = json.dumps({"fastMode": True, "enabledPlugins": {"other@market": True, MOD: True}})
+    out = json.loads(cli.launch_settings(claude.folder, given))
+    assert out["enabledPlugins"] == {"other@market": True, MOD: False} and out["fastMode"] is True and out["statusLine"]
+    assert json.loads(cli.launch_args(claude.folder).split("\n")[3])["enabledPlugins"] == {MOD: False}
 
 
 def test_background_sessions_turn_the_mod_off_and_keep_the_analyst_s_own_plugins(claude):
