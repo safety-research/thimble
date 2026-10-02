@@ -2,12 +2,13 @@
 // thread (no `$`). It wraps the block to its region, draws each citation as a link (cite.ts), animates the spinner of
 // a citation a fix round or a verification is working on, shows the hovered citation's ref beside it, and hands each
 // press to gestures.tsx with what is under the pointer: a citation, a table row, or the sentence of the word there.
+// While the right-click menu is open on one of its passages, that passage is shaded.
 import type { ClientModule, RenderElement } from 'claude-code'
 
 import { blockLayout, passageAt } from './cite'
 import type { ChipView } from './cite'
 import { lineWidth, width } from './draw'
-import { onPointer, send } from './gestures'
+import { menuLines, onPointer, send } from './gestures'
 import type { Target } from './gestures'
 import type { Run, TableRuns } from './lib'
 import { paintLine } from './paint'
@@ -18,6 +19,7 @@ type Props = {
   chips: ChipView[]
   ids: string[]
   raws: string[]
+  menu?: Target | null
 }
 type S = { hover: number; frame: number }
 
@@ -61,7 +63,7 @@ const Para: ClientModule<Props, S> = (props, surface) => {
     })
   }
 
-  const rows: RenderElement[] = lay.lines.map(l => paintLine(Text, l))
+  const rows: RenderElement[] = menuLines(lay, props.raws, props.menu).map(l => paintLine(Text, l))
   const span = st.hover >= 0 ? lay.spans.find(s => s.chip === st.hover) : undefined
   const tip = st.hover >= 0 ? props.chips[st.hover]?.tip : undefined
   // a tip over the line above the citation, or below it on a first line, or on a one-line paragraph after its text

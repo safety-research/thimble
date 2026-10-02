@@ -43,14 +43,15 @@ paragraphs for a question that takes several steps, such as a why question.
   Code's theme; chart colours keep 3:1 contrast on light and dark backgrounds.
 - **Citations.** Every citation `[[value|place]]` is an underlined link. A place can be file lines, a CSV row, a JSON
   value, a SQLite row, a card value or lines of a Bash output. The mod checks each one, and a citation is red when the
-  place does not exist or the value is not there. A subagent forked from Claude fixes red citations and cards that
-  cannot be drawn, outside the main conversation: a spinner shows beside a red citation while it works, the subagent
-  rewrites each sentence whole, the mod puts it in place of the old sentence without a mark, and Claude gets a note you
-  do not see. A citation it could not fix stays red with ✗ after it, and its tip and panel say why.
+  place does not exist or the value is not there. A subagent forked from Claude repairs red citations and cards that
+  cannot be drawn, outside the main conversation; the citation stays red with a spinner after it meanwhile. The
+  subagent rewrites each sentence whole, the mod puts the fixed sentence in place of the old one without a mark, and
+  Claude gets a note you do not see. A citation it could not fix stays red with ✗ after it, and its tip and panel say
+  why.
 - **Verification.** "verify" (in the menu, or `w` in the citation panel) has a forked subagent write a standalone
-  script that recomputes the value from the raw files. A spinner shows after the citation meanwhile. The mod runs the
-  script and shows it and its output in the panel; the citation gets ✓ when the script recomputed the cited value, or
-  ✗ and red when it recomputed another.
+  script that recomputes the value from the raw files, with a spinner after the citation meanwhile. The mod runs the
+  script and shows it and its output in the panel; the citation gets ✓ when the script recomputed the cited value, and
+  ✗ and turns red when it recomputed another.
 - **Side threads.** shift+click on anything, "ask about this" in the menu, or `/thimble-ask <question>` opens a side
   thread: a forked subagent answers in a panel, and nothing is added to the main conversation. `m` puts the thread's
   one-line result into the prompt. Each subagent the mod starts shows in the main chat as one dim line at most, named

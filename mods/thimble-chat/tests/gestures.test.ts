@@ -270,7 +270,7 @@ test('the menu names its target in the room it has, its quote closed', () => {
 test('the open menu\'s sentence or citation is shaded in its paragraph', () => {
   const block = parseReply('dse has [[13403|card:abc123#revisions/dse]] revisions. The others are small.')[0]
   if (block?.type !== 'rich') throw new Error('expected a paragraph with a citation')
-  const chips = [{ label: '13403', state: 'link' as const, mark: '', tip: '' }]
+  const chips = [{ label: '13403', state: 'link' as const, mark: '', tip: '', spin: false }]
   const lay = blockLayout(block, chips, 80, -1)
   const raws = ['[[13403|card:abc123#revisions/dse]]']
   const lit = (menu: unknown) => menuLines(lay, raws, menu)[0]!.filter(s => s.bg === COLORS.cursor).map(s => s.s).join('')
