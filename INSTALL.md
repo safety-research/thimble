@@ -112,6 +112,15 @@ are checked, and the episodes are drawn as `multiagent-swimlane` cards, the card
 actions main chose. Test builds called it `swarm`: the commands still take that name for this release, and what was
 set for it carries over.
 
+## thimble-cc-mod
+
+thimble-cc-mod is a single-agent thimble inside Claude Code, an exploration that ships with thimble as a second plugin
+of its marketplace. Claude answers with cards drawn in the chat and citations you can check, with no server, browser or
+background agents. Switch it on in a folder with `thimble cc-mod on`, which asks first, then writes the folder's
+`.claude/settings.json` through `claude plugin`; then run `claude` there. `thimble cc-mod off` undoes it, and `thimble
+cc-mod status` says which plugin is on in the folder. The two never run in the same session: `thimble cc-mod on` turns
+the thimble plugin off in that folder, and every session the `thimble` command starts turns thimble-cc-mod off.
+
 ## Update
 
 `thimble update` installs the latest release; in a Dev install it runs `git pull --ff-only` and the install steps,

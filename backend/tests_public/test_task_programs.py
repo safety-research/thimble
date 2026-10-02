@@ -358,6 +358,7 @@ async def test_a_task_program_s_sessions_refuse_what_they_would_ask_since_nobody
     asked = settings["permissions"].get("ask") or []
     assert not any(str(corpus) in r or r.startswith("Bash(") or r.startswith("Web") for r in asked), asked
     assert {"WebFetch", "WebSearch"} <= set(argv[argv.index("--disallowedTools") + 1].split(","))
+    assert settings["enabledPlugins"] == {f"thimble-cc-mod@{config.marketplace_name()}": False}, "never the mod"
     key = start["session"]
     assert key.startswith("task:labels:")
     agent_session.unanswered(CORPUS, key, True)

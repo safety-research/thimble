@@ -1504,7 +1504,7 @@ class Sessions:
             flags += ["--add-dir", str(d)]
         if conf_models.get("effort"):
             flags += ["--effort", str(conf_models["effort"])]
-        flags += ["--settings", json.dumps(settings)]
+        flags += ["--settings", json.dumps(config.without_mod(settings))]
         return flags
 
     async def start(self, cwd: Path, prompt: str, *, name: str, workspace: str | None,

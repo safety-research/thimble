@@ -6,6 +6,7 @@
 # What it produces: <out>/thimble-<version>-<shortsha>.zip (default out: <repo>/release/, gitignored) whose single
 # top-level folder thimble-<version>-<shortsha>/ holds exactly what an install needs and nothing else:
 #   plugin/               the Claude Code plugin (skill, .mcp.json, bin/) — what the marketplace installs
+#   mods/thimble-cc-mod/  the marketplace's second plugin, thimble-cc-mod (`thimble cc-mod on`); never its tests/
 #   extensions/           the extensions thimble ships, which `thimble extension add <name>` copies into ~/.thimble/extensions
 #   backend/              the server (app/, tests_public/, pyproject.toml, uv.lock); never .venv or __pycache__
 #   backend/requirements.txt  uv.lock's runtime packages with the hashes of their files (uv export), which install.sh
@@ -19,8 +20,9 @@
 #                         them) and builds dist when there is none. Never node_modules
 #   frontend/runtime/     package.json and package-lock.json of the frontend packages the server and its scripts load
 #                         (runtime_npm, below), cut from the frontend's own: what install.sh installs beside a built dist
-#   .claude-plugin/       marketplace.json listing ./plugin, its name set to --marketplace-name (default thimble-local,
-#                         so a zip install and the repo-as-marketplace "thimble" can coexist on one machine)
+#   .claude-plugin/       marketplace.json listing ./plugin and ./mods/thimble-cc-mod, its name set to
+#                         --marketplace-name (default thimble-local, so a zip install and the repo-as-marketplace
+#                         "thimble" can coexist on one machine); every plugin it lists must have its folder in the zip
 #   scripts/install.sh scripts/update.sh scripts/rebuild_ui.sh   what an install runs; scripts/dev/ never ships
 #   scripts/view_shot.mjs the headless page of a view's checks (backend/app/views.py runs it)
 #   scripts/ui_shot.mjs   the page screenshots of main's `screenshot` tool and of the dev agent (dev.py runs it)
@@ -80,12 +82,14 @@ version="$(python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1]))["v
 [ -n "$version" ] || die "plugin/.claude-plugin/plugin.json has no version"
 sha="$(git -C "$repo" rev-parse --short HEAD)"
 full_sha="$(git -C "$repo" rev-parse HEAD)"
-allow=(plugin extensions backend prompts .claude-plugin README.md INSTALL.md docs/config.md docs/assets/thimble-banner.svg LICENSE
+allow=(plugin mods/thimble-cc-mod extensions backend prompts .claude-plugin README.md INSTALL.md docs/config.md docs/assets/thimble-banner.svg LICENSE
        scripts/install.sh scripts/update.sh scripts/rebuild_ui.sh scripts/view_shot.mjs scripts/ui_shot.mjs
        frontend/src frontend/public frontend/index.html frontend/package.json
        frontend/package-lock.json frontend/vite.config.ts frontend/tsconfig.json frontend/tsconfig.app.json frontend/tsconfig.node.json)
 dirty=false
-if [ -n "$(git -C "$repo" status --porcelain --untracked-files=no -- "${allow[@]}" ':(exclude)backend/tests')" ]; then
+# what an install does not run: the backend's tests and the mod's
+not_shipped=(':(exclude)backend/tests' ':(exclude)mods/thimble-cc-mod/tests')
+if [ -n "$(git -C "$repo" status --porcelain --untracked-files=no -- "${allow[@]}" "${not_shipped[@]}")" ]; then
   dirty=true
   echo "release.sh: tracked files the zip carries have uncommitted changes, which ship (RELEASE.json says dirty)" >&2
 fi
@@ -122,8 +126,7 @@ stage_root="$(mktemp -d)"
 trap 'rm -rf "$stage_root"' EXIT
 stage="$stage_root/$name"
 mkdir -p "$stage"
-# backend/tests, where present, is not part of an install
-git -C "$repo" ls-files -z --cached -- "${allow[@]}" ':(exclude)backend/tests' |
+git -C "$repo" ls-files -z --cached -- "${allow[@]}" "${not_shipped[@]}" |
 while IFS= read -r -d '' f; do
   [ -f "$repo/$f" ] || continue  # tracked but deleted in the working tree
   mkdir -p "$stage/$(dirname "$f")"
@@ -201,13 +204,18 @@ with open(os.path.join(fe, "runtime", "package-lock.json"), "w") as f:
                         "packages": {"": root, **dict(sorted(keep.items()))}}, indent=2) + "\n")
 PY
 fi
-python3 -I - "$stage/.claude-plugin/marketplace.json" "$mp_name" <<'PY'
-import json, sys
+python3 -I - "$stage/.claude-plugin/marketplace.json" "$mp_name" <<'PY' || die "the marketplace lists a plugin the zip does not carry (above)"
+import json, os, sys
 p, name = sys.argv[1], sys.argv[2]
 d = json.load(open(p))
 d["name"] = name
 json.dump(d, open(p, "w"), indent=2)
 open(p, "a").write("\n")
+root = os.path.dirname(os.path.dirname(p))
+missing = [e.get("source") for e in d.get("plugins", [])
+           if not os.path.isfile(os.path.join(root, str(e.get("source")), ".claude-plugin", "plugin.json"))]
+if missing:
+    sys.exit(f"release.sh: no .claude-plugin/plugin.json under {', '.join(map(str, missing))}")
 PY
 # the pages' links to files the zip does not carry (CLAUDE.md, docs/) go to GitHub, so none is broken in an install
 python3 -I - "$stage" "$gh_repo" "$full_sha" <<'PY'
@@ -245,7 +253,7 @@ $bad"
 for top in "$stage"/* "$stage"/.[!.]*; do
   [ -e "$top" ] || continue
   case "$(basename "$top")" in
-    plugin | extensions | backend | prompts | frontend | scripts | .claude-plugin | README.md | INSTALL.md | docs | LICENSE | \
+    plugin | mods | extensions | backend | prompts | frontend | scripts | .claude-plugin | README.md | INSTALL.md | docs | LICENSE | \
       THIRD_PARTY_NOTICES | RELEASE.json) ;;
     *) die "unexpected top-level entry in the staged tree: $(basename "$top")";;
   esac
