@@ -74,6 +74,25 @@ export function cut(s: string, n: number): string {
   return `${out}…`
 }
 
+/** `s` in at most two lines of `n` columns: broken at the last space that fits, else as wrapLabel breaks a word; the
+ *  second line cut. */
+export function fold(s: string, n: number): string[] {
+  const t = s.replace(/\s+/g, ' ').trim()
+  if (width(t) <= n) return [t]
+  let w = 0
+  let sp = -1
+  let i = 0
+  for (const ch of t) {
+    if (w + cw(ch) > n) break
+    if (ch === ' ' && w > n / 3) sp = i
+    w += cw(ch)
+    i += ch.length
+  }
+  if (t[i] === ' ') sp = i
+  if (sp < 0) return wrapLabel(t, n)
+  return [t.slice(0, sp), cut(t.slice(sp + 1), n)]
+}
+
 function pad(s: string, n: number, right = false): string {
   const c = cut(s, n)
   const fill = ' '.repeat(Math.max(0, n - width(c)))
@@ -164,11 +183,14 @@ function barLayout(card: CardData, cols: number, hover: number): Layout {
   const more = (card.rows?.length ?? 0) - rows.length
   const col = card.y || 'value'
   const groups = [...new Set(rows.map(r => r.group).filter(Boolean))]
-  const labelW = Math.min(Math.max(4, ...rows.map(r => width(r.label))), Math.max(8, Math.floor(cols / 3)), 28)
   const valueW = Math.max(...rows.map(r => fmt(r.value).length), 1)
-  const barW = Math.max(4, cols - labelW - valueW - 3)
+  const room = cols - valueW - 3
+  // the bars keep two fifths of the room; a label longer than the rest takes two lines
+  const labelW = Math.min(Math.max(4, ...rows.map(r => width(r.label))), Math.max(8, room - Math.max(12, Math.ceil(room * 0.4))))
+  const barW = Math.max(4, room - labelW)
   const max = Math.max(...rows.map(r => Math.abs(r.value)), 0)
   const lines: Line[] = []
+  const owner: number[] = []
   const items: Item[] = rows.map(r => ({
     label: r.label,
     value: `${fmt(r.value)} ${col}`,
@@ -181,20 +203,27 @@ function barLayout(card: CardData, cols: number, hover: number): Layout {
     const on = i === hover
     const color = on ? COLORS.accent : r.value < 0 ? COLORS.negative : COLORS.series[Math.max(0, groups.indexOf(r.group)) % COLORS.series.length]!
     const b = bar(r.value, max, barW)
+    const [first, second] = fold(r.label, labelW)
+    const style = { fg: on ? COLORS.accent : COLORS.dim, b: on }
     lines.push([
-      { s: pad(r.label, labelW), fg: on ? COLORS.accent : COLORS.dim, b: on },
+      { s: pad(first!, labelW), ...style },
       { s: ' ' },
       { s: b, fg: color },
       { s: ' '.repeat(Math.max(1, barW - width(b) + 1)) },
       { s: pad(fmt(r.value), valueW, true), b: on },
     ])
+    owner.push(i)
+    if (second) {
+      lines.push([{ s: pad(second, labelW), ...style }])
+      owner.push(i)
+    }
   })
   const foot: Seg[] = []
   if (more > 0) foot.push({ s: `… ${more} more rows  `, fg: COLORS.dim })
   if (card.total !== undefined) foot.push({ s: `all: ${fmt(card.total)}  `, fg: COLORS.dim })
   groups.forEach((g, j) => foot.push({ s: '■ ', fg: COLORS.series[j % COLORS.series.length] }, { s: `${g}  `, fg: COLORS.dim }))
   if (foot.length) lines.push(foot)
-  return { lines, items, hit: (_x, y) => (y >= 0 && y < rows.length ? y : -1) }
+  return { lines, items, hit: (_x, y) => owner[y] ?? -1 }
 }
 
 const DOT = [
@@ -372,17 +401,25 @@ function timelineLayout(card: CardData, cols: number, hover: number): Layout {
     axisRows = 2
   }
   const tW = Math.min(Math.max(...shown.map(t => width(t))), 22)
+  const owner: number[] = lines.map(() => -1)
   evs.forEach((e, i) => {
     const on = i === hover
+    const label = fold(e.label, Math.max(8, cols - tW - 6))
+    const arrow: Seg[] = e.ref ? [{ s: ' ↗', fg: COLORS.dim }] : []
     lines.push([
       { s: on ? '▶ ' : '  ', fg: COLORS.accent },
       { s: pad(shown[i]!, tW, isTime), fg: on ? COLORS.accent : COLORS.dim, b: on },
       { s: '  ' },
-      { s: cut(e.label, Math.max(8, cols - tW - 6)), b: on },
-      ...(e.ref ? [{ s: ' ↗', fg: COLORS.dim }] : []),
+      { s: label[0]!, b: on },
+      ...(label.length === 1 ? arrow : []),
     ])
+    owner.push(i)
+    if (label[1]) {
+      lines.push([{ s: ' '.repeat(tW + 4) }, { s: label[1], b: on }, ...arrow])
+      owner.push(i)
+    }
   })
-  return { lines, items, hit: (_x, y) => (y >= axisRows && y - axisRows < evs.length ? y - axisRows : -1) }
+  return { lines, items, hit: (_x, y) => owner[y] ?? -1 }
 }
 
 function tableLayout(card: CardData, cols: number, hover: number): Layout {
@@ -392,11 +429,9 @@ function tableLayout(card: CardData, cols: number, hover: number): Layout {
   const numeric = heads.map((_, c) => rows.every(r => typeof r[c] === 'number' || r[c] === null))
   const nat = heads.map((h, c) => Math.max(width(h), ...rows.map(r => width(fmt(r[c])))))
   const gap = 2
-  let ws = nat.map(n => Math.min(n, 40))
-  while (ws.reduce((a, b) => a + b, 0) + gap * (ws.length - 1) > cols && Math.max(...ws) > 6) {
-    const j = ws.indexOf(Math.max(...ws))
-    ws = ws.map((w, i) => (i === j ? w - 1 : w))
-  }
+  // the widest columns narrow until the table fits; a cell wider than its column takes two lines
+  const ws = nat.map(n => Math.min(n, cols))
+  while (ws.reduce((a, b) => a + b, 0) + gap * (ws.length - 1) > cols && Math.max(...ws) > 6) ws[ws.indexOf(Math.max(...ws))]! -= 1
   const xs: number[] = []
   ws.reduce((x, w) => (xs.push(x), x + w + gap), 0)
   const items: Item[] = []
@@ -410,24 +445,37 @@ function tableLayout(card: CardData, cols: number, hover: number): Layout {
   const hr = hover >= 0 ? Math.floor(hover / Math.max(1, heads.length)) : -1
   const hc = hover >= 0 ? hover % Math.max(1, heads.length) : -1
   const cell = (s: string, c: number) => pad(s, ws[c]!, numeric[c])
+  // a row's cells, each in one or two lines
+  const parts = (r: string[]) => r.map((s, c) => (numeric[c] ? [s] : fold(s, ws[c]!)))
   const lines: Line[] = []
-  lines.push(heads.flatMap((h, c): Seg[] => [{ s: cell(h, c), b: true }, ...(c < heads.length - 1 ? [{ s: '  ' }] : [])]))
+  const owner: number[] = []
+  const head = parts(heads)
+  for (let k = 0; k < Math.max(...head.map(p => p.length)); k++) {
+    lines.push(heads.flatMap((_, c): Seg[] => [{ s: cell(head[c]![k] ?? '', c), b: true }, ...(c < heads.length - 1 ? [{ s: '  ' }] : [])]))
+    owner.push(-1)
+  }
   lines.push([{ s: ws.map(w => '─'.repeat(w)).join('  '), fg: COLORS.rule }])
+  owner.push(-1)
   rows.forEach((r, ri) => {
-    lines.push(
-      heads.flatMap((_, c): Seg[] => [
-        { s: cell(fmt(r[c]), c), bg: ri === hr ? COLORS.cursor : undefined, b: ri === hr && c === hc, u: ri === hr && c === hc },
-        ...(c < heads.length - 1 ? [{ s: '  ', bg: ri === hr ? COLORS.cursor : undefined }] : []),
-      ]),
-    )
+    const p = parts(heads.map((_, c) => fmt(r[c])))
+    const bg = ri === hr ? COLORS.cursor : undefined
+    for (let k = 0; k < Math.max(...p.map(q => q.length)); k++) {
+      lines.push(
+        heads.flatMap((_, c): Seg[] => [
+          { s: cell(p[c]![k] ?? '', c), bg, b: ri === hr && c === hc, u: ri === hr && c === hc && k < p[c]!.length },
+          ...(c < heads.length - 1 ? [{ s: '  ', bg }] : []),
+        ]),
+      )
+      owner.push(ri)
+    }
   })
   if (all.length > rows.length) lines.push([{ s: `… ${all.length - rows.length} more rows`, fg: COLORS.dim }])
   return {
     lines,
     items,
     hit: (x, y) => {
-      const ri = y - 2
-      if (ri < 0 || ri >= rows.length) return -1
+      const ri = owner[y] ?? -1
+      if (ri < 0) return -1
       let c = xs.findIndex((x0, i) => x >= x0 && x < x0 + ws[i]! + (i < ws.length - 1 ? gap : 0))
       if (c < 0) c = 0
       return ri * heads.length + c
@@ -443,10 +491,20 @@ function exampleLayout(card: CardData, cols: number, hover: number): Layout {
   exs.forEach((e, i) => {
     const on = i === hover
     const color = on ? COLORS.accent : COLORS.series[0]
-    lines.push([{ s: '▍ ', fg: color }, ...(e.note ? [{ s: cut(e.note, cols - 4 - width(e.ref) - 2), b: true }, { s: '  ' }] : []), { s: e.ref, fg: on ? COLORS.link : COLORS.dim, u: on }])
-    owner.push(i)
-    const words = e.quote.replace(/\s+/g, ' ').trim()
     const room = Math.max(10, cols - 4)
+    // the note in up to two lines, its record after it where it fits, else on a line of its own
+    const ref: Seg = { s: e.ref, fg: on ? COLORS.link : COLORS.dim, u: on }
+    const note = e.note ? (width(e.note) + 2 + width(e.ref) <= room ? [e.note] : fold(e.note, room)) : []
+    note.forEach((t, k) => {
+      const last = k === note.length - 1 && width(t) + 2 + width(e.ref) <= room
+      lines.push([{ s: '▍ ', fg: color }, { s: t, b: true }, ...(last ? [{ s: '  ' }, ref] : [])])
+      owner.push(i)
+    })
+    if (!note.length || width(note.at(-1)!) + 2 + width(e.ref) > room) {
+      lines.push([{ s: '▍ ', fg: color }, ref])
+      owner.push(i)
+    }
+    const words = e.quote.replace(/\s+/g, ' ').trim()
     let rest = words
     let n = 0
     while (rest && n < 4) {
@@ -474,6 +532,7 @@ export const MAX_NODES = 40
 export const MAX_EDGES = 80
 const NODE_LABEL = 24 // columns of a label line; a longer label takes two lines, and the readout has the whole label
 const NODE_LABEL_MIN = 12
+const NODE_LABEL_MAX = 40
 const EDGE_INLINE = 24 // a longer edge label, or one with no place of its own beside its edge, is a numbered note
 
 /**
@@ -1233,6 +1292,14 @@ function diagramLayout(card: CardData, cols: number, hover: number): Layout {
       g = diagramGrid(nodes, edges, cols, fit)
       if (g.width <= cols) break
     }
+    // a label NODE_LABEL's two lines would cut gets a wider box, up to NODE_LABEL_MAX, when that fits no taller
+    const cutAt = (label: string, w: number) => !label.endsWith('…') && wrapLabel(label, w).at(-1)!.endsWith('…')
+    let need = NODE_LABEL
+    for (const n of nodes) while (need < NODE_LABEL_MAX && cutAt(n.label, need)) need++
+    if (need > NODE_LABEL && g!.width <= cols) {
+      const wide = diagramGrid(nodes, edges, cols, { ...FITS[0]!, label: need })
+      if (wide.width <= cols && wide.grid.length <= g!.grid.length) g = wide
+    }
     grids.set(key, g!)
     if (grids.size > 16) grids.delete(grids.keys().next().value!)
   }
@@ -1259,18 +1326,23 @@ function diagramLayout(card: CardData, cols: number, hover: number): Layout {
     }
     return line
   })
-  // a note: its number, its edge's ends and its label, the label wrapped under the ends to three lines in all
+  // a note: its number, its edge's ends and its label, the label wrapped under the ends to four lines in all
   for (const { n, edge } of notes) {
     const e = edges[edge]!
     const on = edge === hotEdge
     const num = `${n}  `
     const room = Math.max(8, cols - width(num))
     const [src, tgt] = [nodes[at.get(e.source)!]!.label, nodes[at.get(e.target)!]!.label]
-    let ends = `${cut(src, 28)} → ${cut(tgt, 28)}: `
-    if (width(ends) > room) ends = `${cut(src, Math.max(3, Math.floor((room - 5) / 2)))} → ${cut(tgt, Math.max(3, Math.floor((room - 5) / 2)))}: `
+    let ends = `${src} → ${tgt}: `
+    if (width(ends) > room) {
+      // the shorter end whole where it fits in half the room, the longer one in the rest
+      const both = room - 5
+      const sw = Math.max(3, Math.min(width(src), Math.max(Math.floor(both / 2), both - width(tgt))))
+      ends = `${cut(src, sw)} → ${cut(tgt, Math.max(3, both - sw))}: `
+    }
     const left = room - width(ends)
     const first = left >= 10 || left >= width(e.label ?? '') ? left : 0
-    const label = noteLines(e.label ?? '', first, room, first ? 3 : 2)
+    const label = noteLines(e.label ?? '', first, room, first ? 4 : 5)
     const style = { fg: on ? COLORS.accent : COLORS.dim, b: on }
     const text = { i: true, fg: on ? COLORS.accent : undefined }
     lines.push([{ s: num + ends, ...style }, ...(first && label[0] ? [{ s: label.shift()!, ...text }] : [])])
