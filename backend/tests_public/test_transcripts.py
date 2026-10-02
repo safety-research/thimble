@@ -265,6 +265,44 @@ def test_a_chat_export_larger_than_the_sniff_s_head_is_offered_transcript_and_re
     assert page["total"] == 12000 and page["n_groups"] == 3000 and page["turns"][-1]["text"] == "Done, with a test. (2999)"
 
 
+def _cited_page(chats, rel: str, quote: str) -> dict:
+    """The turns page a citation of `quote` in `rel` opens at: the span refs.span_of_quote makes, passed as the Reader
+    passes it."""
+    from app import refs
+
+    p = refs.parse_ref(refs.span_of_quote(chats, rel, quote))
+    r = client.get(f"{CHATS}/source/turns", params={"path": rel, "line": p["line"], "block": p["block"],
+                                                    "char_start": p["start"], "char_end": p["end"]})
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
+def test_a_citation_of_words_in_a_one_line_json_transcript_opens_at_the_turn_that_holds_them(chats, monkeypatch):
+    msgs = {"messages": [{"role": "user", "content": "Why does the nightly build fail?"},
+                         {"role": "assistant", "content": "The groupby test drops the NaN key."},
+                         {"role": "user", "content": "Draft a fix."}]}
+    (chats / "logs" / "minified.json").write_text(json.dumps(msgs))
+    page = _cited_page(chats, "logs/minified.json", "drops the NaN key")
+    assert page["cited"] == {"i": 1, "quote": "drops the NaN key"}
+    assert 1 in [t["i"] for t in page["turns"]] and {t["line"] for t in page["turns"]} == {1}
+    bare = client.get(f"{CHATS}/source/turns", params={"path": "logs/minified.json", "line": 1}).json()
+    assert "cited" not in bare and bare["start"] == 0 and len(bare["turns"]) == 3
+    monkeypatch.setattr(transcripts, "TURN_TEXT_MAX", 10)
+    cut = _cited_page(chats, "logs/minified.json", "drops the NaN key")
+    held = next(t for t in cut["turns"] if t["i"] == 1)
+    assert held["text"] == "The groupby test drops the NaN key" and held["cut"] == len("The groupby test drops the NaN key.")
+
+
+def test_a_citation_of_escaped_words_in_a_pretty_printed_json_transcript_is_cited(chats):
+    msgs = [{"role": "user", "content": "Is it fixed?"},
+            {"role": "assistant", "content": 'She said "ship it"\nand left.'},
+            {"role": "user", "content": "Good."}]
+    (chats / "logs" / "pretty.json").write_text(json.dumps(msgs, indent=2))
+    page = _cited_page(chats, "logs/pretty.json", 'said "ship it"\nand left')
+    assert page["cited"] == {"i": 1, "quote": 'said "ship it"\nand left'}
+    assert page["turns"][1]["i"] == 1 and page["turns"][1]["line"] != page["turns"][0]["line"]
+
+
 def test_the_turns_of_other_tools_chat_logs(chats):
     """Claude Code's /export and aider's chat history start a turn at each prompt and each reply."""
     def speakers(name):
