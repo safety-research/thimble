@@ -110,7 +110,6 @@ async function paths($: Dollar): Promise<void> {
 async function ensureGuide($: Dollar): Promise<string> {
   if (guide) return guide
   await paths($)
-  debug = Boolean(await $.env.get('THIMBLE_CC_MOD_DEBUG'))
   try {
     guide = (await $.fs.read(`${root}/prompt/chat.md`)).replaceAll('{{helper}}', `${root}/helper`)
   } catch {
@@ -809,7 +808,15 @@ async function openCitation($: Dollar, c: Citation, key?: string, quote?: string
   await openPane($, { id: CITE_PANE, title: 'Citation', focus: true, closeOnEscape: true, columns: 96, rows: 22 })
 }
 
+/** The citation pane and the card pane take turns: one opened while the other holds the keys opens behind it as a
+ *  tab, and the click seems to do nothing. */
+async function openPlace($: Dollar, c: Citation, key?: string, quote?: string): Promise<void> {
+  await $.ui.close({ id: CARD_PANE })
+  await openCitation($, c, key, quote)
+}
+
 async function openCardPane($: Dollar, id: string, mode: string): Promise<void> {
+  await $.ui.close({ id: CITE_PANE })
   const card = await loadCard($, id)
   await $.state.set({ plugin: 'thimble-cc-mod', key: 'paneCard' }, id)
   await $.state.set({ plugin: 'thimble-cc-mod', key: 'paneMode' }, mode)
@@ -899,28 +906,56 @@ async function cardContext($: Dollar, id: string): Promise<{ label: string; cont
 
 // ------------------------------------------------------------------------------------------------ gestures
 
-/** One line of .thimble-cc-mod/mouse.log (THIMBLE_CC_MOD_DEBUG=1): a press or release a Client saw, and what it made. */
-async function logMouse($: Dollar, module: string, g: Sent): Promise<void> {
+const DEBUG_FLAG = `${HOME}/debug`
+const OFF = /^(|0|off|false|no)$/i
+
+/** The mouse log is on when .thimble-cc-mod/debug says so (/thimble-cc-mod debug on|off writes it), else when
+ *  THIMBLE_CC_MOD_DEBUG is set. */
+async function loadDebug($: Dollar): Promise<void> {
   await paths($)
-  const ev: Partial<PointerEv> = g.ev ?? {}
-  const mods = (['shift', 'ctrl', 'alt'] as const).filter(k => ev[k]).join('+') || 'none'
-  mouseLog.push(
-    JSON.stringify({ at: new Date(await $.clock.now()).toISOString(), event: ev.type, button: ev.button, mods, gesture: g.gesture ?? 'none', target: g.target ? `${g.target.kind}: ${targetLabel(g.target)}` : '', module }),
-  )
+  let flag: string | undefined
+  try {
+    flag = (await $.fs.read(`${cwd}/${DEBUG_FLAG}`)).trim()
+  } catch {
+    flag = undefined
+  }
+  const env = flag === undefined ? ((await $.env.get('THIMBLE_CC_MOD_DEBUG').catch(() => undefined)) ?? '').trim() : ''
+  debug = !OFF.test(flag ?? env)
+}
+
+let logFailed = false
+
+/** Append a line to .thimble-cc-mod/mouse.log; the first failure is said once in the transcript. */
+async function writeMouseLog($: Dollar, line: string): Promise<void> {
+  await paths($)
+  mouseLog.push(line)
   try {
     await $.fs.write(`${cwd}/${HOME}/mouse.log`, `${mouseLog.slice(-500).join('\n')}\n`)
-  } catch {
-    // the log is best effort
+  } catch (err) {
+    if (!logFailed) $.ui.log(`thimble-cc-mod: could not write ${HOME}/mouse.log: ${String(err).slice(0, 160)}`)
+    logFailed = true
   }
 }
 
-async function onGesture($: Dollar, g: Gesture, t: Target): Promise<void> {
-  if (g === 'menu') await openMenu($, t)
-  else if (g === 'cite') await act($, 'cite', t)
+/** One line of the mouse log: a press or release a Client saw, and what it made. */
+async function logMouse($: Dollar, module: string, g: Sent): Promise<void> {
+  const ev: Partial<PointerEv> = g.ev ?? {}
+  const mods = (['shift', 'ctrl', 'alt'] as const).filter(k => ev[k]).join('+') || 'none'
+  const at = new Date(await $.clock.now()).toISOString()
+  await writeMouseLog($, JSON.stringify({ at, event: ev.type, button: ev.button, mods, gesture: g.gesture ?? 'none', target: g.target ? `${g.target.kind}: ${targetLabel(g.target)}` : '', module }))
+}
+
+async function onGesture($: Dollar, g: Gesture, t: Target, ev?: PointerEv): Promise<void> {
+  if (g === 'menu') {
+    // the press chose the open menu's target; a release that the menu's pane moved onto another target does not change it
+    if (ev?.type === 'release' && (await read($, menuA))) return
+    await openMenu($, t)
+  } else if (g === 'cite') await act($, 'cite', t)
   else if (g === 'thread') await act($, 'thread', t)
   else if (g === 'primary') {
     const c = placeOf(t)
-    if (c) await openCitation($, c, t.claim, await quoteOf($, t))
+    if (c) await openPlace($, c, t.claim, await quoteOf($, t))
+    else if (t.kind === 'card' && cardOf(t)) await openCardPane($, cardOf(t), t.script ? 'script' : '')
   }
 }
 
@@ -984,7 +1019,7 @@ async function act($: Dollar, what: Act, t: Target): Promise<void> {
   switch (what) {
     case 'open': {
       const c = placeOf(t)
-      if (c) await openCitation($, c, t.claim, await quoteOf($, t))
+      if (c) await openPlace($, c, t.claim, await quoteOf($, t))
       return
     }
     case 'cite': {
@@ -1009,7 +1044,7 @@ async function act($: Dollar, what: Act, t: Target): Promise<void> {
       // a reply's citation is verified as the claim of its sentence in its answer, never as another answer's
       await askVerify($, t.claim && claimMap.has(t.claim) ? t.claim : id)
       // a mark has no chip of its own to show the outcome: the citation panel does
-      if (t.kind !== 'citation') await openCitation($, c, undefined, await quoteOf($, t))
+      if (t.kind !== 'citation') await openPlace($, c, undefined, await quoteOf($, t))
       return
     }
     case 'script':
@@ -1063,6 +1098,7 @@ export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     const started = await next(e)
     await ensureGuide($)
+    await loadDebug($)
     // the card helper writes cards here, wherever a script runs: every Bash command and process started after inherits it
     await $.env.set('THIMBLE_CC_MOD_ROOT', cwd).catch((err: unknown) => $.ui.log(`thimble-cc-mod: could not set THIMBLE_CC_MOD_ROOT: ${String(err).slice(0, 120)}`))
     await loadCorrections($)
@@ -1072,7 +1108,7 @@ export const register: Register = on => {
     await $.command.register({ name: 'thimble-check', description: 'Check the citations of the last reply again', immediate: true })
     await $.command.register({ name: 'thimble-ask', description: 'Ask a side thread about the last reply, out of the main chat: /thimble-ask <question>', immediate: true })
     await $.command.register({ name: 'thimble-band', description: 'Show or hide the band of the last reply\'s citations above the prompt', immediate: true })
-    await $.command.register({ name: 'thimble-cc-mod', description: 'thimble-cc-mod status: the guidance, the cards and files of this folder', immediate: true })
+    await $.command.register({ name: 'thimble-cc-mod', description: 'thimble-cc-mod status; /thimble-cc-mod debug on|off writes the mouse log or stops it', immediate: true })
     // a resumed session: the band lists the last reply's citations
     try {
       const rows = await $.session.messages()
@@ -1334,12 +1370,10 @@ export const register: Register = on => {
       if (fresh.length) seen.set(d.origin, Math.max(...fresh.map(g => g.seq)))
       for (const g of fresh) {
         if (debug) await logMouse($, e.module, g)
-        if (g.gesture && g.target) await onGesture($, g.gesture, g.target)
+        if (g.gesture && g.target) await onGesture($, g.gesture, g.target, g.ev)
       }
     } else if (debug && (d.ev || d.type === 'act' || d.type === 'param')) {
-      await paths($)
-      mouseLog.push(JSON.stringify({ at: new Date(await $.clock.now()).toISOString(), module: e.module, ...d }))
-      await $.fs.write(`${cwd}/${HOME}/mouse.log`, `${mouseLog.slice(-500).join('\n')}\n`)
+      await writeMouseLog($, JSON.stringify({ at: new Date(await $.clock.now()).toISOString(), module: e.module, ...d }))
     }
     if (d.type === 'pointer' || d.type === 'gesture') return next(e)
     if (d.type === 'hover') {
@@ -1645,8 +1679,19 @@ export const register: Register = on => {
     return { text: `side thread opened${q ? `: ${q}` : ''}` }
   })
 
-  on('command.run', { command: 'thimble-cc-mod' }, async $ => {
+  on('command.run', { command: 'thimble-cc-mod' }, async ($, e) => {
     await paths($)
+    const [word, value = ''] = e.args.trim().split(/\s+/)
+    if (word === 'debug') {
+      if (value !== 'on' && value !== 'off') return { text: `the mouse log is ${debug ? 'on' : 'off'}: /thimble-cc-mod debug on|off` }
+      try {
+        await $.fs.write(`${cwd}/${DEBUG_FLAG}`, `${value}\n`)
+      } catch (err) {
+        return { text: `could not write ${DEBUG_FLAG}: ${String(err).slice(0, 160)}` }
+      }
+      debug = value === 'on'
+      return { text: debug ? `the mouse log is on: ${cwd}/${HOME}/mouse.log` : 'the mouse log is off' }
+    }
     const g = await ensureGuide($)
     const present = (await $.session.messages()).some(r => r.role === 'user' && r.text.includes(GUIDE_MARK))
     const count = async (dir: string) => {
@@ -1661,6 +1706,7 @@ export const register: Register = on => {
         `plugin folder: ${root}`,
         `guidance: ${g ? `${g.length} characters, ${present ? 'in this conversation' : 'goes with the next prompt'}` : 'not loaded'}`,
         `in ${cwd}/${HOME}: ${await count('cards')} cards, ${await count('answers')} answers, ${await count('threads')} side threads, ${await count('verify')} verification scripts`,
+        `mouse log: ${debug ? `on (${HOME}/mouse.log)` : 'off (/thimble-cc-mod debug on)'}`,
       ].join('\n'),
     }
   })

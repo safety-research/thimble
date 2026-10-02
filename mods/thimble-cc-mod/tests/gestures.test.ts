@@ -1,5 +1,6 @@
-// The gestures (hooks/gestures.tsx): one set on every target. Click opens the place a target cites, double-click puts
-// its citation into the prompt, shift-, ctrl- or middle-click opens a side thread, right-click opens the menu.
+// The gestures (hooks/gestures.tsx): one set on every target. Click opens the place a target cites (a sentence's first
+// citation's, a card's script), double-click puts its citation into the prompt, shift-, ctrl- or middle-click opens a
+// side thread, right-click opens the menu.
 import type { JsonValue, On } from 'claude-code'
 import { expect, mock, test } from 'claude-code/testing'
 import type { Mounted } from 'claude-code/testing'
@@ -131,11 +132,12 @@ test('each button and modifier makes one gesture, the same on every target', () 
 })
 
 test('a target names its citation, the place a click opens and the actions of its menu', () => {
-  const mark: Target = { kind: 'mark', ref: 'card:abc123#revisions/dse', text: '13403', cardId: 'abc123' }
-  const record: Target = { kind: 'record', ref: 'pages.jsonl#L3', text: 'Main', cardId: 'ex1' }
+  const script = '.thimble-cc-mod/scripts/by.py'
+  const mark: Target = { kind: 'mark', ref: 'card:abc123#revisions/dse', text: '13403', cardId: 'abc123', script }
+  const record: Target = { kind: 'record', ref: 'pages.jsonl#L3', text: 'Main', cardId: 'ex1', script }
   const chip: Target = { kind: 'citation', ref: '[[13403|card:abc123#revisions/dse]]' }
   const sentence: Target = { kind: 'sentence', text: 'The wikis differ   a lot.' }
-  const card: Target = { kind: 'card', cardId: 'abc123', text: 'Which wikis?' }
+  const card: Target = { kind: 'card', cardId: 'abc123', text: 'Which wikis?', script }
   expect(citeText(mark)).toBe('[[13403|card:abc123#revisions/dse]]')
   expect(citeText(chip)).toBe('[[13403|card:abc123#revisions/dse]]')
   expect(citeText(sentence)).toBe('"The wikis differ a lot."')
@@ -146,11 +148,16 @@ test('a target names its citation, the place a click opens and the actions of it
   expect(placeOf(record)?.ref).toBe('pages.jsonl#L3')
   expect(placeOf(chip)?.ref).toBe('card:abc123#revisions/dse')
   expect(placeOf(sentence)).toBe(null)
+  expect(placeOf({ kind: 'sentence', text: 'dse has [[13403|card:abc123#revisions/dse]] revisions, see [[pages.jsonl#L3]].' })?.ref).toBe('card:abc123#revisions/dse')
+  expect(placeOf({ kind: 'row', text: 'dse | [[13403|pages.jsonl#L3]]' })?.ref).toBe('pages.jsonl#L3')
+  expect(placeOf(card)).toBe(null)
   expect(menuItems(mark).map(m => m.act)).toEqual(['thread', 'verify', 'script', 'rerun', 'cite'])
   expect(menuItems(record).map(m => m.act)).toEqual(['open', 'thread', 'script', 'rerun', 'cite'])
   expect(menuItems(chip).map(m => m.act)).toEqual(['open', 'thread', 'verify', 'cite'])
   expect(menuItems(sentence).map(m => m.act)).toEqual(['thread', 'cite'])
   expect(menuItems(card).map(m => m.act)).toEqual(['thread', 'script', 'rerun', 'cite'])
+  // a card made without a script has nothing to open or rerun
+  expect(menuItems({ ...record, script: undefined }).map(m => m.act)).toEqual(['open', 'thread', 'cite'])
 })
 
 test('a click acts once no second click follows; a double-click cites and does not open', () => {
@@ -187,6 +194,17 @@ test('right-click opens the menu on its press, or on a release whose press went 
   onPointer(t, { type: 'up', x: 0, y: 0, button: 'right' }, q)
   expect(q.gestures()).toEqual(['menu'])
   q.advance(1000)
+})
+
+test('a right release that the reflowed transcript puts on another target leaves the menu on the pressed one', () => {
+  const record: Target = { kind: 'record', ref: 'pages.jsonl#L3', text: 'Main', cardId: 'ex1' }
+  const card: Target = { kind: 'card', ref: 'card:ex1', text: 'Which pages?', cardId: 'ex1' }
+  const p = port()
+  onPointer(record, { type: 'down', x: 3, y: 4, button: 'right' }, p)
+  onPointer(card, { type: 'up', x: 3, y: 4, button: 'right' }, p)
+  const sent = p.posts.flatMap(x => x.gestures ?? []).filter((g, i, all) => all.findIndex(y => y.seq === g.seq) === i)
+  expect(sent.filter(g => g.gesture === 'menu').map(g => g.target.kind)).toEqual(['record'])
+  p.advance(1000)
 })
 
 // ------------------------------------------------------------------------------------------------ in a reply
@@ -233,7 +251,7 @@ test('a gesture posted from a chip or a mark is handled once: click opens, menu 
   await ui.post({ type: 'gesture', origin: 'o1', gestures: [chip] } as never, { in: 'para-3' })
   await ui.post({ type: 'hover', id: '', origin: 'o1', gestures: [chip] } as never, { in: 'para-3' })
   expect(w.opened).toEqual(['thimble-cite'])
-  const mark: Sent = { seq: 2, gesture: 'menu', target: { kind: 'mark', ref: 'card:abc123#revisions/dse', text: '13403', cardId: 'abc123' }, ev: press('right') }
+  const mark: Sent = { seq: 2, gesture: 'menu', target: { kind: 'mark', ref: 'card:abc123#revisions/dse', text: '13403', cardId: 'abc123', script: CARD.source.script }, ev: press('right') }
   await ui.post({ type: 'gesture', origin: 'o1', gestures: [chip, mark] } as never, { in: 'card-1-abc123' })
   expect(w.opened).toEqual(['thimble-cite', 'thimble-menu'])
   const menu = (await $.ui.mount(MENU as never)) as unknown as M
@@ -241,6 +259,77 @@ test('a gesture posted from a chip or a mark is handled once: click opens, menu 
   expect(w.runs).toContain('.thimble-cc-mod/scripts/by.py')
   await menu.unmount()
   await ui.unmount()
+})
+
+test('a click on a card opens its script, on a sentence its first citation', async ($, on) => {
+  const w = world(on)
+  await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
+  const ui = (await $.ui.mount(MESSAGE as never)) as unknown as M
+  const click = async (x: number, y: number, inside: string) => {
+    await ui.pointer({ type: 'down', x, y, button: 'left', in: inside } as never)
+    await ui.pointer({ type: 'up', x, y, button: 'left', in: inside } as never)
+    await ui.advance(DOUBLE_MS * 2)
+  }
+  await click(4, 1, 'card-1-abc123') // the title
+  expect(w.opened).toEqual(['thimble-card'])
+  await click(1, 0, 'para-3') // "dse", before the first citation
+  expect(w.opened).toEqual(['thimble-card', 'thimble-cite'])
+  await ui.unmount()
+})
+
+test('the menu keeps the pressed target when the release arrives as a menu on another', async ($, on) => {
+  world(on)
+  on('ui.panes', () => ({ value: [{ id: 'thimble-menu', title: 'Actions', isShown: true, isFocused: true, isPlaced: true }] }) as never)
+  await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
+  const ui = (await $.ui.mount(MESSAGE as never)) as unknown as M
+  const record: Sent = { seq: 1, gesture: 'menu', target: { kind: 'record', ref: 'pages.jsonl#L3', text: 'Main', cardId: 'abc123' }, ev: press('right') }
+  const card: Sent = { seq: 2, gesture: 'menu', target: { kind: 'card', ref: 'card:abc123', text: 'Which wikis?', cardId: 'abc123' }, ev: { ...press('right'), type: 'release' } }
+  await ui.post({ type: 'gesture', origin: 'o2', gestures: [record, card] } as never, { in: 'card-1-abc123' })
+  // the record's menu opens its place; the card's has no such row
+  const menu = (await $.ui.mount(MENU as never)) as unknown as M
+  expect(await menu.find({ key: 'menu-open' })).toBeDefined()
+  await menu.unmount()
+  await ui.unmount()
+})
+
+test('a hovered citation loses its tip when the pointer moves off it, presses, or the paragraph reflows', async ($, on) => {
+  world(on)
+  await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
+  const ui = (await $.ui.mount(MESSAGE as never)) as unknown as M
+  const block = parseReply(REPLY).find(b => b.type === 'rich')
+  if (block?.type !== 'rich') throw new Error('expected a paragraph with citations')
+  const chips = [0, 1].map(() => ({ label: '13403', state: 'link' as const, mark: '', tip: '', spin: false }))
+  const x = blockLayout(block, chips, 136, -1).spans[0]!.x0 + 1
+  const tip = async () => JSON.stringify(await ui.drawn({ in: 'para-3' })).includes('"position":"absolute"')
+  const move = (px: number, py: number) => ui.pointer({ type: 'move', x: px, y: py, in: 'para-3' } as never)
+  await move(x, 0)
+  expect(await tip()).toBe(true)
+  await move(x, 6) // below the paragraph's one line: a move the engine reports while the region holds the pointer
+  expect(await tip()).toBe(false)
+  await move(x, 0)
+  expect(await tip()).toBe(true)
+  await ui.pointer({ type: 'down', x, y: 0, button: 'right', in: 'para-3' } as never)
+  await ui.pointer({ type: 'up', x, y: 0, button: 'right', in: 'para-3' } as never)
+  expect(await tip()).toBe(false)
+  await move(x, 0)
+  expect(await tip()).toBe(true)
+  await ui.resize({ columns: 90, rows: 2, in: 'para-3' })
+  expect(await tip()).toBe(false)
+  await ui.unmount()
+})
+
+test('/thimble-cc-mod debug on turns the mouse log on without the variable', async ($, on) => {
+  const w = world(on)
+  await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
+  const r = (await $.command.run({ command: 'thimble-cc-mod', args: 'debug on' } as never)) as { text?: string }
+  expect(r.text).toContain('the mouse log is on')
+  expect(w.files.get(`${CWD}/.thimble-cc-mod/debug`)).toBe('on\n')
+  const ui = (await $.ui.mount(MESSAGE as never)) as unknown as M
+  await ui.pointer({ type: 'down', x: 3, y: 0, button: 'right', in: 'md-2' } as never)
+  expect(w.files.get(`${CWD}/.thimble-cc-mod/mouse.log`)).toContain('"gesture":"menu"')
+  await ui.unmount()
+  await $.command.run({ command: 'thimble-cc-mod', args: 'debug off' } as never)
+  expect(w.files.get(`${CWD}/.thimble-cc-mod/debug`)).toBe('off\n')
 })
 
 test('THIMBLE_CC_MOD_DEBUG=1 logs each press and release with its button, modifiers, gesture and target', async ($, on) => {
@@ -265,6 +354,9 @@ test('the menu names its target in the room it has, its quote closed', () => {
   expect(targetLabel(sentence, 32)).toBe('"All five of the largest…"')
   expect(targetLabel({ kind: 'sentence', text: 'Short.' }, 32)).toBe('"Short."')
   expect(targetLabel(card, 32).length).toBeLessThanOrEqual(32)
+  // a citation shows by its label, never by a ref that names a card's id
+  expect(targetLabel({ kind: 'sentence', text: 'dse has [[13403|card:abc123#revisions/dse]] revisions.' })).toBe('"dse has 13403 revisions."')
+  expect(targetLabel({ kind: 'citation', ref: '[[card:abc123#revisions/dse]]' })).toBe('card dse')
 })
 
 test('the open menu\'s sentence or citation is shaded in its paragraph', () => {

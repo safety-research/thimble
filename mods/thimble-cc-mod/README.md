@@ -68,13 +68,14 @@ record, a diagram node.
 
 | Gesture | Does |
 | --- | --- |
-| click | opens the place the target cites (a chart value has none: it is selected) |
+| click | opens the place the target cites; a sentence or a table row opens its first citation's place, a card its script (or the card in a panel when it has none); a chart value has none: it is selected |
 | double-click | puts the target's citation into the prompt (a sentence: quoted) |
 | shift+click | opens a side thread about the target (also ctrl+click and middle-click, where the terminal reports them) |
 | right-click | a menu: open, ask about this, verify, open the script, rerun, cite (a letter key each; Esc closes); the target is shaded while it is open |
 
-If a gesture misbehaves, start Claude Code with `THIMBLE_CC_MOD_DEBUG=1` and send `.thimble-cc-mod/mouse.log`: one line per
-press and release the mod received, with its button, modifiers, gesture and target.
+If a gesture misbehaves, run `/thimble-cc-mod debug on` (or start Claude Code with `THIMBLE_CC_MOD_DEBUG=1`) and send
+`.thimble-cc-mod/mouse.log`: one line per press and release the mod received, with its button, modifiers, gesture and
+target. `/thimble-cc-mod debug off` stops it.
 
 Commands: `/thimble-card <n>` (the last answer's n-th card in a panel), `/thimble-cite <n>` (its n-th citation),
 `/thimble-check` (check the last answer again), `/thimble-ask <question>`, `/thimble-band` (a row above the prompt
