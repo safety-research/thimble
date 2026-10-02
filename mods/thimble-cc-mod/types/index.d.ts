@@ -41,11 +41,12 @@ export type ChatVerify = {
   ranAt?: number
 }
 
-/** The citations of main's last reply, for the band. */
+/** The citations of main's last reply, for the band, by the key of each claim (cite.ts claimKey). */
 export type ChatTurn = { id: string; ids: string[] }
 
-/** A card's script run by the mod (a param picked, or "rerun"): `rev` counts finished runs, so drawings reread it. */
-export type ChatRun = { rev: number; busy?: string; error?: string; stdout?: string; stderr?: string; exitCode?: number; at?: number }
+/** A card's script run by the mod (a param picked, or "rerun"): `rev` counts finished runs, so drawings reread it.
+ *  `written`: while a picked choice shows, the param values the replies were written for (JSON), else absent. */
+export type ChatRun = { rev: number; busy?: string; error?: string; stdout?: string; stderr?: string; exitCode?: number; at?: number; written?: string }
 
 /** One question of a side thread and its answer, while running its tool calls and latest text. */
 export type ChatThreadTurn = { q: string; a: string; state: string; tools: number; partial: string }
@@ -53,26 +54,32 @@ export type ChatThreadTurn = { q: string; a: string; state: string; tools: numbe
 /** A side thread: what it is about, the subagent answering it, its exchange, and the file it is saved to. */
 export type ChatThread = { id: string; label: string; ref: string; context: string; agentId: string; engine: string; turns: ChatThreadTurn[]; file: string }
 
-/** A citation (by its id) or a card (`card-<id>`) a fix round works on: `fixing` while its subagent runs, then `fixed`
+/** A citation (by its claim's key) or a card (`card-<id>`) a fix round works on: `fixing` while its subagent runs, then `fixed`
  *  or `failed` with why. */
 export type ChatFix = { state: string; why?: string }
 
 /** One passage a fix round asks to correct: the reply's text as it stands (a sentence, or a card's embed line), what
- *  is wrong in it, and the citations whose chips follow it. */
-export type ChatFixItem = { old: string; problems: { raw: string; why: string }[]; cites: string[]; card?: string }
+ *  is wrong in it, the citations whose chips follow it, and the keys of their claims. */
+export type ChatFixItem = { old: string; problems: { raw: string; why: string }[]; cites: string[]; keys?: string[]; card?: string }
 
-/** A subagent the mod started: a side thread's, a fix round's or a verification's, with what its end updates. */
-export type ChatAgent = { kind: string; label: string; thread?: string; cite?: string; items?: ChatFixItem[]; reply?: string; endRow?: string }
+/** A text row of main's reply, by its uuid (the `requestId` its drawing gets), as the model wrote it. */
+export type ChatRow = { id: string; text: string }
 
-/** A passage of a reply a fix round corrected: drawn as `new` in place of `old`, unmarked. */
-export type ChatCorrection = { old: string; new: string; at: number }
+/** A subagent the mod started: a side thread's, a fix round's or a verification's, with what its end updates. A fix
+ *  round keeps the turn's rows and its answer's end, so its corrections reach their row and the answer file. */
+export type ChatAgent = { kind: string; label: string; thread?: string; cite?: string; items?: ChatFixItem[]; reply?: string; endRow?: string; rows?: ChatRow[]; end?: ChatEnd }
 
-/** The last text row of an answer, which carries the answer's summary line. */
-export type ChatEnd = { ids: string[]; cards: string[]; file: string }
+/** A passage of a reply a fix round corrected: drawn as `new` in place of `old`, unmarked, in the row it was made for. */
+export type ChatCorrection = { old: string; new: string; at: number; row: string }
+
+/** The last text row of an answer, which carries the answer's summary line: the answer's rows as written, its cards,
+ *  and its file with its heading. */
+export type ChatEnd = { rows: ChatRow[]; cards: string[]; file: string; head: string }
 
 /** What a gesture acts on (hooks/gestures.tsx): `ref` the place it cites (bare, or a whole `[[value|ref]]`), `text` its
- *  shown value or its words, `cardId` the card it is on, `script` that card's script. */
-export type ChatTarget = { kind: 'card' | 'mark' | 'sentence' | 'citation' | 'row' | 'record' | 'node'; ref?: string; text?: string; cardId?: string; script?: string }
+ *  shown value or its words, `cardId` the card it is on, `script` that card's script, `claim` the key of a reply
+ *  citation's claim (its sentence and answer). */
+export type ChatTarget = { kind: 'card' | 'mark' | 'sentence' | 'citation' | 'row' | 'record' | 'node'; ref?: string; text?: string; cardId?: string; script?: string; claim?: string }
 
 declare module 'claude-code' {
   interface PluginState {

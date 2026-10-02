@@ -24,12 +24,12 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, RenderElement, ResolveInput } from 'claude-code'
 
-import type { ChatAgent, ChatCorrection, ChatFixItem, ChatRun, ChatThread, ChatVerdict, ChatVerify } from '../types'
-import { applyCorrections, blockLayout, chipLook, chipSegs, chipState, citeLabel, fixItems, fixPrompt, fixedCard, paraLayout, parseFix, settleFix, streamLink, streamStep, streaming, verifyFailed } from './cite'
-import type { ChipView, Problem, StreamLook, Streaming } from './cite'
+import type { ChatAgent, ChatCorrection, ChatEnd, ChatFixItem, ChatRow, ChatRun, ChatThread, ChatVerdict, ChatVerify } from '../types'
+import { answerFile, applyCorrections, blockClaims, blockLayout, chipLook, chipSegs, chipState, citeLabel, claimsIn, fixItems, fixPrompt, fixedCard, paraLayout, parseFix, plainCites, quoteSpan, settleFix, streamLink, streamStep, streaming, verifyFailed, wrapAround } from './cite'
+import type { ChipView, Claim, Problem, StreamLook, Streaming } from './cite'
 import { cardLayout, cut } from './draw'
-import type { CardData, CardMeta } from './draw'
-import { chipLabel, cid, citations, clip, embeddedCards, forMain, fromMod, needsDrawing, parseReply, scriptResult, sentenceOf, shownMatches, takeawayAfter, threadBody, validateCard, valueIn } from './lib'
+import type { CardData, CardMeta, Line } from './draw'
+import { chipLabel, cid, citations, clip, embeddedCards, forMain, fromMod, inlineRuns, needsDrawing, parseReply, scriptResult, shownMatches, takeawayAfter, threadBody, validateCard, valueIn } from './lib'
 import type { Citation } from './lib'
 import { COLORS, paintLine, paintLines } from './paint'
 import { cardOf, citationOf, citeText, menuItems, placeOf, targetLabel } from './gestures'
@@ -67,11 +67,22 @@ const HOME = '.thimble-cc-mod'
 const CARD_MAX_COLS = 120
 const GUIDE_MARK = '# thimble-cc-mod\n'
 const STATUS_WORDS: Record<string, string> = {
-  ok: 'resolves, and the value is there',
-  differs: 'resolves, but the value is not there',
-  missing: 'does not resolve',
-  unchecked: 'not checked',
+  ok: 'the value is at the place',
+  differs: 'the place resolves, but the value is not there',
+  missing: 'the place does not resolve',
+  unchecked: 'the place resolves; the value is not checked',
   pending: 'not checked yet',
+}
+
+/** What the citation panel's head says of a citation: what its place shows, then what its verification found, so it
+ *  agrees with the link's colour and mark. A citation without a value only resolves or not. */
+function statusWords(c: Citation, status: string, run: ChatVerify | undefined): string {
+  const place = status === 'ok' && c.display === null ? 'the place resolves' : (STATUS_WORDS[status] ?? status)
+  if (!run) return place
+  if (run.state === 'verified') return `${place}, and the verification recomputed it`
+  if (run.state === 'refuted') return `${place}, but the verification recomputed ${run.result}`
+  if (run.state === 'asked' || run.state === 'running') return `${place}; verifying…`
+  return `${place}, but the verification failed`
 }
 
 // ------------------------------------------------------------------------------------------------ module state
@@ -81,7 +92,9 @@ let debug = false
 let root = ''
 let cwd = ''
 const known = new Map<string, Citation>() // every citation seen, by id
-const replyOf = new Map<string, string>() // a citation's id -> the reply text it was seen in
+const claimMap = new Map<string, Claim>() // every claim drawn or checked, by its key
+const quotes = new Map<string, string>() // a record's citation id -> the quoted passage of the example opened
+let lastReply = '' // main's last reply, for /thimble-ask
 const cardReply = new Map<string, string>() // a card's id -> the reply text that embeds it
 const cards = new Map<string, { mtime: number; data: CardData | null; error: string; why: string }>()
 const mouseLog: string[] = []
@@ -154,16 +167,50 @@ async function metaOf($: Dollar, id: string): Promise<CardMeta> {
 const queue = new Map<string, Citation>()
 let flushing = false
 
-function remember(cs: Citation[], text?: string): void {
-  for (const c of cs) {
-    const id = cid(c.raw)
-    known.set(id, c)
-    if (text && !replyOf.has(id)) replyOf.set(id, text)
-  }
+function remember(cs: Citation[]): void {
+  for (const c of cs) known.set(cid(c.raw), c)
 }
 
-/** Check citations with helper/resolve.py, one process for the batch, and keep each verdict in state. */
-async function check($: Dollar, cs: Citation[]): Promise<void> {
+function rememberClaims(cls: Claim[]): void {
+  for (const cl of cls) claimMap.set(cl.key, cl)
+  remember(cls.map(cl => cl.c))
+}
+
+/** The citation a panel or a verification is keyed by: a claim's, or a citation's own (a mark's, a record's). */
+function citeOf(key: string): Citation | undefined {
+  return claimMap.get(key)?.c ?? known.get(key)
+}
+
+const CARD_OF = /^card:([A-Za-z0-9_-]+)/
+
+/** The param values a card shows, as JSON, to compare with the ones its replies were written for. */
+function paramsKey(card: CardData | null | undefined): string {
+  return JSON.stringify(Object.fromEntries((card?.params ?? []).map(p => [p.name, String(p.value)])))
+}
+
+/** While the analyst's pick shows another choice of a card than its replies were written for: which, in words. */
+async function otherChoice($: Dollar, ref: string): Promise<string> {
+  const id = CARD_OF.exec(ref)?.[1]
+  const run = id ? (await $.state.get({ ...RUNS, id })).value : undefined
+  if (!id || !run?.written) return ''
+  const now = (await loadCard($, id))?.params ?? []
+  let was: Record<string, string> = {}
+  try {
+    was = JSON.parse(run.written) as Record<string, string>
+  } catch {
+    return ''
+  }
+  const diff = now.filter(p => p.name in was && String(p.value) !== was[p.name])
+  if (!diff.length) return ''
+  return `written for ${diff.map(p => `${p.name} = ${was[p.name]}`).join(', ')}; the card now shows ${diff.map(p => `${p.name} = ${p.value}`).join(', ')}`
+}
+
+/** Check citations with helper/resolve.py, one process for the batch, and keep each verdict in state. A citation of a
+ *  card that shows another choice than its reply was written for keeps its verdict, unless `force` (a reply written
+ *  now is checked against what the card shows now). */
+async function check($: Dollar, all: Citation[], force = false): Promise<void> {
+  const cs: Citation[] = []
+  for (const c of all) if (force || !c.ref.startsWith('card:') || !(await otherChoice($, c.ref))) cs.push(c)
   if (cs.length === 0) return
   await paths($)
   const items = cs.map(c => ({ id: cid(c.raw), ref: c.ref, display: c.display }))
@@ -215,8 +262,8 @@ async function problemsOf($: Dollar, text: string): Promise<Problem[]> {
     if (f.error) out.push({ card: id, why: f.error })
   }
   const cs = citations(text)
-  remember(cs, text)
-  await check($, cs)
+  remember(cs)
+  await check($, cs, true)
   for (const c of cs) {
     const v = (await $.state.get({ ...VERDICTS, id: cid(c.raw) })).value
     if (v?.status === 'missing') out.push({ cite: c, why: `does not resolve: ${v.why}` })
@@ -254,18 +301,23 @@ async function noteMain($: Dollar, text: string): Promise<void> {
 // ------------------------------------------------------------------------------------------------ fix rounds
 
 function fixKey(it: ChatFixItem): string[] {
-  return it.card ? [`card-${it.card}`] : it.cites.map(cid)
+  return it.card ? [`card-${it.card}`] : (it.keys ?? [])
 }
 
 async function setFix($: Dollar, items: ChatFixItem[], state: string, why?: string): Promise<void> {
   for (const it of items) for (const id of fixKey(it)) await $.state.set({ ...FIXES, id }, why ? { state, why } : { state })
 }
 
-/** A reply's problems go to a forked subagent, out of main's chat; its citations spin until it answers. */
-async function startFix($: Dollar, text: string, endRow: string): Promise<void> {
+/** A reply's problems go to a forked subagent, out of main's chat; its citations spin until it answers. `rows` are the
+ *  turn's text rows, so each passage's citations are known by their claims and its correction by its row. */
+async function startFix($: Dollar, text: string, rows: ChatRow[], endRow: string, end: ChatEnd | undefined): Promise<void> {
   const problems = await problemsOf($, text)
   if (!problems.length) return
   const items = fixItems(text, problems)
+  for (const it of items) {
+    if (it.card) continue
+    it.keys = rows.filter(r => r.text.includes(it.old)).flatMap(r => claimsIn(r.text, r.id).filter(cl => it.cites.includes(cl.c.raw)).map(cl => cl.key))
+  }
   await setFix($, items, 'fixing')
   const prompt = fixPrompt(items)
   const label = fixName(items)
@@ -274,7 +326,7 @@ async function startFix($: Dollar, text: string, endRow: string): Promise<void> 
     await setFix($, items, 'failed', `could not start a subagent: ${r.deny}`)
     return
   }
-  await $.state.set({ ...AGENTS, id: r.agentId }, { kind: 'fix', label, items, reply: text, endRow })
+  await $.state.set({ ...AGENTS, id: r.agentId }, { kind: 'fix', label, items, reply: text, endRow, rows, ...(end ? { end } : {}) })
 }
 
 /** The fix round answered: each corrected sentence that now checks replaces the old one; the others stay red, ✗. */
@@ -282,8 +334,8 @@ async function fixComplete($: Dollar, a: ChatAgent, reason: string, answer: stri
   const items = a.items ?? []
   const got = reason === 'answer' ? parseFix(answer, items.length) : items.map(() => ({ ok: false as const, why: `the fix ended: ${reason}` }))
   const fresh = got.flatMap(g => (g.ok ? citations(g.text) : []))
-  for (const g of got) if (g.ok) remember(citations(g.text), g.text)
-  await check($, fresh)
+  remember(fresh)
+  await check($, fresh, true)
   const verdicts = new Map<string, ChatVerdict | undefined>()
   for (const c of fresh) verdicts.set(c.raw, (await $.state.get({ ...VERDICTS, id: cid(c.raw) })).value)
   const cardErrors = new Map<string, string>()
@@ -297,31 +349,27 @@ async function fixComplete($: Dollar, a: ChatAgent, reason: string, answer: stri
     await setFix($, [items[i]!], st.state, st.why)
   }
   const at = await $.clock.now()
-  const made: ChatCorrection[] = out.corrections.map(c => ({ ...c, at }))
+  // each correction is for the row its passage stands in, and is drawn there only
+  const rows = a.rows ?? []
+  const made: ChatCorrection[] = out.corrections.map(c => ({ ...c, at, row: rows.find(r => r.text.includes(c.old))?.id ?? a.endRow ?? '' }))
   const notes = out.notes
   // a card's script may have changed values the reply cites
-  const reply = applyCorrections(a.reply ?? '', made)
-  const cs = citations(reply)
-  remember(cs, reply)
-  await check($, cs.filter(c => c.ref.startsWith('card:')))
+  const fixedRows = rows.map(r => ({ id: r.id, text: applyCorrections(r.text, made, r.id) }))
+  const cls = fixedRows.flatMap(r => claimsIn(r.text, r.id))
+  rememberClaims(cls)
+  await check($, cls.map(cl => cl.c).filter(c => c.ref.startsWith('card:')), true)
   if (made.length) {
     const all = await update($, correctionsA, list => [...(list ?? []), ...made].slice(-200))
     await paths($)
     await $.fs.write(`${cwd}/${HOME}/corrections.json`, JSON.stringify(all, null, 1)).catch(() => undefined)
-    const end = a.endRow ? (await $.state.get({ ...ENDS, id: a.endRow })).value : undefined
-    if (end && a.endRow) {
-      try {
-        const file = `${cwd}/${end.file}`
-        const saved = applyCorrections(await $.fs.read(file), made)
-        await $.fs.write(file, saved)
-        // the summary counts the answer's citations, the file's text after its heading
-        await $.state.set({ ...ENDS, id: a.endRow }, { ...end, ids: citations(saved.slice(saved.indexOf('\n\n') + 2)).map(c => cid(c.raw)) })
-      } catch {
-        // the answer file keeps the reply as it was
-      }
+    // the answer file is written again from the answer as written and its corrections, whatever state was lost
+    const end = (a.endRow ? (await $.state.get({ ...ENDS, id: a.endRow })).value : undefined) ?? a.end
+    if (end) {
+      await $.fs.write(`${cwd}/${end.file}`, answerFile(end, all)).catch(() => undefined)
+      if (a.endRow) await $.state.set({ ...ENDS, id: a.endRow }, end)
     }
     const turn = await read($, turnA)
-    if (turn && turn.ids.some(id => fixKeysOf(items).has(id))) await $.state.set({ plugin: 'thimble-cc-mod', key: 'turn' }, { ...turn, ids: cs.map(c => cid(c.raw)) })
+    if (turn && turn.ids.some(id => fixKeysOf(items).has(id))) await $.state.set({ plugin: 'thimble-cc-mod', key: 'turn' }, { ...turn, ids: cls.map(cl => cl.key) })
   }
   if (notes.length) await noteMain($, ['thimble-cc-mod checked your last reply, and a subagent worked on its problems; the analyst sees the result in place:', ...notes.map(n => `- ${n}`)].join('\n'))
 }
@@ -335,7 +383,8 @@ async function loadCorrections($: Dollar): Promise<void> {
   await paths($)
   try {
     const list = JSON.parse(await $.fs.read(`${cwd}/${HOME}/corrections.json`)) as ChatCorrection[]
-    if (Array.isArray(list)) await $.state.set(CORRECTIONS, list.filter(c => typeof c?.old === 'string' && typeof c?.new === 'string'))
+    // a correction without the row it was made for cannot be put back in the right answer
+    if (Array.isArray(list)) await $.state.set(CORRECTIONS, list.filter(c => typeof c?.old === 'string' && typeof c?.new === 'string' && typeof c?.row === 'string' && c.row !== ''))
   } catch {
     // no corrections in this folder
   }
@@ -347,7 +396,7 @@ function scriptPath(id: string): string {
   return `${HOME}/verify/v-${id}.py`
 }
 
-function verifyPrompt(c: Citation, v: ChatVerdict | undefined, reply: string, script: string): string {
+function verifyPrompt(c: Citation, v: ChatVerdict | undefined, sentence: string, script: string): string {
   const where =
     v?.kind === 'value'
       ? `row "${v.row}" of column "${v.column}" of card:${v.card}`
@@ -356,21 +405,21 @@ function verifyPrompt(c: Citation, v: ChatVerdict | undefined, reply: string, sc
         : v?.file
           ? `${v.file}${v.start ? ` line ${v.start}` : ''}`
           : c.ref
-  const sentence = sentenceOf(reply, c.raw) || c.raw
   return [
-    `thimble-cc-mod: the analyst asks for a verification script of ${c.raw} (${where}), from the sentence "${clip(sentence, 300)}"`,
+    `thimble-cc-mod: the analyst asks for a verification script of ${c.raw} (${where}), from the sentence "${clip(sentence || c.raw, 300)}". Recompute what that sentence claims.`,
     `Write it at ${script}, following "Verification scripts" in thimble-cc-mod's guidance, run it once, and reply in one sentence with what it recomputed.`,
   ].join('\n')
 }
 
-/** A forked subagent writes the citation's verification script, out of main's chat; its end runs the script. */
+/** A forked subagent writes the verification script of a claim (`id`: its key; a mark's or a record's citation id), out
+ *  of main's chat; its end runs the script. */
 async function askVerify($: Dollar, id: string): Promise<void> {
-  const c = known.get(id)
+  const c = citeOf(id)
   if (!c) return
-  const v = (await $.state.get({ ...VERDICTS, id })).value
+  const v = (await $.state.get({ ...VERDICTS, id: cid(c.raw) })).value
   const script = scriptPath(id)
   await $.state.set({ ...VERIFY, id }, { id, state: 'asked', script, expected: c.display })
-  const prompt = verifyPrompt(c, v, replyOf.get(id) ?? '', script)
+  const prompt = verifyPrompt(c, v, claimMap.get(id)?.sentence ?? '', script)
   const label = verifyName(chipLabel(c))
   const r = await spawnSub($, prompt, label, withGuide(await ensureGuide($), prompt))
   if ('deny' in r) {
@@ -394,7 +443,7 @@ async function verifyComplete($: Dollar, a: ChatAgent, answer: string): Promise<
 async function runVerify($: Dollar, id: string): Promise<void> {
   await paths($)
   const prev = (await $.state.get({ ...VERIFY, id })).value
-  const c = known.get(id)
+  const c = citeOf(id)
   const script = prev?.script ?? scriptPath(id)
   const expected = prev?.expected ?? c?.display ?? null
   let source = ''
@@ -422,7 +471,8 @@ async function runVerify($: Dollar, id: string): Promise<void> {
       state: r.exitCode !== 0 || result === null ? 'error' : ok ? 'verified' : 'refuted',
     })
     if (r.exitCode === 0 && result !== null && c) {
-      await noteMain($, `thimble-cc-mod: the verification script ${script} recomputed ${result} for ${c.raw}${expected === null ? '' : ok ? ', which matches' : `, not ${expected}`}.`)
+      const sentence = claimMap.get(id)?.sentence
+      await noteMain($, `thimble-cc-mod: the verification script ${script} recomputed ${result} for ${c.raw}${sentence ? ` in "${clip(sentence, 200)}"` : ''}${expected === null ? '' : ok ? ', which matches' : `, not ${expected}`}.`)
     }
   } catch (err) {
     await $.state.set({ ...VERIFY, id }, { id, state: 'error', script, expected, source: source.slice(0, 9000), stderr: String(err).slice(0, 500) })
@@ -474,7 +524,10 @@ async function rerunCard($: Dollar, id: string, change?: { name: string; value: 
   const values: Record<string, string | number> = {}
   for (const p of card.params ?? []) values[p.name] = p.value
   if (change) values[change.name] = change.value
-  await $.state.set({ ...RUNS, id }, { ...prev, busy: change ? `running with ${change.name} = ${change.value}…` : 'running…', error: undefined })
+  // a choice changes what the card shows, not what its replies claimed: they keep the choice they were written for
+  const written = prev.written ?? (change ? paramsKey(card) : undefined)
+  const keep = written ? { written } : {}
+  await $.state.set({ ...RUNS, id }, { ...prev, ...keep, busy: change ? `running with ${change.name} = ${change.value}…` : 'running…', error: undefined })
   try {
     const r = await $.process.run(['python3', script], {
       cwd,
@@ -483,13 +536,37 @@ async function rerunCard($: Dollar, id: string, change?: { name: string; value: 
     })
     const f = await cardFile($, id)
     const error = r.exitCode !== 0 ? `the script exited with ${r.exitCode}: ${r.stderr.trim().split('\n').at(-1) ?? ''}` : f.error
-    await $.state.set({ ...RUNS, id }, { rev: prev.rev + 1, error: error || undefined, stdout: r.stdout.slice(-3000), stderr: r.stderr.slice(-2000), exitCode: r.exitCode, at: await $.clock.now() })
+    // back at the choice the replies were written for, the card is theirs again
+    const still = written && paramsKey(f.data) !== written ? { written } : {}
+    await $.state.set({ ...RUNS, id }, { rev: prev.rev + 1, ...still, error: error || undefined, stdout: r.stdout.slice(-3000), stderr: r.stderr.slice(-2000), exitCode: r.exitCode, at: await $.clock.now() })
   } catch (err) {
-    await $.state.set({ ...RUNS, id }, { rev: prev.rev + 1, error: `could not run ${script}: ${String(err).slice(0, 100)}` })
+    await $.state.set({ ...RUNS, id }, { rev: prev.rev + 1, ...keep, error: `could not run ${script}: ${String(err).slice(0, 100)}` })
   }
-  // the citations of this card are checked again: the reply's numbers may no longer be on it
-  const mine = [...known.values()].filter(c => c.ref.startsWith(`card:${id}`))
+  // the citations of this card are checked again (the script may have changed its values), but not while the card
+  // shows another choice than they were written for (check keeps their verdicts then)
+  const mine = [...known.values()].filter(c => c.ref.startsWith(`card:${id}#`) || c.ref === `card:${id}`)
   if (mine.length) await check($, mine)
+}
+
+/** What a card's script printed, without the card helper's lines for main (where the card went, how to embed and cite
+ *  it): the analyst reads the script's own output. */
+function scriptOutput(stdout: string): string {
+  const out: string[] = []
+  let listing = false
+  for (const line of stdout.split('\n')) {
+    if (/^thimble-cc-mod(?: card |:)|^controls on the card: |^embed it on a line of its own: /.test(line)) {
+      listing = false
+      continue
+    }
+    if (/^cite its (?:values|records) as:$/.test(line)) {
+      listing = true
+      continue
+    }
+    if (listing && /^ {2}(?:\[\[|\.\.\. \d+ more)/.test(line)) continue
+    listing = false
+    out.push(line)
+  }
+  return out.join('\n')
 }
 
 // ------------------------------------------------------------------------------------------------ side threads
@@ -572,9 +649,9 @@ async function threadComplete($: Dollar, cwd: string, agentId: string, reason: s
   const done = lastTurn(t, { a: text, state: reason === 'answer' ? 'done' : 'error' })
   await setThread($, done)
   await saveThread($, cwd, done)
-  // the ring moves from the question field to "offer to main", so its hotkey (m) works; a click or Tab reaches the field
-  if (reason === 'answer' && forMain(text)) void $.ui.focus({ requestId: THREAD_PANE, key: 'main' }).catch(() => undefined)
-  $.ui.toast(`the side thread on ${clip(t.label, 40)} answered`)
+  // the ring stays on the question field, so a follow-up typed next goes to this thread (with the ring on a button,
+  // typing goes to main's prompt); Tab or a click reaches "offer to main"
+  $.ui.toast(`the side thread on ${clip(plainCites(t.label), 40)} answered`)
   return text
 }
 
@@ -589,34 +666,57 @@ function chipDecoration(raw: string, start = 0): { start: number; end: number; u
 function fixNote(status: string | undefined, fix: { state: string; why?: string } | undefined): string {
   const st = chipState(status, fix?.state)
   if (st === 'fixing') return 'being fixed…'
-  if (st === 'failed') return `the fix failed: ${fix?.why ?? 'no reason given'}`
+  if (st === 'failed') return `the fix failed: ${plainWhy(fix?.why ?? 'no reason given')}`
   return ''
 }
 
-/** A ref as the analyst reads it: a card's place by the card's question, never its id; any other place as written. */
-function placeName(ref: string): string {
-  const m = /^card:([A-Za-z0-9_-]+)(?:#(.*))?$/.exec(ref)
-  if (!m) return ref
-  const q = cards.get(m[1]!)?.data?.question
-  const name = q ? `card "${clip(q, 40)}"` : 'a card'
-  return m[2] ? `${name} · ${m[2]}` : name
+/** A card by its question, never its id. */
+function cardName(id: string): string {
+  const q = cards.get(id)?.data?.question
+  return q ? `card "${clip(q, 40)}"` : 'the card'
 }
 
-async function chipView($: Dollar, c: Citation): Promise<{ view: ChipView; id: string }> {
-  const id = cid(c.raw)
-  const v = (await $.state.get({ ...VERDICTS, id })).value
-  const run = (await $.state.get({ ...VERIFY, id })).value
-  const fix = (await $.state.get({ ...FIXES, id })).value
+/** A ref as the analyst reads it: a card's place by the card's question and a command's output by its line, never an
+ *  id; any other place as written. */
+function placeName(ref: string): string {
+  const m = /^card:([A-Za-z0-9_-]+)(?:#(.*))?$/.exec(ref)
+  if (m) return m[2] ? `${cardName(m[1]!)} · ${m[2]}` : cardName(m[1]!)
+  const call = /^call:[A-Za-z0-9_-]+(?:#L(\d+)(?:-L?(\d+))?)?$/.exec(ref)
+  if (call) return `a command's output${call[1] ? ` · line ${call[1]}${call[2] ? `-${call[2]}` : ''}` : ''}`
+  return ref
+}
+
+/** A reason as the analyst reads it: citations as their shown words, a card by its question, a command's output
+ *  without its id. */
+function plainWhy(why: string): string {
+  return plainCites(why)
+    .replace(/\bcard[: ]([A-Za-z0-9_-]+)/g, (m, id: string) => (cards.has(id) || /^[0-9a-f]{6}$/.test(id) ? cardName(id) : m))
+    .replace(/\bcall[: ](?=[a-z]*\d)[0-9a-z]{3,8}\b/g, 'the command')
+    .replace(new RegExp(`${HOME.replace('.', '\\.')}/cards/[A-Za-z0-9_-]+\\.json`, 'g'), 'its card file')
+}
+
+async function chipView($: Dollar, cl: Claim): Promise<ChipView> {
+  const c = cl.c
+  const v = (await $.state.get({ ...VERDICTS, id: cid(c.raw) })).value
+  const run = (await $.state.get({ ...VERIFY, id: cl.key })).value
+  const fix = (await $.state.get({ ...FIXES, id: cl.key })).value
   const look = chipLook(v?.status, fix?.state, run?.state)
-  const tip = [placeName(c.ref), look.state === 'link' && v?.status !== 'ok' ? '' : v?.why, fixNote(v?.status, fix), verifyWords(run)].filter(Boolean).join(' · ')
-  return { id, view: { label: citeLabel(c), ...look, tip } }
+  const why = look.state === 'link' && v?.status !== 'ok' ? '' : plainWhy(v?.why ?? '')
+  const tip = [placeName(c.ref), why, await otherChoice($, c.ref), fixNote(v?.status, fix), verifyWords(run)].filter(Boolean).join(' · ')
+  return { label: citeLabel(c), ...look, tip }
+}
+
+/** A line of text as segments, each citation as a link (its shown words, underlined), the rest styled `base`. */
+function linkSegs(text: string, base: Omit<Line[number], 's'>): Line {
+  return inlineRuns(text.replace(/\s+/g, ' ')).map(r => (r.cite ? { s: citeLabel(r.cite), fg: COLORS.link, u: true } : { ...base, s: r.text }))
 }
 
 // ------------------------------------------------------------------------------------------------ drawing a reply
 
 /** A reply's blocks as thimble-cc-mod draws them: Markdown as the engine would, cards as panels, paragraphs that hold
- *  citations as chips. Interactive (Clients) on the terminal and desktop, static elsewhere. */
-async function drawReply($: Dollar, e: ResolveInput, text: string, width: number, prefix = ''): Promise<RenderElement[]> {
+ *  citations as chips. Interactive (Clients) on the terminal and desktop, static elsewhere. `answer` names the answer
+ *  (a row's uuid, a side thread's turn): each citation is checked as the claim of its sentence in it. */
+async function drawReply($: Dollar, e: ResolveInput, text: string, width: number, answer: string, prefix = ''): Promise<RenderElement[]> {
   const { Box, Text, Markdown } = $.ui.resolve(e)
   const live = e.surface === 'terminal' || e.surface === 'desktop'
   const cols = Math.max(30, width)
@@ -667,12 +767,12 @@ async function drawReply($: Dollar, e: ResolveInput, text: string, width: number
     const chips: ChipView[] = []
     const ids: string[] = []
     const raws: string[] = []
-    for (const r of block.runs) {
-      if (!r.cite) continue
-      const { view, id } = await chipView($, r.cite)
-      chips.push(view)
-      ids.push(id)
-      raws.push(r.cite.raw)
+    const cls = blockClaims(block, answer)
+    rememberClaims(cls)
+    for (const cl of cls) {
+      chips.push(await chipView($, cl))
+      ids.push(cl.key)
+      raws.push(cl.c.raw)
     }
     if (live) {
       const { Client } = $.ui.resolve(e as ResolveInput<'AssistantMessage', 'terminal'>)
@@ -697,11 +797,15 @@ async function openPane($: Dollar, args: Parameters<Dollar['ui']['open']>[0]): P
   }
 }
 
-async function openCitation($: Dollar, c: Citation): Promise<void> {
+/** Open the citation panel on a claim (`key`), or on a citation of its own (a mark's, a record's, with the passage the
+ *  example quotes). */
+async function openCitation($: Dollar, c: Citation, key?: string, quote?: string): Promise<void> {
   const id = cid(c.raw)
   remember([c])
+  if (quote) quotes.set(id, quote)
+  else quotes.delete(id)
   if (!(await $.state.get({ ...VERDICTS, id })).value) enqueue($, [c])
-  await $.state.set({ plugin: 'thimble-cc-mod', key: 'open' }, id)
+  await $.state.set({ plugin: 'thimble-cc-mod', key: 'open' }, key && claimMap.has(key) ? key : id)
   await openPane($, { id: CITE_PANE, title: 'Citation', focus: true, closeOnEscape: true, columns: 96, rows: 22 })
 }
 
@@ -710,6 +814,25 @@ async function openCardPane($: Dollar, id: string, mode: string): Promise<void> 
   await $.state.set({ plugin: 'thimble-cc-mod', key: 'paneCard' }, id)
   await $.state.set({ plugin: 'thimble-cc-mod', key: 'paneMode' }, mode)
   await openPane($, { id: CARD_PANE, title: clip(card?.question ?? 'Card', 60), focus: true, closeOnEscape: true, columns: 100 })
+}
+
+/** A cited line wrapped in at most `rows` rows around its highlight (the shown value, or the passage the example
+ *  quotes), the gutter numbering its first row. */
+function wrappedRows(els: { Text: (p: object) => RenderElement }, w: { n: number; text: string; spans?: number[][] }, quote: string, gutter: number, cols: number, rows: number): RenderElement[] {
+  const { Text } = els
+  const room = Math.max(10, cols - gutter - 3)
+  const text = w.text.replace(/\t/g, '  ')
+  const first = w.spans?.[0]
+  const span: [number, number] | null = quote ? quoteSpan(text, quote) : first ? [first[0]!, first[1]!] : null
+  return wrapAround(text, span, room, rows).map((r, i) =>
+    Text({
+      children: [
+        Text({ color: COLORS.accent, children: `${i === 0 ? String(w.n).padStart(gutter) : ' '.repeat(gutter)} ${i === 0 ? '▶' : '│'} ` }),
+        Text({ children: r.hi ? r.text.slice(0, r.hi[0]) : r.text || ' ' }),
+        ...(r.hi ? [Text({ backgroundColor: COLORS.highlight, bold: true, children: r.text.slice(r.hi[0], r.hi[1]) }), Text({ children: r.text.slice(r.hi[1]) })] : []),
+      ],
+    }),
+  )
 }
 
 function lineRow(els: { Text: (p: object) => RenderElement }, w: { n: number; text: string; hit: boolean; spans?: number[][] }, gutter: number, cols: number): RenderElement {
@@ -740,16 +863,17 @@ function lineRow(els: { Text: (p: object) => RenderElement }, w: { n: number; te
   })
 }
 
-/** What a side thread about a citation is told: the sentence, the ref and what the place shows. */
-async function citationContext($: Dollar, id: string): Promise<{ label: string; context: string; ref: string }> {
-  const c = known.get(id)
-  const v = (await $.state.get({ ...VERDICTS, id })).value
-  const sentence = c ? sentenceOf(replyOf.get(id) ?? '', c.raw) : ''
+/** What a side thread about a citation (a claim's key, or a citation's id) is told: the sentence, the ref and what the
+ *  place shows. */
+async function citationContext($: Dollar, key: string): Promise<{ label: string; context: string; ref: string }> {
+  const c = citeOf(key)
+  const v = c ? (await $.state.get({ ...VERDICTS, id: cid(c.raw) })).value : undefined
+  const sentence = claimMap.get(key)?.sentence ?? ''
   const shows = v?.window?.filter(w => w.hit).map(w => w.text).join('\n') ?? v?.value ?? ''
   return {
     ref: c?.raw ?? '',
     label: c ? `the citation ${c.raw}` : 'a citation',
-    context: [sentence && `The sentence: "${clip(sentence, 600)}"`, v && `The citation ${STATUS_WORDS[v.status] ?? v.status} (${v.why}).`, shows && `The cited place shows: ${clip(shows, 1500)}`]
+    context: [sentence && `The sentence: "${clip(sentence, 600)}"`, v && `Checked: ${STATUS_WORDS[v.status] ?? v.status} (${v.why}).`, shows && `The cited place shows: ${clip(shows, 1500)}`]
       .filter(Boolean)
       .join('\n'),
   }
@@ -796,8 +920,15 @@ async function onGesture($: Dollar, g: Gesture, t: Target): Promise<void> {
   else if (g === 'thread') await act($, 'thread', t)
   else if (g === 'primary') {
     const c = placeOf(t)
-    if (c) await openCitation($, c)
+    if (c) await openCitation($, c, t.claim, await quoteOf($, t))
   }
+}
+
+/** The passage an example card quotes from the record a target names. */
+async function quoteOf($: Dollar, t: Target): Promise<string | undefined> {
+  if (t.kind !== 'record' || !t.cardId) return undefined
+  const card = await loadCard($, t.cardId)
+  return card?.examples?.find(x => x.ref === t.ref)?.quote || undefined
 }
 
 let menuWatch: { cancel: () => void } | null = null
@@ -833,7 +964,7 @@ async function aboutTarget($: Dollar, t: Target): Promise<{ label: string; conte
   if (t.kind === 'card' && card) return cardContext($, card)
   if (t.kind === 'citation' && c) {
     remember([c])
-    return citationContext($, cid(c.raw))
+    return citationContext($, t.claim && claimMap.has(t.claim) ? t.claim : cid(c.raw))
   }
   if (t.kind === 'sentence' || !c) {
     const s = (t.text ?? '').trim()
@@ -853,7 +984,7 @@ async function act($: Dollar, what: Act, t: Target): Promise<void> {
   switch (what) {
     case 'open': {
       const c = placeOf(t)
-      if (c) await openCitation($, c)
+      if (c) await openCitation($, c, t.claim, await quoteOf($, t))
       return
     }
     case 'cite': {
@@ -875,9 +1006,10 @@ async function act($: Dollar, what: Act, t: Target): Promise<void> {
       const id = cid(c.raw)
       remember([c])
       if (!(await $.state.get({ ...VERDICTS, id })).value) enqueue($, [c])
-      await askVerify($, id)
+      // a reply's citation is verified as the claim of its sentence in its answer, never as another answer's
+      await askVerify($, t.claim && claimMap.has(t.claim) ? t.claim : id)
       // a mark has no chip of its own to show the outcome: the citation panel does
-      if (t.kind !== 'citation') await openCitation($, c)
+      if (t.kind !== 'citation') await openCitation($, c, undefined, await quoteOf($, t))
       return
     }
     case 'script':
@@ -913,20 +1045,19 @@ function streamLook(questions: Map<string, string>): StreamLook {
 }
 
 /** The text rows of a turn in main, split at each tool call: the last part holds the answer. */
-type Part = { texts: string[]; rows: string[] }
+type Part = { rows: ChatRow[] }
 
 /** The part of a turn that is its answer: the last one that cites or embeds a card, else the last one. Earlier parts
  *  are what main wrote while it worked ("Reading the files…"). */
 function answerPart(parts: Part[]): Part | undefined {
-  const full = parts.filter(p => p.texts.some(t => t.trim()))
-  return [...full].reverse().find(p => needsDrawing(p.texts.join('\n\n'))) ?? full.at(-1)
+  const full = parts.filter(p => p.rows.some(r => r.text.trim()))
+  return [...full].reverse().find(p => needsDrawing(p.rows.map(r => r.text).join('\n\n'))) ?? full.at(-1)
 }
 
 // ------------------------------------------------------------------------------------------------ register
 
 export const register: Register = on => {
-  let turnText: string[] = []
-  let turnParts: Part[] = [{ texts: [], rows: [] }] // this turn's text rows in main (their text and uuids), by part
+  let turnParts: Part[] = [{ rows: [] }] // this turn's text rows in main (their uuids and text), by part
   let turnPrompt = ''
 
   on('session.start', async ($, e, next) => {
@@ -952,12 +1083,14 @@ export const register: Register = on => {
         if (r.role === 'assistant' && r.text.trim()) last.unshift(r.text)
       }
       const text = last.join('\n\n')
+      lastReply = text
       if (embeddedCards(text).length) lastCards = embeddedCards(text)
-      const cs = citations(text)
-      if (cs.length) {
-        remember(cs, text)
-        await $.state.set({ plugin: 'thimble-cc-mod', key: 'turn' }, { id: 'resumed', ids: cs.map(c => cid(c.raw)) })
-        enqueue($, cs)
+      // the rows' uuids are not listed: the band's claims are the resumed answer's own
+      const cls = claimsIn(text, 'resumed')
+      if (cls.length) {
+        rememberClaims(cls)
+        await $.state.set({ plugin: 'thimble-cc-mod', key: 'turn' }, { id: 'resumed', ids: cls.map(cl => cl.key) })
+        enqueue($, cls.map(cl => cl.c))
       }
     } catch {
       // nothing to resume
@@ -1012,8 +1145,7 @@ export const register: Register = on => {
   // ---------------------------------------------------------------------------------------------- turns
 
   on('turn.start', async ($, e, next) => {
-    turnText = []
-    turnParts = [{ texts: [], rows: [] }]
+    turnParts = [{ rows: [] }]
     turnPrompt = e.text
     return next(e)
   })
@@ -1060,12 +1192,9 @@ export const register: Register = on => {
       const shown = msg.content as { type?: string; text?: string }[]
       const blocks = shown.map(b => (b.type === 'text' && typeof b.text === 'string' && asWritten.has(b.text) ? { ...b, text: asWritten.get(b.text)! } : b))
       if (blocks.some((b, i) => b !== shown[i])) msg = { ...msg, content: blocks as typeof msg.content }
-      const part = turnParts.at(-1)!
       const texts = blocks.flatMap(b => (b.type === 'text' && typeof b.text === 'string' && b.text.trim() ? [b.text] : []))
-      turnText.push(...texts)
-      part.texts.push(...texts)
-      if (texts.length) part.rows.push(e.uuid)
-      if (blocks.some(b => b.type === 'tool_use')) turnParts.push({ texts: [], rows: [] })
+      if (texts.length) turnParts.at(-1)!.rows.push({ id: e.uuid, text: texts.join('\n\n') })
+      if (blocks.some(b => b.type === 'tool_use')) turnParts.push({ rows: [] })
     }
     const stored = await next(msg === e.message ? e : { ...e, message: msg })
     if (e.agentId !== undefined) await threadAppend($, e.agentId, e.door, e.message.content)
@@ -1088,38 +1217,43 @@ export const register: Register = on => {
       const answer = await threadComplete($, cwd, e.agentId, e.reason, e.answer)
       if (answer) {
         const cs = citations(answer)
-        remember(cs, answer)
+        remember(cs)
         enqueue($, cs)
       }
       return done
     }
-    const text = turnText.length ? turnText.join('\n\n') : e.answer
+    const rows = turnParts.flatMap(p => p.rows)
+    const text = rows.length ? rows.map(r => r.text).join('\n\n') : e.answer
+    lastReply = text
+    const cls = rows.flatMap(r => claimsIn(r.text, r.id))
+    rememberClaims(cls)
     const cs = citations(text)
-    remember(cs, text)
+    remember(cs)
     if (cs.length) {
-      await check($, cs) // again, at the turn's end: a card may have changed since the block was drawn
-      await $.state.set({ plugin: 'thimble-cc-mod', key: 'turn' }, { id: e.turnId, ids: cs.map(c => cid(c.raw)) })
+      await check($, cs, true) // again, at the turn's end: a card may have changed since the block was drawn
+      await $.state.set({ plugin: 'thimble-cc-mod', key: 'turn' }, { id: e.turnId, ids: cls.map(cl => cl.key) })
     }
     // the answer (not what main wrote while it worked) as a file the analyst owns, and a summary line under its last row
     const part = answerPart(turnParts)
-    const answer = part ? part.texts.join('\n\n') : e.answer
+    const answer = part ? part.rows.map(r => r.text).join('\n\n') : e.answer
     const answerCites = citations(answer)
     const cardsOf = embeddedCards(answer)
     if (embeddedCards(text).length) lastCards = embeddedCards(text)
-    const lastRow = part?.rows.at(-1) ?? ''
+    const lastRow = part?.rows.at(-1)?.id ?? ''
+    let end: ChatEnd | undefined
     if (answer.trim() && (answerCites.length || cardsOf.length) && !fromMod(turnPrompt)) {
       await paths($)
       const stamp = new Date(await $.clock.now()).toISOString().replace(/[-:]/g, '').replace(/\..*$/, '').replace('T', '-')
-      const file = `${HOME}/answers/${stamp}.md`
+      end = { rows: part?.rows.length ? part.rows : [{ id: lastRow, text: answer }], cards: cardsOf, file: `${HOME}/answers/${stamp}.md`, head: turnPrompt.split('\n')[0] ?? '' }
       try {
-        await $.fs.write(`${cwd}/${file}`, `# ${turnPrompt.split('\n')[0] ?? ''}\n\n${answer}\n`)
+        await $.fs.write(`${cwd}/${end.file}`, `# ${end.head}\n\n${answer}\n`)
       } catch {
         // the answer stays in the transcript
       }
-      if (lastRow) await $.state.set({ ...ENDS, id: lastRow }, { ids: answerCites.map(c => cid(c.raw)), cards: cardsOf, file })
+      if (lastRow) await $.state.set({ ...ENDS, id: lastRow }, end)
     }
     // a card that cannot be drawn or a citation that fails goes to a fix round, out of main's chat
-    if (text.trim() && !fromMod(turnPrompt)) await startFix($, text, lastRow)
+    if (text.trim() && !fromMod(turnPrompt)) await startFix($, text, rows, lastRow, end)
     return done
   })
 
@@ -1128,21 +1262,26 @@ export const register: Register = on => {
   on('ui.render', { component: 'AssistantMessage' }, async ($, e, next) => {
     const end = (await $.state.get({ ...ENDS, id: e.requestId })).value
     if (!needsDrawing(e.props.text) && !end) return next(e)
-    const text = applyCorrections(e.props.text, (await read($, correctionsA)) ?? [])
+    // only the corrections made for this row: the same sentence in another answer is that answer's own
+    const corrections = (await read($, correctionsA)) ?? []
+    const text = applyCorrections(e.props.text, corrections, e.requestId)
     const cs = citations(text)
-    remember(cs, text)
+    remember(cs)
     const unchecked: Citation[] = []
     for (const c of cs) if (!(await $.state.get({ ...VERDICTS, id: cid(c.raw) })).value) unchecked.push(c)
     if (unchecked.length) enqueue($, unchecked)
     const { Box, Text } = $.ui.resolve(e)
-    const out = await drawReply($, e, text, (e.viewport?.columns ?? 100) - 4)
+    const out = await drawReply($, e, text, (e.viewport?.columns ?? 100) - 4, e.requestId)
     if (end) {
-      // one dim line under the answer: its citations and cards, where it is saved, and the problems left
+      // one dim line under the answer: its citations and cards, where it is saved, and the problems left, counted from
+      // the answer's rows as drawn now (their corrections in place)
       const left = { problem: 0, fixing: 0, failed: 0, link: 0 }
-      for (const id of end.ids) {
-        const v = (await $.state.get({ ...VERDICTS, id })).value
-        const f = (await $.state.get({ ...FIXES, id })).value
-        const r = (await $.state.get({ ...VERIFY, id })).value
+      const cls = new Map<string, Claim>()
+      for (const r of end.rows) for (const cl of claimsIn(applyCorrections(r.text, corrections, r.id), r.id)) cls.set(cl.key, cl)
+      for (const cl of cls.values()) {
+        const v = (await $.state.get({ ...VERDICTS, id: cid(cl.c.raw) })).value
+        const f = (await $.state.get({ ...FIXES, id: cl.key })).value
+        const r = (await $.state.get({ ...VERIFY, id: cl.key })).value
         left[chipState(v?.status, f?.state, r?.state)]++
       }
       const red = left.problem + left.failed
@@ -1150,7 +1289,7 @@ export const register: Register = on => {
       out.push(
         <Box marginTop={1}>
           <Text wrap="truncate-end">
-            <Text dimColor>{[plural(end.ids.length, 'citation'), ...(end.cards.length ? [plural(end.cards.length, 'card')] : []), `saved as ${end.file}`].join(' · ')}</Text>
+            <Text dimColor>{[plural(cls.size, 'citation'), ...(end.cards.length ? [plural(end.cards.length, 'card')] : []), `saved as ${end.file}`].join(' · ')}</Text>
             {left.fixing ? <Text dimColor>{` · fixing ${left.fixing}…`}</Text> : null}
             {red ? <Text color={COLORS.problem}>{` · ${plural(red, 'problem')}`}</Text> : null}
           </Text>
@@ -1218,21 +1357,29 @@ export const register: Register = on => {
 
   on('ui.render', { component: 'Pane', requestId: CITE_PANE }, async ($, e) => {
     const { Box, Text, Button, Code } = $.ui.resolve(e)
+    // `id` keys the claim's fix and verification (a citation's own id for a mark or a record); the verdict is the
+    // citation's, whatever sentence holds it
     const id = await read($, openA)
-    const v = id ? (await $.state.get({ ...VERDICTS, id })).value : undefined
-    // after a reload the module's map is empty; the verdict in state still holds the citation
-    const c = id ? (known.get(id) ?? (v ? { raw: v.raw, ref: v.ref, display: v.display } : undefined)) : undefined
+    const own = id ? (await $.state.get({ ...VERDICTS, id })).value : undefined
+    // after a reload the module's maps are empty; the verdict in state still holds a citation opened by its own id
+    const c = id ? (citeOf(id) ?? (own ? { raw: own.raw, ref: own.ref, display: own.display } : undefined)) : undefined
     const cols = Math.max(30, e.props.bodyColumns)
     if (!c) return <Text dimColor>No citation open.</Text>
+    const v = own ?? (await $.state.get({ ...VERDICTS, id: cid(c.raw) })).value
     const run = (await $.state.get({ ...VERIFY, id })).value
     const fix = (await $.state.get({ ...FIXES, id })).value
     const status = v?.status ?? 'pending'
     const look = chipLook(status, fix?.state, run?.state)
+    const quote = quotes.get(cid(c.raw)) ?? ''
     const body: RenderElement[] = []
-    const head = paraLayout({ prefix: '', heading: 0, quote: false, runs: [{ text: citeLabel(c), cite: c }, { text: ` · ${STATUS_WORDS[status] ?? status}` }] }, [{ label: citeLabel(c), ...look, tip: '' }], cols, -1)
+    const head = paraLayout({ prefix: '', heading: 0, quote: false, runs: [{ text: citeLabel(c), cite: c }, { text: ` · ${statusWords(c, status, run)}` }] }, [{ label: citeLabel(c), ...look, tip: '' }], cols, -1)
     body.push(paintLines(Box, Text, head.lines))
-    body.push(<Text dimColor wrap="truncate-end">{clip(c.ref.startsWith('card:') ? placeName(c.ref) : c.raw, cols)}</Text>)
-    if (v?.why) body.push(<Text color={status === 'missing' || status === 'differs' ? COLORS.problem : COLORS.dim} wrap="truncate-end">{clip(v.why, cols)}</Text>)
+    const sentence = claimMap.get(id)?.sentence
+    body.push(<Text dimColor wrap="truncate-end">{clip(sentence ? `${placeName(c.ref)} · in "${plainCites(sentence)}"` : placeName(c.ref), cols)}</Text>)
+    const red = status === 'missing' || status === 'differs'
+    if (v?.why && (red || c.display !== null)) body.push(<Text color={red ? COLORS.problem : COLORS.dim} wrap="truncate-end">{clip(plainWhy(v.why), cols)}</Text>)
+    const choice = await otherChoice($, c.ref)
+    if (choice) body.push(<Text dimColor wrap="wrap">{choice}</Text>)
     if (fixNote(status, fix)) body.push(<Text color={COLORS.problem} wrap="wrap">{fixNote(status, fix)}</Text>)
     if (!v) body.push(<Text dimColor>checking…</Text>)
     else if (v.kind === 'value' || v.kind === 'card') {
@@ -1250,10 +1397,19 @@ export const register: Register = on => {
         body.push(<Text dimColor wrap="truncate-end">{card.source?.script ? `made by ${card.source.script}` : 'no script recorded'}</Text>)
       }
     } else if (v.window.length) {
-      const head = v.kind === 'call' ? `output of call:${v.call} · $ ${clip(v.command ?? '', cols - 30)}` : `${v.file}${v.start ? ` · line ${v.start}${v.end && v.end !== v.start ? `-${v.end}` : ''}` : ''}`
+      const head = v.kind === 'call' ? `output of $ ${clip(v.command ?? '', cols - 15)}` : `${v.file}${v.start ? ` · line ${v.start}${v.end && v.end !== v.start ? `-${v.end}` : ''}` : ''}`
       body.push(<Text bold wrap="truncate-end">{head}</Text>)
       const gutter = Math.max(...v.window.map(w => String(w.n).length))
-      body.push(<Box flexDirection="column">{v.window.map(w => lineRow({ Text } as never, w, gutter, cols))}</Box>)
+      // the cited lines wrapped, the value or the quoted passage lit; when they take many rows, less context around
+      const hits = v.window.filter(w => w.hit)
+      const hitRows = Math.max(3, Math.min(8, Math.floor(((e.props.scroll?.bodyRows || 20) - 12) / Math.max(1, hits.length))))
+      const wraps = hits.some(w => w.text.length > cols - gutter - 3)
+      const near = wraps ? 2 : 99
+      const firstHit = v.window.findIndex(w => w.hit)
+      const lastHit = v.window.length - 1 - [...v.window].reverse().findIndex(w => w.hit)
+      const lines = v.window.filter((w, i) => w.hit || (i >= firstHit - near && i <= lastHit + near))
+      body.push(<Box flexDirection="column">{lines.flatMap(w => (w.hit ? wrappedRows({ Text } as never, w, quote, gutter, cols, hitRows) : [lineRow({ Text } as never, w, gutter, cols)]))}</Box>)
+      if (quote && !hits.some(w => quoteSpan(w.text, quote))) body.push(<Text wrap="wrap"><Text dimColor>{'quoted: '}</Text><Text backgroundColor={COLORS.highlight} bold>{clip(quote, 600)}</Text></Text>)
     }
 
     // verification, and a side thread about this citation
@@ -1365,37 +1521,32 @@ export const register: Register = on => {
     if (!t) return <Text dimColor>No side thread.</Text>
     const g = await ensureGuide($)
     const body: RenderElement[] = []
-    body.push(
-      <Text wrap="truncate-end">
-        <Text dimColor>side thread about </Text>
-        <Text bold>{clip(t.label, cols - 20)}</Text>
-      </Text>,
-    )
-    if (t.context) body.push(<Text dimColor wrap="truncate-end">{clip(t.context.split('\n')[0] ?? '', cols)}</Text>)
+    body.push(paintLine(Text, [{ s: 'side thread about ', d: true }, ...linkSegs(t.label, { b: true })]))
+    if (t.context) body.push(paintLine(Text, linkSegs(t.context.split('\n')[0] ?? '', { d: true })))
     body.push(<Text dimColor>{'─'.repeat(Math.min(cols, 80))}</Text>)
     let k = 0
     for (const turn of t.turns) {
       k++
-      body.push(<Text color={COLORS.accent} bold wrap="wrap">{`› ${turn.q}`}</Text>)
+      body.push(<Text color={COLORS.accent} bold wrap="wrap">{`› ${plainCites(turn.q)}`}</Text>)
       if (turn.state === 'running') {
         body.push(<Text dimColor wrap="truncate-end">{`working · ${turn.tools} tool call${turn.tools === 1 ? '' : 's'}${turn.partial ? ` · ${clip(turn.partial, cols - 30)}` : ''}`}</Text>)
       } else if (turn.state === 'error') {
         body.push(<Text color={COLORS.problem} wrap="wrap">{turn.a}</Text>)
       } else {
-        body.push(<Box flexDirection="column">{await drawReply($, e, threadBody(turn.a), cols, `t${k}-`)}</Box>)
+        body.push(<Box flexDirection="column">{await drawReply($, e, threadBody(turn.a), cols, `${t.id}:${k}`, `t${k}-`)}</Box>)
       }
       body.push(<Text> </Text>)
     }
     const last = t.turns.at(-1)
     const answered = t.turns.filter(x => x.state === 'done')
     const line = answered.length ? forMain(answered.at(-1)!.a) : ''
-    if (line) body.push(<Text dimColor wrap="truncate-end">{`for main: ${clip(line, cols - 10)}`}</Text>)
+    if (line) body.push(paintLine(Text, linkSegs(`for main: ${line}`, { d: true })))
     body.push(
       <Input
         key="ask"
         {...(t.turns.length === 0 ? { autoFocus: true as const } : {})}
         label="ask"
-        placeholder={t.turns.length ? 'a follow-up (Enter sends it to this thread)' : `ask about ${clip(t.label, 40)} (Enter)`}
+        placeholder={t.turns.length ? 'a follow-up (Enter sends it to this thread)' : `ask about ${clip(plainCites(t.label), 40)} (Enter)`}
         submitLabel="ask"
         onSubmit={v => void askThread($, t.id, v, g)}
       />,
@@ -1410,7 +1561,7 @@ export const register: Register = on => {
             variant="primary"
             onPress={() => {
               const lead = 'Side thread on '
-              const about = t.ref || clip(t.label, 60)
+              const about = t.ref || clip(plainCites(t.label), 60)
               void $.prompt
                 .fill({ text: `${lead}${about}: ${line} `, mode: 'insert', decorations: t.ref ? [chipDecoration(t.ref, lead.length)] : [] })
                 .then(() => $.ui.toast("the side thread's line is in the prompt"))
@@ -1433,13 +1584,13 @@ export const register: Register = on => {
     const { Box, Text, Button } = $.ui.resolve(e)
     const views: { id: string; c: Citation; view: ChipView }[] = []
     for (const id of turn.ids) {
-      const c = known.get(id)
-      if (c) views.push({ id, c, view: (await chipView($, c)).view })
+      const cl = claimMap.get(id)
+      if (cl) views.push({ id, c: cl.c, view: await chipView($, cl) })
     }
     const bad = views.filter(x => x.view.state !== 'link').length
     const hoverId = await read($, hoverA)
-    const hc = hoverId ? known.get(hoverId) : undefined
-    const hview = hc ? (await chipView($, hc)).view : undefined
+    const hc = hoverId ? claimMap.get(hoverId) : undefined
+    const hview = hc ? await chipView($, hc) : undefined
     // the readout row stays when nothing is hovered, so the band keeps its height and the transcript does not move
     const readout = hview ? paintLine(Text, [...chipSegs(hview, false), { s: `  ${hview.tip}`, d: true }]) : <Text> </Text>
     return (
@@ -1451,7 +1602,7 @@ export const register: Register = on => {
           {bad ? <Text color={COLORS.problem}>{`· ${bad} with a problem`}</Text> : null}
           <Text dimColor>·</Text>
           {views.slice(0, 9).map((x, i) => (
-            <Button key={`c${i}`} label={`${cut(x.view.label, 14)}${x.view.mark}`} hotkey={String(i + 1)} plain onPress={() => void openCitation($, x.c)} />
+            <Button key={`c${i}`} label={`${cut(x.view.label, 14)}${x.view.mark}`} hotkey={String(i + 1)} plain onPress={() => void openCitation($, x.c, x.id)} />
           ))}
           <Button key="hide" label="hide" plain dimColor onPress={() => update($, hiddenA, () => turn.id)} />
         </Box>
@@ -1465,10 +1616,10 @@ export const register: Register = on => {
     const turn = await read($, turnA)
     const n = Number.parseInt(e.args.trim() || '1', 10)
     const id = turn?.ids[n - 1]
-    const c = id ? known.get(id) : undefined
-    if (!c) return { text: `the last reply has ${turn?.ids.length ?? 0} citations` }
-    await openCitation($, c)
-    return { text: `opened ${c.raw}` }
+    const c = id ? citeOf(id) : undefined
+    if (!id || !c) return { text: `the last reply has ${turn?.ids.length ?? 0} citations` }
+    await openCitation($, c, id)
+    return { text: `opened ${citeLabel(c)}` }
   })
 
   on('command.run', { command: 'thimble-band' }, async $ => {
@@ -1480,11 +1631,17 @@ export const register: Register = on => {
 
   on('command.run', { command: 'thimble-ask' }, async ($, e) => {
     const q = e.args.trim()
-    const turn = await read($, turnA)
-    const firstId = turn?.ids[0]
-    const reply = firstId ? (replyOf.get(firstId) ?? '') : ''
+    const reply = lastReply
     const id = await openThread($, { label: 'the last answer', context: reply ? `The last answer in the main conversation:\n${clip(reply, 3000)}` : '' })
     if (q) void askThread($, id, q, await ensureGuide($))
+    // the command's text holds the prompt while it runs, so the pane could not take the keys: once the prompt is
+    // empty, its field takes them, so a follow-up typed next goes to this thread
+    $.clock.after(250, () => {
+      void (async () => {
+        await $.ui.open({ id: THREAD_PANE, title: 'Side thread', focus: true, closeOnEscape: true }).catch(() => undefined)
+        await $.ui.focus({ requestId: THREAD_PANE, key: 'ask' }).catch(() => undefined)
+      })()
+    })
     return { text: `side thread opened${q ? `: ${q}` : ''}` }
   })
 
@@ -1510,7 +1667,7 @@ export const register: Register = on => {
 
   on('command.run', { command: 'thimble-check' }, async $ => {
     const turn = await read($, turnA)
-    const cs = (turn?.ids ?? []).map(id => known.get(id)).filter((c): c is Citation => Boolean(c))
+    const cs = [...new Map((turn?.ids ?? []).map(id => citeOf(id)).filter((c): c is Citation => Boolean(c)).map(c => [c.raw, c])).values()]
     await check($, cs)
     const vs = await Promise.all(cs.map(async c => (await $.state.get({ ...VERDICTS, id: cid(c.raw) })).value))
     const ok = vs.filter(v => v?.status === 'ok').length
@@ -1564,9 +1721,9 @@ export const register: Register = on => {
       body.push(<Text wrap="truncate-end"><Text bold>{card.source.script}</Text><Text dimColor>{`  edit it in your editor, then run it again here${card.source.sha1 ? ` · sha1 ${card.source.sha1} when the card was made` : ''}`}</Text></Text>)
       body.push(<Code source={source.slice(0, 9000)} language="python" startLine={1} wrap="truncate-end" />)
       if (run?.exitCode !== undefined) {
-        body.push(<Text dimColor>{`output of the last run (exit ${run.exitCode})`}</Text>)
-        const tail = `${run.stdout ?? ''}${run.stderr ? `\n${run.stderr}` : ''}`.trim().split('\n').slice(-8)
-        body.push(<Box flexDirection="column">{tail.map(l => <Text wrap="truncate-end">{l || ' '}</Text>)}</Box>)
+        const tail = `${scriptOutput(run.stdout ?? '')}${run.stderr ? `\n${run.stderr}` : ''}`.trim().split('\n').slice(-8)
+        body.push(<Text dimColor>{`output of the last run (exit ${run.exitCode})${tail.join('').trim() ? '' : ': nothing printed'}`}</Text>)
+        if (tail.join('').trim()) body.push(<Box flexDirection="column">{tail.map(l => <Text wrap="truncate-end">{l || ' '}</Text>)}</Box>)
       }
       body.push(cardEl)
     } else {

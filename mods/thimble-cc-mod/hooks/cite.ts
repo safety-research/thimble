@@ -13,7 +13,7 @@
 import type { ChatCorrection, ChatFixItem } from '../types'
 import { cut, lineWidth, width } from './draw'
 import type { Line, Seg } from './draw'
-import { EMBED_RE, chipLabel, citations } from './lib'
+import { EMBED_RE, chipLabel, cid, citations, parseReply } from './lib'
 import type { Citation, Run, TableRuns } from './lib'
 import { COLORS } from './paint'
 
@@ -292,6 +292,89 @@ export function sentenceAt(source: string, at: number): string {
   return source.slice(start, end).trim()
 }
 
+// ---------------------------------------------------------------------------------------- claims
+
+/** A citation where it stands: its sentence (a table's row) in one answer. `key` names the state of what is checked
+ *  about it (its fix, its verification), so the same citation in another sentence or answer is checked on its own. */
+export type Claim = { key: string; c: Citation; sentence: string }
+
+export function claimKey(answer: string, sentence: string, raw: string): string {
+  return cid(`${answer}\n${sentence}\n${raw}`)
+}
+
+/** A rich block's claims, one per citation in the order its chips are numbered. */
+export function blockClaims(block: { runs: Run[]; table?: TableRuns }, answer: string): Claim[] {
+  const out: Claim[] = []
+  const add = (c: Citation, sentence: string) => out.push({ key: claimKey(answer, sentence, c.raw), c, sentence })
+  if (block.table) {
+    for (const row of block.table.rows) {
+      const source = row.map(cell => cell.map(r => (r.cite ? r.cite.raw : r.text)).join('')).join(' | ')
+      for (const cell of row) for (const r of cell) if (r.cite) add(r.cite, source)
+    }
+    return out
+  }
+  let source = ''
+  const at: { c: Citation; at: number }[] = []
+  for (const r of block.runs) {
+    if (r.cite) at.push({ c: r.cite, at: source.length })
+    source += r.cite ? r.cite.raw : r.text
+  }
+  for (const x of at) add(x.c, sentenceAt(source, x.at))
+  return out
+}
+
+/** A reply text's claims in reading order, each once. */
+export function claimsIn(text: string, answer: string): Claim[] {
+  const seen = new Set<string>()
+  const out: Claim[] = []
+  for (const b of parseReply(text)) {
+    if (b.type !== 'rich') continue
+    for (const cl of blockClaims(b, answer)) if (!seen.has(cl.key) && seen.add(cl.key)) out.push(cl)
+  }
+  return out
+}
+
+/** A text with each citation as its shown words, for a line the analyst reads where no link is drawn. */
+export function plainCites(text: string): string {
+  return citations(text).reduce((t, c) => t.replaceAll(c.raw, citeLabel(c)), text)
+}
+
+// ---------------------------------------------------------------------------------------- a cited record
+
+/** Where a quoted passage stands in a record's line as written: as is, JSON-escaped, or its words apart by any
+ *  whitespace or escaped line break. */
+export function quoteSpan(line: string, quote: string): [number, number] | null {
+  const q = quote.trim()
+  if (!q) return null
+  const escaped = (s: string) => JSON.stringify(s).slice(1, -1)
+  const ascii = (s: string) => escaped(s).replace(/[\u0080-￿]/g, ch => `\\u${ch.charCodeAt(0).toString(16).padStart(4, '0')}`)
+  for (const form of [q, escaped(q), ascii(q)]) {
+    const at = line.indexOf(form)
+    if (at >= 0) return [at, at + form.length]
+  }
+  const lit = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const words = q.split(/\s+/).map(w => `(?:${[...new Set([w, escaped(w), ascii(w)])].map(lit).join('|')})`)
+  const m = new RegExp(words.join('(?:\\s|\\\\[nrt])+')).exec(line)
+  return m ? [m.index, m.index + m[0].length] : null
+}
+
+/** A long line wrapped to `room` columns in at most `rows` rows, the rows around `span` when it does not fit; each row
+ *  with the part of `span` it holds. */
+export function wrapAround(text: string, span: [number, number] | null, room: number, rows: number): { text: string; hi: [number, number] | null }[] {
+  const n = Math.max(1, room)
+  const all: { at: number; text: string }[] = []
+  for (let at = 0; at < text.length || all.length === 0; at += n) all.push({ at, text: text.slice(at, at + n) })
+  let first = 0
+  if (all.length > rows && span) first = Math.max(0, Math.min(all.length - rows, Math.floor(span[0] / n) - 1))
+  return all.slice(first, first + rows).map((r, i, shown) => {
+    const lo = span ? Math.max(span[0], r.at) - r.at : 0
+    const hi = span ? Math.min(span[1], r.at + r.text.length) - r.at : 0
+    const more = (i === 0 && first > 0 ? '…' : '') + r.text + (i === shown.length - 1 && first + rows < all.length ? '…' : '')
+    const shift = i === 0 && first > 0 ? 1 : 0
+    return { text: more, hi: span && hi > lo ? [lo + shift, hi + shift] : null }
+  })
+}
+
 /** What a pointer at (x, y) of a layout is over, other than a citation: a table's row, or the sentence of the word
  *  there (the nearest word of the line, between words). */
 export function passageAt(lay: ParaLayout, x: number, y: number): { kind: 'row' | 'sentence'; text: string } | null {
@@ -378,14 +461,20 @@ export function parseFix(answer: string, n: number): FixAnswer[] {
   })
 }
 
-/** A reply's text with each corrected passage in place of the old one, unmarked. */
-export function applyCorrections(text: string, corrections: readonly ChatCorrection[]): string {
+/** A reply row's text with each passage corrected for that row (`row`, its uuid) in place of the old one, unmarked; a
+ *  correction made for another answer never applies, though the same sentence stands there. */
+export function applyCorrections(text: string, corrections: readonly ChatCorrection[], row: string): string {
   let out = text
   for (const c of corrections) {
-    if (!c.old || !out.includes(c.old)) continue
+    if (c.row !== row || !c.old || !out.includes(c.old)) continue
     out = out.replace(c.old, () => c.new)
   }
   return out
+}
+
+/** An answer's file: its heading and its rows, each with the corrections made for it. */
+export function answerFile(end: { rows: { id: string; text: string }[]; head: string }, corrections: readonly ChatCorrection[]): string {
+  return `# ${end.head}\n\n${end.rows.map(r => applyCorrections(r.text, corrections, r.id)).join('\n\n')}\n`
 }
 
 /** A text's words and numbers outside its citations. */

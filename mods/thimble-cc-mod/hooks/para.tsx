@@ -17,6 +17,7 @@ type Props = {
   cols: number
   block: { prefix: string; heading: number; quote: boolean; runs: Run[]; table?: TableRuns }
   chips: ChipView[]
+  /** each citation's claim key (cite.ts claimKey) */
   ids: string[]
   raws: string[]
   menu?: Target | null
@@ -45,7 +46,7 @@ const Para: ClientModule<Props, S> = (props, surface) => {
     }
     const k = lay.spans.find(s => s.line === ev.y && ev.x >= s.x0 && ev.x < s.x1)?.chip ?? -1
     if ((ev.type === 'down' || ev.type === 'up') && ev.button) {
-      const target: Target | null = k >= 0 ? { kind: 'citation', ref: props.raws[k] ?? '', text: props.chips[k]?.label ?? '' } : passageAt(lay, ev.x, ev.y)
+      const target: Target | null = k >= 0 ? { kind: 'citation', ref: props.raws[k] ?? '', text: props.chips[k]?.label ?? '', claim: props.ids[k] ?? '' } : passageAt(lay, ev.x, ev.y)
       if (target) onPointer(target, { button: ev.button, shift: Boolean(ev.shift), ctrl: Boolean(ev.ctrl), alt: Boolean(ev.alt), type: ev.type === 'down' ? 'press' : 'release' }, surface)
     }
     if (k !== cur.hover) {
