@@ -265,7 +265,7 @@ copy_tree() {  # a release install: the release's entries replace the install's;
   fi
   say "copying the release into $dir (kept there if present: backend/.venv, frontend/node_modules, workspaces/, data/, dev/)"
   run mkdir -p "$dir"
-  for entry in plugin extensions backend prompts frontend .claude-plugin scripts README.md INSTALL.md docs LICENSE THIRD_PARTY_NOTICES RELEASE.json; do
+  for entry in plugin mods extensions backend prompts frontend .claude-plugin scripts README.md INSTALL.md docs LICENSE THIRD_PARTY_NOTICES RELEASE.json; do
     [ -e "$src/$entry" ] || continue
     keep=""; case "$entry" in backend) keep=.venv;; frontend) keep=node_modules;; esac
     say "+ replace $dir/$entry${keep:+/* except $keep}"
@@ -1239,6 +1239,7 @@ finish() {  # doctor, then the one next step (and the PATH line the link needs)
     say "  export THIMBLE_HOME=$(printf '%q' "$home")"
   fi
   say "next: run $cmd in a folder of transcripts; it starts Claude Code with thimble and prints the dashboard's URL"
+  say "thimble-cc-mod, a single-agent thimble inside Claude Code, is included: turn it on in a folder with $cmd cc-mod on"
 }
 
 keep_log() {  # the run's output also goes to $home/install.log (the last run only), which `thimble feedback` carries

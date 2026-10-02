@@ -18,6 +18,9 @@
 #                                        each was last used and the sessions open on it (backend/app/runs.py)
 #   thimble purge <id>… [-y] [--dry-run] delete workspaces or archived runs by id, printing what went; never the folder a
 #                                        workspace read or Claude Code's transcripts (backend/app/runs.py)
+#   thimble cc-mod on [--yes] | off | status
+#                                        thimble-cc-mod in this folder, by `claude plugin` at project scope; on turns the
+#                                        thimble plugin off here (backend/app/cli.py cmd_cc_mod)
 #   thimble launch-args [--cwd <p>] [--settings <s>]
 #                                        what a session starts with: the channel entry, the --allowedTools, --effort and
 #                                        --settings values, the tools that end a turn without text, main's --name, then
@@ -53,7 +56,7 @@ plugin="$(cd "$here/.." && pwd -P)"
 
 # the supervisor's subcommands (backend/app/cli.py build_parser) plus the `server` group; `up` is an alias of `ensure`.
 # `uninstall` is the bash function below, so it works with backend/.venv missing or broken.
-SUPERVISOR_COMMANDS=" server up ensure stop restart doctor fix revert update list purge extension launch-args prompt "
+SUPERVISOR_COMMANDS=" server up ensure stop restart doctor fix revert update list purge extension cc-mod launch-args prompt "
 
 # usage: what `thimble help` prints; the header above has the details.
 usage() {
@@ -75,6 +78,9 @@ usage: thimble [claude flags...]          start thimble in this folder: a new Cl
                                           write a problem report to send the developer
        thimble extension add <folder | git URL | name> [--yes] | on <name> | off <name> | list | remove <name>
                                           add, switch on or off, list or remove extensions
+       thimble cc-mod on [--yes] | off | status
+                                          thimble-cc-mod (a single-agent thimble inside Claude Code) in this
+                                          folder; on turns the thimble plugin off here
        thimble update [--from <zip>]      bring the install up to date
        thimble uninstall [--yes] [--keep-home]
 EOF
@@ -453,8 +459,8 @@ esac
 # folder; it is passed on -c/--continue and -r/--resume too, so a resumed main keeps that name (one an earlier build
 # left unnamed takes it, and so does one the analyst renamed with /rename), and an -n/--name among the analyst's own
 # flags wins.
-# --settings carries thimble's statusline and the composer's fast mode, merged into the analyst's own --settings, since
-# Claude Code reads only the last one. --allowedTools lets the thimble
+# --settings carries thimble's statusline, the composer's fast mode and thimble-cc-mod off (the two plugins never run in
+# one session), merged into the analyst's own --settings, since Claude Code reads only the last one. --allowedTools lets the thimble
 # tools and the plugin's skills run without a permission prompt, since a fork answering the browser must not wait on a
 # terminal nobody watches; nothing is denied. THIMBLE_CHANNEL tells the MCP shim to subscribe. The session opens with
 # /thimble, which starts the server and opens this folder as a workspace.

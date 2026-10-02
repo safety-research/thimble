@@ -99,6 +99,31 @@ CLAUDE_BIN = CLI_PATH or "claude"
 NO_CLAUDE_FOUND = "the `claude` CLI was not found (not on PATH, not at ~/.local/bin/claude)"  # what a model call says
 NO_CLAUDE = f"{NO_CLAUDE_FOUND}: install Claude Code, or name its path with THIMBLE_CLAUDE_BIN"
 
+# thimble's marketplace (install.sh registers this tree under its name: thimble in a checkout, thimble-local from a
+# release zip) lists two plugins: thimble and thimble-cc-mod (mods/thimble-cc-mod), a single-agent thimble inside
+# Claude Code. They never run in one session, since two card systems confuse Claude: every session thimble starts turns
+# the mod off (without_mod), and `thimble cc-mod on` turns thimble off in the folder it turns the mod on in.
+MARKETPLACE_FILE = REPO_ROOT / ".claude-plugin" / "marketplace.json"
+MOD_PLUGIN = "thimble-cc-mod"
+
+
+def marketplace_name() -> str:
+    """The name of this install's marketplace (MARKETPLACE_FILE); '' when it cannot be read."""
+    try:
+        name = json.loads(MARKETPLACE_FILE.read_text("utf-8")).get("name")
+    except (OSError, ValueError, AttributeError):
+        return ""
+    return name if isinstance(name, str) else ""
+
+
+def without_mod(settings: dict[str, Any]) -> dict[str, Any]:
+    """`settings` (a session's --settings) with thimble-cc-mod of this install's marketplace off in `enabledPlugins`."""
+    name = marketplace_name()
+    if not name:
+        return settings
+    enabled = settings.get("enabledPlugins")
+    return {**settings, "enabledPlugins": {**(enabled if isinstance(enabled, dict) else {}), f"{MOD_PLUGIN}@{name}": False}}
+
 
 # --------------------------------------------------------------------------- the kernel wrapper
 #

@@ -41,6 +41,7 @@ def test_a_view_build_s_session_may_read_the_corpus_and_asks_before_it_changes_i
     flags = dev.Sessions()._flags(CORPUS, "thimble view: Posts", (folder,), dev.view_fence(CORPUS, "posts", corpus, folder, conf))
     settings = json.loads(flags[flags.index("--settings") + 1])
     assert settings["permissions"]["deny"][0] == f"Edit(/{views.EXAMPLES_DIR}/**)"
+    assert settings["enabledPlugins"] == {f"thimble-cc-mod@{config.marketplace_name()}": False}, "never the mod"
     assert f"Edit(/{corpus}/**)" in settings["permissions"]["ask"]
     assert f"Edit(/{corpus}/**)" not in settings["permissions"]["deny"]
     box = settings["sandbox"]

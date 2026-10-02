@@ -72,6 +72,7 @@ Type `/thimble` to start the thimble server and print the dashboard URL. If `/th
 | `thimble revert` | undo the last change thimble's dev agent applied |
 | `thimble extension add <folder\|git URL>` | add an extension and switch it on, after showing what it gives |
 | `thimble extension list\|on\|off\|remove [<name>]` | list the extensions, switch one on or off everywhere, or remove it |
+| `thimble cc-mod on\|off\|status` | switch thimble-cc-mod, a single-agent thimble inside Claude Code, on or off in this folder ([INSTALL.md](INSTALL.md#thimble-cc-mod)) |
 | `thimble uninstall` | uninstall the package |
 
 ## Requirements

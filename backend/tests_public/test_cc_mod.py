@@ -1,0 +1,151 @@
+"""thimble-cc-mod, the second plugin of thimble's marketplace: the marketplace lists it, `thimble cc-mod on|off|status`
+switches it in the current folder through `claude plugin` alone (stubbed here: no test runs Claude Code), and every
+session the launcher starts turns it off."""
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+
+from app import cli, config
+
+MP = "thimble-local"
+MOD, OWN = f"thimble-cc-mod@{MP}", f"thimble@{MP}"
+
+
+@pytest.fixture()
+def claude(tmp_path, monkeypatch):
+    """An install whose marketplace is thimble-local, a corpus folder as the caller's, and a stand-in for `claude plugin`:
+    `listed` is what `plugin list --json` prints there, `markets` what `plugin marketplace list --json` prints; each run
+    is recorded in `runs` and changes `listed` as Claude Code would, unless its verb is in `fail`."""
+    market = tmp_path / "app" / ".claude-plugin" / "marketplace.json"
+    market.parent.mkdir(parents=True)
+    market.write_text(json.dumps({"name": MP}))
+    monkeypatch.setattr(config, "MARKETPLACE_FILE", market)
+    folder = tmp_path / "corpus"
+    folder.mkdir()
+    monkeypatch.setenv("THIMBLE_CALLER_CWD", str(folder))
+    state = SimpleNamespace(listed=[{"id": OWN, "scope": "user", "enabled": True}],
+                            markets=[{"name": MP, "source": "directory"}], runs=[], fail=set(), asked=[],
+                            folder=folder.resolve())
+
+    def listing(_claude, args, _cwd):
+        if args == ["plugin", "list"]:
+            return [dict(p) for p in state.listed]
+        return list(state.markets) if args == ["plugin", "marketplace", "list"] else []
+
+    def run(_claude, args, cwd):
+        state.runs.append(args)
+        verb, pid = args[1], args[2]
+        assert args[3:] == ["--scope", "project"] and Path(cwd) == state.folder
+        if verb in state.fail:
+            return 1, "it went wrong"
+        if verb == "install":
+            state.listed.append({"id": pid, "scope": "project", "projectPath": str(cwd), "enabled": True})
+        elif verb == "uninstall":
+            state.listed = [p for p in state.listed if not (p["id"] == pid and p["scope"] == "project")]
+        else:
+            for p in state.listed:
+                if p["id"] == pid:
+                    p["enabled"] = verb == "enable"
+        return 0, ""
+
+    def confirm(question):
+        state.asked.append(question)
+        return True
+
+    monkeypatch.setattr(cli, "_claude_json", listing)
+    monkeypatch.setattr(cli, "_claude_run", run)
+    monkeypatch.setattr(cli, "confirm", confirm)
+    return state
+
+
+def _status(capsys) -> str:
+    capsys.readouterr()
+    assert cli.main(["cc-mod", "status"]) == 0
+    return capsys.readouterr().out
+
+
+def test_on_asks_then_installs_the_mod_and_turns_thimble_off_and_off_undoes_both(claude, capsys):
+    assert cli.main(["cc-mod", "on"]) == 0
+    out = capsys.readouterr().out
+    assert claude.runs == [["plugin", "install", MOD, "--scope", "project"], ["plugin", "disable", OWN, "--scope", "project"]]
+    assert claude.asked == [cli.MOD_QUESTION]
+    assert f"claude plugin install {MOD} --scope project" in out.split(cli.MOD_QUESTION)[0]
+    assert str(claude.folder / ".claude" / "settings.json") in out and "`thimble cc-mod off`" in out
+    status = _status(capsys)
+    assert f"thimble-cc-mod is on in {claude.folder}" in status and f"thimble plugin is off in {claude.folder}" in status
+    claude.runs.clear()
+    assert cli.main(["cc-mod", "off"]) == 0
+    assert claude.runs == [["plugin", "uninstall", MOD, "--scope", "project"], ["plugin", "enable", OWN, "--scope", "project"]]
+    assert "on here again" in capsys.readouterr().out
+    status = _status(capsys)
+    assert "thimble-cc-mod is off" in status and "thimble plugin is on" in status
+    assert json.loads((cli.home() / cli.MOD_STATE).read_text()) == []
+    claude.runs.clear()
+    assert cli.main(["cc-mod", "off"]) == 0 and claude.runs == [], "nothing left to undo"
+
+
+def test_on_changes_nothing_without_a_yes_and_yes_skips_the_question(claude, capsys, monkeypatch):
+    for answer, line in ((False, cli.MOD_DECLINED_LINE), (None, cli.MOD_UNASKED_LINE)):
+        monkeypatch.setattr(cli, "confirm", lambda q, a=answer: a)
+        assert cli.main(["cc-mod", "on"]) == 1
+        assert line in capsys.readouterr().out and claude.runs == []
+    monkeypatch.setattr(cli, "confirm", lambda q: pytest.fail("--yes asks nothing"))
+    assert cli.main(["cc-mod", "on", "--yes"]) == 0
+    assert [r[1] for r in claude.runs] == ["install", "disable"]
+
+
+def test_off_turns_thimble_on_only_where_on_turned_it_off(claude):
+    claude.listed = [{"id": OWN, "scope": "user", "enabled": False}]
+    assert cli.main(["cc-mod", "on", "--yes"]) == 0
+    assert claude.runs == [["plugin", "install", MOD, "--scope", "project"]], "thimble was off here already"
+    claude.runs.clear()
+    assert cli.main(["cc-mod", "off"]) == 0
+    assert claude.runs == [["plugin", "uninstall", MOD, "--scope", "project"]]
+
+
+def test_on_without_the_marketplace_registered_says_how_and_runs_nothing(claude, capsys):
+    claude.markets = []
+    assert cli.main(["cc-mod", "on", "--yes"]) == 1
+    out = capsys.readouterr().out
+    assert f'marketplace "{MP}"' in out and "claude plugin marketplace add" in out and claude.runs == []
+
+
+def test_a_failed_install_leaves_thimble_on(claude, capsys):
+    claude.fail = {"install"}
+    assert cli.main(["cc-mod", "on", "--yes"]) == 1
+    assert claude.runs == [["plugin", "install", MOD, "--scope", "project"]]
+    assert "it went wrong" in capsys.readouterr().out
+    assert not (cli.home() / cli.MOD_STATE).exists()
+
+
+def test_status_counts_only_this_folder_s_project_install(claude, capsys, tmp_path):
+    claude.listed.append({"id": MOD, "scope": "project", "projectPath": str(tmp_path / "elsewhere"), "enabled": True})
+    status = _status(capsys)
+    assert "thimble-cc-mod is off" in status and "thimble plugin is on" in status
+
+
+def test_every_launch_turns_the_mod_off_and_keeps_the_analyst_s_own_plugins(claude):
+    settings = json.loads(cli.launch_settings(claude.folder))
+    assert settings["enabledPlugins"] == {MOD: False}
+    given = json.dumps({"enabledPlugins": {"other@market": True, MOD: True}})
+    assert json.loads(cli.launch_settings(claude.folder, given))["enabledPlugins"] == {"other@market": True, MOD: False}
+    assert json.loads(cli.launch_args(claude.folder).split("\n")[3])["enabledPlugins"] == {MOD: False}
+
+
+def test_without_a_marketplace_name_the_settings_stay_as_they_are(monkeypatch, tmp_path):
+    monkeypatch.setattr(config, "MARKETPLACE_FILE", tmp_path / "missing.json")
+    assert config.without_mod({"fastMode": True}) == {"fastMode": True}
+
+
+def test_the_marketplace_lists_thimble_and_thimble_cc_mod_and_the_launcher_takes_the_command():
+    market = json.loads(config.MARKETPLACE_FILE.read_text())
+    plugins = {p["name"]: p for p in market["plugins"]}
+    assert set(plugins) == {"thimble", "thimble-cc-mod"}
+    assert plugins["thimble-cc-mod"]["source"] == "./mods/thimble-cc-mod"
+    assert plugins["thimble-cc-mod"]["license"] == "Apache-2.0" and plugins["thimble-cc-mod"]["description"]
+    launcher = (config.REPO_ROOT / "plugin" / "bin" / "thimble").read_text()
+    assert " cc-mod " in launcher.split('SUPERVISOR_COMMANDS="', 1)[1].split('"', 1)[0]
