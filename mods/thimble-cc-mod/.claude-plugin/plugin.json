@@ -1,6 +1,6 @@
 {
   "name": "thimble-cc-mod",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "A single-agent thimble inside Claude Code: answers drawn as cards between the reply's text, citations you can open and check, and verification scripts on request. An exploration.",
   "author": {
     "name": "thimble exploration"
