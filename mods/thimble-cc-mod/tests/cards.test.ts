@@ -4,7 +4,7 @@ import type { On } from 'claude-code'
 import { expect, mock, test } from 'claude-code/testing'
 import type { Mounted } from 'claude-code/testing'
 
-import { cardLayout, layerGraph, menuShade, shortTimes, wrapLabel } from '../hooks/draw'
+import { cardLayout, layerGraph, lineWidth, menuShade, shortTimes, width, wrapLabel } from '../hooks/draw'
 import type { CardData } from '../hooks/draw'
 import { validateCard } from '../hooks/lib'
 import { COLORS, SERIES } from '../hooks/paint'
@@ -78,7 +78,10 @@ function world(on: On): World {
     return { value: { kind: 'file', size: 1, mtimeMs: 1, isLink: false } }
   })
   on('fs.exists', ($, e) => ({ value: w.files.has(e.path) }))
-  on('fs.list', () => ({ value: [] }))
+  // a folder's files: those of the world directly in it
+  on('fs.list', ($, e) => ({
+    value: [...w.files.keys()].filter(k => k.startsWith(`${e.path}/`) && !k.slice(e.path.length + 1).includes('/')).map(k => ({ name: k.slice(e.path.length + 1), kind: 'file', size: 1, mtimeMs: 1, isLink: false })),
+  }) as never)
   on('fs.write', ($, e) => {
     w.files.set(e.path, e.text)
     return { value: undefined }
@@ -531,4 +534,81 @@ test('labels take the room the card has, and wrap to two lines before they are c
   const dg = graph('n0te', [['AgentRelent posting coordination notes', 'wiki dse', 'writes three hundred and seventeen revisions over two days, most of them reverting other agents']])
   expect(text(dg, 116).join(' ')).toContain('AgentRelent posting coordination notes → wiki dse: writes')
   expect(text(dg, 116).join(' ')).not.toContain('…')
+})
+
+// ------------------------------------------------------------------------------------------------ the panel's width
+
+const HOURS = Array.from({ length: 24 }, (_, h) => String(h).padStart(2, '0'))
+const LINE: CardData = {
+  id: 'f18jun',
+  kind: 'line',
+  question: 'On 18 June, which hours and pages did the edits go to?',
+  x: 'hour',
+  y: 'edits',
+  note: '',
+  source: { script: '.thimble-cc-mod/scripts/hours.py', index: 0 },
+  series: ['pages edited', 'pages created', 'pages moved', 'pages deleted', 'pages restored from an earlier revision'].map((name, k) => ({
+    name,
+    points: HOURS.map((h, i) => [h, ((i * 37 + k * 11) % 23) * (k + 1)] as [string, number]),
+  })),
+}
+
+/** The width of each line a drawn tree shows: each Text a card or a view paints as one line (truncate-end). */
+function lineWidths(tree: unknown): number[] {
+  const out: number[] = []
+  const walk = (n: unknown) => {
+    if (Array.isArray(n)) return n.forEach(walk)
+    if (!n || typeof n !== 'object') return
+    const o = n as { type?: string; props?: { wrap?: string; children?: unknown }; children?: unknown }
+    if (o.type === 'Text' && o.props?.wrap === 'truncate-end') return void out.push(width(shown(o)))
+    walk(o.children ?? o.props?.children)
+  }
+  walk(tree)
+  return out
+}
+
+const GROUPS: CardData = {
+  ...BAR,
+  id: 'g4bars',
+  question: 'Which wikis did each kind of agent edit on 18 June, by hour of the evening?',
+  rows: ['dse', 'probier', 'sandbox', 'help'].map((g, i) => ({ label: `${g} wiki at ${17 + i}:00`, value: 40 + i * 517, group: `${g} agents posting notes` })),
+}
+
+test('at a panel\'s width every card fits: no line is wider than the room, and a long legend wraps', () => {
+  for (const cols of [56, 61, 66]) {
+    for (const card of [LINE, BAR, GROUPS, DIAGRAM]) {
+      const lines = cardLayout(card, cols, -1).lines
+      expect(Math.max(...lines.map(lineWidth))).toBeLessThanOrEqual(cols)
+    }
+    const text = cardLayout(LINE, cols, -1).lines.map(l => l.map(s => s.s).join('')).join('\n')
+    for (const name of ['pages edited', 'pages deleted', 'pages restored']) expect(text).toContain(name)
+    expect(text).toMatch(/00 +23/)
+  }
+})
+
+test('a card in a side thread\'s answer takes the panel\'s width less the reply\'s margin, so nothing is cut', async ($, on) => {
+  const w = world(on)
+  w.files.set(`${CWD}/.thimble-cc-mod/cards/g4bars.json`, JSON.stringify(GROUPS))
+  // a thread saved by an earlier session, whose answer holds the card; the threads list reopens it
+  const turn = { q: 'which hours did the edits go to?', a: 'By hour:\n\n[[card:g4bars]]', state: 'done', tools: 2, partial: '' }
+  const saved = { id: 'tsaved', label: 'the last answer', ref: '', context: '', engine: 'fork', turns: [turn], file: '.thimble-cc-mod/threads/tsaved.md' }
+  w.files.set(`${CWD}/.thimble-cc-mod/threads/tsaved.json`, JSON.stringify(saved))
+  await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
+  const PANE = { plugin: 'thimble-cc-mod', component: 'Pane', requestId: 'thimble', surface: 'terminal', viewport: { columns: 200, rows: 55 }, props: { bodyColumns: 70, bodyRows: 50 } } as never
+  await $.command.run({ command: 'thimble-threads', args: '' } as never)
+  let pane = (await $.ui.mount(PANE)) as unknown as M
+  await pane.press({ key: 'thread-open:tsaved' })
+  await pane.unmount()
+  pane = (await $.ui.mount(PANE)) as unknown as M
+  const room = 70 - 1 - 4 // the panel's body, less a column at its right and the reply's margin
+  const card = (await pane.find({ type: 'Client', key: 't1-card-2-g4bars' })) as { props: { width: number; props: { cols: number } } } | undefined
+  expect(card?.props.width).toBe(room)
+  expect(card?.props.props.cols).toBe(room)
+  // drawn at the width the panel gives it, as the engine lays the Client out
+  await pane.resize({ columns: card!.props.width, rows: 20, in: 't1-card-2-g4bars' })
+  const widths = lineWidths(await pane.drawn({ in: 't1-card-2-g4bars' }))
+  expect(widths.length).toBeGreaterThan(4)
+  expect(shown(await pane.drawn({ in: 't1-card-2-g4bars' }))).toContain('help agents posting notes')
+  expect(Math.max(...widths)).toBeLessThanOrEqual(room - 4) // its border and padding
+  await pane.unmount()
 })

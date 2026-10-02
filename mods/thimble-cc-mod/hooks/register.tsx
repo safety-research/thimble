@@ -838,7 +838,8 @@ const MARGIN = 4
 async function drawReply($: Dollar, e: ResolveInput, text: string, width: number, answer: string, prefix = '', first = false): Promise<RenderElement[]> {
   const { Box, Text, Markdown, Button } = $.ui.resolve(e)
   const live = e.surface === 'terminal' || e.surface === 'desktop'
-  const cols = Math.max(30, width)
+  // `width`: the columns a block may take, right of the margin; a card is laid out for them and no wider
+  const cols = Math.max(24, width)
   const out: RenderElement[] = []
   const blocks = parseReply(text)
   const menu = live ? ((await read($, menuA)) ?? null) : null // the target of an open menu, lit where it is drawn
@@ -1533,7 +1534,8 @@ async function drawThread($: Dollar, e: PaneEvent): Promise<RenderElement> {
     } else if (turn.state === 'error') {
       body.push(<Text color={COLORS.problem} wrap="wrap">{turn.a}</Text>)
     } else {
-      body.push(<Box flexDirection="column">{await drawReply($, e, threadBody(turn.a), cols, `${t.id}:${k}`, `t${k}-`)}</Box>)
+      // each block of the answer stands right of the reply's margin, so a card gets the panel's width less it
+      body.push(<Box flexDirection="column">{await drawReply($, e, threadBody(turn.a), cols - MARGIN, `${t.id}:${k}`, `t${k}-`)}</Box>)
     }
     body.push(<Text> </Text>)
   }

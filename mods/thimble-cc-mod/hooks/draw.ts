@@ -103,6 +103,36 @@ export function lineWidth(l: Line): number {
   return l.reduce((n, s) => n + width(s.s), 0)
 }
 
+/** A legend's entries in as many lines of at most `cols` columns as they need, two spaces between entries on a line;
+ *  an entry wider than a line alone has its last segment cut. */
+function flow(entries: readonly Line[], cols: number): Line[] {
+  const lines: Line[] = []
+  let cur: Line = []
+  let w = 0
+  for (const entry of entries) {
+    let e = entry
+    let ew = lineWidth(e)
+    if (ew > cols && e.length) {
+      const last = e.at(-1)!
+      e = [...e.slice(0, -1), { ...last, s: cut(last.s, Math.max(1, cols - (ew - width(last.s)))) }]
+      ew = lineWidth(e)
+    }
+    if (cur.length && w + 2 + ew > cols) {
+      lines.push(cur)
+      cur = []
+      w = 0
+    }
+    if (cur.length) {
+      cur.push({ s: '  ' })
+      w += 2
+    }
+    cur.push(...e)
+    w += ew
+  }
+  if (cur.length) lines.push(cur)
+  return lines
+}
+
 /** `lines` with a background on the cells [x0, x1) of each span's line, segments split where a span starts or ends. */
 export function shade(lines: readonly Line[], spans: readonly { line: number; x0: number; x1: number }[], bg: string): Line[] {
   return lines.map((l, y) => {
@@ -218,11 +248,11 @@ function barLayout(card: CardData, cols: number, hover: number): Layout {
       owner.push(i)
     }
   })
-  const foot: Seg[] = []
-  if (more > 0) foot.push({ s: `… ${more} more rows  `, fg: COLORS.dim })
-  if (card.total !== undefined) foot.push({ s: `all: ${fmt(card.total)}  `, fg: COLORS.dim })
-  groups.forEach((g, j) => foot.push({ s: '■ ', fg: COLORS.series[j % COLORS.series.length] }, { s: `${g}  `, fg: COLORS.dim }))
-  if (foot.length) lines.push(foot)
+  const foot: Line[] = []
+  if (more > 0) foot.push([{ s: `… ${more} more rows`, fg: COLORS.dim }])
+  if (card.total !== undefined) foot.push([{ s: `all: ${fmt(card.total)}`, fg: COLORS.dim }])
+  groups.forEach((g, j) => foot.push([{ s: '■ ', fg: COLORS.series[j % COLORS.series.length] }, { s: g, fg: COLORS.dim }]))
+  lines.push(...flow(foot, cols))
   return { lines, items, hit: (_x, y) => owner[y] ?? -1 }
 }
 
@@ -338,7 +368,7 @@ function lineLayout(card: CardData, cols: number, hover: number, plotRows = 10):
   lines.push([{ s: axis, fg: COLORS.rule }])
   const xl = first.length + last.length + 2 <= pw ? first + ' '.repeat(pw - first.length - last.length) + last : first
   lines.push([{ s: ' '.repeat(yW + 1) + xl, fg: COLORS.dim }])
-  if (series.length > 1) lines.push(series.flatMap((s, si) => [{ s: '━ ', fg: COLORS.series[si % COLORS.series.length] }, { s: `${s.name}  `, fg: COLORS.dim }]))
+  if (series.length > 1) lines.push(...flow(series.map((s, si) => [{ s: '━ ', fg: COLORS.series[si % COLORS.series.length] }, { s: s.name, fg: COLORS.dim }]), cols))
   return { lines, items, hit: (x, y) => nearest(x, y) }
 }
 
