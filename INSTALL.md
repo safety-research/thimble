@@ -1,5 +1,9 @@
 # Installing thimble
 
+> **Installing thimble for someone, as an agent?** Follow the Installing section of [CLAUDE.md](CLAUDE.md), which
+> Claude Code loads only in a session started inside the clone: run `bash scripts/install.sh --dry-run`, ask the
+> person each question it lists, and pass the flag for each of their answers. Answer none of them yourself.
+
 thimble uses whichever auth path you have configured for `claude`: every model call runs through your own `claude`, in
 your config dir with your user settings (thimble's sessions run in folders of their own, so auth set only in a
 project's `.claude/` settings does not reach them). thimble tells you when `claude` is missing or not logged in.
@@ -50,7 +54,7 @@ shows what it installs and where, then asks its questions:
   the sandbox works; run install.sh again to set it up. `--sandbox-deps` or `--no-sandbox-deps` answers it. macOS has
   the sandbox built in.
 - **thimble in every Claude Code session.** A yes adds thimble to `~/.claude/settings.json` and `~/.claude/plugins`.
-  The `thimble` command works either way. `--plugin` or `--no-plugin` answers it.
+  The `thimble` command and [thimble-cc-mod](#thimble-cc-mod) work either way. `--plugin` or `--no-plugin` answers it.
 - **Trust of thimble's workspaces folder**, where thimble keeps each workspace and runs its agents. A yes adds it to
   `~/.claude.json`. The orientation, its critic, the writers and view builds need it: they run as Claude Code
   background agents, which Claude Code starts only in a trusted folder. `--trust-workspaces` or `--no-trust-workspaces` answers it.
@@ -117,7 +121,10 @@ set for it carries over.
 thimble-cc-mod is a single-agent thimble inside Claude Code, an exploration that ships with thimble as a second plugin
 of its marketplace. Claude answers with cards drawn in the chat and citations you can check, with no server, browser or
 background agents. Switch it on in a folder with `thimble cc-mod on`, which asks first, then writes the folder's
-`.claude/settings.json` through `claude plugin`; then run `claude` there. `thimble cc-mod off` undoes it, and `thimble
+`.claude/settings.json` through `claude plugin`; then run `claude` there. When Claude Code does not know thimble's
+marketplace yet (install.sh registers it only on a yes to the plugin question), `on` lists its registration from the
+install's folder among the steps it asks about and runs it first. That adds no plugin to your sessions, and `thimble
+uninstall` takes it back. `thimble cc-mod off` undoes it, and `thimble
 cc-mod status` says whether each of the two plugins is on in the folder. They are switched independently: `on` and `off`
 leave the thimble plugin as it is. Sessions you start with `thimble`, and thimble's background sessions (the
 orientation, critic, writers, checks, task programs and builds), run without the mod; plain `claude` in the folder uses
@@ -133,7 +140,8 @@ until `thimble server restart`.
 
 ## Uninstall
 
-`thimble uninstall` asks, then removes the plugin registration and the trust entry the install added,
+`thimble uninstall` asks, then removes the plugin registration and the trust entry the install added (or the
+marketplace `thimble cc-mod on` registered, which turns thimble-cc-mod off in the folders it is on in),
 `~/.local/bin/thimble`, and `~/.thimble`, which holds a Global install's workspaces. `--keep-home` keeps `~/.thimble`.
 A clone stays where it is, and so does a downloaded headless Chromium, in Playwright's cache folder.
 

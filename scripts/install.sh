@@ -851,6 +851,7 @@ marketplace_name() {  # mp_name: the name Claude Code registers the tree under â
 
 plugin_regs() {  # the thimble plugins Claude Code lists, a line each: ours or other, the marketplace, and the folder that
   # marketplace was added from (else what its source is). Only a marketplace added from this install's folder is ours.
+  # Also a line "mod", the marketplace and the folder, for each folder where thimble-cc-mod from ours is on.
   # Fails when the lists can't be read
   [ "$have_claude" = 1 ] && command -v python3 >/dev/null 2>&1 || return 1
   claude plugin list --json > "$tmp/plugins.json" 2>/dev/null || return 1
@@ -881,6 +882,8 @@ for p in plugins:
     if name == "thimble" and market:
         w = where.get(market, "a marketplace Claude Code does not list")
         print("ours" if w == mine else "other", market, w, sep="\t")
+    elif name == "thimble-cc-mod" and market and where.get(market) == mine:
+        print("mod", market, p.get("projectPath") or "a folder", sep="\t")
 PY
 }
 
@@ -888,13 +891,15 @@ plugin_record() {  # the earlier answer to the plugin question ($home/plugin.jso
   # plugin_reg, the marketplace of the one added from this install's folder, the only registration install.sh changes
   # unasked; other_reg and other_from, one added from anywhere else, which is another install's. Without the record,
   # this install's own registration counts as an earlier yes. When Claude Code's lists can't be read, plugin_kept is the
-  # registration the record names, which is then left as it is
-  plugin_prev="" plugin_reg="" plugin_kept="" plugin_switch="" other_reg="" other_from=""
+  # registration the record names, which is then left as it is. mod_in: the folders where thimble-cc-mod from this
+  # install's marketplace is on, which a `claude plugin marketplace remove` would turn it off in
+  plugin_prev="" plugin_reg="" plugin_kept="" plugin_switch="" other_reg="" other_from="" mod_in=""
   local regs kind m w
   [ ! -f "$home/plugin.json" ] || plugin_prev="$(json_get "$home/plugin.json" answer)"
   if regs="$(plugin_regs)"; then
     while IFS=$'\t' read -r kind m w; do
-      if [ "$kind" = ours ]; then plugin_reg="$m"
+      if [ "$kind" = mod ]; then mod_in="${mod_in:+$mod_in, }$w"
+      elif [ "$kind" = ours ]; then plugin_reg="$m"
       elif [ "$kind" = other ] && [ -z "$other_reg" ]; then other_reg="$m" other_from="$w"; fi
     done <<< "$regs"
     [ -f "$home/plugin.json" ] || [ -z "$plugin_reg" ] || plugin_prev=yes
@@ -1004,14 +1009,14 @@ browser_text() {  # the browser question's explanation, after probe_browser
 }
 
 plugin_text() {  # the plugin question
-  say "Add thimble to $(cc_path settings.json) and $(cc_path plugins), so it is available in every claude session from startup? The \`thimble\` command works either way, and \`thimble uninstall\` removes it."
+  say "Add thimble to $(cc_path settings.json) and $(cc_path plugins), so it is available in every claude session from startup? The \`thimble\` command and \`thimble cc-mod on\` work either way, and \`thimble uninstall\` removes it."
 }
 
 earlier_answers() {  # what settles each question before it is asked: the browser and plugin answers of an earlier
   # install, and the trust question when one is due; for each question that is not asked, why, naming the folder
   # (browser_skip, plugin_skip, trust_skip)
   browser_was="$(browser_prev)" browser_skip="" plugin_prev="" plugin_reg="" plugin_skip="" trust_skip=""
-  plugin_kept="" plugin_switch="" other_reg="" other_from="" cli_state="" cli_other="" cli_switch=""
+  plugin_kept="" plugin_switch="" other_reg="" other_from="" cli_state="" cli_other="" cli_switch="" mod_in=""
   if [ -n "$browser_was" ]; then
     if [ -f "$home/config.json" ] && [ "$(json_get "$home/config.json" browser 2>/dev/null)" = "$browser_was" ]; then
       browser_skip="answered $browser_was at your earlier install ($home/config.json); --browser changes it"
@@ -1045,6 +1050,7 @@ ask() {  # the questions, before anything is installed: the browser, the sandbox
   tty=0
   if [ "$dry" = 1 ]; then
     step "the questions install.sh asks on a terminal, and the flag that gives each answer"
+    say "(An agent installing thimble for someone asks them each question below, in its words, and passes their answer's flag; it answers none itself.)"
     if [ -n "$browser" ]; then say "1. the browser: answered by --browser $browser"
     elif [ -n "$browser_was" ]; then say "1. the browser: $browser_skip"
     else
@@ -1082,7 +1088,7 @@ ask() {  # the questions, before anything is installed: the browser, the sandbox
         need+=("the trust: --trust-workspaces or --no-trust-workspaces")
       fi
     fi
-    local again="bash $src/scripts/install.sh --dry-run prints the questions; then run install.sh again with a flag for each."
+    local again="bash $src/scripts/install.sh --dry-run prints the questions; ask them (an agent asks the person it installs for, and answers none itself), then run install.sh again with a flag for each."
     if [ "$src" != "$dir" ] && earlier_install; then
       again="Ask them, then run \`thimble update\` again with a flag for each, which it passes on to install.sh. An install older than 0.3.0 has a \`thimble update\` that takes no flags: unzip the release and run its scripts/install.sh --dir $dir with the flags."
     fi
@@ -1177,7 +1183,12 @@ register_plugin() {  # the plugin question's answer: yes registers the tree as a
     return 0
   fi
   left="${plugin_reg:-$plugin_kept}"
-  if [ -n "$plugin_reg" ] && run claude plugin uninstall "thimble@$plugin_reg" && run claude plugin marketplace remove "$plugin_reg"; then left=""; fi
+  if [ -n "$plugin_reg" ] && [ -n "$mod_in" ]; then  # the marketplace stays: removing it turns thimble-cc-mod off too
+    if run claude plugin uninstall "thimble@$plugin_reg"; then
+      left=""
+      say "kept marketplace \"$plugin_reg\", since thimble-cc-mod from it is on in $mod_in; thimble uninstall removes it"
+    fi
+  elif [ -n "$plugin_reg" ] && run claude plugin uninstall "thimble@$plugin_reg" && run claude plugin marketplace remove "$plugin_reg"; then left=""; fi
   [ -z "$left" ] || say "(the registration an earlier yes added is still there: claude plugin uninstall thimble@$left && claude plugin marketplace remove $left takes it back)"
   plugin_write no "$left"
   say "not registered: the \`thimble\` command loads the plugin for its own sessions. install.sh --plugin adds it to every session"

@@ -14,7 +14,7 @@ This is an exploration that ships with thimble as the second plugin of its marke
 ## Install
 
 With thimble installed, run `thimble cc-mod on` in a folder; `thimble cc-mod off` undoes it. Both switch this mod
-alone. Sessions you start with `thimble` run without the mod; plain `claude` in the folder uses it.
+alone. When Claude Code does not know thimble's marketplace yet, `on` registers it first, in the same question. Sessions you start with `thimble` run without the mod; plain `claude` in the folder uses it.
 
 Without installing thimble:
 

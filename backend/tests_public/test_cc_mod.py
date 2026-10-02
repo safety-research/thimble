@@ -38,6 +38,11 @@ def claude(tmp_path, monkeypatch):
 
     def run(_claude, args, cwd):
         state.runs.append(args)
+        if args[:3] == ["plugin", "marketplace", "add"]:
+            if "marketplace add" in state.fail:
+                return 1, "it went wrong"
+            state.markets.append({"name": MP, "source": "directory", "path": args[3]})
+            return 0, ""
         verb, pid = args[1], args[2]
         assert args[3:] == ["--scope", "project"] and Path(cwd) == state.folder
         if verb in state.fail:
@@ -114,11 +119,39 @@ def test_a_thimble_plugin_off_here_stays_off_and_an_old_cc_mod_json_is_ignored(c
     assert cli.main(["cc-mod", "on", "--yes"]) == 0
 
 
-def test_on_without_the_marketplace_registered_says_how_and_runs_nothing(claude, capsys):
+def test_on_without_the_marketplace_registered_registers_it_on_the_same_yes(claude, capsys, monkeypatch):
+    """install.sh registers thimble's marketplace only on a yes to its plugin question; with a no, `on` lists the
+    marketplace's registration before the install, asks once, and on a yes runs both. With a no it runs nothing."""
+    add = ["plugin", "marketplace", "add", str(config.REPO_ROOT)]
     claude.markets = []
+    monkeypatch.setattr(cli, "confirm", lambda q: False)
+    assert cli.main(["cc-mod", "on"]) == 1 and claude.runs == []
+    monkeypatch.setattr(cli, "confirm", lambda q: claude.asked.append(q) or True)
+    capsys.readouterr()
+    assert cli.main(["cc-mod", "on"]) == 0
+    before = capsys.readouterr().out.split("+ claude")[0]
+    assert claude.asked == [cli.MOD_QUESTION] and claude.runs == [add, ["plugin", "install", MOD, "--scope", "project"]]
+    assert f"claude {' '.join(add)}" in before and f"claude plugin install {MOD} --scope project" in before
+    assert f'marketplace "{MP}" yet' in before and "`thimble uninstall` takes it back" in before
+    claude.runs.clear()
+    assert cli.main(["cc-mod", "off"]) == 0 and claude.runs == [["plugin", "uninstall", MOD, "--scope", "project"]]
+    claude.runs.clear()
+    assert cli.main(["cc-mod", "on", "--yes"]) == 0, "registered now: only the install runs"
+    assert claude.runs == [["plugin", "install", MOD, "--scope", "project"]]
+
+
+def test_a_failed_registration_installs_nothing(claude, capsys):
+    claude.markets, claude.fail = [], {"marketplace add"}
     assert cli.main(["cc-mod", "on", "--yes"]) == 1
+    assert claude.runs == [["plugin", "marketplace", "add", str(config.REPO_ROOT)]]
+    assert "it went wrong" in capsys.readouterr().out
+
+
+def test_the_marketplace_from_another_install_is_left_and_nothing_runs(claude, capsys, tmp_path):
+    claude.markets = [{"name": MP, "source": "directory", "path": str(tmp_path / "other")}]
+    assert cli.main(["cc-mod", "on", "--yes"]) == 1 and claude.runs == []
     out = capsys.readouterr().out
-    assert f'marketplace "{MP}"' in out and "claude plugin marketplace add" in out and claude.runs == []
+    assert str(tmp_path / "other") in out and f"claude plugin marketplace remove {MP}" in out
 
 
 def test_a_failed_install_says_why(claude, capsys):
