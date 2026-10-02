@@ -345,6 +345,38 @@ def test_a_session_replaced_before_its_move_was_read_is_parked_all_the_same(cwd,
     assert session.current(CORPUS) is None and quits == [CORPUS]
 
 
+@pytest.mark.parametrize("restart", [False, True])
+def test_a_subagent_at_work_when_the_session_moves_goes_on_in_the_job(cwd, project, quits, restart):
+    """Main's background subagent still works when Claude Code moves the session into a job: its chat runs on, and the
+    job's task notification ends it with its result, after a server restart too."""
+    p = project / f"{SID}.jsonl"
+    p.write_text("")
+    _subscribe(SID, cc_channel.CHANNEL)
+    lv = _attach(cwd, p, pid=100)
+    session.tail_once(lv)
+    started = _stamped(SID, 1, "2026-10-01T20:27:52.417Z", _human("Count the posts in the background"),
+                       _assistant(_use("toolu_ag", "Agent", {"description": "posts", "prompt": "Count the posts.",
+                                                             "run_in_background": True})),
+                       _result("toolu_ag", "Async agent launched successfully.\nagentId: a1b2c3d4"), END)
+    _append(p, lv, [*started, *_moved(SID, JOB)])
+    assert session.current(CORPUS).sid == JOB
+    chat = next(m for m in agents.list_chats(CORPUS) if m.get("role") == session.SUBAGENT_ROLE)
+    assert chat["status"] == "running" and chat["session"] == JOB
+    if restart:
+        _restart()
+        _subscribe(JOB, cc_channel.HOOK)
+        session.connected(CORPUS, JOB, cwd, 200, claim=False)
+    note = ("<task-notification>\n<task-id>a1b2c3d4</task-id>\n<status>completed</status>\n<result>8 posts</result>\n"
+            "</task-notification>")
+    _write(project / f"{JOB}.jsonl", [*_copy(started, JOB), *_stamped(
+        JOB, 2, "2026-10-01T23:30:03.924Z", {"type": "user", "origin": {"kind": "task-notification"},
+                                             "message": {"content": note}}, _assistant(_say("8 posts.")), END)])
+    session.tail_once(session.current(CORPUS))
+    chat = agents.read_meta(CORPUS, chat["id"])
+    assert chat["status"] == "done" and chat["result"] == "8 posts"
+    assert _shown("text") == ["8 posts."]
+
+
 def test_a_copied_record_is_known_by_its_uuid_or_its_time_and_a_session_that_goes_on_is_not_parked(tmp_path):
     """A record of the job's transcript is a copy when the old transcript has its uuid, even stamped later, or when it
     is stamped no later than the move; a record of the job's own has neither. A transcript that ends with the move,
