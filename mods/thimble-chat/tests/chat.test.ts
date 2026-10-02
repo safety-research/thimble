@@ -175,7 +175,7 @@ test('layouts: a bar row is hit by its line, a chip by its cells', () => {
   const lay = cardLayout(BAR, 60, -1)
   expect(lay.items[1]!.cite).toBe('[[1013|card:abc123#revisions/probier]]')
   expect(lay.hit(10, 1)).toBe(1)
-  const para = paraLayout(parseReply(REPLY)[1] as never, [{ label: '13403', state: 'link', mark: '', tip: '' }, { label: '14416', state: 'link', mark: '', tip: '' }], 80, -1)
+  const para = paraLayout(parseReply(REPLY)[1] as never, [{ label: '13403', state: 'link', mark: '', spin: false, tip: '' }, { label: '14416', state: 'link', mark: '', spin: false, tip: '' }], 80, -1)
   expect(para.spans.length).toBe(2)
   expect(para.spans[0]!.x0).toBe('dse has '.length)
 })
@@ -189,7 +189,7 @@ test('a table whose cells hold citations is a rich block in columns, its chips h
   expect(table.table?.rows.length).toBe(3)
   expect(table.table?.align).toEqual(['left', 'right'])
   expect(table.runs.filter(r => r.cite).length).toBe(1)
-  const lay = blockLayout(table, [{ label: '314', state: 'link', mark: '', tip: '' }], 80, -1)
+  const lay = blockLayout(table, [{ label: '314', state: 'link', mark: '', spin: false, tip: '' }], 80, -1)
   expect(lay.lines.length).toBe(4) // header, rule, two rows
   expect(lay.spans).toEqual([{ line: 2, x0: 'Name'.length + 2 + 'Revisions'.length - '314'.length, x1: 'Name'.length + 2 + 'Revisions'.length, chip: 0 }])
 })

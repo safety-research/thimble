@@ -4,8 +4,9 @@ import type { On } from 'claude-code'
 import { expect, mock, test } from 'claude-code/testing'
 import type { Mounted } from 'claude-code/testing'
 
-import { FAILED_MARK, SPIN, applyCorrections, chipSegs, chipState, fixItems, fixPrompt, paraLayout, parseFix, passageAt, sentenceAt, settleFix, verifyMark } from '../hooks/cite'
-import { citations, parseReply } from '../hooks/lib'
+import { SPIN, applyCorrections, chipLook, chipSegs, chipState, fixItems, fixPrompt, paraLayout, parseFix, passageAt, sentenceAt, sentenceIn, settleFix } from '../hooks/cite'
+import { fixName, threadName, verifyName } from '../hooks/threads'
+import { cid, citations, parseReply } from '../hooks/lib'
 import { COLORS } from '../hooks/paint'
 
 const CWD = '/corpus/wiki'
@@ -27,7 +28,7 @@ const BAD = 'probier has [[1014|card:abc123#revisions/probier]], see [[pages.jso
 const REPLY = ['[[card:abc123]]', '', 'dse has [[13403|card:abc123#revisions/dse]] of [[14416|card:abc123#revisions/all]] revisions.', '', BAD].join('\n')
 const FIXED = 'probier has [[1013|card:abc123#revisions/probier]], see [[pages.jsonl#L3]].'
 
-type World = { files: Map<string, string>; spawned: { prompt: string; subagentType?: string; description?: string }[]; submitted: string[] }
+type World = { files: Map<string, string>; spawned: { prompt: string; subagentType?: string; description?: string }[]; submitted: string[]; verifyOut: string }
 
 function resolveOne(ref: string, display: string | null) {
   const values: Record<string, string> = { 'card:abc123#revisions/dse': '13403', 'card:abc123#revisions/probier': '1013', 'card:abc123#revisions/all': '14416' }
@@ -42,7 +43,7 @@ function resolveOne(ref: string, display: string | null) {
 }
 
 function world(on: On): World {
-  const w: World = { files: new Map([[`${CWD}/.thimble-chat/cards/abc123.json`, JSON.stringify(CARD)]]), spawned: [], submitted: [] }
+  const w: World = { files: new Map([[`${CWD}/.thimble-chat/cards/abc123.json`, JSON.stringify(CARD)]]), spawned: [], submitted: [], verifyOut: '' }
   mock.env(on, {})
   mock.clock(on, { now: 1_790_000_000_000 })
   on('session.start', ($, e) => ({ cwd: e.cwd }))
@@ -71,6 +72,7 @@ function world(on: On): World {
       const out = req.items.map(it => ({ ...resolveOne(it.ref, it.display), id: it.id }))
       return { value: { exitCode: 0, stdout: JSON.stringify(out), stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     }
+    if (/verify\/v-\w+\.py$/.test(String(e.argv[1])) && w.verifyOut) return { value: { exitCode: 0, stdout: w.verifyOut, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     return { value: { exitCode: 1, stdout: '', stderr: 'no such script', isStdoutTruncated: false, isStderrTruncated: false } }
   })
   on('prompt.submit', ($, e) => {
@@ -100,7 +102,7 @@ const MESSAGE = (text: string) => ({ plugin: 'thimble-chat', component: 'Assista
 
 // ------------------------------------------------------------------------------------------------ display
 
-test('a citation is an underlined link; only a problem has colour, with a spinner or a static marker beside it', () => {
+test('a citation is an underlined link; a problem is red; a spinner while it is worked on, then ✓, or ✗ and red', () => {
   expect(chipState('ok', undefined)).toBe('link')
   expect(chipState('unchecked', undefined)).toBe('link')
   expect(chipState(undefined, undefined)).toBe('link')
@@ -109,17 +111,24 @@ test('a citation is an underlined link; only a problem has colour, with a spinne
   expect(chipState('differs', 'fixing')).toBe('fixing')
   expect(chipState('differs', 'failed')).toBe('failed')
   expect(chipState('ok', 'failed')).toBe('link')
-  const link = chipSegs({ label: '412', state: 'link', mark: '', tip: '' }, false)
+  expect(chipState('ok', undefined, 'refuted')).toBe('failed')
+  expect(chipLook('ok', undefined, 'verified')).toEqual({ state: 'link', mark: '✓', spin: false })
+  expect(chipLook('ok', undefined, 'refuted')).toEqual({ state: 'failed', mark: '✗', spin: false })
+  expect(chipLook('ok', undefined, 'running')).toEqual({ state: 'link', mark: '', spin: true })
+  expect(chipLook('ok', undefined, 'asked')).toEqual({ state: 'link', mark: '', spin: true })
+  expect(chipLook('ok', undefined, 'error')).toEqual({ state: 'link', mark: '', spin: false })
+  expect(chipLook('differs', 'fixing', undefined)).toEqual({ state: 'fixing', mark: '', spin: true })
+  expect(chipLook('differs', 'failed', undefined)).toEqual({ state: 'failed', mark: '✗', spin: false })
+  const link = chipSegs({ label: '412', state: 'link', mark: '', spin: false, tip: '' }, false)
   expect(link).toEqual([{ s: '412', fg: COLORS.link, u: true, inv: false }])
   expect(link[0]!.bg).toBe(undefined)
-  expect(chipSegs({ label: '412', state: 'problem', mark: '', tip: '' }, false)[0]!.fg).toBe(COLORS.problem)
-  const spin = chipSegs({ label: '412', state: 'fixing', mark: '', tip: '' }, false, 3)
+  expect(chipSegs({ label: '412', state: 'problem', mark: '', spin: false, tip: '' }, false)[0]!.fg).toBe(COLORS.problem)
+  const spin = chipSegs({ label: '412', state: 'fixing', mark: '', spin: true, tip: '' }, false, 3)
   expect(spin[1]).toEqual({ s: ` ${SPIN[3]}`, fg: COLORS.problem })
-  expect(chipSegs({ label: '412', state: 'failed', mark: '', tip: '' }, false)[1]!.s).toBe(` ${FAILED_MARK}`)
-  expect(verifyMark('verified')).toBe('✓')
-  expect(verifyMark('refuted')).toBe('✗')
-  expect(verifyMark('running')).toBe('')
-  expect(chipSegs({ label: '412', state: 'link', mark: '✓', tip: '' }, false)[1]).toEqual({ s: '✓', fg: COLORS.ok })
+  const failed = chipSegs({ label: '412', state: 'failed', mark: '✗', spin: false, tip: '' }, false)
+  expect(failed).toEqual([{ s: '412', fg: COLORS.problem, u: true, inv: false }, { s: '✗', fg: COLORS.problem }])
+  expect(chipSegs({ label: '412', state: 'link', mark: '✓', spin: false, tip: '' }, false)[1]).toEqual({ s: '✓', fg: COLORS.ok })
+  expect(JSON.stringify([link, spin, failed])).not.toMatch(/fix|corrected/)
 })
 
 test('a press between words finds its sentence, citations kept; a full stop inside a citation ends none', () => {
@@ -146,6 +155,15 @@ test('fix items: one per sentence however many of its citations fail; a card by 
   expect(prompt).toContain(`1. ${BAD}`)
   expect(prompt).toContain('2. [[card:zz9]]\n   no card zz9')
   expect(prompt).toContain('`<n>: CANNOT <why>`')
+  expect(prompt).toContain('Give a sentence whole, rewritten so that every word of it agrees with the corrected values')
+})
+
+test("a fix item is the citation's whole sentence: within its line, without the list marker, a full stop inside a citation ends none", () => {
+  const text = ['Intro line.', '- Agent 3 made the most. It deleted [["Seite gelöscht. Neu."|events.jsonl#L4]] twice, about a third.', '| dse | [[9|a.csv#row=2]] |'].join('\n')
+  const [quote, cell] = citations(text)
+  expect(sentenceIn(text, quote!.raw)).toBe('It deleted [["Seite gelöscht. Neu."|events.jsonl#L4]] twice, about a third.')
+  expect(sentenceIn(text, cell!.raw)).toBe('| dse | [[9|a.csv#row=2]] |')
+  expect(fixItems(text, [{ cite: quote!, why: 'no' }])[0]!.old).toBe('It deleted [["Seite gelöscht. Neu."|events.jsonl#L4]] twice, about a third.')
 })
 
 test('the fix answer: one line per item, CANNOT, a missing line, backticks and quotes', () => {
@@ -156,11 +174,11 @@ test('the fix answer: one line per item, CANNOT, a missing line, backticks and q
   expect(parseFix('1: "quoted text"', 1)[0]).toEqual({ ok: true, text: 'quoted text' })
 })
 
-test('corrections are drawn in place and marked; a card embed stays alone on its line; $ is kept', () => {
+test('a corrected sentence replaces the old one whole, unmarked; a card embed stays alone on its line; $ is kept', () => {
   const out = applyCorrections(REPLY, [{ old: BAD, new: 'probier costs $1 or [[1013|card:abc123#revisions/probier]].', at: 1 }, { old: '[[card:abc123]]', new: '[[card:def456]]', at: 1 }])
-  expect(out).toContain('probier costs $1 or [[1013|card:abc123#revisions/probier]]. *(corrected)*')
+  expect(out.split('\n').at(-1)).toBe('probier costs $1 or [[1013|card:abc123#revisions/probier]].')
   expect(out.split('\n')[0]).toBe('[[card:def456]]')
-  expect(applyCorrections(REPLY, [{ old: BAD, new: FIXED, at: 1 }], false)).toContain(`\n${FIXED}`)
+  expect(applyCorrections(REPLY, [{ old: BAD, new: FIXED, at: 1 }])).toBe(REPLY.replace(BAD, FIXED))
 })
 
 // ------------------------------------------------------------------------------------------------ the flow
@@ -177,6 +195,19 @@ test('a fix round settles each item: a correction that checks is drawn, one that
   expect(bad.states[0]).toEqual({ state: 'failed', why: 'the correction still does not check ([[1015|card:abc123#revisions/probier]]: the card shows 1013, not 1015)' })
   expect(bad.states[1]).toEqual({ state: 'failed', why: 'the script fails' })
   expect(bad.notes[1]).toBe('could not fix [[card:zz9]]: the script fails')
+  const bare = settleFix(items.slice(0, 1), parseFix('1: [[1013|card:abc123#revisions/probier]]', 1), verdict, () => '')
+  expect(bare.corrections).toEqual([])
+  expect(bare.states[0]).toEqual({ state: 'failed', why: 'the fix gave a value, not the whole sentence' })
+})
+
+test('each subagent of the mod is named for what it does', () => {
+  const [c1] = citations(BAD)
+  expect(fixName(fixItems(REPLY, [{ cite: c1!, why: 'x' }]))).toBe('verification · correcting citations')
+  expect(fixName(fixItems(REPLY, [{ card: 'zz9', why: 'x' }]))).toBe('verification · correcting cards')
+  expect(fixName(fixItems(REPLY, [{ cite: c1!, why: 'x' }, { card: 'zz9', why: 'x' }]))).toBe('verification · correcting citations and cards')
+  expect(verifyName('13403')).toBe('verification · checking 13403')
+  expect(threadName('Why is dse so large?')).toBe('side thread · Why is dse so large?')
+  expect(threadName('Why does the dse wiki have so many more revisions than all the others combined?')).toBe('side thread · Why does the dse wiki have so many more…')
 })
 
 test('a reply with a failing citation goes to a forked subagent, never as a prompt to main; refused, it is marked', async ($, on) => {
@@ -186,27 +217,28 @@ test('a reply with a failing citation goes to a forked subagent, never as a prom
   await $.turn.complete({ turnId: 't1', answer: REPLY, durationMs: 5, reason: 'answer' } as never)
   expect(w.submitted).toEqual([])
   expect(w.spawned[0]?.subagentType).toBe('fork')
-  expect(w.spawned[0]?.description).toBe('thimble-chat fix of 1 problem')
+  expect(w.spawned[0]?.description).toBe('verification · correcting citations')
   expect(w.spawned[0]?.prompt).toContain(`1. ${BAD}`)
   expect(w.spawned[0]?.prompt).toContain('[[1014|card:abc123#revisions/probier]]: the card shows 1013, not 1014')
   // the kit starts no subagent (it drops the id a hook answers): the general-purpose fallback is refused too, and the
-  // citation stays red with the failure marker
+  // citation stays red, ✗ after it, its tip saying why
   expect(w.spawned[1]?.subagentType).toBe('general-purpose')
   const ui = (await $.ui.mount(MESSAGE(REPLY))) as unknown as M
   const para = JSON.stringify(await ui.find({ key: 'para-3' }))
-  expect(para).toContain('"state":"failed"')
-  expect(para).toContain("couldn't fix: could not start a subagent")
+  expect(para).toContain('"state":"failed","mark":"✗"')
+  expect(para).toContain('the fix failed: could not start a subagent')
+  expect(para).not.toContain("couldn't fix")
   await ui.unmount()
 })
 
-test('corrections are drawn in place in the reply, marked, also in a later session', async ($, on) => {
+test('corrections are drawn in place in the reply, unmarked, also in a later session', async ($, on) => {
   const w = world(on)
   w.files.set(`${CWD}/.thimble-chat/corrections.json`, JSON.stringify([{ old: BAD, new: FIXED, at: 1 }]))
   await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
   const ui = (await $.ui.mount(MESSAGE(REPLY))) as unknown as M
   const para = JSON.stringify(await ui.find({ key: 'para-3' }))
   expect(para).toContain('[[1013|card:abc123#revisions/probier]]')
-  expect(para).toContain('(corrected)')
+  expect(para).not.toContain('corrected')
   expect(para).not.toContain('1014')
   expect(para).not.toContain('"state":"problem"')
   await ui.unmount()
@@ -224,7 +256,7 @@ test('a verification script is asked of a forked subagent, never as a prompt to 
   await pane.press({ key: 'verify' })
   expect(w.submitted).toEqual([])
   expect(w.spawned[0]?.subagentType).toBe('fork')
-  expect(w.spawned[0]?.description).toBe('thimble-chat verification of 13403')
+  expect(w.spawned[0]?.description).toBe('verification · checking 13403')
   expect(w.spawned[0]?.prompt).toContain(`verification script of ${dse.raw}`)
   expect(w.spawned[0]?.prompt).toMatch(/Write it at \.thimble-chat\/verify\/v-\w+\.py/)
   expect(await pane.find({ type: 'Text', text: /could not start a subagent/ })).toBeDefined()
@@ -234,13 +266,40 @@ test('a verification script is asked of a forked subagent, never as a prompt to 
 test("a row of main's chat that a subagent of the mod causes is one dim line", async ($, on) => {
   world(on)
   await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
-  const note = (await $.ui.mount({ plugin: 'thimble-chat', component: 'UserMessage', requestId: 'u1', surface: 'terminal', viewport: { columns: 140, rows: 40 }, props: { text: 'Agent "thimble-chat side thread: the card" completed', origin: { kind: 'task-notification' }, isExpanded: false, task: { id: 'agent-x', status: 'completed' } } } as never)) as unknown as M
-  expect(await note.find({ type: 'Text', text: /› thimble-chat: a subagent finished/ })).toBeDefined()
+  const note = (await $.ui.mount({ plugin: 'thimble-chat', component: 'UserMessage', requestId: 'u1', surface: 'terminal', viewport: { columns: 140, rows: 40 }, props: { text: 'Agent "side thread · why is dse so large?" completed', origin: { kind: 'task-notification' }, isExpanded: false, task: { id: 'agent-x', status: 'completed' } } } as never)) as unknown as M
+  expect(await note.find({ type: 'Text', text: /› a thimble-chat subagent · finished/ })).toBeDefined()
   await note.unmount()
   const other = (await $.ui.mount({ plugin: 'thimble-chat', component: 'UserMessage', requestId: 'u2', surface: 'terminal', viewport: { columns: 140, rows: 40 }, props: { text: 'Agent "explore" completed', origin: { kind: 'task-notification' }, isExpanded: false, task: { id: 'agent-y', status: 'completed' } } } as never)) as unknown as M
   expect(await other.find({ type: 'Text', text: /the engine row/ })).toBeDefined()
   await other.unmount()
-  const row = (await $.ui.mount({ plugin: 'thimble-chat', component: 'ToolUse', requestId: 'tu1', surface: 'terminal', viewport: { columns: 140, rows: 40 }, props: { tool_use_id: 'tu1', tool: 'Agent', input: { description: 'thimble-chat fix of 2 problems', prompt: 'x' }, isRunning: true, isErrored: false, isInterrupted: false } } as never)) as unknown as M
-  expect(await row.find({ type: 'Text', text: /› thimble-chat fix of 2 problems …/ })).toBeDefined()
+  const row = (await $.ui.mount({ plugin: 'thimble-chat', component: 'ToolUse', requestId: 'tu1', surface: 'terminal', viewport: { columns: 140, rows: 40 }, props: { tool_use_id: 'tu1', tool: 'Agent', input: { description: 'verification · correcting citations', prompt: 'x' }, isRunning: true, isErrored: false, isInterrupted: false } } as never)) as unknown as M
+  expect(await row.find({ type: 'Text', text: /› verification · correcting citations …/ })).toBeDefined()
   await row.unmount()
+})
+
+test('a verification is drawn on its citation: a spinner while it runs, ✗ and red when it recomputed another value, else ✓', async ($, on) => {
+  const w = world(on)
+  await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
+  const dse = citations(REPLY)[1]!
+  const script = `${CWD}/.thimble-chat/verify/v-${cid(dse.raw)}.py`
+  let ui = (await $.ui.mount(MESSAGE(REPLY))) as unknown as M
+  const ev = { button: 'left', shift: false, ctrl: false, alt: false, type: 'press' }
+  await ui.post({ type: 'gesture', origin: 'o1', gestures: [{ seq: 1, gesture: 'primary', target: { kind: 'citation', ref: dse.raw }, ev }] }, { in: 'para-2' })
+  await ui.unmount()
+  const pane = (await $.ui.mount({ plugin: 'thimble-chat', component: 'Pane', requestId: 'thimble-cite', surface: 'terminal', viewport: { columns: 100, rows: 30 }, props: { bodyColumns: 96, bodyRows: 28 } } as never)) as unknown as M
+  await pane.press({ key: 'verify' })
+  w.files.set(script, 'print("RESULT: 13400")')
+  w.verifyOut = 'RESULT: 13400\n'
+  await pane.press({ key: 'rerun' })
+  await pane.unmount()
+  ui = (await $.ui.mount(MESSAGE(REPLY))) as unknown as M
+  expect(JSON.stringify(await ui.find({ key: 'para-2' }))).toContain('"label":"13403","state":"failed","mark":"✗","spin":false')
+  await ui.unmount()
+  w.verifyOut = 'RESULT: 13403\n'
+  const again = (await $.ui.mount({ plugin: 'thimble-chat', component: 'Pane', requestId: 'thimble-cite', surface: 'terminal', viewport: { columns: 100, rows: 30 }, props: { bodyColumns: 96, bodyRows: 28 } } as never)) as unknown as M
+  await again.press({ key: 'rerun' })
+  await again.unmount()
+  ui = (await $.ui.mount(MESSAGE(REPLY))) as unknown as M
+  expect(JSON.stringify(await ui.find({ key: 'para-2' }))).toContain('"label":"13403","state":"link","mark":"✓","spin":false')
+  await ui.unmount()
 })

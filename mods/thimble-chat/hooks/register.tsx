@@ -10,10 +10,10 @@
 // - Citations: every [[...]] of a reply is drawn as a link (para.tsx, cite.ts), red when helper/resolve.py finds the
 //   ref missing or without its value. The citation panel shows the cited lines, highlighted.
 // - Fix rounds: when a reply has red citations or a card that cannot be drawn, a forked subagent corrects them, out of
-//   main's chat; each corrected passage is drawn in place, marked, and main is told in a note it reads but the analyst
-//   does not see. A red citation shows a spinner while the fork works and a static marker when the fix failed.
+//   main's chat; each corrected sentence replaces the old one in place, unmarked, and main is told in a note it reads
+//   but the analyst does not see. A red citation shows a spinner while the fork works, and ✗ when the fix failed.
 // - Verification scripts: a forked subagent writes a standalone script that recomputes a cited value; the mod runs it
-//   and marks the citation ✓ or ✗. The panel shows the script and its output.
+//   and marks the citation ✓, or ✗ and red. A spinner shows meanwhile. The panel shows the script and its output.
 // - Gestures (gestures.tsx): every target (card, mark, sentence, citation, row, record, node) takes the same clicks;
 //   a right-click opens the menu of every action.
 // - Side threads (threads.tsx): a subagent answers out of main's chat; its result is offered back as one line. Every
@@ -23,7 +23,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, RenderElement, ResolveInput } from 'claude-code'
 
 import type { ChatAgent, ChatCorrection, ChatFixItem, ChatRun, ChatThread, ChatVerdict, ChatVerify } from '../types'
-import { FAILED_MARK, applyCorrections, blockLayout, chipSegs, chipState, fixItems, fixPrompt, fixedCard, parseFix, settleFix, verifyMark } from './cite'
+import { applyCorrections, blockLayout, chipLook, chipSegs, chipState, fixItems, fixPrompt, fixedCard, parseFix, settleFix } from './cite'
 import type { ChipView, Problem } from './cite'
 import { cardLayout, cut } from './draw'
 import type { CardData, CardMeta } from './draw'
@@ -32,7 +32,7 @@ import type { Citation } from './lib'
 import { COLORS, paintLine, paintLines } from './paint'
 import { cardOf, citationOf, citeText, menuItems, placeOf, targetLabel } from './gestures'
 import type { Act, Gesture, PointerEv, Sent, Target } from './gestures'
-import { AGENT_PREFIX, forkPrompt, freshPrompt, lastTurn, threadFile, withGuide } from './threads'
+import { MOD_AGENT, fixName, forkPrompt, freshPrompt, lastTurn, threadFile, threadName, verifyName, withGuide } from './threads'
 
 type Dollar = EngineInterface
 
@@ -64,7 +64,6 @@ const MENU_PANE = 'thimble-menu'
 const HOME = '.thimble-chat'
 const CARD_MAX_COLS = 120
 const GUIDE_MARK = '# thimble-chat\n'
-const MOD_AGENT = new RegExp(`${AGENT_PREFIX} (side thread|fix of|verification of)`)
 const STATUS_WORDS: Record<string, string> = {
   ok: 'resolves, and the value is there',
   differs: 'resolves, but the value is not there',
@@ -226,9 +225,9 @@ async function problemsOf($: Dollar, text: string): Promise<Problem[]> {
 
 // ------------------------------------------------------------------------------------------------ the mod's subagents
 
-/** Start a subagent of the mod: a fork of main, or where a fork is refused a general-purpose one given `fresh`. */
-async function spawnSub($: Dollar, prompt: string, description: string, fresh: string): Promise<{ agentId: string; engine: string } | { deny: string }> {
-  const desc = `${AGENT_PREFIX} ${description}`
+/** Start a subagent of the mod, named `desc` (threads.tsx): a fork of main, or where a fork is refused a
+ *  general-purpose one given `fresh`. */
+async function spawnSub($: Dollar, prompt: string, desc: string, fresh: string): Promise<{ agentId: string; engine: string } | { deny: string }> {
   let engine = 'fork'
   let r = await $.agent.spawn({ prompt, description: desc, subagentType: 'fork' }).catch((err: unknown) => ({ deny: String(err) }))
   if (r.deny !== undefined || !('agentId' in r) || !r.agentId) {
@@ -267,7 +266,7 @@ async function startFix($: Dollar, text: string, endRow: string): Promise<void> 
   const items = fixItems(text, problems)
   await setFix($, items, 'fixing')
   const prompt = fixPrompt(items)
-  const label = `fix of ${items.length} problem${items.length === 1 ? '' : 's'}`
+  const label = fixName(items)
   const r = await spawnSub($, prompt, label, withGuide(await ensureGuide($), `${prompt}\n\nThe reply:\n${text}`))
   if ('deny' in r) {
     await setFix($, items, 'failed', `could not start a subagent: ${r.deny}`)
@@ -276,7 +275,7 @@ async function startFix($: Dollar, text: string, endRow: string): Promise<void> 
   await $.state.set({ ...AGENTS, id: r.agentId }, { kind: 'fix', label, items, reply: text, endRow })
 }
 
-/** The fix round answered: each corrected passage that now checks is drawn in place; the others stay red, marked. */
+/** The fix round answered: each corrected sentence that now checks replaces the old one; the others stay red, ✗. */
 async function fixComplete($: Dollar, a: ChatAgent, reason: string, answer: string): Promise<void> {
   const items = a.items ?? []
   const got = reason === 'answer' ? parseFix(answer, items.length) : items.map(() => ({ ok: false as const, why: `the fix ended: ${reason}` }))
@@ -299,7 +298,7 @@ async function fixComplete($: Dollar, a: ChatAgent, reason: string, answer: stri
   const made: ChatCorrection[] = out.corrections.map(c => ({ ...c, at }))
   const notes = out.notes
   // a card's script may have changed values the reply cites
-  const reply = applyCorrections(a.reply ?? '', made, false)
+  const reply = applyCorrections(a.reply ?? '', made)
   const cs = citations(reply)
   remember(cs, reply)
   await check($, cs.filter(c => c.ref.startsWith('card:')))
@@ -312,7 +311,7 @@ async function fixComplete($: Dollar, a: ChatAgent, reason: string, answer: stri
       await $.state.set({ ...ENDS, id: a.endRow }, { ...end, ids: cs.map(c => cid(c.raw)) })
       try {
         const file = `${cwd}/${end.file}`
-        await $.fs.write(file, applyCorrections(await $.fs.read(file), made, false))
+        await $.fs.write(file, applyCorrections(await $.fs.read(file), made))
       } catch {
         // the answer file keeps the reply as it was
       }
@@ -368,7 +367,7 @@ async function askVerify($: Dollar, id: string): Promise<void> {
   const script = scriptPath(id)
   await $.state.set({ ...VERIFY, id }, { id, state: 'asked', script, expected: c.display })
   const prompt = verifyPrompt(c, v, replyOf.get(id) ?? '', script)
-  const label = `verification of ${chipLabel(c)}`
+  const label = verifyName(chipLabel(c))
   const r = await spawnSub($, prompt, label, withGuide(await ensureGuide($), prompt))
   if ('deny' in r) {
     await $.state.set({ ...VERIFY, id }, { id, state: 'error', script, expected: c.display, stderr: `could not start a subagent: ${r.deny}` })
@@ -523,7 +522,7 @@ async function askThread($: Dollar, id: string, q: string, guide: string): Promi
   // Each question starts a fresh fork that carries the exchange so far. A follow-up sent to the finished subagent
   // ($.session.send) resumes it, but its end then reaches main as a task notification, and main answers it in its
   // chat; a fork started by $.agent.spawn ends without one.
-  const label = `side thread: ${clip(t.label, 40)}`
+  const label = threadName(q)
   const r = await spawnSub($, forkPrompt(t, q.trim()), label, freshPrompt(t, q.trim(), guide))
   if ('deny' in r) {
     await setThread($, lastTurn(t, { state: 'error', a: `could not start a subagent: ${r.deny}` }))
@@ -573,9 +572,11 @@ function chipDecoration(raw: string, start = 0): { start: number; end: number; u
   return { start, end: start + raw.length, underline: true, color: COLORS.link }
 }
 
-function fixWords(fix: { state: string; why?: string } | undefined): string {
-  if (fix?.state === 'fixing') return 'being fixed…'
-  if (fix?.state === 'failed') return `couldn't fix: ${fix.why ?? 'no reason given'}`
+/** What a citation's fix round says while it runs, or after it failed on a citation that is still red. */
+function fixNote(status: string | undefined, fix: { state: string; why?: string } | undefined): string {
+  const st = chipState(status, fix?.state)
+  if (st === 'fixing') return 'being fixed…'
+  if (st === 'failed') return `the fix failed: ${fix?.why ?? 'no reason given'}`
   return ''
 }
 
@@ -593,9 +594,9 @@ async function chipView($: Dollar, c: Citation): Promise<{ view: ChipView; id: s
   const v = (await $.state.get({ ...VERDICTS, id })).value
   const run = (await $.state.get({ ...VERIFY, id })).value
   const fix = (await $.state.get({ ...FIXES, id })).value
-  const state = chipState(v?.status, fix?.state)
-  const tip = [placeName(c.ref), state === 'link' && v?.status !== 'ok' ? '' : v?.why, state === 'fixing' || state === 'failed' ? fixWords(fix) : '', verifyWords(run)].filter(Boolean).join(' · ')
-  return { id, view: { label: chipLabel(c), state, mark: verifyMark(run?.state), tip } }
+  const look = chipLook(v?.status, fix?.state, run?.state)
+  const tip = [placeName(c.ref), look.state === 'link' && v?.status !== 'ok' ? '' : v?.why, fixNote(v?.status, fix), verifyWords(run)].filter(Boolean).join(' · ')
+  return { id, view: { label: chipLabel(c), ...look, tip } }
 }
 
 // ------------------------------------------------------------------------------------------------ drawing a reply
@@ -628,7 +629,7 @@ async function drawReply($: Dollar, e: ResolveInput, text: string, width: number
       const f = await cardFile($, block.id)
       if (!f.data) {
         const fix = (await $.state.get({ ...FIXES, id: `card-${block.id}` })).value
-        const more = fix?.state === 'fixing' ? ' · being fixed…' : fix?.state === 'failed' ? ` · ${FAILED_MARK}: ${fix.why ?? ''}` : ''
+        const more = fix?.state === 'fixing' ? ' · being fixed…' : fix?.state === 'failed' ? ' ✗' : ''
         push(<Text color={COLORS.problem} wrap="wrap">{`▍ Card ${order} cannot be drawn: ${f.why}${more}`}</Text>)
         continue
       }
@@ -1032,16 +1033,17 @@ export const register: Register = on => {
       for (const id of end.ids) {
         const v = (await $.state.get({ ...VERDICTS, id })).value
         const f = (await $.state.get({ ...FIXES, id })).value
-        left[chipState(v?.status, f?.state)]++
+        const r = (await $.state.get({ ...VERIFY, id })).value
+        left[chipState(v?.status, f?.state, r?.state)]++
       }
+      const red = left.problem + left.failed
       const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? '' : 's'}`
       out.push(
         <Box marginTop={1}>
           <Text wrap="truncate-end">
             <Text dimColor>{[plural(end.ids.length, 'citation'), ...(end.cards.length ? [plural(end.cards.length, 'card')] : []), `saved as ${end.file}`].join(' · ')}</Text>
             {left.fixing ? <Text dimColor>{` · fixing ${left.fixing}…`}</Text> : null}
-            {left.problem ? <Text color={COLORS.problem}>{` · ${plural(left.problem, 'problem')}`}</Text> : null}
-            {left.failed ? <Text color={COLORS.problem}>{` · ${left.failed} couldn't be fixed`}</Text> : null}
+            {red ? <Text color={COLORS.problem}>{` · ${plural(red, 'problem')}`}</Text> : null}
           </Text>
         </Box>,
       )
@@ -1063,7 +1065,7 @@ export const register: Register = on => {
     const a = await agentOf($, e.props.task?.id)
     if (!a && !MOD_AGENT.test(e.props.text)) return next(e)
     const { Text } = $.ui.resolve(e)
-    return <Text dimColor wrap="truncate-end">{`› ${AGENT_PREFIX}: ${a?.label ?? 'a subagent'} finished`}</Text>
+    return <Text dimColor wrap="truncate-end">{`› ${a?.label ?? 'a thimble-chat subagent'} · finished`}</Text>
   })
 
   on('ui.render', { component: 'ToolUse', props: { tool: 'Agent' } }, async ($, e, next) => {
@@ -1116,12 +1118,12 @@ export const register: Register = on => {
     const run = (await $.state.get({ ...VERIFY, id })).value
     const fix = (await $.state.get({ ...FIXES, id })).value
     const status = v?.status ?? 'pending'
-    const state = chipState(status, fix?.state)
+    const look = chipLook(status, fix?.state, run?.state)
     const body: RenderElement[] = []
-    body.push(paintLine(Text, [...chipSegs({ label: chipLabel(c), state, mark: verifyMark(run?.state), tip: '' }, false), { s: `  ${STATUS_WORDS[status] ?? status}` }]))
+    body.push(paintLine(Text, [...chipSegs({ label: chipLabel(c), ...look, tip: '' }, false), { s: `  ${STATUS_WORDS[status] ?? status}` }]))
     body.push(<Text dimColor wrap="truncate-end">{clip(c.ref.startsWith('card:') ? placeName(c.ref) : c.raw, cols)}</Text>)
-    if (v?.why) body.push(<Text color={state === 'link' ? COLORS.dim : COLORS.problem} wrap="truncate-end">{clip(v.why, cols)}</Text>)
-    if (state === 'fixing' || state === 'failed') body.push(<Text color={COLORS.problem} wrap="wrap">{fixWords(fix)}</Text>)
+    if (v?.why) body.push(<Text color={status === 'missing' || status === 'differs' ? COLORS.problem : COLORS.dim} wrap="truncate-end">{clip(v.why, cols)}</Text>)
+    if (fixNote(status, fix)) body.push(<Text color={COLORS.problem} wrap="wrap">{fixNote(status, fix)}</Text>)
     if (!v) body.push(<Text dimColor>checking…</Text>)
     else if (v.kind === 'value' || v.kind === 'card') {
       const card = v.card ? await loadCard($, v.card) : null

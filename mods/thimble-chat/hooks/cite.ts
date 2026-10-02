@@ -1,45 +1,55 @@
 // Citations as the analyst sees them (no `$`), shared by the hooks module, para.tsx and the tests.
 //
 // - Display: every citation is a plain underlined link. Only a problem has colour: red when the value is not at the
-//   cited place or the place does not exist, with a spinner beside it while a fix round works on it and a static
-//   marker when the fix failed. A verification adds ✓ or ✗ after it.
+//   cited place or the place does not exist. A spinner follows a citation while a fix round or its verification works
+//   on it; then ✓ when its verification recomputed the value, or ✗ (and red) when the verification recomputed another
+//   value or the fix round could not correct it.
 // - Layout: a reply's paragraph or table wrapped to its width, with where each citation, word and table row lands, so
 //   a pointer finds what it is over.
-// - Fix rounds: the passages a forked subagent is asked to correct, its answer read, and the corrections drawn in place.
+// - Fix rounds: the sentences a forked subagent is asked to rewrite, its answer read, and each corrected sentence put
+//   in place of the old one, unmarked.
 import type { ChatCorrection, ChatFixItem } from '../types'
 import { cut, lineWidth, width } from './draw'
 import type { Line, Seg } from './draw'
-import { EMBED_RE, citations, sentenceOf } from './lib'
+import { EMBED_RE, citations } from './lib'
 import type { Citation, Run, TableRuns } from './lib'
 import { COLORS } from './paint'
 
 /** `link` for every citation without a problem (checked, unchecked or not checked yet); `problem` when the value is
- *  not at the place or the place does not exist; `fixing` while a fix round runs on it; `failed` when the fix failed. */
+ *  not at the place or the place does not exist; `fixing` while a fix round runs on it; `failed` when the fix round
+ *  could not correct it or its verification recomputed another value. */
 export type ChipState = 'link' | 'problem' | 'fixing' | 'failed'
-export type ChipView = { label: string; state: ChipState; mark: string; tip: string }
+/** `mark` is ✓, ✗ or nothing; `spin` while a fix round or a verification works on the citation. */
+export type ChipView = { label: string; state: ChipState; mark: string; spin: boolean; tip: string }
 
 export const SPIN = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
-export const FAILED_MARK = "⚠ couldn't fix"
-export const CORRECTED_MARK = '*(corrected)*'
 
-/** How a citation is drawn, from the resolver's status and its fix round's state. */
-export function chipState(status: string | undefined, fix: string | undefined): ChipState {
+/** How a citation is drawn, from the resolver's status, its fix round's state and its verification's state. */
+export function chipState(status: string | undefined, fix: string | undefined, verify?: string): ChipState {
   if (fix === 'fixing') return 'fixing'
+  if (verify === 'refuted') return 'failed'
   if (status !== 'missing' && status !== 'differs') return 'link'
   return fix === 'failed' ? 'failed' : 'problem'
 }
 
-/** The mark a verification leaves after a citation: ✓ when its script recomputed the value, ✗ when not. */
-export function verifyMark(state: string | undefined): string {
-  return state === 'verified' ? '✓' : state === 'refuted' ? '✗' : ''
+/** A verification is working while its subagent writes the script or the mod runs it. */
+export function verifying(verify: string | undefined): boolean {
+  return verify === 'asked' || verify === 'running'
 }
 
-/** A citation as styled segments: the underlined label, then its mark, spinner or failure marker. */
+/** The state, mark and spinner of a citation. */
+export function chipLook(status: string | undefined, fix: string | undefined, verify: string | undefined): Pick<ChipView, 'state' | 'mark' | 'spin'> {
+  const state = chipState(status, fix, verify)
+  const spin = state === 'fixing' || verifying(verify)
+  const mark = spin ? '' : state === 'failed' ? '✗' : state === 'link' && verify === 'verified' ? '✓' : ''
+  return { state, mark, spin }
+}
+
+/** A citation as styled segments: the underlined label, then its spinner or its mark. */
 export function chipSegs(c: ChipView, hover: boolean, frame = 0): Seg[] {
   const segs: Seg[] = [{ s: c.label, fg: c.state === 'link' ? COLORS.link : COLORS.problem, u: true, inv: hover }]
-  if (c.mark) segs.push({ s: c.mark, fg: c.mark === '✓' ? COLORS.ok : COLORS.problem })
-  if (c.state === 'fixing') segs.push({ s: ` ${SPIN[frame % SPIN.length]}`, fg: COLORS.problem })
-  if (c.state === 'failed') segs.push({ s: ` ${FAILED_MARK}`, fg: COLORS.problem })
+  if (c.spin) segs.push({ s: ` ${SPIN[frame % SPIN.length]}`, fg: c.state === 'link' ? COLORS.dim : COLORS.problem })
+  else if (c.mark) segs.push({ s: c.mark, fg: c.mark === '✓' ? COLORS.ok : COLORS.problem })
   return segs
 }
 
@@ -70,7 +80,7 @@ export function paraLayout(
   let k = 0
   for (const r of block.runs) {
     if (r.cite) {
-      const c = chips[k] ?? { label: r.text, state: 'link', mark: '', tip: '' }
+      const c: ChipView = chips[k] ?? { label: r.text, state: 'link', mark: '', spin: false, tip: '' }
       toks.push({ segs: chipSegs(c, k === hover, frame), space: false, chip: k, at: source.length })
       source += r.cite.raw
       k++
@@ -153,7 +163,7 @@ export function mdTableLayout(table: TableRuns, chips: ChipView[], cols: number,
     row.map(cell =>
       cell.map(run => {
         if (run.cite) {
-          const c = chips[k] ?? { label: run.text, state: 'link', mark: '', tip: '' }
+          const c: ChipView = chips[k] ?? { label: run.text, state: 'link', mark: '', spin: false, tip: '' }
           const on = k === hover
           return { segs: chipSegs(c, on, frame), chip: k++ }
         }
@@ -266,12 +276,25 @@ export function passageAt(lay: ParaLayout, x: number, y: number): { kind: 'row' 
 
 export type Problem = { cite: Citation; why: string } | { card: string; why: string }
 
+/** The sentence of a text that holds a citation: within its line, without the line's Markdown lead (a list marker, a
+ *  heading's #, a quote's >), so the sentence put in its place keeps the lead; a table's row whole. */
+export function sentenceIn(text: string, raw: string): string {
+  const at = text.indexOf(raw)
+  if (at < 0) return ''
+  const start = text.lastIndexOf('\n', at - 1) + 1
+  const nl = text.indexOf('\n', at)
+  const line = text.slice(start, nl < 0 ? undefined : nl)
+  if (/^\s*\|/.test(line)) return line.trim()
+  const lead = /^\s*(?:(?:[-*+]|\d+[.)]|#{1,6})\s+|>\s*)*/.exec(line)?.[0].length ?? 0
+  return sentenceAt(line.slice(lead), at - start - lead)
+}
+
 /** The passages of a reply to correct: each problem citation's sentence (one item per sentence, however many of its
  *  citations fail), and each card that cannot be drawn by its embed line. */
 export function fixItems(text: string, problems: Problem[]): ChatFixItem[] {
   const items: ChatFixItem[] = []
   for (const p of problems) {
-    const old = 'card' in p ? `[[card:${p.card}]]` : sentenceOf(text, p.cite.raw) || p.cite.raw
+    const old = 'card' in p ? `[[card:${p.card}]]` : sentenceIn(text, p.cite.raw) || p.cite.raw
     let it = items.find(x => x.old === old)
     if (!it) {
       it = { old, problems: [], cites: [] }
@@ -288,12 +311,14 @@ export function fixItems(text: string, problems: Problem[]): ChatFixItem[] {
   return items
 }
 
-/** What the fix round's forked subagent is asked: each passage and its problems, answered one line per passage. */
+/** What the fix round's forked subagent is asked: each passage and its problems, answered with each sentence
+ *  rewritten whole, one line per passage. */
 export function fixPrompt(items: ChatFixItem[]): string {
   return [
     "thimble-chat: your last reply has problems the analyst sees in red. Fix them here: rerun or fix a card's script, or cite the value the place shows. Do not change the corpus; write only under .thimble-chat/.",
     ...items.map((it, i) => `${i + 1}. ${it.old}\n   ${it.problems.map(p => (p.raw === it.old ? p.why : `${p.raw}: ${p.why}`)).join('; ')}`),
-    'Then answer with one line per item and nothing else: `<n>: <the corrected text, citations included>`, or `<n>: CANNOT <why>`.',
+    'Then answer with one line per item and nothing else: `<n>: <the corrected item>`, or `<n>: CANNOT <why>`.',
+    'thimble-chat puts each corrected item in place of the old one. Give a sentence whole, rewritten so that every word of it agrees with the corrected values (a comparison, a ranking, a share such as "about a third"), its citations included; a table row whole, its cells between | as before; a card by its embed line.',
   ].join('\n')
 }
 
@@ -319,17 +344,21 @@ export function parseFix(answer: string, n: number): FixAnswer[] {
   })
 }
 
-/** A reply's text with its corrections drawn in place, each corrected passage marked (a card's embed line, which
- *  must stay alone on its line, is not). */
-export function applyCorrections(text: string, corrections: readonly ChatCorrection[], mark = true): string {
+/** A reply's text with each corrected passage in place of the old one, unmarked. */
+export function applyCorrections(text: string, corrections: readonly ChatCorrection[]): string {
   let out = text
   for (const c of corrections) {
     if (!c.old || !out.includes(c.old)) continue
-    const embed = EMBED_RE.test(c.new)
-    const next = mark && !embed ? `${c.new} ${CORRECTED_MARK}` : c.new
-    out = out.replace(c.old, () => next)
+    out = out.replace(c.old, () => c.new)
   }
   return out
+}
+
+/** A text's words and numbers outside its citations. */
+function prose(s: string): string {
+  return citations(s)
+    .reduce((t, c) => t.replace(c.raw, ' '), s)
+    .replace(/[^\p{L}\p{N}]+/gu, '')
 }
 
 /** The card a card item names after its fix: the one its corrected embed line names, else its own. */
@@ -339,10 +368,10 @@ export function fixedCard(it: ChatFixItem, g: FixAnswer): string {
 
 export type FixOutcome = { corrections: { old: string; new: string }[]; states: { state: 'fixed' | 'failed'; why?: string }[]; notes: string[] }
 
-/** What a fix round's answer comes to, item by item: a correction drawn in place when everything it cites checks (or,
- *  for a card, when the card now draws), else the item stays red with why. `verdict` is the check of a citation of a
- *  corrected text, `cardError` why a card cannot be drawn ('' when it can); a passage not in `reply` cannot be
- *  corrected in place. */
+/** What a fix round's answer comes to, item by item: a correction put in place when it is a whole sentence (not a bare
+ *  value) and everything it cites checks (or, for a card, when the card now draws), else the item stays red with why.
+ *  `verdict` is the check of a citation of a corrected text, `cardError` why a card cannot be drawn ('' when it can);
+ *  a passage not in `reply` cannot be corrected in place. */
 export function settleFix(
   items: ChatFixItem[],
   got: FixAnswer[],
@@ -368,6 +397,7 @@ export function settleFix(
     }
     if (!g.ok) return fail(g.why, `"${it.old}": ${g.why}`)
     if (reply !== undefined && !reply.includes(it.old)) return fail('the cited passage is not in the reply as written', `"${it.old}": it is not in the reply as written`)
+    if (prose(it.old) && !prose(g.text)) return fail('the fix gave a value, not the whole sentence', `"${it.old}": the fix gave a value, not the whole sentence`)
     for (const c of citations(g.text)) {
       const v = verdict(c.raw)
       if (v?.status === 'missing' || v?.status === 'differs') return fail(`the correction still does not check (${c.raw}: ${v.why})`, `"${it.old}": the correction still does not check`)
