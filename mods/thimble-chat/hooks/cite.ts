@@ -2,32 +2,44 @@
 //
 // - Display: every citation is a plain underlined link. Only a problem has colour: red when the value is not at the
 //   cited place or the place does not exist. A spinner follows a citation while a fix round or its verification works
-//   on it; then ✓ when its verification recomputed the value, or ✗ (and red) when the verification recomputed another
-//   value or the fix round could not correct it.
-// - Layout: a reply's paragraph or table wrapped to its width, with where each citation, word and table row lands, so
-//   a pointer finds what it is over.
+//   on it; then ✓ when its verification recomputed the value, or ✗ (and red) when the verification failed (another
+//   value, a crash, no script written) or the fix round could not correct it.
+// - Layout: a reply's paragraph or table wrapped to its width, a citation's shown value whole and wrapping like the
+//   words around it, with where each citation, word and table row lands, so a pointer finds what it is over.
 // - Fix rounds: the sentences a forked subagent is asked to rewrite, its answer read, and each corrected sentence put
 //   in place of the old one, unmarked.
+// - Streaming: a reply's text as the engine shows it while it streams, citations as links and card lines as
+//   placeholders, before the mod draws the finished block.
 import type { ChatCorrection, ChatFixItem } from '../types'
 import { cut, lineWidth, width } from './draw'
 import type { Line, Seg } from './draw'
-import { EMBED_RE, citations } from './lib'
+import { EMBED_RE, chipLabel, citations } from './lib'
 import type { Citation, Run, TableRuns } from './lib'
 import { COLORS } from './paint'
 
 /** `link` for every citation without a problem (checked, unchecked or not checked yet); `problem` when the value is
  *  not at the place or the place does not exist; `fixing` while a fix round runs on it; `failed` when the fix round
- *  could not correct it or its verification recomputed another value. */
+ *  could not correct it or its verification failed (another value, a crash, no script). */
 export type ChipState = 'link' | 'problem' | 'fixing' | 'failed'
 /** `mark` is ✓, ✗ or nothing; `spin` while a fix round or a verification works on the citation. */
 export type ChipView = { label: string; state: ChipState; mark: string; spin: boolean; tip: string }
 
+/** What a citation's link says: its shown value whole, or a short name of the place for one without a value. */
+export function citeLabel(c: Citation): string {
+  return c.display ?? chipLabel(c)
+}
+
 export const SPIN = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
+
+/** A verification that failed: its script recomputed another value, crashed, printed no result, or was never written. */
+export function verifyFailed(verify: string | undefined): boolean {
+  return verify === 'refuted' || verify === 'error' || verify === 'missing'
+}
 
 /** How a citation is drawn, from the resolver's status, its fix round's state and its verification's state. */
 export function chipState(status: string | undefined, fix: string | undefined, verify?: string): ChipState {
   if (fix === 'fixing') return 'fixing'
-  if (verify === 'refuted') return 'failed'
+  if (verifyFailed(verify)) return 'failed'
   if (status !== 'missing' && status !== 'differs') return 'link'
   return fix === 'failed' ? 'failed' : 'problem'
 }
@@ -63,7 +75,113 @@ export type ParaLayout = { lines: Line[]; spans: ChipSpan[]; words: WordSpan[]; 
 
 const segsWidth = (segs: Seg[]) => segs.reduce((n, s) => n + width(s.s), 0)
 
-/** A rich block wrapped to `cols`: words flow, each citation is one link that never breaks. */
+/** A word or a space of a flowing text. `chip` is the citation it belongs to (-1 for none); a citation's words wrap like
+ *  any others, its mark or spinner stays with its last word. `at` is where a plain word starts in the source. */
+type Tok = { segs: Seg[]; space: boolean; chip: number; at: number }
+
+/** Runs as words and spaces, their citations numbered from `k0`; `bold` for a heading or a table's header. */
+function tokens(runs: Run[], chips: ChipView[], k0: number, hover: number, frame: number, bold: boolean): { toks: Tok[]; source: string; next: number } {
+  const toks: Tok[] = []
+  let source = ''
+  let k = k0
+  for (const r of runs) {
+    if (r.cite) {
+      const c: ChipView = chips[k] ?? { label: citeLabel(r.cite), state: 'link', mark: '', spin: false, tip: '' }
+      const [label, ...after] = chipSegs(c, k === hover, frame)
+      const parts = label!.s.split(/(\s+)/).filter(Boolean)
+      parts.forEach((part, i) => {
+        const space = /^\s+$/.test(part)
+        const segs: Seg[] = [{ ...label!, s: space ? ' ' : part }]
+        if (i === parts.length - 1) segs.push(...after)
+        toks.push({ segs, space, chip: k, at: source.length })
+      })
+      source += r.cite.raw
+      k++
+      continue
+    }
+    let at = source.length
+    for (const part of r.text.split(/(\s+)/)) {
+      if (!part) continue
+      const space = /^\s+$/.test(part)
+      const style: Seg = { s: space ? ' ' : part }
+      if (r.b || bold) style.b = true
+      if (r.i) style.i = true
+      if (r.u) style.u = true
+      if (r.code) style.fg = COLORS.code
+      toks.push({ segs: [style], space, chip: -1, at })
+      at += part.length
+    }
+    source += r.text
+  }
+  return { toks, source, next: k }
+}
+
+/** Words and spaces wrapped to `room` columns, x from 0: each citation's cells as spans, each plain word's place. A word
+ *  longer than the line is cut into pieces. */
+function flow(toks: Tok[], room: number): { lines: Line[]; spans: ChipSpan[]; words: WordSpan[] } {
+  const lines: Line[] = []
+  const spans: ChipSpan[] = []
+  const words: WordSpan[] = []
+  let cur: Line = []
+  let used = 0
+  const span = (x0: number, x1: number, chip: number) => {
+    const last = spans.at(-1)
+    if (last && last.chip === chip && last.line === lines.length && last.x1 === x0) last.x1 = x1
+    else spans.push({ line: lines.length, x0, x1, chip })
+  }
+  const newLine = () => {
+    while (cur.length && cur.at(-1)!.s === ' ') cur.pop()
+    const last = spans.at(-1)
+    if (last && last.line === lines.length) last.x1 = Math.min(last.x1, lineWidth(cur))
+    lines.push(cur)
+    cur = []
+    used = 0
+  }
+  let glued = false // the token before was a word: no break before this one, unless its group is wider than a line
+  let groupAt = 0
+  toks.forEach((t, n) => {
+    const w = segsWidth(t.segs)
+    if (t.space) {
+      glued = false
+      if (used > 0 && used + 1 <= room) {
+        cur.push(t.segs[0]!)
+        if (t.chip >= 0) span(used, used + 1, t.chip)
+        used += 1
+      }
+      return
+    }
+    if (!glued) {
+      // a group of words with no space between ("[[value|ref]]," or "(value)") wraps whole
+      let gw = 0
+      for (let j = n; j < toks.length && !toks[j]!.space; j++) gw += segsWidth(toks[j]!.segs)
+      if (used > 0 && used + gw > room) newLine()
+      groupAt = used
+    } else if (groupAt === 0 && used > 0 && used + w > room) newLine()
+    glued = true
+    const [seg, ...after] = t.segs
+    let s = seg!.s
+    let at = t.at
+    while (width(s) > room) {
+      const head = cut(s, room + 1).slice(0, -1) || [...s][0]!
+      if (t.chip >= 0) span(used, used + width(head), t.chip)
+      else words.push({ line: lines.length, x0: used, x1: used + width(head), at })
+      cur.push({ ...seg!, s: head })
+      newLine()
+      s = s.slice(head.length)
+      at += head.length
+    }
+    const piece: Seg[] = [{ ...seg!, s }, ...after]
+    const pw = segsWidth(piece)
+    if (t.chip >= 0) span(used, used + pw, t.chip)
+    else words.push({ line: lines.length, x0: used, x1: used + width(s), at })
+    cur.push(...piece)
+    used += pw
+  })
+  if (cur.length || lines.length === 0) newLine()
+  return { lines, spans, words }
+}
+
+/** A rich block wrapped to `cols`: words flow, a citation's words with them, each citation one link. */
 export function paraLayout(
   block: { prefix: string; heading: number; quote: boolean; runs: Run[] },
   chips: ChipView[],
@@ -74,112 +192,34 @@ export function paraLayout(
   const lead = block.quote ? '│ ' : block.prefix
   const indent = block.quote ? '│ ' : ' '.repeat(width(block.prefix))
   const room = Math.max(10, cols - width(lead))
-  type Tok = { segs: Seg[]; space: boolean; chip: number; at: number }
-  const toks: Tok[] = []
-  let source = ''
-  let k = 0
-  for (const r of block.runs) {
-    if (r.cite) {
-      const c: ChipView = chips[k] ?? { label: r.text, state: 'link', mark: '', spin: false, tip: '' }
-      toks.push({ segs: chipSegs(c, k === hover, frame), space: false, chip: k, at: source.length })
-      source += r.cite.raw
-      k++
-      continue
-    }
-    let at = source.length
-    for (const part of r.text.split(/(\s+)/)) {
-      if (!part) continue
-      const space = /^\s+$/.test(part)
-      const style: Seg = { s: space ? ' ' : part }
-      if (r.b || block.heading) style.b = true
-      if (r.i) style.i = true
-      if (r.u) style.u = true
-      if (r.code) style.fg = COLORS.code
-      toks.push({ segs: [style], space, chip: -1, at })
-      at += part.length
-    }
-    source += r.text
-  }
+  const { toks, source } = tokens(block.runs, chips, 0, hover, frame, block.heading > 0)
+  const f = flow(toks, room)
   const x0 = width(lead)
-  const lines: Line[] = []
-  const spans: ChipSpan[] = []
-  const words: WordSpan[] = []
-  let cur: Line = []
-  let used = 0
-  const newLine = () => {
-    while (cur.length && cur.at(-1)!.s === ' ') cur.pop()
-    lines.push(cur)
-    cur = []
-    used = 0
-  }
-  for (const t of toks) {
-    const w = segsWidth(t.segs)
-    if (t.space) {
-      if (used > 0 && used + 1 <= room) {
-        cur.push(t.segs[0]!)
-        used += 1
-      }
-      continue
-    }
-    if (used > 0 && used + w > room) newLine()
-    if (t.chip >= 0) {
-      spans.push({ line: lines.length, x0: x0 + used, x1: x0 + used + w, chip: t.chip })
-      cur.push(...t.segs)
-      used += w
-      continue
-    }
-    // a word longer than the line is cut into pieces
-    const seg = t.segs[0]!
-    let s = seg.s
-    let at = t.at
-    while (width(s) > room) {
-      const head = cut(s, room + 1).slice(0, -1)
-      words.push({ line: lines.length, x0: x0 + used, x1: x0 + used + width(head), at })
-      cur.push({ ...seg, s: head })
-      newLine()
-      s = s.slice(head.length)
-      at += head.length
-    }
-    words.push({ line: lines.length, x0: x0 + used, x1: x0 + used + width(s), at })
-    cur.push({ ...seg, s })
-    used += width(s)
-  }
-  if (cur.length || lines.length === 0) newLine()
   const dimLead: Seg = { s: lead, fg: block.quote ? COLORS.dim : undefined, b: !block.quote && block.heading > 0 }
   return {
-    lines: lines.map((l, i) => [i === 0 ? dimLead : { s: indent, fg: block.quote ? COLORS.dim : undefined }, ...l]),
-    spans,
-    words,
+    lines: f.lines.map((l, i) => [i === 0 ? dimLead : { s: indent, fg: block.quote ? COLORS.dim : undefined }, ...l]),
+    spans: f.spans.map(s => ({ ...s, x0: s.x0 + x0, x1: s.x1 + x0 })),
+    words: f.words.map(w => ({ ...w, x0: w.x0 + x0, x1: w.x1 + x0 })),
     source,
   }
 }
 
 /** A table block in aligned columns, the header bold over a rule, each citation one link. Columns wider than `cols`
- *  allows are narrowed from the widest, their text cut; a citation is never cut (one that does not fit is left out). */
+ *  allows are narrowed from the widest, and a cell's words (a citation's too) wrap within its column. */
 export function mdTableLayout(table: TableRuns, chips: ChipView[], cols: number, hover: number, frame = 0): ParaLayout {
   const GAP = 2
   let k = 0
-  const grid: { segs: Seg[]; chip: number }[][][] = table.rows.map((row, r) =>
-    row.map(cell =>
-      cell.map(run => {
-        if (run.cite) {
-          const c: ChipView = chips[k] ?? { label: run.text, state: 'link', mark: '', spin: false, tip: '' }
-          const on = k === hover
-          return { segs: chipSegs(c, on, frame), chip: k++ }
-        }
-        const seg: Seg = { s: run.text.replace(/\s+/g, ' ') }
-        if (run.b || r === 0) seg.b = true
-        if (run.i) seg.i = true
-        if (run.u) seg.u = true
-        if (run.code) seg.fg = COLORS.code
-        return { segs: [seg], chip: -1 }
-      }),
-    ),
+  const grid = table.rows.map((row, r) =>
+    row.map(cell => {
+      const t = tokens(cell, chips, k, hover, frame, r === 0)
+      k = t.next
+      return t.toks
+    }),
   )
   const rowSource = table.rows.map(row => row.map(cell => cell.map(run => (run.cite ? run.cite.raw : run.text)).join('')).join(' | '))
   const ncol = Math.max(...grid.map(r => r.length))
-  const cellW = (cell: { segs: Seg[] }[] | undefined) => (cell ?? []).reduce((n, p) => n + lineWidth(p.segs), 0)
-  const w = Array.from({ length: ncol }, (_, c) => Math.max(1, ...grid.map(r => cellW(r[c]))))
+  const natural = (toks: Tok[] | undefined) => lineWidth(flow(toks ?? [], 1e9).lines[0] ?? [])
+  const w = Array.from({ length: ncol }, (_, c) => Math.max(1, ...grid.map(r => natural(r[c]))))
   const room = Math.max(ncol, cols - GAP * (ncol - 1))
   while (w.reduce((a, b) => a + b, 0) > room) {
     const widest = w.indexOf(Math.max(...w))
@@ -190,36 +230,30 @@ export function mdTableLayout(table: TableRuns, chips: ChipView[], cols: number,
   const spans: ChipSpan[] = []
   const rows: string[] = []
   grid.forEach((row, r) => {
-    const line: Line = []
-    let x = 0
-    for (let c = 0; c < ncol; c++) {
-      const parts = row[c] ?? []
-      const fill = Math.max(0, w[c]! - cellW(parts))
-      const align = table.align[c] ?? 'left'
-      const before = align === 'right' ? fill : align === 'center' ? Math.floor(fill / 2) : 0
-      if (c > 0) {
-        line.push({ s: ' '.repeat(GAP) })
-        x += GAP
-      }
-      if (before) line.push({ s: ' '.repeat(before) })
-      let used = before
-      for (const p of parts) {
-        const pw = lineWidth(p.segs)
-        if (used + pw > w[c]!) {
-          if (p.chip >= 0 || w[c]! - used < 2) break
-          line.push({ ...p.segs[0]!, s: cut(p.segs[0]!.s, w[c]! - used) })
-          used = w[c]!
-          break
+    const cells = Array.from({ length: ncol }, (_, c) => flow(row[c] ?? [], w[c]!))
+    const height = Math.max(...cells.map(f => f.lines.length))
+    for (let i = 0; i < height; i++) {
+      const line: Line = []
+      let x = 0
+      for (let c = 0; c < ncol; c++) {
+        const f = cells[c]!
+        const part = f.lines[i] ?? []
+        const fill = Math.max(0, w[c]! - lineWidth(part))
+        const align = table.align[c] ?? 'left'
+        const before = align === 'right' ? fill : align === 'center' ? Math.floor(fill / 2) : 0
+        if (c > 0) {
+          line.push({ s: ' '.repeat(GAP) })
+          x += GAP
         }
-        if (p.chip >= 0) spans.push({ line: lines.length, x0: x + used, x1: x + used + pw, chip: p.chip })
-        line.push(...p.segs)
-        used += pw
+        if (before) line.push({ s: ' '.repeat(before) })
+        for (const s of f.spans) if (s.line === i) spans.push({ line: lines.length, x0: x + before + s.x0, x1: x + before + s.x1, chip: s.chip })
+        line.push(...part)
+        if (fill - before) line.push({ s: ' '.repeat(fill - before) })
+        x += w[c]!
       }
-      if (w[c]! > used) line.push({ s: ' '.repeat(w[c]! - used) })
-      x += w[c]!
+      lines.push(line)
+      rows.push(rowSource[r] ?? '')
     }
-    lines.push(line)
-    rows.push(rowSource[r] ?? '')
     if (r === 0 && grid.length > 1) {
       lines.push([{ s: w.map(n => '─'.repeat(n)).join(' '.repeat(GAP)), fg: COLORS.rule }])
       rows.push('')
@@ -406,5 +440,95 @@ export function settleFix(
     out.states.push({ state: 'fixed' })
     out.notes.push(`"${it.old}" now reads "${g.text}"`)
   })
+  return out
+}
+
+// ---------------------------------------------------------------------------------------- while a reply streams
+
+/** One text block of a reply as it streams: what the model wrote (`raw`), what the engine was handed to show
+ *  (`shown`), and how far the finished lines go (`done`: their length in `raw`, `doneShown` as shown). */
+export type Streaming = { raw: string; shown: string; done: number; doneShown: string; fence: boolean }
+
+export function streaming(): Streaming {
+  return { raw: '', shown: '', done: 0, doneShown: '', fence: false }
+}
+
+/** How a streaming reply shows a citation and a card's embed line: `link` gives a citation's Markdown, `card` the
+ *  placeholder line of a card by its id. */
+export type StreamLook = { link: (c: Citation) => string; card: (id: string) => string }
+
+// the start of a line that may still turn out to be a card's embed line
+const EMBED_PREFIX = /^\s*(?:\[(?:\[(?:c(?:a(?:r(?:d(?::[A-Za-z0-9_-]*(?:\](?:\]\s*)?)?)?)?)?)?)?)?|!(?:\[.*)?)$/
+
+/** A citation as a Markdown link the engine underlines: its label escaped, to the file of its place. */
+export function streamLink(c: Citation, url: string): string {
+  return `[${citeLabel(c).replace(/[\\[\]*_`<>]/g, m => `\\${m}`)}](${url})`
+}
+
+/** A line outside a fence, each whole citation outside code drawn by `link`. On an unfinished line (`partial`), the text
+ *  from a citation or a code span that has not closed yet (it may still) is held back: `text` is what shows now. */
+function streamLine(line: string, partial: boolean, look: StreamLook): string {
+  let out = ''
+  let i = 0
+  while (i < line.length) {
+    const ch = line[i]!
+    if (ch === '`') {
+      const j = line.indexOf('`', i + 1)
+      if (j >= 0) {
+        out += line.slice(i, j + 1)
+        i = j + 1
+        continue
+      }
+      if (partial) return out
+    } else if (ch === '[' && line[i + 1] === '[') {
+      const j = line.indexOf(']]', i + 2)
+      const inner = j >= 0 ? line.slice(i + 2, j) : ''
+      const c = j >= 0 && inner.trim() && !/[[\]]/.test(inner) ? citations(`[[${inner}]]`)[0] : undefined
+      if (c) {
+        out += look.link(c)
+        i = j + 2
+        continue
+      }
+      if (partial && j < 0 && /^[^[\]]*\]?$/.test(line.slice(i + 2))) return out
+    } else if (ch === '[' && partial && i === line.length - 1) return out
+    out += ch
+    i++
+  }
+  return out
+}
+
+/** A finished line as it shows: a fence's lines as written, a card's embed line as its placeholder, else its citations
+ *  as links. */
+function streamDone(st: Streaming, line: string, look: StreamLook): string {
+  if (/^\s*```/.test(line)) {
+    st.fence = !st.fence
+    return line
+  }
+  if (st.fence) return line
+  const embed = EMBED_RE.exec(line)
+  if (embed) return look.card((embed[1] ?? embed[2])!)
+  return streamLine(line, false, look)
+}
+
+/** More of a block's text arrived (or, with `end`, the block is whole): the text to hand the engine now, so that what
+ *  it shows never holds a citation's raw spelling. Finished lines are final; of the line still being written, a
+ *  citation, code span or embed line not yet closed waits. */
+export function streamStep(st: Streaming, more: string, end: boolean, look: StreamLook): string {
+  st.raw += more
+  let nl = st.raw.indexOf('\n', st.done)
+  while (nl >= 0) {
+    st.doneShown += `${streamDone(st, st.raw.slice(st.done, nl), look)}\n`
+    st.done = nl + 1
+    nl = st.raw.indexOf('\n', st.done)
+  }
+  const rest = st.raw.slice(st.done)
+  let now = st.doneShown
+  if (end) now += rest ? streamDone(st, rest, look) : ''
+  else if (st.fence) now += rest
+  else if (!EMBED_PREFIX.test(rest)) now += streamLine(rest, true, look)
+  // what was handed over stands (the record is put back as written at its append)
+  if (!now.startsWith(st.shown)) return ''
+  const out = now.slice(st.shown.length)
+  st.shown = now
   return out
 }

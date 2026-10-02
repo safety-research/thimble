@@ -4,7 +4,9 @@ import type { On } from 'claude-code'
 import { expect, mock, test } from 'claude-code/testing'
 import type { Mounted } from 'claude-code/testing'
 
-import { SPIN, applyCorrections, chipLook, chipSegs, chipState, fixItems, fixPrompt, paraLayout, parseFix, passageAt, sentenceAt, sentenceIn, settleFix } from '../hooks/cite'
+import { SPIN, applyCorrections, blockLayout, chipLook, chipSegs, chipState, fixItems, fixPrompt, paraLayout, parseFix, passageAt, sentenceAt, sentenceIn, settleFix, streamLink, streamStep, streaming } from '../hooks/cite'
+import type { ChipView } from '../hooks/cite'
+import { lineWidth } from '../hooks/draw'
 import { fixName, threadName, verifyName } from '../hooks/threads'
 import { cid, citations, parseReply } from '../hooks/lib'
 import { COLORS } from '../hooks/paint'
@@ -116,7 +118,8 @@ test('a citation is an underlined link; a problem is red; a spinner while it is 
   expect(chipLook('ok', undefined, 'refuted')).toEqual({ state: 'failed', mark: '✗', spin: false })
   expect(chipLook('ok', undefined, 'running')).toEqual({ state: 'link', mark: '', spin: true })
   expect(chipLook('ok', undefined, 'asked')).toEqual({ state: 'link', mark: '', spin: true })
-  expect(chipLook('ok', undefined, 'error')).toEqual({ state: 'link', mark: '', spin: false })
+  expect(chipLook('ok', undefined, 'error')).toEqual({ state: 'failed', mark: '✗', spin: false })
+  expect(chipLook('ok', undefined, 'missing')).toEqual({ state: 'failed', mark: '✗', spin: false })
   expect(chipLook('differs', 'fixing', undefined)).toEqual({ state: 'fixing', mark: '', spin: true })
   expect(chipLook('differs', 'failed', undefined)).toEqual({ state: 'failed', mark: '✗', spin: false })
   const link = chipSegs({ label: '412', state: 'link', mark: '', spin: false, tip: '' }, false)
@@ -302,4 +305,144 @@ test('a verification is drawn on its citation: a spinner while it runs, ✗ and 
   ui = (await $.ui.mount(MESSAGE(REPLY))) as unknown as M
   expect(JSON.stringify(await ui.find({ key: 'para-2' }))).toContain('"label":"13403","state":"link","mark":"✓","spin":false')
   await ui.unmount()
+})
+
+// ------------------------------------------------------------------------------------------------ verification failures
+
+test('a verification script that crashes or is never written fails: ✗ and red, and the panel says why', async ($, on) => {
+  const w = world(on)
+  await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
+  const dse = citations(REPLY)[1]!
+  const script = `${CWD}/.thimble-chat/verify/v-${cid(dse.raw)}.py`
+  let ui = (await $.ui.mount(MESSAGE(REPLY))) as unknown as M
+  const ev = { button: 'left', shift: false, ctrl: false, alt: false, type: 'press' }
+  await ui.post({ type: 'gesture', origin: 'o1', gestures: [{ seq: 1, gesture: 'primary', target: { kind: 'citation', ref: dse.raw }, ev }] }, { in: 'para-2' })
+  await ui.unmount()
+  const PANE = { plugin: 'thimble-chat', component: 'Pane', requestId: 'thimble-cite', surface: 'terminal', viewport: { columns: 100, rows: 30 }, props: { bodyColumns: 96, bodyRows: 28 } } as never
+  let pane = (await $.ui.mount(PANE)) as unknown as M
+  await pane.press({ key: 'verify' })
+  // never written: run it, and there is no script
+  await pane.press({ key: 'rerun' })
+  expect(await pane.find({ type: 'Text', text: /^✗ not written: there is no \.thimble-chat\/verify\/v-\w+\.py/ })).toBeDefined()
+  await pane.unmount()
+  ui = (await $.ui.mount(MESSAGE(REPLY))) as unknown as M
+  expect(JSON.stringify(await ui.find({ key: 'para-2' }))).toContain('"label":"13403","state":"failed","mark":"✗","spin":false')
+  await ui.unmount()
+  // written, and it crashes (the engine's process.run answers exit 1, "no such script")
+  w.files.set(script, 'import nope')
+  pane = (await $.ui.mount(PANE)) as unknown as M
+  await pane.press({ key: 'rerun' })
+  expect(await pane.find({ type: 'Text', text: /^✗ crashed: \.thimble-chat\/verify\/v-\w+\.py exited with 1 \(no such script\)/ })).toBeDefined()
+  await pane.unmount()
+  ui = (await $.ui.mount(MESSAGE(REPLY))) as unknown as M
+  const para = JSON.stringify(await ui.find({ key: 'para-2' }))
+  expect(para).toContain('"label":"13403","state":"failed","mark":"✗","spin":false')
+  expect(para).toContain('script crashed')
+  await ui.unmount()
+})
+
+// ------------------------------------------------------------------------------------------------ long citations
+
+test('a long quoted citation shows whole, its words wrapping like the words around it, each piece the one link', () => {
+  const quote = '"answered wrong before discovering proxy settings in the second week"'
+  const block = parseReply(`The agent [[${quote}|events.jsonl#L4]] and then stopped.`)[0] as Parameters<typeof paraLayout>[0]
+  const chips: ChipView[] = [{ label: quote, state: 'link', mark: '✓', spin: false, tip: '' }]
+  const lay = paraLayout(block, chips, 30, -1)
+  const lines = lay.lines.map(l => l.map(x => x.s).join(''))
+  expect(lines.join(' ').replace(/\s+/g, ' ')).toBe(`The agent ${quote}✓ and then stopped.`)
+  expect(lines.every(l => l.length <= 30)).toBe(true)
+  const mine = lay.spans.filter(x => x.chip === 0)
+  expect(mine.length).toBeGreaterThan(1)
+  // every cell a span covers is the link's, underlined
+  for (const sp of mine) {
+    let x = 0
+    for (const seg of lay.lines[sp.line]!) {
+      for (const _ of seg.s) {
+        if (x >= sp.x0 && x < sp.x1 && seg.s !== '✓') expect(seg.u).toBe(true)
+        x++
+      }
+    }
+  }
+  // punctuation right after a citation wraps with it, never alone at a line's start
+  const glued = paraLayout(parseReply('aaaa bbbb [[12345|x.csv#row=1]], cc')[0] as Parameters<typeof paraLayout>[0], [], 15, -1)
+  expect(glued.lines.map(l => l.map(x => x.s).join(''))).toEqual(['aaaa bbbb', '12345, cc'])
+  // hovering any piece lights the whole citation
+  const lit = paraLayout(block, chips, 30, 0)
+  expect(lit.lines.flat().filter(x => x.inv).map(x => x.s).join(' ').replace(/\s+/g, ' ')).toBe(quote)
+  // in a narrow table the quote wraps in its column, the citation never left out
+  const table = parseReply(['| who | said |', '|---|---|', `| a1 | [[${quote}|events.jsonl#L4]] |`].join('\n'))[0] as Parameters<typeof blockLayout>[0]
+  const tl = blockLayout(table, chips, 32, -1)
+  expect(tl.lines.every(l => lineWidth(l) <= 32)).toBe(true)
+  expect(tl.lines.map(l => l.map(x => x.s).join('')).join(' ').replace(/\s+/g, ' ')).toContain(`a1 ${quote.slice(0, 10)}`)
+  expect(tl.lines.flat().map(x => x.s).join('').replace(/\s+/g, '')).toContain(`${quote.replace(/\s+/g, '')}✓`)
+  expect(new Set(tl.spans.filter(x => x.chip === 0).map(x => x.line)).size).toBeGreaterThan(1)
+  expect(tl.rows!.filter(r => r.includes('a1')).length).toBe(tl.lines.length - 2)
+})
+
+// ------------------------------------------------------------------------------------------------ while a reply streams
+
+test('a streaming reply shows each citation as a link, never its raw spelling; an unclosed one waits; a card line is a placeholder', () => {
+  const look = { link: (c: { display: string | null; ref: string }) => `<${c.display ?? c.ref}>`, card: (id: string) => `▍ card ${id}` }
+  const st = streaming()
+  const pieces = ['dse has [[134', '03|card:abc123#revisions/dse]] rev', 'isions.\n[[card:ab', 'c123]]\n| a | [[1|x.csv#row=1]] |\n```\n[[raw|kept]]\n```\nsee `[[a|b]]` and [', '[2|y.json#/a]]']
+  const outs = pieces.map(p => streamStep(st, p, false, look))
+  expect(outs[0]).toBe('dse has ')
+  expect(outs[2]).toBe('isions.\n')
+  outs.push(streamStep(st, '', true, look))
+  expect(outs.join('')).toBe('dse has <13403> revisions.\n▍ card abc123\n| a | <1> |\n```\n[[raw|kept]]\n```\nsee `[[a|b]]` and <2>')
+  expect(st.raw).toBe(pieces.join(''))
+  // an unclosed citation at the block's end is handed over as written
+  const open = streaming()
+  expect(streamStep(open, 'cut [[12|a.csv', false, look)).toBe('cut ')
+  expect(streamStep(open, '', true, look)).toBe('[[12|a.csv')
+  expect(streamLink({ raw: '', display: '"a [b]_c"', ref: 'p.jsonl#L2' }, 'file:///w/p.jsonl')).toBe('["a \\[b\\]\\_c"](file:///w/p.jsonl)')
+})
+
+test('while main streams, the engine is handed links and placeholders; the row is stored as written; the answer file holds the answer alone', async ($, on) => {
+  const w = world(on)
+  const stored: string[] = []
+  let chunks: { kind: string; index?: number; text?: string; id?: string; name?: string }[] = []
+  on('turn.step', async function* ($, e) {
+    for (const c of chunks) yield c as never
+    return { turnId: e.turnId, index: e.index, answer: '', toolUses: [], stopReason: 'end_turn', usage: null } as never
+  })
+  // the kit stores no row (nothing beneath answers session.append, and an answer without next is skipped): the test
+  // reads what reaches the bottom, and the append's rejection is expected
+  on('session.append', ($, e, next) => {
+    for (const b of e.message.content as { type: string; text?: string }[]) if (b.type === 'text') stored.push(b.text!)
+    return next(e)
+  })
+  const step = async (index: number) => {
+    const got: { kind: string; index: number; text?: string }[] = []
+    for await (const c of $.turn.step({ turnId: 't1', index, model: 'm', messageCount: 1 } as never)) got.push(c as never)
+    return got
+  }
+  const append = (uuid: string, content: unknown[]) =>
+    $.session.append({ message: { type: 'assistant', role: 'assistant', content }, door: 'response', origin: { kind: 'model', model: 'm' }, uuid } as never).catch(() => undefined)
+  await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
+  await $.turn.start({ text: 'which wiki?', turnId: 't1' } as never)
+  chunks = [{ kind: 'text', index: 0, text: 'Reading the four files.' }, { kind: 'tool', index: 1, id: 'tu1', name: 'Bash' }]
+  const first = await step(0)
+  expect(first.map(c => c.kind)).toEqual(['text', 'tool'])
+  await append('r1', [{ type: 'text', text: first[0]!.text }])
+  await append('r2', [{ type: 'tool_use', id: 'tu1', name: 'Bash', input: {} }])
+  // the reply arrives in pieces cut inside its citations and its card line
+  const cuts = [3, 11, 40, 47, 70, 95]
+  chunks = cuts.map((at, i) => ({ kind: 'text', index: 0, text: REPLY.slice(at, cuts[i + 1]) }))
+  chunks.unshift({ kind: 'text', index: 0, text: REPLY.slice(0, 3) })
+  chunks.push({ kind: 'stop', stopReason: 'end_turn', usage: null } as never)
+  const second = await step(1)
+  const shown = second.filter(c => c.kind === 'text').map(c => c.text).join('')
+  expect(second.at(-1)!.kind).toBe('stop')
+  expect(shown).not.toMatch(/\[\[/)
+  expect(shown.split('\n')[0]).toBe('▍ *Which wikis have the most revisions?*')
+  expect(shown).toContain(`dse has [13403](file://${CWD}/.thimble-chat/cards/abc123.json) of [14416](file://${CWD}/.thimble-chat/cards/abc123.json) revisions.`)
+  expect(shown).toContain(`see [pages:3](file://${CWD}/pages.jsonl).`)
+  await append('r3', [{ type: 'text', text: shown }])
+  expect(stored.at(-1)).toBe(REPLY)
+  await $.turn.complete({ turnId: 't1', answer: shown, durationMs: 5, reason: 'answer' } as never)
+  const saved = [...w.files.entries()].filter(([k]) => k.includes('/.thimble-chat/answers/'))
+  expect(saved.length).toBe(1)
+  expect(saved[0]![1]).toBe(`# which wiki?\n\n${REPLY}\n`)
+  expect(saved[0]![1]).not.toContain('Reading the four files.')
 })

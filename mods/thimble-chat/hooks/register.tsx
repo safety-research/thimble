@@ -19,12 +19,14 @@
 // - Side threads (threads.tsx): a subagent answers out of main's chat; its result is offered back as one line. Every
 //   row a subagent of the mod causes in main's chat is drawn as one dim line.
 // - Bash results: each output is saved (.thimble-chat/calls/<id>.json) and main is told its ref, so it can cite a line.
+// - While a reply streams, the engine is handed its text with each citation as a Markdown link and each card's embed
+//   line as a placeholder (turn.step), so no raw [[...]] shows; the row is stored as the model wrote it (session.append).
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, RenderElement, ResolveInput } from 'claude-code'
 
 import type { ChatAgent, ChatCorrection, ChatFixItem, ChatRun, ChatThread, ChatVerdict, ChatVerify } from '../types'
-import { applyCorrections, blockLayout, chipLook, chipSegs, chipState, fixItems, fixPrompt, fixedCard, parseFix, settleFix } from './cite'
-import type { ChipView, Problem } from './cite'
+import { applyCorrections, blockLayout, chipLook, chipSegs, chipState, citeLabel, fixItems, fixPrompt, fixedCard, paraLayout, parseFix, settleFix, streamLink, streamStep, streaming, verifyFailed } from './cite'
+import type { ChipView, Problem, StreamLook, Streaming } from './cite'
 import { cardLayout, cut } from './draw'
 import type { CardData, CardMeta } from './draw'
 import { chipLabel, cid, citations, clip, embeddedCards, forMain, fromMod, needsDrawing, parseReply, scriptResult, sentenceOf, shownMatches, takeawayAfter, threadBody, validateCard, valueIn } from './lib'
@@ -308,10 +310,12 @@ async function fixComplete($: Dollar, a: ChatAgent, reason: string, answer: stri
     await $.fs.write(`${cwd}/${HOME}/corrections.json`, JSON.stringify(all, null, 1)).catch(() => undefined)
     const end = a.endRow ? (await $.state.get({ ...ENDS, id: a.endRow })).value : undefined
     if (end && a.endRow) {
-      await $.state.set({ ...ENDS, id: a.endRow }, { ...end, ids: cs.map(c => cid(c.raw)) })
       try {
         const file = `${cwd}/${end.file}`
-        await $.fs.write(file, applyCorrections(await $.fs.read(file), made))
+        const saved = applyCorrections(await $.fs.read(file), made)
+        await $.fs.write(file, saved)
+        // the summary counts the answer's citations, the file's text after its heading
+        await $.state.set({ ...ENDS, id: a.endRow }, { ...end, ids: citations(saved.slice(saved.indexOf('\n\n') + 2)).map(c => cid(c.raw)) })
       } catch {
         // the answer file keeps the reply as it was
       }
@@ -425,6 +429,15 @@ async function runVerify($: Dollar, id: string): Promise<void> {
   }
 }
 
+/** Why a verification that ended in `error` failed: it crashed, printed no result, or never started. */
+function verifyError(run: ChatVerify): string {
+  const last = (run.stderr ?? '').trim().split('\n').at(-1) ?? ''
+  if (!run.source) return `failed: ${clip(run.stderr || 'the script could not be read', 300)}`
+  if (run.exitCode === undefined) return `crashed: ${run.script} could not run${last ? ` (${clip(last, 160)})` : ''}`
+  if (run.exitCode !== 0) return `crashed: ${run.script} exited with ${run.exitCode}${last ? ` (${clip(last, 160)})` : ''}`
+  return `failed: ${run.script} printed no RESULT line`
+}
+
 function verifyWords(run: ChatVerify | undefined): string {
   if (!run) return ''
   switch (run.state) {
@@ -433,13 +446,13 @@ function verifyWords(run: ChatVerify | undefined): string {
     case 'refuted':
       return `script recomputed ${run.result}, not ${run.expected}`
     case 'error':
-      return 'script failed'
+      return run.source ? 'script crashed' : 'script failed to start'
     case 'asked':
       return 'script being written'
     case 'running':
       return 'script running'
     case 'missing':
-      return 'no script written'
+      return 'script not written'
     default:
       return ''
   }
@@ -596,7 +609,7 @@ async function chipView($: Dollar, c: Citation): Promise<{ view: ChipView; id: s
   const fix = (await $.state.get({ ...FIXES, id })).value
   const look = chipLook(v?.status, fix?.state, run?.state)
   const tip = [placeName(c.ref), look.state === 'link' && v?.status !== 'ok' ? '' : v?.why, fixNote(v?.status, fix), verifyWords(run)].filter(Boolean).join(' · ')
-  return { id, view: { label: chipLabel(c), ...look, tip } }
+  return { id, view: { label: citeLabel(c), ...look, tip } }
 }
 
 // ------------------------------------------------------------------------------------------------ drawing a reply
@@ -876,11 +889,44 @@ async function act($: Dollar, what: Act, t: Target): Promise<void> {
   }
 }
 
+// ------------------------------------------------------------------------------------------------ while a reply streams
+
+const asWritten = new Map<string, string>() // a text block as the engine was handed it while it streamed -> as written
+
+/** The file a citation's place is in, as a file: URL, the target of its link while the reply streams. */
+function placeUrl(ref: string): string {
+  const [base = ''] = ref.split('#', 1)
+  const m = /^(card|call):([A-Za-z0-9_-]+)$/.exec(base)
+  const file = m ? `${cwd}/${HOME}/${m[1]}s/${m[2]}.json` : base.startsWith('/') ? base : `${cwd}/${base}`
+  return `file://${encodeURI(file).replace(/[()]/g, ch => `%${ch.charCodeAt(0).toString(16)}`)}`
+}
+
+/** How a streaming reply shows citations and card lines; the cards' questions are read before (`questions`). */
+function streamLook(questions: Map<string, string>): StreamLook {
+  return {
+    link: c => streamLink(c, placeUrl(c.ref)),
+    card: id => {
+      const q = questions.get(id)
+      return `▍ *${q ? q.replace(/[\\[\]*_`<>]/g, m => `\\${m}`) : 'drawing the card…'}*`
+    },
+  }
+}
+
+/** The text rows of a turn in main, split at each tool call: the last part holds the answer. */
+type Part = { texts: string[]; rows: string[] }
+
+/** The part of a turn that is its answer: the last one that cites or embeds a card, else the last one. Earlier parts
+ *  are what main wrote while it worked ("Reading the files…"). */
+function answerPart(parts: Part[]): Part | undefined {
+  const full = parts.filter(p => p.texts.some(t => t.trim()))
+  return [...full].reverse().find(p => needsDrawing(p.texts.join('\n\n'))) ?? full.at(-1)
+}
+
 // ------------------------------------------------------------------------------------------------ register
 
 export const register: Register = on => {
   let turnText: string[] = []
-  let turnRows: string[] = [] // the uuids of this turn's text rows in main
+  let turnParts: Part[] = [{ texts: [], rows: [] }] // this turn's text rows in main (their text and uuids), by part
   let turnPrompt = ''
 
   on('session.start', async ($, e, next) => {
@@ -967,24 +1013,62 @@ export const register: Register = on => {
 
   on('turn.start', async ($, e, next) => {
     turnText = []
-    turnRows = []
+    turnParts = [{ texts: [], rows: [] }]
     turnPrompt = e.text
     return next(e)
   })
 
-  on('session.append', async ($, e, next) => {
-    const stored = await next(e)
-    if (e.agentId !== undefined) await threadAppend($, e.agentId, e.door, e.message.content)
-    if (e.door === 'response' && e.agentId === undefined && Array.isArray(e.message.content)) {
-      let has = false
-      for (const b of e.message.content as { type?: string; text?: string }[]) {
-        if (b.type === 'text' && typeof b.text === 'string' && b.text.trim()) {
-          turnText.push(b.text)
-          has = true
-        }
+  // main's reply as it streams: citations as links and card lines as placeholders, never their raw spelling
+  on('turn.step', async function* ($, e, next) {
+    if (e.agentId !== undefined) return yield* next(e)
+    await paths($)
+    const blocks = new Map<number, Streaming>()
+    const questions = new Map<string, string>()
+    const look = streamLook(questions)
+    const end = (i: number, st: Streaming) => {
+      const out = streamStep(st, '', true, look)
+      if (st.shown !== st.raw) {
+        asWritten.set(st.shown, st.raw)
+        if (asWritten.size > 50) asWritten.delete(asWritten.keys().next().value!)
       }
-      if (has && 'uuid' in stored && typeof stored.uuid === 'string') turnRows.push(stored.uuid)
+      return out ? [{ kind: 'text' as const, index: i, text: out }] : []
     }
+    for await (const ch of next(e)) {
+      if (ch.kind === 'text') {
+        const st = blocks.get(ch.index) ?? streaming()
+        blocks.set(ch.index, st)
+        for (const m of `${st.raw.slice(st.done)}${ch.text}`.matchAll(/\[\[card:([A-Za-z0-9_-]+)\]\]/g)) {
+          if (!questions.has(m[1]!)) questions.set(m[1]!, (await cardFile($, m[1]!)).data?.question ?? '')
+        }
+        const out = streamStep(st, ch.text, false, look)
+        if (out === ch.text) yield ch
+        else if (out) yield { ...ch, text: out }
+        continue
+      }
+      // a block ends before anything else of the response passes: what it held back is handed over
+      for (const [i, st] of blocks) yield* end(i, st)
+      blocks.clear()
+      yield ch
+    }
+    for (const [i, st] of blocks) yield* end(i, st)
+  })
+
+  on('session.append', async ($, e, next) => {
+    let msg = e.message
+    if (e.door === 'response' && e.agentId === undefined && Array.isArray(msg.content)) {
+      // a block of main's reply is stored as the model wrote it, not as it showed while it streamed
+      const shown = msg.content as { type?: string; text?: string }[]
+      const blocks = shown.map(b => (b.type === 'text' && typeof b.text === 'string' && asWritten.has(b.text) ? { ...b, text: asWritten.get(b.text)! } : b))
+      if (blocks.some((b, i) => b !== shown[i])) msg = { ...msg, content: blocks as typeof msg.content }
+      const part = turnParts.at(-1)!
+      const texts = blocks.flatMap(b => (b.type === 'text' && typeof b.text === 'string' && b.text.trim() ? [b.text] : []))
+      turnText.push(...texts)
+      part.texts.push(...texts)
+      if (texts.length) part.rows.push(e.uuid)
+      if (blocks.some(b => b.type === 'tool_use')) turnParts.push({ texts: [], rows: [] })
+    }
+    const stored = await next(msg === e.message ? e : { ...e, message: msg })
+    if (e.agentId !== undefined) await threadAppend($, e.agentId, e.door, e.message.content)
     return stored
   })
 
@@ -1016,23 +1100,26 @@ export const register: Register = on => {
       await check($, cs) // again, at the turn's end: a card may have changed since the block was drawn
       await $.state.set({ plugin: 'thimble-chat', key: 'turn' }, { id: e.turnId, ids: cs.map(c => cid(c.raw)) })
     }
-    // the answer as a file the analyst owns, and a summary line under its last row
-    const cardsOf = embeddedCards(text)
-    if (cardsOf.length) lastCards = cardsOf
-    if (text.trim() && (cs.length || cardsOf.length) && !fromMod(turnPrompt)) {
+    // the answer (not what main wrote while it worked) as a file the analyst owns, and a summary line under its last row
+    const part = answerPart(turnParts)
+    const answer = part ? part.texts.join('\n\n') : e.answer
+    const answerCites = citations(answer)
+    const cardsOf = embeddedCards(answer)
+    if (embeddedCards(text).length) lastCards = embeddedCards(text)
+    const lastRow = part?.rows.at(-1) ?? ''
+    if (answer.trim() && (answerCites.length || cardsOf.length) && !fromMod(turnPrompt)) {
       await paths($)
       const stamp = new Date(await $.clock.now()).toISOString().replace(/[-:]/g, '').replace(/\..*$/, '').replace('T', '-')
       const file = `${HOME}/answers/${stamp}.md`
       try {
-        await $.fs.write(`${cwd}/${file}`, `# ${turnPrompt.split('\n')[0] ?? ''}\n\n${text}\n`)
+        await $.fs.write(`${cwd}/${file}`, `# ${turnPrompt.split('\n')[0] ?? ''}\n\n${answer}\n`)
       } catch {
         // the answer stays in the transcript
       }
-      const lastRow = turnRows.at(-1)
-      if (lastRow) await $.state.set({ ...ENDS, id: lastRow }, { ids: cs.map(c => cid(c.raw)), cards: cardsOf, file })
+      if (lastRow) await $.state.set({ ...ENDS, id: lastRow }, { ids: answerCites.map(c => cid(c.raw)), cards: cardsOf, file })
     }
     // a card that cannot be drawn or a citation that fails goes to a fix round, out of main's chat
-    if (text.trim() && !fromMod(turnPrompt)) await startFix($, text, turnRows.at(-1) ?? '')
+    if (text.trim() && !fromMod(turnPrompt)) await startFix($, text, lastRow)
     return done
   })
 
@@ -1142,7 +1229,8 @@ export const register: Register = on => {
     const status = v?.status ?? 'pending'
     const look = chipLook(status, fix?.state, run?.state)
     const body: RenderElement[] = []
-    body.push(paintLine(Text, [...chipSegs({ label: chipLabel(c), ...look, tip: '' }, false), { s: `  ${STATUS_WORDS[status] ?? status}` }]))
+    const head = paraLayout({ prefix: '', heading: 0, quote: false, runs: [{ text: citeLabel(c), cite: c }, { text: ` · ${STATUS_WORDS[status] ?? status}` }] }, [{ label: citeLabel(c), ...look, tip: '' }], cols, -1)
+    body.push(paintLines(Box, Text, head.lines))
     body.push(<Text dimColor wrap="truncate-end">{clip(c.ref.startsWith('card:') ? placeName(c.ref) : c.raw, cols)}</Text>)
     if (v?.why) body.push(<Text color={status === 'missing' || status === 'differs' ? COLORS.problem : COLORS.dim} wrap="truncate-end">{clip(v.why, cols)}</Text>)
     if (fixNote(status, fix)) body.push(<Text color={COLORS.problem} wrap="wrap">{fixNote(status, fix)}</Text>)
@@ -1204,16 +1292,16 @@ export const register: Register = on => {
         ),
       )
     } else {
-      const color = run.state === 'verified' ? COLORS.ok : run.state === 'refuted' || run.state === 'error' ? COLORS.problem : COLORS.dim
+      const color = run.state === 'verified' ? COLORS.ok : verifyFailed(run.state) ? COLORS.problem : COLORS.dim
       const words: Record<string, string> = {
         asked: `a subagent is writing ${run.script} …`,
         running: `running ${run.script} …`,
-        missing: `${run.script} was not written${run.stderr ? `: ${clip(run.stderr, 200)}` : ''}`,
+        missing: `✗ not written: ${run.stderr ? `the subagent ended without writing ${run.script}: ${clip(run.stderr, 200)}` : `there is no ${run.script}`}`,
         verified: `✓ the script recomputed ${run.result}, as cited`,
         refuted: `✗ the script recomputed ${run.result}, the reply cites ${run.expected}`,
-        error: run.exitCode === undefined && run.stderr && !run.source ? run.stderr : `the script ${run.exitCode ? `exited with ${run.exitCode}` : 'printed no RESULT line'}`,
+        error: `✗ ${verifyError(run)}`,
       }
-      body.push(<Text color={color} bold wrap="truncate-end">{words[run.state] ?? run.state}</Text>)
+      body.push(<Text color={color} bold wrap="wrap">{words[run.state] ?? run.state}</Text>)
       if (run.source) {
         body.push(<Text dimColor wrap="truncate-end">{run.script}</Text>)
         body.push(<Code source={run.source.slice(0, 6000)} language="python" startLine={1} wrap="truncate-end" />)
