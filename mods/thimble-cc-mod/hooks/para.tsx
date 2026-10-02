@@ -3,7 +3,11 @@
 // a citation a fix round or a verification is working on, shows the hovered citation's ref beside it, and hands each
 // press to gestures.tsx with what is under the pointer: a citation, a table row, or the sentence of the word there.
 // While the right-click menu is open on one of its passages, that passage is shaded.
-import type { ClientModule, RenderElement } from 'claude-code'
+//
+// A hovered citation is lit and tipped only while the pointer moves over it: a press, a move off the region, a
+// reflow of the transcript (a pane opening beside it) or a hover in another paragraph clears it, since the engine does
+// not always report the pointer leaving.
+import type { ClientModule, ClientSurface, RenderElement } from 'claude-code'
 
 import { blockLayout, passageAt } from './cite'
 import type { ChipView } from './cite'
@@ -21,38 +25,61 @@ type Props = {
   raws: string[]
   menu?: Target | null
 }
-type S = { hover: number; frame: number }
+/** `cols`: the width the hover was set at; after a reflow it is stale. */
+type S = { hover: number; frame: number; cols: number }
 
 const TIP_BG = '#1f2428'
 const TIP_FG = '#e6edf3'
 
 // each instance's latest props, for its spinner tick
 const latest = new WeakMap<object, Props>()
+// the instance whose citation is hovered: one at a time
+let hovered: ClientSurface<S> | null = null
+
+function unhover(surface: ClientSurface<S>): void {
+  const cur = surface.state
+  if (hovered === surface) hovered = null
+  if (!cur || cur.hover === -1) return
+  try {
+    surface.setState({ ...cur, hover: -1 })
+    send(surface, { type: 'hover', id: '' })
+  } catch {
+    // an instance that is gone has nothing to clear
+  }
+}
 
 const Para: ClientModule<Props, S> = (props, surface) => {
   const { Box, Text } = surface.elements
   const cols = surface.columns || props.cols || 80
-  const st = surface.state ?? { hover: -1, frame: 0 }
-  const lay = blockLayout(props.block, props.chips, cols, st.hover, st.frame)
+  const st = surface.state ?? { hover: -1, frame: 0, cols }
+  const hover = st.cols === cols ? st.hover : -1
+  const lay = blockLayout(props.block, props.chips, cols, hover, st.frame)
   latest.set(surface, props)
 
   // set on every call, so the listener reads this call's layout
   surface.onPointer(ev => {
-    const cur = surface.state ?? { hover: -1, frame: 0 }
-    if (ev.type === 'leave') {
-      if (cur.hover !== -1) surface.setState({ ...cur, hover: -1 })
-      return
-    }
+    const cur = surface.state ?? { hover: -1, frame: 0, cols }
     const k = lay.spans.find(s => s.line === ev.y && ev.x >= s.x0 && ev.x < s.x1)?.chip ?? -1
     if ((ev.type === 'down' || ev.type === 'up') && ev.button) {
       const target: Target | null = k >= 0 ? { kind: 'citation', ref: props.raws[k] ?? '', text: props.chips[k]?.label ?? '' } : passageAt(lay, ev.x, ev.y)
       if (target) onPointer(target, { button: ev.button, shift: Boolean(ev.shift), ctrl: Boolean(ev.ctrl), alt: Boolean(ev.alt), type: ev.type === 'down' ? 'press' : 'release' }, surface)
+      if (ev.type === 'down') unhover(surface)
+      return
     }
-    if (k !== cur.hover) {
-      surface.setState({ ...cur, hover: k })
-      // the band shows the hovered citation's ref and status, whatever room the paragraph has for a tip
-      if (ev.type === 'move') send(surface, { type: 'hover', id: k >= 0 ? (props.ids[k] ?? '') : '' })
+    if (ev.type !== 'move' || ev.x < 0 || ev.y < 0 || ev.x >= cols || ev.y >= lay.lines.length) {
+      unhover(surface)
+      return
     }
+    if (k === cur.hover && cur.cols === cols) return
+    if (k < 0) {
+      unhover(surface)
+      return
+    }
+    if (hovered && hovered !== surface) unhover(hovered)
+    hovered = surface
+    surface.setState({ ...cur, hover: k, cols })
+    // the band shows the hovered citation's ref and status, whatever room the paragraph has for a tip
+    send(surface, { type: 'hover', id: props.ids[k] ?? '' })
   })
   if (surface.state === undefined) {
     surface.setState(st)
@@ -64,8 +91,8 @@ const Para: ClientModule<Props, S> = (props, surface) => {
   }
 
   const rows: RenderElement[] = menuLines(lay, props.raws, props.menu).map(l => paintLine(Text, l))
-  const span = st.hover >= 0 ? lay.spans.find(s => s.chip === st.hover) : undefined
-  const tip = st.hover >= 0 ? props.chips[st.hover]?.tip : undefined
+  const span = hover >= 0 ? lay.spans.find(s => s.chip === hover) : undefined
+  const tip = hover >= 0 ? props.chips[hover]?.tip : undefined
   // a tip over the line above the citation, or below it on a first line, or on a one-line paragraph after its text
   // (an absolute Box is clipped to the region, which is one row tall then)
   if (span && tip) {

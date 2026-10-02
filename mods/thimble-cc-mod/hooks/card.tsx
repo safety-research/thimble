@@ -2,8 +2,9 @@
 // The chart is text (block, braille and box-drawing characters), so the Client can redraw it per pointer move: the mark
 // under the pointer is highlighted and its value shows at the right of the title. Presses on a mark, a record, a node or
 // the card itself go to the gestures (onPointer), which decide what a click, a double-click or a right-click does. The
-// one control row is the card's params: a choice runs the card's script again with it.
-import type { ClientModule } from 'claude-code'
+// one control row is the card's params: a choice runs the card's script again with it. As in para.tsx, a move off the
+// card, a reflow or a hover on another card clears the hovered mark.
+import type { ClientModule, ClientSurface } from 'claude-code'
 
 import { cardLayout, cut, menuShade, width } from './draw'
 import type { CardData, CardMeta, Item, Line, Seg } from './draw'
@@ -12,9 +13,24 @@ import type { Target } from './gestures'
 import { COLORS, paintLine } from './paint'
 
 type Props = { card: CardData; cols: number; plotRows?: number; debug?: boolean; meta?: CardMeta; pane?: boolean; menu?: Target | null }
-type S = { hover: number; act: string }
+/** `cols`: the width the hover was set at; after a reflow it is stale. */
+type S = { hover: number; act: string; cols: number }
 
 const PAD_X = 2 // border and padding on the left
+
+// the card whose mark or param is hovered: one at a time
+let hovered: ClientSurface<S> | null = null
+
+function unhover(surface: ClientSurface<S>): void {
+  const cur = surface.state
+  if (hovered === surface) hovered = null
+  if (!cur || (cur.hover === -1 && !cur.act)) return
+  try {
+    surface.setState({ ...cur, hover: -1, act: '' })
+  } catch {
+    // an instance that is gone has nothing to clear
+  }
+}
 
 type Hot = { x0: number; x1: number; param: string; value: string }
 
@@ -63,30 +79,36 @@ const Card: ClientModule<Props, S> = (props, surface) => {
   const { Box, Text } = surface.elements
   const cols = surface.columns || props.cols || 80
   const inner = Math.max(20, cols - 4)
-  const fresh: S = { hover: -1, act: '' }
+  const fresh: S = { hover: -1, act: '', cols }
   const st = surface.state ?? fresh
+  const stale = st.cols !== cols
+  const hover = stale ? -1 : st.hover
   const card = props.card
   const meta = props.meta ?? {}
 
   // while a right-click's menu is open on the card its border is lit and its title shaded; on one of its marks, that
   // mark is drawn hovered and shaded
   const menuOnCard = isMenuTarget(cardTarget(card), props.menu)
-  let lay = cardLayout(card, inner, st.hover, props.plotRows)
+  let lay = cardLayout(card, inner, hover, props.plotRows)
   const menuItem = props.menu ? lay.items.findIndex(it => isMenuTarget(itemTarget(it, card), props.menu)) : -1
-  const shown = st.hover >= 0 ? st.hover : menuItem
-  if (shown !== st.hover) lay = cardLayout(card, inner, shown, props.plotRows)
-  const prow = paramRow(card, st.act)
+  const shown = hover >= 0 ? hover : menuItem
+  if (shown !== hover) lay = cardLayout(card, inner, shown, props.plotRows)
+  const prow = paramRow(card, stale ? '' : st.act)
   const top = 2 + (prow ? 1 : 0) // border, title, params
+  const rowsTall = surface.rows || Infinity
 
   const targetAt = (i: number): Target => (i >= 0 && lay.items[i] ? itemTarget(lay.items[i]!, card) : cardTarget(card))
+  const select = (cur: S, i: number, act: string) => {
+    if (i === cur.hover && act === cur.act && cur.cols === cols) return
+    if (i < 0 && !act) return unhover(surface)
+    if (hovered && hovered !== surface) unhover(hovered)
+    hovered = surface
+    surface.setState({ ...cur, hover: i, act, cols })
+  }
 
   // set on every call, so the listener reads this call's layout and props
   surface.onPointer(ev => {
     const cur = surface.state ?? fresh
-    if (ev.type === 'leave') {
-      if (cur.hover !== -1 || cur.act) surface.setState({ ...cur, hover: -1, act: '' })
-      return
-    }
     const cx = ev.x - PAD_X
     const hot = prow && ev.y === 2 ? prow.hots.find(h => cx >= h.x0 && cx < h.x1) : undefined
     const i = hot ? -1 : lay.hit(cx, ev.y - top)
@@ -98,10 +120,14 @@ const Card: ClientModule<Props, S> = (props, surface) => {
         return
       }
       onPointer(targetAt(i), ev, surface)
-      if (ev.type === 'down' && (i !== cur.hover || act !== cur.act)) surface.setState({ ...cur, hover: i, act })
+      if (ev.type === 'down') select(cur, i, act)
       return
     }
-    if (i !== cur.hover || act !== cur.act) surface.setState({ ...cur, hover: i, act })
+    if (ev.type !== 'move' || ev.x < 0 || ev.y < 0 || ev.x >= cols || ev.y >= rowsTall) {
+      unhover(surface)
+      return
+    }
+    select(cur, i, act)
   })
   // Keys only in the pane: a Client with a key listener keeps the keyboard after a click, so in the chat the analyst's
   // typing would go to the card instead of the prompt.
@@ -111,7 +137,7 @@ const Card: ClientModule<Props, S> = (props, surface) => {
       const n = lay.items.length
       const step = ev.key === 'up' || ev.key === 'left' ? -1 : ev.key === 'down' || ev.key === 'right' ? 1 : 0
       if (step && n) {
-        surface.setState({ ...cur, hover: Math.min(n - 1, Math.max(0, (cur.hover < 0 ? (step > 0 ? -1 : n) : cur.hover) + step)) })
+        surface.setState({ ...cur, cols, hover: Math.min(n - 1, Math.max(0, (cur.hover < 0 ? (step > 0 ? -1 : n) : cur.hover) + step)) })
         return
       }
       if ((ev.key === 'return' || ev.key === 'enter') && cur.hover >= 0) {

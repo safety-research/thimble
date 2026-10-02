@@ -1,6 +1,7 @@
 // One set of gestures for every target the mod draws (a card, a mark, a sentence, a citation, a row, a record, a node):
 //
-//   click            the target's one action: open the place it cites (a card value has none: its Client selects it)
+//   click            the target's one action: open the place it cites, a sentence's or a row's first citation's place,
+//                    or a card's script (a card value has none: its Client selects it)
 //   double-click     put the target's citation into the prompt
 //   shift+click      a side thread about the target; ctrl+click and middle-click do the same where they arrive as such
 //   right-click      a menu of every action
@@ -11,7 +12,7 @@
 import type { ClientModule, ClientPointerEvent, JsonValue } from 'claude-code'
 
 import type { ChatTarget } from '../types'
-import { sentenceAt } from './cite'
+import { citeLabel, sentenceAt } from './cite'
 import type { ParaLayout } from './cite'
 import { lineWidth, shade } from './draw'
 import type { Line } from './draw'
@@ -37,7 +38,7 @@ const origin = Math.random().toString(36).slice(2, 10)
 let seq = 0
 let outbox: Sent[] = []
 const waiting = new Map<string, () => void>() // a clicked target -> what cancels its pending click
-let lastRightPress = ''
+let rightDown = false // a right press reached this module and its release has not
 
 function portOf(ctx: unknown): Port | null {
   const c = ctx as { post?: unknown; surface?: unknown } | null
@@ -97,13 +98,14 @@ export function onPointer(target: Target, ev: PointerEv | ClientPointerEvent, ct
   if (!port || !e) return
   const key = targetKey(target)
   if (e.type === 'release') {
-    // a right button that comes up without having gone down here (its press went elsewhere) still opens the menu
-    const lost = e.button === 'right' && lastRightPress !== key
-    lastRightPress = ''
+    // The press picks the menu's target. The menu's pane can reflow the transcript before the release, which then lands
+    // on another target; only a right release whose press never reached this module opens the menu.
+    const lost = e.button === 'right' && !rightDown
+    if (e.button === 'right') rightDown = false
     emit(port, { gesture: lost ? 'menu' : null, target, ev: e })
     return
   }
-  if (e.type === 'press' && e.button === 'right') lastRightPress = key
+  if (e.type === 'press' && e.button === 'right') rightDown = true
   const cancel = waiting.get(key)
   const g = classify(e, Boolean(cancel) && e.button === 'left' && !e.shift && !e.ctrl && !e.alt)
   if (cancel) {
@@ -151,10 +153,13 @@ export function citeText(t: Target): string {
   return s ? `"${s.length > 300 ? `${s.slice(0, 299)}…` : s}"` : ''
 }
 
-/** The place a click opens: a citation's, or a mark's, row's, record's or node's when it lies outside the cards. */
+/** The place a click opens: a citation's; a sentence's or a reply's table row's first citation's; a mark's, row's,
+ *  record's or node's when it lies outside the cards. */
 export function placeOf(t: Target): Citation | null {
+  if (t.kind === 'card') return null
+  if (t.kind === 'sentence' || (t.kind === 'row' && !t.ref)) return citations(t.text ?? '')[0] ?? null
   const c = citationOf(t)
-  if (!c || t.kind === 'card' || t.kind === 'sentence') return null
+  if (!c) return null
   return t.kind === 'citation' || !CARD_REF.test(c.ref) ? c : null
 }
 
@@ -169,7 +174,7 @@ export function menuItems(t: Target): MenuItem[] {
   if (placeOf(t)) out.push({ act: 'open', label: 'open', hotkey: 'o' })
   out.push({ act: 'thread', label: 'ask about this', hotkey: 'a' })
   if (c?.display && t.kind !== 'card' && t.kind !== 'sentence') out.push({ act: 'verify', label: 'verify', hotkey: 'v' })
-  if (card && (t.script || t.kind !== 'citation')) out.push({ act: 'script', label: 'open the script', hotkey: 's' }, { act: 'rerun', label: 'rerun', hotkey: 'r' })
+  if (card && t.script) out.push({ act: 'script', label: 'open the script', hotkey: 's' }, { act: 'rerun', label: 'rerun', hotkey: 'r' })
   if (citeText(t)) out.push({ act: 'cite', label: 'cite', hotkey: 'c' })
   return out
 }
@@ -182,20 +187,28 @@ function shorten(s: string, n: number): string {
   return `${(sp >= room / 2 ? s.slice(0, sp) : s.slice(0, room)).replace(/[\s,;:.]+$/, '')}…`
 }
 
-/** A short name for the target in at most `max` characters, as the menu and the mouse log show it; quoted words keep
- *  their closing quote when cut. */
+/** A short name for the target in at most `max` characters, as the menu and the mouse log show it: each citation by
+ *  its label, never its ref; quoted words keep their closing quote when cut. */
 export function targetLabel(t: Target, max = 48): string {
-  const s = (t.text ?? '').replace(/[`*_]+|^\s*(#+|[-*+]|\d+[.)])\s+/g, '').replace(/\s+/g, ' ').trim()
+  const s = (t.text ?? '')
+    .replace(/\[\[[^\[\]]+?\]\]/g, m => {
+      const c = citations(m)[0]
+      return c ? citeLabel(c) : m
+    })
+    .replace(/[`*_]+|^\s*(#+|[-*+]|\d+[.)])\s+/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
   const n = Math.max(8, max)
+  const c = citationOf(t)
   switch (t.kind) {
     case 'card':
       return s ? `card "${shorten(s, n - 7)}"` : 'card'
     case 'sentence':
       return s ? `"${shorten(s, n - 2)}"` : 'sentence'
     case 'citation':
-      return shorten(citationOf(t)?.display ?? citationOf(t)?.ref ?? 'citation', n)
+      return shorten(c ? citeLabel(c) : 'citation', n)
     default:
-      return shorten(s || citationOf(t)?.ref || t.kind, n)
+      return shorten(s || (c ? citeLabel(c) : t.kind), n)
   }
 }
 
