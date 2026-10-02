@@ -471,6 +471,39 @@ def test_a_thread_s_fork_at_work_when_the_session_moves_goes_on_in_the_job(cwd, 
     assert [r["type"] for r in _log(thread["id"]) if r["type"] in ("done", "error")] == ["done"]
 
 
+def test_a_moved_job_s_subagent_transcript_links_to_the_old_one_and_each_line_shows_once(cwd, project, quits):
+    """Claude Code links the job's subagent transcript to the old session's file, which it keeps appending to: the job
+    adopts the link as the subagent it carried, so there is no second chat and a line written after the move shows
+    once."""
+    p = project / f"{SID}.jsonl"
+    p.write_text("")
+    _subscribe(SID, cc_channel.CHANNEL)
+    lv = _attach(cwd, p, pid=100)
+    session.tail_once(lv)
+    old = project / SID / "subagents" / "agent-a1b2c3d4.jsonl"
+    old.parent.mkdir(parents=True)
+    old.with_name("agent-a1b2c3d4.meta.json").write_text(json.dumps({"toolUseId": "toolu_ag", "description": "posts"}))
+    _write(old, [_assistant(_say("Counting the posts"))])
+    started = _stamped(SID, 1, "2026-10-01T20:27:52.417Z", _human("Count the posts in the background"),
+                       _assistant(_use("toolu_ag", "Agent", {"description": "posts", "prompt": "Count the posts.",
+                                                             "run_in_background": True})),
+                       _result("toolu_ag", "Async agent launched successfully.\nagentId: a1b2c3d4"), END)
+    _append(p, lv, started)
+    _append(p, lv, _moved(SID, JOB))
+    link = project / JOB / "subagents" / "agent-a1b2c3d4.jsonl"
+    link.parent.mkdir(parents=True)
+    link.symlink_to(old)
+    _write(old, [_assistant(_say("8 posts so far"))])
+    _write(project / f"{JOB}.jsonl", _copy(started, JOB))
+    job = session.current(CORPUS)
+    assert job is not None and job.sid == JOB
+    session.tail_once(job)
+    session.tail_once(job)
+    chats = [m for m in agents.list_chats(CORPUS) if m.get("role") == session.SUBAGENT_ROLE]
+    assert len(chats) == 1 and [(s.agent_id, s.path) for s in job.subs] == [("a1b2c3d4", link)]
+    assert [r["delta"] for r in _log(chats[0]["id"]) if r["type"] == "text"] == ["Counting the posts", "8 posts so far"]
+
+
 def test_a_copied_record_is_known_by_its_uuid_or_its_time_and_a_session_that_goes_on_is_not_parked(tmp_path):
     """A record of the job's transcript is a copy when the old transcript has its uuid, even stamped later, or when it
     is stamped no later than the move; a record of the job's own has neither. A transcript that ends with the move,
