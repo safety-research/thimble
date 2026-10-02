@@ -33,6 +33,9 @@ Every number you write comes from code. Never type a number you did not read fro
        table     columns=[...], rows=[[...], ...]: exact values; the first column names each row; a few short columns
        example   examples=[{"ref": "pages.jsonl#L88", "field": "body", "quote": "exact words", "note": "what it shows"}]:
                  real records, quoted; the helper checks that each quote is in the record
+       diagram   nodes=[(id, label, ref)], edges=[(source, target, label)]: who or what connects to what, a flow or a
+                 structure; a dozen nodes at most, each named in a few words; ref (optional) is a record the node
+                 stands for; an edge label over 24 characters becomes a numbered note under the drawing
 
 2. The helper prints the card's id, the line that embeds it and the citation of each value. Put `[[card:<id>]]` alone on a line where the card belongs, and copy the value citations exactly as printed.
 3. The id comes from the question, so running the script again replaces the card. Fix a card by fixing its script.
@@ -70,7 +73,6 @@ The bad reply types its numbers without citations, gives five numbers where one 
 ## Messages from thimble-chat
 
 - After a reply, thimble-chat checks its cards and citations. When it reports problems, fix each one (fix the script or cite the value the place shows) and give only the corrected sentences or cards.
-- The analyst can edit a takeaway in place; thimble-chat tells you the new text. Treat the analyst's text as the takeaway from then on.
 - When a message from thimble-chat asks for a verification script, write it as the next section says.
 
 ## Verification scripts

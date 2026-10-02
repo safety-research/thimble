@@ -4,7 +4,8 @@ compared with the value at a ref (a port of thimble's backend/app/cite.py shown_
 Refs read here:
     card:<id>                       a card
     card:<id>#<column>/<row>        a value of a card (bar: the y title and the label; table: a column and the first
-                                    column's value; line: the series and the x value; timeline: event and its number)
+                                    column's value; line: the series and the x value; timeline: event and its number;
+                                    diagram: node and its id, edge and its number)
     call:<id>#L<n>[-L<m>]           lines of a Bash call's output, as thimble-chat saved it (.thimble-chat/calls)
     <path>#L<n>[-L<m>]              lines of a text file, counted from 1
     <path>#row=<n>                  a row of a CSV or TSV file, counted from the row after the header
@@ -194,6 +195,11 @@ def card_values(card: dict) -> dict[str, dict[str, object]]:
     elif kind == "timeline":
         out["event"] = {str(i + 1): f"{e['time']} {e['label']}" for i, e in enumerate(card.get("events", []))}
         out["time"] = {str(i + 1): e["time"] for i, e in enumerate(card.get("events", []))}
+    elif kind == "diagram":
+        out["node"] = {str(n["id"]): n["label"] for n in card.get("nodes", [])}
+        label = {str(n["id"]): n["label"] for n in card.get("nodes", [])}
+        out["edge"] = {str(i + 1): f"{label.get(e['source'], e['source'])} → {label.get(e['target'], e['target'])}"
+                       + (f": {e['label']}" if e.get("label") else "") for i, e in enumerate(card.get("edges", []))}
     return out
 
 

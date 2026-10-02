@@ -61,6 +61,7 @@ function resolveOne(ref: string, display: string | null) {
 function world(on: On, extra: Record<string, string> = {}): World {
   const w: World = { files: new Map(Object.entries({ [`${CWD}/.thimble-chat/cards/abc123.json`]: JSON.stringify(BAR), ...extra })), writes: [], runs: [], filled: [], submitted: [], spawned: [], sent: [], appended: [], opened: [] }
   mock.env(on, {})
+  on('env.set', () => ({ value: undefined }) as never)
   mock.clock(on, { now: 1_790_000_000_000 })
   on('session.start', ($, e) => ({ cwd: e.cwd }))
   on('session.cwd', () => ({ value: CWD }))
@@ -219,7 +220,7 @@ test('a card that does not validate is drawn as an error', async ($, on) => {
   world(on, { [`${CWD}/.thimble-chat/cards/bad111.json`]: JSON.stringify({ id: 'bad111', kind: 'bar', question: 'q', rows: [] }) })
   await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
   const ui = await $.ui.mount({ ...MESSAGE('[[card:bad111]]\n\nsee [[card:bad111]]'), surface: 'terminal' } as never)
-  expect(await ui.find({ type: 'Text', text: /card bad111 does not validate: a bar card needs rows/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /Card 1 cannot be drawn: a bar card needs rows/ })).toBeDefined()
   await ui.unmount()
 })
 
@@ -228,8 +229,8 @@ test('clicking a bar puts its value citation in the prompt', async ($, on) => {
   await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
   const ui = (await $.ui.mount({ ...MESSAGE(REPLY), surface: 'terminal' } as never)) as unknown as M
   await ui.resize({ columns: 100, rows: 12, in: 'card-1-abc123' })
-  // border, title, readout, params row: the bars start at row 4 of the region, probier is row 5
-  await ui.pointer({ type: 'down', x: 10, y: 5, button: 'left', in: 'card-1-abc123' } as never)
+  // border, title, params row: the bars start at row 3 of the region, probier is row 4
+  await ui.pointer({ type: 'down', x: 10, y: 4, button: 'left', in: 'card-1-abc123' } as never)
   expect(w.filled).toEqual(['[[1013|card:abc123#revisions/probier]] '])
   await ui.unmount()
 })
@@ -240,38 +241,8 @@ test('a param picked on the card runs its script again for that card, and the ca
   const ui = (await $.ui.mount({ ...MESSAGE(REPLY), surface: 'terminal' } as never)) as unknown as M
   await ui.post({ type: 'param', card: 'abc123', name: 'by', value: 'label' }, { in: 'card-1-abc123' })
   const run = w.runs.find(r => r.argv[1] === '.thimble-chat/scripts/by.py')
-  expect(run?.env).toEqual({ THIMBLE_CHAT_PARAMS: '{"by":"label"}', THIMBLE_CHAT_ONLY: '0:abc123' })
+  expect(run?.env).toEqual({ THIMBLE_CHAT_PARAMS: '{"by":"label"}', THIMBLE_CHAT_ONLY: '0:abc123', THIMBLE_CHAT_ROOT: CWD })
   expect(await ui.find({ type: 'Text', text: /AgentRelent/, in: 'card-1-abc123' })).toBeDefined()
-  await ui.unmount()
-})
-
-test('star and hide write the card note; a hidden card keeps one line', async ($, on) => {
-  const w = world(on)
-  await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
-  const ui = (await $.ui.mount({ ...MESSAGE(REPLY), surface: 'terminal' } as never)) as unknown as M
-  await ui.post({ type: 'act', card: 'abc123', act: 'star' }, { in: 'card-1-abc123' })
-  expect(JSON.parse(w.files.get(`${CWD}/.thimble-chat/notes/abc123.json`)!)).toEqual({ starred: true })
-  await ui.post({ type: 'act', card: 'abc123', act: 'hide' }, { in: 'card-1-abc123' })
-  expect(await ui.find({ type: 'Text', text: /hidden card: Which wikis/, in: 'card-1-abc123' })).toBeDefined()
-  await ui.unmount()
-})
-
-test('an edited takeaway replaces the paragraph in place and is saved', async ($, on) => {
-  const w = world(on)
-  await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
-  const ui = (await $.ui.mount({ ...MESSAGE(REPLY), surface: 'terminal' } as never)) as unknown as M
-  await ui.post({ type: 'act', card: 'abc123', act: 'edit' }, { in: 'card-1-abc123' })
-  expect(w.opened).toContain('thimble-edit')
-  const pane = (await $.ui.mount({ plugin: 'thimble-chat', component: 'Pane', requestId: 'thimble-edit', surface: 'terminal', viewport: { columns: 100, rows: 20 }, props: { bodyColumns: 96, bodyRows: 10 } } as never)) as unknown as M
-  await pane.input({ key: 'takeaway', text: 'dse has most of them: [[13403|card:abc123#revisions/dse]].' })
-  const note = JSON.parse(w.files.get(`${CWD}/.thimble-chat/notes/abc123.json`)!) as { takeaway: string; original: string }
-  expect(note.takeaway).toBe('dse has most of them: [[13403|card:abc123#revisions/dse]].')
-  expect(note.original).toContain('of [[14416|card:abc123#revisions/all]] revisions.')
-  // the note to main ($.session.append) has no stand-in in the kit ("no implementation for session.append"), so
-  // it is not checked here
-  await pane.unmount()
-  await ui.redraw()
-  expect(await ui.find({ key: 'para-2' })).toBeDefined()
   await ui.unmount()
 })
 

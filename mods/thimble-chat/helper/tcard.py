@@ -7,11 +7,16 @@
     card("timeline", "What happened to the pricing page?", events=[("2026-09-01 10:02", "Agent 3 creates it", "events.jsonl#L12")])
     card("table", "Which pages were reverted most?", columns=["page", "reverts", "editors"], rows=[["Pricing", 9, 4]])
     card("example", "How does a revert read?", examples=[{"ref": "revisions.jsonl#L88", "field": "comment", "quote": "rv"}])
+    card("diagram", "Who hands work to whom?", nodes=[("a3", "Agent 3", "events.jsonl#L12"), "Agent 7"],
+         edges=[("a3", "Agent 7", "assigns pages")])
 
     by = param("by", "wiki", ["wiki", "label"])   # a control on the card: picking a choice runs the script again
 
-Each call writes .thimble-chat/cards/<id>.json in the current folder and prints the line that embeds the card in a
-reply and the citation of each value. The id comes from the question, so running the script again replaces the card.
+Each call writes .thimble-chat/cards/<id>.json in the session's folder, wherever the script runs (THIMBLE_CHAT_ROOT,
+which thimble-chat sets for the session; else the folder holding the script's .thimble-chat; else the nearest folder up
+from the current one that has a .thimble-chat; else the current folder), and prints the line that embeds the card in a
+reply and the citation of each value. Refs (an example's, a node's) are read from that folder too. The id comes from the
+question, so running the script again replaces the card.
 
 When the analyst picks another choice of a param on the card, thimble-chat runs the script again with
 THIMBLE_CHAT_PARAMS (the values, as JSON) and THIMBLE_CHAT_ONLY ("<index>:<id>"): only that card is written, under its
@@ -26,15 +31,37 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from refs import HOME, LINES_RE, fmt, read_lines, record_text, safe_path, split_ref  # noqa: E402
+from refs import HOME, LINES_RE, fmt, read_lines, record_text, resolve, safe_path, split_ref  # noqa: E402
 
-KINDS = ("bar", "line", "timeline", "table", "example")
+KINDS = ("bar", "line", "timeline", "table", "example", "diagram")
+MAX_NODES = 40
+MAX_EDGES = 80
 MAX_ROWS = 2000
 MAX_QUOTE = 600
 MAX_CHOICES = 12
 
 _params: list[dict] = []  # the params this script declared, in order
 _count = 0  # card() calls so far in this run
+
+
+def _root() -> str:
+    """The session's folder, where cards are written and refs are read."""
+    env = os.environ.get("THIMBLE_CHAT_ROOT")
+    if env and os.path.isdir(env):
+        return os.path.abspath(env)
+    main = getattr(sys.modules.get("__main__"), "__file__", None)
+    if main:
+        parts = os.path.abspath(main).split(os.sep)
+        if HOME in parts:
+            return os.sep.join(parts[: len(parts) - 1 - parts[::-1].index(HOME)]) or os.sep
+    d = os.getcwd()
+    while True:
+        if os.path.isdir(os.path.join(d, HOME)):
+            return d
+        up = os.path.dirname(d)
+        if up == d:
+            return os.getcwd()
+        d = up
 
 
 def _env_json(name: str) -> dict:
@@ -88,7 +115,7 @@ def _plain(v: object) -> object:
     return str(v)
 
 
-def _source() -> dict:
+def _source(root: str) -> dict:
     main = sys.modules.get("__main__")
     path = getattr(main, "__file__", None)
     if not path or not os.path.isfile(path):
@@ -97,8 +124,9 @@ def _source() -> dict:
         return {}
     with open(path, "rb") as f:
         sha = hashlib.sha1(f.read()).hexdigest()[:12]
-    rel = os.path.relpath(os.path.abspath(path), os.getcwd())
-    return {"script": rel, "sha1": sha}
+    full = os.path.abspath(path)
+    rel = os.path.relpath(full, root)
+    return {"script": full if rel.startswith("..") else rel, "sha1": sha}
 
 
 def _example(cwd: str, ex: dict) -> dict:
@@ -126,15 +154,76 @@ def _example(cwd: str, ex: dict) -> dict:
     return {"ref": ref, "quote": str(quote), "note": str(ex.get("note", "")), "field": field or ""}
 
 
+def _node(n) -> dict:
+    if isinstance(n, dict):
+        nid = n.get("id", n.get("name", n.get("label")))
+        if nid is None:
+            raise TypeError(f"diagram node {n!r} has no id; a node is a name, (id, label, ref) or {{id, label, ref}}")
+        label, ref, detail = n.get("label"), n.get("ref"), n.get("detail")
+    elif isinstance(n, (tuple, list)):
+        nid, label, ref = (list(n) + [None, None])[:3]
+        detail = None
+    else:
+        nid, label, ref, detail = n, None, None, None
+    out = {"id": str(_plain(nid)), "label": str(_plain(label if label not in (None, "") else nid)).strip()}
+    if ref:
+        out["ref"] = str(ref)
+    if detail:
+        out["detail"] = str(detail)
+    return out
+
+
+def _diagram(root: str, nodes, edges) -> tuple[list[dict], list[dict]]:
+    ns: list[dict] = []
+    seen: dict[str, dict] = {}
+
+    def add(n) -> str:
+        node = _node(n)
+        if node["id"] not in seen:
+            seen[node["id"]] = node
+            ns.append(node)
+        return node["id"]
+
+    for n in nodes or []:
+        add(n)
+    es = []
+    for e in edges or []:
+        if isinstance(e, dict):
+            s, t, label = e.get("source", e.get("from")), e.get("target", e.get("to")), e.get("label")
+        elif isinstance(e, (tuple, list)) and len(e) >= 2:
+            s, t, label = (list(e) + [None])[:3]
+        else:
+            raise TypeError(f"diagram edge {e!r}: give (source, target) or (source, target, label)")
+        if s is None or t is None:
+            raise TypeError(f"diagram edge {e!r} has no source or target")
+        # an edge may name a node by its id or by its label
+        by_label = {v["label"]: k for k, v in seen.items()}
+        s, t = (str(_plain(v)) for v in (s, t))
+        s, t = (v if v in seen else by_label.get(v) or add(v) for v in (s, t))
+        edge = {"source": s, "target": t}
+        if label not in (None, ""):
+            edge["label"] = str(label)
+        es.append(edge)
+    if not ns:
+        raise ValueError("a diagram card needs nodes, as names, (id, label, ref) or {id, label, ref}")
+    if len(ns) > MAX_NODES or len(es) > MAX_EDGES:
+        raise ValueError(f"a diagram card shows at most {MAX_NODES} nodes and {MAX_EDGES} edges")
+    for n in ns:
+        if n.get("ref") and resolve(root, n["ref"])["status"] == "missing":
+            raise ValueError(f"node {n['label']!r}: the ref {n['ref']} does not resolve in {root}")
+    return ns, es
+
+
 def card(kind: str, question: str, *, rows=None, columns=None, series=None, points=None, events=None, examples=None,
-         x: str = "", y: str = "", total: bool | float | int = False, note: str = "", id: str | None = None) -> str:
+         nodes=None, edges=None, x: str = "", y: str = "", total: bool | float | int = False, note: str = "",
+         id: str | None = None) -> str:
     """Write a card and print how to embed and cite it. Returns the card's id."""
     global _count
     if kind not in KINDS:
         raise ValueError(f"kind must be one of {', '.join(KINDS)}")
     if not question or not str(question).strip():
         raise ValueError("a card needs its question")
-    cwd = os.getcwd()
+    root = _root()
     index = _count
     _count += 1
     cid = id or hashlib.sha1(f"{kind}:{question}".encode()).hexdigest()[:6]
@@ -147,7 +236,7 @@ def card(kind: str, question: str, *, rows=None, columns=None, series=None, poin
         cid = keep or cid
     data: dict = {"id": cid, "kind": kind, "question": str(question).strip(), "x": x, "y": y, "note": note,
                   "created": _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds"),
-                  "source": {**_source(), "index": index}}
+                  "source": {**_source(root), "index": index}}
     if _params:
         data["params"] = [dict(p) for p in _params]
     cites: list[str] = []
@@ -196,21 +285,26 @@ def card(kind: str, question: str, *, rows=None, columns=None, series=None, poin
         for r in data["rows"][:8]:
             cites += [f"[[{fmt(v)}|card:{cid}#{c}/{r[0]}]]" for c, v in zip(data["columns"][1:], r[1:]) if isinstance(v, (int, float))]
     elif kind == "example":
-        data["examples"] = [_example(cwd, ex) for ex in examples or []]
+        data["examples"] = [_example(root, ex) for ex in examples or []]
         if not data["examples"]:
             raise ValueError("an example card needs examples, as [{'ref': 'file.jsonl#L12', 'quote': '...'}]")
         cites = [f"[[{ex['ref']}]]" for ex in data["examples"]]
-    folder = os.path.join(cwd, HOME, "cards")
+    elif kind == "diagram":
+        data["nodes"], data["edges"] = _diagram(root, nodes, edges)
+        cites = [f"[[{n['ref']}]]" for n in data["nodes"] if n.get("ref")]
+    folder = os.path.join(root, HOME, "cards")
     os.makedirs(folder, exist_ok=True)
     with open(os.path.join(folder, f"{cid}.json"), "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=1)
-    n = len(data.get("rows") or data.get("series") or data.get("events") or data.get("examples") or [])
-    print(f"thimble-chat card {cid} ({kind}, {n} {'series' if kind == 'line' else 'rows'}) -> {HOME}/cards/{cid}.json")
+    n = len(data.get("rows") or data.get("series") or data.get("events") or data.get("examples") or data.get("nodes") or [])
+    unit = {"line": "series", "diagram": "nodes"}.get(kind, "rows")
+    where = os.path.join(HOME, "cards", f"{cid}.json") if os.path.samefile(root, os.getcwd()) else os.path.join(root, HOME, "cards", f"{cid}.json")
+    print(f"thimble-chat card {cid} ({kind}, {n} {unit}) -> {where}")
     if _params:
         print("controls on the card: " + "; ".join(f"{p['name']} = {p['value']} of {', '.join(map(str, p['choices']))}" for p in _params))
     print(f"embed it on a line of its own: [[card:{cid}]]")
     if cites:
-        print("cite its values as:" if kind != "example" else "cite its records as:")
+        print("cite its records as:" if kind in ("example", "diagram") else "cite its values as:")
         for c in cites[:24]:
             print(f"  {c}")
         if len(cites) > 24:
@@ -220,7 +314,7 @@ def card(kind: str, question: str, *, rows=None, columns=None, series=None, poin
 
 if __name__ == "__main__":
     if len(sys.argv) >= 2 and sys.argv[1] == "list":
-        folder = os.path.join(os.getcwd(), HOME, "cards")
+        folder = os.path.join(_root(), HOME, "cards")
         for name in sorted(os.listdir(folder)) if os.path.isdir(folder) else []:
             with open(os.path.join(folder, name), encoding="utf-8") as f:
                 c = json.load(f)

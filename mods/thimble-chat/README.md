@@ -34,11 +34,12 @@ one- or two-sentence takeaway when one chart or table answers the question, or s
 paragraphs for a question that takes several steps, such as a why question.
 
 - **Cards.** Claude computes every number with a Python script under `.thimble-chat/scripts/`, which ends by writing
-  a card: a bar chart, line chart, timeline, table, or quoted example records. The mod draws the card where the reply
-  places it. Hover a bar, point or cell to see its value; click it to put its citation into the prompt, or right-click
-  to open the cited place (the other way round for timelines and examples). The row under the card has the card's
-  choices (such as `by: wiki label`; a click reruns the script with that choice), the script's name (opens it), rerun,
-  star, hide, edit takeaway and ask.
+  a card: a bar chart, line chart, timeline, table, quoted example records, or a diagram (boxes joined by arrows, its
+  long edge labels as numbered notes under it). The card is written to the session's folder wherever the script runs,
+  and the mod draws it where the reply places it: its question, its choices if it has any (such as `by  wiki  label`;
+  picking one reruns the script with it), and the chart. The mark under the pointer is highlighted and its value shows
+  at the right of the question. Colours follow Claude Code's theme (light, dark, daltonized, ANSI); chart colours keep
+  3:1 contrast on light and dark backgrounds.
 - **Chips.** Every citation `[[value|place]]` is a chip: green when the value is at the cited place, amber when the
   place exists but the value is not there, red when the place does not exist, grey when it is not checked. A place can
   be file lines, a CSV row, a JSON value, a SQLite row, a card value or lines of a Bash output. Hover a chip to see its
@@ -53,12 +54,12 @@ paragraphs for a question that takes several steps, such as a why question.
   value from the raw files, without the answer's code. The mod runs the script, shows it and its output, and marks the
   chip ✓ if it recomputed the value or ✗ if not.
 
-Commands: `/thimble-card <id>` (a card in a panel), `/thimble-cite <n>` (the last answer's n-th citation),
+Commands: `/thimble-card <n>` (the last answer's n-th card in a panel), `/thimble-cite <n>` (the last answer's n-th citation),
 `/thimble-check` (check the last answer again), `/thimble-ask <question>`, `/thimble-band` (a row above the prompt
 listing the last answer's citations, opened with the digits 1-9), `/thimble-chat` (status).
 
-The mod and Claude write only under `.thimble-chat/` in the folder: scripts, cards, answers, notes (stars, hides,
-edited takeaways), side threads, verification scripts and saved Bash outputs.
+The mod and Claude write only under `.thimble-chat/` in the folder: scripts, cards, answers, side threads,
+verification scripts and saved Bash outputs.
 
 Display: hover and clicks need Claude Code's fullscreen view (`/tui fullscreen`); without it the cards and chips are
 drawn but do not respond to the mouse. iTerm2 shows the chips in full colour; macOS Terminal shows 256 colours. In
@@ -66,7 +67,8 @@ tmux, set `set -g mouse on`, and `CLAUDE_CODE_TMUX_TRUECOLOR=1` for full colour.
 
 ## Known limits
 
-- Charts are text: eighth-block bars and braille lines, at most 120 columns wide.
+- Charts are text: eighth-block bars, braille lines and box-drawing diagrams, at most 120 columns wide. A diagram
+  shows at most 40 nodes and 80 edges.
 - cmd+click and option+click do not reach the mod (iTerm2 keeps them). Right-click is the second gesture; shift-, alt-
   and ctrl-click do the same where the terminal reports them.
 - While the prompt holds a draft, a panel that opens does not take the keys: click it first.
@@ -86,6 +88,7 @@ From `mods/thimble-chat`:
     claude plugin validate .
     claude plugin test .
     python3 tests/test_helpers.py
+    python3 tests/test_cards.py
     npx -p typescript tsc -p . --noEmit
 
 `tsc` needs the type declarations Claude Code writes into `.claude-plugin/types/` when it loads the mod from a folder,

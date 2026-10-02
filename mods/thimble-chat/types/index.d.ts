@@ -44,10 +44,6 @@ export type ChatVerify = {
 /** The citations of main's last reply, for the band. */
 export type ChatTurn = { id: string; ids: string[] }
 
-/** What the analyst did to a card, mirrored in .thimble-chat/notes/<id>.json: starred, hidden, its takeaway edited
- *  (`takeaway` the analyst's text, `original` the reply's). */
-export type ChatNote = { starred?: boolean; hidden?: boolean; takeaway?: string; original?: string; editedAt?: number }
-
 /** A card's script run by the mod (a param picked, or "rerun"): `rev` counts finished runs, so drawings reread it. */
 export type ChatRun = { rev: number; busy?: string; error?: string; stdout?: string; stderr?: string; exitCode?: number; at?: number }
 
@@ -56,9 +52,6 @@ export type ChatThreadTurn = { q: string; a: string; state: string; tools: numbe
 
 /** A side thread: what it is about, the subagent answering it, its exchange, and the file it is saved to. */
 export type ChatThread = { id: string; label: string; ref: string; context: string; agentId: string; engine: string; turns: ChatThreadTurn[]; file: string }
-
-/** The takeaway being edited in the edit pane. */
-export type ChatEdit = { card: string; text: string; original: string }
 
 /** The last text row of an answer, which carries the answer's summary line. */
 export type ChatEnd = { ids: string[]; cards: string[]; file: string }
@@ -75,12 +68,10 @@ declare module 'claude-code' {
       paneCard: string
       picked: string
       hover: string
-      notes: StateFamily<ChatNote>
       runs: StateFamily<ChatRun>
       threads: StateFamily<ChatThread>
       thread: string
       threadList: string[]
-      edit: ChatEdit | null
       ends: StateFamily<ChatEnd>
       band: boolean
       paneMode: string

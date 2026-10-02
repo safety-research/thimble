@@ -1,10 +1,39 @@
-// Styled lines to elements, for a Client's table or a render hook's: one Text per line, one nested Text per segment.
+// Colours, and styled lines to elements, for a Client's table or a render hook's: one Text per line, one nested Text per
+// segment.
+//
+// A colour is a key of Claude Code's theme where one fits, so text, links, problems and highlights follow the theme the
+// analyst picked (light, dark, daltonized, ANSI). Chart series have no theme key, so they are mid-luminance colours that
+// keep 3:1 contrast on light and on dark backgrounds (tests/cards.test.ts checks both).
 import type { BoxProps, ElementConstructor, RenderElement, TextProps } from 'claude-code'
 
 import type { Line, Seg } from './draw'
 
 type TextC = ElementConstructor<TextProps>
 type BoxC = ElementConstructor<BoxProps>
+
+export const SERIES = ['#2f7de1', '#c2710c', '#1f9d55', '#9061f9', '#0f9a8f', '#e0457b'] as const
+
+export const COLORS = {
+  series: [...SERIES] as string[],
+  negative: '#e5484d',
+  /** a mark under the pointer, and the readout of its value */
+  accent: 'text',
+  text: 'text',
+  dim: 'inactive',
+  /** borders, axes and rules */
+  rule: 'subtle',
+  /** the background of the row or column under the pointer */
+  cursor: 'userMessageBackground',
+  /** the background of a cited value in the lines a citation panel shows */
+  highlight: 'selectionBg',
+  code: 'permission',
+  link: 'remember',
+  problem: 'error',
+  ok: 'success',
+  warn: 'warning',
+  chip: { ok: 'success', differs: 'warning', missing: 'error', unchecked: 'inactive', pending: 'inactive' } as Record<string, string>,
+  chipFg: 'inverseText',
+}
 
 function seg(Text: TextC, s: Seg): RenderElement {
   const p: TextProps = {}
