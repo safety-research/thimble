@@ -1,13 +1,19 @@
 {
   "name": "thimble",
   "owner": { "name": "Matthew Joerke" },
-  "description": "thimble: notebook-backed analysis of agent runs inside a Claude Code session. One plugin, sourced from ./plugin of this tree; the version is plugin/.claude-plugin/plugin.json's.",
+  "description": "thimble: notebook-backed analysis of agent runs inside a Claude Code session. Two plugins: thimble, sourced from ./plugin of this tree (its version is plugin/.claude-plugin/plugin.json's), and thimble-cc-mod, sourced from ./mods/thimble-cc-mod.",
   "plugins": [
     {
       "name": "thimble",
       "source": "./plugin",
       "license": "Apache-2.0",
       "description": "Turns a Claude Code session into an analyst workbench over the agent transcripts in the working directory: the thimble MCP tools, its hooks, the /thimble skill and the channel launcher. Needs the thimble server installed beside it (scripts/install.sh)."
+    },
+    {
+      "name": "thimble-cc-mod",
+      "source": "./mods/thimble-cc-mod",
+      "license": "Apache-2.0",
+      "description": "A single-agent thimble inside Claude Code: it answers with cards drawn in the chat and citations you can check. An exploration."
     }
   ]
 }
