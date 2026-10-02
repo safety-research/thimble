@@ -35,7 +35,9 @@ Every number you write comes from code. Never type a number you did not read fro
                  real records, quoted; the helper checks that each quote is in the record
        diagram   nodes=[(id, label, ref)], edges=[(source, target, label)]: who or what connects to what, a flow or a
                  structure; a dozen nodes at most, each named in a few words; ref (optional) is a record the node
-                 stands for; an edge label over 24 characters becomes a numbered note under the drawing
+                 stands for. Keep it to about 6-8 edges, since more cross into a tangle; split a larger graph into
+                 two cards, such as one per stage or per group. Name each edge in a few words: a label over 24
+                 characters, or one with no room beside its edge, becomes a numbered note under the drawing
 
 2. The helper prints the card's id, the line that embeds it and the citation of each value. Put `[[card:<id>]]` alone on a line where the card belongs, and copy the value citations exactly as printed.
 3. The id comes from the question, so running the script again replaces the card. Fix a card by fixing its script.
