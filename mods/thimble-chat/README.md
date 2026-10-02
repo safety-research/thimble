@@ -53,6 +53,21 @@ paragraphs for a question that takes several steps, such as a why question.
   value from the raw files, without the answer's code. The mod runs the script, shows it and its output, and marks the
   chip ✓ if it recomputed the value or ✗ if not.
 
+## Gestures
+
+The same on every target: a card, a bar, point or cell, a sentence or paragraph of a reply, a citation, a table row,
+an example record, a diagram node.
+
+| Gesture | Does |
+| --- | --- |
+| click | opens the place the target cites (a chart value has none: it is selected) |
+| double-click | puts the target's citation into the prompt (a sentence: the sentence, quoted) |
+| shift+click | opens a side thread about the target; ctrl+click and middle-click do the same where the terminal reports them |
+| right-click | a menu of every action: open, ask about this, verify, open the script, rerun, cite (keys: the letter shown; Esc closes) |
+
+If a gesture misbehaves, start Claude Code with `THIMBLE_CHAT_DEBUG=1`: each press and release the mod receives (button,
+modifiers, the gesture it made, the target) is appended to `.thimble-chat/mouse.log`.
+
 Commands: `/thimble-card <id>` (a card in a panel), `/thimble-cite <n>` (the last answer's n-th citation),
 `/thimble-check` (check the last answer again), `/thimble-ask <question>`, `/thimble-band` (a row above the prompt
 listing the last answer's citations, opened with the digits 1-9), `/thimble-chat` (status).
@@ -67,8 +82,9 @@ tmux, set `set -g mouse on`, and `CLAUDE_CODE_TMUX_TRUECOLOR=1` for full colour.
 ## Known limits
 
 - Charts are text: eighth-block bars and braille lines, at most 120 columns wide.
-- cmd+click and option+click do not reach the mod (iTerm2 keeps them). Right-click is the second gesture; shift-, alt-
-  and ctrl-click do the same where the terminal reports them.
+- cmd+click, fn+click and option+click do not reach the mod (macOS terminals keep them or send no bit for them).
+  macOS Terminal and iTerm2 may send ctrl+click as a right-click, which opens the menu.
+- A click on the transcript's bottom row while "Jump to bottom" shows goes to that button.
 - While the prompt holds a draft, a panel that opens does not take the keys: click it first.
 - A hover tip shows on a neighbouring line, since a tip cannot be drawn outside its paragraph.
 - The mod's correction and verification requests appear in the transcript as prompts from the plugin.

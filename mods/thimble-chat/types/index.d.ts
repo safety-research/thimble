@@ -63,6 +63,10 @@ export type ChatEdit = { card: string; text: string; original: string }
 /** The last text row of an answer, which carries the answer's summary line. */
 export type ChatEnd = { ids: string[]; cards: string[]; file: string }
 
+/** What a gesture acts on (hooks/gestures.tsx): `ref` the place it cites (bare, or a whole `[[value|ref]]`), `text` its
+ *  shown value or its words, `cardId` the card it is on, `script` that card's script. */
+export type ChatTarget = { kind: 'card' | 'mark' | 'sentence' | 'citation' | 'row' | 'record' | 'node'; ref?: string; text?: string; cardId?: string; script?: string }
+
 declare module 'claude-code' {
   interface PluginState {
     'thimble-chat': {
@@ -84,6 +88,7 @@ declare module 'claude-code' {
       ends: StateFamily<ChatEnd>
       band: boolean
       paneMode: string
+      menu: ChatTarget | null
     }
   }
 }
