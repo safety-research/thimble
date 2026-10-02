@@ -759,16 +759,17 @@ def _continue(lv: Live) -> None:
     """Main's session continues in the session its continued-in record names (`lv.continued`): Claude Code moved it into
     a background job, whose session copied the conversation into a transcript beside this one's and runs in its own
     process. That session becomes main in this one's place, by the pid its shim reported (attach), read from its
-    transcript's start without the records it copied (_copied), with the turn in progress, main's subagents still at
-    work (a thread's fork ends, as when main is replaced) and the events queued for this one (channel.move_events).
-    This one ends as CONTINUED: thimble's agents go on, and its shim, in the parked process, does not make it main again
-    (_parked)."""
+    transcript's start without the records it copied (_copied), with the turn in progress, main's subagents and threads'
+    forks still at work (threads.fork_moved) and the events queued for this one (channel.move_events). This one ends as
+    CONTINUED: thimble's agents go on, and its shim, in the parked process, does not make it main again (_parked)."""
     from . import channel  # noqa: PLC0415
 
     c, (new, at) = lv.c, lv.continued
     config_dir = _shim_configs.get((c, new), (lv.config or "") if lv.config_known else None)
-    carried = [s for s in lv.subs if not s.done and not s.thread]  # the job runs them on, so detach ends none of them
+    carried = [s for s in lv.subs if not s.done]  # the job runs them on, so detach ends none of them
     lv.subs = [s for s in lv.subs if s not in carried]
+    for tid in {s.chat for s in carried if s.thread} | threads.awaiting_in(c, lv.sid):
+        threads.fork_moved(c, tid, lv.sid, new)
     detach(c, lv.sid, CONTINUED)
     nv = attach(c, new, lv.cwd, str(Path(str(lv.transcript_path)).with_name(f"{new}.jsonl")), None, config_dir)
     if nv is None:
@@ -779,8 +780,12 @@ def _continue(lv: Live) -> None:
     nv.offset = 0
     _take_turn(nv, _turn_state(lv))
     nv.watch_tasks |= lv.watch_tasks
+    moved = {s.chat for s in carried if s.thread}
+    for sub in [s for s in nv.subs if s.thread and s.chat in moved]:  # attach found the moved forks, as finished ones
+        nv.subs.remove(sub)
+        nv.sub_paths.discard(str(sub.path))
     nv.subs += carried
-    for chat in {s.chat for s in carried if not s.proxy}:  # a restarted server finds it under the job (_restore_subs)
+    for chat in {s.chat for s in carried if not s.proxy and not s.thread}:  # a restarted server finds it under the job
         agents.update_agent(c, chat, session=new)
     _persist(nv)
     _save_cursor(nv)

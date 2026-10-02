@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from app import agents, cc_channel, channel, config, session
+from app import agents, cc_channel, channel, config, session, threads
 
 CORPUS = "mini"
 SID = "e7b0a1f2-0000-4000-8000-000000000001"
@@ -438,6 +438,37 @@ def test_naming_the_job_after_an_unread_move_takes_over_from_no_session(cwd, pro
     _write(p, [*_turn(SID, 1, "2026-10-01T20:26:31.492Z", "the board's posts"), *_moved(SID, JOB)])
     out = asyncio.run(channel.session_route(CORPUS, channel.SessionBody(session=JOB, cwd=cwd)))
     assert out["attached"] and out["replaced"] is None and session.current(CORPUS).sid == JOB
+
+
+def test_a_thread_s_fork_at_work_when_the_session_moves_goes_on_in_the_job(cwd, project, quits):
+    """A thread's fork still works when Claude Code moves the session into a job: the fork is the job's, the thread
+    keeps running, and the job's task notification finishes it."""
+    p = project / f"{SID}.jsonl"
+    p.write_text("")
+    _subscribe(SID, cc_channel.CHANNEL)
+    lv = _attach(cwd, p, pid=100)
+    session.tail_once(lv)
+    thread = agents.new_thread(CORPUS, None, None, "Days the page changed")
+    channel.post(CORPUS, "thread", {"thread": thread["id"], "text": "On which days did it change?"})
+    name = agents.read_meta(CORPUS, thread["id"])[threads.FORK_NAME_KEY]
+    forked = _stamped(SID, 1, "2026-10-01T20:27:52.417Z", _human("Look into the thread"),
+                      _assistant(_use("toolu_fk", "Agent", {"description": f"thread:{name}", "prompt": "Answer it.",
+                                                            "run_in_background": True})),
+                      _result("toolu_fk", "Async agent launched successfully.\nagentId: f0e1d2c3"), END)
+    _append(p, lv, [*forked, *_moved(SID, JOB)])
+    assert session.current(CORPUS).sid == JOB
+    fork = agents.read_meta(CORPUS, thread["id"])["fork"]
+    assert fork["session"] == JOB and fork["agent_id"] == "f0e1d2c3" and not fork.get("ended")
+    assert agents.running(CORPUS, thread["id"])
+
+    note = ("<task-notification>\n<task-id>f0e1d2c3</task-id>\n<status>completed</status>\n<result>Mondays</result>\n"
+            "</task-notification>")
+    _write(project / f"{JOB}.jsonl", [*_copy(forked, JOB), *_stamped(
+        JOB, 2, "2026-10-01T23:30:03.924Z", {"type": "user", "origin": {"kind": "task-notification"},
+                                             "message": {"content": note}}, _assistant(_say("It answered.")), END)])
+    session.tail_once(session.current(CORPUS))
+    assert not agents.running(CORPUS, thread["id"])
+    assert [r["type"] for r in _log(thread["id"]) if r["type"] in ("done", "error")] == ["done"]
 
 
 def test_a_copied_record_is_known_by_its_uuid_or_its_time_and_a_session_that_goes_on_is_not_parked(tmp_path):
