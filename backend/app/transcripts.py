@@ -1054,27 +1054,73 @@ def _parse_turns(path: Path, rel: str) -> dict[str, Any]:
     return out
 
 
-def turns_page(path: Path, rel: str, start: int = 0, count: int = 100, line: int | None = None) -> dict[str, Any]:
-    """A page of parse_turns: `count` turns from index `start`, or, given a `line`, from a few turns before the last
-    one standing at or before it. Each turn's text is cut at TURN_TEXT_MAX (`cut` says so). `groups` holds the
-    conversations the page's turns belong to, by index, and `n_groups` how many the file holds."""
+def _quote_forms(quote: str) -> list[str]:
+    """The words a span of the raw file quotes, as a turn's parsed text would hold them: JSON-decoded when they read as
+    the body of a JSON string, then as written."""
+    forms = []
+    try:
+        decoded = json.loads('"' + quote + '"')
+    except ValueError:
+        decoded = None
+    if isinstance(decoded, str):
+        forms.append(decoded.strip())
+    forms.append(quote.strip())
+    return [q for q in dict.fromkeys(forms) if q]
+
+
+def _cited_turn(turns: list[dict[str, Any]], on_line: list[int], quote: str) -> tuple[int, int, int] | None:
+    """(index, start, end) of the first turn of `on_line` whose text holds `quote`, with the offsets into its text: an
+    exact match in any of them first, then refs._find_quote's loose match while their text is small enough. None when no
+    turn holds it."""
+    from . import refs  # noqa: PLC0415
+
+    forms = _quote_forms(quote)
+    for i in on_line:
+        text = turns[i].get("text") or ""
+        for q in forms:
+            at = text.find(q)
+            if at >= 0:
+                return i, at, at + len(q)
+    if sum(len(turns[i].get("text") or "") for i in on_line) > refs.QUOTE_LOOSE_MAX_BYTES:
+        return None
+    for i in on_line:
+        text = turns[i].get("text") or ""
+        for q in forms:
+            found = refs._find_quote(text, q)
+            if found:
+                return i, found[0], found[1]
+    return None
+
+
+def turns_page(path: Path, rel: str, start: int = 0, count: int = 100, line: int | None = None,
+               quote: str | None = None) -> dict[str, Any]:
+    """A page of parse_turns: `count` turns from index `start`, or, given a `line`, from a few turns before the turn it
+    cites. That turn is the first standing on `line` whose text holds `quote` (the words a span of that line quotes),
+    else the first standing on `line`, else the last before it. A turn found by its quote is `cited`: {i, quote}, the
+    words as its text holds them. Each turn's text is cut at TURN_TEXT_MAX (`cut` says so), the cited turn's not before
+    the quote's end. `groups` holds the conversations the page's turns belong to, by index, and `n_groups` how many the
+    file holds."""
     parsed = parse_turns(path, rel)
     turns = parsed["turns"]
-    if line is not None:
-        at = 0
-        for i, t in enumerate(turns):
-            if t["line"] <= line:
-                at = i
-            else:
-                break
-        start = max(0, at - 5)
     count = max(1, min(count, TURNS_PAGE_MAX))
+    cited: tuple[int, int, int] | None = None
+    if line is not None:
+        on_line = [i for i, t in enumerate(turns) if t["line"] == line]
+        cited = _cited_turn(turns, on_line, quote) if quote and on_line else None
+        if cited:
+            at = cited[0]
+        elif on_line:
+            at = on_line[0]
+        else:
+            at = max((i for i, t in enumerate(turns) if t["line"] < line), default=0)
+        start = max(0, at - min(5, count - 1))
     start = max(0, min(start, len(turns)))
     page = []
     for i, t in enumerate(turns[start:start + count], start):
         text = t.get("text") or ""
-        item = {"i": i, "line": t["line"], "speaker": t.get("speaker") or "", "role": t["role"], "text": text[:TURN_TEXT_MAX]}
-        if len(text) > TURN_TEXT_MAX:
+        keep = max(TURN_TEXT_MAX, cited[2]) if cited and cited[0] == i else TURN_TEXT_MAX
+        item = {"i": i, "line": t["line"], "speaker": t.get("speaker") or "", "role": t["role"], "text": text[:keep]}
+        if len(text) > keep:
             item["cut"] = len(text)
         for k in ("time", "group"):
             if k in t:
@@ -1082,17 +1128,33 @@ def turns_page(path: Path, rel: str, start: int = 0, count: int = 100, line: int
         page.append(item)
     groups = parsed["groups"]
     touched = sorted({t["group"] for t in page if "group" in t})
-    return {"path": rel, "total": len(turns), "start": start, "turns": page, "n_groups": len(groups),
-            "groups": {str(g): groups[g] for g in touched}}
+    out = {"path": rel, "total": len(turns), "start": start, "turns": page, "n_groups": len(groups),
+           "groups": {str(g): groups[g] for g in touched}}
+    if cited:
+        i, a, b = cited
+        out["cited"] = {"i": i, "quote": (turns[i].get("text") or "")[a:b]}
+    return out
 
 
 @router.get("/corpora/{c}/source/turns")
-def get_turns(c: str, path: str, start: int = 0, count: int = 100, line: int | None = None) -> dict[str, Any]:
-    """A page of the turns of a JSON transcript (turns_page): 415 for one with no turns."""
+def get_turns(c: str, path: str, start: int = 0, count: int = 100, line: int | None = None, block: int | None = None,
+              char_start: int | None = None, char_end: int | None = None) -> dict[str, Any]:
+    """A page of the turns of a JSON transcript (turns_page): 415 for one with no turns. `block`, `char_start` and
+    `char_end` with `line` are a span of the raw file (`<path>#L<line>.b<block>:c<char_start>-<char_end>`, UTF-16
+    offsets), whose words pick the turn the page opens at."""
     from . import corpus  # noqa: PLC0415 — corpus imports nothing from here
 
-    p = corpus._file(corpus._corpus(c), path)
-    return turns_page(p, path, start, count, line)
+    root = corpus._corpus(c)
+    p = corpus._file(root, path)
+    quote = None
+    if line is not None and block is not None and char_start is not None and char_end is not None and char_end > char_start:
+        from . import refs  # noqa: PLC0415
+
+        try:
+            quote = refs.resolve_base(root, f"{path}#L{line}.b{block}:c{char_start}-{char_end}").get("excerpt")
+        except refs.RefError:
+            quote = None
+    return turns_page(p, path, start, count, line, quote)
 
 
 def _aider_turns(records: list[dict[str, Any]]) -> None:
