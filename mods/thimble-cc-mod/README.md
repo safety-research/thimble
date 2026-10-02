@@ -1,10 +1,10 @@
-# thimble-chat
+# thimble-cc-mod
 
 thimble's analysis guidance in a plain Claude Code session, as a [mod](https://code.claude.com/docs/en/plugins/mods/overview).
 You ask a question about the data in a folder. Claude answers with numbers computed by code, the mod draws each card as
 a chart or table between the lines of the reply, and each citation is a link you can click to see the cited place. There is no thimble server, browser or background agent.
 
-This is an exploration. It is not part of thimble's release, and it may change or break.
+This is an exploration that ships with thimble as the second plugin of its marketplace. It may change or break.
 
 ## Requirements
 
@@ -13,19 +13,22 @@ This is an exploration. It is not part of thimble's release, and it may change o
 
 ## Install
 
-    git clone -b explore/thimble-chat https://github.com/safety-research/thimble ~/thimble-chat-dev
-    claude plugin marketplace add ~/thimble-chat-dev/mods
-    cd <corpus folder> && claude plugin install thimble-chat@thimble-chat-dev --scope project
+With thimble installed, run `thimble cc-mod on` in a folder; `thimble cc-mod off` undoes it. `on` turns the thimble
+plugin off in that folder, and the sessions the `thimble` command starts turn this mod off.
 
-The marketplace path must end in `/mods`: adding the repository's top folder installs full thimble instead.
-`--scope project` turns the mod on in that folder only. Run the last line in each folder you want it in.
+Without installing thimble:
 
-Update: `git -C ~/thimble-chat-dev pull`, then start a new session or run `/reload-plugins` in an open one.
+    git clone -b explore/thimble-cc-mod https://github.com/safety-research/thimble <dir>
+    claude plugin marketplace add <dir>
+    cd <folder> && claude plugin install thimble-cc-mod@thimble --scope project
 
-Remove:
+Do not install the `thimble` plugin from that marketplace unless you ran thimble's installer: it needs the thimble
+server. `--scope project` turns the mod on in that folder only.
 
-    cd <corpus folder> && claude plugin uninstall thimble-chat --scope project
-    claude plugin marketplace remove thimble-chat-dev
+Update: `git -C <dir> pull`, then `claude plugin marketplace update thimble`.
+
+Remove: `claude plugin uninstall thimble-cc-mod --scope project` in the folder, then
+`claude plugin marketplace remove thimble`.
 
 ## Use
 
@@ -33,8 +36,8 @@ Run `claude` in the folder and ask a question about its files. Claude answers in
 one- or two-sentence takeaway when one chart or table answers the question, or short sections with cards between
 paragraphs for a question that takes several steps, such as a why question.
 
-- **Cards.** Claude computes every number with a Python script under `.thimble-chat/scripts/`, which ends by writing
-  a card to the session's `.thimble-chat/cards/`, wherever the script runs. The kinds are bar, line, timeline (times
+- **Cards.** Claude computes every number with a Python script under `.thimble-cc-mod/scripts/`, which ends by writing
+  a card to the session's `.thimble-cc-mod/cards/`, wherever the script runs. The kinds are bar, line, timeline (times
   shown and cited short, as 18 Jun 21:26), table, example records and diagram (boxes joined by arrows in layers; a long
   node name wraps to two lines; an edge label stands on its own edge, or, when it is long or has no room there, is a
   numbered note under the drawing with its number on the edge). A card shows its question, its choices if it has any
@@ -70,14 +73,14 @@ record, a diagram node.
 | shift+click | opens a side thread about the target (also ctrl+click and middle-click, where the terminal reports them) |
 | right-click | a menu: open, ask about this, verify, open the script, rerun, cite (a letter key each; Esc closes); the target is shaded while it is open |
 
-If a gesture misbehaves, start Claude Code with `THIMBLE_CHAT_DEBUG=1` and send `.thimble-chat/mouse.log`: one line per
+If a gesture misbehaves, start Claude Code with `THIMBLE_CC_MOD_DEBUG=1` and send `.thimble-cc-mod/mouse.log`: one line per
 press and release the mod received, with its button, modifiers, gesture and target.
 
 Commands: `/thimble-card <n>` (the last answer's n-th card in a panel), `/thimble-cite <n>` (its n-th citation),
 `/thimble-check` (check the last answer again), `/thimble-ask <question>`, `/thimble-band` (a row above the prompt
-listing the last answer's citations, opened with the digits 1-9), `/thimble-chat` (status).
+listing the last answer's citations, opened with the digits 1-9), `/thimble-cc-mod` (status).
 
-The mod and Claude write only under `.thimble-chat/` in the folder: scripts, cards, answers, side threads,
+The mod and Claude write only under `.thimble-cc-mod/` in the folder: scripts, cards, answers, side threads,
 verification scripts, corrections and saved Bash outputs.
 
 Display: the mouse needs Claude Code's fullscreen view (`/tui fullscreen`); without it cards and citations are drawn
@@ -98,13 +101,10 @@ but do not respond. iTerm2 shows the colours in full; macOS Terminal shows 256 c
 - A side thread's Bash outputs cannot be cited, and each follow-up starts a new subagent given the exchange so far.
 - A number typed without any citation is not caught.
 - Tried only in the terminal, not in the Desktop app.
-- If thimble itself is installed, its plugin also loads in the folder. This mod was tried with it off: set
-  `"thimble@thimble-local": false` (`"thimble@thimble": false` for a Dev install) under `enabledPlugins` in the
-  folder's `.claude/settings.json`.
 
 ## Tests
 
-From `mods/thimble-chat`:
+From `mods/thimble-cc-mod`:
 
     claude plugin validate .
     claude plugin test .

@@ -35,8 +35,8 @@ def test_lines_quotes_and_link_words() -> None:
 
 def test_card_params_and_single_card_rerun() -> None:
     with tempfile.TemporaryDirectory() as d:
-        os.makedirs(os.path.join(d, ".thimble-chat", "scripts"))
-        script = os.path.join(d, ".thimble-chat", "scripts", "by.py")
+        os.makedirs(os.path.join(d, ".thimble-cc-mod", "scripts"))
+        script = os.path.join(d, ".thimble-cc-mod", "scripts", "by.py")
         with open(script, "w") as f:
             f.write(
                 f"import sys; sys.path.insert(0, {HELPER!r}); from tcard import card, param\n"
@@ -48,14 +48,14 @@ def test_card_params_and_single_card_rerun() -> None:
         run = lambda env: subprocess.run([sys.executable, script], cwd=d, env={**os.environ, **env}, capture_output=True, text=True, check=True)  # noqa: E731
         out = run({}).stdout
         assert "[[3|card:" in out and "controls on the card: by = wiki" in out
-        cards = sorted(os.listdir(os.path.join(d, ".thimble-chat", "cards")))
+        cards = sorted(os.listdir(os.path.join(d, ".thimble-cc-mod", "cards")))
         assert len(cards) == 2
-        run({"THIMBLE_CHAT_PARAMS": json.dumps({"by": "label"}), "THIMBLE_CHAT_ONLY": "0:keep01"})
-        with open(os.path.join(d, ".thimble-chat", "cards", "keep01.json")) as f:
+        run({"THIMBLE_CC_MOD_PARAMS": json.dumps({"by": "label"}), "THIMBLE_CC_MOD_ONLY": "0:keep01"})
+        with open(os.path.join(d, ".thimble-cc-mod", "cards", "keep01.json")) as f:
             c = json.load(f)
         assert [r["label"] for r in c["rows"]] == ["Agent"] and c["params"][0]["value"] == "label"
         assert c["source"]["index"] == 0
-        assert len(os.listdir(os.path.join(d, ".thimble-chat", "cards"))) == 3  # the table was not written again
+        assert len(os.listdir(os.path.join(d, ".thimble-cc-mod", "cards"))) == 3  # the table was not written again
 
 
 def test_example_quotes_are_checked() -> None:

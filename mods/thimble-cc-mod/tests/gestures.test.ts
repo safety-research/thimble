@@ -18,7 +18,7 @@ const CARD = {
   x: 'wiki',
   y: 'revisions',
   note: '',
-  source: { script: '.thimble-chat/scripts/by.py', index: 0 },
+  source: { script: '.thimble-cc-mod/scripts/by.py', index: 0 },
   rows: [
     { label: 'dse', value: 13403, group: '' },
     { label: 'probier', value: 1013, group: '' },
@@ -26,21 +26,21 @@ const CARD = {
   total: 14416,
 }
 const REPLY = ['[[card:abc123]]', '', 'The wikis differ a lot in size.', '', 'dse has [[13403|card:abc123#revisions/dse]] revisions, see [[pages.jsonl#L3]].'].join('\n')
-const MESSAGE = { plugin: 'thimble-chat', component: 'AssistantMessage', requestId: 'm1', surface: 'terminal', viewport: { columns: 140, rows: 40 }, props: { text: REPLY, isFirstOfReply: true } }
-const MENU = { plugin: 'thimble-chat', component: 'Pane', requestId: 'thimble-menu', surface: 'terminal', viewport: { columns: 100, rows: 30 }, props: { bodyColumns: 34, bodyRows: 8 } }
+const MESSAGE = { plugin: 'thimble-cc-mod', component: 'AssistantMessage', requestId: 'm1', surface: 'terminal', viewport: { columns: 140, rows: 40 }, props: { text: REPLY, isFirstOfReply: true } }
+const MENU = { plugin: 'thimble-cc-mod', component: 'Pane', requestId: 'thimble-menu', surface: 'terminal', viewport: { columns: 100, rows: 30 }, props: { bodyColumns: 34, bodyRows: 8 } }
 
 type World = { files: Map<string, string>; filled: string[]; opened: string[]; runs: string[]; submitted: string[]; clock: ReturnType<typeof mock.clock> }
 
 function world(on: On, env: Record<string, string> = {}): World {
   mock.env(on, env)
   const clock = mock.clock(on, { now: 1_790_000_000_000 })
-  const w: World = { files: new Map([[`${CWD}/.thimble-chat/cards/abc123.json`, JSON.stringify(CARD)]]), filled: [], opened: [], runs: [], submitted: [], clock }
+  const w: World = { files: new Map([[`${CWD}/.thimble-cc-mod/cards/abc123.json`, JSON.stringify(CARD)]]), filled: [], opened: [], runs: [], submitted: [], clock }
   on('session.start', ($, e) => ({ cwd: e.cwd }))
   on('session.cwd', () => ({ value: CWD }))
   on('session.messages', () => ({ value: [] }) as never)
   on('command.register', ($, e) => ({ value: { command: e.name } }) as never)
   on('fs.read', ($, e) => {
-    if (e.path.endsWith('/prompt/chat.md')) return { value: '# thimble-chat\nguidance' }
+    if (e.path.endsWith('/prompt/chat.md')) return { value: '# thimble-cc-mod\nguidance' }
     const text = w.files.get(e.path)
     if (text === undefined) throw new Error(`ENOENT: ${e.path}`)
     return { value: text }
@@ -238,18 +238,18 @@ test('a gesture posted from a chip or a mark is handled once: click opens, menu 
   expect(w.opened).toEqual(['thimble-cite', 'thimble-menu'])
   const menu = (await $.ui.mount(MENU as never)) as unknown as M
   await menu.press({ key: 'menu-rerun' })
-  expect(w.runs).toContain('.thimble-chat/scripts/by.py')
+  expect(w.runs).toContain('.thimble-cc-mod/scripts/by.py')
   await menu.unmount()
   await ui.unmount()
 })
 
-test('THIMBLE_CHAT_DEBUG=1 logs each press and release with its button, modifiers, gesture and target', async ($, on) => {
-  const w = world(on, { THIMBLE_CHAT_DEBUG: '1' })
+test('THIMBLE_CC_MOD_DEBUG=1 logs each press and release with its button, modifiers, gesture and target', async ($, on) => {
+  const w = world(on, { THIMBLE_CC_MOD_DEBUG: '1' })
   await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
   const ui = (await $.ui.mount(MESSAGE as never)) as unknown as M
   await ui.pointer({ type: 'down', x: 3, y: 0, button: 'left', ctrl: true, in: 'md-2' } as never)
   await ui.pointer({ type: 'up', x: 3, y: 0, button: 'left', in: 'md-2' } as never)
-  const log = (w.files.get(`${CWD}/.thimble-chat/mouse.log`) ?? '').trim().split('\n').map(l => JSON.parse(l) as Record<string, string>)
+  const log = (w.files.get(`${CWD}/.thimble-cc-mod/mouse.log`) ?? '').trim().split('\n').map(l => JSON.parse(l) as Record<string, string>)
   expect(log.map(l => [l.event, l.button, l.mods, l.gesture])).toEqual([
     ['press', 'left', 'ctrl', 'thread'],
     ['release', 'left', 'none', 'none'],

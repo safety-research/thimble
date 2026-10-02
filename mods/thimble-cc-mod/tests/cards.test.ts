@@ -1,5 +1,5 @@
 // The cards lane: less chrome on a card, no hex ids where the analyst reads, theme-aware colours, the diagram kind,
-// and cards written to the session's folder. `claude plugin test mods/thimble-chat`.
+// and cards written to the session's folder. `claude plugin test mods/thimble-cc-mod`.
 import type { On } from 'claude-code'
 import { expect, mock, test } from 'claude-code/testing'
 import type { Mounted } from 'claude-code/testing'
@@ -17,7 +17,7 @@ const BAR: CardData = {
   x: 'wiki',
   y: 'revisions',
   note: '',
-  source: { script: '.thimble-chat/scripts/by.py', index: 0 },
+  source: { script: '.thimble-cc-mod/scripts/by.py', index: 0 },
   rows: [
     { label: 'dse', value: 13403, group: '' },
     { label: 'probier', value: 1013, group: '' },
@@ -32,7 +32,7 @@ const DIAGRAM: CardData = {
   x: '',
   y: '',
   note: '',
-  source: { script: '.thimble-chat/scripts/flow.py', index: 0 },
+  source: { script: '.thimble-cc-mod/scripts/flow.py', index: 0 },
   nodes: [
     { id: 'p', label: 'Planner', ref: 'events.jsonl#L3' },
     { id: 'c', label: 'Coder' },
@@ -50,8 +50,8 @@ type World = { files: Map<string, string>; filled: string[]; opened: string[]; e
 function world(on: On): World {
   const w: World = {
     files: new Map([
-      [`${CWD}/.thimble-chat/cards/abc123.json`, JSON.stringify(BAR)],
-      [`${CWD}/.thimble-chat/cards/d1a9e0.json`, JSON.stringify(DIAGRAM)],
+      [`${CWD}/.thimble-cc-mod/cards/abc123.json`, JSON.stringify(BAR)],
+      [`${CWD}/.thimble-cc-mod/cards/d1a9e0.json`, JSON.stringify(DIAGRAM)],
     ]),
     filled: [],
     opened: [],
@@ -68,7 +68,7 @@ function world(on: On): World {
   on('session.messages', () => ({ value: [] }) as never)
   on('command.register', ($, e) => ({ value: { command: e.name } }) as never)
   on('fs.read', ($, e) => {
-    if (e.path.endsWith('/prompt/chat.md')) return { value: '# thimble-chat\nguidance {{helper}}' }
+    if (e.path.endsWith('/prompt/chat.md')) return { value: '# thimble-cc-mod\nguidance {{helper}}' }
     const text = w.files.get(e.path)
     if (text === undefined) throw new Error(`ENOENT: ${e.path}`)
     return { value: text }
@@ -111,7 +111,7 @@ function world(on: On): World {
 
 type M = Mounted<'terminal'>
 const MESSAGE = (text: string) =>
-  ({ plugin: 'thimble-chat', component: 'AssistantMessage', requestId: 'm1', surface: 'terminal', viewport: { columns: 140, rows: 40 }, props: { text, isFirstOfReply: true } }) as never
+  ({ plugin: 'thimble-cc-mod', component: 'AssistantMessage', requestId: 'm1', surface: 'terminal', viewport: { columns: 140, rows: 40 }, props: { text, isFirstOfReply: true } }) as never
 
 /** Every string a drawn tree shows, joined. */
 function shown(tree: unknown): string {
@@ -169,7 +169,7 @@ test('a card that cannot be drawn is named by its place in the reply, not its id
 test('the helper is told the session folder, and a rerun passes it on', async ($, on) => {
   const w = world(on)
   await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
-  expect(w.envSet).toContainEqual(['THIMBLE_CHAT_ROOT', CWD])
+  expect(w.envSet).toContainEqual(['THIMBLE_CC_MOD_ROOT', CWD])
 })
 
 test('/thimble-card takes a card by its place in the last reply', async ($, on) => {

@@ -1,4 +1,4 @@
-// thimble-chat's tests: `claude plugin test mods/thimble-chat`. The hooks the tests register sit beneath the plugin
+// thimble-cc-mod's tests: `claude plugin test mods/thimble-cc-mod`. The hooks the tests register sit beneath the plugin
 // and stand for the engine: a filesystem in memory, process.run as the resolver and the card scripts, the prompt,
 // subagents and panes. Drawings are mounted on the terminal and the desktop (both have Client) and on vscode (static).
 import type { On } from 'claude-code'
@@ -18,7 +18,7 @@ const BAR: CardData = {
   x: 'wiki',
   y: 'revisions',
   note: '',
-  source: { script: '.thimble-chat/scripts/by.py', index: 0 },
+  source: { script: '.thimble-cc-mod/scripts/by.py', index: 0 },
   rows: [
     { label: 'dse', value: 13403, group: '' },
     { label: 'probier', value: 1013, group: '' },
@@ -60,7 +60,7 @@ function resolveOne(ref: string, display: string | null) {
 }
 
 function world(on: On, extra: Record<string, string> = {}): World {
-  const w: World = { files: new Map(Object.entries({ [`${CWD}/.thimble-chat/cards/abc123.json`]: JSON.stringify(BAR), ...extra })), writes: [], runs: [], filled: [], submitted: [], spawned: [], sent: [], appended: [], opened: [] }
+  const w: World = { files: new Map(Object.entries({ [`${CWD}/.thimble-cc-mod/cards/abc123.json`]: JSON.stringify(BAR), ...extra })), writes: [], runs: [], filled: [], submitted: [], spawned: [], sent: [], appended: [], opened: [] }
   mock.env(on, {})
   on('env.set', () => ({ value: undefined }) as never)
   mock.clock(on, { now: 1_790_000_000_000 })
@@ -69,7 +69,7 @@ function world(on: On, extra: Record<string, string> = {}): World {
   on('session.messages', () => ({ value: [] }) as never)
   on('command.register', ($, e) => ({ value: { command: e.name } }) as never)
   on('fs.read', ($, e) => {
-    if (e.path.endsWith('/prompt/chat.md')) return { value: '# thimble-chat\nguidance {{helper}}' }
+    if (e.path.endsWith('/prompt/chat.md')) return { value: '# thimble-cc-mod\nguidance {{helper}}' }
     const text = w.files.get(e.path)
     if (text === undefined) throw new Error(`ENOENT: ${e.path}`)
     return { value: text }
@@ -96,11 +96,11 @@ function world(on: On, extra: Record<string, string> = {}): World {
       return { value: { exitCode: 0, stdout: JSON.stringify(out), stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     }
     // a card's script, run again with a param: it writes the card with the new rows
-    const params = JSON.parse(e.init?.env?.THIMBLE_CHAT_PARAMS ?? '{}') as Record<string, string>
+    const params = JSON.parse(e.init?.env?.THIMBLE_CC_MOD_PARAMS ?? '{}') as Record<string, string>
     const rows = params.by === 'label' ? [{ label: 'AgentRelent', value: 317, group: '' }] : BAR.rows
-    w.files.set(`${CWD}/.thimble-chat/cards/abc123.json`, JSON.stringify({ ...BAR, rows, params: [{ ...BAR.params![0]!, value: params.by ?? 'wiki' }] }))
+    w.files.set(`${CWD}/.thimble-cc-mod/cards/abc123.json`, JSON.stringify({ ...BAR, rows, params: [{ ...BAR.params![0]!, value: params.by ?? 'wiki' }] }))
     w.writes.push({ path: 'card', text: '' })
-    return { value: { exitCode: 0, stdout: 'thimble-chat card abc123', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+    return { value: { exitCode: 0, stdout: 'thimble-cc-mod card abc123', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
   })
   on('prompt.fill', ($, e) => {
     w.filled.push(e.text)
@@ -137,7 +137,7 @@ function world(on: On, extra: Record<string, string> = {}): World {
 
 type M = Mounted<'terminal'>
 
-const MESSAGE = (text: string) => ({ plugin: 'thimble-chat', component: 'AssistantMessage', requestId: 'm1', viewport: { columns: 140, rows: 40 }, props: { text, isFirstOfReply: true } }) as const
+const MESSAGE = (text: string) => ({ plugin: 'thimble-cc-mod', component: 'AssistantMessage', requestId: 'm1', viewport: { columns: 140, rows: 40 }, props: { text, isFirstOfReply: true } }) as const
 
 // ------------------------------------------------------------------------------------------------ pure helpers
 
@@ -195,9 +195,9 @@ test('a table whose cells hold citations is a rich block in columns, its chips h
 })
 
 test('the mod knows its own prompts under the engine framing', () => {
-  const framed = 'The thimble-chat plugin sent a message:\nthimble-chat found problems in your last reply\n- x\n\nThis is how Claude Code surfaces a prompt a plugin submits between turns.'
+  const framed = 'The thimble-cc-mod plugin sent a message:\nthimble-cc-mod found problems in your last reply\n- x\n\nThis is how Claude Code surfaces a prompt a plugin submits between turns.'
   expect(fromMod(framed)).toBe(true)
-  expect(unframed(framed)).toBe('thimble-chat found problems in your last reply\n- x')
+  expect(unframed(framed)).toBe('thimble-cc-mod found problems in your last reply\n- x')
   expect(fromMod('Which wikis have the most revisions?')).toBe(false)
 })
 
@@ -218,7 +218,7 @@ test('a reply draws its card as a Client panel and its citations as chips, stati
 })
 
 test('a card that does not validate is drawn as an error', async ($, on) => {
-  world(on, { [`${CWD}/.thimble-chat/cards/bad111.json`]: JSON.stringify({ id: 'bad111', kind: 'bar', question: 'q', rows: [] }) })
+  world(on, { [`${CWD}/.thimble-cc-mod/cards/bad111.json`]: JSON.stringify({ id: 'bad111', kind: 'bar', question: 'q', rows: [] }) })
   await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
   const ui = await $.ui.mount({ ...MESSAGE('[[card:bad111]]\n\nsee [[card:bad111]]'), surface: 'terminal' } as never)
   expect(await ui.find({ type: 'Text', text: /Card 1 cannot be drawn: a bar card needs rows/ })).toBeDefined()
@@ -241,8 +241,8 @@ test('a param picked on the card runs its script again for that card, and the ca
   await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
   const ui = (await $.ui.mount({ ...MESSAGE(REPLY), surface: 'terminal' } as never)) as unknown as M
   await ui.post({ type: 'param', card: 'abc123', name: 'by', value: 'label' }, { in: 'card-1-abc123' })
-  const run = w.runs.find(r => r.argv[1] === '.thimble-chat/scripts/by.py')
-  expect(run?.env).toEqual({ THIMBLE_CHAT_PARAMS: '{"by":"label"}', THIMBLE_CHAT_ONLY: '0:abc123', THIMBLE_CHAT_ROOT: CWD })
+  const run = w.runs.find(r => r.argv[1] === '.thimble-cc-mod/scripts/by.py')
+  expect(run?.env).toEqual({ THIMBLE_CC_MOD_PARAMS: '{"by":"label"}', THIMBLE_CC_MOD_ONLY: '0:abc123', THIMBLE_CC_MOD_ROOT: CWD })
   expect(await ui.find({ type: 'Text', text: /AgentRelent/, in: 'card-1-abc123' })).toBeDefined()
   await ui.unmount()
 })
@@ -256,7 +256,7 @@ test('a Bash output is saved and main is told how to cite its lines', async ($, 
   const ran = await $.tool.call({ tool: 'Bash', command: 'wc -l pages.jsonl' } as never)
   const context = ((ran as { context?: readonly string[] }).context ?? []).join('\n')
   expect(context).toMatch(/this output is call:\w+\. To cite a line of it, write \[\[<value>\|call:\w+#L<n>\]\]/)
-  expect(w.writes.some(x => x.path.includes('/.thimble-chat/calls/'))).toBe(true)
+  expect(w.writes.some(x => x.path.includes('/.thimble-cc-mod/calls/'))).toBe(true)
 })
 
 // ------------------------------------------------------------------------------------------------ side threads
@@ -270,12 +270,12 @@ test('a side thread asks a forked subagent, out of main\'s chat, and its pane ta
   expect(w.opened).toContain('thimble-thread')
   await ui.unmount()
   for (const surface of ['terminal', 'desktop'] as const) {
-    const pane = (await $.ui.mount({ plugin: 'thimble-chat', component: 'Pane', requestId: 'thimble-thread', surface, viewport: { columns: 100, rows: 30 }, props: { bodyColumns: 96, bodyRows: 28 } } as never)) as unknown as M
+    const pane = (await $.ui.mount({ plugin: 'thimble-cc-mod', component: 'Pane', requestId: 'thimble-thread', surface, viewport: { columns: 100, rows: 30 }, props: { bodyColumns: 96, bodyRows: 28 } } as never)) as unknown as M
     expect(await pane.find({ type: 'Text', text: /side thread about/ })).toBeDefined()
     expect(await pane.find({ key: 'ask' })).toBeDefined()
     await pane.unmount()
   }
-  const pane = (await $.ui.mount({ plugin: 'thimble-chat', component: 'Pane', requestId: 'thimble-thread', surface: 'terminal', viewport: { columns: 100, rows: 30 }, props: { bodyColumns: 96, bodyRows: 28 } } as never)) as unknown as M
+  const pane = (await $.ui.mount({ plugin: 'thimble-cc-mod', component: 'Pane', requestId: 'thimble-thread', surface: 'terminal', viewport: { columns: 100, rows: 30 }, props: { bodyColumns: 96, bodyRows: 28 } } as never)) as unknown as M
   await pane.input({ key: 'ask', text: 'Why is dse so large?' })
   expect(w.spawned[0]?.subagentType).toBe('fork')
   expect(w.spawned[0]?.prompt).toContain('Why is dse so large?')
@@ -283,7 +283,7 @@ test('a side thread asks a forked subagent, out of main\'s chat, and its pane ta
   expect(w.spawned[0]?.prompt).toContain('FOR MAIN:')
   // the kit starts no subagent, so the mod falls back to a general-purpose one given the guidance, then reports it
   expect(w.spawned[1]?.subagentType).toBe('general-purpose')
-  expect(w.spawned[1]?.prompt).toContain('# thimble-chat')
+  expect(w.spawned[1]?.prompt).toContain('# thimble-cc-mod')
   expect(await pane.find({ type: 'Text', text: /could not start a subagent/ })).toBeDefined()
   expect(w.submitted.length).toBe(0) // nothing of the thread reached main's chat
   await pane.unmount()

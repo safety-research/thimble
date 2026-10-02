@@ -1,12 +1,12 @@
-// thimble-chat: a single-agent thimble inside Claude Code. No server, no browser.
+// thimble-cc-mod: a single-agent thimble inside Claude Code. No server, no browser.
 //
 // - Prompting: prompt/chat.md rides with the first prompt of a conversation as context (managed settings on this
 //   machine bypass a user plugin's prompt.compose). It tells main to answer card shaped or report shaped, numbers from
 //   code, every number cited.
-// - Cards: main's Python writes a card with helper/tcard.py (.thimble-chat/cards/<id>.json); a reply line holding only
+// - Cards: main's Python writes a card with helper/tcard.py (.thimble-cc-mod/cards/<id>.json); a reply line holding only
 //   [[card:<id>]] is drawn as the card's panel there, between the reply's text, by the Client card.tsx. A card is one
 //   of six typed specs; one that does not validate is drawn as an error, and a fix round corrects it. The helper
-//   writes cards to the session's folder (THIMBLE_CHAT_ROOT, set at session.start), wherever the script runs.
+//   writes cards to the session's folder (THIMBLE_CC_MOD_ROOT, set at session.start), wherever the script runs.
 // - Citations: every [[...]] of a reply is drawn as a link (para.tsx, cite.ts), red when helper/resolve.py finds the
 //   ref missing or without its value. The citation panel shows the cited lines, highlighted.
 // - Fix rounds: when a reply has red citations or a card that cannot be drawn, a forked subagent corrects them, out of
@@ -18,7 +18,7 @@
 //   a right-click opens the menu of every action.
 // - Side threads (threads.tsx): a subagent answers out of main's chat; its result is offered back as one line. Every
 //   row a subagent of the mod causes in main's chat is drawn as one dim line.
-// - Bash results: each output is saved (.thimble-chat/calls/<id>.json) and main is told its ref, so it can cite a line.
+// - Bash results: each output is saved (.thimble-cc-mod/calls/<id>.json) and main is told its ref, so it can cite a line.
 // - While a reply streams, the engine is handed its text with each citation as a Markdown link and each card's embed
 //   line as a placeholder (turn.step), so no raw [[...]] shows; the row is stored as the model wrote it (session.append).
 import { atom, read, update } from 'claude-code'
@@ -38,34 +38,34 @@ import { MOD_AGENT, fixName, forkPrompt, freshPrompt, lastTurn, threadFile, thre
 
 type Dollar = EngineInterface
 
-const VERDICTS = { plugin: 'thimble-chat', key: 'verdicts' } as const
-const VERIFY = { plugin: 'thimble-chat', key: 'verify' } as const
-const RUNS = { plugin: 'thimble-chat', key: 'runs' } as const
-const THREADS = { plugin: 'thimble-chat', key: 'threads' } as const
-const ENDS = { plugin: 'thimble-chat', key: 'ends' } as const
-const FIXES = { plugin: 'thimble-chat', key: 'fixes' } as const
-const AGENTS = { plugin: 'thimble-chat', key: 'agents' } as const
-const CORRECTIONS = { plugin: 'thimble-chat', key: 'corrections' } as const
-const openA = atom({ plugin: 'thimble-chat', key: 'open' } as const, '')
-const turnA = atom({ plugin: 'thimble-chat', key: 'turn' } as const, null)
-const hiddenA = atom({ plugin: 'thimble-chat', key: 'hidden' } as const, '')
+const VERDICTS = { plugin: 'thimble-cc-mod', key: 'verdicts' } as const
+const VERIFY = { plugin: 'thimble-cc-mod', key: 'verify' } as const
+const RUNS = { plugin: 'thimble-cc-mod', key: 'runs' } as const
+const THREADS = { plugin: 'thimble-cc-mod', key: 'threads' } as const
+const ENDS = { plugin: 'thimble-cc-mod', key: 'ends' } as const
+const FIXES = { plugin: 'thimble-cc-mod', key: 'fixes' } as const
+const AGENTS = { plugin: 'thimble-cc-mod', key: 'agents' } as const
+const CORRECTIONS = { plugin: 'thimble-cc-mod', key: 'corrections' } as const
+const openA = atom({ plugin: 'thimble-cc-mod', key: 'open' } as const, '')
+const turnA = atom({ plugin: 'thimble-cc-mod', key: 'turn' } as const, null)
+const hiddenA = atom({ plugin: 'thimble-cc-mod', key: 'hidden' } as const, '')
 const correctionsA = atom(CORRECTIONS, [])
-const paneCardA = atom({ plugin: 'thimble-chat', key: 'paneCard' } as const, '')
-const paneModeA = atom({ plugin: 'thimble-chat', key: 'paneMode' } as const, '')
-const pickedA = atom({ plugin: 'thimble-chat', key: 'picked' } as const, '')
-const hoverA = atom({ plugin: 'thimble-chat', key: 'hover' } as const, '')
-const bandA = atom({ plugin: 'thimble-chat', key: 'band' } as const, false)
-const threadA = atom({ plugin: 'thimble-chat', key: 'thread' } as const, '')
-const threadListA = atom({ plugin: 'thimble-chat', key: 'threadList' } as const, [])
-const menuA = atom({ plugin: 'thimble-chat', key: 'menu' } as const, null)
+const paneCardA = atom({ plugin: 'thimble-cc-mod', key: 'paneCard' } as const, '')
+const paneModeA = atom({ plugin: 'thimble-cc-mod', key: 'paneMode' } as const, '')
+const pickedA = atom({ plugin: 'thimble-cc-mod', key: 'picked' } as const, '')
+const hoverA = atom({ plugin: 'thimble-cc-mod', key: 'hover' } as const, '')
+const bandA = atom({ plugin: 'thimble-cc-mod', key: 'band' } as const, false)
+const threadA = atom({ plugin: 'thimble-cc-mod', key: 'thread' } as const, '')
+const threadListA = atom({ plugin: 'thimble-cc-mod', key: 'threadList' } as const, [])
+const menuA = atom({ plugin: 'thimble-cc-mod', key: 'menu' } as const, null)
 
 const CITE_PANE = 'thimble-cite'
 const CARD_PANE = 'thimble-card'
 const THREAD_PANE = 'thimble-thread'
 const MENU_PANE = 'thimble-menu'
-const HOME = '.thimble-chat'
+const HOME = '.thimble-cc-mod'
 const CARD_MAX_COLS = 120
-const GUIDE_MARK = '# thimble-chat\n'
+const GUIDE_MARK = '# thimble-cc-mod\n'
 const STATUS_WORDS: Record<string, string> = {
   ok: 'resolves, and the value is there',
   differs: 'resolves, but the value is not there',
@@ -97,7 +97,7 @@ async function paths($: Dollar): Promise<void> {
 async function ensureGuide($: Dollar): Promise<string> {
   if (guide) return guide
   await paths($)
-  debug = Boolean(await $.env.get('THIMBLE_CHAT_DEBUG'))
+  debug = Boolean(await $.env.get('THIMBLE_CC_MOD_DEBUG'))
   try {
     guide = (await $.fs.read(`${root}/prompt/chat.md`)).replaceAll('{{helper}}', `${root}/helper`)
   } catch {
@@ -174,7 +174,7 @@ async function check($: Dollar, cs: Citation[]): Promise<void> {
       timeoutMs: 20000,
     })
     if (r.exitCode !== 0) {
-      $.ui.log(`thimble-chat: the resolver failed: ${r.stderr.trim().split('\n').at(-1) ?? ''}`)
+      $.ui.log(`thimble-cc-mod: the resolver failed: ${r.stderr.trim().split('\n').at(-1) ?? ''}`)
       return
     }
     const out = JSON.parse(r.stdout) as (Omit<ChatVerdict, 'raw' | 'display' | 'id'> & { id: string })[]
@@ -185,7 +185,7 @@ async function check($: Dollar, cs: Citation[]): Promise<void> {
       await $.state.set({ ...VERDICTS, id: v.id }, { ...v, window, id: v.id, raw: c.raw, ref: c.ref, display: c.display })
     }
   } catch (err) {
-    $.ui.log(`thimble-chat: could not check citations: ${String(err).slice(0, 120)}`)
+    $.ui.log(`thimble-cc-mod: could not check citations: ${String(err).slice(0, 120)}`)
   }
 }
 
@@ -248,7 +248,7 @@ async function agentOf($: Dollar, agentId: string | undefined): Promise<ChatAgen
 async function noteMain($: Dollar, text: string): Promise<void> {
   await $.session
     .append({ message: { type: 'user', content: [{ type: 'text', text }] } })
-    .catch((err: unknown) => $.ui.log(`thimble-chat: could not leave main a note: ${String(err).slice(0, 200)}`))
+    .catch((err: unknown) => $.ui.log(`thimble-cc-mod: could not leave main a note: ${String(err).slice(0, 200)}`))
 }
 
 // ------------------------------------------------------------------------------------------------ fix rounds
@@ -321,9 +321,9 @@ async function fixComplete($: Dollar, a: ChatAgent, reason: string, answer: stri
       }
     }
     const turn = await read($, turnA)
-    if (turn && turn.ids.some(id => fixKeysOf(items).has(id))) await $.state.set({ plugin: 'thimble-chat', key: 'turn' }, { ...turn, ids: cs.map(c => cid(c.raw)) })
+    if (turn && turn.ids.some(id => fixKeysOf(items).has(id))) await $.state.set({ plugin: 'thimble-cc-mod', key: 'turn' }, { ...turn, ids: cs.map(c => cid(c.raw)) })
   }
-  if (notes.length) await noteMain($, ['thimble-chat checked your last reply, and a subagent worked on its problems; the analyst sees the result in place:', ...notes.map(n => `- ${n}`)].join('\n'))
+  if (notes.length) await noteMain($, ['thimble-cc-mod checked your last reply, and a subagent worked on its problems; the analyst sees the result in place:', ...notes.map(n => `- ${n}`)].join('\n'))
 }
 
 function fixKeysOf(items: ChatFixItem[]): Set<string> {
@@ -358,8 +358,8 @@ function verifyPrompt(c: Citation, v: ChatVerdict | undefined, reply: string, sc
           : c.ref
   const sentence = sentenceOf(reply, c.raw) || c.raw
   return [
-    `thimble-chat: the analyst asks for a verification script of ${c.raw} (${where}), from the sentence "${clip(sentence, 300)}"`,
-    `Write it at ${script}, following "Verification scripts" in thimble-chat's guidance, run it once, and reply in one sentence with what it recomputed.`,
+    `thimble-cc-mod: the analyst asks for a verification script of ${c.raw} (${where}), from the sentence "${clip(sentence, 300)}"`,
+    `Write it at ${script}, following "Verification scripts" in thimble-cc-mod's guidance, run it once, and reply in one sentence with what it recomputed.`,
   ].join('\n')
 }
 
@@ -422,7 +422,7 @@ async function runVerify($: Dollar, id: string): Promise<void> {
       state: r.exitCode !== 0 || result === null ? 'error' : ok ? 'verified' : 'refuted',
     })
     if (r.exitCode === 0 && result !== null && c) {
-      await noteMain($, `thimble-chat: the verification script ${script} recomputed ${result} for ${c.raw}${expected === null ? '' : ok ? ', which matches' : `, not ${expected}`}.`)
+      await noteMain($, `thimble-cc-mod: the verification script ${script} recomputed ${result} for ${c.raw}${expected === null ? '' : ok ? ', which matches' : `, not ${expected}`}.`)
     }
   } catch (err) {
     await $.state.set({ ...VERIFY, id }, { id, state: 'error', script, expected, source: source.slice(0, 9000), stderr: String(err).slice(0, 500) })
@@ -478,7 +478,7 @@ async function rerunCard($: Dollar, id: string, change?: { name: string; value: 
   try {
     const r = await $.process.run(['python3', script], {
       cwd,
-      env: { THIMBLE_CHAT_PARAMS: JSON.stringify(values), THIMBLE_CHAT_ONLY: `${card.source.index ?? 0}:${id}`, THIMBLE_CHAT_ROOT: cwd },
+      env: { THIMBLE_CC_MOD_PARAMS: JSON.stringify(values), THIMBLE_CC_MOD_ONLY: `${card.source.index ?? 0}:${id}`, THIMBLE_CC_MOD_ROOT: cwd },
       timeoutMs: 180000,
     })
     const f = await cardFile($, id)
@@ -513,11 +513,11 @@ async function getThread($: Dollar, id: string): Promise<ChatThread | undefined>
 /** Open a side thread about something on the screen; the pane takes the keys, its field asks the first question. */
 async function openThread($: Dollar, about: { label: string; context: string; ref?: string }): Promise<string> {
   const id = `t${(await $.clock.now()).toString(36)}`
-  const t: ChatThread = { id, label: about.label, ref: about.ref ?? '', context: about.context, agentId: '', engine: '', turns: [], file: `.thimble-chat/threads/${id}.md` }
+  const t: ChatThread = { id, label: about.label, ref: about.ref ?? '', context: about.context, agentId: '', engine: '', turns: [], file: `.thimble-cc-mod/threads/${id}.md` }
   await setThread($, t)
   const list = (await read($, threadListA)) ?? []
-  await $.state.set({ plugin: 'thimble-chat', key: 'threadList' }, [...list, id].slice(-20))
-  await $.state.set({ plugin: 'thimble-chat', key: 'thread' }, id)
+  await $.state.set({ plugin: 'thimble-cc-mod', key: 'threadList' }, [...list, id].slice(-20))
+  await $.state.set({ plugin: 'thimble-cc-mod', key: 'thread' }, id)
   await openPane($, { id: THREAD_PANE, title: 'Side thread', focus: true, closeOnEscape: true })
   return id
 }
@@ -614,7 +614,7 @@ async function chipView($: Dollar, c: Citation): Promise<{ view: ChipView; id: s
 
 // ------------------------------------------------------------------------------------------------ drawing a reply
 
-/** A reply's blocks as thimble-chat draws them: Markdown as the engine would, cards as panels, paragraphs that hold
+/** A reply's blocks as thimble-cc-mod draws them: Markdown as the engine would, cards as panels, paragraphs that hold
  *  citations as chips. Interactive (Clients) on the terminal and desktop, static elsewhere. */
 async function drawReply($: Dollar, e: ResolveInput, text: string, width: number, prefix = ''): Promise<RenderElement[]> {
   const { Box, Text, Markdown } = $.ui.resolve(e)
@@ -701,14 +701,14 @@ async function openCitation($: Dollar, c: Citation): Promise<void> {
   const id = cid(c.raw)
   remember([c])
   if (!(await $.state.get({ ...VERDICTS, id })).value) enqueue($, [c])
-  await $.state.set({ plugin: 'thimble-chat', key: 'open' }, id)
+  await $.state.set({ plugin: 'thimble-cc-mod', key: 'open' }, id)
   await openPane($, { id: CITE_PANE, title: 'Citation', focus: true, closeOnEscape: true, columns: 96, rows: 22 })
 }
 
 async function openCardPane($: Dollar, id: string, mode: string): Promise<void> {
   const card = await loadCard($, id)
-  await $.state.set({ plugin: 'thimble-chat', key: 'paneCard' }, id)
-  await $.state.set({ plugin: 'thimble-chat', key: 'paneMode' }, mode)
+  await $.state.set({ plugin: 'thimble-cc-mod', key: 'paneCard' }, id)
+  await $.state.set({ plugin: 'thimble-cc-mod', key: 'paneMode' }, mode)
   await openPane($, { id: CARD_PANE, title: clip(card?.question ?? 'Card', 60), focus: true, closeOnEscape: true, columns: 100 })
 }
 
@@ -775,7 +775,7 @@ async function cardContext($: Dollar, id: string): Promise<{ label: string; cont
 
 // ------------------------------------------------------------------------------------------------ gestures
 
-/** One line of .thimble-chat/mouse.log (THIMBLE_CHAT_DEBUG=1): a press or release a Client saw, and what it made. */
+/** One line of .thimble-cc-mod/mouse.log (THIMBLE_CC_MOD_DEBUG=1): a press or release a Client saw, and what it made. */
 async function logMouse($: Dollar, module: string, g: Sent): Promise<void> {
   await paths($)
   const ev: Partial<PointerEv> = g.ev ?? {}
@@ -805,7 +805,7 @@ let menuWatch: { cancel: () => void } | null = null
 /** Open the menu of a target. The target stays in state while the menu is open, so the reply lights it (drawReply hands
  *  it to each Client as `menu`), and is cleared once the menu closes, by a choice or Esc. */
 async function openMenu($: Dollar, t: Target): Promise<void> {
-  await $.state.set({ plugin: 'thimble-chat', key: 'menu' }, t)
+  await $.state.set({ plugin: 'thimble-cc-mod', key: 'menu' }, t)
   await $.ui.open({ id: MENU_PANE, title: 'Actions', focus: true, closeOnEscape: true, rows: menuItems(t).length + 1, columns: 34 })
   menuWatch?.cancel()
   const watch = $.clock.every(250, () => {
@@ -820,7 +820,7 @@ async function openMenu($: Dollar, t: Target): Promise<void> {
       if (open) return
       watch.cancel()
       if (menuWatch === watch) menuWatch = null
-      await $.state.set({ plugin: 'thimble-chat', key: 'menu' }, null)
+      await $.state.set({ plugin: 'thimble-cc-mod', key: 'menu' }, null)
     })()
   })
   menuWatch = watch
@@ -860,7 +860,7 @@ async function act($: Dollar, what: Act, t: Target): Promise<void> {
       const text = citeText(t)
       if (!text) return
       await $.prompt.fill({ text: `${text} `, mode: 'insert', decorations: text.startsWith('[[') ? [chipDecoration(text)] : [] })
-      if (text.startsWith('[[')) await $.state.set({ plugin: 'thimble-chat', key: 'picked' }, text)
+      if (text.startsWith('[[')) await $.state.set({ plugin: 'thimble-cc-mod', key: 'picked' }, text)
       return
     }
     case 'thread': {
@@ -933,7 +933,7 @@ export const register: Register = on => {
     const started = await next(e)
     await ensureGuide($)
     // the card helper writes cards here, wherever a script runs: every Bash command and process started after inherits it
-    await $.env.set('THIMBLE_CHAT_ROOT', cwd).catch((err: unknown) => $.ui.log(`thimble-chat: could not set THIMBLE_CHAT_ROOT: ${String(err).slice(0, 120)}`))
+    await $.env.set('THIMBLE_CC_MOD_ROOT', cwd).catch((err: unknown) => $.ui.log(`thimble-cc-mod: could not set THIMBLE_CC_MOD_ROOT: ${String(err).slice(0, 120)}`))
     await loadCorrections($)
     $.clock.every(150, () => void flushQueue($))
     await $.command.register({ name: 'thimble-card', description: 'Open a card of the last reply in a pane: /thimble-card <n>' })
@@ -941,7 +941,7 @@ export const register: Register = on => {
     await $.command.register({ name: 'thimble-check', description: 'Check the citations of the last reply again', immediate: true })
     await $.command.register({ name: 'thimble-ask', description: 'Ask a side thread about the last reply, out of the main chat: /thimble-ask <question>', immediate: true })
     await $.command.register({ name: 'thimble-band', description: 'Show or hide the band of the last reply\'s citations above the prompt', immediate: true })
-    await $.command.register({ name: 'thimble-chat', description: 'thimble-chat status: the guidance, the cards and files of this folder', immediate: true })
+    await $.command.register({ name: 'thimble-cc-mod', description: 'thimble-cc-mod status: the guidance, the cards and files of this folder', immediate: true })
     // a resumed session: the band lists the last reply's citations
     try {
       const rows = await $.session.messages()
@@ -956,7 +956,7 @@ export const register: Register = on => {
       const cs = citations(text)
       if (cs.length) {
         remember(cs, text)
-        await $.state.set({ plugin: 'thimble-chat', key: 'turn' }, { id: 'resumed', ids: cs.map(c => cid(c.raw)) })
+        await $.state.set({ plugin: 'thimble-cc-mod', key: 'turn' }, { id: 'resumed', ids: cs.map(c => cid(c.raw)) })
         enqueue($, cs)
       }
     } catch {
@@ -971,8 +971,8 @@ export const register: Register = on => {
   on('prompt.submit', async ($, e, next) => {
     // a subagent of the mod that ends with a notification to main: main would answer it in its chat
     if (e.origin.kind === 'task-notification') {
-      const mine = (await $.agent.list().catch(() => [])).filter(a => a.spawnedBy === 'thimble-chat')
-      if (mine.some(a => e.text.includes(a.id))) return { drop: 'thimble-chat: a subagent of the mod finished' }
+      const mine = (await $.agent.list().catch(() => [])).filter(a => a.spawnedBy === 'thimble-cc-mod')
+      if (mine.some(a => e.text.includes(a.id))) return { drop: 'thimble-cc-mod: a subagent of the mod finished' }
     }
     const g = await ensureGuide($)
     if (!g) return next(e)
@@ -1005,7 +1005,7 @@ export const register: Register = on => {
     } catch {
       return ran
     }
-    const note = `thimble-chat: this output is call:${short}. To cite a line of it, write [[<value>|call:${short}#L<n>]], counting the output's lines from 1.`
+    const note = `thimble-cc-mod: this output is call:${short}. To cite a line of it, write [[<value>|call:${short}#L<n>]], counting the output's lines from 1.`
     return { ...ran, context: [...(ran.context ?? []), note] }
   })
 
@@ -1098,7 +1098,7 @@ export const register: Register = on => {
     remember(cs, text)
     if (cs.length) {
       await check($, cs) // again, at the turn's end: a card may have changed since the block was drawn
-      await $.state.set({ plugin: 'thimble-chat', key: 'turn' }, { id: e.turnId, ids: cs.map(c => cid(c.raw)) })
+      await $.state.set({ plugin: 'thimble-cc-mod', key: 'turn' }, { id: e.turnId, ids: cs.map(c => cid(c.raw)) })
     }
     // the answer (not what main wrote while it worked) as a file the analyst owns, and a summary line under its last row
     const part = answerPart(turnParts)
@@ -1174,7 +1174,7 @@ export const register: Register = on => {
     const a = await agentOf($, e.props.task?.id)
     if (!a && !MOD_AGENT.test(e.props.text)) return next(e)
     const { Text } = $.ui.resolve(e)
-    return <Text dimColor wrap="truncate-end">{`› ${a?.label ?? 'a thimble-chat subagent'} · finished`}</Text>
+    return <Text dimColor wrap="truncate-end">{`› ${a?.label ?? 'a thimble-cc-mod subagent'} · finished`}</Text>
   })
 
   on('ui.render', { component: 'ToolUse', props: { tool: 'Agent' } }, async ($, e, next) => {
@@ -1204,7 +1204,7 @@ export const register: Register = on => {
     }
     if (d.type === 'pointer' || d.type === 'gesture') return next(e)
     if (d.type === 'hover') {
-      await $.state.set({ plugin: 'thimble-chat', key: 'hover' }, typeof d.id === 'string' ? d.id : '')
+      await $.state.set({ plugin: 'thimble-cc-mod', key: 'hover' }, typeof d.id === 'string' ? d.id : '')
       return next(e)
     }
     if (d.type === 'param' && typeof d.card === 'string' && typeof d.name === 'string' && typeof d.value === 'string') {
@@ -1446,7 +1446,7 @@ export const register: Register = on => {
       <Box flexDirection="column">
         {readout}
         <Box flexDirection="row" columnGap={1} flexWrap="wrap">
-          <Text bold>thimble-chat</Text>
+          <Text bold>thimble-cc-mod</Text>
           <Text dimColor>{`${views.length} citation${views.length === 1 ? '' : 's'}`}</Text>
           {bad ? <Text color={COLORS.problem}>{`· ${bad} with a problem`}</Text> : null}
           <Text dimColor>·</Text>
@@ -1473,8 +1473,8 @@ export const register: Register = on => {
 
   on('command.run', { command: 'thimble-band' }, async $ => {
     const on_ = !(await read($, bandA))
-    await $.state.set({ plugin: 'thimble-chat', key: 'band' }, on_)
-    await $.state.set({ plugin: 'thimble-chat', key: 'hidden' }, '')
+    await $.state.set({ plugin: 'thimble-cc-mod', key: 'band' }, on_)
+    await $.state.set({ plugin: 'thimble-cc-mod', key: 'hidden' }, '')
     return { text: `the citation band is ${on_ ? 'on (digits 1-9 in the empty prompt open a citation)' : 'off'}` }
   })
 
@@ -1488,7 +1488,7 @@ export const register: Register = on => {
     return { text: `side thread opened${q ? `: ${q}` : ''}` }
   })
 
-  on('command.run', { command: 'thimble-chat' }, async $ => {
+  on('command.run', { command: 'thimble-cc-mod' }, async $ => {
     await paths($)
     const g = await ensureGuide($)
     const present = (await $.session.messages()).some(r => r.role === 'user' && r.text.includes(GUIDE_MARK))

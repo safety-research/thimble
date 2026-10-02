@@ -1,4 +1,4 @@
-"""thimble-chat cards: write a card's data from Python, so every number a card shows comes from code.
+"""thimble-cc-mod cards: write a card's data from Python, so every number a card shows comes from code.
 
     import sys; sys.path.insert(0, "<plugin>/helper"); from tcard import card
 
@@ -12,14 +12,14 @@
 
     by = param("by", "wiki", ["wiki", "label"])   # a control on the card: picking a choice runs the script again
 
-Each call writes .thimble-chat/cards/<id>.json in the session's folder, wherever the script runs (THIMBLE_CHAT_ROOT,
-which thimble-chat sets for the session; else the folder holding the script's .thimble-chat; else the nearest folder up
-from the current one that has a .thimble-chat; else the current folder), and prints the line that embeds the card in a
+Each call writes .thimble-cc-mod/cards/<id>.json in the session's folder, wherever the script runs (THIMBLE_CC_MOD_ROOT,
+which thimble-cc-mod sets for the session; else the folder holding the script's .thimble-cc-mod; else the nearest folder up
+from the current one that has a .thimble-cc-mod; else the current folder), and prints the line that embeds the card in a
 reply and the citation of each value. Refs (an example's, a node's) are read from that folder too. The id comes from the
 question, so running the script again replaces the card.
 
-When the analyst picks another choice of a param on the card, thimble-chat runs the script again with
-THIMBLE_CHAT_PARAMS (the values, as JSON) and THIMBLE_CHAT_ONLY ("<index>:<id>"): only that card is written, under its
+When the analyst picks another choice of a param on the card, thimble-cc-mod runs the script again with
+THIMBLE_CC_MOD_PARAMS (the values, as JSON) and THIMBLE_CC_MOD_ONLY ("<index>:<id>"): only that card is written, under its
 own id, so the reply that embeds it shows the new data.
 """
 from __future__ import annotations
@@ -47,7 +47,7 @@ _count = 0  # card() calls so far in this run
 
 def _root() -> str:
     """The session's folder, where cards are written and refs are read."""
-    env = os.environ.get("THIMBLE_CHAT_ROOT")
+    env = os.environ.get("THIMBLE_CC_MOD_ROOT")
     if env and os.path.isdir(env):
         return os.path.abspath(env)
     main = getattr(sys.modules.get("__main__"), "__file__", None)
@@ -98,7 +98,7 @@ def _env_json(name: str) -> dict:
 
 def param(name: str, default, choices):
     """A value the analyst can change on the card, from `choices` (at most 12 strings or numbers). Returns `default`,
-    or the choice the analyst picked when thimble-chat runs the script again."""
+    or the choice the analyst picked when thimble-cc-mod runs the script again."""
     choices = [_plain(c) for c in choices]
     if not choices or len(choices) > MAX_CHOICES:
         raise ValueError(f"param {name!r}: give 1 to {MAX_CHOICES} choices")
@@ -109,7 +109,7 @@ def param(name: str, default, choices):
         raise ValueError(f"param {name!r}: the default {default!r} is not among the choices")
     if any(p["name"] == name for p in _params):
         raise ValueError(f"param {name!r} is declared twice")
-    want = _env_json("THIMBLE_CHAT_PARAMS").get(name, default)
+    want = _env_json("THIMBLE_CC_MOD_PARAMS").get(name, default)
     value = next((c for c in choices if str(c) == str(want)), default)
     _params.append({"name": str(name), "value": value, "default": default, "choices": choices})
     return value
@@ -143,7 +143,7 @@ def _source(root: str) -> dict:
     main = sys.modules.get("__main__")
     path = getattr(main, "__file__", None)
     if not path or not os.path.isfile(path):
-        print("thimble-chat: this card has no script file. Write the code to .thimble-chat/scripts/<name>.py and run it, "
+        print("thimble-cc-mod: this card has no script file. Write the code to .thimble-cc-mod/scripts/<name>.py and run it, "
               "so the analyst can read how the card was made.", file=sys.stderr)
         return {}
     with open(path, "rb") as f:
@@ -251,9 +251,9 @@ def card(kind: str, question: str, *, rows=None, columns=None, series=None, poin
     index = _count
     _count += 1
     cid = id or hashlib.sha1(f"{kind}:{question}".encode()).hexdigest()[:6]
-    only = os.environ.get("THIMBLE_CHAT_ONLY", "")
+    only = os.environ.get("THIMBLE_CC_MOD_ONLY", "")
     if only:
-        # a run by thimble-chat for one card: the others of this script are left as they are
+        # a run by thimble-cc-mod for one card: the others of this script are left as they are
         at, _, keep = only.partition(":")
         if str(index) != at:
             return cid
@@ -327,7 +327,7 @@ def card(kind: str, question: str, *, rows=None, columns=None, series=None, poin
     n = len(data.get("rows") or data.get("series") or data.get("events") or data.get("examples") or data.get("nodes") or [])
     unit = {"line": "series", "diagram": "nodes"}.get(kind, "rows")
     where = os.path.join(HOME, "cards", f"{cid}.json") if os.path.samefile(root, os.getcwd()) else os.path.join(root, HOME, "cards", f"{cid}.json")
-    print(f"thimble-chat card {cid} ({kind}, {n} {unit}) -> {where}")
+    print(f"thimble-cc-mod card {cid} ({kind}, {n} {unit}) -> {where}")
     if _params:
         print("controls on the card: " + "; ".join(f"{p['name']} = {p['value']} of {', '.join(map(str, p['choices']))}" for p in _params))
     print(f"embed it on a line of its own: [[card:{cid}]]")

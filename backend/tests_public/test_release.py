@@ -15,11 +15,11 @@ from app import config
 NEEDS = pytest.mark.skipif(not shutil.which("zip") or not shutil.which("git"), reason="release.sh needs zip and git")
 
 
-# a stand-in for mods/thimble-cc-mod, the marketplace's second plugin
+# a stand-in for mods/: thimble-cc-mod, the marketplace's second plugin, and a file beside it that does not ship
 MOD_FILES = {"mods/thimble-cc-mod/.claude-plugin/plugin.json": '{"name": "thimble-cc-mod", "version": "0.1.0"}\n',
              "mods/thimble-cc-mod/hooks/hooks.json": "{}\n",
              "mods/thimble-cc-mod/tests/test_mod.py": "def test_it():\n    pass\n",
-             "mods/.claude-plugin/marketplace.json": '{"name": "thimble-cc-mod-dev", "plugins": []}\n'}
+             "mods/notes.md": "not shipped\n"}
 
 
 def small_repo(tmp_path, *more):

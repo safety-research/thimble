@@ -1,4 +1,4 @@
-// Pure helpers of thimble-chat (no `$`), shared by the hooks module, the surface modules and the tests.
+// Pure helpers of thimble-cc-mod (no `$`), shared by the hooks module, the surface modules and the tests.
 //
 // - citations(text): the [[display|ref]] and [[ref]] citations of a reply, and the link form [display](ref).
 // - parseReply(text): a reply block cut into Markdown chunks, card embeds (a line holding only [[card:<id>]]) and rich
@@ -15,7 +15,7 @@ export type Block =
   | { type: 'card'; id: string; gap: boolean }
   | { type: 'rich'; prefix: string; heading: number; quote: boolean; runs: Run[]; gap: boolean; table?: TableRuns }
 
-/** A Markdown table that holds citations, drawn by thimble-chat (the `|` inside `[[value|ref]]` breaks a GFM table):
+/** A Markdown table that holds citations, drawn by thimble-cc-mod (the `|` inside `[[value|ref]]` breaks a GFM table):
  *  its rows of cells of runs, the first row the header, and each column's alignment. A table block's `runs` are its
  *  cells' runs in reading order, so its chips are numbered as a paragraph's are. */
 export type TableRuns = { rows: Run[][][]; align: ('left' | 'right' | 'center')[] }
@@ -173,7 +173,7 @@ export function tableRuns(lines: string[]): TableRuns {
 }
 
 /** A reply block cut into what the engine draws as Markdown (no citation in it), the cards it embeds, and the rich
- *  blocks thimble-chat draws itself so their citations can be chips. Fences and tables stay Markdown whole. */
+ *  blocks thimble-cc-mod draws itself so their citations can be chips. Fences and tables stay Markdown whole. */
 export function parseReply(text: string): Block[] {
   const lines = text.split('\n')
   const out: Block[] = []
@@ -269,7 +269,7 @@ export function parseReply(text: string): Block[] {
   return out
 }
 
-/** Whether a reply block needs thimble-chat's drawing: it embeds a card or holds a citation. */
+/** Whether a reply block needs thimble-cc-mod's drawing: it embeds a card or holds a citation. */
 export function needsDrawing(text: string): boolean {
   return text.split('\n').some(l => EMBED_RE.test(l)) || citations(text).length > 0
 }
@@ -504,18 +504,18 @@ export function forMain(answer: string): string {
   return end ? first.slice(0, end.index + 1) : first.slice(0, 200)
 }
 
-/** A prompt as thimble-chat sent it, without the engine's framing around a plugin's prompt ("The thimble-chat plugin
+/** A prompt as thimble-cc-mod sent it, without the engine's framing around a plugin's prompt ("The thimble-cc-mod plugin
  *  sent a message:" before it, a line on how plugin prompts are surfaced after it); other prompts unchanged. */
 export function unframed(text: string): string {
   return text
-    .replace(/^\s*The thimble-chat plugin sent a message:\s*/, '')
+    .replace(/^\s*The thimble-cc-mod plugin sent a message:\s*/, '')
     .replace(/\n+This is how Claude Code surfaces a prompt a plugin submits[\s\S]*$/, '')
     .trim()
 }
 
-/** Whether a prompt is one thimble-chat sent main (a fix request, a verification request, a note). */
+/** Whether a prompt is one thimble-cc-mod sent main (a fix request, a verification request, a note). */
 export function fromMod(text: string): boolean {
-  return unframed(text).startsWith('thimble-chat')
+  return unframed(text).startsWith('thimble-cc-mod')
 }
 
 /** A side thread's answer as the pane draws it: its `FOR MAIN:` line left out (the pane offers it as a button). */

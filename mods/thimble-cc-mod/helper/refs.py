@@ -1,4 +1,4 @@
-"""Shared by tcard.py and resolve.py: where thimble-chat keeps its files, how a ref is read, and how a shown number is
+"""Shared by tcard.py and resolve.py: where thimble-cc-mod keeps its files, how a ref is read, and how a shown number is
 compared with the value at a ref (a port of thimble's backend/app/cite.py shown_matches and value_in).
 
 Refs read here:
@@ -6,7 +6,7 @@ Refs read here:
     card:<id>#<column>/<row>        a value of a card (bar: the y title and the label; table: a column and the first
                                     column's value; line: the series and the x value; timeline: event and its number;
                                     diagram: node and its id, edge and its number)
-    call:<id>#L<n>[-L<m>]           lines of a Bash call's output, as thimble-chat saved it (.thimble-chat/calls)
+    call:<id>#L<n>[-L<m>]           lines of a Bash call's output, as thimble-cc-mod saved it (.thimble-cc-mod/calls)
     <path>#L<n>[-L<m>]              lines of a text file, counted from 1
     <path>#row=<n>                  a row of a CSV or TSV file, counted from the row after the header
     <path>#/<json pointer>          a value of a JSON document
@@ -24,7 +24,7 @@ import sqlite3
 from decimal import ROUND_HALF_EVEN, ROUND_HALF_UP, Decimal, InvalidOperation
 from itertools import islice
 
-HOME = ".thimble-chat"
+HOME = ".thimble-cc-mod"
 LINE_CAP = 4000  # characters of one line kept for display; the match is found on the whole line first
 
 NUM_RE = re.compile(r"(?<![\w:./#\-−])[-−]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?%?(?![\w%:])")

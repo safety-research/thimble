@@ -1,4 +1,4 @@
-// thimble-chat's state contract: every value the hooks module keeps in $.state.
+// thimble-cc-mod's state contract: every value the hooks module keeps in $.state.
 
 /** One line of the place a citation names, as helper/resolve.py read it; `hit` on the cited lines, `spans` where the
  *  shown value stands in them. */
@@ -76,7 +76,7 @@ export type ChatTarget = { kind: 'card' | 'mark' | 'sentence' | 'citation' | 'ro
 
 declare module 'claude-code' {
   interface PluginState {
-    'thimble-chat': {
+    'thimble-cc-mod': {
       verdicts: StateFamily<ChatVerdict>
       verify: StateFamily<ChatVerify>
       open: string

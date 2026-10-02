@@ -11,8 +11,8 @@
 import type { ChatFixItem, ChatThread, ChatThreadTurn } from '../types'
 
 const RULES = [
-  'Answer here, briefly, the way thimble-chat answers in the main conversation: numbers from code (run Python with Bash; a card with the helper when a chart or table answers it), every number and record cited as [[value|ref]].',
-  'Do not change the corpus, and write only under .thimble-chat/.',
+  'Answer here, briefly, the way thimble-cc-mod answers in the main conversation: numbers from code (run Python with Bash; a card with the helper when a chart or table answers it), every number and record cited as [[value|ref]].',
+  'Do not change the corpus, and write only under .thimble-cc-mod/.',
   'End with one line `FOR MAIN: <one sentence>` stating what you found; the analyst may pass that line to the main conversation.',
 ].join(' ')
 
@@ -26,7 +26,7 @@ function history(t: ChatThread): string {
 export function forkPrompt(t: ChatThread, q: string): string {
   const past = history(t)
   return [
-    'thimble-chat side thread. The analyst reads this exchange in a pane beside the main conversation; the main conversation does not see it.',
+    'thimble-cc-mod side thread. The analyst reads this exchange in a pane beside the main conversation; the main conversation does not see it.',
     `It is about ${t.label}:`,
     t.context,
     '',

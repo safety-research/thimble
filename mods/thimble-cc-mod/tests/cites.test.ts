@@ -1,4 +1,4 @@
-// Citations and fix rounds: `claude plugin test mods/thimble-chat`. The hooks registered here stand for the engine: a
+// Citations and fix rounds: `claude plugin test mods/thimble-cc-mod`. The hooks registered here stand for the engine: a
 // filesystem in memory, the resolver and subagents.
 import type { On } from 'claude-code'
 import { expect, mock, test } from 'claude-code/testing'
@@ -19,7 +19,7 @@ const CARD = {
   x: 'wiki',
   y: 'revisions',
   note: '',
-  source: { script: '.thimble-chat/scripts/by.py', index: 0 },
+  source: { script: '.thimble-cc-mod/scripts/by.py', index: 0 },
   rows: [
     { label: 'dse', value: 13403, group: '' },
     { label: 'probier', value: 1013, group: '' },
@@ -45,7 +45,7 @@ function resolveOne(ref: string, display: string | null) {
 }
 
 function world(on: On): World {
-  const w: World = { files: new Map([[`${CWD}/.thimble-chat/cards/abc123.json`, JSON.stringify(CARD)]]), spawned: [], submitted: [], verifyOut: '' }
+  const w: World = { files: new Map([[`${CWD}/.thimble-cc-mod/cards/abc123.json`, JSON.stringify(CARD)]]), spawned: [], submitted: [], verifyOut: '' }
   mock.env(on, {})
   mock.clock(on, { now: 1_790_000_000_000 })
   on('session.start', ($, e) => ({ cwd: e.cwd }))
@@ -53,7 +53,7 @@ function world(on: On): World {
   on('session.messages', () => ({ value: [] }) as never)
   on('command.register', ($, e) => ({ value: { command: e.name } }) as never)
   on('fs.read', ($, e) => {
-    if (e.path.endsWith('/prompt/chat.md')) return { value: '# thimble-chat\nguidance' }
+    if (e.path.endsWith('/prompt/chat.md')) return { value: '# thimble-cc-mod\nguidance' }
     const text = w.files.get(e.path)
     if (text === undefined) throw new Error(`ENOENT: ${e.path}`)
     return { value: text }
@@ -100,7 +100,7 @@ function world(on: On): World {
 }
 
 type M = Mounted<'terminal'>
-const MESSAGE = (text: string) => ({ plugin: 'thimble-chat', component: 'AssistantMessage', requestId: 'm1', surface: 'terminal', viewport: { columns: 140, rows: 40 }, props: { text, isFirstOfReply: true } }) as never
+const MESSAGE = (text: string) => ({ plugin: 'thimble-cc-mod', component: 'AssistantMessage', requestId: 'm1', surface: 'terminal', viewport: { columns: 140, rows: 40 }, props: { text, isFirstOfReply: true } }) as never
 
 // ------------------------------------------------------------------------------------------------ display
 
@@ -236,7 +236,7 @@ test('a reply with a failing citation goes to a forked subagent, never as a prom
 
 test('corrections are drawn in place in the reply, unmarked, also in a later session', async ($, on) => {
   const w = world(on)
-  w.files.set(`${CWD}/.thimble-chat/corrections.json`, JSON.stringify([{ old: BAD, new: FIXED, at: 1 }]))
+  w.files.set(`${CWD}/.thimble-cc-mod/corrections.json`, JSON.stringify([{ old: BAD, new: FIXED, at: 1 }]))
   await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
   const ui = (await $.ui.mount(MESSAGE(REPLY))) as unknown as M
   const para = JSON.stringify(await ui.find({ key: 'para-3' }))
@@ -255,13 +255,13 @@ test('a verification script is asked of a forked subagent, never as a prompt to 
   const ev = { button: 'left', shift: false, ctrl: false, alt: false, type: 'press' }
   await ui.post({ type: 'gesture', origin: 'o1', gestures: [{ seq: 1, gesture: 'primary', target: { kind: 'citation', ref: dse.raw }, ev }] }, { in: 'para-2' })
   await ui.unmount()
-  const pane = (await $.ui.mount({ plugin: 'thimble-chat', component: 'Pane', requestId: 'thimble-cite', surface: 'terminal', viewport: { columns: 100, rows: 30 }, props: { bodyColumns: 96, bodyRows: 28 } } as never)) as unknown as M
+  const pane = (await $.ui.mount({ plugin: 'thimble-cc-mod', component: 'Pane', requestId: 'thimble-cite', surface: 'terminal', viewport: { columns: 100, rows: 30 }, props: { bodyColumns: 96, bodyRows: 28 } } as never)) as unknown as M
   await pane.press({ key: 'verify' })
   expect(w.submitted).toEqual([])
   expect(w.spawned[0]?.subagentType).toBe('fork')
   expect(w.spawned[0]?.description).toBe('verification · checking 13403')
   expect(w.spawned[0]?.prompt).toContain(`verification script of ${dse.raw}`)
-  expect(w.spawned[0]?.prompt).toMatch(/Write it at \.thimble-chat\/verify\/v-\w+\.py/)
+  expect(w.spawned[0]?.prompt).toMatch(/Write it at \.thimble-cc-mod\/verify\/v-\w+\.py/)
   expect(await pane.find({ type: 'Text', text: /could not start a subagent/ })).toBeDefined()
   await pane.unmount()
 })
@@ -269,13 +269,13 @@ test('a verification script is asked of a forked subagent, never as a prompt to 
 test("a row of main's chat that a subagent of the mod causes is one dim line", async ($, on) => {
   world(on)
   await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
-  const note = (await $.ui.mount({ plugin: 'thimble-chat', component: 'UserMessage', requestId: 'u1', surface: 'terminal', viewport: { columns: 140, rows: 40 }, props: { text: 'Agent "side thread · why is dse so large?" completed', origin: { kind: 'task-notification' }, isExpanded: false, task: { id: 'agent-x', status: 'completed' } } } as never)) as unknown as M
-  expect(await note.find({ type: 'Text', text: /› a thimble-chat subagent · finished/ })).toBeDefined()
+  const note = (await $.ui.mount({ plugin: 'thimble-cc-mod', component: 'UserMessage', requestId: 'u1', surface: 'terminal', viewport: { columns: 140, rows: 40 }, props: { text: 'Agent "side thread · why is dse so large?" completed', origin: { kind: 'task-notification' }, isExpanded: false, task: { id: 'agent-x', status: 'completed' } } } as never)) as unknown as M
+  expect(await note.find({ type: 'Text', text: /› a thimble-cc-mod subagent · finished/ })).toBeDefined()
   await note.unmount()
-  const other = (await $.ui.mount({ plugin: 'thimble-chat', component: 'UserMessage', requestId: 'u2', surface: 'terminal', viewport: { columns: 140, rows: 40 }, props: { text: 'Agent "explore" completed', origin: { kind: 'task-notification' }, isExpanded: false, task: { id: 'agent-y', status: 'completed' } } } as never)) as unknown as M
+  const other = (await $.ui.mount({ plugin: 'thimble-cc-mod', component: 'UserMessage', requestId: 'u2', surface: 'terminal', viewport: { columns: 140, rows: 40 }, props: { text: 'Agent "explore" completed', origin: { kind: 'task-notification' }, isExpanded: false, task: { id: 'agent-y', status: 'completed' } } } as never)) as unknown as M
   expect(await other.find({ type: 'Text', text: /the engine row/ })).toBeDefined()
   await other.unmount()
-  const row = (await $.ui.mount({ plugin: 'thimble-chat', component: 'ToolUse', requestId: 'tu1', surface: 'terminal', viewport: { columns: 140, rows: 40 }, props: { tool_use_id: 'tu1', tool: 'Agent', input: { description: 'verification · correcting citations', prompt: 'x' }, isRunning: true, isErrored: false, isInterrupted: false } } as never)) as unknown as M
+  const row = (await $.ui.mount({ plugin: 'thimble-cc-mod', component: 'ToolUse', requestId: 'tu1', surface: 'terminal', viewport: { columns: 140, rows: 40 }, props: { tool_use_id: 'tu1', tool: 'Agent', input: { description: 'verification · correcting citations', prompt: 'x' }, isRunning: true, isErrored: false, isInterrupted: false } } as never)) as unknown as M
   expect(await row.find({ type: 'Text', text: /› verification · correcting citations …/ })).toBeDefined()
   await row.unmount()
 })
@@ -284,12 +284,12 @@ test('a verification is drawn on its citation: a spinner while it runs, ✗ and 
   const w = world(on)
   await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
   const dse = citations(REPLY)[1]!
-  const script = `${CWD}/.thimble-chat/verify/v-${cid(dse.raw)}.py`
+  const script = `${CWD}/.thimble-cc-mod/verify/v-${cid(dse.raw)}.py`
   let ui = (await $.ui.mount(MESSAGE(REPLY))) as unknown as M
   const ev = { button: 'left', shift: false, ctrl: false, alt: false, type: 'press' }
   await ui.post({ type: 'gesture', origin: 'o1', gestures: [{ seq: 1, gesture: 'primary', target: { kind: 'citation', ref: dse.raw }, ev }] }, { in: 'para-2' })
   await ui.unmount()
-  const pane = (await $.ui.mount({ plugin: 'thimble-chat', component: 'Pane', requestId: 'thimble-cite', surface: 'terminal', viewport: { columns: 100, rows: 30 }, props: { bodyColumns: 96, bodyRows: 28 } } as never)) as unknown as M
+  const pane = (await $.ui.mount({ plugin: 'thimble-cc-mod', component: 'Pane', requestId: 'thimble-cite', surface: 'terminal', viewport: { columns: 100, rows: 30 }, props: { bodyColumns: 96, bodyRows: 28 } } as never)) as unknown as M
   await pane.press({ key: 'verify' })
   w.files.set(script, 'print("RESULT: 13400")')
   w.verifyOut = 'RESULT: 13400\n'
@@ -299,7 +299,7 @@ test('a verification is drawn on its citation: a spinner while it runs, ✗ and 
   expect(JSON.stringify(await ui.find({ key: 'para-2' }))).toContain('"label":"13403","state":"failed","mark":"✗","spin":false')
   await ui.unmount()
   w.verifyOut = 'RESULT: 13403\n'
-  const again = (await $.ui.mount({ plugin: 'thimble-chat', component: 'Pane', requestId: 'thimble-cite', surface: 'terminal', viewport: { columns: 100, rows: 30 }, props: { bodyColumns: 96, bodyRows: 28 } } as never)) as unknown as M
+  const again = (await $.ui.mount({ plugin: 'thimble-cc-mod', component: 'Pane', requestId: 'thimble-cite', surface: 'terminal', viewport: { columns: 100, rows: 30 }, props: { bodyColumns: 96, bodyRows: 28 } } as never)) as unknown as M
   await again.press({ key: 'rerun' })
   await again.unmount()
   ui = (await $.ui.mount(MESSAGE(REPLY))) as unknown as M
@@ -313,17 +313,17 @@ test('a verification script that crashes or is never written fails: ✗ and red,
   const w = world(on)
   await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
   const dse = citations(REPLY)[1]!
-  const script = `${CWD}/.thimble-chat/verify/v-${cid(dse.raw)}.py`
+  const script = `${CWD}/.thimble-cc-mod/verify/v-${cid(dse.raw)}.py`
   let ui = (await $.ui.mount(MESSAGE(REPLY))) as unknown as M
   const ev = { button: 'left', shift: false, ctrl: false, alt: false, type: 'press' }
   await ui.post({ type: 'gesture', origin: 'o1', gestures: [{ seq: 1, gesture: 'primary', target: { kind: 'citation', ref: dse.raw }, ev }] }, { in: 'para-2' })
   await ui.unmount()
-  const PANE = { plugin: 'thimble-chat', component: 'Pane', requestId: 'thimble-cite', surface: 'terminal', viewport: { columns: 100, rows: 30 }, props: { bodyColumns: 96, bodyRows: 28 } } as never
+  const PANE = { plugin: 'thimble-cc-mod', component: 'Pane', requestId: 'thimble-cite', surface: 'terminal', viewport: { columns: 100, rows: 30 }, props: { bodyColumns: 96, bodyRows: 28 } } as never
   let pane = (await $.ui.mount(PANE)) as unknown as M
   await pane.press({ key: 'verify' })
   // never written: run it, and there is no script
   await pane.press({ key: 'rerun' })
-  expect(await pane.find({ type: 'Text', text: /^✗ not written: there is no \.thimble-chat\/verify\/v-\w+\.py/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^✗ not written: there is no \.thimble-cc-mod\/verify\/v-\w+\.py/ })).toBeDefined()
   await pane.unmount()
   ui = (await $.ui.mount(MESSAGE(REPLY))) as unknown as M
   expect(JSON.stringify(await ui.find({ key: 'para-2' }))).toContain('"label":"13403","state":"failed","mark":"✗","spin":false')
@@ -332,7 +332,7 @@ test('a verification script that crashes or is never written fails: ✗ and red,
   w.files.set(script, 'import nope')
   pane = (await $.ui.mount(PANE)) as unknown as M
   await pane.press({ key: 'rerun' })
-  expect(await pane.find({ type: 'Text', text: /^✗ crashed: \.thimble-chat\/verify\/v-\w+\.py exited with 1 \(no such script\)/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^✗ crashed: \.thimble-cc-mod\/verify\/v-\w+\.py exited with 1 \(no such script\)/ })).toBeDefined()
   await pane.unmount()
   ui = (await $.ui.mount(MESSAGE(REPLY))) as unknown as M
   const para = JSON.stringify(await ui.find({ key: 'para-2' }))
@@ -436,12 +436,12 @@ test('while main streams, the engine is handed links and placeholders; the row i
   expect(second.at(-1)!.kind).toBe('stop')
   expect(shown).not.toMatch(/\[\[/)
   expect(shown.split('\n')[0]).toBe('▍ *Which wikis have the most revisions?*')
-  expect(shown).toContain(`dse has [13403](file://${CWD}/.thimble-chat/cards/abc123.json) of [14416](file://${CWD}/.thimble-chat/cards/abc123.json) revisions.`)
+  expect(shown).toContain(`dse has [13403](file://${CWD}/.thimble-cc-mod/cards/abc123.json) of [14416](file://${CWD}/.thimble-cc-mod/cards/abc123.json) revisions.`)
   expect(shown).toContain(`see [pages:3](file://${CWD}/pages.jsonl).`)
   await append('r3', [{ type: 'text', text: shown }])
   expect(stored.at(-1)).toBe(REPLY)
   await $.turn.complete({ turnId: 't1', answer: shown, durationMs: 5, reason: 'answer' } as never)
-  const saved = [...w.files.entries()].filter(([k]) => k.includes('/.thimble-chat/answers/'))
+  const saved = [...w.files.entries()].filter(([k]) => k.includes('/.thimble-cc-mod/answers/'))
   expect(saved.length).toBe(1)
   expect(saved[0]![1]).toBe(`# which wiki?\n\n${REPLY}\n`)
   expect(saved[0]![1]).not.toContain('Reading the four files.')
