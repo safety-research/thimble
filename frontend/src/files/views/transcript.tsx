@@ -591,7 +591,8 @@ const TURNS_CAP = 2000
  * /source/turns): a page at a time from the start, or
  * around a cited line, more as the reader nears either end, up to TURNS_CAP at a time. Each turn stands on the line of
  * the file that holds its words, so a label or a citation of that line finds it; the words are the parsed text, which
- * span labels do not mark. */
+ * span labels do not mark. A citation of words opens at the turn the server finds holding them (`cited`), where they
+ * are highlighted, among however many turns share its line. */
 function TurnsTranscript({ workspace, path, targetRef }: ViewProps) {
   const asked = useMemo(() => targetOf(targetRef, path), [targetRef, path])
   const [data, setData] = useState<SourceTurns | null>(null)
@@ -599,18 +600,22 @@ function TurnsTranscript({ workspace, path, targetRef }: ViewProps) {
   const loading = useRef(false)
   const rootRef = useRef<HTMLDivElement | null>(null)
   const askedLine = asked?.line
+  const askedBlock = asked?.block
+  const askedStart = asked?.start
+  const askedEnd = asked?.end
   useEffect(() => {
     let alive = true
     setData(null)
     setError(null)
+    const span = askedStart != null && askedEnd != null ? { block: askedBlock ?? 0, start: askedStart, end: askedEnd } : undefined
     api
-      .sourceTurns(workspace, path, 0, TURNS_PAGE, askedLine)
+      .sourceTurns(workspace, path, 0, TURNS_PAGE, askedLine, span)
       .then((p) => alive && setData(p))
       .catch((e) => alive && setError(errMsg(e)))
     return () => {
       alive = false
     }
-  }, [workspace, path, askedLine])
+  }, [workspace, path, askedLine, askedBlock, askedStart, askedEnd])
   const more = useCallback(
     (dir: 'earlier' | 'later') => {
       if (!data || loading.current) return
@@ -624,7 +629,7 @@ function TurnsTranscript({ workspace, path, targetRef }: ViewProps) {
           setData((cur) => {
             if (!cur) return p
             const groups = { ...cur.groups, ...p.groups }
-            if (dir === 'earlier') return { ...p, groups, turns: [...p.turns, ...cur.turns].slice(0, TURNS_CAP) }
+            if (dir === 'earlier') return { ...p, cited: cur.cited, groups, turns: [...p.turns, ...cur.turns].slice(0, TURNS_CAP) }
             const turns = [...cur.turns, ...p.turns]
             const drop = Math.max(0, turns.length - TURNS_CAP)
             return { ...cur, groups, total: p.total, start: cur.start + drop, turns: turns.slice(drop) }
@@ -646,9 +651,13 @@ function TurnsTranscript({ workspace, path, targetRef }: ViewProps) {
     return () => io.disconnect()
   }, [more])
   const turns = data?.turns ?? []
-  // a citation of a line scrolls to the turn standing on it, or the last before it
-  const holder = asked ? turns.reduce<SourceTurn | null>((best, t) => (t.line <= asked.line ? t : best), null) : null
-  const { target, hit } = useTarget(holder ? `${path}#L${holder.line}` : undefined, path, rootRef, [data])
+  const cited = data?.cited
+  // a citation scrolls to the turn holding the words it quotes, else to the first turn standing on its line, else the
+  // last before it
+  const holder = !asked ? null : cited ? (turns.find((t) => t.i === cited.i) ?? null) : lineHolder(turns, asked.line)
+  // the citation itself when the turn stands on its line, so another span of that line scrolls again
+  const cardRef = !holder ? undefined : holder.line === asked!.line ? targetRef : `${path}#L${holder.line}`
+  const { target, hit } = useTarget(cardRef, path, rootRef, [data])
   if (error) return <div className="reader-error-text">{error}</div>
   if (!data)
     return (
@@ -670,7 +679,7 @@ function TurnsTranscript({ workspace, path, targetRef }: ViewProps) {
         </div>,
       )
     const next = shown[k + 1]?.line ?? (last.i !== t.i ? last.line + 1 : t.line)
-    out.push(<TurnCard key={t.i} path={path} turn={t} end={Math.max(t.line, next - 1)} target={holder?.i === t.i ? target : null} hit={hit} />)
+    out.push(<TurnCard key={t.i} path={path} turn={t} end={Math.max(t.line, next - 1)} target={holder?.i === t.i ? target : null} hit={hit} quote={cited?.i === t.i ? cited.quote : null} />)
   })
   return (
     <div className="reader-transcript reader-turns" ref={rootRef}>
@@ -687,14 +696,20 @@ function TurnsTranscript({ workspace, path, targetRef }: ViewProps) {
   )
 }
 
+/** The turn a citation of `line` opens at when no quoted words pick one: the first standing on it, else the last before
+ * it. Pure. */
+function lineHolder(turns: readonly SourceTurn[], line: number): SourceTurn | null {
+  return turns.find((t) => t.line === line) ?? turns.reduce<SourceTurn | null>((best, t) => (t.line < line ? t : best), null)
+}
+
 /** One turn of a whole-file JSON transcript, whose gutter shows the labels of its line and of the lines up to the next
- * turn's (`end`). */
-function TurnCard({ path, turn, end, target, hit }: { path: string; turn: SourceTurn; end: number; target: Target | null; hit: boolean }) {
+ * turn's (`end`), and the words a citation quotes (`quote`) highlighted. */
+function TurnCard({ path, turn, end, target, hit, quote }: { path: string; turn: SourceTurn; end: number; target: Target | null; hit: boolean; quote: string | null }) {
   const header = [turn.speaker || turn.role, turn.time ? timeOf(turn.time) : null].filter(Boolean).join(' · ')
   const block: Block = { kind: 'text', text: turn.text }
   return (
     <RecordCard path={path} line={turn.line} end={end} target={target} hit={hit} className={`reader-msg reader-turn-${turn.role}`} header={header} text={turn.text.slice(0, 500)}>
-      {turn.text.trim() ? <BlockEl block={block} line={turn.line} index={0} target={null} hit={false} /> : <div className="reader-msg-empty">(empty)</div>}
+      {turn.text.trim() ? <BlockEl block={block} line={turn.line} index={0} target={quoteTarget(target, turn.line, 0, turn.text, quote)} hit={hit} /> : <div className="reader-msg-empty">(empty)</div>}
       {turn.cut != null && <div className="reader-msg-empty">Cut at {turn.text.length.toLocaleString()} of {turn.cut.toLocaleString()} characters. Raw shows all of it.</div>}
     </RecordCard>
   )

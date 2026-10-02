@@ -59,6 +59,7 @@ _DATA_URL_RE = re.compile(r"^data:image/png;base64,(.+)$", re.S)
 _CHAT_REF_RE = re.compile(r"^chat:([A-Za-z0-9_-]{1,64})#(\d+)$")
 # (workspace, thread) -> the session a forkless event of the thread went to, until its fork is known (module note)
 _awaiting: dict[tuple[str, str], str | None] = {}
+_moved: dict[tuple[str, str], str] = {}  # (workspace, thread) -> the session its fork moved from (fork_moved)
 
 
 def _now() -> str:
@@ -508,13 +509,35 @@ def fork_lost(c: str, thread_id: str) -> None:
     log.info("%s: thread %s: its fork %s could not be reached", c, thread_id, fork.get("agent_id"))
 
 
+def fork_moved(c: str, thread_id: str, old: str, new: str) -> None:
+    """Main's session `old` continues in session `new`, which runs the thread's fork on (session._continue): the fork,
+    and an event of the thread that waits for one, are the new session's, so session_ended(old) leaves the thread
+    running and its next event goes to the fork (_live_fork)."""
+    meta = agents.meta_or_none(c, thread_id)
+    fork = dict((meta or {}).get("fork") or {})
+    if fork.get("session") == old and not fork.get("ended"):
+        fork["session"] = new
+        agents.update_agent(c, thread_id, fork=fork)
+    if (c, thread_id) in _awaiting and _awaiting[(c, thread_id)] == old:
+        _awaiting[(c, thread_id)] = new
+    _moved[(c, thread_id)] = old
+
+
+def awaiting_in(c: str, sid: str) -> set[str]:
+    """The threads whose event went to main to fork in session `sid` and wait for their fork (awaiting_fork)."""
+    return {tid for (cc, tid), s in _awaiting.items() if cc == c and s == sid}
+
+
 def session_ended(c: str, sid: str) -> None:
     """The session `sid` is no longer main: every thread's fork in it is gone, so its next event forks anew; a thread
-    still marked running (an event that waited for its fork, or a queued message) stops and says why."""
+    still marked running (an event that waited for its fork, or a queued message) stops and says why. A thread whose
+    fork went on in another session (fork_moved) is left alone."""
     for meta in agents.list_chats(c):
         if meta.get("kind") != agents.KIND_THREAD:
             continue
         tid = str(meta["id"])
+        if _moved.pop((c, tid), None) == sid:
+            continue
         fork = dict(meta.get("fork") or {})
         if fork.get("session") == sid and not fork.get("ended"):
             fork["ended"] = _now()

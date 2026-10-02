@@ -100,7 +100,9 @@ UNINSTALL_SHELL_LINE = "thimble: uninstall is a shell command, not a /thimble ac
 # What the analyst sees on the hook and Monitor routes. Each note says why channels are off, what differs on the route
 # used instead, then the fix, in terms of what the analyst sees. On the Monitor route permission prompts stay in the
 # terminal, and after /clear the Monitor is gone, so that note asks for /thimble again. A reason with no fix the analyst
-# can act on (Bedrock, Vertex, Foundry, or a login that is not a claude.ai one) gets the generic line.
+# can act on (Bedrock, Vertex, Foundry, or a login that is not a claude.ai one) gets the generic line. A background
+# session of Claude Code's (cc_channel.background) runs without channels however it was started, so its SESSION note
+# (BACKGROUND_NOTES) says that and gives no fix.
 _NOT_AVAILABLE = "Claude Code channels are not available in this session"
 CHANNELS_OFF = {
     cc_channel.SESSION: "Claude Code channels are off because this session was started without them",
@@ -121,6 +123,9 @@ _MONITOR_EFFECT = ("and hooks are disabled too, so thimble connects through a Mo
                    "appear only here in the terminal, and Claude may ask you to confirm here what you approved in the "
                    "browser. After /clear, say /thimble again.")
 MONITOR_NOTES = {why: f"thimble: WARNING - {off}, {_MONITOR_EFFECT}{CHANNEL_FIXES[why]}" for why, off in CHANNELS_OFF.items()}
+_BACKGROUND_OFF = "Claude Code runs background sessions without channels"
+BACKGROUND_NOTES = {cc_channel.HOOK: f"thimble: note - {_BACKGROUND_OFF}, {_HOOK_EFFECT}",
+                    cc_channel.MONITOR: f"thimble: WARNING - {_BACKGROUND_OFF}, {_MONITOR_EFFECT}"}
 MONITOR_MARK = "thimble-monitor:"  # then the command main's Monitor runs (plugin/skills/thimble/SKILL.md)
 WATCHER = "bin/.thimble-watch"  # the plugin's hidden watcher, under its root
 FRESH = "fresh"  # /thimble fresh: the folder's workspace moved aside, an empty one opened
@@ -1355,16 +1360,21 @@ def resume_lines(url: str, name: str | None, archive: str) -> list[str]:
     return [RESTORED_REPLACED_LINE.format(name=archive, path=replaced, replaced=Path(str(replaced)).name)]
 
 
-def delivery_lines(route: cc_channel.Delivery, cwd: Path, session: str) -> list[str]:
+def delivery_lines(route: cc_channel.Delivery, cwd: Path, session: str, background: bool = False) -> list[str]:
     """The lines after the URL that say how the browser reaches this session: none on the channel, a note on the hook route,
-    the warning and the Monitor's command on the Monitor route."""
-    command = channel_command()
+    the warning and the Monitor's command on the Monitor route. `background` is whether the session is a background
+    session of Claude Code's (cc_channel.background)."""
+    if route.mode not in (cc_channel.HOOK, cc_channel.MONITOR):
+        return []
+    if background and route.reason == cc_channel.SESSION:
+        note = BACKGROUND_NOTES[route.mode]
+    else:
+        notes = HOOK_NOTES if route.mode == cc_channel.HOOK else MONITOR_NOTES
+        note = notes[route.reason].format(command=channel_command())
     if route.mode == cc_channel.HOOK:
-        return [HOOK_NOTES[route.reason].format(command=command)]
-    if route.mode == cc_channel.MONITOR:
-        watcher = shlex.join([str(plugin_root() / WATCHER), "--stream", "--cwd", str(cwd), "--session", session])
-        return [MONITOR_NOTES[route.reason].format(command=command), f"{MONITOR_MARK} {watcher}"]
-    return []
+        return [note]
+    watcher = shlex.join([str(plugin_root() / WATCHER), "--stream", "--cwd", str(cwd), "--session", session])
+    return [note, f"{MONITOR_MARK} {watcher}"]
 
 
 def launched() -> bool:
@@ -1380,10 +1390,12 @@ def plugin_root() -> Path:
 
 def channel_command(root: Path | None = None) -> str:
     """The `claude` command line that loads the plugin copy at `root` as a development channel, for the delivery notes:
-    `--plugin-dir` and `plugin:thimble@inline` for a folder, `plugin:thimble@<marketplace>` for an installed copy."""
+    `--plugin-dir` and `plugin:thimble@inline` for a folder, `plugin:thimble@<marketplace>` for an installed copy
+    (cc_channel.marketplace)."""
     root = root or plugin_root()
-    flag = f"--dangerously-load-development-channels {cc_channel.channel(root)}"
-    if cc_channel.marketplace(root) != cc_channel.INLINE:
+    found = cc_channel.marketplace(root)
+    flag = f"--dangerously-load-development-channels plugin:{cc_channel.PLUGIN}@{found}"
+    if found != cc_channel.INLINE:
         return f"claude {flag}"
     return f"claude --plugin-dir {shlex.quote(str(root))} {flag}"
 
@@ -2663,8 +2675,9 @@ def cmd_ensure(args: argparse.Namespace) -> int:
             print(warn if not args.session and to_terminal() else UNTRUSTED_MODEL_LINE)
         status = config.auth_status(cwd=cwd)
         if args.session:
-            route = cc_channel.delivery(cc_channel.claude_pid(), plugin_root(), cwd, explain=True, status=status)
-            lines = delivery_lines(route, cwd, str(args.session))
+            pid = cc_channel.claude_pid()
+            route = cc_channel.delivery(pid, plugin_root(), cwd, explain=True, status=status)
+            lines = delivery_lines(route, cwd, str(args.session), cc_channel.background(pid))
             mark = [ln for ln in lines if ln.startswith(MONITOR_MARK)]
             for line in lines:
                 if line not in mark:

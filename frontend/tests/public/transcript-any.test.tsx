@@ -453,6 +453,39 @@ describe('a whole-file JSON transcript', () => {
     expect(!!el.querySelector('.reader-card[data-line="3"] > .reader-gutter .reader-gutter-cell.is-lit')).toBe(true)
     expect([...el.querySelectorAll('.reader-session')].map((s) => s.textContent)).toEqual(['Conversation 1', 'Conversation 2'])
   })
+  test('a citation of words opens at the turn the server finds holding them, among turns that share a line, and marks them', async () => {
+    const turns = vi.spyOn(api, 'sourceTurns').mockResolvedValue({
+      path: 'm.json',
+      total: 2,
+      start: 0,
+      n_groups: 1,
+      groups: { '0': { title: '', first: 0 } },
+      turns: [
+        { i: 0, line: 1, speaker: 'user', role: 'user', text: 'why does the build fail?', group: 0 },
+        { i: 1, line: 1, speaker: 'assistant', role: 'assistant', text: 'The groupby test drops the NaN key.', group: 0 },
+      ],
+      cited: { i: 1, quote: 'drops the NaN key' },
+    })
+    const page: SourcePage = { path: 'm.json', kind: 'text', total_lines: 1, start: 1, records: [] }
+    const View = transcript.component
+    const scrolled: string[] = []
+    Element.prototype.scrollIntoView = function (this: Element) {
+      scrolled.push(this.textContent ?? '')
+    }
+    try {
+      const el = await mount(<View workspace="w" path="m.json" kind="text" page={page} targetRef="m.json#L1.b0:c120-137" loadMore={() => undefined} transcript={{ format: 'json', score: 0.95 }} />)
+      await settle()
+      expect(turns).toHaveBeenCalledWith('w', 'm.json', 0, expect.any(Number), 1, { block: 0, start: 120, end: 137 })
+      const [first, second] = [...el.querySelectorAll('.reader-card')]
+      expect(second.classList.contains('reader-target')).toBe(true)
+      expect(second.querySelector('.hl')?.textContent).toBe('drops the NaN key')
+      expect(first.classList.contains('reader-target')).toBe(false)
+      expect(first.querySelector('.hl')).toBeNull()
+      expect(scrolled[0]).toBe('drops the NaN key')
+    } finally {
+      delete (Element.prototype as Partial<Element>).scrollIntoView
+    }
+  })
   test('a turn with no words inside a conversation gets no row', async () => {
     const records: SourceRecord[] = [{ line: 1, record: { messages: [{ role: 'system', content: '' }, { role: 'user', content: 'hello' }, { role: 'assistant', content: null }] }, blocks: [], meta: {} }]
     const hint: TranscriptHint = { format: 'conversations', score: 0.95, keys: { list: 'messages', speaker: 'role', text: 'content' } }
