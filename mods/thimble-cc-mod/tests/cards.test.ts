@@ -95,7 +95,7 @@ function world(on: On): World {
   on('prompt.read', () => ({ text: '', cursor: 0 }) as never)
   on('ui.open', ($, e) => {
     w.opened.push(e.id)
-    return { value: { isOpen: true } } as never
+    return { value: { isPlaced: true } } as never
   })
   on('ui.close', () => ({ value: undefined }) as never)
   on('ui.toast', () => ({ value: undefined }) as never)

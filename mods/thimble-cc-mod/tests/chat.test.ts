@@ -44,6 +44,8 @@ type World = {
   sent: string[]
   appended: string[]
   opened: string[]
+  /** false: a pane the mod opens waits undrawn, as Claude Code keeps one a click opened on a narrow terminal */
+  placed: boolean
 }
 
 /** What the resolver says of a ref: the bar card's values as its file holds them, one line of pages.jsonl, nothing else. */
@@ -62,7 +64,7 @@ function resolveOne(ref: string, display: string | null, card: CardData = BAR) {
 }
 
 function world(on: On, extra: Record<string, string> = {}): World {
-  const w: World = { files: new Map(Object.entries({ [`${CWD}/.thimble-cc-mod/cards/abc123.json`]: JSON.stringify(BAR), ...extra })), writes: [], runs: [], filled: [], submitted: [], spawned: [], sent: [], appended: [], opened: [] }
+  const w: World = { files: new Map(Object.entries({ [`${CWD}/.thimble-cc-mod/cards/abc123.json`]: JSON.stringify(BAR), ...extra })), writes: [], runs: [], filled: [], submitted: [], spawned: [], sent: [], appended: [], opened: [], placed: true }
   mock.env(on, {})
   on('env.set', () => ({ value: undefined }) as never)
   mock.clock(on, { now: 1_790_000_000_000 })
@@ -124,8 +126,9 @@ function world(on: On, extra: Record<string, string> = {}): World {
   })
   on('ui.open', ($, e) => {
     w.opened.push(e.id)
-    return { value: { isOpen: true } } as never
+    return { value: w.placed ? { isPlaced: true } : { isPlaced: false, reason: 'unasked below 144 columns (120 now): placed when the person opens it, or when the terminal is widened to 144 columns' } }
   })
+  on('ui.panes', () => ({ value: [...new Set(w.opened)].map(id => ({ id, title: id, isShown: w.placed, isFocused: false, isPlaced: w.placed })) }))
   on('ui.close', () => ({ value: undefined }) as never)
   on('ui.toast', () => ({ value: undefined }) as never)
   on('ui.log', () => ({ value: undefined }) as never)
@@ -319,4 +322,47 @@ test('a side thread asks a forked subagent, out of main\'s chat, and its pane ta
   expect(await pane.find({ type: 'Text', text: /could not start a subagent/ })).toBeDefined()
   expect(w.submitted.length).toBe(0) // nothing of the thread reached main's chat
   await pane.unmount()
+})
+
+test('a pane a click opens that waits undrawn on a narrow terminal is offered above the prompt, and its button opens it', async ($, on) => {
+  const w = world(on)
+  w.placed = false
+  await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
+  const ui = (await $.ui.mount({ ...MESSAGE(REPLY), surface: 'terminal' } as never)) as unknown as M
+  await ui.pointer({ type: 'down', x: 10, y: 1, button: 'left', shift: true, in: 'card-1-abc123' } as never)
+  await ui.unmount()
+  expect(w.opened).toEqual(['thimble-thread'])
+  const above = { plugin: 'thimble-cc-mod', component: 'AbovePrompt', requestId: 'above', surface: 'terminal', viewport: { columns: 120, rows: 40 }, props: { hasSurvey: false, view: {} } }
+  const band = (await $.ui.mount(above as never)) as unknown as M
+  expect(await band.find({ type: 'Text', text: /needs 144 columns here \(120 now\)/ })).toBeDefined()
+  // the button is the person's ask, so Claude Code places the pane at any width
+  w.placed = true
+  await band.press({ key: 'open-waiting' })
+  expect(w.opened).toEqual(['thimble-thread', 'thimble-thread'])
+  await band.unmount()
+  const after = (await $.ui.mount(above as never)) as unknown as M
+  expect(await after.find({ key: 'open-waiting' })).toBeUndefined()
+  await after.unmount()
+})
+
+test('/exit and the end of the session stop the mod\'s subagents that still run, and no other', async ($, on) => {
+  world(on)
+  const stopped: string[] = []
+  const agents = [
+    { id: 'agent-1', description: 'verification · checking 3908', type: 'fork', status: 'running', spawnedBy: 'thimble-cc-mod' },
+    { id: 'agent-2', description: 'side thread · why', type: 'fork', status: 'completed', spawnedBy: 'thimble-cc-mod' },
+    { id: 'agent-3', description: 'Explore the wiki', type: 'Explore', status: 'running' },
+  ]
+  on('agent.list', () => ({ value: agents }))
+  on('tool.call', ($, e) => {
+    if (e.tool === 'TaskStop') stopped.push(String((e as { task_id?: unknown }).task_id))
+    return { result: { message: 'stopped', task_id: 'agent-1', task_type: 'local_agent' }, text: 'stopped' } as never
+  })
+  on('command.run', () => ({ text: '' }))
+  on('session.end', ($, e) => ({ sessionId: e.sessionId }))
+  await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
+  await $.command.run({ command: 'exit', args: '' } as never)
+  expect(stopped).toEqual(['agent-1'])
+  await $.session.end({ reason: 'prompt_input_exit', sessionId: 's1', resume: { id: 's1' } } as never)
+  expect(stopped).toEqual(['agent-1', 'agent-1'])
 })

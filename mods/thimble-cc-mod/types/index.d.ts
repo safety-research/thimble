@@ -81,6 +81,10 @@ export type ChatEnd = { rows: ChatRow[]; cards: string[]; file: string; head: st
  *  citation's claim (its sentence and answer). */
 export type ChatTarget = { kind: 'card' | 'mark' | 'sentence' | 'citation' | 'row' | 'record' | 'node'; ref?: string; text?: string; cardId?: string; script?: string; claim?: string }
 
+/** A pane a click opened that Claude Code keeps undrawn on a narrow terminal (`why`: its reason), until the person
+ *  opens it from the row above the prompt. */
+export type ChatWaiting = { id: string; title: string; rows?: number; columns?: number; why: string }
+
 declare module 'claude-code' {
   interface PluginState {
     'thimble-cc-mod': {
@@ -103,6 +107,7 @@ declare module 'claude-code' {
       agents: StateFamily<ChatAgent>
       corrections: ChatCorrection[]
       menu: ChatTarget | null
+      waiting: ChatWaiting | null
     }
   }
 }

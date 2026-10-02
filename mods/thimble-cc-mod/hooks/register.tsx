@@ -24,7 +24,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, RenderElement, ResolveInput } from 'claude-code'
 
-import type { ChatAgent, ChatCorrection, ChatEnd, ChatFixItem, ChatRow, ChatRun, ChatThread, ChatVerdict, ChatVerify } from '../types'
+import type { ChatAgent, ChatCorrection, ChatEnd, ChatFixItem, ChatRow, ChatRun, ChatThread, ChatVerdict, ChatVerify, ChatWaiting } from '../types'
 import { answerFile, applyCorrections, blockClaims, blockLayout, capLine, chipLook, chipSegs, chipState, citeLabel, claimsIn, fixItems, fixPrompt, fixedCard, paraLayout, parseFix, plainCites, quoteSpan, quotedWords, settleFix, streamLink, streamStep, streaming, verifyFailed, wrapAround } from './cite'
 import type { ChipView, Claim, Problem, StreamLook, Streaming } from './cite'
 import { cardLayout, cut } from './draw'
@@ -58,11 +58,13 @@ const bandA = atom({ plugin: 'thimble-cc-mod', key: 'band' } as const, false)
 const threadA = atom({ plugin: 'thimble-cc-mod', key: 'thread' } as const, '')
 const threadListA = atom({ plugin: 'thimble-cc-mod', key: 'threadList' } as const, [])
 const menuA = atom({ plugin: 'thimble-cc-mod', key: 'menu' } as const, null)
+const waitingA = atom({ plugin: 'thimble-cc-mod', key: 'waiting' } as const, null)
 
 const CITE_PANE = 'thimble-cite'
 const CARD_PANE = 'thimble-card'
 const THREAD_PANE = 'thimble-thread'
 const MENU_PANE = 'thimble-menu'
+const MOD_PANES = new Set([CITE_PANE, CARD_PANE, THREAD_PANE, MENU_PANE])
 const HOME = '.thimble-cc-mod'
 const CARD_MAX_COLS = 120
 const GUIDE_MARK = '# thimble-cc-mod\n'
@@ -284,6 +286,31 @@ async function spawnSub($: Dollar, prompt: string, desc: string, fresh: string):
   }
   if (r.deny !== undefined || !('agentId' in r) || !r.agentId) return { deny: r.deny ?? 'no id' }
   return { agentId: r.agentId, engine }
+}
+
+/** Stop a subagent of the mod (TaskStop). One still running at /exit makes Claude Code ask whether to stop it or move
+ *  the conversation to the background (claude agents), so each is stopped once its result is in, with its pane, and
+ *  before the session ends. */
+async function endSub($: Dollar, agentId: string, why: string): Promise<void> {
+  if (!agentId) return
+  const status = (await $.agent.list().catch(() => [])).find(a => a.id === agentId)?.status
+  if (status && status !== 'running' && status !== 'pending') {
+    await logEvent($, { event: 'agent end', agent: agentId, why, result: `already ${status}` })
+    return
+  }
+  const r = await $.tool.call({ tool: 'TaskStop', task_id: agentId }).catch((err: unknown) => ({ deny: String(err), isError: undefined, text: undefined }))
+  const result = r.deny !== undefined ? `refused: ${r.deny}` : r.isError ? `error: ${r.text ?? ''}` : 'stopped'
+  await logEvent($, { event: 'agent end', agent: agentId, why, result: clip(result, 200) })
+}
+
+/** Stop the mod's subagents that still run, or only those `pick` keeps. */
+async function endRunning($: Dollar, why: string, pick?: (a: ChatAgent | undefined) => boolean): Promise<void> {
+  const mine = (await $.agent.list().catch(() => [])).filter(a => a.spawnedBy === 'thimble-cc-mod')
+  await logEvent($, { event: 'agents', why, list: mine.map(a => `${a.id} ${a.status}`).join(', ') || 'none' })
+  for (const a of mine) {
+    if (a.status !== 'running' && a.status !== 'pending') continue
+    if (!pick || pick(await agentOf($, a.id))) await endSub($, a.id, why)
+  }
 }
 
 async function agentOf($: Dollar, agentId: string | undefined): Promise<ChatAgent | undefined> {
@@ -594,7 +621,7 @@ async function openThread($: Dollar, about: { label: string; context: string; re
   const list = (await read($, threadListA)) ?? []
   await $.state.set({ plugin: 'thimble-cc-mod', key: 'threadList' }, [...list, id].slice(-20))
   await $.state.set({ plugin: 'thimble-cc-mod', key: 'thread' }, id)
-  await openPane($, { id: THREAD_PANE, title: 'Side thread', focus: true, closeOnEscape: true })
+  await openPane($, { id: THREAD_PANE, title: 'Side thread' })
   return id
 }
 
@@ -621,6 +648,20 @@ async function askThread($: Dollar, id: string, q: string, guide: string): Promi
   await setThread($, { ...t, agentId: r.agentId, engine: r.engine })
 }
 
+/** The side thread pane closed: the subagents still answering in it stop, and their questions say so. */
+async function endThreads($: Dollar): Promise<void> {
+  const stopped = new Set<string>()
+  await endRunning($, 'the side thread pane closed', a => {
+    if (a?.kind !== 'thread' || !a.thread) return false
+    stopped.add(a.thread)
+    return true
+  })
+  for (const tid of stopped) {
+    const t = await getThread($, tid)
+    if (t?.turns.at(-1)?.state === 'running') await setThread($, lastTurn(t, { state: 'error', a: 'stopped: the side thread panel was closed' }))
+  }
+}
+
 /** A subagent's row: a thread's progress (its tool calls and latest text). Called by register.tsx's one
  *  session.append hook (an event takes one hook per matcher). */
 async function threadAppend($: Dollar, agentId: string | undefined, door: string, content: unknown): Promise<void> {
@@ -643,7 +684,8 @@ async function threadComplete($: Dollar, cwd: string, agentId: string, reason: s
   const tid = (await agentOf($, agentId))?.thread
   if (!tid) return null
   const t = await getThread($, tid)
-  if (!t) return null
+  // a turn stopped with its pane keeps saying so
+  if (!t || t.turns.at(-1)?.state !== 'running') return null
   const text = reason === 'answer' ? answer : `${answer || ''}\n(the subagent ended: ${reason})`.trim()
   const done = lastTurn(t, { a: text, state: reason === 'answer' ? 'done' : 'error' })
   await setThread($, done)
@@ -794,15 +836,49 @@ async function drawReply($: Dollar, e: ResolveInput, text: string, width: number
 
 // ------------------------------------------------------------------------------------------------ panes
 
+type PaneArgs = { id: string; title: string; rows?: number; columns?: number }
+
 /** Open a pane with the keys. With a draft in the prompt the keys stay there (Claude Code keeps the person's typing),
- *  so the analyst is told to click the pane, which then takes them. */
-async function openPane($: Dollar, args: Parameters<Dollar['ui']['open']>[0]): Promise<void> {
-  await $.ui.open(args)
+ *  so the analyst is told to click the pane, which then takes them.
+ *
+ *  Claude Code does not count a click on a Client as the person asking for a pane: below 144 columns (110 for a pane
+ *  they opened before) it keeps the pane undrawn. The row above the prompt then offers it, and pressing its button
+ *  is asking. */
+async function openPane($: Dollar, args: PaneArgs): Promise<void> {
+  let r: Awaited<ReturnType<Dollar['ui']['open']>>
+  try {
+    r = await $.ui.open({ ...args, focus: true, closeOnEscape: true })
+  } catch (err) {
+    await logEvent($, { event: 'pane', pane: args.id, result: `failed: ${clip(String(err), 200)}` })
+    $.ui.log(`thimble-cc-mod: could not open the ${args.title} panel: ${clip(String(err), 200)}`)
+    return
+  }
+  await logEvent($, { event: 'pane', pane: args.id, result: r.isPlaced ? 'placed' : `waits: ${r.reason}` })
+  const prev = await read($, waitingA)
+  if (!r.isPlaced) {
+    if (prev && prev.id !== args.id) await $.ui.close({ id: prev.id }).catch(() => undefined)
+    await $.state.set({ plugin: 'thimble-cc-mod', key: 'waiting' }, { ...args, why: r.reason })
+    $.ui.toast(`the terminal is too narrow for the ${args.title} panel a click opens: press "open" above the prompt`)
+    return
+  }
+  if (prev?.id === args.id) await $.state.set({ plugin: 'thimble-cc-mod', key: 'waiting' }, null)
   try {
     if ((await $.prompt.read()).text.trim()) $.ui.toast('the prompt holds a draft, so it keeps the keys: click the panel to use its keys')
   } catch {
     // no prompt to read
   }
+}
+
+/** What closing one of the mod's panes ends: a side thread's subagents with their pane, the row offering it. */
+async function paneClosing($: Dollar, id: string): Promise<void> {
+  if (id === THREAD_PANE) await endThreads($)
+  if ((await read($, waitingA))?.id === id) await $.state.set({ plugin: 'thimble-cc-mod', key: 'waiting' }, null)
+}
+
+/** Close one of the mod's panes from its own button. */
+async function closePane($: Dollar, id: string): Promise<void> {
+  await paneClosing($, id)
+  await $.ui.close({ id })
 }
 
 /** Open the citation panel on a claim (`key`), or on a citation of its own (a mark's, a record's, with the passage the
@@ -814,7 +890,7 @@ async function openCitation($: Dollar, c: Citation, key?: string, quote?: string
   else quotes.delete(id)
   if (!(await $.state.get({ ...VERDICTS, id })).value) enqueue($, [c])
   await $.state.set({ plugin: 'thimble-cc-mod', key: 'open' }, key && claimMap.has(key) ? key : id)
-  await openPane($, { id: CITE_PANE, title: 'Citation', focus: true, closeOnEscape: true, columns: 96, rows: 22 })
+  await openPane($, { id: CITE_PANE, title: 'Citation', columns: 96, rows: 22 })
 }
 
 /** The citation pane and the card pane take turns: one opened while the other holds the keys opens behind it as a
@@ -829,7 +905,7 @@ async function openCardPane($: Dollar, id: string, mode: string): Promise<void> 
   const card = await loadCard($, id)
   await $.state.set({ plugin: 'thimble-cc-mod', key: 'paneCard' }, id)
   await $.state.set({ plugin: 'thimble-cc-mod', key: 'paneMode' }, mode)
-  await openPane($, { id: CARD_PANE, title: clip(card?.question ?? 'Card', 60), focus: true, closeOnEscape: true, columns: 100 })
+  await openPane($, { id: CARD_PANE, title: clip(card?.question ?? 'Card', 60), columns: 100 })
 }
 
 /** A cited line wrapped in at most `rows` rows around its highlight (the shown value, or the passage the example
@@ -954,6 +1030,13 @@ async function logMouse($: Dollar, module: string, g: Sent): Promise<void> {
   await writeMouseLog($, JSON.stringify({ at, event: ev.type, button: ev.button, mods, gesture: g.gesture ?? 'none', target: g.target ? `${g.target.kind}: ${targetLabel(g.target)}` : '', module }))
 }
 
+/** A line of the mouse log for what the mod did next: the action a gesture ran, the pane it opened (placed, waiting,
+ *  failed), a subagent it stopped. */
+async function logEvent($: Dollar, fields: Record<string, string>): Promise<void> {
+  if (!debug) return
+  await writeMouseLog($, JSON.stringify({ at: new Date(await $.clock.now()).toISOString(), ...fields }))
+}
+
 async function onGesture($: Dollar, g: Gesture, t: Target, ev?: PointerEv): Promise<void> {
   if (g === 'menu') {
     // the press chose the open menu's target; a release that the menu's pane moved onto another target does not change it
@@ -981,7 +1064,7 @@ let menuWatch: { cancel: () => void } | null = null
  *  it to each Client as `menu`), and is cleared once the menu closes, by a choice or Esc. */
 async function openMenu($: Dollar, t: Target): Promise<void> {
   await $.state.set({ plugin: 'thimble-cc-mod', key: 'menu' }, t)
-  await $.ui.open({ id: MENU_PANE, title: 'Actions', focus: true, closeOnEscape: true, rows: menuItems(t).length + 1, columns: 34 })
+  await openPane($, { id: MENU_PANE, title: 'Actions', rows: menuItems(t).length + 1, columns: 34 })
   menuWatch?.cancel()
   const watch = $.clock.every(250, () => {
     void (async () => {
@@ -1024,6 +1107,7 @@ async function aboutTarget($: Dollar, t: Target): Promise<{ label: string; conte
 
 /** One action on a target, from a gesture or the menu. */
 async function act($: Dollar, what: Act, t: Target): Promise<void> {
+  await logEvent($, { event: 'act', act: what, target: `${t.kind}: ${targetLabel(t)}` })
   const card = cardOf(t)
   switch (what) {
     case 'open': {
@@ -1039,8 +1123,12 @@ async function act($: Dollar, what: Act, t: Target): Promise<void> {
       return
     }
     case 'thread': {
-      const about = await aboutTarget($, t)
-      await $.ui.close({ id: CITE_PANE })
+      // what the thread is told about the target is a nicety: the pane opens without it
+      const about = await aboutTarget($, t).catch(async (err: unknown) => {
+        await logEvent($, { event: 'act', act: 'thread', result: `no context: ${clip(String(err), 200)}` })
+        return { label: targetLabel(t), context: '', ...(t.ref ? { ref: t.ref } : {}) }
+      })
+      await $.ui.close({ id: CITE_PANE }).catch(() => undefined)
       await openThread($, about)
       return
     }
@@ -1098,6 +1186,69 @@ function answerPart(parts: Part[]): Part | undefined {
   return [...full].reverse().find(p => needsDrawing(p.rows.map(r => r.text).join('\n\n'))) ?? full.at(-1)
 }
 
+// ------------------------------------------------------------------------------------------------ above the prompt
+
+/** The row above the prompt of a pane a click opened that waits undrawn: its button opens it, as the person's ask. */
+async function waitingRow($: Dollar, e: ResolveInput): Promise<RenderElement | null> {
+  const w = await read($, waitingA)
+  if (!w) return null
+  const pane = (await $.ui.panes().catch(() => [])).find(p => p.id === w.id)
+  if (!pane || pane.isPlaced) return null
+  const { Box, Text, Button } = $.ui.resolve(e)
+  const m = /below (\d+) columns \((\d+) now/.exec(w.why)
+  const why = m ? `a panel a click opens needs ${m[1]} columns here (${m[2]} now)` : 'the terminal is too narrow for a panel a click opens'
+  const open = async () => {
+    const r = await $.ui.open({ id: w.id, title: w.title, focus: true, closeOnEscape: true, ...(w.rows ? { rows: w.rows } : {}), ...(w.columns ? { columns: w.columns } : {}) })
+    await logEvent($, { event: 'pane', pane: w.id, result: r.isPlaced ? 'placed from the row above the prompt' : `still waits: ${r.reason}` })
+    if (r.isPlaced) await $.state.set({ plugin: 'thimble-cc-mod', key: 'waiting' }, null)
+  }
+  const dismiss = async () => {
+    await $.state.set({ plugin: 'thimble-cc-mod', key: 'waiting' }, null)
+    await $.ui.close({ id: w.id }).catch(() => undefined)
+  }
+  return (
+    <Box flexDirection="row" columnGap={1} flexWrap="wrap">
+      <Text color={COLORS.accent}>{`${w.title} panel`}</Text>
+      <Text dimColor>{`· ${why}`}</Text>
+      <Button key="open-waiting" label="open" variant="primary" onPress={() => void open()} />
+      <Button key="drop-waiting" label="dismiss" plain dimColor onPress={() => void dismiss()} />
+    </Box>
+  )
+}
+
+/** The band of the last answer's citations (/thimble-band). */
+async function bandRows($: Dollar, e: ResolveInput): Promise<RenderElement | null> {
+  const turn = await read($, turnA)
+  if (!turn || turn.ids.length === 0 || (await read($, hiddenA)) === turn.id) return null
+  const { Box, Text, Button } = $.ui.resolve(e)
+  const views: { id: string; c: Citation; view: ChipView }[] = []
+  for (const id of turn.ids) {
+    const cl = claimMap.get(id)
+    if (cl) views.push({ id, c: cl.c, view: await chipView($, cl) })
+  }
+  const bad = views.filter(x => x.view.state !== 'link').length
+  const hoverId = await read($, hoverA)
+  const hc = hoverId ? claimMap.get(hoverId) : undefined
+  const hview = hc ? await chipView($, hc) : undefined
+  // the readout row stays when nothing is hovered, so the band keeps its height and the transcript does not move
+  const readout = hview ? paintLine(Text, [...chipSegs(hview, false), { s: `  ${hview.tip}`, d: true }]) : <Text> </Text>
+  return (
+    <Box flexDirection="column">
+      {readout}
+      <Box flexDirection="row" columnGap={1} flexWrap="wrap">
+        <Text bold>thimble-cc-mod</Text>
+        <Text dimColor>{`${views.length} citation${views.length === 1 ? '' : 's'}`}</Text>
+        {bad ? <Text color={COLORS.problem}>{`· ${bad} with a problem`}</Text> : null}
+        <Text dimColor>·</Text>
+        {views.slice(0, 9).map((x, i) => (
+          <Button key={`c${i}`} label={`${cut(x.view.label, 14)}${x.view.mark}`} hotkey={String(i + 1)} plain onPress={() => void openCitation($, x.c, x.id)} />
+        ))}
+        <Button key="hide" label="hide" plain dimColor onPress={() => update($, hiddenA, () => turn.id)} />
+      </Box>
+    </Box>
+  )
+}
+
 // ------------------------------------------------------------------------------------------------ register
 
 export const register: Register = on => {
@@ -1141,6 +1292,31 @@ export const register: Register = on => {
       // nothing to resume
     }
     return started
+  })
+
+  // The mod's subagents end with the session. /exit stops them before Claude Code looks for running ones (it would ask
+  // whether to stop them or move the conversation to the background); ctrl+c and the other ends reach session.end.
+  on('command.run', { command: 'exit' }, async ($, e, next) => {
+    await endRunning($, '/exit')
+    return next(e)
+  })
+
+  on('session.end', async ($, e, next) => {
+    await endRunning($, `the session ends (${e.reason})`).catch(() => undefined)
+    return next(e)
+  })
+
+  // A pane closed by the person, or by another plugin; the mod's own closes do not reach its hooks (closePane).
+  on('ui.close', async ($, e, next) => {
+    if (!MOD_PANES.has(e.id)) return next(e)
+    await paneClosing($, e.id)
+    // A pane the person closes by hand (Esc, its ✕) loses its standing as one they asked for, and the next click opens
+    // it undrawn again below 144 columns (openPane): the mod closes it itself instead.
+    if (e.origin.kind === 'person') {
+      $.clock.after(0, () => void $.ui.close({ id: e.id }).catch(() => undefined))
+      return { value: undefined }
+    }
+    return next(e)
   })
 
   // The guidance rides along with the first prompt of a conversation, as context the model reads and the analyst does
@@ -1251,11 +1427,15 @@ export const register: Register = on => {
     if (e.agentId !== undefined) {
       await paths($)
       const a = await agentOf($, e.agentId)
-      if (a?.kind === 'fix') {
+      if (!a) return done
+      // its result is in: the subagent is stopped once the engine has recorded its end
+      const id = e.agentId
+      $.clock.after(500, () => void endSub($, id, `${a.kind} ${e.reason === 'answer' ? 'answered' : `ended: ${e.reason}`}`))
+      if (a.kind === 'fix') {
         await fixComplete($, a, e.reason, e.answer)
         return done
       }
-      if (a?.kind === 'verify') {
+      if (a.kind === 'verify') {
         await verifyComplete($, a, e.answer)
         return done
       }
@@ -1379,7 +1559,13 @@ export const register: Register = on => {
       if (fresh.length) seen.set(d.origin, Math.max(...fresh.map(g => g.seq)))
       for (const g of fresh) {
         if (debug) await logMouse($, e.module, g)
-        if (g.gesture && g.target) await onGesture($, g.gesture, g.target, g.ev)
+        if (!g.gesture || !g.target) continue
+        try {
+          await onGesture($, g.gesture, g.target, g.ev)
+        } catch (err) {
+          await logEvent($, { event: 'gesture failed', gesture: g.gesture, error: clip(String(err), 300) })
+          $.ui.log(`thimble-cc-mod: the ${g.gesture} gesture failed: ${clip(String(err), 200)}`)
+        }
       }
     } else if (debug && (d.ev || d.type === 'act' || d.type === 'param')) {
       await writeMouseLog($, JSON.stringify({ at: new Date(await $.clock.now()).toISOString(), module: e.module, ...d }))
@@ -1612,47 +1798,31 @@ export const register: Register = on => {
             }}
           />
         ) : null}
-        <Button key="close" label="close" hotkey="x" role="dismiss" onPress={() => void $.ui.close({ id: THREAD_PANE })} />
+        <Button key="close" label="close" hotkey="x" role="dismiss" onPress={() => void closePane($, THREAD_PANE)} />
         <Text dimColor>{last?.state === 'running' ? 'answering…' : t.engine ? `${t.engine} subagent · ${t.file}` : ''}</Text>
       </Box>,
     )
     return <Box flexDirection="column">{body}</Box>
   })
 
-  // ---------------------------------------------------------------------------------------------- band (opt-in)
+  // ---------------------------------------------------------------------------------------------- above the prompt
 
+  // A pane a click opened that waits undrawn on a narrow terminal (openPane): its button opens it, as the person's ask.
+  // Then the band of citations, when it is on.
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
-    if (e.props.hasSurvey || e.props.view.agentId || !(await read($, bandA))) return next(e)
-    const turn = await read($, turnA)
-    if (!turn || turn.ids.length === 0 || (await read($, hiddenA)) === turn.id) return next(e)
-    const { Box, Text, Button } = $.ui.resolve(e)
-    const views: { id: string; c: Citation; view: ChipView }[] = []
-    for (const id of turn.ids) {
-      const cl = claimMap.get(id)
-      if (cl) views.push({ id, c: cl.c, view: await chipView($, cl) })
-    }
-    const bad = views.filter(x => x.view.state !== 'link').length
-    const hoverId = await read($, hoverA)
-    const hc = hoverId ? claimMap.get(hoverId) : undefined
-    const hview = hc ? await chipView($, hc) : undefined
-    // the readout row stays when nothing is hovered, so the band keeps its height and the transcript does not move
-    const readout = hview ? paintLine(Text, [...chipSegs(hview, false), { s: `  ${hview.tip}`, d: true }]) : <Text> </Text>
+    if (e.props.hasSurvey || e.props.view.agentId) return next(e)
+    const wait = await waitingRow($, e)
+    const band = (await read($, bandA)) ? await bandRows($, e) : null
+    if (!wait && !band) return next(e)
+    const { Box } = $.ui.resolve(e)
     return (
       <Box flexDirection="column">
-        {readout}
-        <Box flexDirection="row" columnGap={1} flexWrap="wrap">
-          <Text bold>thimble-cc-mod</Text>
-          <Text dimColor>{`${views.length} citation${views.length === 1 ? '' : 's'}`}</Text>
-          {bad ? <Text color={COLORS.problem}>{`· ${bad} with a problem`}</Text> : null}
-          <Text dimColor>·</Text>
-          {views.slice(0, 9).map((x, i) => (
-            <Button key={`c${i}`} label={`${cut(x.view.label, 14)}${x.view.mark}`} hotkey={String(i + 1)} plain onPress={() => void openCitation($, x.c, x.id)} />
-          ))}
-          <Button key="hide" label="hide" plain dimColor onPress={() => update($, hiddenA, () => turn.id)} />
-        </Box>
+        {wait}
+        {band}
       </Box>
     )
   })
+
 
   // ---------------------------------------------------------------------------------------------- commands
 

@@ -77,7 +77,7 @@ function world(on: On, env: Record<string, string> = {}): World {
   on('agent.spawn', () => ({ model: 'm', agentId: 'agent-1' }))
   on('ui.open', ($, e) => {
     w.opened.push(e.id)
-    return { value: { isOpen: true } } as never
+    return { value: { isPlaced: true } } as never
   })
   on('ui.close', () => ({ value: undefined }) as never)
   on('ui.toast', () => ({ value: undefined }) as never)
@@ -332,17 +332,18 @@ test('/thimble-cc-mod debug on turns the mouse log on without the variable', asy
   expect(w.files.get(`${CWD}/.thimble-cc-mod/debug`)).toBe('off\n')
 })
 
-test('THIMBLE_CC_MOD_DEBUG=1 logs each press and release with its button, modifiers, gesture and target', async ($, on) => {
+test('THIMBLE_CC_MOD_DEBUG=1 logs each press and release with its button, modifiers, gesture and target, and what it did', async ($, on) => {
   const w = world(on, { THIMBLE_CC_MOD_DEBUG: '1' })
   await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
   const ui = (await $.ui.mount(MESSAGE as never)) as unknown as M
   await ui.pointer({ type: 'down', x: 3, y: 0, button: 'left', ctrl: true, in: 'md-2' } as never)
   await ui.pointer({ type: 'up', x: 3, y: 0, button: 'left', in: 'md-2' } as never)
   const log = (w.files.get(`${CWD}/.thimble-cc-mod/mouse.log`) ?? '').trim().split('\n').map(l => JSON.parse(l) as Record<string, string>)
-  expect(log.map(l => [l.event, l.button, l.mods, l.gesture])).toEqual([
-    ['press', 'left', 'ctrl', 'thread'],
-    ['release', 'left', 'none', 'none'],
-  ])
+  expect(log.map(l => l.event)).toEqual(['press', 'act', 'pane', 'release'])
+  expect([log[0]?.button, log[0]?.mods, log[0]?.gesture]).toEqual(['left', 'ctrl', 'thread'])
+  expect([log[3]?.button, log[3]?.mods, log[3]?.gesture]).toEqual(['left', 'none', 'none'])
+  // what the press did next: the action it ran and the pane that action opened
+  expect([log[1]?.act, log[2]?.pane, log[2]?.result]).toEqual(['thread', 'thimble-thread', 'placed'])
   expect(log[0]?.target).toBe('sentence: "The wikis differ a lot in size."')
   await ui.unmount()
 })
