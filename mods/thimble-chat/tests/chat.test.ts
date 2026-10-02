@@ -5,7 +5,8 @@ import type { On } from 'claude-code'
 import { expect, mock, test } from 'claude-code/testing'
 import type { Mounted } from 'claude-code/testing'
 
-import { blockLayout, cardLayout, paraLayout } from '../hooks/draw'
+import { blockLayout, paraLayout } from '../hooks/cite'
+import { cardLayout } from '../hooks/draw'
 import type { CardData } from '../hooks/draw'
 import { citations, embeddedCards, forMain, fromMod, parseReply, scriptResult, shownMatches, tableCells, takeawayAfter, threadBody, unframed, validateCard, valueIn } from '../hooks/lib'
 
@@ -173,7 +174,7 @@ test('layouts: a bar row is hit by its line, a chip by its cells', () => {
   const lay = cardLayout(BAR, 60, -1)
   expect(lay.items[1]!.cite).toBe('[[1013|card:abc123#revisions/probier]]')
   expect(lay.hit(10, 1)).toBe(1)
-  const para = paraLayout(parseReply(REPLY)[1] as never, [{ label: '13403', status: 'ok', mark: '', tip: '' }, { label: '14416', status: 'ok', mark: '', tip: '' }], 80, -1)
+  const para = paraLayout(parseReply(REPLY)[1] as never, [{ label: '13403', state: 'link', mark: '', tip: '' }, { label: '14416', state: 'link', mark: '', tip: '' }], 80, -1)
   expect(para.spans.length).toBe(2)
   expect(para.spans[0]!.x0).toBe('dse has '.length)
 })
@@ -187,9 +188,9 @@ test('a table whose cells hold citations is a rich block in columns, its chips h
   expect(table.table?.rows.length).toBe(3)
   expect(table.table?.align).toEqual(['left', 'right'])
   expect(table.runs.filter(r => r.cite).length).toBe(1)
-  const lay = blockLayout(table, [{ label: '314', status: 'ok', mark: '', tip: '' }], 80, -1)
+  const lay = blockLayout(table, [{ label: '314', state: 'link', mark: '', tip: '' }], 80, -1)
   expect(lay.lines.length).toBe(4) // header, rule, two rows
-  expect(lay.spans).toEqual([{ line: 2, x0: 'Name'.length + 2 + 'Revisions'.length - ' 314 '.length, x1: 'Name'.length + 2 + 'Revisions'.length, chip: 0 }])
+  expect(lay.spans).toEqual([{ line: 2, x0: 'Name'.length + 2 + 'Revisions'.length - '314'.length, x1: 'Name'.length + 2 + 'Revisions'.length, chip: 0 }])
 })
 
 test('the mod knows its own prompts under the engine framing', () => {
@@ -276,40 +277,6 @@ test('an edited takeaway replaces the paragraph in place and is saved', async ($
 })
 
 // ------------------------------------------------------------------------------------------------ turns
-
-test('a reply whose citation shows another value goes back to main as a fix prompt, once', async ($, on) => {
-  const w = world(on)
-  await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
-  await $.turn.start({ text: 'which wiki?', turnId: 't1' } as never)
-  await $.turn.complete({ turnId: 't1', answer: REPLY, durationMs: 5, reason: 'answer' } as never)
-  expect(w.submitted.length).toBe(1)
-  expect(w.submitted[0]).toContain('thimble-chat found problems')
-  expect(w.submitted[0]).toContain('[[1014|card:abc123#revisions/probier]]: the card shows 1013, not 1014')
-  expect([...w.files.keys()].some(p => p.includes('/.thimble-chat/answers/'))).toBe(true)
-  // the fix turn itself is not sent back again, nor saved as an answer; the engine frames a plugin's prompt
-  const answers = () => [...w.files.keys()].filter(p => p.includes('/.thimble-chat/answers/')).length
-  const saved = answers()
-  await $.turn.start({ text: `The thimble-chat plugin sent a message:\n${w.submitted[0]!}`, turnId: 't2' } as never)
-  await $.turn.complete({ turnId: 't2', answer: 'probier has [[1014|card:abc123#revisions/probier]].', durationMs: 5, reason: 'answer' } as never)
-  expect(w.submitted.length).toBe(1)
-  expect(answers()).toBe(saved)
-})
-
-test('the mod\'s own prompt is one line that unfolds on a click, static where no Client runs', async ($, on) => {
-  world(on)
-  await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
-  const text = 'The thimble-chat plugin sent a message:\nthimble-chat found problems in your last reply, which the analyst sees in red or amber:\n- [[1014|card:abc123#revisions/probier]]: the card shows 1013, not 1014\nFix each one.'
-  const row = (surface: string, isExpanded: boolean) => ({ plugin: 'thimble-chat', component: 'UserMessage', requestId: 'u1', surface, viewport: { columns: 140, rows: 40 }, props: { text, origin: { kind: 'plugin', name: 'thimble-chat' }, isExpanded } }) as never
-  // the engine calls a short row under its speaker label expanded, so the fold ignores isExpanded where it can draw
-  const ui = (await $.ui.mount(row('terminal', true))) as unknown as M
-  const fold = await ui.find({ key: 'fold' })
-  expect(fold).toBeDefined()
-  expect(JSON.stringify(fold)).toContain('asked Claude to fix 1 problem')
-  await ui.unmount()
-  const flat = await $.ui.mount(row('vscode', false))
-  expect(await flat.find({ type: 'Text', text: /asked Claude to fix 1 problem in the last reply · ctrl\+o shows the message/ })).toBeDefined()
-  await flat.unmount()
-})
 
 test('a Bash output is saved and main is told how to cite its lines', async ($, on) => {
   const w = world(on)

@@ -1,7 +1,11 @@
 // Styled lines to elements, for a Client's table or a render hook's: one Text per line, one nested Text per segment.
 import type { BoxProps, ElementConstructor, RenderElement, TextProps } from 'claude-code'
 
+import { COLORS as BASE } from './draw'
 import type { Line, Seg } from './draw'
+
+/** The drawing's colours: a citation is drawn in `link`, a problem in `problem`, a verified value's mark in `ok`. */
+export const COLORS = { ...BASE, link: '#4c8fdb', problem: '#d64541', ok: '#3fa15a' }
 
 type TextC = ElementConstructor<TextProps>
 type BoxC = ElementConstructor<BoxProps>
