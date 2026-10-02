@@ -617,6 +617,41 @@ def test_the_plugin_is_registered_only_on_a_yes_and_uninstall_removes_only_what_
     assert run(uninstall) == taken_back and not record.exists()
 
 
+def test_thimble_cc_mod_s_marketplace_outlives_a_no_and_uninstall_removes_it(tmp_path):
+    """`thimble cc-mod on` registers thimble's marketplace when a no left it out. A --no-plugin re-run leaves it; a yes
+    then a no takes back the thimble plugin and keeps the marketplace while thimble-cc-mod from it is on, since removing
+    a marketplace turns its plugins off; uninstall removes the marketplace and names what that turns off."""
+    tree = fake_tree(tmp_path / "release")
+    dest = tmp_path / "home" / ".thimble" / "app"
+    bin_ = stub_bin(tmp_path)
+    claude_stub(bin_)
+    log, state = tmp_path / "claude.log", tmp_path / "claude.json"
+    env = env_for(tmp_path, PATH=f"{bin_}:/usr/bin:/bin", STUB_LOG=str(log), CLAUDE_STATE=str(state))
+    record = Path(env["THIMBLE_HOME"]) / "plugin.json"
+
+    def run(cmd: list[str]) -> tuple[str, list[str]]:
+        log.write_text("")
+        r = subprocess.run(cmd, capture_output=True, text=True, env=env, stdin=subprocess.DEVNULL, timeout=60)
+        assert r.returncode == 0, r.stdout + r.stderr
+        return r.stdout, plugin_changes(log)
+
+    def install(flag: str) -> list[str]:
+        return run(["bash", str(tree / "scripts" / "install.sh"), "--dir", str(dest), *ANSWERS, flag,
+                    "--no-trust-workspaces"])[1]
+
+    assert install("--no-plugin") == []
+    state.write_text(json.dumps({"marketplaces": {"thimble-local": str(dest)}, "plugins": ["thimble-cc-mod@thimble-local"]}))
+    assert install("--no-plugin") == [] and json.loads(record.read_text()) == {"answer": "no", "registered": ""}
+    assert install("--plugin")[-2:] == ["plugin install --scope user thimble@thimble-local",
+                                        "plugin update --scope user thimble@thimble-local"]
+    assert install("--no-plugin") == ["plugin uninstall thimble@thimble-local"]
+    assert json.loads(state.read_text())["marketplaces"] == {"thimble-local": str(dest)}
+    assert json.loads(record.read_text()) == {"answer": "no", "registered": ""}
+    out, changes = run(["bash", str(dest / "plugin" / "bin" / "thimble"), "uninstall", "--yes"])
+    assert changes == ["plugin marketplace remove thimble-local"] and "thimble-cc-mod off" in out, out
+    assert json.loads(state.read_text())["marketplaces"] == {}
+
+
 def two_checkouts(tmp_path: Path) -> tuple[Path, Path, dict[str, str]]:
     """A first checkout whose plugin Claude Code has registered (marketplace "thimble") and which ~/.local/bin/thimble
     runs, and a second checkout with its own THIMBLE_HOME under the same HOME; the second's environment."""

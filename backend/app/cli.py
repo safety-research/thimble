@@ -12,6 +12,7 @@
     thimble prompt <name>… [--cwd <path>]  (prompt files rendered for a session in <path>, for skills and hooks)
     thimble extension add <folder | git URL | built-in name> [--yes] | on <name> | off <name> | list | remove <name>
                                                                                               (extensions.py)
+    thimble cc-mod on [--yes] | off | status   (thimble-cc-mod in the current folder, by `claude plugin`; cmd_cc_mod)
 
 `server up` (alias `ensure`) is the one starter: `GET /api/health`, then under `flock <home>/server.lock` spawn uvicorn
 on THIMBLE_PORT (8300) as its own session leader (plus Vite on 5300 when THIMBLE_DEV is on), wait for health, map the
@@ -1400,7 +1401,6 @@ def channel_command(root: Path | None = None) -> str:
     return f"claude --plugin-dir {shlex.quote(str(root))} {flag}"
 
 
-MARKETPLACE_FILE = config.REPO_ROOT / ".claude-plugin" / "marketplace.json"  # the marketplace install.sh registers
 PLUGIN_LIST_TIMEOUT_S = 10.0
 COPY_IGNORED = ("__pycache__", ".DS_Store")  # what running or browsing a plugin copy adds to it
 
@@ -1442,9 +1442,9 @@ def installed_copy(cwd: Path) -> Installed | None:
     plugin/ itself is the copy; otherwise the cache copy counts when it matches plugin/ and finds this tree. None when
     there is no such copy, it is disabled, or anything fails."""
     try:
-        name = json.loads(MARKETPLACE_FILE.read_text("utf-8")).get("name")
+        name = config.marketplace_name()
         claude = shutil.which("claude")
-        if not isinstance(name, str) or not name or not claude:
+        if not name or not claude:
             return None
         listed = _claude_json(claude, ["plugin", "list"], cwd)
         if not any(isinstance(p, dict) and p.get("id") == f"{PLUGIN_NAME}@{name}" and p.get("enabled") is True
@@ -1565,7 +1565,8 @@ def launch_settings(cwd: Path, given: str = "") -> str:
     """The one `--settings` value the launcher passes main, since Claude Code reads only the last one: the analyst's own
     `given` (inline JSON, or a file relative to `cwd`) with thimble's statusline, chained to theirs (from `given`, else
     their own settings, cc_settings.own_statusline) at their refresh interval, and the composer's fast mode and
-    ultracode where they name none. `given` as it is when it cannot be read."""
+    ultracode where they name none, and thimble-cc-mod off (config.without_mod), as in thimble's background sessions,
+    whatever the folder's settings say. `given` as it is when it cannot be read."""
     from . import bg_session, cc_settings  # noqa: PLC0415
 
     own: Any = {}
@@ -1575,8 +1576,8 @@ def launch_settings(cwd: Path, given: str = "") -> str:
         except (OSError, ValueError):
             own = None
         if not isinstance(own, dict):
-            print(f"thimble: WARNING - --settings {given} could not be read, so thimble's statusline is left out",
-                  file=sys.stderr)
+            print(f"thimble: WARNING - --settings {given} could not be read, so thimble's statusline is left out and "
+                  "thimble-cc-mod is not turned off", file=sys.stderr)
             return given.replace("\n", " ")
     line = own.get("statusLine")
     theirs = line if isinstance(line, dict) and isinstance(line.get("command"), str) else cc_settings.own_statusline()
@@ -1587,7 +1588,7 @@ def launch_settings(cwd: Path, given: str = "") -> str:
         out.setdefault("fastMode", choice["fast"])
     if choice.get("effort") == cc_settings.ULTRACODE:
         out.setdefault("ultracode", True)
-    return json.dumps(out)
+    return json.dumps(config.without_mod(out))
 
 
 def main_name(cwd: Path) -> str:
@@ -3021,6 +3022,124 @@ def cmd_extension(args: argparse.Namespace) -> int:
     return 0
 
 
+# `thimble cc-mod on|off|status`: thimble-cc-mod (config.MOD_PLUGIN) on or off in the current folder, only through
+# `claude plugin` at project scope, which writes the folder's .claude/settings.json. It never changes the thimble plugin:
+# the two are switched independently. When Claude Code does not know thimble's marketplace (install.sh registers it only
+# on a yes to its plugin question), `on` registers it from this install's folder first, on the same yes; `thimble
+# uninstall` takes it back. A cc-mod.json in thimble's home, left by a test build that did, is not read.
+MOD_TIMEOUT_S = 120.0
+MOD_LOCAL_SCOPES = ("project", "local")
+MOD_QUESTION = "Go ahead? [y/N] "
+MOD_ASK_LINE = ("This writes {settings} (Claude Code's settings for this folder). To undo it, run `thimble cc-mod off` "
+                "in this folder.")
+MOD_UNASKED_LINE = "thimble cc-mod: nothing changed, since there is no terminal to ask in; pass --yes to go ahead."
+MOD_DECLINED_LINE = "thimble cc-mod: nothing changed."
+MOD_MARKETPLACE_LINE = ("Claude Code does not know thimble's marketplace \"{name}\" yet, so this registers it from "
+                        "{folder} first; it adds no plugin to your sessions, and `thimble uninstall` takes it back.")
+MOD_OTHER_MARKETPLACE_LINE = ("thimble cc-mod: Claude Code has thimble's marketplace \"{name}\" from {other}, another "
+                              "thimble install, not from this one ({folder}); nothing changed. Run `thimble cc-mod on` "
+                              "with that install's thimble, or remove its registration with `claude plugin marketplace "
+                              "remove {name}` first.")
+
+
+def _claude_run(claude: str, args: list[str], cwd: Path) -> tuple[int, str]:
+    """A `claude` command's exit code and what it printed."""
+    try:
+        r = subprocess.run([claude, *args], cwd=cwd, capture_output=True, text=True, timeout=MOD_TIMEOUT_S,
+                           stdin=subprocess.DEVNULL, check=False, env=config.launch_environ())
+    except (OSError, subprocess.SubprocessError) as e:
+        return 1, str(e)
+    return r.returncode, f"{r.stdout or ''}{r.stderr or ''}".strip()
+
+
+def plugin_here(listed: list[Any], plugin_id: str, cwd: Path, enabled: bool = True) -> bool:
+    """Whether `claude plugin list --json`, run in `cwd`, lists `plugin_id` for `cwd` (and with `enabled`, enabled):
+    a project or local install of another folder does not count."""
+    for p in listed:
+        if not (isinstance(p, dict) and p.get("id") == plugin_id) or (enabled and p.get("enabled") is not True):
+            continue
+        where = p.get("projectPath")
+        if p.get("scope") in MOD_LOCAL_SCOPES and isinstance(where, str) and where and Path(where).resolve() != cwd:
+            continue
+        return True
+    return False
+
+
+def _marketplace_folder(market: dict[str, Any]) -> Path | None:
+    """The folder a row of `claude plugin marketplace list --json` was added from, when it is a directory marketplace
+    that names its folder; None otherwise (then it is not taken for another install's)."""
+    src = market.get("source")
+    kind, path = (src.get("source"), src.get("path")) if isinstance(src, dict) else (src, market.get("path"))
+    return Path(path).resolve() if kind == "directory" and isinstance(path, str) and path else None
+
+
+def cmd_cc_mod(args: argparse.Namespace) -> int:
+    cwd = Path(os.environ.get("THIMBLE_CALLER_CWD") or os.getcwd()).resolve()
+    name, claude = config.marketplace_name(), config.CLI_PATH
+    if not claude:
+        print(f"thimble cc-mod: {config.NO_CLAUDE}")
+        return 1
+    if not name:
+        print(f"thimble cc-mod: could not read the marketplace's name from {config.MARKETPLACE_FILE}")
+        return 1
+    mod, own = f"{config.MOD_PLUGIN}@{name}", f"{PLUGIN_NAME}@{name}"
+    try:
+        listed = _claude_json(claude, ["plugin", "list"], cwd)
+    except (OSError, ValueError, subprocess.SubprocessError) as e:
+        print(f"thimble cc-mod: `claude plugin list` failed: {e}")
+        return 1
+    if args.mod_cmd == "status":
+        own_on = plugin_here(listed, own, cwd)
+        hint = "" if own_on else " (the `thimble` command still starts thimble here" + (
+            f"; `claude plugin enable {own} --scope project` turns it on for `claude`)"
+            if plugin_here(listed, own, cwd, enabled=False) else ")")
+        print(f"thimble cc-mod: thimble-cc-mod is {'on' if plugin_here(listed, mod, cwd) else 'off'} in {cwd}")
+        print(f"thimble cc-mod: the thimble plugin is {'on' if own_on else 'off'} in {cwd}{hint}")
+        return 0
+    if args.mod_cmd == "on":
+        if plugin_here(listed, mod, cwd):
+            print(f"thimble cc-mod: thimble-cc-mod is on in {cwd} already.")
+            return 0
+        try:
+            markets = _claude_json(claude, ["plugin", "marketplace", "list"], cwd)
+        except (OSError, ValueError, subprocess.SubprocessError):
+            markets = []
+        found = next((m for m in markets if isinstance(m, dict) and m.get("name") == name), None)
+        other = _marketplace_folder(found) if found is not None else None
+        if other is not None and other != config.REPO_ROOT.resolve():
+            print(MOD_OTHER_MARKETPLACE_LINE.format(name=name, other=other, folder=config.REPO_ROOT))
+            return 1
+        steps = [] if found is not None else [["plugin", "marketplace", "add", str(config.REPO_ROOT)]]
+        steps.append(["plugin", "install", mod, "--scope", "project"])
+        if not args.yes:
+            print(f"thimble cc-mod on runs, in {cwd}:\n" + "\n".join(f"  claude {shlex.join(s)}" for s in steps))
+            if found is None:
+                print(MOD_MARKETPLACE_LINE.format(name=name, folder=config.REPO_ROOT))
+            print(MOD_ASK_LINE.format(settings=cwd / ".claude" / "settings.json"))
+            answer = confirm(MOD_QUESTION)
+            if not answer:
+                print(MOD_UNASKED_LINE if answer is None else MOD_DECLINED_LINE)
+                return 1
+    else:
+        if not plugin_here(listed, mod, cwd, enabled=False):
+            print(f"thimble cc-mod: thimble-cc-mod is not on in {cwd}; nothing to do.")
+            return 0
+        steps = [["plugin", "uninstall", mod, "--scope", "project"]]
+    for step in steps:
+        print(f"+ claude {shlex.join(step)}")
+        code, out = _claude_run(claude, step, cwd)
+        if code != 0:
+            print(f"thimble cc-mod: `claude {shlex.join(step)}` failed{': ' + out if out else ''}")
+            return 1
+    if args.mod_cmd == "on":
+        print(f"thimble cc-mod: thimble-cc-mod is on in {cwd}: sessions `claude` starts here load it (in an open "
+              "session, /reload-plugins); sessions `thimble` starts run without it. `thimble cc-mod off` turns it off "
+              "again.")
+    else:
+        print(f"thimble cc-mod: thimble-cc-mod is off in {cwd}.")
+    return 0
+
+
 def cmd_list(_: argparse.Namespace) -> int:
     from . import runs  # noqa: PLC0415
 
@@ -3130,6 +3249,11 @@ def build_parser() -> argparse.ArgumentParser:
     fb.set_defaults(fn=cmd_feedback)
     sub.add_parser("list", help="the workspaces by id: each folder's live one and its archived runs, when each was last "
                    "used and the sessions open on it").set_defaults(fn=cmd_list)
+    cm = sub.add_parser("cc-mod", help="thimble-cc-mod, a single-agent thimble inside Claude Code, in this folder: on "
+                        "(asks first) | off | status; the thimble plugin stays as it is")
+    cm.add_argument("mod_cmd", choices=("on", "off", "status"))
+    cm.add_argument("-y", "--yes", action="store_true", help="on: without asking")
+    cm.set_defaults(fn=cmd_cc_mod)
     pg = sub.add_parser("purge", help="delete workspaces or archived runs by id (`thimble list`) and print what was deleted")
     pg.add_argument("ids", nargs="+", metavar="id", help="an id `thimble list` shows")
     pg.add_argument("-y", "--yes", action="store_true", help="accepted and ignored (purge does not ask)")

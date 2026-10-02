@@ -15,6 +15,13 @@ from app import config
 NEEDS = pytest.mark.skipif(not shutil.which("zip") or not shutil.which("git"), reason="release.sh needs zip and git")
 
 
+# a stand-in for mods/: thimble-cc-mod, the marketplace's second plugin, and a file beside it that does not ship
+MOD_FILES = {"mods/thimble-cc-mod/.claude-plugin/plugin.json": '{"name": "thimble-cc-mod", "version": "0.1.0"}\n',
+             "mods/thimble-cc-mod/hooks/hooks.json": "{}\n",
+             "mods/thimble-cc-mod/tests/test_mod.py": "def test_it():\n    pass\n",
+             "mods/notes.md": "not shipped\n"}
+
+
 def small_repo(tmp_path, *more):
     """A git repo holding release.sh, check_content.py, the manifests release.sh reads and the files `more` names, all
     committed."""
@@ -26,6 +33,9 @@ def small_repo(tmp_path, *more):
     (root / "README.md").write_text("# thimble\n")
     (root / "plugin" / "bin").mkdir()
     (root / "plugin" / "bin" / "tool").write_text("#!/bin/sh\n")
+    for rel, text in MOD_FILES.items():
+        (root / rel).parent.mkdir(parents=True, exist_ok=True)
+        (root / rel).write_text(text)
     git(root, "init", "-q")
     git(root, "add", ".")
     git(root, "commit", "-q", "-m", "init")
@@ -117,3 +127,24 @@ def test_the_zip_carries_the_config_s_reference_the_install_guide_links(tmp_path
     assert "docs/config.md" in files
     assert "](docs/config.md)" in meta["INSTALL.md"]
     assert "/blob/" in meta["docs/config.md"] and "/docs/notes.md)" in meta["docs/config.md"]
+
+
+@NEEDS
+def test_the_zip_carries_thimble_cc_mod_and_its_marketplace_lists_both_plugins_under_the_install_s_name(tmp_path):
+    """mods/thimble-cc-mod ships without its tests, and nothing else under mods/; the zip's marketplace lists thimble
+    and thimble-cc-mod under the --marketplace-name, thimble-local by default. A plugin the marketplace lists without
+    its folder in the zip stops the release."""
+    root = small_repo(tmp_path)
+    r, files, meta = release(root, tmp_path / "out", read=(".claude-plugin/marketplace.json",))
+    assert r.returncode == 0, r.stderr
+    assert {"mods/thimble-cc-mod/.claude-plugin/plugin.json", "mods/thimble-cc-mod/hooks/hooks.json"} <= files
+    assert not {f for f in files if f.startswith("mods/") and not f.startswith("mods/thimble-cc-mod/")}
+    assert "mods/thimble-cc-mod/tests/test_mod.py" not in files
+    market = json.loads(meta[".claude-plugin/marketplace.json"])
+    assert market["name"] == "thimble-local"
+    assert {p["name"]: p["source"] for p in market["plugins"]} == {"thimble": "./plugin",
+                                                                  "thimble-cc-mod": "./mods/thimble-cc-mod"}
+    git(root, "rm", "-q", "-r", "mods/thimble-cc-mod")
+    git(root, "commit", "-q", "-m", "no mod")
+    r, files, _ = release(root, tmp_path / "out2")
+    assert r.returncode != 0 and "./mods/thimble-cc-mod" in r.stderr

@@ -174,6 +174,7 @@ async def test_every_session_asks_through_the_permission_hook_and_no_prompt_tool
     assert "permission_hook.py" in hook["command"] and f"--ws {CORPUS} --session {KEY} " in hook["command"]
     settings = json.loads(argv[argv.index("--settings") + 1])
     assert settings["hooks"]["PermissionDenied"] == hooks and "PreToolUse" not in settings["hooks"]
+    assert settings["enabledPlugins"] == {f"thimble-cc-mod@{config.marketplace_name()}": False}, "never the mod"
     assert run.mode == "manual" and _flag(argv) == "default", "no row and no mode main reported: Manual"
     assert "ask_permission" not in tools.REGISTRY
 

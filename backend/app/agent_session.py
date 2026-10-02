@@ -793,7 +793,7 @@ async def start(c: str, key: str, *, role: str, title: str, agent_args: list[str
     if hooks:
         given = {**given, "hooks": {**(given.get("hooks") or {}), **hooks}}
     given["env"] = {**await asyncio.to_thread(settings_env, c, key, extra_env), **(given.get("env") or {})}
-    settings = json.dumps(with_home_shell(given))
+    settings = json.dumps(config.without_mod(with_home_shell(given)))
     argv = await asyncio.to_thread(command, agent_args, sid, effort, settings, cwd, append_shared, model,
                                    resume=bool(resume), permission_mode=permission_mode, disallowed=disallowed,
                                    add_dirs=[cwd])

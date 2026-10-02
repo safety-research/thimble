@@ -734,7 +734,7 @@ def claude_argv(run: Run, argv: list[str]) -> tuple[list[str], Path, dict[str, s
     work.mkdir(parents=True, exist_ok=True)
     settings["env"] = agent_session.settings_env(job.c, job.key, {**agent_session.fence_env(work),
                                                                   **agent_session.skill_prompts_env(corpus, work)})
-    settings = agent_session.with_home_shell(settings)
+    settings = config.without_mod(agent_session.with_home_shell(settings))
     final = [agent_session.CLAUDE_BIN, *kept, "--plugin-dir", str(agent_session.PLUGIN_DIR), "--add-dir", str(corpus), *added,
              "--settings", json.dumps(settings), "--append-system-prompt", append, "--permission-mode", permission_mode,
              "--allowedTools", ",".join(agent_session.own_rules()), "--disallowedTools", ",".join(deny)]

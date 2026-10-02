@@ -44,6 +44,18 @@ Type `/thimble` to start the thimble server and print the dashboard URL. If `/th
 
 > **Please note:** thimble connects the browser to your Claude Code session through [channels](https://code.claude.com/docs/en/channels). While thimble is under development, a Claude Code session needs to be started with `--dangerously-load-development-channels` (`thimble` from the CLI handles this for you) and a warning screen will appear before starting your Claude Code session (this warning is expected). Without this flag, or if channels are disabled by your org, thimble connects through the plugin's hooks instead and `/thimble` prints a note with the exact command.
 
+## Claude Code Mod (Experimental)
+
+Thimble can also operate as a [Claude Code Mod](https://code.claude.com/docs/en/plugins/mods/overview) that operates directly in the Claude Code terminal UI, with no server or browser. Plots, verification links, and threads are all rendered in the terminal. The `thimble-cc-mod` plugin is experimental and may break.
+
+![thimble-cc-mod in the Claude Code terminal](docs/assets/thimble-cc-mod.png)
+
+```
+cd <directory you want to analyze>
+thimble cc-mod on
+claude
+```
+
 ## Commands
 
 **Inside a Claude Code session**
@@ -72,6 +84,7 @@ Type `/thimble` to start the thimble server and print the dashboard URL. If `/th
 | `thimble revert` | undo the last change thimble's dev agent applied |
 | `thimble extension add <folder\|git URL>` | add an extension and switch it on, after showing what it gives |
 | `thimble extension list\|on\|off\|remove [<name>]` | list the extensions, switch one on or off everywhere, or remove it |
+| `thimble cc-mod on\|off\|status` | switch thimble-cc-mod, a single-agent thimble inside Claude Code, on or off in this folder ([INSTALL.md](INSTALL.md#thimble-cc-mod)) |
 | `thimble uninstall` | uninstall the package |
 
 ## Requirements
