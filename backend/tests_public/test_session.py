@@ -279,6 +279,24 @@ def test_a_job_written_and_subscribed_after_main_followed_takes_the_open_turn_on
     assert [r["type"] for r in _mirror()] == ["user", "tool_use", "tool_result", "text", "done"]
 
 
+def test_a_record_the_job_writes_in_the_millisecond_of_the_move_is_shown(cwd, project, quits):
+    """The job's first turn of its own is stamped in the same millisecond as the continued-in record: its records have
+    new uuids, so they are shown, and only the turn the job copied is skipped."""
+    p = project / f"{SID}.jsonl"
+    p.write_text("")
+    _subscribe(SID, cc_channel.CHANNEL)
+    lv = _attach(cwd, p, pid=100)
+    session.tail_once(lv)
+    asked = _turn(SID, 1, "2026-10-01T20:26:31.492Z", "the board's posts")
+    _append(p, lv, [*asked, *_moved(SID, JOB)])
+    _write(project / f"{JOB}.jsonl", [*_copy(asked, JOB), *_turn(JOB, 2, MOVED_AT, "the threads")])
+    job = session.current(CORPUS)
+    assert job is not None and job.sid == JOB
+    session.tail_once(job)
+    assert _shown("user") == ["the board's posts", "the threads"]
+    assert _shown("text") == ["About the board's posts", "About the threads"]
+
+
 @pytest.mark.parametrize("back_first", ["parked", "job"])
 def test_main_follows_after_a_restart_past_the_move_and_again_when_the_job_comes_back_or_moves_on(
         cwd, project, quits, back_first):
@@ -505,9 +523,10 @@ def test_a_moved_job_s_subagent_transcript_links_to_the_old_one_and_each_line_sh
 
 
 def test_a_copied_record_is_known_by_its_uuid_or_its_time_and_a_session_that_goes_on_is_not_parked(tmp_path):
-    """A record of the job's transcript is a copy when the old transcript has its uuid, even stamped later, or when it
-    is stamped no later than the move; a record of the job's own has neither. A transcript that ends with the move,
-    queued events after it, names the job; once the session writes on after it, it names none."""
+    """A record of the job's transcript is a copy when the old transcript has its uuid, even stamped later; only a
+    record with no uuid is a copy by being stamped no later than the move. A record of the job's own, with a new uuid,
+    is not a copy even when stamped in the millisecond of the move. A transcript that ends with the move, queued events
+    after it, names the job; once the session writes on after it, it names none."""
     old = tmp_path / f"{SID}.jsonl"
     _write(old, [*_stamped(SID, 1, "2026-10-01T20:26:31.492Z", _human("the board's posts")), *_moved(SID, JOB)])
     assert session._continued_in(str(old)) == (JOB, MOVED_AT)
@@ -516,7 +535,9 @@ def test_a_copied_record_is_known_by_its_uuid_or_its_time_and_a_session_that_goe
     session._take_copied(lv)
     assert lv.copied is not None
     assert session._copied(lv.copied, {"uuid": "1-0", "timestamp": "2026-10-02T00:00:00.000Z"})
-    assert session._copied(lv.copied, {"uuid": "elsewhere", "timestamp": "2026-10-01T20:26:31.492Z"})
+    assert session._copied(lv.copied, {"type": "attachment", "timestamp": "2026-10-01T20:26:31.492Z"})
+    assert not session._copied(lv.copied, {"type": "attachment", "timestamp": "2026-10-01T21:17:45.529Z"})
     assert not session._copied(lv.copied, {"uuid": "2-0", "timestamp": "2026-10-01T23:30:03.924Z"})
+    assert not session._copied(lv.copied, {"uuid": "2-1", "timestamp": MOVED_AT})
     _write(old, _stamped(SID, 9, "2026-10-02T01:00:00.000Z", _human("back again")))
     assert session._continued_in(str(old)) is None

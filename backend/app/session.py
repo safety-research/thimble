@@ -1732,9 +1732,11 @@ def _take_copied(lv: Live) -> None:
 
 def _copied(copied: tuple[set[str], float], rec: dict) -> bool:
     """Whether a record is one its session copied from the session it continues (_take_copied): its uuid is one of that
-    session's, or it is stamped no later than the moment the session continued."""
+    session's. Only a record with no uuid is judged by its time, a copy when stamped no later than the moment the session
+    continued, so a record the session writes itself in that same millisecond is still its own."""
     uuids, at = copied
-    return str(rec.get("uuid") or "") in uuids or 0 < _stamp(rec) <= at
+    uuid = str(rec.get("uuid") or "")
+    return uuid in uuids if uuid else 0 < _stamp(rec) <= at
 
 
 def _continued_in(path: str | None) -> tuple[str, str] | None:
