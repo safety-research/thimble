@@ -38,7 +38,7 @@ For a development build, clone the repo and run `bash scripts/install.sh`.
 
 thimble-cc-mod draws cards and citations you can check in the Claude Code chat itself, with no server, browser or background agents. It is an exploration and may change or break.
 
-- **With thimble installed:** run `thimble cc-mod on` in a folder (`thimble cc-mod off` undoes it). The thimble plugin stays as it is.
+- **With thimble installed:** run `thimble cc-mod on` in a folder (`thimble cc-mod off` undoes it). Sessions you start with `thimble` run without the mod; plain `claude` in the folder uses it.
 - **Without thimble:**
 
   ```
