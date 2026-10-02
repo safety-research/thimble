@@ -900,6 +900,7 @@ async def test_thimble_s_config_switches_extensions_off_and_sets_their_agents(co
 async def test_the_extension_command_adds_lists_and_removes(corpus, capsys, monkeypatch, tmp_path):
     """`thimble extension list` says per workspace whether each extension runs there, and whether each view shows."""
     monkeypatch.setenv("THIMBLE_WORKSPACES_DIR", str(config.WORKSPACES_DIR))
+    monkeypatch.setattr(cli, "healthy", lambda url: False)  # the default port may be a live server's
     (config.WORKSPACES_DIR / "later").mkdir(parents=True)
     assert cli.main(["extension", "add", str(FIXTURE), "--yes"]) == 0
     out = capsys.readouterr().out
