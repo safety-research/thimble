@@ -209,6 +209,8 @@ class Live:
         self.continued: tuple[str, str] | None = None  # (session, time) of the continued-in record read (_continue)
         self.came_from: dict | None = None  # {session, transcript, at} of the session this one continues (FROM_KEY)
         self.copied: tuple[set[str], float] | None = None  # what that session's records are known by (_copied)
+        self.moved_at: float | None = None  # time.monotonic() when main followed it here from that session (_continue)
+        self.reading = False  # tail_once runs for it now, so _read_now leaves it to that read
         self.task: asyncio.Task | None = None
         self.wake = asyncio.Event()
 
@@ -757,27 +759,33 @@ def _continue(lv: Live) -> None:
     """Main's session continues in the session its continued-in record names (`lv.continued`): Claude Code moved it into
     a background job, whose session copied the conversation into a transcript beside this one's and runs in its own
     process. That session becomes main in this one's place, by the pid its shim reported (attach), read from its
-    transcript's start without the records it copied (_copied), with the turn in progress, main's subagents still at
-    work (a thread's fork ends, as when main is replaced) and the events queued for this one (channel.move_events).
-    This one ends as CONTINUED: thimble's agents go on, and its shim, in the parked process, does not make it main again
-    (_parked)."""
+    transcript's start without the records it copied (_copied), with the turn in progress, main's subagents and threads'
+    forks still at work (threads.fork_moved) and the events queued for this one (channel.move_events). This one ends as
+    CONTINUED: thimble's agents go on, and its shim, in the parked process, does not make it main again (_parked)."""
     from . import channel  # noqa: PLC0415
 
     c, (new, at) = lv.c, lv.continued
     config_dir = _shim_configs.get((c, new), (lv.config or "") if lv.config_known else None)
-    carried = [s for s in lv.subs if not s.done and not s.thread]  # the job runs them on, so detach ends none of them
+    carried = [s for s in lv.subs if not s.done]  # the job runs them on, so detach ends none of them
     lv.subs = [s for s in lv.subs if s not in carried]
+    for tid in {s.chat for s in carried if s.thread} | threads.awaiting_in(c, lv.sid):
+        threads.fork_moved(c, tid, lv.sid, new)
     detach(c, lv.sid, CONTINUED)
     nv = attach(c, new, lv.cwd, str(Path(str(lv.transcript_path)).with_name(f"{new}.jsonl")), None, config_dir)
     if nv is None:
         return
     nv.came_from = {"session": lv.sid, "transcript": lv.transcript_path, "at": at}
+    nv.moved_at = time.monotonic()
     _take_copied(nv)
     nv.offset = 0
     _take_turn(nv, _turn_state(lv))
     nv.watch_tasks |= lv.watch_tasks
+    moved = {s.chat for s in carried if s.thread}
+    for sub in [s for s in nv.subs if s.thread and s.chat in moved]:  # attach found the moved forks, as finished ones
+        nv.subs.remove(sub)
+        nv.sub_paths.discard(str(sub.path))
     nv.subs += carried
-    for chat in {s.chat for s in carried if not s.proxy}:  # a restarted server finds it under the job (_restore_subs)
+    for chat in {s.chat for s in carried if not s.proxy and not s.thread}:  # a restarted server finds it under the job
         agents.update_agent(c, chat, session=new)
     _persist(nv)
     _save_cursor(nv)
@@ -2028,7 +2036,10 @@ def _note_model(lv: Live, rec: dict) -> None:
 
 
 def _read_now(lv: Live) -> None:
-    """tail_once now, not at the tail's next read; a failure is left to that read, which meets it too."""
+    """tail_once now, not at the tail's next read, unless a read of it is under way (an event posted from inside that
+    read); a failure is left to that read, which meets it too."""
+    if lv.reading:
+        return
     try:
         tail_once(lv)
     except Exception:  # noqa: BLE001
@@ -2037,6 +2048,14 @@ def _read_now(lv: Live) -> None:
 
 def tail_once(lv: Live) -> None:
     """Translate what the transcript and the subagents' transcripts gained since the last read."""
+    lv.reading = True
+    try:
+        _tail_once(lv)
+    finally:
+        lv.reading = False
+
+
+def _tail_once(lv: Live) -> None:
     if not lv.transcript_path:
         lv.transcript_path = find_transcript(lv.sid, lv.config_dir)
         if lv.transcript_path:

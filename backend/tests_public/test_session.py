@@ -3,13 +3,14 @@ other record, and main follows its session when Claude Code moves it into a back
 written by the test in Claude Code's record shapes."""
 from __future__ import annotations
 
+import asyncio
 import json
 from collections import deque
 from pathlib import Path
 
 import pytest
 
-from app import agents, cc_channel, channel, config, session
+from app import agents, cc_channel, channel, config, session, threads
 
 CORPUS = "mini"
 SID = "e7b0a1f2-0000-4000-8000-000000000001"
@@ -129,8 +130,8 @@ NEXT = "e7b0a1f2-0000-4000-8000-000000000003"
 MOVED_AT = "2026-10-01T21:17:45.528Z"
 
 
-def _subscribe(sid: str, delivery: str) -> object:
-    q = object()
+def _subscribe(sid: str, delivery: str) -> asyncio.Queue:
+    q: asyncio.Queue = asyncio.Queue()
     channel._subs.setdefault(CORPUS, set()).add(q)
     channel._routes[q] = (sid, delivery)
     return q
@@ -375,6 +376,132 @@ def test_a_subagent_at_work_when_the_session_moves_goes_on_in_the_job(cwd, proje
     chat = agents.read_meta(CORPUS, chat["id"])
     assert chat["status"] == "done" and chat["result"] == "8 posts"
     assert _shown("text") == ["8 posts."]
+
+
+class _Req:
+    """A request whose client stays connected, for calling a route function directly."""
+
+    async def is_disconnected(self) -> bool:
+        return False
+
+
+async def _job_subscribes_on_the_channel(cwd: str) -> dict:
+    """The job's shim subscribes on the channel route: the first event its stream carries after `ready`."""
+    resp = await channel.subscribe(_Req(), cwd=cwd, session=JOB, pid=200)
+    gen = resp.body_iterator
+    try:
+        assert (await gen.__anext__())["event"] == "ready"
+        return json.loads((await gen.__anext__())["data"])
+    finally:
+        await gen.aclose()
+
+
+@pytest.mark.parametrize("job_route", [cc_channel.HOOK, cc_channel.CHANNEL])
+@pytest.mark.parametrize("old_route", [cc_channel.CHANNEL, cc_channel.HOOK])
+def test_an_event_posted_after_the_move_and_before_the_job_s_shim_subscribes_waits_for_the_job(
+        cwd, project, old_route, job_route):
+    """The browser posts an event after Claude Code wrote the move, before the tail read it and before the job's shim
+    subscribed: main follows first, and the event waits in the job's queue, never the parked session's, until the
+    job's watcher takes it or its channel subscribes."""
+    p = project / f"{SID}.jsonl"
+    p.write_text("")
+    old_sub = _subscribe(SID, old_route)
+    lv = _attach(cwd, p, pid=100)
+    session.tail_once(lv)
+    asked = _turn(SID, 1, "2026-10-01T20:26:31.492Z", "the board's posts")
+    _append(p, lv, asked)
+    _write(project / f"{JOB}.jsonl", _copy(asked, JOB))
+    _write(p, _moved(SID, JOB))
+
+    posted = channel.post(CORPUS, "main", {"text": "Which posts are new?"})
+    assert session.current(CORPUS).sid == JOB and posted["delivered"] == 1
+    assert old_sub.empty() and not channel._pending.get((CORPUS, SID))
+    assert [n["meta"]["event"] for n in channel._pending[(CORPUS, JOB)]] == [posted["id"]]
+    if job_route == cc_channel.HOOK:
+        _subscribe(JOB, cc_channel.HOOK)
+        session.connected(CORPUS, JOB, cwd, 200, claim=False)
+        got = asyncio.run(channel.pull_route(_Req(), cwd=cwd, session=JOB, wait=1, pid=200))
+        assert got["id"] == posted["id"]
+    else:
+        got = asyncio.run(_job_subscribes_on_the_channel(cwd))
+        assert got["meta"]["event"] == posted["id"] and not channel._pending.get((CORPUS, JOB))
+
+
+def test_naming_the_job_after_an_unread_move_takes_over_from_no_session(cwd, project):
+    """/thimble in the job before the tail read the move: the parked session is never main again, so /thimble says
+    nothing of taking over from it."""
+    p = project / f"{SID}.jsonl"
+    p.write_text("")
+    _subscribe(SID, cc_channel.CHANNEL)
+    lv = _attach(cwd, p, pid=100)
+    session.tail_once(lv)
+    _write(p, [*_turn(SID, 1, "2026-10-01T20:26:31.492Z", "the board's posts"), *_moved(SID, JOB)])
+    out = asyncio.run(channel.session_route(CORPUS, channel.SessionBody(session=JOB, cwd=cwd)))
+    assert out["attached"] and out["replaced"] is None and session.current(CORPUS).sid == JOB
+
+
+def test_a_thread_s_fork_at_work_when_the_session_moves_goes_on_in_the_job(cwd, project, quits):
+    """A thread's fork still works when Claude Code moves the session into a job: the fork is the job's, the thread
+    keeps running, and the job's task notification finishes it."""
+    p = project / f"{SID}.jsonl"
+    p.write_text("")
+    _subscribe(SID, cc_channel.CHANNEL)
+    lv = _attach(cwd, p, pid=100)
+    session.tail_once(lv)
+    thread = agents.new_thread(CORPUS, None, None, "Days the page changed")
+    channel.post(CORPUS, "thread", {"thread": thread["id"], "text": "On which days did it change?"})
+    name = agents.read_meta(CORPUS, thread["id"])[threads.FORK_NAME_KEY]
+    forked = _stamped(SID, 1, "2026-10-01T20:27:52.417Z", _human("Look into the thread"),
+                      _assistant(_use("toolu_fk", "Agent", {"description": f"thread:{name}", "prompt": "Answer it.",
+                                                            "run_in_background": True})),
+                      _result("toolu_fk", "Async agent launched successfully.\nagentId: f0e1d2c3"), END)
+    _append(p, lv, [*forked, *_moved(SID, JOB)])
+    assert session.current(CORPUS).sid == JOB
+    fork = agents.read_meta(CORPUS, thread["id"])["fork"]
+    assert fork["session"] == JOB and fork["agent_id"] == "f0e1d2c3" and not fork.get("ended")
+    assert agents.running(CORPUS, thread["id"])
+
+    note = ("<task-notification>\n<task-id>f0e1d2c3</task-id>\n<status>completed</status>\n<result>Mondays</result>\n"
+            "</task-notification>")
+    _write(project / f"{JOB}.jsonl", [*_copy(forked, JOB), *_stamped(
+        JOB, 2, "2026-10-01T23:30:03.924Z", {"type": "user", "origin": {"kind": "task-notification"},
+                                             "message": {"content": note}}, _assistant(_say("It answered.")), END)])
+    session.tail_once(session.current(CORPUS))
+    assert not agents.running(CORPUS, thread["id"])
+    assert [r["type"] for r in _log(thread["id"]) if r["type"] in ("done", "error")] == ["done"]
+
+
+def test_a_moved_job_s_subagent_transcript_links_to_the_old_one_and_each_line_shows_once(cwd, project, quits):
+    """Claude Code links the job's subagent transcript to the old session's file, which it keeps appending to: the job
+    adopts the link as the subagent it carried, so there is no second chat and a line written after the move shows
+    once."""
+    p = project / f"{SID}.jsonl"
+    p.write_text("")
+    _subscribe(SID, cc_channel.CHANNEL)
+    lv = _attach(cwd, p, pid=100)
+    session.tail_once(lv)
+    old = project / SID / "subagents" / "agent-a1b2c3d4.jsonl"
+    old.parent.mkdir(parents=True)
+    old.with_name("agent-a1b2c3d4.meta.json").write_text(json.dumps({"toolUseId": "toolu_ag", "description": "posts"}))
+    _write(old, [_assistant(_say("Counting the posts"))])
+    started = _stamped(SID, 1, "2026-10-01T20:27:52.417Z", _human("Count the posts in the background"),
+                       _assistant(_use("toolu_ag", "Agent", {"description": "posts", "prompt": "Count the posts.",
+                                                             "run_in_background": True})),
+                       _result("toolu_ag", "Async agent launched successfully.\nagentId: a1b2c3d4"), END)
+    _append(p, lv, started)
+    _append(p, lv, _moved(SID, JOB))
+    link = project / JOB / "subagents" / "agent-a1b2c3d4.jsonl"
+    link.parent.mkdir(parents=True)
+    link.symlink_to(old)
+    _write(old, [_assistant(_say("8 posts so far"))])
+    _write(project / f"{JOB}.jsonl", _copy(started, JOB))
+    job = session.current(CORPUS)
+    assert job is not None and job.sid == JOB
+    session.tail_once(job)
+    session.tail_once(job)
+    chats = [m for m in agents.list_chats(CORPUS) if m.get("role") == session.SUBAGENT_ROLE]
+    assert len(chats) == 1 and [(s.agent_id, s.path) for s in job.subs] == [("a1b2c3d4", link)]
+    assert [r["delta"] for r in _log(chats[0]["id"]) if r["type"] == "text"] == ["Counting the posts", "8 posts so far"]
 
 
 def test_a_copied_record_is_known_by_its_uuid_or_its_time_and_a_session_that_goes_on_is_not_parked(tmp_path):
