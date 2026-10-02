@@ -3484,19 +3484,18 @@ async def run_cell_by_id(c: str, cell_id: str) -> dict:
     return await _run_cell(c, hit[0], cell_id)
 
 
-# Regenerate Card runs in the background once it waits for a label's run, and the loop keeps only weak references to
-# tasks, so each is held here until it ends.
+# A regenerate that waits for a label's run goes on in the background, and the loop keeps only weak references to tasks,
+# so each is held here until it ends.
 _regenerating: set[asyncio.Task] = set()
 
 
 @router.post("/ws/{c}/cells/{cell_id}/regenerate")
 async def regenerate_cell(c: str, cell_id: str, response: Response) -> dict:
-    """Run a card again on its labels as they are now (the Regenerate Card offered once a label it counts by has
-    changed), then start the card check, which brings the takeaway up to date while the automatic check is on. A card
-    that gets no check keeps its takeaway; one whose outputs are unchanged is not read again. Labels whose rows were
-    made under another definition run first: the answer is then 202 with the card and `waiting` (those label ids), and
-    the card runs when their runs end. Otherwise the card as stored after its run. 404 for no such card, 400 for one
-    with no code."""
+    """Run a card again on its labels as they are now, then start the card check, which brings the takeaway up to date
+    while the automatic check is on. A card that gets no check keeps its takeaway; one whose outputs are unchanged is
+    not read again. Labels whose rows were made under another definition run first: the answer is then 202 with the
+    card and `waiting` (those label ids), and the card runs when their runs end. Otherwise the card as stored after its
+    run. 404 for no such card, 400 for one with no code."""
     hit = find_cell(_ws(c), cell_id)
     if hit is None:
         raise HTTPException(404, f"no such card: {cell_id}")

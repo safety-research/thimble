@@ -3465,7 +3465,7 @@ async def bring_current(c: str, concept_ids: list[str], created_by: str = "user"
         await start_apply(c, cid, paths, limit, created_by)
         cards = await asyncio.to_thread(_label_cards, ws, cid)
         tell_main(c, concept, dict(cards[0][1]) if cards else None)
-        _notify(c, cid, "applying")  # the canvas reads the run record, so the card's Regenerate Card turns meanwhile
+        _notify(c, cid, "applying")  # the canvas reads the run record again, so the label card shows its run meanwhile
         out.append(cid)
     return out
 
