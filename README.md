@@ -14,8 +14,6 @@ https://github.com/user-attachments/assets/3c21e405-6b8d-4ba6-85a8-24211800596c
 
 ## Installation
 
-thimble comes as two plugins, and you can turn on either one without the other: **thimble**, the workbench (installed as below), and **thimble-cc-mod**, thimble inside a plain Claude Code session ([below](#thimble-cc-mod)).
-
 ### Installing with Claude
 
 ```
@@ -34,23 +32,6 @@ For a development build, clone the repo and run `bash scripts/install.sh`.
 
 [INSTALL.md](INSTALL.md) covers requirements, updating and troubleshooting.
 
-### thimble-cc-mod
-
-thimble-cc-mod draws cards and citations you can check in the Claude Code chat itself, with no server, browser or background agents. It is an exploration and may change or break.
-
-- **With thimble installed:** run `thimble cc-mod on` in a folder (`thimble cc-mod off` undoes it). Sessions you start with `thimble` run without the mod; plain `claude` in the folder uses it.
-- **Without thimble:**
-
-  ```
-  git clone https://github.com/safety-research/thimble <dir>
-  claude plugin marketplace add <dir>
-  cd <folder> && claude plugin install thimble-cc-mod@thimble --scope project
-  ```
-
-  Don't install the `thimble` plugin from this marketplace without running thimble's installer: it needs the thimble server.
-
-Then run `claude` in that folder. [mods/thimble-cc-mod/README.md](mods/thimble-cc-mod/README.md) covers its requirements and how to use it.
-
 ## Usage
 
 - Run `thimble` in a directory, just as you would run `claude` 
@@ -62,6 +43,18 @@ Then run `claude` in that folder. [mods/thimble-cc-mod/README.md](mods/thimble-c
 Type `/thimble` to start the thimble server and print the dashboard URL. If `/thimble` is not recognised, run `/reload-plugins`.
 
 > **Please note:** thimble connects the browser to your Claude Code session through [channels](https://code.claude.com/docs/en/channels). While thimble is under development, a Claude Code session needs to be started with `--dangerously-load-development-channels` (`thimble` from the CLI handles this for you) and a warning screen will appear before starting your Claude Code session (this warning is expected). Without this flag, or if channels are disabled by your org, thimble connects through the plugin's hooks instead and `/thimble` prints a note with the exact command.
+
+## Claude Code Mod (Experimental)
+
+Thimble can also operate as a [Claude Code Mod](https://code.claude.com/docs/en/plugins/mods/overview) that operates directly in the Claude Code terminal UI, with no server or browser. Plots, verification links, and threads are all rendered in the terminal. The `thimble-cc-mod` plugin is experimental and may break.
+
+![thimble-cc-mod in the Claude Code terminal](docs/assets/thimble-cc-mod.png)
+
+```
+cd <directory you want to analyze>
+thimble cc-mod on
+claude
+```
 
 ## Commands
 

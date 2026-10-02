@@ -121,7 +121,7 @@ background agents. Switch it on in a folder with `thimble cc-mod on`, which asks
 cc-mod status` says whether each of the two plugins is on in the folder. They are switched independently: `on` and `off`
 leave the thimble plugin as it is. Sessions you start with `thimble`, and thimble's background sessions (the
 orientation, critic, writers, checks, task programs and builds), run without the mod; plain `claude` in the folder uses
-it. To use it without installing thimble, see the [README](README.md#thimble-cc-mod).
+it. To use it without installing thimble, see the [mod's README](mods/thimble-cc-mod/README.md).
 
 ## Update
 
