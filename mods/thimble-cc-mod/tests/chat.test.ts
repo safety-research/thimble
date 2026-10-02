@@ -46,9 +46,11 @@ type World = {
   opened: string[]
 }
 
-/** What the resolver says of a ref: the bar card's values, one line of pages.jsonl, nothing else. */
-function resolveOne(ref: string, display: string | null) {
-  const values: Record<string, string> = { 'card:abc123#revisions/dse': '13403', 'card:abc123#revisions/probier': '1013', 'card:abc123#revisions/all': '14416' }
+/** What the resolver says of a ref: the bar card's values as its file holds them, one line of pages.jsonl, nothing else. */
+function resolveOne(ref: string, display: string | null, card: CardData = BAR) {
+  const values: Record<string, string> = { 'card:abc123#revisions/all': '14416' }
+  for (const r of (card.rows ?? []) as { label: string; value: number }[]) values[`card:abc123#revisions/${r.label}`] = String(r.value)
+  if (ref.startsWith('card:abc123#') && !(ref in values)) return { ref, kind: 'card', card: 'abc123', status: 'missing', why: `card abc123 has no value ${ref.split('#')[1]}`, window: [] }
   if (ref in values) {
     const v = values[ref]!
     const ok = display === null || display === v
@@ -92,7 +94,8 @@ function world(on: On, extra: Record<string, string> = {}): World {
     w.runs.push({ argv: e.argv, env: e.init?.env })
     if (String(e.argv[1]).endsWith('/helper/resolve.py')) {
       const req = JSON.parse(e.init?.stdin ?? '{}') as { items: { id: string; ref: string; display: string | null }[] }
-      const out = req.items.map(it => ({ ...resolveOne(it.ref, it.display), id: it.id }))
+      const card = JSON.parse(w.files.get(`${CWD}/.thimble-cc-mod/cards/abc123.json`) ?? 'null') as CardData | null
+      const out = req.items.map(it => ({ ...resolveOne(it.ref, it.display, card ?? BAR), id: it.id }))
       return { value: { exitCode: 0, stdout: JSON.stringify(out), stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     }
     // a card's script, run again with a param: it writes the card with the new rows
@@ -239,12 +242,41 @@ test('double-clicking a bar puts its value citation in the prompt', async ($, on
 test('a param picked on the card runs its script again for that card, and the card redraws', async ($, on) => {
   const w = world(on)
   await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
+  // the reply's citations are checked at its end
+  await $.turn.start({ text: 'which wiki?', turnId: 't1' } as never)
+  await $.turn.complete({ turnId: 't1', answer: REPLY, durationMs: 5, reason: 'answer' } as never)
   const ui = (await $.ui.mount({ ...MESSAGE(REPLY), surface: 'terminal' } as never)) as unknown as M
   await ui.post({ type: 'param', card: 'abc123', name: 'by', value: 'label' }, { in: 'card-1-abc123' })
   const run = w.runs.find(r => r.argv[1] === '.thimble-cc-mod/scripts/by.py')
   expect(run?.env).toEqual({ THIMBLE_CC_MOD_PARAMS: '{"by":"label"}', THIMBLE_CC_MOD_ONLY: '0:abc123', THIMBLE_CC_MOD_ROOT: CWD })
   expect(await ui.find({ type: 'Text', text: /AgentRelent/, in: 'card-1-abc123' })).toBeDefined()
   await ui.unmount()
+  // the reply's citations were written for "by = wiki": they stay links, and their tip says so, with no card id
+  let again = (await $.ui.mount({ ...MESSAGE(REPLY), surface: 'terminal' } as never)) as unknown as M
+  const para = JSON.stringify(await again.find({ key: 'para-2' }))
+  expect(para).toContain('"label":"13403","state":"link"')
+  expect(para).toContain('written for by = wiki; the card now shows by = label')
+  expect(para).not.toMatch(/abc123 has no value/)
+  // back at their choice, they are checked again as before
+  await again.post({ type: 'param', card: 'abc123', name: 'by', value: 'wiki' }, { in: 'card-1-abc123' })
+  await again.unmount()
+  again = (await $.ui.mount({ ...MESSAGE(REPLY), surface: 'terminal' } as never)) as unknown as M
+  const back = JSON.stringify(await again.find({ key: 'para-2' }))
+  expect(back).toContain('"label":"13403","state":"link"')
+  expect(back).not.toContain('written for')
+  await again.unmount()
+  // the script pane shows what the script printed, not the card helper's lines for main
+  const card = (await $.ui.mount({ ...MESSAGE(REPLY), surface: 'terminal' } as never)) as unknown as M
+  const target = { kind: 'card', ref: 'card:abc123', cardId: 'abc123', text: BAR.question, script: BAR.source!.script }
+  await card.post({ type: 'gesture', origin: 'o9', gestures: [{ seq: 1, gesture: 'menu', target, ev: { button: 'right', shift: false, ctrl: false, alt: false, type: 'press' } }] } as never, { in: 'card-1-abc123' })
+  await card.unmount()
+  const menu = (await $.ui.mount({ plugin: 'thimble-cc-mod', component: 'Pane', requestId: 'thimble-menu', surface: 'terminal', viewport: { columns: 40, rows: 10 }, props: { bodyColumns: 34, bodyRows: 8 } } as never)) as unknown as M
+  await menu.press({ key: 'menu-script' })
+  await menu.unmount()
+  const pane = (await $.ui.mount({ plugin: 'thimble-cc-mod', component: 'Pane', requestId: 'thimble-card', surface: 'terminal', viewport: { columns: 100, rows: 30 }, props: { bodyColumns: 96, bodyRows: 28 } } as never)) as unknown as M
+  expect(await pane.find({ type: 'Text', text: /output of the last run \(exit 0\): nothing printed/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /thimble-cc-mod card abc123/ })).toBeUndefined()
+  await pane.unmount()
 })
 
 // ------------------------------------------------------------------------------------------------ turns

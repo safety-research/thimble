@@ -4,11 +4,11 @@ import type { On } from 'claude-code'
 import { expect, mock, test } from 'claude-code/testing'
 import type { Mounted } from 'claude-code/testing'
 
-import { SPIN, applyCorrections, blockLayout, chipLook, chipSegs, chipState, fixItems, fixPrompt, paraLayout, parseFix, passageAt, sentenceAt, sentenceIn, settleFix, streamLink, streamStep, streaming } from '../hooks/cite'
+import { SPIN, answerFile, applyCorrections, blockLayout, chipLook, chipSegs, chipState, claimsIn, fixItems, fixPrompt, paraLayout, parseFix, passageAt, quoteSpan, sentenceAt, sentenceIn, settleFix, streamLink, streamStep, streaming, wrapAround } from '../hooks/cite'
 import type { ChipView } from '../hooks/cite'
 import { lineWidth } from '../hooks/draw'
 import { fixName, threadName, verifyName } from '../hooks/threads'
-import { cid, citations, parseReply } from '../hooks/lib'
+import { citations, parseReply } from '../hooks/lib'
 import { COLORS } from '../hooks/paint'
 
 const CWD = '/corpus/wiki'
@@ -30,7 +30,7 @@ const BAD = 'probier has [[1014|card:abc123#revisions/probier]], see [[pages.jso
 const REPLY = ['[[card:abc123]]', '', 'dse has [[13403|card:abc123#revisions/dse]] of [[14416|card:abc123#revisions/all]] revisions.', '', BAD].join('\n')
 const FIXED = 'probier has [[1013|card:abc123#revisions/probier]], see [[pages.jsonl#L3]].'
 
-type World = { files: Map<string, string>; spawned: { prompt: string; subagentType?: string; description?: string }[]; submitted: string[]; verifyOut: string }
+type World = { opened: { id: string; focus?: boolean }[]; files: Map<string, string>; spawned: { prompt: string; subagentType?: string; description?: string }[]; submitted: string[]; verifyOut: string; lines?: { n: number; text: string; hit: boolean }[]; clock?: { advance: (ms: number) => Promise<void> } }
 
 function resolveOne(ref: string, display: string | null) {
   const values: Record<string, string> = { 'card:abc123#revisions/dse': '13403', 'card:abc123#revisions/probier': '1013', 'card:abc123#revisions/all': '14416' }
@@ -45,9 +45,9 @@ function resolveOne(ref: string, display: string | null) {
 }
 
 function world(on: On): World {
-  const w: World = { files: new Map([[`${CWD}/.thimble-cc-mod/cards/abc123.json`, JSON.stringify(CARD)]]), spawned: [], submitted: [], verifyOut: '' }
+  const w: World = { opened: [], files: new Map([[`${CWD}/.thimble-cc-mod/cards/abc123.json`, JSON.stringify(CARD)]]), spawned: [], submitted: [], verifyOut: '' }
   mock.env(on, {})
-  mock.clock(on, { now: 1_790_000_000_000 })
+  w.clock = mock.clock(on, { now: 1_790_000_000_000 })
   on('session.start', ($, e) => ({ cwd: e.cwd }))
   on('session.cwd', () => ({ value: CWD }))
   on('session.messages', () => ({ value: [] }) as never)
@@ -71,7 +71,7 @@ function world(on: On): World {
   on('process.run', ($, e) => {
     if (String(e.argv[1]).endsWith('/helper/resolve.py')) {
       const req = JSON.parse(e.init?.stdin ?? '{}') as { items: { id: string; ref: string; display: string | null }[] }
-      const out = req.items.map(it => ({ ...resolveOne(it.ref, it.display), id: it.id }))
+      const out = req.items.map(it => ({ ...resolveOne(it.ref, it.display), id: it.id, ...(w.lines && it.ref === 'pages.jsonl#L3' ? { window: w.lines } : {}) }))
       return { value: { exitCode: 0, stdout: JSON.stringify(out), stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     }
     if (/verify\/v-\w+\.py$/.test(String(e.argv[1])) && w.verifyOut) return { value: { exitCode: 0, stdout: w.verifyOut, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
@@ -86,7 +86,10 @@ function world(on: On): World {
     w.spawned.push({ prompt: e.prompt, description: e.description, subagentType: e.subagentType ?? (e as { subagent_type?: string }).subagent_type })
     return { model: 'm', agentId: `agent-${w.spawned.length}` }
   })
-  on('ui.open', () => ({ value: { isOpen: true } }) as never)
+  on('ui.open', ($, e) => {
+    w.opened.push({ id: e.id, focus: (e as { focus?: boolean }).focus })
+    return { value: { isOpen: true } } as never
+  })
   on('ui.close', () => ({ value: undefined }) as never)
   on('ui.toast', () => ({ value: undefined }) as never)
   on('ui.log', () => ({ value: undefined }) as never)
@@ -100,7 +103,19 @@ function world(on: On): World {
 }
 
 type M = Mounted<'terminal'>
-const MESSAGE = (text: string) => ({ plugin: 'thimble-cc-mod', component: 'AssistantMessage', requestId: 'm1', surface: 'terminal', viewport: { columns: 140, rows: 40 }, props: { text, isFirstOfReply: true } }) as never
+const MESSAGE = (text: string, requestId = 'm1') => ({ plugin: 'thimble-cc-mod', component: 'AssistantMessage', requestId, surface: 'terminal', viewport: { columns: 140, rows: 40 }, props: { text, isFirstOfReply: true } }) as never
+const PANE = { plugin: 'thimble-cc-mod', component: 'Pane', requestId: 'thimble-cite', surface: 'terminal', viewport: { columns: 100, rows: 30 }, props: { bodyColumns: 96, bodyRows: 28 } } as never
+const PRESS = { button: 'left', shift: false, ctrl: false, alt: false, type: 'press' }
+
+/** A text row of main's reply, as the engine stores it (the kit stores none: its rejection is expected). */
+function appendRow($: { session: { append: (args: never) => Promise<unknown> } }, uuid: string, text: string): Promise<unknown> {
+  return $.session.append({ message: { type: 'assistant', role: 'assistant', content: [{ type: 'text', text }] }, door: 'response', origin: { kind: 'model', model: 'm' }, uuid } as never).catch(() => undefined)
+}
+
+/** The key of a citation's claim in a row of a reply. */
+function claimOf(text: string, row: string, raw: string): string {
+  return claimsIn(text, row).find(cl => cl.c.raw === raw)!.key
+}
 
 // ------------------------------------------------------------------------------------------------ display
 
@@ -177,11 +192,26 @@ test('the fix answer: one line per item, CANNOT, a missing line, backticks and q
   expect(parseFix('1: "quoted text"', 1)[0]).toEqual({ ok: true, text: 'quoted text' })
 })
 
-test('a corrected sentence replaces the old one whole, unmarked; a card embed stays alone on its line; $ is kept', () => {
-  const out = applyCorrections(REPLY, [{ old: BAD, new: 'probier costs $1 or [[1013|card:abc123#revisions/probier]].', at: 1 }, { old: '[[card:abc123]]', new: '[[card:def456]]', at: 1 }])
+test('a corrected sentence replaces the old one whole, unmarked, in its own row only; a card embed stays alone on its line; $ is kept', () => {
+  const out = applyCorrections(REPLY, [{ old: BAD, new: 'probier costs $1 or [[1013|card:abc123#revisions/probier]].', at: 1, row: 'r1' }, { old: '[[card:abc123]]', new: '[[card:def456]]', at: 1, row: 'r1' }], 'r1')
   expect(out.split('\n').at(-1)).toBe('probier costs $1 or [[1013|card:abc123#revisions/probier]].')
   expect(out.split('\n')[0]).toBe('[[card:def456]]')
-  expect(applyCorrections(REPLY, [{ old: BAD, new: FIXED, at: 1 }])).toBe(REPLY.replace(BAD, FIXED))
+  expect(applyCorrections(REPLY, [{ old: BAD, new: FIXED, at: 1, row: 'r1' }], 'r1')).toBe(REPLY.replace(BAD, FIXED))
+  // a later answer with the same sentence keeps what it says
+  expect(applyCorrections(REPLY, [{ old: BAD, new: FIXED, at: 1, row: 'r1' }], 'r2')).toBe(REPLY)
+})
+
+test('a claim is a citation in its sentence and answer: the same citation elsewhere is another claim', () => {
+  const raw = '[[06:02|revisions.jsonl#L6149]]'
+  const a = `dse got its first edit at ${raw}. Then more.`
+  const b = `The fractal wiki got its first edit at ${raw}.`
+  const ka = claimOf(a, 'r1', raw)
+  expect(claimsIn(a, 'r1')[0]!.sentence).toBe(`dse got its first edit at ${raw}.`)
+  expect(claimOf(b, 'r2', raw)).not.toBe(ka)
+  expect(claimOf(a, 'r2', raw)).not.toBe(ka)
+  expect(claimOf(`Intro. ${a}`, 'r1', raw)).toBe(ka)
+  // a table's claim is its row
+  expect(claimsIn('| w | n |\n|---|---|\n| dse | [[9|a.csv#row=2]] |', 'r1')[0]!.sentence).toBe('dse | [[9|a.csv#row=2]]')
 })
 
 // ------------------------------------------------------------------------------------------------ the flow
@@ -217,6 +247,7 @@ test('a reply with a failing citation goes to a forked subagent, never as a prom
   const w = world(on)
   await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
   await $.turn.start({ text: 'which wiki?', turnId: 't1' } as never)
+  await appendRow($, 'm1', REPLY)
   await $.turn.complete({ turnId: 't1', answer: REPLY, durationMs: 5, reason: 'answer' } as never)
   expect(w.submitted).toEqual([])
   expect(w.spawned[0]?.subagentType).toBe('fork')
@@ -236,7 +267,8 @@ test('a reply with a failing citation goes to a forked subagent, never as a prom
 
 test('corrections are drawn in place in the reply, unmarked, also in a later session', async ($, on) => {
   const w = world(on)
-  w.files.set(`${CWD}/.thimble-cc-mod/corrections.json`, JSON.stringify([{ old: BAD, new: FIXED, at: 1 }]))
+  // one made for this row, one from before corrections knew their row
+  w.files.set(`${CWD}/.thimble-cc-mod/corrections.json`, JSON.stringify([{ old: BAD, new: FIXED, at: 1, row: 'm1' }, { old: 'dse has', new: 'DSE HAS', at: 1 }]))
   await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
   const ui = (await $.ui.mount(MESSAGE(REPLY))) as unknown as M
   const para = JSON.stringify(await ui.find({ key: 'para-3' }))
@@ -244,7 +276,13 @@ test('corrections are drawn in place in the reply, unmarked, also in a later ses
   expect(para).not.toContain('corrected')
   expect(para).not.toContain('1014')
   expect(para).not.toContain('"state":"problem"')
+  expect(JSON.stringify(await ui.find({ key: 'para-2' }))).not.toContain('DSE HAS')
   await ui.unmount()
+  // a later answer that says the same keeps what it says, red
+  const later = (await $.ui.mount(MESSAGE(REPLY, 'm2'))) as unknown as M
+  const again = JSON.stringify(await later.find({ key: 'para-3' }))
+  expect(again).toContain('[[1014|card:abc123#revisions/probier]]')
+  await later.unmount()
 })
 
 test('a verification script is asked of a forked subagent, never as a prompt to main', async ($, on) => {
@@ -252,15 +290,15 @@ test('a verification script is asked of a forked subagent, never as a prompt to 
   await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
   const dse = citations(REPLY)[1]!
   const ui = (await $.ui.mount(MESSAGE(REPLY))) as unknown as M
-  const ev = { button: 'left', shift: false, ctrl: false, alt: false, type: 'press' }
-  await ui.post({ type: 'gesture', origin: 'o1', gestures: [{ seq: 1, gesture: 'primary', target: { kind: 'citation', ref: dse.raw }, ev }] }, { in: 'para-2' })
+  await ui.post({ type: 'gesture', origin: 'o1', gestures: [{ seq: 1, gesture: 'primary', target: { kind: 'citation', ref: dse.raw, claim: claimOf(REPLY, 'm1', dse.raw) }, ev: PRESS }] }, { in: 'para-2' })
   await ui.unmount()
-  const pane = (await $.ui.mount({ plugin: 'thimble-cc-mod', component: 'Pane', requestId: 'thimble-cite', surface: 'terminal', viewport: { columns: 100, rows: 30 }, props: { bodyColumns: 96, bodyRows: 28 } } as never)) as unknown as M
+  const pane = (await $.ui.mount(PANE)) as unknown as M
   await pane.press({ key: 'verify' })
   expect(w.submitted).toEqual([])
   expect(w.spawned[0]?.subagentType).toBe('fork')
   expect(w.spawned[0]?.description).toBe('verification · checking 13403')
   expect(w.spawned[0]?.prompt).toContain(`verification script of ${dse.raw}`)
+  expect(w.spawned[0]?.prompt).toContain(`from the sentence "dse has ${dse.raw} of`)
   expect(w.spawned[0]?.prompt).toMatch(/Write it at \.thimble-cc-mod\/verify\/v-\w+\.py/)
   expect(await pane.find({ type: 'Text', text: /could not start a subagent/ })).toBeDefined()
   await pane.unmount()
@@ -284,12 +322,12 @@ test('a verification is drawn on its citation: a spinner while it runs, ✗ and 
   const w = world(on)
   await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
   const dse = citations(REPLY)[1]!
-  const script = `${CWD}/.thimble-cc-mod/verify/v-${cid(dse.raw)}.py`
+  const key = claimOf(REPLY, 'm1', dse.raw)
+  const script = `${CWD}/.thimble-cc-mod/verify/v-${key}.py`
   let ui = (await $.ui.mount(MESSAGE(REPLY))) as unknown as M
-  const ev = { button: 'left', shift: false, ctrl: false, alt: false, type: 'press' }
-  await ui.post({ type: 'gesture', origin: 'o1', gestures: [{ seq: 1, gesture: 'primary', target: { kind: 'citation', ref: dse.raw }, ev }] }, { in: 'para-2' })
+  await ui.post({ type: 'gesture', origin: 'o1', gestures: [{ seq: 1, gesture: 'primary', target: { kind: 'citation', ref: dse.raw, claim: key }, ev: PRESS }] }, { in: 'para-2' })
   await ui.unmount()
-  const pane = (await $.ui.mount({ plugin: 'thimble-cc-mod', component: 'Pane', requestId: 'thimble-cite', surface: 'terminal', viewport: { columns: 100, rows: 30 }, props: { bodyColumns: 96, bodyRows: 28 } } as never)) as unknown as M
+  const pane = (await $.ui.mount(PANE)) as unknown as M
   await pane.press({ key: 'verify' })
   w.files.set(script, 'print("RESULT: 13400")')
   w.verifyOut = 'RESULT: 13400\n'
@@ -305,6 +343,18 @@ test('a verification is drawn on its citation: a spinner while it runs, ✗ and 
   ui = (await $.ui.mount(MESSAGE(REPLY))) as unknown as M
   expect(JSON.stringify(await ui.find({ key: 'para-2' }))).toContain('"label":"13403","state":"link","mark":"✓","spin":false')
   await ui.unmount()
+  // the same citation in another sentence of a later answer is not verified by this one
+  const other = 'The probier wiki has [[13403|card:abc123#revisions/dse]] revisions.'
+  const later = (await $.ui.mount(MESSAGE(other, 'm2'))) as unknown as M
+  expect(JSON.stringify(await later.find({ key: 'para-1' }))).toContain('"label":"13403","state":"link","mark":"","spin":false')
+  await later.post({ type: 'gesture', origin: 'o2', gestures: [{ seq: 1, gesture: 'menu', target: { kind: 'citation', ref: dse.raw, claim: claimOf(other, 'm2', dse.raw) }, ev: { ...PRESS, button: 'right' } }] }, { in: 'para-1' })
+  await later.unmount()
+  const menu = (await $.ui.mount({ ...(PANE as object), requestId: 'thimble-menu' } as never)) as unknown as M
+  await menu.press({ key: 'menu-verify' })
+  await menu.unmount()
+  const asked = w.spawned.filter(s => s.description === 'verification · checking 13403').at(-1)!
+  expect(asked.prompt).toContain(`from the sentence "${other}"`)
+  expect(asked.prompt).not.toContain(script.slice(CWD.length + 1))
 })
 
 // ------------------------------------------------------------------------------------------------ verification failures
@@ -313,12 +363,11 @@ test('a verification script that crashes or is never written fails: ✗ and red,
   const w = world(on)
   await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
   const dse = citations(REPLY)[1]!
-  const script = `${CWD}/.thimble-cc-mod/verify/v-${cid(dse.raw)}.py`
+  const key = claimOf(REPLY, 'm1', dse.raw)
+  const script = `${CWD}/.thimble-cc-mod/verify/v-${key}.py`
   let ui = (await $.ui.mount(MESSAGE(REPLY))) as unknown as M
-  const ev = { button: 'left', shift: false, ctrl: false, alt: false, type: 'press' }
-  await ui.post({ type: 'gesture', origin: 'o1', gestures: [{ seq: 1, gesture: 'primary', target: { kind: 'citation', ref: dse.raw }, ev }] }, { in: 'para-2' })
+  await ui.post({ type: 'gesture', origin: 'o1', gestures: [{ seq: 1, gesture: 'primary', target: { kind: 'citation', ref: dse.raw, claim: key }, ev: PRESS }] }, { in: 'para-2' })
   await ui.unmount()
-  const PANE = { plugin: 'thimble-cc-mod', component: 'Pane', requestId: 'thimble-cite', surface: 'terminal', viewport: { columns: 100, rows: 30 }, props: { bodyColumns: 96, bodyRows: 28 } } as never
   let pane = (await $.ui.mount(PANE)) as unknown as M
   await pane.press({ key: 'verify' })
   // never written: run it, and there is no script
@@ -445,4 +494,78 @@ test('while main streams, the engine is handed links and placeholders; the row i
   expect(saved.length).toBe(1)
   expect(saved[0]![1]).toBe(`# which wiki?\n\n${REPLY}\n`)
   expect(saved[0]![1]).not.toContain('Reading the four files.')
+})
+
+// ------------------------------------------------------------------------------------------------ fix rounds and answers
+
+test("an answer's file and its footer follow the corrections made for its rows", async ($, on) => {
+  const end = { rows: [{ id: 'm1', text: REPLY }], head: 'which wiki?' }
+  expect(answerFile(end, [{ old: BAD, new: FIXED, at: 1, row: 'm1' }, { old: 'dse has', new: 'x', at: 1, row: 'm0' }])).toBe(`# which wiki?\n\n${REPLY.replace(BAD, FIXED)}\n`)
+  const w = world(on)
+  w.files.set(`${CWD}/.thimble-cc-mod/corrections.json`, JSON.stringify([{ old: BAD, new: FIXED, at: 1, row: 'm1' }]))
+  await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
+  await $.turn.start({ text: 'which wiki?', turnId: 't1' } as never)
+  await appendRow($, 'm1', REPLY)
+  await $.turn.complete({ turnId: 't1', answer: REPLY, durationMs: 5, reason: 'answer' } as never)
+  // the footer counts the answer as drawn: the corrected sentence, not the red one its fix round was asked about
+  const ui = (await $.ui.mount(MESSAGE(REPLY))) as unknown as M
+  expect(await ui.find({ type: 'Text', text: /4 citations · 1 card · saved as/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /problem/ })).toBeUndefined()
+  await ui.unmount()
+})
+
+// ------------------------------------------------------------------------------------------------ panes
+
+test('a record panel says the place resolves, wraps the record and lights the quoted passage', async ($, on) => {
+  const w = world(on)
+  const long = `{"name": "Main", "body": "${'x'.repeat(10)} the quoted passage\\nis here ${'y'.repeat(200)}"}`
+  w.files.set(`${CWD}/.thimble-cc-mod/cards/ex1.json`, JSON.stringify({ id: 'ex1', kind: 'example', question: 'Which records?', examples: [{ ref: 'pages.jsonl#L3', quote: 'the quoted passage is here', note: '' }] }))
+  w.lines = [{ n: 2, text: '{}', hit: false }, { n: 3, text: long, hit: true }]
+  await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
+  const ui = (await $.ui.mount(MESSAGE(REPLY))) as unknown as M
+  await ui.post({ type: 'gesture', origin: 'o1', gestures: [{ seq: 1, gesture: 'primary', target: { kind: 'record', ref: 'pages.jsonl#L3', cardId: 'ex1', text: 'x' }, ev: PRESS }] }, { in: 'para-3' })
+  await ui.unmount()
+  await w.clock!.advance(200) // the queued check runs
+  const pane = (await $.ui.mount(PANE)) as unknown as M
+  expect(await pane.find({ type: 'Text', text: / · the place resolves$/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /the value is/ })).toBeUndefined()
+  expect(await pane.find({ type: 'Text', text: /This citation shows no value to recompute/ })).toBeDefined()
+  const lit = await pane.find({ type: 'Text', text: /^the quoted passage\\nis here$/ })
+  expect(lit).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /yyyy/ })).toBeDefined()
+  await pane.unmount()
+})
+
+test('a quoted passage is found in a record as written; a long line wraps around it', () => {
+  const line = '{"a": "caf\\u00e9 \\"one\\"\\nand two"}'
+  expect(quoteSpan(line, 'café "one" and two')).toEqual([7, line.length - 2])
+  expect(quoteSpan('plain words here', 'words')).toEqual([6, 11])
+  expect(quoteSpan('nothing', 'absent')).toBe(null)
+  const rows = wrapAround('a'.repeat(100) + 'HIT' + 'b'.repeat(100), [100, 103], 20, 3)
+  expect(rows.length).toBe(3)
+  expect(rows.some(r => r.hi && r.text.slice(r.hi[0], r.hi[1]).length > 0)).toBe(true)
+  expect(rows[0]!.text.startsWith('…')).toBe(true)
+})
+
+test('a side thread about a citation shows it as its words, never its markup', async ($, on) => {
+  world(on)
+  await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
+  const dse = citations(REPLY)[1]!
+  const ui = (await $.ui.mount(MESSAGE(REPLY))) as unknown as M
+  await ui.post({ type: 'gesture', origin: 'o1', gestures: [{ seq: 1, gesture: 'thread', target: { kind: 'citation', ref: dse.raw, claim: claimOf(REPLY, 'm1', dse.raw) }, ev: { ...PRESS, shift: true } }] }, { in: 'para-2' })
+  await ui.unmount()
+  const pane = (await $.ui.mount({ ...(PANE as object), requestId: 'thimble-thread' } as never)) as unknown as M
+  expect(await pane.find({ type: 'Text', text: /side thread about/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^13403$/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /\[\[/ })).toBeUndefined()
+  await pane.unmount()
+})
+
+test('/thimble-ask hands the keys to its pane once the prompt is empty, so a follow-up goes to the thread', async ($, on) => {
+  const w = world(on)
+  await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
+  await $.command.run({ command: 'thimble-ask', args: 'why is dse so large?' } as never)
+  await w.clock!.advance(300)
+  // opened with the keys when the command ran, and asked for them again after it
+  expect(w.opened.filter(o => o.id === 'thimble-thread' && o.focus).length).toBe(2)
 })
