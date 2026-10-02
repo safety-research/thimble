@@ -209,6 +209,8 @@ class Live:
         self.continued: tuple[str, str] | None = None  # (session, time) of the continued-in record read (_continue)
         self.came_from: dict | None = None  # {session, transcript, at} of the session this one continues (FROM_KEY)
         self.copied: tuple[set[str], float] | None = None  # what that session's records are known by (_copied)
+        self.moved_at: float | None = None  # time.monotonic() when main followed it here from that session (_continue)
+        self.reading = False  # tail_once runs for it now, so _read_now leaves it to that read
         self.task: asyncio.Task | None = None
         self.wake = asyncio.Event()
 
@@ -772,6 +774,7 @@ def _continue(lv: Live) -> None:
     if nv is None:
         return
     nv.came_from = {"session": lv.sid, "transcript": lv.transcript_path, "at": at}
+    nv.moved_at = time.monotonic()
     _take_copied(nv)
     nv.offset = 0
     _take_turn(nv, _turn_state(lv))
@@ -2028,7 +2031,10 @@ def _note_model(lv: Live, rec: dict) -> None:
 
 
 def _read_now(lv: Live) -> None:
-    """tail_once now, not at the tail's next read; a failure is left to that read, which meets it too."""
+    """tail_once now, not at the tail's next read, unless a read of it is under way (an event posted from inside that
+    read); a failure is left to that read, which meets it too."""
+    if lv.reading:
+        return
     try:
         tail_once(lv)
     except Exception:  # noqa: BLE001
@@ -2037,6 +2043,14 @@ def _read_now(lv: Live) -> None:
 
 def tail_once(lv: Live) -> None:
     """Translate what the transcript and the subagents' transcripts gained since the last read."""
+    lv.reading = True
+    try:
+        _tail_once(lv)
+    finally:
+        lv.reading = False
+
+
+def _tail_once(lv: Live) -> None:
     if not lv.transcript_path:
         lv.transcript_path = find_transcript(lv.sid, lv.config_dir)
         if lv.transcript_path:
