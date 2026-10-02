@@ -482,3 +482,30 @@ test('a pointer move repaints a diagram without laying it out again', () => {
   for (let i = 0; i < 20; i++) cardLayout(big, 76, i)
   expect(Date.now() - t).toBeLessThan(200)
 })
+
+// ------------------------------------------------------------------------------------------------ round 1: label room
+
+test('labels take the room the card has, and wrap to two lines before they are cut', () => {
+  const text = (c: CardData, cols: number) => cardLayout(c, cols, -1).lines.map(l => l.map(s => s.s).join(''))
+  const long = 'notes to other agents on time-sensitive tasks'
+  const bars: CardData = { ...BAR, rows: [{ label: long, value: 412, group: '' }, { label: 'edits', value: 30, group: '' }] }
+  expect(text(bars, 116)[0]).toContain(long)
+  expect(text(bars, 116)[0]).toMatch(/█{30}/) // the bars keep their room
+  // too long for its column: two lines, both its row's
+  const narrow = cardLayout(bars, 50, -1)
+  expect(text(bars, 50).slice(0, 2).join(' ')).toContain('time-sensitive')
+  expect([narrow.hit(0, 0), narrow.hit(0, 1), narrow.hit(0, 2)]).toEqual([0, 0, 1])
+  const first = 'save event revision_ref found in revisions and the audit log'
+  const table: CardData = { ...BAR, kind: 'table', columns: ['pattern', 'count'], rows: [[first, 312], ['short', 9]] }
+  expect(text(table, 116)[2]).toContain(first)
+  const wrapped = cardLayout(table, 40, -1)
+  expect(text(table, 40).slice(2, 4).join(' ')).toContain('audit log')
+  expect([wrapped.hit(0, 2), wrapped.hit(0, 3), wrapped.hit(0, 4)]).toEqual([0, 0, 2])
+  const note = 'Agent posts a note to the other agents about splitting the edit work before the deadline'
+  const ex: CardData = { ...BAR, kind: 'example', examples: [{ ref: 'wiki/revisions.jsonl#L12345', quote: 'the quote', note }] }
+  expect(text(ex, 116).join(' ')).toContain(note)
+  expect(text(ex, 116).join(' ')).toContain('wiki/revisions.jsonl#L12345')
+  const dg = graph('n0te', [['AgentRelent posting coordination notes', 'wiki dse', 'writes three hundred and seventeen revisions over two days, most of them reverting other agents']])
+  expect(text(dg, 116).join(' ')).toContain('AgentRelent posting coordination notes → wiki dse: writes')
+  expect(text(dg, 116).join(' ')).not.toContain('…')
+})
