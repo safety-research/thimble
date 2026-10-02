@@ -1196,6 +1196,8 @@ export interface SourceTurns {
   groups: Record<string, { title: string; first: number }>
   /** how many conversations the file holds */
   n_groups: number
+  /** the turn holding the words a cited span quotes, and those words as its text holds them */
+  cited?: { i: number; quote: string }
 }
 
 export interface SourcePage {

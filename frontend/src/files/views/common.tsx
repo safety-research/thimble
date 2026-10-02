@@ -120,7 +120,8 @@ export function useTarget(targetRef: string | undefined, path: string, rootRef: 
     if (!target || done.current === targetRef) return
     const root = rootRef.current
     if (!root) return
-    const card = root.querySelector<HTMLElement>(`.reader-card[data-line="${target.line}"]`)
+    // the card the view marks as the target, else the first standing on the line (turns of a one-line file share it)
+    const card = root.querySelector<HTMLElement>(`.reader-card.reader-target[data-line="${target.line}"]`) ?? root.querySelector<HTMLElement>(`.reader-card[data-line="${target.line}"]`)
     if (!card) return
     const blockEl = target.block != null ? card.querySelector<HTMLElement>(`.reader-block[data-block="${target.block}"]`) : null
     // centre a span's highlight rather than its block, which may be much taller than the view; a view that draws no

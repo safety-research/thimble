@@ -4,7 +4,9 @@ Claude Code registers the plugin's channel only in a session started with `--dan
 plugin:thimble@<marketplace>` (or `--channels`), and tells no child process, so `on` reads the `claude` process's
 command line (claude_pid walks up to it). THIMBLE_CHANNEL, which the `thimble` launcher exports, is the explicit signal
 and wins. An entry counts when it names this plugin copy: `plugin:thimble@inline` for a `--plugin-dir` copy,
-`plugin:thimble@<marketplace>` for an installed one.
+`plugin:thimble@<marketplace>` for an installed one, which is a copy in Claude Code's plugin cache or, for a directory
+marketplace, the plugin folder in that marketplace's own folder, which Claude Code loads in place (`marketplace` reads
+its registry for that). A background session of Claude Code's (a job its daemon runs) has no channels (`background`).
 
 Claude Code still refuses the channel after the flag for a third-party provider (Bedrock, Vertex, Foundry), for a
 login that is not a claude.ai one as `claude auth status`, run in the session's folder with its environment, reports
@@ -29,6 +31,12 @@ BG_KIND_ENV, BG_KIND = "CLAUDE_CODE_SESSION_KIND", "bg"
 PLUGIN = "thimble"
 SOURCE = "plugin:thimble:thimble"  # the `source` of the plugin server's channel events, as Claude Code shows them
 INLINE = "inline"  # the marketplace Claude Code gives a plugin loaded with --plugin-dir
+MARKETPLACE_FILE = Path(".claude-plugin") / "marketplace.json"  # in a marketplace's folder: its name and its plugins
+# Claude Code's registry, in its config dir: the marketplaces it knows with their sources, and the plugins installed
+KNOWN_MARKETPLACES = Path("plugins") / "known_marketplaces.json"
+INSTALLED_PLUGINS = Path("plugins") / "installed_plugins.json"
+DIRECTORY_SOURCE = "directory"  # the source type of a marketplace that is a local folder
+SESSIONS = "sessions"  # in Claude Code's config dir: <pid>.json for each running `claude` process, with its `kind`
 FLAGS = ("--dangerously-load-development-channels", "--channels")
 DEV_FLAG = FLAGS[0]  # the development flag skips the org's channel allowlist; `--channels` does not
 MAX_HOPS = 32  # claude_pid's walk up the process tree
@@ -85,25 +93,43 @@ def entries(args: list[str]) -> list[str]:
     return [entry for _, entry in flagged(args)]
 
 
-def marketplace(root: Path) -> str:
-    """The marketplace Claude Code loaded the plugin copy at `root` from: <marketplace> for a copy in its plugin cache,
-    `inline` for any other folder (a --plugin-dir)."""
+def marketplace(root: Path, environ: Mapping[str, str] | None = None) -> str:
+    """The marketplace Claude Code loads the plugin copy at `root` from: <marketplace> for a copy in its plugin cache;
+    for a copy in the folder of a directory marketplace, that marketplace's name when Claude Code's registry (in the
+    config dir `environ` names) has it registered from that folder and the plugin installed from it; `inline` for any
+    other folder (a --plugin-dir) or when those files cannot be read."""
     parts = Path(root).parts
     if len(parts) >= 5 and parts[-5:-3] == ("plugins", "cache") and parts[-2] == PLUGIN:
         return parts[-3]
+    try:
+        folder = Path(root).parent.resolve()
+        name = (_read(folder / MARKETPLACE_FILE) or {}).get("name")
+        if not (isinstance(name, str) and name):
+            return INLINE
+        known = (_read(config_dir(environ) / KNOWN_MARKETPLACES) or {}).get(name)
+        source = known.get("source") if isinstance(known, dict) else None
+        if not (isinstance(source, dict) and source.get("source") == DIRECTORY_SOURCE):
+            return INLINE
+        path = source.get("path")
+        installed = (_read(config_dir(environ) / INSTALLED_PLUGINS) or {}).get("plugins")
+        if (isinstance(path, str) and Path(path).is_absolute() and Path(path).resolve() == folder
+                and isinstance(installed, dict) and f"{PLUGIN}@{name}" in installed):
+            return name
+    except (OSError, ValueError, RuntimeError):
+        pass
     return INLINE
 
 
-def channel(root: Path) -> str:
+def channel(root: Path, environ: Mapping[str, str] | None = None) -> str:
     """The channel entry that loads the plugin copy at `root`: `plugin:thimble@<marketplace>`."""
-    return f"plugin:{PLUGIN}@{marketplace(root)}"
+    return f"plugin:{PLUGIN}@{marketplace(root, environ)}"
 
 
 def claude_pid(environ: Mapping[str, str] | None = None) -> int | None:
     """The `claude` process a command Claude Code started runs under (module note); None when no ancestor is one."""
     env = os.environ if environ is None else environ
     named = env.get("CLAUDE_PID") or ""
-    sessions = Path(env.get("CLAUDE_CONFIG_DIR") or (Path.home() / ".claude")) / "sessions"
+    sessions = config_dir(env) / SESSIONS
     pid: int | None = os.getppid()
     for _ in range(MAX_HOPS):
         if pid is None or pid <= 1:
@@ -124,7 +150,7 @@ def flags(pid: int | None, root: Path, environ: Mapping[str, str] | None = None)
         return {DEV_FLAG}
     if pid is None:
         return set()
-    entry = channel(root)
+    entry = channel(root, env)
     return {flag for flag, e in flagged(procs.argv(pid)) if e == entry}
 
 
@@ -133,6 +159,15 @@ def on(pid: int | None, root: Path, environ: Mapping[str, str] | None = None) ->
     THIMBLE_CHANNEL is set, or that process's command line names the copy's channel entry (module note). Whether Claude
     Code then loads the channel is `delivery`'s question."""
     return bool(flags(pid, root, environ))
+
+
+def background(pid: int | None, environ: Mapping[str, str] | None = None) -> bool:
+    """Whether the `claude` process `pid` runs a background session of Claude Code's (a job its daemon runs): the
+    environment says so (BG_KIND_ENV), or the state file Claude Code keeps for that process gives its `kind` as one."""
+    env = os.environ if environ is None else environ
+    if env.get(BG_KIND_ENV) == BG_KIND:
+        return True
+    return pid is not None and (_read(config_dir(env) / SESSIONS / f"{pid}.json") or {}).get("kind") == BG_KIND
 
 
 # --------------------------------------------------------------------------- what Claude Code refuses after the flag
@@ -205,7 +240,8 @@ def channels_blocked(root: Path, named: set[str], environ: Mapping[str, str] | N
             return ORG
     if named and DEV_FLAG not in named:
         listed = (tier or {}).get("allowedChannelPlugins")
-        if not any(isinstance(p, dict) and p.get("plugin") == PLUGIN and p.get("marketplace") == marketplace(root)
+        mkt = marketplace(root, env)
+        if not any(isinstance(p, dict) and p.get("plugin") == PLUGIN and p.get("marketplace") == mkt
                    for p in (listed if isinstance(listed, list) else [])):
             return ORG
     return ""
@@ -219,7 +255,7 @@ def hooks_blocked(cwd: Path, root: Path, environ: Mapping[str, str] | None = Non
         return True
     if tier.get("allowManagedHooksOnly") is True:
         enabled = tier.get("enabledPlugins")
-        if not (isinstance(enabled, dict) and enabled.get(f"{PLUGIN}@{marketplace(root)}") is True):
+        if not (isinstance(enabled, dict) and enabled.get(f"{PLUGIN}@{marketplace(root, environ)}") is True):
             return True
     value = None
     for path in (config_dir(environ) / USER_SETTINGS, *(Path(cwd) / p for p in PROJECT_SETTINGS)):

@@ -166,10 +166,13 @@ def connected_workspaces() -> list[str]:
 
 
 def reachable(c: str) -> bool:
-    """Whether an event posted now reaches a session: a channel's subscription, or one of the session that is main.
-    Another `claude` in the folder subscribes on the hook route too, and never gets main's events (_publish)."""
+    """Whether an event posted now reaches a session: a channel's subscription, or one of the session that is main, or
+    a session main just continued in whose shim has not subscribed yet (_awaits_shim). Another `claude` in the folder
+    subscribes on the hook route too, and never gets main's events, nor does a parked session (_publish)."""
+    _read_main(c)
     main = _main_sid(c)
-    return any(_route(q)[1] == cc_channel.CHANNEL or (main and _route(q)[0] == main) for q in _subs.get(c, ()))
+    return _awaits_shim(c) or any(_route(q)[1] == cc_channel.CHANNEL or (main and _route(q)[0] == main)
+                                  for q in _live_subs(c, main))
 
 
 def _attr_key(key: str) -> str:
@@ -431,17 +434,56 @@ def _main_sid(c: str) -> str | None:
     return lv.sid if lv is not None else None
 
 
+def _read_main(c: str) -> None:
+    """Read main's transcript now, so that a session it continued in is main before an event picks its recipients."""
+    from . import session  # noqa: PLC0415
+
+    lv = session.current(c)
+    if lv is not None:
+        session._read_now(lv)
+
+
+def _live_subs(c: str, main: str | None) -> list[asyncio.Queue]:
+    """The workspace's subscriptions but those of parked sessions (session._parked), which never get an event."""
+    from . import session  # noqa: PLC0415
+
+    def parked(sid: str | None) -> bool:
+        return bool(sid) and sid != main and session._parked(c, str(sid))
+
+    return [q for q in _subs.get(c, ()) if not parked(_route(q)[0])]
+
+
+def _awaits_shim(c: str) -> bool:
+    """Whether main is a session it continued in less than session.GRACE_S ago (session._continue) whose shim has not
+    subscribed yet: its events wait in its queue (_pending) for its watcher's pull or its channel's subscription."""
+    from . import session  # noqa: PLC0415
+
+    lv = session.current(c)
+    return (lv is not None and lv.came_from is not None and lv.moved_at is not None
+            and time.monotonic() - lv.moved_at < session.GRACE_S
+            and not any(_route(q)[0] == lv.sid for q in _subs.get(c, ())))
+
+
 def _publish(c: str, note: dict[str, Any]) -> int:
-    """Hand the notification to the subscriptions of the session that is main when it has any, else to every channel's. A
-    channel's gets it on its stream; a session on the hook or Monitor route gets it queued for the watcher. Returns the
+    """Hand the notification to the subscriptions of the session that is main when it has any, else to every channel's
+    but a parked session's. A channel's gets it on its stream; a session on the hook or Monitor route gets it queued for
+    the watcher, as does a session main just continued in whose shim has not subscribed yet (_awaits_shim). Returns the
     number reached."""
-    subs = list(_subs.get(c, ()))
+    _read_main(c)
     main = _main_sid(c)
+    subs = _live_subs(c, main)
     mine = [q for q in subs if main and _route(q)[0] == main]
-    if held(c) and (mine or any(_route(q)[1] == cc_channel.CHANNEL for q in subs)):
+    awaited = main if not mine and _awaits_shim(c) else None
+    if held(c) and (mine or awaited or any(_route(q)[1] == cc_channel.CHANNEL for q in subs)):
         riders = pop_held(c)
         note = {**note, "content": f"{note.get('content') or ''}\n\n{meanwhile(riders)}",
                 "terminal": _joined([note, *riders])}
+    if awaited:
+        _pending.setdefault((c, awaited), deque()).append(note)
+        _wake(c)
+        log.info("%s: event %s kind=%s waits for session %s's shim", c, (note.get("meta") or {}).get("event"),
+                 (note.get("meta") or {}).get("kind"), awaited)
+        return 1
     n = 0
     queued: set[str] = set()
     for q in mine or [q for q in subs if _route(q)[1] == cc_channel.CHANNEL]:
@@ -567,10 +609,13 @@ async def session_route(c: str, body: SessionBody) -> dict[str, Any]:
         corpus = config.corpus_dir(c)
     except ValueError as e:
         raise HTTPException(404, str(e)) from e
+    _read_main(c)  # a session main continued in is main already, so naming it takes over from none
     before = session.current(c)
     # a session another terminal runs, whose shim is still subscribed, stops hearing the browser: /thimble says so
     replaced = before.sid if before is not None and before.sid != body.session and listening(c, before.sid) else None
     lv = session.attach(c, body.session, body.cwd or str(corpus))
+    if replaced and session._parked(c, replaced):  # it waits parked and is never main again (session.may_return)
+        replaced = None
     return {"attached": bool(lv), "session": body.session, "listening": listening(c), "replaced": replaced}
 
 
@@ -634,6 +679,9 @@ async def subscribe(request: Request, cwd: str, session: str | None = None, pid:
     _subs.setdefault(c, set()).add(q)
     _routes[q] = (session or None, delivery)
     session_mod.connected(c, session, cwd, pid, config_dir, claim=delivery == cc_channel.CHANNEL)
+    if session and delivery == cc_channel.CHANNEL:  # the events that waited for this session, in the order posted
+        for note in _pending.pop((c, session), ()):
+            q.put_nowait({"content": note.get("content"), "meta": note.get("meta")})
     _wake(c)  # a watcher of this session's that waits learns it delivers by channel now
     from . import extensions  # noqa: PLC0415
 

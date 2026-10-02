@@ -1,6 +1,6 @@
 [project]
 name = "thimble-backend"
-version = "0.4.0"
+version = "0.4.1"
 license = "Apache-2.0"
 description = "thimble: an analyst workbench for reconstructing what happened in agent transcripts"
 requires-python = ">=3.12"

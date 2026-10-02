@@ -5,8 +5,11 @@ A session attaches when its MCP shim subscribes to the channel naming it or when
 session is main per workspace, kept in `workspaces/<c>/sessions.json` with the tail's cursor and each subagent's place,
 so a restarted server reads on where it stopped. The channel subscription is the session's liveness: with no
 subscriber for GRACE_S the session detaches. /clear and /resume switch sessions in the same process, and main follows
-the new id by pid (_follow). When main's session ends and none takes over, everything thimble runs for the workspace
-stops (agents.stop_all), and once no workspace has a main session the server stops itself (cli.stop_self).
+the new id by pid (_follow). When Claude Code moves the session into a background job, its transcript ends with a
+`continued-in` record naming the job's session, which copied the conversation and runs in its own process: main follows
+it there (_continue), and the session it left, parked in its old process, is never main again by its shim (_parked).
+When main's session ends and none takes over, everything thimble runs for the workspace stops (agents.stop_all), and
+once no workspace has a main session the server stops itself (cli.stop_self).
 
 The tail translates transcript records into main's log (`by: terminal`): the analyst's lines (not /thimble's own turn
 or local commands such as /model), channel events, task notifications, peer messages, tool calls and results, text,
@@ -203,6 +206,11 @@ class Live:
         self.subs: list[Sub] = []
         self.sub_paths: set[str] = set()
         self.pending_paths: dict[str, int] = {}
+        self.continued: tuple[str, str] | None = None  # (session, time) of the continued-in record read (_continue)
+        self.came_from: dict | None = None  # {session, transcript, at} of the session this one continues (FROM_KEY)
+        self.copied: tuple[set[str], float] | None = None  # what that session's records are known by (_copied)
+        self.moved_at: float | None = None  # time.monotonic() when main followed it here from that session (_continue)
+        self.reading = False  # tail_once runs for it now, so _read_now leaves it to that read
         self.task: asyncio.Task | None = None
         self.wake = asyncio.Event()
 
@@ -235,6 +243,10 @@ SHIM_PIDS_KEPT = 256  # _shim_pids and _shim_configs keep the newest this many
 STAMP_LINES = 200  # _began_since looks this far into a transcript for its first record with a timestamp
 CURSOR_CALLS = 200  # the cursor keeps the names of main's newest this many tool calls, for results that come later
 SUBS_KEY = "subs"  # sessions.json: each followed subagent transcript's place, by its path (_sub_places)
+CONTINUED = "continued"  # sessions.json's reason for a session that continued in another (_continue)
+FROM_KEY = "continues"  # sessions.json: {session, transcript, at} of the session this one continues (_continue)
+CONTINUED_TAIL = 1_048_576  # bytes at a transcript's end where _continued_in looks for its continued-in record
+UUID_RE = re.compile(rb'"uuid":\s*"([^"\\]+)"')
 
 
 # --------------------------------------------------------------------------- sessions.json
@@ -260,7 +272,8 @@ def _persist(lv: Live, *, keep_subs: bool = True) -> None:
     cursor, subs = old.get("cursor"), old.get(SUBS_KEY) if keep_subs else None
     d[lv.sid] = {"session": lv.sid, "cwd": lv.cwd, "transcript_path": lv.transcript_path, "pid": lv.pid, "since": lv.since,
                  **({"config_dir": lv.config or ""} if lv.config_known else {}),
-                 **({"cursor": cursor} if cursor else {}), **({SUBS_KEY: subs} if isinstance(subs, dict) else {})}
+                 **({"cursor": cursor} if cursor else {}), **({SUBS_KEY: subs} if isinstance(subs, dict) else {}),
+                 **({FROM_KEY: lv.came_from} if lv.came_from else {})}
     atomic_write_text(_sessions_path(lv.c), json.dumps(d, indent=1))
 
 
@@ -286,12 +299,7 @@ def _save_cursor(lv: Live) -> None:
     if not isinstance(rec, dict):
         return
     if main_moved:
-        names = dict(list(lv.tool_names.items())[-CURSOR_CALLS:])
-        rec["cursor"] = {"transcript": lv.transcript_path, "offset": at, "turn_open": lv.turn_open, "fresh": lv.fresh,
-                         "wrote": lv.wrote, "tool_names": names, "hidden": [i for i in lv.hidden if i in names],
-                         "seen": [k for k in lv.seen if k.split(":", 1)[-1] in names],
-                         "watch_calls": [i for i in lv.watch_calls if i in names], "sends": lv.sends,
-                         "turn_threads": lv.turn_threads, "forked": sorted(lv.forked)}
+        rec["cursor"] = {"transcript": lv.transcript_path, "offset": at, **_turn_state(lv)}
     # kept even when empty: a record with places says that a file it names no place for was never read (_restore_subs)
     rec[SUBS_KEY] = places
     atomic_write_text(_sessions_path(lv.c), json.dumps(d, indent=1))
@@ -325,6 +333,21 @@ def _restore_cursor(lv: Live, cur: Any) -> None:
     if not isinstance(at, int) or isinstance(at, bool) or at < 0 or at > _size(Path(lv.transcript_path)):
         return
     lv.offset = lv.saved = at
+    _take_turn(lv, cur)
+
+
+def _turn_state(lv: Live) -> dict:
+    """The open turn's state, as the cursor keeps it, with the names of main's newest CURSOR_CALLS tool calls."""
+    names = dict(list(lv.tool_names.items())[-CURSOR_CALLS:])
+    return {"turn_open": lv.turn_open, "fresh": lv.fresh, "wrote": lv.wrote, "tool_names": names,
+            "hidden": [i for i in lv.hidden if i in names],
+            "seen": [k for k in lv.seen if k.split(":", 1)[-1] in names],
+            "watch_calls": [i for i in lv.watch_calls if i in names], "sends": lv.sends,
+            "turn_threads": lv.turn_threads, "forked": sorted(lv.forked)}
+
+
+def _take_turn(lv: Live, cur: dict) -> None:
+    """Go on with the turn state `cur` holds (_turn_state)."""
     lv.turn_open, lv.fresh, lv.wrote = bool(cur.get("turn_open")), bool(cur.get("fresh")), bool(cur.get("wrote"))
     lv.tool_names = {str(k): str(v) for k, v in (cur.get("tool_names") or {}).items()}
     lv.hidden = {str(i) for i in cur.get("hidden") or []}
@@ -421,6 +444,11 @@ def attach(c: str, sid: Any, cwd: Any, transcript_path: str | None = None, pid: 
     if restored:
         lv.since = str(stored.get("since") or lv.since)
         _restore_cursor(lv, stored.get("cursor"))
+        if isinstance(stored.get(FROM_KEY), dict):  # read on, from its start when no cursor was kept, without the copy
+            lv.came_from = stored[FROM_KEY]
+            _take_copied(lv)
+            lv.offset = max(lv.offset, 0)
+        lv.continued = _continued_in(lv.transcript_path)  # it moved while no server followed it: tail_once follows
     # A session followed before comes back under the same id when resumed, so its subagents' and forks' transcripts are
     # picked up where they stand rather than read from their start.
     _restore_subs(lv, stored.get(SUBS_KEY), revive=restored)
@@ -625,14 +653,21 @@ def detach(c: str, sid: str, reason: str | None = None) -> bool:
 def connected(c: str, sid: str | None, cwd: str, pid: int | None, config_dir: str | None = None, *,
               claim: bool = True) -> None:
     """A shim subscribed, naming its session's `claude` pid and CLAUDE_CONFIG_DIR. On the channel (`claim`) the session it
-    names is main. On the hook and Monitor routes only /thimble makes a session main, so a subscription attaches only the
-    current (or last) main, or a new session in main's own `claude` process (`pid`), which main follows (_follow)."""
+    names is main, unless it continued in another session and waits parked (_parked). On the hook and Monitor routes
+    only /thimble makes a session main, so a subscription attaches only the current (or last) main, or a new session in
+    main's own `claude` process (`pid`), which main follows (_follow). Main's transcript is read first, so a session
+    main continues in is main before its subscription is weighed (_continue, _moved_main)."""
     for table, value in ((_shim_pids, pid), (_shim_configs, config_dir)):
         if sid and value is not None:
             table.pop((c, sid), None)
             table[(c, sid)] = value
             while len(table) > SHIM_PIDS_KEPT:
                 table.pop(next(iter(table)))
+    lv = _live.get(c) or (_moved_main(c, sid) if sid else None)
+    if sid and lv is not None and lv.sid != sid:
+        _read_now(lv)
+    if claim and sid and _parked(c, sid):
+        claim = False
     old = None
     if not claim:
         held = ((agents.meta_or_none(c, agents.MAIN_ID) or {}).get("attached") or {}).get("session")
@@ -655,6 +690,16 @@ def connected(c: str, sid: str | None, cwd: str, pid: int | None, config_dir: st
         attach(c, sid, cwd, None, pid)
 
 
+def _moved_main(c: str, sid: str) -> Live | None:
+    """After a restart, before main's own shim came back: the session main's meta names, attached again when its
+    transcript ends with a continued-in record naming `sid`, so that its first read follows it (_continue)."""
+    held = ((agents.meta_or_none(c, agents.MAIN_ID) or {}).get("attached") or {}).get("session")
+    rec = sessions(c).get(str(held)) if held else None
+    if not rec or rec.get("ended") or (_continued_in(rec.get("transcript_path")) or ("",))[0] != sid:
+        return None
+    return attach(c, held, str(rec.get("cwd") or ""), rec.get("transcript_path"))
+
+
 def main_pid(c: str) -> int | None:
     """The pid of the `claude` process main's session runs in: what its shim reported, else (after a restart, before
     that shim came back) what sessions.json recorded for the session main's meta names."""
@@ -672,11 +717,16 @@ def main_pid(c: str) -> int | None:
 
 def may_follow(c: str, sid: str, pid: int | None) -> bool:
     """Whether a watcher of non-main session `sid` waits rather than stops: it runs in main's process and is a session
-    main
-    will follow (a new /clear session, or one /resume brought back)."""
-    if not pid or pid != main_pid(c):
+    main will follow (a new /clear session, or one /resume brought back), or main's transcript, read now, made it main
+    (_continue)."""
+    if not pid:
         return False
     cur = _live.get(c)
+    if pid != main_pid(c):
+        if cur is not None:
+            _read_now(cur)
+        now = _live.get(c)
+        return now is not None and now.sid == sid
     state = _read_state(_sessions_dir(cur.config_dir if cur is not None else None) / f"{pid}.json")
     return sid not in sessions(c) or state.get("sessionId") == sid
 
@@ -703,6 +753,44 @@ def _follow(c: str, old: str, new: str, cwd: str, pid: int | None, config_dir: s
     lv.watch_tasks |= tasks
     channel.move_events(c, old, new)
     log.info("%s: session %s follows %s in the same process (pid %s)", c, new, old, pid)
+
+
+def _continue(lv: Live) -> None:
+    """Main's session continues in the session its continued-in record names (`lv.continued`): Claude Code moved it into
+    a background job, whose session copied the conversation into a transcript beside this one's and runs in its own
+    process. That session becomes main in this one's place, by the pid its shim reported (attach), read from its
+    transcript's start without the records it copied (_copied), with the turn in progress, main's subagents and threads'
+    forks still at work (threads.fork_moved) and the events queued for this one (channel.move_events). This one ends as
+    CONTINUED: thimble's agents go on, and its shim, in the parked process, does not make it main again (_parked)."""
+    from . import channel  # noqa: PLC0415
+
+    c, (new, at) = lv.c, lv.continued
+    config_dir = _shim_configs.get((c, new), (lv.config or "") if lv.config_known else None)
+    carried = [s for s in lv.subs if not s.done]  # the job runs them on, so detach ends none of them
+    lv.subs = [s for s in lv.subs if s not in carried]
+    for tid in {s.chat for s in carried if s.thread} | threads.awaiting_in(c, lv.sid):
+        threads.fork_moved(c, tid, lv.sid, new)
+    detach(c, lv.sid, CONTINUED)
+    nv = attach(c, new, lv.cwd, str(Path(str(lv.transcript_path)).with_name(f"{new}.jsonl")), None, config_dir)
+    if nv is None:
+        return
+    nv.came_from = {"session": lv.sid, "transcript": lv.transcript_path, "at": at}
+    nv.moved_at = time.monotonic()
+    _take_copied(nv)
+    nv.offset = 0
+    _take_turn(nv, _turn_state(lv))
+    nv.watch_tasks |= lv.watch_tasks
+    moved = {s.chat for s in carried if s.thread}
+    for sub in [s for s in nv.subs if s.thread and s.chat in moved]:  # attach found the moved forks, as finished ones
+        nv.subs.remove(sub)
+        nv.sub_paths.discard(str(sub.path))
+    nv.subs += carried
+    for chat in {s.chat for s in carried if not s.proxy and not s.thread}:  # a restarted server finds it under the job
+        agents.update_agent(c, chat, session=new)
+    _persist(nv)
+    _save_cursor(nv)
+    channel.move_events(c, lv.sid, new)
+    log.info("%s: session %s continues in session %s (pid %s)", c, lv.sid, new, nv.pid)
 
 
 def disconnected(c: str, sid: str | None) -> None:
@@ -783,11 +871,20 @@ async def _stop_server() -> None:
 
 
 def may_return(c: str, sid: str) -> bool:
-    """Whether session `sid` is main again when main's session ends (_hand_back): another session replaced it and its
-    shim is still subscribed."""
+    """Whether session `sid` is main again when main's session ends (_hand_back): another session replaced it, its shim
+    is still subscribed, and it is not parked (_parked)."""
     from . import channel  # noqa: PLC0415
 
-    return (sessions(c).get(sid) or {}).get("reason") == "replaced" and sid in channel.subscribed_sessions(c)
+    return ((sessions(c).get(sid) or {}).get("reason") == "replaced" and sid in channel.subscribed_sessions(c)
+            and not _parked(c, sid))
+
+
+def _parked(c: str, sid: str) -> bool:
+    """Whether session `sid` ended by continuing in another session and has not gone on since: its transcript ends with
+    the continued-in record (_continued_in). Its process waits parked, and its shim's subscription makes it main neither
+    by claiming main (connected) nor when main ends (may_return)."""
+    rec = sessions(c).get(sid) or {}
+    return bool(rec.get("ended")) and _continued_in(rec.get("transcript_path")) is not None
 
 
 def _hand_back(c: str, gone: str) -> None:
@@ -1592,10 +1689,10 @@ def _channel_module() -> Any:
     return channel
 
 
-def _stamp(line: bytes | str) -> float:
+def _stamp(line: bytes | str | dict) -> float:
     """A transcript record's `timestamp` as time.time() counts it; 0.0 when it has none."""
     try:
-        ts = json.loads(line).get("timestamp")
+        ts = (line if isinstance(line, dict) else json.loads(line)).get("timestamp")
         return datetime.fromisoformat(str(ts).replace("Z", "+00:00")).timestamp() if ts else 0.0
     except (ValueError, TypeError, AttributeError):
         return 0.0
@@ -1620,6 +1717,48 @@ def _began_since(path: str | None, since: str | None) -> bool:
     except OSError:
         pass
     return True
+
+
+def _take_copied(lv: Live) -> None:
+    """Keep on `lv` what tells the records its session copied from the session it continues (Live.came_from): the copies
+    keep their uuids and their times, so the uuids of that session's transcript, and the time it continued (_copied)."""
+    src = lv.came_from or {}
+    uuids: set[str] = set()
+    with contextlib.suppress(OSError, TypeError):
+        with open(src.get("transcript"), "rb") as f:
+            uuids = {m.group(1).decode() for line in f for m in UUID_RE.finditer(line)}
+    lv.copied = (uuids, _stamp({"timestamp": src.get("at")}))
+
+
+def _copied(copied: tuple[set[str], float], rec: dict) -> bool:
+    """Whether a record is one its session copied from the session it continues (_take_copied): its uuid is one of that
+    session's. Only a record with no uuid is judged by its time, a copy when stamped no later than the moment the session
+    continued, so a record the session writes itself in that same millisecond is still its own."""
+    uuids, at = copied
+    uuid = str(rec.get("uuid") or "")
+    return uuid in uuids if uuid else 0 < _stamp(rec) <= at
+
+
+def _continued_in(path: str | None) -> tuple[str, str] | None:
+    """(session, time) of the continued-in record a transcript ends with, when only records with no uuid (Claude Code's
+    queue of the events the parked session never reads) follow it, within its last CONTINUED_TAIL bytes; else None."""
+    try:
+        with open(path, "rb") as f:  # type: ignore[arg-type]
+            f.seek(max(0, _size(Path(path)) - CONTINUED_TAIL))  # type: ignore[arg-type]
+            data = f.read()
+    except (OSError, TypeError):
+        return None
+    for line in reversed(data.split(b"\n")):
+        try:
+            rec = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(rec, dict) or rec.get("uuid"):
+            return None
+        new = str(rec.get("continuedInSessionId") or "")
+        if rec.get("type") == "continued-in" and SID_RE.match(new):
+            return new, str(rec.get("timestamp") or "")
+    return None
 
 
 def _typed(rec: dict) -> str | None:
@@ -1761,7 +1900,12 @@ def translate(lv: Live, line: bytes | str) -> None:
     shapes do not cover."""
     rec = _load(line)
     t = rec.get("type")
-    if rec.get("isSidechain"):
+    if rec.get("isSidechain") or (lv.copied is not None and _copied(lv.copied, rec)):
+        return
+    if t == "continued-in":
+        new = str(rec.get("continuedInSessionId") or "")
+        if SID_RE.match(new) and new != lv.sid:
+            lv.continued = (new, str(rec.get("timestamp") or ""))
         return
     origin = (rec.get("origin") or {}).get("kind") if isinstance(rec.get("origin"), dict) else None
     if t == "user":
@@ -1893,13 +2037,35 @@ def _note_model(lv: Live, rec: dict) -> None:
         agents.notify(lv.c, agents.MAIN_ID)
 
 
+def _read_now(lv: Live) -> None:
+    """tail_once now, not at the tail's next read, unless a read of it is under way (an event posted from inside that
+    read); a failure is left to that read, which meets it too."""
+    if lv.reading:
+        return
+    try:
+        tail_once(lv)
+    except Exception:  # noqa: BLE001
+        log.debug("%s: session %s was not read now", lv.c, lv.sid, exc_info=True)
+
+
 def tail_once(lv: Live) -> None:
     """Translate what the transcript and the subagents' transcripts gained since the last read."""
+    lv.reading = True
+    try:
+        _tail_once(lv)
+    finally:
+        lv.reading = False
+
+
+def _tail_once(lv: Live) -> None:
     if not lv.transcript_path:
         lv.transcript_path = find_transcript(lv.sid, lv.config_dir)
         if lv.transcript_path:
             _persist(lv)
     _tail_main(lv)
+    if lv.continued and lv.continued[0] != lv.sid:
+        _continue(lv)
+        return
     if lv.transcript_path and (lv.busy or lv.pending_paths):
         _scan_subs(lv)
     for sub in lv.subs:
