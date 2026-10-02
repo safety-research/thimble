@@ -7,15 +7,14 @@ import type { ClientModule } from 'claude-code'
 
 import { cardLayout, cut, width } from './draw'
 import type { CardData, CardMeta, Item, Line, Seg } from './draw'
-import { onPointer } from './gestures'
-import type { PointerEv, Target } from './gestures'
+import { onPointer, send } from './gestures'
+import type { Target } from './gestures'
 import { COLORS, paintLine } from './paint'
 
 type Props = { card: CardData; cols: number; plotRows?: number; debug?: boolean; meta?: CardMeta; pane?: boolean }
-type S = { hover: number; act: string; downAt: number; downKey: string }
+type S = { hover: number; act: string }
 
 const PAD_X = 2 // border and padding on the left
-const DOUBLE_MS = 400
 
 type Hot = { x0: number; x1: number; param: string; value: string }
 
@@ -64,7 +63,7 @@ const Card: ClientModule<Props, S> = (props, surface) => {
   const { Box, Text } = surface.elements
   const cols = surface.columns || props.cols || 80
   const inner = Math.max(20, cols - 4)
-  const fresh: S = { hover: -1, act: '', downAt: 0, downKey: '' }
+  const fresh: S = { hover: -1, act: '' }
   const st = surface.state ?? fresh
   const card = props.card
   const meta = props.meta ?? {}
@@ -89,15 +88,11 @@ const Card: ClientModule<Props, S> = (props, surface) => {
     const plain = !ev.shift && !ev.ctrl && !ev.alt
     if (ev.type === 'down' || ev.type === 'up') {
       if (hot && plain && (ev.button ?? 'left') === 'left') {
-        if (ev.type === 'down') surface.post({ type: 'param', card: card.id, name: hot.param, value: hot.value })
+        if (ev.type === 'down') send(surface, { type: 'param', card: card.id, name: hot.param, value: hot.value })
         return
       }
-      const key = i >= 0 ? `i${i}` : 'card'
-      const now = Date.now()
-      const double = ev.type === 'down' && cur.downKey === key && now - cur.downAt < DOUBLE_MS
-      const pe: PointerEv = { button: ev.button ?? 'left', shift: Boolean(ev.shift), ctrl: Boolean(ev.ctrl), alt: Boolean(ev.alt), type: ev.type === 'up' ? 'release' : double ? 'double' : 'press' }
-      onPointer(targetAt(i), pe, surface)
-      if (ev.type === 'down') surface.setState({ ...cur, hover: i, act, downAt: double ? 0 : now, downKey: key })
+      onPointer(targetAt(i), ev, surface)
+      if (ev.type === 'down' && (i !== cur.hover || act !== cur.act)) surface.setState({ ...cur, hover: i, act })
       return
     }
     if (i !== cur.hover || act !== cur.act) surface.setState({ ...cur, hover: i, act })

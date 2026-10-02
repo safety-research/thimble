@@ -43,10 +43,6 @@ export type Item = { label: string; value: string; cite: string; open: string; k
 
 export type Layout = { lines: Line[]; items: Item[]; hit: (x: number, y: number) => number }
 
-export function statusColor(status: string): string {
-  return COLORS.chip[status] ?? COLORS.chip.pending!
-}
-
 // ---------------------------------------------------------------------------------------- text width
 
 export function cw(ch: string): number {

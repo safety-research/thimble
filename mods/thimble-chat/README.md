@@ -34,44 +34,58 @@ one- or two-sentence takeaway when one chart or table answers the question, or s
 paragraphs for a question that takes several steps, such as a why question.
 
 - **Cards.** Claude computes every number with a Python script under `.thimble-chat/scripts/`, which ends by writing
-  a card: a bar chart, line chart, timeline, table, quoted example records, or a diagram (boxes joined by arrows, its
-  long edge labels as numbered notes under it). The card is written to the session's folder wherever the script runs,
-  and the mod draws it where the reply places it: its question, its choices if it has any (such as `by  wiki  label`;
-  picking one reruns the script with it), and the chart. The mark under the pointer is highlighted and its value shows
-  at the right of the question. Colours follow Claude Code's theme (light, dark, daltonized, ANSI); chart colours keep
-  3:1 contrast on light and dark backgrounds.
-- **Citations.** Every citation `[[value|place]]` is drawn as an underlined link. A place can be file lines, a CSV row,
-  a JSON value, a SQLite row, a card value or lines of a Bash output. The mod checks each one; a citation is red when
-  the place does not exist or the value is not there. When a reply has red citations or a card that does not validate,
-  a subagent forked from Claude corrects them out of the main conversation: a red citation shows a spinner while it
-  works, each corrected sentence is redrawn in place and marked *(corrected)*, and Claude is told in a note you do not
-  see. A citation the subagent could not fix stays red with "⚠ couldn't fix"; its hover and panel say why.
-- **Panels.** The citation panel shows the cited lines with the value marked, or the card with the cited row marked.
-  Panels dock on the right in the fullscreen view at 110 or more columns, and open above the prompt otherwise.
-- **Side threads.** "? ask" on a card, `a` in the citation panel, or `/thimble-ask <question>` opens a side thread: a
-  forked subagent answers in a panel, and nothing is added to the main conversation. `m` puts the thread's one-line
-  result into the prompt, for you to send or not.
-- **Verification scripts.** `w` in the citation panel has a forked subagent write a standalone script that recomputes
-  the cited value from the raw files, without the answer's code. The mod runs the script, shows it and its output in
-  the panel, and marks the citation ✓ if it recomputed the value or ✗ if not.
+  a card to the session's `.thimble-chat/cards/`, wherever the script runs. The kinds are bar, line, timeline, table,
+  example records and diagram (boxes joined by arrows in layers; an edge label over 24 characters becomes a numbered
+  note under the drawing). A card shows its question, its choices if it has any (picking one reruns the script), and
+  the chart. The mark under the pointer is highlighted and its value shows beside the question. Colours follow Claude
+  Code's theme; chart colours keep 3:1 contrast on light and dark backgrounds.
+- **Citations.** Every citation `[[value|place]]` is an underlined link. A place can be file lines, a CSV row, a JSON
+  value, a SQLite row, a card value or lines of a Bash output. The mod checks each one, and a citation is red when the
+  place does not exist or the value is not there. A subagent forked from Claude fixes red citations and cards that
+  cannot be drawn, outside the main conversation: a spinner shows beside a red citation while it works, each corrected
+  sentence is redrawn in place and marked *(corrected)*, and Claude gets a note you do not see. A citation it could not
+  fix stays red with "⚠ couldn't fix", and its tip and panel say why.
+- **Verification.** "verify" (in the menu, or `w` in the citation panel) has a forked subagent write a standalone
+  script that recomputes the value from the raw files. The mod runs it, shows the script and its output in the panel,
+  and puts ✓ or ✗ after the citation.
+- **Side threads.** shift+click on anything, "ask about this" in the menu, or `/thimble-ask <question>` opens a side
+  thread: a forked subagent answers in a panel, and nothing is added to the main conversation. `m` puts the thread's
+  one-line result into the prompt. Each subagent the mod starts shows in the main chat as one dim line at most.
 
-Commands: `/thimble-card <n>` (the last answer's n-th card in a panel), `/thimble-cite <n>` (the last answer's n-th citation),
+## Gestures
+
+The same on every target: a card, a bar, point or cell, a sentence of a reply, a citation, a table row, an example
+record, a diagram node.
+
+| Gesture | Does |
+| --- | --- |
+| click | opens the place the target cites (a chart value has none: it is selected) |
+| double-click | puts the target's citation into the prompt (a sentence: quoted) |
+| shift+click | opens a side thread about the target (also ctrl+click and middle-click, where the terminal reports them) |
+| right-click | a menu: open, ask about this, verify, open the script, rerun, cite (a letter key each; Esc closes) |
+
+If a gesture misbehaves, start Claude Code with `THIMBLE_CHAT_DEBUG=1` and send `.thimble-chat/mouse.log`: one line per
+press and release the mod received, with its button, modifiers, gesture and target.
+
+Commands: `/thimble-card <n>` (the last answer's n-th card in a panel), `/thimble-cite <n>` (its n-th citation),
 `/thimble-check` (check the last answer again), `/thimble-ask <question>`, `/thimble-band` (a row above the prompt
 listing the last answer's citations, opened with the digits 1-9), `/thimble-chat` (status).
 
 The mod and Claude write only under `.thimble-chat/` in the folder: scripts, cards, answers, side threads,
 verification scripts, corrections and saved Bash outputs.
 
-Display: hover and clicks need Claude Code's fullscreen view (`/tui fullscreen`); without it the cards and citations are
-drawn but do not respond to the mouse. iTerm2 shows the colours in full; macOS Terminal shows 256 colours. In
-tmux, set `set -g mouse on`, and `CLAUDE_CODE_TMUX_TRUECOLOR=1` for full colour.
+Display: the mouse needs Claude Code's fullscreen view (`/tui fullscreen`); without it cards and citations are drawn
+but do not respond. iTerm2 shows the colours in full; macOS Terminal shows 256 colours. In tmux, set
+`set -g mouse on`, and `CLAUDE_CODE_TMUX_TRUECOLOR=1` for full colour.
 
 ## Known limits
 
 - Charts are text: eighth-block bars, braille lines and box-drawing diagrams, at most 120 columns wide. A diagram
   shows at most 40 nodes and 80 edges.
-- cmd+click and option+click do not reach the mod (iTerm2 keeps them). Right-click is the second gesture; shift-, alt-
-  and ctrl-click do the same where the terminal reports them.
+- cmd+click, fn+click and option+click never reach the mod on macOS. macOS Terminal and iTerm2 may send ctrl+click as
+  a plain right-click, which opens the menu.
+- A click on the transcript's bottom row while "Jump to bottom" shows goes to that button.
+- In the fullscreen view at 110 or more columns the menu and panels dock on the right and narrow the transcript.
 - While the prompt holds a draft, a panel that opens does not take the keys: click it first.
 - A hover tip shows on a neighbouring line, since a tip cannot be drawn outside its paragraph.
 - A side thread's Bash outputs cannot be cited, and each follow-up starts a new subagent given the exchange so far.

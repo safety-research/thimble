@@ -74,6 +74,7 @@ The bad reply types its numbers without citations, gives five numbers where one 
 
 - After a reply, thimble-chat checks its cards and citations, and a subagent forked from you fixes any problems out of the main conversation. In that subagent, fix each one (fix or rerun the script, or cite the value the place shows) and answer in the form its message asks. In the main conversation, thimble-chat's note tells you what was corrected; treat the corrected text as your reply.
 - When thimble-chat asks a subagent forked from you for a verification script, write it as the next section says.
+- The analyst's message may hold citations or a quoted sentence they pasted from your replies: they name what the question is about.
 
 ## Verification scripts
 

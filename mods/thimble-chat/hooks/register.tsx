@@ -30,6 +30,8 @@ import type { CardData, CardMeta } from './draw'
 import { chipLabel, cid, citations, clip, embeddedCards, forMain, fromMod, needsDrawing, parseReply, scriptResult, sentenceOf, shownMatches, takeawayAfter, threadBody, validateCard, valueIn } from './lib'
 import type { Citation } from './lib'
 import { COLORS, paintLine, paintLines } from './paint'
+import { cardOf, citationOf, citeText, menuItems, placeOf, targetLabel } from './gestures'
+import type { Act, Gesture, PointerEv, Sent, Target } from './gestures'
 import { AGENT_PREFIX, forkPrompt, freshPrompt, lastTurn, threadFile, withGuide } from './threads'
 
 type Dollar = EngineInterface
@@ -53,10 +55,12 @@ const hoverA = atom({ plugin: 'thimble-chat', key: 'hover' } as const, '')
 const bandA = atom({ plugin: 'thimble-chat', key: 'band' } as const, false)
 const threadA = atom({ plugin: 'thimble-chat', key: 'thread' } as const, '')
 const threadListA = atom({ plugin: 'thimble-chat', key: 'threadList' } as const, [])
+const menuA = atom({ plugin: 'thimble-chat', key: 'menu' } as const, null)
 
 const CITE_PANE = 'thimble-cite'
 const CARD_PANE = 'thimble-card'
 const THREAD_PANE = 'thimble-thread'
+const MENU_PANE = 'thimble-menu'
 const HOME = '.thimble-chat'
 const CARD_MAX_COLS = 120
 const GUIDE_MARK = '# thimble-chat\n'
@@ -79,7 +83,8 @@ const known = new Map<string, Citation>() // every citation seen, by id
 const replyOf = new Map<string, string>() // a citation's id -> the reply text it was seen in
 const cardReply = new Map<string, string>() // a card's id -> the reply text that embeds it
 const cards = new Map<string, { mtime: number; data: CardData | null; error: string; why: string }>()
-const pointerLog: string[] = []
+const mouseLog: string[] = []
+const seen = new Map<string, number>() // a gestures module instance -> the last gesture it sent that was handled
 let lastCards: string[] = [] // the cards of main's last reply that embeds any, in order
 
 async function paths($: Dollar): Promise<void> {
@@ -600,7 +605,11 @@ async function drawReply($: Dollar, e: ResolveInput, text: string, width: number
   for (const block of blocks) {
     n++
     if (block.type === 'md') {
-      push(<Markdown text={block.text} />)
+      if (live) {
+        // a Client, so a plain paragraph takes the gestures too
+        const { Client } = $.ui.resolve(e as ResolveInput<'AssistantMessage', 'terminal'>)
+        push(<Client key={`${prefix}md-${n}`} module="./gestures.tsx" width="100%" props={{ text: block.text }} />)
+      } else push(<Markdown text={block.text} />)
       continue
     }
     if (block.type === 'card') {
@@ -737,6 +746,101 @@ async function cardContext($: Dollar, id: string): Promise<{ label: string; cont
     ]
       .filter(Boolean)
       .join('\n'),
+  }
+}
+
+// ------------------------------------------------------------------------------------------------ gestures
+
+/** One line of .thimble-chat/mouse.log (THIMBLE_CHAT_DEBUG=1): a press or release a Client saw, and what it made. */
+async function logMouse($: Dollar, module: string, g: Sent): Promise<void> {
+  await paths($)
+  const ev: Partial<PointerEv> = g.ev ?? {}
+  const mods = (['shift', 'ctrl', 'alt'] as const).filter(k => ev[k]).join('+') || 'none'
+  mouseLog.push(
+    JSON.stringify({ at: new Date(await $.clock.now()).toISOString(), event: ev.type, button: ev.button, mods, gesture: g.gesture ?? 'none', target: g.target ? `${g.target.kind}: ${targetLabel(g.target)}` : '', module }),
+  )
+  try {
+    await $.fs.write(`${cwd}/${HOME}/mouse.log`, `${mouseLog.slice(-500).join('\n')}\n`)
+  } catch {
+    // the log is best effort
+  }
+}
+
+async function onGesture($: Dollar, g: Gesture, t: Target): Promise<void> {
+  if (g === 'menu') await openMenu($, t)
+  else if (g === 'cite') await act($, 'cite', t)
+  else if (g === 'thread') await act($, 'thread', t)
+  else if (g === 'primary') {
+    const c = placeOf(t)
+    if (c) await openCitation($, c)
+  }
+}
+
+async function openMenu($: Dollar, t: Target): Promise<void> {
+  await $.state.set({ plugin: 'thimble-chat', key: 'menu' }, t)
+  await $.ui.open({ id: MENU_PANE, title: 'Actions', focus: true, closeOnEscape: true, rows: menuItems(t).length + 1, columns: 34 })
+}
+
+/** What a side thread about a target is told. */
+async function aboutTarget($: Dollar, t: Target): Promise<{ label: string; context: string; ref?: string }> {
+  const card = cardOf(t)
+  const c = citationOf(t)
+  if (t.kind === 'card' && card) return cardContext($, card)
+  if (t.kind === 'citation' && c) {
+    remember([c])
+    return citationContext($, cid(c.raw))
+  }
+  if (t.kind === 'sentence' || !c) {
+    const s = (t.text ?? '').trim()
+    return { label: `the passage "${clip(s, 48)}"`, context: s ? `The passage of the reply: "${clip(s, 1500)}"` : '' }
+  }
+  const base = card ? await cardContext($, card) : null
+  return {
+    ref: c.raw,
+    label: `${targetLabel(t)}${base ? ` on ${base.label}` : ''}`,
+    context: [`The analyst points at ${c.raw}.`, base?.context].filter(Boolean).join('\n'),
+  }
+}
+
+/** One action on a target, from a gesture or the menu. */
+async function act($: Dollar, what: Act, t: Target): Promise<void> {
+  const card = cardOf(t)
+  switch (what) {
+    case 'open': {
+      const c = placeOf(t)
+      if (c) await openCitation($, c)
+      return
+    }
+    case 'cite': {
+      const text = citeText(t)
+      if (!text) return
+      await $.prompt.fill({ text: `${text} `, mode: 'insert', decorations: text.startsWith('[[') ? [chipDecoration(text)] : [] })
+      if (text.startsWith('[[')) await $.state.set({ plugin: 'thimble-chat', key: 'picked' }, text)
+      return
+    }
+    case 'thread': {
+      const about = await aboutTarget($, t)
+      await $.ui.close({ id: CITE_PANE })
+      await openThread($, about)
+      return
+    }
+    case 'verify': {
+      const c = citationOf(t)
+      if (!c || c.display === null) return
+      const id = cid(c.raw)
+      remember([c])
+      if (!(await $.state.get({ ...VERDICTS, id })).value) enqueue($, [c])
+      await askVerify($, id)
+      // a mark has no chip of its own to show the outcome: the citation panel does
+      if (t.kind !== 'citation') await openCitation($, c)
+      return
+    }
+    case 'script':
+      if (card) await openCardPane($, card, 'script')
+      return
+    case 'rerun':
+      if (card) void rerunCard($, card)
+      return
   }
 }
 
@@ -963,63 +1067,28 @@ export const register: Register = on => {
   // ---------------------------------------------------------------------------------------------- clicks
 
   on('ui.message', async ($, e, next) => {
-    const d = (e.data ?? {}) as { type?: string; id?: string; cite?: string; open?: string; secondary?: boolean; kind?: string; card?: string; act?: string; name?: string; value?: string; ev?: unknown; target?: { kind?: string; ref?: string } }
-    if (debug && (d.ev || d.type === 'act' || d.type === 'param')) {
+    const d = (e.data ?? {}) as { type?: string; id?: string; card?: string; act?: string; name?: string; value?: string; ev?: unknown; origin?: string; gestures?: unknown }
+    // every post of a Client that uses hooks/gestures.tsx carries its recent gestures; each is handled once
+    if (Array.isArray(d.gestures) && typeof d.origin === 'string') {
+      const last = seen.get(d.origin) ?? 0
+      const fresh = (d.gestures as Sent[]).filter(g => typeof g?.seq === 'number' && g.seq > last)
+      if (fresh.length) seen.set(d.origin, Math.max(...fresh.map(g => g.seq)))
+      for (const g of fresh) {
+        if (debug) await logMouse($, e.module, g)
+        if (g.gesture && g.target) await onGesture($, g.gesture, g.target)
+      }
+    } else if (debug && (d.ev || d.type === 'act' || d.type === 'param')) {
       await paths($)
-      pointerLog.push(JSON.stringify({ at: await $.clock.now(), component: e.component, module: e.module, ...d }))
-      await $.fs.write(`${cwd}/${HOME}/pointer.log`, `${pointerLog.slice(-200).join('\n')}\n`)
+      mouseLog.push(JSON.stringify({ at: new Date(await $.clock.now()).toISOString(), module: e.module, ...d }))
+      await $.fs.write(`${cwd}/${HOME}/mouse.log`, `${mouseLog.slice(-500).join('\n')}\n`)
     }
-    if (d.type === 'pointer') return next(e)
+    if (d.type === 'pointer' || d.type === 'gesture') return next(e)
     if (d.type === 'hover') {
       await $.state.set({ plugin: 'thimble-chat', key: 'hover' }, typeof d.id === 'string' ? d.id : '')
       return next(e)
     }
-    // a press on a citation (gestures.tsx): a plain one opens its panel, a right or modified one puts it in the prompt
-    if (d.type === 'gesture' && d.target?.kind === 'citation' && typeof d.target.ref === 'string') {
-      const c = citations(d.target.ref)[0]
-      if (!c) return next(e)
-      const g = (d.ev ?? {}) as { button?: string; shift?: boolean; ctrl?: boolean; alt?: boolean }
-      if (g.button === 'left' && !g.shift && !g.ctrl && !g.alt) await openCitation($, c)
-      else {
-        await $.prompt.fill({ text: `${c.raw} `, mode: 'insert', decorations: [chipDecoration(c.raw)] })
-        $.ui.toast(`${clip(c.raw, 60)} is in the prompt`)
-      }
-      return next(e)
-    }
-    if (d.type === 'card' && typeof d.cite === 'string') {
-      const opens = d.kind === 'example' || d.kind === 'timeline'
-      const wantsOpen = opens !== Boolean(d.secondary)
-      const ref = typeof d.open === 'string' ? d.open : ''
-      if (wantsOpen && ref) {
-        const m = /^\[\[(?:([^|\]]*)\|)?([^\]]+)\]\]$/.exec(d.cite)
-        await openCitation($, m && m[2] === ref ? { raw: d.cite, ref, display: m[1] ?? null } : { raw: `[[${ref}]]`, ref, display: null })
-      } else if (d.cite.startsWith('[[')) {
-        await $.prompt.fill({ text: `${d.cite} `, mode: 'insert', decorations: [chipDecoration(d.cite)] })
-        await $.state.set({ plugin: 'thimble-chat', key: 'picked' }, d.cite)
-        $.ui.toast(`${clip(d.cite, 60)} is in the prompt`)
-      }
-      return next(e)
-    }
     if (d.type === 'param' && typeof d.card === 'string' && typeof d.name === 'string' && typeof d.value === 'string') {
       void rerunCard($, d.card, { name: d.name, value: d.value })
-      return next(e)
-    }
-    if (d.type === 'act' && typeof d.card === 'string') {
-      const id = d.card
-      switch (d.act) {
-        case 'script':
-          await openCardPane($, id, 'script')
-          break
-        case 'rerun':
-          void rerunCard($, id)
-          break
-        case 'ask': {
-          const about = await cardContext($, id)
-          await $.ui.close({ id: CITE_PANE })
-          await openThread($, about)
-          break
-        }
-      }
       return next(e)
     }
     return next(e)
@@ -1131,6 +1200,35 @@ export const register: Register = on => {
       )
     }
     return <Box flexDirection="column">{body}</Box>
+  })
+
+  // ---------------------------------------------------------------------------------------------- the menu
+
+  // a right-click's menu: every action of the target, one row each, its hotkey first; Esc closes it
+  on('ui.render', { component: 'Pane', requestId: MENU_PANE }, async ($, e) => {
+    const { Box, Text, Button } = $.ui.resolve(e)
+    const t = await read($, menuA)
+    if (!t) return <Text dimColor>Nothing selected.</Text>
+    const items = menuItems(t)
+    const cols = Math.max(20, e.props.bodyColumns)
+    return (
+      <Box flexDirection="column">
+        <Text dimColor wrap="truncate-end">{clip(targetLabel(t), cols)}</Text>
+        {items.map((m, i) => (
+          <Button
+            key={`menu-${m.act}`}
+            label={m.label}
+            hotkey={m.hotkey}
+            plain
+            {...(i === 0 ? { autoFocus: true as const } : {})}
+            onPress={async () => {
+              await $.ui.close({ id: MENU_PANE })
+              await act($, m.act, t)
+            }}
+          />
+        ))}
+      </Box>
+    )
   })
 
   // ---------------------------------------------------------------------------------------------- side thread pane

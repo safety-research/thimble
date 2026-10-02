@@ -240,7 +240,7 @@ test('colours: theme keys for text and highlights, a series palette that reads o
     for (const bg of [COLORS.cursor, COLORS.highlight]) expect(contrast(resolve(name, COLORS.text), resolve(name, bg))).toBeGreaterThanOrEqual(4.5)
   }
   // every token that is not a raw colour is a key of Claude Code's theme
-  const tokens = Object.values(COLORS).flatMap(v => (typeof v === 'string' ? [v] : Array.isArray(v) ? v : Object.values(v)))
+  const tokens: string[] = Object.values(COLORS).flatMap(v => (typeof v === 'string' ? [v] : v))
   for (const t of tokens) if (!t.startsWith('#')) expect(Object.keys(THEMES.light!.keys)).toContain(t)
 })
 
@@ -308,6 +308,8 @@ test('a diagram in a reply is a Client card; a press on a node with a record ope
   const row = lay.lines.findIndex(l => l.map(s => s.s).join('').includes('Planner'))
   const col = lay.lines[row]!.map(s => s.s).join('').indexOf('Planner')
   await ui.pointer({ type: 'down', x: col + 2, y: row + 2, button: 'left', in: 'card-1-d1a9e0' } as never)
+  await ui.pointer({ type: 'up', x: col + 2, y: row + 2, button: 'left', in: 'card-1-d1a9e0' } as never)
+  await ui.advance(400) // a click acts once no second click followed
   expect(w.opened).toContain('thimble-cite')
   await ui.unmount()
 })

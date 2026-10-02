@@ -225,13 +225,13 @@ test('a card that does not validate is drawn as an error', async ($, on) => {
   await ui.unmount()
 })
 
-test('clicking a bar puts its value citation in the prompt', async ($, on) => {
+test('double-clicking a bar puts its value citation in the prompt', async ($, on) => {
   const w = world(on)
   await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
   const ui = (await $.ui.mount({ ...MESSAGE(REPLY), surface: 'terminal' } as never)) as unknown as M
   await ui.resize({ columns: 100, rows: 12, in: 'card-1-abc123' })
   // border, title, params row: the bars start at row 3 of the region, probier is row 4
-  await ui.pointer({ type: 'down', x: 10, y: 4, button: 'left', in: 'card-1-abc123' } as never)
+  for (const type of ['down', 'up', 'down', 'up']) await ui.pointer({ type, x: 10, y: 4, button: 'left', in: 'card-1-abc123' } as never)
   expect(w.filled).toEqual(['[[1013|card:abc123#revisions/probier]] '])
   await ui.unmount()
 })
@@ -265,7 +265,8 @@ test('a side thread asks a forked subagent, out of main\'s chat, and its pane ta
   const w = world(on)
   await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
   const ui = (await $.ui.mount({ ...MESSAGE(REPLY), surface: 'terminal' } as never)) as unknown as M
-  await ui.post({ type: 'act', card: 'abc123', act: 'ask' }, { in: 'card-1-abc123' })
+  // shift+click on the card's title row
+  await ui.pointer({ type: 'down', x: 10, y: 1, button: 'left', shift: true, in: 'card-1-abc123' } as never)
   expect(w.opened).toContain('thimble-thread')
   await ui.unmount()
   for (const surface of ['terminal', 'desktop'] as const) {

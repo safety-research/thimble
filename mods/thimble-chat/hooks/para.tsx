@@ -7,7 +7,7 @@ import type { ClientModule, RenderElement } from 'claude-code'
 import { blockLayout, passageAt } from './cite'
 import type { ChipView } from './cite'
 import { lineWidth, width } from './draw'
-import { onPointer } from './gestures'
+import { onPointer, send } from './gestures'
 import type { Target } from './gestures'
 import type { Run, TableRuns } from './lib'
 import { paintLine } from './paint'
@@ -49,7 +49,7 @@ const Para: ClientModule<Props, S> = (props, surface) => {
     if (k !== cur.hover) {
       surface.setState({ ...cur, hover: k })
       // the band shows the hovered citation's ref and status, whatever room the paragraph has for a tip
-      if (ev.type === 'move') surface.post({ type: 'hover', id: k >= 0 ? (props.ids[k] ?? '') : '' })
+      if (ev.type === 'move') send(surface, { type: 'hover', id: k >= 0 ? (props.ids[k] ?? '') : '' })
     }
   })
   if (surface.state === undefined) {

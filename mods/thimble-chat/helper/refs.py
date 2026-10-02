@@ -328,7 +328,7 @@ def _resolve_card(cwd: str, cid: str, frag: str, display: str | None, out: dict)
     out["kind"] = "card"
     out["card"] = cid
     if card is None:
-        out["why"] = f"no card {cid}"
+        out["why"] = "no such card"
         return out
     out["question"] = card.get("question", "")
     if not frag:

@@ -217,7 +217,8 @@ test('a verification script is asked of a forked subagent, never as a prompt to 
   await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
   const dse = citations(REPLY)[1]!
   const ui = (await $.ui.mount(MESSAGE(REPLY))) as unknown as M
-  await ui.post({ type: 'gesture', target: { kind: 'citation', ref: dse.raw }, ev: { button: 'left', shift: false, ctrl: false, alt: false, type: 'press' } }, { in: 'para-2' })
+  const ev = { button: 'left', shift: false, ctrl: false, alt: false, type: 'press' }
+  await ui.post({ type: 'gesture', origin: 'o1', gestures: [{ seq: 1, gesture: 'primary', target: { kind: 'citation', ref: dse.raw }, ev }] }, { in: 'para-2' })
   await ui.unmount()
   const pane = (await $.ui.mount({ plugin: 'thimble-chat', component: 'Pane', requestId: 'thimble-cite', surface: 'terminal', viewport: { columns: 100, rows: 30 }, props: { bodyColumns: 96, bodyRows: 28 } } as never)) as unknown as M
   await pane.press({ key: 'verify' })

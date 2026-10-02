@@ -31,8 +31,6 @@ export const COLORS = {
   problem: 'error',
   ok: 'success',
   warn: 'warning',
-  chip: { ok: 'success', differs: 'warning', missing: 'error', unchecked: 'inactive', pending: 'inactive' } as Record<string, string>,
-  chipFg: 'inverseText',
 }
 
 function seg(Text: TextC, s: Seg): RenderElement {
