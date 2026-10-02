@@ -579,13 +579,22 @@ function fixWords(fix: { state: string; why?: string } | undefined): string {
   return ''
 }
 
+/** A ref as the analyst reads it: a card's place by the card's question, never its id; any other place as written. */
+function placeName(ref: string): string {
+  const m = /^card:([A-Za-z0-9_-]+)(?:#(.*))?$/.exec(ref)
+  if (!m) return ref
+  const q = cards.get(m[1]!)?.data?.question
+  const name = q ? `card "${clip(q, 40)}"` : 'a card'
+  return m[2] ? `${name} · ${m[2]}` : name
+}
+
 async function chipView($: Dollar, c: Citation): Promise<{ view: ChipView; id: string }> {
   const id = cid(c.raw)
   const v = (await $.state.get({ ...VERDICTS, id })).value
   const run = (await $.state.get({ ...VERIFY, id })).value
   const fix = (await $.state.get({ ...FIXES, id })).value
   const state = chipState(v?.status, fix?.state)
-  const tip = [c.ref, state === 'link' && v?.status !== 'ok' ? '' : v?.why, state === 'fixing' || state === 'failed' ? fixWords(fix) : '', verifyWords(run)].filter(Boolean).join(' · ')
+  const tip = [placeName(c.ref), state === 'link' && v?.status !== 'ok' ? '' : v?.why, state === 'fixing' || state === 'failed' ? fixWords(fix) : '', verifyWords(run)].filter(Boolean).join(' · ')
   return { id, view: { label: chipLabel(c), state, mark: verifyMark(run?.state), tip } }
 }
 
@@ -1110,7 +1119,7 @@ export const register: Register = on => {
     const state = chipState(status, fix?.state)
     const body: RenderElement[] = []
     body.push(paintLine(Text, [...chipSegs({ label: chipLabel(c), state, mark: verifyMark(run?.state), tip: '' }, false), { s: `  ${STATUS_WORDS[status] ?? status}` }]))
-    body.push(<Text dimColor wrap="truncate-end">{clip(c.raw, cols)}</Text>)
+    body.push(<Text dimColor wrap="truncate-end">{clip(c.ref.startsWith('card:') ? placeName(c.ref) : c.raw, cols)}</Text>)
     if (v?.why) body.push(<Text color={state === 'link' ? COLORS.dim : COLORS.problem} wrap="truncate-end">{clip(v.why, cols)}</Text>)
     if (state === 'fixing' || state === 'failed') body.push(<Text color={COLORS.problem} wrap="wrap">{fixWords(fix)}</Text>)
     if (!v) body.push(<Text dimColor>checking…</Text>)
