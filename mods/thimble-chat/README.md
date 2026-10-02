@@ -34,10 +34,12 @@ one- or two-sentence takeaway when one chart or table answers the question, or s
 paragraphs for a question that takes several steps, such as a why question.
 
 - **Cards.** Claude computes every number with a Python script under `.thimble-chat/scripts/`, which ends by writing
-  a card to the session's `.thimble-chat/cards/`, wherever the script runs. The kinds are bar, line, timeline, table,
-  example records and diagram (boxes joined by arrows in layers; an edge label over 24 characters becomes a numbered
-  note under the drawing). A card shows its question, its choices if it has any (picking one reruns the script), and
-  the chart. The mark under the pointer is highlighted and its value shows beside the question. Colours follow Claude
+  a card to the session's `.thimble-chat/cards/`, wherever the script runs. The kinds are bar, line, timeline (times
+  shown and cited short, as 18 Jun 21:26), table, example records and diagram (boxes joined by arrows in layers; a long
+  node name wraps to two lines; an edge label stands on its own edge, or, when it is long or has no room there, is a
+  numbered note under the drawing with its number on the edge). A card shows its question, its choices if it has any
+  (picking one reruns the script), and the chart. The mark under the pointer is highlighted and its value shows
+  beside the question. Colours follow Claude
   Code's theme; chart colours keep 3:1 contrast on light and dark backgrounds.
 - **Citations.** Every citation `[[value|place]]` is an underlined link. A place can be file lines, a CSV row, a JSON
   value, a SQLite row, a card value or lines of a Bash output. The mod checks each one, and a citation is red when the
@@ -62,7 +64,7 @@ record, a diagram node.
 | click | opens the place the target cites (a chart value has none: it is selected) |
 | double-click | puts the target's citation into the prompt (a sentence: quoted) |
 | shift+click | opens a side thread about the target (also ctrl+click and middle-click, where the terminal reports them) |
-| right-click | a menu: open, ask about this, verify, open the script, rerun, cite (a letter key each; Esc closes) |
+| right-click | a menu: open, ask about this, verify, open the script, rerun, cite (a letter key each; Esc closes); the target is shaded while it is open |
 
 If a gesture misbehaves, start Claude Code with `THIMBLE_CHAT_DEBUG=1` and send `.thimble-chat/mouse.log`: one line per
 press and release the mod received, with its button, modifiers, gesture and target.

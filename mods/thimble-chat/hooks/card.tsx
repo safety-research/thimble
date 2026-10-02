@@ -7,11 +7,11 @@ import type { ClientModule } from 'claude-code'
 
 import { cardLayout, cut, width } from './draw'
 import type { CardData, CardMeta, Item, Line, Seg } from './draw'
-import { onPointer, send } from './gestures'
+import { isMenuTarget, onPointer, send } from './gestures'
 import type { Target } from './gestures'
 import { COLORS, paintLine } from './paint'
 
-type Props = { card: CardData; cols: number; plotRows?: number; debug?: boolean; meta?: CardMeta; pane?: boolean }
+type Props = { card: CardData; cols: number; plotRows?: number; debug?: boolean; meta?: CardMeta; pane?: boolean; menu?: Target | null }
 type S = { hover: number; act: string }
 
 const PAD_X = 2 // border and padding on the left
@@ -68,7 +68,12 @@ const Card: ClientModule<Props, S> = (props, surface) => {
   const card = props.card
   const meta = props.meta ?? {}
 
-  const lay = cardLayout(card, inner, st.hover, props.plotRows)
+  // while a right-click's menu is open on the card its border is lit; on one of its marks, that mark is drawn hovered
+  const menuOnCard = isMenuTarget(cardTarget(card), props.menu)
+  let lay = cardLayout(card, inner, st.hover, props.plotRows)
+  const menuItem = props.menu ? lay.items.findIndex(it => isMenuTarget(itemTarget(it, card), props.menu)) : -1
+  const shown = st.hover >= 0 ? st.hover : menuItem
+  if (shown !== st.hover) lay = cardLayout(card, inner, shown, props.plotRows)
   const prow = paramRow(card, st.act)
   const top = 2 + (prow ? 1 : 0) // border, title, params
 
@@ -116,7 +121,7 @@ const Card: ClientModule<Props, S> = (props, surface) => {
   if (surface.state === undefined) surface.setState(st)
 
   // the title, and at its right the value under the pointer, or what the mod is doing to the card
-  const item = st.hover >= 0 ? lay.items[st.hover] : undefined
+  const item = shown >= 0 ? lay.items[shown] : undefined
   const right: Seg | null = item
     ? { s: cut(item.value ? `${item.label}: ${item.value}` : item.label, Math.max(12, Math.floor(inner * 0.6))), b: true, fg: COLORS.accent }
     : meta.busy
@@ -134,7 +139,7 @@ const Card: ClientModule<Props, S> = (props, surface) => {
   return Box({
     flexDirection: 'column',
     borderStyle: 'round',
-    borderColor: meta.error ? COLORS.problem : COLORS.rule,
+    borderColor: meta.error ? COLORS.problem : menuOnCard || menuItem >= 0 ? COLORS.accent : COLORS.rule,
     paddingX: 1,
     width: cols,
     children: rows,

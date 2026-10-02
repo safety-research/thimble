@@ -11,8 +11,13 @@
 import type { ClientModule, ClientPointerEvent, JsonValue } from 'claude-code'
 
 import type { ChatTarget } from '../types'
+import { sentenceAt } from './cite'
+import type { ParaLayout } from './cite'
+import { lineWidth, shade } from './draw'
+import type { Line } from './draw'
 import { citations } from './lib'
 import type { Citation } from './lib'
+import { COLORS } from './paint'
 
 export type Target = ChatTarget
 
@@ -169,31 +174,74 @@ export function menuItems(t: Target): MenuItem[] {
   return out
 }
 
-/** A short name for the target, as the menu and the mouse log show it. */
-export function targetLabel(t: Target): string {
+/** `s` in at most `n` characters: whole when it fits, else cut at the last space that keeps half of it, then `…`. */
+function shorten(s: string, n: number): string {
+  if (s.length <= n) return s
+  const room = Math.max(1, n - 1)
+  const sp = s.lastIndexOf(' ', room)
+  return `${(sp >= room / 2 ? s.slice(0, sp) : s.slice(0, room)).replace(/[\s,;:.]+$/, '')}…`
+}
+
+/** A short name for the target in at most `max` characters, as the menu and the mouse log show it; quoted words keep
+ *  their closing quote when cut. */
+export function targetLabel(t: Target, max = 48): string {
   const s = (t.text ?? '').replace(/[`*_]+|^\s*(#+|[-*+]|\d+[.)])\s+/g, '').replace(/\s+/g, ' ').trim()
-  const short = s.length > 48 ? `${s.slice(0, 47)}…` : s
+  const n = Math.max(8, max)
   switch (t.kind) {
     case 'card':
-      return short ? `card "${short}"` : 'card'
+      return s ? `card "${shorten(s, n - 7)}"` : 'card'
     case 'sentence':
-      return short ? `"${short}"` : 'sentence'
+      return s ? `"${shorten(s, n - 2)}"` : 'sentence'
     case 'citation':
-      return citationOf(t)?.display ?? citationOf(t)?.ref ?? 'citation'
+      return shorten(citationOf(t)?.display ?? citationOf(t)?.ref ?? 'citation', n)
     default:
-      return short || citationOf(t)?.ref || t.kind
+      return shorten(s || citationOf(t)?.ref || t.kind, n)
   }
+}
+
+// ------------------------------------------------------------------------------------------------ the menu's target
+
+/** Whether the open menu belongs to `t`. `menu` is the target the hooks module hands each Client in its `menu` prop
+ *  while the menu is open (null once it closes). */
+export function isMenuTarget(t: Target, menu: unknown): boolean {
+  return typeof menu === 'object' && menu !== null && targetKey(menu as Target) === targetKey(t)
+}
+
+/** A paragraph's lines with the open menu's target shaded: its citation, its sentence (the words passageAt maps to
+ *  it, and the spaces between them) or its table row. */
+export function menuLines(lay: ParaLayout, raws: readonly string[], menu: unknown): Line[] {
+  if (typeof menu !== 'object' || menu === null) return lay.lines
+  const m = menu as Target
+  const cells: { line: number; x0: number; x1: number }[] = []
+  if (m.kind === 'citation') for (const s of lay.spans) if (raws[s.chip] === m.ref) cells.push(s)
+  if (m.kind === 'row' && lay.rows) {
+    lay.rows.forEach((r, y) => {
+      if (r && isMenuTarget({ kind: 'row', text: r }, m)) cells.push({ line: y, x0: 0, x1: lineWidth(lay.lines[y] ?? []) })
+    })
+  }
+  if (m.kind === 'sentence') {
+    const byLine = new Map<number, { x0: number; x1: number }>()
+    for (const w of lay.words) {
+      if (!isMenuTarget({ kind: 'sentence', text: sentenceAt(lay.source, w.at) }, m)) continue
+      const c = byLine.get(w.line)
+      byLine.set(w.line, c ? { x0: Math.min(c.x0, w.x0), x1: Math.max(c.x1, w.x1) } : { x0: w.x0, x1: w.x1 })
+    }
+    for (const [line, c] of byLine) cells.push({ line, ...c })
+  }
+  return cells.length ? shade(lay.lines, cells, COLORS.cursor) : lay.lines
 }
 
 // ------------------------------------------------------------------------------------------------ Markdown block
 
-type RegionProps = { text: string }
+type RegionProps = { text: string; menu?: Target | null }
 
-/** A block of a reply drawn as Markdown, with the gestures of a sentence target. */
+/** A block of a reply drawn as Markdown, with the gestures of a sentence target, shaded while its menu is open. */
 const Region: ClientModule<RegionProps> = (props, surface) => {
-  const { Markdown } = surface.elements
-  surface.onPointer(ev => onPointer({ kind: 'sentence', text: props.text.slice(0, 1200) }, ev, surface))
-  return Markdown({ text: props.text })
+  const { Box, Markdown } = surface.elements
+  const target: Target = { kind: 'sentence', text: props.text.slice(0, 1200) }
+  surface.onPointer(ev => onPointer(target, ev, surface))
+  const md = Markdown({ text: props.text })
+  return isMenuTarget(target, props.menu) ? Box({ backgroundColor: COLORS.cursor, children: md }) : md
 }
 
 export default Region

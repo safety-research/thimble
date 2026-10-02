@@ -4,7 +4,7 @@ import type { On } from 'claude-code'
 import { expect, mock, test } from 'claude-code/testing'
 import type { Mounted } from 'claude-code/testing'
 
-import { cardLayout, layerGraph } from '../hooks/draw'
+import { cardLayout, layerGraph, shortTimes, wrapLabel } from '../hooks/draw'
 import type { CardData } from '../hooks/draw'
 import { validateCard } from '../hooks/lib'
 import { COLORS, SERIES } from '../hooks/paint'
@@ -294,6 +294,83 @@ test('a row too wide for the card moves nodes to a row of their own', () => {
   expect(text.every(t => t.length <= 50)).toBe(true)
   expect(text.filter(t => t.includes('╭')).length).toBeGreaterThanOrEqual(3) // the root's row and two rows of children
   for (const n of nodes) expect(text.join('\n')).toContain(n.label.slice(0, 6))
+})
+
+const FAN_IN: CardData = {
+  ...DIAGRAM,
+  id: 'f4n1n0',
+  question: 'Which wikis did the five largest labels write on?',
+  nodes: ['AgentRelent', 'AgentMassPointer13', 'MapHelper', 'LinkHelper771', 'AgentTestLearnXYZ', 'wiki dse'].map(id => ({ id, label: id })),
+  edges: [
+    { source: 'AgentRelent', target: 'wiki dse', label: '317 revisions' },
+    { source: 'AgentMassPointer13', target: 'wiki dse', label: '187 revisions' },
+    { source: 'MapHelper', target: 'wiki dse', label: '184 revisions' },
+    { source: 'LinkHelper771', target: 'wiki dse', label: '176 revisions' },
+    { source: 'AgentTestLearnXYZ', target: 'wiki dse', label: '130 revisions' },
+  ],
+}
+
+test('a long node label wraps to two lines before it is cut', () => {
+  expect(wrapLabel('AgentMassPointer13', 12)).toEqual(['AgentMass', 'Pointer13'])
+  expect(wrapLabel('3083 labels in one wiki', 12)).toEqual(['3083 labels', 'in one wiki'])
+  expect(wrapLabel('wiki dse', 12)).toEqual(['wiki dse'])
+  const lay = cardLayout(FAN_IN, 76, -1)
+  const text = lay.lines.map(l => l.map(s => s.s).join('')).join('\n')
+  for (const part of ['AgentMass', 'Pointer13', 'LearnXYZ']) expect(text).toContain(part)
+  expect(text).not.toContain('…')
+})
+
+test('edges into one box keep ports of their own, and each label belongs to one edge', () => {
+  const lay = cardLayout(FAN_IN, 76, -1)
+  const text = lay.lines.map(l => l.map(s => s.s).join(''))
+  const N = FAN_IN.nodes!.length
+  // five arrows on wiki dse's top border, a blank column between each two
+  const arrows = text.find(t => (t.match(/▼/g) ?? []).length === 5)
+  expect(arrows).toBeDefined()
+  expect(arrows).not.toMatch(/▼▼/)
+  // a label written in the drawing is on its edge: the cells of its words hit that edge
+  const notes = text.map((t, y) => [t, y] as const).filter(([t]) => /^\d+ {2}/.test(t))
+  expect(notes.length).toBeGreaterThan(0)
+  const drawing = text.slice(0, notes[0]![1])
+  for (const [k, e] of FAN_IN.edges!.entries()) {
+    const row = drawing.findIndex(t => t.includes(e.label!))
+    if (row >= 0) expect(lay.hit(drawing[row]!.indexOf(e.label!), row)).toBe(N + k)
+  }
+  // a label with no place of its own is a note, and its number stands on its edge's line
+  for (const [t, y] of notes) {
+    const n = t.split(' ')[0]!
+    const edge = lay.hit(0, y)
+    const onEdge = drawing.some((r, yy) => [...r.matchAll(new RegExp(`(?<![0-9])${n}(?![0-9])`, 'g'))].some(m => lay.hit(m.index!, yy) === edge))
+    expect(onEdge).toBe(true)
+  }
+})
+
+test('a line passing a row runs on straight into its port, with no one-column jog', () => {
+  for (const cols of [76, 110]) {
+    const text = cardLayout(FAN_IN, cols, -1).lines.map(l => l.map(s => s.s).join(''))
+    expect(text.join('\n')).not.toMatch(/╰╮|╭╯|╯╭|╮╰/)
+  }
+})
+
+test('a timeline shows short times and cites them as it shows them', () => {
+  expect(shortTimes(['2026-06-18T21:26:00Z', '2026-07-02 16:46'])).toEqual(['18 Jun 21:26', '2 Jul 16:46'])
+  expect(shortTimes(['2026-06-18', '2026-06-19T00:00:00Z'])).toEqual(['18 Jun', '19 Jun'])
+  expect(shortTimes(['2025-12-31 23:59', '2026-01-01 00:01'])).toEqual(['31 Dec 2025 23:59', '1 Jan 2026 00:01'])
+  expect(shortTimes(['2026-06-18T21:26:05Z', '2026-06-18T21:26:40Z'])).toEqual(['18 Jun 21:26:05', '18 Jun 21:26:40'])
+  expect(shortTimes(['day 1', '2026-06-18'])).toEqual(['day 1', '2026-06-18'])
+  const card: CardData = {
+    ...BAR,
+    kind: 'timeline',
+    events: [
+      { time: '2026-06-18T17:15:00Z', label: 'First revision', ref: '' },
+      { time: '2026-06-18T21:26:00Z', label: 'Last revert', ref: 'revisions.jsonl#L9', shown: '18 Jun 21:26' },
+    ],
+  }
+  const lay = cardLayout(card, 70, -1)
+  const text = lay.lines.map(l => l.map(s => s.s).join('')).join('\n')
+  expect(text).toContain('18 Jun 17:15')
+  expect(text).not.toMatch(/T\d\d:|:00Z/)
+  expect(lay.items[0]).toMatchObject({ label: '18 Jun 17:15', cite: '[[18 Jun 17:15|card:abc123#time/1]]', text: '18 Jun 17:15' })
 })
 
 test('a diagram in a reply is a Client card; a press on a node with a record opens it', async ($, on) => {

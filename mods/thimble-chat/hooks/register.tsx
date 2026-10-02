@@ -608,6 +608,7 @@ async function drawReply($: Dollar, e: ResolveInput, text: string, width: number
   const cols = Math.max(30, width)
   const out: RenderElement[] = []
   const blocks = parseReply(text)
+  const menu = live ? ((await read($, menuA)) ?? null) : null // the target of an open menu, lit where it is drawn
   let n = 0
   let order = 0 // the card's place among the reply's cards, its name for the analyst ("Card 2")
   const push = (el: RenderElement) => out.push(blocks[n - 1]?.gap ? <Box marginTop={1}>{el}</Box> : el)
@@ -617,7 +618,7 @@ async function drawReply($: Dollar, e: ResolveInput, text: string, width: number
       if (live) {
         // a Client, so a plain paragraph takes the gestures too
         const { Client } = $.ui.resolve(e as ResolveInput<'AssistantMessage', 'terminal'>)
-        push(<Client key={`${prefix}md-${n}`} module="./gestures.tsx" width="100%" props={{ text: block.text }} />)
+        push(<Client key={`${prefix}md-${n}`} module="./gestures.tsx" width="100%" props={{ text: block.text, menu }} />)
       } else push(<Markdown text={block.text} />)
       continue
     }
@@ -637,7 +638,7 @@ async function drawReply($: Dollar, e: ResolveInput, text: string, width: number
       const w = Math.min(cols, CARD_MAX_COLS)
       if (live) {
         const { Client } = $.ui.resolve(e as ResolveInput<'AssistantMessage', 'terminal'>)
-        push(<Client key={`${prefix}card-${n}-${card.id}`} module="./card.tsx" width={w} props={{ card, cols: w, debug, meta }} />)
+        push(<Client key={`${prefix}card-${n}-${card.id}`} module="./card.tsx" width={w} props={{ card, cols: w, debug, meta, menu }} />)
       } else {
         const lay = cardLayout(card, w - 4, -1)
         push(
@@ -661,7 +662,7 @@ async function drawReply($: Dollar, e: ResolveInput, text: string, width: number
     }
     if (live) {
       const { Client } = $.ui.resolve(e as ResolveInput<'AssistantMessage', 'terminal'>)
-      push(<Client key={`${prefix}para-${n}`} module="./para.tsx" width="100%" props={{ cols, block, chips, ids, raws }} />)
+      push(<Client key={`${prefix}para-${n}`} module="./para.tsx" width="100%" props={{ cols, block, chips, ids, raws, menu }} />)
     } else {
       push(paintLines(Box, Text, blockLayout(block, chips, cols, -1).lines))
     }
@@ -785,9 +786,30 @@ async function onGesture($: Dollar, g: Gesture, t: Target): Promise<void> {
   }
 }
 
+let menuWatch: { cancel: () => void } | null = null
+
+/** Open the menu of a target. The target stays in state while the menu is open, so the reply lights it (drawReply hands
+ *  it to each Client as `menu`), and is cleared once the menu closes, by a choice or Esc. */
 async function openMenu($: Dollar, t: Target): Promise<void> {
   await $.state.set({ plugin: 'thimble-chat', key: 'menu' }, t)
   await $.ui.open({ id: MENU_PANE, title: 'Actions', focus: true, closeOnEscape: true, rows: menuItems(t).length + 1, columns: 34 })
+  menuWatch?.cancel()
+  const watch = $.clock.every(250, () => {
+    void (async () => {
+      let open = true
+      try {
+        open = (await $.ui.panes()).some(p => p.id === MENU_PANE)
+      } catch {
+        watch.cancel()
+        return
+      }
+      if (open) return
+      watch.cancel()
+      if (menuWatch === watch) menuWatch = null
+      await $.state.set({ plugin: 'thimble-chat', key: 'menu' }, null)
+    })()
+  })
+  menuWatch = watch
 }
 
 /** What a side thread about a target is told. */
@@ -1222,7 +1244,7 @@ export const register: Register = on => {
     const cols = Math.max(20, e.props.bodyColumns)
     return (
       <Box flexDirection="column">
-        <Text dimColor wrap="truncate-end">{clip(targetLabel(t), cols)}</Text>
+        <Text dimColor wrap="truncate-end">{targetLabel(t, cols - 2)}</Text>
         {items.map((m, i) => (
           <Button
             key={`menu-${m.act}`}

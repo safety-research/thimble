@@ -83,6 +83,21 @@ def test_diagram_nodes_edges_refs_and_values() -> None:
         assert r.returncode != 0 and "does not resolve" in r.stderr
 
 
+def test_timeline_times_are_shown_and_cited_short() -> None:
+    with tempfile.TemporaryDirectory() as root:
+        path = _script(root, "card('timeline', 'What happened?', events=[('2026-06-18T17:15:00Z', 'first', ''), ('2026-07-02T16:46:00Z', 'last', '')])")
+        out = _run(path, root)
+        assert "[[18 Jun 17:15|card:" in out and "T17:15" not in out
+        name = _cards(root)[0]
+        with open(os.path.join(root, ".thimble-chat", "cards", name)) as f:
+            c = json.load(f)
+        assert c["events"][0]["time"] == "2026-06-18T17:15:00Z" and c["events"][0]["shown"] == "18 Jun 17:15"
+        cid = name[:-5]
+        assert resolve(root, f"card:{cid}#time/1", "18 Jun 17:15")["status"] == "ok"
+        assert resolve(root, f"card:{cid}#time/1", "2026-06-18T17:15:00Z")["status"] == "ok"  # as the script wrote it
+        assert resolve(root, f"card:{cid}#time/1", "19 Jun 17:15")["status"] == "differs"
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_") and callable(fn):
