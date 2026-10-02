@@ -423,8 +423,8 @@ export function validateCard(c: unknown, id?: string): string | null {
     case 'timeline': {
       const evs = list('events')
       if (!evs?.length) return 'a timeline card needs events'
-      const bad = evs.findIndex(e => !isObj(e) || !isStr(e.time) || !isStr(e.label) || !isStr(e.ref))
-      if (bad >= 0) return `event ${bad + 1} needs time, label and ref`
+      const bad = evs.findIndex(e => !isObj(e) || !isStr(e.time) || !isStr(e.label) || !isStr(e.ref) || !(e.shown === undefined || isStr(e.shown)))
+      if (bad >= 0) return `event ${bad + 1} needs time, label and ref (shown is optional text)`
       break
     }
     case 'table': {

@@ -4,8 +4,11 @@ import type { JsonValue, On } from 'claude-code'
 import { expect, mock, test } from 'claude-code/testing'
 import type { Mounted } from 'claude-code/testing'
 
-import { DOUBLE_MS, citationOf, citeText, classify, menuItems, onPointer, placeOf, send } from '../hooks/gestures'
+import { blockLayout } from '../hooks/cite'
+import { DOUBLE_MS, citationOf, citeText, classify, menuItems, menuLines, onPointer, placeOf, send, targetLabel } from '../hooks/gestures'
 import type { PointerEv, Sent, Target } from '../hooks/gestures'
+import { parseReply } from '../hooks/lib'
+import { COLORS } from '../hooks/paint'
 
 const CWD = '/corpus/wiki'
 const CARD = {
@@ -26,12 +29,12 @@ const REPLY = ['[[card:abc123]]', '', 'The wikis differ a lot in size.', '', 'ds
 const MESSAGE = { plugin: 'thimble-chat', component: 'AssistantMessage', requestId: 'm1', surface: 'terminal', viewport: { columns: 140, rows: 40 }, props: { text: REPLY, isFirstOfReply: true } }
 const MENU = { plugin: 'thimble-chat', component: 'Pane', requestId: 'thimble-menu', surface: 'terminal', viewport: { columns: 100, rows: 30 }, props: { bodyColumns: 34, bodyRows: 8 } }
 
-type World = { files: Map<string, string>; filled: string[]; opened: string[]; runs: string[]; submitted: string[] }
+type World = { files: Map<string, string>; filled: string[]; opened: string[]; runs: string[]; submitted: string[]; clock: ReturnType<typeof mock.clock> }
 
 function world(on: On, env: Record<string, string> = {}): World {
-  const w: World = { files: new Map([[`${CWD}/.thimble-chat/cards/abc123.json`, JSON.stringify(CARD)]]), filled: [], opened: [], runs: [], submitted: [] }
   mock.env(on, env)
-  mock.clock(on, { now: 1_790_000_000_000 })
+  const clock = mock.clock(on, { now: 1_790_000_000_000 })
+  const w: World = { files: new Map([[`${CWD}/.thimble-chat/cards/abc123.json`, JSON.stringify(CARD)]]), filled: [], opened: [], runs: [], submitted: [], clock }
   on('session.start', ($, e) => ({ cwd: e.cwd }))
   on('session.cwd', () => ({ value: CWD }))
   on('session.messages', () => ({ value: [] }) as never)
@@ -252,5 +255,46 @@ test('THIMBLE_CHAT_DEBUG=1 logs each press and release with its button, modifier
     ['release', 'left', 'none', 'none'],
   ])
   expect(log[0]?.target).toBe('sentence: "The wikis differ a lot in size."')
+  await ui.unmount()
+})
+
+test('the menu names its target in the room it has, its quote closed', () => {
+  const card: Target = { kind: 'card', ref: 'card:abc123', text: 'Which labels wrote the most revisions on the busiest wiki?', cardId: 'abc123' }
+  expect(targetLabel(card, 32)).toBe('card "Which labels wrote the…"')
+  const sentence: Target = { kind: 'sentence', text: 'All five of the largest labels wrote only on dse.' }
+  expect(targetLabel(sentence, 32)).toBe('"All five of the largest…"')
+  expect(targetLabel({ kind: 'sentence', text: 'Short.' }, 32)).toBe('"Short."')
+  expect(targetLabel(card, 32).length).toBeLessThanOrEqual(32)
+})
+
+test('the open menu\'s sentence or citation is shaded in its paragraph', () => {
+  const block = parseReply('dse has [[13403|card:abc123#revisions/dse]] revisions. The others are small.')[0]
+  if (block?.type !== 'rich') throw new Error('expected a paragraph with a citation')
+  const chips = [{ label: '13403', state: 'link' as const, mark: '', tip: '' }]
+  const lay = blockLayout(block, chips, 80, -1)
+  const raws = ['[[13403|card:abc123#revisions/dse]]']
+  const lit = (menu: unknown) => menuLines(lay, raws, menu)[0]!.filter(s => s.bg === COLORS.cursor).map(s => s.s).join('')
+  expect(lit(null)).toBe('')
+  expect(lit({ kind: 'citation', ref: raws[0], text: '13403' })).toBe('13403')
+  const second = lit({ kind: 'sentence', text: 'The others are small.' })
+  expect(second).toBe('The others are small.')
+})
+
+test('a right-click lights its target in the reply while the menu is open', async ($, on) => {
+  const w = world(on)
+  let panes = [{ id: 'thimble-menu', title: 'Actions', isShown: true, isFocused: true, isPlaced: true }]
+  on('ui.panes', () => ({ value: panes }) as never)
+  await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
+  const ui = (await $.ui.mount(MESSAGE as never)) as unknown as M
+  const lit = async () => JSON.stringify(await ui.drawn({ in: 'md-2' })).includes(COLORS.cursor)
+  expect(await lit()).toBe(false)
+  await ui.pointer({ type: 'down', x: 3, y: 0, button: 'right', in: 'md-2' } as never)
+  await ui.pointer({ type: 'up', x: 3, y: 0, button: 'right', in: 'md-2' } as never)
+  expect(w.opened).toEqual(['thimble-menu'])
+  await w.clock.advance(300)
+  expect(await lit()).toBe(true)
+  panes = [] // closed by a choice or Esc
+  await w.clock.advance(300)
+  expect(await lit()).toBe(false)
   await ui.unmount()
 })

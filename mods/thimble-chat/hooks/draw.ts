@@ -28,7 +28,7 @@ export type CardData = {
   total?: number
   columns?: string[]
   series?: { name: string; points: [string | number, number][] }[]
-  events?: { time: string; label: string; ref: string }[]
+  events?: { time: string; label: string; ref: string; shown?: string }[]
   examples?: { ref: string; quote: string; note: string }[]
   nodes?: DiagramNode[]
   edges?: DiagramEdge[]
@@ -82,6 +82,34 @@ function pad(s: string, n: number, right = false): string {
 
 export function lineWidth(l: Line): number {
   return l.reduce((n, s) => n + width(s.s), 0)
+}
+
+/** `lines` with a background on the cells [x0, x1) of each span's line, segments split where a span starts or ends. */
+export function shade(lines: readonly Line[], spans: readonly { line: number; x0: number; x1: number }[], bg: string): Line[] {
+  return lines.map((l, y) => {
+    const mine = spans.filter(s => s.line === y && s.x1 > s.x0)
+    if (!mine.length) return l
+    const on = (x: number) => mine.some(s => x >= s.x0 && x < s.x1)
+    const out: Line = []
+    let x = 0
+    for (const seg of l) {
+      let run = ''
+      let runOn = false
+      const flush = () => {
+        if (run) out.push(runOn ? { ...seg, s: run, bg } : { ...seg, s: run })
+        run = ''
+      }
+      for (const ch of seg.s) {
+        const o = on(x)
+        if (run && o !== runOn) flush()
+        runOn = o
+        run += ch
+        x += cw(ch)
+      }
+      flush()
+    }
+    return out
+  })
 }
 
 // ---------------------------------------------------------------------------------------- cards
@@ -264,18 +292,44 @@ function lineLayout(card: CardData, cols: number, hover: number, plotRows = 10):
   return { lines, items, hit: (x, y) => nearest(x, y) }
 }
 
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+const STAMP = /^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?)?\s*(?:Z|[+-]\d{2}(?::?\d{2})?)?$/
+
+/**
+ * Timestamps as a timeline shows them, all in one form: "18 Jun 21:26", the year only when the events span more than
+ * one, the time only when one is not midnight, seconds only when two events share a minute. The clock reads as written
+ * (no time zone conversion). Times that are not all ISO dates are kept as they are. helper/tcard.py has the same rule.
+ */
+export function shortTimes(times: readonly string[]): string[] {
+  const parts = times.map(t => STAMP.exec(t.trim()))
+  if (!parts.length || parts.some(p => !p)) return [...times]
+  const ps = parts as RegExpExecArray[]
+  const years = new Set(ps.map(p => p[1]))
+  const clock = ps.some(p => (p[4] ?? '00') !== '00' || (p[5] ?? '00') !== '00' || (p[6] ?? '00') !== '00')
+  const minute = (p: RegExpExecArray) => `${p[1]}-${p[2]}-${p[3]} ${p[4] ?? '00'}:${p[5] ?? '00'}`
+  const secs = ps.some(p => ps.some(q => minute(p) === minute(q) && (p[6] ?? '00') !== (q[6] ?? '00')))
+  return ps.map(p => {
+    const day = `${Number(p[3])} ${MONTHS[Number(p[2]) - 1] ?? p[2]}${years.size > 1 ? ` ${p[1]}` : ''}`
+    if (!clock) return day
+    return `${day} ${p[4] ?? '00'}:${p[5] ?? '00'}${secs ? `:${p[6] ?? '00'}` : ''}`
+  })
+}
+
 function timelineLayout(card: CardData, cols: number, hover: number): Layout {
   const evs = (card.events ?? []).slice(0, 30)
   const times = evs.map(e => Date.parse(e.time.replace(' ', 'T')))
   const isTime = times.every(t => !Number.isNaN(t))
+  // the form the card helper wrote beside each time, else the same rule applied here
+  const fallback = shortTimes(evs.map(e => e.time))
+  const shown = evs.map((e, i) => e.shown || fallback[i]!)
   const lines: Line[] = []
   const items: Item[] = evs.map((e, i) => ({
-    label: e.time,
+    label: shown[i]!,
     value: e.label,
-    cite: e.ref ? `[[${e.ref}]]` : cite(e.time, `card:${card.id}#time/${i + 1}`),
+    cite: e.ref ? `[[${e.ref}]]` : cite(shown[i]!, `card:${card.id}#time/${i + 1}`),
     open: e.ref || `card:${card.id}#time/${i + 1}`,
     kind: e.ref ? 'record' : 'mark',
-    text: e.ref ? e.label : e.time,
+    text: e.ref ? e.label : shown[i]!,
   }))
   let axisRows = 0
   if (isTime && evs.length > 1) {
@@ -291,17 +345,17 @@ function timelineLayout(card: CardData, cols: number, hover: number): Layout {
       { s: ' ' },
       ...cells.map((c): Seg => (c >= 0 ? { s: '●', fg: c === hover ? COLORS.accent : COLORS.series[0], b: c === hover } : { s: '─', fg: COLORS.rule })),
     ])
-    const a = evs[times.indexOf(t0)]!.time
-    const b = evs[times.indexOf(t1)]!.time
-    lines.push([{ s: ` ${a}${' '.repeat(Math.max(1, aw - a.length - b.length))}${b}`, fg: COLORS.dim }])
+    const a = shown[times.indexOf(t0)]!
+    const b = shown[times.indexOf(t1)]!
+    lines.push([{ s: ` ${a}${' '.repeat(Math.max(1, aw - width(a) - width(b)))}${b}`, fg: COLORS.dim }])
     axisRows = 2
   }
-  const tW = Math.min(Math.max(...evs.map(e => width(e.time))), 22)
+  const tW = Math.min(Math.max(...shown.map(t => width(t))), 22)
   evs.forEach((e, i) => {
     const on = i === hover
     lines.push([
       { s: on ? '▶ ' : '  ', fg: COLORS.accent },
-      { s: pad(e.time, tW), fg: on ? COLORS.accent : COLORS.dim, b: on },
+      { s: pad(shown[i]!, tW, isTime), fg: on ? COLORS.accent : COLORS.dim, b: on },
       { s: '  ' },
       { s: cut(e.label, Math.max(8, cols - tW - 6)), b: on },
       ...(e.ref ? [{ s: ' ↗', fg: COLORS.dim }] : []),
@@ -397,9 +451,9 @@ function exampleLayout(card: CardData, cols: number, hover: number): Layout {
 
 export const MAX_NODES = 40
 export const MAX_EDGES = 80
-const NODE_LABEL = 24 // characters of a node's label its box shows; the readout has the whole label
+const NODE_LABEL = 24 // columns of a label line; a longer label takes two lines, and the readout has the whole label
 const NODE_LABEL_MIN = 12
-const EDGE_INLINE = 24 // a longer edge label, or one with no room beside its edge, is a numbered note under the drawing
+const EDGE_INLINE = 24 // a longer edge label, or one with no place of its own beside its edge, is a numbered note
 
 /**
  * Nodes in layers by dependency, as thimble's canvas lays out a diagram: a node with no incoming edge sits in layer 0,
@@ -431,6 +485,45 @@ export function layerGraph(ids: readonly string[], edges: readonly DiagramEdge[]
   return layer
 }
 
+/**
+ * A node's label in at most two lines of at most `w` columns: one line when it fits, else broken at a space, a case
+ * change, a digit run or after punctuation, as evenly as it goes (a space preferred); a second line still too long is
+ * cut.
+ */
+export function wrapLabel(label: string, w: number): string[] {
+  const s = label.replace(/\s+/g, ' ').trim()
+  if (width(s) <= w) return [s]
+  const chars = [...s]
+  let best: [string, string] | null = null
+  let score = Number.POSITIVE_INFINITY
+  for (let i = 1; i < chars.length; i++) {
+    const a = chars[i - 1]!
+    const b = chars[i]!
+    const space = b === ' '
+    if (a === ' ') continue
+    if (!space && !(/[a-z]/.test(a) && /[A-Z]/.test(b)) && !(/[A-Za-z]/.test(a) && /[0-9]/.test(b)) && !/[-_/.:,;)]/.test(a)) continue
+    const l1 = chars.slice(0, i).join('')
+    const l2 = chars.slice(space ? i + 1 : i).join('')
+    if (!l2 || width(l1) > w) continue
+    const sc = Math.max(width(l1), width(l2)) + (width(l2) > w ? 1000 : 0) + (space ? 0 : 2)
+    if (sc < score) {
+      score = sc
+      best = [l1, l2]
+    }
+  }
+  if (!best) {
+    // no break fits: split inside the word, the first line as full as the halves allow
+    const half = Math.min(w, Math.ceil(width(s) / 2))
+    let l1 = ''
+    for (const ch of chars) {
+      if (width(l1) + cw(ch) > half) break
+      l1 += ch
+    }
+    best = [l1, s.slice(l1.length)]
+  }
+  return [best[0], cut(best[1], w)]
+}
+
 /** Lefts for a row of boxes of widths `w`, each as near its wanted centre as the gaps allow, inside [0, room]. */
 function placeRow(w: readonly number[], want: readonly number[], room: number, gap: readonly number[]): number[] {
   const x = w.map((wi, i) => Math.round(want[i]! - wi / 2))
@@ -452,11 +545,15 @@ const JOIN: Record<number, string> = {
 
 /**
  * A diagram drawn with box-drawing characters, top to bottom, a layer of nodes to a row (layerGraph). A row too wide
- * for the card cuts its labels, then moves nodes to a row of their own. An edge runs from a port on its source's bottom
- * border to its target's top border, where the arrow is (an edge drawn against the layers has its arrow at the top
- * end); an edge across several rows passes each one as a vertical line. Between two rows each edge that bends takes a
- * track of its own. A short edge label is written beside its edge, a long one is a numbered note under the drawing.
- * Items: the nodes in order, then the edges.
+ * for the card wraps its labels to two lines, then cuts them, then moves nodes to a row of their own. Each edge has a
+ * port of its own on its source's bottom border and its target's top border, where the arrow is (an edge drawn
+ * against the layers has its arrow at the top end); a box with many edges is widened to keep its ports apart. An edge
+ * across several rows passes each one as a vertical line. Between two rows each edge that bends takes a track of its
+ * own, ordered so that verticals cross no horizontal run where an order allows it.
+ *
+ * An edge's label stands where it can belong to no other edge: on the edge's own horizontal run, or beside its own last
+ * vertical with clear space around it. Otherwise it is a numbered note under the drawing, and the number is written on
+ * the edge's own line. Items: the nodes in order, then the edges.
  */
 function diagramLayout(card: CardData, cols: number, hover: number): Layout {
   const nodes = (card.nodes ?? []).slice(0, MAX_NODES)
@@ -478,21 +575,34 @@ function diagramLayout(card: CardData, cols: number, hover: number): Layout {
     layer.set(flat.target, l + 1)
   }
 
-  // boxes: a row too wide for the card cuts its labels down to NODE_LABEL_MIN characters first
-  const labelW = nodes.map(n => Math.max(1, Math.min(width(n.label), NODE_LABEL, cols - 4)))
-  const boxW = (i: number) => labelW[i]! + 4
+  // boxes: wide enough for the label and for a blank column between ports; a row too wide for the card wraps its
+  // labels to two lines of at least NODE_LABEL_MIN columns, then cuts them
+  const lab = nodes.map(n => wrapLabel(n.label, Math.max(1, Math.min(NODE_LABEL, cols - 4))))
+  const labW = (i: number) => Math.max(1, ...lab[i]!.map(width))
+  const portW = nodes.map((_, i) => {
+    let up = 0
+    let down = 0
+    for (const e of edges) {
+      const fwd = layer.get(e.source)! < layer.get(e.target)!
+      if (at.get(fwd ? e.source : e.target) === i) down++
+      if (at.get(fwd ? e.target : e.source) === i) up++
+    }
+    const k = Math.max(up, down)
+    return k > 1 ? Math.min(cols, 2 * k + 1) : 0
+  })
+  const boxW = (i: number) => Math.max(labW(i) + 4, portW[i]!)
   const GAP = 3
   for (let l = 0; l <= depth(); l++) {
     const row = ids.map((_, i) => i).filter(i => layer.get(ids[i]!) === l)
     if (row.reduce((a, i) => a + boxW(i), 0) + GAP * Math.max(0, row.length - 1) <= cols) continue
     const each = Math.max(NODE_LABEL_MIN, Math.floor((cols - GAP * (row.length - 1)) / row.length) - 4)
-    for (const i of row) labelW[i] = Math.min(labelW[i]!, each)
+    for (const i of row) lab[i] = wrapLabel(nodes[i]!.label, Math.min(labW(i), each))
   }
 
   // entries of each row: nodes and the points where longer edges pass; segments join entries of adjacent rows
   type Entry = { key: string; node: number; edge: number; w: number; x: number }
   type SegT = { edge: number; up: Entry; low: Entry; xa: number; xb: number; track: number }
-  const gaps = (r: Entry[]) => r.slice(0, -1).map((en, i) => (en.node < 0 || r[i + 1]!.node < 0 ? 2 : GAP))
+  const gaps = (r: Entry[]) => r.slice(0, -1).map((en, i) => (en.node < 0 && r[i + 1]!.node < 0 ? 1 : en.node < 0 || r[i + 1]!.node < 0 ? 2 : GAP))
   const rowWidth = (r: Entry[]) => r.reduce((a, en) => a + en.w, 0) + gaps(r).reduce((a, b) => a + b, 0)
   const build = () => {
     const rows: Entry[][] = Array.from({ length: depth() + 1 }, () => [])
@@ -522,7 +632,7 @@ function diagramLayout(card: CardData, cols: number, hover: number): Layout {
     })
     return { rows, dirs, segs }
   }
-  // then a row still too wide, with the lines passing it, moves nodes to a row of its own below: nodes with no edge
+  // then a row still too wide, with the lines passing it, moves nodes to a row of their own below: nodes with no edge
   // onward first, each taking its box off the row and adding a line for each edge reaching it from above
   let built = build()
   for (let guard = 0; guard < N; guard++) {
@@ -552,8 +662,11 @@ function diagramLayout(card: CardData, cols: number, hover: number): Layout {
     lows.set(s.up.key, [...(lows.get(s.up.key) ?? []), s])
     ups.set(s.low.key, [...(ups.get(s.low.key) ?? []), s])
   }
+  // a row of boxes is as tall as its tallest label
+  const bh = rows.map(r => Math.max(3, ...r.filter(en => en.node >= 0).map(en => lab[en.node]!.length + 2)))
 
-  // order each row by the mean position of its neighbours, a few sweeps down and up
+  // order each row by the mean position of its neighbours, a few sweeps down and up, then swap neighbours in a row
+  // while that removes crossings
   const pos = new Map<string, number>()
   const index = () => rows.forEach(r => r.forEach((en, i) => pos.set(en.key, i)))
   index()
@@ -567,6 +680,35 @@ function diagramLayout(card: CardData, cols: number, hover: number): Layout {
       rows[l]!.sort((a, b) => mean((lows.get(a.key) ?? []).map(s => pos.get(s.low.key)!), pos.get(a.key)!) - mean((lows.get(b.key) ?? []).map(s => pos.get(s.low.key)!), pos.get(b.key)!))
       index()
     }
+  }
+  const between = rows.slice(0, -1).map((_, l) => segs.filter(s => rowOf.get(s.up.key) === l))
+  const crossings = (l: number) => {
+    const list = between[l]
+    if (!list) return 0
+    let n = 0
+    for (let a = 0; a < list.length; a++) {
+      for (let b = a + 1; b < list.length; b++) {
+        const s = list[a]!
+        const t = list[b]!
+        if (s.up !== t.up && s.low !== t.low && (pos.get(s.up.key)! - pos.get(t.up.key)!) * (pos.get(s.low.key)! - pos.get(t.low.key)!) < 0) n++
+      }
+    }
+    return n
+  }
+  for (let pass = 0, better = true; pass < 6 && better; pass++) {
+    better = false
+    rows.forEach((r, l) => {
+      for (let i = 0; i + 1 < r.length; i++) {
+        const before = crossings(l - 1) + crossings(l)
+        ;[r[i], r[i + 1]] = [r[i + 1]!, r[i]!]
+        index()
+        if (crossings(l - 1) + crossings(l) < before) better = true
+        else {
+          ;[r[i], r[i + 1]] = [r[i + 1]!, r[i]!]
+          index()
+        }
+      }
+    })
   }
 
   // x: packed, then each row pulled toward its neighbours' centres
@@ -589,41 +731,128 @@ function diagramLayout(card: CardData, cols: number, hover: number): Layout {
   const shift = Math.max(0, minX - Math.max(0, Math.min(12, cols - (maxX - minX))))
   for (const r of rows) for (const en of r) en.x -= shift
 
-  // ports: a node's edges leave its bottom border and reach its top border at columns spread about its centre, or
+  // ports: a node's edges leave its bottom border and reach its top border at columns spread about its centre, in the
+  // order of the entries at their other ends; only a box too narrow for them all makes them share one port as a bus
   const spread = (en: Entry, list: SegT[], other: (s: SegT) => Entry, set: (s: SegT, x: number) => void) => {
     const sorted = [...list].sort((a, b) => centre(other(a)) - centre(other(b)))
     if (en.node < 0) {
       for (const s of sorted) set(s, en.x)
       return
     }
-    // more than three edges share one port, so they fan out from one track as a bus
     const k = sorted.length
-    const step = k > 1 && k <= 3 ? Math.max(0, Math.min(4, Math.floor((en.w - 3) / (k - 1)))) : 0
+    const step = k > 1 ? Math.max(0, Math.min(4, Math.floor((en.w - 3) / (k - 1)))) : 0
     const first = Math.round(centre(en) - (step * (k - 1)) / 2)
     sorted.forEach((s, j) => set(s, Math.min(en.x + en.w - 2, Math.max(en.x + 1, first + j * step))))
   }
+  const ports = () => {
+    for (const r of rows) {
+      for (const en of r) {
+        spread(en, lows.get(en.key) ?? [], s => s.low, (s, x) => (s.xa = x))
+        spread(en, ups.get(en.key) ?? [], s => s.up, (s, x) => (s.xb = x))
+      }
+    }
+  }
+  ports()
+  // each row below the first pulled once more, toward the ports above it rather than the boxes' centres
+  for (let l = 1; l < rows.length; l++) {
+    const r = rows[l]!
+    const want = r.map(en => mean((ups.get(en.key) ?? []).map(s => s.xa), centre(en)) + 0.5)
+    placeRow(r.map(en => en.w), want, room, gaps(r)).forEach((x, i) => (r[i]!.x = x))
+    ports()
+  }
+  // an edge whose other end lies above or below its box's border runs straight: its port moves there, when that keeps
+  // its order among the box's other ports and a blank column beside each
+  const straighten = (en: Entry, list: SegT[], s: SegT, end: 'xa' | 'xb', x: number): boolean => {
+    if (en.node < 0 || x < en.x + 1 || x > en.x + en.w - 2) return false
+    const cur = s[end]
+    if (list.some(o => o !== s && o[end] === cur)) return false
+    for (const o of list) {
+      if (o === s) continue
+      if ((o[end] < cur && o[end] >= x - 1) || (o[end] > cur && o[end] <= x + 1)) return false
+    }
+    s[end] = x
+    return true
+  }
+  // a point where a longer edge passes a row moves under the port above it, where the row leaves room
+  const fitsAt = (en: Entry, x: number): boolean => {
+    const r = rows[rowOf.get(en.key)!]!
+    const i = r.indexOf(en)
+    const g = gaps(r)
+    if (x < 0 || x + en.w > room) return false
+    return !(i > 0 && x < r[i - 1]!.x + r[i - 1]!.w + g[i - 1]!) && !(i < r.length - 1 && x + en.w + g[i]! > r[i + 1]!.x)
+  }
+  const shiftPass = (en: Entry, x: number): boolean => {
+    if (!fitsAt(en, x)) return false
+    en.x = x
+    for (const o of ups.get(en.key) ?? []) o.xb = x
+    for (const o of lows.get(en.key) ?? []) o.xa = x
+    return true
+  }
+  // or over the port below it, and a straight line above it moves along: the points above it, up to the port it leaves
+  const carry = (en: Entry, x: number, depth = 0): boolean => {
+    if (!fitsAt(en, x)) return false
+    const u = (ups.get(en.key) ?? [])[0]
+    if (u && u.xa === u.xb && depth < rows.length) {
+      if (u.up.node >= 0 ? !straighten(u.up, lows.get(u.up.key)!, u, 'xa', x) : !carry(u.up, x, depth + 1)) return false
+    }
+    return shiftPass(en, x)
+  }
+  for (const r of between) {
+    // rightmost first, then leftmost first, so a point moving toward its port is not held by one that moves too
+    for (const order of [[...r].sort((a, b) => b.xa - a.xa), [...r].sort((a, b) => a.xa - b.xa)]) {
+      for (const s of order) if (s.xa !== s.xb && s.low.node < 0) shiftPass(s.low, s.xa)
+    }
+    for (const s of r) {
+      if (s.xa !== s.xb && !straighten(s.up, lows.get(s.up.key)!, s, 'xa', s.xb)) straighten(s.low, ups.get(s.low.key)!, s, 'xb', s.xa)
+    }
+  }
+  // a box whose lines would run straight a column or two over moves there, where its row leaves room
   for (const r of rows) {
     for (const en of r) {
-      spread(en, lows.get(en.key) ?? [], s => s.low, (s, x) => (s.xa = x))
-      spread(en, ups.get(en.key) ?? [], s => s.up, (s, x) => (s.xb = x))
+      if (en.node < 0) continue
+      const mine = [...(ups.get(en.key) ?? []).map(s => [s, 'xb'] as const), ...(lows.get(en.key) ?? []).map(s => [s, 'xa'] as const)]
+      const straight = (d: number) => mine.filter(([s, end]) => (end === 'xb' ? s.xb + d === s.xa : s.xa + d === s.xb)).length
+      let best = 0
+      for (const d of [-1, 1, -2, 2]) if (straight(d) > straight(best) && fitsAt(en, en.x + d)) best = d
+      if (!best) continue
+      en.x += best
+      for (const [s, end] of mine) s[end] += best
+    }
+  }
+  // bottom up, each point that still bends below moves over the port below it, where it can
+  for (const r of [...between].reverse()) {
+    for (const order of [[...r].sort((a, b) => b.xb - a.xb), [...r].sort((a, b) => a.xb - b.xb)]) {
+      for (const s of order) if (s.xa !== s.xb && s.up.node < 0) carry(s.up, s.xb)
     }
   }
 
-  // tracks: a bending segment's horizontal run, on a row of the channel no other unrelated run overlaps; a segment whose
-  // top column another's bottom column shares runs above it, so their verticals do not meet
+  // tracks: a bending segment's horizontal run, on a row of the channel no other unrelated run overlaps. A segment whose
+  // top column lies within another's run runs above it, and one whose bottom column does runs below it, so their lines
+  // do not cross; where both hold, a crossing cannot be avoided
   const related = (a: SegT, b: SegT) => a.edge === b.edge || (a.up === b.up && a.xa === b.xa) || (a.low === b.low && a.xb === b.xb)
+  const lo = (s: SegT) => Math.min(s.xa, s.xb)
+  const hi = (s: SegT) => Math.max(s.xa, s.xb)
   const channels = rows.slice(0, -1).map((_, l) => {
-    const mine = segs.filter(s => rowOf.get(s.up.key) === l)
-    let left = mine.filter(s => s.xa !== s.xb).sort((a, b) => Math.min(a.xa, a.xb) - Math.min(b.xa, b.xb))
+    const mine = between[l]!
+    const bend = mine.filter(s => s.xa !== s.xb)
+    const above = new Map(bend.map(s => [s, new Set<SegT>()]))
+    for (const p of bend) {
+      for (const q of bend) {
+        if (p === q || related(p, q)) continue
+        if (q.xa >= lo(p) && q.xa <= hi(p)) above.get(p)!.add(q)
+        if (q.xb >= lo(p) && q.xb <= hi(p)) above.get(q)!.add(p)
+      }
+    }
+    let left = [...bend].sort((a, b) => lo(a) - lo(b))
     let tracks = 0
     while (left.length) {
-      let free = left.filter(s => !left.some(o => o !== s && o.xa === s.xb && !related(o, s)))
-      if (!free.length) free = [left[0]!]
+      const placed = new Set(bend.filter(s => s.track >= 0))
+      const waiting = (s: SegT) => [...above.get(s)!].filter(q => !placed.has(q)).length
+      let ready = left.filter(s => waiting(s) === 0)
+      if (!ready.length) ready = [left.reduce((a, b) => (waiting(b) < waiting(a) ? b : a))]
       const on: SegT[] = []
-      for (const s of free) {
-        const [a0, a1] = [Math.min(s.xa, s.xb), Math.max(s.xa, s.xb)]
-        const fits = on.every(o => related(o, s) || a1 < Math.min(o.xa, o.xb) || Math.max(o.xa, o.xb) < a0)
-        if (fits) {
+      for (const s of ready) {
+        if (on.every(o => related(o, s) || hi(s) < lo(o) || hi(o) < lo(s))) {
           s.track = tracks
           on.push(s)
         }
@@ -640,14 +869,14 @@ function diagramLayout(card: CardData, cols: number, hover: number): Layout {
   let y = 0
   rows.forEach((_, l) => {
     top.push(y)
-    y += 3 + (heights[l] ?? 0)
+    y += bh[l]! + (heights[l] ?? 0)
   })
   const H = y
   const Wd = Math.max(1, ...rows.flatMap(r => r.map(en => en.x + en.w)))
 
   // the grid: each cell's line directions per segment, then boxes and text over them
   type Mark = { seg: number; d: number }
-  type CellT = { marks: Mark[]; ch?: string; item: number; kind: 'line' | 'box' | 'label' | 'arrow' | 'text' | '' ; b?: boolean; i?: boolean }
+  type CellT = { marks: Mark[]; ch?: string; item: number; kind: 'line' | 'box' | 'label' | 'arrow' | 'text' | ''; num?: boolean }
   const grid: CellT[][] = Array.from({ length: H }, () => Array.from({ length: Wd }, () => ({ marks: [], item: -1, kind: '' as const })))
   const mark = (x: number, yy: number, seg: number, d: number) => {
     const c = grid[yy]?.[x]
@@ -658,9 +887,9 @@ function diagramLayout(card: CardData, cols: number, hover: number): Layout {
   }
   segs.forEach((s, si) => {
     const l = rowOf.get(s.up.key)!
-    const y0 = top[l]! + 3
+    const y0 = top[l]! + bh[l]!
     const h = heights[l]!
-    if (s.up.node < 0) for (let k = 0; k < 3; k++) mark(s.xa, top[l]! + k, si, U | D)
+    if (s.up.node < 0) for (let k = 0; k < bh[l]!; k++) mark(s.xa, top[l]! + k, si, U | D)
     if (s.xa === s.xb) {
       for (let k = 0; k < h; k++) mark(s.xa, y0 + k, si, U | D)
       return
@@ -691,22 +920,32 @@ function diagramLayout(card: CardData, cols: number, hover: number): Layout {
       c.item = N + segs[groups[vert]![0]!.seg]!.edge
     } else c.ch = JOIN[bits.reduce((a, b) => a | b, 0)] ?? '┼'
   }
-  // boxes
+  // boxes, each label line centred
   rows.forEach((r, l) => {
     for (const en of r) {
       if (en.node < 0) continue
       const i = en.node
-      const label = cut(nodes[i]!.label, labelW[i]!)
       const inner = en.w - 2
-      const lines = ['╭' + '─'.repeat(inner) + '╮', '│ ' + label + ' '.repeat(Math.max(0, inner - 1 - width(label))) + '│', '╰' + '─'.repeat(inner) + '╯']
-      lines.forEach((text, k) => {
+      const h = bh[l]!
+      const text = lab[i]!
+      const first = Math.floor((h - 2 - text.length) / 2)
+      for (let k = 0; k < h; k++) {
+        let line: string
+        if (k === 0) line = '╭' + '─'.repeat(inner) + '╮'
+        else if (k === h - 1) line = '╰' + '─'.repeat(inner) + '╯'
+        else {
+          const t = text[k - 1 - first] ?? ''
+          const left = 1 + Math.floor((inner - 2 - width(t)) / 2)
+          line = '│' + ' '.repeat(left) + t + ' '.repeat(Math.max(0, inner - left - width(t))) + '│'
+        }
         let x = en.x
-        for (const ch of text) {
+        for (const ch of line) {
           const c = grid[top[l]! + k]?.[x]
-          if (c) Object.assign(c, { ch, item: i, kind: k === 1 && x > en.x + 1 && x < en.x + en.w - 2 ? 'text' : 'box', marks: [] })
+          const inside = k > 0 && k < h - 1 && x > en.x && x < en.x + en.w - 1
+          if (c) Object.assign(c, { ch, item: i, kind: inside ? 'text' : 'box', marks: [] })
           x += 1
         }
-      })
+      }
     }
   })
   // ports and arrows on the borders
@@ -715,7 +954,7 @@ function diagramLayout(card: CardData, cols: number, hover: number): Layout {
     const { rev } = dirs[k]!
     const lu = rowOf.get(s.up.key)!
     if (s.up.node >= 0) {
-      const c = grid[top[lu]! + 2]![s.xa]!
+      const c = grid[top[lu]! + bh[lu]! - 1]![s.xa]!
       Object.assign(c, rev ? { ch: '▲', kind: 'arrow', item: N + k } : { ch: c.ch === '▲' ? '▲' : '┬', kind: c.ch === '▲' ? 'arrow' : 'box' })
     }
     if (s.low.node >= 0) {
@@ -724,14 +963,14 @@ function diagramLayout(card: CardData, cols: number, hover: number): Layout {
     }
   })
 
-  // edge labels: on the edge's horizontal run when it is long enough, else beside its last vertical in the channel's
-  // label row, else a numbered note
+  // edge labels: on the edge's own horizontal run when it is long enough, else beside its own last vertical with clear
+  // cells around, else a numbered note whose number is written on a cell of the edge's own line
   const free = (x: number, yy: number) => x >= 0 && x < cols && (grid[yy]?.[x] === undefined || (grid[yy]![x]!.kind === '' && !grid[yy]![x]!.marks.length))
-  const write = (x: number, yy: number, text: string, item: number) => {
+  const write = (x: number, yy: number, text: string, item: number, num = false) => {
     let cx = x
     for (const ch of text) {
       while (grid[yy]!.length <= cx) grid[yy]!.push({ marks: [], item: -1, kind: '' })
-      Object.assign(grid[yy]![cx]!, { ch, item, kind: 'label', i: true, marks: [] })
+      Object.assign(grid[yy]![cx]!, { ch, item, kind: 'label', num, marks: [] })
       cx += 1
     }
   }
@@ -740,40 +979,59 @@ function diagramLayout(card: CardData, cols: number, hover: number): Layout {
     if (!e.label) return
     const s = lastSeg[k]!
     const l = rowOf.get(s.up.key)!
-    const y0 = top[l]! + 3
+    const y0 = top[l]! + bh[l]!
     const text = e.label
     const w = width(text)
-    let placed = false
+    const own = (x: number, yy: number, d: number) => {
+      const c = grid[yy]?.[x]
+      return Boolean(c && c.kind === 'line' && c.marks.length && c.marks.every(m => segs[m.seg]!.edge === k && m.d === d))
+    }
     if (w <= EDGE_INLINE && s.xa !== s.xb && Math.abs(s.xb - s.xa) - 1 >= w + 2) {
       const t = y0 + s.track
-      const x = Math.min(s.xa, s.xb) + 1 + Math.floor((Math.abs(s.xb - s.xa) - 1 - (w + 2)) / 2)
+      const x = lo(s) + 1 + Math.floor((Math.abs(s.xb - s.xa) - 1 - (w + 2)) / 2)
       let clear = true
-      for (let cx = x; cx < x + w + 2; cx++) clear &&= grid[t]![cx]!.marks.every(m => segs[m.seg]!.edge === k && m.d === (L | R))
-      if (clear) {
-        write(x, t, ` ${text} `, N + k)
-        placed = true
-      }
+      for (let cx = x; cx < x + w + 2; cx++) clear &&= own(cx, t, L | R)
+      if (clear) return write(x, t, ` ${text} `, N + k)
     }
+    // beside the vertical: one blank cell between them and four past the text, on a vertical no other edge shares
     const row = y0 + heights[l]! - 1
-    // a place beside the vertical with a blank cell on each side of the text
-    const fits = (x0: number, n: number) => {
-      if (x0 < 0 || x0 + n > cols) return false
-      for (let cx = x0 - 1; cx <= x0 + n; cx++) if (cx >= 0 && cx < cols && !free(cx, row)) return false
+    const alone = !segs.some(o => o !== s && o.low === s.low && o.xb === s.xb)
+    const clearRun = (a: number, b: number) => {
+      for (let cx = a; cx <= b; cx++) if (cx < cols && !free(cx, row)) return false
       return true
     }
-    const beside = (n: number) => (fits(s.xb + 2, n) ? s.xb + 2 : fits(s.xb - 1 - n, n) ? s.xb - 1 - n : -1)
-    if (!placed && w <= EDGE_INLINE) {
-      const x = beside(w)
-      if (x >= 0) {
-        write(x, row, text, N + k)
-        placed = true
-      }
+    if (alone && w <= EDGE_INLINE) {
+      const right = s.xb + 2
+      if (right + w <= cols && clearRun(s.xb + 1, right + w + 3)) return write(right, row, text, N + k)
+      const left = s.xb - 1 - w
+      if (left >= 0 && clearRun(Math.max(0, left - 4), s.xb - 1)) return write(left, row, text, N + k)
     }
-    if (placed) return
     const n = notes.length + 1
     notes.push({ n, edge: k })
-    const x = beside(String(n).length)
-    if (x >= 0) write(x, row, String(n), N + k)
+    // the number on the edge's own vertical, nearest the arrow first, else on its own horizontal run
+    const digits = String(n)
+    // not beside another number, nor within four cells of a label's words
+    const crowded = (x: number, yy: number) => {
+      for (let cx = x - 4; cx < x + digits.length + 4; cx++) {
+        const c = grid[yy]?.[cx]
+        if (c?.kind === 'label' && (!c.num || cx === x - 1 || cx === x + digits.length)) return true
+      }
+      return false
+    }
+    const cells: [number, number, boolean][] = []
+    grid.forEach((r, yy) => r.forEach((_, x) => {
+      if (own(x, yy, U | D)) cells.push([x, yy, true])
+      else if (own(x, yy, L | R)) cells.push([x, yy, false])
+    }))
+    cells.sort((a, b) => Number(b[2]) - Number(a[2]) || b[1] - a[1])
+    for (const [x, yy, vertical] of cells) {
+      let fits = !crowded(x, yy)
+      for (let j = 1; j < digits.length && fits; j++) fits = vertical ? free(x + j, yy) : own(x + j, yy, L | R)
+      if (fits) {
+        write(x, yy, digits, N + k, true)
+        break
+      }
+    }
   })
 
   // the grid as lines; the hovered node or edge drawn in the accent colour
@@ -789,7 +1047,7 @@ function diagramLayout(card: CardData, cols: number, hover: number): Layout {
       else if (c.kind === 'box') seg = { s: ch, fg: c.item === hotNode ? COLORS.accent : COLORS.dim, b: c.item === hotNode }
       else if (c.kind === 'line' || c.kind === 'arrow' || c.kind === 'label') {
         const on = c.item - N === hotEdge && hotEdge >= 0
-        seg = { s: ch, fg: on ? COLORS.accent : COLORS.dim, b: on, i: c.kind === 'label' }
+        seg = { s: ch, fg: on ? COLORS.accent : COLORS.dim, b: on || Boolean(c.num), i: c.kind === 'label' && !c.num }
       } else seg = { s: ch }
       const prev = line.at(-1)
       if (prev && prev.fg === seg.fg && prev.b === seg.b && prev.i === seg.i) prev.s += seg.s

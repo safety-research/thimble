@@ -194,7 +194,7 @@ def card_values(card: dict) -> dict[str, dict[str, object]]:
                 out.setdefault(str(c), {})[key] = v
     elif kind == "timeline":
         out["event"] = {str(i + 1): f"{e['time']} {e['label']}" for i, e in enumerate(card.get("events", []))}
-        out["time"] = {str(i + 1): e["time"] for i, e in enumerate(card.get("events", []))}
+        out["time"] = {str(i + 1): e.get("shown") or e["time"] for i, e in enumerate(card.get("events", []))}
     elif kind == "diagram":
         out["node"] = {str(n["id"]): n["label"] for n in card.get("nodes", [])}
         label = {str(n["id"]): n["label"] for n in card.get("nodes", [])}
@@ -340,9 +340,12 @@ def _resolve_card(cwd: str, cid: str, frag: str, display: str | None, out: dict)
         return out
     col, row, val = hit
     out.update(kind="value", column=col, row=row, value=fmt(val), text=fmt(val))
+    # a timeline's time is cited as the card shows it, or as the script wrote it
+    raw = card["events"][int(row) - 1]["time"] if card.get("kind") == "timeline" and col == "time" else None
     if display is None:
         out.update(status="ok", why="resolves")
-    elif shown_matches(display, fmt(val)) or (not _parts(display) and value_in(display, fmt(val))):
+    elif (shown_matches(display, fmt(val)) or (not _parts(display) and value_in(display, fmt(val)))
+          or (raw is not None and display.strip() == str(raw).strip())):
         out.update(status="ok", why=f"the card shows {fmt(val)}")
     else:
         out.update(status="differs", why=f"the card shows {fmt(val)}, not {display}")

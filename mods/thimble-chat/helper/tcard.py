@@ -28,6 +28,7 @@ import datetime as _dt
 import hashlib
 import json
 import os
+import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -62,6 +63,29 @@ def _root() -> str:
         if up == d:
             return os.getcwd()
         d = up
+
+
+_MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+_STAMP = re.compile(r"(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?)?\s*(?:Z|[+-]\d{2}(?::?\d{2})?)?")
+
+
+def short_times(times: list[str]) -> list[str]:
+    """Timestamps as a timeline card shows and cites them, all in one form: "18 Jun 21:26", the year only when the
+    events span more than one, the time only when one is not midnight, seconds only when two events share a minute.
+    The clock reads as written. Times that are not all ISO dates are kept. hooks/draw.ts shortTimes has the same rule."""
+    ps = [_STAMP.fullmatch(t.strip()) for t in times]
+    if not ps or not all(ps):
+        return list(times)
+    g = [[p.group(i) or "00" if i >= 4 else p.group(i) for i in range(7)] for p in ps]
+    years = {x[1] for x in g}
+    clock = any(x[4] != "00" or x[5] != "00" or x[6] != "00" for x in g)
+    minute = [(x[1], x[2], x[3], x[4], x[5]) for x in g]
+    secs = any(minute[i] == minute[j] and g[i][6] != g[j][6] for i in range(len(g)) for j in range(len(g)))
+    out = []
+    for x in g:
+        day = f"{int(x[3])} {_MONTHS[int(x[2]) - 1] if 1 <= int(x[2]) <= 12 else x[2]}" + (f" {x[1]}" if len(years) > 1 else "")
+        out.append(day if not clock else f"{day} {x[4]}:{x[5]}" + (f":{x[6]}" if secs else ""))
+    return out
 
 
 def _env_json(name: str) -> dict:
@@ -275,8 +299,12 @@ def card(kind: str, question: str, *, rows=None, columns=None, series=None, poin
             evs.append({"time": str(_plain(t)), "label": str(label), "ref": str(ref or "")})
         if not evs:
             raise ValueError("a timeline card needs events, as [(time, label, ref), ...]")
-        data["events"] = evs[:200]
-        cites = [f"[[{e['ref']}]]" if e["ref"] else f"[[{e['time']}|card:{cid}#time/{i + 1}]]" for i, e in enumerate(evs)]
+        evs = evs[:200]
+        for e, shown in zip(evs, short_times([e["time"] for e in evs])):
+            if shown != e["time"]:
+                e["shown"] = shown
+        data["events"] = evs
+        cites = [f"[[{e['ref']}]]" if e["ref"] else f"[[{e.get('shown', e['time'])}|card:{cid}#time/{i + 1}]]" for i, e in enumerate(evs)]
     elif kind == "table":
         if not columns or rows is None:
             raise ValueError("a table card needs columns=[...] and rows=[[...], ...]; the first column names each row")
