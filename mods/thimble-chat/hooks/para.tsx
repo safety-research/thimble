@@ -1,7 +1,7 @@
 // A paragraph (or a table) of a reply that holds citations: a Client surface module, drawn on Claude Code's drawing
 // thread (no `$`). It wraps the block to its region, draws each citation as a link (cite.ts), animates the spinner of
-// a citation a fix round is working on, shows the hovered citation's ref beside it, and hands each press to
-// gestures.tsx with what is under the pointer: a citation, a table row, or the sentence of the word there.
+// a citation a fix round or a verification is working on, shows the hovered citation's ref beside it, and hands each
+// press to gestures.tsx with what is under the pointer: a citation, a table row, or the sentence of the word there.
 import type { ClientModule, RenderElement } from 'claude-code'
 
 import { blockLayout, passageAt } from './cite'
@@ -57,7 +57,7 @@ const Para: ClientModule<Props, S> = (props, surface) => {
     surface.every(150, () => {
       const p = latest.get(surface)
       const cur = surface.state
-      if (p && cur && p.chips.some(c => c.state === 'fixing')) surface.setState({ ...cur, frame: cur.frame + 1 })
+      if (p && cur && p.chips.some(c => c.spin)) surface.setState({ ...cur, frame: cur.frame + 1 })
     })
   }
 

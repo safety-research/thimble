@@ -64,7 +64,7 @@ export type ChatFixItem = { old: string; problems: { raw: string; why: string }[
 /** A subagent the mod started: a side thread's, a fix round's or a verification's, with what its end updates. */
 export type ChatAgent = { kind: string; label: string; thread?: string; cite?: string; items?: ChatFixItem[]; reply?: string; endRow?: string }
 
-/** A passage of a reply a fix round corrected: drawn as `new` in place of `old`, marked. */
+/** A passage of a reply a fix round corrected: drawn as `new` in place of `old`, unmarked. */
 export type ChatCorrection = { old: string; new: string; at: number }
 
 /** The last text row of an answer, which carries the answer's summary line. */

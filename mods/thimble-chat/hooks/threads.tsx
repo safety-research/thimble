@@ -8,7 +8,7 @@
 // where a fork is refused, a general-purpose subagent given the guidance and the context. Each follow-up starts a new
 // fork given the exchange so far (a resumed subagent's end would reach main as a task notification, and main would
 // answer it in its chat).
-import type { ChatThread, ChatThreadTurn } from '../types'
+import type { ChatFixItem, ChatThread, ChatThreadTurn } from '../types'
 
 const RULES = [
   'Answer here, briefly, the way thimble-chat answers in the main conversation: numbers from code (run Python with Bash; a card with the helper when a chart or table answers it), every number and record cited as [[value|ref]].',
@@ -47,8 +47,33 @@ export function freshPrompt(t: ChatThread, q: string, guide: string): string {
   return withGuide(guide, forkPrompt(t, q))
 }
 
-/** How every subagent of the mod is described, so its rows in main's chat are known as the mod's. */
-export const AGENT_PREFIX = 'thimble-chat'
+// How each subagent of the mod is named where Claude Code lists it and in its one dim row in main's chat; the names
+// also tell the mod's rows from others.
+export const MOD_AGENT = /(?:verification|side thread) · /
+
+/** A fix round's name, by what it corrects. */
+export function fixName(items: ChatFixItem[]): string {
+  const what = [items.some(it => !it.card) && 'citations', items.some(it => it.card) && 'cards'].filter(Boolean).join(' and ')
+  return `verification · correcting ${what || 'citations'}`
+}
+
+/** A verification script's name, by the value it recomputes. */
+export function verifyName(value: string): string {
+  return `verification · checking ${value}`
+}
+
+/** A side thread's name, by the first words of its question. */
+export function threadName(q: string): string {
+  return `side thread · ${firstWords(q, 40)}`
+}
+
+function firstWords(s: string, n: number): string {
+  const one = s.replace(/\s+/g, ' ').trim()
+  if (one.length <= n) return one
+  const cut = one.slice(0, n + 1)
+  const sp = cut.lastIndexOf(' ')
+  return `${(sp > n / 2 ? cut.slice(0, sp) : one.slice(0, n)).replace(/[\s,;:.]+$/, '')}…`
+}
 
 export function lastTurn(t: ChatThread, patch: Partial<ChatThreadTurn>): ChatThread {
   const turns = t.turns.slice()
