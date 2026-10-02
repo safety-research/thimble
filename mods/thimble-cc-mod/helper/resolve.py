@@ -1,4 +1,4 @@
-"""thimble-cc-mod's resolver, run by the mod: reads {"cwd", "items": [{"id", "ref", "display"}], "around"} on stdin and
+"""thimble-cc-mod's resolver, run by the mod: reads {"cwd", "items": [{"id", "ref", "display", "quote"?}], "around"} on stdin and
 prints one result per item (refs.resolve) as JSON. One process checks every citation of a reply."""
 from __future__ import annotations
 

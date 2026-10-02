@@ -10,7 +10,7 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 HELPER = os.path.join(os.path.dirname(HERE), "helper")
 sys.path.insert(0, HELPER)
-from refs import resolve, shown_matches, value_in  # noqa: E402
+from refs import resolve, resolve_many, shown_matches, value_in  # noqa: E402
 
 
 def test_numbers() -> None:
@@ -31,6 +31,24 @@ def test_lines_quotes_and_link_words() -> None:
         assert resolve(d, "ev.jsonl#L1", "this record")["status"] == "unchecked"
         assert resolve(d, "ev.jsonl#L2", None)["status"] == "missing"
         assert resolve(d, "nope.jsonl#L1", None)["status"] == "missing"
+
+
+def test_long_record_shows_every_field() -> None:
+    with tempfile.TemporaryDirectory() as d:
+        body = " ".join(f"word{i}?" for i in range(900))
+        with open(os.path.join(d, "r.jsonl"), "w") as f:
+            f.write(json.dumps({"body": body, "label": "AgentX", "time": "2026-06-18T19:59:28Z"}) + "\n")
+        quoted, linked, example = resolve_many(d, [
+            {"id": "a", "ref": "r.jsonl#L1", "display": '"AgentX"'},
+            {"id": "b", "ref": "r.jsonl#L1", "display": "this save"},
+            {"id": "c", "ref": "r.jsonl#L1", "display": None, "quote": "word700?"},
+        ])
+        for r in (quoted, linked, example):
+            text = r["window"][0]["text"]
+            assert len(text) < 700 and '"label": "AgentX"' in text and '"time": "2026-06-18T19:59:28Z"' in text
+        for r, words in ((quoted, "AgentX"), (example, "word700?")):
+            [[s, e]] = r["window"][0]["spans"]
+            assert r["window"][0]["text"][s:e] == words
 
 
 def test_card_params_and_single_card_rerun() -> None:

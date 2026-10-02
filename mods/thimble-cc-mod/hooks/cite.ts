@@ -341,6 +341,26 @@ export function plainCites(text: string): string {
 
 // ---------------------------------------------------------------------------------------- a cited record
 
+const QUOTE_MARKS = '"\'“”‘’'
+
+/** The words of a citation that quotes ([["a phrase"|ref]]), without their quote marks; '' for any other. */
+export function quotedWords(display: string | null): string {
+  const d = (display ?? '').trim()
+  return d.length > 2 && QUOTE_MARKS.includes(d[0]!) && QUOTE_MARKS.includes(d.at(-1)!) ? d.slice(1, -1) : ''
+}
+
+/** A line of a cited place cut to `cap` characters for keeping, around its first span (the shown value or the quoted
+ *  passage), the spans moved with it. */
+export function capLine<T extends { text: string; spans?: number[][] }>(w: T, cap = 1200): T {
+  if (w.text.length <= cap) return w
+  const first = w.spans?.[0]
+  const lo = first ? Math.max(0, Math.min(first[0]! - Math.floor(cap / 3), w.text.length - cap)) : 0
+  const text = `${lo ? '…' : ''}${w.text.slice(lo, lo + cap)}${lo + cap < w.text.length ? '…' : ''}`
+  const shift = lo - (lo ? 1 : 0)
+  if (!w.spans) return { ...w, text }
+  return { ...w, text, spans: w.spans.map(([a, b]) => [a! - shift, b! - shift]).filter(([a, b]) => a! >= 0 && b! <= text.length) }
+}
+
 /** Where a quoted passage stands in a record's line as written: as is, JSON-escaped, or its words apart by any
  *  whitespace or escaped line break. */
 export function quoteSpan(line: string, quote: string): [number, number] | null {

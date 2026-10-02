@@ -25,7 +25,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, RenderElement, ResolveInput } from 'claude-code'
 
 import type { ChatAgent, ChatCorrection, ChatEnd, ChatFixItem, ChatRow, ChatRun, ChatThread, ChatVerdict, ChatVerify } from '../types'
-import { answerFile, applyCorrections, blockClaims, blockLayout, chipLook, chipSegs, chipState, citeLabel, claimsIn, fixItems, fixPrompt, fixedCard, paraLayout, parseFix, plainCites, quoteSpan, settleFix, streamLink, streamStep, streaming, verifyFailed, wrapAround } from './cite'
+import { answerFile, applyCorrections, blockClaims, blockLayout, capLine, chipLook, chipSegs, chipState, citeLabel, claimsIn, fixItems, fixPrompt, fixedCard, paraLayout, parseFix, plainCites, quoteSpan, quotedWords, settleFix, streamLink, streamStep, streaming, verifyFailed, wrapAround } from './cite'
 import type { ChipView, Claim, Problem, StreamLook, Streaming } from './cite'
 import { cardLayout, cut } from './draw'
 import type { CardData, CardMeta, Line } from './draw'
@@ -212,7 +212,7 @@ async function check($: Dollar, all: Citation[], force = false): Promise<void> {
   for (const c of all) if (force || !c.ref.startsWith('card:') || !(await otherChoice($, c.ref))) cs.push(c)
   if (cs.length === 0) return
   await paths($)
-  const items = cs.map(c => ({ id: cid(c.raw), ref: c.ref, display: c.display }))
+  const items = cs.map(c => ({ id: cid(c.raw), ref: c.ref, display: c.display, quote: quotes.get(cid(c.raw)) }))
   try {
     const r = await $.process.run(['python3', `${root}/helper/resolve.py`], {
       cwd,
@@ -227,7 +227,7 @@ async function check($: Dollar, all: Citation[], force = false): Promise<void> {
     for (const v of out) {
       const c = known.get(v.id) ?? cs.find(x => cid(x.raw) === v.id)
       if (!c) continue
-      const window = (v.window ?? []).map(w => ({ ...w, text: w.text.length > 1200 ? `${w.text.slice(0, 1199)}…` : w.text }))
+      const window = (v.window ?? []).map(w => capLine(w))
       await $.state.set({ ...VERDICTS, id: v.id }, { ...v, window, id: v.id, raw: c.raw, ref: c.ref, display: c.display })
     }
   } catch (err) {
@@ -685,6 +685,15 @@ function placeName(ref: string): string {
   return ref
 }
 
+/** A pasted citation of card `id` as its pane names it: the value and its place on the card; '' for any other. */
+function citedOnCard(raw: string, id: string): string {
+  const c = citations(raw)[0]
+  const m = c && /^card:([A-Za-z0-9_-]+)(?:#(.*))?$/.exec(c.ref)
+  if (!c || m?.[1] !== id) return ''
+  const place = m[2] ? m[2].replace('/', ' ') : 'the card'
+  return c.display !== null ? `${c.display} · ${place}` : place
+}
+
 /** A reason as the analyst reads it: citations as their shown words, a card by its question, a command's output
  *  without its id. */
 function plainWhy(why: string): string {
@@ -1003,7 +1012,7 @@ async function aboutTarget($: Dollar, t: Target): Promise<{ label: string; conte
   }
   if (t.kind === 'sentence' || !c) {
     const s = (t.text ?? '').trim()
-    return { label: `the passage "${clip(s, 48)}"`, context: s ? `The passage of the reply: "${clip(s, 1500)}"` : '' }
+    return { label: `the passage "${clip(plainCites(s), 48)}"`, context: s ? `The passage of the reply: "${clip(s, 1500)}"` : '' }
   }
   const base = card ? await cardContext($, card) : null
   return {
@@ -1404,7 +1413,8 @@ export const register: Register = on => {
     const fix = (await $.state.get({ ...FIXES, id })).value
     const status = v?.status ?? 'pending'
     const look = chipLook(status, fix?.state, run?.state)
-    const quote = quotes.get(cid(c.raw)) ?? ''
+    // the passage an example quotes, or the words a citation quotes
+    const quote = quotes.get(cid(c.raw)) ?? quotedWords(c.display)
     const body: RenderElement[] = []
     const head = paraLayout({ prefix: '', heading: 0, quote: false, runs: [{ text: citeLabel(c), cite: c }, { text: ` · ${statusWords(c, status, run)}` }] }, [{ label: citeLabel(c), ...look, tip: '' }], cols, -1)
     body.push(paintLines(Box, Text, head.lines))
@@ -1443,7 +1453,7 @@ export const register: Register = on => {
       const lastHit = v.window.length - 1 - [...v.window].reverse().findIndex(w => w.hit)
       const lines = v.window.filter((w, i) => w.hit || (i >= firstHit - near && i <= lastHit + near))
       body.push(<Box flexDirection="column">{lines.flatMap(w => (w.hit ? wrappedRows({ Text } as never, w, quote, gutter, cols, hitRows) : [lineRow({ Text } as never, w, gutter, cols)]))}</Box>)
-      if (quote && !hits.some(w => quoteSpan(w.text, quote))) body.push(<Text wrap="wrap"><Text dimColor>{'quoted: '}</Text><Text backgroundColor={COLORS.highlight} bold>{clip(quote, 600)}</Text></Text>)
+      if (quote && status !== 'differs' && !hits.some(w => quoteSpan(w.text, quote))) body.push(<Text wrap="wrap"><Text dimColor>{'quoted: '}</Text><Text backgroundColor={COLORS.highlight} bold>{clip(quote, 600)}</Text></Text>)
     }
 
     // verification, and a side thread about this citation
@@ -1773,7 +1783,8 @@ export const register: Register = on => {
       }
       body.push(cardEl)
     } else {
-      if (picked) body.push(<Text dimColor wrap="truncate-end">{`last cited: ${picked}`}</Text>)
+      const cited = citedOnCard(picked, card.id)
+      if (cited) body.push(<Text dimColor wrap="truncate-end">{`last cited: ${cited}`}</Text>)
     }
     return <Box flexDirection="column">{body}</Box>
   })
