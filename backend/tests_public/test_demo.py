@@ -266,7 +266,7 @@ def fake_dataset(name: str) -> Dataset:
 
 def args(**kw) -> argparse.Namespace:
     base = dict(names=[], yes=True, dir=None, list=False, no_start=True, replace=False, precaches=None, export=None,
-                dataset=None, corpus=None, allow_private=False, scrub_user=False)
+                dataset=None, corpus=None, allow_private=False, scrub_user=False, app=None)
     return argparse.Namespace(**{**base, **kw})
 
 

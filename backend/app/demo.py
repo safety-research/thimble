@@ -308,14 +308,14 @@ def gitleaks_scan(root: Path) -> list[str] | None:
 
 
 def export(ws: Path, corpus: Path, out: Path, *, name: str, home: Path | None = None, user: str | None = None,
-           allow_private: bool = False, scrub_user: bool = False,
+           allow_private: bool = False, scrub_user: bool = False, app: Path | None = None,
            scan: Callable[[Path], list[str] | None] = gitleaks_scan) -> dict[str, Any]:
     """Write the pre-cache of workspace folder `ws`, made on corpus folder `corpus`, to the zip `out`; the manifest.
     DemoError, and nothing written, when something private remains (unless `allow_private`). `scrub_user` writes
     SCRUBBED_USER in place of the user name where it stands as a word (in `ls -l` output, say)."""
     home = home or Path.home()
     user = getpass.getuser() if user is None else user
-    pairs = placeholder_pairs(ws, corpus, home, config.REPO_ROOT)
+    pairs = placeholder_pairs(ws, corpus, home, app or config.REPO_ROOT)
     user_re = re.compile(rf"(?<![\w]){re.escape(user)}(?![\w])") if user and len(user) >= 3 else None
     scrubbed = 0
     files: list[dict[str, Any]] = []
@@ -818,7 +818,8 @@ def run_export(args: argparse.Namespace, say: Callable[[str], None]) -> int:
     if out_path.is_dir() or not out_path.name.endswith(".zip"):
         out_path = out_path / f"{name}{SUFFIX}"
     try:
-        m = export(ws, corpus, out_path, name=name, allow_private=args.allow_private, scrub_user=args.scrub_user)
+        m = export(ws, corpus, out_path, name=name, allow_private=args.allow_private, scrub_user=args.scrub_user,
+                   app=given(args.app) if args.app else None)
     except DemoError as e:
         say(f"thimble demo --export: {e}")
         return 1
@@ -865,6 +866,7 @@ def add_parser(sub: Any) -> None:
                    help="maintainers: write the pre-cache of WORKSPACE (a name or a folder) to OUT (a .zip or a folder)")
     p.add_argument("--dataset", help="with --export: the dataset the pre-cache is for (default: the workspace's name)")
     p.add_argument("--corpus", help="with --export: the workspace's corpus folder, when thimble does not know it")
+    p.add_argument("--app", help="with --export: the thimble install the orientation ran in, when it is not this one")
     p.add_argument("--scrub-user", action="store_true",
                    help="with --export: write `user` in place of your user name where it stands as a word")
     p.add_argument("--allow-private", action="store_true",
