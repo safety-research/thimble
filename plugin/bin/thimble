@@ -440,7 +440,8 @@ case "${1:-}" in
       if [ "$1" = prompt ] && rendered_prompts "${@:2}"; then exit 0; fi
       # `server up` and `prompt` are run by the skills, each as a single command, so that one sandbox.excludedCommands
       # entry or allowed-tools rule covers it (Claude Code checks each part of a compound command); a skill fails on a
-      # non-zero exit, so each always exits 0, with a thimble: line when the tree cannot be found
+      # non-zero exit, so each always exits 0, with a thimble: line when the tree cannot be found. `prompt` leaves its
+      # stderr apart, since the SessionStart hook prints its stdout into the model's context (the skills add 2>&1)
       up=0 skill=0
       case "$1 ${2:-}" in "server up"* | "server ensure"* | "up "* | "ensure "*) up=1 skill=1;; prompt*) skill=1;; esac
       # /thimble feedback: the report, with the folder the skill names, and no server; not when the plugin's hook wrote
@@ -462,10 +463,12 @@ case "${1:-}" in
       # THIMBLE_PLUGIN_ROOT names this plugin copy, whose hooks and watcher /thimble looks for (cli.plugin_root)
       repo="$("$here/thimble-app-dir" 2>&1)" || {
         [ "$skill" = 1 ] || { printf '%s\n' "$repo" >&2; exit 1; }
-        printf '%s\n' "$repo"; exit 0; }
+        if [ "$up" = 1 ]; then printf '%s\n' "$repo"; else printf '%s\n' "$repo" >&2; fi
+        exit 0; }
       export THIMBLE_CALLER_CWD="${THIMBLE_CALLER_CWD:-$PWD}" THIMBLE_PLUGIN_ROOT="$plugin"
       cd "$repo/backend"
-      if [ "$skill" = 1 ]; then "$here/thimble-python" -m app.cli "$@" 2>&1 || true; exit 0; fi
+      if [ "$up" = 1 ]; then "$here/thimble-python" -m app.cli "$@" 2>&1 || true; exit 0; fi
+      if [ "$skill" = 1 ]; then "$here/thimble-python" -m app.cli "$@" || true; exit 0; fi
       exec "$here/thimble-python" -m app.cli "$@"
     fi
     printf 'thimble: unknown command %s\n' "$1" >&2

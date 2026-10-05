@@ -22,7 +22,7 @@ The canvas is where your work goes, and the chat is where you talk with the anal
 
 ## Events from the browser
 
-The browser's events arrive as `<thimble-event … kind="…">` messages inside a system reminder that starts with `thimble browser event:`, sometimes between two tool calls, or as events of the Monitor that /thimble asked you to run.
+The browser's events arrive as `<thimble-event … kind="…">` messages, sometimes between two tool calls: inside a system reminder that starts with `thimble browser event:`, in a tool's result, or as events of the Monitor that /thimble asked you to run.
 
 An event with no text of its own carries one line saying what the analyst did, such as `Start the orientation (final notebook, report)` or `Write the report`, so that the terminal shows it. That line is no brief and no request.
 

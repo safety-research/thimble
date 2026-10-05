@@ -156,6 +156,38 @@ def test_a_message_main_has_not_got_yet_shows_on_its_statusline_until_its_line_p
     assert line() == "", "main got both"
 
 
+def test_a_queued_message_leaves_the_statusline_on_the_monitor_route_and_when_another_session_is_main():
+    """No held hook prints a line on the Monitor route, so the watcher's ack ends the message's place on the
+    statusline; a session that is no longer main shows none of the words queued for it, and they go once the new main
+    gets a message."""
+    from app import bg_session
+
+    def line(sid: str = SID) -> str:
+        return asyncio.run(bg_session.agents_route(bg_session.AgentsQuery(cwd=_cwd(), session=sid)))["line"]
+
+    _subscribe(SID, cc_plugin.MONITOR)
+    session.attach(CORPUS, SID, _cwd(), None)
+    # queued while main's shim had not subscribed yet (events._awaits_shim), which noted it for the statusline
+    posted = events.post(CORPUS, "main", {"text": "Which kinds of link failed today?"})
+    events._notices[(CORPUS, SID)] = [(posted["id"], "Which kinds of link failed today?"), ("e0", "an older one")]
+    assert line() == f"thimble · {events.QUEUED}Which kinds of link failed today? (and 1 more)"
+
+    async def take() -> None:
+        got = await events.pull_route(Req(), cwd=_cwd(), session=SID, wait=1)
+        await events.ack_route(events.AckBody(cwd=_cwd(), session=SID, id=got["id"], terminal=False))
+
+    asyncio.run(take())
+    assert line() == f"thimble · {events.QUEUED}an older one", "the acknowledged one is gone"
+
+    other = "0ther000-0000-4000-8000-000000000001"
+    _subscribe(other)
+    session.attach(CORPUS, other, _cwd(), None)
+    assert line() == "", "SID is not main"
+    events.post(CORPUS, "main", {"text": "And yesterday?"})
+    assert line(other) == f"thimble · {events.QUEUED}And yesterday?"
+    assert (CORPUS, SID) not in events._notices
+
+
 def test_a_tray_entry_claude_code_refuses_is_asked_for_once_and_its_line_prints_once(monkeypatch):
     """Claude Code may refuse main's Agent call that shows a background session in the agent tray, as auto mode can:
     thimble then asks main no more for that session, while its own refusal of a second tray entry is no such refusal.
@@ -354,6 +386,14 @@ def test_the_server_answers_a_hook_route_only_to_a_request_that_proves_the_token
         r = client.post("/api/events/held", json=body, headers=good)
         assert r.status_code == 200 and r.headers[hook_auth.PROOF_HEADER] == proof
         assert client.get("/api/health").status_code == 200, "no other route asks for it"
+        # a session started before the update to 0.6.0 calls 0.5.0's routes, which answer as the new ones, proof and all
+        assert client.post("/api/channel/held", json=body, headers=wrong).status_code == 401
+        r = client.post("/api/channel/held", json=body, headers=good)
+        assert r.status_code == 200 and r.headers[hook_auth.PROOF_HEADER] == proof
+        assert set(events.OLD_PATHS.values()) <= {*hook_auth.HOOK_PATHS, *hook_auth.SHIM_PATHS, "/api/events/main",
+                                                  "/api/events/sessions"}
+        relay = {"cwd": _cwd(), "request_id": "r1", "tool_name": "Bash"}
+        assert client.post("/api/channel/permission", json=relay, headers=_signed()[0]).status_code == 404
         _record_token(home, token="rotated")  # a new start writes a new token, which the server reads at once
         assert client.post("/api/events/held", json=body, headers=_signed()[0]).status_code == 401
         assert client.post("/api/events/held", json=body, headers=_signed("rotated")[0]).status_code == 200

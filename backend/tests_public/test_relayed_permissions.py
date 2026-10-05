@@ -147,6 +147,11 @@ async def test_four_relayed_requests_stay_while_main_idles_on_its_background_age
     session.tail_once(lv)
     assert _held() == [ids["a3"], ids["a4"]]
 
+    # a call nobody asked about (allowed without a prompt) answers nothing
+    _write(files["a3"], [_assistant(_use("bash_a3_ls", "Bash", {"command": "ls"})), _result("bash_a3_ls", "x")])
+    session.tail_once(lv)
+    assert _held() == [ids["a3"], ids["a4"]], "an unasked call ended a3's prompt"
+
     # the two agents stop: nothing can still ask their prompts, so they leave the card and their hooks' waits end
     note = "<task-notification>\n<task-id>{a}</task-id>\n<status>killed</status>\n</task-notification>"
     _write(tmp_path / f"{SID}.jsonl", [{"type": "user", "origin": {"kind": "task-notification"},

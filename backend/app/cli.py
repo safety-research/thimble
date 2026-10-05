@@ -101,9 +101,10 @@ UNINSTALL_SHELL_LINE = "thimble: uninstall is a shell command, not a /thimble ac
 # What /thimble prints where the plugin's hooks are off, so that thimble connects through main's Monitor
 # (cc_plugin.route): on that route permission prompts stay in the terminal, and after /clear the Monitor is gone, so the
 # note asks for /thimble again.
-MONITOR_NOTE = ("thimble: WARNING - Claude Code hooks are disabled in this session, so thimble connects through a Monitor "
-                "instead. Permission prompts appear only here in the terminal, and Claude may ask you to confirm here "
-                "what you approved in the browser. After /clear, say /thimble again.")
+MONITOR_NOTE = ("thimble: WARNING - your settings or your organization's turn thimble's plugin hooks off in this "
+                "session, so thimble connects through a Monitor instead. Permission prompts appear only here in the "
+                "terminal, and Claude may ask you to confirm here what you approved in the browser. After /clear, say "
+                "/thimble again.")
 MONITOR_MARK = "thimble-monitor:"  # then the command main's Monitor runs (plugin/skills/thimble/SKILL.md)
 WATCHER = "bin/.thimble-watch"  # the plugin's hidden watcher, under its root
 FRESH = "fresh"  # /thimble fresh: the folder's workspace moved aside, an empty one opened

@@ -78,10 +78,15 @@ SUB_QUIET_S = 1.0  # a foreground subagent whose result is in is finished once i
 TAIL_BUSY_S, TAIL_IDLE_S = 0.5, 1.0
 GRACE_S = 10.0  # a workspace with no subscriber for this long has no session
 SID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
-EVENT_RE = re.compile(rf"^\s*<{EVENT_TAG}\s([^>]*)>\n?(.*?)\n?</{EVENT_TAG}>\s*$", re.S)  # one event, as events.render
+# a transcript thimble 0.5.0 wrote holds its events as `<channel source="plugin:thimble:thimble" …>`: as records of
+# origin OLD_ORIGIN on the channel route, inside task notifications on the hook and Monitor routes
+OLD_TAG, OLD_ORIGIN, OLD_SOURCE = "channel", "channel", "plugin:thimble:thimble"
+# one event, as events.render writes it or 0.5.0's channel did
+EVENT_RE = re.compile(rf"^\s*<(?:{EVENT_TAG}|{OLD_TAG})\s([^>]*)>\n?(.*?)\n?</(?:{EVENT_TAG}|{OLD_TAG})>\s*$", re.S)
 ATTR_RE = re.compile(r'([A-Za-z_][A-Za-z0-9_]*)="([^"]*)"')
-# a browser event inside a task notification (the hook and Monitor routes, module note)
-EVENT_TAG_RE = re.compile(rf"<{EVENT_TAG}\s[^>]*>.*?</{EVENT_TAG}>", re.S)
+# a browser event inside a task notification (the hook and Monitor routes, module note), or one of 0.5.0's
+EVENT_TAG_RE = re.compile(rf'<{EVENT_TAG}\s[^>]*>.*?</{EVENT_TAG}>'
+                          rf'|<{OLD_TAG}\s+source="{re.escape(OLD_SOURCE)}"[^>]*>.*?</{OLD_TAG}>', re.S)
 # a Monitor event's output in its task notification, which Claude Code 2.1.281 writes with &, < and > escaped
 MONITOR_EVENT_RE = re.compile(r"</summary>\s*<event>(.*?)</event>", re.S)
 MONITOR_TOOL = "Monitor"
@@ -1085,8 +1090,8 @@ def _command_line(text: str) -> str | None:
 
 
 def browser_events(text: str) -> list[str]:
-    """The browser events a task notification carries, each as its `<thimble-event …>…</thimble-event>` text; a Monitor event's
-    `<event>` block is escaped, so it is unescaped once."""
+    """The browser events a task notification carries, each as its `<thimble-event …>…</thimble-event>` text (or
+    0.5.0's, OLD_TAG); a Monitor event's `<event>` block is escaped, so it is unescaped once."""
     blocks = MONITOR_EVENT_RE.findall(text or "")
     if blocks:
         return [tag for block in blocks for tag in EVENT_TAG_RE.findall(html.unescape(block))]
@@ -1903,7 +1908,9 @@ def translate(lv: Live, line: bytes | str) -> None:
         text = _user_text(rec)
         if text is None:
             return
-        if origin == "task-notification" and browser_events(text):
+        if origin == OLD_ORIGIN:  # a 0.5.0 transcript's event, read again (OLD_TAG)
+            _browser_event(lv, text, mid_turn=False)
+        elif origin == "task-notification" and browser_events(text):
             for tag in browser_events(text):
                 _browser_event(lv, tag, mid_turn=False)
         elif origin == "task-notification":
@@ -1944,7 +1951,9 @@ def translate(lv: Live, line: bytes | str) -> None:
             aorigin = (att.get("origin") or {}).get("kind") if isinstance(att.get("origin"), dict) else None
             prompt = str(att.get("prompt") or "")
             tags = browser_events(prompt) if aorigin in (None, "task-notification") else []
-            if tags:
+            if aorigin == OLD_ORIGIN:  # a 0.5.0 transcript's event, read again (OLD_TAG)
+                _browser_event(lv, prompt, mid_turn=True)
+            elif tags:
                 for tag in tags:
                     _browser_event(lv, tag, mid_turn=True)
             elif aorigin == "task-notification" or att.get("commandMode") == "task-notification":

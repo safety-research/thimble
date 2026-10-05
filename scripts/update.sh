@@ -13,8 +13,8 @@
 # exist; for a path --sums FILE, else a SHA256SUMS in the zip's folder when there is one. A mismatch refuses the update.
 # Either way install.sh runs npm ci again when package-lock.json changed and Node 20+ is present, since custom views need
 # the frontend's packages; in a checkout it also rebuilds frontend/dist when the pull changed a file it is built from (a
-# release brings its own build). Claude Code takes the new plugin copy only when plugin.json's version changed; a running
-# server is not restarted here (one line says how).
+# release brings its own build). Claude Code takes the new plugin copy only when plugin.json's version changed, and a
+# running session only when it restarts; a running server is not restarted here (one line says how for each).
 set -euo pipefail
 
 usage() { sed -n '2,/^set -euo/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//'; }
@@ -150,6 +150,9 @@ if [ "$dry" != 1 ]; then
     say "version unchanged ($old_version): the files are updated, but Claude Code keeps its cached plugin copy until plugin.json's version changes"
   else
     say "thimble $old_version → $new_version"
+    # a running session keeps the plugin it loaded (its MCP shim, and the hooks of a cached copy) until it restarts
+    say "Claude Code sessions started before this update keep the previous plugin: quit each one and run" \
+      "\`thimble\` again (\`thimble -c\` continues the last session)"
   fi
   # a running server keeps the old code until restarted; the analyst picks the moment
   if [ -f "$home/server.json" ]; then

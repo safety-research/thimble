@@ -3,7 +3,8 @@ runs under, and whether the plugin's hooks run there, which decides the route br
 
 Browser events reach a session through the plugin's hooks (plugin/hooks/hooks.json, plugin/bin/.thimble-watch): the
 HOOK route. Where the hooks are off, by `disableAllHooks` in the analyst's, the project's or the folder's local settings,
-or by the org's managed tier (`disableAllHooks`, or `allowManagedHooksOnly` without this plugin enabled there), main
+or in the `--settings` the session's `claude` was started with (the launcher passes the analyst's own there), or by the
+org's managed tier (`disableAllHooks`, or `allowManagedHooksOnly` without this plugin enabled there), main
 arms a Monitor on the watcher instead: the MONITOR route (`route`). The managed tier is the org's server-managed
 settings (remote-settings.json in Claude Code's config dir) when they exist, else managed-settings.json with its
 managed-settings.d drop-ins in the platform's managed folder (`managed`).
@@ -119,9 +120,37 @@ def managed(environ: Mapping[str, str] | None = None) -> dict[str, Any] | None:
     return tier
 
 
+def flag_settings(environ: Mapping[str, str] | None = None) -> dict[str, Any] | None:
+    """The settings the `claude` process a command runs under (claude_pid) was started with by its last `--settings`,
+    inline JSON or a file relative to that process's folder; None without one, or when it cannot be read. Without /proc
+    the command line comes split on white space (procs.argv), so inline JSON is read from the words joined again."""
+    pid = claude_pid(environ)
+    args = procs.argv(pid) if pid else []
+    at, value = -1, ""
+    for i, a in enumerate(args):
+        if a == "--settings" and i + 1 < len(args):
+            at, value = i + 1, args[i + 1]
+        elif a.startswith("--settings="):
+            at, value = i, a[len("--settings="):]
+    if at < 0:
+        return None
+    try:
+        if value.lstrip().startswith("{"):
+            try:
+                d = json.loads(value)
+            except ValueError:
+                d = json.JSONDecoder().raw_decode(" ".join([value, *args[at + 1:]]).lstrip())[0]
+        else:
+            d = _read((procs.cwd(pid) or Path.cwd()) / Path(value).expanduser())
+    except (ValueError, OSError):
+        return None
+    return d if isinstance(d, dict) else None
+
+
 def hooks_blocked(cwd: Path, root: Path, environ: Mapping[str, str] | None = None) -> bool:
     """Whether the plugin's hooks are off for a session in `cwd` (module note): by the managed tier, or by
-    `disableAllHooks` as the analyst's, the project's and the folder's local settings resolve it, the later winning."""
+    `disableAllHooks` as the analyst's, the project's and the folder's local settings and the session's `--settings`
+    (flag_settings) resolve it, the later winning, as Claude Code ranks them."""
     tier = managed(environ) or {}
     if tier.get("disableAllHooks") is True:
         return True
@@ -134,6 +163,9 @@ def hooks_blocked(cwd: Path, root: Path, environ: Mapping[str, str] | None = Non
         v = (_read(path) or {}).get("disableAllHooks")
         if isinstance(v, bool):
             value = v
+    v = (flag_settings(environ) or {}).get("disableAllHooks")
+    if isinstance(v, bool):
+        value = v
     return value is True
 
 

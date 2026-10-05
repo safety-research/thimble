@@ -138,6 +138,28 @@ class RequestTiming:
         await self.app(scope, receive, send_timed)
 
 
+class OldEventRoutes:
+    """Pure ASGI middleware, outermost: a request on a route thimble 0.5.0 named for Claude Code channels, which a
+    session started before the update still calls, goes on as its new route (events.OLD_PATHS), so every check and the
+    router see the new path. Each such route is logged once."""
+
+    def __init__(self, app) -> None:
+        self.app = app
+        self.seen: set[str] = set()
+
+    async def __call__(self, scope, receive, send) -> None:
+        from . import events  # noqa: PLC0415
+
+        new = events.OLD_PATHS.get(scope.get("path", "")) if scope["type"] == "http" else None
+        if new is not None:
+            if scope["path"] not in self.seen:
+                self.seen.add(scope["path"])
+                log.info("%s answers as %s: a Claude Code session started before the update to thimble 0.6.0 calls "
+                         "it; restarting that session loads the new plugin", scope["path"], new)
+            scope = {**scope, "path": new, "raw_path": new.encode("latin-1")}
+        await self.app(scope, receive, send)
+
+
 class CompleteStreams:
     """Pure ASGI middleware. When the server stops, sse_starlette cancels each event stream without the response's last
     message, which uvicorn reports as an error; such a response gets its last, empty message here. An unfinished
@@ -336,7 +358,8 @@ def create_app() -> FastAPI:
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=ALLOWED_HOSTS)
     app.add_middleware(SecurityHeaders)  # outside the two checks, so their refusals carry the headers too
     app.add_middleware(RequestTiming)  # times the whole stack
-    app.add_middleware(CompleteStreams)  # added last = outermost: sees every response's last message
+    app.add_middleware(CompleteStreams)  # sees every response's last message
+    app.add_middleware(OldEventRoutes)  # added last = outermost: the checks see the new path
 
     for name in ROUTER_MODULES:
         try:

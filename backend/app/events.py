@@ -25,6 +25,10 @@ as a follow-up to the orientation, waits there too (show). With every hook off (
 them. A message the analyst sends while main's turn runs reaches the session only at the turn's next tool call, or once
 the turn ends, so main's statusline shows its words at once, after QUEUED, until the held hook prints its line
 (queued_line, which bg_session.agents_route adds to the statusline).
+
+A session started before an update to 0.6.0 runs 0.5.0's MCP shim, and perhaps the hooks of 0.5.0's cached plugin copy,
+until Claude Code restarts. Those call the routes 0.5.0 named for Claude Code channels, which answer as their new routes
+for this release (OLD_PATHS, which main.OldEventRoutes applies), so such a session still hears the browser.
 """
 from __future__ import annotations
 
@@ -80,6 +84,12 @@ SAID = "› "  # opens the analyst's own words in main's terminal (terminal_line
 QUEUED = "queued from the browser: "  # opens the statusline's line of a message main has not got yet (queued_line)
 LINE_CHARS = 160  # of an event's line in main's terminal: about two lines
 NOTICES_KEPT = 50  # a session's queued messages kept for its statusline; the oldest go first
+# 0.5.0's routes (module note) -> the route each answers as. A 0.5.0 shim's own relay of a channel's permission prompt
+# (/api/channel/permission) has none: the PermissionRequest hook relays the same prompt.
+OLD_PATHS = {"/api/channel": "/api/events", "/api/channel/pull": "/api/events/pull", "/api/channel/ack": "/api/events/ack",
+             "/api/channel/held": "/api/events/held", "/api/channel/mode": "/api/events/mode",
+             "/api/channel/main": "/api/events/main", "/api/channel/sessions": "/api/events/sessions",
+             "/api/channel/permission/hook": "/api/events/permission"}
 _KEY_RE = re.compile(r"[^A-Za-z0-9_]")
 _KIND_RE = re.compile(r"^- `([a-z_]+)`", re.M)
 
@@ -496,10 +506,14 @@ def _publish(c: str, note: dict[str, Any]) -> int:
 
 def _notice(c: str, sid: str, note: dict[str, Any]) -> None:
     """Keep the analyst's words of an event that carries them (terminal_line's SAID) for session `sid`'s statusline
-    (queued_line); the held hook forgets them once the session gets the event (held_route)."""
+    (queued_line); the held hook forgets them once the session gets the event (held_route), and the Monitor route's ack
+    does (ack_route). Only main gets events, so the words kept for another session of the workspace, one main was
+    before, go."""
     line = str(note.get("terminal") or "")
     if not line.startswith(SAID):
         return
+    for key in [k for k in _notices if k[0] == c and k[1] != sid]:
+        del _notices[key]
     kept = _notices.setdefault((c, sid), [])
     kept.append((str((note.get("meta") or {}).get("event") or ""), line[len(SAID):]))
     del kept[:-NOTICES_KEPT]
@@ -568,8 +582,11 @@ def move_events(c: str, old: str, new: str) -> None:
 
 def queued_line(c: str, sid: str | None, chars: int = 110) -> str:
     """Main's statusline line for the messages the analyst sent that session `sid` has not got yet (module note): the
-    oldest one's words after QUEUED, cut at `chars`, and how many more wait; '' for none."""
-    waiting = [words for _, words in _notices.get((c, sid or ""), [])]
+    oldest one's words after QUEUED, cut at `chars`, and how many more wait; '' for none, and for a session that is not
+    main."""
+    if not sid or sid != _main_sid(c):
+        return ""
+    waiting = [words for _, words in _notices.get((c, sid), [])]
     if not waiting:
         return ""
     more = f" (and {len(waiting) - 1} more)" if len(waiting) > 1 else ""
@@ -767,8 +784,11 @@ async def ack_route(body: AckBody) -> dict[str, Any]:
     taken = _taken.pop(body.id, None)
     if taken is None:
         raise HTTPException(404, "no such event is in flight")
+    key = (taken[0], body.session or "")
     if body.terminal and taken[2].get("terminal"):
-        _lines.setdefault((taken[0], body.session or ""), []).append((body.id, str(taken[2]["terminal"])))
+        _lines.setdefault(key, []).append((body.id, str(taken[2]["terminal"])))
+    elif key in _notices:  # the Monitor route: no held hook prints its line, so the statusline lets it go now
+        _notices[key] = [n for n in _notices[key] if n[0] != body.id]
     return {"acknowledged": body.id}
 
 
@@ -796,7 +816,6 @@ async def held_route(body: HeldBody) -> dict[str, Any]:
         _notices[key] = [n for n in _notices[key] if n[0] not in shown]
     lines = [*(line for _, line in written), _joined(riders)]
     return {"text": meanwhile(riders), "terminal": "\n".join(dict.fromkeys(x for x in lines if x))}
-
 
 
 class ModeBody(BaseModel):
@@ -1043,8 +1062,10 @@ def agent_moved(c: str, agent: str, after: float) -> None:
 def calls_done(c: str, agent: str | None, done: "list[tuple[tuple[str, str], float]]") -> None:
     """Calls of the subagent or fork `agent`, or of main when it is None, got their results (each call_key with the
     result's time): the prompt each one waited on was answered, in the terminal or here, so its hook's wait ends and
-    the browser drops its card. A call is matched to the prompt with its call_key, else, for a subagent, to the one
-    prompt of its tool that agent has open; any other prompt stays."""
+    the browser drops its card. A call is matched to the prompt with its call_key, else, for a subagent's call of a tool
+    whose key is its whole input (no CALL_FIELDS entry, so a field the prompt and the call do not share can tell them
+    apart), to the one prompt of its tool that agent has open; any other prompt stays. A call of a tool CALL_FIELDS
+    names that matches no prompt is one the agent made without a prompt, such as an `ls` beside a prompted `wc -l`."""
     gone: set[str] = set()
     answered = _answered.get((c, agent or ""), [])
     for key, at in done:
@@ -1054,8 +1075,8 @@ def calls_done(c: str, agent: str | None, done: "list[tuple[tuple[str, str], flo
         open_ = sorted(((i, a) for i, a in _asks.items() if a.c == c and a.agent == agent and i not in gone
                         and a.call[0] == key[0] and a.at <= at), key=lambda x: x[1].at)
         hit = next((i for i, a in open_ if a.call == key), None)
-        if hit is None and len(open_) == 1 and agent is not None:  # main's prompts and calls carry the same input
-            hit = open_[0][0]
+        if hit is None and len(open_) == 1 and agent is not None and key[0] not in CALL_FIELDS:
+            hit = open_[0][0]  # main's prompts and calls carry the same input
         if hit is not None:
             gone.add(hit)
     for request_id in gone:

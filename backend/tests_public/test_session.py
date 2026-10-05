@@ -521,3 +521,28 @@ def test_a_copied_record_is_known_by_its_uuid_or_its_time_and_a_session_that_goe
     assert not session._copied(lv.copied, {"uuid": "2-1", "timestamp": MOVED_AT})
     _write(old, _stamped(SID, 9, "2026-10-02T01:00:00.000Z", _human("back again")))
     assert session._continued_in(str(old)) is None
+
+
+def test_a_transcript_thimble_0_5_0_wrote_keeps_its_browser_events_in_the_context(tmp_path):
+    """A main session resumed after the update to 0.6.0 has 0.5.0's records before its own: its events as records of
+    origin `channel` (the channel route, meta records) and as `<channel source="plugin:thimble:thimble">` tags in task
+    notifications (the hook route). The context's conversation reads them as the analyst's messages, beside 0.6.0's
+    form, and another channel's tag stays a notification."""
+    from app import context
+
+    def user(content: str, origin: str, **extra) -> dict:
+        return {"type": "user", "origin": {"kind": origin}, "message": {"role": "user", "content": content}, **extra}
+
+    path = tmp_path / f"{SID}.jsonl"
+    path.write_text("\n".join(json.dumps(r) for r in [
+        user('<channel source="plugin:thimble:thimble" kind="main" event="a1">\nfirst, on the channel\n</channel>',
+             "channel", isMeta=True),
+        user('<task-notification>\n<channel source="plugin:thimble:thimble" kind="main" event="a2">\nsecond, by the '
+             'hook\n</channel>\n</task-notification>', "task-notification"),
+        user('<task-notification>\n<thimble-event kind="main" event="a3">\nthird, in 0.6.0\n</thimble-event>\n'
+             '</task-notification>', "task-notification"),
+    ]) + "\n")
+    said = [(e.head, e.body) for e in context._entries(path)]
+    assert said == [("[analyst]", "first, on the channel"), ("[analyst]", "second, by the hook"),
+                    ("[analyst]", "third, in 0.6.0")]
+    assert session.browser_events('<channel source="plugin:other:x" kind="main">not ours</channel>') == []

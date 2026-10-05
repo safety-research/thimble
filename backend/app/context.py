@@ -120,6 +120,7 @@ def _event(raw: str, forks: bool = True) -> _Entry | None:
     body = (m.group(2) if m else str(raw or "")).strip()
     kind = attrs.pop("kind", "")
     attrs.pop("event", None)
+    attrs.pop("source", None)  # 0.5.0's tag (session.OLD_TAG)
     if kind in ("main", ""):
         return _Entry("[analyst]", body) if body else None
     if kind == events.THREAD:
@@ -200,7 +201,11 @@ def _entries(path: Path, forks: bool = True) -> list[_Entry]:
             entries.append(_Entry(f"[notification {status}]" if status else "[notification]", result))
 
     def prompt(text: str, origin: str | None) -> None:
-        if origin == "task-notification":
+        if origin == session.OLD_ORIGIN:  # an event in a transcript thimble 0.5.0 wrote
+            e = _event(text, forks)
+            if e is not None:
+                entries.append(e)
+        elif origin == "task-notification":
             notification(text)
         elif origin in (None, "human"):
             command = session._command_line(text)
@@ -217,7 +222,7 @@ def _entries(path: Path, forks: bool = True) -> list[_Entry]:
         if kind == "user":
             _results(rec, calls, hidden)
             text = session._user_text(rec)
-            if text is None or rec.get("isCompactSummary") or rec.get("isMeta"):
+            if text is None or rec.get("isCompactSummary") or (rec.get("isMeta") and origin != session.OLD_ORIGIN):
                 continue
             prompt(text, origin)
         elif kind == "attachment":

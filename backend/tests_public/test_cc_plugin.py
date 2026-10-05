@@ -87,6 +87,29 @@ def test_the_route_is_the_hooks_unless_settings_turn_them_off(cc, tmp_path, monk
     assert cc_plugin.route(folder, root) == (cc_plugin.MONITOR if off else cc_plugin.HOOK)
 
 
+@pytest.mark.parametrize("how", ["inline", "split", "file", "equals", "none"])
+def test_the_launcher_s_settings_turn_the_hooks_off_over_the_folder_s(cc, tmp_path, monkeypatch, how):
+    """`thimble --settings` with disableAllHooks reaches main as the `--settings` its `claude` runs with, which Claude
+    Code ranks over the analyst's and the folder's settings: the route is the Monitor's. Without /proc the command line
+    comes split on white space."""
+    from app import procs
+
+    root, folder = _tree(tmp_path), tmp_path / "corpus"
+    (folder / ".claude").mkdir(parents=True)
+    (folder / ".claude" / "settings.local.json").write_text(json.dumps({"disableAllHooks": False}))
+    value = json.dumps({"statusLine": {"type": "command", "command": "a b"}, "disableAllHooks": True})
+    (tmp_path / "s.json").write_text(value)
+    argv = {"inline": ["claude", "--settings", value, "--", "/thimble"],
+            "split": ["claude", "--settings", *value.split(), "--", "/thimble"],
+            "file": ["claude", "--settings", "s.json"],
+            "equals": ["claude", f"--settings={value}"],
+            "none": ["claude", "--resume"]}[how]
+    monkeypatch.setattr(cc_plugin, "claude_pid", lambda environ=None: 4242)
+    monkeypatch.setattr(procs, "argv", lambda pid: argv if pid == 4242 else [])
+    monkeypatch.setattr(procs, "cwd", lambda pid: tmp_path)
+    assert cc_plugin.route(folder, root) == (cc_plugin.HOOK if how == "none" else cc_plugin.MONITOR)
+
+
 def test_slash_thimble_prints_nothing_about_routes_on_the_hook_route_and_the_monitor_s_command_off_it(
         cc, tmp_path, monkeypatch):
     monkeypatch.setattr(cli, "plugin_root", lambda: tmp_path / "plugin")
