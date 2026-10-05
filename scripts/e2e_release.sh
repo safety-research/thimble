@@ -200,7 +200,8 @@ if ! claude_files > "$logs/claude-files-before.json" 2>&1; then
 fi
 files_before="$logs/claude-files-before.json"
 flags=(--browser bundled --no-sandbox-deps --no-plugin --no-trust-workspaces)
-if ! (cd "$src_tree" && in_env bash scripts/install.sh "${flags[@]}" --dry-run) < /dev/null > "$logs/install-plan.log" 2>&1; then
+# --verbose: the dry run then prints every step's commands, which the check below reads
+if ! (cd "$src_tree" && in_env bash scripts/install.sh "${flags[@]}" --dry-run --verbose) < /dev/null > "$logs/install-plan.log" 2>&1; then
   record install fail "install.sh --dry-run exited non-zero; see logs/install-plan.log"; exit 1
 fi
 planned="$(grep -E '^\+ claude plugin ' "$logs/install-plan.log" || true)"

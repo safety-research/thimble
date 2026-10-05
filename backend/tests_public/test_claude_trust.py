@@ -134,9 +134,9 @@ def test_a_yes_writes_the_install_s_own_entry_even_where_a_folder_above_trusts_i
     cfg.parent.mkdir()
     cfg.write_text(json.dumps(projects(**{str(parent): T})))
     record = tmp_path / "thimble-home" / claude_changes.TRUST_FILE
-    assert claude_changes.question(tree) == "" and "is trusted" in claude_changes.install_trust(tree)
+    assert claude_changes.question(tree) == "" and claude_changes.install_trust(tree) == (f"Claude Code trusts {tree}", True)
     assert str(tree) not in json.loads(cfg.read_text())["projects"]
-    claude_changes.install_trust(tree, "yes")
+    assert claude_changes.install_trust(tree, "yes") == (f"Claude Code trusts {tree} now ({cfg})", True)
     assert json.loads(cfg.read_text())["projects"][str(tree)] == T and json.loads(record.read_text())["added"] is True
     record.unlink()
     claude_changes.install_trust(tree, "yes")

@@ -21,6 +21,9 @@
 #   thimble cc-mod on [--yes] | off | status
 #                                        thimble-cc-mod in this folder, by `claude plugin` at project scope; the thimble
 #                                        plugin stays as it is (backend/app/cli.py cmd_cc_mod)
+#   thimble plugin on | off | status     thimble in every Claude Code session, or only in the sessions this command
+#                                        starts, which load its plugin either way (scripts/plugin.sh, bash: it needs no
+#                                        venv)
 #   thimble launch-args [--cwd <p>] [--settings <s>]
 #                                        what a session starts with: the channel entry, the --allowedTools, --effort and
 #                                        --settings values, the tools that end a turn without text, main's --name, then
@@ -81,6 +84,8 @@ usage: thimble [claude flags...]          start thimble in this folder: a new Cl
        thimble cc-mod on [--yes] | off | status
                                           thimble-cc-mod (a single-agent thimble inside Claude Code) in this
                                           folder
+       thimble plugin on | off | status   thimble in every Claude Code session (/thimble in any `claude`), or
+                                          only in the sessions `thimble` starts
        thimble update [--from <zip>]      bring the install up to date
        thimble uninstall [--yes] [--keep-home]
 EOF
@@ -433,6 +438,12 @@ case "${1:-}" in
     shift; uninstall "$@";;
   feedback)
     shift; feedback "$@";;
+  plugin)
+    # scripts/plugin.sh of the tree this copy belongs to (bin/thimble-app-dir), which registers it with `claude plugin`
+    shift
+    repo="$("$here/thimble-app-dir" 2>&1)" || { printf '%s\n' "$repo" >&2; exit 1; }
+    [ -f "$repo/scripts/plugin.sh" ] || { printf 'thimble plugin: %s has no scripts/plugin.sh (an install older than 0.6.0): run thimble update first\n' "$repo" >&2; exit 1; }
+    exec bash "$repo/scripts/plugin.sh" "$@";;
   status)
     shift; exec "$self" server status "$@";;
   *)
