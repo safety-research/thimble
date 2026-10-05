@@ -366,6 +366,8 @@ def export(ws: Path, corpus: Path, out: Path, *, name: str, home: Path | None = 
         meta = chat_summary(ws)
         manifest = {
             "schema": SCHEMA, "version": VERSION, "dataset": name, "created": now(),
+            # the source's own notice travels with excerpts of it (mythos-5's asks to stay out of training corpora)
+            "notice": DATASETS[name].notice if name in DATASETS else "",
             "thimble": {"version": _thimble_version(), "commit": _commit()},
             "orientation": {k: run.get(k) for k in ("status", "passes", "query", "effort", "ultracode", "critique",
                                                     "started", "ended") if isinstance(run, dict)}

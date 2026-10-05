@@ -35,10 +35,10 @@ A pre-cache made with an older thimble still installs: the format has a version 
 
 - `thimble-demo-precache.json`: `schema` (`thimble-demo-precache`), `version` (1), `dataset`, `created`, `thimble`
   (version and commit that made it), `orientation` (status, outputs, effort, Ultracode, critique, model, start and end),
-  `counts` (cards, labels, views, documents, chats), `corpus` (each file the orientation read, with its size and
-  SHA-256, checked on install), `placeholders`, `files` (each file kept, with its size and SHA-256), `left_out` (each
-  file left out and why), `gitleaks`, `user_name_scrubbed`, `typed_in_main`, `marked_done` (chats whose meta still said
-  they ran, written done), `flagged`.
+  `notice` (the source's own, such as mythos-5's canary), `counts` (cards, labels, views, documents, chats), `corpus`
+  (each file the orientation read, with its size and SHA-256, checked on install), `placeholders`, `files` (each file
+  kept, with its size and SHA-256), `left_out` (each file left out and why), `gitleaks`, `user_name_scrubbed`,
+  `typed_in_main`, `marked_done` (chats whose meta still said they ran, written done), `flagged`.
 - `workspace/`: the files of the workspace folder, by their paths in it: `notebooks/` (the cards and their full-size
   outputs), `concepts/` and `labels/*.jsonl` (the labels), `views/` and `extension/` (the views), `investigations/`
   (the documents and the event stream), `chats/` and `calls/` (main's chat, the orientation's thread and its calls),

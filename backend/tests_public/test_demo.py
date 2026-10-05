@@ -440,3 +440,11 @@ def test_the_analyst_picks_the_folder_thimble_starts_in(tmp_path, monkeypatch):
         assert demo.pick_folder(folders) == want
     monkeypatch.setattr("builtins.input", lambda q: "")
     assert demo.pick_folder(folders[:1]) == folders[0]
+
+
+def test_a_precache_carries_its_sources_notice(tmp_path):
+    corpus = tmp_path / "corpus"
+    corpus.mkdir()
+    ws = make_workspace(tmp_path, corpus, tmp_path)
+    m = demo.export(ws, corpus, tmp_path / "m.zip", name="mythos-5", home=tmp_path, user="", scan=no_scan)
+    assert "canary GUID" in m["notice"]
