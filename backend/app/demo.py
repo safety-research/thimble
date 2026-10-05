@@ -53,6 +53,7 @@ CATALOG = config.REPO_ROOT / "demos" / "precaches.json"
 DEFAULT_DIR = Path("~/thimble-demo")
 PLACEHOLDERS = {"workspace": "@@THIMBLE_WORKSPACE@@", "corpus": "@@THIMBLE_CORPUS@@", "app": "@@THIMBLE_APP@@",
                 "home": "@@THIMBLE_HOME@@"}
+DASHED = {k: v.replace("@@THIMBLE_", "@@THIMBLE_DASHED_") for k, v in PLACEHOLDERS.items()}
 SCRUBBED_USER = "user"  # what --scrub-user writes in place of the exporter's user name
 
 # What a pre-cache keeps, by the first part of the path in the workspace; anything else is listed as left out.
@@ -64,14 +65,14 @@ REBUILT = {"scratch": "the kernels' mirror of the corpus, rebuilt", "kernels": "
            "viewed.jsonl": "the files the maintainer opened", "sessions.json": "the maintainer's Claude Code sessions",
            "bg-sessions.json": "the maintainer's background sessions", "permissions.jsonl": "permission answers",
            "undo.jsonl": "the undo history", "render-theme.json": "the browser's theme", "unheard.json": "per session",
-           "views-work": "the view builds' own scratch"}
+           "views-work": "the view builds' own scratch", "critique": "the critic's digest of the transcript"}
 SKIP_PARTS = {"__pycache__", "cache", "trash", "tmp"}
 SKIP_SUFFIXES = (".sqlite", ".sqlite-wal", ".sqlite-shm", ".lock", ".log", ".tmp", ".pyc", ".png")
 DOT_OK = {"views", "extension"}  # where dot files are thimble's own records (views/.versions, .reviewed)
 WORK_FILE_MAX = 5_000_000  # a file in orient/work larger than this is left out (cards keep their outputs)
 TEXT_SUFFIXES = (".json", ".jsonl", ".md", ".txt", ".py", ".html", ".csv", ".js", ".css", ".tsv", ".yaml", ".yml")
 SECRET_KEY_RE = re.compile(r"key|token|secret|password|credential", re.I)
-ABS_PATH_RE = re.compile(r"(?<![\w.@])/(?:home|Users|mnt|tmp|private|var/folders|root)/[\w.@+-]+")
+ABS_PATH_RE = re.compile(r"(?<![\w.@])/(?:home|Users|mnt|root)/[\w.@+-]+")  # /tmp is the data's, mostly
 # zip entry names a pre-cache may hold: relative, no `..`, no backslash
 SAFE_NAME = re.compile(r"^(?!/)(?!.*(?:^|/)\.\.(?:/|$))[^\\\x00]+$")
 
@@ -130,34 +131,39 @@ def kept(rel: Path, size: int) -> str | None:
     return None
 
 
-def _forms(path: str) -> list[str]:
-    """The ways an absolute path is written in a workspace's files: as is, JSON-escaped, and with a trailing slash."""
-    esc = json.dumps(path)[1:-1]
-    return list(dict.fromkeys([path, esc]))
+def dashed(path: str) -> str:
+    """A folder as Claude Code names its projects folder: every character but a letter or digit as `-`."""
+    return re.sub(r"[^A-Za-z0-9]", "-", path)
 
 
 def placeholder_pairs(workspace: Path, corpus: Path, home: Path, app: Path) -> list[tuple[str, str]]:
-    """(absolute path, placeholder) for the workspace, the corpus, thimble's install and the home folder, longest path
-    first, so a workspace inside the home folder is written as the workspace's placeholder."""
+    """(absolute path, placeholder) for the workspace, the corpus, thimble's install and the home folder, as written
+    and JSON-escaped, and as Claude Code's projects folder names them (`-home-a-…`), longest first, so a workspace
+    inside the home folder is written as the workspace's placeholder."""
     pairs = []
     for key, p in (("workspace", workspace), ("corpus", corpus), ("app", app), ("home", home)):
         for form in {str(p), str(p.resolve())}:
-            pairs += [(f, PLACEHOLDERS[key]) for f in _forms(form)]
+            pairs += [(form, PLACEHOLDERS[key]), (json.dumps(form)[1:-1], PLACEHOLDERS[key]),
+                      (dashed(form), DASHED[key])]
     return sorted(set(pairs), key=lambda kv: -len(kv[0]))
 
 
-TRUNCATED_RE = re.compile(r"/[^\s'\"`\\…]{3,}(?:…|\\u2026)")  # a path a summary cut short: `/home/a…`
+# a path cut short: by a summary's ellipsis, or where a logged tool input ends (the string's closing quote)
+TRUNCATED_RE = re.compile(r"/[^\s'\"`\\…]{3,}(?=…|\\u2026|\\?\")")
 
 
 def with_placeholders(text: str, pairs: list[tuple[str, str]]) -> str:
-    """`text` with each path of `pairs` written as its placeholder, also where a summary cut it short (`/home/a…`)."""
+    """`text` with each path of `pairs` written as its placeholder, also where it was cut short (`/home/a…`), which
+    is written as the placeholder and an ellipsis."""
     def cut(m: re.Match[str]) -> str:
-        ell = "…" if m.group().endswith("…") else "\\u2026"
-        head = m.group()[: -len(ell)]
-        return next((new + ell for old, new in pairs if old.startswith(head) and len(head) >= 5), m.group())
+        head = m.group()
+        if head.count("/") < 2 or len(head) < 5:
+            return head
+        ell = "" if m.string.startswith(("…", "\\u2026"), m.end()) else "…"  # the cut keeps its own ellipsis
+        return next((new + ell for old, new in pairs if old.startswith("/") and old.startswith(head) and old != head),
+                    head)
 
-    if "…" in text or "\\u2026" in text:
-        text = TRUNCATED_RE.sub(cut, text)
+    text = TRUNCATED_RE.sub(cut, text)
     for old, new in pairs:
         text = text.replace(old, new)
     return text
@@ -436,6 +442,8 @@ def install(zip_path: Path, ws: Path, corpus: Path, *, home: Path | None = None)
                     for key, ph in PLACEHOLDERS.items():
                         if ph in text:
                             text = text.replace(ph, json.dumps(values[key])[1:-1] if js else values[key])
+                        if DASHED[key] in text:
+                            text = text.replace(DASHED[key], dashed(values[key]))
                     data = text.encode("utf-8")
                 dest = tmp / rel
                 dest.parent.mkdir(parents=True, exist_ok=True)
@@ -645,10 +653,10 @@ def start_session(folder: Path) -> None:
 
 
 def wrapped(say: Callable[[str], None], width: int = 110) -> Callable[[str], None]:
-    """`say`, with a long line wrapped under its own indent (a command to copy is left whole)."""
+    """`say`, with a long line wrapped under its own indent (a command or JSON to copy is left whole)."""
     def out(text: str) -> None:
         for line in text.split("\n"):
-            if len(line) <= width or line.lstrip().startswith("cd "):
+            if len(line) <= width or line.lstrip().startswith(("cd ", "{")):
                 say(line)
                 continue
             indent = line[: len(line) - len(line.lstrip())]
@@ -788,8 +796,8 @@ def run_export(args: argparse.Namespace, say: Callable[[str], None]) -> int:
     o = m["orientation"]
     made = ", ".join(x for x in (str(o.get("model") or "").replace("[1m]", ""), "Ultracode" if o.get("ultracode") else
                                  str(o.get("effort") or ""), "no prompt" if not o.get("query") else "") if x)
-    say("  " + json.dumps({name: {"url": f"https://github.com/{cli.release_repo()}/releases/download/<tag>/"
-                                         f"{out_path.name}", "sha256": digest, "bytes": size, "made_with": made}}))
+    say(json.dumps({name: {"url": f"https://github.com/{cli.release_repo()}/releases/download/<tag>/{out_path.name}",
+                           "sha256": digest, "bytes": size, "made_with": made}}))
     return 0
 
 

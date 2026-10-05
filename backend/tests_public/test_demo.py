@@ -379,13 +379,19 @@ def test_export_scrubs_the_user_name_and_paths_a_summary_cut_short(tmp_path):
     corpus.mkdir()
     ws = make_workspace(tmp_path, corpus, tmp_path)
     cut = str(ws)[: len(str(ws)) - 4] + "…"
-    (ws / "chats" / "o1.jsonl").write_text(json.dumps({"summary": f"drwx maintainername maintainername x\n{cut}"}) + "\n")
+    logged = json.dumps({"input": {"command": f"ls {str(ws)[:-6]}"}, "workflow_dir": f"/p/{demo.dashed(str(ws))}-x"})
+    (ws / "chats" / "o1.jsonl").write_text(json.dumps({"summary": f"drwx maintainername maintainername x\n{cut}"}) + "\n"
+                                           + logged + "\n")
     out = tmp_path / "s.zip"
     m = demo.export(ws, corpus, out, name="toy", home=tmp_path, user="maintainername", scrub_user=True, scan=no_scan)
     with zipfile.ZipFile(out) as zf:
         chat = zf.read("workspace/chats/o1.jsonl").decode()
     assert "drwx user user x" in chat and "@@THIMBLE_WORKSPACE@@\\u2026" in chat and str(tmp_path) not in chat
+    assert '"command": "ls @@THIMBLE_WORKSPACE@@…"' in chat and '"/p/@@THIMBLE_DASHED_WORKSPACE@@-x"' in chat
     assert m["user_name_scrubbed"] == 2 and m["flagged"] == []
+    back = tmp_path / "elsewhere" / "toy"
+    demo.install(out, back, corpus, home=tmp_path)
+    assert f"/p/{demo.dashed(str(back))}-x" in (back / "chats" / "o1.jsonl").read_text()
 
 
 def test_export_command_waits_for_a_finished_orientation(tmp_path, monkeypatch):
