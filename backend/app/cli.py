@@ -3296,6 +3296,8 @@ def build_parser() -> argparse.ArgumentParser:
                          "that is main in --cwd's workspace")
     pr.add_argument("--lead", help="text printed before the prompts, when they print")
     pr.set_defaults(fn=cmd_prompt)
+    from . import demo  # noqa: PLC0415 — `thimble demo`: the demo datasets and their pre-cached orientations
+    demo.add_parser(sub)
     return ap
 
 

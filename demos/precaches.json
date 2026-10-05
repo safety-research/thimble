@@ -1,0 +1,6 @@
+{
+  "schema": "thimble-demo-precaches",
+  "version": 1,
+  "about": "The pre-cached orientations `thimble demo` installs: per dataset, a release asset (<name>.thimble-demo.zip) with its size and SHA-256. demos/README.md says how one is made.",
+  "precaches": {}
+}

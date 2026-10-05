@@ -130,6 +130,28 @@ leave the thimble plugin as it is. Sessions you start with `thimble`, and thimbl
 orientation, critic, writers, checks, task programs and builds), run without the mod; plain `claude` in the folder uses
 it. To use it without installing thimble, see the [mod's README](mods/thimble-cc-mod/README.md).
 
+## Demo datasets
+
+`thimble demo` shows thimble on public data without waiting for an orientation. It lists three datasets with their
+sources and sizes, asks before each download (`--yes` answers for all, or name the ones you want), and rebuilds each
+from its publisher's files into `~/thimble-demo/<name>` (`--dir` moves it):
+
+| dataset | source | download |
+|---|---|---|
+| `collusion-wiki` | the logs of a wiki AI agents used as a message board, from [collusion.wiki](https://collusion.wiki/) | 4.4 MB |
+| `rubyhack` | the diffs of 22 malicious Ruby gems that the [RubyHack investigation](https://www.rubyhack.ai/) cites, from my.diffend.io, with API keys redacted | 1.2 MB |
+| `mythos-5` | the [Mythos 5 transcript](https://github.com/anthropics/mythos-5-incident-transcript) Anthropic released | 2.6 MB |
+
+Each build is checked against the copy the demo's orientations ran on; a source that changed since is named in a
+warning. `~/thimble-demo/SOURCES.md` lists what each build changes. The command then registers each folder, installs
+its pre-cached orientation as the folder's workspace (cards, labels, views, the orientation's thread), and starts
+`thimble` in the first folder (`--no-start` prints the commands instead). A workspace that holds an analysis already
+is left as it is unless `--replace`, which archives it first. Run again, it downloads nothing it already has.
+
+The pre-cached orientations are release assets, named with their SHA-256 in
+[demos/precaches.json](demos/precaches.json); [demos/README.md](demos/README.md) says how a maintainer makes one with
+`thimble demo --export`.
+
 ## Update
 
 `thimble update` installs the latest release; in a Dev install it runs `git pull --ff-only` and the install steps,

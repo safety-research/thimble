@@ -21,6 +21,9 @@
 #   thimble cc-mod on [--yes] | off | status
 #                                        thimble-cc-mod in this folder, by `claude plugin` at project scope; the thimble
 #                                        plugin stays as it is (backend/app/cli.py cmd_cc_mod)
+#   thimble demo [name…] [--yes] [--dir <d>] [--no-start] | --export <workspace> <out>
+#                                        download the demo datasets from their public sources (asking first), open each
+#                                        on its pre-cached orientation, start thimble in the first (backend/app/demo.py)
 #   thimble launch-args [--cwd <p>] [--settings <s>]
 #                                        what a session starts with: the channel entry, the --allowedTools, --effort and
 #                                        --settings values, the tools that end a turn without text, main's --name, then
@@ -56,7 +59,7 @@ plugin="$(cd "$here/.." && pwd -P)"
 
 # the supervisor's subcommands (backend/app/cli.py build_parser) plus the `server` group; `up` is an alias of `ensure`.
 # `uninstall` is the bash function below, so it works with backend/.venv missing or broken.
-SUPERVISOR_COMMANDS=" server up ensure stop restart doctor fix revert update list purge extension cc-mod launch-args prompt "
+SUPERVISOR_COMMANDS=" server up ensure stop restart doctor fix revert update list purge extension cc-mod launch-args prompt demo "
 
 # usage: what `thimble help` prints; the header above has the details.
 usage() {
@@ -81,6 +84,9 @@ usage: thimble [claude flags...]          start thimble in this folder: a new Cl
        thimble cc-mod on [--yes] | off | status
                                           thimble-cc-mod (a single-agent thimble inside Claude Code) in this
                                           folder
+       thimble demo [name...] [--yes] [--dir <d>] [--no-start]
+                                          download public datasets (collusion-wiki, rubyhack, mythos-5), asking
+                                          first, and open each on a pre-cached orientation
        thimble update [--from <zip>]      bring the install up to date
        thimble uninstall [--yes] [--keep-home]
 EOF
