@@ -63,7 +63,8 @@ REBUILT = {"scratch": "the kernels' mirror of the corpus, rebuilt", "kernels": "
            "view-indexes": "views' indexes, rebuilt", "telemetry.jsonl": "the maintainer's browser telemetry",
            "viewed.jsonl": "the files the maintainer opened", "sessions.json": "the maintainer's Claude Code sessions",
            "bg-sessions.json": "the maintainer's background sessions", "permissions.jsonl": "permission answers",
-           "undo.jsonl": "the undo history", "render-theme.json": "the browser's theme", "unheard.json": "per session"}
+           "undo.jsonl": "the undo history", "render-theme.json": "the browser's theme", "unheard.json": "per session",
+           "views-work": "the view builds' own scratch"}
 SKIP_PARTS = {"__pycache__", "cache", "trash", "tmp"}
 SKIP_SUFFIXES = (".sqlite", ".sqlite-wal", ".sqlite-shm", ".lock", ".log", ".tmp", ".pyc", ".png")
 DOT_OK = {"views", "extension"}  # where dot files are thimble's own records (views/.versions, .reviewed)
@@ -460,11 +461,14 @@ def catalog(path: Path | None = None) -> dict[str, dict[str, Any]]:
 class Downloads:
     """Fetches with a cache in DIR/.downloads, so a second `thimble demo` downloads nothing again."""
 
-    def __init__(self, root: Path, get: Callable[[str], bytes] = demo_data.http_get, say: Callable[[str], None] = print):
-        self.root, self.get, self.say = root / ".downloads", get, say
+    def __init__(self, root: Path, get: Callable[[str], bytes] = demo_data.http_get):
+        self.root, self.get = root / ".downloads", get
+
+    def path(self, url: str) -> Path:
+        return self.root / hashlib.sha256(url.encode()).hexdigest()[:24]
 
     def __call__(self, url: str) -> bytes:
-        p = self.root / hashlib.sha256(url.encode()).hexdigest()[:24]
+        p = self.path(url)
         if p.is_file():
             return p.read_bytes()
         try:
@@ -571,9 +575,8 @@ def register(folder: Path, url: str | None) -> str:
     return str(config.register_corpus(folder, exact=True)["name"])
 
 
-def place_precache(ds: Dataset, folder: Path, root: Path, cat: dict[str, dict[str, Any]], local: Path | None,
-                   url: str | None, env: dict[str, Any], replace: bool, fetch: Callable[[str], bytes],
-                   say: Callable[[str], None]) -> str | None:
+def place_precache(ds: Dataset, folder: Path, cat: dict[str, dict[str, Any]], local: Path | None, url: str | None,
+                   env: dict[str, Any], replace: bool, fetch: Downloads, say: Callable[[str], None]) -> str | None:
     """Install `ds`'s pre-cache as the workspace of `folder`: the workspace's name, or None when none was installed."""
     from . import cli  # noqa: PLC0415
 
@@ -585,13 +588,11 @@ def place_precache(ds: Dataset, folder: Path, root: Path, cat: dict[str, dict[st
             return None
     elif ds.name in cat:
         entry = cat[ds.name]
-        data = fetch(entry["url"])
-        if hashlib.sha256(data).hexdigest() != entry["sha256"]:
+        if hashlib.sha256(fetch(entry["url"])).hexdigest() != entry["sha256"]:
+            fetch.path(entry["url"]).unlink(missing_ok=True)
             say(f"  the pre-cached orientation at {entry['url']} does not match demos/precaches.json; not installed")
             return None
-        zip_path = root / ".downloads" / f"{ds.name}{SUFFIX}"
-        zip_path.parent.mkdir(parents=True, exist_ok=True)
-        zip_path.write_bytes(data)
+        zip_path = fetch.path(entry["url"])
     else:
         say(f"  {ds.name} has no pre-cached orientation published yet; Start in thimble runs one")
         return None
@@ -607,10 +608,12 @@ def place_precache(ds: Dataset, folder: Path, root: Path, cat: dict[str, dict[st
             ok, archived = cli.archive_workspace(url, name)
             if not ok:
                 raise DemoError(f"workspace {name} could not be archived; see {cli.log_path()}")
-        if ws.exists():
+        if ws.exists():  # no server to archive it: moved where /thimble fresh moves a workspace
             from . import ledger  # noqa: PLC0415
 
-            dest = ledger.archive_path(name)
+            dest = ws.parent / ledger.ARCHIVE_DIR / f"{name}-{datetime.now().strftime(ledger.ARCHIVE_TIME)}"
+            while dest.exists():
+                dest = dest.with_name(dest.name + "-2")
             dest.parent.mkdir(parents=True, exist_ok=True)
             ws.rename(dest)
             archived = str(dest)
@@ -636,14 +639,15 @@ def start_session(folder: Path) -> None:
 
 def wrapped(say: Callable[[str], None], width: int = 110) -> Callable[[str], None]:
     """`say`, with a long line wrapped under its own indent (a command to copy is left whole)."""
-    def out(line: str) -> None:
-        if len(line) <= width or line.lstrip().startswith("cd "):
-            say(line)
-            return
-        indent = line[: len(line) - len(line.lstrip())]
-        for part in textwrap.wrap(line, width, subsequent_indent=indent + "  ", break_long_words=False,
-                                  break_on_hyphens=False):
-            say(part)
+    def out(text: str) -> None:
+        for line in text.split("\n"):
+            if len(line) <= width or line.lstrip().startswith("cd "):
+                say(line)
+                continue
+            indent = line[: len(line) - len(line.lstrip())]
+            for part in textwrap.wrap(line, width, subsequent_indent=indent + "  ", break_long_words=False,
+                                      break_on_hyphens=False):
+                say(part)
 
     return out
 
@@ -667,8 +671,9 @@ def run(args: argparse.Namespace, *, get: Callable[[str], bytes] = demo_data.htt
         say(line)
     if args.list:
         return 0
-    fetch = Downloads(root, get, say)
+    fetch = Downloads(root, get)
     ready: list[tuple[Dataset, Path]] = []
+    failed = 0
     for ds in selected:
         answer = _ask(f"Download {ds.name} ({human(ds.download_bytes)}) into {root / ds.name}? [y/N] ", args.yes)
         if answer is None:
@@ -682,6 +687,7 @@ def run(args: argparse.Namespace, *, get: Callable[[str], bytes] = demo_data.htt
             warnings = write_dataset(ds, root / ds.name, fetch)
         except (demo_data.SourceError, DemoError) as e:
             say(f"  {ds.name}: not built: {e}")
+            failed += 1
             continue
         for w in warnings:
             say(f"  warning: {w}")
@@ -691,13 +697,13 @@ def run(args: argparse.Namespace, *, get: Callable[[str], bytes] = demo_data.htt
             say(f"  notice from the source: {ds.notice}")
         ready.append((ds, root / ds.name))
     if not ready:
-        return 1 if selected else 0
+        return 1 if failed else 0
     (root / "SOURCES.md").write_text(sources_md([d for d, _ in ready]), "utf-8")
     url, env = server(say)
     opened: list[tuple[Path, str | None]] = []
     for ds, folder in ready:
         try:
-            name = place_precache(ds, folder, root, cat, local, url, env, args.replace, fetch, say)
+            name = place_precache(ds, folder, cat, local, url, env, args.replace, fetch, say)
         except (DemoError, demo_data.SourceError, OSError, zipfile.BadZipFile) as e:
             say(f"  {ds.name}: the pre-cached orientation was not installed: {e}")
             name = None
@@ -721,8 +727,13 @@ def run_export(args: argparse.Namespace, say: Callable[[str], None]) -> int:
     ws = Path(env["workspaces_dir"]) / workspace
     if not ws.is_dir():
         ws = Path(workspace).expanduser().resolve()
-    if not (ws / "orient" / "run.json").is_file():
+    run_rec = _read_json(ws / "orient" / "run.json")
+    if not isinstance(run_rec, dict):
         say(f"thimble demo --export: {workspace} is no workspace with an orientation")
+        return 1
+    if run_rec.get("status") != "done" or run_rec.get("queue"):
+        say(f"thimble demo --export: the orientation of {ws.name} is {run_rec.get('status')}"
+            + (" with follow-ups waiting" if run_rec.get("queue") else "") + "; export it once it is done")
         return 1
     name = args.dataset or ws.name
     rec = config.read_sidecar(ws.name, Path(env["data_dir"]))

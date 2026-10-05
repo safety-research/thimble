@@ -277,15 +277,17 @@ def fake_world(tmp_path, monkeypatch):
     env = {"workspaces_dir": str(tmp_path / "workspaces"), "data_dir": str(tmp_path / "data")}
     got: list[str] = []
     lines: list[str] = []
+    served: dict[str, bytes] = {}
 
     def get(url: str) -> bytes:
         got.append(url)
-        return b"payload"
+        return served.get(url, b"payload")
 
     def server(say):
         return None, env
 
-    return {"get": get, "got": got, "lines": lines, "server": server, "root": tmp_path / "demo", "env": env}
+    return {"get": get, "got": got, "lines": lines, "server": server, "root": tmp_path / "demo", "env": env,
+            "served": served}
 
 
 def said(w) -> str:
@@ -384,3 +386,38 @@ def test_export_scrubs_the_user_name_and_paths_a_summary_cut_short(tmp_path):
         chat = zf.read("workspace/chats/o1.jsonl").decode()
     assert "drwx user user x" in chat and "@@THIMBLE_WORKSPACE@@\\u2026" in chat and str(tmp_path) not in chat
     assert m["user_name_scrubbed"] == 2 and m["flagged"] == []
+
+
+def test_export_command_waits_for_a_finished_orientation(tmp_path, monkeypatch):
+    monkeypatch.setattr(demo, "gitleaks_scan", no_scan)
+    monkeypatch.setattr(demo.getpass, "getuser", lambda: "")
+    monkeypatch.setenv("HOME", str(tmp_path))
+    corpus = tmp_path / "corpus"
+    corpus.mkdir()
+    ws = make_workspace(tmp_path, corpus, tmp_path)
+    run_path = ws / "orient" / "run.json"
+    run_path.write_text(json.dumps({"status": "running", "chats": {"orient": "o1"}}))
+    lines: list[str] = []
+    a = args(export=[str(ws), str(tmp_path / "out")], corpus=str(corpus))
+    assert demo.run(a, say=lines.append) == 1 and "is running; export it once it is done" in " ".join(lines)
+    run_path.write_text(json.dumps({"status": "done", "chats": {"orient": "o1"}}))
+    assert demo.run(a, say=lines.append) == 0
+    assert (tmp_path / "out" / "toy.thimble-demo.zip").is_file()
+    assert any('"toy": {"url": "https://github.com/' in x for x in lines)
+
+
+def test_a_published_precache_is_downloaded_checked_and_installed(tmp_path, fake_world):
+    w = fake_world
+    corpus = tmp_path / "made-on" / "one"
+    corpus.mkdir(parents=True)
+    (corpus / "a.jsonl").write_bytes(b'{"n": 1}\n')
+    ws = make_workspace(tmp_path / "made-on", corpus, tmp_path / "made-on")
+    z = tmp_path / "one.thimble-demo.zip"
+    demo.export(ws, corpus, z, name="one", home=tmp_path / "made-on", user="", scan=no_scan)
+    url = "https://github.com/o/r/releases/download/t/one.thimble-demo.zip"
+    w["served"][url] = z.read_bytes()
+    demo.CATALOG.write_text(json.dumps({"precaches": {"one": {"url": url, "sha256": sha(z.read_bytes()),
+                                                               "bytes": z.stat().st_size}}}))
+    assert run(w, args(names=["one"], dir=str(w["root"]))) == 0
+    assert url in w["got"] and (Path(w["env"]["workspaces_dir"]) / "one" / "notebooks" / "g1.json").is_file()
+    assert "pre-cached orientation" in said(w) and "installed as workspace one" in said(w)
