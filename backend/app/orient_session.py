@@ -30,6 +30,11 @@ on the run's record for follow-ups; the model settings come from the `orient` an
 Calls. Each call the session, its agents, its critique and its follow-ups make is numbered in its chat's sequence and
 citable as `call:<chat>/<n>` (calls.py).
 
+Coverage. In the first run, the orientation's first add_card and its `critique` call run orient_checks.unopened, and
+when corpus files were never opened, the call's result names them and asks the orientation to look at each or say why
+not: add_card's after the card is made, critique's in place of the critique, which waits for the next call. The note is
+given at most COVERAGE_NOTES times a run, counted on the record's `coverage` (coverage).
+
 End of the first run. orientation.finished closes the record and reveals the deck (each view proposal reached the
 analyst when its build passed its checks); the report is asked for once no follow-up waits. Main hears an `orient` event with one line counting what was made.
 
@@ -60,8 +65,8 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from . import (agent_session, agents, bg_session, cc_settings, config, ledger, orientation, prompts, tools, userconf,
-               work_files)
+from . import (agent_session, agents, bg_session, cc_settings, config, ledger, orient_checks, orientation, prompts,
+               tools, userconf, work_files)
 
 log = logging.getLogger("thimble.orient_session")
 router = APIRouter()
@@ -95,6 +100,7 @@ _MARKS = {"request": "\x00request\x00", "instructions": "\x00instructions\x00"}
 BROWSER = "browser"  # `by` of a message typed in the orientation's thread
 MAIN = "main"  # `by` of a message main's message_orientation sent
 EXTENSION = "extension"  # `by` of an extension's orientation instructions, sent when it starts running here
+COVERAGE_NOTES = 2  # the coverage note is given once and repeated at most once in a run (coverage)
 
 
 class NoOrientation(RuntimeError):
@@ -359,6 +365,32 @@ def _moved(run: agent_session.Run) -> None:
     """A retry changed the session's process: the record names the new pid, or none while the retry waits, so
     orientation.running does not take the run for ended."""
     orientation.record(run.c, pid=run.pid)
+
+
+# --------------------------------------------------------------------------- coverage
+
+
+async def coverage(c: str, name: str) -> str:
+    """The coverage note for the orientation's call of `name` (module note, coverage): the corpus files its first run
+    never opened, then what to do next, for its first add_card and each critique call while fewer than COVERAGE_NOTES
+    checks ran; '' when none is due or every file was opened. A check is counted before it runs, so a parallel call does
+    not run it again, and one that finds every file opened ends the checks."""
+    rec = orientation.read_run(c) or {}
+    done = int(rec.get("coverage") or 0)
+    first_run = rec.get("status") == "running" and not int(rec.get("run") or 0)
+    if not first_run or done >= COVERAGE_NOTES or (name == "add_card" and done):
+        return ""
+    orientation.record(c, coverage=done + 1)
+    try:
+        found = await orient_checks.check_apart(c, only_unopened=True)
+    except (ValueError, TimeoutError, RuntimeError) as e:
+        log.warning("%s: the coverage check did not run (%s)", c, e)
+        return ""
+    if not found:
+        orientation.record(c, coverage=COVERAGE_NOTES)
+        return ""
+    then = tools.hint("orient-unopened-card" if name == "add_card" else "orient-unopened-critique")
+    return f"{found[0].text}\n\n{then}"
 
 
 # --------------------------------------------------------------------------- follow-ups

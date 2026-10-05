@@ -886,6 +886,22 @@ In {file}, no card names `{value}`, a value of `{field}` in {count} of {sampled}
 
 No check found anything.
 
+## orient-unopened
+
+{n} of the {total} files in {root} were never opened by a card's code, a Read call or a command or script of yours, so your analysis says nothing about them:
+
+{files}
+
+Look at each one, at least a sample of its records, or say in a line why it does not bear on the analysis.
+
+## orient-unopened-card
+
+Then go on drafting, and revise each card that what you find changes.
+
+## orient-unopened-critique
+
+The critique did not start. Call `critique` again once you have looked.
+
 ## start_orientation-started
 
 The orientation has started in its own session, and the browser shows it, so this turn needs no words from you unless it has something else for the analyst. An `orient` event tells you when it ends.
