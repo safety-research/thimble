@@ -140,3 +140,13 @@ def test_a_tray_entry_s_hand_back_shows_nothing_in_main_s_chat_and_a_session_s_m
     _, log_path = agents.paths(CORPUS, agents.MAIN_ID)
     chips = [r["text"] for r in agents.read_events(log_path) if r.get("type") == "chip"]
     assert chips == [f"{e.shown} to main: The cards' numbers check out."], chips
+
+
+def test_a_reply_a_safeguard_stopped_reads_as_an_api_error(tmp_path, monkeypatch):
+    """Claude Code writes a safeguard's refusal with `error` a string, not an object with a status."""
+    path = tmp_path / "t.jsonl"
+    path.write_text(json.dumps({"type": "assistant", "isApiErrorMessage": True, "error": "invalid_request",
+                                "message": {"content": [{"type": "text", "text": "API Error: safeguards flagged"}]}})
+                    + "\n")
+    monkeypatch.setattr(bg_session.session, "find_transcript", lambda sid, config_dir=None: str(path))
+    assert bg_session.turn_state("sid") == (False, "API Error: safeguards flagged", True, None)

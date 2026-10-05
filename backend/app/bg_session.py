@@ -1595,7 +1595,8 @@ def turn_state(session_id: str) -> tuple[bool, str, bool, int | None]:
             said = " ".join(b.get("text", "") for b in blocks if isinstance(b, dict) and b.get("type") == "text")
             if said.strip():
                 text, error = said.strip(), bool(rec.get("isApiErrorMessage"))
-                code = rec.get("apiErrorStatus") or (rec.get("error") or {}).get("status") if error else None
+                err = rec.get("error")  # an object with a status, or a string such as "invalid_request" (a safeguard)
+                code = rec.get("apiErrorStatus") or (err.get("status") if isinstance(err, dict) else None) if error else None
                 status = int(code) if isinstance(code, int) else None
     return ended, text, error, status
 
