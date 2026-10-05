@@ -2222,7 +2222,7 @@ async def detach_all() -> None:
 
 
 def _home() -> Path:
-    from . import cli  # noqa: PLC0415 — cli imports config, procs and cc_channel only
+    from . import cli  # noqa: PLC0415 — cli imports config, procs and cc_plugin only
 
     return cli.home()
 

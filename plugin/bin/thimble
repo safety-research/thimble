@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # thimble: the one command.
 #
-#   thimble [claude flags…]              start thimble: a new Claude Code session in this folder with the plugin as a
-#                                        channel and main's prompt appended, running /thimble (below); -c/--continue
+#   thimble [claude flags…]              start thimble: a new Claude Code session in this folder with the plugin
+#                                        loaded and main's prompt appended, running /thimble (below); -c/--continue
 #                                        resumes the folder's last main session (with none it is claude's own),
 #                                        -r/--resume [value] is claude's own
 #   thimble server up [--cwd <p>] [--session <sid>] [--action <a>]
@@ -22,7 +22,7 @@
 #                                        thimble-cc-mod in this folder, by `claude plugin` at project scope; the thimble
 #                                        plugin stays as it is (backend/app/cli.py cmd_cc_mod)
 #   thimble launch-args [--cwd <p>] [--settings <s>]
-#                                        what a session starts with: the channel entry, the --allowedTools, --effort and
+#                                        what a session starts with: the plugin folder, the --allowedTools, --effort and
 #                                        --settings values, the tools that end a turn without text, main's --name, then
 #                                        main's prompt
 #   thimble prompt <name>… [--cwd <p>]   prompt files rendered for a session in <p> (the injected command of the
@@ -459,7 +459,7 @@ case "${1:-}" in
       fi
       # the tree (backend/ and its .venv) is found by bin/thimble-app-dir: `../..` in a checkout or an unzipped release,
       # the installed tree named in $THIMBLE_HOME/app-dir when this copy sits in Claude Code's plugin cache.
-      # THIMBLE_PLUGIN_ROOT names this plugin copy, whose channel entry /thimble looks for (cli.plugin_root)
+      # THIMBLE_PLUGIN_ROOT names this plugin copy, whose hooks and watcher /thimble looks for (cli.plugin_root)
       repo="$("$here/thimble-app-dir" 2>&1)" || {
         [ "$up" = 1 ] || { printf '%s\n' "$repo" >&2; exit 1; }
         printf '%s\n' "$repo"; exit 0; }
@@ -473,10 +473,10 @@ case "${1:-}" in
     exit 2;;
 esac
 
-# The session: Claude Code in this folder with the plugin loaded as a development channel, which is how browser events
-# reach it (where channels are off, the plugin's watcher delivers instead). `launch-args` prints the channel entry of
-# the installed plugin copy, else plugin:thimble@inline for --plugin-dir. Main's prompt is appended to the system prompt,
-# since Claude Code cuts MCP server instructions at about 2 KB and an appended prompt reaches every fork whole.
+# The session: Claude Code in this folder with the plugin loaded, whose hooks bring it the browser's events.
+# `launch-args` prints the plugin folder to load with --plugin-dir, or nothing when Claude Code has the plugin copy
+# installed and loads it already. Main's prompt is appended to the system prompt, since Claude Code cuts MCP server
+# instructions at about 2 KB and an appended prompt reaches every fork whole.
 # --effort is passed only when neither the analyst's settings nor their flags name one, unless the composer chose one.
 # --name is `thimble:main · <workspace>` (cli.main_name), since `claude agents` and /resume list the sessions of every
 # folder; it is passed on -c/--continue and -r/--resume too, so a resumed main keeps that name (one an earlier build
@@ -486,8 +486,8 @@ esac
 # into the analyst's own --settings, since Claude Code reads only the last one. --allowedTools lets the thimble tools
 # and the plugin's skills run without a permission prompt, since a fork answering the browser must not wait on a
 # terminal nobody watches; nothing is denied.
-# THIMBLE_CHANNEL tells the MCP shim to subscribe. The session opens with /thimble, which starts the server and opens
-# this folder as a workspace.
+# THIMBLE_LAUNCHED tells /thimble that main's prompt is appended already. The session opens with /thimble, which starts
+# the server and opens this folder as a workspace.
 command -v claude >/dev/null 2>&1 || {
   printf 'thimble: the `claude` CLI is not on PATH. thimble runs inside Claude Code: install it (https://docs.anthropic.com/en/docs/claude-code), then run thimble again.\n' >&2
   exit 1; }
@@ -516,7 +516,7 @@ cwd="$PWD"
 out="$(cd "$repo/backend" && THIMBLE_CALLER_CWD="$cwd" \
   "$here/thimble-python" -m app.cli launch-args ${ask[@]+"${ask[@]}"} --cwd "$cwd")" || {
   printf 'thimble: could not render the session prompt (see the lines above); run `thimble doctor`\n' >&2; exit 1; }
-channel="${out%%$'\n'*}"
+plugin_dir="${out%%$'\n'*}"
 rest="${out#*$'\n'}"
 allowed="${rest%%$'\n'*}"
 rest="${rest#*$'\n'}"
@@ -546,13 +546,13 @@ elif [ "$cont" = 1 ]; then
   resume=(--continue)
 fi
 load=()
-[ "$channel" != "plugin:thimble@inline" ] || load=(--plugin-dir "$plugin")
-export THIMBLE_CHANNEL="$channel"
+[ -z "$plugin_dir" ] || load=(--plugin-dir "$plugin_dir")
+export THIMBLE_LAUNCHED=1
 # Claude Code aborts an MCP call that sends neither a result nor progress for 30 min. The shim reports progress every
 # minute; the longer limit (4 h, in ms) covers a Claude Code that ignores it. A value the analyst set is kept.
 export CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT="${CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT:-14400000}"
 # A turn that ends right after one of these tools needs no closing text, and main's prompt says so; empty when this
 # `claude` does not read the variable, and main's prompt then ends such turns with the end token (backend/app/terminal_tools.py).
 [ -z "$turn_tools" ] || export CLAUDE_CODE_TERMINAL_MCP_TOOLS="$turn_tools"
-exec claude ${load[@]+"${load[@]}"} --dangerously-load-development-channels "$channel" "${tools[@]}" \
+exec claude ${load[@]+"${load[@]}"} "${tools[@]}" \
   ${resume[@]+"${resume[@]}"} --append-system-prompt "$prompt" "$@" -- /thimble

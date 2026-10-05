@@ -1,7 +1,7 @@
 """The orientation's own Claude Code session, beside main, started with the `start_orientation` tool. The machinery it
 shares with a writer's session is agent_session.py; this module holds what is the orientation's own. It is a separate
-session rather than an agent-team teammate because a teammate has no Workflow tool, its permission prompts are not
-relayed to the channel, the plugin agent's definition is not applied, and it runs at main's effort.
+session rather than an agent-team teammate because a teammate has no Workflow tool, the plugin agent's definition is
+not applied, and it runs at main's effort.
 
 Start. `start_orientation` takes a brief and three independent output switches: `final_notebook` (the deck, group
 `Orientation`), `propose_views` and `generate_report`. The orientation's thread is what it always leaves.
@@ -750,7 +750,7 @@ def status_text(c: str, status: str, k: int = 0, made: "dict[str, Any] | None" =
 
 
 def _tell_main(c: str, status: str, k: int = 0, made: "dict[str, Any] | None" = None, error: str = "") -> None:
-    """The `orient` channel event: a run of the orientation ended, with status_text as its text (prompts/main.md); it
+    """The `orient` browser event: a run of the orientation ended, with status_text as its text (prompts/main.md); it
     waits for main when no session listens (agent_session.tell_main)."""
     agent_session.tell_main(c, orientation.ORIENT_KIND, {"text": status_text(c, status, k, made, error),
                                                          "status": status, **({"run": k} if k else {})})
@@ -861,10 +861,10 @@ class MessageBody(BaseModel):
 async def message_route(c: str, body: MessageBody) -> dict[str, Any]:
     """The orientation thread's composer: message() from the analyst. 400 for an empty message, 404 when no orientation
     has run, 410 when its session is gone, 409 when it cannot start."""
-    from . import channel  # noqa: PLC0415
+    from . import events  # noqa: PLC0415
 
     config.workspace_dir(c)
-    line = channel.terminal_line(channel.MAIN, f"orientation: {body.text}", {})
+    line = events.terminal_line(events.MAIN, f"orientation: {body.text}", {})
     try:
         out = await message(c, body.text, BROWSER)
     except ValueError as e:
@@ -875,5 +875,5 @@ async def message_route(c: str, body: MessageBody) -> dict[str, Any]:
         raise HTTPException(410, f"{e}; start a new orientation to explore further") from e
     except RuntimeError as e:
         raise HTTPException(409, str(e)) from e
-    channel.show(c, line)
+    events.show(c, line)
     return out

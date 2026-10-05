@@ -251,11 +251,11 @@ export const api = {
      */
   postEvent: (c: string, kind: string, payload: Record<string, unknown>) =>
     j<EventPosted>(`${ws(c)}/events`, { method: 'POST', body: JSON.stringify({ kind, payload }) }),
-  /** The composer's effort chip: main's effort (and its threads') from its next request (channel.effort_route). */
+  /** The composer's effort chip: main's effort (and its threads') from its next request (events.effort_route). */
   setEffort: (c: string, effort: MainEffort) => j<{ effort: string; choice: MainEffort }>(`${ws(c)}/session/effort`, { method: 'PUT', body: JSON.stringify({ effort }) }),
-  /** Turn fast mode off or back on for main and its threads from main's next request (channel.fast_route). */
+  /** Turn fast mode off or back on for main and its threads from main's next request (events.fast_route). */
   setFast: (c: string, fast: boolean) => j<{ fast: boolean }>(`${ws(c)}/session/fast`, { method: 'PUT', body: JSON.stringify({ fast }) }),
-  /** Allow or deny a permission prompt of main's session that the shim relayed (channel.permission_route). */
+  /** Allow or deny a permission prompt of main's session that its hook relayed (events.permission_route). */
   answerPermission: (c: string, id: string, allow: boolean) => j<{ answered: string }>(`${ws(c)}/permission`, { method: 'POST', body: JSON.stringify({ id, allow }) }),
   /** Allow or deny a permission request of a session thimble started beside main (agent_session.permission_route);
      * `always` also applies Claude Code's suggested "don't ask again" rules for the rest of the session, and `shown`

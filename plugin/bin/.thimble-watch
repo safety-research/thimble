@@ -1,7 +1,7 @@
 #!/bin/sh
 ''''[ -n "${THIMBLE_SESSION:-}" ] && [ -n "${THIMBLE_SESSION_TOKEN:-}" ] && exit 0; exec "$(dirname "$0")/thimble-python" -S "$0" "$@" # '''
-"""thimble's watcher: how browser events reach a Claude Code session whose channel is off. The plugin's hooks
-(plugin/hooks/hooks.json) run it, and on the Monitor route main's Monitor does.
+"""thimble's watcher: how browser events reach the analyst's Claude Code session. The plugin's hooks
+(plugin/hooks/hooks.json) run it, and where those hooks are off (the Monitor route) main's Monitor does.
 
 The first two lines make this file both a shell script and a Python program, as in bin/thimble-mcp; the shell line
 exits at once in a session thimble starts itself, which has THIMBLE_SESSION and the THIMBLE_SESSION_TOKEN that proves it
@@ -25,21 +25,21 @@ Every hook but the stream does nothing without $THIMBLE_HOME/server.json and the
 holds the token and each answer must prove the server does (app/hook_auth.py); an answer without that proof counts as
 no server, so a process on the recorded port is neither told anything nor believed.
 
-The hook long-polls the server for the session's next event (GET /api/channel/pull), writes it to stderr in the
-`<channel …>` form, acknowledges it and exits 2, which makes Claude Code wake the session. It exits 0 in a subagent, when
-another watcher holds the session's lock, when no server listens at first, on 404/409/410 (STOP), when the `claude`
-process has moved to another session (/clear), and when that process has exited. A server that has answered once is
-waited for across restarts.
+The hook long-polls the server for the session's next event (GET /api/events/pull), writes it to stderr in the
+`<thimble-event …>` form, acknowledges it and exits 2, which makes Claude Code wake the session. It exits 0 in a
+subagent, when another watcher holds the session's lock, when no server listens at first, on 404/410 (STOP), when the
+`claude` process has moved to another session (/clear), and when that process has exited. A server that has answered
+once is waited for across restarts.
 
 The permission hook relays the prompt to the server, which shows it in main's chat and answers when the analyst does.
 
 The held hook runs as each of main's turns begins, on a prompt the analyst typed and on an event the watcher woke it
-with: it takes the events the server holds for main (app/channel.py QUIET_KINDS) and prints them as the prompt's added
-context, and prints the lines main's terminal shows of the events the watcher wrote out (app/channel.py terminal_line)
+with: it takes the events the server holds for main (app/events.py QUIET_KINDS) and prints them as the prompt's added
+context, and prints the lines main's terminal shows of the events the watcher wrote out (app/events.py terminal_line)
 as its systemMessage, since Claude Code shows such an event only as the fixed rewakeSummary. It prints nothing in a
 subagent, when nothing waits or when no server answers within HELD_WAIT_S.
 
-The mode hook tells the server (POST /api/channel/mode) the permission mode Claude Code reports for the session as each
+The mode hook tells the server (POST /api/events/mode) the permission mode Claude Code reports for the session as each
 of its turns begins and ends, which is the mode the agents thimble starts follow by default. It sends nothing in a
 subagent. As a turn ends it also shows, once, as its systemMessage, the dashboard link /thimble left for the session
 (app/cli.py leave_link): the link carries the key that lets the browser answer permission requests and change
@@ -72,7 +72,7 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
-PULL_WAIT_S = 25  # app/channel.py PULL_WAIT_S: the server holds a pull this long
+PULL_WAIT_S = 25  # app/events.py PULL_WAIT_S: the server holds a pull this long
 LIFETIME_S = 23 * 3600  # the hook's own timeout is 86400 s (hooks.json)
 RETRY_S = 2.0
 LOCK_SWEEP_S = 2 * 86400  # a lock file untouched this long belongs to no running watcher (each takes it anew)
@@ -82,9 +82,10 @@ LINE_CHARS = 480  # below Claude Code's cut of a Monitor line, 500, counted as i
 SPACE = re.compile(r" ")
 ATTR_BREAK = re.compile(r' (?=[A-Za-z_][A-Za-z0-9_]*=")')  # the space before an attribute (a value's " is escaped)
 WAKE = 2  # the exit code that wakes the session (asyncRewake)
-STOP = {404, 409, 410}  # the server's answers that end a watcher (module note)
+STOP = {404, 410}  # the server's answers that end a watcher (module note)
 CUT_NOTE = "(cut here, since a Monitor event holds about 3,000 characters; the whole event is in {path})"
 DENIED = "The analyst denied this in thimble's browser."
+END_TAG = "</thimble-event>"  # closes an event as the server renders it (app/events.py render)
 HELD_WAIT_S = 3.0
 AGENTS_WAIT_S = 3.0
 
@@ -206,7 +207,7 @@ def parent(pid: int) -> int:
 def claude_pid() -> int | None:
     """The `claude` process this watcher runs under: CLAUDE_PID, which Claude Code sets for its hooks and the commands
     it runs, else the nearest ancestor that has a session record in Claude Code's config directory, as
-    app/cc_channel.py's claude_pid finds it; None when neither says."""
+    app/cc_plugin.py's claude_pid finds it; None when neither says."""
     named = os.environ.get("CLAUDE_PID") or ""
     if named.isdigit():
         return int(named)
@@ -261,7 +262,7 @@ def pull(cwd: str, session: str, until: float, pid: int | None = None, *,
         query = urllib.parse.urlencode({k: v for k, v in (("cwd", cwd), ("session", session), ("pid", pid),
                                                           ("wait", PULL_WAIT_S)) if v})
         try:
-            status, body = request("GET", f"/api/channel/pull?{query}", timeout=PULL_WAIT_S + 15)
+            status, body = request("GET", f"/api/events/pull?{query}", timeout=PULL_WAIT_S + 15)
         except urllib.error.URLError:  # no connection was made (refused): an HTTP status returns from request()
             if not reached:
                 return None
@@ -285,7 +286,7 @@ def pull(cwd: str, session: str, until: float, pid: int | None = None, *,
 
 def ack(cwd: str, session: str, event_id: str, terminal: bool = False) -> None:
     try:
-        request("POST", "/api/channel/ack", {"cwd": cwd, "session": session, "id": event_id, "terminal": terminal})
+        request("POST", "/api/events/ack", {"cwd": cwd, "session": session, "id": event_id, "terminal": terminal})
     except (OSError, http.client.HTTPException):
         pass
 
@@ -317,7 +318,7 @@ def permission(inp: dict) -> int:
             "tool_name": str(inp.get("tool_name") or ""), "tool_input": inp.get("tool_input"),
             "agent_id": inp.get("agent_id") or None}
     try:
-        status, answer = request("POST", "/api/channel/permission/hook", body, timeout=None)
+        status, answer = request("POST", "/api/events/permission", body, timeout=None)
     except (OSError, http.client.HTTPException):
         return 0
     behavior = answer.get("behavior") if status == 200 else None
@@ -336,7 +337,7 @@ def held(inp: dict) -> int:
         return 0
     body = {"cwd": folder(inp), "session": str(inp.get("session_id") or "") or None}
     try:
-        status, answer = request("POST", "/api/channel/held", body, timeout=HELD_WAIT_S)
+        status, answer = request("POST", "/api/events/held", body, timeout=HELD_WAIT_S)
     except (OSError, http.client.HTTPException):
         return 0
     text, said = (str(answer.get("text") or ""), str(answer.get("terminal") or "")) if status == 200 else ("", "")
@@ -358,7 +359,7 @@ def mode(inp: dict) -> int:
     body = {"cwd": folder(inp), "session": str(inp.get("session_id") or "") or None,
             "permission_mode": str(inp["permission_mode"])}
     try:
-        request("POST", "/api/channel/mode", body, timeout=AGENTS_WAIT_S)
+        request("POST", "/api/events/mode", body, timeout=AGENTS_WAIT_S)
     except (OSError, http.client.HTTPException):
         pass
     return 0
@@ -492,7 +493,7 @@ def fit(event_id: str, text: str) -> str:
 def cut(event_id: str, text: str) -> str:
     """The event cut inside its body before STREAM_CHARS, with a line saying where the whole of it is saved."""
     head, _, rest = text.partition("\n")
-    body = rest[: -len("</channel>")].rstrip("\n") if rest.endswith("</channel>") else rest
+    body = rest[: -len(END_TAG)].rstrip("\n") if rest.endswith(END_TAG) else rest
     path = home() / "events" / f"{''.join(ch for ch in event_id if ch.isalnum()) or int(time.time())}.txt"
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -500,8 +501,8 @@ def cut(event_id: str, text: str) -> str:
     except OSError:
         pass
     note = CUT_NOTE.format(path=path)
-    keep = max(0, STREAM_CHARS - len(head) - len(note) - len("</channel>") - 8)
-    return f"{head}\n{body[:keep].rstrip()}\n…\n{note}\n</channel>"
+    keep = max(0, STREAM_CHARS - len(head) - len(note) - len(END_TAG) - 8)
+    return f"{head}\n{body[:keep].rstrip()}\n…\n{note}\n{END_TAG}"
 
 
 def stream(args: list[str]) -> int:

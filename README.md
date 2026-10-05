@@ -42,7 +42,7 @@ For a development build, clone the repo and run `bash scripts/install.sh`.
 
 Type `/thimble` to start the thimble server and print the dashboard URL. If `/thimble` is not recognised, run `/reload-plugins`.
 
-> **Please note:** thimble connects the browser to your Claude Code session through [channels](https://code.claude.com/docs/en/channels). While thimble is under development, a Claude Code session needs to be started with `--dangerously-load-development-channels` (`thimble` from the CLI handles this for you) and a warning screen will appear before starting your Claude Code session (this warning is expected). Without this flag, or if channels are disabled by your org, thimble connects through the plugin's hooks instead and `/thimble` prints a note with the exact command.
+> **Please note:** thimble connects the browser to your Claude Code session through the plugin's [hooks](https://code.claude.com/docs/en/hooks). If your settings or your organization disable hooks, thimble connects through a Monitor instead, permission prompts appear only in the terminal, and `/thimble` prints a warning that says so.
 
 ## Claude Code Mod (Experimental)
 

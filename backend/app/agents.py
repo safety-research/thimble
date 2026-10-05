@@ -45,7 +45,7 @@ AGENT_STATUSES = ("running", "done", "failed", "stopped")
 # the browser's SSE reads these; a coalesced `chat` record on the workspace stream tells every other page to re-read
 EVENT_COALESCE_S = 0.25
 # `by` of the analyst's line: typed in the terminal (the mirror reads it from the transcript) or in the browser (logged
-# when the channel event is posted)
+# when the browser event is posted)
 TERMINAL, BROWSER = "terminal", "browser"
 ANCHOR_TEXT_CHARS = 2_000  # of what the pointed-at element showed, kept on the thread's meta
 
@@ -317,7 +317,7 @@ def new_thread(c: str, anchor: str | None, anchor_text: str | None, title: str |
                image: str | None = None, parent: str | None = None) -> dict:
     """A thread born from a ⌘-click or ⌘-drag: `anchor` is what was pointed at (refs joined by ','), with its visible text,
     surface, element kind, CSS selector and a captured PNG. `parent` is the chat the analyst was reading (thread_parent).
-    Its first message is a channel event of kind `thread`, which main answers by forking."""
+    Its first message is a browser event of kind `thread`, which main answers by forking."""
     from . import threads  # noqa: PLC0415
 
     ensure_main(c)
@@ -460,7 +460,7 @@ def group_for(c: str, meta: dict) -> str:
 # --------------------------------------------------------------------------- running, and the cards a chat made
 
 
-_busy: set[tuple[str, str]] = set()  # (workspace, chat) running for the channel and the mirror
+_busy: set[tuple[str, str]] = set()  # (workspace, chat) running for browser events and the mirror
 
 
 def set_running(c: str, chat_id: str, on: bool) -> None:
@@ -558,7 +558,7 @@ def _notify(c: str, chat_id: str) -> None:
     _pending_notify[key] = loop.call_later(EVENT_COALESCE_S, fire)
 
 
-notify = _notify  # the name the channel, the mirror and the thread module call
+notify = _notify  # the name the events module, the mirror and the thread module call
 
 
 def _emit_chat(c: str, chat_id: str) -> None:
@@ -584,7 +584,7 @@ def chip(c: str, kind: str, text: str, **fields: Any) -> dict:
 
 def mirror(c: str, type_: str, **data: Any) -> dict:
     """A record on main, appended and announced: the mirror's (session.py, `by: terminal`) and a browser message the
-    channel posted (channel.py, `by: browser`)."""
+    events module posted (events.py, `by: browser`)."""
     ensure_main(c)
     _, log_path = paths(c, MAIN_ID)
     rec = {"type": type_, "ts": _now(), **data}
@@ -790,20 +790,20 @@ async def main_route(c: str) -> Response:
 @router.post("/ws/{c}/chats", status_code=201)
 async def create_route(c: str, body: NewThread) -> dict:
     """A new thread. With `text` the question goes out as the thread's first event in the same call, and when no
-    session listens nothing is made (409, channel.post's message), so the browser keeps the draft and no thread is left
+    session listens nothing is made (409, events.post's message), so the browser keeps the draft and no thread is left
     empty."""
-    from . import channel, threads  # noqa: PLC0415 — both import this module
+    from . import events, threads  # noqa: PLC0415 — both import this module
 
     text = (body.text or "").strip()
-    if text and not channel.reachable(c):
-        raise HTTPException(409, channel.NOT_LISTENING.format(cwd=config.corpus_dir(c)))
+    if text and not events.reachable(c):
+        raise HTTPException(409, events.NOT_LISTENING.format(cwd=config.corpus_dir(c)))
     meta = new_thread(c, body.anchor, body.anchor_text, body.title, surface=body.surface, element=body.element,
                       selector=body.selector, image=body.image, parent=body.parent)
     if not text:
         return meta
     await threads.warm(c, meta)
     try:
-        posted = channel.post(c, channel.THREAD, {"thread": meta["id"], "text": text})
+        posted = events.post(c, events.THREAD, {"thread": meta["id"], "text": text})
     except Exception:
         _trash(c, meta["id"])
         raise
@@ -957,12 +957,12 @@ async def interrupt_route(c: str, chat_id: str) -> dict:
         return {"stopped": True}
     if meta.get("agent_id") and meta.get("parent") == MAIN_ID and not meta.get("pid") and meta.get("status") == "running":
         # a subagent of the analyst's session: only main can stop it
-        from . import channel, tools  # noqa: PLC0415
+        from . import events, tools  # noqa: PLC0415
 
         title = str(meta.get("title") or "a subagent")
         text = tools.hint("stop-subagent", title=title, agent_id=str(meta["agent_id"]))
-        channel.post(c, channel.MAIN, {"text": text}, mirror=False,
-                     line=channel.terminal_line(channel.MAIN, f"Stop {title}", {}))
+        events.post(c, events.MAIN, {"text": text}, mirror=False,
+                     line=events.terminal_line(events.MAIN, f"Stop {title}", {}))
         return {"stopped": False, "asked": "main"}
     return {"stopped": False}
 

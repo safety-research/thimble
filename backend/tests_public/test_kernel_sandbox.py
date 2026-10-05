@@ -9,7 +9,7 @@ import sys
 
 import pytest
 
-from app import channel, config, kernel_wrap, notebook, srt, views
+from app import config, events, kernel_wrap, notebook, srt, views
 
 SRT = srt.package(config.REPO_ROOT)
 NODE = srt.node()
@@ -198,7 +198,7 @@ async def test_card_code_reads_the_views_but_can_t_change_the_forms_main_s_promp
         said = "".join(b.get("text/plain", "") for b in cell["outputs"]).split()
         assert said == ["one", "post", *["refused"] * 6, "kept", "kept"], said
         assert all((registry / name).read_text() == "{}\n" for name in ("card_types.json", "extensions.json"))
-        prompt = channel.session_prompt(str(config.corpus_dir("mini")))
+        prompt = events.session_prompt(str(config.corpus_dir("mini")))
         assert "one post (Posts)" in views.forms_text("mini") and "one post" in prompt and "WRITTEN-BY-A-CARD" not in prompt
         assert await views.reader_call("mini", "posts", "records") == 8
         assert list(views.index_dir("mini", "posts").glob("*.index.pickle"))

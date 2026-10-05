@@ -143,13 +143,13 @@ async def test_a_request_a_previous_server_left_waiting_is_taken_off_at_start_an
     assert {r["id"] for r in log if r.get("answer") == agent_session.NOBODY_WAITS} == {"o1", "r0", "r1", "r2"}
 
 
-async def test_main_s_relayed_request_stays_at_start_for_channel_py_to_answer_or_drop():
-    from app import channel
+async def test_main_s_relayed_request_stays_at_start_for_events_py_to_answer_or_drop():
+    from app import events
 
-    channel._hold(CORPUS, "main-1", "Bash", "ls", "{}")
+    events._hold(CORPUS, "main-1", "Bash", "ls", "{}")
     await agent_session.recover()
     assert [p["id"] for p in agents.read_meta(CORPUS, agents.MAIN_ID)["permissions"]] == ["main-1"]
-    channel._drop(CORPUS, {"main-1"})
+    events._drop(CORPUS, {"main-1"})
 
 
 async def test_a_request_asked_while_the_server_starts_stays_on_the_card():
@@ -165,12 +165,12 @@ async def test_a_request_asked_while_the_server_starts_stays_on_the_card():
 async def test_main_s_relayed_request_asked_after_a_session_s_is_stamped_after_it():
     from datetime import datetime
 
-    from app import channel
+    from app import events
 
     chat = _agent("view:a")
     call = asyncio.ensure_future(agent_session.hook_request(CORPUS, _body("view:a", "first")))
     [first] = await _pending(chat, 1)
-    channel._hold(CORPUS, "main-1", "Bash", "ls", "{}")
+    events._hold(CORPUS, "main-1", "Bash", "ls", "{}")
     [later] = agents.read_meta(CORPUS, agents.MAIN_ID)["permissions"]
     assert datetime.fromisoformat(later["since"]) >= datetime.fromisoformat(first["since"]), "the card lists it second"
     agent_session.answer(CORPUS, chat, first["id"], True)

@@ -234,7 +234,7 @@ def test_a_program_s_token_works_for_its_role_s_own_tools_only_and_only_while_it
         ok = client.post("/api/tools/list_cards", json=body, headers=headers())
         assert ok.status_code == 200 and not ok.json()["is_error"]
         assert client.post("/api/tools/add_card", json=body, headers=headers()).status_code == 401
-        assert client.post("/api/channel/permission", json={}, headers=headers()).status_code == 401
+        assert client.post("/api/events/permission", json={}, headers=headers()).status_code == 401
         hook_auth.revoke(run.token_id)
         harness._runs.pop(run.token_id, None)
         assert client.post("/api/tools/list_cards", json=body, headers=headers()).status_code == 401

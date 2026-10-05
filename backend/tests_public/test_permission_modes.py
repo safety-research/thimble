@@ -14,10 +14,10 @@ import sys
 from pathlib import Path
 
 import pytest
-from conftest import card_wait, print_sessions
+from conftest import Listener, card_wait, print_sessions
 from fastapi import HTTPException
 
-from app import agent_session, agents, cc_channel, channel, config, ledger, modes, orient_session, session, tools, userconf
+from app import agent_session, agents, cc_plugin, config, events, ledger, modes, orient_session, session, tools, userconf
 
 CORPUS = "mini"
 KEY = orient_session.KEY
@@ -92,10 +92,10 @@ print(json.dumps({"type": "result", "subtype": "success", "is_error": False, "re
 def _fresh(workspaces_tmp):
     session._live.clear()
     session._expected.clear()
-    channel._subs.clear()
+    events._subs.clear()
     agent_session._runs.clear()
     yield
-    channel._subs.clear()
+    events._subs.clear()
     agent_session._runs.clear()
 
 
@@ -112,7 +112,7 @@ def fake(tmp_path, monkeypatch) -> Path:
     monkeypatch.setattr(agent_session, "STOP_WAIT_S", 1.0)
     monkeypatch.setenv("FAKE_DIR", str(out))
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude-config"))
-    monkeypatch.setenv("THIMBLE_CHANNEL", "plugin:thimble@inline")
+    monkeypatch.setenv("THIMBLE_LAUNCHED", "1")
     monkeypatch.delenv("FAKE_MODE", raising=False)
     # the fence without the sandbox, which the config then does not require; the fence's test turns it on
     monkeypatch.setenv("THIMBLE_SANDBOX", "0")
@@ -121,10 +121,8 @@ def fake(tmp_path, monkeypatch) -> Path:
     return out
 
 
-def _listen() -> asyncio.Queue:
-    q: asyncio.Queue = asyncio.Queue()
-    channel._subs.setdefault(CORPUS, set()).add(q)
-    return q
+def _listen() -> Listener:
+    return Listener(CORPUS)
 
 
 async def _done(key: str = KEY) -> None:
@@ -167,7 +165,7 @@ async def test_each_agent_runs_in_its_row_else_in_main_s_mode_and_nothing_else_p
     assert modes.mode_for(CORPUS, "orient") == "manual", "a mode written into main's meta is no report"
 
     async def report(sid: str, mode: str) -> None:
-        await channel.mode_route(channel.ModeBody(cwd=str(cwd), session=sid, permission_mode=mode))
+        await events.mode_route(events.ModeBody(cwd=str(cwd), session=sid, permission_mode=mode))
 
     await report("sid-other", "bypassPermissions")
     assert modes.mode_for(CORPUS, "writer") == "manual", "another session's mode is not main's"
@@ -204,7 +202,7 @@ async def test_each_agent_runs_in_its_row_else_in_main_s_mode_and_nothing_else_p
     remote.unlink()
     managed = fake.parent / "managed"
     (managed / "managed-settings.d").mkdir(parents=True)
-    monkeypatch.setitem(cc_channel.MANAGED_DIRS, sys.platform, managed)
+    monkeypatch.setitem(cc_plugin.MANAGED_DIRS, sys.platform, managed)
     (managed / "managed-settings.json").write_text(json.dumps({"permissions": {"disableBypassPermissionsMode": "disable"}}))
     (managed / "managed-settings.d" / "auto.json").write_text(json.dumps({"permissions": {"disableAutoMode": "disable"}}))
     assert modes.disabled() == {"auto", "bypass"}, "the managed file with its drop-ins"

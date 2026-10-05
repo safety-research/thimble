@@ -23,8 +23,8 @@ dependencies = [
   # the card harness (app/render.py) draws every card offscreen in a headless Chromium, which install.sh fetches for
   # the version uv.lock pins
   "playwright>=1.55",
-  # the plugin's MCP shim (plugin/bin/thimble-mcp) holds the channel's stream to the server and relays permission prompts
-  # with it, in the tree's own venv, which a release installs without the dev extras
+  # the plugin's MCP shim (plugin/bin/thimble-mcp) calls the server's tools and holds its subscription's stream with it,
+  # in the tree's own venv, which a release installs without the dev extras
   "httpx>=0.27",
 ]
 

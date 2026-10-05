@@ -143,7 +143,7 @@ async def test_each_stack_s_session_sees_its_own_values_and_the_user_s_own_sessi
         (a_home, a["THIMBLE_PORT"], a["THIMBLE_PLUGIN_ROOT"])
     assert env["XDG_CACHE_HOME"] == str(work / agent_session.CACHE_DIR)
     assert env["PATH"].split(os.pathsep)[0] == str(Path(sys.prefix) / "bin")
-    assert env["THIMBLE_CALLER_CWD"] == "" and env["THIMBLE_CHANNEL"] == ""
+    assert env["THIMBLE_CALLER_CWD"] == "" and env["THIMBLE_LAUNCHED"] == ""
 
     b = _stack(monkeypatch, tmp_path / "b", 9722)
     view = (await _view_build())["env"]
@@ -295,7 +295,7 @@ def test_every_variable_a_session_s_own_code_reads_is_set_for_it():
     root = config.REPO_ROOT
     files = [*(root / "plugin" / "bin").iterdir(),
              *(root / "backend" / "app" / f"{m}.py" for m in ("permission_hook", "call_ref", "sandbox_allow", "scratch_hook",
-                                                              "work_budget", "view_check", "hook_auth", "cc_channel",
+                                                              "work_budget", "view_check", "hook_auth", "cc_plugin",
                                                               "prompts", "config", "tools"))]
     names = {n for f in files if f.is_file() for n in re.findall(r"\bTHIMBLE_[A-Z][A-Z0-9_]*", f.read_text("utf-8"))}
     # a constant's name, and the server's fallback model, which no session's code uses

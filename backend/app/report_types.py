@@ -2164,7 +2164,7 @@ async def tool_read_ref(ctx: Any, args: dict[str, Any]) -> Any:
 
 
 # --------------------------------------------------------------------------- a write the analyst asked for
-# The Report tab's Write posts a `write` channel event, which main answers with start_writing (write_session.py).
+# The Report tab's Write posts a `write` browser event, which main answers with start_writing (write_session.py).
 # write_requested (or begin_write, for a request made in the chat) marks the document as being written: the stream says
 # `report {status: generating}` until the document is saved whole or the writer's chat finishes (writer_finished),
 # ending
@@ -2280,10 +2280,10 @@ def cancel_workspace(c: str) -> list[str]:
 
 
 def _listen() -> None:
-    """write_requested on the channel's `write` events and writer_finished on every agent chat's end."""
-    from . import agents, channel  # noqa: PLC0415
+    """write_requested on the `write` events and writer_finished on every agent chat's end."""
+    from . import agents, events  # noqa: PLC0415
 
-    channel.observe(WRITE_EVENT, write_requested)
+    events.observe(WRITE_EVENT, write_requested)
     agents.on_agent_finished(writer_finished)
 
 

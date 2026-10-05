@@ -3849,9 +3849,9 @@ def show_concept(c: str, id_or_name: str, on: bool | None, values: list[str] | N
     return concept
 
 
-LABELED_KIND = "labeled"  # the channel event that tells main of a label the analyst ran from the browser (prompts/main.md)
-LABEL_DONE_KIND = "label_done"  # the channel event that tells main a label it ran finished after its call returned
-RERUN_KIND = "rerun"  # the channel event that tells main which cards thimble ran again because a label they read changed
+LABELED_KIND = "labeled"  # the browser event that tells main of a label the analyst ran from the browser (prompts/main.md)
+LABEL_DONE_KIND = "label_done"  # the browser event that tells main a label it ran finished after its call returned
+RERUN_KIND = "rerun"  # the browser event that tells main which cards thimble ran again because a label they read changed
 _watching: set[asyncio.Task] = set()  # the tasks of tell_when_done, held until they end
 _reruns: dict[tuple[str, str], asyncio.Task] = {}  # (workspace, label id) -> the reruns of its readers after its last run
 _told_in_label_done: set[tuple[str, str]] = set()  # labels whose reruns label_done reports, so no `rerun` event goes
@@ -3939,12 +3939,12 @@ def rerun_text(c: str, cards: list[dict]) -> str:
 
 
 def _post_rerun(c: str, concept: dict, cards: list[dict]) -> bool:
-    from . import channel
+    from . import events
 
     text = (f"thimble ran these cards again since label {concept['name']} [[concept:{concept['id']}]] changed.\n\n"
             + rerun_text(c, cards))
     try:
-        channel.post(c, RERUN_KIND, {"text": text, "name": concept["name"], "ref": f"concept:{concept['id']}",
+        events.post(c, RERUN_KIND, {"text": text, "name": concept["name"], "ref": f"concept:{concept['id']}",
                                      "cards": ", ".join(f"card:{x['id']}" for x in cards)})
     except HTTPException as e:
         log.info("%s: the %s event for concept:%s was not posted: %s", c, RERUN_KIND, concept["id"], e.detail)
@@ -3967,7 +3967,7 @@ def tell_when_done(c: str, concept_id: str) -> None:
     """Post `label_done` to main once the label's running apply ends and thimble ran the cards that read it again
     (rerun_readers): its counts, its card, and those cards whose takeaway is stale or that failed, with their new output.
     A run that fails or is stopped posts nothing."""
-    from . import channel
+    from . import events
 
     key = (c, concept_id)
     _told_in_label_done.add(key)
@@ -3998,7 +3998,7 @@ def tell_when_done(c: str, concept_id: str) -> None:
                    "card": f"card:{cards[0][1]['id']}" if cards else None,
                    "cards": ", ".join(f"card:{x['id']}" for x in reran) or None}
         try:
-            channel.post(c, LABEL_DONE_KIND, payload)
+            events.post(c, LABEL_DONE_KIND, payload)
         except HTTPException as e:
             log.info("%s: the %s event for concept:%s was not posted: %s", c, LABEL_DONE_KIND, concept_id, e.detail)
             _check_takeaways(c, reran)
@@ -4014,7 +4014,7 @@ def tell_main(c: str, concept: dict, card: dict | None) -> bool:
     version is marked told only once an event went out. Never raises."""
     if concept.get("told") == concept["version"]:
         return False
-    from . import channel
+    from . import events
 
     scope = SCOPE_OF_UNIT.get(concept["unit"], "files")
     payload = {"text": (concept["description"] if concept["kind"] == "prompt" else concept["spec"]).strip(),
@@ -4024,7 +4024,7 @@ def tell_main(c: str, concept: dict, card: dict | None) -> bool:
                "what": "changed" if concept["told"] > 0 or concept["version"] > 1 else "defined",
                "stale": ", ".join(f"card:{x['id']}" for x in stale_cards(_ws(c), concept)) or None}
     try:
-        channel.post(c, LABELED_KIND, payload)
+        events.post(c, LABELED_KIND, payload)
     except HTTPException as e:
         log.debug("%s: the %s event for concept:%s was not posted: %s", c, LABELED_KIND, concept["id"], e.detail)
         return False
@@ -4247,7 +4247,7 @@ async def apply_route(c: str, concept_id: str, body: ApplyBody, response: Respon
     card = dict(cards[0][1]) if cards else None
     if card is None and not ran_before:
         card = await asyncio.to_thread(label_card, c, concept, None, body.created_by)
-    tell_main(c, concept, card)  # on the loop: the channel's queues are the loop's
+    tell_main(c, concept, card)  # on the loop: the events module's queues are the loop's
     if not body.wait:
         response.status_code = 202
         return record

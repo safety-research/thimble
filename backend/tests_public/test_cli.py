@@ -112,7 +112,9 @@ def test_up_prints_the_url_and_opens_a_sessions_folder(home, data, monkeypatch, 
     (tmp_path / "cc" / "settings.json").write_text(json.dumps({"disableAllHooks": True}))
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "cc"))
     assert cli.main(["ensure", "--cwd", str(folder), "--session", "s8"]) == 0
-    assert capsys.readouterr().out.splitlines() == ["thimble: http://127.0.0.1:5300/?ws=calls"], "no hook to show it"
+    url, note, mark = capsys.readouterr().out.splitlines()
+    assert url == "thimble: http://127.0.0.1:5300/?ws=calls", "no hook to show it"
+    assert note == cli.MONITOR_NOTE and mark.startswith(cli.MONITOR_MARK), "main's Monitor brings the browser's events"
     assert cli.main(["up", "--cwd", str(folder)]) == 0, "a bare up read by a program"
     assert capsys.readouterr().out.splitlines() == ["thimble: http://127.0.0.1:5300/"] and len(posted) == 2
     monkeypatch.setattr(cli, "to_terminal", lambda: True)
@@ -231,7 +233,7 @@ def test_real_up_starts_a_detached_server_idempotently_and_stop_ends_it(home, da
     if probe.returncode != 0:
         pytest.skip("app.main does not import in this tree: " + probe.stderr.strip().splitlines()[-1][:200])
     port = _free_port()
-    # a claude.ai login (fake_claude), so the launcher's channel stands and /thimble prints the URL alone
+    # a session the launcher started, with the plugin's hooks on, so /thimble prints the URL alone
     env = {**os.environ, "THIMBLE_HOME": str(home), "THIMBLE_PORT": str(port),
            "THIMBLE_DATA_DIR": str(data), "THIMBLE_WORKSPACES_DIR": str(tmp_path / "ws")}
     env.pop("THIMBLE_DEV", None)

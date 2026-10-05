@@ -311,14 +311,14 @@ async def refresh_quietly(c: str, *, warm: bool = True) -> dict[str, dict[str, A
 
 async def announce(c: str) -> None:
     """Refresh the types when main's session connects, and tell main of the types its prompt did not list."""
-    from . import channel  # noqa: PLC0415
+    from . import events  # noqa: PLC0415
 
     before = set(read_registry(c))
     types = await refresh_quietly(c)
     new = {k: v for k, v in types.items() if k not in before}
-    if new and channel.reachable(c):
+    if new and events.reachable(c):
         try:
-            channel.post(c, "card_types", {"text": _block(new), "types": ", ".join(new)})
+            events.post(c, "card_types", {"text": _block(new), "types": ", ".join(new)})
         except HTTPException as e:
             log.info("%s: the card types were not announced: %s", c, e.detail)
 

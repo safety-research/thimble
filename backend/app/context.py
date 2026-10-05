@@ -21,7 +21,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Iterable, Iterator
 
-from . import agents, channel, cite, config, investigation, prompts, report_types, session, threads, tools
+from . import agents, cite, config, events, investigation, prompts, report_types, session, threads, tools
 
 PROMPT = "context"  # prompts/context.md
 PARTS = ("conversation", "threads", "orientation", "canvas", "views", "documents")  # every part render gives by default
@@ -112,18 +112,17 @@ def transcript_path(c: str) -> Path | None:
 
 
 def _event(raw: str, forks: bool = True) -> _Entry | None:
-    """A channel event as main received it: the analyst's message for `main`, else the event with its attributes. A
+    """A browser event as main received it: the analyst's message for `main`, else the event with its attributes. A
     thread's event keeps its question and refs, since the rest of its anchor (the selector, the element's text, what
     the ref resolves to) is for the fork to read; without `forks` it is left out, since the threads part tells it."""
-    m = session.CHANNEL_RE.match(raw or "")
+    m = session.EVENT_RE.match(raw or "")
     attrs = dict(session.ATTR_RE.findall(m.group(1))) if m else {}
     body = (m.group(2) if m else str(raw or "")).strip()
     kind = attrs.pop("kind", "")
-    attrs.pop("source", None)
     attrs.pop("event", None)
     if kind in ("main", ""):
         return _Entry("[analyst]", body) if body else None
-    if kind == channel.THREAD:
+    if kind == events.THREAD:
         if not forks:
             return None
         keep = [ln for ln in body.splitlines() if ln.startswith(("question:", "ref:"))]
@@ -180,11 +179,11 @@ def _entries(path: Path, forks: bool = True) -> list[_Entry]:
     subagents = path.parent / path.stem / "subagents"
 
     def notification(text: str) -> None:
-        # a session without channels gets the browser's events as a task notification, from thimble's watcher or its
-        # Monitor (session.browser_events); they are the analyst's messages on that route and are rendered as such
-        events = session.browser_events(text)
-        if events:
-            entries.extend(e for e in (_event(x, forks) for x in events) if e is not None)
+        # the browser's events come as a task notification, from thimble's watcher or its Monitor
+        # (session.browser_events); they are the analyst's messages and are rendered as such
+        found = session.browser_events(text)
+        if found:
+            entries.extend(e for e in (_event(x, forks) for x in found) if e is not None)
             return
         fields = dict(session.TASK_FIELD_RE.findall(text or ""))
         agent_id = str(fields.get("task-id") or "").strip()
@@ -201,11 +200,7 @@ def _entries(path: Path, forks: bool = True) -> list[_Entry]:
             entries.append(_Entry(f"[notification {status}]" if status else "[notification]", result))
 
     def prompt(text: str, origin: str | None) -> None:
-        if origin == "channel":
-            e = _event(text, forks)
-            if e is not None:
-                entries.append(e)
-        elif origin == "task-notification":
+        if origin == "task-notification":
             notification(text)
         elif origin in (None, "human"):
             command = session._command_line(text)
@@ -222,7 +217,7 @@ def _entries(path: Path, forks: bool = True) -> list[_Entry]:
         if kind == "user":
             _results(rec, calls, hidden)
             text = session._user_text(rec)
-            if text is None or rec.get("isCompactSummary") or (rec.get("isMeta") and origin != "channel"):
+            if text is None or rec.get("isCompactSummary") or rec.get("isMeta"):
                 continue
             prompt(text, origin)
         elif kind == "attachment":

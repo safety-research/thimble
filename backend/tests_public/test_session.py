@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from app import agents, cc_channel, channel, config, session, threads
+from app import agents, cc_plugin, config, events, session, threads
 
 CORPUS = "mini"
 SID = "e7b0a1f2-0000-4000-8000-000000000001"
@@ -27,12 +27,12 @@ def _fresh(workspaces_tmp, tmp_path, monkeypatch):
     session._came_back.clear()
     session._shim_pids.clear()
     session._shim_configs.clear()
-    for table in (channel._subs, channel._routes, channel._pending, channel._taken):
+    for table in (events._subs, events._pending, events._taken):
         table.clear()
     agents._busy.clear()
     yield
     session._live.clear()
-    for table in (channel._subs, channel._routes, channel._pending, channel._taken):
+    for table in (events._subs, events._pending, events._taken):
         table.clear()
 
 
@@ -130,11 +130,10 @@ NEXT = "e7b0a1f2-0000-4000-8000-000000000003"
 MOVED_AT = "2026-10-01T21:17:45.528Z"
 
 
-def _subscribe(sid: str, delivery: str) -> asyncio.Queue:
-    q: asyncio.Queue = asyncio.Queue()
-    channel._subs.setdefault(CORPUS, set()).add(q)
-    channel._routes[q] = (sid, delivery)
-    return q
+def _subscribe(sid: str, delivery: str = cc_plugin.HOOK) -> events.Sub:
+    sub = events.Sub(sid, delivery)
+    events._subs.setdefault(CORPUS, set()).add(sub)
+    return sub
 
 
 def _stamped(sid: str, n: int, at: str, *recs: dict) -> list[dict]:
@@ -150,7 +149,7 @@ def _moved(sid: str, to: str, at: str = MOVED_AT) -> list[dict]:
     """The continued-in record, then an event queued for the parked session, which never reads it."""
     return [{"type": "continued-in", "timestamp": at, "sessionId": sid, "continuedInSessionId": to},
             {"type": "queue-operation", "operation": "enqueue", "timestamp": "2026-10-01T22:41:21.160Z",
-             "sessionId": sid, "content": "<channel kind=\"main\">hello</channel>"}]
+             "sessionId": sid, "content": "<thimble-event kind=\"main\">hello</thimble-event>"}]
 
 
 def _copy(recs: list[dict], sid: str) -> list[dict]:
@@ -175,8 +174,7 @@ def _restart() -> None:
     """The server stops and starts again: what it held in memory is gone, and every shim subscribes anew."""
     session._live.clear()
     session._shim_pids.clear()
-    for table in (channel._subs, channel._routes):
-        table.clear()
+    events._subs.clear()
 
 
 @pytest.fixture()
@@ -208,27 +206,27 @@ def test_main_follows_its_session_into_a_background_job_and_the_parked_session_n
     job ends main does not fall back to it."""
     p = project / f"{SID}.jsonl"
     p.write_text("")
-    old_sub = _subscribe(SID, cc_channel.CHANNEL)
+    old_sub = _subscribe(SID, cc_plugin.HOOK)
     lv = _attach(cwd, p, pid=100)
     session.tail_once(lv)
     asked = _turn(SID, 1, "2026-10-01T20:26:31.492Z", "the board's posts")
     _append(p, lv, asked)
-    channel._pending[(CORPUS, SID)] = deque([{"content": "x", "meta": {"event": "e1"}}])
+    events._pending[(CORPUS, SID)] = deque([{"content": "x", "meta": {"event": "e1"}}])
 
     _write(project / f"{JOB}.jsonl", [*_copy(asked, JOB), *_turn(JOB, 2, "2026-10-01T23:30:03.924Z", "the threads")])
     _write(p, _moved(SID, JOB))
     if first == "watcher":
-        assert channel._pull_state(CORPUS, JOB, 200) is None, "the job's watcher waits for events"
+        assert events._pull_state(CORPUS, JOB, 200) is None, "the job's watcher waits for events"
         assert session.current(CORPUS).sid == JOB
-    _subscribe(JOB, cc_channel.HOOK)
-    session.connected(CORPUS, JOB, cwd, 200, claim=False)
+    _subscribe(JOB, cc_plugin.HOOK)
+    session.connected(CORPUS, JOB, cwd, 200)
     job = session.current(CORPUS)
     assert job is not None and job.sid == JOB and job.pid == 200 and session.main_pid(CORPUS) == 200
     session.tail_once(job)
     assert _shown("user") == ["the board's posts", "the threads"]
     assert _shown("text") == ["About the board's posts", "About the threads"]
-    assert [n["meta"]["event"] for n in channel._pending[(CORPUS, JOB)]] == ["e1"]
-    assert not channel._pending.get((CORPUS, SID))
+    assert [n["meta"]["event"] for n in events._pending[(CORPUS, JOB)]] == ["e1"]
+    assert not events._pending.get((CORPUS, SID))
     states = tmp_path / "claude-config" / "sessions"
     states.mkdir(parents=True)
     (states / "100.json").write_text(json.dumps({"sessionId": SID, "status": "idle", "parkedJobId": JOB[:8]}))
@@ -237,13 +235,13 @@ def test_main_follows_its_session_into_a_background_job_and_the_parked_session_n
 
     assert session.sessions(CORPUS)[SID]["reason"] == session.CONTINUED and not session.may_return(CORPUS, SID)
     session.connected(CORPUS, SID, cwd, 100)
-    assert session.current(CORPUS) is job, "the parked session's shim subscribing again on the channel"
-    channel._subs[CORPUS].discard(old_sub)
+    assert session.current(CORPUS) is job, "the parked session's shim subscribing again"
+    events._subs[CORPUS].discard(old_sub)
     session.disconnected(CORPUS, SID)
     assert session.current(CORPUS) is job and quits == []
-    channel._subs[CORPUS].add(old_sub)
-    for q in [q for q in channel._subs[CORPUS] if channel._routes[q][0] == JOB]:
-        channel._subs[CORPUS].discard(q)
+    events._subs[CORPUS].add(old_sub)
+    for q in [q for q in events._subs[CORPUS] if q.session == JOB]:
+        events._subs[CORPUS].discard(q)
     session.disconnected(CORPUS, JOB)
     assert session.current(CORPUS) is None and quits == [CORPUS], "the job ended; the parked session is not main again"
 
@@ -254,7 +252,7 @@ def test_a_job_written_and_subscribed_after_main_followed_takes_the_open_turn_on
     shim subscribes first, and the turn the old session left open goes on from the job's first record of its own."""
     p = project / f"{SID}.jsonl"
     p.write_text("")
-    _subscribe(SID, cc_channel.CHANNEL)
+    _subscribe(SID, cc_plugin.HOOK)
     lv = _attach(cwd, p, pid=100)
     session.tail_once(lv)
     asked = _stamped(SID, 1, "2026-10-01T20:26:31.492Z", _human("Add a card"),
@@ -268,11 +266,11 @@ def test_a_job_written_and_subscribed_after_main_followed_takes_the_open_turn_on
     _restart()
     _write(t, [*_copy(asked, JOB), *_stamped(JOB, 2, "2026-10-01T21:18:00.000Z", _result("toolu_ac", "card:cd34ef56"),
                                               _assistant(_say("card:cd34ef56")), END)])
-    _subscribe(SID, cc_channel.CHANNEL)
+    _subscribe(SID, cc_plugin.HOOK)
     session.connected(CORPUS, SID, cwd, 100)
     assert session.current(CORPUS) is None, "the parked session subscribing first is not main"
-    _subscribe(JOB, cc_channel.HOOK)
-    session.connected(CORPUS, JOB, cwd, 200, claim=False)
+    _subscribe(JOB, cc_plugin.HOOK)
+    session.connected(CORPUS, JOB, cwd, 200)
     job = session.current(CORPUS)
     assert job is not None and job.sid == JOB and job.pid == 200
     session.tail_once(job)
@@ -284,7 +282,7 @@ def test_a_record_the_job_writes_in_the_millisecond_of_the_move_is_shown(cwd, pr
     new uuids, so they are shown, and only the turn the job copied is skipped."""
     p = project / f"{SID}.jsonl"
     p.write_text("")
-    _subscribe(SID, cc_channel.CHANNEL)
+    _subscribe(SID, cc_plugin.HOOK)
     lv = _attach(cwd, p, pid=100)
     session.tail_once(lv)
     asked = _turn(SID, 1, "2026-10-01T20:26:31.492Z", "the board's posts")
@@ -319,19 +317,19 @@ def test_main_follows_after_a_restart_past_the_move_and_again_when_the_job_comes
     threads = _turn(JOB, 2, "2026-10-01T23:30:03.924Z", "the threads")
     _write(t, [*_copy(asked, JOB), *threads])
     if back_first == "parked":
-        _subscribe(SID, cc_channel.CHANNEL)
+        _subscribe(SID, cc_plugin.HOOK)
         session.connected(CORPUS, SID, cwd, 100)
-    bg = _subscribe(JOB, cc_channel.HOOK)
-    session.connected(CORPUS, JOB, cwd, 200, claim=False)
+    bg = _subscribe(JOB, cc_plugin.HOOK)
+    session.connected(CORPUS, JOB, cwd, 200)
     job = session.current(CORPUS)
     assert job is not None and job.sid == JOB and job.pid == 200
     session.tail_once(job)
     assert _shown("text") == ["About the board's posts", "About the threads"]
 
-    _subscribe(JOB, cc_channel.CHANNEL)
+    _subscribe(JOB, cc_plugin.HOOK)
     session.connected(CORPUS, JOB, cwd, 300)
     assert session.current(CORPUS) is job and job.pid == 300 and session.main_pid(CORPUS) == 300
-    channel._subs[CORPUS].discard(bg)
+    events._subs[CORPUS].discard(bg)
     session.disconnected(CORPUS, JOB)
     assert session.current(CORPUS) is job and quits == [], "the background process's shim leaving ends nothing"
 
@@ -352,14 +350,14 @@ def test_a_session_replaced_before_its_move_was_read_is_parked_all_the_same(cwd,
     main, nor does the job's end."""
     p = project / f"{SID}.jsonl"
     _write(p, [*_turn(SID, 1, "2026-10-01T20:26:31.492Z", "the board's posts"), *_moved(SID, JOB)])
-    _subscribe(SID, cc_channel.CHANNEL)
+    _subscribe(SID, cc_plugin.HOOK)
     _attach(cwd, p, pid=100)
-    job_sub = _subscribe(JOB, cc_channel.HOOK)
+    job_sub = _subscribe(JOB, cc_plugin.HOOK)
     assert session.attach(CORPUS, JOB, cwd, None, 200) is not None
     assert session.sessions(CORPUS)[SID]["reason"] == "replaced" and not session.may_return(CORPUS, SID)
     session.connected(CORPUS, SID, cwd, 100)
     assert session.current(CORPUS).sid == JOB
-    channel._subs[CORPUS].discard(job_sub)
+    events._subs[CORPUS].discard(job_sub)
     session.disconnected(CORPUS, JOB)
     assert session.current(CORPUS) is None and quits == [CORPUS]
 
@@ -370,7 +368,7 @@ def test_a_subagent_at_work_when_the_session_moves_goes_on_in_the_job(cwd, proje
     job's task notification ends it with its result, after a server restart too."""
     p = project / f"{SID}.jsonl"
     p.write_text("")
-    _subscribe(SID, cc_channel.CHANNEL)
+    _subscribe(SID, cc_plugin.HOOK)
     lv = _attach(cwd, p, pid=100)
     session.tail_once(lv)
     started = _stamped(SID, 1, "2026-10-01T20:27:52.417Z", _human("Count the posts in the background"),
@@ -383,8 +381,8 @@ def test_a_subagent_at_work_when_the_session_moves_goes_on_in_the_job(cwd, proje
     assert chat["status"] == "running" and chat["session"] == JOB
     if restart:
         _restart()
-        _subscribe(JOB, cc_channel.HOOK)
-        session.connected(CORPUS, JOB, cwd, 200, claim=False)
+        _subscribe(JOB, cc_plugin.HOOK)
+        session.connected(CORPUS, JOB, cwd, 200)
     note = ("<task-notification>\n<task-id>a1b2c3d4</task-id>\n<status>completed</status>\n<result>8 posts</result>\n"
             "</task-notification>")
     _write(project / f"{JOB}.jsonl", [*_copy(started, JOB), *_stamped(
@@ -403,27 +401,13 @@ class _Req:
         return False
 
 
-async def _job_subscribes_on_the_channel(cwd: str) -> dict:
-    """The job's shim subscribes on the channel route: the first event its stream carries after `ready`."""
-    resp = await channel.subscribe(_Req(), cwd=cwd, session=JOB, pid=200)
-    gen = resp.body_iterator
-    try:
-        assert (await gen.__anext__())["event"] == "ready"
-        return json.loads((await gen.__anext__())["data"])
-    finally:
-        await gen.aclose()
-
-
-@pytest.mark.parametrize("job_route", [cc_channel.HOOK, cc_channel.CHANNEL])
-@pytest.mark.parametrize("old_route", [cc_channel.CHANNEL, cc_channel.HOOK])
-def test_an_event_posted_after_the_move_and_before_the_job_s_shim_subscribes_waits_for_the_job(
-        cwd, project, old_route, job_route):
+def test_an_event_posted_after_the_move_and_before_the_job_s_shim_subscribes_waits_for_the_job(cwd, project):
     """The browser posts an event after Claude Code wrote the move, before the tail read it and before the job's shim
     subscribed: main follows first, and the event waits in the job's queue, never the parked session's, until the
-    job's watcher takes it or its channel subscribes."""
+    job's watcher takes it."""
     p = project / f"{SID}.jsonl"
     p.write_text("")
-    old_sub = _subscribe(SID, old_route)
+    _subscribe(SID, cc_plugin.HOOK)
     lv = _attach(cwd, p, pid=100)
     session.tail_once(lv)
     asked = _turn(SID, 1, "2026-10-01T20:26:31.492Z", "the board's posts")
@@ -431,18 +415,14 @@ def test_an_event_posted_after_the_move_and_before_the_job_s_shim_subscribes_wai
     _write(project / f"{JOB}.jsonl", _copy(asked, JOB))
     _write(p, _moved(SID, JOB))
 
-    posted = channel.post(CORPUS, "main", {"text": "Which posts are new?"})
+    posted = events.post(CORPUS, "main", {"text": "Which posts are new?"})
     assert session.current(CORPUS).sid == JOB and posted["delivered"] == 1
-    assert old_sub.empty() and not channel._pending.get((CORPUS, SID))
-    assert [n["meta"]["event"] for n in channel._pending[(CORPUS, JOB)]] == [posted["id"]]
-    if job_route == cc_channel.HOOK:
-        _subscribe(JOB, cc_channel.HOOK)
-        session.connected(CORPUS, JOB, cwd, 200, claim=False)
-        got = asyncio.run(channel.pull_route(_Req(), cwd=cwd, session=JOB, wait=1, pid=200))
-        assert got["id"] == posted["id"]
-    else:
-        got = asyncio.run(_job_subscribes_on_the_channel(cwd))
-        assert got["meta"]["event"] == posted["id"] and not channel._pending.get((CORPUS, JOB))
+    assert not events._pending.get((CORPUS, SID))
+    assert [n["meta"]["event"] for n in events._pending[(CORPUS, JOB)]] == [posted["id"]]
+    _subscribe(JOB, cc_plugin.HOOK)
+    session.connected(CORPUS, JOB, cwd, 200)
+    got = asyncio.run(events.pull_route(_Req(), cwd=cwd, session=JOB, wait=1, pid=200))
+    assert got["id"] == posted["id"]
 
 
 def test_naming_the_job_after_an_unread_move_takes_over_from_no_session(cwd, project):
@@ -450,11 +430,11 @@ def test_naming_the_job_after_an_unread_move_takes_over_from_no_session(cwd, pro
     nothing of taking over from it."""
     p = project / f"{SID}.jsonl"
     p.write_text("")
-    _subscribe(SID, cc_channel.CHANNEL)
+    _subscribe(SID, cc_plugin.HOOK)
     lv = _attach(cwd, p, pid=100)
     session.tail_once(lv)
     _write(p, [*_turn(SID, 1, "2026-10-01T20:26:31.492Z", "the board's posts"), *_moved(SID, JOB)])
-    out = asyncio.run(channel.session_route(CORPUS, channel.SessionBody(session=JOB, cwd=cwd)))
+    out = asyncio.run(events.session_route(CORPUS, events.SessionBody(session=JOB, cwd=cwd)))
     assert out["attached"] and out["replaced"] is None and session.current(CORPUS).sid == JOB
 
 
@@ -463,11 +443,11 @@ def test_a_thread_s_fork_at_work_when_the_session_moves_goes_on_in_the_job(cwd, 
     keeps running, and the job's task notification finishes it."""
     p = project / f"{SID}.jsonl"
     p.write_text("")
-    _subscribe(SID, cc_channel.CHANNEL)
+    _subscribe(SID, cc_plugin.HOOK)
     lv = _attach(cwd, p, pid=100)
     session.tail_once(lv)
     thread = agents.new_thread(CORPUS, None, None, "Days the page changed")
-    channel.post(CORPUS, "thread", {"thread": thread["id"], "text": "On which days did it change?"})
+    events.post(CORPUS, "thread", {"thread": thread["id"], "text": "On which days did it change?"})
     name = agents.read_meta(CORPUS, thread["id"])[threads.FORK_NAME_KEY]
     forked = _stamped(SID, 1, "2026-10-01T20:27:52.417Z", _human("Look into the thread"),
                       _assistant(_use("toolu_fk", "Agent", {"description": f"thread:{name}", "prompt": "Answer it.",
@@ -495,7 +475,7 @@ def test_a_moved_job_s_subagent_transcript_links_to_the_old_one_and_each_line_sh
     once."""
     p = project / f"{SID}.jsonl"
     p.write_text("")
-    _subscribe(SID, cc_channel.CHANNEL)
+    _subscribe(SID, cc_plugin.HOOK)
     lv = _attach(cwd, p, pid=100)
     session.tail_once(lv)
     old = project / SID / "subagents" / "agent-a1b2c3d4.jsonl"

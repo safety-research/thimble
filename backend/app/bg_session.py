@@ -1042,17 +1042,17 @@ def _outgoing(item: dict[str, Any]) -> str:
 
 def _flush_outbox(e: Entry) -> None:
     """A message no proxy took within PROXY_WAIT_S goes to main to send, once."""
-    from . import channel, tools  # noqa: PLC0415
+    from . import events, tools  # noqa: PLC0415
 
     now = time.monotonic()
     for item in e.outbox:
         if item["sent"] or item["main_asked"] or now - item["ts"] < PROXY_WAIT_S:
             continue
-        if not channel.reachable(e.c):
+        if not events.reachable(e.c):
             continue
         item["main_asked"] = True
         with contextlib.suppress(Exception):
-            channel.post(e.c, "agent", {"text": tools.hint("bg-relay", session=e.name, token=item["token"]), "name": e.name})
+            events.post(e.c, "agent", {"text": tools.hint("bg-relay", session=e.name, token=item["token"]), "name": e.name})
             log.info("%s: no proxy took %s's message %s; main is asked to send it", e.c, e.name, item["token"])
 
 
@@ -1101,13 +1101,13 @@ def proxy_start_hint(c: str, key: str) -> str:
 
 def ask_main_for_proxy(c: str, *keys: str) -> bool:
     """Ask main, with one `agent` event, to start the proxies of the sessions `keys`; False when no session listens."""
-    from . import channel  # noqa: PLC0415
+    from . import events  # noqa: PLC0415
 
     found = [e for e in (entry(c, k) for k in keys) if e is not None and not e.proxy_refused]
-    if not found or not channel.reachable(c):
+    if not found or not events.reachable(c):
         return False
     try:
-        channel.post(c, "agent", {"text": "\n\n".join(proxy_start_hint(c, e.key) for e in found),
+        events.post(c, "agent", {"text": "\n\n".join(proxy_start_hint(c, e.key) for e in found),
                                   "name": ", ".join(e.name for e in found)})
     except Exception:  # noqa: BLE001
         log.info("%s: main was not asked to start the proxies of %s", c, keys, exc_info=True)

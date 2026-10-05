@@ -22,6 +22,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from conftest import Listener
 
 from app import config, dev, extension_manifest, headless, tools, userconf, views
 
@@ -844,11 +845,9 @@ async def test_no_thread_is_read_as_a_question_from_a_view_s_own_box(ws, inproc,
     anchor's content only."""
     import httpx  # noqa: PLC0415
 
-    from app import channel  # noqa: PLC0415
     from app.main import app  # noqa: PLC0415
 
-    q: asyncio.Queue = asyncio.Queue()
-    channel._subs.setdefault(CORPUS, set()).add(q)
+    q = Listener(CORPUS)
     click = {"surface": "files", "element": "view:threads", "selector": "", "image": None, "parent": None}
     cases = [{**click, "anchor": "view:threads", "anchor_text": "Legend"},
              {**click, "anchor": "board.jsonl#L3", "anchor_text": "Confirmed"},
@@ -862,7 +861,7 @@ async def test_no_thread_is_read_as_a_question_from_a_view_s_own_box(ws, inproc,
                 assert "asked: in the view's own box" not in content, body
                 assert "The records the view reads" not in content, body
     finally:
-        channel._subs.pop(CORPUS, None)
+        q.close()
 
 
 # ------------------------------------------------------------------------------------------------- worked examples

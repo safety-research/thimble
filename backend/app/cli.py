@@ -8,7 +8,7 @@
     thimble feedback ["description"] [--no-logs]   (a problem report as a zip; feedback.py)
     thimble list                           (the workspaces by id, archived runs included; runs.py)
     thimble purge <id>… [--dry-run]        (delete workspaces or archived runs by id; runs.py)
-    thimble launch-args --cwd <path>       (the launcher's: channel entry, allowed tools, main's effort and settings, turn tools, main's name, main's prompt)
+    thimble launch-args --cwd <path>       (the launcher's: plugin folder, allowed tools, main's effort and settings, turn tools, main's name, main's prompt)
     thimble prompt <name>… [--cwd <path>]  (prompt files rendered for a session in <path>, for skills and hooks)
     thimble extension add <folder | git URL | built-in name> [--yes] | on <name> | off <name> | list | remove <name>
                                                                                               (extensions.py)
@@ -18,8 +18,8 @@
 on THIMBLE_PORT (8300) as its own session leader (plus Vite on 5300 when THIMBLE_DEV is on), wait for health, map the
 cwd to a workspace, print `thimble: <url>` (LINK_LINE in a session), and name the session to the server. It always
 exits 0, since a skill fails whole when its command exits non-zero. `--action fresh` moves the workspace aside into
-<workspaces>/.archive/; `--action restore` restores an archive. /thimble also reports the route browser events take
-(cc_channel.delivery).
+<workspaces>/.archive/; `--action restore` restores an archive. Where the plugin's hooks are off, /thimble also prints
+the command main's Monitor runs (cc_plugin.route, monitor_lines).
 
 <home> is `~/.thimble` or THIMBLE_HOME. <home>/server.json records {port, pid, url, repo, env, token, ui_key}, readable
 by its owner alone; `token` is new at each start and is what the plugin's hooks prove they hold, and `ui_key`, kept
@@ -38,7 +38,7 @@ left nothing. In the sandbox without the hook's result `up` starts nothing and p
 entries that would run it outside (sandbox_line). `restart` and `stop` name the work
 they would interrupt (running_work) and ask first unless `--yes`. In dev mode an `up` that finds the source tree changed
 while the server is idle restarts the backend (THIMBLE_NO_AUTORESTART=1 disables it). This module imports only
-`config`, `procs`, `cc_channel` and the standard library (others lazily), never `app.notebook`.
+`config`, `procs`, `cc_plugin` and the standard library (others lazily), never `app.notebook`.
 """
 from __future__ import annotations
 
@@ -71,7 +71,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator, Mapping, NamedTuple
 
-from . import cc_channel, config, headless, procs
+from . import cc_plugin, config, headless, procs
 
 DEFAULT_PORT = 8300
 DEFAULT_UI_PORT = 5300
@@ -98,41 +98,18 @@ FEEDBACK = "feedback"  # /thimble feedback: the problem report (feedback.py)
 REPORT_LINE = ("thimble: to report it, say `/thimble feedback` or run `thimble feedback \"the server did not start\"` in a "
                "shell; either writes a zip with the logs to send the developer.")
 UNINSTALL_SHELL_LINE = "thimble: uninstall is a shell command, not a /thimble action. Run `thimble uninstall` in a terminal; it says what it will remove and asks first."
-# What the analyst sees on the hook and Monitor routes. Each note says why channels are off, what differs on the route
-# used instead, then the fix, in terms of what the analyst sees. On the Monitor route permission prompts stay in the
-# terminal, and after /clear the Monitor is gone, so that note asks for /thimble again. A reason with no fix the analyst
-# can act on (Bedrock, Vertex, Foundry, or a login that is not a claude.ai one) gets the generic line. A background
-# session of Claude Code's (cc_channel.background) runs without channels however it was started, so its SESSION note
-# (BACKGROUND_NOTES) says that and gives no fix.
-_NOT_AVAILABLE = "Claude Code channels are not available in this session"
-CHANNELS_OFF = {
-    cc_channel.SESSION: "Claude Code channels are off because this session was started without them",
-    cc_channel.ORG: "Claude Code channels are off because your organization has disabled them",
-    cc_channel.PROVIDER: _NOT_AVAILABLE,
-    cc_channel.ACCOUNT: _NOT_AVAILABLE,
-}
-CHANNEL_FIXES = {
-    cc_channel.SESSION: " For the direct connection, quit and run `thimble` in this folder, or restart with `{command}`.",
-    cc_channel.ORG: " To use channels, ask your admin to enable them.",
-    cc_channel.PROVIDER: "",
-    cc_channel.ACCOUNT: "",
-}
-_HOOK_EFFECT = ("so thimble connects through hooks instead. Browser messages arrive as fast as with channels, but "
-                "Claude may ask you to confirm here in the terminal what you approved in the browser.")
-HOOK_NOTES = {why: f"thimble: note - {off}, {_HOOK_EFFECT}{CHANNEL_FIXES[why]}" for why, off in CHANNELS_OFF.items()}
-_MONITOR_EFFECT = ("and hooks are disabled too, so thimble connects through a Monitor instead. Permission prompts "
-                   "appear only here in the terminal, and Claude may ask you to confirm here what you approved in the "
-                   "browser. After /clear, say /thimble again.")
-MONITOR_NOTES = {why: f"thimble: WARNING - {off}, {_MONITOR_EFFECT}{CHANNEL_FIXES[why]}" for why, off in CHANNELS_OFF.items()}
-_BACKGROUND_OFF = "Claude Code runs background sessions without channels"
-BACKGROUND_NOTES = {cc_channel.HOOK: f"thimble: note - {_BACKGROUND_OFF}, {_HOOK_EFFECT}",
-                    cc_channel.MONITOR: f"thimble: WARNING - {_BACKGROUND_OFF}, {_MONITOR_EFFECT}"}
+# What /thimble prints where the plugin's hooks are off, so that thimble connects through main's Monitor
+# (cc_plugin.route): on that route permission prompts stay in the terminal, and after /clear the Monitor is gone, so the
+# note asks for /thimble again.
+MONITOR_NOTE = ("thimble: WARNING - Claude Code hooks are disabled in this session, so thimble connects through a Monitor "
+                "instead. Permission prompts appear only here in the terminal, and Claude may ask you to confirm here "
+                "what you approved in the browser. After /clear, say /thimble again.")
 MONITOR_MARK = "thimble-monitor:"  # then the command main's Monitor runs (plugin/skills/thimble/SKILL.md)
 WATCHER = "bin/.thimble-watch"  # the plugin's hidden watcher, under its root
 FRESH = "fresh"  # /thimble fresh: the folder's workspace moved aside, an empty one opened
 RESUME = "restore"  # /thimble restore [<archive>]: an archive restored in its place, or the archives listed
 ALIASES = {"resume": RESUME}  # another name the action takes
-OPENING = ("", "on", FRESH, RESUME)  # the actions that open the workspace (and print the delivery note)
+OPENING = ("", "on", FRESH, RESUME)  # the actions that open the workspace (and arm the Monitor where hooks are off)
 RESUME_LINE = "thimble: resuming the dashboard from your last run; `/thimble fresh` starts over"
 # what /thimble prints in place of the link, which carries the ui_key and so is kept out of the model's context: main's
 # Stop hook shows it under the reply (leave_link, plugin/bin/.thimble-watch)
@@ -163,9 +140,10 @@ ARCHIVE_TIMEOUT_S = 60.0  # the archive stops an orientation's or a writer's ses
 # marks the uvicorn `start` spawns, so a server knows the supervisor started it and may restart itself after a ticket
 # applies (dev.supervised); a server started by hand lacks it and is never restarted by a ticket
 SUPERVISED_ENV = "THIMBLE_SUPERVISED"
-CHANNEL_ENV = cc_channel.ENV  # the launcher exports it (plugin/bin/thimble); Claude Code passes it on to the skill's command
+# the launcher exports it (plugin/bin/thimble), and Claude Code passes it on to the skill's command: main's prompt is
+# appended to the session's system prompt already (launched)
+LAUNCHED_ENV = "THIMBLE_LAUNCHED"
 PLUGIN_ROOT_ENV = "THIMBLE_PLUGIN_ROOT"  # bin/thimble exports its plugin copy: the tree's plugin/, or an installed copy
-CHANNEL = "plugin:thimble@inline"  # the development channel of this tree's plugin/, loaded with --plugin-dir
 MCP_TOOLS_RULE = "mcp__plugin_thimble_thimble"  # every tool of the plugin's thimble server, in a permission rule
 # The agents defined for a session thimble starts with `--agents` (agent_definition: the writer's, the orientation's and
 # the critic's own sessions), each from a prompt file in a plugin agent's form (prompts.agent_file).
@@ -499,7 +477,7 @@ def sandbox_line(cwd: Path) -> str:
     from . import cc_settings  # noqa: PLC0415 — the settings' path, needed on this path alone
 
     settings = cc_settings.config_dir() / "settings.json"
-    if cc_channel.hooks_blocked(cwd, plugin_root()):
+    if cc_plugin.hooks_blocked(cwd, plugin_root()):
         return SANDBOX_NO_HOOKS_LINE.format(rule=sandbox_rule(), watch=watch_rule(), settings=settings)
     return SANDBOX_LINE.format(rule=sandbox_rule(), settings=settings, log=log_path())
 
@@ -1361,44 +1339,24 @@ def resume_lines(url: str, name: str | None, archive: str) -> list[str]:
     return [RESTORED_REPLACED_LINE.format(name=archive, path=replaced, replaced=Path(str(replaced)).name)]
 
 
-def delivery_lines(route: cc_channel.Delivery, cwd: Path, session: str, background: bool = False) -> list[str]:
-    """The lines after the URL that say how the browser reaches this session: none on the channel, a note on the hook route,
-    the warning and the Monitor's command on the Monitor route. `background` is whether the session is a background
-    session of Claude Code's (cc_channel.background)."""
-    if route.mode not in (cc_channel.HOOK, cc_channel.MONITOR):
+def monitor_lines(cwd: Path, session: str) -> list[str]:
+    """What /thimble prints after the URL where the plugin's hooks are off (cc_plugin.route): the warning, and the
+    command main's Monitor runs after MONITOR_MARK; none where the hooks deliver."""
+    if cc_plugin.route(cwd, plugin_root()) != cc_plugin.MONITOR:
         return []
-    if background and route.reason == cc_channel.SESSION:
-        note = BACKGROUND_NOTES[route.mode]
-    else:
-        notes = HOOK_NOTES if route.mode == cc_channel.HOOK else MONITOR_NOTES
-        note = notes[route.reason].format(command=channel_command())
-    if route.mode == cc_channel.HOOK:
-        return [note]
     watcher = shlex.join([str(plugin_root() / WATCHER), "--stream", "--cwd", str(cwd), "--session", session])
-    return [note, f"{MONITOR_MARK} {watcher}"]
+    return [MONITOR_NOTE, f"{MONITOR_MARK} {watcher}"]
 
 
 def launched() -> bool:
     """Whether the `thimble` launcher started this session, and so appended main's prompt to its system prompt: it
-    exports THIMBLE_CHANNEL."""
-    return bool(os.environ.get(CHANNEL_ENV))
+    exports LAUNCHED_ENV."""
+    return bool(os.environ.get(LAUNCHED_ENV))
 
 
 def plugin_root() -> Path:
     """The plugin copy whose bin/thimble ran this command (PLUGIN_ROOT_ENV), else this tree's plugin/."""
     return Path(os.environ.get(PLUGIN_ROOT_ENV) or PLUGIN_DIR).resolve()
-
-
-def channel_command(root: Path | None = None) -> str:
-    """The `claude` command line that loads the plugin copy at `root` as a development channel, for the delivery notes:
-    `--plugin-dir` and `plugin:thimble@inline` for a folder, `plugin:thimble@<marketplace>` for an installed copy
-    (cc_channel.marketplace)."""
-    root = root or plugin_root()
-    found = cc_channel.marketplace(root)
-    flag = f"--dangerously-load-development-channels plugin:{cc_channel.PLUGIN}@{found}"
-    if found != cc_channel.INLINE:
-        return f"claude {flag}"
-    return f"claude --plugin-dir {shlex.quote(str(root))} {flag}"
 
 
 PLUGIN_LIST_TIMEOUT_S = 10.0
@@ -1417,14 +1375,10 @@ def _plugin_files(root: Path) -> dict[str, tuple[bytes, bool]]:
 
 class Installed(NamedTuple):
     """The installed plugin copy main loads (installed_copy): the folder Claude Code runs it from and the marketplace
-    its channel entry names."""
+    it is installed from."""
 
     root: Path
     marketplace: str
-
-    @property
-    def channel(self) -> str:
-        return f"plugin:{PLUGIN_NAME}@{self.marketplace}"
 
 
 def _claude_json(claude: str, args: list[str], cwd: Path) -> list[Any]:
@@ -1437,10 +1391,9 @@ def _claude_json(claude: str, args: list[str], cwd: Path) -> list[Any]:
 
 def installed_copy(cwd: Path) -> Installed | None:
     """The copy of this tree's plugin that Claude Code has installed and enables for `cwd` (`claude plugin list --json`),
-    which the launcher loads rather than plugin/ with --plugin-dir, since Claude Code's startup notice lists a --plugin-dir
-    plugin's channel as `plugin not installed` although it works. When the marketplace is a directory source at this tree,
-    plugin/ itself is the copy; otherwise the cache copy counts when it matches plugin/ and finds this tree. None when
-    there is no such copy, it is disabled, or anything fails."""
+    which every session loads already, so the launcher adds no copy of plugin/ with --plugin-dir. When the marketplace is
+    a directory source at this tree, plugin/ itself is the copy; otherwise the cache copy counts when it matches plugin/
+    and finds this tree. None when there is no such copy, it is disabled, or anything fails."""
     try:
         name = config.marketplace_name()
         claude = shutil.which("claude")
@@ -1459,7 +1412,7 @@ def installed_copy(cwd: Path) -> Installed | None:
             if not (isinstance(p, dict) and p.get("id") == f"{PLUGIN_NAME}@{name}" and p.get("enabled") is True):
                 continue
             root = Path(str(p.get("installPath") or ""))
-            if not (root.is_absolute() and root.is_dir()) or cc_channel.marketplace(root) != name:
+            if not (root.is_absolute() and root.is_dir()) or cc_plugin.marketplace(root) != name:
                 continue
             found = subprocess.run([str(root / "bin" / "thimble-app-dir")], capture_output=True, text=True,
                                    timeout=PLUGIN_LIST_TIMEOUT_S, stdin=subprocess.DEVNULL, check=False)
@@ -1550,7 +1503,7 @@ def last_main(cwd: Path) -> str:
 
 
 def main_choice(cwd: Path) -> dict[str, Any]:
-    """The composer's effort and fast-mode choice for main in the folder's workspace (channel.effort_route), kept in the
+    """The composer's effort and fast-mode choice for main in the folder's workspace (events.effort_route), kept in the
     workspace's settings.json as models.main; {} for none."""
     c = config.workspace_for_cwd(str(cwd))
     try:
@@ -1605,11 +1558,12 @@ def main_name(cwd: Path) -> str:
 
 
 def launch_args(cwd: Path, resume: bool = False, settings: str = "") -> str:
-    """The launcher's values, one per line: the channel entry of the plugin copy to load, the `--allowedTools` line, the
-    `--effort` value ('' for none), the `--settings` value (launch_settings, over the analyst's own `settings`), the
-    value to export as terminal_tools.ENV ('' when the `claude` it starts does not read it), main's `--name`
-    (main_name), with `resume` the session to resume, then main's prompt, whose turn ending follows that value."""
-    from . import cc_settings, channel, terminal_tools  # noqa: PLC0415 — needed by this subcommand alone
+    """The launcher's values, one per line: the plugin folder to load with `--plugin-dir` ('' when the plugin copy is
+    one Claude Code has installed, installed_copy), the `--allowedTools` line, the `--effort` value ('' for none), the
+    `--settings` value (launch_settings, over the analyst's own `settings`), the value to export as terminal_tools.ENV
+    ('' when the `claude` it starts does not read it), main's `--name` (main_name), with `resume` the session to resume,
+    then main's prompt, whose turn ending follows that value."""
+    from . import cc_settings, events, terminal_tools  # noqa: PLC0415 — needed by this subcommand alone
 
     installed = installed_copy(cwd)
     root = installed.root if installed else plugin_root()
@@ -1626,10 +1580,11 @@ def launch_args(cwd: Path, resume: bool = False, settings: str = "") -> str:
     turn_tools = terminal_tools.launch_value()
     chosen = main_choice(cwd).get("effort")
     effort = cc_settings.level_of(chosen) if chosen in (*cc_settings.EFFORTS, cc_settings.ULTRACODE) else ""
-    return "\n".join([installed.channel if installed else cc_channel.channel(root), tools_line,
+    load = "" if installed or cc_plugin.marketplace(root) != cc_plugin.INLINE else str(root)
+    return "\n".join([load, tools_line,
                       effort or cc_settings.main_effort_flag(cwd), launch_settings(cwd, settings), turn_tools,
                       main_name(cwd), *last,
-                      channel.session_prompt(str(cwd.resolve()), bool(turn_tools))])
+                      events.session_prompt(str(cwd.resolve()), bool(turn_tools))])
 
 
 def cmd_launch_args(args: argparse.Namespace) -> int:
@@ -1656,10 +1611,10 @@ def cmd_prompt(args: argparse.Namespace) -> int:
     cwd = Path(args.cwd or os.environ.get("THIMBLE_CALLER_CWD") or os.getcwd())
     if getattr(args, "if_main", False) and not is_main(cwd):
         return 0
-    from . import channel, prompts  # noqa: PLC0415 — the renderer, needed by this subcommand alone
+    from . import events, prompts  # noqa: PLC0415 — the renderer, needed by this subcommand alone
 
     try:
-        text = channel.render_prompts(args.names, str(cwd.resolve()))
+        text = events.render_prompts(args.names, str(cwd.resolve()))
     except prompts.PromptError as e:
         print(f"thimble: {e}")
         return 1
@@ -1669,14 +1624,14 @@ def cmd_prompt(args: argparse.Namespace) -> int:
 
 
 def is_main(cwd: Path) -> bool:
-    """Whether the `claude` process this command runs under (cc_channel.claude_pid) runs the session that is main in the
-    workspace for `cwd`, by the server's record (GET /api/channel/main). False when the server is down, the folder is no
+    """Whether the `claude` process this command runs under (cc_plugin.claude_pid) runs the session that is main in the
+    workspace for `cwd`, by the server's record (GET /api/events/main). False when the server is down, the folder is no
     workspace, or another session is main."""
-    pid = cc_channel.claude_pid()
+    pid = cc_plugin.claude_pid()
     if not pid:
         return False
     query = urllib.parse.urlencode({"cwd": str(cwd.resolve()), "pid": pid})
-    status, body = _request("GET", f"{api_url()}/api/channel/main?{query}", timeout=3.0)
+    status, body = _request("GET", f"{api_url()}/api/events/main?{query}", timeout=3.0)
     return status == 200 and isinstance(body, dict) and body.get("main") is True
 
 
@@ -2187,26 +2142,15 @@ def port_line(p: int, up: bool) -> str:
 
 
 def delivery_line(cwd: Path) -> str:
-    """How a session the launcher starts in `cwd` would hear the browser (cc_channel.delivery with the launcher's
-    signal set): the channel, the plugin's hooks, or a Monitor, and why channels are off."""
+    """How a session the launcher starts in `cwd` would hear the browser (cc_plugin.route): the plugin's hooks, or a
+    Monitor where they are off."""
     try:
-        route = cc_channel.delivery(None, plugin_root(), cwd, {**os.environ, cc_channel.ENV: CHANNEL})
+        route = cc_plugin.route(cwd, plugin_root())
     except Exception as e:  # noqa: BLE001 — the doctor reports; it never fails on one of its lines
         return f"not checked ({type(e).__name__})"
-    if route.mode == cc_channel.CHANNEL:
-        return "channel (browser messages reach the session directly)"
-    why = DOCTOR_CHANNELS_OFF.get(route.reason, route.reason)
-    if route.mode == cc_channel.HOOK:
-        return f"hooks ({why}; browser messages still arrive)"
-    return f"Monitor ({why}, and hooks are off too; permission prompts show only in the terminal)"
-
-
-DOCTOR_CHANNELS_OFF = {
-    cc_channel.SESSION: "the session is started without channels",
-    cc_channel.ORG: "your organization has turned Claude Code channels off",
-    cc_channel.PROVIDER: "channels are not available with Bedrock, Vertex or Foundry",
-    cc_channel.ACCOUNT: "channels need a claude.ai login, and this setup uses an API key, auth token or apiKeyHelper",
-}
+    if route == cc_plugin.HOOK:
+        return "the plugin's hooks"
+    return "Monitor (Claude Code's settings turn the plugin's hooks off; permission prompts show only in the terminal)"
 
 
 def api_host() -> str:
@@ -2665,7 +2609,7 @@ def cmd_ensure(args: argparse.Namespace) -> int:
         warn = UNTRUSTED_LINE.format(folder=folder, command=trust_command()) if folder else ""
         # with the plugin's hooks off no Stop hook shows the link, so the page opens without the key; the terminal
         # shows the trust warning with its command under the link, and the model reads it without the command
-        if (args.session and not cc_channel.hooks_blocked(cwd, plugin_root())
+        if (args.session and not cc_plugin.hooks_blocked(cwd, plugin_root())
                 and leave_link(str(args.session), ui_url(name), [warn] if warn else [])):
             print(LINK_LINE)
         else:
@@ -2676,9 +2620,7 @@ def cmd_ensure(args: argparse.Namespace) -> int:
             print(warn if not args.session and to_terminal() else UNTRUSTED_MODEL_LINE)
         status = config.auth_status(cwd=cwd)
         if args.session:
-            pid = cc_channel.claude_pid()
-            route = cc_channel.delivery(pid, plugin_root(), cwd, explain=True, status=status)
-            lines = delivery_lines(route, cwd, str(args.session), cc_channel.background(pid))
+            lines = monitor_lines(cwd, str(args.session))
             mark = [ln for ln in lines if ln.startswith(MONITOR_MARK)]
             for line in lines:
                 if line not in mark:
@@ -3279,7 +3221,7 @@ def build_parser() -> argparse.ArgumentParser:
     for flag in INSTALL_FLAGS:
         u.add_argument(flag, dest="install_flags", action="append_const", const=flag, help="passed on to install.sh")
     u.set_defaults(fn=cmd_update)
-    la = sub.add_parser("launch-args", help="for plugin/bin/thimble: the channel entry, the --allowedTools, --effort and --settings values, the tools that end a turn without text, main's --name, then main's prompt")
+    la = sub.add_parser("launch-args", help="for plugin/bin/thimble: the plugin folder, the --allowedTools, --effort and --settings values, the tools that end a turn without text, main's --name, then main's prompt")
     la.add_argument("--cwd")
     la.add_argument("--resume", action="store_true", help="a line before the prompt: the folder's last main session")
     la.add_argument("--settings", help="the analyst's own --settings, which thimble's are merged into")

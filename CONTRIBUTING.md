@@ -63,7 +63,7 @@ and it leaves your Claude Code settings and your `thimble` command as they were.
 | an extension's program that runs a role: how it starts, and the `thimble` modules it imports | `backend/app/harness.py`, `backend/agent_kit/`, `docs/agents.md` |
 | every model-facing prompt | `prompts/` (rendered by `backend/app/prompts.py`) |
 | the browser (React, Vite); the types it shares with the backend | `frontend/src/`, `frontend/src/lib/types.ts` |
-| the Claude Code plugin: launcher, MCP server and channel, skills, hooks | `plugin/` |
+| the Claude Code plugin: launcher, MCP server, skills, hooks | `plugin/` |
 | the worked examples of custom views, which the dev agent reads and thimble never installs | `plugin/viewers/` |
 | install, update, release and dev scripts | `scripts/` |
 | tests | `backend/tests_public/` (pytest), `frontend/tests/public/` (vitest), `frontend/tests/public/browser/` |

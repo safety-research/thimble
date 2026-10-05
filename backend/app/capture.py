@@ -427,7 +427,7 @@ def begin(name: str, *, model: str | None = None, effort: str | None = None, pat
                 "its claude_code preset plus the append below and manages the conversation, so this file holds what "
                 "thimble passes (options, append, tool definitions, the messages it sends) and the transcript the CLI "
                 "streamed back — not the exact request bytes."),
-        "message": "message — text the server hands a terminal Claude Code session (channel, inbox or the next prompt's status block); exact.",
+        "message": "message — text the server hands a terminal Claude Code session (browser event, inbox or the next prompt's status block); exact.",
         "note": "note — rendered outside a live call.",
     }
     head = [f"# {name}", "", f"- caller: {name}", f"- when: {datetime.now(timezone.utc).isoformat(timespec='seconds')}"]

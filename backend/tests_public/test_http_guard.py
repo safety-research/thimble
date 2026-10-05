@@ -1,5 +1,5 @@
-"""http_guard: a state-changing request a browser sends from another origin is refused, the channel refuses a web page
-even on a GET, a JSON route refuses a body without a JSON content type, and every response carries nosniff,
+"""http_guard: a state-changing request a browser sends from another origin is refused, the plugin's routes refuse a web
+page even on a GET, a JSON route refuses a body without a JSON content type, and every response carries nosniff,
 frame-ancestors and a policy (the built UI's, or the API's)."""
 from __future__ import annotations
 
@@ -39,30 +39,30 @@ def test_a_post_from_another_origin_is_refused_before_it_reaches_the_route(app_p
     assert r.status_code == 403
 
 
-def test_the_channel_refuses_a_web_page_on_a_get_too(app_prod, monkeypatch):
-    """The shim's subscription is a GET that makes the session it names main (channel.subscribe): no browser request
+def test_the_plugin_s_routes_refuse_a_web_page_on_a_get_too(app_prod, monkeypatch):
+    """The shim's subscription is a GET that attaches the session it names (events.subscribe): no browser request
     may reach it, not even the app's own page (an <img> in markdown a model wrote sends Sec-Fetch-Site: same-origin and
     no Origin). The shim and the hooks send no Origin and no Sec-Fetch-* header, and pass."""
-    from app import channel, session
+    from app import events, session
 
     attached = []
     monkeypatch.setattr(config, "workspace_for_cwd", lambda cwd: "mini")
     monkeypatch.setattr(session, "connected", lambda *a, **k: attached.append(a))
     monkeypatch.setattr(session, "main_pid", lambda c: 4242)
     c = TestClient(app_prod)
-    q = "cwd=/corpus&session=evil&pid=1&delivery=channel"
+    q = "cwd=/corpus&session=evil&pid=1&delivery=hook"
     for headers in ({"Origin": "https://evil.example"}, {"Origin": "null"}, {"Origin": "http://127.0.0.1:1"},
                     {"Origin": "http://testserver"}, {"Sec-Fetch-Site": "cross-site"}, {"Sec-Fetch-Site": "same-site"},
                     {"Sec-Fetch-Site": "none"}, {"Sec-Fetch-Site": "same-origin"}, {"Sec-Fetch-Dest": "image"},
                     {"Sec-Fetch-Mode": "no-cors"}):
         # the subscription last: were it served, its stream would not end
-        for path in ("/api/channel/main?cwd=/corpus&pid=4242", f"/api/channel/pull?{q}&wait=0", f"/api/channel?{q}"):
+        for path in ("/api/events/main?cwd=/corpus&pid=4242", f"/api/events/pull?{q}&wait=0", f"/api/events?{q}"):
             r = c.get(path, headers=headers)
             assert r.status_code == 403, (path, headers)
-    assert not attached and not channel._subs.get("mini")
+    assert not attached and not events._subs.get("mini")
     # the hooks' curl: no Origin, no Sec-Fetch-Site
-    assert c.get("/api/channel/main?cwd=/corpus&pid=4242").json() == {"workspace": "mini", "main": True}
-    assert c.post("/api/channel/ack", json={"cwd": "/corpus", "id": "x"},
+    assert c.get("/api/events/main?cwd=/corpus&pid=4242").json() == {"workspace": "mini", "main": True}
+    assert c.post("/api/events/ack", json={"cwd": "/corpus", "id": "x"},
                   headers={"Origin": "http://testserver", "Sec-Fetch-Site": "same-origin"}).status_code == 403
     # a read elsewhere is still never refused
     assert c.get("/api/health", headers={"Sec-Fetch-Site": "same-site"}).status_code == 200

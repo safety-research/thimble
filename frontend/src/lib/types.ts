@@ -575,7 +575,7 @@ export type OrientEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
  * Code's levels, then Ultracode, which runs at xhigh with workflows (cc_settings.EFFORTS and ultracode). */
 export type MainEffort = OrientEffort | 'ultracode'
 
-/** A permission request waiting for the analyst: main's, relayed by the shim (channel.py), or one of a session thimble
+/** A permission request waiting for the analyst: main's, relayed by its hook (events.py), or one of a session thimble
  * started beside main, the orientation's or a writer's (agent_session.ask). `what` is what the call would do, `input`
  * its arguments as text. */
 export interface PermissionRequest {
@@ -596,7 +596,7 @@ export interface PermissionRequest {
   /** what Claude Code's own "don't ask again" would add for the session (`Bash(npm test *)`, `all edits`), when the
    * request suggests it: the card's third choice (backend agent_session, don't ask again) */
   always?: string
-  /** on main's meta: the thread or subagent chat whose agent asked, when the hook said which (backend channel._hold) */
+  /** on main's meta: the thread or subagent chat whose agent asked, when the hook said which (backend events._hold) */
   chat?: string | null
   /** why auto mode refused the call, when the request is one it refused and the analyst may allow (backend
    * agent_session, auto mode) */

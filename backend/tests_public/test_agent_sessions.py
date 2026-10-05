@@ -17,10 +17,10 @@ import urllib.request
 from pathlib import Path
 
 import pytest
-from conftest import card_wait, print_sessions
+from conftest import Listener, card_wait, print_sessions
 from fastapi import HTTPException
 
-from app import (agent_session, agents, channel, config, hook_auth, ledger, modes, orient_session, permission_hook,
+from app import (agent_session, agents, config, events, hook_auth, ledger, modes, orient_session, permission_hook,
                  session, tools, userconf)
 
 CORPUS = "mini"
@@ -37,7 +37,7 @@ out = Path(os.environ["FAKE_DIR"])
 (out / "process_env.json").write_text(json.dumps(dict(os.environ)))
 if "--settings" in argv:  # as Claude Code does: the settings' env over the process's
     os.environ.update(json.loads(argv[len(argv) - 1 - argv[::-1].index("--settings") + 1]).get("env") or {})
-(out / "env.json").write_text(json.dumps({k: os.environ.get(k) for k in ("THIMBLE_SESSION", "THIMBLE_CHANNEL", "XDG_CACHE_HOME", "MPLCONFIGDIR",
+(out / "env.json").write_text(json.dumps({k: os.environ.get(k) for k in ("THIMBLE_SESSION", "THIMBLE_LAUNCHED", "XDG_CACHE_HOME", "MPLCONFIGDIR",
                                                                         "CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD", "THIMBLE_RENDERED_PROMPTS",
                                                                         "CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS")}
                                           | {"PATH0": os.environ.get("PATH", "").split(os.pathsep)[0], "cwd": os.getcwd()}))
@@ -99,10 +99,10 @@ print(json.dumps({"type": "result", "subtype": "success", "is_error": False, "re
 def _fresh(workspaces_tmp):
     session._live.clear()
     session._expected.clear()
-    channel._subs.clear()
+    events._subs.clear()
     agent_session._runs.clear()
     yield
-    channel._subs.clear()
+    events._subs.clear()
     agent_session._runs.clear()
 
 
@@ -119,7 +119,7 @@ def fake(tmp_path, monkeypatch) -> Path:
     monkeypatch.setattr(agent_session, "STOP_WAIT_S", 1.0)
     monkeypatch.setenv("FAKE_DIR", str(out))
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude-config"))
-    monkeypatch.setenv("THIMBLE_CHANNEL", "plugin:thimble@inline")  # the server's own, inherited from main's session
+    monkeypatch.setenv("THIMBLE_LAUNCHED", "1")  # the server's own, inherited from main's session
     monkeypatch.delenv("FAKE_MODE", raising=False)
     monkeypatch.delenv("FAKE_SLEEP", raising=False)
     print_sessions(monkeypatch)
@@ -128,10 +128,8 @@ def fake(tmp_path, monkeypatch) -> Path:
     return out
 
 
-def _listen() -> asyncio.Queue:
-    q: asyncio.Queue = asyncio.Queue()
-    channel._subs.setdefault(CORPUS, set()).add(q)
-    return q
+def _listen() -> Listener:
+    return Listener(CORPUS)
 
 
 async def _done(key: str = orient_session.KEY) -> None:
@@ -349,7 +347,7 @@ async def test_a_start_renders_its_prompts_off_the_loop_and_the_session_gets_the
     assert defined["prompt"] == orient_session.system_prompt(CORPUS, "", parts)
     rendered = Path(json.loads((fake / "env.json").read_text())["THIMBLE_RENDERED_PROMPTS"])
     for name in agent_session.SKILL_PROMPTS:
-        assert (rendered / f"{name}.md").read_text("utf-8") == channel.render_prompts([name], str(cwd)) + "\n"
+        assert (rendered / f"{name}.md").read_text("utf-8") == events.render_prompts([name], str(cwd)) + "\n"
 
     on_loop.clear()
     await write_session.start(CORPUS, "report")

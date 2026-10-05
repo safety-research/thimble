@@ -1,7 +1,7 @@
 """Side threads as forks of the analyst's Claude Code session.
 
 A thread starts in the browser from a ⌘-click or ⌘-drag (agents.new_thread); its meta keeps the anchor (ref, visible
-text, surface, selector, and a PNG under `anchors/`). Each message typed in it is a channel event of kind `thread`
+text, surface, selector, and a PNG under `anchors/`). Each message typed in it is a browser event of kind `thread`
 (`event`) naming the thread and its card group `thread:<id>`; the first one carries the anchor and what its refs
 hold.
 Main answers by forking with description `thread:<name>`, the thread's fork name (fork_name: its title as a slug, which
@@ -253,7 +253,7 @@ def _session_id(c: str) -> str | None:
 
 
 def event(c: str, payload: dict[str, Any], event_id: str) -> tuple[str, dict[str, Any], str] | None:
-    """channel.post's builder for kind `thread`: (body, attributes, thread id), or None when the message waits for the
+    """events.post's builder for kind `thread`: (body, attributes, thread id), or None when the message waits for the
     thread's fork (module note). The question is logged in the thread's chat and the thread is marked running until its
     fork stops."""
     thread_id = str(payload.get("thread") or "").strip()
@@ -332,17 +332,17 @@ def awaiting_fork(c: str, thread_id: str) -> bool:
 def flush(c: str, thread_id: str) -> bool:
     """Send the messages queued while the thread waited for its fork, to the fork when it is known, else to main to
     fork anew; False when none wait or no session listens (they stay queued, and ask_again sends them)."""
-    from . import channel  # noqa: PLC0415
+    from . import events  # noqa: PLC0415
 
     meta = agents.meta_or_none(c, thread_id)
     queued = [q for q in (meta or {}).get(QUEUED_KEY) or [] if isinstance(q, dict) and str(q.get("text") or "").strip()]
-    if not queued or not channel.reachable(c):
+    if not queued or not events.reachable(c):
         return False
     agents.update_agent(c, thread_id, **{QUEUED_KEY: []})
     questions = [str(q["text"]) for q in queued]
     body, fields, _ = build(c, thread_id, questions)
-    channel.send(c, channel.THREAD, body, fields, thread=thread_id,
-                 line=channel.terminal_line(channel.THREAD, " ".join(questions), fields))
+    events.send(c, events.THREAD, body, fields, thread=thread_id,
+                 line=events.terminal_line(events.THREAD, " ".join(questions), fields))
     agents.set_running(c, thread_id, True)
     return True
 
@@ -363,9 +363,9 @@ def unanswered(c: str, thread_id: str) -> list[str]:
 def ask_again(c: str, thread_id: str, *, hand: bool = False) -> dict[str, Any]:
     """Send the thread's unanswered questions to the session again, with no new line in the thread (the `again`
     record marks it for the export); with `hand`, the event is returned as `text` for a tool's result instead
-    (channel.hand). 400 for a chat that is no thread or has no question, 409 when the thread is working or no session
+    (events.hand). 400 for a chat that is no thread or has no question, 409 when the thread is working or no session
     listens."""
-    from . import channel  # noqa: PLC0415
+    from . import events  # noqa: PLC0415
 
     meta = agents.read_meta(c, thread_id)
     if meta.get("kind") != agents.KIND_THREAD:
@@ -375,16 +375,16 @@ def ask_again(c: str, thread_id: str, *, hand: bool = False) -> dict[str, Any]:
     questions = unanswered(c, thread_id)
     if not questions:
         raise HTTPException(400, "the thread has no question to ask again")
-    if not channel.reachable(c):
-        raise HTTPException(409, channel.NOT_LISTENING.format(cwd=config.corpus_dir(c)))
+    if not events.reachable(c):
+        raise HTTPException(409, events.NOT_LISTENING.format(cwd=config.corpus_dir(c)))
     agents.update_agent(c, thread_id, **{QUEUED_KEY: []})
     body, fields, _ = build(c, thread_id, questions)
     if hand:
         event_id = secrets.token_hex(4)
-        out = {"text": channel.hand(c, event_id, body, fields, thread=thread_id)}
+        out = {"text": events.hand(c, event_id, body, fields, thread=thread_id)}
     else:
-        posted = channel.send(c, channel.THREAD, body, fields, thread=thread_id,
-                              line=channel.terminal_line(channel.THREAD, " ".join(questions), fields))
+        posted = events.send(c, events.THREAD, body, fields, thread=thread_id,
+                              line=events.terminal_line(events.THREAD, " ".join(questions), fields))
         event_id, out = posted["id"], {}
     _, log_path = agents.paths(c, thread_id)
     agents.append(log_path, {"type": "again", "ts": _now(), "event": event_id, "questions": len(questions)})
@@ -675,10 +675,10 @@ def _ask_target(c: str, name: str) -> tuple[dict | None, str]:
 async def tool_message_thread(ctx: Any, args: dict[str, Any]) -> Any:
     """The `message_thread` tool (the /thimble:ask command): a message typed in the terminal goes where the thread's
     composer in the browser would send it (the frontend's threads.composerTarget). A side thread logs it and hands main
-    its `thread` event in the result, so main answers in the same turn (channel.hand), and with no message asks its
+    its `thread` event in the result, so main answers in the same turn (events.hand), and with no message asks its
     unanswered questions again (ask_again); the latest orientation takes it as a follow-up (orient_session.message);
     a view's build thread takes it as a change to the view (views.message). Any other chat's messages go to main."""
-    from . import channel, orient_session, orientation, tools, views  # noqa: PLC0415
+    from . import events, orient_session, orientation, tools, views  # noqa: PLC0415
 
     text = str(args.get("message") or "").strip()
     meta, why = _ask_target(ctx.c, str(args.get("thread") or ""))
@@ -690,15 +690,15 @@ async def tool_message_thread(ctx: Any, args: dict[str, Any]) -> Any:
             if not text:
                 again = ask_again(ctx.c, tid, hand=True)
                 return tools.ok(tools.hint("message_thread-again", thread=name, event=again["text"]))
-            if not channel.reachable(ctx.c):
-                return tools.err(f"message_thread: {channel.NOT_LISTENING.format(cwd=config.corpus_dir(ctx.c))}")
+            if not events.reachable(ctx.c):
+                return tools.err(f"message_thread: {events.NOT_LISTENING.format(cwd=config.corpus_dir(ctx.c))}")
             event_id = secrets.token_hex(4)
             built = event(ctx.c, {"thread": tid, "text": text, "by": agents.TERMINAL}, event_id)
             if built is None:
                 return tools.ok(tools.hint("message_thread-queued", thread=name))
             body, fields, _ = built
             return tools.ok(tools.hint("message_thread-event", thread=name,
-                                       event=channel.hand(ctx.c, event_id, body, fields, thread=tid)))
+                                       event=events.hand(ctx.c, event_id, body, fields, thread=tid)))
         if not text:
             return tools.err(tools.hint("message_thread-empty", thread=name))
         latest = (((orientation.read_run(ctx.c) or {}).get("chats") or {}).get(orientation.ROLE))

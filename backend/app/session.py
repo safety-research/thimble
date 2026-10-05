@@ -1,9 +1,9 @@
 """The mirror: the analyst's Claude Code session is the workspace's `main`, and the browser shows its transcript.
 
-A session attaches when its MCP shim subscribes to the channel naming it or when `/thimble` names it
+A session attaches when its MCP shim subscribes naming it (events.subscribe) or when `/thimble` names it
 (`POST /api/ws/{c}/session`); its transcript is found under the config dir its shim reported (find_transcript). One
 session is main per workspace, kept in `workspaces/<c>/sessions.json` with the tail's cursor and each subagent's place,
-so a restarted server reads on where it stopped. The channel subscription is the session's liveness: with no
+so a restarted server reads on where it stopped. The shim's subscription is the session's liveness: with no
 subscriber for GRACE_S the session detaches. /clear and /resume switch sessions in the same process, and main follows
 the new id by pid (_follow). When Claude Code moves the session into a background job, its transcript ends with a
 `continued-in` record naming the job's session, which copied the conversation and runs in its own process: main follows
@@ -12,7 +12,7 @@ When main's session ends and none takes over, everything thimble runs for the wo
 once no workspace has a main session the server stops itself (cli.stop_self).
 
 The tail translates transcript records into main's log (`by: terminal`): the analyst's lines (not /thimble's own turn
-or local commands such as /model), channel events, task notifications, peer messages, tool calls and results, text,
+or local commands such as /model), browser events, task notifications, peer messages, tool calls and results, text,
 and `done` at turn_duration; any record shape it does not cover disables it with one `error` record. Safety stops,
 fallbacks, interrupts and long waits (read from `<claude config>/sessions/<pid>.json`) become one note each.
 
@@ -35,7 +35,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from . import agents, cc_channel, cc_settings, cite, config, modes, orientation, terminal_tools, threads, userconf
+from . import agents, cc_settings, cite, config, modes, orientation, terminal_tools, threads, userconf
+from .events import TAG as EVENT_TAG
 from .ledger import atomic_write_text
 
 log = logging.getLogger("thimble.session")
@@ -75,12 +76,12 @@ AGENT_FILE_RE = re.compile(r"^agent-([A-Za-z0-9_-]+)\.jsonl$")
 META_WAIT_SCANS = 4  # scans a subagent file without its meta json waits before it is adopted untitled
 SUB_QUIET_S = 1.0  # a foreground subagent whose result is in is finished once its file has been quiet this long
 TAIL_BUSY_S, TAIL_IDLE_S = 0.5, 1.0
-GRACE_S = 10.0  # a workspace with no channel subscriber for this long has no session
+GRACE_S = 10.0  # a workspace with no subscriber for this long has no session
 SID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
-CHANNEL_RE = re.compile(r"^\s*<channel\s([^>]*)>\n?(.*?)\n?</channel>\s*$", re.S)
+EVENT_RE = re.compile(rf"^\s*<{EVENT_TAG}\s([^>]*)>\n?(.*?)\n?</{EVENT_TAG}>\s*$", re.S)  # one event, as events.render
 ATTR_RE = re.compile(r'([A-Za-z_][A-Za-z0-9_]*)="([^"]*)"')
 # a browser event inside a task notification (the hook and Monitor routes, module note)
-EVENT_TAG_RE = re.compile(r'<channel\s+source="' + re.escape(cc_channel.SOURCE) + r'"[^>]*>.*?</channel>', re.S)
+EVENT_TAG_RE = re.compile(rf"<{EVENT_TAG}\s[^>]*>.*?</{EVENT_TAG}>", re.S)
 # a Monitor event's output in its task notification, which Claude Code 2.1.281 writes with &, < and > escaped
 MONITOR_EVENT_RE = re.compile(r"</summary>\s*<event>(.*?)</event>", re.S)
 MONITOR_TOOL = "Monitor"
@@ -117,7 +118,6 @@ WAIT_NOTE_S = 2.0  # a wait shorter than this (a prompt the analyst answered at 
 # Main's hook-relayed prompt older than this is ended while Claude Code's record says the session waits on none: the
 # analyst answered it in the terminal. A subagent's or fork's prompt is never released this way.
 ASK_RELEASE_S = 10.0
-RELAYED_IDLE_S = 10.0  # a request the channel relayed this long ago leaves the card when nothing in the session runs
 SAFETY_ALERT = ("Claude Code is waiting in your terminal: Claude's safety check stopped this answer. Choose there whether "
                 "to switch to another model and go on, or to stay on this one and stop the answer.")
 FALLBACK_SUBTYPE = "model_refusal_fallback"
@@ -149,7 +149,7 @@ class Sub:
         self.report: str | None = None  # the message it handed back, its result
         self.typed: str | None = None  # the last message the analyst typed to it in the agent view (_typed)
         self.of_main = False  # a subagent main started with the Agent tool (_spawn)
-        self.call_keys: dict[str, tuple[str, str]] = {}  # tool_use id -> its channel.call_key (_results)
+        self.call_keys: dict[str, tuple[str, str]] = {}  # tool_use id -> its events.call_key (_results)
         self.on_results: Any = None  # told the calls whose results each read found, when set (_results)
         self.proxy = False  # the tray entry of a background session of thimble's, whose transcript no chat shows
         self.quiet_since = time.monotonic()
@@ -201,7 +201,7 @@ class Live:
         self.stop_noted = False  # the turn's stop or interrupt has its note
         self.wait: tuple[str, float, bool] | None = None  # the wait in progress: what holds it, since when, noted
         self.watch_calls: set[str] = set()  # tool_use ids of main's Monitor calls on thimble's watcher
-        self.call_keys: dict[str, tuple[str, str]] = {}  # tool_use id -> channel.call_key of main's own calls (_results_in)
+        self.call_keys: dict[str, tuple[str, str]] = {}  # tool_use id -> events.call_key of main's own calls (_results_in)
         self.watch_tasks: set[str] = set()  # the task ids those Monitors run as
         self.subs: list[Sub] = []
         self.sub_paths: set[str] = set()
@@ -227,7 +227,7 @@ class Live:
 
 
 _live: dict[str, Live] = {}  # by workspace: the one session that is main
-_expected: set[str] = set()  # ids of channel events the channel logged when it posted them
+_expected: set[str] = set()  # ids of browser events events.post logged when it posted them
 _event_threads: dict[str, str] = {}  # a thread event's id -> its thread
 _grace: dict[str, asyncio.TimerHandle] = {}  # workspace -> the pending detach after its last subscriber left
 _sweep_task: asyncio.Task | None = None
@@ -539,9 +539,9 @@ def main_mode(c: str) -> str | None:
 def _runs_elsewhere(c: str, cur: Live, pid: int | None) -> bool:
     """Whether session `cur` still runs in a `claude` process other than `pid`'s: its shim is subscribed, and the two
     pids, where both are known, differ."""
-    from . import channel  # noqa: PLC0415
+    from . import events  # noqa: PLC0415
 
-    if cur.sid not in channel.subscribed_sessions(c):
+    if cur.sid not in events.subscribed_sessions(c):
         return False
     own = cur.pid or _shim_pids.get((c, cur.sid))
     return not (pid and own and pid == own)
@@ -645,18 +645,15 @@ def detach(c: str, sid: str, reason: str | None = None) -> bool:
     meta["ended"] = {"session": sid, "cwd": str(held.get("cwd") or ""), "at": _now()}
     agents.write_meta(c, meta)
     agents.notify(c, agents.MAIN_ID)
-    _channel_module().drop_relayed(c)  # the session's prompts end with it
     log.info("%s: session %s detached (%s)", c, sid, reason or "ended")
     return True
 
 
-def connected(c: str, sid: str | None, cwd: str, pid: int | None, config_dir: str | None = None, *,
-              claim: bool = True) -> None:
-    """A shim subscribed, naming its session's `claude` pid and CLAUDE_CONFIG_DIR. On the channel (`claim`) the session it
-    names is main, unless it continued in another session and waits parked (_parked). On the hook and Monitor routes
-    only /thimble makes a session main, so a subscription attaches only the current (or last) main, or a new session in
-    main's own `claude` process (`pid`), which main follows (_follow). Main's transcript is read first, so a session
-    main continues in is main before its subscription is weighed (_continue, _moved_main)."""
+def connected(c: str, sid: str | None, cwd: str, pid: int | None, config_dir: str | None = None) -> None:
+    """A shim subscribed, naming its session's `claude` pid and CLAUDE_CONFIG_DIR. Only /thimble makes a session main,
+    so a subscription attaches only the current (or last) main, or a new session in main's own `claude` process
+    (`pid`), which main follows (_follow). Main's transcript is read first, so a session main continues in is main
+    before its subscription is weighed (_continue, _moved_main)."""
     for table, value in ((_shim_pids, pid), (_shim_configs, config_dir)):
         if sid and value is not None:
             table.pop((c, sid), None)
@@ -666,27 +663,20 @@ def connected(c: str, sid: str | None, cwd: str, pid: int | None, config_dir: st
     lv = _live.get(c) or (_moved_main(c, sid) if sid else None)
     if sid and lv is not None and lv.sid != sid:
         _read_now(lv)
-    if claim and sid and _parked(c, sid):
-        claim = False
+    if not sid:
+        return
+    held = ((agents.meta_or_none(c, agents.MAIN_ID) or {}).get("attached") or {}).get("session")
+    cur = _live.get(c)
     old = None
-    if not claim:
-        held = ((agents.meta_or_none(c, agents.MAIN_ID) or {}).get("attached") or {}).get("session")
-        cur = _live.get(c)
-        if not sid:
+    if sid not in (held, cur.sid if cur is not None else None):
+        if not pid or pid != main_pid(c):
             return
-        if sid not in (held, cur.sid if cur is not None else None):
-            if not pid or pid != main_pid(c):
-                return
-            old = cur.sid if cur is not None else held
-    elif sid and pid:
-        cur = _live.get(c)
-        if cur is not None and cur.sid != sid and pid == main_pid(c):
-            old = cur.sid
+        old = cur.sid if cur is not None else held
     _cancel_grace(c)
     _came_back.add(c)
     if old:
         _follow(c, str(old), str(sid), cwd, pid)
-    elif sid:
+    else:
         attach(c, sid, cwd, None, pid)
 
 
@@ -733,8 +723,8 @@ def may_follow(c: str, sid: str, pid: int | None) -> bool:
 
 def _follow(c: str, old: str, new: str, cwd: str, pid: int | None, config_dir: str | None = None) -> None:
     """Main's `claude` process runs a new session (/clear, /resume): it becomes main in place of `old`, keeps the known
-    Monitor tasks, and takes the events queued for `old` (channel.move_events)."""
-    from . import channel  # noqa: PLC0415
+    Monitor tasks, and takes the events queued for `old` (events.move_events)."""
+    from . import events  # noqa: PLC0415
 
     cur = _live.get(c)
     tasks = set(cur.watch_tasks) if cur is not None and cur.sid == old else set()
@@ -751,7 +741,7 @@ def _follow(c: str, old: str, new: str, cwd: str, pid: int | None, config_dir: s
     if _began_since(lv.transcript_path, since):
         lv.offset = 0
     lv.watch_tasks |= tasks
-    channel.move_events(c, old, new)
+    events.move_events(c, old, new)
     log.info("%s: session %s follows %s in the same process (pid %s)", c, new, old, pid)
 
 
@@ -760,9 +750,9 @@ def _continue(lv: Live) -> None:
     a background job, whose session copied the conversation into a transcript beside this one's and runs in its own
     process. That session becomes main in this one's place, by the pid its shim reported (attach), read from its
     transcript's start without the records it copied (_copied), with the turn in progress, main's subagents and threads'
-    forks still at work (threads.fork_moved) and the events queued for this one (channel.move_events). This one ends as
+    forks still at work (threads.fork_moved) and the events queued for this one (events.move_events). This one ends as
     CONTINUED: thimble's agents go on, and its shim, in the parked process, does not make it main again (_parked)."""
-    from . import channel  # noqa: PLC0415
+    from . import events  # noqa: PLC0415
 
     c, (new, at) = lv.c, lv.continued
     config_dir = _shim_configs.get((c, new), (lv.config or "") if lv.config_known else None)
@@ -789,17 +779,17 @@ def _continue(lv: Live) -> None:
         agents.update_agent(c, chat, session=new)
     _persist(nv)
     _save_cursor(nv)
-    channel.move_events(c, lv.sid, new)
+    events.move_events(c, lv.sid, new)
     log.info("%s: session %s continues in session %s (pid %s)", c, lv.sid, new, nv.pid)
 
 
 def disconnected(c: str, sid: str | None) -> None:
     """A shim's subscription ended: when none of main's is left after GRACE_S, the session is gone."""
-    from . import channel  # noqa: PLC0415
+    from . import events  # noqa: PLC0415
 
     def mains() -> bool:
         lv = _live.get(c)
-        return channel.listening(c, lv.sid if lv is not None else None)
+        return events.listening(c, lv.sid if lv is not None else None)
 
     if mains():
         return
@@ -873,9 +863,9 @@ async def _stop_server() -> None:
 def may_return(c: str, sid: str) -> bool:
     """Whether session `sid` is main again when main's session ends (_hand_back): another session replaced it, its shim
     is still subscribed, and it is not parked (_parked)."""
-    from . import channel  # noqa: PLC0415
+    from . import events  # noqa: PLC0415
 
-    return ((sessions(c).get(sid) or {}).get("reason") == "replaced" and sid in channel.subscribed_sessions(c)
+    return ((sessions(c).get(sid) or {}).get("reason") == "replaced" and sid in events.subscribed_sessions(c)
             and not _parked(c, sid))
 
 
@@ -890,10 +880,10 @@ def _parked(c: str, sid: str) -> bool:
 def _hand_back(c: str, gone: str) -> None:
     """Main's session `gone` ended while a session it replaced still runs: the most recently replaced one is main again,
     by the pid its shim reported, and its dormant watcher takes the next event."""
-    from . import channel  # noqa: PLC0415
+    from . import events  # noqa: PLC0415
 
     recs = sessions(c)
-    live = [s for s in dict.fromkeys(channel.subscribed_sessions(c)) if s and s != gone and may_return(c, s)]
+    live = [s for s in dict.fromkeys(events.subscribed_sessions(c)) if s and s != gone and may_return(c, s)]
     if not live:
         return
     back = max(live, key=lambda s: str(recs[s].get("ended") or ""))
@@ -910,7 +900,7 @@ def _cancel_grace(c: str) -> None:
 
 
 def expect(c: str, event_id: str, *, thread: str | None = None) -> None:
-    """The channel logged event `event_id` as it posted it: the mirror skips its record, and main runs until the turn
+    """events.post logged event `event_id` as it posted it: the mirror skips its record, and main runs until the turn
     ends. A
     thread's event is remembered with its thread (thread_for)."""
     _expected.add(event_id)
@@ -923,8 +913,8 @@ def expect(c: str, event_id: str, *, thread: str | None = None) -> None:
 
 
 def handed(c: str, event_id: str, thread: str) -> None:
-    """A thread's event main got in a tool's result (channel.hand): main's turn counts it as an event that reached it
-    (_channel), and until the turn ends a turn the tail opens late keeps it."""
+    """A thread's event main got in a tool's result (events.hand): main's turn counts it as an event that reached it
+    (_browser_event), and until the turn ends a turn the tail opens late keeps it."""
     _event_threads[event_id] = thread
     lv = _live.get(c)
     if lv is not None:
@@ -933,14 +923,14 @@ def handed(c: str, event_id: str, thread: str) -> None:
 
 
 def push_event(c: str, kind: str, text: str, **meta: Any) -> bool:
-    """Server code's way to send the session an event (a built view's `view`, dev.run_view): channel.post with `text`
+    """Server code's way to send the session an event (a built view's `view`, dev.run_view): events.post with `text`
     as the body and `meta` as its attributes; False when no session listens."""
     from fastapi import HTTPException  # noqa: PLC0415
 
-    from . import channel  # noqa: PLC0415
+    from . import events  # noqa: PLC0415
 
     try:
-        channel.post(c, kind, {"text": text, **meta}, check_kind=False)
+        events.post(c, kind, {"text": text, **meta}, check_kind=False)
     except HTTPException as e:
         if e.status_code == 409:
             return False
@@ -1056,9 +1046,9 @@ def _user_line(lv: Live, text: str, by: str = TERMINAL, **extra: Any) -> None:
     _rec(lv, "user", text=text, by=by, **extra)
 
 
-def _channel(lv: Live, raw: str, *, mid_turn: bool) -> None:
-    """A channel event as the session received it (module note)."""
-    m = CHANNEL_RE.match(raw or "")
+def _browser_event(lv: Live, raw: str, *, mid_turn: bool) -> None:
+    """A browser event as the session received it (module note)."""
+    m = EVENT_RE.match(raw or "")
     attrs = {k: html.unescape(v) for k, v in ATTR_RE.findall(m.group(1))} if m else {}
     body = m.group(2) if m else str(raw or "")
     kind, event_id, thread = attrs.get("kind", ""), attrs.get("event", ""), attrs.get("thread")
@@ -1095,7 +1085,7 @@ def _command_line(text: str) -> str | None:
 
 
 def browser_events(text: str) -> list[str]:
-    """The browser events a task notification carries, each as its `<channel …>…</channel>` text; a Monitor event's
+    """The browser events a task notification carries, each as its `<thimble-event …>…</thimble-event>` text; a Monitor event's
     `<event>` block is escaped, so it is unescaped once."""
     blocks = MONITOR_EVENT_RE.findall(text or "")
     if blocks:
@@ -1345,8 +1335,8 @@ def _finish_sub(lv: Live, sub: Sub, status: str, result: str | None, *, kind: st
         sub.done = True
         _bg().proxy_ended(lv.c, sub.agent_id)
         return
-    if sub.agent_id and sub.agent_id in _channel_module().asking(lv.c):
-        _channel_module().agent_moved(lv.c, sub.agent_id, float("inf"))  # a stopped agent's prompt is gone
+    if sub.agent_id and sub.agent_id in _events().asking(lv.c):
+        _events().agent_moved(lv.c, sub.agent_id, float("inf"))  # a stopped agent's prompt is gone
     if sub.owner is not None:  # one agent of a workflow: the chat is the workflow's, which ends with the workflow
         sub.done = True
         return
@@ -1538,10 +1528,8 @@ def _tail_sub(lv: Live, sub: Sub) -> int:
     done = _results(sub, lines)
     if done and sub.on_results is not None:
         sub.on_results(done)
-    if done and sub.agent_id and sub.agent_id in _channel_module().asking(lv.c):
-        _channel_module().calls_done(lv.c, sub.agent_id, done)
-    if done:
-        _channel_module().relayed_done(lv.c, done)  # a prompt the channel relayed, answered in the terminal
+    if done and sub.agent_id and sub.agent_id in _events().asking(lv.c):
+        _events().calls_done(lv.c, sub.agent_id, done)
     return n
 
 
@@ -1551,7 +1539,7 @@ def _results(sub: Sub, lines: list[bytes]) -> list[tuple[tuple[str, str], float]
 
 
 def _results_in(call_keys: dict[str, tuple[str, str]], lines: list[bytes]) -> list[tuple[tuple[str, str], float]]:
-    """The calls whose results lines of a transcript hold, each as channel.call_key names it, with the result's time;
+    """The calls whose results lines of a transcript hold, each as events.call_key names it, with the result's time;
     the calls themselves are kept in `call_keys` as they appear, since a result may come in a later read."""
     out: list[tuple[tuple[str, str], float]] = []
     for line in lines:
@@ -1567,7 +1555,7 @@ def _results_in(call_keys: dict[str, tuple[str, str]], lines: list[bytes]) -> li
             if not isinstance(b, dict):
                 continue
             if b.get("type") == "tool_use" and isinstance(b.get("id"), str):
-                call_keys[b["id"]] = _channel_module().call_key(str(b.get("name") or ""), b.get("input"))
+                call_keys[b["id"]] = _events().call_key(str(b.get("name") or ""), b.get("input"))
             elif b.get("type") == "tool_result" and b.get("tool_use_id") in call_keys:
                 out.append((call_keys.pop(b["tool_use_id"]), _stamp(line) or time.time()))
     return out
@@ -1678,15 +1666,15 @@ def running_agents(c: str) -> list[dict[str, Any]]:
             name = str(meta.get("title") or "subagent")
         else:
             continue
-        waiting = sub.agent_id is not None and sub.agent_id in _channel_module().asking(c)
+        waiting = sub.agent_id is not None and sub.agent_id in _events().asking(c)
         out.append({"name": name, "state": "waiting for a permission prompt" if waiting else "working", "kind": "subagent"})
     return out
 
 
-def _channel_module() -> Any:
-    from . import channel  # noqa: PLC0415 — as elsewhere here: channel imports session lazily too
+def _events() -> Any:
+    from . import events  # noqa: PLC0415 — as elsewhere here: events imports session lazily too
 
-    return channel
+    return events
 
 
 def _stamp(line: bytes | str | dict) -> float:
@@ -1915,11 +1903,9 @@ def translate(lv: Live, line: bytes | str) -> None:
         text = _user_text(rec)
         if text is None:
             return
-        if origin == "channel":
-            _channel(lv, text, mid_turn=False)
-        elif origin == "task-notification" and browser_events(text):
+        if origin == "task-notification" and browser_events(text):
             for tag in browser_events(text):
-                _channel(lv, tag, mid_turn=False)
+                _browser_event(lv, tag, mid_turn=False)
         elif origin == "task-notification":
             _task_notification(lv, text)
         elif origin == "peer":
@@ -1958,11 +1944,9 @@ def translate(lv: Live, line: bytes | str) -> None:
             aorigin = (att.get("origin") or {}).get("kind") if isinstance(att.get("origin"), dict) else None
             prompt = str(att.get("prompt") or "")
             tags = browser_events(prompt) if aorigin in (None, "task-notification") else []
-            if aorigin == "channel":
-                _channel(lv, prompt, mid_turn=True)
-            elif tags:
+            if tags:
                 for tag in tags:
-                    _channel(lv, tag, mid_turn=True)
+                    _browser_event(lv, tag, mid_turn=True)
             elif aorigin == "task-notification" or att.get("commandMode") == "task-notification":
                 # a subagent that ended while main's turn went on
                 fields = dict(TASK_FIELD_RE.findall(prompt))
@@ -2075,7 +2059,6 @@ def _tail_once(lv: Live) -> None:
             _finish_sub(lv, sub, *sub.finish)
     _save_cursor(lv)  # the subagents' places, and the runs that ended
     _watch_wait(lv)
-    _settle_relayed(lv)
 
 
 def _sessions_dir(config_dir: Path | None = None) -> Path:
@@ -2120,9 +2103,9 @@ def _watch_wait(lv: Live) -> None:
     if what != PERMISSION_WAIT and lv.wait is not None and lv.wait[0] == PERMISSION_WAIT:
         _asked(lv, False)
     if state and what != PERMISSION_WAIT:
-        from . import channel  # noqa: PLC0415
+        from . import events  # noqa: PLC0415
 
-        channel.release_asks(lv.c, ASK_RELEASE_S)  # a hook's prompt answered in the terminal before the tail saw it
+        events.release_asks(lv.c, ASK_RELEASE_S)  # a hook's prompt answered in the terminal before the tail saw it
     if what is None:
         lv.wait = None
         _alert(lv, None)
@@ -2146,26 +2129,16 @@ def _watch_wait(lv: Live) -> None:
     _note(lv, f"{WAITING_TEXT}: {detail}" if detail else WAITING_TEXT)
 
 
-def _settle_relayed(lv: Live) -> None:
-    """Drop the requests the channel relayed at least RELAYED_IDLE_S ago once nothing in the session can still be asking
-    them: no turn is open, no subagent runs and Claude Code's own record shows no prompt. The age covers a prompt whose
-    turn the tail has not read yet."""
-    channel = _channel_module()
-    if lv.busy or not channel.relaying(lv.c) or session_state(lv).get("status") == "waiting":
-        return
-    channel.drop_relayed(lv.c, RELAYED_IDLE_S)
-
-
 def _asked(lv: Live, waiting: bool) -> bool:
     """While the session waits on a permission prompt: whether main's meta holds a relayed request. Once the session no
-    longer waits on one, main's own hook-relayed requests are dropped (channel.clear_permissions); those of its agents
-    and those the channel relayed stay."""
+    longer waits on one, main's own hook-relayed requests are dropped (events.clear_permissions); those of its agents
+    stay."""
     meta = agents.meta_or_none(lv.c, agents.MAIN_ID) or {}
     pending = bool(meta.get("permissions"))
     if not waiting and pending:
-        from . import channel  # noqa: PLC0415
+        from . import events  # noqa: PLC0415
 
-        channel.clear_permissions(lv.c)
+        events.clear_permissions(lv.c)
     return waiting and pending
 
 
@@ -2220,8 +2193,7 @@ def _tail_main(lv: Live) -> None:
     _save_cursor(lv)
     done = _results_in(lv.call_keys, lines)
     if done:
-        _channel_module().calls_done(lv.c, None, done)  # main's own prompts answered in the terminal
-        _channel_module().relayed_done(lv.c, done)
+        _events().calls_done(lv.c, None, done)  # main's own prompts answered in the terminal
 
 
 def _degrade(lv: Live, err: Exception) -> None:
@@ -2264,14 +2236,14 @@ def sweep() -> list[str]:
     this server started. Never while the server is stopping, when every workspace looks unsubscribed. Returns the
     session
     ids detached."""
-    from . import channel  # noqa: PLC0415
+    from . import events  # noqa: PLC0415
 
     if _shutting_down():
         return []
     gone: list[str] = []
     for path in sorted(config.WORKSPACES_DIR.glob("*/sessions.json")):
         c = path.parent.name
-        if c in _came_back or channel.listening(c):
+        if c in _came_back or events.listening(c):
             continue
         try:
             held = (agents.meta_or_none(c, agents.MAIN_ID) or {}).get("attached") or {}

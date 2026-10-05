@@ -411,7 +411,7 @@ class Run:
     # by transcript path: [bytes read, the partial line, the models its replies came from, in order] (_note_models)
     models: dict[str, list] = field(default_factory=dict)
     bg: bool = False  # a Claude Code background session (module note, background sessions)
-    # request id -> the call it asks about (channel.call_key), which its result in the transcript answers
+    # request id -> the call it asks about (events.call_key), which its result in the transcript answers
     ask_keys: dict[str, tuple[str, str]] = field(default_factory=dict)
 
 
@@ -488,9 +488,9 @@ def role_agent(agent: dict[str, Any], conf: dict[str, Any]) -> dict[str, Any]:
 
 def shared_prompt(cwd: Path) -> str:
     """shared.md rendered for the corpus folder, as main's append and the shared skill render it."""
-    from . import channel  # noqa: PLC0415 — channel imports the views module, which this module does not otherwise need
+    from . import events  # noqa: PLC0415 — events imports the views module, which this module does not otherwise need
 
-    return channel.render_prompts(SHARED_PROMPTS, str(cwd))
+    return events.render_prompts(SHARED_PROMPTS, str(cwd))
 
 
 def own_rules() -> list[str]:
@@ -557,8 +557,8 @@ def environ() -> dict[str, str]:
 
 def settings_env(c: str, key: str, extra: dict[str, str] | None = None) -> dict[str, str]:
     """The --settings `env` of the session `key` of workspace `c` (config.session_env): the server's THIMBLE_* values,
-    `key` as THIMBLE_SESSION with a token that proves it (hook_auth.session_token), no THIMBLE_CHANNEL, since the
-    session hears no browser events, no ceiling on --print's background wait (BG_WAIT_ENV), a 4 h idle limit on a
+    `key` as THIMBLE_SESSION with a token that proves it (hook_auth.session_token), no THIMBLE_LAUNCHED, since the
+    launcher started no such session, no ceiling on --print's background wait (BG_WAIT_ENV), a 4 h idle limit on a
     thimble call (IDLE_TIMEOUT_ENV), and `extra` on top."""
     return config.session_env({SESSION_ENV: key, hook_auth.SESSION_TOKEN_ENV: hook_auth.session_token(c, key),
                                BG_WAIT_ENV: BG_WAIT_MS, IDLE_TIMEOUT_ENV: IDLE_TIMEOUT_MS, **(extra or {})})
@@ -643,12 +643,12 @@ def skill_prompts_env(corpus: Path, work: Path) -> dict[str, str]:
     """RENDERED_ENV for a fenced session: each of SKILL_PROMPTS rendered for the corpus folder `corpus` into
     `<work>/RENDERED_DIR/<name>.md`, the text `thimble prompt <name>` prints, which plugin/bin/thimble prints from there
     in that session (module note, the fence)."""
-    from . import channel  # noqa: PLC0415 — as in shared_prompt
+    from . import events  # noqa: PLC0415 — as in shared_prompt
 
     folder = work / RENDERED_DIR
     folder.mkdir(parents=True, exist_ok=True)
     for name in SKILL_PROMPTS:
-        (folder / f"{name}.md").write_text(channel.render_prompts([name], str(corpus)) + "\n", encoding="utf-8")
+        (folder / f"{name}.md").write_text(events.render_prompts([name], str(corpus)) + "\n", encoding="utf-8")
     return {RENDERED_ENV: str(folder)}
 
 
@@ -1474,7 +1474,7 @@ def _tail_main(run: Run) -> None:
 def _answered_in_terminal(run: Run, agent_id: str | None, done: "list[tuple[tuple[str, str], float]]") -> None:
     """Calls of a background session, or of its agent `agent_id`, got their results: a permission request that still
     waits on one of them was answered in the session's own terminal, so its card's wait ends (module note, background
-    sessions). A call is matched to its request by channel.call_key, else to the one request of its tool open."""
+    sessions). A call is matched to its request by events.call_key, else to the one request of its tool open."""
     for key, _at in done:
         mine = [rid for rid, (who, tool) in run.asking.items() if who == agent_id and tool == key[0] and rid in run.waits]
         hit = next((rid for rid in mine if run.ask_keys.get(rid) == key), mine[0] if len(mine) == 1 else None)
@@ -2176,7 +2176,7 @@ def _save_unheard(c: str) -> None:
 
 
 def tell_main(c: str, kind: str, payload: dict[str, Any]) -> bool:
-    """Post the channel event that tells main a session ended, after any that waited; when no session listens (409:
+    """Post the browser event that tells main a session ended, after any that waited; when no session listens (409:
     main not attached yet after a restart, or the server going down) it is kept, on disk too, and posted once one
     listens (deliver_unheard). True when it was posted now."""
     notes = _notes(c)
@@ -2192,14 +2192,14 @@ def tell_main(c: str, kind: str, payload: dict[str, Any]) -> bool:
 def deliver_unheard(c: str) -> int:
     """Post the workspace's ends main has not heard, in order, while a session listens; returns how many were posted.
     One refused for another reason than 409 is dropped, with a log line."""
-    from . import channel  # noqa: PLC0415 — channel imports the views module, which this module does not otherwise need
+    from . import events  # noqa: PLC0415 — events imports the views module, which this module does not otherwise need
 
     notes = _notes(c)
     sent = 0
     while notes:
         note = notes[0]
         try:
-            channel.post(c, str(note["kind"]), dict(note.get("payload") or {}))
+            events.post(c, str(note["kind"]), dict(note.get("payload") or {}))
             sent += 1
         except HTTPException as e:
             if e.status_code == 409:
@@ -2432,9 +2432,9 @@ async def ask(c: str, key: str | None, tool_name: str, inp: Any, agent_id: str |
     if verdict == "ask":
         run.forced.add(rid)
     if run.bg:
-        from . import channel  # noqa: PLC0415 — channel imports the views module, which this module does not need
+        from . import events  # noqa: PLC0415 — events imports the views module, which this module does not need
 
-        run.ask_keys[rid] = channel.call_key(tool_name, inp)
+        run.ask_keys[rid] = events.call_key(tool_name, inp)
     if web:
         run.groups[web] = rid
     if updates:
@@ -2702,7 +2702,7 @@ def dismiss(c: str, chat: str, request_id: str) -> bool:
 def _clear_left(c: str, metas: "list[dict[str, Any]]") -> list[str]:
     """Take the requests a previous server left waiting off the chats `metas` of workspace `c` (module note,
     permissions): their hooks lost the connection, so Claude Code went on without an answer. A request a session of
-    this server waits on stays, and so do main's, which channel.py relays and drops. Returns their ids."""
+    this server waits on stays, and so do main's, which events.py relays and drops. Returns their ids."""
     live = {rid for r in [*_runs.values(), *_hosted.values()] for rid in r.waits}
     gone: list[str] = []
     for meta in metas:

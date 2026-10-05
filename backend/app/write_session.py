@@ -5,7 +5,7 @@ so main's list of agents never shows it. It has every tool of a default Claude C
 OWN_TOOLS, and runs in a work folder of its own with the corpus read-only (agent_session, the fence). Its first message
 holds the whole context (context.render, CONTEXT_CHARS) followed by the task. One writer runs per document, with the
 `writer` role's model settings and THIMBLE_SESSION `writer:<doc>`; the report checks run once it has ended. Main starts
-it with `start_writing` and hears a `written` channel event when it ends. A writer cut short by a server stop is resumed
+it with `start_writing` and hears a `written` browser event when it ends. A writer cut short by a server stop is resumed
 by the next server (_resume_left). A writer answering the orientation's report pass carries `orient` and `orient_run` on
 its meta."""
 from __future__ import annotations
@@ -24,7 +24,7 @@ log = logging.getLogger("thimble.write_session")
 
 AGENT = "writer"  # prompts/writer.md, the agent the session runs as
 ROLE = "writer"  # the agent chat's role
-WRITTEN_KIND = "written"  # the channel kind that tells main a writer ended (prompts/main.md)
+WRITTEN_KIND = "written"  # the event kind that tells main a writer ended (prompts/main.md)
 DEFAULT_EFFORT = "high"  # when writer.md names none
 CONTEXT_CHARS = 600_000  # of the first message, about 150k tokens
 WORK_DIR = "writers"  # workspaces/<c>/writers/<doc>, a writer's own folder, where it may write

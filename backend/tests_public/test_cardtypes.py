@@ -25,10 +25,11 @@ import types
 from pathlib import Path
 
 import pytest
+from conftest import Listener
 
 from fastapi import HTTPException
 
-from app import card_check, cardtypes, channel, concepts, config, extensions, notebook, render, tools, views
+from app import card_check, cardtypes, concepts, config, extensions, notebook, render, tools, views
 
 SWIMLANE = extensions.builtin_dir() / "multiagent-swimlane" / "cards" / "multiagent-swimlane"
 
@@ -227,15 +228,14 @@ def test_keep_rewrites_the_literal_arguments_of_the_one_card_call():
 
 
 async def test_main_hears_when_a_label_it_ran_finishes_and_can_colour_its_values(crew):
-    q: asyncio.Queue = asyncio.Queue()
-    channel._subs.setdefault(CORPUS, set()).add(q)
+    q = Listener(CORPUS)
     try:
         cid = await _label("even", r"value is \d*[02468]\.", ["even", "odd"])
         concepts.tell_when_done(CORPUS, cid)
         note = await asyncio.wait_for(q.get(), 10)
         assert note["meta"]["kind"] == "label_done" and "label even" in note["content"] and "even 70" in note["content"]
     finally:
-        channel._subs.pop(CORPUS, None)
+        q.close()
     concepts.show_concept(CORPUS, "even", None, colours={"odd": "cyan", "even": "blue"})
     after = {cl["name"]: cl["color"] for cl in concepts.read_concept(config.workspace_dir(CORPUS), cid)["classes"]}
     assert after == {"even": 1, "odd": 12}

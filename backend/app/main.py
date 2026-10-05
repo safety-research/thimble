@@ -1,5 +1,5 @@
 """FastAPI app: the thimble server. A module in ROUTER_MODULES that has routes exposes `router`, and one that owns
-subprocesses or tasks (kernels, the job queue, the channel's streams) exposes `shutdown()`, which the lifespan calls."""
+subprocesses or tasks (kernels, the job queue, the shims' event streams) exposes `shutdown()`, which the lifespan calls."""
 from __future__ import annotations
 
 import asyncio
@@ -80,8 +80,8 @@ ROUTER_MODULES = [
     "dev", "telemetry", "export", "feedback_routes",
     # undo and redo over the workspace's cards and documents
     "undo",
-    # the channel to the analyst's Claude Code session, and the mirror of its transcript (listed for its shutdown)
-    "channel", "session",
+    # browser events to the analyst's Claude Code session, and the mirror of its transcript (listed for its shutdown)
+    "events", "session",
     # the Claude Code sessions thimble starts beside main, the orientation's and each writer's: their permission
     # requests (shut down with the server), and the orientation's calls, stored whole and citable
     "agent_session", "calls", "orient_session",
@@ -105,8 +105,8 @@ ALLOWED_HOSTS = [h.strip() for h in os.environ.get("THIMBLE_ALLOWED_HOSTS", "127
 # Request timing: a request slower than this many ms is logged at WARNING, every other one at DEBUG. Every response
 # carries `Server-Timing: app;dur=<ms>`, so the browser's Network panel shows the backend's own time.
 SLOW_REQUEST_MS = float(os.environ.get("THIMBLE_SLOW_MS", "300"))
-# the watcher's long polls (channel.py), slow by design: logged at DEBUG like a fast request
-LONG_POLLS = ("/api/channel/pull", "/api/channel/permission/hook")
+# the watcher's long polls (events.py), slow by design: logged at DEBUG like a fast request
+LONG_POLLS = ("/api/events/pull", "/api/events/permission")
 timing_log = logging.getLogger("thimble.timing")
 
 class RequestTiming:
@@ -352,7 +352,7 @@ def create_app() -> FastAPI:
             continue
         app.include_router(router, prefix="/api")
 
-    from . import cli  # noqa: PLC0415 — imports config, procs and cc_channel only
+    from . import cli  # noqa: PLC0415 — imports config, procs and cc_plugin only
 
     install = {"home": str(cli.home().expanduser().resolve()), "app": str(Path(config.REPO_ROOT).resolve())}
 

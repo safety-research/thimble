@@ -25,7 +25,7 @@ export const ORIENT_DEFAULT_EFFORT: MainEffort = 'ultracode'
 /** Main's model's tip: a running session's model changes only by /model in its terminal. */
 export const MODEL_TIP = 'Run /model in the Claude Code terminal to change the model'
 
-/** What a change to main's effort or fast mode does: it is kept for main's next launch (backend channel.effort_route). */
+/** What a change to main's effort or fast mode does: it is kept for main's next launch (backend events.effort_route). */
 export const NEXT_LAUNCH = 'Main runs with it from your next `thimble` launch'
 
 /** Why a model's bolt cannot switch: it has no fast mode. */

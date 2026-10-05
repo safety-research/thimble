@@ -58,7 +58,7 @@ WAITING_WRITER = "writer"  # a run's `waiting` while it is queued behind the doc
 MAX_SESSIONS = 3  # runs whose sessions run at once
 INTERRUPTED = "the server stopped while this run ran"  # a run the previous server left running (mark_interrupted)
 CHANGED = ("generated", "rewritten", "edited")  # the `report` statuses of a save that changes text
-CHECKED_KIND = "checked"  # the channel event that tells main a run it started ended (prompts/main.md)
+CHECKED_KIND = "checked"  # the browser event that tells main a run it started ended (prompts/main.md)
 DEFAULT_EFFORT = "medium"  # when check.md names none
 SUMMARY_CHARS = 300
 NAME_CHARS = 80
@@ -661,7 +661,7 @@ def _chat(act: _Active, chat: str) -> None:
 def _finish(act: _Active, status: str, summary: str) -> None:
     """A run ended: its record written, and for a run that ended `done` the check's earlier comments on the passages it
     covered superseded and their fingerprints seen; main told when run_check started it."""
-    from . import channel, report, report_types  # noqa: PLC0415
+    from . import events, report, report_types  # noqa: PLC0415
 
     if act.ended:
         return
@@ -695,7 +695,7 @@ def _finish(act: _Active, status: str, summary: str) -> None:
     _stream(c, act.check, act.doc, status, act.run, str(rec.get("chat") or ""))
     if act.notify:
         try:
-            channel.post(c, CHECKED_KIND, {"text": rec["summary"] or status, "check": act.check, "doc": act.doc,
+            events.post(c, CHECKED_KIND, {"text": rec["summary"] or status, "check": act.check, "doc": act.doc,
                                            "status": status, "comments": act.comments})
         except HTTPException as e:
             log.info("%s: main did not hear that check %s ended on %s (%s %s)", c, act.check, act.doc, e.status_code, e.detail)

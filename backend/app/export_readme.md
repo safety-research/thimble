@@ -43,8 +43,8 @@ Every `.jsonl` file has one JSON object per line.
   name. A subagent's chat: its `agent_id` names `agent-<agent_id>.jsonl` under its `session`'s directory. A thread's
   fork: the thread's `fork.agent_id` names its transcript under main's session directory.
 - **A message sent in the browser.** A `user` record with `by: browser` in `chats/main.jsonl` (or in a thread's log)
-  carries `event`; the same id is `event="<id>"` in the `<channel source="plugin:thimble:thimble" …>` tag of the
-  transcript record where the session received it. Send time is the chat record's `ts`, pickup the transcript record's
+  carries `event`; the same id is `event="<id>"` in the `<thimble-event …>` tag of the transcript record where the
+  session received it. Send time is the chat record's `ts`, pickup the transcript record's
   `timestamp`, and the answer is finished at the next `done` record in the chat. `telemetry/ui.jsonl` has the send as
   `ask-send` (target `chat:<id>`, `detail.event` the event kind, `detail.chars`), with the page load it came from.
 - **A card.** `card:<id>` (or `cell:<id>`) in telemetry targets, citations and label refs is

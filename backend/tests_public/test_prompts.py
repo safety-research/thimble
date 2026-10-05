@@ -14,9 +14,9 @@ def test_real_prompts_render_clean(monkeypatch):
 
 def test_main_renders_with_either_ending(tmp_path, monkeypatch):
     """Main's prompt renders with the ending of each mode (terminal_tools.ENDINGS), each found on exactly one line."""
-    from app import channel, terminal_tools
+    from app import events, terminal_tools
 
     monkeypatch.delenv("THIMBLE_PROMPTS_DIR", raising=False)
     for terminal in (True, False):
-        out = channel.render_prompts(["main"], str(tmp_path), terminal=terminal)
+        out = events.render_prompts(["main"], str(tmp_path), terminal=terminal)
         assert terminal_tools.ENDINGS[terminal] in out and terminal_tools.ENDINGS[not terminal] not in out

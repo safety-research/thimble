@@ -1,12 +1,9 @@
-"""plugin/bin/thimble-mcp as a channel: it declares Claude Code's `claude/channel` capability, and in a session with the
-channel (THIMBLE_CHANNEL in its environment, which the launcher exports, or the channel flag naming this plugin copy on
-its parent's command line, app.cc_channel) it subscribes to the server's `GET /api/channel` with its folder,
-its session id and its parent's pid, and writes each `channel` event as a `notifications/claude/channel` on stdout, none
-before the MCP handshake is done. That session also relays its permission prompts: it declares
-`claude/channel/permission`, posts each `notifications/claude/channel/permission_request` to
-`POST /api/channel/permission`, and writes each `permission` event of the stream as
-`notifications/claude/channel/permission`. Every request proves the token in server.json and the shim believes only an
-answer that proves it too (app/hook_auth.py). The server here is a stand-in that serves one event of each kind."""
+"""plugin/bin/thimble-mcp: in the analyst's session it subscribes to the server's `GET /api/events` with its folder, its
+session id, its parent's pid and the route its session hears events by (`hook`, or `monitor` where Claude Code's
+settings turn hooks off, app.cc_plugin.route), declares no experimental capability and writes nothing but its answers.
+It passes each tool call on to the server with the id Claude Code gave it. Every request proves the token in
+server.json and the shim believes only an answer that proves it too (app/hook_auth.py). The server here is a
+stand-in."""
 from __future__ import annotations
 
 import json
@@ -28,9 +25,6 @@ from app import config, hook_auth
 from conftest import fake_claude_bin
 
 SHIM = config.REPO_ROOT / "plugin" / "bin" / "thimble-mcp"
-NOTE = {"content": "question: why?", "meta": {"kind": "thread", "event": "e1", "thread": "t1"}}
-VERDICT = {"request_id": "swagd", "behavior": "allow"}
-REQUEST = {"request_id": "abcde", "tool_name": "Bash", "description": "Create x", "input_preview": '{"command": "touch x"}'}
 TOKEN = "t0ken-of-this-install"  # the one _start records in server.json
 
 
@@ -45,14 +39,13 @@ def proof(handler: BaseHTTPRequestHandler, token: str | None = TOKEN) -> str | N
 
 
 class _Server:
-    """GET /api/channel: a `ready` event, one `channel` event, then held open; every query string is kept. Each answer
-    proves `token` (none with None); a request that does not prove it is kept in `refused` and answered 401."""
+    """GET /api/events: a `ready` event and a keep-alive, then held open; every query string is kept. Each answer proves
+    `token` (none with None); a request that does not prove it is kept in `refused` and answered 401."""
 
     def __init__(self, token: str | None = TOKEN) -> None:
         self.token = token
         self.refused: list[str] = []
         self.queries: list[dict] = []
-        self.posts: list[dict] = []
         self.calls: list[tuple[str, dict]] = []  # (tool, body) of each POST /api/tools/<tool>
         outer = self
 
@@ -62,8 +55,6 @@ class _Server:
                 path = urllib.parse.urlsplit(self.path).path
                 if self._refused():
                     return
-                if path == "/api/channel/permission":
-                    outer.posts.append(json.loads(body))
                 answer = b"{}"
                 if path.startswith("/api/tools/"):
                     outer.calls.append((path.rsplit("/", 1)[-1], json.loads(body)))
@@ -76,7 +67,7 @@ class _Server:
 
             def do_GET(self):  # noqa: N802
                 u = urllib.parse.urlsplit(self.path)
-                if u.path != "/api/channel":
+                if u.path != "/api/events":
                     self.send_response(404)
                     self.end_headers()
                     return
@@ -89,8 +80,6 @@ class _Server:
                 self.end_headers()
                 self.wfile.write(b'event: ready\ndata: {"workspace": "mini"}\n\n')
                 self.wfile.write(b": ping\n\n")
-                self.wfile.write(b"event: channel\ndata: " + json.dumps(NOTE).encode() + b"\n\n")
-                self.wfile.write(b"event: permission\ndata: " + json.dumps(VERDICT).encode() + b"\n\n")
                 self.wfile.flush()
                 time.sleep(3)
 
@@ -133,12 +122,12 @@ INITIALIZE = {"jsonrpc": "2.0", "id": 0, "method": "initialize",
 INITIALIZED = {"jsonrpc": "2.0", "method": "notifications/initialized"}
 
 
-def _run(tmp_path: Path, port: int, channel: bool, wait_s: float, until: Any = "notifications/claude/channel",
-         send: list[dict] | None = None, parent: list[str] | None = None, extra: dict | None = None) -> list[dict]:
+def _run(tmp_path: Path, port: int, wait_s: float, until: Any, send: list[dict] | None = None,
+         parent: list[str] | None = None, extra: dict | None = None) -> list[dict]:
     """The shim's output until `until` (a method written, or a function that says when) or `wait_s`, after the MCP
     handshake and the messages in `send`; with `parent`, the shim runs as the child of a stand-in `claude` process whose
     command line carries those arguments; `extra` adds to its environment."""
-    p = _start(tmp_path, port, channel, parent=parent, extra=extra)
+    p = _start(tmp_path, port, parent=parent, extra=extra)
     _send(p, [INITIALIZE, INITIALIZED, *(send or [])])
     try:
         return _read(p, until, wait_s)
@@ -146,7 +135,7 @@ def _run(tmp_path: Path, port: int, channel: bool, wait_s: float, until: Any = "
         _stop(p)
 
 
-def _start(tmp_path: Path, port: int | None, channel: bool, parent: list[str] | None = None,
+def _start(tmp_path: Path, port: int | None, parent: list[str] | None = None,
            extra: dict | None = None) -> subprocess.Popen:
     """The shim as a child process (of a stand-in `claude` with `parent`), its server the stand-in on `port`, recorded
     in server.json with TOKEN; with `port` None there is no server.json."""
@@ -154,19 +143,14 @@ def _start(tmp_path: Path, port: int | None, channel: bool, parent: list[str] | 
     home.mkdir(exist_ok=True)
     if port is not None:
         (home / "server.json").write_text(json.dumps({"port": port, "api": f"http://127.0.0.1:{port}", "token": TOKEN}))
-    # a claude.ai login, which channels need (cc_channel.channels_blocked)
     claude = fake_claude_bin(home, {"loggedIn": True, "authMethod": "claude.ai"})
     (tmp_path / "cc").mkdir(exist_ok=True)
     env = {**os.environ, "THIMBLE_HOME": str(home), "THIMBLE_CWD": "/data/mini", "CLAUDE_CONFIG_DIR": str(tmp_path / "cc"),
            "CLAUDE_CODE_SESSION_ID": "s-123", "THIMBLE_CLAUDE_BIN": str(claude)}
     env.pop("THIMBLE_SKIP_KEY", None)
-    for k in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_PROFILE", "CLAUDE_CODE_USE_BEDROCK",
-              "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY"):
-        env.pop(k, None)  # the runner's own login must not decide the route the test asserts
-    env.pop("THIMBLE_CHANNEL", None)
+    for k in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_PROFILE"):
+        env.pop(k, None)
     env.pop("THIMBLE_SESSION", None)
-    if channel:
-        env["THIMBLE_CHANNEL"] = "plugin:thimble@inline"
     env.update(extra or {})
     cmd = [str(SHIM)] if parent is None else [sys.executable, "-c", PARENT, str(SHIM), *parent]
     p = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=env,
@@ -208,32 +192,28 @@ def _stop(p: subprocess.Popen) -> None:
     p.wait()
 
 
-def test_the_shim_declares_the_channel_and_forwards_an_event(tmp_path, server):
-    out = _run(tmp_path, server.port, channel=True, wait_s=30)
-    init = next(m for m in out if m.get("id") == 0)
-    assert init["result"]["capabilities"]["experimental"] == {"claude/channel": {}, "claude/channel/permission": {}}
-    assert "`thimble`" in init["result"]["instructions"] and len(init["result"]["instructions"].encode()) < 2048
-    notes = [m for m in out if m.get("method") == "notifications/claude/channel"]
-    assert notes and notes[0]["params"] == NOTE
-    q = server.queries[0]
-    assert q["cwd"] == "/data/mini" and q["session"] == "s-123" and int(q["pid"]) == os.getpid()
-
-
-def test_the_launcher_s_session_relays_its_permission_prompts_both_ways(tmp_path, server):
-    """Claude Code's request reaches the server with the folder and the session; the browser's answer on the stream
-    reaches Claude Code as the verdict notification. The stand-in sends its verdict the moment the shim subscribes,
-    which can be before the shim has posted the request, so the shim runs until the post arrives."""
-    note = {"jsonrpc": "2.0", "method": "notifications/claude/channel/permission_request", "params": REQUEST}
-    p = _start(tmp_path, server.port, channel=True)
+@pytest.mark.parametrize("hooks", [True, False])
+def test_the_shim_subscribes_with_its_route_and_writes_only_its_answers(tmp_path, server, hooks):
+    if not hooks:
+        (tmp_path / "cc").mkdir(exist_ok=True)
+        (tmp_path / "cc" / "settings.json").write_text(json.dumps({"disableAllHooks": True}))
+    p = _start(tmp_path, server.port)
+    out: list[dict] = []
     try:
-        _send(p, [INITIALIZE, INITIALIZED, note])
-        out = _read(p, "notifications/claude/channel/permission", 30)
-        _read(p, lambda: bool(server.posts), 30)
+        _send(p, [INITIALIZE, INITIALIZED])
+        end = time.monotonic() + 30
+        while time.monotonic() < end and not (server.queries and any(m.get("id") == 0 for m in out)):
+            out += _read(p, lambda: False, 0.2)
+        out += _read(p, lambda: False, 1.0)  # a second after both, for anything it would write of its own
     finally:
         _stop(p)
-    verdicts = [m for m in out if m.get("method") == "notifications/claude/channel/permission"]
-    assert verdicts and verdicts[0]["params"] == VERDICT
-    assert server.posts == [{**REQUEST, "cwd": "/data/mini", "session": "s-123"}]
+    init = next(m for m in out if m.get("id") == 0)
+    assert not init["result"]["capabilities"].get("experimental")
+    assert "`thimble`" in init["result"]["instructions"] and len(init["result"]["instructions"].encode()) < 2048
+    assert not [m for m in out if "method" in m], "no notification of its own"
+    q = server.queries[0]
+    assert q["cwd"] == "/data/mini" and q["session"] == "s-123" and int(q["pid"]) == os.getpid()
+    assert q["delivery"] == ("hook" if hooks else "monitor")
 
 
 def test_a_tool_call_carries_the_id_claude_code_gave_it(tmp_path, server):
@@ -245,8 +225,7 @@ def test_a_tool_call_carries_the_id_claude_code_gave_it(tmp_path, server):
                        "_meta": {"claudecode/toolUseId": "toolu_01abc"}}}
     bare = {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
             "params": {"name": "message_orientation", "arguments": {"message": "again"}}}
-    _run(tmp_path, server.port, channel=False, wait_s=15, send=[call, bare],
-           until=lambda: len(server.calls) >= 2)
+    _run(tmp_path, server.port, wait_s=15, send=[call, bare], until=lambda: len(server.calls) >= 2)
     got = {body["args"]["message"]: (name, body["tool_use_id"]) for name, body in server.calls}  # the two calls may land in either order
     assert got == {"more": ("message_orientation", "toolu_01abc"), "again": ("message_orientation", None)}
 
@@ -261,8 +240,8 @@ def test_a_session_name_counts_only_with_its_token(tmp_path, server):
         {t["name"] for t in tools.list(tools.ANALYST, session="orient")}
     name = sorted(both)[0]
     call = {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": name, "arguments": {}}}
-    _run(tmp_path, server.port, channel=False, wait_s=15, send=[call], until=lambda: bool(server.calls),
+    _run(tmp_path, server.port, wait_s=15, send=[call], until=lambda: bool(server.calls),
          extra={"THIMBLE_SESSION": "orient"})
-    _run(tmp_path, server.port, channel=False, wait_s=15, send=[call], until=lambda: len(server.calls) >= 2,
+    _run(tmp_path, server.port, wait_s=15, send=[call], until=lambda: len(server.calls) >= 2,
          extra={"THIMBLE_SESSION": "orient", "THIMBLE_SESSION_TOKEN": "n.m"})
     assert [(body["session"], body["session_token"]) for _, body in server.calls] == [(None, None), ("orient", "n.m")]

@@ -194,7 +194,7 @@ def _launcher(tmp_path: Path, lines: list[str]) -> tuple[Path, Path]:
 def test_the_launcher_passes_mains_name_and_lets_the_analysts_win(tmp_path):
     import subprocess  # noqa: PLC0415
 
-    head = ["plugin:thimble@inline", "mcp__x", "", "{}", ""]
+    head = [str(tmp_path / "plugin"), "mcp__x", "", "{}", ""]
     launcher, path = _launcher(tmp_path, [*head, "thimble:main · logs", "the prompt"])
     (tmp_path / "launch-args.txt.resume").write_text("\n".join([*head, "thimble:main · logs", "sid-last", "the prompt"]))
     argv_out = tmp_path / "argv.txt"
@@ -207,6 +207,9 @@ def test_the_launcher_passes_mains_name_and_lets_the_analysts_win(tmp_path):
     argv = run()
     assert argv[argv.index("--name") + 1] == "thimble:main · logs" and "--resume" not in argv
     assert argv[argv.index("--append-system-prompt") + 1] == "the prompt"
+    assert argv[argv.index("--plugin-dir") + 1] == str(tmp_path / "plugin")
+    assert [a for a in argv if a.startswith("--")] == ["--plugin-dir", "--allowedTools", "--settings", "--name",
+                                                       "--append-system-prompt", "--"], "no flag but these"
     argv = run("-c")
     assert argv[argv.index("--name") + 1] == "thimble:main · logs"
     assert argv[argv.index("--resume") + 1] == "sid-last"

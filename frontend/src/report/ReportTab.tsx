@@ -2,7 +2,7 @@
 // drawn as the Files views bar draws its views (Segmented), + New
 // (DocMenus.tsx), Export (ExportMenu.tsx), the story's Read, the lock note (LockNote.tsx), History (History.tsx) and the primary action,
 // Write or Revise (WriteAction.tsx, where Revise asks first), which asks the analyst's session for the document (a
-// `write` channel event; `report` stream events follow it). A failed write stays on its document (writeFailures.ts) with Retry until dismissed or written. A document
+// `write` browser event; `report` stream events follow it). A failed write stays on its document (writeFailures.ts) with Retry until dismissed or written. A document
 // not written yet is its frame (GET …/frame). The views' module (Documents.tsx) is imported once in an effect rather than
 // with React.lazy, whose Suspense retry can stall; documents are kept by slug so a switch never shows an empty body.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'

@@ -187,15 +187,66 @@ def _view_tickets_held(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _no_held_events():
-    """The quiet events channel.post holds for the next event and the modes main's hooks reported are module state:
+    """The quiet events events.post holds for the next event and the modes main's hooks reported are module state:
     none carries over from another test."""
-    from app import channel, session
+    from app import events, session
 
-    for held in (channel._held, session._modes):
+    for held in (events._held, session._modes):
         held.clear()
     yield
-    for held in (channel._held, session._modes):
+    for held in (events._held, session._modes):
         held.clear()
+
+
+LISTENER_SID = "5e55a000-0000-4000-8000-0000000000aa"
+
+
+class Listener:
+    """A session that is main in workspace `corpus` and whose shim holds a subscription, for a test that checks what
+    reaches main: the events events.post queues for its watcher (events._pending), taken like an asyncio.Queue's."""
+
+    def __init__(self, corpus: str, sid: str = LISTENER_SID) -> None:
+        from app import config, events, session
+
+        self.corpus, self.sid = corpus, sid
+        self.sub = events.Sub(sid)
+        events._subs.setdefault(corpus, set()).add(self.sub)
+        session.attach(corpus, sid, str(config.corpus_dir(corpus)), None)
+
+    def _queue(self):
+        from app import events
+
+        return events._pending.get((self.corpus, self.sid))
+
+    def empty(self) -> bool:
+        return not self._queue()
+
+    def get_nowait(self) -> dict:
+        import asyncio
+
+        q = self._queue()
+        if not q:
+            raise asyncio.QueueEmpty
+        return q.popleft()
+
+    async def get(self, timeout: float = 10.0) -> dict:
+        import asyncio
+
+        end = time.monotonic() + timeout
+        while self.empty():
+            if time.monotonic() > end:
+                raise asyncio.TimeoutError
+            await asyncio.sleep(0.02)
+        return self.get_nowait()
+
+    def close(self) -> None:
+        from app import events, session
+
+        events._subs.get(self.corpus, set()).discard(self.sub)
+        events._pending.pop((self.corpus, self.sid), None)
+        lv = session._live.pop(self.corpus, None)
+        if lv is not None and lv.task is not None:
+            lv.task.cancel()
 
 
 @pytest.fixture(autouse=True)
@@ -261,8 +312,8 @@ def data_tmp(tmp_path, monkeypatch):
 @pytest.fixture()
 def home(tmp_path, monkeypatch):
     """A scratch THIMBLE_HOME and Claude Code config dir, a stand-in UI build, and no adoption of a real server: the
-    default port may be a live server's. `up` runs as in a session the launcher started, on a claude.ai login."""
-    from app import cc_channel, cli, config
+    default port may be a live server's. `up` runs as in a session the launcher started."""
+    from app import cli, config
 
     monkeypatch.setenv("THIMBLE_HOME", str(tmp_path / "home"))
     for k in ("THIMBLE_PORT", "THIMBLE_UI_PORT", "THIMBLE_DEV", "THIMBLE_DATA_DIR", "THIMBLE_WORKSPACES_DIR"):
@@ -273,8 +324,7 @@ def home(tmp_path, monkeypatch):
     (tmp_path / "ui-dist" / "index.html").write_text("<html></html>")
     monkeypatch.setenv("THIMBLE_FRONTEND_DIST", str(tmp_path / "ui-dist"))
     monkeypatch.setattr(config, "FRONTEND_DIST", tmp_path / "ui-dist")
-    monkeypatch.setenv(cli.CHANNEL_ENV, "plugin:thimble@inline")
-    monkeypatch.setattr(cc_channel, "login", lambda environ=None, cwd=None: {"loggedIn": True, "authMethod": "claude.ai"})
+    monkeypatch.setenv(cli.LAUNCHED_ENV, "1")
     monkeypatch.setattr(cli, "health_leader", lambda url=None: None)
     monkeypatch.setattr(cli, "foreign_home", lambda url=None: None)  # nor refuses one: another test covers that
     monkeypatch.delenv(cli.SANDBOX_ENV, raising=False)

@@ -2261,10 +2261,10 @@ async def add_route(c: str, name: str, request: Request) -> dict[str, Any]:
 async def refresh_route() -> dict[str, Any]:
     """`thimble extension add` and `remove`: every workspace a session is connected to finds its extensions again at
     once. {workspaces: {c: [the extensions active there]}}."""
-    from . import channel  # noqa: PLC0415
+    from . import events  # noqa: PLC0415
 
     out = {}
-    for c in channel.connected_workspaces():
+    for c in events.connected_workspaces():
         await connected(c)
         out[c] = [e["name"] for e in active(c)]
     return {"workspaces": out}

@@ -1,7 +1,7 @@
 """The orientation as the server sees it: its record, for the readers that need it without a session.
 
 No model runs here. The orientation is its own Claude Code session beside main (orient_session.py, prompts/orient.md),
-started when main calls `start_orientation`. The browser's Start sends a `start` channel event, which main answers by
+started when main calls `start_orientation`. The browser's Start sends a `start` browser event, which main answers by
 calling that tool with the brief and the three output switches (`final_notebook`, the deck; `propose_views`;
 `generate_report`). This module hears the Start (start_requested), keeps its settings (`effort`, `critique`,
 `ultracode`), and is told when the session starts (started) and stops (finished).
@@ -28,7 +28,7 @@ permission mode, the critique, the work-folder fence and the editable instructio
 
 When run 0 ends, the held proposals appear, and the orientation's chat gets chips for them. A failed run 0
 runs again in its session when a start asks for the same orientation. When the report was asked for, orient_session
-sends the `write` channel event once no follow-up waits.
+sends the `write` browser event once no follow-up waits.
 """
 from __future__ import annotations
 
@@ -54,12 +54,12 @@ DEFAULT_EFFORT = "max"
 DEFAULT_ULTRACODE = True  # an orientation runs with Ultracode unless Start turns it off
 ROLE = "orient"  # the orientation's chat role
 TITLE = "Orientation"  # the agent chat's title
-ORIENT_KIND = "orient"  # the channel kind that tells main the orientation ended (prompts/main.md)
+ORIENT_KIND = "orient"  # the event kind that tells main the orientation ended (prompts/main.md)
 GROUP_PATHS = {"deck": "Orientation"}  # the orientation's one group, its deck
 REPORT_DOC = "report"
-WRITE_KIND = "write"  # the channel kind the Report tab's Write sends
+WRITE_KIND = "write"  # the event kind the Report tab's Write sends
 RUNNING = ("requested", "running")
-START_KIND = "start"  # the channel kind the browser's Start sends (prompts/main.md, Events from the browser)
+START_KIND = "start"  # the event kind the browser's Start sends (prompts/main.md, Events from the browser)
 REQUEST_WAIT_S = 600.0  # a Start main has not taken up with start_orientation in this long is taken as dropped
 # analyst-facing lines
 CARDS_CHIP = "the orientation's cards"
@@ -129,7 +129,7 @@ def effort(value: Any) -> str:
 
 
 def flag(value: Any, default: bool) -> bool:
-    """A Start choice sent as a boolean, or as the string a channel attribute carries."""
+    """A Start choice sent as a boolean, or as the string an event attribute carries."""
     if isinstance(value, bool):
         return value
     if isinstance(value, str) and value.strip().lower() in ("true", "false"):
@@ -372,13 +372,13 @@ def request_report(c: str, request: str = "") -> bool:
     """The report pass: the `write` event the Report tab's Write sends, for the report, which main answers with
     start_writing, `request` its text (a revision's, naming the cards a follow-up changed). False when no session
     listens or the event is refused (logged, never raised: the orientation itself is done)."""
-    from . import channel  # noqa: PLC0415
+    from . import events  # noqa: PLC0415
 
     payload: dict[str, Any] = {"doc": REPORT_DOC}
     if request.strip():
         payload["text"] = request.strip()
     try:
-        channel.post(c, WRITE_KIND, payload, check_kind=False, line=channel.describe(WRITE_KIND, payload))
+        events.post(c, WRITE_KIND, payload, check_kind=False, line=events.describe(WRITE_KIND, payload))
     except HTTPException as e:
         log.warning("orientation %s: the report pass was not sent (%s %s)", c, e.status_code, e.detail)
         return False
@@ -396,10 +396,10 @@ def request_report(c: str, request: str = "") -> bool:
 
 
 def _listen() -> None:
-    """start_requested on the channel's `start` events."""
-    from . import channel  # noqa: PLC0415
+    """start_requested on the `start` events."""
+    from . import events  # noqa: PLC0415
 
-    channel.observe(START_KIND, start_requested)
+    events.observe(START_KIND, start_requested)
 
 
 _listen()

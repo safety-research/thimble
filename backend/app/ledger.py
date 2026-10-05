@@ -385,7 +385,7 @@ async def _end_work(c: str) -> None:
 
 async def _stop_sessions(c: str, why: str) -> None:
     """Stop the Claude Code sessions the server runs for the workspace (an orientation's, a writer's: they never
-    subscribe to the channel) and detach the analyst's session from it, before its folder goes."""
+    subscribe to its events) and detach the analyst's session from it, before its folder goes."""
     from . import agent_session, session  # lazy: session imports this module
 
     for run in [r for (cc, _), r in list(agent_session._runs.items()) if cc == c]:
@@ -403,9 +403,9 @@ async def reset_workspace(c: str, idle: bool = False) -> dict[str, bool]:
     if path.parent != config.WORKSPACES_DIR.resolve() or path == config.WORKSPACES_DIR.resolve():
         raise HTTPException(400, f"refusing to delete {path}")
     if idle:
-        from . import channel  # noqa: PLC0415 — lazy, as in _end_work
+        from . import events  # noqa: PLC0415 — lazy, as in _end_work
 
-        n = len(channel.subscribed_sessions(c))
+        n = len(events.subscribed_sessions(c))
         if n:
             raise HTTPException(409, f"{c} has {n} open session{'s' if n > 1 else ''}: quit "
                                      f"{'them' if n > 1 else 'it'} first")

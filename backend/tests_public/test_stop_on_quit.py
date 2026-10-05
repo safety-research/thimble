@@ -74,8 +74,8 @@ def test_main_ending_with_no_successor_stops_the_agents(monkeypatch):
     session._live["w"] = Lv()
     monkeypatch.setattr(session, "detach", lambda c, sid, why: session._live.pop(c, None))
     monkeypatch.setattr(session, "_hand_back", lambda c, gone: None)
-    from app import channel
-    monkeypatch.setattr(channel, "listening", lambda c, sid: False)
+    from app import events
+    monkeypatch.setattr(events, "listening", lambda c, sid: False)
     monkeypatch.setattr(session, "GRACE_S", 0)
     session.disconnected("w", "s1")
     assert called == ["w"]
