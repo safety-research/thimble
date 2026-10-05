@@ -133,8 +133,8 @@ thimble-cc-mod is a single-agent thimble inside Claude Code, an exploration that
 of its marketplace. Claude answers with cards drawn in the chat and citations you can check, with no server, browser or
 background agents. Switch it on in a folder with `thimble cc-mod on`, which asks first, then writes the folder's
 `.claude/settings.json` through `claude plugin`; then run `claude` there. When Claude Code does not know thimble's
-marketplace yet (a default install doesn't register it), `on` lists its registration from the
-install's folder among the steps it asks about and runs it first. That adds no plugin to your sessions, and `thimble
+marketplace yet (a default install doesn't register it), `on` lists its registration from the install's folder among
+the steps it asks about and runs it first. That adds no plugin to your sessions, and `thimble
 uninstall` takes it back. `thimble cc-mod off` undoes it, and `thimble
 cc-mod status` says whether each of the two plugins is on in the folder. They are switched independently: `on` and `off`
 leave the thimble plugin as it is. Sessions you start with `thimble`, and thimble's background sessions (the
@@ -152,9 +152,9 @@ until `thimble server restart`.
 ## Uninstall
 
 `thimble uninstall` asks, then removes the trust entry the install added, the plugin registration that put thimble in
-every Claude Code session, if there is one (or the marketplace `thimble cc-mod on` registered, which turns thimble-cc-mod off in the folders
-it is on in), `~/.local/bin/thimble`, and `~/.thimble`, which holds a Global install's workspaces. `--keep-home` keeps
-`~/.thimble`.
+every Claude Code session, if there is one (or the marketplace `thimble cc-mod on` registered, which turns
+thimble-cc-mod off in the folders it is on in), `~/.local/bin/thimble`, and `~/.thimble`, which holds a Global
+install's workspaces. `--keep-home` keeps `~/.thimble`.
 A clone stays where it is, and so does a downloaded headless Chromium, in Playwright's cache folder.
 
 To delete one workspace and keep the install, `thimble list` shows the workspaces by id and `thimble purge <id>` deletes
