@@ -16,6 +16,11 @@ The call text can run to tens of megabytes, so it is split into words and path r
 is a set lookup. The checks run in a child process (check_apart), since pure-Python parsing in a server thread would
 hold the interpreter lock; an abandoned critique kills the child. Every line the model reads is a `## check-*` section
 of prompts/tools.md.
+
+The orientation itself hears of the files it never opened, at its first card and when it asks for its critique
+(orient_session.coverage). That check, `unopened`, reads only the calls' input, since a survey's listing names every
+file without opening one; a folder counts only where a command names it whole or by a wildcard, since reading one file
+of a folder opens none of the others. It names each file with its records and its share of the corpus.
 """
 from __future__ import annotations
 
@@ -50,18 +55,21 @@ CHECK_TIMEOUT_S = 600.0  # check_apart's child is stopped after this long
 JSONL_SUFFIXES = (".jsonl", ".ndjson")
 READ_TOOLS = ("Read",)  # a Grep or Glob call searches or lists a file without reading it
 UNREAD_LISTED = 12  # unread files named one by one; past this, by kind of file with a count
+RECORDS_MAX_BYTES = 200_000_000  # an unopened file past this size gives its size: its records take long to count
 UNUSED_PER_KIND = 5  # unused fields and values named per kind of file, the most filled first
 UNUSED_LISTED = 20
 CALL_TEXT_CHARS = 200_000  # of one call's input and output read for the checks
 CALLS_TEXT_CHARS = 30_000_000  # of every call's, together
 CRITIC = "critic"  # a critique's chat's agent_type (critique_session.AGENT, which imports this module)
 BACKEND_DIR = Path(__file__).resolve().parent.parent  # where `python -m app.orient_checks` runs (check_apart)
+UNOPENED_FLAG = "--unopened"  # the child computes unopened rather than check
 _DIGITS_RE = re.compile(r"\d+")
 _UUID_RE = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", re.I)
 _TOKEN_RE = re.compile(r"[A-Za-z0-9]+")
 _HEX_ID_RE = re.compile(r"(?=.*\d)[0-9a-f]{3,}", re.I)  # a whole token of hex digits, at least one of them a digit
 _WORD_RE = re.compile(r"[A-Za-z0-9_]+")  # the characters of a whole word, as _Text.names bounds one
 _PATH_RE = re.compile(r"[\w./-]+")  # the characters a path is written with, as _read_by_calls splits the text
+_GLOB_RE = re.compile(r"[\w./*?-]+")  # a run of path characters that may hold a wildcard (_globbed)
 
 
 @dataclass
@@ -141,9 +149,10 @@ def _read_by_agents(c: str, corpus: Path) -> set[str]:
     return out
 
 
-def _calls_text(c: str) -> str:
-    """The input and output of every stored call of the workspace's orientations (calls.py), each cut to
-    CALL_TEXT_CHARS, together up to CALLS_TEXT_CHARS; a critic's own calls are left out, as its Reads are."""
+def _calls_text(c: str, results: bool = True) -> str:
+    """The input and output (only the input without `results`) of every stored call of the workspace's orientations
+    (calls.py), each cut to CALL_TEXT_CHARS, together up to CALLS_TEXT_CHARS; a critic's own calls are left out, as its
+    Reads are."""
     from . import calls  # noqa: PLC0415
 
     ws = config.workspace_dir(c)
@@ -157,7 +166,8 @@ def _calls_text(c: str) -> str:
             if row.get("chat") in critics:
                 continue
             full = calls.get(c, chat, int(row["n"])) or {}
-            text = json.dumps(full.get("input"), ensure_ascii=False, default=str) + "\n" + str(full.get("result") or "")
+            text = json.dumps(full.get("input"), ensure_ascii=False, default=str)
+            text += "\n" + str(full.get("result") or "") if results else ""
             text = text[:CALL_TEXT_CHARS]
             parts.append(text)
             total += len(text)
@@ -172,20 +182,27 @@ def _critic_chats(c: str) -> set[str]:
     return {str(m["id"]) for m in agents.list_chats(c) if m.get("agent_type") == CRITIC}
 
 
-def _read_by_calls(text: str, corpus: Path, files: set[str]) -> set[str]:
+def _read_by_calls(text: str, corpus: Path, files: set[str], whole: bool = False) -> set[str]:
     """The corpus files the orientation's calls named: a file by its corpus-relative or absolute path filling whole
-    components of a run of path characters, and every file under a folder named the same way. A path holding other
-    characters (a space) is searched for in the whole text instead."""
+    components of a run of path characters, and every file under a folder named the same way. With `whole`, a folder
+    is named only where a run holding a slash ends at it (`ls tickets/`, `tickets/*.txt`, `ls <corpus>/tickets`), not
+    where it leads a file's path, so reading one file of a folder leaves the others unread, nor as a bare word, which
+    prose holds too; and a wildcard pattern names the files it matches (_globbed). A path holding other characters (a
+    space) is searched for in the whole text instead."""
     if not text:
         return set()
     root = str(corpus.resolve()).rstrip("/") + "/"
-    text = text.replace(root, "")
+    text = text.replace(root, "/" if whole else "")  # with `whole`, a path from the corpus keeps a slash
     depth = max((f.count("/") + 1 for f in files), default=1)
-    heads: set[str] = set()  # the leading components of each run, where a folder can be named
+    heads: set[str] = set()  # the leading components of each run (trailing with `whole`), where a folder can be named
     spans: set[str] = set()  # each sequence of up to `depth` whole components of a run, where a file can be named
     for run in set(_PATH_RE.findall(text)):
-        parts = run.split("/")
-        heads.update("/".join(parts[:j]) for j in range(1, min(len(parts), depth) + 1))
+        if whole:
+            parts = run.rstrip("/").split("/") if "/" in run else []
+            heads.update("/".join(parts[i:]) for i in range(len(parts)))
+        else:
+            parts = run.split("/")
+            heads.update("/".join(parts[:j]) for j in range(1, min(len(parts), depth) + 1))
         for r in {run, run.rstrip(".")}:  # a path at the end of a sentence is still named
             parts = r.split("/")
             for i in range(len(parts)):
@@ -196,13 +213,44 @@ def _read_by_calls(text: str, corpus: Path, files: set[str]) -> set[str]:
 
     out = {f for f in files if (f in spans if plain(f) else f in text)}
     folders = {os.path.dirname(f) for f in files} - {""}
-    named = {d for d in folders
-             if (d in heads if plain(d) else re.search(rf"(?<![\w./-]){re.escape(d)}(?:/|(?![\w.-]))", text))}
+
+    def spaced(d: str) -> str:  # the regex of a folder whose name holds a space, named as `whole` or not asks
+        e = re.escape(d)
+        return rf"/{e}/?(?![\w./-])|(?<![\w./-]){e}/(?![\w.-])" if whole else rf"(?<![\w./-]){e}(?:/|(?![\w.-]))"
+
+    named = {d for d in folders if (d in heads if plain(d) else re.search(spaced(d), text))}
     for f in files:
         parts = f.split("/")
         if any("/".join(parts[:i]) in named for i in range(1, len(parts))):
             out.add(f)
+    return out | _globbed(text, files) if whole else out
+
+
+def _globbed(text: str, files: set[str]) -> set[str]:
+    """The files a wildcard pattern of the text matches by its trailing components, as a shell or glob() would from
+    some folder: `*.txt` in `cd tickets && cat *.txt` matches every file named so in any folder. Only a pattern with a
+    word character and a dot or a slash counts (`*.jsonl`, `runs/*/`), since `*` also multiplies and repeats. A
+    pattern's last component is matched against the names that hold its longest literal part, then its folders."""
+    by_name: dict[str, list[str]] = {}
+    for f in files:
+        by_name.setdefault(f.rpartition("/")[2], []).append(f)
+    out: set[str] = set()
+    for pat in {r.strip("/") for r in _GLOB_RE.findall(text) if "*" in r or "?" in r}:
+        if not re.search(r"\w", pat) or not re.search(r"[./]", pat):
+            continue
+        folder, _, last = pat.rpartition("/")
+        literal, name = max(re.split(r"[*?]", last), key=len), re.compile(_glob_rx(last))
+        found = [f for n in by_name if literal in n and name.fullmatch(n) for f in by_name[n] if f not in out]
+        if folder:
+            within, path = max(re.split(r"[*?]", folder), key=len), re.compile(rf"(?:^|/){_glob_rx(pat)}$")
+            found = [f for f in found if within in f and path.search(f)]
+        out.update(found)
     return out
+
+
+def _glob_rx(pattern: str) -> str:
+    """The regex of a wildcard pattern: `**` any run of characters, `*` any within one component, `?` one."""
+    return re.escape(pattern).replace(r"\*\*", ".*").replace(r"\*", "[^/]*").replace(r"\?", "[^/]")
 
 
 # --------------------------------------------------------------------------- sampling records
@@ -314,10 +362,11 @@ class _Text:
 # --------------------------------------------------------------------------- the checks
 
 
-def _unread_files(c: str, corpus: Path, files: list[str], cells: list[dict[str, Any]], calls_text: str = "") -> list[str]:
+def _unread_files(c: str, corpus: Path, files: list[str], cells: list[dict[str, Any]], calls_text: str = "",
+                  whole: bool = False) -> list[str]:
     fileset = set(files)
     return sorted(fileset - _read_by_cells(cells, fileset) - _read_by_agents(c, corpus)
-                  - _read_by_calls(calls_text, corpus, fileset))
+                  - _read_by_calls(calls_text, corpus, fileset, whole))
 
 
 def _unread(unread: list[str], files: list[str]) -> list[Finding]:
@@ -380,17 +429,57 @@ def check(c: str) -> list[Finding]:
     return _unread(unread, files) + _unused(corpus, [f for f in files if f in opened], cells, calls_text)
 
 
-def child_argv(c: str) -> list[str]:
+def unopened(c: str) -> list[Finding]:
+    """The orientation's coverage note for workspace `c` (orient_session.coverage), one finding or none: the corpus
+    files no card read, no Read call opened and no call's input named, by its path or its folder's whole, the largest
+    first, each with its records (its size past RECORDS_MAX_BYTES) and its share of the corpus's bytes; past
+    UNREAD_LISTED files, each kind of file with its count and share (a kind of one file as that file). ValueError for a
+    workspace whose corpus is gone."""
+    from . import corpus as corpus_mod, records  # noqa: PLC0415
+    from .tools import hint  # noqa: PLC0415
+
+    corpus = config.corpus_dir(c)
+    sizes = {s["path"]: int(s.get("size_bytes") or 0) for s in corpus_mod.list_sources(corpus) if not s.get("hidden")}
+    files = list(sizes)
+    unread = _unread_files(c, corpus, files, _cells(config.workspace_dir(c)), _calls_text(c, results=False), whole=True)
+    if not unread:
+        return []
+    total = sum(sizes.values()) or 1
+
+    def share(n: int) -> str:
+        return f"{n / total:.0%} of the corpus" if n >= total / 100 else "under 1% of the corpus"
+
+    def row(f: str) -> str:
+        n = records.count(corpus / f, f) if sizes[f] <= RECORDS_MAX_BYTES else 0
+        return f"- `{f}`: {f'{n:,} records' if n else f'{sizes[f] / 1e6:,.1f} MB'}, {share(sizes[f])}"
+
+    if len(unread) <= UNREAD_LISTED:
+        rows = [row(f) for f in sorted(unread, key=lambda f: -sizes[f])]
+    else:
+        kinds: dict[str, list[str]] = {}
+        for f in unread:
+            kinds.setdefault(_kind_key(f).replace("#", "*"), []).append(f)
+        ranked = sorted(kinds.items(), key=lambda kv: -sum(sizes[f] for f in kv[1]))
+        rows = [row(fs[0]) if len(fs) == 1 else f"- `{k}`: {len(fs):,} files, {share(sum(sizes[f] for f in fs))}"
+                for k, fs in ranked[:UNREAD_LISTED]]
+        if len(ranked) > UNREAD_LISTED:
+            rows.append(f"- {len(ranked) - UNREAD_LISTED:,} more kinds of file")
+    return [Finding("unopened", hint("orient-unopened", n=f"{len(unread):,}", total=f"{len(files):,}", root=str(corpus),
+                                     files="\n".join(rows)))]
+
+
+def child_argv(c: str, *flags: str) -> list[str]:
     """The command of check_apart's child for workspace `c` (a test replaces it with a child that only waits)."""
-    return [sys.executable, "-m", "app.orient_checks", c]
+    return [sys.executable, "-m", "app.orient_checks", c, *flags]
 
 
-async def check_apart(c: str, timeout_s: float = CHECK_TIMEOUT_S) -> list[Finding]:
-    """check(c) run in a child process that reads the same workspaces and registry folders as the server. ValueError as
-    check raises it, TimeoutError past `timeout_s`, RuntimeError otherwise. The child is killed whenever it is still
-    running as this returns, including when the caller is cancelled."""
+async def check_apart(c: str, timeout_s: float = CHECK_TIMEOUT_S, only_unopened: bool = False) -> list[Finding]:
+    """check(c), or unopened(c) with `only_unopened`, run in a child process that reads the same workspaces and registry
+    folders as the server. ValueError as check raises it, TimeoutError past `timeout_s`, RuntimeError otherwise. The
+    child is killed whenever it is still running as this returns, including when the caller is cancelled."""
     env = {**os.environ, "THIMBLE_WORKSPACES_DIR": str(config.WORKSPACES_DIR), "THIMBLE_DATA_DIR": str(config.DATA_DIR)}
-    proc = await asyncio.create_subprocess_exec(*child_argv(c), cwd=str(BACKEND_DIR), env=env,
+    argv = child_argv(c, UNOPENED_FLAG) if only_unopened else child_argv(c)
+    proc = await asyncio.create_subprocess_exec(*argv, cwd=str(BACKEND_DIR), env=env,
                                                 stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
     try:
         out, err = await asyncio.wait_for(proc.communicate(), timeout_s)
@@ -415,10 +504,10 @@ async def check_apart(c: str, timeout_s: float = CHECK_TIMEOUT_S) -> list[Findin
 
 
 def main(argv: list[str]) -> int:
-    """`python -m app.orient_checks <workspace>`, check_apart's child: the findings as a JSON list on stdout, or exit 2
-    with the reason on stderr for a workspace whose corpus is gone."""
+    """`python -m app.orient_checks <workspace> [--unopened]`, check_apart's child: the findings as a JSON list on
+    stdout, or exit 2 with the reason on stderr for a workspace whose corpus is gone."""
     try:
-        found = check(argv[0])
+        found = unopened(argv[0]) if UNOPENED_FLAG in argv[1:] else check(argv[0])
     except ValueError as e:
         print(e, file=sys.stderr)
         return 2
