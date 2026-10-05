@@ -32,7 +32,7 @@ A pre-cache made with an older thimble still installs: the format has a version 
   (version and commit that made it), `orientation` (status, outputs, effort, Ultracode, critique, model, start and end),
   `counts` (cards, labels, views, documents, chats), `corpus` (each file the orientation read, with its size and
   SHA-256, checked on install), `placeholders`, `files` (each file kept, with its size and SHA-256), `left_out` (each
-  file left out and why), `gitleaks`, `user_name_scrubbed`, `typed_in_main`, `flagged`.
+  file left out and why), `gitleaks`, `user_name_scrubbed`, `typed_in_main`, `marked_done` (chats whose meta still said they ran, written done), `flagged`.
 - `workspace/`: the files of the workspace folder, by their paths in it: `notebooks/` (the cards and their full-size
   outputs), `concepts/` and `labels/*.jsonl` (the labels), `views/` and `extension/` (the views), `investigations/`
   (the documents and the event stream), `chats/` and `calls/` (main's chat, the orientation's thread and its calls),
@@ -42,5 +42,5 @@ A pre-cache made with an older thimble still installs: the format has a version 
 Absolute paths are written as `@@THIMBLE_WORKSPACE@@`, `@@THIMBLE_CORPUS@@`, `@@THIMBLE_APP@@` (thimble's install)
 and `@@THIMBLE_HOME@@`, and filled in on install. Left out, as thimble rebuilds them or they belong to the maintainer's
 machine: label indexes (`*.sqlite`), view caches and `view-indexes/`, `kernels/`, `scratch/`, telemetry, the files
-viewed, sessions, permissions, undo and hidden files. The orientation's own Claude Code transcript is not included, so
+viewed, sessions, permissions, undo, the critic's digest of the transcript (`critique/`), the writers' and view builds' own folders, and hidden files. Chats' metas lose the ids of processes that ran them. The orientation's own Claude Code transcript is not included, so
 a follow-up to the pre-cached orientation asks for a new one.

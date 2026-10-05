@@ -146,7 +146,7 @@ def make_workspace(root: Path, corpus: Path, home: Path) -> Path:
         "labels/l1.sqlite": "derived",
         "chats/o1.jsonl": json.dumps({"tool_use": {"input": {"path": f"{corpus}/a.jsonl"}}}) + "\n",
         "chats/o1.meta.json": json.dumps({"id": "o1", "kind": "agent", "role": "orient", "model": "claude-opus-5-5",
-                                         "effort": "ultracode"}),
+                                         "effort": "ultracode", "status": "running", "pid": 7, "server": 8}),
         "calls/o1.jsonl": "{}\n",
         "chats/main.jsonl": "".join(json.dumps(r) + "\n" for r in (
             {"type": "user", "text": "/exit", "by": "terminal"}, {"type": "user", "text": "hello", "by": "browser"},
@@ -194,6 +194,8 @@ def test_export_keeps_state_leaves_out_what_is_rebuilt_and_writes_placeholders(t
     assert "@@THIMBLE_CORPUS@@/a.jsonl" in text and "@@THIMBLE_HOME@@/.claude/x" in text
     assert "api_token" not in text and '"pid"' not in text and "/exit" not in text
     assert m["typed_in_main"] == ["hello"] and '"start"' in text
+    meta = json.loads(zipfile.ZipFile(out).read("workspace/chats/o1.meta.json"))
+    assert meta["status"] == "done" and "pid" not in meta and "server" not in meta and m["marked_done"] == ["o1"]
     assert m["counts"] == {"cards": 2, "labels": 1, "views": 1, "documents": 1, "chats": 1}
     assert m["orientation"]["model"] == "claude-opus-5-5" and m["orientation"]["ultracode"] is True
     assert m["corpus"] == [{"path": "a.jsonl", "bytes": 9, "sha256": sha(b'{"x": 1}\n')}]
@@ -318,6 +320,7 @@ def test_demo_downloads_builds_and_installs_the_precache(tmp_path, fake_world):
     assert not (Path(w["env"]["workspaces_dir"]) / "two").exists()
     text = said(w)
     assert "installed as workspace one: 2 cards, 1 labels, 1 views" in text
+    assert "pre-cached orientation" in text and "(claude-opus-5-5, Ultracode)" in text
     assert "no two.thimble-demo.zip" in text and f"2. cd {w['root'] / 'two'} && thimble" in text
     assert "## one: one" in (w["root"] / "SOURCES.md").read_text()
     # a second run downloads nothing and leaves the analysis in place

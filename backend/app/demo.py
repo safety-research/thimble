@@ -65,7 +65,8 @@ REBUILT = {"scratch": "the kernels' mirror of the corpus, rebuilt", "kernels": "
            "viewed.jsonl": "the files the maintainer opened", "sessions.json": "the maintainer's Claude Code sessions",
            "bg-sessions.json": "the maintainer's background sessions", "permissions.jsonl": "permission answers",
            "undo.jsonl": "the undo history", "render-theme.json": "the browser's theme", "unheard.json": "per session",
-           "views-work": "the view builds' own scratch", "critique": "the critic's digest of the transcript"}
+           "views-work": "the view builds' own scratch", "critique": "the critic's digest of the transcript",
+           "writers": "the writers' own scratch"}
 SKIP_PARTS = {"__pycache__", "cache", "trash", "tmp"}
 SKIP_SUFFIXES = (".sqlite", ".sqlite-wal", ".sqlite-shm", ".lock", ".log", ".tmp", ".pyc", ".png")
 DOT_OK = {"views", "extension"}  # where dot files are thimble's own records (views/.versions, .reviewed)
@@ -205,6 +206,27 @@ def _run_record(data: bytes) -> bytes:
     return json.dumps(run, ensure_ascii=False, indent=2).encode()
 
 
+LIVE = ("running", "working", "starting", "queued", "pending")  # a chat's statuses while its session runs
+
+
+def chat_meta(data: bytes) -> tuple[bytes, bool]:
+    """A chat's meta with what belonged to a running process taken out (pid, server), and a status that says it runs
+    written `done`, since nothing runs in an installed pre-cache (a `stopped` card offers a Resume that has no session
+    to resume); and whether it said so. The export names these chats, as one may not have finished."""
+    try:
+        meta = json.loads(data)
+    except ValueError:
+        return data, False
+    if not isinstance(meta, dict):
+        return data, False
+    for k in ("pid", "server"):
+        meta.pop(k, None)
+    live = meta.get("status") in LIVE
+    if live:
+        meta["status"] = "done"
+    return json.dumps(meta, ensure_ascii=False, indent=1).encode(), live
+
+
 def main_chat(data: bytes) -> tuple[bytes, list[str]]:
     """Main's chat without the slash commands the maintainer typed (/exit, /thimble), and the other messages they
     typed, which the export prints for a look before the pre-cache ships."""
@@ -300,6 +322,7 @@ def export(ws: Path, corpus: Path, out: Path, *, name: str, home: Path | None = 
     left: list[dict[str, Any]] = []
     flagged: list[str] = []
     typed: list[str] = []
+    stopped: list[str] = []
     with tempfile.TemporaryDirectory(prefix="thimble-demo-export-") as tmp:
         stage = Path(tmp) / "workspace"
         for p in sorted(ws.rglob("*")):
@@ -318,6 +341,10 @@ def export(ws: Path, corpus: Path, out: Path, *, name: str, home: Path | None = 
                 data = _run_record(data)
             elif rel.as_posix() == "chats/main.jsonl":
                 data, typed = main_chat(data)
+            elif rel.parts[0] == "chats" and rel.name.endswith(".meta.json"):
+                data, live = chat_meta(data)
+                if live:
+                    stopped.append(rel.name[: -len(".meta.json")])
             if is_text(rel, data) and _decodes(data):
                 text = with_placeholders(data.decode("utf-8"), pairs)
                 if scrub_user and user_re is not None:
@@ -351,6 +378,7 @@ def export(ws: Path, corpus: Path, out: Path, *, name: str, home: Path | None = 
             "gitleaks": "not installed" if leaks is None else f"{len(leaks)} findings",
             "user_name_scrubbed": scrubbed,
             "typed_in_main": typed,
+            "marked_done": stopped,
             "flagged": flagged,
         }
         out.parent.mkdir(parents=True, exist_ok=True)
@@ -470,6 +498,23 @@ def catalog(path: Path | None = None) -> dict[str, dict[str, Any]]:
     data = _read_json(path or CATALOG)
     entries = data.get("precaches") if isinstance(data, dict) else None
     return {k: v for k, v in (entries or {}).items() if isinstance(v, dict) and v.get("url") and v.get("sha256")}
+
+
+def local_catalog(folder: Path) -> dict[str, dict[str, Any]]:
+    """What --precaches DIR holds, by dataset, as catalog() describes the published ones (for the listing)."""
+    out = {}
+    for name in DATASETS:
+        p = folder / f"{name}{SUFFIX}"
+        if p.is_file():
+            try:
+                with zipfile.ZipFile(p) as zf:
+                    o = read_manifest(zf).get("orientation") or {}
+            except (DemoError, zipfile.BadZipFile, OSError):
+                o = {}
+            made = ", ".join(x for x in (str(o.get("model") or "").replace("[1m]", ""),
+                                         "Ultracode" if o.get("ultracode") else "") if x)
+            out[name] = {"url": p.as_uri(), "sha256": "", "bytes": p.stat().st_size, "made_with": made}
+    return out
 
 
 class Downloads:
@@ -681,7 +726,7 @@ def run(args: argparse.Namespace, *, get: Callable[[str], bytes] = demo_data.htt
     selected = [DATASETS[n] for n in names]
     root = given(args.dir) if args.dir else DEFAULT_DIR.expanduser().resolve()
     local = given(args.precaches) if args.precaches else None
-    cat = catalog()
+    cat = catalog() if local is None else local_catalog(local)
     for line in listing(selected, cat, root):
         say(line)
     if args.list:
@@ -785,6 +830,9 @@ def run_export(args: argparse.Namespace, say: Callable[[str], None]) -> int:
         f"gitleaks: {m['gitleaks']}")
     if m["flagged"]:
         say(f"  {len(m['flagged'])} findings kept with --allow-private; they are listed in the manifest")
+    if m["marked_done"]:
+        say(f"  {len(m['marked_done'])} chats said they were running and are written done: "
+            + ", ".join(m["marked_done"]) + "; export again once they end if they still run")
     if m["typed_in_main"]:
         say(f"  main's chat keeps {len(m['typed_in_main'])} messages you typed: "
             + "; ".join(repr(t) for t in m["typed_in_main"][:5]))
