@@ -92,6 +92,12 @@ def file_sha256(p: Path) -> str:
     return h.hexdigest()
 
 
+def given(path: str) -> Path:
+    """A path the analyst typed, relative to the folder they ran `thimble` in (plugin/bin/thimble runs the CLI in
+    backend/ and names their folder in THIMBLE_CALLER_CWD)."""
+    return (Path(os.environ.get("THIMBLE_CALLER_CWD") or os.getcwd()) / Path(path).expanduser()).resolve()
+
+
 def human(n: float) -> str:
     for unit in ("B", "KB", "MB", "GB"):
         if n < 1000 or unit == "GB":
@@ -524,7 +530,8 @@ def listing(selected: list[Dataset], cat: dict[str, dict[str, Any]], root: Path,
     for i, d in enumerate(selected, 1):
         pc = cat.get(d.name)
         size = (f"Download {human(d.download_bytes)}, {human(d.disk_bytes)} on disk; "
-                + (f"pre-cached orientation {human(pc.get('bytes') or 0)}." if pc else
+                + (f"pre-cached orientation {human(pc.get('bytes') or 0)}"
+                   + (f" ({pc['made_with']})." if pc.get("made_with") else ".") if pc else
                    "no pre-cached orientation published yet."))
         out += [f"  {i}. {d.name}: {d.title}", *wrap(d.about), *wrap(f"Source: {d.source}"), *wrap(size), ""]
     out += wrap(f"Each goes into {root}/<name>. Nothing is downloaded without a yes.", "")
@@ -664,8 +671,8 @@ def run(args: argparse.Namespace, *, get: Callable[[str], bytes] = demo_data.htt
         say(f"thimble demo: no dataset {', '.join(unknown)}; the datasets are {', '.join(DATASETS)}")
         return 2
     selected = [DATASETS[n] for n in names]
-    root = Path(args.dir or DEFAULT_DIR).expanduser().resolve()
-    local = Path(args.precaches).expanduser().resolve() if args.precaches else None
+    root = given(args.dir) if args.dir else DEFAULT_DIR.expanduser().resolve()
+    local = given(args.precaches) if args.precaches else None
     cat = catalog()
     for line in listing(selected, cat, root):
         say(line)
@@ -709,14 +716,27 @@ def run(args: argparse.Namespace, *, get: Callable[[str], bytes] = demo_data.htt
             name = None
         opened.append((folder, name))
     say("")
-    for folder, _ in opened:
-        say(f"  cd {folder} && thimble")
-    first = opened[0][0]
+    for i, (folder, _) in enumerate(opened, 1):
+        say(f"  {i}. cd {folder} && thimble" if len(opened) > 1 else f"  cd {folder} && thimble")
     if args.no_start or not sys.stdin.isatty() or not sys.stdout.isatty():
         return 0
-    if _ask(f"Start thimble in {first} now? [Y/n] ", False, default=True):
-        start(first)
+    pick = pick_folder([f for f, _ in opened])
+    if pick is not None:
+        start(pick)
     return 0
+
+
+def pick_folder(folders: list[Path]) -> Path | None:
+    """The folder the analyst chose to start thimble in, the first on Enter; None for a no."""
+    if len(folders) == 1:
+        return folders[0] if _ask(f"Start thimble in {folders[0]} now? [Y/n] ", False, default=True) else None
+    try:
+        answer = input(f"Start thimble in which? [1-{len(folders)}, Enter for 1, n for none] ").strip().lower()
+    except EOFError:
+        return None
+    if not answer:
+        return folders[0]
+    return folders[int(answer) - 1] if answer.isdigit() and 1 <= int(answer) <= len(folders) else None
 
 
 def run_export(args: argparse.Namespace, say: Callable[[str], None]) -> int:
@@ -726,7 +746,7 @@ def run_export(args: argparse.Namespace, say: Callable[[str], None]) -> int:
     env = cli.resolve_env()
     ws = Path(env["workspaces_dir"]) / workspace
     if not ws.is_dir():
-        ws = Path(workspace).expanduser().resolve()
+        ws = given(workspace)
     run_rec = _read_json(ws / "orient" / "run.json")
     if not isinstance(run_rec, dict):
         say(f"thimble demo --export: {workspace} is no workspace with an orientation")
@@ -737,11 +757,11 @@ def run_export(args: argparse.Namespace, say: Callable[[str], None]) -> int:
         return 1
     name = args.dataset or ws.name
     rec = config.read_sidecar(ws.name, Path(env["data_dir"]))
-    corpus = Path(args.corpus).expanduser().resolve() if args.corpus else Path(rec["path"]) if rec else None
+    corpus = given(args.corpus) if args.corpus else Path(rec["path"]) if rec else None
     if corpus is None or not corpus.is_dir():
         say(f"thimble demo --export: the corpus folder of {ws.name} is unknown; pass --corpus")
         return 1
-    out_path = Path(out).expanduser().resolve()
+    out_path = given(out)
     if out_path.is_dir() or not out_path.name.endswith(".zip"):
         out_path = out_path / f"{name}{SUFFIX}"
     try:
@@ -765,8 +785,11 @@ def run_export(args: argparse.Namespace, say: Callable[[str], None]) -> int:
         if mism:
             say(f"  warning: the corpus differs from what `thimble demo` downloads: {', '.join(mism)}")
     say("  its entry for demos/precaches.json, once the zip is a release asset:")
+    o = m["orientation"]
+    made = ", ".join(x for x in (str(o.get("model") or "").replace("[1m]", ""), "Ultracode" if o.get("ultracode") else
+                                 str(o.get("effort") or ""), "no prompt" if not o.get("query") else "") if x)
     say("  " + json.dumps({name: {"url": f"https://github.com/{cli.release_repo()}/releases/download/<tag>/"
-                                         f"{out_path.name}", "sha256": digest, "bytes": size}}))
+                                         f"{out_path.name}", "sha256": digest, "bytes": size, "made_with": made}}))
     return 0
 
 

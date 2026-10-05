@@ -318,7 +318,7 @@ def test_demo_downloads_builds_and_installs_the_precache(tmp_path, fake_world):
     assert not (Path(w["env"]["workspaces_dir"]) / "two").exists()
     text = said(w)
     assert "installed as workspace one: 2 cards, 1 labels, 1 views" in text
-    assert "no two.thimble-demo.zip" in text and f"cd {w['root'] / 'two'} && thimble" in text
+    assert "no two.thimble-demo.zip" in text and f"2. cd {w['root'] / 'two'} && thimble" in text
     assert "## one: one" in (w["root"] / "SOURCES.md").read_text()
     # a second run downloads nothing and leaves the analysis in place
     w["got"].clear()
@@ -421,3 +421,13 @@ def test_a_published_precache_is_downloaded_checked_and_installed(tmp_path, fake
     assert run(w, args(names=["one"], dir=str(w["root"]))) == 0
     assert url in w["got"] and (Path(w["env"]["workspaces_dir"]) / "one" / "notebooks" / "g1.json").is_file()
     assert "pre-cached orientation" in said(w) and "installed as workspace one" in said(w)
+
+
+def test_the_analyst_picks_the_folder_thimble_starts_in(tmp_path, monkeypatch):
+    folders = [tmp_path / "a", tmp_path / "b"]
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    for typed, want in (("", folders[0]), ("2", folders[1]), ("n", None), ("9", None)):
+        monkeypatch.setattr("builtins.input", lambda q, typed=typed: typed)
+        assert demo.pick_folder(folders) == want
+    monkeypatch.setattr("builtins.input", lambda q: "")
+    assert demo.pick_folder(folders[:1]) == folders[0]
