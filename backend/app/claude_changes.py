@@ -26,14 +26,15 @@ from typing import Any
 
 TRUST_FILE = "trust.json"  # in thimble's home: {folder, config, answer: yes | no, added}
 TRUST_KEY = "hasTrustDialogAccepted"
-QUESTION = ("Trust thimble's folder {folder} by adding it to {config}?\n"
-            "It holds thimble's workspaces, where its agents run, and the code the dev agent changes. The orientation, "
-            "its critic, the writers and code tickets need this: they run as Claude Code background agents, which show "
-            "in your terminal's agent tray, and Claude Code starts those only in a folder it trusts. With a no, they "
-            "can't start until the folder is trusted. `thimble uninstall` takes the entry back.")
+# the question's first line is the question itself; the rest says why it is asked and what each answer does
+QUESTION = ("Trust thimble's folder {folder} in Claude Code?\n"
+            "thimble's background agents (the orientation, its critic, the writers, and the builders of views and code "
+            "changes) run as Claude Code background sessions in this folder, and Claude Code starts those only in a "
+            "folder you trust. A yes adds this one folder to {config}; `thimble uninstall` takes it out again. With a no, "
+            "those agents won't start until the folder is trusted.")
 CHANGE = "install.sh --trust-workspaces or --no-trust-workspaces changes it"
-UNTRUSTED = ("the orientation, its critic, the writers and code tickets can't start until it is; "
-             "`bash {install} --trust-workspaces` trusts it")
+UNTRUSTED = "the orientation, its critic, the writers and view builds won't start until it is"
+NOT_TRUSTED = 3  # the exit code of `claude_changes.py trust` when the folder is not trusted after it (install.sh warns)
 # the records of the keys older versions wrote: file in thimble's home -> the key in a folder's settings.local.json
 # (None: statusLine, recorded as {ours, previous})
 OLD_RECORDS = {"effort-overrides.json": "CLAUDE_CODE_EFFORT_LEVEL", "fast-overrides.json": "CLAUDE_CODE_DISABLE_FAST_MODE",
@@ -212,46 +213,45 @@ def skipped(tree: Path) -> str:
     on = trusted(folder, data)
     answer = _answer(rec, folder, config, data)
     if answer == "no" and not on:
-        return f"answered no at your earlier install, so {folder} is not trusted; --trust-workspaces changes it"
+        return (f"{folder} is not trusted in Claude Code (your earlier answer), so thimble's background agents won't "
+                "start; --trust-workspaces changes it")
     if answer == "no":
-        return f"answered no at your earlier install, but {config} trusts {folder} by an entry thimble did not add"
+        return f"Claude Code trusts {folder} by an entry thimble did not add (you answered no at an earlier install)"
     if answer == "yes" and not on:
-        return (f"answered yes at your earlier install, but {config} no longer trusts {folder}; --trust-workspaces "
-                "trusts it again")
+        return (f"Claude Code no longer trusts {folder}, though you answered yes at an earlier install; "
+                "--trust-workspaces trusts it again")
     if answer == "yes" and rec.get("added"):
-        return f"already trusted from your earlier install ({folder}); --no-trust-workspaces changes it"
+        return f"Claude Code trusts {folder} (your earlier answer; --no-trust-workspaces takes it back)"
     if on:
-        return f"already trusted in {config} ({folder}), by an entry thimble did not add"
+        return f"Claude Code trusts {folder} already, by an entry thimble did not add"
     return ""
 
 
-def install_trust(tree: Path, answer: str | None = None) -> str:
+def install_trust(tree: Path, answer: str | None = None) -> tuple[str, bool]:
     """install.sh's trust step for the install at `tree` (module note): `answer` is yes or no from its flags or its
-    question, else the recorded one, else asked on a terminal. The line to print."""
+    question, else the recorded one, else asked on a terminal. The line to print, and whether the folder is trusted
+    after it; an error writing Claude Code's config raises OSError or ValueError."""
     folder, config = trust_folder(tree), global_config()
     rec = _read(home() / TRUST_FILE)
     same = rec.get("folder") == str(folder) and rec.get("config") == str(config)
-    untrusted = UNTRUSTED.format(install=tree / "scripts" / "install.sh")
+    untrusted = UNTRUSTED
     recorded = _answer(rec, folder, config, _read(config))
     if answer is None and recorded:
         if recorded == "no" and not trusted(folder, _read(config)):
-            return f"answered no at an earlier install, so {folder} is not trusted, and {untrusted}"
-        return f"answered {recorded} at an earlier install; {CHANGE}"
+            return f"{folder} is not trusted in Claude Code (your earlier answer), so {untrusted}", False
+        return f"Claude Code trusts {folder} (your earlier answer; {CHANGE})", True
     added = bool(rec.get("added") and rec.get("folder") and rec.get("config"))
     if added and (answer == "no" or not same):  # the entry an earlier yes added: refused now, or for another folder
-        try:
-            _set_trust(Path(rec["folder"]), Path(rec["config"]), False)
-        except (OSError, ValueError) as e:
-            return f"could not write {rec['config']} ({e}); nothing recorded"
+        _set_trust(Path(rec["folder"]), Path(rec["config"]), False)
         added = False
     record = {"folder": str(folder), "config": str(config), "answer": answer or "yes", "added": added}
     data = _read(config)
     if trusted(folder, data) and (answer != "yes" or own_trust(folder, data)):  # a yes writes the folder's own entry
         _write(home() / TRUST_FILE, record)
-        return f"{folder} is trusted in {config}{' by an entry thimble did not add' if answer == 'no' else ''}"
+        return f"Claude Code trusts {folder}{' by an entry thimble did not add' if answer == 'no' else ''}", True
     if answer is None:
         if not sys.stdin.isatty():
-            return f"not asked (no terminal), so {folder} is not trusted, and {untrusted}"
+            return f"{folder} is not trusted in Claude Code (not asked: no terminal), so {untrusted}", False
         try:
             reply = input(QUESTION.format(folder=folder, config=config) + " [y/N] ")
             answer = "yes" if reply.strip().lower() in ("y", "yes") else "no"
@@ -259,14 +259,11 @@ def install_trust(tree: Path, answer: str | None = None) -> str:
             answer = "no"
     if answer == "yes":
         folder.mkdir(parents=True, exist_ok=True)
-        try:
-            _set_trust(folder, config, True)
-        except (OSError, ValueError) as e:
-            return f"could not write {config} ({e}); nothing recorded"
+        _set_trust(folder, config, True)
     _write(home() / TRUST_FILE, {**record, "answer": answer, "added": answer == "yes"})
     if answer == "yes":
-        return f"marked {folder} trusted in {config}"
-    return f"not trusted, so {untrusted}"
+        return f"Claude Code trusts {folder} now ({config})", True
+    return f"{folder} is not trusted in Claude Code, as you chose, so {untrusted}", False
 
 
 def untrust() -> list[str]:
@@ -335,7 +332,13 @@ def cleanup() -> list[str]:
 if __name__ == "__main__":
     args = sys.argv[1:]
     if args[:1] == ["trust"] and len(args) in (2, 3):
-        print(install_trust(Path(args[1]), {"--yes": "yes", "--no": "no"}.get(args[2]) if len(args) == 3 else None))
+        try:
+            line, on = install_trust(Path(args[1]), {"--yes": "yes", "--no": "no"}.get(args[2]) if len(args) == 3 else None)
+        except (OSError, ValueError) as e:
+            print(f"could not write Claude Code's config ({e}); nothing recorded")
+            sys.exit(1)
+        print(line)
+        sys.exit(0 if on else NOT_TRUSTED)
     elif args[:1] == ["question"] and len(args) == 2:
         print(question(Path(args[1])))
     elif args[:1] == ["skipped"] and len(args) == 2:

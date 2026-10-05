@@ -23,7 +23,8 @@
 #   .claude-plugin/       marketplace.json listing ./plugin and ./mods/thimble-cc-mod, its name set to
 #                         --marketplace-name (default thimble-local, so a zip install and the repo-as-marketplace
 #                         "thimble" can coexist on one machine); every plugin it lists must have its folder in the zip
-#   scripts/install.sh scripts/update.sh scripts/rebuild_ui.sh   what an install runs; scripts/dev/ never ships
+#   scripts/install.sh scripts/plugin.sh scripts/update.sh scripts/rebuild_ui.sh   what an install runs (plugin.sh is
+#                         `thimble plugin on|off`); scripts/dev/ never ships
 #   scripts/view_shot.mjs the headless page of a view's checks (backend/app/views.py runs it)
 #   scripts/ui_shot.mjs   the page screenshots of main's `screenshot` tool and of the dev agent (dev.py runs it)
 #   README.md LICENSE INSTALL.md docs/config.md docs/assets/thimble-banner.svg   the readme, the Apache-2.0 license,
@@ -83,7 +84,7 @@ version="$(python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1]))["v
 sha="$(git -C "$repo" rev-parse --short HEAD)"
 full_sha="$(git -C "$repo" rev-parse HEAD)"
 allow=(plugin mods/thimble-cc-mod extensions backend prompts .claude-plugin README.md INSTALL.md docs/config.md docs/assets/thimble-banner.svg LICENSE
-       scripts/install.sh scripts/update.sh scripts/rebuild_ui.sh scripts/view_shot.mjs scripts/ui_shot.mjs
+       scripts/install.sh scripts/plugin.sh scripts/update.sh scripts/rebuild_ui.sh scripts/view_shot.mjs scripts/ui_shot.mjs
        frontend/src frontend/public frontend/index.html frontend/package.json
        frontend/package-lock.json frontend/vite.config.ts frontend/tsconfig.json frontend/tsconfig.app.json frontend/tsconfig.node.json)
 dirty=false

@@ -40,7 +40,7 @@ For a development build, clone the repo and run `bash scripts/install.sh`.
 
 ### From a running Claude Code session
 
-Type `/thimble` to start the thimble server and print the dashboard URL. If `/thimble` is not recognised, run `/reload-plugins`.
+In a session started with `thimble`, type `/thimble` to start the thimble server and print the dashboard URL. If a session you started with plain `claude` doesn't recognise `/thimble`, quit it and run `thimble` in that folder.
 
 > **Please note:** thimble connects the browser to your Claude Code session through the plugin's [hooks](https://code.claude.com/docs/en/hooks). If your settings or your organization turn the plugin's hooks off, thimble connects through a Monitor instead: permission prompts appear only in the terminal, you say `/thimble` again after `/clear`, and `/thimble` prints a warning that says so.
 

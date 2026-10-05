@@ -2791,7 +2791,8 @@ def update_script() -> Path:
     return config.REPO_ROOT / "scripts" / "update.sh"
 
 
-# install.sh's answers to its questions, and --require-pinned, which `thimble update` passes on to it through update.sh
+# install.sh's answers to its questions, --plugin and --no-plugin, and --require-pinned, which `thimble update` passes on
+# to it through update.sh
 INSTALL_FLAGS = ("--sandbox-deps", "--no-sandbox-deps", "--plugin", "--no-plugin", "--trust-workspaces",
                  "--no-trust-workspaces", "--require-pinned")
 
@@ -2967,8 +2968,8 @@ def cmd_extension(args: argparse.Namespace) -> int:
 
 # `thimble cc-mod on|off|status`: thimble-cc-mod (config.MOD_PLUGIN) on or off in the current folder, only through
 # `claude plugin` at project scope, which writes the folder's .claude/settings.json. It never changes the thimble plugin:
-# the two are switched independently. When Claude Code does not know thimble's marketplace (install.sh registers it only
-# on a yes to its plugin question), `on` registers it from this install's folder first, on the same yes; `thimble
+# the two are switched independently. When Claude Code does not know thimble's marketplace (only `thimble plugin on` or
+# install.sh --plugin registers it), `on` registers it from this install's folder first, on the same yes; `thimble
 # uninstall` takes it back. A cc-mod.json in thimble's home, left by a test build that did, is not read.
 MOD_TIMEOUT_S = 120.0
 MOD_LOCAL_SCOPES = ("project", "local")

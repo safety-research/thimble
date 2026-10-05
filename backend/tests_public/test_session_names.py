@@ -13,6 +13,7 @@ import pytest
 from app import bg_session, cli, config, dev, tools
 
 CORPUS = "mini"
+INSTALLED_COPY = cli.installed_copy  # before conftest's autouse fixture stands it in
 
 
 def test_names_carry_the_workspace():
@@ -237,6 +238,50 @@ def test_the_launcher_passes_mains_name_and_lets_the_analysts_win(tmp_path):
     for own in (["-n", "mine"], ["--name", "mine"], ["--name=mine"]):
         argv = run(*own)
         assert "thimble:main · logs" not in argv and own[-1] in argv
+
+
+def test_without_the_plugin_registered_the_launcher_loads_its_own_plugin_folder(tmp_path, monkeypatch):
+    """thimble is not added to every Claude Code session unless asked (install.sh --plugin, `thimble plugin on`), so the
+    launcher must load the plugin itself: when Claude Code lists no thimble copy of this install (installed_copy is
+    None), launch-args names this tree's plugin folder and the launcher passes it with --plugin-dir; when launch-args
+    names none (an installed copy, which Claude Code loads already), the launcher adds no --plugin-dir."""
+    path = tmp_path / "path"
+    path.mkdir()
+    (path / "claude").write_text('#!/bin/sh\ncase "$*" in *"plugin list"*|*"marketplace list"*) echo "[]";; esac\n')
+    (path / "claude").chmod(0o755)
+    monkeypatch.setenv("PATH", f"{path}:/usr/bin:/bin")
+    assert INSTALLED_COPY(tmp_path) is None
+    (path / "claude").write_text('#!/bin/sh\ncase "$*" in *"plugin list"*) echo \'[{"id": "thimble@elsewhere", '
+                                 '"enabled": true}]\';; *"marketplace list"*) echo "[]";; esac\n')
+    assert INSTALLED_COPY(tmp_path) is None, "another marketplace's thimble is not this install's"
+    name = config.marketplace_name()
+    listed = json.dumps([{"id": f"thimble@{name}", "enabled": True}])
+    markets = json.dumps([{"name": name, "source": "directory", "path": str(config.REPO_ROOT)}])
+    (path / "claude").write_text(f"#!/bin/sh\ncase \"$*\" in *\"marketplace list\"*) echo '{markets}';; "
+                                 f"*\"plugin list\"*) echo '{listed}';; esac\n")
+    assert INSTALLED_COPY(tmp_path) == cli.Installed(cli.PLUGIN_DIR.resolve(), name), "the control: registered here"
+    data = tmp_path / "data"
+    data.mkdir()
+    monkeypatch.setenv("THIMBLE_DATA_DIR", str(data))
+    logs = tmp_path / "work" / "logs"
+    logs.mkdir(parents=True)
+    assert cli.launch_args(logs).split("\n")[0] == str(cli.plugin_root()), "installed_copy None: load plugin/"
+
+    work = tmp_path / "w"
+    work.mkdir()
+    launcher, cpath = _launcher(work, [str(work / "plugin"), "mcp__x", "", "{}", "", "thimble:main · w", "the prompt"])
+    argv_out = tmp_path / "argv.txt"
+    subprocess_env = {"PATH": f"{cpath}:/usr/bin:/bin", "HOME": str(tmp_path), "ARGV_OUT": str(argv_out)}
+    import subprocess  # noqa: PLC0415
+
+    subprocess.run(["bash", str(launcher)], check=True, capture_output=True, cwd=work, env=subprocess_env)
+    argv = argv_out.read_text().splitlines()
+    assert argv[argv.index("--plugin-dir") + 1] == str(work / "plugin")
+    assert "--dangerously-load-development-channels" not in argv
+    (work / "launch-args.txt").write_text("\n".join(["", "mcp__x", "", "{}", "", "thimble:main · w", "the prompt"]))
+    subprocess.run(["bash", str(launcher)], check=True, capture_output=True, cwd=work, env=subprocess_env)
+    argv = argv_out.read_text().splitlines()
+    assert "--plugin-dir" not in argv and argv[-1] == "/thimble"
 
 
 def test_by_name_takes_the_role_before_any_separator(followed):

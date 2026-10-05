@@ -2,7 +2,8 @@
 
 > **Installing thimble for someone, as an agent?** Follow the Installing section of [CLAUDE.md](CLAUDE.md), which
 > Claude Code loads only in a session started inside the clone: run `bash scripts/install.sh --dry-run`, ask the
-> person each question it lists, and pass the flag for each of their answers. Answer none of them yourself.
+> person each question it lists (often there are none), and pass the flag for each of their answers. Answer none of
+> them yourself.
 
 thimble uses whichever auth path you have configured for `claude`: every model call runs through your own `claude`, in
 your config dir with your user settings (thimble's sessions run in folders of their own, so auth set only in a
@@ -38,32 +39,42 @@ cd thimble
 bash scripts/install.sh
 ```
 
-Either install links the `thimble` command into `~/.local/bin` (and prints the line to add to your shell startup file
+Either install links the `thimble` command into `~/.local/bin` (and says which line to add to your shell startup file
 when that folder is not on your PATH) and runs `thimble doctor`. A `thimble` command or Claude Code plugin that another
-thimble install set up stays as it is unless you agree, on a terminal, to switch it. Before it installs anything, it
-shows what it installs and where, then asks its questions:
+thimble install set up stays as it is unless you agree, on a terminal, to switch it.
 
-- **A browser for screenshots.** thimble takes screenshots of the cards and views it draws, to check and improve them.
-  For the best experience, download Playwright's headless Chromium (about 210 MB, 650 MB on disk). With a no, thimble
-  uses the Chrome or Edge on your machine, which install.sh test-launches, since a policy can block automation. With
-  neither, thimble can't check and improve its cards and views. `--browser bundled`, `--browser system` or
+install.sh opens with one screen: what it found (Claude Code, Python or uv, Node, a browser, Claude Code's sandbox),
+what it installs where and about how big, what it changes in your Claude Code setup, and how many questions remain.
+Then it asks those, and prints a line per step: ✓ when the step is done, ! when it needs you. It ends with what is left
+for you to do, if anything. Every command it runs, with its output, goes to `~/.thimble/install.log`.
+
+It asks a question only when this machine leaves it open, so often it asks none:
+
+- **A browser for screenshots**, only when it finds no Chrome or Edge that starts under automation. thimble takes
+  screenshots of the cards and views it draws, to check how they look. install.sh test-launches a Chrome or Edge it
+  finds where Playwright looks (a policy can block automation), and uses one that starts, downloading nothing.
+  Otherwise it offers Playwright's headless Chromium (about 210 MB to download, 650 MB on disk); with a no, thimble
+  works without screenshots, or tries the Chrome it found anyway. `--browser bundled`, `--browser system` or
   `--browser off` answers it.
-- **The sandbox's system packages** (Linux, when they are missing). thimble's agents run their Bash only in Claude
-  Code's sandbox, which needs bubblewrap and socat, and on Ubuntu 23.10 or later an AppArmor profile for bwrap. A yes
-  installs them with sudo and your package manager (apt, dnf or pacman). With a no, thimble's agents won't run until
-  the sandbox works; run install.sh again to set it up. `--sandbox-deps` or `--no-sandbox-deps` answers it. macOS has
-  the sandbox built in.
-- **thimble in every Claude Code session.** A yes adds thimble to `~/.claude/settings.json` and `~/.claude/plugins`.
-  The `thimble` command and [thimble-cc-mod](#thimble-cc-mod) work either way. `--plugin` or `--no-plugin` answers it.
-- **Trust of thimble's workspaces folder**, where thimble keeps each workspace and runs its agents. A yes adds it to
-  `~/.claude.json`. The orientation, its critic, the writers and view builds need it: they run as Claude Code
-  background agents, which Claude Code starts only in a trusted folder. `--trust-workspaces` or `--no-trust-workspaces` answers it.
+- **The sandbox's system packages** (Linux, while Claude Code's sandbox can't run). thimble's agents run their shell
+  commands in Claude Code's sandbox, so they can read only the folder you open with thimble and write only their
+  workspace. On Linux the sandbox needs bubblewrap and socat, and on Ubuntu 23.10 or later an AppArmor profile for
+  bwrap. A yes installs them with sudo and your package manager (apt, dnf or pacman); the question shows the exact
+  commands. With a no, thimble's agents won't start until the sandbox works; run install.sh again to set it up.
+  `--sandbox-deps` or `--no-sandbox-deps` answers it. macOS has the sandbox built in.
+- **Trust of thimble's folder**, while Claude Code doesn't trust it. The orientation, its critic, the writers and view
+  builds run as Claude Code background sessions in thimble's workspaces folder, which Claude Code starts only in a
+  folder you trust. A yes adds that one folder to `~/.claude.json`. `--trust-workspaces` or `--no-trust-workspaces`
+  answers it.
 
-Without a terminal, install.sh runs only when every question it would ask has its flag, and otherwise lists the
-missing ones; a system Chrome or Edge it finds is used without asking. The browser, plugin and trust answers are kept,
-so an update doesn't ask them again, and `thimble update` passes the same flags on. To change an answer, run
-install.sh again with its flag; it skips the steps that are done. `install.sh --dry-run` prints the questions and
-every step, and changes nothing.
+install.sh doesn't add thimble to every Claude Code session, and doesn't ask about it: the `thimble` command loads
+thimble's plugin into the sessions it starts. If an earlier install added thimble to every session, that stays;
+`thimble plugin off` or `install.sh --no-plugin` takes it out.
+
+Without a terminal, install.sh runs only when every question that remains has its flag, and otherwise lists the missing
+ones. The answers are kept, so an update doesn't ask them again, and `thimble update` passes the same flags on. To change
+an answer, run install.sh again with its flag; it skips the steps that are done. `install.sh --dry-run` prints the
+opening screen and the questions that remain, and changes nothing; `--verbose` also prints every command.
 
 ## Package mirrors and your own Python
 
@@ -122,7 +133,7 @@ thimble-cc-mod is a single-agent thimble inside Claude Code, an exploration that
 of its marketplace. Claude answers with cards drawn in the chat and citations you can check, with no server, browser or
 background agents. Switch it on in a folder with `thimble cc-mod on`, which asks first, then writes the folder's
 `.claude/settings.json` through `claude plugin`; then run `claude` there. When Claude Code does not know thimble's
-marketplace yet (install.sh registers it only on a yes to the plugin question), `on` lists its registration from the
+marketplace yet (a default install doesn't register it), `on` lists its registration from the
 install's folder among the steps it asks about and runs it first. That adds no plugin to your sessions, and `thimble
 uninstall` takes it back. `thimble cc-mod off` undoes it, and `thimble
 cc-mod status` says whether each of the two plugins is on in the folder. They are switched independently: `on` and `off`
@@ -140,9 +151,10 @@ until `thimble server restart`.
 
 ## Uninstall
 
-`thimble uninstall` asks, then removes the plugin registration and the trust entry the install added (or the
-marketplace `thimble cc-mod on` registered, which turns thimble-cc-mod off in the folders it is on in),
-`~/.local/bin/thimble`, and `~/.thimble`, which holds a Global install's workspaces. `--keep-home` keeps `~/.thimble`.
+`thimble uninstall` asks, then removes the trust entry the install added, the plugin registration that put thimble in
+every Claude Code session, if there is one (or the marketplace `thimble cc-mod on` registered, which turns thimble-cc-mod off in the folders
+it is on in), `~/.local/bin/thimble`, and `~/.thimble`, which holds a Global install's workspaces. `--keep-home` keeps
+`~/.thimble`.
 A clone stays where it is, and so does a downloaded headless Chromium, in Playwright's cache folder.
 
 To delete one workspace and keep the install, `thimble list` shows the workspaces by id and `thimble purge <id>` deletes
@@ -164,7 +176,7 @@ that one and prints each path it deleted. The folder it read and your Claude Cod
   browser (the install's answer, or no Chrome or Edge found), or the machine lacks the headless Chromium's system
   libraries. thimble never downloads a browser by itself. `install.sh --browser system` or `--browser bundled` sets one
   up, and `thimble doctor` names the command for missing libraries. Then run `thimble restart`.
-- `/thimble` is not recognised in a `claude` session: it works there only after `install.sh --plugin`; then run
-  `/reload-plugins`, or start a new session.
+- `/thimble` is not recognised in a `claude` session: a session started with plain `claude` doesn't load thimble. Quit
+  it and run `thimble` in that folder; sessions you start with `thimble` have `/thimble`.
 - To report a problem, run `thimble feedback "<what went wrong>"`. It writes a zip of the logs, chats and Claude
   Code transcripts, with keys removed, and says where to send it. The chats and transcripts quote your corpus.

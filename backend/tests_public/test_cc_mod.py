@@ -120,7 +120,7 @@ def test_a_thimble_plugin_off_here_stays_off_and_an_old_cc_mod_json_is_ignored(c
 
 
 def test_on_without_the_marketplace_registered_registers_it_on_the_same_yes(claude, capsys, monkeypatch):
-    """install.sh registers thimble's marketplace only on a yes to its plugin question; with a no, `on` lists the
+    """Only `thimble plugin on` (or install.sh --plugin) registers thimble's marketplace; without it, `on` lists the
     marketplace's registration before the install, asks once, and on a yes runs both. With a no it runs nothing."""
     add = ["plugin", "marketplace", "add", str(config.REPO_ROOT)]
     claude.markets = []
