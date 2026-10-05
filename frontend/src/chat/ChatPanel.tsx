@@ -42,7 +42,7 @@ import { ViewChip } from './ViewChip'
 import { replayHeld } from './pending'
 import { ThreadRows } from './ThreadRows'
 import { mainEdits, STAGE_TEXT, threadStage, type ThreadStage } from './threadStatus'
-import { composerTarget, pickItems, threadKind, threadLabels, threadNodes, type ThreadKind } from './threads'
+import { answeredSince, composerTarget, pickItems, threadKind, threadLabels, threadNodes, threadsRunning, type ThreadKind } from './threads'
 import { RoleChip } from './RoleChip'
 import { useChat, type ChatState } from './useChat'
 import { pendingAsks, waitingAt, waitingChats } from './waiting'
@@ -503,6 +503,20 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
     [chats, current, chat.running, seen, waitingIds],
   )
   const labels = useMemo(() => threadLabels(items), [items])
+  // a thread the analyst left while it answered says so once its answer is in: a toast with its chip, beside the dot
+  // the thread tree shows; the first list sets the baseline, so a reload toasts nothing
+  const threadsWere = useRef<Map<string, boolean> | null>(null)
+  const shown = useRef({ current, labels })
+  shown.current = { current, labels }
+  useEffect(() => {
+    const was = threadsWere.current
+    threadsWere.current = threadsRunning(chats)
+    if (!was) return
+    for (const id of answeredSince(was, chats, shown.current.current)) {
+      const label = shown.current.labels.get(id) ?? 'thread'
+      bus.emit('toast', { text: 'A thread you left has its answer', thread: { id, label } })
+    }
+  }, [chats])
   const baseNodes = useMemo(() => threadNodes(items), [items])
 
   const rename = useCallback(

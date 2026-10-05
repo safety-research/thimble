@@ -65,6 +65,17 @@ export function threadKind(m: Pick<ChatMeta, 'kind' | 'role'>): ThreadKind | nul
   return null
 }
 
+/** Each thread's running flag, for answeredSince to compare with later. Pure. */
+export function threadsRunning(chats: readonly ChatMeta[]): Map<string, boolean> {
+  return new Map(chats.filter((m) => threadKind(m) === 'thread').map((m) => [m.id, !!m.running]))
+}
+
+/** The threads that stopped running since `was` (threadsRunning of an earlier list), other than the one shown
+ * (`current`): a thread the analyst left while it answered, which has its answer now. Pure. */
+export function answeredSince(was: ReadonlyMap<string, boolean>, chats: readonly ChatMeta[], current: string): string[] {
+  return chats.filter((m) => threadKind(m) === 'thread' && m.id !== current && was.get(m.id) === true && !m.running).map((m) => m.id)
+}
+
 /** Where a message typed in a thread's composer goes: `here`, the chat's own session (main, or a thread's fork); the
  * latest orientation from its thread or its steps' (`orient`); the view a build thread builds (`view`); else main, for
  * threads of sessions that take no message. */
