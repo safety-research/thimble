@@ -1,7 +1,7 @@
 """The orientation hears which corpus files it never opened (orient_session.coverage): its first run's first add_card
 names them after the card is made, its critique call names them in place of the critique, at most twice a run, and a
 follow-up hears nothing. A file only a survey's listing named, or only a sibling of which was read, is unopened; one a
-command named, by its path, its folder's whole or a wildcard pattern, is opened."""
+command named, by its path, its folder's path or a wildcard pattern, is opened, and a word of prose names no folder."""
 from __future__ import annotations
 
 import pytest
@@ -14,7 +14,7 @@ NOTE = {"question": "What does the corpus hold?", "kind": "note", "text": "Three
 
 
 @pytest.fixture()
-def chat(workspaces_tmp):
+async def chat(workspaces_tmp):
     """The orientation's chat, its first run going."""
     calls.forget()
     made = agents.new_agent(CORPUS, orientation.ROLE, orientation.TITLE, announce=False, brief="")["id"]
@@ -58,8 +58,20 @@ def test_a_listed_file_or_a_sibling_of_a_read_one_is_unopened_and_named_with_its
     for unopened in ("agents/agent-02.jsonl", "agents/agent-03.jsonl", "events.jsonl"):
         assert f"`{unopened}`: {records.count(root / unopened, unopened):,} records, " in text
     assert "of the corpus" in text and str(root) in text
-    agents_files = {f for f in _files() if f.startswith("agents/")}
-    assert orient_checks._read_by_calls(f"ls {root}/agents/", root, set(_files()), whole=True) == agents_files
+    files = set(_files())
+    agents_files = {f for f in files if f.startswith("agents/")}
+    for command in (f"ls {root}/agents", "ls agents/", f"cat {root}/agents/*.jsonl", "wc -l agent-0?.jsonl"):
+        assert orient_checks._read_by_calls(command, root, files, whole=True) == agents_files, command
+    assert orient_checks._read_by_calls("Three agents posted on the board.", root, files, whole=True) == set()
+
+
+def test_past_the_listed_count_files_are_named_by_kind_and_a_kind_of_one_by_its_path(chat, monkeypatch):
+    monkeypatch.setattr(orient_checks, "UNREAD_LISTED", 3)
+    [found] = orient_checks.unopened(CORPUS)
+    rows = [line for line in found.text.splitlines() if line.startswith("- ")]
+    assert rows[1].startswith("- `agents/agent-*.jsonl`: 3 files, ")
+    assert rows[0].startswith("- `forge.db`: ") and " records, " in rows[0] and " records, " in rows[2]
+    assert len(rows) == 4 and rows[-1].endswith("more kinds of file")
 
 
 async def test_the_first_card_then_the_critique_get_the_note_and_the_next_critique_runs(chat, critiques):

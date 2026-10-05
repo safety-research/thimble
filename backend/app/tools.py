@@ -617,7 +617,7 @@ async def call(c: str, name: str, args: dict[str, Any] | None, *, actor: str = A
 
         res = await card_check.after_tool(c, name, args, res, session=session, anchor=anchor)
     if orienting and name == "add_card" and not res.is_error and (note := await orient_session.coverage(c, name)):
-        res = ToolResult([*res.content, {"type": "text", "text": note}])
+        res = ok(f"{res.text}\n\n{note}")  # add_card's result is text alone
     return with_call_line(name, args, res)
 
 

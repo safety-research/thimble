@@ -185,19 +185,20 @@ def _critic_chats(c: str) -> set[str]:
 def _read_by_calls(text: str, corpus: Path, files: set[str], whole: bool = False) -> set[str]:
     """The corpus files the orientation's calls named: a file by its corpus-relative or absolute path filling whole
     components of a run of path characters, and every file under a folder named the same way. With `whole`, a folder
-    is named only where a run ends at it (`ls tickets/`, `tickets/*.txt`), not where it leads a file's path, so reading
-    one file of a folder leaves the others unread, and a wildcard pattern names the files it matches (_globbed). A path
-    holding other characters (a space) is searched for in the whole text instead."""
+    is named only where a run holding a slash ends at it (`ls tickets/`, `tickets/*.txt`, `ls <corpus>/tickets`), not
+    where it leads a file's path, so reading one file of a folder leaves the others unread, nor as a bare word, which
+    prose holds too; and a wildcard pattern names the files it matches (_globbed). A path holding other characters (a
+    space) is searched for in the whole text instead."""
     if not text:
         return set()
     root = str(corpus.resolve()).rstrip("/") + "/"
-    text = text.replace(root, "")
+    text = text.replace(root, "/" if whole else "")  # with `whole`, a path from the corpus keeps a slash
     depth = max((f.count("/") + 1 for f in files), default=1)
     heads: set[str] = set()  # the leading components of each run (trailing with `whole`), where a folder can be named
     spans: set[str] = set()  # each sequence of up to `depth` whole components of a run, where a file can be named
     for run in set(_PATH_RE.findall(text)):
         if whole:
-            parts = run.rstrip("/").split("/")
+            parts = run.rstrip("/").split("/") if "/" in run else []
             heads.update("/".join(parts[i:]) for i in range(len(parts)))
         else:
             parts = run.split("/")
@@ -212,8 +213,12 @@ def _read_by_calls(text: str, corpus: Path, files: set[str], whole: bool = False
 
     out = {f for f in files if (f in spans if plain(f) else f in text)}
     folders = {os.path.dirname(f) for f in files} - {""}
-    after = r"(?:/(?![\w.-])|(?![\w./-]))" if whole else r"(?:/|(?![\w.-]))"  # what follows a folder named in full
-    named = {d for d in folders if (d in heads if plain(d) else re.search(rf"(?<![\w./-]){re.escape(d)}{after}", text))}
+
+    def spaced(d: str) -> str:  # the regex of a folder whose name holds a space, named as `whole` or not asks
+        e = re.escape(d)
+        return rf"/{e}/?(?![\w./-])|(?<![\w./-]){e}/(?![\w.-])" if whole else rf"(?<![\w./-]){e}(?:/|(?![\w.-]))"
+
+    named = {d for d in folders if (d in heads if plain(d) else re.search(spaced(d), text))}
     for f in files:
         parts = f.split("/")
         if any("/".join(parts[:i]) in named for i in range(1, len(parts))):
@@ -428,7 +433,8 @@ def unopened(c: str) -> list[Finding]:
     """The orientation's coverage note for workspace `c` (orient_session.coverage), one finding or none: the corpus
     files no card read, no Read call opened and no call's input named, by its path or its folder's whole, the largest
     first, each with its records (its size past RECORDS_MAX_BYTES) and its share of the corpus's bytes; past
-    UNREAD_LISTED files, each kind of file with its count and share. ValueError for a workspace whose corpus is gone."""
+    UNREAD_LISTED files, each kind of file with its count and share (a kind of one file as that file). ValueError for a
+    workspace whose corpus is gone."""
     from . import corpus as corpus_mod, records  # noqa: PLC0415
     from .tools import hint  # noqa: PLC0415
 
@@ -443,18 +449,19 @@ def unopened(c: str) -> list[Finding]:
     def share(n: int) -> str:
         return f"{n / total:.0%} of the corpus" if n >= total / 100 else "under 1% of the corpus"
 
+    def row(f: str) -> str:
+        n = records.count(corpus / f, f) if sizes[f] <= RECORDS_MAX_BYTES else 0
+        return f"- `{f}`: {f'{n:,} records' if n else f'{sizes[f] / 1e6:,.1f} MB'}, {share(sizes[f])}"
+
     if len(unread) <= UNREAD_LISTED:
-        rows = []
-        for f in sorted(unread, key=lambda f: -sizes[f]):
-            n = records.count(corpus / f, f) if sizes[f] <= RECORDS_MAX_BYTES else 0
-            what = f"{n:,} records" if n else f"{sizes[f] / 1e6:,.1f} MB"
-            rows.append(f"- `{f}`: {what}, {share(sizes[f])}")
+        rows = [row(f) for f in sorted(unread, key=lambda f: -sizes[f])]
     else:
         kinds: dict[str, list[str]] = {}
         for f in unread:
             kinds.setdefault(_kind_key(f).replace("#", "*"), []).append(f)
         ranked = sorted(kinds.items(), key=lambda kv: -sum(sizes[f] for f in kv[1]))
-        rows = [f"- `{k}`: {len(fs):,} files, {share(sum(sizes[f] for f in fs))}" for k, fs in ranked[:UNREAD_LISTED]]
+        rows = [row(fs[0]) if len(fs) == 1 else f"- `{k}`: {len(fs):,} files, {share(sum(sizes[f] for f in fs))}"
+                for k, fs in ranked[:UNREAD_LISTED]]
         if len(ranked) > UNREAD_LISTED:
             rows.append(f"- {len(ranked) - UNREAD_LISTED:,} more kinds of file")
     return [Finding("unopened", hint("orient-unopened", n=f"{len(unread):,}", total=f"{len(files):,}", root=str(corpus),
