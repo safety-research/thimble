@@ -76,7 +76,7 @@ claude
 | Command | What it does |
 |---|---|
 | `thimble update` | update to the latest release |
-| `thimble demo [<name>...]` | download public datasets (collusion-wiki, rubyhack, mythos-5) from their publishers, asking before each, and open each on an orientation run ahead of time ([INSTALL.md](INSTALL.md#demo-datasets)) |
+| `thimble demo [<name>...]` | download public datasets (collusion-wiki, rubyhack, mythos-5) from their publishers, asking before each, and open each in the browser on an orientation run ahead of time, with no Claude Code session until you attach one (`cd <folder> && thimble`, or `--attach`) ([INSTALL.md](INSTALL.md#demo-datasets)) |
 | `thimble server up\|status\|stop\|restart` | manage the thimble server |
 | `thimble doctor` | print the install state |
 | `thimble list` | list the workspaces by id (each folder's, and its archived runs), when each was last used and its open sessions |

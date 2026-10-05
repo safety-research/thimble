@@ -143,14 +143,24 @@ from its publisher's files into `~/thimble-demo/<name>` (`--dir` moves it):
 | `mythos-5` | the [Mythos 5 transcript](https://github.com/anthropics/mythos-5-incident-transcript) Anthropic released | 2.6 MB |
 
 Each build is checked against the copy the demo's orientations ran on; a source that changed since is named in a
-warning. `~/thimble-demo/SOURCES.md` lists what each build changes. The command then registers each folder, installs
-its pre-cached orientation as the folder's workspace (cards, labels, views, the orientation's thread), and starts
-`thimble` in the first folder (`--no-start` prints the commands instead). A workspace that holds an analysis already
-is left as it is unless `--replace`, which archives it first. Run again, it downloads nothing it already has.
+warning. `~/thimble-demo/SOURCES.md` lists what each build changes. The command then registers each folder and
+installs its pre-cached orientation (from [demos/](demos/README.md) in the repository) as the folder's workspace: the
+cards, labels, views, report and the orientation's thread, and the orientation's Claude Code transcript where Claude
+Code resumes it. It opens the workspace in your browser, without starting a Claude Code session, and prints how to
+attach one:
 
-The pre-cached orientations are release assets, named with their SHA-256 in
-[demos/precaches.json](demos/precaches.json); [demos/README.md](demos/README.md) says how a maintainer makes one with
-`thimble demo --export`.
+```bash
+cd ~/thimble-demo/collusion-wiki && thimble   # main, the session you chat with in the page
+```
+
+To continue the orientation itself, type in its thread in the page or ask main to message the orientation: its
+session resumes with everything it read and did. While it runs, `claude agents` lists it as
+`thimble:orient · <name>`, and `claude attach <id>` opens it in a terminal. `--attach` starts main directly instead
+of only opening the page.
+
+A workspace that holds an analysis already is left as it is unless `--replace`, which archives it first. Run again,
+it downloads nothing it already has. [demos/README.md](demos/README.md) says what a pre-cache holds and how a
+maintainer makes one with `thimble demo --export`.
 
 ## Update
 

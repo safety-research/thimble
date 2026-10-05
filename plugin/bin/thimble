@@ -21,9 +21,10 @@
 #   thimble cc-mod on [--yes] | off | status
 #                                        thimble-cc-mod in this folder, by `claude plugin` at project scope; the thimble
 #                                        plugin stays as it is (backend/app/cli.py cmd_cc_mod)
-#   thimble demo [name…] [--yes] [--dir <d>] [--no-start] | --export <workspace> <out>
+#   thimble demo [name…] [--yes] [--dir <d>] [--attach] | --export <workspace> <out>
 #                                        download the demo datasets from their public sources (asking first), open each
-#                                        on its pre-cached orientation, start thimble in the first (backend/app/demo.py)
+#                                        in the browser on its pre-cached orientation (demos/), print how to attach a
+#                                        session; --attach starts thimble in the first (backend/app/demo.py)
 #   thimble launch-args [--cwd <p>] [--settings <s>]
 #                                        what a session starts with: the channel entry, the --allowedTools, --effort and
 #                                        --settings values, the tools that end a turn without text, main's --name, then
@@ -84,7 +85,7 @@ usage: thimble [claude flags...]          start thimble in this folder: a new Cl
        thimble cc-mod on [--yes] | off | status
                                           thimble-cc-mod (a single-agent thimble inside Claude Code) in this
                                           folder
-       thimble demo [name...] [--yes] [--dir <d>] [--no-start]
+       thimble demo [name...] [--yes] [--dir <d>] [--attach]
                                           download public datasets (collusion-wiki, rubyhack, mythos-5), asking
                                           first, and open each on a pre-cached orientation
        thimble update [--from <zip>]      bring the install up to date
