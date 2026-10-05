@@ -1764,7 +1764,10 @@ def _save_announced(c: str) -> None:
 @router.post("/agents")
 async def agents_route(body: AgentsQuery) -> dict[str, Any]:
     """thimble's agents for the folder's workspace: `{rows, line, text}` for the statusline and /thimble:agents, and with `announce` the lines main's terminal has not shown yet (the plugin's hooks print them):
-    each session's start once and each run's finish."""
+    each session's start once and each run's finish. The statusline's `line` also holds the browser's messages that
+    `session` has not got yet (events.queued_line)."""
+    from . import events  # noqa: PLC0415
+
     c = config.workspace_for_cwd(body.cwd)
     if not c:
         return {"rows": [], "line": "", "text": "", "announce": ""}
@@ -1783,7 +1786,8 @@ async def agents_route(body: AgentsQuery) -> dict[str, Any]:
                              ("" if alive(e) else " (it has stopped)"))
         if lines:
             _save_announced(c)
-    return {"rows": rows, "line": status_line(rows), "text": listing_text(rows), "announce": "\n".join(lines)}
+    line = "\n".join(x for x in (status_line(rows), events.queued_line(c, body.session, STATUS_CHARS)) if x)
+    return {"rows": rows, "line": line, "text": listing_text(rows), "announce": "\n".join(lines)}
 
 
 class RelayBody(BaseModel):

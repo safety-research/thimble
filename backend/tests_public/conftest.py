@@ -244,6 +244,7 @@ class Listener:
 
         events._subs.get(self.corpus, set()).discard(self.sub)
         events._pending.pop((self.corpus, self.sid), None)
+        events._notices.pop((self.corpus, self.sid), None)
         lv = session._live.pop(self.corpus, None)
         if lv is not None and lv.task is not None:
             lv.task.cancel()

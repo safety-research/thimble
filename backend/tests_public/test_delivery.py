@@ -1,7 +1,8 @@
 """Delivery through the plugin's hooks. The server side (events.py): an event for the session that is main is taken by
-one watcher, in flight until acknowledged, and the PermissionRequest hook's prompt waits on main's meta until the
-browser answers. The server answers a hook route only to a request that proves the token, and the hooks, run against a
-stand-in server, do nothing without server.json or with a server that cannot prove the token."""
+one watcher, in flight until acknowledged, a message main has not got yet shows on its statusline, and the
+PermissionRequest hook's prompt waits on main's meta until the browser answers. The server answers a hook route only to
+a request that proves the token, and the hooks, run against a stand-in server, do nothing without server.json or with a
+server that cannot prove the token."""
 from __future__ import annotations
 
 import asyncio
@@ -44,12 +45,13 @@ def _record_token(home: Path, token: str = TOKEN, **extra) -> None:
 def _fresh(workspaces_tmp, tmp_path, monkeypatch):
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude-config"))
     for table in (events._subs, events._pending, events._taken, events._asks, events._waiters, events._lines,
-                  session._live, session._expected, session._event_threads, session._came_back, session._shim_pids,
-                  session._shim_configs):
+                  events._notices, session._live, session._expected, session._event_threads, session._came_back,
+                  session._shim_pids, session._shim_configs):
         table.clear()
     agents._busy.clear()
     yield
-    for table in (events._subs, events._pending, events._taken, events._asks, events._waiters, session._live):
+    for table in (events._subs, events._pending, events._taken, events._asks, events._waiters, events._notices,
+                  session._live):
         table.clear()
 
 
@@ -121,6 +123,37 @@ def test_the_held_hook_prints_what_the_analyst_wrote_once_its_event_is_written_o
     assert "days-the-page-changed" in lines[2] and "On which days did it change?" in lines[2]
     assert not any(x in "\n".join(lines) for x in (asked["id"], posted["id"], thread["id"], "c0ffee12"))
     assert not asyncio.run(events.held_route(events.HeldBody(cwd=_cwd(), session=SID)))["terminal"], "printed once"
+
+
+def test_a_message_main_has_not_got_yet_shows_on_its_statusline_until_its_line_prints():
+    """Claude Code gives main a browser message only at its turn's next tool call or once the turn ends, so main's
+    statusline shows the analyst's words at once, after QUEUED, until the held hook prints the message's line; an event
+    that carries no words of the analyst's shows nothing there, nor does another session's statusline."""
+    from app import bg_session
+
+    _subscribe(SID)
+    session.attach(CORPUS, SID, _cwd(), None)
+    first = events.post(CORPUS, "main", {"text": "Which kinds of link failed today?"})
+    events.post(CORPUS, "checked", {"text": "the check ended"})
+    thread = agents.new_thread(CORPUS, None, None, "Days the page changed")
+    events.post(CORPUS, "thread", {"thread": thread["id"], "text": "On which days did it change?"})
+
+    def line(sid: str = SID) -> str:
+        return asyncio.run(bg_session.agents_route(bg_session.AgentsQuery(cwd=_cwd(), session=sid)))["line"]
+
+    assert line() == f"thimble · {events.QUEUED}Which kinds of link failed today? (and 1 more)"
+    assert line() == line() and first["id"] not in line(), "it shows until main gets it, without ids"
+    assert line("0ther000-0000-4000-8000-000000000001") == ""
+
+    async def deliver() -> None:
+        for _ in range(3):
+            got = await events.pull_route(Req(), cwd=_cwd(), session=SID, wait=1)
+            await events.ack_route(events.AckBody(cwd=_cwd(), session=SID, id=got["id"], terminal=True))
+
+    asyncio.run(deliver())
+    said = asyncio.run(events.held_route(events.HeldBody(cwd=_cwd(), session=SID)))["terminal"]
+    assert "Which kinds of link failed today?" in said and "On which days did it change?" in said
+    assert line() == "", "main got both"
 
 
 def test_a_tray_entry_claude_code_refuses_is_asked_for_once_and_its_line_prints_once(monkeypatch):

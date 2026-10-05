@@ -438,11 +438,11 @@ case "${1:-}" in
   *)
     if [[ "$SUPERVISOR_COMMANDS" == *" $1 "* ]]; then
       if [ "$1" = prompt ] && rendered_prompts "${@:2}"; then exit 0; fi
-      # `server up` is run by the /thimble skill as a single command, so that one sandbox.excludedCommands entry covers
-      # it (Claude Code sandboxes a compound command unless every part is excluded); a skill fails on a non-zero exit,
-      # so it always exits 0, with a thimble: line when the tree cannot be found
-      up=0
-      case "$1 ${2:-}" in "server up"* | "server ensure"* | "up "* | "ensure "*) up=1;; esac
+      # `server up` and `prompt` are run by the skills, each as a single command, so that one sandbox.excludedCommands
+      # entry or allowed-tools rule covers it (Claude Code checks each part of a compound command); a skill fails on a
+      # non-zero exit, so each always exits 0, with a thimble: line when the tree cannot be found
+      up=0 skill=0
+      case "$1 ${2:-}" in "server up"* | "server ensure"* | "up "* | "ensure "*) up=1 skill=1;; prompt*) skill=1;; esac
       # /thimble feedback: the report, with the folder the skill names, and no server; not when the plugin's hook wrote
       # it already and left what it printed for the supervisor to print (app/cli.py hook_up)
       if [ "$up" = 1 ]; then
@@ -461,11 +461,11 @@ case "${1:-}" in
       # the installed tree named in $THIMBLE_HOME/app-dir when this copy sits in Claude Code's plugin cache.
       # THIMBLE_PLUGIN_ROOT names this plugin copy, whose hooks and watcher /thimble looks for (cli.plugin_root)
       repo="$("$here/thimble-app-dir" 2>&1)" || {
-        [ "$up" = 1 ] || { printf '%s\n' "$repo" >&2; exit 1; }
+        [ "$skill" = 1 ] || { printf '%s\n' "$repo" >&2; exit 1; }
         printf '%s\n' "$repo"; exit 0; }
       export THIMBLE_CALLER_CWD="${THIMBLE_CALLER_CWD:-$PWD}" THIMBLE_PLUGIN_ROOT="$plugin"
       cd "$repo/backend"
-      if [ "$up" = 1 ]; then "$here/thimble-python" -m app.cli "$@" 2>&1 || true; exit 0; fi
+      if [ "$skill" = 1 ]; then "$here/thimble-python" -m app.cli "$@" 2>&1 || true; exit 0; fi
       exec "$here/thimble-python" -m app.cli "$@"
     fi
     printf 'thimble: unknown command %s\n' "$1" >&2

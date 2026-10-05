@@ -4,10 +4,10 @@ description: thimble gives a human analyst a browser workspace beside this sessi
 disable-model-invocation: true
 argument-hint: "[fresh | restore [<name>] | status | fix | feedback]"
 arguments: [action, archive]
-allowed-tools: Bash(${CLAUDE_PLUGIN_ROOT}/bin/thimble prompt *) Bash(${CLAUDE_PLUGIN_ROOT}/bin/thimble server up *) Bash(${CLAUDE_PLUGIN_ROOT}/bin/.thimble-watch --stream *) Bash(true)
+allowed-tools: Bash(${CLAUDE_PLUGIN_ROOT}/bin/thimble prompt *) Bash(${CLAUDE_PLUGIN_ROOT}/bin/thimble server up *) Bash(${CLAUDE_PLUGIN_ROOT}/bin/.thimble-watch --stream *)
 ---
 
-!`${CLAUDE_PLUGIN_ROOT}/bin/thimble prompt main --unless-launched --cwd "${CLAUDE_PROJECT_DIR}" --action "$action" --archive "$archive" 2>&1 || true`
+!`${CLAUDE_PLUGIN_ROOT}/bin/thimble prompt main --unless-launched --cwd "${CLAUDE_PROJECT_DIR}" --action "$action" --archive "$archive" 2>&1`
 
 !`${CLAUDE_PLUGIN_ROOT}/bin/thimble server up --cwd "${CLAUDE_PROJECT_DIR}" --session "${CLAUDE_SESSION_ID}" --action "$action" --archive "$archive" 2>&1`
 

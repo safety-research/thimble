@@ -1,7 +1,8 @@
 #!/bin/sh
 ''''exec "$(dirname "$0")/thimble-python" -S "$0" "$@" # '''
 """thimble's running agents, as its server lists them: its background sessions (the orientation, writers, the critic)
-with their state, and the threads and subagents of main's session.
+with their state, and the threads and subagents of main's session; on the statusline also the browser's messages the
+session has not got yet.
 
     thimble-agents --statusline [--chain <command>]
         one line for Claude Code's statusline, read from the statusline's JSON on stdin; with --chain, the analyst's

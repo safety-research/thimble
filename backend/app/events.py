@@ -22,7 +22,9 @@ they belong to, else a short line saying what happened. Claude Code shows a woke
 so the watcher's acknowledgment keeps the event's line (_lines) for the UserPromptSubmit hook, which Claude Code runs
 as the event's turn begins, to print (held_route); the line of something the analyst did that sends main no event, such
 as a follow-up to the orientation, waits there too (show). With every hook off (the Monitor route) nothing can print
-them.
+them. A message the analyst sends while main's turn runs reaches the session only at the turn's next tool call, or once
+the turn ends, so main's statusline shows its words at once, after QUEUED, until the held hook prints its line
+(queued_line, which bg_session.agents_route adds to the statusline).
 """
 from __future__ import annotations
 
@@ -75,7 +77,9 @@ GONE = "gone"  # _pull_state: another session is main now
 DORMANT = "dormant"  # _pull_state: another session is main now, and this one is main again when that one ends
 HOOK_ASK_PREFIX = "h"  # the ids of the permission requests the PermissionRequest hook relays
 SAID = "› "  # opens the analyst's own words in main's terminal (terminal_line)
+QUEUED = "queued from the browser: "  # opens the statusline's line of a message main has not got yet (queued_line)
 LINE_CHARS = 160  # of an event's line in main's terminal: about two lines
+NOTICES_KEPT = 50  # a session's queued messages kept for its statusline; the oldest go first
 _KEY_RE = re.compile(r"[^A-Za-z0-9_]")
 _KIND_RE = re.compile(r"^- `([a-z_]+)`", re.M)
 
@@ -96,7 +100,10 @@ _pending: dict[tuple[str, str], deque] = {}  # (workspace, session or "") -> eve
 _taken: dict[str, tuple[str, str, dict[str, Any], float]] = {}  # event id -> (workspace, session, note, when taken)
 _waiters: dict[str, set[tuple[asyncio.AbstractEventLoop, asyncio.Future]]] = {}  # workspace -> its waiting pulls
 _asks: dict[str, "Ask"] = {}  # hook permission id -> the request waiting for the analyst
-_lines: dict[tuple[str, str], list[str]] = {}  # (workspace, session) -> lines of events its watcher wrote out, to print
+# (workspace, session) -> (event id, line) of events its watcher wrote out, and lines that send no event, to print
+_lines: dict[tuple[str, str], list[tuple[str, str]]] = {}
+# (workspace, session) -> (event id, words) of the analyst's messages queued for it, not yet printed (queued_line)
+_notices: dict[tuple[str, str], list[tuple[str, str]]] = {}
 _observers: dict[str, list[Callable[[str, dict[str, Any], dict[str, Any]], None]]] = {}  # kind -> observe()'s functions
 
 
@@ -382,7 +389,7 @@ def show(c: str, line: str) -> None:
     runs on every turn."""
     main = _main_sid(c)
     if main and line and any(sub.session == main and sub.delivery == cc_plugin.HOOK for sub in _subs.get(c, ())):
-        _lines.setdefault((c, main), []).append(line)
+        _lines.setdefault((c, main), []).append(("", line))
 
 
 def hand(c: str, event_id: str, text: str, fields: dict[str, Any], *, thread: str) -> str:
@@ -462,7 +469,8 @@ def _awaits_shim(c: str) -> bool:
 def _publish(c: str, note: dict[str, Any]) -> int:
     """Queue the event for the watcher of the session that is main when its shim holds a subscription, or of a session
     main just continued in whose shim has not subscribed yet (_awaits_shim); a parked session's subscription, or another
-    session's, gets nothing. Returns the number reached."""
+    session's, gets nothing. The analyst's words show on main's statusline until main gets them (_notice). Returns the
+    number reached."""
     _read_main(c)
     main = _main_sid(c)
     mine = [sub for sub in _live_subs(c, main) if main and sub.session == main]
@@ -471,6 +479,8 @@ def _publish(c: str, note: dict[str, Any]) -> int:
     if to is None:
         log.info("%s: event %s kind=%s delivered=0", c, meta.get("event"), meta.get("kind"))
         return 0
+    if not mine or any(sub.delivery == cc_plugin.HOOK for sub in mine):
+        _notice(c, to, note)
     if held(c):
         riders = pop_held(c)
         note = {**note, "content": f"{note.get('content') or ''}\n\n{meanwhile(riders)}",
@@ -482,6 +492,17 @@ def _publish(c: str, note: dict[str, Any]) -> int:
     else:
         log.info("%s: event %s kind=%s waits for session %s's shim", c, meta.get("event"), meta.get("kind"), to)
     return 1
+
+
+def _notice(c: str, sid: str, note: dict[str, Any]) -> None:
+    """Keep the analyst's words of an event that carries them (terminal_line's SAID) for session `sid`'s statusline
+    (queued_line); the held hook forgets them once the session gets the event (held_route)."""
+    line = str(note.get("terminal") or "")
+    if not line.startswith(SAID):
+        return
+    kept = _notices.setdefault((c, sid), [])
+    kept.append((str((note.get("meta") or {}).get("event") or ""), line[len(SAID):]))
+    del kept[:-NOTICES_KEPT]
 
 
 def _wake(c: str) -> None:
@@ -541,6 +562,20 @@ def move_events(c: str, old: str, new: str) -> None:
     if moved:
         _pending.setdefault((c, new), deque()).extendleft(reversed(moved))
         _wake(c)
+    if (c, old) in _notices:
+        _notices[(c, new)] = [*_notices.pop((c, old)), *_notices.get((c, new), [])]
+
+
+def queued_line(c: str, sid: str | None, chars: int = 110) -> str:
+    """Main's statusline line for the messages the analyst sent that session `sid` has not got yet (module note): the
+    oldest one's words after QUEUED, cut at `chars`, and how many more wait; '' for none."""
+    waiting = [words for _, words in _notices.get((c, sid or ""), [])]
+    if not waiting:
+        return ""
+    more = f" (and {len(waiting) - 1} more)" if len(waiting) > 1 else ""
+    line = f"thimble · {QUEUED}{waiting[0]}"
+    room = chars - len(more)
+    return (line if len(line) <= room else line[: room - 1].rstrip() + "…") + more
 
 
 def pending(c: str) -> int:
@@ -733,7 +768,7 @@ async def ack_route(body: AckBody) -> dict[str, Any]:
     if taken is None:
         raise HTTPException(404, "no such event is in flight")
     if body.terminal and taken[2].get("terminal"):
-        _lines.setdefault((taken[0], body.session or ""), []).append(str(taken[2]["terminal"]))
+        _lines.setdefault((taken[0], body.session or ""), []).append((body.id, str(taken[2]["terminal"])))
     return {"acknowledged": body.id}
 
 
@@ -747,13 +782,19 @@ async def held_route(body: HeldBody) -> dict[str, Any]:
     """The UserPromptSubmit hook, as a turn of main's begins (a prompt typed in the terminal, or an event the watcher
     wrote out): `{text, terminal}`, the quiet events waiting as MEANWHILE, which the hook adds to the prompt ('' when
     none wait or `session` is not main), and the lines main's terminal shows of the events the session's watcher wrote
-    out and of those quiet events, which it prints, each line once. 404 when the folder is no workspace."""
+    out and of those quiet events, which it prints, each line once. An event printed here no longer shows on the
+    statusline (queued_line). 404 when the folder is no workspace."""
     c = config.workspace_for_cwd(body.cwd)
     if not c:
         raise HTTPException(404, f"{body.cwd} is not a thimble workspace")
     main = _main_sid(c)
+    key = (c, body.session or "")
     riders = pop_held(c) if main and body.session == main else []
-    lines = [*_lines.pop((c, body.session or ""), []), _joined(riders)]
+    written = _lines.pop(key, [])
+    shown = {event_id for event_id, _ in written if event_id}
+    if shown and key in _notices:
+        _notices[key] = [n for n in _notices[key] if n[0] not in shown]
+    lines = [*(line for _, line in written), _joined(riders)]
     return {"text": meanwhile(riders), "terminal": "\n".join(dict.fromkeys(x for x in lines if x))}
 
 
@@ -1035,6 +1076,7 @@ async def shutdown() -> None:
     _pending.clear()
     _taken.clear()
     _lines.clear()
+    _notices.clear()
     for request_id in list(_asks):
         _answer_ask(request_id, None)
     _answered.clear()
