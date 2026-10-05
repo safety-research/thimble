@@ -5,6 +5,7 @@ main's name as launch-args prints it (cli.main_name) and the launcher passes it.
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
 
 import pytest
@@ -126,6 +127,25 @@ async def test_the_agents_list_and_the_start_lines_name_each_agent_in_plain_word
     assert got["text"] == "writer  working\ncritic  waiting for you\n\n↓ to follow any of them"
     assert got["announce"] == "writer started: ↓ to follow it\ncritic started: ↓ to follow it"
     assert got["line"] == "thimble · ● thimble:writer working · ◐ thimble:critic waiting for a permission"
+
+
+async def test_a_new_session_is_starting_and_a_finish_line_leaves_out_a_result_of_a_word_or_two(followed, monkeypatch):
+    """A session the listings have not shown yet is starting, not restarting; a run's finish line in main's terminal
+    carries the session's result unless it is a word or two, such as "Done.", which says no more than the line."""
+    new, old = followed
+    new.missing_since, new.pid = time.monotonic(), None
+    old.missing_since, old.pid = time.monotonic(), 4242
+    assert [bg_session.state_words(e) for e in (new, old)] == ["starting", "restarting"]
+    assert bg_session.plain_state("starting") == "starting"
+    new.missing_since = old.missing_since = 0.0
+    monkeypatch.setattr(config, "workspace_for_cwd", lambda cwd: CORPUS)
+    monkeypatch.setattr(bg_session, "_announced", {(CORPUS, "main-1"): ({new.short, old.short}, {})})
+    monkeypatch.setattr(bg_session, "_announced_loaded", {CORPUS})
+    monkeypatch.setattr(bg_session, "_save_announced", lambda c: None)
+    new.ended_at, new.run_open, new.result = 1.0, False, "Done."
+    old.ended_at, old.run_open, old.result = 2.0, False, "Wrote three cards about the failed links."
+    got = await bg_session.agents_route(bg_session.AgentsQuery(cwd="/work", session="main-1", announce=True))
+    assert got["announce"] == "writer finished\ncritic finished: Wrote three cards about the failed links."
 
 
 def test_main_name_is_the_workspace_slash_thimble_opens(tmp_path, monkeypatch):

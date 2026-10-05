@@ -1307,8 +1307,8 @@ def _pending_out(e: Entry) -> list[dict[str, Any]]:
 def state_words(e: Entry) -> str:
     if e.status == "stopped":
         return "ended"
-    if e.missing_since:
-        return "restarting"
+    if e.missing_since:  # a session the listings have not shown yet is starting, not restarting
+        return "starting" if e.pid is None and time.time() - e.started < START_GRACE_S else "restarting"
     if e.status == "waiting":
         return f"waiting for a {e.waiting_for or 'reply'}"
     if e.status == "idle" or resting(e):
@@ -1697,7 +1697,7 @@ def status_line(rows: list[dict[str, Any]], chars: int = STATUS_CHARS) -> str:
     line holds about `chars` characters."""
     if not rows:
         return ""
-    mark = {"working": "●", "waiting": "◐", "restarting": "◐"}
+    mark = {"working": "●", "starting": "●", "waiting": "◐", "restarting": "◐"}
     parts = [f"{mark.get(r['state'].split()[0], '○')} {config.session_role(r['name'])} {r['state']}" for r in rows]
     lead, pad = "thimble · ", " " * len("thimble")  # a further line starts under the first line's first separator
     lines, cur = [], lead + parts[0]
@@ -1711,11 +1711,12 @@ def status_line(rows: list[dict[str, Any]], chars: int = STATUS_CHARS) -> str:
 
 
 def plain_state(state: str) -> str:
-    """A row's state as /thimble:agents lists it: working, waiting for you, done or restarting."""
+    """A row's state as /thimble:agents lists it: starting, working, waiting for you, done or restarting."""
     first = state.split()[0].rstrip(",") if state else ""
     if first == "waiting":
         return "waiting for you"
-    return {"done": "done", "idle": "done", "ended": "done", "restarting": "restarting"}.get(first, "working")
+    return {"done": "done", "idle": "done", "ended": "done", "starting": "starting",
+            "restarting": "restarting"}.get(first, "working")
 
 
 def listing_text(rows: list[dict[str, Any]]) -> str:
@@ -1782,7 +1783,9 @@ async def agents_route(body: AgentsQuery) -> dict[str, Any]:
                 lines.append(f"{label_of(e.key)} started: ↓ to follow it")
             elif e.short in started and e.ended_at and finished.get(e.short) != e.ended_at and not e.run_open:
                 finished[e.short] = e.ended_at
-                lines.append(f"{label_of(e.key)} finished" + (f": {cite.prose(e.result)[:200]}" if e.result else "") +
+                said = cite.prose(e.result or "").strip()
+                # a result of a word or two, such as "Done.", repeats what the line says
+                lines.append(f"{label_of(e.key)} finished" + (f": {said[:200]}" if len(said.split()) > 2 else "") +
                              ("" if alive(e) else " (it has stopped)"))
         if lines:
             _save_announced(c)
