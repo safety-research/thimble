@@ -16,8 +16,9 @@ Run values. Every run gets exactly the model and effort its arguments or Setting
 the role with them first (the module); a typed start gets them from the module's spawn and step hooks, which read the
 request's values (subagents.json) by the request id on the prompt's first line.
 
-The files. subagents.json, callers.jsonl and launch.json hold what the hooks and the module trust (subagent_files.py);
-the hooks write them first and post here only when a server runs. Kernels see them read-only (kernel_wrap.TRUSTED_FILES).
+The files. subagents.json, callers.jsonl and launch.json, in the workspace's `trusted` folder, hold what the hooks and
+the module trust (subagent_files.py); the hooks write them first and post here only when a server runs. Kernels see the
+folder read-only (kernel_wrap.TRUSTED_DIR).
 
 Runs and ends. A run is one turn sequence of an agent, from its start or a follow-up to its hand-back. The mirror
 (session.py) and the hooks tell run_ended the end once per run, by whichever signal comes first; a SubagentStop alone is
@@ -282,7 +283,8 @@ def ws(c: str) -> Path:
 
 
 def ensure_files(c: str) -> None:
-    """subagents.json, callers.jsonl and launch.json made in the workspace when missing (subagent_files.ensure)."""
+    """The trusted folder with subagents.json, callers.jsonl and launch.json made in the workspace when missing
+    (subagent_files.ensure)."""
     files.ensure(ws(c))
 
 

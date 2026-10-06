@@ -28,9 +28,10 @@ def test_it_launches_main_interactively_with_the_agent_view_off_and_the_caller_s
 def test_it_waits_for_the_module_s_accepted_hello(tmp_path):
     pc = _script()
     assert pc.hello(tmp_path) is None
-    (tmp_path / "subagents.json").write_text(json.dumps({"module": {"session": "s", "idle": "not main", "at": "x"}}))
+    (tmp_path / "trusted").mkdir()
+    (tmp_path / "trusted" / "subagents.json").write_text(json.dumps({"module": {"session": "s", "idle": "not main", "at": "x"}}))
     assert pc.hello(tmp_path) is None
-    (tmp_path / "subagents.json").write_text(json.dumps({"module": {"session": "s", "version": "0.6.0", "at": "x"}}))
+    (tmp_path / "trusted" / "subagents.json").write_text(json.dumps({"module": {"session": "s", "version": "0.6.0", "at": "x"}}))
     assert pc.hello(tmp_path)["session"] == "s"
 
 

@@ -692,8 +692,8 @@ class Check:
             ws = config.workspace_dir(self.c)
             (self.out / "workspace").mkdir(exist_ok=True)
             for name in ("subagents.json", "launch.json", "callers.jsonl"):
-                if (ws / name).is_file():
-                    shutil.copy2(ws / name, self.out / "workspace" / name)
+                if (ws / "trusted" / name).is_file():
+                    shutil.copy2(ws / "trusted" / name, self.out / "workspace" / name)
 
 
 # --------------------------------------------------------------------------------------------- the classifier smoke

@@ -970,10 +970,10 @@ class Rule(NamedTuple):
 
 LINKS_DIR = "links"  # under thimble's home: the dashboard link with its key, briefly (cli.LINKS_DIR)
 # the workspace's files and folders main and its agents may not edit, since thimble keeps its records there: the checks,
-# the chats, the extensions' state, the run record, the files the hooks trust (subagents.json, callers.jsonl,
-# launch.json) and the views' state (proposals with their attempt counts, the versions readers are served)
-STATE_PATHS = ("checks/**", "chats/**", "extensions/**", "extension/extension.json", "orient/run.json",
-               "subagents.json", "callers.jsonl", "launch.json", "views/**")
+# the chats, the extensions' state, the run record, the folder of the files the hooks trust (trusted/: subagents.json,
+# callers.jsonl, launch.json) and the views' state (proposals with their attempt counts, the versions readers are served)
+STATE_PATHS = ("checks/**", "chats/**", "extensions/**", "extension/extension.json", "orient/run.json", "trusted/**",
+               "views/**")
 TICKET_FILES = ("tickets.jsonl", "applies.jsonl")  # in a development install's dev folder: the code tickets' records
 
 

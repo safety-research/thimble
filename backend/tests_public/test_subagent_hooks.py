@@ -277,17 +277,18 @@ def test_the_state_file_is_replaced_whole_under_its_lock(tmp_path):
     ws = tmp_path / "ws"
     ws.mkdir()
     sf.ensure(ws)
-    assert sorted(p.name for p in ws.iterdir()) == sorted(sf.FILES)
+    assert sorted(p.name for p in ws.iterdir()) == sorted([sf.DIR, sf.LOCK])
+    assert sorted(p.name for p in sf.trusted_dir(ws).iterdir()) == sorted(sf.FILES)
     with sf.update(ws) as state:
         state["agents"] = {"a": {"status": "running"}}
-    inode = (ws / sf.STATE).stat().st_ino
+    inode = sf.state_path(ws).stat().st_ino
     with sf.update(ws) as state:
         state["agents"]["a"]["status"] = "done"
     assert sf.read(ws)["agents"]["a"]["status"] == "done"
-    assert (ws / sf.STATE).stat().st_ino != inode, "a write renames a new file over the old one"
+    assert sf.state_path(ws).stat().st_ino != inode, "a write renames a new file over the old one"
     with sf.update(ws) as state:
         pass
-    assert not [p for p in ws.iterdir() if p.name.endswith(".tmp")]
+    assert not [p for p in sf.trusted_dir(ws).iterdir() if p.name.endswith(".tmp")]
 
 
 def test_callers_are_found_by_their_call_and_trimmed_to_the_last_hour(tmp_path, monkeypatch):
@@ -297,7 +298,7 @@ def test_callers_are_found_by_their_call_and_trimmed_to_the_last_hour(tmp_path, 
     assert sf.find_caller(ws, "toolu_x1")["agent_id"] == "a1"
     assert sf.find_caller(ws, "toolu_none") is None
     old = json.dumps({"tool_use_id": "toolu_old", "agent_id": "a0", "agent_type": "t", "ts": time.time() - 7200})
-    (ws / sf.CALLERS).write_text(old + "\n" + (ws / sf.CALLERS).read_text())
+    sf.callers_path(ws).write_text(old + "\n" + sf.callers_path(ws).read_text())
     sf.trim_callers(ws)
     assert sf.find_caller(ws, "toolu_old") is None and sf.find_caller(ws, "toolu_x1") is not None
 
@@ -336,7 +337,7 @@ def test_without_a_server_the_agent_check_decides_from_the_file_alone(tmp_path, 
 def test_a_check_that_fails_denies_a_start_of_a_role_and_lets_any_other_call_go(tmp_path, ws):
     """A hook that fails lets its call run, so a start of one of thimble's roles is denied when the check itself cannot
     run (here subagents.json cannot be opened), and every other Agent call goes on as Claude Code made it."""
-    state = ws / sf.STATE
+    state = sf.state_path(ws)
     state.unlink()
     state.mkdir()
     try:

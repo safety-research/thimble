@@ -127,7 +127,7 @@ def read(p: Path):
 
 def hello(ws: Path) -> "dict | None":
     """The module's accepted hello in subagents.json (`module`: {session, version, at}), None while it has none."""
-    module = (read(ws / "subagents.json") or {}).get("module")
+    module = (read(ws / "trusted" / "subagents.json") or {}).get("module")
     if isinstance(module, dict) and module.get("session") and module.get("version") and not module.get("idle"):
         return module
     return None
@@ -225,7 +225,7 @@ def main() -> int:
             time.sleep(1.0)
         (logs / "screen.txt").write_text(term.screen(), "utf-8")
         if said is None:
-            module = (read(ws / "subagents.json") or {}).get("module")
+            module = (read(ws / "trusted" / "subagents.json") or {}).get("module")
             print(f"precache_orientation: no hello from thimble's module within {HELLO_WAIT_S:.0f} s ({module})",
                   file=sys.stderr)
             return 1

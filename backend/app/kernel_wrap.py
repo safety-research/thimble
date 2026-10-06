@@ -9,8 +9,8 @@ Both draw the same boundary:
   read     the system, the backend venv and its interpreter, the corpus and the page's fonts and matplotlibrc
   write    the workspace directory, except settings.json and config.json (thimble's config for the workspace), which
            the kernel can neither read nor write, and telemetry.jsonl, viewed.jsonl (the view log, which the telemetry
-           export merges), the files thimble's agents' hooks trust (TRUSTED_FILES), the registry folder
-           (REGISTRY_DIR), the views' state (VIEWS_DIR) and the workspace's local extension (LOCAL_DIR), which it can
+           export merges), the registry folder (REGISTRY_DIR), the views' state (VIEWS_DIR), the workspace's local
+           extension (LOCAL_DIR) and the folder of the files thimble's agents' hooks trust (TRUSTED_DIR), which it can
            read only, and the lock of subagents.json's writers (LOCK_FILES), which it can neither read nor write.
            HOME and TMPDIR are fresh at each start: a private /tmp under bwrap, the kernel's kernels/<key>.home folder
            under srt
@@ -56,23 +56,23 @@ HIDDEN_FILES = ("settings.json", "config.json")
 EMPTY_FILE = "/dev/null"
 # read-only over the writable workspace (the server writes them from outside)
 READ_ONLY_FILES = ("telemetry.jsonl", "viewed.jsonl")
-# what the plugin's --agent-check hook and the gate tools trust (subagent_files.FILES): the pending requests and the
-# agent registry, the callers of thimble's tools and what main was launched with. A cell that could write them could
-# make a request a plugin start claims, or credit its call to an agent. Bound read-only with --ro-bind, never
-# --ro-bind-try, which would skip a missing one and let a cell create it; the server makes each before a kernel starts
-TRUSTED_FILES = ("subagents.json", "callers.jsonl", "launch.json")
 # the lock subagents.json's writers take (subagent_files.LOCK), hidden as HIDDEN_FILES are rather than read-only: a
 # read-only file can still be opened and flocked, and a cell that held the lock would make every hook and the server
 # wait for it and then write without it, so that two writers no longer exclude each other; a cell that swapped it for a
-# file of its own would do the same. The server makes it before a kernel starts
+# file of its own would do the same. The server makes it before a kernel starts, and nothing renames it
 LOCK_FILES = ("subagents.json.lock",)
-# the workspace's folders that main's and the orientation's prompts are made from, which a card's code reads: read-only,
-# each as a folder so that what the server writes later (its atomic rewrites among it) shows inside; the server creates
-# them before the kernel starts
+# the workspace's folders that main's and the orientation's prompts are made from, which a card's code reads, and the
+# folder of the files thimble's hooks trust: read-only, each as a folder so that what the server writes later (its
+# atomic rewrites among it) shows inside. A file bound by itself would not hold: Linux takes the bind off a file that
+# the server renames a new file over, and the cell could then write it. The server creates them before the kernel starts
 REGISTRY_DIR = "registry"  # the card types and extensions as the server found them (cardtypes.py, extensions.py)
 VIEWS_DIR = "views"  # thimble's state of the views (views.state_dir): proposals, versions, reviews
 LOCAL_DIR = "extension"  # the workspace's local extension (views.local_dir), whose views the dev agent's builds write
-READ_ONLY_DIRS = (REGISTRY_DIR, VIEWS_DIR, LOCAL_DIR)
+# what the plugin's --agent-check hook and the gate tools trust (subagent_files.DIR): the pending requests and the agent
+# registry, the callers of thimble's tools and what main was launched with. A cell that could write them could make a
+# request a plugin start claims, or credit its call to an agent
+TRUSTED_DIR = "trusted"
+READ_ONLY_DIRS = (REGISTRY_DIR, VIEWS_DIR, LOCAL_DIR, TRUSTED_DIR)
 SIGINT_PREFIX = ("/bin/sh", "-c", 'trap "" INT; exec "$@"', "thimble-kernel-wrap")  # shell prefix that ignores SIGINT in bwrap (module docstring)
 
 SRT_LAUNCHER = Path(__file__).with_name("kernel_srt.mjs")
@@ -166,7 +166,7 @@ def srt_rules(*, corpus_dir: str | Path, workspace_dir: str | Path, venv: str | 
     if system == "linux":
         allow_read.append(str(Path(srt_dir).joinpath(*SRT_HELPERS)))
         deny_read = _outermost(deny_read, allow_read)
-    read_only = [str(ws / name) for name in (*READ_ONLY_FILES, *TRUSTED_FILES, *READ_ONLY_DIRS)]
+    read_only = [str(ws / name) for name in (*READ_ONLY_FILES, *READ_ONLY_DIRS)]
     return {"filesystem": {
         "denyRead": list(dict.fromkeys(deny_read)),
         "allowRead": list(dict.fromkeys(allow_read)),
@@ -233,8 +233,6 @@ def kernel_wrap_argv(argv: Sequence[str], *, corpus_dir: str | Path, workspace_d
         out += ["--ro-bind", EMPTY_FILE, str(ws / name)]
     for name in READ_ONLY_FILES:  # read-only over the workspace bind (the server writes from outside)
         out += ["--ro-bind-try", str(ws / name), str(ws / name)]
-    for name in TRUSTED_FILES:  # each exists (notebook._guarded_files), so a missing one fails the start
-        out += ["--ro-bind", str(ws / name), str(ws / name)]
     for name in READ_ONLY_DIRS:
         out += ["--ro-bind", str(ws / name), str(ws / name)]
     out += ["--", *argv]

@@ -105,19 +105,22 @@ def test_the_work_folders_main_s_bash_may_write():
 # --------------------------------------------------------------------------- the files the hooks trust
 
 
-def test_a_new_workspace_has_the_trusted_files_and_the_kernel_binds_them_read_only(tmp_path):
+def test_a_new_workspace_has_the_trusted_files_and_the_kernel_binds_their_folder_read_only(tmp_path):
+    """The kernel binds the trusted folder, not each file: the writers replace a file whole, and Linux takes the bind
+    off a file another namespace renames a new file over (test_kernel_sandbox has the kernel's own test)."""
     ws = config.workspace_dir(CORPUS)
-    for name in kernel_wrap.TRUSTED_FILES:
-        assert (ws / name).is_file(), name
+    trusted = ws / kernel_wrap.TRUSTED_DIR
+    assert trusted == sf.trusted_dir(ws) and kernel_wrap.TRUSTED_DIR in kernel_wrap.READ_ONLY_DIRS
+    for name in sf.FILES:
+        assert (trusted / name).is_file(), name
     argv = kernel_wrap.kernel_wrap_argv(["python"], corpus_dir=tmp_path / "c", workspace_dir=ws, connection_dir=tmp_path,
                                         venv=None, python="/usr/bin/python3")
-    for name in kernel_wrap.TRUSTED_FILES:
-        i = argv.index(str(ws / name))
-        assert argv[i - 1] == "--ro-bind" and argv[i + 1] == str(ws / name), name
+    i = argv.index(str(trusted))
+    assert argv[i - 1] == "--ro-bind" and argv[i + 1] == str(trusted)
+    assert not any(str(trusted / name) in argv for name in sf.FILES), "no bind of a file the writers replace"
     rules = kernel_wrap.srt_rules(corpus_dir=tmp_path / "c", workspace_dir=ws, venv=None, python="/usr/bin/python3",
                                   srt_dir=tmp_path, home=tmp_path / "h", platform="linux")
-    for name in kernel_wrap.TRUSTED_FILES:
-        assert str(ws / name) in rules["filesystem"]["denyWrite"], name
+    assert str(trusted) in rules["filesystem"]["denyWrite"]
 
 
 def test_the_kernel_can_neither_hold_nor_swap_the_lock_of_subagents_json(tmp_path):
