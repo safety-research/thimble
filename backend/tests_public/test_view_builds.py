@@ -185,7 +185,7 @@ def test_a_view_build_runs_on_the_model_of_the_session_that_asked(board, monkeyp
     """An orientation's proposal is built on the orientation's model, without the 1M tag, at the effort and speed it runs
     at; one the analyst asked for on main's model, effort and speed as its replies report them, and before main's first
     reply on the analyst's own Claude Code settings. What the analyst chose for the dev agent in Settings wins, field by
-    field."""
+    field; a fast mode set for it is read and ignored, since thimble's agents have none of their own."""
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "cc"))
     monkeypatch.setattr(orientation, "read_run", lambda c: {"ultracode": True})
     monkeypatch.setitem(userconf.DEFAULTS["sandbox"], "enforce", False)  # the flags below come with no fence
@@ -204,8 +204,8 @@ def test_a_view_build_runs_on_the_model_of_the_session_that_asked(board, monkeyp
                                                                           "effort": "medium", "fast": False}})
     assert flags({"asked": True}) == {"model": "claude-opus-4-8", "effort": "medium", "fast": False}
     ledger.put_settings(CORPUS, {config.MODELS_KEY: {"dev": {"model": "claude-opus-5-5", "fast": True}}})
-    assert flags({"asked": True}) == {"model": "claude-opus-5-5", "effort": "medium", "fast": True}
-    assert flags({"orientation": True}) == {"model": "claude-opus-5-5", "effort": "xhigh", "fast": True}
+    assert flags({"asked": True}) == {"model": "claude-opus-5-5", "effort": "medium", "fast": False}
+    assert flags({"orientation": True}) == {"model": "claude-opus-5-5", "effort": "xhigh", "fast": False}
 
 
 def test_a_resumed_build_keeps_its_fence(board, monkeypatch):

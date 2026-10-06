@@ -229,14 +229,18 @@ def test_an_edit_of_thimble_s_config_asks_in_every_session_somebody_answers_and_
 
 def test_an_agent_s_own_sandbox_switch_runs_it_outside_the_sandbox_without_the_enforce_refusal(workspaces_tmp,
                                                                                                 monkeypatch):
+    """The dev agent's own `sandbox: off` (code tickets keep their fence keys) runs it outside the sandbox without the
+    enforce refusal; a writer's is read and ignored, since the writers share main's fence."""
     monkeypatch.setattr(userconf, "sandbox_runs", lambda refresh=False: False)
     with pytest.raises(userconf.ConfigError):
+        userconf.session(CORPUS, "dev")
+    _config({"agents": {"dev": {"sandbox": "off"}, "writer": {"sandbox": "off"}}})
+    assert not userconf.session(CORPUS, "dev").sandboxed
+    with pytest.raises(userconf.ConfigError):
         userconf.session(CORPUS, "writer")
-    _config({"agents": {"writer": {"sandbox": "off"}}})
-    assert not userconf.session(CORPUS, "writer").sandboxed
-    _config({"agents": {"writer": {"sandbox": "maybe", "env": ["NOT A NAME"]}}})
+    _config({"agents": {"dev": {"sandbox": "maybe", "env": ["NOT A NAME"]}, "writer": {"sandbox": "maybe"}}})
     problem = userconf.problem(CORPUS)
-    assert "agents.writer.sandbox" in problem and "agents.writer.env" in problem
+    assert "agents.dev.sandbox" in problem and "agents.dev.env" in problem and "agents.writer" not in problem
 
 
 def test_a_program_s_token_works_for_its_role_s_own_tools_only_and_only_while_it_runs(data_tmp, workspaces_tmp):
@@ -272,14 +276,17 @@ def test_settings_name_each_role_s_agent_and_its_consent_settings(tmp_path, work
                                                   "main": {"description": "Adds.", "prompt": "m.md"}},
                              {"agents/orientation/o.py": "async def run(input):\n    return 'ok'\n",
                               "agents/main/m.md": "Say hello."}))
-    _config({"agents": {"critic": {"network": "off", "data": "off", "sandbox": "off"}}})
+    _config({"agents": {"critic": {"network": "off", "data": "off", "sandbox": "off", "web": "off"},
+                        "orientation": {"data": "off"}, "dev": {"network": "off", "sandbox": "off"}}})
     rows = ledger.with_features({}, CORPUS)["agents"]
     assert rows["main"]["additions"] == ["survey"]
     assert rows["orient"]["way"] == "sdk" and rows["orient"]["extension"] == "survey"
-    assert (rows["orient"]["network"], rows["orient"]["data"], rows["orient"]["sandbox"]) == ("on", "ask", "on")
-    assert (rows["critic"]["network"], rows["critic"]["data"], rows["critic"]["sandbox"]) == ("off", "off", "off")
+    assert (rows["main"]["network"], rows["main"]["data"], rows["main"]["sandbox"]) == ("on", "off", "on"), \
+        "main's fence, which thimble's agents share: the orientation's keys"
+    assert rows["critic"]["web"] == "off" and "network" not in rows["critic"], "a critic's own fence keys are ignored"
+    assert (rows["dev"]["network"], rows["dev"]["sandbox"]) == ("off", "off"), "the code tickets' own fence"
     assert rows["critic"]["way"] == "thimble" and rows["critic"]["config"] == "agents.critic"
-    assert set(rows) == {"main", *userconf.MODE_ROWS.values(), *userconf.CALLS}
+    assert set(rows) == {"main", "orient", "writer", "critic", "checks", *userconf.MODE_ROWS.values(), *userconf.CALLS}
 
 
 # --------------------------------------------------------------------------- programs

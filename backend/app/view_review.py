@@ -486,7 +486,7 @@ def records_text(shots: list[dict[str, Any]]) -> str:
     return text if len(text) <= RECORDS_CHARS else text[: RECORDS_CHARS - 1] + "…"
 
 
-def _role(c: str) -> dict[str, str]:
+def _role(c: str) -> dict[str, Any]:
     """The model, effort and speed of the `verify` role's calls (config.call_settings)."""
     return config.call_settings(c, "verify")
 
@@ -508,7 +508,7 @@ async def _call(c: str, system: str, user: str, tool: Any, images: list[tuple[by
     role = _role(c)
     return await model_mod.structured(
         user, tool=tool, model=model or role["model"], effort=effort or role["effort"],
-        system=system, cwd=config.corpus_dir(c),
+        system=system, cwd=config.corpus_dir(c), refusal=role["refusal"],
         speed=role["speed"], images=images, idle_timeout_s=READ_IDLE_S)
 
 

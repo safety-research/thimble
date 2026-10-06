@@ -189,8 +189,8 @@ def prompt(c: str, name: str, description: str, files: list[tuple[Any, ...]]) ->
 
 
 async def ask(c: str, text: str, model: str | None = None) -> Any:
-    """The call: model.structured on `model`, else the labels role's model, at the labels role's effort and speed
-    (config.call_settings). Never raises."""
+    """The call: model.structured on `model`, else the labels role's model, at the labels role's effort and speed, and
+    on the refusal row's after a refusal (config.call_settings). Never raises."""
     from . import model as model_mod  # noqa: PLC0415
 
     role = config.call_settings(c, "labels")
@@ -198,7 +198,7 @@ async def ask(c: str, text: str, model: str | None = None) -> Any:
                               input_schema=SCHEMA)
     with capture.scope("view fit", keep=True):
         return await model_mod.structured(text, tool=tool, model=model or role["model"], effort=role["effort"],
-                                          speed=role["speed"], cwd=config.corpus_dir(c))
+                                          speed=role["speed"], refusal=role["refusal"], cwd=config.corpus_dir(c))
 
 
 async def fit_task(c: str, inp: dict[str, Any], *, model: str | None = None) -> Any:

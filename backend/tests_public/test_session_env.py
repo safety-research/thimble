@@ -247,8 +247,9 @@ def test_every_variable_a_session_s_own_code_reads_is_set_for_it():
                                                               "work_budget", "view_check", "hook_auth", "cc_plugin",
                                                               "prompts", "config", "tools"))]
     names = {n for f in files if f.is_file() for n in re.findall(r"\bTHIMBLE_[A-Z][A-Z0-9_]*", f.read_text("utf-8"))}
-    # a constant's name, and the server's fallback model, which no session's code uses
-    names -= {"THIMBLE_PREFIXES", "THIMBLE_FALLBACK_MODEL"}
+    # a constant's name, the server's fallback model, which no session's code uses, and the mark of main's fence, which
+    # main's own --settings set (cc_plugin.FENCE_MARK)
+    names -= {"THIMBLE_PREFIXES", "THIMBLE_FALLBACK_MODEL", "THIMBLE_MAIN_FENCE"}
     assert names <= set(config.SESSION_VARS) | set(config.STACK_VARS), \
         sorted(names - set(config.SESSION_VARS) - set(config.STACK_VARS))
 
@@ -317,7 +318,7 @@ async def test_a_structured_call_runs_no_claude_with_thimble_s_variables(tmp_pat
     monkeypatch.setenv(sdk.SKIP_VERSION_CHECK_ENV, "")
     monkeypatch.delenv(sdk.SKIP_VERSION_CHECK_ENV)
     monkeypatch.setattr(config, "CLI_PATH", str(exe))
-    options = sdk.build(cwd=tmp_path, tools=[], mcp_servers={}, system="", model=None, effort=None, env=None)
+    options = sdk.build(cwd=tmp_path, tools=[], mcp_servers={}, system="", model="claude-opus-5-5", effort="low", env=None)
     async for _ in query(prompt="hello", options=options):
         pass
     starts = [json.loads(line) for line in log.read_text().splitlines()]

@@ -30,7 +30,7 @@ def test_the_settings_route_changes_only_the_browser_s_settings(client, workspac
     assert client.post("/api/ui/key", json={"key": "a guess"}).status_code == 403
     assert client.post("/api/ui/key", json={"key": UI_KEY}).status_code == 204
     for key, value in (("kernel_wrap", "none"), ("orient_instructions", "x"), ("card_check", False), ("anything", 1),
-                       ("permission_modes", {"orient": "yolo"}), ("permission_modes", {"main": "bypass"})):
+                       ("permission_modes", {"dev": "yolo"}), ("permission_modes", {"main": "bypass"})):
         r = client.put(f"/api/ws/{CORPUS}/settings", json={"run_cell_result_lines": 20, key: value})
         assert r.status_code == 400, (key, value)
     assert not path.exists() or not json.loads(path.read_text()), "a refused PUT changes nothing"

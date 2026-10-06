@@ -166,8 +166,9 @@ def apply_workers() -> int:
     return max(1, min((os.cpu_count() or 2) - 1, 8))
 
 
-def labels_model(c: str) -> dict[str, str]:
-    """The model, effort and speed of the labels role's calls for a workspace (config.call_settings)."""
+def labels_model(c: str) -> dict[str, Any]:
+    """The model, effort and speed of the labels role's calls for a workspace, and the refusal row's
+    (config.call_settings)."""
     return config.call_settings(c, "labels")
 
 
@@ -1903,6 +1904,7 @@ async def labels_task(c: str, inp: dict, *, model: str | None = None,
             model=model_name,
             effort=role["effort"],
             speed=role["speed"],
+            refusal=role["refusal"],
             system=system,
             cwd=config.corpus_dir(c),
             on_retry=on_retry,
@@ -4696,7 +4698,8 @@ async def draft_task(c: str, inp: dict, *, model: str | None = None) -> Any:
     role = labels_model(c)
     with capture.scope("concepts draft", keep=True):
         return await model_mod.structured(prompt, tool=draft_tool(), model=model or role["model"],
-                                          effort=role["effort"], speed=role["speed"], cwd=config.corpus_dir(c))
+                                          effort=role["effort"], speed=role["speed"], refusal=role["refusal"],
+                                          cwd=config.corpus_dir(c))
 
 
 def _call_failed(call: Any) -> HTTPException:

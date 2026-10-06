@@ -1328,10 +1328,11 @@ def agent_definitions(c: str | None) -> dict[str, dict[str, Any]]:
 
 def agent_models(c: str | None) -> dict[str, dict[str, Any]]:
     """The Settings rows of the active extensions' agents, by config key ("<ext>:<name>"): the model and effort each
-    runs at, as agent_definitions resolves them (the config's, else its file's, else the orientation's subagents'
-    model and its session's effort, ''), `fast` False since it runs at its session's speed, and `extension`."""
+    runs at (the config's, else its file's, else thimble:helper's row, `subagents`, so that each names an explicit
+    effort), `fast` False since a subagent has no fast mode of its own, and `extension`."""
     conf = userconf.load_or_defaults(c)[0]
-    subagents = config.models_for(c)["subagents"]["model"]
+    helper = config.models_for(c)["subagents"]
+    subagents = helper["model"]
     out: dict[str, dict[str, Any]] = {}
     for e in active(c):
         for name in _words(e.get("agents")):
@@ -1345,7 +1346,8 @@ def agent_models(c: str | None) -> dict[str, dict[str, Any]]:
             mine = userconf.extension_agent(conf, key)
             model = str(mine["model"] or front.get("model") or "")
             out[key] = {"model": config.exact_model(model) if model else subagents,
-                        "effort": str(mine["effort"] or front.get("effort") or ""), "fast": False,
+                        "effort": config.effort_level(mine["effort"] or front.get("effort")) or helper["effort"],
+                        "fast": False,
                         "extension": e["name"]}
     return out
 
@@ -2010,7 +2012,8 @@ def consent(e: dict[str, Any], conf: dict[str, Any]) -> str:
         if role == "main":
             used["main"] = "your own settings"
         elif (a := agents_conf.get(CONFIG_AGENT.get(role, ""))) and isinstance(a, dict):
-            used[role] = _settings_words(a)
+            # what its sessions run under: main's fence's keys for a role thimble runs as main's subagent
+            used[role] = _settings_words(userconf.agent_conf(conf, CONFIG_AGENT[role]) if "agents" in conf else a)
     from . import tasks  # noqa: PLC0415 — tasks reads this module
 
     for r in e.get("tasks") or []:

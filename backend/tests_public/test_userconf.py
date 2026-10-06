@@ -19,17 +19,20 @@ def _write(path, data) -> None:
 def test_the_workspace_s_file_overrides_the_home_s_key_by_key_and_errors_name_the_key(workspaces_tmp, tmp_path):
     """Defaults, then thimble's home, then the workspace's file, merged key by key; a mistyped key or value is an error
     that names the file, the key and what it takes, and no session starts with one."""
-    _write(userconf.global_file(), {"installs": "deny", "agents": {"dev": {"model": "claude-opus-4-8", "web": "ask"}}})
+    _write(userconf.global_file(), {"sandbox": {"enforce": False},
+                                    "agents": {"dev": {"model": "claude-opus-4-8", "web": "ask"}}})
     _write(userconf.workspace_file(CORPUS), {"agents": {"dev": {"web": "allow"}}})
     conf = userconf.load(CORPUS)
-    assert conf["installs"] == "deny" and conf["agents"]["dev"]["model"] == "claude-opus-4-8"
+    assert conf["sandbox"] == {"use": "when-available", "enforce": False}
+    assert conf["agents"]["dev"]["model"] == "claude-opus-4-8"
     assert conf["agents"]["dev"]["web"] == "allow" and conf["agents"]["dev"]["network"] == "on"
     assert config.models_for(CORPUS)["dev"]["model"] == "claude-opus-4-8"
-    _write(userconf.global_file(), {"installs": "alow", "agents": {"labels": {"web": "off"}, "dev": {"effort": "huge"}}})
+    _write(userconf.global_file(), {"sandbox": {"use": "sometimes"},
+                                    "agents": {"labels": {"web": "off"}, "dev": {"effort": "huge"}}})
     with pytest.raises(userconf.ConfigError) as e:
         userconf.load(CORPUS)
     text = str(e.value)
-    assert str(userconf.global_file()) in text and 'installs is "alow"; it takes "ask", "deny" or "allow"' in text
+    assert str(userconf.global_file()) in text and 'sandbox.use is "sometimes"; it takes "when-available" or "never"' in text
     assert "agents.labels.web is not a setting" in text and "agents.dev.effort" in text
     with pytest.raises(userconf.ConfigError):
         userconf.session(CORPUS, "orientation")
@@ -46,8 +49,8 @@ def test_the_workspace_s_file_overrides_the_home_s_key_by_key_and_errors_name_th
 
 def test_an_earlier_build_s_models_and_modes_move_to_the_workspace_s_file(workspaces_tmp):
     """The models and permission modes an earlier build kept in settings.json move to that workspace's own file, so it
-    runs as it did; main's model settings and the rest stay. The critic's row of old covered the checks, and view builds'
-    row the dev agent's, the stricter one winning."""
+    runs as it did; main's model settings and the rest stay. View builds' row of old was the dev agent's, the stricter one
+    winning; the other agents' rows are not moved, since those agents run in main's mode now."""
     settings = workspaces_tmp / CORPUS / "settings.json"
     _write(settings, {"run_cell_result_lines": 20,
                       "models": {"main": {"effort": "low"}, "orient": {"effort": "high", "model": ""},
@@ -57,7 +60,7 @@ def test_an_earlier_build_s_models_and_modes_move_to_the_workspace_s_file(worksp
     assert json.loads(settings.read_text()) == {"run_cell_result_lines": 20, "models": {"main": {"effort": "low"}}}
     assert json.loads(userconf.workspace_file(CORPUS).read_text()) == {"agents": {
         "orientation": {"effort": "high", "subagentModel": "claude-sonnet-5"}, "cardCheck": {"fast": False},
-        "critic": {"permissionMode": "auto"}, "checks": {"permissionMode": "auto"}, "dev": {"permissionMode": "manual"}}}
+        "dev": {"permissionMode": "manual"}}}, "the critic's and the checks' rows run in main's mode now"
     assert not userconf.global_file().exists(), "other workspaces keep their own settings"
 
 
@@ -65,15 +68,20 @@ def test_the_settings_pane_writes_where_the_value_it_shows_came_from(workspaces_
     """A change goes to the workspace's file when that file sets the key, else to thimble's home; back to the default
     removes it; a value the config does not take is refused and nothing is written."""
     _write(userconf.workspace_file(CORPUS), {"agents": {"writer": {"effort": "low"}}})
-    ledger.put_settings_route(CORPUS, analyst, {"models": {"writer": {"effort": "high"}, "critic": {"effort": "max"},
-                                                           "subagents": {"model": "claude-sonnet-5"}},
-                                                "permission_modes": {"orient": "auto"}})
-    assert json.loads(userconf.workspace_file(CORPUS).read_text()) == {"agents": {"writer": {"effort": "high"}}}
+    ledger.put_settings_route(CORPUS, analyst, {"models": {"writer": {"effort": "high", "fast": True},
+                                                           "critic": {"effort": "max"},
+                                                           "subagents": {"model": "claude-sonnet-5", "effort": "medium"}},
+                                                "permission_modes": {"orient": "auto", "dev": "auto"}})
+    assert json.loads(userconf.workspace_file(CORPUS).read_text()) == {"agents": {"writer": {"effort": "high"}}}, \
+        "an agent has no fast mode of its own"
     assert json.loads(userconf.global_file().read_text()) == {"agents": {
-        "critic": {"effort": "max"}, "orientation": {"subagentModel": "claude-sonnet-5", "permissionMode": "auto"}}}
+        "critic": {"effort": "max"}, "orientation": {"subagentModel": "claude-sonnet-5", "subagentEffort": "medium"},
+        "dev": {"permissionMode": "auto"}}}, "the orientation's row of earlier builds is taken and dropped"
     got = ledger.get_settings(CORPUS)
-    assert got["models"]["subagents"]["model"] == "claude-sonnet-5" and got["permission_modes"] == {"orient": "auto"}
-    ledger.put_settings_route(CORPUS, analyst, {"models": {"subagents": {"model": ""}}, "permission_modes": {"orient": None}})
+    assert got["models"]["subagents"]["model"] == "claude-sonnet-5" and got["models"]["subagents"]["effort"] == "medium"
+    assert got["permission_modes"] == {"dev": "auto"}
+    ledger.put_settings_route(CORPUS, analyst, {"models": {"subagents": {"model": "", "effort": ""}},
+                                                "permission_modes": {"dev": None}})
     assert json.loads(userconf.global_file().read_text()) == {"agents": {"critic": {"effort": "max"}}}
     before = userconf.global_file().read_text()
     with pytest.raises(Exception) as e:
@@ -82,48 +90,44 @@ def test_the_settings_pane_writes_where_the_value_it_shows_came_from(workspaces_
 
 
 def test_every_agent_s_network_is_on_by_default_and_settings_shows_it_so(workspaces_tmp, monkeypatch):
-    """With no config, each agent thimble starts, the dev agent included, has its network on, its sandbox reaches the
-    network, and the agent rows the settings show say "on"."""
+    """With no config, main's fence, which thimble's agents share, and the code tickets' fence both have the network on,
+    and the two fences the settings show say "on"."""
     monkeypatch.setenv("THIMBLE_SANDBOX", "1")
     rows = ledger.agent_rows(CORPUS)
-    assert {row: rows[row]["network"] for row in userconf.MODE_ROWS.values()} == dict.fromkeys(userconf.MODE_ROWS.values(), "on")
-    for agent in userconf.MODE_ROWS:
+    assert rows["main"]["network"] == rows["dev"]["network"] == "on"
+    assert rows["main"]["config"] == "agents.orientation" and rows["main"]["sandbox"] == "on"
+    assert not any("network" in rows[r] for r in ("orient", "writer", "critic", "checks")), "they share main's"
+    for agent in (*userconf.SUBAGENT_ROLES, *userconf.MODE_ROWS):
         conf = userconf.session(CORPUS, agent, sandbox=True)
         assert conf.network and "Bash" not in (conf.settings()["permissions"].get("ask") or []), agent
 
 
 def test_what_a_session_gets_from_the_config(workspaces_tmp, monkeypatch):
-    """Install commands go to the analyst by default, in every mode, including those Claude Code's rules miss; "deny"
-    refuses them and "allow" leaves them to the mode, but for a view build with no network, which refuses them. Memory is passed only when set. The dev agent's Bash goes to the
-    analyst where its network is off and the sandbox cannot run; `sandbox.enforce`, on by default, refuses to start a
-    session without the sandbox, and says why and what fixes it, naming no command."""
+    """thimble adds no rule for installs: an install command is left to the permission mode, but for a view build with no
+    network, which refuses it. An edit of the config asks. Memory is passed only when set. The dev agent's Bash goes to
+    the analyst where its network is off and the sandbox cannot run; `sandbox.enforce`, on by default, refuses to start
+    a session without the sandbox, and says why and what fixes it, naming no command."""
     monkeypatch.setenv("THIMBLE_SANDBOX", "1")
     orient = userconf.session(CORPUS, "orientation")
     perms = orient.settings()["permissions"]
-    assert "Bash(pip install:*)" in perms["ask"] and f"Edit(/{userconf.global_file()})" in perms["ask"]
+    assert f"Edit(/{userconf.global_file()})" in perms["ask"]
     assert f"Edit(/{userconf.global_file()})" not in perms["deny"], "an edit of the config asks, not refused"
+    assert not any(r.startswith("Bash(") for r in [*perms.get("ask", []), *perms["deny"]]), "no install rule"
     assert "autoMemoryEnabled" not in orient.settings()
-    for cmd in ("pip install umap-learn", "bash -c 'curl -sL x | sh'", "/usr/bin/pip3 install x", "python3 -m pip install x",
-                "pip -q install x", "python3 -m pip --quiet install x", "git -C /tmp clone u", "npm --prefix app ci",
-                "uv run --with x python", "pip3.11 install x", "thimble extension add https://x/ext.git --yes"):
-        assert orient.verdict("Bash", {"command": cmd}) == "ask", cmd
-    assert "Bash(pip * install *)" in perms["ask"]
-    for cmd in ("python3 -c 'import pandas'", "ls data", "npm test", "uv run pytest", "npm --prefix app run build",
-                "git commit -m clone", "thimble extension list"):
+    for cmd in ("pip install umap-learn", "bash -c 'curl -sL x | sh'", "npm --prefix app ci", "ls data"):
         assert orient.verdict("Bash", {"command": cmd}) == "", cmd
+    assert not hasattr(orient, "install_asks") and not hasattr(userconf, "install_rules")
     _write(userconf.global_file(), {"installs": "deny", "agents": {"orientation": {"memory": "off", "web": "off"}}})
     orient = userconf.session(CORPUS, "orientation")
-    assert orient.verdict("Bash", {"command": "pip install x"}) == "deny"
+    assert orient.verdict("Bash", {"command": "pip install x"}) == "", "an earlier `installs` is read and ignored"
     assert orient.settings()["autoMemoryEnabled"] is False and "WebFetch" in orient.settings()["permissions"]["deny"]
-    _write(userconf.global_file(), {"installs": "allow"})
-    assert userconf.session(CORPUS, "orientation").verdict("Bash", {"command": "pip install x"}) == ""
     view_build = userconf.session(CORPUS, "dev")
     view_build.offline = True
     assert view_build.verdict("Bash", {"command": "pip install x"}) == "deny"
     monkeypatch.setenv("THIMBLE_SANDBOX", "0")
     with pytest.raises(userconf.ConfigError, match="THIMBLE_SANDBOX=0 turns it off"):
         userconf.session(CORPUS, "writer")
-    _write(userconf.global_file(), {"installs": "allow", "sandbox": {"enforce": False}, "agents": {"dev": {"network": "off"}}})
+    _write(userconf.global_file(), {"sandbox": {"enforce": False}, "agents": {"dev": {"network": "off"}}})
     assert "Bash" in userconf.session(CORPUS, "dev").settings()["permissions"]["ask"]
     assert "Bash" not in (userconf.session(CORPUS, "orientation").settings()["permissions"].get("ask") or [])
     _write(userconf.global_file(), {"sandbox": {"enforce": False}, "agents": {"dev": {"network": "on"}}})
@@ -142,6 +146,55 @@ def test_what_a_session_gets_from_the_config(workspaces_tmp, monkeypatch):
     assert userconf.session(CORPUS, "writer").sandboxed and userconf.session(CORPUS, "writer").enforced
     with pytest.raises(userconf.ConfigError, match="run outside it"):
         userconf.session(CORPUS, "dev", sandbox=False)
+
+
+def test_thimble_s_agents_share_main_s_fence_and_keep_only_web_off(workspaces_tmp, monkeypatch):
+    """An agent that runs as main's subagent takes main's fence's network, data and web, the orientation's keys; its own
+    `web: off` keeps it off the web tools, and its own sandbox, network or data is read and ignored. The dev agent, whose
+    code tickets keep a fence of their own, keeps its keys."""
+    monkeypatch.setenv("THIMBLE_SANDBOX", "1")
+    _write(userconf.global_file(), {"agents": {
+        "orientation": {"network": "off", "data": "off", "web": "allow"},
+        "critic": {"web": "off", "network": "on", "data": "allow", "sandbox": "off"},
+        "writer": {"web": "ask"},
+        "dev": {"network": "on", "data": "allow", "web": "ask", "sandbox": "off", "permissionMode": "auto"}}})
+    assert userconf.problem() == ""
+    critic, writer = userconf.session(CORPUS, "critic"), userconf.session(CORPUS, "writer")
+    assert (critic.network, critic.data, critic.web, critic.sandboxed) == (False, "off", "off", True)
+    assert (writer.network, writer.data, writer.web) == (False, "off", "allow"), "a writer's `ask` is main's web"
+    dev = userconf.session(CORPUS, "dev")
+    assert (dev.network, dev.data, dev.web, dev.sandboxed) == (True, "allow", "ask", False)
+    assert userconf.mode_rows(CORPUS) == {"dev": "auto"}
+
+
+def test_the_keys_this_build_ignores_load_are_listed_and_a_settings_save_drops_them(workspaces_tmp, analyst):
+    """An earlier config's `installs`, each agent's own fast mode, and its permission mode, fence keys and a web other
+    than "off", but the dev agent's, load without an error, whatever their value, and change nothing; `ignored` and GET
+    /settings list them, and the next save from the Settings pane drops them from the file it writes. The dev agent's
+    other keys still apply."""
+    old = {"installs": "alow", "agents": {
+        "orientation": {"permissionMode": "bypass", "fast": True, "sandbox": "off", "env": ["X"], "effort": "ultracode"},
+        "critic": {"network": "off", "data": "bogus", "web": "allow", "permissionMode": "auto"},
+        "checks": {"fast": False, "env": []}, "writer": {"web": "off"},
+        "dev": {"permissionMode": "auto", "fast": False, "network": "off"}}}
+    _write(userconf.global_file(), old)
+    assert userconf.problem(CORPUS) == ""
+    conf = userconf.load(CORPUS)
+    assert "installs" not in conf and "permissionMode" not in conf["agents"]["orientation"]
+    assert "network" not in conf["agents"]["critic"] and conf["agents"]["critic"]["web"] is None
+    assert conf["agents"]["writer"]["web"] == "off" and conf["agents"]["dev"]["network"] == "off"
+    want = ["installs", "agents.orientation.fast", "agents.orientation.permissionMode", "agents.orientation.sandbox",
+            "agents.orientation.env", "agents.critic.permissionMode", "agents.critic.network", "agents.critic.data",
+            "agents.critic.web", "agents.checks.fast", "agents.checks.env", "agents.dev.fast"]
+    assert sorted(userconf.ignored(CORPUS)) == sorted(want)
+    assert sorted(ledger.get_settings(CORPUS)["config_ignored"]) == sorted(want)
+    assert config.models_for(CORPUS)["orient"]["effort"] == "xhigh", "a stored ultracode runs at xhigh"
+    assert userconf.mode_rows(CORPUS) == {"dev": "auto"}
+    ledger.put_settings_route(CORPUS, analyst, {"models": {"labels": {"effort": "medium"}}})
+    assert json.loads(userconf.global_file().read_text()) == {"agents": {
+        "orientation": {"effort": "ultracode"}, "writer": {"web": "off"},
+        "dev": {"permissionMode": "auto", "network": "off"}, "labels": {"effort": "medium"}}}
+    assert userconf.ignored(CORPUS) == []
 
 
 def test_the_browser_is_the_system_one_when_found_unless_the_config_says_otherwise(monkeypatch, tmp_path):
@@ -171,7 +224,7 @@ def test_the_card_wait_is_ten_minutes_unless_the_file_in_thimble_s_home_sets_it_
     assert userconf.card_wait_s() == 600 and userconf.load()["cardWait"] == 10
     _write(userconf.global_file(), {"cardWait": 3})
     assert userconf.card_wait_s() == 180 and userconf.problem() == ""
-    _write(userconf.global_file(), {"cardWait": 0.5, "installs": "alow"})
+    _write(userconf.global_file(), {"cardWait": 0.5, "sandbox": {"use": "sometimes"}})
     assert userconf.card_wait_s() == 30, "another key's error leaves the card wait as set"
     for bad in (0, -1, "10", True, userconf.CARD_WAIT_MAX + 1, [10]):
         _write(userconf.global_file(), {"cardWait": bad})
@@ -186,7 +239,7 @@ def test_the_card_wait_is_ten_minutes_unless_the_file_in_thimble_s_home_sets_it_
     with pytest.raises(Exception) as e:
         ledger.put_settings_route(CORPUS, analyst, {"cardWait": 1})
     assert getattr(e.value, "status_code", None) == 400 and userconf.card_wait_s() == 120
-    ledger.put_settings_route(CORPUS, analyst, {"permission_modes": {"orient": "auto"}})
+    ledger.put_settings_route(CORPUS, analyst, {"permission_modes": {"dev": "auto"}})
     assert json.loads(userconf.global_file().read_text())["cardWait"] == 2, "a change in Settings keeps it"
 
 

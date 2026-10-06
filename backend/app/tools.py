@@ -1268,17 +1268,13 @@ def _kind_mismatch(kind: str, cell: dict) -> str:
 
 def _card_installs(ctx: Ctx, code: str, tool: str) -> str:
     """The refusal of card code that installs software or downloads files (sandbox_allow.code_installs), from an agent
-    thimble started, unless thimble's config sets `installs` to "allow"; '' otherwise. Such code runs in the kernel,
-    where no permission prompt can reach the analyst."""
-    from . import sandbox_allow, userconf  # noqa: PLC0415
+    thimble started; '' otherwise. Such code runs in the kernel, where neither a permission prompt nor Claude Code's
+    permission mode reaches it, so it is refused whatever the mode (userconf's `installs` is read and ignored)."""
+    from . import sandbox_allow  # noqa: PLC0415
 
     if not ctx.session or not code.strip():
         return ""
-    try:
-        installs = userconf.load(ctx.c)["installs"]
-    except userconf.ConfigError:
-        installs = "ask"
-    return hint("card-installs", tool=tool) if installs != "allow" and sandbox_allow.code_installs(code) else ""
+    return hint("card-installs", tool=tool) if sandbox_allow.code_installs(code) else ""
 
 
 async def _h_add_card(ctx: Ctx, args: dict[str, Any]) -> ToolResult:

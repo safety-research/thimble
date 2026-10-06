@@ -233,7 +233,8 @@ async def test_bypass_grants_every_request_and_switches_with_manual_while_the_se
     later runs keep the switch, and its row is left alone."""
     monkeypatch.setenv("FAKE_MODE", "sleep")
     _listen()
-    ledger.put_settings(CORPUS, {modes.SETTING: {"orient": "bypass"}})
+    monkeypatch.setattr(modes, "session_mode", lambda c: "bypass")  # main's mode, which the orientation runs in
+    ledger.put_settings(CORPUS, {modes.SETTING: {"dev": "auto"}})
     run = await orient_session.start(CORPUS, "")
     pid = run.pid
     assert run.mode == "bypass" and _flag(run.argv) == "default"
@@ -258,32 +259,7 @@ async def test_bypass_grants_every_request_and_switches_with_manual_while_the_se
     assert e.value.status_code == 404
     again = await orient_session.message(CORPUS, "one more look", orient_session.BROWSER)
     assert again["status"] == "resumed" and agent_session.current(CORPUS, KEY).mode == "manual", "its follow-up keeps the switch"
-    assert ledger.get_settings(CORPUS)[modes.SETTING] == {"orient": "bypass"}
-    await orient_session.stop(CORPUS)
-    await _done()
-
-
-async def test_a_switch_to_bypass_leaves_the_config_s_asks_waiting_for_the_analyst(fake, monkeypatch):
-    """A switch to Bypass grants what waits on the card, but not an install command thimble's config sent there: that
-    one waits for the analyst's own answer."""
-    monkeypatch.setenv("FAKE_MODE", "sleep")
-    _listen()
-    run = await orient_session.start(CORPUS, "")
-    assert run.mode == "manual" and run.config is not None
-    install = {"command": "bash -c 'pip install requests'"}
-    assert run.config.verdict("Bash", install) == "ask"
-    held = _ask("Bash", install)
-    plain = _ask("Bash", {"command": "rm -r out"})
-    pending = await _pending(run.chat, 2)
-    agent_session.set_mode(CORPUS, run.chat, "bypass")
-    assert (await plain)["behavior"] == "allow"
-    await asyncio.sleep(0.1)
-    assert not held.done(), "the install still waits"
-    rid = next(p["id"] for p in pending if "pip install" in p.get("command", ""))
-    assert [p.get("asked_by") for p in pending if p["id"] == rid] == ["installs"]
-    assert all(not p.get("asked_by") for p in pending if p["id"] != rid), "a call the mode asks about names no config"
-    assert agent_session.answer(CORPUS, run.chat, rid, False)
-    assert (await held)["behavior"] == "deny"
+    assert ledger.get_settings(CORPUS)[modes.SETTING] == {"dev": "auto"}
     await orient_session.stop(CORPUS)
     await _done()
 
@@ -295,7 +271,7 @@ async def test_an_edit_of_thimble_s_config_waits_for_the_analyst_in_bypass_and_r
     both files and still deny main's kept mode."""
     monkeypatch.setenv("FAKE_MODE", "sleep")
     _listen()
-    ledger.put_settings(CORPUS, {modes.SETTING: {"orient": "bypass"}})
+    monkeypatch.setattr(modes, "session_mode", lambda c: "bypass")  # main's mode, which the orientation runs in
     run = await orient_session.start(CORPUS, "")
     assert run.mode == "bypass" and run.config is not None
     perms = run.config.settings()["permissions"]

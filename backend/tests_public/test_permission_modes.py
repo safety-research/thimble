@@ -148,9 +148,10 @@ def _flag(argv: list[str]) -> str:
 
 
 async def test_each_agent_runs_in_its_row_else_in_main_s_mode_and_nothing_else_picks_one(fake, monkeypatch, analyst):
-    """An agent's mode is the analyst's pick in Settings, else the mode Claude Code reports to main's hooks. No
-    settings file, neither the corpus folder's nor the analyst's, chooses one, nor main's meta; start_orientation has no
-    mode to give; and a mode the analyst's or the org's Claude Code settings turn off is refused and never used."""
+    """Every agent runs in the mode Claude Code reports to main's hooks, but the code tickets, whose row the analyst may
+    set in Settings; the rows earlier builds had for the other agents are taken and ignored. No settings file, neither
+    the corpus folder's nor the analyst's, chooses one, nor main's meta; start_orientation has no mode to give; and a
+    mode the analyst's or the org's Claude Code settings turn off is refused and never used."""
     cwd = config.corpus_dir(CORPUS)
     (cwd / ".claude").mkdir(exist_ok=True)
     (cwd / ".claude" / "settings.json").write_text(json.dumps({"permissions": {"defaultMode": "bypassPermissions"}}))
@@ -170,13 +171,15 @@ async def test_each_agent_runs_in_its_row_else_in_main_s_mode_and_nothing_else_p
     assert modes.mode_for(CORPUS, "writer") == "manual", "another session's mode is not main's"
     await report("sid-main", "auto")
     assert [modes.mode_for(CORPUS, a) for a in modes.AGENTS] == ["auto"] * len(modes.AGENTS)
-    ledger.put_settings_route(CORPUS, analyst, {modes.SETTING: {"checks": "bypass", "writer": "manual"}})
-    assert (modes.mode_for(CORPUS, "checks"), modes.mode_for(CORPUS, "writer"), modes.mode_for(CORPUS, "critic")) == \
-        ("bypass", "manual", "auto"), "each row apart"
+    assert modes.AGENTS == ("dev",)
+    ledger.put_settings_route(CORPUS, analyst, {modes.SETTING: {"checks": "bypass", "writer": "manual", "dev": "bypass"}})
+    assert (modes.mode_for(CORPUS, "checks"), modes.mode_for(CORPUS, "writer"), modes.mode_for(CORPUS, "dev")) == \
+        ("auto", "auto", "bypass"), "an earlier build's rows are taken and ignored"
+    assert ledger.get_settings(CORPUS)[modes.SETTING] == {"dev": "bypass"}
     ledger.put_settings_route(CORPUS, analyst, {modes.SETTING: {"views": "manual"}})
-    assert modes.mode_for(CORPUS, "dev") == modes.mode_for(CORPUS, "views") == "manual", "view builds are the dev agent's"
-    ledger.put_settings_route(CORPUS, analyst, {modes.SETTING: {"writer": None}})
-    assert modes.mode_for(CORPUS, "writer") == "auto", "a row put back follows main again"
+    assert modes.mode_for(CORPUS, "dev") == modes.mode_for(CORPUS, "views") == "manual", "view builds' old row is the dev agent's"
+    ledger.put_settings_route(CORPUS, analyst, {modes.SETTING: {"dev": None}})
+    assert modes.mode_for(CORPUS, "dev") == "auto", "a row put back follows main again"
 
     assert "permissions" not in tools.schema_of("start_orientation")["properties"]
     seen: dict = {}
@@ -190,9 +193,12 @@ async def test_each_agent_runs_in_its_row_else_in_main_s_mode_and_nothing_else_p
 
     user.write_text(json.dumps({"permissions": {"disableBypassPermissionsMode": "disable"}}))
     with pytest.raises(HTTPException) as e:
-        ledger.put_settings_route(CORPUS, analyst, {modes.SETTING: {"orient": "bypass"}})
+        ledger.put_settings_route(CORPUS, analyst, {modes.SETTING: {"dev": "bypass"}})
     assert e.value.status_code == 400 and "Bypass" in e.value.detail
-    assert modes.mode_for(CORPUS, "checks") == "auto", "a Bypass turned off is not used"
+    report_mode = session.note_mode
+    report_mode(CORPUS, "sid-main", "bypassPermissions")
+    assert modes.mode_for(CORPUS, "checks") == "manual", "a Bypass turned off is not used"
+    report_mode(CORPUS, "sid-main", "auto")
     assert ledger.get_settings(CORPUS)["disabled_modes"] == ["bypass"]
     user.write_text("{}")
     remote = user.parent / "remote-settings.json"
@@ -246,12 +252,12 @@ def test_a_server_restarted_under_main_follows_its_last_reported_mode_until_main
 def test_a_continued_session_takes_a_card_s_switch_else_its_row(fake, monkeypatch):
     """A session thimble continues starts its process again with its flags, so it takes the mode a card switched its
     chat to while this server runs, else its agent's row; a chat an earlier version ran as a background session too."""
-    ledger.put_settings(CORPUS, {modes.SETTING: {"orient": "auto"}})
+    monkeypatch.setattr(modes, "session_mode", lambda c: "auto")  # main's mode, which the orientation runs in
     chat = agents.new_agent(CORPUS, "orient", "Orientation", permission_mode="bypass", background=True)["id"]
-    assert agent_session.start_mode(CORPUS, "orient", chat=chat) == "auto", "no switch: its row"
+    assert agent_session.start_mode(CORPUS, "orient", chat=chat) == "auto", "no switch: main's mode"
     monkeypatch.setitem(agent_session._switched, (CORPUS, chat), "manual")
     assert agent_session.start_mode(CORPUS, "orient", chat=chat) == "manual", "a switch while this server runs"
-    assert agent_session.start_mode(CORPUS, "orient") == "auto", "a new session: its row"
+    assert agent_session.start_mode(CORPUS, "orient") == "auto", "a new session: main's mode"
 
 
 # ----------------------------------------------------------------------------- Auto
@@ -264,7 +270,7 @@ async def test_auto_is_claude_code_s_auto_mode_and_a_call_it_refuses_waits_for_t
     shows as not run."""
     monkeypatch.setenv("FAKE_MODE", "sleep")
     _listen()
-    ledger.put_settings(CORPUS, {modes.SETTING: {"orient": "auto"}})
+    monkeypatch.setattr(modes, "session_mode", lambda c: "auto")  # main's mode, which the orientation runs in
     run = await orient_session.start(CORPUS, "")
     assert run.mode == "auto" and _flag(run.argv) == "auto"
     settings = json.loads(run.argv[run.argv.index("--settings") + 1])
@@ -313,7 +319,7 @@ async def test_a_call_auto_mode_gave_no_safety_verdict_on_goes_back_to_it_then_w
     monkeypatch.setattr(agent_session, "CLASSIFIER_WAITS_S", (0.01,))
     assert card_wait(0.004) == 0.24
     _listen()
-    ledger.put_settings(CORPUS, {modes.SETTING: {"orient": "auto"}})
+    monkeypatch.setattr(modes, "session_mode", lambda c: "auto")  # main's mode, which the orientation runs in
     run = await orient_session.start(CORPUS, "")
     reasons = ("Classifier unavailable", "Auto mode unavailable — stopped after repeated responses with no safety verdict")
     for i, reason in enumerate(reasons, 1):
@@ -333,7 +339,7 @@ async def test_a_call_auto_mode_gave_no_safety_verdict_on_goes_back_to_it_then_w
 async def test_the_hook_s_route_answers_for_the_session_its_shim_names(fake, monkeypatch):
     monkeypatch.setenv("FAKE_MODE", "sleep")
     _listen()
-    ledger.put_settings(CORPUS, {modes.SETTING: {"orient": "bypass"}})
+    monkeypatch.setattr(modes, "session_mode", lambda c: "bypass")  # main's mode, which the orientation runs in
     await orient_session.start(CORPUS, "")
     body = agent_session.PermissionRequestBody(session=KEY, tool_name="Bash", tool_input={"command": "ls"}, agent_id="a9")
     assert await agent_session.hook_request(CORPUS, body) == {"behavior": "allow",
