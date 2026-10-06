@@ -180,12 +180,12 @@ async def test_a_message_to_the_finished_agent_starts_its_next_run_and_the_short
 
 async def test_a_message_after_a_run_the_module_ended_starts_the_next_run(bridge, project, ended):
     """A run that ended by a sign the mirror does not read (the module's turn end after a TaskStop: the browser's
-    Stop, or thimble's stop when main went into plan mode, U4) leaves the agent able to continue: the message that
-    resumes it starts its next run, which ends again (live: the follow-up after a plan-mode stop was not counted)."""
+    Stop) leaves the agent able to continue: the message that resumes it starts its next run, which ends again (live:
+    the follow-up after such a stop was not counted)."""
     lv, chat, path = await _click_orientation(bridge, project)
     _write(path, _assistant({"type": "text", "text": "Reading the files."}))
     session.tail_once(lv)
-    subagents.mark_stopped_by(CORPUS, AGENT, subagents.STOPPED_PLAN)
+    subagents.mark_stopped_by(CORPUS, AGENT, subagents.STOPPED_ANALYST)
     subagents.ended(CORPUS, AGENT, "", "aborted")
     assert ended[-1][:4] == ("ended", "orientation", 0, "stopped")
     _write(path, {"type": "user", "isMeta": True, "origin": {"kind": "coordinator"},
@@ -788,13 +788,22 @@ async def _no_line() -> str:
 
 async def test_main_s_plan_mode_reaching_a_running_agent_marks_its_run(bridge, project, ended):
     """Live check L21: Claude Code adds a plan_mode attachment to a running subagent's transcript when main goes into
-    plan mode, and the agent follows it; the mirror marks its run and chat so (subagents.saw_plan_mode)."""
+    plan mode, and the agent follows it; the mirror marks its run and chat so (subagents.saw_plan_mode). When main
+    leaves plan mode Claude Code adds plan_mode_exit, and the agent goes on with its work: the mark goes, and
+    plan_mode_reentry sets it again."""
     lv, chat, path = await _click_orientation(bridge, project)
     _write(path, {"type": "user", "message": {"role": "user", "content": "the task"}},
-           {"type": "attachment", "attachment": {"type": "plan_mode", "reminderType": "full"}})
+           {"type": "attachment", "attachment": {"type": "plan_mode", "reminderType": "full", "isSubAgent": True}})
     session.tail_once(lv)
-    assert subagents.agent(CORPUS, AGENT)["plan_run"] == 0
+    assert subagents.agent(CORPUS, AGENT)["plan_run"] == 0 and subagents.ended_in_plan(CORPUS, AGENT)
     assert agents.read_meta(CORPUS, chat)["plan_mode"] is True
+    _write(path, {"type": "attachment", "attachment": {"type": "plan_mode_exit", "planExists": True}})
+    session.tail_once(lv)
+    assert subagents.agent(CORPUS, AGENT)["plan_run"] is None and not subagents.ended_in_plan(CORPUS, AGENT)
+    assert agents.read_meta(CORPUS, chat).get("plan_mode") is None
+    _write(path, {"type": "attachment", "attachment": {"type": "plan_mode_reentry", "planFilePath": "/p.md"}})
+    session.tail_once(lv)
+    assert subagents.ended_in_plan(CORPUS, AGENT) and agents.read_meta(CORPUS, chat)["plan_mode"] is True
 
 
 async def test_a_background_shell_of_thimble_s_agent_is_stopped_with_it(bridge, project, ended):

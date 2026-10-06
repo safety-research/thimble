@@ -41,7 +41,7 @@ import { countMessages, isUnread, markSeen, readSeen, type SeenMap } from './see
 import { SKIPPED_NOTE, StartGate, restoreOf, startGateShown, startedChat } from './StartGate'
 import { AgentCard, stopSession, useAgentRows } from './AgentCard'
 import { OrientStart, useOrientRun } from './OrientStart'
-import { CONTINUE_HERE_LINE, PAUSED_LINE, STOPPED_CONTINUE_LINE, continueOf, continueText, lastSession, planStoppedLine } from './subagent'
+import { CONTINUE_HERE_LINE, PAUSED_LINE, STOPPED_CONTINUE_LINE, continueOf, continueText, lastSession } from './subagent'
 import { UnfencedBanner } from '../shell/UnfencedBanner'
 import { ViewChip } from './ViewChip'
 import { replayHeld } from './pending'
@@ -1065,8 +1065,6 @@ function SessionView({ ws, id, chat, role, title, running, outbox = [], fromMain
   const here = orient && !running && meta?.status === 'stopped' && meta.stopped_by === 'quit' && meta.continue === 'here'
   // stopped with Esc, which Claude Code resumes no more: a message starts a continuation in this thread (U2)
   const escStopped = orient && !running && meta?.continue === 'stopped-by-user'
-  // stopped by thimble when main went into plan mode: the thread ends saying so, and how to go on once main leaves it (U4)
-  const planStopped = planStoppedLine(meta, running)
   // a message sent from here is shown until the log holds it (a follow-up's first record)
   const landed = landedTexts(chat.rows)
   const sending = outbox.filter((m) => !landed.has(m.text.trim()))
@@ -1078,7 +1076,6 @@ function SessionView({ ws, id, chat, role, title, running, outbox = [], fromMain
       <Rows rows={rows} ws={ws} chat={id} calls={orient ? id : undefined} live={running} />
       {here && <Note className="chat-continue-here" text={CONTINUE_HERE_LINE} />}
       {escStopped && <Note className="chat-continue-here" data-continue="stopped-by-user" text={STOPPED_CONTINUE_LINE} />}
-      {planStopped && <Note className="chat-continue-here" data-stopped-by="plan" text={planStopped} />}
       {sending.map((m, i) => (
         <PendingMessage key={`s:${i}:${m.text}`} text={m.text} ws={ws} held={!!m.held} />
       ))}
@@ -1114,8 +1111,6 @@ type TicketWithShots = Ticket & { source?: string; before_shot?: string | null; 
 function ViewBuildView({ ws, id, chat, slug }: { ws: string; id: string; chat: ChatState; slug: string }) {
   const p = findProposal(useProposals(ws), slug)
   const parts = useMemo(() => viewBuildParts(chat.rows), [chat.rows])
-  // its builder stopped by thimble as main went into plan mode: the thread ends saying so, and that Retry goes on (U4)
-  const planStopped = planStoppedLine(chat.meta?.id === id ? chat.meta : null, chat.running)
   return (
     <>
       {p && <SpecCard className="chat-proposal" title="Proposal" lead={firstSentence(`${p.why} ${p.arrangement}`)} full={[p.why, p.arrangement].filter(Boolean).join('\n\n')} end={<ViewChip ws={ws} slug={p.slug} name={p.name} />} data-anchor={`view:${p.slug}`} />}
@@ -1129,7 +1124,6 @@ function ViewBuildView({ ws, id, chat, slug }: { ws: string; id: string; chat: C
           </Fragment>
         )
       })}
-      {planStopped && <Note className="chat-continue-here" data-stopped-by="plan" text={planStopped} />}
     </>
   )
 }

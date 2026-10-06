@@ -184,6 +184,12 @@ def subagent_ended(c: str, run: subagents.Run, status: str, summary: str) -> Non
     subagents.tell_main(c, WRITTEN_KIND, {"text": summary or "", "status": status, "doc": doc})
 
 
+def left_work(c: str, run: subagents.Run) -> bool:
+    """Whether the writer's run saved its document (subagents.Type.left_work), so that main's plan mode at its end is
+    no failure."""
+    return report_types.write_saved(c, run.key.split(":", 1)[-1])
+
+
 def subagent_refused(c: str, req: dict[str, Any]) -> None:
     """A writer's start that did not happen: its document's card shows the refusal with its kind, and its pending
     write ends (report_types.write_refused)."""

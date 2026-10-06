@@ -516,16 +516,30 @@ async def test_the_analyst_s_stop_and_main_s_quit_end_a_build_failed_with_retry(
     assert "stopped_by" not in _prop(other), "Retry clears it"
 
 
-async def test_plan_mode_s_stop_ends_a_build_failed_with_retry_saying_why_and_a_review_stopped(board, bridge, gates):
-    """U4: thimble stopped the builder when main went into plan mode: the view fails with the plan line (why, and to
-    choose Retry once main leaves plan mode), with no repair; nothing starts again by itself."""
+async def test_a_build_main_s_plan_mode_held_at_its_end_fails_with_retry_saying_why_and_no_repair(board, bridge, gates):
+    """Main went into plan mode while a builder ran, and thimble stopped nothing, as Claude Code stops no subagent then:
+    the builder followed main and could only read and plan. A build that ends there with no view that passes fails
+    with Retry and the line that says why, and no repair starts; an orientation's proposal shows in the views list,
+    failed. A builder that left a passing view before plan mode held it is built, as the gate says after any run."""
     slug = _propose(orientation=True)
     agent = await _started(slug, route=subagents.FOLLOW_ON)
-    assert await subagents.stop_for_plan(CORPUS) == [agent]
-    subagents.run_ended(CORPUS, agent, "stopped", "", source="notification")
-    await _until(lambda: _prop(slug).get("status") == "failed", "the stopped build never failed")
-    assert _prop(slug)["error"] == subagents.plan_line("view-builder") and "Retry" in _prop(slug)["error"]
-    assert len(bridge.ops("spawn")) == 1, "no repair and no new start"
+    subagents.saw_plan_mode(CORPUS, agent)
+    subagents.run_ended(CORPUS, agent, "done", "My plan is in the plan file.", source="handback")
+    await _until(lambda: _prop(slug).get("status") == "failed", "the build plan mode held never failed")
+    line = subagents.plan_failed_line("view-builder")
+    assert _prop(slug)["error"] == line and line.endswith(", then choose Retry on the view.")
+    assert len(bridge.ops("spawn")) == 1, "no repair"
+    assert slug not in views.held_slugs(CORPUS), "the views list shows it"
+    views.retry(CORPUS, slug, {})
+    assert _prop(slug)["status"] == "queued", "Retry builds it again"
+    dev.stop_view(CORPUS, slug, dev.VIEW_STOPPED)
+
+    built = _propose("Threads", asked=True)
+    theirs = await _started(built)
+    _draft(built)
+    subagents.saw_plan_mode(CORPUS, theirs)
+    subagents.run_ended(CORPUS, theirs, "done", "I wrote the view before plan mode came.", source="handback")
+    await _until(lambda: _prop(built).get("status") == "built", "the view it left was not built")
 
 
 async def test_main_s_quit_stops_a_change_to_a_built_view_which_says_so_and_keeps_the_view(board, bridge, gates,
@@ -777,6 +791,28 @@ async def test_a_reviewer_that_ends_without_finish_review_has_its_edit_gated_onc
     await _until(lambda: (_prop(slug).get("review") or {}).get("state") == "done", "the review never ended")
     assert (folder / views.VIEW_HTML).read_text() == "<p>v1</p>"
     assert _prop(slug)["review"]["note"] == view_review.REVISION_FAILED_NOTE
+
+
+async def test_a_review_main_s_plan_mode_held_at_its_end_fails_saying_why_unless_it_finished(board, bridge, gates,
+                                                                                                pictures, hints):
+    """A reviewer main's plan mode held at its end, which could only read and plan, did not finish its review: the
+    review fails with the line that says why and to choose Review again, not done. One that finished it (finish_review)
+    before plan mode held it is done."""
+    slug = _propose(asked=True)
+    reviewer, _ = await _reviewed(slug)
+    subagents.saw_plan_mode(CORPUS, reviewer)
+    subagents.run_ended(CORPUS, reviewer, "done", "My plan is in the plan file.", source="handback")
+    await _until(lambda: (_prop(slug).get("review") or {}).get("state") == "failed", "the review never failed")
+    line = subagents.plan_failed_line("view-reviewer")
+    assert _prop(slug)["review"]["note"] == line and line.endswith(", then choose Review again on the view.")
+    other = _propose("Threads", asked=True)
+    second, key = await _reviewed(other)
+    res = await _call("finish_review", {"left": ["a taste in colours"]}, second, key)
+    assert res.text.endswith(tools.hint("finish-review-done"))
+    subagents.saw_plan_mode(CORPUS, second)
+    subagents.run_ended(CORPUS, second, "done", "Reviewed.", source="handback")
+    await _until(lambda: not view_review.running(CORPUS, other), "the reviewer never ended")
+    assert subagents.agent(CORPUS, second)["status"] == "done" and _prop(other)["review"]["state"] == "done"
 
 
 async def test_a_build_s_pass_starts_its_review_as_a_follow_on_start(board, bridge, gates, pictures, monkeypatch):

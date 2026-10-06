@@ -248,8 +248,7 @@ export function stopSession(ws: string, chat: string, role: string): Promise<boo
     .catch((e: Error) => (bus.emit('toast', { text: stopFailedLine(e.message), kind: 'error' }), false))
 }
 
-/** Write again on a writer that main's quit, or main's plan mode, stopped: its request made anew as a click
- * (subagents.again). */
+/** Write again on a writer that main's quit stopped: its request made anew as a click (subagents.again). */
 function WriteAgain({ ws, request }: { ws: string; request: string }) {
   const [busy, setBusy] = useState(false)
   return (
@@ -281,7 +280,7 @@ export function SubagentNotes({ ws, meta, running, noModule = false, back = fals
   // the terminal shows it only in the Claude Code session it ran in
   const here = running || continueOf(meta, mainSid) === 'here'
   const stopped = stoppedLine(meta, back && meta?.continue === 'here')
-  const again = meta?.role === 'writer' && (meta.stopped_by === 'quit' || meta.stopped_by === 'plan') && !running && meta.request
+  const again = meta?.role === 'writer' && meta.stopped_by === 'quit' && !running && meta.request
   return (
     <div className="chat-sub-notes" data-paused={meta?.paused ?? undefined}>
       {running && meta?.paused === 'critique' && (

@@ -37,8 +37,8 @@ export function terminalLine(m: Pick<ChatMeta, 'agent_type' | 'role'> | null | u
 
 /** Why the agent's card says it stopped, or ''. An orientation main's quit stopped says how to continue it while no
  * session is back (`back` false); once `thimble --continue` brought main back, its thread says a message continues it
- * (CONTINUE_HERE_LINE). One thimble stopped when main went into plan mode says so, and how to go on (planLine). */
-export function stoppedLine(m: Pick<ChatMeta, 'status' | 'stopped_by' | 'role' | 'route' | 'agent_type'> | null | undefined, back = false): string {
+ * (CONTINUE_HERE_LINE). */
+export function stoppedLine(m: Pick<ChatMeta, 'status' | 'stopped_by' | 'role' | 'route'> | null | undefined, back = false): string {
   if (!m || m.status !== 'stopped' || !isSubagent(m)) return ''
   if (m.stopped_by === 'quit') {
     return m.role === 'orient' && !back
@@ -47,38 +47,7 @@ export function stoppedLine(m: Pick<ChatMeta, 'status' | 'stopped_by' | 'role' |
   }
   if (m.stopped_by === 'analyst') return 'Stopped.'
   if (m.stopped_by === 'user') return 'Stopped with Esc in your terminal.'
-  if (m.stopped_by === 'plan') return planLine(m.role, m.agent_type)
   return ''
-}
-
-/** How a run thimble stopped when main went into plan mode goes on once main leaves it, by its agent's role (backend
- * subagents.PLAN_HOW). A view's build, its review and a code ticket share the chat role `dev`, so the agent's type
- * names the role; a chat without one goes by its chat role (PLAN_CHAT_ROLES). */
-const PLAN_HOW: Record<string, string> = {
-  orientation: 'send it a message to continue it',
-  critic: 'send the orientation a message to continue it',
-  writer: 'choose Write again',
-  'view-builder': 'choose Retry on the view',
-  'view-reviewer': 'choose Review again on the view',
-  check: 'choose Run on the check',
-  'dev-ticket': 'choose Retry on the ticket',
-}
-const PLAN_CHAT_ROLES: Record<string, string> = { orient: 'orientation', step: 'critic', writer: 'writer', dev: 'view-builder', check: 'check' }
-
-/** The line of a run thimble stopped through Claude Code when main went into plan mode, where its agents would have to
- * ask before every step: why, and how to go on (backend subagents.plan_line), by the agent's type (`thimble:<role>`)
- * where it is known, else by its chat's role. */
-export function planLine(role: string | null | undefined, agentType?: string | null): string {
-  const own = agentType?.startsWith('thimble:') ? agentType.slice('thimble:'.length) : ''
-  const how = PLAN_HOW[own] ?? PLAN_HOW[PLAN_CHAT_ROLES[role ?? ''] ?? ''] ?? 'start it again'
-  return `Stopped when your Claude Code session went into plan mode, where thimble's agents would have to ask you before every step. Leave plan mode (shift+tab in your terminal), then ${how}.`
-}
-
-/** The line a thread ends with once thimble stopped its run as main went into plan mode (planLine), or null: an
- * orientation's, a writer's or a check's thread (ChatPanel SessionView) and a view's build (ViewBuildView), whose
- * transcript's own end says only "stopped". Pure. */
-export function planStoppedLine(m: Pick<ChatMeta, 'status' | 'stopped_by' | 'role' | 'agent_type'> | null | undefined, running: boolean): string | null {
-  return !running && m?.status === 'stopped' && m.stopped_by === 'plan' ? planLine(m.role, m.agent_type) : null
 }
 
 export type Continue = 'here' | 'earlier-session' | 'earlier-version' | 'stopped-by-user' | null
