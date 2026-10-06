@@ -59,13 +59,13 @@ def definition(c: str) -> dict[str, Any]:
     """The registration of `thimble:writer` for workspace `c` (subagents.roles adds its model, effort and
     `background`): writer.md's body, its frontmatter's description, shared.md as the skill `thimble:shared`, and the
     thimble tools that are not a writer's taken away."""
-    from . import agent_session, cli, prompts, userconf  # noqa: PLC0415
+    from . import cli, prompts, userconf  # noqa: PLC0415
 
     with prompts.custom(userconf.prompt_files(c, "writer")):
         _, agent = cli.agent_definition(AGENT)
     out = {k: agent[k] for k in ("description", "prompt") if k in agent}
     out["skills"] = list(dict.fromkeys([*SKILLS, *(agent.get("skills") or [])]))
-    out["disallowedTools"] = agent_session.not_own(OWN_TOOLS)
+    out["disallowedTools"] = tools.not_own(OWN_TOOLS)
     return out
 
 

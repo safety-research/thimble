@@ -200,8 +200,6 @@ def roles(c: str) -> dict[str, Role]:
     /api/module/roles): each of TYPES's with its fixed prompt and description, the full model id and explicit effort of
     Settings (values_for), `background: true`, `disallowedTools` with the web tools when its agent's `web` is off and
     `omitClaudeMd` when its `memory` is off; then the extensions' agents (extension_types)."""
-    from . import agent_session  # noqa: PLC0415 — its kept part holds the thimble tools' names
-
     out: dict[str, Role] = {}
     for role, t in TYPES.items():
         try:
@@ -214,7 +212,7 @@ def roles(c: str) -> dict[str, Role]:
         conf = _agent_conf(c, t.agent)
         denied = list(d.get("disallowedTools") or [])
         if conf.get("web") == "off":
-            denied += list(agent_session.WEB_TOOLS)
+            denied += list(tools.WEB_TOOLS)
         if denied:
             d["disallowedTools"] = list(dict.fromkeys(denied))
         if conf.get("memory") == "off":
@@ -1297,11 +1295,9 @@ def _stop_background(short: str) -> None:
     never raises."""
     import subprocess  # noqa: PLC0415
 
-    from . import agent_session  # noqa: PLC0415
-
     try:
         subprocess.run([config.CLAUDE_BIN, "stop", short], capture_output=True, text=True, timeout=30,
-                       env=agent_session.environ())
+                       env=config.launch_environ())
     except (OSError, subprocess.SubprocessError):
         log.debug("background session %s was not stopped", short, exc_info=True)
 

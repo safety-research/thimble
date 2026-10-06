@@ -113,6 +113,28 @@ async def test_critique_writes_the_brief_and_gives_the_orientation_its_agent_cal
     assert agents.read_meta(CORPUS, chat).get("paused") is None, "the report continues the orientation's run"
 
 
+async def test_a_critic_start_the_orientation_never_makes_ends_with_its_run(bridge, models, workspaces_tmp,
+                                                                            monkeypatch):
+    """The R3 check of main's turns skips an agent's own starts, so the orientation's end refuses a critic start its
+    `critique` call made and its Agent call never claimed: it waits no more, and a late call of it is denied."""
+    from app import orient_session
+
+    async def no_checks(c, chat=None):
+        return None
+
+    monkeypatch.setattr(critique_session, "checks_text", no_checks)
+    ans = await orient_session.start(CORPUS, "", ["final"], critique=True, route=subagents.CLICK)
+    ctx = type("Ctx", (), {"c": CORPUS, "session": "orient", "tool_use_id": "toolu_cq"})()
+    res = await critique_session.tool_critique(ctx, {"context": "My account."})
+    inp = json.loads(res.text.split("AGENT CALL ", 1)[1].splitlines()[0])
+    subagents.run_ended(CORPUS, ans.agent_id, "done", "The analysis.", source="handback")
+    r = next(r for r in subagents.read(CORPUS)["requests"].values() if r["role"] == "critic")
+    assert (r["state"], r["refused_kind"], r["reason"]) == ("refused", "no-call", critique_session.NEVER_STARTED)
+    with subagents.update(CORPUS) as state:
+        late = {"tool_name": "Agent", "tool_use_id": "toolu_late", "tool_input": inp, "agent_id": ans.agent_id}
+        assert sf.check_call(state, late) is not None, "a late call of it is denied"
+
+
 async def test_critique_is_the_orientation_s_alone(bridge, models, workspaces_tmp):
     ctx = type("Ctx", (), {"c": CORPUS, "session": None, "tool_use_id": "t"})()
     res = await critique_session.tool_critique(ctx, {})

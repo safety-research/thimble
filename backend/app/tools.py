@@ -343,6 +343,21 @@ def list(role: str = ANALYST, session: str | None = None) -> "builtins.list[dict
     return [{"name": n, "description": secs[n][0], "input_schema": secs[n][1]} for n in names]
 
 
+PLUGIN_NAME = "thimble"  # the plugin's name (orientation.PLUGIN), the scope of its MCP server's tools
+WEB_TOOLS = ("WebFetch", "WebSearch")  # Claude Code's web tools, which an agent's `web: off` takes away
+
+
+def thimble_tool(name: str) -> str:
+    """A thimble tool's name as a subagent of main or a session thimble starts sees it, from the plugin's server."""
+    return f"mcp__plugin_{PLUGIN_NAME}_{SERVER_NAME}__{name}"
+
+
+def not_own(own: "builtins.list[str] | tuple[str, ...]") -> "builtins.list[str]":
+    """The thimble tools of the registry not in `own`, as an agent sees them: its disallowedTools, which leave it its own
+    thimble tools beside Claude Code's."""
+    return [thimble_tool(n) for n in REGISTRY if n not in own]
+
+
 def allowed_tools(role: str) -> "builtins.list[str]":
     """The `allowed_tools` names of a worker's thimble tools: mcp__thimble__<tool> per tool of the role."""
     role_of(role)

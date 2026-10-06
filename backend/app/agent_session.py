@@ -62,7 +62,7 @@ from urllib.parse import urlsplit
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
-from . import agents, cc_settings, config, hook_auth, modes, orientation, permission_hook, sandbox_allow, session, tools, \
+from . import agents, cc_settings, config, hook_auth, modes, permission_hook, sandbox_allow, session, tools, \
     userconf
 from .ledger import atomic_write_text
 
@@ -137,7 +137,7 @@ RETRY_PROMPT = "session-retry"  # prompts/tools.md: the stdin prompt of a sessio
 LATER_TOOLS = ("ScheduleWakeup", "CronCreate", "CronDelete", "CronList")
 # The web tools, which ask in a session in manual mode whatever else allows them (module note, the web), the process
 # modes they ask in, and the workspace's file of the web rules the analyst kept, {"allow": [rule, ...]}.
-WEB_TOOLS = ("WebFetch", "WebSearch")
+WEB_TOOLS = tools.WEB_TOOLS
 WEB_ASK_MODES = ("default", "acceptEdits")
 WEB_RULES_FILE = "web_rules.json"
 WORKSPACE = "workspace"  # the `destination` of a "don't ask again" update kept for the workspace, never sent to Claude Code
@@ -262,15 +262,8 @@ def with_web_asks(settings: dict[str, Any], process_mode: str) -> dict[str, Any]
     return {**settings, "permissions": perms} if perms or "permissions" in settings else settings
 
 
-def thimble_tool(name: str) -> str:
-    """A thimble tool's name as a session sees it, from the plugin's server."""
-    return f"mcp__plugin_{orientation.PLUGIN}_{tools.SERVER_NAME}__{name}"
-
-
-def not_own(own: "list[str] | tuple[str, ...]") -> list[str]:
-    """The thimble tools of the registry not in `own`, as the session sees them: its --disallowedTools, which leave a
-    session with its own thimble tools beside Claude Code's."""
-    return [thimble_tool(n) for n in tools.REGISTRY if n not in own]
+thimble_tool = tools.thimble_tool  # a thimble tool's name as a session sees it
+not_own = tools.not_own  # the session's --disallowedTools of thimble's tools, which leave it its own
 
 
 def environ() -> dict[str, str]:

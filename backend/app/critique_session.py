@@ -78,13 +78,13 @@ def definition(c: str) -> dict[str, Any]:
     """The registration of `thimble:critic` for workspace `c` (subagents.roles adds its model, effort and
     `background`): critic.md's body, its frontmatter's description, shared.md as the skill `thimble:shared`, and the
     thimble tools that are not the critic's taken away."""
-    from . import agent_session, cli, prompts, userconf  # noqa: PLC0415
+    from . import cli, prompts, userconf  # noqa: PLC0415
 
     with prompts.custom(userconf.prompt_files(c, "critic")):
         _, agent = cli.agent_definition(AGENT)
     out = {k: agent[k] for k in ("description", "prompt") if k in agent}
     out["skills"] = list(dict.fromkeys([*SKILLS, *(agent.get("skills") or [])]))
-    out["disallowedTools"] = agent_session.not_own(OWN_TOOLS)
+    out["disallowedTools"] = tools.not_own(OWN_TOOLS)
     return out
 
 
@@ -495,6 +495,23 @@ async def tool_critique(ctx: Any, args: dict[str, Any]) -> Any:
     if caller.agent_id:
         subagents.set_paused(ctx.c, caller.agent_id, "critique")
     return tools.ok(tools.hint("critique-subagent", input=json.dumps(ans["input"], ensure_ascii=False)))
+
+
+NEVER_STARTED = "the orientation ended its run without starting the critic"  # a critic start it never made (expire)
+
+
+def expire_pending(c: str, orient: subagents.Run) -> list[str]:
+    """The orientation's run ended: a critic start its `critique` call made and its own Agent call never claimed is
+    refused (kind no-call), so it waits no more and --agent-check denies a late call of it. The R3 check of main's turns
+    skips an agent's own starts, so nothing else ends it. The request ids refused."""
+    key = session_key(orient.key)
+    out = []
+    for rid, r in list((subagents.read(c).get("requests") or {}).items()):
+        if (isinstance(r, dict) and r.get("kind") == "start" and r.get("key") == key and r.get("caller_role")
+                and r.get("state") == "pending"):
+            subagents.refuse(c, rid, NEVER_STARTED, subagents.NO_CALL)
+            out.append(rid)
+    return out
 
 
 def subagent_started(c: str, run: subagents.Run, req: dict[str, Any]) -> None:
