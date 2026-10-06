@@ -888,14 +888,19 @@ def _resume_work(c: str) -> None:
             log.exception("%s: the work left waiting did not go on", c)
 
 
+STOP_AFTER_S = 3.0  # after main's end, how long the server waits before it stops itself (_stop_server)
+
+
 async def _stop_server() -> None:
     """No workspace has a main session: what still runs in any workspace stops as main's end stops it, the kernels end,
-    and the server stops itself (cli.stop_self)."""
+    and the server stops itself (cli.stop_self), STOP_AFTER_S later, so a page that is open reads main's end and shows
+    the session-gone card before its stream closes (live check L10), and a session that attaches meanwhile keeps it."""
     from . import cli, notebook  # noqa: PLC0415
 
     for c in sorted(agents.at_work()):
         with contextlib.suppress(Exception):
             await agents.stop_all(c)
+    await asyncio.sleep(STOP_AFTER_S)
     if _live or _shutting_down():
         return
     with contextlib.suppress(Exception):

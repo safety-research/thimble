@@ -3,9 +3,9 @@
 // too) that gives the command to reconnect. thimble's agents are subagents of that session, so they stopped with it:
 // the card names them, and says that a message continues the orientation once the session is back
 // (stoppedAgentsLine). A code ticket's session goes on without main, so the permission card with its requests shows
-// under the card, where it can be answered. It goes when a session attaches, and is not shown while
-// the stream is down. A session that takes main over from another terminal is followed at once, with a toast. A
-// workspace `thimble demo` installed from a pre-cache is read without a session until the first attaches, so the card
+// under the card, where it can be answered. It goes when a session attaches, and is not shown while the stream is
+// down, unless main's session had ended before it went down (the server stops itself after a quit). A session that
+// takes main over from another terminal is followed at once, with a toast. A workspace `thimble demo` installed from a pre-cache is read without a session until the first attaches, so the card
 // waits for that session's end there (chat/Precached offers the attach command in the orientation's thread).
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
@@ -90,10 +90,12 @@ export function stoppedAgentsLine(metas: Iterable<ChatMeta>): string {
   return `thimble's agents stopped with it: ${list}.${orient ? ' Once it is back, send the orientation a message to continue it.' : ''}`
 }
 
-/** Whether main's meta, once loaded, has no session attached while the stream is up; in a pre-cached workspace, only
- * once a session attached and ended. Pure. */
+/** Whether main's meta, once loaded, has no session attached while the stream is up, or after main's session ended
+ * (`ended`), also once the stream went down: the server stops itself soon after the analyst quits, and the card, not
+ * the server-down line, says what to run (live check L10); in a pre-cached workspace, only once a session attached and
+ * ended. Pure. */
 export function isGone(main: ChatMeta | null | undefined, streamUp: boolean, precached = false): boolean {
-  return !!main && !main.attached && streamUp && !(precached && !main.ended)
+  return !!main && !main.attached && (streamUp || !!main.ended) && !(precached && !main.ended)
 }
 
 /** Whether main's session is `session`, which took main from `after` in another terminal, while this tab followed

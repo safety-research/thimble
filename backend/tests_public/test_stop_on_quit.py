@@ -86,6 +86,7 @@ def test_the_server_stops_itself_once_no_workspace_has_a_main_session(monkeypatc
     monkeypatch.setattr(agents, "at_work", lambda: {"idle"})
     stops: list[int] = []
     monkeypatch.setattr(cli, "stop_self", lambda: stops.append(1))
+    monkeypatch.setattr(session, "STOP_AFTER_S", 0.05)
 
     async def main_ends() -> None:
         session._stop_agents("w")
@@ -100,6 +101,34 @@ def test_the_server_stops_itself_once_no_workspace_has_a_main_session(monkeypatc
     asyncio.run(main_ends())
     assert stopped == ["w", "w", "idle"], "what another workspace still runs stops too"
     assert stops == [1]
+
+
+def test_the_server_waits_before_it_stops_so_the_page_reads_main_s_end_and_a_new_main_keeps_it(monkeypatch):
+    """Live check L10: the server stopped itself within a second of main's quit, so the open page never read main's end
+    and showed "thimble's server is not answering" instead of the session-gone card. It waits STOP_AFTER_S first, and a
+    session that becomes main meanwhile keeps it running."""
+    async def stop_all(c):
+        return []
+
+    monkeypatch.setattr(agents, "stop_all", stop_all)
+    monkeypatch.setattr(agents, "at_work", lambda: set())
+    stops: list[int] = []
+    monkeypatch.setattr(cli, "stop_self", lambda: stops.append(1))
+    monkeypatch.setattr(session, "STOP_AFTER_S", 0.3)
+    assert session.STOP_AFTER_S > 0
+
+    async def main_ends(back: bool) -> list[int]:
+        session._stop_agents("w")
+        await asyncio.sleep(0.15)
+        seen = list(stops)
+        if back:
+            session._live["w"] = object()
+        await asyncio.sleep(0.3)
+        session._live.pop("w", None)
+        return seen
+
+    assert asyncio.run(main_ends(back=True)) == [] and stops == [], "a session that came back keeps the server"
+    assert asyncio.run(main_ends(back=False)) == [] and stops == [1], "it stops only after the wait"
 
 
 async def _running_build(c: str, slug: str) -> "asyncio.Task":

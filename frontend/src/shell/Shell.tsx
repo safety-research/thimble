@@ -329,7 +329,7 @@ export function Shell({ ws }: { ws: string }) {
       <CmdPointer ws={ws} />
       <Toasts />
       <TourHost />
-      <ServerDown />
+      {!gone && <ServerDown />}
       <NewVersion />
       {gone && <SessionGone gone={gone} ws={ws} />}
     </div>

@@ -36,6 +36,9 @@ test('a pre-cached workspace is read without a session until one attached and en
   expect(isGone(MAIN, true, true)).toBe(false)
   expect(isGone({ ...MAIN, ended: { session: 's', cwd: '/srv' } } as unknown as ChatMeta, true, true)).toBe(true)
   expect(isGone(MAIN, true, false)).toBe(true)
+  // the stream down: a restart shows no card, but a session that ended before the server stopped itself does (L10)
+  expect(isGone(MAIN, false, false)).toBe(false)
+  expect(isGone({ ...MAIN, ended: { session: 's', cwd: '/srv' } } as unknown as ChatMeta, false, false)).toBe(true)
   expect(isGone({ ...MAIN, attached: { session: 's' } } as unknown as ChatMeta, true, true)).toBe(false)
 })
 
