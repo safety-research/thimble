@@ -60,13 +60,15 @@ run without the mod; plain `claude` in the folder uses it.
 The mod and Claude write only under `.thimble-cc-mod/` in the folder.
 
 **Sandbox.** Some scripts the mod runs itself, on a click: a card's script run again, a verification script, a view's
-checks (which run its reader), the file browser and a label's run. Claude Code's sandbox covers only its own tools'
-calls, so the mod sandboxes these scripts as thimble's browser mode sandboxes its notebook kernels. On Linux they run in
-bubblewrap. On macOS they run in Anthropic's sandbox runtime (Seatbelt), which needs Node 20.11 or newer and a thimble
-install, since the runtime comes with thimble. In the sandbox a script reads the folder, the Python and Node it runs
-with and the mod's folder. It writes only `.thimble-cc-mod/` and keeps the network. Where no sandbox can run, the
-scripts run as before, with your access, and the transcript says so once. `/thimble-cc-mod` shows which sandbox is in
-use. `THIMBLE_KERNEL_WRAP=none|bwrap|srt` picks one, as it does in browser mode (`helper/sandbox.py`).
+checks (which run its reader) and the drawings its reviewer reads, the file browser and a label's run. Claude Code's
+sandbox covers only its own tools' calls, so the mod sandboxes these scripts as thimble's browser mode sandboxes its
+notebook kernels. On Linux they run in bubblewrap. On macOS they run in Anthropic's sandbox runtime (Seatbelt), which
+needs Node 20.11 or newer and a thimble install, since the runtime comes with thimble. In the sandbox a script reads the
+folder, the Python and Node it runs with and the mod's folder. It writes only `.thimble-cc-mod/` and keeps the network.
+Like a notebook kernel, it inherits no environment variable that looks like a secret, such as `ANTHROPIC_API_KEY` or a
+name containing `TOKEN`. Where no sandbox can run, the scripts run as before, with your access, and the transcript says
+so once. `/thimble-cc-mod` shows which sandbox is in use. `THIMBLE_KERNEL_WRAP=none|bwrap|srt` picks one, as it does in
+browser mode (`helper/sandbox.py`).
 
 How the mod draws, its grid, type, colour and symbols, each with one meaning, is written in `views/SPEC.md`
 ("The visual system"): bold marks only what is new, red only a problem, a palette hue only a value of a category.

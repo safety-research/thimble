@@ -218,7 +218,9 @@ async function paths($: Dollar): Promise<void> {
 // The scripts the mod runs itself (a card's script run again, a verification script, a view's checks, the file
 // browser's helper, a label's run) run model-written code on a click, outside Claude Code's tools and so outside its
 // sandbox. They run in the sandbox browser mode's kernels run in (hooks/sandbox.ts, helper/sandbox.py), planned once a
-// session and kept here, never in .thimble-cc-mod/, which the scripts can write.
+// session and kept here, never in .thimble-cc-mod/, which the scripts can write. So do the helpers that read or copy
+// files there for the mod (a view's drawings for its reviewer, the copy of a view kept for its review), since a script
+// can replace those files with links out of the folder.
 
 let planned: Promise<SandboxPlan> | null = null
 let unboxedSaid = false
@@ -4714,20 +4716,22 @@ async function viewChanged($: Dollar, slug: string): Promise<void> {
 }
 
 /** The view as the review found it, kept in reviewed/ before a builder fixes it (`keep`), and put back when the fixes
- *  never pass the checks (`restore`), by the helper, which copies rows.json's parts too. */
+ *  never pass the checks (`restore`), by the helper, which copies rows.json's parts too. It runs in the scripts'
+ *  sandbox, since a script can replace the folders it copies between with links out of the folder. */
 async function copyReviewed($: Dollar, slug: string, op: 'keep' | 'restore'): Promise<void> {
-  await $.process.run(['python3', `${root}/helper/viewpipe.py`, op, slug, '--root', cwd], { cwd, timeoutMs: 120000 }).catch(() => undefined)
+  await boxRun($, ['python3', `${root}/helper/viewpipe.py`, op, slug, '--root', cwd], { cwd, timeoutMs: 120000 }).catch(() => undefined)
   if (op === 'restore') await viewChanged($, slug)
 }
 
 /** The view drawn as the reviewer reads it: every tab as it opens and with its first row selected, 96 columns wide,
- *  then the first tab 66 wide; saved as render.txt beside the view. */
+ *  then the first tab 66 wide; saved as render.txt beside the view. Drawn in the scripts' sandbox, as the checks draw
+ *  it, since a script can replace the files it reads with links out of the folder. */
 async function drawingsOf($: Dollar, slug: string): Promise<string> {
   const dir = `${cwd}/${HOME}/views/${slug}`
   const base = ['node', `${root}/tools/render_view.mjs`, '--spec', `${dir}/view.json`, '--rows', `${dir}/rows.json`, '--plain', '--height', '48']
   const run = async (more: string[]) => {
     try {
-      const r = await $.process.run([...base, ...more], { cwd, timeoutMs: 120000 })
+      const r = await boxRun($, [...base, ...more], { cwd, timeoutMs: 120000 })
       return r.exitCode === 0 ? r.stdout : `(the drawing failed: ${clip(r.stderr, 300)})`
     } catch (err) {
       return `(the drawing failed: ${clip(String(err), 300)})`

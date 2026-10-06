@@ -1,6 +1,7 @@
 """The sandbox of the scripts thimble-cc-mod runs itself: a card's script run again, a verification script, a view's
-checks (which run its reader), the file browser's helper and a label's run. Claude Code's sandbox covers its tools'
-calls, not a plugin's $.process.run, so the mod wraps these as browser mode wraps its notebook kernels
+checks (which run its reader) and the drawings its reviewer reads, the copy of a view kept for its review, the file
+browser's helper and a label's run. Claude Code's sandbox covers its tools' calls, not a plugin's $.process.run, so the
+mod wraps these as browser mode wraps its notebook kernels
 (backend/app/kernel_wrap.py, whose boundary this keeps):
 
   srt    on macOS: Anthropic's sandbox runtime (npm @anthropic-ai/sandbox-runtime, Seatbelt), run by
@@ -21,6 +22,11 @@ The boundary:
            binds
   network  the host's, as for the kernels
   HOME     .thimble-cc-mod/sandbox/home under srt (TMPDIR inside it), a private /tmp/home under bubblewrap
+  env      the session's, without what looks like a secret (notebook.kernel_env's rule: ANTHROPIC_*, OP_*, CLAUDE_*,
+           THIMBLE_* but the mod's own THIMBLE_CC_MOD_*, and any name holding API_KEY, TOKEN, SECRET, PASSWORD or
+           CREDENTIAL), since a script has the network and its output reaches the model. bubblewrap unsets the names
+           the planner's environment holds (the session's, which the scripts inherit); srt_run.mjs drops them as it
+           starts each script
 
     python3 sandbox.py plan --cwd DIR      the plan, probed on this machine, as one JSON line:
         {"wrap", "prefix", "python", "env", "line", "error"}: run [*prefix, python, script, ...] with env over the
@@ -34,12 +40,13 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import shutil
 import site
 import subprocess
 import sys
+from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Sequence
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent  # the mod's folder
@@ -62,6 +69,12 @@ NODE_MIN = (20, 11)
 SRT_HIDDEN = ("/Users", "/Volumes", "/private/tmp", "/private/var/tmp", "/private/var/folders")
 SRT_NO_WRITE = ("/tmp/claude", "/private/tmp/claude")
 PROBE_S = 30.0
+# notebook.kernel_env's rule (backend/app/notebook.py), which srt_run.mjs repeats: a script has the network and its
+# output reaches the model, so it inherits nothing that looks like a secret. The mod's own variables stay: a card's
+# choices and the folder (THIMBLE_CC_MOD_PARAMS, _ONLY, _ROOT), which the mod sets for each run.
+SECRET_PREFIXES = ("ANTHROPIC_", "OP_", "THIMBLE_", "CLAUDE_")
+SECRET_RE = re.compile(r"API_?KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL", re.IGNORECASE)
+MOD_ENV = "THIMBLE_CC_MOD_"
 
 BOUNDS = "it reads this folder, writes only .thimble-cc-mod/, and keeps the network"
 
@@ -97,6 +110,15 @@ def user_env() -> dict[str, str]:
     """The environment that keeps the user's site-packages found under a fresh HOME."""
     user = site.getusersitepackages() if site.ENABLE_USER_SITE is not False else ""
     return {"PYTHONUSERBASE": site.getuserbase()} if user and os.path.isdir(user) else {}
+
+
+def secret(name: str) -> bool:
+    """Whether an environment variable looks like a secret (notebook.kernel_env), which no script inherits."""
+    return (name.startswith(SECRET_PREFIXES) and not name.startswith(MOD_ENV)) or bool(SECRET_RE.search(name))
+
+
+def secret_names(environ: Mapping[str, str]) -> list[str]:
+    return sorted(k for k in environ if secret(k))
 
 
 def node() -> str | None:
@@ -152,9 +174,10 @@ def srt_prefix(*, node_exe: str, srt_dir: Path, rules: dict, box_home: Path) -> 
             "--"]
 
 
-def bwrap_prefix(*, cwd: Path, read: Sequence[Path], bwrap: str = "bwrap") -> list[str]:
+def bwrap_prefix(*, cwd: Path, read: Sequence[Path], bwrap: str = "bwrap", unset: Sequence[str] = ()) -> list[str]:
     """bubblewrap's argv before the command (kernel_wrap.kernel_wrap_argv, for one command that ends with its caller:
-    --die-with-parent, and --new-session since nothing interrupts it)."""
+    --die-with-parent, and --new-session since nothing interrupts it), with the variables `unset` names (the
+    session's secrets, secret_names) unset."""
     ws = cwd / HOME
     out = [bwrap, "--unshare-all", "--share-net", "--unshare-user", "--disable-userns", "--die-with-parent",
            "--new-session", "--ro-bind", "/usr", "/usr"]
@@ -166,7 +189,7 @@ def bwrap_prefix(*, cwd: Path, read: Sequence[Path], bwrap: str = "bwrap") -> li
         out += ["--ro-bind-try", d, d]
     out += ["--dev", "/dev", "--proc", "/proc", "--tmpfs", "/tmp", "--dir", SANDBOX_HOME, "--setenv", "HOME",
             SANDBOX_HOME]
-    for name in (*UNSET_ENV, "TMPDIR"):
+    for name in dict.fromkeys((*UNSET_ENV, "TMPDIR", *unset)):
         out += ["--unsetenv", name]
     system = [Path(d) for d in SYSTEM_RO]
     for p in read:
@@ -259,7 +282,7 @@ def plan(cwd: str | Path, wrap: str | None = None) -> dict:
         if not bwrap_works(exe):
             whys.append("bubblewrap is not installed" if not exe else "bubblewrap cannot create namespaces here")
             return None
-        prefix = bwrap_prefix(cwd=cwd, read=read, bwrap=exe or "bwrap")
+        prefix = bwrap_prefix(cwd=cwd, read=read, bwrap=exe or "bwrap", unset=secret_names(os.environ))
         bad = probe(prefix, python, cwd, env)
         if bad:
             whys.append(f"bubblewrap does not run here: {bad}")

@@ -40,7 +40,7 @@ const PLAN = {
 }
 
 type Run = { argv: string[]; env: Record<string, string> }
-type World = { files: Map<string, string>; runs: Run[]; plans: number; plan: Record<string, unknown> | string; logs: string[]; spawned: number; clock: ReturnType<typeof mock.clock> }
+type World = { files: Map<string, string>; runs: Run[]; plans: number; plan: Record<string, unknown> | string; logs: string[]; spawned: number; agents: { id: string; status: string; spawnedBy: string }[]; clock: ReturnType<typeof mock.clock> }
 
 const ok = (stdout: string) => ({ value: { exitCode: 0, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
 
@@ -61,6 +61,7 @@ function world(on: On): World {
     plan: PLAN,
     logs: [],
     spawned: 0,
+    agents: [],
     clock,
   }
   on('env.set', () => ({ value: undefined }) as never)
@@ -108,7 +109,7 @@ function world(on: On): World {
     w.spawned++
     return { model: 'm', agentId: `agent-${w.spawned}` }
   })
-  on('agent.list', () => ({ value: [] }) as never)
+  on('agent.list', () => ({ value: w.agents }) as never)
   on('prompt.read', () => ({ value: { text: '' } }) as never)
   on('prompt.fill', ($, e) => ({ isFilled: true, text: e.text, cursor: e.text.length }) as never)
   on('ui.open', () => ({ value: { isPlaced: true } }) as never)
@@ -192,7 +193,7 @@ test('a verification script runs in the sandbox', async ($, on) => {
   expectBoxed(runOf(w, script), ['python3', script])
 })
 
-test("a view's checks, which run its reader, run in the sandbox", async ($, on) => {
+test("a view's checks, which run its reader, and the drawings its reviewer reads run in the sandbox", async ($, on) => {
   const w = world(on)
   await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
   await $.command.run({ command: 'thimble-views', args: 'timeline' } as never)
@@ -203,7 +204,28 @@ test("a view's checks, which run its reader, run in the sandbox", async ($, on) 
   await settle()
   const run = runOf(w, '/helper/viewpipe.py')
   expect(run).toBeDefined()
-  expectBoxed(run, ['python3', run!.argv.find(a => a.endsWith('/helper/viewpipe.py'))!, 'check', 'timeline', '--root', CWD])
+  const viewpipe = run!.argv.find(a => a.endsWith('/helper/viewpipe.py'))!
+  expectBoxed(run, ['python3', viewpipe, 'check', 'timeline', '--root', CWD])
+  // the drawings the reviewer reads, drawn from files a script can write (or make a link out of the folder)
+  const drawn = w.runs.filter(r => r.argv.some(a => a.endsWith('/tools/render_view.mjs')))
+  expect(drawn).toHaveLength(2)
+  const render = drawn[0]!.argv.find(a => a.endsWith('/tools/render_view.mjs'))!
+  expectBoxed(drawn[0], ['node', render, '--spec', `${VIEW}/view.json`, '--rows', `${VIEW}/rows.json`, '--plain', '--height', '48', '--all', '--width', '96'])
+})
+
+test('the copy of a view kept before a builder fixes what its reviewer found runs in the sandbox', async ($, on) => {
+  const w = world(on)
+  w.files.set(`${VIEW}/status.json`, JSON.stringify({ for: PROPOSAL.ts, state: 'reviewing', attempt: 1, round: 0, agent: 'agent-r', at: 0 }))
+  w.agents.push({ id: 'agent-r', status: 'running', spawnedBy: 'thimble-cc-mod' })
+  await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
+  // the reviewer finds a problem: the view as reviewed is copied into reviewed/, which a script can make a link out of
+  // the folder
+  await $.turn.complete({ turnId: 'r1', agentId: 'agent-r', answer: '{"problems": ["Events, as it opens: no incident shows"]}', durationMs: 5, reason: 'answer' } as never)
+  await w.clock.advance(1100)
+  await settle()
+  const run = w.runs.find(r => r.argv.some(a => a.endsWith('/helper/viewpipe.py')) && r.argv.includes('keep'))
+  expect(run).toBeDefined()
+  expectBoxed(run, ['python3', run!.argv.find(a => a.endsWith('/helper/viewpipe.py'))!, 'keep', 'timeline', '--root', CWD])
 })
 
 test("the file browser's helper runs in the sandbox", async ($, on) => {

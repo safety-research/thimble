@@ -5,8 +5,9 @@
 //   node srt_run.mjs <srt package dir> <rules JSON> --home <dir> -- <command...>
 //
 // The rules are sandbox.py's srt_rules. No network rules are given, so the command keeps the host's network. HOME is
-// <dir> and TMPDIR <dir>/tmp, the XDG_* folders unset (kernel_wrap.srt_env). This process stays the command's parent
-// and exits with its code; SIGTERM and SIGHUP are passed on.
+// <dir> and TMPDIR <dir>/tmp, the XDG_* folders unset (kernel_wrap.srt_env), and no variable that looks like a secret
+// is passed on (sandbox.py secret). This process stays the command's parent and exits with its code; SIGTERM and
+// SIGHUP are passed on.
 import { spawn } from 'node:child_process'
 import { constants } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
@@ -19,6 +20,9 @@ if (!srtArg || !rulesJson || homeFlag !== '--home' || !home || sep !== '--' || a
 }
 
 const quote = s => `'${s.replaceAll("'", "'\\''")}'`
+
+// sandbox.py's secret (notebook.kernel_env's rule): the mod's own THIMBLE_CC_MOD_* variables stay
+const secret = k => (/^(ANTHROPIC_|OP_|THIMBLE_|CLAUDE_)/.test(k) && !k.startsWith('THIMBLE_CC_MOD_')) || /API_?KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL/i.test(k)
 
 // srt guards shell and git dotfiles under its own working directory (on Linux by mounting empty read-only files over
 // them), so it works from this file's folder, and the command starts where this process was started
@@ -40,6 +44,7 @@ try {
 
 const env = { ...process.env, HOME: home, TMPDIR: join(home, 'tmp') }
 for (const k of ['XDG_CACHE_HOME', 'XDG_CONFIG_HOME', 'XDG_DATA_HOME', 'XDG_STATE_HOME', 'XDG_RUNTIME_DIR']) delete env[k]
+for (const k of Object.keys(env)) if (secret(k)) delete env[k]
 const child = spawn('/bin/sh', ['-c', `exec ${wrapped}`], { cwd, env, stdio: 'inherit' })
 for (const sig of ['SIGTERM', 'SIGHUP']) process.on(sig, () => child.kill(sig))
 child.on('error', e => {

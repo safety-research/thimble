@@ -3,6 +3,7 @@ helper/sandbox.py plans): it must not write outside the folder's .thimble-cc-mod
 what lies outside the folder. `python3 tests/test_sandbox.py` (no dependencies; skips where no sandbox runs)."""
 from __future__ import annotations
 
+import itertools
 import json
 import os
 import shutil
@@ -109,6 +110,43 @@ def test_a_rerun_reads_nothing_outside_the_folder_and_has_a_home_of_its_own() ->
         assert tried["home"] != os.path.expanduser("~"), tried
 
 
+SECRETS = {"OP_SERVICE_ACCOUNT_TOKEN": "op", "ANTHROPIC_API_KEY": "key", "CLAUDE_CODE_SESSION_ID": "s",
+           "THIMBLE_PORT": "8300", "GITHUB_TOKEN": "gh", "DB_PASSWORD": "pw"}
+ENV_SEEN = """import json, os
+print("ENV " + json.dumps(sorted(k for k in os.environ if k in {names!r})))
+"""
+
+
+def test_a_rerun_inherits_none_of_the_session_s_secrets() -> None:
+    """browser mode's kernels get none (notebook.kernel_env), since a script has the network and its output reaches the
+    model; the mod's own variables, a card's choices among them, and the rest of the environment stay."""
+    if not sandboxed():
+        return
+    names = [*SECRETS, "THIMBLE_CC_MOD_PARAMS", "THIMBLE_CC_MOD_ONLY", "THIMBLE_CC_MOD_ROOT", "CARD_COLOUR"]
+    with tempfile.TemporaryDirectory() as root:
+        os.makedirs(os.path.join(root, ".thimble-cc-mod", "scripts"))
+        script = os.path.join(".thimble-cc-mod", "scripts", "env.py")
+        with open(os.path.join(root, script), "w") as f:
+            f.write(ENV_SEEN.format(names=names))
+        r = rerun(root, script, {**SECRETS, "CARD_COLOUR": "blue"})
+        assert r.returncode == 0, r.stderr
+        seen = json.loads(next(line for line in r.stdout.splitlines() if line.startswith("ENV "))[4:])
+        assert seen == ["CARD_COLOUR", "THIMBLE_CC_MOD_ONLY", "THIMBLE_CC_MOD_PARAMS", "THIMBLE_CC_MOD_ROOT"], seen
+
+
+def test_what_counts_as_a_secret_is_the_kernels_rule() -> None:
+    for name in SECRETS:
+        assert sandbox.secret(name), name
+    for name in ("THIMBLE_CC_MOD_PARAMS", "THIMBLE_CC_MOD_ROOT", "PATH", "PYTHONUSERBASE", "LANG", "HOME"):
+        assert not sandbox.secret(name), name
+    assert sandbox.secret("THIMBLE_CC_MOD_TOKEN")
+    unset = sandbox.secret_names({"ANTHROPIC_API_KEY": "k", "LANG": "C"})
+    prefix = sandbox.bwrap_prefix(cwd=sandbox.Path("/data"), read=[], unset=unset)
+    pairs = list(itertools.pairwise(prefix))
+    assert ("--unsetenv", "ANTHROPIC_API_KEY") in pairs and ("--unsetenv", "LANG") not in pairs
+    assert prefix.index("ANTHROPIC_API_KEY") < prefix.index("--")
+
+
 def test_the_user_s_packages_and_a_venv_s_still_import() -> None:
     if not sandboxed():
         return
@@ -168,6 +206,35 @@ def test_a_view_s_checks_pass_in_the_sandbox_and_its_reader_cannot_write_beside_
         shutil.rmtree(d, ignore_errors=True)
 
 
+def test_a_view_s_drawing_and_its_reviewed_copy_stay_in_the_folder() -> None:
+    """The drawing the reviewer reads (register.tsx drawingsOf) and the copy of the view kept for review (copyReviewed)
+    run in the sandbox: a script can make the copy's folder a link out of the folder, and outside the sandbox the copy
+    then writes there."""
+    if not sandboxed() or not shutil.which("node"):
+        return
+    import test_viewpipe  # noqa: PLC0415 — its worked view: a reader, a spec and two runs' chats
+    d = test_viewpipe.folder()
+    try:
+        p = plan(d)
+        env = {**os.environ, **p["env"]}
+        view = os.path.join(d, ".thimble-cc-mod", "views", "chats")
+        viewpipe = [*p["prefix"], p["python"], os.path.join(HELPER, "viewpipe.py")]
+        r = subprocess.run([*viewpipe, "check", "chats", "--root", d], cwd=d, env=env, capture_output=True, text=True,
+                           timeout=600)
+        assert r.returncode == 0, r.stdout + r.stderr
+        render = os.path.join(os.path.dirname(HELPER), "tools", "render_view.mjs")
+        r = subprocess.run([*p["prefix"], "node", render, "--spec", f"{view}/view.json", "--rows", f"{view}/rows.json",
+                            "--plain", "--height", "48", "--all", "--width", "96"], cwd=d, env=env, capture_output=True,
+                           text=True, timeout=120)
+        assert r.returncode == 0 and r.stdout.startswith("=== "), r.stderr
+        with tempfile.TemporaryDirectory() as outside:
+            os.symlink(outside, os.path.join(view, "reviewed"))
+            subprocess.run([*viewpipe, "keep", "chats", "--root", d], cwd=d, env=env, capture_output=True, timeout=120)
+            assert os.listdir(outside) == [], os.listdir(outside)
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+
 def test_the_plan_where_a_sandbox_is_named_or_none_runs() -> None:
     with tempfile.TemporaryDirectory() as root:
         none = sandbox.plan(root, "none")
@@ -213,9 +280,13 @@ def test_the_srt_launcher_runs_a_command_in_the_sandbox_runtime() -> None:
         code = ("import os, sys\nopen(os.path.join(sys.argv[1], 'w'), 'w').close()\n"
                 "try:\n    open(os.path.join(sys.argv[2], 'w'), 'w').close()\nexcept OSError: pass\n"
                 "print('SECRET', os.path.exists(os.path.join(sys.argv[2], 'secret.txt')))\n"
-                "print('HOME', os.environ['HOME'], os.environ['TMPDIR'])\n")
+                "print('HOME', os.environ['HOME'], os.environ['TMPDIR'])\n"
+                "print('ENV', sorted(k for k in os.environ if k in ('ANTHROPIC_API_KEY', 'OP_SERVICE_ACCOUNT_TOKEN', "
+                "'THIMBLE_CC_MOD_PARAMS', 'CARD_COLOUR')))\n")
         prefix = sandbox.srt_prefix(node_exe=node, srt_dir=pkg, rules=rules, box_home=sandbox.Path(home))
-        r = subprocess.run([*prefix, sys.executable, "-c", code, root, outside], cwd=root, capture_output=True,
+        env = {**os.environ, "ANTHROPIC_API_KEY": "k", "OP_SERVICE_ACCOUNT_TOKEN": "t", "THIMBLE_CC_MOD_PARAMS": "{}",
+               "CARD_COLOUR": "blue"}
+        r = subprocess.run([*prefix, sys.executable, "-c", code, root, outside], cwd=root, env=env, capture_output=True,
                            text=True, timeout=120)
         if r.returncode == 3 and "could not be set up" in r.stderr:
             print(f"skipped: the sandbox runtime does not run here: {r.stderr.strip()[-200:]}")
@@ -225,6 +296,8 @@ def test_the_srt_launcher_runs_a_command_in_the_sandbox_runtime() -> None:
         assert os.path.exists(os.path.join(root, "w")) and not os.path.exists(os.path.join(outside, "w"))
         assert "SECRET False" in r.stdout, r.stdout
         assert f"HOME {home} {os.path.join(home, 'tmp')}" in r.stdout, r.stdout
+        # no secret passed on; the mod's own variables and the rest stay
+        assert "ENV ['CARD_COLOUR', 'THIMBLE_CC_MOD_PARAMS']" in r.stdout, r.stdout
         # the command's exit code is the launcher's
         assert subprocess.run([*prefix, sys.executable, "-c", "raise SystemExit(7)"], cwd=root, capture_output=True,
                               timeout=120).returncode == 7
