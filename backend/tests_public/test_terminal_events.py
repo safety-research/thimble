@@ -63,6 +63,17 @@ def test_an_event_needs_main_s_claude_process_to_run_and_no_subscription(ws):
     assert e.value.status_code == 409
 
 
+def test_reachable_is_main_s_claude_process_in_terminal_mode(ws):
+    """The callers that ask first whether an event can reach main (a new thread with its question, message_thread, a
+    thread's queued messages) see main's `claude` process in terminal mode, where no subscription exists."""
+    assert not events._subs.get(CORPUS)
+    assert events.reachable(CORPUS) is True
+    gone = subprocess.Popen([sys.executable, "-c", "pass"])
+    gone.wait()
+    write_launch(ws, pid=gone.pid)
+    assert events.reachable(CORPUS) is False
+
+
 def test_the_watcher_takes_each_event_once_in_order_and_the_held_hook_prints_each_line_once(ws):
     a = events.post(CORPUS, "label_done", {"text": "first", "name": "a"}, check_kind=False)
     b = events.post(CORPUS, "rerun", {"text": "second", "name": "b"}, check_kind=False)

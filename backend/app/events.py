@@ -195,7 +195,11 @@ def connected_workspaces() -> list[str]:
 def reachable(c: str) -> bool:
     """Whether an event posted now reaches a session: a subscription of the session that is main, or a session main just
     continued in whose shim has not subscribed yet (_awaits_shim). Another `claude` in the folder subscribes too, and
-    never gets main's events, nor does a parked session (_publish)."""
+    never gets main's events, nor does a parked session (_publish). In terminal mode, which has no subscription, main's
+    `claude` process runs (launch.json's pid), whose watcher takes the event from the queue file."""
+    ws = _terminal_ws(c)
+    if ws is not None:
+        return files.main_pid(ws) is not None
     _read_main(c)
     main = _main_sid(c)
     return _awaits_shim(c) or bool(main and any(sub.session == main for sub in _live_subs(c, main)))
@@ -295,7 +299,7 @@ def post(c: str, kind: str, payload: dict[str, Any] | None = None, *, check_kind
     if check_kind and kind not in kinds():
         raise HTTPException(400, f"unknown event kind {kind!r}; the kinds are {', '.join(kinds())} (prompts/{PROMPT}.md)")
     ws = _terminal_ws(c)
-    if not (reachable(c) if ws is None else files.main_pid(ws) is not None):
+    if not reachable(c):
         raise HTTPException(409, NOT_LISTENING.format(cwd=config.corpus_dir(c)))
     event_id = secrets.token_hex(4)
     out: dict[str, Any] = {"id": event_id, "kind": kind}
