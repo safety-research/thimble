@@ -1,52 +1,72 @@
-// thimble's Colour by control for a view's page, part of the view kit: views.frame_document loads it right after
-// viewer_bridge.js, whose marks it draws through, and viewer_kit.css styles it. A page calls it once:
+// thimble's Color by control for a view's page, part of the view kit: views.frame_document loads it right after
+// viewer_bridge.js, whose marks it draws through, and before viewer_range.js (thimble.timeRange), which shares what it
+// keeps; viewer_kit.css styles them. A page calls it once:
 //
-//   const colour = thimble.colourBy({
+//   const colour = thimble.colorBy({           thimble.colourBy is the same function
 //     mount: '#colour',                        an element in the view's top row, which the control fills
 //     fields: [{ name: 'kind', title: 'Kind', values: ['Text only', 'With links'] }, { name: 'source' }],
 //                                              a declared value may name its palette colour: { name: 'Error', colour: 7 }
 //     chips: 'filter',                         a value turned off hides its records; 'highlight' (the default) dims them
-//     strip: '#list',                          the list that gets the coloured scrollbar, or true for the page
+//     strip: '#list',                          the list that gets the colored tracks, or true for the page
 //     onChange: (colour) => draw(),            the choice, a value turned on or off, or the label values changed
 //   })
 //
-// One menu lists together the view's own fields it declares colourable and every label over files, those that mark the
-// view's files first. A field colours by the values its records take, each in a palette colour of its own (the label
-// palette, --label-1 to --label-12, in the order the values come: the declared `values`, each in the colour it names or
-// else the next free one, then the most frequent first, kept per view so a value keeps its colour). A label colours by its values on each anchored record, in the label's own
-// colours; choosing one turns it on, and a label the analyst turns on, here or anywhere in thimble, takes the colour.
-// Colour by is thimble's small secondary button with the choice in it. The chosen field's values are key chips in the
-// top row (viewer_kit.css .chip-key), each a square swatch of its colour, its name and its count; a click turns a value
-// off or on, an Alt-click or a double click keeps that value alone. On a record, colour is always a bar on the left
-// edge of its row or card (the bridge draws it on every element whose data-colour is the value of the chosen field, and
-// on every anchored record when a label is chosen), never coloured text or a fill. The
-// strip is the File browser's transcript ruler for any list: its track shows where each value's records are, and its
-// thumb frames the part in view. thimble keeps the choice, the values turned off and the colours per view (the bridge's
-// `colour` message), and hands them back as window.__thimbleColour when the page loads.
+// One menu lists together Off, the view's own fields it declares colorable and every label over files, those that mark
+// the view's files first, each label with its switch and the button that shows its definition in place. A field colors
+// by the values its records take, each in a palette colour of its own (the label palette, --label-1 to --label-12, in
+// the order the values come: the declared `values`, each in the colour it names or else the next free one, then the
+// most frequent first, kept per view so a value keeps its colour). A label colors by its values on each anchored record,
+// in the label's own colours; choosing one turns it on, and a label the analyst turns on, here or anywhere in thimble,
+// takes the colour. Off colors nothing: no chips, no bars, grey tracks.
+// Color by is thimble's small secondary button with the choice in it, and while a label is the choice a button beside
+// it shows the label's definition. The chosen field's values are key chips in the top row (viewer_kit.css .chip-key),
+// each a square swatch of its colour, its name and its count; a click turns a value off or on, an Alt-click or a double
+// click keeps that value alone, and hovering a label's value shows what the label says the value means. On a record,
+// colour is always a bar on the left edge of its row or card (the bridge draws it on every element whose data-colour is
+// the value of the chosen field, and on every anchored record when a label is chosen), never coloured text or a fill.
+// The strip is a list's scrollbar as an editor's two tracks: the overview track shows where each value's records are in
+// the whole list, the labels that are on as ticks at its edge, and a box around the part in view; a long list adds the
+// zoomed track beside it, the part around the view at a finer scale, its colours faded beyond the part in view.
+// Hovering the overview shows the records there and zooms the zoomed track to them, a click goes there and a drag
+// scrubs. thimble keeps the choice, the values turned off and the colours per view (the bridge's `colour` message),
+// with the time ranges viewer_range.js keeps, and hands them back as window.__thimbleColour when the page loads.
+//
+// Reset, at the row's end, shows while the view is not as it opens: a value turned off, a time range zoomed in, a search
+// field or select in the row changed, or what the page says of its own state (thimble.onReset). It puts all of them
+// back and keeps the choice of Color by.
 ;(function () {
   'use strict'
+  // the bridge's part for the kit (window.__thimbleKit), which viewer_range.js, loaded after this file, takes away
   var kit = window.__thimbleKit
-  try {
-    delete window.__thimbleKit
-  } catch (e) {
-    window.__thimbleKit = undefined
-  }
   if (!kit || !window.thimble) return
   var thimble = window.thimble
 
   var NONE = '\u0000none' // the key of the records that take no value
+  var OFF = 'off' // what thimble keeps for Color by: Off
   var PALETTE = 12 // --label-1 .. --label-12; a value past them takes --label-none
-  var STRIP_W = 13 // px: the File browser's ruler as one rail, a 7px lane in a 3px inset
+  var TRACK_W = 12 // px: one track, a 7px lane after a 1px inset, then a 3px column for the labels' ticks
+  var LANE_X = 1
   var LANE = 7
-  var INSET = 3
-  var MIN_MARK = 2 // px, a mark's least height on the strip
+  var MARK_X = 9
+  var MARK_W = 3
+  var GAP = 2 // px between the zoomed track and the overview track
+  var ZOOM_AT = 8 // the zoomed track shows once the list is this many times the part in view
+  var ZOOM_OFF = 6.5 // and goes again below this, so a list near the line does not flip
+  var ZOOM_SPAN = 5 // the zoomed track holds this many heights of the part in view
+  var FADE = 0.3 // the zoomed track's colours beyond the part in view, as a share of their strength
+  var MIN_MARK = 2 // px, a mark's least height on a track
   var HIT = 3 // px either side of a mark within which a click goes to its record
-  var THUMB_MIN = 24
+  var THUMB_MIN = 8 // px, the least height of the box around the part in view
+  var PEEK = 6 // records the hover preview lists
   var MAX_KEPT = 200 // values whose colour is kept per field
+  var DEF_FOR = 60000 // ms a label's definition is kept before it is asked for again
   var ICON = {
     down: 'M6 9l6 6 6-6',
     check: 'M5 12.5l4.5 4.5L19 7',
     plus: 'M12 5v14M5 12h14',
+    info: 'M12 3a9 9 0 1 0 0 18a9 9 0 1 0 0-18zM12 11v5.5M12 7.6v.01',
+    reset: 'M4 12a8 8 0 1 0 2.35-5.65M4 4.5v4h4',
+    open: 'M14 4h6v6M20 4l-8 8M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5',
   }
   function ico(name) {
     return '<svg class="thimble-colour-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="' + ICON[name] + '"/></svg>'
@@ -67,11 +87,19 @@
     if (typeof target === 'string') return document.querySelector(target)
     return target && target.nodeType === 1 ? target : null
   }
+  function safe(fn, fallback) {
+    try {
+      return fn()
+    } catch (e) {
+      kit.report(e)
+      return fallback
+    }
+  }
 
   // ---------------------------------------------------------------- what is kept per view
   function loadState() {
     var s = window.__thimbleColour
-    var out = { by: null, field: null, off: {}, seen: null, colours: {} }
+    var out = { by: null, field: null, off: {}, seen: null, colours: {}, range: {} }
     if (!s || typeof s !== 'object') return out
     if (typeof s.by === 'string') out.by = s.by
     if (typeof s.field === 'string') out.field = s.field
@@ -85,12 +113,18 @@
         out.colours[f] = {}
         for (var v in m) if (typeof m[v] === 'number' && m[v] >= 0) out.colours[f][v] = m[v]
       }
+    // the time ranges of viewer_range.js, by their key: [from, to]
+    if (s.range && typeof s.range === 'object')
+      for (var r in s.range) {
+        var w = s.range[r]
+        if (Array.isArray(w) && w.length === 2 && isFinite(w[0]) && isFinite(w[1]) && w[1] > w[0]) out.range[r] = [Number(w[0]), Number(w[1])]
+      }
     return out
   }
   var S = loadState()
 
   var labelState = null
-  var control = null // the one Colour by control of the page
+  var control = null // the one Color by control of the page
 
   // ---------------------------------------------------------------- the labels
   function onLabels() {
@@ -138,10 +172,109 @@
   })
 
   function save() {
-    var keep = { v: 1, by: S.by, field: S.field, off: S.off, seen: S.seen || [], colours: S.colours }
+    var keep = { v: 1, by: S.by, field: S.field, off: S.off, seen: S.seen || [], colours: S.colours, range: S.range }
     try {
       kit.save(JSON.parse(JSON.stringify(keep)))
     } catch (e) {}
+  }
+
+  // ---------------------------------------------------------------- a label's definition
+  // What thimble's label panel shows of a label, asked of thimble with a fetch the server answers itself
+  // (views.kit_answer): {id, name, kind, text, spec, scope, unit, labeled, values: [{name, highlight, n, meaning}]}, or
+  // null when thimble does not know it (an older thimble, a card's frame, the checks' test label).
+  var defs = {}
+  function definition(id) {
+    var d = defs[id]
+    if (d && Date.now() - d.at < DEF_FOR) return d.wait
+    var wait = thimble.fetch({ $thimble: 'label', id: String(id) }).then(
+      function (r) {
+        var got = r && typeof r === 'object' && r.id != null ? r : null
+        defs[id].def = got
+        return got
+      },
+      function () {
+        defs[id].def = null
+        return null
+      },
+    )
+    defs[id] = { at: Date.now(), wait: wait, def: undefined }
+    return wait
+  }
+  function knownDef(id) {
+    return defs[id] ? defs[id].def : undefined
+  }
+  function meaningOf(def, value) {
+    var vs = (def && def.values) || []
+    for (var i = 0; i < vs.length; i++) if (vs[i].name === value) return vs[i].meaning || ''
+    return ''
+  }
+  var KIND = { prompt: 'Prompt', regex: 'Regex', code: 'Code', manual: 'By hand' }
+  // the definition as the menu and its popover show it: what it judges or matches, its values with what each means
+  // and how many records take it, the files it covers, and Open label
+  function defHtml(l, def) {
+    var id = l ? l.id : def && def.id
+    var head = ''
+    var body = ''
+    if (def === undefined) body = '<div class="thimble-def-wait" aria-busy="true"><span></span><span></span><span></span></div>'
+    if (def) {
+      head =
+        '<div class="thimble-def-meta"><span class="chip chip-sans chip-tone-neutral">' + esc(KIND[def.kind] || def.kind || 'Label') + '</span>' +
+        (def.scope ? '<span class="chip chip-tone-evidence" title="' + esc(def.scope) + '"><span class="chip-text">' + esc(def.scope) + '</span></span>' : '') +
+        (typeof def.labeled === 'number' ? '<span class="thimble-def-n">' + num(def.labeled) + ' ' + (def.labeled === 1 ? 'record' : 'records') + '</span>' : '') +
+        '</div>'
+      if (def.text) body += '<div class="thimble-def-text">' + esc(def.text) + '</div>'
+      if (def.spec) body += '<pre class="thimble-def-spec">' + esc(def.spec) + '</pre>'
+    }
+    var vals = (def && def.values) || (l && l.values) || []
+    var colours = {}
+    var lv = (l && l.values) || []
+    for (var c = 0; c < lv.length; c++) colours[lv[c].name] = lv[c].colour
+    if (vals.length)
+      body +=
+        '<div class="thimble-def-vals">' +
+        vals
+          .map(function (v) {
+            var col = colours[v.name]
+            return (
+              '<div class="thimble-def-val' + (v.highlight === false ? ' quiet' : '') + '"><span class="thimble-colour-sw"' + (col ? ' style="--c:' + esc(col) + '"' : '') + '></span><span class="thimble-def-vn">' + esc(v.name) + '</span>' +
+              (typeof v.n === 'number' ? '<span class="thimble-colour-n">' + num(v.n) + '</span>' : '') +
+              (v.meaning ? '<span class="thimble-def-m">' + esc(v.meaning) + '</span>' : '') +
+              '</div>'
+            )
+          })
+          .join('') +
+        '</div>'
+    var open = typeof thimble.editLabel === 'function' && id != null ? '<div class="thimble-def-acts"><button type="button" class="btn btn-secondary btn-sm thimble-def-open" data-open-label="' + esc(id) + '" data-label="' + esc(id) + '">' + ico('open') + 'Open label</button></div>' : ''
+    return '<div class="thimble-def" data-def="' + esc(id) + '">' + head + body + open + '</div>'
+  }
+
+  // ---------------------------------------------------------------- the kit's tip: a few words beside the pointer
+  var tipEl = null
+  function tip(html, x, y, side) {
+    if (!html) return untip()
+    if (!tipEl) {
+      tipEl = document.createElement('div')
+      tipEl.className = 'thimble-tip'
+      tipEl.setAttribute('role', 'tooltip')
+      tipEl.setAttribute('data-thimble-chrome', '')
+      document.body.appendChild(tipEl)
+    }
+    tipEl.innerHTML = html
+    tipEl.style.display = 'block'
+    var w = tipEl.offsetWidth
+    var h = tipEl.offsetHeight
+    var vw = document.documentElement.clientWidth
+    var left = side === 'left' ? x - w - 10 : x + 12
+    if (left + w > vw - 6) left = x - w - 10
+    if (left < 6) left = 6
+    var top = side === 'above' ? y - h - 10 : y + 14
+    if (top + h > innerHeight - 6) top = y - h - 10
+    if (top < 6) top = 6
+    tipEl.style.left = left + 'px'
+    tipEl.style.top = top + 'px'
+  }
+  function untip() {
+    if (tipEl) tipEl.style.display = 'none'
   }
 
   // A field's declared values and the palette place of each: a value given as {name, colour} takes the colour it names
@@ -203,6 +336,7 @@
     this.changeTimer = null
     this.countTimer = null
     this.lastKey = ''
+    this.resetShown = false
     if (this.mount) {
       this.mount.classList.add('thimble-colour-mount')
       this.mount.setAttribute('data-thimble-chrome', '')
@@ -223,6 +357,15 @@
         self.pre = null
         self.only(key)
       })
+      // a label's value shows what the label says it means
+      this.root.addEventListener('pointerover', function (e) {
+        var chip = e.target.closest && e.target.closest('.thimble-colour-chip')
+        if (chip) self.chipTip(chip, e)
+      })
+      this.root.addEventListener('pointerout', function (e) {
+        var chip = e.target.closest && e.target.closest('.thimble-colour-chip')
+        if (chip && !(e.relatedTarget && chip.contains(e.relatedTarget))) untip()
+      })
       // fitted on the next frame, so the chips hidden or shown are not a resize the observer must hear in the same one
       var fitFrame = null
       var fitWidth = -1
@@ -242,7 +385,7 @@
     new MutationObserver(function (records) {
       for (var i = 0; i < records.length; i++) {
         var t = records[i].target
-        if (t && t.nodeType === 1 && t.closest && t.closest('.thimble-colour-mount,.thimble-colour-menu,.thimble-colour-strip')) continue
+        if (t && t.nodeType === 1 && t.closest && t.closest('.thimble-colour-mount,.thimble-colour-menu,.thimble-colour-strip,.thimble-range,.thimble-tip,.thimble-colour-peek')) continue
         self.soon()
         return
       }
@@ -254,9 +397,10 @@
     for (var i = 0; i < this.fields.length; i++) if (this.fields[i].name === name) return this.fields[i]
     return null
   }
-  // what the colour is now: a field, a label that is on, or nothing
+  // what the colour is now: Off, a field, a label that is on, or nothing
   Control.prototype.choice = function () {
     var by = S.by || ''
+    if (by === OFF) return { off: true, title: 'Off', key: OFF }
     if (by.indexOf('l:') === 0) {
       var id = by.slice(2)
       var l = isOn(id) ? labelById(id) : null
@@ -271,7 +415,7 @@
   }
   Control.prototype.offSet = function (c) {
     c = c || this.choice()
-    return c ? S.off[c.key] || [] : []
+    return c && !c.off ? S.off[c.key] || [] : []
   }
   Control.prototype.isOn = function (value) {
     return this.offSet().indexOf(keyOf(value)) < 0
@@ -328,7 +472,7 @@
   }
   Control.prototype.colourOf = function (value) {
     var c = this.choice()
-    if (!c || keyOf(value) === NONE) return null
+    if (!c || c.off || keyOf(value) === NONE) return null
     if (c.field) return this.fieldColour(c.field, value)
     var l = labelById(c.label)
     var vs = (l && l.values) || []
@@ -337,7 +481,7 @@
   }
   Control.prototype.valueOf = function (record) {
     var c = this.choice()
-    if (!c || record == null) return null
+    if (!c || c.off || record == null) return null
     if (c.field) {
       // a field's own value(record) takes any record the page has, such as a row's index into its columns
       var f = this.field(c.field)
@@ -358,7 +502,7 @@
     var c = this.choice()
     var out = {}
     var units = {}
-    if (!c) return out
+    if (!c || c.off) return out
     var seen = {}
     var records = 0
     var els = document.querySelectorAll(c.field ? '[data-colour]' : '[data-anchor]')
@@ -383,10 +527,11 @@
     }
     return c.label && !records ? units : out
   }
-  // the chips' values: the label's highlighted values, or the field's declared values and those counted, then no value
+  // the chips' values: the label's highlighted values, or the field's declared values and those counted, then no
+  // value; none for Off
   Control.prototype.list = function () {
     var c = this.choice()
-    if (!c) return []
+    if (!c || c.off) return []
     var counts = this.givenBy === c.key && this.given ? this.given : this.domCounts
     var out = []
     var have = {}
@@ -442,6 +587,7 @@
       this.lastKey = key
       this.render()
       if (this.menu && this.menu.values) this.redrawMenu()
+      tellColour()
     }
     if (this.coloursChanged) {
       this.coloursChanged = false
@@ -456,19 +602,21 @@
     var off = this.offSet(c)
     var how = this.mode === 'filter' ? 'hide' : 'dim'
     kit.colour(
-      c
-        ? {
-            mode: c.label ? 'label' : 'field',
-            label: c.label || null,
-            name: c.title,
-            colourOf: function (v) {
-              return self.colourOf(v)
-            },
-            off: function (v) {
-              return off.indexOf(keyOf(v)) >= 0 ? how : null
-            },
-          }
-        : null,
+      c && c.off
+        ? { mode: 'off' }
+        : c
+          ? {
+              mode: c.label ? 'label' : 'field',
+              label: c.label || null,
+              name: c.title,
+              colourOf: function (v) {
+                return self.colourOf(v)
+              },
+              off: function (v) {
+                return off.indexOf(keyOf(v)) >= 0 ? how : null
+              },
+            }
+          : null,
     )
   }
   // the choice or the values turned off changed: kept, drawn, and the page told once
@@ -491,23 +639,14 @@
     }
   }
   Control.prototype.changed = function () {
-    var self = this
     this.forget()
     this.labelKey = this.drawnKey()
     save()
     this.hook()
     this.refresh()
-    if (this.changeTimer != null) return
-    this.changeTimer = setTimeout(function () {
-      self.changeTimer = null
-      if (self.onChange) {
-        try {
-          self.onChange(self.api)
-        } catch (e) {
-          kit.report(e)
-        }
-      }
-    }, 0)
+    checkReset()
+    if (resetting) return
+    this.changedQuiet()
   }
   // what the choice draws: which it is, and for a label its values and their colours
   Control.prototype.drawnKey = function () {
@@ -523,7 +662,7 @@
     save()
     this.hook()
     this.refresh()
-    if (this.menu && !this.menu.values) this.redrawMenu()
+    if (this.menu && !this.menu.values && !this.menu.def) this.redrawMenu()
     if (key !== was) this.changedQuiet()
   }
   Control.prototype.changedQuiet = function () {
@@ -541,17 +680,22 @@
     }, 0)
   }
   Control.prototype.marksChanged = function () {
-    if (this.choice() && this.choice().label) this.soon()
+    var c = this.choice()
+    if (c && c.label) this.soon()
+    // the labels' ticks on the tracks follow the marks
+    for (var i = 0; i < this.strips.length; i++) this.strips[i].dirty()
   }
 
-  // ---------------------------------------------------------------- the top row: Colour by and the values' chips
+  // ---------------------------------------------------------------- the top row: Color by, the values' chips, Reset
   Control.prototype.render = function () {
     if (!this.root) return
     var c = this.choice()
     var off = this.offSet(c)
     var lab = c && c.label ? ' data-label="' + esc(c.label) + '"' : ''
-    // Colour by is thimble's small secondary button, as a menu's trigger: its choice in it and a chevron
-    var by = '<button type="button" class="btn btn-secondary btn-sm thimble-colour-by" aria-haspopup="menu" aria-expanded="' + (this.menu ? 'true' : 'false') + '"' + lab + '><span class="thimble-colour-k">Colour by:</span><b>' + esc(c ? c.title : 'None') + '</b>' + ico('down') + '</button>'
+    // Color by is thimble's small secondary button, as a menu's trigger: its choice in it and a chevron
+    var by = '<button type="button" class="btn btn-secondary btn-sm thimble-colour-by" aria-haspopup="menu" aria-expanded="' + (this.menu && !this.menu.def ? 'true' : 'false') + '"' + lab + '><span class="thimble-colour-k">Color by:</span><b>' + esc(c ? c.title : 'None') + '</b>' + ico('down') + '</button>'
+    // while a label is the colour, one click shows its definition
+    var about = c && c.label ? '<button type="button" class="btn btn-ghost btn-sm btn-square thimble-colour-about"' + lab + ' aria-haspopup="dialog" aria-expanded="' + (this.menu && this.menu.def ? 'true' : 'false') + '" aria-label="' + esc('What ' + c.title + ' means') + '" title="' + esc('What ' + c.title + ' means') + '">' + ico('info') + '</button>' : ''
     // each value is a key chip: a square swatch of its colour, its name and its count
     var chips = ''
     for (var i = 0; i < this.values.length; i++) {
@@ -559,10 +703,19 @@
       var on = off.indexOf(v.key) < 0
       chips +=
         '<button type="button" class="chip chip-key chip-act thimble-colour-chip" data-i="' + i + '" aria-pressed="' + on + '"' + lab +
-        (v.colour ? ' style="--c:' + esc(v.colour) + '"' : '') + ' title="' + esc(v.name) + '"><span class="chip-sw"></span><span class="chip-text">' + esc(v.name) + '</span><span class="chip-count">' + num(v.n) + '</span></button>'
+        (v.colour ? ' style="--c:' + esc(v.colour) + '"' : '') + (c && c.label ? '' : ' title="' + esc(v.name) + '"') + '><span class="chip-sw"></span><span class="chip-text">' + esc(v.name) + '</span><span class="chip-count">' + num(v.n) + '</span></button>'
     }
     chips += '<button type="button" class="btn btn-ghost btn-sm thimble-colour-more" hidden></button>'
-    this.root.innerHTML = by + '<span class="thimble-colour-chips">' + chips + '</span>'
+    var reset = '<button type="button" class="btn btn-secondary btn-sm thimble-reset"' + (this.resetShown ? '' : ' hidden') + '>' + ico('reset') + 'Reset</button>'
+    this.root.innerHTML = by + about + '<span class="thimble-colour-chips">' + chips + '</span>' + reset
+    this.fit()
+  }
+  // Reset shows only while the view is not as it opens
+  Control.prototype.showReset = function (on) {
+    if (on === this.resetShown) return
+    this.resetShown = on
+    var b = this.root && this.root.querySelector('.thimble-reset')
+    if (b) b.hidden = !on
     this.fit()
   }
   // the chips that do not fit the row go behind "N more", which lists every value
@@ -589,11 +742,31 @@
     var v = this.values[Number(node.getAttribute('data-i'))]
     return v ? v.key : null
   }
+  // what a label's value means, beside its chip, once thimble has said
+  Control.prototype.chipTip = function (chip, e) {
+    var c = this.choice()
+    if (!c || !c.label) return
+    var v = this.values[Number(chip.getAttribute('data-i'))]
+    if (!v || v.value == null) return
+    var id = c.label
+    var r = chip.getBoundingClientRect()
+    var show = function (def) {
+      if (!chip.isConnected || !chip.matches(':hover')) return
+      var m = meaningOf(def, v.value)
+      if (m) tip('<div class="thimble-tip-h"><span class="thimble-colour-sw" style="--c:' + esc(v.colour || '') + '"></span>' + esc(v.name) + '</div><div class="thimble-tip-m">' + esc(m) + '</div>', r.left, r.bottom - 8)
+    }
+    var known = knownDef(id)
+    if (known !== undefined) return show(known)
+    definition(id).then(show)
+    void e
+  }
   Control.prototype.click = function (e) {
     var t = e.target
     if (!t.closest) return
     if (t.closest('.thimble-colour-by')) return this.toggleMenu(t.closest('.thimble-colour-by'))
+    if (t.closest('.thimble-colour-about')) return this.toggleDef(t.closest('.thimble-colour-about'))
     if (t.closest('.thimble-colour-more')) return this.toggleMenu(t.closest('.thimble-colour-more'), true)
+    if (t.closest('.thimble-reset')) return doReset()
     var chip = t.closest('.thimble-colour-chip')
     if (!chip) return
     var key = this.keyAt(chip)
@@ -606,7 +779,7 @@
   }
   Control.prototype.toggle = function (key) {
     var c = this.choice()
-    if (!c) return
+    if (!c || c.off) return
     var off = (S.off[c.key] || []).slice()
     var at = off.indexOf(key)
     if (at >= 0) off.splice(at, 1)
@@ -617,7 +790,7 @@
   // that value alone, or every value again when it was alone already
   Control.prototype.only = function (key) {
     var c = this.choice()
-    if (!c) return
+    if (!c || c.off) return
     var others = this.values.map(function (v) { return v.key }).filter(function (k) { return k !== key })
     var off = S.off[c.key] || []
     var alone = off.indexOf(key) < 0 && others.every(function (k) { return off.indexOf(k) >= 0 })
@@ -639,18 +812,31 @@
     }
     this.openMenu(anchor, values)
   }
+  // the definition of the label colored by, in a popover under its button
+  Control.prototype.toggleDef = function (anchor) {
+    var c = this.choice()
+    if (!c || !c.label) return
+    if (this.menu) {
+      var was = this.menu.anchor
+      this.closeMenu()
+      if (was === anchor) return
+    }
+    this.openMenu(anchor, false, c.label)
+  }
   Control.prototype.closeMenu = function () {
     if (!this.menu) return
     this.menu.el.remove()
     document.removeEventListener('pointerdown', this.menu.away, true)
     document.removeEventListener('keydown', this.menu.key, true)
+    this.menu.anchor.setAttribute('aria-expanded', 'false')
     this.menu = null
-    var b = this.root && this.root.querySelector('.thimble-colour-by')
-    if (b) b.setAttribute('aria-expanded', 'false')
   }
-  Control.prototype.menuHtml = function (values) {
+  Control.prototype.menuHtml = function (values, defId) {
     var c = this.choice()
-    var self = this
+    if (defId != null) {
+      var dl = labelById(defId)
+      return '<div class="thimble-colour-head">' + esc(dl ? dl.name : '') + '</div>' + defHtml(dl || { id: defId, values: [] }, knownDef(defId))
+    }
     if (values) {
       var off = this.offSet(c)
       return (
@@ -666,25 +852,27 @@
     var tick = function (on) {
       return '<span class="thimble-colour-tick">' + (on ? ico('check') : '') + '</span>'
     }
-    var html = ''
-    if (this.fields.length) {
-      html += '<div class="thimble-colour-head">Colour by</div>'
-      html += this.fields
-        .map(function (f) {
-          var on = !!(c && c.field === f.name)
-          return '<button type="button" class="thimble-colour-item" role="menuitemradio" aria-checked="' + on + '" data-by="' + esc('f:' + f.name) + '">' + tick(on) + '<span class="thimble-colour-nm">' + esc(f.title) + '</span></button>'
-        })
-        .join('')
-    }
+    var open = (this.menu && this.menu.open) || {}
+    var html = '<div class="thimble-colour-head">Color by</div>'
+    html += '<button type="button" class="thimble-colour-item" role="menuitemradio" aria-checked="' + !!(c && c.off) + '" data-by="' + OFF + '">' + tick(!!(c && c.off)) + '<span class="thimble-colour-nm">Off</span></button>'
+    html += this.fields
+      .map(function (f) {
+        var on = !!(c && c.field === f.name)
+        return '<button type="button" class="thimble-colour-item" role="menuitemradio" aria-checked="' + on + '" data-by="' + esc('f:' + f.name) + '">' + tick(on) + '<span class="thimble-colour-nm">' + esc(f.title) + '</span></button>'
+      })
+      .join('')
     var all = allLabels()
     var row = function (l) {
       var on = !!(c && c.label === l.id)
       var lit = !!l.on || isOn(l.id)
+      var shown = !!open[l.id]
       return (
         '<div class="thimble-colour-item thimble-colour-label" role="menuitemradio" tabindex="0" aria-checked="' + on + '" data-by="' + esc('l:' + l.id) + '" data-label="' + esc(l.id) + '">' + tick(on) +
         '<span class="thimble-colour-sw" style="--c:' + esc(l.colour || '') + '"></span><span class="thimble-colour-nm">' + esc(l.name) + '</span>' +
         (typeof l.count === 'number' ? '<span class="thimble-colour-n">' + num(l.count) + '</span>' : '') +
-        '<button type="button" class="thimble-colour-switch' + (lit ? ' on' : '') + '" role="switch" aria-checked="' + lit + '" aria-label="' + esc((lit ? 'Turn off ' : 'Turn on ') + l.name) + '" data-switch="' + esc(l.id) + '" data-label="' + esc(l.id) + '"><span></span></button></div>'
+        '<button type="button" class="thimble-colour-info' + (shown ? ' on' : '') + '" aria-expanded="' + shown + '" aria-label="' + esc('What ' + l.name + ' means') + '" title="' + esc('What ' + l.name + ' means') + '" data-info="' + esc(l.id) + '" data-label="' + esc(l.id) + '">' + ico('info') + '</button>' +
+        '<button type="button" class="thimble-colour-switch' + (lit ? ' on' : '') + '" role="switch" aria-checked="' + lit + '" aria-label="' + esc((lit ? 'Turn off ' : 'Turn on ') + l.name) + '" data-switch="' + esc(l.id) + '" data-label="' + esc(l.id) + '"><span></span></button></div>' +
+        (shown ? defHtml(l, knownDef(l.id)) : '')
       )
     }
     var here = all.filter(function (l) { return l.here })
@@ -693,27 +881,18 @@
     html += here.length ? here.map(row).join('') : '<div class="thimble-colour-note">No label covers these files yet</div>'
     if (other.length) html += '<div class="thimble-colour-head">Other labels</div>' + other.map(row).join('')
     if (typeof thimble.newLabel === 'function') html += '<div class="thimble-colour-sep"></div><button type="button" class="thimble-colour-item" data-new>' + '<span class="thimble-colour-tick">' + ico('plus') + '</span><span class="thimble-colour-nm">New label</span></button>'
-    void self
     return html
   }
-  Control.prototype.openMenu = function (anchor, values) {
+  Control.prototype.openMenu = function (anchor, values, defId) {
     var self = this
     var m = document.createElement('div')
-    m.className = 'thimble-colour-menu'
-    m.setAttribute('role', 'menu')
+    m.className = 'thimble-colour-menu' + (defId != null ? ' thimble-colour-defpop' : '')
+    m.setAttribute('role', defId != null ? 'dialog' : 'menu')
     m.setAttribute('data-thimble-chrome', '')
-    m.innerHTML = this.menuHtml(values)
+    this.menu = { el: m, anchor: anchor, values: !!values, def: defId != null ? defId : null, open: {} }
+    m.innerHTML = this.menuHtml(values, defId)
     document.body.appendChild(m)
-    var r = anchor.getBoundingClientRect()
-    var w = m.offsetWidth
-    var h = m.offsetHeight
-    var vw = document.documentElement.clientWidth
-    var left = Math.max(8, Math.min(r.left, vw - w - 8))
-    var top = r.bottom + 4
-    if (top + h > innerHeight - 8 && r.top - 4 - h >= 8) top = r.top - 4 - h
-    m.style.left = left + 'px'
-    m.style.top = Math.max(8, top) + 'px'
-    m.style.maxHeight = Math.max(120, innerHeight - Math.max(8, top) - 8) + 'px'
+    this.placeMenu()
     var away = function (e) {
       if (!m.contains(e.target) && !anchor.contains(e.target)) self.closeMenu()
     }
@@ -735,16 +914,56 @@
         e.target.click()
       }
     })
-    this.menu = { el: m, anchor: anchor, away: away, key: key, values: !!values }
+    this.menu.away = away
+    this.menu.key = key
     anchor.setAttribute('aria-expanded', 'true')
+    if (defId != null) this.loadDef(defId)
+  }
+  Control.prototype.placeMenu = function () {
+    var m = this.menu && this.menu.el
+    if (!m) return
+    var r = this.menu.anchor.getBoundingClientRect()
+    m.style.maxHeight = ''
+    var w = m.offsetWidth
+    var h = m.offsetHeight
+    var vw = document.documentElement.clientWidth
+    var left = Math.max(8, Math.min(r.left, vw - w - 8))
+    var top = r.bottom + 4
+    if (top + h > innerHeight - 8 && r.top - 4 - h >= 8) top = r.top - 4 - h
+    m.style.left = left + 'px'
+    m.style.top = Math.max(8, top) + 'px'
+    m.style.maxHeight = Math.max(120, innerHeight - Math.max(8, top) - 8) + 'px'
   }
   Control.prototype.redrawMenu = function () {
     if (!this.menu) return
-    this.menu.el.innerHTML = this.menuHtml(this.menu.values)
+    var scroll = this.menu.el.scrollTop
+    this.menu.el.innerHTML = this.menuHtml(this.menu.values, this.menu.def)
+    this.menu.el.scrollTop = scroll
+  }
+  // a label's definition asked of thimble, the menu drawn again when it comes
+  Control.prototype.loadDef = function (id) {
+    var self = this
+    if (knownDef(id) !== undefined && defs[id] && Date.now() - defs[id].at < DEF_FOR) return
+    definition(id).then(function () {
+      if (!self.menu) return
+      if (self.menu.def === id || self.menu.open[id]) {
+        self.redrawMenu()
+        if (self.menu.def === id) self.placeMenu()
+      }
+    })
   }
   Control.prototype.menuClick = function (e, values) {
     var t = e.target
     var self = this
+    var ol = t.closest('[data-open-label]')
+    if (ol) {
+      e.stopPropagation()
+      var lid = ol.getAttribute('data-open-label')
+      this.closeMenu()
+      thimble.editLabel(lid).catch(function () {})
+      return
+    }
+    if (this.menu && this.menu.def != null) return
     if (values) {
       var it = t.closest('[data-i]')
       var key = it ? this.keyAt(it) : null
@@ -753,6 +972,16 @@
       else this.toggle(key)
       return this.redrawMenu()
     }
+    var info = t.closest('[data-info]')
+    if (info) {
+      e.stopPropagation()
+      var iid = info.getAttribute('data-info')
+      this.menu.open[iid] = !this.menu.open[iid]
+      this.redrawMenu()
+      if (this.menu.open[iid]) this.loadDef(iid)
+      return
+    }
+    if (t.closest('.thimble-def')) return
     var sw = t.closest('[data-switch]')
     if (sw) {
       e.stopPropagation()
@@ -784,34 +1013,51 @@
     this.choose(by)
   }
 
-  // ---------------------------------------------------------------- the coloured scrollbar
-  // A list's scrollbar as the File browser's transcript ruler draws it with one rail: a track the height of the list
-  // whose lane shows each record of a value that is on, in its colour, where it stands in the list, and a thumb that
-  // frames the part in view. A drag of the thumb or a press on the track scrolls the list, a wheel over it too, and a
-  // click on a mark goes to its record. The list's own scrollbar is hidden in its favour. `rows`, for a list that draws
-  // only the rows in view, gives every row's value in order, which the lane draws in place of the rows on the page.
+  // ---------------------------------------------------------------- the tracks: a list's colored scrollbar
+  // A list's scrollbar as a music or video editor's navigator, in one or two tracks beside the list (the list's own
+  // scrollbar is hidden in their favour). The overview track, at the right, is the whole list: its lane shows each
+  // record of a value that is on, in its colour, where it stands in the list (grey for all of them with Color by Off),
+  // the labels that are on mark their records as ticks at its edge, and a box frames the part in view. A list many times
+  // the height of its box adds the zoomed track at its left: the part around the view at a finer scale, its colours
+  // faded beyond the part in view. Hovering the overview zooms the zoomed track to the place under the pointer and shows
+  // the records there in a preview, without scrolling; a click goes there, a click on a mark to its record, and a drag
+  // scrubs, on either track; a drag of the box moves the view; a wheel over them scrolls the list. `rows`, for a list
+  // that draws only the rows in view, gives every row's value in order, which the lanes draw in place of the rows on
+  // the page, `refs` each row's record (for the labels' ticks) and `preview(i)` what the preview says of row i; for a
+  // list of elements `preview(el)` may say it instead of each record's own time and first line.
   function Strip(control, target, opts) {
     var self = this
     this.c = control
     this.page = target === true || target === document.documentElement || target === document.body || target === document.scrollingElement
     this.box = this.page ? document.scrollingElement || document.documentElement : target
-    this.rows = opts && Array.isArray(opts.rows) ? opts.rows : null
-    this.ticks = []
+    this.set(opts)
+    this.recs = [] // each record: [top, bottom] as fractions of the list's height, its colour or null, its element or row
+    this.marks = [] // each label's tick: [where, colour, label, value]
     this.stale = true
+    this.zoomed = false
+    this.hover = null // where the pointer is on the overview track, as a fraction of the list, while it hovers
+    this.frozen = null // the zoomed track's span while a drag on it lasts
     this.el = document.createElement('div')
     this.el.className = 'thimble-colour-strip'
     this.el.setAttribute('data-thimble-chrome', '')
     this.el.setAttribute('aria-hidden', 'true')
-    this.canvas = document.createElement('canvas')
-    this.thumb = document.createElement('div')
-    this.thumb.className = 'thimble-colour-thumb'
-    this.el.appendChild(this.canvas)
-    this.el.appendChild(this.thumb)
+    this.whole = this.track('whole')
+    this.zoom = this.track('zoom')
+    this.span = document.createElement('div') // where on the overview the zoomed track looks
+    this.span.className = 'thimble-colour-span'
+    this.whole.el.appendChild(this.span)
+    this.peekEl = document.createElement('div')
+    this.peekEl.className = 'thimble-colour-peek'
+    this.peekEl.setAttribute('data-thimble-chrome', '')
+    this.peekEl.setAttribute('aria-hidden', 'true')
     document.body.appendChild(this.el)
+    document.body.appendChild(this.peekEl)
     var pad = this.page ? document.body : this.box
     this.padded = pad
     this.padWas = pad.style.paddingRight
-    pad.style.paddingRight = parseFloat(getComputedStyle(pad).paddingRight || '0') + STRIP_W + 2 + 'px'
+    this.padBase = parseFloat(getComputedStyle(pad).paddingRight || '0') || 0
+    this.width = -1
+    this.fitWidth()
     this.box.classList.add('thimble-colour-scrolled')
     this.onScroll = function () {
       self.place()
@@ -838,6 +1084,9 @@
     this.el.addEventListener('pointercancel', function (e) {
       self.up(e)
     })
+    this.el.addEventListener('pointerleave', function () {
+      if (!self.drag) self.leave()
+    })
     this.el.addEventListener(
       'wheel',
       function (e) {
@@ -848,6 +1097,22 @@
     )
     this.dirty()
   }
+  Strip.prototype.set = function (opts) {
+    this.rows = opts && Array.isArray(opts.rows) ? opts.rows : null
+    this.refs = opts && Array.isArray(opts.refs) ? opts.refs : null
+    this.preview = opts && typeof opts.preview === 'function' ? opts.preview : null
+  }
+  Strip.prototype.track = function (name) {
+    var t = document.createElement('div')
+    t.className = 'thimble-colour-track thimble-colour-' + name
+    var cv = document.createElement('canvas')
+    var thumb = document.createElement('div')
+    thumb.className = 'thimble-colour-thumb'
+    t.appendChild(cv)
+    t.appendChild(thumb)
+    this.el.appendChild(t)
+    return { el: t, canvas: cv, thumb: thumb, name: name }
+  }
   Strip.prototype.remove = function () {
     ;(this.page ? window : this.box).removeEventListener('scroll', this.onScroll)
     window.removeEventListener('resize', this.onResize)
@@ -855,6 +1120,17 @@
     this.box.classList.remove('thimble-colour-scrolled')
     this.padded.style.paddingRight = this.padWas
     this.el.remove()
+    this.peekEl.remove()
+  }
+  // the tracks' width, and the room the list leaves them
+  Strip.prototype.fitWidth = function () {
+    var w = this.zoomed ? TRACK_W * 2 + GAP : TRACK_W
+    if (w === this.width) return
+    this.width = w
+    this.el.style.width = w + 'px'
+    this.zoom.el.style.display = this.zoomed ? '' : 'none'
+    this.whole.el.style.left = (this.zoomed ? TRACK_W + GAP : 0) + 'px'
+    this.padded.style.paddingRight = this.padBase + w + 2 + 'px'
   }
   Strip.prototype.dirty = function () {
     var self = this
@@ -872,124 +1148,225 @@
     var r = this.box.getBoundingClientRect()
     return { left: r.left, top: r.top, right: r.right, bottom: r.bottom, height: r.height }
   }
-  // each record of a value that is on: [top, bottom] as fractions of the list's height, its colour and its element
+  function grey() {
+    return kit.realColour('rgba(var(--ink-rgb), 0.34)')
+  }
+  // every record of the list, and the labels' ticks: [top, bottom] as fractions of the list's height, its colour (null
+  // for a record that takes none), its element or its row; a record of a value turned off is left out
   Strip.prototype.measure = function () {
     var c = this.c
     var ch = c.choice()
-    var out = []
-    if (!ch) return out
+    var recs = []
+    var marks = []
+    var plain = !ch || ch.off
     var off = c.offSet(ch)
+    var by = ch && ch.label ? ch.label : null
+    var g = grey()
+    var tick = function (ref, at) {
+      var m = ref != null ? thimble.markOf(String(ref)) : null
+      var vs = m && Array.isArray(m.values) ? m.values : []
+      for (var k = 0; k < vs.length; k++) if (vs[k] && vs[k].id !== by && vs[k].colour) marks.push([at, vs[k].colour, vs[k].label, vs[k].value])
+    }
     if (this.rows) {
       var n = this.rows.length
       for (var i = 0; i < n; i++) {
-        var key = keyOf(this.rows[i])
-        if (key === NONE || off.indexOf(key) >= 0) continue
-        var col = c.colourOf(this.rows[i])
-        if (col) out.push([i / n, (i + 1) / n, col, i])
+        var key = plain ? '' : keyOf(this.rows[i])
+        if (!plain && key !== NONE && off.indexOf(key) >= 0) continue
+        recs.push([i / n, (i + 1) / n, plain ? g : key === NONE ? null : c.colourOf(this.rows[i]), i])
       }
-      return out
+      if (this.refs) for (var r = 0; r < this.refs.length && r < n; r++) tick(this.refs[r], (r + 0.5) / n)
+    } else {
+      var box = this.box
+      var H = Math.max(1, box.scrollHeight)
+      var top0 = this.page ? -box.scrollTop : this.rect().top + box.clientTop - box.scrollTop
+      var scope = this.page ? document : box
+      var els = scope.querySelectorAll(ch && ch.field ? '[data-colour]' : '[data-anchor]')
+      var seen = {}
+      for (var j = 0; j < els.length; j++) {
+        var e = els[j]
+        if (e.tagName === 'CANVAS' || e.closest('.thimble-colour-mount,.thimble-colour-menu,[data-thimble-chrome]')) continue
+        var ref = e.getAttribute('data-anchor')
+        var v = null
+        if (ch && ch.field) v = e.getAttribute('data-colour')
+        else {
+          if (!ref || seen[ref]) continue
+          seen[ref] = true
+          if (by) v = c.valueOf(ref)
+        }
+        var k2 = plain ? '' : keyOf(v)
+        if (!plain && k2 !== NONE && off.indexOf(k2) >= 0) continue
+        var rr = e.getBoundingClientRect()
+        if (!rr.height) continue
+        var y = rr.top - top0
+        recs.push([y / H, (y + rr.height) / H, plain ? g : k2 === NONE ? null : c.colourOf(v), e])
+        if (ref) tick(ref, (y + rr.height / 2) / H)
+      }
+      recs.sort(function (a, b) {
+        return a[0] - b[0]
+      })
     }
+    this.recs = recs
+    this.marks = marks
+  }
+  // the part in view, as fractions of the list's height
+  Strip.prototype.view = function () {
     var box = this.box
     var H = Math.max(1, box.scrollHeight)
-    var top0 = this.page ? -box.scrollTop : this.rect().top + box.clientTop - box.scrollTop
-    var scope = this.page ? document : box
-    var els = scope.querySelectorAll(ch.field ? '[data-colour]' : '[data-anchor]')
-    var seen = {}
-    for (var j = 0; j < els.length; j++) {
-      var e = els[j]
-      if (e.closest('.thimble-colour-mount,.thimble-colour-menu') || e.tagName === 'CANVAS') continue
-      var ref = e.getAttribute('data-anchor')
-      var v
-      if (ch.field) v = e.getAttribute('data-colour')
-      else {
-        if (!ref || seen[ref]) continue
-        seen[ref] = true
-        v = c.valueOf(ref)
-      }
-      var k = keyOf(v)
-      if (k === NONE || off.indexOf(k) >= 0) continue
-      var r = e.getBoundingClientRect()
-      if (!r.height) continue
-      var colour = c.colourOf(v)
-      if (!colour) continue
-      var y = r.top - top0
-      out.push([y / H, (y + r.height) / H, colour, e])
-    }
-    out.sort(function (a, b) {
-      return a[0] - b[0]
-    })
-    return out
+    return [box.scrollTop / H, Math.min(1, (box.scrollTop + box.clientHeight) / H)]
+  }
+  // the span the zoomed track shows: around the place the pointer hovers on the overview, or the part in view
+  Strip.prototype.zoomSpan = function () {
+    if (this.frozen) return this.frozen
+    var v = this.view()
+    var s = Math.min(1, ZOOM_SPAN * (v[1] - v[0]))
+    var mid = this.hover != null ? this.hover : (v[0] + v[1]) / 2
+    var z0 = Math.max(0, Math.min(1 - s, mid - s / 2))
+    return [z0, z0 + s]
   }
   Strip.prototype.draw = function () {
     var r = this.rect()
     var box = this.box
     var scrolls = box.scrollHeight > box.clientHeight + 1
     this.el.style.display = scrolls ? '' : 'none'
-    if (!scrolls) return
+    if (!scrolls) {
+      this.leave()
+      return
+    }
+    var ratio = box.scrollHeight / Math.max(1, box.clientHeight)
+    var zoomed = this.zoomed ? ratio >= ZOOM_OFF : ratio >= ZOOM_AT
+    if (zoomed !== this.zoomed) {
+      this.zoomed = zoomed
+      this.fitWidth()
+    }
     var h = Math.max(0, Math.min(r.bottom, innerHeight) - Math.max(r.top, 0) - 4)
-    this.el.style.left = r.right - STRIP_W - 2 + 'px'
+    this.el.style.left = r.right - this.width - 2 + 'px'
     this.el.style.top = Math.max(r.top, 0) + 2 + 'px'
     this.el.style.height = h + 'px'
     this.h = h
     if (this.stale) {
-      this.ticks = this.measure()
+      this.measure()
       this.stale = false
     }
-    var dpr = window.devicePixelRatio || 1
-    var cv = this.canvas
-    cv.width = Math.ceil(STRIP_W * dpr)
-    cv.height = Math.ceil(h * dpr)
-    cv.style.width = STRIP_W + 'px'
-    cv.style.height = h + 'px'
-    var ctx = cv.getContext && cv.getContext('2d')
-    if (ctx) {
-      ctx.clearRect(0, 0, cv.width, cv.height)
-      var x = Math.round(INSET * dpr)
-      var w = Math.max(1, Math.round(LANE * dpr))
-      ctx.fillStyle = kit.realColour('rgba(var(--ink-rgb), 0.035)')
-      ctx.fillRect(x, 0, w, cv.height)
-      for (var i = 0; i < this.ticks.length; i++) {
-        var t = this.ticks[i]
-        var y0 = t[0] * h
-        var y1 = t[1] * h
-        if (y1 - y0 < MIN_MARK) {
-          y0 = Math.max(0, Math.min(h - MIN_MARK, (y0 + y1 - MIN_MARK) / 2))
-          y1 = y0 + MIN_MARK
-        }
-        var a = Math.round(y0 * dpr)
-        ctx.fillStyle = t[2]
-        ctx.fillRect(x, a, w, Math.max(1, Math.round(y1 * dpr) - a))
-      }
-    }
+    this.paint(this.whole, [0, 1], null)
     this.place()
   }
-  Strip.prototype.place = function () {
-    var box = this.box
-    var H = Math.max(1, box.scrollHeight)
+  // a track's canvas: the records within `span` (fractions of the list), each in its colour, faded outside `bright`
+  Strip.prototype.paint = function (t, span, bright) {
     var h = this.h || 0
-    var th = Math.max(THUMB_MIN, Math.min(h, (box.clientHeight / H) * h))
-    var room = Math.max(0, h - th)
-    var free = H - box.clientHeight
-    var top = this.drag ? this.drag.top : free > 0 ? (box.scrollTop / free) * room : 0
-    this.thumb.style.height = th + 'px'
-    this.thumb.style.transform = 'translateY(' + top + 'px)'
-    this.th = th
-    this.thumbTop = top
+    var dpr = window.devicePixelRatio || 1
+    var cv = t.canvas
+    var W = Math.ceil(TRACK_W * dpr)
+    var Hp = Math.ceil(h * dpr)
+    if (cv.width !== W) cv.width = W
+    if (cv.height !== Hp) cv.height = Hp
+    cv.style.width = TRACK_W + 'px'
+    cv.style.height = h + 'px'
+    var ctx = cv.getContext && cv.getContext('2d')
+    if (!ctx) return
+    ctx.clearRect(0, 0, cv.width, cv.height)
+    var x = Math.round(LANE_X * dpr)
+    var w = Math.max(1, Math.round(LANE * dpr))
+    ctx.globalAlpha = 1
+    ctx.fillStyle = kit.realColour('rgba(var(--ink-rgb), 0.035)')
+    ctx.fillRect(x, 0, w, cv.height)
+    var s0 = span[0]
+    var sw = Math.max(1e-9, span[1] - span[0])
+    var recs = this.recs
+    // the first record that reaches into the span
+    var lo = 0
+    var hi = recs.length
+    while (lo < hi) {
+      var mid = (lo + hi) >> 1
+      if (recs[mid][1] < s0) lo = mid + 1
+      else hi = mid
+    }
+    for (var i = lo; i < recs.length; i++) {
+      var rc = recs[i]
+      if (rc[0] > span[1]) break
+      if (!rc[2]) continue
+      var y0 = ((rc[0] - s0) / sw) * h
+      var y1 = ((rc[1] - s0) / sw) * h
+      if (y1 - y0 < MIN_MARK) {
+        y0 = Math.max(0, Math.min(h - MIN_MARK, (y0 + y1 - MIN_MARK) / 2))
+        y1 = y0 + MIN_MARK
+      }
+      ctx.globalAlpha = bright && ((rc[0] + rc[1]) / 2 < bright[0] || (rc[0] + rc[1]) / 2 > bright[1]) ? FADE : 1
+      var a = Math.round(y0 * dpr)
+      ctx.fillStyle = rc[2]
+      ctx.fillRect(x, a, w, Math.max(1, Math.round(y1 * dpr) - a))
+    }
+    // the labels' ticks at the track's edge
+    var mx = Math.round(MARK_X * dpr)
+    var mw = Math.max(1, Math.round(MARK_W * dpr))
+    for (var k = 0; k < this.marks.length; k++) {
+      var mk = this.marks[k]
+      if (mk[0] < s0 || mk[0] > span[1]) continue
+      ctx.globalAlpha = bright && (mk[0] < bright[0] || mk[0] > bright[1]) ? FADE : 1
+      var my = Math.round((((mk[0] - s0) / sw) * h - 1) * dpr)
+      ctx.fillStyle = mk[1]
+      ctx.fillRect(mx, Math.max(0, my), mw, Math.max(1, Math.round(2 * dpr)))
+    }
+    ctx.globalAlpha = 1
   }
-  Strip.prototype.scrollTo = function (thumbTop) {
+  // the boxes around the part in view, and the zoomed track drawn for where it now looks
+  Strip.prototype.place = function () {
+    var h = this.h || 0
+    var v = this.drag && this.drag.view ? this.drag.view : this.view()
+    var box = function (thumb, a, b, min) {
+      var y0 = a * h
+      var y1 = b * h
+      if (y1 - y0 < min) {
+        var m = (y0 + y1) / 2
+        y0 = Math.max(0, Math.min(h - min, m - min / 2))
+        y1 = y0 + min
+      }
+      var shown = y1 > 0 && y0 < h
+      thumb.style.display = shown ? '' : 'none'
+      thumb.style.height = Math.max(0, Math.min(h, y1) - Math.max(0, y0)) + 'px'
+      thumb.style.transform = 'translateY(' + Math.max(0, y0) + 'px)'
+      return [Math.max(0, y0), Math.min(h, y1)]
+    }
+    this.thumbAt = box(this.whole.thumb, v[0], v[1], THUMB_MIN)
+    if (!this.zoomed) {
+      this.span.style.display = 'none'
+      return
+    }
+    var z = this.zoomSpan()
+    this.zspan = z
+    var s = Math.max(1e-9, z[1] - z[0])
+    box(this.zoom.thumb, (v[0] - z[0]) / s, (v[1] - z[0]) / s, 4)
+    this.paint(this.zoom, z, v)
+    this.span.style.display = ''
+    this.span.style.top = z[0] * h + 'px'
+    this.span.style.height = Math.max(2, (z[1] - z[0]) * h) + 'px'
+  }
+  // the list scrolled so that the place `at` (a fraction of it) is in the middle of the box
+  Strip.prototype.centre = function (at) {
     var box = this.box
-    var room = Math.max(1, (this.h || 0) - (this.th || 0))
-    box.scrollTop = (Math.max(0, Math.min(room, thumbTop)) / room) * Math.max(0, box.scrollHeight - box.clientHeight)
+    box.scrollTop = Math.max(0, Math.min(box.scrollHeight - box.clientHeight, at * box.scrollHeight - box.clientHeight / 2))
   }
-  Strip.prototype.tickAt = function (y) {
+  // the track under the pointer and the place there, as a fraction of the list
+  Strip.prototype.at = function (e) {
+    var zr = this.zoomed ? this.zoom.el.getBoundingClientRect() : null
+    var onZoom = !!(zr && e.clientX >= zr.left - 1 && e.clientX <= zr.right + Math.floor(GAP / 2))
+    var t = onZoom ? this.zoom : this.whole
+    var r = t.el.getBoundingClientRect()
+    var y = Math.max(0, Math.min(this.h || 0, e.clientY - r.top))
     var h = this.h || 1
+    var span = onZoom ? this.zspan || this.zoomSpan() : [0, 1]
+    return { track: t, y: y, x: e.clientX - r.left, at: span[0] + (y / h) * (span[1] - span[0]), span: span }
+  }
+  Strip.prototype.recAt = function (p) {
+    var h = this.h || 1
+    var sw = p.span[1] - p.span[0]
     var best = null
     var bd = Infinity
-    for (var i = 0; i < this.ticks.length; i++) {
-      var t = this.ticks[i]
-      var y0 = t[0] * h
-      var y1 = Math.max(t[1] * h, y0 + MIN_MARK)
-      var d = y < y0 ? y0 - y : y > y1 ? y - y1 : 0
+    for (var i = 0; i < this.recs.length; i++) {
+      var t = this.recs[i]
+      if (!t[2]) continue
+      var y0 = ((t[0] - p.span[0]) / sw) * h
+      var y1 = Math.max(((t[1] - p.span[0]) / sw) * h, y0 + MIN_MARK)
+      var d = p.y < y0 ? y0 - p.y : p.y > y1 ? p.y - y1 : 0
       if (d <= HIT && d <= bd) {
         best = t
         bd = d
@@ -1009,31 +1386,132 @@
   Strip.prototype.down = function (e) {
     if (e.button !== 0) return
     e.preventDefault()
-    var y = e.clientY - this.el.getBoundingClientRect().top
-    var onThumb = y >= this.thumbTop && y <= this.thumbTop + this.th
-    this.drag = { dy: onThumb ? y - this.thumbTop : this.th / 2, y0: e.clientY, moved: false, onThumb: onThumb, top: this.thumbTop }
+    var p = this.at(e)
+    var whole = p.track === this.whole
+    var onThumb = whole && this.thumbAt && p.y >= this.thumbAt[0] - 1 && p.y <= this.thumbAt[1] + 1
+    if (!whole) this.frozen = p.span.slice()
+    this.hover = null
+    this.drag = { track: p.track, dy: onThumb ? p.y - this.thumbAt[0] : null, y0: e.clientY, moved: false, onThumb: onThumb }
+    if (!onThumb) this.centre(p.at)
+    this.unpeek()
     if (this.el.setPointerCapture) this.el.setPointerCapture(e.pointerId)
     this.el.setAttribute('data-drag', '')
   }
   Strip.prototype.move = function (e) {
     var d = this.drag
-    if (!d) return
+    if (!d) return this.hovered(e)
     if (!d.moved && Math.abs(e.clientY - d.y0) < 3) return
     d.moved = true
-    d.top = e.clientY - this.el.getBoundingClientRect().top - d.dy
-    this.scrollTo(d.top)
+    var r = d.track.el.getBoundingClientRect()
+    var h = this.h || 1
+    var y = e.clientY - r.top
+    if (d.onThumb) {
+      // the box follows the pointer where it was taken
+      var box = this.box
+      var top = Math.max(0, y - d.dy) / h
+      box.scrollTop = Math.max(0, Math.min(box.scrollHeight - box.clientHeight, top * box.scrollHeight))
+    } else {
+      var span = d.track === this.whole ? [0, 1] : this.frozen || [0, 1]
+      this.centre(span[0] + (Math.max(0, Math.min(h, y)) / h) * (span[1] - span[0]))
+    }
     this.place()
   }
   Strip.prototype.up = function (e) {
     var d = this.drag
     this.drag = null
     this.el.removeAttribute('data-drag')
-    if (!d || d.moved) return this.place()
-    var y = e.clientY - this.el.getBoundingClientRect().top
-    var t = this.tickAt(y)
-    if (t) this.go(t)
-    else if (!d.onThumb) this.scrollTo(y - this.th / 2)
+    if (d && !d.moved) {
+      var p = this.at(e)
+      if (d.track !== this.whole) p.span = this.frozen || p.span
+      var t = this.recAt(p)
+      if (t) this.go(t)
+    }
+    this.frozen = null
     this.place()
+  }
+  // hovering the overview: the zoomed track looks there, and the preview lists the records there
+  Strip.prototype.hovered = function (e) {
+    var p = this.at(e)
+    if (p.track === this.whole) {
+      this.hover = p.at
+      if (this.zoomed) this.place()
+    } else if (this.hover != null) {
+      // the zoomed track keeps looking where the overview was hovered while the pointer moves onto it
+      p.span = this.zspan || p.span
+    }
+    this.peek(p, e)
+  }
+  Strip.prototype.leave = function () {
+    var was = this.hover
+    this.hover = null
+    this.unpeek()
+    if (was != null && this.zoomed) this.place()
+  }
+  // what the preview says of a record: its time and its first line
+  Strip.prototype.peekOf = function (rec) {
+    var t = rec[3]
+    var got = null
+    if (this.preview) got = safe(function () { return this.preview(t) }.bind(this), null)
+    if (got != null && typeof got !== 'object') got = { text: String(got) }
+    if (got) return { when: got.when || got.time || '', text: got.text || '' }
+    if (typeof t === 'number') return { when: '', text: 'Row ' + num(t + 1) }
+    var time = t.querySelector && t.querySelector('time')
+    var when = (t.getAttribute('data-time') || (time ? time.textContent : '') || '').trim()
+    var text = t.getAttribute('data-preview') || t.getAttribute('data-anchor-text') || t.textContent || ''
+    text = text.replace(/\s+/g, ' ').trim()
+    if (when && text.indexOf(when) === 0) text = text.slice(when.length).trim()
+    return { when: when, text: text.slice(0, 160) }
+  }
+  Strip.prototype.peek = function (p, e) {
+    var h = this.h || 1
+    var v = this.view()
+    var half = Math.max((v[1] - v[0]) / 2, 0.5 / Math.max(1, this.recs.length))
+    var at = p.at
+    var near = []
+    for (var i = 0; i < this.recs.length; i++) {
+      var r = this.recs[i]
+      if (r[1] < at - half) continue
+      if (r[0] > at + half) break
+      near.push(r)
+    }
+    near.sort(function (a, b) {
+      return Math.abs((a[0] + a[1]) / 2 - at) - Math.abs((b[0] + b[1]) / 2 - at)
+    })
+    near = near.slice(0, PEEK).sort(function (a, b) {
+      return a[0] - b[0]
+    })
+    var sw = p.span[1] - p.span[0]
+    var ticks = this.marks.filter(function (m) {
+      return Math.abs(((m[0] - p.span[0]) / sw) * h - p.y) <= HIT + 1
+    })
+    var seen = {}
+    var html = ''
+    for (var k = 0; k < ticks.length && k < 4; k++) {
+      var tk = ticks[k]
+      var key = tk[2] + '\u0000' + tk[3]
+      if (seen[key]) continue
+      seen[key] = true
+      html += '<div class="thimble-peek-mark"><span class="thimble-colour-sw" style="--c:' + esc(tk[1]) + '"></span><b>' + esc(tk[2]) + '</b>' + (String(tk[3]) !== String(tk[2]) ? '<span>' + esc(tk[3]) + '</span>' : '') + '</div>'
+    }
+    var self = this
+    html += near
+      .map(function (r) {
+        var w = self.peekOf(r)
+        return '<div class="thimble-peek-row"><span class="thimble-colour-sw"' + (r[2] ? ' style="--c:' + esc(r[2]) + '"' : '') + '></span>' + (w.when ? '<time>' + esc(w.when) + '</time>' : '') + '<span class="thimble-peek-t">' + esc(w.text) + '</span></div>'
+      })
+      .join('')
+    if (!html) return this.unpeek()
+    var pe = this.peekEl
+    pe.innerHTML = html
+    pe.style.display = 'block'
+    var sr = this.el.getBoundingClientRect()
+    var w = pe.offsetWidth
+    var ph = pe.offsetHeight
+    pe.style.left = Math.max(6, sr.left - w - 6) + 'px'
+    pe.style.top = Math.max(6, Math.min(innerHeight - ph - 6, e.clientY - ph / 2)) + 'px'
+  }
+  Strip.prototype.unpeek = function () {
+    this.peekEl.style.display = 'none'
   }
 
   Control.prototype.strip = function (target, opts) {
@@ -1042,7 +1520,11 @@
     for (var i = 0; i < this.strips.length; i++) {
       var s = this.strips[i]
       if (s.box === t || (t === true && s.page)) {
-        if (opts && 'rows' in opts) s.rows = Array.isArray(opts.rows) ? opts.rows : null
+        if (opts) {
+          if ('rows' in opts) s.rows = Array.isArray(opts.rows) ? opts.rows : null
+          if ('refs' in opts) s.refs = Array.isArray(opts.refs) ? opts.refs : null
+          if ('preview' in opts) s.preview = typeof opts.preview === 'function' ? opts.preview : null
+        }
         s.dirty()
         return s
       }
@@ -1052,25 +1534,175 @@
     return made
   }
 
+  // ---------------------------------------------------------------- details in place
+  // A row's details open under its own line, as in the File browser's transcript: thimble.expand(row, render) runs
+  // render(), which adds or removes the details (the page may draw the whole list again), keeps the row where it was on
+  // the screen, under the pointer that clicked it, and lets the details that appeared grow into place, the rows below
+  // moving down with them. The details are the elements render() adds with the class `thimble-details`, or `opts.details`
+  // (a selector); the row is found again by its data-anchor, its id or `opts.find()` when render() replaced it.
+  var GROW_MS = 160
+  function scroller(node) {
+    for (var a = node.parentElement; a; a = a.parentElement) {
+      var o = getComputedStyle(a).overflowY
+      if ((o === 'auto' || o === 'scroll') && a.scrollHeight > a.clientHeight) return a
+    }
+    return document.scrollingElement || document.documentElement
+  }
+  function expand(row, render, opts) {
+    opts = opts || {}
+    var sel = opts.details || '.thimble-details'
+    var anchor = row && row.getAttribute ? row.getAttribute('data-anchor') : null
+    var id = row && row.id
+    var box = row ? scroller(row) : null
+    var y0 = row ? row.getBoundingClientRect().top : 0
+    var before = typeof Set === 'function' ? new Set(document.querySelectorAll(sel)) : null
+    try {
+      render()
+    } catch (e) {
+      kit.report(e)
+    }
+    if (!row) return
+    var again = row.isConnected ? row : typeof opts.find === 'function' ? opts.find() : id ? document.getElementById(id) : null
+    if (!again && anchor) {
+      var all = document.querySelectorAll('[data-anchor]')
+      for (var i = 0; i < all.length; i++)
+        if (all[i].getAttribute('data-anchor') === anchor && !all[i].closest(sel)) {
+          again = all[i]
+          break
+        }
+    }
+    if (again && box) {
+      var dy = again.getBoundingClientRect().top - y0
+      if (Math.abs(dy) > 0.5) box.scrollTop += dy
+    }
+    if (!before) return
+    var fresh = document.querySelectorAll(sel)
+    for (var k = 0; k < fresh.length; k++) {
+      var d = fresh[k]
+      if (before.has(d) || typeof d.animate !== 'function') continue
+      var h = d.offsetHeight
+      if (!h) continue
+      d.animate([{ height: '0px', opacity: 0, overflow: 'hidden' }, { height: h + 'px', opacity: 1, overflow: 'hidden' }], { duration: GROW_MS, easing: 'ease-out' })
+    }
+  }
+  /** a row's details opened or closed under its own line, the row kept where it is on the screen (see above) */
+  thimble.expand = expand
+
+  // ---------------------------------------------------------------- Reset
+  // The view as it opens: no value turned off, every time range showing its whole span (viewer_range.js), each search
+  // field and select in Color by's row as the page wrote it, and the page's own state as thimble.onReset says. Reset
+  // puts them back without telling the page part by part, then calls the page's reset(), which draws once; a page that
+  // gave none hears Color by's and each range's onChange, and its fields' input and change events, as usual.
+  var parts = [] // the kit's other parts that Reset puts back: {changed(), reset(), fire()}
+  var pageReset = null
+  var resetting = false
+  var resetTimer = null
+  function rowFields() {
+    var row = control && control.mount && control.mount.parentElement
+    if (!row) return []
+    var out = []
+    var fs = row.querySelectorAll('input.field, select.field')
+    for (var i = 0; i < fs.length; i++) {
+      var f = fs[i]
+      if (f.closest('[data-thimble-chrome]') || f.closest('.thimble-colour-mount')) continue
+      if (f.tagName === 'INPUT' && !/^(text|search)$/.test(f.type || 'text')) continue
+      out.push(f)
+    }
+    return out
+  }
+  function firstIndex(sel) {
+    for (var i = 0; i < sel.options.length; i++) if (sel.options[i].defaultSelected) return i
+    return sel.options.length ? 0 : -1
+  }
+  function fieldChanged(f) {
+    return f.tagName === 'SELECT' ? f.selectedIndex !== firstIndex(f) : f.value !== f.defaultValue
+  }
+  function isChanged() {
+    if (control && control.offSet().length) return true
+    for (var i = 0; i < parts.length; i++) if (safe(parts[i].changed, false)) return true
+    if (rowFields().some(fieldChanged)) return true
+    return !!(pageReset && pageReset.changed && safe(pageReset.changed, false))
+  }
+  function checkReset() {
+    if (resetTimer != null || !control) return
+    resetTimer = setTimeout(function () {
+      resetTimer = null
+      if (control) control.showReset(isChanged())
+    }, 30)
+  }
+  function doReset() {
+    untip()
+    resetting = true
+    var fired = []
+    try {
+      S.off = {}
+      for (var i = 0; i < parts.length; i++) if (safe(parts[i].changed, false)) fired.push(parts[i])
+      for (var j = 0; j < fired.length; j++) safe(fired[j].reset)
+      if (control) {
+        save()
+        control.hook()
+        control.refresh()
+      }
+      var fs = rowFields().filter(fieldChanged)
+      for (var k = 0; k < fs.length; k++) {
+        var f = fs[k]
+        if (f.tagName === 'SELECT') f.selectedIndex = firstIndex(f)
+        else f.value = f.defaultValue
+        f.dispatchEvent(new Event('input', { bubbles: true }))
+        f.dispatchEvent(new Event('change', { bubbles: true }))
+      }
+    } finally {
+      resetting = false
+    }
+    if (pageReset && pageReset.reset) safe(pageReset.reset)
+    else {
+      if (control) control.changedQuiet()
+      for (var m = 0; m < fired.length; m++) if (fired[m].fire) safe(fired[m].fire)
+    }
+    if (control) control.showReset(isChanged())
+  }
+  // a click, a key or a typed letter anywhere may change what the page shows
+  ;['input', 'change', 'click', 'keyup'].forEach(function (type) {
+    document.addEventListener(type, function () {
+      checkReset()
+    }, true)
+  })
+
+  // the kit's parts that hear Color by: viewer_range.js draws its overview in the values' colours
+  var colourFns = []
+  var colourTimer = null
+  function tellColour() {
+    if (colourTimer != null) return
+    colourTimer = setTimeout(function () {
+      colourTimer = null
+      for (var i = 0; i < colourFns.length; i++) safe(colourFns[i])
+    }, 0)
+  }
+
   // ---------------------------------------------------------------- what the page holds
   function api(c) {
     var out = {
-      /** the colour now: {field, title} or {label, title} (the label's id and name), or null */
+      /** the colour now: {field, title} or {label, title} (the label's id and name), or null (Off, or nothing) */
       get by() {
         var ch = c.choice()
-        return ch ? (ch.label ? { label: ch.label, title: ch.title } : { field: ch.field, title: ch.title }) : null
+        return ch && !ch.off ? (ch.label ? { label: ch.label, title: ch.title } : { field: ch.field, title: ch.title }) : null
       },
-      /** the field coloured by, or null while a label is */
+      /** whether the analyst chose Off, which colors nothing */
+      get off() {
+        var ch = c.choice()
+        return !!(ch && ch.off)
+      },
+      /** the field colored by, or null while a label is or the colour is Off */
       get field() {
         var ch = c.choice()
         return ch && ch.field ? ch.field : null
       },
-      /** the label coloured by (its id), or null while a field is */
+      /** the label colored by (its id), or null while a field is or the colour is Off */
       get label() {
         var ch = c.choice()
         return ch && ch.label ? ch.label : null
       },
-      /** the chips' values: [{value, name, colour, on, n}], value null for the records that take none */
+      /** the chips' values: [{value, name, colour, on, n}], value null for the records that take none; none for Off */
       get values() {
         var off = c.offSet()
         return c.values.map(function (v) {
@@ -1079,11 +1711,11 @@
       },
       /** the value a record takes: its field's (record[field], or the field's own value(record), which may take any
        *  record such as a row's index), or for a label the label's value on record.ref (or on a ref given as a
-       *  string); null for none */
+       *  string); null for none, and always null for Off */
       valueOf: function (record) {
         return c.valueOf(record)
       },
-      /** the colour of a value, one a canvas can draw; null for no value */
+      /** the colour of a value, one a canvas can draw; null for no value and for Off */
       colourOf: function (value) {
         return c.colourOf(value)
       },
@@ -1095,8 +1727,8 @@
       keeps: function (record) {
         return c.isOn(c.valueOf(record))
       },
-      /** ` data-colour="<value>"` for a record's element while a field is coloured by, '' while a label is: the bar
-       *  thimble draws on the element */
+      /** ` data-colour="<value>"` for a record's element while a field is colored by, '' while a label is or for Off:
+       *  the bar thimble draws on the element */
       attr: function (record) {
         var ch = c.choice()
         if (!ch || !ch.field) return ''
@@ -1119,17 +1751,18 @@
         }
         c.refresh()
       },
-      /** the choice as the reader takes it with a fetch (thimble.colour_value and colour_on in reader.py) */
+      /** the choice as the reader takes it with a fetch (thimble.colour_value and colour_on in reader.py); null for Off */
       query: function () {
         var ch = c.choice()
-        if (!ch) return null
+        if (!ch || ch.off) return null
         var off = c.offSet(ch).map(function (k) { return k === NONE ? null : k })
         if (ch.label) return { label: ch.label, name: ch.title, off: off }
         return { field: ch.field, off: off }
       },
-      /** the coloured scrollbar on a list (an element or a selector, or true for the page); `opts.rows` gives every
-       *  row's value in order for a list that draws only the rows in view, and a later call with the same list updates
-       *  them */
+      /** the colored tracks on a list (an element or a selector, or true for the page); `opts.rows` gives every row's
+       *  value in order for a list that draws only the rows in view, `opts.refs` every row's record, `opts.preview(i or
+       *  element)` what the hover preview says of a record ({when, text} or a string); a later call with the same list
+       *  updates them */
       strip: function (target, opts) {
         c.strip(target, opts)
         return out
@@ -1138,8 +1771,8 @@
     return out
   }
 
-  /** Colour by, in the view's top row (see the top of this file). Called again, it replaces the control. */
-  thimble.colourBy = function (opts) {
+  /** Color by, in the view's top row (see the top of this file). Called again, it replaces the control. */
+  thimble.colorBy = function (opts) {
     opts = opts || {}
     if (control) {
       control.closeMenu()
@@ -1154,6 +1787,43 @@
     c.forget()
     c.hook()
     c.refresh()
+    checkReset()
     return c.api
+  }
+  thimble.colourBy = thimble.colorBy
+
+  /** What Reset puts back of the page's own state: `changed()` says whether it differs from how the view opens (a menu's
+   *  choice, a selection, a mode), `reset()` puts it back and draws the page again, after the kit has put back its
+   *  chips, its time ranges and the search fields of the row. Called again, it replaces the last. `check()` on what it
+   *  returns asks again whether Reset shows, for a change the page makes without a click or a key. */
+  thimble.onReset = function (opts) {
+    opts = opts || {}
+    pageReset = { changed: typeof opts.changed === 'function' ? opts.changed : null, reset: typeof opts.reset === 'function' ? opts.reset : null }
+    checkReset()
+    return { check: checkReset }
+  }
+
+  // what viewer_range.js shares: what is kept per view, the colour now, Reset, and the tip
+  kit.shared = {
+    state: S,
+    save: save,
+    colour: function () {
+      return control ? control.api : null
+    },
+    onColour: function (fn) {
+      colourFns.push(fn)
+    },
+    part: function (p) {
+      parts.push(p)
+      checkReset()
+      return checkReset
+    },
+    resetting: function () {
+      return resetting
+    },
+    tip: tip,
+    untip: untip,
+    esc: esc,
+    num: num,
   }
 })()

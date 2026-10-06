@@ -2,26 +2,29 @@
 <html>
 <head>
 <style>
-  /* thimble's parts (.field, .btn, .list-row), its Colour by control and the theme's tokens come with the frame; this
-     page lays out the top row, the messages per hour and the list */
+  /* thimble's parts (.field, .btn), its Color by control, its time range selector and the theme's tokens come with the
+     frame; this page lays out the top row, the range and the list */
   html, body { margin: 0; height: 100%; }
   body { background: var(--surface-card); overflow: hidden; }
   * { box-sizing: border-box; }
   #view { height: 100%; display: flex; flex-direction: column; }
   .top { flex: none; display: flex; align-items: center; gap: 10px; padding: 12px 16px 10px; border-bottom: 1px solid var(--border-subtle); }
   .search { flex: 0 1 180px; min-width: 120px; height: var(--control-sm); }
-  .shown { flex: none; color: var(--text-tertiary); font: 400 var(--text-mono-sm) / 1 var(--font-mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
-  #hours { flex: none; display: block; width: 100%; height: 74px; padding: 8px 16px 0; overflow: visible; }
-  #hours text { fill: var(--text-tertiary); font: 400 10px / 1 var(--font-mono); font-variant-numeric: tabular-nums; }
-  #hours .rule { stroke: var(--border-subtle); }
-  #list { flex: 1; min-height: 0; overflow: auto; padding: 4px 0 12px; }
-  .msg { display: grid; grid-template-columns: 92px 58px 78px minmax(0, 1fr); gap: 0 10px; align-items: baseline; padding: 4px 16px 4px 14px; border-bottom: 1px solid var(--border-hairline); cursor: pointer; }
+  #range { flex: none; padding: 10px 16px 4px; }
+  .head { flex: none; display: flex; align-items: baseline; gap: 8px; padding: 6px 16px 4px; border-bottom: 1px solid var(--border-hairline); color: var(--text-secondary); font: 400 var(--text-mono-sm) / 1.4 var(--font-mono); font-variant-numeric: tabular-nums; }
+  #list { flex: 1; min-height: 0; overflow: auto; padding: 0 0 12px; }
+  .msg { padding: 4px 16px 4px 14px; border-bottom: 1px solid var(--border-hairline); cursor: pointer; }
   .msg:hover { background: rgba(var(--ink-rgb), 0.03); }
-  .msg.open { background: var(--surface-selected); }
+  .line { display: grid; grid-template-columns: 92px 58px 78px minmax(0, 1fr); gap: 0 10px; align-items: baseline; }
   .msg time, .msg .who, .msg .ch { color: var(--text-tertiary); font: 400 var(--text-mono-sm) / 1.5 var(--font-mono); font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .msg .who { color: var(--text-secondary); }
   .msg .text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-primary); font: 400 var(--text-sm) / 1.5 var(--font-body); }
-  .msg.open .text { white-space: pre-wrap; overflow-wrap: anywhere; }
+  /* a message opened in place: its whole text and its fields under its line */
+  .thimble-details { padding: 4px 0 6px 250px; }
+  .thimble-details .full { white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text-primary); font: 400 var(--text-sm) / 1.5 var(--font-body); }
+  .thimble-details dl { display: flex; gap: 14px; margin: 4px 0 0; color: var(--text-secondary); font: 400 var(--text-mono-sm) / 1.4 var(--font-mono); }
+  .thimble-details dt { display: inline; color: var(--text-tertiary); }
+  .thimble-details dd { display: inline; margin: 0 0 0 4px; }
   .empty { padding: 28px 16px; color: var(--text-tertiary); }
 </style>
 </head>
@@ -30,9 +33,9 @@
   <div class="top">
     <input class="field search" id="q" type="search" placeholder="Search messages" aria-label="Search messages">
     <span id="colour"></span>
-    <span class="shown" id="shown"></span>
   </div>
-  <svg id="hours" aria-label="Messages per hour"></svg>
+  <div id="range"></div>
+  <div class="head" id="head"></div>
   <div id="list"></div>
 </div>
 <script>
@@ -42,9 +45,9 @@ const when = (iso) => `${+iso.slice(8, 10)} ${MON[+iso.slice(5, 7) - 1]} ${iso.s
 let data = null
 let open = null
 
-// the one Colour by control: the view's own fields and every label in one menu, the values as chips in this row, a
-// bar on each message's left edge, and the coloured scrollbar on the list
-const colour = thimble.colourBy({
+// the one Color by control: Off, the view's own fields and every label in one menu, the values as chips in this row,
+// a bar on each message's left edge, the list's two tracks, and Reset at the row's end
+const colour = thimble.colorBy({
   mount: '#colour',
   fields: [
     { name: 'kind', title: 'Kind', values: ['Text only', 'With links'] },
@@ -56,6 +59,13 @@ const colour = thimble.colourBy({
   onChange: load,
 })
 
+// the one control for time: the messages over the whole span in the Color by colours, a viewfinder that frames the
+// part the list shows, and its start, end and length; it opens on the whole span
+const range = thimble.timeRange({ mount: '#range', onChange: draw })
+
+// what Reset puts back of this page's own state: the message opened in place
+thimble.onReset({ changed: () => open != null, reset: () => { open = null; load() } })
+
 async function load() {
   try {
     data = await thimble.fetch({ op: 'board', colour: colour.query() }, { key: 'board' })
@@ -64,60 +74,36 @@ async function load() {
     throw e
   }
   colour.counts(data.counts)
+  for (const m of data.messages) m.t = Date.parse(m.ts) / 1000
+  // the overview's records: each message's time and its value, which it draws in the value's colour
+  range.data({ times: data.messages.map((m) => m.t), values: data.messages.map((m) => m.value) })
   draw()
 }
 
 function shown() {
   const q = document.getElementById('q').value.trim().toLowerCase()
-  return q ? data.messages.filter((m) => m.text.toLowerCase().includes(q)) : data.messages
+  return data.messages.filter((m) => range.has(m.t) && (!q || m.text.toLowerCase().includes(q)))
 }
+
+const details = (m) => `<div class="thimble-details"><div class="full">${esc(m.text)}</div><dl><div><dt>author</dt><dd>${esc(m.author)}</dd></div><div><dt>channel</dt><dd>#${esc(m.channel)}</dd></div><div><dt>kind</dt><dd>${esc(m.kind)}</dd></div></dl></div>`
+const row = (m) => `<div class="msg" data-anchor="${esc(m.ref)}"${colour.attr(m)}><div class="line"><time>${when(m.ts)}</time><span class="who">${esc(m.author)}</span><span class="ch">#${esc(m.channel)}</span><span class="text">${esc(m.text)}</span></div>${m.ref === open ? details(m) : ''}</div>`
 
 function draw() {
   if (!data) return
   const rows = shown()
-  document.getElementById('shown').textContent = `${rows.length.toLocaleString('en-US')} messages`
-  const list = document.getElementById('list')
-  list.innerHTML = rows.length
-    ? rows.map((m) => `<div class="msg${m.ref === open ? ' open' : ''}" data-anchor="${esc(m.ref)}"${colour.attr(m)}><time>${when(m.ts)}</time><span class="who">${esc(m.author)}</span><span class="ch">#${esc(m.channel)}</span><span class="text">${esc(m.text)}</span></div>`).join('')
-    : '<div class="empty">No message</div>'
-  drawHours()
-}
-
-// the messages per hour, each hour's bar stacked in the colours of the values that are on
-function drawHours() {
-  const svg = document.getElementById('hours')
-  const w = svg.clientWidth - 32
-  const h = 44
-  const hours = data.hours
-  if (!hours.length || w <= 0) return (svg.innerHTML = '')
-  const t0 = Date.parse(hours[0][0])
-  const t1 = Date.parse(hours[hours.length - 1][0]) + 3600e3
-  const X = (t) => ((t - t0) / (t1 - t0)) * w
-  const max = Math.max(1, ...hours.map(([, c]) => Object.values(c).reduce((a, b) => a + b, 0)))
-  const bw = Math.max(1, X(t0 + 3600e3) - 1)
-  let s = `<line class="rule" x1="0" x2="${w}" y1="${h + 0.5}" y2="${h + 0.5}"/>`
-  for (const [hour, counts] of hours) {
-    let y = h
-    for (const [v, n] of Object.entries(counts)) {
-      const hh = (n / max) * (h - 2)
-      y -= hh
-      const c = colour.colourOf(v === '' ? null : v) || 'var(--label-none)'
-      s += `<rect x="${X(Date.parse(hour)).toFixed(1)}" y="${y.toFixed(1)}" width="${bw.toFixed(1)}" height="${hh.toFixed(1)}" fill="${esc(c)}"><title>${esc(when(hour))} · ${esc(v || 'none')} · ${n}</title></rect>`
-    }
-  }
-  for (let t = Math.ceil(t0 / 86400e3) * 86400e3; t < t1; t += 86400e3) s += `<text x="${X(t).toFixed(1)}" y="${h + 12}">${when(new Date(t).toISOString()).slice(0, -6)}</text>`
-  svg.innerHTML = `<g transform="translate(16,0)">${s}</g>`
+  document.getElementById('head').textContent = `${rows.length.toLocaleString('en-US')} ${rows.length === 1 ? 'message' : 'messages'}`
+  document.getElementById('list').innerHTML = rows.length ? rows.map(row).join('') : '<div class="empty">No message</div>'
 }
 
 document.getElementById('q').addEventListener('input', draw)
+// a click opens a message in place under its line, the row kept under the pointer; a second click closes it
 document.getElementById('list').addEventListener('click', (e) => {
-  const row = e.target.closest('.msg')
-  if (!row) return
-  open = open === row.dataset.anchor ? null : row.dataset.anchor
-  for (const r of document.querySelectorAll('.msg.open')) r.classList.remove('open')
-  if (open) row.classList.add('open')
+  const el = e.target.closest('.msg')
+  if (!el || e.target.closest('.thimble-details')) return
+  open = open === el.dataset.anchor ? null : el.dataset.anchor
+  thimble.expand(el, draw)
 })
-// a label's values arrive while it runs, which the chips' counts and the chart follow while a label is the colour
+// a label's values arrive while it runs, which the chips' counts and the overview follow while a label is the colour
 let later = null
 thimble.onMarks(() => {
   if (!colour.label) return
@@ -128,16 +114,17 @@ thimble.onOpen((place) => {
   if (!place.ref) return
   open = place.ref
   const go = () => {
-    const row = document.querySelector(`.msg[data-anchor="${CSS.escape(open)}"]`)
-    if (!row) return false
-    for (const r of document.querySelectorAll('.msg.open')) r.classList.remove('open')
-    row.classList.add('open')
-    row.scrollIntoView({ block: 'center' })
+    if (!data) return false
+    const m = data.messages.find((x) => x.ref === open)
+    if (m && !range.has(m.t)) range.set(null)
+    draw()
+    const el = document.querySelector(`.msg[data-anchor="${CSS.escape(open)}"]`)
+    if (!el) return false
+    el.scrollIntoView({ block: 'center' })
     return true
   }
   if (!go()) setTimeout(go, 400)
 })
-addEventListener('resize', () => data && drawHours())
 load()
 </script>
 </body>

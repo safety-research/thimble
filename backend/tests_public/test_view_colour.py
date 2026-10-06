@@ -1,7 +1,9 @@
-"""The view kit's Colour by (backend/app/viewer_colour.js, thimble.colourBy) on the server's side: every view page loads
-it after the bridge; a page that mounts it has label controls, since the control draws them; the reader takes the
-page's choice with thimble.colour_value and colour_on; and the worked example plugin/viewers/colour-by, which shows the
-control, draws the test label through it and has no label control of its own."""
+"""The view kit's Color by (backend/app/viewer_colour.js, thimble.colorBy) and time range selector (viewer_range.js,
+thimble.timeRange) on the server's side: every view page loads them after the bridge, Color by first; a page that mounts
+Color by, by either of its names, has label controls, since the control draws them; the reader takes the page's choice
+with thimble.colour_value and colour_on; the kit's own fetch of a label's definition is answered by thimble, never by
+the reader; and the worked example plugin/viewers/colour-by, which shows the control and the range selector, draws the
+test label through it and has no label control of its own."""
 import json
 import os
 import shutil
@@ -41,9 +43,11 @@ def test_every_view_page_loads_the_colour_control_after_the_bridge_and_before_th
     (d / views.VIEW_HTML).write_text("<div id=c></div><script>const mine = thimble.colourBy({ mount: '#c', fields: [] })</script>")
     doc = views.frame_document({"dir": str(d), "slug": "board", "name": "Board"})
     bridge = doc.index("window.__thimbleKit = {")
-    control = doc.index("thimble.colourBy = function")
-    assert bridge < control < doc.index("const mine = thimble.colourBy("), "the bridge hands the control its part, then the page mounts it"
-    assert ".thimble-colour-chips" in doc and ".chip-key" in doc, "the kit's parts style it"
+    control = doc.index("thimble.colorBy = function")
+    timerange = doc.index("thimble.timeRange = function")
+    assert bridge < control < timerange < doc.index("const mine = thimble.colourBy("), \
+        "the bridge hands the kit its part, Color by and then the range selector take it, then the page mounts them"
+    assert ".thimble-colour-chips" in doc and ".chip-key" in doc and ".thimble-range-win" in doc, "the kit's parts style it"
 
 
 def test_a_page_that_mounts_colour_by_has_label_controls(tmp_path):
@@ -56,6 +60,7 @@ def test_a_page_that_mounts_colour_by_has_label_controls(tmp_path):
         return {"dir": str(d)}
 
     assert views.label_controls(page("<script>const c = thimble.colourBy({ mount: '#c', fields: [] })</script>"))
+    assert views.label_controls(page("<script>const c = thimble.colorBy({ mount: '#c', fields: [] })</script>"))
     assert views.label_controls(page('<b data-label="x"></b><script>thimble.setLabel("x", true)</script>'))
     assert not views.label_controls(page('<b data-label="x"></b><script>thimble.onLabels(() => {})</script>'))
 
@@ -78,6 +83,30 @@ def test_the_reader_takes_the_page_s_colour_choice():
         assert kt.colour_value({"label": "another"}, "messages.jsonl#L14") is None, "a label that is not on marks nothing"
     finally:
         kt._view_ctx = None
+
+
+def test_the_kit_s_fetch_of_a_label_s_definition_is_thimble_s_to_answer(workspaces_tmp, tmp_path, monkeypatch):
+    """Color by's menu asks for a label's definition with thimble.fetch({"$thimble": "label", id}): thimble answers it
+    from the label as its panel shows it, with what each value means where the prompt says so, and the reader never sees
+    it; an unknown label is None, and any other query is the reader's."""
+    from app import concepts  # noqa: PLC0415
+
+    (tmp_path / "data" / "kit").mkdir(parents=True)
+    (tmp_path / "data" / "kit" / "manifest.json").write_text(json.dumps({"name": "kit", "description": ""}))
+    monkeypatch.setattr(config, "DATA_DIR", (tmp_path / "data").resolve())
+    ws = config.workspace_dir("kit")
+    k = concepts.new_concept("asks", "Does the message ask another agent for something? yes = it asks for an answer. "
+                             "no: it asks for nothing.", "prompt", None, "record", ["yes", "no"], glob="messages.jsonl")
+    concepts.write_concept(ws, k)
+    handled, d = views.kit_answer("kit", {"$thimble": "label", "id": k["id"]})
+    assert handled
+    assert {x: d[x] for x in ("id", "name", "kind", "scope", "spec")} == \
+        {"id": k["id"], "name": "asks", "kind": "prompt", "scope": "messages.jsonl", "spec": ""}
+    assert d["text"].startswith("Does the message ask")
+    assert [(v["name"], v["meaning"]) for v in d["values"]] == [("yes", "it asks for an answer"), ("no", "it asks for nothing")]
+    assert views.kit_answer("kit", {"$thimble": "label", "id": "nolabel"}) == (True, None)
+    assert views.kit_answer("kit", {"op": "board"}) == (False, None)
+    assert views.kit_answer("kit", None) == (False, None)
 
 
 @pytest.fixture()

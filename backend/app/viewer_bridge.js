@@ -76,7 +76,7 @@
 //   state {id}             page to frame, answered by state {id, state}: what the analyst is looking at, before a newer
 //                          version of the view is loaded in its place: {ref, scroll, fields, segs} (pageState)
 //   restore {state}        page to frame: that state put back in the newer version's page, as far as it fits (restore)
-//   colour {state}         frame to page: the view's Colour by choice changed (viewer_colour.js), which thimble keeps
+//   colour {state}         frame to page: the view's Color by choice, or a time range (viewer_range.js), changed, which thimble keeps
 //                          per view and hands the page again as window.__thimbleColour when it loads
 // An anchored element with data-anchor-unmarked takes no mark, where the page draws the labels' colours on it itself,
 // such as a lane whose marks carry them; the checks then look for the label's colour on the element. A ⌘-click on it
@@ -915,7 +915,8 @@
   // value's colour, with data-thimble-label as before. For a field of the view, every element that says its value in
   // data-colour, anchored or not, takes the bar in that value's colour, with data-thimble-colour (an SVG shape the page
   // colours itself); the labels that are on then draw no bar, and their texts stay highlighted. An element whose value
-  // the analyst turned off is hidden or dimmed (data-thimble-off), as the hook says.
+  // the analyst turned off is hidden or dimmed (data-thimble-off), as the hook says. With Color by Off (mode 'off') no
+  // element takes a bar, and the texts the labels that are on match stay highlighted.
   var offed = []
   var OFF = '[data-thimble-off="hide"]{display:none!important}[data-thimble-off="dim"]{opacity:.25!important}'
   function paint() {
@@ -934,6 +935,7 @@
     for (var i2 = 0; i2 < offed.length; i2++) offed[i2].removeAttribute('data-thimble-off')
     offed = []
     var hook = colourHook && (colourHook.mode === 'label' || colourHook.mode === 'field') ? colourHook : null
+    var plain = !!(colourHook && colourHook.mode === 'off') // Color by: Off, which draws no bar
     var colours = []
     var ranges = []
     var owns = []
@@ -963,7 +965,10 @@
         var bar = null
         var shows = ''
         var kind = 'label'
-        if (!hook) {
+        if (plain) {
+          if (m && !unmarked && outermost(el, ref)) spanned.push([el, m])
+          continue
+        } else if (!hook) {
           if (!m || unmarked || !outermost(el, ref)) continue
           bar = m.bar
           shows = (m.names || []).join(', ')
@@ -1336,9 +1341,10 @@
   addEventListener('pointerdown', stopRestore, true)
   addEventListener('keydown', stopRestore, true)
 
-  // What the view kit's own controls (viewer_colour.js, loaded right after this bridge) need of it, handed over once:
-  // they hear the labels and marks without registering the page's onLabels, set the Colour by choice the marks are drawn
-  // by, have the page drawn again, and keep the choice with thimble.
+  // What the view kit's own controls (viewer_colour.js and viewer_range.js, loaded right after this bridge) need of it,
+  // handed over once (the last of them takes it away): they hear the labels and marks without registering the page's
+  // onLabels, set the Color by choice the marks are drawn by, have the page drawn again, and keep the choice and the
+  // time ranges with thimble.
   window.__thimbleKit = {
     labels: function (fn) {
       kitFns.push(fn)
