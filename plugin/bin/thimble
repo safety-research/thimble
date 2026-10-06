@@ -562,11 +562,21 @@ case "${1:-}" in
     exit 2;;
 esac
 
-# The session: Claude Code in this folder with the plugin loaded, whose hooks bring it the browser's events.
+# The session: Claude Code in this folder with the plugin loaded, whose hooks bring it the browser's events. Main runs
+# inside thimble's fence (cli.main_fence, in its --settings): Claude Code's sandbox on, the corpus read-only, writes only
+# in the agents' work folders, thimble's token files unreadable, and every subagent main starts inherits it. thimble's
+# agents are subagents of main, whose types the plugin's hooks module registers (plugin/hooks/thimble.ts); without the
+# module they cannot start, and the launch says so.
 # `launch-args` prints the plugin folder to load with --plugin-dir, or nothing when Claude Code has the plugin copy
 # installed and loads it already. Main's prompt is appended to the system prompt, since Claude Code cuts MCP server
 # instructions at about 2 KB and an appended prompt reaches every fork whole.
-# --effort is passed only when neither the analyst's settings nor their flags name one, unless the composer chose one.
+# --effort is passed only when neither the analyst's settings nor their flags name one, unless the composer chose one or
+# the analyst's CLAUDE_CODE_EFFORT_LEVEL did: the launch unsets that variable, which would override every agent's effort,
+# and passes its value as main's --effort instead.
+# --session-id is the id launch-args chose for a new session and wrote into the workspace's launch.json, from which the
+# hooks module's bridge takes main's session; it is left out when the analyst's flags name the session themselves.
+# The env line's switches are exported (CLAUDE_CODE_DISABLE_AGENT_VIEW=1: no "Move to background" and no ← agent view),
+# the variables the unset line names are unset, and the note lines are printed before Claude Code starts.
 # --name is `thimble:main · <workspace>` (cli.main_name), since `claude agents` and /resume list the sessions of every
 # folder; it is passed on -c/--continue and -r/--resume too, so a resumed main keeps that name (one an earlier build
 # left unnamed takes it, and so does one the analyst renamed with /rename), and an -n/--name among the analyst's own
@@ -584,22 +594,32 @@ command -v claude >/dev/null 2>&1 || {
 # thimble's own record (cli.last_main), since Claude Code's --continue could pick a writer's session in the same
 # folder; with none, --continue goes to `claude` as it is. The analyst's --settings goes to launch-args, which merges it
 # into thimble's. Other flags go to `claude` as they are; --new is dropped.
-cont=0 args=() own=""
+cont=0 args=() own="" sid="" sid_named=0 safe=0
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --new) ;;
     -c | --continue) cont=1;;
     --settings) [ "$#" -lt 2 ] || { own="$2"; shift; };;
     --settings=*) own="${1#--settings=}";;
+    # the analyst's own flags that name main's session: launch-args then names none (-r alone opens Claude Code's picker)
+    -r | --resume) sid_named=1; args+=("$1")
+      if [ "$#" -ge 2 ] && [ "${2#-}" = "$2" ]; then sid="$2"; args+=("$2"); shift; else sid=""; fi;;
+    --resume=* | --session-id=*) sid_named=1; sid="${1#*=}"; args+=("$1");;
+    --session-id) sid_named=1; args+=("$1"); [ "$#" -lt 2 ] || { sid="$2"; args+=("$2"); shift; };;
+    --fork-session) sid_named=2; args+=("$1");;
+    --safe-mode) safe=1; args+=("$1");;
     --) args+=("$@"); break;;
     *) args+=("$1");;
   esac
   shift
 done
+[ "$sid_named" != 2 ] || sid=""  # a fork gets an id Claude Code chooses
 set -- ${args[@]+"${args[@]}"}
 ask=()
 [ "$cont" = 0 ] || ask=(--resume)
 [ -z "$own" ] || ask+=(--settings="$own")
+[ "$sid_named" = 0 ] || ask+=(--own-session="$sid")
+[ "$safe" = 0 ] || ask+=(--safe-mode)
 repo="$("$here/thimble-app-dir")"
 cwd="$PWD"
 out="$(cd "$repo/backend" && THIMBLE_CALLER_CWD="$cwd" \
@@ -617,6 +637,14 @@ turn_tools="${rest%%$'\n'*}"
 rest="${rest#*$'\n'}"
 name="${rest%%$'\n'*}"
 rest="${rest#*$'\n'}"
+session_id="${rest%%$'\n'*}"
+rest="${rest#*$'\n'}"
+switches="${rest%%$'\n'*}"
+rest="${rest#*$'\n'}"
+unset_vars="${rest%%$'\n'*}"
+rest="${rest#*$'\n'}"
+notes="${rest%%$'\n'*}"
+rest="${rest#*$'\n'}"
 last=""
 if [ "$cont" = 1 ]; then last="${rest%%$'\n'*}"; rest="${rest#*$'\n'}"; fi
 prompt="$rest"
@@ -627,6 +655,13 @@ for a in "$@"; do case "$a" in --effort | --effort=*) effort="";; esac; done
 # an -n/--name among the analyst's own flags is their choice, so thimble's name is left out
 for a in "$@"; do case "$a" in -n | --name | --name=*) name="";; esac; done
 [ -z "$name" ] || tools+=(--name "$name")
+[ -z "$session_id" ] || tools+=(--session-id "$session_id")
+for kv in $switches; do export "$kv"; done
+for v in $unset_vars; do unset "$v"; done
+if [ -n "$notes" ]; then
+  IFS=$'\t' read -r -a note_lines <<<"$notes"
+  for n in "${note_lines[@]}"; do printf '%s\n' "$n" >&2; done
+fi
 resume=()
 if [ -n "$last" ]; then
   resume=(--resume "$last")

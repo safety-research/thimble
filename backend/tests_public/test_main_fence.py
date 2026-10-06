@@ -1,0 +1,307 @@
+"""Main started by `thimble` runs inside thimble's fence (cli.main_fence), so every subagent it starts, thimble's agents
+among them, runs inside it too; the launch registers the folder, finds its extensions again and writes launch.json
+before main starts (cli.launch_args), and says what it unset and why thimble's agents may not start."""
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import pytest
+
+from app import cc_plugin, cli, config, userconf
+
+REGISTER = cli.register_here  # the real one, which conftest replaces for the other tests
+REFRESH = cli.refresh_extensions
+
+
+@pytest.fixture()
+def corpus(tmp_path, monkeypatch) -> Path:
+    """A folder to start thimble in, with the data folder, the workspaces and thimble's home of the test's own; the
+    folder registered as `logs`, its sandbox able to run."""
+    data = tmp_path / "data"
+    data.mkdir()
+    monkeypatch.setenv("THIMBLE_DATA_DIR", str(data))
+    monkeypatch.setattr(config, "DATA_DIR", data.resolve())
+    monkeypatch.setenv("THIMBLE_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("THIMBLE_PORT", "21101")
+    monkeypatch.setenv("THIMBLE_UI_PORT", "21102")
+    monkeypatch.setenv("THIMBLE_SANDBOX", "1")
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "cc"))
+    for name in (*cli.UNSET_VARS, cli.NO_MODULE_ENV, cli.SAFE_MODE_ENV, "THIMBLE_CALLER_CWD", "THIMBLE_DEV_DIR"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setattr(cc_plugin, "MANAGED_DIRS", {})
+    folder = tmp_path / "work" / "logs"
+    folder.mkdir(parents=True)
+    config.register_corpus(folder, exact=True)
+    return folder
+
+
+def _conf(data) -> None:
+    userconf.global_file().parent.mkdir(parents=True, exist_ok=True)
+    userconf.global_file().write_text(json.dumps(data))
+
+
+def _rules(fence) -> dict[str, list[str]]:
+    return fence["permissions"]
+
+
+def test_the_fence_keeps_the_corpus_read_only_and_lets_main_write_only_the_agents_work_folders(corpus):
+    """Claude Code's sandbox on with no command outside it and no Bash allowed unasked; writes only in the six work
+    folders, never a ticket's worktree; the corpus and the workspace's config and settings not writable; the token files
+    and the links folder unreadable; thimble's records not editable; no additionalDirectories; the fence's mark."""
+    fence = cli.main_fence(corpus)
+    box, perms = fence["sandbox"], _rules(fence)
+    ws = config.WORKSPACES_DIR.resolve() / "logs"
+    assert box["enabled"] and not box["allowUnsandboxedCommands"] and not box["autoAllowBashIfSandboxed"]
+    assert box["failIfUnavailable"] is True, "sandbox.enforce, on by default"
+    fs = box["filesystem"]
+    assert fs["allowWrite"] == [str(ws / d) for d in ("orient/work", "writers", "critique-work", "check-work",
+                                                       "views-work", "extension/views")]
+    assert fs["allowWrite"] == [str(p) for p in cli.write_dirs("logs")]
+    assert fs["denyWrite"] == [str(corpus.resolve()), str(ws / "config.json"), str(ws / "settings.json")]
+    assert fs["denyRead"] == [*userconf.private_paths(), str(cli.home() / "links")]
+    assert "network" not in box, "the orientation's network is on by default"
+    assert box["excludedCommands"] == [cli.watch_rule(cli.plugin_root())], "the Monitor route's watcher (U15)"
+    assert "additionalDirectories" not in perms
+    for p in ("checks/**", "chats/**", "extensions/**", "extension/extension.json", "orient/run.json", "subagents.json",
+              "callers.jsonl", "launch.json", "views/**"):
+        assert f"Edit(/{ws / p})" in perms["deny"], p
+    assert f"Edit(/{userconf.main_modes_file()})" in perms["deny"]
+    assert all(r in perms["deny"] for r in userconf.private_rules())
+    assert f"Read(/{cli.home() / 'links'}/**)" in perms["deny"]
+    assert f"Read(/{ws / 'critique'}/**)" in perms["allow"], "the critic reads its digest and brief"
+    assert fence["env"] == {cc_plugin.FENCE_MARK: "1"}
+    assert not any("views-work" in r for r in perms["deny"]), "view builders work there"
+    rules = [*fs["allowWrite"], *fs["denyWrite"], *fs["denyRead"],
+             *(r[len("Edit(/"):-1] for r in perms["deny"] if r.startswith("Edit("))]
+    for path in rules:
+        assert "*" not in path.removesuffix("/**"), f"{path}: Linux drops any other glob (U19)"
+
+
+def test_the_fence_s_rules_follow_the_orientation_s_data_web_and_network_and_add_no_install_rule(corpus):
+    """An edit of the corpus asks, is denied, or is left to the mode by `data`; an edit of thimble's config asks; the web
+    tools ask, are denied or allowed by `web`; `network` off denies every domain. No rule names an install, whatever an
+    earlier config's `installs` says."""
+    ws = config.WORKSPACES_DIR.resolve() / "logs"
+    corpus_rule = f"Edit(/{corpus.resolve()}/**)"
+    for data, web, network in (("ask", "ask", "on"), ("off", "off", "off"), ("allow", "allow", "on")):
+        for installs in ("ask", "deny", "allow"):
+            _conf({"installs": installs, "agents": {"orientation": {"data": data, "web": web, "network": network}}})
+            fence = cli.main_fence(corpus)
+            perms = _rules(fence)
+            where = {k: [r for r in v if r == corpus_rule] for k, v in perms.items()}
+            assert where == {**{k: [] for k in perms}, **({"ask": [corpus_rule]} if data == "ask" else
+                                                         {"deny": [corpus_rule]} if data == "off" else {})}
+            web_in = {"ask": "ask", "off": "deny", "allow": "allow"}[web]
+            assert {"WebFetch", "WebSearch"} <= set(perms[web_in])
+            assert (fence["sandbox"].get("network") == {"deniedDomains": ["*"]}) == (network == "off")
+            assert {f"Edit(/{userconf.global_file()})", f"Edit(/{ws / 'config.json'})",
+                    f"Edit(/{ws / 'settings.json'})"} <= set(perms["ask"])
+            every = [r for rules in perms.values() for r in rules]
+            assert not any(r.startswith("Bash(") for r in every), (installs, every)
+    causes = {r.rule: r.cause for r in userconf.main_rules("logs")}
+    assert causes[f"Edit(/{userconf.global_file()})"] == "config" and causes["WebFetch"] == "web"
+    assert "installs" not in causes.values()
+
+
+def test_a_development_install_denies_edits_of_the_code_tickets_records(corpus, tmp_path, monkeypatch):
+    """In a development install main may not edit the checkout's dev/tickets.jsonl and dev/applies.jsonl, which hold
+    the change a ticket's checks passed; the folders are no write folder either."""
+    monkeypatch.setenv("THIMBLE_DEV_DIR", str(tmp_path / "dev"))
+    monkeypatch.setattr(config, "REPO_ROOT", tmp_path)
+    (tmp_path / ".git").mkdir()
+    perms = _rules(cli.main_fence(corpus))
+    assert {f"Edit(/{tmp_path / 'dev' / 'tickets.jsonl'})", f"Edit(/{tmp_path / 'dev' / 'applies.jsonl'})"} <= \
+        set(perms["deny"])
+    (tmp_path / ".git").rmdir()
+    assert not any("tickets.jsonl" in r for r in _rules(cli.main_fence(corpus))["deny"]), "an installed copy has none"
+
+
+def test_no_fence_without_the_sandbox_and_the_launch_says_so(corpus, monkeypatch):
+    """With thimble's config turning the sandbox off, or where it cannot run, main starts without the fence, and the
+    launch's note line says so; a folder `up` refuses has no fence either."""
+    _conf({"sandbox": {"use": "never", "enforce": False}})
+    assert cli.main_fence(corpus) == {} and cli.fence_off("logs") == "never"
+    assert cli.NO_FENCE_LINES["never"] in cli.launch_args(corpus).split("\n")[9].split("\t")
+    _conf({})
+    monkeypatch.setenv("THIMBLE_SANDBOX", "0")
+    assert cli.main_fence(corpus) == {}
+    lines = cli.launch_args(corpus).split("\n")
+    assert cli.NO_FENCE_LINES["missing"] in lines[9].split("\t")
+    assert cc_plugin.FENCE_MARK not in json.dumps(json.loads(lines[3]).get("env") or {})
+    assert cli.fence_off(None) == "refused"
+    monkeypatch.setenv("THIMBLE_SANDBOX", "1")
+    monkeypatch.setattr(cli, "register_here", lambda cwd: None)
+    assert cli.NO_FENCE_LINES["refused"] in cli.launch_args(corpus).split("\n")[9].split("\t")
+
+
+def test_launch_json_says_unfenced_when_the_analysts_settings_cannot_be_read(corpus, capsys):
+    """An analyst's --settings that cannot be read is passed on as it is, without thimble's fence, and launch.json
+    records main as not fenced, as main's command line will show it."""
+    lines = cli.launch_args(corpus, settings="missing.json").split("\n")
+    assert lines[3] == "missing.json" and "could not be read" in capsys.readouterr().err
+    assert json.loads((config.WORKSPACES_DIR / "logs" / cli.LAUNCH_FILE).read_text())["fenced"] is False
+    cli.launch_args(corpus)
+    assert json.loads((config.WORKSPACES_DIR / "logs" / cli.LAUNCH_FILE).read_text())["fenced"] is True
+
+
+def test_a_config_with_an_error_still_fences_main_with_the_defaults(corpus):
+    """A broken config never opens the fence: main is fenced with the defaults' rules."""
+    _conf({"agents": {"orientation": {"data": "sometimes"}}})
+    assert userconf.problem("logs")
+    perms = _rules(cli.main_fence(corpus))
+    assert f"Edit(/{corpus.resolve()}/**)" in perms["ask"]
+
+
+def test_with_fence_joins_the_analysts_own_settings_but_keeps_the_sandbox_closed(corpus):
+    """The analyst's own --settings: permission lists joined, their sandbox keys kept, filesystem and excluded commands
+    joined, their env kept beside the fence's mark; the keys that would open the fence stay thimble's."""
+    own = {"permissions": {"allow": ["Bash(git status)"], "ask": ["Bash(git push:*)"]},
+           "sandbox": {"autoAllowBashIfSandboxed": True, "enabled": False, "allowUnsandboxedCommands": True,
+                       "filesystem": {"allowWrite": ["/srv/out"]}, "excludedCommands": ["docker *"]},
+           "env": {"MINE": "1"}}
+    out = cli.with_fence(own, cli.main_fence(corpus))
+    assert out["permissions"]["allow"][0] == "Bash(git status)"
+    assert out["permissions"]["ask"][0] == "Bash(git push:*)" and len(out["permissions"]["ask"]) > 1
+    assert out["sandbox"]["autoAllowBashIfSandboxed"] is True, "the analyst's own sandbox keys win"
+    assert out["sandbox"]["enabled"] is True and out["sandbox"]["allowUnsandboxedCommands"] is False
+    assert "/srv/out" in out["sandbox"]["filesystem"]["allowWrite"]
+    assert out["sandbox"]["excludedCommands"][0] == "docker *" and len(out["sandbox"]["excludedCommands"]) == 2
+    assert out["env"]["MINE"] == "1" and out["env"][cc_plugin.FENCE_MARK] == "1"
+    assert cli.with_fence(own, {}) is own
+    settings = json.loads(cli.launch_settings(corpus, json.dumps(own), cli.main_fence(corpus)))
+    assert cc_plugin.fenced_argv(["claude", "--settings", json.dumps(settings)], corpus), "main_fenced reads it so"
+
+
+def test_launch_args_on_a_new_folder_registers_it_refreshes_its_extensions_first_and_writes_launch_json(
+        tmp_path, corpus, monkeypatch):
+    """On a folder never registered, launch-args registers it, finds its extensions again before anything reads the
+    roles (U4), prints no --agents line, writes launch.json with main's session id, whether main is fenced, the
+    switches and the variables it unsets, and gives main the fence."""
+    monkeypatch.setattr(cli, "register_here", REGISTER)
+    seen: list[str] = []
+    monkeypatch.setattr(cli, "refresh_extensions", lambda c: seen.append(c))
+    fresh = tmp_path / "work" / "notes"
+    fresh.mkdir()
+    assert config.workspace_for_cwd(str(fresh)) is None
+    monkeypatch.setenv("CLAUDE_CODE_SUBAGENT_MODEL", "haiku")
+    lines = cli.launch_args(fresh).split("\n")
+    assert config.workspace_for_cwd(str(fresh)) == "notes" and seen == ["notes"]
+    assert "--agents" not in "\n".join(lines[:10])
+    rec = json.loads((config.WORKSPACES_DIR / "notes" / cli.LAUNCH_FILE).read_text())
+    assert rec["session"] == lines[6] and cli.SESSION_ID_RE.fullmatch(rec["session"])
+    assert rec["fenced"] is True and rec["switches"] == cli.SWITCHES and rec["unset"] == ["CLAUDE_CODE_SUBAGENT_MODEL"]
+    assert rec["at"]
+    settings = json.loads(lines[3])
+    assert settings["sandbox"]["enabled"] and settings["env"][cc_plugin.FENCE_MARK] == "1"
+    assert "Read(/" + str(Path(cli.resolve_env()["workspaces_dir"]).resolve() / "*" / "bg" / "*.md") + ")" not in lines[1]
+    resumed = cli.launch_args(fresh, own_session="0b9d2f3e-1c2d-4e5f-8a9b-0c1d2e3f4a5b").split("\n")
+    assert resumed[6] == "" and json.loads((config.WORKSPACES_DIR / "notes" / cli.LAUNCH_FILE).read_text())["session"] \
+        == "0b9d2f3e-1c2d-4e5f-8a9b-0c1d2e3f4a5b", "the analyst's own --resume or --session-id names it"
+    cli.launch_args(fresh, own_session="")
+    assert json.loads((config.WORKSPACES_DIR / "notes" / cli.LAUNCH_FILE).read_text())["session"] is None
+    home = Path.home()
+    assert REGISTER(home) is None, "the home folder is never a workspace"
+
+
+def test_refresh_extensions_asks_a_running_server_else_finds_them_here(corpus, monkeypatch):
+    """A running server of this install refreshes the workspace's extensions (GET /ws/{c}/extensions); without one
+    launch-args finds them itself. Neither failing stops the launch."""
+    calls: list = []
+    monkeypatch.setattr(cli, "healthy", lambda url=None, timeout=1.0: True)
+    monkeypatch.setattr(cli, "foreign_home", lambda url=None: None)
+    monkeypatch.setattr(cli, "_request", lambda method, url, body=None, timeout=5.0: calls.append((method, url)) or (200, {}))
+    REFRESH("logs")
+    assert calls == [("GET", f"{cli.api_url()}/api/ws/logs/extensions")]
+    from app import extensions
+
+    found: list[str] = []
+
+    async def refresh(c, wait=0.0):
+        found.append(c)
+        return {}
+
+    monkeypatch.setattr(cli, "healthy", lambda url=None, timeout=1.0: False)
+    monkeypatch.setattr(extensions, "refresh", refresh)
+    REFRESH("logs")
+    assert found == ["logs"]
+
+    async def broken(c, wait=0.0):
+        raise RuntimeError("no")
+
+    monkeypatch.setattr(extensions, "refresh", broken)
+    REFRESH("logs")  # never raises
+
+
+def test_the_launch_unsets_the_effort_and_subagent_model_variables_and_gives_main_its_effort(corpus, monkeypatch):
+    """CLAUDE_CODE_EFFORT_LEVEL is unset and its value passed as main's --effort, unless thimble's models.main names
+    main's effort; the two subagent-model variables are unset; a note names each."""
+    monkeypatch.setenv("CLAUDE_CODE_EFFORT_LEVEL", "high")
+    monkeypatch.setenv("CLAUDE_CODE_SUBAGENT_MODEL", "haiku")
+    monkeypatch.setenv("CLAUDE_CODE_SUBAGENT_MODEL_FORCE", "1")
+    lines = cli.launch_args(corpus).split("\n")
+    assert lines[2] == "high" and lines[8].split() == list(cli.UNSET_VARS)
+    notes = lines[9].split("\t")
+    assert cli.UNSET_EFFORT_LINE.format(effort="high") in notes
+    assert all(cli.UNSET_LINE.format(name=n) in notes for n in cli.UNSET_VARS[1:])
+    (config.WORKSPACES_DIR / "logs").mkdir(parents=True, exist_ok=True)
+    (config.WORKSPACES_DIR / "logs" / "settings.json").write_text(json.dumps({"models": {"main": {"effort": "low"}}}))
+    lines = cli.launch_args(corpus).split("\n")
+    assert lines[2] == "low" and "CLAUDE_CODE_EFFORT_LEVEL" in lines[8].split()
+    monkeypatch.delenv("CLAUDE_CODE_EFFORT_LEVEL")
+    monkeypatch.delenv("CLAUDE_CODE_SUBAGENT_MODEL")
+    monkeypatch.delenv("CLAUDE_CODE_SUBAGENT_MODEL_FORCE")
+    assert cli.launch_args(corpus).split("\n")[8] == ""
+
+
+def test_the_launch_says_plainly_when_hooks_modules_are_off_and_still_launches(corpus, tmp_path, monkeypatch):
+    """Managed settings that set disableAllHooks or allowManagedHooksOnly, the analyst's own disableAllHooks or
+    THIMBLE_NO_MODULE: the note line says thimble's agents can't start and why, and the launch goes on; THIMBLE_NO_MODULE
+    is recorded among the switches. Safe mode gets its warning."""
+    def note(**kw) -> list[str]:
+        return cli.launch_args(corpus, **kw).split("\n")[9].split("\t")
+
+    assert not any("hooks modules are off" in n for n in note())
+    managed = tmp_path / "managed"
+    managed.mkdir()
+    monkeypatch.setattr(cc_plugin, "MANAGED_DIRS", {cc_plugin.sys.platform: managed})
+    for key in ("disableAllHooks", "allowManagedHooksOnly"):
+        (managed / "managed-settings.json").write_text(json.dumps({key: True}))
+        assert cli.MODULES_OFF_LINE.format(reason=f"your organization's managed settings set {key}") in note()
+    (managed / "managed-settings.json").write_text(json.dumps({"allowManagedHooksOnly": True,
+                                                               "enabledPlugins": {"thimble@thimble-local": True}}))
+    assert not any("hooks modules are off" in n for n in note()), "thimble is a managed plugin there"
+    (managed / "managed-settings.json").unlink()
+    monkeypatch.setenv(cli.NO_MODULE_ENV, "1")
+    assert cli.MODULES_OFF_LINE.format(reason=f"{cli.NO_MODULE_ENV} is set") in note()
+    rec = json.loads((config.WORKSPACES_DIR / "logs" / cli.LAUNCH_FILE).read_text())
+    assert rec["switches"][cli.NO_MODULE_ENV] == "1"
+    monkeypatch.delenv(cli.NO_MODULE_ENV)
+    (tmp_path / "cc").mkdir(exist_ok=True)
+    (tmp_path / "cc" / "settings.json").write_text(json.dumps({"disableAllHooks": True}))
+    assert cli.MODULES_OFF_LINE.format(reason="your Claude Code settings set disableAllHooks") in note()
+    (tmp_path / "cc" / "settings.json").write_text("{}")
+    assert cli.SAFE_MODE_LINE in note(safe_mode=True)
+    monkeypatch.setenv(cli.SAFE_MODE_ENV, "1")
+    assert cli.SAFE_MODE_LINE in note()
+
+
+def test_slash_thimble_warns_in_a_session_the_launcher_did_not_start(corpus, monkeypatch, capsys):
+    """/thimble in a plain `claude` (no THIMBLE_LAUNCHED and no fence on its command line) prints the warning; in a
+    launched, fenced main it does not."""
+    monkeypatch.setattr(cli, "launched", lambda: False)
+    monkeypatch.setattr(cli, "fenced_here", lambda cwd: False)
+    assert cli.UNFENCED_LINE.startswith("thimble: WARNING - this session was not started with `thimble`")
+    assert "thimble's agents cannot start in it" in cli.UNFENCED_LINE
+    src = Path(cli.__file__).read_text("utf-8")
+    assert "if args.session and not launched() and not fenced_here(cwd):\n            print(UNFENCED_LINE)" in src
+    fence = {"sandbox": {"enabled": True}, "env": {cc_plugin.FENCE_MARK: "1"}}
+    monkeypatch.undo()
+    monkeypatch.setattr(cc_plugin, "claude_pid", lambda environ=None: 77)
+    from app import procs
+
+    monkeypatch.setattr(procs, "argv", lambda pid: ["claude", "--settings", json.dumps(fence)])
+    monkeypatch.setattr(procs, "cwd", lambda pid: None)
+    assert cli.fenced_here(Path("/tmp"))
+    monkeypatch.setattr(procs, "argv", lambda pid: ["claude"])
+    assert not cli.fenced_here(Path("/tmp"))

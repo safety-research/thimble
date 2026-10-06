@@ -177,10 +177,12 @@ def test_launch_args_put_mains_name_before_the_resume_id_and_the_prompt(tmp_path
     monkeypatch.setattr(cli, "last_main", lambda cwd: "sid-last")
     plain = cli.launch_args(logs).split("\n")
     assert plain[5] == cli.main_name(logs) == "thimble:main · logs"
-    assert "\n".join(plain[6:]).strip() and plain[6] != "sid-last", "the prompt follows the name"
+    assert cli.SESSION_ID_RE.fullmatch(plain[6]), "a new session's id, which launch.json records"
+    assert plain[7].split() == [f"{k}={v}" for k, v in cli.SWITCHES.items()]
+    assert "\n".join(plain[10:]).strip() and "sid-last" not in plain[6:11], "the prompt follows the name and the lines"
     resumed = cli.launch_args(logs, resume=True).split("\n")
-    assert resumed[5] == "thimble:main · logs" and resumed[6] == "sid-last"
-    assert resumed[7:] == plain[6:]
+    assert resumed[5] == "thimble:main · logs" and resumed[6] == "" and resumed[10] == "sid-last"
+    assert resumed[11:] == plain[10:]
 
 
 def _launcher(tmp_path: Path, lines: list[str]) -> tuple[Path, Path]:
@@ -209,8 +211,10 @@ def test_the_launcher_passes_mains_name_and_lets_the_analysts_win(tmp_path):
     import subprocess  # noqa: PLC0415
 
     head = [str(tmp_path / "plugin"), "mcp__x", "", "{}", ""]
-    launcher, path = _launcher(tmp_path, [*head, "thimble:main · logs", "the prompt"])
-    (tmp_path / "launch-args.txt.resume").write_text("\n".join([*head, "thimble:main · logs", "sid-last", "the prompt"]))
+    lines = ["", "CLAUDE_CODE_DISABLE_AGENT_VIEW=1", "", ""]  # no session id, the env, unset and note lines
+    launcher, path = _launcher(tmp_path, [*head, "thimble:main · logs", *lines, "the prompt"])
+    (tmp_path / "launch-args.txt.resume").write_text("\n".join([*head, "thimble:main · logs", *lines, "sid-last",
+                                                                "the prompt"]))
     argv_out = tmp_path / "argv.txt"
 
     def run(*flags: str) -> list[str]:
@@ -262,7 +266,8 @@ def test_without_the_plugin_registered_the_launcher_loads_its_own_plugin_folder(
 
     work = tmp_path / "w"
     work.mkdir()
-    launcher, cpath = _launcher(work, [str(work / "plugin"), "mcp__x", "", "{}", "", "thimble:main · w", "the prompt"])
+    launcher, cpath = _launcher(work, [str(work / "plugin"), "mcp__x", "", "{}", "", "thimble:main · w", "", "", "", "",
+                                       "the prompt"])
     argv_out = tmp_path / "argv.txt"
     subprocess_env = {"PATH": f"{cpath}:/usr/bin:/bin", "HOME": str(tmp_path), "ARGV_OUT": str(argv_out)}
     import subprocess  # noqa: PLC0415
@@ -271,7 +276,8 @@ def test_without_the_plugin_registered_the_launcher_loads_its_own_plugin_folder(
     argv = argv_out.read_text().splitlines()
     assert argv[argv.index("--plugin-dir") + 1] == str(work / "plugin")
     assert "--dangerously-load-development-channels" not in argv
-    (work / "launch-args.txt").write_text("\n".join(["", "mcp__x", "", "{}", "", "thimble:main · w", "the prompt"]))
+    (work / "launch-args.txt").write_text("\n".join(["", "mcp__x", "", "{}", "", "thimble:main · w", "", "", "", "",
+                                                     "the prompt"]))
     subprocess.run(["bash", str(launcher)], check=True, capture_output=True, cwd=work, env=subprocess_env)
     argv = argv_out.read_text().splitlines()
     assert "--plugin-dir" not in argv and argv[-1] == "/thimble"
@@ -291,3 +297,38 @@ def test_a_peer_messages_sender_is_found_in_a_slugged_name(followed):
     assert tray.by_origin(CORPUS, "thimble-writer") is new
     assert tray.by_origin(CORPUS, "thimble-critic") is old
     assert tray.by_origin(CORPUS, "thimble-dev") is None
+
+
+def test_the_launcher_passes_the_session_id_exports_the_switches_unsets_the_variables_and_prints_the_notes(tmp_path):
+    """The launcher passes launch-args' session id with --session-id, exports the env line's switches into `claude`'s
+    environment, unsets the variables the unset line names, prints each note line before Claude Code starts, and tells
+    launch-args when the analyst's own flags name the session (-r, --session-id, --fork-session) or ask for safe mode."""
+    import subprocess  # noqa: PLC0415
+
+    head = [str(tmp_path / "plugin"), "mcp__x", "high", "{}", ""]
+    sid = "0b9d2f3e-1c2d-4e5f-8a9b-0c1d2e3f4a5b"
+    notes = "thimble: CLAUDE_CODE_EFFORT_LEVEL is unset\tthimble's agents can't start in this session: x."
+    launcher, path = _launcher(tmp_path, [*head, "thimble:main · logs", sid,
+                                          "CLAUDE_CODE_DISABLE_AGENT_VIEW=1 CLAUDE_DISABLE_ADOPT=1",
+                                          "CLAUDE_CODE_EFFORT_LEVEL CLAUDE_CODE_SUBAGENT_MODEL", notes, "the prompt"])
+    (path / "claude").write_text('#!/bin/sh\nfor a in "$@"; do printf "%s\\n" "$a"; done > "$ARGV_OUT"\n'
+                                 'env > "$ARGV_OUT.env"\n')
+    asked = tmp_path / "asked.txt"
+    py = tmp_path / "plugin" / "bin" / "thimble-python"
+    py.write_text(py.read_text().replace("#!/bin/sh\n", f'#!/bin/sh\nprintf "%s\\n" "$@" > "{asked}"\n'))
+    argv_out = tmp_path / "argv.txt"
+    env = {"PATH": f"{path}:/usr/bin:/bin", "HOME": str(tmp_path), "ARGV_OUT": str(argv_out),
+           "CLAUDE_CODE_EFFORT_LEVEL": "high", "CLAUDE_CODE_SUBAGENT_MODEL": "haiku"}
+    done = subprocess.run(["bash", str(launcher)], check=True, capture_output=True, text=True, cwd=tmp_path, env=env)
+    argv = argv_out.read_text().splitlines()
+    assert argv[argv.index("--session-id") + 1] == sid and argv[argv.index("--effort") + 1] == "high"
+    seen = dict(line.split("=", 1) for line in Path(f"{argv_out}.env").read_text().splitlines() if "=" in line)
+    assert seen["CLAUDE_CODE_DISABLE_AGENT_VIEW"] == "1" and seen["CLAUDE_DISABLE_ADOPT"] == "1"
+    assert "CLAUDE_CODE_EFFORT_LEVEL" not in seen and "CLAUDE_CODE_SUBAGENT_MODEL" not in seen
+    assert done.stderr.splitlines()[:2] == notes.split("\t")
+    assert "--own-session" not in asked.read_text() and "--safe-mode" not in asked.read_text()
+    for flags, told in ((["-r", "sid-mine"], "--own-session=sid-mine"), (["--session-id", sid], f"--own-session={sid}"),
+                        (["-r", "x", "--fork-session"], "--own-session="), (["--safe-mode"], "--safe-mode")):
+        subprocess.run(["bash", str(launcher), *flags], check=True, capture_output=True, cwd=tmp_path, env=env)
+        assert told in asked.read_text().splitlines(), flags
+        assert flags[-1] in argv_out.read_text().splitlines(), "the analyst's flags reach claude as they are"

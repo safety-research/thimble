@@ -278,6 +278,17 @@ def _no_plugin_list(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _launch_writes_nothing_shared(monkeypatch):
+    """launch_args registers its folder (cli.register_here) and finds the workspace's extensions again through a running
+    server (cli.refresh_extensions). In a test it registers nothing, so the suite's shared data folder gains no corpus,
+    and reaches no server: the default port may be a live server's. A test of either replaces it again."""
+    from app import cli, config
+
+    monkeypatch.setattr(cli, "register_here", lambda cwd: config.workspace_for_cwd(str(cwd)))
+    monkeypatch.setattr(cli, "refresh_extensions", lambda c: None)
+
+
+@pytest.fixture(autouse=True)
 def _claude_stand_in(tmp_path_factory, monkeypatch):
     """A stand-in `claude`, first on PATH and as the resolved CLI (config.CLI_PATH and the modules that hold it), for the
     test and the processes it starts, which prints the version thimble is tested with for `--version` and nothing
