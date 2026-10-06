@@ -449,6 +449,41 @@ async def test_the_critic_may_not_add_a_card_and_main_may_not_critique(bridge, m
     assert refused, "main's own call of the orientation's tool"
 
 
+async def test_main_s_own_call_runs_at_once_and_a_subagent_s_is_found_by_its_transcript(bridge, tmp_path):
+    """The caller hook writes a line only for a subagent's call, and before Claude Code makes it, so main's own call has
+    none: it is told apart by main's transcript at once, not after CALLER_WAIT_S (live: each of main's thimble calls
+    took 2 s longer, start_orientation 4.2 s). A subagent's call with no line yet is found by its own transcript."""
+    import time
+
+    from app import session, tools
+
+    assert subagents.CALLER_WAIT_S >= 1.0, "the wait this test shows main's calls no longer take"
+    t = time.monotonic()
+    assert await subagents.caller(CORPUS, "toolu_main_no_session") is None
+    assert time.monotonic() - t < 0.5, "with no session attached, main's call waits for nothing"
+    main = tmp_path / "main.jsonl"
+    main.write_text(json.dumps({"type": "assistant", "message": {"content": [
+        {"type": "tool_use", "id": "toolu_main1", "name": "mcp__plugin_thimble_thimble__add_card"}]}}) + "\n")
+    lv = session.Live(CORPUS, "sid-main", "/tmp", str(main), None)
+    with subagents.update(CORPUS) as state:
+        sf.registry(state)["orient1"] = {"key": "orient", "role": "orientation", "status": "running", "chat": "o1"}
+    sub = session.Sub(CORPUS, "o1", None, "orient1", role="orient")
+    sub.path = tmp_path / "agent-orient1.jsonl"
+    sub.path.write_text(json.dumps({"type": "assistant", "message": {"content": [
+        {"type": "tool_use", "id": "toolu_sub1", "name": "mcp__plugin_thimble_thimble__add_card"}]}}) + "\n")
+    lv.subs.append(sub)
+    session._live[CORPUS] = lv
+    try:
+        t = time.monotonic()
+        refused, as_session = await tools._as_caller(CORPUS, "add_card", "toolu_main1")
+        assert not refused and as_session is None
+        assert time.monotonic() - t < 0.5, "main's own call runs at once"
+        who = await subagents.caller(CORPUS, "toolu_sub1")
+        assert who is not None and who.key == "orient", "a subagent's call is found by the transcript that holds it"
+    finally:
+        session._live.pop(CORPUS, None)
+
+
 def test_the_shim_of_main_lists_every_tool_and_the_critique_among_them():
     from app import tools
 

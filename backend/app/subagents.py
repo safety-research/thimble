@@ -1217,25 +1217,25 @@ def caller_of(c: str, agent_id: str, agent_type: str = "") -> Caller | None:
 
 
 async def caller(c: str, tool_use_id: str | None) -> Caller | None:
-    """The agent that made the thimble call `tool_use_id`, from the caller hook's line (callers.jsonl), waiting up to
-    CALLER_WAIT_S for it; then from the mirror's search of the transcripts (session.caller_sub). None for main's own call
-    and for a call of an agent that is not thimble's."""
+    """The agent that made the thimble call `tool_use_id`, from the caller hook's line (callers.jsonl), else from the
+    mirror's search of the transcripts (session.call_holder), which waits up to CALLER_WAIT_S for one to hold the call.
+    None for main's own call and for a call of an agent that is not thimble's.
+
+    The caller hook runs, and writes its line, before Claude Code makes a subagent's call, and main's own calls get no
+    line. So a missing line is not waited for: main's transcript holds main's call as soon as the call comes, and each
+    of main's calls (add_card among them) runs at once."""
     from . import session  # noqa: PLC0415
 
     if not tool_use_id:
         return None
-    end = time.monotonic() + CALLER_WAIT_S
-    while True:
-        line = files.find_caller(ws(c), tool_use_id)
-        if line is not None:
-            return caller_of(c, str(line.get("agent_id") or ""), str(line.get("agent_type") or ""))
-        if time.monotonic() >= end:
-            break
-        await asyncio.sleep(0.05)
-    sub = await session.caller_sub(c, tool_use_id)
-    if sub is None or not sub.agent_id:
-        return None
-    return caller_of(c, sub.agent_id)
+    line = files.find_caller(ws(c), tool_use_id)
+    if line is None:
+        held = await session.call_holder(c, tool_use_id, CALLER_WAIT_S)
+        line = files.find_caller(ws(c), tool_use_id)  # a line written meanwhile names the agent best
+        if line is None:
+            agent_id = held.agent_id if isinstance(held, session.Sub) else None
+            return caller_of(c, str(agent_id)) if agent_id else None
+    return caller_of(c, str(line.get("agent_id") or ""), str(line.get("agent_type") or ""))
 
 
 def allowed(who: Caller, name: str) -> bool:

@@ -2066,16 +2066,24 @@ def agent_paths(c: str, agent_ids: "list[str]") -> "list[Path]":
 async def caller_sub(c: str, tool_use_id: str | None) -> "Sub | None":
     """Main's subagent whose transcript holds the call `tool_use_id`, waiting CALL_WAIT_S at most for its line; None for
     main's own call or one found in no transcript."""
+    holder = await call_holder(c, tool_use_id)
+    return holder if isinstance(holder, Sub) else None
+
+
+async def call_holder(c: str, tool_use_id: str | None, wait_s: float = CALL_WAIT_S) -> "Sub | Live | None":
+    """The subagent, or main (its Live), whose transcript holds the call `tool_use_id`, waiting `wait_s` at most for its
+    line; None when no session is attached or no transcript holds it by then. Main's own call is found as soon as
+    Claude Code has written it to main's transcript, which it does before it makes the call."""
     lv = _live.get(c)
     if lv is None or not tool_use_id:
         return None
     needle, read = tool_use_id.encode(), {}
-    deadline = time.monotonic() + CALL_WAIT_S
+    deadline = time.monotonic() + wait_s
     scanned = False
     while True:
         holder = _call_holder(lv, tool_use_id, needle, read)
         if holder is not None:
-            return holder if isinstance(holder, Sub) else None
+            return holder
         if time.monotonic() >= deadline:
             return None
         if not scanned:
