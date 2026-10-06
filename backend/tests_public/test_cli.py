@@ -141,6 +141,9 @@ def test_up_prints_the_url_and_opens_a_sessions_folder(home, data, monkeypatch, 
     url, note, mark = capsys.readouterr().out.splitlines()
     assert url == "thimble: http://127.0.0.1:5300/?ws=calls", "no hook to show it"
     assert note == cli.MONITOR_NOTE and mark.startswith(cli.MONITOR_MARK), "main's Monitor brings the browser's events"
+    monkeypatch.setenv(cli.cc_plugin.FENCE_MARK, "1")  # thimble's fence lets out only the /thimble of main's session
+    assert cli.monitor_lines(folder, "s8")[0] == cli.MONITOR_NOTE_FENCED and "`thimble -c`" in cli.MONITOR_NOTE_FENCED
+    monkeypatch.delenv(cli.cc_plugin.FENCE_MARK)
     assert cli.main(["up", "--cwd", str(folder)]) == 0, "a bare up read by a program"
     assert capsys.readouterr().out.splitlines() == ["thimble: http://127.0.0.1:5300/"] and len(posted) == 2
     monkeypatch.setattr(cli, "to_terminal", lambda: True)
@@ -438,6 +441,18 @@ def test_up_in_the_bash_sandbox_prints_what_the_hook_did_outside_it(home, data, 
     monkeypatch.setenv(cli.SANDBOX_ENV, "1")
     assert cli.main([*skill[:-3], "fresh", "--archive", ""]) == 0
     assert capsys.readouterr().out.startswith("thimble: WARNING") and started == []
+    # in thimble's fence with the hooks off, only the plain /thimble and /thimble status of main's session are let out
+    # (main_fence): another action names the terminal command, the plain one after a new session id says to continue
+    assert cli.main(skill) == 0 and capsys.readouterr().out.splitlines() == [cli.LINK_LINE], "the hook's result"
+    monkeypatch.setenv(cli.cc_plugin.FENCE_MARK, "1")
+    settings.write_text(json.dumps({"disableAllHooks": True}))
+    assert cli.main([*skill[:-3], "fresh", "--archive", ""]) == 0
+    assert capsys.readouterr().out.splitlines() == [cli.FENCE_ACTION_LINE.format(words="fresh", action="fresh",
+                                                                                 archive="")]
+    assert cli.main([*skill[:-3], "restore", "--archive", "logs-2026"]) == 0
+    assert "`thimble server up --action restore --archive logs-2026`" in capsys.readouterr().out
+    assert cli.main(skill) == 0 and capsys.readouterr().out.splitlines() == [cli.FENCE_SESSION_LINE]
+    assert started == []
 
 
 def test_the_doctor_says_when_the_analyst_s_own_sandbox_makes_a_folder_in_the_corpus(tmp_path, monkeypatch):

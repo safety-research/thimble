@@ -115,6 +115,9 @@ MONITOR_NOTE = ("thimble: WARNING - your settings or your organization's turn th
                 "session, so thimble connects through a Monitor instead. Permission prompts appear only here in the "
                 "terminal, and Claude may ask you to confirm here what you approved in the browser. After /clear, say "
                 "/thimble again.")
+# the same in thimble's fence, which lets out only the /thimble of the session `thimble` started (SANDBOX_ACTIONS)
+MONITOR_NOTE_FENCED = MONITOR_NOTE.replace("After /clear, say /thimble again.",
+                                           "After /clear, quit and run `thimble -c` in this folder.")
 MONITOR_MARK = "thimble-monitor:"  # then the command main's Monitor runs (plugin/skills/thimble/SKILL.md)
 WATCHER = "bin/.thimble-watch"  # the plugin's hidden watcher, under its root
 FRESH = "fresh"  # /thimble fresh: the folder's workspace moved aside, an empty one opened
@@ -179,6 +182,17 @@ SANDBOX_NO_HOOKS_LINE = ("thimble: WARNING - Claude Code's Bash sandbox is on in
                          "reaching thimble's server, and with the plugin's hooks off nothing can start the server "
                          "outside the sandbox, so there is no link. To fix it, add \"{rule}\" and \"{watch}\" to "
                          "sandbox.excludedCommands in {settings}, then say /thimble again.")
+# In thimble's fence with the plugin's hooks off (main_fence), sandbox.excludedCommands lets out only the skill's own
+# command for these actions, exactly as Claude Code spells it for main's session (sandbox_rules): the plain /thimble and
+# /thimble status. Any other action, or the same command under another session id, stays in the sandbox, so main's Bash
+# cannot run `--action fresh` or `fix` outside it; the command then says what to do instead (fenced_sandbox_line).
+SANDBOX_ACTIONS = ("", "status")
+FENCE_ACTION_LINE = ("thimble: Claude Code's hooks are off in this session, so thimble's sandbox lets /thimble reach "
+                     "thimble's server only to open the workspace or show its status. To run /thimble {words}, run "
+                     "`thimble server up --action {action}{archive}` in a terminal in this folder.")
+FENCE_SESSION_LINE = ("thimble: Claude Code's hooks are off in this session, so thimble's sandbox lets /thimble reach "
+                      "thimble's server only in the session `thimble` started, and /clear or /resume gave this session "
+                      "a new id. Quit, and run `thimble -c` in this folder.")
 HOOK_RESULTS_DIR = "up"  # under <home>: what /thimble's hook left for the skill's command to print (hook_up)
 HOOK_RESULT_S = 60.0  # a result older than this is not the one the hook left for this /thimble
 MANUAL_RESTART = "manual restart"  # dev.PLAIN_REASONS
@@ -477,6 +491,35 @@ def sandbox_rule(root: Path | None = None) -> str:
     own path (`root`, by default plugin_root), as the skill's command spells it once Claude Code has put in its plugin
     root."""
     return f"{(root or plugin_root()) / 'bin' / 'thimble'} server up *"
+
+
+def sandbox_rules(root: Path, cwd: Path, session: str | None) -> list[str]:
+    """The `sandbox.excludedCommands` entries that let out the /thimble skill's own command for SANDBOX_ACTIONS in main's
+    session `session`, in the corpus `cwd`, with the plugin copy at `root`: exactly the command Claude Code runs once it
+    has put in the plugin root, the project folder (as `cwd` names it, and as its real path names it) and the session
+    id, without the `2>&1` the skill adds, which Claude Code leaves out of the match (module note: a command that differs
+    in any way stays in the sandbox). None without a session id, or where a value holds a character the skill's quotes
+    would not keep."""
+    if not session or not SESSION_ID_RE.fullmatch(session):
+        return []
+    folders = list(dict.fromkeys([str(cwd), os.path.realpath(cwd)]))
+    if any(ch in f for f in folders for ch in '"\\$`\n'):
+        return []
+    return [f'{root / "bin" / "thimble"} server up --cwd "{f}" --session "{session}" --action "{a}" --archive ""'
+            for f in folders for a in SANDBOX_ACTIONS]
+
+
+def fenced_sandbox_line(cwd: Path, action: str, archive: str) -> str:
+    """What /thimble prints in thimble's fence with the plugin's hooks off when its command ran in the sandbox (module
+    note, SANDBOX_ACTIONS): the terminal command for an action the fence keeps in, else that /clear or /resume changed
+    the session id; '' outside thimble's fence or with the hooks on."""
+    if os.environ.get(cc_plugin.FENCE_MARK, "").strip() != "1" or not cc_plugin.hooks_blocked(cwd, plugin_root()):
+        return ""
+    if action in SANDBOX_ACTIONS:
+        return FENCE_SESSION_LINE
+    named = f" --archive {shlex.quote(archive)}" if archive else ""
+    return FENCE_ACTION_LINE.format(words=" ".join(w for w in (action, archive) if w), action=shlex.quote(action),
+                                    archive=named)
 
 
 def watch_rule(root: Path | None = None) -> str:
@@ -1376,7 +1419,8 @@ def monitor_lines(cwd: Path, session: str) -> list[str]:
     if cc_plugin.route(cwd, plugin_root()) != cc_plugin.MONITOR:
         return []
     watcher = shlex.join([str(plugin_root() / WATCHER), "--stream", "--cwd", str(cwd), "--session", session])
-    return [MONITOR_NOTE, f"{MONITOR_MARK} {watcher}"]
+    fenced = os.environ.get(cc_plugin.FENCE_MARK, "").strip() == "1"
+    return [MONITOR_NOTE_FENCED if fenced else MONITOR_NOTE, f"{MONITOR_MARK} {watcher}"]
 
 
 def launched() -> bool:
@@ -1683,11 +1727,13 @@ def fence_off(c: str | None) -> str:
     return "" if cc_settings.sandbox_ok() else "missing"
 
 
-def main_fence(cwd: Path, c: str | None = None, root: Path | None = None) -> dict[str, Any]:
+def main_fence(cwd: Path, c: str | None = None, root: Path | None = None, session: str | None = None) -> dict[str, Any]:
     """The --settings keys that put main, and every subagent it starts, inside thimble's fence for the corpus `cwd`,
-    workspace `c` (by default the one `cwd` is registered as), the plugin copy at `root` (module note, main's fence):
-    `sandbox`, `permissions` (userconf.main_rules; no additionalDirectories) and `env` (cc_plugin.FENCE_MARK). {} when
-    fence_off says so. A config with an error fences main with the defaults' rules."""
+    workspace `c` (by default the one `cwd` is registered as), the plugin copy at `root`, main's session `session`
+    (module note, main's fence): `sandbox`, `permissions` (userconf.main_rules; no additionalDirectories) and `env`
+    (cc_plugin.FENCE_MARK). With the plugin's hooks off, /thimble's own command for SANDBOX_ACTIONS in that session is
+    let out of the sandbox, and no other (sandbox_rules). {} when fence_off says so. A config with an error fences main
+    with the defaults' rules."""
     from . import userconf  # noqa: PLC0415
 
     c = c or config.workspace_for_cwd(str(cwd))
@@ -1701,7 +1747,7 @@ def main_fence(cwd: Path, c: str | None = None, root: Path | None = None) -> dic
     root = root or plugin_root()
     excluded = [watch_rule(root)]  # the Monitor route's watcher must reach the server (spike U15)
     if cc_plugin.hooks_blocked(cwd, root):
-        excluded.append(sandbox_rule(root))  # with the hooks off, /thimble's own command starts the server
+        excluded += sandbox_rules(root, cwd, session)  # with the hooks off, /thimble's own command starts the server
     fs = {"allowWrite": [str(d) for d in write_dirs(c)],
           "denyWrite": [str(corpus), str(userconf.workspace_file(c)), str(ws / "settings.json")],
           "denyRead": [*userconf.private_paths(), str(home() / LINKS_DIR)]}
@@ -1895,8 +1941,17 @@ def _launch_args(cwd: Path, resume: bool, settings: str, own_session: str | None
     last = [last_main(cwd)] if resume else []
     turn_tools = terminal_tools.launch_value()
     notes: list[str] = []
+    # the session main runs as: one this launch names (--session-id) unless the analyst's flags or --continue name it
+    if resume and last and last[0]:
+        session: str | None = last[0]
+        session_id = ""
+    elif own_session is not None or resume:
+        session = own_session if own_session and SESSION_ID_RE.fullmatch(own_session) else None
+        session_id = ""
+    else:
+        session = session_id = str(uuid.uuid4())
     why_off = fence_off(c)
-    fence = {} if why_off else main_fence(cwd, c, root)
+    fence = {} if why_off else main_fence(cwd, c, root, session)
     if why_off in NO_FENCE_LINES:
         notes.append(NO_FENCE_LINES[why_off])
     unset = [name for name in UNSET_VARS if os.environ.get(name, "").strip()]
@@ -1922,15 +1977,6 @@ def _launch_args(cwd: Path, resume: bool, settings: str, own_session: str | None
         notes.append(MODULES_OFF_LINE.format(reason=why_idle))
     if safe_mode or os.environ.get(SAFE_MODE_ENV, "").strip() not in ("", "0", "false"):
         notes.append(SAFE_MODE_LINE)
-    # the session main runs as: one this launch names (--session-id) unless the analyst's flags or --continue name it
-    if resume and last and last[0]:
-        session: str | None = last[0]
-        session_id = ""
-    elif own_session is not None or resume:
-        session = own_session if own_session and SESSION_ID_RE.fullmatch(own_session) else None
-        session_id = ""
-    else:
-        session = session_id = str(uuid.uuid4())
     settings_value = launch_settings(cwd, settings, fence)
     if c:  # fenced as main's command line will show it (an unreadable --settings of the analyst's carries no fence)
         launch_record(c, session, cc_plugin.fenced_argv(["claude", "--settings", settings_value], cwd), switches, unset)
@@ -3009,7 +3055,8 @@ def cmd_ensure(args: argparse.Namespace) -> int:
         print(REFUSED_LINE.format(path=cwd))
         return 0
     if in_sandbox():  # a server started here would die with the command, and the host's is out of reach
-        print(sandbox_line(cwd))
+        print(fenced_sandbox_line(cwd, (args.action or "").strip(), (getattr(args, "archive", None) or "").strip())
+              or sandbox_line(cwd))
         return 0
     ensure_home()
     env = resolve_env()

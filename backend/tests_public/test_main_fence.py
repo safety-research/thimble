@@ -287,6 +287,38 @@ def test_main_s_settings_blank_the_variables_a_settings_file_s_env_would_set_and
     assert env_of(cli.launch_args(corpus).split("\n")) == blank, "without the fence as well"
 
 
+def test_with_hooks_off_the_fence_lets_out_only_the_skill_s_own_command_for_main_s_session(corpus, tmp_path):
+    """With the plugin's hooks off, /thimble's own command must reach the server from outside the sandbox. The fence
+    lets out exactly that command as Claude Code runs it for main's session, for the plain /thimble and /thimble status
+    alone, never `server up *`, which would let main's Bash run `--action fresh` or `fix` outside the sandbox. Claude
+    Code 2.1.291 matched these entries against the skill's command as it ran it, without its `2>&1`, let the plain and the
+    status one out, and kept fresh and fix in the sandbox. Without a session id for main, none is let out."""
+    from test_plugin_agents import split
+
+    sid = "0b9d2f3e-1c2d-4e5f-8a9b-0c1d2e3f4a5b"
+    root = cli.plugin_root()
+    assert cli.main_fence(corpus, session=sid)["sandbox"]["excludedCommands"] == [cli.watch_rule(root)], "hooks on"
+    (tmp_path / "cc").mkdir(exist_ok=True)
+    (tmp_path / "cc" / "settings.json").write_text(json.dumps({"disableAllHooks": True}))
+    excluded = cli.main_fence(corpus, session=sid)["sandbox"]["excludedCommands"]
+    assert excluded == [cli.watch_rule(root), *cli.sandbox_rules(root, corpus, sid)] and len(excluded) == 3
+    assert not any(rule.endswith("server up *") for rule in excluded)
+    _, body = split((root / "skills" / "thimble" / "SKILL.md").read_text("utf-8"))
+    command = next(ln[2:].split("`")[0] for ln in body.splitlines() if "server up" in ln and ln.startswith("!`"))
+    for action in cli.SANDBOX_ACTIONS:
+        ran = (command.replace("${CLAUDE_PLUGIN_ROOT}", str(root)).replace("${CLAUDE_PROJECT_DIR}", str(corpus))
+               .replace("${CLAUDE_SESSION_ID}", sid).replace("$action", action).replace("$archive", ""))
+        assert ran.endswith(" 2>&1") and ran.removesuffix(" 2>&1") in excluded, ran
+    assert cli.main_fence(corpus)["sandbox"]["excludedCommands"] == [cli.watch_rule(root)], "no session id"
+    lines = cli.launch_args(corpus).split("\n")
+    assert cli.sandbox_rules(root, corpus, lines[6])[0] in json.loads(lines[3])["sandbox"]["excludedCommands"]
+    link = tmp_path / "work" / "link"
+    link.symlink_to(corpus)
+    both = cli.sandbox_rules(root, link, sid)
+    assert len(both) == 4 and any(f'--cwd "{link}"' in r for r in both) and any(f'--cwd "{corpus}"' in r for r in both)
+    assert cli.sandbox_rules(root, tmp_path / 'say "hi"', sid) == [] and cli.sandbox_rules(root, corpus, "x") == []
+
+
 def test_the_launch_says_plainly_when_hooks_modules_are_off_and_still_launches(corpus, tmp_path, monkeypatch):
     """Managed settings that set disableAllHooks or allowManagedHooksOnly, the analyst's own disableAllHooks or
     THIMBLE_NO_MODULE: the note line says thimble's agents can't start and why, and the launch goes on; THIMBLE_NO_MODULE
