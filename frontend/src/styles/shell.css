@@ -891,6 +891,13 @@ button.settings-ext-name:hover .settings-ext-caret {
 .settings-row-noted {
   padding-bottom: 4px;
 }
+/* the dev row's fast switch, for code tickets alone, after its note */
+.settings-ticket-fast {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  white-space: nowrap;
+}
 .settings-role-note {
   grid-column: 1 / -1;
   margin-top: -6px;

@@ -2,8 +2,9 @@
 // model is read-only (only /model in the terminal changes it) and whose effort and fast mode are kept for its next
 // launch (PUT session/effort and session/fast); thimble's agents (the orientation, the orientation's subagents run as
 // thimble:helper, the critic, the writers, the dev agent of view builds, reviews and code tickets, the report checks),
-// with a "web" switch that keeps an agent off WebFetch and WebSearch; the classifiers (labels, the card check, the
-// viewer suggestion), the only rows with fast mode; and the row a classifier's call runs again on when its model
+// with a "web" switch that keeps an agent off WebFetch and WebSearch, and on the dev row a fast switch for code tickets
+// alone (backend config.FAST_OF_TICKETS); the classifiers (labels, the card check, the viewer suggestion), the only
+// other rows with fast mode; and the row a classifier's call runs again on when its model
 // refuses, or off. Then one row per agent of the extensions running here (`<extension>:<agent>`). The effort menu lists
 // Claude Code's levels, and a model that runs with no effort shows none. An agent's row applies to its next start. A
 // save sends only the changed fields so defaults stay defaults (thimble's config, backend userconf.py). Choices that
@@ -212,12 +213,15 @@ export const ROLE_NOTE: Record<string, string> = {
 }
 /** thimble's agents, whose rows apply to their next start. */
 export const AGENT_ROLES = ['orient', 'subagents', 'critic', 'writer', 'dev', 'checks'] as const
-/** The classifiers: one model call each, the only rows with fast mode. */
+/** The classifiers: one model call each, the only rows with fast mode but the dev row's, which is code tickets'. */
 export const CLASSIFIER_ROLES = ['labels', 'verify', 'suggest'] as const
 /** The agents whose web switch the table offers (backend userconf.SUBAGENT_ROLES less the orientation, whose web is
  * main's fence's). */
 export const WEB_ROWS = ['critic', 'writer', 'checks'] as const
 export type WebRow = (typeof WEB_ROWS)[number]
+/** The dev row's fast switch, by the name it shows: its fast mode reaches code tickets alone, which run as `claude -p`
+ * jobs of the server; view builds and reviews run as subagents of main (backend config.FAST_OF_TICKETS). */
+export const TICKET_FAST = "code tickets' fast mode"
 /** The line under the table. */
 export const NEXT_START_LINE = "An agent's row applies to its next start; a run that goes on keeps its own model and effort."
 
@@ -235,15 +239,15 @@ export function roleEfforts(role: string): string[] {
   return [...EFFORTS]
 }
 
-/** Why a role's cell cannot be changed here, or null when it can. Fast mode is the classifiers' and main's alone; a
- * model with no effort has no effort to pick. Pure. */
+/** Why a role's cell cannot be changed here, or null when it can. Fast mode is the classifiers', main's and, for code
+ * tickets alone, the dev row's (TICKET_FAST); a model with no effort has no effort to pick. Pure. */
 export function lockedWhy(role: string, cell: 'model' | 'effort' | 'fast', conf: ModelConf, main: { attached: boolean }): string | null {
   if (role === 'main') {
     if (cell === 'model') return MODEL_TIP
     return main.attached ? null : 'No Claude Code session is attached to main'
   }
   if (cell === 'effort' && conf.model && !hasEffort(conf.model)) return `${modelLabel(conf.model)} runs with no effort`
-  if (cell === 'fast' && !(CLASSIFIER_ROLES as readonly string[]).includes(role)) return "thimble's agents have no fast mode of their own"
+  if (cell === 'fast' && role !== 'dev' && !(CLASSIFIER_ROLES as readonly string[]).includes(role)) return "thimble's agents have no fast mode of their own"
   if (cell === 'fast' && conf.model && !hasFastMode(conf.model)) return noFastTip(conf.model)
   return null
 }
@@ -520,7 +524,17 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
                   ) : (
                     <span />
                   )}
-                  {ROLE_NOTE[role] && <span className="settings-role-note">{ROLE_NOTE[role]}</span>}
+                  {ROLE_NOTE[role] && (
+                    <span className="settings-role-note">
+                      {ROLE_NOTE[role]}
+                      {role === 'dev' && (
+                        <span className="settings-ticket-fast">
+                          {` · ${TICKET_FAST}`}
+                          <FastBolt on={!!conf.fast && (!conf.model || hasFastMode(conf.model))} why={why('fast')} label={TICKET_FAST} onChange={(fast) => set(role, { fast })} className={`settings-fast${why('fast') ? ' settings-locked' : ''}`} />
+                        </span>
+                      )}
+                    </span>
+                  )}
                 </div>
               )
             })}

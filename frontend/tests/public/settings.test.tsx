@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 // The settings popover (src/shell/SettingsPopover.tsx): one model table with a row per role and exactly the model and
 // effort that runs, Claude Code's levels in every agent's effort menu and none for a model that runs with none, fast
-// mode only for the classifiers and main, the viewer suggestion's and the refusal's rows, the orientation subagents' row
+// mode only for the classifiers, main and code tickets (on the dev row), the viewer suggestion's and the refusal's rows, the orientation subagents' row
 // with its effort, a web switch per agent; main's fence, which thimble's agents share; one permission row, the code
 // tickets', with cardWait; no installs row.
 import { act } from 'react'
@@ -66,6 +66,8 @@ describe('the rules', () => {
     const conf = (model: string) => ({ model, effort: 'high', fast: false })
     expect(lockedWhy('orient', 'fast', conf('claude-opus-5-5'), { attached: true })).toMatch(/no fast mode/)
     expect(lockedWhy('labels', 'fast', conf('claude-opus-5-5'), { attached: true })).toBeNull()
+    expect(lockedWhy('dev', 'fast', conf('claude-opus-5-5'), { attached: true })).toBeNull()
+    expect(lockedWhy('dev', 'fast', conf('claude-haiku-4-5-20251001'), { attached: true })).toMatch(/fast/i)
     expect(lockedWhy('checks', 'effort', conf('claude-haiku-4-5-20251001'), { attached: true })).toBe('Haiku 4.5 runs with no effort')
   })
 
@@ -116,5 +118,22 @@ describe('the popover', () => {
     await act(async () => [...doc.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent === 'Save')!.click())
     await settle()
     expect(puts).toEqual([['/api/ws/mini/settings', { web: { writer: 'off' } }]])
+  })
+
+  test("the dev row's fast switch is code tickets', and a save sends it", async () => {
+    const anchor = document.createElement('button')
+    document.body.appendChild(anchor)
+    await mount(<SettingsPopover ws="mini" anchor={anchor} open onClose={() => {}} />)
+    await settle()
+    await settle()
+    const doc = document.body
+    const note = doc.querySelector('.settings-row[data-role="dev"] .settings-role-note')!
+    expect(note.textContent).toBe("view builds, view reviews and code tickets · code tickets' fast mode")
+    const bolt = note.querySelector<HTMLButtonElement>(".fast-bolt[aria-label=\"code tickets' fast mode\"]")!
+    expect(bolt.getAttribute('aria-disabled')).toBeNull()
+    await act(async () => bolt.click())
+    await act(async () => [...doc.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent === 'Save')!.click())
+    await settle()
+    expect(puts).toEqual([['/api/ws/mini/settings', { models: { dev: { fast: true } } }]])
   })
 })
