@@ -1776,6 +1776,14 @@ def main_fence(cwd: Path, c: str | None = None, root: Path | None = None, sessio
         # starts the server
         excluded += [*watch_rules(root, cwd, session), *sandbox_rules(root, cwd, session)]
     trees = [str(d) for d in ticket_trees()]
+    for tree in trees:
+        # Claude Code drops an additionalDirectories folder that does not exist as main starts, and the first ticket
+        # makes this one later, so outside auto mode a ticket's agent was asked about each Read of its worktree (live
+        # check L27 on 060-s4): the folder is made first
+        try:
+            Path(tree).mkdir(parents=True, exist_ok=True)
+        except OSError:
+            pass
     fs = {"allowWrite": [*(str(d) for d in write_dirs(c)), *trees],
           "denyWrite": [str(corpus), str(userconf.workspace_file(c)), str(ws / "settings.json")],
           "denyRead": [*userconf.private_paths(), str(home() / LINKS_DIR)]}

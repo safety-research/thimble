@@ -125,6 +125,8 @@ def test_a_development_install_denies_edits_of_the_code_tickets_records(corpus, 
     trees = str(dev.worktrees_dir())
     assert trees == str(cli.home() / "dev" / "trees") and cli.ticket_trees() == [dev.worktrees_dir()]
     assert perms["additionalDirectories"] == [trees] and fence["sandbox"]["filesystem"]["allowWrite"][-1] == trees
+    # Claude Code drops an additionalDirectories folder that does not exist as main starts (live check L27 on 060-s4)
+    assert dev.worktrees_dir().is_dir(), "the fence makes the worktrees' folder before main starts"
     written = fence["sandbox"]["filesystem"]["allowWrite"]
     assert str(dev.dev_home()) not in written and str(dev.box_dir("t1")) not in written
     assert not dev.box_dir("t1").is_relative_to(dev.worktrees_dir()), "a ticket's box is outside what main writes"
