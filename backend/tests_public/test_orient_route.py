@@ -320,3 +320,23 @@ async def test_a_workspace_0_5_0_left_loads_lists_and_renders_and_its_orientatio
     res = await tools.call(CORPUS, "message_orientation", {"message": "And May?"})
     assert res.is_error and res.text.endswith(HINTS["orient-continue-earlier-version"])
     assert not bridge.calls
+
+
+async def test_the_browser_reads_the_orientation_s_record_a_refused_start_with_its_kind(bridge, models, workspaces_tmp):
+    """GET /ws/{c}/orientation: {} before any orientation, then the record the Start gate and its card read: a refused
+    start with its request, switches, model, effort and {reason, kind}."""
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+
+    with TestClient(app, base_url="http://127.0.0.1") as client:
+        assert client.get(f"/api/ws/{CORPUS}/orientation").json() == {}
+        orientation.start_requested(CORPUS, {"text": "the moderators", "passes": ["final", "report"], "critique": True,
+                                             "model": "claude-sonnet-5", "effort": "high", "request": "r1",
+                                             "started_by": "typed"})
+        orientation.refuse(CORPUS, "[Auto-Mode Bypass]", subagents.AUTO_MODE, request="r1")
+        got = client.get(f"/api/ws/{CORPUS}/orientation").json()
+    assert (got["status"], got["query"], got["passes"], got["critique"]) == ("refused", "the moderators", ["final", "report"], True)
+    assert (got["model"], got["effort"], got["started_by"], got["request"]) == ("claude-sonnet-5", "high", "typed", "r1")
+    assert {k: got["refused"][k] for k in ("reason", "kind", "request")} == {"reason": "[Auto-Mode Bypass]", "kind": "auto-mode", "request": "r1"}
+    assert set(got) <= set(orient_session.RUN_FIELDS)
