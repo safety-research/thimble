@@ -391,6 +391,9 @@ export interface ViewMark {
   bar: string
   /** the names of the labels that highlight the record, in the order of `on` */
   names: string[]
+  /** each label that is on and highlights the record, with its value and that value's colour, in the order of `on`, so
+   * a page can colour its records by one of them */
+  values?: { id: string; label: string; value: string; colour: string }[]
   /** the texts to highlight in the record's element, each span cut into the pieces `needles` looks for */
   spans: { text: string; colour: string }[]
   /** with a label filter on, whether the record or unit passes it */
@@ -514,14 +517,28 @@ export function withKeeps(
   return out
 }
 
+/** A colour as a view's page gets it: a token reference, var(--label-3), resolved to the colour it stands for, so a
+ * canvas can draw it; any other colour as it is. Pure. */
+export function pageColour(colour: string, resolve: (token: string) => string): string {
+  const m = /^var\((--[\w-]+)\)$/.exec(colour.trim())
+  return m ? resolve(m[1]) || colour : colour
+}
+
 /** The marks a custom view's page draws (viewer_bridge.js `labels` message), keyed by record ref: for each ref, the
  * labels that are on and highlight the record's value (`rows`: ref -> label id -> row). A view may not show the record's
  * text verbatim, so every highlighting label gives it the bar, and its texts are highlighted wherever the page shows
- * them. Refs that name no highlighted record are left out. */
-export function viewMarks(on: readonly Concept[], rows: { get(ref: string): ReadonlyMap<string, LabelRow> | undefined }, refs: Iterable<string>): Record<string, ViewMark> {
+ * them; `values` names each such label with its value. `resolve` turns a token (--label-3) into the colour it stands
+ * for, so every colour is one a canvas can draw. Refs that name no highlighted record are left out. */
+export function viewMarks(
+  on: readonly Concept[],
+  rows: { get(ref: string): ReadonlyMap<string, LabelRow> | undefined },
+  refs: Iterable<string>,
+  resolve: (token: string) => string = () => '',
+): Record<string, ViewMark> {
   const out: Record<string, ViewMark> = {}
   if (!on.length) return out
   const rank = new Map(on.map((k, i) => [k.id, i]))
+  const real = (c: string) => pageColour(c, resolve)
   for (const ref of refs) {
     if (!recordOf(ref)) continue
     const mine = rows.get(recordKey(ref))
@@ -530,7 +547,12 @@ export function viewMarks(on: readonly Concept[], rows: { get(ref: string): Read
     const lit = [m.bar, m.tint, ...m.spans].filter((x): x is NonNullable<typeof x> => !!x).sort((a, b) => rank.get(a.concept)! - rank.get(b.concept)!)
     if (!lit.length) continue
     const names = [...new Map(lit.map((x) => [x.concept, x.name])).values()]
-    out[ref] = { bar: lit[0].colour, names, spans: m.spans.flatMap((s) => needles(s.text).map((text) => ({ text, colour: s.colour }))) }
+    out[ref] = {
+      bar: real(lit[0].colour),
+      names,
+      values: m.lit.map((x) => ({ id: x.concept, label: x.name, value: x.value, colour: real(x.colour) })),
+      spans: m.spans.flatMap((s) => needles(s.text).map((text) => ({ text, colour: real(s.colour) }))),
+    }
   }
   return out
 }

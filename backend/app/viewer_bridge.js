@@ -45,16 +45,19 @@
 //   seen {refs}            frame to page: the same for the anchored elements a scroll, a resize or a redraw brought into
 //                          view
 //   labels {marks, on, filter, all, palette, answered}
-//                          page to frame: marks {ref: {bar, names, spans: [{text, colour}], keep?}}, the marks of the
-//                          labels that are on for the records and units among those refs, drawn over every element with
-//                          that data-anchor, with `keep` whether the ref passes the label filter, and `answered` the
+//                          page to frame: marks {ref: {bar, names, values: [{id, label, value, colour}], spans: [{text,
+//                          colour}], keep?}}, the marks of the labels that are on for the records and units among those
+//                          refs, drawn over every element with that data-anchor, `values` each label that highlights the
+//                          record with its value, with `keep` whether the ref passes the label filter, and `answered` the
 //                          `seq` of the anchors whose every ref those marks answer for the filter (-1 while some are
 //                          still being read); on [{id, name, colour,
 //                          values}], the labels that are on; filter {label, value, colour} or null; all [{id, name, on,
 //                          here, colour, values: [{name, colour, highlight}], count}], every label over files, those
 //                          that mark records in the view's files first with `here` true; palette, the
 //                          colours a label's value can take. Each replaces the last; window.thimble.onLabels hears all
-//                          but the marks, which window.thimble.markOf reads and window.thimble.onMarks hears. In a card's
+//                          but the marks, which window.thimble.markOf reads and window.thimble.onMarks hears. A colour
+//                          that is a CSS variable, var(--label-3), is resolved here to the colour it stands for, so a
+//                          canvas can draw every colour the page is given. In a card's
 //                          frame the elements whose records the filter drops are dimmed, never hidden, and the page's
 //                          own filtering is left alone
 //   key {key}              page to frame, once the frame is ready: the key every labelCall carries, which only this
@@ -73,6 +76,8 @@
 //   state {id}             page to frame, answered by state {id, state}: what the analyst is looking at, before a newer
 //                          version of the view is loaded in its place: {ref, scroll, fields, segs} (pageState)
 //   restore {state}        page to frame: that state put back in the newer version's page, as far as it fits (restore)
+//   colour {state}         frame to page: the view's Colour by choice changed (viewer_colour.js), which thimble keeps
+//                          per view and hands the page again as window.__thimbleColour when it loads
 // An anchored element with data-anchor-unmarked takes no mark, where the page draws the labels' colours on it itself,
 // such as a lane whose marks carry them; the checks then look for the label's colour on the element. A ⌘-click on it
 // still asks about its ref.
@@ -100,6 +105,10 @@
   var initFns = []
   var markFns = []
   var markKey = '{}'
+  // the view kit's own controls (viewer_colour.js): what they hear of the labels, which is not the page's onLabels and
+  // so leaves the label filter to thimble, and the Colour by choice that the marks are drawn by (colourHook)
+  var kitFns = []
+  var colourHook = null
   var ownSize = false // the page said the height it needs, so the document's own height is no longer sent
   // The analyst's gesture: transient user activation in this frame, read through the getter as it was when the bridge
   // ran, so a page that redefines it later changes what it reads itself but not what the bridge reads
@@ -241,6 +250,70 @@
       return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]
     })
   }
+  // A colour as a canvas can draw it: one that names a CSS variable, var(--label-3), is read through an element's
+  // computed colour in the frame's tokens; any other is kept as it is. The frame is loaded again when the theme changes,
+  // so a colour is resolved once per page.
+  var colourProbe = null
+  var realColours = {}
+  function realColour(c) {
+    if (typeof c !== 'string' || c.indexOf('var(') < 0) return c
+    if (Object.prototype.hasOwnProperty.call(realColours, c)) return realColours[c]
+    var root = document.head || document.documentElement
+    if (!root) return c
+    if (!colourProbe || !colourProbe.isConnected) {
+      colourProbe = document.createElement('i')
+      colourProbe.setAttribute('data-thimble-chrome', '')
+      root.appendChild(colourProbe)
+    }
+    colourProbe.style.color = ''
+    colourProbe.style.color = c
+    var got = ''
+    try {
+      got = getComputedStyle(colourProbe).color
+    } catch (e) {}
+    var out = got && got.indexOf('var(') < 0 ? got : c
+    realColours[c] = out
+    return out
+  }
+  // the marks with every colour resolved (realColour), so markOf hands the page colours a canvas can draw
+  function realMarks(raw) {
+    var out = {}
+    for (var ref in raw) {
+      var m = raw[ref]
+      if (!m || typeof m !== 'object') continue
+      var c = {}
+      for (var k in m) c[k] = m[k]
+      if (typeof c.bar === 'string') c.bar = realColour(c.bar)
+      if (Array.isArray(c.spans))
+        c.spans = c.spans.map(function (s) {
+          return s && typeof s === 'object' ? { text: s.text, colour: realColour(s.colour) } : s
+        })
+      if (Array.isArray(c.values))
+        c.values = c.values.map(function (v) {
+          return v && typeof v === 'object' ? { id: v.id, label: v.label, value: v.value, colour: realColour(v.colour) } : v
+        })
+      out[ref] = c
+    }
+    return out
+  }
+  function realLabelList(list) {
+    if (!Array.isArray(list)) return list
+    return list.map(function (l) {
+      if (!l || typeof l !== 'object') return l
+      var c = {}
+      for (var k in l) c[k] = l[k]
+      if (typeof c.colour === 'string') c.colour = realColour(c.colour)
+      if (Array.isArray(c.values))
+        c.values = c.values.map(function (v) {
+          if (!v || typeof v !== 'object') return v
+          var w = {}
+          for (var j in v) w[j] = v[j]
+          if (typeof w.colour === 'string') w.colour = realColour(w.colour)
+          return w
+        })
+      return c
+    })
+  }
   window.thimble = {
     /** the view this page belongs to: {slug, name}, for the view:<slug>/<key> refs it writes */
     view: window.__thimbleView || null,
@@ -343,7 +416,9 @@
         }
       }
     },
-    /** the mark of the labels the page is given on one record or unit ref, {bar, names, keep?}, or null */
+    /** the mark of the labels the page is given on one record or unit ref, {bar, names, values, spans, keep?}, or null:
+     *  `bar` the colour of the first label that highlights it, `values` [{id, label, value, colour}] each label that
+     *  does with its value; every colour one a canvas can draw (rgb(), or a hex) */
     markOf: function (ref) {
       return marks[String(ref)] || null
     },
@@ -462,14 +537,16 @@
         }
       }
     } else if (d.type === P + 'labels') {
-      marks = d.marks && typeof d.marks === 'object' ? d.marks : {}
+      marks = d.marks && typeof d.marks === 'object' ? realMarks(d.marks) : {}
       filter = d.filter && typeof d.filter === 'object' ? d.filter : null
+      if (filter && typeof filter.colour === 'string') filter = realLabelList([filter])[0]
       answered = typeof d.answered === 'number' ? d.answered : -1
-      var state = { labels: Array.isArray(d.on) ? d.on : [], filter: filter }
-      if (Array.isArray(d.all)) state.all = d.all
-      if (Array.isArray(d.palette)) state.palette = d.palette
+      var state = { labels: Array.isArray(d.on) ? realLabelList(d.on) : [], filter: filter }
+      if (Array.isArray(d.all)) state.all = realLabelList(d.all)
+      if (Array.isArray(d.palette)) state.palette = d.palette.map(realColour)
       var key = JSON.stringify(state)
-      if (key !== labelKey) {
+      var labelsChanged = key !== labelKey
+      if (labelsChanged) {
         labelKey = key
         labelState = state
         for (var f = 0; f < labelFns.length; f++) {
@@ -480,10 +557,19 @@
           }
         }
       }
-      paint()
       var mk = JSON.stringify(marks)
-      if (mk !== markKey) {
-        markKey = mk
+      var marksChanged = mk !== markKey
+      if (marksChanged) markKey = mk
+      // the view kit's controls hear it before the marks are drawn, so a label turned on is drawn as the colour at once
+      for (var kf = 0; kf < kitFns.length; kf++) {
+        try {
+          kitFns[kf](labelState, labelsChanged, marksChanged)
+        } catch (err) {
+          report(err)
+        }
+      }
+      paint()
+      if (marksChanged) {
         for (var g = 0; g < markFns.length; g++) {
           try {
             markFns[g]()
@@ -502,6 +588,9 @@
     }
   })
   addEventListener('error', function (e) {
+    // the browser says so when a ResizeObserver's callback resized what it observes, which it then hears on the next
+    // frame: a notice that nothing failed
+    if (!e.error && typeof e.message === 'string' && e.message.indexOf('ResizeObserver loop') === 0) return
     report(e.error || e.message)
   })
   // a label call thimble refused is the page's to show; left unhandled, it is no error of the view
@@ -805,6 +894,30 @@
     paintTimer = setTimeout(paint, 100)
     if (typeof requestAnimationFrame === 'function') paintFrame = requestAnimationFrame(paint)
   }
+  // The mark of the label the view kit colours by on a record (colourHook.label): that label's entry in the mark's
+  // values, else, for a mark from before values were sent, its bar when the label is among its names
+  function valueIn(m, hook) {
+    if (!m) return null
+    var vs = Array.isArray(m.values) ? m.values : null
+    if (vs) {
+      for (var i = 0; i < vs.length; i++) if (vs[i] && vs[i].id === hook.label) return vs[i]
+      return null
+    }
+    if (typeof m.bar === 'string' && Array.isArray(m.names) && m.names.indexOf(hook.name) >= 0) return { id: hook.label, label: hook.name, value: hook.name, colour: m.bar }
+    return null
+  }
+  function outermost(el, ref) {
+    for (var a = el.parentElement; a; a = a.parentElement) if (a.getAttribute('data-anchor') === ref) return false
+    return true
+  }
+  // With the view kit's Colour by in the page (colourHook, viewer_colour.js), the bar shows the one thing the analyst
+  // colours by. For a label, the outermost element of each anchored record that label highlights takes the bar in its
+  // value's colour, with data-thimble-label as before. For a field of the view, every element that says its value in
+  // data-colour, anchored or not, takes the bar in that value's colour, with data-thimble-colour (an SVG shape the page
+  // colours itself); the labels that are on then draw no bar, and their texts stay highlighted. An element whose value
+  // the analyst turned off is hidden or dimmed (data-thimble-off), as the hook says.
+  var offed = []
+  var OFF = '[data-thimble-off="hide"]{display:none!important}[data-thimble-off="dim"]{opacity:.25!important}'
   function paint() {
     if (paintTimer != null) clearTimeout(paintTimer)
     if (paintFrame != null) cancelAnimationFrame(paintFrame)
@@ -812,11 +925,15 @@
     paintFrame = null
     for (var i = 0; i < marked.length; i++) {
       marked[i].removeAttribute('data-thimble-label')
+      marked[i].removeAttribute('data-thimble-colour')
       marked[i].removeAttribute('data-thimble-bar')
       marked[i].removeAttribute('data-thimble-edge')
       marked[i].removeAttribute('data-thimble-own')
     }
     marked = []
+    for (var i2 = 0; i2 < offed.length; i2++) offed[i2].removeAttribute('data-thimble-off')
+    offed = []
+    var hook = colourHook && (colourHook.mode === 'label' || colourHook.mode === 'field') ? colourHook : null
     var colours = []
     var ranges = []
     var owns = []
@@ -829,48 +946,82 @@
       }
       return k
     }
-    if (hasMarks()) {
+    if (hasMarks() || hook) {
       // the elements to mark and what the view draws on them are read first, with the previous marks cleared, and written
       // after, so the page's styles are worked out once rather than once per element
-      var els = document.querySelectorAll('[data-anchor]')
-      var todo = []
+      var els = document.querySelectorAll(hook && hook.mode === 'field' ? '[data-anchor],[data-colour]' : '[data-anchor]')
+      var todo = [] // [element, bar colour, what it shows, 'label' or 'colour', edge, own shadow, mark]
+      var offs = []
+      var spanned = []
       var cut = new Map()
       for (var j = 0; j < els.length; j++) {
         var el = els[j]
+        if (el.tagName === 'CANVAS') continue
         var ref = el.getAttribute('data-anchor')
-        var m = marks[ref]
-        if (!m || el.tagName === 'CANVAS' || el.hasAttribute('data-anchor-unmarked') || typeof m.bar !== 'string' || !COLOUR.test(m.bar)) continue
-        var inner = false
-        for (var a = el.parentElement; a && !inner; a = a.parentElement) inner = a.getAttribute('data-anchor') === ref
-        if (inner) continue
+        var m = ref ? marks[ref] : null
+        var unmarked = el.hasAttribute('data-anchor-unmarked')
+        var bar = null
+        var shows = ''
+        var kind = 'label'
+        if (!hook) {
+          if (!m || unmarked || !outermost(el, ref)) continue
+          bar = m.bar
+          shows = (m.names || []).join(', ')
+        } else if (hook.mode === 'label') {
+          if (!ref || !outermost(el, ref)) continue
+          var hit = valueIn(m, hook)
+          offs.push([el, hook.off(hit ? hit.value : null)])
+          if (m && !unmarked) spanned.push([el, m])
+          if (!hit || unmarked) continue
+          bar = hit.colour
+          shows = hook.name
+        } else {
+          var own = el.hasAttribute('data-colour')
+          var v = own ? el.getAttribute('data-colour') : null
+          if (v === '') v = null
+          if (own) offs.push([el, hook.off(v)])
+          if (m && !unmarked && outermost(el, ref)) spanned.push([el, m])
+          if (!own || v == null || unmarked || el instanceof SVGElement) continue
+          bar = hook.colourOf(v)
+          shows = v
+          kind = 'colour'
+        }
+        if (typeof bar !== 'string' || !COLOUR.test(bar)) continue
         if (el instanceof SVGElement) {
-          todo.push([el, m, 'svg', null])
+          todo.push([el, bar, shows, kind, 'svg', null, m])
           continue
         }
-        var own = getComputedStyle(el).boxShadow
-        todo.push([el, m, edgeOf(el, cut), own && own !== 'none' && SHADOW.test(own) ? own : null])
+        var shadow = getComputedStyle(el).boxShadow
+        todo.push([el, bar, shows, kind, edgeOf(el, cut), shadow && shadow !== 'none' && SHADOW.test(shadow) ? shadow : null, m])
+      }
+      for (var f = 0; f < offs.length; f++) {
+        if (!offs[f][1]) continue
+        offs[f][0].setAttribute('data-thimble-off', offs[f][1] === 'hide' && !(offs[f][0] instanceof SVGElement) ? 'hide' : 'dim')
+        offed.push(offs[f][0])
       }
       for (var d = 0; d < todo.length; d++) {
         var el2 = todo[d][0]
-        var m2 = todo[d][1]
-        el2.setAttribute('data-thimble-label', (m2.names || []).join(', '))
-        el2.setAttribute('data-thimble-bar', String(slot(m2.bar)))
-        el2.setAttribute('data-thimble-edge', todo[d][2])
-        if (todo[d][3]) {
-          var o = owns.indexOf(todo[d][3])
-          if (o < 0) o = owns.push(todo[d][3]) - 1
+        el2.setAttribute(todo[d][3] === 'label' ? 'data-thimble-label' : 'data-thimble-colour', todo[d][2])
+        el2.setAttribute('data-thimble-bar', String(slot(todo[d][1])))
+        el2.setAttribute('data-thimble-edge', todo[d][4])
+        if (todo[d][5]) {
+          var o = owns.indexOf(todo[d][5])
+          if (o < 0) o = owns.push(todo[d][5]) - 1
           el2.setAttribute('data-thimble-own', String(o))
         }
         marked.push(el2)
-        var spans = HL && Array.isArray(m2.spans) ? m2.spans : []
-        var t = spans.length ? joined(el2) : null
+        if (!hook) spanned.push([el2, todo[d][6]])
+      }
+      for (var p = 0; p < spanned.length; p++) {
+        var spans = HL && spanned[p][1] && Array.isArray(spanned[p][1].spans) ? spanned[p][1].spans : []
+        var t = spans.length ? joined(spanned[p][0]) : null
         for (var s = 0; s < spans.length; s++) {
           var sp = spans[s] || {}
           if (typeof sp.colour === 'string' && COLOUR.test(sp.colour)) rangesOf(t, String(sp.text || ''), ranges[slot(sp.colour)])
         }
       }
     }
-    var css = (colours.length ? BARS : '') + (drop() ? DROP : '')
+    var css = (marked.length ? BARS : '') + (drop() ? DROP : '') + (offed.length ? OFF : '')
     sendHidden()
     for (var k = 0; k < colours.length; k++) {
       css += '[data-thimble-bar="' + k + '"]{--thimble-label:' + colours[k] + '}'
@@ -884,7 +1035,7 @@
     }
     if (sheet && sheet.textContent !== css) sheet.textContent = css
     if (HL) {
-      for (var o = 0; o < lit.length; o++) CSS.highlights.delete(lit[o])
+      for (var o2 = 0; o2 < lit.length; o2++) CSS.highlights.delete(lit[o2])
       lit = []
       for (var h = 0; h < ranges.length; h++) {
         if (!ranges[h].length) continue
@@ -1053,7 +1204,7 @@
       if (sheet && (r.target === sheet || (r.addedNodes.length === 1 && r.addedNodes[0] === sheet))) continue
       if (r.type === 'attributes') {
         if (r.attributeName === 'class') {
-          if (r.target.hasAttribute('data-thimble-label')) changed = true
+          if (r.target.hasAttribute('data-thimble-label') || r.target.hasAttribute('data-thimble-colour')) changed = true
           continue
         }
         if (r.target.tagName === 'CANVAS') continue
@@ -1062,14 +1213,16 @@
         continue
       }
       for (var j = 0; j < r.addedNodes.length; j++) {
-        if (collect(r.addedNodes[j])) changed = true
+        var added = r.addedNodes[j]
+        if (collect(added)) changed = true
+        else if (colourHook && added.nodeType === 1 && (added.hasAttribute('data-colour') || added.querySelector('[data-colour]'))) changed = true
       }
-      if (!changed && r.target.closest && r.target.closest('[data-thimble-label]')) changed = true
+      if (!changed && r.target.closest && r.target.closest('[data-thimble-label],[data-thimble-colour]')) changed = true
     }
     if (unsent.length && sendTimer == null) sendTimer = setTimeout(sendAnchors, 30)
     else if (changed) seenSoon()
-    if (changed && (hasMarks() || dropping())) paintSoon()
-  }).observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['data-anchor', 'class'] })
+    if (changed && (hasMarks() || dropping() || colourHook)) paintSoon()
+  }).observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['data-anchor', 'data-colour', 'class'] })
 
   // What the analyst is looking at, for a newer version of the view loaded in this page's place: `ref` the element they
   // last clicked since the last `open`, `scroll` the scroll positions of the page and of each box scrolled, `fields`
@@ -1182,6 +1335,27 @@
   addEventListener('wheel', stopRestore, { passive: true, capture: true })
   addEventListener('pointerdown', stopRestore, true)
   addEventListener('keydown', stopRestore, true)
+
+  // What the view kit's own controls (viewer_colour.js, loaded right after this bridge) need of it, handed over once:
+  // they hear the labels and marks without registering the page's onLabels, set the Colour by choice the marks are drawn
+  // by, have the page drawn again, and keep the choice with thimble.
+  window.__thimbleKit = {
+    labels: function (fn) {
+      kitFns.push(fn)
+      if (labelState) fn(labelState, true, true)
+    },
+    colour: function (hook) {
+      colourHook = hook || null
+      paintSoon()
+    },
+    paint: paintSoon,
+    save: function (state) {
+      post({ type: P + 'colour', state: state })
+    },
+    gesture: gesture,
+    report: report,
+    realColour: realColour,
+  }
 
   function size() {
     var b = document.body

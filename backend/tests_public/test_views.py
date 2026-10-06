@@ -600,6 +600,19 @@ def test_the_test_label_answers_thimble_labels_as_a_label_would(tmp_path):
         kt._view_ctx, kt._view_paths = None, []
 
 
+def test_a_mark_names_each_label_s_value_with_the_label_s_id():
+    """Under the test label a marked record's mark and a unit's say the test label's value with its id, which the page's
+    `all` lists the label by, so a page can tell one label's values from another's; an unmarked record has no mark."""
+    from app import kernel_thimble as kt  # noqa: PLC0415
+
+    ctx = views.probe_context()
+    rec = views._record_mark(ctx, "board.jsonl#L7")
+    assert rec["values"] == [{"id": kt.PROBE_ID, "label": kt.PROBE_NAME, "value": kt.PROBE_NAME, "colour": kt.PROBE_COLOUR}]
+    assert views._record_mark(ctx, "board.jsonl#L8") is None
+    unit = views._unit_mark(ctx, ["board.jsonl#L6", "board.jsonl#L7", "board.jsonl#L14"])
+    assert unit["values"] == rec["values"] and unit["bar"] == kt.PROBE_COLOUR
+
+
 def _shot(state: str, **shown) -> dict:
     return {"ok": True, "state": state, "fetched_records": shown.pop("fetched", 0), "label_controls": shown.pop("controls", 1),
             "shown": shown}
@@ -781,7 +794,8 @@ def test_the_frame_document_blocks_every_host_before_any_script(ws):
     v = dict(views.read_view(CORPUS, "threads"), libs=views._libs(["vega-embed"]))
     with_libs = views.frame_document(v)
     if views.LIBS["vega"].is_file():
-        assert with_libs.count("<script>") == 6, "the view's name, the bridge, vega, vega-lite, vega-embed and the view's own"
+        assert with_libs.count("<script>") == 7, \
+            "the view's name, the bridge, the kit's Colour by, vega, vega-lite, vega-embed and the view's own"
     assert views._script_text("a</script>b") == "a<\\/script>b"
     assert views._libs(["vega-embed"]) == ["vega", "vega-lite", "vega-embed"]
 
@@ -812,8 +826,8 @@ async def test_no_thread_is_read_as_a_question_from_a_view_s_own_box(ws, inproc,
 
 # ------------------------------------------------------------------------------------------------- worked examples
 #
-# plugin/viewers/timeline, linked-sessions and repository are the worked examples a view ticket's session reads
-# (prompts/dev-view.md), and never views of a workspace. Each ships an invented sample of the files it claims under
+# plugin/viewers/timeline, linked-sessions, repository and colour-by are the worked examples a view ticket's session
+# reads (prompts/dev-view.md), and never views of a workspace; colour-by shows the view kit's Colour by. Each ships an invented sample of the files it claims under
 # sample/, and passes over it the checks a view a session writes must pass. Each sample is copied into the temp DATA_DIR
 # as a corpus named after its example.
 
@@ -824,6 +838,7 @@ EXAMPLES = {
     "repository": ("repository", ["view:repository/r1/pull/11", "view:repository/r3", "view:repository/r2/issues/6",
                                   "view:repository/r3/discussions/2", "view:repository/r4/agents/moss"]),
     "linked-sessions": ("linked-sessions", ["view:linked-sessions/r1", "view:linked-sessions/a07a4da7"]),
+    "colour-by": ("colour-by", ["messages.jsonl#L7"]),
 }
 
 
@@ -863,6 +878,7 @@ BROKEN = {
                    ("runs/r1/events.jsonl",
                     '{"id": "x1", "type": "label.added", "ts": "2026-05-20T10:00:00Z", "number": 11}\n'
                     '{"id": "x2", "type": "comment", "ts": "yesterday", "actor": "ash", "number": 11}\n', 2)],
+    "colour-by": [("messages.jsonl", '{"ts": "yesterday", "author": "ash", "channel": "ops", "text": "no time"}\n', 1)],
     "linked-sessions": [("runs/r1/sessions-index.json", "not json", 1),
                         ("runs/r1/36fe6b9d-6e6d-4582-aef9-c97a0fe8f576.jsonl",
                          '{"type": "user", "uuid": "x9", "timestamp": "2026-09-12T14:50:00Z", "message": {"role": '
@@ -947,11 +963,13 @@ async def test_every_worked_example_answers_the_checks_over_its_sample(name, sam
 
 async def _every_answer(name: str, slug: str) -> list:
     """What the example's page fetches, over every place: each Timeline event in full, each session's transcript and
-    the runs and sessions compared, each Repository tab and unit."""
+    the runs and sessions compared, each Repository tab and unit, the Message board under three Colour by choices."""
     call = functools.partial(views.reader_call, name, slug, "records")
     if name == "timeline":
         rows = (await call({"op": "overview"}))["cols"]["r"]
         return [{"ref": got["ref"], **got["record"]} for got in [await call({"op": "record", "r": r}) for r in rows]]
+    if name == "colour-by":
+        return [await call({"op": "board", "colour": c}) for c in (None, {"field": "channel", "off": []}, {"field": "kind", "off": ["Text only"]})]
     if name == "linked-sessions":
         ov = await call({"op": "overview"})
         out = [await call({"op": "session", "id": s["id"]}) for s in ov["sessions"]]

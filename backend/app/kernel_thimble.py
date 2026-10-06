@@ -17,7 +17,12 @@ it with `WS` (the workspace directory) set and registers it as `thimble`.
                               (source, target[, label]) or dicts. A node's first line is its label, the rest its
                               detail. Output is DIAGRAM_MIME with a text/plain listing the model reads and cites
     thimble.marked(ref)       in a view's reader: the marks of the labels that are on for one record, each
-                              {label, value, colour}, [] outside a view's call
+                              {label, value, colour, id}, [] outside a view's call
+    thimble.colour_value(choice, ref=None, record=None)
+                              in a view's reader: the value a record takes under the page's Colour by (`choice`, the
+                              page's colour.query()), a label's value on `ref` or a field's in `record`; None for none
+    thimble.colour_on(choice, value)
+                              in a view's reader: whether the analyst left that value's chip on
     thimble.kept(ref)         in a view's reader: whether the record passes the analyst's label filter (True with none)
     thimble.kept_unit(refs)   in a view's reader: whether a unit that gathers the records `refs` passes that filter,
                               judged by its records in the files the filter's label ran over (True when it has records
@@ -59,7 +64,8 @@ from pathlib import Path
 
 WS = globals().get("WS")  # the workspace directory, set by the injector (notebook.kernel_argv)
 
-__all__ = ["labels", "colours", "marked", "kept", "view_labels", "progress", "diagram", "timeline", "card"]
+__all__ = ["labels", "colours", "marked", "kept", "view_labels", "colour_value", "colour_on", "progress", "diagram", "timeline",
+           "card"]
 
 FRAME_ROWS = 500  # rows of a table card's DataFrame the card keeps and shows (frames.ROWS_MAX)
 
@@ -779,9 +785,37 @@ def _probed(ref: str, every) -> bool:
 
 def marked(ref):
     """The marks of the labels that are on for the record `ref` (`<path>#L<n>`, or the ref of a record of another reader
-    such as `<db>#<table>/<key>` or `<pdf>#p<n>`): each {label, value, colour} whose value
+    such as `<db>#<table>/<key>` or `<pdf>#p<n>`): each {label, value, colour, id} whose value
     the record takes and the analyst highlights, in the labels' order. [] outside a view's reader call."""
     return _marked(_view_ctx, ref)
+
+
+def colour_value(choice, ref=None, record=None):
+    """The value a record takes under the view's Colour by, `choice` being what the page's colour.query() sent with its
+    fetch (viewer_colour.js): for a label, {label: id, name}, the label's highlighted value on the record `ref`, else
+    None; for a field of the view, {field}, record[field] (record a dict), else None. None for no choice."""
+    if not isinstance(choice, dict):
+        return None
+    if choice.get("label") is not None:
+        if ref is None:
+            return None
+        want = str(choice.get("label"))
+        hit = next((m for m in _marked(_view_ctx, ref) if m.get("id") == want), None)
+        return None if hit is None else hit.get("value")
+    field = choice.get("field")
+    if field is None or not isinstance(record, dict):
+        return None
+    v = record.get(field)
+    return None if _missing(v) or v == "" else str(v)
+
+
+def colour_on(choice, value):
+    """Whether the analyst left a value's chip on under the view's Colour by (`choice`, the page's colour.query()), None
+    standing for the records that take no value: True for every value with no choice."""
+    if not isinstance(choice, dict):
+        return True
+    off = choice.get("off") or []
+    return (None if value is None or value == "" else str(value)) not in off
 
 
 def kept(ref):
@@ -834,13 +868,13 @@ def _marked(ctx, ref) -> list:
         return []
     ref = str(ref)
     if ctx.get("probe"):
-        return [{"label": PROBE_NAME, "value": PROBE_NAME, "colour": PROBE_COLOUR}] if _probed(ref, ctx["probe"]) else []
+        return [{"label": PROBE_NAME, "value": PROBE_NAME, "colour": PROBE_COLOUR, "id": PROBE_ID}] if _probed(ref, ctx["probe"]) else []
     out = []
     for k in ctx.get("labels") or []:
         v = _value_of(k, ref)
         hit = next((x for x in k.get("values") or [] if x.get("highlight") and x.get("name") == v), None)
         if hit is not None:
-            out.append({"label": k.get("name"), "value": v, "colour": hit.get("colour") or k.get("colour")})
+            out.append({"label": k.get("name"), "value": v, "colour": hit.get("colour") or k.get("colour"), "id": k.get("id")})
     return out
 
 

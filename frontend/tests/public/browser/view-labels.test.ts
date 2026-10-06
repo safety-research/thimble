@@ -1,8 +1,8 @@
 // The frame half of a view's bridge (backend/app/viewer_bridge.js) drawing the labels that are on, in a real browser: a
 // page holds a view in a sandboxed frame as ViewerFrame does, and a `labels` message draws its marks, a bar in the
 // label's colour and the marked text highlighted through the CSS Custom Highlight API, which leaves the view's DOM as
-// it wrote it. What the bridge reports and posts is tests/public/bridge.test.ts, under jsdom, which has no layout and
-// no highlights.
+// it wrote it; thimble.markOf hands the page those colours resolved, so a canvas can draw them. What the bridge reports
+// and posts is tests/public/bridge.test.ts, under jsdom, which has no layout and no highlights.
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
@@ -106,4 +106,18 @@ test('the anchors report names the records in view, and a scroll names those it 
   const seen = await tall.evaluate(() => (window as any).__got.find((m: { type: string }) => m.type === 'thimble:seen').refs)
   assert.deepEqual(seen, Array.from({ length: 10 }, (_, i) => `b.jsonl#L${i + 101}`), 'the records the scroll brought into view, once')
   await tall.close()
+})
+
+test("thimble.markOf gives the page each label's colour as one a canvas can draw", async () => {
+  await send({ 'a.jsonl#L1': { bar: 'var(--label-2)', names: ['coord'], values: [{ id: 'k2', label: 'coord', value: 'yes', colour: 'var(--label-2)' }], spans: [{ text: 'deadline', colour: 'var(--label-2)' }] } })
+  await frame().waitForFunction(() => (window as any).thimble.markOf('a.jsonl#L1')?.bar === 'rgb(230, 159, 0)')
+  const got = await frame().evaluate(() => {
+    const m = (window as any).thimble.markOf('a.jsonl#L1')
+    const cv = document.createElement('canvas')
+    const ctx = cv.getContext('2d')!
+    ctx.fillStyle = m.bar
+    ctx.fillRect(0, 0, 1, 1)
+    return { value: m.values[0].colour, span: m.spans[0].colour, px: [...ctx.getImageData(0, 0, 1, 1).data].slice(0, 3) }
+  })
+  assert.deepEqual(got, { value: 'rgb(230, 159, 0)', span: 'rgb(230, 159, 0)', px: [230, 159, 0] }, 'var(--label-2) of the frame, drawn on a canvas')
 })

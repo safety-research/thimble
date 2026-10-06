@@ -151,6 +151,7 @@ LIBS: dict[str, Path] = {
 LIB_NEEDS = {"vega-lite": ("vega",), "vega-embed": ("vega", "vega-lite")}
 BRIDGE_JS = Path(__file__).with_name("viewer_bridge.js")
 KIT_CSS = Path(__file__).with_name("viewer_kit.css")  # thimble's chips, buttons, segmented controls, tables and list rows
+COLOUR_JS = Path(__file__).with_name("viewer_colour.js")  # the view kit's Colour by control, thimble.colourBy
 HOST_PY = Path(__file__).with_name("view_host.py")
 KERNEL_THIMBLE = Path(__file__).with_name("kernel_thimble.py")  # the `thimble` module a reader imports (view_host)
 # The test label of the checks and the review: it marks every record whose line is a multiple of PROBE_EVERY, about one
@@ -1930,15 +1931,22 @@ def labels_state(ctx: dict[str, Any] | None) -> dict[str, Any]:
     return kernel_thimble._view_labels(ctx or NO_LABELS)
 
 
+def _mark_values(marks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """A mark's `values` for the bridge: each label that highlights the record, {id, label, value, colour}, so that a
+    page can colour its records by one label of those that are on (thimble.markOf)."""
+    return [{"id": m.get("id"), "label": m.get("label"), "value": m.get("value"), "colour": m.get("colour")} for m in marks]
+
+
 def _record_mark(ctx: dict[str, Any], ref: str) -> dict[str, Any] | None:
-    """A record's mark for the bridge, {bar, names, spans, keep?}: the first label's colour as its bar, and with a filter
-    whether it is kept; None for a record no label marks and no filter keeps."""
+    """A record's mark for the bridge, {bar, names, values, spans, keep?}: the first label's colour as its bar, each
+    label's value, and with a filter whether it is kept; None for a record no label marks and no filter keeps."""
     from . import kernel_thimble  # noqa: PLC0415
 
     marks = kernel_thimble._marked(ctx, ref)
     out: dict[str, Any] = {}
     if marks:
-        out = {"bar": marks[0]["colour"], "names": list(dict.fromkeys(m["label"] for m in marks)), "spans": []}
+        out = {"bar": marks[0]["colour"], "names": list(dict.fromkeys(m["label"] for m in marks)),
+               "values": _mark_values(marks), "spans": []}
     if ctx.get("filter"):
         keep = kernel_thimble._kept(ctx, ref)
         if not keep and not out:
@@ -1949,18 +1957,27 @@ def _record_mark(ctx: dict[str, Any], ref: str) -> dict[str, Any] | None:
 
 def _unit_mark(ctx: dict[str, Any], rs: list[str]) -> dict[str, Any] | None:
     """A unit's mark from the records it stands for: marked by each label that marks any of them, its bar the colour most
-    of its marked records take, and with a filter kept as kernel_thimble.kept_unit keeps it."""
+    of its marked records take, each label's value the one most of them take, and with a filter kept as
+    kernel_thimble.kept_unit keeps it."""
     from . import kernel_thimble  # noqa: PLC0415
 
     names: dict[str, None] = {}
     colours: dict[str, int] = {}
+    by_label: dict[Any, dict[tuple, int]] = {}
     for r in rs:
         for m in kernel_thimble._marked(ctx, r):
             names.setdefault(m["label"], None)
             colours[m["colour"]] = colours.get(m["colour"], 0) + 1
+            seen = by_label.setdefault(m.get("id"), {})
+            key = (m.get("label"), m.get("value"), m.get("colour"))
+            seen[key] = seen.get(key, 0) + 1
     out: dict[str, Any] = {}
     if names:
-        out = {"bar": max(colours, key=lambda k: colours[k]), "names": list(names), "spans": []}
+        values = []
+        for lid, seen in by_label.items():
+            label, value, colour = max(seen, key=lambda k: seen[k])
+            values.append({"id": lid, "label": label, "value": value, "colour": colour})
+        out = {"bar": max(colours, key=lambda k: colours[k]), "names": list(names), "values": values, "spans": []}
     if ctx.get("filter"):
         keep = kernel_thimble._kept_unit(ctx, rs)
         if not keep and not out:
@@ -3079,7 +3096,8 @@ def _style_text(css: str) -> str:
 def frame_document(view: dict[str, Any], media: str | None = None, *, card: bool = False,
                    derived: list[dict[str, str]] | None = None) -> str:
     """The view's page as a frame loads it: the policy that blocks every load but the view's media route, the bridge
-    (viewer_bridge.js), thimble's parts (viewer_kit.css), the vendored libraries the view names, then view.html, whose
+    (viewer_bridge.js), the kit's Colour by control (viewer_colour.js), thimble's parts (viewer_kit.css), the vendored
+    libraries the view names, then view.html, whose
     own styles come after the parts. The browser adds the theme's tokens (ViewerFrame.tsx). `media` is the media
     route's absolute URL (media_url), which the policy allows for images, audio and video and thimble.mediaUrl builds
     on; without it the page loads no URL at all. `card` marks the page as a card's (cardtypes.py), which draws what the
@@ -3098,6 +3116,7 @@ def frame_document(view: dict[str, Any], media: str | None = None, *, card: bool
             '<meta charset="utf-8">',
             f"<script>window.__thimbleView = {_script_text(who)}</script>",
             f"<script>{_script_text(BRIDGE_JS.read_text('utf-8'))}</script>",
+            f"<script>{_script_text(COLOUR_JS.read_text('utf-8'))}</script>",
             f"<style>{KIT_CSS.read_text('utf-8')}</style>"]
     for name in view.get("libs") or []:
         p = LIBS.get(name)
@@ -4572,8 +4591,9 @@ _controls_seen: dict[tuple[str, int, int], bool] = {}
 
 def label_controls(v: dict[str, Any]) -> bool:
     """Whether the view's page draws label controls of its own: its view.html gives an element `data-label`
-    (prompts/dev-view.md), even one only a menu shows, and calls `thimble.setLabel`. thimble draws no label control
-    above a view, so beside a view without them its Labels sidebar opens while a label is on."""
+    (prompts/dev-view.md), even one only a menu shows, and calls `thimble.setLabel`, or it mounts the kit's Colour by
+    control (`thimble.colourBy`, viewer_colour.js), which draws them. thimble draws no label control above a view, so
+    beside a view without them its Labels sidebar opens while a label is on."""
     d = v.get("dir")
     if not d:
         return False
@@ -4588,7 +4608,7 @@ def label_controls(v: dict[str, Any]) -> bool:
             _controls_seen.clear()
         try:
             text = page.read_text("utf-8", "replace")
-            _controls_seen[key] = "data-label" in text and "setLabel" in text
+            _controls_seen[key] = ("data-label" in text and "setLabel" in text) or "thimble.colourBy(" in text
         except OSError:
             return False
     return _controls_seen[key]

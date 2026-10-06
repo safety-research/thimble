@@ -39,7 +39,7 @@ export function frameTokens(): Record<string, string> {
 }
 
 /** The tokens a view's page reads (views.frame_document; plugin/viewers use them with light fallbacks), those the parts
- * of backend/app/viewer_kit.css are drawn in, and the label palette the marks of the labels that are on are drawn in
+ * of backend/app/viewer_kit.css are drawn in (its Colour by menu among them), and the label palette the marks of the labels that are on are drawn in
  * (viewer_bridge.js), so they match the Labels pane's. */
 export const VIEW_TOKENS = [
   ...FRAME_TOKENS,
@@ -80,6 +80,11 @@ export const VIEW_TOKENS = [
   '--border-hairline',
   '--border-strong',
   '--bg-panel',
+  '--overlay-bg',
+  '--overlay-edge',
+  '--shadow-popover',
+  '--text-eyebrow',
+  '--radius-hl',
   '--status-positive',
   '--status-negative',
   '--status-warning',
