@@ -11,6 +11,7 @@ import sys
 import pytest
 from fastapi.testclient import TestClient
 
+import app
 from app import agents, config, kernel_wrap, subagents
 from app import subagent_files as sf
 from subagent_fakes import HINTS, bridge, hints  # noqa: F401 — fixtures
@@ -313,6 +314,7 @@ def test_the_module_s_ended_posts_and_session_moves_reach_subagents(monkeypatch,
     mod.on_ended = heard.append
     mod.rekey = lambda c, old, new: moves.append((c, old, new))
     monkeypatch.setitem(sys.modules, "app.module_bridge", mod)
+    monkeypatch.setattr(app, "module_bridge", mod, raising=False)  # read before sys.modules once the real one loaded
     subagents._hear_module()
     assert heard == [subagents.ended]
     body = subagents.HookBody(cwd=str(config.corpus_dir(CORPUS)), hook={"old": "s-old", "session_id": "s-new"})

@@ -68,6 +68,7 @@ class FakeBridge:
 @pytest.fixture()
 def bridge(monkeypatch) -> FakeBridge:
     """A FakeBridge installed as app.module_bridge, with main fenced (cc_plugin.main_fenced) and the hints of HINTS."""
+    import app
     from app import cc_plugin, tools
 
     fake = FakeBridge()
@@ -75,6 +76,9 @@ def bridge(monkeypatch) -> FakeBridge:
     for name in ("live", "why_not", "request", "push_roles"):
         setattr(mod, name, getattr(fake, name))
     monkeypatch.setitem(sys.modules, "app.module_bridge", mod)
+    # `from . import module_bridge` reads the package's attribute first, which the real bridge sets once any test has
+    # imported it, so the fake replaces that too
+    monkeypatch.setattr(app, "module_bridge", mod, raising=False)
     monkeypatch.setattr(cc_plugin, "main_fenced", lambda c: True, raising=False)
     real = tools.descriptions
     monkeypatch.setattr(tools, "descriptions", lambda: {**real(), **HINTS})

@@ -16,6 +16,7 @@ from dataclasses import dataclass
 import httpx
 import pytest
 
+import app
 from app import cc_plugin, config, hook_auth, module_bridge, session, tools
 
 CORPUS = "mini"
@@ -378,6 +379,7 @@ async def test_the_roles_come_from_subagents_roles_as_agent_register_takes_them(
                         "disallowedTools": ["mcp__plugin_thimble_thimble__start_orientation"], "extra": 1},
         "thimble:helper": Role("Help.", "claude-sonnet-5", "high", skills=["thimble:shared"])}
     monkeypatch.setitem(sys.modules, "app.subagents", fake)
+    monkeypatch.setattr(app, "subagents", fake)  # `from . import subagents` reads the package's attribute first
     _launch()
     mod = Module(client, plugin_headers)
     assert (await mod.get("roles")).status_code == 409, "only after the hello"
