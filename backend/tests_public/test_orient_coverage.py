@@ -165,6 +165,44 @@ def test_a_script_s_printed_fields_and_table_rows_count_the_records_they_came_fr
     assert len(got["forge.db"]) == 2 and set(got) == {"board.jsonl", "forge.db"}
 
 
+def test_a_file_made_from_the_corpus_outside_it_counts_as_the_lines_it_came_from(chat, tmp_path):
+    """A dump the orientation wrote of a corpus file into its work folder, by a call that printed nothing, and then read
+    there by its absolute path (Read, cat, grep in the folder) shows the lines of the file the writing call named; so
+    does a long output Claude Code saved to a file, read with Read, by the call it came from. A file outside the corpus
+    that no call naming corpus files gave shows nothing."""
+    root = config.corpus_dir(CORPUS)
+    dumps = tmp_path / "orient-work" / "dumps"
+    posts = [json.loads(x) for x in _lines("board.jsonl")]
+    dumped = [f"L{i} | {r['author']} | {r['body'].splitlines()[0][:70]}" for i, r in enumerate(posts, 1)]
+    _bash(chat, 1, f"mkdir -p {dumps} && cd {root} && python3 dump.py board.jsonl > {dumps}/board.txt", "")
+    _call(chat, 2, "Read", {"file_path": f"{dumps}/board.txt"}, "\n".join(f"{k}\t{x}" for k, x in enumerate(dumped[:2], 1)))
+    _bash(chat, 3, f"sed -n 4p {dumps}/board.txt", dumped[3])
+    _bash(chat, 4, f"cd {dumps} && grep -n . *.txt | sed -n 6p", f"board.txt:6:{dumped[5]}")
+    saved = tmp_path / "tool-results" / "b1.txt"
+    _bash(chat, 5, f"cd {root} && python3 -c 'print(open(\"events.jsonl\").read())'",
+          f"<persisted-output>\nOutput too large (41.2KB). Full output saved to: {saved}\n\nPreview (first 2KB):\n")
+    _call(chat, 6, "Read", {"file_path": str(saved)}, "\n".join(f"{k}\t{x}" for k, x in enumerate(_lines("events.jsonl", 2, 3), 1)))
+    _call(chat, 7, "Read", {"file_path": str(tmp_path / "notes.md")}, f"1\t{dumped[6]}")
+    _bash(chat, 8, f"cat {tmp_path}/other/board.txt", dumped[7])
+    assert _seen(chat) == {"board.jsonl": {1, 2, 4, 6}, "events.jsonl": {2, 3}}
+
+
+def test_a_line_found_in_a_file_the_call_names_by_path_counts_there_alone(chat):
+    """A query whose table shares a folder's name (`... from agents`) names that folder's files too, but the PR title it
+    printed from forge.db, which agent-01's transcript also holds, counts as a row of forge.db alone; text a command
+    printed from agent-02's transcript counts in agent-02's, though agent-01's holds it too."""
+    root = config.corpus_dir(CORPUS)
+    _bash(chat, 1, f"sqlite3 {root}/forge.db 'select title from prs where number = 7101; select count(*) from agents'",
+          "Document the two line-break modes\n3")
+    got = _seen(chat)
+    assert set(got) == {"forge.db"} and len(got["forge.db"]) == 1
+    line = next(n for n, x in enumerate(_lines("agents/agent-02.jsonl"), 1) if "Clarify the width parameter" in x)
+    _bash(chat, 2, f"cd {root} && sed -n {line}p agents/agent-02.jsonl | grep -o 'Clarify the width parameter[^\"]*'",
+          "Clarify the width parameter")
+    got = _seen(chat)
+    assert got["agents/agent-02.jsonl"] == {line} and "agents/agent-01.jsonl" not in got
+
+
 def test_a_line_found_in_more_files_than_shared_max_counts_in_none(chat, monkeypatch):
     """Text that many of the named files hold, such as a field's name, identifies no record."""
     root = config.corpus_dir(CORPUS)

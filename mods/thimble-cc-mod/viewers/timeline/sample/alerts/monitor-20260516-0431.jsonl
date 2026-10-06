@@ -1,0 +1,19 @@
+{"monitor": "4.0.2", "started": 1778905860000, "rules": 38}
+{"id": "alr-46", "ts": 1778906405000, "state": "RESOLVED", "service": "web", "severity": "warning", "incident": null, "summary": "web-2: log disk 61% full after rotation", "resolves": "alr-45"}
+{"id": "alr-47", "ts": 1778917285000, "state": "FIRING", "service": "payments", "severity": "warning", "incident": "INC-312", "summary": "payments: database connections at 176 of 200 for 5 min"}
+{"id": "alr-48", "ts": 1778918283000, "state": "FIRING", "service": "bookings-db", "severity": "warning", "incident": "INC-312", "summary": "bookings-db: connections at 188 of 200"}
+{"id": "alr-49", "ts": 1778918510000, "state": "FIRING", "service": "payments", "severity": "critical", "incident": "INC-312", "summary": "payments: error rate 14% over 5 min (limit 5%)"}
+{"id": "alr-50", "ts": 1778918650000, "state": "FIRING", "service": "bookings-db", "severity": "critical", "incident": "INC-312", "summary": "bookings-db: connections at 200 of 200, new connections refused"}
+{"id": "alr-51", "ts": 1778918895000, "state": "FIRING", "service": "web", "severity": "warning", "incident": "INC-312", "summary": "web: 5xx responses at 6% on /checkout"}
+{"id": "alr-50", "ts": 1778918650000, "state": "FIRING", "service": "bookings-db", "severity": "critical", "incident": "INC-312", "summary": "bookings-db: connections at 200 of 200, new connections refused"}
+{"id": "alr-53", "ts": 1778920580000, "state": "RESOLVED", "service": "bookings-db", "severity": "critical", "incident": "INC-312", "summary": "bookings-db: connections at 71 of 200", "resolves": "alr-50"}
+{"id": "alr-52", "ts": 1778919130000, "state": "FIRING", "service": "passes", "severity": "warning", "incident": "INC-312", "summary": "passes queue: 1,240 jobs waiting (limit 500)"}
+{"id": "alr-54", "ts": 1778920625000, "state": "RESOLVED", "service": "bookings-db", "severity": "warning", "incident": "INC-312", "summary": "bookings-db: connections at 64 of 200", "resolves": "alr-48"}
+{"id": "alr-55", "ts": 1778920724000, "state": "RESOLVED", "service": "payments", "severity": "critical", "incident": "INC-312", "summary": "payments: error rate 0.6% over 5 min", "resolves": "alr-49"}
+{"id": "alr-56", "ts": 1778920802000, "state": "RESOLVED", "service": "web", "severity": "warning", "incident": "INC-312", "summary": "web: 5xx responses at 0.2% on /checkout", "resolves": "alr-51"}
+{"id": "alr-57", "ts": 1778920830000, "state": "RESOLVED", "service": "payments", "severity": "warning", "incident": "INC-312", "summary": "payments: database connections at 58 of 200", "resolves": "alr-47"}
+{"id": "alr-58", "ts": 1778923870000, "state": "RESOLVED", "service": "passes", "severity": "warning", "incident": "INC-312", "summary": "passes queue: 12 jobs waiting", "resolves": "alr-52"}
+{"id": "alr-59", "ts": 1778927765000, "state": "FIRING", "service": "payments", "severity": "warning", "incident": "INC-312", "summary": "payments: p95 latency 2.4 s over 5 min (limit 2 s)"}
+{"id": "alr-60", "ts": 1778928168000, "state": "RESOLVED", "service": "payments", "severity": "warning", "incident": "INC-312", "summary": "payments: p95 latency 0.9 s", "resolves": "alr-59"}
+{"id": "alr-61", "ts": 1778936740000, "state": "FIRING", "service": null, "severity": "warning", "incident": null, "summary": "web-2: log disk 85% full"}
+{"id": "alr-62", "ts": 1778937850000, "state": "RESOLVED", "service": "web", "severity": "warning", "incident": null, "summary": "web-2: log disk 60% full after rotation", "resolves": "alr-61"}

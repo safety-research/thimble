@@ -1,0 +1,336 @@
+{
+  "version": 1,
+  "name": "Repository",
+  "slug": "repository",
+  "description": "Four agent runs on one small library, read as a code forge shows them: pull requests, issues, discussions and agents in tabs filtered on every field, each pull request's story with its pushes, reviews and merge, the same backlog issue compared run by run, and every run's activity on its own clock.",
+  "data": "One folder per run of a team of agents working the same backlog of one library, so issue #3 of one run is issue #3 of another. manifest.json gives the run's setup under keys that changed between runs (run or id, started or started_at, agents or team, approvals, required_approvals or policy.approvals, timezone). events.jsonl holds the forge's events (issue.opened, pr.opened, push with its diff, review, comment, pr.merged, pr.closed, pr.reopened); r4 wrote schema 2, which renames type, ts, actor, labels, fixes, body and diff, writes epoch milliseconds and capital verdicts, and ends in a line cut off when the run stopped, which the reader reports. r3 exported its forge as CSV tables in local time, a commit's diff in a quoted cell over several lines, and reviews.json. board.jsonl holds the discussion and agents/<name>.jsonl each agent's transcript, whose last words are its sign-off. Some events were redelivered or logged late, a review comes from an account that is gone, a linked issue or a number of approvals is free text, and a pull request without an area takes its issue's.",
+  "scope": ["runs/*.json", "runs/*.jsonl", "runs/*.csv"],
+  "collections": [
+    {
+      "name": "runs",
+      "one": "one run of a team on the backlog",
+      "key": "id",
+      "title": "id",
+      "fields": [
+        {"name": "id", "type": "text", "label": "run"},
+        {"name": "ref", "type": "ref"},
+        {"name": "setup", "type": "category", "derived": "computed", "from": "the manifest's agents and approvals", "how": "how many agents and the approvals a merge needs"},
+        {"name": "agents", "type": "number", "derived": "computed", "from": "the manifest's agents and the transcripts", "how": "every agent either names"},
+        {"name": "approvals", "type": "number", "derived": "cleaned", "from": "approvals, required_approvals or policy.approvals", "how": "the first number in free text"},
+        {"name": "started", "type": "time", "derived": "cleaned", "from": "the manifest's started, else the first record", "how": "in UTC"},
+        {"name": "span", "type": "duration", "label": "ran", "derived": "computed", "from": "its records' times", "how": "from its start to its last record"},
+        {"name": "brief", "type": "text", "derived": "cleaned", "from": "brief or prompt", "how": "its text"},
+        {"name": "pulls", "type": "number", "label": "pull requests"},
+        {"name": "merged", "type": "number"},
+        {"name": "median to merge", "type": "duration", "derived": "computed", "from": "its merged pull requests", "how": "the median of their times to merge"},
+        {"name": "fixed", "type": "number", "label": "issues fixed"}
+      ],
+      "detail": {
+        "meta": ["setup"],
+        "fields": ["started", "span", "approvals", "pulls", "merged", "median to merge", "fixed"],
+        "text": "brief",
+        "related": [
+          {
+            "title": "Pull requests",
+            "collection": "pulls",
+            "via": "run",
+            "show": {
+              "kind": "table",
+              "columns": [{"field": "number"}, {"field": "title"}, {"field": "state"}, {"field": "to merge"}],
+              "sort": {"field": "number"}
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "pulls",
+      "one": "one pull request of a run, with its records",
+      "key": "key",
+      "title": "title",
+      "fields": [
+        {"name": "key", "type": "text"},
+        {"name": "ref", "type": "ref"},
+        {"name": "run", "type": "category", "link": "runs"},
+        {"name": "setup", "type": "category", "derived": "computed", "from": "the run's manifest", "how": "how many agents and the approvals a merge needs"},
+        {"name": "number", "type": "number", "label": "#"},
+        {"name": "title", "type": "text"},
+        {"name": "author", "type": "category", "link": "agents"},
+        {"name": "state", "type": "category", "derived": "computed", "from": "its merge, close and reopen records", "how": "open, merged or closed"},
+        {"name": "area", "type": "category", "derived": "computed", "from": "labels or area, else the issue it fixes", "how": "the first label, else the issue's area"},
+        {"name": "close reason", "type": "category", "derived": "cleaned", "from": "a close record's reason", "how": "its words, closed when it gives none"},
+        {"name": "closes", "type": "text", "link": "issues", "derived": "cleaned", "from": "fixes, closes or linked_issue", "how": "the first number in free text"},
+        {"name": "issue", "type": "category", "label": "backlog issue", "derived": "computed", "from": "closes", "how": "the issue's number and title, the same in every run"},
+        {"name": "merged by", "type": "category"},
+        {"name": "opened", "type": "duration", "derived": "cleaned", "from": "its opening's time", "how": "time since the run started"},
+        {"name": "first review", "type": "duration", "derived": "computed", "from": "its opening and its first review", "how": "the time between them"},
+        {"name": "to merge", "type": "duration", "derived": "computed", "from": "its opening and its merge", "how": "the time between them"},
+        {"name": "reviews", "type": "list", "label": "reviewers", "derived": "computed", "from": "its reviews", "how": "each reviewer's latest verdict, ✓ approved and ✗ changes requested"},
+        {"name": "commits", "type": "number"},
+        {"name": "size", "type": "text", "derived": "computed", "from": "its pushes' diffs", "how": "lines added and removed"},
+        {"name": "changed", "type": "text", "derived": "computed", "from": "its pushes' diffs", "how": "lines added and removed and the files"},
+        {"name": "files", "type": "list", "derived": "computed", "from": "its pushes' diffs", "how": "the files they change"},
+        {"name": "comments", "type": "number"},
+        {"name": "flags", "type": "list", "derived": "computed", "from": "its merge, reviews and pushes", "how": "merged by its author, merged over a change request, pushed after its last approval, or waiting for approvals", "flag": ["merged over a change request", "pushed after its last approval"]},
+        {"name": "twins", "type": "list", "link": "pulls", "label": "in other runs", "derived": "computed", "from": "issue", "how": "the other runs' pull requests for the same backlog issue"},
+        {"name": "line", "type": "text", "derived": "computed", "from": "author, state, merge and closes", "how": "the forge's line under its title"},
+        {"name": "text", "type": "text", "label": "description"}
+      ],
+      "detail": {
+        "meta": ["state", "area", "run", "setup"],
+        "fields": ["author", "merged by", "closes", "opened", "first review", "to merge", "reviews", "commits", "changed", "flags"],
+        "text": "text",
+        "related": [
+          {
+            "title": "Conversation",
+            "collection": "events",
+            "via": "unit",
+            "show": {"kind": "transcript", "speaker": "author", "text": "text", "time": "at"}
+          },
+          {
+            "title": "Same issue in other runs",
+            "collection": "pulls",
+            "via": "twins",
+            "show": {
+              "kind": "table",
+              "columns": [
+                {"field": "run"},
+                {"field": "number"},
+                {"field": "state"},
+                {"field": "to merge"},
+                {"field": "flags", "show": "chips"}
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "issues",
+      "one": "one issue of a run, with its records",
+      "key": "key",
+      "title": "title",
+      "fields": [
+        {"name": "key", "type": "text"},
+        {"name": "ref", "type": "ref"},
+        {"name": "run", "type": "category", "link": "runs"},
+        {"name": "setup", "type": "category", "derived": "computed", "from": "the run's manifest", "how": "how many agents and the approvals a merge needs"},
+        {"name": "number", "type": "number", "label": "#"},
+        {"name": "title", "type": "text"},
+        {"name": "author", "type": "category"},
+        {"name": "state", "type": "category", "derived": "computed", "from": "its close records and the pull requests that fix it", "how": "fixed once a pull request that fixes it merged"},
+        {"name": "area", "type": "category", "derived": "cleaned", "from": "labels or area", "how": "the first label"},
+        {"name": "origin", "type": "category", "derived": "computed", "from": "its opening and the run's start", "how": "backlog when opened before the run started, else found during the run"},
+        {"name": "issue", "type": "category", "label": "backlog issue", "derived": "computed", "from": "number and title", "how": "the same in every run"},
+        {"name": "opened", "type": "duration", "derived": "cleaned", "from": "its opening's time", "how": "time since the run started"},
+        {"name": "fixed by", "type": "text", "link": "pulls", "derived": "computed", "from": "the pull requests' closes", "how": "the merged pull request that fixes it"},
+        {"name": "pulls", "type": "text", "label": "pull requests", "derived": "computed", "from": "the pull requests' closes and states", "how": "each with its state and time to merge"},
+        {"name": "to fix", "type": "duration", "derived": "computed", "from": "its opening and the merge that fixed it", "how": "the time between them"},
+        {"name": "comments", "type": "number"},
+        {"name": "twins", "type": "list", "link": "issues", "label": "in other runs", "derived": "computed", "from": "issue", "how": "the same backlog issue in the other runs"},
+        {"name": "line", "type": "text", "derived": "computed", "from": "author, origin, fixed by and comments", "how": "the forge's line under its title"},
+        {"name": "text", "type": "text", "label": "description"}
+      ],
+      "detail": {
+        "meta": ["state", "area", "origin", "run", "setup"],
+        "fields": ["author", "opened", "fixed by", "to fix", "pulls", "comments"],
+        "text": "text",
+        "related": [
+          {
+            "title": "Conversation",
+            "collection": "events",
+            "via": "unit",
+            "show": {"kind": "transcript", "speaker": "author", "text": "text", "time": "at"}
+          },
+          {
+            "title": "Pull requests",
+            "collection": "pulls",
+            "via": "closes",
+            "show": {
+              "kind": "table",
+              "columns": [{"field": "number"}, {"field": "title"}, {"field": "author"}, {"field": "state"}, {"field": "to merge"}]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "discussions",
+      "one": "one thread of a run's board",
+      "key": "key",
+      "title": "title",
+      "fields": [
+        {"name": "key", "type": "text"},
+        {"name": "ref", "type": "ref"},
+        {"name": "run", "type": "category", "link": "runs"},
+        {"name": "number", "type": "number", "label": "#"},
+        {"name": "title", "type": "text"},
+        {"name": "author", "type": "category"},
+        {"name": "opened", "type": "duration", "derived": "cleaned", "from": "created_at of its first post", "how": "time since the run started"},
+        {"name": "posts", "type": "number"},
+        {"name": "posters", "type": "list"},
+        {"name": "mentions", "type": "list", "derived": "cleaned", "from": "the posts' bodies", "how": "the #<n> numbers they name"},
+        {"name": "text", "type": "text", "label": "first post"}
+      ],
+      "detail": {
+        "meta": ["run", "author"],
+        "fields": ["opened", "posts", "posters", "mentions"],
+        "related": [
+          {
+            "title": "Posts",
+            "collection": "events",
+            "via": "unit",
+            "show": {"kind": "transcript", "speaker": "author", "text": "text", "time": "at"}
+          }
+        ]
+      }
+    },
+    {
+      "name": "agents",
+      "one": "one agent of a run",
+      "key": "key",
+      "title": "name",
+      "fields": [
+        {"name": "key", "type": "text"},
+        {"name": "ref", "type": "ref"},
+        {"name": "run", "type": "category", "link": "runs"},
+        {"name": "name", "type": "text", "label": "agent"},
+        {"name": "opened", "type": "number", "derived": "computed", "from": "the pull requests' authors", "how": "the pull requests it opened"},
+        {"name": "merged", "type": "number", "derived": "computed", "from": "the pull requests' authors and states", "how": "those of them that merged"},
+        {"name": "merges", "type": "number", "derived": "computed", "from": "the merges' authors", "how": "the pull requests it merged, its own or others'"},
+        {"name": "approved", "type": "number"},
+        {"name": "changes", "type": "number", "label": "changes asked"},
+        {"name": "comments", "type": "number"},
+        {"name": "posts", "type": "number"},
+        {"name": "reviewed", "type": "list", "derived": "computed", "from": "the reviews it gave", "how": "the authors whose pull requests it approved or asked changes of"},
+        {"name": "note", "type": "text", "label": "sign-off", "derived": "cleaned", "from": "its transcript's last assistant text", "how": "its text"}
+      ],
+      "detail": {
+        "meta": ["run"],
+        "fields": ["opened", "merged", "merges", "approved", "changes", "comments", "posts", "reviewed"],
+        "text": "note",
+        "related": [
+          {
+            "title": "Pull requests",
+            "collection": "pulls",
+            "via": "author",
+            "show": {"kind": "table", "columns": [{"field": "number"}, {"field": "title"}, {"field": "state"}, {"field": "to merge"}]}
+          },
+          {
+            "title": "Activity",
+            "collection": "events",
+            "via": "agent",
+            "show": {"kind": "table", "columns": [{"field": "at"}, {"field": "action"}, {"field": "unit"}], "sort": {"field": "at"}}
+          }
+        ]
+      }
+    },
+    {
+      "name": "events",
+      "one": "one opening, push, review, comment, merge, close, reopen, post or sign-off",
+      "key": "key",
+      "title": "text",
+      "fields": [
+        {"name": "key", "type": "text"},
+        {"name": "ref", "type": "ref"},
+        {"name": "unit", "type": "text", "link": ["pulls", "issues", "discussions", "agents"]},
+        {"name": "run", "type": "category", "link": "runs"},
+        {"name": "agent", "type": "text", "link": "agents"},
+        {"name": "at", "type": "duration", "label": "time", "derived": "cleaned", "from": "ts, time, created_at, committed_at or submitted_at", "how": "time since the run started, a time without an offset in the run's timezone"},
+        {"name": "action", "type": "category", "derived": "cleaned", "from": "kind, and a review's verdict", "how": "opened, pushed, merged and so on, a review by its verdict, the merge in an issue's story as fixed"},
+        {"name": "author", "type": "category"},
+        {"name": "kind", "type": "category", "derived": "cleaned", "from": "type or event, else the export table", "how": "push read as commit, pr.merged as merge and so on"},
+        {"name": "text", "type": "text", "derived": "computed", "from": "title, body, message, diff or reason", "how": "what it did, then its own words, a push with its size and diff"}
+      ],
+      "detail": {"meta": ["action", "author", "run"], "fields": ["unit", "at", "kind"], "text": "text"}
+    }
+  ],
+  "stats": [
+    {"label": "runs", "collection": "runs", "agg": "count"},
+    {"label": "pull requests", "collection": "pulls", "agg": "count"},
+    {"label": "merged", "collection": "pulls", "agg": "count", "where": {"field": "state", "is": "merged"}},
+    {"label": "issues", "collection": "issues", "agg": "count"},
+    {"label": "agents", "collection": "agents", "agg": "count"}
+  ],
+  "tabs": [
+    {
+      "name": "Pull requests",
+      "collection": "pulls",
+      "overview": {"kind": "bars", "field": "run", "color": "state"},
+      "zoom": "a click on a run keeps its pull requests, on a state those in it",
+      "filter": {"fields": ["state", "area", "author", "reviews", "flags", "close reason"], "search": ["title", "text", "line", "files"]},
+      "body": [{"kind": "list", "meta": ["area", "size", "reviews"], "text": "line", "tags": ["flags"], "sort": {"field": "number"}, "group": "run"}]
+    },
+    {
+      "name": "Issues",
+      "collection": "issues",
+      "overview": {"kind": "bars", "field": "issue", "color": "state"},
+      "zoom": "a click on an issue keeps it in every run, on a state the issues in it",
+      "filter": {"fields": ["run", "setup", "state", "origin", "area"], "search": ["title", "text", "line"]},
+      "body": [
+        {
+          "kind": "table",
+          "columns": [{"field": "run"}, {"field": "setup"}, {"field": "state"}, {"field": "pulls"}, {"field": "to fix"}],
+          "sort": {"field": "run"},
+          "group": "issue"
+        }
+      ]
+    },
+    {
+      "name": "Discussions",
+      "collection": "discussions",
+      "overview": {"kind": "bars", "field": "run"},
+      "zoom": "a click on a run keeps its discussions",
+      "filter": {"fields": ["author", "posters"], "search": ["title", "text"]},
+      "body": [{"kind": "list", "meta": ["run", "author", "posts", "mentions"], "text": "text"}]
+    },
+    {
+      "name": "Agents",
+      "collection": "agents",
+      "overview": {"kind": "bars", "field": "run", "value": "opened", "agg": "sum"},
+      "zoom": "a click on a run keeps its agents",
+      "filter": {"fields": ["reviewed"], "search": ["name", "note"]},
+      "body": [
+        {
+          "kind": "table",
+          "columns": [
+            {"field": "name"},
+            {"field": "run"},
+            {"field": "opened"},
+            {"field": "merged", "show": "bar"},
+            {"field": "merges"},
+            {"field": "approved"},
+            {"field": "changes", "label": "changes"},
+            {"field": "comments"}
+          ],
+          "sort": {"field": "merged", "desc": true}
+        }
+      ]
+    },
+    {
+      "name": "Activity",
+      "collection": "events",
+      "where": {"field": "action", "not": "fixed"},
+      "overview": {"kind": "histogram", "time": "at", "color": "action"},
+      "zoom": "a click on the strip narrows the runs' clocks to that stretch",
+      "filter": {"fields": ["run", "action", "author", "kind"], "search": ["text", "author"]},
+      "body": [
+        {"kind": "lanes", "lane": "run", "time": "at", "color": "action", "lanes": {"collection": "runs", "meta": ["setup"], "label": "id"}},
+        {
+          "kind": "table",
+          "columns": [{"field": "at"}, {"field": "author"}, {"field": "action"}, {"field": "unit"}],
+          "sort": {"field": "at"},
+          "group": "run"
+        }
+      ]
+    }
+  ],
+  "accepts": [{"form": "L<n>", "means": "the record on line <n> of a run's file, selected with its pull request, issue or discussion"}],
+  "units": [
+    {"form": "<run>", "means": "one run, selected with its measures"},
+    {"form": "<run>/pull/<n>", "means": "one pull request, selected with its story"},
+    {"form": "<run>/issues/<n>", "means": "one issue, selected with its story and the pull requests that close it"},
+    {"form": "<run>/discussions/<n>", "means": "one discussion, selected with every post"},
+    {"form": "<run>/agents/<name>", "means": "one agent, selected with its sign-off and its activity"}
+  ]
+}

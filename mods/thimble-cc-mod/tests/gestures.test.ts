@@ -4,7 +4,7 @@
 // its release, a drag selects and copies. Every view opens in one panel, `thimble`, which shows the view `panelView` names.
 import type { JsonValue, On } from 'claude-code'
 import { expect, mock, test } from 'claude-code/testing'
-import type { Mounted } from 'claude-code/testing'
+import type { Engine, Mounted } from 'claude-code/testing'
 
 import { blockLayout } from '../hooks/cite'
 import { citationOf, classify, menuItems, menuLines, onPointer, placeOf, send, targetLabel } from '../hooks/gestures'
@@ -32,12 +32,12 @@ const REPLY = ['[[card:abc123]]', '', 'The wikis differ a lot in size.', '', 'ds
 const MESSAGE = { plugin: 'thimble-cc-mod', component: 'AssistantMessage', requestId: 'm1', surface: 'terminal', viewport: { columns: 140, rows: 40 }, props: { text: REPLY, isFirstOfReply: true } }
 const MENU = { plugin: 'thimble-cc-mod', component: 'Pane', requestId: 'thimble', surface: 'terminal', viewport: { columns: 100, rows: 30 }, props: { bodyColumns: 34, bodyRows: 8 } }
 
-type World = { files: Map<string, string>; filled: string[]; opened: string[]; closed: string[]; copied: string[]; toasts: string[]; runs: string[]; submitted: string[]; clock: ReturnType<typeof mock.clock>; placed: boolean }
+type World = { files: Map<string, string>; filled: string[]; opened: string[]; openArgs: { id: string; columns?: number }[]; opens: { id: string; title?: string; focus?: true; columns?: number }[]; closed: string[]; copied: string[]; toasts: string[]; runs: string[]; submitted: string[]; clock: ReturnType<typeof mock.clock>; placed: boolean; hold: ((path: string) => Promise<void>) | null }
 
 function world(on: On, env: Record<string, string> = {}): World {
   mock.env(on, env)
   const clock = mock.clock(on, { now: 1_790_000_000_000 })
-  const w: World = { files: new Map([[`${CWD}/.thimble-cc-mod/cards/abc123.json`, JSON.stringify(CARD)]]), filled: [], opened: [], closed: [], copied: [], toasts: [], runs: [], submitted: [], clock, placed: true }
+  const w: World = { files: new Map([[`${CWD}/.thimble-cc-mod/cards/abc123.json`, JSON.stringify(CARD)]]), filled: [], opened: [], openArgs: [], opens: [], closed: [], copied: [], toasts: [], runs: [], submitted: [], clock, placed: true, hold: null }
   on('session.start', ($, e) => ({ cwd: e.cwd }))
   on('session.cwd', () => ({ value: CWD }))
   on('session.messages', () => ({ value: [] }) as never)
@@ -48,12 +48,13 @@ function world(on: On, env: Record<string, string> = {}): World {
     if (text === undefined) throw new Error(`ENOENT: ${e.path}`)
     return { value: text }
   })
-  on('fs.stat', ($, e) => {
+  on('fs.stat', async ($, e) => {
+    await w.hold?.(e.path)
     if (!w.files.has(e.path)) throw new Error(`ENOENT: ${e.path}`)
     return { value: { kind: 'file', size: 1, mtimeMs: 1, isLink: false } }
   })
   on('fs.exists', ($, e) => ({ value: w.files.has(e.path) }))
-  on('fs.list', () => ({ value: [] }))
+  on('fs.list', ($, e) => ({ value: e.path.endsWith('/reports') ? [...w.files.keys()].filter(p => p.startsWith(`${e.path}/`)).map(p => ({ name: p.slice(e.path.length + 1), kind: 'file' as const, size: 1, mtimeMs: 1, isLink: false })) : [] }))
   on('fs.write', ($, e) => {
     w.files.set(e.path, e.text)
     return { value: undefined }
@@ -79,6 +80,8 @@ function world(on: On, env: Record<string, string> = {}): World {
   on('agent.spawn', () => ({ model: 'm', agentId: 'agent-1' }))
   on('ui.open', ($, e) => {
     w.opened.push(e.id)
+    w.openArgs.push({ id: e.id, columns: e.columns })
+    w.opens.push({ id: e.id, title: e.title, focus: e.focus, columns: e.columns })
     return { value: w.placed ? { isPlaced: true } : { isPlaced: false, reason: 'the terminal is too narrow' } } as never
   })
   on('ui.close', ($, e) => {
@@ -165,11 +168,12 @@ test('a target names its citation, the place a click opens and the actions of it
   expect(placeOf(card)).toBe(null)
   // no menu has a "cite": nothing fills main's prompt
   expect(menuItems(mark).map(m => m.act)).toEqual(['thread', 'verify', 'script', 'rerun'])
-  expect(menuItems(record).map(m => m.act)).toEqual(['open', 'thread', 'script', 'rerun'])
+  // a record of a file of the folder also opens in the file browser
+  expect(menuItems(record).map(m => m.act)).toEqual(['open', 'files', 'thread', 'script', 'rerun'])
   expect(menuItems(chip).map(m => m.act)).toEqual(['open', 'thread', 'verify'])
   expect(menuItems(card).map(m => m.act)).toEqual(['thread', 'script', 'rerun'])
   // a card made without a script has nothing to open or rerun
-  expect(menuItems({ ...record, script: undefined }).map(m => m.act)).toEqual(['open', 'thread'])
+  expect(menuItems({ ...record, script: undefined }).map(m => m.act)).toEqual(['open', 'files', 'thread'])
 })
 
 test('a click acts at once, a double-click is the same action; a modifier or middle click posts no gesture', () => {
@@ -254,7 +258,7 @@ test('a plain paragraph is the engine\'s Markdown with an "ask ›" shown on hov
   expect(w.filled).toEqual([])
   await ui.unmount()
   const pane = (await $.ui.mount(PANEL as never)) as unknown as M
-  expect(await pane.find({ type: 'Text', text: /side thread about/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^thread about / })).toBeDefined()
   expect(await pane.find({ type: 'Text', text: /The wikis differ a lot in size/ })).toBeDefined()
   await pane.unmount()
 })
@@ -304,7 +308,7 @@ test('a left drag in a paragraph lights the cells it covers and copies their tex
   const w = world(on)
   await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
   const ui = (await $.ui.mount(MESSAGE as never)) as unknown as M
-  const lit = async () => JSON.stringify(await ui.drawn({ in: 'para-3' })).includes(COLORS.highlight)
+  const lit = async () => JSON.stringify(await ui.drawn({ in: 'para-3' })).includes(COLORS.selected)
   expect(await lit()).toBe(false)
   await ui.pointer({ type: 'down', x: 0, y: 0, button: 'left', in: 'para-3' } as never)
   await ui.pointer({ type: 'move', x: 6, y: 0, button: 'left', in: 'para-3' } as never)
@@ -336,7 +340,7 @@ test('a selection offers "ask about this", whose press opens a side thread about
   expect(w.filled).toEqual([])
   await ui.unmount()
   const pane = (await $.ui.mount(PANEL as never)) as unknown as M
-  expect(await pane.find({ type: 'Text', text: /side thread about/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^thread about / })).toBeDefined()
   expect(await pane.find({ type: 'Text', text: /dse has/ })).toBeDefined()
   await pane.unmount()
 })
@@ -379,7 +383,7 @@ test('the open menu\'s sentence or citation is shaded in its paragraph', () => {
   const chips = [{ label: '13403', state: 'link' as const, mark: '', tip: '', spin: false }]
   const lay = blockLayout(block, chips, 80, -1)
   const raws = ['[[13403|card:abc123#revisions/dse]]']
-  const lit = (menu: unknown) => menuLines(lay, raws, menu)[0]!.filter(s => s.bg === COLORS.menu).map(s => s.s).join('')
+  const lit = (menu: unknown) => menuLines(lay, raws, menu)[0]!.filter(s => s.bg === COLORS.selected).map(s => s.s).join('')
   expect(lit(null)).toBe('')
   expect(lit({ kind: 'citation', ref: raws[0], text: '13403' })).toBe('13403')
   expect(lit({ kind: 'sentence', text: 'The others are small.' })).toBe('The others are small.')
@@ -391,7 +395,7 @@ test('a right-click on a citation opens the menu view in the panel and lights th
   await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
   const ui = (await $.ui.mount(MESSAGE as never)) as unknown as M
   const [, pages] = chipXs()
-  const lit = async () => JSON.stringify(await ui.drawn({ in: 'para-3' })).includes(COLORS.menu)
+  const lit = async () => JSON.stringify(await ui.drawn({ in: 'para-3' })).includes(COLORS.selected)
   expect(await lit()).toBe(false)
   await ui.pointer({ type: 'down', x: pages!, y: 0, button: 'right', in: 'para-3' } as never)
   await ui.pointer({ type: 'up', x: pages!, y: 0, button: 'right', in: 'para-3' } as never)
@@ -456,11 +460,11 @@ test('a press on a card\'s title opens a side thread about it in the panel; so d
   for (const mods of [{ shift: true }, { ctrl: true }, { alt: true }, { button: 'middle' as const }]) await click(50, 0, mods)
   expect(w.opened).toEqual([])
   await click(10, 3) // probier's bar (border, title, then the bars): "what was going on here?"
-  expect(await ui.find({ type: 'Text', text: /probier: 1013/, in: 'card-1-abc123' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /probier {2}1,013/, in: 'card-1-abc123' })).toBeDefined()
   expect(w.opened).toEqual(['thimble'])
   let pane = (await $.ui.mount(PANEL as never)) as unknown as M
-  expect(await pane.find({ type: 'Text', text: /side thread about/ })).toBeDefined()
-  expect(await pane.find({ type: 'Text', text: /probier: 1013/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^thread about / })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /probier: 1,013/ })).toBeDefined()
   await pane.unmount()
   await ui.press({ key: 'card-title:abc123', in: 'card-1-abc123' })
   expect(w.opened).toEqual(['thimble', 'thimble'])
@@ -469,47 +473,192 @@ test('a press on a card\'s title opens a side thread about it in the panel; so d
   expect(w.filled).toEqual([])
   await ui.unmount()
   pane = (await $.ui.mount(PANEL as never)) as unknown as M
-  expect(await pane.find({ type: 'Text', text: /side thread about/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^thread about / })).toBeDefined()
   expect(await pane.find({ type: 'Text', text: /Which wikis have the most revisions\?/ })).toBeDefined()
   // the threads list holds the three, the latest first; a press shows the bar's again
   await pane.press({ key: 'threads' })
   await pane.unmount()
   pane = (await $.ui.mount(PANEL as never)) as unknown as M
-  const rows = (await pane.findAll({ type: 'Button' })).map(b => (b as { key?: string; props: { label?: string } }).props.label ?? '').filter(l => l !== 'close')
+  const rows = (await pane.findAll({ type: 'Button' })).filter(b => /^thread-open:/.test(String((b as { key?: string }).key ?? (b as { props: { key?: string } }).props.key))).map(b => (b as { props: { label?: string } }).props.label ?? '')
   expect(rows).toHaveLength(3)
-  expect(rows[2]).toMatch(/probier: 1013/)
+  expect(rows[2]).toMatch(/probier: 1,013/)
   await pane.unmount()
 })
+
+const band = (columns: number) => ({ plugin: 'thimble-cc-mod', component: 'AbovePrompt', requestId: 'above', surface: 'terminal', viewport: { columns, rows: 30 }, props: { hasSurvey: false, view: {} } }) as never
+
+/** A left click on the pages:3 citation of the reply's paragraph with citations. */
+async function clickPages($: Engine): Promise<void> {
+  const ui = (await $.ui.mount(MESSAGE as never)) as unknown as M
+  const [, pages] = chipXs()
+  await ui.pointer({ type: 'down', x: pages!, y: 0, button: 'left', in: 'para-3' } as never)
+  await ui.pointer({ type: 'up', x: pages!, y: 0, button: 'left', in: 'para-3' } as never)
+  await ui.unmount()
+}
 
 test('the panel a click opened that waits undrawn is offered above the prompt; its button opens it', async ($, on) => {
   const w = world(on)
   let panes = [{ id: 'thimble', title: 'Citation', isShown: false, isFocused: false, isPlaced: false }]
   on('ui.panes', () => ({ value: panes }) as never)
   await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
-  const band = { plugin: 'thimble-cc-mod', component: 'AbovePrompt', requestId: 'above', surface: 'terminal', viewport: { columns: 100, rows: 30 }, props: { hasSurvey: false, view: {} } } as never
-  let above = (await $.ui.mount(band)) as unknown as M
+  let above = (await $.ui.mount(band(150))) as unknown as M
   expect(await above.find({ key: 'pending' })).toBeUndefined()
   await above.unmount()
-  w.placed = false // the engine leaves an open no person asked for undrawn on a narrow terminal
-  const ui = (await $.ui.mount(MESSAGE as never)) as unknown as M
-  const [, pages] = chipXs()
-  await ui.pointer({ type: 'down', x: pages!, y: 0, button: 'left', in: 'para-3' } as never)
-  await ui.pointer({ type: 'up', x: pages!, y: 0, button: 'left', in: 'para-3' } as never)
-  await ui.unmount()
+  w.placed = false // the engine leaves an open no person asked for undrawn (another surface's width, a remote client)
+  await clickPages($)
   expect(w.opened).toEqual(['thimble'])
-  above = (await $.ui.mount(band)) as unknown as M
-  expect(await above.find({ type: 'Text', text: '▸ Citation is ready' })).toBeDefined()
+  above = (await $.ui.mount(band(150))) as unknown as M
+  expect(await above.find({ type: 'Text', text: 'Citation is ready' })).toBeDefined()
   expect(await above.find({ type: 'Button', key: 'pending', text: 'open panel' })).toBeDefined()
   expect(await above.find({ type: 'Button', key: 'pending-x', text: 'dismiss' })).toBeDefined()
-  expect(await above.find({ type: 'Text', text: /opens by itself in windows 144\+ columns wide/ })).toBeDefined()
+  expect(await above.find({ type: 'Text', text: /columns wide/ })).toBeUndefined()
   w.placed = true
   await above.press({ key: 'pending' })
   expect(w.opened).toEqual(['thimble', 'thimble'])
   await above.unmount()
   panes = [{ ...panes[0]!, isShown: true, isPlaced: true }]
-  above = (await $.ui.mount(band)) as unknown as M
+  above = (await $.ui.mount(band(150))) as unknown as M
   expect(await above.find({ key: 'pending' })).toBeUndefined()
   await above.unmount()
+})
+
+test('below 144 columns a click does not open the panel, even one the person opened before; the row above the prompt does', async ($, on) => {
+  const w = world(on)
+  let panes: { id: string; title: string; isShown: boolean; isFocused: boolean; isPlaced: boolean }[] = []
+  on('ui.panes', () => ({ value: panes }) as never)
+  await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
+  // the row above the prompt measures the terminal while no pane of the mod's is seated
+  let above = (await $.ui.mount(band(120))) as unknown as M
+  await above.unmount()
+  // w.placed stays true: the engine would seat it (its floor is 110 for a pane the person opened before)
+  await clickPages($)
+  expect(w.opened).toEqual([])
+  above = (await $.ui.mount(band(120))) as unknown as M
+  expect(await above.find({ type: 'Button', key: 'pending', text: 'open panel' })).toBeDefined()
+  await above.press({ key: 'pending' })
+  // the person's press opens it, as wide as leaves main 70 columns
+  expect(w.openArgs).toEqual([{ id: 'thimble', columns: 49 }])
+  await above.unmount()
+  panes = [{ id: 'thimble', title: 'Citation', isShown: true, isFocused: true, isPlaced: true }]
+  above = (await $.ui.mount(band(120 - 50))) as unknown as M
+  expect(await above.find({ key: 'pending' })).toBeUndefined()
+  await above.unmount()
+  // once the panel is open, a click changes what it shows, at the width measured before it opened
+  await clickPages($)
+  expect(w.openArgs).toEqual([{ id: 'thimble', columns: 49 }, { id: 'thimble', columns: 49 }])
+  const pane = (await $.ui.mount(PANEL as never)) as unknown as M
+  expect(await pane.find({ type: 'Text', text: /pages:3/ })).toBeDefined()
+  await pane.unmount()
+})
+
+test('the row above the prompt\'s "dismiss" drops a held panel; a wide terminal opens on the click, at 96 columns', async ($, on) => {
+  const w = world(on)
+  const panes: { id: string; title: string; isShown: boolean; isFocused: boolean; isPlaced: boolean }[] = []
+  on('ui.panes', () => ({ value: panes }) as never)
+  await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
+  let above = (await $.ui.mount(band(130))) as unknown as M
+  await above.unmount()
+  await clickPages($)
+  above = (await $.ui.mount(band(130))) as unknown as M
+  await above.press({ key: 'pending-x' })
+  await above.unmount()
+  above = (await $.ui.mount(band(130))) as unknown as M
+  expect(await above.find({ key: 'pending' })).toBeUndefined()
+  await above.unmount()
+  expect(w.opened).toEqual([])
+  above = (await $.ui.mount(band(200))) as unknown as M
+  await above.unmount()
+  await clickPages($)
+  expect(w.openArgs).toEqual([{ id: 'thimble', columns: 96 }])
+})
+
+/** The panel as the terminal draws it: docked beside main (`main` columns), or inline above the prompt. */
+const panel = (main: number, body: number, placement: 'dock' | 'inline' = 'dock') =>
+  ({ plugin: 'thimble-cc-mod', component: 'Pane', requestId: 'thimble', surface: 'terminal', viewport: { columns: main, rows: 55 }, props: { bodyColumns: body, bodyRows: 50, placement } }) as never
+
+test('a resize fits the docked panel again: 96 at 200, 49 at 120 so main keeps 70, 96 back at 200', async ($, on) => {
+  const w = world(on)
+  on('ui.panes', () => ({ value: [{ id: 'thimble', title: 'Citation', isShown: true, isFocused: false, isPlaced: true }] }) as never)
+  await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
+  const above = (await $.ui.mount(band(200))) as unknown as M
+  await above.unmount()
+  await clickPages($)
+  expect(w.openArgs).toEqual([{ id: 'thimble', columns: 96 }])
+  // each change of width redraws the panel: main's columns, its body and the rule between them make the terminal
+  const draw = async (main: number, body: number, placement: 'dock' | 'inline' = 'dock') => {
+    const pane = (await $.ui.mount(panel(main, body, placement))) as unknown as M
+    await pane.unmount()
+    await w.clock.advance(1)
+  }
+  await draw(103, 96)
+  expect(w.opens).toHaveLength(1)
+  // narrowed to 120, the engine keeps the panel 95 wide and main 24: it opens again at 49, without the keys
+  await draw(24, 95)
+  expect(w.opens.slice(1)).toEqual([{ id: 'thimble', title: 'Citation', focus: undefined, columns: 49 }])
+  await draw(70, 49)
+  expect(w.opens).toHaveLength(2)
+  // widened back to 200
+  await draw(150, 49)
+  expect(w.opens.at(-1)?.columns).toBe(96)
+  await draw(103, 96)
+  expect(w.opens).toHaveLength(3)
+  // a width the person dragged the panel to stays
+  await draw(139, 60)
+  expect(w.opens).toHaveLength(3)
+  // a click opens at the width the terminal has now, not the one measured before the panel opened
+  await clickPages($)
+  expect(w.openArgs.at(-1)).toEqual({ id: 'thimble', columns: 96 })
+  // under 110 the engine seats it inline, at the terminal's width: nothing to fit, and the next open asks for 36
+  await draw(100, 96, 'inline')
+  expect(w.opens).toHaveLength(4)
+  await clickPages($)
+  expect(w.openArgs.at(-1)).toEqual({ id: 'thimble', columns: 36 })
+})
+
+test('a right-click held below 144 columns keeps its target until the row above the prompt opens the menu', async ($, on) => {
+  const w = world(on)
+  let panes: { id: string; title: string; isShown: boolean; isFocused: boolean; isPlaced: boolean }[] = []
+  on('ui.panes', () => ({ value: panes }) as never)
+  await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
+  let above = (await $.ui.mount(band(120))) as unknown as M
+  await above.unmount()
+  const ui = (await $.ui.mount(MESSAGE as never)) as unknown as M
+  const [dse] = chipXs()
+  await ui.pointer({ type: 'down', x: dse!, y: 0, button: 'right', in: 'para-3' } as never)
+  await ui.pointer({ type: 'up', x: dse!, y: 0, button: 'right', in: 'para-3' } as never)
+  await ui.unmount()
+  expect(w.opened).toEqual([])
+  await w.clock.advance(1000) // the menu's watch runs while the row offers it
+  above = (await $.ui.mount(band(120))) as unknown as M
+  await above.press({ key: 'pending' })
+  await above.unmount()
+  panes = [{ id: 'thimble', title: 'Actions', isShown: true, isFocused: true, isPlaced: true }]
+  const menu = (await $.ui.mount(MENU as never)) as unknown as M
+  expect(await menu.find({ key: 'menu-verify' })).toBeDefined()
+  await menu.unmount()
+})
+
+test('"verify" in a citation\'s menu replaces the menu with the citation panel, which shows the verification running', async ($, on) => {
+  const w = world(on)
+  on('ui.panes', () => ({ value: [{ id: 'thimble', title: 'Actions', isShown: true, isFocused: true, isPlaced: true }] }) as never)
+  await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
+  const ui = (await $.ui.mount(MESSAGE as never)) as unknown as M
+  const [dse] = chipXs()
+  await ui.pointer({ type: 'down', x: dse!, y: 0, button: 'right', in: 'para-3' } as never)
+  await ui.pointer({ type: 'up', x: dse!, y: 0, button: 'right', in: 'para-3' } as never)
+  await ui.unmount()
+  const menu = (await $.ui.mount(MENU as never)) as unknown as M
+  await menu.press({ key: 'menu-verify' })
+  await menu.unmount()
+  expect(w.opened).toEqual(['thimble', 'thimble'])
+  expect(w.closed).toEqual([])
+  const pane = (await $.ui.mount(PANEL as never)) as unknown as M
+  expect(await pane.find({ key: 'menu-verify' })).toBeUndefined()
+  expect(await pane.find({ type: 'Text', text: /^citation/ })).toBeDefined()
+  // the verification's state stands where the "verify" button stood (this world's kit starts no subagent)
+  expect(await pane.find({ type: 'Button', key: 'verify' })).toBeUndefined()
+  expect(await pane.find({ type: 'Text', text: /^× failed: could not start a subagent/ })).toBeDefined()
+  await pane.unmount()
 })
 
 test('the menu keeps the pressed target when the release arrives as a menu on another', async ($, on) => {
@@ -624,5 +773,172 @@ test('a paragraph with citations and a card take the "?" too: the card\'s asks a
   await again.unmount()
   pane = (await $.ui.mount(PANEL as never)) as unknown as M
   expect(await pane.find({ type: 'Text', text: /dse has/ })).toBeDefined()
+  await pane.unmount()
+})
+
+// ------------------------------------------------------------------------------------------------ side threads in the panel
+
+const REPORT_MD = ['# dse holds the edits', '', 'Intro [[13403|card:abc123#revisions/dse]].', '', '<details><summary>How it was counted</summary>', '', 'By a script.', '', '</details>'].join('\n')
+const REPORT_JSON = JSON.stringify({ slug: 'doc', form: 'document', title: 'dse holds the edits', request: '', file: '.thimble-cc-mod/reports/doc.md', state: 'ready', tools: 0, partial: '', problems: [], created: 1 })
+
+function withReport(w: World): void {
+  w.files.set(`${CWD}/.thimble-cc-mod/reports/doc.md`, REPORT_MD)
+  w.files.set(`${CWD}/.thimble-cc-mod/reports/doc.json`, REPORT_JSON)
+}
+
+async function showReport($: Engine): Promise<void> {
+  await $.command.run({ command: 'thimble-reports', args: '' } as never)
+  const list = (await $.ui.mount(PANEL as never)) as unknown as M
+  await list.press({ key: 'report-open:doc' })
+  await list.unmount()
+}
+
+/** The mod's last write of each of its plain state values (not a family's), by key. */
+function written(on: On): Map<string, unknown> {
+  const last = new Map<string, unknown>()
+  on('state.set', ($, e, next) => {
+    const x = e as { key: string; id?: string; value: unknown }
+    if (x.id === undefined) last.set(x.key, x.value)
+    return next(e)
+  })
+  return last
+}
+
+/** A side thread opened as /thimble-ask opens one: its id, and the key of its question field. */
+async function newThread($: Engine, state: Map<string, unknown>): Promise<{ id: string; key: string }> {
+  await $.command.run({ command: 'thimble-ask', args: '' } as never)
+  const pane = (await $.ui.mount(PANEL as never)) as unknown as M
+  const key = (await pane.find({ type: 'Input' }))?.key ?? ''
+  await pane.unmount()
+  return { id: String(state.get('thread') ?? ''), key }
+}
+
+test('each side thread has its own question field, so a draft left in one is not sent with the next thread\'s question', async ($, on) => {
+  const w = world(on)
+  const state = written(on)
+  await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
+  const first = await newThread($, state)
+  expect(first.key).toMatch(/^ask-\w+$/)
+  let pane = (await $.ui.mount(PANEL as never)) as unknown as M
+  await pane.input({ key: first.key, text: 'and summarise the pattern.', kind: 'change' })
+  await pane.unmount()
+  const second = await newThread($, state)
+  expect(second.id).not.toBe(first.id)
+  expect(second.key).toMatch(/^ask-\w+$/)
+  expect(second.key).not.toBe(first.key)
+  // the drawing carries no thread id where an id could be read
+  pane = (await $.ui.mount(PANEL as never)) as unknown as M
+  expect(JSON.stringify(await pane.drawn())).not.toContain(second.id)
+  await pane.input({ key: second.key, text: 'How many distinct ip16 prefixes wrote on dse?' })
+  await pane.unmount()
+  const saved = w.files.get(`${CWD}/.thimble-cc-mod/threads/${second.id}.md`) ?? ''
+  expect(saved).toContain('How many distinct ip16 prefixes wrote on dse?')
+  expect(saved).not.toContain('summarise')
+  // the first thread, reopened from the list, has its own field again, the one its draft was typed in
+  await $.command.run({ command: 'thimble-threads', args: '' } as never)
+  const list = (await $.ui.mount(PANEL as never)) as unknown as M
+  await list.press({ key: `thread-open:${first.id}` })
+  await list.unmount()
+  pane = (await $.ui.mount(PANEL as never)) as unknown as M
+  expect((await pane.find({ type: 'Input' }))?.key).toBe(first.key)
+  await pane.unmount()
+})
+
+test('back from a side thread leads to the report the panel showed before it, and after the panel closed, to what it showed last', async ($, on) => {
+  const w = world(on)
+  const state = written(on)
+  withReport(w)
+  await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
+  const back = async () => {
+    const pane = (await $.ui.mount(PANEL as never)) as unknown as M
+    await pane.press({ key: 'nav-back' })
+    await pane.unmount()
+    return state.get('panelView')
+  }
+  await showReport($)
+  const first = await newThread($, state)
+  expect(await back()).toBe('report')
+  // closed by the report's own key (x): the way stays
+  let pane = (await $.ui.mount(PANEL as never)) as unknown as M
+  await pane.press({ key: 'close' })
+  await pane.unmount()
+  expect(w.closed).toEqual(['thimble'])
+  const second = await newThread($, state)
+  expect(second.id).not.toBe(first.id)
+  expect(await back()).toBe('report')
+  // back goes as a browser's does: the report's own way back is the reports list it was opened from
+  expect(await back()).toBe('reports')
+  pane = (await $.ui.mount(PANEL as never)) as unknown as M
+  expect(await pane.find({ key: 'nav-back' })).toBeUndefined()
+  // the first thread stays in the threads tree
+  await pane.press({ key: 'threads' })
+  await pane.unmount()
+  pane = (await $.ui.mount(PANEL as never)) as unknown as M
+  await pane.press({ key: `thread-open:${first.id}` })
+  await pane.unmount()
+  expect(state.get('thread')).toBe(first.id)
+})
+
+test('a side thread waits for the report drawing it replaces, two seconds at most; one that settles after it draws the panel once more, so the thread\'s field and buttons work', async ($, on) => {
+  const w = world(on)
+  const state = written(on)
+  const redraws = () => Number(state.get('panelRedraw') ?? 0)
+  // real time, in which the engine starts what an act asked for (the test's clock moves only when advanced)
+  const tick = () => new Promise<void>(r => (globalThis as unknown as { setTimeout: (fn: () => void, ms: number) => unknown }).setTimeout(r, 100))
+  withReport(w)
+  await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
+  await showReport($)
+  const pane = (await $.ui.mount(PANEL as never)) as unknown as M
+  // drawings that settle in turn ask for no other
+  await pane.press({ key: 'toggle:toggle-1' })
+  await w.clock.advance(100)
+  expect(redraws()).toBe(0)
+  // the report's next drawing waits on its file while the side thread replaces it
+  const holdReport = () => {
+    let release = () => {}
+    let reached = () => {}
+    const held = new Promise<void>(r => {
+      release = r
+    })
+    const waiting = new Promise<void>(r => {
+      reached = r
+    })
+    w.hold = path => {
+      if (!path.endsWith('/reports/doc.md')) return Promise.resolve()
+      reached()
+      return held
+    }
+    return {
+      waiting,
+      release: () => {
+        w.hold = null
+        release()
+      },
+    }
+  }
+  const replace = async (limit: boolean) => {
+    const report = holdReport()
+    const toggled = pane.press({ key: 'toggle:toggle-1' })
+    await report.waiting
+    const asked = $.command.run({ command: 'thimble-ask', args: '' } as never)
+    await tick()
+    // the command shows the thread a moment after it runs
+    const shown = w.clock.advance(10)
+    await tick()
+    const limited = limit ? w.clock.advance(2000) : Promise.resolve()
+    await tick()
+    report.release()
+    await Promise.all([toggled, asked, shown, limited])
+    await w.clock.advance(100)
+    expect(JSON.stringify(await pane.drawn())).toContain('thread about ')
+    expect((await pane.find({ type: 'Input' }))?.key).toMatch(/^ask-\w+$/)
+  }
+  // the thread's drawing waits for the report's to settle, so it settles last and needs no other
+  await replace(false)
+  expect(redraws()).toBe(0)
+  // a report drawing still waiting after two seconds: the thread draws without it, and the panel once more after it
+  await pane.press({ key: 'nav-back' })
+  await replace(true)
+  expect(redraws()).toBe(1)
   await pane.unmount()
 })

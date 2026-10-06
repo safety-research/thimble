@@ -12,7 +12,7 @@ export type Run = { text: string; b?: boolean; i?: boolean; code?: boolean; u?: 
 /** `gap`: a blank line stood before the block in the reply, so it is drawn one row below the one before it. */
 export type Block =
   | { type: 'md'; text: string; gap: boolean }
-  | { type: 'card'; id: string; gap: boolean }
+  | { type: 'card'; id: string; gap: boolean; caption?: string }
   | { type: 'rich'; prefix: string; heading: number; quote: boolean; runs: Run[]; gap: boolean; table?: TableRuns }
 
 /** A Markdown table that holds citations, drawn by thimble-cc-mod (the `|` inside `[[value|ref]]` breaks a GFM table):
@@ -20,7 +20,6 @@ export type Block =
  *  cells' runs in reading order, so its chips are numbered as a paragraph's are. */
 export type TableRuns = { rows: Run[][][]; align: ('left' | 'right' | 'center')[] }
 
-const SPAN_RE = /\[\[([^\[\]]+?)\]\]/g
 const FENCE_RE = /```[\s\S]*?```|`[^`\n]*`/g
 const LINK_RE = /(?<![\[!])\[([^\[\]\n]*)\]\(\s*(?:<([^<>\n]+)>|((?:[^()\s<>]|\([^()\s]*\))+))\s*\)/g
 const WEB_RE = /^(?:[a-z][a-z0-9+.-]*:\/\/|mailto:|tel:)/i
@@ -33,10 +32,65 @@ function make(display: string | null, ref: string): Citation {
 
 function spanCitation(inner: string): Citation | null {
   const t = inner.trim()
-  const bar = t.indexOf('|')
+  const bar = t.lastIndexOf('|')
   const display = bar >= 0 ? t.slice(0, bar).trim() : null
   const ref = (bar >= 0 ? t.slice(bar + 1) : t).trim()
   return ref ? make(display, ref) : null
+}
+
+const CITE_MAX = 2000 // characters a citation may span, so a stray [[ costs little
+
+/** Where the citation that opens with the `[[` at `at` ends (just past its `]]`), or -1 when none opens there. A shown
+ *  value may hold brackets, as a quoted line of code or JSON does (`[["counts[\"dse\"] += 1"|call:x#L2]]`); the place
+ *  after its last bar holds no bracket. The citation ends at the first `]]` that closes such a place, provided the value
+ *  before the bar holds `[[` only inside balanced brackets (a quoted JSON list). One that holds a bracket lies on one
+ *  line, and none runs past a blank line, so code in prose is not taken for a citation. */
+export function citeEnd(text: string, at: number): number {
+  if (!text.startsWith('[[', at)) return -1
+  const stop = Math.min(text.length, at + CITE_MAX)
+  // the place since the last bar (all of it, with no bar): whether it holds a bracket, and whether any words
+  let placeBracket = false
+  let placeWords = false
+  // the value so far, and as it stood at the last bar
+  let depth = 0
+  let unbalanced = false
+  let double = false
+  let valueOk = true
+  let bracket = false
+  let lined = false
+  for (let k = at + 2; k < stop; k++) {
+    const ch = text[k]!
+    if (ch === ']' && text[k + 1] === ']' && !placeBracket && placeWords && valueOk) return k + 2
+    if (ch === '|') {
+      valueOk = !double || (depth === 0 && !unbalanced)
+      placeBracket = false
+      placeWords = false
+    } else if (ch === '[' || ch === ']') {
+      if (lined) return -1
+      bracket = placeBracket = true
+      if (ch === '[' && k > at + 2 && text[k - 1] === '[') double = true
+      depth += ch === '[' ? 1 : -1
+      if (depth < 0) unbalanced = true
+    } else if (ch === '\n') {
+      if (bracket) return -1
+      lined = true
+      let j = k + 1
+      while (text[j] === ' ' || text[j] === '\t') j++
+      if (text[j] === '\n') return -1
+    } else if (ch !== ' ' && ch !== '\t') placeWords = true
+  }
+  return -1
+}
+
+/** Each `[[...]]` citation of a text as written, where it starts and where it ends, in order. */
+export function citeSpans(text: string): { at: number; end: number }[] {
+  const out: { at: number; end: number }[] = []
+  for (let i = text.indexOf('[['); i >= 0; ) {
+    const end = citeEnd(text, i)
+    if (end >= 0) out.push({ at: i, end })
+    i = text.indexOf('[[', end >= 0 ? end : i + 1)
+  }
+  return out
 }
 
 function linkCitation(shown: string, target: string): Citation | null {
@@ -50,9 +104,9 @@ function linkCitation(shown: string, target: string): Citation | null {
 export function citations(text: string): Citation[] {
   const found: { at: number; c: Citation }[] = []
   const clean = text.replace(FENCE_RE, m => ' '.repeat(m.length))
-  for (const m of clean.matchAll(SPAN_RE)) {
-    const c = spanCitation(m[1]!)
-    if (c) found.push({ at: m.index ?? 0, c })
+  for (const sp of citeSpans(clean)) {
+    const c = spanCitation(text.slice(sp.at + 2, sp.end - 2))
+    if (c) found.push({ at: sp.at, c })
   }
   for (const m of clean.matchAll(LINK_RE)) {
     const c = linkCitation(m[1]!, m[2] ?? m[3] ?? '')
@@ -93,16 +147,25 @@ export function chipLabel(c: Citation): string {
 /** A line of Markdown as styled runs: bold, italic, code, links (their text), citations (one run each). */
 export function inlineRuns(text: string): Run[] {
   const out: Run[] = []
+  // each citation outside code is masked to one token of its length, so the brackets, stars and underscores of a
+  // quoted value neither end it nor start emphasis
+  let masked = ''
+  let from = 0
+  for (const sp of citeSpans(text.replace(FENCE_RE, m => ' '.repeat(m.length)))) {
+    masked += `${text.slice(from, sp.at)}\uE000${'\uE001'.repeat(sp.end - sp.at - 1)}`
+    from = sp.end
+  }
+  masked += text.slice(from)
   // tokens: code span, citation, link (citation form or web), bold, italic
-  const TOKEN = /(`[^`\n]+`)|(\[\[[^\[\]]+?\]\])|((?<![\[!])\[[^\[\]\n]*\]\([^()\s]*(?:\([^()\s]*\)[^()\s]*)*\))|(\*\*[^*\n]+\*\*|__[^_\n]+__)|((?<![\w*])\*[^*\n]+\*(?!\w)|(?<![\w_])_[^_\n]+_(?![\w]))/g
+  const TOKEN = /(`[^`\n]+`)|(\uE000\uE001*)|((?<![\[!])\[[^\[\]\n]*\]\([^()\s]*(?:\([^()\s]*\)[^()\s]*)*\))|(\*\*[^*\n]+\*\*|__[^_\n]+__)|((?<![\w*])\*[^*\n]+\*(?!\w)|(?<![\w_])_[^_\n]+_(?![\w]))/g
   let last = 0
   const push = (r: Run) => {
     if (r.text) out.push(r)
   }
-  for (const m of text.matchAll(TOKEN)) {
+  for (const m of masked.matchAll(TOKEN)) {
     const at = m.index ?? 0
     push({ text: text.slice(last, at) })
-    const tok = m[0]
+    const tok = text.slice(at, at + m[0].length)
     if (m[1]) push({ text: tok.slice(1, -1), code: true })
     else if (m[2]) {
       const c = spanCitation(tok.slice(2, -2))
@@ -133,7 +196,6 @@ export function tableCells(line: string): string[] {
   if (t.endsWith('|') && !t.endsWith('\\|')) t = t.slice(0, -1)
   const cells: string[] = []
   let cur = ''
-  let depth = 0
   let code = false
   for (let i = 0; i < t.length; i++) {
     const ch = t[i]!
@@ -142,10 +204,15 @@ export function tableCells(line: string): string[] {
       i++
       continue
     }
-    if (!code && t.startsWith('[[', i)) depth++
-    else if (!code && depth > 0 && t.startsWith(']]', i)) depth--
+    // a citation's bars, escaped or not, stay in its cell
+    const end = code ? -1 : citeEnd(t, i)
+    if (end >= 0) {
+      cur += t.slice(i, end).replaceAll('\\|', '|')
+      i = end - 1
+      continue
+    }
     if (ch === '`') code = !code
-    if (ch === '|' && depth === 0 && !code) {
+    if (ch === '|' && !code) {
       cells.push(cur.trim())
       cur = ''
       continue
@@ -195,9 +262,11 @@ export function parseReply(text: string): Block[] {
     const embed = EMBED_RE.exec(line)
     if (embed) {
       flush()
-      out.push({ type: 'card', id: (embed[1] ?? embed[2])!, gap: blank })
+      // a figure's caption (report.ts normalizeDoc) is the italic line right under its embed
+      const cap = /^\s*\*([^*\n].*?)\*\s*$/.exec(lines[i + 1] ?? '')
+      out.push({ type: 'card', id: (embed[1] ?? embed[2])!, gap: blank, ...(cap ? { caption: cap[1]!.trim() } : {}) })
       blank = false
-      i++
+      i += cap ? 2 : 1
       continue
     }
     if (/^\s*```/.test(line)) {
@@ -250,7 +319,8 @@ export function parseReply(text: string): Block[] {
       body = []
       while (i < lines.length && /^\s*>/.test(lines[i]!)) body.push(lines[i++]!.replace(/^\s*>\s?/, ''))
     } else {
-      body = []
+      // its first line whatever it starts with (an indented "# " is no heading), then up to the next block
+      body = [lines[i++]!]
       while (
         i < lines.length && lines[i]!.trim() && !EMBED_RE.test(lines[i]!) && !/^\s*(```|\||#{1,6}\s|>|([-*+]|\d+[.)])\s)/.test(lines[i]!)
       ) body.push(lines[i++]!)
@@ -283,6 +353,33 @@ export function mdPieces(text: string): string[] {
     } else cur.push(line)
   }
   if (cur.length) out.push(cur.join('\n'))
+  return out
+}
+
+const ITEM_LINE = /^([-*+]|\d+[.)])\s/
+
+/** mdPieces with each top-level item of a list a piece of its own, so a report's "?" asks about one item; an item's
+ *  indented lines stay with it. `join`: the piece follows the one before without a blank line. */
+export function askPieces(text: string): { text: string; join: boolean }[] {
+  const out: { text: string; join: boolean }[] = []
+  for (const piece of mdPieces(text)) {
+    const lines = piece.split('\n')
+    if (/^\s*```/.test(lines[0]!) || !lines.some(l => ITEM_LINE.test(l))) {
+      out.push({ text: piece, join: false })
+      continue
+    }
+    let cur: string[] = []
+    let join = false
+    for (const l of lines) {
+      if (ITEM_LINE.test(l) && cur.length) {
+        out.push({ text: cur.join('\n'), join })
+        cur = []
+        join = true
+      }
+      cur.push(l)
+    }
+    out.push({ text: cur.join('\n'), join })
+  }
   return out
 }
 
@@ -421,7 +518,8 @@ export function sentenceOf(text: string, raw: string): string {
 
 // ---------------------------------------------------------------------------------------- card files
 
-export const CARD_KINDS = ['bar', 'line', 'timeline', 'table', 'example', 'diagram'] as const
+// `label` is the label tool's own card (helper/labels.py), never one main writes
+export const CARD_KINDS = ['bar', 'line', 'timeline', 'table', 'example', 'diagram', 'label'] as const
 export const MAX_DIAGRAM_NODES = 40
 export const MAX_DIAGRAM_EDGES = 80
 
@@ -430,8 +528,8 @@ const isNum = (v: unknown): v is number => typeof v === 'number' && Number.isFin
 const isStr = (v: unknown): v is string => typeof v === 'string'
 const isCell = (v: unknown) => v === null || isStr(v) || isNum(v) || typeof v === 'boolean'
 
-/** Why a card file cannot be drawn, or null when it fits its kind's spec. The mod draws only these six typed specs;
- *  a card that fails is drawn as this error, and main is asked to fix it. */
+/** Why a card file cannot be drawn, or null when it fits its kind's spec. The mod draws only these typed specs; a card
+ *  that fails is drawn as this error, and main is asked to fix it. */
 export function validateCard(c: unknown, id?: string): string | null {
   if (!isObj(c)) return 'the file is not a JSON object'
   if (!isStr(c.id) || !/^[A-Za-z0-9_-]+$/.test(c.id)) return 'no valid id'
@@ -440,11 +538,18 @@ export function validateCard(c: unknown, id?: string): string | null {
   if (!isStr(c.question) || !c.question.trim()) return 'no question'
   const list = (k: string) => (Array.isArray(c[k]) ? (c[k] as unknown[]) : null)
   switch (c.kind) {
-    case 'bar': {
+    case 'bar':
+    case 'label': {
       const rows = list('rows')
-      if (!rows?.length) return 'a bar card needs rows'
+      if (!rows?.length) return `a ${c.kind} card needs rows`
       const bad = rows.findIndex(r => !isObj(r) || !isStr(r.label) || !isNum(r.value))
-      if (bad >= 0) return `bar row ${bad + 1} needs a label and a finite number value`
+      if (bad >= 0) return `${c.kind} row ${bad + 1} needs a label and a finite number value`
+      if (c.kind === 'bar') break
+      const l = c.label
+      if (!isObj(l) || !isStr(l.slug) || !isStr(l.name) || !Array.isArray(l.values) || !l.values.every(isStr)) return 'a label card needs its label: slug, name and values'
+      const exs = list('examples') ?? []
+      const badX = exs.findIndex(e => !isObj(e) || !isStr(e.ref) || !isStr(e.quote) || !isStr(e.value) || !(l.values as string[]).includes(e.value))
+      if (badX >= 0) return `label card example ${badX + 1} needs a ref, its words and one of the label's values`
       break
     }
     case 'line': {
@@ -494,6 +599,12 @@ export function validateCard(c: unknown, id?: string): string | null {
       const badE = edges.findIndex(e => !isObj(e) || !isStr(e.source) || !isStr(e.target) || !ids.has(e.source) || !ids.has(e.target) || !opt(e.label))
       if (badE >= 0) return `edge ${badE + 1} needs a source and a target among the node ids`
       break
+    }
+  }
+  if (c.labels !== undefined) {
+    const ls = c.labels
+    if (!Array.isArray(ls) || ls.some(l => !isObj(l) || !isStr(l.slug) || !isStr(l.name) || !Array.isArray(l.values) || !l.values.every(isStr) || !(l.marks === undefined || isObj(l.marks)))) {
+      return 'labels must be a list of {slug, name, values, marks?}, as the card helper writes it'
     }
   }
   if (c.params !== undefined) {
