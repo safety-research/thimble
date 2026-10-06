@@ -428,14 +428,16 @@ export interface Proposal {
   agent_id?: string | null
   /** the builder's gate attempts so far (finish_view), of MAX_ATTEMPTS */
   attempt?: number
-  /** the fresh builder that repairs a failed build: 1 for the first repair, of VIEW_REPAIRS (dev.py); absent for the
-   * first build */
-  repair?: number
+  /** the repairs of an orientation's proposal so far: a fresh builder after a build that failed for good, of
+   * VIEW_REPAIRS (dev.py build_ended); while one builds, its number. Absent or 0 for the first build */
+  repairs?: number
   /** why a build stopped before its end: `quit` when the analyst's Claude Code session ended (Retry starts it again) */
   stopped_by?: StoppedBy | null
   /** a build's start that did not happen, with its kind and the pending request Start it starts again */
   refused?: Refusal | null
-  /** the build's exact model and effort (its Build menu, else Settings' dev row) */
+  /** the build's exact model and effort (its Build menu, else Settings' dev row), as the backend keeps them
+   * (dev.start_build's `values`) */
+  values?: { model?: string; effort?: string } | null
   model?: string | null
   effort?: string | null
 }

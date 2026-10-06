@@ -2761,7 +2761,7 @@ def revise(c: str, slug: str, request: str, *, why: str | None = None, claims: A
         fields: dict[str, Any] = {"status": "building" if prop.get("status") == "building" else "queued", "error": None,
                                   "change": change or None, "changed": True, "revision": revision or None,
                                   "asked": True if asked else None, "failed_change": None, "ts": _now(),
-                                  "route": route, "refused": None}
+                                  "route": route, "refused": None, "stopped_by": None}
         if values:
             fields["values"] = {k: str(v) for k, v in values.items() if v}
         spec = clean_spec(spec)
@@ -2811,7 +2811,7 @@ def retry(c: str, slug: str, values: dict[str, Any] | None = None) -> dict[str, 
     if prop.get("status") != "failed":
         raise HTTPException(409, f"the view {prop['name']!r} is {prop.get('status')}, not failed")
     prop = update_proposal(c, slug, status="queued", error=None, refused=None, route=CLICK, repairs=0,
-                           values=vals) or prop
+                           values=vals, stopped_by=None) or prop
     _emit(c, slug, "queued", chat=prop.get("chat"))
     _queue(c, slug)
     return prop

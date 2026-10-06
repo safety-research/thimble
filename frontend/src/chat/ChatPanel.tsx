@@ -225,8 +225,8 @@ export function buildStage(line: string): { label: string; state: StepState; det
     const detail = m[2].replace(/\b(\d+) ref\(s\)/g, (_, n: string) => `${n} ${n === '1' ? 'ref' : 'refs'}`).trim()
     return m[1] === 'passed' ? { label: 'Checks passed', state: 'done', detail } : { label: 'Checks failed', state: 'failed', detail }
   }
-  m = /^the view did not pass, so a new session builds it again from what failed \(repair (\d+) of (\d+)\)$/.exec(t)
-  if (m) return { label: `Building again in a new session · repair ${m[1]} of ${m[2]}`, state: 'running' }
+  m = /^the view did not pass, so a new (session|builder) builds it again from what failed \(repair (\d+) of (\d+)\)$/.exec(t)
+  if (m) return { label: `Building again with a new ${m[1] === 'builder' ? 'builder' : 'session'} · repair ${m[2]} of ${m[3]}`, state: 'running' }
   m = /^the session is waiting for an answer; ([\s\S]*)$/.exec(t)
   if (m) return { label: 'Waiting for an answer', state: 'running', detail: m[1] }
   return { label: t.charAt(0).toUpperCase() + t.slice(1), state: 'running' }

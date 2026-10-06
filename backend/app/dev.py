@@ -2727,7 +2727,7 @@ async def start_build(c: str, slug: str, route: str, values: dict[str, Any] | No
     (views.views_dir(c) / slug).mkdir(parents=True, exist_ok=True)
     view_work_dir(c, slug).mkdir(parents=True, exist_ok=True)
     vals = subagents.values_for(c, _builder(), values or prop.get("values") or None)
-    fields: dict[str, Any] = {"values": vals, "error": None, "refused": None, "route": route}
+    fields: dict[str, Any] = {"values": vals, "error": None, "refused": None, "route": route, "stopped_by": None}
     if route == subagents.CLICK:
         fields["repairs"] = 0
     prop = views.update_proposal(c, slug, **fields) or prop
@@ -3083,7 +3083,8 @@ def _view_failed(c: str, slug: str, error: str, chat: str | None = None) -> None
         return
     if not current:
         return
-    views.update_proposal(c, slug, status="failed", error=error)
+    # a build main's quit stopped says so on its chip (`stopped_by`), as a chat of a thimble agent does
+    views.update_proposal(c, slug, status="failed", error=error, stopped_by="quit" if error == MAIN_ENDED else None)
     views._emit(c, slug, "failed", chat=chat)
     if chat:
         _close_chat({"workspace": c, "chat": chat}, "failed", error)

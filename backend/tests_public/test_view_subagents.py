@@ -466,7 +466,10 @@ async def test_the_analyst_s_stop_and_main_s_quit_end_a_build_failed_with_retry(
     await _started(other)
     subagents.close_running(CORPUS)
     await _until(lambda: _prop(other).get("status") == "failed", "main's quit left the build running")
-    assert _prop(other)["error"] == dev.MAIN_ENDED
+    assert _prop(other)["error"] == dev.MAIN_ENDED and _prop(other)["stopped_by"] == "quit", "its chip says why"
+    assert "stopped_by" not in _prop(slug), "the analyst's Stop is no quit"
+    views.retry(CORPUS, other)
+    assert "stopped_by" not in _prop(other), "Retry clears it"
 
 
 # --------------------------------------------------------------------------- changes

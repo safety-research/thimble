@@ -5,6 +5,7 @@
 // check's row that went stale after the analyst's own edits, with Run (src/report/Checks.tsx); a writer's start that
 // did not happen, which stays on its document (src/report/writeFailures.ts).
 import { act } from 'react'
+import { buildStage } from '../../src/chat/ChatPanel.tsx'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { ViewChip, buildingText, failedWhy, queuedText } from '../../src/chat/ViewChip.tsx'
 import { bus } from '../../src/lib/bus.ts'
@@ -48,8 +49,9 @@ describe('a view build\'s chip', () => {
   test('queued says how many build of the pool; building names a repair\'s count', () => {
     expect(queuedText([P('a'), P('b'), P('c', { status: 'queued' })])).toBe('queued · 2 of 3 building')
     expect(queuedText([P('c', { status: 'queued' })])).toBe('queued')
-    expect(buildingText(P('a', { repair: 1 }))).toBe('repair 1 of 2')
+    expect(buildingText(P('a', { repairs: 1 }))).toBe('repair 1 of 2')
     expect(buildingText(P('a'))).toBe('building')
+    expect(buildStage('the view did not pass, so a new builder builds it again from what failed (repair 1 of 2)').label).toBe('Building again with a new builder · repair 1 of 2')
   })
 
   test("why a ✕: a refusal's line, a stop at main's quit, or the error", () => {
@@ -59,7 +61,7 @@ describe('a view build\'s chip', () => {
   })
 
   test('a repair builds with its count, and a queued build waits with the pool\'s', async () => {
-    proposals = [P('posts', { repair: 2 }), P('board'), P('graph', { status: 'queued' })]
+    proposals = [P('posts', { repairs: 2 }), P('board'), P('graph', { status: 'queued' })]
     const posts = await chip('posts')
     expect(posts.querySelector('.view-chip-word')?.textContent).toBe('repair 2 of 2')
     const graph = await chip('graph')
@@ -67,7 +69,7 @@ describe('a view build\'s chip', () => {
   })
 
   test("a build main's quit stopped says so, and Retry starts a builder with the Build menu's model and effort", async () => {
-    proposals = [P('posts', { status: 'failed', stopped_by: 'quit', model: 'claude-opus-5-5', effort: 'max' })]
+    proposals = [P('posts', { status: 'failed', stopped_by: 'quit', values: { model: 'claude-opus-5-5', effort: 'max' } })]
     const el = await chip('posts')
     expect(el.querySelector('.view-chip-word')?.textContent).toBe('stopped')
     expect(el.querySelector('.view-chip-values')?.textContent).toBe('Opus 5.5 · max')

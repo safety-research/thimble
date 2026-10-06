@@ -62,8 +62,8 @@ export function queuedText(proposals: readonly Pick<Proposal, 'status'>[]): stri
 }
 
 /** A building chip's word: a repair says which of VIEW_REPAIRS it is. Pure. */
-export function buildingText(p: Pick<Proposal, 'repair'> | null | undefined): string {
-  return p?.repair ? `repair ${p.repair} of ${VIEW_REPAIRS}` : 'building'
+export function buildingText(p: Pick<Proposal, 'repairs'> | null | undefined): string {
+  return p?.repairs ? `repair ${p.repairs} of ${VIEW_REPAIRS}` : 'building'
 }
 
 /** The tooltip of a building chip: where the terminal shows its builder. */
@@ -142,7 +142,8 @@ export function ViewChip({ ws, slug, name, className }: Props) {
   const changeFailed = status === 'built' && p?.failed_change != null
   const refused = !!p?.refused && !pending && status !== 'built'
   const failed = status === 'failed' || changeFailed || refused
-  const values = picked ?? (p?.model ? { model: p.model, effort: p.effort ?? '' } : dev ?? { model: '', effort: '' })
+  const ran = p?.values?.model ? { model: p.values.model, effort: p.values.effort ?? '' } : p?.model ? { model: p.model, effort: p.effort ?? '' } : null
+  const values = picked ?? ran ?? dev ?? { model: '', effort: '' }
   const open = () => {
     if ((pending || failed) && p?.chat) {
       track('chip-teleport', { target: `chat:${p.chat}`, detail: { kind: 'view-build' } })
