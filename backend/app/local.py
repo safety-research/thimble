@@ -439,7 +439,10 @@ async def _agents(c: str, args: list[str], pos: list[str]) -> Any:
             continue
         _, log_path = agents.paths(c, str(m["id"]))
         events = agents.read_events(log_path)
-        out.append({**m, "tail": events[-tail:] if tail > 0 else []})
+        # the chat's meta, with a row's names as the agents' row above the prompt reads them, and its last records
+        row = {"name": f"thimble:{m.get('role')}", "label": m.get("title") or m.get("role"), "chat": m["id"],
+               "state": m.get("status"), "started": m.get("created_at")}
+        out.append({**m, **row, "tail": events[-tail:] if tail > 0 else []})
     return {"agents": out, "orientation": orientation.read_run(c)}
 
 
@@ -465,20 +468,24 @@ async def _resolve(c: str, args: list[str], pos: list[str]) -> Any:
     corpus_dir = config.corpus_dir(c)
 
     def one(item: Any) -> dict[str, Any]:
+        """The ref route's answer for one ref (refs.resolve), `{ref, error}` when it does not resolve; with `state`
+        (ok, missing, differs) and its `why`, the value checked as the takeaway's links check it (verify)."""
         ref = str(item.get("ref") if isinstance(item, dict) else item or "").strip()
         value = item.get("value") if isinstance(item, dict) else None
-        row: dict[str, Any] = {"ref": ref, **({"value": value} if value is not None else {})}
+        given = {"value": value} if value is not None else {}
         try:
-            got = refs.resolve(corpus_dir, ref)
+            got = dict(refs.resolve(corpus_dir, ref))
         except refs.RefError as e:
-            return {**row, "state": "missing", "why": str(e.detail), "resolved": None}
+            return {"ref": ref, **given, "error": str(e.detail), "state": "missing", "why": str(e.detail)}
         except Exception as e:  # noqa: BLE001 — one bad ref never takes the others down
-            return {**row, "state": "missing", "why": f"{type(e).__name__}: {e}", "resolved": None}
+            why = f"{type(e).__name__}: {e}"
+            return {"ref": ref, **given, "error": why, "state": "missing", "why": why}
+        got.update(ref=ref, **given)
         if (got.get("meta") or {}).get("span_missing"):
-            return {**row, "state": "missing", "why": verify.WHY_SPAN_MISSING, "resolved": got}
+            return {**got, "state": "missing", "why": verify.WHY_SPAN_MISSING}
         if value is not None and not verify._value_matches(str(value), str(got.get("excerpt") or "")):
-            return {**row, "state": "differs", "why": verify.WHY_VALUE, "resolved": got}
-        return {**row, "state": "ok", "resolved": got}
+            return {**got, "state": "differs", "why": verify.WHY_VALUE}
+        return {**got, "state": "ok"}
 
     return await asyncio.to_thread(lambda: [one(x) for x in wanted])
 

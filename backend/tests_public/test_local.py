@@ -185,6 +185,11 @@ async def test_state_gives_what_the_routes_give(term):
     got = await local.state(CORPUS, "resolve", [json.dumps(["board.jsonl#L1", {"ref": "board.jsonl#L1", "value": "REVIEW WANTED"},
                                                            {"ref": "board.jsonl#L1", "value": "nope 4242"}, "gone.jsonl#L1"])])
     assert [g["state"] for g in got] == ["ok", "ok", "differs", "missing"]
+    # each is the ref route's answer for its ref (refs.resolve), `error` where it does not resolve
+    from app import refs
+
+    assert {k: v for k, v in got[0].items() if k != "state"} == refs.resolve(config.corpus_dir(CORPUS), "board.jsonl#L1")
+    assert got[3]["error"] and got[3]["ref"] == "gone.jsonl#L1"
     agents_ = await local.state(CORPUS, "agents", ["--tail", "1"])
     assert [a["role"] for a in agents_["agents"]] == ["labels"] and len(agents_["agents"][0]["tail"]) <= 1
     with pytest.raises(local.StateError, match="no surface"):
