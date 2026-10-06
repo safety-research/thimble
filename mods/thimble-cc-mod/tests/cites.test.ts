@@ -172,7 +172,7 @@ function claimOf(text: string, row: string, raw: string): string {
 
 // ------------------------------------------------------------------------------------------------ display
 
-test('a citation is an underlined link; a problem is red; ◌ while it is worked on, then ✓, or × and red', () => {
+test('a citation is a blue underlined link; a problem is red; ◌ while it is worked on, then ✓, or × and red', () => {
   expect(chipState('ok', undefined)).toBe('link')
   expect(chipState('unchecked', undefined)).toBe('link')
   expect(chipState(undefined, undefined)).toBe('link')
@@ -191,8 +191,10 @@ test('a citation is an underlined link; a problem is red; ◌ while it is worked
   expect(chipLook('differs', 'fixing', undefined)).toEqual({ state: 'fixing', mark: '', spin: true })
   expect(chipLook('differs', 'failed', undefined)).toEqual({ state: 'failed', mark: '×', spin: false })
   const link = chipSegs({ label: '412', state: 'link', mark: '', spin: false, tip: '' }, false)
-  expect(link).toEqual([{ s: '412', u: true }])
+  expect(link).toEqual([{ s: '412', fg: COLORS.link, u: true }])
   expect(link[0]!.bg).toBe(undefined)
+  // under the pointer in inverse: its blue becomes the background
+  expect(chipSegs({ label: '412', state: 'link', mark: '', spin: false, tip: '' }, true)).toEqual([{ s: '412', fg: COLORS.link, u: true, inv: true }])
   expect(chipSegs({ label: '412', state: 'problem', mark: '', spin: false, tip: '' }, false)[0]!.fg).toBe(COLORS.problem)
   const spin = chipSegs({ label: '412', state: 'fixing', mark: '', spin: true, tip: '' }, false, 3)
   expect(spin[1]).toEqual({ s: ` ${SPIN}`, fg: COLORS.problem })
@@ -624,8 +626,11 @@ test('a long quoted citation shows whole, its words wrapping like the words arou
   expect(tl.lines.map(l => l.map(x => x.s).join('')).join(' ').replace(/\s+/g, ' ')).toContain(`a1 ${quote.slice(0, 10)}`)
   expect(tl.lines.flat().map(x => x.s).join('').replace(/\s+/g, '')).toContain(`${quote.replace(/\s+/g, '')}✓`)
   expect(new Set(tl.spans.filter(x => x.chip === 0).map(x => x.line)).size).toBeGreaterThan(1)
-  // the column names (dim, no rule under them) take a line; the row takes the rest
-  expect(tl.rows!.filter(r => r.includes('a1')).length).toBe(tl.lines.length - 1)
+  // the column names (bold, a rule under them) take a line each; the row takes the rest
+  expect(tl.rows!.filter(r => r.includes('a1')).length).toBe(tl.lines.length - 2)
+  expect(tl.rows![1]).toBe('')
+  expect(tl.lines[0]!.filter(x => x.s.trim()).every(x => x.b)).toBe(true)
+  expect(tl.lines[1]!.filter(x => x.s.trim()).map(x => [x.s.replace(/─/g, '-'), x.fg])).toEqual([['---', COLORS.rule], ['-'.repeat(lineWidth(tl.lines[1]!) - 5), COLORS.rule]])
 })
 
 // ------------------------------------------------------------------------------------------------ quoted values with brackets
@@ -1068,4 +1073,60 @@ test('marks read back: a verification or fix its session left running is ended; 
   // set again, a mark is the newest: the cap drops the oldest
   setMark(m, 'fixes', 'c', { state: 'fixed' })
   expect(Object.keys(parseMarks(marksJson(m, 1)).fixes)).toEqual(['c'])
+})
+
+// ------------------------------------------------------------------------------------------------ round 8: Markdown and the tip
+
+test('the model\'s Markdown is drawn as Claude Code draws it: bold bold, italic italic, inline code in the code colour, a heading bold', () => {
+  const chips: ChipView[] = [{ label: '13403', state: 'link', mark: '', spin: false, tip: '' }]
+  const block = parseReply('dse has **most** of the [[13403|card:abc123#revisions/dse]] *revisions*, see `pages.jsonl` and [the docs](https://example.com).')[0] as Parameters<typeof paraLayout>[0]
+  const segs = paraLayout(block, chips, 120, -1).lines.flat()
+  expect(segs.find(s => s.s === 'most')).toMatchObject({ b: true })
+  expect(segs.find(s => s.s === 'revisions')).toMatchObject({ i: true })
+  expect(segs.find(s => s.s === 'pages.jsonl')).toMatchObject({ fg: COLORS.code })
+  expect(segs.find(s => s.s === 'docs')).toMatchObject({ fg: COLORS.link, u: true })
+  expect(segs.find(s => s.s === 'has')!.b).toBeFalsy()
+  // the citation a blue link, not bold
+  expect(segs.find(s => s.s === '13403')).toMatchObject({ fg: COLORS.link, u: true })
+  const head = parseReply('## dse holds [[13403|card:abc123#revisions/dse]] revisions')[0] as Parameters<typeof paraLayout>[0]
+  const hs = paraLayout(head, chips, 120, -1).lines.flat().filter(s => s.s.trim() && s.s !== '13403')
+  expect(hs.length).toBeGreaterThan(0)
+  expect(hs.every(s => s.b)).toBe(true)
+})
+
+test('the citation under the pointer is inverse; its tip sits on a quiet box on the row below, or above on the paragraph\'s last row', async ($, on) => {
+  world(on)
+  await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
+  const text = 'dse has [[13403|card:abc123#revisions/dse]] revisions, a count that runs on and on past the edge of a narrow paragraph, of [[14416|card:abc123#revisions/all]] in all.'
+  const ui = (await $.ui.mount(MESSAGE(text))) as unknown as M
+  await ui.resize({ columns: 40, rows: 6, in: 'para-1' })
+  const block = parseReply(text)[0] as Parameters<typeof paraLayout>[0]
+  const lay = paraLayout(block, [], 40, -1)
+  const at = (k: number) => lay.spans.find(s => s.chip === k)!
+  const tipBox = async () => {
+    let found: { top?: number; bg?: unknown } | null = null
+    const walk = (n: unknown) => {
+      if (Array.isArray(n)) return n.forEach(walk)
+      if (!n || typeof n !== 'object') return
+      const o = n as { props?: Record<string, unknown>; children?: unknown }
+      if (o.props?.position === 'absolute') {
+        const kid = JSON.stringify(o.children ?? o.props.children)
+        found = { top: o.props.top as number, bg: /"backgroundColor":"([^"]+)"/.exec(kid)?.[1] }
+      }
+      walk(o.children ?? o.props?.children)
+    }
+    walk(await ui.drawn({ in: 'para-1' }))
+    return found as { top?: number; bg?: unknown } | null
+  }
+  const first = at(0)
+  expect(first.line).toBe(0)
+  await ui.pointer({ type: 'move', x: first.x0, y: first.line, in: 'para-1' } as never)
+  expect(await tipBox()).toEqual({ top: 1, bg: COLORS.tip })
+  // the hovered citation in inverse, in the link colour
+  expect(JSON.stringify(await ui.drawn({ in: 'para-1' }))).toMatch(/"color":"remember"[^}]*"inverse":true|"inverse":true[^}]*"color":"remember"/)
+  const last = at(1)
+  expect(last.line).toBe(lay.lines.length - 1)
+  await ui.pointer({ type: 'move', x: last.x0, y: last.line, in: 'para-1' } as never)
+  expect(await tipBox()).toEqual({ top: last.line - 1, bg: COLORS.tip })
+  await ui.unmount()
 })

@@ -5,7 +5,7 @@ import { expect, mock, test } from 'claude-code/testing'
 import type { Mounted } from 'claude-code/testing'
 
 import { animFrame } from '../hooks/anim'
-import { cardLayout, layerGraph, lineWidth, menuShade, shortTimes, width, wrapCell, wrapLabel } from '../hooks/draw'
+import { cardLayout, layerGraph, lineWidth, shortTimes, width, wrapCell, wrapLabel } from '../hooks/draw'
 import type { Cell, CardData } from '../hooks/draw'
 import { validateCard } from '../hooks/lib'
 import { COLORS, SERIES } from '../hooks/paint'
@@ -153,9 +153,10 @@ test('the value under the pointer shows at the right of the title; a click or do
   await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
   const ui = (await $.ui.mount(MESSAGE('[[card:abc123]]'))) as unknown as M
   await ui.resize({ columns: 100, rows: 12, in: 'card-1-abc123' })
-  await ui.pointer({ type: 'move', x: 10, y: 4, in: 'card-1-abc123' } as never)
+  // the top border, the title, the blank row under it and the params row; then the bars, probier the second
+  await ui.pointer({ type: 'move', x: 10, y: 5, in: 'card-1-abc123' } as never)
   expect(await ui.find({ type: 'Text', text: /probier {2}1,013 revisions/, in: 'card-1-abc123' })).toBeDefined()
-  for (const type of ['down', 'up', 'down', 'up']) await ui.pointer({ type, x: 10, y: 4, button: 'left', in: 'card-1-abc123' } as never)
+  for (const type of ['down', 'up', 'down', 'up']) await ui.pointer({ type, x: 10, y: 5, button: 'left', in: 'card-1-abc123' } as never)
   expect(await ui.find({ type: 'Text', text: /probier {2}1,013 revisions/, in: 'card-1-abc123' })).toBeDefined()
   // a card value cites the card itself: a click is a side thread about it (twice for a double-click, the one panel);
   // nothing reaches main's prompt
@@ -169,8 +170,8 @@ test('a right-click on a bar names it in the menu by its label and value; the me
   await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
   const ui = (await $.ui.mount(MESSAGE('[[card:abc123]]'))) as unknown as M
   await ui.resize({ columns: 100, rows: 12, in: 'card-1-abc123' })
-  await ui.pointer({ type: 'down', x: 10, y: 4, button: 'right', in: 'card-1-abc123' } as never)
-  await ui.pointer({ type: 'up', x: 10, y: 4, button: 'right', in: 'card-1-abc123' } as never)
+  await ui.pointer({ type: 'down', x: 10, y: 5, button: 'right', in: 'card-1-abc123' } as never)
+  await ui.pointer({ type: 'up', x: 10, y: 5, button: 'right', in: 'card-1-abc123' } as never)
   await ui.unmount()
   expect(w.opened).toEqual(['thimble'])
   const menu = (await $.ui.mount({ plugin: 'thimble-cc-mod', component: 'Pane', requestId: 'thimble', surface: 'terminal', viewport: { columns: 40, rows: 10 }, props: { bodyColumns: 34, bodyRows: 8 } } as never)) as unknown as M
@@ -215,19 +216,19 @@ test('/thimble-card takes a card by its place in the last reply', async ($, on) 
 const THEMES: Record<string, { bg: string[]; keys: Record<string, string> }> = {
   light: {
     bg: ['#ffffff', '#f6f6f6'],
-    keys: { text: 'rgb(0,0,0)', inverseText: 'rgb(255,255,255)', inactive: 'rgb(102,102,102)', subtle: 'rgb(175,175,175)', remember: 'rgb(0,0,255)', permission: 'rgb(87,105,247)', success: 'rgb(44,122,57)', error: 'rgb(171,43,63)', warning: 'rgb(150,108,30)', userMessageBackground: 'rgb(240,240,240)', selectionBg: 'rgb(180,213,255)', composerSidebarBackground: 'rgb(245,245,245)' },
+    keys: { text: 'rgb(0,0,0)', inverseText: 'rgb(255,255,255)', inactive: 'rgb(102,102,102)', subtle: 'rgb(175,175,175)', remember: 'rgb(0,0,255)', permission: 'rgb(87,105,247)', suggestion: 'rgb(87,105,247)', success: 'rgb(44,122,57)', error: 'rgb(171,43,63)', warning: 'rgb(150,108,30)', userMessageBackground: 'rgb(240,240,240)', selectionBg: 'rgb(180,213,255)', composerSidebarBackground: 'rgb(245,245,245)' },
   },
   'light-daltonized': {
     bg: ['#ffffff', '#f6f6f6'],
-    keys: { text: 'rgb(0,0,0)', inverseText: 'rgb(255,255,255)', inactive: 'rgb(102,102,102)', subtle: 'rgb(175,175,175)', remember: 'rgb(51,102,255)', permission: 'rgb(51,102,255)', success: 'rgb(0,102,153)', error: 'rgb(204,0,0)', warning: 'rgb(255,153,0)', userMessageBackground: 'rgb(220,220,220)', selectionBg: 'rgb(180,213,255)', composerSidebarBackground: 'rgb(235,235,235)' },
+    keys: { text: 'rgb(0,0,0)', inverseText: 'rgb(255,255,255)', inactive: 'rgb(102,102,102)', subtle: 'rgb(175,175,175)', remember: 'rgb(51,102,255)', permission: 'rgb(51,102,255)', suggestion: 'rgb(51,102,255)', success: 'rgb(0,102,153)', error: 'rgb(204,0,0)', warning: 'rgb(255,153,0)', userMessageBackground: 'rgb(220,220,220)', selectionBg: 'rgb(180,213,255)', composerSidebarBackground: 'rgb(235,235,235)' },
   },
   dark: {
     bg: ['#000000', '#1e1e1e', '#282c34'],
-    keys: { text: 'rgb(255,255,255)', inverseText: 'rgb(0,0,0)', inactive: 'rgb(153,153,153)', subtle: 'rgb(80,80,80)', remember: 'rgb(177,185,249)', permission: 'rgb(177,185,249)', success: 'rgb(78,186,101)', error: 'rgb(255,107,128)', warning: 'rgb(255,193,7)', userMessageBackground: 'rgb(55,55,55)', selectionBg: 'rgb(38,79,120)', composerSidebarBackground: 'rgb(38,38,38)' },
+    keys: { text: 'rgb(255,255,255)', inverseText: 'rgb(0,0,0)', inactive: 'rgb(153,153,153)', subtle: 'rgb(80,80,80)', remember: 'rgb(177,185,249)', permission: 'rgb(177,185,249)', suggestion: 'rgb(177,185,249)', success: 'rgb(78,186,101)', error: 'rgb(255,107,128)', warning: 'rgb(255,193,7)', userMessageBackground: 'rgb(55,55,55)', selectionBg: 'rgb(38,79,120)', composerSidebarBackground: 'rgb(38,38,38)' },
   },
   'dark-daltonized': {
     bg: ['#000000', '#1e1e1e', '#282c34'],
-    keys: { text: 'rgb(255,255,255)', inverseText: 'rgb(0,0,0)', inactive: 'rgb(153,153,153)', subtle: 'rgb(80,80,80)', remember: 'rgb(153,204,255)', permission: 'rgb(153,204,255)', success: 'rgb(51,153,255)', error: 'rgb(255,102,102)', warning: 'rgb(255,204,0)', userMessageBackground: 'rgb(55,55,55)', selectionBg: 'rgb(38,79,120)', composerSidebarBackground: 'rgb(38,38,38)' },
+    keys: { text: 'rgb(255,255,255)', inverseText: 'rgb(0,0,0)', inactive: 'rgb(153,153,153)', subtle: 'rgb(80,80,80)', remember: 'rgb(153,204,255)', permission: 'rgb(153,204,255)', suggestion: 'rgb(153,204,255)', success: 'rgb(51,153,255)', error: 'rgb(255,102,102)', warning: 'rgb(255,204,0)', userMessageBackground: 'rgb(55,55,55)', selectionBg: 'rgb(38,79,120)', composerSidebarBackground: 'rgb(38,38,38)' },
   },
 }
 
@@ -302,8 +303,8 @@ test('a diagram is drawn in boxes and box-drawing lines, a long label as a numbe
   const box = text.findIndex(t => t.includes('│ Planner │'))
   expect(box).toBeGreaterThanOrEqual(0)
   expect(text.some(t => t.includes('│ Coder │'))).toBe(true)
-  expect(text.join('\n')).toMatch(/[╭─]+▼[─╮]+/) // an arrow on a target's top border
-  expect(text.join('\n')).toContain('▲') // the edge back up from Reviewer to Coder
+  expect(text.join('\n')).toMatch(/[╭─]+↓[─╮]+/) // an arrow on a target's top border
+  expect(text.join('\n')).toContain('↑') // the edge back up from Reviewer to Coder
   expect(text.join('\n')).toContain('assigns')
   expect(text.some(t => /^1 {2}Coder → Reviewer: opens a pull request/.test(t))).toBe(true)
   expect(text.every(t => t.length <= 70)).toBe(true)
@@ -313,8 +314,8 @@ test('a diagram is drawn in boxes and box-drawing lines, a long label as a numbe
   expect(lay.items[0]).toMatchObject({ kind: 'node', open: 'events.jsonl#L3', cite: '[[events.jsonl#L3]]', text: 'Planner' })
   expect(lay.items[1]).toMatchObject({ kind: 'node', open: 'card:d1a9e0#node/c' })
   // an edge's line is its edge, after the nodes
-  const arrowRow = text.findIndex(t => t.includes('▼'))
-  expect(lay.hit(text[arrowRow]!.indexOf('▼'), arrowRow)).toBeGreaterThanOrEqual(3)
+  const arrowRow = text.findIndex(t => t.includes('↓'))
+  expect(lay.hit(text[arrowRow]!.indexOf('↓'), arrowRow)).toBeGreaterThanOrEqual(3)
   // the note line is its edge too
   const note = text.findIndex(t => t.startsWith('1  '))
   expect(lay.items[lay.hit(0, note)]).toMatchObject({ label: 'Coder → Reviewer' })
@@ -361,9 +362,9 @@ test('edges into one box keep ports of their own, and each label belongs to one 
   const text = lay.lines.map(l => l.map(s => s.s).join(''))
   const N = FAN_IN.nodes!.length
   // five arrows on wiki dse's top border, a blank column between each two
-  const arrows = text.find(t => (t.match(/▼/g) ?? []).length === 5)
+  const arrows = text.find(t => (t.match(/↓/g) ?? []).length === 5)
   expect(arrows).toBeDefined()
-  expect(arrows).not.toMatch(/▼▼/)
+  expect(arrows).not.toMatch(/↓↓/)
   // a label written in the drawing is on its edge: the cells of its words hit that edge
   const notes = text.map((t, y) => [t, y] as const).filter(([t]) => /^\d+ {2}/.test(t))
   expect(notes.length).toBeGreaterThan(0)
@@ -416,47 +417,45 @@ test('a diagram in a reply is a Client card; a press on a node with a record ope
   await ui.resize({ columns: 80, rows: 30, in: 'card-1-d1a9e0' })
   const tree = await ui.drawn({ in: 'card-1-d1a9e0' })
   expect(shown(tree)).toContain('Planner')
-  // border and title, then the drawing: Planner's label on its second row
+  // the border, the title and the blank row under it, then the drawing, inside the border and its padding (2 cells a
+  // side): Planner's label on its second row
   const lay = cardLayout(DIAGRAM, 76, -1)
   const row = lay.lines.findIndex(l => l.map(s => s.s).join('').includes('Planner'))
   const col = lay.lines[row]!.map(s => s.s).join('').indexOf('Planner')
-  await ui.pointer({ type: 'down', x: col + 2, y: row + 2, button: 'left', in: 'card-1-d1a9e0' } as never)
-  await ui.pointer({ type: 'up', x: col + 2, y: row + 2, button: 'left', in: 'card-1-d1a9e0' } as never)
+  await ui.pointer({ type: 'down', x: col + 2, y: row + 3, button: 'left', in: 'card-1-d1a9e0' } as never)
+  await ui.pointer({ type: 'up', x: col + 2, y: row + 3, button: 'left', in: 'card-1-d1a9e0' } as never)
   expect(w.opened).toEqual(['thimble']) // the Citation view, at once: a click waits for no second one
   await ui.unmount()
 })
 
-// ------------------------------------------------------------------------------------------------ round 4: menu shading, dense diagrams
+// ------------------------------------------------------------------------------------------------ round 8: the frame, no menu shading, dense diagrams
 
-test('the open menu\'s mark is shaded on the selection background: a bar\'s row, a table\'s cell, a diagram\'s box', () => {
-  const lit = (lines: { s: string; bg?: string }[][]) => lines.map(l => l.filter(s => s.bg === COLORS.selected).map(s => s.s).join(''))
-  const bars = menuShade(cardLayout(BAR, 60, 1), 1)
-  expect(lit(bars)[0]).toBe('')
-  expect(lit(bars)[1]).toContain('probier')
-  const table: CardData = { ...BAR, kind: 'table', columns: ['wiki', 'revisions'], rows: [['dse', 13403], ['probier', 1013]] }
-  const rows = menuShade(cardLayout(table, 60, 2), 2) // the second row's first cell, under the column names
-  expect(lit(rows)[2]).toContain('probier')
-  const nodes = menuShade(cardLayout(DIAGRAM, 70, 0), 0)
-  const box = nodes.findIndex(l => l.map(s => s.s).join('').includes('Planner'))
-  expect(lit(nodes)[box]).toContain('Planner')
-  expect(lit(nodes).filter(Boolean).length).toBe(3) // the box's three rows, nothing else
-  expect(menuShade(cardLayout(BAR, 60, -1), -1).flat().some(s => s.bg === COLORS.selected)).toBe(false)
+test('every card has a full round border in the rule grey with a cell of padding; its title, a blank row, then its body', async ($, on) => {
+  world(on)
+  await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
+  const ui = (await $.ui.mount(MESSAGE('[[card:abc123]]'))) as unknown as M
+  await ui.resize({ columns: 100, rows: 12, in: 'card-1-abc123' })
+  const box = (await ui.drawn({ in: 'card-1-abc123' })) as unknown as { type: string; props: Record<string, unknown>; children?: unknown[] }
+  expect(box.type).toBe('Box')
+  expect(box.props).toMatchObject({ borderStyle: 'round', borderColor: COLORS.rule, paddingX: 1, width: 100 })
+  const rows = ((box.children ?? box.props.children) as unknown[]).map(c => shown(c))
+  expect(rows[0]).toContain('Which wikis have the most revisions?')
+  expect(rows[1]!.trim()).toBe('')
+  expect(rows[2]).toMatch(/^by {2}wiki {2}label$/)
+  // the lines inside take the room the border and its padding leave
+  for (const l of cardLayout(BAR, 96, -1).lines) expect(lineWidth(l)).toBeLessThanOrEqual(96)
+  await ui.unmount()
 })
 
-test('a right-click on a card shades its title while the menu is open', async ($, on) => {
+test('a right-click on a card shades nothing on it: a right-click does what a click does', async ($, on) => {
   const w = world(on)
-  let panes = [{ id: 'thimble', title: 'Actions', isShown: true, isFocused: true, isPlaced: true }]
-  on('ui.panes', () => ({ value: panes }) as never)
+  on('ui.panes', () => ({ value: [{ id: 'thimble', title: 'Actions', isShown: true, isFocused: true, isPlaced: true }] }) as never)
   await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
   const ui = (await $.ui.mount(MESSAGE('[[card:d1a9e0]]'))) as unknown as M
   await ui.resize({ columns: 80, rows: 30, in: 'card-1-d1a9e0' })
   const lit = async () => JSON.stringify(await ui.drawn({ in: 'card-1-d1a9e0' })).includes(COLORS.selected)
-  expect(await lit()).toBe(false)
   await ui.pointer({ type: 'down', x: 4, y: 1, button: 'right', in: 'card-1-d1a9e0' } as never)
   await ui.pointer({ type: 'up', x: 4, y: 1, button: 'right', in: 'card-1-d1a9e0' } as never)
-  await w.clock!.advance(300)
-  expect(await lit()).toBe(true)
-  panes = [] // closed by its button
   await w.clock!.advance(300)
   expect(await lit()).toBe(false)
   await ui.unmount()
@@ -529,11 +528,11 @@ test('labels take the room the card has, and wrap to two lines before they are c
   expect([narrow.hit(0, 0), narrow.hit(0, 1), narrow.hit(0, 2)]).toEqual([0, 0, 1])
   const first = 'save event revision_ref found in revisions and the audit log'
   const table: CardData = { ...BAR, kind: 'table', columns: ['pattern', 'count'], rows: [[first, 312], ['short', 9]] }
-  // under the column names, with no rule under them
-  expect(text(table, 116)[1]).toContain(first)
+  // under the column names and the rule under them
+  expect(text(table, 116)[2]).toContain(first)
   const wrapped = cardLayout(table, 40, -1)
-  expect(text(table, 40).slice(1, 3).join(' ')).toContain('audit log')
-  expect([wrapped.hit(0, 1), wrapped.hit(0, 2), wrapped.hit(0, 3)]).toEqual([0, 0, 2])
+  expect(text(table, 40).slice(2, 4).join(' ')).toContain('audit log')
+  expect([wrapped.hit(0, 1), wrapped.hit(0, 2), wrapped.hit(0, 3), wrapped.hit(0, 4)]).toEqual([-1, 0, 0, 2])
   const note = 'Agent posts a note to the other agents about splitting the edit work before the deadline'
   const ex: CardData = { ...BAR, kind: 'example', examples: [{ ref: 'wiki/revisions.jsonl#L12345', quote: 'the quote', note }] }
   expect(text(ex, 116).join(' ')).toContain(note)
@@ -590,7 +589,8 @@ test('at a panel\'s width every card fits: no line is wider than the room, and a
     }
     const text = cardLayout(LINE, cols, -1).lines.map(l => l.map(s => s.s).join('')).join('\n')
     for (const name of ['pages edited', 'pages deleted', 'pages restored']) expect(text).toContain(name)
-    expect(text).toMatch(/00 +23/)
+    // the x labels at the ends and the middle
+    expect(text).toMatch(/00 +12 +23/)
   }
 })
 
@@ -700,7 +700,7 @@ test('a table\'s cells break between words, after a hyphen, and inside a name on
 test('a cell in a later block is its own column\'s; hovering it inverts that cell alone, and the rows arrive together', () => {
   const lines = plain(WHO, 46)
   const second = lines.findIndex((l, y) => l.startsWith('label ') && lines.slice(0, y).some(p => p.startsWith('label ')))
-  const y = second + 1 // under the second block's column names
+  const y = second + 2 // under the second block's column names and the rule under them
   expect(lines[y]).toMatch(/^AgentRelent\s/)
   const lay = cardLayout(WHO, 46, -1)
   const i = lay.hit(lines[y]!.indexOf('20:10:06'), y)
@@ -809,4 +809,93 @@ test('a table card in a side thread at a 120-column terminal fits the panel: eve
   for (const h of ['revisions', 'first', 'last', '(UTC)', 'IP /16', 'values', 'AgentRelent', 'ResearchReaderMN', 'Jun18Citations', '20:17:06']) expect(text).toContain(h)
   expect(text.replace(/Who edited.*?…/, '')).not.toContain('…') // only the title, one line, may be cut
   await pane.unmount()
+})
+
+// ------------------------------------------------------------------------------------------------ round 8: marks, rows and records
+
+const segsOf = (lines: { s: string }[][]) => lines.map(l => l.map(s => s.s).join(''))
+
+test('a chart with no colour field is one series in the first hue; the bar under the pointer turns the text colour, its label inverse', () => {
+  const lay = cardLayout(BAR, 60, -1)
+  expect(lay.lines.slice(0, 2).map(l => l.find(s => s.s.includes('█'))!.fg)).toEqual([SERIES[0], SERIES[0]])
+  const lit = cardLayout(BAR, 60, 1).lines[1]!
+  expect(lit.find(s => s.s.includes('█'))!.fg).toBe(COLORS.text)
+  expect(lit[0]).toMatchObject({ s: 'probier', inv: true })
+  // a line of one series: the first hue too
+  const one: CardData = { ...BAR, kind: 'line', series: [{ name: 'revisions', points: [['2026-06-17', 3], ['2026-06-18', 9], ['2026-06-19', 4]] }] }
+  const marks = cardLayout(one, 60, -1).lines.flat().filter(s => /[⠁-⣿]/.test(s.s))
+  expect(marks.length).toBeGreaterThan(0)
+  expect(new Set(marks.map(s => s.fg))).toEqual(new Set([SERIES[0]]))
+})
+
+test('a table card\'s header: the column names bold, a rule under each as wide as its column, the rows right under it', () => {
+  const table: CardData = { ...BAR, kind: 'table', columns: ['label', 'revisions', 'pages', 'wikis'], rows: [['AgentRelent', 317, 4, 'dse'], ['AgentMassPointer13', 187, 3, 'dse']] }
+  const lay = cardLayout(table, 80, -1)
+  const text = segsOf(lay.lines)
+  expect(text[0]).toMatch(/^label +revisions {2}pages {2}wikis/)
+  expect(lay.lines[0]!.filter(s => s.s.trim()).every(s => s.b)).toBe(true)
+  expect(text[1]).toMatch(/^─+ {2}─{9} {2}─{5} {2}─+$/)
+  expect(lay.lines[1]!.filter(s => s.s.trim()).every(s => s.fg === COLORS.rule)).toBe(true)
+  // each rule as wide as its column: the names start where their rules start
+  const starts = (t: string, re: RegExp) => [...t.matchAll(re)].map(m => m.index)
+  expect(starts(text[1]!, /─+/g)).toEqual([0, text[0]!.indexOf('revisions'), text[0]!.indexOf('pages') , text[0]!.indexOf('wikis')])
+  expect(text[2]).toMatch(/^AgentRelent +317 +4 {2}dse/)
+  expect([lay.hit(0, 0), lay.hit(0, 1), lay.hit(0, 2)]).toEqual([-1, -1, 0])
+})
+
+test('a timeline: each event\'s time starts at the card\'s edge, under the axis\'s start time; then its ● in the first hue, its words and a blue ↗', () => {
+  const card: CardData = {
+    ...BAR,
+    kind: 'timeline',
+    events: [
+      { time: '2026-06-18T00:06:00Z', label: 'First revision of the day', ref: 'revisions.jsonl#L3' },
+      { time: '2026-06-18T17:15:00Z', label: 'The welcome page is replaced', ref: '' },
+      { time: '2026-06-18T23:57:00Z', label: 'Last revision of the day', ref: 'revisions.jsonl#L9' },
+    ],
+  }
+  const lay = cardLayout(card, 70, -1)
+  const text = segsOf(lay.lines)
+  expect(text[0]).toMatch(/^●─+●─+●$/)
+  expect(lay.lines[0]!.filter(s => s.s === '●').map(s => s.fg)).toEqual([SERIES[0], SERIES[0], SERIES[0]])
+  expect(text[1]).toMatch(/^18 Jun 00:06 +18 Jun 23:57$/)
+  expect(text[2]).toBe('18 Jun 00:06  ● First revision of the day ↗')
+  expect(text[3]).toBe('18 Jun 17:15  ● The welcome page is replaced')
+  expect(lay.lines[2]!.find(s => s.s === '●')!.fg).toBe(SERIES[0])
+  expect(lay.lines[2]!.find(s => s.s === '↗')!.fg).toBe(COLORS.link)
+  expect(lay.lines[2]![0]).toMatchObject({ s: '18 Jun 00:06', fg: COLORS.dim })
+  // the time under the pointer in inverse
+  expect(cardLayout(card, 70, 1).lines[3]![0]).toMatchObject({ s: '18 Jun 17:15', inv: true })
+})
+
+test('example records: ● and thimble\'s note, under it the record\'s words in quotation marks and italic, the place right after them; a blank row between', () => {
+  const card: CardData = {
+    ...BAR,
+    kind: 'example',
+    examples: [
+      { ref: 'revisions.jsonl#L635', quote: 'If any ahead cohort sees R3 or later, PLEASE append state immediately.', note: '00:56. An agent asks agents in other runs to post the next answer.' },
+      { ref: 'revisions.jsonl#L10879', quote: 'County year twenty links direct filtered '.repeat(8), note: '17:15. The welcome page is replaced by links.' },
+    ],
+  }
+  const lay = cardLayout(card, 110, -1)
+  const text = segsOf(lay.lines)
+  expect(text[0]).toBe('● 00:56. An agent asks agents in other runs to post the next answer.')
+  expect(lay.lines[0]![0]!.fg).toBe(SERIES[0])
+  expect(text[1]).toBe('  "If any ahead cohort sees R3 or later, PLEASE append state immediately."  ↗ revisions.jsonl line 635')
+  expect(lay.lines[1]!.find(s => s.s.startsWith('"If'))).toMatchObject({ i: true })
+  expect(lay.lines[1]!.find(s => s.s === '↗')!.fg).toBe(COLORS.link)
+  expect(lay.lines[1]!.find(s => s.s === 'revisions.jsonl line 635')).toMatchObject({ fg: COLORS.link, u: true })
+  expect(text[2]).toBe('')
+  // a long quote: three rows at most, its end cut with …", the place on the row under it when it does not fit beside
+  const second = text.slice(3)
+  expect(second[0]).toBe('● 17:15. The welcome page is replaced by links.')
+  expect(second.slice(1, 4).every(t => t.startsWith('  ') && !t.includes('↗'))).toBe(true)
+  expect(second[1]!.trimStart().startsWith('"County')).toBe(true)
+  expect(second[3]!.endsWith('…"')).toBe(true)
+  expect(second[4]).toBe('  ↗ revisions.jsonl line 10879')
+  expect(Math.max(...lay.lines.map(lineWidth))).toBeLessThanOrEqual(110)
+  // where the place does not fit beside the quote's last row, it takes the row under it
+  expect(segsOf(cardLayout(card, 100, -1).lines)[2]).toBe('  ↗ revisions.jsonl line 635')
+  // the records hit as theirs, the blank row as none; the place under the pointer in inverse
+  expect([lay.hit(0, 0), lay.hit(0, 1), lay.hit(0, 2), lay.hit(0, 3)]).toEqual([0, 0, -1, 1])
+  expect(cardLayout(card, 110, 0).lines[1]!.find(s => s.s === 'revisions.jsonl line 635')).toMatchObject({ inv: true })
 })

@@ -149,9 +149,8 @@ export function focusItem(card: CardData, items: readonly Item[], f: Focus): num
     case 'label': {
       const key = f.row ?? f.x
       if (key === undefined) return -1
-      const bar = ((card.rows ?? []) as BarRow[]).slice(0, MAX_BARS).findIndex(r => same(r.label, key))
-      // a label card's records follow its bars
-      return bar >= 0 || card.kind === 'bar' ? bar : items.findIndex(it => it.kind === 'record' && it.open === key)
+      // a label card is a bar card of its counts: its records are the label panel's
+      return ((card.rows ?? []) as BarRow[]).slice(0, MAX_BARS).findIndex(r => same(r.label, key))
     }
     case 'table': {
       const key = f.row ?? f.x
@@ -216,7 +215,7 @@ export function focusFromRef(card: CardData, ref: string): Focus | undefined {
         return undefined
     }
   }
-  if ((card.kind === 'example' || card.kind === 'label') && (card.examples ?? []).some(e => e.ref === ref)) return { row: ref }
+  if (card.kind === 'example' && (card.examples ?? []).some(e => e.ref === ref)) return { row: ref }
   if (card.kind === 'timeline') {
     const i = (card.events ?? []).findIndex(e => e.ref === ref)
     if (i >= 0) return { event: i + 1 }
@@ -449,7 +448,7 @@ function diagramFrame(card: CardData, lay: Layout, t: number): Line[] {
       if (y <= reach) return p
       // an arrow not drawn yet leaves its box's border whole, once the box is there
       const shown = (j: number) => j >= 0 && j < N && t >= nodeAt(j)
-      return (p.ch === '▼' || p.ch === '▲') && (shown(lay.hit(x - 1, y)) || shown(lay.hit(x + 1, y))) ? { ...p, ch: '─', seg: { s: '', fg: COLORS.dim } } : null
+      return (p.ch === '↓' || p.ch === '↑') && (shown(lay.hit(x - 1, y)) || shown(lay.hit(x + 1, y))) ? { ...p, ch: '─', seg: { s: '', fg: COLORS.dim } } : null
     }),
   )
 }
