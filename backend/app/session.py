@@ -2174,7 +2174,8 @@ def translate_sub(lv: Live, sub: Sub, line: bytes | str) -> int:
     origin = rec.get("origin") if isinstance(rec.get("origin"), dict) else {}
     if rec.get("type") == "user" and origin.get("kind") in ("peer", "task-notification"):
         return 0  # a hand-back or a notice from a subagent this one started, which is no line of this chat
-    if rec.get("type") == "user" and not sub.thread and not rec.get("isMeta"):
+    # a compaction's summary (isCompactSummary) is Claude Code's, written as a user record: no message of anyone's
+    if rec.get("type") == "user" and not sub.thread and not rec.get("isMeta") and not rec.get("isCompactSummary"):
         prompt = _user_text(rec)
         if prompt and prompt.strip() and not prompt.lstrip().startswith("<"):
             if INTERRUPT_RE.match(prompt.strip()):
@@ -2305,7 +2306,7 @@ def translate(lv: Live, line: bytes | str) -> None:
             if isinstance(b, dict) and b.get("type") == "tool_result" and isinstance(b.get("tool_use_id"), str):
                 _tool_result(lv, b["tool_use_id"], b.get("content"), bool(b.get("is_error")))
         text = _user_text(rec)
-        if text is None:
+        if text is None or rec.get("isCompactSummary"):  # a compaction's summary is no prompt of the analyst's
             return
         if origin == OLD_ORIGIN:  # a 0.5.0 transcript's event, read again (OLD_TAG)
             _browser_event(lv, text, mid_turn=False)

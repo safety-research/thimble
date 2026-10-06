@@ -438,6 +438,29 @@ async def test_clear_carries_thimble_s_agents_into_the_new_session_read_from_the
     assert agents.read_meta(CORPUS, chat)["session"] == NEW
 
 
+async def test_a_compaction_s_summary_is_no_message_in_the_thread_or_in_main(bridge, project, ended):
+    """Claude Code writes a compaction's summary as a user record (isCompactSummary), the orientation's own automatic
+    one and main's /compact alike: neither chat shows it as a message (live check L18, group c)."""
+    lv, chat, path = await _click_orientation(bridge, project)
+    summary = ("This session is being continued from a previous conversation that ran out of context. The summary "
+               "below covers the earlier portion of the conversation.")
+    _write(path, {"type": "user", "message": {"role": "user", "content": "the task"}},
+           {"type": "system", "subtype": "compact_boundary", "content": "Conversation compacted",
+            "compactMetadata": {"trigger": "auto"}},
+           {"type": "user", "isCompactSummary": True, "isVisibleInTranscriptOnly": True,
+            "message": {"role": "user", "content": summary}},
+           _assistant({"type": "text", "text": "Reading on after the compaction."}))
+    _write(Path(lv.transcript_path), {"type": "system", "subtype": "compact_boundary", "content": "Conversation compacted"},
+           {"type": "user", "isCompactSummary": True, "isVisibleInTranscriptOnly": True,
+            "message": {"role": "user", "content": summary}})
+    session.tail_once(lv)
+    thread = agents.read_events(agents.paths(CORPUS, chat)[1])
+    assert [r.get("text") for r in thread if r.get("type") == "user"] == ["the task"]
+    assert any(r.get("delta") == "Reading on after the compaction." for r in thread), "the thread keeps following"
+    main_log = agents.read_events(agents.paths(CORPUS, "main")[1])
+    assert not any(summary in str(r.get("text") or "") for r in main_log)
+
+
 def _at(t: float) -> str:
     from datetime import datetime, timezone
 
