@@ -25,6 +25,10 @@ follow-on start through the module), a hand-back's wait (subagents.stopped), and
 started, whose ends its own passes must see, since their queues live in its memory (dev, checks). It exits SETTLE_S
 after the last of these, or once main's `claude` process has gone, and after MAX_S at the latest. Nothing runs in
 browser mode: a call for a workspace whose session is not in terminal mode exits at once.
+
+The SubagentStart hook's process then follows the running agents (follow): while one of thimble's agents runs, it makes
+a call with no kind every FOLLOW_S, so an agent's thread shows its steps while it works, as the server's resident mirror
+shows them in browser mode, and not only at the next hook.
 """
 from __future__ import annotations
 
@@ -50,6 +54,8 @@ TICK_S = 1.0
 SETTLE_S = 3.0
 MAX_S = 3600.0
 LOG_FILE = "local-hooks.log"  # in the workspace folder
+FOLLOW_LOCK = "mirror.follow.lock"  # in the workspace folder: held by the one process that follows the running agents
+FOLLOW_S = 1.0  # between the follower's calls (follow)
 
 
 def _todo_path(ws: Path) -> Path:
@@ -86,10 +92,11 @@ def _take_todo(ws: Path) -> list[tuple[str, dict[str, Any]]]:
     return out
 
 
-def _try_lock(ws: Path) -> int | None:
-    """The workspace's MIRROR_LOCK, held: its file descriptor, or None when another process holds it."""
+def _try_lock(ws: Path, name: str = MIRROR_LOCK) -> int | None:
+    """The workspace's lock file `name` (MIRROR_LOCK), held: its file descriptor, or None when another process holds
+    it."""
     try:
-        fd = os.open(ws / MIRROR_LOCK, os.O_RDONLY | os.O_CREAT, 0o600)
+        fd = os.open(ws / name, os.O_RDONLY | os.O_CREAT, 0o600)
     except OSError:
         return None
     try:
@@ -134,6 +141,42 @@ def run(c: str, kind: str, body: dict[str, Any]) -> int:
             os.close(fd)
         if not _todo_path(ws).exists():  # a call that came while the lock was being let go
             return passes
+
+
+def _agents_run(c: str) -> bool:
+    """Whether one of thimble's agents runs in workspace `c` (subagents.json)."""
+    from . import subagents  # noqa: PLC0415
+
+    return any(isinstance(a, dict) and a.get("role") in subagents.ROLES and a.get("status") in sf.RUNNING
+               for a in subagents.agents_of(c).values())
+
+
+def follow(c: str) -> int:
+    """The SubagentStart hook's process, once its call is done: while one of thimble's agents runs and main's `claude`
+    lives, a call with no kind every FOLLOW_S, so the mirror reads the agents' transcripts as they grow and their threads
+    show their steps as they take them, as the server's mirror shows them in browser mode. One process follows at a
+    time (FOLLOW_LOCK). Returns the number of passes it ran."""
+    from . import config  # noqa: PLC0415
+
+    ws = config.workspace_dir(c)
+    start = time.monotonic()
+    passes = 0
+
+    def going() -> bool:
+        return _agents_run(c) and sf.main_pid(ws) is not None and time.monotonic() - start < MAX_S
+
+    while going():
+        fd = _try_lock(ws, FOLLOW_LOCK)
+        if fd is None:
+            return passes
+        try:
+            while going():
+                passes += run(c, "", {})
+                time.sleep(FOLLOW_S)
+        finally:
+            os.close(fd)
+        # an agent that started as this process let go: its own hook's process found the lock held, so look again
+    return passes
 
 
 async def _hold(c: str, ws: Path) -> int:
@@ -263,6 +306,8 @@ def main(argv: list[str] | None = None) -> int:
     _logging(ws)
     try:
         run(c, kind, body)
+        if kind == "started":
+            follow(c)
     except Exception:  # noqa: BLE001
         log.exception("%s: the %s call failed", c, kind)
         return 1

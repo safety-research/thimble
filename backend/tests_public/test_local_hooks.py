@@ -349,3 +349,29 @@ def test_the_holder_hears_every_agent_end_the_server_hears(workspaces_tmp, tmp_p
     seen = json.loads(out.stdout.strip().splitlines()[-1])
     assert seen["before"] == list(local_hooks.END_LISTENERS)
     assert "app.checks._writer_ended" in seen["hooks"]
+
+
+async def test_while_an_agent_runs_its_thread_shows_each_step_with_no_other_hook(ws, project, module, monkeypatch):
+    """The SubagentStart hook's process follows the running agents (local_hooks.follow): a step the orientation takes
+    reaches its thread with no further hook, and the follower stops once no agent of thimble's runs (live check T5: an
+    orientation's pane showed one step after a minute's work)."""
+    monkeypatch.setattr(local_hooks, "FOLLOW_S", 0.05)
+    chat = await _typed_orientation(project, passes=("final",))
+    done = threading.Event()
+    out: list[int] = []
+    t = threading.Thread(target=lambda: (out.append(local_hooks.follow(CORPUS)), done.set()), daemon=True)
+    t.start()
+    path = project / SID / "subagents" / f"agent-{AGENT}.jsonl"
+    _write(path, _assistant(_use("toolu_o1", "Bash", {"command": "wc -l events.jsonl"})))
+    for _ in range(200):
+        if any(e.get("type") == "tool_use" and e.get("id") == "toolu_o1" for e in _log(chat)):
+            break
+        await asyncio.sleep(0.05)
+    else:
+        raise AssertionError("the step never reached the orientation's thread")
+    assert not done.is_set(), "the follower stopped while the orientation ran"
+    assert local_hooks._try_lock(ws, local_hooks.FOLLOW_LOCK) is None, "one follower at a time"
+    with sf.update(ws) as state:
+        sf.registry(state)[AGENT]["status"] = "done"
+    assert await asyncio.to_thread(done.wait, 30), "the follower went on after the orientation ended"
+    assert out and out[0] >= 1
