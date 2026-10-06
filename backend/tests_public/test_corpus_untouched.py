@@ -1,7 +1,7 @@
 """No agent thimble starts leaves anything in the corpus folder. thimble's own agents are subagents of main, whose fence
 keeps the corpus read-only (cli.main_fence), and write in work folders outside it (subagents.write_dirs). Claude Code's
 Bash sandbox makes a folder of its own in the folder a sandboxed command starts in, so every `claude -p` session thimble
-starts itself (a view build's, an extension's program's) runs in a folder of its own with the corpus added, and each of
+starts itself (a code ticket's, an extension's program's) runs in a folder of its own with the corpus added, and each of
 its Bash commands starts there again: a `cd` into the corpus does not carry over to the next command
 (agent_session.HOME_SHELL_ENV).
 
@@ -10,7 +10,6 @@ and check that a copy of a corpus is left as it was. They need THIMBLE_LIVE_CLAU
 Code's sandbox. The card and label kernels need no model and run wherever their sandbox runs."""
 from __future__ import annotations
 
-import asyncio
 import json
 import os
 import shutil
@@ -70,34 +69,23 @@ def test_every_agent_s_work_folder_lies_outside_the_corpus(corpus):
         assert not folder.resolve().is_relative_to(corpus), kind
 
 
-def test_a_view_build_runs_in_its_own_folder_with_the_view_s_folder_and_the_corpus_added(corpus, monkeypatch):
-    monkeypatch.setenv("THIMBLE_SANDBOX", "0")
-    monkeypatch.setitem(userconf.DEFAULTS["sandbox"], "enforce", False)
-    monkeypatch.setattr(views, "build_problem", lambda: "")
-    monkeypatch.setattr(dev, "_view_queue", [])
-    seen: list[dict] = []
+def test_each_job_s_own_folder_is_one_main_s_fence_lets_it_write_and_its_task_names_it(corpus):
+    """A view builder, a view reviewer and a check's run are subagents of main inside main's fence: each one's own folder
+    lies under a folder main's Bash may write (subagents.write_dirs), and so does the view's folder; a build's task
+    names both, and its registration names the corpus as the folder it reads."""
+    from app import subagents, view_tools
 
-    async def turn(run, run_log, cwd, prompt, resume, **kw):
-        seen.append({"cwd": cwd, "prompt": prompt, **kw})
-        raise dev.SessionError("stopped here")
+    writable = [w.resolve() for w in subagents.write_dirs(CORPUS)]
 
-    monkeypatch.setattr(dev, "_worker_turn", turn)
+    def under(p: Path) -> bool:
+        return any(p.resolve().is_relative_to(w) for w in writable)
+
     slug = views.propose(CORPUS, "Posts", "to read the board", ["board.jsonl"], "one row per post", asked=True)["slug"]
-    asyncio.run(dev._run_view(CORPUS, slug, dev.Run(ticket_id=f"view:{slug}", title="Posts", ts_start="")))
-    [turn_kw] = seen
     work, folder = dev.view_work_dir(CORPUS, slug), views.views_dir(CORPUS) / slug
-    assert turn_kw["cwd"] == work and turn_kw["add_dirs"] == (folder, corpus)
-    assert str(work) in turn_kw["prompt"], "the prompt says where its commands start"
-    conf = dev.dev_config(CORPUS, sandbox=True)
-    flags = dev.Sessions()._flags(CORPUS, "thimble view: Posts", (folder, corpus),
-                                  dev.view_fence(CORPUS, slug, corpus, folder, conf),
-                                  dev.view_asking(CORPUS, slug, folder, conf))
-    settings = _settings(flags)
-    assert settings["env"][agent_session.HOME_SHELL_ENV] == "1"
-    assert f"Edit(/{work}/**)" in settings["permissions"]["allow"]
-    assert settings["env"][agent_session.MEMORY_ENV] == "1", "the corpus's CLAUDE.md is read"
-    assert {f"{work}/CLAUDE.md", f"{config.WORKSPACES_DIR}/CLAUDE.md"} <= set(settings["claudeMdExcludes"]), \
-        "no memory file above the build's own folder, such as thimble's own, is read"
+    assert under(work) and under(folder) and under(checks.work_dir(CORPUS, "k1", "report"))
+    task = dev.build_task(CORPUS, views.read_proposal(CORPUS, slug))
+    assert str(work) in task and str(folder) in task
+    assert str(corpus) in view_tools.builder_definition(CORPUS)["prompt"]
 
 
 def test_a_program_s_session_runs_in_the_role_s_work_folder(corpus, tmp_path, monkeypatch):

@@ -473,3 +473,20 @@ def test_a_chat_an_earlier_version_left_running_closes_as_earlier_version(monkey
     assert subagents.close_old(CORPUS) == [meta["id"]]
     after = agents.read_meta(CORPUS, meta["id"])
     assert after["status"] == "stopped" and after["continue"] == "earlier-version"
+
+
+def test_what_agent_session_keeps_is_imported_only_by_the_jobs_thimble_still_starts():
+    """agent_session.py keeps only what code tickets' `claude -p` sessions, `thimble fix` and an extension's programs
+    need (Q6), so only dev.py and harness.py import it, besides main.py, which mounts its answer route."""
+    import ast
+    from pathlib import Path
+
+    app = Path(subagents.__file__).parent
+    importers = set()
+    for path in sorted(app.glob("*.py")):
+        for node in ast.walk(ast.parse(path.read_text("utf-8"))):
+            names = ([a.name for a in node.names] if isinstance(node, ast.ImportFrom) and node.module in (None, "app")
+                     else [node.module or ""] if isinstance(node, ast.ImportFrom) else [])
+            if any(n == "agent_session" or n.endswith(".agent_session") for n in names):
+                importers.add(path.stem)
+    assert importers <= {"dev", "harness", "agent_session"}, sorted(importers - {"dev", "harness", "agent_session"})

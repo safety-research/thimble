@@ -430,6 +430,26 @@ async def test_a_change_goes_to_the_last_builder_when_it_can_be_reached_else_to_
     assert "a legend" in bridge.ops("spawn")[-1]["prompt"] and len(bridge.ops("send")) == 1
 
 
+async def test_an_extension_s_program_builds_the_view_turn_by_turn_in_place_of_a_builder(board, bridge, gates, heard,
+                                                                                         monkeypatch):
+    turns: list[str] = []
+    part = type("Part", (), {"extension": "builder"})()
+
+    async def turn(c, slug, message, folders, p, rec):
+        turns.append(message)
+        _draft(slug, "<p>FAIL</p>" if len(turns) == 1 else "<p>fixed</p>")
+        return "wrote it"
+
+    monkeypatch.setattr(dev, "view_program", lambda c: part)
+    monkeypatch.setattr(dev, "program_view_turn", turn)
+    slug = _propose(asked=True)
+    ans = await dev.start_build(CORPUS, slug, subagents.CLICK)
+    assert ans.get("program") == "builder" and not bridge.ops("spawn")
+    await _until(lambda: _prop(slug).get("status") == "built", "the program's build never passed")
+    assert len(turns) == 2 and "problem: the page says FAIL" in turns[1], "what failed goes back to the program"
+    assert [k for k, _ in heard] == ["view"] and (CORPUS, slug) not in dev._view_runs
+
+
 # --------------------------------------------------------------------------- the review
 
 
@@ -569,12 +589,14 @@ def test_every_job_click_route_refuses_the_server_s_token_without_the_analyst_s_
     assert not bridge.calls, "the module is never asked"
 
 
-def test_the_module_registers_the_view_roles_on_their_settings_row(board):
-    """subagents.roles holds `thimble:view-builder` and `thimble:view-reviewer` on Settings' dev row, each with an
-    explicit effort, a fixed description, and the thimble tools that are not its own taken away."""
+def test_the_module_registers_the_three_job_roles_on_their_settings_rows(board):
+    """subagents.roles holds `thimble:view-builder` and `thimble:view-reviewer` on Settings' dev row and `thimble:check`
+    on its checks row, each with an explicit effort, a fixed description, and the thimble tools that are not its own
+    taken away."""
     roles = subagents.roles(CORPUS)
-    assert {"orientation", "critic", "writer", "view-builder", "view-reviewer", "helper"} <= set(roles)
-    own = {"view-builder": view_tools.BUILDER_TOOLS, "view-reviewer": view_tools.REVIEWER_TOOLS}
+    assert {"orientation", "critic", "writer", "view-builder", "view-reviewer", "check", "helper"} <= set(roles)
+    own = {"view-builder": view_tools.BUILDER_TOOLS, "view-reviewer": view_tools.REVIEWER_TOOLS,
+           "check": ("read_ref", "list_cards", "add_comment")}
     for role, mine in own.items():
         r = roles[role]
         assert r["type"] == f"thimble:{role}" and r["background"] and r["description"].strip()

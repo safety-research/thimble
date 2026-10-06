@@ -133,6 +133,9 @@ TYPES: dict[str, Type] = {
                           "app.view_tools:reviewer_definition", "app.view_tools:REVIEWER_TOOLS",
                           "app.view_review:subagent_started", "app.view_review:subagent_ended",
                           "app.view_review:subagent_refused"),
+    "check": Type("check", tools.CHECK_SESSION, "check", "checks", "checks", "app.checks:definition",
+                  "app.checks:OWN_TOOLS", "app.checks:subagent_started", "app.checks:subagent_ended",
+                  "app.checks:subagent_refused"),
     HELPER: Type(HELPER, None, None, "subagents", "orientation", "app.subagents:helper_definition"),
 }
 

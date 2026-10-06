@@ -163,8 +163,8 @@ def _dev_dir_off_the_checkout(tmp_path, monkeypatch):
 @pytest.fixture(autouse=True)
 def _view_tickets_held(monkeypatch):
     """A view proposal queues its build at once, and a build that starts asks main's module for a subagent. Every test
-    holds them queued with an empty pool."""
-    from app import dev
+    holds them queued with an empty pool, and starts with no report check's run."""
+    from app import checks, dev
 
     monkeypatch.setattr(dev, "VIEW_POOL", 0)
     monkeypatch.setattr(dev, "_view_runs", {})
@@ -174,7 +174,9 @@ def _view_tickets_held(monkeypatch):
     monkeypatch.setattr(dev, "_retry_handle", None)
     monkeypatch.setattr(dev, "_no_module_looks", {})
     monkeypatch.setattr(dev, "_settling", set())
-
+    monkeypatch.setattr(checks, "_active", {})
+    monkeypatch.setattr(checks, "_queue", [])
+    monkeypatch.setattr(checks, "_retry_handle", None)
 
 
 @pytest.fixture(autouse=True)
