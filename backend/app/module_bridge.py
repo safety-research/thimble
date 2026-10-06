@@ -454,9 +454,12 @@ def why_not(c: str) -> str:
         return idle
     if b.problem:
         return b.problem
-    switches = _launch(c).get("switches")
+    launch = _launch(c)
+    switches = launch.get("switches")
     if isinstance(switches, (list, dict)) and NO_MODULE_ENV in switches:
         return f"{NO_MODULE_ENV} is set"
+    if launch.get("modules_off"):  # what the launcher found, such as its own --settings that set disableAllHooks
+        return str(launch["modules_off"])
     from . import cc_plugin  # noqa: PLC0415
 
     tier = cc_plugin.managed() or {}

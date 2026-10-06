@@ -452,6 +452,15 @@ def test_the_launch_says_plainly_when_hooks_modules_are_off_and_still_launches(c
     (tmp_path / "cc" / "settings.json").write_text(json.dumps({"disableAllHooks": True}))
     assert cli.MODULES_OFF_LINE.format(reason="your Claude Code settings set disableAllHooks") in note()
     (tmp_path / "cc" / "settings.json").write_text("{}")
+    # live check L29: what only the launch can see, its own --settings, is kept in launch.json for the browser and the
+    # doctor, which run outside that session
+    assert cli.launch_args(corpus, settings='{"disableAllHooks": true}')
+    rec = json.loads((config.WORKSPACES_DIR / "logs" / cli.LAUNCH_FILE).read_text())
+    assert rec["modules_off"] == "your --settings set disableAllHooks"
+    line = cli.module_line(corpus)
+    assert line.startswith("off in the last launch here") and "your --settings set disableAllHooks" in line
+    cli.launch_args(corpus)
+    assert "modules_off" not in json.loads((config.WORKSPACES_DIR / "logs" / cli.LAUNCH_FILE).read_text())
     assert cli.SAFE_MODE_LINE in note(safe_mode=True)
     monkeypatch.setenv(cli.SAFE_MODE_ENV, "1")
     assert cli.SAFE_MODE_LINE in note()

@@ -1684,7 +1684,7 @@ def main_name(cwd: Path) -> str:
 # subagent paths are in): the orientation's work folder, the writers', the critics', the checks', the view builders' and
 # the workspace's own views. No code ticket's worktree: code tickets keep their own fence.
 WRITE_DIRS = ("orient/work", "writers", "critique-work", "check-work", "views-work", "extension/views")
-LAUNCH_FILE = "launch.json"  # in the workspace: {session, at, fenced, switches, unset, pid}
+LAUNCH_FILE = "launch.json"  # in the workspace: {session, at, fenced, switches, unset, pid, modules_off}
 # exported into main's environment: no "Move to background" and no ← agent view, the ↓ tray kept (spike U11);
 # CLAUDE_DISABLE_ADOPT adds nothing to the first but does no harm
 SWITCHES = {"CLAUDE_CODE_DISABLE_AGENT_VIEW": "1", "CLAUDE_DISABLE_ADOPT": "1"}
@@ -1938,10 +1938,11 @@ def refresh_extensions(c: str) -> None:
 
 
 def launch_record(c: str, session: str | None, fenced: bool, switches: dict[str, str], unset: list[str],
-                  pid: int | None = None) -> None:
+                  pid: int | None = None, modules_off: str = "") -> None:
     """Write launch.json in workspace `c` (module note, main's fence), with `pid`, the launcher's own process, which
-    becomes main's `claude` when the launcher execs it, when the launcher names it. Never raises: a launch that cannot
-    write it starts main, whose hooks module then stays idle."""
+    becomes main's `claude` when the launcher execs it, when the launcher names it, and `modules_off`, why the launch
+    found Claude Code's hooks modules off (modules_off), which the browser and the doctor give as the reason. Never
+    raises: a launch that cannot write it starts main, whose hooks module then stays idle."""
     from .ledger import atomic_write_text  # noqa: PLC0415
 
     try:
@@ -1950,6 +1951,8 @@ def launch_record(c: str, session: str | None, fenced: bool, switches: dict[str,
                                "unset": unset}
         if pid and pid > 1:
             rec["pid"] = int(pid)
+        if modules_off:
+            rec["modules_off"] = modules_off
         atomic_write_text(path, json.dumps(rec, indent=1) + "\n")
     except (OSError, ValueError) as e:
         _log(f"launch-args: {LAUNCH_FILE} of {c} was not written: {e}")
@@ -2060,7 +2063,7 @@ def _launch_args(cwd: Path, resume: bool, settings: str, own_session: str | None
     settings_value = launch_settings(cwd, settings, fence)
     if c:  # fenced as main's command line will show it (an unreadable --settings of the analyst's carries no fence)
         launch_record(c, session, cc_plugin.fenced_argv(["claude", "--settings", settings_value], cwd), switches, unset,
-                      launcher_pid)
+                      launcher_pid, modules_off=why_idle)
     load = "" if installed or cc_plugin.marketplace(root) != cc_plugin.INLINE else str(root)
     return "\n".join([load, tools_line, effort, settings_value, turn_tools,
                       main_name(cwd), session_id, " ".join(f"{k}={v}" for k, v in switches.items()), " ".join(unset),
@@ -2535,10 +2538,14 @@ def module_line(cwd: Path) -> str:
     if why:
         return f"off: Claude Code's hooks modules are off ({why}), so thimble's agents cannot start in this folder"
     notes = []
+    c = config.workspace_for_cwd(str(cwd))
+    launch = read_launch(c)
+    if launch.get("modules_off"):  # what the last launch alone could see, such as its own --settings
+        return (f"off in the last launch here ({launch.get('at') or '?'}): Claude Code's hooks modules were off "
+                f"({launch['modules_off']}), so thimble's agents could not start in it")
     if folder_trusted(cwd) is False:
         notes.append(f"Claude Code does not trust {cwd} yet; it asks at the first launch, and loads the module only "
                      "in a folder you trust")
-    c = config.workspace_for_cwd(str(cwd))
     try:
         rec = (_read_json(config.workspace_path(c) / "subagents.json") or {}).get("module") if c else None
     except (OSError, ValueError, KeyError, AttributeError):
