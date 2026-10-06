@@ -4,16 +4,14 @@ from __future__ import annotations
 
 import pytest
 
-from app import agent_session, calls
+from app import calls
 
 
 @pytest.fixture(autouse=True)
 def _fresh(workspaces_tmp):
     calls.forget()
-    agent_session._runs.clear()
     yield
     calls.forget()
-    agent_session._runs.clear()
 
 
 def test_only_a_file_in_the_session_s_own_tool_results_folder_is_read(tmp_path):

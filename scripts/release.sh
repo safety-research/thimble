@@ -89,8 +89,8 @@ allow=(plugin mods/thimble-cc-mod extensions backend prompts demos .claude-plugi
        frontend/src frontend/public frontend/index.html frontend/package.json
        frontend/package-lock.json frontend/vite.config.ts frontend/tsconfig.json frontend/tsconfig.app.json frontend/tsconfig.node.json)
 dirty=false
-# what an install does not run: the backend's tests and the mod's
-not_shipped=(':(exclude)backend/tests' ':(exclude)mods/thimble-cc-mod/tests')
+# what an install does not run: the backend's tests, the mod's and the hooks module's
+not_shipped=(':(exclude)backend/tests' ':(exclude)mods/thimble-cc-mod/tests' ':(exclude,glob)plugin/hooks/*.test.ts')
 if [ -n "$(git -C "$repo" status --porcelain --untracked-files=no -- "${allow[@]}" "${not_shipped[@]}")" ]; then
   dirty=true
   echo "release.sh: tracked files the zip carries have uncommitted changes, which ship (RELEASE.json says dirty)" >&2

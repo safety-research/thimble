@@ -203,7 +203,7 @@ export function Output({ bundle, maxLines, maxRows, fitWidth, card, labels }: { 
     case 'text/markdown':
       return (
         <div className="outputs-md">
-          <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={MD_REHYPE} components={MD_COMPONENTS}>
+          <ReactMarkdown remarkPlugins={[[remarkGfm, { singleTilde: false }]]} rehypePlugins={MD_REHYPE} components={MD_COMPONENTS}>
             {asText(data)}
           </ReactMarkdown>
         </div>

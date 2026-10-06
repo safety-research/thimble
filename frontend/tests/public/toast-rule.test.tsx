@@ -29,7 +29,7 @@ const REFUSAL = "Claude Code's sandbox cannot run here, so the orientation would
 
 test('a refused Start says why beside Start, once, and makes no toast', async () => {
   vi.stubGlobal('fetch', async (url: string, init?: RequestInit) => {
-    if (String(url).endsWith('/events') && init?.method === 'POST') return new Response(JSON.stringify({ detail: REFUSAL }), { status: 409, headers: { 'content-type': 'application/json' } })
+    if (String(url).endsWith('/start') && init?.method === 'POST') return new Response(JSON.stringify({ detail: REFUSAL }), { status: 409, headers: { 'content-type': 'application/json' } })
     return new Response(JSON.stringify({ models: {} }), { status: 200, headers: { 'content-type': 'application/json' } })
   })
   const el = await mount(<StartGate ws="mini" model="claude-opus-5-5" />)

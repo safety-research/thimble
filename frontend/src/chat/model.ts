@@ -11,6 +11,8 @@ export interface UserRow {
   ts?: string
   /** where the analyst typed it: the session's terminal or the browser; `main` for a message main sent the orientation */
   by?: string
+  /** with `by` terminal: the analyst typed it in Claude Code's agent tray, not a prompt main's call sent */
+  tray?: boolean
   /** `orient-follow-up` on a message an earlier build passed to the orientation through main, kept in older logs; a
    * follow-up's message now says so by its `run` */
   event?: string
@@ -65,6 +67,8 @@ export interface ChipRow {
   generation?: number
   /** the writer's chat a document save came from (report_types._writer_chat) */
   writer?: string
+  /** a follow-up that was not passed on (orient_session.not_passed_on): the message, which Send again sends */
+  message?: string
 }
 export interface AgentRow {
   kind: 'agent'
@@ -75,6 +79,8 @@ export interface AgentRow {
   ts?: string
   /** an orientation's follow-up, in main: the run of its session a message started (1 for the first) */
   run?: number
+  /** a dev chat that builds or reviews this view rather than running a code ticket */
+  view?: string
 }
 export interface ErrorRow {
   kind: 'error'
@@ -157,7 +163,7 @@ export function foldRecords(records: readonly ChatRecord[], skip?: ReadonlySet<n
     const into = parent ? parent.children : rows
     switch (e.type) {
       case 'user':
-        rows.push({ kind: 'user', index, text: e.text, ts: e.ts, by: e.by, event: e.event, run: e.run, extension: e.extension })
+        rows.push({ kind: 'user', index, text: e.text, ts: e.ts, by: e.by, ...(e.tray ? { tray: true } : {}), event: e.event, run: e.run, extension: e.extension })
         return
       case 'text': {
         // a Claude Code notification the model copied into its reply is harness text, not words for the analyst
@@ -185,11 +191,11 @@ export function foldRecords(records: readonly ChatRecord[], skip?: ReadonlySet<n
         return
       }
       case 'chip': {
-        rows.push({ kind: 'chip', index, chip: String(e.kind), text: chipText(String(e.kind), e.text), ref: e.ref, ts: e.ts, status: typeof e.status === 'string' ? e.status : undefined, chat: typeof e.chat === 'string' ? e.chat : undefined, generation: typeof e.generation === 'number' ? e.generation : undefined, writer: typeof e.writer === 'string' ? e.writer : undefined })
+        rows.push({ kind: 'chip', index, chip: String(e.kind), text: chipText(String(e.kind), e.text), ref: e.ref, ts: e.ts, status: typeof e.status === 'string' ? e.status : undefined, chat: typeof e.chat === 'string' ? e.chat : undefined, generation: typeof e.generation === 'number' ? e.generation : undefined, writer: typeof e.writer === 'string' ? e.writer : undefined, message: typeof e.message === 'string' ? e.message : undefined })
         return
       }
       case 'agent': {
-        const row: AgentRow = { kind: 'agent', index, chat: e.chat, role: e.role, title: e.title, ts: e.ts, ...(typeof e.run === 'number' ? { run: e.run } : {}) }
+        const row: AgentRow = { kind: 'agent', index, chat: e.chat, role: e.role, title: e.title, ts: e.ts, ...(typeof e.run === 'number' ? { run: e.run } : {}), ...(e.view ? { view: e.view } : {}) }
         const call = e.tool_use_id ? calls.get(e.tool_use_id) : undefined
         if (e.tool_use_id && call !== undefined && call > index) held.set(e.tool_use_id, [...(held.get(e.tool_use_id) ?? []), row])
         else rows.push(row)
@@ -1414,6 +1420,14 @@ export const stepEnded = (s: { state?: StepState }): boolean => s.state !== 'run
 /** Whether a row is a message that started a follow-up of the orientation (backend orientation.message): a `user`
  * record that says so by its event or its run, which the orientation's first message never does. Pure. */
 export const isFollowUpRow = (r: Row): r is UserRow => r.kind === 'user' && (r.event === 'orient-follow-up' || (typeof r.run === 'number' && r.run > 0))
+
+/** The texts of the analyst's messages a thread's log holds, by which the browser stops showing one it sent as on its
+ * way: a follow-up's first record (isFollowUpRow), or a message thimble's browser passed on (`by` browser), which the
+ * server records as it sends it (orient_session._show_message) with no `run`, since a message to a running
+ * orientation starts none. Pure. */
+export function landedTexts(rows: readonly Row[]): Set<string> {
+  return new Set(rows.filter((r): r is UserRow => r.kind === 'user' && (r.by === 'browser' || isFollowUpRow(r))).map((r) => r.text.trim()))
+}
 
 /** The latest time a row of `rows` carries (a message, a call, its result, a step's start); null when none does. Pure. */
 export function lastRowTs(rows: readonly Row[]): string | null {

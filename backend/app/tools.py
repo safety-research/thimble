@@ -39,12 +39,14 @@ router = APIRouter()
 SERVER_NAME = "thimble"  # workers see mcp__thimble__<tool>; the user's session mcp__plugin_thimble_thimble__<tool>
 TOOLS_PROMPT = "tools"  # prompts/tools.md: the `## <tool>` sections (description and schema) and the hint sections
 ANALYST = "analyst"
-# The THIMBLE_SESSION of each session thimble starts beside main (agent_session.py): `orient`, or `writer:<doc>` since
+# The key of each of thimble's agents (subagents.py), the session its calls run as: `orient`, or `writer:<doc>` since
 # two documents may be written at once (session_kind).
 ORIENT_SESSION = "orient"
 WRITER_SESSION = "writer"
 CRITIQUE_SESSION = "critique"  # `critique:orient`, the critic of the orientation's analysis (critique_session.py)
 CHECK_SESSION = "check"  # `check:<id>:<doc>`, a run of a report check on a document (checks.py)
+VIEW_SESSION = "view"  # `view:<slug>`, a build of a view (dev.py, view_tools.py)
+REVIEW_SESSION = "review"  # `review:<slug>`, a review of a built view (view_review.py, view_tools.py)
 MAIN_ONLY: "tuple[str | None, ...]" = (None,)  # Spec.sessions of a tool only main's shim lists (no THIMBLE_SESSION)
 ROLES = (ANALYST,)  # the dev worker is a Claude Code session with its own tools (dev.py)
 ANALYSIS_ROLES = (ANALYST,)  # who reads cards and records
@@ -185,8 +187,7 @@ REGISTRY: dict[str, Spec] = {
         Spec("reply_in_thread", (ANALYST,), "app.threads:tool_reply_in_thread"),
         # a message typed in the terminal to a thread, sent as that thread's composer would (/thimble:ask); main's
         Spec("message_thread", (ANALYST,), "app.threads:tool_message_thread", sessions=MAIN_ONLY),
-        # a tray entry of thimble's agents waits for its news (tray.py); thimble's agents listed for the terminal
-        Spec("wait_session", (ANALYST,), "app.tray:tool_wait_session", sessions=MAIN_ONLY),
+        # thimble's agents listed for the terminal (tray.py)
         Spec("list_agents", (ANALYST,), "app.tray:tool_list_agents", sessions=MAIN_ONLY),
         # a thread renamed or deleted from the chat, as its row's menu does; main's, as the analyst asks it
         Spec("rename_thread", (ANALYST,), "app.threads:tool_rename_thread", sessions=MAIN_ONLY),
@@ -194,18 +195,25 @@ REGISTRY: dict[str, Spec] = {
         Spec("screenshot", (ANALYST,), _H + "screenshot"),
         Spec("start_orientation", (ANALYST,), "app.orient_session:tool_start_orientation", aliases=("orient",)),
         Spec("start_writing", (ANALYST,), "app.write_session:tool_start_writing"),
-        # the orientation's check of its own analysis, listed by its session alone; it waits for the critic's report, so
-        # a call
-        # Claude Code drops stops the critic (drop_stops)
-        Spec("critique", (ANALYST,), "app.critique_session:tool_critique", sessions=(ORIENT_SESSION,), drop_stops=True),
-        # a message to the orientation after it finished, which resumes its session (orient_session.message); main's
-        # alone
+        # the orientation's check of its own analysis: its result is the Agent call that starts the critic; the
+        # orientation's alone (subagents.allowed)
+        Spec("critique", (ANALYST,), "app.critique_session:tool_critique", sessions=(ORIENT_SESSION,)),
+        # a message to the orientation after it finished, which continues its agent (orient_session); main's alone
         Spec("message_orientation", (ANALYST,), "app.orient_session:tool_message_orientation", sessions=MAIN_ONLY),
         # a report check made or run from the chat; main's alone
         Spec("run_check", (ANALYST,), "app.checks:tool_run_check", sessions=MAIN_ONLY),
         # a report check turned off, as the Checks pane's switch does, its runs stopped; main's, as run_check is
         Spec("stop_check", (ANALYST,), "app.comments:tool_stop_check", sessions=MAIN_ONLY),
         Spec("file_dev_ticket", (ANALYST,), _H + "file_dev_ticket"),
+        # a view's builder and reviewer check the view as often as they want, and finish once, where the server runs the
+        # gates of record (view_tools.py); a gate stops when its caller drops the call (the agent was stopped)
+        Spec("view_check", (ANALYST,), "app.view_tools:tool_view_check", sessions=(VIEW_SESSION, REVIEW_SESSION),
+             drop_stops=True),
+        Spec("finish_view", (ANALYST,), "app.view_tools:tool_finish_view", sessions=(VIEW_SESSION,), drop_stops=True),
+        Spec("view_pictures", (ANALYST,), "app.view_tools:tool_view_pictures", sessions=(REVIEW_SESSION,),
+             drop_stops=True),
+        Spec("finish_review", (ANALYST,), "app.view_tools:tool_finish_review", sessions=(REVIEW_SESSION,),
+             drop_stops=True),
     )
 }
 
@@ -336,13 +344,29 @@ def session_kind(session: str | None) -> str | None:
 
 def list(role: str = ANALYST, session: str | None = None) -> "builtins.list[dict[str, Any]]":  # noqa: A001 — the contract names it `tools.list`
     """[{name, description, input_schema}] for the tools the role may use in the session `session` (a THIMBLE_SESSION),
-    in
-    registry order. A tool with `sessions` of its own is listed in those alone."""
+    in registry order. A tool with `sessions` of its own is listed in those alone, but main's shim (no session) lists
+    them all, since thimble's agents are main's subagents and call through it: each agent's registration takes away
+    the tools that are not its own, and a call is refused when its caller may not make it (call_route)."""
     role_of(role)
     kind = session_kind(session)
-    names = [s.name for s in REGISTRY.values() if role in s.roles and (not s.sessions or kind in s.sessions)]
+    names = [s.name for s in REGISTRY.values() if role in s.roles and (kind is None or not s.sessions or kind in s.sessions)]
     secs = tool_sections(names)
     return [{"name": n, "description": secs[n][0], "input_schema": secs[n][1]} for n in names]
+
+
+PLUGIN_NAME = "thimble"  # the plugin's name (orientation.PLUGIN), the scope of its MCP server's tools
+WEB_TOOLS = ("WebFetch", "WebSearch")  # Claude Code's web tools, which an agent's `web: off` takes away
+
+
+def thimble_tool(name: str) -> str:
+    """A thimble tool's name as a subagent of main or a session thimble starts sees it, from the plugin's server."""
+    return f"mcp__plugin_{PLUGIN_NAME}_{SERVER_NAME}__{name}"
+
+
+def not_own(own: "builtins.list[str] | tuple[str, ...]") -> "builtins.list[str]":
+    """The thimble tools of the registry not in `own`, as an agent sees them: its disallowedTools, which leave it its own
+    thimble tools beside Claude Code's."""
+    return [thimble_tool(n) for n in REGISTRY if n not in own]
 
 
 def allowed_tools(role: str) -> "builtins.list[str]":
@@ -499,11 +523,11 @@ def own_group_session(session: str | None) -> bool:
 
 
 def session_chat(c: str, session: str | None) -> str | None:
-    """The chat of the running session `session` names, None when none runs (the mirror then credits its cards to it,
-    agents.claim_cell)."""
-    from . import agent_session  # noqa: PLC0415 — agent_session imports this module
+    """The chat of the running agent of thimble's whose key `session` is, None when none runs (the mirror then credits
+    its cards to it, agents.claim_cell)."""
+    from . import subagents  # noqa: PLC0415 — subagents imports this module
 
-    run = agent_session.current(c, session) if session else None
+    run = subagents.current(c, session) if session else None
     return run.chat if run is not None and run.chat else None
 
 
@@ -1268,17 +1292,13 @@ def _kind_mismatch(kind: str, cell: dict) -> str:
 
 def _card_installs(ctx: Ctx, code: str, tool: str) -> str:
     """The refusal of card code that installs software or downloads files (sandbox_allow.code_installs), from an agent
-    thimble started, unless thimble's config sets `installs` to "allow"; '' otherwise. Such code runs in the kernel,
-    where no permission prompt can reach the analyst."""
-    from . import sandbox_allow, userconf  # noqa: PLC0415
+    thimble started; '' otherwise. Such code runs in the kernel, where neither a permission prompt nor Claude Code's
+    permission mode reaches it, so it is refused whatever the mode (userconf's `installs` is read and ignored)."""
+    from . import sandbox_allow  # noqa: PLC0415
 
     if not ctx.session or not code.strip():
         return ""
-    try:
-        installs = userconf.load(ctx.c)["installs"]
-    except userconf.ConfigError:
-        installs = "ask"
-    return hint("card-installs", tool=tool) if installs != "allow" and sandbox_allow.code_installs(code) else ""
+    return hint("card-installs", tool=tool) if sandbox_allow.code_installs(code) else ""
 
 
 async def _h_add_card(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
@@ -2428,14 +2448,15 @@ async def _h_show_label(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
 
 
 async def _h_propose_view(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
-    """A proposal for a view written for how the corpus arranges its records, a ticket the dev agent builds at once
-    (views.propose, dev.run_view) from its fields (views.SPEC_FIELDS). The orientation's proposals are held until their
-    views pass their checks, so each reaches the analyst as soon as it works. A viewer of unusual file types the
-    orientation proposes
-    (views.offered_type_viewer) is stored `suggested`, offered in the File browser and built once the analyst accepts
-    it. A claim that matches no corpus file is refused, naming real paths near it; where views cannot be built the
-    proposal fails at once. A proposal from main's shim is one the analyst asked for, so the browser opens the view once
-    built."""
+    """A proposal for a view written for how the corpus arranges its records, which a `thimble:view-builder` builds at
+    once (views.propose, dev.start_build) from its fields (views.SPEC_FIELDS), on the model and effort the call names,
+    else Settings' dev row. The orientation's proposals are built as follow-on starts of its own start, and held until
+    their views pass their checks, so each reaches the analyst as soon as it works. A viewer of unusual file types the
+    orientation proposes (views.offered_type_viewer) is stored `suggested`, offered in the File browser and built once
+    the analyst accepts it. A claim that matches no corpus file is refused, naming real paths near it; where views
+    cannot be built the proposal fails at once. A proposal from main's shim is one the analyst asked for: its result is
+    the exact Agent call that starts its builder, which main makes (`## start_job-subagent`), and the browser opens the
+    view once built."""
     from . import views
 
     claims = args.get("claims")
@@ -2452,37 +2473,47 @@ async def _h_propose_view(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
         near = " ".join(hint("propose_view-near", claim=g, paths=", ".join(p)) for g, p in unmatched.items() if p)
         return err(" ".join(hint("propose_view-unmatched", claims=", ".join(unmatched), near=near).split()))
     orient = session_kind(ctx.session) == ORIENT_SESSION
+    typed = ctx.session is None  # main's own call: the build is main's Agent call
+    values = {k: str(args[k]) for k in ("model", "effort") if args.get(k)}
+    if typed:
+        from . import subagents  # noqa: PLC0415
+
+        if (before := subagents.refusal_before(ctx.c)) is not None:
+            return err(before.reason or f"propose_view: {before.kind}")
     prop = await _maybe_await(views.propose(ctx.c, name=str(args["name"]).strip(), why=str(args["why"]).strip(),
                                             claims=claims, arrangement="", proposed_by=ctx.created_by,
-                                            orientation=orient, asked=ctx.session is None,
-                                            suggested=orient and views.offered_type_viewer(claims), spec=spec))
+                                            orientation=orient, asked=typed,
+                                            suggested=orient and views.offered_type_viewer(claims), spec=spec,
+                                            route=views.TYPED if typed else None, values=values or None))
     status = str(prop.get("status") or "queued")
     if not prop.get("held"):
         _chip(ctx.c, "view", str(prop.get("name") or prop.get("slug")), ref=f"view:{prop.get('slug')}", status=status)
     claimed = ", ".join(prop.get("claims") or [])
     if status == "suggested":
         return ok(hint("propose_view-suggested", view=prop.get("name"), slug=prop.get("slug"), claims=claimed))
-    # without Node 20+ or the frontend's packages, or where thimble's config refuses the dev agent's session (the
-    # sandbox), the build fails at once (dev.run_view), and main is told why
-    if why := await asyncio.to_thread(views.build_problem) or await asyncio.to_thread(_view_refusal, ctx.c):
+    # without Node 20+ or the frontend's packages the build fails at once (dev.start_build), and main is told why
+    if why := await asyncio.to_thread(views.build_problem):
+        if typed:
+            views.update_proposal(ctx.c, str(prop["slug"]), status="failed", error=why)
         return ok(hint("propose_view-cannot-build", view=prop.get("name"), slug=prop.get("slug"), why=why))
+    if typed:
+        return await _typed_build(ctx, str(prop["slug"]), values)
     if prop.get("revised") and not prop.get("held"):  # a view built under this name is changed in place (views.revise)
         return ok(hint("view-changing", view=prop.get("name"), slug=prop.get("slug")))
     return ok(hint("propose_view-proposed", view=prop.get("name"), slug=prop.get("slug"), claims=claimed))
 
 
-def _view_refusal(c: str) -> str:
-    """Why thimble's config refuses a view build's session in workspace `c` (dev.dev_config), '' when it doesn't."""
-    config_of = _optional("dev", "dev_config")
-    if config_of is None:
-        return ""
-    from . import userconf  # noqa: PLC0415
+async def _typed_build(ctx: Ctx, slug: str, values: dict[str, str] | None = None) -> ToolResult:
+    """The build of the view `slug` main asked for: its pending start and the exact Agent call main makes
+    (`## start_job-subagent`), or the refusal (dev.start_build)."""
+    from . import dev  # noqa: PLC0415
 
-    try:
-        config_of(c, sandbox=True)
-    except userconf.ConfigError as e:
-        return str(e)
-    return ""
+    ans = await dev.start_build(ctx.c, slug, "typed", values or None, call=ctx.tool_use_id)
+    if ans.get("program"):
+        return ok(hint("view-changing", view=slug, slug=slug))
+    if ans.refused or "input" not in ans:
+        return err(ans.reason or f"propose_view: {ans.kind}")
+    return ok(hint("start_job-subagent", input=json.dumps(ans["input"], ensure_ascii=False)))
 
 
 async def _h_file_dev_ticket(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
@@ -2503,11 +2534,14 @@ async def _h_file_dev_ticket(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
         if slug is None:
             names = [v["name"] for v in views.list_views(ctx.c) if v.get("origin") == "workspace"]
             return err(hint("file_dev_ticket-no-view", view=view, views=", ".join(names) or "none"))
+        typed = ctx.session is None  # main's own call: the change is main's Agent call
         prop = views.revise(ctx.c, slug, f"{title}\n\n{body}", proposed_by=ctx.created_by,  # on the loop: it queues
-                            asked=ctx.session is None)
+                            asked=typed, route=views.TYPED if typed else views.FOLLOW_ON)
         _chip(ctx.c, "view", str(prop.get("name") or slug), ref=f"view:{slug}", status="queued")
         if why := await asyncio.to_thread(views.build_problem):
             return ok(hint("propose_view-cannot-build", view=prop.get("name"), slug=slug, why=why))
+        if typed:
+            return await _typed_build(ctx, slug)
         return ok(hint("view-changing", view=prop.get("name"), slug=slug))
     fn = _optional("dev", "file_ticket")
     if fn is None:
@@ -2573,7 +2607,8 @@ async def call_route(name: str, body: CallBody, request: Request) -> dict[str, A
     directory belongs to no corpus; everything else the model should read is an is_error result, never an HTTP error.
     A tool marked drop_stops is cancelled when the shim drops the request (until_dropped). The call runs as the session
     it names only with a token that proves it (hook_auth.session_proven): without one it runs as the analyst's, unless
-    it comes from a workspace's own folder, and with a wrong one it does not run."""
+    it comes from a workspace's own folder, and with a wrong one it does not run. A call through main's shim runs as
+    the agent of thimble's that made it (_as_caller)."""
     if not known(name):
         raise HTTPException(404, f"no such tool: {name}")
     from . import harness, hook_auth  # noqa: PLC0415 — harness imports agent_session's helpers lazily
@@ -2598,12 +2633,39 @@ async def call_route(name: str, body: CallBody, request: Request) -> dict[str, A
             return err(hint("session-unproven", tool=name)).as_dict()
         log.info("a call of %s names the session %s without its token; it runs as the analyst's", name, session)
         session = None
+    if session is None:  # main's shim: main's own call, or one of thimble's agents', told apart by its caller
+        refused, session = await _as_caller(c, name, body.tool_use_id or None)
+        if refused:
+            return err(refused).as_dict()
     work = call(c, name, body.args, actor=body.actor, notebook=body.notebook, session=session,
                 tool_use_id=body.tool_use_id or None)
     if REGISTRY[canonical(name)].drop_stops:
         res = await until_dropped(request.receive, work, name)
         return (res or err(f"{name} was stopped: its caller dropped the call")).as_dict()
     return (await work).as_dict()
+
+
+async def _as_caller(c: str, name: str, tool_use_id: str | None) -> tuple[str, str | None]:
+    """(why the call is refused, '' when it runs; the session it runs as) for a call through main's shim: the key of the
+    agent of thimble's that made it (subagents.caller, from the caller hook's line, else the transcript that holds the
+    call), or None for main's own. A call its caller may not make is refused (subagents.allowed): main's `critique`, the
+    critic's `add_card`, a tool of a part the orientation's run has off (orientation.part_on)."""
+    from . import orientation, orient_session, subagents  # noqa: PLC0415 — each imports this module
+
+    canon = canonical(name)
+    who = await subagents.caller(c, tool_use_id) if tool_use_id else None
+    if who is None:
+        spec = REGISTRY[canon]
+        if spec.sessions and None not in spec.sessions:
+            return f"{canon} is not available to main", None
+        return "", None
+    if not subagents.allowed(who, canon):
+        return f"{canon} is not available to {who.agent_type or 'this agent'}", None
+    if session_kind(who.key) == ORIENT_SESSION:
+        part = next((p for p, names in orient_session.PART_TOOLS.items() if canon in names), None)
+        if part is not None and not orientation.part_on(c, part):
+            return f"{canon} is not available in this run of the orientation, whose {part} output is off", None
+    return "", who.key
 
 
 async def until_dropped(receive: Callable[[], Awaitable[dict[str, Any]]], work: Awaitable[ToolResult],

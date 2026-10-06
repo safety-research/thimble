@@ -86,7 +86,7 @@ UNUSED_PER_KIND = 5  # unused fields and values named per kind of file, the most
 UNUSED_LISTED = 20
 CALL_TEXT_CHARS = 200_000  # of one call's input and output read for the checks
 CALLS_TEXT_CHARS = 30_000_000  # of every call's, together
-CRITIC = "critic"  # a critique's chat's agent_type (critique_session.AGENT, which imports this module)
+CRITIC = "critic"  # a critique's chat's agent_type, `thimble:critic` as a subagent (critique_session, _critic)
 BACKEND_DIR = Path(__file__).resolve().parent.parent  # where `python -m app.orient_checks` runs (check_apart)
 COVERAGE_FLAG = "--coverage"  # the child adds the coverage line of the orientation chat named next (coverage)
 ONLY_FLAG = "--only"  # with COVERAGE_FLAG, the child computes the coverage line alone
@@ -189,7 +189,7 @@ def _read_by_agents(c: str, corpus: Path) -> set[str]:
 
     out: set[str] = set()
     for meta in agents.list_chats(c):
-        if meta.get("agent_type") == CRITIC:
+        if _critic(meta):
             continue
         _, log_path = agents.paths(c, str(meta["id"]))
         for rec in agents.read_events(log_path):
@@ -260,7 +260,7 @@ def _own_calls(c: str, chats: set[str]) -> Iterator[dict[str, Any]]:
 def _critic_chats(c: str) -> set[str]:
     from . import agents  # noqa: PLC0415
 
-    return {str(m["id"]) for m in agents.list_chats(c) if m.get("agent_type") == CRITIC}
+    return {str(m["id"]) for m in agents.list_chats(c) if _critic(m)}
 
 
 def _critic(meta: dict[str, Any]) -> bool:

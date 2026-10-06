@@ -1,7 +1,7 @@
 """Views: viewers written for how a corpus arranges its records, and the proposals they start as.
 
 A view is three files in `workspaces/<c>/extension/views/<slug>/`, the workspace's local extension (local_dir), written
-by the dev agent's session (dev.run_view): view.json {name, description, scope, unit, records, accepts, units, libs,
+by the view's builder, a subagent of main (dev.start_build, view_tools.py): view.json {name, description, scope, unit, records, accepts, units, libs,
 built}, reader.py (the contract in view_host.py), and view.html, drawn in a sandboxed frame that loads nothing but the
 view's media route. `scope` are globs of the files the view opens (held as `claims`), `unit` "file" for a file viewer
 (file_type_viewer), `records` its kinds of record with the fields its reader made rather than read, each `derived`
@@ -24,14 +24,13 @@ kernel with a cached index; refs.resolve hands file refs with a fragment to enri
 synchronous callers to the kernel on the server's loop.
 
 thimble's own state of the views (proposals, versions, revisions, reviews) stays in `workspaces/<c>/views/` (state_dir).
-A proposal is a view ticket in `views/proposals.json` that starts building as soon as it is proposed. Until the
-server
-stamps `built` into view.json the view is a draft that nothing lists or opens. After each session turn the server
-runs
-`gate` (the files' validation, then `check`); a pass stamps `built`, a failure goes back to the session up to
-dev.MAX_ATTEMPTS times. A change to a built view (revise) copies its files aside and restores them if the change
-fails.
-Progress is `view {slug, status, chat?}` on the workspace stream."""
+A proposal is a build in `views/proposals.json` that starts as soon as it is proposed. Until the server stamps
+`built` into view.json the view is a draft that nothing lists or opens. The builder checks its draft with view_check and
+finishes with finish_view, where the server runs `gate` (the files' validation, then `check`); a pass stamps `built`
+and `version` (mark_built) and keeps the files as they passed (VERSIONS_SUBDIR), a failure goes back to the builder up
+to dev.MAX_ATTEMPTS times. Readers see only what a gate passed (read_built's digest rule): a write into the view's
+folder after its pass reaches them only once a gate passes it. A change to a built view (revise) copies its files
+aside and restores them if the change fails. Progress is `view {slug, status, chat?}` on the workspace stream."""
 from __future__ import annotations
 
 import asyncio
@@ -56,13 +55,13 @@ import time
 from collections import OrderedDict
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Iterator
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel
 
-from . import config, corpus_tree, headless, investigation, prompts, refs, userconf, view_calls, view_indexes, view_libs
+from . import config, corpus_tree, headless, investigation, refs, userconf, view_calls, view_indexes, view_libs
 from .records import is_record_ref as is_record
 from .view_host import shown_whole
 from .ledger import atomic_write_text, read_json, unlinked, write_json, write_json_once
@@ -207,11 +206,12 @@ def _now() -> str:
 
 def _emit(c: str, slug: str, status: str, **extra: Any) -> None:
     """The `view` event on the workspace stream. investigation.emit runs on the event loop only, so a caller in a
-    worker thread (a route's blocking part) hands it to the bound loop. A held proposal's build sends none: the analyst
-    hears of it once its view is built (mark_built)."""
-    if slug in held_slugs(c):
-        return
+    worker thread (a route's blocking part) hands it to the bound loop. A held proposal's build (one of the
+    orientation's, before its view first passes) says `held`: its chip in the orientation's thread follows it, while
+    the views bar and the view-ready toast wait for the view to be built (mark_built) (live checks L19, L25)."""
     event = {"type": "view", "slug": slug, "status": status, **extra}
+    if slug in held_slugs(c):
+        event["held"] = True
 
     def send() -> None:
         try:
@@ -584,23 +584,163 @@ def _view_json(d: Path) -> dict[str, Any]:
 
 
 def read_built(c: str, slug: str) -> dict[str, Any] | None:
-    """The view as it last passed its checks: what every reader of a view but its own checks uses, since a draft never
-    opens a citation. While a session may be writing the view's folder (_changing), or has left it a draft, that is the
-    version kept when it last passed (_as_built); otherwise read_view. None for a view that never passed."""
+    """The view as it last passed its checks: what every reader of a view but its own checks uses (citations, the
+    views kernel, list_views), since only files a gate passed may reach them (the digest rule). The live folder is
+    served only when its files' digest (view_digest, cached) equals the `version` stamp mark_built wrote and the copy
+    kept at that version (VERSIONS_SUBDIR, which only the server writes) exists; otherwise the copy kept when it last
+    passed (_as_built). So neither a builder's or reviewer's edit after its pass, another agent's write into the folder,
+    nor a `built` stamp an agent wrote into view.json reaches a reader ungated. A change found while no agent of the view
+    runs is gated once (_found_change). None for a view that never passed."""
     v = read_view(c, slug)
-    if v is not None and v["origin"] == "workspace" and (v["draft"] or _changing(c, slug)):
+    if v is None or v["origin"] != "workspace":
+        return v
+    if not v["draft"] and passed_as_is(c, slug, v):
+        return v
+    kept = _as_built(c, slug, v)
+    if not v["draft"] or kept is not None:
+        _found_change(c, slug)
+    return kept
+
+
+def passed_as_is(c: str, slug: str, v: dict[str, Any] | None = None) -> bool:
+    """Whether the view's live folder holds what its last gate passed: its digest is its `version` stamp, and the copy
+    kept at that version exists."""
+    v = v or read_view(c, slug)
+    version = str((v or {}).get("version") or "")
+    if not v or not VERSION_RE.match(version) or not (_versions_dir(c, slug) / version / VIEW_JSON).is_file():
+        return False
+    return digest(views_dir(c) / slug)[:12] == version
+
+
+_digests: dict[str, tuple[tuple[Any, ...], str]] = {}  # a view folder -> (its files' sizes and times, their digest)
+_DIGESTS_MAX = 512
+
+
+def digest(d: Path) -> str:
+    """view_digest of the folder `d`, cached on its files' names, sizes and modification times."""
+    try:
+        files = sorted(p for p in d.iterdir() if p.is_file())
+        lib = d / view_libs.LIB_DIR
+        files += sorted(p for p in lib.iterdir() if p.is_file()) if lib.is_dir() and not lib.is_symlink() else []
+        stamp = tuple((p.relative_to(d).as_posix(), st.st_size, st.st_mtime_ns) for p in files for st in (p.stat(),))
+    except OSError:
+        return ""
+    hit = _digests.get(str(d))
+    if hit is not None and hit[0] == stamp:
+        return hit[1]
+    value = view_digest(d)
+    if len(_digests) >= _DIGESTS_MAX:
+        _digests.pop(next(iter(_digests)))
+    _digests[str(d)] = (stamp, value)
+    return value
+
+
+FOUND_GATE_S = 5.0  # a change found in a view's folder with no agent of the view running is gated once this quiet
+_found: dict[tuple[str, str], str] = {}  # (workspace, slug) -> the digest gated or waiting to be, so each is gated once
+_found_timers: dict[tuple[str, str], asyncio.TimerHandle] = {}
+
+
+def _raw_proposal(c: str, slug: str) -> dict[str, Any]:
+    """The proposal of `slug` as stored, its status not settled against the built views (list_proposals reads those
+    through read_built, which calls this)."""
+    p = proposals_path(c)
+    raw = read_json(p, []) if p.is_file() else []
+    return next((x for x in raw if isinstance(x, dict) and x.get("slug") == slug), {}) if isinstance(raw, list) else {}
+
+
+def _agent_works_on(c: str, slug: str) -> bool:
+    """Whether a builder, a reviewer or a program's build of the view runs, or its proposal waits for one."""
+    from . import dev, subagents, view_tools  # noqa: PLC0415
+
+    prop = _raw_proposal(c, slug)
+    return (prop.get("status") in PENDING or (c, slug) in dev._view_runs
+            or subagents.running(c, view_tools.build_key(slug)) or subagents.running(c, view_tools.review_key(slug)))
+
+
+def _found_change(c: str, slug: str) -> None:
+    """The view's folder no longer holds what its last gate passed, and no agent of the view runs (a change made in the
+    analyst's editor, say): the gate runs once on it after FOUND_GATE_S, and a pass makes it the view (mark_built); a
+    failure leaves readers on the copy that passed."""
+    try:
+        if _agent_works_on(c, slug):
+            return
+    except Exception:  # noqa: BLE001 — a reader never fails for this
+        log.debug("%s: whether an agent works on %s is unknown", c, slug, exc_info=True)
+        return
+    now = digest(views_dir(c) / slug)
+    if not now or _found.get((c, slug)) == now:
+        return
+    loop = _thread_loop() or (_loop if _loop is not None and _loop.is_running() and not _loop.is_closed() else None)
+    if loop is None:
+        return
+    _found[(c, slug)] = now
+
+    def arm() -> None:
+        old = _found_timers.pop((c, slug), None)
+        if old is not None:
+            old.cancel()
+        _found_timers[(c, slug)] = loop.call_later(
+            FOUND_GATE_S, lambda: loop.create_task(_gate_found(c, slug, now), name=f"view-found:{c}:{slug}"))
+
+    if _thread_loop() is loop:
+        arm()
+    else:
+        loop.call_soon_threadsafe(arm)
+
+
+async def _gate_found(c: str, slug: str, seen: str) -> None:
+    _found_timers.pop((c, slug), None)
+    d = views_dir(c) / slug
+    if digest(d) != seen or _agent_works_on(c, slug) or passed_as_is(c, slug):
+        return
+    try:
+        rep = await gate(c, slug, _kept_locators(c, slug))
+    except Exception:  # noqa: BLE001
+        log.exception("%s: the gate of the change found in %s failed", c, slug)
+        return
+    if rep.get("ok") and digest(d) == seen:
+        log.info("%s: a change made to the view %s outside thimble's agents passed its checks", c, slug)
+        mark_built(c, slug)
+    else:
+        log.info("%s: a change made to the view %s outside thimble's agents did not pass, so readers keep the view as "
+                 "it last passed: %s", c, slug, first_failure(rep))
+
+
+async def regate(c: str, slug: str) -> dict[str, Any] | None:
+    """At the end of an agent of the view (dev._settle, view_review.subagent_ended): a folder that changed after its
+    last pass is gated again, and a pass makes it the view, a failure puts back the files kept at that pass
+    (restore_version). The gate's report, or None when the folder holds what passed."""
+    v = read_view(c, slug)
+    if v is None or v["origin"] != "workspace" or passed_as_is(c, slug, v):
+        return None
+    version = str(v.get("version") or "")
+    rep = await gate(c, slug, _kept_locators(c, slug))
+    if rep.get("ok"):
+        mark_built(c, slug)
+    elif not restore_version(c, slug, version):
         kept = _as_built(c, slug, v)
         if kept is not None:
-            return kept
-    return None if v is None or v["draft"] else v
+            restore_version(c, slug, str(kept.get("version") or ""))
+    return rep
 
 
-def _changing(c: str, slug: str) -> bool:
-    """Whether a session may be writing the view's folder: a change to it (revise, whose copy aside stays until the
-    change ends) or a revision its review asked for."""
-    from . import view_review  # noqa: PLC0415 — the review imports this module
-
-    return _revision_dir(c, slug).is_dir() or view_review.revising(c, slug)
+def restore_version(c: str, slug: str, version: str) -> bool:
+    """Put the view's files back as they were kept at `version` (_publish), its cache left: False without that copy."""
+    src = _versions_dir(c, slug) / version if VERSION_RE.match(str(version or "")) else None
+    if src is None or not (src / VIEW_JSON).is_file():
+        return False
+    d = views_dir(c) / slug
+    d.mkdir(parents=True, exist_ok=True)
+    for p in d.iterdir():
+        if p.name == CACHE_SUBDIR or p.is_symlink():
+            continue
+        shutil.rmtree(p, ignore_errors=True) if p.is_dir() else p.unlink(missing_ok=True)
+    for p in src.iterdir():
+        if p.is_symlink():
+            continue
+        shutil.copytree(p, d / p.name, symlinks=True) if p.is_dir() else shutil.copy2(p, d / p.name)
+    _forget(c, slug)
+    return True
 
 
 def _as_built(c: str, slug: str, live: dict[str, Any]) -> dict[str, Any] | None:
@@ -815,16 +955,40 @@ def _versions_dir(c: str, slug: str) -> Path:
 
 def _publish(c: str, slug: str, version: str) -> None:
     """Keep the view's files as they passed their checks at `version` (VERSIONS_SUBDIR), the newest VERSIONS_KEPT."""
-    root = _versions_dir(c, slug)
+    _keep_version(views_dir(c) / slug, _versions_dir(c, slug), version)
+
+
+def keep_installed(ws: Path) -> list[str]:
+    """The copies kept at their versions (VERSIONS_SUBDIR) of the views of a workspace folder thimble installs whole (a
+    pre-cache, demo.install), which carries the views' files with their `version` stamps but not thimble's state of
+    them: a view whose files still hash to its stamp gets that copy, so readers see it as it passed when the pre-cache
+    was made (read_built) rather than nothing until its checks run again here. The slugs kept."""
+    root = ws / LOCAL_SUBDIR / VIEWS_SUBDIR
+    kept: list[str] = []
+    if not root.is_dir() or root.is_symlink():
+        return kept
+    for d in sorted(root.iterdir()):
+        if not SLUG_RE.match(d.name) or not d.is_dir() or d.is_symlink():
+            continue
+        raw = _view_json(d)
+        version = str(raw.get("version") or "")
+        if raw.get("built") and VERSION_RE.match(version) and view_digest(d)[:12] == version:
+            _keep_version(d, ws / VIEWS_SUBDIR / VERSIONS_SUBDIR / d.name, version)
+            kept.append(d.name)
+    return kept
+
+
+def _keep_version(src: Path, root: Path, version: str) -> None:
+    """The files of the view folder `src` kept at `version` in `root`, the newest VERSIONS_KEPT of its versions."""
     dst = root / version
     if not dst.is_dir():
         tmp = root / f".{version}.tmp"
         shutil.rmtree(tmp, ignore_errors=True)
         tmp.mkdir(parents=True)
-        for f in (views_dir(c) / slug).iterdir():
+        for f in src.iterdir():
             if f.is_file() and not f.is_symlink():
                 shutil.copy2(f, tmp / f.name)
-        view_libs.copy_lib(views_dir(c) / slug, tmp)
+        view_libs.copy_lib(src, tmp)
         os.replace(tmp, dst)
     os.utime(dst)
     kept = sorted((x for x in root.iterdir() if x.is_dir() and VERSION_RE.match(x.name)),
@@ -1266,6 +1430,27 @@ def snippet(req: dict[str, Any]) -> str:
 _runner = view_calls.execute
 # the limit of the reader calls made in this context: CHECK_CALL_S within gate(), else none
 _call_limit: contextvars.ContextVar[float | None] = contextvars.ContextVar("view_call_limit", default=None)
+# whether the reader calls made in this context read the view's live folder (live_reads), else the view as it last
+# passed its checks (read_built)
+_live: contextvars.ContextVar[bool] = contextvars.ContextVar("view_live_reads", default=False)
+
+
+@contextlib.contextmanager
+def live_reads() -> Iterator[None]:
+    """The reader calls made inside, without a version, read the view's live folder, its draft: the checks of a view
+    (check, which the gates run) and a reviewer's pictures (view_review.pictures). Every other reader call without a
+    version reads the view as it last passed (read_built), so a citation, a page, main's screenshot or the views kernel
+    never runs files no gate passed (the digest rule)."""
+    token = _live.set(True)
+    try:
+        yield
+    finally:
+        _live.reset(token)
+
+
+def _current(c: str, slug: str) -> dict[str, Any] | None:
+    """The view a reader call without a version reads: the live folder inside live_reads, else read_built."""
+    return read_view(c, slug) if _live.get() else read_built(c, slug)
 
 
 def _answer_from(outputs: list[dict]) -> dict[str, Any] | None:
@@ -1301,8 +1486,9 @@ def _prepare(c: str, slug: str, version: str | None = None) -> tuple[dict[str, A
 
 def _prepared(c: str, slug: str, version: str | None = None) -> tuple[dict[str, Any], dict[str, Any],
                                                                        list[tuple[str, int, int]]]:
-    """_prepare's view and request, and the claimed files they were made from."""
-    view = read_version(c, slug, version) if version else read_view(c, slug)
+    """_prepare's view and request, and the claimed files they were made from: with `version` the view at that version,
+    else the view as it last passed, or its live folder inside live_reads (_current)."""
+    view = read_version(c, slug, version) if version else _current(c, slug)
     if view is None:
         raise ReaderError(f"no view {slug!r}" + (f" at version {version}; reload it" if version else ""))
     if not view["ok"]:
@@ -2333,10 +2519,17 @@ def _keep_deleted(c: str, prop: dict[str, Any]) -> None:
         write_json(state_dir(c) / DELETED_FILE, items)
 
 
+CLICK, FOLLOW_ON, TYPED = "click", "follow-on", "typed"  # how a build starts (subagents.ROUTES)
+
+
 def propose(c: str, name: str, why: str, claims: Any, arrangement: str, proposed_by: str = "analyst",
             orientation: bool = False, asked: bool = False, suggested: bool = False,
-            spec: dict[str, Any] | None = None) -> dict[str, Any]:
-    """Store a proposal, announce it and queue it for the dev agent at once (dev.queue_view). A proposal of the same
+            spec: dict[str, Any] | None = None, route: str | None = None,
+            values: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Store a proposal, announce it and queue its build at once (dev.queue_view), as part of the start that asked for it
+    (`route`: an orientation's proposal a follow-on start, else a click), with the run's `values` (model and effort,
+    else Settings' dev row). A typed proposal, main's propose_view, is not queued: its caller starts it with main's
+    Agent call (dev.start_build). A proposal of the same
     name not yet built is replaced under its slug, its build stopped. An `orientation` proposal is stored
     `orientation: true` and, unless `suggested`, `held: true`, queued unannounced until its view passes its checks
     (mark_built); a held proposal proposed again unchanged is left as it is, and changed it is revised (revise), still
@@ -2367,9 +2560,10 @@ def propose(c: str, name: str, why: str, claims: Any, arrangement: str, proposed
         raise HTTPException(400, "a proposal says which records a unit gathers and how the page lays it out (`arrangement`)")
     # a view already built under this name is changed in place, as the analyst still uses it, rather than built again
     # beside it under a new slug
+    route = route or (FOLLOW_ON if orientation else CLICK)
     if (built := built_slug(c, name)) is not None:
         return revise(c, built, "", why=why, claims=claims_l, arrangement=arrangement, proposed_by=proposed_by,
-                      asked=asked, spec=spec or None)
+                      asked=asked, spec=spec or None, route=route, values=values)
     with _proposals_lock:
         items = list_proposals(c)
         old = next((p for p in items if str(p.get("name", "")).casefold() == name.casefold()
@@ -2380,7 +2574,7 @@ def propose(c: str, name: str, why: str, claims: Any, arrangement: str, proposed
                 return old  # the same proposal again: its build goes on, or its view stays built
             # changed, such as after the critique: its build goes on from its draft, or its view is changed
             return revise(c, old["slug"], "", why=why, claims=claims_l, arrangement=arrangement,
-                          proposed_by=proposed_by, spec=spec or None)
+                          proposed_by=proposed_by, spec=spec or None, route=route, values=values)
         if old is not None:
             _stop_review(c, old["slug"], forget=True)
             _stop_build(c, old["slug"], "replaced", force=bool(old.get("held")))
@@ -2396,10 +2590,13 @@ def propose(c: str, name: str, why: str, claims: Any, arrangement: str, proposed
             prop["held"] = True
         if asked:
             prop["asked"] = True
+        prop["route"] = route
+        if values:
+            prop["values"] = {k: str(v) for k, v in values.items() if v}
         items.append(prop)
         _save_proposals(c, items)
     _emit(c, slug, prop["status"])
-    if not suggested:
+    if not suggested and route != TYPED:
         _queue(c, slug)
     return prop
 
@@ -2528,28 +2725,27 @@ def unchanged_since_built(c: str, slug: str) -> bool:
     return kept.is_dir() and view_digest(kept) == view_digest(views_dir(c) / slug)
 
 
-def end_revision(c: str, slug: str, error: str | None = None, *, failed_change: str | None = None) -> None:
-    """A change to a built view that failed (`error`) or was dismissed: the view as it was, its proposal built again
-    with the error kept, and `view {built}` on the stream. `failed_change`, the request of a change that failed, stays
-    on the proposal for retry."""
+def end_revision(c: str, slug: str, error: str | None = None, *, failed_change: str | None = None,
+                 stopped_by: str | None = None) -> None:
+    """A change to a built view that failed (`error`), was dismissed or was stopped by main's quit (`stopped_by`
+    "quit", which its chip shows as stopped): the view as it was, its proposal built again with the error kept, and
+    `view {built}` on the stream. `failed_change`, the request of a change that failed, stays on the proposal for
+    retry."""
     restore_built(c, slug)
     update_proposal(c, slug, status="built", change=None, changed=None, revision=None, error=error,
-                    failed_change=failed_change)
+                    failed_change=failed_change, stopped_by=stopped_by)
     _emit(c, slug, "built")
 
 
 def revise(c: str, slug: str, request: str, *, why: str | None = None, claims: Any = None,
            arrangement: str | None = None, proposed_by: str = "analyst", asked: bool = False,
-           spec: dict[str, Any] | None = None) -> dict[str, Any]:
-    """A change to the view `slug`, as a view ticket on its proposal (made from the view when it has none): `request` is
-    the
+           spec: dict[str, Any] | None = None, route: str = CLICK, values: dict[str, Any] | None = None) -> dict[str, Any]:
+    """A change to the view `slug`, as a build on its proposal (made from the view when it has none): `request` is the
     analyst's words, and given fields replace the proposal's. A built view's files are copied aside first
-    (restore_built),
-    and the proposal is marked `revision` and `changed`. A running build stops, its draft kept. Queued at once. 404
-    for
-    no such view or proposal."""
-    from . import dev  # noqa: PLC0415
-
+    (restore_built), and the proposal is marked `revision` and `changed`. Queued at once (dev.queue_view), as part of
+    the start that asked for it (`route`), where a running builder of the view gets the change as a message, and a
+    finished one that main's session can still reach runs again with it; a typed change (main's propose_view) is
+    started by its caller. 404 for no such view or proposal."""
     request = str(request or "").strip()
     _stop_review(c, slug)
     with _proposals_lock:
@@ -2564,13 +2760,13 @@ def revise(c: str, slug: str, request: str, *, why: str | None = None, claims: A
             _save_proposals(c, [*items, prop])
         revision = view is not None or bool(prop.get("revision"))
         pending = prop.get("status") in PENDING
-        if pending:
-            # the build stops and its draft stays: the session goes on from it with the change
-            dev.stop_view(c, slug, "revised")
         change = "\n\n".join(x for x in (str(prop.get("change") or "") if pending else "", request) if x)
-        fields: dict[str, Any] = {"status": "queued", "error": None, "change": change or None, "changed": True,
-                                  "revision": revision or None, "asked": True if asked else None,
-                                  "failed_change": None, "ts": _now()}
+        fields: dict[str, Any] = {"status": "building" if prop.get("status") == "building" else "queued", "error": None,
+                                  "change": change or None, "changed": True, "revision": revision or None,
+                                  "asked": True if asked else None, "failed_change": None, "ts": _now(),
+                                  "route": route, "refused": None, "stopped_by": None}
+        if values:
+            fields["values"] = {k: str(v) for k, v in values.items() if v}
         spec = clean_spec(spec)
         for k, v in (("why", " ".join(str(why or "").split())), ("claims", _str_list(claims)),
                      ("arrangement", spec_arrangement(spec) if spec else _lines(arrangement)), ("spec", spec)):
@@ -2579,15 +2775,17 @@ def revise(c: str, slug: str, request: str, *, why: str | None = None, claims: A
         if revision:
             _keep_built(c, slug)
         prop = update_proposal(c, slug, **fields) or prop
-    _emit(c, slug, "queued", chat=prop.get("chat"))
-    _queue(c, slug)
+    _emit(c, slug, str(prop.get("status") or "queued"), chat=prop.get("chat"))
+    if route != TYPED:
+        _queue(c, slug)
     return {**prop, "revised": True}
 
 
-def message(c: str, slug: str, text: str) -> dict[str, Any]:
+def message(c: str, slug: str, text: str, *, by: str = "browser", route: str = CLICK) -> dict[str, Any]:
     """What the analyst typed in the thread of the view's build: logged there, then applied as a change to the view
-    (revise,
-    `asked`) in the same session. 400 for an empty message, 404 for no such view or proposal."""
+    (revise, `asked`), as part of the click that sent it from the browser; one typed in the terminal (/thimble:ask,
+    threads.tool_message_thread, `by` terminal) is a typed change, which main's exact Agent call starts (`route`
+    typed). 400 for an empty message, 404 for no such view or proposal."""
     from . import agents  # noqa: PLC0415
 
     text = str(text or "").strip()
@@ -2598,22 +2796,47 @@ def message(c: str, slug: str, text: str) -> dict[str, Any]:
         raise HTTPException(404, f"no such view: {slug}")
     chat = str((prop or {}).get("chat") or "")
     if chat and agents.meta_or_none(c, chat) is not None:
-        agents.Recorder(c, chat).record("user", text=text, by=agents.BROWSER)
-    return revise(c, slug, text, asked=True)
+        agents.Recorder(c, chat).record("user", text=text, by=by)
+    return revise(c, slug, text, asked=True, route=route)
 
 
-def retry(c: str, slug: str) -> dict[str, Any]:
-    """Queue a failed proposal again (the Retry of its chip); its run resumes the same session when it has one. A built
-    view whose last change failed (`failed_change`) is changed again with the same request. 404 for no such proposal,
-    409 for one that is built with no failed change, queued or building."""
+def click_refused(c: str, slug: str) -> dict[str, Any] | None:
+    """A Build, Retry or accept click that cannot start a builder now, refused at once as Start is
+    (subagents.refusal_before: main not started by `thimble`, or no hooks module; in plan mode --agent-check refuses
+    the builder's start as it runs): the proposal keeps its status and records the refusal, which its chip shows. None
+    when nothing stands in the way. Queued instead, the build waited for a session that could start it and started by
+    itself later (live check L15)."""
+    from . import subagents  # noqa: PLC0415
+
+    before = subagents.refusal_before(c, click=True)
+    if before is None:
+        return None
+    refused = {"kind": before.kind, "reason": before.reason, "request": None, "at": _now()}
+    failed = (read_proposal(c, slug) or {}).get("status") == "failed"
+    prop = update_proposal(c, slug, refused=refused, **({"error": before.reason} if failed else {}))
+    prop = prop or read_proposal(c, slug) or {}
+    _emit(c, slug, str(prop.get("status") or "failed"), chat=prop.get("chat"))
+    return prop
+
+
+def retry(c: str, slug: str, values: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Queue a failed proposal again (Build or Retry on its chip, a click), with the run's `values` when the Build menu
+    names them, else Settings' dev row; a new builder goes on from the draft in the view's folder. A built view whose
+    last change failed (`failed_change`) is changed again with the same request. 404 for no such proposal, 409 for one
+    that is built with no failed change, queued or building."""
     prop = read_proposal(c, slug)
     if prop is None:
         raise HTTPException(404, f"no such proposal: {slug}")
+    vals = {k: str(v) for k, v in (values or {}).items() if v} or None
+    again = prop.get("status") == "failed" or (prop.get("status") == "built" and prop.get("failed_change") is not None)
+    if again and (refused := click_refused(c, slug)) is not None:
+        return refused
     if prop.get("status") == "built" and prop.get("failed_change") is not None:
-        return revise(c, slug, str(prop["failed_change"]), asked=True)
+        return revise(c, slug, str(prop["failed_change"]), asked=True, route=CLICK, values=vals)
     if prop.get("status") != "failed":
         raise HTTPException(409, f"the view {prop['name']!r} is {prop.get('status')}, not failed")
-    prop = update_proposal(c, slug, status="queued", error=None) or prop
+    prop = update_proposal(c, slug, status="queued", error=None, refused=None, route=CLICK, repairs=0,
+                           values=vals, stopped_by=None) or prop
     _emit(c, slug, "queued", chat=prop.get("chat"))
     _queue(c, slug)
     return prop
@@ -2663,7 +2886,7 @@ def delete_proposal(c: str, slug: str) -> None:
         if hit is None:
             raise HTTPException(404, f"no such proposal: {slug}")
         if hit.get("revision") and hit.get("status") in PENDING:
-            # a running build puts the view back itself once its session has stopped (dev.run_view)
+            # a running build puts the view back itself once its builder has stopped (dev._settle)
             if not dev.stop_view(c, slug, "dismissed"):
                 end_revision(c, slug)
             return
@@ -2708,7 +2931,7 @@ async def _gate(c: str, slug: str, locators: list[str] | None, *, shot_dir: Path
     text = {n: (d / n).read_text("utf-8", errors="replace") if (d / n).is_file() else "" for n in (READER_PY, VIEW_HTML)}
     problems = source_problems(raw.get("claims") if raw.get("claims") is not None else raw.get("scope"),
                                text[READER_PY], text[VIEW_HTML], raw.get("libs"))
-    # a change to a built view starts from files that carry thimble's own stamp, so it is no sign of a session's
+    # a change to a built view starts from files that carry thimble's own stamp, so it is no sign of a builder's
     # writing there (a session that removes it is fine too; mark_built stamps the view again)
     if raw.get("built") and (prop := read_proposal(c, slug)) is not None and prop.get("status") != "built" \
             and not prop.get("revision"):
@@ -2823,7 +3046,7 @@ _PAGE_LOADED = re.compile(r"^page: [a-z]+, ")  # a page line of a page that load
 
 
 def built_line(view: dict[str, Any]) -> str:
-    """What main hears when a view is built (the `view` event, dev.run_view): the files that open in it now and the
+    """What main hears when a view is built (the `view` event, dev.register_pass): the files that open in it now and the
     citation forms it adds, since main's prompt, with its table of forms, was rendered before the view existed."""
     return _hint("view-built", view=view.get("name", ""), claims=", ".join(view.get("claims") or []),
                  forms=forms_sentence(view) or _hint("view-no-forms"))
@@ -2959,8 +3182,9 @@ async def shoot_states(c: str, slug: str, states: list[dict[str, Any]], *, width
     `width` by `height`. Returns one result per state, {ok, errors, fetches, height, refs, records, units, marked, hidden,
     shown, layout, controls, actions, fonts, fetched_records, png?}, and with `answers` the first that many reader answers each
     state's page got; without Node or the frontend's packages each has build_problem's line as its one error. With
-    `prepared`, a reader request of its own (robust_check's), the page's fetches are answered from it."""
-    view = read_view(c, slug)
+    `prepared`, a reader request of its own (robust_check's), the page's fetches are answered from it. The page is the
+    view as it last passed, or its live folder inside live_reads (_current)."""
+    view = _current(c, slug)
     if view is None:
         return [{"ok": False, "errors": [f"no view {slug!r}"], "fetches": 0} for _ in states]
     media = media_url(SHOT_MEDIA_ORIGIN, c, slug)
@@ -3274,6 +3498,13 @@ def _is_line_form(form: str) -> bool:
 
 async def check(c: str, slug: str, locators: list[str] | None = None, *, shot_dir: Path | None = None,
                 picture: bool = False, need_locators: bool = True) -> dict[str, Any]:
+    """_check on the view's live folder (live_reads): what the gates check is the draft, not the view as it last passed."""
+    with live_reads():
+        return await _check(c, slug, locators, shot_dir=shot_dir, picture=picture, need_locators=need_locators)
+
+
+async def _check(c: str, slug: str, locators: list[str] | None = None, *, shot_dir: Path | None = None,
+                 picture: bool = False, need_locators: bool = True) -> dict[str, Any]:
     """A view's checks, all by code: the index builds, every claimed file is read or hidden with a why, locators and
     sampled lines round-trip (the answer cites the line back and its excerpt is literal source), declared keys resolve,
     the page loads headless without errors, and the test label's marks show on the records it shows (label_problems).
@@ -4233,13 +4464,14 @@ def _fmt_size(n: int) -> str:
 
 
 async def _suggest_call(c: str, system: str, user: str, tool: Any, model: str | None = None) -> Any:
-    """The proposal's one model call: `model`, else the `dev` role's model, at the `dev` role's effort and speed
-    (config.call_settings; the fallback model after a refusal, as model.structured runs it). Tests replace it."""
+    """The proposal's one model call: `model`, else the viewer suggestion's model (Settings' `suggest` row), at that
+    row's effort and speed, and on the refusal row's after a refusal (config.call_settings). Tests replace it."""
     from . import model as model_mod  # noqa: PLC0415
 
-    role = config.call_settings(c, "dev")
+    role = config.call_settings(c, "suggest")
     return await model_mod.structured(user, tool=tool, model=model or role["model"], effort=role["effort"],
-                                      speed=role["speed"], system=system, cwd=config.corpus_dir(c))
+                                      speed=role["speed"], refusal=role["refusal"], system=system,
+                                      cwd=config.corpus_dir(c))
 
 
 def _suggest_sections(c: str) -> tuple[dict[str, str], Any]:
@@ -4312,7 +4544,9 @@ def accept(c: str, slug: str) -> dict[str, Any]:
         raise HTTPException(404, f"no such proposal: {slug}")
     if prop.get("status") != "suggested":
         raise HTTPException(409, f"the view {prop['name']!r} is {prop.get('status')}, not suggested")
-    prop = update_proposal(c, slug, status="queued", asked=True, accepted=True, ts=_now()) or prop
+    if (refused := click_refused(c, slug)) is not None:
+        return refused
+    prop = update_proposal(c, slug, status="queued", asked=True, accepted=True, ts=_now(), route=CLICK) or prop
     _emit(c, slug, "queued", asked=True)
     _queue(c, slug)
     return prop
@@ -4430,27 +4664,63 @@ async def suggest_route(c: str, body: SuggestBody) -> dict[str, Any]:
         return {"slug": None}
 
 
+def _click(request: Request) -> None:
+    """403 unless the request carries the analyst's browser cookie: a click that starts, messages or stops a view's
+    builder or reviewer, which auto mode does not judge (subagents.analyst_only)."""
+    from . import subagents  # noqa: PLC0415
+
+    subagents.analyst_only(request)
+
+
+def _working(c: str, slug: str) -> bool:
+    """Whether a builder or reviewer of the view runs, so that a deletion stops one (a click)."""
+    try:
+        return _agent_works_on(c, slug)
+    except Exception:  # noqa: BLE001
+        return False
+
+
 @router.post("/ws/{c}/views/proposals/{slug}/accept")
-async def accept_route(c: str, slug: str) -> dict[str, Any]:
-    """Build a suggested viewer (accept); it comes back queued."""
+async def accept_route(c: str, slug: str, request: Request) -> dict[str, Any]:
+    """Build a suggested viewer (accept), a click; it comes back queued."""
+    _click(request)
     config.workspace_dir(c)
     _bind_loop()
     return accept(c, slug)
 
 
+class BuildBody(BaseModel):
+    model: str | None = None
+    effort: str | None = None
+
+
+@router.post("/ws/{c}/views/{slug}/build")
+async def build_route(c: str, slug: str, request: Request, body: BuildBody | None = None) -> dict[str, Any]:
+    """Build or Retry on a view's chip, a click, with the model and effort its Build menu names (else Settings' dev
+    row): a failed proposal, or a built view's failed change, queued again and started through main's module as the
+    pool has room (retry). Answers the proposal; 404 for none, 409 for one with nothing failed."""
+    _click(request)
+    config.workspace_dir(c)
+    _bind_loop()
+    values = {k: v for k, v in (("model", body.model if body else None), ("effort", body.effort if body else None)) if v}
+    return retry(c, slug, values or None)
+
+
 @router.post("/ws/{c}/views/proposals/{slug}/retry")
-async def retry_route(c: str, slug: str) -> dict[str, Any]:
-    """Queue a failed proposal, or a built view's failed change, again; it comes back `queued` (404 for none, 409 for
+async def retry_route(c: str, slug: str, request: Request) -> dict[str, Any]:
+    """Retry with Settings' values (build_route without a menu), a click; it comes back `queued` (404 for none, 409 for
     one with nothing failed)."""
+    _click(request)
     config.workspace_dir(c)
     _bind_loop()
     return retry(c, slug)
 
 
 @router.post("/ws/{c}/views/proposals/{slug}/stop")
-async def stop_build_route(c: str, slug: str) -> dict[str, Any]:
-    """Stop the proposal's build (stop_build); the proposal then fails, with Retry (404 for none, 409 for one that is
-    not queued or building)."""
+async def stop_build_route(c: str, slug: str, request: Request) -> dict[str, Any]:
+    """Stop the proposal's build (stop_build), a click; the proposal then fails, with Retry (404 for none, 409 for one
+    that is not queued or building)."""
+    _click(request)
     config.workspace_dir(c)
     _bind_loop()
     return stop_build(c, slug)
@@ -4461,17 +4731,21 @@ class ViewMessage(BaseModel):
 
 
 @router.post("/ws/{c}/views/proposals/{slug}/message")
-async def message_route(c: str, slug: str, body: ViewMessage) -> dict[str, Any]:
-    """A message typed in the view's build thread: logged there and queued as a change to the view (message); answers
-    the proposal."""
+async def message_route(c: str, slug: str, body: ViewMessage, request: Request) -> dict[str, Any]:
+    """A message typed in the view's build thread, a click: logged there and sent as a change to the view (message);
+    answers the proposal."""
+    _click(request)
     config.workspace_dir(c)
     _bind_loop()
     return message(c, slug, body.text)
 
 
 @router.delete("/ws/{c}/views/proposals/{slug}")
-async def delete_proposal_route(c: str, slug: str) -> dict[str, Any]:
+async def delete_proposal_route(c: str, slug: str, request: Request) -> dict[str, Any]:
+    """Delete the proposal (delete_proposal); while its builder or reviewer runs, that is a click that stops it."""
     config.workspace_dir(c)
+    if _working(c, slug):
+        _click(request)
     delete_proposal(c, slug)
     return {"ok": True}
 
@@ -4514,8 +4788,11 @@ async def get_view_route(c: str, slug: str) -> dict[str, Any]:
 
 
 @router.delete("/ws/{c}/views/{slug}")
-async def delete_view_route(c: str, slug: str) -> dict[str, Any]:
+async def delete_view_route(c: str, slug: str, request: Request) -> dict[str, Any]:
+    """Delete the view (delete_view); while its builder or reviewer runs, that is a click that stops it."""
     config.workspace_dir(c)
+    if _working(c, slug):
+        _click(request)
     delete_view(c, slug)
     return {"ok": True}
 
@@ -4665,83 +4942,14 @@ async def resolve_route(c: str, slug: str, ref: str, v: str | None = None) -> di
     return await open_place(c, slug, ref, locator_of(ref), v)
 
 
-class CheckBody(BaseModel):
-    locators: list[str] | None = None
-    picture: bool = False
-
-
-@router.post("/ws/{c}/views/{slug}/check")
-async def check_route(c: str, slug: str, request: Request, body: CheckBody | None = None) -> dict[str, Any]:
-    """A view ticket's session checking its draft: the gate with `locators` beside the sampled lines, {ok, lines, png},
-    `png` the picture of the page as it opens when `picture` asks for one. The locators are kept on the proposal for the
-    server's gate after the turn. Loopback only, and like every write only with the token's proof (view_check.py) or
-    the analyst's cookie (hook_auth.LocalWriteGuard)."""
-    from . import dev  # noqa: PLC0415
-
-    if not dev._is_loopback(request):
-        raise HTTPException(403, "a view's checks run from localhost only")
-    config.workspace_dir(c)
-    _check_slug(slug)
-    _bind_loop()
-    from .tools import until_dropped  # noqa: PLC0415 — tools imports this module
-
-    locators = [str(x).strip() for x in (body.locators if body and body.locators else []) if str(x).strip()]
-    answer = await until_dropped(request.receive, check_answer(c, slug, locators, bool(body and body.picture)),
-                                 f"view {slug}'s check")
-    if answer is None:
-        raise HTTPException(409, "the check was dropped by its caller")
-    return answer
-
-
-CHECK_DROP = ".check"  # in a view's folder: the check requests view_check.py leaves where it cannot reach the server
-CHECK_POLL_S = 0.3
-_DROP_NAME = re.compile(r"^[0-9a-f]{8,64}\.json$")
-
-
 async def check_answer(c: str, slug: str, locators: list[str], picture: bool) -> dict[str, Any]:
-    """A session's check of its draft: the gate with `locators` beside the sampled lines, the locators kept on the
-    proposal for the server's gate after the turn. {ok, lines, png}, `png` the picture of the page as it opens when
-    `picture` asks for one."""
+    """A builder's or reviewer's check of its draft (view_tools.tool_view_check): the gate with `locators` beside the
+    sampled lines, the locators kept on the proposal for the gates of record (finish_view). {ok, lines, png}, `png` the
+    path of a picture of the page as it opens when `picture` asks for one."""
     if locators and read_proposal(c, slug) is not None:
         update_proposal(c, slug, locators=locators)
     report = await gate(c, slug, locators or _kept_locators(c, slug), picture=picture)
     return {"ok": bool(report.get("ok")), "lines": gate_lines(report), "png": (report.get("page") or {}).get("png")}
-
-
-def watch_checks(c: str, slug: str) -> asyncio.Task:
-    """While a session builds or revises the view, answer the check requests view_check.py leaves in the view's
-    CHECK_DROP folder when its post cannot reach the server, as from inside the sandbox: each `<id>.json` {locators,
-    picture} is renamed `<id>.taken` and answered as `<id>.answer.json` with check_answer's answer. Cancel the task to
-    stop; the folder is removed then."""
-    return asyncio.get_running_loop().create_task(_watch_checks(c, slug), name=f"view-checks:{c}:{slug}")
-
-
-def _drop_requests(drop: Path) -> list[Path]:
-    """The requests waiting in a view's CHECK_DROP folder: regular files named `<id>.json`, and none when the folder or
-    the view's folder is a symlink, since the session that writes there could point it at files of thimble's own."""
-    if drop.parent.is_symlink() or drop.is_symlink() or not drop.is_dir():
-        return []
-    return sorted(p for p in drop.glob("*.json") if _DROP_NAME.match(p.name) and not p.is_symlink() and p.is_file())
-
-
-async def _watch_checks(c: str, slug: str) -> None:
-    drop = views_dir(c) / slug / CHECK_DROP
-    try:
-        while True:
-            await asyncio.sleep(CHECK_POLL_S)
-            for req in await asyncio.to_thread(_drop_requests, drop):
-                taken = req.with_suffix(".taken")
-                try:
-                    await asyncio.to_thread(os.replace, req, taken)
-                    body = json.loads(await asyncio.to_thread(taken.read_text, "utf-8"))
-                    locators = [str(x).strip() for x in body.get("locators") or [] if str(x).strip()]
-                    answer = await check_answer(c, slug, locators, bool(body.get("picture")))
-                except (OSError, ValueError, AttributeError) as e:
-                    answer = {"ok": False, "lines": [f"problem: the check request could not be read: {e}"], "png": None}
-                await asyncio.to_thread(atomic_write_text, drop / f"{req.stem}.answer.json", json.dumps(answer))
-                await asyncio.to_thread(taken.unlink, True)
-    finally:
-        await asyncio.to_thread(shutil.rmtree, drop, True)
 
 
 def _kept_locators(c: str, slug: str) -> list[str] | None:

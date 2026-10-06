@@ -747,6 +747,67 @@ def session_role(folder: str) -> str:
     return SESSION_ROLES.get(folder.split("/", 1)[0], "other")
 
 
+# the role a chat of thimble's agents (route subagent) names its transcript by, by the chat's role; a view's reviewer has
+# the builder's chat role and `review` set (SUBAGENT_REVIEW)
+SUBAGENT_ROLES = {"orient": "orientation", "writer": "writer", "step": "critic", "dev": "view build",
+                  "check": "report check"}
+SUBAGENT_REVIEW = "view review"
+
+
+def _main_folders(claude_dir: Path, sid: str) -> list[Path]:
+    """The folders beside main's transcript `<sid>.jsonl` under Claude Code's projects where its subagents' transcripts
+    are, `<sid>/subagents`."""
+    try:
+        return [p.parent / sid / "subagents" for p in (claude_dir / "projects").glob(f"*/{sid}.jsonl")]
+    except OSError:
+        return []
+
+
+def subagent_transcripts(ws: Path, claude_dir: Path) -> list[tuple[str, list[Path], str]]:
+    """The transcripts of thimble's agents that ran as subagents of main in workspace folder `ws` (a chat with `route:
+    subagent` and an agent id), as (agent id, its files in order, its role), each followed by its descendants' (found
+    by `parentAgentId` in their meta json, role `other`). An agent's records live under main's session folder,
+    `<main sid>/subagents/agent-<id>.jsonl`, and after /clear or /resume they go on in the new session's folder (U1),
+    so an agent can have one file per session it ran under, oldest first."""
+    out: list[tuple[str, list[Path], str]] = []
+    seen: set[str] = set()
+    for meta_path in sorted((ws / "chats").glob("*.meta.json")) if (ws / "chats").is_dir() else []:
+        meta = _read_json(meta_path)
+        if not isinstance(meta, dict) or meta.get("route") != "subagent" or not meta.get("agent_id"):
+            continue
+        agent = str(meta["agent_id"])
+        if agent in seen or meta.get("role") not in SUBAGENT_ROLES:
+            continue
+        seen.add(agent)
+        sessions = [str(x) for x in (meta.get("sessions") or [meta.get("session")]) if x]
+        folders = [f for sid in dict.fromkeys(sessions) for f in _main_folders(claude_dir, sid)]
+        own = [f / f"agent-{agent}.jsonl" for f in folders if (f / f"agent-{agent}.jsonl").is_file()]
+        if not own:
+            continue
+        out.append((agent, own, SUBAGENT_REVIEW if meta.get("review") else SUBAGENT_ROLES[str(meta["role"])]))
+        mine, metas = {agent}, {}
+        for f in folders:
+            for mp in sorted(f.glob("agent-*.meta.json")):
+                aid = mp.name[len("agent-"):-len(".meta.json")]
+                m = _read_json(mp)
+                if aid not in mine and isinstance(m, dict):
+                    metas.setdefault(aid, (m, []))[1].append(mp.with_name(f"agent-{aid}.jsonl"))
+        grew = True
+        while grew:
+            grew = False
+            for aid, (m, paths) in metas.items():
+                if aid not in mine and str(m.get("parentAgentId") or "") in mine:
+                    mine.add(aid)
+                    grew = True
+        for aid, (_m, paths) in metas.items():
+            if aid in mine and aid not in seen:
+                seen.add(aid)
+                files = [p for p in paths if p.is_file()]
+                if files:
+                    out.append((aid, files, "other"))
+    return out
+
+
 def export_full(ws: Path, corpus: Path, out: Path, *, name: str, home: Path | None = None, user: str | None = None,
                 scrub_user: bool = False, app: Path | None = None, claude_dir: Path | None = None,
                 scan: Callable[[Path], list[str] | None] = gitleaks_scan,
@@ -890,6 +951,21 @@ def export_full(ws: Path, corpus: Path, out: Path, *, name: str, home: Path | No
                         pass
                 entry["files"].append(write(stage, qpath, body))
             transcripts.append(entry)
+        for agent, parts, role in subagent_transcripts(ws, claude_dir):
+            path = f"{TRANSCRIPTS}/agent-{agent}.jsonl"
+            body, stats = b"", {"kept": 0, "dropped": {}, "unreadable": 0}
+            for part in parts:  # one file per session it ran under, in order (U1)
+                data, more = clean_transcript(part.read_bytes())
+                body += data
+                stats["kept"] += int(more.get("kept") or 0)
+                stats["unreadable"] += int(more.get("unreadable") or 0)
+                for k, n in (more.get("dropped") or {}).items():
+                    stats["dropped"][k] = stats["dropped"].get(k, 0) + n
+            text = scrub(path, body.decode("utf-8"))
+            measure(path, text)
+            transcripts.append({"agent": agent, "session": "", "role": role, "folder": "", "path": path,
+                                **{k: v for k, v in write(stage, path, text.encode("utf-8")).items() if k != "path"},
+                                **stats, "files": []})
         leaks = scan(stage)
         meta = chat_summary(ws, chat)
         dropped = sum(n for t in transcripts for n in t["dropped"].values())
@@ -909,7 +985,8 @@ def export_full(ws: Path, corpus: Path, out: Path, *, name: str, home: Path | No
             "inventory": {
                 "bytes": dict(sorted(sizes.items())), "files": dict(sorted(files_n.items())), **tally,
                 "typed_in_main": len(typed), "marked_done": stopped,
-                "sessions": {r: n for r in (*SESSION_ROLES.values(), "other")
+                "sessions": {r: n for r in dict.fromkeys((*SESSION_ROLES.values(), *SUBAGENT_ROLES.values(),
+                                                          SUBAGENT_REVIEW, "other"))
                              if (n := sum(1 for t in transcripts if t["role"] == r))},
                 "transcript_records": sum(int(t.get("kept") or 0) for t in transcripts),
                 "dropped_records": dropped,
@@ -1244,6 +1321,8 @@ def install(src: Path, ws: Path, corpus: Path, *, home: Path | None = None,
             dest.parent.mkdir(parents=True, exist_ok=True)
             dest.write_bytes(data)
         for t in trs:
+            if t.get("agent"):  # a subagent of the session that ran it, which no new session continues (precached.py)
+                continue
             p, old = src / str(t["path"]), str(t.get("session") or "")
             sid, folder = sids.get(old), str(t.get("folder") or "")
             if not sid or not p.is_file():
@@ -1297,6 +1376,9 @@ def install(src: Path, ws: Path, corpus: Path, *, home: Path | None = None,
             meta.update(status="done", precached=mark)
             meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=1), "utf-8")
             (tmp / "chats" / f"{chat}.jsonl").touch()
+        from . import views  # noqa: PLC0415 — the views' module is the server's, loaded only here
+
+        views.keep_installed(tmp)  # the pre-cache leaves out the views' kept versions, which readers need (read_built)
         tmp.rename(ws)
     except BaseException:
         shutil.rmtree(tmp, ignore_errors=True)

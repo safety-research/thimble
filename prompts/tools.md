@@ -213,7 +213,7 @@ Open a card of a card type as its view in Files, as the card's Open as view does
 
 ## propose_view
 
-Propose a view, a page that shows records in a form their files hide, or a viewer for one unusual file type. thimble's dev agent builds it from these fields alone, so name the fields, keys and counts it needs.
+Propose a view, a page that shows records in a form their files hide, or a viewer for one unusual file type. thimble's dev agent builds it from these fields alone, so name the fields, keys and counts it needs. When main proposes one, the result is the exact Agent call that starts its build as a subagent of main, which main then makes; an orientation's proposals are built without a call of its own. Pass a model or an effort only when the analyst names one, so that the build otherwise runs on the dev agent's values in thimble's Settings.
 
 ```json
 {
@@ -226,7 +226,9 @@ Propose a view, a page that shows records in a form their files hide, or a viewe
     "overview": {"type": "string", "description": "What does the overview look like?"},
     "zoom": {"type": "string", "description": "How do you zoom?"},
     "filter": {"type": "string", "description": "How do you filter? Labels are the main filter, every field the records carry can be selected, and several runs or sources can be compared side by side."},
-    "details": {"type": "string", "description": "What details might you want on demand?"}
+    "details": {"type": "string", "description": "What details might you want on demand?"},
+    "model": {"type": "string", "description": "The model to build it on, such as opus, sonnet or a full model id, only when the analyst names one. Default: the dev agent's model in Settings."},
+    "effort": {"type": "string", "enum": ["low", "medium", "high", "xhigh", "max"], "description": "The effort to build it at, only when the analyst names one. Default: the dev agent's effort in Settings."}
   },
   "required": ["name", "why", "claims", "unit", "overview", "zoom", "filter", "details"]
 }
@@ -327,23 +329,9 @@ Send a message the analyst typed in this terminal to a thread, as that thread's 
 }
 ```
 
-## wait_session
-
-Only for a tray entry of thimble's agents, as its instructions file says; main never calls it. Waits for news from the agent the entry shows: its replies, tool calls and messages, its state, or its end. It returns as soon as there is news, or within a few seconds.
-
-```json
-{
-  "type": "object",
-  "properties": {
-    "session": {"type": "string", "description": "The session's whole name, such as thimble:writer · logs."}
-  },
-  "required": ["session"]
-}
-```
-
 ## list_agents
 
-List thimble's agents that run now and what each is doing. Call it for /thimble:agents.
+List thimble's agents, the subagents of this session that thimble started, with what each is doing and its thread in the browser. Claude Code's agent tray lists the same subagents. Call it for /thimble:agents.
 
 ```json
 {
@@ -399,34 +387,38 @@ Get a picture of what the analyst sees in the browser, such as a card as the can
 
 ## start_orientation
 
-Start an orientation, a broad analysis of the corpus that helps the analyst understand it, in a Claude Code session of its own beside yours, which shows the analyst when it finishes the outputs its switches turn on. The browser shows it as a thread, and an `orient` event tells you when it ends. Call it once for a `start` event with the event's switches, or when the analyst asks for a new orientation, which adds to the cards the earlier ones left, and `message_orientation` to explore further within one that has finished. One orientation runs at a time, so while one runs the call starts nothing.
+Start an orientation, a broad analysis of the corpus that helps the analyst understand it, as a subagent of this session, which shows the analyst when it finishes the outputs its switches turn on. The browser shows it as a thread, Claude Code's agent tray shows it as a row, and an `orient` event tells you when it ends. Call it when the analyst asks for a new orientation, which adds to the cards the earlier ones left, and `message_orientation` to explore further within one that has finished. Its result is the exact Agent call that starts the orientation, which you then make. Pass only the model, effort and switches the analyst named, so that the others take the values thimble's Settings give them. One orientation runs at a time, so while one runs the call starts nothing.
 
 ```json
 {
   "type": "object",
   "properties": {
     "brief": {"type": "string", "description": "The analyst's request in their words, such as a focus, or empty for the whole corpus."},
-    "final_notebook": {"type": "boolean", "description": "Leave a deck of cards for the analyst, the group `Orientation`, which appears when the orientation ends. Default true."},
-    "propose_views": {"type": "boolean", "description": "Propose views of the files. Default true."},
-    "generate_report": {"type": "boolean", "description": "Write the report when the orientation ends. Default false."},
-    "critique": {"type": "boolean", "description": "Have a critic review the analysis before the outputs are written. Default false."}
+    "final_notebook": {"type": "boolean", "description": "Leave a deck of cards for the analyst, the group `Orientation`, which appears when the orientation ends. Left out, Settings decide. Default true."},
+    "propose_views": {"type": "boolean", "description": "Propose views of the files. Left out, Settings decide. Default true."},
+    "generate_report": {"type": "boolean", "description": "Write the report when the orientation ends. Left out, Settings decide. Default false."},
+    "critique": {"type": "boolean", "description": "Have a critic review the analysis before the outputs are written. Left out, Settings decide. Default false."},
+    "model": {"type": "string", "description": "The model to run it on, such as opus, sonnet or a full model id, only when the analyst names one. Default: the orientation's model in Settings."},
+    "effort": {"type": "string", "enum": ["low", "medium", "high", "xhigh", "max"], "description": "The effort to run it at, only when the analyst names one. Default: the orientation's effort in Settings."}
   }
 }
 ```
 
 ## start_writing
 
-Start a writer, in a Claude Code session of its own beside yours, which writes or revises one document from this conversation, the canvas and the documents. The browser shows its steps, and its last message reaches you as a `written` event when it ends. Call it for a `write` event or when the analyst asks for a document, and use `edit_document` yourself to change one passage, slide or layout of a written document.
+Start a writer, as a subagent of this session, which writes or revises one document from this conversation, the canvas and the documents. The browser shows its steps, and its last message reaches you as a `written` event when it ends. Its result is the exact Agent call that starts the writer, which you then make. Call it when the analyst asks for a document or for a change to one, and use `edit_document` yourself to change one passage, slide or layout of a written document. Pass a model or an effort only when the analyst names one, so that the writer otherwise runs on the values thimble's Settings give it.
 
 ```json
 {
   "type": "object",
   "properties": {
-    "doc": {"type": "string", "description": "The document's slug, such as report, story or slides, the write event's `doc`."},
-    "request": {"type": "string", "description": "What the analyst asked for, in their words, the write event's text. Empty for the document as its form asks."},
-    "after": {"type": "string", "description": "The passage the request is about, the write event's `after`."},
+    "doc": {"type": "string", "description": "The document's slug, such as report, story or slides, or a `card` event's `doc`."},
+    "request": {"type": "string", "description": "What the analyst asked for, in their words. Empty for the document as its form asks."},
+    "after": {"type": "string", "description": "The passage the request is about, such as a `card` event's `after`."},
     "type": {"type": "string", "description": "Only for a document that does not exist yet, which is then made: casefile (one document, a section per case, such as an agent, a run or a session), comparison (a page with a grid of the cases against measures), timeline (dated events in phases), page, or document, slides or story for one the request describes."},
-    "name": {"type": "string", "description": "The new document's name in the browser, such as Case file."}
+    "name": {"type": "string", "description": "The new document's name in the browser, such as Case file."},
+    "model": {"type": "string", "description": "The model to run the writer on, such as opus, sonnet or a full model id, only when the analyst names one. Default: the writer's model in Settings."},
+    "effort": {"type": "string", "enum": ["low", "medium", "high", "xhigh", "max"], "description": "The effort to run the writer at, only when the analyst names one. Default: the writer's effort in Settings."}
   },
   "required": ["doc"]
 }
@@ -434,7 +426,7 @@ Start a writer, in a Claude Code session of its own beside yours, which writes o
 
 ## critique
 
-Have a critic review your whole analysis, from your transcript, and the cards and view proposals you drafted, for files and fields you never opened, rival accounts you did not test and claims no call supports. The critic runs in a Claude Code session of its own and changes nothing. The call returns its report when it ends.
+Have a critic review your whole analysis, from your transcript, and the cards and view proposals you drafted, for files and fields you never opened, rival accounts you did not test and claims no call supports. The call returns the Agent call that starts the critic as your subagent, which you then make. The critic changes nothing, and its report reaches you as a message when it ends.
 
 ```json
 {
@@ -447,7 +439,7 @@ Have a critic review your whole analysis, from your transcript, and the cards an
 
 ## message_orientation
 
-Send the orientation a message after it finished, such as a question its analysis did not answer, which continues its session with its whole analysis in context and revises its outputs where the answer changes them. A message sent while it runs waits until that run ends, and an `orient` event tells you when it ends. Call it when the analyst asks for more from the orientation, and `start_orientation` for a new one.
+Send the orientation a message, such as a question its analysis did not answer, which continues it with its whole analysis in context and revises its outputs where the answer changes them. Its result is the exact SendMessage call that passes the message on, which you then make. A message sent while it runs reaches it after its current step, and an `orient` event tells you when it ends. Call it when the analyst asks for more from the orientation, and `start_orientation` for a new one.
 
 ```json
 {
@@ -461,7 +453,7 @@ Send the orientation a message after it finished, such as a question its analysi
 
 ## run_check
 
-Run a report check over the written documents, a question asked of every passage that leaves a comment beside each passage it applies to. A new name creates the check and a known one reruns it, and either way it is turned on and reruns when a document changes. For one note on one passage, use `add_comment`.
+Run a report check over the written documents, a question asked of every passage that leaves a comment beside each passage it applies to. A new name creates the check and a known one reruns it, and either way it is turned on. It runs again by itself after a writer saves a document, and after the analyst's own edits it shows the passages that changed until they run it. Its result is the exact Agent call that starts the check as a subagent of this session, which you then make. For one note on one passage, use `add_comment`.
 
 ```json
 {
@@ -503,6 +495,72 @@ File a ticket for thimble's developer agent when thimble itself should change, s
     "view": {"type": "string", "description": "The name of a view the dev agent built for this corpus, when the change is to that view."}
   },
   "required": ["title", "body"]
+}
+```
+
+## view_check
+
+Check the view you build or review, as often as you want: the checks thimble runs on every view, which say what failed and what they noted. Pass as `locators` the refs that sampling may miss, such as a key of each unit the view gives, and `picture` to get a picture of the page as it opens, whose path Read opens.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "locators": {"type": "array", "items": {"type": "string"}, "description": "Refs to check beside the sampled lines, such as `<path>#L<n>` or `view:<slug>/<key>`."},
+    "picture": {"type": "boolean", "description": "Also take a picture of the page as it opens, 1048 px wide with no label on."}
+  }
+}
+```
+
+## finish_view
+
+Finish the view you build: thimble runs the checks as the record of your build. When they pass, the view reaches the analyst. When they fail, the result says what failed and which attempt it was.
+
+```json
+{
+  "type": "object",
+  "properties": {}
+}
+```
+
+## view_pictures
+
+Take pictures of the view you review, whose paths Read opens. The first call of a round gives the view as it opens; ask for other states in `states`, up to three more in each round.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "states": {
+      "type": "array",
+      "maxItems": 3,
+      "description": "States to see beside the overview: `control`, the view as it opens after clicking `controls` in turn, each named by its text as the list of controls gives it, or by an option of a select; `labels`, the view as it opens with a test label on that marks about one record in seven in the colour the analyst's first label takes; `filtered`, the same filtered to the test label, which should keep only what it marks; `detail`, the place the first citation opens; `open`, the place a citation of `ref` opens, a record `<path>#L<n>` or a unit from the records; `narrow`, the view as it opens 798 px wide; `wide`, the view as it opens 1528 px wide.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "state": {"type": "string", "enum": ["control", "labels", "filtered", "detail", "open", "narrow", "wide"]},
+          "controls": {"type": "array", "maxItems": 3, "items": {"type": "string"}, "description": "For `control`: the controls to click in turn, by their text."},
+          "ref": {"type": "string", "description": "For `open`: the ref whose place to see."},
+          "why": {"type": "string", "description": "What you want to check in it, in a few words."}
+        },
+        "required": ["state", "why"]
+      }
+    }
+  }
+}
+```
+
+## finish_review
+
+End a round of your review: thimble runs the view's checks on what you changed. Pass what you revised and what you leave, each as a short phrase; with nothing changed, the review is done.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "revised": {"type": "array", "items": {"type": "string"}, "description": "What you revised in this round, one short phrase each."},
+    "left": {"type": "array", "items": {"type": "string"}, "description": "The problems you leave as they are, one short phrase each, with why when the data shows the view is right."}
+  }
 }
 ```
 
@@ -778,6 +836,56 @@ The page writes purple colours: {colours}. Purple is thimble's colour for agents
 
 The dev agent built the view {view}, so {claims} now open in it. In it {forms}.
 
+## finish-view-pass
+
+The checks passed, and the view is built: the analyst sees it now. Change nothing more, and end with one line saying what you built.
+
+## finish-view-fail
+
+The checks failed, attempt {n} of {of}:
+
+{report}
+
+Fix what failed, check the view again with `view_check`, then call `finish_view` again.
+
+## finish-view-stop
+
+No attempt is left, so stop now. Change nothing more, and end with one line saying what still fails; thimble shows the failure to the analyst or starts a new build from it.
+
+## finish-review-again
+
+The checks passed, and the view as you revised it is what the analyst sees now. Take the pictures again with `view_pictures` and look once more, then call `finish_review`.
+
+## finish-review-done
+
+The checks passed, and the review is done. Change nothing more, and end with one line saying what you revised and what you left.
+
+## finish-review-restored
+
+The checks failed on your revision, so the view is as it was before your change. Change nothing more, and end with one line saying what you tried.
+
+## view-pictures
+
+The pictures, which Read opens:
+
+{paths}
+
+The records they show:
+
+{records}
+
+## view-review-program
+
+{extension}'s program reviews views in this workspace in place of your own reading of the pictures. It read these pictures and found these problems:
+
+{problems}
+
+Fix these problems, and only these. When it found none, call `finish_review` with nothing revised.
+
+## view-review-program-failed
+
+{extension}'s program reviews views in this workspace in place of your own reading of the pictures, and it failed: {why}. Change nothing, and end with one line that says so.
+
 ## view-no-forms
 
 no citation resolves, because its `accepts` and `units` are empty
@@ -912,10 +1020,6 @@ When your first run ended, thimble measured how much of the corpus it saw, from 
 
 {coverage}
 
-## start_orientation-started
-
-The orientation has started in its own session, and the browser shows it, so this turn needs no words from you unless it has something else for the analyst. An `orient` event tells you when it ends.
-
 ## start_orientation-unasked
 
 No Start and no message from the analyst has asked for an orientation since the last one ended, so this call started none. Start one only when the analyst asks for it, and write nothing about this call.
@@ -924,13 +1028,77 @@ No Start and no message from the analyst has asked for an orientation since the 
 
 An orientation runs already, so this call started none: one orientation runs at a time. The browser shows the one that runs, so write nothing about it, unless the analyst asked for a new orientation in this turn: then tell them in one line that one runs and that they can stop it in its thread first.
 
-## start_writing-started
+## start_orientation-subagent
 
-The writer of {doc} has started in its own session, and the browser shows it, so this turn needs no words from you unless it has something else for the analyst. Its last message reaches you as a `written` event.
+Start the orientation now as a subagent of this session, with one Agent call whose input is exactly this:
+
+{input}
+
+Change nothing in it, since thimble lets only this call through, and end the turn on it, with no words before or after it: the terminal and the browser both show the call.
+
+## start_orientation-program
+
+The extension {extension} runs the orientation with its own program. The program has started, and the browser shows it, so this turn needs no words from you unless it has something else for the analyst. An `orient` event tells you when it ends.
+
+## start_job-subagent
+
+Start it now as a subagent of this session, with one Agent call whose input is exactly this:
+
+{input}
+
+Change nothing in it, since thimble lets only this call through, and end the turn on it, with no words before or after it: the terminal and the browser both show the call.
+
+## subagent-request
+
+[thimble request {request_id}]
+
+## agent-check-exact
+
+thimble starts its agents, and passes messages on to them, only with the call its tool gave: make the call again exactly as the result of start_orientation, start_writing, propose_view, run_check or message_orientation gave it, with nothing changed, or make none if the analyst did not ask for it.
+
+## agent-check-message
+
+thimble's agents continue only when the analyst asks. If they asked, call message_orientation and send what it gives; otherwise ask them first.
+
+## start-plan-mode
+
+Your Claude Code session is in plan mode, where thimble's agents would have to ask you before every card and every edit, so none of them starts or takes a message there. Switch out of plan mode first (shift+tab in your terminal).
+
+## start-refused-not-launched
+
+This session was not started with `thimble`, so it and its subagents run without thimble's sandbox and can change your files, and thimble's agents cannot start in it. Quit and run `thimble` in this folder.
+
+## start-refused-no-module
+
+thimble's agents can't start in this session: Claude Code's hooks modules are off ({reason}). Main, its threads, cards and labels still work. Once modules are on, quit and run `thimble -c` in this folder.
+
+## module-started-note
+
+thimble: the analyst started thimble's {role} for {what} {how}, as your subagent {agent}. Its report goes to the analyst in thimble, so when it hands back, reply in one short line, and do nothing about it unless the analyst asks.
+
+## follow-up-ran-on
+
+This message ran on {model} · {effort}, the role's current settings.
 
 ## start_writing-running
 
 A writer of {doc} is running already. Tell the analyst so in one line.
+
+## start_writing-subagent
+
+Start the writer now as a subagent of this session, with one Agent call whose input is exactly this:
+
+{input}
+
+Change nothing in it, since thimble lets only this call through, and end the turn on it, with no words before or after it: the terminal and the browser both show the call.
+
+## start_writing-program
+
+An extension's program writes {doc}. The program has started, and the browser shows it, so this turn needs no words from you unless it has something else for the analyst. Its last message reaches you as a `written` event.
+
+## writer-context-file
+
+The workspace as it stands, each part under a heading that says what it holds, is in {path}. Read it whole before you write.
 
 ## start_writing-made
 
@@ -955,6 +1123,10 @@ There is no check named {check}. Call `run_check` again with its `instructions` 
 ## run_check-no-passage
 
 None of {passages} is a passage of a written document. `read_ref` on a document gives each passage's id.
+
+## check-task-file
+
+Your task is in {path}: the check's instructions, the document with the id of every passage, the passages to comment on and what the workspace holds about them. Read it whole first.
 
 ## add_comment-no-passage
 
@@ -1076,6 +1248,22 @@ The critique {status} before it returned its report, and it wrote this.
 
 {text}
 
+## critique-subagent
+
+Start the critic now as your subagent, with one Agent call whose input is exactly this:
+
+{input}
+
+Change nothing in it, since thimble lets only this call through. Then end your turn without calling SubagentHandback and without a report, since your run is not done: the critic works in the background, and its report reaches you as a message that starts your next turn. Follow up its report then, as your prompt says. If the call is refused or the critic fails, revise without its review and say so in your thread.
+
+## critic-brief-file
+
+Your brief is in {path}. Read it whole before anything else.
+
+## critique-work-folder
+
+Your own folder, where you may put a script or a scratch file, is {path}.
+
 ## writer-task
 
 Write `report:{doc}`, the document named {title}.
@@ -1125,6 +1313,16 @@ Start the orientation.
 ## orient-no-request
 
 The analyst asked for nothing in particular, so cover the whole corpus.
+
+## orient-subagent-prompt
+
+[thimble request {request_id}]
+
+The analyst's request: {request}
+
+The outputs this run leaves, of those `### Outputs` describes: {outputs}. The ones it leaves out, whose parts of `### Outputs` do not apply: {off}. The critique: {critique}.
+
+Start the orientation.
 
 ## orient-finished
 
@@ -1180,10 +1378,6 @@ This message is from the analyst's own session.
 
 This message is from the analyst, typed in your thread.
 
-## orient-from-terminal
-
-This message is from the analyst, typed in Claude Code's agent tray.
-
 ## orient-from-extension
 
 The analyst switched on the extension {extension} and asked you to run its instructions for the orientation now. Follow them as far as the work you did allows.
@@ -1226,11 +1420,25 @@ A follow-up of the orientation changed these cards, which the report cites: {car
 
 ## message_orientation-started
 
-The orientation has taken up the message in its session, and the browser shows it, so this turn needs no words from you unless it has something else for the analyst. An `orient` event tells you when it ends.
+The orientation has the message, and the browser shows it, so this turn needs no words from you unless it has something else for the analyst. An `orient` event tells you when it ends.
 
-## message_orientation-queued
+## orient-subagent-message
 
-The orientation is running, so the message waits and goes to it when this run ends. The browser shows it waiting, so this turn needs no words from you unless it has something else for the analyst.
+Pass the message on now with one SendMessage call, with `to` "{agent}" and exactly the text below as `message`, and end the turn on that call, with no words before or after it. Change nothing in the text, since thimble lets only this message through. Claude Code defers SendMessage, so load it with ToolSearch first if you have not yet.
+
+{text}
+
+## orient-continue-earlier-session
+
+This orientation ran in an earlier Claude Code session. To continue it, quit and run `{resume}` in this folder, or start a new orientation.
+
+## orient-continue-earlier-version
+
+This orientation ran in an earlier version of thimble and cannot be continued. Start a new orientation to explore further.
+
+## orient-continue-stopped-by-user
+
+This orientation was stopped with Esc in your terminal, and Claude Code does not continue an agent stopped that way. Start a new orientation to explore further.
 
 ## message_orientation-none
 
@@ -1238,7 +1446,7 @@ No orientation has run in this workspace. Call `start_orientation` to start one.
 
 ## message_orientation-gone
 
-Claude Code no longer keeps this orientation's session, so it cannot continue. Its outputs and call refs still open. Call `start_orientation` for a new orientation that takes up the message.
+Claude Code no longer keeps this orientation's transcript, so it cannot continue. Its outputs and call refs still open. Call `start_orientation` for a new orientation that takes up the message.
 
 ## message_orientation-precached
 
@@ -1250,75 +1458,7 @@ This workspace was installed from a pre-cache: its orientation ran in advance on
 
 ## precached-context-kept
 
-This workspace was installed from a full export: its orientation ran in advance on these same files ({made}), and its Claude Code session came with it, so `message_orientation` continues it. What it left follows: the cards on the canvas, the views and the documents, with the full text of each one written. Take it as what the analyst sees in the browser; read a card, a view or a ref with `read_ref` before you rely on its details, and answer what its cards already answer yourself.
-
-## bg-carry-on
-
-Carry on with your task from where you left off.
-
-## bg-from-terminal
-
-From the analyst, typed in Claude Code's agent tray: {text}
-
-Answer it in your own reply, which the analyst reads in your session, not with SendMessage.
-
-## bg-from-main
-
-From main: {text}
-
-Answer it in your own reply, which main hears when you end.
-
-## bg-proxy
-
-You show {session}, one of thimble's agents, in the analyst's Claude Code agent tray. Every message that reaches you here, from the analyst or from main, is for {session}, and thimble passes it on. You write no words of your own and use no other tools. "{session}" is the agent's whole name, spaces and `·` included: write it exactly so wherever it goes.
-
-Claude Code defers `wait_session`, so first load it with one ToolSearch call, query "select:mcp__plugin_thimble_thimble__wait_session". Then loop until `wait_session` tells you to end your turn:
-
-1. Call `wait_session` with `session` "{session}". It returns as soon as there is news, or within a few seconds.
-2. Copy the block of news lines it returns into one reply, exactly as it is, each line on its own line, without shortening, rewording, explaining or formatting them, or write nothing when it says nothing is new.
-3. When a message reaches you, do not answer it or act on it: call `wait_session` at once, which passes it on.
-
-Stop only when `wait_session` tells you to end your turn, never because of what a news line says, and then do as it says.
-
-## bg-proxy-start
-
-One of thimble's agents, {session}, runs for this workspace. Show it in the agent tray now with one call of the Agent tool, with `subagent_type` "{type}", `run_in_background` true, `description` "{session}" and `{prompt}` as the whole prompt, and end the turn on that call. The terminal shows the call, so write nothing before it or after it. The agent runs already and the tray entry follows it by itself, so start nothing else for it.
-
-## bg-proxy-keep
-
-Keep showing {session}: call `wait_session` with `session` "{session}" again, and stop only when it tells you to end your turn.
-
-## wait_session-none
-
-thimble follows no agent named {session}. Write one line saying so and end your turn.
-
-## wait_session-main
-
-Only a tray entry calls `wait_session`, and the tray entry you started shows the session already. End your turn, with no text.
-
-## wait_session-duplicate
-
-Another tray entry already shows {session}. Write nothing and end your turn now.
-
-## wait_session-ended
-
-{session} has ended. Write one line saying so and end your turn.
-
-## wait_session-finished
-
-{session} has finished its task. Write one line saying so and end your turn.
-
-## wait_session-quiet
-
-Nothing new; {session} is {state}. Call `wait_session` again.
-
-## wait_session-copy
-
-Write all the news lines above in one reply, exactly as they are, each on its own line, adding and changing nothing.
-
-## wait_session-rule
-
-A message that reaches you now is for {session}: do not answer it, call `wait_session`, which passes it on.
+This workspace was installed from a full export: its orientation ran in advance on these same files ({made}), as a subagent of the exporter's Claude Code session, so `message_orientation` cannot reach it, though its thread shows every step it took. What it left follows: the cards on the canvas, the views and the documents, with the full text of each one written. Take it as what the analyst sees in the browser; read a card, a view or a ref with `read_ref` before you rely on its details, and answer what its cards already answer yourself.
 
 ## agents-none
 
@@ -1350,10 +1490,6 @@ The analyst asks the thread {thread} its questions again. Handle the thread's ev
 
 The message is in the thread {thread}, which waits for the fork you started for it and gets the message once that fork is known, so this turn needs no words from you.
 
-## message_thread-view
-
-The change is queued for the view's build in {thread}, which the browser shows, so this turn needs no words from you.
-
 ## message_thread-empty
 
 {thread} takes no empty message. Pass what the analyst wrote as `message`.
@@ -1370,10 +1506,6 @@ The analyst pressed Stop on {title}, your subagent `{agent_id}`, in the browser.
 
 The message is empty. Pass what the analyst asks the orientation as `message`.
 
-## session-retry
-
-Your session stopped because Anthropic's API was at capacity, and it has now been resumed. Carry on with your task from where you stopped.
-
 ## session-unfinished
 
 Your session ended while agents or workflows you started in the background were still running, and they stopped with it. It has now been resumed. Continue each stopped agent with SendMessage, or start again what cannot be continued, then wait for all their results and use them before you finish.
@@ -1385,10 +1517,6 @@ The analyst changed your permission mode, so your session was paused and has now
 ## session-mode-stopped
 
 The agents that were running stopped with it: {agents}. Continue each with SendMessage to its id, which keeps what it has done, and run a stopped workflow again from its run with `resumeFromRunId`, then use their results as before.
-
-## session-resumed
-
-Your session ended before its task was done and has now been resumed with all its work. Make again any call that did not run, if you still need it. {stopped}Carry on with your task from where you stopped.
 
 ## session-model-fallback
 

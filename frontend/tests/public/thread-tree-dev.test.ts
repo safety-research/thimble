@@ -49,3 +49,21 @@ test('the open tree keeps the order it opened with; a new thread goes after', as
   expect(inKeptOrder([n('c'), n('a'), n('new'), n('b')], ['a', 'b', 'c']).map((x) => x.id)).toEqual(['a', 'b', 'c', 'new'])
   expect(inKeptOrder([n('c'), n('a')], null).map((x) => x.id)).toEqual(['c', 'a'])
 })
+
+test("a view's builds and reviews each take a name of their own, numbered in the order they started (live check L25)", () => {
+  const at = (n: number) => `2026-09-28T20:0${n}:00Z`
+  const chats = [
+    meta({ id: 'main', kind: 'main', role: 'main', title: 'main', parent: null }),
+    meta({ id: 'b1', title: 'view: Wiki Page History', view: 'wiki-page-history', created_at: at(1) }),
+    meta({ id: 'r1', title: 'review: Wiki Page History', view: 'wiki-page-history', review: true, created_at: at(2) }),
+    meta({ id: 'b2', title: 'view: Wiki Page History', view: 'wiki-page-history', created_at: at(3) }),
+    meta({ id: 'r2', title: 'review: Wiki Page History', view: 'wiki-page-history', review: true, created_at: at(4) }),
+  ]
+  const label = new Map(pickItems(chats, () => false, () => false).map((i) => [i.id, i.label]))
+  expect(['b1', 'r1', 'b2', 'r2'].map((id) => label.get(id))).toEqual([
+    'dev/wiki-page-history',
+    'dev/wiki-page-history-review',
+    'dev/wiki-page-history-2',
+    'dev/wiki-page-history-review-2',
+  ])
+})

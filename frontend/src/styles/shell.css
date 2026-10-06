@@ -886,3 +886,50 @@ button.settings-ext-name:hover .settings-ext-caret {
   overflow-wrap: anywhere;
   user-select: all;
 }
+
+/* the model table's notes and switches: a row's note under its name, an agent's web switch, the refusal row's switch */
+.settings-row-noted {
+  padding-bottom: 4px;
+}
+/* the dev row's fast switch, for code tickets alone, after its note */
+.settings-ticket-fast {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  white-space: nowrap;
+}
+.settings-role-note {
+  grid-column: 1 / -1;
+  margin-top: -6px;
+  color: var(--text-tertiary);
+  font: var(--type-body-sm);
+}
+.settings-row-off .settings-model,
+.settings-row-off .settings-effort {
+  opacity: 0.4;
+}
+.settings-web {
+  justify-self: start;
+  display: inline-flex;
+}
+.settings-next-start,
+.settings-main-mode,
+.settings-ignored {
+  color: var(--text-tertiary);
+}
+.settings-mode-cell {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+}
+.settings-card-wait {
+  color: var(--text-tertiary);
+  font: var(--type-body-sm);
+}
+.settings-fence-note {
+  color: var(--text-tertiary);
+}
+.shell-gone-agents {
+  color: var(--text-secondary);
+}

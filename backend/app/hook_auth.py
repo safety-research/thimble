@@ -1,6 +1,7 @@
 """The routes only thimble's plugin and hooks call: the plugin's hooks' (plugin/bin/.thimble-watch, and
 bin/thimble-agents for /api/agents), its MCP shim's (bin/thimble-mcp: the event subscription and tool
-calls), and the hooks of the sessions thimble starts (app/permission_hook.py, app/call_ref.py).
+calls), its hooks module's (plugin/hooks/thimble.ts: /api/module/*, app/module_bridge.py), and the hooks of the
+sessions thimble starts (app/permission_hook.py).
 
 Any process on the machine can reach a loopback port, and the plugin runs in every Claude Code session that has it,
 so each side proves it holds the token the supervisor writes into <home>/server.json (readable by its owner alone,
@@ -48,9 +49,13 @@ from starlette.responses import Response
 
 HOOK_PATHS = frozenset({
     "/api/events/pull", "/api/events/ack", "/api/events/held", "/api/events/mode", "/api/events/permission",
-    "/api/agents", "/api/bg/relay", "/api/bg/agent-check", "/api/bg/proxy-stop",
+    "/api/agents", "/api/bg/agent-check",
+    # thimble's agents' hooks (subagents.py), each beside the record it wrote to the workspace's files
+    "/api/subagents/started", "/api/subagents/denied", "/api/subagents/stopped", "/api/subagents/end",
+    "/api/subagents/rekey",
 })
 SHIM_PATHS = frozenset({"/api/events"})
+MODULE_PREFIX = "/api/module/"  # the hooks module's routes (app/module_bridge.py): every one, whatever the method
 TOOL_PREFIX = "/api/tools/"  # POST /api/tools/<name>; GET /api/tools/holdings is the CLI's and stays open
 SESSION_HOOK_PATHS = re.compile(r"/api/ws/[^/]+/(sessions/permission|calls/ref)")
 NONCE_HEADER = "x-thimble-nonce"
@@ -69,8 +74,10 @@ UI_COOKIE_AGE_S = 400 * 24 * 3600  # the longest a browser keeps a cookie
 # paths. It covers the whole API, not just /api/ws/, so a browser proves itself to LocalWriteGuard on every write route.
 UI_COOKIE_PATH = "/api/"
 LEGACY_COOKIE_PATHS = ("/api/ws/", "/api/")  # where UI_COOKIE was set; claim and a moved cookie delete it there
-ANALYST_ONLY = ("open thimble from the link shown under /thimble's reply, or printed by `thimble up` in a shell, to"
-                " answer permission requests or change permission modes")
+# a click route's 403 without the analyst's cookie: every such click, not only the permission answers (live check L32)
+ANALYST_ONLY = ("only the analyst's own thimble page can do this (start, message or stop thimble's agents, build a view,"
+                " answer a permission request, change a permission mode): open it from the link shown under /thimble's"
+                " reply, or printed by `thimble up` in a shell, and click there")
 
 # A write to the local API (any method but GET/HEAD/OPTIONS) must prove it comes from thimble's own browser (the ui_key
 # cookie) or a local tool that can read server.json (the hook proof). A notebook kernel runs model-authored code with
@@ -121,9 +128,9 @@ def headers(token: str, nonce: str) -> dict[str, str]:
 
 
 def guarded(method: str, path: str) -> bool:
-    """Whether a request needs the proof: a hook's or shim route's, or a tool call."""
-    return (path in HOOK_PATHS or path in SHIM_PATHS or (method == "POST" and path.startswith(TOOL_PREFIX))
-            or SESSION_HOOK_PATHS.fullmatch(path) is not None)
+    """Whether a request needs the proof: a hook's, the shim's or the hooks module's route, or a tool call."""
+    return (path in HOOK_PATHS or path in SHIM_PATHS or path.startswith(MODULE_PREFIX)
+            or (method == "POST" and path.startswith(TOOL_PREFIX)) or SESSION_HOOK_PATHS.fullmatch(path) is not None)
 
 
 def _state() -> dict:
@@ -311,8 +318,8 @@ def _api(path: str) -> bool:
 
 
 def hook_proof(headers: Headers, method: str = "", path: str = "") -> bool:
-    """Whether `headers` carry a valid hook proof: a local tool that read the token (the plugin, the CLI,
-    view_check.py), or an agent's token on a request its grant allows."""
+    """Whether `headers` carry a valid hook proof: a local tool that read the token (the plugin, the CLI), or an agent's
+    token on a request its grant allows."""
     tok = _token_for(headers, method, path)[0]
     nonce = headers.get(NONCE_HEADER, "")
     return bool(tok and nonce and len(nonce) <= NONCE_MAX

@@ -5,7 +5,9 @@
 // thread works, a strip of its steps rides behind the composer, and every permission request waits on one card above
 // it (PermissionCard). The composer sends where threads.composerTarget says, and while the agent a thread shows (or a
 // step's parent) runs and the browser can stop it, the composer's send square is its Stop (composerStopOf). A thread
-// whose run ended without a reply offers Ask again.
+// whose run ended without a reply offers Ask again. Until an orientation was asked for, main's composer is the Start
+// gate (StartGate); a start that did not happen shows its card in main (OrientStart) and the gate comes back filled in.
+// While main runs outside thimble's fence, a banner says so (UnfencedBanner).
 import { Fragment, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Button } from '../components/Button'
 import { Chip } from '../components/Chip'
@@ -23,21 +25,24 @@ import { newest, STALE } from '../lib/newest'
 import { callRef, parseRef } from '../lib/refs'
 import { track } from '../lib/telemetry'
 import { hhmm } from '../lib/time'
-import type { ChatMeta, ChatRecord, MainEffort, ModelConf, OrientPermissions, Proposal, QueuedMessage, SessionAlert, Settings, Ticket } from '../lib/types'
-import { hasFastMode, invalidateSettings, loadSettings, onSettingsChange, saveRole } from '../lib/models'
+import type { ChatMeta, ChatRecord, MainEffort, ModelConf, Proposal, SessionAlert, StartAnswer, Ticket } from '../lib/types'
+import { loadSettings, onSettingsChange } from '../lib/models'
 import { findProposal, refreshProposals, useProposals } from '../lib/proposals'
 import { readStorage, storageKey, writeStorage } from '../lib/workspace'
 import { Composer } from './Composer'
-import { EFFORT_CHOICES, mainEffort, mainFast, NEXT_LAUNCH, ORIENT_DEFAULT_EFFORT } from './ModelLine'
-import { API_ERROR_KIND, apiRetry, branchIndex, capacityNote, foldRecords, isFollowUpRow, madeBy, mainSkips, orientRuns, orientSummaries, orientWriters, QUIET_RE, sessionSteps, stepEnded, toolSteps, withApiErrors, withBranches, withCallNumbers, type MainContext, type Row, type ShotRow } from './model'
+import { mainEffort, mainFast, NEXT_LAUNCH } from './ModelLine'
+import { API_ERROR_KIND, apiRetry, branchIndex, capacityNote, foldRecords, landedTexts, madeBy, mainSkips, orientRuns, orientSummaries, orientWriters, QUIET_RE, sessionSteps, stepEnded, toolSteps, withApiErrors, withBranches, withCallNumbers, type MainContext, type Row, type ShotRow } from './model'
 import { Holds, useRetryText } from './Holds'
 import { TicketStatus, useTicket } from './TicketStatus'
 import { Divider, Note, ThreadChip, ThreadsContext } from './Notes'
 import { RefText } from './markdown'
 import { CallFocusContext, MAIN_RETRY_NOTE, Rows, THREAD_RETRY_NOTE, type CallFocus, type ErrorRetry } from './Rows'
 import { countMessages, isUnread, markSeen, readSeen, type SeenMap } from './seen'
-import { SKIPPED_NOTE, StartGate, agentMode, startGateShown } from './StartGate'
-import { AgentCard, StoppedHold, stoppedAlert, stopSession, useAgentRows } from './AgentCard'
+import { SKIPPED_NOTE, StartGate, restoreOf, startGateShown, startedChat } from './StartGate'
+import { AgentCard, stopSession, useAgentRows } from './AgentCard'
+import { OrientStart, useOrientRun } from './OrientStart'
+import { CONTINUE_HERE_LINE, PAUSED_LINE, continueOf, continueText, lastSession } from './subagent'
+import { UnfencedBanner } from '../shell/UnfencedBanner'
 import { ViewChip } from './ViewChip'
 import { replayHeld } from './pending'
 import { ThreadRows } from './ThreadRows'
@@ -65,11 +70,11 @@ export type ComposerStop =
 
 const STOP_LABELS: Readonly<Record<string, string>> = { orient: 'Stop the orientation', writer: 'Stop the writer', check: 'Stop the check' }
 
-type StopMeta = Pick<ChatMeta, 'id' | 'status'> & Partial<Pick<ChatMeta, 'role' | 'mode_agent' | 'agent_type'>>
+type StopMeta = Pick<ChatMeta, 'id' | 'status'> & Partial<Pick<ChatMeta, 'role' | 'agent_type'>>
 
-/** Whether a chat is the critique's, a step of the orientation run by the critic's session or an extension's critic
- * program. Pure. */
-const isCritique = (m: StopMeta | null): boolean => !!m && m.role === 'step' && (m.mode_agent === 'critic' || !!m.agent_type?.endsWith(':critic'))
+/** Whether a chat is the critique's, a step of the orientation run by its critic (`thimble:critic`) or an extension's
+ * critic program. Pure. */
+const isCritique = (m: StopMeta | null): boolean => !!m && m.role === 'step' && !!m.agent_type?.endsWith(':critic')
 const CRITIQUE_STOP = 'Stop the critique'
 
 /** The Stop the composer carries for the thread shown, while what it stops runs: a session's (STOP_LABELS), its dev
@@ -220,8 +225,8 @@ export function buildStage(line: string): { label: string; state: StepState; det
     const detail = m[2].replace(/\b(\d+) ref\(s\)/g, (_, n: string) => `${n} ${n === '1' ? 'ref' : 'refs'}`).trim()
     return m[1] === 'passed' ? { label: 'Checks passed', state: 'done', detail } : { label: 'Checks failed', state: 'failed', detail }
   }
-  m = /^the view did not pass, so a new session builds it again from what failed \(repair (\d+) of (\d+)\)$/.exec(t)
-  if (m) return { label: `Building again in a new session · repair ${m[1]} of ${m[2]}`, state: 'running' }
+  m = /^the view did not pass, so a new (session|builder) builds it again from what failed \(repair (\d+) of (\d+)\)$/.exec(t)
+  if (m) return { label: `Building again with a new ${m[1] === 'builder' ? 'builder' : 'session'} · repair ${m[2]} of ${m[3]}`, state: 'running' }
   m = /^the session is waiting for an answer; ([\s\S]*)$/.exec(t)
   if (m) return { label: 'Waiting for an answer', state: 'running', detail: m[1] }
   return { label: t.charAt(0).toUpperCase() + t.slice(1), state: 'running' }
@@ -304,22 +309,16 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
   const treeKey = storageKey(ws, 'threads-collapsed')
   const [treeCollapsed, setTreeCollapsed] = useState(() => readStorage<boolean>(treeKey, true))
   const [stripOpen, setStripOpen] = useState(false)
-  // the orientation's role settings (backend config.models_for), which the Start gate's model line shows and saves to;
+  // the orientation's row of Settings (backend config.models_for), where the Start gate's model and effort menus open;
   // a read that fails is tried again
   const [orientConf, setOrientConf] = useState<ModelConf | null>(null)
-  // the permission modes the analyst set per agent, and those their Claude Code settings turn off (Start's switcher)
-  const [modeRows, setModeRows] = useState<Settings['permission_modes']>({})
-  const [offModes, setOffModes] = useState<OrientPermissions[]>([])
   useEffect(() => {
     let alive = true
     let retry: number | undefined
     const read = () =>
       loadSettings(ws)
         .then((s) => {
-          if (!alive) return
-          setOrientConf(s.models?.orient ?? null)
-          setModeRows(s.permission_modes ?? {})
-          setOffModes(s.disabled_modes ?? [])
+          if (alive) setOrientConf(s.models?.orient ?? null)
         })
         .catch(() => {
           if (alive) retry = window.setTimeout(read, SETTINGS_RETRY_MS)
@@ -332,25 +331,11 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
       off()
     }
   }, [ws])
-  const orientEffortOf = (conf: ModelConf | null): MainEffort | null =>
-    conf && (EFFORT_CHOICES as readonly string[]).includes(conf.effort) ? (conf.effort as MainEffort) : null
-  const saveOrient = (patch: Partial<ModelConf>) => {
-    setOrientConf((c) => (c ? { ...c, ...patch } : c))
-    saveRole(ws, 'orient', patch).catch((e: Error) => bus.emit('toast', { text: `Could not change the orientation's settings: ${e.message}`, kind: 'error' }))
-  }
-  // a pick the server refuses goes back to the saved row, so Start shows the mode the orientation will start in
-  const saveOrientMode = (mode: OrientPermissions) => {
-    const before = modeRows?.orient
-    setModeRows((r) => ({ ...r, orient: mode }))
-    api
-      .putSettings(ws, { permission_modes: { orient: mode } })
-      .then(() => invalidateSettings(ws))
-      .catch((e: Error) => {
-        setModeRows((r) => ({ ...r, orient: before }))
-        invalidateSettings(ws)
-        bus.emit('toast', { text: `Could not change the orientation's permission mode: ${e.message}`, kind: 'error' })
-      })
-  }
+  // this tab's Start click: when it went out, while it waits for its answer, and what it answered
+  const [pendingStart, setPendingStart] = useState<number | null>(null)
+  const [startAnswer, setStartAnswer] = useState<StartAnswer | null>(null)
+  // the gate's text field, which Edit request on a refused start goes to
+  const gateKey = useRef(0)
   // a kept thread that is gone (deleted, or the workspace archived) falls back to main at the first load of the list
   const restored = useRef(false)
   const fresh = useMemo(() => newest<ChatMeta[]>(), [ws])
@@ -582,11 +567,34 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
   const runningAgents = useMemo(() => chats.filter((m) => (threadKind(m) === 'orient' || threadKind(m) === 'writer' || threadKind(m) === 'dev') && m.status === 'running').sort((a, b) => (a.created_at < b.created_at ? 1 : -1)), [chats])
   // the orientations' logs are read as well: main leaves out its relay of the summary one handed back
   const orientIds = useMemo(() => chats.filter((m) => threadKind(m) === 'orient').map((m) => m.id), [chats])
-  const showGate = startGateShown({ main: current === 'main', skipped, started, loading: main.loading, error: main.error, orientation: main.meta?.orientation, orientChats: orientIds.length })
+  // New orientation, where the latest one cannot be continued: the gate opens in main though an orientation ran
+  const [againGate, setAgainGate] = useState(false)
+  const showGate = startGateShown({ main: current === 'main', skipped, started, loading: main.loading, error: main.error, orientation: main.meta?.orientation, orientChats: orientIds.length, again: againGate })
+  // the orientation's record: Starting…, a start that did not happen, and the gate filled in again from it
+  const orientRun = useOrientRun(ws, main.meta?.orientation)
+  const restore = useMemo(() => restoreOf(orientRun.run), [orientRun.run])
+  // main's meta again when the record changes (its `orientation`, which opens the gate after a refusal)
+  const reloadMain = main.reload
+  useEffect(() => bus.on('orient', () => void reloadMain()), [reloadMain])
+  const onStartAnswer = (a: StartAnswer | null) => {
+    setPendingStart(null)
+    setStartAnswer(a)
+    orientRun.reload()
+    void main.reload()
+    // started (or an extension's program runs it): the gate gives way at once; refused: it comes back, filled in
+    setStarted(!!a && (!!a.agentId || !!a.program))
+    if (a && (a.agentId || a.program)) setAgainGate(false)
+    // the orientation's thread opens on its first steps, as Start was the analyst's own click here
+    const opened = startedChat(a)
+    if (opened) setCurrent(opened)
+  }
   const agentRows = useAgentRows(ws, [...new Set([...runningAgents.map((m) => m.id), ...orientIds])])
   const orienting = current === 'main' ? runningAgents.find((m) => threadKind(m) === 'orient') : undefined
   const metaMap = useMemo(() => new Map(chats.map((m) => [m.id, m])), [chats])
   const strip = orienting ? taskStrip('orient', true, agentRows.get(orienting.id) ?? [], metaMap) : taskStrip(kind, running, chat.rows, metaMap, !!curMeta?.view, kind === 'thread' ? threadStage(curMeta, running) : null)
+  // the orientation waits for its critic's report: the strip says so (subagents' `paused: critique`)
+  const pausedFor = (orienting ?? (kind === 'orient' ? curMeta : null))?.paused === 'critique'
+  if (strip && pausedFor) strip.title = PAUSED_LINE
   // the orientation the strip follows in main (its retry below), and the session whose strip it is in its own thread
   const stripMeta = orienting ?? (kind === 'orient' ? curMeta : null)
   const stripSession = orienting ?? (kind === 'orient' || kind === 'writer' || kind === 'check' || kind === 'step' || kind === 'dev' ? curMeta : null)
@@ -597,10 +605,6 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
   const waiting = !!waitingFor
   // every request of every session that waits for the analyst, on the one card above the composer
   const asks = useMemo(() => pendingRequests(main.meta, metaMap.values()), [main.meta, metaMap])
-  // the session the strip follows waits to start again after Anthropic's API was at capacity (backend agent_session,
-  // retry): the strip says so, counting down, with Retry now
-  const retryMeta = stripMeta ?? (kind === 'writer' ? curMeta : null)
-  const retryAlert = retryMeta?.alert?.kind === 'retry' ? retryMeta.alert : null
   // the latest orientation, which the orientation's composer and main's message_orientation reach
   const latestOrient = orientIds.length ? [...chats].filter((m) => threadKind(m) === 'orient').sort((a, b) => (a.created_at < b.created_at ? 1 : -1))[0]?.id ?? null : null
   // a workspace installed from a pre-cache (chat/Precached): its orientation keeps a session only from a full export
@@ -609,8 +613,11 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
   // the thread of a pre-cached orientation that kept no session, main
   const target = composerTarget(kind, curMeta, latestOrient && precached?.orientation === latestOrient && !takesFollowUps(precached) ? null : latestOrient)
   const [sendingView, setSendingView] = useState(false)
-  // the analyst's messages to the orientation, from their send until its log or its queue holds them
-  const [outbox, setOutbox] = useState<{ chat: string; text: string; key: number }[]>([])
+  // the analyst's messages to the orientation, from their send until its log holds them; `held` while the server holds
+  // one until the coverage line is measured
+  const [outbox, setOutbox] = useState<{ chat: string; text: string; key: number; held?: boolean }[]>([])
+  // the server's text when the orientation cannot take a message here (409 earlier session, 410 earlier version)
+  const [orientClosed, setOrientClosed] = useState<{ chat: string; text: string } | null>(null)
   const [sendingOrient, setSendingOrient] = useState(false)
   const outboxSeq = useRef(0)
   // main's session as the composer shows it (ModelLine): its effort and fast mode, and whether one is attached at all,
@@ -619,6 +626,14 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
   const detached = !!main.meta && !attached
   // whether no session was ever attached to a pre-cached workspace, while the composer would reach nothing
   const neverAttached = detached && !main.meta?.ended
+  // the orientation the composer would reach, when it cannot take a message here: an earlier Claude Code session's or an
+  // earlier version's, whose text takes the composer's place (backend orient_session.latest's 409 and 410)
+  const orientMeta = target.to === 'orient' ? metaMap.get(target.chat) ?? (curMeta?.id === target.chat ? curMeta : null) : null
+  const orientContinue = target.to === 'orient' ? continueOf(curMeta?.id === target.chat ? curMeta : orientMeta, attached?.session) : null
+  const orientClosedText =
+    target.to === 'orient'
+      ? (orientClosed?.chat === target.chat ? orientClosed.text : '') || continueText(orientContinue, lastSession(curMeta?.id === target.chat ? curMeta : orientMeta))
+      : ''
   const pickEffort = useCallback(
     (e: MainEffort) => {
       track('chat-settings', { target: 'chat:main', detail: { effort: e } })
@@ -693,10 +708,16 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
       setOutbox((o) => [...o, { chat: chatId, text, key }])
       return api
         .messageOrientation(ws, text)
-        .then(() => true)
+        .then((r) => {
+          if (r.status === 'held') setOutbox((o) => o.map((m) => (m.key === key ? { ...m, held: true } : m)))
+          return true
+        })
         .catch((e: Error) => {
           setOutbox((o) => o.filter((m) => m.key !== key))
-          bus.emit('toast', { text: `Could not send it to the orientation. ${e.message}`, kind: 'error' })
+          // an orientation of an earlier session or version, or one stopped with Esc: its text takes the composer's place
+          const closed = /^(409|410)\s+(This orientation (?:ran in an earlier|was stopped with Esc).*)$/s.exec(e.message)
+          if (closed) setOrientClosed({ chat: chatId, text: closed[2] })
+          else bus.emit('toast', { text: `Your message was not passed on: ${e.message.replace(/^\d{3}\s+/, '')}`, kind: 'error' })
           return false
         })
         .finally(() => setSendingOrient(false))
@@ -727,14 +748,14 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
   // the composer's chip: the model and effort of the session the message goes to; main's for main and its threads
   const roleChip =
     target.to === 'orient' ? (
-      <RoleChip ws={ws} role="orient" label="the orientation" />
+      <RoleChip ws={ws} role="orient" label="the orientation" values={orientMeta?.values ?? null} />
     ) : target.to === 'view' ? (
       <RoleChip ws={ws} role="dev" label="the view build" />
     ) : undefined
   const mainChip = !!attached && !roleChip
 
   return (
-    <ThreadsContext.Provider value={{ labels, metas }}>
+    <ThreadsContext.Provider value={{ labels, metas, main: main.meta }}>
       <section
         ref={rootRef}
         className="chat"
@@ -773,6 +794,7 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
             aside={onCollapse && <Button variant="icon" size="sm" icon="panel-left" title="Collapse the chat" className="chat-head-collapse" onClick={onCollapse} />}
           />
         </header>
+        <UnfencedBanner main={main.meta} />
         <div
           className="chat-list"
           ref={listRef}
@@ -794,10 +816,22 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
                 {skipped && <Note className="chat-skipped" text={SKIPPED_NOTE} />}
                 {precached?.orientation && !mainRows.length && <Note className="chat-origin" text="The orientation ran in advance:" chips={<ThreadChip id={precached.orientation} />} />}
                 <Rows rows={withBranches(mainRows, main.records, branches)} ws={ws} chat="main" streaming={main.streaming} retry={mainRetry} />
+                <OrientStart
+                  ws={ws}
+                  run={orientRun.run}
+                  answer={startAnswer}
+                  pendingSince={pendingStart}
+                  onStarted={(a) => onStartAnswer(a)}
+                  onEdit={() => {
+                    setSkipped(false)
+                    setStarted(false)
+                    window.requestAnimationFrame(() => footRef.current?.querySelector<HTMLTextAreaElement>('.chat-gate-text')?.focus())
+                  }}
+                />
               </>
             )}
             {!chat.loading && !chat.error && kind === 'thread' && curMeta && <ThreadView ws={ws} meta={curMeta} chat={chat} main={main} skip={mainSkip} branches={branches} detached={detached} />}
-            {!chat.loading && !chat.error && kind === 'orient' && <SessionView ws={ws} id={current} chat={chat} role="orient" title="Orientation" running={running} outbox={outbox.filter((m) => m.chat === current).map((m) => m.text)} attached={!!attached} />}
+            {!chat.loading && !chat.error && kind === 'orient' && <SessionView ws={ws} id={current} chat={chat} role="orient" title="Orientation" running={running} outbox={outbox.filter((m) => m.chat === current)} attached={!!attached} />}
             {!chat.loading && !chat.error && kind === 'writer' && <SessionView ws={ws} id={current} chat={chat} role="writer" title={curMeta?.title || 'Writer'} running={running} />}
             {!chat.loading && !chat.error && kind === 'check' && <SessionView ws={ws} id={current} chat={chat} role="check" title={curMeta?.title || 'Check'} running={running} fromMain={false} />}
             {!chat.loading && !chat.error && kind === 'dev' && <DevView ws={ws} id={current} chat={chat} mainRecords={main.records} ticket={ticket} onTicket={setTicket} />}
@@ -808,31 +842,22 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
         <div ref={footRef} className="chat-foot">
           <Holds className="chat-main-holds" alert={main.meta?.alert} />
           {asks.length > 0 && <PermissionCard ws={ws} asks={asks} metas={metaMap} labels={labels} />}
-          {strip && !showGate && (
-            <TaskStrip
-              title={strip.title}
-              steps={strip.steps}
-              count={strip.count}
-              open={stripOpen}
-              onToggle={() => setStripOpen((o) => !o)}
-              waiting={waiting}
-              retry={retryAlert}
-              onRetry={retryMeta ? () => api.retrySession(ws, retryMeta.id) : undefined}
-            />
-          )}
+          {strip && !showGate && <TaskStrip title={strip.title} steps={strip.steps} count={strip.count} open={stripOpen} onToggle={() => setStripOpen((o) => !o)} waiting={waiting} />}
           {showGate ? (
             <StartGate
+              key={`gate:${restore ? orientRun.run?.request ?? 'refused' : 'new'}:${gateKey.current}`}
               ws={ws}
+              main={main.meta}
               model={orientConf?.model ?? null}
-              onModel={orientConf ? (model) => saveOrient({ model, fast: !!orientConf.fast && hasFastMode(model) }) : undefined}
-              defaultEffort={orientEffortOf(orientConf) ?? ORIENT_DEFAULT_EFFORT}
-              fast={orientConf ? !!orientConf.fast : null}
-              onEffort={(effort) => saveOrient({ effort })}
-              onFast={orientConf ? (fast) => (track('start-toggle', { target: 'orient:fast', detail: { fast } }), saveOrient({ fast })) : undefined}
-              mode={agentMode(modeRows, 'orient', attached?.permission_mode, offModes)}
-              offModes={offModes}
-              onMode={saveOrientMode}
-              onStarted={() => setStarted(true)}
+              effort={orientConf?.effort ?? null}
+              restore={restore}
+              onStarting={() => {
+                // the gate closes at once; Starting… shows after a second without the answer, and a refusal opens it again
+                setStartAnswer(null)
+                setPendingStart(Date.now())
+                setStarted(true)
+              }}
+              onAnswer={onStartAnswer}
               onSkip={() => {
                 writeStorage(skipKey, true)
                 setSkipped(true)
@@ -840,6 +865,24 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
             />
           ) : precached && attachInstead(precached, neverAttached, target.to) ? (
             <AttachBar mark={precached} />
+          ) : orientClosedText ? (
+            <div className="chat-continue" role="note" data-continue={orientContinue ?? undefined}>
+              <Icon name="terminal" size={13} className="chat-continue-ico" />
+              <span>{orientClosedText}</span>
+              <Button
+                size="sm"
+                variant="secondary"
+                className="chat-continue-new"
+                onClick={() => {
+                  // the Start gate in main, as before the first orientation, since this one takes no message
+                  setCurrent('main')
+                  setStarted(false)
+                  setAgainGate(true)
+                }}
+              >
+                New orientation
+              </Button>
+            </div>
           ) : (
             <Composer
               model={mainModel}
@@ -988,22 +1031,26 @@ function useCallIndex(ws: string, chat: string | null, rows: readonly Row[]): Re
   return index
 }
 
-/** A message on its way to the orientation or waiting in its queue: the analyst's tile, with a line that says it waits. */
-function PendingMessage({ text, ws, queued }: { text: string; ws: string; queued: boolean }) {
+/** The note under a message the server holds until the coverage line is measured, which goes with it. */
+export const HELD_NOTE = 'Sent when the coverage check ends (at most 2 minutes)'
+
+/** A message on its way to the orientation: the analyst's tile, with a spinner, or the note that it is held. */
+function PendingMessage({ text, ws, held }: { text: string; ws: string; held: boolean }) {
   return (
-    <div className="chat-msg chat-user chat-pending" data-queued={queued || undefined}>
+    <div className="chat-msg chat-user chat-pending" data-held={held || undefined}>
       <UserMessage className="chat-message">
         <RefText text={text} workspace={ws} />
       </UserMessage>
-      <Note className="chat-pending-note" spin={!queued} text={queued ? 'Waits for the current run to end' : undefined} />
+      <Note className="chat-pending-note" spin={!held} text={held ? HELD_NOTE : undefined} />
     </div>
   )
 }
 
-/** The thread of the orientation, a writer or a check's run: where it came from, the orientation's instructions as the
- * analyst's message, its card, then its whole session
- * (orientMessages); then the analyst's messages still on their way (`outbox`) and those queued (`queued`). */
-function SessionView({ ws, id, chat, role, title, running, outbox = [], fromMain = true, attached = false }: { ws: string; id: string; chat: ChatState; role: string; title: string; running: boolean; outbox?: readonly string[]; fromMain?: boolean; attached?: boolean }) {
+/** The thread of the orientation, a writer or a check's run: where it came from, the orientation's request as the
+ * analyst's message, its card, then its whole transcript (orientMessages); then the analyst's messages still on their
+ * way (`outbox`). An orientation that main's quit stopped and `thimble --continue` brought back says a message continues
+ * it. */
+function SessionView({ ws, id, chat, role, title, running, outbox = [], fromMain = true, attached = false }: { ws: string; id: string; chat: ChatState; role: string; title: string; running: boolean; outbox?: readonly { text: string; held?: boolean }[]; fromMain?: boolean; attached?: boolean }) {
   const orient = role === 'orient'
   // an orientation `thimble demo` installed from a pre-cache, which ran in advance with no session kept
   const mark = orient && chat.meta?.id === id ? chat.meta?.precached ?? null : null
@@ -1011,23 +1058,20 @@ function SessionView({ ws, id, chat, role, title, running, outbox = [], fromMain
   const index = useCallIndex(ws, orient ? id : null, own)
   const rows = useMemo(() => withCallNumbers(own, index), [own, index])
   const log = useMemo(() => ({ meta: chat.meta, records: chat.records as ChatRecord[], error: chat.error }), [chat.meta, chat.records, chat.error])
-  const queued: QueuedMessage[] = (chat.meta?.id === id ? chat.meta?.queued : null) ?? []
-  const stopped = chat.meta?.id === id ? stoppedAlert(chat.meta) : null
-  // a message sent from here is shown until the log (a follow-up's first record) or the queue holds it
-  const landed = new Set([...chat.rows.filter(isFollowUpRow).map((r) => r.text.trim()), ...queued.map((q) => q.text.trim())])
-  const sending = outbox.filter((t) => !landed.has(t.trim()))
+  const meta = chat.meta?.id === id ? chat.meta : null
+  const here = orient && !running && meta?.status === 'stopped' && meta.stopped_by === 'quit' && meta.continue === 'here'
+  // a message sent from here is shown until the log holds it (a follow-up's first record)
+  const landed = landedTexts(chat.rows)
+  const sending = outbox.filter((m) => !landed.has(m.text.trim()))
   return (
     <>
       {mark && <PrecachedCard mark={mark} attached={attached} />}
       {fromMain && !mark && <Note className="chat-origin" text="Started from main" chips={<ThreadChip id="main" />} />}
-      <AgentCard ws={ws} chat={id} role={role} title={title} log={log} openWhileRunning resumeHere={false} stopHere={false} briefAbove={orient} />
+      <AgentCard ws={ws} chat={id} role={role} title={title} log={log} openWhileRunning stopHere={false} briefAbove={orient} />
       <Rows rows={rows} ws={ws} chat={id} calls={orient ? id : undefined} live={running} />
-      {!running && stopped && <StoppedHold ws={ws} chat={id} text={stopped.text} />}
-      {queued.map((q, i) => (
-        <PendingMessage key={`q:${i}:${q.text}`} text={q.text} ws={ws} queued />
-      ))}
-      {sending.map((t, i) => (
-        <PendingMessage key={`s:${i}:${t}`} text={t} ws={ws} queued={false} />
+      {here && <Note className="chat-continue-here" text={CONTINUE_HERE_LINE} />}
+      {sending.map((m, i) => (
+        <PendingMessage key={`s:${i}:${m.text}`} text={m.text} ws={ws} held={!!m.held} />
       ))}
     </>
   )

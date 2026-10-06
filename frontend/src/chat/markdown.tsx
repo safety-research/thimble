@@ -3,7 +3,7 @@
 // the markers back into spans that render as RefChip. A streaming text renders per completed block, so a delta
 // re-parses only the tail.
 import { Fragment, createContext, memo, useContext, useState, type JSX, type ReactNode } from 'react'
-import Markdown, { type Components, type ExtraProps } from 'react-markdown'
+import Markdown, { type Components, type ExtraProps, type Options } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import type { Element, Properties, Root, Text } from 'hast'
 import { MarkdownCode } from '../components/Code'
@@ -131,7 +131,8 @@ function MdLink(props: JSX.IntrinsicElements['a'] & ExtraProps) {
 // a fenced block in the language it names takes the syntax colours code has everywhere (components/Code.tsx); an image
 // loads only from the machine (components/MdImage)
 const components: Components = { span: MdSpan, a: MdLink, code: MarkdownCode, img: MdImage }
-const remarkPlugins = [remarkGfm]
+// a single ~ is no strikethrough: page and file names hold it (`dse~Agent`, live check L21); ~~two~~ still is
+const remarkPlugins: Options['remarkPlugins'] = [[remarkGfm, { singleTilde: false }]]
 const rehypePlugins = [rehypeRefChips, rehypeNumericCells]
 
 const MarkdownBlock = memo(function MarkdownBlock({ text }: { text: string }) {

@@ -941,6 +941,8 @@ async def _refresh(c: str) -> dict[str, Any]:
                      "oriented": [n for n in state["oriented"] if n in on],
                      "declined": [n for n in state["declined"] if n in on], "extensions": exts}
         await asyncio.to_thread(write_json, _state_path(c), new_state)
+        if _active(state["extensions"]) != _active(exts):
+            _push_roles(c)
         old = {n for n in RENAMED if os.path.lexists(workspace_path(c, n))}
         for name in sorted((set(state["extensions"]) | old) - set(exts)):
             try:
@@ -955,6 +957,20 @@ async def _refresh(c: str) -> dict[str, Any]:
             await asyncio.to_thread(views.withdraw, c, slug, None)
     _gate_installed(c, exts, gates)
     return new_state
+
+
+def _active(exts: dict[str, Any]) -> dict[str, Any]:
+    """The active extensions of a state's `extensions`, each with the digest of its folder."""
+    return {n: e.get("digest") for n, e in exts.items() if isinstance(e, dict) and e.get("active")}
+
+
+def _push_roles(c: str) -> None:
+    """The active extensions changed (one switched, added, removed or changed): main's hooks module registers thimble's
+    agent types again (ledger.push_roles), since the orientation's registered prompt holds their blocks and the types
+    hold their agents, so the next start runs with them, as a Settings save does."""
+    from . import ledger  # noqa: PLC0415
+
+    ledger.push_roles(c)
 
 
 def gates_on() -> bool:
@@ -1073,14 +1089,14 @@ def install_views(c: str) -> list[str]:
 
 
 def orientation_ran(c: str) -> bool:
-    """Whether an orientation has a session, a thread and a transcript in workspace `c`, which a follow-up can resume
-    (orient_session._chat_of and resume)."""
-    from . import agents, orientation, session  # noqa: PLC0415
+    """Whether an orientation ran in workspace `c` whose agent a follow-up can continue (orient_session.latest)."""
+    from . import orient_session  # noqa: PLC0415
 
-    rec = orientation.read_run(c) or {}
-    chat = str((rec.get("chats") or {}).get(orientation.ROLE) or "")
-    sid = str(rec.get("session") or "")
-    return bool(sid and chat and agents.meta_or_none(c, chat) is not None and session.find_transcript(sid))
+    try:
+        orient_session.latest(c)
+    except (orient_session.NoOrientation, orient_session.EarlierSession, orient_session.EarlierVersion):
+        return False
+    return True
 
 
 def oriented_here(c: str) -> bool:
@@ -1117,7 +1133,7 @@ def _can_run(c: str, name: str, exts: dict[str, Any], replacing: bool, ran: tupl
     """Whether Run now can run extension `name`'s orientation here (`ran`, as _ran gives it): its program runs again
     with the earlier cards wherever an orientation ran, and its instructions go to an orientation a follow-up reaches,
     thimble's own session that can be resumed or the program that ran it, which runs again with them
-    (orient_session.message)."""
+    (orient_session.send)."""
     e = exts.get(name) or {}
     if orient_program(e):
         return _program_runs(name, exts) and ran[0]
@@ -1202,9 +1218,9 @@ def _instructions(c: str, name: str, exts: dict[str, Any]) -> str:
 async def run_orientation(c: str, name: str) -> dict[str, Any]:
     """Run now: an extension whose program runs the orientation runs it again as a follow-up, with the earlier request
     and the cards as they stand, so it adds to them (orient_session.run_program_now); any other extension's
-    instructions are sent to the orientation as a follow-up, resumed or queued behind the run going
-    (orient_session.message). {status: rerun | resumed | queued | nothing}, rerun for a program; NoOrientation, Gone
-    or RuntimeError when it cannot run."""
+    instructions are sent to the orientation as a follow-up, through thimble's module (orient_session.send).
+    {status: rerun | sent | held | nothing}, rerun for a program; NoOrientation, EarlierSession, EarlierVersion or
+    RuntimeError when it cannot run."""
     from . import orient_session  # noqa: PLC0415
 
     exts = read_state(c)["extensions"]
@@ -1215,9 +1231,9 @@ async def run_orientation(c: str, name: str) -> dict[str, Any]:
     text = _instructions(c, name, exts)
     if not text:
         return {"status": "nothing"}
-    got = await orient_session.message(c, text, orient_session.EXTENSION, extension=name)
+    got = await orient_session.send(c, text, orient_session.EXTENSION, extension=name)
     await mark_oriented(c, [name])
-    return {"status": str(got.get("status") or "resumed")}
+    return {"status": str(got.get("status") or "sent")}
 
 
 def set_enabled(c: str, name: str, on: bool) -> None:
@@ -1328,10 +1344,11 @@ def agent_definitions(c: str | None) -> dict[str, dict[str, Any]]:
 
 def agent_models(c: str | None) -> dict[str, dict[str, Any]]:
     """The Settings rows of the active extensions' agents, by config key ("<ext>:<name>"): the model and effort each
-    runs at, as agent_definitions resolves them (the config's, else its file's, else the orientation's subagents'
-    model and its session's effort, ''), `fast` False since it runs at its session's speed, and `extension`."""
+    runs at (the config's, else its file's, else thimble:helper's row, `subagents`, so that each names an explicit
+    effort), `fast` False since a subagent has no fast mode of its own, and `extension`."""
     conf = userconf.load_or_defaults(c)[0]
-    subagents = config.models_for(c)["subagents"]["model"]
+    helper = config.models_for(c)["subagents"]
+    subagents = helper["model"]
     out: dict[str, dict[str, Any]] = {}
     for e in active(c):
         for name in _words(e.get("agents")):
@@ -1345,7 +1362,8 @@ def agent_models(c: str | None) -> dict[str, dict[str, Any]]:
             mine = userconf.extension_agent(conf, key)
             model = str(mine["model"] or front.get("model") or "")
             out[key] = {"model": config.exact_model(model) if model else subagents,
-                        "effort": str(mine["effort"] or front.get("effort") or ""), "fast": False,
+                        "effort": config.effort_level(mine["effort"] or front.get("effort")) or helper["effort"],
+                        "fast": False,
                         "extension": e["name"]}
     return out
 
@@ -2010,7 +2028,8 @@ def consent(e: dict[str, Any], conf: dict[str, Any]) -> str:
         if role == "main":
             used["main"] = "your own settings"
         elif (a := agents_conf.get(CONFIG_AGENT.get(role, ""))) and isinstance(a, dict):
-            used[role] = _settings_words(a)
+            # what its sessions run under: main's fence's keys for a role thimble runs as main's subagent
+            used[role] = _settings_words(userconf.agent_conf(conf, CONFIG_AGENT[role]) if "agents" in conf else a)
     from . import tasks  # noqa: PLC0415 — tasks reads this module
 
     for r in e.get("tasks") or []:
@@ -2227,7 +2246,7 @@ async def orientation_route(c: str, name: str, body: OrientBody, request: Reques
             status = (await run_orientation(c, name))["status"]
         except orient_session.NoOrientation:
             raise HTTPException(409, "No orientation has run here yet. It reads the extension when it starts.") from None
-        except (orient_session.Gone, RuntimeError, ValueError) as err:
+        except (orient_session.EarlierSession, orient_session.EarlierVersion, RuntimeError, ValueError) as err:
             raise HTTPException(409, f"{name}'s orientation could not run now: {err}") from None
     else:
         await decline(c, name)

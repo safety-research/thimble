@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import asyncio
 
-from app import agent_session, agents, card_check, checks, cli, concepts, dev, notebook, session
+from app import agents, card_check, checks, cli, concepts, dev, notebook, session
 
 
 def test_stop_all_stops_the_checks_the_builds_the_label_runs_the_sessions_and_the_kernels(monkeypatch):
@@ -15,18 +15,21 @@ def test_stop_all_stops_the_checks_the_builds_the_label_runs_the_sessions_and_th
     monkeypatch.setattr(dev, "stop_workspace", lambda c: called.append("builds") or 1)
     monkeypatch.setattr(concepts, "stop_workspace", lambda c: called.append("label runs") or 0)
 
-    async def wind_down(c):
-        called.append("sessions")
-        return ["Orientation"]
+    def close_running(c, why):
+        called.append("subagents")
+        return ["a1"]
 
     async def kernels(c):
         called.append("kernels")
 
-    monkeypatch.setattr(agent_session, "wind_down", wind_down)
+    from app import subagents
+
+    monkeypatch.setattr(subagents, "close_running", close_running)
     monkeypatch.setattr(notebook, "shutdown_workspace", kernels)
     got = asyncio.run(agents.stop_all("w"))
-    assert called == ["report checks", "card checks", "builds", "label runs", "sessions", "kernels"], "nothing starts a session after its stop"
-    assert got == ["dev build", "Orientation"]
+    assert called == ["report checks", "card checks", "builds", "label runs", "subagents", "kernels"], \
+        "nothing starts after its stop"
+    assert got == ["dev build", "agent a1"], "the chats of thimble's agents, which died with main, are closed"
 
 
 def test_a_workspace_s_label_runs_count_as_at_work_and_stop_with_it():
@@ -83,6 +86,7 @@ def test_the_server_stops_itself_once_no_workspace_has_a_main_session(monkeypatc
     monkeypatch.setattr(agents, "at_work", lambda: {"idle"})
     stops: list[int] = []
     monkeypatch.setattr(cli, "stop_self", lambda: stops.append(1))
+    monkeypatch.setattr(session, "STOP_AFTER_S", 0.05)
 
     async def main_ends() -> None:
         session._stop_agents("w")
@@ -97,6 +101,34 @@ def test_the_server_stops_itself_once_no_workspace_has_a_main_session(monkeypatc
     asyncio.run(main_ends())
     assert stopped == ["w", "w", "idle"], "what another workspace still runs stops too"
     assert stops == [1]
+
+
+def test_the_server_waits_before_it_stops_so_the_page_reads_main_s_end_and_a_new_main_keeps_it(monkeypatch):
+    """Live check L10: the server stopped itself within a second of main's quit, so the open page never read main's end
+    and showed "thimble's server is not answering" instead of the session-gone card. It waits STOP_AFTER_S first, and a
+    session that becomes main meanwhile keeps it running."""
+    async def stop_all(c):
+        return []
+
+    monkeypatch.setattr(agents, "stop_all", stop_all)
+    monkeypatch.setattr(agents, "at_work", lambda: set())
+    stops: list[int] = []
+    monkeypatch.setattr(cli, "stop_self", lambda: stops.append(1))
+    monkeypatch.setattr(session, "STOP_AFTER_S", 0.3)
+    assert session.STOP_AFTER_S > 0
+
+    async def main_ends(back: bool) -> list[int]:
+        session._stop_agents("w")
+        await asyncio.sleep(0.15)
+        seen = list(stops)
+        if back:
+            session._live["w"] = object()
+        await asyncio.sleep(0.3)
+        session._live.pop("w", None)
+        return seen
+
+    assert asyncio.run(main_ends(back=True)) == [] and stops == [], "a session that came back keeps the server"
+    assert asyncio.run(main_ends(back=False)) == [] and stops == [1], "it stops only after the wait"
 
 
 async def _running_build(c: str, slug: str) -> "asyncio.Task":
@@ -119,24 +151,26 @@ async def _running_build(c: str, slug: str) -> "asyncio.Task":
 
 def test_stopping_the_orientation_stops_the_builds_of_its_views_and_no_other(workspaces_tmp):
     """The analyst's Stop ends the orientation's run stopped: the views it proposed stop building, running or queued,
-    and no listing of the proposals queues them again, while a view the analyst asked for builds on. The server's own
-    stop, which the next server resumes, stops none."""
-    from app import config, orient_session, orientation, views
+    and no listing of the proposals queues them again, while a view the analyst asked for builds on. A run main's quit
+    cut off stops none here (main's end stops the builds, dev.stop_workspace)."""
+    from app import orient_session, views
 
     c = "mini"
     ours = [views.propose(c, n, "why", ["board.jsonl"], "one row per post", orientation=True)["slug"]
             for n in ("Posts", "Threads")]
     asked = views.propose(c, "Timeline", "why", ["events.jsonl"], "one row per event", asked=True)["slug"]
 
+    from app import subagents
+
     def run(**kw):
-        return agent_session.Run(c, orient_session.KEY, "chat-o", "sid-o", config.corpus_dir(c), orientation.ROLE, **kw)
+        return subagents.Run(c, orient_session.KEY, "orientation", "chat-o", "a1", **kw)
 
     async def go() -> None:
         building = await _running_build(c, ours[0])
-        orient_session._ended(run(interrupted="the server stopped"), "failed", "")
+        orient_session.subagent_ended(c, run(interrupted=True), "stopped", "")
         await asyncio.sleep(0)
-        assert not building.done() and (c, ours[1]) in dev._view_queue, "the server's stop leaves them to resume"
-        orient_session._ended(run(), "stopped", "")
+        assert not building.done() and (c, ours[1]) in dev._view_queue, "main's quit stops nothing more here"
+        orient_session.subagent_ended(c, run(), "stopped", "")
         await asyncio.sleep(0)
         assert building.cancelled()
 
@@ -147,32 +181,23 @@ def test_stopping_the_orientation_stops_the_builds_of_its_views_and_no_other(wor
     assert dev._view_queue == [(c, asked)]
 
 
-def test_main_s_end_fails_the_views_the_analyst_asked_for_and_holds_a_session_s_until_a_session_is_main_again(workspaces_tmp):
-    """Main's end (dev.stop_workspace) stops every view build of the workspace: a view the analyst asked for, running or
-    queued, fails with Retry, while a view the orientation proposed waits, and no listing of the proposals queues it
-    again until a session is main again."""
+def test_main_s_end_fails_every_queued_build_with_retry_and_none_starts_again(workspaces_tmp):
+    """Main's end (dev.stop_workspace) fails every queued view build of the workspace with MAIN_ENDED and Retry, the
+    analyst's and the orientation's alike, and nothing starts it again by itself: not a listing of the proposals, not a
+    new main. A builder that ran ended with main (test_view_subagents.py)."""
     from app import config, views
 
     c = "mini"
-    first, second = (views.propose(c, n, "why", ["board.jsonl"], "one row per post", asked=True)["slug"]
-                     for n in ("Posts", "Threads"))
-    ours = views.propose(c, "Timeline", "why", ["events.jsonl"], "one row per event", orientation=True)["slug"]
-
-    async def go() -> None:
-        building = await _running_build(c, first)
-        run = dev._view_runs[(c, first)]
-        assert dev.stop_workspace(c) == 1
-        await asyncio.sleep(0)
-        assert building.cancelled() and run.status == dev.MAIN_ENDED, "its build ends failed (dev._run_view)"
-
-    asyncio.run(go())
-    assert not dev._view_queue, "no queued view starts in a stopped one's place"
-    queued = views.read_proposal(c, second) or {}
-    assert (queued.get("status"), queued.get("error")) == ("failed", dev.MAIN_ENDED)
+    slugs = [views.propose(c, n, "why", ["board.jsonl"], "one row per post", asked=True)["slug"]
+             for n in ("Posts", "Threads")]
+    slugs.append(views.propose(c, "Timeline", "why", ["events.jsonl"], "one row per event", orientation=True)["slug"])
+    assert dev.stop_workspace(c) == 3
+    assert not dev._view_queue
+    assert {s: ((views.read_proposal(c, s) or {}).get("status"), (views.read_proposal(c, s) or {}).get("error"))
+            for s in slugs} == dict.fromkeys(slugs, ("failed", dev.MAIN_ENDED))
     dev.recover_views(c)  # the browser lists the proposals
-    assert (c, ours) not in dev._view_queue
     session.attach(c, "sid-next", str(config.corpus_dir(c)))
     try:
-        assert (c, ours) in dev._view_queue
+        assert not dev._view_queue and not dev._view_runs
     finally:
         session._live.pop(c, None)

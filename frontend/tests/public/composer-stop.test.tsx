@@ -107,7 +107,7 @@ describe('what the composer stops (composerStopOf)', () => {
   })
 
   test('the critique: its own Stop, also in a step of the critic, so the orientation goes on without it', () => {
-    const critique = (status: string, how: Partial<ChatMeta> = { mode_agent: 'critic' }) => ({ id: 'k1', status, role: 'step', ...how }) as ChatMeta
+    const critique = (status: string, how: Partial<ChatMeta> = { agent_type: 'thimble:critic' }) => ({ id: 'k1', status, role: 'step', ...how }) as ChatMeta
     const stop = { kind: 'session', chat: 'k1', role: 'critic', label: 'Stop the critique' }
     const orient = { id: 'o1', status: 'running', role: 'orient' } as ChatMeta
     expect(composerStopOf('step', critique('running'), null, orient)).toEqual(stop)
@@ -147,13 +147,26 @@ describe('the Stop sent', () => {
     t.off()
   })
 
-  test('no session to stop, or a failed request, resolves false with an error toast', async () => {
+  test('nothing to stop resolves false with an error toast; one thimble could not pass on says how to stop it in the terminal', async () => {
     const t = toasts()
     answer({ stopped: false })
     expect(await stopSession('mini', 'o1', 'orient')).toBe(false)
+    answer({ stopped: false, kind: 'no-module', reason: "Claude Code did not load thimble's hooks module" })
+    expect(await stopSession('mini', 'o1', 'orient')).toBe(false)
     answer({ detail: 'down' }, 500)
     expect(await stopRun('mini', session, () => undefined)).toBe(false)
-    expect(t.seen.map((x) => [x.kind, x.text.split(':')[0]])).toEqual([['error', 'Could not stop it'], ['error', 'Could not stop it']])
+    expect(t.seen.map((x) => x.kind)).toEqual(['error', 'error', 'error'])
+    expect(t.seen[0].text).toMatch(/^Could not stop it/)
+    expect(t.seen[1].text).toBe("thimble could not stop it: Claude Code did not load thimble's hooks module. Stop it in your terminal: ↓ to it in the agent tray, Enter, then Esc.")
+    expect(t.seen[2].text).toMatch(/^thimble could not stop it: 500 down/)
+    t.off()
+  })
+
+  test('a Stop that found the agent ended already counts as done, with a quiet toast', async () => {
+    answer({ stopped: true, done: true })
+    const t = toasts()
+    expect(await stopSession('mini', 'o1', 'orient')).toBe(true)
+    expect(t.seen).toEqual([{ text: 'It had already ended.' }])
     t.off()
   })
 

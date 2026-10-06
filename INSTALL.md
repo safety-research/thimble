@@ -6,8 +6,10 @@
 > them yourself.
 
 thimble uses whichever auth path you have configured for `claude`: every model call runs through your own `claude`, in
-your config dir with your user settings (thimble's sessions run in folders of their own, so auth set only in a
-project's `.claude/` settings does not reach them). thimble tells you when `claude` is missing or not logged in.
+your config dir with your user settings. thimble's agents run as subagents of the session you start with `thimble`;
+its single model calls (labels, card checks) and code tickets run as `claude -p` jobs in folders of their own, so auth
+set only in a project's `.claude/` settings does not reach them. thimble tells you when `claude` is missing or not
+logged in.
 
 What thimble's agents may do, and on which models, is set in `~/.thimble/config.json`: [docs/config.md](docs/config.md).
 Card code runs in the notebook kernel with your network, whatever that file says. The kernel runs in Anthropic's sandbox
@@ -16,7 +18,9 @@ it runs in bubblewrap on Linux and with your user's access on macOS.
 
 ## Requirements
 
-- [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (tested with 2.1.281), logged in (`claude auth status`).
+- [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (tested with 2.1.291), logged in (`claude auth status`), with
+  its hooks modules on, which thimble's agents need: managed settings with `disableAllHooks` or
+  `allowManagedHooksOnly`, or a folder Claude Code doesn't trust, turn them off.
 - macOS or Linux, and Python 3.12+. [uv](https://docs.astral.sh/uv/getting-started/installation/) is recommended: it
   installs the pinned versions and fetches Python when the machine has none.
 - Node 20+ for custom views and for the sandbox card code and code tickets run in; a Dev install needs 20.19+, 22.13+ or 24+, which the frontend's tests need.
@@ -70,9 +74,10 @@ It asks a question only when this machine leaves it open, so often it asks none:
   commands. With a no, thimble's agents won't start until the sandbox works; run install.sh again to set it up.
   `--sandbox-deps` or `--no-sandbox-deps` answers it. macOS has the sandbox built in.
 
-install.sh no longer asks whether Claude Code should trust thimble's folder: the orientation, its critic, the writers
-and view builds run as `claude -p` sessions, which need no trusted folder. It accepts and ignores `--trust-workspaces`
-and `--no-trust-workspaces` from an earlier version's command line.
+install.sh no longer asks whether Claude Code should trust thimble's folder: thimble's agents run as subagents of your
+own session, in the folder you start `thimble` in, which Claude Code asks you to trust the first time, as for any
+folder. They need that trust, since Claude Code loads a plugin's hooks module only in a trusted folder. install.sh
+accepts and ignores `--trust-workspaces` and `--no-trust-workspaces` from an earlier version's command line.
 
 install.sh doesn't add thimble to every Claude Code session, and doesn't ask about it: the `thimble` command loads
 thimble's plugin into the sessions it starts. If an earlier install added thimble to every session, that stays;
@@ -98,6 +103,51 @@ To use a Python environment you prepared, run `bash scripts/install.sh --python 
 that it holds the packages `backend/pyproject.toml` asks for at versions it allows, links `backend/.venv` to it and
 installs nothing into it. Updates keep the link and check it again. To go back to thimble's own environment, delete the
 link and run install.sh again.
+
+## How thimble's agents run
+
+The orientation, its critic, the writers, view builds, view reviews and report checks are subagents of the Claude Code
+session you start with `thimble`. Claude Code's agent tray (↓) lists them, and each has its thread in the browser.
+
+- **Starting one.** Start, Write, Build, Run and the other buttons in the browser start their agent at once through
+  thimble's plugin, without a turn of Claude's; Claude's context gets a one-line note that names it. Asked in the
+  terminal, Claude calls a thimble tool (`start_orientation`, `start_writing`, `propose_view`, `run_check`) and then
+  makes the Agent call it gives, which Claude Code's auto mode judges as it judges any call. A start that doesn't happen
+  shows in the browser with its reason.
+- **Models and efforts.** Each agent runs on exactly the model and effort that Settings name for it, and a change
+  applies to the next start, with no restart. Start, `/thimble:orient --model <model> --effort <level>` and the start
+  tools take a model and an effort for one run. The orientation's own subagents run on the "orientation subagents" row
+  when it starts them as `thimble:helper`; one it starts as another type runs on the orientation's own model and
+  effort. A follow-up runs on its run's model and effort, except one typed in the terminal to an agent started from
+  the browser after that role's settings changed, which runs on the new ones; its thread says so. The launcher unsets
+  `CLAUDE_CODE_EFFORT_LEVEL` (passing it on as your session's own effort), `CLAUDE_CODE_SUBAGENT_MODEL` and
+  `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` for the session, blanks them where an `env` block of your Claude Code settings sets
+  them, and prints a line for each, so that they can't change the agents' models and efforts.
+- **Ending.** When an agent finishes, its report reaches your session, and Claude answers in one short line; the result
+  is in the browser. Quitting Claude Code stops every agent, and nothing restarts on its own: `thimble -c` and a
+  message in an agent's thread continue it, and Retry starts a view build, review or check again. An orientation from
+  an earlier session, not the one `-c` continues, goes on only in that session: `thimble -r <its session id>`, which
+  its thread shows. A finished agent leaves the ↓ tray; `/tasks` opens it. "Move to background" and the ← agent view
+  are turned off. `/clear` keeps the agents running, but it stops the orientation's current command, which it may run
+  again or skip.
+- **Report checks** run after a writer saves a document. After your own edits a check shows how many passages changed,
+  and Run starts it. **Code tickets** stay jobs of thimble's server, with their own sandbox and checks, and don't show
+  in Claude Code's tray.
+- **One sandbox.** Your session and its agents share one fence: Bash can write only thimble's work folders, the
+  folder you opened is read-only, an edit of it or of thimble's config asks you, and so do web fetches and searches as
+  Settings say. View builders use your session's network. Installs follow your Claude Code permission mode; thimble
+  adds no rule for them. A view reaches you only as its checks last passed it, whatever was written in its folder since.
+- **Permissions.** Every agent runs in your session's permission mode, which you change in the terminal. Your
+  session's own requests show on the browser's card and in the terminal, and either place answers them. An agent's
+  request shows only in the terminal; for one the browser started, Claude Code names the request as from the thimble
+  plugin and offers Yes and No without an always-allow. When auto mode refuses an agent's call, `/permissions` →
+  Recently denied approves it.
+- **Limits.** Claude Code runs at most 20 subagents at once in a session. thimble's agents, their own subagents and side
+  threads count, and thimble queues view builds and checks at the limit. Raise it with
+  `CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS`; it doesn't apply while your session runs Ultracode. The agents have no
+  Workflow tool, which Claude Code gives only to your session and its forks, and no Ultracode mode; its effort, xhigh,
+  is one of the efforts Settings offer them. Start is refused while your session is in plan mode, where an agent would
+  have to ask before every card; shift+tab leaves it. Safe mode (`--safe-mode`) turns thimble's plugin off entirely.
 
 ## Extensions
 
@@ -144,8 +194,8 @@ marketplace yet (a default install doesn't register it), `on` lists its registra
 the steps it asks about and runs it first. That adds no plugin to your sessions, and `thimble
 uninstall` takes it back. `thimble cc-mod off` undoes it, and `thimble
 cc-mod status` says whether each of the two plugins is on in the folder. They are switched independently: `on` and `off`
-leave the thimble plugin as it is. Sessions you start with `thimble`, and the sessions thimble starts (the
-orientation, critic, writers, checks, task programs and builds), run without the mod; plain `claude` in the folder uses
+leave the thimble plugin as it is. Sessions you start with `thimble`, with the agents thimble starts in them, and the jobs thimble's server
+starts (classifier calls, task programs and code tickets), run without the mod; plain `claude` in the folder uses
 it. To use it without installing thimble, see the [mod's README](mods/thimble-cc-mod/README.md).
 
 ## Demo datasets
@@ -189,12 +239,12 @@ A workspace that holds an analysis already is left as it is unless `--replace`, 
 it downloads nothing it already has.
 
 `thimble demo --export <workspace> <out>` writes everything in a workspace as `<out>/<dataset>/`: the cards, labels,
-views and documents, every chat and call output, the work files, and the Claude Code transcripts of the sessions
-thimble ran in it (the orientation, its critic, the writers, view builds). It ends with an inventory of what it wrote:
+views and documents, every chat and call output, the work files, and the Claude Code transcripts of your sessions
+and of the agents thimble ran in them (the orientation, its critic, the writers, view builds, reviews and checks). It ends with an inventory of what it wrote:
 the transcripts, the chats, the call outputs, the label rationales, how much of the dataset's text it holds, what may
 be private (your user name, absolute paths, gitleaks' findings), what it left out and the size of each. It holds the
 dataset's text, so share it only where you may share the dataset. `thimble demo <dataset> --precaches <out>` installs
-it, and a message in the orientation's thread continues the orientation's session. `--outputs-only` writes the
+it; its orientation ran as a subagent of the exporter's session, so it can be read but not continued. `--outputs-only` writes the
 orientation's outputs alone, the pre-caches demos/ holds; [demos/README.md](demos/README.md) says what one holds and
 how a maintainer makes one.
 
@@ -223,9 +273,13 @@ that one and prints each path it deleted. The folder it read and your Claude Cod
 - `thimble doctor` shows the server, the versions, the auth path and the log's recent errors.
 - thimble's agents don't start because Claude Code's sandbox can't run: `thimble doctor` says what is missing, and on
   Linux `install.sh --sandbox-deps` installs it.
-- An empty `.claude/.cc-writes/` folder appears in the folder you start `thimble` in: Claude Code's sandbox is on in
-  your own settings, and it makes that folder for main's Bash, which runs in your session. thimble leaves your
-  session's settings as they are, and `thimble doctor` says when that sandbox is on.
+- thimble's agents don't start, and the browser says Claude Code's hooks modules are off: managed settings
+  (`disableAllHooks`, `allowManagedHooksOnly`) turn them off, or Claude Code doesn't trust the folder. `thimble doctor`
+  names the reason. Fix it, then run `thimble -c`. Claude, its threads, cards, labels and code tickets work meanwhile.
+- Start is greyed out with a line about plan mode: your session is in plan mode, where an agent would ask before every
+  card. Leave it with shift+tab in the terminal.
+- An empty `.claude/.cc-writes/` folder appears in the folder you start `thimble` in: Claude Code's sandbox makes it
+  for Bash, and thimble runs your session in that sandbox. Your Claude Code settings files stay as they are.
 - Cards are not checked, views are checked without loading their page, or screenshots are unavailable: there is no
   browser (the install's answer, or no Chrome or Edge found), or the machine lacks the headless Chromium's system
   libraries. thimble never downloads a browser by itself. `install.sh --browser system` or `--browser bundled` sets one

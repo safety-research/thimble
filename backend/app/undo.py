@@ -243,9 +243,9 @@ def _running(c: str, stack: list[dict[str, Any]]) -> set[str]:
     keys = {str(s["session"]) for s in stack if s.get("session")}
     if not keys:
         return set()
-    from . import agent_session  # noqa: PLC0415 — agent_session reaches this module through the tools it runs
+    from . import subagents  # noqa: PLC0415 — subagents reaches this module through the tools its agents call
 
-    return {k for k in keys if agent_session.running(c, k)}
+    return {k for k in keys if subagents.running(c, k)}
 
 
 def session_name(key: str) -> str:

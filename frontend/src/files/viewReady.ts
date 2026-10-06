@@ -103,6 +103,7 @@ export function useOpenAskedViews(ws: string, names: ReadonlyMap<string, string>
   useEffect(
     () =>
       bus.on('view', (e) => {
+        if (e.held) return // a proposal of the orientation's still waiting for its first passing build
         if (e.status === 'deleted') return markOpened(ws, e.slug)
         const act = onBuilt(e, isReplay(), typingIn(document.activeElement), isShown(ws, e.slug))
         if (act === 'open') teleport(`view:${e.slug}`)

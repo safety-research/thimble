@@ -146,10 +146,10 @@ def test_a_prompt_addition_or_replacement_reaches_the_role_s_prompt_and_the_conf
 
 def test_a_replacing_prompt_keeps_thimble_s_slots_and_leaves_other_braces_as_written(tmp_path, data_tmp,
                                                                                      workspaces_tmp, active):
-    """A replacement may use the slots thimble's own prompt for the role fills (dev.md's {{task}}); any other double
-    brace is literal. The orientation's prompt way is the extensions module's, which adds it to the orientation's
-    instructions, so the role's prompt file is left as it is."""
-    from app import dev
+    """A replacement may use the slots thimble's own prompt for the role fills (dev.md's {{task}}, in the view builder's
+    registration); any other double brace is literal. The orientation's prompt way is the extensions module's, which
+    adds it to the orientation's instructions, so the role's prompt file is left as it is."""
+    from app import view_tools
 
     active.append(_extension(tmp_path, "lean", {"dev": {"description": "Lean.", "prompt": "p.md", "replace": True},
                                                 "orientation": {"description": "Adds.", "prompt": "o.md",
@@ -158,8 +158,7 @@ def test_a_replacing_prompt_keeps_thimble_s_slots_and_leaves_other_braces_as_wri
                              {"agents/dev/p.md": "Build views of {{files}}. Keep {{braces}} as they are.\n\n{{task}}",
                               "agents/orientation/o.md": "Count the runs first.",
                               "agents/orientation/r.md": "Read one run."}))
-    prop = {"slug": "runs", "name": "Runs", "why": "to read the runs", "claims": ["runs/r1.jsonl"]}
-    text = dev.build_view_prompt(CORPUS, prop, tmp_path / "views" / "runs", config.corpus_dir(CORPUS))
+    text = view_tools.builder_definition(CORPUS)["prompt"]
     assert text.startswith("Build views of `runs/r1.jsonl`. Keep { {braces} } as they are.")
     assert "{{task}}" not in text and len(text) > 500
     assert roles.prompt_text(CORPUS, "orientation") is None and roles.subagents(CORPUS, "orientation") == {}
@@ -229,14 +228,21 @@ def test_an_edit_of_thimble_s_config_asks_in_every_session_somebody_answers_and_
 
 def test_an_agent_s_own_sandbox_switch_runs_it_outside_the_sandbox_without_the_enforce_refusal(workspaces_tmp,
                                                                                                 monkeypatch):
+    """The dev agent's own `sandbox: off` (code tickets keep their fence keys) runs it outside the sandbox without the
+    enforce refusal, and so does a writer's for an extension's program that runs the writer, since a program is no
+    subagent of main and keeps its agent's box keys. thimble's own writer does not read it: the writers share main's
+    fence. A value the key does not take is an error for either agent."""
     monkeypatch.setattr(userconf, "sandbox_runs", lambda refresh=False: False)
     with pytest.raises(userconf.ConfigError):
+        userconf.session(CORPUS, "dev")
+    _config({"agents": {"dev": {"sandbox": "off"}, "writer": {"sandbox": "off"}}})
+    assert not userconf.session(CORPUS, "dev").sandboxed
+    assert not userconf.session(CORPUS, "writer", program=True).sandboxed
+    with pytest.raises(userconf.ConfigError):
         userconf.session(CORPUS, "writer")
-    _config({"agents": {"writer": {"sandbox": "off"}}})
-    assert not userconf.session(CORPUS, "writer").sandboxed
-    _config({"agents": {"writer": {"sandbox": "maybe", "env": ["NOT A NAME"]}}})
+    _config({"agents": {"dev": {"sandbox": "maybe", "env": ["NOT A NAME"]}, "writer": {"sandbox": "maybe"}}})
     problem = userconf.problem(CORPUS)
-    assert "agents.writer.sandbox" in problem and "agents.writer.env" in problem
+    assert "agents.dev.sandbox" in problem and "agents.dev.env" in problem and "agents.writer.sandbox" in problem
 
 
 def test_a_program_s_token_works_for_its_role_s_own_tools_only_and_only_while_it_runs(data_tmp, workspaces_tmp):
@@ -272,14 +278,17 @@ def test_settings_name_each_role_s_agent_and_its_consent_settings(tmp_path, work
                                                   "main": {"description": "Adds.", "prompt": "m.md"}},
                              {"agents/orientation/o.py": "async def run(input):\n    return 'ok'\n",
                               "agents/main/m.md": "Say hello."}))
-    _config({"agents": {"critic": {"network": "off", "data": "off", "sandbox": "off"}}})
+    _config({"agents": {"critic": {"network": "off", "data": "off", "sandbox": "off", "web": "off"},
+                        "orientation": {"data": "off"}, "dev": {"network": "off", "sandbox": "off"}}})
     rows = ledger.with_features({}, CORPUS)["agents"]
     assert rows["main"]["additions"] == ["survey"]
     assert rows["orient"]["way"] == "sdk" and rows["orient"]["extension"] == "survey"
-    assert (rows["orient"]["network"], rows["orient"]["data"], rows["orient"]["sandbox"]) == ("on", "ask", "on")
-    assert (rows["critic"]["network"], rows["critic"]["data"], rows["critic"]["sandbox"]) == ("off", "off", "off")
+    assert (rows["main"]["network"], rows["main"]["data"], rows["main"]["sandbox"]) == ("on", "off", "on"), \
+        "main's fence, which thimble's agents share: the orientation's keys"
+    assert rows["critic"]["web"] == "off" and "network" not in rows["critic"], "a critic's own fence keys are ignored"
+    assert (rows["dev"]["network"], rows["dev"]["sandbox"]) == ("off", "off"), "the code tickets' own fence"
     assert rows["critic"]["way"] == "thimble" and rows["critic"]["config"] == "agents.critic"
-    assert set(rows) == {"main", *userconf.MODE_ROWS.values(), *userconf.CALLS}
+    assert set(rows) == {"main", "orient", "writer", "critic", "checks", *userconf.MODE_ROWS.values(), *userconf.CALLS}
 
 
 # --------------------------------------------------------------------------- programs
@@ -345,6 +354,8 @@ async def test_a_program_s_box_hides_server_json_and_keeps_the_corpus_read_only(
     _config({"sandbox": {"enforce": False}})
     secret = userconf.global_file().parent / "server.json"
     secret.write_text('{"token": "not-for-agents"}')
+    # the path reaches the program through the orientation's `env`, which an extension's program keeps (userconf
+    # PROGRAM_KEYS), although thimble's own orientation does not read it
     probe = '''import json, os, thimble
 def run(input):
     out = {}
@@ -480,8 +491,8 @@ thimble.serve(run)
 '''
     active.append(_extension(tmp_path, "crit", {"critic": {"description": "Critiques.", "command": ["python", "c.py"]}},
                              {"agents/critic/c.py": critic}))
-    caller = agent_session.Run(CORPUS, "orient", "chat-o", "sid", config.corpus_dir(CORPUS), orientation.ROLE)
-    monkeypatch.setattr(critique_session, "orientation_run", lambda c, key: caller)
+    caller = critique_session.Caller(CORPUS, "orient", "chat-o", "a1", "sid", str(config.corpus_dir(CORPUS)))
+    monkeypatch.setattr(critique_session, "orientation_caller", lambda c, key: caller)
     monkeypatch.setattr(critique_session, "write_digest", lambda c, run: None)
     monkeypatch.setattr(critique_session, "first_message", lambda c, t, ctx, checks=None: "The digest of the run.")
 
@@ -493,6 +504,39 @@ thimble.serve(run)
     assert not res.is_error, res.text
     assert res.text.splitlines()[-1] == "Report: The digest of the run"
 
+
+
+async def test_a_program_critique_stops_when_the_orientation_s_run_ends(tmp_path, data_tmp, workspaces_tmp, active,
+                                                                        unboxed, monkeypatch):
+    """The program critic is called through the orientation's Caller (its subagent chat) and stops with the
+    orientation's run, since the orientation's end handler stops it (this replaces drop_stops for programs)."""
+    from app import critique_session, harness, orient_session, subagents
+
+    critic = '''import time, thimble
+def run(input):
+    time.sleep(60)
+    return "never"
+thimble.serve(run)
+'''
+    active.append(_extension(tmp_path, "slow", {"critic": {"description": "Critiques.", "command": ["python", "c.py"]}},
+                             {"agents/critic/c.py": critic}))
+    caller = critique_session.Caller(CORPUS, "orient", "chat-o", "a1", "sid", str(config.corpus_dir(CORPUS)))
+    monkeypatch.setattr(critique_session, "orientation_caller", lambda c, key: caller)
+    monkeypatch.setattr(critique_session, "write_digest", lambda c, run: None)
+    monkeypatch.setattr(critique_session, "first_message", lambda c, t, ctx, checks=None: "The digest of the run.")
+    monkeypatch.setattr(orient_session, "_go_on", lambda *a, **k: None)
+
+    async def no_checks(c, chat=None):
+        return None
+
+    monkeypatch.setattr(critique_session, "checks_text", no_checks)
+    call = asyncio.ensure_future(tools.call(CORPUS, "critique", {}, session="orient"))
+    await _until(lambda: harness.running(CORPUS, "critique:orient") or None, what="the program critic to start")
+    orient_session.subagent_ended(CORPUS, subagents.Run(CORPUS, "orient", "orientation", "chat-o", "a1", k=1,
+                                                        interrupted=True), "failed", "the run failed")
+    res = await asyncio.wait_for(call, 30)
+    assert res.is_error and "stopped" in res.text, res.text
+    assert not harness.running(CORPUS, "critique:orient")
 
 def agents_list(c: str) -> list[dict]:
     folder = config.workspace_dir(c) / "chats"
@@ -514,9 +558,9 @@ thimble.serve(run)
 
 async def test_a_dev_program_takes_each_turn_of_a_view_build_and_writes_only_the_view_s_folder(
         tmp_path, data_tmp, workspaces_tmp, active, unboxed, monkeypatch):
-    """With an extension's program as the dev agent, a view build's turn runs the program in place of thimble's session:
-    it gets the message the session would get and the view's folder, writes the view there and keeps its own notes in
-    a folder beside it."""
+    """With an extension's program as the dev agent, a view build's turn runs the program in place of thimble's builder
+    (dev.program_view_turn, which dev.program_build drives): it gets the message a builder would get and the view's
+    folder, writes the view there and keeps its own notes in a folder beside it."""
     from app import dev, views
 
     active.append(_extension(tmp_path, "builder", {"dev": {"description": "Builds views.", "command": ["python", "d.py"]}},
@@ -530,10 +574,8 @@ async def test_a_dev_program_takes_each_turn_of_a_view_build_and_writes_only_the
     monkeypatch.setattr(dev.SESSIONS, "resume", no_session)
     folder = views.views_dir(CORPUS) / "runs-table"
     folder.mkdir(parents=True)
-    run = dev.Run(ticket_id="view:runs-table", title="Runs table", ts_start="")
-    said = await dev._worker_turn(run, dev.Log(None), config.corpus_dir(CORPUS), "Build the runs table.", None,
-                                  name="thimble:view-runs-table", workspace=CORPUS, on_session=lambda *a: None,
-                                  add_dirs=(folder,), answered=False, asking={"key": "view:runs-table"})
+    said = await dev.program_view_turn(CORPUS, "runs-table", "Build the runs table.", [folder], dev.view_program(CORPUS),
+                                       None)
     assert said == "Built runs-table from: Build the ru"
     assert json.loads((folder / "view.json").read_text())["name"] == "runs-table"
     assert sorted(p.name for p in folder.iterdir()) == ["view.json"]

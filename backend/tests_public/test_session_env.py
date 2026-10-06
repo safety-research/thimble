@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from app import agent_session, config, dev, hook_auth, orient_session, tools, userconf, views
+from app import agent_session, config, dev, hook_auth, tools, userconf
 
 CORPUS = "mini"
 
@@ -30,8 +30,6 @@ with open(state / "calls.jsonl", "a") as f:
                         "env": {**os.environ, **(settings.get("env") or {})}}) + "\n")
 sys.stdin.read()
 print(json.dumps({"type": "result", "is_error": False, "result": "ok"}), flush=True)
-if "--agent" in argv:
-    time.sleep(30)  # an orientation runs until the test stops it
 '''
 
 
@@ -44,14 +42,10 @@ def service(tmp_path, monkeypatch, workspaces_tmp):
     state = tmp_path / "bg"
     for module in (agent_session, dev):
         monkeypatch.setattr(module, "CLAUDE_BIN", str(script))
-    monkeypatch.setattr(agent_session, "POLL_S", 0.05)
-    monkeypatch.setattr(agent_session, "STOP_WAIT_S", 1.0)
     monkeypatch.setenv("FAKE_BG", str(state))
     monkeypatch.setenv("THIMBLE_SANDBOX", "0")
     monkeypatch.setitem(userconf.DEFAULTS["sandbox"], "enforce", False)
-    agent_session._runs.clear()
     yield state
-    agent_session._runs.clear()
 
 
 def _stack(monkeypatch, root: Path, port: int) -> dict[str, str]:
@@ -67,26 +61,15 @@ def _calls(state: Path) -> list[dict]:
     return [json.loads(line) for line in (state / "calls.jsonl").read_text().splitlines()]
 
 
-async def _orientation(state: Path, c: str = CORPUS) -> dict:
-    """The orientation's session; the stand-in's record of it."""
-    await orient_session.start(c, "")
-    for _ in range(100):
-        if (state / "calls.jsonl").is_file():
-            break
-        await __import__("asyncio").sleep(0.05)
-    await agent_session.stop(c, orient_session.KEY)
-    return _calls(state)[-1]
-
-
-async def _view_build(state: Path, c: str = CORPUS) -> dict:
-    """A view build of the dev agent's; the stand-in's record of it."""
-    corpus, folder, work = config.corpus_dir(c), views.views_dir(c) / "posts", dev.view_work_dir(c, "posts")
+async def _ticket_session(state: Path, c: str = CORPUS) -> dict:
+    """A code ticket's session of the dev agent's (a `claude -p` job, which thimble still starts); the stand-in's record
+    of it."""
+    work = config.workspace_dir(c) / "ticket-7"
     work.mkdir(parents=True, exist_ok=True)
     conf = dev.dev_config(c, sandbox=True)
     sessions = dev.Sessions()
-    got = await sessions.start(work, "Build the view.", name="thimble view: Posts", workspace=c,
-                               add_dirs=(folder, corpus), fence=dev.view_fence(c, "posts", corpus, folder, conf),
-                               asking=dev.view_asking(c, "posts", folder, conf))
+    got = await sessions.start(work, "Fix the ticket.", name="thimble ticket 7", workspace=c,
+                               asking={"key": "ticket:7", "config": conf})
     await sessions._turns[got["id"]].task
     return _calls(state)[-1]
 
@@ -100,29 +83,21 @@ def _proven(monkeypatch, env: dict, home: str, c: str = CORPUS) -> bool:
 
 async def test_each_stack_s_session_sees_its_own_values_and_no_claude_process_carries_thimble_s(
         service, monkeypatch, tmp_path):
-    """Stack A's orientation and stack B's view build each see only their own values, in their --settings `env`; the
+    """Stack A's code ticket session and stack B's each see only their own values, in their --settings `env`; the
     `claude` processes themselves carry none of thimble's variables."""
     a = _stack(monkeypatch, tmp_path / "a", 9721)
-    orient = await _orientation(service)
+    first = (await _ticket_session(service))["env"]
     a_home = a["THIMBLE_HOME"]
-    work = orient_session.work_dir(CORPUS)
-    assert orient["argv"][:2] == ["-p", "--plugin-dir"] and "--bg" not in orient["argv"]
-    env = orient["env"]
-    assert env["THIMBLE_SESSION"] == orient_session.KEY and _proven(monkeypatch, env, a_home)
-    assert (env["THIMBLE_HOME"], env["THIMBLE_PORT"], env["THIMBLE_PLUGIN_ROOT"]) == \
-        (a_home, a["THIMBLE_PORT"], a["THIMBLE_PLUGIN_ROOT"])
-    assert env["XDG_CACHE_HOME"] == str(work / agent_session.CACHE_DIR)
-    assert env["PATH"].split(os.pathsep)[0] == str(Path(sys.prefix) / "bin")
-    assert env["THIMBLE_CALLER_CWD"] == "" and env["THIMBLE_LAUNCHED"] == ""
-    assert env[agent_session.BG_WAIT_ENV] == agent_session.BG_WAIT_MS
+    assert first["THIMBLE_SESSION"] == "ticket:7" and _proven(monkeypatch, first, a_home)
+    assert first["THIMBLE_CALLER_CWD"] == "" and first["THIMBLE_LAUNCHED"] == ""
 
     b = _stack(monkeypatch, tmp_path / "b", 9722)
-    view = (await _view_build(service))["env"]
-    assert view["THIMBLE_SESSION"] == "view:posts" and _proven(monkeypatch, view, b["THIMBLE_HOME"])
+    view = (await _ticket_session(service))["env"]
+    assert view["THIMBLE_SESSION"] == "ticket:7" and _proven(monkeypatch, view, b["THIMBLE_HOME"])
     assert not _proven(monkeypatch, view, a_home), "a token proves its name to its own stack only"
     assert view["THIMBLE_HOME"] == view["THIMBLE_PORT"] == view["THIMBLE_CALLER_CWD"] == ""
-    assert view["XDG_CACHE_HOME"] == os.environ.get("XDG_CACHE_HOME", "") != env["XDG_CACHE_HOME"]
-    assert view[agent_session.MEMORY_ENV] == "1" and view["THIMBLE_RENDERED_PROMPTS"] == ""
+    assert view["XDG_CACHE_HOME"] == os.environ.get("XDG_CACHE_HOME", "")
+    assert view["THIMBLE_RENDERED_PROMPTS"] == ""
     assert view[agent_session.BG_WAIT_ENV] == agent_session.BG_WAIT_MS
 
     for c in _calls(service):
@@ -165,13 +140,13 @@ def test_the_shim_believes_a_session_name_only_with_its_token(tmp_path):
     """A process whose environment names a session of thimble's but has no token, such as the user's own session
     started where THIMBLE_SESSION was set, gets the analyst's tools from the shim, not that session's."""
     elsewhere = tmp_path / "elsewhere"
-    env = {**os.environ, "THIMBLE_SESSION": orient_session.KEY, "THIMBLE_HOME": str(elsewhere / "home"),
+    env = {**os.environ, "THIMBLE_SESSION": tools.ORIENT_SESSION, "THIMBLE_HOME": str(elsewhere / "home"),
            "THIMBLE_PORT": "8771"}
     env.pop("THIMBLE_SESSION_TOKEN", None)
     shim = subprocess.run([str(config.REPO_ROOT / "plugin" / "bin" / "thimble-mcp"), "--list"], env=env,
                           capture_output=True, text=True, timeout=60)
     listed = {t["name"] for t in json.loads(shim.stdout)}
-    analysts, orientations = ({t["name"] for t in tools.list(tools.ANALYST, session=s)} for s in (None, orient_session.KEY))
+    analysts, orientations = ({t["name"] for t in tools.list(tools.ANALYST, session=s)} for s in (None, tools.ORIENT_SESSION))
     assert listed == analysts != orientations, "the analyst's tools, not the orientation's"
 
 
@@ -244,11 +219,12 @@ def test_every_variable_a_session_s_own_code_reads_is_set_for_it():
     root = config.REPO_ROOT
     files = [*(root / "plugin" / "bin").iterdir(),
              *(root / "backend" / "app" / f"{m}.py" for m in ("permission_hook", "call_ref", "sandbox_allow", "scratch_hook",
-                                                              "work_budget", "view_check", "hook_auth", "cc_plugin",
+                                                              "work_budget", "hook_auth", "cc_plugin",
                                                               "prompts", "config", "tools"))]
     names = {n for f in files if f.is_file() for n in re.findall(r"\bTHIMBLE_[A-Z][A-Z0-9_]*", f.read_text("utf-8"))}
-    # a constant's name, and the server's fallback model, which no session's code uses
-    names -= {"THIMBLE_PREFIXES", "THIMBLE_FALLBACK_MODEL"}
+    # a constant's name, the server's fallback model, which no session's code uses, and the mark of main's fence, which
+    # main's own --settings set (cc_plugin.FENCE_MARK)
+    names -= {"THIMBLE_PREFIXES", "THIMBLE_FALLBACK_MODEL", "THIMBLE_MAIN_FENCE"}
     assert names <= set(config.SESSION_VARS) | set(config.STACK_VARS), \
         sorted(names - set(config.SESSION_VARS) - set(config.STACK_VARS))
 
@@ -317,7 +293,7 @@ async def test_a_structured_call_runs_no_claude_with_thimble_s_variables(tmp_pat
     monkeypatch.setenv(sdk.SKIP_VERSION_CHECK_ENV, "")
     monkeypatch.delenv(sdk.SKIP_VERSION_CHECK_ENV)
     monkeypatch.setattr(config, "CLI_PATH", str(exe))
-    options = sdk.build(cwd=tmp_path, tools=[], mcp_servers={}, system="", model=None, effort=None, env=None)
+    options = sdk.build(cwd=tmp_path, tools=[], mcp_servers={}, system="", model="claude-opus-5-5", effort="low", env=None)
     async for _ in query(prompt="hello", options=options):
         pass
     starts = [json.loads(line) for line in log.read_text().splitlines()]

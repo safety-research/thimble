@@ -453,12 +453,12 @@ def fork_finished(c: str, thread_id: str, status: str = "done", *, kind: str | N
     """The fork stopped: the thread stops running, the run ends in its chat with `done` or why it did not finish, and a
     run
     with no reply leaves a chip in main pointing at the anchor. Waiting messages go to the fork now."""
-    from . import tray  # noqa: PLC0415 — tray imports session, which imports this module
+    from . import subagents  # noqa: PLC0415 — subagents imports session, which imports this module
 
     meta = agents.meta_or_none(c, thread_id)
     agents.set_running(c, thread_id, False)
     _awaiting.pop((c, thread_id), None)
-    tray.fork_ended(c, thread_id)
+    subagents.fork_ended(c, thread_id)
     if meta is None:
         return
     _, log_path = agents.paths(c, thread_id)
@@ -588,12 +588,27 @@ LISTED_ROLES = ("orient", "writer", "check", "dev", agents.STEP_ROLE)
 _TICKET_PREFIX_RE = re.compile(r"^ticket #\d+:\s*", re.I)
 
 
-def _names(meta: dict) -> set[str]:
+def view_names(chats: list[dict]) -> dict[str, str]:
+    """The thread tree's names of a view's builds and reviews, by chat id, as the browser's tree gives them
+    (frontend chat/threads.ts): the first build `<view>`, its first review `<view>-review`, each later one the next
+    number (`<view>-2`, `<view>-review-2`), so no two share a name (live check L25)."""
+    out: dict[str, str] = {}
+    seen: dict[str, int] = {}
+    for m in sorted((m for m in chats if m.get("role") == "dev" and m.get("view")),
+                    key=lambda m: str(m.get("created_at") or "")):
+        base = f"{m['view']}-review" if m.get("review") else str(m["view"])
+        seen[base] = seen.get(base, 0) + 1
+        out[str(m["id"])] = base if seen[base] == 1 else f"{base}-{seen[base]}"
+    return out
+
+
+def _names(meta: dict, views: dict[str, str] | None = None) -> set[str]:
     """What names a chat in the thread tree, lower case: its title, the analyst's name for it, a ticket's slug as
-    the tree shows it (group-board-by-round), a view build's view, and a thread's fork name."""
+    the tree shows it (group-board-by-round), a view build's or review's tree name (view_names), and a thread's fork
+    name."""
     title = str(meta.get("title") or "")
     words = re.findall(r"[^\W_]+", _TICKET_PREFIX_RE.sub("", title))
-    view = str(meta.get("view") or "") if meta.get("role") == "dev" else ""
+    view = (views or {}).get(str(meta.get("id"))) or (str(meta.get("view") or "") if meta.get("role") == "dev" else "")
     return {n.lower() for n in (title, str(meta.get("name") or ""), "-".join(words[:4]), view,
                                 str(meta.get(FORK_NAME_KEY) or "")) if n.strip()}
 
@@ -609,7 +624,8 @@ def find_threads(c: str, name: str) -> list[dict]:
     if by_id or not q:
         return by_id
     low = q.lower()
-    return [m for m in listed if any(low == n or low.endswith(f"/{n}") for n in _names(m))]
+    names = view_names(listed)
+    return [m for m in listed if any(low == n or low.endswith(f"/{n}") for n in _names(m, names))]
 
 
 def _one_thread(c: str, tool: str, name: str) -> tuple[dict | None, str]:
@@ -676,7 +692,8 @@ async def tool_message_thread(ctx: Any, args: dict[str, Any]) -> Any:
     """The `message_thread` tool (the /thimble:ask command): a message typed in the terminal goes where the thread's
     composer in the browser would send it (the frontend's threads.composerTarget). A side thread logs it and hands main
     its `thread` event in the result, so main answers in the same turn (events.hand), and with no message asks its
-    unanswered questions again (ask_again); the latest orientation takes it as a follow-up (orient_session.message);
+    unanswered questions again (ask_again); the latest orientation takes it as main's follow-up, the exact SendMessage
+    message_orientation gives (orient_session.tool_message_orientation);
     a view's build thread takes it as a change to the view (views.message). Any other chat's messages go to main."""
     from . import events, orient_session, orientation, tools, views  # noqa: PLC0415
 
@@ -702,16 +719,18 @@ async def tool_message_thread(ctx: Any, args: dict[str, Any]) -> Any:
         if not text:
             return tools.err(tools.hint("message_thread-empty", thread=name))
         latest = (((orientation.read_run(ctx.c) or {}).get("chats") or {}).get(orientation.ROLE))
-        if meta.get("role") == orientation.ROLE and tid == latest:
-            res = await orient_session.message(ctx.c, text, orient_session.BROWSER)
-            return tools.ok(tools.hint("message_orientation-queued" if res["status"] == "queued" else "message_orientation-started"))
+        if meta.get("role") == orientation.ROLE and tid == latest:  # main's follow-up: its exact SendMessage
+            return await orient_session.tool_message_orientation(ctx, {"message": text})
         if meta.get("role") == "dev" and meta.get("view"):
+            # a change typed in the terminal: main's exact Agent call starts its builder, as file_dev_ticket's does, so
+            # auto mode judges the start (a browser message is the analyst's click, views.message_route)
             views._bind_loop()
-            views.message(ctx.c, str(meta["view"]), text)
-            return tools.ok(tools.hint("message_thread-view", thread=name))
+            slug = str(meta["view"])
+            views.message(ctx.c, slug, text, by=agents.TERMINAL, route=views.TYPED)
+            return await tools._typed_build(ctx, slug)
     except HTTPException as e:
         return tools.err(f"message_thread: {e.detail}")
-    except (orient_session.NoOrientation, orient_session.Gone, RuntimeError) as e:
+    except (orient_session.NoOrientation, RuntimeError) as e:
         return tools.err(f"message_thread: {e}")
     return tools.err(tools.hint("message_thread-main", thread=name))
 

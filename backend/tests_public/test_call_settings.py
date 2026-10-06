@@ -9,7 +9,7 @@ from types import SimpleNamespace
 import pytest
 from claude_agent_sdk import AssistantMessage, ResultMessage, ToolResultBlock, ToolUseBlock, UserMessage
 
-from app import card_check, concepts, harness, ledger, model, userconf, view_fit, view_review, views
+from app import card_check, concepts, config, harness, ledger, model, userconf, view_fit, views
 
 CORPUS = "mini"
 CONCEPT = {"name": "tone", "unit": "record", "kind": "prompt", "spec": "Is the message friendly?", "description": "",
@@ -18,7 +18,6 @@ OUTPUTS = {"labels": {"labels": [{"i": 1, "label": "friendly", "confidence": 0.8
            "label": {"name": "Curt", "scope": "files", "kind": "prompt", "text": "Is it curt?",
                      "values": ["curt", "not curt"], "marks": "span"},
            "critique": {"assessment": [{"problem": ""}] * 5, "question": "Q?", "code": "", "takeaway": "T."},
-           "findings": {"problems": ["The legend covers the chart."]},
            "decision": {"fits": True, "reason": "Each record is a post."},
            "proposal": {"help": False, "name": "", "why": "", "arrangement": ""},
            "answer": {"text": "yes"}}
@@ -67,10 +66,6 @@ def _calls(tmp_path):
     card = {"card": {"id": "c1", "kind": "code", "question": "How many curt replies?", "takeaway": "Two.",
                      "citations": "", "code": "print(2)", "context": "", "typed": "", "kept": ""},
             "picture": str(picture)}
-    review = {"view": {"slug": "board", "name": "Board", "description": "The posts by thread.", "claims": ["board.jsonl"],
-                       "spec": "Unit: a post", "checks": []},
-              "pictures": [{"path": str(picture), "about": "the view as it opens"}], "controls": [], "records": "",
-              "ask": False}
     viewer = {"path": "a.cast", "size": "2.0 KB", "count": "3", "suffix": ".cast", "what": "its first line",
               "head": "{\"version\": 2}"}
     draft = {"description": "messages that sound curt", "records": {"paths": "runs/r1.jsonl", "path": "runs/r1.jsonl",
@@ -85,8 +80,7 @@ def _calls(tmp_path):
         ("label draft", "labels", lambda: concepts.draft_task(CORPUS, draft)),
         ("view fit", "labels", lambda: view_fit.ask(CORPUS, "Does the Board view fit?")),
         ("card check", "verify", lambda: card_check.check_task(CORPUS, card)),
-        ("view review", "verify", lambda: view_review.review_task(CORPUS, review)),
-        ("viewer suggestion", "dev", lambda: views.file_viewer_task(CORPUS, viewer)),
+        ("viewer suggestion", "suggest", lambda: views.file_viewer_task(CORPUS, viewer)),
         ("ask (checks)", "checks", asker("checks")),
         ("ask (cardCheck)", "verify", asker("verify")),
     ]
@@ -95,14 +89,14 @@ def _calls(tmp_path):
 @pytest.mark.parametrize("conf", [
     {},
     {"agents": {"labels": {"model": "claude-sonnet-5", "effort": "medium", "fast": True},
-                "cardCheck": {"effort": "low", "fast": False}, "dev": {"model": "claude-haiku-4-5-20251001"},
-                "checks": {"effort": "max"}}},
+                "cardCheck": {"effort": "low", "fast": False}, "suggest": {"model": "claude-haiku-4-5-20251001"},
+                "checks": {"effort": "max"}, "refusal": {"off": True}}},
 ], ids=["defaults", "configured"])
 async def test_each_structured_call_runs_at_what_settings_shows_for_its_role(conf, tmp_path, data_tmp, workspaces_tmp,
                                                                             seen, monkeypatch):
     """With thimble's config null (the defaults Settings shows resolved) and with some roles set, each call's `claude`
-    gets --model and --effort, CLAUDE_CODE_EFFORT_LEVEL and fastMode equal to its role's row in GET /settings, and
-    ultracode off, whatever THIMBLE_MODEL_SPEED, the speed of a call that names none, says."""
+    gets --model and --effort, CLAUDE_CODE_EFFORT_LEVEL and fastMode equal to its role's row in GET /settings (no
+    effort for a model Claude Code runs without one), and ultracode off, whatever THIMBLE_MODEL_SPEED, the speed of a call that names none, says."""
     path = userconf.global_file()
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(conf))
@@ -116,8 +110,11 @@ async def test_each_structured_call_runs_at_what_settings_shows_for_its_role(con
         assert row["model"] and row["effort"], (what, row)
         opts = seen[before]
         settings = json.loads(opts.settings)
-        assert (opts.model, opts.effort) == (row["model"], row["effort"]), what
-        assert settings["env"]["CLAUDE_CODE_EFFORT_LEVEL"] == row["effort"], what
+        if config.has_effort(row["model"]):
+            assert (opts.model, opts.effort) == (row["model"], row["effort"]), what
+            assert settings["env"]["CLAUDE_CODE_EFFORT_LEVEL"] == row["effort"], what
+        else:  # Haiku runs with no effort (config.NO_EFFORT_MODELS)
+            assert (opts.model, opts.effort) == (row["model"], None) and "env" not in settings, what
         assert settings["fastMode"] is row["fast"] and settings["ultracode"] is False, what
 
 
@@ -126,6 +123,7 @@ async def test_a_call_without_a_model_or_an_effort_does_not_start(seen):
     analyst's own model or effort."""
     tool = model.ToolSpec(name="answer", description="d", input_schema=harness.ANSWER_TOOL)
     for model_name, effort in (("", "low"), ("claude-opus-5-5", ""), ("claude-opus-5-5", None)):
-        res = await model.structured("hi", tool=tool, model=model_name, effort=effort, speed="standard", cwd="/tmp")
+        res = await model.structured("hi", tool=tool, model=model_name, effort=effort, speed="standard", refusal=None,
+                                     cwd="/tmp")
         assert res.status == "error" and "no model or no effort" in res.detail
     assert seen == []

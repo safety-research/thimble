@@ -110,6 +110,7 @@ _pending: dict[tuple[str, str], deque] = {}  # (workspace, session or "") -> eve
 _taken: dict[str, tuple[str, str, dict[str, Any], float]] = {}  # event id -> (workspace, session, note, when taken)
 _waiters: dict[str, set[tuple[asyncio.AbstractEventLoop, asyncio.Future]]] = {}  # workspace -> its waiting pulls
 _asks: dict[str, "Ask"] = {}  # hook permission id -> the request waiting for the analyst
+_terminal: dict[str, "Ask"] = {}  # hook permission id -> a request of thimble's agents the terminal answers (its card)
 # (workspace, session) -> (event id, line) of events its watcher wrote out, and lines that send no event, to print
 _lines: dict[tuple[str, str], list[tuple[str, str]]] = {}
 # (workspace, session) -> (event id, words) of the analyst's messages queued for it, not yet printed (queued_line)
@@ -220,7 +221,6 @@ def build_note(kind: str, event_id: str, text: str, fields: dict[str, Any]) -> d
     return {"content": body, "meta": meta}
 
 
-START_OUTPUTS = {"final": "final notebook", "views": "views", "report": "report"}  # orientation.start_passes, in words
 # the kinds that say something ended and ask main for nothing: each waits and rides along with the next event, under
 # MEANWHILE (prompts/main.md)
 QUIET_KINDS = frozenset({"orient", "written", "labeled", "view", "card_types"})
@@ -230,16 +230,7 @@ _held: dict[str, list[dict[str, Any]]] = {}  # workspace -> HELD_FILE's notes, o
 
 
 def describe(kind: str, payload: dict[str, Any]) -> str:
-    """The body of an event that carries no text of its own: one line saying what the analyst did, which is also what
-    the terminal shows of a Start or a Write (terminal_line)."""
-    if kind == "start":
-        from . import orientation  # noqa: PLC0415
-
-        on = [START_OUTPUTS.get(p, p) for p in orientation.start_passes(payload)]
-        return "Start the orientation" + (f" ({', '.join(on)})" if on else "")
-    if kind == "write":
-        doc = str(payload.get("doc") or "").strip()
-        return f"Write the {doc}" if doc else "Write the document"
+    """The body of an event that carries no text of its own: one line saying what the analyst did."""
     return f"The analyst sent `{kind}` from the browser"
 
 
@@ -255,8 +246,6 @@ def terminal_line(kind: str, words: str, fields: dict[str, Any]) -> str:
         line = SAID + words
     elif kind == THREAD:
         line = f"{SAID}thread {fields.get('name') or ''}: {words}"
-    elif kind in ("start", "write"):
-        line = SAID + describe(kind, fields) + (f": {words}" if words else "")
     elif kind == "labeled":
         line = f"label {fields.get('what') or 'defined'}: {fields.get('name') or ''}"
     elif kind == "view":
@@ -271,8 +260,6 @@ def terminal_line(kind: str, words: str, fields: dict[str, Any]) -> str:
         line = f"the {fields.get('doc') or 'document'} writer ended"
     elif kind == "checked":
         line = f"a check of the {fields.get('doc') or 'document'} ended"
-    elif kind == "agent":
-        line = f"agent: {fields.get('name') or ''}"
     else:
         line = words
     return _cut(line, LINE_CHARS)
@@ -880,17 +867,88 @@ def _asking_chat(c: str, agent: str | None) -> str | None:
     return None
 
 
-def _hold(c: str, request_id: str, tool: str, what: str, preview: str, agent: str | None = None) -> None:
+def _asked_by(c: str, tool: str, tool_input: Any) -> str | None:
+    """Which of the fence's ask rules sends a request of main's or its subagents' to the analyst (userconf.main_rules,
+    each rule with its cause: data, config or web), so the card can say why; None when none is known to."""
+    import fnmatch  # noqa: PLC0415
+
+    from . import userconf  # noqa: PLC0415
+
+    try:
+        rules = userconf.main_rules(c)
+    except Exception:  # noqa: BLE001 — a fence that cannot be read says nothing on the card
+        return None
+    pairs: list[tuple[str, str]] = []
+    if isinstance(rules, dict):
+        for k, v in rules.items():
+            if isinstance(v, (list, tuple)):  # {cause: [rule, …]} or {"ask": [{rule, cause}, …]}
+                for r in v:
+                    if isinstance(r, dict):
+                        pairs.append((str(r.get("rule") or ""), str(r.get("cause") or "")))
+                    else:
+                        pairs.append((str(r), str(k)))
+            elif isinstance(v, str):  # {rule: cause}
+                pairs.append((str(k), v))
+    elif isinstance(rules, (list, tuple)):
+        for r in rules:
+            if hasattr(r, "rule") and hasattr(r, "cause"):  # userconf.Rule(behavior, rule, cause): its ask rules
+                if getattr(r, "behavior", "ask") == "ask":
+                    pairs.append((str(r.rule), str(r.cause)))
+            elif isinstance(r, dict):
+                pairs.append((str(r.get("rule") or ""), str(r.get("cause") or "")))
+            elif isinstance(r, (list, tuple)) and len(r) >= 2:
+                pairs.append((str(r[0]), str(r[1])))
+    inp = tool_input if isinstance(tool_input, dict) else {}
+    field = CALL_FIELDS.get(tool) or ("file_path" if tool in EDIT_TOOLS else "")
+    target = str(inp.get(field) or "") if field else ""
+    names = {tool, "Edit"} if tool in EDIT_TOOLS else {tool}  # an Edit rule covers every tool that writes a file
+    for rule, cause in pairs:
+        name, _, pattern = rule.partition("(")
+        if name.strip() not in names or not cause:
+            continue
+        pattern = pattern.rstrip(")")
+        if not pattern:
+            return cause
+        path = pattern[1:] if pattern.startswith("//") else pattern
+        if path.endswith("/**"):  # the folder and everything under it, not every path that starts with its name
+            hit = target == path[:-3] or target.startswith(path[:-2])
+        else:
+            hit = fnmatch.fnmatch(target, path)
+        if target and hit:
+            return cause
+    return None
+
+
+EDIT_TOOLS = ("Edit", "Write", "MultiEdit", "NotebookEdit")  # the tools Claude Code's Edit(...) rules cover
+
+
+def _thimble_agent(c: str, agent: str | None) -> bool:
+    """Whether `agent` is one of thimble's agents or a descendant of one (subagents.json)."""
+    if not agent:
+        return False
+    from . import subagents  # noqa: PLC0415
+
+    try:
+        return subagents.agent(c, agent) is not None
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _hold(c: str, request_id: str, tool: str, what: str, preview: str, agent: str | None = None,
+          tool_input: Any = None, terminal: bool = False) -> None:
     """Put a relayed permission request on main's meta, where the browser shows it; `chat` names the thread or subagent
-    chat whose agent asked, when the hook said which (_asking_chat)."""
+    chat whose agent asked, when the hook said which (_asking_chat), `asked_by` the fence's rule that asks
+    (_asked_by), and `terminal` says the terminal answers it, so the card shows it without buttons."""
     from . import agents  # noqa: PLC0415
 
     meta = agents.ensure_main(c)
     pending = [p for p in meta.get("permissions") or [] if isinstance(p, dict) and p.get("id") != request_id]
     chat = _asking_chat(c, agent)
+    cause = _asked_by(c, tool, tool_input)
     entry = {"id": request_id, "tool": tool, "what": what or tool, "input": preview[:PERMISSION_INPUT_CHARS],
              "since": _now(), **({"cut": len(preview)} if len(preview) > PERMISSION_INPUT_CHARS else {}),
-             **({"chat": chat} if chat else {})}
+             **({"chat": chat} if chat else {}), **({"asked_by": cause} if cause else {}),
+             **({"terminal": True} if terminal else {})}
     pending.append(entry)
     meta["permissions"] = pending
     agents.write_meta(c, meta)
@@ -942,8 +1000,11 @@ class Ask(NamedTuple):
 @router.post("/events/permission")
 async def hook_permission_route(request: Request, body: HookPermission) -> dict[str, Any]:
     """The PermissionRequest hook relays a prompt of main's session: it waits on main's meta until the analyst answers,
-    `{id, behavior: allow | deny}`, or the prompt or hook goes away, `{id, behavior: null}`. 404 when the folder is no
-    workspace, 409 when the session is not main."""
+    `{id, behavior: allow | deny}`, or the prompt or hook goes away, `{id, behavior: null}`. A prompt of one of
+    thimble's agents (or a descendant) is answered `null` at once, since Claude Code shows no dialog while a hook holds
+    a background subagent's request (U6b): it shows on the card without buttons (`terminal`), and the terminal answers
+    it; the card goes with the call's result or the agent's end. 404 when the folder is no workspace, 409 when the
+    session is not main."""
     c = config.workspace_for_cwd(body.cwd)
     if not c:
         raise HTTPException(404, f"{body.cwd} is not a thimble workspace")
@@ -956,10 +1017,15 @@ async def hook_permission_route(request: Request, body: HookPermission) -> dict[
     preview = json.dumps(body.tool_input, ensure_ascii=False) if body.tool_input is not None else ""
     request_id = HOOK_ASK_PREFIX + secrets.token_hex(4)
     loop = asyncio.get_running_loop()
+    if _thimble_agent(c, body.agent_id):
+        _terminal[request_id] = Ask(c, loop, loop.create_future(), time.monotonic(), time.time(), body.agent_id,
+                                    call_key(body.tool_name, body.tool_input))
+        _hold(c, request_id, body.tool_name, what, preview, body.agent_id, body.tool_input, terminal=True)
+        return {"id": request_id, "behavior": None}
     fut: asyncio.Future = loop.create_future()
     _asks[request_id] = Ask(c, loop, fut, time.monotonic(), time.time(), body.agent_id or None,
                             call_key(body.tool_name, body.tool_input))
-    _hold(c, request_id, body.tool_name, what, preview, body.agent_id or None)
+    _hold(c, request_id, body.tool_name, what, preview, body.agent_id or None, body.tool_input)
     try:
         while not fut.done():
             try:
@@ -1033,8 +1099,15 @@ def release_asks(c: str, older_than: float) -> None:
 
 
 def asking(c: str) -> set[str]:
-    """The subagents and forks whose hook-relayed prompts wait in the workspace."""
-    return {a.agent for a in _asks.values() if a.c == c and a.agent}
+    """The subagents and forks whose hook-relayed prompts wait in the workspace, the terminal's included."""
+    return {a.agent for a in (*_asks.values(), *_terminal.values()) if a.c == c and a.agent}
+
+
+def _end_terminal(c: str, gone: set[str]) -> None:
+    for request_id in gone:
+        _terminal.pop(request_id, None)
+    if gone:
+        _drop(c, gone)
 
 
 # (workspace, agent, '' for main) -> the call_keys of its prompts the analyst answered here whose results have not come
@@ -1066,6 +1139,7 @@ def agent_moved(c: str, agent: str, after: float) -> None:
         _answer_ask(request_id, None)
     if gone:
         _drop(c, gone)
+    _end_terminal(c, {i for i, a in _terminal.items() if a.c == c and a.agent == agent and a.at < after})
 
 
 def calls_done(c: str, agent: str | None, done: "list[tuple[tuple[str, str], float]]") -> None:
@@ -1092,6 +1166,9 @@ def calls_done(c: str, agent: str | None, done: "list[tuple[tuple[str, str], flo
         _answer_ask(request_id, None)
     if gone:
         _drop(c, gone)
+    if agent is not None:  # a call of one of thimble's agents ran: the terminal answered its prompt
+        keys = {key for key, _ in done}
+        _end_terminal(c, {i for i, a in _terminal.items() if a.c == c and a.agent == agent and a.call in keys})
 
 
 def _now() -> str:
@@ -1110,3 +1187,4 @@ async def shutdown() -> None:
     for request_id in list(_asks):
         _answer_ask(request_id, None)
     _answered.clear()
+    _terminal.clear()

@@ -7,16 +7,13 @@
 //   as expected.
 // Environment: THIMBLE_E2E_TREE (the tree thimble runs from), THIMBLE_E2E_CORPUS (the corpus copy), THIMBLE_E2E_WS (what
 // workspace.py printed), THIMBLE_E2E_SHOTS, THIMBLE_E2E_RESULTS, THIMBLE_E2E_FIXTURE (the fixture extension's folder).
-import { execFile, spawnSync } from 'node:child_process'
+import { spawnSync } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { appendFileSync, existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
-import { homedir } from 'node:os'
 import { basename, dirname, join, relative } from 'node:path'
-import { promisify } from 'node:util'
 
 const env = process.env
-const execFileP = promisify(execFile)
 const TREE = env.THIMBLE_E2E_TREE
 const CORPUS = env.THIMBLE_E2E_CORPUS
 const WS = JSON.parse(env.THIMBLE_E2E_WS || '{}')
@@ -307,45 +304,6 @@ async function switchOnAndLook(page, name) {
   await page.locator('.settings-pop').getByRole('button', { name: 'Save', exact: true }).click()
   await page.locator('.settings-pop').waitFor({ state: 'detached', timeout: ACTION_MS }).catch(() => undefined)
   return { shown, shot: s }
-}
-
-/** A Claude Code session with a transcript, as an orientation leaves one: one `claude -p` turn in a folder of the run,
- * on the caller's own login, loading no user settings, plugins or MCP servers. Claude Code keeps its transcript where it
- * keeps every session's (forgetSession removes it). Tried again after a failure, with a new session id each time.
- * {sid} or {error}. */
-async function claudeSession() {
-  const cwd = join(OUT, 'standin-orientation')
-  mkdirSync(cwd, { recursive: true })
-  const clean = Object.fromEntries(Object.entries(env).filter(([k]) => !k.startsWith('THIMBLE_')))
-  let error = ''
-  for (const wait of [0, 15_000, 45_000]) {
-    if (wait) await new Promise((ok) => setTimeout(ok, wait))
-    const sid = randomUUID()
-    const args = ['-p', 'Reply with the single word ok.', '--setting-sources', 'project', '--strict-mcp-config', '--session-id', sid, '--max-turns', '1']
-    const r = await execFileP('claude', args, { cwd, env: clean, timeout: 180_000 }).then(() => null, (e) => e)
-    if (!r) return { sid }
-    forgetSession(sid)
-    error = `${r.stderr || r.stdout || r.message || ''}`.trim().split('\n')[0].slice(0, 200)
-    if (r.code === 'ENOENT') break
-  }
-  return { error: error || 'claude failed' }
-}
-
-/** Remove what Claude Code keeps of a stand-in session (claudeSession): its transcript, and the project folder named
- * for <out>/standin-orientation once that holds nothing else. Returns whether its transcript was found. */
-function forgetSession(sid) {
-  const projects = join(env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude'), 'projects')
-  let found = false
-  for (const d of existsSync(projects) ? readdirSync(projects) : []) {
-    const dir = join(projects, d)
-    if (!d.endsWith('-standin-orientation') || !existsSync(join(dir, `${sid}.jsonl`))) continue
-    found = true
-    rmSync(join(dir, `${sid}.jsonl`), { force: true })
-    rmSync(join(dir, sid), { recursive: true, force: true })
-    const left = readdirSync(dir).filter((n) => !(n === 'memory' && readdirSync(join(dir, n)).length === 0))
-    if (!left.length) rmSync(dir, { recursive: true, force: true })
-  }
-  return found
 }
 
 async function waitShell(page) {
@@ -931,34 +889,34 @@ async function main() {
 
     await step('ext-orient-offer', 'Switching on an extension with orientation instructions offers to run them where an orientation can be resumed, and only there', async () => {
       check(added, 'the extension was not added')
-      // a run record and its chat stand in for an orientation; the offer also needs the transcript Claude Code keeps
+      // a run record and its chat stand in for an orientation that ran as a subagent of main: Run now sends the
+      // extension's instructions to that agent through thimble's module, which reaches only the agents of main's own
+      // Claude Code session, the stand-in's (THIMBLE_E2E_SESSION)
       const run = join(WS.dir, 'orient', 'run.json')
       const chat = join(WS.dir, 'chats', 'e2e-standin.meta.json')
       if (existsSync(run)) return { skip: true, detail: 'an orientation ran in this workspace, so no run record can stand in for one' }
+      const main = env.THIMBLE_E2E_SESSION || ''
+      check(main, 'THIMBLE_E2E_SESSION names no stand-in session')
+      const agent = 'a0e2e5ad1fe0c0de1'
       const plant = (session) => {
         mkdirSync(dirname(run), { recursive: true })
-        writeFileSync(run, JSON.stringify({ session, status: 'done', chats: { orient: 'e2e-standin' } }))
+        writeFileSync(run, JSON.stringify({ status: 'done', chats: { orient: 'e2e-standin' }, agent_id: agent, route: 'subagent', session }))
         mkdirSync(dirname(chat), { recursive: true })
-        writeFileSync(chat, JSON.stringify({ id: 'e2e-standin', kind: 'agent', role: 'orient', title: 'Orientation', status: 'done' }))
+        writeFileSync(chat, JSON.stringify({ id: 'e2e-standin', kind: 'agent', role: 'orient', title: 'Orientation', status: 'done', route: 'subagent', agent_id: agent, session, sessions: [session] }))
       }
-      let sid = ''
       try {
         plant(randomUUID())
-        const without = await switchOnAndLook(page, 'ext-orient-no-transcript')
-        if (without.shown) throw new StepError('Settings offered Run now for an orientation whose transcript Claude Code does not keep', [without.shot])
-        const real = await claudeSession()
-        if (real.error) return { skip: true, detail: `no offer without a transcript, as it should be; the offer itself was not checked, since no Claude Code session could stand in for the orientation: ${real.error}`, shots: [without.shot] }
-        sid = real.sid
-        plant(sid)
+        const without = await switchOnAndLook(page, 'ext-orient-earlier-session')
+        if (without.shown) throw new StepError('Settings offered Run now for an orientation of an earlier Claude Code session, which no follow-up reaches', [without.shot])
+        plant(main)
         const withIt = await switchOnAndLook(page, 'ext-orient-offer')
         if (!withIt.shown) throw new StepError('switching it on in Settings offered no run of its orientation instructions', [without.shot, withIt.shot])
-        return { detail: `no offer while Claude Code keeps no transcript of the orientation; with one (a one-turn \`claude -p\` session, whose transcript is removed after), Settings asks whether to run its orientation now; answered Not now`, shots: [without.shot, withIt.shot] }
+        return { detail: 'no offer for an orientation of an earlier Claude Code session; for one that ran as a subagent of main\'s session, Settings asks whether to run its orientation now; answered Not now', shots: [without.shot, withIt.shot] }
       } finally {
         rmSync(run, { force: true })
         rmSync(chat, { force: true })
-        if (sid && !forgetSession(sid)) console.log(`ext-orient-offer: no transcript of ${sid} found to remove`)
       }
-    }, 600_000)
+    })
 
     await step('ext-live', 'Settings and + New follow every switch of the extension without a reload', async () => {
       check(added, 'the extension was not added')

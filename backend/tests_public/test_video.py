@@ -5,8 +5,9 @@ from __future__ import annotations
 
 import pytest
 
-from app import agent_session, config, extensions, investigation, notebook, report_types, tools, video
+from app import config, extensions, investigation, notebook, report_types, subagents, tools, video, write_session
 from app.ledger import write_json
+from subagent_fakes import bridge  # noqa: F401 — a fixture
 
 CORPUS = "mini"
 MAIN = investigation.MAIN
@@ -31,20 +32,16 @@ async def call(name: str, **args):
     return await tools.call(CORPUS, name, args, actor="analyst")
 
 
-async def test_a_video_starts_a_writer_that_reads_the_video_form(count, monkeypatch):
-    started: dict = {}
-
-    async def start(c, key, **kw):
-        started.update(c=c, key=key, **kw)
-        return object()
-
-    monkeypatch.setattr(agent_session, "start", start)
+async def test_a_video_starts_a_writer_that_reads_the_video_form(count, bridge):
     assert "video" not in report_types.new_kinds(CORPUS)
     await extensions.refresh(CORPUS)
     assert "video" in report_types.new_kinds(CORPUS) and "video" not in [t["slug"] for t in report_types.list_types(CORPUS)]
     r = await call("start_writing", doc="video", type="video")
     assert not r.is_error, r.text
-    assert started["key"] == "writer:video" and started["doc"] == "video" and "report:video" in started["prompt"]
+    [req] = [x for x in subagents.read(CORPUS)["requests"].values() if x["kind"] == "start"]
+    assert req["key"] == "writer:video" and req["input"]["subagent_type"] == "thimble:writer"
+    context = (write_session.work_dir(CORPUS, "video") / write_session.CONTEXT_FILE).read_text()
+    assert "report:video" in context and str(write_session.work_dir(CORPUS, "video")) in req["input"]["prompt"]
     assert report_types.read_type(CORPUS, "video")["renderer"] == "video"
     form = await call("read_ref", ref="type:video")
     assert "narrated explainer" in form.text and "window.seek" in form.text and "window.timing" in form.text

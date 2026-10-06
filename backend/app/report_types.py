@@ -2164,13 +2164,12 @@ async def tool_read_ref(ctx: Any, args: dict[str, Any]) -> Any:
 
 
 # --------------------------------------------------------------------------- a write the analyst asked for
-# The Report tab's Write posts a `write` browser event, which main answers with start_writing (write_session.py).
-# write_requested (or begin_write, for a request made in the chat) marks the document as being written: the stream says
-# `report {status: generating}` until the document is saved whole or the writer's chat finishes (writer_finished),
-# ending
-# as `generated` or `failed`. A request nobody answers ends after WRITE_WAIT_S.
+# Write in the browser starts the document's writer through thimble's module, and main's start_writing makes a typed one
+# (write_session.py). begin_write marks the document as being written: the stream says `report {status: generating}`
+# until the document is saved whole or the writer's chat finishes (writer_finished), ending as `generated` or `failed`,
+# or `refused` when the writer did not start (write_refused). A request nobody answers ends after WRITE_WAIT_S.
 
-WRITE_EVENT = "write"
+WRITE_EVENT = "write"  # a writer's chat is titled `Write <doc>` (writer_finished)
 WRITER_AGENT = "writer"  # prompts/writer.md's name, the agent type of a writer's session chat (write_session.py)
 WRITE_WAIT_S = 30 * 60
 _writes: dict[tuple[str, str], dict[str, Any]] = {}
@@ -2185,17 +2184,6 @@ def write_pending(c: str, slug: str) -> dict[str, Any] | None:
     return w
 
 
-def write_requested(c: str, payload: dict[str, Any], posted: dict[str, Any]) -> None:
-    """The `write` event reached the session: its document is being written from now on."""
-    slug = str(payload.get("doc") or "").strip().lower()
-    if not SLUG_RE.match(slug) or read_type(c, slug) is None:
-        log.info("%s: a write event named no document type (%r)", c, payload.get("doc"))
-        return
-    _writes[(c, slug)] = {"event": posted.get("id"), "t0": time.monotonic(), "ts": _now(), "saved": False,
-                          "request": _collapse(payload.get("text")) or None, "after": payload.get("after")}
-    _emit(c, {"type": "report", "slug": slug, "status": "generating", "by": ANALYST, "run": posted.get("id")})
-
-
 def write_for_orientation(c: str, slug: str, chat: str, run: int = 0) -> None:
     """The pending write of `slug` is the orientation's report pass (orientation.request_report): its writer carries the
     orientation's chat and run, and the browser shows it on the orientation's card."""
@@ -2205,21 +2193,20 @@ def write_for_orientation(c: str, slug: str, chat: str, run: int = 0) -> None:
 
 
 def _writer_chat(ctx: Any) -> str | None:
-    """The chat of the writer session a call comes from (THIMBLE_SESSION `writer:<doc>`), named as `writer` on a save's
-    chip;
-    None for any other caller."""
+    """The chat of the writer a call comes from (its key `writer:<doc>`, subagents.caller), named as `writer` on a
+    save's chip; None for any other caller."""
     key = str(getattr(ctx, "session", None) or "")
     if not key.startswith("writer:"):
         return None
-    from . import agent_session  # noqa: PLC0415 — agent_session is the sessions' runner, loaded after this module
+    from . import subagents  # noqa: PLC0415 — subagents is loaded after this module
 
-    run = agent_session.current(ctx.c, key)
+    run = subagents.current(ctx.c, key)
     return run.chat if run is not None else None
 
 
 def begin_write(c: str, slug: str, request: str | None = None, after: str | None = None) -> dict[str, Any]:
-    """A writer's session is starting for `slug` (write_session.start): the write a `write` event opened, or a new one
-    when the analyst asked in the chat, so the Report tab shows the document as being written either way."""
+    """A writer is starting for `slug` (write_session.start): the pending write, or a new one, so the Report tab shows
+    the document as being written."""
     w = write_pending(c, slug)
     if w is not None:
         return w
@@ -2238,6 +2225,10 @@ def _write_saved(c: str, slug: str, *, whole: bool) -> dict[str, Any] | None:
         if whole:
             _writes.pop((c, slug), None)
     return w
+
+
+WRITER_PLAN_NOTE = ("Your Claude Code session went into plan mode while the writer ran, so it could not save the "
+                    "document. Switch out of plan mode (shift+tab in your terminal), then write it again.")
 
 
 def writer_finished(c: str, meta: dict[str, Any]) -> None:
@@ -2260,6 +2251,11 @@ def writer_finished(c: str, meta: dict[str, Any]) -> None:
             continue
         if w["saved"]:
             _emit(c, {"type": "report", "slug": slug, "status": "generated", "run": w.get("event")})
+        elif meta.get("plan_mode"):
+            # main went into plan mode while it wrote, and the writer with it, so it could only write a plan (live check
+            # L21): a failure the analyst can write again, never a document found to need no change
+            _emit(c, {"type": "report", "slug": slug, "status": "failed", "run": w.get("event"), "chat": meta.get("id"),
+                      "note": WRITER_PLAN_NOTE})
         elif meta.get("status") == "done" and read_doc(c, investigation.MAIN, slug) is not None:
             # a revision whose writer ended well and changed nothing (it read the document and found nothing to change)
             _emit(c, {"type": "report", "slug": slug, "status": "generated", "unchanged": True, "run": w.get("event"),
@@ -2268,6 +2264,15 @@ def writer_finished(c: str, meta: dict[str, Any]) -> None:
             # the writer's chat goes with it, so the browser's Report a problem can take that chat first
             _emit(c, {"type": "report", "slug": slug, "status": "failed", "run": w.get("event"), "chat": meta.get("id"),
                       "note": _cut(meta.get("result") or "the writer ended without saving the document", 300)})
+
+
+def write_refused(c: str, slug: str, reason: str, kind: str, **fields: Any) -> None:
+    """A writer's start that did not happen (write_session.subagent_refused): its pending write ends, and the stream
+    says `report {status: refused, refused: {reason, kind, …}}`, which the document's card shows with the kind's
+    buttons."""
+    _writes.pop((c, slug), None)
+    _emit(c, {"type": "report", "slug": slug, "status": "refused",
+              "refused": {"reason": reason, "kind": kind, **{k: v for k, v in fields.items() if v is not None}}})
 
 
 def cancel_workspace(c: str) -> list[str]:
@@ -2280,10 +2285,9 @@ def cancel_workspace(c: str) -> list[str]:
 
 
 def _listen() -> None:
-    """write_requested on the `write` events and writer_finished on every agent chat's end."""
-    from . import agents, events  # noqa: PLC0415
+    """writer_finished on every agent chat's end."""
+    from . import agents  # noqa: PLC0415
 
-    events.observe(WRITE_EVENT, write_requested)
     agents.on_agent_finished(writer_finished)
 
 
@@ -2305,11 +2309,11 @@ def reverted_line(refs: list[str]) -> str:
 def writer_run(ctx: Any) -> str | None:
     """`<chat>:<run>` of the writer session a call comes from (its THIMBLE_SESSION is `writer:<doc>`), the key that
     makes its saves one generation; None for any other caller, whose every save is a generation of its own."""
-    from . import agent_session, tools  # noqa: PLC0415
+    from . import subagents, tools  # noqa: PLC0415
 
     if tools.session_kind(getattr(ctx, "session", None)) != tools.WRITER_SESSION:
         return None
-    run = agent_session.current(ctx.c, ctx.session)
+    run = subagents.current(ctx.c, ctx.session)
     return f"{run.chat}:{run.k}" if run is not None else None
 
 

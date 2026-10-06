@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pytest
 
-from app import cli, procs
+from app import cli, config, procs
 
 SECRET = "sk-ant-test-secret-never-written"  # gitleaks:allow  a fake key asserting nothing writes it
 BACKEND = Path(__file__).resolve().parents[1]
@@ -141,6 +141,9 @@ def test_up_prints_the_url_and_opens_a_sessions_folder(home, data, monkeypatch, 
     url, note, mark = capsys.readouterr().out.splitlines()
     assert url == "thimble: http://127.0.0.1:5300/?ws=calls", "no hook to show it"
     assert note == cli.MONITOR_NOTE and mark.startswith(cli.MONITOR_MARK), "main's Monitor brings the browser's events"
+    monkeypatch.setenv(cli.cc_plugin.FENCE_MARK, "1")  # thimble's fence lets out only the /thimble of main's session
+    assert cli.monitor_lines(folder, "s8")[0] == cli.MONITOR_NOTE_FENCED and "`thimble -c`" in cli.MONITOR_NOTE_FENCED
+    monkeypatch.delenv(cli.cc_plugin.FENCE_MARK)
     assert cli.main(["up", "--cwd", str(folder)]) == 0, "a bare up read by a program"
     assert capsys.readouterr().out.splitlines() == ["thimble: http://127.0.0.1:5300/"] and len(posted) == 2
     monkeypatch.setattr(cli, "to_terminal", lambda: True)
@@ -149,21 +152,41 @@ def test_up_prints_the_url_and_opens_a_sessions_folder(home, data, monkeypatch, 
     assert cli.build_parser().parse_args(["up"]).cmd == "up" and cli.build_parser().parse_args(["ensure"]).cmd == "ensure"
 
 
+def test_slash_thimble_in_a_plain_claude_leaves_the_warning_for_the_stop_hook(home, data, monkeypatch, capsys):
+    """Live check L15: in a plain `claude`, main's reply to /thimble left out the warning line the skill gave it, so the
+    terminal never showed it. The warning now goes under the link the session's Stop hook shows, whatever main
+    replies; main's text still holds it too. A launched, fenced main gets the link alone."""
+    _healthy_no_process(monkeypatch)
+    monkeypatch.setattr(cli, "_request", lambda m, u, b=None, timeout=5.0: (404, {}))
+    monkeypatch.setattr(cli, "launched", lambda: False)
+    monkeypatch.setattr(cli, "fenced_here", lambda cwd: False)
+    assert cli.main(["up", "--cwd", str(data / "mini" / "agents"), "--session", "s7"]) == 0
+    assert capsys.readouterr().out.splitlines() == [cli.LINK_LINE, cli.UNFENCED_LINE]
+    url, warning = (home / "links" / "s7").read_text().split("\n")
+    assert url.startswith("http://127.0.0.1:5300/?ws=mini#k=") and warning == cli.UNFENCED_LINE
+    monkeypatch.setattr(cli, "launched", lambda: True)
+    assert cli.main(["up", "--cwd", str(data / "mini" / "agents"), "--session", "s6"]) == 0
+    assert capsys.readouterr().out.splitlines() == [cli.LINK_LINE]
+    assert "\n" not in (home / "links" / "s6").read_text()
+
+
 def test_the_launcher_and_slash_thimble_say_nothing_of_claude_code_s_trust(home, data, monkeypatch, capsys,
                                                                        claude_global_config):
-    """Nothing thimble starts needs a folder Claude Code trusts, so neither the launcher nor /thimble warns about trust,
-    and doctor has no trust line, whatever Claude Code's config says."""
+    """Neither the launcher nor /thimble warns about trust, whatever Claude Code's config says. Only the doctor's hooks
+    module line names an untrusted folder, since Claude Code loads thimble's module only in a folder it trusts."""
     _healthy_no_process(monkeypatch)
     monkeypatch.setattr(cli, "_request", lambda m, u, b=None, timeout=5.0: (404, {}))
     claude_global_config.write_text("{}")
     assert cli.main(["up", "--cwd", str(data / "mini" / "agents"), "--session", "s9"]) == 0
     assert capsys.readouterr().out.splitlines() == [cli.LINK_LINE]
     assert (home / "links" / "s9").read_text().strip().count("\n") == 0, "the Stop hook shows the link alone"
-    monkeypatch.setattr(cli, "launch_args", lambda cwd, resume=False, settings="": "args")
+    monkeypatch.setattr(cli, "launch_args", lambda cwd, resume=False, settings="", **kw: "args")
     monkeypatch.setattr(cli, "claude_code_warning", lambda v: None)
     assert cli.main(["launch-args", "--cwd", str(data / "mini")]) == 0
     assert capsys.readouterr().err == ""
-    assert not hasattr(cli, "trust_command") and "trust" not in cli.doctor_text()
+    text = cli.doctor_text()
+    assert not hasattr(cli, "trust_command")
+    assert [ln for ln in text.splitlines() if "trust" in ln] == [line(text, "hooks module")]
 
 
 def line(text: str, key: str) -> str:
@@ -195,6 +218,62 @@ def test_the_doctor_a_model_reads_names_no_install_command_even_when_the_log_doe
     text = cli.doctor_text(commands=False)
     assert not cli._INSTALL_COMMAND.search(text), text
     assert text.count(cli.LOG_LINE_LEFT_OUT) == 4, "three in the tail, one in the errors"
+
+
+def test_the_doctor_says_whether_main_runs_fenced_what_the_launch_sets_and_whether_the_module_ran(
+        home, monkeypatch, fake_claude, tmp_path, claude_global_config):
+    """For a session `thimble` starts in the folder: whether main runs inside thimble's fence and what the last launch
+    recorded, the switches it exports and the variables it unsets, safe mode, and thimble's hooks module: off and why
+    (managed settings, THIMBLE_NO_MODULE), its last hello, or why it stayed idle, with an untrusted folder named."""
+    from app import cc_plugin
+
+    monkeypatch.setattr(cli, "healthy", lambda url=None, timeout=1.0: False)
+    monkeypatch.setattr(cli, "listening", lambda p: False)
+    monkeypatch.setattr(cc_plugin, "MANAGED_DIRS", {})
+    monkeypatch.setenv("THIMBLE_SANDBOX", "1")
+    for name in (*cli.UNSET_VARS, cli.NO_MODULE_ENV, cli.SAFE_MODE_ENV):
+        monkeypatch.delenv(name, raising=False)
+    data = tmp_path / "data"
+    data.mkdir()
+    monkeypatch.setenv("THIMBLE_DATA_DIR", str(data))
+    monkeypatch.setenv("THIMBLE_WORKSPACES_DIR", str(tmp_path / "ws"))
+    corpus = tmp_path / "logs"
+    corpus.mkdir()
+    monkeypatch.setenv("THIMBLE_CALLER_CWD", str(corpus))
+    text = cli.doctor_text()
+    assert line(text, "main's fence").endswith("on at the first `thimble` here, which registers the folder: main runs in "
+                                               "Claude Code's sandbox with the corpus read-only and writes only in "
+                                               "thimble's agents' work folders")
+    assert "CLAUDE_CODE_DISABLE_AGENT_VIEW=1" in line(text, "launch switches") and "none set here" in line(text, "launch")
+    assert line(text, "safe mode") == "  safe mode: off"
+    assert "no session here has run it yet" in line(text, "hooks module")
+    with cli.server_dirs():
+        config.register_corpus(corpus, exact=True)
+        ws = config.workspace_dir("logs")
+    (ws / cli.LAUNCH_FILE).write_text(json.dumps({"session": "s1", "at": "2026-10-06T05:00:00", "fenced": True}))
+    (ws / "trusted" / "subagents.json").write_text(json.dumps({"module": {"session": "0b9d2f3e-1c2d", "version": "0.6.0",
+                                                              "at": "2026-10-06T05:00:01"}}))
+    claude_global_config.write_text(json.dumps({"projects": {str(tmp_path): {"hasTrustDialogAccepted": True}}}))
+    monkeypatch.setenv("CLAUDE_CODE_EFFORT_LEVEL", "high")
+    text = cli.doctor_text()
+    assert line(text, "main's fence").endswith("the last launch here (2026-10-06T05:00:00) was fenced")
+    assert "unsets CLAUDE_CODE_EFFORT_LEVEL (set here)" in line(text, "launch switches")
+    assert line(text, "hooks module").endswith("it ran in the last session (hello from 0b9d2f3e at 2026-10-06T05:00:01, "
+                                               "version 0.6.0)")
+    (ws / "trusted" / "subagents.json").write_text(json.dumps({"module": {"session": "s2", "at": "t", "idle": "main does not run "
+                                                                                                "inside thimble's sandbox"}}))
+    claude_global_config.write_text("{}")
+    got = line(cli.doctor_text(), "hooks module")
+    assert "stayed idle in the last session (t): main does not run inside thimble's sandbox" in got
+    assert f"Claude Code does not trust {corpus} yet" in got
+    monkeypatch.setenv(cli.NO_MODULE_ENV, "1")
+    monkeypatch.setenv(cli.SAFE_MODE_ENV, "1")
+    text = cli.doctor_text()
+    assert line(text, "hooks module").endswith(f"off: Claude Code's hooks modules are off ({cli.NO_MODULE_ENV} is set), "
+                                               "so thimble's agents cannot start in this folder")
+    assert line(text, "safe mode").startswith("  safe mode: on")
+    monkeypatch.setenv("THIMBLE_SANDBOX", "0")
+    assert "off: Claude Code's Bash sandbox can't run" in line(cli.doctor_text(), "main's fence")
 
 
 DEV_LINES = ("turn endings:", "source changed since start:", "validation stack:", "last apply:", "dev tickets:",
@@ -380,6 +459,18 @@ def test_up_in_the_bash_sandbox_prints_what_the_hook_did_outside_it(home, data, 
     monkeypatch.setenv(cli.SANDBOX_ENV, "1")
     assert cli.main([*skill[:-3], "fresh", "--archive", ""]) == 0
     assert capsys.readouterr().out.startswith("thimble: WARNING") and started == []
+    # in thimble's fence with the hooks off, only the plain /thimble and /thimble status of main's session are let out
+    # (main_fence): another action names the terminal command, the plain one after a new session id says to continue
+    assert cli.main(skill) == 0 and capsys.readouterr().out.splitlines() == [cli.LINK_LINE], "the hook's result"
+    monkeypatch.setenv(cli.cc_plugin.FENCE_MARK, "1")
+    settings.write_text(json.dumps({"disableAllHooks": True}))
+    assert cli.main([*skill[:-3], "fresh", "--archive", ""]) == 0
+    assert capsys.readouterr().out.splitlines() == [cli.FENCE_ACTION_LINE.format(words="fresh", action="fresh",
+                                                                                 archive="")]
+    assert cli.main([*skill[:-3], "restore", "--archive", "logs-2026"]) == 0
+    assert "`thimble server up --action restore --archive logs-2026`" in capsys.readouterr().out
+    assert cli.main(skill) == 0 and capsys.readouterr().out.splitlines() == [cli.FENCE_SESSION_LINE]
+    assert started == []
 
 
 def test_the_doctor_says_when_the_analyst_s_own_sandbox_makes_a_folder_in_the_corpus(tmp_path, monkeypatch):

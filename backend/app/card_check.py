@@ -993,9 +993,9 @@ def _session_chat(c: str, cell: dict[str, Any], author: str) -> str | None:
     """The chat of the session that made a card that is not main's: the running session's, else the chat the card is
     stamped with, else the orientation's latest chat for the orientation's card, or a writer's latest chat for its
     document once the writer has ended; None when none is found."""
-    from . import agent_session, agents, orientation  # noqa: PLC0415
+    from . import agents, orientation, subagents  # noqa: PLC0415
 
-    run = agent_session.current(c, author)
+    run = subagents.current(c, author)
     if run is not None:
         return run.chat
     by = str(cell.get("created_by") or "")
@@ -1010,7 +1010,7 @@ def _session_chat(c: str, cell: dict[str, Any], author: str) -> str | None:
     return None
 
 
-def _role(c: str) -> dict[str, str]:
+def _role(c: str) -> dict[str, Any]:
     """The model, effort and speed of the `verify` role's calls (config.call_settings)."""
     return config.call_settings(c, "verify")
 
@@ -1031,7 +1031,7 @@ async def _call(c: str, system: str, user: str, tool: Any, images: list[tuple[by
     run = _current.get()
     return await model_mod.structured(
         user, tool=tool, model=model or role["model"], effort=effort or role["effort"],
-        system=system, cwd=config.corpus_dir(c),
+        system=system, cwd=config.corpus_dir(c), refusal=role["refusal"],
         speed=role["speed"], images=images, idle_timeout_s=READ_IDLE_S,
         on_retry=_on_retry(run) if run is not None else None,
         on_fallback=_on_fallback(run) if run is not None else None)

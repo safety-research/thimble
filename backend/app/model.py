@@ -4,8 +4,9 @@ suggestion and a program's `ask` (harness.ask), each at its role's model, effort
 
 Each call is an Agent SDK session on the user's own `claude` (sdk.build) whose one in-process MCP tool's schema is the
 output schema. It returns a CallResult status (ok, refused, rate_limited, truncated, no_tool_call, timeout, error) and
-follows the retry rules in structured(). A refused call runs again once on config.FALLBACK_MODEL, with `refused_by`
-naming the model that refused it.
+follows the retry rules in structured(). A refused call runs again once on the model and effort of Settings' refusal row
+(config.call_settings' `refusal`), with `refused_by` naming the model that refused it, and not at all when that row is
+off.
 
 No time limit bounds a call, since a long generation is normal; instead a call with no sign of life for the idle window
 (DEFAULT_IDLE_TIMEOUT_S) is killed and retried once in a fresh session.
@@ -147,7 +148,7 @@ class CallResult:
     partial: dict | None = None
     # {input_tokens, output_tokens, …} as the CLI reported them; None when it did not say
     usage: dict | None = None
-    # the model that refused the call when this result is its rerun on config.FALLBACK_MODEL; "" otherwise
+    # the model that refused the call when this result is its rerun on the refusal row's model; "" otherwise
     refused_by: str = ""
 
 
@@ -563,6 +564,7 @@ async def structured(
     model: str,
     effort: str,
     speed: str,
+    refusal: dict[str, str] | None,
     system: str = "",
     cwd: str | Path,
     idle_timeout_s: float = DEFAULT_IDLE_TIMEOUT_S,
@@ -573,8 +575,9 @@ async def structured(
 ) -> CallResult:
     """One structured call. Never raises; every failure is a CallResult.
 
-    `model`, `effort` and `speed` are the caller's role's (config.call_settings), always given, so nothing comes from
-    the analyst's Claude Code settings; a call without a model or an effort ends `error` before it starts. `speed` fast
+    `model`, `effort` and `speed` are the caller's role's and `refusal` the refusal row's {model, effort}, None when that
+    row is off (config.call_settings), always given, so nothing comes from the analyst's Claude Code settings; a call
+    without a model or an effort ends `error` before it starts. `speed` fast
     runs the call in fast mode on a model that has it. `system` is the call's own system prompt, sent whole with the
     output tool's instruction after it (no Claude Code preset). `images` are (bytes, media type) pairs sent before the
     prompt's text. `on_retry(n, wait_s, error_class, exc)` hears each wait before a rule 2 or 4 retry and
@@ -583,26 +586,26 @@ async def structured(
     Retry rules: (1) no_tool_call or schema-invalid: up to `corrective_retries` extra turns
     saying what was wrong; (2) a transient failure: a fresh conversation after each wait of retry.model_knobs()'s
     schedule; (3) a stall: one immediate retry in a fresh session; (4) a 429: one wait until the reset (at most
-    RATE_LIMIT_RETRY_MAX_S), then rate_limited; (5) refused: once more on config.FALLBACK_MODEL. Truncated and auth
-    errors are never retried here.
+    RATE_LIMIT_RETRY_MAX_S), then rate_limited; (5) refused: once more on `refusal`'s model and effort, at standard
+    speed, unless it is off or names the model that refused. Truncated and auth errors are never retried here.
     """
     await _bind_sdk_off_loop()
-    kw: dict[str, Any] = dict(tool=tool, effort=effort, system=system, cwd=cwd,
-                              idle_timeout_s=idle_timeout_s, corrective_retries=corrective_retries, speed=speed,
-                              images=images, on_retry=on_retry)
-    res = await _structured(prompt, model=model, **kw)
-    fallback = config.FALLBACK_MODEL
+    kw: dict[str, Any] = dict(tool=tool, system=system, cwd=cwd, idle_timeout_s=idle_timeout_s,
+                              corrective_retries=corrective_retries, images=images, on_retry=on_retry)
+    res = await _structured(prompt, model=model, effort=effort, speed=speed, **kw)
+    fallback = str((refusal or {}).get("model") or "")
     refused = res.model_requested
     if res.status != "refused" or not fallback or refused.startswith(fallback):
         return res
-    log.warning("structured %s: %s refused the call (%s); running it again on %s", tool.name, refused, res.detail,
-                fallback)
+    log.warning("structured %s: %s refused the call (%s); running it again on %s at effort %s", tool.name, refused,
+                res.detail, fallback, (refusal or {}).get("effort"))
     if on_fallback is not None:
         try:
             on_fallback(res.duration_s)
         except Exception:  # noqa: BLE001 — a listener never stops the fallback
             log.debug("structured %s: on_fallback raised", tool.name, exc_info=True)
-    again = await _structured(prompt, model=fallback, **kw)
+    again = await _structured(prompt, model=fallback, effort=str((refusal or {}).get("effort") or ""), speed="standard",
+                              **kw)
     again.refused_by = refused
     again.duration_s = round(res.duration_s + again.duration_s, 2)
     again.attempts += res.attempts
@@ -642,7 +645,8 @@ async def _structured(
         cap.finish(res.status, res.detail, attempts=attempts, model_used=res.model_used, cost_usd=res.cost_usd,
                    fallback_note=res.fallback_note)
         log.info("structured %s: %s after %.2f s (%s, effort %s%s; %d attempt(s))", tool.name, res.status,
-                 res.duration_s, res.model_used or requested, effort or "default", ", fast mode" if fast else "",
+                 res.duration_s, res.model_used or requested,
+                 effort if config.has_effort(requested) else "none", ", fast mode" if fast else "",
                  attempts)
         if res.status != "ok" and res.detail:
             log.warning("structured %s: %s (%s)", tool.name, res.status, res.detail)
@@ -659,8 +663,10 @@ async def _structured(
     except jsonschema.SchemaError as e:
         return finish(CallResult(status="error", detail=f"the {tool.name} tool's input_schema is invalid: {e.message}"))
 
-    log.info("structured %s: %s at effort %s%s", tool.name, requested, effort or "default", " in fast mode" if fast else "")
-    cap = capture.begin(capture.caller(tool.name), model=requested, effort=effort, path="sdk",
+    # a model with no effort runs with none (sdk.build), and the call's record says so
+    shown = effort if config.has_effort(requested) else "none (the model has none)"
+    log.info("structured %s: %s at effort %s%s", tool.name, requested, shown, " in fast mode" if fast else "")
+    cap = capture.begin(capture.caller(tool.name), model=requested, effort=shown, path="sdk",
                         speed="fast" if fast else "standard", output_tool=tool.name, cwd=str(cwd))
 
     async def run(life: _Life) -> CallResult:

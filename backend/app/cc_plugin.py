@@ -9,6 +9,12 @@ arms a Monitor on the watcher instead: the MONITOR route (`route`). The managed 
 settings (remote-settings.json in Claude Code's config dir) when they exist, else managed-settings.json with its
 managed-settings.d drop-ins in the platform's managed folder (`managed`).
 
+Main started by the `thimble` launcher runs inside thimble's fence (cli.main_fence): the last `--settings` on its
+command line turns Claude Code's sandbox on and carries FENCE_MARK in its `env` (`main_fenced`). The server reads that
+from main's command line rather than from anything main reports, since a session that was not started fenced must not
+be able to claim it. Whether the launcher started main at all (`main_launched`) is read from main's environment, which
+holds LAUNCHED_ENV, where it can be read.
+
 A plugin copy names its marketplace (`marketplace`): `inline` for a `--plugin-dir` copy, `<marketplace>` for an
 installed one, which is a copy in Claude Code's plugin cache or, for a directory marketplace, the plugin folder in that
 marketplace's own folder, which Claude Code loads in place (read from its registry).
@@ -39,6 +45,8 @@ MANAGED_DROPINS = "managed-settings.d"
 USER_SETTINGS = "settings.json"
 PROJECT_SETTINGS = (Path(".claude") / "settings.json", Path(".claude") / "settings.local.json")
 HOOK, MONITOR = "hook", "monitor"  # the routes (module note)
+FENCE_MARK = "THIMBLE_MAIN_FENCE"  # "1" in the --settings `env` of a main thimble's launcher fenced (cli.main_fence)
+LAUNCHED_ENV = "THIMBLE_LAUNCHED"  # set in the environment of every `claude` the launcher starts (cli.LAUNCHED_ENV)
 ROUTES = (HOOK, MONITOR)
 
 
@@ -121,11 +129,16 @@ def managed(environ: Mapping[str, str] | None = None) -> dict[str, Any] | None:
 
 
 def flag_settings(environ: Mapping[str, str] | None = None) -> dict[str, Any] | None:
-    """The settings the `claude` process a command runs under (claude_pid) was started with by its last `--settings`,
-    inline JSON or a file relative to that process's folder; None without one, or when it cannot be read. Without /proc
-    the command line comes split on white space (procs.argv), so inline JSON is read from the words joined again."""
+    """The settings the `claude` process a command runs under (claude_pid) was started with by its last `--settings`
+    (settings_arg); None without one, or when it cannot be read."""
     pid = claude_pid(environ)
-    args = procs.argv(pid) if pid else []
+    return settings_arg(procs.argv(pid) if pid else [], (procs.cwd(pid) if pid else None) or Path.cwd())
+
+
+def settings_arg(args: list[str], cwd: Path) -> dict[str, Any] | None:
+    """The settings the last `--settings` of a `claude` command line `args` names, inline JSON or a file relative to the
+    process's folder `cwd`; None without one, or when it cannot be read. Without /proc the command line comes split on
+    white space (procs.argv), so inline JSON is read from the words joined again."""
     at, value = -1, ""
     for i, a in enumerate(args):
         if a == "--settings" and i + 1 < len(args):
@@ -141,16 +154,55 @@ def flag_settings(environ: Mapping[str, str] | None = None) -> dict[str, Any] | 
             except ValueError:
                 d = json.JSONDecoder().raw_decode(" ".join([value, *args[at + 1:]]).lstrip())[0]
         else:
-            d = _read((procs.cwd(pid) or Path.cwd()) / Path(value).expanduser())
+            d = _read(Path(cwd) / Path(value).expanduser())
     except (ValueError, OSError):
         return None
     return d if isinstance(d, dict) else None
 
 
-def hooks_blocked(cwd: Path, root: Path, environ: Mapping[str, str] | None = None) -> bool:
-    """Whether the plugin's hooks are off for a session in `cwd` (module note): by the managed tier, or by
-    `disableAllHooks` as the analyst's, the project's and the folder's local settings and the session's `--settings`
-    (flag_settings) resolve it, the later winning, as Claude Code ranks them."""
+def fenced_argv(args: list[str], cwd: Path) -> bool:
+    """Whether a `claude` command line `args` (run in `cwd`) is a main thimble's launcher fenced (module note): its last
+    `--settings` turns the sandbox on and carries FENCE_MARK in its `env`. The analyst's own sandbox, without the mark,
+    is not thimble's fence."""
+    d = settings_arg(args, cwd) or {}
+    box, env = d.get("sandbox"), d.get("env")
+    return bool(isinstance(box, dict) and box.get("enabled") is True and isinstance(env, dict)
+                and str(env.get(FENCE_MARK) or "") == "1")
+
+
+def main_fenced(c: str) -> bool:
+    """Whether main's `claude` process in workspace `c` (session.main_pid) runs inside thimble's fence, read from its
+    command line (`/proc/<pid>/cmdline`, `ps` without /proc; module note). False without a main, or when its command line
+    cannot be read."""
+    from . import session  # noqa: PLC0415 — session imports far more than the launcher's checks need
+
+    pid = session.main_pid(c)
+    if not pid:
+        return False
+    return fenced_argv(procs.argv(pid), procs.cwd(pid) or Path.cwd())
+
+
+def main_launched(c: str) -> bool:
+    """Whether the `thimble` launcher started main's `claude` process in workspace `c` (session.main_pid): its
+    environment, as the process started (`/proc/<pid>/environ`), holds LAUNCHED_ENV. Where that cannot be read (no
+    /proc), main's session is the one launch.json names, followed through /clear and /resume (module_bridge
+    .launch_session), or main runs inside thimble's fence, which only the launcher adds. False without a main."""
+    from . import module_bridge, session  # noqa: PLC0415 — both import far more than the launcher's checks need
+
+    pid = session.main_pid(c)
+    if not pid:
+        return False
+    env = procs.environ(pid)
+    if env is not None:
+        return bool(str(env.get(LAUNCHED_ENV) or "").strip())
+    lv = session.current(c)
+    launch = module_bridge.launch_session(c)
+    return bool(lv is not None and launch and lv.sid == launch) or main_fenced(c)
+
+
+def managed_blocks(root: Path, environ: Mapping[str, str] | None = None) -> bool:
+    """Whether the org's managed tier keeps the plugin's hooks off, whatever the analyst's settings say:
+    `disableAllHooks`, or `allowManagedHooksOnly` without thimble enabled there."""
     tier = managed(environ) or {}
     if tier.get("disableAllHooks") is True:
         return True
@@ -158,6 +210,15 @@ def hooks_blocked(cwd: Path, root: Path, environ: Mapping[str, str] | None = Non
         enabled = tier.get("enabledPlugins")
         if not (isinstance(enabled, dict) and enabled.get(f"{PLUGIN}@{marketplace(root, environ)}") is True):
             return True
+    return False
+
+
+def hooks_blocked(cwd: Path, root: Path, environ: Mapping[str, str] | None = None) -> bool:
+    """Whether the plugin's hooks are off for a session in `cwd` (module note): by the managed tier, or by
+    `disableAllHooks` as the analyst's, the project's and the folder's local settings and the session's `--settings`
+    (flag_settings) resolve it, the later winning, as Claude Code ranks them."""
+    if managed_blocks(root, environ):
+        return True
     value = None
     for path in (config_dir(environ) / USER_SETTINGS, *(Path(cwd) / p for p in PROJECT_SETTINGS)):
         v = (_read(path) or {}).get("disableAllHooks")

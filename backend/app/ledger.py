@@ -98,6 +98,19 @@ def unlinked(base: Path, path: Path) -> Path:
     return path
 
 
+def write_under(base: Path, path: Path, text: str) -> None:
+    """`text` written to `path` under `base` by the server: its folders made, none of them a symlink (unlinked), and a
+    symlink at `path` itself replaced rather than followed (atomic_write_text). For a file thimble writes into a folder
+    that its agents' Bash or a kernel can write (a check's task file, a writer's context file, the critic's brief and
+    digest), where a planted link would have the server, which no sandbox holds, write outside it. OSError for a link."""
+    try:
+        unlinked(base, path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        atomic_write_text(unlinked(base, path), text)
+    except ValueError as e:
+        raise OSError(str(e)) from None
+
+
 def write_json(path: Path, obj: Any) -> None:
     atomic_write_text(path, json.dumps(obj, indent=2, ensure_ascii=False))
 
@@ -230,36 +243,52 @@ def with_features(stored: dict[str, Any], c: str | None = None) -> dict[str, Any
     """The effective settings: SETTINGS_DEFAULTS under `stored` less RETIRED_KEYS, `models` as config.models_for resolves
     them from thimble's config with a row per agent of the active extensions (extensions.agent_models), the permission
     modes the config sets (modes.rows), `disabled_modes`, those the analyst's Claude Code settings turn off,
-    `config_error`, the config's error or ''; `agents`, agent_rows; `tasks`, task_rows."""
+    `config_error`, the config's error or ''; `config_ignored`, the keys its files hold that this build reads and ignores
+    (userconf.ignored); `agents`, agent_rows; `tasks`, task_rows; `card_wait`, the minutes a code ticket's permission
+    request waits (userconf.card_wait_s)."""
     from . import extensions, modes, userconf  # noqa: PLC0415 — they import this module
 
     kept = {k: v for k, v in stored.items() if k not in RETIRED_KEYS and k != modes.SETTING}
     models = {**config.models_for(c), **extensions.agent_models(c)}
     return {**SETTINGS_DEFAULTS, **kept, config.MODELS_KEY: models, modes.SETTING: modes.rows(c) if c else {},
             "disabled_modes": sorted(modes.disabled()), "config_error": userconf.problem(c),
-            "agents": agent_rows(c), "tasks": task_rows(c)}
+            "config_ignored": userconf.ignored(c), "agents": agent_rows(c), "tasks": task_rows(c),
+            "card_wait": round(userconf.card_wait_s() / 60, 2)}
 
 
 def agent_rows(c: str | None) -> dict[str, Any]:
-    """Who runs each agent thimble starts and what it may do, by its row of the permission modes (modes.AGENTS): its
-    role's agent (roles.public: thimble's own, or an extension's prompt, Agent SDK program or command, with the
-    extensions that add to its prompt and a conflict), and from thimble's config its sandbox, whether the sandbox can
-    run here, its network, web tools and edits of the corpus; `main` names the extensions that add to main's prompt.
-    `labels` and `cardCheck` (userconf.CALLS) follow, by their config names: who runs their tasks (`tasks`, the first
-    one an extension runs) and the settings a program of those tasks runs under, with the sandbox always on and no web."""
+    """Who runs each agent thimble starts and what it may do. Two fences: `main`'s, which thimble's agents share as main's
+    subagents (its sandbox, whether the sandbox can run here, its network, web tools and edits of the corpus, the
+    orientation's keys in thimble's config, userconf's one fence), with the extensions that add to main's prompt; and
+    `dev`'s, the code tickets', which keep a fence of their own. Each other agent's row (orient, writer, critic,
+    checks) names its role's agent (roles.public: thimble's own, or an extension's prompt, Agent SDK program or command,
+    with the extensions that add to its prompt and a conflict) and its own `web`, "off" or main's. `labels` and
+    `cardCheck` (userconf.CALLS) follow, by their config names: who runs their tasks (`tasks`, the first one an
+    extension runs) and the settings a program of those tasks runs under, with the sandbox always on and no web."""
     from . import roles, tasks, userconf  # noqa: PLC0415
 
     conf = userconf.load_or_defaults(c)[0]
     runs = conf["sandbox"]["use"] != "never" and userconf.sandbox_runs()
     by_role = {r["role"]: r for r in roles.public(c)}
-    out: dict[str, Any] = {"main": {"additions": by_role["main"]["additions"]}}
+    blank = {"way": "thimble", "extension": "", "additions": [], "conflict": []}
+
+    def fence(agent: str) -> dict[str, Any]:
+        mine = userconf.agent_conf(conf, agent)
+        on = conf["sandbox"]["use"] != "never" and (agent == "orientation" or mine.get("sandbox", "on") == "on")
+        return {"sandbox": "on" if on else "off", "sandbox_runs": runs, "network": mine.get("network") or "on",
+                "web": mine.get("web") or "ask", "data": mine.get("data") or "ask", "config": f"agents.{agent}"}
+
+    out: dict[str, Any] = {"main": {"additions": by_role["main"]["additions"], **fence("orientation")}}
+    for agent in userconf.SUBAGENT_ROLES:
+        role = by_role.get(agent) or blank
+        out[userconf.ROLES[agent]] = {"way": role["way"], "extension": role["extension"],
+                                      "additions": role["additions"], "conflict": role["conflict"],
+                                      "web": userconf.agent_conf(conf, agent)["web"], "config": f"agents.{agent}",
+                                      "memory": userconf.agent_conf(conf, agent).get("memory") or "inherit"}
     for agent, row in userconf.MODE_ROWS.items():
-        mine = conf["agents"][agent]
-        role = by_role.get(agent) or {"way": "thimble", "extension": "", "additions": [], "conflict": []}
+        role = by_role.get(agent) or blank
         out[row] = {"way": role["way"], "extension": role["extension"], "additions": role["additions"],
-                    "conflict": role["conflict"], "sandbox": mine.get("sandbox", "on"), "sandbox_runs": runs,
-                    "network": mine.get("network", "on"), "web": mine.get("web", "ask"), "data": mine.get("data", "ask"),
-                    "config": f"agents.{agent}"}
+                    "conflict": role["conflict"], **fence(agent)}
     by_task = task_rows(c)
     for agent in userconf.CALLS:
         mine = conf["agents"][agent]
@@ -290,12 +319,31 @@ def get_settings(c: str) -> dict[str, Any]:
     return with_features(stored_settings(c), c)
 
 
-# The keys PUT /settings may change: SETTINGS_DEFAULTS, the models the browser's settings panel saves, and the rows of
-# the permission modes, which only the analyst's browser may change (hook_auth.analyst). The models and the permission
+# The keys PUT /settings may change: SETTINGS_DEFAULTS, the models the browser's settings panel saves, the rows of
+# the permission modes and the subagents' web switches (WEB_KEY), which only the analyst's browser may change
+# (hook_auth.analyst). The models and the permission
 # modes are written to thimble's config (userconf.save), the rest to the workspace's settings.json. Every other key is
 # the server's own or the analyst's to edit in the file (kernel_wrap, orient_instructions), since a kernel cell or a
 # session's command can reach the route on loopback. RETIRED_KEYS are taken too, and dropped.
-PUT_KEYS = frozenset({*SETTINGS_DEFAULTS, config.MODELS_KEY, "permission_modes", *RETIRED_KEYS})
+WEB_KEY = "web"  # {row: "off" | None}: a subagent of main kept off WebFetch and WebSearch, or back on main's rule
+WEB_ROWS = {"critic": "critic", "writer": "writer", "checks": "checks"}  # the web switches' rows, by thimble's config's agent
+PUT_KEYS = frozenset({*SETTINGS_DEFAULTS, config.MODELS_KEY, "permission_modes", WEB_KEY, *RETIRED_KEYS})
+
+
+def web_patch(rows: Any) -> dict[str, Any]:
+    """The Settings pane's web switches as a patch of thimble's config: each row's agent `web` "off", or None for back to
+    main's rule. ValueError for a row or a value it does not take; the orientation's web is main's fence's, so it is
+    not among the rows."""
+    if not isinstance(rows, dict):
+        raise ValueError("web: a map of rows to \"off\" or null")
+    agents: dict[str, Any] = {}
+    for row, value in rows.items():
+        if row not in WEB_ROWS:
+            raise ValueError(f"web: no row {row!r}; one of {', '.join(WEB_ROWS)}")
+        if value not in ("off", None):
+            raise ValueError(f"web: {row} takes \"off\" or null")
+        agents[WEB_ROWS[row]] = {"web": value}
+    return {"agents": agents} if agents else {}
 
 
 @router.put("/ws/{c}/settings")
@@ -315,6 +363,13 @@ def put_settings_route(c: str, request: Request, settings: dict[str, Any] = Body
             raise HTTPException(403, hook_auth.ANALYST_ONLY)
         if why := modes.patch_error(settings[modes.SETTING]):
             raise HTTPException(400, why)
+    if WEB_KEY in settings:
+        if not hook_auth.analyst(request):
+            raise HTTPException(403, hook_auth.ANALYST_ONLY)
+        try:
+            web_patch(settings[WEB_KEY])
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from e
     try:
         return put_settings(c, {k: v for k, v in settings.items() if k not in RETIRED_KEYS})
     except userconf.ConfigError as e:
@@ -332,9 +387,12 @@ def put_settings(c: str, settings: dict[str, Any]) -> dict[str, Any]:
     models = settings.get(config.MODELS_KEY) if isinstance(settings.get(config.MODELS_KEY), dict) else {}
     patch = userconf.pane_patch(models, settings.get(modes.SETTING) if isinstance(settings.get(modes.SETTING), dict)
                                 else None)
+    for name, conf in web_patch(settings.get(WEB_KEY) or {}).get("agents", {}).items():
+        patch.setdefault("agents", {}).setdefault(name, {}).update(conf)
     if patch:
         userconf.save(c, patch)
-    settings = {k: v for k, v in settings.items() if k != modes.SETTING}
+        push_roles(c)
+    settings = {k: v for k, v in settings.items() if k not in (modes.SETTING, WEB_KEY)}
     if config.MODELS_KEY in settings:
         settings[config.MODELS_KEY] = {k: v for k, v in models.items() if k == "main"}
         if not settings[config.MODELS_KEY]:
@@ -352,6 +410,18 @@ def put_settings(c: str, settings: dict[str, Any]) -> dict[str, Any]:
     if merged != stored or not path.exists() and settings:
         write_json(path, merged)
     return with_features(merged, c)
+
+
+def push_roles(c: str) -> None:
+    """Have main's hooks module register thimble's agent types again with the values Settings now name
+    (module_bridge.push_roles), so the next start of each runs on them. Never raises: a module that is not running
+    registers them at its next session's start."""
+    try:
+        from . import module_bridge  # noqa: PLC0415 — module_bridge imports the session modules
+
+        module_bridge.push_roles(c)
+    except Exception:  # noqa: BLE001 — the save stands; the module registers the roles when it next starts
+        log.warning("%s: the agent types were not registered again after a Settings save", c, exc_info=True)
 
 
 # --------------------------------------------------------------------------- reset and archive
@@ -379,12 +449,16 @@ async def _end_work(c: str) -> None:
 
 
 async def _stop_sessions(c: str, why: str) -> None:
-    """Stop the Claude Code sessions the server runs for the workspace (an orientation's, a writer's: they never
-    subscribe to its events) and detach the analyst's session from it, before its folder goes."""
-    from . import agent_session, session  # lazy: session imports this module
+    """Stop thimble's agents in the workspace (through the module, subagents.stop) and detach the analyst's session from
+    it, before its folder goes."""
+    from . import session, subagents  # lazy: session imports this module
 
-    for run in [r for (cc, _), r in list(agent_session._runs.items()) if cc == c]:
-        await agent_session.stop_run(run)
+    for agent_id, a in subagents.agents_of(c).items():
+        if a.get("status") in ("running", "waiting"):
+            try:
+                await subagents.stop(c, agent_id)
+            except Exception:  # noqa: BLE001 — the folder goes either way
+                log.warning("%s: the agent %s was not stopped", c, agent_id, exc_info=True)
     lv = session.current(c)
     if lv is not None:
         session.detach(c, lv.sid, why)

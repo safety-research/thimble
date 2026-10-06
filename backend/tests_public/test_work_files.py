@@ -1,18 +1,20 @@
 """app.work_files: when an agent's run ends, its work folder lets go of its subagents' scratch folders and of the large
 files nothing uses, and keeps what a card or a document names, the files a named script reads, small files, its
-dot-entries and Python environments. While it runs, the session hears when the folder grows past a budget
-(app/work_budget.py). The work folder and the notebook are invented."""
+dot-entries and Python environments. While it runs, the agent hears when the folder grows past a budget (the plugin's
+watcher, plugin/bin/.thimble-watch). The work folder and the notebook are invented."""
 from __future__ import annotations
 
 import json
 import os
 import subprocess
-import sys
 from pathlib import Path
 
 import pytest
 
-from app import agent_session, config, orient_session, work_budget, work_files
+from app import agent_session, config, orient_session, subagents, work_files
+
+WATCHER = Path(__file__).resolve().parents[2] / "plugin" / "bin" / ".thimble-watch"
+BUDGET_FILE = ".thimble-budget.json"  # the watcher's BUDGET_FILE
 
 C = "board"
 MB = 1024 * 1024
@@ -88,7 +90,7 @@ def test_a_run_that_goes_on_keeps_its_extracts_and_a_failed_one_keeps_everything
     its folder."""
     import asyncio  # noqa: PLC0415
 
-    from app import agent_session, orientation  # noqa: PLC0415
+    from app import orientation  # noqa: PLC0415
 
     work = orient_session.work_dir(C)
     extract = _write(work / "idx" / "turns.pkl", 2 * MB)
@@ -103,41 +105,30 @@ def test_a_run_that_goes_on_keeps_its_extracts_and_a_failed_one_keeps_everything
         work_files.after_run(C, work, status)
         assert asked == want, status
 
-    queue: list = []
-    monkeypatch.setattr(orientation, "read_run", lambda c: {"queue": list(queue)})
+    monkeypatch.setattr(orientation, "read_run", lambda c: {})
     monkeypatch.setattr(orientation, "record", lambda c, **kw: None)
     monkeypatch.setattr(orientation, "finished", lambda *a, **kw: None)
     monkeypatch.setattr(orient_session, "_tell_main", lambda *a, **kw: None)
-    monkeypatch.setattr(orient_session, "_show_queue", lambda *a: None)
     monkeypatch.setattr(orient_session, "_report", lambda c: None)
 
     async def unmeasured(c, chat):
         return ""
 
     monkeypatch.setattr(orient_session, "measure", unmeasured)
-    resumed: list = []
 
-    async def resume(c, messages, *a, **kw):
-        resumed.append(messages)
-
-    monkeypatch.setattr(orient_session, "resume", resume)
-
-    def run() -> agent_session.Run:
-        return agent_session.Run(C, orient_session.KEY, "chat-o", "sid-o", config.corpus_dir(C), orientation.ROLE)
-
-    async def ends(status: str) -> list[tuple]:
+    async def ends(status: str, interrupted: bool = False) -> list[tuple]:
         asked.clear()
-        ended = run()
-        orient_session._ended(ended, status, "")
-        if ended.closing is not None:  # a finished first run goes on once its coverage is measured, as the follower waits
-            await ended.closing
+        run = subagents.Run(C, orient_session.KEY, "orientation", "chat-o", "a1", interrupted=interrupted)
+        orient_session.subagent_ended(C, run, status, "")
+        for _ in range(50):  # a finished first run goes on once its coverage is measured
+            if C not in orient_session._closing:
+                break
+            await asyncio.sleep(0.01)
         await asyncio.sleep(0)
         return list(asked)
 
     assert asyncio.run(ends("done")) == [(work, True)]
-    queue.append({"text": "now the weekends"})
-    assert asyncio.run(ends("done")) == [(work, False)] and resumed, "the waiting message resumes the same session"
-    assert asyncio.run(ends("stopped")) == [(work, False)]
+    assert asyncio.run(ends("stopped")) == [(work, False)], "the analyst's Stop: a follow-up goes on with them"
     assert asyncio.run(ends("failed")) == []
 
 
@@ -165,14 +156,13 @@ def test_a_session_hears_once_each_time_its_work_folder_grows_past_another_budge
     work = tmp_path / "work"
     work.mkdir()
     hooks = agent_session.scratch_hooks(work)["PostToolUse"]
-    assert hooks[0]["matcher"] == "Bash" and "work_budget.py" in hooks[0]["hooks"][0]["command"]
+    assert hooks[0]["matcher"] == "Bash" and ".thimble-watch --work-budget" in hooks[0]["hooks"][0]["command"]
 
-    def call() -> str:
-        state = work / work_budget.STATE_FILE
+    def call(text: str = "{folder} holds {size} of {budget}") -> str:
+        state = work / BUDGET_FILE
         if state.is_file():  # as if CHECK_S went by
             state.write_text(json.dumps({**json.loads(state.read_text()), "checked": 0}))
-        done = subprocess.run([sys.executable, "-S", str(Path(work_budget.__file__)), "--work", str(work), "--budget",
-                               str(2 * MB), "--text", "{folder} holds {size} of {budget}"],
+        done = subprocess.run([str(WATCHER), "--work-budget", "--work", str(work), "--budget", str(2 * MB), "--text", text],
                               input=json.dumps({"hook_event_name": "PostToolUse"}), capture_output=True, text=True,
                               timeout=60)
         assert done.returncode == 0, done.stderr
@@ -190,10 +180,10 @@ def test_a_session_hears_once_each_time_its_work_folder_grows_past_another_budge
     assert call() == ""
     _write(work / "copy.jsonl", 2 * MB)
     assert call(), "grown back"
-    state = json.loads((work / work_budget.STATE_FILE).read_text())
-    (work / work_budget.STATE_FILE).write_text(json.dumps({**state, "warned": 0}))
+    state = json.loads((work / BUDGET_FILE).read_text())
+    (work / BUDGET_FILE).write_text(json.dumps({**state, "warned": 0}))
     assert call(), "the step is kept in the folder"
-    (work / work_budget.STATE_FILE).write_text(json.dumps({**state, "warned": 0, "checked": 9e12}))
-    done = subprocess.run([sys.executable, "-S", str(Path(work_budget.__file__)), "--work", str(work), "--budget",
-                           str(2 * MB), "--text", "x"], input="{}", capture_output=True, text=True, timeout=60)
+    (work / BUDGET_FILE).write_text(json.dumps({**state, "warned": 0, "checked": 9e12}))
+    done = subprocess.run([str(WATCHER), "--work-budget", "--work", str(work), "--budget", str(2 * MB), "--text", "x"],
+                          input="{}", capture_output=True, text=True, timeout=60)
     assert done.stdout == "", "measured at most every CHECK_S"

@@ -511,16 +511,16 @@ class HookCall(BaseModel):
 
 @router.post("/ws/{c}/calls/ref")
 async def hook_route(c: str, body: HookCall) -> dict[str, Any]:
-    """The call-ref hook's (call_ref.py): number the call the session `session` just made in its orientation's
-    sequence and answer `{context}`, the `## call-ref` line that tells the model its ref; `{}` for a call of thimble's
-    own tools, of Claude Code's plumbing, or of a session that is no orientation's."""
-    from . import agent_session, session, tools  # noqa: PLC0415
+    """The plugin's --agents hook: number the call the orientation (its key `session`), or its descendant `agent_id`,
+    just made in the orientation's sequence and answer `{context}`, the `## call-ref` line that tells the model its
+    ref; `{}` for a call of thimble's own tools, of Claude Code's plumbing, or of an agent that is no orientation's."""
+    from . import session, subagents, tools  # noqa: PLC0415
 
     name = str(body.tool_name or "")
     if not body.tool_use_id or not name or is_thimble(name) or name in session.PLUMBING_TOOLS:
         return {}
-    run = agent_session.current(c, body.session)
-    chat = getattr(run, "calls", None) if run is not None else None
+    run = subagents.current(c, body.session)
+    chat = run.calls if run is not None else None
     if not chat:
         return {}
     n = number(c, chat, body.tool_use_id, name, body.tool_input, agent=body.agent_id or None)

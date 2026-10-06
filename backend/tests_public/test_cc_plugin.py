@@ -118,3 +118,82 @@ def test_slash_thimble_prints_nothing_about_routes_on_the_hook_route_and_the_mon
     note, mark = cli.monitor_lines(tmp_path, "sid")
     assert note == cli.MONITOR_NOTE
     assert mark.startswith(cli.MONITOR_MARK) and mark.endswith("--stream --cwd " + str(tmp_path) + " --session sid")
+
+
+CMDLINES = Path(__file__).parent / "fixtures" / "cmdline"
+
+
+def _recorded(name: str) -> list[str]:
+    """A recorded command line of a fenced main (fixtures/cmdline), one argument per line."""
+    return (CMDLINES / f"{name}.txt").read_text("utf-8").rstrip("\n").split("\n")
+
+
+def _with_settings(args: list[str], edit) -> list[str]:
+    """`args` with its last --settings value edited by `edit(dict) -> dict`."""
+    out = list(args)
+    at = max(i for i, a in enumerate(out) if a == "--settings") + 1
+    out[at] = json.dumps(edit(json.loads(out[at])))
+    return out
+
+
+@pytest.mark.parametrize("name", ["fenced-main", "first-launch-no-agents"])
+def test_main_fenced_reads_the_recorded_command_lines(name, tmp_path, monkeypatch):
+    """main_fenced reads main's command line (session.main_pid's process): the spike's recorded fenced mains count, the
+    same command line without the fence's mark or with the sandbox off does not, and neither does a plain `claude`."""
+    from app import procs, session
+
+    argv = {"now": _recorded(name)}
+    monkeypatch.setattr(session, "main_pid", lambda c: 4242 if c == "logs" else None)
+    monkeypatch.setattr(procs, "argv", lambda pid: argv["now"] if pid == 4242 else [])
+    monkeypatch.setattr(procs, "cwd", lambda pid: tmp_path)
+    assert cc_plugin.main_fenced("logs")
+    assert not cc_plugin.main_fenced("other"), "no main, no fence"
+    argv["now"] = _with_settings(_recorded(name), lambda d: {**d, "env": {}})
+    assert not cc_plugin.main_fenced("logs"), "the analyst's own sandbox is not thimble's fence"
+    argv["now"] = _with_settings(_recorded(name), lambda d: {**d, "sandbox": {**d["sandbox"], "enabled": False}})
+    assert not cc_plugin.main_fenced("logs")
+    argv["now"] = ["claude", "--name", "thimble:main · logs"]
+    assert not cc_plugin.main_fenced("logs")
+
+
+def test_main_fenced_takes_the_last_settings_and_a_settings_file(tmp_path, monkeypatch):
+    """Claude Code reads only the last --settings, so a fence followed by another --settings is not one; a --settings file
+    relative to main's folder is read; ps's split command line (no /proc) still reads inline JSON."""
+    fence = {"sandbox": {"enabled": True}, "env": {cc_plugin.FENCE_MARK: "1"}}
+    assert cc_plugin.fenced_argv(["claude", "--settings", json.dumps(fence)], tmp_path)
+    assert not cc_plugin.fenced_argv(["claude", "--settings", json.dumps(fence), "--settings", "{}"], tmp_path)
+    assert cc_plugin.fenced_argv(["claude", f"--settings={json.dumps(fence)}"], tmp_path)
+    (tmp_path / "s.json").write_text(json.dumps(fence))
+    assert cc_plugin.fenced_argv(["claude", "--settings", "s.json"], tmp_path)
+    split = ["claude", "--settings", *json.dumps(fence).split(" "), "--name", "x"]
+    assert cc_plugin.fenced_argv(split, tmp_path)
+    assert not cc_plugin.fenced_argv(["claude", "--settings", json.dumps({**fence, "env": {cc_plugin.FENCE_MARK: "0"}})],
+                                     tmp_path)
+
+
+def test_main_launched_is_read_from_main_s_environment_else_from_launch_json_or_the_fence(monkeypatch, workspaces_tmp):
+    """The browser's unfenced banner tells a plain `claude` with /thimble from a session the launcher started without
+    the fence: the launcher exports THIMBLE_LAUNCHED into main's environment. Where that cannot be read, main's session
+    is the one launch.json names, or main runs inside thimble's fence, which only the launcher adds."""
+    import types
+
+    from app import module_bridge, procs, session
+
+    monkeypatch.setattr(session, "main_pid", lambda c: None)
+    assert not cc_plugin.main_launched("mini"), "no main"
+    monkeypatch.setattr(session, "main_pid", lambda c: 4242)
+    monkeypatch.setattr(procs, "environ", lambda pid: {"THIMBLE_LAUNCHED": "1"} if pid == 4242 else None)
+    assert cc_plugin.main_launched("mini")
+    monkeypatch.setattr(procs, "environ", lambda pid: {"PATH": "/bin"})
+    monkeypatch.setattr(cc_plugin, "main_fenced", lambda c: True)
+    assert not cc_plugin.main_launched("mini"), "the environment, when it can be read, decides"
+    monkeypatch.setattr(procs, "environ", lambda pid: None)  # no /proc
+    monkeypatch.setattr(cc_plugin, "main_fenced", lambda c: False)
+    monkeypatch.setattr(session, "current", lambda c: types.SimpleNamespace(sid="s-main"))
+    monkeypatch.setattr(module_bridge, "launch_session", lambda c: "s-other")
+    assert not cc_plugin.main_launched("mini")
+    monkeypatch.setattr(module_bridge, "launch_session", lambda c: "s-main")
+    assert cc_plugin.main_launched("mini")
+    monkeypatch.setattr(module_bridge, "launch_session", lambda c: "")
+    monkeypatch.setattr(cc_plugin, "main_fenced", lambda c: True)
+    assert cc_plugin.main_launched("mini")

@@ -44,16 +44,17 @@ def test_on_macos_srt_hides_the_home_and_user_data_and_shows_the_kernel_its_own_
     folders nor thimble's and Claude Code's folders; it reads the corpus, the workspace, the venv, each folder its
     interpreter resolves through and the fonts; it writes only the workspace; the workspace's config stays hidden and
     read-only inside the workspace, telemetry.jsonl, the view log, the registry folder, the views' state and the
-    workspace's local extension read-only."""
+    workspace's local extension read-only, and so are the files thimble's agents' hooks trust."""
     rules, (venv, minor, real) = _rules(tmp_path, "darwin")
     fs = rules["filesystem"]
-    hidden = {f"{WS}/settings.json", f"{WS}/config.json"}
+    hidden = {f"{WS}/settings.json", f"{WS}/config.json", f"{WS}/subagents.json.lock"}
     assert {HOME, "/Users", "/Volumes", "/private/tmp", "/private/var/folders", f"{HOME}/.thimble", f"{HOME}/.claude",
             *hidden} <= set(fs["denyRead"])
     assert {CORPUS, WS, str(venv), str(minor), str(real), "/app/backend/app/fonts"} <= set(fs["allowRead"])
     assert not any("sandbox-runtime" in p for p in fs["allowRead"]), "apply-seccomp runs only on Linux"
     assert fs["allowWrite"] == [WS]
-    read_only = {f"{WS}/telemetry.jsonl", f"{WS}/viewed.jsonl", f"{WS}/registry", f"{WS}/views", f"{WS}/extension"}
+    read_only = {f"{WS}/telemetry.jsonl", f"{WS}/viewed.jsonl", f"{WS}/registry", f"{WS}/views", f"{WS}/extension",
+                 f"{WS}/trusted"}
     assert set(fs["denyWrite"]) == {*hidden, *read_only, "/tmp/claude", "/private/tmp/claude"}
     linux = _rules(tmp_path / "l", "linux")[0]["filesystem"]
     assert {"/home", "/tmp", "/mnt", "/run/user"} <= set(linux["denyRead"]) and "/Users" not in linux["denyRead"]
@@ -129,6 +130,8 @@ def test_on_linux_a_venv_whose_python_goes_through_uv_s_minor_version_folder_run
         d.mkdir()
     for name in kernel_wrap.HIDDEN_FILES:
         (ws / name).write_text("{}\n")
+    for name in kernel_wrap.LOCK_FILES:  # as the server makes it before a kernel starts
+        (ws / name).write_text("")
     py = str(venv / "bin" / "python")
     cmd = [py, "-c", "print('ran')"]
     if wrap == "srt":
@@ -238,3 +241,53 @@ def test_the_server_reads_no_settings_from_a_workspace_file_another_name_can_cha
     assert notebook._ws_settings("w") == {}
     with pytest.raises(userconf.ConfigError, match="another name"):
         userconf.load("w")
+
+
+TRUSTED_CELL = """
+import json, os, pathlib
+trusted = pathlib.Path.cwd().parent / "trusted"
+said = []
+for name in ("subagents.json", "callers.jsonl", "launch.json", "planted.json"):
+    try:
+        with open(trusted / name, "a") as f:
+            f.write(json.dumps({"requests": {"req_0000000001": {"state": "pending", "route": "click"}}}))
+        said.append("wrote")
+    except OSError:
+        said.append("refused")
+try:
+    os.rename(trusted, trusted.with_name("moved"))
+    said.append("moved")
+except OSError:
+    said.append("kept")
+print(*said)
+"""
+
+
+@pytest.mark.parametrize("wrap", ["srt", "bwrap"])
+async def test_card_code_can_t_write_the_files_the_hooks_trust_after_the_server_replaced_them(wrap, monkeypatch,
+                                                                                             workspaces_tmp):
+    """subagents.json, callers.jsonl and launch.json stay read-only to a card's code while the server and the hooks
+    replace them whole (a new file renamed over each). Linux takes a bind off a file that another mount namespace renames
+    a file over, so binding each file read-only held only until the first write after the kernel started, and a cell
+    could then write a pending click into subagents.json; the kernel binds their folder read-only instead."""
+    from app import subagent_files
+
+    if not _wrap_works(wrap):
+        pytest.skip(f"{wrap} can't sandbox a process here")
+    monkeypatch.setenv(config.KERNEL_WRAP_ENV, wrap)
+    ws = config.workspace_dir("mini")
+    subagent_files.ensure(ws)
+    try:
+        await notebook.run_code("mini", "print('started')", "main")  # the kernel runs before the writes below
+        for i in range(2):
+            with subagent_files.update(ws) as state:
+                state["agents"] = {"a1": {"status": "running", "n": i}}
+        subagent_files.add_caller(ws, "toolu_x", "a1", "thimble:orientation")
+        subagent_files.trim_callers(ws)
+        cell = await notebook.run_code("mini", TRUSTED_CELL, "main")
+        said = "".join(b.get("text/plain", "") for b in cell["outputs"]).split()
+        assert said == ["refused"] * 4 + ["kept"], said
+        assert "req_0000000001" not in subagent_files.state_path(ws).read_text()
+        assert not (subagent_files.trusted_dir(ws) / "planted.json").exists()
+    finally:
+        await notebook.shutdown_all()

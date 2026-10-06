@@ -1,5 +1,6 @@
-"""The permission hook of every session thimble starts beside main. Claude Code runs it on three events of the session,
-its subagents and its workflow agents, and it hands each to the server:
+"""The permission hook of the `claude -p` sessions thimble starts itself (a code ticket's, an extension's program's;
+agent_session.py). Claude Code runs it on three events of the session, its subagents and its workflow agents, and it
+hands each to the server:
 
 - PermissionRequest: answered by the session's mode (agent_session.ask), at once in Bypass, else when the analyst
   answers on the session's card, with Claude Code's "don't ask again" suggestions offered beside Allow.
@@ -14,7 +15,7 @@ only the hook; using both would ask twice for foreground requests. Claude Code w
 timeout in the session's settings is a day). In auto mode a refused call never reaches PermissionRequest, hence
 PermissionDenied with `retry` plus a PreToolUse `allow`.
 
-It posts the event to POST {server}/api/ws/{ws}/sessions/permission with call_ref.post, which signs it with the token in
+It posts the event to POST {server}/api/ws/{ws}/sessions/permission with post, which signs it with the token in
 server.json and believes only an answer that carries the server's proof (app/hook_auth.py), waits for the answer and
 prints Claude Code's hook output. The session is `--session` when given, else THIMBLE_SESSION, and thimble's home
 `--home` when given, else THIMBLE_HOME, else ~/.thimble. Standard library only, run with `python -S`. Anything
@@ -22,11 +23,14 @@ unexpected prints nothing: a request is then denied, a refusal stays refused, an
 """
 from __future__ import annotations
 
-import importlib.util
+import hashlib
+import hmac
 import json
 import os
+import secrets
 import sys
 import urllib.parse
+import urllib.request
 from pathlib import Path
 
 REQUEST, DENIED, PRE = "PermissionRequest", "PermissionDenied", "PreToolUse"
@@ -35,14 +39,39 @@ TIMEOUT = 86_400  # the hook's own timeout in the session's settings for a reque
 PRE_TIMEOUT = 10  # its timeout before each call, which the server answers at once (agent_session.permission_hooks)
 
 
-def post(path: str, body: dict, timeout: float, home: str) -> object:
-    """call_ref.post, loaded from the file beside this one, since the hook runs as a script outside the app package."""
-    spec = importlib.util.spec_from_file_location("thimble_call_ref", Path(__file__).with_name("call_ref.py"))
-    if spec is None or spec.loader is None:
-        raise OSError("call_ref.py is missing")
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod.post(path, body, timeout, home)
+def sign(token: str, role: str, nonce: str) -> str:
+    """app/hook_auth.py's sign: the proof `role` gives for `nonce`."""
+    return hmac.new(token.encode("utf-8"), f"{role}:{nonce}".encode("utf-8"), hashlib.sha256).hexdigest()
+
+
+def server(home: str = "") -> tuple[str, str] | None:
+    """(the server's address, its token) from server.json in `home`, else THIMBLE_HOME, else ~/.thimble; None without
+    the file, an address or a token."""
+    folder = Path(home or os.environ.get("THIMBLE_HOME") or Path.home() / ".thimble").expanduser()
+    try:
+        data = json.loads((folder / "server.json").read_text("utf-8"))
+        url = str(data["api"]).rstrip("/") if data.get("api") else f"http://127.0.0.1:{int(data['port'])}"
+        token = data.get("token")
+    except (OSError, ValueError, TypeError, KeyError, AttributeError):
+        return None
+    return (url, token) if isinstance(token, str) and token else None
+
+
+def post(path: str, body: dict, timeout: float, home: str = "") -> object:
+    """The server's JSON answer to `body` posted to `path`; OSError when there is no server to ask or the answer does not
+    carry the server's proof."""
+    found = server(home)
+    if found is None:
+        raise OSError("no server.json with an address and a token")
+    url, token = found
+    nonce = secrets.token_hex(16)
+    headers = {"Content-Type": "application/json", "X-Thimble-Nonce": nonce, "X-Thimble-Auth": sign(token, "hook", nonce)}
+    req = urllib.request.Request(url + path, data=json.dumps(body).encode("utf-8"), method="POST", headers=headers)
+    with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310 — loopback, thimble's own server
+        raw, proof = resp.read(), resp.headers.get("X-Thimble-Proof") or ""
+    if not hmac.compare_digest(proof, sign(token, "server", nonce)):
+        raise OSError("the answer does not carry thimble's proof")
+    return json.loads(raw.decode("utf-8") or "{}")
 
 
 def decision(answer: object, event: str = REQUEST) -> dict | None:

@@ -650,11 +650,11 @@ async def test_a_claim_that_matches_no_file_is_listed_as_missing(ws, inproc, bou
     assert rep["ok"] and any("logs/*.log" in n for n in rep["notes"]), views.gate_lines(rep)
 
 
-async def test_the_review_reads_one_picture_asks_for_more_and_sends_its_problems_for_a_revision(ws, bound, monkeypatch):
-    """The review starts from one picture of the view as it opens; the reading may ask for other states, which are shot
-    and read once more with the first, and that reading's problems go to a revision. The view revised, it is reviewed
-    again from one picture, and a reading with no problems ends it."""
-    from app import card_check, model, view_review  # noqa: PLC0415
+async def test_the_review_s_pictures_take_each_state_in_its_pane_with_its_label_and_its_clicks(ws, bound, monkeypatch):
+    """view_pictures (view_review.pictures): a round's first call takes the overview, then the states the reviewer asks
+    for, each in its pane, with the test label on or filtered to, and the controls it names clicked; a `control` that
+    names none is left out. Each picture's line says what it shows and why it was asked for."""
+    from app import view_review  # noqa: PLC0415
 
     monkeypatch.setattr(views, "_queue", lambda c, slug: None)
     views.propose(CORPUS, "Threads", "The posts by thread.", ["board.jsonl"], "Unit: a post", asked=True)
@@ -672,118 +672,64 @@ async def test_the_review_reads_one_picture_asks_for_more_and_sends_its_problems
         return [{"ok": True, "errors": [], "fonts": True, "png": str(st["out"]), "answers": [[{"ref": "board.jsonl#L1"}]]}
                 for st in states]
 
-    answers = [{"problems": ["picture 1: the list is cut off"],
-                "more": [{"state": "filtered", "why": "the filter"}, {"state": "control", "controls": ["Day"], "why": "days"},
-                         {"state": "control", "why": "names no control"}]},
-               {"problems": ["picture 2: the filter keeps every post"]},
-               {"problems": [], "more": []}]
-    readings: list[tuple[int, bool, str]] = []
-
-    async def reading(c, system, user, tool, images, effort):
-        readings.append((len(images), "more" in tool.input_schema["properties"], user))
-        return model.CallResult(status="ok", output=answers[len(readings) - 1])
-
-    revisions: list[list[str]] = []
-
-    async def revise(c, slug, prop, problems, shots):
-        revisions.append(problems)
-        return True, "fixed"
-
     monkeypatch.setattr(views, "shoot_states", shoot_states)
-    monkeypatch.setattr(view_review, "_call", reading)
-    monkeypatch.setattr(view_review, "revise", revise)
-    monkeypatch.setattr(card_check, "fit_image", lambda b: b)
-    await view_review._review(view_review._Run(CORPUS, "threads"))
-    assert taken == [["plain"], ["filtered", "plain"], ["plain"]]
-    assert asked[:3] == [(views.PANE_SIZE, None), (views.PANE_NARROW, None), (views.PANE_SIZE, ["Day"])]
-    assert [(n, more) for n, more, _ in readings] == [(1, True), (3, False), (1, True)]
-    assert "3: the overview after clicking nothing" in readings[1][2], "the stub clicked nothing"
-    assert f"2: the overview filtered to the test label, {views.PANE_NARROW[0]} px wide (asked for: the filter)" in readings[1][2]
-    assert revisions == [["picture 2: the filter keeps every post"]]
-    review = views.read_proposal(CORPUS, "threads")["review"]
-    assert review["state"] == "done" and review["revised"] == revisions[0] and review["shots"] == 4 and not review["left"]
+    monkeypatch.setattr(view_review.headless, "missing", lambda what: False)
+    more = [{"state": "filtered", "why": "the filter"}, {"state": "control", "controls": ["Day"], "why": "days"},
+            {"state": "control", "why": "names no control"}]
+    paths, records, reading = await view_review.pictures(CORPUS, "threads", "a1", more)
+    assert reading == "", "no extension's program replaces the view-review task"
+    assert taken == [["plain", "filtered", "plain"]]
+    assert asked == [(views.PANE_SIZE, None), (views.PANE_NARROW, None), (views.PANE_SIZE, ["Day"])]
+    assert f"the overview filtered to the test label, {views.PANE_NARROW[0]} px wide, asked for: the filter" in paths
+    assert "the overview after clicking nothing" in paths, "the stub clicked nothing"
+    assert "board.jsonl#L1" in records
+    assert views.read_proposal(CORPUS, "threads")["review"]["shots"] == 3
 
 
-async def test_the_review_reads_again_for_as_long_as_the_api_stays_at_capacity(ws, bound, monkeypatch):
-    """A reading the API keeps refusing at capacity waits and reads again, with the waits doubling up to a cap, so a
-    long streak of 429s or 529s never ends the review."""
-    from app import card_check, model, view_review
+async def test_a_program_that_replaces_the_view_review_task_reads_the_reviewer_s_pictures(ws, bound, monkeypatch):
+    """An extension's program that replaces the view-review task gets each view_pictures call's pictures as the task's
+    input (docs/agents.md), and the reviewer gets the problems it found to fix; a program that fails ends the review
+    failed with why, and the reviewer is told to end."""
+    import types  # noqa: PLC0415
 
-    views.propose(CORPUS, "Threads", "The posts by thread.", ["board.jsonl"], "Unit: a post", asked=True)
-    views.mark_built(CORPUS, "threads")
-
-    async def shoot_states(c, slug, states, **k):
-        for st in states:
-            Path(st["out"]).parent.mkdir(parents=True, exist_ok=True)
-            Path(st["out"]).write_bytes(b"png")
-        return [{"ok": True, "errors": [], "fonts": True, "png": str(st["out"])} for st in states]
-
-    readings: list[int] = []
-
-    async def reading(c, system, user, tool, images, effort):
-        readings.append(1)
-        if len(readings) <= 7:
-            return model.CallResult(status="rate_limited" if len(readings) % 2 else "error", detail="529 overloaded_error")
-        return model.CallResult(status="ok", output={"problems": [], "more": []})
-
-    slept: list[float] = []
-
-    async def sleep(s):
-        slept.append(s)
-        await asyncio.sleep(0.05)
-
-    monkeypatch.setattr(views, "shoot_states", shoot_states)
-    monkeypatch.setattr(view_review, "_call", reading)
-    monkeypatch.setattr(view_review, "_capacity_sleep", sleep)
-    monkeypatch.setattr(card_check, "fit_image", lambda b: b)
-    await view_review._guarded(view_review._Run(CORPUS, "threads"))
-    assert slept == [30.0, 60.0, 120.0, 240.0, 300.0, 300.0, 300.0]
-    review = views.read_proposal(CORPUS, "threads")["review"]
-    assert review["state"] == "done" and not review["left"], review
-
-
-async def test_a_review_runs_until_it_ends_and_the_analyst_s_stop_puts_the_view_back(ws, bound, monkeypatch):
-    """A review has no time limit: a revision that takes long is waited for, and the analyst's Stop ends the review
-    `stopped`, its revision's session stopped and the view back at its last version that passed."""
-    from app import card_check, dev, model, view_review  # noqa: PLC0415
+    from app import model, tasks, view_review  # noqa: PLC0415
 
     monkeypatch.setattr(views, "_queue", lambda c, slug: None)
     views.propose(CORPUS, "Threads", "The posts by thread.", ["board.jsonl"], "Unit: a post", asked=True)
     views.mark_built(CORPUS, "threads")
-    page = views.views_dir(CORPUS) / "threads" / "view.html"
-    built = page.read_text("utf-8")
 
     async def shoot_states(c, slug, states, **k):
         for st in states:
             Path(st["out"]).parent.mkdir(parents=True, exist_ok=True)
             Path(st["out"]).write_bytes(b"png")
-        return [{"ok": True, "errors": [], "fonts": True, "png": str(st["out"])} for st in states]
+        return [{"ok": True, "errors": [], "fonts": True, "png": str(st["out"]), "answers": []} for st in states]
 
-    async def reading(c, system, user, tool, images, effort):
-        return model.CallResult(status="ok", output={"problems": ["the list is cut off"], "more": []})
-
-    revising = asyncio.Event()
-
-    async def revise(c, slug, prop, problems, shots):
-        page.write_text("<p>half a revision</p>", "utf-8")
-        revising.set()
-        await asyncio.Event().wait()
-
-    stopped: list[tuple[str, str]] = []
     monkeypatch.setattr(views, "shoot_states", shoot_states)
-    monkeypatch.setattr(view_review, "_call", reading)
-    monkeypatch.setattr(view_review, "revise", revise)
-    monkeypatch.setattr(dev, "stop_review_session", lambda c, slug: stopped.append((c, slug)))
-    monkeypatch.setattr(card_check, "fit_image", lambda b: b)
-    run = view_review.start(CORPUS, "threads")
-    await asyncio.wait_for(revising.wait(), 5)
-    await asyncio.sleep(0.2)
-    assert view_review.running(CORPUS, "threads") and view_review.revising(CORPUS, "threads")
-    assert view_review.stop(CORPUS, "threads")
-    await asyncio.wait_for(run.task, 5)
+    monkeypatch.setattr(view_review.headless, "missing", lambda what: False)
+    monkeypatch.setattr(tasks, "program", lambda c, task: types.SimpleNamespace(extension="vote") if task == "view-review"
+                        else None)
+    inputs: list[dict] = []
+    answer = model.CallResult(status="ok", output={"problems": ["picture 1: the header covers the first post"]})
+
+    async def call(c, task, inp, schema=None, **k):
+        inputs.append(inp)
+        return answer
+
+    monkeypatch.setattr(tasks, "call", call)
+    paths, _, reading = await view_review.pictures(CORPUS, "threads", "a1", [])
+    [inp] = inputs
+    assert inp["view"]["slug"] == "threads" and inp["ask"] is False
+    assert [p["path"] for p in inp["pictures"]] == [paths.split(" ", 2)[1]]
+    assert "vote's program" in reading and "- picture 1: the header covers the first post" in reading
+    answer = model.CallResult(status="error", detail="it crashed")
+    stopped: list[str] = []
+    from app import view_tools  # noqa: PLC0415
+
+    monkeypatch.setattr(view_tools, "stop_after_grace", lambda c, key, agent_id: stopped.append(agent_id))
+    with pytest.raises(view_review.NoPictures, match="vote's program .* failed: it crashed"):
+        await view_review.pictures(CORPUS, "threads", "a1", [{"state": "narrow", "why": "the width"}])
     review = views.read_proposal(CORPUS, "threads")["review"]
-    assert (review["state"], review["note"]) == ("stopped", view_review.STOPPED_NOTE)
-    assert stopped == [(CORPUS, "threads")] and page.read_text("utf-8") == built
+    assert review["state"] == "failed" and review["finished"] and "it crashed" in review["note"] and stopped == ["a1"]
 
 
 async def test_a_workspace_gets_four_views_from_the_orientation_and_a_deleted_one_stays_deleted(ws, monkeypatch):
@@ -1055,53 +1001,6 @@ async def test_every_worked_example_s_page_loads_headless_at_its_first_place(nam
         assert shown["due"] and shown["drawn"] == shown["due"], "the test label shows on the records a worked example shows"
 
 
-async def test_a_check_run_where_it_cannot_reach_the_server_leaves_its_request_in_the_view_s_folder(ws, monkeypatch):
-    """view_check.py run inside the sandbox reaches neither the server nor server.json: it leaves its request as a file
-    in the view's folder, which the server watches while the session runs, and prints the answer written beside it."""
-    import importlib.util  # noqa: PLC0415
-
-    spec = importlib.util.spec_from_file_location("view_check_t", Path(views.__file__).with_name("view_check.py"))
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    asked: list[tuple] = []
-
-    async def answer(c, slug, locators, picture):
-        asked.append((c, slug, locators, picture))
-        return {"ok": True, "lines": ["page: loaded"], "png": None}
-
-    monkeypatch.setattr(views, "check_answer", answer)
-    monkeypatch.setattr(views, "CHECK_POLL_S", 0.05)
-    monkeypatch.setattr(mod, "POLL_S", 0.05)
-    folder = views.views_dir(CORPUS) / "threads"
-    out = io.StringIO()
-    monkeypatch.setattr(sys, "stdout", out)
-    watch = views.watch_checks(CORPUS, "threads")
-    try:
-        code = await asyncio.to_thread(mod.main, ["--home", str(folder / "nowhere"), "--folder", str(folder),
-                                                  "http://127.0.0.1:9/api/ws/boards/views/threads/check", "board.jsonl#L3",
-                                                  "--picture"])
-    finally:
-        watch.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await watch
-    assert code == 0 and json.loads(out.getvalue())["lines"] == ["page: loaded"]
-    assert asked == [(CORPUS, "threads", ["board.jsonl#L3"], True)]
-    assert not (folder / views.CHECK_DROP).exists(), "the folder goes when the session's watch ends"
-    monkeypatch.setattr(mod, "PICKUP_S", 0.2)
-    code = await asyncio.to_thread(mod.main, ["--folder", str(folder), "http://127.0.0.1:9/api/ws/boards/views/threads/check"])
-    assert code == 1 and not list((folder / views.CHECK_DROP).glob("*.json")), "with no server watching it gives up"
-    elsewhere = folder.parent / "elsewhere"
-    elsewhere.mkdir()
-    (elsewhere / "0123abcd.json").write_text("{}")
-    shutil.rmtree(folder / views.CHECK_DROP, ignore_errors=True)
-    (folder / views.CHECK_DROP).symlink_to(elsewhere)
-    assert views._drop_requests(folder / views.CHECK_DROP) == [], "a drop folder that is a symlink is not read"
-    (folder / views.CHECK_DROP).unlink()
-    (folder / views.CHECK_DROP).mkdir()
-    (folder / views.CHECK_DROP / "4567abcd.json").symlink_to(elsewhere / "0123abcd.json")
-    assert views._drop_requests(folder / views.CHECK_DROP) == [], "nor a request that is a symlink"
-
-
 FIT_HTML = """<!doctype html><html><head><style>body{font:13px sans-serif;margin:8px}</style></head><body>
 <div style="position:relative;height:40px"><span style="position:absolute;left:0;top:0">Overlapping label one</span>
 <span style="position:absolute;left:12px;top:2px">Second label here</span></div>
@@ -1294,6 +1193,25 @@ async def test_a_page_that_changes_labels_by_itself_fails_the_checks_and_a_click
     (problem,) = views.self_label_problems([plain])
     assert "`thimble.setLabel`, `thimble.setFilter`" in problem and "2 label calls by itself" in problem
     assert views.self_label_problems([{**plain, "self_labels": []}]) == []
+
+
+SRC_HTML = """<!doctype html><html><head><script src="lib/marked/marked.min.js"></script></head><body>
+<div data-anchor="board.jsonl#L1">one</div><script>thimble.onOpen(() => {})</script></body></html>"""
+
+
+async def test_a_page_that_loads_a_script_by_its_path_fails_the_checks_as_the_browser_refuses_it(ws, inproc, bound):
+    """Live check L31: a builder put `<script src="lib/marked/marked.min.js">` in the page. The browser resolves the
+    path against thimble's address and the frame's policy refuses it ("which a view may not do"), but the checks' page
+    sat at about:blank, where the path resolved to nothing, so the view passed and could not be shown. The checks' page
+    has an http address too, so the page check fails with the same words."""
+    if why := views.build_problem():
+        if os.environ.get("CI") == "true":
+            pytest.fail(why)
+        pytest.skip(why)
+    views.write_view(CORPUS, "src", reader=THREADS_READER, html=SRC_HTML, **{**VIEW, "name": "Src"})
+    (state,) = await views.shoot_states(CORPUS, "src", [{"open": {}}])
+    assert not state["ok"]
+    assert any("lib/marked/marked.min.js, which a view may not do" in e for e in state["errors"]), state["errors"]
 
 
 # what Playwright's own error says to run, which never reaches a model

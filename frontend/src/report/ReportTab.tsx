@@ -30,7 +30,8 @@ import { LockNote } from './LockNote'
 import { ExportMenu } from './ExportMenu'
 import { docKey, docLabel, labelReadDocument, ownType, rendererOf, reportFilterSets, SLUG, switcherItems } from './model'
 import { WriteAction } from './WriteAction'
-import { failedDetail, failedReport, failedText, useWriteFailures, WRITE_RETRY_NOTE } from './writeFailures'
+import { failedDetail, failedReport, failedText, noteRefusal, useWriteFailures, useWriteRefusals, WRITE_RETRY_NOTE, writingAfter } from './writeFailures'
+import { RefusedCard } from '../chat/Refused'
 import { ApiErrorCard } from '../chat/ApiError'
 import { failureText, loadChunk } from '../lib/chunkRecovery'
 
@@ -76,6 +77,9 @@ export function ReportTab({ ws, active }: { ws: string; active: boolean }) {
   const chats = useChatMetas(ws)
   const { failures, dismiss } = useWriteFailures(ws)
   const failure = failures[slug] ?? null
+  // a writer's start that did not happen: its card under the bar, with the kind's buttons
+  const { refusals, dismiss: dismissRefusal } = useWriteRefusals()
+  const refused = refusals[slug] ?? null
   // the views' module is fetched the first time the tab is shown, and stays mounted after
   const [shown, setShown] = useState(active)
   useEffect(() => {
@@ -199,8 +203,8 @@ export function ReportTab({ ws, active }: { ws: string; active: boolean }) {
         const evSlug = typeof e.slug === 'string' ? e.slug : ''
         if (!evSlug) return
         // a failure's mark on the document and its card come from writeFailures.ts
-        if (e.status === 'generating') setGenerating((g) => ({ ...g, [evSlug]: true }))
-        else if (e.status === 'generated' || e.status === 'failed') setGenerating((g) => ({ ...g, [evSlug]: false }))
+        const writing = writingAfter(e.status)
+        if (writing !== null) setGenerating((g) => ({ ...g, [evSlug]: writing }))
         if (e.status === 'deleted' || e.status === 'created' || e.status === 'renamed') {
           // a type made, renamed or deleted, here or in another tab or by the chat: the bar follows, and a deleted
           // document shown goes back to the report
@@ -289,16 +293,18 @@ export function ReportTab({ ws, active }: { ws: string; active: boolean }) {
   // a document is being written while its write is pending or a writer of it runs (which goes on after its first save)
   const writingOf = (s: string) => !!generating[s] || types?.[s]?.status === 'generating' || chats.some((m) => m.role === 'writer' && m.status === 'running' && writerDoc(m) === s)
   const busy = writingSlug === slug || !!generating[slug] || types?.[slug]?.status === 'generating' || !!writer
-  // the request reaches the session as an event; the stream's `report` events (generating, then generated or failed)
-  // carry the write from there, so the button stays busy while the writer works
+  // Write is a click: the writer starts through thimble's plugin, and the answer says whether it did; the stream's
+  // `report` events (generating, then generated or failed) carry the write from there, so the button stays busy while
+  // the writer works. A start that did not happen shows its card under the bar
   const write = async () => {
     if (busy) return
     const s = slug
     setWritingSlug(s)
     track('ui-click', { target: `ui:report-write`, detail: { slug: s } })
     try {
-      await api.write(ws, s)
-      setGenerating((g) => ({ ...g, [s]: true }))
+      const a = await api.write(ws, s)
+      if (a.agentId || a.program) setGenerating((g) => ({ ...g, [s]: true }))
+      else if (a.kind) noteRefusal(s, { kind: a.kind, reason: a.reason ?? '', request: a.request ?? null, expired: a.expired })
     } catch (e) {
       bus.emit('toast', { text: `Could not ask for the ${s}. ${(e as Error).message}`, kind: 'error' })
     } finally {
@@ -386,6 +392,11 @@ export function ReportTab({ ws, active }: { ws: string; active: boolean }) {
           onWrite={() => void write()}
         />
       </div>
+      {refused && !busy && (
+        <div className="wu-refused" data-refused={slug}>
+          <RefusedCard ws={ws} what={`the ${docLabel(slug, types).toLowerCase()}'s writer`} refusal={refused.refusal} onDismiss={() => dismissRefusal(slug)} onStarted={() => setGenerating((g) => ({ ...g, [slug]: true }))} />
+        </div>
+      )}
       {failure && !busy && (
         <div className="wu-failed" data-failed={slug}>
           <ApiErrorCard
