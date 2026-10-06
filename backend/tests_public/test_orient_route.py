@@ -228,6 +228,66 @@ async def test_a_follow_up_to_an_earlier_version_s_or_session_s_orientation_is_r
         session._live.pop(CORPUS, None)
 
 
+MAIN_SID, EARLIER_SID = "11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222"
+
+
+async def test_an_extension_s_run_now_needs_an_orientation_main_s_session_reaches_and_goes_through_the_module(
+        bridge, models, workspaces_tmp, unmeasured):
+    """Settings offers Run now for an extension's orientation instructions only where a follow-up reaches the
+    orientation (extensions.orientation_ran): one that ran as a subagent of main's own Claude Code session. One of an
+    earlier session, or an earlier version's chat with no agent id, gets no offer. Run now sends the instructions to the
+    orientation's agent through thimble's module (orient_session.send), as the analyst's click."""
+    from app import extensions, session
+
+    assert not extensions.orientation_ran(CORPUS), "no orientation ran here"
+    agent = await _orientation()
+    with subagents.update(CORPUS) as state:
+        sf.registry(state)[agent]["sessions"] = [MAIN_SID]
+    await _ended(agent)
+    try:
+        session._live[CORPUS] = session.Live(CORPUS, EARLIER_SID, "/c", None, None)
+        assert not extensions.orientation_ran(CORPUS), "main is another session than the orientation's"
+        session._live[CORPUS] = session.Live(CORPUS, MAIN_SID, "/c", None, None)
+        assert extensions.orientation_ran(CORPUS)
+        out = await orient_session.send(CORPUS, "Read every tally record.", orient_session.EXTENSION,
+                                        extension="ext-min")
+        assert out["status"] == "sent"
+        [send] = bridge.ops("send")
+        assert send["agent"] == agent and send["text"].endswith("Read every tally record.")
+    finally:
+        session._live.pop(CORPUS, None)
+    chat = orientation.read_run(CORPUS)["chats"]["orient"]
+    agents.update_agent(CORPUS, chat, route=None)
+    assert not extensions.orientation_ran(CORPUS), "an earlier version ran it"
+
+
+def test_the_release_test_s_stand_in_orientation_is_one_a_follow_up_reaches_only_from_its_own_session(workspaces_tmp):
+    """scripts/e2e/release.mjs (ext-orient-offer) plants these two files for an orientation that ran as a subagent of
+    main, and expects Settings' offer for main's session alone."""
+    from app import extensions, session
+
+    ws = config.workspace_dir(CORPUS)
+    agent = "a0e2e5ad1fe0c0de1"
+
+    def plant(sid: str) -> None:
+        (ws / "orient").mkdir(exist_ok=True)
+        (ws / "orient" / "run.json").write_text(json.dumps({"status": "done", "chats": {"orient": "e2e-standin"},
+                                                            "agent_id": agent, "route": "subagent", "session": sid}))
+        (ws / "chats").mkdir(exist_ok=True)
+        (ws / "chats" / "e2e-standin.meta.json").write_text(json.dumps({
+            "id": "e2e-standin", "kind": "agent", "role": "orient", "title": "Orientation", "status": "done",
+            "route": "subagent", "agent_id": agent, "session": sid, "sessions": [sid]}))
+
+    session._live[CORPUS] = session.Live(CORPUS, MAIN_SID, "/c", None, None)
+    try:
+        plant(EARLIER_SID)
+        assert not extensions.orientation_ran(CORPUS)
+        plant(MAIN_SID)
+        assert extensions.orientation_ran(CORPUS)
+    finally:
+        session._live.pop(CORPUS, None)
+
+
 async def test_a_follow_up_in_plan_mode_is_refused(bridge, models, workspaces_tmp, monkeypatch, unmeasured):
     from app import session
 

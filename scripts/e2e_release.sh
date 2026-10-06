@@ -26,10 +26,10 @@
 # start the server and a stand-in for the analyst's Claude Code session (scripts/e2e/standin_session.py: no model runs);
 # walk the UI (scripts/e2e/release.mjs): the first-launch welcome and the tour, the File browser, a transcript, a PDF, the
 # fixture view, Settings > Extensions, then `thimble extension add` of scripts/e2e/fixture-extension switched off and on
-# from the CLI and from Settings. The one model call is a one-turn `claude -p` in <out>/standin-orientation, loading no
-# user settings, plugins or MCP servers, whose transcript stands in for an orientation's when Settings offers to run the
-# extension's orientation instructions; the step removes that transcript after. Every process it started is stopped on
-# exit, and <out>/report.md lists each step.
+# from the CLI and from Settings. No model runs in the walk: when Settings offers to run the extension's orientation
+# instructions, a run record and a chat in the workspace stand in for an orientation that ran as a subagent of main,
+# first of an earlier Claude Code session, then of the stand-in's session (THIMBLE_E2E_SESSION, the id this script gives
+# the stand-in and the walk). Every process it started is stopped on exit, and <out>/report.md lists each step.
 #
 # With THIMBLE_LIVE_CLAUDE=1 two contract checks against Claude Code follow the UI walk, so that a Claude Code update
 # that changes a format thimble reads fails the release; without it each is reported as skipped:
@@ -270,7 +270,9 @@ if (cd "$work" && in_env thimble server up) > "$logs/server-up.log" 2>&1 && grep
 else
   record server fail "thimble server up printed no URL (logs/server-up.log)"; exit 1
 fi
-in_env "$tree/backend/.venv/bin/python" -I "$here/e2e/standin_session.py" "$tree" "$work" > "$logs/standin.log" 2>&1 &
+standin_sid="$(python3 -I -c 'import uuid; print(uuid.uuid4())')"
+in_env THIMBLE_E2E_SESSION="$standin_sid" "$tree/backend/.venv/bin/python" -I "$here/e2e/standin_session.py" "$tree" "$work" \
+  > "$logs/standin.log" 2>&1 &
 standin_pid=$!
 
 # 6. the UI, the extension commands among its steps
@@ -278,7 +280,7 @@ ui=0
 walk=(node "$here/e2e/release.mjs")
 if command -v setsid >/dev/null; then walk=(setsid "${walk[@]}"); fi  # its own process group, so cleanup finds its browser
 (cd "$out" && exec "${envs[@]}" THIMBLE_E2E_TREE="$tree" THIMBLE_E2E_CORPUS="$work" THIMBLE_E2E_WS="$ws" \
-  THIMBLE_E2E_SHOTS="$shots" THIMBLE_E2E_RESULTS="$results" THIMBLE_E2E_FIXTURE="$here/e2e/fixture-extension" \
+  THIMBLE_E2E_SESSION="$standin_sid" THIMBLE_E2E_SHOTS="$shots" THIMBLE_E2E_RESULTS="$results" THIMBLE_E2E_FIXTURE="$here/e2e/fixture-extension" \
   "${walk[@]}") > "$logs/ui.log" 2>&1 &
 walk_pid=$!
 wait "$walk_pid" || ui=$?
