@@ -304,6 +304,10 @@ describe('requests', () => {
     expect(await e.server.answer(e.server.push('spawn', spawnArgs({})))).toEqual({ limit })
     e.onSpawn(() => { throw new Error(`Error: ${limit}`) })
     expect(await e.server.answer(e.server.push('spawn', spawnArgs({})))).toEqual({ limit: `Error: Error: ${limit}` })
+    // $.agent.spawn at CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS of this plugin's spawns throws its own text (2.1.291)
+    const spawns = 'thimble: $.agent.spawn refused: 2 spawns are running at once'
+    e.onSpawn(() => { throw new Error(spawns) })
+    expect(await e.server.answer(e.server.push('spawn', spawnArgs({})))).toEqual({ limit: `Error: ${spawns}` })
     e.onSpawn(() => { throw new Error('something else') })
     expect(await e.server.answer(e.server.push('spawn', spawnArgs({})))).toEqual({ error: 'Error: something else' })
     expect(await e.server.answer(e.server.push('spawn', spawnArgs({}, { role: 'nobody' })))).toMatchObject({ error: expect.stringContaining('nobody') })

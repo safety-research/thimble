@@ -159,6 +159,8 @@ async def test_a_click_start_writes_the_request_then_spawns_through_the_module(b
     ({"deny": "PreToolUse:Agent hook error: An orientation is already running."}, "hook"),
     ({"limit": "Claude Code runs at most 20 concurrent subagents"}, "limit"),
     ({"error": "Cannot spawn: 20 concurrent subagents are running; the limit is 20"}, "limit"),
+    # $.agent.spawn's own text at CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS of the plugin's spawns (2.1.291, live check L19)
+    ({"error": "HooksError: thimble: $.agent.spawn refused: 2 spawns are running at once"}, "limit"),
     ({"error": "something else"}, "error"),
     ("no-module", "no-module"),
 ])

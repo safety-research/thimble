@@ -49,7 +49,10 @@ export const RETRY_MS = 2000 // between hellos while no server accepts one, and 
 export const SESSION_WAIT_MS = 10000 // how long /clear's new session id is waited for
 export const SESSION_TICK_MS = 25
 const QUICK_MS = 1000 // a poll answered sooner than this with nothing is a server that is stopping
-const LIMIT = /concurrent subagent limit/i // Claude Code's text when it runs as many subagents as it allows
+// Claude Code's text when it runs as many subagents as it allows: the Agent tool's, and $.agent.spawn's when as many of
+// this plugin's spawns run as CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS allows ("thimble: $.agent.spawn refused: 2 spawns are
+// running at once", which it throws; live check L19)
+const LIMIT = /concurrent subagent limit|spawns are running at once/i
 const GONE = /is not running|no task found|could not be resumed|no transcript found/i
 const QUEUED = /queued for delivery/i
 const REQUEST_WORD = /[A-Za-z0-9_-]{8,64}/g // a request id on the first line of a typed start's prompt

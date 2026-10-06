@@ -14,7 +14,7 @@ import { refreshProposals } from '../../src/lib/proposals.ts'
 import type { Proposal } from '../../src/lib/types.ts'
 import { staleOf, staleText } from '../../src/report/Checks.tsx'
 import { runLine } from '../../src/report/checkComments.ts'
-import { nextRefusals, useWriteRefusals } from '../../src/report/writeFailures.ts'
+import { nextRefusals, useWriteRefusals, writingAfter } from '../../src/report/writeFailures.ts'
 import { mount, settle, unmountAll } from './mount.tsx'
 
 const P = (slug: string, extra: Partial<Proposal> = {}): Proposal => ({ slug, name: slug, why: '', claims: [], arrangement: '', proposed_by: 'orient', status: 'building', ts: '', chat: `c-${slug}`, ...extra }) as Proposal
@@ -101,6 +101,16 @@ describe("a report check's row", () => {
 })
 
 describe("a writer's start that did not happen", () => {
+  test('ends the Writing state its start began, so the refused card shows (live check L19)', () => {
+    // the server says `generating` as the write begins, then `refused` when the module refuses the start (Claude
+    // Code's concurrency limit): the button must not stay on Writing, which hides the card
+    expect(writingAfter('generating')).toBe(true)
+    expect(writingAfter('refused')).toBe(false)
+    expect(writingAfter('generated')).toBe(false)
+    expect(writingAfter('failed')).toBe(false)
+    expect(writingAfter('edited')).toBeNull()
+  })
+
   test('stays on its document until a later write starts, and makes no toast', async () => {
     const toasts: string[] = []
     const off = bus.on('toast', (t) => void toasts.push(t.text))
