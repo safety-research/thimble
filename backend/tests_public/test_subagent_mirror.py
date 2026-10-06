@@ -698,6 +698,43 @@ async def test_an_orientation_stopped_with_esc_is_recorded_as_one_claude_code_re
     assert subagents.cancelled(CORPUS, AGENT), "main's SendMessage got Claude Code's text"
 
 
+async def test_an_esc_stopped_orientation_s_continuation_is_the_next_run_of_its_thread(bridge, project, monkeypatch):
+    """U2: a message to an orientation stopped with Esc starts a continuation, a new agent in the same thread: the
+    mirror writes its transcript into the stopped run's chat, without its prompt (thimble's, with the stopped run's
+    context) as a message, and its run is run 1, which ends as a follow-up's does."""
+    from app import orientation
+
+    monkeypatch.setattr(orient_session, "measure", lambda c, chat: _no_line())
+    told: list[dict] = []
+    monkeypatch.setattr(subagents, "tell_main", lambda c, kind, payload: told.append(payload))
+    lv, chat, path = await _click_orientation(bridge, project)
+    _write(Path(lv.transcript_path), _notice(AGENT, "killed", summary='Agent "orientation: x" was stopped by user'), END)
+    session.tail_once(lv)
+    assert subagents.cancelled(CORPUS, AGENT)
+    new = "a0000000000000c01"
+    bridge.answers.append({"agentId": new})
+    out = await orient_session.send(CORPUS, "And May?")
+    assert out == {"status": "continued", "chat": chat, "agentId": new}
+    assert orientation.read_run(CORPUS)["run"] == 1 and agents.read_meta(CORPUS, chat)["agent_id"] == new
+    cont = _agent_file(project, new, agentType="thimble:orientation", toolUseId="toolu_plugin_c01")
+    _write(cont, {"type": "user", "message": {"role": "user", "content": "[thimble request req_x]\nThe analyst stopped"}},
+           _assistant({"type": "text", "text": "Taking up the work."}),
+           _assistant(_use("toolu_hbc", "SubagentHandback", {"message": "May looks the same."})))
+    session.tail_once(lv)
+    session.tail_once(lv)
+    recs = agents.read_events(agents.paths(CORPUS, chat)[1])
+    users = [r["text"] for r in recs if r.get("type") == "user"]
+    assert "And May?" in users and not [u for u in users if "The analyst stopped" in u], "no prompt as a message"
+    assert "Taking up the work." in json.dumps(recs), [r.get("type") for r in recs]
+    a = subagents.agent(CORPUS, new)
+    assert (a["status"], a["ended_run"]) == ("done", 1)
+    assert orientation.read_run(CORPUS)["followups"][-1]["status"] == "done" and told[-1]["run"] == 1
+
+
+async def _no_line() -> str:
+    return ""
+
+
 async def test_main_s_plan_mode_reaching_a_running_agent_marks_its_run(bridge, project, ended):
     """Live check L21: Claude Code adds a plan_mode attachment to a running subagent's transcript when main goes into
     plan mode, and the agent follows it; the mirror marks its run and chat so (subagents.saw_plan_mode)."""

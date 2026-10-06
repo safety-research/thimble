@@ -1089,11 +1089,14 @@ def install_views(c: str) -> list[str]:
 
 
 def orientation_ran(c: str) -> bool:
-    """Whether an orientation ran in workspace `c` whose agent a follow-up can continue (orient_session.latest)."""
+    """Whether an orientation ran in workspace `c` that a follow-up can continue (orient_session.latest): its agent, or,
+    for one stopped with Esc, a continuation in its thread."""
     from . import orient_session  # noqa: PLC0415
 
     try:
         orient_session.latest(c)
+    except orient_session.StoppedInTerminal:
+        return True
     except (orient_session.NoOrientation, orient_session.EarlierSession, orient_session.EarlierVersion):
         return False
     return True

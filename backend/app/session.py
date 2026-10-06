@@ -182,6 +182,9 @@ class Sub:
         # tool_use id -> input of an Agent call of this subagent for one of thimble's roles, when it is no agent of
         # thimble's (a thread's fork): its result is watched as main's is (R2, _sub_start_result)
         self.starts: dict[str, dict] = {}
+        # an orientation's continuation (U2): its first prompt is thimble's, holding the stopped run's context, and the
+        # analyst's message shows as the run's own (orient_session.subagent_started), so the prompt is no message
+        self.skip_prompt = False
         self.root: str | None = None  # the agent id of the thimble agent a descendant's chat is a step of
         self.last_text: str | None = None  # the last text it wrote, a turn's answer (agent_answer)
         # Claude Code's error line when the latest reply of its current run is an API error (isApiErrorMessage: a
@@ -1547,6 +1550,7 @@ def _thimble_sub(lv: Live, chat: str, agent_id: str, tool_use_id: str | None, ch
     a = subagents.agent(lv.c, agent_id) or {}
     if a.get("role") in subagents.ROLES:
         sub.thimble = str(a["role"])
+        sub.skip_prompt = bool(a.get("continues"))
         sub.of_main = not a.get("parent")
         up = subagents.agent(lv.c, str(a.get("parent") or "")) or {}
         if sub.thimble == "orientation":
@@ -1590,6 +1594,10 @@ def expect_agent(c: str, agent_id: str, chat: str, chat_role: str) -> None:
         lv.subs.append(sub)
     elif sub.chat != chat:
         sub.chat, sub.rec = chat, agents.Recorder(c, chat)
+        if sub.offset == 0:  # found before its chat: an orientation's continuation goes to the stopped run's (U2)
+            from . import subagents  # noqa: PLC0415
+
+            sub.skip_prompt = bool((subagents.agent(c, agent_id) or {}).get("continues"))
     lv.wake.set()
 
 
@@ -2295,6 +2303,9 @@ def translate_sub(lv: Live, sub: Sub, line: bytes | str) -> int:
             if INTERRUPT_RE.match(prompt.strip()):
                 return 0  # the stop's own line: the chat's end says it was stopped
             sub.api_error = None  # a new run's prompt
+            if sub.skip_prompt:
+                sub.skip_prompt = False
+                return 0
             sub.rec.record("user", text=prompt.strip(), by=TERMINAL)
             return 1
     if rec.get("type") == "user":

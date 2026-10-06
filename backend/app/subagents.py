@@ -600,7 +600,7 @@ async def typed_caller(c: str, call: str | None) -> str | None:
 async def start_job(c: str, role: str, key: str, task: str, values: dict[str, Any], route: str, *,
                     description: str = "", request_id: str | None = None, chat: dict[str, Any] | None = None,
                     work: Path | str | None = None, call: str | None = None, caller_role: str | None = None,
-                    check: bool = True) -> Answer:
+                    check: bool = True, fields: dict[str, Any] | None = None) -> Answer:
     """One start of any role, for the agent of `key`, with the prompt `task` and the run's values. A click or a
     follow-on start writes the pending request, then asks the module to spawn it, and answers what the module did
     (Answer); a typed one records the request and answers the exact Agent call for the start tool's result. Without a
@@ -610,7 +610,8 @@ async def start_job(c: str, role: str, key: str, task: str, values: dict[str, An
     writer's document), `work` its work folder (the scratch folders of its subagents), `call` the start tool's call
     in main (R3), and `caller_role` the role of the agent that makes a typed call itself (the critic's start, made by
     the orientation). A typed start whose tool call a thread's fork or another subagent of main's made keeps that
-    subagent (`caller_agent`, typed_caller): only its Agent call claims the request."""
+    subagent (`caller_agent`, typed_caller): only its Agent call claims the request. `fields` are more fields of the
+    request, such as an orientation's continuation's `continues` (ensure_chat)."""
     if role not in TYPES or role == HELPER:
         raise ValueError(f"no role {role!r}")
     if check and not caller_role:
@@ -623,7 +624,7 @@ async def start_job(c: str, role: str, key: str, task: str, values: dict[str, An
     caller_agent = await typed_caller(c, call) if route == TYPED and not caller_role else None
     rid = new_request(c, "start", key, inp, values, route, role=role, rid=rid, chat=dict(chat or {}),
                       work=str(work) if work else None, call=call, caller_role=caller_role,
-                      **({"caller_agent": caller_agent} if caller_agent else {}))
+                      **({"caller_agent": caller_agent} if caller_agent else {}), **(fields or {}))
     if route == TYPED:
         if work:
             make_work(c, Path(work))
@@ -895,6 +896,9 @@ def ensure_chat(c: str, agent_id: str) -> dict[str, Any] | None:
         if meta is not None:
             return meta
     r = request(c, str(a.get("request") or "")) or {}
+    cont = r.get("continues") if isinstance(r.get("continues"), dict) else {}
+    if cont.get("chat") and agents.meta_or_none(c, str(cont["chat"])) is not None:
+        return _continue_chat(c, agent_id, a, r, t, str(cont["chat"]), int(cont.get("run") or 1))
     fields = dict(r.get("chat") or {})
     title = str(fields.pop("title", "") or t.role)
     parent = str(fields.pop("parent", "") or agents.MAIN_ID)
@@ -917,6 +921,38 @@ def ensure_chat(c: str, agent_id: str) -> dict[str, Any] | None:
         except Exception:  # noqa: BLE001 — the chat is made either way
             log.exception("%s: the %s's start handler failed", c, t.role)
     return meta
+
+
+def _continue_chat(c: str, agent_id: str, a: dict[str, Any], r: dict[str, Any], t: Type, chat: str,
+                   k: int) -> dict[str, Any] | None:
+    """A continuation's agent (U2: an orientation stopped with Esc, which Claude Code resumes no more) takes up the
+    stopped run's chat as its run `k`: the chat names the new agent and runs again, the registry entry carries the chat,
+    the run and `continues`, so the mirror shows its prompt not as a message (session._thimble_sub), and the role's
+    start handler sees run k > 0 with the request."""
+    from . import session  # noqa: PLC0415
+
+    sid = (a.get("sessions") or [""])[-1] or (session.current(c).sid if session.current(c) is not None else "")
+    old = agents.meta_or_none(c, chat) or {}
+    sessions = [*[x for x in old.get("sessions") or [] if x and x != sid], *([sid] if sid else [])]
+    agents.update_agent(c, chat, agent_id=agent_id, agent_type=type_name(t.role), values=a.get("values") or {},
+                        session=sid or old.get("session"), sessions=sessions, request=a.get("request"), run=k,
+                        status="running", ts_end=None, result=None, stopped_by=None, paused=None, plan_mode=None,
+                        started_by=CLICK if a.get("route") in (CLICK, FOLLOW_ON) else TYPED,
+                        tool_use_id=r.get("claimed_by"), **{"continue": None})
+    with update(c) as state:
+        reg = files.registry(state)
+        if isinstance(reg.get(agent_id), dict):
+            reg[agent_id].update(chat=chat, run=k, continues=r.get("continues"))
+        snap = dict(reg.get(agent_id) or {**a, "chat": chat, "run": k})
+    run = _run(c, agent_id, {**snap, "chat": chat, "run": k})
+    with contextlib.suppress(Exception):
+        session.expect_agent(c, agent_id, chat, t.chat_role)
+    if run is not None and t.started:
+        try:
+            _resolve(t.started)(c, run, r)
+        except Exception:  # noqa: BLE001 — the chat runs either way
+            log.exception("%s: the %s's start handler failed for its continuation", c, t.role)
+    return agents.meta_or_none(c, chat)
 
 
 def run_again(c: str, agent_id: str, by: str = "") -> Run | None:

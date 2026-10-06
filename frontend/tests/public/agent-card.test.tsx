@@ -8,7 +8,7 @@ import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { AgentCard } from '../../src/chat/AgentCard.tsx'
 import { ThreadsContext } from '../../src/chat/Notes.tsx'
-import { continueOf, continueText, runValues, stoppedLine, terminalLine, valuesText } from '../../src/chat/subagent.ts'
+import { STOPPED_CONTINUE_LINE, continueOf, continueText, runValues, stoppedLine, terminalLine, valuesText } from '../../src/chat/subagent.ts'
 import type { ChatMeta, ChatRecord } from '../../src/lib/types.ts'
 import { mount, settle, unmountAll } from './mount.tsx'
 
@@ -58,11 +58,13 @@ describe('the words', () => {
     expect(continueText('earlier-version', '')).toBe('This orientation ran in an earlier version of thimble and cannot be continued. Start a new orientation to explore further.')
   })
 
-  test('an orientation stopped with Esc in its agent view, which Claude Code resumes no more (live check L9)', () => {
+  test('an orientation stopped with Esc in its agent view, which Claude Code resumes no more, takes a message that continues it (U2)', () => {
     const stopped = meta({ status: 'stopped', stopped_by: 'user', continue: 'stopped-by-user' })
     expect(stoppedLine(stopped)).toBe('Stopped with Esc in your terminal.')
     expect(continueOf(stopped, 's1')).toBe('stopped-by-user')
-    expect(continueText('stopped-by-user', '')).toBe('This orientation was stopped with Esc in your terminal, and Claude Code does not continue an agent stopped that way. Start a new orientation to explore further.')
+    // no closed text: the composer stays, and its message starts a new run in the thread (no New orientation offer)
+    expect(continueText('stopped-by-user', '')).toBe('')
+    expect(STOPPED_CONTINUE_LINE).toMatch(/Send a message to continue it/)
   })
 })
 
