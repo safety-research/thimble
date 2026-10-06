@@ -101,11 +101,14 @@ export function askedBy(ask: PendingAsk, metas: ReadonlyMap<string, ChatMeta>, l
 }
 
 /** One of thimble's agents run as a subagent of main, as the card names it: the orientation, the writer of a document,
- * a report check. Pure. */
+ * a report check, the builder or the reviewer of a view (its chat titled `view: <name>` or `review: <name>`, live check
+ * L31: "The view: Stored Revisions By Label asks to run a command"). Pure. */
 export function subagentName(m: Pick<ChatMeta, 'role' | 'title' | 'doc'>): string {
   if (m.role === 'orient') return 'The orientation'
   if (m.role === 'writer') return m.doc ? `The writer of the ${m.doc}` : 'The report writer'
   if (m.role === 'check') return m.title ? `The ${m.title} check` : 'A report check'
+  const view = /^(view|review):\s*(.+)$/.exec((m.title ?? '').trim())
+  if (m.role === 'dev' && view) return `The ${view[1] === 'view' ? 'builder' : 'reviewer'} of the view ${view[2]}`
   return m.title ? `The ${m.title}` : "One of thimble's agents"
 }
 

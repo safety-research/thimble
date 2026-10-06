@@ -8,7 +8,7 @@ import { act, useState } from 'react'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { ThreadsContext } from '../../src/chat/Notes.tsx'
 import { ARM_MS, EXPIRED_TITLE, PermissionCard } from '../../src/chat/PermissionCard.tsx'
-import { askWhy, autoModeRefusal, pendingRequests, pluginSteered, type PendingAsk } from '../../src/chat/permissions.ts'
+import { askWhy, autoModeRefusal, pendingRequests, pluginSteered, subagentName, type PendingAsk } from '../../src/chat/permissions.ts'
 import { bus } from '../../src/lib/bus.ts'
 import { newest, STALE } from '../../src/lib/newest.ts'
 import type { ChatMeta, PermissionRequest } from '../../src/lib/types.ts'
@@ -176,6 +176,15 @@ describe("main's requests and those of thimble's agents, its subagents", () => {
     expect(askWhy({ chat: 'main', request: req('t1', { terminal: true, chat: 'o8' }) }, metas)).toBe('The orientation asks in your terminal. Answer it there (↓ to the orientation in the agent tray if it is not shown).')
     expect(askWhy({ chat: 'main', request: req('t2', { terminal: true, chat: 'o9', asked_by: 'data' }) }, metas)).toBe(
       'thimble asks before an agent changes your files, in every permission mode. The orientation asks in your terminal. Answer it there (↓ to the orientation in the agent tray if it is not shown). Claude Code shows it as from the thimble plugin.',
+    )
+  })
+
+  test('a view\'s builder and reviewer are named as such, not by their chat\'s title (live check L31)', () => {
+    expect(subagentName({ role: 'dev', title: 'view: Stored Revisions By Label' })).toBe('The builder of the view Stored Revisions By Label')
+    expect(subagentName({ role: 'dev', title: 'review: Page Revisions' })).toBe('The reviewer of the view Page Revisions')
+    const builder = chat('b9', { role: 'dev', title: 'view: Posts', route: 'subagent', agent_id: 'ag5', started_by: 'click' })
+    expect(askWhy({ chat: 'main', request: req('t5', { terminal: true, chat: 'b9' }) }, new Map([[builder.id, builder]]))).toBe(
+      'The builder of the view Posts asks in your terminal. Answer it there (↓ to the builder of the view Posts in the agent tray if it is not shown). Claude Code shows it as from the thimble plugin.',
     )
   })
 
