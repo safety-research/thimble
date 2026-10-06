@@ -2373,10 +2373,12 @@ async def checks_now(t: dict[str, Any]) -> dict[str, Any] | None:
 
 async def _settle_ticket(run: Run, t: dict[str, Any], agent_id: str, status: str, report: str) -> None:
     """What the end of a ticket's agent means for the ticket, the backstop of finish_ticket:
+    - the analyst stopped it (Stop, Discard): the ticket ends stopped (dismissed for Discard), with Retry;
     - it passed: the worktree is put back to the change that passed, then the after shot, the analyst's Allow on the
-      ticket's card in every mode (APPLY_QUESTION) and the apply of that commit (_apply), as before;
-    - it was stopped: the ticket ends stopped (dismissed for the analyst's Discard), MAIN_ENDED when main's quit stopped
-      it, with Retry;
+      ticket's card in every mode (APPLY_QUESTION) and the apply of that commit (_apply), as before; an agent thimble
+      stopped after its pass (view_tools.FINISH_GRACE_S) passed all the same;
+    - its last attempt failed: the ticket fails with what the checks found;
+    - it was stopped otherwise: the ticket ends stopped, MAIN_ENDED when main's quit stopped it, with Retry;
     - it ended without calling finish_ticket and left a change: the gates run once, and a pass goes on as above;
     - otherwise it failed, with what the checks found, or the agent's last words when it made no change."""
     from . import subagents  # noqa: PLC0415
@@ -2390,6 +2392,13 @@ async def _settle_ticket(run: Run, t: dict[str, Any], agent_id: str, status: str
     try:
         t = _get(tid) or t
         finish = t.get("finish") if isinstance(t.get("finish"), dict) and t["finish"].get("agent") == agent_id else {}
+        if run.stop_reason:
+            st, err = run.stop_reason, run.why
+            return
+        if finish.get("result") == "stop":
+            st, err = "failed", str(finish.get("report") or NO_PASS_LINE)[:ERROR_CHARS]
+            run_log.error(err)
+            return
         if finish.get("result") != "pass":
             if status == "stopped":
                 a = subagents.agent(c, agent_id) or {}

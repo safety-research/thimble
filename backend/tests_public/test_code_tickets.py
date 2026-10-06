@@ -206,9 +206,32 @@ async def test_finish_ticket_counts_its_attempts_and_only_the_ticket_s_agent_may
         sf.registry(state)[other["agentId"]] = {"key": dev.ticket_key(t["id"]), "type": "thimble:check", "role": "check",
                                                 "status": "running", "started": 0}
     assert (await _call("ticket_checks", other["agentId"], t["id"])).is_error
-    subagents.run_ended(CORPUS, agent, "done", "It still fails.", source="handback")
+    subagents.mark_stopped_by(CORPUS, agent, subagents.STOPPED_ANALYST)  # thimble's own stop after its last attempt
+    subagents.run_ended(CORPUS, agent, "stopped", "It still fails.", source="module")
     await _until(lambda: dev._get(t["id"])["status"] == "failed", "the ticket did not fail")
     assert "README says FAIL" in dev._get(t["id"])["error"] and not wt.exists()
+
+
+async def test_an_agent_thimble_stops_after_its_pass_still_passed_and_the_analyst_s_stop_stops_it(ticketing, bridge):
+    """An agent still running after its pass is stopped by thimble (view_tools.FINISH_GRACE_S), and the ticket goes on
+    to the analyst's Allow; the analyst's own Stop after a pass ends the ticket stopped, with nothing applied."""
+    for stop in ("grace", "analyst"):
+        t, agent = await _clicked_ticket()
+        (Path(t["worktree"]) / "README.md").write_text("e\n")
+        assert not (await _call("finish_ticket", agent, t["id"])).is_error
+        if stop == "analyst":
+            assert (await dev.stop_ticket(t["id"], _click()))["ok"]
+        else:
+            await subagents.stop(CORPUS, agent)
+        subagents.run_ended(CORPUS, agent, "stopped", "", source="module")
+        if stop == "grace":
+            q = await _question(t["chat"])
+            assert q["what"] == dev.APPLY_QUESTION
+            assert agent_session.answer(CORPUS, t["chat"], q["id"], False)
+        await _until(lambda: dev._get(t["id"]).get("finished"), "the ticket did not end")
+        rec = dev._get(t["id"])
+        assert rec["status"] == "stopped", rec
+        assert (rec["error"] or "").startswith("the analyst did not allow") if stop == "grace" else rec["error"] is None
 
 
 async def test_an_agent_that_ends_without_finish_ticket_gets_the_gates_once(ticketing):
