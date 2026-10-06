@@ -213,6 +213,33 @@ async def test_message_orientation_gives_the_exact_send_message(bridge, models, 
     assert r["input"] == {"to": agent, "message": "And April?"} and r["route"] == "typed"
 
 
+async def test_the_coverage_line_stays_due_until_a_run_starts_with_it(bridge, models, workspaces_tmp, unmeasured):
+    """Live check T5: main's first SendMessage left the coverage line out, so --agent-check denied it, and the
+    message_orientation call main made again gave no line, since the first call had marked it told. Now each call gives
+    the line until a run starts with it, so no follow-up reaches the orientation without it; the next carries none."""
+    agent = await _orientation()
+    await _ended(agent)
+    line = "Coverage: viewed only events.jsonl · 25% of files · 2% of lines"
+    orientation.record(CORPUS, coverage=line, coverage_told=False)
+    lead = tools.hint("orient-coverage-lead", coverage=line)
+    first = await tools.call(CORPUS, "message_orientation", {"message": "And April?"})
+    assert first.text.endswith(f"SEND TO {agent}\nAnd April?\n\n{lead}")
+    with subagents.update(CORPUS) as state:  # main's SendMessage without the line matches no request
+        assert sf.check_call(state, {"tool_name": "SendMessage", "tool_use_id": "toolu_s1",
+                                     "tool_input": {"to": agent, "message": "And April?"}}) is not None
+    assert not orientation.read_run(CORPUS)["coverage_told"]
+    again = await tools.call(CORPUS, "message_orientation", {"message": "And April?"})
+    assert again.text.endswith(f"SEND TO {agent}\nAnd April?\n\n{lead}"), "the call made again still gives the line"
+    with subagents.update(CORPUS) as state:
+        assert sf.check_call(state, {"tool_name": "SendMessage", "tool_use_id": "toolu_s2",
+                                     "tool_input": {"to": agent, "message": f"And April?\n\n{lead}"}}) is None
+    subagents.run_again(CORPUS, agent, "coordinator")
+    assert orientation.read_run(CORPUS)["coverage_told"] is True, "the run started with the line"
+    subagents.run_ended(CORPUS, agent, "done", "April too.", source="handback")
+    later = await tools.call(CORPUS, "message_orientation", {"message": "And May?"})
+    assert later.text.endswith(f"SEND TO {agent}\nAnd May?")
+
+
 async def test_a_browser_follow_up_goes_through_the_module(bridge, models, workspaces_tmp, analyst, unmeasured):
     agent = await _orientation()
     await _ended(agent)
