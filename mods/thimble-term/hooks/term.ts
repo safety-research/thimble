@@ -1,0 +1,487 @@
+// thimble-term's runtime: what it read last and the moves that read thimble again or change what the panel shows.
+// register.tsx wires these to Claude Code's events and hands each the context of its hook (hooks/ctx.ts); reply.tsx and
+// panel.tsx draw.
+//
+// Nothing here writes the workspace: a read is `thimble state`, a change is `thimble act` (hooks/data.ts).
+import type { ChatNav, ChatNavStep, ChatSignal, TermCard, TermPanel, TermThreadRow } from '../types'
+import { busyWords, cardOfCell } from './cell'
+import type { ThimbleCell, ThimbleLabel } from './cell'
+import type { Ctx, SurfaceGot } from './ctx'
+import { act, changed, readState, signature } from './data'
+import type { Area, Scope, Signature } from './data'
+import { cid, citations } from './lib'
+import type { Citation } from './lib'
+import { agentsOf, cellOf, cellsOf, chatOf, homeOf, labelIdOf, labelOf, resolutionOf, threadRowsOf, uiRecordsOf, verdictOf } from './model'
+import { NAV_EMPTY, backTarget, moved, nextTrail } from './nav'
+import { withSignal } from './signal'
+
+export const P = 'thimble-term'
+/** The one pane thimble-term opens: home, a card, a citation, a thread, a label, a document, the files, an agent. */
+export const PANEL = 'thimble-term'
+
+/** The panel's width: 96 columns, or what leaves main 70 beside it. */
+const PANEL_COLS = 96
+const MAIN_KEEP = 70
+
+type Turn = { id: string; at: string; cards: string[]; row: string }
+
+/** A ui.jsonl record's effect: what register.tsx does with a record a tool wrote for the renderer. */
+export type UiApply = (cx: Ctx, kind: string, args: Record<string, unknown>) => Promise<void>
+
+/** What thimble-term holds while the module runs (a reload starts it over; session.start reads the scope again). */
+export const rt = {
+  sc: null as Scope | null,
+  sig: null as Signature | null,
+  busy: false,
+  again: false,
+  turn: null as Turn | null,
+  // the latest row of main's chat a line can stand under (signal.ts isAnchor)
+  anchor: '',
+  termColumns: 0,
+  // when the cards were last read (`cards --since`)
+  cardsAt: '',
+  // the cards some drawing shows, and the label each label card counts
+  shown: new Set<string>(),
+  labelOf: new Map<string, string>(),
+  // the last ui.jsonl record followed (-1 until the first read, which follows none of the earlier ones)
+  uiN: -1,
+  // where the latest gesture came from: inside the panel or not; the way a press on back or a crumb chose
+  navFrom: null as { panel: boolean; at: number } | null,
+  navTo: null as ChatNav | null,
+  // each Client's gestures handled, by its origin
+  seenGestures: new Map<string, number>(),
+  // the answers each side thread had when last read: a new one while the panel does not show it is news
+  answers: new Map<string, number>(),
+  // the text a paragraph's drag selected last (para.tsx), for "ask about this"
+  selection: '',
+  // citations waiting for their check, by id (a drawing queues them; the session's timer checks them)
+  queue: new Map<string, Citation>(),
+  checking: false,
+}
+
+const iso = (ms: number) => new Date(ms).toISOString()
+
+export function panelColumns(): number {
+  return rt.termColumns ? Math.max(36, Math.min(PANEL_COLS, rt.termColumns - MAIN_KEEP - 1)) : PANEL_COLS
+}
+
+// ------------------------------------------------------------------------------------------------ cards
+
+/** A cell as the drawing holds it. */
+export function termCard(cell: ThimbleCell, label: ThimbleLabel | null, rev: number): TermCard {
+  const { card, error } = cardOfCell(cell, label)
+  return {
+    id: cell.id,
+    data: card,
+    takeaway: String(cell.takeaway ?? ''),
+    busy: busyWords(cell),
+    error,
+    group: String(cell.notebook ?? ''),
+    by: String(cell.created_by ?? ''),
+    kind: String(cell.kind ?? 'code'),
+    label: labelIdOf(cell),
+    code: String(cell.code ?? ''),
+    rev,
+  }
+}
+
+async function putCard(cx: Ctx, cell: ThimbleCell): Promise<void> {
+  const lid = labelIdOf(cell)
+  let label: ThimbleLabel | null = null
+  if (cell.kind === 'label' && lid && rt.sc) {
+    rt.labelOf.set(cell.id, lid)
+    const got = await readState(cx, rt.sc, 'label', [lid])
+    label = got.ok ? labelOf(got.value) : null
+  }
+  const prev = await cx.card(cell.id)
+  const next = termCard(cell, label, (prev?.rev ?? 0) + 1)
+  await cx.setCard(cell.id, next)
+  queueCitations(citations(next.takeaway))
+  if (cell.kind === 'example') queueCitations(((cell.payload?.refs as unknown[]) ?? []).map(r => ({ raw: `[[${String(r)}]]`, ref: String(r), display: null })))
+}
+
+/** Read these cards now (a turn's call named them, or a panel shows one). */
+export async function loadCards(cx: Ctx, ids: readonly string[]): Promise<void> {
+  if (!rt.sc) return
+  for (const id of ids) {
+    rt.shown.add(id)
+    const got = await readState(cx, rt.sc, 'card', [id])
+    const cell = got.ok ? cellOf(got.value) : null
+    if (cell) await putCard(cx, cell)
+  }
+}
+
+/** The cards some drawing shows, read again: those the notebooks changed since the last read, and the label cards
+ *  whose label changed. */
+async function refreshCards(cx: Ctx, labels: boolean): Promise<void> {
+  if (!rt.sc || !rt.shown.size) return
+  const since = rt.cardsAt || iso(0)
+  rt.cardsAt = iso((await cx.now()) - 5000)
+  const got = await readState(cx, rt.sc, 'cards', ['--since', since])
+  const read = new Set<string>()
+  if (got.ok) {
+    for (const cell of cellsOf(got.value)) {
+      if (!rt.shown.has(cell.id)) continue
+      read.add(cell.id)
+      await putCard(cx, cell)
+    }
+  }
+  // a card that waits for its run, runs or is checked is read whole, whatever its stamp says
+  for (const id of rt.shown) if (!read.has(id) && (await cx.card(id))?.busy) await loadCards(cx, [id])
+  if (labels) for (const id of rt.labelOf.keys()) if (rt.shown.has(id)) await loadCards(cx, [id])
+}
+
+// ------------------------------------------------------------------------------------------------ citations
+
+/** Ask for these citations' checks: each is checked once, in a batch the session's timer sends (checkQueued). A
+ *  drawing may call it: it only notes them. */
+export function queueCitations(cs: readonly Citation[]): void {
+  for (const c of cs) {
+    const id = cid(c.raw)
+    if (!rt.queue.has(id)) rt.queue.set(id, c)
+  }
+}
+
+export async function checkQueued(cx: Ctx): Promise<void> {
+  if (rt.checking || !rt.sc || !rt.queue.size) return
+  rt.checking = true
+  try {
+    const todo: Citation[] = []
+    for (const [id, c] of rt.queue) if (!(await cx.verdict(id))) todo.push(c)
+    rt.queue.clear()
+    if (todo.length) await resolveCitations(cx, todo)
+  } finally {
+    rt.checking = false
+  }
+}
+
+/** Check citations against `thimble state resolve` and keep each one's verdict. */
+export async function resolveCitations(cx: Ctx, cs: readonly Citation[]): Promise<void> {
+  if (!rt.sc || !cs.length) return
+  const refs = [...new Set(cs.map(c => c.ref))]
+  const got = await readState(cx, rt.sc, 'resolve', [JSON.stringify(refs)])
+  if (!got.ok) return
+  const at = await cx.now()
+  for (const c of cs) await cx.setVerdict(cid(c.raw), verdictOf(c, resolutionOf(got.value, c.ref), at))
+}
+
+/** The verdicts of the cards' takeaways, checked again (a card ran again, its cell holds new values). */
+async function recheckCards(cx: Ctx, ids: readonly string[]): Promise<void> {
+  const cs: Citation[] = []
+  for (const id of ids) {
+    const card = await cx.card(id)
+    if (card) cs.push(...citations(card.takeaway))
+  }
+  if (cs.length) await resolveCitations(cx, cs)
+}
+
+// ------------------------------------------------------------------------------------------------ what the panel shows
+
+/** A surface the panel reads, under the key the panel names it by. */
+export async function readSurface(cx: Ctx, key: string, surface: string, args: readonly string[] = []): Promise<void> {
+  if (!rt.sc) return
+  const got = await readState(cx, rt.sc, surface, args)
+  await cx.setSurface(key, got.ok ? { ok: true, value: got.value } : { ok: false, error: got.error })
+}
+
+export async function surfaceValue<T = unknown>(cx: Ctx, key: string): Promise<{ ok: true; value: T } | { ok: false; error: string } | undefined> {
+  return (await cx.surface(key)) as SurfaceGot as never
+}
+
+/** The citation a panel names (`ref`, and the value it shows). */
+export function panelCitation(p: TermPanel): Citation | null {
+  if (!p.ref) return null
+  return { raw: p.display === null || p.display === undefined ? `[[${p.ref}]]` : `[[${p.display}|${p.ref}]]`, ref: p.ref, display: p.display ?? null }
+}
+
+/** The surfaces a panel view reads, read again. */
+export async function loadPanel(cx: Ctx, p: TermPanel): Promise<void> {
+  switch (p.view) {
+    case 'home':
+      await readSurface(cx, 'home-full', 'home')
+      await readSurface(cx, 'labels', 'labels')
+      await readSurface(cx, 'docs', 'docs')
+      await readSurface(cx, 'canvas', 'cards', ['--since', iso(0)])
+      await readSurface(cx, 'files', 'files')
+      await refreshThreads(cx)
+      return
+    case 'card':
+      if (p.card) await loadCards(cx, [p.card])
+      return
+    case 'cite': {
+      const c = panelCitation(p)
+      if (c) {
+        await resolveCitations(cx, [c])
+        const v = await cx.verdict(cid(c.raw))
+        if (v?.card) await loadCards(cx, [v.card])
+      }
+      return
+    }
+    case 'label':
+      if (p.label) await readSurface(cx, `label:${p.label}`, 'label', [p.label])
+      return
+    case 'labels':
+      await readSurface(cx, 'labels', 'labels')
+      return
+    case 'docs':
+      await readSurface(cx, 'docs', 'docs')
+      return
+    case 'doc':
+      if (p.slug) {
+        await readSurface(cx, `doc:${p.slug}`, 'doc', [p.slug])
+        const doc = await surfaceValue<{ sections?: { figures?: { cell?: string }[] }[] }>(cx, `doc:${p.slug}`)
+        const ids = doc?.ok ? (doc.value.sections ?? []).flatMap(s => (s.figures ?? []).map(f => String(f.cell ?? '').replace(/^(?:card|cell):/, ''))).filter(Boolean) : []
+        await loadCards(cx, ids)
+      }
+      return
+    case 'files':
+      await readSurface(cx, 'files', 'files')
+      return
+    case 'file':
+      if (p.path) await readSurface(cx, `file:${p.path}:${p.start ?? 1}`, 'files', [p.path, ...(p.start && p.start > 1 ? ['--start', String(p.start)] : [])])
+      return
+    case 'thread':
+    case 'agent':
+      if (p.thread) await readThread(cx, p.thread)
+      if (p.view === 'thread' && p.thread) await markSeen(cx, p.thread)
+      return
+    case 'threads':
+      await refreshThreads(cx)
+      return
+    default:
+  }
+}
+
+/** What a panel's step remembers: its view, what names it, and the panel whole (in `mode`), so back shows it again. */
+export function stepOf(p: TermPanel): ChatNavStep {
+  return {
+    view: p.view,
+    title: p.title,
+    ...(p.thread ? { thread: p.thread } : {}),
+    ...(p.ref ? { open: p.display ? `${p.display}|${p.ref}` : p.ref } : {}),
+    ...(p.card ? { card: p.card } : {}),
+    ...(p.slug || p.label || p.path || p.agent ? { slug: String(p.slug || p.label || (p.path ? `${p.path}:${p.start ?? 1}` : '') || p.agent) } : {}),
+    mode: JSON.stringify(p),
+  }
+}
+
+export function panelOfStep(s: ChatNavStep): TermPanel | null {
+  try {
+    const p = JSON.parse(s.mode ?? '') as TermPanel
+    return p && typeof p.view === 'string' ? p : null
+  } catch {
+    return null
+  }
+}
+
+export async function navOrigin(cx: Ctx, panel: boolean): Promise<void> {
+  rt.navFrom = { panel, at: await cx.now() }
+}
+
+async function inPanel(cx: Ctx): Promise<boolean> {
+  return !!rt.navFrom?.panel && (await cx.now()) - rt.navFrom.at < 5000
+}
+
+/** Show `p` in the panel: its step on the panel's way, its data read, the pane opened with the keys. A pane opened
+ *  from a click on a narrow terminal waits undrawn: the row above the prompt offers it (`pending`). */
+export async function openPanel(cx: Ctx, p: TermPanel): Promise<void> {
+  const step = stepOf(p)
+  let nav = rt.navTo
+  rt.navTo = null
+  if (!nav) {
+    const cur = (await cx.nav()) ?? NAV_EMPTY
+    nav = moved(cur, nextTrail(cur.trail, step, await inPanel(cx)))
+  }
+  rt.navFrom = null
+  await cx.setNav(nav)
+  await cx.setPanel(p)
+  if (p.view !== 'menu') await cx.setMenu(null)
+  void loadPanel(cx, p).then(() => cx.bumpPanel())
+  try {
+    const r = await cx.open({ id: PANEL, title: p.title || 'thimble', focus: true, columns: panelColumns() })
+    await cx.setPending(r.isPlaced ? null : { title: p.title })
+  } catch (err) {
+    cx.log(`thimble-term: could not open the panel: ${String(err).slice(0, 200)}`)
+  }
+}
+
+export async function closePanel(cx: Ctx): Promise<void> {
+  await cx.setPending(null)
+  await cx.close(PANEL).catch(() => undefined)
+  await cx.setPanel(null)
+}
+
+export async function navGo(cx: Ctx, nav: ChatNav): Promise<void> {
+  const s = nav.trail.at(-1)
+  const p = s ? panelOfStep(s) : null
+  if (!p || p.view === 'menu') return
+  rt.navTo = nav
+  await openPanel(cx, p)
+}
+
+export async function navBack(cx: Ctx): Promise<void> {
+  const to = backTarget((await cx.nav()) ?? NAV_EMPTY)
+  if (to) await navGo(cx, to)
+}
+
+export async function openHome(cx: Ctx): Promise<void> {
+  await openPanel(cx, { view: 'home', title: 'Home' })
+}
+
+// ------------------------------------------------------------------------------------------------ threads
+
+/** A thread's chat, read again from where the last read stopped. */
+export async function readThread(cx: Ctx, id: string): Promise<void> {
+  if (!rt.sc || !id) return
+  const prev = await cx.thread(id)
+  const after = prev?.n ?? 0
+  const got = await readState(cx, rt.sc, 'thread', [id, ...(after ? ['--after', String(after)] : [])])
+  if (!got.ok) return
+  const { meta, events } = chatOf(got.value)
+  // the route answers the events past `--after`; one that says how many the chat holds (`total`) and gives them all is
+  // read whole
+  const total = (got.value as { total?: unknown })?.total
+  const whole = !prev || (typeof total === 'number' && events.length === total)
+  const all = whole ? events : [...prev.events, ...events]
+  await cx.setThread(id, { id, meta, events: all.slice(-2000), n: whole ? events.length : after + events.length, rev: (prev?.rev ?? 0) + 1 })
+}
+
+function newsOf(rows: readonly TermThreadRow[]): { n: number; one: string } {
+  const fresh = rows.filter(t => t.unread > 0)
+  return { n: fresh.length, one: fresh.length === 1 ? fresh[0]!.id : '' }
+}
+
+/** The threads list read again: the counts above the prompt, and a row in main's chat for each answer that came in
+ *  while the panel did not show its thread (hooks/signal.ts). */
+export async function refreshThreads(cx: Ctx): Promise<void> {
+  if (!rt.sc) return
+  const got = await readState(cx, rt.sc, 'threads')
+  if (!got.ok) return
+  const rows = threadRowsOf(got.value)
+  const shown = await cx.panel()
+  const first = rt.answers.size === 0
+  for (const t of rows) {
+    const was = rt.answers.get(t.id)
+    rt.answers.set(t.id, t.answers)
+    const showing = shown?.view === 'thread' && shown.thread === t.id
+    if (!first && was !== undefined && t.answers > was && !showing && rt.anchor) {
+      const at = rt.anchor
+      await cx.setThreadRows(at, withSignal(await cx.threadRows(at), { thread: t.id, turn: t.answers }))
+    }
+  }
+  await cx.setThreads(rows)
+  await cx.setNews(newsOf(rows))
+  if (shown?.view === 'thread' && shown.thread && rows.some(t => t.id === shown.thread && t.unread)) await markSeen(cx, shown.thread)
+}
+
+/** The analyst has read a thread's answers: thimble keeps it in the chat's meta (`thimble act seen`). */
+export async function markSeen(cx: Ctx, id: string): Promise<void> {
+  if (!rt.sc) return
+  const rows = await cx.threads()
+  const t = rows.find(r => r.id === id)
+  if (t && !t.unread) return
+  await act(cx, rt.sc, 'seen', { thread: id })
+  if (t) {
+    const next: TermThreadRow[] = rows.map(r => (r.id === id ? { ...r, unread: 0, seen: r.answers } : r))
+    await cx.setThreads(next)
+    await cx.setNews(newsOf(next))
+  }
+}
+
+/** The signal rows a row of main's chat carries. */
+export async function signalsAt(cx: Ctx, row: string): Promise<ChatSignal[]> {
+  return cx.threadRows(row)
+}
+
+/** A new side thread about `anchor` (a ref) or `anchorText` (words on screen), with its first question: main forks
+ *  `thread:<name>` for it, as for the browser's. Its id, or why it was refused. */
+export async function startThread(cx: Ctx, anchor: string | null, anchorText: string, message: string): Promise<{ id: string } | { error: string }> {
+  if (!rt.sc) return { error: 'thimble is not in terminal mode in this session' }
+  const got = await act(cx, rt.sc, 'thread', { anchor, message, ...(anchorText ? { anchor_text: anchorText } : {}) })
+  if (!got.ok) return { error: got.error }
+  const v = got.value as { thread?: unknown; id?: unknown; meta?: { id?: unknown } }
+  const id = String(v.thread ?? v.id ?? v.meta?.id ?? '')
+  if (!id) return { error: 'thimble made no thread' }
+  rt.answers.set(id, 0)
+  await refreshThreads(cx)
+  return { id }
+}
+
+export async function threadMessage(cx: Ctx, thread: string, message: string): Promise<string> {
+  if (!rt.sc) return 'thimble is not in terminal mode in this session'
+  const got = await act(cx, rt.sc, 'thread-message', { thread, message })
+  if (!got.ok) return got.error
+  await readThread(cx, thread)
+  return ''
+}
+
+// ------------------------------------------------------------------------------------------------ the refresh loop
+
+async function refreshAgents(cx: Ctx): Promise<void> {
+  if (!rt.sc) return
+  const got = await readState(cx, rt.sc, 'agents')
+  if (got.ok) await cx.setAgents(agentsOf(got.value))
+}
+
+async function refreshHome(cx: Ctx): Promise<void> {
+  if (!rt.sc) return
+  const got = await readState(cx, rt.sc, 'home')
+  if (got.ok) await cx.setHome(homeOf(got.value, await cx.now()))
+}
+
+/** The ui.jsonl records past the last one followed, handed to `apply` in order. The first read follows none. */
+async function followUi(cx: Ctx, apply: UiApply): Promise<void> {
+  if (!rt.sc) return
+  const got = await readState(cx, rt.sc, 'ui', ['--after', String(Math.max(0, rt.uiN))])
+  if (!got.ok) return
+  const recs = uiRecordsOf(got.value)
+  const first = rt.uiN < 0
+  if (first) rt.uiN = 0
+  for (const r of recs) {
+    if (r.n <= rt.uiN) continue
+    rt.uiN = r.n
+    if (!first) await apply(cx, r.kind, r.args)
+  }
+}
+
+/** The areas a panel view reads. */
+const PANEL_AREAS: Record<string, Area[]> = { home: ['cards', 'labels', 'docs', 'chats'], labels: ['labels'], label: ['labels'], docs: ['docs'], doc: ['docs', 'cards'], card: ['cards', 'labels'], cite: ['cards'], threads: ['chats'] }
+
+/** One pass: what changed in the workspace since the last pass, read again where some drawing shows it. */
+export async function tick(cx: Ctx, ui: UiApply): Promise<void> {
+  if (!rt.sc) return
+  if (rt.busy) {
+    rt.again = true
+    return
+  }
+  rt.busy = true
+  try {
+    do {
+      rt.again = false
+      const sig = await signature(cx, rt.sc)
+      const areas = new Set<Area>(changed(rt.sig, sig))
+      const first = rt.sig === null
+      rt.sig = sig
+      if (!areas.size) break
+      const panel = await cx.panel()
+      if (areas.has('cards') || areas.has('labels')) {
+        const before = [...rt.shown]
+        await refreshCards(cx, areas.has('labels'))
+        if (!first) await recheckCards(cx, before)
+      }
+      if (areas.has('chats') || areas.has('agents')) await refreshAgents(cx)
+      if (areas.has('chats')) {
+        await refreshThreads(cx)
+        if (panel?.thread && (panel.view === 'thread' || panel.view === 'agent')) await readThread(cx, panel.thread)
+      }
+      if (areas.has('ui')) await followUi(cx, ui)
+      if (first || areas.has('cards') || areas.has('labels') || areas.has('docs') || areas.has('chats')) await refreshHome(cx)
+      if (panel && !first) {
+        if ((PANEL_AREAS[panel.view] ?? []).some(a => areas.has(a))) await loadPanel(cx, panel)
+        await cx.bumpPanel()
+      }
+    } while (rt.again)
+  } finally {
+    rt.busy = false
+  }
+}
