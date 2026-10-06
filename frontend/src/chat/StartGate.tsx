@@ -119,6 +119,8 @@ export const PLAN_MODE_LINE = 'Your session is in plan mode, where the orientati
 export function noModuleFix(reason: string): string {
   const r = reason.toLowerCase()
   if (r.includes('thimble_no_module')) return 'Unset THIMBLE_NO_MODULE'
+  if (r.includes('your --settings')) return 'Leave disableAllHooks out of the --settings you give `thimble`'
+  if (r.includes('your claude code settings')) return 'Turn disableAllHooks off in your Claude Code settings'
   if (r.includes('managed settings') || r.includes('disableallhooks') || r.includes('allowmanagedhooksonly')) return "Ask whoever manages your Claude Code settings to allow plugins' hooks modules"
   if (r.includes('trust')) return 'Trust this folder in Claude Code'
   return 'Run `thimble doctor` to see why'

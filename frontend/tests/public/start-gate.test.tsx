@@ -130,6 +130,9 @@ describe('its rules', () => {
     expect(startBlocked({ module: true })).toBeNull()
     expect(startBlocked({})).toBeNull()
     expect(noModuleLine('your organization\'s managed settings set disableAllHooks')).toContain("Ask whoever manages your Claude Code settings")
+    // live check L29: the launcher's own --settings, or the analyst's settings files, are the analyst's to change
+    expect(noModuleLine('your --settings set disableAllHooks')).toContain('Leave disableAllHooks out of the --settings you give `thimble`')
+    expect(noModuleLine('your Claude Code settings set disableAllHooks')).toContain('Turn disableAllHooks off in your Claude Code settings')
     expect(noModuleLine('')).toContain("Claude Code did not load thimble's hooks module")
   })
 })
