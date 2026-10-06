@@ -698,3 +698,37 @@ async def test_a_background_shell_of_thimble_s_agent_is_stopped_with_it(bridge, 
     await subagents.stop(CORPUS, AGENT)
     [stop] = bridge.ops("stop")
     assert stop["agent"] == AGENT and stop["shells"] == ["b7xk2q9"]
+
+
+CLASSIFIER = ("Permission for this action was denied by the Claude Code auto mode classifier. Reason: [Credential "
+              "Exploration]. If you have other tasks that don't depend on this action, continue working on those. "
+              "IMPORTANT: You *may* attempt to accomplish this action using other tools.")
+
+
+async def test_a_follow_up_auto_mode_refused_is_told_once_with_the_reason_as_given(bridge, project, ended):
+    """Live check L3: main's SendMessage of a typed follow-up was refused by auto mode, and the browser said it was not
+    passed on twice: once from the PermissionDenied hook (R1, "[Credential Exploration]") and once from the call's
+    result (R2), which carries Claude Code's instructions to the model after the reason. The second signal of the same
+    refusal tells nothing more, and the result's reason is the reason alone."""
+    lv, chat, path = await _click_orientation(bridge, project)
+    _write(path, _assistant(_use("toolu_hb", "SubagentHandback", {"message": "done"})))
+    session.tail_once(lv)
+    ans = subagents.message_request(CORPUS, AGENT, "a probe")
+    with subagents.update(CORPUS) as state:  # R1, as the --denied hook records it
+        sf.record_denied(state, {"tool_name": "SendMessage", "tool_use_id": "toolu_p1", "reason": "[Credential Exploration]",
+                                 "tool_input": {"to": AGENT, "message": "a probe"}})
+    subagents._refused(CORPUS, {**subagents.request(CORPUS, ans["request"]), "id": ans["request"]})
+    _write(Path(lv.transcript_path), _human("send it"),
+           _assistant(_use("toolu_p1", "SendMessage", {"to": AGENT, "message": "a probe"})),
+           _result("toolu_p1", CLASSIFIER, error=True), END)
+    session.tail_once(lv)
+    told = [e for e in ended if e[0] == "refused"]
+    assert told == [("refused", "orientation", "auto-mode", "[Credential Exploration]")]
+
+    # R2 alone (no hook signal): the reason without the instructions to the model
+    second = subagents.message_request(CORPUS, AGENT, "another probe")
+    _write(Path(lv.transcript_path), _human("send it"),
+           _assistant(_use("toolu_p2", "SendMessage", {"to": AGENT, "message": "another probe"})),
+           _result("toolu_p2", CLASSIFIER, error=True), END)
+    session.tail_once(lv)
+    assert subagents.request(CORPUS, second["request"])["reason"] == "[Credential Exploration]"

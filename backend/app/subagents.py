@@ -480,14 +480,14 @@ def claim(c: str, tool_use_id: str, input: dict[str, Any], *, tool_name: str = "
 
 def refuse(c: str, rid: str, reason: str, kind: str) -> dict[str, Any] | None:
     """A request ends as a start or message that did not happen: its state `refused`, with the reason and the kind, and
-    its role's refusal handler (Type.refused) tells the run record and the browser. A request that ended already is
-    left alone."""
+    its role's refusal handler (Type.refused) tells the run record and the browser. A request that ended already, or
+    was refused already with the same kind (the other signal of the same refusal), is left alone."""
     with update(c) as state:
         r = files.requests(state).get(rid)
         if not isinstance(r, dict) or r.get("state") in ("started", "done"):
             return None
-        if r.get("state") == "refused" and r.get("refused_kind") == kind and r.get("reason") == reason:
-            return None
+        if r.get("state") == "refused" and r.get("refused_kind") == kind:
+            return None  # the same refusal by its other signal (R1, then R2): told once, in the first's words
         r.update(state="refused", reason=reason, refused_kind=kind, at=files.now())
         rec = {**r, "id": rid}
     log.info("%s: %s request %s (%s) refused, %s: %s", c, rec.get("kind"), rid, rec.get("role"), kind, reason[:200])

@@ -118,6 +118,9 @@ START_TOOLS = ("start_orientation", "start_writing", "message_orientation", "pro
 # R2: what an error result of main's call for one of thimble's agents says, by the kind of refusal it is
 NOT_FOUND_RE = re.compile(r"agent type .{0,80}not found|not found.{0,40}agent type", re.I)
 EARLIER_RE = re.compile(r"could not be resumed|no transcript found", re.I)
+# auto mode's refusal as main's call result carries Claude Code's instructions to the model after the reason; the
+# analyst reads the reason alone, as the PermissionDenied hook gives it (R1)
+AUTO_MODE_RE = re.compile(r"denied by the Claude Code auto mode classifier\.\s*Reason:\s*(.+?)\.(?:\s|$)")
 HANDBACK_LEAD = "[Subagent hand-back]"  # how Claude Code's frame around a subagent's last report opens
 ASYNC_RESULT_RE = re.compile(r"^\s*Async agent launched")
 AGENT_ID_RE = re.compile(r"agentId:\s*([A-Za-z0-9_-]+)")
@@ -1473,7 +1476,9 @@ def _thimble_result(lv: Live, tool_use_id: str, call: dict, content: Any, is_err
             subagents.refuse(lv.c, rid, reason, subagents.EARLIER if EARLIER_RE.search(reason) else subagents.ERROR)
         return
     if is_error:
-        subagents.refuse(lv.c, rid, text.strip(), _refused_kind(text))
+        kind = _refused_kind(text)
+        m = AUTO_MODE_RE.search(text) if kind == subagents.AUTO_MODE else None
+        subagents.refuse(lv.c, rid, m.group(1).strip() if m else text.strip(), kind)
 
 
 def _refused_kind(text: str) -> str:
