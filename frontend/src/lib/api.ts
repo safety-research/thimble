@@ -545,7 +545,7 @@ export const labelApi = {
   /** `POST /concepts/{id}/labels`: the analyst's verdict on one unit. */
   verdict: (c: string, id: string, ref: string, label: string, note?: string) =>
     j<VerdictResult>(`${ws(c)}/concepts/${enc(id)}/labels`, { method: 'POST', body: JSON.stringify({ ref, label, note }) }),
-  /** `POST /concepts/{id}/apply`: start a run (202 with the run record); `examples` carries the verdicts as few-shot examples. */
+  /** `POST /concepts/{id}/apply`: start a run (202 with the run record); a prompt label's carries the analyst's values as examples. */
   apply: (c: string, id: string, body: ApplyBody) => j<ConceptRun>(`${ws(c)}/concepts/${enc(id)}/apply`, { method: 'POST', body: JSON.stringify(body) }),
 }
 

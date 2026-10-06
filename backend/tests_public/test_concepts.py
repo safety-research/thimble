@@ -493,3 +493,84 @@ async def test_the_server_s_shutdown_ends_the_label_scan_pool_s_workers():
         except ProcessLookupError:
             continue
         raise AssertionError(f"the pool's worker {pid} still runs")
+
+
+async def test_every_prompt_run_learns_from_the_analysts_values_and_agreement_leaves_those_out(api, fake_classify):
+    """A prompt label's run always carries the analyst's latest values as examples, with no switch to ask for it, and
+    "% agreed" counts only the values the classifier was not given as examples: a value it was shown is no test of it.
+    The calibration says how many it left out."""
+    k = await _create(api, description="a board post that claims a PR")
+    base = f"/api/ws/{CORPUS}/concepts/{k['id']}"
+    s = (await api.post(f"{base}/apply", json={"wait": True, "paths": ["board.jsonl"]})).json()
+    assert s["status"] == "done" and s["examples"] == 0 and fake_classify.calls[-1]["concept"]["examples"] == []
+    model = {r["ref"]: r["label"] for r in (await api.get(f"{base}/labels", params={"path": "board.jsonl"})).json()["rows"]}
+    flip = {"yes": "no", "no": "yes"}
+    ordered = sorted(model)
+    judged = {ordered[0]: flip[model[ordered[0]]], ordered[1]: flip[model[ordered[1]]], ordered[2]: model[ordered[2]]}
+    for ref, value in judged.items():
+        cal = (await api.post(f"{base}/labels", json={"ref": ref, "label": value})).json()["calibration"]
+    assert (cal["n"], cal["agreed"], cal["taught"]) == (3, 1, 0), cal
+
+    # the next run carries those values as examples, though nothing asked for them, and they leave the agreement
+    s = (await api.post(f"{base}/apply", json={"wait": True, "paths": ["board.jsonl"]})).json()
+    shown = {ex["ref"]: ex["value"] for ex in fake_classify.calls[-1]["concept"]["examples"]}
+    assert shown == judged and s["examples"] == 3
+    assert (s["calibration"]["n"], s["calibration"]["taught"]) == (0, 3) and s["calibration"]["est_precision"]["no"] is None
+    card = (await api.get(base)).json()
+    assert card["est_precision"] is None and card["calibration"]["taught"] == 3 and "taught" not in card
+
+    # a value set after that run was no example of it, so it counts
+    cal = (await api.post(f"{base}/labels", json={"ref": ordered[3], "label": model[ordered[3]]})).json()["calibration"]
+    assert (cal["n"], cal["agreed"], cal["taught"]) == (1, 1, 3), cal
+    assert (await api.get(base)).json()["est_precision"] == 1.0
+    excerpt = refs.resolve(MINI, f"concept:{k['id']}")["excerpt"]  # what an agent reads of the label
+    assert "not counting the 3 it was given as examples" in excerpt, excerpt
+
+
+def test_a_value_counts_again_once_a_run_writes_its_row_without_it_as_an_example():
+    """held_out and taught_after: a ref is left out while its classifier row is the one a run wrote with it among the
+    examples; a later run that writes the row again without it makes it count."""
+    rows = [("a.jsonl#L1", "yes", "yes", "t2"), ("a.jsonl#L2", "no", "yes", "t2"), ("a.jsonl#L3", "yes", "yes", None)]
+    assert concepts.held_out(rows, {"a.jsonl#L1": "t2", "a.jsonl#L2": "t1"}) == ([("no", "yes"), ("yes", "yes")], 1)
+
+    class Store:
+        def __init__(self, ts):
+            self.ts = ts
+
+        def model_ts(self, refs_):
+            return {r: self.ts[r] for r in refs_ if r in self.ts}
+
+    before = {"a.jsonl#L1": "2026-10-06T04:00:00+00:00", "a.jsonl#L2": "2026-10-06T04:00:00+00:00"}
+    st = Store({"a.jsonl#L1": "2026-10-06T04:00:00+00:00", "a.jsonl#L2": "2026-10-06T05:00:01+00:00",
+                "a.jsonl#L3": "2026-10-06T05:00:02+00:00", "a.jsonl#L4": "2026-10-06T03:00:00+00:00"})
+    after = concepts.taught_after(st, ["a.jsonl#L3", "a.jsonl#L4"], "2026-10-06T05:00:00+00:00", before)
+    # L1 was not written again; L2 was, without it as an example; L3 was an example the run labeled; L4 one it did not
+    assert after == {"a.jsonl#L1": "2026-10-06T04:00:00+00:00", "a.jsonl#L3": "2026-10-06T05:00:02+00:00"}
+
+
+async def test_a_run_that_fails_after_labeling_its_examples_still_leaves_them_out(api, fake_classify, monkeypatch):
+    """A prompt run stores its examples when it starts (`teaching`), so the agreement leaves out the values whose rows it
+    wrote also when it fails before its end; the next run that ends folds them in."""
+    monkeypatch.setattr(concepts, "BATCH_ITEMS", 3)
+    monkeypatch.setattr(concepts, "CONCURRENCY", 1)
+    k = await _create(api, description="a board post that claims a PR")
+    base = f"/api/ws/{CORPUS}/concepts/{k['id']}"
+    await api.post(f"{base}/apply", json={"wait": True, "paths": ["board.jsonl"]})
+    model = {r["ref"]: r["label"] for r in (await api.get(f"{base}/labels", params={"path": "board.jsonl"})).json()["rows"]}
+    first = [f"board.jsonl#L{i}" for i in (1, 2, 3)]  # the first call's records
+    for ref in first:
+        await api.post(f"{base}/labels", json={"ref": ref, "label": model[ref]})
+
+    def broken(_items):
+        raise RuntimeError("the classifier broke")
+
+    fake_classify.plan = [lambda items: _ok(FakeClassify.rule(items)), broken]
+    r = await api.post(f"{base}/apply", json={"wait": True, "paths": ["board.jsonl"]})
+    assert r.status_code >= 400 or r.json().get("status") == "error", r.text
+    assert sorted(ex["ref"] for ex in fake_classify.calls[-2]["concept"]["examples"]) == first
+    # a value on a record the failed run never reached counts; the three it labeled with them as examples do not
+    cal = (await api.post(f"{base}/labels", json={"ref": "board.jsonl#L6", "label": model["board.jsonl#L6"]})).json()["calibration"]
+    assert (cal["n"], cal["taught"]) == (1, 3), cal
+
+    s = (await api.post(f"{base}/apply", json={"wait": True, "paths": ["board.jsonl"]})).json()
+    assert s["status"] == "done" and s["examples"] == 4 and (s["calibration"]["n"], s["calibration"]["taught"]) == (0, 4)

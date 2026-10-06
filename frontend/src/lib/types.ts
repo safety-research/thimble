@@ -1392,7 +1392,7 @@ export interface ConceptApplication {
   message?: string | null
   created_by?: string
   version?: number
-  /** the few-shot examples the run carried (prompt kind, `examples: true`) */
+  /** how many of the analyst's values the run carried as examples (every prompt run carries them) */
   examples?: number
   /** the units the run gave the first value (may be absent) */
   matches?: number
@@ -1422,7 +1422,8 @@ export interface ConceptRun {
 export interface ConceptDetail extends Concept {
   n_reviewed?: number
   est_precision?: number | null
-  calibration?: { n: number; agreed: number; disagreed: number; est_precision: Record<string, number | null> }
+  /** the agreement with the analyst's values the classifier was not given as examples; `taught`, how many it was */
+  calibration?: { n: number; agreed: number; disagreed: number; est_precision: Record<string, number | null>; taught?: number }
   applications?: ConceptApplication[]
   last_run?: ConceptApplication | null
   run?: ConceptRun | null
@@ -1455,15 +1456,13 @@ export interface ApplyBody {
   paths?: string[]
   limit?: number | null
   comment?: boolean
-  /** prompt kind: carry the analyst's verdicts as few-shot examples */
-  examples?: boolean
   wait?: boolean
 }
 
 /** POST /concepts/{id}/labels: the analyst's verdict on one unit. */
 export interface VerdictResult {
   row: LabelRow
-  calibration: { n: number; agreed: number; disagreed: number; est_precision: Record<string, number | null> }
+  calibration: { n: number; agreed: number; disagreed: number; est_precision: Record<string, number | null>; taught?: number }
 }
 
 // --- documents: the Report tab's switcher, the story, the deck and the page (report/) ---

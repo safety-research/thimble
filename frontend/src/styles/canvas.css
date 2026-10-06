@@ -2320,6 +2320,11 @@ audio.bcell-media {
 .canvas-label-menu {
   display: inline-flex;
 }
+/* EXAMPLES' first line: the label's agreement with the values the analyst set that it was not given as examples */
+.canvas-label-agreed {
+  font: var(--type-body-sm);
+  color: var(--text-secondary);
+}
 .canvas-label-rationale {
   padding-left: 10px;
   font: var(--type-body-sm);

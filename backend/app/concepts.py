@@ -141,7 +141,7 @@ SCAN_INFLIGHT_PER_WORKER = 2
 SCAN_STOPPED = "a scan worker stopped; the rows so far are kept, apply again to finish"
 ROWS_LIMIT = 200          # rows the rows route answers by default
 ROWS_MAX = 2_000
-EXAMPLES_MAX = 8          # analyst verdicts a prompt apply carries as few-shot examples
+EXAMPLES_MAX = 8          # the analyst's latest values every prompt run carries as few-shot examples
 EXAMPLE_TEXT_MAX = 600    # chars of an example's text shown to the model
 MATCH_TEXT_MAX = 2000     # chars of a unit's text searched for the words that earned its value (refs.EXCERPT_MAX)
 MATCH_WINDOW = 240        # chars of a unit's text shown around those words (canvas/bodies.tsx LABEL_EXAMPLE_MAX)
@@ -338,7 +338,10 @@ def _normalize(concept_id: str, data: Any) -> dict:
             "agreed": int(cal.get("agreed") or 0),
             "disagreed": int(cal.get("disagreed") or 0),
             "est_precision": cal.get("est_precision") if isinstance(cal.get("est_precision"), dict) else {},
+            "taught": int(cal.get("taught") or 0),
         },
+        "taught": _taught_field(data.get("taught")),
+        "teaching": _teaching_field(data.get("teaching")),
         "created_by": str(data.get("created_by") or "user"),
         "ts": str(data.get("ts") or _now()),
         "version": int(data.get("version") or 1),
@@ -349,6 +352,20 @@ def _normalize(concept_id: str, data: Any) -> dict:
         "label_stats": _label_stats_field(data.get("label_stats")),
         "within": _within_field(data.get("within")) if unit == "record" else None,
     }
+
+
+def _taught_field(v: Any) -> dict[str, str]:
+    """`taught` as stored: {ref: the ts of the classifier row a run wrote while that ref was among its examples}."""
+    return {str(k): str(t) for k, t in v.items() if isinstance(t, str) and t} if isinstance(v, dict) else {}
+
+
+def _teaching_field(v: Any) -> dict | None:
+    """`teaching` as stored: {started, refs} of the prompt run that began with these refs as its examples and has not
+    yet folded them into `taught` at its end (it runs, or failed or was cut off before its end); else None."""
+    if not isinstance(v, dict) or not isinstance(v.get("started"), str) or not v["started"]:
+        return None
+    refs = sorted({str(r) for r in v.get("refs") or [] if isinstance(r, str) and r})
+    return {"started": v["started"], "refs": refs} if refs else None
 
 
 def _within_field(v: Any) -> dict | None:
@@ -852,8 +869,61 @@ def calibration_stats(rows: list[dict], labels: list[str]) -> dict:
     return _calibration_from_pairs(pairs, labels)
 
 
-def _calibration_from_pairs(pairs: list[tuple[str, str]], labels: list[str]) -> dict:
-    """The agreement between the classifier and the analyst over (classifier label, analyst label) pairs."""
+def held_out(rows: Iterable[tuple[str, str, str, str | None]], taught: dict[str, str]) -> tuple[list[tuple[str, str]], int]:
+    """The analyst's values that test the classifier, from (ref, classifier label, analyst label, row ts) rows: the
+    (classifier, analyst) pairs of the refs whose classifier row was not written while the ref was one of the run's
+    examples (`taught`, {ref: that row's ts}), and how many were left out because it was. A value the classifier was
+    shown is no test of it. Pure."""
+    pairs: list[tuple[str, str]] = []
+    left = 0
+    for ref, m_label, a_label, ts in rows:
+        if ts and taught.get(labels_store.canon_ref(ref)) == ts:
+            left += 1
+        else:
+            pairs.append((m_label, a_label))
+    return pairs, left
+
+
+def _calibration(st: labels_store.Store, concept: dict) -> dict:
+    """The concept's agreement with the analyst over the values it was not given as examples (held_out)."""
+    pairs, taught = held_out(st.calibration_rows(), taught_now(st, concept))
+    return _calibration_from_pairs(pairs, concept["labels"], taught)
+
+
+def taught_now(st: labels_store.Store, concept: dict) -> dict[str, str]:
+    """The concept's `taught` as it stands: the stored entries, with the examples of a run that has not reached its end
+    (`teaching`: one that runs, or failed or was cut off) counted from the moment it writes their rows (taught_after)."""
+    taught = concept.get("taught") or {}
+    teaching = concept.get("teaching")
+    return taught_after(st, teaching["refs"], teaching["started"], taught) if teaching else taught
+
+
+def _begin_teaching(ws: Path, concept_id: str, shown: list[str], started: str) -> None:
+    """Blocking (worker thread): at a prompt run's start, store the refs it carries as examples (`teaching`), so the
+    agreement leaves their values out from the moment the run writes their rows, also while it runs and when it fails
+    or is cut off before its end. The examples of an earlier run that never reached its end go into `taught` first."""
+    concept = read_concept(ws, concept_id)
+    if concept is None:
+        return
+    concept["taught"] = taught_now(_store_ready(ws, concept_id), concept)
+    refs = sorted({labels_store.canon_ref(r) for r in shown})
+    concept["teaching"] = {"started": started, "refs": refs} if refs else None
+    write_concept(ws, concept)
+
+
+def taught_after(st: labels_store.Store, shown: list[str], started: str, before: dict[str, str]) -> dict[str, str]:
+    """`taught` after a run that began at `started` with the refs `shown` as its examples: those of them it wrote a
+    classifier row for, with that row's ts, and the refs of `before` whose row no run has written since."""
+    shown_refs = {labels_store.canon_ref(r) for r in shown}
+    now = st.model_ts(shown_refs | set(before))
+    out = {ref: ts for ref, ts in before.items() if now.get(ref) == ts}
+    out.update({ref: now[ref] for ref in shown_refs if ref in now and now[ref] >= started})
+    return out
+
+
+def _calibration_from_pairs(pairs: list[tuple[str, str]], labels: list[str], taught: int = 0) -> dict:
+    """The agreement between the classifier and the analyst over (classifier label, analyst label) pairs; `taught` is
+    how many of the analyst's values were left out because the classifier was given them as examples (held_out)."""
     per: dict[str, list[int]] = {l: [] for l in labels}
     agreed = 0
     n = 0
@@ -863,7 +933,7 @@ def _calibration_from_pairs(pairs: list[tuple[str, str]], labels: list[str]) -> 
         agreed += ok
         per.setdefault(m_label, []).append(ok)
     return {"n": n, "agreed": agreed, "disagreed": n - agreed,
-            "est_precision": {l: (sum(v) / len(v) if v else None) for l, v in per.items()}}
+            "est_precision": {l: (sum(v) / len(v) if v else None) for l, v in per.items()}, "taught": int(taught)}
 
 
 def label_stats(rows: list[dict]) -> dict:
@@ -960,7 +1030,8 @@ def with_stats(ws: Path, concept: dict) -> dict:
     """The concept card: the concept plus n_labeled, n_reviewed, n_marked, counts, est_precision and the live run record."""
     cal = concept["calibration"]
     est = cal["agreed"] / cal["n"] if cal.get("n") else None
-    return {**{k: v for k, v in concept.items() if k != "label_stats"}, **concept_stats(ws, concept), "est_precision": est,
+    return {**{k: v for k, v in concept.items() if k not in ("label_stats", "taught", "teaching")}, **concept_stats(ws, concept),
+            "est_precision": est,
             "run": _runs.get((ws.name, concept["id"]))}
 
 
@@ -1741,8 +1812,9 @@ def render_examples(examples: list[dict]) -> str:
 
 
 def few_shot_examples(ws: Path, concept: dict, corpus_dir: Path | None = None, limit: int = EXAMPLES_MAX) -> list[dict]:
-    """The analyst's latest verdicts on the concept as few-shot examples: [{ref, text, value, note}], at most `limit`,
-    each unit's text from unit_texts (a verdict whose ref no longer resolves is left out). Blocking (worker thread)."""
+    """The analyst's latest values on the concept as few-shot examples, which every prompt run carries: [{ref, text,
+    value, note}], at most `limit`, each unit's text from unit_texts (a value whose ref no longer resolves is left
+    out). Blocking (worker thread)."""
     st = _store_ready(ws, concept["id"], wait=False)
     if st is None:
         return []
@@ -2782,10 +2854,10 @@ def _write_units(units_file: Path, units: Iterable[Unit]) -> None:
 
 
 def _record_application(ws: Path, concept_id: str, app: dict, calibration: dict | None = None,
-                        label_stats: dict | None = None) -> dict | None:
+                        label_stats: dict | None = None, taught: dict[str, str] | None = None) -> dict | None:
     """Append a run summary to the stored concept (re-read: it may have changed meanwhile) and, after a completed
-    run, store the recomputed calibration and the labels file's stats with its key and step its revision, since the
-    run changed its rows (note_change)."""
+    run, store the recomputed calibration, the rows it wrote for its examples (`taught`, which ends its `teaching`) and
+    the labels file's stats with its key and step its revision, since the run changed its rows (note_change)."""
     concept = read_concept(ws, concept_id)
     if concept is None:
         return None
@@ -2794,6 +2866,9 @@ def _record_application(ws: Path, concept_id: str, app: dict, calibration: dict 
     concept["applications"] = (concept["applications"] + [app])[-APPLICATIONS_KEPT:]
     if calibration is not None:
         concept["calibration"] = calibration
+    if taught is not None:
+        concept["taught"] = taught
+        concept["teaching"] = None
     if label_stats is not None:
         concept["label_stats"] = label_stats
     write_concept(ws, concept)
@@ -2821,10 +2896,11 @@ def _patterns(paths: Any) -> list[str]:
 
 
 async def run_apply(c: str, concept_id: str, paths: list[str] | None = None, limit: int | None = None, created_by: str = "user",
-                    *, comment: bool = True, examples: bool = False, run_id: str | None = None, started: str | None = None,
+                    *, comment: bool = True, run_id: str | None = None, started: str | None = None,
                     sources: list[dict] | None = None) -> dict:
     """Apply a concept over its unit's scope, write the label rows and return the run summary. start_apply runs this as a
-    task. One run at a time per concept. With `examples`, a prompt kind carries the analyst's verdicts as few-shot examples.
+    task. One run at a time per concept. A prompt kind always carries the analyst's latest values as few-shot examples
+    (few_shot_examples), and the agreement it reports leaves those values out (held_out).
     Raises HTTPException for a missing concept, a bad regex, no matching files or a fatal error."""
     ws, concept = load_concept(c, concept_id)
     if concept["trial"] and not limit:
@@ -2912,9 +2988,10 @@ async def run_apply(c: str, concept_id: str, paths: list[str] | None = None, lim
                 # lines goes first, so no cover of those lines counts records the file no longer has
                 await asyncio.to_thread(_clear_files, out, [s["path"] for s in sources if s["path"] not in index["files"]
                                                             and not s.get("under") and index["counts"].get(s["path"])])
-            if examples and concept["kind"] == "prompt":
+            if concept["kind"] == "prompt":
                 few = await asyncio.to_thread(few_shot_examples, ws, concept, corpus_dir)
                 concept = {**concept, "examples": few}
+                await asyncio.to_thread(_begin_teaching, ws, concept_id, [str(ex["ref"]) for ex in few], started)
                 _progress(c, concept_id, examples=len(few))
             if concept["kind"] == "regex":
                 # a regex reads a save as what it changed, as a model does, so files that hold saves go record by record
@@ -2967,7 +3044,9 @@ async def run_apply(c: str, concept_id: str, paths: list[str] | None = None, lim
             raise HTTPException(502, f"apply failed: {msg}") from e
         try:
             _progress(c, concept_id, phase="summary", eta_s=None)
-            calibration, stats, file_key = await asyncio.to_thread(_labels_summary, ws, concept_id, concept["labels"])
+            shown = [str(ex["ref"]) for ex in concept.get("examples") or []]
+            calibration, stats, file_key, taught = await asyncio.to_thread(_labels_summary, ws, concept_id, concept["labels"],
+                                                                           shown, started)
             state = _runs.get(key) or {}
             # `matches` (the units this run gave the first value) is kept on the application, so the Files pane's
             # label row can say "468 of 2,392,002 records" after a restart, when the run record is gone.
@@ -2976,7 +3055,7 @@ async def run_apply(c: str, concept_id: str, paths: list[str] | None = None, lim
                    "matches": int(state.get("matches") or 0), "status": "done", "message": message, "created_by": created_by,
                    "version": version, "examples": len(concept.get("examples") or []), "limit": limit, "stopped": cancel.is_set(),
                    "within": within, "within_rev": within_rev}
-            concept = (_record_application(ws, concept_id, app, calibration, _stored_stats(file_key, stats))
+            concept = (_record_application(ws, concept_id, app, calibration, _stored_stats(file_key, stats), taught)
                        or {**concept, "calibration": calibration})
             summary = {**app, "run_id": run_id, "concept": concept_id, "name": concept["name"], "unit": concept["unit"],
                        "kind": concept["kind"], "labels_path": str(out),
@@ -3083,7 +3162,7 @@ def scope_sources(c: str, unit: str, kind: str, patterns: list[str], limit: int 
 
 
 async def start_apply(c: str, concept_id: str, paths: list[str] | None = None, limit: int | None = None, created_by: str = "user",
-                      *, comment: bool = True, examples: bool = False, sources: list[dict] | None = None) -> dict:
+                      *, comment: bool = True, sources: list[dict] | None = None) -> dict:
     """Begin an apply in the background and return its run record at once: 404 no such concept, 400 no matching files, 409 an
     apply of this concept is already running (`detail.run_id` names it). `sources` are the files scope_sources already found."""
     ws, concept = load_concept(c, concept_id)
@@ -3105,7 +3184,7 @@ async def start_apply(c: str, concept_id: str, paths: list[str] | None = None, l
     _cancel_event(c, concept_id).clear()
     record = _run_record(c, concept_id, run_id, started, created_by, patterns, sources)
     task = asyncio.get_running_loop().create_task(
-        run_apply(c, concept_id, patterns, limit, created_by, comment=comment, examples=examples, run_id=run_id, started=started,
+        run_apply(c, concept_id, patterns, limit, created_by, comment=comment, run_id=run_id, started=started,
                   sources=sources),
         name=f"thimble-apply-{concept_id}")
     _tasks[key] = task
@@ -3169,13 +3248,17 @@ async def cancel_workspace(c: str) -> list[str]:
     return out
 
 
-def _labels_summary(ws: Path, concept_id: str, labels: list[str]) -> tuple[dict, dict, tuple[int, int] | None]:
-    """Blocking (worker thread): (calibration, label_stats, the labels file's key) from the store at a run's end."""
+def _labels_summary(ws: Path, concept_id: str, labels: list[str], shown: list[str],
+                    started: str) -> tuple[dict, dict, tuple[int, int] | None, dict[str, str]]:
+    """Blocking (worker thread): (calibration, label_stats, the labels file's key, taught) from the store at the end of
+    a run that began at `started` with the refs `shown` as its examples (taught_after)."""
     p = labels_file(ws, concept_id)
     if _file_key(p) is None:
-        return calibration_stats([], labels), label_stats([]), None
+        return calibration_stats([], labels), label_stats([]), None, {}
     st = _store_ready(ws, concept_id)
-    return _calibration_from_pairs(st.calibration_pairs(), labels), st.stats(), _file_key(p)
+    stored = read_concept(ws, concept_id) or {"taught": {}}
+    taught = taught_after(st, shown, started, taught_now(st, stored))
+    return _calibration(st, {"labels": labels, "taught": taught}), st.stats(), _file_key(p), taught
 
 
 # --------------------------------------------------------------------------- verdicts
@@ -3204,7 +3287,7 @@ def record_verdict(ws: Path, concept: dict, ref: str, label: str, note: str | No
     if st is None:
         write_concept(ws, concept)
         return row, concept
-    concept["calibration"] = _calibration_from_pairs(st.calibration_pairs(), concept["labels"])
+    concept["calibration"] = _calibration(st, concept)
     if stored is not None and before is not None and tuple(stored["key"]) == before:
         stats = {"n_labeled": stored["n_labeled"], "n_reviewed": st.n_reviewed(), "n_marked": st.n_marked(), "counts": dict(stored["counts"])}
     else:
@@ -3554,6 +3637,8 @@ def resolve_concept_ref(corpus: Path | str, ref: str) -> dict:
         return _resolve_value(name, card, cite.decode_label(m[2].strip()), ref)
     cal = card["calibration"]
     est = f"est. precision {card['est_precision']:.0%} on {cal['n']} reviewed" if card["est_precision"] is not None else "uncalibrated"
+    if cal.get("taught"):
+        est += f", not counting the {cal['taught']} it was given as examples"
     counts = ", ".join(f"{k}: {v}" for k, v in sorted(card["counts"].items()))
     excerpt = f"{card['name']} ({card['kind']}, per {card['unit']}): {card['description']}".strip()
     excerpt += f"\n{card['n_labeled']} labeled" + (f" ({counts})" if counts else "") + f"; {est}"
@@ -4083,7 +4168,6 @@ class ApplyBody(BaseModel):
     paths: list[str] = Field(default_factory=list)  # corpus-relative globs or directories (file units)
     limit: int | None = None
     comment: bool = True
-    examples: bool = False  # prompt kind: carry the analyst's verdicts as few-shot examples
     created_by: str = "user"
     wait: bool = False  # true: answer with the summary once the run ends, or the run so far past APPLY_WAIT_S
 
@@ -4241,7 +4325,7 @@ async def apply_route(c: str, concept_id: str, body: ApplyBody, response: Respon
     if concept["unit"] in FILE_UNITS and not paths:
         raise HTTPException(400, "paths is required: corpus-relative globs or a directory (e.g. ['*/board.jsonl'], 'agents'; '*' is the whole dataset)")
     ran_before = bool(concept["applications"])
-    record = await start_apply(c, concept_id, paths, body.limit, body.created_by, comment=body.comment, examples=body.examples)
+    record = await start_apply(c, concept_id, paths, body.limit, body.created_by, comment=body.comment)
     # the browser is the analyst: their label gets its card and main hears of it; a label that ran before without a card
     # keeps having none
     cards = await asyncio.to_thread(_label_cards, ws, concept_id)
