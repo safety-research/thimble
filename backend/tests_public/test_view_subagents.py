@@ -472,6 +472,34 @@ async def test_the_analyst_s_stop_and_main_s_quit_end_a_build_failed_with_retry(
     assert "stopped_by" not in _prop(other), "Retry clears it"
 
 
+async def test_retry_in_a_plain_claude_or_in_plan_mode_is_refused_at_once_and_queues_nothing(board, bridge, gates,
+                                                                                            monkeypatch):
+    """Live check L15: Retry clicked while main was a plain `claude` queued the build under the session launch.json
+    named, where it waited and would have started by itself once that session came back. A Build, Retry or accept click
+    is refused at once as Start is: the proposal stays failed with the refusal, and nothing is queued or spawned."""
+    from app import cc_plugin
+
+    row = {"name": "Posts", "why": "to read the board", "claims": ["board.jsonl"], "arrangement": "one row per post",
+           "proposed_by": "analyst", "status": "failed", "ts": "2026-10-01T00:00:00+00:00", "route": subagents.CLICK}
+    views._save_proposals(CORPUS, [{**row, "slug": "posts"}, {**row, "slug": "viewer", "name": "Viewer",
+                                                               "status": "suggested"}])
+    views._bind_loop()  # as the click routes do
+    monkeypatch.setattr(dev, "VIEW_POOL", 2)
+    monkeypatch.setattr(cc_plugin, "main_fenced", lambda c: False, raising=False)
+    got = views.retry(CORPUS, "posts")
+    assert got["status"] == "failed" and got["refused"]["kind"] == subagents.NOT_LAUNCHED
+    assert views.accept(CORPUS, "viewer")["refused"]["kind"] == subagents.NOT_LAUNCHED
+    assert _prop("viewer")["status"] == "suggested"
+    monkeypatch.setattr(cc_plugin, "main_fenced", lambda c: True, raising=False)
+    monkeypatch.setattr(session, "main_mode", lambda c: "plan")
+    assert views.retry(CORPUS, "posts")["refused"]["kind"] == subagents.HOOK
+    await asyncio.sleep(0.05)
+    assert (CORPUS, "posts") not in dev._view_queue and not bridge.ops("spawn")
+    monkeypatch.setattr(session, "main_mode", lambda c: "auto")
+    assert views.retry(CORPUS, "posts")["status"] == "queued"
+    await _until(lambda: bridge.ops("spawn"), "Retry did not start the build once nothing stood in the way")
+
+
 async def test_a_proposal_an_earlier_version_queued_starts_no_builder_and_waits_for_retry(board, bridge, gates,
                                                                                          monkeypatch):
     """A proposal still queued from before this version (no route) belongs to no click or start of this one: when the
