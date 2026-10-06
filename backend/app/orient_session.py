@@ -4,7 +4,10 @@ session rather than an agent-team teammate because a teammate has no Workflow to
 not applied, and it runs at main's effort.
 
 Start. `start_orientation` takes a brief and three independent output switches: `final_notebook` (the deck, group
-`Orientation`), `propose_views` and `generate_report`. The orientation's thread is what it always leaves.
+`Orientation`), `propose_views` and `generate_report`. The orientation's thread is what it always leaves. Once an
+orientation has ended, the tool starts another only when someone asked for it since (asked_for): a Start that waits,
+or a message of the analyst's in main's chat, typed in the terminal or sent from the browser; an event alone, such as
+the report pass's `write` or a tray entry's `agent`, starts none.
 
 The prompt. prompts/orient.md defines the agent the session runs as (`--agents` for that session alone and `--agent
 thimble-orient`, so main never sees it). Its body is a template system_prompt renders in three parts: a prefix (the
@@ -107,6 +110,7 @@ TERMINAL = "terminal"  # `by` of a message the analyst typed in a tray entry of 
 EXTENSION = "extension"  # `by` of an extension's orientation instructions, sent when it starts running here
 COVERAGE_KIND = "coverage"  # the chip kind of the coverage line at the end of the orientation's thread (_keep_coverage)
 COVERAGE_TIMEOUT_S = 120.0  # the coverage line is given up after this long, so main hears the end without it (measure)
+ASKED_WAIT_S = 2.0  # how long start_orientation waits for main's chat to show the analyst's latest message (asked_for)
 
 
 class NoOrientation(RuntimeError):
@@ -907,10 +911,47 @@ agent_session.on_resume(orientation.ROLE, _resume_left)
 # --------------------------------------------------------------------------- tools and routes
 
 
+def _wrote_since(c: str, since: str) -> bool:
+    """Whether main's chat holds a message of the analyst's, typed in the terminal or sent from the browser's chat, at
+    or after the ISO time `since`."""
+    try:
+        floor = datetime.fromisoformat(since.replace("Z", "+00:00"))
+        _, log_path = agents.paths(c, agents.MAIN_ID)
+        recs = agents.read_events(log_path)
+    except (ValueError, HTTPException, OSError):
+        return True  # a record or a chat that cannot be read refuses no orientation
+    for rec in reversed(recs):
+        if rec.get("type") != "user" or rec.get("by") not in (agents.TERMINAL, agents.BROWSER):
+            continue
+        try:
+            ts = datetime.fromisoformat(str(rec.get("ts") or "").replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        return ts >= floor  # the latest message decides
+    return False
+
+
+async def asked_for(c: str) -> bool:
+    """Whether anyone asked for a new orientation: a Start waits for start_orientation, none has run here yet, or the
+    analyst wrote to main since the latest one ended. Main's chat records a typed message within its follower's tail,
+    so a message not there yet is waited for up to ASKED_WAIT_S."""
+    run = orientation.read_run(c)
+    if not run or run.get("status") in orientation.RUNNING or not run.get("ended"):
+        return True
+    end = asyncio.get_running_loop().time() + ASKED_WAIT_S
+    while True:
+        if await asyncio.to_thread(_wrote_since, c, str(run["ended"])):
+            return True
+        if asyncio.get_running_loop().time() >= end:
+            return False
+        await asyncio.sleep(0.25)
+
+
 async def tool_start_orientation(ctx: Any, args: dict[str, Any]) -> Any:
     """The `start_orientation` tool: start the orientation's session with the brief and the outputs its three switches
     turn on (`final_notebook` and `propose_views` by default, `generate_report` only when asked); a switch left out
-    takes a waiting Start's choice. `analyze_data` is accepted for the deck's switch."""
+    takes a waiting Start's choice. `analyze_data` is accepted for the deck's switch. Refused while one runs, and when
+    nobody asked for a new one since the latest ended (asked_for)."""
     brief = str(args.get("brief") or "")
     # A switch the call leaves out takes the Start's choice while a Start waits for this call, so a call that omits
     # one keeps what the analyst clicked; with no Start waiting it takes the default.
@@ -931,6 +972,8 @@ async def tool_start_orientation(ctx: Any, args: dict[str, Any]) -> Any:
         chosen["critique"] = orientation.flag(args["critique"], orientation.DEFAULT_CRITIQUE)
     if running(ctx.c) or starting(ctx.c) or orientation.active(ctx.c):
         return tools.err(tools.hint("start_orientation-running"))
+    if not await asked_for(ctx.c):
+        return tools.err(tools.hint("start_orientation-unasked"))
     passes = [p for p, on in (("final", final), ("views", views), ("report", report)) if on]
     try:
         await start(ctx.c, brief, passes, call=ctx.tool_use_id, chosen=chosen)

@@ -113,3 +113,34 @@ async def test_a_second_start_orientation_while_one_starts_or_runs_starts_nothin
     third = await tools.call(CORPUS, "start_orientation", {"brief": "again"})
     assert third.is_error and third.text.endswith(tools.hint("start_orientation-running"))
     assert calls == [orient_session.KEY]
+
+
+async def test_once_an_orientation_ended_only_a_start_or_the_analyst_s_message_starts_another(launched, monkeypatch):
+    """After an orientation ended, a start_orientation that no Start and no message of the analyst's asked for, such as
+    one main makes after showing a writer in the agent tray, is refused with one line and starts nothing. A Start that
+    waits, or a message typed in the terminal or sent from the browser's chat since the end, lets it start."""
+    from app import agents
+    from app.ledger import write_json
+
+    monkeypatch.setattr(orient_session, "ASKED_WAIT_S", 0.0)
+    orientation.run_file(CORPUS).parent.mkdir(parents=True, exist_ok=True)
+
+    def ended() -> None:
+        write_json(orientation.run_file(CORPUS), {"status": "done", "passes": ["final", "views", "report"],
+                                                  "started": "2026-10-06T03:30:00+00:00",
+                                                  "ended": "2026-10-06T03:36:15+00:00", "chats": {"orient": "o1"}})
+
+    ended()
+    agents.mirror(CORPUS, "user", by=agents.TERMINAL, text="Start the orientation.", ts="2026-10-06T03:29:00.000+00:00")
+    res = await tools.call(CORPUS, "start_orientation", {})
+    assert res.is_error and res.text.endswith(tools.hint("start_orientation-unasked")), res.text
+    assert "\n" not in tools.hint("start_orientation-unasked") and launched == []
+    orientation.start_requested(CORPUS, {"text": "", "final_notebook": True, "propose_views": True}, {"id": "e2"})
+    assert not (await tools.call(CORPUS, "start_orientation", {})).is_error, "a Start waits"
+    for by in (agents.TERMINAL, agents.BROWSER):
+        ended()
+        agents.mirror(CORPUS, "user", by=by, text="Orient again, on the moderators this time.")
+        assert not (await tools.call(CORPUS, "start_orientation", {"brief": "the moderators"})).is_error, by
+    assert len(launched) == 3
+    orientation.run_file(CORPUS).unlink()
+    assert not (await tools.call(CORPUS, "start_orientation", {})).is_error, "the first orientation of a workspace"

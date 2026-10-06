@@ -916,6 +916,10 @@ When your first run ended, thimble measured how much of the corpus it saw, from 
 
 The orientation has started in its own session, and the browser shows it, so this turn needs no words from you unless it has something else for the analyst. An `orient` event tells you when it ends.
 
+## start_orientation-unasked
+
+No Start and no message from the analyst has asked for an orientation since the last one ended, so this call started none. Start one only when the analyst asks for it, and write nothing about this call.
+
 ## start_orientation-running
 
 An orientation runs already, so this call started none: one orientation runs at a time. The browser shows the one that runs, so write nothing about it, unless the analyst asked for a new orientation in this turn: then tell them in one line that one runs and that they can stop it in its thread first.
