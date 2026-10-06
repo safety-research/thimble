@@ -42,8 +42,16 @@ Ops and their arguments:
 
 The workspace's subagents.json holds, under `module`, the last hello `{session, version, at}`, or the reason the
 module stays idle (`idle`), what it could not register (`problem`), and the session moves rekey learned (`rekeyed`),
-for `doctor`, the browser and a restarted server. It is written under an flock of subagents.json.lock beside it, with an
-atomic replace, keeping every other key.
+and the digest of the roles it fetched last (`served`), for `doctor`, the browser and a restarted server. It is written
+under an flock of subagents.json.lock beside it, with an atomic replace, keeping every other key.
+
+The roles the module registers are rendered from files the analyst may edit by hand: the workspace's settings.json (its
+orientation instructions), thimble's config files and the prompt files an agent's `prompt` names, and thimble's own
+prompt files (roles_stamp). A Settings save and a change of the active extensions ask for a register (push_roles), and
+so does sync_roles whenever the roles rendered now differ from those the module fetched last: before every spawn, since
+a click's agent runs on the registration in force when it starts, and while a long poll is held, every ROLES_CHECK_S
+once a file changed, so that the registration is new before main's next turn, whose own Agent calls ignore a
+registration made during the turn.
 
 The browser reads main's state from main's meta (main_meta, which agents.py's main routes add): whether main runs inside
 thimble's fence, whether the launcher started it, and whether the module is live, with why_not when it is not. Each
@@ -54,6 +62,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import fcntl
+import hashlib
 import json
 import logging
 import os
@@ -81,6 +90,7 @@ POLL_WAIT_S = 25.0  # the server holds a long poll this long
 POLL_TICK_S = 1.0  # how often a held poll looks again whether its session is still main's
 LIVE_GAP_S = 3.0  # a module whose last poll ended this recently still holds it: it polls again at once
 HELLO_HOLD_S = 5.0  # a hello for a session that is not main yet waits this long for a rekey naming it
+ROLES_CHECK_S = 2.0  # how often a held long poll looks whether the files the roles are rendered from changed
 LOCK_WAIT_S = 2.0  # the most a write of subagents.json waits for its lock
 EXPIRED_KEPT = 64  # expired requests remembered for their late answers
 REKEYS_KEPT = 32
@@ -143,6 +153,10 @@ class _Bridge:
     idle: str = ""  # why the last hello was refused
     problem: str = ""  # what the module reported it could not do (a role it could not register)
     shown: bool = False  # live() as main's chat was last notified of it (_show); a page reads it when it opens
+    served: str = ""  # the digest of the roles the module fetched last (roles_route)
+    stamp: tuple = ()  # roles_stamp when the roles were last compared with `served`
+    checked: float = 0.0  # monotonic, when a held poll last looked at roles_stamp (_watch_roles)
+    checking: bool = False
 
 
 _bridges: dict[str, _Bridge] = {}
@@ -244,6 +258,8 @@ def _save(c: str, b: _Bridge) -> None:
         rec["problem"] = b.problem
     if b.rekeyed:
         rec["rekeyed"] = dict(list(b.rekeyed.items())[-REKEYS_KEPT:])
+    if b.served:
+        rec["served"] = b.served
     _record(c, rec)
 
 
@@ -254,9 +270,12 @@ def _bridge(c: str) -> _Bridge:
             b = _bridges.get(c)
             if b is None:
                 b = _Bridge()
-                moved = (registry(c).get("module") or {}).get("rekeyed")
+                rec = registry(c).get("module") or {}
+                moved = rec.get("rekeyed") if isinstance(rec, dict) else None
                 if isinstance(moved, dict):  # what a server before this one learned
                     b.rekeyed.update({str(k): str(v) for k, v in moved.items() if isinstance(v, str)})
+                if isinstance(rec, dict) and isinstance(rec.get("served"), str):  # the roles it served the module
+                    b.served = rec["served"]
                 _bridges[c] = b
     return b
 
@@ -529,6 +548,8 @@ async def request(c: str, op: str, **args: Any) -> Answer:
     _remember_loop()
     if not live(c):
         return {NO_MODULE: why_not(c) or NOT_LOADED}
+    if op == "spawn":
+        await sync_roles(c, force=True)  # module note: registered as the files say now, before the agent starts
     b = _bridge(c)
     req = _enqueue(c, op, _args(op, args), b.session, REQUEST_TIMEOUT_S)
     try:
@@ -584,6 +605,91 @@ def push_roles(c: str) -> None:
     except RuntimeError:
         if _loop is not None and _loop.is_running():
             _loop.call_soon_threadsafe(push)
+
+
+def roles_stamp(c: str) -> tuple:
+    """(path, mtime_ns, size) of each file the roles are rendered from that may change while main runs (module note):
+    the workspace's settings.json, thimble's config files, the prompt files an agent's `prompt` names in them, and the
+    prompt files under thimble's prompts folder; (path, None, None) for one that is missing."""
+    from . import prompts, userconf  # noqa: PLC0415
+
+    paths = [_ws(c) / "settings.json", *userconf.config_files(c)]
+    try:
+        agents = userconf.load_or_defaults(c)[0].get("agents") or {}
+    except Exception:  # noqa: BLE001 — the config's own files are stamped either way
+        agents = {}
+    paths += sorted(Path(str(a["prompt"])) for a in agents.values() if isinstance(a, dict) and a.get("prompt"))
+    with contextlib.suppress(OSError):
+        paths += sorted(prompts._dir().rglob("*.md"))
+    out = []
+    for path in paths:
+        try:
+            st = path.stat()
+            out.append((str(path), st.st_mtime_ns, st.st_size))
+        except OSError:
+            out.append((str(path), None, None))
+    return tuple(out)
+
+
+def _specs(c: str) -> dict[str, dict[str, Any]]:
+    """subagents.roles of workspace `c` as `$.agent.register` takes them, by name (_spec)."""
+    from . import subagents  # noqa: PLC0415
+
+    out: dict[str, dict[str, Any]] = {}
+    for name, role in (subagents.roles(c) or {}).items():
+        spec = _spec(str(name), role)
+        if spec is not None:
+            out[spec["name"]] = spec
+    return out
+
+
+def _digest(specs: dict[str, Any]) -> str:
+    return hashlib.sha256(json.dumps(specs, sort_keys=True, ensure_ascii=False, default=str).encode("utf-8")).hexdigest()
+
+
+async def sync_roles(c: str, force: bool = False) -> bool:
+    """Have the module register the roles again (push_roles) when those rendered now differ from those it fetched last
+    (module note): always compared with `force`, as before a spawn, else only once roles_stamp changed since the last
+    look. Nothing while no server served the module its roles (the record keeps the digest across a restart of the
+    server, _save). True when it asked. Never raises: a roles file that cannot be read leaves the registration as it
+    is."""
+    b = _bridges.get(c)
+    if b is None or not live(c):
+        return False
+    try:
+        stamp = await asyncio.to_thread(roles_stamp, c)
+        if not force and stamp == b.stamp:
+            return False
+        b.stamp = stamp
+        if not b.served:
+            return False
+        digest = _digest(await asyncio.to_thread(_specs, c))
+    except Exception:  # noqa: BLE001
+        log.warning("the roles of %s could not be compared with the module's registration", c, exc_info=True)
+        return False
+    if digest == b.served:
+        return False
+    log.info("the roles of %s changed since the module registered them; it registers them again", c)
+    push_roles(c)
+    return True
+
+
+def _watch_roles(c: str) -> None:
+    """From a held long poll: sync_roles once ROLES_CHECK_S passed since the last look, in a task of its own, one at a
+    time."""
+    b = _bridge(c)
+    now = time.monotonic()
+    if b.checking or now - b.checked < ROLES_CHECK_S:
+        return
+    b.checked, b.checking = now, True
+
+    async def look() -> None:
+        try:
+            await sync_roles(c)
+        finally:
+            b.checking = False
+
+    asyncio.get_running_loop().create_task(look(), name=f"module-roles-{c}")
 
 
 def _take(c: str, session: str) -> _Request | None:
@@ -693,6 +799,7 @@ async def next_route(request: Request, cwd: str, session: str, wait: float = POL
             left = deadline - time.monotonic()
             if left <= 0:
                 return Response(status_code=204)
+            _watch_roles(c)
             await _wait(c, min(left, POLL_TICK_S))
     finally:
         b.polls -= 1
@@ -766,15 +873,14 @@ def _spec(name: str, role: Any) -> dict[str, Any] | None:
 async def roles_route(cwd: str, session: str) -> dict[str, Any]:
     """The roles the module registers, from subagents.roles: `{roles: {name: spec}}`."""
     c = _workspace(cwd)
-    _require(c, session)
-    from . import subagents  # noqa: PLC0415
-
-    roles = await asyncio.to_thread(subagents.roles, c)
-    out: dict[str, dict[str, Any]] = {}
-    for name, role in (roles or {}).items():
-        spec = _spec(str(name), role)
-        if spec is not None:
-            out[spec["name"]] = spec
+    b = _require(c, session)
+    stamp = await asyncio.to_thread(roles_stamp, c)  # before the rendering, so a change during it is seen next time
+    out = await asyncio.to_thread(_specs, c)
+    digest = _digest(out)
+    if digest != b.served:
+        b.served = digest
+        await asyncio.to_thread(_save, c, b)
+    b.stamp = stamp
     return {"roles": out}
 
 
