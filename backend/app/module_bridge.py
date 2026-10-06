@@ -14,8 +14,11 @@ main), or the one `--rekey` moved it to after a /clear or an in-session /resume 
 module sees the new id within tens of milliseconds of the SessionStart hook (spike V2): a hello for an id that is not
 main yet is held up to HELLO_HOLD_S for a rekey that names it. Main must also run inside thimble's fence
 (cc_plugin.main_fenced), so a THIMBLE_LAUNCHED that a child session inherited gets no requests; that is read from main's
-command line once main's session has opened thimble (/thimble attached it, _opened), and a hello before then is asked
-again later rather than refused. The long poll hands out requests for that session only, so two mains in one folder never
+command line once main's session has opened thimble (/thimble attached it), or, at session start, before /thimble
+has, from the command line of the `claude` process Claude Code's own record names for the session launch.json names
+(_launch_pid), which the launcher started the server for, so that the module registers thimble's types inside session
+start and they are in main's first agent listing (_opened). A hello before either is asked again later rather than
+refused. The long poll hands out requests for that session only, so two mains in one folder never
 take each other's clicks.
 
 `request(c, op, **args)` is how the rest of the server asks (lane B's clicks, follow-ups and stops, lane E's jobs). It
@@ -306,10 +309,41 @@ def main_session(c: str) -> str:
     return sid
 
 
-def _fenced(c: str) -> bool:
-    from . import cc_plugin  # noqa: PLC0415
+def _launch_pid(c: str, sid: str) -> int | None:
+    """The `claude` process of main's session `sid` when it is the one launch.json names: the live pid Claude Code's own
+    record of its running processes (<config>/sessions/<pid>.json, cc_plugin.SESSIONS) gives with that session id, which
+    it writes before the session's start hooks run. None for any other session, or without such a record."""
+    from . import cc_plugin, procs  # noqa: PLC0415
+
+    if not sid or str(_launch(c).get("session") or "") != sid:
+        return None
+    try:
+        records = sorted((config.claude_config_dir() / cc_plugin.SESSIONS).glob("*.json"))
+    except OSError:
+        return None
+    for path in records:
+        rec = _read_json(path)
+        if rec.get("sessionId") != sid:
+            continue
+        try:
+            pid = int(rec.get("pid") or path.stem)
+        except (TypeError, ValueError):
+            continue
+        if procs.alive(pid):
+            return pid
+    return None
+
+
+def _fenced(c: str, sid: str = "") -> bool:
+    """Whether main runs inside thimble's fence, read from its `claude` process's command line: the launch session's
+    process (_launch_pid) while the server does not follow `sid` yet, else main's as the server follows it
+    (cc_plugin.main_fenced)."""
+    from . import cc_plugin, procs  # noqa: PLC0415
 
     try:
+        pid = None if _follows(c, sid) else _launch_pid(c, sid)
+        if pid:
+            return cc_plugin.fenced_argv(procs.argv(pid), procs.cwd(pid) or Path.cwd())
         return bool(cc_plugin.main_fenced(c))
     except Exception:  # noqa: BLE001 — main's command line could not be read
         log.debug("main_fenced(%s) failed", c, exc_info=True)
@@ -319,9 +353,16 @@ def _fenced(c: str) -> bool:
 def _opened(c: str, sid: str) -> bool:
     """Whether main's session `sid` is the one the server follows (session.current: /thimble attached it), or one that
     session moved to within its `claude` process by /clear or /resume (rekey) before the server followed, and its
-    `claude` process is known (session.main_pid). Until then main's command line cannot be read, so whether main is
-    fenced is not known yet: a server that was already up when `thimble` started main would otherwise read no command
-    line, or the last main's, and refuse the module for the whole session (NOT_OPEN)."""
+    `claude` process is known (session.main_pid); or, before /thimble has attached it, `sid` is the session launch.json
+    names and Claude Code's own record names its `claude` process (_launch_pid). Until then main's command line cannot
+    be read, so whether main is fenced is not known yet: a server that was already up when `thimble` started main would
+    otherwise read no command line, or the last main's, and refuse the module for the whole session (NOT_OPEN)."""
+    return _follows(c, sid) or _launch_pid(c, sid) is not None
+
+
+def _follows(c: str, sid: str) -> bool:
+    """Whether the server follows main's session `sid` (session.current, through the moves rekey recorded) and knows its
+    `claude` process (session.main_pid): /thimble attached it."""
     from . import session  # noqa: PLC0415
 
     cur = session.current(c)
@@ -343,7 +384,7 @@ def _refusal(c: str, sid: str) -> str:
         return NOT_MAIN
     if not _opened(c, sid):
         return NOT_OPEN
-    if not _fenced(c):
+    if not _fenced(c, sid):
         return NOT_FENCED
     return ""
 

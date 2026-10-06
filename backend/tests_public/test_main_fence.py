@@ -12,6 +12,7 @@ from app import cc_plugin, cli, config, userconf
 
 REGISTER = cli.register_here  # the real one, which conftest replaces for the other tests
 REFRESH = cli.refresh_extensions
+SERVER_FOR_LAUNCH = cli.server_for_launch
 
 
 @pytest.fixture()
@@ -202,6 +203,55 @@ def test_launch_args_on_a_new_folder_registers_it_refreshes_its_extensions_first
     assert json.loads((config.WORKSPACES_DIR / "notes" / cli.LAUNCH_FILE).read_text())["session"] is None
     home = Path.home()
     assert REGISTER(home) is None, "the home folder is never a workspace"
+
+
+def test_the_launch_starts_the_server_before_main_and_before_it_finds_the_extensions(corpus, monkeypatch):
+    """A server that is not up when `claude` starts lets the hooks module register thimble's agent types only later,
+    and Claude Code then prints "N agent type(s) available" instead of listing them from main's first turn. So the
+    launch starts the server and waits for it first, then finds the extensions through it, and prints what the start
+    said; a folder thimble does not open starts none."""
+    order: list[str] = []
+    monkeypatch.setattr(cli, "server_for_launch", lambda c: order.append(f"server {c}") or ["thimble: restarted"])
+    monkeypatch.setattr(cli, "refresh_extensions", lambda c: order.append(f"extensions {c}"))
+    lines = cli.launch_args(corpus).split("\n")
+    assert order == ["server logs", "extensions logs"] and "thimble: restarted" in lines[9].split("\t")
+    order.clear()
+    monkeypatch.setattr(cli, "register_here", lambda cwd: None)
+    cli.launch_args(corpus)
+    assert order == []
+
+
+def test_server_for_launch_starts_and_waits_for_the_server_and_never_stops_the_launch(corpus, monkeypatch):
+    """server_for_launch runs `up`'s start (ensure_running) with its wait and passes on its notices; another install's
+    server on the port, a server that does not answer in time and a start that fails each give a line or nothing, and
+    the launch goes on."""
+    monkeypatch.setattr(cli, "foreign_home", lambda url=None: None)
+    waits: list[float] = []
+
+    def running(wait: float) -> bool:
+        waits.append(wait)
+        cli.NOTICES.append("thimble: the server restarted")
+        return True
+
+    monkeypatch.setattr(cli, "ensure_running", running)
+    assert SERVER_FOR_LAUNCH("logs") == ["thimble: the server restarted"] and waits == [cli.WAIT_S]
+    monkeypatch.setattr(cli, "ensure_running", lambda wait: False)
+    assert SERVER_FOR_LAUNCH("logs") == [cli.LAUNCH_NO_SERVER_LINE.format(wait=cli.WAIT_S, log=cli.log_path())]
+
+    def slow(wait: float) -> bool:
+        raise TimeoutError("still starting")
+
+    monkeypatch.setattr(cli, "ensure_running", slow)
+    monkeypatch.setattr(cli, "healthy", lambda url=None, timeout=1.0: True)
+    assert SERVER_FOR_LAUNCH("logs") == [], "it answered after all"
+
+    def broken(wait: float) -> bool:
+        raise OSError("no port")
+
+    monkeypatch.setattr(cli, "ensure_running", broken)
+    assert SERVER_FOR_LAUNCH("logs") == []
+    monkeypatch.setattr(cli, "foreign_home", lambda url=None: "/other/home")
+    assert SERVER_FOR_LAUNCH("logs") == [cli.FOREIGN_LINE.format(port=cli.port(), other="/other/home")]
 
 
 def test_refresh_extensions_asks_a_running_server_else_finds_them_here(corpus, monkeypatch):

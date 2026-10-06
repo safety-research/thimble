@@ -245,6 +245,52 @@ async def test_a_hello_before_main_s_session_opened_thimble_is_asked_again_not_r
     assert (await Module(client, plugin_headers, CHILD).hello()).status_code == 200
 
 
+async def test_a_hello_at_session_start_is_accepted_from_the_launch_session_s_fenced_process(client, plugin_headers,
+                                                                                            monkeypatch, tmp_path):
+    """The launcher starts the server before main, so the module says hello inside main's session start, before
+    /thimble attaches main. The hello is accepted then when it is from the session launch.json names and Claude Code's
+    own record of its running processes (<config>/sessions/<pid>.json) names a live `claude` process for that session
+    whose command line is fenced: the module registers thimble's types inside session start, and they are in main's
+    first agent listing. That process unfenced is refused; without such a record, or for its process gone, the hello
+    is asked again later. Once /thimble attached main, main's own process decides."""
+    from app import procs
+
+    _launch()
+    monkeypatch.setattr(module_bridge, "_opened", _real_opened)
+    monkeypatch.setattr(session, "current", lambda c: None)
+    fenced = ["claude", "--settings", json.dumps({"sandbox": {"enabled": True}, "env": {cc_plugin.FENCE_MARK: "1"}})]
+    argv = {4242: fenced}
+    monkeypatch.setattr(cc_plugin, "main_fenced", lambda c: False, raising=False)
+    monkeypatch.setattr(procs, "alive", lambda pid: pid in argv)
+    monkeypatch.setattr(procs, "argv", lambda pid: argv.get(pid, []))
+    monkeypatch.setattr(procs, "cwd", lambda pid: tmp_path)
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "cc"))
+    records = tmp_path / "cc" / "sessions"
+    records.mkdir(parents=True)
+    r = await Module(client, plugin_headers).hello()
+    assert r.status_code == 409 and r.json()["detail"] == module_bridge.NOT_OPEN, "no record yet"
+    (records / "4242.json").write_text(json.dumps({"pid": 4242, "sessionId": NEW, "kind": "interactive"}))
+    r = await Module(client, plugin_headers).hello()
+    assert r.status_code == 409 and r.json()["detail"] == module_bridge.NOT_OPEN, "a record of another session"
+    (records / "4242.json").write_text(json.dumps({"pid": 4242, "sessionId": MAIN, "kind": "interactive"}))
+    assert (await Module(client, plugin_headers).hello()).status_code == 200
+    assert module_bridge._launch_pid(CORPUS, MAIN) == 4242 and module_bridge._launch_pid(CORPUS, CHILD) is None
+    argv[4242] = ["claude", "--settings", "{}"]
+    r = await Module(client, plugin_headers).hello()
+    assert r.status_code == 403 and r.json()["detail"] == module_bridge.NOT_FENCED
+    argv.clear()
+    r = await Module(client, plugin_headers).hello()
+    assert r.status_code == 409 and r.json()["detail"] == module_bridge.NOT_OPEN, "its process is gone"
+    # /thimble attached main: main's own process decides, whatever the record says
+    argv[4242] = fenced
+    monkeypatch.setattr(session, "current", lambda c: types.SimpleNamespace(sid=MAIN))
+    monkeypatch.setattr(session, "main_pid", lambda c: 77)
+    r = await Module(client, plugin_headers).hello()
+    assert r.status_code == 403 and r.json()["detail"] == module_bridge.NOT_FENCED
+    monkeypatch.setattr(cc_plugin, "main_fenced", lambda c: True, raising=False)
+    assert (await Module(client, plugin_headers).hello()).status_code == 200
+
+
 async def test_without_a_session_in_launch_json_main_is_the_session_thimble_made_main(client, plugin_headers,
                                                                                      monkeypatch):
     _launch(session="")

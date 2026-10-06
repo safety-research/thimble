@@ -1840,6 +1840,39 @@ def register_here(cwd: Path) -> str | None:
 
 
 EXTENSIONS_WAIT_S = 15.0
+# the launch starts thimble's server before main (server_for_launch), so the hooks module registers thimble's agent types
+# inside main's session start and they are in main's first agent listing; started any later, Claude Code prints "N agent
+# type(s) available" when they come
+LAUNCH_NO_SERVER_LINE = ("thimble: thimble's server did not start within {wait:.0f} s, so thimble's agents are not "
+                         "registered yet; /thimble starts it again. See {log}")
+
+
+def server_for_launch(c: str) -> list[str]:
+    """Start thimble's server for workspace `c` if it is down, and wait for it, before the launcher starts main
+    (ensure_running, as `up` does): the note lines to print, the server's own notices among them, FOREIGN_LINE when
+    another install's server holds the port, and LAUNCH_NO_SERVER_LINE when it did not answer in time. Never raises:
+    the launch goes on, and /thimble starts the server then."""
+    try:
+        ensure_home()
+        url = api_url()
+        other = foreign_home(url)
+        if other:
+            return [FOREIGN_LINE.format(port=port(), other=other)]
+        NOTICES.clear()
+        try:
+            up = ensure_running(WAIT_S)
+        except TimeoutError as e:
+            _log(str(e))
+            up = healthy(url)
+        notes = list(NOTICES)
+        NOTICES.clear()
+        if not up:
+            _log(f"launch-args: no server answers at {url} for {c}")
+            notes.append(LAUNCH_NO_SERVER_LINE.format(wait=WAIT_S, log=log_path()))
+        return notes
+    except Exception as e:  # noqa: BLE001 — the launch goes on without it
+        _log(f"launch-args: the server was not started: {type(e).__name__}: {e}")
+        return []
 
 
 def refresh_extensions(c: str) -> None:
@@ -1915,9 +1948,10 @@ def launch_args(cwd: Path, resume: bool = False, settings: str = "", own_session
     environment sets), the note line (tab-separated lines to print before Claude Code starts), with `resume` the session
     to resume, then main's prompt, whose turn ending follows that value.
 
-    Before it prints, it registers the folder (register_here), finds the workspace's extensions again
-    (refresh_extensions) and writes launch.json (launch_record). Main's effort is explicit: models.main's, else the
-    CLAUDE_CODE_EFFORT_LEVEL it unsets, else cc_settings.main_effort_flag; a stored ultracode runs at its level."""
+    Before it prints, it registers the folder (register_here), starts thimble's server and waits for it
+    (server_for_launch), finds the workspace's extensions again (refresh_extensions) and writes launch.json
+    (launch_record). Main's effort is explicit: models.main's, else the CLAUDE_CODE_EFFORT_LEVEL it unsets, else
+    cc_settings.main_effort_flag; a stored ultracode runs at its level."""
     installed = installed_copy(cwd)
     root = installed.root if installed else plugin_root()
     with server_dirs():
@@ -1930,6 +1964,7 @@ def _launch_args(cwd: Path, resume: bool, settings: str, own_session: str | None
     from . import cc_settings, events, terminal_tools  # noqa: PLC0415 — needed by this subcommand alone
 
     c = register_here(cwd)
+    notes: list[str] = server_for_launch(c) if c else []  # before main, for its first agent listing
     if c:
         refresh_extensions(c)
     workspaces = Path(resolve_env()["workspaces_dir"]).resolve()
@@ -1940,7 +1975,6 @@ def _launch_args(cwd: Path, resume: bool, settings: str, own_session: str | None
     tools_line = ",".join([MCP_TOOLS_RULE, f"Read(/{anchors}/**)", watcher, *skill_rules(root)])
     last = [last_main(cwd)] if resume else []
     turn_tools = terminal_tools.launch_value()
-    notes: list[str] = []
     # the session main runs as: one this launch names (--session-id) unless the analyst's flags or --continue name it
     if resume and last and last[0]:
         session: str | None = last[0]
