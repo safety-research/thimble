@@ -173,6 +173,31 @@ def _start(c: str) -> None:
         pass
 
 
+async def close() -> None:
+    """The end of the shim's session in terminal mode: the jobs it ran end with it, as browser-mode jobs end with the
+    session (the card checks, a label's run, the card watch), and the browser and kernels it started stop. Never
+    raises."""
+    import contextlib  # noqa: PLC0415
+
+    from . import cardrun  # noqa: PLC0415
+
+    cardrun.CardWatch.stop_all()
+    mods = sys.modules
+    for c in list(_started):
+        if "app.card_check" in mods:
+            with contextlib.suppress(Exception):
+                mods["app.card_check"].stop_all(c, mods["app.card_check"].SESSION_ENDED)
+        if "app.concepts" in mods:
+            with contextlib.suppress(Exception):
+                mods["app.concepts"].stop_workspace(c)
+    if "app.render" in mods:
+        with contextlib.suppress(Exception):
+            await mods["app.render"].shutdown()
+    if "app.notebook" in mods:
+        with contextlib.suppress(Exception):
+            await mods["app.notebook"].shutdown_all()
+
+
 # --------------------------------------------------------------------------- what the UI tools leave for the renderer
 
 
@@ -188,6 +213,19 @@ def ui_append(c: str, kind: str, args: dict[str, Any]) -> dict[str, Any]:
         rec = {"n": max(ledger.last_seq(path, "n"), 0) + 1, "at": _now(), "kind": kind, "args": args}
         ledger.append_jsonl(path, rec)
     return rec
+
+
+UI_KINDS = ("layout", "open_view", "filter", "label")
+
+
+def ui_note(c: str, kind: str, args: dict[str, Any]) -> None:
+    """ui_append in terminal mode, where a UI tool's change reaches the renderer through ui.jsonl alone; nothing in
+    browser mode, whose page hears the stream. Never raises: the tool's change is made either way."""
+    try:
+        if terminal(c):
+            ui_append(c, kind, args)
+    except Exception:  # noqa: BLE001
+        log.warning("%s: the %s record for the terminal was not written", c, kind, exc_info=True)
 
 
 def ui_records(c: str, after: int = 0) -> list[dict[str, Any]]:

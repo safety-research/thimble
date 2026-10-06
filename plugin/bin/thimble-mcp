@@ -27,6 +27,14 @@ when the session id changes (/clear, /resume), which the shim checks at each kee
 Protocol: the shim serves only the initialize-handshake protocol (2025-11-25 and earlier); a 2026-07-28
 `server/discover` probe is refused, and Claude Code falls back to the handshake.
 
+Terminal mode (app/local.py): when the workspace of the shim's folder records that its session runs in terminal mode
+(`mode` in trusted/launch.json, read once at start), no server runs. A call runs `tools.call` in this process
+(call_local, local.call), the backend loaded on the first call; the jobs a call leaves running (a prompt label's run,
+the card check of a card `thimble-run` wrote) run on this process's loop and end with it; there is no subscription; and
+fd 1 is pointed at stderr once the MCP stream has its own copy of it (terminal_stdout), so a library or a child process
+that writes to stdout cannot corrupt the protocol. A folder of no workspace stays in browser mode, whose calls reach no
+server here, so a process that lost its environment does nothing.
+
 `thimble-mcp --list` prints the tool list as JSON and `thimble-mcp --instructions` the instructions, without MCP.
 """
 import hmac
@@ -54,7 +62,7 @@ from mcp.server.runner import serve_loop  # noqa: E402
 from mcp.server.stdio import stdio_server  # noqa: E402
 from pydantic import Field  # noqa: E402
 
-from app import cc_plugin, hook_auth, tools  # noqa: E402  (imports app.config, app.prompts, app.procs and starlette only)
+from app import cc_plugin, hook_auth, local, tools  # noqa: E402  (imports app.config, app.prompts, app.procs and starlette only)
 
 logging.basicConfig(level=logging.WARNING, stream=sys.stderr, format="thimble-mcp %(levelname)s: %(message)s")
 log = logging.getLogger("thimble-mcp")
@@ -253,6 +261,36 @@ async def call_server(name: str, args: dict[str, Any], tool_use_id: str | None =
             return _answer(name, resp, proof, base)
 
 
+_TERMINAL: list[bool] = []  # the session's mode, read once (terminal)
+
+
+def terminal() -> bool:
+    """Whether this shim serves a terminal-mode session (module note), read once from the workspace's launch.json."""
+    if not _TERMINAL:
+        c = local.workspace(cwd())
+        _TERMINAL.append(bool(c) and local.terminal(c))
+    return _TERMINAL[0]
+
+
+async def call_local(name: str, args: dict[str, Any], tool_use_id: str | None = None) -> mcp_types.CallToolResult:
+    """Terminal mode: run the call in this process (local.call) and return its answer as call_server would."""
+    session, token = own_session()
+    try:
+        payload = await local.call(name, args, cwd=cwd(), session=session, session_token=token, tool_use_id=tool_use_id)
+    except Exception as e:  # noqa: BLE001 — the shim answers every call
+        log.exception("%s failed in terminal mode", name)
+        return _error(f"{name} failed: {type(e).__name__}: {e}")
+    return _result([b for b in payload.get("content") or [] if isinstance(b, dict)], bool(payload.get("is_error")))
+
+
+def terminal_stdout() -> None:
+    """Terminal mode: keep fd 1 for the MCP stream alone. sys.stdout becomes a copy of fd 1 (which stdio_server wraps)
+    and fd 1 itself points at stderr, so a child process or a C library writing to stdout cannot corrupt the stream."""
+    keep = os.dup(1)
+    os.dup2(2, 1)
+    sys.stdout = os.fdopen(keep, "w", encoding="utf-8", closefd=True)
+
+
 async def with_progress(ctx: Any, call: Any) -> mcp_types.CallToolResult:
     """Await the call, reporting MCP progress every PROGRESS_S, since Claude Code aborts a call that sends neither a
     result nor progress for its idle timeout."""
@@ -302,7 +340,8 @@ def _tool(entry: dict[str, Any]) -> Tool:
 
     async def fn(**kwargs: Any) -> mcp_types.CallToolResult:
         ctx = kwargs.pop(CTX_PARAM, None)
-        call = call_server(name, {k: v for k, v in kwargs.items() if v is not None}, tool_use_id(ctx))
+        given = {k: v for k, v in kwargs.items() if v is not None}
+        call = (call_local if terminal() else call_server)(name, given, tool_use_id(ctx))
         return await with_progress(ctx, call)
 
     params.append(inspect.Parameter(CTX_PARAM, inspect.Parameter.KEYWORD_ONLY, default=None, annotation=Context))
@@ -377,17 +416,23 @@ async def subscription(route: str) -> None:
 async def serve(server: MCPServer) -> None:
     """MCPServer.run_stdio_async with, in the analyst's session, the subscription held beside the MCP session."""
     low = server._lowlevel_server
-    # the parent is the `claude` process; a session thimble starts itself hears no browser events (its main does)
-    route = None if own_session()[0] else cc_plugin.route(cwd(), HERE.parents[1])
+    # the parent is the `claude` process; a session thimble starts itself hears no browser events (its main does), and
+    # in terminal mode no server sends any (module note)
+    route = None if own_session()[0] or terminal() else cc_plugin.route(cwd(), HERE.parents[1])
     options = low.create_initialization_options()
-    async with stdio_server() as (read_stream, write_stream):
-        async with anyio.create_task_group() as tg:
-            if route:
-                tg.start_soon(subscription, route)
-            # not low.run, which also serves 2026-07-28 (module note, Protocol)
-            async with low.lifespan(low) as lifespan_context:
-                await serve_loop(low, read_stream, write_stream, lifespan_state=lifespan_context, init_options=options)
-            tg.cancel_scope.cancel()
+    try:
+        async with stdio_server() as (read_stream, write_stream):
+            async with anyio.create_task_group() as tg:
+                if route:
+                    tg.start_soon(subscription, route)
+                # not low.run, which also serves 2026-07-28 (module note, Protocol)
+                async with low.lifespan(low) as lifespan_context:
+                    await serve_loop(low, read_stream, write_stream, lifespan_state=lifespan_context, init_options=options)
+                tg.cancel_scope.cancel()
+    finally:
+        if terminal():
+            with anyio.CancelScope(shield=True):
+                await local.close()
 
 
 def tool_entries() -> list[dict[str, Any]]:
@@ -407,4 +452,6 @@ if __name__ == "__main__":
     if "--instructions" in sys.argv[1:]:  # a debugging aid: the instructions text, fetched as the server would be
         sys.stdout.write(instructions() + "\n")
         sys.exit(0)
+    if terminal():
+        terminal_stdout()
     anyio.run(serve, build_server())

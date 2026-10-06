@@ -105,8 +105,12 @@ _SECRET_ENV_RE = re.compile(r"API_?KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL", re.I)
 
 def kernel_env() -> dict[str, str]:
     """The backend's environment minus anything that looks like a secret."""
-    return {k: v for k, v in os.environ.items()
-            if not k.startswith(_SECRET_ENV_PREFIXES) and not _SECRET_ENV_RE.search(k)}
+    return kernel_env_of(os.environ)
+
+
+def kernel_env_of(env: Any) -> dict[str, str]:
+    """`env` minus anything that looks like a secret (kernel_env)."""
+    return {k: v for k, v in env.items() if not k.startswith(_SECRET_ENV_PREFIXES) and not _SECRET_ENV_RE.search(k)}
 
 
 SCRATCH_DIR = "scratch"  # workspace-relative: the kernels' cwd, a symlink mirror of the corpus plus what cells write
@@ -2795,7 +2799,7 @@ async def _run_card_code(k: _Kernel, code: str, kind: str | None, timeout_s: flo
     k.last_label_revs. `extra_exprs` are more user expressions for the same request."""
     from . import cardtypes  # noqa: PLC0415 — cardtypes imports views, which imports this module lazily
 
-    if cardtypes.CARD_CALL in code:
+    if cardtypes.CARD_CALL in code and not getattr(k, "local", False):  # a card runner's types: the shim's (cardrun)
         await cardtypes.refresh_quietly(k.workspace, warm=False)
     exprs = {frames.EXPR_KEY: frames.CAPTURE} if frames.captures(kind) else {}
     exprs[LABELS_EXPR_KEY] = LABELS_EXPR
@@ -2999,15 +3003,6 @@ def _keep_takeaway(workspace: str, cell: dict, changed: bool) -> tuple[str, str]
 
 
 RUN_KEY = "run"  # a card whose code runs through `thimble-run` (terminal mode): {state, by, script, ...} (cardrun.py)
-
-
-@_changes
-def stage_new(workspace: str, nb_id: str, code: str, created_by: str, title: str, kind: str, run: dict) -> dict:
-    """A new card of code stored to run later, through `thimble-run` (terminal mode): idle, with its RUN_KEY record.
-    Returns a copy of the stored cell."""
-    cell = new_cell(kind or DEFAULT_KIND, created_by, title, nb_id, code=code)
-    cell[RUN_KEY] = dict(run)
-    return dict(insert_cell(workspace, nb_id, cell))
 
 
 @_changes

@@ -352,6 +352,7 @@ def _normalize(concept_id: str, data: Any) -> dict:
         "applications": applications,
         "label_stats": _label_stats_field(data.get("label_stats")),
         "within": _within_field(data.get("within")) if unit == "record" else None,
+        **({PENDING_RUN: data[PENDING_RUN]} if isinstance(data.get(PENDING_RUN), dict) else {}),
     }
 
 
@@ -3839,7 +3840,8 @@ def _follow(c: str, concept: dict) -> Callable[[Any], Any]:
 
 async def apply_scoped(c: str, *, scope: str, name: str, kind: str, text: str, values: list[str] | None, paths: list[str] | None,
                        limit: int | None, comment: bool, filter: bool, created_by: str, chat: str | None, group: str | None,
-                       question: str | None = None, card: bool = True, within: Any = None, show: bool = False) -> dict:
+                       question: str | None = None, card: bool = True, within: Any = None, show: bool = False,
+                       defer: bool = False) -> dict:
     """Define a label from a predicate and apply it over one scope: the concept, its card in `group` asking `question` unless
     `card` is False or the label ran before without one, the run in the background followed by an agent chat of role
     `labels`, and with `filter` the scope's filter set to the positive value. `within` {label, value?} runs a label over
@@ -3847,7 +3849,9 @@ async def apply_scoped(c: str, *, scope: str, name: str, kind: str, text: str, v
     Files and the views before it runs, so they draw it as it runs. A `limit` makes a new label a trial. The same
     predicate under the same name starts no run when its rows already cover the call (`unchanged: true`). Returns when the
     run ends, when a prompt label has labeled APPLY_ENOUGH units and its eta is longer than the wait left, or after
-    APPLY_WAIT_S, with `stale`, the ids of cards that read the label at an older revision."""
+    APPLY_WAIT_S, with `stale`, the ids of cards that read the label at an older revision. With `defer` (a code label
+    in terminal mode, whose code runs through `thimble-run label`: cardrun.run_label) the label and its card are made
+    and nothing runs: the answer has `deferred: true` and the counts the label already holds."""
     if scope not in SCOPES:
         raise HTTPException(400, f"scope must be one of {', '.join(SCOPES)}")
     if kind not in KINDS:
@@ -3890,6 +3894,13 @@ async def apply_scoped(c: str, *, scope: str, name: str, kind: str, text: str, v
     unchanged = same and not joined and await asyncio.to_thread(covered, c, concept, paths or [], limit)
     if show and unit in FILE_UNITS:
         show_concept(c, concept["id"], True)
+    if defer and not joined and not unchanged:
+        stale = await asyncio.to_thread(stale_cards, ws, read_concept(ws, concept["id"]) or concept)
+        return {"concept": concept["id"], "name": concept["name"], "unit": unit, "total": None,
+                "counts": await asyncio.to_thread(_live_counts, ws, concept["id"]), "failed": 0, "message": None,
+                "partial": False, "cell": made["id"] if made else None, "filter": None,
+                "labels_path": str(labels_file(ws, concept["id"])), "unchanged": False, "deferred": True,
+                "stale": [x["id"] for x in stale]}
     if not joined and not unchanged:
         await start_apply(c, concept["id"], paths or [], limit, author, comment=comment, sources=sources)
         try:
@@ -3983,6 +3994,63 @@ RERUN_OUTPUT_CHARS = 1500  # of each card's new output in what main hears of a r
 SCOPE_OF_UNIT = {**{u: "files" for u in FILE_UNITS}, "cell": "canvas", "span": "report"}
 
 
+# A code label's run waiting for `thimble-run label` (terminal mode): {args, session, at} on its definition, the
+# apply_label call to make again where the code runs (cardrun.run_label).
+PENDING_RUN = "pending_run"
+
+
+def set_pending_run(c: str, concept_id: str, args: dict[str, Any], session: str | None) -> None:
+    ws = _ws(c)
+    with ledger.locked(_concept_file(ws, concept_id)):
+        concept = read_concept(ws, concept_id)
+        if concept is not None:
+            concept[PENDING_RUN] = {"args": args, "session": session, "at": _now()}
+            write_concept(ws, concept)
+
+
+def clear_pending_run(c: str, concept_id: str) -> None:
+    ws = _ws(c)
+    with ledger.locked(_concept_file(ws, concept_id)):
+        concept = read_concept(ws, concept_id)
+        if concept is not None and concept.pop(PENDING_RUN, None) is not None:
+            write_concept(ws, concept)
+
+
+def told_in_label_done(c: str, concept_id: str) -> None:
+    """The reruns after the label's next run are reported by its caller (`thimble-run label`), not in a `rerun`
+    event."""
+    _told_in_label_done.add((c, concept_id))
+
+
+async def reruns_of(c: str, concept_id: str) -> list[dict]:
+    """The cards the label's last run ran again and its caller should hear of (rerun_readers), once those runs end."""
+    task = _reruns.get((c, concept_id))
+    return list(await asyncio.shield(task)) if task is not None else []
+
+
+def stale_note(c: str, cards: list[dict]) -> str:
+    """The `## cards-stale` line for cards that read a label at an older revision and have not run again since, with the
+    command that runs them (terminal mode: cardrun.run_stale)."""
+    from . import cardrun, tools  # noqa: PLC0415
+
+    refs_ = ", ".join(f"[[card:{x['id']}]]" for x in cards)
+    cmd = cardrun.command("stale")
+    cardrun.mirror(c)
+    return tools.hint("cards-stale", cards=refs_, command=cmd) or f"{refs_}: run with Bash: {cmd}"
+
+
+def rerun_note(c: str, cards: list[dict]) -> str:
+    """What the caller hears of the cards a label's run ran again: the `rerun` event's text without the event."""
+    by_label: list[str] = []
+    for cell in cards:
+        for cid in cell.get("labels") or []:
+            k = read_concept(_ws(c), str(cid))
+            if k is not None and k["name"] not in by_label:
+                by_label.append(k["name"])
+    return (f"thimble ran these cards again since label {', '.join(by_label) or 'they read'} changed.\n\n"
+            + rerun_text(c, cards))
+
+
 def _start_reruns(c: str, concept_id: str) -> None:
     key = (c, concept_id)
     task = asyncio.get_running_loop().create_task(rerun_readers(c, concept_id), name=f"thimble-rerun-{concept_id}")
@@ -3994,6 +4062,10 @@ def rerun_after_verdicts(c: str, concept_id: str) -> None:
     it, so a burst of corrections reruns each card once. While the label runs or its readers are running again it waits
     for them to end. Callable from a sync route's worker thread. Never raises."""
     key = (c, concept_id)
+    from . import cardrun  # noqa: PLC0415
+
+    if cardrun.defers(c):  # terminal mode: the cards stay stale until `thimble-run stale` runs them (stale_note)
+        return
 
     def arm() -> None:
         if (old := _verdict_timers.pop(key, None)) is not None:
@@ -4022,7 +4094,7 @@ async def rerun_readers(c: str, concept_id: str) -> list[dict]:
     tell main of those whose takeaway its new output left stale or that failed: in `label_done` when tell_when_done waits
     for this label, else in a `rerun` event. Where no session hears it, the card check brings those takeaways up to date
     when it is on. Returns the cards it tells of, as stored. Never raises."""
-    from . import notebook
+    from . import cardrun, notebook
 
     ws = _ws(c)
     told: list[dict] = []
@@ -4030,6 +4102,11 @@ async def rerun_readers(c: str, concept_id: str) -> list[dict]:
         concept = read_concept(ws, concept_id)
         if concept is None:
             return []
+        if cardrun.defers(c):  # terminal mode: no card runs here; main hears which cards are stale (stale_note)
+            told = await asyncio.to_thread(stale_cards, ws, concept)
+            if told and (c, concept_id) not in _told_in_label_done:
+                _post_stale(c, concept, told)
+            return told
         for cell in await asyncio.to_thread(stale_cards, ws, concept):
             try:
                 ran = await notebook.rerun_on_labels(c, str(cell["id"]))
@@ -4065,6 +4142,20 @@ def _post_rerun(c: str, concept: dict, cards: list[dict]) -> bool:
 
     text = (f"thimble ran these cards again since label {concept['name']} [[concept:{concept['id']}]] changed.\n\n"
             + rerun_text(c, cards))
+    try:
+        events.post(c, RERUN_KIND, {"text": text, "name": concept["name"], "ref": f"concept:{concept['id']}",
+                                     "cards": ", ".join(f"card:{x['id']}" for x in cards)})
+    except HTTPException as e:
+        log.info("%s: the %s event for concept:%s was not posted: %s", c, RERUN_KIND, concept["id"], e.detail)
+        return False
+    return True
+
+
+def _post_stale(c: str, concept: dict, cards: list[dict]) -> bool:
+    """The `rerun` event in terminal mode: the cards that read the changed label, which ran nowhere (stale_note)."""
+    from . import events
+
+    text = f"label {concept['name']} [[concept:{concept['id']}]] changed. " + stale_note(c, cards)
     try:
         events.post(c, RERUN_KIND, {"text": text, "name": concept["name"], "ref": f"concept:{concept['id']}",
                                      "cards": ", ".join(f"card:{x['id']}" for x in cards)})
@@ -4112,10 +4203,16 @@ def tell_when_done(c: str, concept_id: str) -> None:
         counts = await asyncio.to_thread(_live_counts, ws, concept_id)
         cards = await asyncio.to_thread(_label_cards, ws, concept_id)
         told = ", ".join(f"{v} {n:,}" for v, n in counts.items()) or "no values"
+        from . import cardrun  # noqa: PLC0415
+
+        if reran and cardrun.defers(c):  # terminal mode: they ran nowhere (rerun_readers)
+            after = stale_note(c, reran)
+        elif reran:
+            after = "thimble ran the cards that read it again, and these need you:\n\n" + rerun_text(c, reran)
+        else:
+            after = "No card that read it needs you."
         text = (f"label {concept['name']} [[concept:{concept_id}]] finished: {told}. "
-                + (f"Its card is [[card:{cards[0][1]['id']}]]. " if cards else "")
-                + ("thimble ran the cards that read it again, and these need you:\n\n" + rerun_text(c, reran) if reran
-                   else "No card that read it needs you."))
+                + (f"Its card is [[card:{cards[0][1]['id']}]]. " if cards else "") + after)
         payload = {"text": text, "name": concept["name"], "ref": f"concept:{concept_id}",
                    "card": f"card:{cards[0][1]['id']}" if cards else None,
                    "cards": ", ".join(f"card:{x['id']}" for x in reran) or None}
