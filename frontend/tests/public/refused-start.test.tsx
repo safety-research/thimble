@@ -6,7 +6,7 @@
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { STARTING_AFTER_MS, shownRefusal, startingShown } from '../../src/chat/OrientStart.tsx'
-import { NO_ANSWER_LINE, PERMISSIONS_LINE, RefusedCard, refusalActions, refusalLine, requestLine } from '../../src/chat/Refused.tsx'
+import { NO_ANSWER_LINE, PERMISSIONS_LINE, RefusedCard, WAIT_SLOT_LINE, limitOf, refusalActions, refusalLine, requestLine, slotFree } from '../../src/chat/Refused.tsx'
 import { mount, settle, unmountAll } from './mount.tsx'
 
 let posted: [string, unknown][] = []
@@ -77,6 +77,33 @@ describe('the card', () => {
     expect(posted).toEqual([['/api/ws/mini/subagents/again', { request: 'r1' }]])
     const hook = await mount(<RefusedCard ws="mini" what="the orientation" refusal={{ kind: 'hook', reason: 'Your Claude Code session is in plan mode.', request: null }} onDismiss={() => {}} onEdit={() => {}} />)
     expect(buttons(hook)).toEqual(['Dismiss'])
+  })
+})
+
+describe("Try again at Claude Code's limit waits for a free slot (live check L19)", () => {
+  const agent = (status: 'running' | 'done', ts_end: string | null = null) => ({ kind: 'agent' as const, status, ts_end })
+
+  test('the cap is read from either text; a slot is free when fewer run, or, with no cap named, once one ended', () => {
+    expect(limitOf('Concurrent subagent limit reached. You can run 2 subagents at once.')).toBe(2)
+    expect(limitOf('thimble: $.agent.spawn refused: 2 spawns are running at once')).toBe(2)
+    expect(limitOf('Claude Code runs at most 20 concurrent subagents')).toBe(20)
+    expect(limitOf('the limit')).toBeNull()
+    expect(slotFree([agent('running'), agent('running')], 'You can run 2 subagents at once.', null)).toBe(false)
+    expect(slotFree([agent('running'), agent('done', '2026-10-06T10:00:00Z')], 'You can run 2 subagents at once.', null)).toBe(true)
+    expect(slotFree([agent('done', '2026-10-06T09:00:00Z')], 'the limit', '2026-10-06T09:30:00Z')).toBe(false)
+    expect(slotFree([agent('done', '2026-10-06T10:00:00Z')], 'the limit', '2026-10-06T09:30:00Z')).toBe(true)
+  })
+
+  test('the button stays off, saying why, while as many subagents run as the cap', async () => {
+    vi.stubGlobal('fetch', async (url: string) => {
+      const body = String(url).endsWith('/chats') ? [{ id: 'o', kind: 'agent', status: 'running' }, { id: 'w', kind: 'agent', status: 'running' }] : { id: 'r1', kind: 'start', state: 'refused' }
+      return new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } })
+    })
+    const el = await mount(<RefusedCard ws="mini" what="the report's writer" refusal={{ kind: 'limit', reason: 'You can run 2 subagents at once.', request: 'r1' }} onDismiss={() => {}} />)
+    await settle()
+    const again = el.querySelector<HTMLButtonElement>('.chat-refused-again')!
+    expect(again.disabled).toBe(true)
+    expect(again.getAttribute('title')).toBe(WAIT_SLOT_LINE)
   })
 })
 

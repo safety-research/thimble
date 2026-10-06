@@ -13,7 +13,8 @@ import { api } from '../lib/api'
 import { bus } from '../lib/bus'
 import { modelLabel } from '../lib/models'
 import { track } from '../lib/telemetry'
-import type { Refusal, RefusalKind, StartAnswer, SubagentRequest } from '../lib/types'
+import type { ChatMeta, Refusal, RefusalKind, StartAnswer, SubagentRequest } from '../lib/types'
+import { useChatMetas } from './waiting'
 
 /** The buttons a refused start offers, by its kind (plan section 2, "A start that does not happen"). */
 export type RefusedAction = 'start-it' | 'edit' | 'try-again' | 'dismiss'
@@ -27,6 +28,27 @@ export function refusalActions(kind: RefusalKind | null | undefined, expired = f
   if (kind === 'no-module' && expired) return ['try-again', 'dismiss']
   return ['dismiss']
 }
+
+/** The cap Claude Code's limit text names: "You can run 2 subagents at once", "2 spawns are running at once", "at most
+ * 20 concurrent subagents"; null when it names none. Pure. */
+export function limitOf(reason: string | null | undefined): number | null {
+  const m = /\b(\d+)\s+(?:concurrent\s+)?(?:subagents|spawns)\b/i.exec(reason ?? '')
+  return m ? Number(m[1]) : null
+}
+
+/** Whether a slot is free again after a start Claude Code refused at its subagent limit, as the chats count it: fewer
+ * subagents of main run than the cap its text names, or, with no cap named, one ended after the refusal (`at`). Try
+ * again waits for it (plan section 2: "enabled once the mirror counts a free slot"; live check L19). Pure. */
+export function slotFree(metas: readonly Pick<ChatMeta, 'kind' | 'status' | 'ts_end'>[], reason: string | null | undefined, at: string | null | undefined): boolean {
+  const running = metas.filter((m) => m.kind === 'agent' && m.status === 'running').length
+  const cap = limitOf(reason)
+  if (cap != null) return running < cap
+  const since = at ? Date.parse(at) : NaN
+  return Number.isNaN(since) || metas.some((m) => m.kind === 'agent' && !!m.ts_end && Date.parse(m.ts_end) > since)
+}
+
+/** Try again's tooltip while it waits for a free slot. */
+export const WAIT_SLOT_LINE = 'Try again is offered once one of the running subagents ends.'
 
 /** What the card's head says: the agent named, and that it did not start. Pure. */
 export const refusedTitle = (what: string): string => `${what.charAt(0).toUpperCase()}${what.slice(1)} didn't start`
@@ -111,6 +133,10 @@ export function RefusedCard({ ws, what, refusal, text, onDismiss, onEdit, onStar
   const [req, setReq] = useState<SubagentRequest | null>(null)
   const [busy, setBusy] = useState<RefusedAction | null>(null)
   const actions = refusalActions(refusal.kind, !!refusal.expired).filter((a) => (a === 'edit' ? !!onEdit : a === 'dismiss' ? !!onDismiss : !!rid))
+  // at Claude Code's subagent limit, Try again waits until the chats count a free slot
+  const limited = refusal.kind === 'limit'
+  const metas = useChatMetas(ws, limited)
+  const free = !limited || slotFree(metas, refusal.reason, refusal.at)
   useEffect(() => {
     setReq(null)
     if (!rid) return
@@ -162,7 +188,7 @@ export function RefusedCard({ ws, what, refusal, text, onDismiss, onEdit, onStar
                 Start it
               </Button>
             ) : a === 'try-again' ? (
-              <Button key={a} variant="secondary" size="sm" className="chat-refused-again" busy={busy === a} disabled={!!busy} onClick={() => act(a)}>
+              <Button key={a} variant="secondary" size="sm" className="chat-refused-again" busy={busy === a} disabled={!!busy || !free} title={free ? undefined : WAIT_SLOT_LINE} onClick={() => act(a)}>
                 Try again
               </Button>
             ) : a === 'edit' ? (
