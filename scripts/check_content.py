@@ -16,20 +16,33 @@ Kinds of hit:
     demo        a file of a pre-cached orientation (demos/<dataset>/) outside the terms of the exception below
     secret      a gitleaks finding
 
-The one exception: demos/<dataset>/. A pre-cached orientation that `thimble demo --export` wrote, which a maintainer
-read before committing it (demos/README.md), holds .jsonl files and files over 2 MB. Under demos/<dataset>/ these are
-allowed, on these terms only (demo_hits):
-    - the folder holds the export's manifest, thimble-demo-precache.json with schema thimble-demo-precache, and its
-      README.md, and every other file in it is one the manifest lists: workspace/<path> for each of its `files`, or the
-      `path` of one of its `transcripts`
-    - each file is UTF-8 text of a kind the export writes (backend/app/demo_scrub.py TEXT_SUFFIXES: .json, .jsonl, .md,
-      .txt, .py, .html, .csv, .js, .mjs, .css, .tsv, .yaml, .yml, .svg), at most DEMO_FILE_MAX bytes, and the folder's
-      files together at most DEMO_TOTAL_MAX
+The one exception: demos/<dataset>/. A pre-cached orientation that `thimble demo --export --outputs-only` wrote, which a
+maintainer read before committing it (demos/README.md), holds .jsonl files and files over 2 MB. Under demos/<dataset>/
+these are allowed, on these terms only (demo_hits):
+    - the folder holds the export's manifest, thimble-demo-precache.json with schema thimble-demo-precache and version
+      DEMO_VERSION (the outputs alone, no transcript; a full export, the default of `thimble demo --export`, is another
+      version and is refused), and its README.md, and every other file in it is one the manifest lists as
+      workspace/<path> among its `files`
+    - each such <path> is of a kind the export writes (backend/app/demo_scrub.py workspace_kind): the cards
+      (notebooks/), the documents (investigations/<name>/*.json), the labels' definitions (concepts/*.json) and values
+      (labels/*.jsonl), the views' code and manifests (extension/extension.json, extension/views/<slug>/ view.json and
+      .html, .js, .mjs, .css, .py, .md or .svg files outside cache/, views/proposals.json), the orientation's record
+      (orient/run.json, orient/summary.md), the orientation's chat meta and its empty log (chats/<id>.meta.json,
+      chats/<id>.jsonl) and cited calls (calls/<id>.jsonl); no Claude Code transcript, no work file, no view index or
+      cache
+    - each such file has the shape the export writes (demo_scrub.shape_findings): no chat but the orientation's
+      (the manifest's orientation.chat) and its log empty; in a call log only the calls the manifest's `cited_calls`
+      lists, each output at most demo_scrub.CALL_KEPT lines of at most CALL_LINE_CHARS characters; no label row with
+      the texts a label marked (`spans`)
+    - README.md is there, and holds the manifest's `notice` (the source's own notice, such as mythos-5's canary string)
+    - each file is UTF-8 text of a kind the export writes (demo_scrub.TEXT_SUFFIXES: .json, .jsonl, .md, .txt, .py,
+      .html, .js, .mjs, .css, .svg), at most DEMO_FILE_MAX bytes, and the folder's files together at most DEMO_TOTAL_MAX
     - each file passes the export's scrub check (demo_scrub.findings): no absolute path under /home, /Users, /mnt or
       /root, and not this machine's user name as a word (unless it is a common one, demo_scrub.COMMON_USERS), except a
-      finding the manifest's `flagged` names for that file, which the maintainer kept with --allow-private; a
-      transcript also holds none of the records the export drops (demo_scrub.transcript_findings)
-gitleaks scans these files like every other, and the other rules (databases, caches, case) still apply to them.
+      finding the manifest's `flagged` names for that file, which the maintainer kept with --allow-private
+The export also refused any file that shares a long stretch with the dataset (backend/app/demo_verbatim.py); that
+check needs the dataset, which is not in the tree, so this one cannot repeat it. gitleaks scans these files like every
+other, and the other rules (databases, caches, case) still apply to them.
 """
 from __future__ import annotations
 
@@ -55,6 +68,8 @@ MAX_BYTES = 2_000_000
 DEMO = re.compile(r"^demos/([a-z0-9][a-z0-9-]*)/(.+)$")
 DEMO_MANIFEST = "thimble-demo-precache.json"
 DEMO_SCHEMA = "thimble-demo-precache"
+# the outputs alone (backend/app/demo.py VERSION); 2 carried the orientation's transcript, and 4 is the full export
+DEMO_VERSION = 3
 DEMO_FILE_MAX = 6_000_000
 DEMO_TOTAL_MAX = 30_000_000
 SCRUB = Path(__file__).resolve().parent.parent / "backend" / "app" / "demo_scrub.py"  # standard library only
@@ -113,10 +128,20 @@ def demo_hits(root: Path, rels: list[str]) -> list[tuple[str, int, str, str]]:
         if not isinstance(man, dict) or man.get("schema") != DEMO_SCHEMA:
             hits += [(f"{folder}/{sub}", 0, "demo", f"{folder} has no {DEMO_MANIFEST} of the export") for sub in inner]
             continue
-        transcripts = {str(t.get("path")) for t in man.get("transcripts") or [] if isinstance(t, dict)}
-        listed = ({DEMO_MANIFEST, "README.md"} | transcripts
-                  | {f"workspace/{f.get('path')}" for f in man.get("files") or [] if isinstance(f, dict)})
+        if man.get("version") != DEMO_VERSION:
+            hits += [(f"{folder}/{sub}", 0, "demo", f"{folder} is a pre-cache of version {man.get('version')}, not "
+                      f"{DEMO_VERSION} (the outputs alone, with no transcript: `thimble demo --export --outputs-only`)")
+                     for sub in inner]
+            continue
+        listed = {DEMO_MANIFEST, "README.md"} | {f"workspace/{f.get('path')}" for f in man.get("files") or []
+                                                 if isinstance(f, dict)}
         kept = {str(x) for x in man.get("flagged") or []}
+        try:
+            notice_ok = str(man.get("notice") or "") in (root / folder / "README.md").read_text("utf-8")
+        except (OSError, UnicodeDecodeError):
+            notice_ok = False
+        if not notice_ok:
+            hits.append((f"{folder}/README.md", 0, "demo", "missing, or without the source's notice the manifest names"))
         total = 0
         for sub in sorted(inner):
             rel, p = f"{folder}/{sub}", root / folder / sub
@@ -124,6 +149,9 @@ def demo_hits(root: Path, rels: list[str]) -> list[tuple[str, int, str, str]]:
             total += size
             if sub not in listed:
                 hits.append((rel, 0, "demo", f"a file the pre-cache's {DEMO_MANIFEST} does not list"))
+                continue
+            if sub.startswith("workspace/") and not scrub.workspace_kind(sub[len("workspace/"):]):
+                hits.append((rel, 0, "demo", "not one of the orientation's outputs the export writes"))
                 continue
             if not sub.lower().endswith(scrub.TEXT_SUFFIXES):
                 hits.append((rel, 0, "demo", "not a kind of file the export writes"))
@@ -139,9 +167,10 @@ def demo_hits(root: Path, rels: list[str]) -> list[tuple[str, int, str, str]]:
             if sub == DEMO_MANIFEST:  # its `flagged` names the findings kept, so it is checked without them
                 text = json.dumps({k: v for k, v in man.items() if k != "flagged"}, ensure_ascii=False)
             found = [f for f in scrub.findings(text, user) if f"{sub}: {f}" not in kept]
-            if sub in transcripts:
-                found += scrub.transcript_findings(text)
             hits += [(rel, 0, "demo", f"the export's scrub check: {f}") for f in found]
+            if sub.startswith("workspace/"):
+                hits += [(rel, 0, "demo", f"not as the export writes it: {f}")
+                         for f in scrub.shape_findings(sub[len("workspace/"):], text, man)]
         if total > DEMO_TOTAL_MAX:
             hits.append((folder + "/", 0, "demo", f"{total} bytes in all, over {DEMO_TOTAL_MAX}"))
     return hits

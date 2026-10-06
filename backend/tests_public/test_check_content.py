@@ -67,39 +67,88 @@ def precache(root: Path, name: str = "toy", **extra) -> dict[str, str]:
     """A pre-cache folder as `thimble demo --export` writes one: its manifest lists each file it keeps."""
     import json  # noqa: PLC0415
 
-    manifest = {"schema": "thimble-demo-precache", "files": [{"path": "labels/l.jsonl"}, {"path": "orient/run.json"}],
-                "transcripts": [{"path": "transcripts/orient.jsonl"}],
+    manifest = {"schema": "thimble-demo-precache", "version": 3, "notice": "Notice", "orientation": {"chat": "o1"},
+                "files": [{"path": "labels/l.jsonl"}, {"path": "orient/run.json"}, {"path": "chats/o1.jsonl"},
+                          {"path": "calls/o1.jsonl"}],
+                "cited_calls": [{"chat": "o1", "n": 2}],
                 "flagged": ["workspace/orient/run.json: /home/kept"], **extra}
     return {f"demos/{name}/thimble-demo-precache.json": json.dumps(manifest), f"demos/{name}/README.md": "> Notice\n",
             f"demos/{name}/workspace/labels/l.jsonl": '{"x": "' + "a" * 200 + '"}\n',
             f"demos/{name}/workspace/orient/run.json": '{"p": "/home/kept"}',
-            f"demos/{name}/transcripts/orient.jsonl": '{"type":"user","cwd":"@@THIMBLE_WORKSPACE@@"}\n'}
+            f"demos/{name}/workspace/chats/o1.jsonl": "",
+            f"demos/{name}/workspace/calls/o1.jsonl": json.dumps({"n": 2, "result": "line\n" * 30}) + "\n"}
 
 
 def test_a_precache_folder_is_allowed_on_the_terms_of_its_exception_only(cc, tmp_path, monkeypatch):
+    import json  # noqa: PLC0415
+
     monkeypatch.setattr(cc, "MAX_BYTES", 100)
     monkeypatch.setattr(cc.getpass, "getuser", lambda: "maintainer")
     write(tmp_path, precache(tmp_path))
     # .jsonl files, one over MAX_BYTES, and a path the manifest's `flagged` kept: allowed
     assert hits(cc, tmp_path) == [] and cc.demo_hits(tmp_path, cc.files_of(tmp_path)) == []
-    write(tmp_path, {"demos/toy/workspace/extra.json": "{}",
+    listed = precache(tmp_path)
+    man = json.loads(listed["demos/toy/thimble-demo-precache.json"])
+    man["files"] += [{"path": "orient/work/rows.json"}, {"path": "extension/views/v/cache/index.json"}]
+    write(tmp_path, {"demos/toy/thimble-demo-precache.json": json.dumps(man),
+                     "demos/toy/workspace/extra.json": "{}",
                      "demos/toy/workspace/orient/run.json": '{"p": "/home/kept", "by": "maintainer", "q": "/mnt/d/x"}',
-                     "demos/toy/transcripts/orient.jsonl":
-                         '{"type":"attachment","attachment":{"type":"instructions"}}\n',
+                     "demos/toy/workspace/orient/work/rows.json": "[]",
+                     "demos/toy/workspace/extension/views/v/cache/index.json": "{}",
+                     "demos/toy/transcripts/orient.jsonl": '{"type":"user"}\n',
                      "demos/toy/workspace/labels/l.db": b"\0",
                      "demos/other/workspace/a.jsonl": "{}\n",
+                     "demos/old/thimble-demo-precache.json": json.dumps({"schema": "thimble-demo-precache", "version": 2}),
+                     "demos/full/thimble-demo-precache.json": json.dumps({"schema": "thimble-demo-precache", "version": 4,
+                                                                          "format": "full"}),
                      "elsewhere/run.jsonl": "{}\n"})
     rels = cc.files_of(tmp_path)
     got = {(h[0], h[3]) for h in hits(cc, tmp_path) + cc.demo_hits(tmp_path, rels)}
+    unlisted = "a file the pre-cache's thimble-demo-precache.json does not list"
+    not_output = "not one of the orientation's outputs the export writes"
     assert got == {
-        ("demos/toy/workspace/extra.json", "a file the pre-cache's thimble-demo-precache.json does not list"),
+        ("demos/toy/workspace/extra.json", unlisted),
         ("demos/toy/workspace/orient/run.json", "the export's scrub check: the user name 'maintainer'"),
         ("demos/toy/workspace/orient/run.json", "the export's scrub check: /mnt/d"),
-        ("demos/toy/transcripts/orient.jsonl", "the export's scrub check: attachment:instructions (1)"),
+        ("demos/toy/workspace/orient/work/rows.json", not_output),
+        ("demos/toy/workspace/extension/views/v/cache/index.json", not_output),
+        ("demos/toy/transcripts/orient.jsonl", unlisted),
         ("demos/toy/workspace/labels/l.db", "a file of a kind that never belongs in the tree"),
-        ("demos/toy/workspace/labels/l.db", "a file the pre-cache's thimble-demo-precache.json does not list"),
+        ("demos/toy/workspace/labels/l.db", unlisted),
         ("demos/other/workspace/a.jsonl", "demos/other has no thimble-demo-precache.json of the export"),
+        ("demos/old/thimble-demo-precache.json", "demos/old is a pre-cache of version 2, not 3 (the outputs alone, "
+         "with no transcript: `thimble demo --export --outputs-only`)"),
+        ("demos/full/thimble-demo-precache.json", "demos/full is a pre-cache of version 4, not 3 (the outputs alone, "
+         "with no transcript: `thimble demo --export --outputs-only`)"),
         ("elsewhere/run.jsonl", "a file of a kind that never belongs in the tree")}
+
+
+def test_a_precache_holds_the_shape_the_export_writes(cc, tmp_path):
+    """Beyond its kinds of file: the orientation's chat alone, with an empty log; the cited calls alone, each cut to an
+    excerpt; label rows without the texts they marked; and the README with the source's notice."""
+    import json  # noqa: PLC0415
+
+    listed = precache(tmp_path)
+    man = json.loads(listed["demos/toy/thimble-demo-precache.json"])
+    man["files"] += [{"path": "chats/t9.meta.json"}]
+    write(tmp_path, {**listed, "demos/toy/thimble-demo-precache.json": json.dumps(man),
+                     "demos/toy/README.md": "no notice here\n",
+                     "demos/toy/workspace/chats/o1.jsonl": '{"type": "tool_result"}\n',
+                     "demos/toy/workspace/chats/t9.meta.json": "{}",
+                     "demos/toy/workspace/labels/l.jsonl": json.dumps({"ref": "a#L1", "spans": ["the text"]}) + "\n",
+                     "demos/toy/workspace/calls/o1.jsonl": json.dumps({"n": 2, "result": "x" * 501}) + "\n"
+                                                           + json.dumps({"n": 7, "input": "{}"}) + "\n"})
+    got = {(h[0], h[3]) for h in cc.demo_hits(tmp_path, cc.files_of(tmp_path))}
+    shape = "not as the export writes it: "
+    assert got == {
+        ("demos/toy/README.md", "missing, or without the source's notice the manifest names"),
+        ("demos/toy/workspace/chats/o1.jsonl", shape + "the orientation's log, which the export writes empty"),
+        ("demos/toy/workspace/chats/t9.meta.json", shape + "a chat other than the orientation's"),
+        ("demos/toy/workspace/labels/l.jsonl", shape + "a label row with spans (the texts a label marked)"),
+        ("demos/toy/workspace/calls/o1.jsonl", shape + "call 2's output is longer than the excerpt the export keeps")}
+    write(tmp_path, {"demos/toy/workspace/calls/o1.jsonl": json.dumps({"n": 7, "input": "{}"}) + "\n"})
+    got = {(h[0], h[3]) for h in cc.demo_hits(tmp_path, cc.files_of(tmp_path))}
+    assert ("demos/toy/workspace/calls/o1.jsonl", shape + "a call the manifest's cited_calls does not list") in got
 
 
 def test_a_precache_has_size_caps_of_its_own(cc, tmp_path, monkeypatch):

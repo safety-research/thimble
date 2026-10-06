@@ -60,6 +60,30 @@ def fake(monkeypatch, home):
     return sp
 
 
+def test_up_gives_a_new_session_the_precached_context_once(home, data, monkeypatch, capsys):
+    """/thimble in a session new to a workspace `thimble demo` installed from a pre-cache: the line says the session
+    starts fresh from the orientation's cards and report, and the context the server rendered follows the lines the
+    model repeats (precached.take_context answers it once per session)."""
+    _healthy_no_process(monkeypatch)
+    asked = []
+
+    def request(m, u, b=None, timeout=5.0):
+        if m == "POST" and u.endswith("/api/ws/mini/precached/context"):
+            asked.append(b["session"])
+            return 200, {"text": "This workspace was installed from a pre-cache.\n\n## The canvas\n\n- card:c1" if len(asked) == 1 else ""}
+        return 404, {"detail": "Not Found"}
+
+    monkeypatch.setattr(cli, "_request", request)
+    assert cli.main(["up", "--cwd", str(data / "mini" / "agents"), "--session", "s9"]) == 0
+    out = capsys.readouterr().out
+    assert out.splitlines()[:2] == [cli.LINK_LINE, cli.PRECACHED_LINE] and out.rstrip().endswith("- card:c1")
+    assert cli.main(["up", "--cwd", str(data / "mini" / "agents"), "--session", "s9"]) == 0
+    assert capsys.readouterr().out.splitlines() == [cli.LINK_LINE] and asked == ["s9", "s9"]
+    # a bare `thimble up` in a shell is no session: nothing is asked
+    assert cli.main(["up", "--cwd", str(data / "mini" / "agents")]) == 0
+    assert asked == ["s9", "s9"]
+
+
 def test_two_concurrent_ups_start_one_uvicorn(fake, home):
     results: list[bool] = []
 
@@ -91,6 +115,8 @@ def test_up_prints_the_url_and_opens_a_sessions_folder(home, data, monkeypatch, 
     def request(m, u, b=None, timeout=5.0):
         if m != "POST":
             return 404, {"detail": "Not Found"}
+        if u.endswith("/precached/context"):  # no workspace here was installed from a pre-cache
+            return 200, {"text": ""}
         posted.append((u, b))
         return 201, {"name": Path(b["path"]).name}
 

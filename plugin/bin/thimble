@@ -24,10 +24,13 @@
 #   thimble plugin on | off | status     thimble in every Claude Code session, or only in the sessions this command
 #                                        starts, which load its plugin either way (scripts/plugin.sh, bash: it needs no
 #                                        venv)
-#   thimble demo [name…] [--yes] [--dir <d>] [--attach] | --export <workspace> <out>
+#   thimble demo [name…] [--yes] [--dir <d>] [--attach | --no-attach] | --export <workspace> <out> [--outputs-only]
 #                                        download the demo datasets from their public sources (asking first), open each
-#                                        in the browser, on its pre-cached orientation where demos/ has one, print how
-#                                        to attach a session; --attach starts thimble in the first (backend/app/demo.py)
+#                                        in the browser, on its pre-cached orientation where demos/ has one, ask on a
+#                                        terminal whether to attach a session and print how to attach one later;
+#                                        --export writes a workspace whole, with its sessions' transcripts, and lists
+#                                        what it holds (--outputs-only: the outputs alone, for demos/)
+#                                        (backend/app/demo.py)
 #   thimble launch-args [--cwd <p>] [--settings <s>]
 #                                        what a session starts with: the plugin folder, the --allowedTools, --effort and
 #                                        --settings values, the tools that end a turn without text, main's --name, then
@@ -90,9 +93,13 @@ usage: thimble [claude flags...]          start thimble in this folder: a new Cl
                                           folder
        thimble plugin on | off | status   thimble in every Claude Code session (/thimble in any `claude`), or
                                           only in the sessions `thimble` starts
-       thimble demo [name...] [--yes] [--dir <d>] [--attach]
-                                          download public datasets (collusion-wiki, rubyhack, mythos-5), asking
-                                          first, and open each, on a pre-cached orientation where there is one
+       thimble demo [name...] [--yes] [--dir <d>] [--attach | --no-attach]
+                                          download public datasets (collusion-wiki, mythos-5, transluce-gov,
+                                          transluce-urlquery), asking first, open each, on a pre-cached
+                                          orientation where there is one, and ask whether to attach a session
+       thimble demo --export <workspace> <out> [--outputs-only]
+                                          write a workspace whole, with its sessions' transcripts, and list
+                                          what it holds; --outputs-only writes the outputs alone (demos/)
        thimble update [--from <zip>]      bring the install up to date
        thimble uninstall [--yes] [--keep-home]
 EOF

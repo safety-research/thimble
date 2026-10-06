@@ -143,35 +143,53 @@ it. To use it without installing thimble, see the [mod's README](mods/thimble-cc
 
 ## Demo datasets
 
-`thimble demo` opens thimble on public data. It lists three datasets with their sources and sizes, asks before each download (`--yes` answers for all, or name the ones you want), and rebuilds each
-from its publisher's files into `~/thimble-demo/<name>` (`--dir` moves it):
+`thimble demo` opens thimble on public data. It lists four datasets with their sources, publishers and sizes, asks
+before each download (`--yes` answers for all, or name the ones you want), and rebuilds each from its publisher's files
+into `~/thimble-demo/<name>` (`--dir` moves it). thimble redistributes none of them: each is downloaded from its
+publisher on your machine.
 
 | dataset | source | download |
 |---|---|---|
 | `collusion-wiki` | the logs of a wiki AI agents used as a message board, from [collusion.wiki](https://collusion.wiki/) | 4.4 MB |
-| `rubyhack` | the diffs of 22 malicious Ruby gems that the [RubyHack investigation](https://www.rubyhack.ai/) cites, from my.diffend.io, with API keys redacted | 1.2 MB |
 | `mythos-5` | the [Mythos 5 transcript](https://github.com/anthropics/mythos-5-incident-transcript) Anthropic released | 2.6 MB |
+| `transluce-gov` | the request logs behind Transluce's report [AI Agents Targeted U.S. and Canadian Government Websites](https://transluce.org/us-canada-gov) (2026-09-30), from transluce.org; 246 MB on disk | 19.0 MB |
+| `transluce-urlquery` | Transluce's catalog of 38,160 urlquery.net reports likely made by AI agents, from its report [Early rogue AI agent activity and attempts to hack found on urlquery.net](https://transluce.org/agent-activity) (2026-09-23) | 4.6 MB |
 
 Each build is checked against the copy the demo's orientations ran on; a source that changed since is named in a
-warning. `~/thimble-demo/SOURCES.md` lists what each build changes. The command then registers each folder. Where
-[demos/](demos/README.md) in the repository has a pre-cached orientation for the dataset, it installs it as the
-folder's workspace: the cards, labels, views, report and the orientation's thread, and the orientation's Claude Code
-transcript where Claude Code resumes it. A dataset without one opens with no analysis yet, and Start in the page runs
-the orientation. It opens the workspace in your browser, without starting a Claude Code session, and prints how to
-attach one:
+warning, and the Transluce builds go on with what they got. `~/thimble-demo/SOURCES.md` lists who published each
+dataset, where it was downloaded from and what each build changes. Neither Transluce dataset states a licence. Claude's
+cyber safeguards stopped an Opus 5.5 session that read a sample of `transluce-gov`, which holds SQL injection and other
+probe requests, so an orientation or a session on it may be stopped too.
+
+The command then registers each folder. Where [demos/](demos/README.md) in the repository has a pre-cached
+orientation for the dataset, it installs it as the folder's workspace: the cards, labels, views and report. A
+pre-cache holds the orientation's outputs alone, so its Claude Code session is not included. A dataset without one
+opens with no analysis yet, and Start in the page runs the orientation. It opens the workspace in your browser without
+a Claude Code session; in the orientation's thread, "Attach a fresh session" shows the command that attaches one.
+
+On a terminal it then asks `Attach a Claude Code session now? (requires claude to be logged in)`, Enter for yes, once
+`claude auth status` says you are logged in (when you are not, it says how to log in and asks nothing). `--attach`
+answers yes, `--no-attach` no. Either way it prints how to attach later:
 
 ```bash
-cd ~/thimble-demo/collusion-wiki && thimble   # main, the session you chat with in the page
+cd ~/thimble-demo/collusion-wiki && thimble     # main, the session you chat with in the page
+cd ~/thimble-demo/collusion-wiki && thimble -c  # continue the last session there
 ```
 
-To continue a pre-cached orientation, type in its thread in the page or ask main to message the orientation: its
-session resumes with everything it read and did. While it runs, its thread shows its work, and an attached session
-shows it in Claude Code's agent tray as `thimble:orient · <name>`. `--attach` starts main directly instead of only
-opening the page.
+A session attached to a pre-cached workspace starts fresh, with the orientation's cards and report as its context.
 
 A workspace that holds an analysis already is left as it is unless `--replace`, which archives it first. Run again,
-it downloads nothing it already has. [demos/README.md](demos/README.md) says what a pre-cache holds and how a
-maintainer makes one with `thimble demo --export`.
+it downloads nothing it already has.
+
+`thimble demo --export <workspace> <out>` writes everything in a workspace as `<out>/<dataset>/`: the cards, labels,
+views and documents, every chat and call output, the work files, and the Claude Code transcripts of the sessions
+thimble ran in it (the orientation, its critic, the writers, view builds). It ends with an inventory of what it wrote:
+the transcripts, the chats, the call outputs, the label rationales, how much of the dataset's text it holds, what may
+be private (your user name, absolute paths, gitleaks' findings), what it left out and the size of each. It holds the
+dataset's text, so share it only where you may share the dataset. `thimble demo <dataset> --precaches <out>` installs
+it, and a message in the orientation's thread continues the orientation's session. `--outputs-only` writes the
+orientation's outputs alone, the pre-caches demos/ holds; [demos/README.md](demos/README.md) says what one holds and
+how a maintainer makes one.
 
 ## Update
 
