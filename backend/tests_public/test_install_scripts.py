@@ -980,11 +980,13 @@ def test_a_new_login_shell_finds_thimble_and_its_home(tmp_path, shell, run):
 
 def test_help_lists_the_commands_an_analyst_uses_and_fix_and_revert_only_in_a_clone(tmp_path):
     """`thimble help` lists the commands an analyst uses. server, status, launch-args and prompt still run when typed but
-    are not listed; fix and revert change thimble's own code, so only a development install (a git clone) lists them."""
+    are not listed, nor are state and act, terminal mode's renderer's; fix and revert change thimble's own code, so only
+    a development install (a git clone) lists them."""
     listed = ("thimble [claude flags...]", "thimble demo", "thimble list", "thimble purge", "thimble extension",
-              "thimble cc-mod", "thimble plugin", "thimble doctor", "thimble feedback", "thimble update",
+              "thimble cc-mod", "thimble plugin", "thimble mode", "thimble doctor", "thimble feedback", "thimble update",
               "thimble uninstall")
-    unlisted = ("thimble server", "thimble status", "thimble launch-args", "thimble prompt")
+    unlisted = ("thimble server", "thimble status", "thimble launch-args", "thimble prompt", "thimble state",
+                "thimble act")
     for checkout in (False, True):
         tree = fake_tree(tmp_path / f"tree-{checkout}", checkout=checkout)
         thimble = ["bash", str(tree / "plugin" / "bin" / "thimble")]

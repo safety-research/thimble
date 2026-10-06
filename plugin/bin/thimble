@@ -25,6 +25,14 @@
 #   thimble plugin on | off | status     thimble in every Claude Code session, or only in the sessions this command
 #                                        starts, which load its plugin either way (scripts/plugin.sh, bash: it needs no
 #                                        venv)
+#   thimble mode [browser | terminal] [--default] | --unset [--default]
+#                                        the mode `thimble` starts in, in this folder or by default: browser (the server
+#                                        and the browser workspace) or terminal (Claude Code with the renderer plugin, and
+#                                        no server); backend/app/launch_mode.py, run with python3: it needs neither the
+#                                        venv nor the server
+#   thimble state <surface> --cwd <p> [args] | act <kind> --cwd <p> <json>
+#                                        terminal mode's renderer: the JSON a surface's GET route gives the browser, or
+#                                        what a click's POST route does, with no server and no port (backend/app/local.py)
 #   thimble demo [name…] [--yes] [--dir <d>] [--attach | --no-attach] | --export <workspace> <out> [--outputs-only]
 #                                        download the demo datasets from their public sources (asking first), open each
 #                                        in the browser, on its pre-cached orientation where demos/ has one, ask on a
@@ -47,8 +55,8 @@
 #
 #   thimble status                       one line: the server, the orientation, the queue (`server status`)
 #   thimble help | -h | --help           thimble's usage (usage, below): the commands an analyst uses; server, status,
-#                                        launch-args and prompt are left out, and fix and revert are listed only in a
-#                                        development install
+#                                        launch-args, prompt, state and act are left out, and fix and revert are listed
+#                                        only in a development install
 #
 # Dispatch: no arguments, or a first argument that starts with `-`, launches a session (the arguments go to `claude`);
 # a supervisor subcommand runs backend/app/cli.py with THIMBLE_CALLER_CWD set; any other word prints the usage and
@@ -73,8 +81,9 @@ plugin="$(cd "$here/.." && pwd -P)"
 SUPERVISOR_COMMANDS=" server up ensure stop restart doctor fix revert update list purge extension cc-mod launch-args prompt demo "
 
 # usage: what `thimble help` prints, the commands an analyst uses; the header above has the details. `server`,
-# `status`, `launch-args` and `prompt` run when typed and are not listed (CONTRIBUTING.md has them). `fix` and `revert`
-# change thimble's own code, which only a development install can do, so they are listed there alone.
+# `status`, `launch-args`, `prompt`, `state` and `act` run when typed and are not listed (CONTRIBUTING.md has them).
+# `fix` and `revert` change thimble's own code, which only a development install can do, so they are listed there
+# alone.
 usage() {
   cat <<'EOF'
 usage: thimble [claude flags...]          start thimble in this folder: a new Claude Code session with the
@@ -98,6 +107,10 @@ usage: thimble [claude flags...]          start thimble in this folder: a new Cl
                                           folder
        thimble plugin on | off | status   thimble in every Claude Code session (/thimble in any `claude`), or
                                           only in the sessions `thimble` starts
+       thimble mode [browser | terminal] [--default] | --unset [--default]
+                                          where `thimble` in this folder shows its work: in the browser, or in
+                                          the terminal alone with no server (--default: every folder without
+                                          its own mode)
        thimble doctor                     what is installed and running, and what is wrong
        thimble feedback ["what went wrong"] [--no-logs]
                                           write a problem report to send the developer
@@ -139,6 +152,18 @@ rendered_prompts() {
   done
   [ -n "$names" ] || return 1
   for n in $names; do printf '%s' "$sep"; cat "$dir/$n.md"; sep=$'\n'; done
+}
+
+# launch_mode ARGS…: backend/app/launch_mode.py of the tree this copy belongs to, run with python3, else the tree's
+# venv: the file uses only the standard library, so `thimble mode` needs neither the venv nor the server
+launch_mode() {
+  local repo py
+  repo="$("$here/thimble-app-dir")" || return 1
+  for py in python3 "$repo/backend/.venv/bin/python"; do
+    command -v "$py" >/dev/null 2>&1 || continue
+    "$py" -I "$repo/backend/app/launch_mode.py" "$@"; return
+  done
+  printf 'thimble: no python3 was found to read the mode with\n' >&2; return 1
 }
 
 # feedback [--skill] ARGS…: the problem report (backend/app/feedback.py), run as that module alone so it works when the
@@ -521,6 +546,15 @@ case "${1:-}" in
     exec bash "$repo/scripts/plugin.sh" "$@";;
   status)
     shift; exec "$self" server status "$@";;
+  mode)
+    shift; launch_mode cli "$PWD" "$@"; exit;;
+  state | act)
+    # terminal mode's renderer reads a surface and acts as the browser would, through thimble's backend in this process
+    # (backend/app/local.py), which opens no port; on failure it prints {"error": …} and exits 1, as local.py does
+    repo="$("$here/thimble-app-dir" 2>/dev/null)" || { printf '{"error": "thimble cannot find its install"}\n'; exit 1; }
+    export THIMBLE_CALLER_CWD="${THIMBLE_CALLER_CWD:-$PWD}" THIMBLE_PLUGIN_ROOT="$plugin"
+    cd "$repo/backend"
+    exec "$here/thimble-python" -m app.local "$@";;
   *)
     if [[ "$SUPERVISOR_COMMANDS" == *" $1 "* ]]; then
       if [ "$1" = prompt ] && rendered_prompts "${@:2}"; then exit 0; fi
