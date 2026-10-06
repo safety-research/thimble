@@ -195,6 +195,20 @@ def test_a_descendant_registers_under_its_parent_and_takes_its_effort_unless_it_
     assert unknown is None, "the analyst's own subagent is no business of thimble's"
 
 
+def test_a_typed_run_s_helper_child_keeps_the_helper_s_own_effort():
+    """thimble:helper is registered with Settings' "orientation subagents" row, so a typed run's effort is not recorded
+    for it: the module reads the record again after /clear and /resume, and its step hook would then run the helper at
+    the run's effort (live check L34, group c)."""
+    state: dict = {}
+    sf.registry(state)["o1"] = {"role": "orientation", "key": "orient", "status": "running", "work": "/w/o"}
+    sf.efforts(state)["o1"] = "high"
+    sf.check_call(state, {**agent_call("h", call="toolu_hh1", caller="o1"),
+                          "tool_input": {"subagent_type": "thimble:helper", "description": "d", "prompt": "h"}})
+    helper = sf.register(state, {"agent_id": "h1", "agent_type": "thimble:helper", "session_id": MAIN_SID})
+    assert helper["parent"] == "o1" and helper["role"] == sf.HELPER
+    assert "h1" not in sf.efforts(state), "the helper runs on its own registration's effort"
+
+
 def test_two_callers_of_one_type_leave_the_parent_to_the_first_call():
     state: dict = {}
     for a in ("o1", "w1"):

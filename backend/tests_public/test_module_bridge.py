@@ -663,7 +663,10 @@ async def test_the_state_holds_running_agents_their_efforts_the_typed_starts_and
             "aClick": {"type": "thimble:writer", "key": "writer:report", "plugin_started": True,
                        "values": {"effort": "high"}},
             "aCheck": {"type": "thimble:check", "key": "check:unverified:report", "plugin_started": True},
-            "aDone": {"type": "thimble:check", "key": "check:c1:report", "status": "stopped"}},
+            # a follow-up's run: running again, with the end of its earlier run kept (live check L17, group c)
+            "aAgain": {"type": "thimble:writer", "key": "writer:story", "plugin_started": True, "status": "running",
+                       "run": 2, "ended": 1791280306.25, "ended_run": 1},
+            "aDone": {"type": "thimble:check", "key": "check:c1:report", "status": "stopped", "ended": 1791280306.25}},
         "efforts": {"aOwn": "medium"},
         "pending": {
             "orient": {"id": "req0001orient", "kind": "start", "route": "typed", "role": "orientation",
@@ -675,7 +678,7 @@ async def test_the_state_holds_running_agents_their_efforts_the_typed_starts_and
     mod = Module(client, plugin_headers)
     await mod.hello()
     state = (await mod.get("state")).json()
-    assert set(state["agents"]) == {"aTyped", "aGp", "aGp2", "aCritic", "aCriticKid", "aClick", "aCheck"}
+    assert set(state["agents"]) == {"aTyped", "aGp", "aGp2", "aCritic", "aCriticKid", "aClick", "aCheck", "aAgain"}
     assert state["agents"]["aClick"] == {"type": "thimble:writer", "role": "writer", "plugin_started": True}
     assert state["efforts"] == {"aTyped": "max", "aGp": "max", "aGp2": "max", "aCritic": "low",
                                 "aCriticKid": "low", "aOwn": "medium"}, \
@@ -685,7 +688,8 @@ async def test_the_state_holds_running_agents_their_efforts_the_typed_starts_and
     assert sorted(state["notes"]) == sorted([
         "The analyst started orientation aTyped (this corpus) in thimble; its report goes to them there.",
         "The analyst started writer aClick (report) in thimble; its report goes to them there.",
-        "The analyst started check aCheck (unverified on report) in thimble; its report goes to them there."]), \
+        "The analyst started check aCheck (unverified on report) in thimble; its report goes to them there.",
+        "The analyst started writer aAgain (story) in thimble; its report goes to them there."]), \
         "worded as the note at the agent's start (subagents._what)"
 
 

@@ -82,6 +82,15 @@ WORK_DIRS = ("orient/work", "writers", "critique-work", "check-work", "views-wor
 LIMIT_RE_WORDS = ("concurrent", "subagents")  # Claude Code's concurrency-limit text holds both (R2, the module's answer)
 # the label Claude Code puts before a PreToolUse hook's deny in what $.agent.spawn and $.tool.call answer
 HOOK_ERROR_RE = re.compile(r"^\s*PreToolUse:[A-Za-z]+ hook error:\s*")
+# $.agent.spawn's own text when as many of the plugin's spawns run as CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS allows
+# ("thimble: $.agent.spawn refused: 2 spawns are running at once", 2.1.291; live check L19)
+SPAWN_LIMIT_TEXT = "spawns are running at once"
+
+
+def limit_text(text: str) -> bool:
+    """Whether `text` is Claude Code's concurrency-limit text: the Agent tool's (LIMIT_RE_WORDS) or $.agent.spawn's."""
+    low = str(text or "").lower()
+    return bool(low) and (all(w in low for w in LIMIT_RE_WORDS) or SPAWN_LIMIT_TEXT in low)
 
 
 def _now() -> str:
@@ -392,7 +401,7 @@ def _from_module(raw: Any, why: Callable[[], str] = lambda: "") -> Answer:
     if isinstance(ans.get("deny"), str):  # thimble's own reason, as the analyst reads it, without Claude Code's label
         ans["deny"] = HOOK_ERROR_RE.sub("", ans["deny"]) or ans["deny"]
     text = str(ans.get("error") or ans.get("deny") or "")
-    if "limit" not in ans and text and all(w in text.lower() for w in LIMIT_RE_WORDS):
+    if "limit" not in ans and limit_text(text):
         return Answer({"limit": text})
     return ans
 

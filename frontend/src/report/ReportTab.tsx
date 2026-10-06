@@ -30,7 +30,7 @@ import { LockNote } from './LockNote'
 import { ExportMenu } from './ExportMenu'
 import { docKey, docLabel, labelReadDocument, ownType, rendererOf, reportFilterSets, SLUG, switcherItems } from './model'
 import { WriteAction } from './WriteAction'
-import { failedDetail, failedReport, failedText, noteRefusal, useWriteFailures, useWriteRefusals, WRITE_RETRY_NOTE } from './writeFailures'
+import { failedDetail, failedReport, failedText, noteRefusal, useWriteFailures, useWriteRefusals, WRITE_RETRY_NOTE, writingAfter } from './writeFailures'
 import { RefusedCard } from '../chat/Refused'
 import { ApiErrorCard } from '../chat/ApiError'
 import { failureText, loadChunk } from '../lib/chunkRecovery'
@@ -203,8 +203,8 @@ export function ReportTab({ ws, active }: { ws: string; active: boolean }) {
         const evSlug = typeof e.slug === 'string' ? e.slug : ''
         if (!evSlug) return
         // a failure's mark on the document and its card come from writeFailures.ts
-        if (e.status === 'generating') setGenerating((g) => ({ ...g, [evSlug]: true }))
-        else if (e.status === 'generated' || e.status === 'failed') setGenerating((g) => ({ ...g, [evSlug]: false }))
+        const writing = writingAfter(e.status)
+        if (writing !== null) setGenerating((g) => ({ ...g, [evSlug]: writing }))
         if (e.status === 'deleted' || e.status === 'created' || e.status === 'renamed') {
           // a type made, renamed or deleted, here or in another tab or by the chat: the bar follows, and a deleted
           // document shown goes back to the report

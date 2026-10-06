@@ -80,6 +80,15 @@ export function nextRefusals(cur: Readonly<Record<string, WriteRefusal>>, ev: Ws
   return cur as Record<string, WriteRefusal>
 }
 
+/** Whether a document is being written after a `report` event's status: true once its write starts (`generating`),
+ * false once it ends saved, failed or refused (a start the module refused after the write began, such as Claude Code's
+ * concurrency limit, live check L19), else null (no change). Pure. */
+export function writingAfter(status: unknown): boolean | null {
+  if (status === 'generating') return true
+  if (status === 'generated' || status === 'failed' || status === 'refused') return false
+  return null
+}
+
 let refusals: Record<string, WriteRefusal> = {}
 
 let failures: Record<string, WriteFailure> = {}

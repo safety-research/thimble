@@ -185,6 +185,9 @@ class Sub:
         # this Sub writes is numbered in the orientation's sequence, its record carries `n`, and each result is stored
         # whole
         self.calls: Any = None
+        # when main left the session this one's agent is carried into (/clear, /resume): the records its file there
+        # holds from before then were read while that session was main's, and are skipped (_carry, rekeyed)
+        self.skip_before: float | None = None
 
 
 class Live:
@@ -770,7 +773,7 @@ def _follow(c: str, old: str, new: str, cwd: str, pid: int | None, config_dir: s
     lv = attach(c, new, cwd, None, pid, config_dir, follow=True)  # detaches `old` as replaced when it is attached
     if lv is None:
         return
-    _carry(lv, carried)
+    _carry(lv, carried, _left_at(c, old))
     if cur is None:
         _mark_ended(c, old, "replaced")
     # a transcript /clear started holds only this session, so read it from its start and nothing typed before the shim
@@ -1478,9 +1481,10 @@ def _thimble_sub(lv: Live, chat: str, agent_id: str, tool_use_id: str | None, ch
     return sub
 
 
-def _carry(lv: Live, carried: "list[Sub]") -> None:
+def _carry(lv: Live, carried: "list[Sub]", left: float | None = None) -> None:
     """Thimble's agents carried from the session main left (/clear, /resume) into `lv`: the chats attach found for them
-    go, and each is read on in the new session's folder from its start (U1: the file there continues the old one)."""
+    go, and each is read on in the new session's folder from its start (U1: the file there continues the old one),
+    without what that file held from before main left at `left` (_after_move)."""
     if not carried:
         return
     chats = {s.chat for s in carried}
@@ -1489,7 +1493,7 @@ def _carry(lv: Live, carried: "list[Sub]") -> None:
         if sub.path is not None:
             lv.sub_paths.discard(str(sub.path))
     for sub in carried:
-        sub.path, sub.offset, sub.buf = None, 0, b""
+        sub.path, sub.offset, sub.buf, sub.skip_before = None, 0, b"", left
     lv.subs += carried
     lv.wake.set()
 
@@ -1516,10 +1520,11 @@ def rekeyed(c: str, old: str, new: str, moved: "list[str]") -> None:
     lv = _live.get(c)
     if lv is None or lv.sid != new:
         return
+    left = _left_at(c, old)
     for sub in lv.subs:
         if sub.agent_id in moved and sub.path is not None and lv.sid not in str(sub.path):
             lv.sub_paths.discard(str(sub.path))
-            sub.path, sub.offset, sub.buf = None, 0, b""
+            sub.path, sub.offset, sub.buf, sub.skip_before = None, 0, b"", left
     lv.wake.set()
 
 
@@ -1867,6 +1872,8 @@ def _tail_sub(lv: Live, sub: Sub) -> int:
         agents.set_running(lv.c, sub.chat, True)
     lines = (sub.buf + data).split(b"\n")
     sub.buf = lines.pop()
+    if sub.skip_before is not None:
+        lines = _after_move(sub, lines)
     if sub.done and not sub.thread and sub.owner is None and not sub.workflow:
         how = _resumed(lines, strict=bool(sub.thimble))
         if how:
@@ -1886,6 +1893,37 @@ def _tail_sub(lv: Live, sub: Sub) -> int:
     if done and sub.agent_id and sub.agent_id in _events().asking(lv.c):
         _events().calls_done(lv.c, sub.agent_id, done)
     return n
+
+
+def _after_move(sub: Sub, lines: list[bytes]) -> list[bytes]:
+    """The lines of a carried agent's file written since main moved into this session (sub.skip_before): /resume back
+    to a session whose folder holds the agent's file from before /clear appends to that file, whose earlier records the
+    mirror read while that session was main's (live check L17). From the first line written since, every line is
+    kept, and the skip ends."""
+    for i, line in enumerate(lines):
+        try:
+            rec = json.loads(line) if line.strip() else {}
+            ts = rec.get("timestamp") if isinstance(rec, dict) else None
+            at = datetime.fromisoformat(str(ts).replace("Z", "+00:00")).timestamp() if ts else None
+        except ValueError:
+            at = None
+        if at is not None and at >= (sub.skip_before or 0.0):
+            sub.skip_before = None
+            return lines[i:]
+    return []
+
+
+def _left_at(c: str, old: str) -> float | None:
+    """When main left its session `old` (/clear, /resume): the time its SessionEnd hook recorded (subagents.json
+    `main_end`), else None. Claude Code writes an agent's records into the new session's folder only after it."""
+    from . import subagents  # noqa: PLC0415 — subagents imports this module
+
+    try:
+        end = subagents.read(c).get("main_end") or {}
+    except Exception:  # noqa: BLE001
+        return None
+    at = end.get("at") if isinstance(end, dict) and end.get("session") == old else None
+    return float(at) if isinstance(at, (int, float)) and not isinstance(at, bool) else None
 
 
 def _results(sub: Sub, lines: list[bytes]) -> list[tuple[tuple[str, str], float]]:
@@ -2148,7 +2186,8 @@ def translate_sub(lv: Live, sub: Sub, line: bytes | str) -> int:
     origin = rec.get("origin") if isinstance(rec.get("origin"), dict) else {}
     if rec.get("type") == "user" and origin.get("kind") in ("peer", "task-notification"):
         return 0  # a hand-back or a notice from a subagent this one started, which is no line of this chat
-    if rec.get("type") == "user" and not sub.thread and not rec.get("isMeta"):
+    # a compaction's summary (isCompactSummary) is Claude Code's, written as a user record: no message of anyone's
+    if rec.get("type") == "user" and not sub.thread and not rec.get("isMeta") and not rec.get("isCompactSummary"):
         prompt = _user_text(rec)
         if prompt and prompt.strip() and not prompt.lstrip().startswith("<"):
             if INTERRUPT_RE.match(prompt.strip()):
@@ -2280,7 +2319,7 @@ def translate(lv: Live, line: bytes | str) -> None:
             if isinstance(b, dict) and b.get("type") == "tool_result" and isinstance(b.get("tool_use_id"), str):
                 _tool_result(lv, b["tool_use_id"], b.get("content"), bool(b.get("is_error")))
         text = _user_text(rec)
-        if text is None:
+        if text is None or rec.get("isCompactSummary"):  # a compaction's summary is no prompt of the analyst's
             return
         if origin == OLD_ORIGIN:  # a 0.5.0 transcript's event, read again (OLD_TAG)
             _browser_event(lv, text, mid_turn=False)

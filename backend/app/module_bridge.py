@@ -963,8 +963,13 @@ def _role_of(kind: Any) -> str:
 
 
 def _running(entry: dict[str, Any]) -> bool:
+    """Whether an agent of subagents.json runs: its status decides when it has one, since `ended` is the end of its
+    latest run, which stays set while a follow-up's run (subagents.run_again: status running) goes on; without a
+    status, whether it has ended."""
     state = str(entry.get("status") or entry.get("state") or "")
-    return state not in ENDED_STATES and not entry.get("ended")
+    if state:
+        return state not in ENDED_STATES
+    return not entry.get("ended")
 
 
 def _what(entry: dict[str, Any]) -> str:

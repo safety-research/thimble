@@ -92,7 +92,10 @@ export function useProposals(ws: string): Proposal[] | null {
 export function findProposal(proposals: readonly Proposal[] | null, slug: string | null | undefined, name?: string | null): Proposal | null {
   if (!proposals) return null
   if (slug) return proposals.find((p) => p.slug === slug) ?? null
-  const named = proposals.filter((p) => p.name === name)
+  // the server title-cases a proposal's name and compares names case-folded (backend views.propose), while a chip
+  // names the view as the agent's propose_view call did ("Event counts" for the proposal "Event Counts")
+  const want = (name ?? '').trim().toLowerCase()
+  const named = want ? proposals.filter((p) => String(p.name ?? '').trim().toLowerCase() === want) : []
   return named.length ? named.reduce((a, b) => (a.ts >= b.ts ? a : b)) : null
 }
 

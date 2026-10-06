@@ -440,12 +440,13 @@ def register(state: dict[str, Any], hook: dict[str, Any]) -> dict[str, Any] | No
 
 def _inherit(state: dict[str, Any], agent_id: str, entry: dict[str, Any], parent: str) -> None:
     """A descendant takes its thimble ancestor (`root`) and work folder from its parent, and, unless its type is one of
-    thimble's roles, the effort recorded for its parent's run (the module's step hook, V7d)."""
+    thimble's (a role, thimble:helper or an extension's agent, each registered with its own model and effort), the
+    effort recorded for its parent's run (the module's step hook, V7d), as the module's own agent.spawn hook gives it."""
     up = registry(state).get(parent) or {}
     entry["root"] = up.get("root") or (parent if up.get("role") in ROLES else None)
     entry["work"] = up.get("work")
     effort = efforts(state).get(parent)
-    if effort and role_of(entry.get("type")) is None:
+    if effort and not str(entry.get("type") or "").startswith(PREFIX):
         efforts(state)[agent_id] = effort
 
 
