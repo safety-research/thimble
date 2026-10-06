@@ -394,10 +394,10 @@ Start an orientation, a broad analysis of the corpus that helps the analyst unde
   "type": "object",
   "properties": {
     "brief": {"type": "string", "description": "The analyst's request in their words, such as a focus, or empty for the whole corpus."},
-    "final_notebook": {"type": "boolean", "description": "Leave a deck of cards for the analyst, the group `Orientation`, which appears when the orientation ends. Default: Settings' value, true unless the analyst changed it."},
-    "propose_views": {"type": "boolean", "description": "Propose views of the files. Default: Settings' value, true unless the analyst changed it."},
-    "generate_report": {"type": "boolean", "description": "Write the report when the orientation ends. Default: Settings' value, false unless the analyst changed it."},
-    "critique": {"type": "boolean", "description": "Have a critic review the analysis before the outputs are written. Default: Settings' value, false unless the analyst changed it."},
+    "final_notebook": {"type": "boolean", "description": "Leave a deck of cards for the analyst, the group `Orientation`, which appears when the orientation ends. Left out, Settings decide. Default true."},
+    "propose_views": {"type": "boolean", "description": "Propose views of the files. Left out, Settings decide. Default true."},
+    "generate_report": {"type": "boolean", "description": "Write the report when the orientation ends. Left out, Settings decide. Default false."},
+    "critique": {"type": "boolean", "description": "Have a critic review the analysis before the outputs are written. Left out, Settings decide. Default false."},
     "model": {"type": "string", "description": "The model to run it on, such as opus, sonnet or a full model id, only when the analyst names one. Default: the orientation's model in Settings."},
     "effort": {"type": "string", "enum": ["low", "medium", "high", "xhigh", "max"], "description": "The effort to run it at, only when the analyst names one. Default: the orientation's effort in Settings."}
   }
