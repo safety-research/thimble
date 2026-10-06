@@ -51,6 +51,23 @@ def test_a_typed_start_claims_its_request_and_a_different_one_is_denied():
         "a second identical call finds no pending request"
 
 
+def test_a_typed_start_whose_prompt_ends_in_blank_lines_is_claimed_by_the_call_without_them():
+    """Live check L32: a view build's prompt ended in blank lines, which main's Agent call does not carry, so its exact
+    call was denied twice. Whitespace at the end does not count; anything else still does."""
+    state: dict = {}
+    pending_start(state, "req_0000000009", "typed", "req_0000000009\nbuild the view\n\n\n", role="view-builder",
+                  key="view:v")
+    assert sf.check_call(state, agent_call("req_0000000009\nbuild the view!", role="view-builder")) is not None
+    assert sf.check_call(state, agent_call("req_0000000009\nbuild the view", role="view-builder")) is None
+    assert sf.requests(state)["req_0000000009"]["state"] == "claimed"
+    sf.registry(state)[AGENT] = {"role": "orientation", "key": "orient", "status": "done"}
+    sf.requests(state)["req_msg0000009"] = {"kind": "message", "route": "typed", "agent": AGENT, "state": "pending",
+                                            "input": {"to": AGENT, "message": "and April?\n"}}
+    send = {"hook_event_name": "PreToolUse", "tool_name": "SendMessage", "tool_use_id": "toolu_s9",
+            "tool_input": {"to": AGENT, "message": "and April?"}}
+    assert sf.check_call(state, send) is None
+
+
 def test_a_missing_run_in_background_counts_as_background_and_false_is_denied():
     state: dict = {}
     pending_start(state, "req_0000000002", "typed", "p")

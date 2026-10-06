@@ -268,6 +268,13 @@ def _pending_for(state: dict[str, Any], kind: str, match: Any) -> list[tuple[str
             if isinstance(r, dict) and r.get("kind") == kind and r.get("state") == "pending" and match(r)]
 
 
+def same_text(want: str, got: str) -> bool:
+    """Whether a call's prompt or message is the one its request holds: the same text, but for whitespace at its end,
+    which the model's call does not carry (live check L32: a view build's prompt ended in blank lines, and main's
+    exact call was denied twice)."""
+    return want.rstrip() == got.rstrip()
+
+
 def check_call(state: dict[str, Any], hook: dict[str, Any]) -> str | None:
     """The PreToolUse hook's decision on an Agent, SendMessage or TaskStop call (`hook` is its input), with what it
     records in `state`: the reason to deny it, or None to let it go on. It never allows a call outright (Claude Code then
@@ -307,7 +314,7 @@ def check_call(state: dict[str, Any], hook: dict[str, Any]) -> str | None:
         def fits(r: dict[str, Any]) -> bool:
             want = r.get("input") if isinstance(r.get("input"), dict) else {}
             route = r.get("route")
-            if want.get("subagent_type") != kind or str(want.get("prompt") or "") != prompt:
+            if want.get("subagent_type") != kind or not same_text(str(want.get("prompt") or ""), prompt):
                 return False
             if plugin:
                 return route in ("click", "follow-on")
@@ -345,7 +352,7 @@ def check_call(state: dict[str, Any], hook: dict[str, Any]) -> str | None:
         def same(r: dict[str, Any]) -> bool:
             want = r.get("input") if isinstance(r.get("input"), dict) else {}
             route = r.get("route")
-            return (r.get("agent") == to and str(want.get("message") or "") == text
+            return (r.get("agent") == to and same_text(str(want.get("message") or ""), text)
                     and (route in ("click", "follow-on") if plugin else route == "typed"))
 
         found = _pending_for(state, "message", same)
