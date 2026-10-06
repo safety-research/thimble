@@ -28,7 +28,7 @@ test('a card stands under the first question that made it; a report or thread re
     [{ id: 'a', kind: 'bar', question: 'A?' }, { id: 'b', kind: 'table', question: 'B?' }, { id: 'c', kind: 'line', question: 'C?' }],
   )
   // newest first, the thread that only reused a card left out, the card no question names last
-  expect(groups.map(g => [g.head, g.cards.map(c => c.id).join('')])).toEqual([['later', 'c'], ['first', 'a'], ['cards no answer shows', 'b']])
+  expect(groups.map(g => [g.head, g.cards.map(c => c.id).join('')])).toEqual([['later', 'c'], ['first', 'a'], ['other cards', 'b']])
 })
 
 test('one column: the title Home alone, sections under bold headings with their counts, the key hints last', () => {

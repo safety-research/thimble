@@ -160,6 +160,12 @@ function placeRun(run: ChatVerify): boolean {
   return run.expected !== null && run.expected !== undefined && !showsValue(run.expected) && Boolean(citedPlace(run.ref ?? ''))
 }
 
+/** A citation by its words, or, for a place cited without words, the place in words (`revisions.jsonl line 10879`):
+ *  the citation panel's title and its step in the path. */
+function citeTitle(c: Citation): string {
+  return c.display ?? (fileRef(c.ref) ? placeWords(c.ref) : citeLabel(c))
+}
+
 /** What a citation's status says, in plain words (views/SPEC.md, "Words that recur"): `found on the card`, `found in
  *  revisions.jsonl line 10566`, `found in the command's output, line 1` or `not found in …`; after a verification,
  *  `…, and a script got the same number` or `…, but a script got 5,883`. It agrees with the link's colour and mark. */
@@ -2207,7 +2213,7 @@ async function crumbOf($: Dollar, s: ChatNavStep): Promise<{ text: string; mark:
       if (record !== undefined) return { text: `record "${record}"`, mark: '' }
       const v = (await $.state.get({ ...VERDICTS, id })).value
       const c = citeOf(id) ?? (v ? { raw: v.raw, ref: v.ref, display: v.display } : undefined)
-      return { text: c ? `citation ${citeLabel(c)}` : 'citation', mark: '' }
+      return { text: c ? `citation ${citeTitle(c)}` : 'citation', mark: '' }
     }
     case 'card': {
       const card = s.card ? await loadCard($, s.card) : null
@@ -2490,7 +2496,7 @@ async function drawCite($: Dollar, e: PaneEvent): Promise<RenderElement> {
   const body: RenderElement[] = []
   // a record a view opened is named by its row, as the view showed it
   const record = c.display === null ? viewRecords.get(id) : undefined
-  const label = record ? clip(record, Math.max(20, cols - 4)) : citeLabel(c)
+  const label = record ? clip(record, Math.max(20, cols - 4)) : citeTitle(c)
   const problem = status === 'missing' || status === 'differs'
   const red = problem || run?.state === 'refuted' || verifyFailed(run?.state)
   const said = `${statusWords(c, v, status, run)}${problem && v?.why ? ` · ${plainWhy(v.why)}` : ''}`
@@ -3643,7 +3649,7 @@ export const register: Register = on => {
     const c = id ? citeOf(id) : undefined
     if (!id || !c) return { text: `the last reply has ${turn?.ids.length ?? 0} citations` }
     await openCitation($, c, id)
-    return { text: `opened ${citeLabel(c)}` }
+    return { text: `opened ${citeTitle(c)}` }
   })
 
   on('command.run', { command: 'thimble-band' }, async $ => {

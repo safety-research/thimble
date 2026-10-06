@@ -286,7 +286,7 @@ export async function drawCoverage(e: PaneEvent, ctx: HarnessCtx): Promise<Rende
     files.slice(0, 60).forEach((f, i) => {
       const total = f.records ?? 0
       const bar = shareBar(f.seen, total, f.state, barW)
-      const what = f.state === 'untouched' ? 'never opened' : f.state === 'scanned' ? 'counted by code, no record read' : `lines ${rangeWords(f.ranges, 4)}`
+      const what = f.state === 'untouched' ? 'never opened' : f.state === 'scanned' ? 'counted by code, no record read' : `${f.ranges.length === 1 && f.ranges[0]![0] === f.ranges[0]![1] ? 'line' : 'lines'} ${rangeWords(f.ranges, 4)}`
       const firstUnread = f.state === 'read' ? (f.ranges[0]?.[0] === 1 ? (f.ranges[0]?.[1] ?? 0) + 1 : 1) : 1
       rows.push(
         <Box key={`cov-f:${f.file}`} flexDirection="column">

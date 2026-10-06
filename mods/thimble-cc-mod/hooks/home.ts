@@ -72,7 +72,7 @@ export function groupCards(groups: readonly HomeCardGroup[], all: readonly HomeC
   }
   const rest = all.filter(c => !placed.has(c.id))
   const sorted = out.reverse()
-  if (rest.length) sorted.push({ head: 'cards no answer shows', from: 'other', cards: rest, at: 0 })
+  if (rest.length) sorted.push({ head: 'other cards', from: 'other', cards: rest, at: 0 })
   return sorted
 }
 

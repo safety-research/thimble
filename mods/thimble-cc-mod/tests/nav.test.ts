@@ -294,7 +294,7 @@ test('a citation opened from a side thread keeps the thread one step back: the b
   await clickCitationInThread($)
   expect(state.get('panelView')).toBe('cite')
   pane = (await $.ui.mount(PANEL as never)) as unknown as M
-  expect(await way(pane)).toMatch(/^‹ back {2}home › threads › "how big is dse\?" › citation pages:3/)
+  expect(await way(pane)).toMatch(/^‹ back {2}home › threads › "how big is dse\?" › citation pages\.jsonl line 3/)
   expect(await pane.find({ type: 'Button', key: 'crumb-2' })).toBeDefined()
   await pane.press({ key: 'nav-back' })
   await pane.unmount()
@@ -311,7 +311,7 @@ test('a citation opened from a side thread keeps the thread one step back: the b
   await ui.post({ type: 'gesture', origin: 'main-para', gestures: [{ seq: 1, gesture: 'primary', target, ev: { type: 'press', button: 'left', shift: false, ctrl: false, alt: false } }] } as never, { in: para! })
   await ui.unmount()
   pane = (await $.ui.mount(PANEL as never)) as unknown as M
-  expect(await way(pane)).toMatch(/^‹ back {2}home › citation pages:3/)
+  expect(await way(pane)).toMatch(/^‹ back {2}home › citation pages\.jsonl line 3/)
   await pane.unmount()
 })
 
@@ -329,7 +329,7 @@ test('"ask about it" in a citation opened from a thread starts a thread under it
   expect((state.get(`threads/${child}`) as ChatThread).parent).toBe('tuaaa1')
   let pane = (await $.ui.mount(PANEL as never)) as unknown as M
   // home › threads › the first thread › its citation › the new thread, which asks nothing yet
-  expect(await way(pane)).toMatch(/home › threads › "how big is d.*› citation pages:3 › about the cit/)
+  expect(await way(pane)).toMatch(/home › threads › "how big is d.*› citation pages\.jsonl.* › about the cit/)
   await pane.unmount()
   await $.command.run({ command: 'thimble-threads', args: '' } as never)
   pane = (await $.ui.mount(PANEL as never)) as unknown as M
@@ -396,7 +396,7 @@ test('a thread answers on while the panel shows its citation: its crumb shows it
   state.seed('agents/agent-7', { kind: 'thread', label: 'side thread · and probier?', thread: 'tuaaa1' })
   await clickCitationInThread($)
   let pane = (await $.ui.mount(PANEL as never)) as unknown as M
-  expect(await way(pane)).toMatch(/threads › ◌ "how big is dse\?" › citation pages:3show all threads$/)
+  expect(await way(pane)).toMatch(/threads › ◌ "how big is dse\?" › citation pages\.jsonl line 3show all threads$/)
   await pane.unmount()
   // its answer lands while the panel shows the citation: unread, and main's chat gets a row under its latest row
   await $.turn.complete({ turnId: 's7', agentId: 'agent-7', answer: 'probier has [[1013|card:abc123#revisions/probier]].', durationMs: 5, reason: 'answer' } as never)
@@ -405,7 +405,7 @@ test('a thread answers on while the panel shows its citation: its crumb shows it
   expect(await signalLine($, 'm1')).toBe('↳ thread · "and probier?" · answered · new')
   expect(w.toasts).toEqual([])
   pane = (await $.ui.mount(PANEL as never)) as unknown as M
-  expect(await way(pane)).toMatch(/"how big is dse\?" new › citation pages:3show all threads {2}1 new$/)
+  expect(await way(pane)).toMatch(/"how big is dse\?" new › citation pages\.js…show all threads {2}1 new$/)
   // the tree marks it too
   await pane.press({ key: 'threads' })
   await pane.unmount()
