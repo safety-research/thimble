@@ -506,7 +506,7 @@ _SURFACES = {"home": _home, "cards": _cards, "card": _card, "labels": _labels, "
 # --------------------------------------------------------------------------- thimble act
 
 
-ACT_USAGE = ("thimble act <kind> --cwd <dir> '<json>'; kinds: thread {anchor, message}, thread-message {thread, message}, "
+ACT_USAGE = ("thimble act <kind> --cwd <dir> '<json>'; kinds: thread {anchor | anchor_text, message}, thread-message {thread, message}, "
              "verdict {label, ref, value}, seen {thread}, stop {agent}")
 
 
@@ -534,10 +534,13 @@ def _text(payload: dict[str, Any], key: str) -> str:
 
 async def _act_thread(c: str, payload: dict[str, Any]) -> dict[str, Any]:
     """A new side thread on what the analyst pointed at, with its first question: the browser's ⌘-click
-    (agents.create_route)."""
+    (agents.create_route). A sentence or a selection has no ref: its words come as `anchor_text`, with no `anchor`."""
     from . import agents  # noqa: PLC0415
 
-    body = agents.NewThread(anchor=_text(payload, "anchor"), anchor_text=payload.get("anchor_text"),
+    anchor = " ".join(str(payload.get("anchor") or "").split()) or None
+    if anchor is None and not " ".join(str(payload.get("anchor_text") or "").split()):
+        raise StateError("`anchor` and `anchor_text` are both empty")
+    body = agents.NewThread(anchor=anchor, anchor_text=payload.get("anchor_text"),
                             title=payload.get("title"), surface=payload.get("surface") or "terminal",
                             element=payload.get("element"), parent=payload.get("parent"), text=_text(payload, "message"))
     meta = await agents.create_route(c, body)

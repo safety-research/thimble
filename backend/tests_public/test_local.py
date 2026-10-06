@@ -221,6 +221,10 @@ async def test_act_makes_what_the_browser_makes(term, monkeypatch):
     assert made["ok"] and posted == [("thread", {"thread": made["thread"], "text": "Who wrote this?"})]
     meta = agents.read_meta(CORPUS, made["thread"])
     assert meta["anchor"] == "board.jsonl#L1" and meta["anchor_surface"] == "terminal"
+    # a sentence or a selection has no ref: the renderer sends its words as anchor_text, with a null anchor
+    said = await local.act(CORPUS, "thread", {"anchor": None, "anchor_text": "Posts are short.", "message": "Why?"})
+    meta2 = agents.read_meta(CORPUS, said["thread"])
+    assert said["ok"] and meta2["anchor"] is None and meta2["anchor_text"] == "Posts are short."
     more = await local.act(CORPUS, "thread-message", {"thread": f"thread:{made['thread']}", "message": "And when?"})
     assert more["thread"] == made["thread"] and posted[-1] == ("thread", {"thread": made["thread"], "text": "And when?"})
     # an answer is unread until the thread is opened
@@ -241,6 +245,8 @@ async def test_act_makes_what_the_browser_makes(term, monkeypatch):
         await local.act(CORPUS, "nope", {})
     with pytest.raises(local.StateError, match="empty"):
         await local.act(CORPUS, "thread", {"anchor": "x"})
+    with pytest.raises(local.StateError, match="both empty"):
+        await local.act(CORPUS, "thread", {"anchor": None, "message": "Why?"})
     assert concepts.find_concept(ws, "bash")
 
 
