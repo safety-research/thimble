@@ -240,7 +240,7 @@ test('where no sandbox can run, a script runs as before and the transcript says 
     await settle()
   }
   expect(w.runs.filter(r => r.argv.includes(SCRIPT)).map(r => r.argv)).toEqual([['python3', SCRIPT], ['python3', SCRIPT]])
-  expect(w.logs.filter(l => /unsandboxed/.test(l))).toEqual(["thimble-cc-mod: the scripts the mod runs itself (card reruns, verifications, views' checks, labels) run unsandboxed, with your user's access (bubblewrap cannot create namespaces here)"])
+  expect(w.logs.filter(l => /unsandboxed/.test(l))).toEqual(["the scripts the mod runs itself (card reruns, verifications, views' checks, labels) run unsandboxed, with your user's access (bubblewrap cannot create namespaces here)"])
 })
 
 test('a sandbox named in THIMBLE_KERNEL_WRAP that cannot run: the script does not run, and its card says why', async ($, on) => {

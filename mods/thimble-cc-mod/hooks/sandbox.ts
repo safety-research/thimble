@@ -57,7 +57,8 @@ export function boxedArgv(plan: SandboxPlan, argv: readonly string[]): string[] 
   return plan.wrap === 'none' ? [...argv] : [...plan.prefix, ...cmd]
 }
 
-/** The one notice of an unsandboxed session, in the transcript (dim, not sent to the model). */
+/** The one notice of an unsandboxed session, in the transcript (dim, not sent to the model), which the engine draws
+ *  after the plugin's name. */
 export function unboxedNotice(plan: SandboxPlan): string {
-  return `thimble-cc-mod: ${SCRIPTS} ${plan.line}`
+  return `${SCRIPTS} ${plan.line}`
 }

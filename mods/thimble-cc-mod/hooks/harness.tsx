@@ -566,7 +566,8 @@ export async function orientEnded(ctx: HarnessCtx, agentId: string, reason: stri
     if (text.trim() && !/^Coverage: /m.test(text)) await ctx.write(`${cwd}/${o.file}`, `${text.trimEnd()}\n\n${line}\n`)
   }
   if (line) {
-    ctx.log(`thimble-cc-mod: the orientation ended · ${line}`)
+    // the engine draws a plugin's log line after the plugin's name
+    ctx.log(`the orientation ended · ${line}`)
     await ctx.noteMain(`thimble-cc-mod: the orientation ended; the analyst read this line in the chat${written ? ` and at the end of its document ${o.file}` : ''}: "${line}"`)
   }
   // the report: thimble starts its writer once the orientation ends; it retells the document, citing its cards. Its

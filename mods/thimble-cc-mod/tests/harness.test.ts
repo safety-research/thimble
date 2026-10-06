@@ -248,7 +248,7 @@ test('the orientation: a report writer with the corpus listed; it hears nothing 
   expect(summed.filter((_, i) => summed[i - 1] === '--agent')).toEqual(['agent-1', 'agent-5', 'agent-6'])
   const line = 'Coverage: viewed only events.jsonl · 33% of files · <1% of lines'
   expect(f.files.get(`${CWD}/.thimble-cc-mod/reports/orientation.md`)).toBe(`# The wiki has nine editors\n\nText.\n\n${line}\n`)
-  expect(f.logs).toEqual([`thimble-cc-mod: the orientation ended · ${line}`])
+  expect(f.logs).toEqual([`the orientation ended · ${line}`])
   expect(f.notes.at(-1)).toBe(`thimble-cc-mod: the orientation ended; the analyst read this line in the chat and at the end of its document .thimble-cc-mod/reports/orientation.md: "${line}"`)
   expect(rangeWords([[1, 5], [88, 88], [1203, 1250]])).toBe('1-5, 88, 1203-1250')
 })
