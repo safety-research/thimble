@@ -12,6 +12,7 @@
 #   backend/requirements.txt  uv.lock's runtime packages with the hashes of their files (uv export), which install.sh
 #                         installs with uv pip or pip from the package index the machine is set up with
 #   prompts/              read by the server at run time (prompts.py)
+#   demos/                the pre-cached orientations `thimble demo` installs (backend/app/demo.py, demos/README.md)
 #   frontend/dist/        the built UI (tsc --noEmit -p tsconfig.app.json + vite build here, or --dist DIR), served at /
 #                         by the server when THIMBLE_DEV is off (main.py)
 #   frontend/src/ public/ index.html package.json package-lock.json vite.config.ts tsconfig*.json
@@ -83,7 +84,7 @@ version="$(python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1]))["v
 [ -n "$version" ] || die "plugin/.claude-plugin/plugin.json has no version"
 sha="$(git -C "$repo" rev-parse --short HEAD)"
 full_sha="$(git -C "$repo" rev-parse HEAD)"
-allow=(plugin mods/thimble-cc-mod extensions backend prompts .claude-plugin README.md INSTALL.md docs/config.md docs/assets/thimble-banner.svg LICENSE
+allow=(plugin mods/thimble-cc-mod extensions backend prompts demos .claude-plugin README.md INSTALL.md docs/config.md docs/assets/thimble-banner.svg LICENSE
        scripts/install.sh scripts/plugin.sh scripts/update.sh scripts/rebuild_ui.sh scripts/view_shot.mjs scripts/ui_shot.mjs
        frontend/src frontend/public frontend/index.html frontend/package.json
        frontend/package-lock.json frontend/vite.config.ts frontend/tsconfig.json frontend/tsconfig.app.json frontend/tsconfig.node.json)
@@ -254,7 +255,7 @@ $bad"
 for top in "$stage"/* "$stage"/.[!.]*; do
   [ -e "$top" ] || continue
   case "$(basename "$top")" in
-    plugin | mods | extensions | backend | prompts | frontend | scripts | .claude-plugin | README.md | INSTALL.md | docs | LICENSE | \
+    plugin | mods | extensions | backend | prompts | demos | frontend | scripts | .claude-plugin | README.md | INSTALL.md | docs | LICENSE | \
       THIRD_PARTY_NOTICES | RELEASE.json) ;;
     *) die "unexpected top-level entry in the staged tree: $(basename "$top")";;
   esac

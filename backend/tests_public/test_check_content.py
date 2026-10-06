@@ -61,3 +61,51 @@ def test_a_secret_gitleaks_finds_fails_the_command(tmp_path):
     r = subprocess.run([sys.executable, str(SCRIPT), str(tmp_path)], capture_output=True, text=True)
     assert r.returncode == 1 and "deploy.py:1: [secret]" in r.stdout, r.stdout
 
+
+
+def precache(root: Path, name: str = "toy", **extra) -> dict[str, str]:
+    """A pre-cache folder as `thimble demo --export` writes one: its manifest lists each file it keeps."""
+    import json  # noqa: PLC0415
+
+    manifest = {"schema": "thimble-demo-precache", "files": [{"path": "labels/l.jsonl"}, {"path": "orient/run.json"}],
+                "transcripts": [{"path": "transcripts/orient.jsonl"}],
+                "flagged": ["workspace/orient/run.json: /home/kept"], **extra}
+    return {f"demos/{name}/thimble-demo-precache.json": json.dumps(manifest), f"demos/{name}/README.md": "> Notice\n",
+            f"demos/{name}/workspace/labels/l.jsonl": '{"x": "' + "a" * 200 + '"}\n',
+            f"demos/{name}/workspace/orient/run.json": '{"p": "/home/kept"}',
+            f"demos/{name}/transcripts/orient.jsonl": '{"type":"user","cwd":"@@THIMBLE_WORKSPACE@@"}\n'}
+
+
+def test_a_precache_folder_is_allowed_on_the_terms_of_its_exception_only(cc, tmp_path, monkeypatch):
+    monkeypatch.setattr(cc, "MAX_BYTES", 100)
+    monkeypatch.setattr(cc.getpass, "getuser", lambda: "maintainer")
+    write(tmp_path, precache(tmp_path))
+    # .jsonl files, one over MAX_BYTES, and a path the manifest's `flagged` kept: allowed
+    assert hits(cc, tmp_path) == [] and cc.demo_hits(tmp_path, cc.files_of(tmp_path)) == []
+    write(tmp_path, {"demos/toy/workspace/extra.json": "{}",
+                     "demos/toy/workspace/orient/run.json": '{"p": "/home/kept", "by": "maintainer", "q": "/mnt/d/x"}',
+                     "demos/toy/transcripts/orient.jsonl":
+                         '{"type":"attachment","attachment":{"type":"instructions"}}\n',
+                     "demos/toy/workspace/labels/l.db": b"\0",
+                     "demos/other/workspace/a.jsonl": "{}\n",
+                     "elsewhere/run.jsonl": "{}\n"})
+    rels = cc.files_of(tmp_path)
+    got = {(h[0], h[3]) for h in hits(cc, tmp_path) + cc.demo_hits(tmp_path, rels)}
+    assert got == {
+        ("demos/toy/workspace/extra.json", "a file the pre-cache's thimble-demo-precache.json does not list"),
+        ("demos/toy/workspace/orient/run.json", "the export's scrub check: the user name 'maintainer'"),
+        ("demos/toy/workspace/orient/run.json", "the export's scrub check: /mnt/d"),
+        ("demos/toy/transcripts/orient.jsonl", "the export's scrub check: attachment:instructions (1)"),
+        ("demos/toy/workspace/labels/l.db", "a file of a kind that never belongs in the tree"),
+        ("demos/toy/workspace/labels/l.db", "a file the pre-cache's thimble-demo-precache.json does not list"),
+        ("demos/other/workspace/a.jsonl", "demos/other has no thimble-demo-precache.json of the export"),
+        ("elsewhere/run.jsonl", "a file of a kind that never belongs in the tree")}
+
+
+def test_a_precache_has_size_caps_of_its_own(cc, tmp_path, monkeypatch):
+    write(tmp_path, precache(tmp_path))
+    monkeypatch.setattr(cc, "DEMO_FILE_MAX", 100)
+    monkeypatch.setattr(cc, "DEMO_TOTAL_MAX", 150)
+    got = {(h[0], h[3].split(", over")[0]) for h in cc.demo_hits(tmp_path, cc.files_of(tmp_path))}
+    assert ("demos/toy/workspace/labels/l.jsonl", "210 bytes") in got
+    assert any(a == "demos/toy/" and b.endswith("bytes in all") for a, b in got)

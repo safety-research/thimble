@@ -15,7 +15,7 @@ the same session, and its changes land in place, one Undo reverting them all.
                       event?, requested?, started, ended, groups: {orientation}, chats: {orient?},
                       session?, pid?, error?, run (0 the first, then one per follow-up), queue: [{text, by,
                       ts}], followups: [{run, status, started, ended, messages, added, revised, deleted, views}],
-                      report_asked?}
+                      report_asked?, coverage? (the coverage checks run 0 made, orient_session.coverage)}
   orient/summary.md  the session's last message, kept as a record for the export
 
 `query` is only ever the analyst's own words typed with Start. A run with a `final` group uses it as its deck. `status`
@@ -279,7 +279,7 @@ def started(c: str, chat_id: str, *, session: str | None = None, pid: int | None
         passes = list((run or {}).get("passes") or ["final", "views"]) if requested else ["final", "views"]
     groups = ensure_groups(c, deck=True) if "final" in passes else {}
     extra = {k: v for k, v in (("session", session), ("pid", pid)) if v is not None}
-    fresh = {"run": 0, "queue": [], "followups": [], "report_asked": False}
+    fresh = {"run": 0, "queue": [], "followups": [], "report_asked": False, "coverage": 0}
     if run and requested:
         run.update(status="running", started=_now(), passes=list(passes), groups=groups, chats={ROLE: chat_id},
                    **fresh, **extra)
