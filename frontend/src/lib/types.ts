@@ -1736,6 +1736,22 @@ export interface ChatMeta {
   restarted?: { run: number; ts?: string } | null
   /** a session thimble started: its run's number, 0 for its start, then one per resume */
   run?: number
+  /** the orientation, in a workspace `thimble demo` installed from a pre-cache: it ran in advance and its session was
+   * not kept (backend precached.py, demo.install) */
+  precached?: PrecachedMark | null
+}
+
+/** What `thimble demo` installed a workspace from (backend demo.install): the dataset, when its orientation ran and on
+ * what model, the folder of the files it ran on, and the orientation's chat. */
+export interface PrecachedMark {
+  dataset?: string | null
+  created?: string | null
+  /** when the orientation ended (or started) */
+  ran?: string | null
+  installed?: string | null
+  folder?: string | null
+  orientation?: string | null
+  model?: string | null
 }
 
 /** A follow-up of the orientation as its chat's meta keeps it. */

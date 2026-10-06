@@ -47,6 +47,7 @@ import { RoleChip } from './RoleChip'
 import { useChat, type ChatState } from './useChat'
 import { pendingAsks, waitingAt, waitingChats } from './waiting'
 import { PermissionCard } from './PermissionCard'
+import { AttachBar, PrecachedCard, attachInstead, precachedMark } from './Precached'
 import { pendingRequests } from './permissions'
 
 const LIST_DEBOUNCE_MS = 300
@@ -278,6 +279,8 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
   // the thread shown, kept per workspace so a reload opens the same one
   const currentKey = storageKey(ws, 'thread-current')
   const [current, setCurrent] = useState(() => readStorage<string>(currentKey, 'main') || 'main')
+  // whether this browser had shown a thread of this workspace before: a pre-cached one first opens on its orientation
+  const hadThread = useRef(!!readStorage<string>(currentKey, ''))
   useEffect(() => {
     writeStorage(currentKey, current)
   }, [currentKey, current])
@@ -359,6 +362,8 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
           setChats(list)
           if (restored.current) return
           restored.current = true
+          const pre = hadThread.current ? null : precachedMark(list)?.orientation
+          if (pre && list.some((m) => m.id === pre)) return setCurrent(pre)
           setCurrent((cur) => (cur === 'main' || list.some((m) => m.id === cur) ? cur : 'main'))
         })
         .catch(() => undefined),
@@ -598,8 +603,11 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
   const retryAlert = retryMeta?.alert?.kind === 'retry' ? retryMeta.alert : null
   // the latest orientation, which the orientation's composer and main's message_orientation reach
   const latestOrient = orientIds.length ? [...chats].filter((m) => threadKind(m) === 'orient').sort((a, b) => (a.created_at < b.created_at ? 1 : -1))[0]?.id ?? null : null
-  // where the composer sends (threads.composerTarget), which its placeholder names and whose model its chip shows
-  const target = composerTarget(kind, curMeta, latestOrient)
+  // a workspace installed from a pre-cache (chat/Precached): its orientation keeps no session
+  const precached = useMemo(() => precachedMark(chats), [chats])
+  // where the composer sends (threads.composerTarget), which its placeholder names and whose model its chip shows; in
+  // a pre-cached orientation's thread, main
+  const target = composerTarget(kind, curMeta, latestOrient && precached?.orientation === latestOrient ? null : latestOrient)
   const [sendingView, setSendingView] = useState(false)
   // the analyst's messages to the orientation, from their send until its log or its queue holds them
   const [outbox, setOutbox] = useState<{ chat: string; text: string; key: number }[]>([])
@@ -609,6 +617,8 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
   // which is known once main's meta has loaded
   const attached = main.meta?.attached ?? null
   const detached = !!main.meta && !attached
+  // whether no session was ever attached to a pre-cached workspace, while the composer would reach nothing
+  const neverAttached = detached && !main.meta?.ended
   const pickEffort = useCallback(
     (e: MainEffort) => {
       track('chat-settings', { target: 'chat:main', detail: { effort: e } })
@@ -782,11 +792,12 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
             {!chat.loading && !chat.error && kind === 'main' && (
               <>
                 {skipped && <Note className="chat-skipped" text={SKIPPED_NOTE} />}
+                {precached?.orientation && !mainRows.length && <Note className="chat-origin" text="The orientation ran in advance:" chips={<ThreadChip id={precached.orientation} />} />}
                 <Rows rows={withBranches(mainRows, main.records, branches)} ws={ws} chat="main" streaming={main.streaming} retry={mainRetry} />
               </>
             )}
             {!chat.loading && !chat.error && kind === 'thread' && curMeta && <ThreadView ws={ws} meta={curMeta} chat={chat} main={main} skip={mainSkip} branches={branches} detached={detached} />}
-            {!chat.loading && !chat.error && kind === 'orient' && <SessionView ws={ws} id={current} chat={chat} role="orient" title="Orientation" running={running} outbox={outbox.filter((m) => m.chat === current).map((m) => m.text)} />}
+            {!chat.loading && !chat.error && kind === 'orient' && <SessionView ws={ws} id={current} chat={chat} role="orient" title="Orientation" running={running} outbox={outbox.filter((m) => m.chat === current).map((m) => m.text)} attached={!!attached} />}
             {!chat.loading && !chat.error && kind === 'writer' && <SessionView ws={ws} id={current} chat={chat} role="writer" title={curMeta?.title || 'Writer'} running={running} />}
             {!chat.loading && !chat.error && kind === 'check' && <SessionView ws={ws} id={current} chat={chat} role="check" title={curMeta?.title || 'Check'} running={running} fromMain={false} />}
             {!chat.loading && !chat.error && kind === 'dev' && <DevView ws={ws} id={current} chat={chat} mainRecords={main.records} ticket={ticket} onTicket={setTicket} />}
@@ -827,6 +838,8 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
                 setSkipped(true)
               }}
             />
+          ) : precached && attachInstead(precached, neverAttached, target.to) ? (
+            <AttachBar mark={precached} />
           ) : (
             <Composer
               model={mainModel}
@@ -990,8 +1003,10 @@ function PendingMessage({ text, ws, queued }: { text: string; ws: string; queued
 /** The thread of the orientation, a writer or a check's run: where it came from, the orientation's instructions as the
  * analyst's message, its card, then its whole session
  * (orientMessages); then the analyst's messages still on their way (`outbox`) and those queued (`queued`). */
-function SessionView({ ws, id, chat, role, title, running, outbox = [], fromMain = true }: { ws: string; id: string; chat: ChatState; role: string; title: string; running: boolean; outbox?: readonly string[]; fromMain?: boolean }) {
+function SessionView({ ws, id, chat, role, title, running, outbox = [], fromMain = true, attached = false }: { ws: string; id: string; chat: ChatState; role: string; title: string; running: boolean; outbox?: readonly string[]; fromMain?: boolean; attached?: boolean }) {
   const orient = role === 'orient'
+  // an orientation `thimble demo` installed from a pre-cache, which ran in advance with no session kept
+  const mark = orient && chat.meta?.id === id ? chat.meta?.precached ?? null : null
   const own = useMemo(() => orientMessages(chat.rows), [chat.rows])
   const index = useCallIndex(ws, orient ? id : null, own)
   const rows = useMemo(() => withCallNumbers(own, index), [own, index])
@@ -1003,7 +1018,8 @@ function SessionView({ ws, id, chat, role, title, running, outbox = [], fromMain
   const sending = outbox.filter((t) => !landed.has(t.trim()))
   return (
     <>
-      {fromMain && <Note className="chat-origin" text="Started from main" chips={<ThreadChip id="main" />} />}
+      {mark && <PrecachedCard mark={mark} attached={attached} />}
+      {fromMain && !mark && <Note className="chat-origin" text="Started from main" chips={<ThreadChip id="main" />} />}
       <AgentCard ws={ws} chat={id} role={role} title={title} log={log} openWhileRunning resumeHere={false} stopHere={false} briefAbove={orient} />
       <Rows rows={rows} ws={ws} chat={id} calls={orient ? id : undefined} live={running} />
       {!running && stopped && <StoppedHold ws={ws} chat={id} text={stopped.text} />}

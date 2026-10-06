@@ -1226,6 +1226,14 @@ No orientation has run in this workspace. Call `start_orientation` to start one.
 
 Claude Code no longer keeps this orientation's session, so it cannot continue. Its outputs and call refs still open. Call `start_orientation` for a new orientation that takes up the message.
 
+## message_orientation-precached
+
+This orientation ran in advance, before this workspace was installed, and its session was not kept, so it cannot continue. Answer from its cards and the report yourself, or call `start_orientation` for a new orientation that takes up the message.
+
+## precached-context
+
+This workspace was installed from a pre-cache: its orientation ran in advance on these same files ({made}), and its Claude Code session was not kept, so `message_orientation` cannot reach it. What it left follows: the cards on the canvas, the views and the documents, with the full text of each one written. Take it as what the analyst sees in the browser; read a card, a view or a ref with `read_ref` before you rely on its details, and answer what its cards already answer yourself.
+
 ## bg-carry-on
 
 Carry on with your task from where you left off.
