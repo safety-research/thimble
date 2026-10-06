@@ -2690,16 +2690,46 @@ def _start_run(t: dict[str, Any], route: str = "click") -> Run | None:
     return run
 
 
-def _start_next_if_idle() -> None:
+_ticket_looks: dict[str, int] = {}  # workspace -> looks for main's module since a server's start (_start_next_if_idle)
+_ticket_retry: asyncio.TimerHandle | None = None
+
+
+def _start_next_if_idle(wait_module: bool = False) -> None:
+    """Start the next queued ticket when none runs. At a server's start (`wait_module`: _recover, the first request)
+    main's module has not said hello again yet, so a ticket of a workspace whose module is not live keeps its place and
+    the queue looks again after NO_MODULE_RETRY_S, up to NO_MODULE_LOOKS times; then it starts, and a module that is
+    still away refuses it with the reason. Otherwise a ticket filed, retried or started starts, or is refused, at once."""
+    global _ticket_retry
     if _closing or _running() or not STACK_ENABLED:
         return
     try:
-        asyncio.get_running_loop()
+        loop = asyncio.get_running_loop()
     except RuntimeError:
         return  # no loop (the CLI): tickets wait for the server
+    from . import module_bridge  # noqa: PLC0415
+
+    waiting = False
     for t in _queued():
+        c = str(t.get("workspace") or "")
+        if (wait_module or c in _ticket_looks) and not module_bridge.live(c) \
+                and _ticket_looks.get(c, 0) < NO_MODULE_LOOKS:
+            waiting = True
+            continue
+        _ticket_looks.pop(c, None)
         if _start_run(t) is not None:
             return
+    if not waiting or (_ticket_retry is not None and not _ticket_retry.cancelled()):
+        return
+    for c in {str(t.get("workspace") or "") for t in _queued()}:
+        if not module_bridge.live(c):
+            _ticket_looks[c] = _ticket_looks.get(c, 0) + 1
+
+    def again() -> None:
+        global _ticket_retry
+        _ticket_retry = None
+        _start_next_if_idle()
+
+    _ticket_retry = loop.call_later(NO_MODULE_RETRY_S, again)
 
 
 def _pid_alive(pid: Any) -> bool:
@@ -2768,7 +2798,7 @@ def _recover() -> None:
                 with contextlib.suppress(Exception):
                     remove_ticket_tree(rec)
                 _finish(rec, str(rec.get("result") or "")[:400] or None)
-    _start_next_if_idle()
+    _start_next_if_idle(wait_module=True)  # main's module says hello to this server only after it is up
 
 
 # view builds
@@ -4033,7 +4063,7 @@ async def _on_first_request() -> None:
     if not _announced:
         _recover()
         await announce_restart()
-        _start_next_if_idle()
+        _start_next_if_idle(wait_module=True)
 
 
 # ----------------------------------------------------------------------------- routes
@@ -4140,8 +4170,8 @@ MAIN_ENDED = "thimble stopped when its Claude Code session ended"
 
 def stop_workspace(c: str) -> int:
     """Stop what runs for workspace `c` here, main's session having ended (agents.stop_all): its code ticket's
-    preparation or main's start of it that main never made, which end `stopped` with MAIN_ENDED (Retry runs it again),
-    its queued builds and the builds an extension's program runs, which fail with MAIN_ENDED and Retry, and a typed
+    preparation or main's start of it that main never made, and the tickets queued behind it, which end `stopped` with
+    MAIN_ENDED (Retry runs each again), its queued builds and the builds an extension's program runs, which fail with MAIN_ENDED and Retry, and a typed
     start main never made. Its builders, reviewers and the ticket's agent were subagents of main and ended with it:
     subagents.close_running ends their runs, whose end handlers fail their views, and end the ticket, with MAIN_ENDED
     and Retry. A ticket whose agent passed keeps waiting for the analyst's Allow. Nothing starts again by itself.
@@ -4159,6 +4189,12 @@ def stop_workspace(c: str) -> int:
         elif run.request:
             subagents.refuse(c, run.request, MAIN_ENDED, subagents.HOOK)
             n += 1
+    # the clicks still queued behind it end too, so no later session starts them by itself (Retry runs each again);
+    # main's ticket that waits for the analyst's Start keeps waiting for that click
+    for t in [t for t in _read() if t.get("status") == "queued" and t.get("workspace") == c and not t.get("held")]:
+        rec = _update(t["id"], status="stopped", error=MAIN_ENDED, ts_end=_now(), finished=True, runner=None) or t
+        _finish(rec, MAIN_ENDED)
+        n += 1
     for key in [k for k in _view_queue if k[0] == c]:
         _view_queue.remove(key)
         _view_failed(*key, MAIN_ENDED)

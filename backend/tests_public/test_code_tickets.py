@@ -36,6 +36,8 @@ BACKEND = Path(__file__).resolve().parent.parent
 def _fresh(workspaces_tmp, monkeypatch):
     agent_session._hosted.clear()
     monkeypatch.setattr(dev, "_current", None)
+    monkeypatch.setattr(dev, "_ticket_looks", {}, raising=False)
+    monkeypatch.setattr(dev, "_ticket_retry", None, raising=False)
     yield
     agent_session._hosted.clear()
 
@@ -359,6 +361,31 @@ async def test_a_restarted_server_takes_up_the_running_agent_and_asks_again_for_
     dev._recover()
     assert (dev._get(gone["id"])["status"], dev._get(gone["id"])["error"]) == ("stopped", dev.TICKET_ORPHANED)
     assert (dev._get(orphan["id"])["status"], dev._get(orphan["id"])["error"]) == ("stopped", dev.TICKET_CUT_SHORT)
+
+
+async def test_a_queued_ticket_waits_for_main_s_module_after_a_restart_and_main_s_quit_ends_it(ticketing, bridge,
+                                                                                               monkeypatch):
+    """A ticket queued behind one whose apply restarted the server keeps its place until main's module says hello to
+    the new server, then starts through it, rather than failing at once as if hooks modules were off. Main's quit ends
+    the tickets still queued, so no later session starts them by itself; main's ticket that waits for Start keeps
+    waiting for that click."""
+    monkeypatch.setattr(dev, "NO_MODULE_RETRY_S", 0.02)
+    q = dev.file_ticket(CORPUS, "Queued", "x", start=False)
+    bridge.is_live = False  # the server restarted, and the module has not said hello yet
+    dev._current = None
+    dev._recover()
+    await asyncio.sleep(0.1)
+    assert dev._get(q["id"])["status"] == "queued" and not bridge.ops("spawn")
+    bridge.is_live = True
+    await _until(lambda: (dev._get(q["id"]) or {}).get("agent_id"), "the queued ticket did not start once the module was back")
+    assert bridge.ops("spawn")[-1]["route"] == subagents.CLICK
+    behind = dev.file_ticket(CORPUS, "Behind it", "y")
+    held = dev.file_ticket(CORPUS, "Main's", "z", start=False, route="typed")
+    dev._update(held["id"], held=True)
+    assert dev._get(behind["id"])["status"] == "queued"
+    dev.stop_workspace(CORPUS)
+    assert (dev._get(behind["id"])["status"], dev._get(behind["id"])["error"]) == ("stopped", dev.MAIN_ENDED)
+    assert dev._get(held["id"])["status"] == "queued" and dev._get(held["id"])["held"]
 
 
 async def test_a_release_install_registers_no_ticket_agent_and_main_hears_why(ticketing, tmp_path, monkeypatch):
