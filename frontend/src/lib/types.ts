@@ -1826,6 +1826,8 @@ export interface ChatMeta {
   ticket?: string | null
   /** a view ticket's agent chat: the slug of the proposal it builds (dev.run_view) */
   view?: string | null
+  /** a view's agent chat that reviews it (view_review), not one that builds it */
+  review?: boolean | null
   /** a view ticket's agent chat: the analyst asked for the view, so it is their dev thread; the orientation's builds
    * are not listed (dev._view_chat, chat/threads.ts) */
   asked?: boolean | null

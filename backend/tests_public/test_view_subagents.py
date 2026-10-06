@@ -794,6 +794,20 @@ async def test_a_review_refused_at_the_subagent_limit_waits_and_starts_when_trie
     assert view_review.review_of(_prop(slug))["state"] == "failed", "a refusal of another kind fails it"
 
 
+def test_a_view_s_builds_and_reviews_take_the_tree_s_names_which_find_each_one(board):
+    """Live check L25: a view's two builds and two reviews were four threads all called dev/wiki-page-history. The
+    names the browser's tree gives them (threads.view_names) find each one, as /thimble:ask and rename_thread look."""
+    from app import threads
+
+    made = [agents.new_agent(CORPUS, "dev", title, view="posts", **({"review": True} if title.startswith("review") else {}))
+            for title in ("view: Posts", "review: Posts", "view: Posts", "review: Posts")]
+    ids = [m["id"] for m in made]
+    names = threads.view_names(agents.list_chats(CORPUS))
+    assert [names[i] for i in ids] == ["posts", "posts-review", "posts-2", "posts-review-2"]
+    for chat_id, name in zip(ids, ("dev/posts", "dev/posts-review", "dev/posts-2", "dev/posts-review-2")):
+        assert [m["id"] for m in threads.find_threads(CORPUS, name)] == [chat_id], name
+
+
 # --------------------------------------------------------------------------- the clicks are the analyst's
 
 
