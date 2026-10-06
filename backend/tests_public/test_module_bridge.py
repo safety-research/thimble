@@ -616,6 +616,7 @@ async def test_the_state_holds_running_agents_their_efforts_the_typed_starts_and
             "aCriticKid": {"type": "general-purpose", "parent": "aCritic"},
             "aClick": {"type": "thimble:writer", "key": "writer:report", "plugin_started": True,
                        "values": {"effort": "high"}},
+            "aCheck": {"type": "thimble:check", "key": "check:unverified:report", "plugin_started": True},
             "aDone": {"type": "thimble:check", "key": "check:c1:report", "status": "stopped"}},
         "efforts": {"aOwn": "medium"},
         "pending": {
@@ -628,7 +629,7 @@ async def test_the_state_holds_running_agents_their_efforts_the_typed_starts_and
     mod = Module(client, plugin_headers)
     await mod.hello()
     state = (await mod.get("state")).json()
-    assert set(state["agents"]) == {"aTyped", "aGp", "aGp2", "aCritic", "aCriticKid", "aClick"}
+    assert set(state["agents"]) == {"aTyped", "aGp", "aGp2", "aCritic", "aCriticKid", "aClick", "aCheck"}
     assert state["agents"]["aClick"] == {"type": "thimble:writer", "role": "writer", "plugin_started": True}
     assert state["efforts"] == {"aTyped": "max", "aGp": "max", "aGp2": "max", "aCritic": "low",
                                 "aCriticKid": "low", "aOwn": "medium"}, \
@@ -637,7 +638,9 @@ async def test_the_state_holds_running_agents_their_efforts_the_typed_starts_and
                                                    "values": {"model": "claude-opus-5-5[1m]", "effort": "max"}}}
     assert sorted(state["notes"]) == sorted([
         "The analyst started orientation aTyped (this corpus) in thimble; its report goes to them there.",
-        "The analyst started writer aClick (report) in thimble; its report goes to them there."])
+        "The analyst started writer aClick (report) in thimble; its report goes to them there.",
+        "The analyst started check aCheck (unverified on report) in thimble; its report goes to them there."]), \
+        "worded as the note at the agent's start (subagents._what)"
 
 
 async def test_the_module_s_ended_post_reaches_every_observer(client, plugin_headers):

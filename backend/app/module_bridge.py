@@ -942,9 +942,9 @@ def _running(entry: dict[str, Any]) -> bool:
 
 def _what(entry: dict[str, Any]) -> str:
     """The server-checked name an agent's note gives: the part of its key after the role (a document, a view's slug,
-    a check and its document)."""
+    a check and its document), worded as the note at its start words it (subagents._what: `unverified on report`)."""
     key = str(entry.get("key") or "")
-    return key.split(":", 1)[1] if ":" in key else ""
+    return key.split(":", 1)[1].replace(":", " on ") if ":" in key else ""
 
 
 def _efforts(reg: dict[str, Any], agents: dict[str, dict[str, Any]]) -> dict[str, Any]:
