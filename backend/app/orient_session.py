@@ -255,7 +255,7 @@ def run_prompt(c: str, rid: str, brief: str, passes: "list[str]", critique: bool
     on = [OUTPUT_WORDS[p] for p in PASSES if p in passes]
     off = [OUTPUT_WORDS[p] for p in PASSES if p not in passes]
     return tools.hint("orient-subagent-prompt", request_id=rid, request=brief.strip() or tools.hint("orient-no-request"),
-                      outputs=", ".join(on) or "none", off=", ".join(off) or "nothing",
+                      outputs=", ".join(on) or "none", off=", ".join(off) or "none",
                       critique="on" if critique else "off")
 
 
@@ -607,7 +607,7 @@ def continuation_prompt(c: str, rid: str, agent_id: str, message: str, passes: "
     return tools.hint("orient-continuation-prompt", request_id=rid, summary=summary or none,
                       cards=_stopped_cards(c, rec) or none,
                       transcripts="\n".join(str(p) for p in paths) or none, outputs=", ".join(on) or "none",
-                      off=", ".join(off) or "nothing", critique="on" if critique else "off", message=message.strip())
+                      off=", ".join(off) or "none", critique="on" if critique else "off", message=message.strip())
 
 
 async def continue_stopped(c: str, chat: str, agent_id: str, text: str, by: str = BROWSER, *,

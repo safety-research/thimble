@@ -1406,7 +1406,7 @@ The analyst asked for nothing in particular, so cover the whole corpus.
 
 The analyst's request: {request}
 
-The outputs this run leaves, of those `### Outputs` describes: {outputs}. The ones it leaves out, whose parts of `### Outputs` do not apply: {off}. The critique: {critique}.
+Outputs to make, as `### Outputs` describes them: {outputs}. Outputs to skip, with their parts of `### Outputs`: {off}. Critique: {critique}.
 
 Start the orientation.
 
@@ -1548,7 +1548,7 @@ Its cards:
 Its transcript, which you can read for what it did and found:
 {transcripts}
 
-The outputs this run leaves, of those `### Outputs` describes: {outputs}. The ones it leaves out, whose parts of `### Outputs` do not apply: {off}. The critique: {critique}.
+Outputs to make, as `### Outputs` describes them: {outputs}. Outputs to skip, with their parts of `### Outputs`: {off}. Critique: {critique}.
 
 The analyst's message:
 
