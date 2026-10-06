@@ -48,6 +48,7 @@ export const ROLES = ['orientation', 'critic', 'writer', 'view-builder', 'view-r
 export const RETRY_MS = 2000 // between hellos while no server accepts one, and after a failed poll
 export const SESSION_WAIT_MS = 10000 // how long /clear's new session id is waited for
 export const SESSION_TICK_MS = 25
+const QUICK_MS = 1000 // a poll answered sooner than this with nothing is a server that is stopping
 const LIMIT = /concurrent subagent limit/i // Claude Code's text when it runs as many subagents as it allows
 const GONE = /is not running|no task found|could not be resumed|no transcript found/i
 const QUEUED = /queued for delivery/i
@@ -274,13 +275,18 @@ async function connect($: Engine, m: State): Promise<Hello> {
 
 async function poll($: Engine, m: State, gen: number): Promise<void> {
   while (m.active && gen === m.gen) {
+    const asked = Date.now()
     const r = await call($, m, 'GET', `/api/module/next?${where(m)}`)
     if (!m.active || gen !== m.gen) return
     if (r?.status === 200 && isObj(r.data.request)) {
       take($, m, r.data.request as Request)
       continue
     }
-    if (r?.status === 204) continue
+    if (r?.status === 204) {
+      // a server holds a poll up to 25 s; one that answers at once is stopping, and is not asked again at once
+      if (Date.now() - asked < QUICK_MS) await $.clock.sleep(RETRY_MS)
+      continue
+    }
     if (r?.status === 409 && m.leaving && m.session === m.leaving) {
       await $.clock.sleep(SESSION_TICK_MS) // main is moving: follow says hello under the new id
       continue
