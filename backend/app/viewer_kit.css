@@ -1,14 +1,15 @@
 /* thimble's own parts for a view's page, which views.frame_document puts before view.html's own styles. Each class
    draws as the app's part of the same name (frontend/src/styles/components.css) or as the Files view's table and tree
    rows (files.css), in the theme's tokens that the frame passes as CSS variables (frontend/src/lib/frame.ts
-   VIEW_TOKENS), so a view follows the paper, the accent and dark mode.
+   VIEW_TOKENS), so a view follows the paper, the accent and dark mode. The key chip (.chip-key), the menu trigger drawn
+   as a field (button.field, .field.active) and the Colour by control are the views' own: the app draws none of them.
      .chip             a value, a tag or a count: .chip-sans for a name in words, .chip-tone-neutral for a plain value,
                        .chip-tone-evidence for a file, a record or a line, .chip-act when it can be clicked, .active
                        when it is chosen, .chip-plain for a quiet one; .chip-text, .chip-ico and .chip-count inside it.
                        .chip-key is a value with its colour, as a key or a toggle: a .chip-sw swatch, its name and its
-                       count, aria-pressed false when the value is off; the app draws no key, so it is the views'
-                       own
-     .btn              an action: .btn-primary, .btn-secondary or .btn-ghost, .btn-sm for the small size
+                       count, aria-pressed false when the value is off
+     .btn              an action: .btn-primary, .btn-secondary or .btn-ghost, .btn-sm for the small size,
+                       .btn-square for an icon alone
      .seg + .seg-opt   an exclusive choice, the chosen option .active; .seg-track sets the options on a tint
      .field            a text input or a select, or a button that opens a menu (button.field), .active when its menu
                        has a choice set, aria-invalid when what was typed cannot be used
@@ -128,6 +129,11 @@ body {
   background: var(--surface-card);
   color: var(--text-primary);
 }
+.chip-tone-positive.chip-act:hover,
+.chip-tone-warning.chip-act:hover,
+.chip-tone-negative.chip-act:hover {
+  background: var(--surface-card);
+}
 .chip-act:active {
   transform: translateY(0.5px);
 }
@@ -215,6 +221,17 @@ body {
   height: var(--h-control);
   padding: 0 9px;
   font-size: var(--text-mono);
+}
+/* an icon alone is a square */
+.btn-square {
+  width: var(--control-sm);
+  padding: 0;
+}
+.btn-sm.btn-square {
+  width: var(--h-control);
+}
+a.btn {
+  text-decoration: none;
 }
 .btn-ghost {
   padding: 0 6px;
