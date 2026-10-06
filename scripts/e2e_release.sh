@@ -29,7 +29,9 @@
 # from the CLI and from Settings. No model runs in the walk: when Settings offers to run the extension's orientation
 # instructions, a run record and a chat in the workspace stand in for an orientation that ran as a subagent of main,
 # first of an earlier Claude Code session, then of the stand-in's session (THIMBLE_E2E_SESSION, the id this script gives
-# the stand-in and the walk). Every process it started is stopped on exit, and <out>/report.md lists each step.
+# the stand-in and the walk). Every process it started is stopped on exit, and <out>/report.md lists each step. Its
+# first line names the Claude Code the run used (`claude --version` on the run's PATH), flagged when that is not the
+# version the ref under test names in TESTED_CLAUDE_CODE (backend/app/cli.py).
 #
 # With THIMBLE_LIVE_CLAUDE=1 two contract checks against Claude Code follow the UI walk, so that a Claude Code update
 # that changes a format thimble reads fails the release; without it each is reported as skipped:
@@ -151,9 +153,23 @@ ours() {  # the processes this run started that may still run: the server's sess
 
 claude_files() { python3 -I "$here/e2e/claude_files.py" "$out" "$@"; }
 
+# the Claude Code this run uses, as the run's PATH finds it, and the version the ref under test is tested with, read
+# from its cli.py (the clone, or the Global install a zip makes) before cleanup removes it; report.md's first line
+cc_line="$(in_env claude --version 2>/dev/null | head -n 1 || true)"
+cc_version="$(printf '%s\n' "$cc_line" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n 1 || true)"
+cc_version="${cc_version:-$cc_line}"  # `2.1.291` from `2.1.291 (Claude Code)`, else the line as printed
+tested_cc() {
+  local f
+  for f in "$tree/backend/app/cli.py" "${src_tree:-}/backend/app/cli.py"; do
+    [ -f "$f" ] || continue
+    sed -n 's/^TESTED_CLAUDE_CODE = "\([^"]*\)".*/\1/p' "$f" | head -n 1
+    return 0
+  done
+}
+
 files_before=""  # the file holding what claude_files.py printed before the install
 cleanup() {
-  local rc=$? left pid sid="" changed
+  local rc=$? left pid sid="" changed tested
   set +e
   if [ -n "$standin_pid" ]; then kill "$standin_pid" 2>/dev/null; wait "$standin_pid" 2>/dev/null; fi
   sid="$(sed -n 's/.*"pid": *\([0-9][0-9]*\).*/\1/p' "$thome/server.json" 2>/dev/null | head -n 1)"
@@ -172,10 +188,11 @@ cleanup() {
       record claude-files pass "Claude Code's plugins, marketplaces and trusted folders, ~/.local/bin/thimble and the shell startup files as before the run"
     else record claude-files fail "changed during the run: $changed"; fi
   fi
+  tested="$(tested_cc)"
   if [ "$keep_install" = 0 ]; then rm -rf "$clone" "$thome" "$bin" "$out/release"; fi
   [ -z "$trusted_copy" ] || rm -rf "$trusted_copy"
   python3 -I "$here/e2e/report.py" "$results" "$out/report.md" --ref "$ref" --commit "$commit" --started "$started" \
-    --seconds "$((SECONDS - t0))" $([ "$strict" = 1 ] && echo --strict)
+    --seconds "$((SECONDS - t0))" --claude-code "$cc_version" --tested-claude-code "$tested" $([ "$strict" = 1 ] && echo --strict)
   local verdict=$?
   say "report: $out/report.md"
   if [ "$rc" = 0 ]; then rc=$verdict; fi
@@ -185,6 +202,7 @@ trap cleanup EXIT
 trap 'exit 130' INT TERM
 
 say "thimble $ref (${commit:-no commit recorded}) from ${zip_file:-$repo} → $out"
+say "Claude Code ${cc_version:-not found on PATH}"
 
 # 1. a fresh clone, and the release zip when one is asked for
 if [ -z "$zip_file" ]; then
