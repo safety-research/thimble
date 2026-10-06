@@ -8,9 +8,9 @@
 // click: the server starts the orientation through thimble's plugin with no turn of main (POST /ws/{c}/start), and the
 // answer says whether it started. Start is off, with the reason on that line, while thimble's hooks module is not
 // running in main's session (main's meta `module: false`), and with the plain-`claude` warning
-// while main is a session `thimble` did not start (`launched: false`), whose module stays idle for that reason; in
-// plan mode the line warns and Start stays on, since thimble hears main's mode only at main's turns and the server
-// refuses a start in plan mode as it runs. Skip leaves main to the analyst.
+// while main is a session `thimble` did not start (`launched: false`), whose module stays idle for that reason, and in
+// plan mode, which thimble's module reports within seconds of a shift+tab while main is idle (the server's
+// --agent-check still refuses a start in plan mode from the mode as it runs). Skip leaves main to the analyst.
 import { useEffect, useRef, useState } from 'react'
 import { Button } from '../components/Button'
 import { TextArea } from '../components/Field'
@@ -119,8 +119,7 @@ export function modeLine(mode: string | null | undefined): string {
   return `Runs as a subagent of your Claude Code session, ${words ? `in ${words}` : 'in its permission mode'}.`
 }
 
-/** Why Start would be refused while main is in plan mode, where a subagent would ask before every card (U20): a warning,
- * since the mode thimble knows may be stale after a shift+tab while main is idle (StartGate leaves Start on). */
+/** Why Start is off while main is in plan mode, where a subagent would ask before every card (U20). */
 export const PLAN_MODE_LINE = 'Your session is in plan mode, where the orientation would have to ask you before every card. Switch out of plan mode first (shift+tab in your terminal).'
 
 /** What to change so that thimble's hooks module runs, for the reason module_bridge.why_not gives. Pure. */
@@ -195,9 +194,9 @@ export function StartGate({ ws, main, model: rowModel, effort: rowEffort, restor
   const [error, setError] = useState<string | null>(null)
   const taRef = useRef<HTMLTextAreaElement>(null)
   const blocked = startBlocked(main)
-  // plan mode warns and leaves Start on: thimble hears main's mode only at main's turns, so it may be stale after a
-  // shift+tab while main is idle, and the server's --agent-check refuses a start in plan mode from the mode as it runs
-  const off = !!blocked && blocked.kind !== 'plan'
+  // every block turns Start off, plan mode too: the module reports main's mode within seconds of a shift+tab made while
+  // main is idle (plugin/hooks/thimble.ts watchPlan), so the line is not stale for long
+  const off = !!blocked
   const toggle = (id: OrientPass) => {
     const next = togglePass(on, id)
     track('start-toggle', { target: `orient:${id}`, detail: { on: next[id] } })
