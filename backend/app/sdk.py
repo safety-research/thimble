@@ -3,8 +3,10 @@ settings, so it authenticates as `claude` does.
 
 A call gets the output tool and nothing else: no built-in tool, `strict_mcp_config`, and `--safe-mode`, which keeps the
 user's CLAUDE.md, skills, plugins, hooks and MCP servers out of it while their auth, provider and env settings apply.
-The inline `--settings` pin what the call must not take from the user's settings: its effort and fast mode. Its
-permission mode is dontAsk, so only the allowed output tool runs whatever the user's default mode is.
+Its system prompt is the caller's own, sent whole as `--system-prompt` in place of Claude Code's claude_code preset; the
+CLI still opens it with one line of its own and adds its environment context. The inline `--settings` pin what the
+call must not take from the user's settings: its effort, fast mode and ultracode. Its permission mode is dontAsk, so
+only the allowed output tool runs whatever the user's default mode is.
 
 claude_agent_sdk is imported on first use to keep `import app.main` fast. A module that uses the SDK's classes lists
 them in its _SDK_NAMES, imports them under TYPE_CHECKING and calls `_bind_sdk()` first in every function that uses
@@ -72,16 +74,17 @@ def build(
     cwd: str | Path,
     tools: list[str] | tuple[str, ...],
     mcp_servers: dict[str, Any],
-    system_append: str,
+    system: str,
     model: str | None,
     effort: str | None,
     env: dict[str, str] | None,
     speed: str | None = None,
     persist: bool = True,
 ) -> ClaudeAgentOptions:
-    """The one constructor of ClaudeAgentOptions (module note). `tools` are the MCP tool names the call may use; `env` is
-    added to the server's environment, where every THIMBLE_* variable is "" (config.launch_environ says why); `speed`
-    switches on fast mode where the model has it; `persist` False writes no transcript."""
+    """The one constructor of ClaudeAgentOptions (module note). `tools` are the MCP tool names the call may use; `system`
+    is the whole system prompt; `env` is added to the server's environment, where every THIMBLE_* variable is ""
+    (config.launch_environ says why); `speed` switches on fast mode where the model has it; `persist` False writes no
+    transcript."""
     _bind_sdk()
     os.environ.setdefault(SKIP_VERSION_CHECK_ENV, "1")
     return ClaudeAgentOptions(
@@ -90,7 +93,7 @@ def build(
         allowed_tools=[str(t) for t in tools],
         permission_mode="dontAsk",
         mcp_servers=dict(mcp_servers),
-        system_prompt={"type": "preset", "preset": "claude_code", "append": system_append},
+        system_prompt=system,
         model=model,
         effort=effort,
         settings=cli_settings(model, effort, speed),
@@ -105,9 +108,10 @@ def build(
 
 
 def cli_settings(model: str | None, effort: str | None, speed: str | None = None) -> str:
-    """The inline settings of a call: `fastMode` always (config.fast_mode_for), and the call's effort as
-    CLAUDE_CODE_EFFORT_LEVEL, which would otherwise come from the user's settings over `--effort`."""
-    obj: dict[str, Any] = {"fastMode": config.fast_mode_for(model, speed)}
+    """The inline settings of a call: `fastMode` always (config.fast_mode_for), `ultracode` off, since the user's
+    `ultracode: true` would add its instructions to every call, and the call's effort as CLAUDE_CODE_EFFORT_LEVEL,
+    which would otherwise come from the user's settings over `--effort`."""
+    obj: dict[str, Any] = {"fastMode": config.fast_mode_for(model, speed), "ultracode": False}
     if effort:
         obj["env"] = {"CLAUDE_CODE_EFFORT_LEVEL": effort}
     return json.dumps(obj)

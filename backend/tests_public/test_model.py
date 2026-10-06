@@ -149,3 +149,17 @@ async def test_turn_interrupted_only_once_a_call_is_recorded(monkeypatch):
     r = await call()
     assert r.status == "ok" and r.output == {"title": "T"} and r.attempts == 2
     assert made[0].interrupts == 1
+
+
+async def test_a_call_s_system_prompt_is_the_caller_s_own_then_the_output_tool_s_instruction(monkeypatch):
+    """The session's system prompt is a plain string: the caller's `system` and then the output tool's instruction, or
+    the instruction alone, with no Claude Code preset around it; its settings turn the user's ultracode off."""
+    import json
+
+    instruction = "Return the output ONLY via the `report` tool; call it exactly once and write no prose."
+    turn = [amsg(tuse({"title": "T"})), tres(), rmsg()]
+    made = install(monkeypatch, [[turn], [turn]])
+    assert (await call(system="You are a text classifier.")).status == "ok"
+    assert (await call()).status == "ok"
+    assert [m.opts.system_prompt for m in made] == [f"You are a text classifier.\n\n{instruction}", instruction]
+    assert all(json.loads(m.opts.settings)["ultracode"] is False for m in made)

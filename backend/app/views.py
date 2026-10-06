@@ -4240,7 +4240,7 @@ async def _suggest_call(c: str, system: str, user: str, tool: Any, model: str | 
     role = config.models_for(c).get("dev") or dict(config.ROLE_MODELS_DEFAULT["dev"])
     return await model_mod.structured(user, tool=tool,
                                       model=model or role.get("model") or config.ROLE_MODELS_DEFAULT["dev"]["model"],
-                                      effort="low", system_append=system, cwd=config.corpus_dir(c))
+                                      effort="low", system=system, cwd=config.corpus_dir(c))
 
 
 def _suggest_sections(c: str) -> tuple[dict[str, str], Any]:

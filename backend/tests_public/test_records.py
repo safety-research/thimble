@@ -423,6 +423,24 @@ async def test_a_prompt_label_reads_each_record_s_text(api, corpus, workspaces_t
         "runs.json#/runs/1": records.read(corpus / "runs.json", "runs.json", "/runs/1")["line"]}
 
 
+async def test_a_prompt_label_asks_one_call_per_fifty_records(api, corpus, workspaces_tmp, monkeypatch):
+    """Over short records a prompt label makes ceil(n / 50) classifier calls, each of up to 50 records in order."""
+    sizes: list[int] = []
+
+    async def classify(c, concept, items, comment=True, on_retry=None):
+        from app import model
+
+        sizes.append(len(items))
+        return model.CallResult(status="ok", output={"labels": [
+            {"i": n, "label": "no", "confidence": 0.9} for n in range(1, len(items) + 1)]})
+
+    monkeypatch.setattr(concepts, "classify_structured", classify)
+    (corpus / "many.jsonl").write_text("".join(json.dumps({"text": f"reply {n}"}) + "\n" for n in range(1, 121)))
+    k = await _label(api, name="refund", kind="prompt", description="asks for a refund")
+    s = await _apply(api, k, ["many.jsonl"])
+    assert s["status"] == "done" and s["labeled"] == 120 and sorted(sizes) == [20, 50, 50]
+
+
 # --------------------------------------------------------------------------- marks in a view
 
 

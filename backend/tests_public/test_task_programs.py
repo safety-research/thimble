@@ -253,8 +253,8 @@ async def test_every_task_s_own_implementation_takes_its_input_from_a_program(tm
 
     seen: dict[str, str] = {}
 
-    async def structured(prompt, *, tool, model, system_append="", images=(), **k):
-        seen[tool.name] = f"{system_append}\n{prompt}\n{len(images)} images"
+    async def structured(prompt, *, tool, model, system="", images=(), **k):
+        seen[tool.name] = f"{system}\n{prompt}\n{len(images)} images"
         return model_result(OUTPUTS[tool.name])
 
     monkeypatch.setattr(model, "structured", structured)
