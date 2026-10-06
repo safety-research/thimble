@@ -600,6 +600,19 @@ def test_the_test_label_answers_thimble_labels_as_a_label_would(tmp_path):
         kt._view_ctx, kt._view_paths = None, []
 
 
+def test_a_mark_names_each_label_s_value_with_the_label_s_id():
+    """Under the test label a marked record's mark and a unit's say the test label's value with its id, which the page's
+    `all` lists the label by, so a page can tell one label's values from another's; an unmarked record has no mark."""
+    from app import kernel_thimble as kt  # noqa: PLC0415
+
+    ctx = views.probe_context()
+    rec = views._record_mark(ctx, "board.jsonl#L7")
+    assert rec["values"] == [{"id": kt.PROBE_ID, "label": kt.PROBE_NAME, "value": kt.PROBE_NAME, "colour": kt.PROBE_COLOUR}]
+    assert views._record_mark(ctx, "board.jsonl#L8") is None
+    unit = views._unit_mark(ctx, ["board.jsonl#L6", "board.jsonl#L7", "board.jsonl#L14"])
+    assert unit["values"] == rec["values"] and unit["bar"] == kt.PROBE_COLOUR
+
+
 def _shot(state: str, **shown) -> dict:
     return {"ok": True, "state": state, "fetched_records": shown.pop("fetched", 0), "label_controls": shown.pop("controls", 1),
             "shown": shown}

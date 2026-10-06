@@ -45,16 +45,19 @@
 //   seen {refs}            frame to page: the same for the anchored elements a scroll, a resize or a redraw brought into
 //                          view
 //   labels {marks, on, filter, all, palette, answered}
-//                          page to frame: marks {ref: {bar, names, spans: [{text, colour}], keep?}}, the marks of the
-//                          labels that are on for the records and units among those refs, drawn over every element with
-//                          that data-anchor, with `keep` whether the ref passes the label filter, and `answered` the
+//                          page to frame: marks {ref: {bar, names, values: [{id, label, value, colour}], spans: [{text,
+//                          colour}], keep?}}, the marks of the labels that are on for the records and units among those
+//                          refs, drawn over every element with that data-anchor, `values` each label that highlights the
+//                          record with its value, with `keep` whether the ref passes the label filter, and `answered` the
 //                          `seq` of the anchors whose every ref those marks answer for the filter (-1 while some are
 //                          still being read); on [{id, name, colour,
 //                          values}], the labels that are on; filter {label, value, colour} or null; all [{id, name, on,
 //                          here, colour, values: [{name, colour, highlight}], count}], every label over files, those
 //                          that mark records in the view's files first with `here` true; palette, the
 //                          colours a label's value can take. Each replaces the last; window.thimble.onLabels hears all
-//                          but the marks, which window.thimble.markOf reads and window.thimble.onMarks hears. In a card's
+//                          but the marks, which window.thimble.markOf reads and window.thimble.onMarks hears. A colour
+//                          that is a CSS variable, var(--label-3), is resolved here to the colour it stands for, so a
+//                          canvas can draw every colour the page is given. In a card's
 //                          frame the elements whose records the filter drops are dimmed, never hidden, and the page's
 //                          own filtering is left alone
 //   key {key}              page to frame, once the frame is ready: the key every labelCall carries, which only this
@@ -241,6 +244,70 @@
       return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]
     })
   }
+  // A colour as a canvas can draw it: one that names a CSS variable, var(--label-3), is read through an element's
+  // computed colour in the frame's tokens; any other is kept as it is. The frame is loaded again when the theme changes,
+  // so a colour is resolved once per page.
+  var colourProbe = null
+  var realColours = {}
+  function realColour(c) {
+    if (typeof c !== 'string' || c.indexOf('var(') < 0) return c
+    if (Object.prototype.hasOwnProperty.call(realColours, c)) return realColours[c]
+    var root = document.head || document.documentElement
+    if (!root) return c
+    if (!colourProbe || !colourProbe.isConnected) {
+      colourProbe = document.createElement('i')
+      colourProbe.setAttribute('data-thimble-chrome', '')
+      root.appendChild(colourProbe)
+    }
+    colourProbe.style.color = ''
+    colourProbe.style.color = c
+    var got = ''
+    try {
+      got = getComputedStyle(colourProbe).color
+    } catch (e) {}
+    var out = got && got.indexOf('var(') < 0 ? got : c
+    realColours[c] = out
+    return out
+  }
+  // the marks with every colour resolved (realColour), so markOf hands the page colours a canvas can draw
+  function realMarks(raw) {
+    var out = {}
+    for (var ref in raw) {
+      var m = raw[ref]
+      if (!m || typeof m !== 'object') continue
+      var c = {}
+      for (var k in m) c[k] = m[k]
+      if (typeof c.bar === 'string') c.bar = realColour(c.bar)
+      if (Array.isArray(c.spans))
+        c.spans = c.spans.map(function (s) {
+          return s && typeof s === 'object' ? { text: s.text, colour: realColour(s.colour) } : s
+        })
+      if (Array.isArray(c.values))
+        c.values = c.values.map(function (v) {
+          return v && typeof v === 'object' ? { id: v.id, label: v.label, value: v.value, colour: realColour(v.colour) } : v
+        })
+      out[ref] = c
+    }
+    return out
+  }
+  function realLabelList(list) {
+    if (!Array.isArray(list)) return list
+    return list.map(function (l) {
+      if (!l || typeof l !== 'object') return l
+      var c = {}
+      for (var k in l) c[k] = l[k]
+      if (typeof c.colour === 'string') c.colour = realColour(c.colour)
+      if (Array.isArray(c.values))
+        c.values = c.values.map(function (v) {
+          if (!v || typeof v !== 'object') return v
+          var w = {}
+          for (var j in v) w[j] = v[j]
+          if (typeof w.colour === 'string') w.colour = realColour(w.colour)
+          return w
+        })
+      return c
+    })
+  }
   window.thimble = {
     /** the view this page belongs to: {slug, name}, for the view:<slug>/<key> refs it writes */
     view: window.__thimbleView || null,
@@ -343,7 +410,9 @@
         }
       }
     },
-    /** the mark of the labels the page is given on one record or unit ref, {bar, names, keep?}, or null */
+    /** the mark of the labels the page is given on one record or unit ref, {bar, names, values, spans, keep?}, or null:
+     *  `bar` the colour of the first label that highlights it, `values` [{id, label, value, colour}] each label that
+     *  does with its value; every colour one a canvas can draw (rgb(), or a hex) */
     markOf: function (ref) {
       return marks[String(ref)] || null
     },
@@ -462,14 +531,16 @@
         }
       }
     } else if (d.type === P + 'labels') {
-      marks = d.marks && typeof d.marks === 'object' ? d.marks : {}
+      marks = d.marks && typeof d.marks === 'object' ? realMarks(d.marks) : {}
       filter = d.filter && typeof d.filter === 'object' ? d.filter : null
+      if (filter && typeof filter.colour === 'string') filter = realLabelList([filter])[0]
       answered = typeof d.answered === 'number' ? d.answered : -1
-      var state = { labels: Array.isArray(d.on) ? d.on : [], filter: filter }
-      if (Array.isArray(d.all)) state.all = d.all
-      if (Array.isArray(d.palette)) state.palette = d.palette
+      var state = { labels: Array.isArray(d.on) ? realLabelList(d.on) : [], filter: filter }
+      if (Array.isArray(d.all)) state.all = realLabelList(d.all)
+      if (Array.isArray(d.palette)) state.palette = d.palette.map(realColour)
       var key = JSON.stringify(state)
-      if (key !== labelKey) {
+      var labelsChanged = key !== labelKey
+      if (labelsChanged) {
         labelKey = key
         labelState = state
         for (var f = 0; f < labelFns.length; f++) {

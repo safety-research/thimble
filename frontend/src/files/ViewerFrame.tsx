@@ -348,7 +348,7 @@ function useViewLabels(
       }
     }
     const rowsOf = { get: (ref: string) => rows.current.get(recordOf(ref)?.path ?? '')?.get(ref) }
-    const marks = { ...withKeeps(viewMarks(on, rowsOf, refs.current), filter, rowsOf, refs.current, filterFiles), ...(labelled ? unitMarks.current : {}) }
+    const marks = { ...withKeeps(viewMarks(on, rowsOf, refs.current, token), filter, rowsOf, refs.current, filterFiles), ...(labelled ? unitMarks.current : {}) }
     const state = pageLabels(on, filter, filterLabel ? new Map([[filterLabel.id, filterLabel]]) : byId, (name) => token(name) || `var(${name})`)
     const answered = !filter || (everyOne(refs.current, (ref) => keepKnown(ws, ref, filterFiles)) && everyOne(units.current, (u) => unitsAnswered.current.has(u))) ? seqNow.current : -1
     const text = JSON.stringify([marks, state, all, palette, answered])

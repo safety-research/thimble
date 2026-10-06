@@ -834,13 +834,13 @@ def _marked(ctx, ref) -> list:
         return []
     ref = str(ref)
     if ctx.get("probe"):
-        return [{"label": PROBE_NAME, "value": PROBE_NAME, "colour": PROBE_COLOUR}] if _probed(ref, ctx["probe"]) else []
+        return [{"label": PROBE_NAME, "value": PROBE_NAME, "colour": PROBE_COLOUR, "id": PROBE_ID}] if _probed(ref, ctx["probe"]) else []
     out = []
     for k in ctx.get("labels") or []:
         v = _value_of(k, ref)
         hit = next((x for x in k.get("values") or [] if x.get("highlight") and x.get("name") == v), None)
         if hit is not None:
-            out.append({"label": k.get("name"), "value": v, "colour": hit.get("colour") or k.get("colour")})
+            out.append({"label": k.get("name"), "value": v, "colour": hit.get("colour") or k.get("colour"), "id": k.get("id")})
     return out
 
 
