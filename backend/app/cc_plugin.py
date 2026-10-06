@@ -200,10 +200,9 @@ def main_launched(c: str) -> bool:
     return bool(lv is not None and launch and lv.sid == launch) or main_fenced(c)
 
 
-def hooks_blocked(cwd: Path, root: Path, environ: Mapping[str, str] | None = None) -> bool:
-    """Whether the plugin's hooks are off for a session in `cwd` (module note): by the managed tier, or by
-    `disableAllHooks` as the analyst's, the project's and the folder's local settings and the session's `--settings`
-    (flag_settings) resolve it, the later winning, as Claude Code ranks them."""
+def managed_blocks(root: Path, environ: Mapping[str, str] | None = None) -> bool:
+    """Whether the org's managed tier keeps the plugin's hooks off, whatever the analyst's settings say:
+    `disableAllHooks`, or `allowManagedHooksOnly` without thimble enabled there."""
     tier = managed(environ) or {}
     if tier.get("disableAllHooks") is True:
         return True
@@ -211,6 +210,15 @@ def hooks_blocked(cwd: Path, root: Path, environ: Mapping[str, str] | None = Non
         enabled = tier.get("enabledPlugins")
         if not (isinstance(enabled, dict) and enabled.get(f"{PLUGIN}@{marketplace(root, environ)}") is True):
             return True
+    return False
+
+
+def hooks_blocked(cwd: Path, root: Path, environ: Mapping[str, str] | None = None) -> bool:
+    """Whether the plugin's hooks are off for a session in `cwd` (module note): by the managed tier, or by
+    `disableAllHooks` as the analyst's, the project's and the folder's local settings and the session's `--settings`
+    (flag_settings) resolve it, the later winning, as Claude Code ranks them."""
+    if managed_blocks(root, environ):
+        return True
     value = None
     for path in (config_dir(environ) / USER_SETTINGS, *(Path(cwd) / p for p in PROJECT_SETTINGS)):
         v = (_read(path) or {}).get("disableAllHooks")

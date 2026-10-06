@@ -1743,12 +1743,14 @@ def fence_off(c: str | None) -> str:
     return "" if cc_settings.sandbox_ok() else "missing"
 
 
-def main_fence(cwd: Path, c: str | None = None, root: Path | None = None, session: str | None = None) -> dict[str, Any]:
+def main_fence(cwd: Path, c: str | None = None, root: Path | None = None, session: str | None = None,
+               given: str = "") -> dict[str, Any]:
     """The --settings keys that put main, and every subagent it starts, inside thimble's fence for the corpus `cwd`,
     workspace `c` (by default the one `cwd` is registered as), the plugin copy at `root`, main's session `session`
     (module note, main's fence): `sandbox`, `permissions` (userconf.main_rules; no additionalDirectories) and `env`
     (cc_plugin.FENCE_MARK). With the plugin's hooks off, /thimble's own command for SANDBOX_ACTIONS in that session and
-    the Monitor route's watcher command for it are let out of the sandbox, and no other (sandbox_rules, watch_rules).
+    the Monitor route's watcher command for it are let out of the sandbox, and no other (sandbox_rules, watch_rules);
+    `given` is the analyst's own --settings to the launcher, which may turn the hooks off (launch_hooks_blocked).
     {} when fence_off says so. A config with an error fences main with the defaults' rules."""
     from . import userconf  # noqa: PLC0415
 
@@ -1762,7 +1764,7 @@ def main_fence(cwd: Path, c: str | None = None, root: Path | None = None, sessio
     corpus = Path(os.path.realpath(config.corpus_dir(c)))
     root = root or plugin_root()
     excluded: list[str] = []
-    if cc_plugin.hooks_blocked(cwd, root):
+    if launch_hooks_blocked(cwd, root, given):
         # with the hooks off, the Monitor route's watcher must reach the server (spike U15), and /thimble's own command
         # starts the server
         excluded += [*watch_rules(root, cwd, session), *sandbox_rules(root, cwd, session)]
@@ -1811,6 +1813,31 @@ def with_fence(out: dict[str, Any], fence: dict[str, Any]) -> dict[str, Any]:
     return merged
 
 
+def given_settings(cwd: Path, given: str) -> Any:
+    """The analyst's own --settings to the launcher, `given` (inline JSON, or a file relative to `cwd`), parsed; None
+    when there are none or they cannot be read."""
+    if not given:
+        return None
+    try:
+        return json.loads(given if given.lstrip().startswith("{") else (cwd / Path(given).expanduser()).read_text("utf-8"))
+    except (OSError, ValueError):
+        return None
+
+
+def launch_hooks_blocked(cwd: Path, root: Path, given: str = "") -> bool:
+    """cc_plugin.hooks_blocked for the session the launcher is about to start: its --settings, `given`, rank above the
+    analyst's settings files as Claude Code ranks them, but cc_plugin.flag_settings cannot read them while that `claude`
+    does not run yet (live check L29: `--settings '{"disableAllHooks": true}'` left /thimble's command in the sandbox,
+    so /thimble could not reach the server). The org's managed tier still wins."""
+    own = given_settings(cwd, given)
+    v = own.get("disableAllHooks") if isinstance(own, dict) else None
+    if v is True:
+        return True
+    if v is False:
+        return cc_plugin.managed_blocks(root)
+    return cc_plugin.hooks_blocked(cwd, root)
+
+
 def modules_off(cwd: Path, given: str = "") -> str:
     """Why Claude Code will not load thimble's hooks module in a session the launcher starts in `cwd`, as far as the
     launch can tell: the org's managed settings turn hooks modules off (`disableAllHooks`, or `allowManagedHooksOnly`
@@ -1826,12 +1853,7 @@ def modules_off(cwd: Path, given: str = "") -> str:
             return "your organization's managed settings set allowManagedHooksOnly"
     if os.environ.get(NO_MODULE_ENV, "").strip():
         return f"{NO_MODULE_ENV} is set"
-    own: Any = None
-    if given:
-        try:
-            own = json.loads(given if given.lstrip().startswith("{") else (cwd / Path(given).expanduser()).read_text("utf-8"))
-        except (OSError, ValueError):
-            own = None
+    own = given_settings(cwd, given)
     if isinstance(own, dict) and isinstance(own.get("disableAllHooks"), bool):
         return "your --settings set disableAllHooks" if own["disableAllHooks"] else ""
     value = None
@@ -2009,7 +2031,7 @@ def _launch_args(cwd: Path, resume: bool, settings: str, own_session: str | None
     else:
         session = session_id = str(uuid.uuid4())
     why_off = fence_off(c)
-    fence = {} if why_off else main_fence(cwd, c, root, session)
+    fence = {} if why_off else main_fence(cwd, c, root, session, given=settings)
     if why_off in NO_FENCE_LINES:
         notes.append(NO_FENCE_LINES[why_off])
     unset = [name for name in UNSET_VARS if os.environ.get(name, "").strip()]

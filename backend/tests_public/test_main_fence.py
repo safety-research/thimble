@@ -406,6 +406,25 @@ def test_with_hooks_off_the_fence_lets_out_only_the_skill_s_own_command_for_main
     assert cli.sandbox_rules(root, tmp_path / 'say "hi"', sid) == [] and cli.sandbox_rules(root, corpus, "x") == []
 
 
+def test_hooks_turned_off_by_the_launcher_s_own_settings_let_out_the_skill_s_command_too(corpus, tmp_path, monkeypatch):
+    """Live check L29: `thimble --settings '{"disableAllHooks": true}'` launched with the plain no-module line, but the
+    fence read the hooks as on (cc_plugin.flag_settings reads a running claude's --settings, and main did not run yet),
+    so /thimble's own command stayed in the sandbox and could not reach the server. The launcher's --settings count,
+    above the analyst's settings files; the org's managed tier still wins."""
+    sid = "0b9d2f3e-1c2d-4e5f-8a9b-0c1d2e3f4a5b"
+    root = cli.plugin_root()
+    rules = [*cli.watch_rules(root, corpus, sid), *cli.sandbox_rules(root, corpus, sid)]
+    assert cli.main_fence(corpus, session=sid, given='{"disableAllHooks": true}')["sandbox"]["excludedCommands"] == rules
+    lines = cli.launch_args(corpus, settings='{"disableAllHooks": true}').split("\n")
+    assert cli.sandbox_rules(root, corpus, lines[6])[0] in json.loads(lines[3])["sandbox"]["excludedCommands"]
+    (tmp_path / "cc").mkdir(exist_ok=True)
+    (tmp_path / "cc" / "settings.json").write_text(json.dumps({"disableAllHooks": True}))
+    assert cli.main_fence(corpus, session=sid, given='{"disableAllHooks": false}')["sandbox"]["excludedCommands"] == [], \
+        "the launcher's settings rank above the analyst's"
+    monkeypatch.setattr(cc_plugin, "managed", lambda environ=None: {"disableAllHooks": True})
+    assert cli.main_fence(corpus, session=sid, given='{"disableAllHooks": false}')["sandbox"]["excludedCommands"] == rules
+
+
 def test_the_launch_says_plainly_when_hooks_modules_are_off_and_still_launches(corpus, tmp_path, monkeypatch):
     """Managed settings that set disableAllHooks or allowManagedHooksOnly, the analyst's own disableAllHooks or
     THIMBLE_NO_MODULE: the note line says thimble's agents can't start and why, and the launch goes on; THIMBLE_NO_MODULE
