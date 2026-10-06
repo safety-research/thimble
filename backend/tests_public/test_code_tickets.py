@@ -145,6 +145,10 @@ async def test_a_click_prepares_the_ticket_and_starts_its_agent_through_the_modu
         "subagent", agent, "thimble:dev-ticket", t["id"]), "the agent's chat is the ticket's thread"
     assert subagents.agent(CORPUS, agent)["key"] == dev.ticket_key(t["id"]) and t["in_box"] is True
     assert dev._current is not None and dev._current.agent == agent
+    from app import tray
+
+    [row] = [r for r in tray.subagent_rows(CORPUS) if r["role"] == "dev-ticket"]
+    assert (row["name"], row["label"]) == ("thimble:dev-ticket", f"code ticket: #{t['n']} Bigger font")
 
 
 async def test_the_agent_checks_finishes_and_the_analyst_s_allow_applies_the_change_that_passed(ticketing):
