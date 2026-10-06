@@ -145,6 +145,14 @@ export function staleOf(run: Pick<CheckRun, 'stale' | 'status'> | null | undefin
 /** A stale row's words: how many passages changed since the check last ran on them. Pure. */
 export const staleText = (n: number): string => `${n} passage${n === 1 ? '' : 's'} changed since checked`
 
+/** The tip of a running check's spinner: open its run, or what it waits for, since it has no chat yet. Pure. */
+export function checkRunLabel(name: string, run: { chat?: string | null; waiting?: string | null }): string {
+  if (run.chat) return `${name} is running: open its run`
+  if (run.waiting === 'writer') return `${name} runs once the writer has finished`
+  if (run.waiting === 'plan') return `${name} runs once your session leaves plan mode (shift+tab in your terminal)`
+  return `${name} waits for a free session`
+}
+
 /** A check whose passages the analyst changed since it ran: nothing runs by itself (a writer's save runs the checks, the
  * analyst's own edits do not), so the row says how many changed, and Run is a click that starts the check's agent
  * through thimble's plugin on them (POST /checks/{id}/run). */
@@ -276,10 +284,10 @@ export function ChecksPane({ ws, doc, checks, comments, onHide }: ChecksPaneProp
                     {notRun && <span className="wu-count wu-count-none">–</span>}
                   </button>
                   {run?.status === 'running' && (
-                    // a run waiting for a free session, or queued until the document's writer ends, has no chat yet:
-                    // the tip says which, and a click does nothing
+                    // a run waiting for a free session, queued until the document's writer ends, or held while main is
+                    // in plan mode has no chat yet: the tip says which, and a click does nothing
                     <IconButton
-                      label={run.chat ? `${c.name} is running: open its run` : run.waiting === 'writer' ? `${c.name} runs once the writer has finished` : `${c.name} waits for a free session`}
+                      label={checkRunLabel(c.name, run)}
                       className="wu-check-run"
                       aria-disabled={!run.chat || undefined}
                       onClick={() => run.chat && openThread(run.chat, 'report-check')}
