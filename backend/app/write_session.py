@@ -19,7 +19,7 @@ from typing import Any
 
 from fastapi import HTTPException
 
-from . import agent_session, agents, config, context, report_types, tools, work_files
+from . import agent_session, agents, config, context, report_types, tools, tray, work_files
 
 log = logging.getLogger("thimble.write_session")
 
@@ -157,19 +157,48 @@ async def _resume_left(c: str, meta: dict[str, Any], prompt: str) -> agent_sessi
 def _ended(run: agent_session.Run, status: str, summary: str) -> None:
     """The session ended: main hears the writer's last message (report_types.writer_finished has ended the write), once
     a session listens (agent_session.tell_main), and its work folder lets go of what it no longer needs
-    (work_files.after_run). Messages that waited for the run to end continue the session (message), unless the analyst
-    stopped it or the server's stop ended it."""
+    (work_files.after_run). Messages that waited for the run to end continue the session (message); when the analyst
+    stopped it, they are dropped and its tray entry says so. A run the server's stop ended keeps them on its chat for
+    the run the next server resumes."""
     doc = run.key.split(":", 1)[-1]
     work_files.after_run(run.c, work_dir(run.c, doc), status)
     agent_session.tell_main(run.c, WRITTEN_KIND, {"text": summary or "", "status": status, "doc": doc})
-    waiting = _waiting.pop((run.c, doc), [])
-    if waiting and status != "stopped" and not run.interrupted:
-        asyncio.get_running_loop().create_task(_continue(run.c, doc, waiting, run.chat, run.sid),
-                                               name=f"writer-follow-up:{run.c}:{doc}")
+    if run.interrupted:
+        return
+    waiting = _queue(run.c, run.chat)
+    if not waiting:
+        return
+    _show_queue(run.c, run.chat, [])
+    if status == "stopped":
+        tray.not_passed_on(run.c, run.key, len(waiting), "it was stopped")
+        return
+    task = asyncio.get_running_loop().create_task(_continue(run.c, doc, waiting, run.chat, run.sid),
+                                                  name=f"writer-follow-up:{run.c}:{doc}")
+    task.add_done_callback(lambda t: _not_continued(t, run.c, run.key, len(waiting)))
 
 
-# the messages for a writer whose run goes, by (workspace, document), each {text, by}, for the run's end (message)
-_waiting: dict[tuple[str, str], list[dict[str, Any]]] = {}
+def _not_continued(task: "asyncio.Task[Any]", c: str, key: str, n: int) -> None:
+    """The end of the task that continues a writer with the messages that waited: when it could not start, its tray
+    entry says so."""
+    if task.cancelled() or task.exception() is None:
+        return
+    why = str(task.exception()) or type(task.exception()).__name__
+    log.warning("%s: the waiting messages for %s did not continue it: %s", c, key, why)
+    tray.not_passed_on(c, key, n, why)
+
+
+# The messages for a writer whose run goes wait on its chat's meta as `queued`, each {text, by}, for the run's end
+# (message), so a server restart keeps them and its thread shows them.
+def _queue(c: str, chat: str) -> "list[dict[str, Any]]":
+    meta = agents.meta_or_none(c, chat) or {}
+    return [m for m in meta.get("queued") or [] if isinstance(m, dict) and str(m.get("text") or "").strip()]
+
+
+def _show_queue(c: str, chat: str, queue: "list[dict[str, Any]]") -> None:
+    try:
+        agents.update_agent(c, chat, queued=list(queue))
+    except HTTPException:
+        pass
 
 
 async def message(c: str, doc: str, text: str, by: str, *, chat: str, sid: str) -> dict[str, Any]:
@@ -182,8 +211,8 @@ async def message(c: str, doc: str, text: str, by: str, *, chat: str, sid: str) 
         raise ValueError("the message is empty")
     item = {"text": text, "by": by}
     if running(c, doc):
-        queue = _waiting.setdefault((c, doc), [])
-        queue.append(item)
+        queue = [*_queue(c, chat), item]
+        _show_queue(c, chat, queue)
         return {"status": "queued", "chat": chat, "queued": len(queue)}
     run = await _continue(c, doc, [item], chat, sid)
     return {"status": "resumed", "chat": chat, "run": run.k}

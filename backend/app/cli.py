@@ -2409,8 +2409,8 @@ def revert_lines(res: dict[str, Any]) -> list[str]:
     ui = str(res.get("ui_build") or "")
     if ui.startswith("failed"):
         lines.append(f"thimble: the UI could not be rebuilt ({ui.removeprefix('failed: ')[:200]})")
-    restart = {"restarting": "the server restarts with it", "restart_pending": "the server restarts with it once the "
-               "orientation ends", "manual": "restart the server to load it: thimble server restart"}.get(
+    restart = {"restarting": "the server restarts with it", "restart_pending": "the server restarts with it once "
+               "thimble's agents end", "manual": "restart the server to load it: thimble server restart"}.get(
                    str(res.get("restart") or ""))
     if restart:
         lines.append(f"thimble: {restart}")

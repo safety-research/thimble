@@ -755,6 +755,10 @@ async def start(c: str, key: str, *, role: str, title: str, agent_args: list[str
     rules = kept_rules(c, chat) if resume else []  # module note, don't ask again
     argv = with_rules(argv, rules)
     env = environ()
+    if resume and chat and (old := agents.meta_or_none(c, chat)) is not None and old.get("bg"):
+        # a chat an earlier version ran as a Claude Code background session, which may still be idle there: it ends
+        # first, so it never runs beside its resume and no longer lists in `claude agents`
+        await asyncio.to_thread(_stop_background, str(old["bg"]))
     proc = await _exec(argv, folder, env)
     # `server`: this server's pid, the process's parent while this server follows it (_followed_elsewhere); and the
     # workspace's folder, which a copy of the workspace does not share (module note, restart)
@@ -1890,6 +1894,8 @@ async def recover() -> tuple[list[str], list[str]]:
         for meta in metas:
             try:
                 await asyncio.to_thread(_kill_left, meta)
+                if meta.get("bg"):  # _kill_left stopped that background session
+                    agents.update_agent(c, str(meta["id"]), bg=None)
                 why = await _resume_left(c, meta)
                 if why is None:
                     resumed.append(f"{c}/{meta['id']}")
@@ -1898,7 +1904,45 @@ async def recover() -> tuple[list[str], list[str]]:
                 closed.append(f"{c}/{meta['id']}")
             except Exception:  # noqa: BLE001 — never fails the start
                 log.exception("%s: session chat %s, left running, was not closed", c, meta.get("id"))
+        try:
+            await asyncio.to_thread(_stop_old_background, c)
+        except Exception:  # noqa: BLE001 — never fails the start
+            log.exception("%s: an earlier version's background sessions were not stopped", c)
     return closed, resumed
+
+
+OLD_BG_FILE = "bg-sessions.json"  # in the workspace: the background sessions an earlier version started
+
+
+def _stop_old_background(c: str) -> list[str]:
+    """The background sessions an earlier version of thimble started in workspace `c` (OLD_BG_FILE, and the chats whose
+    meta keeps a `bg` short id) end with `claude stop`, their conversations kept: an orientation or a writer that sat
+    idle in Claude Code's background service across the update would otherwise stay listed in `claude agents` under the
+    same name as its tray entry, and a follow-up would run beside it. The file is renamed once read, so this runs once.
+    Blocking; returns the short ids stopped."""
+    path = config.workspace_dir(c) / OLD_BG_FILE
+    shorts: list[str] = []
+    try:
+        rows = json.loads(path.read_text("utf-8"))
+    except (OSError, ValueError):
+        rows = []
+    for row in rows if isinstance(rows, list) else []:
+        if isinstance(row, dict) and str(row.get("short") or "").strip():
+            shorts.append(str(row["short"]).strip())
+    chats = [m for m in agents.list_chats(c) if m.get("bg")]
+    shorts.extend(str(m["bg"]) for m in chats)
+    shorts = list(dict.fromkeys(shorts))
+    for short in shorts:
+        _stop_background(short)
+    for meta in chats:
+        with contextlib.suppress(Exception):
+            agents.update_agent(c, str(meta["id"]), bg=None)
+    if path.exists():
+        with contextlib.suppress(OSError):
+            path.rename(path.with_name(OLD_BG_FILE + ".stopped"))
+    if shorts:
+        log.info("%s: an earlier version's background sessions were stopped: %s", c, ", ".join(shorts))
+    return shorts
 
 
 def _stopped_steps(c: str, chat: str) -> list[dict[str, Any]]:

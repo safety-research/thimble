@@ -199,3 +199,67 @@ async def test_an_earlier_version_s_background_chat_left_running_is_stopped_and_
     assert last[0] == "-p" and last[last.index("--resume") + 1] == run.sid
     meta = agents.read_meta(CORPUS, run.chat)
     assert meta["status"] == "done" and meta.get("background") is None and meta.get("bg") is None
+
+
+async def test_an_earlier_version_s_idle_background_sessions_are_stopped_at_start_and_before_a_follow_up(fake,
+                                                                                                       monkeypatch):
+    """An orientation 0.5.0 left idle in Claude Code's background service across the update still lists in `claude
+    agents`: the server's start stops each background session that version's registry or a chat names, once, and a
+    follow-up of a chat that still names one stops it before `claude -p --resume` runs."""
+    from app import config
+
+    stopped: list[str] = []
+    monkeypatch.setattr(agent_session, "_stop_background", stopped.append)
+    run = await orient_session.start(CORPUS, "")
+    await _done()
+    agents.update_agent(CORPUS, run.chat, background=True, bg="ab12cd34")
+    old = config.workspace_dir(CORPUS) / agent_session.OLD_BG_FILE
+    old.write_text(json.dumps([{"key": KEY, "short": "ab12cd34"}, {"key": "writer:report", "short": "ef56ab78"}]))
+    closed, resumed = await agent_session.recover()
+    assert (closed, resumed) == ([], []) and stopped == ["ab12cd34", "ef56ab78"]
+    assert not old.exists() and agents.read_meta(CORPUS, run.chat).get("bg") is None
+    await agent_session.recover()
+    assert stopped == ["ab12cd34", "ef56ab78"], "it runs once"
+
+    agents.update_agent(CORPUS, run.chat, bg="0a0b0c0d")
+    await orient_session.message(CORPUS, "And April?", orient_session.BROWSER)
+    await _done()
+    assert stopped[-1] == "0a0b0c0d" and agents.read_meta(CORPUS, run.chat).get("bg") is None
+
+
+async def test_a_writer_s_waiting_messages_are_kept_on_its_chat_and_a_stop_drops_them_saying_so(fake, monkeypatch):
+    """Messages that wait for a writer's run are kept on its chat's meta (`queued`), which a server restart keeps and its
+    thread shows; when the analyst stops the run, they are dropped and its tray entry says so."""
+    from app import report_types
+
+    monkeypatch.setattr(report_types, "begin_write", lambda *a, **k: None)
+    key = write_session.session_key("report")
+    monkeypatch.setenv("FAKE_MODE", "sleep")
+    run = await write_session.start(CORPUS, "report")
+    await _transcript(run.sid)
+    got = await write_session.message(CORPUS, "report", "Shorter, please.", agents.TERMINAL, chat=run.chat, sid=run.sid)
+    assert got["status"] == "queued"
+    assert agents.read_meta(CORPUS, run.chat)["queued"] == [{"text": "Shorter, please.", "by": agents.TERMINAL}]
+    _news(key)
+    assert await agent_session.stop(CORPUS, key)
+    assert agents.read_meta(CORPUS, run.chat)["queued"] == []
+    news = _news(key)
+    assert "thimble:writer: the message that waited for it was not passed on, since it was stopped." in news, news
+    assert len(_argvs(fake)) == 1, "the stopped writer was not continued"
+
+
+async def test_a_dev_restart_waits_for_a_running_writer_or_critique_as_for_an_orientation(fake, monkeypatch):
+    from app import dev, report_types
+
+    monkeypatch.setattr(report_types, "begin_write", lambda *a, **k: None)
+    monkeypatch.setenv("FAKE_MODE", "sleep")
+    assert CORPUS not in dev.agents_running()
+    await write_session.start(CORPUS, "report")
+    assert CORPUS in dev.agents_running()
+    await agent_session.stop(CORPUS, write_session.session_key("report"))
+    assert CORPUS not in dev.agents_running()
+
+
+def test_a_message_typed_in_a_tray_entry_reaches_the_orientation_as_the_analyst_s_from_the_tray():
+    lead = orient_session._lead([{"text": "And April?", "by": orient_session.TERMINAL}])
+    assert tools.hint("orient-from-terminal") in lead and tools.hint("orient-from-analyst") not in lead

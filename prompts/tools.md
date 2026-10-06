@@ -1150,6 +1150,10 @@ This message is from the analyst's own session.
 
 This message is from the analyst, typed in your thread.
 
+## orient-from-terminal
+
+This message is from the analyst, typed in Claude Code's agent tray.
+
 ## orient-from-extension
 
 The analyst switched on the extension {extension} and asked you to run its instructions for the orientation now. Follow them as far as the work you did allows.

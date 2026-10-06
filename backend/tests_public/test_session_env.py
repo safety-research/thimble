@@ -161,6 +161,20 @@ def test_a_call_names_its_session_only_with_the_token_that_proves_it(monkeypatch
     assert seen == ["orient", None]
 
 
+def test_the_shim_believes_a_session_name_only_with_its_token(tmp_path):
+    """A process whose environment names a session of thimble's but has no token, such as the user's own session
+    started where THIMBLE_SESSION was set, gets the analyst's tools from the shim, not that session's."""
+    elsewhere = tmp_path / "elsewhere"
+    env = {**os.environ, "THIMBLE_SESSION": orient_session.KEY, "THIMBLE_HOME": str(elsewhere / "home"),
+           "THIMBLE_PORT": "8771"}
+    env.pop("THIMBLE_SESSION_TOKEN", None)
+    shim = subprocess.run([str(config.REPO_ROOT / "plugin" / "bin" / "thimble-mcp"), "--list"], env=env,
+                          capture_output=True, text=True, timeout=60)
+    listed = {t["name"] for t in json.loads(shim.stdout)}
+    analysts, orientations = ({t["name"] for t in tools.list(tools.ANALYST, session=s)} for s in (None, orient_session.KEY))
+    assert listed == analysts != orientations, "the analyst's tools, not the orientation's"
+
+
 def test_the_session_key_is_private_to_thimble_and_outlives_a_restart(monkeypatch, tmp_path):
     """The key the tokens are signed with is a file in thimble's home, readable by its owner alone, which no agent may
     read, and a token stays good across a restart of the server."""

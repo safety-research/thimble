@@ -59,7 +59,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from . import agent_session, agents, cc_settings, config, ledger, orientation, prompts, tools, userconf, work_files
+from . import agent_session, agents, cc_settings, config, ledger, orientation, prompts, tools, tray, userconf, work_files
 
 log = logging.getLogger("thimble.orient_session")
 router = APIRouter()
@@ -92,6 +92,7 @@ BLOCKS = {"instructions": INSTRUCTIONS}
 _MARKS = {"request": "\x00request\x00", "instructions": "\x00instructions\x00"}
 BROWSER = "browser"  # `by` of a message typed in the orientation's thread
 MAIN = "main"  # `by` of a message main's message_orientation sent
+TERMINAL = "terminal"  # `by` of a message the analyst typed in a tray entry of the orientation or its critic (tray.py)
 EXTENSION = "extension"  # `by` of an extension's orientation instructions, sent when it starts running here
 
 
@@ -379,7 +380,8 @@ def _lead(messages: "list[dict[str, Any]]") -> str:
         if m.get("by") == EXTENSION:
             who = tools.hint("orient-from-extension", extension=m.get("extension") or "")
         else:
-            who = tools.hint("orient-from-main" if m.get("by") == MAIN else "orient-from-analyst")
+            who = tools.hint({MAIN: "orient-from-main", TERMINAL: "orient-from-terminal"}.get(str(m.get("by") or ""),
+                                                                                           "orient-from-analyst"))
         parts.append(f"{who}\n\n{str(m.get('text') or '').strip()}")
     return tools.hint("orient-follow-up", messages="\n\n".join(parts))
 
@@ -396,9 +398,9 @@ def _chat_of(c: str) -> tuple[dict[str, Any], str, str]:
 
 
 async def message(c: str, text: str, by: str = MAIN, call: str | None = None, extension: str = "") -> dict[str, Any]:
-    """The one server function a follow-up goes through: `text` from `by` (MAIN, BROWSER or EXTENSION, whose title is
-    `extension`) resumes the finished orientation, {status: resumed, chat, run}, or waits for the run going, {status:
-    queued, chat, queued}. `call` is main's message_orientation call. ValueError for an empty message, NoOrientation,
+    """The one server function a follow-up goes through: `text` from `by` (MAIN, BROWSER, TERMINAL or EXTENSION, whose
+    title is `extension`) resumes the finished orientation, {status: resumed, chat, run}, or waits for the run going,
+    {status: queued, chat, queued}. `call` is main's message_orientation call. ValueError for an empty message, NoOrientation,
     Gone."""
     text = str(text or "").strip()
     if not text:
@@ -407,7 +409,7 @@ async def message(c: str, text: str, by: str = MAIN, call: str | None = None, ex
     if program is not None:
         return program
     rec, chat, sid = _chat_of(c)
-    entry = {"text": text, "by": by if by in (MAIN, BROWSER, EXTENSION) else MAIN, "ts": _now()}
+    entry = {"text": text, "by": by if by in (MAIN, BROWSER, TERMINAL, EXTENSION) else MAIN, "ts": _now()}
     if entry["by"] == EXTENSION:
         entry["extension"] = extension
     if running(c) or orientation.running(c):
@@ -601,6 +603,8 @@ def _ended(run: agent_session.Run, status: str, summary: str) -> None:
         orientation.record(c, queue=[])
         _show_queue(c, run.chat, [])
     if status == "stopped" or run.interrupted:
+        if queue:
+            tray.not_passed_on(c, KEY, len(queue), "it was stopped")
         return  # the analyst's Stop clears what waited, and asks for no report; so does the server's own stop
     if queue:
         asyncio.get_running_loop().create_task(_resume_queued(c, queue), name=f"orient-follow-up:{c}")

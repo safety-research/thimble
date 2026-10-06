@@ -133,7 +133,7 @@ async def test_a_message_typed_in_the_tray_entry_is_passed_on_once(entry, tmp_pa
         "origin": {"kind": "human"}}}) + "\n")  # as Claude Code writes what the analyst types in a subagent's view
     told = await tray.wait(CORPUS, e.name, "a1", proxy)
     await asyncio.gather(*tray._passing)
-    assert got == [(CORPUS, "Check the March numbers too.", orient_session.BROWSER)]
+    assert got == [(CORPUS, "Check the March numbers too.", orient_session.TERMINAL)]
     line = "✉ analyst (tray) → thimble:orient: Check the March numbers too. (it waits for the run that goes to end)"
     assert line in told.split("\n") or e.news == [line]
     await tray.wait(CORPUS, e.name, "a1", proxy)
@@ -163,8 +163,8 @@ def test_a_tray_entry_s_hand_back_shows_nothing_in_main_s_chat_and_a_session_s_m
 
 def test_an_entry_a_previous_server_kept_loads_with_no_run_until_its_run_is_resumed(entry, monkeypatch):
     """The registry keeps the entries across a restart: one whose run was going loads with no run open, so its tray
-    entry ends with no line and main is asked for none, until agent_session resumes the run, which opens it again with
-    its tray entries and the messages they passed on."""
+    entry waits, saying the agent is paused, for PROXY_ASK_S with no line and main is asked for none, until
+    agent_session resumes the run, which opens it again with its tray entries and the messages they passed on."""
     e, _path, asked = entry
     e.relayed = ["t1"]
     tray._save(CORPUS)
@@ -172,7 +172,8 @@ def test_an_entry_a_previous_server_kept_loads_with_no_run_until_its_run_is_resu
     monkeypatch.setattr(tray, "_loaded", set())
     kept = tray.entry(CORPUS, KEY)
     assert kept is not e and (kept.run_open, kept.status, kept.relayed, kept.proxy_agents) == (False, "parked", ["t1"], ["a1"])
-    assert tray.finished(kept) and kept.news == []
+    assert not tray.finished(kept) and kept.news == [], "its tray entry waits through the restart"
+    assert tray.state_words(kept) == "paused while thimble restarts"
     tray._tick()
     assert asked == []
     again = tray.record(CORPUS, KEY, sid=SID, chat="chat-1", role="step", folder=Path("/work"))
@@ -190,3 +191,15 @@ def test_an_entry_a_previous_server_kept_loads_with_no_run_until_its_run_is_resu
     tray.record(CORPUS, KEY, sid=SID, chat="chat-1", role="step", folder=Path("/work"))
     tray._tick()
     assert asked == [(KEY,)], "an entry whose run had ended before the restart gets no wait: its tray entry ended"
+
+
+async def test_a_run_left_for_the_next_server_keeps_its_tray_entry_waiting_until_the_grace_ends(entry, monkeypatch):
+    """A run the server's stop left (run_left) is no end of the agent's task: its tray entry's wait_session says the
+    agent is paused and to call again, never that it ended, until PROXY_ASK_S has passed with no resume."""
+    e, _path, _asked = entry
+    monkeypatch.setattr(tray, "WAIT_S", 0.05)
+    tray.run_left(CORPUS, KEY)
+    got = await tray.wait(CORPUS, e.name)
+    assert "paused while thimble restarts" in got and "has ended" not in got, got
+    e.ended_at -= tray.PROXY_ASK_S
+    assert tray.finished(e) and "has ended" in await tray.wait(CORPUS, e.name)

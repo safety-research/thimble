@@ -248,10 +248,14 @@ export function stopSession(ws: string, chat: string, role: string): Promise<boo
 }
 
 /** The card of a session thimble started (the orientation, a writer, a check's run), or a subagent's chip. */
+/** The chats whose stopped notice offers Resume: the orientation's and a writer's (backend agent_session.resume_chat). */
+const RESUMABLE_ROLES = new Set(['orient', 'writer'])
+
 /** The stopped notice of a session that had not finished its task; one that finished shows as done. An earlier
- * version set it on a background session whose process stopped. */
+ * version set it on a background session whose process stopped; only the orientation and a writer can be resumed, so
+ * another chat's notice is not shown. */
 export function stoppedAlert(meta: ChatMeta | null | undefined): SessionAlert | null {
-  return meta?.alert?.kind === 'stopped' && meta.status !== 'done' ? meta.alert : null
+  return meta?.alert?.kind === 'stopped' && meta.status !== 'done' && RESUMABLE_ROLES.has(meta.role) ? meta.alert : null
 }
 
 /** A session an earlier version ran as a Claude Code background session, whose process stopped (a crash, a kill,

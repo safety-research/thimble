@@ -224,7 +224,7 @@ def _load(c: str) -> None:
         with contextlib.suppress(TypeError):
             e = Entry(**{k: row[k] for k in Entry.KEEP if k in row})
             if e.run_open:  # a run is followed again only once agent_session resumes it
-                e.run_open, e.status = False, "parked"
+                e.run_open, e.status, e.ended_at = False, "parked", time.time()
                 e.proxy_asked = time.monotonic()  # its tray entry, which may still run, gets PROXY_ASK_S to call again
             path = session.find_transcript(e.sid)
             e.offset = session._size(Path(path)) if path else 0  # the tray entry's news starts now
@@ -289,8 +289,13 @@ def resting(e: Entry | None) -> bool:
 
 def finished(e: Entry | None) -> bool:
     """Whether a resting agent has finished its task: its run ended FINISHED_AFTER_S ago and no run followed, so a run
-    that follows at once keeps its tray entry. Its tray entry ends."""
-    return resting(e) and time.time() - e.ended_at >= FINISHED_AFTER_S  # type: ignore[union-attr]
+    that follows at once keeps its tray entry. A run left for the next server (parked) gets PROXY_ASK_S instead, so its
+    tray entry waits through the restart for the run's resume rather than saying the agent ended. Its tray entry
+    ends."""
+    if not resting(e):
+        return False
+    grace = PROXY_ASK_S if e.status == "parked" else FINISHED_AFTER_S  # type: ignore[union-attr]
+    return time.time() - e.ended_at >= grace  # type: ignore[union-attr]
 
 
 def alive(e: Entry | None) -> bool:
@@ -353,12 +358,12 @@ def run_ended(c: str, key: str, status: str, summary: str) -> None:
 
 def run_left(c: str, key: str) -> None:
     """The run of the session `key` was left for the next server or for main's return (agent_session, restart): its
-    tray entry ends, with no line, and the run's resume starts it again."""
+    tray entry waits, with no line, for PROXY_ASK_S (finished), and the run's resume has it follow the run again."""
     e = entry(c, key)
     if e is None:
         return
     e.run_open, e.status = False, "parked"
-    e.ended_at = time.time() - FINISHED_AFTER_S
+    e.ended_at = time.time()
     _changed.set()
     _save(c)
 
@@ -732,13 +737,22 @@ async def _pass_on(e: Entry, text: str, by: str) -> None:
         else:
             to = config.session_role(name_of(e.c, "orient"))
             got = await orient_session.message(e.c, text, orient_session.MAIN if by == agents.MAIN_ID
-                                               else orient_session.BROWSER)
+                                               else orient_session.TERMINAL)
     except Exception as ex:  # noqa: BLE001 — the news says why
         log.info("%s: a message for %s was not passed on: %s", e.c, e.name, ex)
         _news(e, f"thimble could not pass on the message from {sender}: {_one_line(str(ex), TOOL_CHARS)}")
         return
     later = " (it waits for the run that goes to end)" if got.get("status") == "queued" else ""
     _news(e, f"✉ {sender} → {to}: {_one_line(text, MESSAGE_CHARS)}{later}")
+
+
+def not_passed_on(c: str, key: str, n: int, why: str) -> None:
+    """`n` messages that waited for the run of the agent `key` to end were dropped: its tray entry says so and why."""
+    e = entry(c, key)
+    if e is None or n <= 0:
+        return
+    what = "the message that waited for it was" if n == 1 else f"the {n} messages that waited for it were"
+    _news(e, f"{e.shown}: {what} not passed on, since {_one_line(why, TOOL_CHARS)}.")
 
 
 def proxy_alive(e: Entry) -> bool:
@@ -975,7 +989,8 @@ async def wait(c: str, name: str, agent_id: str | None = None, path: Path | None
 def state_words(e: Entry) -> str:
     if e.run_open:
         return "waiting for a permission" if e.status == "waiting" else "working"
-    return {"done": "done", "stopped": "stopped", "failed": "failed"}.get(e.status, "ended")
+    return {"done": "done", "stopped": "stopped", "failed": "failed",
+            "parked": "paused while thimble restarts"}.get(e.status, "ended")
 
 
 async def tool_wait_session(ctx: Any, args: dict[str, Any]) -> Any:

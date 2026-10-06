@@ -254,3 +254,53 @@ def test_a_result_that_only_quotes_a_moved_call_is_no_background_work():
            "kpmn7kn7f and keeps running; you'll receive a notification with the result when it completes.")
     assert agent_session.MOVED_TASK_RE.search(own).group(1) == "kpmn7kn7f"
     assert not agent_session.MOVED_TASK_RE.search(quoted)
+
+
+TASK = "wpvy4g4zv"
+WORKFLOW = [
+    {"type": "assistant", "message": {"content": [{"type": "tool_use", "id": "toolu_w", "name": "Workflow",
+                                                   "input": {"script": "export const meta = {name: 'read'}"}}]}},
+    {"type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": "toolu_w",
+                                              "content": f"Workflow launched in background. Task ID: {TASK}\n"
+                                                         "Summary: read the contract"}]}},
+]
+
+
+def _records(path: Path, *recs: dict) -> None:
+    with path.open("a") as f:
+        for r in recs:
+            f.write(json.dumps(r) + "\n")
+
+
+async def test_a_turn_whose_process_ends_while_its_workflow_runs_fails(tmp_path, monkeypatch):
+    """--print waits for the session's background work (agent_session.BG_WAIT_ENV); a process that still exits while a
+    workflow it launched runs ended that workflow with it, so the turn fails rather than letting the gates run on
+    half-finished work."""
+    tx = tmp_path / "ab12cd34-0000.jsonl"
+    tx.write_text("")
+    fake = _Sessions(tx)
+    monkeypatch.setattr(dev, "SESSIONS", fake)
+    monkeypatch.setattr(dev, "POLL_S", 0.01)
+    _records(tx, *WORKFLOW)
+    _line(tx, "Waiting for the workflow.")
+    _records(tx, {"type": "system", "subtype": "turn_duration", "durationMs": 1000, "pendingWorkflowCount": 1})
+    fake.now = "done"
+    with pytest.raises(dev.SessionError, match="before its background work finished: Waiting for the workflow."):
+        await asyncio.wait_for(_turn(dev.Run("t1", "a ticket", "now"), dev.Log(None), tmp_path), 2)
+
+
+async def test_a_turn_whose_workflow_finished_before_its_process_ended_is_done(tmp_path, monkeypatch):
+    tx = tmp_path / "ab12cd34-0000.jsonl"
+    tx.write_text("")
+    fake = _Sessions(tx)
+    monkeypatch.setattr(dev, "SESSIONS", fake)
+    monkeypatch.setattr(dev, "POLL_S", 0.01)
+    _records(tx, *WORKFLOW, {"type": "system", "subtype": "turn_duration", "durationMs": 1000, "pendingWorkflowCount": 1},
+             {"type": "user", "origin": {"kind": "task-notification"},
+              "message": {"role": "user", "content": f"<task-notification>\n<task-id>{TASK}</task-id>\n"
+                                                     "<status>completed</status>\n</task-notification>"}})
+    _line(tx, "The view is written.")
+    _records(tx, {"type": "system", "subtype": "turn_duration", "durationMs": 1000})
+    fake.now = "done"
+    assert await asyncio.wait_for(_turn(dev.Run("t1", "a ticket", "now"), dev.Log(None), tmp_path), 2) == \
+        "The view is written."

@@ -102,7 +102,7 @@ NO_CLAUDE = f"{NO_CLAUDE_FOUND}: install Claude Code, or name its path with THIM
 # thimble's marketplace (install.sh registers this tree under its name: thimble in a checkout, thimble-local from a
 # release zip) lists two plugins: thimble and thimble-cc-mod (mods/thimble-cc-mod), a single-agent thimble inside
 # Claude Code. They are switched on independently (`thimble cc-mod on|off` changes only the mod, in the folder's
-# settings). Every session thimble starts, main and the background sessions, turns the mod off in its --settings
+# settings). Every session thimble starts, main and its agents' sessions, turns the mod off in its --settings
 # (without_mod), so the two never run in one session; `claude` started in a folder where the mod is on loads it.
 MARKETPLACE_FILE = REPO_ROOT / ".claude-plugin" / "marketplace.json"
 MOD_PLUGIN = "thimble-cc-mod"
@@ -118,7 +118,7 @@ def marketplace_name() -> str:
 
 
 def without_mod(settings: dict[str, Any]) -> dict[str, Any]:
-    """`settings` (the --settings of a session thimble starts: main's or a background session's) with thimble-cc-mod of
+    """`settings` (the --settings of a session thimble starts: main's or an agent's) with thimble-cc-mod of
     this install's marketplace off in `enabledPlugins`, the analyst's other entries kept."""
     name = marketplace_name()
     if not name:
@@ -321,12 +321,10 @@ def claude_env(env: dict[str, str]) -> dict[str, str]:
     return out
 
 
-# Claude Code's background service is shared by every session of the user's: the first `claude` that needs it starts
-# it, and it gives the environment of that process to every background session it runs later, the user's own
-# included. So a `claude` thimble runs has none of thimble's variables in its own environment (launch_environ), and a
-# session thimble starts gets them in its --settings `env` (session_env), which reaches that session alone. There every
-# name below that the session does not set is given this server's value or "", so a value the service kept from
-# another session or another thimble never reaches it.
+# A `claude` thimble runs has none of thimble's variables in its own environment (launch_environ), and a session
+# thimble starts gets them in its --settings `env` (session_env), which reaches that session alone. There every name
+# below that the session does not set is given this server's value or "", so a value meant for another session or
+# another thimble never reaches it.
 # The names thimble sets for one session: a THIMBLE_* one is "" unless the session sets it; another is the server's
 # own value, else "".
 SESSION_VARS = ("THIMBLE_SESSION", "THIMBLE_SESSION_TOKEN", "THIMBLE_RENDERED_PROMPTS", "THIMBLE_AGENT_TOKEN",
@@ -483,10 +481,10 @@ def _shortened(part: str, n: int) -> str:
 
 
 def session_name(role: str, workspace: str | None) -> str:
-    """The name a Claude Code session thimble starts goes by (`claude -n`), as `claude agents`, the agent view, the
-    /resume picker and SendMessage's `to` know it: `thimble:<role> · <workspace>`, such as `thimble:main · logs-2` or
-    `thimble:writer-story · logs-2`, since those lists hold the sessions of every folder, so two workspaces must not share
-    a name; `thimble:<role>` alone for a session of no workspace (`thimble fix`'s code ticket). A name is at most
+    """The name a Claude Code session thimble starts goes by: main's (`claude -n`), as `claude agents`, the /resume
+    picker and SendMessage's `to` know it, and each agent's in the agent tray (tray.py): `thimble:<role> · <workspace>`,
+    such as `thimble:main · logs-2` or `thimble:writer-story · logs-2`, since those lists hold the sessions of every
+    folder, so two workspaces must not share a name; `thimble:<role>` alone for a session of no workspace (`thimble fix`'s code ticket). A name is at most
     SESSION_NAME_MAX characters: a longer one shortens its workspace first, down to SESSION_PART_MIN characters, then its
     role (_shortened), so distinct roles and workspaces keep distinct names."""
     room = SESSION_NAME_MAX - len(SESSION_PREFIX) - (len(SESSION_SEP) if workspace else 0)

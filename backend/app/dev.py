@@ -198,8 +198,8 @@ KERNEL_RESET_LINE = ("thimble restarted after a change ({title}). Cards keep the
 KERNEL_RESET_LINE_PLAIN = "thimble restarted. Cards keep their outputs, but run a card again before building on what it computed."
 KERNEL_KEPT_LINE = "thimble restarted after a change ({title}); your notebook picked up where it left off."
 KERNEL_KEPT_LINE_PLAIN = "thimble restarted; your notebook picked up where it left off."
-RESTART_PENDING_LINE = "thimble will restart after a change ({title}) when orientation finishes"
-RESTART_PENDING_LINE_PLAIN = "thimble will restart when orientation finishes"
+RESTART_PENDING_LINE = "thimble will restart after a change ({title}) when its agents finish"
+RESTART_PENDING_LINE_PLAIN = "thimble will restart when its agents finish"
 PLAIN_REASONS = ("manual restart", SOURCE_CHANGED)
 PLAIN_PREFIXES = ("revert of ", "rollback of ")  # a restart for a revert or a rollback names no change of its own
 SUPERVISED_ENV = cli.SUPERVISED_ENV  # set by `thimble server up` on the uvicorn it spawns (cli._server_environ)
@@ -1854,11 +1854,15 @@ async def _worker_turn(run: Run, run_log: Log, cwd: Path, prompt: str, resume: s
         break
     tail.read(run_log)
     await asyncio.to_thread(SESSIONS.stop, run.session)  # whatever it started that outlived it
-    if state == "done":
+    if state == "done" and not tail.background():
         return tail.last_text
     # the session's last words are most often the reason, so they go in the error
     said, errors = SESSIONS.result(run.session)
     last = " ".join((tail.last_text or said or errors).split())[:SESSION_WORDS_CHARS]
+    if state == "done":
+        # --print ended while a workflow or background agent of the session still ran (a wait Claude Code cut short),
+        # so the gates would run on half-finished work
+        raise SessionError(LOST_LINE + (f": {last}" if last else ""))
     if state == "api error":
         if not answered:
             return tail.last_text or said
@@ -1867,6 +1871,7 @@ async def _worker_turn(run: Run, run_log: Log, cwd: Path, prompt: str, resume: s
 
 
 SESSION_WORDS_CHARS = 300  # of a session's last text in the error of a session that ended any way but done
+LOST_LINE = "the session ended before its background work finished"
 
 
 def _minutes(seconds: float) -> str:
@@ -3493,6 +3498,15 @@ def orient_running() -> list[str]:
     return out
 
 
+def agents_running() -> list[str]:
+    """Workspaces where an orientation runs (orient_running) or another of thimble's agents that show in the agent tray
+    does, a writer or a critique: a restart would cut their runs short, and the critic's is not resumed."""
+    from . import agent_session, tray  # noqa: PLC0415 — both import modules that import this one
+
+    held = {run.c for run in list(agent_session._runs.values()) if tray.shown_in_tray(run.key) and not run.stopping}
+    return sorted({*orient_running(), *held})
+
+
 def restart_file() -> Path:
     return thimble_home() / "restart.json"
 
@@ -3606,8 +3620,8 @@ def recover_rollback() -> dict[str, Any] | None:
 
 
 async def request_restart(t: dict[str, Any] | None, reason: str = "ticket") -> str:
-    """Restart now, or defer while an orientation runs; on a server the supervisor did not start, neither (the ticket's
-    restart is "manual" and its chip says so). "restarting" | "restart_pending" | "manual"."""
+    """Restart now, or defer while an orientation, a writer or a critique runs (agents_running); on a server the
+    supervisor did not start, neither (the ticket's restart is "manual" and its chip says so). "restarting" | "restart_pending" | "manual"."""
     global _restart_pending, _poller
     title = str((t or {}).get("title") or reason)
     if t and t.get("id") and _reloads(t.get("touched") or []):
@@ -3621,7 +3635,7 @@ async def request_restart(t: dict[str, Any] | None, reason: str = "ticket") -> s
                 _chip(rec, APPLIED_RESTART_LINE.format(label=_label(rec)))
         log.info("not restarting for %r: this server was not started by the supervisor", title)
         return "manual"
-    running = orient_running()
+    running = agents_running()
     if running:
         _restart_pending = {"ticket_id": (t or {}).get("id"), "title": title, "requested": _now(), "waiting_on": running}
         if t and t.get("id"):
@@ -3642,16 +3656,16 @@ async def request_restart(t: dict[str, Any] | None, reason: str = "ticket") -> s
 async def _pending_poller() -> None:
     while _restart_pending is not None:
         await asyncio.sleep(2.0)
-        if _restart_pending is not None and not orient_running():
+        if _restart_pending is not None and not agents_running():
             await orient_ended(None)
             return
 
 
 async def orient_ended(c: str | None) -> None:
-    """Fires a deferred restart once no orientation is running. The pending poller calls it, since an
-    orientation's end is recorded only in orient/run.json (orientation.finished)."""
+    """Fires a deferred restart once no orientation, writer or critique is running (agents_running). The pending poller
+    calls it, since an orientation's end is recorded only in orient/run.json (orientation.finished)."""
     global _restart_pending
-    if _restart_pending is None or orient_running():
+    if _restart_pending is None or agents_running():
         return
     pending, _restart_pending = _restart_pending, None
     if pending.get("ticket_id"):
