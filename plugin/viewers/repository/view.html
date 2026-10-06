@@ -25,7 +25,7 @@
   .nav button.on > span { color: var(--text-primary); font-weight: 600; }
   .nav button.on::after { content: ''; position: absolute; left: 8px; right: 8px; bottom: -1px; height: 2px; border-radius: 2px; background: var(--text-primary); }
   .nav .ico { color: var(--text-tertiary); }
-  .nav .chip { height: 18px; padding: 0 6px; }
+  .nav .chip { padding: 0 6px; }
 
   #body { flex: 1; min-height: 0; display: flex; }
   #main { flex: 1; min-width: 0; overflow: auto; padding: 16px 16px 28px; }
@@ -90,13 +90,11 @@
   #filters .search .field { width: 100%; padding-left: 30px; box-sizing: border-box; }
   /* a select as wide as its chosen option, not its longest one */
   #filters select.field { flex: 0 1 auto; min-width: 0; max-width: 220px; field-sizing: content; }
-  #filters select.set { border-color: var(--text-secondary); }
   .states { display: flex; align-items: center; gap: 4px 14px; flex-wrap: wrap; }
   .states button { display: inline-flex; align-items: center; gap: 6px; padding: 2px 0; border: 0; background: none; color: var(--text-secondary); font: 400 var(--text-sm) / 1.3 var(--font-body); cursor: pointer; }
   .states button:hover { color: var(--text-primary); }
   .states button.on { color: var(--text-primary); font-weight: 600; }
   .states button .ico { width: 16px; height: 16px; }
-  .box-head .field { height: var(--control-sm); }
   .box-head select.field { field-sizing: content; }
   .box-head .total { font: 400 var(--text-mono-sm) / 1 var(--font-mono); color: var(--text-tertiary); white-space: nowrap; }
 
@@ -127,7 +125,6 @@
   .empty { padding: 32px 16px; text-align: center; color: var(--text-tertiary); }
 
   /* labels, as the forge shows them after a title: thimble's chips, a label value's tinted in its colour */
-  .row .t .chip, .facts .chip { height: 20px; }
   .lp { border-color: color-mix(in oklab, var(--c) 55%, transparent); background: color-mix(in oklab, var(--c) 14%, var(--surface-card)); color: var(--text-primary); font-weight: 500; }
   .lp::before { content: ''; width: 8px; height: 8px; border-radius: 50%; background: var(--c); }
 
@@ -142,8 +139,7 @@
   .who { display: inline-flex; align-items: center; gap: 6px; }
 
   /* the state of a pull request or an issue: a chip filled with the state's colour, with its icon */
-  .chip.state { height: 28px; padding: 0 12px 0 10px; border-color: var(--c); background: var(--c); color: var(--surface-card); font-size: var(--text-sm); font-weight: 500; }
-  .chip.state .ico { width: 15px; height: 15px; }
+  .chip.state .ico { width: 13px; height: 13px; color: var(--c); }
 
   /* icons: a state's in its colour, an action's in its colour while the records are coloured by activity, else in ink */
   .ico { width: 16px; height: 16px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
@@ -276,8 +272,7 @@
   .facts .pills { display: flex; flex-wrap: wrap; gap: 4px; }
   .runsgrid { display: grid; grid-template-columns: auto 1fr; gap: 6px 8px; align-items: center; }
   .runsgrid .cell { display: flex; flex-wrap: wrap; gap: 4px; }
-  .fbtn.field { display: inline-flex; align-items: center; gap: 6px; height: var(--control-sm); padding: 0 7px 0 9px; color: var(--text-primary); cursor: pointer; white-space: nowrap; font: 400 var(--text-ui-sm) / 1 var(--font-body); }
-  .fbtn.set { background: var(--surface-selected); }
+  .fbtn.field { padding: 0 7px 0 9px; }
   .fbtn .n { color: var(--text-tertiary); font: 400 var(--text-mono-sm) / 1 var(--font-mono); }
   .fchip { flex: none; gap: 5px; max-width: 280px; overflow: hidden; text-overflow: ellipsis; color: var(--text-secondary); font: 400 var(--text-mono-sm) / 1 var(--font-mono); }
   .fchip .ico { width: 11px; height: 11px; color: var(--text-tertiary); }
@@ -508,9 +503,9 @@
     }
     return a
   }
-  // a state as the forge's pill: its icon and name on the state's colour
+  // a state as thimble's chip: its icon in the state's colour and its name
   function statePill(tab, state) {
-    const p = el('span', 'chip chip-sans state')
+    const p = el('span', 'chip chip-sans ' + (state === 'open' ? 'chip-tone-positive' : 'chip-tone-neutral') + ' state')
     p.style.setProperty('--c', `var(${STATE_COLOURS[state]})`)
     const ic = stateIcon(tab, state)
     ic.setAttribute('class', 'ico')
@@ -864,7 +859,7 @@
       const values = facet(name)
       if (!values.length || (!first.includes(name) && !S.more)) continue
       const picked = S.filters[name] || []
-      const sel = el('select', 'field' + (picked.length ? ' set' : ''))
+      const sel = el('select', 'field' + (picked.length ? ' active' : ''))
       sel.setAttribute('aria-label', what)
       sel.append(new Option(any || `${what}`, ''))
       if (picked.length) {
@@ -884,7 +879,7 @@
       parts.push(sel)
     }
     if (rest.length) {
-      const m = el('button', 'field fbtn' + (set ? ' set' : ''))
+      const m = el('button', 'field fbtn' + (set ? ' active' : ''))
       m.innerHTML = `${S.more ? 'Fewer filters' : 'More filters'}${set ? ` <span class="n">${set}</span>` : ''}${CARET}`
       m.setAttribute('aria-expanded', String(!!S.more))
       m.onclick = () => {

@@ -47,7 +47,7 @@
   .r2 { gap: 8px 16px; padding: 10px 0 11px; }
   .search { position: relative; flex: 0 1 240px; min-width: 170px; }
   .search .ico { position: absolute; left: 9px; top: 7px; color: var(--text-tertiary); pointer-events: none; }
-  .search .field { width: 100%; height: var(--control-sm); padding-left: 29px; }
+  .search .field { width: 100%; padding-left: 29px; }
   .filters { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
   .chip-sans .ico-s { margin-right: -2px; color: var(--text-tertiary); }
   .chip.active .ico-s { color: var(--text-on-inverse); opacity: .75; }
@@ -233,7 +233,7 @@
   .more { min-width: 280px; max-width: 300px; }
   .more .sec2 { padding: 2px 4px 6px; }
   .more .rng { display: flex; align-items: center; gap: 8px; padding: 4px 8px 6px; font-size: var(--text-ui-sm); color: var(--text-secondary); }
-  .more .rng .field { width: 72px; font-family: var(--font-mono); font-size: var(--text-mono-sm); }
+  .more .rng .field { width: 72px; }
   .more .hist { display: flex; align-items: flex-end; gap: 2px; height: 26px; padding: 0 8px; }
   .more .hist i { flex: 1; background: rgba(var(--ink-rgb), .22); border-radius: 1px 1px 0 0; }
   .more .txt2 { padding: 2px 8px 8px; }
@@ -241,7 +241,7 @@
   .lay { position: absolute; right: 10px; top: 4px; z-index: 3; }
   #cmp { position: relative; padding-top: 30px; }
   #ov { position: relative; }
-  .lay .btn { gap: 4px; color: var(--text-secondary); }
+  .lay .btn { gap: 4px; }
   .fchip { gap: 6px; height: 22px; padding: 0 8px; font-size: var(--text-mono-sm); }
   .fchip .ico { width: 12px; height: 12px; color: var(--text-tertiary); }
   .dhead h2 .fchip { margin-left: 2px; }
@@ -252,10 +252,9 @@
   .cd-status.den { color: var(--status-warning); }
   .sum h4:first-child { margin-top: 0; }
   .sum .out { max-height: 220px; }
-  .fbtn.field { display: inline-flex; align-items: center; gap: 6px; flex: none; height: var(--control-sm); padding: 0 7px 0 9px; color: var(--text-primary); cursor: pointer; white-space: nowrap; font: 400 var(--text-ui-sm) / 1 var(--font-body); }
+  .fbtn.field { flex: none; padding: 0 7px 0 9px; }
   .fbtn .k { color: var(--text-secondary); }
   .fbtn .v { font-weight: 500; }
-  .fbtn.is-set { background: var(--surface-selected); border-color: rgba(var(--ink-rgb), 0.28); }
   .seg.scope { flex: none; }
   .seg-opt:disabled { opacity: 0.45; cursor: default; }
   .menu.runs .mi.run { align-items: flex-start; height: auto; padding-top: 6px; padding-bottom: 6px; }
@@ -265,7 +264,6 @@
   .menu.runs .task .cap { display: block; margin-bottom: 3px; }
   .rawseg { flex: none; }
   .cd-head .cd-status { white-space: nowrap; }
-  .rawseg .seg-opt { height: 22px; padding: 0 8px; font-size: var(--text-xs); }
   pre.out.rawline { max-height: 200px; white-space: pre-wrap; overflow-wrap: anywhere; }
   .rawref { margin: 12px 0 6px; }
   .vtip { position: fixed; z-index: 90; max-width: 300px; padding: 5px 8px; border-radius: var(--radius-ui); background: var(--surface-card); box-shadow: 0 0 0 1px rgba(var(--ink-rgb), .09), 0 8px 24px rgba(var(--ink-rgb), .12); font: 400 var(--text-ui-sm) / 1.35 var(--font-body); color: var(--text-primary); pointer-events: none; }
@@ -520,7 +518,7 @@ function runsText() {
 }
 function scopeControls() {
   const can = pickedRuns().length >= 2
-  return `<button class="field fbtn ${pickedRuns().length < allRuns().length ? 'is-set' : ''}" data-act="menu" data-menu="runs" aria-haspopup="menu">${runsText()}${ico.caret}</button>
+  return `<button class="field fbtn ${pickedRuns().length < allRuns().length ? 'active' : ''}" data-act="menu" data-menu="runs" aria-haspopup="menu">${runsText()}${ico.caret}</button>
     <div class="seg seg-track scope"><button class="seg-opt ${st.view !== 'compare' ? 'active' : ''}" data-act="combined">Combined</button><button class="seg-opt ${st.view === 'compare' ? 'active' : ''}" data-act="cmpruns" ${can ? '' : 'disabled title="Pick two runs or more to compare them"'}>Compare</button></div>`
 }
 function runsMenu() {

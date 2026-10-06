@@ -12,11 +12,8 @@
   .search { position: relative; flex: 1 1 140px; min-width: 140px; max-width: 220px; }
   .search .field { width: 100%; box-sizing: border-box; padding-left: 27px; }
   .search .ico { position: absolute; left: 8px; top: 50%; margin-top: -7px; color: var(--text-tertiary); pointer-events: none; }
-  .fbtn.field { display: inline-flex; align-items: center; gap: 6px; flex: none; padding: 0 7px 0 9px; color: var(--text-primary); cursor: pointer; white-space: nowrap; }
+  .fbtn.field { flex: none; padding: 0 7px 0 9px; }
   .fbtn .ico { width: 12px; height: 12px; color: var(--text-tertiary); }
-  .fbtn:hover, .fbtn[aria-expanded='true'] { border-color: rgba(var(--ink-rgb), 0.28); }
-  .fbtn[aria-expanded='true'] { background: var(--surface-hover); }
-  .fbtn.is-set { background: var(--surface-selected); border-color: rgba(var(--ink-rgb), 0.28); }
   .fbtn .k { color: var(--text-secondary); }
   .fbtn .v { font-weight: 500; }
   .fbtn .n { color: var(--text-tertiary); font: 400 var(--text-mono-sm) / 1 var(--font-mono); }
@@ -56,8 +53,7 @@
   .gut .win button { display: inline-grid; place-items: center; width: 16px; height: 16px; padding: 0; border: 0; border-radius: 3px; background: none; color: var(--text-tertiary); cursor: pointer; }
   .gut .win button:hover { background: var(--track-bg); color: var(--text-primary); }
   .gut .win .ico { width: 11px; height: 11px; }
-  #lanesBy.btn { position: absolute; left: 8px; gap: 4px; color: var(--text-secondary); font-weight: 400; }
-  #lanesBy.btn b { font-weight: 500; color: var(--text-primary); }
+  #lanesBy.btn { position: absolute; left: 8px; gap: 4px; }
   #lanesBy.btn .ico { width: 12px; height: 12px; }
   .tick { cursor: pointer; }
   .lanehead { cursor: default; }
@@ -87,8 +83,6 @@
   .d-top { display: flex; align-items: flex-start; gap: 16px; }
   .d-text { flex: 1; min-width: 0; margin: 4px 0 0; font: 500 var(--text-sm) / 1.45 var(--font-body); color: var(--text-primary); white-space: pre-wrap; overflow-wrap: anywhere; }
   .d-side { display: flex; flex: none; align-items: center; gap: 6px; margin-top: 4px; }
-  .d-side .chip { gap: 5px; border-color: var(--border-hairline); background: var(--surface-card); color: var(--text-secondary); font-family: var(--font-mono); cursor: pointer; }
-  .d-side .chip:hover { border-color: var(--border-strong); color: var(--text-primary); }
   .d-side .chip .ico { width: 11px; height: 11px; stroke-width: 2; color: var(--text-tertiary); }
   .facts { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 4px 18px; margin: 10px 0 0; }
   .fact { display: flex; align-items: baseline; gap: 8px; min-width: 0; margin: 0; }
@@ -152,7 +146,7 @@
 <section id="chart">
   <div class="gut" id="gut"></div>
   <svg id="strip"></svg>
-  <button id="lanesBy" class="btn btn-ghost btn-sm" type="button" aria-haspopup="menu"></button>
+  <button id="lanesBy" class="btn btn-secondary btn-sm" type="button" aria-haspopup="menu"></button>
   <svg id="lanes"></svg>
 </section>
 <section id="list" tabindex="-1">
@@ -411,7 +405,7 @@ function counts(k) {
 function fbtn(k) {
   const b = document.getElementById('f-' + k), set = S.f[k]
   const v = set.size === 1 ? (name(k, [...set][0]) || 'none') : set.size ? `${set.size}` : ''
-  b.classList.toggle('is-set', set.size > 0)
+  b.classList.toggle('active', set.size > 0)
   b.innerHTML = `${FNAME[k]}${v ? `: <span class="v">${esc(v)}</span>` : ''}${ico('down')}`
 }
 function checklist(k, max = 99) {
@@ -443,12 +437,12 @@ function moreMenu(expand) {
 function renderCtl() {
   const days = document.getElementById('f-days')
   days.innerHTML = `${daysText()}${ico('down')}`
-  days.classList.toggle('is-set', !!S.days)
+  days.classList.toggle('active', !!S.days)
   fbtn('incident'); fbtn('source')
   const n = MORE.reduce((s, k) => s + S.f[k].size, 0) + (S.took[0] != null || S.took[1] != null ? 1 : 0)
   const more = document.getElementById('f-more')
   more.innerHTML = `More filters${n ? ` <span class="n">${n}</span>` : ''}${ico('down')}`
-  more.classList.toggle('is-set', n > 0)
+  more.classList.toggle('active', n > 0)
   const chips = []
   for (const k of MORE) for (const v of S.f[k]) chips.push(`<span class="fchip"><span class="k">${FNAME[k]}</span>${esc(name(k, v) || 'none')}<button data-k="${k}" data-v="${v}" aria-label="Remove">${ico('x')}</button></span>`)
   if (S.took[0] != null || S.took[1] != null) chips.push(`<span class="fchip"><span class="k">Took</span>${S.took[0] ?? 0}–${S.took[1] ?? '∞'} min<button data-took aria-label="Remove">${ico('x')}</button></span>`)
@@ -705,7 +699,7 @@ function details(i) {
   const raw = S.raw ? `<div class="raw">${(d.raw || []).map(([n, s]) => `<span class="ln">${n}</span>${esc(s)}`).join('\n')}</div>` : ''
   const ans = d.answers ? `<div class="d-sec">Answers</div>${linkRow(d.answers, C.tk[i] >= 0 ? C.tk[i] : null)}` : ''
   const by = d.answered.length ? `<div class="d-sec">Answered by<span class="n">${d.answered.length}</span></div>${d.answered.map((b) => linkRow(b, b.t - d.t)).join('')}` : ''
-  return `<div class="d-top"><p class="d-text">${esc(rec.text || '')}</p><span class="d-side"><span class="seg seg-track"><button class="seg-opt${S.raw ? '' : ' active'}" data-raw="0" type="button">Fields</button><button class="seg-opt${S.raw ? ' active' : ''}" data-raw="1" type="button">Raw</button></span><span class="chip chip-sans chip-act" data-file="${esc(d.ref)}" title="Open in the File browser">${ico('file')}${esc(d.ref)}</span></span></div>${S.raw ? raw : `<dl class="facts">${facts.join('')}</dl>`}${ans}${by}`
+  return `<div class="d-top"><p class="d-text">${esc(rec.text || '')}</p><span class="d-side"><span class="seg seg-track"><button class="seg-opt${S.raw ? '' : ' active'}" data-raw="0" type="button">Fields</button><button class="seg-opt${S.raw ? ' active' : ''}" data-raw="1" type="button">Raw</button></span><span class="chip chip-tone-evidence chip-act" data-file="${esc(d.ref)}" title="Open in the File browser">${ico('file')}${esc(d.ref)}</span></span></div>${S.raw ? raw : `<dl class="facts">${facts.join('')}</dl>`}${ans}${by}`
 }
 document.getElementById('tb').addEventListener('click', (ev) => {
   const go = ev.target.closest('[data-go]')

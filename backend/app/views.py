@@ -2966,6 +2966,8 @@ async def _gate(c: str, slug: str, locators: list[str] | None, *, shot_dir: Path
         report["notes"] = [*report.get("notes", []), note]
     if note := purple_note(text[VIEW_HTML]):
         report["notes"] = [*report.get("notes", []), note]
+    if note := own_parts_note(text[VIEW_HTML]):
+        report["notes"] = [*report.get("notes", []), note]
     if picture:
         _prune_shots(shot_dir or (d / CACHE_SUBDIR / "shots"))
     _gate_notes[(c, slug)] = [ln for ln in gate_lines(report) if ln.startswith(("unread: ", "files: ", "page: ", "note: "))]
@@ -4239,6 +4241,149 @@ def purple_note(html: str) -> str:
         return ""
     shown = ", ".join(colours[:4]) + (f" and {len(colours) - 4} more" if len(colours) > 4 else "")
     return _hint("view-purple", colours=shown)
+
+
+# thimble's parts as a view's styles may touch them: the frame styles .chip, .btn, .seg, .field and the Colour by
+# control (viewer_kit.css), and a view lays them out but does not restyle them or draw chips of its own
+_STYLE_RE = re.compile(r"<style\b[^>]*>(.*?)</style\s*>", re.S | re.I)
+_CSS_COMMENT_RE = re.compile(r"/\*.*?\*/", re.S)
+_KIT_PART_RE = re.compile(r"\.(?:chip|btn|seg|field|thimble-colour)(?:-[\w-]+)?(?![\w-])")
+_CLASS_RE = re.compile(r"\.(-?[_a-zA-Z][\w-]*)")
+# what a part looks like, which the kit sets: its edge, fill, corners, colours, type and height. Its width, margins,
+# padding, flex and place are the page's layout.
+_LOOK_PROPS = ("border", "background", "color", "font", "box-shadow", "outline", "height", "min-height", "line-height",
+               "letter-spacing", "text-transform", "text-decoration")
+_LOOK_PREFIXES = ("border-", "background-", "font-", "outline-", "text-decoration-")
+_RADIUS_VARS = {"--radius-hl": 3, "--radius-chip": 4, "--radius-seg": 5, "--radius-ui": 6, "--radius-card": 8,
+                "--radius-pane": 12, "--radius-pill": 999}
+CHIP_RADIUS = 4  # px, var(--radius-chip): a chip's corners
+CHIP_HEIGHT = 30  # px: a padded box no taller than this, or drawn inline, is a chip, a tag or a small button
+_SMALL_HEIGHT_VARS = ("--h-chip", "--h-control", "--control-sm", "--h-row")
+
+
+def _css_rules(css: str) -> Iterator[tuple[str, str]]:
+    """(selector, declarations) of each style rule in `css`, those inside @media, @supports, @container and @layer
+    included; @keyframes, @font-face and the like left out."""
+    i, n = 0, len(css)
+    while i < n:
+        j = css.find("{", i)
+        if j < 0:
+            return
+        depth, k = 1, j + 1
+        while k < n and depth:
+            depth += {"{": 1, "}": -1}.get(css[k], 0)
+            k += 1
+        sel = css[i:j].rsplit(";", 1)[-1].rsplit("}", 1)[-1].strip()
+        body = css[j + 1:k - 1]
+        if sel.startswith("@"):
+            if re.match(r"@(?:media|supports|container|layer)\b", sel, re.I):
+                yield from _css_rules(body)
+        elif sel:
+            yield sel, body
+        i = k
+
+
+def _declarations(body: str) -> dict[str, str]:
+    out: dict[str, str] = {}
+    for part in body.split(";"):
+        prop, sep, value = part.partition(":")
+        if sep and prop.strip():
+            out[prop.strip().lower()] = value.replace("!important", "").strip()
+    return out
+
+
+def _last_compound(selector: str) -> str:
+    """The compound a selector picks its element by: the part after its last combinator, with what its :not(), :is()
+    and attribute brackets hold left out."""
+    bare = re.sub(r"\([^()]*\)|\[[^\]]*\]", "", selector.strip())
+    return re.split(r"\s*[\s>+~]\s*", bare)[-1]
+
+
+def _looks(decls: dict[str, str]) -> list[str]:
+    return [p for p in decls if p in _LOOK_PROPS or p.startswith(_LOOK_PREFIXES)]
+
+
+def _px(value: str) -> float | None:
+    """The largest length a CSS value names, in px: thimble's radius and height tokens by their sizes, a percentage of
+    25 or more as a pill; None when it names none."""
+    sizes: list[float] = []
+    for m in re.finditer(r"var\(\s*(--[\w-]+)", value):
+        if m.group(1) in _RADIUS_VARS:
+            sizes.append(_RADIUS_VARS[m.group(1)])
+    for m in re.finditer(r"(?<![\w-])(\d*\.?\d+)(px|%|rem|em)(?![\w-])", value):
+        num, unit = float(m.group(1)), m.group(2)
+        sizes.append(999.0 if unit == "%" and num >= 25 else num * 16 if unit == "rem" else num * 13 if unit == "em"
+                     else num if unit == "px" else 0.0)
+    return max(sizes) if sizes else None
+
+
+def _painted(decls: dict[str, str]) -> bool:
+    """Whether a rule draws a box: an edge, a fill or a ring."""
+    for prop, value in decls.items():
+        v = value.lower()
+        if prop in ("border", "border-color", "border-width", "border-style", "background", "background-color",
+                    "box-shadow", "outline") and v not in ("0", "none", "transparent", "unset", "initial", "inherit"):
+            return True
+    return False
+
+
+def _padded_sideways(decls: dict[str, str]) -> bool:
+    sides = [decls[p] for p in ("padding-left", "padding-right", "padding-inline") if p in decls]
+    if "padding" in decls:
+        vals = decls["padding"].split()
+        sides.append(vals[1] if len(vals) > 1 else vals[0] if vals else "0")
+    return any(re.search(r"[1-9]|var\(", v) for v in sides)
+
+
+def _chip_like(decls: dict[str, str], radius: float) -> bool:
+    """Whether a rule with corners of `radius` px draws a chip, a tag, a pill or a small button: a box with an edge or a
+    fill, padded at its sides, and a pill, no taller than CHIP_HEIGHT or drawn inline; not a square or a circle of a
+    fixed size."""
+    if not (_painted(decls) and _padded_sideways(decls)):
+        return False
+    w, h = decls.get("width"), decls.get("height") or decls.get("min-height")
+    if w and h and w == h:
+        return False
+    small = h is not None and (any(v in h for v in _SMALL_HEIGHT_VARS) or ((px := _px(h)) is not None and px <= CHIP_HEIGHT))
+    inline = decls.get("display", "").startswith("inline")
+    return radius >= 999 or small or inline
+
+
+def own_parts(html: str) -> list[str]:
+    """What a view's page (`html`) does in its styles that makes its parts look unlike thimble's: a rule that restyles
+    one of thimble's parts (.chip, .btn, .seg, .field or the Colour by control, or a class the page puts on one of
+    them in the same selector, such as `.fbtn.field`), setting its edge, fill, corners, colours, type or height; and a
+    rule that draws a chip-like element (_chip_like) with corners rounder than var(--radius-chip). Each once, in the
+    page's order, as `selector` and what it sets."""
+    css = _CSS_COMMENT_RE.sub("", "\n".join(_STYLE_RE.findall(html or "")))
+    rules = [(sel.strip(), _declarations(body)) for group, body in _css_rules(css) for sel in group.split(",")]
+    aliases: set[str] = set()
+    for sel, _ in rules:
+        for compound in re.split(r"\s*[\s>+~]\s*", re.sub(r"\([^()]*\)|\[[^\]]*\]", "", sel)):
+            if _KIT_PART_RE.search(compound):
+                aliases |= {c for c in _CLASS_RE.findall(compound) if not _KIT_PART_RE.fullmatch("." + c)}
+    found: dict[str, None] = {}
+    for sel, decls in rules:
+        last = _last_compound(sel)
+        part = bool(_KIT_PART_RE.search(last)) or any(c in aliases for c in _CLASS_RE.findall(last))
+        looks = _looks(decls) if part else []
+        if looks:
+            found.setdefault(f"`{sel}` sets {', '.join(looks)}", None)
+            continue
+        radius = decls.get("border-radius")
+        if radius and (px := _px(radius)) is not None and px > CHIP_RADIUS and _chip_like(decls, px):
+            found.setdefault(f"`{sel}` draws a chip with border-radius {radius}", None)
+    return list(found)
+
+
+def own_parts_note(html: str) -> str:
+    """The note for a view whose styles restyle thimble's parts or draw rounded chips of their own (own_parts); ''
+    otherwise."""
+    found = own_parts(html)
+    if not found:
+        return ""
+    shown = "; ".join(found[:4]) + (f"; and {len(found) - 4} more" if len(found) > 4 else "")
+    return _hint("view-own-parts", found=shown)
 
 
 # ----------------------------------------------------------------------------------------------------------

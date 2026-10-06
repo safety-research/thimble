@@ -832,6 +832,10 @@ The browser that takes the checks' and the review's pictures cannot play H.264 v
 
 The page writes purple colours: {colours}. Purple is thimble's colour for agents' work, so if any of them colours a category of the view, such as a speaker or a kind of record, give that category a viz colour (`--viz-*`) instead.
 
+## view-own-parts
+
+The page's styles change how thimble's parts look, or draw chips of their own: {found}. A view looks like the rest of thimble only when it uses thimble's parts as the frame styles them: `chip` (with `chip-sans`, `chip-tone-neutral`, `chip-tone-evidence`, `chip-act`, and `chip-key` with a `chip-sw` swatch for a value with its colour), `btn`, `seg` with `seg-opt`, and `field`. Set their width, margins, padding and place, but not their edges, fills, corners, colours, type or height. Give no chip, tag or small button corners rounder than `var(--radius-chip)`.
+
 ## view-built
 
 The dev agent built the view {view}, so {claims} now open in it. In it {forms}.
