@@ -35,7 +35,9 @@ export type Sort = { field: string; desc?: boolean }
 export type Where = { field: string; is?: Value; not?: Value }
 
 export type Column = { field: string; label?: string; show?: 'text' | 'bar' | 'chips'; width?: number }
-export type TableBody = { kind: 'table'; columns: Column[]; sort?: Sort; group?: string }
+/** `color`: a category field whose values colour each row's glyph, for a tab with no overview to name one (the file
+ *  browser's file type). */
+export type TableBody = { kind: 'table'; columns: Column[]; sort?: Sort; group?: string; color?: string }
 export type ListBody = { kind: 'list'; meta?: string[]; text?: string; tags?: string[]; sort?: Sort; group?: string }
 /** Marks on a time axis, a lane per value of `lane`, or per row of `lanes.collection` (whose key `lane` holds), each
  *  under its `parent` lane, the lanes under a heading per value of their `group`, with their `meta` fields in columns
@@ -65,7 +67,9 @@ export type Filter = { fields: string[]; search?: string[] }
 
 /** Rows of another collection that name this row in `via`, drawn under its detail. */
 export type Related = { title: string; collection: string; via: string; show: TableBody | ListBody | TranscriptBody; where?: Where }
-export type Detail = { meta?: string[]; fields?: string[]; text?: string; related?: Related[] }
+/** `lines`: a list field holding the record's first lines, shown with their numbers under the title (the file
+ *  browser's file, its first lines). */
+export type Detail = { meta?: string[]; fields?: string[]; text?: string; related?: Related[]; lines?: string }
 
 export type ViewCollection = {
   name: string
@@ -220,6 +224,7 @@ export function validateSpec(raw: unknown, opts: { builtin?: boolean } = {}): st
           })
         sort(`${at}.sort`, col, b.sort)
         if (b.group !== undefined) need(`${at}.group`, col, b.group, ['category', 'text'])
+        if (b.color !== undefined) need(`${at}.color`, col, b.color, ['category', 'text'])
         return
       case 'list':
         fieldList(`${at}.meta`, col, b.meta)
@@ -299,6 +304,7 @@ export function validateSpec(raw: unknown, opts: { builtin?: boolean } = {}): st
       fieldList(`${at}.meta`, c.name, d.meta)
       fieldList(`${at}.fields`, c.name, d.fields)
       if (d.text !== undefined) need(`${at}.text`, c.name, d.text)
+      if (d.lines !== undefined) need(`${at}.lines`, c.name, d.lines, ['list'])
       if (d.related !== undefined) {
         if (!Array.isArray(d.related)) return bad(`${at}.related`, 'a list')
         d.related.forEach((r, k) => {

@@ -1,10 +1,15 @@
 // The view pipeline (hooks/viewpipe.ts and its engine in register.tsx): a proposal read, the builder started with
 // thimble's dev-view prompt adapted, the checks' report sent back to a new builder, the view opened when they pass, the
-// reviewer given the drawn view, its problems fixed by a builder, and the row above the prompt and the views pane.
+// reviewer given the drawn view, its problems fixed by a builder, a change the analyst asks for, the `↳ view` row under
+// main's answer and the views pane.
 // `claude plugin test mods/thimble-cc-mod`.
 import type { On } from 'claude-code'
 import { expect, mock, test } from 'claude-code/testing'
-import type { Mounted } from 'claude-code/testing'
+import type { Mounted, TestBody } from 'claude-code/testing'
+
+import { lineWidth } from '../hooks/draw'
+import type { Line } from '../hooks/draw'
+import { signalsJson } from '../hooks/signal'
 
 import { BUILD_ATTEMPTS, LAST_ROUND, REVIEW_ROUNDS, afterBuild, afterReview, buildName, buildPrompt, buildStart, examplesText, fixedOf, handbackFrom, handbackReport, lastLook, parseFindings, parseProposal, reviewName, stateWords, stepOf, touchesProposals, viewReadyNote, viewsCount } from '../hooks/viewpipe'
 import type { BuildStatus } from '../hooks/viewpipe'
@@ -153,7 +158,6 @@ const textOf = (x: unknown): string => {
   const label = typeof el.props?.label === 'string' ? `${el.props.label} ` : ''
   return label + (el.children ?? []).map(textOf).join('')
 }
-const ABOVE = { plugin: 'thimble-cc-mod', component: 'AbovePrompt', requestId: 'above', surface: 'terminal', viewport: { columns: 200, rows: 55 }, props: { hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns: 120, view: {} } } as const
 const PANE = { plugin: 'thimble-cc-mod', component: 'Pane', requestId: 'thimble', surface: 'terminal', viewport: { columns: 200, rows: 55 }, props: { bodyColumns: 96, scroll: { bodyRows: 46 } } } as const
 
 type World = { files: Map<string, string>; spawned: { prompt: string; description: string; type: string }[]; runs: string[][]; opened: string[]; notes: string[]; checks: { exitCode: number; stdout: string }[]; agents: { id: string; status: string; spawnedBy: string }[]; tools: string[]; context: string[]; logs: string[] }
@@ -176,6 +180,7 @@ function world(on: On): World {
     if (e.path.endsWith('/prompt/view-gates.md')) return { value: 'GATES {{check}}\n{{report}}' }
     if (e.path.endsWith('/prompt/view-revise.md')) return { value: 'REVISE {{drawings}}\n{{findings}}' }
     if (e.path.endsWith('/prompt/view-review.md')) return { value: 'REVIEW {{name}}\n{{checks}}\n{{drawings}}\n{{last}}' }
+    if (e.path.endsWith('/prompt/view-change.md')) return { value: 'CHANGE {{request}} {{check}}' }
     const t = w.files.get(e.path)
     if (t === undefined) throw new Error(`ENOENT: ${e.path}`)
     return { value: t }
@@ -238,7 +243,7 @@ function world(on: On): World {
   return w
 }
 
-type Harness = { ui: { mount: (x: never) => Promise<unknown> } }
+type Engine = Parameters<TestBody>[0]
 
 /** The notes the mod left main that wait for its next prompt. */
 function waiting(w: World): string[] {
@@ -246,11 +251,37 @@ function waiting(w: World): string[] {
   return raw ? (JSON.parse(raw) as { notes: string[] }).notes : []
 }
 
-async function above($: Harness): Promise<string> {
-  const ui = (await $.ui.mount(ABOVE as never)) as unknown as M
-  const t = textOf(await ui.drawn())
-  await ui.unmount()
+/** The views pane's list as its Client draws it, one line per view (its glyph, its name, its status at R). */
+async function listLines(pane: M): Promise<Line[]> {
+  const c = (await pane.find({ type: 'Client', key: 'm:views-list' })) as unknown as { props: { props: { lines: Line[] } } } | undefined
+  return c?.props.props.lines ?? []
+}
+const plain = (lines: Line[]) => lines.map(l => l.map(x => x.s).join('').trimEnd()).join('\n')
+
+/** The views pane's list, opened by /thimble-views. */
+async function listed($: Engine): Promise<string> {
+  await $.command.run({ command: 'thimble-views', args: '' } as never)
+  const pane = (await $.ui.mount(PANE as never)) as unknown as M
+  const t = plain(await listLines(pane))
+  await pane.unmount()
   return t
+}
+
+/** The `↳` rows main's chat row `requestId` carries under it (the turn's duration here), as the terminal reads them. */
+const TURN = (requestId: string) => ({ plugin: 'thimble-cc-mod', component: 'TurnDuration', requestId, surface: 'terminal', viewport: { columns: 120, rows: 40 }, props: { word: 'Baked', durationMs: 3000 } })
+async function rowUnder($: Engine, requestId: string): Promise<string> {
+  const ui = (await $.ui.mount(TURN(requestId) as never)) as unknown as M
+  const root = (await ui.drawn()) as unknown as El
+  await ui.unmount()
+  const find = (n: unknown): El | undefined => ((n as El)?.props?.key === `signals:${requestId}` ? (n as El) : ((n as El)?.children ?? []).map(find).find(Boolean))
+  const line = (r: El) => ((r.children ?? []) as El[]).map(c => (c.type === 'Button' ? String(c.props.label) : textOf(c))).join('')
+  const box = find(root)
+  return box ? ((box.children ?? []) as El[]).map(line).join('\n') : ''
+}
+
+/** A row of main's answer stored, which the `↳` rows stand under. */
+async function mainRow($: Engine, uuid: string): Promise<void> {
+  await $.session.append({ message: { type: 'assistant', role: 'assistant', content: [{ type: 'text', text: 'An answer of main.' }] }, door: 'response', origin: { kind: 'model', model: 'm' }, uuid } as never).catch(() => undefined)
 }
 
 const status = (w: World) => JSON.parse(w.files.get(`${DIR}/status.json`) ?? '{}') as { for?: string; state: string; attempt: number; round: number; error?: string }
@@ -272,30 +303,30 @@ test('a proposal asked to be built starts its builder at once, named for the vie
   expect(p).toContain('- Overview: lanes per source over the days')
   expect(p).toContain('/views/SPEC.md')
   expect(status(w)).toMatchObject({ state: 'failed', attempt: 1, round: 0, error: 'could not start a subagent: no id' })
-  expect(await above($ as unknown as Harness)).toContain('× Timeline')
+  expect(await listed($)).toMatch(/^❯ × Timeline/)
   // read again later, the same proposal is not built again
   await $.tool.call({ tool: 'Bash', tool_use_id: 'toolu_2', command: 'cat .thimble-cc-mod/views/timeline/proposal.json' } as never)
   await clock.advance(10)
   expect(w.spawned.length).toBe(2)
 })
 
-test('a proposal without --build waits in the row; the views pane shows its fields and builds it', async ($, on) => {
+test('a proposal without --build waits; the views pane shows its description and builds it', async ($, on) => {
   const w = world(on)
   w.files.set(`${DIR}/proposal.json`, JSON.stringify({ ...PROPOSAL, build: false }))
   const clock = mock.clock(on, { now: 1_790_000_000_000 })
   await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
   await clock.advance(10)
   expect(w.spawned.length).toBe(0)
-  const row = await above($ as unknown as Harness)
-  expect(row).toContain('views')
-  expect(row).toContain('○ Timeline')
   const r = await $.command.run({ command: 'thimble-views', args: 'timeline' } as never)
   expect((r as { text?: string }).text).toBe('1 view proposed')
   expect(w.opened).toEqual(['thimble'])
   const pane = (await $.ui.mount(PANE as never)) as unknown as M
-  const text = textOf(await pane.drawn())
   // its glyph says proposed, and no word repeats it
-  for (const s of ['○ Timeline', 'Every source on one time axis', 'overview', 'lanes per source over the days', 'alerts/*.jsonl, chat/*.json · 39 files', 'build']) expect(text).toContain(s)
+  expect(plain(await listLines(pane))).toMatch(/^❯ ○ Timeline$/)
+  const text = textOf(await pane.drawn())
+  // under the second rule: why it was proposed, as prose, then `build`; none of the proposal's other fields
+  for (const s of ['Every source on one time axis', 'build']) expect(text).toContain(s)
+  for (const s of ['overview', 'lanes per source over the days', 'alerts/*.jsonl', 'ask for a change']) expect(text).not.toContain(s)
   await pane.press({ key: 'vbuild' })
   await pane.unmount()
   await clock.advance(10)
@@ -303,7 +334,7 @@ test('a proposal without --build waits in the row; the views pane shows its fiel
   expect(status(w).for).toBe(PROPOSAL.ts)
 })
 
-test('a build main asks for in its turn starts once the turn ends, so the builder does not hold the turn open', async ($, on) => {
+test('a build main asks for in its turn starts once the turn ends, so the builder does not hold the turn open; its `↳ view` row stands under the answer', async ($, on) => {
   const w = world(on)
   w.files.delete(`${DIR}/proposal.json`)
   on('turn.start', ($, e) => ({ turnId: e.turnId }) as never)
@@ -312,12 +343,16 @@ test('a build main asks for in its turn starts once the turn ends, so the builde
   await $.turn.start({ turnId: 't1', text: 'make me a view of the events' } as never)
   w.files.set(`${DIR}/proposal.json`, JSON.stringify(PROPOSAL))
   await $.tool.call({ tool: 'Bash', tool_use_id: 'toolu_1', command: 'python3 /m/helper/viewpipe.py propose --build --name Timeline' } as never)
+  await mainRow($, 'm1')
   await clock.advance(10)
   expect(w.spawned.length).toBe(0)
-  expect(await above($ as unknown as Harness)).toContain('○ Timeline')
+  // no row while the turn runs
+  expect(await rowUnder($, 'm1')).toBe('')
   await $.turn.complete({ turnId: 't1', answer: 'Building the Timeline view.', durationMs: 5, reason: 'answer' } as never)
   await clock.advance(10)
   expect(w.spawned[0]?.description).toBe('view · building Timeline')
+  // the kit starts no subagent, so the build failed: its row says so
+  expect(await rowUnder($, 'm1')).toBe('↳ view · Timeline · failed')
 })
 
 test('main\'s proposal through the helper is read at once and starts its build', async ($, on) => {
@@ -325,29 +360,39 @@ test('main\'s proposal through the helper is read at once and starts its build',
   w.files.delete(`${DIR}/proposal.json`)
   const clock = mock.clock(on, { now: 1_790_000_000_000 })
   await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
-  expect(await above($ as unknown as Harness)).not.toContain('views')
+  expect(await listed($)).not.toContain('Timeline')
   w.files.set(`${DIR}/proposal.json`, JSON.stringify(PROPOSAL))
   await $.tool.call({ tool: 'Bash', tool_use_id: 'toolu_1', command: 'python3 /m/helper/viewpipe.py propose --build --name Timeline' } as never)
   await clock.advance(10)
   expect(w.spawned[0]?.description).toBe('view · building Timeline')
 })
 
-test('a built view\'s row button opens it in the panel', async ($, on) => {
+test('a built view opens in the panel from its `↳ view` row and from the views pane', async ($, on) => {
   const w = world(on)
   w.files.set(`${DIR}/proposal.json`, JSON.stringify({ ...PROPOSAL, build: false }))
   w.files.set(`${DIR}/view.json`, JSON.stringify(TIMELINE.spec))
   w.files.set(`${DIR}/rows.json`, JSON.stringify(TIMELINE.data))
   w.files.set(`${DIR}/status.json`, JSON.stringify({ for: PROPOSAL.ts, state: 'built', attempt: 1, round: 1, fixed: ['x'], at: 0 }))
+  // an earlier session left its row under main's answer d1
+  w.files.set(`${CWD}/.thimble-cc-mod/signals.json`, signalsJson({ session: 'session-0', last: 'd1', seen: {}, rows: {}, views: { d1: ['timeline'] } }))
   const clock = mock.clock(on, { now: 1_790_000_000_000 })
   await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
   await clock.advance(10)
-  const ui = (await $.ui.mount(ABOVE as never)) as unknown as M
-  expect(textOf(await ui.drawn())).toContain('● Timeline')
-  await ui.press({ key: 'vp:timeline' })
+  expect(await rowUnder($, 'd1')).toBe('↳ view · Timeline · built')
+  const ui = (await $.ui.mount(TURN('d1') as never)) as unknown as M
+  await ui.press({ key: 'view-signal:d1:timeline' })
   await ui.unmount()
   expect(w.opened).toEqual(['thimble'])
-  const pane = (await $.ui.mount(PANE as never)) as unknown as M
-  expect(textOf(await pane.drawn({ in: 'view:timeline' }))).toMatch(/^Timeline +60 events/)
+  let pane = (await $.ui.mount(PANE as never)) as unknown as M
+  expect(textOf(await pane.drawn({ in: 'm:view:timeline' }))).toMatch(/Timeline/)
+  await pane.unmount()
+  // the views pane: the row's glyph says built, and `open` opens it
+  expect(await listed($)).toMatch(/^❯ ● Timeline/)
+  pane = (await $.ui.mount(PANE as never)) as unknown as M
+  await pane.press({ key: 'vopen' })
+  await pane.unmount()
+  pane = (await $.ui.mount(PANE as never)) as unknown as M
+  expect(await pane.find({ type: 'Client', key: 'm:view:timeline' })).toBeDefined()
   await pane.unmount()
 })
 
@@ -361,7 +406,8 @@ test('after a reload: the builder\'s end runs the checks and opens the view; the
   await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
   await clock.advance(10)
   expect(w.spawned.length).toBe(0)
-  expect(await above($ as unknown as Harness)).toContain('◌ Timeline')
+  expect(await listed($)).toMatch(/◌ Timeline/)
+  w.opened.length = 0
   w.checks.push({ exitCode: 0, stdout: 'index: 39 files in 0.4 s\nunread: 1 line the reader could not parse, such as agents.log#L38: x\nchecks passed' })
   await $.turn.complete({ turnId: 'b1', agentId: 'agent-b', answer: 'built', durationMs: 5, reason: 'answer' } as never)
   await clock.advance(1100)
@@ -484,7 +530,7 @@ test('the review of the last fixes ends the build: the problems it names are lef
   expect(waiting(w)[0]).toContain('Its review left 1 problem unfixed')
 })
 
-test('"review again" on a built view runs the checks, then starts a reviewer given the view drawn as text', async ($, on) => {
+test('"ask for a change" on a built view starts a builder given the analyst\'s words; there is no "build again" or "review again"', async ($, on) => {
   const w = world(on)
   w.files.set(`${DIR}/proposal.json`, JSON.stringify({ ...PROPOSAL, build: false }))
   w.files.set(`${DIR}/view.json`, JSON.stringify(TIMELINE.spec))
@@ -495,14 +541,16 @@ test('"review again" on a built view runs the checks, then starts a reviewer giv
   await $.command.run({ command: 'thimble-views', args: 'timeline' } as never)
   const pane = (await $.ui.mount(PANE as never)) as unknown as M
   const text = textOf(await pane.drawn())
-  for (const x of ['build again', 'review again', 'open', 'left']) expect(text).toContain(x)
-  w.checks.push({ exitCode: 0, stdout: 'checks passed' })
-  await pane.press({ key: 'vreview' })
+  for (const x of ['open', 'ask for a change']) expect(text).toContain(x)
+  for (const x of ['build again', 'review again', 'left', 'fixed']) expect(text).not.toContain(x)
+  // the field's label is a dim word before it; the Input has no placeholder
+  expect(((await pane.find({ key: 'vchange-timeline' })) as { props: Record<string, unknown> } | undefined)?.props.placeholder).toBeUndefined()
+  await pane.input({ key: 'vchange-timeline', text: 'put the incidents on a lane of their own' })
   await pane.unmount()
   await clock.advance(10)
-  expect(w.runs.some(r => r[1]?.endsWith('/helper/viewpipe.py') && r[2] === 'check')).toBe(true)
-  expect(w.spawned[0]).toMatchObject({ description: 'view · reviewing Timeline', type: 'fork' })
-  expect(status(w)).toMatchObject({ round: 0 })
+  expect(w.spawned[0]).toMatchObject({ description: 'view · building Timeline', type: 'fork' })
+  expect(w.spawned[0]!.prompt).toContain('BUILD Timeline timeline')
+  expect(w.spawned[0]!.prompt).toContain('CHANGE put the incidents on a lane of their own python3 ')
 })
 
 // tool.call does not reach a fork's tools: a subagent's Bash output is saved and noted from its rows instead, so its
@@ -529,65 +577,46 @@ test("a subagent's Bash output is saved like main's, and the subagent is told ho
   expect([...w.files.keys()].filter(k => k.startsWith(`${CWD}/.thimble-cc-mod/calls/`))).toHaveLength(1)
 })
 
-test('the views pane in a narrow panel: the chosen view\'s name gives way to its controls against the right edge, never drawn over them', async ($, on) => {
+test('the views pane in a narrow panel: each row fits, its name cut before its status at R', async ($, on) => {
   const w = world(on)
-  w.files.set(`${DIR}/proposal.json`, JSON.stringify({ ...PROPOSAL, name: 'Wiki Pages', build: false }))
+  w.files.set(`${DIR}/proposal.json`, JSON.stringify({ ...PROPOSAL, name: 'Wiki Pages with a name long enough to be cut in a narrow panel', build: false }))
   w.files.set(`${DIR}/view.json`, JSON.stringify(TIMELINE.spec))
   w.files.set(`${DIR}/rows.json`, JSON.stringify(TIMELINE.data))
   w.files.set(`${DIR}/status.json`, JSON.stringify({ for: PROPOSAL.ts, state: 'built', attempt: 1, round: 2, left: ['a'], fixed: ['b'], at: 0 }))
   await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
   await $.command.run({ command: 'thimble-views', args: 'timeline' } as never)
-  // the panel at 120 columns is 48 wide: "[ build again ]  [ review again ]  [ open ]  [ close ]" does not fit beside the name
-  // the pane's lines: its name's line just above the row of buttons
-  const lines = async (bodyColumns: number) => {
+  for (const bodyColumns of [48, 96]) {
     const pane = (await $.ui.mount({ ...PANE, props: { bodyColumns, scroll: { bodyRows: 46 } } } as never)) as unknown as M
-    const root = (await pane.drawn()) as unknown as El
+    const lines = await listLines(pane)
     await pane.unmount()
-    // the panel's column inside its type area
-    const col = root.props?.paddingLeft === 1 ? (root.children![0] as El) : root
-    return (col.children ?? []) as El[]
-  }
-  for (const w of [48, 96]) {
-    const top = await lines(w)
-    const head = top.find(x => x.props?.key === 'vhead')!
-    expect(textOf(head).trim()).toMatch(/^Wiki Pages.*build again.*review again.*open$/)
-    // the name may be cut; the controls are a block that never gives way
-    const kids = (head.children ?? []) as El[]
-    expect(kids[0]!.props.flexShrink).toBe(1)
-    expect(kids.at(-1)!.props.flexShrink).toBe(0)
+    // the rows take the type area and its margin
+    for (const l of lines) expect(lineWidth(l)).toBeLessThanOrEqual(Math.max(40, bodyColumns) + 2)
+    const row = plain(lines)
+    expect(row).toMatch(/^❯ ! Wiki Pages/)
+    expect(row).toMatch(/1 problem left, 1 fixed$/)
   }
 })
 
-test('a view built with problems left says so: no check mark, every problem whole in the views pane, the fixed ones on asking', async ($, on) => {
+test('a view built with problems left says so: no check mark; its status in the views pane says how many', async ($, on) => {
   const w = world(on)
-  const long = (i: number) => `Pages, as it opens: problem ${i} is a long sentence about the table that runs well past the width of the panel, so a line cut with an ellipsis would hide its end, which says what to change (end ${i})`
-  const left = Array.from({ length: 8 }, (_, i) => long(i + 1))
+  const left = Array.from({ length: 8 }, (_, i) => `problem ${i + 1}`)
   const fixed = Array.from({ length: 13 }, (_, i) => `fixed ${i + 1}`)
   w.files.set(`${DIR}/proposal.json`, JSON.stringify({ ...PROPOSAL, build: false }))
   w.files.set(`${DIR}/view.json`, JSON.stringify(TIMELINE.spec))
   w.files.set(`${DIR}/rows.json`, JSON.stringify(TIMELINE.data))
-  w.files.set(`${DIR}/status.json`, JSON.stringify({ for: PROPOSAL.ts, state: 'built', attempt: 1, round: 2, fixed, left, checks: ['ok files', `note: rows.json is in 5 parts, as its rows take 16,049,037 bytes; the panel reads each part on its own and puts the rows back in place (end of note)`], at: 0 }))
+  w.files.set(`${DIR}/status.json`, JSON.stringify({ for: PROPOSAL.ts, state: 'built', attempt: 1, round: 2, fixed, left, at: 0 }))
   const clock = mock.clock(on, { now: 1_790_000_000_000 })
   await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
   await clock.advance(10)
-  const row = await above($ as unknown as Harness)
-  // its glyph says it works with problems left; the views pane says how many
-  expect(row).toContain('! Timeline')
-  expect(row).not.toContain('● Timeline')
   const r = await $.command.run({ command: 'thimble-views', args: 'timeline' } as never)
   expect((r as { text?: string }).text).toBe('1 view built')
-  let pane = (await $.ui.mount(PANE as never)) as unknown as M
-  let text = textOf(await pane.drawn())
-  expect(text).toContain('8 problems left, 13 fixed')
-  for (let i = 1; i <= 8; i++) expect(text).toContain(`(end ${i})`)
-  expect(text).toContain('(end of note)')
-  expect(text).toContain('fixed 4')
-  expect(text).not.toContain('fixed 5')
-  await pane.press({ key: 'vmore:fixed' })
-  await pane.unmount()
-  pane = (await $.ui.mount(PANE as never)) as unknown as M
-  text = textOf(await pane.drawn())
-  expect(text).toContain('fixed 13')
-  expect((await pane.find({ key: 'vmore:fixed' }))?.props.label).toBe('fewer')
+  const pane = (await $.ui.mount(PANE as never)) as unknown as M
+  const row = plain(await listLines(pane))
+  // its glyph says it works with problems left
+  expect(row).toMatch(/^❯ ! Timeline +8 problems left, 13 fixed$/)
+  // the pane lists no problem and no fix (views/SPEC.md, "The views pane")
+  const text = textOf(await pane.drawn())
+  expect(text).not.toContain('problem 1')
+  expect(text).not.toContain('fixed 1')
   await pane.unmount()
 })

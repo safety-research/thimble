@@ -2,18 +2,18 @@
 // and /thimble-orient, an orientation run as a fork whose coverage is checked before it may end.
 //
 // - Coverage. Every tool result of main and of every subagent (session.append) is handed to helper/coverage.py, which
-//   decides which files and records it showed or scanned (helper/pyaudit notes the files Python opens). The row above
-//   the prompt says it in one line ("read 2 of 4 files · 0.4% of records · 1 never opened"), /thimble-coverage and
-//   its "details" open the panel (each file, what was read of it, and what was never opened), and main gets the line
-//   with each prompt. When main ends a turn on an answer that speaks for the corpus as a whole while a kind of file
+//   decides which files and records it showed or scanned (helper/pyaudit notes the files Python opens). Home's Files
+//   section shows each folder's and file's records and the share read, /thimble-coverage opens the panel (each file,
+//   what was read of it, and what was never opened), and main gets the line with each prompt. When main ends a turn on an answer that speaks for the corpus as a whole while a kind of file
 //   was never opened, the check's text shows under the answer, and main reads the same text with the analyst's next
 //   prompt; main starts no turn of its own for it.
 // - Labels. Main's `label` tool defines a category over the records of some files (a prompt, a regex or a code
 //   predicate), tries it on a sample or applies it to all, and answers with the counts, examples of each value and
 //   two cards. A prompt label's records are judged by model calls in batches ($.model.complete, thimble's labels
-//   prompt); a regex or code label runs in helper/labels.py. The panel shows the label: its definition, counts,
-//   examples (the analyst can set a record's value, which wins and teaches the next run), "apply to all" and an
-//   edit field. Labels are kept in .thimble-cc-mod/labels.json, where the views read them.
+//   prompt); a regex or code label runs in helper/labels.py. The panel shows the label after the browser's label
+//   editor: its fields (type, scope, the definition, values, sample), each editable, its counts, its examples folded
+//   (the analyst can agree or set a record's value, which wins and teaches the next run), the cards that read it, and
+//   "run on the sample" and "run on all". Labels are kept in .thimble-cc-mod/labels.json, where the views read them.
 // - The orientation. /thimble-orient [brief] starts a fork with prompt/orient.md as a report writer, so the panel shows
 //   it working and then draws its document. It hears nothing of the count while it works. When it ends, the
 //   coverage line (thimble's orient_checks.coverage: the files whose lines its calls showed, by glob, and its share of
@@ -25,7 +25,9 @@ import type { MatchedEvent, ModelCompleteRequest, ModelCompleteResult, RenderEle
 
 import type { ChatCoverage, ChatLabel, ChatLabelExample, ChatReport } from '../types'
 import { clip } from './lib'
-import { demojibake, placeWords, valueColour } from './draw'
+import { demojibake, placeWords, valueColour, width } from './draw'
+import type { Line } from './draw'
+import { ACCENT, FRESH, LINK, MARGIN_W, controlsEl, headerEls, hintsEl, lineEl, marginKey, pointed, ruleEl, spread, subLine } from './chrome'
 import { COLORS } from './paint'
 import type { ReportCtx } from './reports'
 import { slugOf } from './report'
@@ -35,7 +37,6 @@ import type { OrientOpts } from './commands'
 import { startReport } from './reports'
 
 type PaneEvent = MatchedEvent<'ui.render', { component: 'Pane'; requestId: string }>
-type AboveEvent = MatchedEvent<'ui.render', { component: 'AbovePrompt' }>
 
 /** What register.tsx shares with the harness, bound to the hook's `$` (register.tsx harnessCtx). */
 export type HarnessCtx = ReportCtx & {
@@ -59,6 +60,11 @@ export type HarnessCtx = ReportCtx & {
   /** cards whose files labels.py wrote again: drawn again, and the citations of them checked again */
   cardsChanged: (ids: string[]) => Promise<void>
   thread: (about: { label: string; context: string }) => Promise<void>
+  /** words for main, as the analyst's prompt (a new label described in the labels list) */
+  submit: (text: string) => Promise<void>
+  /** the label panel's parts opened (`<slug>:examples`, `<slug>:cards`) */
+  labelOpened: () => Promise<string[]>
+  setLabelOpened: (open: string[]) => Promise<void>
   toast: (text: string) => void
   log: (text: string) => void
 }
@@ -196,33 +202,6 @@ export async function coverageContext(ctx: HarnessCtx): Promise<string> {
   return `thimble-cc-mod coverage so far in this session: ${c.line} (of ${num(c.records)} records in ${c.files} files). \`python3 {{helper}}/coverage.py\` lists each file.`
 }
 
-/** The one line above the prompt, once anything was read: the count, and "details" for the panel. */
-export async function coverageRow(ctx: HarnessCtx, e: AboveEvent): Promise<RenderElement | null> {
-  const c = await ctx.coverage()
-  if (!c || c.read + c.scanned === 0) return null
-  const { Box, Text, Button } = ctx.els(e as unknown as ResolveInput)
-  const parts = c.line.split(' · ')
-  // as the rows above the prompt draw: the label dim at column 2, the value at column 12, the control after a gutter
-  return (
-    <Box key="coverage-row" flexDirection="row">
-      <Box width={12} flexShrink={0}>
-        <Text dimColor>{'  coverage'}</Text>
-      </Box>
-      <Box flexShrink={1}>
-        <Text wrap="truncate-end">
-          {parts.map((p, i) => (
-            <Text key={`cov-${i}`} {...(/only counted/.test(p) ? { dimColor: true } : {})}>
-              {`${i ? ' · ' : ''}${p}`}
-            </Text>
-          ))}
-        </Text>
-      </Box>
-      <Text>{'  '}</Text>
-      <Button key="coverage-details" label="details ›" plain onPress={() => void ctx.openHarness('coverage', 'Coverage')} />
-    </Box>
-  )
-}
-
 const BAR = 12
 
 /** What was read of a file as a bar of `w` cells on a track to the whole: `█` dim (a mark no colour names), then `─` in
@@ -257,11 +236,23 @@ export async function coverageDetail(ctx: HarnessCtx): Promise<CoverageSummary |
   return covDetail.data
 }
 
-/** The coverage panel: its title row with the line dim and `read what was missed ›` against the right edge; under the
- *  rule, a row per file, those nothing opened first: its state (● read, ○ not), its name, a bar of what was read on a
- *  track, its records and the share read against the right edge; a dim secondary row of the lines read. */
+/** The count's line without what a label judged: the panel says what the agents read (views/SPEC.md, "The coverage
+ *  panel"); main's note keeps it. */
+function readLine(line: string): string {
+  return line
+    .split(' · ')
+    .filter(p => !/judged by a label/.test(p))
+    .join(' · ')
+}
+
+/** The coverage panel (views/SPEC.md, section 7, "The coverage panel"): its title and the count's line dim under it;
+ *  under the rule, a row per file, those nothing opened first: its state (● read, ○ not), its name, a bar of what was
+ *  read on a track that takes the room the name and the numbers leave, its records and the share read against R; a
+ *  dim secondary row of the lines read; after a blank row, `all` dim with the corpus's records and the share read; at
+ *  the bottom, `read what was missed`. It does not say how many records a label judged. */
 export async function drawCoverage(e: PaneEvent, ctx: HarnessCtx): Promise<RenderElement> {
   const { Box, Text, Button } = ctx.els(e as unknown as ResolveInput)
+  const els = { Box, Text, Button }
   const s = await coverageDetail(ctx)
   const cols = Math.max(30, e.props.bodyColumns)
   const gaps = s ? s.files.filter(f => f.state !== 'read').map(f => f.file) : []
@@ -270,19 +261,7 @@ export async function drawCoverage(e: PaneEvent, ctx: HarnessCtx): Promise<Rende
       label: 'the files no answer has read',
       context: `thimble-cc-mod's coverage count of this session: ${s?.line ?? ''}. Files with no record read: ${gaps.slice(0, 30).join(', ')}.\nRead a sample of each (start, middle, end), say what each holds and whether it changes any answer so far.`,
     })
-  const rows: RenderElement[] = [
-    <Box key="cov-title" flexDirection="row">
-      <Box flexShrink={1}>
-        <Text wrap="truncate-end">
-          <Text>Coverage</Text>
-          <Text dimColor>{`  ${s ? s.line : "what this session's agents read of the corpus"}`}</Text>
-        </Text>
-      </Box>
-      <Box flexGrow={1} />
-      {gaps.length ? <Button key="cov-ask" label="read what was missed ›" plain onPress={askMissed} /> : null}
-    </Box>,
-    <Text key="cov-rule" color={COLORS.rule}>{'─'.repeat(cols)}</Text>,
-  ]
+  const rows: RenderElement[] = [...headerEls(els, { title: 'Coverage', cols, sub: subLine([s ? readLine(s.line) : "what this session's agents read of the corpus"]) })]
   if (!s) {
     rows.push(<Text key="cov-none" dimColor>{'  none'}</Text>)
   } else {
@@ -301,8 +280,7 @@ export async function drawCoverage(e: PaneEvent, ctx: HarnessCtx): Promise<Rende
     files.slice(0, 60).forEach((f, i) => {
       const total = f.records ?? 0
       const bar = shareBar(f.seen, total, f.state, barW)
-      const judged = f.judged ? ` · ${num(f.judged)} judged by a label` : ''
-      const what = f.state === 'untouched' ? 'never opened' : f.state === 'scanned' ? `counted by code, no record read${judged}` : `lines ${rangeWords(f.ranges, 4)}${judged}`
+      const what = f.state === 'untouched' ? 'never opened' : f.state === 'scanned' ? 'counted by code, no record read' : `lines ${rangeWords(f.ranges, 4)}`
       const firstUnread = f.state === 'read' ? (f.ranges[0]?.[0] === 1 ? (f.ranges[0]?.[1] ?? 0) + 1 : 1) : 1
       rows.push(
         <Box key={`cov-f:${f.file}`} flexDirection="column">
@@ -333,12 +311,13 @@ export async function drawCoverage(e: PaneEvent, ctx: HarnessCtx): Promise<Rende
         <Text dimColor>{`  ${pct(t.records_seen, t.records || 1).padStart(shareW)}`}</Text>
       </Text>,
     )
-    if (s.kinds.length > 1 && s.kinds.length < s.files.length) {
-      rows.push(<Text key="cov-kinds-gap"> </Text>)
-      rows.push(<Text key="cov-kinds-t">By kind of file</Text>)
-      for (const k of s.kinds.slice(0, 20)) rows.push(<Text key={`cov-k:${k.kind}`} dimColor wrap="truncate-end">{`  ${k.kind}  ${k.read} read · ${k.scanned} counted · ${k.untouched} never opened of ${k.files}`}</Text>)
-    }
   }
+  // the bottom: the thread that reads what was missed
+  if (gaps.length) {
+    rows.push(ruleEl(els, cols, 'cov-rule2'))
+    rows.push(controlsEl(els, [<Button key="cov-ask" label="read what was missed" plain onPress={askMissed} />], 'cov-controls')!)
+  }
+  rows.push(hintsEl(els, [...(gaps.length ? ['r to read what was missed'] : []), 'b to go back', 'x to close'], cols))
   const hk = hiddenKeys(ctx, e, [...(gaps.length ? [{ key: 'ask', hotkey: 'r', onPress: askMissed }] : []), { key: 'close', hotkey: 'x', onPress: () => void ctx.closePanel() }])
   if (hk) rows.unshift(hk)
   return <Box flexDirection="column">{rows}</Box>
@@ -651,7 +630,7 @@ export const LABEL_DESCRIPTION = [
   "thimble-cc-mod's labeling tool: define a category over the records of some files and apply it to each record, as thimble's apply_label does. The analyst sees the label in the panel (its definition, counts and examples of each value) and can correct it.",
   'A record is a line of a text file (a JSON line is read as its object) or a row of a CSV file. kind "regex": a Python pattern searched in each record (its field when `field` is given); a match takes the first value, any other record the last. kind "code": Python defining label(unit) that returns (value, confidence), where unit is the JSON record\'s dict, a CSV row\'s dict or {"text": line}. kind "prompt": a model reads each record against `definition`, for a category that takes reading for meaning.',
   'Use it whenever you sort records into categories, instead of a regex or keyword test inside a script. Try a new label with `limit` (about 30 records, spread over the files), read its examples, fix the definition, then run it again without `limit`.',
-  "It answers with the count of each value, examples, and a label card (the count of each value, and records the analyst can agree or disagree with in place) to embed and cite. A card script reads a label's values with tcard's label(name), and its cards then show the label. To run a label of this folder again, such as on every record after a trial or after the analyst corrected records, give only its name (and limit for a trial): records whose value it kept are not read again.",
+  "It answers with the count of each value, examples, and a label card (the count of each value, with a link to the label, where the analyst reads its records and can agree or disagree with them) to embed and cite. A card script reads a label's values with tcard's label(name), and its cards then show the label. To run a label of this folder again, such as on every record after a trial or after the analyst corrected records, give only its name (and limit for a trial): records whose value it kept are not read again.",
 ].join(' ')
 export const LABEL_SCHEMA = {
   type: 'object',
@@ -1058,7 +1037,7 @@ export function labelAnswer(spec: LabelSpec, f: Finished): string {
   if (f.status) lines.push(`The model calls: ${f.status}.`)
   lines.push('', 'Examples of each value:')
   for (const x of f.examples) lines.push(`- ${x.value}  ${x.ref}: ${clip(x.text, 160)}${x.rationale ? `  (why: ${clip(x.rationale, 140)})` : ''}`)
-  if (f.card_output) lines.push('', `The label's card, made by ${f.script}, shows the counts and the first examples, which the analyst can agree or disagree with in place:`, f.card_output.trim())
+  if (f.card_output) lines.push('', `The label's card, made by ${f.script}, shows the counts and links to the label, where the analyst reads its records and can agree or disagree with them:`, f.card_output.trim())
   lines.push(
     '',
     f.trial
@@ -1106,161 +1085,232 @@ export function labelToolLine(input: unknown, l: ChatLabel | undefined): string 
   return `${what} · ${l.values.map(v => `${v} ${num(l.counts[v] ?? 0)}`).join(' · ')}`
 }
 
-/** The label panel: the title row is the label's name with its controls against the right edge, how it was run dim
- *  under it; under the rule, the definition as prose at A2; the values' bars, parts of the whole on tracks (the
- *  catch-all's dim), each with its count and its share dim; `card` and the card's question with `›`; under the second
- *  rule, the records grouped by value, each group under a heading; the field that edits the definition. */
+// the kind the analyst picked in a label's `type` field before saving it, by the label's slug
+const kindDraft = new Map<string, string>()
+
+/** The file a label's records come from, by its stem ("revisions"), else "records". */
+function unitOf(l: ChatLabel): string {
+  const stems = [...new Set(l.paths.map(p => (p.split('/').at(-1) ?? p).replace(/\.[A-Za-z0-9]+$/, '').replace(/\*/g, '')))].filter(Boolean)
+  return stems.length === 1 ? stems[0]! : 'records'
+}
+
+/** How long ago, in plain words ("2 min ago"), or '' for an unknown time. */
+function ago(now: number, then: number): string {
+  if (!then) return ''
+  const m = Math.max(0, Math.round((now - then) / 60000))
+  return m < 1 ? 'just now' : m < 60 ? `${m} min ago` : m < 48 * 60 ? `${Math.round(m / 60)} h ago` : `${Math.round(m / 1440)} days ago`
+}
+
+/** What a label's last run was, in words: `a sample of 30 of 14,591 revisions`, `all 14,591 revisions`, or
+ *  `◌ labeling 12 of 30` while it runs. */
+function lastRun(l: ChatLabel): string {
+  const unit = unitOf(l)
+  if (l.state === 'running') return `◌ labeling ${num(l.labeled)} of ${num(l.limit > 0 && l.total ? Math.min(l.limit, l.total) : l.total)}`
+  return l.trial ? `a sample of ${num(l.labeled)} of ${num(l.total)} ${unit}` : `all ${num(l.labeled)} ${unit}`
+}
+
+/** The label panel (views/SPEC.md, section 7, "The label panel"), after the browser's label editor: the label's name
+ *  and its last run dim under it; under the rule, its fields, each editable (`type`, `scope`, the definition under its
+ *  kind's name, `values`, `sample`), Enter in one saving the label and running it on the sample; the counts, each
+ *  value's bar on a track to the whole with its count and share; `▸ examples` and `▸ cards`, folded, the examples
+ *  grouped by value with their places, words, why, and `agree  it is …`; at the bottom, `run on the sample` and
+ *  `run on all N` (`stop` while it runs), its errors under them. */
 export async function drawLabel(e: PaneEvent, ctx: HarnessCtx): Promise<RenderElement> {
   const { Box, Text, Button, Input } = ctx.els(e as unknown as ResolveInput)
+  const els = { Box, Text, Button }
   const slug = await ctx.labelOpen()
   const l = slug ? await ctx.label(slug) : undefined
   const cols = Math.max(30, e.props.bodyColumns)
-  if (!l) return <Text dimColor>none</Text>
-  const rows: RenderElement[] = []
-  const how = l.kind === 'prompt' ? 'a model reads each record' : l.kind === 'regex' ? 'a regex matches each record' : 'code decides each record'
+  if (!l) return <Box flexDirection="column"><Text dimColor>none</Text></Box>
+  const now = await ctx.now()
+  const opened = await ctx.labelOpened()
+  const rows: RenderElement[] = [...headerEls(els, { title: l.name, cols, sub: subLine([lastRun(l), ago(now, l.created)]) })]
   const keys: { key: string; hotkey: string; onPress: () => void }[] = []
-  const controls: RenderElement[] = []
-  if (l.state === 'running') {
-    controls.push(<Button key="lb-stop" label="stop" plain onPress={() => running.get(l.slug)?.abort()} />)
-    keys.push({ key: 'stop', hotkey: 's', onPress: () => running.get(l.slug)?.abort() })
+  const running = l.state === 'running'
+  const sample = l.trial && l.limit > 0 ? l.limit : 30
+  // the fields, each editable: Enter saves the label with it and runs it on the sample
+  const kind = kindDraft.get(l.slug) ?? l.kind
+  const defName = kind === 'prompt' ? 'prompt' : kind === 'regex' ? 'pattern' : 'code'
+  const save = (patch: Partial<LabelSpec>, limit = sample) => {
+    const k = kindDraft.get(l.slug)
+    kindDraft.delete(l.slug)
+    void rerun(ctx, l, { ...(k && k !== l.kind ? { kind: k as LabelSpec['kind'] } : {}), ...patch }, limit)
   }
-  if (l.state !== 'running' && l.trial) {
-    controls.push(<Button key="lb-all" label={`apply to all ${num(l.total)}`} plain onPress={() => void rerun(ctx, l, {}, 0)} />)
-    keys.push({ key: 'all', hotkey: 'a', onPress: () => void rerun(ctx, l, {}, 0) })
-  }
-  controls.push(<Button key="lb-list" label="all labels ›" plain onPress={() => void ctx.openHarness('labels', 'Labels')} />)
-  keys.push({ key: 'list', hotkey: 'l', onPress: () => void ctx.openHarness('labels', 'Labels') }, { key: 'close', hotkey: 'x', onPress: () => void ctx.closePanel() })
-  rows.push(
-    <Box key="lb-title" flexDirection="row">
-      <Box flexShrink={1}>
-        <Text wrap="truncate-end">{l.name}</Text>
+  const L = Math.max(...['type', 'scope', defName, 'values', 'sample'].map(w => w.length)) + 2
+  const field = (label: string, el: RenderElement) => (
+    <Box key={`lf:${label}`} flexDirection="row">
+      <Box width={L} flexShrink={0}>
+        <Text dimColor>{label}</Text>
       </Box>
-      <Box flexGrow={1} />
-      <Box flexShrink={0} flexDirection="row" columnGap={2}>
-        {controls}
+      <Box flexGrow={1} flexShrink={1} flexDirection="column">
+        {el}
       </Box>
-    </Box>,
+    </Box>
   )
-  const scope = l.state === 'running' ? `◌ labeling ${num(l.labeled)} of ${num(l.limit > 0 && l.total ? Math.min(l.limit, l.total) : l.total)}` : l.trial ? `a trial on ${num(l.labeled)} of ${num(l.total)} records` : `all ${num(l.labeled)} records`
-  rows.push(<Text key="lb-scope" dimColor wrap="wrap">{`${l.kind} · ${how} · ${scope} · ${l.paths.join(', ')}${l.field ? ` (field ${l.field})` : ''}${l.within ? `, among those "${l.within.label}" gave ${l.within.value ?? 'its first value'}` : ''}`}</Text>)
-  rows.push(<Text key="lb-rule" color={COLORS.rule}>{'─'.repeat(cols)}</Text>)
-  // the definition as prose at A2 (code as text, its comments dim)
-  const measure = Math.min(72, cols - 2)
-  if (l.kind === 'code') {
-    const code = l.definition.split('\n')
-    code.slice(0, 14).forEach((ln, i) => {
-      const at = ln.indexOf('#')
-      rows.push(
-        <Text key={`lb-def:${i}`} wrap="truncate-end">
-          <Text>{`  ${at < 0 ? ln || ' ' : ln.slice(0, at)}`}</Text>
-          {at >= 0 ? <Text dimColor>{ln.slice(at)}</Text> : null}
-        </Text>,
-      )
-    })
-    if (code.length > 14) rows.push(<Text key="lb-def-more" dimColor>{`  … ${code.length - 14} more`}</Text>)
-  } else {
-    rows.push(
-      <Box key="lb-def" paddingLeft={2} width={measure + 2}>
-        <Text wrap="wrap">{clip(l.definition, 600)}</Text>
+  // `type`: the kind in use on the selection background, the others a click away
+  rows.push(
+    field(
+      'type',
+      <Box flexDirection="row" columnGap={2}>
+        {(['prompt', 'regex', 'code'] as const).map(k =>
+          k === kind ? (
+            <Text key={`lk:${k}`} backgroundColor={COLORS.selected}>{k}</Text>
+          ) : (
+            <Button key={`lk:${k}`} label={k} plain onPress={() => void (kindDraft.set(l.slug, k), ctx.setLabelOpened([...opened]))} />
+          ),
+        )}
       </Box>,
-    )
+    ),
+  )
+  const scopeText = `${l.paths.join(', ')}${l.field ? ` · field ${l.field}` : ''}`
+  const field2 = (label: string, value: string, onSave: (v: string) => void) =>
+    field(label, running ? <Text wrap="wrap">{value}</Text> : <Input key={`lb-${label}:${l.slug}`} value={value} submitLabel="save and run" onSubmit={v => onSave(v)} />)
+  rows.push(
+    field2('scope', scopeText, v => {
+      const m = /^(.*?)(?:\s*·\s*field\s+(\S+))?\s*$/.exec(v.trim())
+      const paths = (m?.[1] ?? '').split(',').map(x => x.trim()).filter(Boolean)
+      if (paths.length) save({ paths, field: m?.[2] ?? '' })
+    }),
+  )
+  // the definition: the whole prompt wrapped (code coloured as Claude Code colours it); `edit` turns it into the field
+  // that holds it, whose Enter saves it and runs the label on the sample
+  const editKey = `${l.slug}:edit`
+  const editing = !running && (opened.includes(editKey) || kind !== l.kind)
+  const shownDef = kind === l.kind ? l.definition : ''
+  const editDone = (v: string) => {
+    void ctx.setLabelOpened(opened.filter(x => x !== editKey))
+    if (v.trim()) save({ definition: v.trim() })
   }
-  if (l.state === 'error') rows.push(<Text key="lb-err" color={COLORS.problem} wrap="wrap">{`× ${l.why ?? 'failed'}`}</Text>)
-  // what the run recovered from, one dim line; what it could not, one line each in red
-  if (l.status) rows.push(<Text key="lb-status" dimColor wrap="wrap">{l.status}</Text>)
-  for (const err of l.errors) rows.push(<Text key={`lb-e:${err}`} color={COLORS.problem} wrap="wrap">{`! ${err}`}</Text>)
+  if (editing) rows.push(field(defName, <Input key={`lb-def:${l.slug}:${kind}`} value={shownDef} autoFocus submitLabel="save and run" onSubmit={editDone} />))
+  else
+    rows.push(
+      field(
+        defName,
+        <Box flexDirection="column">
+          {kind === 'code' ? ctx.code(e as unknown as ResolveInput, l.definition, 14, 'python', 1) : <Text wrap="wrap">{l.definition}</Text>}
+          {running ? null : <Box flexDirection="row"><Button key={`lb-edit:${l.slug}`} label="edit" plain onPress={() => void ctx.setLabelOpened([...opened.filter(x => x !== editKey), editKey])} /></Box>}
+        </Box>,
+      ),
+    )
+  rows.push(field2('values', l.values.join(' · '), v => {
+    const vs = [...new Set(v.split(/\s*[·,]\s*/).map(x => x.trim()).filter(Boolean))]
+    if (vs.length >= 2) save({ values: vs })
+  }))
+  rows.push(field2('sample', String(sample), v => {
+    const n = Number.parseInt(v.trim(), 10)
+    if (Number.isFinite(n) && n > 0) save({}, n)
+  }))
   rows.push(<Text key="lb-gap"> </Text>)
+  // the counts: each value's ● in its hue, its name, a bar on a track to the whole, its count and its share dim
   const total = l.values.reduce((a, v) => a + (l.counts[v] ?? 0), 0)
-  const vw = Math.min(Math.max(12, Math.floor(cols / 3)), Math.max(...l.values.map(v => v.length)))
+  const vw = Math.min(Math.max(12, Math.floor(cols / 3)), Math.max(...l.values.map(v => width(v))))
   const counts = l.values.map(v => num(l.counts[v] ?? 0))
   const cw = Math.max(...counts.map(c => c.length))
   // the track takes what the names and the numbers leave, so the shares end on R (rule 4)
-  // ● and a space, the name and a gutter, the bar, a gutter and the count, a gutter and the share (5)
   const barW = Math.max(8, cols - 2 - vw - 2 - 2 - cw - 7)
   l.values.forEach((v, i) => {
     const n = l.counts[v] ?? 0
     const w = total ? Math.round((barW * n) / total) : 0
     const colour = valueColour(l.values, v)
+    const hue = colour && colour !== COLORS.dim ? { color: colour } : { dimColor: true }
     rows.push(
       <Text key={`lb-c:${v}`} wrap="truncate-end">
-        <Text {...(colour && colour !== COLORS.dim ? { color: colour } : { dimColor: true })}>{'● '}</Text>
+        <Text {...hue}>{'● '}</Text>
         <Text>{`${clip(v, vw).padEnd(vw)}  `}</Text>
-        <Text {...(colour && colour !== COLORS.dim ? { color: colour } : { dimColor: true })}>{'█'.repeat(w)}</Text>
+        <Text {...hue}>{'█'.repeat(w)}</Text>
         <Text color={COLORS.rule}>{'─'.repeat(barW - w)}</Text>
         <Text>{`  ${counts[i]!.padStart(cw)}`}</Text>
         <Text dimColor>{total ? `  ${pct(n, total).padStart(5)}` : ''}</Text>
       </Text>,
     )
   })
-  // the label's card by its question, which opens it (its script one press further)
-  for (const id of l.cards.slice(0, 2)) {
-    const card = await ctx.loadCard(id)
-    if (card) rows.push(
-      <Box key={`lb-card:${id}`} flexDirection="row">
-        <Text dimColor>{'card  '}</Text>
-        <Button key={`lb-card-open:${id}`} label={`${clip(card.question, Math.max(20, cols - 10))} ›`} plain onPress={() => void ctx.openCard(id)} />
-      </Box>,
-    )
-  }
-  rows.push(<Text key="lb-rule2" color={COLORS.rule}>{'─'.repeat(cols)}</Text>)
-  let firstGroup = true
-  for (const v of l.values) {
-    const xs = l.examples.filter(x => x.value === v)
-    if (!xs.length) continue
-    if (!firstGroup) rows.push(<Text key={`lb-gap:${v}`}> </Text>)
-    firstGroup = false
-    rows.push(<Text key={`lb-h:${v}`}><Text color={valueColour(l.values, v)}>{'● '}</Text><Text>{v}</Text><Text dimColor>{`  ${num(xs.length)}`}</Text></Text>)
-    for (const x of xs) {
-      const others = l.values.filter(o => o !== v)
-      rows.push(
-        <Box key={`lb-x:${x.ref}`} flexDirection="column" marginLeft={2}>
-          <Box flexDirection="row" columnGap={2}>
-            <Box flexDirection="row" flexShrink={1}>
-              <Button key={`lb-open:${x.ref}`} label="↗" plain onPress={() => void ctx.openRef(x.ref)} />
-              <Text> </Text>
-              <Text underline wrap="truncate-end">{placeWords(x.ref)}</Text>
+  if (l.status) rows.push(<Text key="lb-status" dimColor wrap="wrap">{l.status}</Text>)
+  rows.push(<Text key="lb-gap2"> </Text>)
+  // the examples and the cards, folded: a click (or e, c) opens them
+  const exKey = `${l.slug}:examples`
+  const cardKey = `${l.slug}:cards`
+  const flip = (k: string) => () => ctx.setLabelOpened(opened.includes(k) ? opened.filter(x => x !== k) : [...opened, k])
+  const toggleRow = (k: string, name: string, n: number) => ctx.link(e as unknown as ResolveInput, `lt:${k}`, [[{ s: opened.includes(k) ? '▾ ' : '▸ ' }, { s: name }, { s: `  ${num(n)}`, fg: COLORS.dim }]], [{ y: 0, x0: 0, x1: 2 + width(name) + 2 + num(n).length, row: false, run: flip(k) }], cols)
+  rows.push(toggleRow(exKey, 'examples', l.examples.length))
+  keys.push({ key: 'examples', hotkey: 'e', onPress: () => void flip(exKey)() })
+  if (opened.includes(exKey)) {
+    for (const v of l.values) {
+      const xs = l.examples.filter(x => x.value === v)
+      if (!xs.length) continue
+      rows.push(<Text key={`lb-h:${v}`} wrap="truncate-end"><Text>{'  '}</Text><Text color={valueColour(l.values, v)}>{'● '}</Text><Text>{v}</Text><Text dimColor>{`  ${num(xs.length)}`}</Text></Text>)
+      for (const x of xs) {
+        const others = l.values.filter(o => o !== v)
+        const place = placeWords(x.ref)
+        rows.push(
+          <Box key={`lb-x:${x.ref}`} flexDirection="column" marginLeft={4}>
+            <Box flexDirection="row" columnGap={2}>
+              <Box flexShrink={1}>{ctx.link(e as unknown as ResolveInput, `lx:${x.ref}`, [[{ s: '↗ ', fg: LINK }, { s: place, fg: LINK, u: true }]], [{ y: 0, x0: 0, x1: 2 + width(place), row: false, run: () => ctx.openRef(x.ref) }], Math.min(cols - 4, 2 + width(place)))}</Box>
+              <Box flexGrow={1} />
+              {/* the controls, or what the analyst did, one block against R (rule 25) */}
+              {x.analyst ? <Text dimColor>{x.was && x.was !== v ? '✓ set by you' : '✓ agreed'}</Text> : null}
+              {x.analyst ? null : <Button key={`lb-agree:${x.ref}`} label="agree" plain onPress={() => void labelVerdict(ctx, l.slug, x.ref, v)} />}
+              {x.analyst ? null : (
+                <Box key={`lb-dis:${x.ref}`} flexDirection="row" columnGap={2} flexWrap="wrap">
+                  <Text dimColor>it is</Text>
+                  {others.map(o => (
+                    <Button key={`lb-set:${x.ref}:${o}`} label={clip(o, 24)} plain onPress={() => void labelVerdict(ctx, l.slug, x.ref, o)} />
+                  ))}
+                </Box>
+              )}
             </Box>
-            {/* the controls, or what the analyst did, one block against R (rule 25) */}
-            <Box flexGrow={1} />
-            {x.analyst ? <Text dimColor>{x.was && x.was !== v ? '✓ set by you' : '✓ agreed'}</Text> : null}
-            {x.analyst ? null : <Button key={`lb-agree:${x.ref}`} label="agree" plain onPress={() => void labelVerdict(ctx, l.slug, x.ref, v)} />}
-            {x.analyst ? null : others.length === 1 ? (
-              <Button key={`lb-set:${x.ref}:${others[0]}`} label="disagree" plain onPress={() => void labelVerdict(ctx, l.slug, x.ref, others[0]!)} />
-            ) : (
-              <Box key={`lb-dis:${x.ref}`} flexDirection="row" columnGap={2} flexWrap="wrap">
-                <Text dimColor>it is</Text>
-                {others.map(o => (
-                  <Button key={`lb-set:${x.ref}:${o}`} label={clip(o, 24)} plain onPress={() => void labelVerdict(ctx, l.slug, x.ref, o)} />
-                ))}
-              </Box>
-            )}
-          </Box>
-          <Box width={Math.min(72, cols - 2)}>
-            <Text italic wrap="wrap">{clip(demojibake(x.text), Math.max(80, cols * 2))}</Text>
-          </Box>
-          {x.rationale && !(x.analyst && x.was && x.was !== v) ? (
-            <Box width={Math.min(72, cols - 2)}>
-              <Text dimColor wrap="wrap">{`why  ${clip(x.rationale, cols * 2)}`}</Text>
-            </Box>
-          ) : null}
-        </Box>,
-      )
+            <Text italic wrap="wrap">{`"${clip(demojibake(x.text).replace(/\s+/g, ' ').trim(), Math.max(120, (cols - 4) * 3 - 2))}"`}</Text>
+            {x.rationale && !(x.analyst && x.was && x.was !== v) ? <Text dimColor wrap="wrap">{`why  ${clip(x.rationale, cols * 2)}`}</Text> : null}
+          </Box>,
+        )
+      }
     }
   }
-  if (l.state !== 'running') {
-    rows.push(<Text key="lb-gap2"> </Text>)
-    rows.push(
-      <Box key="lb-edit-row" flexDirection="row">
-        <Text dimColor>{'definition  '}</Text>
-        <Box flexGrow={1} flexShrink={1}>
-          <Input key={`lb-edit:${l.slug}`} value={l.definition} submitLabel={l.trial ? 'try again' : 'apply again'} onSubmit={v => void rerun(ctx, l, { definition: v.trim() || l.definition })} />
-        </Box>
-      </Box>,
-    )
+  // the cards that read the label: its own label card, and every card whose script read it
+  const cards = [...new Set([...l.cards, ...(await cardsReading(ctx, l.slug))])].slice(0, 8)
+  rows.push(toggleRow(cardKey, 'cards', cards.length))
+  keys.push({ key: 'cards', hotkey: 'c', onPress: () => void flip(cardKey)() })
+  if (opened.includes(cardKey)) {
+    for (const id of cards) {
+      const card = await ctx.loadCard(id)
+      if (card) rows.push(<Box key={`lb-card:${id}`} flexDirection="row" marginLeft={2}><Button key={`lb-card-open:${id}`} label={`${clip(card.question, Math.max(20, cols - 6))} ›`} plain onPress={() => void ctx.openCard(id)} /></Box>)
+    }
+    if (!cards.length) rows.push(<Text key="lb-cards-none" dimColor>{'  none'}</Text>)
   }
+  // the bottom: run it on the sample or on every record (stop while it runs), its problems in red under them
+  const runSample = () => save({}, sample)
+  const runAll = () => save({}, 0)
+  const stop = () => running && running_(l.slug)?.abort()
+  rows.push(ruleEl(els, cols, 'lb-rule2'))
+  rows.push(
+    controlsEl(els, running ? [<Button key="lb-stop" label="stop" plain onPress={stop} />] : [<Button key="lb-sample" label="run on the sample" plain onPress={runSample} />, <Button key="lb-all" label={`run on all ${num(l.total || 0)}`} plain onPress={runAll} />], 'lb-controls')!,
+  )
+  if (l.state === 'error') rows.push(<Text key="lb-err" color={COLORS.problem} wrap="wrap">{`× ${l.why ?? 'failed'}`}</Text>)
+  for (const err of l.errors) rows.push(<Text key={`lb-e:${err}`} color={COLORS.problem} wrap="wrap">{`! ${err}`}</Text>)
+  if (running) keys.push({ key: 'stop', hotkey: 's', onPress: stop })
+  else keys.push({ key: 'sample', hotkey: 'r', onPress: runSample })
+  keys.push({ key: 'list', hotkey: 'l', onPress: () => void ctx.openHarness('labels', 'Labels') }, { key: 'close', hotkey: 'x', onPress: () => void ctx.closePanel() })
+  rows.push(hintsEl(els, [running ? 's to stop' : 'Enter to save and run', 'e for examples', 'c for cards', 'b to go back', 'x to close'], cols))
   const hk = hiddenKeys(ctx, e, keys)
   if (hk) rows.unshift(hk)
   return <Box flexDirection="column">{rows}</Box>
+}
+
+/** The cards of this folder whose script read the label (tcard's label(name)), newest last. */
+async function cardsReading(ctx: HarnessCtx, slug: string): Promise<string[]> {
+  const { cwd } = await ctx.where()
+  const out: string[] = []
+  for (const name of (await ctx.list(`${cwd}/${ctx.home}/cards`).catch(() => [] as string[])).sort()) {
+    if (!name.endsWith('.json')) continue
+    const id = name.replace(/\.json$/, '')
+    const card = await ctx.loadCard(id)
+    if (card?.labels?.some(x => x.slug === slug) || (card?.kind === 'label' && card.label?.slug === slug)) out.push(id)
+  }
+  return out
+}
+
+/** A label's run that is going on, which its `stop` aborts. */
+function running_(slug: string): AbortController | undefined {
+  return running.get(slug)
 }
 
 function specFromLabel(l: ChatLabel): LabelSpec {
@@ -1338,25 +1388,52 @@ async function labelCards(ctx: HarnessCtx, slug: string): Promise<string[]> {
   return out
 }
 
-/** The labels of this folder, from .thimble-cc-mod/labels.json: its title row and count; under the rule, each label
- *  an item, its name at A2 and how it ran and its counts dim under it; a press opens one. */
+// the labels list's row the keys chose
+let labelPick = ''
+
+/** The labels of this folder (views/SPEC.md, "The label panel", the labels list): its title and count; under the
+ *  rule, one row per label (its glyph, its name, its kind and last run dim at R), `❯` and the accent on the row the
+ *  keys chose; under the second rule the field `describe a new label`, whose words go to main, which makes the label
+ *  with a trial. */
 export async function drawLabels(e: PaneEvent, ctx: HarnessCtx): Promise<RenderElement> {
-  const { Box, Text, Button } = ctx.els(e as unknown as ResolveInput)
+  const { Box, Text, Button, Input } = ctx.els(e as unknown as ResolveInput)
+  const els = { Box, Text, Button }
   const list = await allLabels(ctx)
   const cols = Math.max(30, e.props.bodyColumns)
-  const rows: RenderElement[] = [<Text key="lbs-t"><Text>Labels</Text><Text dimColor>{`  ${list.length}`}</Text></Text>, <Text key="lbs-rule" color={COLORS.rule}>{'─'.repeat(cols)}</Text>]
-  if (!list.length) rows.push(<Text key="lbs-none" dimColor>{'  none'}</Text>)
-  list.forEach(x => {
-    rows.push(
-      <Box key={`lbs:${x.slug}`} flexDirection="column">
-        <Box flexDirection="row">
-          <Text>{'  '}</Text>
-          <Button key={`lbs-open:${x.slug}`} label={clip(x.name, cols - 4)} plain onPress={() => void openLabel(ctx, x.slug)} />
-        </Box>
-        <Text dimColor wrap="truncate-end">{`  ${x.kind} · ${x.scope === 'trial' ? 'trial' : 'all records'} · ${Object.entries(x.counts).map(([v, n]) => `${v} ${num(n)}`).join(' · ')}`}</Text>
-      </Box>,
-    )
-  })
+  const rows: RenderElement[] = [...headerEls(els, { title: 'Labels', cols, sub: subLine([`${list.length} label${list.length === 1 ? '' : 's'}`]) })]
+  const lines: Line[] = []
+  const hits: { y: number; x0: number; x1: number; row: boolean; run: () => Promise<void> | void }[] = []
+  const pick = list.find(x => x.slug === labelPick)?.slug ?? list[0]?.slug ?? ''
+  for (const x of list) {
+    const n = Object.values(x.counts).reduce((a, b) => a + b, 0)
+    const run = x.scope === 'trial' ? `a sample of ${num(n)}` : `all ${num(n)}`
+    hits.push({ y: lines.length, x0: MARGIN_W, x1: cols + MARGIN_W, row: true, run: () => void openLabel(ctx, x.slug) })
+    lines.push(pointed(spread([{ s: '●' }, { s: ' ' }, { s: x.name }], [{ s: `${x.kind} · ${run}`, fg: COLORS.dim }], cols), x.slug === pick))
+  }
+  if (!list.length) lines.push(pointed([{ s: '  ' }, { s: 'none', fg: COLORS.dim }], false))
+  const step = (d: number) => {
+    const at = list.findIndex(x => x.slug === pick)
+    labelPick = list[Math.max(0, Math.min(list.length - 1, at + d))]?.slug ?? ''
+    return ctx.openHarness('labels', 'Labels')
+  }
+  rows.push(ctx.link(e as unknown as ResolveInput, marginKey('labels-list'), lines, hits, cols + MARGIN_W, k => (k === 'up' || k === 'k' ? step(-1) : k === 'down' || k === 'j' ? step(1) : (k === 'return' || k === 'enter') && pick ? void openLabel(ctx, pick) : undefined)))
+  // each label a press away by its key too, for a surface that draws no Client: no row of its own
+  rows.unshift(
+    <Box key="label-presses" width={0} height={0} flexShrink={0} overflow="hidden" flexDirection="row">
+      {list.map(x => <Button key={`lbs-open:${x.slug}`} label={x.name} plain onPress={() => void openLabel(ctx, x.slug)} />)}
+    </Box>,
+  )
+  // a new label in the analyst's words: main makes it with the label tool and tries it on a sample
+  rows.push(ruleEl(els, cols, 'lbs-rule2'))
+  rows.push(
+    <Box key="lbs-new" flexDirection="row">
+      <Text dimColor>{'describe a new label  '}</Text>
+      <Box flexGrow={1} flexShrink={1}>
+        <Input key="lbs-describe" submitLabel="make it" onSubmit={v => void (v.trim() ? ctx.submit(`Make a label with the label tool and try it on a sample of 30: ${v.trim()}`) : undefined)} />
+      </Box>
+    </Box>,
+  )
+  rows.push(hintsEl(els, ['↑↓ to choose', 'Enter to open', 'x to close'], cols))
   const hk = hiddenKeys(ctx, e, [...list.slice(0, 9).map((x, i) => ({ key: `l${i}`, hotkey: String(i + 1), onPress: () => void openLabel(ctx, x.slug) })), { key: 'close', hotkey: 'x', onPress: () => void ctx.closePanel() }])
   if (hk) rows.unshift(hk)
   return <Box flexDirection="column">{rows}</Box>

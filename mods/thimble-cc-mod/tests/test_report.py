@@ -1,11 +1,9 @@
-"""The writer's report check and the film renderer: `python3 tests/test_report.py` (rendering needs a Python with
-Playwright, named by THIMBLE_CC_MOD_PYTHON, and ffmpeg; without them that test is skipped)."""
+"""The writer's report check: `python3 tests/test_report.py`."""
 from __future__ import annotations
 
 import json
 import os
 import re
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -14,7 +12,6 @@ from pathlib import Path
 HERE = os.path.dirname(os.path.abspath(__file__))
 HELPER = os.path.join(os.path.dirname(HERE), "helper")
 sys.path.insert(0, HELPER)
-import film  # noqa: E402
 import report  # noqa: E402
 
 CARD = {"id": "abc123", "kind": "bar", "question": "Which wikis?", "x": "wiki", "y": "revisions", "note": "",
@@ -34,27 +31,33 @@ def _corpus(root: str, md: str) -> str:
     return path
 
 
-def test_a_good_video_checks_ok() -> None:
+def test_a_good_document_checks_ok() -> None:
     md = ("# Title\n\nOpening line.\n\n## One wiki\n\n![x](card:abc123)\n\n"
-          "dse holds [[13403|card:abc123#revisions/dse]] revisions. (pause 0.5)\n\n## A page\n\nIt is [[pages.jsonl#L1]].\n")
+          "dse holds [[13403|card:abc123#revisions/dse]] revisions.\n\n## A page\n\nIt is [[pages.jsonl#L1]].\n")
     with tempfile.TemporaryDirectory() as root:
-        problems, summary = report.check(_corpus(root, md), "video")
+        problems, summary = report.check(_corpus(root, md), "document")
         assert problems == [], problems
-        assert summary.startswith("2 citations resolve, 1 cards, 2 scenes, about 0:"), summary
+        assert summary.startswith("2 citations resolve, 1 cards"), summary
 
 
 def test_problems_name_their_line_and_what_to_do() -> None:
     md = ("Opening without a title.\n\n## One\n\n![x](card:abc123)\n![y](card:ffffff)\n\n"
-          "dse holds [[999|card:abc123#revisions/dse]] revisions. Two. Three.\n\n## Two\n\n![z](card:abc123)\n")
+          "dse holds [[999|card:abc123#revisions/dse]] revisions.\n")
     with tempfile.TemporaryDirectory() as root:
-        problems, _ = report.check(_corpus(root, md), "video")
+        problems, _ = report.check(_corpus(root, md), "document")
     text = "\n".join(problems)
     assert 'does not open with a "# " title' in text
     assert "line 8: [[999|card:abc123#revisions/dse]]" in text
     assert "card:ffffff is embedded but" in text
-    assert "shows 2 cards: one card per scene" in text
-    assert "a line of 3 sentences" in text
-    assert 'scene 2 ("Two") has no line of narration' in text
+
+
+def test_there_is_no_video() -> None:
+    # the video type is gone: its contract is refused, and no type of the registry names it
+    assert "video" not in report.CONTRACTS
+    with tempfile.TemporaryDirectory() as root:
+        path = _corpus(root, "# T\n\n## A\n\nIt is [[pages.jsonl#L1]].\n")
+        r = subprocess.run([sys.executable, os.path.join(HELPER, "report.py"), "check", path, "--contract", "video"], capture_output=True, text=True)
+        assert r.returncode == 2, r.stdout + r.stderr
 
 
 def test_the_command_line() -> None:
@@ -98,56 +101,10 @@ def test_the_contract_is_the_renderer_and_each_type_has_its_guidance() -> None:
     ts = Path(HERE, "..", "hooks", "report.ts").read_text()
     registry = ts[ts.index("export const TYPES"):ts.index("const BY_ID")]
     types = re.findall(r"\{ id: '(\w+)'.*?renderer: '(\w+)', prompt: '([\w.-]+)'", registry)
-    assert {t for t, _, _ in types} >= {"document", "video", "story", "slides"}, types
+    assert {t for t, _, _ in types} >= {"document", "story", "slides"} and "video" not in {t for t, _, _ in types}, types
     for _, renderer, prompt in types:
         assert renderer in report.CONTRACTS, renderer
         assert Path(HERE, "..", "prompt", "reports", prompt).is_file(), prompt
-
-
-def test_cells_and_the_concat_list() -> None:
-    html = film.rows_html("\x1b[0;1;38;2;230;237;243mab\x1b[0m\n\x1b[0;38;2;47;125;225m█", 3)
-    assert html.count('<div class="l">') == 3
-    assert "font-weight:bold" in html and "color:#e6edf3" in html
-    assert "linear-gradient(to top,#2f7de1 100.0%" in html
-    assert film.concat_list([("a.png", 80), ("b.png", 1200)]) == (
-        "ffconcat version 1.0\nfile 'a.png'\nduration 0.080\nfile 'b.png'\nduration 1.200\nfile 'b.png'\n")
-
-
-def test_narration_mixes_each_spoken_line_in_at_its_start() -> None:
-    if not shutil.which("ffmpeg"):
-        print("skipped: no ffmpeg")
-        return
-    # a stand-in voice: a tone per line, written as the voice would write it
-    def fake_speak(tool: str, text: str, out: Path) -> bool:
-        subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi", "-i", "sine=frequency=440:duration=0.5", str(out)], check=True)
-        return True
-
-    real = film.speak
-    film.speak = fake_speak
-    try:
-        with tempfile.TemporaryDirectory() as d:
-            inputs, graph = film.narration([{"start": 0.5, "text": "one"}, {"start": 2, "text": "two"}, {"start": 3, "text": ""}], "espeak-ng", Path(d))
-            assert inputs == ["-i", f"{d}/line000.wav", "-i", f"{d}/line001.wav"]
-            assert graph == "[1:a]adelay=500|500,aformat=channel_layouts=mono[a1];[2:a]adelay=2000|2000,aformat=channel_layouts=mono[a2];[a1][a2]amix=inputs=2:normalize=0:dropout_transition=0[aout]"
-    finally:
-        film.speak = real
-
-
-def test_a_film_renders_to_an_mp4() -> None:
-    py = os.environ.get("THIMBLE_CC_MOD_PYTHON", "")
-    if not py or not shutil.which("ffmpeg"):
-        print("skipped: set THIMBLE_CC_MOD_PYTHON to a Python with Playwright")
-        return
-    frames = [{"ansi": f"\x1b[0;1m frame {i}\x1b[0m", "ms": 400, "caption": f"line {i}"} for i in range(3)]
-    with tempfile.TemporaryDirectory() as d:
-        src = Path(d) / "f.json"
-        src.write_text(json.dumps({"cols": 136, "rows": 32, "frames": frames, "lines": []}))
-        r = subprocess.run([py, os.path.join(HELPER, "film.py"), str(src), str(Path(d) / "out.mp4")], capture_output=True, text=True)
-        assert r.returncode == 0, r.stderr
-        got = json.loads(r.stdout)
-        assert got["frames"] == 3 and got["seconds"] == 1.2
-        probe = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "stream=codec_name,width,height", "-of", "csv=p=0", str(Path(d) / "out.mp4")], capture_output=True, text=True)
-        assert probe.stdout.strip().startswith("h264,1280,720"), probe.stdout
 
 
 if __name__ == "__main__":

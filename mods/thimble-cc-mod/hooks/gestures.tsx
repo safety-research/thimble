@@ -2,7 +2,7 @@
 //
 //   click            the target's one action: open the place it cites, or a side thread about a card
 //   double-click     the same as a click
-//   right-click      a menu of every action
+//   right-click      the same as a click: there is no menu
 //
 // Modifier clicks and the middle button are left alone: terminals keep them for their own selection, and a gesture
 // that works in one terminal and not the next is worse than none. A reply's paragraphs are the engine's Markdown, each
@@ -26,6 +26,7 @@ export type Target = ChatTarget
 
 export type PointerEv = { button: 'left' | 'middle' | 'right'; shift: boolean; ctrl: boolean; alt: boolean; type: 'press' | 'release' | 'double' }
 
+/** `menu` is no longer made (a right-click does what a click does); it stays in the type until the Merge step. */
 export type Gesture = 'primary' | 'menu'
 
 /** One pointer event as posted: what it was, which gesture it made (null: none), and on what. */
@@ -52,12 +53,12 @@ export function normalize(ev: PointerEv | ClientPointerEvent): PointerEv | null 
   return { type: t, button: ev.button ?? 'left', shift: Boolean(ev.shift), ctrl: Boolean(ev.ctrl), alt: Boolean(ev.alt) }
 }
 
-/** The gesture a press makes: a left press (once or twice) its one action, a right press the menu; the rest none. */
+/** The gesture a press makes: a left or right press (once or twice) its one action; the rest none (a modified click
+ *  and the middle button are the terminal's). */
 export function classify(ev: PointerEv): Gesture | null {
   if (ev.type === 'double') return 'primary'
   if (ev.type !== 'press') return null
-  if (ev.button === 'right') return 'menu'
-  return ev.button === 'left' && !ev.shift && !ev.ctrl && !ev.alt ? 'primary' : null
+  return (ev.button === 'left' || ev.button === 'right') && !ev.shift && !ev.ctrl && !ev.alt ? 'primary' : null
 }
 
 export function targetKey(t: Target): string {
@@ -91,11 +92,11 @@ export function onPointer(target: Target, ev: PointerEv | ClientPointerEvent, ct
   const e = normalize(ev)
   if (!port || !e) return
   if (e.type === 'release') {
-    // The press picks the menu's target. The menu's pane can reflow the transcript before the release, which then lands
-    // on another target; only a right release whose press never reached this module opens the menu.
-    const lost = e.button === 'right' && !rightDown
+    // The press picks the target. The panel it opens can reflow the transcript before the release, which then lands
+    // on another target; only a right release whose press never reached this module acts, as a click.
+    const lost = e.button === 'right' && !rightDown && !e.shift && !e.ctrl && !e.alt
     if (e.button === 'right') rightDown = false
-    emit(port, { gesture: lost ? 'menu' : null, target, ev: e })
+    emit(port, { gesture: lost ? 'primary' : null, target, ev: e })
     return
   }
   if (e.type === 'press' && e.button === 'right') rightDown = true
@@ -142,7 +143,7 @@ export type Act = 'open' | 'thread' | 'verify' | 'script' | 'rerun' | 'files'
 /** `hint`: where the choice leads, for a test or a log; the menu prints the label alone, which says what it does. */
 export type MenuItem = { act: Act; label: string; hotkey: string; hint: string }
 
-/** The menu a right-click opens: every action the target has. */
+/** Every action a target has (the menu a right-click opened before there was no menu; the Merge step deletes it). */
 export function menuItems(t: Target): MenuItem[] {
   const c = citationOf(t)
   const card = cardOf(t)

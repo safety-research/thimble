@@ -73,8 +73,8 @@ type M = Mounted<'terminal'>
 type El = { type: string; props: Record<string, unknown>; children?: unknown[] }
 const textOf = (x: unknown): string => (typeof x === 'string' ? x : ((x as El).children ?? []).map(textOf).join(''))
 async function screen(ui: M): Promise<string[]> {
-  const root = (await ui.drawn({ in: `view:${SLUG}` })) as unknown as El
-  return ((root.children ?? []) as El[]).map(c => textOf(c).trimEnd())
+  const root = (await ui.drawn({ in: `m:view:${SLUG}` })) as unknown as El
+  return ((root.children ?? []) as El[]).map(c => textOf(c).slice(2).trimEnd())
 }
 
 /** The view written as the pipeline writes a large one: rows.json naming its parts, each a slice of the rows. */
@@ -138,7 +138,7 @@ test('drawings that ask for a view while it is read share one read; a changed vi
   const both = () => Promise.all([PANE, { ...PANE, surface: 'desktop' }].map(p => $.ui.mount(p as never))) as unknown as Promise<M[]>
   const panes = await both()
   const drawn = await Promise.all(panes.map(p => screen(p)))
-  for (const lines of drawn) expect(lines[0]).toMatch(/^Agent Wiki Pages {2}600 lanes/)
+  for (const lines of drawn) expect(lines[1]).toMatch(/^600 lanes/)
   expect(w.reads.get(`${DIR}/rows-1.json`)).toBe(1)
   for (const p of panes) await p.unmount()
   // the builder wrote new rows: the next drawings read them, once
@@ -168,7 +168,7 @@ test('keys typed into the search while the view draws are each kept, in order', 
   await $.command.run({ command: 'thimble-view', args: SLUG } as never)
   const pane = (await $.ui.mount(PANE as never)) as unknown as M
   await screen(pane)
-  const IN = { in: `view:${SLUG}` }
+  const IN = { in: `m:view:${SLUG}` }
   // what the Client posts: every act not yet seen, the newest last; five keys land before the first is applied
   const acts: { seq: number; act: unknown }[] = [{ seq: 1, act: { op: 'search' } }]
   await pane.post({ type: 'view', view: SLUG, vorigin: 'typing', acts } as never, IN)
@@ -181,6 +181,6 @@ test('keys typed into the search while the view draws are each kept, in order', 
   const again = (await $.ui.mount(PANE as never)) as unknown as M
   const lines = await screen(again)
   // the query as it is typed, the cursor after it in inverse
-  expect(lines.find(l => l.startsWith('Relay'))).toMatch(/^Relay {3}filter/)
+  expect(lines.find(l => l.startsWith('│ ⌕ Relay'))).toMatch(/^│ ⌕ Relay +│$/)
   await again.unmount()
 })

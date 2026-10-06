@@ -1,7 +1,9 @@
-// The home panel (home.ts) in the panel: a Client surface module (no `$`) that draws the lines the hooks
-// module laid out and maps the pointer to their hit regions. Rows have no hover state; any other region under the
-// pointer (a heading, a layout, "… N more") is a control, drawn in inverse; a click posts the hit's index and the stamp
-// of the drawing it was in, and the hooks module acts.
+// A panel drawn from styled lines (the home panel, home.ts; the threads tree and the lists of register.tsx and
+// harness.tsx): a Client surface module (no `$`) that draws the lines the hooks module laid out and maps the pointer
+// to their hit regions. Rows have no hover state; any other region under the pointer (a heading, a link, "… N more") is
+// a control, drawn in inverse. A click (left or right: a right-click does what a click does) posts the hit's index and
+// the stamp of the drawing it was in; a key, once a click has given the Client the keyboard, posts the key; the hooks
+// module acts on both.
 import type { ClientModule } from 'claude-code'
 
 import { lineWidth, width } from './draw'
@@ -9,14 +11,15 @@ import type { Line } from './draw'
 import { send } from './gestures'
 import { paintLine } from './paint'
 
-type Props = { lines: Line[]; hits: number[]; stamp: string; cols: number }
+type Props = { lines: Line[]; hits: number[]; stamp: string; cols: number; keys?: boolean }
 type S = { hover: number }
 type H = { y: number; x0: number; x1: number; row: boolean; g: number }
+type Out = { seq: number; s: string; i?: number; k?: string }
 
-// every post carries the clicks not yet seen, under this instance's name, so a reload's count starts afresh
+// every post carries the clicks and keys not yet seen, under this instance's name, so a reload's count starts afresh
 const horigin = Math.random().toString(36).slice(2, 10)
 let seq = 0
-let outbox: { seq: number; i: number; s: string }[] = []
+let outbox: Out[] = []
 
 function unpack(packed: readonly number[] | undefined): H[] {
   const out: H[] = []
@@ -41,6 +44,11 @@ function inverse(l: Line, x0: number, x1: number): Line {
   return out
 }
 
+function post(surface: unknown, o: Omit<Out, 'seq'>): void {
+  outbox = [...outbox, { seq: ++seq, ...o }].slice(-8)
+  send(surface, { type: 'home', horigin, hacts: outbox as never })
+}
+
 const HomeView: ClientModule<Props, S> = (props, surface) => {
   const { Box, Text } = surface.elements
   const st = surface.state ?? { hover: -1 }
@@ -49,15 +57,16 @@ const HomeView: ClientModule<Props, S> = (props, surface) => {
   surface.onPointer(ev => {
     if (ev.type === 'down') {
       const i = at(ev.x, ev.y)
-      if (i < 0 || (ev.button ?? 'left') !== 'left' || ev.shift || ev.ctrl || ev.alt) return
-      outbox = [...outbox, { seq: ++seq, i, s: props.stamp }].slice(-8)
-      send(surface, { type: 'home', horigin, hacts: outbox })
+      const button = ev.button ?? 'left'
+      if (i < 0 || button === 'middle' || ev.shift || ev.ctrl || ev.alt) return
+      post(surface, { i, s: props.stamp })
       return
     }
     if (ev.type === 'up') return
     const i = ev.type === 'leave' ? -1 : at(ev.x, ev.y)
     if (i !== st.hover) surface.setState({ hover: i })
   })
+  if (props.keys) surface.onKey(ev => post(surface, { k: ev.key, s: props.stamp }))
   if (surface.state === undefined) surface.setState(st)
   let lines = props.lines
   const h = st.hover >= 0 ? hits[st.hover] : undefined

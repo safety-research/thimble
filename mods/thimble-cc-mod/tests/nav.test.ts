@@ -123,12 +123,12 @@ test('a thread\'s state, unread answers and name', () => {
 
 // ------------------------------------------------------------------------------------------------ in the panel
 
-type World = { files: Map<string, string>; opened: string[]; toasts: string[]; clock: ReturnType<typeof mock.clock> }
+type World = { files: Map<string, string>; opened: string[]; toasts: string[]; submitted: string[]; clock: ReturnType<typeof mock.clock> }
 
 function world(on: On): World {
   mock.env(on, {})
   const clock = mock.clock(on, { now: 1_790_000_000_000 })
-  const w: World = { files: new Map(), opened: [], toasts: [], clock }
+  const w: World = { files: new Map(), opened: [], toasts: [], submitted: [], clock }
   on('session.start', ($, e) => ({ cwd: e.cwd }))
   on('session.cwd', () => ({ value: CWD }))
   on('session.messages', () => ({ value: [] }) as never)
@@ -159,7 +159,10 @@ function world(on: On): World {
     return { value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
   })
   on('prompt.read', () => ({ value: { text: '' } }) as never)
-  on('prompt.submit', ($, e) => ({ text: e.text }) as never)
+  on('prompt.submit', ($, e) => {
+    w.submitted.push(e.text)
+    return { text: e.text } as never
+  })
   on('agent.list', () => ({ value: [] }) as never)
   on('ui.open', ($, e) => {
     w.opened.push(e.id)
@@ -209,16 +212,12 @@ function saved(w: World, id: string, more: Partial<ChatThread> = {}): void {
 const keyOf = (b: unknown): string => String((b as El).key ?? (b as El).props?.key ?? '')
 const textOf = (x: unknown): string => (typeof x === 'string' ? x : ((x as El).children ?? []).map(textOf).join(''))
 
-/** The panel's column inside its type area (the Box that insets it 1 cell from each edge). */
-const column = (x: unknown): El => {
-  const el = x as El
-  return el.props?.paddingLeft === 1 && (el.children ?? []).length === 1 ? (el.children![0] as El) : el
-}
+/** The element keyed `key` anywhere under `x`. */
+const keyed = (x: unknown, key: string): El | undefined => (keyOf(x) === key ? (x as El) : (((x as El)?.children ?? []) as unknown[]).map(c => keyed(c, key)).find(Boolean))
 
 /** The way's row as the terminal draws it: a plain Button as its label (no hotkey shows), a Text as its text. */
 async function way(pane: M): Promise<string> {
-  const root = column(await pane.drawn())
-  const row = (root.children ?? []).find(c => keyOf(c) === 'way') as El | undefined
+  const row = keyed(await pane.drawn(), 'way')
   return ((row?.children ?? []) as El[]).map(c => (c.type === 'Button' ? `${c.props.hotkey ? `${String(c.props.hotkey)}: ` : ''}${String(c.props.label)}` : textOf(c))).join('')
 }
 
@@ -254,16 +253,20 @@ async function signalLine(engine: Engine, requestId: string, component = 'Assist
   return box ? ((box.children ?? []) as El[]).map(line).join('\n') : ''
 }
 
-/** The row above the prompt that counts the threads with answers unread, as the terminal reads it: '' when none. */
+/** What the panel's path row says of the threads at its right, as the terminal reads it: '' when no answer waits
+ *  (there is no row above the prompt). */
 async function newsLine(engine: Engine): Promise<string> {
-  const ui = (await engine.ui.mount(ABOVE as never)) as unknown as M
-  const root = (await ui.drawn()) as unknown as El
-  await ui.unmount()
-  const find = (n: unknown): El | undefined => (keyOf(n) === 'threads-row' ? (n as El) : ((n as El)?.children ?? []).map(find).find(Boolean))
-  const row = find(root)
-  // its words as read: a Button's label, a Text's text, a Box's children, one space between
-  const words = (c: unknown): string[] => (typeof c === 'string' ? [c] : (c as El).type === 'Button' ? [String((c as El).props.label)] : ((c as El).children ?? []).flatMap(words))
-  return row ? words(row).join(' ').replace(/\s+/g, ' ').trim() : ''
+  const pane = (await engine.ui.mount(PANEL as never)) as unknown as M
+  const w = await way(pane)
+  await pane.unmount()
+  const m = /show all threads(.*)$/.exec(w)
+  return m && m[1]!.trim() ? `show all threads ${m[1]!.trim()}` : ''
+}
+
+/** The threads panel's tree as plain text, as its Client draws it (without the margin). */
+async function treeText(pane: M): Promise<string> {
+  const c = (await pane.find({ type: 'Client', key: 'm:threads-tree' })) as unknown as { props: { props: { lines: { s: string }[][] } } } | undefined
+  return (c?.props.props.lines ?? []).map(l => l.map(x => x.s).join('').slice(2).replace(/\s+$/, '')).join('\n')
 }
 
 let seq = 0
@@ -285,21 +288,21 @@ test('a citation opened from a side thread keeps the thread one step back: the b
   await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
   await openFromTree($, 'tuaaa1')
   let pane = (await $.ui.mount(PANEL as never)) as unknown as M
-  // from the tree: back to it, home, and the thread by its question
-  expect(await way(pane)).toMatch(/^‹ back {2}home › thread "how big is dse\?"threads$/)
+  // from the tree: back to it, home, the threads and the thread by its question
+  expect(await way(pane)).toMatch(/^‹ back {2}home › threads › "how big is dse\?"$/)
   await pane.unmount()
   await clickCitationInThread($)
   expect(state.get('panelView')).toBe('cite')
   pane = (await $.ui.mount(PANEL as never)) as unknown as M
-  expect(await way(pane)).toMatch(/^‹ back {2}home › thread "how big is dse\?" › citation pages:3/)
-  expect(await pane.find({ type: 'Button', key: 'crumb-1' })).toBeDefined()
+  expect(await way(pane)).toMatch(/^‹ back {2}home › threads › "how big is dse\?" › citation pages:3/)
+  expect(await pane.find({ type: 'Button', key: 'crumb-2' })).toBeDefined()
   await pane.press({ key: 'nav-back' })
   await pane.unmount()
   expect(state.get('panelView')).toBe('thread')
   expect(state.get('thread')).toBe('tuaaa1')
   // forward again and up by the thread's crumb
   await clickCitationInThread($)
-  await press($, 'crumb-1')
+  await press($, 'crumb-2')
   expect(state.get('panelView')).toBe('thread')
   // a click in main starts the breadcrumb over: home › the citation
   const ui = (await $.ui.mount(MESSAGE as never)) as unknown as M
@@ -325,29 +328,30 @@ test('"ask about it" in a citation opened from a thread starts a thread under it
   expect(child).not.toBe('tuaaa1')
   expect((state.get(`threads/${child}`) as ChatThread).parent).toBe('tuaaa1')
   let pane = (await $.ui.mount(PANEL as never)) as unknown as M
-  // home › the first thread › its citation › the new thread, which asks nothing yet
-  expect(await way(pane)).toMatch(/home › thread "how big is d.*› citation pages:3 › thread about the cit/)
+  // home › threads › the first thread › its citation › the new thread, which asks nothing yet
+  expect(await way(pane)).toMatch(/home › threads › "how big is d.*› citation pages:3 › about the cit/)
   await pane.unmount()
   await $.command.run({ command: 'thimble-threads', args: '' } as never)
   pane = (await $.ui.mount(PANEL as never)) as unknown as M
   const rows = (await pane.findAll({ type: 'Button' })).map(keyOf).filter(k => /^thread-open:/.test(k))
   expect(rows).toEqual(['thread-open:tuaaa1', `thread-open:${child}`, 'thread-open:tuaaa2'])
-  const text = textOf(await pane.drawn())
-  expect(text).toContain('main')
-  // a thread asked from a thread hangs under it after └, its state glyph after it
-  expect(text).toMatch(/└ ○ /)
+  const text = await treeText(pane)
+  expect(text).toMatch(/^main$/m)
+  // a thread asked from a thread hangs under it after └, a level deeper
+  expect(text).toMatch(/│ └ about the citation pages:3/)
   expect(text).toContain('nothing asked yet')
   // picked from the tree, the child stands under its parent in the breadcrumb
   await pane.press({ key: `thread-open:${child}` })
   await pane.unmount()
   pane = (await $.ui.mount(PANEL as never)) as unknown as M
-  expect(await way(pane)).toMatch(/home › thread "how big is dse\?" › thread about the citation pages:3/)
-  // the parent lists the threads asked from it
-  await pane.press({ key: 'crumb-1' })
+  expect(await way(pane)).toMatch(/home › threads › "how big is dse\?" › about the citation pages:3/)
+  // the parent shows the tree with its child under it: the keys choose either
+  await pane.press({ key: 'crumb-2' })
   await pane.unmount()
+  expect(state.get('thread')).toBe('tuaaa1')
   pane = (await $.ui.mount(PANEL as never)) as unknown as M
-  expect(await pane.find({ type: 'Text', text: /^asked from this thread {2}1$/ })).toBeDefined()
-  await pane.press({ key: 'child-0' })
+  expect(await treeText(pane)).toMatch(/├ "how big is dse\?"\n│ .*\n│ └ about the citation pages:3/)
+  await pane.press({ key: 'hk-t1' })
   await pane.unmount()
   expect(state.get('thread')).toBe(child)
 })
@@ -392,7 +396,7 @@ test('a thread answers on while the panel shows its citation: its crumb shows it
   state.seed('agents/agent-7', { kind: 'thread', label: 'side thread · and probier?', thread: 'tuaaa1' })
   await clickCitationInThread($)
   let pane = (await $.ui.mount(PANEL as never)) as unknown as M
-  expect(await way(pane)).toMatch(/◌ thread "how big is dse\?" › citation pages:3.*threads {2}1 answering$/)
+  expect(await way(pane)).toMatch(/threads › ◌ "how big is dse\?" › citation pages:3show all threads$/)
   await pane.unmount()
   // its answer lands while the panel shows the citation: unread, and main's chat gets a row under its latest row
   await $.turn.complete({ turnId: 's7', agentId: 'agent-7', answer: 'probier has [[1013|card:abc123#revisions/probier]].', durationMs: 5, reason: 'answer' } as never)
@@ -401,13 +405,13 @@ test('a thread answers on while the panel shows its citation: its crumb shows it
   expect(await signalLine($, 'm1')).toBe('↳ thread · "and probier?" · answered · new')
   expect(w.toasts).toEqual([])
   pane = (await $.ui.mount(PANEL as never)) as unknown as M
-  expect(await way(pane)).toMatch(/thread "how big is dse\?" new › citation pages:3.*threads {2}1 new$/)
+  expect(await way(pane)).toMatch(/"how big is dse\?" new › citation pages:3show all threads {2}1 new$/)
   // the tree marks it too
   await pane.press({ key: 'threads' })
   await pane.unmount()
   pane = (await $.ui.mount(PANEL as never)) as unknown as M
-  expect(textOf(await pane.drawn())).toContain('2 questions · about the last answer')
-  expect(textOf(await pane.drawn())).toMatch(/Side threads {2}\d+ · 1 new/)
+  expect(await treeText(pane)).toMatch(/"how big is dse\?" +2 questions {2}new/)
+  expect(textOf(await pane.drawn())).toMatch(/\d+ threads? · 1 new/)
   await pane.press({ key: 'nav-back' })
   await pane.unmount()
   // back on the citation, then on the thread: read
@@ -464,12 +468,12 @@ test('which rows a thread\'s answer is told under, what its row says, and what s
   expect(signalRead(t, 1, undefined)).toBe(false)
   expect(withSignal([{ thread: 't', turn: 1 }], { thread: 't', turn: 1 })).toEqual([{ thread: 't', turn: 1 }])
 
-  const f = parseSignals(signalsJson({ session: 's', last: 'm9', seen: { t: 1 }, rows: { m1: [{ thread: 't', turn: 1 }] } }))
-  expect(f).toEqual({ session: 's', last: 'm9', seen: { t: 1 }, rows: { m1: [{ thread: 't', turn: 1 }] } })
-  expect(parseSignals('not json')).toEqual({ session: '', last: '', seen: {}, rows: {} })
-  expect(parseSignals(JSON.stringify({ seen: { a: -1, b: 'x', c: 2 }, rows: { r: [{ thread: 1 }] } }))).toEqual({ session: '', last: '', seen: { c: 2 }, rows: {} })
+  const f = parseSignals(signalsJson({ session: 's', last: 'm9', seen: { t: 1 }, rows: { m1: [{ thread: 't', turn: 1 }] }, views: { m2: ['wiki-pages'] } }))
+  expect(f).toEqual({ session: 's', last: 'm9', seen: { t: 1 }, rows: { m1: [{ thread: 't', turn: 1 }] }, views: { m2: ['wiki-pages'] } })
+  expect(parseSignals('not json')).toEqual({ session: '', last: '', seen: {}, rows: {}, views: {} })
+  expect(parseSignals(JSON.stringify({ seen: { a: -1, b: 'x', c: 2 }, rows: { r: [{ thread: 1 }] }, views: { v: [3, ''] } }))).toEqual({ session: '', last: '', seen: { c: 2 }, rows: {}, views: {} })
   const many = Object.fromEntries(Array.from({ length: 205 }, (_, i) => [`r${i}`, [{ thread: 't', turn: 1 }]]))
-  expect(Object.keys(parseSignals(signalsJson({ session: '', last: '', seen: {}, rows: many })).rows)).toHaveLength(200)
+  expect(Object.keys(parseSignals(signalsJson({ session: '', last: '', seen: {}, rows: many, views: {} })).rows)).toHaveLength(200)
 
   const seen: Record<string, number> = { a: 1, b: 0 }
   expect(newsOf([thread('a', { turns: [turn('q')] }), thread('b', { turns: [turn('q')] }), thread('c', { turns: [turn('q')] })], id => seen[id])).toEqual({ n: 1, one: 'b' })
@@ -491,7 +495,7 @@ test('a thread the analyst is looking at when it answers gets no row; its answer
   expect(await newsLine($)).toBe('')
 })
 
-test('an answer not seen come: one row in main\'s chat at that moment, a count above the prompt; a press on the row opens the thread and clears both marks; main reads only its note', async ($, on) => {
+test('an answer not seen come: one row in main\'s chat at that moment, `N new` after `show all threads`; a press on the row opens the thread and clears both marks; main reads only its note', async ($, on) => {
   const w = world(on)
   const state = written(on)
   const tid = 'tuaaa3'
@@ -514,7 +518,7 @@ test('an answer not seen come: one row in main\'s chat at that moment, a count a
   // under main's latest row only
   expect(await signalLine($, 'm1')).toBe('')
   expect(await signalLine($, 'm2')).toBe('↳ thread · "which agent reverted most?" · answered · new')
-  expect(await newsLine($)).toBe('threads 1 new')
+  expect(await newsLine($)).toBe('show all threads 1 new')
   // main gets the one note it got before, and nothing else
   const notes = JSON.parse(w.files.get(`${CWD}/.thimble-cc-mod/notes.json`) ?? '{}') as { notes?: string[] }
   expect(notes.notes).toHaveLength(1)
@@ -538,25 +542,25 @@ test('an answer not seen come: one row in main\'s chat at that moment, a count a
   await again.unmount()
 })
 
-test('a resumed session keeps the unread marks and the rows: the tree, the count above the prompt and the row under the turn\'s duration', async ($, on) => {
+test('a resumed session keeps the unread marks and the rows: the tree, `N new` on the path row and the row under the turn\'s duration', async ($, on) => {
   const w = world(on)
   const state = written(on)
   saved(w, 'tuaaa1', { turns: [turn('how big is dse?', 'done', REPLY), turn('and probier?', 'done', 'probier has 1013.')] })
   saved(w, 'tuaaa2', { at: 2 })
-  w.files.set(`${CWD}/.thimble-cc-mod/signals.json`, signalsJson({ session: 'session-1', last: 'd1', seen: { tuaaa1: 1, tuaaa2: 1 }, rows: { d1: [{ thread: 'tuaaa1', turn: 2 }] } }))
+  w.files.set(`${CWD}/.thimble-cc-mod/signals.json`, signalsJson({ session: 'session-1', last: 'd1', seen: { tuaaa1: 1, tuaaa2: 1 }, rows: { d1: [{ thread: 'tuaaa1', turn: 2 }] }, views: {} }))
   await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
   expect(state.get('threadSeen/tuaaa1')).toBe(1)
-  expect(await newsLine($)).toBe('threads 1 new')
+  expect(await newsLine($)).toBe('show all threads 1 new')
   expect(await signalLine($, 'd1', 'TurnDuration')).toBe('↳ thread · "and probier?" · answered · new')
-  await $.command.run({ command: 'thimble-threads', args: '' } as never)
-  const pane = (await $.ui.mount(PANEL as never)) as unknown as M
-  expect(textOf(await pane.drawn())).toContain('2 questions · earlier session')
-  expect(textOf(await pane.drawn())).toMatch(/Side threads {2}2 · 1 new/)
-  // the count above the prompt opens the one thread with news
+  // `show all threads` opens the threads panel, which marks the thread with news
+  let pane = (await $.ui.mount(PANEL as never)) as unknown as M
+  await pane.press({ key: 'threads' })
   await pane.unmount()
-  const above = (await $.ui.mount(ABOVE as never)) as unknown as M
-  await above.press({ key: 'threads-news' })
-  await above.unmount()
+  pane = (await $.ui.mount(PANEL as never)) as unknown as M
+  expect(await treeText(pane)).toMatch(/"how big is dse\?" +2 questions {2}new/)
+  expect(textOf(await pane.drawn())).toMatch(/2 threads · 1 new/)
+  await pane.press({ key: 'thread-open:tuaaa1' })
+  await pane.unmount()
   expect(state.get('thread')).toBe('tuaaa1')
   expect(state.get('threadSeen/tuaaa1')).toBe(2)
   expect(await newsLine($)).toBe('')
@@ -582,15 +586,15 @@ test('an answer that comes before main\'s chat holds a row waits for the next on
 type HomeProps = { lines: { s: string }[][]; hits: number[]; stamp: string }
 let homeSeq = 0
 
-/** The home panel's lines as plain text, as its Client draws them. */
+/** The home panel's lines as plain text, as its Client draws them (without the margin). */
 async function homeText(pane: M): Promise<string[]> {
-  const c = (await pane.find({ type: 'Client', key: 'home' })) as unknown as { props: { props: HomeProps } } | undefined
-  return (c?.props.props.lines ?? []).map(l => l.map(x => x.s).join('').replace(/\s+$/, ''))
+  const c = (await pane.find({ type: 'Client', key: 'm:home' })) as unknown as { props: { props: HomeProps } } | undefined
+  return (c?.props.props.lines ?? []).map(l => l.map(x => x.s).join('').slice(2).replace(/\s+$/, ''))
 }
 
 /** A click on the first line of the home panel that `re` finds, as its Client posts it. */
 async function homeClick(pane: M, re: RegExp): Promise<void> {
-  const c = (await pane.find({ type: 'Client', key: 'home' })) as unknown as { props: { props: HomeProps } }
+  const c = (await pane.find({ type: 'Client', key: 'm:home' })) as unknown as { props: { props: HomeProps } }
   const { lines, hits, stamp } = c.props.props
   const y = lines.findIndex(l => re.test(l.map(x => x.s).join('')))
   expect(y).toBeGreaterThanOrEqual(0)
@@ -602,7 +606,7 @@ async function homeClick(pane: M, re: RegExp): Promise<void> {
     }
   }
   expect(i).toBeGreaterThanOrEqual(0)
-  await pane.post({ type: 'home', horigin: 'test-home', hacts: [{ seq: ++homeSeq, i, s: stamp }] } as never, { in: 'home' })
+  await pane.post({ type: 'home', horigin: 'test-home', hacts: [{ seq: ++homeSeq, i, s: stamp }] } as never, { in: 'm:home' })
 }
 
 test('the breadcrumb starts at home: /thimble-home opens it, what it opens stands after it, and back and the first crumb return to it', async ($, on) => {
@@ -611,20 +615,20 @@ test('the breadcrumb starts at home: /thimble-home opens it, what it opens stand
   saved(w, 'tuaaa1')
   await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
   const said = (await $.command.run({ command: 'thimble-home', args: '' } as never)) as { text?: string }
-  expect(said.text).toBe('home · stacked')
+  expect(said.text).toBe('home')
   expect(state.get('panelView')).toBe('home')
   let pane = (await $.ui.mount(PANEL as never)) as unknown as M
-  // the home panel shown: its crumb alone, regular, no button
-  expect(await way(pane)).toBe('homethreads')
+  // the home panel shown: its crumb alone, regular, no button; its title Home alone
+  expect(await way(pane)).toBe('homeshow all threads')
   expect(await pane.find({ type: 'Button', key: 'crumb-home' })).toBeUndefined()
-  expect((await homeText(pane))[0]).toMatch(/^Home {2}0 views · 0 reports · 1 thread · 0 cards · 0 labels · 0 files +stacked {2}index$/)
+  expect((await homeText(pane))[0]).toBe('Home')
   // a thread opened from it stands after home; back returns home
   await homeClick(pane, /"how big is dse\?"/)
   await pane.unmount()
   expect(state.get('panelView')).toBe('thread')
   expect(state.get('thread')).toBe('tuaaa1')
   pane = (await $.ui.mount(PANEL as never)) as unknown as M
-  expect(await way(pane)).toMatch(/^‹ back {2}home › thread "how big is dse\?"threads$/)
+  expect(await way(pane)).toMatch(/^‹ back {2}home › threads › "how big is dse\?"$/)
   await pane.press({ key: 'nav-back' })
   await pane.unmount()
   expect(state.get('panelView')).toBe('home')
@@ -633,49 +637,36 @@ test('the breadcrumb starts at home: /thimble-home opens it, what it opens stand
   await press($, 'crumb-home')
   expect(state.get('panelView')).toBe('home')
   expect((state.get('nav') as { trail: ChatNavStep[] }).trail.map(s => s.view)).toEqual(['home'])
-  // an unknown layout is refused, a known one taken
-  expect(((await $.command.run({ command: 'thimble-home', args: 'grid' } as never)) as { text?: string }).text).toBe('no layout "grid": stacked or index')
-  expect(((await $.command.run({ command: 'thimble-home', args: 'index' } as never)) as { text?: string }).text).toBe('home · index')
 })
 
-test('with several threads holding new answers, the row above the prompt opens home, its threads unfolded, those with new answers first', async ($, on) => {
+test('with several threads holding new answers, `show all threads` says how many; home lists them first, `new` in green after each', async ($, on) => {
   const w = world(on)
   const state = written(on)
   saved(w, 'tuaaa1', { at: 1 })
   saved(w, 'tuaaa2', { at: 3, turns: [turn('and probier?', 'done', 'probier has 1013.')] })
   saved(w, 'tuaaa3', { at: 2, turns: [turn('who reverted most?', 'done', 'Mercury.')] })
-  w.files.set(`${CWD}/.thimble-cc-mod/signals.json`, signalsJson({ session: 'session-1', last: '', seen: { tuaaa1: 0, tuaaa2: 0, tuaaa3: 1 }, rows: {} }))
-  state.seed('homeUi', { layout: 'stacked', folded: ['threads'], more: [], pick: '' })
+  w.files.set(`${CWD}/.thimble-cc-mod/signals.json`, signalsJson({ session: 'session-1', last: '', seen: { tuaaa1: 0, tuaaa2: 0, tuaaa3: 1 }, rows: {}, views: {} }))
   await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
-  expect(await newsLine($)).toBe('threads 2 new')
-  const above = (await $.ui.mount(ABOVE as never)) as unknown as M
-  await above.press({ key: 'threads-news' })
-  await above.unmount()
+  expect(await newsLine($)).toBe('show all threads 2 new')
+  await $.command.run({ command: 'thimble-home', args: '' } as never)
   expect(state.get('panelView')).toBe('home')
-  expect((state.get('homeUi') as { folded: string[] }).folded).toEqual([])
   const pane = (await $.ui.mount(PANEL as never)) as unknown as M
   const lines = await homeText(pane)
+  const c = (await pane.find({ type: 'Client', key: 'm:home' })) as unknown as { props: { props: HomeProps } }
   await pane.unmount()
-  const at = lines.findIndex(l => l.startsWith('Side threads  3'))
+  const at = lines.findIndex(l => l.startsWith('Threads (3)'))
   expect(at).toBeGreaterThan(0)
-  // the heading counts what is new, in bold
-  expect(lines[at]).toMatch(/^Side threads {2}3 {2}2 new$/)
-  // the two with new answers first, the newer of them first, their names bold; then the one read
-  const c = (await (async () => {
-    const p = (await $.ui.mount(PANEL as never)) as unknown as M
-    const found = (await p.find({ type: 'Client', key: 'home' })) as unknown as { props: { props: HomeProps } }
-    await p.unmount()
-    return found
-  })())
-  const items = c.props.props.lines.slice(at + 1).filter(l => /^● /.test(l.map(x => x.s).join('')))
-  const rows = items.slice(0, 3).map(l => l.map(x => x.s).join(''))
-  expect(rows[0]).toMatch(/^● "and probier\?"/)
-  expect(rows[1]).toMatch(/^● "how big is dse\?"/)
+  // the heading counts what is new, in green
+  expect(lines[at]).toMatch(/^Threads \(3\) {2}2 new$/)
+  // the two with new answers first, the newer of them first, their names regular and `new` after them; then the one read
+  const items = c.props.props.lines.slice(at + 1).filter(l => /^. ● /.test(l.map(x => x.s).join('')))
+  const rows = items.slice(0, 3).map(l => l.map(x => x.s).join('').slice(2))
+  expect(rows[0]).toMatch(/^● "and probier\?".* new$/)
+  expect(rows[1]).toMatch(/^● "how big is dse\?".* new$/)
   expect(rows[2]).toMatch(/^● "who reverted most\?"/)
-  const bold = (l: { s: string; b?: boolean }[]) => l.some(x => x.b)
-  expect(items.slice(0, 2).every(bold)).toBe(true)
-  expect(bold(items[2]!)).toBe(false)
   expect(rows[2]).not.toMatch(/new$/)
+  expect(items.slice(0, 3).some(l => l.some(x => (x as { b?: boolean }).b))).toBe(false)
+  expect(items[0]!.at(-1)).toMatchObject({ s: 'new', fg: 'success' })
 })
 
 test('the home panel stays live: a thread written on disk while it shows draws it again, and the watch ends when the panel moves on', async ($, on) => {
@@ -693,7 +684,7 @@ test('the home panel stays live: a thread written on disk while it shows draws i
   await w.clock.advance(1600)
   expect(state.get('homeTick')).toBe(1)
   const pane = (await $.ui.mount(PANEL as never)) as unknown as M
-  expect((await homeText(pane)).some(l => l.startsWith('Side threads  2'))).toBe(true)
+  expect((await homeText(pane)).some(l => l.startsWith('Threads (2)'))).toBe(true)
   await pane.unmount()
   await w.clock.advance(1600)
   expect(state.get('homeTick')).toBe(1)
@@ -704,4 +695,54 @@ test('the home panel stays live: a thread written on disk while it shows draws i
   shown = true
   await w.clock.advance(3200)
   expect(state.get('homeTick')).toBe(1)
+})
+
+test('the labels list: one row per label, `❯` on the chosen one; `describe a new label` sends the words to main, which makes it with a trial', async ($, on) => {
+  const w = world(on)
+  const state = written(on)
+  w.files.set(`${CWD}/.thimble-cc-mod/labels.json`, JSON.stringify([{ slug: 'page-kind', name: 'page kind', kind: 'prompt', scope: 'trial', counts: { 'test page': 29, prose: 31 }, spec: '', labels: [], paths: ['pages.jsonl'] }]))
+  state.seed('labels/page-kind', { slug: 'page-kind', name: 'page kind', kind: 'prompt', definition: 'what kind of page it is', values: ['test page', 'prose'], paths: ['pages.jsonl'], field: '', state: 'ready', trial: true, limit: 60, total: 412, labeled: 60, counts: { 'test page': 29, prose: 31 }, examples: [], cards: [], errors: [], created: 0 })
+  await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
+  await $.command.run({ command: 'thimble-label', args: 'list' } as never)
+  const pane = (await $.ui.mount(PANEL as never)) as unknown as M
+  const c = (await pane.find({ type: 'Client', key: 'm:labels-list' })) as unknown as { props: { props: { lines: { s: string }[][] } } }
+  const rows = c.props.props.lines.map(l => l.map(x => x.s).join('').trimEnd())
+  expect(rows).toHaveLength(1)
+  expect(rows[0]).toMatch(/^❯ ● page kind +prompt · a sample of 60$/)
+  // under the second rule, the field: its label dim before it, no placeholder
+  expect(textOf(await pane.drawn())).toContain('describe a new label')
+  expect(((await pane.find({ key: 'lbs-describe' })) as { props: Record<string, unknown> } | undefined)?.props.placeholder).toBeUndefined()
+  await pane.input({ key: 'lbs-describe', text: 'whether a revision reverts another' })
+  expect(w.submitted).toEqual(['Make a label with the label tool and try it on a sample of 30: whether a revision reverts another'])
+  // a row opens its label
+  await pane.press({ key: 'lbs-open:page-kind' })
+  await pane.unmount()
+  expect(state.get('panelView')).toBe('label')
+})
+
+test('a thread asked about a passage leaves a blue `↳` in its margin, in place of the `?`; a click on it opens that thread', async ($, on) => {
+  world(on)
+  const state = written(on)
+  await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
+  await mainRow($, 'm1', REPLY)
+  let msg = (await $.ui.mount(MESSAGE as never)) as unknown as M
+  const asks = (await msg.findAll({ type: 'Button' })).filter(b => (b as unknown as El).props.label === '?')
+  expect(asks.length).toBeGreaterThan(0)
+  const key = keyOf(asks[0])
+  // the `?` is blue under the pointer
+  expect(JSON.stringify(await msg.drawn())).toMatch(new RegExp(`"key":"${key}","label":"\\?","plain":true\\},"press":\\{[^}]*\\},"hover":\\{"color":"remember"\\}`))
+  await msg.press({ key })
+  await msg.unmount()
+  expect(state.get('panelView')).toBe('thread')
+  const tid = state.get('thread')
+  // back to home, then the passage's mark opens the thread again
+  await $.command.run({ command: 'thimble-home', args: '' } as never)
+  msg = (await $.ui.mount(MESSAGE as never)) as unknown as M
+  expect(await msg.find({ type: 'Button', key })).toBeUndefined()
+  const mark = (await msg.find({ type: 'Client', key: `pmark:${key}` })) as unknown as { props: { props: { lines: { s: string; fg?: string }[][]; stamp: string } } } | undefined
+  expect(mark?.props.props.lines[0]![0]).toMatchObject({ s: '↳', fg: 'remember' })
+  await msg.post({ type: 'home', horigin: 'test-mark', hacts: [{ seq: 1, i: 0, s: mark!.props.props.stamp }] } as never, { in: `pmark:${key}` })
+  await msg.unmount()
+  expect(state.get('panelView')).toBe('thread')
+  expect(state.get('thread')).toBe(tid)
 })

@@ -15,7 +15,7 @@
 // - Verification scripts: a forked subagent writes a standalone script that recomputes a cited value; the mod runs it
 //   and marks the citation ✓, or ✗ and red. A spinner shows meanwhile. The panel shows the script and its output.
 // - Gestures (gestures.tsx): every target (card, mark, sentence, citation, row, record, node) takes the same clicks;
-//   a right-click opens the menu of every action.
+//   a right-click does what a click does. There is no menu.
 // - Side threads (threads.tsx): a forked subagent answers out of main's chat, in the panel.
 // - Every subagent of the mod (side threads, fix rounds, verifications, report writers, highlighters, view builders and
 //   reviewers) is a fork of main, so it has main's whole conversation; a general-purpose subagent given the guidance
@@ -27,12 +27,10 @@
 // - Each answer's footer and each citation's fix and verification are kept in .thimble-cc-mod/marks.json, so a resumed
 //   session draws them again.
 // - Bash results: each output is saved (.thimble-cc-mod/calls/<id>.json) and main is told its ref, so it can cite a line.
-// - Playing an answer ("▶ play" under it, /thimble-play): the panel's play view, a Client (player.tsx) that plays the
-//   storyboard play.ts builds from the answer's own text and cards: each card animated (anim.ts), captions typing in,
-//   the value each caption cites lit on the card.
-// - Reports (reports.tsx): a writer subagent writes a document, slides, a story or a video of the work, started by
-//   main's `report` tool, /thimble-report, or "open as report" under an answer; the panel draws each form, and a video
-//   is filmed to an MP4 and played in the play view.
+// - Reports (reports.tsx): a writer subagent writes a document, slides or a story of the work, started by main's
+//   `report` tool, /thimble-report, or "open as report" under an answer; the panel draws each form.
+// - The panels' chrome (chrome.tsx): the path row, an accent title and a dim subtitle, a rule, the panel's parts, its
+//   actions at the bottom after a rule, and a dim italic row of key hints (views/SPEC.md, "The visual system").
 // - While a reply streams, the engine is handed its text with each citation as a Markdown link and each card's embed
 //   line as a placeholder (turn.step), so no raw [[...]] shows; the row is stored as the model wrote it (session.append).
 import { atom, read, update } from 'claude-code'
@@ -44,17 +42,16 @@ import type { Focus } from './anim'
 import { answerFile, applyCorrections, richMarkdown, blockClaims, blockLayout, capLine, chipLook, chipSegs, chipState, citeLabel, citedAs, citedPlace, claimsIn, correctText, emptyMarks, fixItems, fixPrompt, fixedCard, marksJson, paraLayout, parseFix, parseMarks, plainCites, quoteSpan, quotedWords, scriptAim, setMark, settleFix, showsValue, streamLink, streamStep, streaming, verifyFailed, verifyMatches, wrapAround } from './cite'
 import type { ChipView, Claim, Marks, Problem, StreamLook, Streaming } from './cite'
 import { MAX_BARS, MAX_EDGES, MAX_NODES, MAX_TABLE_ROWS, cardLayout, cut, labelHead, lineWidth, placeWords, shade, width as textWidth } from './draw'
+import { ACCENT, FRESH, LINK, MARGIN_W, TIP, controlsEl, fieldEls, freshSeg, hasMargin, headerEls, hintLine, hintsEl, lineEl, linkSeg, marginKey, pointed, ruleEl, ruleLine, spread, subLine, titleLine } from './chrome'
 import type { BarRow, CardData, CardMeta, Cell, Item, Layout, Line } from './draw'
 import { askPieces, chipLabel, cid, citations, citeSpans, clip, embeddedCards, fmt, fromMod, mdPieces, sectionsOf, inlineRuns, needsDrawing, parseReply, scriptResult, takeawayAfter, threadBody, validateCard } from './lib'
 import type { Citation } from './lib'
 import { COLORS, paintLine, paintLines } from './paint'
-import { cardOf, citationOf, citeText, menuItems, placeOf, targetLabel } from './gestures'
+import { cardOf, citationOf, citeText, placeOf, targetLabel } from './gestures'
 import type { Act, Gesture, PointerEv, Sent, Target } from './gestures'
-import { storyboard, tilePlace } from './play'
-import { captionFocus, reportCards, typeOf, videoScenes } from './report'
+import { passageKey, reportCards, typeOf } from './report'
 import { HIGHLIGHT_DESCRIPTION, HIGHLIGHT_SCHEMA, HIGHLIGHT_TOOL, REPORT_COMMAND_DESCRIPTION, REPORT_TOOL, TOOL_DESCRIPTION, TOOL_SCHEMA, allReports, drawReport, drawReports, highlightTool, highlightToolLine, openAsReport, reportAgentDone, reportAppend, reportCommand, reportNav, reportTool, reportToolLine, reportsCommand, showReport } from './reports'
 import type { ReplyOpts, ReportCtx } from './reports'
-import type { PlayCap, PlayOp, PlayScene } from './play'
 import { MOD_AGENT, aboutLine, fallbackName, fixName, forkPrompt, freshPrompt, lastTurn, parseThread, pinCalls, threadFile, threadJson, threadName, threadNote, verifyName, withGuide, withNotes, withoutTaskLine } from './threads'
 import type { ThreadCall } from './threads'
 import { turns } from './turns'
@@ -77,13 +74,13 @@ import type { ChatNav, ChatNavStep, ChatNews, ChatSignal } from '../types'
 import { SIGNALS_EMPTY, isAnchor, newsOf, parseSignals, signalEnd, signalQuestion, signalRead, signalsJson, withSignal } from './signal'
 import type { SignalFile } from './signal'
 // the harness: coverage, labels, the orientation (hooks/harness.tsx)
-import { LABEL_DESCRIPTION, LABEL_SCHEMA, LABEL_TOOL, ORIENT_DESCRIPTION, ORIENT_SCHEMA, ORIENT_TOOL, checkNote, coverageAfterTurn, coverageAppend, coverageCommand, coverageContext, coverageDetail, coverageLast, coverageRow, drawCoverage, drawLabel, drawLabels, isOrient, labelCommand, labelTool, labelToolLine, labelVerdict, labelsCommand, openLabel, orientCommand, orientEnded, orientTool, orientToolLine } from './harness'
+import { LABEL_DESCRIPTION, LABEL_SCHEMA, LABEL_TOOL, ORIENT_DESCRIPTION, ORIENT_SCHEMA, ORIENT_TOOL, checkNote, coverageAfterTurn, coverageAppend, coverageCommand, coverageContext, coverageDetail, coverageLast, drawCoverage, drawLabel, drawLabels, isOrient, labelCommand, labelTool, labelToolLine, labelVerdict, labelsCommand, openLabel, orientCommand, orientEnded, orientTool, orientToolLine } from './harness'
 import type { HarnessCtx } from './harness'
 import { SCRIPTS, boxedArgv, noPlan, parsePlan, unboxedNotice } from './sandbox'
 import type { SandboxPlan } from './sandbox'
 // the home panel (home.ts, drawn by homeview.tsx)
-import { HOME_LAYOUTS, groupCards, homeLayout, homeReduce } from './home'
-import type { HomeAct, HomeCard, HomeCardGroup, HomeData, HomeHit, HomeLayoutName, HomeOpen, HomeUi, SectionId } from './home'
+import { HOME_UI_EMPTY, groupCards, homeLayout, homePick, homeReduce } from './home'
+import type { HomeAct, HomeCard, HomeCardGroup, HomeData, HomeLayout, HomeOpen, HomeUi } from './home'
 
 type Dollar = EngineInterface
 
@@ -106,22 +103,21 @@ const hoverA = atom({ plugin: 'thimble-cc-mod', key: 'hover' } as const, '')
 const bandA = atom({ plugin: 'thimble-cc-mod', key: 'band' } as const, false)
 const threadA = atom({ plugin: 'thimble-cc-mod', key: 'thread' } as const, '')
 const threadListA = atom({ plugin: 'thimble-cc-mod', key: 'threadList' } as const, [])
-const menuA = atom({ plugin: 'thimble-cc-mod', key: 'menu' } as const, null)
 const pendingA = atom({ plugin: 'thimble-cc-mod', key: 'pending' } as const, null)
 const viewA = atom({ plugin: 'thimble-cc-mod', key: 'panelView' } as const, '')
 const panelRedrawA = atom({ plugin: 'thimble-cc-mod', key: 'panelRedraw' } as const, 0)
-const playA = atom({ plugin: 'thimble-cc-mod', key: 'play' } as const, null)
-const playCmdA = atom({ plugin: 'thimble-cc-mod', key: 'playCmd' } as const, { n: 0, op: '' })
 const REPORTS = { plugin: 'thimble-cc-mod', key: 'reports' } as const
 const reportNavA = atom({ plugin: 'thimble-cc-mod', key: 'reportNav' } as const, null)
 const NAV = { plugin: 'thimble-cc-mod', key: 'nav' } as const
 const navA = atom(NAV, NAV_EMPTY)
 const THREAD_SEEN = { plugin: 'thimble-cc-mod', key: 'threadSeen' } as const
 const THREAD_ROWS = { plugin: 'thimble-cc-mod', key: 'threadRows' } as const
+const VIEW_ROWS = { plugin: 'thimble-cc-mod', key: 'viewRows' } as const
 const NEWS: ChatNews = { n: 0, one: '' }
 const newsA = atom({ plugin: 'thimble-cc-mod', key: 'threadNews' } as const, NEWS)
 
-// One panel shows a citation, a card, a side thread or a target's menu, by `panelView`. A click on what a Client draws
+// One panel shows a citation, a card, the threads (one of them selected), a view, a report or the home panel, by
+// `panelView`. A click on what a Client draws
 // is no person's asking to the engine, so a panel it opens waits undrawn below 144 columns. The engine lowers that to
 // 110 for a pane the person opened before, so the mod holds such a click's panel itself below 144 (openPane); once the
 // panel is open, a click only changes what it shows. The panel closes by its own button, not by Esc.
@@ -130,7 +126,7 @@ const CLICK_FLOOR = 144
 // The panel asks for 96 columns, less where main would keep under 70 beside it (the engine's own share leaves 70).
 const PANEL_COLS = 96
 const MAIN_KEEP = 70
-type PanelView = 'cite' | 'card' | 'thread' | 'menu' | 'threads' | 'play' | 'view' | 'views' | 'report' | 'reports' | 'coverage' | 'label' | 'labels' | 'home'
+type PanelView = 'cite' | 'card' | 'thread' | 'threads' | 'view' | 'views' | 'report' | 'reports' | 'coverage' | 'label' | 'labels' | 'home'
 const HOME = '.thimble-cc-mod'
 const CARD_MAX_COLS = 120
 const GUIDE_MARK = '# thimble-cc-mod\n'
@@ -142,16 +138,38 @@ const STATUS_WORDS: Record<string, string> = {
   pending: 'not checked yet',
 }
 
-/** What the citation panel's head says of a citation: what its place shows, then what its verification found, so it
- *  agrees with the link's colour and mark. A citation without a value, or whose words show none, only resolves or not. */
-function statusWords(c: Citation, status: string, run: ChatVerify | undefined): string {
-  const place = (status === 'ok' && c.display === null) || (status === 'unchecked' && !showsValue(c.display)) ? 'the place resolves' : (STATUS_WORDS[status] ?? status)
+/** Where a citation's place is, in words: on the card, in the command's output at a line, in a file at a line. */
+function foundWhere(c: Pick<Citation, 'ref'>, v: ChatVerdict | undefined): string {
+  if (v?.kind === 'value' || v?.kind === 'card' || c.ref.startsWith('card:')) return 'on the card'
+  if (v?.kind === 'call' || c.ref.startsWith('call:')) {
+    const line = v?.start ?? Number(/#L(\d+)/.exec(c.ref)?.[1] ?? 0)
+    return `in the command's output${line ? `, line ${line}` : ''}`
+  }
+  return `in ${placeWords(c.ref)}`
+}
+
+/** What a citation's status says, in plain words (views/SPEC.md, "Words that recur"): `found on the card`, `found in
+ *  revisions.jsonl line 10566`, `found in the command's output, line 1` or `not found in …`; after a verification,
+ *  `…, and a script got the same number` or `…, but a script got 5,883`. It agrees with the link's colour and mark. */
+function statusWords(c: Citation, v: ChatVerdict | undefined, status: string, run: ChatVerify | undefined): string {
+  const where = foundWhere(c, v)
+  const place =
+    status === 'pending' || !v
+      ? '◌ checking'
+      : status === 'missing'
+        ? `not found: ${placeName(c.ref)} does not exist`
+        : status === 'differs'
+          ? `not found ${where}`
+          : status === 'unchecked' && showsValue(c.display)
+            ? `${where}; its value is not checked`
+            : `found ${where}`
   if (!run) return place
-  if (run.kind === 'support' && (run.state === 'verified' || run.state === 'refuted')) return `${place}; a subagent read it: ${run.state === 'verified' ? 'it supports the sentence' : 'it does not support the sentence'}`
-  if (run.state === 'verified') return `${place}, and the verification recomputed it`
-  if (run.state === 'refuted') return `${place}, but the verification recomputed ${run.result}`
-  if (run.state === 'asked' || run.state === 'running') return `${place}; ◌ verifying`
-  return `${place}, but the verification failed`
+  if (run.kind === 'support' && (run.state === 'verified' || run.state === 'refuted')) return `${place}; a subagent read it, and it ${run.state === 'verified' ? 'supports' : 'does not support'} the sentence`
+  if (run.state === 'verified') return `${place}, and a script got the same number`
+  if (run.state === 'refuted') return `${place}, but a script got ${run.result}`
+  if (run.state === 'asked') return `${place}; ◌ a script is being written`
+  if (run.state === 'running') return `${place}; ◌ the script runs`
+  return `${place}, but the script failed`
 }
 
 // ------------------------------------------------------------------------------------------------ module state
@@ -172,11 +190,12 @@ let threadSeq = 0
 let selection = '' // the text last selected in a paragraph, which its "ask about this" asks about
 const seen = new Map<string, number>() // a gestures module instance -> the last gesture it sent that was handled
 let lastCards: string[] = [] // the cards of main's last reply that embeds any, in order
-let lastEndRow = '' // the row that ends main's last answer (its ChatEnd), for /thimble-play
 const handbacks = new Map<string, string>() // a fallback subagent's report through SubagentHandback, by its agent id
 let mainBusy = false // main's turn runs
 const afterMain: (() => Promise<void>)[] = [] // what waits for it to end (a view's builder or reviewer, a report's writer)
 let guideSent = false // the guidance went with a prompt of this conversation
+// when this session (or this load of the hooks) began: proposals made since get their `↳ view` row
+let sessionAt = Date.now()
 // Notes main reads and the analyst does not see (noteMain) wait for main's next prompt and go with it. One appended to
 // the transcript between turns would be its last row, which a resumed session takes for a prompt left unanswered, and
 // Claude Code answers it in main's chat ("No response requested."). NOTES keeps them for a session resumed before then.
@@ -188,7 +207,7 @@ const MARKS = `${HOME}/marks.json`
 let marksSaved: Promise<void> = Promise.resolve()
 // the rows in main's chat saying a side thread answered, by the row each stands under, the latest row one can stand
 // under, and the answers of each thread the analyst has seen (hooks/signal.ts), kept in SIGNALS for a resume
-let signals: SignalFile = { ...SIGNALS_EMPTY, seen: {}, rows: {} }
+let signals: SignalFile = { ...SIGNALS_EMPTY, seen: {}, rows: {}, views: {} }
 const SIGNALS = `${HOME}/signals.json`
 // the rows of a thread that answered before main's chat held a row to stand under, until it holds one
 const WAITING = 'waiting'
@@ -960,20 +979,28 @@ async function getThread($: Dollar, id: string): Promise<ChatThread | undefined>
   return id ? (await $.state.get({ ...THREADS, id })).value : undefined
 }
 
-/** Open a side thread about something on the screen; the pane takes the keys, its field asks the first question. */
-async function openThread($: Dollar, about: { label: string; context: string; ref?: string }): Promise<string> {
+/** Open a thread by its id (a passage's "↳", a "↳ thread" row), one of an earlier session read back first. */
+async function threadById($: Dollar, id: string): Promise<void> {
+  const t = await threadOrSaved($, id)
+  if (t) await showThread($, t)
+}
+
+/** Open a side thread about something on the screen; the pane takes the keys, its field asks the first question.
+ *  `passage`: the key of the passage it is about (passageOf), whose margin shows its "↳" from then on. */
+async function openThread($: Dollar, about: { label: string; context: string; ref?: string; passage?: string }): Promise<string> {
   // the time, and a count, so two threads started in one millisecond do not share an id
   const now = await $.clock.now()
   const id = `t${now.toString(36)}${(++threadSeq).toString(36)}`
   // asked from inside the panel, it hangs under the thread the panel's trail holds (hooks/nav.ts)
   const parent = (await navInPanel($)) ? threadOnTrail(((await read($, navA)) ?? NAV_EMPTY).trail) : ''
-  const t: ChatThread = { id, label: about.label, ref: about.ref ?? '', context: about.context, agentId: '', engine: '', turns: [], file: `.thimble-cc-mod/threads/${id}.md`, ...(parent ? { parent } : {}), at: now }
+  const t: ChatThread = { id, label: about.label, ref: about.ref ?? '', context: about.context, agentId: '', engine: '', turns: [], file: `.thimble-cc-mod/threads/${id}.md`, ...(parent ? { parent } : {}), ...(about.passage ? { passage: about.passage } : {}), at: now }
+  if (about.passage) passageThreads.set(about.passage, id)
   await setThread($, t)
   await setSeen($, id, 0)
   const list = (await read($, threadListA)) ?? []
   await $.state.set({ plugin: 'thimble-cc-mod', key: 'threadList' }, [...list, id].slice(-20))
   await $.state.set({ plugin: 'thimble-cc-mod', key: 'thread' }, id)
-  await openPane($, 'thread', 'Side thread')
+  await openPane($, 'thread', 'Threads')
   return id
 }
 
@@ -1133,9 +1160,9 @@ async function threadFixed($: Dollar, a: ChatAgent, made: { old: string; new: st
 
 // ------------------------------------------------------------------------------------------------ chips
 
-/** How a citation in the prompt is painted: as a link, like the reply's, underlined in the text colour. */
+/** How a citation in the prompt is painted: as a link, like the reply's, blue and underlined. */
 function chipDecoration(raw: string, start = 0): { start: number; end: number; underline: boolean; color: string } {
-  return { start, end: start + raw.length, underline: true, color: COLORS.text }
+  return { start, end: start + raw.length, underline: true, color: LINK }
 }
 
 /** What a citation's fix round says while it runs, or after it failed on a citation that is still red. */
@@ -1186,130 +1213,116 @@ async function chipView($: Dollar, cl: Claim): Promise<ChipView> {
   const run = (await $.state.get({ ...VERIFY, id: cl.key })).value
   const fix = (await $.state.get({ ...FIXES, id: cl.key })).value
   const look = chipLook(v?.status, fix?.state, run?.state)
-  const why = look.state === 'link' && v?.status !== 'ok' ? '' : plainWhy(v?.why ?? '')
-  const tip = [placeName(c.ref), why, await otherChoice($, c.ref), fixNote(v?.status, fix), verifyWords(run)].filter(Boolean).join(' · ')
+  // the tip in plain words: where the value was found (or not), what a script got; why, for a problem
+  const problem = v?.status === 'missing' || v?.status === 'differs'
+  const tip = [statusWords(c, v, v?.status ?? 'pending', run), problem ? plainWhy(v?.why ?? '') : '', await otherChoice($, c.ref), fixNote(v?.status, fix)].filter(Boolean).join(' · ')
   return { label: citeLabel(c), ...look, tip }
 }
 
-/** A line of text as segments, each citation as a link (its shown words, underlined), the rest styled `base`. */
+/** A line of text as segments, each citation as a link (its shown words, blue and underlined), the rest styled
+ *  `base`. */
 function linkSegs(text: string, base: Omit<Line[number], 's'>): Line {
-  return inlineRuns(text.replace(/\s+/g, ' ')).map(r => (r.cite ? { s: citeLabel(r.cite), u: true } : { ...base, s: r.text }))
+  return inlineRuns(text.replace(/\s+/g, ' ')).map(r => (r.cite ? linkSeg(citeLabel(r.cite)) : { ...base, s: r.text }))
 }
 
-/** Markdown as the mod's grid draws it (views/SPEC.md, "The visual system"): a heading as the words of a paragraph,
- *  drawn regular (its row hangs it at column 2), the model's bold and italic and inline code as the text around them.
- *  A fenced block and a table are kept as written. */
+/** Markdown as Claude Code draws it (views/SPEC.md, "The visual system", rule 13): the model's `**bold**`, headings and
+ *  inline code drawn as in any reply, so the text is handed over as written. */
 export function plainMarkdown(md: string): string {
-  const out: string[] = []
-  let fence = false
-  for (const line of md.split('\n')) {
-    if (/^\s*(```|~~~)/.test(line)) {
-      fence = !fence
-      out.push(line)
-      continue
-    }
-    if (fence || /^\s*\|/.test(line)) {
-      out.push(line)
-      continue
-    }
-    const head = /^#{1,6}\s+(.*?)\s*#*\s*$/.exec(line)
-    const text = head ? head[1]! : line
-    out.push(
-      text
-        .replace(/`([^`\n]+)`/g, '$1')
-        .replace(/\*\*(?=\S)(.+?)(?<=\S)\*\*/g, '$1')
-        .replace(/__(?=\S)(.+?)(?<=\S)__/g, '$1')
-        .replace(/(^|[^\w*])\*(?=[^\s*])([^*\n]+?)(?<=[^\s*])\*(?![\w*])/g, '$1$2')
-        .replace(/(^|[^\w])_(?=[^\s_])([^_\n]+?)(?<=[^\s_])_(?![\w])/g, '$1$2'),
-    )
-  }
-  return out.join('\n')
+  return md
 }
 
 // ------------------------------------------------------------------------------------------------ drawing a reply
 
+/** The columns at the left of each block of a reply: ⏺, a space, the reply's margin (the "?" shown on hover, a
+ *  passage's ↳), a space (views/SPEC.md, "The visual system", "The chat column"). Headings sit on the text column. */
+const MARGIN = 4
+/** A reply's margin in the panel (a report, a side thread's answer): its marks at M, its text at A0. */
+const PANEL_MARGIN = 2
+
+// the thread asked about each passage, by the passage's key (report.ts passageKey): its "↳" in the reply's margin
+const passageThreads = new Map<string, string>()
+let passagesRead = false
+
+/** A passage's key, as a thread asked about it keeps it. */
+function passageOf(words: string): string {
+  return passageKey(words).slice(0, 300)
+}
+
+/** The threads of earlier sessions read once, so their passages show their "↳" after a resume. */
+async function loadPassages($: Dollar): Promise<void> {
+  if (passagesRead) return
+  passagesRead = true
+  for (const t of await allThreads($)) if (t.passage && !passageThreads.has(t.passage)) passageThreads.set(t.passage, t.id)
+}
+
 /** A reply's blocks as thimble-cc-mod draws them: Markdown as the engine would, cards as panels, paragraphs that hold
  *  citations as chips. Interactive (Clients) on the terminal and desktop, static elsewhere. `answer` names the answer
  *  (a row's uuid, a side thread's turn): each citation is checked as the claim of its sentence in it. */
-/** The columns at the left of each block of a reply: ⏺, a space, the "?" shown on hover, a space. A heading hangs in
- *  the margin at column 2, its "?" at column 0 (views/SPEC.md, "The visual system", "The chat column"). */
-const MARGIN = 4
-/** A reply's margin in the panel (a report, a side thread's answer): its headings at the panel's A0, its text at A2. */
-const PANEL_MARGIN = 2
-/** The measure of the prose the mod draws (rule 7): a reply's paragraphs wrap at 72 cells. */
-const MEASURE = 72
-
 async function drawReply($: Dollar, e: ResolveInput, text: string, width: number, answer: string, prefix = '', first = false, opts: ReplyOpts = {}): Promise<RenderElement[]> {
   const { Box, Text, Markdown, Button } = $.ui.resolve(e)
   const live = e.surface === 'terminal' || e.surface === 'desktop'
+  if (live) await loadPassages($).catch(() => undefined)
   // `width`: the columns a block may take, right of the margin; a card is laid out for them and no wider
   const cols = Math.max(24, width)
   const out: RenderElement[] = []
   const blocks = parseReply(text)
-  const menu = live ? ((await read($, menuA)) ?? null) : null // the target of an open menu, lit where it is drawn
   let n = 0
   let order = 0 // the card's place among the reply's cards, its name for the analyst ("Card 2")
-  // Each block is a row: a margin of MARGIN columns (the reply's ⏺ on its first, a space, then the "?" and a space)
-  // and the block. On a live surface the
-  // margin holds a "?", shown while the pointer is on the block: a side thread about the block, or for a heading about
-  // its whole section, for a card about the card. It is a Button in the row's own flow, so a press reaches it (an
-  // absolute one outside the row would be the margin's) and is the person's own: the panel opens at any width.
+  // Each block is a row: a margin of MARGIN columns (the reply's ⏺ on its first, a space, then the margin's mark and a
+  // space) and the block. On a live surface the margin holds a "?", blue, shown while the pointer is on the block: a
+  // side thread about the block, or for a heading about its whole section, for a card about the card. It is a Button
+  // in the row's own flow, so a press reaches it (an absolute one outside the row would be the margin's) and is the
+  // person's own: the panel opens at any width. Once a thread was asked about the passage, a blue "↳" stays there in
+  // its place, and a click on it opens that thread.
   let lead = first ? '⏺' : ' '
-  // the columns left of the text: a reply's MARGIN, a report's PANEL_MARGIN (its headings at A0, so they have no "?")
+  // the columns left of the text: a reply's MARGIN, a panel's PANEL_MARGIN (its text at A0, its marks at M)
   const M = opts.margin ?? MARGIN
-  type Ask = { key: string; askKey: string; press: () => void; top?: number; bar?: string }
-  // a block's row: the margin (⏺ on the first, a highlight set's ● or the "?" shown on hover), then the block on the
-  // reply's text axis (column 4), prose at most MEASURE wide; a heading hangs at column 2, its "?" at column 0
-  const row = (el: RenderElement, ask?: Ask, how: { hang?: boolean; prose?: boolean } = {}) => {
+  type Ask = { key: string; askKey: string; press: () => void; passage: string; top?: number; bar?: string }
+  const markOf = (ask: Ask | undefined): RenderElement | null => {
+    if (!ask || !live) return null
+    const tid = passageThreads.get(ask.passage)
+    if (tid) return linesEl($, e as PaneEvent, `pmark:${ask.askKey}`, [[{ s: '↳', fg: LINK }]], [{ y: 0, x0: 0, x1: 1, row: false, run: () => threadById($, tid) }], 1)
+    return (
+      <Box width={1} display="none" hover={{ display: 'flex' }}>
+        <Button key={ask.askKey} label="?" plain hover={{ color: LINK }} onPress={ask.press} />
+      </Box>
+    )
+  }
+  const row = (el: RenderElement, ask?: Ask) => {
     const mark = lead
     lead = ' '
-    const qmark = ask && live ? (
-      <Box width={1} display="none" hover={{ display: 'flex' }}>
-        <Button key={ask.askKey} label="?" plain onPress={ask.press} />
-      </Box>
-    ) : null
-    const hang = how.hang && mark === ' '
-    const content = how.prose ? (
-      <Box flexDirection="column" width={Math.min(MEASURE, cols)} flexShrink={1}>
-        {el}
-      </Box>
-    ) : (
+    const qmark = markOf(ask)
+    const content = (
       <Box flexDirection="column" flexGrow={1} flexShrink={1}>
         {el}
       </Box>
     )
-    // a report's margin: a highlight set's ● or the "?" at A0, the text at A2; a heading at A0 with no margin
+    // a panel's margin: a highlight set's ●, the ↳ or the "?" at M, the text at A0
     if (M !== MARGIN)
       return (
         <Box {...(ask ? { key: ask.key } : {})} flexDirection="row">
-          {hang ? null : (
-            <Box width={M} flexShrink={0} flexDirection="row" marginTop={ask?.top ?? 0}>
-              {ask?.bar ? <Text color={ask.bar}>●</Text> : (qmark ?? <Text> </Text>)}
-            </Box>
-          )}
+          <Box width={M} flexShrink={0} flexDirection="row" marginTop={ask?.top ?? 0}>
+            {ask?.bar ? <Text color={ask.bar}>●</Text> : (qmark ?? <Text> </Text>)}
+          </Box>
           {content}
         </Box>
       )
     return (
       <Box {...(ask ? { key: ask.key } : {})} flexDirection="row">
-        <Box width={hang ? 2 : MARGIN} flexShrink={0} flexDirection="row" marginTop={ask?.top ?? 0}>
-          {hang ? (
-            (qmark ?? <Text> </Text>)
-          ) : (
-            <Box width={2} flexShrink={0} flexDirection="row">
-              {ask?.bar ? <Text color={ask.bar}>●</Text> : <Text>{mark}</Text>}
-            </Box>
-          )}
-          {hang ? null : qmark}
+        <Box width={MARGIN} flexShrink={0} flexDirection="row" marginTop={ask?.top ?? 0}>
+          <Box width={2} flexShrink={0} flexDirection="row">
+            <Text>{mark}</Text>
+          </Box>
+          {qmark}
         </Box>
         {content}
       </Box>
     )
   }
-  // a blank row before a block that had a blank line before it, but none next to a card: its rules stand in for one
-  // (views/SPEC.md, rule 10)
-  const push = (el: RenderElement, ask?: Ask, how: { hang?: boolean; prose?: boolean } = {}) => {
-    const r = row(el, ask, how)
+  // a blank row before a block that had a blank line before it, but none next to a card: its border stands in for one
+  // (views/SPEC.md, rule 11)
+  const push = (el: RenderElement, ask?: Ask) => {
+    const r = row(el, ask)
     const before = blocks[n - 2]
     // and none under a heading: it belongs to what follows it (views/SPEC.md, "Main's chat")
     const underHead = (before?.type === 'rich' && before.heading > 0) || (before?.type === 'md' && /^#{1,6}\s/.test(before.text.split('\n').at(-1)!.trim()))
@@ -1326,9 +1339,10 @@ async function drawReply($: Dollar, e: ResolveInput, text: string, width: number
     const head = /^#{1,6}\s/.test(first) ? [...secs.keys()].find(k => k === first || plainCites(k) === plainCites(first)) : undefined
     const sec = head ? secs.get(head) : undefined
     const at = where(head ? first : heading)
+    const passage = passageOf(words)
     return sec
-      ? () => void openThread($, { label: `the section "${clip(plainCites(first.replace(/^#+\s*/, '')), 60)}"`, context: [at, `The section of the reply the analyst asks about:\n${clip(sec, 4000)}`].filter(Boolean).join('\n') })
-      : () => void threadOn($, { kind: 'sentence', text: words.slice(0, 1200) }, at)
+      ? () => void openThread($, { label: `the section "${clip(plainCites(first.replace(/^#+\s*/, '')), 60)}"`, context: [at, `The section of the reply the analyst asks about:\n${clip(sec, 4000)}`].filter(Boolean).join('\n'), passage })
+      : () => void threadOn($, { kind: 'sentence', text: words.slice(0, 1200) }, at, passage)
   }
   const tooled = (el: RenderElement, words: string) => {
     const tool = opts.tools && /^#{1,6}\s/.test(words) ? opts.tools(words.split('\n')[0]!) : null
@@ -1354,11 +1368,9 @@ async function drawReply($: Dollar, e: ResolveInput, text: string, width: number
         push(<Markdown text={plainMarkdown(block.text)} />)
         continue
       }
-      // The engine's Markdown, so its text selects, its links open and its code is coloured as in any reply; each
-      // paragraph with an "ask ›" Button in a gutter at its right, lit while the pointer is on the paragraph, whose
-      // press (the person's own) opens a side thread about the paragraph at any width.
-      // a heading and the prose right under it (no blank line between) as two pieces: the heading hangs at column 2,
-      // the prose stays on the text axis
+      // The engine's Markdown, so its text selects, its links open, its bold and headings are drawn bold and its code
+      // is coloured as in any reply; a heading and the prose right under it (no blank line between) as two pieces, each
+      // with its own "?"
       const pieces = (opts.items ? askPieces(block.text) : mdPieces(block.text).map(p => ({ text: p, join: false }))).flatMap(p => {
         const lines = p.text.split('\n')
         return /^#{1,6}\s/.test(lines[0]!) && lines.length > 1 && lines.slice(1).join('\n').trim() ? [{ text: lines[0]!, join: p.join }, { text: lines.slice(1).join('\n'), join: true }] : [p]
@@ -1367,15 +1379,12 @@ async function drawReply($: Dollar, e: ResolveInput, text: string, width: number
         const isHead = /^#{1,6}\s/.test(piece)
         if (isHead) heading = piece.split('\n')[0]!
         const m = marked(piece)
-        const ask = { key: `${prefix}md-${n}-${j}`, askKey: `ask-md:${prefix}${n}-${j}`, press: about(piece), ...(m ? { bar: m.color } : {}) }
+        const ask: Ask = { key: `${prefix}md-${n}-${j}`, askKey: `ask-md:${prefix}${n}-${j}`, press: about(piece), passage: passageOf(piece), ...(m ? { bar: m.color } : {}) }
         const el = tooled(<Markdown text={plainMarkdown(piece)} />, piece)
-        // prose at the measure, a table the whole width; a heading hangs at column 2, its controls (a report's
-        // "verify") against the right edge
-        const how = { hang: isHead, prose: !isHead && !/^\s*\|/.test(piece) }
         // a list's items follow each other without a blank row, and a heading's text follows it without one
         const afterHead = j > 0 && /^#{1,6}\s/.test(pieces[j - 1]!.text)
-        if (j === 0) push(el, ask, how)
-        else out.push(join || afterHead ? row(el, ask, how) : <Box marginTop={1}>{row(el, ask, how)}</Box>)
+        if (j === 0) push(el, ask)
+        else out.push(join || afterHead ? row(el, ask) : <Box marginTop={1}>{row(el, ask)}</Box>)
         under(m)
       })
       continue
@@ -1388,27 +1397,24 @@ async function drawReply($: Dollar, e: ResolveInput, text: string, width: number
       if (!f.data) {
         const fix = (await $.state.get({ ...FIXES, id: `card-${block.id}` })).value
         const more = fix?.state === 'fixing' ? ' · ◌ being fixed' : fix?.state === 'failed' ? ' · the fix failed' : ''
-        push(<Text color={COLORS.problem} wrap="wrap">{`× card ${order} cannot be drawn: ${f.why}${more}`}</Text>, undefined, { prose: true })
+        push(<Text color={COLORS.problem} wrap="wrap">{`× card ${order} cannot be drawn: ${f.why}${more}`}</Text>)
         continue
       }
       const card = await labelled($, f.data)
       const meta = await metaOf($, card.id)
       const w = Math.min(cols, CARD_MAX_COLS)
+      const m = marked(`[[card:${card.id}]]`)
+      const at = where(heading)
+      const ask: Ask = { key: `${prefix}cardbox-${n}`, askKey: `ask-card:${prefix}${n}`, press: () => void threadOn($, { kind: 'card', ref: `card:${card.id}`, cardId: card.id }, at, `card:${card.id}`), passage: `card:${card.id}`, top: 1, ...(m ? { bar: m.color } : {}) }
       if (live) {
         const { Client } = $.ui.resolve(e as ResolveInput<'AssistantMessage', 'terminal'>)
-        const cardEl = <Client key={`${prefix}card-${n}-${card.id}`} module="./card.tsx" width={w} props={{ card, cols: w, debug, meta, menu }} />
-        // the "?" beside its title row (under the border): a side thread about the card, as a press on its title
-        const m = marked(`[[card:${card.id}]]`)
-        const at = where(heading)
-        push(cardEl, { key: `${prefix}cardbox-${n}`, askKey: `ask-card:${prefix}${n}`, press: () => void threadOn($, { kind: 'card', ref: `card:${card.id}`, cardId: card.id }, at), top: 1, ...(m ? { bar: m.color } : {}) })
-        under(m)
-      } else {
-        const lay = cardLayout(card, w, -1)
-        const rule = { s: '─'.repeat(w), fg: COLORS.rule }
-        push(<Box flexDirection="column" width={w}>{paintLines(Box, Text, [[rule], [{ s: cut(card.question, w) }], ...labelHead(card, w).lines, ...lay.lines, [rule]])}</Box>)
-      }
-      // a figure's caption: dim, right under the card's rule, at the measure
-      if (block.caption) out.push(row(<Text dimColor wrap="wrap">{block.caption}</Text>, undefined, { prose: true }))
+        // the card draws its own frame (card.tsx); the "?" beside its title row, under the border: a side thread about
+        // the card, as a press on its title
+        push(<Client key={`${prefix}card-${n}-${card.id}`} module="./card.tsx" width={w} props={{ card, cols: w, debug, meta, menu: null }} />, ask)
+      } else push(framedCard($, e, card, w), ask)
+      under(m)
+      // a figure's caption: dim, right under the card's border
+      if (block.caption) out.push(row(<Text dimColor wrap="wrap">{block.caption}</Text>))
       continue
     }
     const chips: ChipView[] = []
@@ -1421,18 +1427,16 @@ async function drawReply($: Dollar, e: ResolveInput, text: string, width: number
       ids.push(cl.key)
       raws.push(cl.c.raw)
     }
+    // its words with each citation as written, for the thread; a heading's "?" asks about its section
+    const words = `${block.heading ? `${'#'.repeat(block.heading)} ` : ''}${richMarkdown({ ...block, heading: 0 }, c => c.raw)}`
     if (live) {
       // the mod's own drawing: each citation a chip (red with a problem, a spinner while worked on, lit under the
-      // pointer), a click on it the panel; a drag selects and copies (para.tsx)
+      // pointer), a click on it the panel; a drag selects and copies (para.tsx). It fills the column.
       const { Client } = $.ui.resolve(e as ResolveInput<'AssistantMessage', 'terminal'>)
-      // prose at the measure, a table the whole width
-      const pw = block.table ? cols : Math.min(MEASURE, cols)
-      const para = <Client key={`${prefix}para-${n}`} module="./para.tsx" width={pw} props={{ cols: pw, block, chips, ids, raws, menu }} />
-      // its words with each citation as written, for the thread; a heading's "?" asks about its section
-      const words = `${block.heading ? `${'#'.repeat(block.heading)} ` : ''}${richMarkdown({ ...block, heading: 0 }, c => c.raw)}`
+      const para = <Client key={`${prefix}para-${n}`} module="./para.tsx" width={cols} props={{ cols, block, chips, ids, raws, menu: null }} />
       if (block.heading) heading = words
       const m = block.heading ? null : marked(words)
-      push(tooled(para, words), { key: `${prefix}parabox-${n}`, askKey: `ask-para:${prefix}${n}`, press: about(words), ...(m ? { bar: m.color } : {}) }, { hang: block.heading > 0 })
+      push(tooled(para, words), { key: `${prefix}parabox-${n}`, askKey: `ask-para:${prefix}${n}`, press: about(words), passage: passageOf(words), ...(m ? { bar: m.color } : {}) })
       under(m)
       continue
     }
@@ -1446,6 +1450,19 @@ async function drawReply($: Dollar, e: ResolveInput, text: string, width: number
     push(<Markdown text={plainMarkdown(md)} />)
   }
   return out
+}
+
+/** A card the mod draws itself (off the terminal, the citation panel): a full round border in the rule grey with a
+ *  cell of padding (views/SPEC.md, rule 11), its title on the first row inside, a blank row, then its label row and
+ *  its body; `lines` in place of the card's own layout (a cited mark lit). */
+function framedCard($: Dollar, e: ResolveInput, card: CardData, w: number, lines?: Line[], key?: string): RenderElement {
+  const { Box, Text } = $.ui.resolve(e)
+  const inner = Math.max(10, w - 4)
+  return (
+    <Box {...(key ? { key } : {})} flexDirection="column" width={w} borderStyle="round" borderColor={COLORS.rule} paddingX={1}>
+      {paintLines(Box, Text, [[{ s: cut(card.question, inner) }], [], ...labelHead(card, inner).lines, ...(lines ?? cardLayout(card, inner, -1).lines)])}
+    </Box>
+  )
 }
 
 // ------------------------------------------------------------------------------------------------ the cited item on a card
@@ -1740,18 +1757,15 @@ async function logEvent($: Dollar, fields: Record<string, string>): Promise<void
   await writeMouseLog($, JSON.stringify({ at: new Date(await $.clock.now()).toISOString(), ...fields }))
 }
 
+/** A gesture of a Client: a click (and a right-click, which does what a click does) opens the place a target cites (a
+ *  citation, a record); on anything else of a card (a point of a plot, a bar, a row, a node, the card itself) a side
+ *  thread about it: "what was going on here?" */
 async function onGesture($: Dollar, g: Gesture, t: Target, ev?: PointerEv): Promise<void> {
-  if (g === 'menu') {
-    // the press chose the open menu's target; a release that the menu's pane moved onto another target does not change it
-    if (ev?.type === 'release' && (await read($, menuA))) return
-    await openMenu($, t)
-  } else if (g === 'primary') {
-    // a click opens the place a target cites (a citation, a record); on anything else of a card (a point of a plot, a
-    // bar, a row, a node, the card itself) a side thread about it: "what was going on here?"
-    const c = placeOf(t)
-    if (c) await openPlace($, c, t.claim, await quoteOf($, t))
-    else if (cardOf(t)) await act($, 'thread', t)
-  }
+  void ev
+  if (g !== 'primary') return
+  const c = placeOf(t)
+  if (c) await openPlace($, c, t.claim, await quoteOf($, t))
+  else if (cardOf(t)) await act($, 'thread', t)
 }
 
 /** The passage an example card quotes from the record a target names. */
@@ -1759,33 +1773,6 @@ async function quoteOf($: Dollar, t: Target): Promise<string | undefined> {
   if (t.kind !== 'record' || !t.cardId) return undefined
   const card = await loadCard($, t.cardId)
   return card?.examples?.find(x => x.ref === t.ref)?.quote || undefined
-}
-
-let menuWatch: { cancel: () => void } | null = null
-
-/** Open the menu of a target. The target stays in state while the menu is open, so the reply lights it (drawReply hands
- *  it to each Client as `menu`), and is cleared once the panel shows something else or closes. */
-async function openMenu($: Dollar, t: Target): Promise<void> {
-  await $.state.set({ plugin: 'thimble-cc-mod', key: 'menu' }, t)
-  await openPane($, 'menu', 'Actions')
-  menuWatch?.cancel()
-  const watch = $.clock.every(250, () => {
-    void (async () => {
-      let open = true
-      try {
-        // a menu the band offers (a click held below 144 columns) stays until the panel shows it or it is dismissed
-        open = ((await $.ui.panes()).some(p => p.id === PANEL) || Boolean(await read($, pendingA))) && (await read($, viewA)) === 'menu'
-      } catch {
-        watch.cancel()
-        return
-      }
-      if (open) return
-      watch.cancel()
-      if (menuWatch === watch) menuWatch = null
-      await $.state.set({ plugin: 'thimble-cc-mod', key: 'menu' }, null)
-    })()
-  })
-  menuWatch = watch
 }
 
 /** What a side thread about a target is told. */
@@ -1809,14 +1796,14 @@ async function aboutTarget($: Dollar, t: Target): Promise<{ label: string; conte
   }
 }
 
-/** A side thread about a target, told where it stands (a report's passage: the report and its section). */
-async function threadOn($: Dollar, t: Target, where: string): Promise<void> {
-  if (!where) return act($, 'thread', t)
+/** A side thread about a target, told where it stands (a report's passage: the report and its section), and kept by
+ *  the passage it was asked about, whose margin then shows its "↳". */
+async function threadOn($: Dollar, t: Target, where: string, passage?: string): Promise<void> {
   const about = await aboutTarget($, t)
-  await openThread($, { ...about, context: [where, about.context].filter(Boolean).join('\n') })
+  await openThread($, { ...about, context: [where, about.context].filter(Boolean).join('\n'), ...(passage ? { passage } : {}) })
 }
 
-/** One action on a target, from a gesture or the menu. */
+/** One action on a target, from a gesture or a panel's control. */
 async function act($: Dollar, what: Act, t: Target): Promise<void> {
   await logEvent($, { event: 'act', act: what, target: `${t.kind}: ${targetLabel(t)}` })
   const card = cardOf(t)
@@ -1957,7 +1944,7 @@ async function threadSteps($: Dollar, id: string): Promise<ChatNavStep[]> {
     seen.add(at)
     const t = await threadOrSaved($, at)
     if (!t) break
-    out.unshift({ view: 'thread', title: 'Side thread', thread: at })
+    out.unshift({ view: 'thread', title: 'Threads', thread: at })
     at = t.parent ?? ''
   }
   return out
@@ -1975,6 +1962,8 @@ async function navStep($: Dollar, view: PanelView, title: string): Promise<void>
   }
   navFrom = null
   await $.state.set(NAV, next)
+  // a report opened is no longer new
+  if (step.view === 'report' && step.slug) freshReports.delete(step.slug)
   const t = step.thread ? await getThread($, step.thread) : undefined
   if (t) await setSeen($, t.id, answered(t))
 }
@@ -1982,7 +1971,7 @@ async function navStep($: Dollar, view: PanelView, title: string): Promise<void>
 /** Show the last step of `nav.trail`, with `nav` as the panel's way. */
 async function navGo($: Dollar, nav: ChatNav): Promise<void> {
   const s = nav.trail.at(-1)
-  if (!s || s.view === 'menu') return
+  if (!s) return
   if (s.view === 'thread') await $.state.set({ plugin: 'thimble-cc-mod', key: 'thread' }, s.thread ?? '')
   else if (s.view === 'cite') await $.state.set({ plugin: 'thimble-cc-mod', key: 'open' }, s.open ?? '')
   else if (s.view === 'card') {
@@ -2054,6 +2043,13 @@ async function anchorAt($: Dollar, row: string): Promise<void> {
     signals.rows[row] = waiting
     delete signals.rows[WAITING]
   }
+  const views = signals.views[WAITING]
+  if (views?.length) {
+    await $.state.set({ ...VIEW_ROWS, id: row }, views)
+    await $.state.set({ ...VIEW_ROWS, id: WAITING }, [])
+    signals.views[row] = views
+    delete signals.views[WAITING]
+  }
   await saveSignals($)
 }
 
@@ -2083,11 +2079,18 @@ async function loadSignals($: Dollar): Promise<void> {
     if (live?.length) got.rows[id] = live
     else await $.state.set({ ...THREAD_ROWS, id }, rows)
   }
+  for (const [id, slugs] of Object.entries(got.views)) {
+    if (id === WAITING && got.session !== session) continue
+    const live = (await $.state.get({ ...VIEW_ROWS, id })).value
+    if (live?.length) got.views[id] = live
+    else await $.state.set({ ...VIEW_ROWS, id }, slugs)
+  }
   if (got.session !== session) {
     delete got.rows[WAITING]
+    delete got.views[WAITING]
     got.last = ''
   }
-  signals = { ...got, seen: { ...got.seen, ...signals.seen }, rows: { ...got.rows, ...signals.rows }, last: signals.last || got.last }
+  signals = { ...got, seen: { ...got.seen, ...signals.seen }, rows: { ...got.rows, ...signals.rows }, views: { ...got.views, ...signals.views }, last: signals.last || got.last }
   await refreshNews($)
 }
 
@@ -2097,16 +2100,19 @@ type RowEvent =
   | MatchedEvent<'ui.render', { component: 'TurnDuration' }>
   | MatchedEvent<'ui.render', { component: 'CommandOutput' }>
 
-/** The rows a row of main's chat carries under it: each side thread's turn that ended there while the panel did not
- *  show the thread, as a finished subagent's row ("↳ thread · <question> · answered"), dim, ↳ at column 0 and its words
- *  at 2, a press opening the thread, and "new" in bold while its answer waits unread (Claude Code's Button has no bold
- *  label, so the word carries it). Null when it carries none. */
+/** The rows a row of main's chat carries under it (views/SPEC.md, "Main's chat", a `↳` row): each side thread's turn
+ *  that ended there while the panel did not show the thread (`↳ thread · "question" · answered`), and each view main
+ *  proposed in the answer it ends (`↳ view · Wiki Pages · built`); `↳` at column 0 and the words at 2, dim, a press
+ *  opening the thread or the view; `new` in green while the answer waits unread or the view was not yet opened,
+ *  `failed` in red; a proposed view's row ends with `build`. Null when it carries none. */
 async function signalRows($: Dollar, e: RowEvent): Promise<RenderElement | null> {
   const list = (await $.state.get({ ...THREAD_ROWS, id: e.requestId })).value ?? []
-  if (!list.length) return null
+  const views = (await $.state.get({ ...VIEW_ROWS, id: e.requestId })).value ?? []
+  if (!list.length && !views.length) return null
   const { Box, Text, Button } = $.ui.resolve(e)
   const cols = Math.max(30, (e.viewport?.columns ?? 100) - 2)
   const out: RenderElement[] = []
+  const gap = () => (out.length ? {} : { marginTop: 1 })
   for (const [i, s] of list.entries()) {
     const t = (await getThread($, s.thread)) ?? (await savedThread($, s.thread))
     const end = t ? signalEnd(t, s.turn) : null
@@ -2114,26 +2120,49 @@ async function signalRows($: Dollar, e: RowEvent): Promise<RenderElement | null>
     const fresh = end === 'answered' && !signalRead(t, s.turn, (await $.state.get({ ...THREAD_SEEN, id: t.id })).value)
     const tail = ` · ${end}`
     out.push(
-      <Box key={`signal-row:${e.requestId}:${i}`} flexDirection="row" {...(out.length ? {} : { marginTop: 1 })}>
+      <Box key={`signal-row:${e.requestId}:${i}`} flexDirection="row" {...gap()}>
         <Text dimColor>{'↳ '}</Text>
         <Button key={`signal:${e.requestId}:${i}`} label={`thread · ${signalQuestion(t, s.turn, Math.max(16, Math.min(60, cols - tail.length - 12)))}`} plain dimColor onPress={() => void showThread($, t)} />
         <Text {...(end === 'failed' ? { color: COLORS.problem } : { dimColor: true })}>{tail}</Text>
         {fresh ? <Text dimColor>{' · '}</Text> : null}
-        {fresh ? <Text bold>new</Text> : null}
+        {fresh ? <Text color={FRESH}>new</Text> : null}
+      </Box>,
+    )
+  }
+  await read($, proposalsA) // drawn again when a view's state changes
+  for (const slug of views) {
+    const r = pipes.get(slug)
+    if (!r) continue
+    const w = stateWords(r.s, r.drawable)
+    const fresh = freshViews.has(slug) && w.state === 'built'
+    const open = async () => {
+      if (r.drawable && (w.state === 'built' || w.state === 'stopped')) return openView($, slug)
+      await $.state.set({ plugin: 'thimble-cc-mod', key: 'viewPane' }, slug)
+      await openPane($, 'views', 'Views')
+    }
+    out.push(
+      <Box key={`view-row:${e.requestId}:${slug}`} flexDirection="row" {...gap()}>
+        <Text dimColor>{'↳ '}</Text>
+        <Button key={`view-signal:${e.requestId}:${slug}`} label={`view · ${clip(r.p.name, 48)}`} plain dimColor onPress={() => void open()} />
+        <Text {...(w.state === 'failed' ? { color: COLORS.problem } : { dimColor: true })}>{` · ${w.state === 'failed' ? 'failed' : w.state}`}</Text>
+        {fresh ? <Text dimColor>{' · '}</Text> : null}
+        {fresh ? <Text color={FRESH}>new</Text> : null}
+        {w.state === 'proposed' && !working.has(slug) ? <Text>{'  '}</Text> : null}
+        {w.state === 'proposed' && !working.has(slug) ? <Button key={`view-build:${e.requestId}:${slug}`} label="build" plain onPress={() => void startBuild($, slug)} /> : null}
       </Box>,
     )
   }
   return out.length ? <Box key={`signals:${e.requestId}`} flexDirection="column">{out}</Box> : null
 }
 
-/** What a step's crumb says, a lower-case kind word and its name, and its mark: ◌ while its thread answers, `new`
- *  while answers wait unread. */
-async function crumbOf($: Dollar, s: ChatNavStep): Promise<{ text: string; mark: string; up?: string }> {
+/** What a step's crumb says (a lower-case kind word and its name, or the name alone after the list it is in), and its
+ *  mark: ◌ while its thread answers, `new` while answers wait unread. */
+async function crumbOf($: Dollar, s: ChatNavStep): Promise<{ text: string; mark: string }> {
   switch (s.view) {
     case 'thread': {
       const t = await getThread($, s.thread ?? '')
-      if (!t) return { text: 'side thread', mark: '' }
-      return { text: `thread ${threadTitle(t)}`, mark: t.turns.at(-1)?.state === 'running' ? '◌' : (await unreadOf($, t)) ? 'new' : '' }
+      if (!t) return { text: 'thread', mark: '' }
+      return { text: threadTitle(t), mark: t.turns.at(-1)?.state === 'running' ? '◌' : (await unreadOf($, t)) ? 'new' : '' }
     }
     case 'cite': {
       const id = s.open ?? ''
@@ -2145,36 +2174,40 @@ async function crumbOf($: Dollar, s: ChatNavStep): Promise<{ text: string; mark:
     }
     case 'card': {
       const card = s.card ? await loadCard($, s.card) : null
-      return { text: `card ${card?.question ?? s.title}${s.mode === 'script' ? ' · script' : ''}`, mark: '' }
+      return { text: `card "${card?.question ?? s.title}"${s.mode === 'script' ? ' · script' : ''}`, mark: '' }
     }
     case 'view': {
-      // a file of the file browser names the step it goes up to (`files`), which the path shows before it
       const spec = loaded.get(s.slug ?? '')?.view.spec
       if (s.slug === FILES_TREE) return { text: 'files', mark: '' }
-      return { text: spec?.name ?? s.title, mark: '', ...(spec?.up ? { up: spec.up } : {}) }
+      return { text: spec?.name ?? s.title, mark: '' }
     }
-    case 'coverage':
-      return { text: 'coverage', mark: '' }
-    case 'labels':
-      return { text: 'labels', mark: '' }
     case 'label':
-      return { text: `label ${s.title.replace(/^label:?\s*/i, '')}`, mark: '' }
+      return { text: s.title.replace(/^label:?\s*/i, ''), mark: '' }
     case 'report':
-      return { text: `report "${s.title}"`, mark: '' }
-    case 'home':
-    case 'reports':
-    case 'views':
-    case 'threads':
-    case 'menu':
-    case 'play':
-      return { text: s.view, mark: '' }
+      return { text: `"${s.title}"`, mark: '' }
     default:
-      return { text: s.title || s.view, mark: '' }
+      return { text: s.view === 'coverage' ? 'coverage' : s.view, mark: '' }
   }
 }
 
-/** Hotkeys with no label of their own (views/SPEC.md, "The visual system", rule 24: a control's words say what it does,
- *  never which key does it): plain Buttons in a Box no row tall, so the panel's keys still press them. */
+/** The list a step stands in, which the path shows before it unless the step before it is that list: `threads` before
+ *  a thread, `labels` before a label, `views` before a view the pipeline built, `files` before a file, `reports` before
+ *  a report. */
+function upOf(s: ChatNavStep, earlier: readonly ChatNavStep[], spec: ViewSpec | null | undefined): { text: string; view: PanelView; files?: true } | null {
+  const before = earlier.at(-1)
+  // `threads` once, before the first thread of the path
+  if (s.view === 'thread') return earlier.some(x => x.view === 'thread' || x.view === 'threads') ? null : { text: 'threads', view: 'threads' }
+  if (s.view === 'label') return before?.view === 'labels' ? null : { text: 'labels', view: 'labels' }
+  if (s.view === 'report') return before?.view === 'reports' ? null : { text: 'reports', view: 'reports' }
+  if (s.view === 'view' && s.slug !== FILES_TREE) {
+    if (spec?.up || (s.slug ?? '').startsWith('@')) return before?.view === 'view' && before.slug === FILES_TREE ? null : { text: 'files', view: 'view', files: true }
+    return before?.view === 'views' ? null : { text: 'views', view: 'views' }
+  }
+  return null
+}
+
+/** Hotkeys with no label of their own (views/SPEC.md, "The visual system", rule 26: the key-hint row says them): plain
+ *  Buttons in a Box no row tall, so the panel's keys still press them. */
 function hiddenKeys($: Dollar, e: { surface: string } & object, keys: { key: string; hotkey: string; onPress: () => void }[]): RenderElement | null {
   if (!keys.length || e.surface === 'mobile') return null
   const { Box, Button } = $.ui.resolve(e as PaneEvent)
@@ -2187,35 +2220,35 @@ function hiddenKeys($: Dollar, e: { surface: string } & object, keys: { key: str
   )
 }
 
-/** The panel's path row: back (b, a click where the view's own b goes back a slide or builds), the path from home (each
- *  step a lower-case kind word and its name, parted by a dim ›; a step a click away; home opens the home panel), and
- *  at the right `threads`, with `N new` in bold while answers wait unread. */
+/** The panel's path row (views/SPEC.md, "A panel's header"): `‹ back` (b), the path from home, each step a lower-case
+ *  kind word and its name (or the name alone after its list) parted by a dim ›, each a click away, a step whose thread
+ *  has new answers followed by `new` in green; at the right `show all threads`, which opens the threads panel, and
+ *  `N new` in green while answers wait unread. The threads panel leaves it out. */
 async function wayRow($: Dollar, e: PaneEvent): Promise<RenderElement> {
   const { Box, Text, Button } = $.ui.resolve(e)
-  const cols = Math.max(30, e.props.bodyColumns - 1)
+  const cols = Math.max(30, e.props.bodyColumns)
   const nav = (await read($, navA)) ?? NAV_EMPTY
   const view = (await read($, viewA)) as PanelView
   const back = backTarget(nav)
-  const ownB = view === 'play' || view === 'views' || view === 'report'
-  let running = 0
-  for (const id of (await read($, threadListA)) ?? []) {
-    const t = await getThread($, id)
-    if (t?.turns.at(-1)?.state === 'running') running++
-  }
+  const ownB = view === 'views' || view === 'report'
+  const inThreads = view === 'threads' || view === 'thread'
   // threads with answers unread, this session's and earlier ones
   const fresh = ((await read($, newsA)) ?? NEWS).n
-  const tail = [fresh ? `${fresh} new` : '', running ? `${running} answering` : ''].filter(Boolean)
+  const tailW = inThreads ? 0 : 'show all threads'.length + (fresh ? `  ${fresh} new`.length : 0) + 2
   const backW = back ? 6 + 2 : 0
-  const threadsW = view === 'threads' ? 0 : 'threads'.length + tail.reduce((n, t) => n + t.length + 3, 0) + 2
-  // the first crumb is home, the home panel's own step when the trail starts from it; a file of the file browser opened
-  // from elsewhere has the step it goes up to (`files`) before it
+  // the first crumb is home, the home panel's own step when the trail starts from it; a step's list before it
   const { steps, skipped } = crumbSteps(nav.trail)
-  const crumbs = await Promise.all(steps.map(s => crumbOf($, s)))
-  // the step a file goes up to, unless the path already passes through the tree
-  const before = steps.at(-2)
-  const lastUp = before?.view === 'view' && before.slug === FILES_TREE ? undefined : crumbs.at(-1)?.up
-  const marksW = crumbs.reduce((n, c) => n + (c.mark ? c.mark.length + 1 : 0), 0) + (lastUp ? lastUp.length + 3 : 0)
-  const fitted = fitCrumbs(['home', ...crumbs.map(c => c.text)], Math.max(12, cols - backW - threadsW - marksW))
+  type Crumb = { text: string; mark: string; go: () => void; here?: boolean; up?: boolean }
+  const crumbs: Crumb[] = []
+  for (const [i, s] of steps.entries()) {
+    const up = upOf(s, steps.slice(0, i), s.view === 'view' ? loaded.get(s.slug ?? '')?.view.spec : undefined)
+    if (up) crumbs.push({ text: up.text, mark: '', up: true, go: () => void (up.files ? openFiles($) : openPane($, up.view, up.text.replace(/^./, ch => ch.toUpperCase()))) })
+    const c = await crumbOf($, s)
+    crumbs.push({ ...c, go: () => void navGo($, { trail: nav.trail.slice(0, i + 1 + skipped), back: withBack(nav.back, nav.trail) }), here: i === steps.length - 1 })
+  }
+  // a bare list panel (threads, views, labels, reports, coverage) has its own step
+  const marksW = crumbs.reduce((n, c) => n + (c.mark ? c.mark.length + 1 : 0), 0)
+  const fitted = fitCrumbs(['home', ...crumbs.map(c => c.text)], Math.max(12, cols - backW - tailW - marksW))
   const parts: RenderElement[] = []
   fitted.forEach((text, i) => {
     if (text === null) {
@@ -2223,15 +2256,13 @@ async function wayRow($: Dollar, e: PaneEvent): Promise<RenderElement> {
       return
     }
     if (i) parts.push(<Text dimColor>{' › '}</Text>)
-    const mark = i ? crumbs[i - 1]!.mark : ''
-    if (mark === '◌') parts.push(<Text>{'◌ '}</Text>)
-    if (i && i === fitted.length - 1) {
-      if (lastUp) parts.push(<Button key="crumb-up" label={lastUp} plain onPress={() => void openFiles($)} />, <Text dimColor>{' › '}</Text>)
-      parts.push(<Text>{text}</Text>)
-    } else if (i) parts.push(<Button key={`crumb-${i}`} label={text} plain onPress={() => void navGo($, { trail: nav.trail.slice(0, i + skipped), back: withBack(nav.back, nav.trail) })} />)
+    const c = i ? crumbs[i - 1]! : null
+    if (c?.mark === '◌') parts.push(<Text>{'◌ '}</Text>)
+    if (c?.here) parts.push(<Text>{text}</Text>)
+    else if (c) parts.push(<Button key={c.up ? 'crumb-up' : `crumb-${i}`} label={text} plain onPress={c.go} />)
     else if (view === 'home' && fitted.length === 1) parts.push(<Text>{text}</Text>)
     else parts.push(<Button key="crumb-home" label={text} plain onPress={() => void openHome($)} />)
-    if (mark === 'new') parts.push(<Text bold>{' new'}</Text>)
+    if (c?.mark === 'new') parts.push(<Text color={FRESH}>{' new'}</Text>)
   })
   return (
     <Box key="way" flexDirection="row">
@@ -2239,36 +2270,84 @@ async function wayRow($: Dollar, e: PaneEvent): Promise<RenderElement> {
       {back ? <Text>{'  '}</Text> : null}
       {parts}
       <Box flexGrow={1} />
-      {view === 'threads' ? null : <Button key="threads" label="threads" plain onPress={() => void openPane($, 'threads', 'Side threads')} />}
-      {view !== 'threads' && fresh ? <Text bold>{`  ${fresh} new`}</Text> : null}
-      {view !== 'threads' && running ? <Text dimColor>{`${fresh ? ' · ' : '  '}${running} answering`}</Text> : null}
-      {hiddenKeys($, e, [...(back && !ownB ? [{ key: 'back', hotkey: 'b', onPress: () => void navBack($) }] : []), ...(view === 'threads' ? [] : [{ key: 'threads', hotkey: 't', onPress: () => void openPane($, 'threads', 'Side threads') }])])}
+      {inThreads ? null : <Button key="threads" label="show all threads" plain onPress={() => void openPane($, 'threads', 'Threads')} />}
+      {!inThreads && fresh ? <Text color={FRESH}>{`  ${fresh} new`}</Text> : null}
+      {hiddenKeys($, e, [...(back && !ownB ? [{ key: 'back', hotkey: 'b', onPress: () => void navBack($) }] : []), ...(inThreads ? [] : [{ key: 'threads', hotkey: 't', onPress: () => void openPane($, 'threads', 'Threads') }])])}
     </Box>
   )
 }
 
-/** A view of the panel under its path row, in the type area: 1 cell inside the pane's left border and 1 cell before
- *  its right edge (views/SPEC.md, "The visual system", section 2). `e` is the event as inset() narrowed it. */
+/** A view of the panel under its path row, on the panel's grid (views/SPEC.md, "The visual system", section 2): a
+ *  cell of padding at each side, then the 2-cell margin M, then the type area from A0 to R. A row that brings its own
+ *  margin (a key starting `m:`: a `❯`, a passage's `?` or `↳`, a Client drawn from lines) stands as it is; every other
+ *  row gets an empty margin. `e` is the event as inset() narrowed it to the type area. */
 async function withWay($: Dollar, e: PaneEvent, body: RenderElement): Promise<RenderElement> {
   const way = await wayRow($, e)
   const { Box } = $.ui.resolve(e)
-  const column = body.type === 'Box' && body.props?.flexDirection === 'column' ? { ...body, children: [way, ...(body.children ?? [])] } : <Box flexDirection="column">{way}{body}</Box>
+  const kids = (body.type === 'Box' && body.props?.flexDirection === 'column' ? (body.children ?? []) : [body]).filter(k => Boolean(k)) as RenderElement[]
+  const rows = [way, ...kids].map(k => (hasMargin(k) ? k : <Box paddingLeft={MARGIN_W} flexDirection="column">{k}</Box>))
   return (
     <Box flexDirection="column" paddingLeft={1} paddingRight={1}>
-      {column}
+      {rows}
     </Box>
   )
 }
 
-/** The pane's event with its body 2 columns narrower: what a view lays out in the type area. */
+/** The pane's event with its body narrowed to the type area: a cell of padding at each side and the 2-cell margin. */
 function inset(e: PaneEvent): PaneEvent {
-  return { ...e, props: { ...e.props, bodyColumns: Math.max(20, e.props.bodyColumns - 2) } } as PaneEvent
+  return { ...e, props: { ...e.props, bodyColumns: Math.max(20, e.props.bodyColumns - 2 - MARGIN_W) } } as PaneEvent
 }
 
 /** The pane's event with `n` body rows fewer: a view laid out to the rows it has, under the panel's top row. */
 function lessRows(e: PaneEvent, n: number): PaneEvent {
   const sc = e.props.scroll
   return sc ? ({ ...e, props: { ...e.props, scroll: { ...sc, bodyRows: Math.max(1, sc.bodyRows - n) } } } as PaneEvent) : e
+}
+
+// ------------------------------------------------------------------------------------------------ panels drawn from lines
+
+/** A region of a panel drawn from lines (homeview.tsx) and what a click on it does. */
+type LineHit = { y: number; x0: number; x1: number; row: boolean; run: () => Promise<void> | void }
+// what each drawing's hits and keys do, by its stamp: the same drawing keeps its stamp, so a Client is not drawn again
+// for nothing; the oldest are let go
+const lineStamps = new Map<string, { runs: (() => Promise<void> | void)[]; key?: (k: string) => Promise<void> | void }>()
+const lineSeen = new Map<string, number>() // the last click or key handled, by the Client instance that sent it
+
+function stampOf(key: string, lines: readonly Line[], hits: readonly LineHit[]): string {
+  let h = 0x811c9dc5
+  const str = `${key}\u0000${JSON.stringify(lines)}\u0000${hits.map(x => `${x.y},${x.x0},${x.x1},${x.row ? 1 : 0}`).join(';')}`
+  for (let i = 0; i < str.length; i++) h = Math.imul(h ^ str.charCodeAt(i), 0x01000193)
+  return `${key}:${(h >>> 0).toString(36)}`
+}
+
+/** A panel's part drawn from styled lines by the Client homeview.tsx, `cols` wide: its hits (a row, a link, a control)
+ *  run their closures on a click (left or right), its keys go to `onKey` once a click gave it the keyboard. Its key
+ *  starts with `m:` when its lines bring the margin (withWay). */
+function linesEl($: Dollar, e: PaneEvent, key: string, lines: Line[], hits: LineHit[], cols: number, onKey?: (k: string) => Promise<void> | void): RenderElement {
+  if (e.surface !== 'terminal' && e.surface !== 'desktop') {
+    const { Text } = $.ui.resolve(e)
+    return <Text>{lines.map(l => l.map(x => x.s).join('')).join('\n')}</Text>
+  }
+  const { Client } = $.ui.resolve(e as unknown as ResolveInput<'Pane', 'terminal'>)
+  const stamp = stampOf(key, lines, hits)
+  lineStamps.delete(stamp)
+  lineStamps.set(stamp, { runs: hits.map(h => h.run), ...(onKey ? { key: onKey } : {}) })
+  for (const k of [...lineStamps.keys()].slice(0, Math.max(0, lineStamps.size - 600))) lineStamps.delete(k)
+  const packed = hits.flatMap((h, i) => [h.y, h.x0, h.x1, h.row ? 1 : 0, i])
+  return <Client key={key} module="./homeview.tsx" width={cols} height={Math.max(1, lines.length)} props={JSON.parse(JSON.stringify({ lines: lines.map(mergeSegs), hits: packed, stamp, cols, ...(onKey ? { keys: true } : {}) })) as never} />
+}
+
+/** A post of homeview.tsx: each click and key not seen yet, by the drawing it was made in. */
+async function linesMessage($: Dollar, origin: unknown, raw: unknown): Promise<void> {
+  if (!Array.isArray(raw) || typeof origin !== 'string') return
+  for (const a of raw as { seq?: unknown; i?: unknown; k?: unknown; s?: unknown }[]) {
+    if (typeof a?.seq !== 'number' || a.seq <= (lineSeen.get(origin) ?? 0)) continue
+    lineSeen.set(origin, a.seq)
+    const got = lineStamps.get(String(a.s))
+    if (!got) continue
+    if (typeof a.k === 'string') await got.key?.(a.k)
+    else await got.runs[Number(a.i)]?.()
+  }
 }
 
 /** In a citation opened from a side thread, a field whose question goes on in that thread, about the citation; the
@@ -2300,66 +2379,18 @@ async function askFollowUp($: Dollar, tid: string, q: string, about: string, g: 
   if (i >= 0) await navGo($, { trail: nav.trail.slice(0, i + 1), back: withBack(nav.back, nav.trail) })
 }
 
-/** The threads asked from a thread, newest first, a press each. */
-async function childRows($: Dollar, e: PaneEvent, t: ChatThread, cols: number): Promise<RenderElement | null> {
-  const kids: ChatThread[] = []
-  for (const id of (await read($, threadListA)) ?? []) {
-    const k = await getThread($, id)
-    if (k?.parent === t.id) kids.push(k)
-  }
-  if (!kids.length) return null
-  const { Box, Text, Button } = $.ui.resolve(e)
-  const rows: RenderElement[] = [<Text><Text>asked from this thread</Text><Text dimColor>{`  ${kids.length}`}</Text></Text>]
-  for (const [i, k] of kids.reverse().slice(0, 6).entries()) {
-    const st = threadState(k)
-    const n = await unreadOf($, k)
-    rows.push(
-      <Box key={`child-row-${i}`} flexDirection="row">
-        <Text dimColor>{'↳ '}</Text>
-        <Button key={`child-${i}`} label={clip(threadTitle(k), Math.max(12, cols - st.words.length - 8))} plain onPress={() => void showThread($, k)} />
-        <Text dimColor wrap="truncate-end">{`  ${st.words}`}</Text>
-        {n ? <Text bold>{'  new'}</Text> : null}
-      </Box>,
-    )
-  }
-  return <Box flexDirection="column">{rows}</Box>
-}
-
 // ------------------------------------------------------------------------------------------------ the panel's views
 
-/** A script's source as the panel lists it, as the cited lines are: each line's number right-aligned in a dim column at
- *  A2, its text after a gutter, a comment dim; no syntax colour (views/SPEC.md, "The visual system", rule 23). */
-function codeRows($: Dollar, e: PaneEvent, source: string, max = 400): RenderElement {
-  const { Box, Text } = $.ui.resolve(e)
+/** Code as Claude Code colours it (its `Code` element): a script, a label's code, a command; given `startLine`, its
+ *  dim gutter of line numbers (views/SPEC.md, "The visual system", rule 14). At most `max` lines, then `… N more`. */
+function codeRows($: Dollar, e: PaneEvent, source: string, max = 400, language = 'python', startLine: number | null = 1): RenderElement {
+  const { Box, Text, Code } = $.ui.resolve(e)
   const lines = source.replace(/\t/g, '    ').split('\n')
   while (lines.length && !lines.at(-1)!.trim()) lines.pop()
-  const shown = lines.slice(0, max)
-  const w = String(shown.length).length
-  /** Where a line's comment starts: its first # outside a string, else -1. */
-  const hash = (l: string): number => {
-    let q = ''
-    for (let i = 0; i < l.length; i++) {
-      const ch = l[i]!
-      if (q) {
-        if (ch === '\\') i++
-        else if (ch === q) q = ''
-      } else if (ch === '"' || ch === "'") q = ch
-      else if (ch === '#') return i
-    }
-    return -1
-  }
+  const shown = lines.slice(0, lines.length > max + 1 ? max : lines.length)
   return (
     <Box flexDirection="column">
-      {shown.map((l, i) => {
-        const at = hash(l)
-        return (
-          <Text wrap="truncate-end">
-            <Text dimColor>{`  ${String(i + 1).padStart(w)}  `}</Text>
-            <Text>{at < 0 ? l || ' ' : l.slice(0, at)}</Text>
-            {at >= 0 ? <Text dimColor>{l.slice(at)}</Text> : null}
-          </Text>
-        )
-      })}
+      <Code source={shown.join('\n') || ' '} language={language} {...(startLine !== null ? { startLine } : {})} wrap="truncate-end" />
       {lines.length > shown.length ? <Text dimColor>{`… ${lines.length - shown.length} more`}</Text> : null}
     </Box>
   )
@@ -2371,33 +2402,39 @@ function scriptName(path: string | undefined): string {
   return !base || /^v-[a-z0-9]+\.py$/.test(base) || /^[0-9a-f]{6,}\.py$/.test(base) || /\d{8}[-_]?\d{6}/.test(base) ? 'the script' : base
 }
 
-/** Label/value rows (rule 6): each label dim, lower case, in a column as wide as the longest label + 2, its value
+/** Label/value rows (rule 27): each label dim, lower case, in a column as wide as the longest label + 2, its value
  *  after it. */
 function fieldRows($: Dollar, e: PaneEvent, rows: [string, RenderElement | string, string?][]): RenderElement | null {
-  if (!rows.length) return null
-  const { Box, Text } = $.ui.resolve(e)
-  const w = Math.max(...rows.map(([k]) => k.length)) + 2
-  return (
-    <Box flexDirection="column">
-      {rows.map(([k, v, colour]) => (
-        <Box key={`f:${k}`} flexDirection="row">
-          <Box width={w} flexShrink={0}>
-            <Text dimColor>{k}</Text>
-          </Box>
-          <Box flexShrink={1}>{typeof v === 'string' ? <Text wrap="wrap" {...(colour ? { color: colour } : {})}>{v}</Text> : v}</Box>
-        </Box>
-      ))}
-    </Box>
-  )
+  return fieldEls($.ui.resolve(e), rows)
 }
 
-/** The citation panel: the title row is the cited value, its status dim (red when the value is not at its place), ✓
- *  after it once a script recomputed it, and `verify  ask about it` against the right edge; under the rule, label/value
- *  rows (`from`, `in`, `why`), a blank row, then the lines, their numbers right-aligned in a dim column at A2, the cited
- *  line's number in the text colour and the cited value on the selection background; a verification's verdict, script
- *  and output; the follow-up field when opened from a side thread. */
+/** The panel's bottom part (rule 25): the second rule, the actions at A0 2 cells apart, the fields under them; then the
+ *  key-hint row, the panel's last. */
+function bottomRows($: Dollar, e: PaneEvent, cols: number, controls: (RenderElement | null | false)[], fields: (RenderElement | null | false)[], hints: string[]): RenderElement[] {
+  const els = $.ui.resolve(e)
+  const ctl = controlsEl(els, controls, 'bottom-controls')
+  const fs = fields.filter((f): f is RenderElement => Boolean(f))
+  return [...(ctl || fs.length ? [ruleEl(els, cols, 'rule-bottom')] : []), ...(ctl ? [ctl] : []), ...fs, hintsEl(els, hints, cols)]
+}
+
+/** The cited value with the value underlined and blue in its sentence (the `source` row). */
+function sourceSegs(sentence: string, c: Citation): Line {
+  const flat = plainCites(sentence).replace(/\s+/g, ' ')
+  const shown = c.display ?? ''
+  const at = shown ? flat.indexOf(shown) : -1
+  if (at < 0) return [{ s: `"${flat}"` }]
+  return [{ s: `"${flat.slice(0, at)}` }, linkSeg(shown), { s: `${flat.slice(at + shown.length)}"` }]
+}
+
+/** The citation panel (views/SPEC.md, section 7, "The citation panel"): the title is the cited value, bold, blue and
+ *  underlined (a link to its place; red when the value is not there), ✓ after it once a script got it; the subtitle
+ *  its status in plain words; under the rule, `from`, `command` (a command's output, coloured as shell) and `source`
+ *  (the reply's sentence, the value in it underlined); the cited lines nested at A2, their numbers in a dim column and
+ *  the value on the selection background, or the cited card in its frame with the cited mark lit; a verification's
+ *  verdict and its script; at the bottom, after the second rule, `verify  ask about it` and the follow-up field. */
 async function drawCite($: Dollar, e: PaneEvent): Promise<RenderElement> {
   const { Box, Text, Button } = $.ui.resolve(e)
+  const els = { Box, Text, Button }
   // `id` keys the claim's fix and verification (a citation's own id for a mark or a record); the verdict is the
   // citation's, whatever sentence holds it
   const id = await read($, openA)
@@ -2405,7 +2442,7 @@ async function drawCite($: Dollar, e: PaneEvent): Promise<RenderElement> {
   // after a reload the module's maps are empty; the verdict in state still holds a citation opened by its own id
   const c = id ? (citeOf(id) ?? (own ? { raw: own.raw, ref: own.ref, display: own.display } : undefined)) : undefined
   const cols = Math.max(30, e.props.bodyColumns)
-  if (!c) return <Text dimColor>none</Text>
+  if (!c) return <Box flexDirection="column"><Text dimColor>none</Text></Box>
   const v = own ?? (await $.state.get({ ...VERDICTS, id: cid(c.raw) })).value
   const run = (await $.state.get({ ...VERIFY, id })).value
   const fix = (await $.state.get({ ...FIXES, id })).value
@@ -2416,83 +2453,53 @@ async function drawCite($: Dollar, e: PaneEvent): Promise<RenderElement> {
   const body: RenderElement[] = []
   // a record a view opened is named by its row, as the view showed it
   const record = c.display === null ? viewRecords.get(id) : undefined
-  const label = record ? clip(record, Math.max(20, cols - 40)) : citeLabel(c)
-  const said = statusWords(c, status, run)
-  const red = status === 'missing' || status === 'differs' || run?.state === 'refuted' || verifyFailed(run?.state)
+  const label = record ? clip(record, Math.max(20, cols - 4)) : citeLabel(c)
+  const problem = status === 'missing' || status === 'differs'
+  const red = problem || run?.state === 'refuted' || verifyFailed(run?.state)
+  const said = `${statusWords(c, v, status, run)}${problem && v?.why ? ` · ${plainWhy(v.why)}` : ''}`
   const canVerify = c.display !== null
-  const ask = (
-    <Button
-      key="ask"
-      label="ask about it"
-      plain
-      onPress={async () => {
-        const about = await citationContext($, id)
-        await openThread($, about)
-      }}
-    />
-  )
-  const inFiles = await filesButton($, e, c.ref)
   const busy = run?.state === 'asked' || run?.state === 'running'
-  const controls: RenderElement[] = [
-    ...(canVerify && !run ? [<Button key="verify" label="verify" plain onPress={() => void askVerify($, id)} />] : []),
-    ...(run && !busy && run.kind !== 'support' ? [<Button key="rerun" label="run again" plain onPress={() => void runVerify($, id)} />] : []),
-    ...(run && (run.state === 'missing' || run.state === 'error') ? [<Button key="again" label="verify again" plain onPress={() => void askVerify($, id)} />] : []),
-    ask,
-    ...(inFiles ? [inFiles] : []),
-  ]
-  const controlsW = (canVerify && !run ? 6 + 2 : 0) + (run && !busy && run.kind !== 'support' ? 9 + 2 : 0) + (run && (run.state === 'missing' || run.state === 'error') ? 12 + 2 : 0) + 12 + (inFiles ? 2 + 8 : 0)
-  // the title row: the value regular (red with a problem), its mark, its status dim; the controls against the right edge
+  const ask = async () => openThread($, await citationContext($, id))
+  // the title: the value as a link to its place (its file in the file browser, a card in the card pane)
   const mark = look.mark === '✓' ? ' ✓' : look.mark ? ` ${look.mark}` : look.spin ? ' ◌' : ''
-  const beside = textWidth(label) + mark.length + 2 + textWidth(said) + 2 + controlsW <= cols
-  const titleW = Math.max(8, cols - controlsW - 2)
-  body.push(
-    <Box key="cite-title" flexDirection="row">
-      <Box flexShrink={1} width={titleW}>
-        <Text wrap="truncate-end">
-          <Text {...(red ? { color: COLORS.problem } : {})}>{label}</Text>
-          {mark ? <Text {...(look.mark && look.mark !== '✓' ? { color: COLORS.problem } : {})}>{mark}</Text> : null}
-          {beside ? <Text {...(red ? { color: COLORS.problem } : { dimColor: true })}>{`  ${said}`}</Text> : null}
-        </Text>
-      </Box>
-      <Box flexGrow={1} />
-      <Box flexShrink={0} flexDirection="row" columnGap={2}>
-        {controls}
-      </Box>
-    </Box>,
-  )
-  if (!beside) body.push(<Text {...(red ? { color: COLORS.problem } : { dimColor: true })} wrap="wrap">{said}</Text>)
-  body.push(<Text color={COLORS.rule}>{'─'.repeat(cols)}</Text>)
-  // where it is from, the sentence it stands in, why it is red, what the card shows now, a fix round's state
+  const titleSegs: Line = [{ s: cut(label, Math.max(8, cols - 4)), b: true, ...(red ? { fg: COLORS.problem, u: true } : { fg: LINK, u: true }) }, ...(mark ? [{ s: mark, ...(look.mark && look.mark !== '✓' ? { fg: COLORS.problem } : {}) }] : [])]
+  const cardId = CARD_OF.exec(c.ref)?.[1]
+  const opens = fileRef(c.ref) ? () => openRef($, c.ref) : cardId ? () => openCardPane($, cardId, '') : null
+  body.push(opens ? linesEl($, e, 'cite-title', [titleSegs], [{ y: 0, x0: 0, x1: textWidth(cut(label, Math.max(8, cols - 4))), row: false, run: () => void opens() }], cols) : lineEl(els, titleSegs, 'cite-title'))
+  body.push(lineEl(els, [{ s: said, ...(red ? { fg: COLORS.problem } : { fg: COLORS.dim }) }], 'cite-sub', true))
+  body.push(ruleEl(els, cols, 'cite-rule'))
+  // where it is from, the command that printed it, the sentence it stands in, what the card shows now, a fix round
   const sentence = claimMap.get(id)?.sentence
   const rows: [string, RenderElement | string, string?][] = [['from', placeName(c.ref)]]
-  if (v?.kind === 'call' && v.command) rows.push(['command', `$ ${clip(v.command, 300)}`])
-  if (sentence) rows.push(['in', `"${clip(plainCites(sentence), 400)}"`])
-  const problem = status === 'missing' || status === 'differs'
-  if (v?.why && (problem || showsValue(c.display))) rows.push(['why', plainWhy(v.why), problem ? COLORS.problem : undefined])
+  if (v?.kind === 'call' && v.command) {
+    const cmd = v.command.split('\n').slice(0, 4).join('\n')
+    rows.push(['command', codeRows($, e, cmd, 4, 'bash', null)])
+  }
+  if (sentence) rows.push(['source', lineEl(els, sourceSegs(sentence, c), 'cite-source', true)])
   const choice = await otherChoice($, c.ref)
   if (choice) rows.push(['note', choice])
   if (fixNote(status, fix)) rows.push(['fix', fixNote(status, fix), COLORS.problem])
   body.push(fieldRows($, e, rows)!)
-  if (!v) body.push(<Box marginTop={1}><Text dimColor>◌ checking</Text></Box>)
+  if (!v) body.push(<Text dimColor>◌ checking</Text>)
   else if (v.kind === 'value' || v.kind === 'card') {
     const card = v.card ? await loadCard($, v.card) : null
     if (card) {
-      body.push(<Box marginTop={1}>{fieldRows($, e, [['card', card.question]])}</Box>)
       // the cited item on the selection background (a table's cell, a bar, a line's point, a timeline's event, a
-      // node), kept in view: a table's column names, then the rows around it
-      const w = Math.min(cols, 90)
+      // node), kept in view: a table's column names, then the rows around it; the card in its frame
+      const w = Math.min(cols, 96)
+      const inner = Math.max(10, w - 4)
       const shown = v.kind === 'value' ? withCitedRow(card, v) : card
-      const k = citedItem(shown, cardLayout(shown, w, -1, 8).items, v)
-      const lay = cardLayout(shown, w, k, 8)
+      const k = citedItem(shown, cardLayout(shown, inner, -1, 8).items, v)
+      const lay = cardLayout(shown, inner, k, 8)
       const lit = shown.kind === 'table' || shown.kind === 'bar' || shown.kind === 'label'
-      let rows2 = lit ? litItem(cardLayout(shown, w, -1, 8), k, COLORS.selected) : lay.lines
+      let rows2 = lit ? litItem(cardLayout(shown, inner, -1, 8), k, COLORS.selected) : lay.lines
       if (k < 0 && (shown.kind === 'bar' || shown.kind === 'label') && v.kind === 'value' && v.row === 'all') {
         rows2 = rows2.map(l => {
           const at = l.findIndex(x => x.s === 'all  ')
           return at < 0 ? l : l.map((x, j) => (j === at + 1 ? { ...x, bg: COLORS.selected } : x))
         })
       }
-      const room = Math.max(8, (e.props.scroll?.bodyRows || 20) - 9)
+      const room = Math.max(8, (e.props.scroll?.bodyRows || 20) - 14)
       const ys = rows2.flatMap((l, y) => (l.some(x => x.bg === COLORS.selected || x.inv) ? [y] : []))
       if (rows2.length > room && ys.length && ys.at(-1)! >= room) {
         // a table's column names are the lines before its first row
@@ -2501,30 +2508,29 @@ async function drawCite($: Dollar, e: PaneEvent): Promise<RenderElement> {
         const lo = Math.max(head, Math.min(ys[0]! - 1, rows2.length - (room - head)))
         rows2 = [...rows2.slice(0, head), ...rows2.slice(lo, lo + room - head)]
       }
-      body.push(<Box marginTop={1} flexDirection="column">{paintLines(Box, Text, rows2)}</Box>)
-      body.push(<Text dimColor wrap="truncate-end">{card.source?.script ? `made by ${scriptName(card.source.script)}` : 'no script recorded'}</Text>)
+      body.push(framedCard($, e, shown, w, rows2, 'cite-card'))
     }
   } else if (v.window.length) {
     const gutter = Math.max(...v.window.map(w => String(w.n).length))
     // the cited lines wrapped, the value or the quoted passage lit; when they take many rows, less context around
     const hits = v.window.filter(w => w.hit)
-    const hitRows = Math.max(3, Math.min(8, Math.floor(((e.props.scroll?.bodyRows || 20) - 12) / Math.max(1, hits.length))))
+    const hitRows = Math.max(3, Math.min(8, Math.floor(((e.props.scroll?.bodyRows || 20) - 14) / Math.max(1, hits.length))))
     const wraps = hits.some(w => w.text.length > cols - gutter - 4)
     const near = wraps ? 2 : 99
     const firstHit = v.window.findIndex(w => w.hit)
     const lastHit = v.window.length - 1 - [...v.window].reverse().findIndex(w => w.hit)
     const lines = v.window.filter((w, i) => w.hit || (i >= firstHit - near && i <= lastHit + near))
-    body.push(<Box marginTop={1} flexDirection="column">{lines.flatMap(w => (w.hit ? wrappedRows({ Text } as never, w, quote, gutter, cols, hitRows) : [lineRow({ Text } as never, w, gutter, cols)]))}</Box>)
+    body.push(<Box key="cite-lines" flexDirection="column">{lines.flatMap(w => (w.hit ? wrappedRows({ Text } as never, w, quote, gutter, cols, hitRows) : [lineRow({ Text } as never, w, gutter, cols)]))}</Box>)
     if (quote && status !== 'differs' && !hits.some(w => quoteSpan(w.text, quote))) body.push(fieldRows($, e, [['quoted', <Text wrap="wrap" backgroundColor={COLORS.selected}>{clip(quote, 600)}</Text>]])!)
   }
-  // the verification: its verdict, its script and its output
+  // the verification: its verdict at A0, its script nested at A2
   if (run) {
     const words: Record<string, string> = {
       asked: `◌ a subagent is writing a script that recomputes ${clip(citeLabel(c), 60)}`,
       running: '◌ running the script',
       missing: `× not written: ${run.stderr ? `the subagent ended without writing the script: ${clip(run.stderr, 200)}` : 'there is no script'}`,
-      verified: `✓ the script recomputed ${run.result}, as cited`,
-      refuted: `× the script recomputed ${run.result}, the reply cites ${citedAs(run.expected, run.ref ?? c.ref)}`,
+      verified: `✓ the script got ${run.result}, as cited`,
+      refuted: `× the script got ${run.result}; the reply cites ${citedAs(run.expected, run.ref ?? c.ref)}`,
       error: `× ${verifyError(run)}`,
       // a citation without a value, judged by a subagent that read its place (a report's "verify this section")
       ...(run.kind === 'support'
@@ -2532,57 +2538,36 @@ async function drawCite($: Dollar, e: PaneEvent): Promise<RenderElement> {
         : {}),
     }
     const tone = verifyFailed(run.state) ? { color: COLORS.problem } : busy ? { dimColor: true } : {}
-    body.push(<Box marginTop={1}><Text {...tone} wrap="wrap">{words[run.state] ?? run.state}</Text></Box>)
-    if (run.source) {
-      if (scriptName(run.script) !== 'the script') body.push(fieldRows($, e, [['script', scriptName(run.script)]])!)
-      body.push(codeRows($, e, run.source.slice(0, 6000)))
+    body.push(<Text key="cite-verdict" {...tone} wrap="wrap">{words[run.state] ?? run.state}</Text>)
+    if (run.source) body.push(<Box key="cite-script" marginLeft={2} flexDirection="column">{codeRows($, e, run.source.slice(0, 6000), 400)}</Box>)
+    // what a failed script printed, dim, nested under it
+    if (verifyFailed(run.state) && (run.stdout || run.stderr)) {
+      const tail = `${run.stdout ?? ''}${run.stderr ? `\n${run.stderr}` : ''}`.trim().split('\n').slice(-8)
+      body.push(<Box key="cite-out" marginLeft={2} flexDirection="column">{tail.map(l => <Text dimColor wrap="truncate-end">{l || ' '}</Text>)}</Box>)
     }
-    if (run.stdout || run.stderr) {
-      const tail = `${run.stdout ?? ''}${run.stderr ? `\n${run.stderr}` : ''}`.trim().split('\n').slice(-12)
-      body.push(fieldRows($, e, [['output', <Box flexDirection="column">{tail.map(l => <Text wrap="truncate-end">{l || ' '}</Text>)}</Box>]])!)
-    }
-  } else if (!canVerify && record === undefined) body.push(<Box marginTop={1}><Text dimColor wrap="wrap">This citation shows no value to recompute.</Text></Box>)
-  // opened from a side thread, a question about it goes on in that thread
+  } else if (!canVerify && record === undefined) body.push(<Text dimColor wrap="wrap">This citation shows no value to recompute.</Text>)
+  // the bottom: what can be done with it, where its result appears; a question about it goes on in its thread
+  const verify = () => void askVerify($, id)
+  const controls = [
+    canVerify && !run ? <Button key="verify" label="verify" plain onPress={verify} /> : null,
+    run && !busy && run.kind !== 'support' ? <Button key="rerun" label="run again" plain onPress={() => void runVerify($, id)} /> : null,
+    run && (run.state === 'missing' || run.state === 'error') ? <Button key="again" label="verify again" plain onPress={verify} /> : null,
+    <Button key="ask" label="ask about it" plain onPress={() => void ask()} />,
+  ]
   const goOn = await followUpField($, e, c.raw)
-  if (goOn) body.push(<Box marginTop={1}>{goOn}</Box>)
   const keys = [
-    ...(canVerify && !run ? [{ key: 'verify', hotkey: 'v', onPress: () => void askVerify($, id) }] : []),
+    ...(canVerify && !run ? [{ key: 'verify', hotkey: 'v', onPress: verify }] : []),
     ...(run && !busy && run.kind !== 'support' ? [{ key: 'rerun', hotkey: 'r', onPress: () => void runVerify($, id) }] : []),
-    ...(run && (run.state === 'missing' || run.state === 'error') ? [{ key: 'again', hotkey: 'v', onPress: () => void askVerify($, id) }] : []),
-    { key: 'ask', hotkey: 'a', onPress: () => void citationContext($, id).then(about => openThread($, about)) },
+    ...(run && (run.state === 'missing' || run.state === 'error') ? [{ key: 'again', hotkey: 'v', onPress: verify }] : []),
+    { key: 'ask', hotkey: 'a', onPress: () => void ask() },
     ...(fileRef(c.ref) ? [{ key: 'files', hotkey: 'f', onPress: () => void openRef($, c.ref) }] : []),
     { key: 'close', hotkey: 'x', onPress: () => void closePanel($) },
   ]
+  const hints = [canVerify && !run ? 'v to verify' : run && !busy && run.kind !== 'support' ? 'r to run again' : '', 'a to ask', fileRef(c.ref) ? 'f for its file' : '', 'b to go back', 'x to close'].filter(Boolean)
+  body.push(...bottomRows($, e, cols, controls, [goOn], hints))
   const hk = hiddenKeys($, e, keys)
   if (hk) body.unshift(hk)
   return <Box flexDirection="column">{body}</Box>
-}
-
-/** The menu: its title row names its target; under the rule, its items at A2, one per row, each saying what it does,
- *  the focused one in inverse (Claude Code draws a focused Button so). */
-async function drawMenu($: Dollar, e: PaneEvent): Promise<RenderElement> {
-  const { Box, Text, Button } = $.ui.resolve(e)
-  const t = await read($, menuA)
-  if (!t) return <Text dimColor>none</Text>
-  const items = menuItems(t)
-  const cols = Math.max(20, e.props.bodyColumns)
-  const press = (m: (typeof items)[number]) => async () => {
-    // a choice that shows something replaces the menu in the panel; one that only runs closes it
-    if (m.act === 'rerun') await closePanel($)
-    await act($, m.act, t)
-  }
-  return (
-    <Box flexDirection="column">
-      {hiddenKeys($, e, items.map(m => ({ key: m.act, hotkey: m.hotkey, onPress: () => void press(m)() })))}
-      <Text wrap="truncate-end">{targetLabel(t, cols)}</Text>
-      <Text color={COLORS.rule}>{'─'.repeat(cols)}</Text>
-      {items.map((m, i) => (
-        <Box key={`menu-row-${m.act}`} flexDirection="row" paddingLeft={2}>
-          <Button key={`menu-${m.act}`} label={m.label} plain {...(i === 0 ? { autoFocus: true as const } : {})} onPress={press(m)} />
-        </Box>
-      ))}
-    </Box>
-  )
 }
 
 /** The key of a side thread's question field: its own for each thread, stable across reloads (a hash of the thread's
@@ -2593,133 +2578,160 @@ function askKey(thread: string): string {
   return `ask-${h.toString(36)}`
 }
 
-/** A side thread: its title row is what it is about (its citations underlined), what that passage opens with dim
- *  under it, then the rule; each turn the analyst's question in quotes, its answer drawn as a reply; the second rule and
- *  the field that asks the next question. */
-async function drawThread($: Dollar, e: PaneEvent): Promise<RenderElement> {
+/** Where a thread was asked, the root its tree hangs it under: a report, else main. */
+function threadRoot(t: ChatThread): string {
+  const m = /In the report "([^"]+)"/.exec(t.context)
+  return m ? `report "${clip(m[1]!, 50)}"` : 'main'
+}
+
+/** The first line of a thread's latest answer, or what it is doing. */
+function threadLine(t: ChatThread): { s: string; fg?: string } {
+  const last = t.turns.at(-1)
+  if (!last) return { s: 'nothing asked yet', fg: COLORS.dim }
+  if (last.state === 'running') return { s: `◌ answering · ${last.tools} tool call${last.tools === 1 ? '' : 's'}`, fg: COLORS.dim }
+  if (last.state === 'error') return /^\s*stopped/.test(last.a) ? { s: 'stopped', fg: COLORS.dim } : { s: `× ${plainCites(last.a).split('\n')[0] ?? ''}`, fg: COLORS.problem }
+  const done = [...t.turns].reverse().find(x => x.state === 'done')
+  const first = plainCites(threadBody(withoutTaskLine(done?.a ?? ''))).replace(/^#+\s*/gm, '').split('\n').find(l => l.trim()) ?? ''
+  return { s: first.replace(/\*\*|__|`/g, '').trim(), fg: COLORS.dim }
+}
+
+/** The threads panel (views/SPEC.md, section 7, "The threads panel"): its title and a dim subtitle (`2 threads · 1
+ *  new`); under the rule, the tree: where threads were asked (`main`, a report) at A0, each thread under it with
+ *  guides, a thread asked from a thread a level deeper, its question in quotation marks and the first line of its
+ *  latest answer dim under it, `N questions` dim and `new` in green at R; the selected thread (`❯`, accent) shows
+ *  under the second rule, its questions and answers drawn as main's chat draws a reply, then the `ask` field. */
+async function drawThreads($: Dollar, e: PaneEvent, selected = ''): Promise<RenderElement> {
   if (e.surface === 'mobile') {
     const { Text } = $.ui.resolve(e)
-    return <Text dimColor>Side threads need a surface with text fields.</Text>
+    return <Text dimColor>Threads need a surface with text fields.</Text>
   }
   const { Box, Text, Button, Input } = $.ui.resolve(e)
-  const t = await getThread($, await read($, threadA))
+  const els = { Box, Text, Button }
   const cols = Math.max(30, e.props.bodyColumns)
-  if (!t) return <Text dimColor>none</Text>
-  const g = await ensureGuide($)
-  const body: RenderElement[] = []
-  const running = t.turns.at(-1)?.state === 'running'
-  body.push(
-    <Box key="thread-title" flexDirection="row">
-      <Box flexShrink={1}>{paintLine(Text, linkSegs(t.label, {}))}</Box>
-      <Box flexGrow={1} />
-      {running ? <Button key="stop" label="stop" plain onPress={() => void endThread($, t.id, 'stopped by the analyst')} /> : null}
-    </Box>,
-  )
-  // what it is about in a line: the opening heading or sentence of the passage its context quotes, else no line
-  const about = aboutLine(t.label, t.context)
-  if (about) body.push(<Text dimColor wrap="truncate-end">{about}</Text>)
-  body.push(<Text color={COLORS.rule}>{'─'.repeat(cols)}</Text>)
-  let k = 0
-  for (const turn of t.turns) {
-    k++
-    if (k > 1) body.push(<Text> </Text>)
-    body.push(<Box width={Math.min(MEASURE, cols)}><Text wrap="wrap">{`"${plainCites(turn.q)}"`}</Text></Box>)
-    if (turn.state === 'running') {
-      const partial = withoutTaskLine(turn.partial).trim()
-      body.push(<Text dimColor wrap="truncate-end">{`◌ answering · ${turn.tools} tool call${turn.tools === 1 ? '' : 's'}${partial ? ` · ${clip(partial, cols - 30)}` : ''}`}</Text>)
-    } else if (turn.state === 'error') {
-      body.push(<Text color={COLORS.problem} wrap="wrap">{`× ${turn.a}`}</Text>)
-    } else {
-      // the answer on the panel's grid: its headings at A0, its text at A2, under the question at A0
-      body.push(<Box flexDirection="column">{await drawReply($, e, threadBody(withoutTaskLine(turn.a)), cols - PANEL_MARGIN, `${t.id}:${k}`, `t${k}-`, false, { margin: PANEL_MARGIN })}</Box>)
-    }
+  const threads = await allThreads($)
+  const seen = new Map<string, number | undefined>()
+  for (const t of threads) seen.set(t.id, (await $.state.get({ ...THREAD_SEEN, id: t.id })).value)
+  const fresh = threads.filter(t => unread(t, seen.get(t.id)) > 0).length
+  const body: RenderElement[] = [
+    ...headerEls(els, { title: 'Threads', cols, sub: subLine([`${threads.length} thread${threads.length === 1 ? '' : 's'}`, fresh ? freshSeg(fresh) : null]) }),
+  ]
+  const t = selected ? await getThread($, selected) : undefined
+  // the tree: a root per place threads were asked, its threads under it, the newest activity first
+  const tree = threadTree(threads)
+  const roots = [...new Set(tree.filter(r => r.depth === 0).map(r => threadRoot(r.t)))]
+  const lines: Line[] = []
+  const hits: LineHit[] = []
+  const order: ChatThread[] = []
+  const cap = t ? 12 : 50
+  let shown = 0
+  for (const root of roots) {
+    if (lines.length) lines.push([])
+    lines.push(pointed([{ s: root }], false))
+    const under = tree.filter((r, i) => {
+      // a root's rows: its top threads and every thread under them
+      let k = i
+      while (k > 0 && tree[k]!.depth > 0) k--
+      return threadRoot(tree[k]!.t) === root
+    })
+    // guides of 2 cells a level, from the tree's own (3 cells a level)
+    under.forEach(r => {
+      if (shown >= cap) return
+      shown++
+      const n = unread(r.t, seen.get(r.t.id))
+      const asked = r.t.turns.length
+      const guide = r.guide.replace(/(.)../g, (_m, ch: string) => `${ch} `)
+      const lead = r.under.replace(/(.)../g, (_m, ch: string) => `${ch} `)
+      const right: Line = [...(asked > 1 ? [{ s: `${asked} questions`, fg: COLORS.dim }] : []), ...(n ? [...(asked > 1 ? [{ s: '  ' }] : []), freshSeg()] : [])]
+      const name = spread([{ s: guide, fg: COLORS.rule }, { s: threadTitle(r.t) }], right, cols)
+      const y = lines.length
+      lines.push(pointed(name, r.t.id === selected))
+      const second = threadLine(r.t)
+      lines.push(pointed([{ s: lead.slice(0, guide.length), fg: COLORS.rule }, { s: cut(second.s, Math.max(10, cols - guide.length)), ...(second.fg ? { fg: second.fg } : {}) }], false))
+      hits.push({ y, x0: MARGIN_W, x1: cols + MARGIN_W, row: true, run: () => showThread($, r.t) }, { y: y + 1, x0: MARGIN_W, x1: cols + MARGIN_W, row: true, run: () => showThread($, r.t) })
+      order.push(r.t)
+    })
   }
-  // an answer from a stand-in subagent was written without main's conversation, which the analyst should know
-  if (t.engine && t.engine !== 'fork') body.push(<Text dimColor wrap="wrap">answered without the main conversation: the fork was refused</Text>)
-  const kids = await childRows($, e, t, cols)
-  if (kids) body.push(<Box marginTop={1}>{kids}</Box>)
-  if (t.turns.length) body.push(<Text color={COLORS.rule}>{'─'.repeat(cols)}</Text>)
-  // Claude Code keeps a field's unsent text by its key, so each thread's field has its own: a draft stays with its thread
-  body.push(
-    <Box key="ask-row" flexDirection="row">
-      <Text dimColor>{'ask  '}</Text>
-      <Box flexGrow={1} flexShrink={1}>
-        <Input key={askKey(t.id)} {...(t.turns.length === 0 ? { autoFocus: true as const } : {})} submitLabel="ask" onSubmit={v => void askThread($, t.id, v, g)} />
+  if (!threads.length) lines.push(pointed([{ s: '  ' }, { s: 'none', fg: COLORS.dim }], false))
+  if (tree.length > shown) {
+    const more = `… ${tree.length - shown} more`
+    hits.push({ y: lines.length, x0: MARGIN_W + 2, x1: MARGIN_W + 2 + more.length, row: false, run: () => openPane($, 'threads', 'Threads') })
+    lines.push(pointed([{ s: '  ' }, { s: more, fg: COLORS.dim }], false))
+  }
+  const step = async (d: number) => {
+    if (!order.length) return
+    const at = order.findIndex(x => x.id === selected)
+    const next = order[Math.max(0, Math.min(order.length - 1, at < 0 ? (d > 0 ? 0 : order.length - 1) : at + d))]!
+    await showThread($, next)
+  }
+  const focusAsk = async () => {
+    if (t) await $.ui.focus({ requestId: PANEL, key: askKey(t.id) }).catch(() => undefined)
+  }
+  body.push(linesEl($, e, marginKey('threads-tree'), lines, hits, cols + MARGIN_W, k => (k === 'up' || k === 'k' ? step(-1) : k === 'down' || k === 'j' ? step(1) : k === 'return' || k === 'enter' ? focusAsk() : undefined)))
+  // each thread a press away by its key too, for a surface that draws no Client: no row of its own; not while a thread
+  // is shown, whose drawing carries no thread's id
+  if (!t)
+    body.unshift(
+      <Box key="thread-presses" width={0} height={0} flexShrink={0} overflow="hidden" flexDirection="row">
+        {order.map(x => <Button key={`thread-open:${x.id}`} label={threadTitle(x)} plain onPress={() => void showThread($, x)} />)}
+      </Box>,
+    )
+  const g = await ensureGuide($)
+  const keys: { key: string; hotkey: string; onPress: () => void }[] = [...order.slice(0, 9).map((x, i) => ({ key: `t${i}`, hotkey: String(i + 1), onPress: () => void showThread($, x) }))]
+  if (t) {
+    // the selected thread, under the second rule: each turn the analyst's question in quotation marks, its answer drawn
+    // as main's chat draws a reply, then the field that asks the next question
+    body.push(ruleEl(els, cols, 'rule-thread'))
+    const running = t.turns.at(-1)?.state === 'running'
+    let k = 0
+    // what it is about, and what that passage opens with, until its first question
+    if (!t.turns.length) {
+      body.push(<Text wrap="wrap">{`about ${plainCites(t.label)}`}</Text>)
+      const opens = aboutLine(t.label, t.context)
+      if (opens) body.push(<Text dimColor wrap="truncate-end">{opens}</Text>)
+    }
+    for (const turn of t.turns) {
+      k++
+      if (k > 1) body.push(<Text> </Text>)
+      body.push(<Text wrap="wrap">{`"${plainCites(turn.q)}"`}</Text>)
+      if (turn.state === 'running') {
+        const partial = withoutTaskLine(turn.partial).trim()
+        body.push(<Text dimColor wrap="truncate-end">{`◌ answering · ${turn.tools} tool call${turn.tools === 1 ? '' : 's'}${partial ? ` · ${clip(partial, cols - 30)}` : ''}`}</Text>)
+      } else if (turn.state === 'error') {
+        body.push(<Text color={COLORS.problem} wrap="wrap">{`× ${turn.a}`}</Text>)
+      } else {
+        // the answer on the panel's grid: its marks at M, its text at A0
+        body.push(<Box key={marginKey(`thread-answer-${k}`)} flexDirection="column">{await drawReply($, e, threadBody(withoutTaskLine(turn.a)), cols, `${t.id}:${k}`, `t${k}-`, false, { margin: PANEL_MARGIN })}</Box>)
+      }
+    }
+    // an answer from a stand-in subagent was written without main's conversation, which the analyst should know
+    if (t.engine && t.engine !== 'fork') body.push(<Text dimColor wrap="wrap">answered without the main conversation: the fork was refused</Text>)
+    // Claude Code keeps a field's unsent text by its key, so each thread's field has its own: a draft stays with it
+    const field = (
+      <Box key="ask-row" flexDirection="row">
+        <Text dimColor>{'ask  '}</Text>
+        <Box flexGrow={1} flexShrink={1}>
+          <Input key={askKey(t.id)} {...(t.turns.length === 0 ? { autoFocus: true as const } : {})} submitLabel="ask" onSubmit={v => void askThread($, t.id, v, g)} />
+        </Box>
       </Box>
-    </Box>,
-  )
-  const hk = hiddenKeys($, e, [...(running ? [{ key: 'stop', hotkey: 's', onPress: () => void endThread($, t.id, 'stopped by the analyst') }] : []), { key: 'close', hotkey: 'x', onPress: () => void closePanel($) }])
+    )
+    if (running) {
+      body.push(controlsEl(els, [<Button key="stop" label="stop" plain onPress={() => void endThread($, t.id, 'stopped by the analyst')} />], 'thread-controls')!)
+      keys.push({ key: 'stop', hotkey: 's', onPress: () => void endThread($, t.id, 'stopped by the analyst') })
+    }
+    body.push(field)
+    keys.push({ key: 'ask', hotkey: 'a', onPress: () => void focusAsk() })
+  }
+  keys.push({ key: 'close', hotkey: 'x', onPress: () => void closePanel($) })
+  body.push(hintsEl(els, ['↑↓ to choose', ...(t ? ['Enter or a to ask'] : []), ...(t && t.turns.at(-1)?.state === 'running' ? ['s to stop'] : []), 'b to go back', 'x to close'], cols))
+  const hk = hiddenKeys($, e, keys)
   if (hk) body.unshift(hk)
   return <Box flexDirection="column">{body}</Box>
 }
 
-/** A thread's state glyph (views/SPEC.md, "The visual system", section 5): ◌ answering, ● answered, × failed, ○ nothing
- *  asked or stopped. */
-function threadGlyph(tone: 'run' | 'ok' | 'problem' | 'dim'): { s: string; colour?: string; dim?: boolean } {
-  return tone === 'run' ? { s: '◌' } : tone === 'ok' ? { s: '●' } : tone === 'problem' ? { s: '×', colour: COLORS.problem } : { s: '○', dim: true }
-}
-
-/** The threads tree: its title row and counts; under the rule, `main` as a heading, each side thread (this session's
- *  and earlier ones) an item, its state at A0 and its name at A2, a dim secondary row of what it is doing; a thread
- *  asked from a thread hangs under it after └; newest activity first; a press shows it. */
-async function drawThreads($: Dollar, e: PaneEvent): Promise<RenderElement> {
-  const { Box, Text, Button } = $.ui.resolve(e)
-  const cols = Math.max(30, e.props.bodyColumns)
-  const threads = await allThreads($)
-  const current = await read($, threadA)
-  const mine = new Set((await read($, threadListA)) ?? [])
-  const seen = new Map<string, number | undefined>()
-  for (const t of threads) seen.set(t.id, (await $.state.get({ ...THREAD_SEEN, id: t.id })).value)
-  const running = threads.filter(t => t.turns.at(-1)?.state === 'running').length
-  const fresh = threads.filter(t => unread(t, seen.get(t.id)) > 0).length
-  const rows: RenderElement[] = [
-    <Text>
-      <Text>Side threads</Text>
-      <Text dimColor>{`  ${threads.length}${running ? ` · ${running} answering` : ''}`}</Text>
-      {fresh ? <Text dimColor>{' · '}</Text> : null}
-      {fresh ? <Text bold>{`${fresh} new`}</Text> : null}
-    </Text>,
-    <Text color={COLORS.rule}>{'─'.repeat(cols)}</Text>,
-  ]
-  if (!threads.length) rows.push(<Text dimColor>{'  none'}</Text>)
-  else rows.push(<Text><Text>main</Text><Text dimColor>{`  ${threads.length}`}</Text></Text>)
-  const tree = threadTree(threads)
-  tree.forEach(({ t, depth }, i) => {
-    const st = threadState(t)
-    const n = unread(t, seen.get(t.id))
-    const g = threadGlyph(st.tone)
-    // a thread asked from a thread hangs under it: └ in the rule grey, 2 cells a level
-    const guide = depth ? `${'  '.repeat(depth - 1)}└ ` : ''
-    const lead = guide.length
-    const room = Math.max(12, cols - lead - 2 - (n ? 5 : 0))
-    const about = t.turns.length ? `about ${plainCites(t.label)}` : aboutLine(t.label, t.context)
-    const state = `${afterGlyph(st.words)}${mine.has(t.id) ? '' : ' · earlier session'}`
-    const name = <Button key={`thread-open:${t.id}`} label={clip(threadTitle(t), room)} plain onPress={() => void showThread($, t)} />
-    rows.push(
-      <Box key={`thread-row:${t.id}`} flexDirection="column">
-        <Box flexDirection="row">
-          {guide ? <Text color={COLORS.rule}>{guide}</Text> : null}
-          <Text {...(g.colour ? { color: g.colour } : {})} {...(g.dim ? { dimColor: true } : {})}>{`${g.s} `}</Text>
-          {t.id === current ? <Box backgroundColor={COLORS.selected}>{name}</Box> : name}
-          {n ? <Text bold>{'  new'}</Text> : null}
-        </Box>
-        <Text wrap="truncate-end">
-          <Text>{' '.repeat(lead + 2)}</Text>
-          <Text {...(st.tone === 'problem' ? { color: COLORS.problem } : { dimColor: true })}>{state}</Text>
-          {about ? <Text dimColor>{` · ${clip(about, Math.max(10, cols - lead - 2 - state.length - 3))}`}</Text> : null}
-        </Text>
-      </Box>,
-    )
-    void i
-  })
-  const hk = hiddenKeys($, e, [...tree.slice(0, 9).map(({ t }, i) => ({ key: `t${i}`, hotkey: String(i + 1), onPress: () => void showThread($, t) })), { key: 'close', hotkey: 'x', onPress: () => void closePanel($) }])
-  if (hk) rows.unshift(hk)
-  return <Box flexDirection="column">{rows}</Box>
-}
-
-/** A card in the panel: the card between its rules, then `made by <script>` dim with `script  run again` against the
- *  right edge. In script mode, the script's name with `run again` against the right edge, the code with dim line
- *  numbers and comments, its last run's output, then the card. */
+/** A card in the panel (views/SPEC.md, "Cards", the card pane): its question is the panel's title, its kind and the
+ *  script that made it the dim subtitle; the card in its frame (card.tsx draws it, its readout row first); at the
+ *  bottom `script  run again`. In script mode, the script through the `Code` element, its gutter at A0, its last run's
+ *  output under it, and `card  run again` at the bottom. */
 async function drawCard($: Dollar, e: PaneEvent): Promise<RenderElement> {
   const id = await read($, paneCardA)
   const mode = await read($, paneModeA)
@@ -2729,163 +2741,44 @@ async function drawCard($: Dollar, e: PaneEvent): Promise<RenderElement> {
     return <Text dimColor>The interactive card needs the terminal or the desktop app.</Text>
   }
   const { Box, Text, Client, Button } = $.ui.resolve(e)
-  if (!card) return <Text dimColor>none</Text>
+  const els = { Box, Text, Button }
+  if (!card) return <Box flexDirection="column"><Text dimColor>none</Text></Box>
   const shownCard = await labelled($, card)
-  const w = Math.max(30, e.props.bodyColumns)
-  const picked = await read($, pickedA)
+  const w = Math.max(30, Math.min(e.props.bodyColumns, CARD_MAX_COLS))
+  const cols = Math.max(30, e.props.bodyColumns)
   const meta = await metaOf($, card.id)
   const run: ChatRun | undefined = (await $.state.get({ ...RUNS, id: card.id })).value
-  const cardEl = <Client key={`pane-${id}`} module="./card.tsx" width={w} props={{ card: shownCard, cols: w, plotRows: 16, debug, meta, pane: true }} />
+  const script = card.source?.script
   const rerun = <Button key="rerun" label={meta.busy ? '◌ running' : 'run again'} plain onPress={() => void rerunCard($, card.id)} />
   const body: RenderElement[] = []
   const keys = [{ key: 'rerun', hotkey: 'r', onPress: () => void rerunCard($, card.id) }, { key: 'close', hotkey: 'x', onPress: () => void closePanel($) }]
-  if (mode === 'script' && card.source?.script) {
-    // the script first, its control on its title row, so it shows however tall the card is; the card below
+  const ran = run?.exitCode !== undefined ? { s: `last run exit ${run.exitCode}`, ...(run.exitCode ? { fg: COLORS.problem } : {}) } : null
+  if (mode === 'script' && script) {
     await paths($)
     let source = ''
     try {
-      source = await $.fs.read(`${cwd}/${card.source.script}`)
+      source = await $.fs.read(`${cwd}/${script}`)
     } catch {
-      source = `(cannot read ${card.source.script})`
+      source = `(cannot read ${script})`
     }
-    body.push(
-      <Box key="script-title" flexDirection="row">
-        <Box flexShrink={1}>
-          <Text wrap="truncate-end">
-            <Text>{scriptName(card.source.script)}</Text>
-            {run?.exitCode !== undefined ? <Text {...(run.exitCode ? { color: COLORS.problem } : { dimColor: true })}>{`  last run exit ${run.exitCode}`}</Text> : null}
-          </Text>
-        </Box>
-        <Box flexGrow={1} />
-        {rerun}
-      </Box>,
-    )
-    body.push(<Text color={COLORS.rule}>{'─'.repeat(w)}</Text>)
-    body.push(codeRows($, e, source.slice(0, 9000)))
+    body.push(...headerEls(els, { title: card.question, cols, sub: subLine([scriptName(script), ran]) }))
+    body.push(codeRows($, e, source.slice(0, 9000), 400))
     if (run?.exitCode !== undefined) {
       const tail = `${scriptOutput(run.stdout ?? '')}${run.stderr ? `\n${run.stderr}` : ''}`.trim().split('\n').slice(-8)
-      body.push(<Box marginTop={1}>{fieldRows($, e, [['output', tail.join('').trim() ? <Box flexDirection="column">{tail.map(l => <Text wrap="truncate-end">{l || ' '}</Text>)}</Box> : <Text dimColor>nothing printed</Text>]])}</Box>)
+      body.push(<Text> </Text>)
+      body.push(fieldRows($, e, [['output', tail.join('').trim() ? <Box flexDirection="column">{tail.map(l => <Text wrap="truncate-end">{l || ' '}</Text>)}</Box> : <Text dimColor>nothing printed</Text>]])!)
     }
-    body.push(<Box marginTop={1}>{cardEl}</Box>)
+    keys.push({ key: 'card', hotkey: 'c', onPress: () => void openCardPane($, card.id, '') })
+    body.push(...bottomRows($, e, cols, [<Button key="card" label="card" plain onPress={() => void openCardPane($, card.id, '')} />, rerun], [], ['r to run again', 'c for the card', 'b to go back', 'x to close']))
   } else {
-    body.push(cardEl)
-    const cited = citedOnCard(picked, card.id)
-    body.push(
-      <Box key="card-foot" flexDirection="row">
-        <Box flexShrink={1}>
-          <Text dimColor wrap="truncate-end">{[card.source?.script ? `made by ${scriptName(card.source.script)}` : 'no script recorded', cited ? `last cited ${cited}` : ''].filter(Boolean).join(' · ')}</Text>
-        </Box>
-        <Box flexGrow={1} />
-        {card.source?.script ? (
-          <Box flexShrink={0} flexDirection="row" columnGap={2}>
-            <Button key="script" label="script" plain onPress={() => void openCardPane($, card.id, 'script')} />
-            {rerun}
-          </Box>
-        ) : null}
-      </Box>,
-    )
-    if (card.source?.script) keys.push({ key: 'script', hotkey: 's', onPress: () => void openCardPane($, card.id, 'script') })
+    body.push(...headerEls(els, { title: card.question, cols, sub: subLine([card.kind, script ? `made by ${scriptName(script)}` : 'no script recorded', ran]) }))
+    body.push(<Client key={`pane-${id}`} module="./card.tsx" width={w} props={{ card: shownCard, cols: w, plotRows: 16, debug, meta, pane: true, menu: null }} />)
+    if (script) keys.push({ key: 'script', hotkey: 's', onPress: () => void openCardPane($, card.id, 'script') })
+    body.push(...bottomRows($, e, cols, script ? [<Button key="script" label="script" plain onPress={() => void openCardPane($, card.id, 'script')} />, rerun] : [], [], [...(script ? ['s for the script', 'r to run again'] : []), 'b to go back', 'x to close']))
   }
   const hk = hiddenKeys($, e, keys)
   if (hk) body.unshift(hk)
   return <Box flexDirection="column">{body}</Box>
-}
-
-// ------------------------------------------------------------------------------------------------ playing an answer
-
-/** Play an answer in the panel: its text as corrected, its rows (whose ids key its claims) and the question asked. */
-async function startPlay($: Dollar, text: string, rows: ChatRow[], head: string, video = false): Promise<void> {
-  const prev = await read($, playA)
-  await $.state.set({ plugin: 'thimble-cc-mod', key: 'play' }, { text, rows, head, seq: (prev?.seq ?? 0) + 1, ...(video ? { video } : {}) })
-  await openPane($, 'play', 'Play')
-}
-
-/** Once the press or command that opened the play view is done, the panel takes the keys (the prompt holds them
- *  while it runs), its ring on the pause button, so the buttons' letters work at once. */
-function playKeys($: Dollar): void {
-  $.clock.after(250, () => {
-    void (async () => {
-      const r = await $.ui.open({ id: PANEL, title: 'Play', focus: true, columns: panelColumns() }).catch((err: unknown) => ({ isPlaced: false, reason: String(err) }))
-      const f = await $.ui.focus({ requestId: PANEL, key: 'play-pause' }).catch((err: unknown) => ({ deny: String(err) }))
-      await logEvent($, { event: 'play keys', open: r.isPlaced ? 'placed' : `waits: ${String((r as { reason?: unknown }).reason)}`, focus: 'deny' in f && f.deny ? `refused: ${f.deny}` : 'on pause' })
-    })()
-  })
-}
-
-/** A press of the play view's buttons, for the player to apply. */
-async function playCmd($: Dollar, op: PlayOp): Promise<void> {
-  await update($, playCmdA, c => ({ n: (c?.n ?? 0) + 1, op }))
-}
-
-/** The last answer to play: the one its end row names, with its corrections, else the reply a resumed session holds. */
-async function lastAnswer($: Dollar): Promise<{ text: string; rows: ChatRow[]; head: string } | null> {
-  const end = lastEndRow ? (await $.state.get({ ...ENDS, id: lastEndRow })).value : undefined
-  if (end) {
-    const corrections = (await read($, correctionsA)) ?? []
-    const rows = end.rows.map(r => ({ id: r.id, text: applyCorrections(r.text, corrections, r.id) }))
-    return { text: rows.map(r => r.text).join('\n\n'), rows, head: end.head }
-  }
-  return lastReply.trim() ? { text: lastReply, rows: [{ id: 'resumed', text: lastReply }], head: '' } : null
-}
-
-/** The play view: the storyboard of the answer, each caption drawn with its citations as chips (the claims of the
- *  reply's own row, so they share its checks), played by player.tsx, which draws its controls; the panel's keys reach
- *  it through `cmd`. */
-async function drawPlay($: Dollar, e: PaneEvent): Promise<RenderElement> {
-  if (e.surface !== 'terminal' && e.surface !== 'desktop') {
-    const { Text } = $.ui.resolve(e)
-    return <Text dimColor>Playing an answer needs the terminal or the desktop app.</Text>
-  }
-  const { Box, Text, Client, Button } = $.ui.resolve(e)
-  const p = await read($, playA)
-  if (!p) return <Text dimColor>none</Text>
-  const cmd = (await read($, playCmdA)) ?? { n: 0, op: '' }
-  // the type area whole: its rules and controls end on R
-  const cols = Math.max(30, e.props.bodyColumns)
-  const rows = Math.max(14, (e.props.scroll?.bodyRows || 30) - 2)
-  const data = new Map<string, CardData | null>()
-  // a video's figure may carry a focus title, `![…](card:<id> "…")`, which embeddedCards does not read
-  for (const id of reportCards(p.text)) data.set(id, await loadCard($, id))
-  const sopts = { card: (id: string) => data.get(id), focusOf: (c: CardData, ref: string) => focusFromRef(c, ref) !== undefined }
-  // a video report plays its own storyboard, at a speaking pace; an answer, the one play.ts builds from it
-  const story = p.video ? videoScenes(p.text, sopts) : storyboard(p.text, sopts)
-  const flat = (s: string) => s.replace(/\s+/g, ' ')
-  const unchecked: Citation[] = []
-  const scenes: PlayScene[] = []
-  for (const s of story) {
-    const card = s.card ? data.get(s.card) : null
-    const caps: PlayCap[] = []
-    for (const c of s.captions) {
-      const block = { prefix: '', heading: 0, quote: false, runs: inlineRuns(c.text) }
-      const row = p.rows.find(r => flat(r.text).includes(c.text))?.id ?? p.rows.at(-1)?.id ?? 'play'
-      const cls = blockClaims(block, row)
-      rememberClaims(cls)
-      const chips: ChipView[] = []
-      for (const cl of cls) {
-        chips.push(await chipView($, cl))
-        if (!(await $.state.get({ ...VERDICTS, id: cid(cl.c.raw) })).value) unchecked.push(cl.c)
-      }
-      caps.push({ block, chips, ids: cls.map(cl => cl.key), raws: cls.map(cl => cl.c.raw), focus: (card && c.focus ? captionFocus(card, c.focus) : undefined) ?? null })
-    }
-    const why = s.card && !card ? (await cardFile($, s.card)).why : ''
-    const tiles = s.numbers?.map(n => ({ ref: n.ref, display: n.display ?? '', place: tilePlace(n.ref, id => data.get(id)) }))
-    scenes.push({ ...s, ...(card ? { data: card } : {}), ...(why ? { why } : {}), caps, ...(tiles ? { tiles } : {}) })
-  }
-  if (unchecked.length) enqueue($, unchecked)
-  return (
-    <Box flexDirection="column">
-      {hiddenKeys($, e, [
-        // the player draws its controls on its title row; the panel's keys reach it through `cmd`, the focus ring on
-        // the pause key (playKeys)
-        { key: '=play-pause', hotkey: 'p', onPress: () => void playCmd($, 'pause') },
-        { key: '=play-back', hotkey: 'b', onPress: () => void playCmd($, 'back') },
-        { key: '=play-next', hotkey: 'n', onPress: () => void playCmd($, 'next') },
-        { key: '=play-restart', hotkey: 'r', onPress: () => void playCmd($, 'restart') },
-        { key: 'close', hotkey: 'q', onPress: () => void closePanel($) },
-      ])}
-      <Client key={`play:${p.seq}`} module="./player.tsx" width={cols} height={rows} props={{ scenes, head: p.head, cols, rows, cmd }} />
-    </Box>
-  )
 }
 
 // ------------------------------------------------------------------------------------------------ reports
@@ -2903,9 +2796,11 @@ function reportCtx($: Dollar): ReportCtx {
     mtime: async path => Number((await $.fs.stat(path)).mtimeMs ?? 0),
     list: async dir => (await $.fs.list(dir)).map(f => f.name),
     run: (argv, init) => $.process.run(argv, init),
-    filmPython: async () => (await $.env.get('THIMBLE_CC_MOD_PYTHON').catch(() => undefined)) ?? '',
     report: async slug => (await $.state.get({ ...REPORTS, id: slug })).value,
     setReport: async r => {
+      // a report its writer just finished is new until the analyst opens it
+      const was = (await $.state.get({ ...REPORTS, id: r.slug })).value
+      if (was?.state === 'writing' && r.state === 'ready') freshReports.add(r.slug)
       await $.state.set({ ...REPORTS, id: r.slug }, r)
     },
     agent: async id => (await $.state.get({ ...AGENTS, id })).value,
@@ -2932,9 +2827,11 @@ function reportCtx($: Dollar): ReportCtx {
     closePanel: () => closePanel($),
     spawn: (prompt, desc, fresh) => spawnSub($, prompt, desc, fresh),
     noteMain: text => noteMain($, text),
-    play: async (text, rows, head) => {
-      await startPlay($, text, rows, head, true)
-      playKeys($)
+    link: (e, key, lines, hits, cols, onKey) => linesEl($, e as PaneEvent, key, lines, hits, cols, onKey),
+    framed: (e, card, w, lines, key) => framedCard($, e, card, w, lines, key),
+    code: (e, source, max, language, startLine) => codeRows($, e as PaneEvent, source, max, language, startLine ?? null),
+    thread: async about => {
+      await openThread($, about)
     },
     afterTurn: async fn => {
       if (mainBusy) afterMain.push(fn)
@@ -2971,16 +2868,13 @@ function reportCtx($: Dollar): ReportCtx {
 async function reportCard($: Dollar, e: ResolveInput, id: string, width: number, key: string, focus?: Focus, data?: CardData): Promise<RenderElement> {
   const loaded = data ?? (await loadCard($, id))
   const card = loaded ? await labelled($, loaded) : null
-  const { Box, Text } = $.ui.resolve(e)
+  const { Text } = $.ui.resolve(e)
   if (!card) return <Text key={key} color={COLORS.problem} wrap="wrap">{`× this card cannot be drawn: ${(await cardFile($, id)).why}`}</Text>
   await $.state.get({ ...RUNS, id }) // a finished run redraws the card
-  if (e.surface !== 'terminal' && e.surface !== 'desktop') {
-    const rule = { s: '─'.repeat(width), fg: COLORS.rule }
-    return <Box key={key} flexDirection="column" width={width}>{paintLines(Box, Text, [[rule], [{ s: cut(card.question, width) }], ...cardLayout(card, width, -1).lines, [rule]])}</Box>
-  }
+  // off the terminal, the card in its frame as the mod draws it; on it, card.tsx draws the frame
+  if (e.surface !== 'terminal' && e.surface !== 'desktop') return framedCard($, e, card, width, undefined, key)
   const { Client } = $.ui.resolve(e as ResolveInput<'Pane', 'terminal'>)
-  const menu = (await read($, menuA)) ?? null
-  return <Client key={key} module="./card.tsx" width={width} props={{ card, cols: width, debug, meta: await metaOf($, id), menu, ...(focus ? { focus } : {}) }} />
+  return <Client key={key} module="./card.tsx" width={width} props={{ card, cols: width, debug, meta: await metaOf($, id), menu: null, ...(focus ? { focus } : {}) }} />
 }
 
 /** What main (or a subagent) is told of a Bash output saved as call:<short>, so it can cite its lines. */
@@ -3051,13 +2945,16 @@ async function panelDrawn($: Dollar, next: { readonly signal: AbortSignal }, s: 
 export const register: Register = on => {
   let turnParts: Part[] = [{ rows: [] }] // this turn's text rows in main (their uuids and text), by part
   let turnPrompt = ''
+  // the question an answer answers: the analyst's prompt, kept through the turns a task's notification starts (a
+  // workflow's end), whose answers go on with it
+  let turnHead = ''
   // the terminal's width as each command runs, for the panel's width (openPane)
   on('command.run', async ($, e, next) => {
     if (e.presentation?.columns > 0) termColumns = e.presentation.columns
     await navOrigin($, false)
     return next(e)
   })
-  // the one ui.render hook of the panel draws the view `panelView` names (drawCite, drawCard, drawThread, drawMenu),
+  // the one ui.render hook of the panel draws the view `panelView` names (drawCite, drawCard, drawThreads, …),
   // each drawing once the one before it has settled (turns.ts), or two seconds at most; one that still settles after a
   // later one began, or that Claude Code abandoned, is followed by one more (panelDrawn)
   const panel = { draws: 0, redrawing: false }
@@ -3069,13 +2966,9 @@ export const register: Register = on => {
       case 'card':
         return drawCard($, e)
       case 'thread':
-        return drawThread($, e)
+        return drawThreads($, e, await read($, threadA))
       case 'threads':
         return drawThreads($, e)
-      case 'menu':
-        return drawMenu($, e)
-      case 'play':
-        return drawPlay($, e)
       case 'view':
         await paths($)
         return drawViewPane($, e, `${cwd}/${HOME}`, () => void closePanel($))
@@ -3100,6 +2993,7 @@ export const register: Register = on => {
 
   on('session.start', async ($, e, next) => {
     const started = await next(e)
+    sessionAt = await $.clock.now().catch(() => Date.now())
     await ensureGuide($)
     await loadDebug($)
     // the card helper writes cards here, wherever a script runs: every Bash command and process started after inherits it
@@ -3115,7 +3009,6 @@ export const register: Register = on => {
     await $.command.register({ name: 'thimble-check', description: 'Check the citations of the last reply again', immediate: true })
     await $.command.register({ name: 'thimble-threads', description: 'Every side thread as a tree, each under the thread it was asked from, with what it is doing and its unread answers: reopen one to read or continue it', immediate: true })
     await $.command.register({ name: 'thimble-ask', description: 'Ask a side thread about the last reply, out of the main chat: /thimble-ask <question>', immediate: true })
-    await $.command.register({ name: 'thimble-play', description: 'Play the last answer as an animated report in the panel', immediate: true })
     await $.command.register({ name: 'thimble-view', description: 'Open a view of this folder in the panel: /thimble-view <name>', immediate: true })
     await $.command.register({ name: 'thimble-views', description: 'The proposed and built views of this folder: /thimble-views [build] <name>', immediate: true })
     await $.command.register({ name: 'thimble-band', description: 'Show or hide the band of the last reply\'s citations above the prompt', immediate: true })
@@ -3136,7 +3029,7 @@ export const register: Register = on => {
     await $.tool.register({ name: 'orient', description: ORIENT_DESCRIPTION, inputSchema: ORIENT_SCHEMA }).catch((err: unknown) => $.ui.log(`thimble-cc-mod: could not offer the orient tool: ${String(err).slice(0, 160)}`))
     await $.command.register({ name: 'thimble-orient', description: 'Orient: a subagent surveys every file and writes a short document in the panel, with a deck of cards, views and a report unless turned off, and a critique when turned on', argumentHint: '[focus] [--no-deck] [--no-views] [--critique] [--no-report]', immediate: true })
     await $.command.register({ name: 'thimble-label', description: 'Define and apply a label, or list the labels or open one', argumentHint: '[list | open <name> | <name> kind= definition= paths= values= limit=]', immediate: true })
-    await $.command.register({ name: 'thimble-home', description: 'Everything made in this folder in one panel: views, reports, side threads, cards, labels and files', argumentHint: '[stacked|index]', immediate: true })
+    await $.command.register({ name: 'thimble-home', description: 'Everything made in this folder in one panel: views, reports, threads, cards, labels and files', immediate: true })
     // a resumed session: the band lists the last reply's citations
     try {
       const rows = await $.session.messages()
@@ -3155,7 +3048,6 @@ export const register: Register = on => {
       const corrections = (await read($, correctionsA)) ?? []
       const own = end?.rows.length && end.rows.every(r => text.includes(r.text)) ? end.rows : null
       const cls = own ? own.flatMap(r => claimsIn(applyCorrections(r.text, corrections, r.id), r.id)) : claimsIn(text, 'resumed')
-      if (own) lastEndRow = marks.last
       if (cls.length) {
         rememberClaims(cls)
         await $.state.set({ plugin: 'thimble-cc-mod', key: 'turn' }, { id: own ? marks.last : 'resumed', ids: cls.map(cl => cl.key) })
@@ -3268,6 +3160,7 @@ export const register: Register = on => {
     mainBusy = true
     turnParts = [{ rows: [] }]
     turnPrompt = e.text
+    if (!/^\s*<task-notification/.test(e.text) || !turnHead) turnHead = e.text.split('\n')[0] ?? ''
     return next(e)
   })
 
@@ -3384,27 +3277,26 @@ export const register: Register = on => {
     if (answer.trim() && (answerCites.length || cardsOf.length) && !fromMod(turnPrompt)) {
       await paths($)
       const stamp = new Date(await $.clock.now()).toISOString().replace(/[-:]/g, '').replace(/\..*$/, '').replace('T', '-')
-      end = { rows: part?.rows.length ? part.rows : [{ id: lastRow, text: answer }], cards: cardsOf, file: `${HOME}/answers/${stamp}.md`, head: turnPrompt.split('\n')[0] ?? '' }
+      end = { rows: part?.rows.length ? part.rows : [{ id: lastRow, text: answer }], cards: cardsOf, file: `${HOME}/answers/${stamp}.md`, head: turnHead }
       try {
         await $.fs.write(`${cwd}/${end.file}`, `# ${end.head}\n\n${answer}\n`)
       } catch {
         // the answer stays in the transcript
       }
-      if (lastRow) {
-        await setEnd($, lastRow, end, true)
-        lastEndRow = lastRow
-      }
+      if (lastRow) await setEnd($, lastRow, end, true)
     }
     // a card that cannot be drawn or a citation that fails goes to a fix round, out of main's chat
     if (text.trim() && !fromMod(turnPrompt)) await startFix($, text, rows, lastRow, end)
     await mainEnded($)
+    // the views this turn proposed: their rows under its answer
+    await attachPendingViews($, lastRow)
     // an answer that speaks for the whole corpus while a kind of file was never opened: the check shows under the
     // answer, and main reads the same words with the analyst's next prompt. Main starts no turn for it.
     if (!fromMod(turnPrompt) && !e.isAborted && lastRow) {
       await paths($)
       const missed = await coverageAfterTurn(harnessCtx($), answer).catch(() => null)
       if (missed) {
-        await setEnd($, lastRow, { ...(end ?? { rows: part?.rows.length ? part.rows : [{ id: lastRow, text: answer }], cards: cardsOf, file: '', head: turnPrompt.split('\n')[0] ?? '' }), check: missed }, true)
+        await setEnd($, lastRow, { ...(end ?? { rows: part?.rows.length ? part.rows : [{ id: lastRow, text: answer }], cards: cardsOf, file: '', head: turnHead }), check: missed }, true)
         await noteMain($, checkNote(missed, `${root}/helper`))
         await logEvent($, { event: 'coverage check', row: lastRow })
       }
@@ -3472,15 +3364,6 @@ export const register: Register = on => {
             label="ask about this answer ›"
             plain
             onPress={() => void openThread($, { label: 'this answer', context: `The answer the analyst asks about:\n${clip(whole, 6000)}` })}
-          />
-          <Button
-            key={`play:${e.requestId}`}
-            label="▶ play"
-            plain
-            onPress={async () => {
-              await startPlay($, whole, end.rows.map(r => ({ id: r.id, text: applyCorrections(r.text, corrections, r.id) })), end.head)
-              playKeys($)
-            }}
           />
           <Button
             key={`as-report:${e.requestId}`}
@@ -3583,19 +3466,21 @@ export const register: Register = on => {
       await writeMouseLog($, JSON.stringify({ at: new Date(await $.clock.now()).toISOString(), module: e.module, ...d }))
     }
     if (d.type === 'pointer' || d.type === 'gesture') return next(e)
+    // a panel drawn from lines (homeview.tsx): its clicks and keys, by the drawing each was made in
     if (d.type === 'home') {
-      await navOrigin($, true)
-      await homeMessage($, (d as { horigin?: unknown }).horigin, (d as { hacts?: unknown }).hacts)
+      await navOrigin($, e.component === 'Pane' && e.requestId === PANEL)
+      clicking++
+      try {
+        await linesMessage($, (d as { horigin?: unknown }).horigin, (d as { hacts?: unknown }).hacts)
+      } finally {
+        clicking--
+      }
       return next(e)
     }
     if (d.type === 'view') {
       await navOrigin($, true)
       await paths($)
       await viewEffects($, await viewMessage($, `${cwd}/${HOME}`, d as never))
-      return next(e)
-    }
-    if (d.type === 'play' && (d as { op?: string }).op === 'close') {
-      await closePanel($)
       return next(e)
     }
     if (d.type === 'copy' && typeof (d as { text?: unknown }).text === 'string') {
@@ -3674,20 +3559,9 @@ export const register: Register = on => {
           </Box>
         </Box>
       ) : null
-    // the side threads holding answers unread (hooks/signal.ts)
-    const trow = await threadsNewsRow($, e)
-    // the views proposed, building and built in this session (the view pipeline), one button each
-    const vrow = await proposalsRow($, e)
-    // what this session has read of the corpus (harness.tsx)
-    const crow = await coverageRow(harnessCtx($), e)
-    const above = offer || trow || vrow || crow ? (
-      <Box flexDirection="column">
-        {offer}
-        {trow}
-        {vrow}
-        {crow}
-      </Box>
-    ) : null
+    // the rows above the prompt are gone (views/SPEC.md, "Main's chat"): threads and views show as `↳` rows under the
+    // answer, coverage in home's Files section; only a panel a click opened that waits undrawn is offered here
+    const above = offer
     if (!(await read($, bandA))) return above ?? next(e)
     const turn = await read($, turnA)
     if (!turn || turn.ids.length === 0 || (await read($, hiddenA)) === turn.id) return above ?? next(e)
@@ -3705,9 +3579,6 @@ export const register: Register = on => {
     return (
       <Box flexDirection="column">
         {offer}
-        {trow}
-        {vrow}
-        {crow}
         {readout}
         <Box flexDirection="row" columnGap={1} flexWrap="wrap">
           <Text>thimble-cc-mod</Text>
@@ -3735,14 +3606,6 @@ export const register: Register = on => {
     return { text: `opened ${citeLabel(c)}` }
   })
 
-  on('command.run', { command: 'thimble-play' }, async $ => {
-    const a = await lastAnswer($)
-    if (!a) return { text: 'there is no answer to play yet' }
-    await startPlay($, a.text, a.rows, a.head)
-    playKeys($)
-    return { text: 'playing the last answer in the panel' }
-  })
-
   on('command.run', { command: 'thimble-band' }, async $ => {
     const on_ = !(await read($, bandA))
     await $.state.set({ plugin: 'thimble-cc-mod', key: 'band' }, on_)
@@ -3751,7 +3614,7 @@ export const register: Register = on => {
   })
 
   on('command.run', { command: 'thimble-threads' }, async $ => {
-    await openPane($, 'threads', 'Side threads')
+    await openPane($, 'threads', 'Threads')
     const n = (await allThreads($)).length
     return { text: `${n} side thread${n === 1 ? '' : 's'}` }
   })
@@ -3765,7 +3628,7 @@ export const register: Register = on => {
     // empty, its field takes them, so a follow-up typed next goes to this thread
     $.clock.after(250, () => {
       void (async () => {
-        await $.ui.open({ id: PANEL, title: 'Side thread', focus: true, columns: panelColumns() }).catch(() => undefined)
+        await $.ui.open({ id: PANEL, title: 'Threads', focus: true, columns: panelColumns() }).catch(() => undefined)
         await $.ui.focus({ requestId: PANEL, key: askKey(id) }).catch(() => undefined)
       })()
     })
@@ -3927,7 +3790,7 @@ export const register: Register = on => {
     const { Box } = $.ui.resolve(e)
     return <Box />
   })
-  on('command.run', { command: 'thimble-home' }, async ($, e) => homeCommand($, e.args))
+  on('command.run', { command: 'thimble-home' }, async $ => homeCommand($))
 }
 
 // ------------------------------------------------------------------------------------------------ the harness
@@ -3981,6 +3844,13 @@ function harnessCtx($: Dollar): HarnessCtx {
     thread: async about => {
       await openThread($, about)
     },
+    submit: async text => {
+      await $.prompt.submit({ text, asUser: true })
+    },
+    labelOpened: async () => (await $.state.get({ plugin: 'thimble-cc-mod', key: 'labelOpen' })).value ?? [],
+    setLabelOpened: async open => {
+      await $.state.set({ plugin: 'thimble-cc-mod', key: 'labelOpen' }, open)
+    },
     toast: text => $.ui.toast(text),
     log: text => $.ui.log(text),
   }
@@ -3999,16 +3869,14 @@ const HOME_UI = { plugin: 'thimble-cc-mod', key: 'homeUi' } as const
 const homeTickA = atom({ plugin: 'thimble-cc-mod', key: 'homeTick' } as const, 0)
 let homeWatch: { cancel: () => void } | null = null
 let homeSig = '' // what watchHome last saw on disk
-const HOME_UI_EMPTY: HomeUi = { layout: 'stacked', folded: [], more: [], pick: '' }
-const homeStamps = new Map<string, HomeAct[]>() // the acts of the last drawings' hits, by the drawing's stamp
-const homeSeen = new Map<string, number>() // the last click handled, by the Client instance that sent it
 const answerHeads = new Map<string, { head: string; cards: string[] }>() // an answer file read once, by its name
-let homeDraws = 0
+// the reports written in this session the analyst has not opened yet: `new` after their names
+const freshReports = new Set<string>()
 
 async function homeUi($: Dollar): Promise<HomeUi> {
   const v = (await $.state.get(HOME_UI)).value
   if (!v) return HOME_UI_EMPTY
-  return { ...HOME_UI_EMPTY, ...v, layout: HOME_LAYOUTS.includes(v.layout as HomeLayoutName) ? (v.layout as HomeLayoutName) : 'stacked' }
+  return { ...HOME_UI_EMPTY, folded: v.folded ?? [], unfolded: v.unfolded ?? [], more: v.more ?? [], pick: v.pick ?? '' }
 }
 
 /** An answer file's time from its name (20261005-214730.md), as epoch ms. */
@@ -4034,7 +3902,7 @@ async function homeData($: Dollar): Promise<HomeData> {
   await read($, homeTickA) // and when what it lists changed on disk (watchHome)
   const views = [...pipes.values()].map(r => {
     const w = stateWords(r.s, r.drawable)
-    return { slug: r.p.slug, name: r.p.name, state: w.state, words: w.words, files: r.p.claims, unit: r.p.unit, drawable: r.drawable, left: r.s?.left?.length ?? 0, at: r.s?.at ?? (Date.parse(r.p.ts) || 0) }
+    return { slug: r.p.slug, name: r.p.name, state: w.state, words: w.words, files: r.p.claims, unit: r.p.unit, drawable: r.drawable, left: r.s?.left?.length ?? 0, at: r.s?.at ?? (Date.parse(r.p.ts) || 0), ...(freshViews.has(r.p.slug) && w.state === 'built' ? { fresh: true } : {}) }
   })
   const rctx = reportCtx($)
   const groups: HomeCardGroup[] = []
@@ -4042,7 +3910,7 @@ async function homeData($: Dollar): Promise<HomeData> {
   for (const r of await allReports(rctx)) {
     const md = r.state === 'ready' ? await text(`${cwd}/${r.file}`) : ''
     const cards = md ? reportCards(md) : []
-    reports.push({ slug: r.slug, title: r.title, form: typeOf(r.form).name, state: r.state, cards: cards.length, tools: r.tools, at: r.created })
+    reports.push({ slug: r.slug, title: r.title, form: typeOf(r.form).name, state: r.state, cards: cards.length, tools: r.tools, at: r.created, ...(freshReports.has(r.slug) && r.state === 'ready' ? { fresh: true } : {}) })
     groups.push({ head: r.title, from: 'report', cards: cards.map(id => ({ id, kind: '', question: '' })), at: r.created })
   }
   const mine = new Set((await read($, threadListA)) ?? [])
@@ -4053,6 +3921,8 @@ async function homeData($: Dollar): Promise<HomeData> {
     threads.push({ id: t.id, title: threadTitle(t), about: `about ${plainCites(t.label)}`, words: afterGlyph(st.words), tone: st.tone, unread: unread(t, (await $.state.get({ ...THREAD_SEEN, id: t.id })).value), earlier: !mine.has(t.id), at })
     groups.push({ head: threadTitle(t), from: 'thread', cards: embeddedCards(t.turns.map(x => x.a).join('\n\n')).map(id => ({ id, kind: '', question: '' })), at })
   }
+  // an answer a task's notification started (a workflow's end) goes on with the question asked before it
+  let lastHead = ''
   for (const name of await names('answers', '.md')) {
     let got = answerHeads.get(name)
     if (!got) {
@@ -4060,7 +3930,9 @@ async function homeData($: Dollar): Promise<HomeData> {
       got = { head: (md.split('\n')[0] ?? '').replace(/^#\s*/, ''), cards: embeddedCards(md) }
       if (md) answerHeads.set(name, got)
     }
-    groups.push({ head: got.head, from: 'answer', cards: got.cards.map(id => ({ id, kind: '', question: '' })), at: answerTime(name) })
+    const head = /^\s*<task-notification/.test(got.head) && lastHead ? lastHead : got.head
+    if (!/^\s*</.test(head)) lastHead = head
+    groups.push({ head, from: 'answer', cards: got.cards.map(id => ({ id, kind: '', question: '' })), at: answerTime(name) })
   }
   // every card of the folder, by its file: its kind and question
   const all: (HomeCard & { created: number })[] = []
@@ -4090,7 +3962,7 @@ async function homeData($: Dollar): Promise<HomeData> {
   const cov = await harnessCtx($).coverage()
   const last = coverageLast()
   if (last.at !== (cov?.at ?? 0) || !last.data) homeCoverageLater($)
-  return { views, reports, threads, cardGroups, labels, files: last.data?.files ?? [], coverage: last.data?.line ?? cov?.line ?? '' }
+  return { views, reports, threads, cardGroups, labels, files: last.data?.files ?? [], coverage: last.data?.line ?? cov?.line ?? '', root: cwd.split('/').filter(Boolean).at(-1) ?? 'folder' }
 }
 
 let homeCovBusy = false
@@ -4110,40 +3982,43 @@ function homeCoverageLater($: Dollar): void {
   })
 }
 
+// the home panel's last layout, which a key steps through
+let homeLast: HomeLayout | null = null
+
+/** The home panel, drawn from home.ts's lines by homeview.tsx: a click on a row opens it, on a heading its section's
+ *  panel, on a group or folder folds it; ↑↓ choose a row, Enter opens it and Space folds it. */
 async function drawHome($: Dollar, e: PaneEvent): Promise<RenderElement> {
-  const { Box, Text, Button } = $.ui.resolve(e)
+  const { Box, Text } = $.ui.resolve(e)
   if (e.surface !== 'terminal' && e.surface !== 'desktop') return <Text dimColor>The home panel needs the terminal or the desktop app.</Text>
-  const { Client } = $.ui.resolve(e)
   const cols = Math.max(40, e.props.bodyColumns)
-  const lay = homeLayout(await homeData($), await homeUi($), cols)
-  const stamp = `h${++homeDraws}`
-  homeStamps.set(stamp, lay.hits.map(h => h.act))
-  for (const k of [...homeStamps.keys()].slice(0, -4)) homeStamps.delete(k)
-  // the hits of one act share a group, so the pointer lights an item's lines together
-  const groups = new Map<HomeAct, number>()
-  const packed = lay.hits.flatMap((h: HomeHit) => {
-    if (!groups.has(h.act)) groups.set(h.act, groups.size)
-    return [h.y, h.x0, h.x1, h.row ? 1 : 0, groups.get(h.act)!]
-  })
+  const ui = await homeUi($)
+  const lay = homeLayout(await homeData($), ui, cols)
+  homeLast = lay
+  const run = (act: HomeAct) => async () => {
+    if (act.op === 'open') await homeOpen($, act.open)
+    else await $.state.set(HOME_UI, homeReduce(await homeUi($), act))
+  }
+  const hits: LineHit[] = lay.hits.map(h => ({ y: h.y, x0: h.x0, x1: h.x1, row: h.row, run: async () => {
+    if (h.pick) await $.state.set(HOME_UI, { ...(await homeUi($)), pick: h.pick })
+    await run(h.act)()
+  } }))
+  const onKey = async (k: string) => {
+    const cur = await homeUi($)
+    const l = homeLast
+    if (!l) return
+    const pick = cur.pick || l.picks[0]?.key || ''
+    const at = l.picks.find(p => p.key === pick)
+    if (k === 'return' || k === 'enter') return at ? run(at.act)() : undefined
+    if (k === 'space' || k === ' ') return at?.act.op === 'fold' ? run(at.act)() : undefined
+    const next = homePick(l, cur, k)
+    if (next !== cur.pick) await $.state.set(HOME_UI, { ...cur, pick: next })
+  }
   return (
     <Box flexDirection="column">
       {hiddenKeys($, e, [{ key: 'close', hotkey: 'x', onPress: () => void closePanel($) }])}
-      <Client key="home" module="./homeview.tsx" width={cols} height={lay.lines.length} props={JSON.parse(JSON.stringify({ lines: lay.lines.map(mergeSegs), hits: packed, stamp, cols })) as never} />
+      {linesEl($, e, marginKey('home'), lay.lines, hits, cols + MARGIN_W, onKey)}
     </Box>
   )
-}
-
-/** A click the Client posted: the hit's act, from the drawing it was in. Each is handled once. */
-async function homeMessage($: Dollar, origin: unknown, raw: unknown): Promise<void> {
-  if (!Array.isArray(raw) || typeof origin !== 'string') return
-  for (const a of raw as { seq?: unknown; i?: unknown; s?: unknown }[]) {
-    if (typeof a?.seq !== 'number' || a.seq <= (homeSeen.get(origin) ?? 0)) continue
-    homeSeen.set(origin, a.seq)
-    const did = homeStamps.get(String(a.s))?.[Number(a.i)]
-    if (!did) continue
-    if (did.op === 'open') await homeOpen($, did.open)
-    else await $.state.set(HOME_UI, homeReduce(await homeUi($), did))
-  }
 }
 
 async function homeOpen($: Dollar, o: HomeOpen): Promise<void> {
@@ -4172,23 +4047,15 @@ async function homeOpen($: Dollar, o: HomeOpen): Promise<void> {
   }
 }
 
-/** /thimble-home [stacked|index]: the panel, in the layout named. */
-async function homeCommand($: Dollar, args: string): Promise<{ text: string }> {
-  const want = args.trim().toLowerCase()
-  if (want && !HOME_LAYOUTS.includes(want as HomeLayoutName)) return { text: `no layout "${clip(want, 40)}": ${HOME_LAYOUTS.join(' or ')}` }
-  if (want) await $.state.set(HOME_UI, { ...(await homeUi($)), layout: want as HomeLayoutName })
+/** /thimble-home: the panel. */
+async function homeCommand($: Dollar): Promise<{ text: string }> {
   await coverageDetail(harnessCtx($)).catch(() => null)
   await openHome($)
-  return { text: `home · ${(await homeUi($)).layout}` }
+  return { text: 'home' }
 }
 
-/** Open the home panel, with section `unfold` unfolded in the stacked layout (the threads, from the row above the
- *  prompt). */
-async function openHome($: Dollar, unfold?: SectionId): Promise<void> {
-  if (unfold) {
-    const ui = await homeUi($)
-    if (ui.folded.includes(unfold)) await $.state.set(HOME_UI, { ...ui, folded: ui.folded.filter(x => x !== unfold) })
-  }
+/** Open the home panel. */
+async function openHome($: Dollar): Promise<void> {
   await scanProposals($)
   homeSig = await homeSignature($)
   await openPane($, 'home', 'Home')
@@ -4244,7 +4111,7 @@ function watchHome($: Dollar): void {
 // (viewdraw.ts) for the Client views.tsx; the acts and keys it posts change the view's state (in `views`, by slug).
 
 type LoadedView = { slug: string; spec: ViewSpec | null; data: ViewData | null; problems: string[]; notes: string[] }
-type ViewEffect = { ask?: { label: string; context: string; ref?: string }; open?: { ref: string; text: string }; menu?: Target; file?: string; from?: number; up?: true }
+type ViewEffect = { ask?: { label: string; context: string; ref?: string }; open?: { ref: string; text: string }; file?: string; from?: number; up?: true }
 
 const VIEWS = { plugin: 'thimble-cc-mod', key: 'views' } as const
 const viewOpenA = atom({ plugin: 'thimble-cc-mod', key: 'view' } as const, '')
@@ -4375,14 +4242,16 @@ async function drawViewPane($: Dollar, e: PaneEvent, home: string, close: () => 
   const cols = Math.max(40, e.props.bodyColumns)
   const rows = Math.max(16, (e.props.scroll?.bodyRows || 40) - 1)
   const st = await viewState($, slug)
-  const lay = viewLayout(v.spec, v.data, st, cols, rows, VIEW_MARGIN)
+  // the view's lines bring the margin, where `❯` marks the selected row: they are the type area and 2 cells wider
+  const lay = viewLayout(v.spec, v.data, st, cols, rows, VIEW_MARGIN, MARGIN_W)
   metas.set(slug, lay.meta)
   const packed = packHits(lay.hits)
   keepHits(slug, packed.stamp, lay.hits)
+  const w = cols + MARGIN_W
   return (
     <Box flexDirection="column">
       {closeKey}
-      <Client key={`view:${slug}`} module="./views.tsx" width={cols} height={lay.lines.length} props={JSON.parse(JSON.stringify({ lines: lay.lines.map(mergeSegs), hits: packed.hits, stamp: packed.stamp, cols, view: slug })) as never} />
+      <Client key={marginKey(`view:${slug}`)} module="./views.tsx" width={w} height={lay.lines.length} props={JSON.parse(JSON.stringify({ lines: lay.lines.map(mergeSegs), hits: packed.hits, stamp: packed.stamp, cols: w, view: slug })) as never} />
     </Box>
   )
 }
@@ -4405,20 +4274,17 @@ function keepHits(slug: string, stamp: string, hits: Hit[]): void {
   viewHits.set(slug, [...kept, { stamp, hits }].slice(-6))
 }
 
-/** What a click on a hit asks for: the act it was drawn with, the side thread about its row, or its record's menu. */
-function hitAct(slug: string, a: HitAct): ViewAct | { menu: Target } | null {
+/** What a click on a hit asks for: the act it was drawn with, or the side thread about its row (its "?"). A
+ *  right-click does what a click does. */
+function hitAct(slug: string, a: HitAct): ViewAct | null {
   const h = viewHits.get(slug)?.find(k => k.stamp === a.s)?.hits[a.i]
   if (!h) return null
-  if (a.menu) {
-    const r = hitRecord(h)
-    return r ? { menu: { kind: 'record', ref: r.ref, text: r.text, ...(r.label ? { label: r.label } : {}) } } : null
-  }
   const sel = a.ask ? hitSel(h) : null
   return sel ? { op: 'ask', ...sel } : h.act
 }
 
 /** A post of the Client (`type: 'view'`): each act not seen yet applied to the view's state, in order; a click on a
- *  hit by the act it was drawn with, a right-click by its record's menu (after the acts). */
+ *  hit by the act it was drawn with. */
 async function viewMessage($: Dollar, home: string, d: { view?: unknown; vorigin?: unknown; acts?: unknown }): Promise<ViewEffect[]> {
   if (typeof d.view !== 'string' || typeof d.vorigin !== 'string' || !Array.isArray(d.acts)) return []
   const last = seenActs.get(d.vorigin) ?? 0
@@ -4426,13 +4292,11 @@ async function viewMessage($: Dollar, home: string, d: { view?: unknown; vorigin
   if (!fresh.length) return []
   seenActs.set(d.vorigin, Math.max(...fresh.map(a => a.seq)))
   const acts: ViewAct[] = []
-  const menus: ViewEffect[] = []
   for (const { act: a } of fresh) {
     const r = a.op === 'hit' ? hitAct(d.view, a) : a
-    if (r && 'menu' in r) menus.push({ menu: r.menu })
-    else if (r) acts.push(r)
+    if (r) acts.push(r)
   }
-  return [...(acts.length ? await applyActs($, home, d.view, acts) : []), ...menus]
+  return acts.length ? applyActs($, home, d.view, acts) : []
 }
 
 /** Acts applied to a view's state (from the Client, the wheel or a command), in the order they came; the effects for
@@ -4482,8 +4346,8 @@ async function openView($: Dollar, slug: string, patch: Partial<ViewState> = {})
   await openPane($, 'view', clip(name, 60))
 }
 
-/** What the view's acts ask of the mod: a side thread about a row, a place opened, a record's menu. A record the view
- *  opens is named by its row in the panel, not as a citation. */
+/** What the view's acts ask of the mod: a side thread about a row, a place opened, a file. A record the view opens is
+ *  named by its row in the panel, not as a citation. */
 async function viewEffects($: Dollar, fx: ViewEffect[]): Promise<void> {
   for (const f of fx) {
     if (f.file) await openFile($, f.file, undefined, f.from)
@@ -4492,10 +4356,6 @@ async function viewEffects($: Dollar, fx: ViewEffect[]): Promise<void> {
     if (f.open) {
       viewRecords.set(cid(`[[${f.open.ref}]]`), f.open.text)
       await openPlace($, { raw: `[[${f.open.ref}]]`, ref: f.open.ref, display: null })
-    }
-    if (f.menu) {
-      if (f.menu.ref) viewRecords.set(cid(`[[${f.menu.ref}]]`), f.menu.text ?? '')
-      await openMenu($, f.menu)
     }
   }
 }
@@ -4518,7 +4378,6 @@ const pipes = new Map<string, PipeRow>() // every proposal of the folder, by slu
 const working = new Set<string>() // the slugs whose builder, checks or reviewer run in this session
 const proposalsA = atom({ plugin: 'thimble-cc-mod', key: 'viewProposals' } as const, [])
 const viewPaneA = atom({ plugin: 'thimble-cc-mod', key: 'viewPane' } as const, '')
-const viewPaneMoreA = atom({ plugin: 'thimble-cc-mod', key: 'viewPaneMore' } as const, [])
 const templates = new Map<string, string>()
 
 async function readJsonFile($: Dollar, path: string): Promise<unknown> {
@@ -4577,7 +4436,11 @@ async function scanOnce($: Dollar): Promise<void> {
       else s = { ...s, state: 'stopped', step: '', agent: '' }
     }
     if (mem) Object.assign(mem, { p, s, drawable })
-    else pipes.set(slug, { p, s, drawable })
+    else {
+      pipes.set(slug, { p, s, drawable })
+      // a proposal made in this session gets its `↳ view` row in main's chat
+      if ((Date.parse(p.ts) || 0) >= sessionAt - 5000) await attachViewRow($, slug)
+    }
     // a build asked for in main's turn starts when the turn ends, which reads the proposals again
     if (p.build && (!s || s.for !== p.ts) && !working.has(slug) && !mainBusy) void startBuild($, slug)
   }
@@ -4607,9 +4470,9 @@ async function setStatus($: Dollar, slug: string, patch: Partial<BuildStatus>, w
   await refreshRow($)
 }
 
-/** The builder's prompt: prompt/view-build.md for the proposal, then the checks' report or the review's problems when
- *  this builder follows another. */
-async function builderPrompt($: Dollar, p: Proposal, follow: { gates?: string[]; review?: string[] }): Promise<string> {
+/** The builder's prompt: prompt/view-build.md for the proposal, then the checks' report, the review's problems, or the
+ *  change the analyst asked for (prompt/view-change.md) when this builder follows another. */
+async function builderPrompt($: Dollar, p: Proposal, follow: { gates?: string[]; review?: string[]; change?: string }): Promise<string> {
   await paths($)
   const folder = `${cwd}/${HOME}/views/${p.slug}`
   const checkCmd = `python3 ${root}/helper/viewpipe.py check ${p.slug}`
@@ -4634,16 +4497,17 @@ async function builderPrompt($: Dollar, p: Proposal, follow: { gates?: string[];
     examples: examplesText(`${root}/viewers`, `${root}/tests/fixtures/views`, own, rowsOp),
     check: checkCmd,
     render,
-    draft: !follow.gates && !follow.review && (await $.fs.exists(`${folder}/view.json`)),
+    draft: !follow.gates && !follow.review && !follow.change && (await $.fs.exists(`${folder}/view.json`)),
   })
+  if (follow.change) return `${first}\n\n${fill(await template($, 'view-change'), { folder, request: follow.change, check: checkCmd })}`
   if (follow.review) return `${first}\n\n${fill(await template($, 'view-revise'), { folder, drawings: `${folder}/render.txt`, findings: findingsText(follow.review), check: checkCmd })}`
   if (follow.gates) return `${first}\n\n${fill(await template($, 'view-gates'), { folder, check: checkCmd, report: ['```', ...follow.gates, '```'].join('\n') })}`
   return first
 }
 
-/** Start a builder for the proposal: the first, one after checks that failed (`gates`, their lines), or one that fixes
- *  what the review found (`review`). */
-async function startBuild($: Dollar, slug: string, follow: { gates?: string[]; review?: string[] } = {}): Promise<void> {
+/** Start a builder for the proposal: the first, one after checks that failed (`gates`, their lines), one that fixes
+ *  what the review found (`review`), or one that makes the change the analyst asked for (`change`). */
+async function startBuild($: Dollar, slug: string, follow: { gates?: string[]; review?: string[]; change?: string } = {}): Promise<void> {
   const row = pipes.get(slug)
   if (!row) return
   working.add(slug)
@@ -4793,19 +4657,6 @@ async function reviewComplete($: Dollar, agentId: string, a: ChatAgent, reason: 
   await startBuild($, slug, { review: problems ?? [] })
 }
 
-/** Review a built view again, as thimble's "review again": the checks first, since its files may have changed, then a
- *  new run of reviews, its rounds counted from none; checks that fail go to a builder. */
-async function reviewAgain($: Dollar, slug: string): Promise<void> {
-  if (!pipes.has(slug) || working.has(slug)) return
-  working.add(slug)
-  await setStatus($, slug, { state: 'checking', step: '', round: 0, attempt: 1, fixed: [], left: [], asked: [], error: undefined })
-  const rep = await runViewChecks($, slug)
-  await setStatus($, slug, { checks: rep.lines })
-  if (!rep.ok) return startBuild($, slug, { gates: rep.lines })
-  await viewChanged($, slug)
-  await startReview($, slug)
-}
-
 /** Stop a build: its builder or reviewer stops, and the view stays as its last checks left it. */
 async function stopBuild($: Dollar, slug: string): Promise<void> {
   const id = pipes.get(slug)?.s?.agent
@@ -4834,32 +4685,8 @@ async function pipeStep($: Dollar, agentId: string, content: unknown): Promise<v
   if (step && pipes.get(a.view)?.s?.step !== step) await setStatus($, a.view, { step }, false)
 }
 
-/** The columns of the rows above the prompt: a label dim at column 2, its value at column 12. */
+/** The columns of the row above the prompt that offers a panel a click held: a label dim at column 2, its words at 12. */
 const ABOVE_LABEL = 12
-
-/** The row above the prompt while side threads hold answers unread: `threads` at column 2 and how many new, in bold, at
- *  column 12; a press on it shows the thread, or the home panel, which lists the threads with new answers first, when
- *  several do. None when every answer is read. (Claude Code's Button has no bold label: the label is the control, the
- *  count beside it the bold.) */
-async function threadsNewsRow($: Dollar, e: AboveEvent): Promise<RenderElement | null> {
-  const news = (await read($, newsA)) ?? NEWS
-  if (!news.n) return null
-  const { Box, Text, Button } = $.ui.resolve(e)
-  const open = async () => {
-    const t = news.one ? await threadOrSaved($, news.one) : undefined
-    if (t) await showThread($, t)
-    else await openHome($, 'threads')
-  }
-  return (
-    <Box key="threads-row" flexDirection="row">
-      <Box width={ABOVE_LABEL} flexShrink={0} flexDirection="row">
-        <Text>{'  '}</Text>
-        <Button key="threads-news" label="threads" plain dimColor onPress={() => void open()} />
-      </Box>
-      <Text bold>{`${news.n} new`}</Text>
-    </Box>
-  )
-}
 
 /** A view's state words where its glyph already says what the words would: without "built", "proposed" or "failed". */
 function afterMark(words: string): string {
@@ -4871,174 +4698,125 @@ function viewGlyph(mark: string): { s: string; colour?: string; dim?: boolean } 
   return mark === '!' || mark === '×' ? { s: mark, colour: COLORS.problem } : mark === '○' ? { s: mark, dim: true } : { s: mark }
 }
 
-// the views built in this session the analyst has not opened yet: their names are new (bold) until opened
+// the views built in this session the analyst has not opened yet: `new` in green after their names until opened
 const freshViews = new Set<string>()
+// the views main proposed in its turn, whose `↳ view` row stands under the answer once the turn ends
+let viewRowsPending: string[] = []
 
-/** The row above the prompt: `views` at column 2, then from column 12 each proposal, its state glyph and its name (in a
- *  bold "new" after it while built and not yet opened), 2 cells apart, and `files ›`; none when no view is proposed. */
-async function proposalsRow($: Dollar, e: AboveEvent): Promise<RenderElement | null> {
-  const rows = ((await read($, proposalsA)) ?? []) as ChatViewPipeRow[]
-  if (!rows.length) return null
-  const { Box, Text, Button } = $.ui.resolve(e)
-  const cols = Math.max(40, e.props.bodyColumns)
-  const each = Math.max(14, Math.floor((cols - ABOVE_LABEL - 8) / Math.min(rows.length, 4)) - 4)
-  return (
-    <Box flexDirection="row">
-      <Box width={ABOVE_LABEL} flexShrink={0}>
-        <Text dimColor>{'  views'}</Text>
-      </Box>
-      <Box flexDirection="row" columnGap={2} flexWrap="wrap" flexShrink={1}>
-        {rows.map(r => {
-          const g = viewGlyph(r.mark)
-          const fresh = freshViews.has(r.slug) && r.state === 'built'
-          return (
-            <Box key={`vpb:${r.slug}`} flexDirection="row">
-              <Text {...(g.colour ? { color: g.colour } : {})} {...(g.dim ? { dimColor: true } : {})}>{`${g.s} `}</Text>
-              <Button
-                key={`vp:${r.slug}`}
-                label={clip(r.name, each)}
-                plain
-                onPress={async () => {
-                  if (r.state === 'built' && r.drawable) return openView($, r.slug)
-                  await $.state.set({ plugin: 'thimble-cc-mod', key: 'viewPane' }, r.slug)
-                  await openPane($, 'views', 'Views')
-                }}
-              />
-              {fresh ? <Text bold>{' new'}</Text> : null}
-            </Box>
-          )
-        })}
-        <Box key="vpb:files">
-          <Button key="vp:files" label="files ›" plain onPress={() => void openFiles($)} />
-        </Box>
-      </Box>
-    </Box>
-  )
+/** Whether a view already has its `↳ view` row under some row of main's chat. */
+function viewRowKnown(slug: string): boolean {
+  return Object.values(signals.views).some(xs => xs.includes(slug)) || viewRowsPending.includes(slug)
 }
 
-/** The views pane: its title row (`Views`, the count, `files ›` against the right edge); under the rule, every
- *  proposal as an item, its state at A0 and its name at A2 (the chosen one on the selection background), its state's
- *  words dim under it; under the second rule, the chosen one: its name with `build again  review again  open` against
- *  the right edge, why it was proposed as prose, and its fields as label/value rows, each list's items after a `-`. */
+/** A view main (or an orientation) proposed gets one `↳ view` row in main's chat: under the answer of the turn that
+ *  proposed it (`anchor`, its last row, once the turn ends), else under main's latest row. */
+async function attachViewRow($: Dollar, slug: string, anchor?: string): Promise<void> {
+  if (!anchor && viewRowKnown(slug)) return
+  if (!anchor && mainBusy) {
+    viewRowsPending.push(slug)
+    return
+  }
+  const at = anchor || signals.last || WAITING
+  const rows = [...(signals.views[at] ?? []).filter(x => x !== slug), slug]
+  signals.views[at] = rows
+  await $.state.set({ ...VIEW_ROWS, id: at }, rows)
+  await saveSignals($)
+}
+
+/** The views main proposed in the turn that just ended: their rows under its answer's last row. */
+async function attachPendingViews($: Dollar, row: string): Promise<void> {
+  const pending = viewRowsPending
+  viewRowsPending = []
+  for (const slug of pending) await attachViewRow($, slug, row || signals.last || WAITING)
+}
+
+/** The views pane (views/SPEC.md, section 7, "The views pane"): its title with `files ›` against R and a dim subtitle;
+ *  under the rule, one row per view (its glyph, its name, its status dim at R), `❯` and the accent on the one chosen;
+ *  under the second rule, the chosen view's description (the proposal's `why`) as prose, then `open` (`build` for a
+ *  proposal, `stop` while it builds) and the field `ask for a change`, whose words go to the view's builder. */
 async function drawPipePane($: Dollar, e: PaneEvent): Promise<RenderElement> {
-  const { Box, Text, Button } = $.ui.resolve(e)
+  if (e.surface === 'mobile') {
+    const { Text } = $.ui.resolve(e)
+    return <Text dimColor>The views pane needs a surface with text fields.</Text>
+  }
+  const { Box, Text, Button, Input } = $.ui.resolve(e)
+  const els = { Box, Text, Button }
   const cols = Math.max(40, e.props.bodyColumns)
   await read($, proposalsA) // drawn again whenever a proposal's state changes
   const all = [...pipes.values()]
   const chosen = pipes.get(await read($, viewPaneA)) ?? all[0]
+  const pick = async (slug: string) => {
+    await $.state.set({ plugin: 'thimble-cc-mod', key: 'viewPane' }, slug)
+  }
   const keys: { key: string; hotkey: string; onPress: () => void }[] = [{ key: 'files', hotkey: 'f', onPress: () => void openFiles($) }]
+  const built = all.filter(r => stateWords(r.s, r.drawable).state === 'built').length
   const out: RenderElement[] = [
-    <Box key="vtitle" flexDirection="row">
-      <Text>
-        <Text>Views</Text>
-        <Text dimColor>{`  ${all.length}`}</Text>
-      </Text>
-      <Box flexGrow={1} />
-      <Button key="vpick:files" label="files ›" plain onPress={() => void openFiles($)} />
-    </Box>,
-    <Text key="vrule1" color={COLORS.rule}>{'─'.repeat(cols)}</Text>,
+    ...headerEls(els, { title: 'Views', cols, right: <Button key="vfiles" label="files ›" plain onPress={() => void openFiles($)} />, sub: subLine([`${all.length} view${all.length === 1 ? '' : 's'}`, built ? `${built} built` : '']) }),
   ]
+  const lines: Line[] = []
+  const hits: LineHit[] = []
   all.forEach((r, i) => {
     const w = stateWords(r.s, r.drawable)
     const g = viewGlyph(w.mark)
-    const pick = () => void $.state.set({ plugin: 'thimble-cc-mod', key: 'viewPane' }, r.p.slug)
-    const name = <Button key={`vpick:${r.p.slug}`} label={clip(r.p.name, cols - 8)} plain onPress={pick} />
+    const fresh = freshViews.has(r.p.slug) && w.state === 'built'
     const rest = afterMark(w.words)
-    out.push(
-      <Box key={`vrow:${r.p.slug}`} flexDirection="column">
-        <Box flexDirection="row">
-          <Text {...(g.colour ? { color: g.colour } : {})} {...(g.dim ? { dimColor: true } : {})}>{`${g.s} `}</Text>
-          {r === chosen ? <Box backgroundColor={COLORS.selected}>{name}</Box> : name}
-          {freshViews.has(r.p.slug) && w.state === 'built' ? <Text bold>{' new'}</Text> : null}
-        </Box>
-        {rest ? <Text {...(w.state === 'failed' ? { color: COLORS.problem } : { dimColor: true })} wrap="truncate-end">{`  ${rest}`}</Text> : null}
-      </Box>,
-    )
-    if (i < 9) keys.push({ key: `v${i}`, hotkey: String(i + 1), onPress: pick })
+    const right: Line = [...(rest ? [{ s: rest, fg: w.state === 'failed' ? COLORS.problem : COLORS.dim }] : []), ...(fresh ? [...(rest ? [{ s: '  ' }] : []), freshSeg()] : [])]
+    const y = lines.length
+    lines.push(pointed(spread([{ s: g.s, ...(g.colour ? { fg: g.colour } : g.dim ? { fg: COLORS.dim } : {}) }, { s: ' ' }, { s: r.p.name }], right, cols), r === chosen))
+    hits.push({ y, x0: MARGIN_W, x1: cols + MARGIN_W, row: true, run: () => pick(r.p.slug) })
+    if (i < 9) keys.push({ key: `v${i}`, hotkey: String(i + 1), onPress: () => void pick(r.p.slug) })
   })
-  if (!all.length) out.push(<Text key="vnone" dimColor>{'  none'}</Text>)
+  if (!all.length) lines.push(pointed([{ s: '  ' }, { s: 'none', fg: COLORS.dim }], false))
+  const step = async (d: number) => {
+    if (!all.length) return
+    const at = chosen ? all.indexOf(chosen) : -1
+    await pick(all[Math.max(0, Math.min(all.length - 1, at + d))]!.p.slug)
+  }
+  const openChosen = async () => {
+    if (chosen?.drawable) await openView($, chosen.p.slug)
+  }
+  out.push(linesEl($, e, marginKey('views-list'), lines, hits, cols + MARGIN_W, k => (k === 'up' || k === 'k' ? step(-1) : k === 'down' || k === 'j' ? step(1) : k === 'return' || k === 'enter' ? openChosen() : undefined)))
+  // each view a press away by its key too, for a surface that draws no Client: no row of its own
+  out.unshift(
+    <Box key="view-presses" width={0} height={0} flexShrink={0} overflow="hidden" flexDirection="row">
+      {all.map(r => <Button key={`vpick:${r.p.slug}`} label={r.p.name} plain onPress={() => void pick(r.p.slug)} />)}
+    </Box>,
+  )
+  const hints = ['↑↓ to choose']
   if (chosen) {
     const p = chosen.p
-    const s = chosen.s
-    const w = stateWords(s, chosen.drawable)
+    const w = stateWords(chosen.s, chosen.drawable)
     const busy = working.has(p.slug)
-    out.push(<Text key="vrule2" color={COLORS.rule}>{'─'.repeat(cols)}</Text>)
-    // its name, and what can be done with it against the right edge
-    out.push(
-      <Box key="vhead" flexDirection="row">
-        <Box flexShrink={1}>
-          <Text wrap="truncate-end">{p.name}</Text>
-        </Box>
-        <Box flexGrow={1} />
-        <Box flexShrink={0} flexDirection="row" columnGap={2}>
-          {!busy ? <Button key="vbuild" label={chosen.drawable ? 'build again' : 'build'} plain onPress={() => void startBuild($, p.slug)} /> : null}
-          {busy ? <Button key="vstop" label="stop" plain onPress={() => void stopBuild($, p.slug)} /> : null}
-          {chosen.drawable && !busy ? <Button key="vreview" label="review again" plain onPress={() => void reviewAgain($, p.slug)} /> : null}
-          {chosen.drawable ? <Button key="vopen" label="open" plain onPress={() => void openView($, p.slug)} /> : null}
-        </Box>
-      </Box>,
-    )
-    if (!busy) keys.push({ key: 'build', hotkey: 'b', onPress: () => void startBuild($, p.slug) })
-    if (chosen.drawable && !busy) keys.push({ key: 'review', hotkey: 'r', onPress: () => void reviewAgain($, p.slug) })
-    if (chosen.drawable) keys.push({ key: 'open', hotkey: 'o', onPress: () => void openView($, p.slug) })
-    // why it was proposed, as prose at A2 (rule 7)
-    out.push(<Box key="vwhy" marginLeft={2} width={Math.min(MEASURE, cols - 2)}><Text wrap="wrap">{p.why}</Text></Box>)
-    // what the view is, as proposed; then where its build stands, each finding on a row of its own after a `-`
-    const more = ((await read($, viewPaneMoreA)) ?? []) as string[]
-    const LABELS = ['unit', 'overview', 'zoom', 'filter', 'details', 'files', 'by', 'checks', 'fixing', 'checking', 'left', 'fixed']
-    const labW = Math.max(...LABELS.map(l => l.length)) + 2
-    const field = (k: string, v: string) => (
-      <Box key={`vf:${k}`} flexDirection="row">
-        <Box width={labW} flexShrink={0}>
-          <Text dimColor>{k}</Text>
-        </Box>
-        <Box flexShrink={1} width={Math.min(MEASURE, cols - labW)}>
-          <Text wrap="wrap">{v}</Text>
+    out.push(ruleEl(els, cols, 'vrule2'))
+    // why it was proposed, as prose filling the type area
+    out.push(<Text key="vwhy" wrap="wrap">{p.why}</Text>)
+    // where its build stands, while it builds or when it failed
+    if (busy && chosen.s?.step) out.push(<Text key="vstep" dimColor wrap="truncate-end">{`◌ ${chosen.s.step}`}</Text>)
+    if (w.state === 'failed' && chosen.s?.error) out.push(<Text key="verr" color={COLORS.problem} wrap="wrap">{`× ${chosen.s.error}`}</Text>)
+    const controls = [
+      chosen.drawable ? <Button key="vopen" label="open" plain onPress={() => void openView($, p.slug)} /> : null,
+      !busy && !chosen.drawable ? <Button key="vbuild" label="build" plain onPress={() => void startBuild($, p.slug)} /> : null,
+      busy ? <Button key="vstop" label="stop" plain onPress={() => void stopBuild($, p.slug)} /> : null,
+    ]
+    if (chosen.drawable) {
+      keys.push({ key: 'open', hotkey: 'o', onPress: () => void openView($, p.slug) })
+      hints.push('Enter or o to open')
+    }
+    if (!busy && !chosen.drawable) {
+      keys.push({ key: 'build', hotkey: 'b', onPress: () => void startBuild($, p.slug) })
+      hints.push('b to build')
+    }
+    // a change asked for in the analyst's words goes to a builder, which changes the view's files (prompt/view-change.md)
+    const field = chosen.drawable && !busy ? (
+      <Box key="vchange" flexDirection="row">
+        <Text dimColor>{'ask for a change  '}</Text>
+        <Box flexGrow={1} flexShrink={1}>
+          <Input key={`vchange-${p.slug}`} submitLabel="send" onSubmit={v => void (v.trim() ? startBuild($, p.slug, { change: v.trim() }) : undefined)} />
         </Box>
       </Box>
-    )
-    const list = (k: string, xs: string[], cap: number, colour?: string) => {
-      const open = more.includes(`${p.slug}:${k}`)
-      const shown = open ? xs : xs.slice(0, cap)
-      const toggle = xs.length > cap ? (
-        <Button
-          key={`vmore:${k}`}
-          label={open ? 'fewer' : `… ${xs.length - cap} more`}
-          plain
-          {...(open ? {} : { dimColor: true })}
-          onPress={() => void $.state.set({ plugin: 'thimble-cc-mod', key: 'viewPaneMore' }, open ? more.filter(m => m !== `${p.slug}:${k}`) : [...more, `${p.slug}:${k}`])}
-        />
-      ) : null
-      return (
-        <Box key={`vf:${k}`} flexDirection="row">
-          <Box width={labW} flexShrink={0}>
-            <Text dimColor>{k}</Text>
-          </Box>
-          <Box flexDirection="column" flexShrink={1} width={Math.min(MEASURE, cols - labW)}>
-            {shown.map((x, i) => (
-              <Box key={`vf:${k}:${i}`} flexDirection="row">
-                <Text>{'- '}</Text>
-                <Box flexShrink={1}>
-                  <Text wrap="wrap" {...(colour ? { color: colour } : {})}>{x.replace(/\s+/g, ' ')}</Text>
-                </Box>
-              </Box>
-            ))}
-            {toggle}
-          </Box>
-        </Box>
-      )
-    }
-    out.push(<Text key="vgap"> </Text>)
-    out.push(field('unit', p.unit), field('overview', p.overview), field('zoom', p.zoom), field('filter', p.filter), field('details', p.details))
-    out.push(field('files', `${p.claims.join(', ')} · ${p.files} file${p.files === 1 ? '' : 's'}`))
-    out.push(field('by', p.proposed_by))
-    // each finding whole, wrapped; the problems left and the checks' notes always, the ones fixed four until asked
-    const checks = (s?.checks ?? []).filter(l => !/^(ok |index:|checks passed)/.test(l))
-    if (checks.length) out.push(list('checks', checks, Infinity))
-    if (s?.asked?.length && (w.state === 'revising' || w.state === 'reviewing')) out.push(list(w.state === 'revising' ? 'fixing' : 'checking', s.asked, Infinity))
-    if (s?.left?.length) out.push(list('left', s.left, Infinity, COLORS.problem))
-    if (s?.fixed?.length) out.push(list('fixed', s.fixed, 4))
-  }
+    ) : null
+    out.push(...bottomRows($, e, cols, controls, [field], [...hints, 'f for the files', 'x to close']))
+  } else out.push(hintsEl(els, ['f for the files', 'x to close'], cols))
   keys.push({ key: 'close', hotkey: 'x', onPress: () => void closePanel($) })
   const hk = hiddenKeys($, e, keys)
   if (hk) out.unshift(hk)

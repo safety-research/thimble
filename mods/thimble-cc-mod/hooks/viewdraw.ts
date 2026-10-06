@@ -11,6 +11,17 @@ import type { Line, Seg } from './draw'
 import { fmt } from './lib'
 import { COLORS } from './paint'
 import { collectionOf, hexId, links, timeMs } from './viewspec'
+
+// same as paint.ts COLORS (accent, link); the Merge step imports them. chrome.tsx holds the same, but tools/
+// render_view.mjs runs this file under Node, which reads no .tsx.
+const ACCENT = 'suggestion'
+const LINK = 'remember'
+/** A zero-width segment that marks the first line of the selected row: the final pass hangs `❯` in the margin before it
+ *  and draws its words in the accent (views/SPEC.md, "The visual system", rule 13); `SEL_WHOLE` across the whole row,
+ *  its dim parts too, as a table's row is (so the eye follows it across the columns). */
+const SEL = '\u0000sel'
+const SEL_WHOLE = '\u0000sel-whole'
+const selMark = (whole: boolean): Seg => ({ s: '', fg: whole ? SEL_WHOLE : SEL })
 import type { Body, Column, Detail, HistogramBody, LanesBody, ListBody, Overview, Row, Scalar, Sort, Stat, TableBody, TranscriptBody, Value, ViewCollection, ViewData, ViewField, ViewLabel, ViewSpec, Where } from './viewspec'
 
 export type ViewSel = ChatViewSel
@@ -43,7 +54,7 @@ export type ViewAct =
   | { op: 'labelValue'; id: string; value: string }
   | { op: 'search' }
   | { op: 'clear' }
-  | { op: 'group'; g: string }
+  | { op: 'group'; g: string; open?: boolean }
   | { op: 'panel'; p: '' | 'problems' | 'derived' | 'about' }
   | { op: 'scroll'; d: number }
   | { op: 'dscroll'; d: number }
@@ -322,7 +333,9 @@ export function colourField(spec: ViewSpec, tab: number): string {
     if (b.kind === 'lanes') return b.color ?? (b.lanes ? '' : b.lane)
     return ''
   }
-  return of(t.overview) || of(t.body.find(b => b.kind === 'lanes'))
+  // a table may name its own colour field (the file browser's file type), for a tab with no overview to carry one
+  const table = t.body.find(b => b.kind === 'table') as TableBody | undefined
+  return of(t.overview) || of(t.body.find(b => b.kind === 'lanes')) || table?.color || ''
 }
 
 /** The colour of a value's word: red when its field flags it as a problem, else none. A value of the colour field keeps
@@ -382,7 +395,9 @@ function glyphOf(spec: ViewSpec, data: ViewData, st: ViewState, c: ViewCollectio
   const f = glyphField(spec, st, c, group)
   const v = f ? vals(r[f.name])[0] : undefined
   if (!f || v === undefined) return { s: ' ' }
-  const colour = palette(spec, data, c.name, f.name).get(String(v))
+  // a field of one value draws dim marks (rule 20): one file type in the whole folder says nothing
+  const pal = palette(spec, data, c.name, f.name)
+  const colour = pal.size > 1 ? pal.get(String(v)) : undefined
   return { s: '●', fg: colour ?? COLORS.dim }
 }
 
@@ -663,58 +678,64 @@ function statOf(spec: ViewSpec, data: ViewData, s: Stat): string {
   return f?.type === 'duration' ? dur(v) : num(+v.toPrecision(4))
 }
 
-/** The title row: the view's name, regular, its numbers dim after a gutter, "N unreadable lines" in red when there are
- *  any, and "N files ›" against the right edge, which opens what the reader read and the fields it made (on the
- *  selection background while open). Then the tabs, when there are several, the active one on the selection background;
- *  a file's window ("lines 1–200 of 3,104") with "earlier" and "later" against the right edge. The file browser's way
- *  back to its tree is a step of the panel's path (register.tsx wayRow), not part of this row. */
-function header(spec: ViewSpec, data: ViewData, st: ViewState, cols: number): Block {
+/** The view's header under the panel's path row (views/SPEC.md, "A panel's header"): its name in the accent and bold,
+ *  `N files ›` against the right edge (the files read and the fields the reader made, opened under the view); the dim
+ *  subtitle of its numbers, "N unreadable lines" in red when there are any, and a file's window ("lines 1-4,000 of
+ *  19,931") with `earlier` and `later` against the right edge; the tabs, when there are several, the selected one
+ *  inverse; the bordered search box. */
+function header(spec: ViewSpec, data: ViewData, st: ViewState, cols: number, tr?: TabRows): Block {
   const lb = builder()
   const probs = data.problems?.length ?? 0
   const files = data.files !== undefined ? `${num(data.files)} file${data.files === 1 ? '' : 's'}` : 'files'
-  const about: [string, ViewAct, Omit<Seg, 's'>][] = []
-  if (probs) about.push([`${num(probs)} unreadable line${probs === 1 ? '' : 's'}`, { op: 'panel', p: st.panel === 'problems' ? '' : 'problems' }, { fg: COLORS.problem, ...(st.panel === 'problems' ? { bg: COLORS.selected } : {}) }])
-  about.push([`${files} ›`, { op: 'panel', p: st.panel === 'about' ? '' : 'about' }, st.panel === 'about' ? { bg: COLORS.selected } : {}])
-  const rightW = about.reduce((n, [t], i) => n + width(t) + (i ? 2 : 0), 0)
-  const name = cut(spec.name, Math.max(8, Math.min(width(spec.name), cols - rightW - 2 - lb.x)))
-  lb.seg({ s: name })
-  const stats = (spec.stats ?? []).map(s => `${statValue(spec, data, s)} ${s.label}`)
-  // as many of the numbers as fit between the name and the controls, a gutter from each
+  const right = `${files} ›`
+  lb.seg({ s: cut(spec.name, Math.max(8, cols - width(right) - 2)), fg: ACCENT, b: true })
+  lb.seg({ s: ' '.repeat(Math.max(2, cols - lb.x - width(right))) })
+  lb.seg({ s: right, ...(st.panel === 'about' ? { bg: COLORS.selected } : {}) }, { op: 'panel', p: st.panel === 'about' ? '' : 'about' })
+  lb.nl()
+  // the subtitle: the view's numbers, dim; its problems, red; a file's window and its pages against the right edge
+  const w = spec.window
+  const pages: [string, ViewAct][] = w ? [...(w.from > 1 ? [['earlier', { op: 'page', d: -1 }] as [string, ViewAct]] : []), ...(w.to < w.total ? [['later', { op: 'page', d: 1 }] as [string, ViewAct]] : [])] : []
+  const pagesW = pages.reduce((n, [t], i) => n + width(t) + (i ? 2 : 0), 0)
+  const facts = [...(spec.stats ?? []).map(x => `${statValue(spec, data, x)} ${x.label}`), ...(w ? [`${w.unit} ${w.from}-${w.to} of ${num(w.total)}`] : [])]
+  const probText = probs ? `${num(probs)} unreadable line${probs === 1 ? '' : 's'}` : ''
+  const room = cols - pagesW - (pagesW ? 2 : 0) - (probText ? width(probText) + 3 : 0)
   let shown = ''
-  for (const t of stats) {
+  for (const t of facts) {
     const next = shown ? `${shown} · ${t}` : t
-    if (lb.x + 2 + width(next) + 2 + rightW > cols) break
+    if (width(next) > room) break
     shown = next
   }
-  if (shown) lb.seg({ s: `  ${shown}`, fg: COLORS.dim })
-  lb.seg({ s: ' '.repeat(Math.max(2, cols - lb.x - rightW)) })
-  about.forEach(([t, act, style], i) => {
-    if (i) lb.seg({ s: '  ' })
-    lb.seg({ s: t, ...style }, act)
-  })
-  lb.nl()
+  if (shown || probText || pages.length) {
+    if (shown) lb.seg({ s: shown, fg: COLORS.dim })
+    if (probText) {
+      if (shown) lb.seg({ s: ' · ', fg: COLORS.dim })
+      lb.seg({ s: probText, fg: COLORS.problem, ...(st.panel === 'problems' ? { bg: COLORS.selected } : {}) }, { op: 'panel', p: st.panel === 'problems' ? '' : 'problems' })
+    }
+    if (pages.length) {
+      lb.seg({ s: ' '.repeat(Math.max(2, cols - lb.x - pagesW)) })
+      pages.forEach(([t, act], i) => {
+        if (i) lb.seg({ s: '  ' })
+        lb.seg({ s: t }, act)
+      })
+    }
+    lb.nl()
+  }
+  // the tabs, each name with a cell of space at each side, the selected one inverse
   if (spec.tabs.length > 1) {
     spec.tabs.forEach((t, i) => {
-      if (i) lb.seg({ s: '  ' })
-      lb.seg({ s: t.name, ...(i === st.tab ? { bg: COLORS.selected } : {}) }, { op: 'tab', i })
+      if (i) lb.seg({ s: ' ' })
+      lb.seg({ s: ` ${t.name} `, ...(i === st.tab ? { inv: true } : {}) }, { op: 'tab', i })
     })
+    lb.nl()
   }
-  // one window of a longer file: which lines, and the windows before and after it, against the right edge
-  const w = spec.window
-  if (w) {
-    const parts: [string, ViewAct | undefined, Omit<Seg, 's'>][] = [
-      [`${w.unit} ${w.from}-${w.to} of ${num(w.total)}`, undefined, { fg: COLORS.dim }],
-      ...(w.from > 1 ? [['earlier', { op: 'page', d: -1 }, {}] as [string, ViewAct, Omit<Seg, 's'>]] : []),
-      ...(w.to < w.total ? [['later', { op: 'page', d: 1 }, {}] as [string, ViewAct, Omit<Seg, 's'>]] : []),
-    ]
-    const wide = parts.reduce((n, [t], i) => n + width(t) + (i ? 2 : 0), 0)
-    lb.seg({ s: ' '.repeat(Math.max(2, cols - lb.x - wide)) })
-    parts.forEach(([t, act, style], i) => {
-      if (i) lb.seg({ s: '  ' })
-      lb.seg({ s: t, ...style }, act)
-    })
-  }
-  if (spec.tabs.length > 1 || w) lb.nl()
+  // the search box across the type area: ⌕ and a dim placeholder, the query while typing (its cursor inverse)
+  const noun = (tr?.col.name ?? spec.tabs[st.tab]?.collection ?? 'rows').replace(/_/g, ' ')
+  const inner = Math.max(4, cols - 4)
+  const words: Line = st.q || st.typing ? [{ s: cut(st.q, inner - 3) }, ...(st.typing ? [{ s: ' ', inv: true }] : [])] : [{ s: cut(`Search ${noun}…`, inner - 2), fg: COLORS.dim }]
+  const used = 2 + lineWidth(words)
+  lb.line([{ s: `╭${'─'.repeat(Math.max(1, cols - 2))}╮`, fg: COLORS.rule }])
+  lb.line([{ s: '│ ', fg: COLORS.rule }, { s: '⌕ ', fg: COLORS.dim }, ...words, { s: ' '.repeat(Math.max(0, inner - used)) }, { s: ' │', fg: COLORS.rule }], { op: 'search' })
+  lb.line([{ s: `╰${'─'.repeat(Math.max(1, cols - 2))}╯`, fg: COLORS.rule }])
   return lb.b
 }
 
@@ -741,14 +762,10 @@ function filterRow(spec: ViewSpec, data: ViewData, st: ViewState, cols: number, 
   }
   const filtered = tr.rows.length !== tr.all
   const countW = width(count)
-  if (st.q || st.typing) {
-    lb.seg({ s: cut(st.q, 24) }, { op: 'search' })
-    if (st.typing) lb.seg({ s: ' ', inv: true })
-  } else lb.seg({ s: 'search' }, { op: 'search' })
   const fields = filterFields(spec, data, tr)
   const open = openField(st)
   if (fields.length) {
-    lb.seg({ s: '  filter  ', fg: COLORS.dim })
+    lb.seg({ s: 'filter  ', fg: COLORS.dim })
     const room = cols - countW - 2
     for (let i = 0; i < fields.length; i++) {
       const f = fields[i]!
@@ -960,7 +977,18 @@ function windowOf(h: readonly number[], cap: number, start: number, want: number
   return [a, Math.max(a, fits(a))]
 }
 
-type Entry = { group?: string; n?: number; closed?: boolean; row?: Row; colour?: string }
+type Entry = { group?: string; n?: number; closed?: boolean; row?: Row; colour?: string; more?: number }
+
+/** The rows an open group of the file browser's tree shows before `… N more` (views/SPEC.md, "The file browser"). */
+const GROUP_ROWS = 20
+
+/** Whether a group is open: a view's groups are open until folded; the file browser's tree opens its first folder and
+ *  folds the rest, until the analyst unfolds one (`<tab>.g.<group>` in `open`). */
+function groupOpen(ctx: Ctx, g: string, i: number): boolean {
+  const k = `${ctx.st.tab}.${g}`
+  if (!ctx.col.opens) return !ctx.st.closed.includes(k)
+  return i === 0 ? !ctx.st.closed.includes(k) : ctx.st.open.includes(`${ctx.st.tab}.g.${g}`)
+}
 
 function grouped(ctx: Ctx, rows: Row[], group: string | undefined): Entry[] {
   if (!group) return rowsMemo(rows, 'entries', () => rows.map(row => ({ row })))
@@ -976,10 +1004,15 @@ function grouped(ctx: Ctx, rows: Row[], group: string | undefined): Entry[] {
     return m
   })
   const out: Entry[] = []
+  let i = 0
   for (const [g, rs] of by) {
-    const closed = ctx.st.closed.includes(`${ctx.st.tab}.${g}`)
+    const closed = !groupOpen(ctx, g, i++)
     out.push({ group: g, n: rs.length, closed, colour: hueOf(ctx.spec, ctx.data, ctx.col.name, gf, rs[0]![group], ctx.st) })
-    if (!closed) out.push(...rs.map(row => ({ row })))
+    if (closed) continue
+    // the file browser's open folder: its first files, then `… N more`, until the analyst asks for them all
+    const cap = ctx.col.opens && !ctx.st.open.includes(`${ctx.st.tab}.g.${g}.all`) && rs.length > GROUP_ROWS + 1 ? GROUP_ROWS : rs.length
+    out.push(...rs.slice(0, cap).map(row => ({ row })))
+    if (cap < rs.length) out.push({ group: g, more: rs.length - cap })
   }
   return out
 }
@@ -992,12 +1025,16 @@ function citeOf(ctx: Pick<Ctx, 'spec' | 'data'>, c: ViewCollection, r: Row): Hit
 
 const isSel = (st: ViewState, c: ViewCollection, r: Row) => st.sel?.c === c.name && st.sel.k === keyOf(c, r)
 
-/** A group's heading at A0: a blank line above it (but at the top of the window), its ● in the group's hue when it is
- *  a value of the colour field, its name regular and its count dim; folded, "… N more" under it at A2. */
+/** A group's heading at A0 (views/SPEC.md, "Tables"): `▾` open or `▸` folded, a blank line above it (but at the top of
+ *  the window), its ● in the group's hue when it is a value of the colour field, its name and its count dim; folded,
+ *  only its heading shows. An open folder of the file browser past its first rows ends in `… N more`. */
 function groupLine(lb: ReturnType<typeof builder>, e: Entry, first: boolean): void {
+  if (e.more) {
+    lb.line([{ s: `  … ${num(e.more)} more`, fg: COLORS.dim }], { op: 'whole', key: `__g:${e.group!}` })
+    return
+  }
   if (!first) lb.line([])
-  lb.line([...(e.colour ? [{ s: '● ', fg: e.colour }] : []), { s: e.group! }, { s: `  ${num(e.n!)}`, fg: COLORS.dim }], { op: 'group', g: e.group! })
-  if (e.closed) lb.line([{ s: `  … ${num(e.n!)} more`, fg: COLORS.dim }], { op: 'group', g: e.group! })
+  lb.line([{ s: e.closed ? '▸ ' : '▾ ' }, ...(e.colour ? [{ s: '● ', fg: e.colour }] : []), { s: e.group!, fg: COLORS.dim }, { s: `  ${num(e.n!)}`, fg: COLORS.dim }], { op: 'group', g: e.group!, open: !e.closed })
 }
 
 /** The window's entries, headed by the group it starts in: the heading in place of the row that would end the window
@@ -1006,15 +1043,15 @@ function headed(entries: readonly Entry[], a: number, b: number, want: number): 
   if (!entries[a]?.row || a === 0 || !entries.some(e => !e.row)) return entries.slice(a, b)
   const from = want === b - 1 ? a + 1 : a
   let g = from
-  while (g > 0 && entries[g]!.row) g--
+  while (g > 0 && (entries[g]!.row || entries[g]!.more)) g--
   if (entries[g]!.row) return entries.slice(a, b)
   if (g === from) return entries.slice(from, b)
   return [entries[g]!, ...entries.slice(from, from === a ? b - 1 : b)]
 }
 
-/** The lines each entry takes: a row its own, a group's heading one more for the blank above it, but the first, and one
- *  more for its "… N more" when folded. */
-const heights = (entries: readonly Entry[], per = 1) => entries.map((e, i) => (e.row ? per : (i ? 2 : 1) + (e.closed ? 1 : 0)))
+/** The lines each entry takes: a row its own, a group's heading one more for the blank above it, but the first, a
+ *  group's `… N more` one. */
+const heights = (entries: readonly Entry[], per = 1) => entries.map((e, i) => (e.row ? per : e.more ? 1 : i ? 2 : 1))
 
 /** Column widths that fit `room` with two cells between columns: each column at least its floor (floors that do not
  *  fit narrow the widest first); then the row's name (`first`) wide enough for nine in ten names whole, as it tells the
@@ -1178,8 +1215,9 @@ function table(ctx: Ctx, body0: TableBody, cols: number, cap: number, act: (c: V
     if (!e.row) return groupLine(lb, e, n === 0)
     const r = e.row
     const on = isSel(st, col, r)
-    const bg = on ? COLORS.selected : undefined
-    const line: Line = glyph ? [{ ...glyphOf(spec, data, st, col, r, body.group), bg }, { s: ' ', bg }] : [{ s: '  ', bg }]
+    // the selected row: `❯` in the margin and the accent across it (the final pass), no background
+    const bg: string | undefined = undefined
+    const line: Line = [...(on ? [selMark(true)] : []), ...(glyph ? [{ ...glyphOf(spec, data, st, col, r, body.group), bg }, { s: ' ', bg }] : [{ s: '  ', bg }])]
     body.columns.forEach((c, i) => {
       const t = cells[i]![k] ?? ''
       if (c.show === 'bar') {
@@ -1259,9 +1297,9 @@ function list(ctx: Ctx, body: ListBody, cols: number, cap: number, act: (c: View
     if (!e.row) return groupLine(lb, e, n === 0)
     const r = e.row
     const on = isSel(st, col, r)
-    const bg = on ? COLORS.selected : undefined
+    const bg: string | undefined = undefined
     const title = titleOf(spec, data, col, r)
-    const line: Line = glyph ? [{ ...glyphOf(spec, data, st, col, r, body.group), bg }, { s: ' ', bg }] : [{ s: '  ', bg }]
+    const line: Line = [...(on ? [selMark(false)] : []), ...(glyph ? [{ ...glyphOf(spec, data, st, col, r, body.group), bg }, { s: ' ', bg }] : [{ s: '  ', bg }])]
     line.push({ s: metas.length ? pad(title, titleW) : cut(title, titleW), bg })
     for (const m of metas) {
       const raw = vals(r[m.f.name])
@@ -1306,9 +1344,9 @@ function list(ctx: Ctx, body: ListBody, cols: number, cap: number, act: (c: View
   return { ...lb.b, order: entries.filter(e => e.row).map(e => ({ c: col.name, k: keyOf(col, e.row!) })), start: a, cap, total: entries.length }
 }
 
-/** Turns: the speaker's ● in its hue at A0 (a label's hue while one is on), its name at A2 in the text colour (a
- *  flagged turn's glyph and value after it, in red), the time dim against the right edge; the text under the speaker at
- *  A2, upright, to three lines. */
+/** Turns (views/SPEC.md, "The file browser", a transcript): per turn, its time dim in a column at A0, then the
+ *  speaker's `●` in its hue (a label's while one is on) and the speaker's name bold (a flagged turn's glyph and value
+ *  after it, in red); the turn's text under the name, upright, to three rows. */
 function transcript(ctx: Ctx, body: TranscriptBody, cols: number, cap: number, act: (c: ViewCollection, r: Row) => ViewAct, sortable: boolean): Windowed {
   const { spec, data, st, col } = ctx
   const rows = sortRows(spec, col, ctx.rows, body.sort ?? (body.time ? { field: body.time } : undefined))
@@ -1316,7 +1354,8 @@ function transcript(ctx: Ctx, body: TranscriptBody, cols: number, cap: number, a
   const tf = fieldIn(col, body.time)
   const times = rowsMemo(rows, `times:${body.time ?? ''}`, () => (body.time ? (tf?.type === 'time' ? timeText(rows.map(r => r[body.time!] ?? null)) : rows.map(r => show(spec, data, col, tf, r[body.time!]))) : []))
   const timeW = Math.min(16, extent([0, ...times.map(width)])[1])
-  const lead = 2
+  // the name, and the text under it, after the time's column, a gutter and the speaker's ●
+  const lead = (timeW ? timeW + 2 : 0) + 2
   const room = Math.max(10, cols - lead)
   const texts = rowsMemo(rows, `turns:${body.text}:${room}`, () => rows.map(r => wrap(show(spec, data, col, fieldIn(col, body.text), r[body.text]), room, 3)))
   const want = rows.findIndex(r => isSel(st, col, r))
@@ -1325,18 +1364,15 @@ function transcript(ctx: Ctx, body: TranscriptBody, cols: number, cap: number, a
   for (let i = a; i < b; i++) {
     const r = rows[i]!
     const on = isSel(st, col, r)
-    const bg = on ? COLORS.selected : undefined
     const who = show(spec, data, col, fieldIn(col, body.speaker), r[body.speaker]) || '–'
-    const hue = st.labelsOn.length ? (markOf(data, st, col, r) ?? COLORS.dim) : (sp.get(String(r[body.speaker])) ?? COLORS.dim)
-    const head: Line = [{ s: '● ', fg: hue, bg }]
+    const hue = st.labelsOn.length ? (markOf(data, st, col, r) ?? COLORS.dim) : (sp.size > 1 ? (sp.get(String(r[body.speaker])) ?? COLORS.dim) : COLORS.dim)
     const fl = flagOf(col, r)
     const time = timeW ? cut(times[i] ?? '', timeW) : ''
-    const tail: Line = fl ? [{ s: `  ${fl.glyph} ${fl.value}`, fg: fl.colour, bg }] : []
-    const nameW = Math.max(4, cols - lead - lineWidth(tail) - (time ? width(time) + 2 : 0))
-    head.push({ s: cut(who, nameW), bg }, ...tail)
-    if (time) head.push({ s: ' '.repeat(Math.max(2, cols - lineWidth(head) - width(time))), bg }, { s: time, fg: COLORS.dim, bg })
+    const tail: Line = fl ? [{ s: `  ${fl.glyph} ${fl.value}`, fg: fl.colour }] : []
+    const nameW = Math.max(4, cols - lead - lineWidth(tail))
+    const head: Line = [...(on ? [selMark(false)] : []), ...(timeW ? [{ s: pad(time, timeW), fg: COLORS.dim }, { s: '  ' }] : []), { s: '● ', fg: hue }, { s: cut(who, nameW), b: true }, ...tail]
     lb.line(fitLine(head, cols), act(col, r), { cite: citeOf(ctx, col, r), row: true })
-    for (const t of texts[i]!) lb.line([{ s: ' '.repeat(lead) + t, bg }], act(col, r), { cite: citeOf(ctx, col, r), row: true })
+    for (const t of texts[i]!) lb.line([{ s: ' '.repeat(lead) + t }], act(col, r), { cite: citeOf(ctx, col, r), row: true })
   }
   if (!rows.length) lb.line([{ s: '  none', fg: COLORS.dim }])
   return { ...lb.b, order: rows.map(r => ({ c: col.name, k: keyOf(col, r) })), start: a, cap, total: rows.length }
@@ -1547,8 +1583,8 @@ function tree(ctx: Ctx, body: Extract<Body, { kind: 'graph' }>, cols: number, ca
   for (const o of out.slice(a, b)) {
     const { r, prefix } = o
     const on = isSel(st, col, r)
-    const bg = on ? COLORS.selected : undefined
-    const line: Line = [{ s: prefix, fg: COLORS.rule, bg }, { s: pad(nameOf(r), Math.max(1, nameW - width(prefix))), bg }]
+    const bg: string | undefined = undefined
+    const line: Line = [...(on ? [selMark(true)] : []), { s: prefix, fg: COLORS.rule, bg }, { s: pad(nameOf(r), Math.max(1, nameW - width(prefix))), bg }]
     const row = cells[out.indexOf(o)]!
     metas.forEach((f, j) => line.push({ s: '  ', bg }, { s: pad(row[j]!, metaW[j]!, numeric[j]), fg: tint(spec, data, col.name, f, r[f.name], st), bg }))
     lb.line(fitLine(line, cols), { op: 'select', c: col.name, k: keyOf(col, r) }, { cite: citeOf(ctx, col, r), row: true })
@@ -1852,7 +1888,8 @@ function lanes(ctx: Ctx, body: LanesBody, cols: number, cap: number, sortable: b
       if (n) lb.nl()
       const act: ViewAct | undefined = l.head.c && l.head.r ? { op: 'select', c: l.head.c.name, k: keyOf(l.head.c, l.head.r) } : undefined
       const on = Boolean(act && st.sel?.c === l.head.c!.name && st.sel.k === keyOf(l.head.c!, l.head.r!))
-      lb.seg({ s: padEnd(cutName(l.label, labW), labW), bg: on ? COLORS.selected : undefined }, act, act ? { cite: citeOf(ctx, l.head.c!, l.head.r!), row: true } : undefined)
+      if (on) lb.seg(selMark(false))
+      lb.seg({ s: padEnd(cutName(l.label, labW), labW) }, act, act ? { cite: citeOf(ctx, l.head.c!, l.head.r!), row: true } : undefined)
       meta.forEach((t, j) => lb.seg({ s: ' ' + pad(t, metaW[j]!, metaNum[j]), fg: COLORS.dim }))
       lb.nl()
       return
@@ -1862,7 +1899,9 @@ function lanes(ctx: Ctx, body: LanesBody, cols: number, cap: number, sortable: b
     const laneOn = !lc && (st.facets[`${st.tab}.${body.lane}`] ?? []).includes(l.key)
     const laneTint = lc ? undefined : hueOf(spec, data, col.name, fieldIn(col, body.lane), l.key, st)
     const hit = lc && l.row ? { cite: citeOf(ctx, lc, l.row), row: true } : undefined
-    const bg = laneSel || laneOn ? COLORS.selected : undefined
+    // a lane of rows selected takes `❯` and the accent; a lane of a value kept by the filter, the selection background
+    const bg = laneOn ? COLORS.selected : undefined
+    if (laneSel) lb.seg(selMark(false))
     if (l.prefix) lb.seg({ s: l.prefix, fg: COLORS.rule, bg }, laneAct, hit)
     if (laneGlyph) lb.seg({ s: '● ', fg: laneTint ?? COLORS.dim, bg }, laneAct, hit)
     const room = Math.max(1, labW - width(l.prefix) - gw)
@@ -2086,17 +2125,29 @@ export function detail(spec: ViewSpec, data: ViewData, st: ViewState, cols: numb
   const g = glyphColumn(spec, st, c) ? glyphOf(spec, data, st, c, r) : { s: ' ' }
   if (st.back.length) lb.seg({ s: '‹ ' }, { op: 'back' })
   else lb.seg({ ...g, s: `${g.s.trim() || ' '} ` })
-  const right = (place ? width(place) + 2 + 2 : 0) + 1
+  // a file of the file browser says what opening it shows; any other row its place (`↗`, blue and underlined) and `?`
+  const kind = c.opens && typeof r.kind === 'string' ? (r.opens_as === false || /^(binary|image|pdf|database|other)$/.test(r.kind) ? 'opens as raw bytes: not shown' : `opens as ${r.kind}`) : ''
+  const right = kind ? width(kind) : (place ? width(place) + 2 + 2 : 0) + 1
   const room = cols - lb.x - right - 2
   lb.seg({ s: cutName(title, Math.max(8, room)) })
   lb.seg({ s: ' '.repeat(Math.max(2, cols - lb.x - right)) })
-  if (place) {
-    lb.seg({ s: '↗ ' }, { op: 'cite', ref, text: title }, { cite: { ref, text: title, label: title } })
-    lb.seg({ s: place, u: true }, { op: 'cite', ref, text: title }, { cite: { ref, text: title, label: title } })
-    lb.seg({ s: '  ' })
+  if (kind) lb.seg({ s: kind, fg: COLORS.dim })
+  else {
+    if (place) {
+      lb.seg({ s: '↗ ', fg: LINK }, { op: 'cite', ref, text: title }, { cite: { ref, text: title, label: title } })
+      lb.seg({ s: place, fg: LINK, u: true }, { op: 'cite', ref, text: title }, { cite: { ref, text: title, label: title } })
+      lb.seg({ s: '  ' })
+    }
+    lb.seg({ s: '?', fg: LINK }, { op: 'ask', c: c.name, k: keyOf(c, r) }, { cite: citeOf({ spec, data }, c, r) })
   }
-  lb.seg({ s: '?' }, { op: 'ask', c: c.name, k: keyOf(c, r) }, { cite: citeOf({ spec, data }, c, r) })
   lb.nl()
+  // the record's first lines, their numbers right-aligned in a dim column (the file browser's file)
+  if (d.lines) {
+    const ls = vals(r[d.lines]).map(String)
+    const nw = String(ls.length).length
+    ls.forEach((l, i) => lb.line([{ s: `  ${String(i + 1).padStart(nw)}  `, fg: COLORS.dim }, { s: cut(l.replace(/\t/g, '  '), Math.max(8, cols - nw - 4)) }]))
+    if (!ls.length) lb.line([{ s: '  none', fg: COLORS.dim }])
+  }
   // its meta values under the title, each after its field's name (a value alone, such as a week, may not say what it
   // is), a flagged one in its flag's colour; on a second line when they do not fit one
   const metaFields = d.meta ?? []
@@ -2180,7 +2231,7 @@ export function detail(spec: ViewSpec, data: ViewData, st: ViewState, cols: numb
       // its field's label dim at A2, as every other value has one, then the text under it at the measure
       lb.line([])
       lb.line([{ s: `  ${tf?.label ?? d.text}`, fg: COLORS.dim }])
-      for (const l of wrap(t, Math.min(72, cols - 2), 12)) lb.line([{ s: `  ${l}` }])
+      for (const l of wrap(t, cols - 2, 12)) lb.line([{ s: `  ${l}` }])
     }
   }
   // the related sections that hold rows, each but the last shortened to its first rows until opened
@@ -2262,17 +2313,27 @@ function panelBlock(spec: ViewSpec, data: ViewData, st: ViewState, cols: number)
 
 // ---------------------------------------------------------------------------------------- the whole view
 
-/** The view at `cols` × `rows` cells: the header line and the tabs, the filter row, the overview with what a click on
- *  it does, the records, and the selected row's details (or what the header opened) under them. */
-export function viewLayout(spec: ViewSpec, data: ViewData, st0: ViewState, full: number, rows: number, margin = 0): ViewLayout {
+/** The keys a view names in its last row (views/SPEC.md, rule 26). */
+export function viewHints(spec: ViewSpec): string[] {
+  const opens = spec.collections.some(c => c.opens)
+  const grouped = spec.tabs.some(t => t.body.some(b => (b.kind === 'table' || b.kind === 'list') && b.group))
+  return opens ? ['Enter to open', '↑↓ to choose', ...(grouped ? ['Space to fold'] : []), 'x to close'] : ['↑↓ to choose', '/ to search', 'Enter to open its place', '? to ask', 'x to close']
+}
+
+/** The view at `cols` × `rows` cells: the header (title, subtitle, tabs, search box), the filter row, the overview,
+ *  the records, the selected row's details (or what the header opened) under them, and the key hints. `lead`: the
+ *  margin before every line, where `❯` marks the selected row (register.tsx draws views with 2). */
+export function viewLayout(spec: ViewSpec, data: ViewData, st0: ViewState, full: number, rows0: number, margin = 0, lead = 0): ViewLayout {
   // the type area's width (`full`): the header, the filter row, the rules, the overview and the detail take it whole;
   // the records leave `margin` cells at its right, where "?" stands beside the row under the pointer (views.tsx)
   const cols = Math.max(20, full - margin)
   const st = { ...st0, tab: Math.max(0, Math.min(st0.tab, spec.tabs.length - 1)) }
   const tr = tabRows(spec, data, st)
   const tab = spec.tabs[st.tab]!
+  // the last row holds the key hints
+  const rows = Math.max(8, rows0 - 1)
   const lb = builder()
-  lb.block(header(spec, data, st, full))
+  lb.block(header(spec, data, st, full, tr))
   lb.block(filterRow(spec, data, st, full, tr))
   let below = st.panel ? panelBlock(spec, data, st, full) : detail(spec, data, st, full)
   const ctx: Ctx = { spec, data, st, col: tr.col, rows: tr.rows, wide: tr.wide, except: tr.except }
@@ -2344,8 +2405,18 @@ export function viewLayout(spec: ViewSpec, data: ViewData, st0: ViewState, full:
     detailRange = [lb.y, lb.y + shown.lines.length]
     lb.block(shown)
   }
-  const lines = lb.b.lines.slice(0, rows).map(l => fitLine(l, full))
-  const hits = lb.b.hits.filter(h => h.y < rows && h.x0 < full).map(h => ({ ...h, x1: Math.min(h.x1, full) }))
+  const kept = lb.b.lines.slice(0, rows).map(l => fitLine(l, full))
+  kept.push([{ s: viewHints(spec).join(' · '), fg: COLORS.dim, i: true }].map(x => ({ ...x, s: cut(x.s, full) })))
+  // the margin: `❯` in the accent before the selected row's first line, its words in the accent; else blank
+  const lines = kept.map(l => {
+    const mark = l.find(x => x.fg === SEL || x.fg === SEL_WHOLE)
+    const rest = l.filter(x => x.fg !== SEL && x.fg !== SEL_WHOLE)
+    if (!lead) return rest
+    if (!mark) return [{ s: ' '.repeat(lead) }, ...rest]
+    const whole = mark.fg === SEL_WHOLE
+    return [{ s: '❯'.padEnd(lead), fg: ACCENT }, ...rest.map(x => (x.fg === undefined || x.fg === COLORS.text || (whole && x.fg === COLORS.dim) ? { ...x, fg: ACCENT } : x))]
+  })
+  const hits = lb.b.hits.filter(h => h.y < rows && h.x0 < full).map(h => ({ ...h, x0: h.x0 + lead, x1: Math.min(h.x1, full) + lead }))
   return {
     lines,
     hits,
@@ -2433,6 +2504,8 @@ export function reduce(spec: ViewSpec, data: ViewData, st: ViewState, act: ViewA
     case 'more':
       return { state: { ...st, open: toggle(st.open, `${st.tab}.${act.field}.all`) } }
     case 'whole':
+      // a folder's `… N more` shows all its rows
+      if (act.key.startsWith('__g:')) return { state: { ...st, open: toggle(st.open, `${st.tab}.g.${act.key.slice(4)}.all`) } }
       return { state: { ...st, open: toggle(st.open, act.key) } }
     case 'field': {
       // one field open per tab: another closes it, the same one again too
@@ -2450,8 +2523,9 @@ export function reduce(spec: ViewSpec, data: ViewData, st: ViewState, act: ViewA
       return { state: { ...st, sorts: { ...st.sorts, [String(st.tab)]: next }, scroll: 0 } }
     }
     case 'select': {
+      // the file browser: a click shows a file's first lines under the rule, a second click opens it
       const file = opensFile(spec, data, { c: act.c, k: act.k })
-      if (file) return { state: { ...st, sel: { c: act.c, k: act.k } }, effect: { file } }
+      if (file) return st.sel?.c === act.c && st.sel.k === act.k ? { state: st, effect: { file } } : { state: { ...st, sel: { c: act.c, k: act.k }, back: [], dscroll: 0, panel: '' } }
       if (st.sel?.c === act.c && st.sel.k === act.k && !st.panel) return { state: { ...st, sel: null, back: [], dscroll: 0 } }
       return { state: { ...st, sel: { c: act.c, k: act.k }, back: [], dscroll: 0, panel: '' } }
     }
@@ -2497,8 +2571,14 @@ export function reduce(spec: ViewSpec, data: ViewData, st: ViewState, act: ViewA
       delete zoom[String(st.tab)]
       return { state: { ...st, q: '', typing: false, facets, labelFilter: null, scroll: 0, zoom } }
     }
-    case 'group':
-      return { state: { ...st, closed: toggle(st.closed, `${st.tab}.${act.g}`) } }
+    case 'group': {
+      // folded or unfolded against how it is drawn now: `closed` folds an open group, `<tab>.g.<group>` in `open`
+      // unfolds one the file browser folds at first
+      const k = `${st.tab}.${act.g}`
+      const opened = `${st.tab}.g.${act.g}`
+      if (act.open === undefined) return { state: { ...st, closed: toggle(st.closed, k) } }
+      return act.open ? { state: { ...st, closed: [...st.closed.filter(x => x !== k), k], open: st.open.filter(x => x !== opened) } } : { state: { ...st, closed: st.closed.filter(x => x !== k), open: [...st.open.filter(x => x !== opened), opened] } }
+    }
     case 'panel':
       return { state: { ...st, panel: act.p, dscroll: 0 } }
     case 'scroll': {
@@ -2584,6 +2664,17 @@ function key(spec: ViewSpec, data: ViewData, st: ViewState, ev: { key: string; c
       return reduce(spec, data, st, { op: 'dscroll', d: -5 }, meta)
     case '?':
       return st.sel ? { state: st, effect: { ask: st.sel } } : { state: st }
+    case 'space':
+    case ' ': {
+      // the selected row's group folds (and the row is no longer shown)
+      const tab = spec.tabs[st.tab]
+      const g = (tab?.body.find(b => b.kind === 'table' || b.kind === 'list') as TableBody | ListBody | undefined)?.group
+      const r = rowOf(spec, data, st.sel)
+      const c = st.sel ? collectionOf(spec, st.sel.c) : undefined
+      if (!g || !r || !c) return { state: st }
+      const value = show(spec, data, c, fieldIn(c, g), r[g]) || '–'
+      return reduce(spec, data, { ...st, sel: null }, { op: 'group', g: value, open: true })
+    }
     case 'o':
     case 'return':
     case 'enter': {
