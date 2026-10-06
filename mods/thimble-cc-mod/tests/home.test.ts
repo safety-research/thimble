@@ -1,19 +1,19 @@
-// The home panel (hooks/home.ts, /thimble-home): what it lists of a session, in its two layouts, and what a
-// click on it does. `claude plugin test mods/thimble-cc-mod`.
+// The home panel (hooks/home.ts, /thimble-home): what it lists of a session, in its one column, and what a click or a
+// key on it does. `claude plugin test mods/thimble-cc-mod`.
 import { expect, test } from 'claude-code/testing'
 
 import { lineWidth } from '../hooks/draw'
-import { groupCards, homeLayout, homeReduce, homeSections, plainLines } from '../hooks/home'
+import { HOME_UI_EMPTY, groupCards, homeLayout, homePick, homeReduce, homeSections, plainLines } from '../hooks/home'
 import type { HomeAct, HomeData, HomeUi } from '../hooks/home'
 import { SESSION } from './home-fixture'
 
 const W = 95
-const UI: HomeUi = { layout: 'stacked', folded: [], more: [], pick: '' }
+const UI: HomeUi = HOME_UI_EMPTY
 
 function data(): HomeData {
   const byId = new Map(SESSION.cards.map(c => [c.id, c]))
   const groups = SESSION.groups.map(g => ({ ...g, cards: g.cards.flatMap(id => (byId.has(id) ? [byId.get(id)!] : [])) }))
-  return { ...SESSION, cardGroups: groupCards(groups, [...SESSION.cards].sort((a, b) => a.created - b.created)) }
+  return { ...SESSION, cardGroups: groupCards(groups, [...SESSION.cards].sort((a, b) => a.created - b.created)), root: 'collusion-wiki' }
 }
 
 const text = (ui: Partial<HomeUi> = {}) => plainLines(homeLayout(data(), { ...UI, ...ui }, W).lines)
@@ -28,74 +28,79 @@ test('a card stands under the first question that made it; a report or thread re
     [{ id: 'a', kind: 'bar', question: 'A?' }, { id: 'b', kind: 'table', question: 'B?' }, { id: 'c', kind: 'line', question: 'C?' }],
   )
   // newest first, the thread that only reused a card left out, the card no question names last
-  expect(groups.map(g => [g.head, g.cards.map(c => c.id).join('')])).toEqual([['later', 'c'], ['first', 'a'], ['cards no answer shows', 'b']])
+  expect(groups.map(g => [g.head, g.cards.map(c => c.id).join('')])).toEqual([['later', 'c'], ['first', 'a'], ['other cards', 'b']])
 })
 
-test('the stacked layout: every section under its heading with its count, the first items, and "… N more"', () => {
-  const lines = text()
-  // the title row: Home and what the panel holds, the layouts against the right edge; then the rule
-  expect(lines[0]).toMatch(/^Home {2}2 views · 1 report · 2 threads · 9 cards · 1 label · 4 files +stacked {2}index$/)
-  expect(lines[1]).toMatch(/^─+$/)
-  // a heading: its name and its count, no marker; what is new after it
-  for (const h of ['Views  2', 'Reports  1', 'Side threads  2  1 new', 'Cards  9', 'Labels  1', 'Files  4']) expect(lines.some(l => l.startsWith(h))).toBe(true)
-  expect(lines.some(l => /^[▾▸]/.test(l))).toBe(false)
-  // an item: its state at A0, its name at A2; a view's state words at the right, without the word its glyph says
-  expect(lines.some(l => /^! Wiki Pages +1 problem left, 7 fixed$/.test(l))).toBe(true)
-  // a thread with a new answer: its name bold, no count on its row
+test('one column: the title Home alone, sections under bold headings with their counts, the key hints last', () => {
   const lay = homeLayout(data(), UI, W)
+  const lines = plainLines(lay.lines)
+  // the title is Home alone, in the accent and bold; then the rule
+  expect(lines[0]).toBe('Home')
+  expect(lay.lines[0]!.find(x => x.s === 'Home')).toMatchObject({ fg: 'suggestion', b: true })
+  expect(lines[1]).toMatch(/^─+$/)
+  // a heading: its name bold, its count dim in parentheses, what is new in green after it
+  for (const h of ['Views (2)', 'Reports (1)', 'Threads (2)  1 new', 'Cards (9)', 'Labels (1)', 'Files (4)']) expect(lines.some(l => l.startsWith(h))).toBe(true)
+  const head = lay.lines.find(l => l.some(x => x.s === 'Threads'))!
+  expect(head.find(x => x.s === 'Threads')!.b).toBe(true)
+  expect(head.find(x => x.s === '1 new')!.fg).toBe('success')
+  // bold only on the title and the headings: never on an item, even a new one
+  expect(lay.lines.filter(l => l.some(x => x.b)).length).toBe(7)
+  // an item: its state at A0, its name at A2, its metadata dim against the right edge, without the word its glyph says
+  expect(lines.some(l => /^! Wiki Pages +pages\.jsonl · 1 problem left, 7 fixed$/.test(l))).toBe(true)
+  // a thread with a new answer: its name regular, `new` in green at the right
   const relent = lay.lines.find(l => l.map(x => x.s).join('').includes('"Is AgentRelent one agent'))!
-  expect(relent.some(x => x.b && x.s.includes('AgentRelent'))).toBe(true)
-  expect(lay.lines.filter(l => l.some(x => x.b)).map(l => plainLines([l])[0])).toEqual(['Side threads  2  1 new', relent.map(x => x.s).join('').trimEnd()])
-  // a label's legend: each value's ● and its count; a file's records against the right edge under the column name
+  expect(relent.some(x => x.b)).toBe(false)
+  expect(relent.at(-1)).toMatchObject({ s: 'new', fg: 'success' })
+  // a label's legend: each value's ● and its count
   expect(lines.some(l => /● test page 29 {2}● links or data 20 {2}● prose 11/.test(l))).toBe(true)
-  expect(lines.some(l => /^Files {2}4 +records$/.test(l))).toBe(true)
-  expect(lines.some(l => /^● revisions\.jsonl +14,591$/.test(l))).toBe(true)
-  // the cards by the question asked, where it was asked in the category column; three questions, then the rest
-  expect(lines.some(l => /^ {2}Which wikis did the agents write to/.test(l))).toBe(false)
-  expect(lines.some(l => /^ {2}… 3 more$/.test(l))).toBe(true)
-  const whole = text({ more: ['cards'] })
-  expect(whole.some(l => /^ {2}Which wikis did the agents write to.* main +1 card$/.test(l))).toBe(true)
-  // a question's cards at A4, their kind as a word in the category column, no glyph
-  expect(whole.some(l => /^ {4}Which wikis did the agents write to.* table$/.test(l))).toBe(true)
-  // a folded section keeps its heading alone
-  const folded = text({ folded: ['files'] })
-  expect(folded.at(-1)).toMatch(/^Files {2}4/)
+  // the key hints, dim and italic, the last row
+  expect(lines.at(-1)).toBe('↑↓ to choose · Enter to open · Space to fold · x to close')
+  expect(lay.lines.at(-1)!.at(-1)).toMatchObject({ i: true })
 })
 
-test('the index: every section in two columns, a line an item; the section picked drawn whole under them', () => {
-  const lines = text({ layout: 'index' })
-  // the second column at A0 + ⌈T/2⌉
-  const col = Math.ceil(W / 2)
-  expect(lines[2]).toMatch(/^Views {2}2 +Cards {2}9$/)
-  expect(lines[2]!.indexOf('Cards')).toBe(col)
-  // the glyph says the view is built (with problems left); no word repeats it
-  expect(lines.some(l => /^! Wiki Pages(?! +built)/.test(l))).toBe(true)
-  expect(lines.filter(l => /^─+$/.test(l)).length).toBe(1)
-  const picked = text({ layout: 'index', pick: 'cards' })
-  const head = picked.findIndex((l, i) => i > 3 && /^Cards {2}9/.test(l))
-  expect(head).toBeGreaterThan(3)
-  expect(picked[head - 1]).toBe('')
-  // whole: no "more" under the section picked
-  expect(picked.slice(head).some(l => /… \d+ more/.test(l))).toBe(false)
+test('card groups say what they hold, the newest open and the others folded, their cards at A2 with their kind at R', () => {
+  const lines = text()
+  const at = lines.findIndex(l => l.startsWith('Cards (9)'))
+  const groups = lines.slice(at + 1).filter(l => /^[▾▸] /.test(l))
+  // the newest group is open, the others folded; a group's card count dim at R
+  expect(groups[0]).toMatch(/^▾ in the report "Agents filled the dse wiki.* \d+ cards$/)
+  expect(groups.slice(1).filter(l => !/collusion-wiki/.test(l)).every(l => l.startsWith('▸ '))).toBe(true)
+  expect(groups.some(l => /^▸ in the thread "Is AgentRelent one agent/.test(l))).toBe(true)
+  expect(groups.some(l => /^▸ answer to "Use the label tool: a prompt label named 'page kind'.* 2 cards$/.test(l))).toBe(true)
+  // the open group's cards at A2, their kind at R
+  const open = lines.indexOf(groups[0]!)
+  expect(lines[open + 1]).toMatch(/^ {2}\S.* +(bar|line|table|timeline|example|diagram|label)$/)
+  // a group is never "… 1 more": it shows whole, or folds
+  expect(lines.some(l => /… 1 more/.test(l))).toBe(false)
 })
 
-test('every line fits the panel, in both layouts and at a narrow panel', () => {
+test('the files by folder: a folder row with its file count, records and share read; the first folder open', () => {
+  const lines = text()
+  expect(lines.some(l => /^Files \(4\) +records +read$/.test(l))).toBe(true)
+  expect(lines.some(l => /^▾ collusion-wiki\/ +4 files +\S+ +\S+$/.test(l))).toBe(true)
+  // its files' glyphs at A2 and their names at A4, records and share against R
+  expect(lines.some(l => /^ {2}● revisions\.jsonl +14,591 +\S+$/.test(l))).toBe(true)
+  // folded, only the folder shows
+  const folded = text({ folded: ['files:collusion-wiki/'] })
+  expect(folded.some(l => /^▸ collusion-wiki\//.test(l))).toBe(true)
+  expect(folded.some(l => /● revisions\.jsonl/.test(l))).toBe(false)
+})
+
+test('every line fits the panel and its margin, at a wide and a narrow panel', () => {
   for (const w of [W, 60]) {
-    for (const ui of [UI, { ...UI, more: ['cards', 'files'] }, { ...UI, layout: 'index' as const }, { ...UI, layout: 'index' as const, pick: 'labels' }]) {
+    for (const ui of [UI, { ...UI, more: ['cards', 'files'] }, { ...UI, unfolded: ['cards:answer:When did the writing happen? Show revisions per day by wiki, and which usernames wrote the most on dse.'] }]) {
       const lay = homeLayout(data(), ui, w)
-      for (const l of lay.lines) expect(lineWidth(l)).toBeLessThanOrEqual(w)
-      for (const h of lay.hits) expect(h.x1).toBeLessThanOrEqual(w)
+      for (const l of lay.lines) expect(lineWidth(l)).toBeLessThanOrEqual(w + 2)
+      for (const h of lay.hits) expect(h.x1).toBeLessThanOrEqual(w + 2)
     }
   }
 })
 
-test('no line says how to use the panel', () => {
-  for (const ui of [UI, { ...UI, layout: 'index' as const, pick: 'threads' }]) {
-    for (const l of plainLines(homeLayout(data(), ui, W).lines)) expect(l).not.toMatch(/\b(click|press|select|type|tap|choose|hover)\b/i)
-  }
+test('no line but the key hints says how to use the panel', () => {
+  for (const l of text().slice(0, -1)) expect(l).not.toMatch(/\b(click|press|select|type|tap|choose|hover)\b/i)
 })
 
-test('a click on an item opens it; one on a heading folds it or, in the index, opens it under the grid', () => {
+test("a click on an item opens it; on a heading its section's panel; on a group or folder it folds", () => {
   const at = (ui: HomeUi, re: RegExp): HomeAct | undefined => {
     const lay = homeLayout(data(), ui, W)
     const y = plainLines(lay.lines).findIndex(l => re.test(l))
@@ -103,21 +108,31 @@ test('a click on an item opens it; one on a heading folds it or, in the index, o
   }
   expect(at(UI, /Wiki Pages/)).toEqual({ op: 'open', open: { kind: 'view', slug: 'wiki-pages', built: true } })
   expect(at(UI, /Usernames Over Time/)).toEqual({ op: 'open', open: { kind: 'view', slug: 'usernames-over-time', built: false } })
-  expect(at(UI, /^ {4}What did the maintainer/)).toMatchObject({ op: 'open', open: { kind: 'card' } })
-  expect(at(UI, /^● pages\.jsonl/)).toEqual({ op: 'open', open: { kind: 'file', path: 'pages.jsonl' } })
+  const label = at(UI, /^▸ answer to "Use the label tool/)!
+  expect(at(homeReduce(UI, label), /^ {2}How many of 60 sampled/)).toMatchObject({ op: 'open', open: { kind: 'card' } })
+  expect(at(UI, /^ {2}● pages\.jsonl/)).toEqual({ op: 'open', open: { kind: 'file', path: 'pages.jsonl' } })
   expect(at(UI, /^● page kind/)).toEqual({ op: 'open', open: { kind: 'label', name: 'page kind' } })
-  const fold = at(UI, /^Labels/)!
-  expect(fold).toEqual({ op: 'fold', sec: 'labels' })
-  expect(homeReduce(UI, fold).folded).toEqual(['labels'])
-  expect(homeReduce(homeReduce(UI, fold), fold).folded).toEqual([])
-  const pick = at({ ...UI, layout: 'index' }, /^Views/)!
-  expect(pick).toEqual({ op: 'pick', sec: 'views' })
-  expect(homeReduce({ ...UI, layout: 'index' }, pick).pick).toBe('views')
-  // the layouts in the header
+  expect(at(UI, /^Labels/)).toEqual({ op: 'open', open: { kind: 'pane', view: 'labels', title: 'Labels' } })
+  expect(at(UI, /^Threads/)).toEqual({ op: 'open', open: { kind: 'pane', view: 'threads', title: 'Threads' } })
+  const fold = at(UI, /^▾ in the report/)!
+  expect(fold).toMatchObject({ op: 'fold', open: true })
+  const folded = homeReduce(UI, fold)
+  expect(plainLines(homeLayout(data(), folded, W).lines).some(l => /^▸ in the report/.test(l))).toBe(true)
+  const unfold = at(folded, /^▸ in the report/)!
+  expect(homeReduce(folded, unfold)).toEqual({ ...UI, folded: [], unfolded: [(unfold as { key: string }).key] })
+})
+
+test('the keys choose a row: `❯` and the accent on it, up and down through the rows a click opens', () => {
   const lay = homeLayout(data(), UI, W)
-  expect(lay.hits.filter(h => h.y === 0).map(h => h.act)).toEqual([{ op: 'layout', layout: 'stacked' }, { op: 'layout', layout: 'index' }])
-  // the layout shown on the selection background, the other plain
-  expect(lay.lines[0]!.filter(x => x.bg).map(x => x.s)).toEqual(['stacked'])
+  // the first row is chosen at first
+  const first = lay.lines.findIndex(l => l[0]?.s === '❯ ')
+  expect(plainLines([lay.lines[first]!])[0]).toMatch(/Usernames Over Time|Wiki Pages/)
+  expect(lay.lines[first]![0]!.fg).toBe('suggestion')
+  const next = homePick(lay, UI, 'down')
+  expect(next).not.toBe(lay.picks[0]!.key)
+  expect(homePick(lay, { ...UI, pick: next }, 'up')).toBe(lay.picks[0]!.key)
+  const chosen = homeLayout(data(), { ...UI, pick: next }, W)
+  expect(chosen.lines.filter(l => l[0]?.s === '❯ ').length).toBe(1)
 })
 
 test('an empty folder: every section named, with nothing under it but "none"', () => {
@@ -127,13 +142,15 @@ test('an empty folder: every section named, with nothing under it but "none"', (
   expect(lines.filter(l => l === '  none').length).toBe(6)
 })
 
-test('the stacked layout shows every thread with new answers, however many, before "… N more"', () => {
+test('the threads with new answers come first; a section shows its first five, then "… N more"', () => {
   const t = (i: number, unread: number) => ({ id: `t${i}`, title: `"question ${i}?"`, about: 'about the last answer', words: 'answered · 1 question', tone: 'ok', unread, earlier: false, at: i })
-  const threads = [t(1, 1), t(2, 0), t(3, 1), t(4, 1), t(5, 0), t(6, 1)]
+  const threads = [t(1, 1), t(2, 0), t(3, 1), t(4, 1), t(5, 0), t(6, 1), t(7, 0), t(8, 0)]
   const lines = plainLines(homeLayout({ ...data(), threads }, UI, W).lines)
-  const at = lines.findIndex(l => l.startsWith('Side threads  6'))
-  expect(lines[at]).toBe('Side threads  6  4 new')
+  const at = lines.findIndex(l => l.startsWith('Threads (8)'))
+  expect(lines[at]).toBe('Threads (8)  4 new')
   const rows = lines.slice(at + 1).filter(l => /^● /.test(l))
   expect(rows.slice(0, 4).map(l => /"question (\d)\?"/.exec(l)?.[1])).toEqual(['6', '4', '3', '1'])
-  expect(lines.slice(at + 1).find(l => /… \d+ more/.test(l))?.trim()).toBe('… 2 more')
+  expect(lines.slice(at + 1).find(l => /… \d+ more/.test(l))?.trim()).toBe('… 3 more')
+  const whole = plainLines(homeLayout({ ...data(), threads }, { ...UI, more: ['threads'] }, W).lines)
+  expect(whole.slice(at + 1).filter(l => /^● "question/.test(l)).length).toBe(8)
 })

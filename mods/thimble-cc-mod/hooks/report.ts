@@ -1,32 +1,29 @@
 // Reports (pure, no `$`): the report types a writer subagent writes, each type's markdown read into what its panel
-// view draws, a video's storyboard read into the scenes the player plays and film.ts films, and what the analyst's
-// questions of a report work on: its sections (verify this section) and its passages (side threads, highlights).
+// view draws, and what the analyst's questions of a report work on: its sections (verify this section) and its
+// passages (side threads, highlights).
 //
 // Report types are one registry (TYPES): each names its writer's guidance (prompt/reports/<prompt>) and its renderer,
 // which is both how the panel draws it (reports.tsx) and the contract its text keeps (formProblems here, and
 // helper/report.py check --contract for the writer). A new output is a new entry, with a new renderer only when none of
-// the four draws it.
+// the three draws it.
 //
 // - document (and the types drawn as one: casefile, comparison, timeline, custom): read whole, a notion-style page;
 //   `<details>` blocks are toggles, `> [!NOTE]` blocks callouts, `![caption](card:<id>)` a figure with its caption.
 // - slides: a title slide from the `# ` title, then one slide per `## ` section, its cards, bullets and `Notes`.
 // - story: interactive graphics, beats one per `## ` section, each with one figure, which may name a step to light.
-// - video: scenes, one per `## ` section, at most one card each; each paragraph is one line of narration.
 import type { ChatHighlightMark } from '../types'
 import type { Focus } from './anim'
 import { focusFromRef, focusItem } from './anim'
 import { blockLayout, plainCites, richMarkdown, scriptAim } from './cite'
-import { MAX_BARS, MAX_TABLE_ROWS, cardLayout, width } from './draw'
+import { MAX_BARS, MAX_TABLE_ROWS, cardLayout, labelHead, width } from './draw'
 import type { CardData } from './draw'
 import { EMBED_RE, askPieces, citations, clip, mdPieces, parseReply } from './lib'
-import { numbersIn } from './play'
-import type { Caption, Scene } from './play'
 
 // ------------------------------------------------------------------------------------------------ the types
 
 /** How the panel draws a report, and the contract its text keeps. */
-export type Renderer = 'document' | 'slides' | 'story' | 'video'
-export const RENDERERS: readonly Renderer[] = ['document', 'slides', 'story', 'video']
+export type Renderer = 'document' | 'slides' | 'story'
+export const RENDERERS: readonly Renderer[] = ['document', 'slides', 'story']
 
 /** A report type: its id (the `report` tool's `form`), its name for the analyst, its renderer, its writer's guidance
  *  (prompt/reports/), a phrase for main's tool description, the words of a request that name it, whether it is written
@@ -39,7 +36,6 @@ export const DEFAULT_TYPE = 'document'
 
 // in the order a request's words are tried against them
 export const TYPES: readonly ReportType[] = [
-  { id: 'video', name: 'video', renderer: 'video', prompt: 'video.md', blurb: 'a narrated storyboard of the cards, played in the panel and filmed to an MP4', words: /\b(videos?|film|movie|animation|animated)\b/, onRequest: true, retell: { label: 'as a video', hotkey: 'v' } },
   { id: 'slides', name: 'slides', renderer: 'slides', prompt: 'slides.md', blurb: 'a deck, one slide at a time', words: /\b(slides?|deck|presentation)\b/, retell: { label: 'as slides', hotkey: 's' } },
   { id: 'story', name: 'interactive story', renderer: 'story', prompt: 'story.md', blurb: 'newsroom-style interactive graphics: beats stepped through beside a figure that stays and changes with them', words: /\bstor(?:y|ies)\b|\bscrolly|\binteractive (?:story|graphics?|piece)\b/, onRequest: true, retell: { label: 'as a story', hotkey: 'y' } },
   { id: 'casefile', name: 'case file', renderer: 'document', prompt: 'casefile.md', blurb: 'a section per case, such as an agent, a run or a session', words: /\bcase ?files?\b/ },
@@ -66,7 +62,7 @@ export function guessType(request: string): ReportForm {
   return TYPES.find(t => t.words?.test(r))?.id ?? DEFAULT_TYPE
 }
 
-/** The type to write for a form main chose and the analyst's words: a type written only on request (a video, a story)
+/** The type to write for a form main chose and the analyst's words: a type written only on request (a story)
  *  needs the request to name it, else the report is a document. */
 export function settleType(form: unknown, request: string): ReportForm {
   const asked = isForm(form) ? form : guessType(request)
@@ -402,9 +398,11 @@ export function buttonRows(labels: readonly string[], cols: number): number {
   return rows
 }
 
-/** The rows a card takes in a report `w` columns wide: its border, its question, its params row and its layout. */
+/** The rows a card takes in a report `w` columns wide: its top and bottom border, its question and the blank row under
+ *  it, its label rows, its params row and its layout (views/SPEC.md, "The visual system", rule 11). */
 export function cardRows(card: CardData, w: number): number {
-  return 3 + (card.params?.length ? 1 : 0) + cardLayout(card, Math.max(20, w - 4), -1).lines.length
+  const inner = Math.max(20, w - 4)
+  return 4 + labelHead(card, inner).lines.length + (card.params?.length ? 1 : 0) + cardLayout(card, inner, -1).lines.length
 }
 
 const FIT_UNITS: Record<string, { field: 'rows' | 'events' | 'examples'; unit: string; cap: number }> = {
@@ -455,115 +453,6 @@ export function storyOf(md: string): { title: string; lead: string; beats: Beat[
   return { title, lead, beats }
 }
 
-// ------------------------------------------------------------------------------------------------ video
-
-export type VideoLine = { text: string; pause: number }
-export type VideoScene = { heading: string; figure: Figure | null; lines: VideoLine[] }
-export type Video = { title: string; opening: VideoLine[]; scenes: VideoScene[] }
-
-const PAUSE_RE = /\s*\(\s*pause\s+(\d+(?:\.\d+)?)\s*s?\s*\)\s*$/i
-export const PAUSE_MAX_S = 5
-
-function lineOf(p: string): VideoLine {
-  const m = PAUSE_RE.exec(p)
-  return { text: (m ? p.slice(0, m.index) : p).trim(), pause: m ? Math.min(PAUSE_MAX_S, Number(m[1])) : 0 }
-}
-
-/** A video's storyboard: the title, its opening lines, and the scenes. A scene's first figure is its card; a later
- *  figure line is left out (two things to show are two scenes). */
-export function videoOf(md: string): Video {
-  const { title, body } = splitTitle(md)
-  const { lead, secs } = sections(body)
-  const opening = paragraphs(takeFigures(lead).rest).map(lineOf).filter(l => l.text)
-  const scenes = secs
-    .filter(s => !/^what changed$/i.test(s.heading))
-    .map(s => {
-      const { figures, rest } = takeFigures(s.text)
-      return { heading: s.heading, figure: figures[0] ?? null, lines: paragraphs(rest).map(lineOf).filter(l => l.text) }
-    })
-  return { title, opening, scenes }
-}
-
-const LINE_BASE_S = 1.4
-const WORDS_PER_S = 2.5
-const LINE_MIN_S = 4.5
-
-/** What the voice says for a line: each citation read as the text it shows. */
-export function spoken(text: string): string {
-  return plainCites(text)
-    .replace(/\*\*|__|`/g, '')
-    .replace(/\s+([,;:!?)]|\.(?!\w))/g, '$1')
-    .replace(/\s+/g, ' ')
-    .trim()
-}
-
-/** A line's estimated length from the words it speaks, as thimble's video estimates it. */
-export function lineSeconds(text: string): number {
-  const words = spoken(text).split(' ').filter(Boolean).length
-  return Math.max(LINE_MIN_S, Math.round((LINE_BASE_S + words / WORDS_PER_S) * 10) / 10)
-}
-
-export type VideoOpts = {
-  card?: (id: string) => CardData | null | undefined
-  focusOf?: (data: CardData, ref: string) => boolean
-}
-
-/** A video's scenes as the player plays them (play.ts Scene): a title scene with the opening lines and the scenes
- *  listed, then a card scene for each scene with a card, a text scene (its cited values as tiles) for the others. Each
- *  line is a caption, timed at a speaking pace (`secs`, `pauses`), lighting the value it cites on the card, else the
- *  figure's step. */
-export function videoScenes(md: string, opts: VideoOpts = {}): Scene[] {
-  const v = videoOf(md)
-  const top: Scene = {
-    kind: 'title',
-    heading: plainCites(v.title).replace(/\*\*|__|`/g, '') || 'Video',
-    captions: v.opening.map(l => ({ text: l.text, focus: '' })),
-    contents: v.scenes.map(s => plainCites(s.heading).replace(/\*\*|__|`/g, '')).filter(Boolean),
-    secs: v.opening.map(l => lineSeconds(l.text)),
-    pauses: v.opening.map(l => l.pause),
-  }
-  const out: Scene[] = [top]
-  for (const s of v.scenes) {
-    if (!s.lines.length && !s.figure) continue
-    const lines = s.lines.length ? s.lines : [{ text: s.heading, pause: 0 }]
-    const secs = lines.map(l => lineSeconds(l.text))
-    const pauses = lines.map(l => l.pause)
-    if (s.figure) {
-      const id = s.figure.id
-      const data = opts.card?.(id)
-      const step = s.figure.step && !calloutOf(s.figure.step) ? `step:${s.figure.step}` : ''
-      // each line lights the first thing it cites that the card draws (a bar, a point, a row, an event, a node)
-      const drawn = (ref: string) => (data && opts.focusOf ? opts.focusOf(data, ref) : ref.startsWith(`card:${id}#`))
-      const captions: Caption[] = lines.map(l => ({ text: l.text, focus: citations(l.text).find(c => drawn(c.ref))?.ref ?? step }))
-      out.push({ kind: 'card', heading: s.heading, card: id, captions, secs, pauses })
-    } else {
-      const numbers = numbersIn(lines.map(l => l.text))
-      const captions = lines.map(l => ({ text: l.text, focus: citations(l.text).find(c => numbers.some(n => n.ref === c.ref))?.ref ?? '' }))
-      out.push({ kind: 'text', heading: s.heading, captions, numbers, secs, pauses })
-    }
-  }
-  return out
-}
-
-/** The storyboard as the video view lists it: each scene's heading with the time it starts, its card, its lines. */
-export function storyboardText(md: string, starts: readonly number[]): string {
-  const v = videoOf(md)
-  const clock = (ms: number) => {
-    const s = Math.floor(ms / 1000)
-    return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
-  }
-  const out: string[] = []
-  if (v.opening.length) out.push(`### ${clock(starts[0] ?? 0)} · Opening`, '', ...v.opening.flatMap(l => [l.text, '']))
-  let k = 1
-  for (const s of v.scenes) {
-    if (!s.lines.length && !s.figure) continue
-    out.push(`### ${clock(starts[k++] ?? 0)} · ${s.heading}`, '')
-    if (s.figure) out.push(`[[card:${s.figure.id}]]`, '')
-    out.push(...s.lines.flatMap(l => [l.text, '']))
-  }
-  return out.join('\n').trim()
-}
-
 // ------------------------------------------------------------------------------------------------ every form
 
 /** What a report's text lacks for its form, in words for the analyst; the writer's own check (helper/report.py) is
@@ -573,13 +462,7 @@ export function formProblems(md: string, form: ReportForm): string[] {
   const { title, body } = splitTitle(md)
   if (!title) out.push('it has no "# " title')
   const view = typeOf(form).renderer
-  if (view === 'video') {
-    const v = videoOf(md)
-    if (!v.scenes.length) out.push('the video has no "## " scene')
-    v.scenes.forEach((s, i) => {
-      if (!s.lines.length) out.push(`scene ${i + 1} ("${s.heading}") has no line of narration`)
-    })
-  } else if (view === 'slides') {
+  if (view === 'slides') {
     if (slidesOf(md).slides.length < 2) out.push('the deck has no "## " slide')
   } else if (view === 'story') {
     if (!storyOf(md).beats.length) out.push('the story has no "## " beat')
@@ -621,11 +504,6 @@ export function reportSections(md: string, renderer: Renderer, slug: string): Se
   if (renderer === 'story') {
     const st = storyOf(md)
     return [{ key: 's0', heading: plainCites(st.title), parts: st.lead ? [{ text: st.lead, answer }] : [] }, ...st.beats.map((b, k) => ({ key: `s${k + 1}`, heading: plainCites(b.heading), parts: b.body ? [{ text: b.body, answer }] : [] }))]
-  }
-  if (renderer === 'video') {
-    const v = videoOf(md)
-    const lines = (ls: VideoLine[]) => ls.map(l => ({ text: l.text, answer }))
-    return [{ key: 's0', heading: 'Opening', parts: lines(v.opening) }, ...v.scenes.filter(s => s.lines.length || s.figure).map((s, k) => ({ key: `s${k + 1}`, heading: plainCites(s.heading), parts: lines(s.lines) }))]
   }
   const out: Section[] = [{ key: 's0', heading: '', parts: [] }]
   for (const seg of docSegments(splitTitle(md).body)) {

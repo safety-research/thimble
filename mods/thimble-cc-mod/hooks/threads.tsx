@@ -244,5 +244,6 @@ export function parseThread(raw: string): ChatThread | null {
     file: t.file ?? `.thimble-cc-mod/threads/${t.id}.md`,
     ...(typeof t.parent === 'string' && t.parent ? { parent: t.parent } : {}),
     ...(typeof t.at === 'number' ? { at: t.at } : {}),
+    ...(typeof t.passage === 'string' && t.passage ? { passage: t.passage } : {}),
   }
 }

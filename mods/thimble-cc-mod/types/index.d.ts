@@ -59,7 +59,7 @@ export type ChatThreadTurn = { q: string; a: string; state: string; tools: numbe
 
 /** A side thread: what it is about, the subagent answering it, its exchange, and the file it is saved to; `parent` the
  *  thread it was asked from ('' or absent: main), `at` when it last changed (epoch ms). */
-export type ChatThread = { id: string; label: string; ref: string; context: string; agentId: string; engine: string; turns: ChatThreadTurn[]; file: string; parent?: string; at?: number }
+export type ChatThread = { id: string; label: string; ref: string; context: string; agentId: string; engine: string; turns: ChatThreadTurn[]; file: string; parent?: string; at?: number; passage?: string }
 
 /** A side thread's turn that ended while the panel did not show the thread: one row in main's chat under the row it
  *  stands under (hooks/signal.ts), by its thread and its turn (from 1). */
@@ -105,12 +105,6 @@ export type ChatTarget = { kind: 'card' | 'mark' | 'sentence' | 'citation' | 'ro
  *  the band offers it as a button, whose press opens it at any width. */
 export type ChatPendingPane = { id: string; title: string; columns?: number; rows?: number; focus?: true; closeOnEscape?: true }
 
-/** The answer the play view plays: its text as corrected, its rows (whose ids key its claims), the question asked,
- *  and a count of plays started, which keys the player so each starts fresh. */
-export type ChatPlay = { text: string; rows: ChatRow[]; head: string; seq: number; video?: boolean }
-
-/** The latest press of the play view's buttons (pause, back, next, restart), counted so the player applies each once. */
-export type ChatPlayCmd = { n: number; op: string }
 
 // ---- views (hooks/viewdraw.ts, hooks/viewpane.tsx; views/SPEC.md)
 
@@ -140,10 +134,6 @@ export type ChatViewState = {
 }
 // ------------------------------------------------------------------------------------------ reports (hooks/reports.tsx)
 
-/** A video report's MP4: `rendering`, `done` (its file, length, and the voice that spoke it, null for captions only),
- *  `error`, or `none` where nothing here can render it; `error` says why. */
-export type ChatReportFilm = { state: string; file?: string; seconds?: number; frames?: number; voice?: string | null; error?: string; at?: number }
-
 /** A passage a highlighter marked: the passage (report.ts passageKey, and its words for the analyst), the place that
  *  shows it and why. */
 export type ChatHighlightMark = { key: string; text: string; ref: string; why: string }
@@ -153,9 +143,9 @@ export type ChatHighlightMark = { key: string; text: string; ref: string; why: s
 export type ChatHighlight = { id: string; request: string; label: string; color: string; state: string; why?: string; marks: ChatHighlightMark[] }
 
 /** A report: its file under .thimble-cc-mod/reports/, its form and title, the analyst's request, its writer's progress
- *  (`writing`, then `ready`, or `error` with why), what its check found, the report it retells, a video's film, the
- *  highlights asked of it; an orientation's switches and the forks that did its analysis. */
-export type ChatReport = { slug: string; form: string; title: string; request: string; file: string; state: string; why?: string; agentId?: string; tools: number; partial: string; problems: string[]; created: number; source?: string; film?: ChatReportFilm; highlights?: ChatHighlight[]; orient?: ChatOrientSwitches; orientBy?: string[] }
+ *  (`writing`, then `ready`, or `error` with why), what its check found, the report it retells, the highlights
+ *  asked of it; an orientation's switches and the forks that did its analysis. */
+export type ChatReport = { slug: string; form: string; title: string; request: string; file: string; state: string; why?: string; agentId?: string; tools: number; partial: string; problems: string[]; created: number; source?: string; highlights?: ChatHighlight[]; orient?: ChatOrientSwitches; orientBy?: string[] }
 
 /** An orientation's switches, as thimble's Start gate offers them (hooks/commands.ts). */
 export type ChatOrientSwitches = { deck: boolean; views: boolean; critique: boolean; report: boolean }
@@ -189,9 +179,9 @@ export type ChatLabelExample = { value: string; ref: string; text: string; ratio
  *  each value, examples, its card, its problems, and `status`, what its model calls recovered from. */
 export type ChatLabel = { slug: string; name: string; kind: string; definition: string; values: string[]; paths: string[]; field: string; within?: { label: string; value?: string }; state: string; why?: string; trial: boolean; limit: number; total: number; labeled: number; counts: Record<string, number>; examples: ChatLabelExample[]; cards: string[]; errors: string[]; status?: string; created: number }
 
-/** The home panel: `stacked` or `index`, the stacked sections folded and shown whole, the section the index draws
- *  whole under it ('' for none). */
-export type ChatHomeUi = { layout: string; folded: string[]; more: string[]; pick: string }
+/** The home panel: the card groups and folders folded or unfolded against their default, the sections shown whole,
+ *  and the row the keys chose (its key, '' for the first). */
+export type ChatHomeUi = { folded: string[]; unfolded: string[]; more: string[]; pick: string }
 
 declare module 'claude-code' {
   interface PluginState {
@@ -214,21 +204,16 @@ declare module 'claude-code' {
       fixes: StateFamily<ChatFix>
       agents: StateFamily<ChatAgent>
       corrections: ChatCorrection[]
-      menu: ChatTarget | null
       pending: ChatPendingPane | null
       panelView: string
       // counts the panel's extra drawings, each drawing it again (register.tsx's panel hook)
       panelRedraw: number
-      play: ChatPlay | null
-      playCmd: ChatPlayCmd
       // views: the open view's slug, and each view's state by its slug
       view: string
       views: StateFamily<ChatViewState>
       // the view pipeline: the proposals as the row above the prompt shows them, and the one the views pane shows
       viewProposals: ChatViewPipeRow[]
       viewPane: string
-      // the views pane's lists opened whole, as `<slug>:<list>`
-      viewPaneMore: string[]
       reports: StateFamily<ChatReport>
       reportNav: ChatReportNav | null
       // the panel's way (hooks/nav.ts), and each side thread's answers the analyst has seen, by its id
@@ -237,13 +222,17 @@ declare module 'claude-code' {
       // the rows in main's chat saying a side thread answered, by the row they stand under; the threads with answers
       // unread (hooks/signal.ts)
       threadRows: StateFamily<ChatSignal[]>
+      // the views whose `↳ view` row stands under each row of main's chat, by the row
+      viewRows: StateFamily<string[]>
       threadNews: ChatNews
       // the harness (hooks/harness.tsx): the coverage count, each label by its slug, and the label the panel shows
       coverage: ChatCoverage | null
       labels: StateFamily<ChatLabel>
       label: string
-      // the home panel (hooks/home.ts): its layout, the sections folded and shown whole, the index's open one; and a
-      // count that draws it again when what it lists changed on disk
+      // the label panel's parts opened (`<slug>:examples`, `<slug>:cards`)
+      labelOpen: string[]
+      // the home panel (hooks/home.ts): what is folded and shown whole and the row chosen; and a count that draws it
+      // again when what it lists changed on disk
       homeUi: ChatHomeUi
       homeTick: number
     }

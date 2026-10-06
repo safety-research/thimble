@@ -26,14 +26,15 @@ register('data:text/javascript,' + encodeURIComponent(hook), import.meta.url)
 const here = dirname(fileURLToPath(import.meta.url))
 const { validateSpec, validateData } = await import(join(here, '../hooks/viewspec.ts'))
 const { viewLayout: layout, initialState, reduce, VIEW_MARGIN } = await import(join(here, '../hooks/viewdraw.ts'))
-// as the panel lays a view out: the records leave the margin where "?" stands (register.tsx)
-const viewLayout = (spec, data, st, cols, rows) => layout(spec, data, st, cols, rows, VIEW_MARGIN)
+// as the panel lays a view out: the records leave the margin where "?" stands, and every line starts with the 2-cell
+// margin where `❯` marks the selected row (register.tsx), so a drawing is `cols` wide in all
+const viewLayout = (spec, data, st, cols, rows) => layout(spec, data, st, cols - 2, rows, VIEW_MARGIN, 2)
 const { lineWidth } = await import(join(here, '../hooks/draw.ts'))
 
 // Claude Code's theme colours, by the keys paint.ts uses
 const THEMES = {
-  dark: { composerSidebarBackground: '#262626', text: '#ffffff', inactive: '#999999', subtle: '#505050', userMessageBackground: '#373737', selectionBg: '#264f78', permission: '#b1b9f9', remember: '#b1b9f9', error: '#ff6b80', success: '#4eba65', warning: '#ffc107' },
-  light: { composerSidebarBackground: '#f5f5f5', text: '#000000', inactive: '#666666', subtle: '#afafaf', userMessageBackground: '#f0f0f0', selectionBg: '#b4d5ff', permission: '#5769f7', remember: '#5769f7', error: '#ab2b3f', success: '#2c7a39', warning: '#966c1e' },
+  dark: { composerSidebarBackground: '#262626', text: '#ffffff', inactive: '#999999', subtle: '#505050', userMessageBackground: '#373737', selectionBg: '#264f78', permission: '#b1b9f9', suggestion: '#b1b9f9', remember: '#b1b9f9', error: '#ff6b80', success: '#4eba65', warning: '#ffc107' },
+  light: { composerSidebarBackground: '#f5f5f5', text: '#000000', inactive: '#666666', subtle: '#afafaf', userMessageBackground: '#f0f0f0', selectionBg: '#b4d5ff', permission: '#5769f7', suggestion: '#5769f7', remember: '#0000ff', error: '#ab2b3f', success: '#2c7a39', warning: '#966c1e' },
 }
 
 function args(argv) {

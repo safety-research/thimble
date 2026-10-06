@@ -141,7 +141,7 @@ export function buildPrompt(template: string, p: Proposal, v: { corpus: string; 
 
 /** The status a builder starts with: the first of a proposal, one after checks that failed (`gates`), or one that fixes
  *  what a review found (`review`, the next round). */
-export function buildStart(prev: BuildStatus | undefined, ts: string, follow: { gates?: string[]; review?: string[] }): Partial<BuildStatus> {
+export function buildStart(prev: BuildStatus | undefined, ts: string, follow: { gates?: string[]; review?: string[]; change?: string }): Partial<BuildStatus> {
   const round = follow.review ? (prev?.round ?? 0) + 1 : follow.gates ? (prev?.round ?? 0) : 0
   return {
     for: ts,
@@ -151,7 +151,7 @@ export function buildStart(prev: BuildStatus | undefined, ts: string, follow: { 
     step: '',
     error: undefined,
     ...(follow.review ? { asked: follow.review } : {}),
-    ...(follow.gates || follow.review ? {} : { fixed: [], left: [], asked: [], checks: [] }),
+    ...(follow.gates || follow.review ? {} : { fixed: [], left: [], asked: follow.change ? [follow.change] : [], checks: [] }),
   }
 }
 

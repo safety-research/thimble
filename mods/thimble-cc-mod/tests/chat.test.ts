@@ -274,15 +274,13 @@ test('a param picked on the card runs its script again for that card, and the ca
   expect(back).toContain('"label":"13403","state":"link"')
   expect(back).not.toContain('written for')
   await again.unmount()
-  // the script pane shows what the script printed, not the card helper's lines for main
-  const card = (await $.ui.mount({ ...MESSAGE(REPLY), surface: 'terminal' } as never)) as unknown as M
-  const target = { kind: 'card', ref: 'card:abc123', cardId: 'abc123', text: BAR.question, script: BAR.source!.script }
-  await card.post({ type: 'gesture', origin: 'o9', gestures: [{ seq: 1, gesture: 'menu', target, ev: { button: 'right', shift: false, ctrl: false, alt: false, type: 'press' } }] } as never, { in: 'card-1-abc123' })
-  await card.unmount()
-  const menu = (await $.ui.mount({ plugin: 'thimble-cc-mod', component: 'Pane', requestId: 'thimble', surface: 'terminal', viewport: { columns: 40, rows: 10 }, props: { bodyColumns: 34, bodyRows: 8 } } as never)) as unknown as M
-  await menu.press({ key: 'menu-script' })
-  await menu.unmount()
-  // the card view replaces the menu in the one panel
+  // the script pane shows what the script printed, not the card helper's lines for main: the card pane's "script"
+  // opens it (there is no menu)
+  await $.command.run({ command: 'thimble-card', args: '1' } as never)
+  const cardPane = (await $.ui.mount({ plugin: 'thimble-cc-mod', component: 'Pane', requestId: 'thimble', surface: 'terminal', viewport: { columns: 100, rows: 30 }, props: { bodyColumns: 96, bodyRows: 28 } } as never)) as unknown as M
+  await cardPane.press({ key: 'script' })
+  await cardPane.unmount()
+  // the card's script view replaces the card view in the one panel
   const pane = (await $.ui.mount({ plugin: 'thimble-cc-mod', component: 'Pane', requestId: 'thimble', surface: 'terminal', viewport: { columns: 100, rows: 30 }, props: { bodyColumns: 96, bodyRows: 28 } } as never)) as unknown as M
   // its last run: exit 0 on the title row, and "output" with nothing printed
   expect(await pane.find({ type: 'Text', text: /last run exit 0/ })).toBeDefined()
@@ -315,7 +313,8 @@ test('a press on a card\'s title asks a forked subagent about it, out of main\'s
   await ui.unmount()
   for (const surface of ['terminal', 'desktop'] as const) {
     const pane = (await $.ui.mount({ plugin: 'thimble-cc-mod', component: 'Pane', requestId: 'thimble', surface, viewport: { columns: 100, rows: 30 }, props: { bodyColumns: 96, bodyRows: 28 } } as never)) as unknown as M
-    expect(await pane.find({ type: 'Text', text: /^thread about / })).toBeDefined()
+    // the threads panel with the new thread selected: what it is about, until its first question
+    expect(await pane.find({ type: 'Text', text: /^about / })).toBeDefined()
     expect(await pane.find({ type: 'Input' })).toBeDefined()
     expect(await pane.find({ key: 'main' })).toBeUndefined() // nothing is offered to main's prompt
     await pane.unmount()
@@ -416,8 +415,8 @@ test("a side thread's answer sits on the panel's own background: its rows and it
   await pane.press({ key: 'thread-open:tsaved' })
   await pane.unmount()
   pane = (await $.ui.mount(PANE)) as unknown as M
-  // the title line: what the thread is about, not the context's lead-in
-  expect(await pane.find({ type: 'Text', text: 'dse has 13403 of 14416 revisions.' })).toBeDefined()
+  // the selected thread under the tree: its question in quotation marks, then its answer; not the context's lead-in
+  expect(await pane.find({ type: 'Text', text: '"how big is dse?"' })).toBeDefined()
   expect(await pane.find({ type: 'Text', text: /The last answer in the main conversation/ })).toBeUndefined()
   const para = (await pane.find({ type: 'Client', key: 't1-para-1' })) as { props: { module: string } } | undefined
   expect(para?.props.module).toMatch(/para\.tsx$/)

@@ -87,12 +87,14 @@ test('hierarchy: group headings after a blank line, items with their glyph hangi
   const repo = VIEWERS.repository!
   const lay = viewLayout(repo.spec, repo.data, initialState(), 110, 52)
   const lines = lay.lines.map(l => l.map(s => s.s).join(''))
-  // no usage hint under the overview
-  expect(lines.some(l => l.startsWith('↑'))).toBe(false)
-  // nothing is new in a view as it opens: no bold anywhere
-  expect(lay.lines.some(l => l.some(s => s.b))).toBe(false)
-  // a group's heading at A0: its name, its count dim, a blank line above it but at the top; no marker
-  const r2 = lines.findIndex(l => /^r2 {2}\d+$/.test(l))
+  // no usage hint under the overview: the keys are named only in the last row
+  expect(lines.slice(0, -1).some(l => l.startsWith('↑'))).toBe(false)
+  expect(lines.at(-1)).toMatch(/^↑↓ to choose · /)
+  // bold only on the view's title (the accent): none in the rows
+  expect(lay.lines.slice(1).some(l => l.some(s => s.b))).toBe(false)
+  expect(lay.lines[0]!.find(s => s.b)?.fg).toBe('suggestion')
+  // a group's heading at A0: ▾, its name and its count dim, a blank line above it but at the top
+  const r2 = lines.findIndex(l => /^▾ r2 {2}\d+$/.test(l))
   expect(r2).toBeGreaterThan(0)
   expect(lines[r2 - 1]!.trim()).toBe('')
   // an item: its state as a coloured glyph hanging at A0, its title at A2, regular

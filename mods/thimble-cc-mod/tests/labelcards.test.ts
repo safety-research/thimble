@@ -1,6 +1,6 @@
-// Labels on cards: the label card the label tool writes (counts per value, records to agree or disagree with in place),
-// the label line of a card whose script read a label, its marks in the values' colours, and the label panel's fixes
-// (no card ids, words as written, retries in one dim line). `claude plugin test mods/thimble-cc-mod`.
+// Labels on cards: the label card the label tool writes (a bar card of the counts per value; its records live in the
+// label panel), the label row of a card whose script read a label (its name a link with ↗), its marks in the values'
+// colours, and the label panel's fixes (no card ids, words as written, retries in one dim line). `claude plugin test mods/thimble-cc-mod`.
 import type { On } from 'claude-code'
 import { expect, mock, test } from 'claude-code/testing'
 import type { Mounted } from 'claude-code/testing'
@@ -61,7 +61,7 @@ test('a label value takes the categorical palette in the label\'s order; the las
   expect(valueColour(vs, 'nope')).toBeUndefined()
 })
 
-test('a label card: bars in the values\' colours with counts and shares, then records to agree or disagree with, each with its value, place, words and why', () => {
+test('a label card is a bar card of its counts: bars in the values\' colours with counts and shares; its records are not on it', () => {
   const lay = cardLayout(LABEL_CARD, 96, -1)
   const lines = lay.lines.map(text)
   expect(lines[0]).toMatch(/^research data links +█+.* 1,734 +79%$/)
@@ -70,87 +70,45 @@ test('a label card: bars in the values\' colours with counts and shares, then re
   expect(lines).toContain('all  2,197')
   // a part of the whole: its bar on a track to the whole
   expect(lines[1]).toMatch(/█+[▏▎▍▌▋▊▉]?─+ +443/)
-  const first = lines.findIndex(l => l.includes('revisions.jsonl line 10879'))
-  expect(lines[first]).toMatch(/^● research data links {2}↗ revisions\.jsonl line 10879 +agree {2}disagree$/)
-  // the place underlined, a link to the record; the value in the text colour, regular
-  expect(lay.lines[first]!.find(s => s.s.includes('line 10879'))!.u).toBe(true)
-  expect(lay.lines[first]!.some(s => s.b)).toBe(false)
-  expect(lay.lines[first]![0]!.fg).toBe(SERIES[0])
-  expect(lines[first + 1]).toBe('  County year twenty links direct filtered')
-  expect(lines[first + 2]).toBe('  why  All four links are jqp.vercel.app queries.')
-  // the words as written, not as the file's double-encoded bytes show them
-  expect(lines.join('\n')).toContain('jedoch möchten wir, dass du einträgst')
-  // judged records say how, in place of the controls; a changed one leaves out the model's why
-  const agreed = lines.find(l => l.includes('line 10886'))!
-  expect(agreed).toMatch(/✓ agreed$/)
-  const changed = lines.findIndex(l => l.includes('line 11957'))
-  expect(lines[changed]).toMatch(/✓ set by you$/)
-  // no blank row between records
-  expect(lines.slice(first, changed).includes('')).toBe(false)
-  expect(lines.slice(changed).some(l => l.includes('md.succ.ai'))).toBe(false)
-  // the controls: agree keeps the value, disagree among three values shows the others first
-  const agree = lay.hots!.find(h => h.key === 'agree:revisions.jsonl#L10879')!
-  expect(agree.act).toEqual({ op: 'verdict', slug: 'what-the-edit-is-for', ref: 'revisions.jsonl#L10879', value: 'research data links' })
-  expect(lines[agree.line]!.slice(agree.x0, agree.x1)).toBe('agree')
-  expect(lay.hots!.find(h => h.key === 'disagree:revisions.jsonl#L10879')!.act).toEqual({ op: 'choose', ref: 'revisions.jsonl#L10879' })
-  expect(lay.hots!.some(h => h.key.includes('#L10886'))).toBe(false)
-  // items: the bars, then the records, which open their place
-  expect(lay.items.map(it => it.open).slice(3, 5)).toEqual(['revisions.jsonl#L10879', 'revisions.jsonl#L10904'])
-  expect(lay.hit(0, first)).toBe(3)
+  // the records, their words and their controls are the label panel's
+  const all = lines.join('\n')
+  for (const gone of ['revisions.jsonl', 'County year', 'agree', 'disagree', 'why', '✓']) expect(all).not.toContain(gone)
+  // items: the bars alone
+  expect(lay.items.map(it => it.label)).toEqual(['research data links', 'own-page links', 'other'])
+  expect(lay.hit(0, 1)).toBe(1)
+  // the bar under the pointer turns the text colour, its label in inverse
+  const lit = cardLayout(LABEL_CARD, 96, 1).lines[1]!
+  expect(lit.find(s => s.s.includes('█'))!.fg).toBe(COLORS.text)
+  expect(lit[0]).toMatchObject({ s: 'own-page links', inv: true })
 })
 
-test('a label card\'s disagree: with two values it sets the other; with more, the others show to pick from; a verdict sent says saving', () => {
-  const two: CardData = { ...LABEL_CARD, label: { ...LABEL_CARD.label!, values: ['yes', 'no'] }, rows: [{ label: 'yes', value: 3, group: '' }, { label: 'no', value: 5, group: '' }], examples: [{ ref: 't.jsonl#L2', quote: 'w', note: '', value: 'no' }] }
-  expect(cardLayout(two, 80, -1).hots!.find(h => h.key === 'disagree:t.jsonl#L2')!.act).toEqual({ op: 'verdict', slug: 'what-the-edit-is-for', ref: 't.jsonl#L2', value: 'yes' })
-  const choosing = cardLayout(LABEL_CARD, 96, -1, undefined, { choose: 'revisions.jsonl#L10879', act: 'set:revisions.jsonl#L10879=other' })
-  const lines = choosing.lines.map(text)
-  const row = lines.findIndex(l => l.startsWith('  it is'))
-  expect(lines[row]).toBe('  it is  ● own-page links  ● other')
-  const pick = choosing.hots!.find(h => h.key === 'set:revisions.jsonl#L10879=other')!
-  expect(pick.act).toEqual({ op: 'verdict', slug: 'what-the-edit-is-for', ref: 'revisions.jsonl#L10879', value: 'other' })
-  expect(lines[pick.line]!.slice(pick.x0, pick.x1)).toBe('● other')
-  // the hovered choice in inverse, and "cancel" replaces the two controls
-  expect(choosing.lines[row]!.find(s => s.s === 'other')).toMatchObject({ inv: true })
-  expect(lines[row - 1]).toMatch(/ cancel$/)
-  const waiting = cardLayout(LABEL_CARD, 96, -1, undefined, { pending: 'revisions.jsonl#L10879=own-page links' })
-  expect(waiting.lines.map(text).find(l => l.includes('line 10879'))).toMatch(/◌ saving$/)
-  expect(waiting.hots!.some(h => h.key.includes('#L10879'))).toBe(false)
+test('at a reply\'s and a panel\'s widths a label card fits: nothing wider than its room', () => {
+  for (const cols of [40, 56, 72, 96, 116]) for (const l of cardLayout(LABEL_CARD, cols, -1).lines) expect(lineWidth(l)).toBeLessThanOrEqual(cols)
 })
 
-test('at a reply\'s and a panel\'s widths a label card fits: nothing wider than its room, the place cut before the value', () => {
-  for (const cols of [40, 56, 72, 96, 116]) {
-    for (const ui of [{}, { choose: 'revisions.jsonl#L10879' }]) {
-      const lay = cardLayout(LABEL_CARD, cols, -1, undefined, ui)
-      for (const l of lay.lines) expect(lineWidth(l)).toBeLessThanOrEqual(cols)
-      for (const h of lay.hots ?? []) expect(h.x1).toBeLessThanOrEqual(cols)
-    }
-  }
-  // narrow: the place cut in its path, its line kept, and the controls under it
-  const narrow = cardLayout(LABEL_CARD, 40, -1).lines.map(text)
-  const at = narrow.findIndex(l => l.includes('line 10879'))
-  expect(narrow[at]).toBe('● research data links  ↗ rev… line 10879')
-  expect(narrow[at + 1]).toBe('  agree  disagree')
-})
-
-test('a card that read a label shows it under its question: its name, then its values each after a dot in its colour', () => {
+test('a card that read a label shows it under its question: its name a link with ↗, then its values each after a dot in its colour', () => {
   const head = labelHead(USES, 96)
   expect(head.slugs).toEqual(['what-the-edit-is-for'])
-  expect(text(head.lines[0]!)).toBe('label  what the edit is for  ● research data links  ● own-page links  ● other')
-  expect(head.lines[0]!.filter(s => s.s === '  ●').map(s => s.fg)).toEqual([SERIES[0], SERIES[1], COLORS.dim])
-  // the name regular, in the text colour; the values' words too, their ● in their hue
+  expect(text(head.lines[0]!)).toBe('label  what the edit is for ↗  ● research data links  ● own-page links  ● other')
+  expect(head.lines[0]!.filter(s => s.s === '●').map(s => s.fg)).toEqual([SERIES[0], SERIES[1], COLORS.dim])
+  // the name blue and underlined, a link to the label, and its ↗ blue; the values' words in the text colour
   const name = head.lines[0]!.find(s => s.s === 'what the edit is for')!
-  expect(name.b || name.fg || name.inv).toBeFalsy()
-  // narrow: the values that do not fit are counted; hovered: the name is lit
+  expect(name).toMatchObject({ fg: COLORS.link, u: true })
+  expect(name.b || name.inv).toBeFalsy()
+  expect(head.lines[0]!.find(s => s.s === '↗')!.fg).toBe(COLORS.link)
+  expect(head.lines[0]!.find(s => s.s === ' other')!.fg).toBeUndefined()
+  // a press opens the label from the name and its ↗: those cells
+  const row = text(head.lines[0]!)
+  expect(row.slice(head.hots[0]!.x0, head.hots[0]!.x1)).toBe('what the edit is for ↗')
+  // narrow: the values that do not fit are counted; hovered: the name and its ↗ in inverse
   const narrow = labelHead(USES, 56, 'what-the-edit-is-for')
-  expect(text(narrow.lines[0]!)).toBe('label  what the edit is for  ● research data links  +2')
+  expect(text(narrow.lines[0]!)).toBe('label  what the edit is for ↗  ● research data links  +2')
   expect(narrow.lines[0]!.find(s => s.s === 'what the edit is for')).toMatchObject({ inv: true })
+  expect(narrow.lines[0]!.find(s => s.s === '↗')).toMatchObject({ inv: true })
   // a label changed since the card was made says so
   expect(text(labelHead({ ...USES, labels: [{ ...USES.labels![0]!, stale: true }] }, 120).lines[0]!)).toMatch(/ {2}changed since$/)
-  // a label card says how its records were labeled, since its bars name the values
-  expect(text(labelHead(LABEL_CARD, 96).lines[0]!)).toBe('label  what the edit is for  a model read each record · all 2,197 records of revisions.jsonl')
-  // narrower, the files go first, then how; the count stays
-  expect(text(labelHead(LABEL_CARD, 80).lines[0]!)).toBe('label  what the edit is for  a model read each record · all 2,197 records')
-  expect(text(labelHead(LABEL_CARD, 60).lines[0]!)).toBe('label  what the edit is for  all 2,197 records')
+  // a label card's row stops at the ↗: its bars name the values, and how it ran is the label panel's
+  expect(text(labelHead(LABEL_CARD, 96).lines[0]!)).toBe('label  what the edit is for ↗')
   expect(labelHead({ ...USES, labels: undefined }, 96).lines).toEqual([])
   for (const cols of [30, 44, 60]) for (const l of labelHead(USES, cols).lines) expect(lineWidth(l)).toBeLessThanOrEqual(cols)
 })
@@ -170,8 +128,10 @@ test('a card that read a label draws its marks in the values\' colours: bars by 
   const tl = cardLayout(timeline, 80, -1).lines
   // an event the label does not mark: a dim mark
   expect(tl[0]!.filter(s => s.s === '●').map(s => s.fg)).toEqual([SERIES[1], COLORS.dim])
-  expect(tl.find(l => text(l).includes('An edit'))![0]).toEqual({ s: '● ', fg: SERIES[1] })
-  expect(tl.find(l => text(l).includes('Another'))![0]!.s).toBe('  ')
+  // each event's row: its time at the content's edge, then its ● in its value's hue, or dim where the label marks it not
+  expect(text(tl.find(l => text(l).includes('An edit'))!)).toMatch(/^18 Jun 10:00 {2}● An edit ↗$/)
+  expect(tl.find(l => text(l).includes('An edit'))!.find(s => s.s === '●')!.fg).toBe(SERIES[1])
+  expect(tl.find(l => text(l).includes('Another'))!.find(s => s.s === '●')!.fg).toBe(COLORS.dim)
   const example: CardData = { ...USES, kind: 'example', examples: [{ ref: 'r.jsonl#L3', quote: 'mÃ¶chten', note: 'a note' }], labels: [{ ...USES.labels![0]!, marks }] }
   const ex = cardLayout(example, 80, -1).lines
   expect(ex[0]![0]).toEqual({ s: '● ', fg: SERIES[1] })
@@ -293,28 +253,21 @@ function shown(tree: unknown): string {
   return out.join('\n')
 }
 
-test('in a reply, "agree" on a label card keeps the record\'s value as the analyst\'s, saying "◌ saving" until the card is written again', { timeoutMs: 30000 }, async ($, on) => {
+test('in a reply a label card is a bar card with its label row; a press on the label\'s name opens the label panel', { timeoutMs: 30000 }, async ($, on) => {
   const w = world(on)
   await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
   const ui = (await $.ui.mount(MESSAGE('[[card:lab123]]'))) as unknown as M
   await ui.resize({ columns: 100, rows: 50, in: 'card-1-lab123' })
   const before = shown(await ui.drawn({ in: 'card-1-lab123' }))
-  expect(before).toContain('label  \nwhat the edit is for\n  a model read each record')
-  expect(before).toContain('agree')
-  // the rule, the title and the label line above the body; no border or padding before its cells
-  const agree = cardLayout(LABEL_CARD, 100, -1).hots!.find(h => h.key === 'agree:revisions.jsonl#L10879')!
-  await ui.pointer({ type: 'down', x: agree.x0 + 1, y: agree.line + 3, button: 'left', in: 'card-1-lab123' } as never)
-  await ui.pointer({ type: 'up', x: agree.x0 + 1, y: agree.line + 3, button: 'left', in: 'card-1-lab123' } as never)
-  expect(w.runs).toContainEqual(['show', 'what-the-edit-is-for', '--cwd', CWD])
-  expect(w.runs).toContainEqual(['verdict', 'what-the-edit-is-for', 'revisions.jsonl#L10879', 'research data links', '--cwd', CWD])
+  expect(before).toContain('label  \nwhat the edit is for\n \n↗')
+  for (const gone of ['agree', 'disagree', 'a model read each record', 'County year']) expect(before).not.toContain(gone)
+  // the top border, the title and the blank row under it, then the label row; its name after the border, the padding
+  // and "label  "
+  await ui.pointer({ type: 'down', x: 2 + 7 + 3, y: 3, button: 'left', in: 'card-1-lab123' } as never)
+  await ui.pointer({ type: 'up', x: 2 + 7 + 3, y: 3, button: 'left', in: 'card-1-lab123' } as never)
   await ui.unmount()
-  // the card as written again: the record says the analyst agreed
-  const again = (await $.ui.mount(MESSAGE('[[card:lab123]]'))) as unknown as M
-  await again.resize({ columns: 100, rows: 50, in: 'card-1-lab123' })
-  const after = shown(await again.drawn({ in: 'card-1-lab123' }))
-  expect(after).toContain('✓ agreed')
-  expect(after).not.toContain('◌ saving')
-  await again.unmount()
+  expect(w.opened).toEqual(['thimble'])
+  expect(w.runs).toContainEqual(['show', 'what-the-edit-is-for', '--cwd', CWD])
 })
 
 test('a press on a card\'s label line opens the label in the panel: no card id, the record\'s words as written, the retries in one line', { timeoutMs: 30000 }, async ($, on) => {
@@ -327,11 +280,23 @@ test('a press on a card\'s label line opens the label in the panel: no card id, 
   expect(card).toContain('what the edit is for')
   // the label changed after the card was made
   expect(card).toContain('changed since')
-  await ui.pointer({ type: 'down', x: 12, y: 2, button: 'right', in: 'card-1-use123' } as never)
-  await ui.pointer({ type: 'up', x: 12, y: 2, button: 'right', in: 'card-1-use123' } as never)
+  // the label row under the top border, the title and the blank row; its name past the border, the padding and "label  "
+  await ui.pointer({ type: 'down', x: 12, y: 3, button: 'right', in: 'card-1-use123' } as never)
+  await ui.pointer({ type: 'up', x: 12, y: 3, button: 'right', in: 'card-1-use123' } as never)
   await ui.unmount()
   expect(w.opened).toEqual(['thimble'])
-  const pane = (await $.ui.mount(PANE)) as unknown as M
+  let pane = (await $.ui.mount(PANE)) as unknown as M
+  // the examples and the cards are folded until opened (e, c)
+  const folded = shown(await pane.drawn())
+  expect(folded).toContain('what the edit is for')
+  expect(folded).not.toContain('jedoch möchten wir')
+  expect(folded).not.toContain(LABEL_CARD.question)
+  await pane.press({ key: 'hk-examples' })
+  await pane.unmount()
+  pane = (await $.ui.mount(PANE)) as unknown as M
+  await pane.press({ key: 'hk-cards' })
+  await pane.unmount()
+  pane = (await $.ui.mount(PANE)) as unknown as M
   const panel = shown(await pane.drawn())
   expect(panel).toContain('what the edit is for')
   expect(panel).toContain('13 empty replies split and asked again')

@@ -46,10 +46,12 @@ type Fake = {
   answer: (argv: string[], stdin?: string) => { exitCode: number; stdout: string; stderr: string }
   model: (prompt: string) => string
   nav: ChatReportNav | null
+  submitted: string[]
+  labelOpened: string[]
 }
 
 function fake(): Fake {
-  const f = { files: new Map(), runs: [], coverage: null, labels: new Map(), reports: new Map(), agents: new Map(), spawned: [], notes: [], logs: [], parents: {}, opened: [], asked: [], changed: [], nav: null } as unknown as Fake
+  const f = { files: new Map(), runs: [], coverage: null, labels: new Map(), reports: new Map(), agents: new Map(), spawned: [], notes: [], logs: [], parents: {}, opened: [], asked: [], changed: [], nav: null, submitted: [], labelOpened: [] } as unknown as Fake
   f.answer = argv => {
     if (String(argv[1]).endsWith('coverage.py') && argv[2] === 'summary') return { exitCode: 0, stdout: JSON.stringify(summary()), stderr: '' }
     if (String(argv[1]).endsWith('coverage.py') && argv[2] === 'record') return { exitCode: 0, stdout: JSON.stringify({ written: 1, line: 'read 1 of 3 files · 0.2% of records', totals: summary().totals }), stderr: '' }
@@ -79,7 +81,6 @@ function fake(): Fake {
       f.runs.push({ argv, boxed: true, ...(init?.stdin ? { stdin: String(init.stdin) } : {}) })
       return f.answer(argv, init?.stdin ? String(init.stdin) : undefined)
     },
-    filmPython: async () => '',
     report: async slug => f.reports.get(slug),
     setReport: async r => {
       f.reports.set(r.slug, r)
@@ -114,7 +115,15 @@ function fake(): Fake {
     noteMain: async t => {
       f.notes.push(t)
     },
-    play: async () => undefined,
+    link: () => {
+      throw new Error('no drawing here')
+    },
+    framed: () => {
+      throw new Error('no drawing here')
+    },
+    code: () => {
+      throw new Error('no drawing here')
+    },
     checkCites: async () => 0,
     afterTurn: fn => (f.started = fn()),
     remember: () => undefined,
@@ -139,6 +148,13 @@ function fake(): Fake {
     },
     labelOpen: async () => '',
     setLabelOpen: async () => undefined,
+    submit: async t => {
+      f.submitted.push(t)
+    },
+    labelOpened: async () => f.labelOpened,
+    setLabelOpened: async open => {
+      f.labelOpened = open
+    },
     openHarness: async view => {
       f.opened.push(view)
     },

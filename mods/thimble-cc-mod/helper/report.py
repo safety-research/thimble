@@ -1,13 +1,12 @@
 """thimble-cc-mod's report check, which the writer runs before it ends:
 
-    python3 report.py check <report.md> --contract <document|slides|story|video>
+    python3 report.py check <report.md> --contract <document|slides|story>
 
-The contract is the renderer of the report's type (hooks/report.ts TYPES), so a new type drawn by one of the four needs
-nothing here; `--form <type>` is read as the contract of the types this file knows. Prints one problem per line: a
-citation whose place does not resolve or does not show its value, a card the report embeds that no script wrote, and
+The contract is the renderer of the report's type (hooks/report.ts TYPES), so a new type drawn by one of the three
+needs nothing here; `--form <type>` is read as the contract of the types this file knows. Prints one problem per line:
+a citation whose place does not resolve or does not show its value, a card the report embeds that no script wrote, and
 what the contract needs (a title; a deck's slides, each figure of at most 8 rows so the slide fits a narrow panel; a
-story's beats, each with one figure; a video's scenes, each with at most one card and one or two sentences per line of
-narration). Ends with one line
+story's beats, each with one figure). Ends with one line
 "ok: ..." when there is none, and exits 1 when there are problems. Citations are read from the folder that holds the
 report's .thimble-cc-mod, as the mod reads them.
 """
@@ -25,8 +24,7 @@ CITE = re.compile(r"\[\[([^\[\]]+?)\]\]")
 FIGURE = re.compile(r"^\s*!\[[^\]\n]*\]\(\s*card:([A-Za-z0-9_-]+)(?:\s+\"[^\"\n]*\")?\s*\)\s*$")
 EMBED = re.compile(r"^\s*\[\[card:([A-Za-z0-9_-]+)\]\]\s*$")
 CODE = re.compile(r"```[\s\S]*?```|`[^`\n]*`")
-PAUSE = re.compile(r"\s*\(\s*pause\s+\d+(?:\.\d+)?\s*s?\s*\)\s*$", re.I)
-CONTRACTS = ("document", "slides", "story", "video")
+CONTRACTS = ("document", "slides", "story")
 # the types drawn as a document, for --form
 DOCUMENT_TYPES = ("casefile", "comparison", "timeline", "custom")
 # a slide's figure in a panel 50 columns by 44 rows: at most this many rows, bars, events or examples
@@ -88,11 +86,6 @@ def paragraphs(text: str) -> list[str]:
     return [p for p in out if p]
 
 
-def sentences(text: str) -> int:
-    plain = CITE.sub(lambda m: m.group(1).split("|")[0], CODE.sub("x", text))
-    return len([s for s in re.split(r"(?<=[.!?])\s+", plain.strip()) if s])
-
-
 def figures(text: str) -> list[str]:
     return [m.group(1) for line in text.split("\n") for m in [FIGURE.match(line) or EMBED.match(line)] if m]
 
@@ -141,27 +134,7 @@ def check(path: str, form: str) -> tuple[list[str], str]:
             problems.append(f"card:{cid} is embedded but {HOME}/cards/{cid}.json does not exist: make it with the card helper")
     lead, secs = sections(body)
     summary = f"{n_cites} citations resolve, {len(cards)} cards"
-    if form == "video":
-        secs = [(h, b) for h, b in secs if h.lower() != "what changed"]
-        if not secs:
-            problems.append('the video has no "## " scene')
-        total = 0.0
-        for i, (h, b) in enumerate(secs, 1):
-            said = [PAUSE.sub("", p) for p in paragraphs(b)]
-            if not said:
-                problems.append(f'scene {i} ("{h}") has no line of narration')
-            if len(figures(b)) > 1:
-                problems.append(f'scene {i} ("{h}") shows {len(figures(b))} cards: one card per scene, so make two scenes')
-            for p in said:
-                if sentences(p) > 2:
-                    problems.append(f'scene {i}: a line of {sentences(p)} sentences; each paragraph is one line of one or two sentences: "{p[:60]}…"')
-                total += max(4.5, 1.4 + words(p) / 2.5)
-        for p in paragraphs(lead):
-            total += max(4.5, 1.4 + words(p) / 2.5)
-        if total > 240:
-            problems.append(f"the narration runs about {int(total // 60)}:{int(total % 60):02d}; keep the video under 3 minutes")
-        summary += f", {len(secs)} scenes, about {int(total // 60)}:{int(total % 60):02d}"
-    elif form == "slides":
+    if form == "slides":
         if not secs:
             problems.append('the deck has no "## " slide')
         for i, (h, b) in enumerate(secs, 1):

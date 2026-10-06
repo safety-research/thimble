@@ -91,19 +91,22 @@ const settle = async () => {
 
 // ------------------------------------------------------------------------------------------------ the registry
 
-test('report types: one registry; a document unless the analyst names another; a video or a story only on request', () => {
+test('report types: one registry; a document unless the analyst names another; a story only on request', () => {
   expect(new Set(TYPES.map(t => t.id)).size).toBe(TYPES.length)
   expect(DEFAULT_TYPE).toBe('document')
   expect(typeOf('nonsense').id).toBe('document')
   expect(typeOf('story')).toMatchObject({ name: 'interactive story', renderer: 'story', onRequest: true })
   expect(typeOf('casefile').renderer).toBe('document')
   expect(guessType('write it up')).toBe('document')
-  expect(guessType('make me a video explaining what is going on in this dataset')).toBe('video')
+  // there is no video: a request for one is a document
+  expect(TYPES.some(t => t.id === 'video')).toBe(false)
+  expect(guessType('make me a video explaining what is going on in this dataset')).toBe('document')
   expect(guessType('tell it as an interactive graphic piece')).toBe('story')
   expect(guessType('a deck for Monday')).toBe('slides')
-  // main asked for a video the analyst did not name: a document
-  expect(settleType('video', 'write up what happened')).toBe('document')
-  expect(settleType('video', 'a short video of it')).toBe('video')
+  // main asked for a story the analyst did not name: a document
+  expect(settleType('story', 'write up what happened')).toBe('document')
+  expect(settleType('story', 'tell it as an interactive story')).toBe('story')
+  expect(settleType('video', 'a short video of it')).toBe('document')
   expect(settleType('casefile', 'one section per agent')).toBe('casefile')
   expect(settleType(undefined, 'slides for the team')).toBe('slides')
   expect(parseReportArgs('case file one per agent')).toEqual({ form: 'casefile', request: 'one per agent' })
@@ -111,7 +114,8 @@ test('report types: one registry; a document unless the analyst names another; a
   expect(parseReportArgs('what happened in the wiki')).toEqual({ form: 'document', request: 'what happened in the wiki' })
   // main's tool is described from the registry, and the type may be left out
   for (const t of TYPES) expect(TOOL_DESCRIPTION).toContain(`${t.id}, ${t.blurb}`)
-  expect(TOOL_DESCRIPTION).toContain('Write a document unless the analyst names another type; video and story only when they ask for one.')
+  expect(TOOL_DESCRIPTION).toContain('Write a document unless the analyst names another type; story only when they ask for one.')
+  expect(TOOL_DESCRIPTION).not.toMatch(/video/)
   expect(TOOL_SCHEMA.required).toEqual(['request'])
 })
 
@@ -202,7 +206,6 @@ function fake(): Fake {
     },
     list: async dir => [...f.files.keys()].filter(p => p.startsWith(`${dir}/`)).map(p => p.slice(dir.length + 1)),
     run: async () => ({ exitCode: 0, stdout: '', stderr: '' }),
-    filmPython: async () => '',
     report: async slug => f.reports.get(slug),
     setReport: async r => {
       f.reports.set(r.slug, r)
@@ -235,7 +238,16 @@ function fake(): Fake {
     noteMain: async text => {
       f.notes.push(text)
     },
-    play: async () => undefined,
+    link: () => {
+      throw new Error('no drawing here')
+    },
+    framed: () => {
+      throw new Error('no drawing here')
+    },
+    code: () => {
+      throw new Error('no drawing here')
+    },
+    thread: async () => undefined,
     checkCites: async () => 0,
     afterTurn: async fn => {
       f.started.push(fn())
@@ -371,6 +383,13 @@ function world(on: On, files: Record<string, string>): World {
 
 const record = (slug: string, form: string, title: string, more: Partial<ChatReport> = {}): string => JSON.stringify({ slug, form, title, request: '', file: `.thimble-cc-mod/reports/${slug}.md`, state: 'ready', tools: 0, partial: '', problems: [], created: 1, ...more })
 
+/** A click on a link drawn by a lines Client (hooks/homeview.tsx), as the Client posts it. */
+let linkSeq = 0
+async function linkClick(pane: M, key: string, i = 0): Promise<void> {
+  const c = (await pane.find({ type: 'Client', key })) as unknown as { props: { props: { stamp: string } } }
+  await pane.post({ type: 'home', horigin: 'test-link', hacts: [{ seq: ++linkSeq, i, s: c.props.props.stamp }] } as never, { in: key })
+}
+
 async function openReport($: Parameters<TestBody>[0], slug: string): Promise<M> {
   await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
   await $.command.run({ command: 'thimble-reports', args: '' } as never)
@@ -383,7 +402,13 @@ async function openReport($: Parameters<TestBody>[0], slug: string): Promise<M> 
 test('a document: "verify" beside a heading asks for a verifier of its citations; each chip and the tallies show the outcome', async ($, on) => {
   const w = world(on, { [`${CWD}/.thimble-cc-mod/reports/doc.md`]: DOC, [`${CWD}/.thimble-cc-mod/reports/doc.json`]: record('doc', 'document', 'dse holds the edits') })
   const pane = await openReport($, 'doc')
-  expect(await json(pane)).toContain('5 citations')
+  // the report has no row of counts under its title: its title, then the rule
+  expect(await json(pane)).not.toContain('5 citations')
+  // a callout: its kind as a dim label, its text after it, drawn as a paragraph rather than a quote
+  expect(await pane.find({ type: 'Text', text: 'note' })).toBeDefined()
+  const note = (await pane.findAll({ type: 'Client' })).map(c => (c as unknown as { props: { props?: { block?: { quote: boolean; runs: { text: string }[] } } } }).props.props?.block).find(b => b?.runs[0]?.text.startsWith('Counts start'))
+  expect(note?.quote).toBe(false)
+  expect(note?.runs[0]?.text).toBe('Counts start in June ')
   expect(await pane.find({ key: 'verify:s1' })).toBeDefined()
   // a section without citations has nothing to verify
   expect(await pane.find({ key: 'verify:s3' })).toBeUndefined()
@@ -412,13 +437,14 @@ test('a document: a highlight set\'s marks beside their passages with their reas
   expect(drawn).toContain('"label":"the counts"')
   // a set still working when its session ended says so
   expect(drawn).toContain('the deletions · the session ended before it finished')
-  expect(await pane.find({ key: 'mark:h1:0' })).toBeDefined()
-  expect(await pane.find({ key: 'mark:h1:1' })).toBeDefined()
+  expect(await pane.find({ type: 'Client', key: 'mark:h1:0' })).toBeDefined()
+  expect(await pane.find({ type: 'Client', key: 'mark:h1:1' })).toBeDefined()
   expect(drawn).toContain('the probier rows')
   // a marked passage: a ● in the set's hue at the left of its first row
   expect(drawn).toContain('"color":"#1d7fc0"')
   await pane.press({ key: 'hl-go:h1' })
-  await pane.press({ key: 'mark-open:h1:0' })
+  // a mark's `↗` is a link: a click on it opens the evidence
+  await linkClick(pane, 'mark:h1:0')
   await pane.unmount()
   const cite = (await $.ui.mount(PANE as never)) as unknown as M
   expect(await json(cite)).toContain('revisions.jsonl line 5')
@@ -426,10 +452,11 @@ test('a document: a highlight set\'s marks beside their passages with their reas
   expect(w.opened.length).toBeGreaterThan(2)
 })
 
-test('the highlight field asks a subagent for marks; a side thread on a list item is told the report and its section', async ($, on) => {
+test('the report has no highlight field: main\'s tool asks a subagent for marks; a side thread on a list item is told the report and its section', async ($, on) => {
   const w = world(on, { [`${CWD}/.thimble-cc-mod/reports/doc.md`]: DOC, [`${CWD}/.thimble-cc-mod/reports/doc.json`]: record('doc', 'document', 'dse holds the edits') })
   const pane = await openReport($, 'doc')
-  await pane.input({ key: 'highlight', text: 'where the counts come from' })
+  expect(await pane.find({ key: 'highlight' })).toBeUndefined()
+  await $.tool.call({ tool: 'mcp__thimble-cc-mod__report_highlight', request: 'where the counts come from' } as never)
   await settle()
   expect(w.spawned[0]!.description).toBe('report · highlighting where the counts come from')
   expect(w.spawned[0]!.prompt).toContain('P4 [The data]: - A plain item without a citation.')
@@ -461,12 +488,9 @@ test('no field or list in a report\'s panels says how to use it', async ($, on) 
   await list.press({ key: 'report-open:doc' })
   await list.unmount()
   const pane = (await $.ui.mount(PANE as never)) as unknown as M
-  // a field's label is a dim word before it, lower case and with no colon (views/SPEC.md, rule 6), not the Input's own
-  const field = (await pane.find({ key: 'highlight' })) as { props: Record<string, unknown> } | undefined
-  expect(field).toBeDefined()
-  expect(field?.props.label).toBeUndefined()
-  expect(field?.props.placeholder).toBeUndefined()
-  expect(await pane.find({ type: 'Text', text: /^highlight {2}$/ })).toBeDefined()
+  // the report has no field; a field's label is a dim word before it, lower case and with no colon (views/SPEC.md,
+  // rule 27), not the Input's own label or placeholder
+  expect(await pane.find({ type: 'Input' })).toBeUndefined()
   await pane.press({ key: 'ask-md:r0-5-0' })
   await pane.unmount()
   const thread = (await $.ui.mount(PANE as never)) as unknown as M
@@ -545,6 +569,7 @@ test('an interactive story: the opening lists the beats; each beat steps in besi
   expect(page).toContain('probier is second')
   expect(page).toContain('Limitations')
   expect(await pane.find({ key: 'retell-story' })).toBeUndefined()
-  expect(await pane.find({ key: 'retell-video' })).toBeDefined()
+  expect(await pane.find({ key: 'retell-slides' })).toBeDefined()
+  expect(await pane.find({ key: 'retell-video' })).toBeUndefined()
   await pane.unmount()
 })
