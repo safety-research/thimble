@@ -162,8 +162,6 @@ interface FilesProps {
   /** the files it reads, the first of them, and how many there are */
   list: readonly string[]
   n: number
-  /** the file Raw shows, marked in the list */
-  current: string | null
   onPick: (path: string) => void
 }
 
@@ -177,8 +175,6 @@ interface LineProps {
   onResidue: () => void
   /** a corpus view's files, first on the line */
   files?: FilesProps
-  /** after the files, such as the file Raw shows */
-  after?: ReactNode
   /** the npm packages its page loads, as view.json's `libs` names them (`name@version`, or a file inside one) */
   libs?: readonly string[]
   /** a file viewer's line, of the one file it shows */
@@ -194,13 +190,12 @@ export function libPackages(libs: readonly string[]): string[] {
  * say it leaves nothing out), the npm packages its page loads, what it leaves out, each part opening the list under the
  * head, and its derived data. A
  * file viewer's line has no files, and says nothing of the file when it reads cleanly. */
-export function ViewHeadLine({ ws, name, notes, shownLabels, residueOpen, onResidue, files, after, libs, file = false }: LineProps) {
+export function ViewHeadLine({ ws, name, notes, shownLabels, residueOpen, onResidue, files, libs, file = false }: LineProps) {
   const words = residueWords(notes, file)
   // both notes read, so a file count is not called complete before the unreadable lines are known
   const clean = !!notes.shown && !!notes.problems && !words.length
   const items: [string, ReactNode][] = []
   if (files && files.n) items.push(['files', <ViewFiles name={name} {...files} clean={clean} />])
-  if (after) items.push(['after', after])
   const packages = libPackages(libs ?? [])
   if (packages.length) items.push(['libs', <span className="view-pane-libs" title="The npm packages the page loads, bundled into the view">{`Uses ${packages.join(', ')}`}</span>])
   for (const w of words)
@@ -230,7 +225,7 @@ export function ViewHeadLine({ ws, name, notes, shownLabels, residueOpen, onResi
 
 /** The files a view reads: their count, the file's name when it reads one, or "All 12 files read" when it leaves
  * nothing out, which a click lists them under; a file picked there opens in Raw. */
-function ViewFiles({ name, list, n, current, onPick, clean }: FilesProps & { name: string; clean: boolean }) {
+function ViewFiles({ name, list, n, onPick, clean }: FilesProps & { name: string; clean: boolean }) {
   const [at, setAt] = useState<HTMLButtonElement | null>(null)
   const [open, setOpen] = useState(false)
   return (
@@ -243,7 +238,7 @@ function ViewFiles({ name, list, n, current, onPick, clean }: FilesProps & { nam
           <button
             key={f}
             type="button"
-            className={'view-pane-list-item mono' + (f === current ? ' is-current' : '')}
+            className="view-pane-list-item mono"
             onClick={() => {
               setOpen(false)
               onPick(f)

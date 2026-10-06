@@ -48,7 +48,7 @@ function Head({ notes, picked, file = false, files }: { notes: ViewNotes; picked
   const [open, setOpen] = useState(false)
   return (
     <div>
-      <ViewHeadLine ws="ws" name="Runs" notes={notes} shownLabels={[]} residueOpen={open} onResidue={() => setOpen((o) => !o)} file={file} files={files ? { list: files, n: files.length, current: null, onPick: () => undefined } : undefined} />
+      <ViewHeadLine ws="ws" name="Runs" notes={notes} shownLabels={[]} residueOpen={open} onResidue={() => setOpen((o) => !o)} file={file} files={files ? { list: files, n: files.length, onPick: () => undefined } : undefined} />
       {open && <ResidueList notes={notes} onPick={(ref) => picked.push(ref)} />}
     </div>
   )

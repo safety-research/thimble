@@ -2390,11 +2390,6 @@
   font: var(--type-ui-sm);
   color: var(--text-tertiary);
 }
-.view-pane-file {
-  overflow-wrap: break-word;
-  font: var(--type-mono-sm);
-  color: var(--text-tertiary);
-}
 .view-pane-files {
   padding: 0;
   border: 0;
@@ -2473,8 +2468,7 @@
 .view-pane-list-item .mono {
   font: var(--type-mono-sm);
 }
-.view-pane-list-item:hover:not(:disabled),
-.view-pane-list-item.is-current {
+.view-pane-list-item:hover:not(:disabled) {
   background: var(--surface-hover);
 }
 .view-pane-list-why,
@@ -2529,12 +2523,6 @@
   border-radius: var(--radius-card);
   background: var(--surface-card);
   box-shadow: var(--ring-card), 0 0 0 1px var(--border-hairline);
-}
-.view-pane-raw {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
 }
 
 /* -------- database -------- */
@@ -2845,7 +2833,7 @@
   border-radius: var(--radius-ui);
   background: var(--surface-card);
 }
-/* the mark of the review of the view's pictures, at the head's right end after the mode switch (ViewPane ReviewMark) */
+/* the mark of the review of the view's pictures, at the head's right end (ViewPane ReviewMark) */
 .view-pane-head .view-pane-review {
   align-self: center;
   margin: 0;
