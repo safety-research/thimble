@@ -855,11 +855,29 @@ def ran_on(c: str, agent_id: str, model: str, effort: str | None = None) -> bool
     return True
 
 
+def api_error(c: str, agent_id: str) -> str | None:
+    """Claude Code's error line when the latest reply of the agent's current run is an API error (session.agent_error),
+    else None."""
+    from . import session  # noqa: PLC0415
+
+    try:
+        return session.agent_error(c, agent_id)
+    except Exception:  # noqa: BLE001 — a transcript that cannot be read says nothing of the run's end
+        log.debug("%s: the reply of %s was not read", c, agent_id, exc_info=True)
+        return None
+
+
 def run_ended(c: str, agent_id: str, status: str, report: str | None, *, source: str = "",
               interrupted: bool = False) -> bool:
     """End the current run of a registered agent once: its status, its chat ended with the report, and its role's end
-    handler (Type.ended). A run that ended already (another signal of the same end) is left alone. True when this call
-    ended it."""
+    handler (Type.ended). A run whose latest reply is an API error (api_error: a refusal by the model's safeguards,
+    retries run out) failed, with Claude Code's error line as its report, whichever signal ends it, unless the agent
+    handed back or was stopped. A run that ended already (another signal of the same end) is left alone. True when this
+    call ended it."""
+    if source != "handback" and status != "stopped":
+        error = api_error(c, agent_id)  # read first: the transcript's tail may hold the run's hand-back, which ends it
+        if error:
+            status, report = "failed", error
     with update(c) as state:
         a = files.registry(state).get(agent_id)
         if not isinstance(a, dict):
@@ -942,13 +960,17 @@ def stopped(c: str, agent_id: str, last_stop: float | None = None) -> None:
 
 
 STOPPED_REASONS = ("abort", "interrupt", "cancel", "kill", "stop")  # a turn.complete reason that means the turn was cut off
-FAILED_REASONS = ("error", "fail")
+# a turn.complete reason that means the run failed: an API error ended it (`error`), or the model refused with no fallback
+# model to retry on (`refusal`)
+FAILED_REASONS = ("error", "fail", "refus")
+NO_ERROR_TEXT = "Claude Code ended the run ({reason}) and gave no error text"  # a failed run's report when none came
 
 
 def ended(c: str, agent_id: str, answer: str | None = None, reason: str = "") -> bool:
     """The module's `ended {agentId, answer, reason}` (its turn.complete, which reaches it for the agents it started
     although its other hooks skip them): a turn's end with its answer, which ends the run once when no child of the
-    agent runs; stopped or failed when the reason says so."""
+    agent runs; stopped or failed when the reason says so (`aborted`; `error`, `refusal`), a failure with the API's
+    error line as its report (run_ended)."""
     state = read(c)
     a = files.registry(state).get(agent_id)
     if not isinstance(a, dict) or children_running(state, agent_id):
@@ -956,6 +978,8 @@ def ended(c: str, agent_id: str, answer: str | None = None, reason: str = "") ->
     why = str(reason or "").lower()
     status = "stopped" if any(w in why for w in STOPPED_REASONS) else "failed" if any(
         w in why for w in FAILED_REASONS) else "done"
+    if status == "failed" and not str(answer or "").strip():
+        answer = NO_ERROR_TEXT.format(reason=why)
     return run_ended(c, agent_id, status, answer, source="module")
 
 

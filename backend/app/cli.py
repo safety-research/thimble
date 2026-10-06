@@ -1662,14 +1662,15 @@ def main_name(cwd: Path) -> str:
 # a machine where it cannot run) main starts without the fence, and the launch says so (NO_FENCE_LINES).
 #
 # The launch also writes launch.json in the workspace (LAUNCH_FILE, launch_record): main's session id, whether main is
-# fenced, the switches the launcher exports and the variables it unsets. The hooks module's bridge accepts a hello only
-# from that session (module_bridge), and `doctor` reads it.
+# fenced, the switches the launcher exports, the variables it unsets, and the launcher's own pid, which is main's
+# `claude` process once the launcher execs it. The hooks module's bridge accepts a hello only from that session
+# (module_bridge), reading from that pid's command line whether main is fenced, and `doctor` reads it.
 
 # the folders main's Bash may write, under the workspace (subagents.write_dirs, which this list stands in for until the
 # subagent paths are in): the orientation's work folder, the writers', the critics', the checks', the view builders' and
 # the workspace's own views. No code ticket's worktree: code tickets keep their own fence.
 WRITE_DIRS = ("orient/work", "writers", "critique-work", "check-work", "views-work", "extension/views")
-LAUNCH_FILE = "launch.json"  # in the workspace: {session, at, fenced, switches, unset}
+LAUNCH_FILE = "launch.json"  # in the workspace: {session, at, fenced, switches, unset, pid}
 # exported into main's environment: no "Move to background" and no ← agent view, the ↓ tray kept (spike U11);
 # CLAUDE_DISABLE_ADOPT adds nothing to the first but does no harm
 SWITCHES = {"CLAUDE_CODE_DISABLE_AGENT_VIEW": "1", "CLAUDE_DISABLE_ADOPT": "1"}
@@ -1898,15 +1899,20 @@ def refresh_extensions(c: str) -> None:
         _log(f"launch-args: the extensions of {c} were not found again: {type(e).__name__}: {e}")
 
 
-def launch_record(c: str, session: str | None, fenced: bool, switches: dict[str, str], unset: list[str]) -> None:
-    """Write launch.json in workspace `c` (module note, main's fence). Never raises: a launch that cannot write it
-    starts main, whose hooks module then stays idle."""
+def launch_record(c: str, session: str | None, fenced: bool, switches: dict[str, str], unset: list[str],
+                  pid: int | None = None) -> None:
+    """Write launch.json in workspace `c` (module note, main's fence), with `pid`, the launcher's own process, which
+    becomes main's `claude` when the launcher execs it, when the launcher names it. Never raises: a launch that cannot
+    write it starts main, whose hooks module then stays idle."""
     from .ledger import atomic_write_text  # noqa: PLC0415
 
     try:
         path = config.workspace_dir(c) / LAUNCH_FILE
-        atomic_write_text(path, json.dumps({"session": session, "at": _now(), "fenced": fenced, "switches": switches,
-                                            "unset": unset}, indent=1) + "\n")
+        rec: dict[str, Any] = {"session": session, "at": _now(), "fenced": fenced, "switches": switches,
+                               "unset": unset}
+        if pid and pid > 1:
+            rec["pid"] = int(pid)
+        atomic_write_text(path, json.dumps(rec, indent=1) + "\n")
     except (OSError, ValueError) as e:
         _log(f"launch-args: {LAUNCH_FILE} of {c} was not written: {e}")
 
@@ -1939,7 +1945,7 @@ def server_dirs() -> Iterator[None]:
 
 
 def launch_args(cwd: Path, resume: bool = False, settings: str = "", own_session: str | None = None,
-                safe_mode: bool = False) -> str:
+                safe_mode: bool = False, launcher_pid: int | None = None) -> str:
     """The launcher's values, one per line: the plugin folder to load with `--plugin-dir` ('' when the plugin copy is
     one Claude Code has installed, installed_copy), the `--allowedTools` line, the `--effort` value ('' for none), the
     `--settings` value (launch_settings, over the analyst's own `settings`, with thimble's fence), the value to export as
@@ -1951,16 +1957,17 @@ def launch_args(cwd: Path, resume: bool = False, settings: str = "", own_session
 
     Before it prints, it registers the folder (register_here), starts thimble's server and waits for it
     (server_for_launch), finds the workspace's extensions again (refresh_extensions) and writes launch.json
-    (launch_record). Main's effort is explicit: models.main's, else the CLAUDE_CODE_EFFORT_LEVEL it unsets, else
+    (launch_record), with `launcher_pid`, the launcher's own pid, which becomes main's `claude` process when the launcher
+    execs it. Main's effort is explicit: models.main's, else the CLAUDE_CODE_EFFORT_LEVEL it unsets, else
     cc_settings.main_effort_flag; a stored ultracode runs at its level."""
     installed = installed_copy(cwd)
     root = installed.root if installed else plugin_root()
     with server_dirs():
-        return _launch_args(cwd, resume, settings, own_session, safe_mode, installed, root)
+        return _launch_args(cwd, resume, settings, own_session, safe_mode, installed, root, launcher_pid)
 
 
 def _launch_args(cwd: Path, resume: bool, settings: str, own_session: str | None, safe_mode: bool,
-                 installed: Installed | None, root: Path) -> str:
+                 installed: Installed | None, root: Path, launcher_pid: int | None = None) -> str:
     """launch_args inside server_dirs."""
     from . import cc_settings, events, terminal_tools  # noqa: PLC0415 — needed by this subcommand alone
 
@@ -2014,7 +2021,8 @@ def _launch_args(cwd: Path, resume: bool, settings: str, own_session: str | None
         notes.append(SAFE_MODE_LINE)
     settings_value = launch_settings(cwd, settings, fence)
     if c:  # fenced as main's command line will show it (an unreadable --settings of the analyst's carries no fence)
-        launch_record(c, session, cc_plugin.fenced_argv(["claude", "--settings", settings_value], cwd), switches, unset)
+        launch_record(c, session, cc_plugin.fenced_argv(["claude", "--settings", settings_value], cwd), switches, unset,
+                      launcher_pid)
     load = "" if installed or cc_plugin.marketplace(root) != cc_plugin.INLINE else str(root)
     return "\n".join([load, tools_line, effort, settings_value, turn_tools,
                       main_name(cwd), session_id, " ".join(f"{k}={v}" for k, v in switches.items()), " ".join(unset),
@@ -2023,7 +2031,8 @@ def _launch_args(cwd: Path, resume: bool, settings: str, own_session: str | None
 
 def cmd_launch_args(args: argparse.Namespace) -> int:
     print(launch_args(Path(args.cwd or os.environ.get("THIMBLE_CALLER_CWD") or os.getcwd()), bool(args.resume),
-                      args.settings or "", own_session=args.own_session, safe_mode=bool(args.safe_mode)))
+                      args.settings or "", own_session=args.own_session, safe_mode=bool(args.safe_mode),
+                      launcher_pid=args.launcher_pid))
     # on stderr, which the launcher leaves on the terminal, before Claude Code starts
     warning = claude_code_warning(claude_code_version())
     if warning:
@@ -3783,6 +3792,8 @@ def build_parser() -> argparse.ArgumentParser:
     la.add_argument("--own-session", help="the analyst's own flags name main's session (-r, --session-id or "
                                           "--fork-session): its id, or '' when it is not known")
     la.add_argument("--safe-mode", action="store_true", help="the analyst passed Claude Code's --safe-mode")
+    la.add_argument("--launcher-pid", type=int, help="the launcher's own pid ($$), which is main's `claude` process "
+                                                     "once it execs claude; launch.json records it")
     la.set_defaults(fn=cmd_launch_args)
     pr = sub.add_parser("prompt", help="for a plugin skill's injected command: prompt files rendered for a session in --cwd")
     pr.add_argument("names", nargs="+", help="prompt names under prompts/, such as shared")

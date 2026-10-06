@@ -164,7 +164,7 @@ function engine(opts: Options = {}) {
       for (let s = await gen.next(); !s.done; s = await gen.next()) { /* no chunks */ }
       return seen.effort
     },
-    complete: (agentId: string | undefined, answer = 'Done.') => hooks['turn.complete']($, { agentId, answer, reason: 'answer', durationMs: 5, isAborted: false, turnId: 't' }, async () => ({ text: answer })),
+    complete: (agentId: string | undefined, answer = 'Done.', more: Json = {}) => hooks['turn.complete']($, { agentId, answer, reason: 'answer', durationMs: 5, isAborted: false, turnId: 't', ...more }, async () => ({ text: answer })),
   }
 }
 
@@ -414,6 +414,18 @@ describe('ends and sessions', () => {
     await until(() => e.server.ended.length === 1)
     await new Promise(r => setTimeout(r, 10))
     expect(e.server.ended).toEqual([{ cwd: CWD, session: MAIN, agentId: 'agent-8', answer: 'Two comments.', reason: 'answer' }])
+  })
+
+  it('posts why a run ended, and for a refusal what the API said of it, so the server can say why it failed', async () => {
+    const e = await started()
+    await e.server.answer(e.server.push('spawn', { role: 'orientation', prompt: 'p', description: 'orientation: the corpus', values: {}, note: '' }))
+    const refusal = { category: 'cyber', explanation: 'This request triggered cyber-related safeguards.' }
+    await e.complete('agent-8', '', { reason: 'refusal', refusal })
+    await until(() => e.server.ended.length === 1)
+    expect(e.server.ended[0]).toEqual({ cwd: CWD, session: MAIN, agentId: 'agent-8', answer: '', reason: 'refusal', refusal })
+    await e.complete('agent-8', 'API Error: Repeated 529 Overloaded errors', { reason: 'error' })
+    await until(() => e.server.ended.length === 2)
+    expect(e.server.ended[1]).toEqual({ cwd: CWD, session: MAIN, agentId: 'agent-8', answer: 'API Error: Repeated 529 Overloaded errors', reason: 'error' })
   })
 
   it('keeps its poll across /clear: a hello under the new id, polls under it, the record again and a note per running agent', async () => {

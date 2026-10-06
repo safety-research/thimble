@@ -237,6 +237,82 @@ async def test_a_killed_run_ends_stopped_and_one_cut_off_by_the_quit_says_contin
     assert agents.read_meta(CORPUS, chat)["continue"] == "here"
 
 
+SAFEGUARD = ("API Error: Opus 4.8's safeguards flagged this message. Our intentionally broad safeguards allow us to "
+             "deliver more capabilities faster, but can sometimes flag legitimate cybersecurity work.\n\nDetails: "
+             "`[cyber]`\n\nRequest ID: req_011CfjqEMn9QjcrgsnMLfo4s")
+
+
+def _api_error(text: str = SAFEGUARD) -> dict:
+    """The record Claude Code writes when an API error ends a turn: a synthetic assistant reply, as a refusal by the
+    model's safeguards left it in an orientation's transcript (Claude Code 2.1.289)."""
+    return {"type": "assistant", "isApiErrorMessage": True, "error": "invalid_request",
+            "message": {"role": "assistant", "model": "<synthetic>", "stop_reason": "refusal",
+                        "content": [{"type": "text", "text": text}]}}
+
+
+async def test_a_run_an_api_error_ended_fails_with_claude_code_s_error_line_whichever_signal_ends_it(
+        bridge, project, ended, monkeypatch):
+    """An API error (a refusal by the model's safeguards, retries run out) ends a run with no hand-back. Its end comes as
+    the module's turn end (reason refusal or error), a SubagentStop, or for a typed start a task notification that may
+    say completed; each ends the run failed, with the error line of the agent's transcript as its report."""
+    lv, chat, path = await _click_orientation(bridge, project)
+    _write(path, {"type": "user", "message": {"role": "user", "content": "the task"}},
+           _assistant(_use("toolu_b1", "Bash", {"command": "ls"})), _result("toolu_b1", "a b"), _api_error())
+    assert subagents.ended(CORPUS, AGENT, "", "refusal")
+    assert ended[-1] == ("ended", "orientation", 0, "failed", SAFEGUARD)
+    assert subagents.agent(CORPUS, AGENT)["status"] == "failed"
+    meta = agents.read_meta(CORPUS, chat)
+    assert meta["status"] == "failed" and meta["result"] == SAFEGUARD[:400]
+
+    # a follow-up's SubagentStop: the run ends with that turn's answer, which here is the API's error
+    subagents.run_again(CORPUS, AGENT, "coordinator")
+    _write(path, {"type": "user", "message": {"role": "user", "content": "And April?"}},
+           _api_error("API Error: Repeated 529 Overloaded errors"))
+    monkeypatch.setattr(subagents, "HANDBACK_WAIT_S", 0.01)
+    monkeypatch.setattr(subagents, "AUTO_HANDBACK_WAIT_S", 0.01)
+    subagents.stopped(CORPUS, AGENT)
+    import asyncio
+
+    for _ in range(100):
+        if ended[-1][:3] == ("ended", "orientation", 1):
+            break
+        await asyncio.sleep(0.01)
+    assert ended[-1] == ("ended", "orientation", 1, "failed", "API Error: Repeated 529 Overloaded errors")
+
+    # a task notification that says completed: failed all the same
+    subagents.run_again(CORPUS, AGENT, "coordinator")
+    _write(path, {"type": "user", "message": {"role": "user", "content": "And May?"}},
+           _api_error("API Error: 400 prompt is too long"))
+    _write(Path(lv.transcript_path), _notice(AGENT, "completed", summary="Agent finished",
+                                             result="API Error: 400 prompt is too long"), END)
+    session.tail_once(lv)
+    assert ended[-1] == ("ended", "orientation", 2, "failed", "API Error: 400 prompt is too long")
+
+
+async def test_an_api_error_the_run_went_on_from_and_a_stop_are_no_failure(bridge, project, ended):
+    """Only the latest reply counts: a run that went on after an API error (Claude Code retried on a fallback model, or
+    nudged it to hand back) ends as its hand-back or answer says; and a run the analyst stopped ends stopped."""
+    lv, chat, path = await _click_orientation(bridge, project)
+    _write(path, _api_error(), _assistant({"type": "text", "text": "Done after all."}))
+    assert subagents.ended(CORPUS, AGENT, "Done after all.", "answer")
+    assert ended[-1] == ("ended", "orientation", 0, "done", "Done after all.")
+    subagents.run_again(CORPUS, AGENT, "coordinator")
+    _write(path, {"type": "user", "message": {"role": "user", "content": "And April?"}}, _api_error())
+    assert subagents.ended(CORPUS, AGENT, "", "aborted")
+    assert ended[-1][:4] == ("ended", "orientation", 1, "stopped")
+    subagents.run_again(CORPUS, AGENT, "coordinator")
+    _write(path, {"type": "user", "message": {"role": "user", "content": "And May?"}}, _api_error(),
+           _assistant(_use("toolu_hb", "SubagentHandback", {"message": "I could not read May."})))
+    session.tail_once(lv)
+    assert ended[-1] == ("ended", "orientation", 2, "done", "I could not read May.")
+
+
+def test_a_failed_turn_end_with_no_text_says_so():
+    """The module's turn end for an API error or a refusal that brought no text and no transcript line: the run's report
+    says Claude Code gave none, rather than nothing."""
+    assert subagents.NO_ERROR_TEXT.format(reason="error") == "Claude Code ended the run (error) and gave no error text"
+
+
 async def test_a_typed_start_s_agent_call_is_no_row_and_its_agent_takes_up_the_claimed_request(bridge, project, ended):
     lv = _attach(project)
     ans = await subagents.start_job(CORPUS, "writer", "writer:report", "write it", {"model": "m", "effort": "e"},

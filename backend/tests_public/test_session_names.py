@@ -189,7 +189,8 @@ def test_without_the_plugin_registered_the_launcher_loads_its_own_plugin_folder(
 def test_the_launcher_passes_the_session_id_exports_the_switches_unsets_the_variables_and_prints_the_notes(tmp_path):
     """The launcher passes launch-args' session id with --session-id, exports the env line's switches into `claude`'s
     environment, unsets the variables the unset line names, prints each note line before Claude Code starts, and tells
-    launch-args when the analyst's own flags name the session (-r, --session-id, --fork-session) or ask for safe mode."""
+    launch-args when the analyst's own flags name the session (-r, --session-id, --fork-session) or ask for safe mode.
+    It passes launch-args its own pid, which is `claude`'s once it execs it, for launch.json."""
     import subprocess  # noqa: PLC0415
 
     head = [str(tmp_path / "plugin"), "mcp__x", "high", "{}", ""]
@@ -199,7 +200,7 @@ def test_the_launcher_passes_the_session_id_exports_the_switches_unsets_the_vari
                                           "CLAUDE_CODE_DISABLE_AGENT_VIEW=1 CLAUDE_DISABLE_ADOPT=1",
                                           "CLAUDE_CODE_EFFORT_LEVEL CLAUDE_CODE_SUBAGENT_MODEL", notes, "the prompt"])
     (path / "claude").write_text('#!/bin/sh\nfor a in "$@"; do printf "%s\\n" "$a"; done > "$ARGV_OUT"\n'
-                                 'env > "$ARGV_OUT.env"\n')
+                                 'env > "$ARGV_OUT.env"\necho $$ > "$ARGV_OUT.pid"\n')
     asked = tmp_path / "asked.txt"
     py = tmp_path / "plugin" / "bin" / "thimble-python"
     py.write_text(py.read_text().replace("#!/bin/sh\n", f'#!/bin/sh\nprintf "%s\\n" "$@" > "{asked}"\n'))
@@ -214,6 +215,9 @@ def test_the_launcher_passes_the_session_id_exports_the_switches_unsets_the_vari
     assert "CLAUDE_CODE_EFFORT_LEVEL" not in seen and "CLAUDE_CODE_SUBAGENT_MODEL" not in seen
     assert done.stderr.splitlines()[:2] == notes.split("\t")
     assert "--own-session" not in asked.read_text() and "--safe-mode" not in asked.read_text()
+    told_pid = asked.read_text().splitlines()
+    assert told_pid[told_pid.index("--launcher-pid") + 1] == Path(f"{argv_out}.pid").read_text().strip(), \
+        "launch-args gets the pid `claude` runs as"
     for flags, told in ((["-r", "sid-mine"], "--own-session=sid-mine"), (["--session-id", sid], f"--own-session={sid}"),
                         (["-r", "x", "--fork-session"], "--own-session="), (["--safe-mode"], "--safe-mode")):
         subprocess.run(["bash", str(launcher), *flags], check=True, capture_output=True, cwd=tmp_path, env=env)

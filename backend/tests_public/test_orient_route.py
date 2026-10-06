@@ -228,6 +228,66 @@ async def test_a_follow_up_to_an_earlier_version_s_or_session_s_orientation_is_r
         session._live.pop(CORPUS, None)
 
 
+MAIN_SID, EARLIER_SID = "11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222"
+
+
+async def test_an_extension_s_run_now_needs_an_orientation_main_s_session_reaches_and_goes_through_the_module(
+        bridge, models, workspaces_tmp, unmeasured):
+    """Settings offers Run now for an extension's orientation instructions only where a follow-up reaches the
+    orientation (extensions.orientation_ran): one that ran as a subagent of main's own Claude Code session. One of an
+    earlier session, or an earlier version's chat with no agent id, gets no offer. Run now sends the instructions to the
+    orientation's agent through thimble's module (orient_session.send), as the analyst's click."""
+    from app import extensions, session
+
+    assert not extensions.orientation_ran(CORPUS), "no orientation ran here"
+    agent = await _orientation()
+    with subagents.update(CORPUS) as state:
+        sf.registry(state)[agent]["sessions"] = [MAIN_SID]
+    await _ended(agent)
+    try:
+        session._live[CORPUS] = session.Live(CORPUS, EARLIER_SID, "/c", None, None)
+        assert not extensions.orientation_ran(CORPUS), "main is another session than the orientation's"
+        session._live[CORPUS] = session.Live(CORPUS, MAIN_SID, "/c", None, None)
+        assert extensions.orientation_ran(CORPUS)
+        out = await orient_session.send(CORPUS, "Read every tally record.", orient_session.EXTENSION,
+                                        extension="ext-min")
+        assert out["status"] == "sent"
+        [send] = bridge.ops("send")
+        assert send["agent"] == agent and send["text"].endswith("Read every tally record.")
+    finally:
+        session._live.pop(CORPUS, None)
+    chat = orientation.read_run(CORPUS)["chats"]["orient"]
+    agents.update_agent(CORPUS, chat, route=None)
+    assert not extensions.orientation_ran(CORPUS), "an earlier version ran it"
+
+
+def test_the_release_test_s_stand_in_orientation_is_one_a_follow_up_reaches_only_from_its_own_session(workspaces_tmp):
+    """scripts/e2e/release.mjs (ext-orient-offer) plants these two files for an orientation that ran as a subagent of
+    main, and expects Settings' offer for main's session alone."""
+    from app import extensions, session
+
+    ws = config.workspace_dir(CORPUS)
+    agent = "a0e2e5ad1fe0c0de1"
+
+    def plant(sid: str) -> None:
+        (ws / "orient").mkdir(exist_ok=True)
+        (ws / "orient" / "run.json").write_text(json.dumps({"status": "done", "chats": {"orient": "e2e-standin"},
+                                                            "agent_id": agent, "route": "subagent", "session": sid}))
+        (ws / "chats").mkdir(exist_ok=True)
+        (ws / "chats" / "e2e-standin.meta.json").write_text(json.dumps({
+            "id": "e2e-standin", "kind": "agent", "role": "orient", "title": "Orientation", "status": "done",
+            "route": "subagent", "agent_id": agent, "session": sid, "sessions": [sid]}))
+
+    session._live[CORPUS] = session.Live(CORPUS, MAIN_SID, "/c", None, None)
+    try:
+        plant(EARLIER_SID)
+        assert not extensions.orientation_ran(CORPUS)
+        plant(MAIN_SID)
+        assert extensions.orientation_ran(CORPUS)
+    finally:
+        session._live.pop(CORPUS, None)
+
+
 async def test_a_follow_up_in_plan_mode_is_refused(bridge, models, workspaces_tmp, monkeypatch, unmeasured):
     from app import session
 
@@ -283,6 +343,50 @@ async def test_a_run_the_analyst_stopped_stops_its_views_and_asks_for_no_report(
     subagents.run_ended(CORPUS, ans.agent_id, "stopped", "", source="notification")
     assert stopped == [CORPUS] and orientation.read_run(CORPUS)["status"] == "stopped"
     assert len(bridge.ops("spawn")) == 1, "no report pass"
+
+
+SAFEGUARD = ("API Error: Opus 4.8's safeguards flagged this message. Our intentionally broad safeguards allow us to "
+             "deliver more capabilities faster, but can sometimes flag legitimate cybersecurity work.")
+
+
+async def test_an_orientation_an_api_error_stopped_says_so_and_why_in_its_thread_main_s_event_and_main_s_chat(
+        bridge, models, workspaces_tmp, monkeypatch):
+    """A refusal by the model's safeguards ends the orientation's first run before it made a card: the module's turn end
+    says `refusal`, with Claude Code's error line. The run ends failed, and each place the analyst looks says that it
+    stopped and why, in the API's words: its thread ends with a line that says so, the `orient` event main gets says it
+    failed with the error, and main's chat gets the orientation's landing (which the browser shows as failed, with the
+    API error's card) although there are no cards. No report pass starts."""
+    told: list[tuple] = []
+    monkeypatch.setattr(subagents, "tell_main", lambda c, kind, payload: told.append((kind, payload)))
+    ans = await orient_session.start(CORPUS, "", ["final", "report"], route=subagents.CLICK)
+    chat = orientation.read_run(CORPUS)["chats"]["orient"]
+    assert subagents.ended(CORPUS, ans.agent_id, SAFEGUARD, "refusal")
+
+    rec = orientation.read_run(CORPUS)
+    assert rec["status"] == "failed" and rec["error"] == SAFEGUARD[:400]
+    [(kind, payload)] = told
+    assert kind == orientation.ORIENT_KIND and payload["status"] == "failed"
+    assert payload["text"].startswith("The orientation failed:") and payload["text"].endswith(f"Its error: {SAFEGUARD}")
+
+    _, thread = agents.paths(CORPUS, chat)
+    lines = agents.read_events(thread)
+    assert lines[-2]["type"] == "error" and lines[-2]["kind"] == "failed" and lines[-2]["message"] == SAFEGUARD[:400]
+    assert lines[-1] == {**lines[-1], "type": "chip", "kind": orient_session.ERROR_KIND,
+                         "text": f"The orientation stopped because of an error: {SAFEGUARD}"}
+    meta = agents.read_meta(CORPUS, chat)
+    assert meta["status"] == "failed" and meta["result"] == SAFEGUARD[:400]
+
+    _, main_log = agents.paths(CORPUS, agents.MAIN_ID)
+    [landing] = [e for e in agents.read_events(main_log) if e.get("type") == "chip" and e.get("kind") == "artifact"]
+    assert landing["chat"] == chat and "ref" not in landing, "the landing with no deck: there are no cards"
+    assert len(bridge.ops("spawn")) == 1, "no report pass"
+
+    # a follow-up the API error stops: its thread says the follow-up stopped, and why
+    subagents.run_again(CORPUS, ans.agent_id, "coordinator")
+    assert subagents.ended(CORPUS, ans.agent_id, "API Error: Repeated 529 Overloaded errors", "error")
+    assert agents.read_events(thread)[-1]["text"] == ("The orientation's follow-up stopped because of an error: API "
+                                                      "Error: Repeated 529 Overloaded errors")
+    assert told[-1][1]["status"] == "failed" and told[-1][1]["text"].endswith("Repeated 529 Overloaded errors")
 
 
 async def test_a_workspace_0_5_0_left_loads_lists_and_renders_and_its_orientation_takes_no_message(

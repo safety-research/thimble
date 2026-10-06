@@ -576,6 +576,9 @@ esac
 # blank in main's --settings, which rank above those files, and its value is main's --effort the same way.
 # --session-id is the id launch-args chose for a new session and wrote into the workspace's launch.json, from which the
 # hooks module's bridge takes main's session; it is left out when the analyst's flags name the session themselves.
+# --launcher-pid is this script's own pid ($$), which `exec claude` keeps, so launch.json names main's `claude` process
+# before main starts: the bridge reads from that process's command line whether main runs inside thimble's fence, and so
+# accepts the module's hello inside session.start, in time for main's first agent listing.
 # The env line's switches are exported (CLAUDE_CODE_DISABLE_AGENT_VIEW=1: no "Move to background" and no ← agent view),
 # the variables the unset line names are unset, and the note lines are printed before Claude Code starts.
 # --name is `thimble:main · <workspace>` (cli.main_name), since `claude agents` and /resume list the sessions of every
@@ -625,7 +628,7 @@ ask=()
 repo="$("$here/thimble-app-dir")"
 cwd="$PWD"
 out="$(cd "$repo/backend" && THIMBLE_CALLER_CWD="$cwd" \
-  "$here/thimble-python" -m app.cli launch-args ${ask[@]+"${ask[@]}"} --cwd "$cwd")" || {
+  "$here/thimble-python" -m app.cli launch-args ${ask[@]+"${ask[@]}"} --launcher-pid "$$" --cwd "$cwd")" || {
   printf 'thimble: could not render the session prompt (see the lines above); run `thimble doctor`\n' >&2; exit 1; }
 plugin_dir="${out%%$'\n'*}"
 rest="${out#*$'\n'}"

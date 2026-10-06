@@ -110,6 +110,10 @@ EXTENSION = "extension"  # `by` of an extension's orientation instructions, sent
 COVERAGE_KIND = "coverage"  # the chip kind of the coverage line at the end of the orientation's thread (_keep_coverage)
 
 COVERAGE_TIMEOUT_S = 120.0  # the coverage line is given up after this long, so main hears the end without it (measure)
+ERROR_KIND = "orient_error"  # the chip kind of the line that ends a failed run in the orientation's thread (_say_failed)
+# that line: the run stopped, and why, in the error's own words (failure_line), such as Claude Code's API error line
+FAILED_LINES = ("The orientation stopped because of an error: {error}",
+                "The orientation's follow-up stopped because of an error: {error}")
 
 ASKED_WAIT_S = 2.0  # how long start_orientation waits for main's chat to show the analyst's latest message (asked_for)
 SCRATCH_GLOB = "tmp_*"  # the scratch folders of the orientation's own subagents (the --subagent-start hook)
@@ -675,6 +679,8 @@ def subagent_ended(c: str, run: subagents.Run, status: str, summary: str) -> Non
     except Exception:  # noqa: BLE001
         log.exception("%s: the orientation's record was not closed", c)
         made = {}
+    if status == "failed":
+        _say_failed(c, run.chat, run.k, summary)
     if run.k == 0 and status == "done" and not run.interrupted:
         try:
             loop = asyncio.get_running_loop()
@@ -685,6 +691,18 @@ def subagent_ended(c: str, run: subagents.Run, status: str, summary: str) -> Non
             loop.create_task(_measured(c, run, status, summary, stopped, made), name=f"orient-coverage:{c}")
             return
     _go_on(c, run, status, summary, stopped, made)
+
+
+def _say_failed(c: str, chat: str, k: int, summary: str) -> None:
+    """A failed run's last line in the orientation's thread, as a note: it stopped, and why (FAILED_LINES), such as the
+    API error that ended it, which subagents.run_ended gives as its report."""
+    line = FAILED_LINES[k > 0].format(error=failure_line(summary) or "no error text came with it")
+    try:
+        _, log_path = agents.paths(c, chat)
+        agents.append(log_path, {"type": "chip", "ts": _now(), "kind": ERROR_KIND, "text": line})
+        agents._notify(c, chat)
+    except (HTTPException, OSError) as e:
+        log.warning("%s: the failed run's line did not reach the orientation's thread (%s)", c, e)
 
 
 def _stop_program_critique(c: str, run: subagents.Run) -> None:

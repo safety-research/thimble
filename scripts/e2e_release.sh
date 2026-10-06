@@ -26,10 +26,25 @@
 # start the server and a stand-in for the analyst's Claude Code session (scripts/e2e/standin_session.py: no model runs);
 # walk the UI (scripts/e2e/release.mjs): the first-launch welcome and the tour, the File browser, a transcript, a PDF, the
 # fixture view, Settings > Extensions, then `thimble extension add` of scripts/e2e/fixture-extension switched off and on
-# from the CLI and from Settings. The one model call is a one-turn `claude -p` in <out>/standin-orientation, loading no
-# user settings, plugins or MCP servers, whose transcript stands in for an orientation's when Settings offers to run the
-# extension's orientation instructions; the step removes that transcript after. Every process it started is stopped on
-# exit, and <out>/report.md lists each step.
+# from the CLI and from Settings. No model runs in the walk: when Settings offers to run the extension's orientation
+# instructions, a run record and a chat in the workspace stand in for an orientation that ran as a subagent of main,
+# first of an earlier Claude Code session, then of the stand-in's session (THIMBLE_E2E_SESSION, the id this script gives
+# the stand-in and the walk). Every process it started is stopped on exit, and <out>/report.md lists each step.
+#
+# With THIMBLE_LIVE_CLAUDE=1 two contract checks against Claude Code follow the UI walk, so that a Claude Code update
+# that changes a format thimble reads fails the release; without it each is reported as skipped:
+#   - the `claude -p` format check (scripts/e2e/contract_print.py): the hook fields, the two-stop shape and the hand-back,
+#     a nested agent's parentAgentId, the task notification, the MCP `_meta` tool-use id, the result line's
+#     contextWindow and subagent_stats, Claude Code's concurrency-limit text, and that thimble's hooks module registers
+#     nothing in -p and the run ends within 2 s of its last result line; its stand-in server takes the first free port
+#     after the UI port;
+#   - the interactive check of the hooks module (scripts/e2e/contract_module.py), with the server stopped and run inside
+#     the check, the stand-in session stopped, and the launcher in `tmux -L $THIMBLE_E2E_SOCKET` (default
+#     thimble-e2e-<port>): the module's hello and thimble's types in main's first agent listing, a spawn through the
+#     bridge on exact values, its toolu_plugin_ id, a deny, the hand-back, the descendants' values, a follow-up, /clear,
+#     a stop, the classifier smoke and the quit. Claude Code must trust the folder main runs in, and the check never
+#     answers its trust question yes, so set THIMBLE_E2E_TRUSTED_DIR to a folder Claude Code trusts: the corpus copy for
+#     this check goes into a new folder there, removed on exit. Both run models on the caller's own Claude login.
 #
 # The run keeps the caller's HOME, so thimble and claude use the caller's own Claude login and config, and it leaves
 # them as they were: it puts the `thimble` link in <out>/bin (THIMBLE_BIN_DIR) in place of ~/.local/bin, passes
@@ -49,7 +64,7 @@ die() { printf 'e2e_release.sh: %s\n' "$*" >&2; exit 2; }
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 src="$(cd "$here/.." && pwd -P)"
-ref="" repo="" out="" port="" corpus="" own_caches=0 strict=0 keep_install=0 zip=0 zip_file=""
+ref="" repo="" out="" port="" corpus="" own_caches=0 strict=0 keep_install=0 zip=0 zip_file="" trusted_copy=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --ref) ref="$2"; shift 2;;
@@ -158,6 +173,7 @@ cleanup() {
     else record claude-files fail "changed during the run: $changed"; fi
   fi
   if [ "$keep_install" = 0 ]; then rm -rf "$clone" "$thome" "$bin" "$out/release"; fi
+  [ -z "$trusted_copy" ] || rm -rf "$trusted_copy"
   python3 -I "$here/e2e/report.py" "$results" "$out/report.md" --ref "$ref" --commit "$commit" --started "$started" \
     --seconds "$((SECONDS - t0))" $([ "$strict" = 1 ] && echo --strict)
   local verdict=$?
@@ -254,7 +270,9 @@ if (cd "$work" && in_env thimble server up) > "$logs/server-up.log" 2>&1 && grep
 else
   record server fail "thimble server up printed no URL (logs/server-up.log)"; exit 1
 fi
-in_env "$tree/backend/.venv/bin/python" -I "$here/e2e/standin_session.py" "$tree" "$work" > "$logs/standin.log" 2>&1 &
+standin_sid="$(python3 -I -c 'import uuid; print(uuid.uuid4())')"
+in_env THIMBLE_E2E_SESSION="$standin_sid" "$tree/backend/.venv/bin/python" -I "$here/e2e/standin_session.py" "$tree" "$work" \
+  > "$logs/standin.log" 2>&1 &
 standin_pid=$!
 
 # 6. the UI, the extension commands among its steps
@@ -262,9 +280,50 @@ ui=0
 walk=(node "$here/e2e/release.mjs")
 if command -v setsid >/dev/null; then walk=(setsid "${walk[@]}"); fi  # its own process group, so cleanup finds its browser
 (cd "$out" && exec "${envs[@]}" THIMBLE_E2E_TREE="$tree" THIMBLE_E2E_CORPUS="$work" THIMBLE_E2E_WS="$ws" \
-  THIMBLE_E2E_SHOTS="$shots" THIMBLE_E2E_RESULTS="$results" THIMBLE_E2E_FIXTURE="$here/e2e/fixture-extension" \
+  THIMBLE_E2E_SESSION="$standin_sid" THIMBLE_E2E_SHOTS="$shots" THIMBLE_E2E_RESULTS="$results" THIMBLE_E2E_FIXTURE="$here/e2e/fixture-extension" \
   "${walk[@]}") > "$logs/ui.log" 2>&1 &
 walk_pid=$!
 wait "$walk_pid" || ui=$?
 [ "$ui" = 0 ] || say "the UI walk exited $ui (logs/ui.log)"
+
+# 7. the `claude -p` contract check, with THIMBLE_LIVE_CLAUDE=1: a stand-in server of its own on the first free port
+#    after the UI port, and its runs' streams, hooks and transcripts in <out>/contract-print
+if [ "${THIMBLE_LIVE_CLAUDE:-}" = 1 ]; then
+  stub_port=""
+  for p in $(seq $((port + 2)) $((port + 40))); do if ! busy "$p"; then stub_port=$p; break; fi; done
+  if [ -z "$stub_port" ]; then
+    record contract-print fail "no free port from $((port + 2)) to $((port + 40)) for its stand-in server"
+  elif ! (cd "$out" && in_env "$tree/backend/.venv/bin/python" -I "$here/e2e/contract_print.py" "$tree" \
+          "$out/contract-print" --port "$stub_port" --results "$results") > "$logs/contract-print.log" 2>&1 \
+       && ! grep -q '"step": "contract-print-' "$results"; then
+    record contract-print fail "the check stopped before its assertions (logs/contract-print.log)"
+  fi
+else
+  record contract-print skip "THIMBLE_LIVE_CLAUDE is not 1"
+fi
+
+# 8. the interactive contract check of the hooks module, with THIMBLE_LIVE_CLAUDE=1: the stand-in session and the
+#    server stop, and the check runs the server itself; the corpus is copied into THIMBLE_E2E_TRUSTED_DIR when it is set
+if [ "${THIMBLE_LIVE_CLAUDE:-}" = 1 ]; then
+  if [ -n "$standin_pid" ]; then kill "$standin_pid" 2>/dev/null || true; wait "$standin_pid" 2>/dev/null || true; standin_pid=""; fi
+  (cd "$out" && in_env "$tree/plugin/bin/thimble" server stop --yes) > "$logs/contract-server-stop.log" 2>&1 || true
+  mod_corpus="$work"
+  if [ -n "${THIMBLE_E2E_TRUSTED_DIR:-}" ]; then
+    if trusted_copy="$(mktemp -d "${THIMBLE_E2E_TRUSTED_DIR%/}/thimble-e2e.XXXXXX")"; then
+      mod_corpus="$trusted_copy/$(basename "$work")"
+      cp -R "$work" "$mod_corpus"
+    else
+      trusted_copy=""
+      say "could not make a folder in THIMBLE_E2E_TRUSTED_DIR=$THIMBLE_E2E_TRUSTED_DIR; the check runs in the corpus copy"
+    fi
+  fi
+  if ! (cd "$out" && in_env "$tree/backend/.venv/bin/python" -I "$here/e2e/contract_module.py" "$tree" "$mod_corpus" \
+        "$out/contract-module" --results "$results" --socket "${THIMBLE_E2E_SOCKET:-thimble-e2e-$port}") \
+        > "$logs/contract-module.log" 2> "$logs/contract-module-server.log" \
+     && ! grep -q '"step": "contract-module-' "$results"; then
+    record contract-module fail "the check stopped before its assertions (logs/contract-module.log)"
+  fi
+else
+  record contract-module skip "THIMBLE_LIVE_CLAUDE is not 1"
+fi
 }
