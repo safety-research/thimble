@@ -467,7 +467,8 @@ BROWSER_WORDS = re.compile(r"\bbrowser|\bcanvas|\bdashboard|⌘|\bchips?\b", re.
 # Prompts that keep these words in terminal mode, each with why: the view page stays a browser page, video is browser
 # mode's only, and its `canvas` is the HTML element.
 BROWSER_ONLY_PROMPTS = {"dev-view.md": "the view page", "report-video.md": "video"}
-BROWSER_ONLY_HINTS = {"view-media-unplayable": "the view page", "view-marks-missing": "the view page"}
+BROWSER_ONLY_HINTS = {"view-media-unplayable": "the view page", "view-marks-missing": "the view page",
+                      "view-own-parts": "the view page"}
 
 
 def _browser_words(text: str) -> list[str]:
