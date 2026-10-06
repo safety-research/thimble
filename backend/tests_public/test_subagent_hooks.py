@@ -292,6 +292,32 @@ def test_without_a_server_the_agent_check_decides_from_the_file_alone(tmp_path, 
     assert sf.read(ws)["requests"]["req_hook000001"]["claimed_by"] == PLUGIN_CALL
 
 
+def test_a_check_that_fails_denies_a_start_of_a_role_and_lets_any_other_call_go(tmp_path, ws):
+    """A hook that fails lets its call run, so a start of one of thimble's roles is denied when the check itself cannot
+    run (here subagents.json cannot be opened), and every other Agent call goes on as Claude Code made it."""
+    state = ws / sf.STATE
+    state.unlink()
+    state.mkdir()
+    try:
+        out = run_hook(tmp_path, "--agent-check", agent_call("not asked", call=PLUGIN_CALL))
+        assert json.loads(out.stdout)["hookSpecificOutput"]["permissionDecision"] == "deny"
+        other = run_hook(tmp_path, "--agent-check", {**agent_call("x", call="toolu_gp1"),
+                                                     "tool_input": {"subagent_type": "general-purpose", "prompt": "x"}})
+        assert other.returncode == 0 and other.stdout.strip() == ""
+    finally:
+        state.rmdir()
+
+
+def test_the_watcher_s_role_types_are_thimble_s_roles():
+    import importlib.util
+    from importlib.machinery import SourceFileLoader
+
+    loader = SourceFileLoader("thimble_watch_roles", str(WATCHER))
+    watcher = importlib.util.module_from_spec(importlib.util.spec_from_loader(loader.name, loader))
+    loader.exec_module(watcher)
+    assert watcher.ROLE_TYPES == tuple(sf.type_name(r) for r in sf.ROLES)
+
+
 def test_without_a_server_each_new_hook_writes_its_record(tmp_path, ws):
     with sf.update(ws) as state:
         pending_start(state, "req_hook000002", "typed", "typed", work=str(ws / "orient" / "work"))

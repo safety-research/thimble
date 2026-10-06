@@ -435,18 +435,32 @@ def deny(reason: str) -> None:
                                              "permissionDecisionReason": reason}}))
 
 
+# the types of thimble's six roles (app/subagent_files.py ROLES, which a test holds this to): a start of one is denied
+# when the check itself fails, since a hook that fails lets the call run, and no such start may run unasked
+ROLE_TYPES = tuple(f"thimble:{r}" for r in ("orientation", "critic", "writer", "view-builder", "view-reviewer", "check"))
+CHECK_FAILED = "thimble could not check this start against the analyst's requests, so it does not run"
+
+
 def agent_check(inp: dict) -> int:
     """The agent-check hook (module note)."""
     tool_input = inp.get("tool_input") if isinstance(inp.get("tool_input"), dict) else {}
     if not tool_input:
         return 0
-    sf, ws = workspace(inp)
-    if ws is None:
-        return 0
-    with sf.update(ws) as state:
-        reason = sf.check_call(state, inp)
+    try:
+        sf, ws = workspace(inp)
+        if ws is None:
+            return 0
+        with sf.update(ws) as state:
+            reason = sf.check_call(state, inp)
+        if reason is not None:
+            reason = reason or sf.hint("agent-check-exact") or "thimble did not ask for this call"
+    except Exception:  # noqa: BLE001 — fail closed for a start of one of thimble's roles, open for anything else
+        if str(inp.get("tool_name") or "") not in ("Agent", "Task") or \
+                str(tool_input.get("subagent_type") or "") not in ROLE_TYPES:
+            return 0
+        reason = CHECK_FAILED
     if reason is not None:
-        deny(reason or sf.hint("agent-check-exact") or "thimble did not ask for this call")
+        deny(reason)
         return 0
     if inp.get("agent_id") or str(inp.get("tool_name") or "") not in sf.AGENT_TOOLS:
         return 0
