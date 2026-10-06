@@ -211,6 +211,11 @@ async def close() -> None:
         if "app.concepts" in mods:
             with contextlib.suppress(Exception):
                 mods["app.concepts"].stop_workspace(c)
+    # the regex scan pool's spawned workers, as the server's shutdown ends them: once this process has gone, nothing
+    # ends a worker that waits on its queue, and it stays after Claude Code quits
+    if "app.concepts" in mods:
+        with contextlib.suppress(Exception):
+            mods["app.concepts"]._pool_shutdown(end=True)
     if "app.render" in mods:
         with contextlib.suppress(Exception):
             await mods["app.render"].shutdown()

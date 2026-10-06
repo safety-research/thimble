@@ -135,6 +135,31 @@ async def test_the_tools_refuse_a_folder_of_no_workspace_and_a_browser_mode_work
     assert res["is_error"] and "browser mode" in text(res)
 
 
+async def test_the_shims_end_ends_the_label_scan_pools_workers(term):
+    """A regex label starts the scan pool's spawned workers in the shim; the shim's end (local.close) ends them, as the
+    server's shutdown does, so none is left once Claude Code quits (live check T9 found one left)."""
+    import time
+
+    from app import concepts
+
+    pool = concepts._pool_get()
+    pool.submit(time.sleep, 60)
+    for _ in range(200):
+        if pool._processes:
+            break
+        time.sleep(0.05)
+    pids = list(pool._processes)
+    assert pids
+    await local.close()
+    assert concepts._pool is None
+    for pid in pids:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            continue
+        raise AssertionError(f"the pool's worker {pid} still runs after the shim's end")
+
+
 async def test_a_code_ticket_is_refused_and_a_card_screenshot_needs_the_harness(term):
     res = await call(term, "file_dev_ticket", title="t", body="b")
     assert res["is_error"] and (tools.hint("ticket-terminal") or "browser mode") in text(res)
