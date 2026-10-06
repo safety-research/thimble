@@ -2,1164 +2,247 @@
 <html>
 <head>
 <style>
-  /* thimble's parts (.chip, .btn, .seg, .field) and the theme's tokens come with the frame; this page lays them out and
-     draws the lanes, the context strip, the menus and the comparison */
+  /* thimble's parts (.field, .btn), its Color by control, its time range selector and the theme's tokens come with the
+     frame; this page lays out the top row, the sessions' lanes under the range and the list of messages and calls */
   html, body { margin: 0; height: 100%; }
   body { background: var(--surface-card); overflow: hidden; }
-  #view { position: relative; height: 100%; display: flex; flex-direction: column; }
-  #ds, #bar { flex: none; }
-  #area { flex: 1; min-height: 0; display: flex; }
-  #left { flex: 1; min-width: 0; overflow: auto; scrollbar-width: thin; }
-  #grip { flex: none; width: 7px; margin-left: -3px; position: relative; z-index: 2; cursor: col-resize; }
-  #grip::after { content: ''; position: absolute; left: 3px; top: 0; bottom: 0; width: 1px; background: var(--border-subtle); }
-  #grip:hover::after, #grip.drag::after { width: 3px; left: 2px; background: var(--border-strong); }
-  #side { flex: none; min-width: 0; display: flex; flex-direction: column; }
-  #side #det { flex: 1; min-height: 0; display: flex; flex-direction: column; border-top: 0; }
-  #side .dhead { flex: none; gap: 6px 10px; padding: 10px 14px; }
-  #side .dhead h2 { flex: 1 1 auto; min-width: 0; }
-  #side .dhead .brk { flex-basis: 100%; height: 0; }
-  #side .dbody { flex: 1; min-height: 0; height: auto; display: flex; flex-direction: column; }
-  #side .tx { flex: 1 1 58%; min-height: 140px; border-right: 0; border-bottom: 1px solid var(--border-subtle); }
-  #side .cd { flex: 1 1 42%; min-height: 120px; }
-  #side .tr { padding: 6px 14px; grid-template-columns: 40px 78px minmax(0, 1fr) auto; gap: 0 8px; }
-  /* in the panel a call's outcome shows in its tint, its result line and its details, which leaves the command room */
   * { box-sizing: border-box; }
-  button { font-family: inherit; }
-  .mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
-  .t3 { color: var(--text-tertiary); }
-  svg text { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
-  svg text.sans { font-family: var(--font-body); }
-  .ico { width: 14px; height: 14px; flex: none; stroke: currentColor; fill: none; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
-  .ico-s { width: 12px; height: 12px; }
-  .grow { flex: 1 1 0; min-width: 0; }
-  .vsep { width: 1px; height: 16px; background: var(--border-subtle); flex: none; }
-  .sw { display: inline-block; width: 8px; height: 8px; border-radius: 2px; flex: none; }
-  .rail { display: inline-block; width: 11px; height: 3px; border-radius: 1px; flex: none; }
-  .mk { width: 14px; height: 12px; flex: none; }
-  .lab { font-size: var(--text-xs); color: var(--text-tertiary); white-space: nowrap; }
-  .cap { color: var(--text-tertiary); font: 400 10.5px / 1.2 var(--font-body); letter-spacing: .08em; text-transform: uppercase; }
-
-  #ds { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 12px; padding: 14px 16px 0; }
-  #ds h1 { margin: 0; min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 500 var(--text-lg) / 1.3 var(--font-body); }
-  #ds b, .counts b, .legend b { font-weight: 500; color: var(--text-primary); font-variant-numeric: tabular-nums; }
-  #bar { padding: 12px 16px 0; border-bottom: 1px solid var(--border-subtle); }
-  .r1, .r2 { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-  .r2 { gap: 8px 16px; padding: 10px 0 11px; }
-  .search { position: relative; flex: 0 1 240px; min-width: 170px; }
-  .search .ico { position: absolute; left: 9px; top: 7px; color: var(--text-tertiary); pointer-events: none; }
-  .search .field { width: 100%; padding-left: 29px; }
-  .filters { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-  .chip-sans .ico-s { margin-right: -2px; color: var(--text-tertiary); }
-  .chip.active .ico-s { color: var(--text-on-inverse); opacity: .75; }
-  .chip .v { font-family: var(--font-mono); font-size: var(--text-mono-sm); }
-  .counts { display: flex; align-items: center; gap: 4px 14px; font-size: var(--text-ui-sm); color: var(--text-tertiary); white-space: nowrap; }
-  .cbtn { gap: 7px; padding: 0 8px 0 10px; }
-  .cbtn .k { color: var(--text-tertiary); font-weight: 400; }
-  .cbtn .ico-s { color: var(--text-tertiary); }
-  .cbtn .sws { display: inline-flex; gap: 2px; }
-  .cbtn .cnm { max-width: 180px; overflow: hidden; text-overflow: ellipsis; }
-  .legend { display: flex; align-items: center; gap: 2px; flex-wrap: wrap; font-size: var(--text-xs); color: var(--text-secondary); }
-  .legend .st { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; padding: 0 5px; }
-  .lg { display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 6px 0 4px; border: 0; border-radius: var(--radius-chip); background: none; color: var(--text-secondary); font: 400 var(--text-xs) / 1 var(--font-body); white-space: nowrap; cursor: pointer; }
-  .lg:hover { background: var(--surface-hover); color: var(--text-primary); }
-  .lg .n { color: var(--text-tertiary); font-variant-numeric: tabular-nums; }
-  .lg.off { opacity: .38; }
-  .lg.off .sw { background: transparent !important; box-shadow: inset 0 0 0 1.3px var(--text-tertiary); }
-  .lg .swb { display: inline-grid; place-items: center; width: 16px; height: 16px; margin-right: -3px; border-radius: 3px; }
-  .lg .swb:hover, .mi .swb:hover { background: var(--track-bg); }
-  .grad { display: inline-block; width: 64px; height: 8px; border-radius: 2px; margin: 0 4px; }
-  .menu { position: absolute; z-index: 50; min-width: 250px; max-width: 320px; padding: 4px; border-radius: var(--radius-card); background: var(--raised-bg); box-shadow: var(--raised-ring), 0 10px 28px rgba(var(--ink-rgb), .14); font-size: var(--text-ui-sm); }
-  .mh { padding: 8px 8px 4px; }
-  .mi { display: flex; align-items: center; gap: 8px; width: 100%; height: 28px; padding: 0 8px; border: 0; border-radius: var(--radius-chip); background: none; color: var(--text-primary); font: 400 var(--text-ui-sm) / 1 var(--font-body); text-align: left; cursor: pointer; }
-  .mi:hover { background: var(--surface-hover); }
-  .mi.sub { padding-left: 30px; color: var(--text-secondary); }
-  .mi .ck { width: 14px; display: inline-grid; place-items: center; color: var(--text-primary); flex: none; }
-  .mi .nm { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .mi .n { margin-left: auto; color: var(--text-tertiary); font-variant-numeric: tabular-nums; font-size: var(--text-xs); flex: none; }
-  .mi .swb { display: inline-grid; place-items: center; width: 18px; height: 18px; margin: 0 -2px; border-radius: 3px; flex: none; }
-  .box { display: inline-block; flex: none; width: 12px; height: 12px; border-radius: 3px; border: 1.5px solid var(--mark); background: transparent; }
-  .box.on { background: var(--mark); }
-  .msep { height: 1px; margin: 4px 0; background: var(--border-hairline); }
-  .mnote { padding: 4px 8px 6px; color: var(--text-tertiary); }
-  .cbx { width: 13px; height: 13px; border-radius: 3px; border: 1px solid var(--border-strong); display: inline-grid; place-items: center; background: var(--surface-card); flex: none; }
-  .cbx.on { background: var(--surface-inverse); border-color: var(--surface-inverse); color: var(--text-on-inverse); }
-  .cbx .ico { width: 9px; height: 9px; stroke-width: 2; }
-  .pal { position: absolute; z-index: 60; display: grid; grid-template-columns: repeat(7, 20px); gap: 6px; padding: 10px; border-radius: var(--radius-card); background: var(--raised-bg); box-shadow: var(--raised-ring), 0 10px 28px rgba(var(--ink-rgb), .14); }
-  .pal button { width: 20px; height: 20px; padding: 0; border: 0; border-radius: 4px; cursor: pointer; }
-  .pal button:hover { transform: scale(1.12); }
-  .pal button.cur { box-shadow: 0 0 0 2px var(--surface-card), 0 0 0 3.5px var(--text-primary); }
-
-  #ov { padding: 0 16px; }
-  .lanes { position: relative; display: flex; }
-  .rowbg { position: absolute; left: -16px; right: -16px; }
-  .rowbg.hl { background: var(--surface-selected); }
-  .rowbg.run { background: var(--bg-sub); border-top: 1px solid var(--border-hairline); }
-  .lcol { position: relative; flex: none; }
-  .lhead, .lrow { position: relative; display: flex; align-items: center; }
-  .lhead > span { position: absolute; }
-  .ln { position: absolute; font: 400 var(--text-ui-sm) / 1 var(--font-body); color: var(--text-primary); white-space: nowrap; cursor: pointer; overflow: hidden; text-overflow: ellipsis; }
-  .lrow .ln:hover { text-decoration: underline; text-decoration-color: var(--border-strong); text-underline-offset: 3px; }
-  .lrow.open .ln { font-weight: 500; }
-  .lrow.run .ln { font-weight: 500; }
-  .lrow.run .ln .ico { vertical-align: -2px; margin-right: 4px; }
-  .lrow.run .ln:hover { text-decoration: none; }
-  .lrow.run .ln .setup { font-weight: 400; color: var(--text-tertiary); margin-left: 4px; }
-  .lrow.run .ln .ico { color: var(--text-tertiary); margin-left: -2px; }
-  .lrow .ln { line-height: 16px; }
-  .lrow.sum .ln { color: var(--text-tertiary); cursor: default; }
-  .num { position: absolute; text-align: right; width: 44px; font: 400 var(--text-mono-sm) / 1 var(--font-mono); font-variant-numeric: tabular-nums; color: var(--text-secondary); }
-  .lrow.run .num { font-weight: 500; color: var(--text-primary); }
-  .num.err, .lrow.run .num.err { color: var(--status-negative); }
-  .num.zero, .lrow.run .num.zero { color: var(--text-placeholder); }
-  .lhead .num { font: inherit; color: inherit; width: auto; }
-  .tree { position: absolute; left: 0; top: 0; pointer-events: none; }
-  svg.plot { display: block; overflow: visible; position: relative; }
-  svg.plot [data-anchor] { cursor: pointer; }
-  /* a call's mark takes the label's colour from the page, so thimble's halo around it is left off */
-  svg.plot [data-thimble-edge], svg.plot [data-thimble-edge] > * { filter: none !important; }
-  svg.plot .msg { cursor: pointer; }
-  .ctx { display: flex; align-items: flex-start; padding: 10px 0 12px; border-top: 1px solid var(--border-hairline); }
-  .ctx .lab { flex: none; padding-top: 3px; }
-  .ctx svg { cursor: crosshair; user-select: none; }
-  .empty { padding: 28px 0; color: var(--text-tertiary); font-size: var(--text-sm); }
-
-  #det { border-top: 1px solid var(--border-subtle); }
-  .dhead { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 14px; padding: 10px 16px; border-bottom: 1px solid var(--border-hairline); }
-  .dhead h2 { margin: 0; font: 500 var(--text-lg) / 1.2 var(--font-body); display: inline-flex; align-items: baseline; gap: 8px; }
-  .dhead h2 .run { font-weight: 400; font-size: var(--text-ui-sm); color: var(--text-tertiary); }
-  .dhead .grp { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-  .dstats { display: inline-flex; gap: 12px; font-size: var(--text-ui-sm); color: var(--text-tertiary); white-space: nowrap; }
-  .dstats b { font-weight: 500; color: var(--text-primary); font-variant-numeric: tabular-nums; }
-  .dstats .err b { color: var(--status-negative); }
-  .dbody { display: grid; grid-template-columns: minmax(0, 1fr) min(440px, 44%); height: 620px; }
-  .narrow .dbody { grid-template-columns: minmax(0, 1fr); grid-template-rows: 380px auto; height: auto; }
-  .narrow .tx { border-right: 0; border-bottom: 1px solid var(--border-hairline); }
-  .tx { overflow: auto; border-right: 1px solid var(--border-hairline); position: relative; scrollbar-width: thin; }
-  .tr { display: grid; grid-template-columns: 44px 86px minmax(0, 1fr) auto; gap: 0 10px; align-items: baseline; padding: 6px 16px; border-bottom: 1px solid var(--border-hairline); cursor: pointer; }
-  .tr:hover { background: rgba(var(--ink-rgb), .03); }
-  .tr.sel, .tr.sel:hover { background: var(--surface-selected); box-shadow: inset 0 0 0 1.5px var(--text-primary); --thimble-own: inset 0 0 0 1.5px var(--text-primary); }
-  .tr .tm { font: 400 var(--text-mono-sm) / 1.5 var(--font-mono); color: var(--text-tertiary); font-variant-numeric: tabular-nums; }
-  .tr .tl { display: inline-flex; align-items: center; gap: 6px; font: 500 var(--text-xs) / 1.5 var(--font-body); color: var(--text-primary); white-space: nowrap; }
-  .tr .tl.q { font-weight: 400; color: var(--text-tertiary); }
-  .tr .arg { font: 400 var(--text-mono) / 1.5 var(--font-mono); color: var(--text-primary); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .tr .sub { grid-column: 3 / 5; font: 400 var(--text-mono-sm) / 1.5 var(--font-mono); color: var(--text-tertiary); margin-top: 1px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .tr .sub.prose { white-space: normal; font-family: var(--font-body); font-size: var(--text-xs); color: var(--text-secondary); }
-  .tr .sub .chip { margin: 2px 4px 0 0; }
-  .tr .sub.fl { display: flex; flex-wrap: wrap; white-space: normal; overflow: visible; }
-  .tr .rt { font: 400 var(--text-mono-sm) / 1.5 var(--font-mono); color: var(--text-tertiary); white-space: nowrap; text-align: right; font-variant-numeric: tabular-nums; }
-  .tr .rt .o-err { color: var(--status-negative); margin-right: 8px; }
-  .tr .rt .o-den { color: var(--status-warning); margin-right: 8px; }
-  .tr .txt { grid-column: 3 / 5; font: 400 var(--text-sm) / 1.5 var(--font-body); color: var(--text-primary); }
-  .tr .txt.q { color: var(--text-secondary); }
-  .tr.wait { cursor: default; }
-  .tr.wait .txt { color: var(--text-tertiary); font-size: var(--text-xs); }
-  .adot { width: 5px; height: 5px; border-radius: 50%; background: var(--text-primary); display: inline-block; }
-  .tr.err .sub { color: var(--status-negative); }
-  .diff .del { color: var(--text-tertiary); }
-  .diff .add { color: var(--status-positive); }
-  .lnk { display: inline-flex; align-items: center; gap: 4px; color: var(--text-primary); font: 500 var(--text-xs) / 1.5 var(--font-body); white-space: nowrap; cursor: pointer; }
-  .mix { display: inline-flex; flex-direction: column; width: 8px; height: 8px; border-radius: 2px; overflow: hidden; flex: none; }
-  .mix i { flex: 1; }
-  .cd { overflow: auto; padding: 14px 16px 16px; scrollbar-width: thin; }
-  .cd-head { display: flex; align-items: center; gap: 8px; }
-  .cd-head .tool { font: 500 var(--text-lg) / 1.2 var(--font-body); }
-  .cd-cmd { margin: 8px 0 12px; padding: 7px 10px; border-radius: var(--radius-ui); background: var(--bg-sub); font: 400 var(--text-mono) / 1.5 var(--font-mono); overflow-wrap: anywhere; }
-  .kv { display: flex; flex-wrap: wrap; gap: 8px 26px; margin-bottom: 4px; }
-  .kv > div { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
-  .kv .k { font-size: var(--text-xs); color: var(--text-tertiary); }
-  .kv .v { font: 400 var(--text-mono) / 1.5 var(--font-mono); color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 260px; }
-  .kv .v.err { color: var(--status-negative); }
-  h4 { margin: 14px 0 6px; font-weight: 400; }
-  pre.out { margin: 0; padding: 8px 10px; border-radius: var(--radius-ui); background: var(--bg-sub); font: 400 var(--text-mono-sm) / 1.55 var(--font-mono); color: var(--text-secondary); overflow: hidden; white-space: pre-wrap; overflow-wrap: anywhere; }
-  pre.out .e { color: var(--status-negative); }
-  pre.out .a { color: var(--status-positive); }
-  pre.out .del { color: var(--text-tertiary); }
-  .chips { display: flex; flex-wrap: wrap; gap: 4px; }
-  .labrow { display: inline-flex; align-items: center; gap: 6px; font-size: var(--text-ui-sm); margin-right: 12px; }
-  .conc { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 0 8px; align-items: baseline; padding: 3px 0; cursor: pointer; }
-  .conc:hover .who { text-decoration: underline; text-decoration-color: var(--border-strong); text-underline-offset: 3px; }
-  .conc .who { font: 400 var(--text-ui-sm) / 1.5 var(--font-body); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .conc .what { font: 400 var(--text-mono-sm) / 1.5 var(--font-mono); color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .conc .what.q { font-family: var(--font-body); font-size: var(--text-xs); color: var(--text-tertiary); }
-
-  #cmp { padding: 0 16px 20px; }
-  .badge { display: inline-grid; place-items: center; width: 16px; height: 16px; border-radius: 3.5px; background: var(--surface-inverse); color: var(--text-on-inverse); font: 500 10px / 1 var(--font-mono); flex: none; }
-  .chip .badge { width: 14px; height: 14px; font-size: 9.5px; border-radius: 3px; }
-  .cmp-lanes { padding: 4px 0 8px; border-bottom: 1px solid var(--border-subtle); }
-  .cgrid { display: grid; }
-  .cgrid > div { min-width: 0; }
-  .ch { padding: 14px 16px 12px 8px; border-bottom: 1px solid var(--border-subtle); }
-  .ch .top { display: flex; align-items: center; gap: 8px; min-width: 0; }
-  .ch .top b { font: 500 var(--text-lg) / 1.2 var(--font-body); white-space: nowrap; }
-  .ch .top .run { font-size: var(--text-ui-sm); color: var(--text-tertiary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .ch .path { margin-top: 5px; font-size: var(--text-xs); color: var(--text-tertiary); }
-  .sec { padding: 14px 0 6px; display: flex; align-items: center; gap: 14px; }
-  .secline { grid-column: 1 / -1; border-top: 1px solid var(--border-hairline); margin-top: 8px; }
-  .ml { display: flex; align-items: center; gap: 7px; height: 22px; font-size: var(--text-ui-sm); color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .ml.sub { font-size: var(--text-xs); color: var(--text-tertiary); }
-  .mc { display: flex; align-items: center; gap: 8px; height: 22px; padding-right: 24px; }
-  .bar { height: 10px; border-radius: 2px; flex: none; }
-  .bartrack { flex: 1 1 0; display: flex; align-items: center; gap: 8px; min-width: 0; }
-  .mc .v { font: 400 var(--text-mono-sm) / 1 var(--font-mono); color: var(--text-secondary); font-variant-numeric: tabular-nums; white-space: nowrap; }
-  .mc .v.zero { color: var(--text-placeholder); }
-  .fl { font: 400 var(--text-mono-sm) / 22px var(--font-mono); color: var(--text-primary); height: 22px; padding-right: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .fc { display: flex; align-items: center; gap: 12px; height: 22px; padding-right: 24px; font: 400 var(--text-mono-sm) / 1 var(--font-mono); color: var(--text-secondary); }
-  .fc .g, .own .g { display: inline-flex; align-items: center; gap: 4px; min-width: 30px; }
-  .sq { width: 8px; height: 8px; border-radius: 1.5px; display: inline-block; flex: none; }
-  .sq.hollow { background: transparent !important; border: 1.3px solid; }
-  .fkey { display: inline-flex; align-items: center; gap: 4px; letter-spacing: 0; text-transform: none; font-size: var(--text-xs); color: var(--text-secondary); }
-  .own { padding: 2px 24px 0 0; }
-  .own .f { display: flex; align-items: center; gap: 12px; height: 21px; font: 400 var(--text-mono-sm) / 1 var(--font-mono); }
-  .own .f .p { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-primary); }
-  .own .f .g { color: var(--text-secondary); }
-  .errl { padding-right: 24px; }
-  .errl .e { display: grid; grid-template-columns: 46px minmax(0, 1fr); gap: 0 8px; padding: 3px 0; font: 400 var(--text-mono-sm) / 1.45 var(--font-mono); cursor: pointer; }
-  .errl .e .tm { color: var(--text-tertiary); }
-  .errl .e .m { color: var(--status-negative); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .errl .e .m.den { color: var(--status-warning); }
-  .errl .e .c { grid-column: 2; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .errl .e .c .who { font-family: var(--font-body); color: var(--text-tertiary); margin-right: 6px; }
-
-  /* ---- the model: the control row, thimble's colour-and-labels control, More filters, Layout, the session's file */
-  #bar { padding: 10px 16px 0; }
-  .r1 { gap: 6px; }
-  .r2 { padding: 8px 0 10px; }
-  .chip-sans .ico-f { width: 12px; height: 12px; color: var(--text-tertiary); margin-right: -1px; }
-  .cc { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; }
-  .menu .mh.cap { padding: 8px 8px 4px; }
-  .mi .nm.lk { cursor: pointer; }
-  .mi .nm.lk:hover { text-decoration: underline; text-decoration-color: var(--border-strong); text-underline-offset: 3px; }
-  .mi .ck.tog { cursor: pointer; }
-  .more { min-width: 280px; max-width: 300px; }
-  .more .sec2 { padding: 2px 4px 6px; }
-  .more .rng { display: flex; align-items: center; gap: 8px; padding: 4px 8px 6px; font-size: var(--text-ui-sm); color: var(--text-secondary); }
-  .more .rng .field { width: 72px; }
-  .more .hist { display: flex; align-items: flex-end; gap: 2px; height: 26px; padding: 0 8px; }
-  .more .hist i { flex: 1; background: rgba(var(--ink-rgb), .22); border-radius: 1px 1px 0 0; }
-  .more .txt2 { padding: 2px 8px 8px; }
-  .more .txt2 .field { width: 100%; }
-  .lay { position: absolute; right: 10px; top: 4px; z-index: 3; }
-  #cmp { position: relative; padding-top: 30px; }
-  #ov { position: relative; }
-  .lay .btn { gap: 4px; }
-  .fchip { gap: 6px; height: 22px; padding: 0 8px; font-size: var(--text-mono-sm); }
-  .fchip .ico { width: 12px; height: 12px; color: var(--text-tertiary); }
-  .dhead h2 .fchip { margin-left: 2px; }
-  #side .dhead { gap: 6px 10px; }
-  .dhead .grp .chip .ico-s { color: var(--text-tertiary); }
-  .cd-status { font: 400 var(--text-mono-sm) / 1 var(--font-mono); color: var(--text-tertiary); }
-  .cd-status.err { color: var(--status-negative); }
-  .cd-status.den { color: var(--status-warning); }
-  .sum h4:first-child { margin-top: 0; }
-  .sum .out { max-height: 220px; }
-  .fbtn.field { flex: none; padding: 0 7px 0 9px; }
-  .fbtn .k { color: var(--text-secondary); }
-  .fbtn .v { font-weight: 500; }
-  .seg.scope { flex: none; }
-  .seg-opt:disabled { opacity: 0.45; cursor: default; }
-  .menu.runs .mi.run { align-items: flex-start; height: auto; padding-top: 6px; padding-bottom: 6px; }
-  .menu.runs .mi.run .cbx { margin-top: 1px; }
-  .menu.runs .sub2 { display: block; margin-top: 2px; font: 400 var(--text-mono-sm) / 1.3 var(--font-mono); color: var(--text-tertiary); }
-  .menu.runs .task { padding: 6px 10px 8px; max-width: 320px; font-size: var(--text-xs); color: var(--text-secondary); }
-  .menu.runs .task .cap { display: block; margin-bottom: 3px; }
-  .rawseg { flex: none; }
-  .cd-head .cd-status { white-space: nowrap; }
-  pre.out.rawline { max-height: 200px; white-space: pre-wrap; overflow-wrap: anywhere; }
-  .rawref { margin: 12px 0 6px; }
-  .vtip { position: fixed; z-index: 90; max-width: 300px; padding: 5px 8px; border-radius: var(--radius-ui); background: var(--surface-card); box-shadow: 0 0 0 1px rgba(var(--ink-rgb), .09), 0 8px 24px rgba(var(--ink-rgb), .12); font: 400 var(--text-ui-sm) / 1.35 var(--font-body); color: var(--text-primary); pointer-events: none; }
+  #view { --names: 204px; --indent: 318px; height: 100%; display: flex; flex-direction: column; }
+  .top { flex: none; display: flex; align-items: center; gap: 10px; padding: 12px 16px 10px; border-bottom: 1px solid var(--border-subtle); }
+  #q { flex: 0 1 220px; min-width: 120px; }
+  #scope { flex: 0 1 190px; min-width: 110px; }
+  /* the names of the sessions in a column at the left and the time across the rest; the range and the lanes keep the
+     same scrollbar gutter, so the lanes stand under the range and its axis */
+  .time, .lane { display: grid; grid-template-columns: var(--names) minmax(0, 1fr); }
+  .time, #lanes { padding: 0 16px 0 8px; scrollbar-gutter: stable; }
+  .time { flex: none; padding-top: 10px; overflow: hidden; }
+  #readout { align-self: center; padding-left: 8px; }
+  .key { display: flex; align-items: center; gap: 12px; padding-left: 8px; color: var(--text-tertiary); font: 400 var(--text-xs) / 1 var(--font-body); }
+  .key i { display: inline-block; width: 12px; margin-right: 5px; vertical-align: middle; }
+  .key .k-span { height: 10px; background: rgba(var(--ink-rgb), 0.07); }
+  .key .k-err { height: 2px; background: var(--status-negative); }
+  #lanes { flex: 0 1 auto; max-height: 40%; overflow-y: auto; padding-bottom: 8px; border-bottom: 1px solid var(--border-subtle); }
+  .run + .run { border-top: 1px solid var(--border-hairline); }
+  .nm { padding: 0 10px 0 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-primary); font: 400 var(--text-ui-sm) / 18px var(--font-body); cursor: pointer; }
+  .nm.head { color: var(--text-secondary); font-weight: 500; line-height: 26px; }
+  .nm:hover { text-decoration: underline; text-decoration-color: var(--border-strong); text-underline-offset: 3px; }
+  .lane svg { display: block; }
+  .span { fill: rgba(var(--ink-rgb), 0.07); }
+  .tick { fill: var(--viz-ink-3); cursor: pointer; }
+  .err { fill: var(--status-negative); }
+  .sep { stroke: var(--border-hairline); }
+  /* the list: one row per message or call, its details opened in place under its line */
+  #list { flex: 1; min-height: 0; overflow: auto; padding-bottom: 12px; }
+  .row { padding: 3px 16px; border-bottom: 1px solid var(--border-hairline); cursor: pointer; }
+  .row:hover { background: rgba(var(--ink-rgb), 0.03); }
+  .line { display: grid; grid-template-columns: 62px 150px 76px minmax(0, 1fr) auto; gap: 0 10px; align-items: baseline; }
+  .row time, .row .end { color: var(--text-tertiary); font: 400 var(--text-mono-sm) / 1.5 var(--font-mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .row .who, .row .what { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 400 var(--text-ui-sm) / 1.5 var(--font-body); }
+  .row .who { color: var(--text-secondary); }
+  .row .what { color: var(--text-tertiary); }
+  .row .text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-primary); font: 400 var(--text-sm) / 1.5 var(--font-body); }
+  .row.call .text { font: 400 var(--text-mono-sm) / 1.5 var(--font-mono); }
+  .row .bad { margin-right: 8px; color: var(--status-negative); }
+  .thimble-details { padding: 4px 0 8px var(--indent); cursor: auto; }
+  .thimble-details pre { max-height: 240px; margin: 0 0 6px; padding: 6px 8px; overflow: auto; border-radius: var(--radius-ui); background: var(--bg-sub); color: var(--text-primary); font: 400 var(--text-mono-sm) / 1.5 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+  .thimble-details .full { margin-bottom: 6px; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text-primary); font: 400 var(--text-sm) / 1.5 var(--font-body); }
+  .acts { display: flex; align-items: center; gap: 8px; color: var(--text-tertiary); font: 400 var(--text-mono-sm) / 1.4 var(--font-mono); }
+  .empty { padding: 28px 16px; color: var(--text-tertiary); }
+  @media (max-width: 720px) { #view { --names: 140px; --indent: 0px; } .line { grid-template-columns: 62px 110px 64px minmax(0, 1fr) auto; } }
 </style>
 </head>
 <body>
-<main id="view"></main>
+<div id="view">
+  <div class="top">
+    <input class="field" id="q" type="search" placeholder="Search messages and calls" aria-label="Search">
+    <select class="field" id="scope" aria-label="Runs and sessions"><option value="">All runs</option></select>
+    <span id="colour"></span>
+  </div>
+  <div class="time">
+    <div id="readout"></div><div id="range"></div>
+    <div class="key"><span><i class="k-span"></i>running</span><span><i class="k-err"></i>failed</span></div><div id="axis"></div>
+  </div>
+  <div id="lanes"></div>
+  <div id="list"></div>
+</div>
 <script>
-// ------------------------------------------------------------------------------------------------------------ setup
+const $ = (id) => document.getElementById(id)
+const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c])
 const slug = (thimble.view && thimble.view.slug) || 'linked-sessions'
-const unitRef = (key) => `view:${slug}/${key}`
-const FIELD_NAME = { run: 'Run', agent: 'Agent', tool: 'Tool', outcome: 'Outcome', 'file type': 'File type', 'duration band': 'Duration' }
-const CHIPS = ['run', 'agent', 'tool', 'outcome', 'file type', 'duration band']
-const MENU = ['tool', 'agent', 'outcome', 'run', 'file type', 'duration band']
-const AX = 28, LH = 30, RH = 30, BAND = [7, 21], MID = 14
-const MAX_TICKED = 4
-const root = getComputedStyle(document.documentElement)
-const tok = (name, fallback) => root.getPropertyValue(name).trim() || fallback
-// the page's own categories in the theme's seven viz colours, then two inks; errors take the red. While a label is on,
-// the labels colour the calls instead
-const CAT = [tok('--viz-1', '#025ac3'), tok('--viz-2', '#d0750a'), tok('--viz-3', '#08632f'), tok('--viz-4', '#1392d4'),
-  tok('--viz-5', '#897301'), tok('--viz-6', '#009c85'), tok('--viz-7', '#844500'), tok('--viz-ink-2', '#6b675f'),
-  tok('--viz-ink-1', '#1b1a18')]
-const QUIET = tok('--viz-ink-3', '#a19d94')
-const NEG = tok('--status-negative', '#c93a28'), WARN = tok('--status-warning', '#9a6512')
-const PAPER = tok('--surface-card', '#ffffff')
-const inkRgb = tok('--ink-rgb', '27,26,24')
-const UNMARKED = `rgba(${inkRgb},.16)`
-const OUTC = { error: NEG, denied: WARN }
-
-function rgb(c) {
-  const m = /^#([0-9a-f]{6})$/i.exec(c)
-  if (m) return [0, 2, 4].map((i) => parseInt(m[1].slice(i, i + 2), 16))
-  const r = /rgba?\(([^)]+)\)/.exec(c)
-  return r ? r[1].split(',').slice(0, 3).map(Number) : [128, 128, 128]
-}
-const mix = (a, b, t) => { const x = rgb(a), y = rgb(b); return `rgb(${x.map((v, i) => Math.round(v + (y[i] - v) * t)).join(',')})` }
-const ramp = (t) => mix(mix(CAT[0], PAPER, 0.8), CAT[0], 0.15 + 0.85 * t)
-const durT = (d) => Math.max(0, Math.min(1, (Math.log10(Math.max(d, 0.05)) + 1) / 2.7))
-
-// ------------------------------------------------------------------------------------------------------------ state
-const st = {
-  field: 'tool', byField: false, filters: {}, search: '', hide: new Set(), win: null, ticked: [], view: 'overview', collapsed: new Set(),
-  open: null, sel: null, msg: null, menu: null, pal: null, includeSubs: true, align: 'start', narrow: false,
-  side: false, compact: false, panelW: 0, leftW: 0, range: null, ftext: '', raw: false, // the open session beside the lanes, and the widths render worked out
-}
-const SIDE_MIN = 760 // the page width from which an open session sits in a panel beside the lanes rather than below them
-const PANEL_MIN = 300, LANES_MIN = 360
-let labels = { labels: [], filter: null, all: null, palette: null } // what thimble.onLabels last said
-let ov = null, sess = null, moment = null, cmp = null
-let S = {}, RUN = {}, CALL = {}
-let seq = 0
-let first = null
-const ensureOverview = () => (first ||= loadOverview().then((ok) => ok || !!ov))
-
-// ------------------------------------------------------------------------------------------------------------ helpers
-const pad = (n) => String(n).padStart(2, '0')
-const fmt = (t) => `${pad(Math.floor(t / 60))}:${pad(Math.floor(t % 60))}`
-const fmtd = (d) => (d < 60 ? `${d < 10 ? d.toFixed(1) : Math.round(d)} s` : `${Math.floor(d / 60)}:${pad(Math.round(d % 60))}`)
-const mins = (t) => `${Math.round(t / 60)} min`
-const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c])
+const LANE = 18
+const KIND = { prompt: 'Prompt', text: 'Text', result: 'Result' }
+const hms = (t) => new Date(t * 1000).toISOString().slice(11, 19)
+const secs = (d) => `${d < 10 ? d.toFixed(1) : Math.round(d)} s`
 const runName = (id) => (/^r\d+$/.test(id) ? `Run ${id.slice(1)}` : id)
-const ico = {
-  search: '<svg class="ico" viewBox="0 0 16 16"><circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5 14 14"/></svg>',
-  caret: '<svg class="ico ico-s" viewBox="0 0 12 12"><path d="M3.5 4.75 6 7.25l2.5-2.5"/></svg>',
-  right: '<svg class="ico ico-s" viewBox="0 0 12 12"><path d="M4.75 3.5 7.25 6l-2.5 2.5"/></svg>',
-  x: '<svg class="ico ico-s" viewBox="0 0 12 12"><path d="M3.5 3.5l5 5M8.5 3.5l-5 5"/></svg>',
-  up: '<svg class="ico ico-s" viewBox="0 0 12 12"><path d="M3 7.5 6 4.5l3 3"/></svg>',
-  down: '<svg class="ico ico-s" viewBox="0 0 12 12"><path d="M3 4.5 6 7.5l3-3"/></svg>',
-  back: '<svg class="ico" viewBox="0 0 16 16"><path d="M13 8H3.5M7.5 4 3.5 8l4 4"/></svg>',
-  plusS: '<svg class="ico ico-s" viewBox="0 0 12 12"><path d="M6 2.5v7M2.5 6h7"/></svg>',
-  parent: '<svg class="ico ico-s" viewBox="0 0 12 12"><path d="M9 9 3.5 3.5M3.5 8V3.5H8"/></svg>',
-  child: '<svg class="ico ico-s" viewBox="0 0 12 12"><path d="M3 3l5.5 5.5M8.5 4v4.5H4"/></svg>',
-  ret: '<svg class="ico ico-s" viewBox="0 0 12 12"><path d="M9.5 2.5v3.5a1.5 1.5 0 0 1-1.5 1.5H3M5 5.5 3 7.5l2 2"/></svg>',
-  check: '<svg class="ico" viewBox="0 0 12 12"><path d="M2.5 6.2 5 8.5l4.5-5"/></svg>',
-  close: '<svg class="ico" viewBox="0 0 16 16"><path d="M4.5 4.5l7 7M11.5 4.5l-7 7"/></svg>',
-  filter: '<svg class="ico ico-f" viewBox="0 0 16 16"><path d="M2.5 4h11M4.5 8h7M6.5 12h3"/></svg>',
-  file: '<svg class="ico" viewBox="0 0 24 24" style="stroke-width:1.75"><path d="M8 3H7a2 2 0 0 0-2 2v5a2 2 0 0 1-2 2 2 2 0 0 1 2 2v5a2 2 0 0 0 2 2h1M16 3h1a2 2 0 0 1 2 2v5a2 2 0 0 0 2 2 2 2 0 0 0-2 2v5a2 2 0 0 1-2 2h-1"/></svg>',
-  arrow: '<svg class="ico" viewBox="0 0 16 16"><path d="M8 13V3.5M4 7.5l4-4 4 4"/></svg>',
-  open: '<svg class="ico ico-s" viewBox="0 0 12 12"><path d="M5 3H3v6h6V7M7 2.5h2.5V5M9.5 2.5 5.5 6.5"/></svg>',
-}
-const MK = {
-  spawn: `<svg class="mk" viewBox="0 0 14 12"><path d="M4 1v6.5h6" fill="none" stroke="rgba(${inkRgb},.55)"/><circle cx="10" cy="7.5" r="1.6" fill="rgba(${inkRgb},.6)"/></svg>`,
-  ret: '<svg class="mk" viewBox="0 0 14 12"><circle cx="7" cy="6" r="3.6" fill="var(--surface-card)" stroke="var(--text-primary)" stroke-width="1.3"/></svg>',
-  wait: `<svg class="mk" viewBox="0 0 14 12"><path d="M0 6h14" stroke="rgba(${inkRgb},.5)" stroke-dasharray="2 3"/></svg>`,
-}
+let data = null, items = [], open = null, several = false, menuHtml = ''
+const S = {}, names = {}, full = new Map() // the sessions by id, their names, and each opened row's record in full
+let loaded
+const ready = new Promise((ok) => { loaded = ok })
 
-// the fields every call carries, and their colours in the order the reader gives their values
-const fieldOf = (c, f) => (f === 'run' ? S[c.session].run : f === 'agent' ? S[c.session].agent : f === 'tool' ? c.tool : f === 'outcome' ? c.outcome : c[f])
-const valuesOf = (f) => (ov ? ov.fields[f].map((x) => x.v) : [])
-const valueName = (f, v) => (f === 'run' ? runName(v) : v)
-function colourOf(f, v) {
-  const vs = valuesOf(f), i = Math.max(0, vs.indexOf(v))
-  if (f === 'outcome') return v === 'ok' ? QUIET : OUTC[v] || CAT[i % CAT.length]
-  if (f === 'duration band') return ramp(vs.length > 1 ? i / (vs.length - 1) : 0.5)
-  if (f === 'file type' && v === 'no file') return QUIET
-  return CAT[i % CAT.length]
-}
-
-// the labels: the values that are on colour the calls (the reader's `classes`, in thimble's order) unless a field is
-// chosen in the Colour menu, which colours this page alone, and the menu lists every label over files with its colour
-// and its switch
-const classes = () => (ov ? ov.classes : [])
-const labelOn = () => !st.byField && classes().length > 0
-const labelBy = (name) => (labels.all || labels.labels || []).find((l) => l.name === name)
-const classKey = (c) => `${c.label}\n${c.value}`
-const classColour = (i) => { const c = classes()[i], l = c && labelBy(c.label), v = l && (l.values || []).find((x) => x.name === c.value); return (v && v.colour) || (c && c.colour) || UNMARKED }
-function coloursOf(c) {
-  if (labelOn()) return c.m.length ? c.m.map(classColour) : [UNMARKED]
-  return [st.field === 'duration band' ? ramp(durT(c.duration)) : colourOf(st.field, fieldOf(c, st.field))]
-}
-const swatch = (cols, size = 8) => (cols.length > 1 ? `<span class="mix" style="width:${size}px;height:${size}px">${cols.map((x) => `<i style="background:${x}"></i>`).join('')}</span>` : `<i class="sw" style="width:${size}px;height:${size}px;background:${cols[0]}"></i>`)
-
-const inWin = (c) => !st.win || (c.time + c.duration >= st.win[0] && c.time <= st.win[1])
-const full = () => !st.win
-const winOf = () => st.win || [0, ov ? ov.span : 1]
-const agentName = (s) => s.label || s.agent
-
-// ------------------------------------------------------------------------------------------------------------ fetches
-const selection = () => ({ filters: Object.fromEntries(Object.entries(st.filters).map(([f, h]) => [f, [...h]])), search: st.search, hide: [...st.hide], win: st.win, range: st.range, files: st.ftext })
-
-async function loadOverview() {
-  const my = ++seq
-  const got = await thimble.fetch({ op: 'overview', ...selection() })
-  if (my !== seq) return false
-  ov = got
-  S = {}, RUN = {}, CALL = {}
-  for (const r of ov.runs) {
-    RUN[r.id] = r
-    RUNINFO[r.id] = { team: r.team, sessions: r.sessions.length, started: r.started ? new Date(r.started).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'UTC' }).replace(',', '') : '' }
-  }
-  if (ov.task) RUNINFO.task = ov.task
-  for (const s of ov.sessions) { S[s.id] = { ...s, calls: [], tasks: [] } }
-  for (const r of ov.runs) {
-    const seen = {}
-    for (const id of r.sessions) { const a = S[id].agent; seen[a] = (seen[a] || 0) + 1; S[id].label = seen[a] > 1 ? `${a} ${seen[a]}` : a }
-  }
-  for (const c of ov.calls) { CALL[c.ref] = c; if (S[c.session]) { S[c.session].calls.push(c); if (c.child) S[c.session].tasks.push(c) } }
-  // the label values hidden or the field values filtered that no longer exist are let go
-  st.hide = new Set([...st.hide].filter((k) => k === 'none' || classes().some((c) => classKey(c) === k)))
-  if (!labelOn()) st.hide = new Set()
-  st.ticked = st.ticked.filter((id) => S[id] || RUN[id])
-  if (st.view === 'compare' && st.ticked.length < 2) st.view = 'overview'
-  if (st.open && !S[st.open]) { st.open = null; st.sel = null; sess = null }
-  return true
-}
-async function loadSession() {
-  if (!st.open) { sess = null; return }
-  const id = st.open
-  const got = await thimble.fetch({ op: 'session', id, ...selection() })
-  if (st.open !== id) return
-  sess = got
-  const calls = sess ? sess.items.filter((i) => i.kind === 'call') : []
-  if (!calls.some((c) => c.ref === st.sel)) st.sel = null
-  await loadMoment()
-}
-async function loadMoment() {
-  const c = selCall()
-  moment = null
-  if (!c) return
-  const at = c.ref
-  const got = await thimble.fetch({ op: 'moment', run: S[st.open].run, t: c.time, session: st.open, at: c.ref })
-  if (selCall() && selCall().ref === at) moment = got
-}
-async function loadCompare() {
-  if (st.view !== 'compare') { cmp = null; return }
-  cmp = await thimble.fetch({ op: 'compare', ids: st.ticked, subs: st.includeSubs, ...selection() })
-}
-async function reload({ session = true } = {}) {
-  if (!(await loadOverview())) return
-  await Promise.all([session ? loadSession() : null, loadCompare()])
-  render()
-}
-const rawOf = new Map() // a call's ref -> its lines as the transcript holds them
-async function loadRaw(c) {
-  const got = await thimble.fetch({ op: 'raw', refs: c.refs || [c.ref] })
-  rawOf.set(c.ref, got || [])
-  if (st.raw && selCall() && selCall().ref === c.ref) render()
-}
-const selCall = () => (sess && st.sel ? sess.items.find((i) => i.kind === 'call' && i.ref === st.sel) : null)
-
-// ------------------------------------------------------------------------------------------------------------ the head
-function chipText(f) {
-  const vs = valuesOf(f), hid = st.filters[f]
-  const vis = vs.filter((v) => !hid.has(v))
-  if (vis.length === 1) return `${FIELD_NAME[f]}: ${valueName(f, vis[0])}`
-  if (hid.size === 1) return `${FIELD_NAME[f]}: not ${valueName(f, [...hid][0])}`
-  return `${FIELD_NAME[f]}: ${vis.length} of ${vs.length}`
-}
-function colourButton() {
-  const cls = labelOn() ? classes() : []
-  let what
-  if (cls.length === 1) what = `<span class="sws"><i class="sw" style="background:${classColour(0)}"></i></span><span class="cnm">${esc(cls[0].label)}</span>`
-  else if (cls.length > 1) what = `<span class="sws">${cls.map((c, i) => `<i class="sw" style="background:${classColour(i)}"></i>`).join('')}</span>${new Set(cls.map((c) => c.label)).size} labels`
-  else what = FIELD_NAME[st.field]
-  const ids = (labels.labels || []).map((l) => l.id).filter(Boolean).join(' ')
-  return `<button class="btn btn-secondary btn-sm cbtn" data-act="menu" data-menu="colour" ${ids ? `data-label="${esc(ids)}"` : ''}><span class="k">Colour</span>${what}${ico.caret}</button>`
-}
-// a label value's swatch, which opens the palette of thimble's label colours when thimble takes a colour change
-function swatchButton(label, value, colour, cls = 'swb') {
-  const l = labelBy(label)
-  const can = l && l.id && labels.palette && labels.palette.length
-  const box = `<i class="sw" style="background:${colour}"></i>`
-  return can ? `<span class="${cls}" role="button" title="Change colour" data-act="palette" data-id="${esc(l.id)}" data-value="${esc(value)}">${box}</span>` : box
-}
-function legend() {
-  const out = []
-  if (labelOn()) {
-    classes().forEach((c, i) => {
-      const l = labelBy(c.label), key = classKey(c)
-      const multi = l && (l.values || []).filter((v) => v.highlight !== false).length > 1
-      out.push(`<span class="lg ${st.hide.has(key) ? 'off' : ''}" role="button" data-act="legend" data-v="${esc(key)}" data-label="${esc((l && l.id) || '')}" title="Click: only this · Shift-click: hide">${swatchButton(c.label, c.value, classColour(i))}${esc(multi ? `${c.label}: ${c.value}` : c.label)}<span class="n">${c.n}</span></span>`)
-    })
-    if (ov.none || st.hide.has('none')) out.push(`<span class="lg ${st.hide.has('none') ? 'off' : ''}" role="button" data-act="legend" data-v="none" title="Click: only this · Shift-click: hide"><i class="sw" style="background:${UNMARKED}"></i>No label<span class="n">${ov.none}</span></span>`)
-    if (st.hide.size) out.push('<button class="btn btn-ghost btn-sm" data-act="showall">Show all</button>')
-  } else {
-    const hid = st.filters[st.field] || new Set()
-    if (st.field === 'duration band') out.push(`<span class="st">0.1 s<i class="grad" style="background:linear-gradient(90deg,${ramp(0)},${ramp(0.5)},${ramp(1)})"></i>50 s</span>`)
-    for (const { v, n } of ov.fields[st.field]) {
-      out.push(`<span class="lg ${hid.has(v) ? 'off' : ''}" role="button" data-act="legend" data-v="${esc(v)}" title="Click: only this · Shift-click: hide"><i class="sw" style="background:${colourOf(st.field, v)}"></i>${esc(valueName(st.field, v))}<span class="n">${n}</span></span>`)
-    }
-    if (hid.size) out.push('<button class="btn btn-ghost btn-sm" data-act="showall">Show all</button>')
-  }
-  return out.join('')
-}
-const PRIMARY = ['agent', 'tool', 'outcome']
-function moreCount() { return (st.filters['file type'] && st.filters['file type'].size ? 1 : 0) + (st.range ? 1 : 0) + (st.ftext ? 1 : 0) }
-function filterChip(f) {
-  const hid = st.filters[f]
-  if (hid && hid.size) return `<button class="chip chip-sans active" data-act="menu" data-menu="f:${f}">${esc(chipText(f))}<span class="x" data-act="clearf" data-f="${f}" style="display:inline-flex">${ico.x}</span></button>`
-  return `<button class="chip chip-sans chip-tone-neutral chip-act" data-act="menu" data-menu="f:${f}">${esc(FIELD_NAME[f])}${ico.caret}</button>`
-}
-// the Error, Denied, Spawned, Returned and Waiting glyphs, with counts over the calls that pass
-function glyphs() {
-  const calls = ov.calls.filter((c) => st.view === 'compare' || inWin(c))
-  const nErr = calls.filter((c) => c.outcome === 'error').length, nDen = calls.filter((c) => c.outcome === 'denied').length
-  const spawned = calls.filter((c) => c.child).length
-  const returned = ov.sessions.filter((s) => s.parent).length
-  const waits = ov.sessions.reduce((n, s) => n + s.waits.length, 0)
-  return `<span class="st"><i class="rail" style="background:${NEG}"></i>Error <b>${nErr}</b></span><span class="st"><i class="rail" style="background:${WARN}"></i>Denied <b>${nDen}</b></span>
-    <span class="st">${MK.spawn}Spawned <b>${spawned}</b></span><span class="st">${MK.ret}Returned <b>${returned}</b></span><span class="st">${MK.wait}Waiting on subagents <b>${waits}</b></span>`
-}
-// the runs in scope: every run the overview's run field lists, with each run's team as the last overview gave it
-const RUNINFO = {}
-const allRuns = () => valuesOf('run')
-const pickedRuns = () => allRuns().filter((r) => !(st.filters.run || new Set()).has(r))
-function runsText() {
-  const all = allRuns(), on = pickedRuns()
-  if (on.length === all.length) return `<span class="k">Runs</span> <span class="v">All ${all.length}</span>`
-  if (on.length === 1) return `<span class="k">Run</span> <span class="v">${esc(on[0])}</span>`
-  return `<span class="k">Runs</span> <span class="v">${on.length <= 3 ? on.map(esc).join(', ') : on.length}</span>`
-}
-function scopeControls() {
-  const can = pickedRuns().length >= 2
-  return `<button class="field fbtn ${pickedRuns().length < allRuns().length ? 'active' : ''}" data-act="menu" data-menu="runs" aria-haspopup="menu">${runsText()}${ico.caret}</button>
-    <div class="seg seg-track scope"><button class="seg-opt ${st.view !== 'compare' ? 'active' : ''}" data-act="combined">Combined</button><button class="seg-opt ${st.view === 'compare' ? 'active' : ''}" data-act="cmpruns" ${can ? '' : 'disabled title="Pick two runs or more to compare them"'}>Compare</button></div>`
-}
-function runsMenu() {
-  const on = new Set(pickedRuns()), all = allRuns()
-  const n = Object.fromEntries((ov.fields.run || []).map((x) => [x.v, x.n]))
-  const rows = all.map((r) => {
-    const info = RUNINFO[r] || {}
-    return `<button class="mi run" data-act="runonly" data-v="${esc(r)}" title="Click for this run alone"><span class="cbx ${on.has(r) ? 'on' : ''}" data-act="runbox" data-v="${esc(r)}" title="Add or remove this run">${on.has(r) ? ico.check : ''}</span><span class="nm"><b>${esc(runName(r))}</b> <span class="t3">${esc(info.team || '')}</span>${info.started ? `<span class="sub2">${esc(info.started)}${info.sessions ? ` · ${info.sessions} sessions` : ''}</span>` : ''}</span><span class="n">${n[r] || 0}</span></button>`
-  }).join('')
-  return `<div class="menu runs" id="menu" data-for="runs" style="min-width:260px"><button class="mi" data-act="runall"><span class="cbx ${on.size === all.length ? 'on' : ''}">${on.size === all.length ? ico.check : ''}</span><span class="nm">All runs</span></button><div class="msep"></div>${rows}${RUNINFO.task ? `<div class="msep"></div><div class="task"><span class="cap">Task</span>${esc(RUNINFO.task)}</div>` : ''}</div>`
-}
-async function setRuns(on) {
-  const all = allRuns()
-  st.filters.run = new Set(all.filter((r) => !on.includes(r)))
-  if (on.length < 2 && st.view === 'compare') st.view = 'overview'
-  if (st.view === 'compare') st.ticked = on.slice(0, MAX_TICKED)
-  render.toTop = true
-  await reload()
-}
-function topBar() {
-  const n = moreCount()
-  const moreChips = (st.filters['file type'] && st.filters['file type'].size ? filterChip('file type') : '') +
-    (st.range ? `<button class="chip chip-sans active" data-act="rangeclear">Duration <span class="v">${st.range[0]}–${st.range[1]} s</span>${ico.x}</button>` : '') +
-    (st.ftext ? `<button class="chip chip-sans active" data-act="ftextclear">Files touched: <span class="v">${esc(st.ftext)}</span>${ico.x}</button>` : '')
-  const timeChip = st.view === 'compare' || full() ? '' : `<button class="chip chip-sans active" data-act="fullwin">Time <span class="v">${Math.round(st.win[0] / 60)}–${Math.round(st.win[1] / 60)} min</span>${ico.x}</button>`
-  const anyFilter = Object.entries(st.filters).some(([f, h]) => f !== 'run' && h.size) || st.hide.size || !full() || st.search || st.range || st.ftext
-  return `<header id="bar">
-    <div class="r1">${scopeControls()}<label class="search">${ico.search}<input class="field" id="q" placeholder="Search messages, commands, paths" value="${esc(st.search)}" autocomplete="off" spellcheck="false"></label>
-      <div class="filters">${PRIMARY.map(filterChip).join('')}<button class="chip chip-sans chip-tone-neutral chip-act" data-act="menu" data-menu="more">${ico.filter}More filters${n ? ` (${n})` : ''}${ico.caret}</button>${moreChips}${timeChip}${anyFilter ? '<button class="btn btn-ghost btn-sm" data-act="clearall">Clear</button>' : ''}</div></div>
-    <div class="r2 cc" id="cc" data-thimble="colour-and-labels">${colourButton()}<div class="legend">${legend()}</div>
-      <div class="vsep"></div><div class="legend">${glyphs()}</div></div>
-  </header>`
-}
-function menus() {
-  if (st.menu === 'colour') {
-    const fields = MENU.map((f) => {
-      const on = !labelOn() && st.field === f
-      const sw = f === 'duration band' ? `<i class="sw" style="width:22px;background:linear-gradient(90deg,${ramp(0)},${ramp(1)})"></i>` : `<span style="display:inline-flex;gap:1px">${valuesOf(f).slice(0, 4).map((v) => `<i class="sw" style="width:5px;border-radius:1px;background:${colourOf(f, v)}"></i>`).join('')}</span>`
-      return `<button class="mi" data-act="field" data-f="${f}"><span class="ck">${on ? ico.check : ''}</span>${esc(FIELD_NAME[f])}<span class="n">${sw}</span></button>`
-    }).join('')
-    // every label over files, as thimble lists them, those over these files first; a click turns one on or off
-    const all = labels.all || labels.labels.map((l) => ({ ...l, on: true }))
-    const row = (l) => {
-      const lit = (l.values || []).filter((v) => v.highlight !== false)
-      const box = `<span class="box ${l.on ? 'on' : ''}" style="--mark:${l.colour}"></span>`
-      const main = `<div class="mi" data-label="${esc(l.id || '')}"><span class="ck tog" data-act="label" data-id="${esc(l.id || '')}" title="${l.on ? 'Turn off' : 'Turn on'}">${box}</span><span class="nm lk" data-act="label" data-id="${esc(l.id || '')}">${esc(l.name)}</span>
-        <span class="n">${l.count == null ? '' : l.count}</span>${lit.length === 1 ? swatchButton(l.name, lit[0].name, lit[0].colour) : ''}</div>`
-      const subs = l.on && lit.length > 1 ? lit.map((v) => `<div class="mi sub" data-label="${esc(l.id || '')}"><span class="nm">${esc(v.name)}</span><span class="n"></span>${swatchButton(l.name, v.name, v.colour)}</div>`).join('') : ''
-      return main + subs
-    }
-    const here = all.filter((l) => l.here).map(row).join('')
-    const other = all.filter((l) => !l.here).map(row).join('')
-    const rows = `<div class="mh cap">Labels over these files</div>${here || '<div class="mnote">No label covers these files yet</div>'}${other ? `<div class="mh cap">Other labels</div>${other}` : ''}`
-    const make = thimble.newLabel ? `<div class="msep"></div><button class="mi" data-act="newlabel"><span class="ck">${ico.plusS}</span>New label</button>` : ''
-    const byLabels = `<button class="mi" data-act="bylabels"><span class="ck">${labelOn() ? ico.check : ''}</span>Labels<span class="n"><span style="display:inline-flex;gap:1px">${classes().slice(0, 4).map((c, i) => `<i class="sw" style="width:5px;border-radius:1px;background:${classColour(i)}"></i>`).join('')}</span></span></button>`
-    return `<div class="menu" id="menu" data-anchor-name="Colour menu" data-for="colour"><div class="mh cap">Colour by</div>${byLabels}${fields}<div class="msep"></div>${rows}${make}</div>`
-  }
-  if (st.menu === 'more') {
-    const f = 'file type', hid = st.filters[f] || new Set()
-    const types = ov.fields[f].map(({ v, n }) => `<button class="mi" data-act="fval" data-f="${f}" data-v="${esc(v)}"><span class="cbx ${hid.has(v) ? '' : 'on'}" data-act="fval" data-f="${f}" data-v="${esc(v)}">${hid.has(v) ? '' : ico.check}</span><span class="nm">${esc(v)}</span><span class="n">${n}</span></button>`).join('')
-    const bins = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-    for (const c of ov.calls) if (!c.child) bins[Math.min(11, Math.floor(durT(c.duration) * 12))]++
-    const mx = Math.max(1, ...bins)
-    const [a, b] = st.range || ['0.1', '50']
-    return `<div class="menu more" id="menu" data-for="more">
-      <div class="mh cap">File type</div><div class="sec2">${types}</div><div class="msep"></div>
-      <div class="mh cap">Duration</div><div class="hist">${bins.map((n) => `<i style="height:${Math.max(2, (n / mx) * 26)}px"></i>`).join('')}</div>
-      <div class="rng"><input class="field" id="rmin" value="${esc(a)}" aria-label="From"> to <input class="field" id="rmax" value="${esc(b)}" aria-label="To"> s<button class="btn btn-secondary btn-sm" data-act="rangeset" style="margin-left:auto">Apply</button></div><div class="msep"></div>
-      <div class="mh cap">Files touched</div><div class="txt2"><input class="field" id="ftext" placeholder="Path contains" value="${esc(st.ftext)}" autocomplete="off" spellcheck="false"></div></div>`
-  }
-  if (st.menu === 'runs') return runsMenu()
-  if (st.menu === 'layout') {
-    return `<div class="menu" id="menu" data-for="layout" style="min-width:220px"><div class="mh cap">Align</div>
-      <button class="mi" data-act="align" data-v="clock"><span class="ck">${st.align === 'clock' ? ico.check : ''}</span>Run clock</button>
-      <button class="mi" data-act="align" data-v="start"><span class="ck">${st.align === 'start' ? ico.check : ''}</span>Session start</button>
-      <div class="msep"></div><button class="mi" data-act="subs"><span class="ck">${st.includeSubs ? ico.check : ''}</span>Include subagents</button></div>`
-  }
-  if (st.menu && st.menu.startsWith('f:')) {
-    const f = st.menu.slice(2), hid = st.filters[f] || new Set()
-    return `<div class="menu" id="menu" data-for="f:${f}" style="min-width:210px"><div class="mh cap">${esc(FIELD_NAME[f])}</div>${ov.fields[f].map(({ v, n }) => `<button class="mi" data-act="fonly" data-f="${f}" data-v="${esc(v)}" title="Click: only this · Box: show or hide"><span class="cbx ${hid.has(v) ? '' : 'on'}" data-act="fval" data-f="${f}" data-v="${esc(v)}">${hid.has(v) ? '' : ico.check}</span><i class="sw" style="background:${colourOf(f, v)}"></i><span class="nm">${esc(valueName(f, v))}</span><span class="n">${n}</span></button>`).join('')}
-      <div class="msep"></div><button class="mi" data-act="clearf" data-f="${f}"><span class="ck"></span>Show all</button></div>`
-  }
-  return ''
-}
-// thimble's label colours, one of which becomes the value's colour through thimble
-function palette() {
-  if (!st.pal || !labels.palette) return ''
-  const l = (labels.all || labels.labels || []).find((x) => x.id === st.pal.id)
-  const cur = l && ((l.values || []).find((v) => v.name === st.pal.value) || {}).colour
-  return `<div class="pal" id="pal" data-label="${esc(st.pal.id)}">${labels.palette.map((c) => `<button data-act="colour" data-colour="${esc(c)}" class="${cur && c.toLowerCase() === String(cur).toLowerCase() ? 'cur' : ''}" style="background:${c}" aria-label="Colour ${esc(c)}"></button>`).join('')}</div>`
-}
-
-// ------------------------------------------------------------------------------------------------------------ lanes
-function niceStep(pxPerMin) { for (const m of [1, 2, 5, 10, 15, 30, 60]) if (m * pxPerMin >= 66) return m * 60; return 7200 }
-function layout(rows) { let y = AX; for (const r of rows) { r.y = y; y += r.kind === 'run' ? RH : LH } return y }
-function laneSvg({ rows, dom, width, sel = null, compare = false }) {
-  const plotL = 6, W = width - plotL - 10
-  const pxs = W / Math.max(1, dom[1] - dom[0])
-  const X = (t) => plotL + (t - dom[0]) * pxs
-  const H = layout(rows)
-  const rowOf = {}
-  for (const r of rows) if (r.kind === 'lane') rowOf[r.s.id] = r
-  const out = [], g = [], heads = []
-  const step = niceStep(pxs * 60)
-  const selX = sel && rowOf[sel.session] ? X(sel.time - rowOf[sel.session].off + sel.duration / 2) : null
-  for (let t = Math.ceil(dom[0] / step) * step; t <= dom[1]; t += step) {
-    const x = X(t)
-    out.push(`<line x1="${x}" x2="${x}" y1="${AX - 4}" y2="${H}" stroke="rgba(${inkRgb},.08)"/>`)
-    // a tick's label gives way to the chosen call's time, which sits on the axis in a 42 px box
-    const start = x - plotL < 20, w = mins(t).length * 6.4
-    const [l0, l1] = start ? [x, x + w] : [x - w / 2, x + w / 2]
-    if (selX != null && l1 > selX - 24 && l0 < selX + 24) continue
-    out.push(`<text x="${x}" y="${AX - 10}" font-size="10.5" fill="var(--text-tertiary)" text-anchor="${start ? 'start' : 'middle'}">${mins(t)}</text>`)
-  }
-  const clip = `clip-${Math.random().toString(36).slice(2, 7)}`
-  out.push(`<clipPath id="${clip}"><rect x="${plotL}" y="0" width="${W}" height="${H}"/></clipPath>`)
-  for (const r of rows.filter((r) => r.kind === 'run')) {
-    heads.push(`<rect x="0" y="${r.y}" width="${width + 16}" height="${RH}" fill="var(--bg-sub)"/><line x1="0" x2="${width + 16}" y1="${r.y + 0.5}" y2="${r.y + 0.5}" stroke="var(--border-hairline)"/>`)
-    const when = new Date(r.run.started)
-    const started = when.toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'UTC' }).replace(',', '')
-    heads.push(`<text class="sans" x="${plotL + 4}" y="${r.y + 19}" font-size="12" fill="var(--text-tertiary)">${r.run.sessions.length} sessions · started ${started} · ran ${fmtd(r.run.span)}</text>`)
-  }
-  const drawCalls = (calls, y, off, summary) => {
-    for (const c of calls) {
-      const t = c.time - off
-      if (t + c.duration < dom[0] || t > dom[1]) continue
-      const x = X(t), cols = coloursOf(c)
-      const w = c.child ? 3 : Math.max(cols.length > 1 ? 5 : cols[0] !== UNMARKED && labelOn() ? 3 : 2, c.duration * pxs)
-      const h = (BAND[1] - BAND[0]) / cols.length
-      const tip = `${c.tool} · ${fmt(c.time)}${c.outcome !== 'ok' ? ' · ' + c.outcome : ''}\n${c.input || ''}`
-      const anchor = summary ? '' : ` data-anchor="${esc(c.ref)}"`
-      if (cols.length === 1) g.push(`<rect${anchor} x="${x}" y="${y + BAND[0]}" width="${w}" height="${h}" fill="${cols[0]}"><title>${esc(tip)}</title></rect>`)
-      else g.push(`<g${anchor}>${cols.map((col, i) => `<rect x="${x}" y="${y + BAND[0] + i * h}" width="${w}" height="${h}" fill="${col}"/>`).join('')}<title>${esc(tip)}</title></g>`)
-      if (c.outcome !== 'ok') g.push(`<rect x="${x - 1}" y="${y + BAND[1] + 2}" width="${Math.max(4, w + 2)}" height="3" rx="1" fill="${OUTC[c.outcome] || NEG}" pointer-events="none"/>`)
-      if (sel && c.ref === sel.ref) g.push(`<rect x="${x - 2.5}" y="${y + BAND[0] - 2.5}" width="${w + 5}" height="${BAND[1] - BAND[0] + 5}" rx="2" fill="none" stroke="var(--text-primary)" stroke-width="1.5" pointer-events="none"/>`)
-    }
-  }
-  for (const r of rows.filter((r) => r.kind !== 'run')) {
-    const a = X(Math.max(dom[0], (r.kind === 'lane' ? r.s.start : 0) - r.off)), b = X(Math.min(dom[1], (r.kind === 'lane' ? r.s.end : r.run.span) - r.off))
-    if (b > a) g.push(`<rect x="${a}" y="${r.y + BAND[0]}" width="${b - a}" height="${BAND[1] - BAND[0]}" rx="2" fill="rgba(${inkRgb},.045)"/>`)
-    if (r.kind === 'lane') for (const [wa, wb] of r.s.waits) g.push(`<line x1="${X(wa - r.off) + 3}" x2="${X(wb - r.off)}" y1="${r.y + MID}" y2="${r.y + MID}" stroke="rgba(${inkRgb},.4)" stroke-dasharray="2 3"/>`)
-  }
-  for (const r of rows.filter((r) => r.kind === 'lane')) {
-    const s = r.s, p = rowOf[s.parent]
-    if (!p || s.spawn == null) continue
-    const xs = X(s.spawn - r.off) + 1.5, xc = X(s.start - r.off)
-    g.push(`<path d="M${xs} ${p.y + BAND[1]} V${r.y + MID} H${Math.max(xs, xc)}" fill="none" stroke="rgba(${inkRgb},.5)"/><circle cx="${Math.max(xs, xc)}" cy="${r.y + MID}" r="1.8" fill="rgba(${inkRgb},.6)"/>`)
-    g.push(`<path d="M${X(s.end - r.off)} ${r.y + BAND[0]} V${p.y + MID}" fill="none" stroke="rgba(${inkRgb},.5)" stroke-dasharray="1.5 2.5"/>`)
-  }
-  for (const r of rows.filter((r) => r.kind !== 'run')) {
-    if (r.kind === 'lane') drawCalls(r.s.calls, r.y, r.off, false)
-    else for (const id of r.run.sessions) drawCalls(S[id].calls, r.y, r.off, true)
-    if (r.kind !== 'lane') continue
-    for (const kid of Object.values(S).filter((k) => k.parent === r.s.id && rowOf[k.id])) {
-      const te = kid.end - r.off
-      if (te >= dom[0] && te <= dom[1]) g.push(`<circle cx="${X(te)}" cy="${r.y + MID}" r="3.6" fill="var(--surface-card)" stroke="var(--text-primary)" stroke-width="1.3"><title>${esc(agentName(kid))} returned · ${fmt(kid.end)}</title></circle>`)
-    }
-    if (!compare) for (const m of (ov.messages || []).filter((m) => m.session === r.s.id)) {
-      const t = m.time - r.off
-      if (t >= dom[0] && t <= dom[1]) g.push(`<path class="msg" data-anchor="${esc(m.ref)}" data-act="openmsg" data-s="${esc(m.session)}" data-ref="${esc(m.ref)}" d="M${X(t)} ${r.y + 1.5}l3.5 3.5-3.5 3.5-3.5-3.5z" fill="var(--text-primary)"><title>${esc(m.kind)} · ${fmt(m.time)}</title></path>`)
-    }
-  }
-  out.push(`<g clip-path="url(#${clip})">${g.join('')}</g>`, heads.join(''))
-  out.push(`<line x1="${plotL}" x2="${plotL + W}" y1="${AX - 0.5}" y2="${AX - 0.5}" stroke="var(--border-subtle)"/>`)
-  if (selX != null) {
-    const runOf = (r) => (r.kind === 'run' || r.kind === 'sum' ? r.run.id : r.s.run)
-    const rr = rows.filter((r) => runOf(r) === S[sel.session].run)
-    out.push(`<line x1="${selX}" x2="${selX}" y1="${AX}" y2="${rr[rr.length - 1].y + LH}" stroke="var(--text-primary)" stroke-opacity=".45" stroke-dasharray="3 3"/>`)
-    out.push(`<rect x="${selX - 21}" y="${AX - 21}" width="42" height="16" rx="3" fill="var(--surface-inverse)"/><text x="${selX}" y="${AX - 9.5}" font-size="10.5" fill="var(--text-on-inverse)" text-anchor="middle">${fmt(sel.time - rowOf[sel.session].off)}</text>`)
-  }
-  return `<svg class="plot" width="${width}" height="${H}">${out.join('')}</svg>`
-}
-function labelCol(rows, { w, badges = null, cols }) {
-  const CX = 0, IND = 16
-  const nameX = (r) => (r.kind !== 'lane' ? CX : badges ? 24 + r.s.depth * IND : CX + 16 + r.s.depth * IND)
-  const out = [`<div class="lhead cap" style="height:${AX}px"><span style="left:${CX}px">Session</span>${cols.map((c) => `<span class="num" style="right:${c.r}px">${c.name}</span>`).join('')}</div>`]
-  const tl = []
-  for (const r of rows) {
-    if (r.kind !== 'lane' || !r.s.parent) continue
-    const p = rows.find((q) => q.kind === 'lane' && q.s.id === r.s.parent)
-    if (!p) continue
-    const px = nameX(p) + 4, y1 = p.y + LH / 2 + 8, y2 = r.y + LH / 2
-    tl.push(`<path d="M${px} ${y1} V${y2 - 4} Q${px} ${y2} ${px + 4} ${y2} H${nameX(r) - 4}" fill="none" stroke="var(--border-strong)"/>`)
-  }
-  out.push(`<svg class="tree" width="${w}" height="${rows.length ? rows[rows.length - 1].y + LH : 0}">${tl.join('')}</svg>`)
-  const numOf = (o) => cols.map((c) => `<span class="num ${c.cls ? c.cls(o) : ''}" style="right:${c.r}px">${c.v(o)}</span>`).join('')
-  const numW = cols.length ? cols[0].r + 48 : 0
-  for (const r of rows) {
-    const id = r.kind === 'lane' ? r.s.id : r.run.id
-    const badge = badges && badges[id] ? `<span class="badge" style="position:absolute;left:0">${badges[id]}</span>` : ''
-    let name, nums = '', act = '', anchor = ''
-    if (r.kind === 'run') { name = `${st.collapsed.has(r.run.id) ? ico.right : ico.caret}${esc(runName(r.run.id))}<span class="setup">${esc(r.run.team)}</span>`; nums = numOf(r.run); act = `data-act="collapse" data-id="${esc(r.run.id)}"`; anchor = `data-anchor="${esc(unitRef(r.run.key))}"` }
-    else if (r.kind === 'sum') name = `${r.run.sessions.length} sessions, collapsed`
-    else { name = esc(agentName(r.s)) + (badges && badges[id] ? ` <span class="t3">${esc(runName(r.s.run))}</span>` : ''); nums = numOf(r.s); act = `data-act="open" data-id="${esc(r.s.id)}"`; anchor = `data-anchor="${esc(unitRef(r.s.key))}"` }
-    const maxW = w - nameX(r) - numW
-    out.push(`<div class="lrow ${r.kind} ${r.kind === 'lane' && id === st.open && st.view === 'overview' ? 'open' : ''}" ${anchor} data-anchor-unmarked style="height:${r.kind === 'run' ? RH : LH}px">${badge}<span class="ln" ${act} style="left:${nameX(r)}px;max-width:${Math.max(40, maxW)}px" title="${esc(r.kind === 'lane' ? agentName(r.s) : r.kind === 'run' ? `${runName(r.run.id)} · ${r.run.team}` : '')}">${name}</span>${nums}</div>`)
-  }
-  return `<div class="lcol" style="width:${w}px">${out.join('')}</div>`
-}
-// the lanes' width, left of an open session's panel; beside a narrow panel the session column drops its counts
-const viewWidth = () => Math.max(st.side ? 300 : 560, st.leftW - 44)
-const labelWidth = () => (st.compact ? 170 : st.narrow ? 250 : 320)
-const COLS = () => (st.compact ? [] : [{ name: esc('Calls'), r: st.narrow ? 64 : 74, v: (s) => s['call count'] }, { name: esc('Errors'), r: 6, v: (s) => s['error count'] || '–', cls: (s) => (s['error count'] ? 'err' : 'zero') }])
-function overview() {
-  const rows = []
-  for (const run of ov.runs) {
-    rows.push({ kind: 'run', run, off: 0 })
-    if (st.collapsed.has(run.id)) rows.push({ kind: 'sum', run, off: 0 })
-    else for (const id of run.sessions) rows.push({ kind: 'lane', s: S[id], run, off: 0 })
-  }
-  const lw = labelWidth(), pw = viewWidth() - lw
-  if (!rows.length) return `<section id="ov"><div class="empty">No session has a call that passes.</div></section>`
-  const svg = laneSvg({ rows, dom: winOf(), width: pw, sel: st.open ? selCall() && { ...selCall(), session: st.open } : null })
-  const bgs = rows.map((r) => (r.kind === 'run' ? `<div class="rowbg run" style="top:${r.y}px;height:${RH}px"></div>` : r.kind === 'lane' && r.s.id === st.open ? `<div class="rowbg hl" style="top:${r.y}px;height:${LH}px"></div>` : '')).join('')
-  // the context strip: every run's calls over the whole span, and the brush that sets the lanes' window
-  const cl = 6, CW = pw - cl - 10, span = ov.span || 1, cx = (t) => cl + (t / span) * CW
-  const rowH = 4, gap = 3, ch = ov.runs.length * (rowH + gap) - gap
-  const cs = []
-  ov.runs.forEach((run, i) => {
-    const y = i * (rowH + gap)
-    cs.push(`<rect x="${cx(0)}" y="${y}" width="${cx(run.span) - cx(0)}" height="${rowH}" fill="rgba(${inkRgb},.06)"/>`)
-    for (const id of run.sessions) for (const c of S[id].calls) if (!c.child) cs.push(`<rect x="${cx(c.time)}" y="${y}" width="${Math.max(1, (c.duration / span) * CW)}" height="${rowH}" fill="${coloursOf(c)[0]}" fill-opacity=".75"/>`)
-  })
-  const [w0, w1] = winOf(), bx1 = cx(w0), bx2 = cx(w1)
-  cs.push(`<rect x="${cl}" y="-4" width="${Math.max(0, bx1 - cl)}" height="${ch + 8}" fill="var(--surface-card)" fill-opacity=".7"/><rect x="${bx2}" y="-4" width="${Math.max(0, cl + CW - bx2)}" height="${ch + 8}" fill="var(--surface-card)" fill-opacity=".7"/>`)
-  cs.push(`<rect id="brush" x="${bx1}" y="-5" width="${bx2 - bx1}" height="${ch + 10}" rx="3" fill="rgba(${inkRgb},.03)" stroke="rgba(${inkRgb},.45)"/>`)
-  for (const x of [bx1, bx2]) cs.push(`<rect x="${x - 2.5}" y="${ch / 2 - 7}" width="5" height="14" rx="1.5" fill="var(--surface-card)" stroke="rgba(${inkRgb},.55)"/>`)
-  const tstep = niceStep((CW / span) * 60)
-  for (let t = 0; t <= span; t += tstep) cs.push(`<text x="${cx(t)}" y="${ch + 17}" font-size="10" fill="var(--text-tertiary)" text-anchor="${t === 0 ? 'start' : 'middle'}">${mins(t)}</text>`)
-  return `<section id="ov"><div class="lanes">${bgs}${labelCol(rows, { w: lw, cols: COLS() })}${svg}</div>
-    <div class="ctx"><div class="lab" style="width:${lw}px">Zoom</div><svg class="plot" id="zoom" width="${pw}" height="${ch + 22}" data-cl="${cl}" data-cw="${CW}">${cs.join('')}</svg></div></section>`
-}
-
-// ------------------------------------------------------------------------------------------------------------ the open session
-function transcript(s) {
-  return sess.items.map((it) => {
-    const msgAttrs = st.msg && it.ref === st.msg ? 'class="tr sel" id="selrow"' : 'class="tr"'
-    if (it.kind === 'prompt') return `<div ${msgAttrs} data-anchor="${esc(it.ref)}"><span class="tm">${fmt(it.time)}</span><span class="tl q">Prompt</span><span class="txt q">${esc(it.text)}</span></div>`
-    if (it.kind === 'text' || it.kind === 'result') return `<div ${msgAttrs} data-anchor="${esc(it.ref)}"><span class="tm">${fmt(it.time)}</span><span class="tl${it.kind === 'result' ? ' q' : ''}">${it.kind === 'result' ? 'Result' : '<i class="adot"></i>'}</span><span class="txt">${esc(it.text)}</span></div>`
-    if (it.kind === 'wait') return `<div class="tr wait"><span class="tm"></span><span class="tl q">Waiting</span><span class="txt">${esc(it.on.map((id) => (S[id] ? agentName(S[id]) : id)).join(' and '))} running · ${fmtd(it.b - it.a)}</span></div>`
-    if (it.kind === 'return') {
-      const kid = S[it.child]
-      return `<div class="tr" data-act="open" data-id="${esc(it.child)}" ${it.ref ? `data-anchor="${esc(it.ref)}"` : ''}><span class="tm">${fmt(it.time)}</span><span class="tl q">${ico.ret}Returned</span><span class="arg"><span class="lnk">${esc(kid ? agentName(kid) : it.child)}${ico.child}</span></span><span class="rt">ran ${fmtd(it.ran)}</span>${it.text ? `<span class="sub prose">${esc(it.text)}</span>` : ''}</div>`
-    }
-    const c = it
-    const cols = coloursOf({ ...c, session: s.id })
-    const on = c.ref === st.sel && !st.msg
-    const cl = ['tr', c.outcome === 'error' ? 'err' : '', c.outcome === 'denied' ? 'den' : '', on ? 'sel' : ''].join(' ')
-    const attrs = `class="${cl}" data-act="sel" data-ref="${esc(c.ref)}" data-anchor="${esc(c.ref)}" ${on ? 'id="selrow"' : ''}`
-    const tl = `<span class="tl">${swatch(cols)}${esc(c.tool)}</span>`
-    if (c.child) {
-      const kid = S[c.child]
-      return `<div ${attrs}><span class="tm">${fmt(c.time)}</span>${tl}<span class="arg"><span class="lnk" data-act="open" data-id="${esc(c.child)}">${esc(kid ? agentName(kid) : c.child)}${ico.child}</span> <span style="font-family:var(--font-body);font-size:var(--text-sm);color:var(--text-secondary);margin-left:4px">${esc(c.input)}</span></span><span class="rt">spawned</span></div>`
-    }
-    const outc = c.outcome === 'error' ? `<span class="o-err">error${c.exit != null ? ' · exit ' + esc(c.exit) : ''}</span>` : c.outcome === 'denied' ? '<span class="o-den">denied</span>' : ''
-    const chips = (fs) => `<span class="sub fl">${fs.map((f) => `<span class="chip chip-tone-neutral chip-act" data-act="searchfor" data-v="${esc(f)}" title="${esc(f)}">${esc(f.split('/').pop())}</span>`).join('')}</span>`
-    let sub = ''
-    if (c.new != null) sub = `<span class="sub diff">${c.old ? `<span class="del">− ${esc(c.old)}</span>&nbsp;&nbsp;&nbsp;` : ''}<span class="add">+ ${esc(c.new)}</span></span>`
-    else if (c.matches.length) sub = `<span class="sub">${esc(c.result)}</span>${chips(c.matches)}`
-    else if (c.tool !== 'Read' && c.tool !== 'Edit' && c.files.length && c.result) sub = `<span class="sub">${esc(c.result)}</span>${chips(c.files)}`
-    else if (c.tool !== 'Read' && c.tool !== 'Edit' && c.result) sub = `<span class="sub">${esc(c.result)}</span>`
-    const size = c.tool === 'Read' && c.result ? esc(c.result) + ' · ' : ''
-    return `<div ${attrs}><span class="tm">${fmt(c.time)}</span>${tl}<span class="arg" title="${esc(c.input)}">${esc(c.input)}</span><span class="rt">${outc}${size}${fmtd(c.duration)}</span>${sub}</div>`
-  }).join('')
-}
-function callDetails(c, s) {
-  const cls = classes()
-  const chip = c.outcome === 'error' ? `<span class="cd-status err">error${c.exit != null ? ' · exit ' + esc(c.exit) : ''}</span>` : c.outcome === 'denied' ? '<span class="cd-status den">denied</span>' : '<span class="cd-status">ok</span>'
-  const output = c.output ? esc(c.output) : c.new != null ? `${c.old ? `<span class="del">− ${esc(c.old)}</span>\n` : ''}<span class="a">+ ${esc(c.new)}</span>` : c.outcome === 'ok' ? esc(c.result || 'done') : `<span class="e">${esc(c.result)}</span>`
-  const labs = c.m.map((i) => `<span class="labrow"><span class="box on" style="--mark:${classColour(i)}"></span>${esc(cls[i].label)}${labelBy(cls[i].label) && (labelBy(cls[i].label).values || []).filter((v) => v.highlight !== false).length > 1 ? `: ${esc(cls[i].value)}` : ''}</span>`).join('')
-  const cols = coloursOf({ ...c, session: s.id })
-  const conc = (moment || []).map((o) => {
-    let what
-    if (o.state === 'starts') what = `<span class="what q">starts at ${fmt(o.at)}</span>`
-    else if (o.state === 'returned') what = `<span class="what q">returned at ${fmt(o.at)}</span>`
-    else if (o.state === 'waiting') what = `<span class="what q">waiting on ${esc(o.on.join(', '))}</span>`
-    else if (o.state === 'call') what = `<span class="what"><span class="t3">${fmt(o.at)}</span>&nbsp; ${esc(o.tool)} ${esc(o.input)}</span>`
-    else what = '<span class="what q">starting</span>'
-    return `<div class="conc" data-act="open" data-id="${esc(o.id)}" ${o.ref ? `data-call="${esc(o.ref)}"` : ''}><span class="who">${esc(S[o.id] ? agentName(S[o.id]) : o.agent)}</span>${what}</div>`
-  })
-  const rawSeg = `<span class="seg seg-track rawseg"><button class="seg-opt ${st.raw ? '' : 'active'}" data-act="raw" data-v="0">Fields</button><button class="seg-opt ${st.raw ? 'active' : ''}" data-act="raw" data-v="1">Raw</button></span>`
-  const head = `<div data-anchor="${esc(c.ref)}"><div class="cd-head">${swatch(cols, 10)}<span class="tool">${esc(c.tool)}</span>${chip}<div class="grow"></div>${rawSeg}</div>
-    <div class="cd-cmd">${esc(c.child ? `${S[c.child] ? agentName(S[c.child]) : c.child}: ${c.input}` : c.input)}</div></div>`
-  // Raw: the call's tool_use and tool_result lines as the transcript holds them
-  if (st.raw) {
-    const lines = rawOf.get(c.ref)
-    if (!lines) loadRaw(c)
-    return `${head}<div>${(lines || []).map((x) => `<button class="chip chip-tone-neutral chip-act fchip rawref" data-act="openfile" data-ref="${esc(x.ref)}" data-tip="Open ${esc(x.ref)} in the File browser">${ico.file}${esc(x.ref.split('/').pop())}</button><pre class="out rawline">${esc(x.text)}</pre>`).join('') || '<pre class="out rawline t3">Reading the lines</pre>'}</div>`
-  }
-  return `${head}<div>
-    <div class="kv"><div><span class="k">Call</span><span class="v">${c.position} of ${sess['call count']}</span></div><div><span class="k">Started</span><span class="v">${fmt(c.time)}</span></div><div><span class="k">Duration</span><span class="v">${fmtd(c.duration)}</span></div>
-      ${c.outcome !== 'ok' ? `<div><span class="k">Result</span><span class="v err" title="${esc(c.result)}">${esc(c.result)}</span></div>` : ''}
-      ${c.again ? `<div><span class="k">Same command next</span><span class="v">${fmt(c.again.time)} · ${esc(c.again.outcome)}</span></div>` : ''}</div>
-    ${labs ? `<h4 class="cap">Labels</h4><div>${labs}</div>` : ''}
-    <h4 class="cap">${c.child ? esc('Returned') : esc('Output')}</h4><pre class="out">${output}</pre>
-    ${c.files.length ? `<h4 class="cap">${esc('Files')}</h4><div class="chips">${c.files.map((f) => `<span class="chip chip-tone-neutral chip-act" data-act="searchfor" data-v="${esc(f)}">${esc(f)}</span>`).join('')}</div>` : ''}</div>
-    ${conc.length ? `<h4 class="cap">${esc(runName(s.run))} at ${fmt(c.time)}</h4>${conc.join('')}` : ''}`
-}
-function sessionSummary(s) {
-  const result = sess.items.find((i) => i.kind === 'result')
-  const waited = s.waits.reduce((n, [a, b]) => n + (b - a), 0)
-  return `<div class="sum"><div class="kv"><div><span class="k">Started</span><span class="v">${fmt(s.start)}</span></div><div><span class="k">Ended</span><span class="v">${fmt(s.end)}</span></div><div><span class="k">Ran</span><span class="v">${fmtd(s.end - s.start)}</span></div>${waited ? `<div><span class="k">Waiting on subagents</span><span class="v">${fmtd(waited)}</span></div>` : ''}</div>
-    ${result ? `<h4 class="cap">Returned</h4><pre class="out">${esc(result.text)}</pre>` : ''}</div>`
-}
-function details() {
-  if (!st.open || !S[st.open] || !sess) return ''
-  const s = S[st.open]
-  const c = selCall()
-  const parent = s.parent && S[s.parent]
-  const task = parent ? parent.tasks.find((x) => x.child === s.id) : null
-  const kids = Object.values(S).filter((k) => k.parent === s.id).sort((a, b) => a.start - b.start)
-  const run = RUN[s.run]
-  const path = s.ref.slice(0, s.ref.lastIndexOf('#'))
-  const at = c ? c.ref : null
-  const close = `<button class="btn btn-ghost btn-sm" data-act="closedet" aria-label="Close">${ico.close}</button>`
-  const file = `<button class="chip chip-tone-neutral chip-act fchip" data-act="openfile" data-path="${esc(path)}" ${at ? `data-ref="${esc(at)}"` : ''} data-tip="Open ${esc(path)} in the File browser${c ? `, at the ${esc(c.tool)} call at ${fmt(c.time)}` : ''}">${ico.file}${esc(path.split('/').pop())}${ico.open}</button>`
-  return `<section id="det"><div class="dhead" data-anchor="${esc(unitRef(s.key))}" data-anchor-unmarked>
-      <h2>${esc(agentName(s))}</h2>${file}<div class="grow"></div>${st.side ? `${close}<span class="brk"></span>` : ''}
-      <span class="dstats"><span>${esc(runName(s.run))} · ${esc(run.team)}</span><span><b>${s['call count']}</b> ${s['call count'] === 1 ? 'call' : 'calls'}</span><span>ran <b>${fmtd(s.end - s.start)}</b></span><span class="err"><b>${s['error count']}</b> ${s['error count'] === 1 ? 'error' : 'errors'}</span></span>
-      ${st.side ? '<span class="brk"></span>' : ''}
-      ${parent ? `<span class="grp"><span class="lab">Spawned by</span><button class="chip chip-sans chip-tone-neutral chip-act" data-act="open" data-id="${esc(parent.id)}" ${task ? `data-call="${esc(task.ref)}"` : ''} data-tip="Select ${esc(agentName(parent))}'s lane at its Task call, ${s.spawn != null ? fmt(s.spawn) : ''}">${ico.parent}${esc(agentName(parent))}${s.spawn != null ? ` · Task <span class="v">${fmt(s.spawn)}</span>` : ''}</button></span>` : ''}
-      ${kids.length ? `<span class="grp"><span class="lab">Subagents</span>${kids.map((k) => `<button class="chip chip-sans chip-tone-neutral chip-act" data-act="open" data-id="${esc(k.id)}" data-tip="Select ${esc(agentName(k))}'s lane, spawned at ${k.spawn != null ? fmt(k.spawn) : ''}">${esc(agentName(k))}${ico.child}</button>`).join('')}</span>` : ''}
-      <div class="grow"></div>
-      <span class="grp"><button class="btn btn-ghost btn-sm" data-act="err" data-dir="-1">${ico.up}Previous error</button><button class="btn btn-ghost btn-sm" data-act="err" data-dir="1">${ico.down}Next error</button></span>
-      ${st.side ? '' : close}</div>
-    <div class="dbody"><div class="tx" id="tx">${transcript(s)}</div><div class="cd">${c ? callDetails(c, s) : sessionSummary(s)}</div></div></section>`
-}
-// ------------------------------------------------------------------------------------------------------------ compare
-function compare() {
-  if (!cmp) return '<section id="cmp"></section>'
-  const cls = classes()
-  const groups = cmp.groups
-  const letters = Object.fromEntries(groups.map((g, i) => [g.root, 'ABCD'[i]]))
-  const rows = []
-  for (const g of groups) {
-    const base = S[g.root] ? S[g.root].depth : 0
-    for (const id of g.sessions) if (S[id]) rows.push({ kind: 'lane', s: { ...S[id], depth: S[id].depth - base, parent: g.sessions.includes(S[id].parent) ? S[id].parent : null }, off: st.align === 'start' ? g.start : 0 })
-  }
-  // the lanes' rows are copies, so a subagent's spawn line finds its parent among them
-  const lw = labelWidth(), pw = viewWidth() - lw
-  const dom = st.align === 'start' ? [0, Math.max(...groups.map((g) => g.end - g.start)) + 15] : [Math.min(...groups.map((g) => g.start)) - 15, Math.max(...groups.map((g) => g.end)) + 15]
-  const svg = rows.length ? laneSvg({ rows, dom, width: pw, compare: true }) : ''
-  const head = `<div class="lay"><button class="btn btn-ghost btn-sm" data-act="menu" data-menu="layout">Layout${ico.caret}</button></div>`
-  const lanes = `<div class="cmp-lanes"><div class="lanes">${labelCol(rows, { w: lw, badges: letters, cols: COLS() })}${svg}</div></div>`
-  const cells = []
-  cells.push('<div class="ch"></div>', ...groups.map((g) => `<div class="ch" data-anchor="${esc(unitRef(g.id))}" data-anchor-unmarked><div class="top"><span class="badge">${letters[g.root]}</span><b>${RUN[g.id] ? esc(runName(g.id)) : esc(S[g.root] ? agentName(S[g.root]) : g.root)}</b><span class="run">${RUN[g.id] ? '' : esc(runName(g.run)) + ' · '}${esc(g.team)}</span></div>
-    <div class="path">${g.sessions.length > 1 ? `with ${esc([...new Set(g.agents.slice(1))].join(', '))}` : 'no subagents'} · <span class="mono">${fmt(g.start)}–${fmt(g.end)}</span> into the run</div></div>`))
-  const barRow = (label, vals, max, colour, fmtv = (v) => v, sw = '') => {
-    cells.push(`<div class="ml">${sw}${label}</div>`)
-    for (const v of vals) cells.push(`<div class="mc"><div class="bartrack"><div class="bar" style="width:${v ? `max(2px, calc((100% - 56px) * ${v / max}))` : '0'};background:${colour}"></div><span class="v ${v ? '' : 'zero'}">${v ? fmtv(v) : '–'}</span></div></div>`)
-  }
-  const sec = (name, extra = '') => cells.push(`<div class="sec cap">${name}${extra}</div>`, ...groups.map(() => '<div class="sec"></div>'))
-  const line = () => cells.push('<div class="secline"></div>')
-  const maxN = Math.max(1, ...groups.map((g) => g['call count']))
-  if (cls.length) {
-    sec(esc('Labels'))
-    cls.forEach((c, i) => barRow(esc(c.label) + (labelBy(c.label) && (labelBy(c.label).values || []).filter((v) => v.highlight !== false).length > 1 ? `: ${esc(c.value)}` : ''), groups.map((g) => g.classes[i]), maxN, classColour(i), (v) => v, `<span class="box on" style="--mark:${classColour(i)};width:10px;height:10px"></span>`))
-    line()
-  }
-  sec(esc('Calls by tool'))
-  barRow(esc('All calls'), groups.map((g) => g['call count']), maxN, `rgba(${inkRgb},.55)`)
-  for (const t of cmp.tools) barRow(esc(t), groups.map((g) => g.tools[t] || 0), maxN, colourOf('tool', t), (v) => v, `<i class="sw" style="background:${colourOf('tool', t)}"></i>`)
-  line()
-  sec('Outcomes')
-  const maxO = Math.max(1, ...groups.map((g) => Math.max(g['error count'], g['denied count']))) * 2.5
-  barRow(esc('Error'), groups.map((g) => g['error count']), maxO, NEG, (v) => v, `<i class="rail" style="background:${NEG}"></i>`)
-  barRow(esc('Denied'), groups.map((g) => g['denied count']), maxO, WARN, (v) => v, `<i class="rail" style="background:${WARN}"></i>`)
-  line()
-  sec('Time')
-  const maxT = Math.max(1, ...groups.map((g) => Math.max(g['wall clock'], g['summed time'])))
-  barRow(esc('Wall clock'), groups.map((g) => g['wall clock']), maxT, `rgba(${inkRgb},.55)`, fmtd)
-  barRow(esc('Summed over sessions'), groups.map((g) => g['summed time']), maxT, `rgba(${inkRgb},.35)`, fmtd)
-  barRow(esc('In tool calls'), groups.map((g) => g['in tool calls']), maxT, `rgba(${inkRgb},.35)`, fmtd)
-  barRow(esc('Waiting on subagents'), groups.map((g) => g.waiting), maxT, `rgba(${inkRgb},.35)`, fmtd)
-  line()
-  const EDIT = colourOf('tool', 'Edit'), READ = colourOf('tool', 'Read')
-  sec(esc('Files touched'), `<span class="fkey"><i class="sq" style="background:${EDIT}"></i>edits<i class="sq hollow" style="border-color:${READ};margin-left:8px"></i>reads</span>`)
-  const use = (g, f) => ({ e: (g.files[f] || [0, 0])[0], r: (g.files[f] || [0, 0])[1] })
-  const glyph = (u) => `<span class="g">${u.e ? `<i class="sq" style="background:${EDIT}"></i>${u.e}` : ''}</span><span class="g">${u.r ? `<i class="sq hollow" style="border-color:${READ}"></i>${u.r}` : ''}</span>`
-  cells.push('<div class="ml">Files</div>', ...groups.map((g) => `<div class="mc"><span class="v">${Object.keys(g.files).length}</span></div>`))
-  const all = [...new Set(groups.flatMap((g) => Object.keys(g.files)))]
-  const weight = (f) => groups.reduce((s, g) => s + use(g, f).e * 3 + use(g, f).r, 0)
-  const shared = all.filter((f) => groups.every((g) => g.files[f])).sort((x, y) => weight(y) - weight(x))
-  cells.push(`<div class="ml sub">In ${groups.length > 2 ? 'all' : 'both'}</div>`, ...groups.map(() => '<div></div>'))
-  for (const f of shared) { cells.push(`<div class="fl" title="${esc(f)}">${esc(f)}</div>`); for (const g of groups) cells.push(`<div class="fc">${glyph(use(g, f))}</div>`) }
-  cells.push(`<div class="ml sub" style="align-items:flex-start;padding-top:4px">Not in ${groups.length > 2 ? 'all' : 'both'}</div>`)
-  for (const g of groups) {
-    const own = Object.keys(g.files).filter((f) => !shared.includes(f)).map((f) => ({ f, u: use(g, f) })).sort((x, y) => y.u.e - x.u.e || y.u.r - x.u.r)
-    cells.push(`<div class="own">${own.map(({ f, u }) => `<div class="f"><span class="p" title="${esc(f)}">${esc(f)}</span>${glyph(u)}</div>`).join('') || '<div class="f"><span class="p t3">–</span></div>'}</div>`)
-  }
-  line()
-  sec(esc('Errors and denials'))
-  cells.push('<div></div>')
-  for (const g of groups) cells.push(`<div class="errl">${g.errors.map((e) => `<div class="e" data-anchor="${esc(e.ref)}" data-act="opencall" data-ref="${esc(e.ref)}"><span class="tm">+${fmt(e.time)}</span><span class="m ${e.outcome === 'denied' ? 'den' : ''}">${esc(e.result)}</span><span class="c">${g.sessions.length > 1 ? `<span class="who">${esc(e.agent)}</span>` : ''}${esc(e.tool)} ${esc(e.input)}</span></div>`).join('') || '<span class="t3">–</span>'}</div>`)
-  return `<section id="cmp">${head}${lanes}<div class="cgrid" style="grid-template-columns:${st.narrow ? 170 : 300}px repeat(${groups.length}, minmax(0,1fr))">${cells.join('')}</div></section>`
-}
-
-// ------------------------------------------------------------------------------------------------------------ render and events
-// An open session sits in a resizable panel beside the lanes, or below them in a narrow page; the lanes and the panel's
-// transcript keep their scroll across renders.
-function render() {
-  const view = document.getElementById('view')
-  if (!ov) { view.innerHTML = ''; return }
-  const W = view.clientWidth || window.innerWidth
-  st.side = st.view === 'overview' && !!st.open && !!S[st.open] && !!sess && W >= SIDE_MIN
-  if (st.side) st.panelW = Math.round(Math.max(PANEL_MIN, Math.min(st.panelW || W * 0.38, 640, W - LANES_MIN)))
-  st.leftW = st.side ? W - st.panelW : W
-  st.narrow = st.leftW < 980
-  st.compact = st.side && st.leftW < 640
-  view.classList.toggle('narrow', st.narrow && !st.side)
-  const txScroll = document.getElementById('tx')?.scrollTop
-  const leftScroll = render.toTop ? 0 : document.getElementById('left')?.scrollTop || 0
-  render.toTop = false
-  const left = st.view === 'compare' ? compare() : overview() + (st.side ? '' : details())
-  const side = st.side ? `<div id="grip" title="Drag to resize"></div><aside id="side" style="width:${st.panelW}px">${details()}</aside>` : ''
-  view.innerHTML = topBar() + `<div id="area"><div id="left">${left}</div>${side}</div>` + menus() + palette()
-  document.getElementById('left').scrollTop = leftScroll
-  place('menu', `[data-menu="${st.menu ? CSS.escape(st.menu) : 'colour'}"]`)
-  if (st.pal) place('pal', `[data-act="palette"][data-id="${CSS.escape(st.pal.id)}"][data-value="${CSS.escape(st.pal.value)}"]`, st.pal.from)
-  const tx = document.getElementById('tx'), row = document.getElementById('selrow')
-  if (tx && row) {
-    if (render.scrollToSel || txScroll == null) tx.scrollTop = Math.max(0, row.offsetTop - tx.clientHeight * 0.25)
-    else tx.scrollTop = txScroll
-  }
-  render.scrollToSel = false
-  if (render.focusSearch) { const q = document.getElementById('q'); q.focus(); q.setSelectionRange(q.value.length, q.value.length); render.focusSearch = false }
-}
-// a popover sits under the control that opened it, inside the page
-function place(id, sel, from) {
-  const m = document.getElementById(id)
-  if (!m) return
-  const scope = from ? document.querySelector(`#${from === 'menu' ? 'menu' : 'bar'}`) : document
-  const a = (scope && scope.querySelector(sel)) || document.querySelector(sel)
-  if (!a) { m.remove(); return }
-  const vr = document.getElementById('view').getBoundingClientRect(), ar = a.getBoundingClientRect()
-  const left = Math.min(ar.left - vr.left, vr.width - m.offsetWidth - 8)
-  m.style.left = `${Math.max(8, id === 'pal' && from === 'menu' ? ar.right - vr.left + 6 : left)}px`
-  m.style.top = `${(id === 'pal' && from === 'menu' ? ar.top - 10 : ar.bottom + 4) - vr.top}px`
-}
-async function openSession(id, call, message = null) {
-  if (!S[id]) return
-  st.open = id; st.sel = call || null; st.msg = message; st.view = 'overview'; render.scrollToSel = true
-  await loadSession()
-  if (call) st.sel = call
-  // a cited message is chosen in the transcript, with the call before it (else the one after it) in the details
-  const m = message && sess ? sess.items.find((i) => i.ref === message && i.kind !== 'call') : null
-  const calls = sess ? sess.items.filter((i) => i.kind === 'call') : []
-  if (m) st.sel = (calls.filter((i) => i.time <= m.time).pop() || calls.find((i) => i.time > m.time) || {}).ref || st.sel
-  else st.msg = null
-  await loadMoment()
-  render()
-  // below the lanes, the session is brought into sight when its head is out of it
-  const head = st.side ? null : document.querySelector('#det .dhead')
-  const top = head ? head.getBoundingClientRect().top : 0
-  if (head && (top < 0 || top > window.innerHeight - 160)) head.scrollIntoView({ block: 'start' })
-}
-function setWin(a, b) {
-  const span = ov.span
-  st.win = b - a < 120 ? [Math.max(0, a - 600), Math.min(span, a + 600)] : [Math.max(0, a), Math.min(span, b)]
-  if (st.win[0] <= 0 && st.win[1] >= span) st.win = null
-}
-// the label controls change thimble's labels, whose answer comes back through onLabels; a label that is on colours
-// the page again while a field does
-function toggleLabel(id) {
-  const l = (labels.all || []).find((x) => x.id === id)
-  const was = st.byField
-  st.byField = false
-  if (l && l.on && was) return render()
-  if (l && thimble.setLabel) thimble.setLabel(id, !l.on)
-}
-
-document.addEventListener('click', async (e) => {
-  const el = e.target.closest('[data-act]')
-  if (!el) { if ((st.menu && !e.target.closest('#menu')) || (st.pal && !e.target.closest('#pal')) ) { st.menu = null; st.pal = null; render() } return }
-  const act = el.dataset.act, id = el.dataset.id
-  e.preventDefault()
-  let refetch = false
-  if (act !== 'palette' && act !== 'colour') st.pal = null
-  switch (act) {
-    case 'menu': st.menu = st.menu === el.dataset.menu ? null : el.dataset.menu; break
-    case 'field': st.field = el.dataset.f; st.byField = true; st.menu = null; st.hide = new Set(); refetch = true; break
-    case 'label': e.stopPropagation(); toggleLabel(id); return
-    case 'bylabels': st.byField = false; st.menu = null; st.hide = new Set(); refetch = true; break
-    case 'rangeset': { const a = parseFloat(document.getElementById('rmin').value), b = parseFloat(document.getElementById('rmax').value); if (a >= 0 && b > a) st.range = [a, b]; st.menu = null; refetch = true; break }
-    case 'rangeclear': st.range = null; refetch = true; break
-    case 'ftextclear': st.ftext = ''; refetch = true; break
-    case 'openfile': e.stopPropagation(); thimble.navigate(el.dataset.ref || el.dataset.path, { browser: true }); return
-    case 'newlabel': st.menu = null; render(); if (thimble.newLabel) thimble.newLabel(); return
-    case 'palette': e.stopPropagation(); st.pal = st.pal && st.pal.id === id && st.pal.value === el.dataset.value ? null : { id, value: el.dataset.value, from: el.closest('#menu') ? 'menu' : 'bar' }; break
-    case 'colour': if (st.pal && thimble.setLabelColour) thimble.setLabelColour(st.pal.id, st.pal.value, el.dataset.colour); st.pal = null; break
-    case 'legend': {
-      const v = el.dataset.v
-      if (labelOn()) {
-        // the label values are hidden in this view only, not by thimble's label filter
-        const keys = [...classes().map(classKey), 'none']
-        if (e.shiftKey || e.altKey) { const h = new Set(st.hide); h.has(v) ? h.delete(v) : h.add(v); if (h.size < keys.length) st.hide = h }
-        else { const only = st.hide.size === keys.length - 1 && !st.hide.has(v); st.hide = only ? new Set() : new Set(keys.filter((x) => x !== v)) }
-      } else {
-        const vs = valuesOf(st.field), h = new Set(st.filters[st.field] || [])
-        if (e.shiftKey || e.altKey) { h.has(v) ? h.delete(v) : h.add(v); if (h.size < vs.length) st.filters[st.field] = h }
-        else { const only = h.size === vs.length - 1 && !h.has(v); st.filters[st.field] = only ? new Set() : new Set(vs.filter((x) => x !== v)) }
-      }
-      refetch = true
-      break
-    }
-    case 'showall':
-      if (labelOn()) st.hide = new Set()
-      else st.filters[st.field] = new Set()
-      refetch = true
-      break
-    case 'fval': { e.stopPropagation(); const f = el.dataset.f, v = el.dataset.v, h = new Set(st.filters[f] || []); h.has(v) ? h.delete(v) : h.add(v); if (h.size < valuesOf(f).length) st.filters[f] = h; refetch = true; break }
-    case 'fonly': {
-      e.stopPropagation()
-      const f = el.dataset.f, v = el.dataset.v, vs = valuesOf(f), h = st.filters[f] || new Set()
-      const only = h.size === vs.length - 1 && !h.has(v)
-      st.filters[f] = only ? new Set() : new Set(vs.filter((x) => x !== v))
-      refetch = true
-      break
-    }
-    case 'clearf': e.stopPropagation(); st.filters[el.dataset.f] = new Set(); st.menu = null; refetch = true; break
-    case 'clearall': st.filters = st.filters.run ? { run: st.filters.run } : {}; st.hide = new Set(); st.win = null; st.search = ''; st.range = null; st.ftext = ''; refetch = true; break
-    case 'fullwin': st.win = null; refetch = true; break
-    case 'searchfor': e.stopPropagation(); st.search = el.dataset.v; refetch = true; break
-    case 'raw': st.raw = el.dataset.v === '1'; break
-    case 'runall': await setRuns(allRuns()); return
-    case 'runonly': await setRuns([el.dataset.v]); return
-    case 'runbox': {
-      e.stopPropagation()
-      const on = new Set(pickedRuns()), v = el.dataset.v
-      on.has(v) ? on.delete(v) : on.add(v)
-      if (on.size) await setRuns(allRuns().filter((r) => on.has(r)))
-      return
-    }
-    case 'combined': if (st.view === 'compare') { st.view = 'overview'; st.ticked = []; render.toTop = true } break
-    case 'cmpruns': if (pickedRuns().length >= 2) { st.view = 'compare'; st.ticked = pickedRuns().slice(0, MAX_TICKED); st.menu = null; await loadCompare(); render.toTop = true } break
-    case 'collapse': st.collapsed.has(id) ? st.collapsed.delete(id) : st.collapsed.add(id); break
-    case 'open': e.stopPropagation(); await openSession(id, el.dataset.call); return
-    case 'opencall': { const c = CALL[el.dataset.ref]; if (c) await openSession(c.session, c.ref); return }
-    case 'openmsg': await openSession(el.dataset.s, null); return
-    case 'sel': st.sel = el.dataset.ref; st.msg = null; await loadMoment(); break
-    case 'err': {
-      const calls = sess.items.filter((i) => i.kind === 'call'), errs = calls.filter((c) => c.outcome !== 'ok'), cur = selCall()
-      const nx = +el.dataset.dir > 0 ? errs.find((c) => !cur || c.time > cur.time) : errs.filter((c) => cur && c.time < cur.time).pop()
-      if (nx) { st.sel = nx.ref; st.msg = null; render.scrollToSel = true; await loadMoment() }
-      break
-    }
-    case 'closedet': st.open = null; st.sel = null; st.msg = null; sess = null; break
-    case 'subs': st.includeSubs = !st.includeSubs; st.menu = null; await loadCompare(); break
-    case 'align': st.align = el.dataset.v; st.menu = null; break
-  }
-  if (refetch) { await reload(); return }
-  render()
+// the one Color by control: Off, the view's own fields and every label in one menu, the values as chips in this row,
+// a bar on each row's left edge, the list's two tracks, and Reset at the row's end
+const colour = thimble.colorBy({
+  mount: '#colour',
+  fields: [{ name: 'speaker', title: 'Speaker' }, { name: 'tool', title: 'Tool' }, { name: 'file type', title: 'File type' }],
+  chips: 'filter',
+  strip: '#list',
+  onChange: load,
 })
-document.addEventListener('click', async (e) => {
-  const r = e.target.closest('svg.plot [data-anchor]')
-  if (!r || r.dataset.act) return
-  const c = CALL[r.getAttribute('data-anchor')]
-  if (c) await openSession(c.session, c.ref)
-})
-document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && (st.menu || st.pal)) { st.menu = null; st.pal = null; render() } })
-document.addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target.id === 'ftext') { st.ftext = e.target.value.trim(); st.menu = null; reload() } })
+// the one control for time: every message and call over the whole span in the Color by colors, a break where the runs
+// lie hours apart, and a viewfinder over the part the lanes and the list show
+const range = thimble.timeRange({ mount: '#range', readout: '#readout', gap: 1200, onChange: draw })
+// what Reset puts back of this page's own state: the row opened in place (the kit puts back the search and the menu)
+const reset = thimble.onReset({ changed: () => open != null, reset: () => { open = null; load() } })
+
+async function load() {
+  try {
+    data = await thimble.fetch({ op: 'overview', colour: colour.query(), scope: $('scope').value, search: $('q').value.trim() }, { key: 'overview' })
+  } catch (e) {
+    if (e.name === 'AbortError') return
+    throw e
+  }
+  colour.counts(data.counts)
+  menu()
+  items = [...data.calls, ...data.messages].sort((a, b) => a.time - b.time)
+  range.data({ times: items.map((i) => i.time), values: items.map((i) => colour.valueOf(i)) })
+  draw()
+  reset.check() // the menu or the search may have changed without a click, as when thimble opens a place
+  loaded()
+}
+
+// each session's name, its agent numbered when its run has two; the menu lists every run with its sessions as a tree
+function menu() {
+  const seen = {}
+  for (const s of data.sessions) {
+    S[s.id] = s
+    seen[s.run + s.agent] = (seen[s.run + s.agent] || 0) + 1
+    names[s.id] = seen[s.run + s.agent] > 1 ? `${s.agent} ${seen[s.run + s.agent]}` : s.agent
+  }
+  const opts = ['<option value="">All runs</option>']
+  for (const r of data.runs) {
+    opts.push(`<option value="r:${esc(r.id)}">${esc(runName(r.id))} · ${esc(r.team)}</option>`)
+    for (const s of data.sessions) if (s.run === r.id) opts.push(`<option value="s:${esc(s.id)}">${'\u2003'.repeat(s.depth + 1)}${esc(names[s.id])}</option>`)
+  }
+  const el = $('scope'), was = el.value
+  if (opts.join('') === menuHtml) return
+  el.innerHTML = menuHtml = opts.join('')
+  el.value = was
+  if (el.selectedIndex < 0) { el.value = ''; soon() } // a session the label filter no longer keeps
+}
+
+function draw() {
+  if (!data) return
+  const scale = range.scale($('axis').clientWidth)
+  thimble.timeAxis('#axis', scale)
+  lanes(scale)
+  list()
+}
+
+// a lane per session in scope under its run's name, each subagent under the session that spawned it: the time it ran
+// as a gray band, and each message and call a mark in its Color by color, as wide as the call took, a failed call
+// underlined in red. A run's name and a session's lane are the view's units, which a label marks where it marks
+// one of their records
+function lanes(scale) {
+  const scope = new Set(data.scope), by = {}, runs = {}
+  for (const it of items) (by[it.session] ||= []).push(it)
+  for (const s of data.sessions) if (scope.has(s.id)) (runs[s.run] ||= []).push(lane(s, by[s.id] || [], scale))
+  $('lanes').innerHTML = data.runs.filter((r) => runs[r.id]).map((r) => `<div class="run"><div class="nm head" data-scope="r:${esc(r.id)}" data-anchor="view:${slug}/${esc(r.id)}">${esc(runName(r.id))} · ${esc(r.team)}</div>${runs[r.id].join('')}</div>`).join('')
+}
+function lane(s, calls, scale) {
+  const a = Math.max(0, scale.x(s.start)), b = Math.min(scale.width, scale.x(s.end))
+  let svg = b > a ? `<rect class="span" x="${a}" y="4" width="${b - a}" height="${LANE - 8}"/>` : ''
+  for (const it of calls) {
+    const end = it.time + (it.duration || 0)
+    if (end < range.from || it.time > range.to) continue
+    const x = scale.x(it.time), w = Math.max(2, scale.x(end) - x), c = colour.colourOf(colour.valueOf(it))
+    svg += `<rect class="tick" data-ref="${esc(it.ref)}" x="${x}" y="3" width="${w}" height="${LANE - 6}"${c ? ` style="fill:${c}"` : ''}><title>${hms(it.time)} ${esc(it.tool || KIND[it.kind])} ${esc(it.input ?? it.text)}</title></rect>`
+    if (it.outcome && it.outcome !== 'ok') svg += `<rect class="err" x="${x}" y="${LANE - 2}" width="${Math.max(4, w)}" height="2"/>`
+  }
+  return `<div class="lane" data-anchor="view:${slug}/${esc(s.id)}"><div class="nm" style="padding-left:${8 + s.depth * 12}px" data-scope="s:${esc(s.id)}">${esc(names[s.id])}</div><svg width="${scale.width}" height="${LANE}">${svg}</svg></div>`
+}
+
+// the messages and calls in the range, in time order: each row its time, its session, its tool or kind and its first
+// line, a call that failed saying so in red
+function list() {
+  const shown = items.filter((i) => range.has(i.time))
+  several = new Set(data.scope.map((id) => S[id].run)).size > 1
+  $('list').innerHTML = shown.length ? shown.map(row).join('') : '<div class="empty">No message or call</div>'
+}
+function row(it) {
+  const s = S[it.session], who = several ? `${s.run} · ${names[s.id]}` : names[s.id]
+  const bad = it.outcome && it.outcome !== 'ok' ? `<span class="bad">${esc(it.outcome)}</span>` : ''
+  return `<div class="row ${it.tool ? 'call' : 'msg'}" data-anchor="${esc(it.ref)}"${colour.attr(it)}><div class="line"><time>${hms(it.time)}</time><span class="who">${esc(who)}</span><span class="what">${esc(it.tool || KIND[it.kind])}</span><span class="text">${esc(it.input ?? it.text)}</span><span class="end">${bad}${it.tool ? secs(it.duration) : ''}</span></div>${it.ref === open ? details(it) : ''}</div>`
+}
+// a row opened in place: a call's whole input and what came back, or a message's whole text, and the file it is in
+function details(it) {
+  const f = full.get(it.ref) || {}
+  const out = f.new != null ? `${f.old ? `− ${f.old}\n` : ''}+ ${f.new}` : f.output || f.result
+  const body = it.tool ? `<pre>${esc(f.input)}</pre>${out ? `<pre>${esc(out)}</pre>` : ''}` : `<div class="full">${esc(f.text)}</div>`
+  return `<div class="thimble-details">${body}<div class="acts">${f.exit != null ? `<span>exit ${f.exit}</span>` : ''}${f.child ? `<button class="btn btn-secondary btn-sm" data-scope="s:${esc(f.child)}">Show ${esc(names[f.child] || 'subagent')}</button>` : ''}<button class="btn btn-ghost btn-sm" data-file="${esc(it.ref)}">Open in file</button></div></div>`
+}
+
+const rowOf = (ref) => $('list').querySelector(`.row[data-anchor="${CSS.escape(ref)}"]`)
+async function fetchFull(ref) {
+  if (!full.has(ref)) full.set(ref, await thimble.fetch({ op: 'record', ref }))
+}
+// a message or call to show, from a lane's mark or a citation: opened in place and scrolled to
+async function reveal(ref) {
+  if (!items.some((i) => i.ref === ref)) {
+    $('scope').value = ''
+    $('q').value = ''
+    await load()
+  }
+  const it = items.find((i) => i.ref === ref)
+  if (!it) return
+  open = ref
+  await fetchFull(ref)
+  if (!range.has(it.time)) range.set(null)
+  list()
+  rowOf(ref)?.scrollIntoView({ block: 'center' })
+}
+
 let typing = null
-document.addEventListener('input', (e) => {
-  if (e.target.id !== 'q') return
-  st.search = e.target.value
-  clearTimeout(typing)
-  typing = setTimeout(() => { render.focusSearch = true; reload() }, 250)
+$('q').addEventListener('input', () => { clearTimeout(typing); typing = setTimeout(load, 250) })
+$('scope').addEventListener('change', load)
+// a session's or a run's name narrows the view to it through the menu in the top row; a lane's mark opens its row
+document.addEventListener('click', (e) => {
+  const go = e.target.closest('[data-scope]'), file = e.target.closest('[data-file]'), mark = e.target.closest('[data-ref]')
+  if (go) { $('scope').value = go.dataset.scope; load() }
+  else if (file) thimble.navigate(file.dataset.file, { browser: true })
+  else if (mark) reveal(mark.dataset.ref)
 })
-// the context strip: drag across it to set the lanes' window
-document.addEventListener('mousedown', (e) => {
-  const z = e.target.closest('#zoom')
-  if (!z) return
-  e.preventDefault()
-  const box = z.getBoundingClientRect(), cl = +z.dataset.cl, cw = +z.dataset.cw, span = ov.span
-  const tAt = (x) => Math.max(0, Math.min(span, ((x - box.left - cl) / cw) * span))
-  const t0 = tAt(e.clientX)
-  const move = (ev) => { const t1 = tAt(ev.clientX); const b = document.getElementById('brush'); const a = Math.min(t0, t1), c = Math.max(t0, t1); b.setAttribute('x', cl + (a / span) * cw); b.setAttribute('width', ((c - a) / span) * cw) }
-  const up = (ev) => { document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up); const t1 = tAt(ev.clientX); setWin(Math.min(t0, t1), Math.max(t0, t1)); reload({ session: false }) }
-  document.addEventListener('mousemove', move); document.addEventListener('mouseup', up)
+// a click on a row opens it in place under its line, the row kept under the pointer; a second click closes it
+$('list').addEventListener('click', async (e) => {
+  const el = e.target.closest('.row')
+  if (!el || e.target.closest('.thimble-details')) return
+  const ref = el.dataset.anchor
+  open = open === ref ? null : ref
+  if (open) await fetchFull(ref)
+  thimble.expand(rowOf(ref) || el, list)
 })
-// the grip between the lanes and the session's panel: drag it to widen one or the other
-document.addEventListener('mousedown', (e) => {
-  const grip = e.target.closest('#grip')
-  if (!grip) return
-  e.preventDefault()
-  grip.classList.add('drag')
-  let frame = 0
-  const move = (ev) => {
-    st.panelW = document.getElementById('view').getBoundingClientRect().right - ev.clientX
-    cancelAnimationFrame(frame)
-    frame = requestAnimationFrame(() => { render(); document.getElementById('grip')?.classList.add('drag') })
-  }
-  const up = () => { document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up); document.getElementById('grip')?.classList.remove('drag') }
-  document.addEventListener('mousemove', move); document.addEventListener('mouseup', up)
-})
-let resizing = null
-window.addEventListener('resize', () => { clearTimeout(resizing); resizing = setTimeout(render, 60) })
-
-// ------------------------------------------------------------------------------------------------------------ thimble
-// a whole file the analyst opened the view on (Open in, `picked`): a transcript opens its session, a run's index its run
-function targetOfFile(path) {
-  if (!path) return {}
-  if (/(^|\/)sessions-index\.json$/.test(path)) return { run: path.split('/').slice(-2)[0] }
-  const s = ov.sessions.find((x) => x.ref && x.ref.slice(0, x.ref.lastIndexOf('#')) === path)
-  return s ? { session: s.id } : {}
-}
+// a place thimble opens: a cited message or call in its row, a session or a run as the menu's choice, and a
+// transcript or a run's index the analyst opened the view on as its session or its run
 thimble.onOpen(async (place) => {
-  if (!(await ensureOverview())) return
-  const opened = (place && place.target) || (place && place.picked ? targetOfFile(place.path) : {})
-  if (opened.run && RUN[opened.run]) {
-    st.filters.run = new Set(valuesOf('run').filter((v) => v !== opened.run))
-    await reload()
-  } else if (opened.session) {
-    await openSession(opened.session, opened.call || null, opened.message || null)
-  } else render()
+  await ready
+  const t = place.target || {}, path = place.picked ? place.path || '' : ''
+  const file = data.sessions.find((s) => s.path === path)
+  const run = t.run || (/sessions-index\.json$/.test(path) ? path.split('/').slice(-2)[0] : null)
+  if (t.call || t.message) return reveal(t.call || t.message)
+  if (run || t.session || file) {
+    $('scope').value = run ? `r:${run}` : `s:${t.session || file.id}`
+    load()
+  }
 })
-thimble.onLabels(async (state) => {
-  const was = JSON.stringify([labels.labels, labels.filter])
-  const before = new Set(labels.labels.map((l) => l.name))
-  // a label turned on in thimble colours the page again
-  if ((state.labels || []).some((l) => !before.has(l.name))) st.byField = false
-  labels = { labels: state.labels || [], filter: state.filter || null, all: state.all || null, palette: state.palette || null }
-  if (!ov) return // the first fetch reads them
-  // the reader applies the labels that are on and the filter; the list of labels and the palette only redraw the menu
-  if (JSON.stringify([labels.labels, labels.filter]) === was) render()
-  else await reload()
+// the label filter changes which records the reader keeps, and a label's values arrive while it runs
+let later = null, filter = null
+const soon = () => { clearTimeout(later); later = setTimeout(load, 300) }
+thimble.onLabels((state) => {
+  const now = JSON.stringify(state.filter || null)
+  if (filter != null && now !== filter) soon()
+  filter = now
 })
-// a control's tip, as thimble's Tip draws it: under the control after a moment's rest
-let tipT = null, tipEl = null
-document.addEventListener('mouseover', (e) => {
-  const a = e.target.closest('[data-tip]')
-  clearTimeout(tipT)
-  if (!a) { if (tipEl) { tipEl.remove(); tipEl = null } return }
-  tipT = setTimeout(() => {
-    if (tipEl) tipEl.remove()
-    tipEl = document.createElement('div'); tipEl.className = 'vtip'; tipEl.textContent = a.dataset.tip; document.body.appendChild(tipEl)
-    const r = a.getBoundingClientRect()
-    tipEl.style.left = `${Math.max(8, Math.min(r.left, innerWidth - tipEl.offsetWidth - 8))}px`; tipEl.style.top = `${r.bottom + 6}px`
-  }, 350)
-})
-;(async () => { if (await ensureOverview()) render() })()
+thimble.onMarks(() => { if (colour.label) soon() })
+load()
 </script>
 </body>
 </html>
