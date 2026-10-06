@@ -179,7 +179,8 @@ async def test_a_card_s_output_counts_by_the_files_its_code_read(chat):
 
     made = await tools.call(CORPUS, "add_card", NOTE, session=orient_session.KEY)
     cid = made.text.split("card:", 1)[1].split()[0].strip("`.,)")
-    result = f"$ add_card question=\"What happened?\"\ncard:{cid}\n[out0]\nL1|{_lines('events.jsonl', 3, 3)[0]}"
+    echo = f"$ add_card question=\"{'What happened first, and then? ' * 10}\" code=\"rows = load()\" takeaway=\"[[3|card:x1]]\""
+    result = f"{echo}\ncard:{cid}\n[out0]\nL1|{_lines('events.jsonl', 3, 3)[0]}"
     _call(chat, 1, "mcp__plugin_thimble_thimble__add_card", {"code": "rows = load()", "question": "What happened?"}, result)
     assert _seen(chat) == {}, "its code names no file, and the card read none"
     ws = config.workspace_dir(CORPUS)

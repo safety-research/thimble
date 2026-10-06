@@ -107,7 +107,7 @@ _NUMBERED_RE = re.compile(r"^\s*(\d+)(?:\t|→)")  # a line of a Read result: it
 # where an output line is cut into pieces: what JSON escapes (a quote, a backslash with what it escapes, a character past
 # ASCII), and the separators of printed columns (a tab, a bar, two spaces)
 _PIECE_SPLIT_RE = re.compile(r'\\u[0-9a-fA-F]{4}|\\.|["\t|]| {2,}|[^\x20-\x7e]')
-_CARD_RE = re.compile(r"\bcard:([A-Za-z0-9_-]+)")
+_CARD_RE = re.compile(r"^card:([A-Za-z0-9_-]+)", re.M)  # the card an add_card or edit_card result names on a line
 _PAGES_RE = re.compile(r"(\d+)(?:\s*-\s*(\d+))?")
 _DIGITS_RE = re.compile(r"\d+")
 _UUID_RE = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", re.I)
@@ -670,13 +670,15 @@ def _whole_hits(corpus: Path, shown: list[_Shown], sizes: dict[str, int]) -> dic
     return hits
 
 
-def _piece_hits(corpus: Path, wanted: dict[str, set[bytes]], budget: list[int]) -> dict[tuple[str, bytes], int]:
-    """{(file, piece): the offset of its first occurrence in the file} for each piece searched for in each file, within
-    PIECE_SCAN_BYTES of the file and what is left of `budget` (one int, the bytes the searches may still go through)."""
+def _piece_hits(corpus: Path, wanted: dict[str, set[bytes]], budget: list[int],
+                sizes: dict[str, int]) -> dict[tuple[str, bytes], int]:
+    """{(file, piece): the offset of its first occurrence in the file} for each piece searched for in each file, the
+    smallest file first, within PIECE_SCAN_BYTES of the file and what is left of `budget` (one int, the bytes the
+    searches may still go through)."""
     import mmap  # noqa: PLC0415
 
     out: dict[tuple[str, bytes], int] = {}
-    for f in sorted(wanted):
+    for f in sorted(wanted, key=lambda f: (sizes.get(f, 0), f)):
         if budget[0] <= 0:
             break
         try:
@@ -741,7 +743,7 @@ def _seen(c: str, corpus: Path, sizes: dict[str, int], chats: set[str]) -> dict[
         text = json.dumps(inp, ensure_ascii=False, default=str)
         named = _read_by_calls(text, corpus, files) | _globbed(text, files)
         if name in ("add_card", "edit_card"):
-            for cid in _CARD_RE.findall(row["result"][:200]):
+            for cid in _CARD_RE.findall(row["result"][:SEEN_CHARS]):
                 named.update(r for r in cards.get(cid, ()) if r in files)
         shown.extend(_shown_lines(k, row["result"], named))
     whole = _whole_hits(corpus, shown, sizes)
@@ -769,7 +771,7 @@ def _seen(c: str, corpus: Path, sizes: dict[str, int], chats: set[str]) -> dict[
             if p < len(shown[i].pieces):
                 for f in shown[i].files:
                     wanted.setdefault(f, set()).add(shown[i].pieces[p])
-        found = _piece_hits(corpus, wanted, budget)
+        found = _piece_hits(corpus, wanted, budget, sizes)
         todo = [i for i in todo if p < len(shown[i].pieces) and not credit(
             {f: found[(f, shown[i].pieces[p])] for f in shown[i].files if (f, shown[i].pieces[p]) in found}, offsets)]
     for f, at in offsets.items():
