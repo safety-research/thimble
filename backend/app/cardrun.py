@@ -7,14 +7,17 @@ label with `## cards-stale`. The caller runs the command in its Bash, inside mai
 the code as a kernel cell would: one IPython shell (LocalKernel) set up with the kernel's own startup lines
 (notebook.startup_lines: Altair's mimetype renderer, pandas' column width, the figure formatter, the page's faces, the
 cell-reads hook and the `thimble` module with WS set), thimble's matplotlibrc and the inline backend's SVG figures,
-then the same storage path as a kernel run (notebook._execute_cell: output bounding, memos, reads, labels read). It
-writes the card's outputs into the group under the store's lock and prints what add_card prints in browser mode, and
-exits 0, or 1 when the code errored. No kernel lasts between runs, so each run loads its data again.
+then the same storage path as a kernel run (notebook._execute_cell: output bounding, memos, reads, labels read). The
+cell runs in the process's main thread, as in a kernel, with a SIGALRM time limit standing in for a kernel's SIGINT,
+while the event loop runs in a thread of its own (serve). It writes the card's outputs into the group under the store's
+lock and prints what add_card prints in browser mode, and exits 0, or 1 when the code errored. No kernel lasts between
+runs, so each run loads its data again. A run writes only the folders write_dirs names, which main's fence gives its
+Bash; it writes no canvas history or undo step and starts no chat.
 
-A card whose run ends with a takeaway (add_card's `takeaway`) is marked `check: "pending"`; the shim's CardWatch sees
-the group file change and starts its card check (card_check.start), or skips it as browser mode does without Chromium
-or the built frontend. A run that `thimble-run` did not finish (Bash's timeout killed it) is marked interrupted by the
-watch once its process is gone.
+The shim's CardWatch sees a group file change and records each run that ended (canvas_history, undo), starts the card
+check of a card marked `check: "pending"` (a run that ended with add_card's `takeaway`; card_check.start skips it as
+browser mode does without Chromium or the built frontend), and marks interrupted a run whose `thimble-run` is gone (its
+run lock is free: hold_run), such as one Bash's timeout killed.
 """
 from __future__ import annotations
 
@@ -22,9 +25,9 @@ import asyncio
 import concurrent.futures
 import contextlib
 import json
-import queue
 import logging
 import os
+import queue
 import shlex
 import signal
 import sys
