@@ -109,6 +109,18 @@ export const THREAD_T1 = {
 
 export const AGENTS = { rows: [{ name: 'thimble:orientation', label: 'orientation: the whole corpus', state: 'working', kind: 'subagent', chat: 'o1', role: 'orientation' }], line: 'thimble · orientation working · 3 cards', text: '' }
 
+// a deck as the writer stores it: slides of sentences (each a bullet) and a figure each, the second slide's single `figure`
+export const SLIDES = {
+  id: 'slides',
+  title: 'The relay in two slides',
+  type: 'slides',
+  renderer: 'slides',
+  slides: [
+    { id: 'sl1', heading: 'The export is large', sentences: [{ id: 'y1', text: 'It holds [[4579|card:ff73e071#pages/TOTAL]] pages.', bullet: '-' }, { id: 'y2', text: 'Most are agents\' notes.', bullet: '-' }], figures: [{ id: 'f9', cell: 'card:ff73e071', caption: 'The export per wiki.' }], notes: 'speaker notes' },
+    { id: 'sl2', heading: 'What it leaves open', sentences: [{ id: 'y3', text: 'One week only.', bullet: '-' }], figure: { cell: 'card:d0diag00', caption: 'Who acted on what.' } },
+  ],
+}
+
 export const DOC = {
   id: 'report',
   title: 'Agents used the dse wiki as a relay',
@@ -217,7 +229,7 @@ export function world(on: On, opts: { mode?: string; ws?: string | null } = {}):
       case 'docs':
         return out(w.states.docs)
       case 'doc':
-        return rest[0] === 'report' ? out(DOC) : out({ error: 'no doc' }, 1)
+        return rest[0] === 'report' ? out(DOC) : rest[0] === 'slides' ? out(SLIDES) : out({ error: 'no doc' }, 1)
       case 'threads':
         return out(w.states.threads)
       case 'thread':

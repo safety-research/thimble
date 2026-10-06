@@ -11,7 +11,7 @@ import { act, changed, readState, signature } from './data'
 import type { Area, Scope, Signature } from './data'
 import { cid, citations } from './lib'
 import type { Citation } from './lib'
-import { agentsOf, cellOf, cellsOf, chatOf, homeOf, labelIdOf, labelOf, resolutionOf, threadRowsOf, uiRecordsOf, verdictOf } from './model'
+import { agentsOf, cellOf, cellsOf, chatOf, docUnits, homeOf, labelIdOf, labelOf, resolutionOf, threadRowsOf, uiRecordsOf, verdictOf } from './model'
 import { NAV_EMPTY, backTarget, moved, nextTrail } from './nav'
 import { withSignal } from './signal'
 
@@ -229,8 +229,8 @@ export async function loadPanel(cx: Ctx, p: TermPanel): Promise<void> {
     case 'doc':
       if (p.slug) {
         await readSurface(cx, `doc:${p.slug}`, 'doc', [p.slug])
-        const doc = await surfaceValue<{ sections?: { figures?: { cell?: string }[] }[] }>(cx, `doc:${p.slug}`)
-        const ids = doc?.ok ? (doc.value.sections ?? []).flatMap(s => (s.figures ?? []).map(f => String(f.cell ?? '').replace(/^(?:card|cell):/, ''))).filter(Boolean) : []
+        const doc = await surfaceValue<Record<string, unknown>>(cx, `doc:${p.slug}`)
+        const ids = doc?.ok ? docUnits(doc.value).units.flatMap(s => (s.figures ?? []).map(f => String(f.cell ?? '').replace(/^(?:card|cell):/, ''))).filter(Boolean) : []
         await loadCards(cx, ids)
       }
       return

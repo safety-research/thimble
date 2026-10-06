@@ -29,7 +29,7 @@ import type { Target } from './gestures'
 import { homeLayout, homeReduce } from './home'
 import type { HomeAct, HomeCardGroup, HomeData, HomeFile, HomeLabel, HomeOpen, HomeReport, HomeThread, HomeUi, HomeView } from './home'
 import { cid, clip } from './lib'
-import { docsOf, labelOf, labelsOf, threadOf } from './model'
+import { docUnits, docsOf, labelOf, labelsOf, threadOf } from './model'
 import { crumbSteps, fitCrumbs, threadState, withBack } from './nav'
 import { COLORS, paintLines } from './paint'
 import { MEASURE, PANEL_MARGIN, cardBlock, drawReply } from './reply'
@@ -694,9 +694,6 @@ async function drawDocs(cx: Ctx, e: PaneEvent): Promise<RenderElement> {
   return <Box flexDirection="column">{body}</Box>
 }
 
-type DocSentence = { id?: string; text?: string }
-type DocSection = { id?: string; heading?: string; paragraphs?: { id?: string; sentences?: DocSentence[] }[]; figures?: { cell?: string; caption?: string; after_paragraph?: string }[] }
-
 async function drawDoc(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElement> {
   const { Box, Text } = cx.els(e)
   const cols = Math.max(30, e.props.bodyColumns)
@@ -704,11 +701,11 @@ async function drawDoc(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEleme
   if (!got) return none(cx, e, '◌ reading the document')
   if (!got.ok) return <Text color={COLORS.problem} wrap="wrap">{`× ${got.error}`}</Text>
   const doc = got.value
-  const sections = (Array.isArray(doc.sections) ? doc.sections : []) as DocSection[]
+  const { units: sections, word } = docUnits(doc)
   const figures = sections.reduce((n, s) => n + (s.figures?.length ?? 0), 0)
   const text = sections.flatMap(s => (s.paragraphs ?? []).flatMap(pp => (pp.sentences ?? []).map(x => str(x.text)))).join(' ')
   const cites = (text.match(/\[\[/g) ?? []).length
-  const stats = [str(doc.renderer) || str(doc.type) || 'document', plural(sections.length, 'section'), plural(cites, 'citation'), figures ? plural(figures, 'card') : ''].filter(Boolean).join(' · ')
+  const stats = [str(doc.renderer) || str(doc.type) || 'document', plural(sections.length, word), plural(cites, 'citation'), figures ? plural(figures, 'card') : ''].filter(Boolean).join(' · ')
   const body: RenderElement[] = [titleRow(cx, e, clip(str(doc.title) || p.title, cols), ''), <Text dimColor wrap="truncate-end">{stats}</Text>, rule(cx, e, cols)]
   if (sections.length > 1) {
     body.push(<Text>Contents</Text>)
@@ -720,7 +717,7 @@ async function drawDoc(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEleme
     const figs = s.figures ?? []
     const placed = new Set<number>()
     for (const [j, para] of (s.paragraphs ?? []).entries()) {
-      const words = (para.sentences ?? []).map(x => str(x.text)).join(' ')
+      const words = (para.sentences ?? []).map(x => str(x.text)).join(para.sentences?.some(x => x.bullet) ? '\n' : ' ')
       if (words.trim()) body.push(<Box flexDirection="column">{await drawReply(cx, e, words, w, { margin: PANEL_MARGIN, prefix: `d${i}-${j}-`, ask: tgt => void openAsk(cx, tgt) })}</Box>)
       for (const [k, f] of figs.entries()) {
         if (f.after_paragraph !== para.id || placed.has(k)) continue

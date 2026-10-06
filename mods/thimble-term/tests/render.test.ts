@@ -6,7 +6,7 @@ import { expect, test } from 'claude-code/testing'
 import type { Engine, Mounted } from 'claude-code/testing'
 
 import { HOME_LINE } from '../hooks/register'
-import { CLI, CWD, WS, shown, world } from './fixtures'
+import { CLI, CWD, SLIDES, WS, shown, world } from './fixtures'
 import type { World } from './fixtures'
 
 type M = Mounted<'terminal'>
@@ -400,4 +400,26 @@ test("an agent's pane shows the run it opened on, not an earlier run of the same
   await w.clock.settle()
   await agent.unmount()
   expect(w.acts.some(a => a.kind === 'stop' && a.payload.agent === 'o1')).toBe(true)
+})
+
+test('a deck opens with its slides: each heading, its sentences as bullets, its figure as a card', async ($, on) => {
+  const w = world(on)
+  w.states.home = { ...w.states.home, docs: { ...w.states.home.docs, slides: { exists: true, title: SLIDES.title } } as typeof w.states.home.docs }
+  w.states.docs = { ...w.states.docs, slides: { exists: true, title: SLIDES.title, renderer: 'slides', name: 'Slides' } as typeof w.states.docs.slides }
+  await start($, w)
+  await $.command.run({ command: 'thimble:thimble', args: '' } as never)
+  await w.clock.settle()
+  const pane = (await $.ui.mount(PANE)) as unknown as M
+  const y = await rowOf(pane, 'home', SLIDES.title)
+  expect(y).toBeGreaterThan(0)
+  await pane.pointer({ type: 'down', x: 4, y, button: 'left', in: 'home' } as never)
+  await w.clock.settle()
+  await pane.redraw()
+  let text = shown(await pane.drawn())
+  for (const s of ['slides · 2 slides · 1 citation · 2 cards', 'The export is large', 'What it leaves open', 'Most are agents', 'One week only.', 'The export per wiki.', 'Who acted on what.']) expect(text).toContain(s)
+  await w.clock.settle()  // the figures' cards are read, then drawn
+  await pane.redraw()
+  expect(await pane.find({ type: 'Client', key: 'card-f0-0-ff73e071' })).toBeDefined()
+  expect(await pane.find({ type: 'Client', key: 'card-f1-0-d0diag00' })).toBeDefined()
+  await pane.unmount()
 })

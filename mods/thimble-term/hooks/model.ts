@@ -318,3 +318,27 @@ export function uiRecordsOf(v: unknown): UiRecord[] {
   const list = Array.isArray(v) ? v : isObj(v) && Array.isArray(v.records) ? v.records : []
   return list.filter(isObj).map(r => ({ n: typeof r.n === 'number' ? r.n : 0, kind: str(r.kind), args: isObj(r.args) ? r.args : {} }))
 }
+
+// ------------------------------------------------------------------------------------------------ documents
+
+export type DocSentence = { id?: string; text?: string; bullet?: string }
+export type DocFigure = { cell?: string; caption?: string; after_paragraph?: string }
+// a unit of a document: a report's or a story's section (paragraphs), a deck's slide or a story's beat (sentences, and
+// one `figure` or a list of `figures`), as report_types.units reads them
+export type DocSection = { id?: string; heading?: string; paragraphs?: { id?: string; sentences?: DocSentence[] }[]; sentences?: DocSentence[]; figures?: DocFigure[]; figure?: DocFigure | null }
+const UNIT_KEYS = [['sections', 'section'], ['slides', 'slide'], ['beats', 'beat'], ['lines', 'line']] as const
+
+/** The document's units (report_types.units) and their word, a slide's sentences as one paragraph each bullet a line. */
+export function docUnits(doc: Obj): { units: DocSection[]; word: string } {
+  for (const [key, word] of UNIT_KEYS) {
+    const v = doc[key]
+    if (!Array.isArray(v)) continue
+    const units = (v as DocSection[]).filter(u => u && typeof u === 'object').map(u => {
+      if (Array.isArray(u.paragraphs)) return { ...u, figures: u.figures ?? (u.figure ? [u.figure] : []) }
+      const sentences = (u.sentences ?? []).map(x => ({ ...x, text: x.bullet ? `${x.bullet} ${String(x.text ?? '')}` : String(x.text ?? '') }))
+      return { ...u, paragraphs: sentences.length ? [{ id: `${u.id ?? ''}-s`, sentences }] : [], figures: u.figures ?? (u.figure ? [u.figure] : []) }
+    })
+    return { units, word }
+  }
+  return { units: [], word: 'section' }
+}
