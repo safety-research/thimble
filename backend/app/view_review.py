@@ -508,7 +508,7 @@ async def _call(c: str, system: str, user: str, tool: Any, images: list[tuple[by
     return await model_mod.structured(
         user, tool=tool, model=model or role.get("model") or config.ROLE_MODELS_DEFAULT["verify"]["model"],
         effort=effort or None,
-        system_append=system, cwd=config.corpus_dir(c),
+        system=system, cwd=config.corpus_dir(c),
         speed="fast" if role.get("fast") else "standard", images=images, idle_timeout_s=READ_IDLE_S)
 
 

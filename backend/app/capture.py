@@ -230,8 +230,8 @@ async def mcp_tool_defs(server: Any) -> list[dict[str, Any]] | None:
 
 def options_dict(opts: Any) -> dict[str, Any]:
     """A ClaudeAgentOptions as a JSON-able dict: servers by name and type (their tools are listed under ## Tools),
-    hooks by event and matcher, the system prompt's append pointed at its own section, credentials redacted, None
-    fields dropped."""
+    hooks by event and matcher, the system prompt pointed at its own section, credentials redacted, None fields
+    dropped."""
     out: dict[str, Any] = {}
     fields = getattr(opts, "__dataclass_fields__", None)
     names = list(fields) if fields else [k for k in vars(opts)] if hasattr(opts, "__dict__") else []
@@ -244,10 +244,7 @@ def options_dict(opts: Any) -> dict[str, Any]:
         elif name == "hooks" and isinstance(v, dict):
             out[name] = {ev: [getattr(m, "matcher", repr(m)) for m in ms] for ev, ms in v.items()}
         elif name == "system_prompt":
-            if isinstance(v, dict):
-                out[name] = {**{k: x for k, x in v.items() if k != "append"}, "append": "<see ## System prompt>"}
-            else:
-                out[name] = "<see ## System prompt>"
+            out[name] = "<see ## System prompt>"
         elif name == "settings":
             out[name] = _settings(v)
         elif name == "env":
@@ -259,11 +256,8 @@ def options_dict(opts: Any) -> dict[str, Any]:
     return out
 
 
-def system_append_of(opts: Any) -> str:
-    sp = getattr(opts, "system_prompt", None)
-    if isinstance(sp, dict):
-        return str(sp.get("append") or "")
-    return str(sp or "")
+def system_prompt_of(opts: Any) -> str:
+    return str(getattr(opts, "system_prompt", None) or "")
 
 
 # --------------------------------------------------------------------------- one call's file
@@ -310,13 +304,14 @@ class Call:
     # --- what is sent ---------------------------------------------------------------------------------------
 
     async def sdk_options(self, opts: Any, *, out_tool: Any = None, builtin: list[str] | None = None) -> None:
-        """The Agent SDK path: the options (redacted), the system append verbatim, and every tool the model is
+        """The Agent SDK path: the options (redacted), the system prompt verbatim, and every tool the model is
         offered — the structured call's output tool (`out_tool`, a model.ToolSpec) first, then the in-process
         servers' tools as their objects list them, then the built-in tools by name."""
         if not self.on:
             return
         self.fenced("Options (ClaudeAgentOptions as thimble builds them; sdk.build)", options_dict(opts))
-        self.text("System prompt (the append; the CLI prepends its claude_code preset)", system_append_of(opts))
+        self.text("System prompt (sent whole; the CLI adds its own first line and environment context)",
+                  system_prompt_of(opts))
         tools: list[dict[str, Any]] = []
         if out_tool is not None:
             tools.append({"server": "out", "name": getattr(out_tool, "name", None), "description": getattr(out_tool, "description", None),
@@ -423,10 +418,10 @@ def begin(name: str, *, model: str | None = None, effort: str | None = None, pat
     p = d / f"{_stamp()}-{seq:04d}-{_slug(name)}.md"
     cap = Call(p)
     paths = {
-        "sdk": ("sdk — an Agent SDK session (ClaudeSDKClient over the `claude` CLI). The CLI builds the system prompt from "
-                "its claude_code preset plus the append below and manages the conversation, so this file holds what "
-                "thimble passes (options, append, tool definitions, the messages it sends) and the transcript the CLI "
-                "streamed back — not the exact request bytes."),
+        "sdk": ("sdk — an Agent SDK session (ClaudeSDKClient over the `claude` CLI). The CLI sends the system prompt "
+                "below after a first line of its own, adds its environment context and manages the conversation, so "
+                "this file holds what thimble passes (options, system prompt, tool definitions, the messages it sends) "
+                "and the transcript the CLI streamed back — not the exact request bytes."),
         "message": "message — text the server hands a terminal Claude Code session (browser event, inbox or the next prompt's status block); exact.",
         "note": "note — rendered outside a live call.",
     }

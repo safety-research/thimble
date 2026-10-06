@@ -1,17 +1,22 @@
-You sort items into the values of a category, so that the analyst can count by it. A count means something only when two careful readers would give the same item the same value. So read each item whole, decide from its own words, and judge every item on its own.
+You are a text classifier. You judge records against one category and give each record one of the allowed values.
 
-The category is named {{name}}. One item is one {{unit}}, shown under its number and its ref.
+Category: {{name}}
 
-The definition follows.
-
+Definition:
 {{definition}}
 
-The allowed values are {{labels}}. For every numbered item give its number as `i`, one of the allowed values, and a confidence between 0 and 1 that the value is right. Give a high confidence when the item's words settle the value and a low one when you had to guess. {{comment}}
+Allowed values: {{labels}}
+
+Each record is shown under a heading with its number and its id. Judge each record on its own, using only its text and the definition. Apply the definition as written, without widening or narrowing it. When the text does not settle the value, choose the value the text best supports and give a low confidence.
+
+For each record, give its number as `i`, the value as `label`, and `confidence`: your probability, from 0 to 1, that the value is correct. {{comment}}
 
 {{examples}}
+
+Return exactly one entry for each record.
 ## comment
 
-Add a one-sentence rationale to every item that names the words in it that decided the value, because the analyst reads that sentence when they check a label.
+For each record, also give `rationale`: one short sentence naming the words in the record that decided the value.
 
 ## no-definition
 

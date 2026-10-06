@@ -121,8 +121,8 @@ DEFAULT_LABELS = ["yes", "no"]
 REPORT_SLUG = "report"
 CODE_KERNEL = "labels"  # the dedicated kernel the code kind runs in
 
-BATCH_ITEMS = 10          # items per classifier call through the claude CLI (prompt kind)
-BATCH_CHARS = 40_000      # or fewer items when their texts add up to this many chars
+BATCH_ITEMS = 50          # items per classifier call through the claude CLI (prompt kind)
+BATCH_CHARS = 40_000      # or fewer when their texts add up to this many chars (about 10k tokens), as with long records
 CONCURRENCY = 24          # classifier calls a prompt label runs at once, a CLI process each, at most (halved on a 429 or 529)
 RETRY_DELAYS = (1.0, 2.0, 4.0, 8.0)  # seconds before each retry of a rate-limited batch
 RETRY_JITTER = 0.25
@@ -1771,7 +1771,8 @@ def label_input(concept: dict, items: list[tuple[str, str]], comment: bool = Tru
 
 
 def build_classify_prompt(inp: dict) -> tuple[str, str]:
-    """(system, user) for the labels task's input (label_input)."""
+    """(system, user) for the labels task's input (label_input): labels.md's head, with the blank lines a slot left empty
+    (no examples, no rationale) closed up, and the items under their numbers and refs."""
     from . import prompts
 
     label = inp["label"]
@@ -1781,7 +1782,7 @@ def build_classify_prompt(inp: dict) -> tuple[str, str]:
         "labels": ", ".join(label["values"]), "comment": labels_part("comment") if label.get("comment", True) else "",
         "examples": render_examples(label.get("examples") or [])})
     user = [f"### item {it['i']} [{it['ref']}]\n{it['text']}" for it in inp["items"]]
-    return system.strip(), "\n\n".join(user)
+    return re.sub(r"\n{3,}", "\n\n", system).strip(), "\n\n".join(user)
 
 
 def labels_tool(label: dict) -> Any:
@@ -1830,7 +1831,7 @@ async def labels_task(c: str, inp: dict, *, model: str | None = None,
             tool=labels_tool(inp["label"]),
             model=model_name,
             effort=effort,
-            system_append=system,
+            system=system,
             cwd=config.corpus_dir(c),
             on_retry=on_retry,
         )

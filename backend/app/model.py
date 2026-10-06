@@ -294,17 +294,17 @@ def _out_server(spec: ToolSpec, state: CallState) -> Any:
     return create_sdk_mcp_server(_SERVER, tools=[sdk_tool(spec.name, spec.description, spec.input_schema)(out)])
 
 
-def _options(spec: ToolSpec, state: CallState, *, model: str | None, effort: str | None, system_append: str,
+def _options(spec: ToolSpec, state: CallState, *, model: str | None, effort: str | None, system: str,
              cwd: str | Path, speed: str = "standard") -> ClaudeAgentOptions:
     """The SDK options for one structured call (sdk.build): the output tool's server under `out`, in the served config
-    dir (config.claude_env). No transcript is kept."""
+    dir (config.claude_env), and the caller's `system` followed by the output tool's instruction as the whole system
+    prompt. No transcript is kept."""
     instruction = _instruction(spec)
-    append = f"{system_append}\n\n{instruction}" if system_append else instruction
     return sdk.build(
         cwd=cwd,
         tools=[f"mcp__{_SERVER}__{spec.name}"],
         mcp_servers={_SERVER: _out_server(spec, state)},
-        system_append=append,
+        system=f"{system}\n\n{instruction}" if system else instruction,
         model=model,
         effort=effort,
         env=config.claude_env({}),
@@ -561,7 +561,7 @@ async def structured(
     tool: ToolSpec,
     model: str,
     effort: str | None = None,
-    system_append: str = "",
+    system: str = "",
     cwd: str | Path,
     idle_timeout_s: float = DEFAULT_IDLE_TIMEOUT_S,
     corrective_retries: int = 1,
@@ -572,9 +572,10 @@ async def structured(
 ) -> CallResult:
     """One structured call. Never raises; every failure is a CallResult.
 
-    `images` are (bytes, media type) pairs sent before the prompt's text. `on_retry(n, wait_s, error_class, exc)` hears
-    each wait before a rule 2 or 4 retry and `on_fallback(spent_s)` the time a refused call took, so a caller's own time
-    limit can exclude them. `speed` runs the call in fast mode on a model that has it.
+    `system` is the call's own system prompt, sent whole with the output tool's instruction after it (no Claude Code
+    preset). `images` are (bytes, media type) pairs sent before the prompt's text. `on_retry(n, wait_s, error_class,
+    exc)` hears each wait before a rule 2 or 4 retry and `on_fallback(spent_s)` the time a refused call took, so a
+    caller's own time limit can exclude them. `speed` runs the call in fast mode on a model that has it.
 
     Retry rules: (1) no_tool_call or schema-invalid: up to `corrective_retries` extra turns
     saying what was wrong; (2) a transient failure: a fresh conversation after each wait of retry.model_knobs()'s
@@ -583,7 +584,7 @@ async def structured(
     errors are never retried here.
     """
     await _bind_sdk_off_loop()
-    kw: dict[str, Any] = dict(tool=tool, effort=effort, system_append=system_append, cwd=cwd,
+    kw: dict[str, Any] = dict(tool=tool, effort=effort, system=system, cwd=cwd,
                               idle_timeout_s=idle_timeout_s, corrective_retries=corrective_retries, speed=speed,
                               images=images, on_retry=on_retry)
     res = await _structured(prompt, model=model, **kw)
@@ -611,7 +612,7 @@ async def _structured(
     tool: ToolSpec,
     model: str,
     effort: str | None = None,
-    system_append: str = "",
+    system: str = "",
     cwd: str | Path,
     idle_timeout_s: float = DEFAULT_IDLE_TIMEOUT_S,
     corrective_retries: int = 1,
@@ -663,7 +664,7 @@ async def _structured(
         rate_retry_used = False  # one wait-and-retry on a 429 before it is terminal
         while True:  # each flag is set at most once, so at most three sessions run per with_backoff attempt
             state = CallState(tool)
-            opts = _options(tool, state, model=requested, effort=effort, system_append=system_append, cwd=cwd,
+            opts = _options(tool, state, model=requested, effort=effort, system=system, cwd=cwd,
                             speed="fast" if fast else "standard")
             retry_note, retry_sleep = "", 0.0
             if attempts:

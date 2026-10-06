@@ -317,7 +317,7 @@ async def test_a_structured_call_runs_no_claude_with_thimble_s_variables(tmp_pat
     monkeypatch.setenv(sdk.SKIP_VERSION_CHECK_ENV, "")
     monkeypatch.delenv(sdk.SKIP_VERSION_CHECK_ENV)
     monkeypatch.setattr(config, "CLI_PATH", str(exe))
-    options = sdk.build(cwd=tmp_path, tools=[], mcp_servers={}, system_append="", model=None, effort=None, env=None)
+    options = sdk.build(cwd=tmp_path, tools=[], mcp_servers={}, system="", model=None, effort=None, env=None)
     async for _ in query(prompt="hello", options=options):
         pass
     starts = [json.loads(line) for line in log.read_text().splitlines()]

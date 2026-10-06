@@ -212,6 +212,52 @@ async def test_one_labels_request_reads_the_rows_of_several_line_ranges(api, wor
         assert r.status_code == 400, bad
 
 
+CURT = {"id": "curt", "name": "Curt reply", "unit": "record", "kind": "prompt", "spec": "The reply is short and unfriendly.",
+        "description": "", "labels": ["curt", "not curt"]}
+CURT_ITEMS = [("runs/a.jsonl#L1", "Do it now."), ("runs/a.jsonl#L2", "Thanks so much!")]
+
+
+async def test_a_prompt_label_s_system_prompt_is_a_plain_classifier_prompt(monkeypatch):
+    """A prompt label's call gets labels.md's head as its whole system prompt: a text classifier's prompt that names the
+    category, its definition and its values and says nothing of thimble or the analyst, asks for a rationale only with
+    `comment` and leaves no blank lines where a slot was empty; the items keep their numbered headings."""
+    monkeypatch.delenv("THIMBLE_PROMPTS_DIR", raising=False)
+    system, user = concepts.build_classify_prompt(concepts.label_input(CURT, CURT_ITEMS))
+    assert system.startswith("You are a text classifier.") and system.endswith("Return exactly one entry for each record.")
+    assert "Category: Curt reply\n\nDefinition:\nThe reply is short and unfriendly.\n\nAllowed values: curt, not curt" in system
+    assert "also give `rationale`" in system and "\n\n\n" not in system
+    assert "thimble" not in system.lower() and "analyst" not in system.lower()
+    assert user == "### item 1 [runs/a.jsonl#L1]\nDo it now.\n\n### item 2 [runs/a.jsonl#L2]\nThanks so much!"
+    bare, _ = concepts.build_classify_prompt(concepts.label_input(CURT, CURT_ITEMS, comment=False))
+    assert "rationale" not in bare and "\n\n\n" not in bare
+    shown = concepts.label_input({**CURT, "examples": [{"ref": "runs/b.jsonl#L4", "text": "No.", "value": "curt"}]}, CURT_ITEMS)
+    with_examples, _ = concepts.build_classify_prompt(shown)
+    assert "### example 1 [runs/b.jsonl#L4]\nNo." in with_examples and "\n\n\n" not in with_examples
+    assert with_examples.index("### example 1") < with_examples.index("Return exactly one entry for each record.")
+
+    seen: dict = {}
+
+    async def structured(prompt, **kw):
+        seen.update(kw, prompt=prompt)
+        return model_mod.CallResult(status="ok", output={"labels": []})
+
+    monkeypatch.setattr(model_mod, "structured", structured)
+    inp = concepts.label_input(CURT, CURT_ITEMS)
+    await concepts.labels_task(CORPUS, inp)
+    assert (seen["system"], seen["prompt"]) == concepts.build_classify_prompt(inp) and seen["tool"].name == "labels"
+
+
+def test_a_classifier_call_carries_fifty_records_and_fewer_long_ones():
+    """A prompt label asks BATCH_ITEMS (50) units a call, and fewer when their texts pass BATCH_CHARS."""
+    def units(n: int, text: str) -> list:
+        return [concepts.Unit(f"a.jsonl#L{i}", ["a.jsonl"], lambda: iter([("", text)])) for i in range(1, n + 1)]
+
+    assert concepts.BATCH_ITEMS == 50
+    assert [len(b) for b in concepts._batches(iter(units(120, "a short reply")), "record", concepts.BATCH_ITEMS)] == [50, 50, 20]
+    long = list(concepts._batches(iter(units(20, "x" * 5_000)), "record", concepts.BATCH_ITEMS))
+    assert [len(b) for b in long] == [8, 8, 4] and all(sum(len(it.text) for it in b) <= concepts.BATCH_CHARS for b in long)
+
+
 async def test_prompt_apply_batches_rows(api, workspaces_tmp, fake_classify, monkeypatch):
     monkeypatch.setattr(concepts, "BATCH_ITEMS", 3)
     k = await _create(api, description="a board post that claims a PR")
