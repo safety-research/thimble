@@ -437,7 +437,8 @@ async def ask(run: Run, payload: dict[str, Any]) -> Any:
     spec = model.ToolSpec("answer", "Give your answer with this tool.", ANSWER_TOOL if plain else schema)
     role = config.call_settings(run.c, run.job.model_role)
     res = await model.structured(prompt, tool=spec, model=str(payload.get("model") or role["model"]),
-                                 effort=role["effort"], speed=role["speed"], cwd=str(run.job.work), images=images)
+                                 effort=role["effort"], speed=role["speed"], refusal=role["refusal"],
+                                 cwd=str(run.job.work), images=images)
     if res.status != "ok" or res.output is None:
         raise HarnessError(f"the model call ended {res.status}: {res.detail or res.text[:300]}")
     return res.output.get("text", "") if plain else res.output
