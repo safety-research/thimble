@@ -81,7 +81,10 @@ async def tool_ticket_checks(ctx: Any, args: dict[str, Any]) -> Any:
         t = _ticket(tid, agent_id, "ticket_checks")
     except Refused as e:
         return tools.err(str(e))
-    validation = await dev.checks_now(t)
+    try:
+        validation = await dev.checks_now(t)
+    except dev.GitError as e:
+        return tools.err(f"ticket_checks: thimble could not read the worktree's change: {e}")
     if validation is None:
         return tools.ok(tools.hint("ticket-checks-empty"))
     head = "The checks pass." if validation["ok"] else "The checks fail."
@@ -108,7 +111,10 @@ async def tool_finish_ticket(ctx: Any, args: dict[str, Any]) -> Any:
     attempt = int(t.get("attempt") or 0)
     if attempt >= dev.MAX_ATTEMPTS:
         return tools.err(tools.hint("finish-ticket-stop"))
-    got = await dev.gates_of_record(t, dev._log_for(t))
+    try:
+        got = await dev.gates_of_record(t, dev._log_for(t))
+    except dev.GitError as e:  # nothing was checked, so no attempt is counted
+        return tools.err(f"finish_ticket: thimble could not commit the worktree's change, so nothing was checked: {e}")
     if got is None:
         return tools.err(tools.hint("finish-ticket-empty"))
     attempt += 1

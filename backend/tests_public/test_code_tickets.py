@@ -56,11 +56,16 @@ def _git(cwd: Path, *args: str) -> str:
 
 
 def _repo(tmp_path: Path) -> Path:
+    """A checkout like thimble's: its .gitignore names the venv and node_modules folders (the latter as a folder, which
+    the worktree's link to it is not), and both are there for a worktree to link to."""
     repo = tmp_path / "repo"
     repo.mkdir()
     _git(repo, "init", "-q", "-b", "main")
     (repo / "README.md").write_text("a\n")
-    _git(repo, "add", "README.md")
+    (repo / ".gitignore").write_text("backend/.venv\nfrontend/node_modules/\n")
+    (repo / "backend" / ".venv").mkdir(parents=True)
+    (repo / "frontend" / "node_modules").mkdir(parents=True)
+    _git(repo, "add", "README.md", ".gitignore")
     _git(repo, "commit", "-qm", "a")
     return repo
 
@@ -161,6 +166,8 @@ async def test_the_agent_checks_finishes_and_the_analyst_s_allow_applies_the_cha
         rec = dev._get(t["id"])
         assert rec["finish"]["result"] == "pass" and rec["change"] == _git(wt, "rev-parse", "HEAD") != rec["base"]
         assert dev.touched_files(wt) == [] and rec["touched"] == ["README.md"]
+        assert (wt / "frontend" / "node_modules").is_symlink(), "the links stay out of the commit"
+        assert _git(wt, "show", "--name-only", "--format=", "HEAD") == "README.md"
         assert all(isinstance(b, ticket_box.Box) for _, _, b in ticketing["gates"])
         (wt / "late.txt").write_text("written after the pass\n")
         subagents.run_ended(CORPUS, agent, "done", "The font is bigger.", source="handback")

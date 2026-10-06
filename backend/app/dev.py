@@ -696,7 +696,9 @@ def commit_worktree(wt: Path, tid: str) -> str:
     branch, with the server's hardened git (_git_run): the ticket's agent cannot write the checkout's git folder, so
     the server makes its commits (finish_ticket). The branch's head; nothing is committed when nothing changed."""
     if touched_files(wt):
-        _git(wt, "add", "-A", "--", ".", *(f":(exclude){p}" for p in sorted(_LINKED)))
+        _git(wt, "add", "-A", "--", ".")
+        # the links to the live checkout's venv and node_modules, which .gitignore may not name as links
+        _git(wt, "rm", "-r", "-q", "--cached", "--ignore-unmatch", "--", *sorted(_LINKED))
         _git(wt, *COMMIT_GIT, "commit", "-q", "--no-verify", "-m", f"dev: ticket {tid}")
     return _git(wt, "rev-parse", "HEAD")
 
