@@ -208,6 +208,16 @@ async def test_start_it_starts_a_refused_typed_start_as_a_click_with_the_same_ca
     assert subagents.request(CORPUS, ans["request"])["route"] == "click"
 
 
+async def test_start_it_never_starts_an_agent_s_own_start_as_main_s_subagent(bridge, models):
+    """The critic's start is the orientation's own Agent call; through the module it would be main's subagent, whose
+    report never reaches the orientation."""
+    ans = await subagents.start_job(CORPUS, "critic", "critique:orient", "c", {"model": "m", "effort": "e"},
+                                    subagents.TYPED, caller_role="orientation")
+    subagents.refuse(CORPUS, ans["request"], "[Credential Exploration]", subagents.AUTO_MODE)
+    again = await subagents.start_it(CORPUS, ans["request"])
+    assert again.refused and again.kind == subagents.HOOK and not bridge.ops("spawn")
+
+
 # --------------------------------------------------------------------------- follow-ups and stops
 
 
@@ -418,6 +428,11 @@ def test_every_click_route_refuses_the_server_s_token_without_the_analyst_s_cook
     meta = agents.new_agent(CORPUS, "writer", "Write report", route="subagent", agent_id="a1", status="running")
     r = client.post(f"/api/ws/mini/chats/{meta['id']}/interrupt", headers=plugin_headers())
     assert r.status_code == 403
+    r = client.delete(f"/api/ws/mini/chats/{meta['id']}", headers=plugin_headers())
+    assert r.status_code == 403, "deleting a running agent's chat stops it through the module"
+    assert agents.meta_or_none(CORPUS, meta["id"]) is not None
+    r = client.post("/api/ws/mini/extensions/any/orientation", json={"run": True}, headers=plugin_headers())
+    assert r.status_code == 403, "Run now sends the extension's instructions to the orientation through the module"
     assert not bridge.calls, "the module is never asked"
 
 

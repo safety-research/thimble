@@ -483,6 +483,8 @@ async def start_it(c: str, rid: str) -> Answer:
         return refusal(ERROR, "no such request")
     if r.get("state") not in ("refused", "expired"):
         return refusal(HOOK, "this request is not refused")
+    if r.get("caller_role"):  # the critic: the module would start it as main's subagent, not its orientation's
+        return refusal(HOOK, "an agent's own start (the orientation's critic) can't be started from the browser")
     _set(c, rid, route=CLICK, state="pending", claimed_by=None, reason=None, refused_kind=None, again=files.now())
     return await _spawn(c, rid, r)
 

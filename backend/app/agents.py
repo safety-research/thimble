@@ -902,7 +902,7 @@ async def _stop_for_delete(c: str, meta: dict) -> None:
     if meta.get("kind") != KIND_AGENT:
         return
     cid = str(meta["id"])
-    if meta.get("route") == "subagent" and meta.get("agent_id") and meta.get("status") == "running":
+    if _runs_as_subagent(meta):
         from . import subagents  # noqa: PLC0415 — subagents imports this module
 
         with contextlib.suppress(Exception):
@@ -914,13 +914,24 @@ async def _stop_for_delete(c: str, meta: dict) -> None:
         await asyncio.wait({task}, timeout=DELETE_WAIT_S)
 
 
-async def delete_chat(c: str, chat_id: str) -> list[str]:
-    """Delete a chat and the chats of its steps, stopping each that runs, and move their files to the trash (_trash).
-    The ids deleted, the chat's first; 409 for main."""
+def _runs_as_subagent(meta: dict) -> bool:
+    """Whether an agent chat is one of thimble's agents that runs, which a delete stops through the module."""
+    return (meta.get("kind") == KIND_AGENT and meta.get("route") == "subagent" and bool(meta.get("agent_id"))
+            and meta.get("status") == "running")
+
+
+def _with_steps(c: str, chat_id: str) -> list[dict]:
+    """A chat's meta and its steps' metas, the chat's first; 409 for main."""
     meta = read_meta(c, chat_id)
     if meta.get("kind") == KIND_MAIN:
         raise HTTPException(409, "main cannot be deleted")
-    gone = [meta, *(m for m in list_chats(c) if m.get("role") == STEP_ROLE and m.get("parent") == chat_id)]
+    return [meta, *(m for m in list_chats(c) if m.get("role") == STEP_ROLE and m.get("parent") == chat_id)]
+
+
+async def delete_chat(c: str, chat_id: str) -> list[str]:
+    """Delete a chat and the chats of its steps, stopping each that runs, and move their files to the trash (_trash).
+    The ids deleted, the chat's first; 409 for main."""
+    gone = _with_steps(c, chat_id)
     for m in gone:
         await _stop_for_delete(c, m)
     for m in gone:
@@ -933,7 +944,13 @@ async def delete_chat(c: str, chat_id: str) -> list[str]:
 
 
 @router.delete("/ws/{c}/chats/{chat_id}")
-async def delete_route(c: str, chat_id: str) -> dict:
+async def delete_route(c: str, chat_id: str, request: Request) -> dict:
+    """Delete a chat (delete_chat). Deleting one of thimble's agents that runs, or a chat one runs as a step of, stops it
+    through the module, which is a click, so it takes the analyst's cookie (403 without it), as Stop does."""
+    if any(_runs_as_subagent(m) for m in _with_steps(c, chat_id)):
+        from . import subagents  # noqa: PLC0415 — subagents imports this module
+
+        subagents.analyst_only(request)
     ids = await delete_chat(c, chat_id)
     return {"deleted": chat_id, "chats": ids}
 
