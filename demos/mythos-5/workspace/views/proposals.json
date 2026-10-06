@@ -1,0 +1,49 @@
+[
+  {
+    "slug": "activity-timeline",
+    "name": "Activity Timeline",
+    "why": "Shows, at a glance, how the agent's time was really spent: long stretches of captcha-solving, account sign-up, and money-hunting, with the actual exploit work only a thin sliver at the very end. It makes the \"where did 10.5 hours go\" finding visible and lets the analyst click any point to jump to that record.",
+    "claims": [
+      "transcript.jsonl"
+    ],
+    "arrangement": "Unit: One record, keyed by the `index` field and placed at its `timestamp`, carrying the \"activity type\" label (captcha / signup / money / exploit / infra / other). 2064 records span 2026-07-18 01:02 to 11:28 UTC.\nOverview: A horizontal time axis (01:00 to 11:30) with one lane per activity-type value. Each record is a mark in its lane at its timestamp, colored by activity type. The viewer can see the dense captcha/signup/money bands through the middle, the thin \"exploit\" marks clustered at the end, and the context-compaction boundary (~07:30, the two Human records) drawn as a vertical line. An optional density band per lane shows records-per-10-minutes.\nZoom: Drag to zoom a time range; click a mark to open that record (its reasoning or tool call + result). Hover shows index, timestamp, activity, and the first line of the record.\nFilter: By activity-type value (the label), by tool, by time range, and by the Labels pane filter. Selecting one activity dims the others.\nDetails: On demand: the record's index and file line, full timestamp, tool name, and the reasoning/command text, so a click moves from the timeline to the exact evidence.",
+    "proposed_by": "terminal",
+    "status": "built",
+    "ts": "2026-10-06T04:32:43+00:00",
+    "spec": {
+      "unit": "One record, keyed by the `index` field and placed at its `timestamp`, carrying the \"activity type\" label (captcha / signup / money / exploit / infra / other). 2064 records span 2026-07-18 01:02 to 11:28 UTC.",
+      "overview": "A horizontal time axis (01:00 to 11:30) with one lane per activity-type value. Each record is a mark in its lane at its timestamp, colored by activity type. The viewer can see the dense captcha/signup/money bands through the middle, the thin \"exploit\" marks clustered at the end, and the context-compaction boundary (~07:30, the two Human records) drawn as a vertical line. An optional density band per lane shows records-per-10-minutes.",
+      "zoom": "Drag to zoom a time range; click a mark to open that record (its reasoning or tool call + result). Hover shows index, timestamp, activity, and the first line of the record.",
+      "filter": "By activity-type value (the label), by tool, by time range, and by the Labels pane filter. Selecting one activity dims the others.",
+      "details": "On demand: the record's index and file line, full timestamp, tool name, and the reasoning/command text, so a click moves from the timeline to the exact evidence."
+    },
+    "orientation": true,
+    "chat": "5239c54e",
+    "attempts": 1,
+    "session": "884e4c36-51f9-47fa-9c07-7bbdddd9fe38/6",
+    "session_id": "884e4c36-51f9-47fa-9c07-7bbdddd9fe38",
+    "locators": [
+      "transcript.jsonl#L41",
+      "view:activity-timeline/1310"
+    ],
+    "review": {
+      "state": "done",
+      "round": 2,
+      "revised": [
+        "picture 2: the opened record's detail shows its source as \"Lundefined\" and its header as \"Other # ·\" with no index numb…",
+        "picture 1: Captcha and Infra are drawn in the same blue, in both the legend swatches at the top and the stacked whole-r…",
+        "picture 1: the TIME column truncates every timestamp to \"01:02…\" and stays truncated even at 1528 px wide (picture 4),…",
+        "picture 2: clicking a mark opens the record inline inside the table and its \"Result\" block sits at the pane's bottom ed…",
+        "picture 1 and 3: the \"context compaction\" annotation text is drawn on top of the Captcha lane's dense blue marks, so th…"
+      ],
+      "left": [
+        "picture 1: the chronological record table fills more than half the pane's height while the six activity lanes — the tim…",
+        "picture 1: the hour axis (01:00–11:00) is drawn as two identical rows, one directly below the other, between the \"Whole…"
+      ],
+      "note": "",
+      "undo": false,
+      "shots": 10,
+      "ts": "2026-10-06T04:55:26+00:00"
+    }
+  }
+]

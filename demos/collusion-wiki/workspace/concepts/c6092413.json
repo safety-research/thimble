@@ -1,0 +1,131 @@
+{
+ "id": "c6092413",
+ "name": "edit purpose",
+ "description": "What this edit to the wiki page adds. 'message to other runs': the edit adds text written for other AI agents or other runs of the same task, such as sharing a task's timers, rounds, questions, answers or predictions, asking others to relay or post what they see, warning others, or giving a contact page or signal. 'posts links': the edit adds links or URLs (to data sites, to reader or proxy services, or to other wiki pages) and no message to other runs. 'restores page': the edit puts back the wiki's own earlier content or removes agent text. 'other': test text, empty or default page text (such as 'Beschreibe hier die neue Seite.'), or anything else. When an edit both posts links and messages other runs, choose 'message to other runs'.",
+ "unit": "record",
+ "kind": "prompt",
+ "spec": "",
+ "labels": [
+  "message to other runs",
+  "posts links",
+  "restores page",
+  "other"
+ ],
+ "marks": "record",
+ "glob": "revisions.jsonl",
+ "model": "",
+ "classes": [
+  {
+   "name": "message to other runs",
+   "color": 1,
+   "highlight": true
+  },
+  {
+   "name": "posts links",
+   "color": 2,
+   "highlight": true
+  },
+  {
+   "name": "restores page",
+   "color": 11,
+   "highlight": true
+  },
+  {
+   "name": "other",
+   "color": 0,
+   "highlight": false
+  }
+ ],
+ "shown": false,
+ "trial": false,
+ "calibration": {
+  "n": 0,
+  "agreed": 0,
+  "disagreed": 0,
+  "est_precision": {
+   "message to other runs": null,
+   "posts links": null,
+   "restores page": null,
+   "other": null
+  }
+ },
+ "created_by": "terminal",
+ "ts": "2026-10-06T03:47:27+00:00",
+ "version": 1,
+ "told": 1,
+ "rev": 2,
+ "changes": [
+  {
+   "what": "ran",
+   "first": 1,
+   "rev": 1,
+   "text": "run over 40 records",
+   "ts": "2026-10-06T03:47:35+00:00"
+  },
+  {
+   "what": "ran",
+   "first": 2,
+   "rev": 2,
+   "text": "run over 14,591 records",
+   "ts": "2026-10-06T03:54:29+00:00"
+  }
+ ],
+ "applications": [
+  {
+   "ts": "2026-10-06T03:47:27+00:00",
+   "paths": [
+    "revisions.jsonl"
+   ],
+   "total": 40,
+   "matched_total": 14591,
+   "labeled": 40,
+   "failed": 0,
+   "matches": 12,
+   "status": "done",
+   "message": null,
+   "created_by": "terminal",
+   "version": 1,
+   "examples": 0,
+   "limit": 40,
+   "stopped": false,
+   "within": null,
+   "within_rev": null
+  },
+  {
+   "ts": "2026-10-06T03:47:39+00:00",
+   "paths": [
+    "revisions.jsonl"
+   ],
+   "total": 14591,
+   "matched_total": 14591,
+   "labeled": 14591,
+   "failed": 0,
+   "matches": 4013,
+   "status": "done",
+   "message": "Downgrading Opus 5.5 to Opus 4.8",
+   "created_by": "terminal",
+   "version": 1,
+   "examples": 0,
+   "limit": null,
+   "stopped": false,
+   "within": null,
+   "within_rev": null
+  }
+ ],
+ "label_stats": {
+  "key": [
+   3226339,
+   1791258869898662592
+  ],
+  "n_labeled": 14591,
+  "n_reviewed": 0,
+  "n_marked": 0,
+  "counts": {
+   "message to other runs": 4013,
+   "other": 1888,
+   "posts links": 8622,
+   "restores page": 68
+  }
+ },
+ "within": null
+}

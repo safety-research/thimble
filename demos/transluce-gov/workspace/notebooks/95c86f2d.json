@@ -1,0 +1,371 @@
+{
+ "title": "Report figures",
+ "ts": "2026-10-06T04:49:33.034659+00:00",
+ "role": "analyst",
+ "kind": "sequence",
+ "parent": null,
+ "anchor": null,
+ "chat": null,
+ "investigation": null,
+ "finding": null,
+ "pos": null,
+ "order": null,
+ "cells": [
+  {
+   "id": "1223fa40",
+   "notebook": "95c86f2d",
+   "kind": "table",
+   "title": "How do the post's statements about single sections compare with the records?",
+   "takeaway": "The records agree with the post at [[Canada|card:1223fa40#verdict/Canada]], [[Texas|card:1223fa40#verdict/Texas]], New York on May 17 and [[CDC|card:1223fa40#verdict/CDC]]. They differ on [[Justice's order of events|card:1223fa40#the%20records%20show/Justice]] and a [[budget portal count|card:1223fa40#the%20records%20show/MAX]], and cannot check the Census section or the [[BEA sign-up|card:1223fa40#verdict/BEA]].",
+   "takeaway_author": "model",
+   "labels": [],
+   "locked": false,
+   "created_by": "chat:1c9a7323",
+   "created_at_event": null,
+   "edited": [
+    {
+     "by": "chat:1c9a7323",
+     "ts": "2026-10-06T05:05:30+00:00"
+    },
+    {
+     "by": "chat:1c9a7323",
+     "ts": "2026-10-06T05:12:28+00:00"
+    }
+   ],
+   "created_ts": "2026-10-06T04:49:33+00:00",
+   "ts": "2026-10-06T05:12:46+00:00",
+   "width": null,
+   "height": null,
+   "pos": null,
+   "starred": false,
+   "code": "import os, glob, json, pandas as pd\n# \"the post says\" paraphrases https://transluce.org/us-canada-gov, section by section.\n\ndef cap(folder):\n    d = pd.read_csv(f'{folder}/arquivo-captures.csv', dtype=str, keep_default_na=False)\n    d['row'] = range(1, len(d) + 1)\n    return d.sort_values(['captured_at_utc', 'row'])\n\ndef day(ts):\n    t = pd.Timestamp(ts)\n    return f'{t:%b} {t.day}'\n\nrows = []\n\n# Canada: the 13 payload requests listed in sources.csv and their stored texts\ncs = pd.read_csv('02-canada/sources.csv', dtype=str, keep_default_na=False)\ntexts = [open('02-canada/' + f, encoding='utf-8').read().splitlines()[0] for f in cs.file if f]\nnf = sum(t.strip() == 'Record not found.' for t in texts)\nrows.append(('Canada', '13 payloads of 6 kinds, believed unsuccessful',\n             f'{len(cs)} listed, all {\"/\".join(sorted(cs.http_status.unique()))}; {nf} of {len(texts)} texts \"Record not found.\"',\n             'agrees'))\n\n# Texas: direct PDF exports of the STI data table\ntr = pd.read_csv('07-texas/urlquery-reports.csv', dtype=str, keep_default_na=False)\nth = pd.read_csv('07-texas/urlquery-http.csv', dtype=str, keep_default_na=False)\npdf = tr[tr.submitted_url.str.contains('DataTableBuilder.pdf')].report_id\nsignin = sum(bool(((th.report_id == r) & th.url.str.contains('auth/signin')).any()) for r in pdf)\nrows.append(('Texas', 'could not confirm data came back',\n             f'{len(pdf)} PDF exports, {signin} sent to sign-in; {int(th.response_mime.str.contains(\"pdf\").sum())} PDFs',\n             'agrees'))\n\n# New York: on May 17, blocked first, then worked\nny = cap('06-new-york')\nd17 = ny[ny.captured_at_utc.str.startswith('2026-05-17')]\nd16 = ny[ny.captured_at_utc.str.startswith('2026-05-16')]\nboth = ny.groupby('target_url').indexed_http_status.agg(lambda s: {'200', '403'} <= set(s)).sum()\nrows.append(('New York', 'May 17: first blocked, later worked',\n             f'May 17: {d17.indexed_http_status.iloc[0]} then {d17.indexed_http_status.iloc[1]}; '\n             f'May 16: {len(d16)} all {\"/\".join(d16.indexed_http_status.unique())}; {both} URLs got both',\n             'agrees for May 17'))\n\n# Justice: the encoded parent-folder trick and the redirects\nj = cap('11-justice')\ntrick = j[j.target_url.str.contains(r'\\.\\.%2[Ff]', regex=True)]\nredirect = j[j.indexed_http_status == '302'].iloc[0]\nrows.append(('Justice', 'May 30-31: \"..%2F\" got past redirects',\n             f'\"..%2F\" first {day(trick.captured_at_utc.iloc[0])} ({trick.indexed_http_status.iloc[0]}); '\n             f'first redirect {day(redirect.captured_at_utc)}',\n             'order differs'))\n\n# MAX budget portal: distinct method/URL pairs in the urlquery scans\nmh = pd.read_csv('09-max-gov/urlquery-http.csv', dtype=str, keep_default_na=False)\npairs = mh[['method', 'url']].drop_duplicates().shape[0]\nrows.append(('MAX', '416 distinct method/URL pairs', f'{pairs} pairs', 'differs'))\n\n# BEA: an attempted sign-up as \"OpenAI Research\", and a failed CAPTCHA reading\nbea = pd.read_csv('12-bea/arquivo-captures.csv', dtype=str, keep_default_na=False)\nsignup = int(bea.target_url.str.contains(r'regist|sign-?up', case=False).sum())\nfiles = [f for f in glob.glob('**/*', recursive=True) if f.endswith(('.csv', '.txt', '.json'))]\noair = sum('openai research' in open(f, encoding='utf-8', errors='replace').read().lower() for f in files)\nbs = pd.read_csv('12-bea/sources.csv', dtype=str, keep_default_na=False)\nwithheld = int(bs.source_url.str.startswith('[WITHHELD').sum())\nfn = json.load(open('12-bea/responses/35dbde93d88a7753.txt'))['data']['function']['value']\nocr = json.loads(json.loads(fn)['ocr'])['ParsedResults'][0]['ParsedText']\nrows.append(('BEA', 'tried to register as \"OpenAI Research\"; CAPTCHA reading failed',\n             f'{signup} sign-up URLs, {oair} files name it; {withheld} of {len(bs)} programs withheld; '\n             f'OCR text {\"empty\" if ocr == \"\" else \"found\"}',\n             'sign-up not checkable'))\n\n# Census and CDC: evidence the post says it withheld\nrows.append(('Census', 'URLs withheld', f'folder empty ({len(os.listdir(\"13-census\"))} files)', 'withheld'))\ncdc = pd.read_csv('15-cdc/sources.csv', dtype=str, keep_default_na=False)\nbody = open('15-cdc/' + cdc.file.iloc[0], encoding='utf-8').read().splitlines()\nrows.append(('CDC', 'query-validation error; program link withheld',\n             f'{len(cdc)} capture, {cdc.http_status.iloc[0]} \"{body[1]}\"', 'agrees'))\n\npd.DataFrame(rows, columns=['section', 'the post says', 'the records show', 'verdict']).set_index('section')",
+   "exec_count": 3,
+   "status": "ok",
+   "outputs": [
+    {
+     "application/vnd.thimble.frame+json": {
+      "columns": [
+       "section",
+       "the post says",
+       "the records show",
+       "verdict"
+      ],
+      "types": {
+       "section": "nominal",
+       "the post says": "nominal",
+       "the records show": "nominal",
+       "verdict": "nominal"
+      },
+      "index": "section",
+      "rows": [
+       [
+        "Canada",
+        "13 payloads of 6 kinds, believed unsuccessful",
+        "13 listed, all 200; 11 of 11 texts \"Record not found.\"",
+        "agrees"
+       ],
+       [
+        "Texas",
+        "could not confirm data came back",
+        "2 PDF exports, 2 sent to sign-in; 0 PDFs",
+        "agrees"
+       ],
+       [
+        "New York",
+        "May 17: first blocked, later worked",
+        "May 17: 403 then 200; May 16: 12 all 200; 5 URLs got both",
+        "agrees for May 17"
+       ],
+       [
+        "Justice",
+        "May 30-31: \"..%2F\" got past redirects",
+        "\"..%2F\" first May 25 (200); first redirect May 30",
+        "order differs"
+       ],
+       [
+        "MAX",
+        "416 distinct method/URL pairs",
+        "324 pairs",
+        "differs"
+       ],
+       [
+        "BEA",
+        "tried to register as \"OpenAI Research\"; CAPTCHA reading failed",
+        "0 sign-up URLs, 0 files name it; 4 of 4 programs withheld; OCR text empty",
+        "sign-up not checkable"
+       ],
+       [
+        "Census",
+        "URLs withheld",
+        "folder empty (0 files)",
+        "withheld"
+       ],
+       [
+        "CDC",
+        "query-validation error; program link withheld",
+        "1 capture, 500 \"Processing Error\"",
+        "agrees"
+       ]
+      ],
+      "total": 8,
+      "label": "section",
+      "view": {
+       "columns": [
+        "the post says",
+        "the records show",
+        "verdict"
+       ],
+       "formats": {},
+       "more": 0
+      }
+     },
+     "text/plain": "section   the post says                   the records show                verdict\nCanada    13 payloads of 6 kinds, believed unsuccessful  13 listed, all 200; 11 of 11 texts \"Record not found.\"  agrees\nTexas     could not confirm data came back  2 PDF exports, 2 sent to sign-in; 0 PDFs  agrees\nNew York  May 17: first blocked, later worked  May 17: 403 then 200; May 16: 12 all 200; 5 URLs got both  agrees for May 17\nJustice   May 30-31: \"..%2F\" got past redirects  \"..%2F\" first May 25 (200); first redirect May 30  order differs\nMAX       416 distinct method/URL pairs   324 pairs                       differs\nBEA       tried to register as \"OpenAI Research\"; CAPTCHA reading failed  0 sign-up URLs, 0 files name it; 4 of 4 programs withheld; OCR text empty  sign-up not checkable\nCensus    URLs withheld                   folder empty (0 files)          withheld\nCDC       query-validation error; program link withheld  1 capture, 500 \"Processing Error\"  agrees"
+    }
+   ],
+   "slug": "statements-blog-post",
+   "started": "2026-10-06T05:12:28+00:00",
+   "out_memo": {
+    "next": 1,
+    "outs": [
+     {
+      "i": 0,
+      "d": "frame:d06a132791bd70fd4da29b098f9908dc55834a47"
+     }
+    ]
+   },
+   "duration_s": 1.054,
+   "label_revs": {},
+   "reads": [
+    "02-canada/sources.csv",
+    "02-canada/responses/4a7cf593d21b99c3.txt",
+    "02-canada/responses/86bc8f2bcd14b8cd.txt",
+    "02-canada/responses/aff18dcb77fbdaae.txt",
+    "02-canada/responses/48da696b4d13f14f.txt",
+    "02-canada/responses/7d4ed6490d93aee6.txt",
+    "02-canada/responses/ef4963baddb790d2.txt",
+    "02-canada/responses/f6b2132e05dc9183.txt",
+    "02-canada/responses/c76d29fa74fdaa0a.txt",
+    "02-canada/responses/c4c0a3769dd55751.txt",
+    "02-canada/responses/1424a9b503b6efe9.txt",
+    "02-canada/responses/35635251ed725cab.txt",
+    "07-texas/urlquery-reports.csv",
+    "07-texas/urlquery-http.csv",
+    "06-new-york/arquivo-captures.csv",
+    "11-justice/arquivo-captures.csv",
+    "09-max-gov/urlquery-http.csv",
+    "12-bea/arquivo-captures.csv",
+    ".",
+    "07-texas",
+    "09-max-gov",
+    "15-cdc",
+    "15-cdc/responses",
+    "03-kansas",
+    "03-kansas/responses",
+    "10-navy",
+    "10-navy/responses",
+    "13-census",
+    "06-new-york",
+    "06-new-york/responses",
+    "02-canada",
+    "02-canada/responses",
+    "08-california",
+    "08-california/responses",
+    "04-illinois",
+    "04-illinois/responses",
+    "12-bea",
+    "12-bea/responses",
+    "01-education",
+    "01-education/responses",
+    "11-justice",
+    "11-justice/responses",
+    "05-maryland",
+    "14-sec",
+    "README.txt",
+    "09-max-gov/cited-wiki-revision.txt",
+    "09-max-gov/arquivo-captures.csv",
+    "09-max-gov/sources.csv",
+    "09-max-gov/urlquery-reports.csv",
+    "15-cdc/sources.csv",
+    "15-cdc/responses/4c484673db755ba8.txt",
+    "03-kansas/arquivo-captures.csv",
+    "03-kansas/sources.csv",
+    "03-kansas/responses/0ed36b6e294d3953.txt",
+    "03-kansas/responses/063d72008cb9cf23.txt",
+    "10-navy/arquivo-captures.csv",
+    "10-navy/sources.csv",
+    "10-navy/responses/aae991050745bd3e.txt",
+    "10-navy/responses/c0b4c866eceead18.txt",
+    "10-navy/responses/e23820ec9e3abfe6.txt",
+    "06-new-york/cited-wiki-task.txt",
+    "06-new-york/sources.csv",
+    "06-new-york/responses/0ebc0b6559b5e205.txt",
+    "06-new-york/responses/0fe52754ede863be.txt",
+    "02-canada/arquivo-captures.csv",
+    "08-california/arquivo-captures.csv",
+    "08-california/sources.csv",
+    "08-california/responses/30e6e11ac193f163.txt",
+    "08-california/responses/d506779921987073.txt",
+    "04-illinois/arquivo-captures.csv",
+    "04-illinois/sources.csv",
+    "04-illinois/responses/e286eb3775af3c69.txt",
+    "04-illinois/responses/10e61400736c6fac.txt",
+    "04-illinois/responses/c1713941bd05ead1.txt",
+    "04-illinois/responses/023ec565cd32a3d7.txt",
+    "04-illinois/responses/0eea4d97a6af7b1b.txt",
+    "04-illinois/responses/8709be2642777214.txt",
+    "04-illinois/responses/1747629da711f771.txt",
+    "12-bea/sources.csv",
+    "12-bea/responses/54b66ed598a5e91a.txt",
+    "12-bea/responses/35dbde93d88a7753.txt",
+    "12-bea/responses/6238a2ed3349b9a7.txt",
+    "12-bea/responses/3c9424e4ef690e07.txt",
+    "01-education/benchmark-excerpt.json",
+    "01-education/arquivo-captures.csv",
+    "01-education/sources.csv",
+    "01-education/responses/450ccf151e5b3d4e.txt",
+    "01-education/responses/2bd055bdb7b402d2.txt",
+    "01-education/responses/b73063a345a2e036.txt",
+    "01-education/responses/d95e20dd56c1b94b.txt",
+    "01-education/responses/2a18f06fa8dfe7e9.txt",
+    "01-education/responses/51cfbe12fcbeefd9.txt",
+    "01-education/responses/87f94ffe50e4f92e.txt",
+    "01-education/responses/247f37a91314df61.txt",
+    "01-education/responses/3c09860c16d359c7.txt",
+    "01-education/responses/5505a61392d67293.txt",
+    "01-education/responses/df3eb23126be49ab.txt",
+    "01-education/responses/785170240f9fb1b1.txt",
+    "01-education/responses/803bd881d62047be.txt",
+    "01-education/responses/dee0956a519c9c26.txt",
+    "01-education/responses/51924b18c44288bc.txt",
+    "11-justice/benchmark-excerpt.json",
+    "11-justice/sources.csv",
+    "11-justice/responses/b230e960efb2e4d4.txt",
+    "11-justice/responses/5a5c55dcac351de1.txt",
+    "11-justice/responses/4c074c0034580078.txt",
+    "05-maryland/arquivo-captures.csv",
+    "05-maryland/urlquery-http.csv",
+    "05-maryland/response-excerpts.json",
+    "05-maryland/sources.csv",
+    "05-maryland/urlquery-reports.csv",
+    "14-sec/cited-wiki-revision.txt",
+    "14-sec/urlquery-http.csv",
+    "14-sec/sources.csv",
+    "14-sec/urlquery-reports.csv"
+   ],
+   "verification": {
+    "exec_count": 3,
+    "links": {
+     "status": "partial",
+     "resolved": [
+      {
+       "value": "Canada",
+       "ref": "card:1223fa40#verdict/Canada",
+       "tier": 2
+      },
+      {
+       "value": "Texas",
+       "ref": "card:1223fa40#verdict/Texas",
+       "tier": 2
+      },
+      {
+       "value": "CDC",
+       "ref": "card:1223fa40#verdict/CDC",
+       "tier": 2
+      },
+      {
+       "value": "Justice's order of events",
+       "ref": "card:1223fa40#the%20records%20show/Justice",
+       "tier": 2
+      },
+      {
+       "value": "budget portal count",
+       "ref": "card:1223fa40#the%20records%20show/MAX",
+       "tier": 2
+      },
+      {
+       "value": "BEA sign-up",
+       "ref": "card:1223fa40#verdict/BEA",
+       "tier": 2
+      }
+     ],
+     "unresolved": [
+      "17"
+     ],
+     "broken": [],
+     "quiet": [],
+     "checked": true,
+     "healed": {
+      "version": "b651a766e820",
+      "relinks": 0,
+      "changes": [],
+      "ms": 3
+     }
+    },
+    "attempts": 0,
+    "note": null,
+    "status": "ok"
+   },
+   "check": {
+    "id": "chk_78fbe902ccf7",
+    "basis": "cadad5d8b14341b3",
+    "status": "fixed",
+    "stages": {
+     "render": {
+      "status": "ok",
+      "ms": 256,
+      "image": "card-checks/1223fa40/chk_78fbe902ccf7-card.png"
+     },
+     "critique": {
+      "status": "ok",
+      "ms": 13104,
+      "effort": "high",
+      "assessment": [
+       {
+        "problem": ""
+       },
+       {
+        "problem": ""
+       },
+       {
+        "problem": ""
+       },
+       {
+        "problem": "The takeaway says the records agree with the post at New York, but the table only agrees for May 17: on May 16 all 12 captures got 200, and 5 URLs got both 200 and 403."
+       },
+       {
+        "problem": ""
+       }
+      ],
+      "model": "claude-opus-5-5"
+     }
+    },
+    "started": "2026-10-06T05:12:32+00:00",
+    "ended": "2026-10-06T05:12:46+00:00",
+    "author": "writer:report"
+   },
+   "previous_code": "import os, glob, pandas as pd\n# \"the post says\" paraphrases https://transluce.org/us-canada-gov, section by section.\n\ndef cap(folder):\n    d = pd.read_csv(f'{folder}/arquivo-captures.csv', dtype=str, keep_default_na=False)\n    d['row'] = range(1, len(d) + 1)\n    return d.sort_values(['captured_at_utc', 'row'])\n\ndef day(ts):\n    t = pd.Timestamp(ts)\n    return f'{t:%b} {t.day}'\n\nrows = []\n\n# Canada: the 13 payload requests listed in sources.csv and their stored texts\ncs = pd.read_csv('02-canada/sources.csv', dtype=str, keep_default_na=False)\ntexts = [open('02-canada/' + f, encoding='utf-8').read().splitlines()[0] for f in cs.file if f]\nnf = sum(t.strip() == 'Record not found.' for t in texts)\nrows.append(('Canada', '13 payloads of 6 kinds, all failed',\n             f'{len(cs)} listed, all {\"/\".join(sorted(cs.http_status.unique()))}; {nf} of {len(texts)} texts \"Record not found.\"',\n             'agrees'))\n\n# Texas: direct PDF exports of the STI data table\ntr = pd.read_csv('07-texas/urlquery-reports.csv', dtype=str, keep_default_na=False)\nth = pd.read_csv('07-texas/urlquery-http.csv', dtype=str, keep_default_na=False)\npdf = tr[tr.submitted_url.str.contains('DataTableBuilder.pdf')].report_id\nsignin = sum(bool(((th.report_id == r) & th.url.str.contains('auth/signin')).any()) for r in pdf)\nrows.append(('Texas', 'could not confirm data came back',\n             f'{len(pdf)} PDF exports, {signin} sent to sign-in; {int(th.response_mime.str.contains(\"pdf\").sum())} PDFs',\n             'agrees'))\n\n# New York: blocked first, then worked?\nny = cap('06-new-york')\nfirst403 = ny[ny.indexed_http_status == '403'].iloc[0]\nbefore = ny[ny.captured_at_utc < first403.captured_at_utc]\naltered = before.target_url.str.contains('x=/').sum()\nboth = ny.groupby('target_url').indexed_http_status.agg(lambda s: {'200', '403'} <= set(s)).sum()\nrows.append(('New York', 'first requests blocked, later ones worked',\n             f'first {len(before)} all {\"/\".join(before.indexed_http_status.unique())} ({altered} with x=/); '\n             f'first 403 {day(first403.captured_at_utc)}; {both} URLs got both',\n             'partly'))\n\n# Justice: the encoded parent-folder trick and the redirects\nj = cap('11-justice')\ntrick = j[j.target_url.str.contains(r'\\.\\.%2[Ff]', regex=True)]\nredirect = j[j.indexed_http_status == '302'].iloc[0]\nrows.append(('Justice', 'May 30-31: \"..%2F\" got past redirects',\n             f'\"..%2F\" first {day(trick.captured_at_utc.iloc[0])} ({trick.indexed_http_status.iloc[0]}); '\n             f'first redirect {day(redirect.captured_at_utc)}',\n             'partly'))\n\n# MAX budget portal: distinct method/URL pairs in the urlquery scans\nmh = pd.read_csv('09-max-gov/urlquery-http.csv', dtype=str, keep_default_na=False)\npairs = mh[['method', 'url']].drop_duplicates().shape[0]\nrows.append(('MAX', '416 distinct method/URL pairs', f'{pairs} pairs', 'differs'))\n\n# BEA: a sign-up for an API key as \"OpenAI Research\"\nbea = pd.read_csv('12-bea/arquivo-captures.csv', dtype=str, keep_default_na=False)\nsignup = int(bea.target_url.str.contains(r'regist|sign-?up', case=False).sum())\nemail = int(bea.target_url.str.contains('@').sum())\nfiles = [f for f in glob.glob('**/*', recursive=True) if f.endswith(('.csv', '.txt', '.json'))]\noair = sum('openai research' in open(f, encoding='utf-8', errors='replace').read().lower() for f in files)\nrows.append(('BEA', 'signed up as \"OpenAI Research\"',\n             f'{signup} sign-up URLs, {email} emails, {oair} files name it', 'no trace'))\n\n# Census and CDC: evidence the post says it withheld\nrows.append(('Census', 'URLs withheld', f'folder empty ({len(os.listdir(\"13-census\"))} files)', 'withheld'))\ncdc = pd.read_csv('15-cdc/sources.csv', dtype=str, keep_default_na=False)\nbody = open('15-cdc/' + cdc.file.iloc[0], encoding='utf-8').read().splitlines()\nrows.append(('CDC', 'program link withheld',\n             f'{len(cdc)} capture, {cdc.http_status.iloc[0]} \"{body[1]}\"', 'withheld'))\n\npd.DataFrame(rows, columns=['section', 'the post says', 'the records show', 'verdict']).set_index('section')",
+   "fixes": [
+    {
+     "id": "fix_8ef40542bfe0",
+     "check": "chk_78fbe902ccf7",
+     "ts": "2026-10-06T05:12:46+00:00",
+     "by": "check",
+     "fields": [
+      "takeaway"
+     ],
+     "before": {
+      "takeaway": "The records agree with the post at [[Canada|card:1223fa40#verdict/Canada]], [[Texas|card:1223fa40#verdict/Texas]], [[New York|card:1223fa40#verdict/New%20York]] and [[CDC|card:1223fa40#verdict/CDC]]. They differ on [[Justice's order of events|card:1223fa40#the%20records%20show/Justice]] and a [[budget portal count|card:1223fa40#the%20records%20show/MAX]], and cannot check the Census section or the [[BEA sign-up|card:1223fa40#verdict/BEA]]."
+     },
+     "after": {
+      "takeaway": "The records agree with the post at [[Canada|card:1223fa40#verdict/Canada]], [[Texas|card:1223fa40#verdict/Texas]], New York on May 17 and [[CDC|card:1223fa40#verdict/CDC]]. They differ on [[Justice's order of events|card:1223fa40#the%20records%20show/Justice]] and a [[budget portal count|card:1223fa40#the%20records%20show/MAX]], and cannot check the Census section or the [[BEA sign-up|card:1223fa40#verdict/BEA]]."
+     },
+     "reason": "The takeaway says the records agree with the post at New York, but the table only agrees for May 17: on May 16 all 12 captures got 200, and 5 URLs got both 200 and 403.",
+     "state": "applied"
+    }
+   ]
+  }
+ ],
+ "created_by": "chat:1c9a7323",
+ "id": "95c86f2d",
+ "session": "writer:report"
+}

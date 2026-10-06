@@ -1,0 +1,150 @@
+{
+  "name": "Episode Browser",
+  "description": "The URLQuery report catalog grouped into episodes, the bursts of one data source's reports less than two hours apart, as a strip of every episode in time and a sortable list with each one's span, size and mix of direct requests, proxies and submitted programs, coloured by confidence, class, disposition, source basis, cohort or a label with thimble's Colour by; the episodes in view summed up on demand, any episode opened under its row with its reports in time order and any report in full with its source row, provenance and decisions.",
+  "scope": [
+    "all-reports.csv",
+    "report-sources.csv",
+    "selection-provenance.csv",
+    "supplement-classifications.json",
+    "classification-overrides.json"
+  ],
+  "records": [
+    {
+      "name": "report",
+      "one": "one row of all-reports.csv, with its report-sources.csv row joined by report_id",
+      "fields": [
+        {
+          "name": "t",
+          "type": "time",
+          "derived": "cleaned",
+          "from": "report_date_utc",
+          "how": "read as seconds since 1970 in UTC"
+        },
+        {
+          "name": "gap",
+          "type": "number",
+          "derived": "computed",
+          "from": "report_date_utc of the report and of the one before it in its episode",
+          "how": "seconds between the two"
+        },
+        {
+          "name": "why_short",
+          "type": "text",
+          "derived": "cleaned",
+          "from": "why_included",
+          "how": "each stock sentence cut to a few words and the disclaimer on imported tags dropped"
+        },
+        {
+          "name": "cohort",
+          "type": "category",
+          "derived": "computed",
+          "from": "why_included",
+          "how": "whether it names the externally selected research-activity cohort"
+        },
+        {
+          "name": "group",
+          "type": "category",
+          "derived": "computed",
+          "from": "data_source in report-sources.csv, else disposition",
+          "how": "joined by report_id, a report with no source row grouped as Needs review or Background control"
+        },
+        {
+          "name": "value",
+          "type": "category",
+          "derived": "computed",
+          "from": "the Colour by choice",
+          "how": "the report's confidence, broad_class, disposition, source_basis or cohort, or a label's value on its catalog row or source row"
+        }
+      ]
+    },
+    {
+      "name": "episode",
+      "one": "the reports of one data source whose consecutive times are less than two hours apart",
+      "fields": [
+        {
+          "name": "start",
+          "type": "time",
+          "derived": "computed",
+          "from": "report_date_utc of its reports",
+          "how": "the first report's time, a gap of two hours or more starting the next episode"
+        },
+        {
+          "name": "end",
+          "type": "time",
+          "derived": "computed",
+          "from": "report_date_utc of its reports",
+          "how": "the last report's time"
+        },
+        {
+          "name": "duration",
+          "type": "number",
+          "derived": "computed",
+          "from": "start and end",
+          "how": "time from the first report to the last"
+        },
+        {
+          "name": "cohort",
+          "type": "number",
+          "derived": "computed",
+          "from": "why_included of its reports",
+          "how": "share whose why_included names the externally selected research-activity cohort"
+        },
+        {
+          "name": "rate",
+          "type": "list",
+          "derived": "computed",
+          "from": "report_date_utc of its reports",
+          "how": "reports in each of 24 equal slices of its span"
+        },
+        {
+          "name": "peak_minute",
+          "type": "number",
+          "derived": "computed",
+          "from": "report_date_utc of its reports",
+          "how": "most reports in one clock minute in UTC"
+        },
+        {
+          "name": "peak_hour",
+          "type": "number",
+          "derived": "computed",
+          "from": "report_date_utc of its reports",
+          "how": "most reports in one clock hour in UTC"
+        },
+        {
+          "name": "cv",
+          "type": "list",
+          "derived": "computed",
+          "from": "the Colour by choice",
+          "how": "the episode's reports the label filter keeps, per value of the choice"
+        }
+      ]
+    }
+  ],
+  "accepts": [
+    {
+      "form": "row=<n>",
+      "means": "row <n> of all-reports.csv or report-sources.csv, the report it names opened in its episode, or of selection-provenance.csv, the report it is about"
+    },
+    {
+      "form": "L<n>",
+      "means": "the report on line <n> of a CSV file, or the decision whose lines hold line <n> of a decisions file, opened in its episode"
+    },
+    {
+      "form": "/decisions/<k>",
+      "means": "decision <k> of supplement-classifications.json or classification-overrides.json, its report opened in its episode"
+    }
+  ],
+  "units": [
+    {
+      "form": "<source key>/<YYYY-MM-DDTHH:MM:SSZ>",
+      "means": "one episode, named by its data source in lower case with dashes and its first report's UTC time, such as unctad/2026-05-17T00:10:01Z, opened with its reports"
+    },
+    {
+      "form": "<source key>",
+      "means": "every episode of one data source, such as unctad or needs-review, the view narrowed to it"
+    }
+  ],
+  "libs": [],
+  "built": "2026-10-06T21:52:08+00:00",
+  "version": "cc9f24c6a856"
+}

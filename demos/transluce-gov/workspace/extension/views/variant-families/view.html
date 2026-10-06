@@ -1,0 +1,675 @@
+<!doctype html>
+<html>
+<head>
+<style>
+  /* thimble's parts (.field, .chip, .btn, .seg), its Colour by control and the theme's tokens come with the frame; this
+     page lays out one control row, the families by section on the left, and the open family's members with one
+     member's row below */
+  :root {
+    --hatch: repeating-linear-gradient(135deg, rgba(var(--ink-rgb), 0.42) 0 1px, transparent 1px 3.5px);
+    --k-wrapper: var(--viz-1); --k-tag: var(--viz-5); --k-host: var(--viz-6); --k-path: var(--viz-7); --k-encoding: var(--viz-2); --k-query: var(--viz-4);
+  }
+  html, body { margin: 0; height: 100%; }
+  body { display: flex; flex-direction: column; overflow: hidden; background: var(--surface-card); color: var(--text-primary); font: 400 var(--text-ui-sm) / 1.4 var(--font-body); }
+  button { font: inherit; color: inherit; }
+  .ico { width: 14px; height: 14px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; }
+  .mono { font-family: var(--font-mono); }
+  .num { font: 400 var(--text-mono-sm) / 1 var(--font-mono); font-variant-numeric: tabular-nums; color: var(--text-tertiary); }
+
+  /* the control row */
+  #ctl { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 8px 12px; border-bottom: 1px solid var(--border-hairline); }
+  .search { position: relative; flex: 0 1 136px; min-width: 100px; }
+  .search .field { width: 100%; box-sizing: border-box; padding-left: 26px; }
+  .search .ico { position: absolute; left: 8px; top: 50%; margin-top: -7px; color: var(--text-tertiary); pointer-events: none; }
+  #minSel { flex: none; width: auto; }
+  #thr .ico { width: 12px; height: 12px; }
+  #colour { min-width: 240px; margin-left: 6px; }
+
+  /* the two panes */
+  #main { flex: 1; min-height: 0; display: flex; }
+  #list { flex: none; width: clamp(290px, 40%, 560px); overflow: auto; border-right: 1px solid var(--border-hairline); }
+  #zoom { flex: 1; min-width: 0; display: flex; flex-direction: column; min-height: 0; }
+
+  .tot { display: flex; align-items: center; gap: 8px; padding: 6px 12px 6px; color: var(--text-secondary); font-size: var(--text-xs); }
+  .tot select { margin-left: auto; max-width: 150px; }
+  .tot b { color: var(--text-primary); font-weight: 500; }
+  .sec { position: sticky; top: 0; z-index: 2; display: grid; grid-template-columns: 14px minmax(0, 1fr) auto auto 64px; align-items: center; gap: 8px; width: 100%; height: 30px; padding: 0 12px 0 8px; border: 0; border-top: 1px solid var(--border-hairline); background: var(--surface-card); text-align: left; cursor: pointer; }
+  .sec:hover { background: var(--surface-hover); }
+  .sec .caret { color: var(--text-tertiary); transition: transform 0.12s; }
+  .sec.open .caret { transform: rotate(90deg); }
+  .sec .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+  .sec.empty .nm, .sec.empty .num { color: var(--text-tertiary); font-weight: 400; }
+  .mix { height: 6px; border-radius: 2px; }
+  .fam { display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; gap: 3px 8px; padding: 6px 12px 7px 8px; border-top: 1px solid var(--border-hairline); cursor: pointer; }
+  .fam .b { grid-row: span 2; display: flex; flex-direction: column; align-items: center; gap: 5px; padding-top: 1px; }
+  .fam .b .doc { width: 12px; height: 12px; color: var(--text-tertiary); }
+  .fam .b .thr { width: 13px; height: 13px; stroke-width: 2.2; color: var(--text-primary); }
+  .chip .ico { width: 10px; height: 10px; stroke-width: 2.2; }
+  .un { color: var(--text-tertiary); font: 400 10.5px / 1 var(--font-body); }
+  .fam:hover { background: var(--surface-hover); }
+  .fam.active { background: var(--surface-selected); }
+  .fam .u { font: 400 var(--text-mono-sm) / 1.4 var(--font-mono); overflow-wrap: anywhere; }
+  .fam .u .h, .fh .u .h { color: var(--text-tertiary); }
+  .fam .r1, .fam .r2 { display: flex; align-items: baseline; gap: 4px; justify-content: flex-end; white-space: nowrap; font: 400 var(--text-mono-sm) / 1.4 var(--font-mono); font-variant-numeric: tabular-nums; }
+  .fam .r1 b { font-weight: 500; }
+  .fam .r2 { color: var(--text-secondary); }
+  .gapr { padding: 3px 12px 3px 32px; border-top: 1px solid var(--border-hairline); color: var(--text-tertiary); font-size: 10.5px; }
+  .strips { display: flex; flex-direction: column; gap: 2px; align-self: center; min-width: 0; }
+  .strip { height: 7px; border-radius: 2px; background: var(--hatch); }
+  .more { display: block; width: 100%; padding: 6px 14px; border: 0; border-top: 1px solid var(--border-hairline); background: none; color: var(--text-secondary); font-size: var(--text-xs); text-align: left; cursor: pointer; }
+  .more:hover { background: var(--surface-hover); color: var(--text-primary); }
+  .void { padding: 18px 14px; color: var(--text-tertiary); font-size: var(--text-xs); }
+
+  /* the open family */
+  .fh { flex: none; padding: 10px 14px 8px; border-bottom: 1px solid var(--border-hairline); }
+  .fh .u { font: 500 var(--text-mono) / 1.45 var(--font-mono); overflow-wrap: anywhere; }
+  .fh .meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin-top: 4px; color: var(--text-secondary); font-size: var(--text-xs); }
+  .fh .meta b { color: var(--text-primary); font-weight: 500; }
+  .through { display: inline-flex; align-items: center; gap: 3px; padding: 0; border: 0; background: none; color: var(--text-primary); font: 500 var(--text-xs) / 1.4 var(--font-body); cursor: pointer; }
+  .through:hover { text-decoration: underline; text-decoration-color: var(--border-strong); text-underline-offset: 2px; }
+  .through .tm { font: 400 var(--text-mono-sm) / 1 var(--font-mono); color: var(--text-secondary); }
+  .through .ico { width: 12px; height: 12px; }
+  .bigstrip { display: flex; height: 12px; margin-top: 8px; gap: 1px; }
+  .bigstrip i { flex: 1 1 0; min-width: 0; cursor: pointer; }
+  .bigstrip i.none { background: var(--hatch); box-shadow: inset 0 0 0 1px rgba(var(--ink-rgb), 0.3); }
+  .bigstrip i:first-child { border-radius: 2px 0 0 2px; }
+  .bigstrip i:last-child { border-radius: 0 2px 2px 0; }
+  .bigstrip i:hover { opacity: 0.7; }
+  .bigstrip.dense { gap: 0; }
+  .fh .row2 { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; margin-top: 7px; }
+  .fh .seg { margin-left: auto; }
+  [data-sibs] .ico { width: 12px; height: 12px; transition: transform 0.12s; }
+  [data-sibs][aria-pressed='true'] .ico { transform: rotate(90deg); }
+  .sibs { max-height: 168px; overflow: auto; margin-top: 8px; border: 1px solid var(--border-hairline); border-radius: var(--radius-ui); }
+  .sibs .fam:first-child { border-top: 0; }
+
+  .k-wrapper, .k-tag, .k-host, .k-path, .k-encoding, .k-query { border-radius: 2px; }
+  .k-wrapper { background: color-mix(in srgb, var(--k-wrapper) 15%, transparent); box-shadow: inset 0 -1.5px 0 var(--k-wrapper); }
+  .k-tag { background: color-mix(in srgb, var(--k-tag) 18%, transparent); box-shadow: inset 0 -1.5px 0 var(--k-tag); }
+  .k-host { background: color-mix(in srgb, var(--k-host) 16%, transparent); box-shadow: inset 0 -1.5px 0 var(--k-host); }
+  .k-path { background: color-mix(in srgb, var(--k-path) 15%, transparent); box-shadow: inset 0 -1.5px 0 var(--k-path); }
+  .k-encoding { background: color-mix(in srgb, var(--k-encoding) 18%, transparent); box-shadow: inset 0 -1.5px 0 var(--k-encoding); }
+  .k-query { background: color-mix(in srgb, var(--k-query) 16%, transparent); box-shadow: inset 0 -1.5px 0 var(--k-query); }
+  .kp { display: inline-block; max-width: 100%; vertical-align: top; overflow-wrap: anywhere; }
+
+  #members { flex: 1; min-height: 0; overflow: auto; position: relative; }
+  .mh { position: sticky; top: 0; z-index: 2; display: grid; grid-template-columns: var(--cols); gap: 8px; padding: 5px 12px 4px 12px; background: var(--surface-card); border-bottom: 1px solid var(--border-hairline); font: 400 10.5px / 1.2 var(--font-body); letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-tertiary); }
+  .mh .r { text-align: right; }
+  .day { padding: 7px 12px 3px 12px; color: var(--text-tertiary); font: 500 var(--text-xs) / 1 var(--font-body); }
+  .mem { display: grid; grid-template-columns: var(--cols); gap: 8px; align-items: start; padding: 4px 12px 4px 12px; cursor: pointer; }
+  .mem:hover { background: var(--surface-hover); }
+  .mem.active { background: var(--surface-selected); outline: 1.5px solid rgba(var(--ink-rgb), 0.6); outline-offset: -1.5px; }
+  .mem.faded { opacity: 0.35; }
+  .mem .tm { font: 400 var(--text-mono-sm) / 1.45 var(--font-mono); color: var(--text-secondary); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .mem .st { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; }
+  .src { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 400 10px / 1.2 var(--font-body); color: var(--text-tertiary); }
+  .mem .st { min-width: 0; }
+  .mem .url { font: 400 var(--text-mono-sm) / 1.45 var(--font-mono); overflow-wrap: anywhere; min-width: 0; }
+  .mem .mi { font: 400 var(--text-mono-sm) / 1.45 var(--font-mono); color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .mem .ln { text-align: right; font: 400 var(--text-mono-sm) / 1.45 var(--font-mono); font-variant-numeric: tabular-nums; color: var(--text-secondary); }
+  .mem .ln i { display: block; height: 3px; margin: 2px 0 0 auto; border-radius: 1px; background: rgba(var(--ink-rgb), 0.28); }
+  .page { display: flex; align-items: center; gap: 8px; padding: 8px 12px; color: var(--text-tertiary); font-size: var(--text-xs); }
+
+  .spl .ln { text-align: right; font: 400 var(--text-mono-sm) / 1.45 var(--font-mono); font-variant-numeric: tabular-nums; color: var(--text-secondary); white-space: nowrap; }
+  .spl .ln i { display: block; height: 3px; margin: 2px 0 0 auto; border-radius: 1px; background: rgba(var(--ink-rgb), 0.28); }
+  .spl { display: grid; grid-template-columns: minmax(0, 1fr) auto 76px 34px; gap: 10px; align-items: center; padding: 5px 12px; border-top: 1px solid var(--border-hairline); cursor: pointer; }
+  .spl:hover { background: var(--surface-hover); }
+  .spl .url { font: 400 var(--text-mono-sm) / 1.45 var(--font-mono); overflow-wrap: anywhere; }
+  .spl .cells { display: flex; flex-wrap: wrap; gap: 1px; max-width: 128px; }
+  .spl .cells i { width: 7px; height: 12px; border-radius: 1px; }
+  .spl .cells i.none { background: var(--hatch); box-shadow: inset 0 0 0 1px rgba(var(--ink-rgb), 0.4); }
+  .spl .sstrip { display: block; width: 128px; height: 12px; border-radius: 2px; }
+
+  #detail { flex: none; height: 46%; min-height: 150px; display: flex; flex-direction: column; border-top: 1px solid var(--border-strong); }
+  #detail[hidden] { display: none; }
+  .dh { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; padding: 7px 8px 6px 12px; border-bottom: 1px solid var(--border-hairline); }
+  .dh .t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 400 var(--text-mono-sm) / 1.4 var(--font-mono); color: var(--text-secondary); }
+  .dh .ans { flex: none; max-width: 46%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-left: 8px; font: 400 var(--text-ui-sm) / 1.4 var(--font-body); color: var(--text-primary); }
+  .dh .ans b { font: 600 var(--text-mono-sm) / 1 var(--font-mono); }
+  .dnote { padding: 6px 12px 0; color: var(--text-secondary); font: 400 var(--text-xs) / 1.45 var(--font-body); }
+  .db { flex: 1; min-height: 0; display: flex; overflow: hidden; }
+  .db.stack { flex-direction: column; overflow: auto; }
+  .cols { flex: 1 1 48%; min-width: 0; overflow: auto; padding: 6px 12px 10px; }
+  .db.stack .cols { flex: none; overflow: visible; }
+  .cols table { width: 100%; border-collapse: collapse; }
+  .cols td { padding: 3px 0; vertical-align: top; border-bottom: 1px solid var(--border-hairline); }
+  .cols table { table-layout: fixed; }
+  .cols td.k { width: 128px; padding-right: 10px; color: var(--text-tertiary); font-size: var(--text-xs); overflow-wrap: anywhere; }
+  .cols td.v { font: 400 var(--text-mono-sm) / 1.45 var(--font-mono); overflow-wrap: anywhere; }
+  .cols a, .resp a { color: inherit; text-decoration: underline; text-decoration-color: rgba(var(--ink-rgb), 0.35); }
+  .resp { flex: 1 1 52%; min-width: 0; display: flex; flex-direction: column; border-left: 1px solid var(--border-hairline); }
+  .db.stack .resp { flex: none; border-left: 0; border-bottom: 1px solid var(--border-hairline); }
+  .db.stack .cols + .resp { border-bottom: 0; border-top: 1px solid var(--border-hairline); }
+  .resp .rh { flex: none; display: flex; align-items: center; gap: 8px; padding: 7px 12px 5px; font-size: var(--text-xs); color: var(--text-secondary); }
+  .resp .rh .t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .resp pre { flex: 1; min-height: 0; margin: 0; padding: 4px 12px 12px; overflow: auto; font: 400 var(--text-mono-sm) / 1.5 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+  .db.stack .resp pre { max-height: 260px; }
+  .resp .none { padding: 10px 12px; color: var(--text-tertiary); font-size: var(--text-xs); }
+
+  .pop { position: fixed; z-index: 60; min-width: 210px; max-width: 320px; max-height: 70vh; overflow: auto; padding: 4px; border-radius: var(--radius-ui); background: var(--raised-bg); box-shadow: var(--raised-ring), 0 10px 28px rgba(var(--ink-rgb), 0.14); }
+  .pop .head { padding: 8px 8px 4px; font: 500 var(--text-xs) / 1 var(--font-body); color: var(--text-tertiary); }
+  .pop .sep { height: 1px; margin: 4px 0; background: var(--border-hairline); }
+  .pop .note { padding: 4px 8px 6px; color: var(--text-tertiary); font-size: var(--text-xs); }
+  .item { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 28px; padding: 0 8px; border: 0; border-radius: 4px; background: none; text-align: left; cursor: pointer; }
+  .item:hover { background: var(--surface-hover); }
+  .item:disabled { cursor: default; opacity: 0.55; }
+  .item .lab { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .err { padding: 14px; color: var(--status-negative); font-size: var(--text-xs); white-space: pre-wrap; }
+</style>
+</head>
+<body>
+<div id="ctl">
+  <label class="search"><svg class="ico" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.2-4.2"/></svg><input id="q" class="field" type="search" placeholder="URL contains" autocomplete="off" spellcheck="false" aria-label="URL contains"></label>
+  <select class="field" id="minSel" aria-label="Families with at least this many spellings"></select>
+  <button class="btn btn-secondary btn-sm" id="thr" aria-pressed="false"><svg class="ico" viewBox="0 0 24 24"><path d="M7 17 17 7M9 7h8v8"/></svg>Got through</button>
+  <span id="colour"></span>
+</div>
+<div id="main">
+  <div id="list"></div>
+  <div id="zoom">
+    <div id="fhead" class="fh"></div>
+    <div id="members"></div>
+    <div id="detail" hidden></div>
+  </div>
+</div>
+<script>
+'use strict'
+const SLUG = 'variant-families'
+const MINS = [1, 2, 3, 5, 10]
+const PAGE = 600 // members the reader answers at a time (MEMBERS_PAGE)
+// the answer classes in their order, each in the label palette's colour it names: 2xx green, 3xx blue, 4xx olive, 5xx
+// orange (the palette has no red), as the Capture Timeline colours them
+const ANSWERS = [{ name: '2xx', colour: 3 }, { name: '3xx', colour: 1 }, { name: '4xx', colour: 5 }, { name: '5xx', colour: 2 }]
+// the commonest status codes, most first, each in a colour of its answer's hue (2xx greens, 3xx blues, 4xx olive, 5xx
+// orange and browns), as the Capture Timeline colours them; the rarer codes take the places left
+const STATUSES = [{ name: '200', colour: 3 }, { name: '302', colour: 1 }, { name: '500', colour: 7 }, { name: '404', colour: 5 }, { name: '504', colour: 2 }, { name: '503', colour: 11 }, { name: '301', colour: 8 }, { name: '202', colour: 9 }]
+const CODE_WORD = { 200: 'the page was sent', 201: 'created', 202: 'accepted, not yet done', 204: 'no content', 206: 'part of the page was sent', 301: 'moved for good to another address', 302: 'sent on to another address', 303: 'sent on to another address', 304: 'not changed since the last copy', 307: 'sent on to another address for now', 308: 'moved for good to another address', 400: 'the site refused the request as malformed', 401: 'the site asked for a login', 403: 'the site refused access', 404: 'the site has no such page', 405: 'the site does not take this kind of request', 410: 'the page is gone', 429: 'the site said too many requests', 500: 'the site had an error', 502: 'a server in front of the site got no good answer', 503: 'the site was unavailable', 504: 'the site did not answer in time', 520: 'the site sent an unknown error', 524: 'the site did not answer in time' }
+const CLS_WORD = { 2: 'the page was sent', 3: 'sent on to another address', 4: 'refused or not found', 5: 'server error or time-out' }
+const WITHHELD_RX = /\[(?:REDACTED|OPAQUE_OMITTED|WITHHELD)/
+const WITHHELD_NOTE = 'Transluce withheld the bracketed parts of this address'
+const KIND_NAMES = { wrapper: 'wrapper service', tag: 'tag', host: 'host form', path: 'path form', encoding: 'encoding', query: 'query form' }
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+const S = { min: 3, q: '', section: '', through: false, open: new Set(), sel: null, selRef: null,
+  kind: null, mode: 'time', spell: null, sibs: false, offset: 0 }
+let D = null // the overview
+let F = null // the open family
+let M = null // the open member
+let labelKey = null
+let ALL_SECTIONS = []
+const extra = {} // section -> families "more" added
+
+const $ = (s, el = document) => el.querySelector(s)
+const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
+const fmt = (n) => Number(n || 0).toLocaleString('en-US')
+const ico = {
+  up: '<svg class="ico" viewBox="0 0 24 24"><path d="M7 17 17 7M9 7h8v8"/></svg>',
+  caret: '<svg class="ico caret" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></svg>',
+  close: '<svg class="ico" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg>',
+  check: '<svg class="ico chk" viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg>',
+  pen: '<svg class="ico" viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16v4Z"/></svg>',
+  plus: '<svg class="ico" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>',
+  file: '<svg class="ico" viewBox="0 0 24 24"><path d="M14 3H6v18h12V7l-4-4Z"/><path d="M14 3v4h4"/></svg>',
+  doc: '<svg class="ico doc" viewBox="0 0 24 24"><path d="M14 3H6v18h12V7l-4-4Z"/><path d="M9 13h6M9 17h4"/></svg>',
+}
+
+function clsOf(code) { const s = String(code || ''); return /^[1-5]\d\d$/.test(s) ? s[0] : '0' }
+
+// ------------------------------------------------------------------ Colour by
+// one control in the control row: the view's fields and every label in one menu, each value a chip with its count;
+// a value turned off dims its members, and a family none of whose members keeps a value turned on leaves the list.
+// Every strip and mix draws the members in their values' colours, no value hatched; each member row takes thimble's
+// bar on its left edge, and the members list the coloured scrollbar.
+const byV = (r) => r.v
+const colour = thimble.colourBy({
+  mount: '#colour',
+  fields: [
+    { name: 'answer', title: 'Answer', values: ANSWERS, value: byV },
+    { name: 'status', title: 'Status code', values: STATUSES, value: byV },
+    { name: 'body', title: 'Shared body', value: byV },
+    { name: 'through', title: 'Got through', value: byV },
+    { name: 'source', title: 'Source', value: byV },
+    { name: 'saved', title: 'Saved response', value: byV },
+    { name: 'mime', title: 'Content type', value: byV },
+  ],
+  chips: 'highlight',
+  strip: '#members',
+  onChange: () => { if (started) load() },
+})
+// a value's colour in a strip, a pale tint while its chip is off; transparent for no value, which the hatch shows through
+function paint(name) {
+  if (name == null) return 'transparent'
+  const c = colour.colourOf(name) || 'var(--label-none)'
+  return colour.isOn(name) ? c : `color-mix(in srgb, ${c} 22%, var(--surface-card))`
+}
+// a strip's codes are 0 for no value and k for the k-th of the answer's values
+const nameIn = (vals, k) => (k > 0 && vals ? vals[k - 1] : null)
+function noValue() { const by = colour.by; return by ? (by.label ? 'Not marked' : `No ${by.title.toLowerCase()}`) : 'none' }
+
+// a strip coded as runs "value:length,..." drawn as one gradient
+function gradient(runs, colourOf) {
+  if (!runs) return ''
+  const xs = runs.split(',').map((r) => r.split(':').map(Number))
+  const total = xs.reduce((a, [, n]) => a + n, 0) || 1
+  let at = 0
+  const stops = []
+  for (const [v, n] of xs) {
+    const a = (at / total) * 100, b = ((at + n) / total) * 100
+    const c = colourOf(v)
+    stops.push(`${c} ${a.toFixed(3)}% ${b.toFixed(3)}%`)
+    at += n
+  }
+  return `linear-gradient(to right, ${stops.join(', ')})`
+}
+function stripStyle(runs, vals) { return runs ? `background:${gradient(runs, (v) => paint(nameIn(vals, v)))}, var(--hatch)` : '' }
+function runsOf(values) {
+  const out = []
+  for (const v of values) { if (out.length && out[out.length - 1][0] === v) out[out.length - 1][1]++; else out.push([v, 1]) }
+  return out.map(([v, n]) => `${v}:${n}`).join(',')
+}
+
+function splitUrl(u) {
+  const i = u.indexOf('/')
+  return i > 0 ? [u.slice(0, i), u.slice(i)] : ['', u]
+}
+// a URL's text with a line break allowed only after / ? & = (or an escaped / or &), never inside ://
+const BREAK = /(?<=[/?&=]|%2[Ff]|%26)(?!\/)/
+function brk(t) { return String(t == null ? '' : t).split(BREAK).map(esc).join('<wbr>') }
+function urlHtml(u) { const [h, p] = splitUrl(u); return `<span class="h">${esc(h)}</span><wbr>${brk(p)}` }
+// a spelling's parts, each marked part kept whole on its line
+function partsHtml(parts) {
+  return parts.map(([t, k]) => k ? `<span class="k-${k} kp" title="${esc(KIND_NAMES[k])}">${esc(t)}</span>` : brk(t)).join('')
+}
+function when(iso) {
+  const m = /^(\d{4})-(\d\d)-(\d\d)[T ](\d\d:\d\d:\d\d)/.exec(iso || '')
+  return m ? { day: `${+m[3]} ${MONTHS[+m[2] - 1]} ${m[1]}`, time: m[4] } : { day: '', time: iso || '' }
+}
+function bytes(n) {
+  if (n == null) return ''
+  if (n < 1000) return String(n)
+  if (n < 1e6) return (n / 1000).toFixed(n < 1e4 ? 1 : 0) + 'k'
+  return (n / 1e6).toFixed(1) + 'M'
+}
+
+
+// ------------------------------------------------------------------ controls
+
+function renderControls() {
+  $('#minSel').innerHTML = MINS.map((m) => `<option value="${m}"${S.min === m ? ' selected' : ''}>${m}+ spelling${m === 1 ? '' : 's'}</option>`).join('')
+  $('#thr').setAttribute('aria-pressed', String(S.through))
+  $('#thr').classList.toggle('active', !!S.through)
+}
+$('#minSel').onchange = (ev) => { S.min = +ev.target.value; renderControls(); load() }
+$('#thr').onclick = () => { S.through = !S.through; renderControls(); load() }
+let qTimer = null
+$('#q').addEventListener('input', () => { clearTimeout(qTimer); qTimer = setTimeout(() => { S.q = $('#q').value.trim(); load() }, 280) })
+
+// ------------------------------------------------------------------ the overview
+
+function query(extraQ) {
+  return { op: 'overview', min: S.min, q: S.q, through: S.through, colour: colour.query(),
+    ...(S.section ? { sections: [S.section] } : {}), ...(extraQ || {}) }
+}
+async function load() {
+  let got
+  try { got = await thimble.fetch(query(S.sel ? { sel: S.sel } : null), { key: 'overview' }) } catch (e) { if (e && e.name === 'AbortError') return false; showError($('#list'), e); return false }
+  D = got
+  colour.counts(D.counts || {})
+  if (!ALL_SECTIONS.length && !S.section) ALL_SECTIONS = D.sections.map((x) => x.section)
+  for (const k of Object.keys(extra)) delete extra[k]
+  if (!S.sel) {
+    S.sel = D.pick || null; S.selRef = null
+    if (D.pick_section) S.open.add(D.pick_section)
+  }
+  if (S.sel) S.open.add(String(S.sel).split('/')[0])
+  renderList()
+  await loadFamily()
+  // a family the filters leave no member of gives way to the first one they keep
+  if ((!F || !F.members.length) && D.pick && S.sel !== D.pick) {
+    S.sel = D.pick; S.selRef = null
+    if (D.pick_section) S.open.add(D.pick_section)
+    renderList()
+    await loadFamily()
+  }
+  if (S.scrollList) {
+    S.scrollList = false
+    const el = $('#list .fam.active')
+    if (el) el.scrollIntoView({ block: 'center' })
+  }
+  return true
+}
+// a family's URL in the list, without the host its section's families share
+function famUrl(f, host) {
+  const [h, p] = splitUrl(f.url)
+  return host && h === host ? brk(p) : urlHtml(f.url)
+}
+function commonHost(list) {
+  const n = {}
+  for (const f of list) { const h = splitUrl(f.url)[0]; n[h] = (n[h] || 0) + 1 }
+  const best = Object.entries(n).sort((a, b) => b[1] - a[1])[0]
+  return best && best[1] > 1 ? best[0] : ''
+}
+function famHtml(f, active, host, vals) {
+  const sp = f.spellings !== f.spellings_all ? `<b>${fmt(f.spellings)}</b>/${fmt(f.spellings_all)}` : `<b>${fmt(f.spellings)}</b>`
+  const rows = f.rows !== f.rows_all ? `${fmt(f.rows)}/${fmt(f.rows_all)}` : fmt(f.rows)
+  return `<div class="fam${active ? ' active' : ''}" data-key="${esc(f.key)}" data-anchor="view:${SLUG}/${esc(f.key)}" data-anchor-text="${esc(f.url)}" data-anchor-name="${esc(f.url)}">
+    <div class="b">${f.through ? `<span title="got through">${ico.up.replace('class="ico"', 'class="ico thr"')}</span>` : ''}${f.saved ? `<span title="a saved response">${ico.doc}</span>` : ''}</div>
+    <div class="u" title="${esc(f.url)}">${famUrl(f, host)}</div>
+    <div class="r1">${sp}<span class="un">${f.spellings_all === 1 ? 'spelling' : 'spellings'}</span></div>
+    <div class="strips"><div class="strip" style="${stripStyle(f.strip, vals)}"></div></div>
+    <div class="r2">${rows}<span class="un">${f.rows_all === 1 ? 'row' : 'rows'}</span></div>
+  </div>`
+}
+function renderList() {
+  const el = $('#list')
+  if (!D) return
+  const opts = `<option value="">All sections</option>` + (ALL_SECTIONS.length ? ALL_SECTIONS : D.sections.map((x) => x.section)).map((x) => `<option value="${esc(x)}"${x === S.section ? ' selected' : ''}>${esc(x)}</option>`).join('')
+  let html = `<div class="tot"><b>${fmt(D.families)}</b> families <span class="num">${fmt(D.rows)} rows</span><select class="field" id="secSel" aria-label="Section">${opts}</select></div>`
+  for (const s of D.sections) {
+    if (S.section && s.section !== S.section) continue
+    const open = S.open.has(s.section)
+    // the section's members by value, in the chips' order, no value last
+    const order = new Map(colour.values.map((v, i) => [v.value, i]))
+    const mix = s.mix.slice().sort((x, y) => (x[0] < 0 ? 1e9 : order.has(D.vals[x[0]]) ? order.get(D.vals[x[0]]) : 1e6) - (y[0] < 0 ? 1e9 : order.has(D.vals[y[0]]) ? order.get(D.vals[y[0]]) : 1e6))
+    const tot = mix.reduce((a, [, n]) => a + n, 0) || 1
+    let at = 0
+    const stops = mix.map(([v, n]) => { const a = at, b = at + (n / tot) * 100; at = b; return `${paint(v < 0 ? null : D.vals[v])} ${a.toFixed(2)}% ${b.toFixed(2)}%` }).join(', ')
+    html += `<button class="sec${open ? ' open' : ''}${s.families ? '' : ' empty'}" data-sec="${esc(s.section)}" aria-expanded="${open}">${ico.caret}<span class="nm">${esc(s.section)}</span><span class="num">${fmt(s.families)}</span><span>${s.through ? `<span class="chip chip-tone-neutral" title="families that got through">${ico.up}${fmt(s.through)}</span>` : ''}</span><span class="mix" style="${s.rows ? `background:linear-gradient(to right, ${stops}), var(--hatch)` : ''}"></span></button>`
+    if (!open) continue
+    const list = s.list.concat(extra[s.section] || [])
+    const host = commonHost(list)
+    html += list.map((f) => famHtml(f, f.key === S.sel, host, D.vals)).join('')
+    if (s.pinned && !list.some((f) => f.key === s.pinned.key)) html += `<div class="gapr">${fmt(s.pinned.rank)} of ${fmt(s.families)}</div>${famHtml(s.pinned, s.pinned.key === S.sel, host, D.vals)}`
+    if (list.length < s.families) html += `<button class="more" data-more="${esc(s.section)}">${fmt(s.families - list.length)} more</button>`
+    if (!s.families) html += '<div class="void">No family here</div>'
+  }
+  el.innerHTML = html
+}
+$('#list').addEventListener('change', (ev) => {
+  if (ev.target.id !== 'secSel') return
+  S.section = ev.target.value
+  if (S.section && !String(S.sel || '').startsWith(S.section + '/')) S.sel = null
+  if (S.section) S.open.add(S.section)
+  load()
+})
+$('#list').addEventListener('click', async (ev) => {
+  const sec = ev.target.closest('[data-sec]')
+  if (sec) { const s = sec.dataset.sec; S.open.has(s) ? S.open.delete(s) : S.open.add(s); renderList(); return }
+  const more = ev.target.closest('[data-more]')
+  if (more) {
+    const s = more.dataset.more
+    const sec_ = D.sections.find((x) => x.section === s)
+    const offset = sec_.list.length + (extra[s] || []).length
+    more.disabled = true
+    try {
+      const got = await thimble.fetch(query({ section: s, offset }), { key: 'more:' + s })
+      const one = got.sections.find((x) => x.section === s)
+      extra[s] = (extra[s] || []).concat(one ? one.list : [])
+    } catch (e) { if (!(e && e.name === 'AbortError')) showError($('#list'), e) }
+    renderList()
+    return
+  }
+  const fam = ev.target.closest('[data-key]')
+  if (fam) openFamily(fam.dataset.key)
+})
+function openFamily(key, ref) {
+  S.sel = key; S.selRef = ref || null; S.kind = null; S.spell = null; S.offset = 0; S.sibs = false
+  M = null
+  for (const el of document.querySelectorAll('#list .fam')) el.classList.toggle('active', el.dataset.key === key)
+  return loadFamily()
+}
+
+// ------------------------------------------------------------------ the open family
+
+async function loadFamily() {
+  if (!S.sel) { F = null; renderFamily(); return }
+  let got
+  try {
+    got = await thimble.fetch({ op: 'family', key: S.sel, offset: S.offset, ref: S.selRef, colour: colour.query() }, { key: 'family' })
+  } catch (e) { if (e && e.name === 'AbortError') return; showError($('#members'), e); return }
+  F = got
+  if (F) S.offset = F.offset
+  if (S.autoMember && F && F.members.length && !S.selRef) {
+    // a family a citation opens shows one member in full: one with a saved response, else the first that got past a
+    // block, else the first
+    const m = F.members.find((x) => x.saved) || F.members.find((x) => x.passed) || F.members[0]
+    S.selRef = m.ref
+  }
+  S.autoMember = false
+  renderFamily()
+  if (S.selRef && F && F.members.some((m) => m.ref === S.selRef)) { await loadMember(S.selRef); scrollToMember(S.selRef, 'center') }
+  else hideDetail()
+}
+function renderFamily() {
+  const head = $('#fhead'), list = $('#members')
+  if (!F) {
+    head.innerHTML = ''
+    list.innerHTML = `<div class="void">${S.sel ? 'This family has no member the filters keep' : 'No family the filters keep'}</div>`
+    hideDetail()
+    return
+  }
+  const span = F.span[0] && F.span[1] ? `${esc(F.span[0])} – ${esc(F.span[1])}` : ''
+  const sp = F.spellings !== F.spellings_all ? `${fmt(F.spellings)} of ${fmt(F.spellings_all)}` : fmt(F.spellings)
+  const rows = F.rows !== F.rows_all ? `${fmt(F.rows)} of ${fmt(F.rows_all)}` : fmt(F.rows)
+  const dense = F.members.length > 120
+  const cells = F.members.map((m, j) => `<i data-j="${j}" class="${m.v != null ? '' : 'none'}" style="${m.v != null ? `background:${esc(paint(m.v))}` : ''}" title="${esc(when(m.time).day + ' ' + when(m.time).time + ' · ' + (m.status || 'no status') + (colour.field === 'answer' ? '' : ' · ' + (m.v ?? noValue())))}"></i>`).join('')
+  // the first member that got a 2xx after a 4xx or 5xx for the same page, which a click opens
+  const thr = F.through ? F.members.find((m) => m.passed) : null
+  const kinds = F.kinds.map(([k, n]) => `<button class="chip chip-key chip-act" data-kind="${k}" aria-pressed="${!S.kind || S.kind === k}" style="--c:var(--k-${k})"${k === 'wrapper' && F.wrappers.length ? ` title="${esc(F.wrappers.join(', '))}"` : ''}><span class="chip-sw"></span><span class="chip-text">${esc(KIND_NAMES[k])}</span><span class="chip-count">${fmt(n)}</span></button>`).join('')
+  const seg = `<span class="seg seg-track"><button class="seg-opt${S.mode === 'time' ? ' active' : ''}" data-mode="time">Time</button><button class="seg-opt${S.mode === 'spell' ? ' active' : ''}" data-mode="spell">Spellings</button></span>`
+  const sibs = F.sibling_count ? `<button class="btn btn-ghost btn-sm${S.sibs ? ' active' : ''}" data-sibs aria-pressed="${S.sibs}">${fmt(F.sibling_count)} other ${F.sibling_count === 1 ? 'family' : 'families'} on this path${ico.caret}</button>` : ''
+  head.innerHTML = `<div class="u" data-anchor="view:${SLUG}/${esc(F.key)}" data-anchor-text="${esc(F.url)}" data-anchor-name="${esc(F.url)}">${urlHtml(F.url)}</div>
+    <div class="meta"><span>${esc(F.section)}</span><span><b>${sp}</b> spellings</span><span><b>${rows}</b> rows</span>${span ? `<span class="num">${span}</span>` : ''}${thr ? `<button class="through" data-thr="${esc(thr.ref)}" data-anchor="${esc(thr.ref)}" data-anchor-text="${esc(F.spelling_list[thr.spelling_idx].url)}" title="Open the first member that got a 2xx after a 4xx or 5xx">${ico.up}got through <span class="tm">${esc(when(thr.time).day)} ${esc(when(thr.time).time)}</span></button>` : F.through ? `<span class="through">${ico.up}got through</span>` : ''}${sibs}</div>
+    <div class="bigstrip${dense ? ' dense' : ''}">${cells}</div>
+    <div class="row2">${kinds}${seg}</div>
+    ${S.sibs ? `<div class="sibs">${F.siblings.map((f) => famHtml(f, false, '', F.vals)).join('')}</div>` : ''}`
+  renderMembers()
+}
+$('#fhead').addEventListener('click', (ev) => {
+  const c = ev.target.closest('.bigstrip i')
+  if (c) { const m = F.members[+c.dataset.j]; if (m) { S.mode = 'time'; S.spell = null; selectMember(m.ref, true) } return }
+  const th = ev.target.closest('[data-thr]')
+  if (th && !ev.metaKey && !ev.ctrlKey) { if (S.mode !== 'time' || S.spell != null || S.kind) { S.mode = 'time'; S.spell = null; S.kind = null; renderFamily() } selectMember(th.dataset.thr, true); return }
+  const k = ev.target.closest('[data-kind]')
+  if (k) { S.kind = S.kind === k.dataset.kind ? null : k.dataset.kind; renderFamily(); return }
+  const md = ev.target.closest('[data-mode]')
+  if (md) { S.mode = md.dataset.mode; S.spell = null; renderFamily(); $('#members').scrollTop = 0; return }
+  if (ev.target.closest('[data-sibs]')) { S.sibs = !S.sibs; renderFamily(); return }
+  const fam = ev.target.closest('.sibs [data-key]')
+  if (fam) openFamily(fam.dataset.key)
+})
+
+function wideMembers() { return ($('#members').clientWidth || 600) >= 560 }
+function memberCols(hasLen) {
+  return wideMembers()
+    ? ['62px', '52px', 'minmax(0, 1fr)', '58px', hasLen ? '52px' : '', '30px'].filter(Boolean).join(' ')
+    : ['56px', '52px', 'minmax(0, 1fr)', hasLen ? '44px' : '', '30px'].filter(Boolean).join(' ')
+}
+const MIME_SHORT = { javascript: 'js', 'x-javascript': 'js', 'octet-stream': 'binary', 'vnd.ms-excel': 'xls', 'vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'xlsx', 'x-zip-compressed': 'zip', plain: 'text' }
+function mimeShort(m) {
+  if (!m) return ''
+  const t = String(m).split(';')[0].trim().toLowerCase().split('/').pop()
+  if (MIME_SHORT[t]) return MIME_SHORT[t]
+  for (const [re, short] of [[/json/, 'json'], [/xml/, 'xml'], [/spreadsheet|excel/, 'xls'], [/zip/, 'zip'], [/pdf/, 'pdf']]) if (re.test(t)) return short
+  return t.replace(/^(x-|vnd\.)/, '')
+}
+function bodyMark(m) {
+  if (!m.digest) return ''
+  if (m.digest_idx != null && m.digest_idx >= 0) return `<span class="chip chip-tone-neutral" title="the same body as other members: ${esc(m.digest)}">${String.fromCharCode(65 + (m.digest_idx % 26))}</span>`
+  return ''
+}
+function renderMembers() {
+  const el = $('#members')
+  const hasLen = F.members.some((m) => m.length != null)
+  const wide = wideMembers()
+  el.style.setProperty('--cols', memberCols(hasLen))
+  if (!F.members.length) { el.innerHTML = '<div class="void">No member the filters keep</div>'; return }
+  if (S.mode === 'spell') return renderSpellings()
+  const maxLen = Math.max(1, ...F.members.map((m) => m.length || 0))
+  let html = `<div class="mh"><span>Time</span><span>Status</span><span>Spelling</span>${wide ? '<span>Mime</span>' : ''}${hasLen ? '<span class="r">Bytes</span>' : ''}<span>Body</span></div>`
+  let day = ''
+  for (const m of F.members) {
+    const sp = F.spelling_list[m.spelling_idx]
+    const w = when(m.time)
+    if (w.day !== day) { day = w.day; html += `<div class="day">${esc(day)}</div>` }
+    const has = !S.kind || sp.parts.some(([, k]) => k === S.kind)
+    const faded = (!has) || (S.spell != null && S.spell !== m.spelling_idx)
+    const st = m.status ? `<span class="chip chip-tone-neutral"${m.passed ? ' title="got through: a 2xx after a 4xx or 5xx"' : ''}>${m.passed ? ico.up : ''}${esc(m.status)}</span>` : `<span class="chip chip-plain" title="no status">–</span>`
+    const len = m.length != null ? `${bytes(m.length)}<i style="width:${Math.max(2, Math.round((m.length / maxLen) * 100))}%"></i>` : '–'
+    const mi = mimeShort(m.mime)
+    const sub = [m.source === 'urlquery' ? 'scan' : '', wide ? '' : mi].filter(Boolean).join(' · ')
+    html += `<div class="mem${m.ref === S.selRef ? ' active' : ''}${faded ? ' faded' : ''}" data-ref="${esc(m.ref)}" data-anchor="${esc(m.ref)}" data-anchor-text="${esc(sp.url)}" data-anchor-name="${esc((m.status || 'scan') + ' · ' + w.day + ' ' + w.time)}"${colour.attr(m)}>
+      <span class="tm">${esc(w.time)}</span><span class="st">${st}${sub ? `<span class="src" title="${esc(m.mime || '')}">${esc(sub)}</span>` : ''}</span><span class="url">${partsHtml(sp.parts)}</span>${wide ? `<span class="mi" title="${esc(m.mime || '')}">${esc(mi || '–')}</span>` : ''}${hasLen ? `<span class="ln">${len}</span>` : ''}<span>${bodyMark(m)}</span></div>`
+  }
+  if (F.offset > 0 || F.more) {
+    html += `<div class="page"><span class="num">${fmt(F.offset + 1)}–${fmt(F.offset + F.members.length)} of ${fmt(F.rows)}</span>${F.offset > 0 ? '<button class="btn btn-ghost btn-sm" data-page="-1">Earlier</button>' : ''}${F.more ? '<button class="btn btn-ghost btn-sm" data-page="1">Later</button>' : ''}</div>`
+  }
+  el.innerHTML = html
+}
+function renderSpellings() {
+  const el = $('#members')
+  const by = F.spelling_list.map(() => [])
+  const maxLen = Math.max(1, ...F.members.map((m) => m.length || 0))
+  for (const m of F.members) by[m.spelling_idx].push(m)
+  let html = ''
+  F.spelling_list.forEach((sp, j) => {
+    const ms = by[j]
+    if (!ms.length) return
+    if (S.kind && !sp.parts.some(([, k]) => k === S.kind)) return
+    const cells = ms.length > 32
+      ? `<span class="sstrip" style="${stripStyle(runsOf(ms.map((m) => (m.v == null ? 0 : F.vals.indexOf(m.v) + 1))), F.vals)}"></span>`
+      : ms.map((m) => `<i class="${m.v != null ? '' : 'none'}" style="${m.v != null ? `background:${esc(paint(m.v))}` : ''}" title="${esc(when(m.time).day + ' ' + when(m.time).time + ' · ' + (m.status || 'no status'))}"></i>`).join('')
+    const lens = ms.map((m) => m.length).filter((x) => x != null)
+    const lo = lens.length ? Math.min(...lens) : null, hi = lens.length ? Math.max(...lens) : null
+    const len = lo == null ? '' : bytes(lo) === bytes(hi) ? bytes(lo) : `${bytes(lo)}–${bytes(hi)}`
+    html += `<div class="spl" data-spell="${j}"><span class="url">${partsHtml(sp.parts)}</span><span class="cells">${cells}</span><span class="ln">${len}<i style="width:${hi == null ? 0 : Math.max(2, Math.round((hi / maxLen) * 100))}%"></i></span><span class="num" style="text-align:right">${fmt(ms.length)}</span></div>`
+  })
+  el.innerHTML = html || '<div class="void">No spelling of this kind</div>'
+}
+$('#members').addEventListener('click', (ev) => {
+  const pg = ev.target.closest('[data-page]')
+  if (pg) { S.offset = Math.max(0, F.offset + (+pg.dataset.page) * PAGE); S.selRef = null; loadFamily().then(() => { $('#members').scrollTop = 0 }); return }
+  const spl = ev.target.closest('[data-spell]')
+  if (spl) { S.mode = 'time'; S.spell = +spl.dataset.spell; renderFamily(); const m = F.members.find((x) => x.spelling_idx === S.spell); if (m) scrollToMember(m.ref); return }
+  const row = ev.target.closest('[data-ref]')
+  if (row) selectMember(row.dataset.ref)
+})
+$('#members').addEventListener('keydown', (ev) => {
+  if (ev.key !== 'ArrowDown' && ev.key !== 'ArrowUp' || !F || !F.members.length || S.mode !== 'time') return
+  ev.preventDefault()
+  const j = F.members.findIndex((m) => m.ref === S.selRef)
+  const k = Math.max(0, Math.min(F.members.length - 1, j < 0 ? 0 : j + (ev.key === 'ArrowDown' ? 1 : -1)))
+  selectMember(F.members[k].ref, true)
+})
+$('#members').tabIndex = 0
+function scrollToMember(ref, block = 'nearest') {
+  const el = [...document.querySelectorAll('#members .mem')].find((x) => x.dataset.ref === ref)
+  if (el) el.scrollIntoView({ block })
+}
+async function selectMember(ref, scroll) {
+  S.selRef = ref
+  for (const el of document.querySelectorAll('#members .mem')) el.classList.toggle('active', el.dataset.ref === ref)
+  await loadMember(ref)
+  if (scroll) scrollToMember(ref)
+}
+
+// ------------------------------------------------------------------ one member
+
+async function loadMember(ref) {
+  let got
+  try { got = await thimble.fetch({ op: 'member', ref }, { key: 'member' }) } catch (e) { if (e && e.name === 'AbortError') return; showError($('#detail'), e); $('#detail').hidden = false; return }
+  M = got
+  renderDetail()
+}
+function hideDetail() { M = null; $('#detail').hidden = true; $('#detail').innerHTML = '' }
+function renderDetail() {
+  const el = $('#detail')
+  if (!M) return hideDetail()
+  el.hidden = false
+  const fm = F && F.members.find((m) => m.ref === M.ref)
+  const sp = fm ? F.spelling_list[fm.spelling_idx] : null
+  const w = fm ? when(fm.time) : { day: '', time: '' }
+  const linkCols = new Set(['archive_url', 'report_url', 'json_url'])
+  const rows = M.columns.map(([k, v]) => {
+    let val = brk(v)
+    if (linkCols.has(k) && /^https?:\/\//.test(v)) val = `<a href="${esc(v)}" target="_blank" rel="noopener noreferrer">${brk(v)}</a>`
+    if ((k === 'target_url' || k === 'submitted_url') && sp && sp.url === v) val = partsHtml(sp.parts)
+    if (k === 'indexed_http_status' || k === 'mime') return `<tr><td class="k">${esc(k)}</td><td class="v">${val}</td></tr>`
+    return `<tr><td class="k">${esc(k)}</td><td class="v">${val}</td></tr>`
+  }).join('') + (M.status_from ? `<tr><td class="k">status</td><td class="v">${esc(M.status || '–')} <span class="num">from ${esc(M.status_from)}</span></td></tr>` : '')
+  let resp = ''
+  if (M.saved_responses.length) {
+    resp = M.saved_responses.map((r) => `<div class="rh"><span class="t" title="${esc(r.source_url)}">${esc(r.file || 'no file')}${r.http_status ? ` · ${esc(r.http_status)}` : ''}</span>${r.path ? `<button class="btn btn-ghost btn-sm" data-nav="${esc(r.path)}">${ico.file}Open</button>` : ''}</div>${r.text != null ? `<pre>${esc(r.text)}${r.cut ? '\n…' : ''}</pre>` : `<div class="none">${r.image ? 'An image' : r.missing ? 'The file is missing' : ''}</div>`}`).join('')
+  }
+  const stack = el.clientWidth < 560
+  const line = (/#L(\d+)/.exec(M.ref || '') || [])[1] || ''
+  const word = M.status ? (CODE_WORD[+M.status] || CLS_WORD[clsOf(M.status)] || '') : (M.source === 'urlquery' ? 'the scanner made no request for this address' : 'no status')
+  const notes = [WITHHELD_RX.test(M.line || '') ? WITHHELD_NOTE : ''].filter(Boolean)
+  el.innerHTML = `<div class="dh" data-anchor="${esc(M.ref)}" data-anchor-text="${esc(sp ? sp.url : M.link)}" data-anchor-name="${esc((M.status || 'scan') + ' · ' + w.day + ' ' + w.time)}"${fm ? colour.attr(fm) : ''}>
+      <span class="ans"><b>${esc(M.status || '–')}</b> · ${esc(word)}</span>
+      <span class="t" title="${esc(placeOf(M.ref))}">${esc(w.day + ' ' + w.time)} · ${esc(placeOf(M.ref))}</span>
+      ${M.link ? `<a class="btn btn-ghost btn-sm" href="${esc(M.link)}" target="_blank" rel="noopener noreferrer">${M.source === 'urlquery' ? 'Report' : 'Archive'}</a>` : ''}
+      <button class="btn btn-secondary btn-sm" data-nav="${esc(M.ref)}">${ico.file}Open line ${esc(fmt(line))} in the file</button>
+      <button class="btn btn-ghost btn-sm" data-close aria-label="Close">${ico.close}</button></div>
+    ${notes.map((n) => `<div class="dnote">${n}</div>`).join('')}
+    <div class="db${stack ? ' stack' : ''}">${!M.saved_responses.length ? `<div class="cols"><table>${rows}</table></div>` : stack ? `<div class="resp">${resp}</div><div class="cols"><table>${rows}</table></div>` : `<div class="cols"><table>${rows}</table></div><div class="resp">${resp}</div>`}</div>`
+}
+$('#detail').addEventListener('click', (ev) => {
+  if (ev.target.closest('[data-close]')) { S.selRef = null; for (const el of document.querySelectorAll('#members .mem.active')) el.classList.remove('active'); hideDetail(); return }
+  const n = ev.target.closest('[data-nav]')
+  if (n) thimble.navigate(n.dataset.nav, { browser: true })
+})
+
+function placeOf(ref) {
+  const m = /^(.*)#L(\d+)$/.exec(ref || '')
+  return m ? `${m[1]}, line ${fmt(m[2])}` : ref
+}
+function showError(el, e) { el.innerHTML = `<div class="err">${esc((e && (e.message || e.reason)) || String(e))}</div>` }
+
+
+// ------------------------------------------------------------------ thimble
+
+let started = false
+let pendingOpen = null
+async function start() {
+  if (started) return
+  started = true
+  renderControls()
+  if (pendingOpen) { S.sel = pendingOpen.key; S.selRef = pendingOpen.ref || null; S.scrollList = true }
+  await load()
+}
+thimble.onOpen(async (place) => {
+  const t = (place && place.target) || {}
+  if (!t.key) {
+    if (t.section) S.open.add(t.section)
+    if (!started) return start()
+    renderList()
+    const el = [...document.querySelectorAll('#list .sec')].find((x) => x.dataset.sec === t.section)
+    if (el) el.scrollIntoView({ block: 'start' })
+    return
+  }
+  const sec = String(t.key).split('/')[0]
+  S.scrollList = true
+  S.autoMember = !t.ref
+  if (!started) { pendingOpen = t; S.open.add(sec); return start() }
+  S.open.add(sec)
+  S.sel = t.key; S.selRef = t.ref || null; S.kind = null; S.spell = null; S.offset = 0; S.sibs = false
+  if (S.section && S.section !== sec) S.section = ''
+  await load()
+})
+// the label filter keeps fewer members; a label's values arrive while it runs, which the strips follow while a label
+// is the colour
+thimble.onLabels(async (state) => {
+  const key = JSON.stringify([(state.labels || []).map((l) => [l.id, l.values]), state.filter || null])
+  const was = labelKey
+  labelKey = key
+  if (!started || was === null || was === key) return
+  await load()
+})
+let marksTimer = null
+thimble.onMarks(() => { if (!colour.label || !started) return; clearTimeout(marksTimer); marksTimer = setTimeout(load, 300) })
+let rz = null
+addEventListener('resize', () => { clearTimeout(rz); rz = setTimeout(() => { if (F) renderMembers(); if (M) renderDetail() }, 120) })
+setTimeout(() => { if (!started) start() }, 60)
+</script>
+</body>
+</html>

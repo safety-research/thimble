@@ -1,0 +1,51 @@
+{
+  "name": "Activity Timeline",
+  "description": "Every record of the agent's transcript on one time axis, one lane per activity, so the long stretches of captcha-solving, account sign-up and money-hunting stand apart from the thin sliver of exploit work at the very end; the marks, the run strip and the list colour by Activity, Tool or any label from one Colour by control, and a record opens in full in the list with a button that opens the transcript at that message.",
+  "claims": [
+    "transcript.jsonl"
+  ],
+  "accepts": [
+    {
+      "form": "L<n>",
+      "means": "the record on line <n>, or the nearest, opened in the list"
+    }
+  ],
+  "units": [
+    {
+      "form": "<index>",
+      "means": "the record with that index, opened in the list"
+    }
+  ],
+  "libs": [],
+  "records": [
+    {
+      "name": "record",
+      "one": "one transcript message — a piece of reasoning or a tool call with its result",
+      "fields": [
+        {
+          "name": "time",
+          "type": "time",
+          "derived": "cleaned",
+          "from": "timestamp",
+          "how": "read in UTC, and for the system prompt and the two context-compaction turns, whose stamp is the harness clock rather than a point in the run, taken from the records around them in file order"
+        },
+        {
+          "name": "activity",
+          "type": "category",
+          "derived": "computed",
+          "from": "the record's content, tool call and result",
+          "how": "classified captcha, signup, money, exploit, infra or other by a table of text and file-path signals, the strongest single match winning, and a bare reasoning record with no signal of its own taking the activity of the nearest record that has one; the system prompt and the two compaction turns take no activity"
+        },
+        {
+          "name": "value",
+          "type": "category",
+          "derived": "computed",
+          "from": "the Colour by choice",
+          "how": "the record's activity, its tool (Reasoning for a message with no tool), or a label's value on it"
+        }
+      ]
+    }
+  ],
+  "built": "2026-10-06T21:50:06+00:00",
+  "version": "7deb9fb3ab86"
+}

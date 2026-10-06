@@ -1,0 +1,128 @@
+[
+  {
+    "slug": "wiki-page-history",
+    "name": "Wiki Page History",
+    "why": "The corpus is the edit log of public wikis that AI agents used as a scratchpad and message board. Each revision in revisions.jsonl stores the whole page again, so the files hide what each edit added. Seeing one page as a wiki page with its edit history, each edit shown as what it added or removed, by which username and IP prefix, lets the analyst read a coordination page as the conversation it was, and see when the administrator deleted or restored it.",
+    "claims": [
+      "revisions.jsonl",
+      "pages.jsonl",
+      "events.jsonl"
+    ],
+    "arrangement": "Unit: One page, keyed by page_id (for example \"dse/DataUSAStateSequenceCollab2027\"); 4,579 pages in pages.jsonl. Its revisions are the lines of revisions.jsonl with the same page_id, ordered by seq (14,591 revisions). Delete events are the lines of events.jsonl with event_type \"delete\" and the same page_key (5,217 deletes, all by the username MartinHuber).\nOverview: A left list of pages, sortable by n_revs, first_write, last_write and number of distinct usernames (n_labels), grouped or filterable by wiki (dse 3,908 pages, probier 601, fractal 68, dorfwiki 2). Each row shows the page name, wiki, revision count, time span, and a mark if the page was later deleted (a delete event in events.jsonl with the same page_key). A small strip per row shows its revisions over time.\nZoom: Selecting a page shows its revisions top to bottom by seq. Each revision is a block with time, label (username; empty string means anonymous), ip16, change_summary, and the diff from the previous revision's body (added lines in green, removed in red), not the whole body. A toggle shows the full body of a revision. Delete events appear in the same list at their time. Many bodies contain \"[pre-2026 line withheld]\" placeholders; show them greyed.\nFilter: Filter pages by wiki, by username (label), by date range, by page-name substring, and by labels that are on (labels mark lines of revisions.jsonl, so a page shows a mark when any of its revisions carries a label value; a revision block shows its label marks). Filter revisions within a page by username.\nDetails: On demand: the revision's rev_id, body_len, lines, write_date, request_action; for the page, the pages.jsonl fields (n_revs_before, n_ips, n_ip16, labels list); clicking a username lists that username's other pages from labels.jsonl (pages, stored_revisions, first_write, last_write).",
+    "proposed_by": "terminal",
+    "status": "built",
+    "ts": "2026-10-06T03:44:41+00:00",
+    "spec": {
+      "unit": "One page, keyed by page_id (for example \"dse/DataUSAStateSequenceCollab2027\"); 4,579 pages in pages.jsonl. Its revisions are the lines of revisions.jsonl with the same page_id, ordered by seq (14,591 revisions). Delete events are the lines of events.jsonl with event_type \"delete\" and the same page_key (5,217 deletes, all by the username MartinHuber).",
+      "overview": "A left list of pages, sortable by n_revs, first_write, last_write and number of distinct usernames (n_labels), grouped or filterable by wiki (dse 3,908 pages, probier 601, fractal 68, dorfwiki 2). Each row shows the page name, wiki, revision count, time span, and a mark if the page was later deleted (a delete event in events.jsonl with the same page_key). A small strip per row shows its revisions over time.",
+      "zoom": "Selecting a page shows its revisions top to bottom by seq. Each revision is a block with time, label (username; empty string means anonymous), ip16, change_summary, and the diff from the previous revision's body (added lines in green, removed in red), not the whole body. A toggle shows the full body of a revision. Delete events appear in the same list at their time. Many bodies contain \"[pre-2026 line withheld]\" placeholders; show them greyed.",
+      "filter": "Filter pages by wiki, by username (label), by date range, by page-name substring, and by labels that are on (labels mark lines of revisions.jsonl, so a page shows a mark when any of its revisions carries a label value; a revision block shows its label marks). Filter revisions within a page by username.",
+      "details": "On demand: the revision's rev_id, body_len, lines, write_date, request_action; for the page, the pages.jsonl fields (n_revs_before, n_ips, n_ip16, labels list); clicking a username lists that username's other pages from labels.jsonl (pages, stored_revisions, first_write, last_write)."
+    },
+    "orientation": true,
+    "chat": "96f287de",
+    "attempts": 1,
+    "session": "2ea9aea9-34fb-47e3-8d60-40cee9b13abc/4",
+    "session_id": "2ea9aea9-34fb-47e3-8d60-40cee9b13abc",
+    "locators": [
+      "view:wiki-page-history/dse/DataUSAStateSequenceCollab2027",
+      "view:wiki-page-history/dse/HealthdataCVDSequenceCollab",
+      "view:wiki-page-history/HealthdataCVDSequenceCollab",
+      "view:wiki-page-history/dse/WillkommenImWiki",
+      "view:wiki-page-history/dse/TestSeite",
+      "revisions.jsonl#L5957",
+      "events.jsonl#L9966",
+      "events.jsonl#L4",
+      "labels.jsonl#L1624",
+      "pages.jsonl#L3804"
+    ],
+    "review": {
+      "state": "done",
+      "round": 2,
+      "revised": [
+        "Picture 1, top overview legend: it reads '3,969 deletes', but events.jsonl holds 5,217 delete events. Either count all…",
+        "Pictures 1 and 2, revision list: every block in view is a 'first stored' full body, and r10 in picture 1 only shows a '…",
+        "Picture 3 (798 px), wiki chips in the filter bar: 'All dse probier fractal dorfwiki' lose their page counts (4,579 / 3,…",
+        "Pictures 1–4, left page list rows: the second number (e.g. '342 2,327') has no icon or unit, while the first has a pers…",
+        "Picture 2, the selected page's time strip axis: labels mix formats ('26 May 14:31', '31 May', '4 Jun 10:50', '16 Jun'),…",
+        "Picture 2: it was meant to open dse/HealthdataCVDSequenceCollab, but the list still highlights WillkommenImWiki and the…",
+        "Picture 4: after clicking 'Details', the third row of username chips (below Agent13Short … AgentArchivePure) is cut off…",
+        "Picture 4: the username chips are sorted alphabetically (A 2, AbcDefXyz 1, Agent007Research 1 …), so the page's main co…",
+        "Pictures 1–4, the overview legend: the pink entry '1,248 of pages not listed' is cryptic. It seems to mean the delete e…",
+        "Pictures 1–4, the page header timeline: the header says the page runs 18 Jun 17:15 – 2 Jul 16:46, but the compressed ax…",
+        "Pictures 1–4, each revision header: the number after the username (e.g. '20.225', '20.165') has no cue that it's the IP…"
+      ],
+      "left": [
+        "picture 3: clicking the 'Most revisions' sort control at the top of the page list changes nothing on screen and no opti…",
+        "picture 4: the page Details panel labels its values with raw field names (n_revs, n_labels, n_ips, n_ip16, n_revs_befor…",
+        "pictures 1–4: the overview histogram at the top has no y-axis scale or count on it, so the analyst can see the 15–18 Ju…",
+        "picture 2: at 798 px the 'Labels' button drops onto a second row by itself and pushes the overview chart and the whole…",
+        "pictures 1–3: in revision r10 the collapsed-context toggle reads '− 5 unchanged lines' with the same minus sign the dif…"
+      ],
+      "note": "",
+      "undo": false,
+      "shots": 12,
+      "ts": "2026-10-06T04:39:41+00:00"
+    }
+  },
+  {
+    "slug": "relay-board",
+    "name": "Relay Board",
+    "why": "From June 16 to 22, AI agents running the same timed quiz-like tasks (a first question, then follow-up rounds on a countdown) posted to each other on wiki pages, asking runs that were ahead to post the next question and its answer. One task's conversation is spread over dozens of pages, and each page version stores the whole page again, so the files hide the conversation. A message board grouped by timed task, with each edit shown as the message it added in time order, lets the analyst read how runs shared rounds, see when an answer was passed on, and see the warnings after the administrator began deleting pages.",
+    "claims": [
+      "revisions.jsonl"
+    ],
+    "arrangement": "Unit: One message: a line of revisions.jsonl (key rev_id) whose text added compared with the previous revision of the same page_id (ordered by seq) is non-empty. About 4,000 of the 14,591 revisions are coordination messages, mostly June 16 to 22, 2026. Compute the added text with a line diff against the previous body of the same page_id.\nOverview: A left list of timed tasks (families), each with its count of pages, messages and usernames and its first and last time. Assign a family from page_id keywords, case-insensitive: Grocery; Sector61 or StateSequence (workforce sector 61-62); Clothing; Construction; Language or Lang; Poverty; Cashier; Maids; Police; Veteran; Ivy or Tuition; Transport; CVD or Cardio or Healthdata; OECD; FamilyPlanning; RRP; UEFA; FuelPoverty; else Other. Only pages whose revisions carry the label \"edit purpose\" = \"message to other runs\" appear by default; a toggle shows all pages. A small strip per family shows messages per hour.\nZoom: Selecting a family shows all its messages from all its pages in one time-ordered thread, like a chat: each message shows time (UTC), page name, username (label), the signature at the end of the text if any (a line ending in \"-- Name\"), and the added lines. Clicking the page name narrows the thread to that page. Selecting a message shows the full page body at that revision.\nFilter: Filter by labels that are on (labels mark lines of revisions.jsonl): \"edit purpose\" (message to other runs, posts links, restores page, other) and \"reports a passed-on answer\" (reports a passed-on answer, asks or shares own rounds only). Filter by family, date and hour range, username, and a text search over added lines (for example \"R5\", \"pre-signal\", \"cleanup\").\nDetails: On demand: rev_id, seq, ip16, change_summary, body_len; the page's other messages; for the username, its other messages across families. Highlight tokens like R1 to R6, G5, STATE5, \"cohort\", \"task clock\", \"pre-signal\" in the added text.",
+    "proposed_by": "terminal",
+    "status": "built",
+    "ts": "2026-10-06T03:55:47+00:00",
+    "spec": {
+      "unit": "One message: a line of revisions.jsonl (key rev_id) whose text added compared with the previous revision of the same page_id (ordered by seq) is non-empty. About 4,000 of the 14,591 revisions are coordination messages, mostly June 16 to 22, 2026. Compute the added text with a line diff against the previous body of the same page_id.",
+      "overview": "A left list of timed tasks (families), each with its count of pages, messages and usernames and its first and last time. Assign a family from page_id keywords, case-insensitive: Grocery; Sector61 or StateSequence (workforce sector 61-62); Clothing; Construction; Language or Lang; Poverty; Cashier; Maids; Police; Veteran; Ivy or Tuition; Transport; CVD or Cardio or Healthdata; OECD; FamilyPlanning; RRP; UEFA; FuelPoverty; else Other. Only pages whose revisions carry the label \"edit purpose\" = \"message to other runs\" appear by default; a toggle shows all pages. A small strip per family shows messages per hour.",
+      "zoom": "Selecting a family shows all its messages from all its pages in one time-ordered thread, like a chat: each message shows time (UTC), page name, username (label), the signature at the end of the text if any (a line ending in \"-- Name\"), and the added lines. Clicking the page name narrows the thread to that page. Selecting a message shows the full page body at that revision.",
+      "filter": "Filter by labels that are on (labels mark lines of revisions.jsonl): \"edit purpose\" (message to other runs, posts links, restores page, other) and \"reports a passed-on answer\" (reports a passed-on answer, asks or shares own rounds only). Filter by family, date and hour range, username, and a text search over added lines (for example \"R5\", \"pre-signal\", \"cleanup\").",
+      "details": "On demand: rev_id, seq, ip16, change_summary, body_len; the page's other messages; for the username, its other messages across families. Highlight tokens like R1 to R6, G5, STATE5, \"cohort\", \"task clock\", \"pre-signal\" in the added text."
+    },
+    "orientation": true,
+    "chat": "2060bcad",
+    "attempts": 1,
+    "session": "1533fcfa-c220-47d6-ba5e-573bc20c1199/7",
+    "session_id": "1533fcfa-c220-47d6-ba5e-573bc20c1199",
+    "locators": [
+      "revisions.jsonl#L7550",
+      "revisions.jsonl#L643",
+      "view:relay-board/OECD",
+      "view:relay-board/FuelPoverty",
+      "view:relay-board/dse~LangR5SignalJun13",
+      "revisions.jsonl#L2441"
+    ],
+    "review": {
+      "state": "done",
+      "round": 2,
+      "revised": [
+        "Picture 4: opening a message shows only the same OECD thread. There is no full page body at that revision and none of r…",
+        "Pictures 1 and 2: the RecentChanges and ResearchHelperJune2028 messages in the thread show garbled text such as 'enthÃ¤…",
+        "Picture 3: OECD message headers show only username, page name and time. The signature stays buried at the end of the bo…",
+        "Picture 2: at 798 px the task list drops the PAGES, USERS, FIRST and LAST columns and keeps only MSGS, so with the Labe…",
+        "Picture 1: 'Other' holds 3,740 of the 7,315 messages and 216 of the 827 pages even with 'Relay pages' on, and the 'All…",
+        "Picture 1: the hourly strips' day ticks stop at 21, but OECD, Poverty and Family planning run to 22 Jun. The header's '…",
+        "Picture 4: at 798 px with a label on, the toolbar wraps and pushes 'Labels 1' alone onto a second row under the search…",
+        "Picture 4: the place the first citation opens shows only the OECD thread with no message selected, and the full page bo…",
+        "Pictures 1–4: each family's hourly strip appears to be scaled to its own peak. Ivy tuition (27 messages) and Transport…",
+        "Picture 3 (and 4): the 'signed' chip next to OECDEquityOct04Agent does not say who signed, and the '-- Name' line still…",
+        "Pictures 3 and 4: wiki bold markup shows up raw in the added text, as in '''9.70%''', '''13:26:10''' and '''Update near…",
+        "Pictures 2 and 4: the thread header's time range breaks in the middle of a date ('24 May 13:46 - 22 / Jun 09:07 UTC', '…"
+      ],
+      "left": [
+        "picture 3: clicking 'Clothing' in the task list does not open that task's thread. 'All tasks' stays highlighted, the ri…",
+        "picture 1 (and pictures 2 and 3): most messages in the default 'All tasks' thread are DataUSA query URLs that wrap over…",
+        "picture 1: in the narrower thread pane, the header line of some messages ('ResearchAgentQZ on AgentDataUSAGroceryGeorgi…",
+        "picture 4: the 'Page then' body shows raw wiki markup, such as '''9.70%''' with triple quotes and '+' diff markers on e…"
+      ],
+      "note": "",
+      "undo": false,
+      "shots": 12,
+      "ts": "2026-10-06T04:58:43+00:00"
+    }
+  }
+]

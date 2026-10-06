@@ -1,0 +1,363 @@
+{"clear": "01-education/arquivo-captures.csv", "from": 1, "to": null}
+{"clear": "02-canada/arquivo-captures.csv", "from": 1, "to": null}
+{"clear": "03-kansas/arquivo-captures.csv", "from": 1, "to": null}
+{"clear": "04-illinois/arquivo-captures.csv", "from": 1, "to": null}
+{"clear": "05-maryland/arquivo-captures.csv", "from": 1, "to": null}
+{"clear": "06-new-york/arquivo-captures.csv", "from": 1, "to": null}
+{"clear": "08-california/arquivo-captures.csv", "from": 1, "to": null}
+{"clear": "09-max-gov/arquivo-captures.csv", "from": 1, "to": null}
+{"clear": "10-navy/arquivo-captures.csv", "from": 1, "to": null}
+{"clear": "11-justice/arquivo-captures.csv", "from": 1, "to": null}
+{"clear": "12-bea/arquivo-captures.csv", "from": 1, "to": null}
+{"cover": "01-education/arquivo-captures.csv", "from": 2, "to": 144464, "value": "ordinary", "source": "code", "ts": "2026-10-06T04:35:44+00:00"}
+{"cover": "01-education/arquivo-captures.csv", "from": 144466, "to": 219924, "value": "ordinary", "source": "code", "ts": "2026-10-06T04:35:44+00:00"}
+{"cover": "02-canada/arquivo-captures.csv", "from": 2, "to": 23, "value": "ordinary", "source": "code", "ts": "2026-10-06T04:35:44+00:00"}
+{"cover": "02-canada/arquivo-captures.csv", "from": 25, "to": 299, "value": "ordinary", "source": "code", "ts": "2026-10-06T04:35:44+00:00"}
+{"cover": "02-canada/arquivo-captures.csv", "from": 301, "to": 323, "value": "ordinary", "source": "code", "ts": "2026-10-06T04:35:44+00:00"}
+{"cover": "02-canada/arquivo-captures.csv", "from": 325, "to": 332, "value": "ordinary", "source": "code", "ts": "2026-10-06T04:35:44+00:00"}
+{"cover": "02-canada/arquivo-captures.csv", "from": 334, "to": 420, "value": "ordinary", "source": "code", "ts": "2026-10-06T04:35:44+00:00"}
+{"cover": "02-canada/arquivo-captures.csv", "from": 425, "to": 611, "value": "ordinary", "source": "code", "ts": "2026-10-06T04:35:44+00:00"}
+{"cover": "02-canada/arquivo-captures.csv", "from": 613, "to": 678, "value": "ordinary", "source": "code", "ts": "2026-10-06T04:35:44+00:00"}
+{"cover": "02-canada/arquivo-captures.csv", "from": 680, "to": 900, "value": "ordinary", "source": "code", "ts": "2026-10-06T04:35:44+00:00"}
+{"cover": "03-kansas/arquivo-captures.csv", "from": 2, "to": 35908, "value": "ordinary", "source": "code", "ts": "2026-10-06T04:35:44+00:00"}
+{"cover": "03-kansas/arquivo-captures.csv", "from": 35910, "to": 35911, "value": "ordinary", "source": "code", "ts": "2026-10-06T04:35:44+00:00"}
+{"cover": "03-kansas/arquivo-captures.csv", "from": 35913, "to": 35914, "value": "ordinary", "source": "code", "ts": "2026-10-06T04:35:44+00:00"}
+{"cover": "03-kansas/arquivo-captures.csv", "from": 35916, "to": 35917, "value": "ordinary", "source": "code", "ts": "2026-10-06T04:35:44+00:00"}
+{"cover": "03-kansas/arquivo-captures.csv", "from": 35934, "to": 35950, "value": "ordinary", "source": "code", "ts": "2026-10-06T04:35:44+00:00"}
+{"cover": "03-kansas/arquivo-captures.csv", "from": 35954, "to": 35955, "value": "ordinary", "source": "code", "ts": "2026-10-06T04:35:44+00:00"}
+{"cover": "03-kansas/arquivo-captures.csv", "from": 35957, "to": 35958, "value": "ordinary", "source": "code", "ts": "2026-10-06T04:35:44+00:00"}
+{"cover": "03-kansas/arquivo-captures.csv", "from": 35961, "to": 35962, "value": "ordinary", "source": "code", "ts": "2026-10-06T04:35:44+00:00"}
+{"cover": "03-kansas/arquivo-captures.csv", "from": 35964, "to": 35969, "value": "ordinary", "source": "code", "ts": "2026-10-06T04:35:44+00:00"}
+{"cover": "03-kansas/arquivo-captures.csv", "from": 35971, "to": 35972, "value": "ordinary", "source": "code", "ts": "2026-10-06T04:35:44+00:00"}
+{"cover": "03-kansas/arquivo-captures.csv", "from": 35974, "to": 35974, "value": "ordinary", "source": "code", "ts": "2026-10-06T04:35:44+00:00"}
+{"cover": "03-kansas/arquivo-captures.csv", "from": 35976, "to": 35977, "value": "ordinary", "source": "code", "ts": "2026-10-06T04:35:44+00:00"}
+{"cover": "03-kansas/arquivo-captures.csv", "from": 35979, "to": 35991, "value": "ordinary", "source": "code", "ts": "2026-10-06T04:35:44+00:00"}
+{"cover": "03-kansas/arquivo-captures.csv", "from": 35994, "to": 35994, "value": "ordinary", "source": "code", "ts": "2026-10-06T04:35:44+00:00"}
+{"cover": "03-kansas/arquivo-captures.csv", "from": 35996, "to": 36004, "value": "ordinary", "source": "code", "ts": "2026-10-06T04:35:44+00:00"}
+{"cover": "03-kansas/arquivo-captures.csv", "from": 36006, "to": 36021, "value": "ordinary", "source": "code", "ts": "2026-10-06T04:35:44+00:00"}
+{"cover": "03-kansas/arquivo-captures.csv", "from": 36023, "to": 36033, "value": "ordinary", "source": "code", "ts": "2026-10-06T04:35:44+00:00"}
+{"cover": "03-kansas/arquivo-captures.csv", "from": 36035, "to": 36035, "value": "ordinary", "source": "code", "ts": "2026-10-06T04:35:44+00:00"}
+{"cover": "03-kansas/arquivo-captures.csv", "from": 36037, "to": 36040, "value": "ordinary", "source": "code", "ts": "2026-10-06T04:35:44+00:00"}
+{"cover": "03-kansas/arquivo-captures.csv", "from": 36042, "to": 36043, "value": "ordinary", "source": "code", "ts": "2026-10-06T04:35:44+00:00"}
+{"cover": "03-kansas/arquivo-captures.csv", "from": 36045, "to": 36074, "value": "ordinary", "source": "code", "ts": "2026-10-06T04:35:44+00:00"}
+{"cover": "03-kansas/arquivo-captures.csv", "from": 36076, "to": 36092, "value": "ordinary", "source": "code", "ts": "2026-10-06T04:35:44+00:00"}
+{"cover": "03-kansas/arquivo-captures.csv", "from": 36094, "to": 36096, "value": "ordinary", "source": "code", "ts": "2026-10-06T04:35:44+00:00"}
+{"cover": "03-kansas/arquivo-captures.csv", "from": 36098, "to": 36225, "value": "ordinary", "source": "code", "ts": "2026-10-06T04:35:44+00:00"}
+{"cover": "03-kansas/arquivo-captures.csv", "from": 36227, "to": 36580, "value": "ordinary", "source": "code", "ts": "2026-10-06T04:35:44+00:00"}
+{"cover": "04-illinois/arquivo-captures.csv", "from": 2, "to": 11, "value": "ordinary", "source": "code", "ts": "2026-10-06T04:35:44+00:00"}
+{"cover": "04-illinois/arquivo-captures.csv", "from": 13, "to": 13, "value": "ordinary", "source": "code", "ts": "2026-10-06T04:35:44+00:00"}
+{"cover": "04-illinois/arquivo-captures.csv", "from": 16, "to": 77, "value": "ordinary", "source": "code", "ts": "2026-10-06T04:35:44+00:00"}
+{"cover": "04-illinois/arquivo-captures.csv", "from": 79, "to": 81, "value": "ordinary", "source": "code", "ts": "2026-10-06T04:35:44+00:00"}
+{"cover": "04-illinois/arquivo-captures.csv", "from": 84, "to": 89, "value": "ordinary", "source": "code", "ts": "2026-10-06T04:35:44+00:00"}
+{"cover": "04-illinois/arquivo-captures.csv", "from": 99, "to": 101, "value": "ordinary", "source": "code", "ts": "2026-10-06T04:35:44+00:00"}
+{"cover": "04-illinois/arquivo-captures.csv", "from": 103, "to": 103, "value": "ordinary", "source": "code", "ts": "2026-10-06T04:35:44+00:00"}
+{"cover": "04-illinois/arquivo-captures.csv", "from": 120, "to": 121, "value": "ordinary", "source": "code", "ts": "2026-10-06T04:35:44+00:00"}
+{"cover": "04-illinois/arquivo-captures.csv", "from": 123, "to": 123, "value": "ordinary", "source": "code", "ts": "2026-10-06T04:35:44+00:00"}
+{"cover": "04-illinois/arquivo-captures.csv", "from": 125, "to": 178, "value": "ordinary", "source": "code", "ts": "2026-10-06T04:35:44+00:00"}
+{"cover": "04-illinois/arquivo-captures.csv", "from": 180, "to": 180, "value": "ordinary", "source": "code", "ts": "2026-10-06T04:35:44+00:00"}
+{"cover": "04-illinois/arquivo-captures.csv", "from": 198, "to": 207, "value": "ordinary", "source": "code", "ts": "2026-10-06T04:35:44+00:00"}
+{"cover": "04-illinois/arquivo-captures.csv", "from": 230, "to": 230, "value": "ordinary", "source": "code", "ts": "2026-10-06T04:35:44+00:00"}
+{"cover": "04-illinois/arquivo-captures.csv", "from": 238, "to": 248, "value": "ordinary", "source": "code", "ts": "2026-10-06T04:35:44+00:00"}
+{"cover": "04-illinois/arquivo-captures.csv", "from": 250, "to": 250, "value": "ordinary", "source": "code", "ts": "2026-10-06T04:35:44+00:00"}
+{"cover": "05-maryland/arquivo-captures.csv", "from": 2, "to": 7016, "value": "ordinary", "source": "code", "ts": "2026-10-06T04:35:44+00:00"}
+{"cover": "05-maryland/arquivo-captures.csv", "from": 7019, "to": 279067, "value": "ordinary", "source": "code", "ts": "2026-10-06T04:35:44+00:00"}
+{"cover": "05-maryland/arquivo-captures.csv", "from": 279069, "to": 285861, "value": "ordinary", "source": "code", "ts": "2026-10-06T04:35:44+00:00"}
+{"cover": "05-maryland/arquivo-captures.csv", "from": 285863, "to": 288086, "value": "ordinary", "source": "code", "ts": "2026-10-06T04:35:44+00:00"}
+{"cover": "05-maryland/arquivo-captures.csv", "from": 288088, "to": 288118, "value": "ordinary", "source": "code", "ts": "2026-10-06T04:35:44+00:00"}
+{"cover": "05-maryland/arquivo-captures.csv", "from": 288120, "to": 290178, "value": "ordinary", "source": "code", "ts": "2026-10-06T04:35:44+00:00"}
+{"cover": "05-maryland/arquivo-captures.csv", "from": 290185, "to": 290306, "value": "ordinary", "source": "code", "ts": "2026-10-06T04:35:44+00:00"}
+{"cover": "05-maryland/arquivo-captures.csv", "from": 290308, "to": 291954, "value": "ordinary", "source": "code", "ts": "2026-10-06T04:35:44+00:00"}
+{"cover": "05-maryland/arquivo-captures.csv", "from": 291956, "to": 292040, "value": "ordinary", "source": "code", "ts": "2026-10-06T04:35:44+00:00"}
+{"cover": "05-maryland/arquivo-captures.csv", "from": 292042, "to": 292371, "value": "ordinary", "source": "code", "ts": "2026-10-06T04:35:44+00:00"}
+{"cover": "05-maryland/arquivo-captures.csv", "from": 292373, "to": 295946, "value": "ordinary", "source": "code", "ts": "2026-10-06T04:35:44+00:00"}
+{"cover": "06-new-york/arquivo-captures.csv", "from": 4, "to": 10, "value": "ordinary", "source": "code", "ts": "2026-10-06T04:35:44+00:00"}
+{"cover": "06-new-york/arquivo-captures.csv", "from": 13, "to": 23, "value": "ordinary", "source": "code", "ts": "2026-10-06T04:35:44+00:00"}
+{"cover": "06-new-york/arquivo-captures.csv", "from": 26, "to": 168, "value": "ordinary", "source": "code", "ts": "2026-10-06T04:35:44+00:00"}
+{"cover": "06-new-york/arquivo-captures.csv", "from": 170, "to": 181, "value": "ordinary", "source": "code", "ts": "2026-10-06T04:35:44+00:00"}
+{"cover": "06-new-york/arquivo-captures.csv", "from": 184, "to": 185, "value": "ordinary", "source": "code", "ts": "2026-10-06T04:35:44+00:00"}
+{"cover": "06-new-york/arquivo-captures.csv", "from": 187, "to": 234, "value": "ordinary", "source": "code", "ts": "2026-10-06T04:35:44+00:00"}
+{"cover": "06-new-york/arquivo-captures.csv", "from": 238, "to": 276, "value": "ordinary", "source": "code", "ts": "2026-10-06T04:35:44+00:00"}
+{"cover": "06-new-york/arquivo-captures.csv", "from": 278, "to": 399, "value": "ordinary", "source": "code", "ts": "2026-10-06T04:35:44+00:00"}
+{"cover": "06-new-york/arquivo-captures.csv", "from": 402, "to": 716, "value": "ordinary", "source": "code", "ts": "2026-10-06T04:35:44+00:00"}
+{"cover": "08-california/arquivo-captures.csv", "from": 2, "to": 51, "value": "ordinary", "source": "code", "ts": "2026-10-06T04:35:44+00:00"}
+{"cover": "08-california/arquivo-captures.csv", "from": 65, "to": 84, "value": "ordinary", "source": "code", "ts": "2026-10-06T04:35:44+00:00"}
+{"cover": "08-california/arquivo-captures.csv", "from": 89, "to": 112, "value": "ordinary", "source": "code", "ts": "2026-10-06T04:35:44+00:00"}
+{"cover": "09-max-gov/arquivo-captures.csv", "from": 2, "to": 27, "value": "ordinary", "source": "code", "ts": "2026-10-06T04:35:44+00:00"}
+{"cover": "10-navy/arquivo-captures.csv", "from": 2, "to": 1079, "value": "ordinary", "source": "code", "ts": "2026-10-06T04:35:44+00:00"}
+{"cover": "10-navy/arquivo-captures.csv", "from": 1081, "to": 2349, "value": "ordinary", "source": "code", "ts": "2026-10-06T04:35:44+00:00"}
+{"cover": "10-navy/arquivo-captures.csv", "from": 2352, "to": 2786, "value": "ordinary", "source": "code", "ts": "2026-10-06T04:35:44+00:00"}
+{"cover": "10-navy/arquivo-captures.csv", "from": 2788, "to": 3730, "value": "ordinary", "source": "code", "ts": "2026-10-06T04:35:44+00:00"}
+{"cover": "11-justice/arquivo-captures.csv", "from": 5, "to": 20, "value": "ordinary", "source": "code", "ts": "2026-10-06T04:35:44+00:00"}
+{"cover": "11-justice/arquivo-captures.csv", "from": 22, "to": 24, "value": "ordinary", "source": "code", "ts": "2026-10-06T04:35:44+00:00"}
+{"cover": "11-justice/arquivo-captures.csv", "from": 33, "to": 35, "value": "ordinary", "source": "code", "ts": "2026-10-06T04:35:44+00:00"}
+{"cover": "12-bea/arquivo-captures.csv", "from": 2, "to": 22, "value": "ordinary", "source": "code", "ts": "2026-10-06T04:35:44+00:00"}
+{"cover": "12-bea/arquivo-captures.csv", "from": 24, "to": 25, "value": "ordinary", "source": "code", "ts": "2026-10-06T04:35:44+00:00"}
+{"cover": "12-bea/arquivo-captures.csv", "from": 27, "to": 37, "value": "ordinary", "source": "code", "ts": "2026-10-06T04:35:44+00:00"}
+{"cover": "12-bea/arquivo-captures.csv", "from": 39, "to": 62, "value": "ordinary", "source": "code", "ts": "2026-10-06T04:35:44+00:00"}
+{"cover": "12-bea/arquivo-captures.csv", "from": 64, "to": 66, "value": "ordinary", "source": "code", "ts": "2026-10-06T04:35:44+00:00"}
+{"cover": "12-bea/arquivo-captures.csv", "from": 68, "to": 101, "value": "ordinary", "source": "code", "ts": "2026-10-06T04:35:44+00:00"}
+{"cover": "12-bea/arquivo-captures.csv", "from": 103, "to": 103, "value": "ordinary", "source": "code", "ts": "2026-10-06T04:35:44+00:00"}
+{"cover": "12-bea/arquivo-captures.csv", "from": 105, "to": 109, "value": "ordinary", "source": "code", "ts": "2026-10-06T04:35:44+00:00"}
+{"cover": "12-bea/arquivo-captures.csv", "from": 111, "to": 115, "value": "ordinary", "source": "code", "ts": "2026-10-06T04:35:44+00:00"}
+{"cover": "12-bea/arquivo-captures.csv", "from": 117, "to": 135, "value": "ordinary", "source": "code", "ts": "2026-10-06T04:35:44+00:00"}
+{"cover": "12-bea/arquivo-captures.csv", "from": 137, "to": 143, "value": "ordinary", "source": "code", "ts": "2026-10-06T04:35:44+00:00"}
+{"cover": "12-bea/arquivo-captures.csv", "from": 145, "to": 146, "value": "ordinary", "source": "code", "ts": "2026-10-06T04:35:44+00:00"}
+{"cover": "12-bea/arquivo-captures.csv", "from": 148, "to": 156, "value": "ordinary", "source": "code", "ts": "2026-10-06T04:35:44+00:00"}
+{"cover": "12-bea/arquivo-captures.csv", "from": 158, "to": 170, "value": "ordinary", "source": "code", "ts": "2026-10-06T04:35:44+00:00"}
+{"cover": "12-bea/arquivo-captures.csv", "from": 172, "to": 177, "value": "ordinary", "source": "code", "ts": "2026-10-06T04:35:44+00:00"}
+{"cover": "12-bea/arquivo-captures.csv", "from": 179, "to": 193, "value": "ordinary", "source": "code", "ts": "2026-10-06T04:35:44+00:00"}
+{"cover": "12-bea/arquivo-captures.csv", "from": 195, "to": 206, "value": "ordinary", "source": "code", "ts": "2026-10-06T04:35:44+00:00"}
+{"cover": "12-bea/arquivo-captures.csv", "from": 213, "to": 214, "value": "ordinary", "source": "code", "ts": "2026-10-06T04:35:44+00:00"}
+{"cover": "12-bea/arquivo-captures.csv", "from": 216, "to": 218, "value": "ordinary", "source": "code", "ts": "2026-10-06T04:35:44+00:00"}
+{"cover": "12-bea/arquivo-captures.csv", "from": 220, "to": 233, "value": "ordinary", "source": "code", "ts": "2026-10-06T04:35:44+00:00"}
+{"cover": "12-bea/arquivo-captures.csv", "from": 236, "to": 248, "value": "ordinary", "source": "code", "ts": "2026-10-06T04:35:44+00:00"}
+{"cover": "12-bea/arquivo-captures.csv", "from": 251, "to": 315, "value": "ordinary", "source": "code", "ts": "2026-10-06T04:35:44+00:00"}
+{"cover": "12-bea/arquivo-captures.csv", "from": 317, "to": 365, "value": "ordinary", "source": "code", "ts": "2026-10-06T04:35:44+00:00"}
+{"cover": "12-bea/arquivo-captures.csv", "from": 367, "to": 537, "value": "ordinary", "source": "code", "ts": "2026-10-06T04:35:44+00:00"}
+{"cover": "12-bea/arquivo-captures.csv", "from": 542, "to": 2737, "value": "ordinary", "source": "code", "ts": "2026-10-06T04:35:44+00:00"}
+{"cover": "12-bea/arquivo-captures.csv", "from": 2740, "to": 3012, "value": "ordinary", "source": "code", "ts": "2026-10-06T04:35:44+00:00"}
+{"ref": "01-education/arquivo-captures.csv#row=144464", "label": "attack string", "confidence": 0.9, "source": "code", "ts": "2026-10-06T04:35:50+00:00", "line": 144465}
+{"ref": "02-canada/arquivo-captures.csv#row=23", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:53+00:00", "line": 24}
+{"ref": "02-canada/arquivo-captures.csv#row=299", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:53+00:00", "line": 300}
+{"ref": "02-canada/arquivo-captures.csv#row=323", "label": "attack string", "confidence": 0.9, "source": "code", "ts": "2026-10-06T04:35:53+00:00", "line": 324}
+{"ref": "02-canada/arquivo-captures.csv#row=332", "label": "attack string", "confidence": 0.9, "source": "code", "ts": "2026-10-06T04:35:53+00:00", "line": 333}
+{"ref": "02-canada/arquivo-captures.csv#row=420", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:53+00:00", "line": 421}
+{"ref": "02-canada/arquivo-captures.csv#row=421", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:53+00:00", "line": 422}
+{"ref": "02-canada/arquivo-captures.csv#row=422", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:53+00:00", "line": 423}
+{"ref": "02-canada/arquivo-captures.csv#row=423", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:53+00:00", "line": 424}
+{"ref": "02-canada/arquivo-captures.csv#row=611", "label": "attack string", "confidence": 0.9, "source": "code", "ts": "2026-10-06T04:35:53+00:00", "line": 612}
+{"ref": "02-canada/arquivo-captures.csv#row=678", "label": "attack string", "confidence": 0.9, "source": "code", "ts": "2026-10-06T04:35:53+00:00", "line": 679}
+{"ref": "03-kansas/arquivo-captures.csv#row=35908", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 35909}
+{"ref": "03-kansas/arquivo-captures.csv#row=35911", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 35912}
+{"ref": "03-kansas/arquivo-captures.csv#row=35914", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 35915}
+{"ref": "03-kansas/arquivo-captures.csv#row=35917", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 35918}
+{"ref": "03-kansas/arquivo-captures.csv#row=35918", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 35919}
+{"ref": "03-kansas/arquivo-captures.csv#row=35919", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 35920}
+{"ref": "03-kansas/arquivo-captures.csv#row=35920", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 35921}
+{"ref": "03-kansas/arquivo-captures.csv#row=35921", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 35922}
+{"ref": "03-kansas/arquivo-captures.csv#row=35922", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 35923}
+{"ref": "03-kansas/arquivo-captures.csv#row=35923", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 35924}
+{"ref": "03-kansas/arquivo-captures.csv#row=35924", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 35925}
+{"ref": "03-kansas/arquivo-captures.csv#row=35925", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 35926}
+{"ref": "03-kansas/arquivo-captures.csv#row=35926", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 35927}
+{"ref": "03-kansas/arquivo-captures.csv#row=35927", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 35928}
+{"ref": "03-kansas/arquivo-captures.csv#row=35928", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 35929}
+{"ref": "03-kansas/arquivo-captures.csv#row=35929", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 35930}
+{"ref": "03-kansas/arquivo-captures.csv#row=35930", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 35931}
+{"ref": "03-kansas/arquivo-captures.csv#row=35931", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 35932}
+{"ref": "03-kansas/arquivo-captures.csv#row=35932", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 35933}
+{"ref": "03-kansas/arquivo-captures.csv#row=35950", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 35951}
+{"ref": "03-kansas/arquivo-captures.csv#row=35951", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 35952}
+{"ref": "03-kansas/arquivo-captures.csv#row=35952", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 35953}
+{"ref": "03-kansas/arquivo-captures.csv#row=35955", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 35956}
+{"ref": "03-kansas/arquivo-captures.csv#row=35958", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 35959}
+{"ref": "03-kansas/arquivo-captures.csv#row=35959", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 35960}
+{"ref": "03-kansas/arquivo-captures.csv#row=35962", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 35963}
+{"ref": "03-kansas/arquivo-captures.csv#row=35969", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 35970}
+{"ref": "03-kansas/arquivo-captures.csv#row=35972", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 35973}
+{"ref": "03-kansas/arquivo-captures.csv#row=35974", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 35975}
+{"ref": "03-kansas/arquivo-captures.csv#row=35977", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 35978}
+{"ref": "03-kansas/arquivo-captures.csv#row=35991", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 35992}
+{"ref": "03-kansas/arquivo-captures.csv#row=35992", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 35993}
+{"ref": "03-kansas/arquivo-captures.csv#row=35994", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 35995}
+{"ref": "03-kansas/arquivo-captures.csv#row=36004", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 36005}
+{"ref": "03-kansas/arquivo-captures.csv#row=36021", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 36022}
+{"ref": "03-kansas/arquivo-captures.csv#row=36033", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 36034}
+{"ref": "03-kansas/arquivo-captures.csv#row=36035", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 36036}
+{"ref": "03-kansas/arquivo-captures.csv#row=36040", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 36041}
+{"ref": "03-kansas/arquivo-captures.csv#row=36043", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 36044}
+{"ref": "03-kansas/arquivo-captures.csv#row=36074", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 36075}
+{"ref": "03-kansas/arquivo-captures.csv#row=36092", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 36093}
+{"ref": "03-kansas/arquivo-captures.csv#row=36096", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 36097}
+{"ref": "03-kansas/arquivo-captures.csv#row=36225", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 36226}
+{"ref": "04-illinois/arquivo-captures.csv#row=11", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 12}
+{"ref": "04-illinois/arquivo-captures.csv#row=13", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 14}
+{"ref": "04-illinois/arquivo-captures.csv#row=14", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 15}
+{"ref": "04-illinois/arquivo-captures.csv#row=77", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 78}
+{"ref": "04-illinois/arquivo-captures.csv#row=81", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 82}
+{"ref": "04-illinois/arquivo-captures.csv#row=82", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 83}
+{"ref": "04-illinois/arquivo-captures.csv#row=89", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 90}
+{"ref": "04-illinois/arquivo-captures.csv#row=90", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 91}
+{"ref": "04-illinois/arquivo-captures.csv#row=91", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 92}
+{"ref": "04-illinois/arquivo-captures.csv#row=92", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 93}
+{"ref": "04-illinois/arquivo-captures.csv#row=93", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 94}
+{"ref": "04-illinois/arquivo-captures.csv#row=94", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 95}
+{"ref": "04-illinois/arquivo-captures.csv#row=95", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 96}
+{"ref": "04-illinois/arquivo-captures.csv#row=96", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 97}
+{"ref": "04-illinois/arquivo-captures.csv#row=97", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 98}
+{"ref": "04-illinois/arquivo-captures.csv#row=101", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 102}
+{"ref": "04-illinois/arquivo-captures.csv#row=103", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 104}
+{"ref": "04-illinois/arquivo-captures.csv#row=104", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 105}
+{"ref": "04-illinois/arquivo-captures.csv#row=105", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 106}
+{"ref": "04-illinois/arquivo-captures.csv#row=106", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 107}
+{"ref": "04-illinois/arquivo-captures.csv#row=107", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 108}
+{"ref": "04-illinois/arquivo-captures.csv#row=108", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 109}
+{"ref": "04-illinois/arquivo-captures.csv#row=109", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 110}
+{"ref": "04-illinois/arquivo-captures.csv#row=110", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 111}
+{"ref": "04-illinois/arquivo-captures.csv#row=111", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 112}
+{"ref": "04-illinois/arquivo-captures.csv#row=112", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 113}
+{"ref": "04-illinois/arquivo-captures.csv#row=113", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 114}
+{"ref": "04-illinois/arquivo-captures.csv#row=114", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 115}
+{"ref": "04-illinois/arquivo-captures.csv#row=115", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 116}
+{"ref": "04-illinois/arquivo-captures.csv#row=116", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 117}
+{"ref": "04-illinois/arquivo-captures.csv#row=117", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 118}
+{"ref": "04-illinois/arquivo-captures.csv#row=118", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 119}
+{"ref": "04-illinois/arquivo-captures.csv#row=121", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 122}
+{"ref": "04-illinois/arquivo-captures.csv#row=123", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 124}
+{"ref": "04-illinois/arquivo-captures.csv#row=178", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 179}
+{"ref": "04-illinois/arquivo-captures.csv#row=180", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 181}
+{"ref": "04-illinois/arquivo-captures.csv#row=181", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 182}
+{"ref": "04-illinois/arquivo-captures.csv#row=182", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 183}
+{"ref": "04-illinois/arquivo-captures.csv#row=183", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 184}
+{"ref": "04-illinois/arquivo-captures.csv#row=184", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 185}
+{"ref": "04-illinois/arquivo-captures.csv#row=185", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 186}
+{"ref": "04-illinois/arquivo-captures.csv#row=186", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 187}
+{"ref": "04-illinois/arquivo-captures.csv#row=187", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 188}
+{"ref": "04-illinois/arquivo-captures.csv#row=188", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 189}
+{"ref": "04-illinois/arquivo-captures.csv#row=189", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 190}
+{"ref": "04-illinois/arquivo-captures.csv#row=190", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 191}
+{"ref": "04-illinois/arquivo-captures.csv#row=191", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 192}
+{"ref": "04-illinois/arquivo-captures.csv#row=192", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 193}
+{"ref": "04-illinois/arquivo-captures.csv#row=193", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 194}
+{"ref": "04-illinois/arquivo-captures.csv#row=194", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 195}
+{"ref": "04-illinois/arquivo-captures.csv#row=195", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 196}
+{"ref": "04-illinois/arquivo-captures.csv#row=196", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 197}
+{"ref": "04-illinois/arquivo-captures.csv#row=207", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 208}
+{"ref": "04-illinois/arquivo-captures.csv#row=208", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 209}
+{"ref": "04-illinois/arquivo-captures.csv#row=209", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 210}
+{"ref": "04-illinois/arquivo-captures.csv#row=210", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 211}
+{"ref": "04-illinois/arquivo-captures.csv#row=211", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 212}
+{"ref": "04-illinois/arquivo-captures.csv#row=212", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 213}
+{"ref": "04-illinois/arquivo-captures.csv#row=213", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 214}
+{"ref": "04-illinois/arquivo-captures.csv#row=214", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 215}
+{"ref": "04-illinois/arquivo-captures.csv#row=215", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 216}
+{"ref": "04-illinois/arquivo-captures.csv#row=216", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 217}
+{"ref": "04-illinois/arquivo-captures.csv#row=217", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 218}
+{"ref": "04-illinois/arquivo-captures.csv#row=218", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 219}
+{"ref": "04-illinois/arquivo-captures.csv#row=219", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 220}
+{"ref": "04-illinois/arquivo-captures.csv#row=220", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 221}
+{"ref": "04-illinois/arquivo-captures.csv#row=221", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 222}
+{"ref": "04-illinois/arquivo-captures.csv#row=222", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 223}
+{"ref": "04-illinois/arquivo-captures.csv#row=223", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 224}
+{"ref": "04-illinois/arquivo-captures.csv#row=224", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 225}
+{"ref": "04-illinois/arquivo-captures.csv#row=225", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 226}
+{"ref": "04-illinois/arquivo-captures.csv#row=226", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 227}
+{"ref": "04-illinois/arquivo-captures.csv#row=227", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 228}
+{"ref": "04-illinois/arquivo-captures.csv#row=228", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 229}
+{"ref": "04-illinois/arquivo-captures.csv#row=230", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 231}
+{"ref": "04-illinois/arquivo-captures.csv#row=231", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 232}
+{"ref": "04-illinois/arquivo-captures.csv#row=232", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 233}
+{"ref": "04-illinois/arquivo-captures.csv#row=233", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 234}
+{"ref": "04-illinois/arquivo-captures.csv#row=234", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 235}
+{"ref": "04-illinois/arquivo-captures.csv#row=235", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 236}
+{"ref": "04-illinois/arquivo-captures.csv#row=236", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 237}
+{"ref": "04-illinois/arquivo-captures.csv#row=248", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 249}
+{"ref": "04-illinois/arquivo-captures.csv#row=250", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 251}
+{"ref": "04-illinois/arquivo-captures.csv#row=251", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 252}
+{"ref": "05-maryland/arquivo-captures.csv#row=7016", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 7017}
+{"ref": "05-maryland/arquivo-captures.csv#row=7017", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:35:55+00:00", "line": 7018}
+{"ref": "05-maryland/arquivo-captures.csv#row=279067", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:36:05+00:00", "line": 279068}
+{"ref": "05-maryland/arquivo-captures.csv#row=285861", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:36:05+00:00", "line": 285862}
+{"ref": "05-maryland/arquivo-captures.csv#row=288086", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:36:05+00:00", "line": 288087}
+{"ref": "05-maryland/arquivo-captures.csv#row=288118", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:36:05+00:00", "line": 288119}
+{"ref": "05-maryland/arquivo-captures.csv#row=290178", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:36:05+00:00", "line": 290179}
+{"ref": "05-maryland/arquivo-captures.csv#row=290179", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:36:05+00:00", "line": 290180}
+{"ref": "05-maryland/arquivo-captures.csv#row=290180", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:36:05+00:00", "line": 290181}
+{"ref": "05-maryland/arquivo-captures.csv#row=290181", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:36:05+00:00", "line": 290182}
+{"ref": "05-maryland/arquivo-captures.csv#row=290182", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:36:05+00:00", "line": 290183}
+{"ref": "05-maryland/arquivo-captures.csv#row=290183", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:36:05+00:00", "line": 290184}
+{"ref": "05-maryland/arquivo-captures.csv#row=290306", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:36:05+00:00", "line": 290307}
+{"ref": "05-maryland/arquivo-captures.csv#row=291954", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:36:05+00:00", "line": 291955}
+{"ref": "05-maryland/arquivo-captures.csv#row=292040", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:36:05+00:00", "line": 292041}
+{"ref": "05-maryland/arquivo-captures.csv#row=292371", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:36:05+00:00", "line": 292372}
+{"ref": "06-new-york/arquivo-captures.csv#row=1", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:36:05+00:00", "line": 2}
+{"ref": "06-new-york/arquivo-captures.csv#row=2", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:36:05+00:00", "line": 3}
+{"ref": "06-new-york/arquivo-captures.csv#row=10", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:36:05+00:00", "line": 11}
+{"ref": "06-new-york/arquivo-captures.csv#row=11", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:36:05+00:00", "line": 12}
+{"ref": "06-new-york/arquivo-captures.csv#row=23", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:36:05+00:00", "line": 24}
+{"ref": "06-new-york/arquivo-captures.csv#row=24", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:36:05+00:00", "line": 25}
+{"ref": "06-new-york/arquivo-captures.csv#row=168", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:36:05+00:00", "line": 169}
+{"ref": "06-new-york/arquivo-captures.csv#row=181", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:36:05+00:00", "line": 182}
+{"ref": "06-new-york/arquivo-captures.csv#row=182", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:36:05+00:00", "line": 183}
+{"ref": "06-new-york/arquivo-captures.csv#row=185", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:36:05+00:00", "line": 186}
+{"ref": "06-new-york/arquivo-captures.csv#row=234", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:36:05+00:00", "line": 235}
+{"ref": "06-new-york/arquivo-captures.csv#row=235", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:36:05+00:00", "line": 236}
+{"ref": "06-new-york/arquivo-captures.csv#row=236", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:36:05+00:00", "line": 237}
+{"ref": "06-new-york/arquivo-captures.csv#row=276", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:36:05+00:00", "line": 277}
+{"ref": "06-new-york/arquivo-captures.csv#row=399", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:36:05+00:00", "line": 400}
+{"ref": "06-new-york/arquivo-captures.csv#row=400", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:36:05+00:00", "line": 401}
+{"ref": "08-california/arquivo-captures.csv#row=51", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:36:05+00:00", "line": 52}
+{"ref": "08-california/arquivo-captures.csv#row=52", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:36:05+00:00", "line": 53}
+{"ref": "08-california/arquivo-captures.csv#row=53", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:36:05+00:00", "line": 54}
+{"ref": "08-california/arquivo-captures.csv#row=54", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:36:05+00:00", "line": 55}
+{"ref": "08-california/arquivo-captures.csv#row=55", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:36:05+00:00", "line": 56}
+{"ref": "08-california/arquivo-captures.csv#row=56", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:36:05+00:00", "line": 57}
+{"ref": "08-california/arquivo-captures.csv#row=57", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:36:05+00:00", "line": 58}
+{"ref": "08-california/arquivo-captures.csv#row=58", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:36:05+00:00", "line": 59}
+{"ref": "08-california/arquivo-captures.csv#row=59", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:36:05+00:00", "line": 60}
+{"ref": "08-california/arquivo-captures.csv#row=60", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:36:05+00:00", "line": 61}
+{"ref": "08-california/arquivo-captures.csv#row=61", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:36:05+00:00", "line": 62}
+{"ref": "08-california/arquivo-captures.csv#row=62", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:36:05+00:00", "line": 63}
+{"ref": "08-california/arquivo-captures.csv#row=63", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:36:05+00:00", "line": 64}
+{"ref": "08-california/arquivo-captures.csv#row=84", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:36:05+00:00", "line": 85}
+{"ref": "08-california/arquivo-captures.csv#row=85", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:36:05+00:00", "line": 86}
+{"ref": "08-california/arquivo-captures.csv#row=86", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:36:05+00:00", "line": 87}
+{"ref": "08-california/arquivo-captures.csv#row=87", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:36:05+00:00", "line": 88}
+{"ref": "10-navy/arquivo-captures.csv#row=1079", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:36:05+00:00", "line": 1080}
+{"ref": "10-navy/arquivo-captures.csv#row=2349", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:36:05+00:00", "line": 2350}
+{"ref": "10-navy/arquivo-captures.csv#row=2350", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:36:05+00:00", "line": 2351}
+{"ref": "10-navy/arquivo-captures.csv#row=2786", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:36:05+00:00", "line": 2787}
+{"ref": "11-justice/arquivo-captures.csv#row=1", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:36:05+00:00", "line": 2}
+{"ref": "11-justice/arquivo-captures.csv#row=2", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:36:05+00:00", "line": 3}
+{"ref": "11-justice/arquivo-captures.csv#row=3", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:36:05+00:00", "line": 4}
+{"ref": "11-justice/arquivo-captures.csv#row=20", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:36:05+00:00", "line": 21}
+{"ref": "11-justice/arquivo-captures.csv#row=24", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:36:05+00:00", "line": 25}
+{"ref": "11-justice/arquivo-captures.csv#row=25", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:36:05+00:00", "line": 26}
+{"ref": "11-justice/arquivo-captures.csv#row=26", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:36:05+00:00", "line": 27}
+{"ref": "11-justice/arquivo-captures.csv#row=27", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:36:05+00:00", "line": 28}
+{"ref": "11-justice/arquivo-captures.csv#row=28", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:36:05+00:00", "line": 29}
+{"ref": "11-justice/arquivo-captures.csv#row=29", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:36:05+00:00", "line": 30}
+{"ref": "11-justice/arquivo-captures.csv#row=30", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:36:05+00:00", "line": 31}
+{"ref": "11-justice/arquivo-captures.csv#row=31", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:36:05+00:00", "line": 32}
+{"ref": "11-justice/arquivo-captures.csv#row=35", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:36:05+00:00", "line": 36}
+{"ref": "11-justice/arquivo-captures.csv#row=36", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:36:05+00:00", "line": 37}
+{"ref": "11-justice/arquivo-captures.csv#row=37", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:36:05+00:00", "line": 38}
+{"ref": "11-justice/arquivo-captures.csv#row=38", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:36:05+00:00", "line": 39}
+{"ref": "11-justice/arquivo-captures.csv#row=39", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:36:05+00:00", "line": 40}
+{"ref": "11-justice/arquivo-captures.csv#row=40", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:36:05+00:00", "line": 41}
+{"ref": "12-bea/arquivo-captures.csv#row=22", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:36:05+00:00", "line": 23}
+{"ref": "12-bea/arquivo-captures.csv#row=25", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:36:05+00:00", "line": 26}
+{"ref": "12-bea/arquivo-captures.csv#row=37", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:36:05+00:00", "line": 38}
+{"ref": "12-bea/arquivo-captures.csv#row=62", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:36:05+00:00", "line": 63}
+{"ref": "12-bea/arquivo-captures.csv#row=66", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:36:05+00:00", "line": 67}
+{"ref": "12-bea/arquivo-captures.csv#row=101", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:36:05+00:00", "line": 102}
+{"ref": "12-bea/arquivo-captures.csv#row=103", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:36:05+00:00", "line": 104}
+{"ref": "12-bea/arquivo-captures.csv#row=109", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:36:05+00:00", "line": 110}
+{"ref": "12-bea/arquivo-captures.csv#row=115", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:36:05+00:00", "line": 116}
+{"ref": "12-bea/arquivo-captures.csv#row=135", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:36:05+00:00", "line": 136}
+{"ref": "12-bea/arquivo-captures.csv#row=143", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:36:05+00:00", "line": 144}
+{"ref": "12-bea/arquivo-captures.csv#row=146", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:36:05+00:00", "line": 147}
+{"ref": "12-bea/arquivo-captures.csv#row=156", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:36:05+00:00", "line": 157}
+{"ref": "12-bea/arquivo-captures.csv#row=170", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:36:05+00:00", "line": 171}
+{"ref": "12-bea/arquivo-captures.csv#row=177", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:36:05+00:00", "line": 178}
+{"ref": "12-bea/arquivo-captures.csv#row=193", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:36:05+00:00", "line": 194}
+{"ref": "12-bea/arquivo-captures.csv#row=206", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:36:05+00:00", "line": 207}
+{"ref": "12-bea/arquivo-captures.csv#row=207", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:36:05+00:00", "line": 208}
+{"ref": "12-bea/arquivo-captures.csv#row=208", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:36:05+00:00", "line": 209}
+{"ref": "12-bea/arquivo-captures.csv#row=209", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:36:05+00:00", "line": 210}
+{"ref": "12-bea/arquivo-captures.csv#row=210", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:36:05+00:00", "line": 211}
+{"ref": "12-bea/arquivo-captures.csv#row=211", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:36:05+00:00", "line": 212}
+{"ref": "12-bea/arquivo-captures.csv#row=214", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:36:05+00:00", "line": 215}
+{"ref": "12-bea/arquivo-captures.csv#row=218", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:36:05+00:00", "line": 219}
+{"ref": "12-bea/arquivo-captures.csv#row=233", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:36:05+00:00", "line": 234}
+{"ref": "12-bea/arquivo-captures.csv#row=234", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:36:05+00:00", "line": 235}
+{"ref": "12-bea/arquivo-captures.csv#row=248", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:36:05+00:00", "line": 249}
+{"ref": "12-bea/arquivo-captures.csv#row=249", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:36:05+00:00", "line": 250}
+{"ref": "12-bea/arquivo-captures.csv#row=315", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:36:05+00:00", "line": 316}
+{"ref": "12-bea/arquivo-captures.csv#row=365", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:36:05+00:00", "line": 366}
+{"ref": "12-bea/arquivo-captures.csv#row=537", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:36:05+00:00", "line": 538}
+{"ref": "12-bea/arquivo-captures.csv#row=538", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:36:05+00:00", "line": 539}
+{"ref": "12-bea/arquivo-captures.csv#row=539", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:36:05+00:00", "line": 540}
+{"ref": "12-bea/arquivo-captures.csv#row=540", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:36:05+00:00", "line": 541}
+{"ref": "12-bea/arquivo-captures.csv#row=2737", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:36:05+00:00", "line": 2738}
+{"ref": "12-bea/arquivo-captures.csv#row=2738", "label": "URL trick", "confidence": 0.85, "source": "code", "ts": "2026-10-06T04:36:05+00:00", "line": 2739}

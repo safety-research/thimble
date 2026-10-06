@@ -1,0 +1,126 @@
+{
+  "name": "Relay Board",
+  "description": "The messages AI agents left on wiki pages while they ran the same timed tasks: each save read as the lines it added, threaded by task in time order, coloured by kind, wiki, signature or any label with the colour on each message's edge and in the thread's scrollbar, with the page at that save beside it.",
+  "claims": [
+    "revisions.jsonl",
+    "events.jsonl"
+  ],
+  "accepts": [
+    {
+      "form": "L<n>",
+      "means": "the save on line <n>, shown in its task's thread with the page at that save beside it"
+    }
+  ],
+  "units": [
+    {
+      "form": "<task>",
+      "means": "one timed task's thread, such as OECD, Cashier, Shared or Other"
+    },
+    {
+      "form": "<page_key>",
+      "means": "one page's messages in time order, such as dse~LangR5SignalJun13"
+    }
+  ],
+  "libs": [],
+  "records": [
+    {
+      "name": "save",
+      "one": "one save of a wiki page, read as the lines it added; a message when those lines hold text other than blanks, the stock new-page line and withheld placeholders",
+      "fields": [
+        {
+          "name": "time",
+          "type": "time",
+          "derived": "cleaned",
+          "from": "time",
+          "how": "read as UTC seconds and sorted with ties in line order"
+        },
+        {
+          "name": "added",
+          "type": "text",
+          "derived": "computed",
+          "from": "body and the body of the page's previous stored save by seq, or an empty page when a delete of the page in events.jsonl comes between them",
+          "how": "the lines a line diff finds added; the first stored save, and a save after a delete, add their whole body"
+        },
+        {
+          "name": "added_lines",
+          "type": "list",
+          "derived": "computed",
+          "from": "body and the body of the page's previous stored save by seq, or an empty page when a delete of the page in events.jsonl comes between them",
+          "how": "the numbers from 0 of the body's lines a line diff finds added"
+        },
+        {
+          "name": "removed_lines",
+          "type": "list",
+          "derived": "computed",
+          "from": "body and the body of the page's previous stored save by seq, or an empty page when a delete of the page in events.jsonl comes between them",
+          "how": "the lines of the previous save a line diff finds removed"
+        },
+        {
+          "name": "n_added",
+          "type": "number",
+          "derived": "computed",
+          "from": "added_lines",
+          "how": "how many lines the line diff finds added"
+        },
+        {
+          "name": "n_removed",
+          "type": "number",
+          "derived": "computed",
+          "from": "removed_lines",
+          "how": "how many lines the line diff finds removed"
+        },
+        {
+          "name": "kind",
+          "type": "category",
+          "derived": "computed",
+          "from": "added",
+          "how": "With links when the added text holds http:// or https:// or www., Text only when it holds none, after blanks and the stock new-page line and withheld placeholders are dropped; No new text when nothing is left"
+        },
+        {
+          "name": "task",
+          "type": "category",
+          "derived": "computed",
+          "from": "name",
+          "how": "the first task whose keywords the page name holds ignoring case, Sector 61-62 tried last; Shared pages for WillkommenImWiki, StartSeite, TestSeite, RecentChanges and SandBox; else No task in the name"
+        },
+        {
+          "name": "signature",
+          "type": "text",
+          "derived": "cleaned",
+          "from": "added",
+          "how": "the name after -- at the end of the last added line that ends in one"
+        },
+        {
+          "name": "earlier_lost",
+          "type": "category",
+          "derived": "computed",
+          "from": "seq",
+          "how": "the page's first stored save has a seq above 1"
+        },
+        {
+          "name": "after_delete",
+          "type": "category",
+          "derived": "computed",
+          "from": "time and the delete events of events.jsonl with the save's page_key",
+          "how": "a delete of the page at or after the previous stored save's time and before this save's time"
+        },
+        {
+          "name": "wiki",
+          "type": "category",
+          "derived": "cleaned",
+          "from": "wiki",
+          "how": "the wiki of the save's page, as the page's first stored save names it"
+        },
+        {
+          "name": "signed",
+          "type": "category",
+          "derived": "computed",
+          "from": "signature and label",
+          "how": "Username when the signature is the save's username ignoring case; Another name when it is not; Unsigned when the added text ends in no signature"
+        }
+      ]
+    }
+  ],
+  "built": "2026-10-06T21:49:19+00:00",
+  "version": "49d7f058840e"
+}

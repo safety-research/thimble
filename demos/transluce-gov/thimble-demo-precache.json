@@ -1,0 +1,2457 @@
+{
+ "schema": "thimble-demo-precache",
+ "version": 3,
+ "format": "outputs-only",
+ "dataset": "transluce-gov",
+ "created": "2026-10-06T22:12:32+00:00",
+ "notice": "",
+ "credit": "Published by Transluce (Cable, Chiu, Pernice, Ruis, Zhang, Bas, Chetty, Kaiyom, Shen, Stosz, Steinhardt; Corridor, MIT, Transluce, AIUC, Hertz Foundation) with \"AI Agents Targeted U.S. and Canadian Government Websites\", 2026-09-30. thimble does not redistribute it: `thimble demo` downloads it from transluce.org on your machine.",
+ "thimble": {
+  "version": "0.6.0",
+  "commit": "932f42b9"
+ },
+ "orientation": {
+  "status": "done",
+  "passes": [
+   "final",
+   "views",
+   "report"
+  ],
+  "query": null,
+  "effort": "xhigh",
+  "ultracode": true,
+  "critique": false,
+  "started": "2026-10-06T04:26:01+00:00",
+  "ended": "2026-10-06T04:46:51+00:00",
+  "model": "claude-opus-5-5[1m]",
+  "chat_effort": "xhigh",
+  "chat": "1e6fd2e6",
+  "coverage": "Coverage: viewed only 05-maryland/**, 01-education/** (13 of 18 files), 03-kansas/**, 14-sec/**, 10-navy/**, 09-max-gov/** (5 of 7 files), and 9 more · 81% of files · 1% of records"
+ },
+ "counts": {
+  "cards": 9,
+  "labels": 1,
+  "views": 2,
+  "documents": 1
+ },
+ "corpus": [
+  {
+   "path": "01-education/arquivo-captures.csv",
+   "bytes": 102415260,
+   "sha256": "60d9f4183aa6874da226d68c9d6f5d08dd19a2f2f4a5416abd6b9d121b9fa166"
+  },
+  {
+   "path": "01-education/benchmark-excerpt.json",
+   "bytes": 513,
+   "sha256": "8c5bb7fff5a464481a3759a7b277deaa090049854e5a8369a183f69341f65a7e"
+  },
+  {
+   "path": "01-education/responses/247f37a91314df61.txt",
+   "bytes": 12,
+   "sha256": "68bb40547dd87d3fa79f820c9203b7b073871acd6513aa1c12cdb5f2d2a07c4a"
+  },
+  {
+   "path": "01-education/responses/2a18f06fa8dfe7e9.txt",
+   "bytes": 7308,
+   "sha256": "26fc83c58fb7353af4bc3e2cc8fa112c9a56b631add8702841e721b8387faf98"
+  },
+  {
+   "path": "01-education/responses/2bd055bdb7b402d2.txt",
+   "bytes": 12,
+   "sha256": "68bb40547dd87d3fa79f820c9203b7b073871acd6513aa1c12cdb5f2d2a07c4a"
+  },
+  {
+   "path": "01-education/responses/3c09860c16d359c7.txt",
+   "bytes": 7315,
+   "sha256": "b0cb20238aa35bf068951d934625c9e76fb37ac58f6a39550ec5fd58cc265a6d"
+  },
+  {
+   "path": "01-education/responses/450ccf151e5b3d4e.txt",
+   "bytes": 7268,
+   "sha256": "8d673eca1f78ee3801d6a00e33ad414a9e752a5bc5247340661969f8648e8081"
+  },
+  {
+   "path": "01-education/responses/51924b18c44288bc.txt",
+   "bytes": 12,
+   "sha256": "68bb40547dd87d3fa79f820c9203b7b073871acd6513aa1c12cdb5f2d2a07c4a"
+  },
+  {
+   "path": "01-education/responses/51cfbe12fcbeefd9.txt",
+   "bytes": 7323,
+   "sha256": "fdcd4c2ce684bd0b94a836bc74d3a664b94244433e6691154cabc30e81097142"
+  },
+  {
+   "path": "01-education/responses/5505a61392d67293.txt",
+   "bytes": 7328,
+   "sha256": "e53d0766828d6d1ecb99e44f9e63648cd108c460e43aa5fd80e03508bc96dca0"
+  },
+  {
+   "path": "01-education/responses/785170240f9fb1b1.txt",
+   "bytes": 12,
+   "sha256": "68bb40547dd87d3fa79f820c9203b7b073871acd6513aa1c12cdb5f2d2a07c4a"
+  },
+  {
+   "path": "01-education/responses/803bd881d62047be.txt",
+   "bytes": 7268,
+   "sha256": "8d673eca1f78ee3801d6a00e33ad414a9e752a5bc5247340661969f8648e8081"
+  },
+  {
+   "path": "01-education/responses/87f94ffe50e4f92e.txt",
+   "bytes": 7268,
+   "sha256": "8d673eca1f78ee3801d6a00e33ad414a9e752a5bc5247340661969f8648e8081"
+  },
+  {
+   "path": "01-education/responses/b73063a345a2e036.txt",
+   "bytes": 12,
+   "sha256": "68bb40547dd87d3fa79f820c9203b7b073871acd6513aa1c12cdb5f2d2a07c4a"
+  },
+  {
+   "path": "01-education/responses/d95e20dd56c1b94b.txt",
+   "bytes": 7331,
+   "sha256": "fb71337071eaef862ef054a8a15b2056eca36d1717d620c8b033b12e5a11d023"
+  },
+  {
+   "path": "01-education/responses/dee0956a519c9c26.txt",
+   "bytes": 12,
+   "sha256": "68bb40547dd87d3fa79f820c9203b7b073871acd6513aa1c12cdb5f2d2a07c4a"
+  },
+  {
+   "path": "01-education/responses/df3eb23126be49ab.txt",
+   "bytes": 7311,
+   "sha256": "928aad20c0f85f01ca3e4fe7c4c62fec2c37bc2ae040b0e8ba7f3a3500e0bf21"
+  },
+  {
+   "path": "01-education/sources.csv",
+   "bytes": 4399,
+   "sha256": "12104a575abb8c90f8d9e0c621a15f06cb41b5089122745243a3f1fdf5599953"
+  },
+  {
+   "path": "02-canada/arquivo-captures.csv",
+   "bytes": 407423,
+   "sha256": "da4089de1ab87cf528f1ba9479c3a94eb1f0d9eb77ced1700dceb90b26cb23d3"
+  },
+  {
+   "path": "02-canada/responses/1424a9b503b6efe9.txt",
+   "bytes": 495,
+   "sha256": "6479334e47fdd81ecdffc648443a4bc0c8264c6714912b0a6e4f2071147cfda9"
+  },
+  {
+   "path": "02-canada/responses/35635251ed725cab.txt",
+   "bytes": 495,
+   "sha256": "6479334e47fdd81ecdffc648443a4bc0c8264c6714912b0a6e4f2071147cfda9"
+  },
+  {
+   "path": "02-canada/responses/48da696b4d13f14f.txt",
+   "bytes": 495,
+   "sha256": "6479334e47fdd81ecdffc648443a4bc0c8264c6714912b0a6e4f2071147cfda9"
+  },
+  {
+   "path": "02-canada/responses/4a7cf593d21b99c3.txt",
+   "bytes": 495,
+   "sha256": "6479334e47fdd81ecdffc648443a4bc0c8264c6714912b0a6e4f2071147cfda9"
+  },
+  {
+   "path": "02-canada/responses/7d4ed6490d93aee6.txt",
+   "bytes": 495,
+   "sha256": "6479334e47fdd81ecdffc648443a4bc0c8264c6714912b0a6e4f2071147cfda9"
+  },
+  {
+   "path": "02-canada/responses/86bc8f2bcd14b8cd.txt",
+   "bytes": 495,
+   "sha256": "6479334e47fdd81ecdffc648443a4bc0c8264c6714912b0a6e4f2071147cfda9"
+  },
+  {
+   "path": "02-canada/responses/aff18dcb77fbdaae.txt",
+   "bytes": 495,
+   "sha256": "6479334e47fdd81ecdffc648443a4bc0c8264c6714912b0a6e4f2071147cfda9"
+  },
+  {
+   "path": "02-canada/responses/c4c0a3769dd55751.txt",
+   "bytes": 495,
+   "sha256": "6479334e47fdd81ecdffc648443a4bc0c8264c6714912b0a6e4f2071147cfda9"
+  },
+  {
+   "path": "02-canada/responses/c76d29fa74fdaa0a.txt",
+   "bytes": 495,
+   "sha256": "6479334e47fdd81ecdffc648443a4bc0c8264c6714912b0a6e4f2071147cfda9"
+  },
+  {
+   "path": "02-canada/responses/ef4963baddb790d2.txt",
+   "bytes": 495,
+   "sha256": "6479334e47fdd81ecdffc648443a4bc0c8264c6714912b0a6e4f2071147cfda9"
+  },
+  {
+   "path": "02-canada/responses/f6b2132e05dc9183.txt",
+   "bytes": 495,
+   "sha256": "6479334e47fdd81ecdffc648443a4bc0c8264c6714912b0a6e4f2071147cfda9"
+  },
+  {
+   "path": "02-canada/sources.csv",
+   "bytes": 3549,
+   "sha256": "c2e99652d6da201dc35593d3acbfc4e06ab2718c5b63a6e455c93bba47d76dcf"
+  },
+  {
+   "path": "03-kansas/arquivo-captures.csv",
+   "bytes": 10930548,
+   "sha256": "ec21d7118fa9f9d2cb0cbb7286e084a3529205fc05708d6f0cc9093aee77b28e"
+  },
+  {
+   "path": "03-kansas/responses/063d72008cb9cf23.txt",
+   "bytes": 42,
+   "sha256": "8bf1f9fe55c57370957e893aa9d0ba4392bc9093a20ddaf31628c44788349023"
+  },
+  {
+   "path": "03-kansas/responses/0ed36b6e294d3953.txt",
+   "bytes": 6667,
+   "sha256": "892439312b191a0f9be9b8171e79835829dc07338b8abd6a80aefffecdbdb466"
+  },
+  {
+   "path": "03-kansas/sources.csv",
+   "bytes": 472,
+   "sha256": "6a789b5baf74f975d971aa0096eedd7369a7154e58367436c040e01c937ba0bf"
+  },
+  {
+   "path": "04-illinois/arquivo-captures.csv",
+   "bytes": 80715,
+   "sha256": "308c6ccbb09092744f2496db16268a54aeba301a3fafb58bd3ba52ba32cc1728"
+  },
+  {
+   "path": "04-illinois/responses/023ec565cd32a3d7.txt",
+   "bytes": 373,
+   "sha256": "348384c6031321e461bb351f8a9d8ba3aba242ece1864587f5e5a987e9446196"
+  },
+  {
+   "path": "04-illinois/responses/0eea4d97a6af7b1b.txt",
+   "bytes": 84,
+   "sha256": "c5b3d7cd992fb1cea565b681de11fc99eae9ceae28d27b57d2cfa4b84012ce97"
+  },
+  {
+   "path": "04-illinois/responses/10e61400736c6fac.txt",
+   "bytes": 84,
+   "sha256": "c5b3d7cd992fb1cea565b681de11fc99eae9ceae28d27b57d2cfa4b84012ce97"
+  },
+  {
+   "path": "04-illinois/responses/1747629da711f771.txt",
+   "bytes": 92,
+   "sha256": "615150ae6401e3043ce7ba8ed20943628784149986d6ed1a25f1f269e8ab87ce"
+  },
+  {
+   "path": "04-illinois/responses/8709be2642777214.txt",
+   "bytes": 36,
+   "sha256": "f70a1ee84e85277e7ab32df303a330711cf60a936454fea0f1429f3d0656bc89"
+  },
+  {
+   "path": "04-illinois/responses/c1713941bd05ead1.txt",
+   "bytes": 11,
+   "sha256": "0e7b179179cc5d760439a95e4cd404c95ca863d5a5e9c870a9cad35f3c6b9f45"
+  },
+  {
+   "path": "04-illinois/responses/e286eb3775af3c69.txt",
+   "bytes": 92,
+   "sha256": "615150ae6401e3043ce7ba8ed20943628784149986d6ed1a25f1f269e8ab87ce"
+  },
+  {
+   "path": "04-illinois/sources.csv",
+   "bytes": 1814,
+   "sha256": "eba44d3db64eff295d2ab49c80904041c17b9d7f64e87eb46ed86d0a1308374f"
+  },
+  {
+   "path": "05-maryland/arquivo-captures.csv",
+   "bytes": 124039800,
+   "sha256": "cf8a927fb7fd1b0abf8d04e760d5900550c7b19de302cf482f47063562a5deec"
+  },
+  {
+   "path": "05-maryland/response-excerpts.json",
+   "bytes": 93092,
+   "sha256": "a61df5dd206922e41a145ebab83cdb8f6cd767b83d20c3680219bb07fc641162"
+  },
+  {
+   "path": "05-maryland/sources.csv",
+   "bytes": 672,
+   "sha256": "b6da1614aa2e3110fd6402b760c9f4008cc3990aaffef9f78ed428aedd240223"
+  },
+  {
+   "path": "05-maryland/urlquery-http.csv",
+   "bytes": 41405,
+   "sha256": "266f7959889d1831256f826b2fb59f14bf47011465df46739fa53b21c0411190"
+  },
+  {
+   "path": "05-maryland/urlquery-reports.csv",
+   "bytes": 931,
+   "sha256": "03d13439322a13cb03666c77102eec4b672a84829276ea1b70dd271bda387f01"
+  },
+  {
+   "path": "06-new-york/arquivo-captures.csv",
+   "bytes": 260895,
+   "sha256": "8db977dcecc146b8d5da7a2a66ca82322bc2d005904ee590c2cd0956c3cb4daf"
+  },
+  {
+   "path": "06-new-york/cited-wiki-task.txt",
+   "bytes": 1421,
+   "sha256": "f99acf1be94244355c2014f8ee4420175874466a7ce1c2f5cbc6cf1b570832d9"
+  },
+  {
+   "path": "06-new-york/responses/0ebc0b6559b5e205.txt",
+   "bytes": 34,
+   "sha256": "f710cc6964ff9b1f50df65f40f2fe843221bc259b9b60d729e536193542b2818"
+  },
+  {
+   "path": "06-new-york/responses/0fe52754ede863be.txt",
+   "bytes": 2480,
+   "sha256": "05d18a29f3d68ece92546cc22a1bce8eddb8ac97353ace56296767a9eeb6e858"
+  },
+  {
+   "path": "06-new-york/sources.csv",
+   "bytes": 681,
+   "sha256": "b1a76ce64474727f1a32b9d227e425d56c1601691d673190fbeb0f294ebe20a7"
+  },
+  {
+   "path": "07-texas/urlquery-http.csv",
+   "bytes": 84733,
+   "sha256": "4c0f571e44131fdb00d788024855eab571c69c3a7f986332d59e305cb1eae6a8"
+  },
+  {
+   "path": "07-texas/urlquery-reports.csv",
+   "bytes": 3148,
+   "sha256": "f6cef213f7cf8010d1a875fefa56f7e5b8dde89296f2152834bbb8ebd19795fc"
+  },
+  {
+   "path": "08-california/arquivo-captures.csv",
+   "bytes": 40776,
+   "sha256": "2fae9577b55e1023a9dcc9d52f5a63525368421b985942c96271be533f0cefb5"
+  },
+  {
+   "path": "08-california/responses/30e6e11ac193f163.txt",
+   "bytes": 726,
+   "sha256": "9db3410a89ea6b3508576668d9754e3da25da06eb7dc214bf36446aee9b56479"
+  },
+  {
+   "path": "08-california/responses/d506779921987073.txt",
+   "bytes": 1353,
+   "sha256": "8fe5d3e7e80e3fd9128783dbb94ad1ac246495a105a6d15c77d9e3f7b732a4ca"
+  },
+  {
+   "path": "08-california/sources.csv",
+   "bytes": 1891,
+   "sha256": "7cf7f3bcd58c678c54575f1541bc33f8b66d5a63f4d546384b88e6782b7e38b4"
+  },
+  {
+   "path": "09-max-gov/arquivo-captures.csv",
+   "bytes": 10780,
+   "sha256": "767fdfa34e0e757f11cd7ab6f1dfd33396da462a1a0f8a6bfd64aaa4f9c1b811"
+  },
+  {
+   "path": "09-max-gov/cited-wiki-revision.txt",
+   "bytes": 199,
+   "sha256": "e7aa066b0350465c883a7d6cb0f13b510f0577f09efc0575c0ade34e577a5db4"
+  },
+  {
+   "path": "09-max-gov/may27-links.png",
+   "bytes": 185804,
+   "sha256": "c2169148e56b86b796941a19d064109336f8af04a72bd4af818e0ba416cefa6f"
+  },
+  {
+   "path": "09-max-gov/pdf-to-json.png",
+   "bytes": 14226,
+   "sha256": "e63be7f54a6bf60ec2aeebe568a6a1d4140c3bd2f2a506454642ebd41e0223a3"
+  },
+  {
+   "path": "09-max-gov/sources.csv",
+   "bytes": 541,
+   "sha256": "cb1a9e76af14b7ab8261007d8d4245f1fe71a1241425a1efebf9d023f1ed286c"
+  },
+  {
+   "path": "09-max-gov/urlquery-http.csv",
+   "bytes": 791859,
+   "sha256": "15225c118465fd8a10b713103b9c52774dae6c7cc7f07a06ed9ab44d4803c501"
+  },
+  {
+   "path": "09-max-gov/urlquery-reports.csv",
+   "bytes": 312807,
+   "sha256": "fc3dcac234043508acc9ae3f76b720ac5e003f4da7c5cb77897b969b52021785"
+  },
+  {
+   "path": "10-navy/arquivo-captures.csv",
+   "bytes": 1898661,
+   "sha256": "5073583bcdb94799730439b40374117d095e043b1b20269aee717693e77ec12a"
+  },
+  {
+   "path": "10-navy/responses/aae991050745bd3e.txt",
+   "bytes": 1746,
+   "sha256": "677b8f77d8ebb849cfdd4ed1168aaa13aea9a972c729f80520aebc67079951db"
+  },
+  {
+   "path": "10-navy/responses/c0b4c866eceead18.txt",
+   "bytes": 435,
+   "sha256": "7de689700cb4718d1f3a001b0d752753a4fbdb60a75d43e09d646573d83eb1de"
+  },
+  {
+   "path": "10-navy/responses/e23820ec9e3abfe6.txt",
+   "bytes": 474,
+   "sha256": "514c61e8e496c91580f9d977c97a6c319dfe07457a1362ed5a929457b6ede574"
+  },
+  {
+   "path": "10-navy/sources.csv",
+   "bytes": 1038,
+   "sha256": "ccb1ab886cff124d09f2b2859209b0b50dfe109895d5f6d161e456a0767eee37"
+  },
+  {
+   "path": "11-justice/arquivo-captures.csv",
+   "bytes": 15524,
+   "sha256": "49769c675a16e9096ce23e6a7844071c9ac06f8f937bc4e3a71b9fee899a0cd6"
+  },
+  {
+   "path": "11-justice/benchmark-excerpt.json",
+   "bytes": 526,
+   "sha256": "ac5b8659d01e14b83a9d9722c8ee0c83d843b87dc0cab07223691205fd0dfd91"
+  },
+  {
+   "path": "11-justice/responses/4c074c0034580078.txt",
+   "bytes": 4371,
+   "sha256": "65c59620cbd342020a27c3b6406b2fd791c99621f2fd1a3836b9a0951aa7ece1"
+  },
+  {
+   "path": "11-justice/responses/5a5c55dcac351de1.txt",
+   "bytes": 3127,
+   "sha256": "f5e54b55823fbb2c829ddcc77c52c0c3f4b4073947fde565105b1d53f66b4280"
+  },
+  {
+   "path": "11-justice/responses/b230e960efb2e4d4.txt",
+   "bytes": 4397,
+   "sha256": "ec250c854897c9cbe967ac16cb4b5e7fe85d3148a30f826fd5c6ccdb24bc7615"
+  },
+  {
+   "path": "11-justice/sources.csv",
+   "bytes": 1011,
+   "sha256": "50a15a4812578c0fa3979b5ba2c1f633f6fbd2372978168ac94f8f5016e5d186"
+  },
+  {
+   "path": "12-bea/arquivo-captures.csv",
+   "bytes": 1103991,
+   "sha256": "90428ee7659adfa248627dda9d3c26212ff0db9f437adf33e831b41e67f50d22"
+  },
+  {
+   "path": "12-bea/responses/35dbde93d88a7753.txt",
+   "bytes": 928,
+   "sha256": "ec77e1a5624ebb1cb059317d4760cb77324750766c5625f4b8ec21e4dcfc9956"
+  },
+  {
+   "path": "12-bea/responses/3c9424e4ef690e07.txt",
+   "bytes": 5843,
+   "sha256": "b852dc314168ae7f5a0b76c45deb24da3d5b40d1bbf6e42a2ca922033a30f251"
+  },
+  {
+   "path": "12-bea/responses/54b66ed598a5e91a.txt",
+   "bytes": 446,
+   "sha256": "744604a31f9de33f64ec1773a86abcdce2913fd9ed808b0ee6dc92fe6098c36e"
+  },
+  {
+   "path": "12-bea/responses/6238a2ed3349b9a7.txt",
+   "bytes": 5811,
+   "sha256": "7bba0379efd6cc2b5a7b3e818424c21f7409e5baade1d9360f5ae12e5b66de2b"
+  },
+  {
+   "path": "12-bea/sources.csv",
+   "bytes": 987,
+   "sha256": "649b825762872bdbfd00ddc29a72ce031ec462a10d11bbbf9b84b5e083272a49"
+  },
+  {
+   "path": "14-sec/cited-wiki-revision.txt",
+   "bytes": 734,
+   "sha256": "2a0ca6e9c9ea871b085bdf71b9e1b24603fd754156b4bdd3e2be1d7fd6ea71c9"
+  },
+  {
+   "path": "14-sec/sources.csv",
+   "bytes": 228,
+   "sha256": "b03b61a12d71135f5548ddb5c61012af207b1157684fee06f5c76cc053322539"
+  },
+  {
+   "path": "14-sec/urlquery-http.csv",
+   "bytes": 2466986,
+   "sha256": "6582a5854176a1cf01fd736d56f2baec6a4ddd0866f275c265f271f7c886fe61"
+  },
+  {
+   "path": "14-sec/urlquery-reports.csv",
+   "bytes": 240463,
+   "sha256": "5a041d2c117cda5dcb305990bd135e0554f1f72bf8815587281334c1f9a94035"
+  },
+  {
+   "path": "15-cdc/responses/4c484673db755ba8.txt",
+   "bytes": 553,
+   "sha256": "7d996d97f45b60035ccc7c764d7768344f2df49f183da021e4fb509791079486"
+  },
+  {
+   "path": "15-cdc/sources.csv",
+   "bytes": 278,
+   "sha256": "d566384c384dd47263490e547e44a0b048a05214e0e49e7c889160d430567e6d"
+  },
+  {
+   "path": "README.txt",
+   "bytes": 164,
+   "sha256": "50884eebeea9d0f45798b630670049789628321a595b27a317d92f8bf69a76b6"
+  }
+ ],
+ "placeholders": {
+  "workspace": "@@THIMBLE_WORKSPACE@@",
+  "corpus": "@@THIMBLE_CORPUS@@",
+  "app": "@@THIMBLE_APP@@",
+  "thimble_home": "@@THIMBLE_HOME@@",
+  "home": "@@THIMBLE_USER_HOME@@"
+ },
+ "files": [
+  {
+   "path": "calls/1e6fd2e6.jsonl",
+   "bytes": 9511,
+   "sha256": "d12672db62960cdbf44b036b6118c4707d261d259889ecee91b151a97f1c52fe"
+  },
+  {
+   "path": "chats/1e6fd2e6.jsonl",
+   "bytes": 0,
+   "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+   "path": "chats/1e6fd2e6.meta.json",
+   "bytes": 459,
+   "sha256": "532d417d77a7c10d9e730893901c53bedd643968678bac81f3ea8c1eda9519c6"
+  },
+  {
+   "path": "concepts/a5755a83.json",
+   "bytes": 3441,
+   "sha256": "9cbcf14d50d9cdec8d088310542a90a4c3c7707297d5270a66c16212cc07505c"
+  },
+  {
+   "path": "extension/extension.json",
+   "bytes": 115,
+   "sha256": "beace31d327f441691a2887007611bdc0aa8ae5823fc11084466246f67963f41"
+  },
+  {
+   "path": "extension/views/capture-timeline/reader.py",
+   "bytes": 50043,
+   "sha256": "e268d060e8a415cc2ef6d50c2a7853cbbd81a9748f7619fd16cb18283170fc29"
+  },
+  {
+   "path": "extension/views/capture-timeline/view.html",
+   "bytes": 70519,
+   "sha256": "3596280c44a2511f7bef3868b1851f3c0af855dd99df207e41ccae6fe1ef2580"
+  },
+  {
+   "path": "extension/views/capture-timeline/view.json",
+   "bytes": 6527,
+   "sha256": "9b3ac47e57221ec46775e54e52f2c5c52c2f36b05b3162d78155fef6a2a7a993"
+  },
+  {
+   "path": "extension/views/variant-families/reader.py",
+   "bytes": 76023,
+   "sha256": "7cf530e4842376c52c6d98babbc8e02ef917cab2f4bb1fe253ad89b06abe0f7f"
+  },
+  {
+   "path": "extension/views/variant-families/view.html",
+   "bytes": 47159,
+   "sha256": "05dc20cd9d6fc297c52c530d003a281483fc71488ddfb6a0810ece1d3799891e"
+  },
+  {
+   "path": "extension/views/variant-families/view.json",
+   "bytes": 7821,
+   "sha256": "1eba40ffb64db5211554f73ee92d841cf592186ba9cfb8ac952da31b13f3096a"
+  },
+  {
+   "path": "investigations/main/investigation.json",
+   "bytes": 82,
+   "sha256": "10d1ed7edb3d7f19bb9d4c4fa5646abf08514b29cc89c268f8b74a7bf3555a79"
+  },
+  {
+   "path": "investigations/main/report.json",
+   "bytes": 42257,
+   "sha256": "3021f6b6a690eade747f2b6b80a415c52b4b5221937721d20e40be01f8fb7fb7"
+  },
+  {
+   "path": "labels/a5755a83.jsonl",
+   "bytes": 55139,
+   "sha256": "f8c9e8912a9409f83e3bb266b6346a94686a636abf29e87a6cfd49d892ed210f"
+  },
+  {
+   "path": "notebooks/95c86f2d.json",
+   "bytes": 21138,
+   "sha256": "27ccb7e9653969306dc9da7f9c0364882c8e98e71797ca898fb370cdc865a460"
+  },
+  {
+   "path": "notebooks/e215b014.json",
+   "bytes": 156874,
+   "sha256": "17594f2dc6a9e54fb12dc8ce2f29a3069065598c7e7f291aed52daa55cafb507"
+  },
+  {
+   "path": "orient/run.json",
+   "bytes": 458,
+   "sha256": "9364f19902306a5c07157f32a45ad266a2c61b54a8385dc0ce2f86e8bd57b4fe"
+  },
+  {
+   "path": "orient/summary.md",
+   "bytes": 190,
+   "sha256": "8fe60c366dcfeb0c27c59ec0ff3258a19bf7d32adfd51eb2ca4b962ceb308d77"
+  },
+  {
+   "path": "views/proposals.json",
+   "bytes": 8604,
+   "sha256": "a07344e38c06a8e794a1cf2f749556afe286d5395e333b81f96a930bf4e9c588"
+  }
+ ],
+ "cited_calls": [
+  {
+   "chat": "1e6fd2e6",
+   "n": 413,
+   "lines": [
+    [
+     3,
+     3
+    ],
+    [
+     23,
+     23
+    ],
+    [
+     23,
+     23
+    ]
+   ],
+   "cut": true,
+   "found": true
+  },
+  {
+   "chat": "1e6fd2e6",
+   "n": 492,
+   "lines": [
+    [
+     1,
+     64
+    ]
+   ],
+   "cut": true,
+   "found": true
+  }
+ ],
+ "verbatim": {
+  "long": 400,
+  "window": 64,
+  "stride": 32,
+  "longest": [
+   {
+    "path": "calls/1e6fd2e6.jsonl",
+    "chars": 192,
+    "shared": 3136
+   },
+   {
+    "path": "notebooks/e215b014.json",
+    "chars": 81,
+    "shared": 81
+   },
+   {
+    "path": "extension/views/variant-families/view.json",
+    "chars": 73,
+    "shared": 73
+   }
+  ]
+ },
+ "left_out": [
+  {
+   "path": "bg/orient.md",
+   "bytes": 1200,
+   "why": "the agent tray's instructions"
+  },
+  {
+   "path": "bg/writer-report.md",
+   "bytes": 1200,
+   "why": "the agent tray's instructions"
+  },
+  {
+   "path": "canvas-history.jsonl",
+   "bytes": 230277,
+   "why": "the cards' edit history"
+  },
+  {
+   "path": "card-checks/037c62f8/chk_1b667469b44e-card.png",
+   "bytes": 69333,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/037c62f8/chk_657150bb2063-card.png",
+   "bytes": 77280,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/051b0a3c/chk_5c72a08b5631-card.png",
+   "bytes": 224314,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/051b0a3c/chk_94ad8eaa7f85-card.png",
+   "bytes": 232207,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/051b0a3c/chk_9b137477ffcf-card.png",
+   "bytes": 228421,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/051b0a3c/chk_a7606dbbd088-card.png",
+   "bytes": 226837,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/051b0a3c/chk_a7606dbbd088-revised.png",
+   "bytes": 229321,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/051b0a3c/chk_c15eb7e94043-card.png",
+   "bytes": 228364,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/1223fa40/chk_59228514ad11-card.png",
+   "bytes": 101557,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/1223fa40/chk_65958eb51af5-card.png",
+   "bytes": 138103,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/1223fa40/chk_78fbe902ccf7-card.png",
+   "bytes": 137914,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/1223fa40/chk_78fbe902ccf7-revised.png",
+   "bytes": 138834,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/1223fa40/chk_bb68bb722611-card.png",
+   "bytes": 120989,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/1223fa40/chk_e836b47b14ac-card.png",
+   "bytes": 90955,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/1223fa40/chk_f77370036715-card.png",
+   "bytes": 121597,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/23a5ce55/chk_02a4927c003b-card.png",
+   "bytes": 91074,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/23a5ce55/chk_a08d4a25ff37-card.png",
+   "bytes": 90767,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/23a5ce55/chk_a08d4a25ff37-revised.png",
+   "bytes": 92178,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/23a5ce55/fix_3fb59cd97a36-before.json",
+   "bytes": 20595,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/42c599c0/chk_3196f850304c-card.png",
+   "bytes": 100015,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/42c599c0/chk_3196f850304c-revised.png",
+   "bytes": 99452,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/461c8e18/chk_6780a7a8d1d7-card.png",
+   "bytes": 111365,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/461c8e18/chk_a9cf8cbddebd-card.png",
+   "bytes": 122636,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/62080c96/chk_3764c85d60a3-card.png",
+   "bytes": 134080,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/62080c96/chk_3764c85d60a3-revised.png",
+   "bytes": 156510,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/62080c96/fix_92d127b07881-before.json",
+   "bytes": 3176,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/efb05049/chk_090e88b97550-card.png",
+   "bytes": 153025,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/efb05049/chk_2413fe119658-card.png",
+   "bytes": 149605,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/efb05049/chk_46113809e4a1-card.png",
+   "bytes": 153478,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/efb05049/chk_46113809e4a1-revised.png",
+   "bytes": 155399,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/efb05049/chk_a98a2cd11006-card.png",
+   "bytes": 149605,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/efb05049/chk_e22403559d15-card.png",
+   "bytes": 150492,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/efb05049/fix_90c48700a41e-before.json",
+   "bytes": 8287,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/f125a3a9/chk_1a05f0861b69-card.png",
+   "bytes": 84367,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/f125a3a9/chk_51d991a55aeb-card.png",
+   "bytes": 87222,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/timings.jsonl",
+   "bytes": 6523,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "chats/0b8635f9.jsonl",
+   "bytes": 143483,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/0b8635f9.meta.json",
+   "bytes": 690,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/0dd5df34.jsonl",
+   "bytes": 121089,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/0dd5df34.meta.json",
+   "bytes": 688,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/19909292.jsonl",
+   "bytes": 51527,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/19909292.meta.json",
+   "bytes": 701,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/1c9a7323.jsonl",
+   "bytes": 425163,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/1c9a7323.meta.json",
+   "bytes": 1288,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/23dba9ff.jsonl",
+   "bytes": 124727,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/23dba9ff.meta.json",
+   "bytes": 775,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/2b1c90f5.jsonl",
+   "bytes": 56192,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/2b1c90f5.meta.json",
+   "bytes": 687,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/34a2c7ba.jsonl",
+   "bytes": 35550,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/34a2c7ba.meta.json",
+   "bytes": 709,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/38e1c295.jsonl",
+   "bytes": 153836,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/38e1c295.meta.json",
+   "bytes": 777,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/3b2998f2.jsonl",
+   "bytes": 127795,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/3b2998f2.meta.json",
+   "bytes": 700,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/46715763.jsonl",
+   "bytes": 382792,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/46715763.meta.json",
+   "bytes": 684,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/4a6d9826.jsonl",
+   "bytes": 53029,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/4a6d9826.meta.json",
+   "bytes": 703,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/5668b28a.jsonl",
+   "bytes": 52272,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/5668b28a.meta.json",
+   "bytes": 711,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/820cce5b.jsonl",
+   "bytes": 73076,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/820cce5b.meta.json",
+   "bytes": 690,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/825268ef.jsonl",
+   "bytes": 168393,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/825268ef.meta.json",
+   "bytes": 700,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/a22d4512.jsonl",
+   "bytes": 94149,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/a22d4512.meta.json",
+   "bytes": 777,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/c4a10b02.jsonl",
+   "bytes": 266,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/c4a10b02.meta.json",
+   "bytes": 406,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/c7de6101.jsonl",
+   "bytes": 110684,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/c7de6101.meta.json",
+   "bytes": 706,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/d001a840.jsonl",
+   "bytes": 52304,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/d001a840.meta.json",
+   "bytes": 687,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/d15bdede.jsonl",
+   "bytes": 113045,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/d15bdede.meta.json",
+   "bytes": 692,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/d5013702.jsonl",
+   "bytes": 47946,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/d5013702.meta.json",
+   "bytes": 687,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/e23e7416.jsonl",
+   "bytes": 64908,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/e23e7416.meta.json",
+   "bytes": 705,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/efcaeeb6.jsonl",
+   "bytes": 99244,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/efcaeeb6.meta.json",
+   "bytes": 692,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/main.jsonl",
+   "bytes": 4313,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/main.meta.json",
+   "bytes": 494,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "config.json",
+   "bytes": 3,
+   "why": "the maintainer's settings"
+  },
+  {
+   "path": "extension/views/capture-timeline/cache/review/round-0-1791268618-1.png",
+   "bytes": 152040,
+   "why": "a view's cache or data, rebuilt from the download"
+  },
+  {
+   "path": "extension/views/capture-timeline/cache/review/round-0-1791268634-2.png",
+   "bytes": 138151,
+   "why": "a view's cache or data, rebuilt from the download"
+  },
+  {
+   "path": "extension/views/capture-timeline/cache/review/round-0-1791268634-3.png",
+   "bytes": 167558,
+   "why": "a view's cache or data, rebuilt from the download"
+  },
+  {
+   "path": "extension/views/capture-timeline/cache/review/round-0-1791268634-4.png",
+   "bytes": 167920,
+   "why": "a view's cache or data, rebuilt from the download"
+  },
+  {
+   "path": "extension/views/capture-timeline/cache/review/round-1-1791269889-5.png",
+   "bytes": 147047,
+   "why": "a view's cache or data, rebuilt from the download"
+  },
+  {
+   "path": "extension/views/capture-timeline/cache/review/round-1-1791269904-6.png",
+   "bytes": 134859,
+   "why": "a view's cache or data, rebuilt from the download"
+  },
+  {
+   "path": "extension/views/capture-timeline/cache/review/round-1-1791269904-7.png",
+   "bytes": 176480,
+   "why": "a view's cache or data, rebuilt from the download"
+  },
+  {
+   "path": "extension/views/capture-timeline/cache/review/round-1-1791269904-8.png",
+   "bytes": 163550,
+   "why": "a view's cache or data, rebuilt from the download"
+  },
+  {
+   "path": "extension/views/capture-timeline/cache/review/round-2-1791271352-9.png",
+   "bytes": 147024,
+   "why": "a view's cache or data, rebuilt from the download"
+  },
+  {
+   "path": "extension/views/capture-timeline/cache/review/round-2-1791271368-10.png",
+   "bytes": 136192,
+   "why": "a view's cache or data, rebuilt from the download"
+  },
+  {
+   "path": "extension/views/capture-timeline/cache/review/round-2-1791271368-11.png",
+   "bytes": 161595,
+   "why": "a view's cache or data, rebuilt from the download"
+  },
+  {
+   "path": "extension/views/capture-timeline/cache/review/round-2-1791271368-12.png",
+   "bytes": 172364,
+   "why": "a view's cache or data, rebuilt from the download"
+  },
+  {
+   "path": "extension/views/capture-timeline/cache/shots/check-1791264728-overview.png",
+   "bytes": 154669,
+   "why": "a view's cache or data, rebuilt from the download"
+  },
+  {
+   "path": "extension/views/capture-timeline/cache/shots/check-1791267914-overview.png",
+   "bytes": 152040,
+   "why": "a view's cache or data, rebuilt from the download"
+  },
+  {
+   "path": "extension/views/capture-timeline/cache/shots/check-1791268549-overview.png",
+   "bytes": 152040,
+   "why": "a view's cache or data, rebuilt from the download"
+  },
+  {
+   "path": "extension/views/capture-timeline/cache/shots/check-1791269824-overview.png",
+   "bytes": 147047,
+   "why": "a view's cache or data, rebuilt from the download"
+  },
+  {
+   "path": "extension/views/capture-timeline/cache/shots/check-1791271289-overview.png",
+   "bytes": 147024,
+   "why": "a view's cache or data, rebuilt from the download"
+  },
+  {
+   "path": "extension/views/url-pattern-map/cache/review/round-0-1791266018-1.png",
+   "bytes": 163547,
+   "why": "a view's cache or data, rebuilt from the download"
+  },
+  {
+   "path": "extension/views/url-pattern-map/cache/review/round-0-1791266043-2.png",
+   "bytes": 131870,
+   "why": "a view's cache or data, rebuilt from the download"
+  },
+  {
+   "path": "extension/views/url-pattern-map/cache/review/round-0-1791266043-3.png",
+   "bytes": 105651,
+   "why": "a view's cache or data, rebuilt from the download"
+  },
+  {
+   "path": "extension/views/url-pattern-map/cache/review/round-1-1791266242-4.png",
+   "bytes": 162467,
+   "why": "a view's cache or data, rebuilt from the download"
+  },
+  {
+   "path": "extension/views/url-pattern-map/cache/review/round-1-1791266256-5.png",
+   "bytes": 150020,
+   "why": "a view's cache or data, rebuilt from the download"
+  },
+  {
+   "path": "extension/views/url-pattern-map/cache/review/round-1-1791266256-6.png",
+   "bytes": 126945,
+   "why": "a view's cache or data, rebuilt from the download"
+  },
+  {
+   "path": "extension/views/url-pattern-map/cache/review/round-2-1791266485-7.png",
+   "bytes": 162171,
+   "why": "a view's cache or data, rebuilt from the download"
+  },
+  {
+   "path": "extension/views/url-pattern-map/cache/review/round-2-1791266503-10.png",
+   "bytes": 127313,
+   "why": "a view's cache or data, rebuilt from the download"
+  },
+  {
+   "path": "extension/views/url-pattern-map/cache/review/round-2-1791266503-8.png",
+   "bytes": 156231,
+   "why": "a view's cache or data, rebuilt from the download"
+  },
+  {
+   "path": "extension/views/url-pattern-map/cache/review/round-2-1791266503-9.png",
+   "bytes": 149598,
+   "why": "a view's cache or data, rebuilt from the download"
+  },
+  {
+   "path": "extension/views/url-pattern-map/cache/shots/check-1791262531-overview.png",
+   "bytes": 159216,
+   "why": "a view's cache or data, rebuilt from the download"
+  },
+  {
+   "path": "extension/views/url-pattern-map/cache/shots/check-1791264599-overview.png",
+   "bytes": 164742,
+   "why": "a view's cache or data, rebuilt from the download"
+  },
+  {
+   "path": "extension/views/url-pattern-map/cache/shots/check-1791265944-overview.png",
+   "bytes": 163547,
+   "why": "a view's cache or data, rebuilt from the download"
+  },
+  {
+   "path": "extension/views/url-pattern-map/cache/shots/check-1791266194-overview.png",
+   "bytes": 162467,
+   "why": "a view's cache or data, rebuilt from the download"
+  },
+  {
+   "path": "extension/views/url-pattern-map/cache/shots/check-1791266427-overview.png",
+   "bytes": 162171,
+   "why": "a view's cache or data, rebuilt from the download"
+  },
+  {
+   "path": "extension/views/urlquery-reports/cache/review/round-0-1791261635-1.png",
+   "bytes": 110246,
+   "why": "a view's cache or data, rebuilt from the download"
+  },
+  {
+   "path": "extension/views/urlquery-reports/cache/review/round-0-1791261649-2.png",
+   "bytes": 101293,
+   "why": "a view's cache or data, rebuilt from the download"
+  },
+  {
+   "path": "extension/views/urlquery-reports/cache/review/round-0-1791261649-3.png",
+   "bytes": 100699,
+   "why": "a view's cache or data, rebuilt from the download"
+  },
+  {
+   "path": "extension/views/urlquery-reports/cache/review/round-0-1791261649-4.png",
+   "bytes": 115880,
+   "why": "a view's cache or data, rebuilt from the download"
+  },
+  {
+   "path": "extension/views/urlquery-reports/cache/review/round-1-1791261954-5.png",
+   "bytes": 112880,
+   "why": "a view's cache or data, rebuilt from the download"
+  },
+  {
+   "path": "extension/views/urlquery-reports/cache/review/round-1-1791261970-6.png",
+   "bytes": 97857,
+   "why": "a view's cache or data, rebuilt from the download"
+  },
+  {
+   "path": "extension/views/urlquery-reports/cache/review/round-1-1791261970-7.png",
+   "bytes": 97211,
+   "why": "a view's cache or data, rebuilt from the download"
+  },
+  {
+   "path": "extension/views/urlquery-reports/cache/review/round-1-1791261970-8.png",
+   "bytes": 84804,
+   "why": "a view's cache or data, rebuilt from the download"
+  },
+  {
+   "path": "extension/views/urlquery-reports/cache/review/round-2-1791262134-9.png",
+   "bytes": 116929,
+   "why": "a view's cache or data, rebuilt from the download"
+  },
+  {
+   "path": "extension/views/urlquery-reports/cache/review/round-2-1791262152-10.png",
+   "bytes": 97617,
+   "why": "a view's cache or data, rebuilt from the download"
+  },
+  {
+   "path": "extension/views/urlquery-reports/cache/review/round-2-1791262152-11.png",
+   "bytes": 117478,
+   "why": "a view's cache or data, rebuilt from the download"
+  },
+  {
+   "path": "extension/views/urlquery-reports/cache/review/round-2-1791262152-12.png",
+   "bytes": 101142,
+   "why": "a view's cache or data, rebuilt from the download"
+  },
+  {
+   "path": "extension/views/urlquery-reports/cache/shots/check-1791261907-overview.png",
+   "bytes": 98837,
+   "why": "a view's cache or data, rebuilt from the download"
+  },
+  {
+   "path": "extension/views/urlquery-reports/cache/shots/check-1791261925-overview.png",
+   "bytes": 112880,
+   "why": "a view's cache or data, rebuilt from the download"
+  },
+  {
+   "path": "extension/views/urlquery-reports/cache/shots/check-1791262069-overview.png",
+   "bytes": 120690,
+   "why": "a view's cache or data, rebuilt from the download"
+  },
+  {
+   "path": "extension/views/urlquery-reports/cache/shots/check-1791262088-overview.png",
+   "bytes": 120323,
+   "why": "a view's cache or data, rebuilt from the download"
+  },
+  {
+   "path": "extension/views/urlquery-reports/cache/shots/check-1791262107-overview.png",
+   "bytes": 116929,
+   "why": "a view's cache or data, rebuilt from the download"
+  },
+  {
+   "path": "extensions/video/extension.json",
+   "bytes": 153,
+   "why": "the maintainer's extensions"
+  },
+  {
+   "path": "extensions/video/reports/video/export.py",
+   "bytes": 1555,
+   "why": "the maintainer's extensions"
+  },
+  {
+   "path": "extensions/video/reports/video/report.json",
+   "bytes": 155,
+   "why": "the maintainer's extensions"
+  },
+  {
+   "path": "extensions/video/reports/video/report.md",
+   "bytes": 1402,
+   "why": "the maintainer's extensions"
+  },
+  {
+   "path": "held-events.json",
+   "bytes": 2127,
+   "why": "per session"
+  },
+  {
+   "path": "investigations/main/events.jsonl",
+   "bytes": 222988,
+   "why": "not one of the orientation's outputs"
+  },
+  {
+   "path": "orient/work/.thimble-budget.json",
+   "bytes": 64,
+   "why": "a hidden file"
+  },
+  {
+   "path": "orient/work/.thimble-prompts/preamble.md",
+   "bytes": 547,
+   "why": "a hidden file"
+  },
+  {
+   "path": "orient/work/.thimble-prompts/shared.md",
+   "bytes": 23674,
+   "why": "a hidden file"
+  },
+  {
+   "path": "orient/work/critique.json",
+   "bytes": 21354,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/minute_counts.csv",
+   "bytes": 128255,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/report_01-education.json",
+   "bytes": 33645,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/report_02-canada_03-kansas.json",
+   "bytes": 43617,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/report_04-illinois_06-new-york_08-california.json",
+   "bytes": 1280,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/report_05-maryland.json",
+   "bytes": 38894,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/report_07-texas_09-max-gov.json",
+   "bytes": 43336,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/report_10-navy_11-justice_15-cdc.json",
+   "bytes": 42754,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/report_12-bea_14-sec.json",
+   "bytes": 42905,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/report_cross.json",
+   "bytes": 67331,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/scripts/build_agg.py",
+   "bytes": 961,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/scripts/request_kind.py",
+   "bytes": 1659,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/scripts/save_reports.py",
+   "bytes": 519,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/scripts/show_report.py",
+   "bytes": 318,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "permissions.jsonl",
+   "bytes": 14286,
+   "why": "permission answers"
+  },
+  {
+   "path": "registry/card_types.json",
+   "bytes": 17,
+   "why": "rebuilt by thimble"
+  },
+  {
+   "path": "registry/extensions.json",
+   "bytes": 1129,
+   "why": "rebuilt by thimble"
+  },
+  {
+   "path": "sessions.json",
+   "bytes": 288,
+   "why": "the maintainer's Claude Code sessions"
+  },
+  {
+   "path": "settings.json",
+   "bytes": 3,
+   "why": "the maintainer's settings"
+  },
+  {
+   "path": "telemetry.jsonl",
+   "bytes": 0,
+   "why": "the maintainer's browser telemetry"
+  },
+  {
+   "path": "tray.json",
+   "bytes": 1417,
+   "why": "not one of the orientation's outputs"
+  },
+  {
+   "path": "undo.jsonl",
+   "bytes": 1307139,
+   "why": "the undo history"
+  },
+  {
+   "path": "viewed.jsonl",
+   "bytes": 0,
+   "why": "the files the maintainer opened"
+  },
+  {
+   "path": "views/.reviewed/capture-timeline/reader.py",
+   "bytes": 45714,
+   "why": "a hidden file"
+  },
+  {
+   "path": "views/.reviewed/capture-timeline/view.html",
+   "bytes": 71794,
+   "why": "a hidden file"
+  },
+  {
+   "path": "views/.reviewed/capture-timeline/view.json",
+   "bytes": 5581,
+   "why": "a hidden file"
+  },
+  {
+   "path": "views/.reviewed/capture-timeline.last/reader.py",
+   "bytes": 45714,
+   "why": "a hidden file"
+  },
+  {
+   "path": "views/.reviewed/capture-timeline.last/view.html",
+   "bytes": 75125,
+   "why": "a hidden file"
+  },
+  {
+   "path": "views/.reviewed/capture-timeline.last/view.json",
+   "bytes": 5581,
+   "why": "a hidden file"
+  },
+  {
+   "path": "views/.reviewed/url-pattern-map/reader.py",
+   "bytes": 43963,
+   "why": "a hidden file"
+  },
+  {
+   "path": "views/.reviewed/url-pattern-map/view.html",
+   "bytes": 54106,
+   "why": "a hidden file"
+  },
+  {
+   "path": "views/.reviewed/url-pattern-map/view.json",
+   "bytes": 3444,
+   "why": "a hidden file"
+  },
+  {
+   "path": "views/.reviewed/url-pattern-map.last/reader.py",
+   "bytes": 43963,
+   "why": "a hidden file"
+  },
+  {
+   "path": "views/.reviewed/url-pattern-map.last/view.html",
+   "bytes": 59071,
+   "why": "a hidden file"
+  },
+  {
+   "path": "views/.reviewed/url-pattern-map.last/view.json",
+   "bytes": 3444,
+   "why": "a hidden file"
+  },
+  {
+   "path": "views/.reviewed/urlquery-reports/reader.py",
+   "bytes": 30329,
+   "why": "a hidden file"
+  },
+  {
+   "path": "views/.reviewed/urlquery-reports/view.html",
+   "bytes": 68617,
+   "why": "a hidden file"
+  },
+  {
+   "path": "views/.reviewed/urlquery-reports/view.json",
+   "bytes": 5123,
+   "why": "a hidden file"
+  },
+  {
+   "path": "views/.reviewed/urlquery-reports.last/reader.py",
+   "bytes": 30760,
+   "why": "a hidden file"
+  },
+  {
+   "path": "views/.reviewed/urlquery-reports.last/view.html",
+   "bytes": 75815,
+   "why": "a hidden file"
+  },
+  {
+   "path": "views/.reviewed/urlquery-reports.last/view.json",
+   "bytes": 5123,
+   "why": "a hidden file"
+  },
+  {
+   "path": "views/.versions/capture-timeline/423a0f82bf89/reader.py",
+   "bytes": 45867,
+   "why": "a hidden file"
+  },
+  {
+   "path": "views/.versions/capture-timeline/423a0f82bf89/view.html",
+   "bytes": 77024,
+   "why": "a hidden file"
+  },
+  {
+   "path": "views/.versions/capture-timeline/423a0f82bf89/view.json",
+   "bytes": 5581,
+   "why": "a hidden file"
+  },
+  {
+   "path": "views/.versions/capture-timeline/7096df603393/reader.py",
+   "bytes": 45714,
+   "why": "a hidden file"
+  },
+  {
+   "path": "views/.versions/capture-timeline/7096df603393/view.html",
+   "bytes": 71794,
+   "why": "a hidden file"
+  },
+  {
+   "path": "views/.versions/capture-timeline/7096df603393/view.json",
+   "bytes": 5581,
+   "why": "a hidden file"
+  },
+  {
+   "path": "views/.versions/capture-timeline/79f9ea94c4ce/reader.py",
+   "bytes": 45714,
+   "why": "a hidden file"
+  },
+  {
+   "path": "views/.versions/capture-timeline/79f9ea94c4ce/view.html",
+   "bytes": 75125,
+   "why": "a hidden file"
+  },
+  {
+   "path": "views/.versions/capture-timeline/79f9ea94c4ce/view.json",
+   "bytes": 5581,
+   "why": "a hidden file"
+  },
+  {
+   "path": "views/.versions/url-pattern-map/4377a0f1ad3a/reader.py",
+   "bytes": 44007,
+   "why": "a hidden file"
+  },
+  {
+   "path": "views/.versions/url-pattern-map/4377a0f1ad3a/view.html",
+   "bytes": 63350,
+   "why": "a hidden file"
+  },
+  {
+   "path": "views/.versions/url-pattern-map/4377a0f1ad3a/view.json",
+   "bytes": 3518,
+   "why": "a hidden file"
+  },
+  {
+   "path": "views/.versions/url-pattern-map/5a41e863a8cc/reader.py",
+   "bytes": 43963,
+   "why": "a hidden file"
+  },
+  {
+   "path": "views/.versions/url-pattern-map/5a41e863a8cc/view.html",
+   "bytes": 54106,
+   "why": "a hidden file"
+  },
+  {
+   "path": "views/.versions/url-pattern-map/5a41e863a8cc/view.json",
+   "bytes": 3444,
+   "why": "a hidden file"
+  },
+  {
+   "path": "views/.versions/url-pattern-map/7daf91490866/reader.py",
+   "bytes": 43963,
+   "why": "a hidden file"
+  },
+  {
+   "path": "views/.versions/url-pattern-map/7daf91490866/view.html",
+   "bytes": 59071,
+   "why": "a hidden file"
+  },
+  {
+   "path": "views/.versions/url-pattern-map/7daf91490866/view.json",
+   "bytes": 3444,
+   "why": "a hidden file"
+  },
+  {
+   "path": "views/.versions/urlquery-reports/1aeaa2faae3f/reader.py",
+   "bytes": 30329,
+   "why": "a hidden file"
+  },
+  {
+   "path": "views/.versions/urlquery-reports/1aeaa2faae3f/view.html",
+   "bytes": 68617,
+   "why": "a hidden file"
+  },
+  {
+   "path": "views/.versions/urlquery-reports/1aeaa2faae3f/view.json",
+   "bytes": 5123,
+   "why": "a hidden file"
+  },
+  {
+   "path": "views/.versions/urlquery-reports/52f1e86e29dd/reader.py",
+   "bytes": 30760,
+   "why": "a hidden file"
+  },
+  {
+   "path": "views/.versions/urlquery-reports/52f1e86e29dd/view.html",
+   "bytes": 80166,
+   "why": "a hidden file"
+  },
+  {
+   "path": "views/.versions/urlquery-reports/52f1e86e29dd/view.json",
+   "bytes": 5123,
+   "why": "a hidden file"
+  },
+  {
+   "path": "views/.versions/urlquery-reports/ed2df6199526/reader.py",
+   "bytes": 30760,
+   "why": "a hidden file"
+  },
+  {
+   "path": "views/.versions/urlquery-reports/ed2df6199526/view.html",
+   "bytes": 75815,
+   "why": "a hidden file"
+  },
+  {
+   "path": "views/.versions/urlquery-reports/ed2df6199526/view.json",
+   "bytes": 5123,
+   "why": "a hidden file"
+  },
+  {
+   "path": "views/key-refs.json",
+   "bytes": 1565859,
+   "why": "the excerpts of the records the views' keys cite, rebuilt"
+  },
+  {
+   "path": "views-work/capture-timeline/axis_test.js",
+   "bytes": 1234,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/capture-timeline/axis_test2.js",
+   "bytes": 1879,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/capture-timeline/page.js",
+   "bytes": 56955,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/capture-timeline/prof/collapse.py",
+   "bytes": 2822,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/capture-timeline/prof/fastnorm.py",
+   "bytes": 1240,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/capture-timeline/prof/params.py",
+   "bytes": 786,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/capture-timeline/prof/profile.py",
+   "bytes": 1856,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/capture-timeline/prof/profile2.py",
+   "bytes": 1113,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/capture-timeline/prof/profile3.py",
+   "bytes": 1522,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/capture-timeline/prof/seq.py",
+   "bytes": 533,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/capture-timeline/runtime_report.md",
+   "bytes": 27809,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/capture-timeline/segs.json",
+   "bytes": 1625,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/capture-timeline/stub/run.py",
+   "bytes": 1230,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/capture-timeline/stub/shots/compare.png",
+   "bytes": 152545,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/capture-timeline/stub/shots/compare2.png",
+   "bytes": 151597,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/capture-timeline/stub/shots/compare_798.png",
+   "bytes": 146294,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/capture-timeline/stub/shots/detail_kansas.png",
+   "bytes": 178427,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/capture-timeline/stub/shots/edu_detail_798.png",
+   "bytes": 159198,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/capture-timeline/stub/shots/edu_detail_798b.png",
+   "bytes": 160178,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/capture-timeline/stub/shots/edu_detail_798c.png",
+   "bytes": 167246,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/capture-timeline/stub/shots/edu_detail_798d.png",
+   "bytes": 169134,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/capture-timeline/stub/shots/edu_detail_tall.png",
+   "bytes": 226430,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/capture-timeline/stub/shots/edu_probe_range.png",
+   "bytes": 165468,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/capture-timeline/stub/shots/filtered.png",
+   "bytes": 135268,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/capture-timeline/stub/shots/illinois.png",
+   "bytes": 149465,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/capture-timeline/stub/shots/kansas_1048.png",
+   "bytes": 144252,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/capture-timeline/stub/shots/narrow_probe.png",
+   "bytes": 138372,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/capture-timeline/stub/shots/navy_798.png",
+   "bytes": 148762,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/capture-timeline/stub/shots/pop_filters.png",
+   "bytes": 182474,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/capture-timeline/stub/shots/pop_labels.png",
+   "bytes": 145414,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/capture-timeline/stub/shots/pop_sites.png",
+   "bytes": 176536,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/capture-timeline/stub/shots/r_compare.png",
+   "bytes": 163506,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/capture-timeline/stub/shots/r_detail.png",
+   "bytes": 163581,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/capture-timeline/stub/shots/r_narrow.png",
+   "bytes": 134999,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/capture-timeline/stub/shots/r_wide.png",
+   "bytes": 215745,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/capture-timeline/stub/shots/run_kansas.png",
+   "bytes": 180395,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/capture-timeline/stub/shots/run_kansas2.png",
+   "bytes": 181845,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/capture-timeline/stub/shots/run_kansas3.png",
+   "bytes": 176158,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/capture-timeline/stub/shots/s_compare.png",
+   "bytes": 161457,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/capture-timeline/stub/shots/s_detail_tall.png",
+   "bytes": 244006,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/capture-timeline/stub/shots/s_narrow.png",
+   "bytes": 134864,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/capture-timeline/stub/shots/s_wide.png",
+   "bytes": 181386,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/capture-timeline/stub/shots/search_or.png",
+   "bytes": 154669,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/capture-timeline/stub/shots/t1.png",
+   "bytes": 138411,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/capture-timeline/stub/shots/t_detail1048.png",
+   "bytes": 204561,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/capture-timeline/stub/shots/t_detail798.png",
+   "bytes": 170532,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/capture-timeline/stub/shots/t_filters.png",
+   "bytes": 161630,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/capture-timeline/stub/shots/t_filters798.png",
+   "bytes": 106573,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/capture-timeline/stub/shots/t_overview.png",
+   "bytes": 147021,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/capture-timeline/stub/shots/u_detail1048.png",
+   "bytes": 203022,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/capture-timeline/stub/shots/u_detail798.png",
+   "bytes": 173280,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/capture-timeline/stub/shots/u_overview798.png",
+   "bytes": 136192,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/capture-timeline/stub/shots/u_run1048.png",
+   "bytes": 185990,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/capture-timeline/stub/shots/u_wide.png",
+   "bytes": 184257,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/capture-timeline/stub/shots/wide.png",
+   "bytes": 195898,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/capture-timeline/stub/shots/wide_detail.png",
+   "bytes": 220073,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/capture-timeline/stub/shots/work/frame.html",
+   "bytes": 142013,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/capture-timeline/stub/shots/work/states.json",
+   "bytes": 3482,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/capture-timeline/stub/shots.py",
+   "bytes": 5759,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/capture-timeline/stub/states1.json",
+   "bytes": 492,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/capture-timeline/stub/states10.json",
+   "bytes": 268,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/capture-timeline/stub/states11.json",
+   "bytes": 410,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/capture-timeline/stub/states12.json",
+   "bytes": 410,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/capture-timeline/stub/states2.json",
+   "bytes": 239,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/capture-timeline/stub/states3.json",
+   "bytes": 282,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/capture-timeline/stub/states4.json",
+   "bytes": 326,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/capture-timeline/stub/states5.json",
+   "bytes": 221,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/capture-timeline/stub/states6.json",
+   "bytes": 184,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/capture-timeline/stub/states7.json",
+   "bytes": 350,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/capture-timeline/stub/states8.json",
+   "bytes": 267,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/capture-timeline/stub/states9.json",
+   "bytes": 331,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/capture-timeline/stub/thimble.py",
+   "bytes": 1025,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/capture-timeline/torn/09-max-gov/arquivo-captures.csv",
+   "bytes": 9000,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/capture-timeline/torn/11-justice/arquivo-captures.csv",
+   "bytes": 15540,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/capture-timeline/torn/11-justice/responses/4c074c0034580078.txt",
+   "bytes": 4371,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/capture-timeline/torn/11-justice/responses/5a5c55dcac351de1.txt",
+   "bytes": 3127,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/capture-timeline/torn/11-justice/responses/b230e960efb2e4d4.txt",
+   "bytes": 4397,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/capture-timeline/torn/11-justice/sources.csv",
+   "bytes": 1011,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/url-pattern-map/scratch/check1.json",
+   "bytes": 4266,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/url-pattern-map/scratch/check2.json",
+   "bytes": 4881,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/url-pattern-map/scratch/check3.json",
+   "bytes": 5128,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/url-pattern-map/scratch/check4.json",
+   "bytes": 5467,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/url-pattern-map/scratch/check5.json",
+   "bytes": 5128,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/url-pattern-map/scratch/harness.py",
+   "bytes": 2502,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/url-pattern-map/scratch/norm.py",
+   "bytes": 6972,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/url-pattern-map/scratch/robust/11-justice/arquivo-captures.csv",
+   "bytes": 15580,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/url-pattern-map/scratch/run1.py",
+   "bytes": 1188,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/url-pattern-map/scratch/s1.json",
+   "bytes": 887,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/url-pattern-map/scratch/s2.json",
+   "bytes": 1173,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/url-pattern-map/scratch/s3.json",
+   "bytes": 1235,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/url-pattern-map/scratch/s4.json",
+   "bytes": 591,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/url-pattern-map/scratch/s5.json",
+   "bytes": 1183,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/url-pattern-map/scratch/s5.log",
+   "bytes": 3100,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/url-pattern-map/scratch/s6.json",
+   "bytes": 1154,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/url-pattern-map/scratch/s6.log",
+   "bytes": 3026,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/url-pattern-map/scratch/shoot.py",
+   "bytes": 5073,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/url-pattern-map/scratch/shots/canada-filtered.png",
+   "bytes": 73396,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/url-pattern-map/scratch/shots/canada-label.png",
+   "bytes": 152435,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/url-pattern-map/scratch/shots/detail-edu.png",
+   "bytes": 147811,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/url-pattern-map/scratch/shots/filtered.png",
+   "bytes": 63622,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/url-pattern-map/scratch/shots/frame.html",
+   "bytes": 128377,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/url-pattern-map/scratch/shots/label-illinois.png",
+   "bytes": 139415,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/url-pattern-map/scratch/shots/labels-pop.png",
+   "bytes": 152020,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/url-pattern-map/scratch/shots/narrow-kansas.png",
+   "bytes": 109447,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/url-pattern-map/scratch/shots/navy.png",
+   "bytes": 163930,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/url-pattern-map/scratch/shots/q-detail-narrow.png",
+   "bytes": 127313,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/url-pattern-map/scratch/shots/q-edu.png",
+   "bytes": 162171,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/url-pattern-map/scratch/shots/q-il.png",
+   "bytes": 140793,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/url-pattern-map/scratch/shots/q-md.png",
+   "bytes": 165572,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/url-pattern-map/scratch/shots/r-arch.png",
+   "bytes": 150169,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/url-pattern-map/scratch/shots/r-detail-narrow.png",
+   "bytes": 126945,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/url-pattern-map/scratch/shots/r-narrow.png",
+   "bytes": 150020,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/url-pattern-map/scratch/shots/r-overview.png",
+   "bytes": 162467,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/url-pattern-map/scratch/shots/states.json",
+   "bytes": 1400,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/url-pattern-map/scratch/shots/type-pop.png",
+   "bytes": 164716,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/url-pattern-map/scratch/shots/wide-maryland.png",
+   "bytes": 241121,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/url-pattern-map/scratch/t1.py",
+   "bytes": 1765,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/url-pattern-map/scratch/t2.py",
+   "bytes": 684,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/url-pattern-map/scratch/t3.py",
+   "bytes": 269,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/url-pattern-map/scratch/t4.py",
+   "bytes": 849,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/url-pattern-map/scratch/t5.py",
+   "bytes": 449,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/url-pattern-map/scratch/view.before-review.html",
+   "bytes": 54106,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/url-pattern-map/scratch/view.round1.html",
+   "bytes": 59071,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/urlquery-reports/check.sh",
+   "bytes": 410,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/urlquery-reports/demo.py",
+   "bytes": 560,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/urlquery-reports/demo_filt.js",
+   "bytes": 298,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/urlquery-reports/demo_lab.js",
+   "bytes": 443,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/urlquery-reports/demo_n2.js",
+   "bytes": 162,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/urlquery-reports/demo_n3.js",
+   "bytes": 143,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/urlquery-reports/demo_narrow.js",
+   "bytes": 679,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/urlquery-reports/demo_w.js",
+   "bytes": 478,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/urlquery-reports/demo_wf.js",
+   "bytes": 578,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/urlquery-reports/stub/thimble.py",
+   "bytes": 744,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/urlquery-reports/t_facts.py",
+   "bytes": 1360,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/urlquery-reports/t_reader.py",
+   "bytes": 1809,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/urlquery-reports/t_redir.py",
+   "bytes": 960,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/urlquery-reports/t_unwrap.py",
+   "bytes": 1378,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/urlquery-reports/view.clean.html",
+   "bytes": 80166,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "writers/report/.thimble-budget.json",
+   "bytes": 59,
+   "why": "a hidden file"
+  },
+  {
+   "path": "writers/report/.thimble-prompts/preamble.md",
+   "bytes": 547,
+   "why": "a hidden file"
+  },
+  {
+   "path": "writers/report/.thimble-prompts/shared.md",
+   "bytes": 24255,
+   "why": "a hidden file"
+  },
+  {
+   "path": "writers/report/args2.json",
+   "bytes": 9434,
+   "why": "the writers' own scratch"
+  },
+  {
+   "path": "writers/report/draft.md",
+   "bytes": 9798,
+   "why": "the writers' own scratch"
+  }
+ ],
+ "gitleaks": "0 findings",
+ "user_name_scrubbed": 0,
+ "flagged": [],
+ "views": [
+  {
+   "slug": "capture-timeline",
+   "name": "Capture Timeline",
+   "version": "65b85882fb5e",
+   "from": "capture-timeline",
+   "from_version": "65b85882fb5e",
+   "picked": "live at 65b85882fb5e"
+  },
+  {
+   "slug": "variant-families",
+   "name": "Variant Families",
+   "version": "48578690d721",
+   "from": "variant-families",
+   "from_version": "48578690d721",
+   "picked": "live at 48578690d721"
+  }
+ ]
+}

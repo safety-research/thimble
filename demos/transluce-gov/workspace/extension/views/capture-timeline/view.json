@@ -1,0 +1,183 @@
+{
+  "name": "Capture Timeline",
+  "description": "Each government site's Arquivo.pt captures over time: a lane per section with its captures per minute, coloured by the site's answer or by any field or label the Colour by control offers, and on demand the log of any time range, runs of near-identical URLs folded into one row, beside the capture picked in full.",
+  "scope": [
+    "*/arquivo-captures.csv"
+  ],
+  "records": [
+    {
+      "name": "capture",
+      "one": "one row of a section's arquivo-captures.csv",
+      "fields": [
+        {
+          "name": "site",
+          "type": "category",
+          "derived": "computed",
+          "from": "the section folder and its most common host",
+          "how": "the folder's words beside that host without www, port or user"
+        },
+        {
+          "name": "status_class",
+          "type": "category",
+          "derived": "computed",
+          "from": "indexed_http_status",
+          "how": "2xx, 3xx, 4xx or 5xx by its first digit, else other"
+        },
+        {
+          "name": "host",
+          "type": "category",
+          "derived": "cleaned",
+          "from": "target_url",
+          "how": "the part between // and the path, as written"
+        },
+        {
+          "name": "decoded_url",
+          "type": "text",
+          "derived": "cleaned",
+          "from": "target_url",
+          "how": "percent escapes decoded where they make readable text"
+        },
+        {
+          "name": "cited",
+          "type": "category",
+          "derived": "computed",
+          "from": "sources.csv in the same section",
+          "how": "true when a sources.csv row names a responses file for this archive_url"
+        },
+        {
+          "name": "response",
+          "type": "text",
+          "derived": "computed",
+          "from": "sources.csv and the responses folder of the same section",
+          "how": "the text of the responses file sources.csv names for this archive_url, or for the SHA256 a withheld URL gives"
+        },
+        {
+          "name": "v",
+          "type": "category",
+          "derived": "computed",
+          "from": "the Colour by choice",
+          "how": "the answer class, status code, short content type, host, saved response or withheld address of the capture, or a label's value on it"
+        }
+      ]
+    },
+    {
+      "name": "log row",
+      "one": "one capture, or a run of captures in a row that answer in the same status class and whose URLs differ only in cache-busting values or in one number that goes up by 1 to 3 at each step",
+      "fields": [
+        {
+          "name": "segs",
+          "type": "text",
+          "derived": "computed",
+          "from": "target_url of the run's first and last capture",
+          "how": "percent-decoded, a cache-busting value shown as an ellipsis, a changing number as its range, and the parts that differ from the previous distinct URL marked"
+        },
+        {
+          "name": "kind",
+          "type": "category",
+          "derived": "computed",
+          "from": "target_url of the run's captures",
+          "how": "same when only cache-busting values differ, number when one number goes up"
+        },
+        {
+          "name": "range",
+          "type": "list",
+          "derived": "computed",
+          "from": "target_url of the run's first and last capture",
+          "how": "the changing number's first and last value"
+        },
+        {
+          "name": "first_time",
+          "type": "time",
+          "derived": "computed",
+          "from": "captured_at_utc of the run's first capture",
+          "how": "as the file writes it, when the row stands for a later labelled capture"
+        },
+        {
+          "name": "last_time",
+          "type": "time",
+          "derived": "computed",
+          "from": "captured_at_utc of the run's last capture",
+          "how": "as the file writes it"
+        },
+        {
+          "name": "last_url",
+          "type": "text",
+          "derived": "computed",
+          "from": "target_url of the run's last capture",
+          "how": "as the file writes it"
+        },
+        {
+          "name": "codes",
+          "type": "list",
+          "derived": "computed",
+          "from": "indexed_http_status of the run's captures",
+          "how": "every status the run's captures answered, when they differ"
+        },
+        {
+          "name": "cited",
+          "type": "category",
+          "derived": "computed",
+          "from": "sources.csv in the same section",
+          "how": "true when a capture of the run has a saved response body"
+        },
+        {
+          "name": "v",
+          "type": "category",
+          "derived": "computed",
+          "from": "the Colour by choice",
+          "how": "the answer class, status code, short content type, host, saved response or withheld address of the capture, or a label's value on it"
+        }
+      ]
+    },
+    {
+      "name": "minute",
+      "one": "one minute of one section's captures, a bar in its lane",
+      "fields": [
+        {
+          "name": "c",
+          "type": "number",
+          "derived": "computed",
+          "from": "captured_at_utc and the Colour by choice",
+          "how": "captures counted per UTC minute and per value of the chosen field or label after every filter, the values turned off left out"
+        },
+        {
+          "name": "segs",
+          "type": "list",
+          "derived": "computed",
+          "from": "captured_at_utc",
+          "how": "the section's active periods, split where no capture comes for over an hour"
+        },
+        {
+          "name": "peak_t",
+          "type": "time",
+          "derived": "computed",
+          "from": "captured_at_utc",
+          "how": "the start of the lane's first minute with the most captures"
+        }
+      ]
+    }
+  ],
+  "accepts": [
+    {
+      "form": "L<n>",
+      "means": "the capture on line <n>, opened in its section's log with its details"
+    },
+    {
+      "form": "row=<n>",
+      "means": "the capture in data row <n>, opened in its section's log with its details"
+    }
+  ],
+  "units": [
+    {
+      "form": "<section>",
+      "means": "one section's captures, such as 03-kansas, its lane picked and its whole log open"
+    },
+    {
+      "form": "<section>/<from>..<to>",
+      "means": "a section's captures between two UTC times written YYYY-MM-DDTHH:MM:SS, its lane brushed to them and their log open"
+    }
+  ],
+  "libs": [],
+  "built": "2026-10-06T21:51:22+00:00",
+  "version": "65b85882fb5e"
+}

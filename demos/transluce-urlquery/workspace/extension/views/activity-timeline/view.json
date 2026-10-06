@@ -1,0 +1,76 @@
+{
+  "name": "Activity Timeline",
+  "description": "Every URLQuery report on one UTC time axis, a lane per data source, opening on the months that hold 99% of the reports with the data's whole span boxed in the strip above, zoomable from years to single seconds, coloured by confidence, class, disposition, source basis, catalog or a label with thimble's Colour by, a lane opened taller with its reports listed, and any report opened in full beside the lanes.",
+  "scope": [
+    "all-reports.csv",
+    "report-sources.csv",
+    "additional-cited-reports.csv"
+  ],
+  "records": [
+    {
+      "name": "report",
+      "one": "one URLQuery report, a row of all-reports.csv with its row of report-sources.csv",
+      "fields": [
+        {
+          "name": "time",
+          "type": "time",
+          "derived": "cleaned",
+          "from": "report_date_utc",
+          "how": "read as UTC to the second"
+        },
+        {
+          "name": "lane",
+          "type": "category",
+          "derived": "computed",
+          "from": "data_source, or disposition for a report with no source row",
+          "how": "the data_source joined on report_id, else Review required or Background control"
+        },
+        {
+          "name": "data_source",
+          "type": "category",
+          "derived": "computed",
+          "from": "report-sources.csv",
+          "how": "the source row with the same report_id, with its source_basis and matched_sources"
+        },
+        {
+          "name": "catalog",
+          "type": "category",
+          "derived": "computed",
+          "from": "additional-cited-reports.csv",
+          "how": "supplemental when its report_id is listed there, else main"
+        }
+      ]
+    }
+  ],
+  "accepts": [
+    {
+      "form": "L<n>",
+      "means": "the report on line <n> of all-reports.csv, report-sources.csv or additional-cited-reports.csv, opened in full and shown in its lane"
+    }
+  ],
+  "units": [
+    {
+      "form": "<lane>",
+      "means": "one lane's reports, such as unctad, review-required or background-control, that lane opened with its reports listed"
+    },
+    {
+      "form": "<YYYY-MM-DD>",
+      "means": "every report of one UTC day, zoomed to that day"
+    },
+    {
+      "form": "<from>..<to>",
+      "means": "the reports between two UTC times written YYYY-MM-DDTHH:MM, zoomed to that window"
+    },
+    {
+      "form": "<lane>/<YYYY-MM-DD>",
+      "means": "one lane's reports on one UTC day, a bar of the overview, the lane opened and zoomed to that day"
+    },
+    {
+      "form": "<lane>/<from>..<to>",
+      "means": "one lane's reports between two UTC times, a bar once zoomed in, the lane opened and zoomed to that window"
+    }
+  ],
+  "libs": [],
+  "built": "2026-10-06T21:51:58+00:00",
+  "version": "8650116bd270"
+}

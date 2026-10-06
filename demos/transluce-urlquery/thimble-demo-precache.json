@@ -1,0 +1,2957 @@
+{
+ "schema": "thimble-demo-precache",
+ "version": 3,
+ "format": "outputs-only",
+ "dataset": "transluce-urlquery",
+ "created": "2026-10-06T22:12:25+00:00",
+ "notice": "",
+ "credit": "Published by Transluce (Cable, Chiu, Pernice, Zhang, Anthony, Bas, Shen, Stosz, Steinhardt) with \"Early rogue AI agent activity and attempts to hack found on urlquery.net\", 2026-09-23. thimble does not redistribute it: `thimble demo` downloads it from transluce.org on your machine.",
+ "thimble": {
+  "version": "0.6.0",
+  "commit": "932f42b9"
+ },
+ "orientation": {
+  "status": "done",
+  "passes": [
+   "final",
+   "views",
+   "report"
+  ],
+  "query": null,
+  "effort": "xhigh",
+  "ultracode": true,
+  "critique": false,
+  "started": "2026-10-06T03:44:49+00:00",
+  "ended": "2026-10-06T04:05:24+00:00",
+  "model": "claude-opus-5-5[1m]",
+  "chat_effort": "xhigh",
+  "chat": "7e554e8e",
+  "coverage": "Coverage: viewed every file · 100% of files · <1% of records"
+ },
+ "counts": {
+  "cards": 9,
+  "labels": 1,
+  "views": 2,
+  "documents": 1
+ },
+ "corpus": [
+  {
+   "path": "README.md",
+   "bytes": 5349,
+   "sha256": "0b498c2b26d80bdd28adc9790438f8c2cf2557abe06c00035bb610b1459641d6"
+  },
+  {
+   "path": "additional-cited-reports.csv",
+   "bytes": 38534,
+   "sha256": "d9acf3bd1eedb3c79740f211077cf83df4a5d98fcf61c06d7e7264df6a7fddfd"
+  },
+  {
+   "path": "all-report-links.txt",
+   "bytes": 2480400,
+   "sha256": "bbc84c0aa4192b952f94ae316aad28e2e5de027dd0c3533d49e64f471aa203f2"
+  },
+  {
+   "path": "all-reports.csv",
+   "bytes": 17750685,
+   "sha256": "64c59f7ffa31d08f1c66fd274953cf21d446ca18aca04d3a614208639fbf6eb8"
+  },
+  {
+   "path": "classification-overrides.json",
+   "bytes": 1906,
+   "sha256": "92ab708f5c10fac306425354603ee0cd948c8508942438ebf4e209f79dbd85b3"
+  },
+  {
+   "path": "collection-summary.json",
+   "bytes": 1083,
+   "sha256": "5a7bf02c1a6aa8e2c70efe7c18af2344c222bccf098ff83a3246d04a3d0e8dbe"
+  },
+  {
+   "path": "daily-counts.csv",
+   "bytes": 8863,
+   "sha256": "7c5b82bbbf506bbf24958d7458ad29185281b17d3334f3a7ae82c155774c4f35"
+  },
+  {
+   "path": "daily-source-counts.csv",
+   "bytes": 8337,
+   "sha256": "595aa1187491485547868bf43ecdd2865006be421021df0c9b87cfcf3328e91b"
+  },
+  {
+   "path": "manifest.json",
+   "bytes": 2370,
+   "sha256": "a56db64dbebf1ac3b0ef2b3a6adbaa529ac467e2a4d4d37d019b66999ffa473a"
+  },
+  {
+   "path": "methods.json",
+   "bytes": 21187,
+   "sha256": "4eed4705fce4e7cd944af37bb303b63218bfceb95fdbea0475e0e857bd69a28d"
+  },
+  {
+   "path": "report-sources.csv",
+   "bytes": 3424581,
+   "sha256": "d92acb400b845bb10de669f8a04e0be06813085e6e5c71d0d35e64734e68fb67"
+  },
+  {
+   "path": "reports.csv",
+   "bytes": 17712263,
+   "sha256": "026de639726f1d610b61e89a86260770defb90d49c1ce847e6ff1690207b2165"
+  },
+  {
+   "path": "search-coverage.json",
+   "bytes": 13344,
+   "sha256": "decffdc7425bef9adf6589ff4a48d14dbaf3927eff0c94cb670303d8f67eaad9"
+  },
+  {
+   "path": "selection-provenance.csv",
+   "bytes": 12947,
+   "sha256": "1fcf2c9e36149ab6f8ab4bfdfaab5de5db193fd4733300556ac4c863946563f1"
+  },
+  {
+   "path": "supplement-classifications.json",
+   "bytes": 52263,
+   "sha256": "25b605e60d1e7d7c1624ee297eda354e6bb781bee83bbb2f1380804c47da508f"
+  },
+  {
+   "path": "supplement-summary.json",
+   "bytes": 392,
+   "sha256": "b605a2be793c508f92f99fcfbbb5f67f425e8c81ca0664d85d05ad2f00051f62"
+  }
+ ],
+ "placeholders": {
+  "workspace": "@@THIMBLE_WORKSPACE@@",
+  "corpus": "@@THIMBLE_CORPUS@@",
+  "app": "@@THIMBLE_APP@@",
+  "thimble_home": "@@THIMBLE_HOME@@",
+  "home": "@@THIMBLE_USER_HOME@@"
+ },
+ "files": [
+  {
+   "path": "calls/7e554e8e.jsonl",
+   "bytes": 36608,
+   "sha256": "9fdbc097d9e6cf9a97f81728491dc4069253e18cf48353dce9087843fe3ccf7f"
+  },
+  {
+   "path": "chats/7e554e8e.jsonl",
+   "bytes": 0,
+   "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+   "path": "chats/7e554e8e.meta.json",
+   "bytes": 459,
+   "sha256": "201c9e5d005a6c6e1f86e75faaa5485e4eb2c43cb6b9cf487c7e2f07002d9071"
+  },
+  {
+   "path": "concepts/b436b78d.json",
+   "bytes": 3033,
+   "sha256": "72ec410062bddacdd39637f21c2b920d58877592fcae60853f790849e082754f"
+  },
+  {
+   "path": "extension/extension.json",
+   "bytes": 120,
+   "sha256": "6ec1a62746beedb044dc07ac8c4ad55bdd31b37fe257c26c8de1be1993f3c158"
+  },
+  {
+   "path": "extension/views/activity-timeline/reader.py",
+   "bytes": 25242,
+   "sha256": "3739425bd65c62eb394f0e6e729260c2e8fedbd55e4128418f13cc6ae73662b2"
+  },
+  {
+   "path": "extension/views/activity-timeline/view.html",
+   "bytes": 80836,
+   "sha256": "379564b773a0853661b684c53fc3c65597b63594baff53870fde8f20555e2bfc"
+  },
+  {
+   "path": "extension/views/activity-timeline/view.json",
+   "bytes": 2778,
+   "sha256": "84646a9721f892226c09fd42717b91395944d14080c8eea946aa48d7106915c5"
+  },
+  {
+   "path": "extension/views/episode-browser/reader.py",
+   "bytes": 38652,
+   "sha256": "74ffa51ca4ef1e29f03326ddc8dc1e270048fe6e7b87b84cc907623f7abaa39e"
+  },
+  {
+   "path": "extension/views/episode-browser/view.html",
+   "bytes": 91934,
+   "sha256": "5aba7209478597180414b51e62b8aee96ea4832c85d9ed4b7547c7d1e6000eed"
+  },
+  {
+   "path": "extension/views/episode-browser/view.json",
+   "bytes": 5503,
+   "sha256": "6ceae74510b0ce5d627c497cb287b6b3484adae2b8d07bf99cef54fe16ee8566"
+  },
+  {
+   "path": "investigations/main/investigation.json",
+   "bytes": 82,
+   "sha256": "92bb34f9e49b3adc7afe6bd601b08ed7f601ba24544afd49c915067fd3f73414"
+  },
+  {
+   "path": "investigations/main/report.json",
+   "bytes": 39327,
+   "sha256": "d17fa74e20a2e91eeeda422f71639bbe035f0cda8feb81c0571703ea179e6ff0"
+  },
+  {
+   "path": "labels/b436b78d.jsonl",
+   "bytes": 5848405,
+   "sha256": "5672b4e19e7c0d0ad04e2efc4a3ae1c44e173383839ecb645c2d7b8dac0dfcd1"
+  },
+  {
+   "path": "notebooks/519d3976.json",
+   "bytes": 86109,
+   "sha256": "dd113a77d719b3d07a43edf161f119ac2bf9866783a0a509013dc00066be5b00"
+  },
+  {
+   "path": "notebooks/9a5ff5b4.json",
+   "bytes": 7159,
+   "sha256": "af03a7bb90827109c8e239d69d6d6827a1e59725bbdf623ab7e6486122a6ea32"
+  },
+  {
+   "path": "orient/run.json",
+   "bytes": 458,
+   "sha256": "900e6875835d41afb01fe60bc4115d72819b1c9dfb2e068d7a1e40b3f437feab"
+  },
+  {
+   "path": "orient/summary.md",
+   "bytes": 70,
+   "sha256": "cb1b6fcabdd416f6b8d137c0d15918f479f11d73e9f7bad36c1c7d460630370e"
+  },
+  {
+   "path": "views/proposals.json",
+   "bytes": 7309,
+   "sha256": "9ec5445698d504ad1e372afe60f6e7b10eb08cedfa7dc83d1aeb1f2c48bf14d8"
+  }
+ ],
+ "cited_calls": [
+  {
+   "chat": "7e554e8e",
+   "n": 29,
+   "lines": null,
+   "cut": true,
+   "found": true
+  },
+  {
+   "chat": "7e554e8e",
+   "n": 33,
+   "lines": [
+    [
+     11,
+     11
+    ]
+   ],
+   "cut": true,
+   "found": true
+  },
+  {
+   "chat": "7e554e8e",
+   "n": 39,
+   "lines": [
+    [
+     5,
+     5
+    ],
+    [
+     5,
+     5
+    ]
+   ],
+   "cut": true,
+   "found": true
+  },
+  {
+   "chat": "7e554e8e",
+   "n": 48,
+   "lines": [
+    [
+     18,
+     18
+    ]
+   ],
+   "cut": true,
+   "found": true
+  },
+  {
+   "chat": "7e554e8e",
+   "n": 161,
+   "lines": [
+    [
+     1,
+     1
+    ],
+    [
+     1,
+     1
+    ],
+    [
+     1,
+     1
+    ]
+   ],
+   "cut": true,
+   "found": true
+  },
+  {
+   "chat": "7e554e8e",
+   "n": 353,
+   "lines": [
+    [
+     9,
+     9
+    ],
+    [
+     9,
+     9
+    ]
+   ],
+   "cut": true,
+   "found": true
+  },
+  {
+   "chat": "7e554e8e",
+   "n": 371,
+   "lines": null,
+   "cut": false,
+   "found": true
+  },
+  {
+   "chat": "7e554e8e",
+   "n": 377,
+   "lines": null,
+   "cut": true,
+   "found": true
+  },
+  {
+   "chat": "7e554e8e",
+   "n": 428,
+   "lines": [
+    [
+     84,
+     84
+    ],
+    [
+     4,
+     4
+    ]
+   ],
+   "cut": true,
+   "found": true
+  },
+  {
+   "chat": "7e554e8e",
+   "n": 430,
+   "lines": [
+    [
+     3,
+     3
+    ],
+    [
+     3,
+     3
+    ],
+    [
+     3,
+     3
+    ]
+   ],
+   "cut": true,
+   "found": true
+  },
+  {
+   "chat": "7e554e8e",
+   "n": 437,
+   "lines": [
+    [
+     5,
+     11
+    ]
+   ],
+   "cut": true,
+   "found": true
+  },
+  {
+   "chat": "7e554e8e",
+   "n": 445,
+   "lines": [
+    [
+     1,
+     1
+    ],
+    [
+     2,
+     2
+    ]
+   ],
+   "cut": true,
+   "found": true
+  },
+  {
+   "chat": "7e554e8e",
+   "n": 446,
+   "lines": [
+    [
+     8,
+     8
+    ],
+    [
+     4,
+     4
+    ]
+   ],
+   "cut": true,
+   "found": true
+  }
+ ],
+ "verbatim": {
+  "long": 400,
+  "window": 64,
+  "stride": 32,
+  "longest": [
+   {
+    "path": "calls/7e554e8e.jsonl",
+    "chars": 120,
+    "shared": 846
+   },
+   {
+    "path": "investigations/main/report.json",
+    "chars": 90,
+    "shared": 90
+   },
+   {
+    "path": "extension/views/episode-browser/reader.py",
+    "chars": 90,
+    "shared": 232
+   }
+  ]
+ },
+ "left_out": [
+  {
+   "path": "bg/orient.md",
+   "bytes": 1220,
+   "why": "the agent tray's instructions"
+  },
+  {
+   "path": "bg/writer-report.md",
+   "bytes": 1220,
+   "why": "the agent tray's instructions"
+  },
+  {
+   "path": "canvas-history.jsonl",
+   "bytes": 145002,
+   "why": "the cards' edit history"
+  },
+  {
+   "path": "card-checks/0ee4c58f/chk_3fc1bcc9af33-card.png",
+   "bytes": 131144,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/0ee4c58f/chk_60761b2365f4-card.png",
+   "bytes": 126825,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/0ee4c58f/chk_775dba559b66-card.png",
+   "bytes": 128170,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/67c6fe70/chk_3893a3f3ad4e-card.png",
+   "bytes": 105254,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/67c6fe70/chk_3893a3f3ad4e-revised.png",
+   "bytes": 109518,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/67c6fe70/chk_a2fbc55452b9-card.png",
+   "bytes": 104649,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/67c6fe70/chk_fd785b6aabf8-card.png",
+   "bytes": 105280,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/84aa5fe1/chk_b6054952df46-card.png",
+   "bytes": 82094,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/84aa5fe1/chk_b6054952df46-revised.png",
+   "bytes": 70258,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/84aa5fe1/fix_d2b266b31067-before.json",
+   "bytes": 7623,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/a1608f64/chk_e8a7cb50c823-card.png",
+   "bytes": 51076,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/a1608f64/chk_e8a7cb50c823-revised.png",
+   "bytes": 51654,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/a7856af1/chk_3b908b2984ff-card.png",
+   "bytes": 181285,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/a7856af1/chk_3b908b2984ff-revised.png",
+   "bytes": 169296,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/a7856af1/chk_53497866813f-card.png",
+   "bytes": 172204,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/a7856af1/chk_7bfba3e8bc5a-card.png",
+   "bytes": 183649,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/a7856af1/fix_5d68202ef30f-before.json",
+   "bytes": 4035,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/b2835e4f/chk_0722d73298fc-card.png",
+   "bytes": 90182,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/b2835e4f/chk_1700693ff65b-card.png",
+   "bytes": 89726,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/ca822fc8/chk_618d2d363ee1-card.png",
+   "bytes": 78199,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/ca822fc8/chk_b27299a78820-card.png",
+   "bytes": 76735,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/ca822fc8/chk_b27299a78820-revised.png",
+   "bytes": 76512,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/ca822fc8/chk_daf201b21336-card.png",
+   "bytes": 79858,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/ca822fc8/fix_c925a99a42de-before.json",
+   "bytes": 1192,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/e095325f/chk_26c1913e0238-card.png",
+   "bytes": 203905,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/e095325f/chk_5b322843bceb-card.png",
+   "bytes": 191857,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/e095325f/chk_5b322843bceb-revised.png",
+   "bytes": 190129,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/e095325f/chk_6c588272eec2-card.png",
+   "bytes": 190401,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/e095325f/chk_8071f14684e1-card.png",
+   "bytes": 191248,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/e2e3a3fc/chk_0bd464c4064b-card.png",
+   "bytes": 51982,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/e2e3a3fc/chk_5ad946c4972c-card.png",
+   "bytes": 67288,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/e2e3a3fc/chk_ddcce13fc709-card.png",
+   "bytes": 67361,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/timings.jsonl",
+   "bytes": 6019,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "chats/1925037f.jsonl",
+   "bytes": 12674,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/1925037f.meta.json",
+   "bytes": 718,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/19d7ffb8.jsonl",
+   "bytes": 42578,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/19d7ffb8.meta.json",
+   "bytes": 723,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/239a4c8f.jsonl",
+   "bytes": 59440,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/239a4c8f.meta.json",
+   "bytes": 719,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/30e5b0e8.jsonl",
+   "bytes": 97858,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/30e5b0e8.meta.json",
+   "bytes": 720,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/30ed3371.jsonl",
+   "bytes": 42966,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/30ed3371.meta.json",
+   "bytes": 718,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/3f7813cf.jsonl",
+   "bytes": 77387,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/3f7813cf.meta.json",
+   "bytes": 712,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/43d884da.jsonl",
+   "bytes": 81481,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/43d884da.meta.json",
+   "bytes": 724,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/4c9ace82.jsonl",
+   "bytes": 59963,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/4c9ace82.meta.json",
+   "bytes": 690,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/52391247.jsonl",
+   "bytes": 22336,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/52391247.meta.json",
+   "bytes": 718,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/58e82685.jsonl",
+   "bytes": 78326,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/58e82685.meta.json",
+   "bytes": 712,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/6551592a.jsonl",
+   "bytes": 20210,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/6551592a.meta.json",
+   "bytes": 718,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/6592172c.jsonl",
+   "bytes": 14093,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/6592172c.meta.json",
+   "bytes": 718,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/75714082.jsonl",
+   "bytes": 92504,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/75714082.meta.json",
+   "bytes": 708,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/7853998a.jsonl",
+   "bytes": 58499,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/7853998a.meta.json",
+   "bytes": 723,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/7a09a7c7.jsonl",
+   "bytes": 49426,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/7a09a7c7.meta.json",
+   "bytes": 723,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/854f8039.jsonl",
+   "bytes": 543036,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/854f8039.meta.json",
+   "bytes": 1222,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/89a0a4a1.jsonl",
+   "bytes": 107141,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/89a0a4a1.meta.json",
+   "bytes": 765,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/8dfc7989.jsonl",
+   "bytes": 159192,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/8dfc7989.meta.json",
+   "bytes": 778,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/8eec401a.jsonl",
+   "bytes": 87325,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/8eec401a.meta.json",
+   "bytes": 712,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/91b09e36.jsonl",
+   "bytes": 29115,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/91b09e36.meta.json",
+   "bytes": 718,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/b339ec49.jsonl",
+   "bytes": 69833,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/b339ec49.meta.json",
+   "bytes": 716,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/c245b4f5.jsonl",
+   "bytes": 382,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/c245b4f5.meta.json",
+   "bytes": 466,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/cdfeb286.jsonl",
+   "bytes": 56622,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/cdfeb286.meta.json",
+   "bytes": 714,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/d3e426fd.jsonl",
+   "bytes": 14552,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/d3e426fd.meta.json",
+   "bytes": 718,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/d5f2f12f.jsonl",
+   "bytes": 90256,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/d5f2f12f.meta.json",
+   "bytes": 708,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/dbe78755.jsonl",
+   "bytes": 65844,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/dbe78755.meta.json",
+   "bytes": 710,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/df97cd65.jsonl",
+   "bytes": 26305,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/df97cd65.meta.json",
+   "bytes": 718,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/f7872a1b.jsonl",
+   "bytes": 43288,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/f7872a1b.meta.json",
+   "bytes": 711,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/fd4e5612.jsonl",
+   "bytes": 61706,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/fd4e5612.meta.json",
+   "bytes": 707,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/main.jsonl",
+   "bytes": 3138,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/main.meta.json",
+   "bytes": 504,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "config.json",
+   "bytes": 3,
+   "why": "the maintainer's settings"
+  },
+  {
+   "path": "extension/views/activity-timeline/cache/review/round-0-1791261144-1.png",
+   "bytes": 142519,
+   "why": "a view's cache or data, rebuilt from the download"
+  },
+  {
+   "path": "extension/views/activity-timeline/cache/review/round-0-1791261161-2.png",
+   "bytes": 121667,
+   "why": "a view's cache or data, rebuilt from the download"
+  },
+  {
+   "path": "extension/views/activity-timeline/cache/review/round-0-1791261161-3.png",
+   "bytes": 129233,
+   "why": "a view's cache or data, rebuilt from the download"
+  },
+  {
+   "path": "extension/views/activity-timeline/cache/review/round-0-1791261161-4.png",
+   "bytes": 160123,
+   "why": "a view's cache or data, rebuilt from the download"
+  },
+  {
+   "path": "extension/views/activity-timeline/cache/review/round-1-1791261431-5.png",
+   "bytes": 152634,
+   "why": "a view's cache or data, rebuilt from the download"
+  },
+  {
+   "path": "extension/views/activity-timeline/cache/review/round-1-1791261446-6.png",
+   "bytes": 159112,
+   "why": "a view's cache or data, rebuilt from the download"
+  },
+  {
+   "path": "extension/views/activity-timeline/cache/review/round-1-1791261446-7.png",
+   "bytes": 141267,
+   "why": "a view's cache or data, rebuilt from the download"
+  },
+  {
+   "path": "extension/views/activity-timeline/cache/review/round-1-1791261446-8.png",
+   "bytes": 133928,
+   "why": "a view's cache or data, rebuilt from the download"
+  },
+  {
+   "path": "extension/views/activity-timeline/cache/review/round-2-1791261570-9.png",
+   "bytes": 152634,
+   "why": "a view's cache or data, rebuilt from the download"
+  },
+  {
+   "path": "extension/views/activity-timeline/cache/review/round-2-1791261580-10.png",
+   "bytes": 141986,
+   "why": "a view's cache or data, rebuilt from the download"
+  },
+  {
+   "path": "extension/views/activity-timeline/cache/review/round-2-1791261580-11.png",
+   "bytes": 134918,
+   "why": "a view's cache or data, rebuilt from the download"
+  },
+  {
+   "path": "extension/views/activity-timeline/cache/review/round-2-1791261580-12.png",
+   "bytes": 159112,
+   "why": "a view's cache or data, rebuilt from the download"
+  },
+  {
+   "path": "extension/views/activity-timeline/cache/shots/check-1791260781-overview.png",
+   "bytes": 137941,
+   "why": "a view's cache or data, rebuilt from the download"
+  },
+  {
+   "path": "extension/views/activity-timeline/cache/shots/check-1791260895-overview.png",
+   "bytes": 142519,
+   "why": "a view's cache or data, rebuilt from the download"
+  },
+  {
+   "path": "extension/views/activity-timeline/cache/shots/check-1791261114-overview.png",
+   "bytes": 142519,
+   "why": "a view's cache or data, rebuilt from the download"
+  },
+  {
+   "path": "extension/views/activity-timeline/cache/shots/check-1791261405-overview.png",
+   "bytes": 152634,
+   "why": "a view's cache or data, rebuilt from the download"
+  },
+  {
+   "path": "extension/views/activity-timeline/cache/shots/check-1791261549-overview.png",
+   "bytes": 152634,
+   "why": "a view's cache or data, rebuilt from the download"
+  },
+  {
+   "path": "extension/views/burst-board/cache/review/round-0-1791259630-1.png",
+   "bytes": 120115,
+   "why": "a view's cache or data, rebuilt from the download"
+  },
+  {
+   "path": "extension/views/burst-board/cache/review/round-0-1791259642-2.png",
+   "bytes": 104000,
+   "why": "a view's cache or data, rebuilt from the download"
+  },
+  {
+   "path": "extension/views/burst-board/cache/review/round-0-1791259642-3.png",
+   "bytes": 92535,
+   "why": "a view's cache or data, rebuilt from the download"
+  },
+  {
+   "path": "extension/views/burst-board/cache/review/round-0-1791259642-4.png",
+   "bytes": 125788,
+   "why": "a view's cache or data, rebuilt from the download"
+  },
+  {
+   "path": "extension/views/burst-board/cache/review/round-1-1791259853-5.png",
+   "bytes": 121095,
+   "why": "a view's cache or data, rebuilt from the download"
+  },
+  {
+   "path": "extension/views/burst-board/cache/review/round-1-1791259867-6.png",
+   "bytes": 126971,
+   "why": "a view's cache or data, rebuilt from the download"
+  },
+  {
+   "path": "extension/views/burst-board/cache/review/round-1-1791259867-7.png",
+   "bytes": 112703,
+   "why": "a view's cache or data, rebuilt from the download"
+  },
+  {
+   "path": "extension/views/burst-board/cache/review/round-2-1791259981-8.png",
+   "bytes": 129678,
+   "why": "a view's cache or data, rebuilt from the download"
+  },
+  {
+   "path": "extension/views/burst-board/cache/review/round-2-1791259993-10.png",
+   "bytes": 112871,
+   "why": "a view's cache or data, rebuilt from the download"
+  },
+  {
+   "path": "extension/views/burst-board/cache/review/round-2-1791259993-11.png",
+   "bytes": 135728,
+   "why": "a view's cache or data, rebuilt from the download"
+  },
+  {
+   "path": "extension/views/burst-board/cache/review/round-2-1791259993-9.png",
+   "bytes": 126317,
+   "why": "a view's cache or data, rebuilt from the download"
+  },
+  {
+   "path": "extension/views/burst-board/cache/shots/check-1791259405-overview.png",
+   "bytes": 95245,
+   "why": "a view's cache or data, rebuilt from the download"
+  },
+  {
+   "path": "extension/views/burst-board/cache/shots/check-1791259577-overview.png",
+   "bytes": 120274,
+   "why": "a view's cache or data, rebuilt from the download"
+  },
+  {
+   "path": "extension/views/burst-board/cache/shots/check-1791259833-overview.png",
+   "bytes": 121095,
+   "why": "a view's cache or data, rebuilt from the download"
+  },
+  {
+   "path": "extension/views/burst-board/cache/shots/check-1791259966-overview.png",
+   "bytes": 129678,
+   "why": "a view's cache or data, rebuilt from the download"
+  },
+  {
+   "path": "extensions/video/extension.json",
+   "bytes": 153,
+   "why": "the maintainer's extensions"
+  },
+  {
+   "path": "extensions/video/reports/video/export.py",
+   "bytes": 1555,
+   "why": "the maintainer's extensions"
+  },
+  {
+   "path": "extensions/video/reports/video/report.json",
+   "bytes": 155,
+   "why": "the maintainer's extensions"
+  },
+  {
+   "path": "extensions/video/reports/video/report.md",
+   "bytes": 1402,
+   "why": "the maintainer's extensions"
+  },
+  {
+   "path": "held-events.json",
+   "bytes": 1479,
+   "why": "per session"
+  },
+  {
+   "path": "investigations/main/events.jsonl",
+   "bytes": 176250,
+   "why": "not one of the orientation's outputs"
+  },
+  {
+   "path": "orient/work/.thimble-budget.json",
+   "bytes": 60,
+   "why": "a hidden file"
+  },
+  {
+   "path": "orient/work/.thimble-prompts/preamble.md",
+   "bytes": 547,
+   "why": "a hidden file"
+  },
+  {
+   "path": "orient/work/.thimble-prompts/shared.md",
+   "bytes": 23674,
+   "why": "a hidden file"
+  },
+  {
+   "path": "orient/work/wf/classification/combos.csv",
+   "bytes": 2905,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/classification/combos.py",
+   "bytes": 699,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/classification/combos_all.txt",
+   "bytes": 3750,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/classification/phrases.py",
+   "bytes": 1624,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/classification/q2.py",
+   "bytes": 2093,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/classification/q3.py",
+   "bytes": 1168,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/classification/q4.py",
+   "bytes": 743,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/classification/q5.py",
+   "bytes": 937,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/classification/q6.py",
+   "bytes": 1963,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/classification/q6b.py",
+   "bytes": 1221,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/deckcheck/a7856af1_check.py",
+   "bytes": 6273,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/deckcheck/adj.py",
+   "bytes": 2021,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/deckcheck/adj2.py",
+   "bytes": 988,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/deckcheck/b2835e4f_check.py",
+   "bytes": 2827,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/deckcheck/b2835e4f_check2.py",
+   "bytes": 1218,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/deckcheck/b2835e4f_check3.py",
+   "bytes": 962,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/deckcheck/b2835e4f_check4.py",
+   "bytes": 1372,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/deckcheck/b2835e4f_check5.py",
+   "bytes": 609,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/deckcheck/ca822fc8_a.py",
+   "bytes": 1058,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/deckcheck/ca822fc8_b.py",
+   "bytes": 1197,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/deckcheck/ca822fc8_c.py",
+   "bytes": 911,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/deckcheck/ca822fc8_check.py",
+   "bytes": 1240,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/deckcheck/ca822fc8_d.py",
+   "bytes": 1062,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/deckcheck/ca822fc8_e.py",
+   "bytes": 894,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/deckcheck/ca822fc8_f.py",
+   "bytes": 1405,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/deckcheck/ca822fc8_g.py",
+   "bytes": 1361,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/deckcheck/ca822fc8_h.py",
+   "bytes": 1196,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/deckcheck/card0ee4_a.py",
+   "bytes": 1265,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/deckcheck/card0ee4_b.py",
+   "bytes": 2607,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/deckcheck/card0ee4_c.py",
+   "bytes": 689,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/deckcheck/card0ee4_d.py",
+   "bytes": 2743,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/deckcheck/card0ee4_e.py",
+   "bytes": 2013,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/deckcheck/card0ee4_f.py",
+   "bytes": 1422,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/deckcheck/card0ee4_g.py",
+   "bytes": 2094,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/deckcheck/card0ee4_h.py",
+   "bytes": 978,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/deckcheck/card0ee4_i.py",
+   "bytes": 911,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/deckcheck/card0ee4_j.py",
+   "bytes": 1248,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/deckcheck/card0ee4_k.py",
+   "bytes": 1740,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/deckcheck/card0ee4_l.py",
+   "bytes": 949,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/deckcheck/check_67c6fe70.py",
+   "bytes": 3147,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/deckcheck/check_67c6fe70_b.py",
+   "bytes": 1985,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/deckcheck/check_84aa5fe1.py",
+   "bytes": 2763,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/deckcheck/check_84aa5fe1_b.py",
+   "bytes": 1420,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/deckcheck/checks5.py",
+   "bytes": 1505,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/deckcheck/claims.py",
+   "bytes": 1861,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/deckcheck/claims2.py",
+   "bytes": 1230,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/deckcheck/claims3.py",
+   "bytes": 1875,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/deckcheck/claims4.py",
+   "bytes": 2875,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/deckcheck/e095325f_check.py",
+   "bytes": 1924,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/deckcheck/e095325f_rows.py",
+   "bytes": 393,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/deckcheck/e2e3a3fc_burst.py",
+   "bytes": 1565,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/deckcheck/e2e3a3fc_check.py",
+   "bytes": 2646,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/deckcheck/e2e3a3fc_perday.py",
+   "bytes": 880,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/deckcheck/idmatch.py",
+   "bytes": 1286,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/deckcheck/load.py",
+   "bytes": 608,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/deckcheck/rr.py",
+   "bytes": 1269,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/reconciliation/check2_union.py",
+   "bytes": 2584,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/reconciliation/check3_counts.py",
+   "bytes": 3094,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/reconciliation/check4_sources.py",
+   "bytes": 3336,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/reconciliation/check5_daily.py",
+   "bytes": 2762,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/reconciliation/check6_dailysrc.py",
+   "bytes": 1850,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/reconciliation/check7_pre_overrides.py",
+   "bytes": 1495,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/reconciliation/check_manifest.py",
+   "bytes": 684,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/reconciliation/common.py",
+   "bytes": 400,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/reconciliation/needs_review_phrase.py",
+   "bytes": 855,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/reconciliation/rows_behind.py",
+   "bytes": 1756,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/search-coverage/analyze.py",
+   "bytes": 1876,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/search-coverage/bucket_detail.py",
+   "bytes": 1392,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/search-coverage/compare.py",
+   "bytes": 2398,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/search-coverage/examples.py",
+   "bytes": 1649,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/search-coverage/examples2.py",
+   "bytes": 1503,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/search-coverage/family.py",
+   "bytes": 2756,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/search-coverage/phrases.py",
+   "bytes": 615,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/search-coverage/review.py",
+   "bytes": 2540,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/search-coverage/review2.py",
+   "bytes": 1762,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/search-coverage/review3.py",
+   "bytes": 1388,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/search-coverage/routes.py",
+   "bytes": 3638,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/search-coverage/sources.py",
+   "bytes": 800,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/supplement/check1.py",
+   "bytes": 2592,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/supplement/episodes.py",
+   "bytes": 1954,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/supplement/families.py",
+   "bytes": 1640,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/supplement/prov.py",
+   "bytes": 1095,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/supplement/sources.py",
+   "bytes": 2416,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/timing/episodes.py",
+   "bytes": 1072,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/timing/episodes_1h.csv",
+   "bytes": 68547,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/timing/episodes_24h.csv",
+   "bytes": 19922,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/timing/episodes_6h.csv",
+   "bytes": 35666,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/timing/hours.py",
+   "bytes": 2163,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/timing/load.py",
+   "bytes": 566,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/timing/overlap.py",
+   "bytes": 2352,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/timing/samesec_baseline.py",
+   "bytes": 1169,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/timing/sigpos.py",
+   "bytes": 1710,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/verify-classification/explore1.py",
+   "bytes": 949,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/verify-classification/v10.py",
+   "bytes": 1786,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/verify-classification/v11.py",
+   "bytes": 1310,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/verify-classification/v1b.py",
+   "bytes": 1345,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/verify-classification/v2.py",
+   "bytes": 2151,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/verify-classification/v4.py",
+   "bytes": 1520,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/verify-classification/v5.py",
+   "bytes": 2350,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/verify-classification/v5b.py",
+   "bytes": 662,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/verify-classification/v6.py",
+   "bytes": 2102,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/verify-classification/v6b.py",
+   "bytes": 402,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/verify-classification/v7.py",
+   "bytes": 931,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/verify-classification/v8.py",
+   "bytes": 2791,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/verify-classification/v9.py",
+   "bytes": 1985,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/verify-classification/vcombos.py",
+   "bytes": 2405,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/verify-classification/vparse.py",
+   "bytes": 1806,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/verify-classification/vrefs.py",
+   "bytes": 461,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/verify-coverage/basic.py",
+   "bytes": 1501,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/verify-coverage/buckets.py",
+   "bytes": 663,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/verify-coverage/coh2.py",
+   "bytes": 1530,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/verify-coverage/f10_iowa.py",
+   "bytes": 1623,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/verify-coverage/f11_family.py",
+   "bytes": 893,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/verify-coverage/f1_audit.py",
+   "bytes": 999,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/verify-coverage/f4_family.py",
+   "bytes": 2315,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/verify-coverage/f5_labels.py",
+   "bytes": 1666,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/verify-coverage/f6_review.py",
+   "bytes": 3940,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/verify-coverage/f7_methods.py",
+   "bytes": 1425,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/verify-coverage/f8_nomethod.py",
+   "bytes": 2253,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/verify-coverage/f9_routes.py",
+   "bytes": 1952,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/verify-coverage/load.py",
+   "bytes": 1258,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/verify-reconcile/v1_manifest_union.py",
+   "bytes": 3167,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/verify-reconcile/v2_counts.py",
+   "bytes": 2388,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/verify-reconcile/v3_sources.py",
+   "bytes": 4558,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/verify-reconcile/v4_daily.py",
+   "bytes": 5119,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/verify-reconcile/v5_overrides_phrase.py",
+   "bytes": 3699,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/verify-supplement/v1.py",
+   "bytes": 2718,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/verify-supplement/v2.py",
+   "bytes": 1877,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/verify-supplement/v3.py",
+   "bytes": 1895,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/verify-supplement/v4.py",
+   "bytes": 2664,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/verify-supplement/v5.py",
+   "bytes": 972,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/verify-supplement/v6.py",
+   "bytes": 1331,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/verify-supplement/v7.py",
+   "bytes": 1585,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/verify-supplement/v8.py",
+   "bytes": 1709,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/verify-supplement/v9.py",
+   "bytes": 3670,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/verify-temporal/anom.py",
+   "bytes": 2481,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/verify-temporal/common.py",
+   "bytes": 1758,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/verify-temporal/f1.py",
+   "bytes": 3254,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/verify-temporal/f2.py",
+   "bytes": 1107,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/verify-temporal/f3.py",
+   "bytes": 1463,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/verify-temporal/f4.py",
+   "bytes": 1483,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/verify-temporal/f5.py",
+   "bytes": 1285,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/verify-temporal/f6.py",
+   "bytes": 2832,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/verify-temporal/f7.py",
+   "bytes": 2270,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/verify-temporal/f8.py",
+   "bytes": 2461,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/verify-temporal/f8b.py",
+   "bytes": 2387,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/verify-temporal/f8c.py",
+   "bytes": 742,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wf/verify-temporal/f9.py",
+   "bytes": 3016,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wfout/analyze_classification.json",
+   "bytes": 26483,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wfout/analyze_coverage.json",
+   "bytes": 25939,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wfout/analyze_reconcile.json",
+   "bytes": 15012,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wfout/analyze_supplement.json",
+   "bytes": 24119,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wfout/analyze_temporal.json",
+   "bytes": 22261,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wfout/verify_classification.json",
+   "bytes": 26181,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wfout/verify_coverage.json",
+   "bytes": 19973,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wfout/verify_reconcile.json",
+   "bytes": 17190,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wfout/verify_supplement.json",
+   "bytes": 23125,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/wfout/verify_temporal.json",
+   "bytes": 24101,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "permissions.jsonl",
+   "bytes": 2034,
+   "why": "permission answers"
+  },
+  {
+   "path": "registry/card_types.json",
+   "bytes": 17,
+   "why": "rebuilt by thimble"
+  },
+  {
+   "path": "registry/extensions.json",
+   "bytes": 1134,
+   "why": "rebuilt by thimble"
+  },
+  {
+   "path": "sessions.json",
+   "bytes": 298,
+   "why": "the maintainer's Claude Code sessions"
+  },
+  {
+   "path": "settings.json",
+   "bytes": 3,
+   "why": "the maintainer's settings"
+  },
+  {
+   "path": "telemetry.jsonl",
+   "bytes": 0,
+   "why": "the maintainer's browser telemetry"
+  },
+  {
+   "path": "tray.json",
+   "bytes": 1382,
+   "why": "not one of the orientation's outputs"
+  },
+  {
+   "path": "undo.jsonl",
+   "bytes": 800642,
+   "why": "the undo history"
+  },
+  {
+   "path": "viewed.jsonl",
+   "bytes": 0,
+   "why": "the files the maintainer opened"
+  },
+  {
+   "path": "views/.reviewed/activity-timeline/reader.py",
+   "bytes": 24841,
+   "why": "a hidden file"
+  },
+  {
+   "path": "views/.reviewed/activity-timeline/view.html",
+   "bytes": 78653,
+   "why": "a hidden file"
+  },
+  {
+   "path": "views/.reviewed/activity-timeline/view.json",
+   "bytes": 2503,
+   "why": "a hidden file"
+  },
+  {
+   "path": "views/.reviewed/activity-timeline.last/reader.py",
+   "bytes": 25242,
+   "why": "a hidden file"
+  },
+  {
+   "path": "views/.reviewed/activity-timeline.last/view.html",
+   "bytes": 86483,
+   "why": "a hidden file"
+  },
+  {
+   "path": "views/.reviewed/activity-timeline.last/view.json",
+   "bytes": 2503,
+   "why": "a hidden file"
+  },
+  {
+   "path": "views/.reviewed/burst-board/reader.py",
+   "bytes": 31251,
+   "why": "a hidden file"
+  },
+  {
+   "path": "views/.reviewed/burst-board/view.html",
+   "bytes": 71900,
+   "why": "a hidden file"
+  },
+  {
+   "path": "views/.reviewed/burst-board/view.json",
+   "bytes": 3792,
+   "why": "a hidden file"
+  },
+  {
+   "path": "views/.reviewed/burst-board.last/reader.py",
+   "bytes": 31251,
+   "why": "a hidden file"
+  },
+  {
+   "path": "views/.reviewed/burst-board.last/view.html",
+   "bytes": 73452,
+   "why": "a hidden file"
+  },
+  {
+   "path": "views/.reviewed/burst-board.last/view.json",
+   "bytes": 3792,
+   "why": "a hidden file"
+  },
+  {
+   "path": "views/.versions/activity-timeline/240f29decd3f/reader.py",
+   "bytes": 25242,
+   "why": "a hidden file"
+  },
+  {
+   "path": "views/.versions/activity-timeline/240f29decd3f/view.html",
+   "bytes": 86483,
+   "why": "a hidden file"
+  },
+  {
+   "path": "views/.versions/activity-timeline/240f29decd3f/view.json",
+   "bytes": 2503,
+   "why": "a hidden file"
+  },
+  {
+   "path": "views/.versions/activity-timeline/72c8c794fce7/reader.py",
+   "bytes": 24841,
+   "why": "a hidden file"
+  },
+  {
+   "path": "views/.versions/activity-timeline/72c8c794fce7/view.html",
+   "bytes": 78653,
+   "why": "a hidden file"
+  },
+  {
+   "path": "views/.versions/activity-timeline/72c8c794fce7/view.json",
+   "bytes": 2503,
+   "why": "a hidden file"
+  },
+  {
+   "path": "views/.versions/activity-timeline/bc3a1abe9aa1/reader.py",
+   "bytes": 25242,
+   "why": "a hidden file"
+  },
+  {
+   "path": "views/.versions/activity-timeline/bc3a1abe9aa1/view.html",
+   "bytes": 87800,
+   "why": "a hidden file"
+  },
+  {
+   "path": "views/.versions/activity-timeline/bc3a1abe9aa1/view.json",
+   "bytes": 2503,
+   "why": "a hidden file"
+  },
+  {
+   "path": "views/.versions/burst-board/5f3f0387b064/reader.py",
+   "bytes": 31251,
+   "why": "a hidden file"
+  },
+  {
+   "path": "views/.versions/burst-board/5f3f0387b064/view.html",
+   "bytes": 73452,
+   "why": "a hidden file"
+  },
+  {
+   "path": "views/.versions/burst-board/5f3f0387b064/view.json",
+   "bytes": 3792,
+   "why": "a hidden file"
+  },
+  {
+   "path": "views/.versions/burst-board/cf67a7b6dfa4/reader.py",
+   "bytes": 31251,
+   "why": "a hidden file"
+  },
+  {
+   "path": "views/.versions/burst-board/cf67a7b6dfa4/view.html",
+   "bytes": 71900,
+   "why": "a hidden file"
+  },
+  {
+   "path": "views/.versions/burst-board/cf67a7b6dfa4/view.json",
+   "bytes": 3792,
+   "why": "a hidden file"
+  },
+  {
+   "path": "views/.versions/burst-board/f57422687c91/reader.py",
+   "bytes": 31251,
+   "why": "a hidden file"
+  },
+  {
+   "path": "views/.versions/burst-board/f57422687c91/view.html",
+   "bytes": 74775,
+   "why": "a hidden file"
+  },
+  {
+   "path": "views/.versions/burst-board/f57422687c91/view.json",
+   "bytes": 3792,
+   "why": "a hidden file"
+  },
+  {
+   "path": "views/key-refs.json",
+   "bytes": 2341363,
+   "why": "the excerpts of the records the views' keys cite, rebuilt"
+  },
+  {
+   "path": "views-work/activity-timeline/d1.json",
+   "bytes": 411,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/activity-timeline/d10.json",
+   "bytes": 522,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/activity-timeline/d11.json",
+   "bytes": 380,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/activity-timeline/d11b.json",
+   "bytes": 390,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/activity-timeline/d2.json",
+   "bytes": 395,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/activity-timeline/d3.json",
+   "bytes": 479,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/activity-timeline/d4.json",
+   "bytes": 1200,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/activity-timeline/d5.json",
+   "bytes": 516,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/activity-timeline/d6.json",
+   "bytes": 727,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/activity-timeline/d7.json",
+   "bytes": 592,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/activity-timeline/d8.json",
+   "bytes": 614,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/activity-timeline/d9.json",
+   "bytes": 633,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/activity-timeline/drive.mjs",
+   "bytes": 7740,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/activity-timeline/r1.txt",
+   "bytes": 2122,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/activity-timeline/r10.txt",
+   "bytes": 2133,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/activity-timeline/r11.txt",
+   "bytes": 2106,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/activity-timeline/r12.txt",
+   "bytes": 132,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/activity-timeline/r13.txt",
+   "bytes": 2503,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/activity-timeline/r2.txt",
+   "bytes": 2936,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/activity-timeline/r3.txt",
+   "bytes": 580,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/activity-timeline/r4.txt",
+   "bytes": 1384,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/activity-timeline/r5.txt",
+   "bytes": 1436,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/activity-timeline/r6.txt",
+   "bytes": 97,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/activity-timeline/r7.txt",
+   "bytes": 165,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/activity-timeline/r8.txt",
+   "bytes": 827,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/activity-timeline/r9.txt",
+   "bytes": 258,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/activity-timeline/run1.txt",
+   "bytes": 6347,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/activity-timeline/run10.txt",
+   "bytes": 115,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/activity-timeline/run11.txt",
+   "bytes": 142,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/activity-timeline/run12.txt",
+   "bytes": 556,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/activity-timeline/run13.txt",
+   "bytes": 205,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/activity-timeline/run14.txt",
+   "bytes": 566,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/activity-timeline/run15.txt",
+   "bytes": 2125,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/activity-timeline/run16.txt",
+   "bytes": 353,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/activity-timeline/run17.txt",
+   "bytes": 916,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/activity-timeline/run2.txt",
+   "bytes": 2048,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/activity-timeline/run3.txt",
+   "bytes": 2103,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/activity-timeline/run4.txt",
+   "bytes": 2103,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/activity-timeline/run5.txt",
+   "bytes": 3006,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/activity-timeline/run6.txt",
+   "bytes": 2966,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/activity-timeline/run7.txt",
+   "bytes": 501,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/activity-timeline/run8.txt",
+   "bytes": 2965,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/activity-timeline/run9.txt",
+   "bytes": 153,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/activity-timeline/shot.py",
+   "bytes": 9318,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/activity-timeline/shots/all-range.png",
+   "bytes": 132847,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/activity-timeline/shots/crop.png",
+   "bytes": 43085,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/activity-timeline/shots/d0.png",
+   "bytes": 137941,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/activity-timeline/shots/d1-brush.png",
+   "bytes": 139367,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/activity-timeline/shots/d2-wheel-in.png",
+   "bytes": 142143,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/activity-timeline/shots/d3-hover.png",
+   "bytes": 142172,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/activity-timeline/shots/d4-iso.png",
+   "bytes": 141930,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/activity-timeline/shots/d5-fit.png",
+   "bytes": 137668,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/activity-timeline/shots/d6-iso.png",
+   "bytes": 82149,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/activity-timeline/shots/damaged.png",
+   "bytes": 96968,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/activity-timeline/shots/detail.png",
+   "bytes": 124889,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/activity-timeline/shots/e1-tip.png",
+   "bytes": 152690,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/activity-timeline/shots/e2-barzoom.png",
+   "bytes": 119324,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/activity-timeline/shots/e3-rowpick.png",
+   "bytes": 103842,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/activity-timeline/shots/e4-near.png",
+   "bytes": 77286,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/activity-timeline/shots/e5-tick.png",
+   "bytes": 89943,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/activity-timeline/shots/e6-conf.png",
+   "bytes": 62173,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/activity-timeline/shots/e7-search.png",
+   "bytes": 83528,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/activity-timeline/shots/f1-multi.png",
+   "bytes": 212925,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/activity-timeline/shots/f2-multimenu.png",
+   "bytes": 221607,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/activity-timeline/shots/f3-expanded.png",
+   "bytes": 218181,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/activity-timeline/shots/f4-ctxclick.png",
+   "bytes": 141120,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/activity-timeline/shots/f5-detail-wide.png",
+   "bytes": 128644,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/activity-timeline/shots/filtered.png",
+   "bytes": 122606,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/activity-timeline/shots/final-detail.png",
+   "bytes": 135716,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/activity-timeline/shots/final-open.png",
+   "bytes": 142519,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/activity-timeline/shots/frame.html",
+   "bytes": 153389,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/activity-timeline/shots/g1-palette.png",
+   "bytes": 139527,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/activity-timeline/shots/g2-filters.png",
+   "bytes": 35615,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/activity-timeline/shots/h1-more-bottom.png",
+   "bytes": 170129,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/activity-timeline/shots/labels-menu.png",
+   "bytes": 132626,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/activity-timeline/shots/lane-iso.png",
+   "bytes": 86868,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/activity-timeline/shots/lm0.png",
+   "bytes": 135715,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/activity-timeline/shots/lm1.png",
+   "bytes": 135715,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/activity-timeline/shots/lm2.png",
+   "bytes": 135715,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/activity-timeline/shots/more-menu.png",
+   "bytes": 142519,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/activity-timeline/shots/multi-798.png",
+   "bytes": 135302,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/activity-timeline/shots/multi-filter.png",
+   "bytes": 134410,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/activity-timeline/shots/n-detail.png",
+   "bytes": 134989,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/activity-timeline/shots/n-multi.png",
+   "bytes": 151580,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/activity-timeline/shots/n-nolabel.png",
+   "bytes": 141986,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/activity-timeline/shots/n-open.png",
+   "bytes": 144444,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/activity-timeline/shots/n-probe.png",
+   "bytes": 146354,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/activity-timeline/shots/opened.png",
+   "bytes": 142519,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/activity-timeline/shots/overview-probe.png",
+   "bytes": 132659,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/activity-timeline/shots/states.json",
+   "bytes": 243,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/activity-timeline/shots/steps.json",
+   "bytes": 304,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/activity-timeline/shots/w-more.png",
+   "bytes": 169690,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/activity-timeline/shots/w-open.png",
+   "bytes": 152634,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/activity-timeline/shots/wide.png",
+   "bytes": 211942,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/activity-timeline/shots/z-10m-probe.png",
+   "bytes": 92793,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/activity-timeline/shots/z-2h.png",
+   "bytes": 115839,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/activity-timeline/shots/z-day.png",
+   "bytes": 97294,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/activity-timeline/st1.json",
+   "bytes": 501,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/activity-timeline/st2.json",
+   "bytes": 921,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/activity-timeline/st3.json",
+   "bytes": 146,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/activity-timeline/st4.json",
+   "bytes": 77,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/activity-timeline/st5.json",
+   "bytes": 203,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/activity-timeline/st6.json",
+   "bytes": 285,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/activity-timeline/st7.json",
+   "bytes": 207,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/activity-timeline/st8.json",
+   "bytes": 435,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/activity-timeline/st9.json",
+   "bytes": 497,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/activity-timeline/stub/thimble.py",
+   "bytes": 1973,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/activity-timeline/t.py",
+   "bytes": 1475,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/activity-timeline/t2.py",
+   "bytes": 1090,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/burst-board/s1.json",
+   "bytes": 629,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/burst-board/s2.json",
+   "bytes": 328,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/burst-board/s3.json",
+   "bytes": 624,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/burst-board/s4.json",
+   "bytes": 191,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/burst-board/shoot.py",
+   "bytes": 7780,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/burst-board/shots/a-compare.png",
+   "bytes": 122941,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/burst-board/shots/a-detail.png",
+   "bytes": 126971,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/burst-board/shots/a-narrow.png",
+   "bytes": 111176,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/burst-board/shots/a-open.png",
+   "bytes": 121111,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/burst-board/shots/a-pane1048.png",
+   "bytes": 138263,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/burst-board/shots/a-wide.png",
+   "bytes": 162202,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/burst-board/shots/b-1h.png",
+   "bytes": 108826,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/burst-board/shots/b-ctx.png",
+   "bytes": 151440,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/burst-board/shots/b-narrow.png",
+   "bytes": 111620,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/burst-board/shots/c-detail.png",
+   "bytes": 126678,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/burst-board/shots/c-filter.png",
+   "bytes": 113618,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/burst-board/shots/c-narrow.png",
+   "bytes": 116015,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/burst-board/shots/c-open.png",
+   "bytes": 129678,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/burst-board/shots/c-pane1048.png",
+   "bytes": 141031,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/burst-board/shots/c-short.png",
+   "bytes": 141214,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/burst-board/shots/d-detail.png",
+   "bytes": 126317,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/burst-board/shots/d-narrow.png",
+   "bytes": 112871,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/burst-board/shots/frame.html",
+   "bytes": 139520,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/burst-board/shots/states.json",
+   "bytes": 6548,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "writers/report/.thimble-budget.json",
+   "bytes": 58,
+   "why": "a hidden file"
+  },
+  {
+   "path": "writers/report/.thimble-prompts/preamble.md",
+   "bytes": 547,
+   "why": "a hidden file"
+  },
+  {
+   "path": "writers/report/.thimble-prompts/shared.md",
+   "bytes": 23674,
+   "why": "a hidden file"
+  },
+  {
+   "path": "writers/report/draft.md",
+   "bytes": 11963,
+   "why": "the writers' own scratch"
+  },
+  {
+   "path": "writers/report/verify/burst-code/v1.py",
+   "bytes": 2477,
+   "why": "the writers' own scratch"
+  },
+  {
+   "path": "writers/report/verify/burst-code/v2.py",
+   "bytes": 2768,
+   "why": "the writers' own scratch"
+  },
+  {
+   "path": "writers/report/verify/burst-code/v3.py",
+   "bytes": 2361,
+   "why": "the writers' own scratch"
+  },
+  {
+   "path": "writers/report/verify/completeness/load.py",
+   "bytes": 504,
+   "why": "the writers' own scratch"
+  },
+  {
+   "path": "writers/report/verify/completeness/timing.py",
+   "bytes": 1684,
+   "why": "the writers' own scratch"
+  },
+  {
+   "path": "writers/report/verify/opening/basic.py",
+   "bytes": 1230,
+   "why": "the writers' own scratch"
+  },
+  {
+   "path": "writers/report/verify/opening/coh.py",
+   "bytes": 1280,
+   "why": "the writers' own scratch"
+  },
+  {
+   "path": "writers/report/verify/opening/early.py",
+   "bytes": 1143,
+   "why": "the writers' own scratch"
+  },
+  {
+   "path": "writers/report/verify/opening/lab2.py",
+   "bytes": 1171,
+   "why": "the writers' own scratch"
+  },
+  {
+   "path": "writers/report/verify/opening/label.py",
+   "bytes": 1197,
+   "why": "the writers' own scratch"
+  },
+  {
+   "path": "writers/report/verify/opening/rows.py",
+   "bytes": 443,
+   "why": "the writers' own scratch"
+  },
+  {
+   "path": "writers/report/verify/opening/sent.py",
+   "bytes": 454,
+   "why": "the writers' own scratch"
+  },
+  {
+   "path": "writers/report/verify/opening/sr.py",
+   "bytes": 1062,
+   "why": "the writers' own scratch"
+  },
+  {
+   "path": "writers/report/verify/opening/src.py",
+   "bytes": 935,
+   "why": "the writers' own scratch"
+  },
+  {
+   "path": "writers/report/verify/sec-cohort-timeline/v1.py",
+   "bytes": 3948,
+   "why": "the writers' own scratch"
+  },
+  {
+   "path": "writers/report/verify/sec-cohort-timeline/v2.py",
+   "bytes": 571,
+   "why": "the writers' own scratch"
+  },
+  {
+   "path": "writers/report/verify/sec-cohort-timeline/v3.py",
+   "bytes": 704,
+   "why": "the writers' own scratch"
+  },
+  {
+   "path": "writers/report/verify/sec-cohort-timeline/v4.py",
+   "bytes": 2027,
+   "why": "the writers' own scratch"
+  },
+  {
+   "path": "writers/report/verify/sec-cohort-timeline/v5.py",
+   "bytes": 1950,
+   "why": "the writers' own scratch"
+  },
+  {
+   "path": "writers/report/verify/sec-cohort-timeline/v6.py",
+   "bytes": 2707,
+   "why": "the writers' own scratch"
+  },
+  {
+   "path": "writers/report/verify/sec-cohort-timeline/v7.py",
+   "bytes": 1053,
+   "why": "the writers' own scratch"
+  },
+  {
+   "path": "writers/report/verify/sec-who/v1.py",
+   "bytes": 1394,
+   "why": "the writers' own scratch"
+  },
+  {
+   "path": "writers/report/verify/sec-who/v2.py",
+   "bytes": 1346,
+   "why": "the writers' own scratch"
+  },
+  {
+   "path": "writers/report/verify/sec-who/v3.py",
+   "bytes": 1267,
+   "why": "the writers' own scratch"
+  },
+  {
+   "path": "writers/report/verify/sec-who/v4.py",
+   "bytes": 1374,
+   "why": "the writers' own scratch"
+  },
+  {
+   "path": "writers/report/verify/sec-who/v5.py",
+   "bytes": 1263,
+   "why": "the writers' own scratch"
+  },
+  {
+   "path": "writers/report/verify/sec-who/v6.py",
+   "bytes": 2202,
+   "why": "the writers' own scratch"
+  },
+  {
+   "path": "writers/report/verify/sec-who/v7.py",
+   "bytes": 1118,
+   "why": "the writers' own scratch"
+  },
+  {
+   "path": "writers/report/verify/sec-who/v8.py",
+   "bytes": 941,
+   "why": "the writers' own scratch"
+  }
+ ],
+ "gitleaks": "0 findings",
+ "user_name_scrubbed": 0,
+ "flagged": [],
+ "views": [
+  {
+   "slug": "activity-timeline",
+   "name": "Activity Timeline",
+   "version": "8650116bd270",
+   "from": "activity-timeline",
+   "from_version": "8650116bd270",
+   "picked": "live at 8650116bd270"
+  },
+  {
+   "slug": "episode-browser",
+   "name": "Episode Browser",
+   "version": "cc9f24c6a856",
+   "from": "episode-browser",
+   "from_version": "cc9f24c6a856",
+   "picked": "live at cc9f24c6a856"
+  }
+ ]
+}

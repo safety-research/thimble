@@ -1,0 +1,1765 @@
+{
+ "schema": "thimble-demo-precache",
+ "version": 3,
+ "format": "outputs-only",
+ "dataset": "collusion-wiki",
+ "created": "2026-10-06T22:12:21+00:00",
+ "notice": "",
+ "credit": "Published by the collusion.wiki authors with their report at https://collusion.wiki/. thimble does not redistribute it: `thimble demo` downloads it from collusion.wiki on your machine and rebuilds it.",
+ "thimble": {
+  "version": "0.6.0",
+  "commit": "932f42b9"
+ },
+ "orientation": {
+  "status": "done",
+  "passes": [
+   "final",
+   "views",
+   "report"
+  ],
+  "query": null,
+  "effort": "xhigh",
+  "ultracode": true,
+  "critique": false,
+  "started": "2026-10-06T03:43:38+00:00",
+  "ended": "2026-10-06T04:05:35+00:00",
+  "model": "claude-opus-5-5[1m]",
+  "chat_effort": "xhigh",
+  "chat": "664c1449",
+  "coverage": "Coverage: viewed every file · 100% of files · <1% of lines"
+ },
+ "counts": {
+  "cards": 8,
+  "labels": 5,
+  "views": 2,
+  "documents": 1
+ },
+ "corpus": [
+  {
+   "path": "events.jsonl",
+   "bytes": 5381614,
+   "sha256": "8a1b647d92d105e606a978744b16074810b0f7cc61ae2b748a1c81e5f32ff6fa"
+  },
+  {
+   "path": "labels.jsonl",
+   "bytes": 1065401,
+   "sha256": "7ebf896de4abedb1c7b203497211e28d8465f29dfee232ce4025f56114be093a"
+  },
+  {
+   "path": "pages.jsonl",
+   "bytes": 1662919,
+   "sha256": "4e04bcd522555504df6d7eed96db32154897aba0c781d77eb9b539aa688d5689"
+  },
+  {
+   "path": "revisions.jsonl",
+   "bytes": 33478335,
+   "sha256": "fedf20200c28bca717f616f36bc6d00a1e9a35fe377f5f8a3cf9278fc6c397f4"
+  }
+ ],
+ "placeholders": {
+  "workspace": "@@THIMBLE_WORKSPACE@@",
+  "corpus": "@@THIMBLE_CORPUS@@",
+  "app": "@@THIMBLE_APP@@",
+  "thimble_home": "@@THIMBLE_HOME@@",
+  "home": "@@THIMBLE_USER_HOME@@"
+ },
+ "files": [
+  {
+   "path": "calls/664c1449.jsonl",
+   "bytes": 1548,
+   "sha256": "76cdb6b37d5a37654219fb2b82f58df5c33f52906277260b6405fde1e9e893c0"
+  },
+  {
+   "path": "chats/664c1449.jsonl",
+   "bytes": 0,
+   "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+   "path": "chats/664c1449.meta.json",
+   "bytes": 459,
+   "sha256": "070a2c8eb8937e26a7011a4d7fed5050d6de00bd633d0b6196786c5e8e1bfbbb"
+  },
+  {
+   "path": "concepts/03e6215e.json",
+   "bytes": 2710,
+   "sha256": "2ec2aa611e43008a9977103e3449051f738940618776f97ffdb71ea29c49edf3"
+  },
+  {
+   "path": "concepts/7b284df2.json",
+   "bytes": 2550,
+   "sha256": "838c16555d580d2d2325a15d5c6b4daa93262f9d34f5a71bc51d265264d5e779"
+  },
+  {
+   "path": "concepts/7d7d492a.json",
+   "bytes": 3095,
+   "sha256": "6682ec2acaade92ca5134a068467dd89abaaae020959a510957485ae50c0c6ff"
+  },
+  {
+   "path": "concepts/c6092413.json",
+   "bytes": 2982,
+   "sha256": "d6fefcdc73bd7c833bac96bfdd045bf7b847f36486e04edfa9b3855112c14675"
+  },
+  {
+   "path": "concepts/da79d13c.json",
+   "bytes": 1909,
+   "sha256": "fb6b4bf59beb7beec267f36fa68b30bdc320e0c98522f780f71a3f98fd895d62"
+  },
+  {
+   "path": "extension/extension.json",
+   "bytes": 116,
+   "sha256": "e42d8b8316752dbaa8c0b8cae7bfa0fb0e50182112e69f3edbba28bc07df8623"
+  },
+  {
+   "path": "extension/views/relay-board/reader.py",
+   "bytes": 24353,
+   "sha256": "377a483b1242ec6cbe608e253c02f7515e0a102cdf1b6d1bb492d5cb3ff7be30"
+  },
+  {
+   "path": "extension/views/relay-board/view.html",
+   "bytes": 74337,
+   "sha256": "4199e72a15ed8c155d19b33a69137959aa90cab5c4c8a9340edeb4fbe16a493c"
+  },
+  {
+   "path": "extension/views/relay-board/view.json",
+   "bytes": 4896,
+   "sha256": "cbbe29323a0f787b955f0d67c430169497b96aaaa22538559bdc7cad2470466f"
+  },
+  {
+   "path": "extension/views/wiki-page-history/reader.py",
+   "bytes": 42212,
+   "sha256": "c7c787239455d9280889a77a34af3f6be84323997fd375575425990fee2c0b9c"
+  },
+  {
+   "path": "extension/views/wiki-page-history/view.html",
+   "bytes": 80833,
+   "sha256": "0faa8f0f546f299a246d9a570714c83c09c1f4f7b4fef091b387a8fd892680a9"
+  },
+  {
+   "path": "extension/views/wiki-page-history/view.json",
+   "bytes": 4579,
+   "sha256": "f29baf0107c947dd0c14915fa8de39387c7d2e613aea3129d39a287fee007016"
+  },
+  {
+   "path": "investigations/main/investigation.json",
+   "bytes": 82,
+   "sha256": "e76cb8e27f4f953c4293748445edadefbb7ad77af3fb3bac360b01c330712470"
+  },
+  {
+   "path": "investigations/main/report.json",
+   "bytes": 26996,
+   "sha256": "64736196324d2b6ebb59773db723ebacfec96b7a0110782919073202bbd00d8d"
+  },
+  {
+   "path": "labels/03e6215e.jsonl",
+   "bytes": 1162543,
+   "sha256": "e27af57736afe8e4489da08c380cb9177cc4ca00baa40d83950f671504f916f1"
+  },
+  {
+   "path": "labels/7b284df2.jsonl",
+   "bytes": 98529,
+   "sha256": "a9179810c64ffa15b63ccfc7cd8938de81774335f6f6e9327ca7fc292848a7e6"
+  },
+  {
+   "path": "labels/7d7d492a.jsonl",
+   "bytes": 1043137,
+   "sha256": "00aeb0329fa9d6ecfc1515ab55d4a93a50585261ffbf0a1da0d4c70921d83fd7"
+  },
+  {
+   "path": "labels/c6092413.jsonl",
+   "bytes": 3226339,
+   "sha256": "e921b2a7f5ddcc5545eeaff86f0a6330d2034c7ccc547a3fe27a88c910cf919f"
+  },
+  {
+   "path": "labels/da79d13c.jsonl",
+   "bytes": 1816611,
+   "sha256": "070a907415d6700efa12fd1c64a17fd18398a4c0da4f3d34466367e2716cc5d5"
+  },
+  {
+   "path": "notebooks/1a232d7d.json",
+   "bytes": 94655,
+   "sha256": "c94cb09845e035d5d85ef86fd6f491319f77c37abd17902cadfa2ef5a5cf5620"
+  },
+  {
+   "path": "orient/run.json",
+   "bytes": 458,
+   "sha256": "5ea7cc1f8f37c0f8303f441071c596ff6fc940bb5034142881d860afb833da5c"
+  },
+  {
+   "path": "orient/summary.md",
+   "bytes": 68,
+   "sha256": "012bac52704188d6702971a3cafd018c5d029403966669f5fcc6cc7a724b67e2"
+  },
+  {
+   "path": "views/proposals.json",
+   "bytes": 15231,
+   "sha256": "652316bafe7599d2c1b3f5ba6184bb9d401bf9171065c28fc2a4227f41ccad5e"
+  }
+ ],
+ "cited_calls": [
+  {
+   "chat": "664c1449",
+   "n": 404,
+   "lines": [
+    [
+     30,
+     31
+    ],
+    [
+     30,
+     31
+    ],
+    [
+     30,
+     31
+    ]
+   ],
+   "cut": true,
+   "found": true
+  }
+ ],
+ "verbatim": {
+  "long": 400,
+  "window": 64,
+  "stride": 32,
+  "longest": [
+   {
+    "path": "labels/c6092413.jsonl",
+    "chars": 96,
+    "shared": 1200
+   },
+   {
+    "path": "labels/7b284df2.jsonl",
+    "chars": 64,
+    "shared": 256
+   },
+   {
+    "path": "labels/7d7d492a.jsonl",
+    "chars": 64,
+    "shared": 384
+   }
+  ]
+ },
+ "left_out": [
+  {
+   "path": "bg/orient.md",
+   "bytes": 1204,
+   "why": "the agent tray's instructions"
+  },
+  {
+   "path": "bg/writer-report.md",
+   "bytes": 1204,
+   "why": "the agent tray's instructions"
+  },
+  {
+   "path": "canvas-history.jsonl",
+   "bytes": 226424,
+   "why": "the cards' edit history"
+  },
+  {
+   "path": "card-checks/049753e2/chk_0862989c5d22-card.png",
+   "bytes": 118345,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/049753e2/chk_3a3fbddbc3a5-card.png",
+   "bytes": 116636,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/049753e2/chk_5936d2a46308-card.png",
+   "bytes": 116950,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/049753e2/chk_5936d2a46308-revised.png",
+   "bytes": 113953,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/049753e2/chk_dfc1a91dd14f-card.png",
+   "bytes": 116636,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/2fe5405c/chk_5dbc1f663ebc-card.png",
+   "bytes": 101911,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/2fe5405c/chk_7c44fba95dae-card.png",
+   "bytes": 100165,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/2fe5405c/chk_8f6b72676d3e-card.png",
+   "bytes": 69772,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/2fe5405c/chk_8f6b72676d3e-revised.png",
+   "bytes": 70130,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/2fe5405c/chk_be2de21b869a-card.png",
+   "bytes": 100967,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/2fe5405c/chk_ca711a0bac04-card.png",
+   "bytes": 68961,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/2fe5405c/chk_f02efe7ab2dc-card.png",
+   "bytes": 74020,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/2fe5405c/chk_f9260338fd91-card.png",
+   "bytes": 100470,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/2fe5405c/chk_f9260338fd91-revised.png",
+   "bytes": 103309,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/2fe5405c/fix_bac7f5adf9df-before.json",
+   "bytes": 7620,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/3b4c6e8a/chk_083518389352-card.png",
+   "bytes": 140231,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/3b4c6e8a/chk_2ca5523f1c78-card.png",
+   "bytes": 113581,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/3b4c6e8a/chk_2ca5523f1c78-revised.png",
+   "bytes": 97021,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/3b4c6e8a/chk_51f32530eb51-card.png",
+   "bytes": 140248,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/3b4c6e8a/chk_51f32530eb51-revised.png",
+   "bytes": 108899,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/3b4c6e8a/chk_b099315661f2-card.png",
+   "bytes": 131234,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/3b4c6e8a/fix_1bc9b542181a-before.json",
+   "bytes": 2328,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/3b4c6e8a/fix_dfd713954309-before.json",
+   "bytes": 2805,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/5c34a2fe/chk_345b147c8219-card.png",
+   "bytes": 121774,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/5c34a2fe/chk_345b147c8219-revised.png",
+   "bytes": 125380,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/5c34a2fe/chk_4189501da822-card.png",
+   "bytes": 132434,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/5c34a2fe/chk_4189501da822-revised.png",
+   "bytes": 134002,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/5c34a2fe/chk_48648be11f66-card.png",
+   "bytes": 128097,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/5c34a2fe/chk_6b20c4622f3c-card.png",
+   "bytes": 138252,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/5c34a2fe/chk_98fcdc860ac7-card.png",
+   "bytes": 138525,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/5c34a2fe/chk_c16703ed5a77-card.png",
+   "bytes": 135465,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/5c34a2fe/chk_fec1702e3b4e-card.png",
+   "bytes": 140652,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/5c34a2fe/fix_7342b269a435-before.json",
+   "bytes": 1816,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/5c34a2fe/fix_a131887eeb6c-before.json",
+   "bytes": 1963,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/7faaa2db/chk_2ac78da18191-card.png",
+   "bytes": 82552,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/7faaa2db/chk_6e4eed3e6c4e-card.png",
+   "bytes": 82985,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/7faaa2db/chk_6e4eed3e6c4e-revised.png",
+   "bytes": 83333,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/7faaa2db/chk_da2095211a8d-card.png",
+   "bytes": 90962,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/952a2ca5/chk_1083a38a45ba-card.png",
+   "bytes": 147574,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/952a2ca5/chk_14af88fb42c5-card.png",
+   "bytes": 146976,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/952a2ca5/chk_14af88fb42c5-revised.png",
+   "bytes": 143992,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/952a2ca5/chk_7ccb158fe270-card.png",
+   "bytes": 146158,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/952a2ca5/chk_7e7f55c9f0f5-card.png",
+   "bytes": 148677,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/952a2ca5/chk_a23641c2a922-card.png",
+   "bytes": 146149,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/952a2ca5/chk_b11c19cb0b24-card.png",
+   "bytes": 146475,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/952a2ca5/chk_c8de7f37e6f9-card.png",
+   "bytes": 129207,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/952a2ca5/chk_d0b43c1ffb17-card.png",
+   "bytes": 148677,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/952a2ca5/chk_f6e40328f830-card.png",
+   "bytes": 132612,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/a0c50437/chk_29d0af6719ba-card.png",
+   "bytes": 75218,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/a0c50437/chk_29d0af6719ba-revised.png",
+   "bytes": 85529,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/a0c50437/chk_98b7631e3bc6-card.png",
+   "bytes": 77792,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/a0c50437/chk_98b7631e3bc6-revised.png",
+   "bytes": 76647,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/a0c50437/chk_ba8bb8b81c85-card.png",
+   "bytes": 78490,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/a0c50437/chk_cf763b2cee00-card.png",
+   "bytes": 84965,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/a0c50437/fix_c4d2d71903db-before.json",
+   "bytes": 1189,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/a6eb6b84/chk_2bf5b3e5069c-card.png",
+   "bytes": 73760,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/a6eb6b84/chk_2bf5b3e5069c-revised.png",
+   "bytes": 69503,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/a6eb6b84/chk_3b1c77bdd93e-card.png",
+   "bytes": 72169,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/a6eb6b84/chk_68586ce11313-card.png",
+   "bytes": 74974,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/a6eb6b84/fix_d2dc26433d6c-before.json",
+   "bytes": 6500,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/adf0b0b4/chk_3d61047969da-card.png",
+   "bytes": 80570,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/adf0b0b4/chk_3d61047969da-revised.png",
+   "bytes": 73661,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/adf0b0b4/chk_6473b07c9c9a-card.png",
+   "bytes": 78467,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/adf0b0b4/chk_828576c091fe-card.png",
+   "bytes": 79142,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/adf0b0b4/chk_83dff1059bb6-card.png",
+   "bytes": 81237,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/adf0b0b4/chk_c3afda56469d-card.png",
+   "bytes": 80060,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/adf0b0b4/chk_e73923e27106-card.png",
+   "bytes": 78467,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/c010c172/chk_6084e0ef8491-card.png",
+   "bytes": 164134,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/c010c172/chk_a0b89ecc0c45-card.png",
+   "bytes": 167821,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "card-checks/timings.jsonl",
+   "bytes": 12074,
+   "why": "the card checks' screenshots and earlier card states"
+  },
+  {
+   "path": "chats/0ca409cb.jsonl",
+   "bytes": 282,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/0ca409cb.meta.json",
+   "bytes": 428,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/1006991b.jsonl",
+   "bytes": 91314,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/1006991b.meta.json",
+   "bytes": 702,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/18e93a87.jsonl",
+   "bytes": 101074,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/18e93a87.meta.json",
+   "bytes": 686,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/19b2ef2d.jsonl",
+   "bytes": 108029,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/19b2ef2d.meta.json",
+   "bytes": 698,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/1cec431b.jsonl",
+   "bytes": 26203,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/1cec431b.meta.json",
+   "bytes": 694,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/1e438f23.jsonl",
+   "bytes": 394,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/1e438f23.meta.json",
+   "bytes": 474,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/2060bcad.jsonl",
+   "bytes": 126634,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/2060bcad.meta.json",
+   "bytes": 767,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/2c3fea77.jsonl",
+   "bytes": 29284,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/2c3fea77.meta.json",
+   "bytes": 692,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/3f9f6d5f.jsonl",
+   "bytes": 228,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/3f9f6d5f.meta.json",
+   "bytes": 406,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/52575808.jsonl",
+   "bytes": 75158,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/52575808.meta.json",
+   "bytes": 692,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/55f356bc.jsonl",
+   "bytes": 254,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/55f356bc.meta.json",
+   "bytes": 400,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/5696d6d5.jsonl",
+   "bytes": 368,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/5696d6d5.meta.json",
+   "bytes": 471,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/6b90bec2.jsonl",
+   "bytes": 50744,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/6b90bec2.meta.json",
+   "bytes": 688,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/73a6f6c6.jsonl",
+   "bytes": 216,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/73a6f6c6.meta.json",
+   "bytes": 404,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/78f3f09e.jsonl",
+   "bytes": 41104,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/78f3f09e.meta.json",
+   "bytes": 698,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/8a947981.jsonl",
+   "bytes": 282,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/8a947981.meta.json",
+   "bytes": 433,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/8d1c4676.jsonl",
+   "bytes": 17895,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/8d1c4676.meta.json",
+   "bytes": 698,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/93251eb4.jsonl",
+   "bytes": 412830,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/93251eb4.meta.json",
+   "bytes": 1302,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/93fe9097.jsonl",
+   "bytes": 80949,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/93fe9097.meta.json",
+   "bytes": 694,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/96f287de.jsonl",
+   "bytes": 110482,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/96f287de.meta.json",
+   "bytes": 778,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/c1b6d929.jsonl",
+   "bytes": 17394,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/c1b6d929.meta.json",
+   "bytes": 700,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/cc072bef.jsonl",
+   "bytes": 214,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/cc072bef.meta.json",
+   "bytes": 403,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/d9d583f0.jsonl",
+   "bytes": 386,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/d9d583f0.meta.json",
+   "bytes": 466,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/f3ccb4b0.jsonl",
+   "bytes": 46552,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/f3ccb4b0.meta.json",
+   "bytes": 696,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/fe77dba8.jsonl",
+   "bytes": 34801,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/fe77dba8.meta.json",
+   "bytes": 690,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/fe8977dd.jsonl",
+   "bytes": 30661,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/fe8977dd.meta.json",
+   "bytes": 700,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/main.jsonl",
+   "bytes": 4019,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "chats/main.meta.json",
+   "bytes": 496,
+   "why": "a conversation: its tool results quote the corpus"
+  },
+  {
+   "path": "config.json",
+   "bytes": 3,
+   "why": "the maintainer's settings"
+  },
+  {
+   "path": "extension/views/relay-board/cache/review/round-0-1791261440-1.png",
+   "bytes": 151446,
+   "why": "a view's cache or data, rebuilt from the download"
+  },
+  {
+   "path": "extension/views/relay-board/cache/review/round-0-1791261454-2.png",
+   "bytes": 115115,
+   "why": "a view's cache or data, rebuilt from the download"
+  },
+  {
+   "path": "extension/views/relay-board/cache/review/round-0-1791261454-3.png",
+   "bytes": 151052,
+   "why": "a view's cache or data, rebuilt from the download"
+  },
+  {
+   "path": "extension/views/relay-board/cache/review/round-0-1791261454-4.png",
+   "bytes": 118393,
+   "why": "a view's cache or data, rebuilt from the download"
+  },
+  {
+   "path": "extension/views/relay-board/cache/review/round-1-1791262341-5.png",
+   "bytes": 161980,
+   "why": "a view's cache or data, rebuilt from the download"
+  },
+  {
+   "path": "extension/views/relay-board/cache/review/round-1-1791262354-6.png",
+   "bytes": 171008,
+   "why": "a view's cache or data, rebuilt from the download"
+  },
+  {
+   "path": "extension/views/relay-board/cache/review/round-1-1791262354-7.png",
+   "bytes": 147721,
+   "why": "a view's cache or data, rebuilt from the download"
+  },
+  {
+   "path": "extension/views/relay-board/cache/review/round-1-1791262354-8.png",
+   "bytes": 157194,
+   "why": "a view's cache or data, rebuilt from the download"
+  },
+  {
+   "path": "extension/views/relay-board/cache/review/round-2-1791262657-9.png",
+   "bytes": 161282,
+   "why": "a view's cache or data, rebuilt from the download"
+  },
+  {
+   "path": "extension/views/relay-board/cache/review/round-2-1791262673-10.png",
+   "bytes": 170119,
+   "why": "a view's cache or data, rebuilt from the download"
+  },
+  {
+   "path": "extension/views/relay-board/cache/review/round-2-1791262673-11.png",
+   "bytes": 163001,
+   "why": "a view's cache or data, rebuilt from the download"
+  },
+  {
+   "path": "extension/views/relay-board/cache/review/round-2-1791262673-12.png",
+   "bytes": 152364,
+   "why": "a view's cache or data, rebuilt from the download"
+  },
+  {
+   "path": "extension/views/relay-board/cache/shots/check-1791260841-overview.png",
+   "bytes": 151446,
+   "why": "a view's cache or data, rebuilt from the download"
+  },
+  {
+   "path": "extension/views/relay-board/cache/shots/check-1791260936-overview.png",
+   "bytes": 151446,
+   "why": "a view's cache or data, rebuilt from the download"
+  },
+  {
+   "path": "extension/views/relay-board/cache/shots/check-1791261389-overview.png",
+   "bytes": 151446,
+   "why": "a view's cache or data, rebuilt from the download"
+  },
+  {
+   "path": "extension/views/relay-board/cache/shots/check-1791262301-overview.png",
+   "bytes": 161980,
+   "why": "a view's cache or data, rebuilt from the download"
+  },
+  {
+   "path": "extension/views/relay-board/cache/shots/check-1791262624-overview.png",
+   "bytes": 161282,
+   "why": "a view's cache or data, rebuilt from the download"
+  },
+  {
+   "path": "extension/views/wiki-page-history/cache/review/round-0-1791260119-1.png",
+   "bytes": 150635,
+   "why": "a view's cache or data, rebuilt from the download"
+  },
+  {
+   "path": "extension/views/wiki-page-history/cache/review/round-0-1791260133-2.png",
+   "bytes": 115577,
+   "why": "a view's cache or data, rebuilt from the download"
+  },
+  {
+   "path": "extension/views/wiki-page-history/cache/review/round-0-1791260133-3.png",
+   "bytes": 131323,
+   "why": "a view's cache or data, rebuilt from the download"
+  },
+  {
+   "path": "extension/views/wiki-page-history/cache/review/round-0-1791260133-4.png",
+   "bytes": 184061,
+   "why": "a view's cache or data, rebuilt from the download"
+  },
+  {
+   "path": "extension/views/wiki-page-history/cache/review/round-1-1791260341-5.png",
+   "bytes": 155940,
+   "why": "a view's cache or data, rebuilt from the download"
+  },
+  {
+   "path": "extension/views/wiki-page-history/cache/review/round-1-1791260357-6.png",
+   "bytes": 126626,
+   "why": "a view's cache or data, rebuilt from the download"
+  },
+  {
+   "path": "extension/views/wiki-page-history/cache/review/round-1-1791260357-7.png",
+   "bytes": 124304,
+   "why": "a view's cache or data, rebuilt from the download"
+  },
+  {
+   "path": "extension/views/wiki-page-history/cache/review/round-1-1791260357-8.png",
+   "bytes": 143484,
+   "why": "a view's cache or data, rebuilt from the download"
+  },
+  {
+   "path": "extension/views/wiki-page-history/cache/review/round-2-1791261544-9.png",
+   "bytes": 156470,
+   "why": "a view's cache or data, rebuilt from the download"
+  },
+  {
+   "path": "extension/views/wiki-page-history/cache/review/round-2-1791261558-10.png",
+   "bytes": 125637,
+   "why": "a view's cache or data, rebuilt from the download"
+  },
+  {
+   "path": "extension/views/wiki-page-history/cache/review/round-2-1791261558-11.png",
+   "bytes": 156471,
+   "why": "a view's cache or data, rebuilt from the download"
+  },
+  {
+   "path": "extension/views/wiki-page-history/cache/review/round-2-1791261558-12.png",
+   "bytes": 147423,
+   "why": "a view's cache or data, rebuilt from the download"
+  },
+  {
+   "path": "extension/views/wiki-page-history/cache/shots/check-1791258825-overview.png",
+   "bytes": 146769,
+   "why": "a view's cache or data, rebuilt from the download"
+  },
+  {
+   "path": "extension/views/wiki-page-history/cache/shots/check-1791260004-overview.png",
+   "bytes": 150300,
+   "why": "a view's cache or data, rebuilt from the download"
+  },
+  {
+   "path": "extension/views/wiki-page-history/cache/shots/check-1791260076-overview.png",
+   "bytes": 150635,
+   "why": "a view's cache or data, rebuilt from the download"
+  },
+  {
+   "path": "extension/views/wiki-page-history/cache/shots/check-1791260300-overview.png",
+   "bytes": 155940,
+   "why": "a view's cache or data, rebuilt from the download"
+  },
+  {
+   "path": "extension/views/wiki-page-history/cache/shots/check-1791261495-overview.png",
+   "bytes": 156470,
+   "why": "a view's cache or data, rebuilt from the download"
+  },
+  {
+   "path": "extensions/video/extension.json",
+   "bytes": 153,
+   "why": "the maintainer's extensions"
+  },
+  {
+   "path": "extensions/video/reports/video/export.py",
+   "bytes": 1555,
+   "why": "the maintainer's extensions"
+  },
+  {
+   "path": "extensions/video/reports/video/report.json",
+   "bytes": 155,
+   "why": "the maintainer's extensions"
+  },
+  {
+   "path": "extensions/video/reports/video/report.md",
+   "bytes": 1402,
+   "why": "the maintainer's extensions"
+  },
+  {
+   "path": "held-events.json",
+   "bytes": 3258,
+   "why": "per session"
+  },
+  {
+   "path": "investigations/main/events.jsonl",
+   "bytes": 194110,
+   "why": "not one of the orientation's outputs"
+  },
+  {
+   "path": "orient/work/.thimble-budget.json",
+   "bytes": 63,
+   "why": "a hidden file"
+  },
+  {
+   "path": "orient/work/.thimble-prompts/preamble.md",
+   "bytes": 547,
+   "why": "a hidden file"
+  },
+  {
+   "path": "orient/work/.thimble-prompts/shared.md",
+   "bytes": 23674,
+   "why": "a hidden file"
+  },
+  {
+   "path": "orient/work/make_diffs.py",
+   "bytes": 811,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/passed_on_lines.json",
+   "bytes": 2524,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "orient/work/readers_slices.txt",
+   "bytes": 4501,
+   "why": "the orientation's work files"
+  },
+  {
+   "path": "registry/card_types.json",
+   "bytes": 17,
+   "why": "rebuilt by thimble"
+  },
+  {
+   "path": "registry/extensions.json",
+   "bytes": 1130,
+   "why": "rebuilt by thimble"
+  },
+  {
+   "path": "sessions.json",
+   "bytes": 290,
+   "why": "the maintainer's Claude Code sessions"
+  },
+  {
+   "path": "settings.json",
+   "bytes": 3,
+   "why": "the maintainer's settings"
+  },
+  {
+   "path": "telemetry.jsonl",
+   "bytes": 313,
+   "why": "the maintainer's browser telemetry"
+  },
+  {
+   "path": "tray.json",
+   "bytes": 1437,
+   "why": "not one of the orientation's outputs"
+  },
+  {
+   "path": "undo.jsonl",
+   "bytes": 620352,
+   "why": "the undo history"
+  },
+  {
+   "path": "viewed.jsonl",
+   "bytes": 0,
+   "why": "the files the maintainer opened"
+  },
+  {
+   "path": "views/.reviewed/relay-board/reader.py",
+   "bytes": 21923,
+   "why": "a hidden file"
+  },
+  {
+   "path": "views/.reviewed/relay-board/view.html",
+   "bytes": 69110,
+   "why": "a hidden file"
+  },
+  {
+   "path": "views/.reviewed/relay-board/view.json",
+   "bytes": 3134,
+   "why": "a hidden file"
+  },
+  {
+   "path": "views/.reviewed/relay-board.last/reader.py",
+   "bytes": 22614,
+   "why": "a hidden file"
+  },
+  {
+   "path": "views/.reviewed/relay-board.last/view.html",
+   "bytes": 71646,
+   "why": "a hidden file"
+  },
+  {
+   "path": "views/.reviewed/relay-board.last/view.json",
+   "bytes": 3167,
+   "why": "a hidden file"
+  },
+  {
+   "path": "views/.reviewed/wiki-page-history/reader.py",
+   "bytes": 39629,
+   "why": "a hidden file"
+  },
+  {
+   "path": "views/.reviewed/wiki-page-history/view.html",
+   "bytes": 78176,
+   "why": "a hidden file"
+  },
+  {
+   "path": "views/.reviewed/wiki-page-history/view.json",
+   "bytes": 4128,
+   "why": "a hidden file"
+  },
+  {
+   "path": "views/.reviewed/wiki-page-history.last/reader.py",
+   "bytes": 40329,
+   "why": "a hidden file"
+  },
+  {
+   "path": "views/.reviewed/wiki-page-history.last/view.html",
+   "bytes": 81728,
+   "why": "a hidden file"
+  },
+  {
+   "path": "views/.reviewed/wiki-page-history.last/view.json",
+   "bytes": 4128,
+   "why": "a hidden file"
+  },
+  {
+   "path": "views/.versions/relay-board/57d6b2a318b9/reader.py",
+   "bytes": 22614,
+   "why": "a hidden file"
+  },
+  {
+   "path": "views/.versions/relay-board/57d6b2a318b9/view.html",
+   "bytes": 71646,
+   "why": "a hidden file"
+  },
+  {
+   "path": "views/.versions/relay-board/57d6b2a318b9/view.json",
+   "bytes": 3167,
+   "why": "a hidden file"
+  },
+  {
+   "path": "views/.versions/relay-board/7c6acce227a5/reader.py",
+   "bytes": 21923,
+   "why": "a hidden file"
+  },
+  {
+   "path": "views/.versions/relay-board/7c6acce227a5/view.html",
+   "bytes": 69110,
+   "why": "a hidden file"
+  },
+  {
+   "path": "views/.versions/relay-board/7c6acce227a5/view.json",
+   "bytes": 3134,
+   "why": "a hidden file"
+  },
+  {
+   "path": "views/.versions/relay-board/e616bdfb4089/reader.py",
+   "bytes": 22614,
+   "why": "a hidden file"
+  },
+  {
+   "path": "views/.versions/relay-board/e616bdfb4089/view.html",
+   "bytes": 72567,
+   "why": "a hidden file"
+  },
+  {
+   "path": "views/.versions/relay-board/e616bdfb4089/view.json",
+   "bytes": 3167,
+   "why": "a hidden file"
+  },
+  {
+   "path": "views/.versions/wiki-page-history/21f1dace7153/reader.py",
+   "bytes": 40977,
+   "why": "a hidden file"
+  },
+  {
+   "path": "views/.versions/wiki-page-history/21f1dace7153/view.html",
+   "bytes": 83294,
+   "why": "a hidden file"
+  },
+  {
+   "path": "views/.versions/wiki-page-history/21f1dace7153/view.json",
+   "bytes": 4128,
+   "why": "a hidden file"
+  },
+  {
+   "path": "views/.versions/wiki-page-history/360794e62883/reader.py",
+   "bytes": 39629,
+   "why": "a hidden file"
+  },
+  {
+   "path": "views/.versions/wiki-page-history/360794e62883/view.html",
+   "bytes": 78176,
+   "why": "a hidden file"
+  },
+  {
+   "path": "views/.versions/wiki-page-history/360794e62883/view.json",
+   "bytes": 4128,
+   "why": "a hidden file"
+  },
+  {
+   "path": "views/.versions/wiki-page-history/d6cf02776348/reader.py",
+   "bytes": 40329,
+   "why": "a hidden file"
+  },
+  {
+   "path": "views/.versions/wiki-page-history/d6cf02776348/view.html",
+   "bytes": 81728,
+   "why": "a hidden file"
+  },
+  {
+   "path": "views/.versions/wiki-page-history/d6cf02776348/view.json",
+   "bytes": 4128,
+   "why": "a hidden file"
+  },
+  {
+   "path": "views/key-refs.json",
+   "bytes": 184757,
+   "why": "the excerpts of the records the views' keys cite, rebuilt"
+  },
+  {
+   "path": "views-work/relay-board/harness.py",
+   "bytes": 7768,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/relay-board/profile2.py",
+   "bytes": 2297,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/relay-board/shots/a-open-1048.png",
+   "bytes": 157897,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/relay-board/shots/b-oecd-label.png",
+   "bytes": 158707,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/relay-board/shots/c-detail-798.png",
+   "bytes": 176626,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/relay-board/shots/d-detail-1048.png",
+   "bytes": 204457,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/relay-board/shots/e-wide-1528.png",
+   "bytes": 214092,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/relay-board/shots/f-search.png",
+   "bytes": 171231,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/relay-board/shots/g-labelsmenu.png",
+   "bytes": 169680,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/relay-board/shots/h-when.png",
+   "bytes": 158393,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/relay-board/shots/i-filtered.png",
+   "bytes": 141671,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/relay-board/shots/j-allpages-798.png",
+   "bytes": 123456,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/relay-board/shots/k-pagenarrow.png",
+   "bytes": 209943,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/relay-board/shots/l-usertab.png",
+   "bytes": 196444,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/relay-board/shots/m-fampick-798.png",
+   "bytes": 169332,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/relay-board/shots/n-when.png",
+   "bytes": 159529,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/relay-board/shots/p-open.png",
+   "bytes": 159669,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/relay-board/shots/q-detail.png",
+   "bytes": 176738,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/relay-board/shots/r-filtered.png",
+   "bytes": 147447,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/relay-board/shots/s-open-1048.png",
+   "bytes": 161980,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/relay-board/shots/t-798-label.png",
+   "bytes": 173603,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/relay-board/shots/u-oecd-click.png",
+   "bytes": 130019,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/relay-board/shots/v-oecd-1048.png",
+   "bytes": 150428,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/relay-board/shots/w-wide-detail.png",
+   "bytes": 329915,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/relay-board/shots/x-798-click.png",
+   "bytes": 133035,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/relay-board/shots/y-798-cite.png",
+   "bytes": 177218,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/relay-board/shots/z-oecd-1048.png",
+   "bytes": 153431,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/relay-board/shots/z2-construction.png",
+   "bytes": 153826,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/relay-board/states1.json",
+   "bytes": 269,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/relay-board/states2.json",
+   "bytes": 247,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/relay-board/states3.json",
+   "bytes": 557,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/relay-board/states4.json",
+   "bytes": 452,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/relay-board/states5.json",
+   "bytes": 227,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/relay-board/states6.json",
+   "bytes": 568,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/relay-board/states7.json",
+   "bytes": 357,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/relay-board/states8.json",
+   "bytes": 93,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/relay-board/states9.json",
+   "bytes": 292,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/relay-board/try_reader.py",
+   "bytes": 2154,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/wiki-page-history/a-coord.png",
+   "bytes": 139124,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/wiki-page-history/a-deleted.png",
+   "bytes": 187127,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/wiki-page-history/a-probe-narrow.png",
+   "bytes": 122529,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/wiki-page-history/b-coord.png",
+   "bytes": 207145,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/wiki-page-history/b-event.png",
+   "bytes": 79864,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/wiki-page-history/b-filter.png",
+   "bytes": 150782,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/wiki-page-history/b-labels.png",
+   "bytes": 161228,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/wiki-page-history/b-mh.png",
+   "bytes": 144136,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/wiki-page-history/b-user.png",
+   "bytes": 142538,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/wiki-page-history/c-brush.png",
+   "bytes": 189014,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/wiki-page-history/c-details.png",
+   "bytes": 171439,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/wiki-page-history/c-puser.png",
+   "bytes": 187627,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/wiki-page-history/d-info.png",
+   "bytes": 107508,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/wiki-page-history/d-user.png",
+   "bytes": 149515,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/wiki-page-history/drive.mjs",
+   "bytes": 5502,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/wiki-page-history/e-user.png",
+   "bytes": 157880,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/wiki-page-history/f-rev.png",
+   "bytes": 139090,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/wiki-page-history/frame.html",
+   "bytes": 148327,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/wiki-page-history/g-open-798.png",
+   "bytes": 176480,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/wiki-page-history/g-open.png",
+   "bytes": 185818,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/wiki-page-history/g-testseite-del.png",
+   "bytes": 172078,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/wiki-page-history/g-testseite.png",
+   "bytes": 142708,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/wiki-page-history/h-open-none.png",
+   "bytes": 167575,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/wiki-page-history/h-open-probe.png",
+   "bytes": 140028,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/wiki-page-history/i-details.png",
+   "bytes": 147423,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/wiki-page-history/i-open-nokey.png",
+   "bytes": 141372,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/wiki-page-history/i-open-probe.png",
+   "bytes": 141368,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/wiki-page-history/open.json",
+   "bytes": 69,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/wiki-page-history/page.js",
+   "bytes": 62055,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/wiki-page-history/s1.json",
+   "bytes": 884,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/wiki-page-history/s2.json",
+   "bytes": 1549,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/wiki-page-history/s3.json",
+   "bytes": 674,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/wiki-page-history/s4.json",
+   "bytes": 361,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/wiki-page-history/s5.json",
+   "bytes": 952,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/wiki-page-history/serve.py",
+   "bytes": 943,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/wiki-page-history/shoot.py",
+   "bytes": 4548,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/wiki-page-history/stub/thimble.py",
+   "bytes": 806,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/wiki-page-history/t1.py",
+   "bytes": 2458,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/wiki-page-history/t2.py",
+   "bytes": 1984,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/wiki-page-history/t_basic.mjs",
+   "bytes": 2212,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/wiki-page-history/t_del.mjs",
+   "bytes": 320,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/wiki-page-history/t_open.mjs",
+   "bytes": 65,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/wiki-page-history/t_rev.mjs",
+   "bytes": 64,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/wiki-page-history/t_user.mjs",
+   "bytes": 502,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "views-work/wiki-page-history/t_user2.mjs",
+   "bytes": 166,
+   "why": "the view builds' scratch"
+  },
+  {
+   "path": "writers/report/.thimble-budget.json",
+   "bytes": 60,
+   "why": "a hidden file"
+  },
+  {
+   "path": "writers/report/.thimble-prompts/preamble.md",
+   "bytes": 547,
+   "why": "a hidden file"
+  },
+  {
+   "path": "writers/report/.thimble-prompts/shared.md",
+   "bytes": 23674,
+   "why": "a hidden file"
+  },
+  {
+   "path": "writers/report/make_diffs.py",
+   "bytes": 811,
+   "why": "the writers' own scratch"
+  }
+ ],
+ "gitleaks": "0 findings",
+ "user_name_scrubbed": 0,
+ "flagged": [],
+ "views": [
+  {
+   "slug": "relay-board",
+   "name": "Relay Board",
+   "version": "49d7f058840e",
+   "from": "relay-board",
+   "from_version": "49d7f058840e",
+   "picked": "live at 49d7f058840e"
+  },
+  {
+   "slug": "wiki-page-history",
+   "name": "Wiki Page History",
+   "version": "654330f0c454",
+   "from": "wiki-page-history",
+   "from_version": "654330f0c454",
+   "picked": "live at 654330f0c454"
+  }
+ ]
+}

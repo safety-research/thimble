@@ -1,0 +1,96 @@
+{
+ "id": "a5755a83",
+ "name": "request kind",
+ "description": "",
+ "unit": "record",
+ "kind": "code",
+ "spec": "import re\nfrom urllib.parse import unquote\n\n# attack string: SQL injection (' or 1 OR 1=1), markup injection (<, <script), 32-bit overflow numbers\nSQLI = re.compile(r\"(\\bor\\b\\s*\\d+\\s*=\\s*\\d+)|(union\\s+select)|(^|[=&])'|'(\\s|$|&)|;\\s*(drop|select)\\b\", re.I)\nXSS = re.compile(r\"<\\s*(script|img|svg)|=<|=%3c|javascript:|onerror\\s*=\", re.I)\nBIGINT = re.compile(r\"=(2147483648|4294967296|9223372036854775808|-2147483649)(&|$)\")\nTRAVERSAL = re.compile(r\"\\.\\./|\\.\\.%2f|%2e%2e\", re.I)\n\ndef label(unit):\n    url = unit.get('target_url', '') or ''\n    m = re.match(r'^([A-Za-z]+)://([^/?#]*)(.*)$', url)\n    if not m:\n        return ('ordinary', 0.5)\n    scheme, host_raw, rest = m.groups()\n    host = host_raw.lower()\n    dec = unquote(unquote(rest))\n    if SQLI.search(dec) or XSS.search(dec) or XSS.search(rest) or BIGINT.search(dec):\n        return ('attack string', 0.9)\n    # URL trick: parent-directory segments, the host written another way (raw IP, user@host,\n    # trailing dot, odd capitals), doubled slashes, extra path or ';' after a script name,\n    # a second '?' inside the query, or a debug switch\n    hostname = re.sub(r':\\d+$', '', host.split('@')[-1])\n    path = rest.split('?')[0]\n    query = rest.split('?', 1)[1] if '?' in rest else ''\n    doubled = re.search(r'//+(?![a-z0-9-]+\\.[a-z0-9.-]+\\.[a-z]{2,}/)', path, re.I)\n    second_q = '?' in query and 'requesturi=' not in query.lower()\n    if ('@' in host or re.fullmatch(r'\\d+\\.\\d+\\.\\d+\\.\\d+', hostname) or hostname.endswith('.')\n            or host_raw != host or scheme not in ('http', 'https')\n            or TRAVERSAL.search(rest) or doubled\n            or re.search(r'\\.(aspx|asp|prg|php)[/;]', path, re.I) or ';' in path\n            or second_q or re.search(r'[?&]debug=1', rest)):\n        return ('URL trick', 0.85)\n    return ('ordinary', 0.8)",
+ "labels": [
+  "attack string",
+  "URL trick",
+  "ordinary"
+ ],
+ "marks": "record",
+ "glob": "*/arquivo-captures.csv",
+ "model": "",
+ "classes": [
+  {
+   "name": "attack string",
+   "color": 1,
+   "highlight": true
+  },
+  {
+   "name": "URL trick",
+   "color": 2,
+   "highlight": true
+  },
+  {
+   "name": "ordinary",
+   "color": 11,
+   "highlight": true
+  }
+ ],
+ "shown": false,
+ "trial": false,
+ "calibration": {
+  "n": 0,
+  "agreed": 0,
+  "disagreed": 0,
+  "est_precision": {
+   "attack string": null,
+   "URL trick": null,
+   "ordinary": null
+  }
+ },
+ "created_by": "terminal",
+ "ts": "2026-10-06T04:35:15+00:00",
+ "version": 1,
+ "told": 1,
+ "rev": 1,
+ "changes": [
+  {
+   "what": "ran",
+   "first": 1,
+   "rev": 1,
+   "text": "run over 561,229 records",
+   "ts": "2026-10-06T04:36:06+00:00"
+  }
+ ],
+ "applications": [
+  {
+   "ts": "2026-10-06T04:35:15+00:00",
+   "paths": [
+    "*/arquivo-captures.csv"
+   ],
+   "total": 561229,
+   "matched_total": 561229,
+   "labeled": 561229,
+   "failed": 0,
+   "matches": 5,
+   "status": "done",
+   "message": null,
+   "created_by": "terminal",
+   "version": 1,
+   "examples": 0,
+   "limit": null,
+   "stopped": false,
+   "within": null,
+   "within_rev": null
+  }
+ ],
+ "label_stats": {
+  "key": [
+   91573528,
+   1791261365999868997
+  ],
+  "n_labeled": 561229,
+  "n_reviewed": 0,
+  "n_marked": 0,
+  "counts": {
+   "URL trick": 240,
+   "attack string": 5,
+   "ordinary": 560984
+  }
+ },
+ "within": null
+}
