@@ -28,6 +28,11 @@ Each role's handlers (Type.started, Type.ended, Type.refused) do what its run's 
 
 Attribution. A PreToolUse hook on thimble's tools records which agent makes each call (callers.jsonl); caller() names
 the agent, and its key is the session the call runs as (tools.call_route), a descendant's that of its thimble ancestor.
+
+Terminal mode. No server runs: the starts, follow-ups and stops above reach the module through the trusted folder
+(module_bridge's file transport), main's permission mode and plan mode come from the files (session.main_mode), and the
+hooks' records are followed by their backend calls (local_hooks.py), which run the same bodies as the routes below
+(hook_started, hook_stopped, hook_denied, hook_end, hook_rekey) and stop the running agents in plan mode (plan_check).
 """
 from __future__ import annotations
 

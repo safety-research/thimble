@@ -448,6 +448,7 @@ def watch_files(inp: dict, ws: Path) -> int:
     pid = claude_pid()
     path = ef.queue_path(ws)
     seen = None
+    plan = PlanWatch(ws, session)
     until = time.monotonic() + LIFETIME_S
     while time.monotonic() < until:
         if pid and not alive(pid):
@@ -455,6 +456,7 @@ def watch_files(inp: dict, ws: Path) -> int:
         now = process_session(pid)
         if now and now != session:
             return 0
+        plan.look()
         try:
             st = path.stat()
             stamp = (st.st_mtime_ns, st.st_size)
@@ -494,6 +496,38 @@ def stream_files(args: list[str], ws: Path) -> int:
             continue
         sys.stdout.write(fit(str(got.get("id") or ""), str(got.get("text") or "")) + "\n")
         sys.stdout.flush()
+
+
+class PlanWatch:
+    """What the waker, which runs for as long as main's session does, sees of main's plan mode in module.json (the
+    module's poll of it, which no process can hear otherwise while main is idle): when plan mode began since the waker
+    last looked and agents of thimble's roles run, the backend's `plan` call stops them (app/subagents.py plan_check),
+    within a tick of the module's poll rather than at an agent's next tool call."""
+
+    def __init__(self, ws: Path, session: str) -> None:
+        self.ws, self.session = ws, session
+        self.stamp: tuple | None = None
+        self.told = 0.0  # module.json's plan_at of the plan mode the backend's call was started for
+
+    def look(self) -> None:
+        sf = files()
+        try:
+            st = sf.module_path(self.ws).stat()
+            stamp = (st.st_mtime_ns, st.st_size)
+        except OSError:
+            return
+        if stamp == self.stamp:
+            return
+        self.stamp = stamp
+        out = sf.read_module(self.ws)
+        at = float(out.get("plan_at") or 0)
+        if out.get("plan") is not True or at <= self.told or out.get("session") != self.session:
+            return
+        self.told = at
+        running = [a for a in sf.registry(sf.read(self.ws)).values() if isinstance(a, dict) and a.get("role") in sf.ROLES
+                   and a.get("status") in ("running", "waiting") and a.get("stopped_by") != "plan"]
+        if running:
+            spawn_local("plan", {"session_id": self.session, "hook_event_name": "PlanPoll", "cwd": folder({})})
 
 
 def plan_call(inp: dict, ws: Path) -> None:

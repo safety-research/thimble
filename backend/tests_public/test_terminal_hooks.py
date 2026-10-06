@@ -318,3 +318,32 @@ def test_the_monitor_route_streams_main_s_events_from_the_queue_until_main_exits
     assert out.returncode == 0
     assert out.stdout.index(f'event="{a["id"]}"') < out.stdout.index(f'event="{b["id"]}"')
     assert event_files.waiting(ws) == []
+
+
+def test_the_waker_starts_the_backend_s_plan_call_once_the_module_sees_plan_mode_while_agents_run(tmp_path, ws,
+                                                                                                 monkeypatch):
+    from terminal_fakes import FileModule
+
+    watcher, spawned = loaded(monkeypatch, tmp_path, ws)
+    mod = FileModule(ws, session=MAIN)
+    mod.write()
+    look = watcher.PlanWatch(ws, MAIN)
+    look.look()
+    mod.plan(True)
+    look.look()
+    assert spawned == [], "no agent of thimble's runs"
+    with sf.update(ws) as state:
+        sf.registry(state)[AGENT] = {"role": "orientation", "key": "orient", "status": "running"}
+    time.sleep(0.01)
+    mod.plan(True)
+    look.look()
+    assert [k for k, _ in spawned] == ["plan"]
+    mod.write()  # a heartbeat: the same plan mode
+    look.look()
+    assert len(spawned) == 1
+    with sf.update(ws) as state:
+        sf.registry(state)[AGENT]["stopped_by"] = "plan"
+    time.sleep(0.01)
+    mod.plan(True)
+    look.look()
+    assert len(spawned) == 1, "stopped for plan mode already"

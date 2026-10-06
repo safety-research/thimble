@@ -139,6 +139,10 @@ async def _hold(c: str, ws: Path) -> int:
         elif time.monotonic() - quiet >= SETTLE_S and not _todo_path(ws).exists():
             break
         await asyncio.sleep(TICK_S)
+    from . import subagents  # noqa: PLC0415
+
+    for key in [k for k in subagents._waits if k[0] == c]:  # their timers end with this loop
+        subagents._waits.pop(key, None)
     return passes
 
 
@@ -208,8 +212,13 @@ def _workspace(body: dict[str, Any]) -> str | None:
     return config.workspace_for_cwd(cwd)
 
 
+LOG_BYTES = 1_000_000  # local-hooks.log is rotated past this, keeping one before it
+
+
 def _logging(ws: Path) -> None:
-    handler = logging.FileHandler(ws / LOG_FILE, encoding="utf-8")
+    from logging.handlers import RotatingFileHandler  # noqa: PLC0415
+
+    handler = RotatingFileHandler(ws / LOG_FILE, maxBytes=LOG_BYTES, backupCount=1, encoding="utf-8")
     handler.setFormatter(logging.Formatter("%(asctime)s %(process)d %(name)s %(levelname)s %(message)s"))
     root = logging.getLogger()
     root.addHandler(handler)
