@@ -43,7 +43,7 @@ def test_every_view_page_loads_the_colour_control_after_the_bridge_and_before_th
     bridge = doc.index("window.__thimbleKit = {")
     control = doc.index("thimble.colourBy = function")
     assert bridge < control < doc.index("const mine = thimble.colourBy("), "the bridge hands the control its part, then the page mounts it"
-    assert ".thimble-colour-chip" in doc, "the kit's parts style it"
+    assert ".thimble-colour-chips" in doc and ".chip-key" in doc, "the kit's parts style it"
 
 
 def test_a_page_that_mounts_colour_by_has_label_controls(tmp_path):

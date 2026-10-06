@@ -15,10 +15,11 @@
 // palette, --label-1 to --label-12, in the order the values come: the declared `values`, each in the colour it names or
 // else the next free one, then the most frequent first, kept per view so a value keeps its colour). A label colours by its values on each anchored record, in the label's own
 // colours; choosing one turns it on, and a label the analyst turns on, here or anywhere in thimble, takes the colour.
-// The chosen field's values are chips in the top row, each with its count and its colour as a bar along the chip's
-// left edge; a click turns a value off or on, an Alt-click or a double click keeps that value alone. Colour is always
-// a bar on the left edge of a record's row, card or chip (the bridge draws it on every element whose data-colour is the
-// value of the chosen field, and on every anchored record when a label is chosen), never coloured text or a fill. The
+// Colour by is thimble's small secondary button with the choice in it. The chosen field's values are key chips in the
+// top row (viewer_kit.css .chip-key), each a square swatch of its colour, its name and its count; a click turns a value
+// off or on, an Alt-click or a double click keeps that value alone. On a record, colour is always a bar on the left
+// edge of its row or card (the bridge draws it on every element whose data-colour is the value of the chosen field, and
+// on every anchored record when a label is chosen), never coloured text or a fill. The
 // strip is the File browser's transcript ruler for any list: its track shows where each value's records are, and its
 // thumb frames the part in view. thimble keeps the choice, the values turned off and the colours per view (the bridge's
 // `colour` message), and hands them back as window.__thimbleColour when the page loads.
@@ -43,7 +44,6 @@
   var THUMB_MIN = 24
   var MAX_KEPT = 200 // values whose colour is kept per field
   var ICON = {
-    palette: 'M12 3a9 9 0 0 0 0 18c1.1 0 1.8-.8 1.8-1.7 0-.5-.2-.9-.5-1.2-.3-.3-.5-.7-.5-1.2 0-.9.8-1.7 1.7-1.7H16a5 5 0 0 0 5-5c0-4-4-7.2-9-7.2zM7.5 12h.01M9 7.8h.01M13.5 7h.01M17 10h.01',
     down: 'M6 9l6 6 6-6',
     check: 'M5 12.5l4.5 4.5L19 7',
     plus: 'M12 5v14M5 12h14',
@@ -550,14 +550,16 @@
     var c = this.choice()
     var off = this.offSet(c)
     var lab = c && c.label ? ' data-label="' + esc(c.label) + '"' : ''
-    var by = '<button type="button" class="btn btn-ghost btn-sm thimble-colour-by" aria-haspopup="menu" aria-expanded="' + (this.menu ? 'true' : 'false') + '"' + lab + '>' + ico('palette') + '<span class="thimble-colour-k">Colour by</span><b>' + esc(c ? c.title : 'None') + '</b>' + ico('down') + '</button>'
+    // Colour by is thimble's small secondary button, as a menu's trigger: its choice in it and a chevron
+    var by = '<button type="button" class="btn btn-secondary btn-sm thimble-colour-by" aria-haspopup="menu" aria-expanded="' + (this.menu ? 'true' : 'false') + '"' + lab + '><span class="thimble-colour-k">Colour by:</span><b>' + esc(c ? c.title : 'None') + '</b>' + ico('down') + '</button>'
+    // each value is a key chip: a square swatch of its colour, its name and its count
     var chips = ''
     for (var i = 0; i < this.values.length; i++) {
       var v = this.values[i]
       var on = off.indexOf(v.key) < 0
       chips +=
-        '<button type="button" class="thimble-colour-chip' + (v.colour ? '' : ' thimble-colour-none') + '" data-i="' + i + '" aria-pressed="' + on + '"' + lab +
-        (v.colour ? ' style="--c:' + esc(v.colour) + '"' : '') + ' title="' + esc(v.name) + '"><span class="thimble-colour-name">' + esc(v.name) + '</span><span class="thimble-colour-n">' + num(v.n) + '</span></button>'
+        '<button type="button" class="chip chip-key chip-act thimble-colour-chip" data-i="' + i + '" aria-pressed="' + on + '"' + lab +
+        (v.colour ? ' style="--c:' + esc(v.colour) + '"' : '') + ' title="' + esc(v.name) + '"><span class="chip-sw"></span><span class="chip-text">' + esc(v.name) + '</span><span class="chip-count">' + num(v.n) + '</span></button>'
     }
     chips += '<button type="button" class="btn btn-ghost btn-sm thimble-colour-more" hidden></button>'
     this.root.innerHTML = by + '<span class="thimble-colour-chips">' + chips + '</span>'
@@ -578,7 +580,7 @@
     for (var j = chips.length - 1; j >= 0 && box.scrollWidth > box.clientWidth + 1; j--) {
       chips[j].hidden = true
       hid++
-      more.textContent = hid + ' more'
+      more.innerHTML = hid + ' more' + ico('down')
     }
   }
   // the value a chip or a menu item stands for, by its place among the chips' values (a value's own text may hold what

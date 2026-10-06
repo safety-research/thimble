@@ -6,10 +6,11 @@ view colours the same way:
 
 - One menu lists the fields the view can colour by and every label over files. Fields are values the files hold or the
   reader works out, such as a kind or a source. The labels that mark the view's files come first, each with its switch.
-- The values of the chosen field show as chips in the top row, each with its count. A click turns a value off or on.
-  An Alt-click, or a double click, shows that value alone. A value turned off is hidden or dimmed, as the view says.
-- Colour is a 3 px bar on the left edge of a record's row or card, and of each chip. Text and fills keep their own
-  colours.
+- Colour by is thimble's small secondary button, with the choice in it: "Colour by: Kind".
+- The values of the chosen field show as key chips in the top row (`chip chip-key` in the view kit): a square of the
+  value's colour, its name and its count. A click turns a value off or on. An Alt-click, or a double click, shows that
+  value alone. A value turned off is hidden or dimmed, as the view says, and its chip goes quiet with an empty square.
+- On a record, colour is a 3 px bar on the left edge of its row or card. Text and fills keep their own colours.
 - A coloured scrollbar shows where the records of each value are in a long list. It is the scrollbar of the File
   browser's transcript mode.
 - thimble keeps the choice, the values turned off and each value's colour per view. The page opens on them again.
@@ -74,6 +75,11 @@ load()
   Call it again with the same list when the values change.
 - Draw no colour control, legend or label list of your own. The control is the page's label control: a view that
   mounts it passes the check that a view draws its labels' controls.
+- Where the page shows a value with its colour outside the control, such as in a detail pane, use the same key chip:
+  `<span class="chip chip-key"><span class="chip-sw" style="--c:${colour.colourOf(v)}"></span><span class="chip-text">${v}</span></span>`.
+- Give the page's chips, buttons, menus and fields thimble's classes (`chip`, `btn`, `seg`, `field`) and do not restyle
+  them: the view checks note a rule that changes their edges, fills, corners, colours, type or height, and a chip of
+  the page's own with corners rounder than `var(--radius-chip)` (views.own_parts).
 
 ## In the reader
 

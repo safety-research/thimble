@@ -3,16 +3,21 @@
    rows (files.css), in the theme's tokens that the frame passes as CSS variables (frontend/src/lib/frame.ts
    VIEW_TOKENS), so a view follows the paper, the accent and dark mode.
      .chip             a value, a tag or a count: .chip-sans for a name in words, .chip-tone-neutral for a plain value,
-                       .chip-act when it can be clicked, .active when it is chosen
+                       .chip-tone-evidence for a file, a record or a line, .chip-act when it can be clicked, .active
+                       when it is chosen, .chip-plain for a quiet one; .chip-text, .chip-ico and .chip-count inside it.
+                       .chip-key is a value with its colour, as a key or a toggle: a .chip-sw swatch, its name and its
+                       count, aria-pressed false when the value is off; the app draws no key, so it is the views'
+                       own
      .btn              an action: .btn-primary, .btn-secondary or .btn-ghost, .btn-sm for the small size
      .seg + .seg-opt   an exclusive choice, the chosen option .active; .seg-track sets the options on a tint
-     .field            a text input or a select
+     .field            a text input or a select, or a button that opens a menu (button.field), .active when its menu
+                       has a choice set, aria-invalid when what was typed cannot be used
      .table            a table of records: caps header, hairline rows, .active on the chosen row
      .list-row         a row of a list: .active on the chosen one
      .avatar           a person or an agent: the initial of its name on a neutral disc, whose shade the page sets
                        from the name as --a (0.08 to 0.24), so the label colours stay the only colours
      .thimble-colour-* the Colour by control (viewer_colour.js, thimble.colourBy), which the page only mounts: Colour by
-                       and the values' chips in the top row, its menu, and the coloured scrollbar */
+                       and the values' key chips in the top row, its menu, and the coloured scrollbar */
 
 body {
   font: 400 var(--text-sm) / 1.45 var(--font-body);
@@ -35,10 +40,15 @@ body {
   color: var(--text-accent);
   font: 400 var(--text-mono-sm) / 1 var(--font-mono);
   font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+  text-transform: none;
   white-space: nowrap;
   vertical-align: 1px;
   cursor: default;
   transition: var(--transition-color);
+}
+.chip[hidden] {
+  display: none;
 }
 .chip-sans {
   height: 22px;
@@ -46,10 +56,38 @@ body {
   border-radius: var(--radius-ui);
   font: 400 var(--text-ui-sm) / 1 var(--font-body);
 }
+/* the name, cut with an ellipsis */
+.chip-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 14px;
+}
+.chip-ico {
+  flex: none;
+  width: 10px;
+  height: 10px;
+}
+/* a count after the name, past a hairline */
+.chip-count {
+  flex: none;
+  padding: 0 0 0 5px;
+  margin-right: -1px;
+  border-left: 1px solid color-mix(in oklab, currentColor 25%, transparent);
+  font: 400 var(--text-mono-sm) / 12px var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  opacity: 0.8;
+}
 .chip-tone-neutral {
   border-color: rgba(var(--ink-rgb), 0.18);
   background: var(--surface-card);
   color: var(--text-primary);
+}
+/* what points at the data: a file, a record, a line */
+.chip-tone-evidence {
+  border-color: rgba(var(--ink-rgb), 0.18);
+  background: var(--surface-card);
+  color: var(--text-secondary);
 }
 .chip-tone-positive,
 .chip-tone-warning,
@@ -68,6 +106,12 @@ body {
   border-color: var(--status-negative);
   color: var(--status-negative);
 }
+.chip-plain,
+.chip-plain.chip-tone-neutral {
+  border-color: transparent;
+  background: transparent;
+  color: var(--text-tertiary);
+}
 .chip-act {
   cursor: pointer;
 }
@@ -79,12 +123,74 @@ body {
   border-color: rgba(var(--ink-rgb), 0.3);
   background: var(--surface-card);
 }
+.chip-tone-evidence.chip-act:hover {
+  border-color: rgba(var(--ink-rgb), 0.3);
+  background: var(--surface-card);
+  color: var(--text-primary);
+}
+.chip-act:active {
+  transform: translateY(0.5px);
+}
+.chip-act:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
 .chip.active,
 .chip.active:hover,
 .chip[aria-pressed='true'] {
   border-color: var(--surface-inverse);
   background: var(--surface-inverse);
   color: var(--text-on-inverse);
+}
+.chip:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 1.5px var(--accent);
+}
+/* a value with its colour, as a key or a toggle (Colour by's chips): the value's colour a square swatch before its name
+   (.chip-sw, its colour --c, an outline for a value with none), the name in the body face, the count in mono after it
+   (.chip-count), on a hairline box at a control's height. Pressed, it keeps that look; a value turned off (aria-pressed
+   false) takes the quiet chip's look (.chip-plain), its swatch an outline. */
+.chip-key {
+  height: var(--h-control);
+  padding: 0 7px 0 6px;
+  border-color: var(--border-subtle);
+  background: transparent;
+  color: var(--text-secondary);
+  font: 400 var(--text-xs) / 1 var(--font-body);
+}
+.chip-key .chip-text {
+  max-width: 200px;
+}
+.chip.chip-key[aria-pressed='true'] {
+  border-color: var(--border-subtle);
+  background: transparent;
+  color: var(--text-secondary);
+}
+.chip.chip-key.chip-act:hover {
+  border-color: rgba(var(--ink-rgb), 0.3);
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+.chip.chip-key[aria-pressed='false'] {
+  border-color: transparent;
+  background: transparent;
+  color: var(--text-tertiary);
+}
+.chip.chip-key[aria-pressed='false']:hover {
+  border-color: var(--border-subtle);
+  background: transparent;
+}
+.chip-sw {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  background: var(--c, transparent);
+  box-shadow: inset 0 0 0 1px var(--c, rgba(var(--ink-rgb), 0.45));
+}
+.chip-key[aria-pressed='false'] .chip-sw {
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--c, rgba(var(--ink-rgb), 0.3));
 }
 
 .btn {
@@ -208,6 +314,28 @@ body {
   color: var(--text-placeholder);
   opacity: 1;
 }
+.field[aria-invalid='true'] {
+  border-color: var(--status-negative);
+}
+/* a button drawn as a field opens a menu, as a select does: its name, a count or the chosen value, then a chevron.
+   .active says its menu has a choice set, such as a filter. */
+button.field {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  text-align: left;
+  cursor: pointer;
+}
+button.field:hover,
+button.field[aria-expanded='true'],
+select.field:hover {
+  border-color: rgba(var(--ink-rgb), 0.28);
+}
+.field.active {
+  border-color: rgba(var(--ink-rgb), 0.28);
+  background-color: var(--surface-selected);
+}
 /* a select draws a chevron of two thin strokes in the theme's ink in place of the browser's arrow */
 select.field {
   appearance: none;
@@ -292,9 +420,10 @@ select.field {
 }
 
 /* -------- Colour by (viewer_colour.js). The control fills the element the page mounts it in, in its top row: the
-   Colour by button, then a chip per value with its count, its colour a bar along the chip's left edge, as the bridge
-   draws it on the records; a value turned off keeps a faint bar and tertiary text. Values that do not fit go behind
-   "N more". -------- */
+   Colour by button (thimble's small secondary button, its choice in it and a chevron, as a menu's trigger), then a key
+   chip per value (.chip.chip-key above: a square swatch of its colour, its name and its count) that turns the value
+   off and on. Values that do not fit go behind "N more". The records carry the colour as a bar on their left edge,
+   which the bridge draws. -------- */
 /* the mount takes the row's free width whatever its chips, so a chip hidden or shown never resizes it */
 .thimble-colour-mount {
   display: flex;
@@ -322,12 +451,14 @@ select.field {
 .thimble-colour-by.btn {
   flex: none;
   gap: 5px;
-  padding: 0 6px 0 7px;
-  color: var(--text-secondary);
+  padding: 0 7px 0 9px;
   font-weight: 400;
 }
-.thimble-colour-by.btn > .thimble-colour-ico:first-child {
-  color: var(--text-tertiary);
+.thimble-colour-by.btn[aria-expanded='true'] {
+  background: var(--surface-hover);
+}
+.thimble-colour-k {
+  color: var(--text-secondary);
 }
 .thimble-colour-by b {
   max-width: 180px;
@@ -336,7 +467,8 @@ select.field {
   font-weight: 500;
   color: var(--text-primary);
 }
-.thimble-colour-by .thimble-colour-ico:last-child {
+.thimble-colour-by .thimble-colour-ico,
+.thimble-colour-more .thimble-colour-ico {
   width: 12px;
   height: 12px;
   color: var(--text-tertiary);
@@ -348,43 +480,8 @@ select.field {
   min-width: 0;
   overflow: hidden;
 }
-.thimble-colour-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
+.thimble-colour-chips > .chip {
   flex: none;
-  box-sizing: border-box;
-  height: 22px;
-  max-width: 220px;
-  margin: 0;
-  padding: 0 7px 0 10px;
-  border: 1px solid rgba(var(--ink-rgb), 0.14);
-  border-radius: var(--radius-chip);
-  background: var(--surface-card);
-  box-shadow: inset 3px 0 0 var(--c, transparent);
-  color: var(--text-primary);
-  font: 400 var(--text-ui-sm) / 1 var(--font-body);
-  white-space: nowrap;
-  cursor: pointer;
-  transition: var(--transition-color);
-}
-.thimble-colour-chip[hidden] {
-  display: none;
-}
-.thimble-colour-chip.thimble-colour-none {
-  padding-left: 7px;
-}
-.thimble-colour-chip:hover {
-  border-color: rgba(var(--ink-rgb), 0.3);
-}
-.thimble-colour-chip:focus-visible {
-  outline: none;
-  box-shadow: inset 3px 0 0 var(--c, transparent), 0 0 0 1.5px var(--accent);
-}
-.thimble-colour-name {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 .thimble-colour-n {
   flex: none;
@@ -392,22 +489,9 @@ select.field {
   font: 400 var(--text-mono-sm) / 1 var(--font-mono);
   font-variant-numeric: tabular-nums;
 }
-.thimble-colour-chip[aria-pressed='false'] {
-  border-color: rgba(var(--ink-rgb), 0.1);
-  background: transparent;
-  box-shadow: inset 3px 0 0 color-mix(in oklab, var(--c, transparent) 28%, transparent);
-  color: var(--text-tertiary);
-}
-.thimble-colour-chip[aria-pressed='false'] .thimble-colour-name {
-  text-decoration: line-through;
-  text-decoration-color: rgba(var(--ink-rgb), 0.35);
-}
-.thimble-colour-chip[aria-pressed='false'] .thimble-colour-n {
-  color: var(--text-placeholder);
-}
 .thimble-colour-more.btn {
   flex: none;
-  color: var(--text-tertiary);
+  gap: 4px;
   font-weight: 400;
 }
 .thimble-colour-more[hidden] {
@@ -474,10 +558,11 @@ select.field {
 }
 .thimble-colour-sw {
   flex: none;
-  width: 3px;
-  height: 14px;
-  border-radius: 1px;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
   background: var(--c, transparent);
+  box-shadow: inset 0 0 0 1px var(--c, rgba(var(--ink-rgb), 0.45));
 }
 .thimble-colour-nm {
   flex: 1 1 auto;

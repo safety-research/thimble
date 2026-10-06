@@ -1,5 +1,5 @@
 // The view kit's Colour by (backend/app/viewer_colour.js) in a real browser: a page holds a view in a sandboxed frame,
-// and the bridge draws the chosen value's colour as a bar on each record's left edge and the chips show it on theirs;
+// and the bridge draws the chosen value's colour as a bar on each record's left edge and each chip shows it as a square;
 // the coloured scrollbar shows where each value's records are and scrolls the list; chips that do not fit go behind
 // "N more". Through the real ViewerFrame
 // the choice is kept per view and the page starts on it when it is built again. What the control decides without
@@ -20,7 +20,8 @@ const KIT = read('viewer_kit.css')
 const TOKENS =
   ':root{--label-1:#025ac3;--label-2:#d0750a;--label-3:#08632f;--label-none:#a09c93;--ink-rgb:27,26,24;--surface-card:#fffdf8;' +
   '--text-primary:#000;--text-secondary:#4a4844;--text-tertiary:#726f69;--accent:#5135ff;--radius-chip:4px;--radius-ui:6px;' +
-  '--h-row:28px;--control-sm:28px;--h-control:24px;--text-ui-sm:12px;--text-mono-sm:11px;--font-body:sans-serif;--font-mono:monospace}'
+  '--h-row:28px;--control-sm:28px;--h-control:24px;--h-chip:20px;--text-xs:12px;--text-ui-sm:12px;--text-mono-sm:11px;--border-subtle:rgba(27,26,24,0.12);' +
+  '--font-body:sans-serif;--font-mono:monospace}'
 // sixty messages, the last ten With links, in a list that scrolls
 const ROWS = Array.from({ length: 60 }, (_, i) => `<div class="msg" data-anchor="m.jsonl#L${i + 1}" data-colour="${i < 50 ? 'Text only' : 'With links'}">message ${i + 1}</div>`).join('')
 const VIEW = `<!doctype html><html><head><style>${TOKENS} body{margin:0;font:12px sans-serif} .top{display:flex;align-items:center;gap:8px;padding:8px} #list{height:300px;overflow:auto} .msg{box-sizing:border-box;height:30px;padding:6px 8px 0 12px}</style>
@@ -53,18 +54,24 @@ async function framed(width = 700): Promise<{ page: Page; frame: () => Frame }> 
 }
 
 describe('Colour by in a frame', () => {
-  test("each record's value is a bar on its left edge, and each chip's is a bar on its own", async () => {
+  test("each record's value is a bar on its left edge, and each chip's a square swatch before its name", async () => {
     const { page, frame } = await framed()
     const s = await frame().evaluate(() => ({
       first: getComputedStyle(document.querySelector('[data-anchor="m.jsonl#L1"]')!).boxShadow,
       last: getComputedStyle(document.querySelector('[data-anchor="m.jsonl#L60"]')!).boxShadow,
-      chips: [...document.querySelectorAll('.thimble-colour-chip')].map((c) => [c.textContent ?? '', getComputedStyle(c).boxShadow, getComputedStyle(c).color]),
+      chips: [...document.querySelectorAll('.thimble-colour-chip')].map((c) => {
+        const sw = getComputedStyle(c.querySelector('.chip-sw')!)
+        const cs = getComputedStyle(c)
+        return [c.textContent ?? '', sw.backgroundColor, `${sw.width} ${sw.height}`, cs.color, cs.borderRadius, cs.height]
+      }),
     }))
     assert.match(s.first, /rgb\(2, 90, 195\) 3px 0px 0px 0px inset/, 'the first value takes the first palette colour, inside the padding')
     assert.match(s.last, /rgb\(208, 117, 10\) 3px 0px 0px 0px inset/)
     assert.deepEqual(s.chips.map((c) => c[0]), ['Text only50', 'With links10'])
-    assert.match(s.chips[0][1], /rgb\(2, 90, 195\) 3px 0px 0px 0px inset/, "the chip's edge, not its text, carries the colour")
-    assert.equal(s.chips[0][2], 'rgb(0, 0, 0)', "the chip's text stays the text colour")
+    assert.equal(s.chips[0][1], 'rgb(2, 90, 195)', "the chip's swatch, not its text, carries the colour")
+    assert.equal(s.chips[0][2], '8px 8px', 'the swatch is a square')
+    assert.equal(s.chips[0][3], 'rgb(74, 72, 68)', "the chip's text stays a text colour")
+    assert.deepEqual([s.chips[0][4], s.chips[0][5]], ['4px', '24px'], "thimble's chip corners, a control's height")
     await page.close()
   })
 
