@@ -12,6 +12,11 @@ Earlier builds kept the agents' models and permission modes in the workspace's s
 that workspace's override the first time the workspace's config is read, so each workspace runs as it did. The settings
 of an extension thimble renamed (RENAMED_EXTENSIONS) are read under its new name, and written so when a file is
 rewritten (rename_extensions).
+
+Edits of the config. An agent's edit of these files (Session.config_files) goes to the analyst in every permission
+mode, as an edit of the corpus does with `data` at "ask" (Session.verdict, ask_cause `config`), so the analyst sees on
+the card what an agent would change in its own permissions and decides; a session nobody answers is refused it.
+main's kept mode (main_modes_file), which only thimble writes, stays denied.
 """
 from __future__ import annotations
 
@@ -714,19 +719,33 @@ class Session:
         except (OSError, ValueError, KeyError):
             return None
 
+    @staticmethod
+    def _edited(tool: str, inp: Any) -> Path | None:
+        """The file a call of `tool` writes, resolved, when it is an edit tool's call with an absolute path; else None."""
+        if tool not in EDIT_TOOLS or not isinstance(inp, dict):
+            return None
+        target = inp.get("notebook_path" if tool == "NotebookEdit" else "file_path")
+        if not isinstance(target, str) or not target.strip():
+            return None
+        path = Path(target.strip()).expanduser()
+        return Path(os.path.realpath(path)) if path.is_absolute() else None
+
     def edits_corpus(self, tool: str, inp: Any) -> bool:
         """Whether a call of `tool` writes a file in the corpus folder."""
-        if tool not in EDIT_TOOLS or not isinstance(inp, dict):
+        real, corpus = self._edited(tool, inp), self.corpus()
+        if real is None or corpus is None:
             return False
-        target = inp.get("notebook_path" if tool == "NotebookEdit" else "file_path")
-        corpus = self.corpus()
-        if not isinstance(target, str) or not target.strip() or corpus is None:
-            return False
-        path = Path(target.strip()).expanduser()
-        if not path.is_absolute():
-            return False
-        real = Path(os.path.realpath(path))
         return real == corpus or corpus in real.parents
+
+    def config_files(self) -> list[Path]:
+        """thimble's config files, whose edits ask (module note, edits of the config): the one in thimble's home and
+        the workspace's."""
+        return [global_file(), *([workspace_file(self.c)] if self.c else [])]
+
+    def edits_config(self, tool: str, inp: Any) -> bool:
+        """Whether a call of `tool` writes one of thimble's config files (config_files)."""
+        real = self._edited(tool, inp)
+        return real is not None and any(real == Path(os.path.realpath(f)) for f in self.config_files())
 
     @property
     def bash_asks(self) -> bool:
@@ -736,13 +755,17 @@ class Session:
 
     def settings(self) -> dict[str, Any]:
         """The --settings keys of the config for the session: the install rules, Bash asked when bash_asks, the web
-        allowed or denied, auto memory when not inherited, and a deny of edits to the config's files and to main's kept
-        mode (main_modes_file)."""
-        files = [global_file(), main_modes_file(), *([workspace_file(self.c)] if self.c else [])]
-        perms: dict[str, list[str]] = {"deny": [*(f"Edit(/{f})" for f in files), *private_rules()]}
+        allowed or denied, auto memory when not inherited, an ask of edits to the config's files (a deny in a session
+        nobody answers), and a deny of edits to main's kept mode (main_modes_file)."""
+        config_rules = [f"Edit(/{f})" for f in self.config_files()]
+        perms: dict[str, list[str]] = {"deny": [f"Edit(/{main_modes_file()})", *private_rules()]}
+        if self.hosted:
+            perms["ask"] = config_rules
+        else:
+            perms["deny"] += config_rules
         rules = [f"Bash({r})" for r in install_rules()]
         if self.installs == "ask" and self.hosted:
-            perms["ask"] = rules
+            perms["ask"] = [*perms.get("ask", []), *rules]
         elif self.installs != "allow":
             perms["deny"] += rules
         if self.bash_asks:
@@ -762,14 +785,18 @@ class Session:
         return self.installs != "allow"
 
     def may_ask(self) -> bool:
-        """Whether a call can go to the analyst whatever the permission mode (verdict)."""
-        return self.installs != "allow" or self.bash_asks or self.data == "ask"
+        """Whether a call can go to the analyst whatever the permission mode (verdict): in any session somebody answers,
+        since an edit of the config's files always does."""
+        return self.hosted or self.installs != "allow" or self.bash_asks or self.data == "ask"
 
     def verdict(self, tool: str, inp: Any) -> str:
         """`deny` or `ask` when the config refuses a call or sends it to the analyst whatever the permission mode: an
-        edit of the corpus by `data`; for a Bash call, an install command by `installs`, or refused when offline, and,
-        when bash_asks, any other command; `own` for one of the session's own commands then, which runs unasked; ''
-        for any other call."""
+        edit of the config's files (module note, edits of the config), refused in a session nobody answers; an edit of
+        the corpus by `data`; for a Bash call, an install command by `installs`, or refused when offline, and, when
+        bash_asks, any other command; `own` for one of the session's own commands then, which runs unasked; '' for any
+        other call."""
+        if self.edits_config(tool, inp):
+            return "ask" if self.hosted else "deny"
         if self.data != "allow" and self.edits_corpus(tool, inp):
             return "deny" if self.data == "off" else "ask"
         command = inp.get("command") if tool == "Bash" and isinstance(inp, dict) else None
@@ -782,8 +809,10 @@ class Session:
         return ""
 
     def ask_cause(self, tool: str, inp: Any) -> str:
-        """What makes verdict() send a call to the analyst: `data` for an edit of the corpus, `installs` for an install
-        command, `commands` for any other command while bash_asks."""
+        """What makes verdict() send a call to the analyst: `config` for an edit of the config's files, `data` for an
+        edit of the corpus, `installs` for an install command, `commands` for any other command while bash_asks."""
+        if self.edits_config(tool, inp):
+            return "config"
         if self.data != "allow" and self.edits_corpus(tool, inp):
             return "data"
         command = inp.get("command") if tool == "Bash" and isinstance(inp, dict) else None

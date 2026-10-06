@@ -66,9 +66,9 @@ also auto-allows Bash in the sandbox and edits in the work folder (sandbox_allow
 
 The config. thimble's config (userconf.py) adds its rules to the session's --settings (userconf.Session.settings): an
 ask or a deny of every install or download command (`installs`), the web tools allowed or taken away (`web`), auto
-memory when it is not inherited, and, where the session's network is off and its Bash runs outside the sandbox, an ask
-of every Bash command. A command that `installs` or that ask covers goes to the card in every mode, Bypass included
-(userconf.Session.verdict): Claude Code's own ask rules miss a command behind `bash -c` or a path, so in auto mode the
+memory when it is not inherited, an ask of edits to thimble's config files, and, where the session's network is off and
+its Bash runs outside the sandbox, an ask of every Bash command. A command that `installs` or that ask covers, and an
+edit of the config's files, goes to the card in every mode, Bypass included (userconf.Session.verdict): Claude Code's own ask rules miss a command behind `bash -c` or a path, so in auto mode the
 hook before each call asks for it as well, and the call it allowed is let through (`cleared`). The fence's sandbox has
 no network unless the agent's network is on, and a session whose config requires the sandbox (`sandbox.enforce`) does
 not start without it.

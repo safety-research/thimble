@@ -4,6 +4,8 @@ thimble's agents take their settings from `~/.thimble/config.json` (`$THIMBLE_HO
 
 The Settings pane writes this file for the models, efforts, fast mode and permission modes. Each change goes to the file the value came from, so a key the workspace's file sets is changed there. Edit the file by hand for everything else. A change applies to the next session an agent starts.
 
+When one of thimble's agents edits this file or a workspace's `config.json`, it asks you first, in every permission mode, Bypass and Auto included, like an edit of the corpus with `data` at `"ask"`. The permission card shows the edit, and says that thimble asks because it changes thimble's config. A session that has nobody to ask, such as an extension's program run without a chat or `thimble fix`, can't edit these files.
+
 thimble changes none of Claude Code's settings. Your own Claude Code settings still apply to every agent, and thimble's rules are added to them.
 
 ```json

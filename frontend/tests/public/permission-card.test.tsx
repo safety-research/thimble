@@ -111,6 +111,14 @@ describe('the card', () => {
     expect(w.querySelector('.chat-perm-why')?.textContent).toMatch(/every permission mode\. If nobody answers within a minute, it is declined\.$/)
   })
 
+  test("an edit of thimble's config names the config as the reason, in Bypass too", async () => {
+    const bypass = chat('or3', { permission_mode: 'bypass' })
+    const edit = req('c1', { tool: 'Edit', what: '/home/u/.thimble/config.json', asked_by: 'config', wait_s: 600 })
+    const el = await mount(<PermissionCard ws="mini" asks={[{ chat: 'or3', request: edit }]} metas={new Map([['or3', bypass]])} labels={new Map()} />)
+    expect(el.querySelector('.chat-perm-why')?.textContent).toBe(
+      "thimble asks before an agent changes thimble's config, in every permission mode. If nobody answers within 10 minutes, it is declined.")
+  })
+
   test("a code ticket's question says what it asks and why thimble asks, in Bypass too, with Allow and Deny", async () => {
     const dev = chat('d1', { role: 'dev', title: 'ticket #3: Fix the chart', permission_mode: 'bypass' })
     const what = "Apply this change to thimble's own code?"

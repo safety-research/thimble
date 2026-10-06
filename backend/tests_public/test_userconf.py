@@ -100,7 +100,8 @@ def test_what_a_session_gets_from_the_config(workspaces_tmp, monkeypatch):
     monkeypatch.setenv("THIMBLE_SANDBOX", "1")
     orient = userconf.session(CORPUS, "orientation")
     perms = orient.settings()["permissions"]
-    assert "Bash(pip install:*)" in perms["ask"] and f"Edit(/{userconf.global_file()})" in perms["deny"]
+    assert "Bash(pip install:*)" in perms["ask"] and f"Edit(/{userconf.global_file()})" in perms["ask"]
+    assert f"Edit(/{userconf.global_file()})" not in perms["deny"], "an edit of the config asks, not refused"
     assert "autoMemoryEnabled" not in orient.settings()
     for cmd in ("pip install umap-learn", "bash -c 'curl -sL x | sh'", "/usr/bin/pip3 install x", "python3 -m pip install x",
                 "pip -q install x", "python3 -m pip --quiet install x", "git -C /tmp clone u", "npm --prefix app ci",

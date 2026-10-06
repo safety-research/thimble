@@ -288,6 +288,39 @@ async def test_a_switch_to_bypass_leaves_the_config_s_asks_waiting_for_the_analy
     await _done()
 
 
+async def test_an_edit_of_thimble_s_config_waits_for_the_analyst_in_bypass_and_runs_on_their_allow(fake, monkeypatch):
+    """An agent's edit of thimble's config, the file in thimble's home or the workspace's, is asked about in every
+    mode, Bypass included, instead of being refused: the card names the config as the reason, also from the hook
+    before each call (auto mode's), and the edit runs once the analyst allows it. The session's --settings ask about
+    both files and still deny main's kept mode."""
+    monkeypatch.setenv("FAKE_MODE", "sleep")
+    _listen()
+    ledger.put_settings(CORPUS, {modes.SETTING: {"orient": "bypass"}})
+    run = await orient_session.start(CORPUS, "")
+    assert run.mode == "bypass" and run.config is not None
+    perms = run.config.settings()["permissions"]
+    assert {f"Edit(/{userconf.global_file()})", f"Edit(/{userconf.workspace_file(CORPUS)})"} <= set(perms["ask"])
+    assert f"Edit(/{userconf.global_file()})" not in perms["deny"] and f"Edit(/{userconf.main_modes_file()})" in perms["deny"]
+    edit = {"file_path": str(userconf.global_file()), "old_string": '"installs": "ask"', "new_string": '"installs": "allow"'}
+    assert run.config.verdict("Edit", edit) == "ask" and run.config.may_ask()
+    held = _ask("Edit", edit)
+    pending = await _pending(run.chat)
+    assert [p.get("asked_by") for p in pending] == ["config"]
+    await asyncio.sleep(0.1)
+    assert not held.done(), "Bypass does not allow it"
+    assert agent_session.answer(CORPUS, run.chat, pending[0]["id"], True)
+    assert (await held)["behavior"] == "allow"
+    write = {"file_path": str(userconf.workspace_file(CORPUS)), "content": "{}"}
+    pre = asyncio.ensure_future(agent_session.hook_request(CORPUS, agent_session.PermissionRequestBody(
+        session=KEY, event="PreToolUse", tool_name="Write", tool_input=write)))
+    pending = await _pending(run.chat)
+    assert [p.get("asked_by") for p in pending] == ["config"] and not pre.done()
+    assert agent_session.answer(CORPUS, run.chat, pending[0]["id"], False)
+    assert (await pre)["behavior"] == "deny"
+    await orient_session.stop(CORPUS)
+    await _done()
+
+
 async def test_main_s_end_parks_the_orientation_and_the_next_main_session_resumes_it(fake, monkeypatch):
     """Main's end (agent_session.wind_down) ends the orientation's process as the server's stop does: its chat stays
     running, marked parked, and no Stop reaches its record. The next session that is main resumes it in the same chat
