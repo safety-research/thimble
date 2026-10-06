@@ -1440,6 +1440,8 @@
   min-height: 0;
   overflow: auto;
   scrollbar-width: none;
+  /* the reader anchors its scroll itself, the same in every browser (anchor.ts): the browser's own would correct twice */
+  overflow-anchor: none;
 }
 /* columns past the right edge of the body: the paper fades in over the last 32px */
 .reader-edge {
@@ -1710,7 +1712,9 @@
   padding: 10px 20px 10px 12px;
   border-bottom: 1px solid rgba(var(--ink-rgb), 0.07);
 }
-/* records out of sight are neither laid out nor painted, so a resize or scroll reflows only those near the view */
+/* records out of sight are neither laid out nor painted, so a resize or scroll reflows only those near the view; the
+   records within a body's height and a half of the view are drawn ahead of it (anchor.ts data-near), so their real
+   heights replace the estimates out of sight, where the reader's scroll anchor makes up for them */
 .reader-record {
   content-visibility: auto;
   contain-intrinsic-size: auto 160px;
@@ -1718,6 +1722,10 @@
 .reader-line {
   content-visibility: auto;
   contain-intrinsic-size: auto 24px;
+}
+.reader-record[data-near],
+.reader-line[data-near] {
+  content-visibility: visible;
 }
 /* the label gutter (views/common.tsx LaneGutter): a --lane-w column per label that is on, filled in the record's class
    colour; the line number moves right past it */

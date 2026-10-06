@@ -19,6 +19,7 @@ import { failureText, ReportProblemButton } from '../shell/ProblemReport'
 import { clearMatches, firstMatchFrom, lineAsked, markMatches, markSpots, matchCount, matchNumber, stepInLine, stepMatch, unfoldAt, type MatchAt } from './find'
 import { countsOf, FindBar, useSourceFind } from './FindBar'
 import { classesOf, colourVar, laneTags, litClass, marksOf, valueOf } from './labels'
+import { useScrollAnchor } from './anchor'
 import { ReaderLabelsContext, useReaderLabels } from './marks'
 import { FIND_MARK, findColumn, ReaderRuler, rulerColumns, useRuler, type LensTick, type RulerTick, type Seen, type Shown } from './Ruler'
 import { fmtSize } from './Tree'
@@ -657,7 +658,6 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
   const bodyRef = useRef<HTMLDivElement | null>(null)
   const recordsRef = useRef(records)
   recordsRef.current = records
-  const pendingScroll = useRef<{ h: number; t: number } | null>(null)
   // a page is being read: the scroll, the fill below and a resize can each ask for the next page in the same frame,
   // before the `loading` they see has turned true
   const reading = useRef(false)
@@ -757,19 +757,17 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
     setShown((cur) => (sameShown(cur, next) ? cur : next))
   }, [total, first, last])
 
+  // the record at the top of the reader keeps its place while records above it change height: as they are drawn near
+  // the view, and across a page loaded above or records dropped above (hold, in loadMore)
+  const viewType = viewByType(only ?? pick)?.type ?? builtins.auto.type
+  const { hold } = useScrollAnchor(bodyRef, [records, viewType, pick])
+
   useLayoutEffect(() => {
-    const p = pendingScroll.current
-    const root = bodyRef.current
-    if (p && root) {
-      root.scrollTop = p.t + (root.scrollHeight - p.h)
-      pendingScroll.current = null
-    }
     measure()
   }, [records, measure])
 
   // the body or the view in it changed size (the reader resized, a label's column came in): measure again. A pick
   // (a file-type viewer's page in place of the body, and back) can mount a new body.
-  const viewType = viewByType(only ?? pick)?.type ?? builtins.auto.type
   useEffect(() => {
     const el = bodyRef.current
     if (!el || typeof ResizeObserver === 'undefined') return
@@ -849,8 +847,7 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
         if (dir === 'earlier') {
           const start = Math.max(1, f - PAGE)
           const page = await api.source(workspace, path, start, f - start)
-          const root = bodyRef.current
-          pendingScroll.current = root ? { h: root.scrollHeight, t: root.scrollTop } : null
+          hold()
           setRecords((c) => {
             const merged = [...page.records, ...c]
             return merged.length > CAP ? merged.slice(0, CAP) : merged
@@ -859,6 +856,8 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
         } else {
           const page = await api.source(workspace, path, l + 1, PAGE)
           if (!page.records.length) dryAfter.current = l
+          // records dropped from the start are above the view
+          if (recordsRef.current.length + page.records.length > CAP) hold()
           setRecords((c) => {
             const merged = [...c, ...page.records]
             return merged.length > CAP ? merged.slice(merged.length - CAP) : merged
@@ -872,7 +871,7 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
         setLoading(false)
       }
     },
-    [workspace, path, loading, total, takeTotal],
+    [workspace, path, loading, total, takeTotal, hold],
   )
 
   const frame = useRef<number | null>(null)
