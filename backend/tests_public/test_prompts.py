@@ -228,10 +228,12 @@ def test_no_prompt_describes_what_went_with_the_headless_agents():
 
 
 def test_main_and_the_orientation_say_how_subagents_end_and_start(monkeypatch):
-    """main.md tells main to answer a hand-back of one of thimble's agents in one short line, and orient.md tells the
-    orientation to start its own subagents as thimble:helper."""
+    """main.md tells main to answer a hand-back of one of thimble's agents in one short line, and to write that line
+    for a task notification that follows a report it answered too, since a turn without text makes Claude Code ask
+    again (a turn more); orient.md tells the orientation to start its own subagents as thimble:helper."""
     monkeypatch.delenv("THIMBLE_PROMPTS_DIR", raising=False)
-    assert any("hands back" in line and "one short line" in line for line in prompts.load("main").splitlines())
+    [line] = [line for line in prompts.load("main").splitlines() if "hands back" in line and "one short line" in line]
+    assert "task notification comes after a report" in line and "Always write this line" in line
     assert "thimble:helper" in prompts.load("orient")
 
 
