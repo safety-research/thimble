@@ -112,6 +112,10 @@ RESUME = "restore"  # /thimble restore [<archive>]: an archive restored in its p
 ALIASES = {"resume": RESUME}  # another name the action takes
 OPENING = ("", "on", FRESH, RESUME)  # the actions that open the workspace (and arm the Monitor where hooks are off)
 RESUME_LINE = "thimble: resuming the dashboard from your last run; `/thimble fresh` starts over"
+# /thimble in a session new to a workspace `thimble demo` installed from a pre-cache, which then gives the session what
+# the orientation left as context (precached.py)
+PRECACHED_LINE = ("thimble: opening the orientation that ran in advance on these files; this session starts fresh, "
+                  "from its cards and report; `/thimble fresh` starts over")
 # what /thimble prints in place of the link, which carries the ui_key and so is kept out of the model's context: main's
 # Stop hook shows it under the reply (leave_link, plugin/bin/.thimble-watch)
 LINK_LINE = "thimble: the dashboard link is under this reply (or run `thimble up` in a shell)"
@@ -1281,6 +1285,23 @@ def resumes(url: str, name: str | None) -> bool:
     if status != 200 or not isinstance(body, dict):
         return False
     return any(body.get(k) for k in HELD_KEYS)
+
+
+def precached_context(url: str, name: str, session: str) -> str:
+    """What a session new to a workspace installed from a pre-cache starts from (`POST /api/ws/{c}/precached/context`,
+    precached.take_context): the orientation's cards, views and documents; '' for any other workspace or session, or
+    when the server does not answer. A failure is logged, never raised."""
+    try:
+        status, body = _request("POST", f"{url}/api/ws/{urllib.parse.quote(name)}/precached/context",
+                                {"session": session}, timeout=30.0)
+    except Exception as e:  # noqa: BLE001 — never a traceback in the skill text
+        _log(f"pre-cached context of {name}: {type(e).__name__}: {e}")
+        return ""
+    if status != 200 or not isinstance(body, dict):
+        if status not in (0, 404):
+            _log(f"pre-cached context of {name}: {status} {str(body)[:200]}")
+        return ""
+    return str(body.get("text") or "")
 
 
 def archive_workspace(url: str, name: str) -> tuple[bool, str | None]:
@@ -2595,6 +2616,7 @@ def cmd_ensure(args: argparse.Namespace) -> int:
             print(ARCHIVES_LINE.format(names=", ".join(found)) if found else NO_ARCHIVES_LINE)
         return 0
     mark: list[str] = []
+    given = ""  # the pre-cache's context, for a session new to a workspace installed from one (precached_context)
     if may_register and name is None:
         print(REGISTER_FAILED_LINE.format(path=cwd, log=log_path()))
     else:
@@ -2605,7 +2627,8 @@ def cmd_ensure(args: argparse.Namespace) -> int:
         elif action == RESUME:
             second = resume_lines(url, name, archive)
         else:
-            second = [RESUME_LINE] if not opened and resumes(url, name) else []
+            given = precached_context(url, name, str(args.session)) if name and args.session else ""
+            second = [PRECACHED_LINE] if given else [RESUME_LINE] if not opened and resumes(url, name) else []
         folder = untrusted(Path(env["workspaces_dir"]))
         warn = UNTRUSTED_LINE.format(folder=folder, command=trust_command()) if folder else ""
         # with the plugin's hooks off no Stop hook shows the link, so the page opens without the key; the terminal
@@ -2642,6 +2665,9 @@ def cmd_ensure(args: argparse.Namespace) -> int:
                 print(warning)
     for line in notices + mark:
         print(line)
+    if given:
+        print("")
+        print(given)
     return 0
 
 

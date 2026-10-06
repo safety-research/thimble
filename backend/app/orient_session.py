@@ -47,7 +47,9 @@ terminal shows in its agent tray.
 Follow-ups. Messages from main's `message_orientation` tool or the thread's composer go through message(): a finished
 orientation's session is resumed with the message in `## orient-follow-up`; a message sent while a run goes waits in the
 record's `queue`. A follow-up's cards land in place as one undo batch; when it changes a card the report cites, the
-report pass runs again as a revision. When Claude Code has deleted the session's transcript, message() raises Gone.
+report pass runs again as a revision. When Claude Code has deleted the session's transcript, message() raises Gone,
+and for an orientation `thimble demo` installed from a pre-cache, whose session was not kept, Precached
+(precached.py).
 An orientation an extension's program runs takes a follow-up by running again with it (_program_follow_up); Settings'
 Run now for an extension whose program runs the orientation runs it again with the latest orientation's request and
 the cards as they stand (run_program_now).
@@ -65,8 +67,8 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from . import (agent_session, agents, bg_session, cc_settings, config, ledger, orient_checks, orientation, prompts,
-               tools, userconf, work_files)
+from . import (agent_session, agents, bg_session, cc_settings, config, ledger, orient_checks, orientation, precached,
+               prompts, tools, userconf, work_files)
 
 log = logging.getLogger("thimble.orient_session")
 router = APIRouter()
@@ -437,6 +439,10 @@ async def message(c: str, text: str, by: str = MAIN, call: str | None = None, ex
     text = str(text or "").strip()
     if not text:
         raise ValueError("the message is empty")
+    if precached.is_precached_run(orientation.read_run(c)):
+        raise precached.Precached("this orientation ran in advance and its session was not kept, so it cannot "
+                                  "continue; attach a session (it starts from the cards and the report) or start a new "
+                                  "orientation")
     program = await _program_follow_up(c, text, call)
     if program is not None:
         return program
@@ -876,6 +882,8 @@ async def tool_message_orientation(ctx: Any, args: dict[str, Any]) -> Any:
         return tools.err(tools.hint("message_orientation-empty"))
     except NoOrientation:
         return tools.err(tools.hint("message_orientation-none"))
+    except precached.Precached:
+        return tools.err(tools.hint("message_orientation-precached"))
     except Gone:
         return tools.err(tools.hint("message_orientation-gone"))
     except RuntimeError as e:
@@ -903,6 +911,8 @@ async def message_route(c: str, body: MessageBody) -> dict[str, Any]:
         raise HTTPException(400, str(e)) from e
     except NoOrientation as e:
         raise HTTPException(404, str(e)) from e
+    except precached.Precached as e:
+        raise HTTPException(409, str(e)) from e
     except Gone as e:
         raise HTTPException(410, f"{e}; start a new orientation to explore further") from e
     except RuntimeError as e:

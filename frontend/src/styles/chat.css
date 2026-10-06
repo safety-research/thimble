@@ -1732,3 +1732,63 @@ button.model-line-part[aria-expanded='true'] {
 .chat-apierr-retry {
   flex: none;
 }
+
+/* a workspace installed from a pre-cache (chat/Precached): the card at the top of the orientation's thread, and the
+   bar that stands in for the composer while no session was ever attached; the command in mono on the track's wash,
+   as the reconnect card shows it (shell-gone-command) */
+.precached-card,
+.precached-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.precached-card .card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.precached-bar {
+  padding: 10px 12px;
+  border: 1px solid var(--border-hairline);
+  border-radius: var(--radius-card);
+  background: var(--surface-card);
+}
+.precached-text {
+  margin: 0;
+  color: var(--text-secondary);
+  font: var(--type-body);
+}
+.precached-note {
+  margin: 0;
+  color: var(--text-tertiary);
+  font: var(--type-body-sm);
+}
+.precached-actions {
+  display: flex;
+  gap: 8px;
+}
+.precached-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.precached-command {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 6px 6px 10px;
+  border-radius: var(--radius-ui);
+  background: var(--track-bg);
+}
+.precached-command code {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--text-primary);
+  font: var(--type-mono);
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+.precached-note code {
+  font: var(--type-mono);
+  color: var(--text-secondary);
+}

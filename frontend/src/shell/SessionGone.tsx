@@ -2,12 +2,15 @@
 // shell is greyed out and inert under a scrim and one card (portaled to the body, with every other body layer inert
 // too) that gives the command to reconnect. The sessions thimble started go on without main, so the permission card
 // with their requests shows under it, where it can be answered. It goes when a session attaches, and is not shown while
-// the stream is down. A session that takes main over from another terminal is followed at once, with a toast.
+// the stream is down. A session that takes main over from another terminal is followed at once, with a toast. A
+// workspace `thimble demo` installed from a pre-cache is read without a session until the first attaches, so the card
+// waits for that session's end there (chat/Precached offers the attach command in the orientation's thread).
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { ThreadsContext } from '../chat/Notes'
 import { PermissionCard } from '../chat/PermissionCard'
 import { pendingRequests } from '../chat/permissions'
+import { precachedMark } from '../chat/Precached'
 import { pickItems, threadLabels } from '../chat/threads'
 import { useChatMetas } from '../chat/waiting'
 import { Button } from '../components/Button'
@@ -69,9 +72,10 @@ function Wrapped({ text }: { text: string }) {
   )
 }
 
-/** Whether main's meta, once loaded, has no session attached while the stream is up. Pure. */
-export function isGone(main: ChatMeta | null | undefined, streamUp: boolean): boolean {
-  return !!main && !main.attached && streamUp
+/** Whether main's meta, once loaded, has no session attached while the stream is up; in a pre-cached workspace, only
+ * once a session attached and ended. Pure. */
+export function isGone(main: ChatMeta | null | undefined, streamUp: boolean, precached = false): boolean {
+  return !!main && !main.attached && streamUp && !(precached && !main.ended)
 }
 
 /** Whether main's session is `session`, which took main from `after` in another terminal, while this tab followed
@@ -86,6 +90,7 @@ export function useSessionGone(ws: string): Gone | null {
   const [up, setUp] = useState(true)
   const [due, setDue] = useState(false)
   const [corpus, setCorpus] = useState<CorpusInfo | null>(null)
+  const [precached, setPrecached] = useState(false)
   const followed = useRef<string | null>(null)
   useEffect(() => {
     let alive = true
@@ -93,7 +98,11 @@ export function useSessionGone(ws: string): Gone | null {
     const load = () =>
       api
         .chats(ws)
-        .then((list) => alive && setMain(list.find((m) => m.kind === 'main') ?? null))
+        .then((list) => {
+          if (!alive) return
+          setMain(list.find((m) => m.kind === 'main') ?? null)
+          setPrecached(!!precachedMark(list))
+        })
         .catch(() => undefined)
     void load()
     api
@@ -117,7 +126,7 @@ export function useSessionGone(ws: string): Gone | null {
       if (timer != null) window.clearTimeout(timer)
     }
   }, [ws])
-  const gone = isGone(main, up)
+  const gone = isGone(main, up, precached)
   useEffect(() => {
     setDue(false)
     if (!gone) return
