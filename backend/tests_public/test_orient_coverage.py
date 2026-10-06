@@ -185,6 +185,22 @@ def test_a_file_made_from_the_corpus_outside_it_counts_as_the_lines_it_came_from
     assert _seen(chat) == {"board.jsonl": {1, 2, 4, 6}, "events.jsonl": {2, 3}}
 
 
+def test_a_line_found_in_a_file_the_call_names_by_path_counts_there_alone(chat):
+    """A query whose table shares a folder's name (`... from agents`) names that folder's files too, but the PR title it
+    printed from forge.db, which agent-01's transcript also holds, counts as a row of forge.db alone; text a command
+    printed from agent-02's transcript counts in agent-02's, though agent-01's holds it too."""
+    root = config.corpus_dir(CORPUS)
+    _bash(chat, 1, f"sqlite3 {root}/forge.db 'select title from prs where number = 7101; select count(*) from agents'",
+          "Document the two line-break modes\n3")
+    got = _seen(chat)
+    assert set(got) == {"forge.db"} and len(got["forge.db"]) == 1
+    line = next(n for n, x in enumerate(_lines("agents/agent-02.jsonl"), 1) if "Clarify the width parameter" in x)
+    _bash(chat, 2, f"cd {root} && sed -n {line}p agents/agent-02.jsonl | grep -o 'Clarify the width parameter[^\"]*'",
+          "Clarify the width parameter")
+    got = _seen(chat)
+    assert got["agents/agent-02.jsonl"] == {line} and "agents/agent-01.jsonl" not in got
+
+
 def test_a_line_found_in_more_files_than_shared_max_counts_in_none(chat, monkeypatch):
     """Text that many of the named files hold, such as a field's name, identifies no record."""
     root = config.corpus_dir(CORPUS)

@@ -27,7 +27,9 @@ agents', never a critique's) count, each by what its stored output (calls.py) sh
   any other    each line of its output (SEEN_CHARS at most, as much as Claude Code shows of a Bash output) that is a
                line of a file the call's input names (by path, folder or wildcard; for add_card and edit_card also the
                files the card's code read), or a long enough piece of one, such as a field a script printed or a cell
-               of a table; a line found in more than SHARED_MAX of those files counts in none
+               of a table; a line found in a file the call names by its own path (or a wildcard) counts there alone,
+               not in the other files of a folder the call also names, and a line found in more than SHARED_MAX of the
+               files counts in none
   a file made  a call that reads a file outside the corpus (a Read, cat, grep, ...) by its absolute path counts as
                above against the corpus files named by the calls whose input gave that path, its folder or a path in
                it: a dump the orientation wrote of agents/a.jsonl into work/dumps/ and read there counts as lines of
@@ -36,7 +38,9 @@ agents', never a critique's) count, each by what its stored output (calls.py) sh
 
 So a command that only counts or lists (wc, ls, find, grep -c) shows no line of a file and counts nothing. The search
 reads each file up to LINE_SCAN_BYTES for whole lines and PIECE_SCAN_BYTES for pieces, within LINE_SCAN_TOTAL and
-PIECE_SCAN_TOTAL in all, so in a very large corpus the line can count less than was seen. The orientation's end adds it
+PIECE_SCAN_TOTAL in all, so in a very large corpus the line can count less than was seen. It can count more where the
+files a call names hold the same text: a line found in up to SHARED_MAX of them counts in each, so a file that repeats
+another's records (a table exported as JSON Lines, both named) counts as seen with it. The orientation's end adds it
 to its transcript (orient_session.measure), and a critique's first message gives it in place of the unread line. A
 file's lines or records are records.count's, estimated from its bytes past COUNT_BYTES (`~`).
 """
@@ -284,11 +288,11 @@ def _orientation_chats(c: str, chat: str) -> set[str]:
     return out
 
 
-def _read_by_calls(text: str, corpus: Path, files: set[str]) -> set[str]:
+def _read_by_calls(text: str, corpus: Path, files: set[str], by_path: set[str] | None = None) -> set[str]:
     """The corpus files a call's text names: a file by its corpus-relative or absolute path filling whole components of
     a run of path characters, and every file under a folder named the same way, as a bare word too (`os.listdir('runs')`).
     A path holding other characters (a space) is searched for in the whole text instead. A wildcard pattern's files are
-    _globbed's."""
+    _globbed's. `by_path`, when given, gets the files named by their own path alone."""
     if not text:
         return set()
     root = str(corpus.resolve()).rstrip("/") + "/"
@@ -308,6 +312,8 @@ def _read_by_calls(text: str, corpus: Path, files: set[str]) -> set[str]:
         return _PATH_RE.fullmatch(path) is not None
 
     out = {f for f in files if (f in spans if plain(f) else f in text)}
+    if by_path is not None:
+        by_path.update(out)
     folders = {os.path.dirname(f) for f in files} - {""}
     named = {d for d in folders
              if (d in heads if plain(d) else re.search(rf"(?<![\w./-]){re.escape(d)}(?:/|(?![\w.-]))", text))}
@@ -590,12 +596,14 @@ def _share(n: float, total: float) -> str:
 @dataclass
 class _Shown:
     """One line of a call's output: the call, the forms in which it may be a file's line whole, its pieces as searched
-    for (_pieces), and the files the call names."""
+    for (_pieces), and the files it may be a line of: those the call names, by path, folder or wildcard, and those it
+    reads a file made from."""
 
     call: int
     wholes: tuple[bytes, ...]
     pieces: tuple[bytes, ...]
     files: tuple[str, ...]
+    direct: frozenset[str] = frozenset()  # of `files`, those the call names by their own path or a wildcard
 
 
 def _read_shown(row: dict[str, Any], rel: str, reader: str | None) -> set[int]:
@@ -629,18 +637,20 @@ def _pieces(line: str) -> tuple[bytes, ...]:
     return tuple(out)
 
 
-def _shown_lines(k: int, text: str, files: set[str]) -> Iterator[_Shown]:
-    """The output lines of call `k` (SEEN_CHARS and SEEN_LINES at most) that may be lines of `files`."""
+def _shown_lines(k: int, text: str, files: set[str], direct: set[str] = frozenset()) -> Iterator[_Shown]:
+    """The output lines of call `k` (SEEN_CHARS and SEEN_LINES at most) that may be lines of `files`, of which the call
+    names `direct` by their own path."""
     if not files:
         return
     names = tuple(sorted(files))
+    direct = frozenset(direct)
     for line in text[:SEEN_CHARS].split("\n")[:SEEN_LINES]:
         line = line.rstrip("\r")
         bare = _LINE_PREFIX_RE.sub("", line, count=1)
         wholes = tuple(dict.fromkeys(x.encode("utf-8", "replace") for x in (line, bare) if len(x.strip()) >= LINE_MIN))
         pieces = _pieces(bare)
         if wholes or pieces:
-            yield _Shown(k, wholes, pieces, names)
+            yield _Shown(k, wholes, pieces, names, direct)
 
 
 def _whole_hits(corpus: Path, shown: list[_Shown], sizes: dict[str, int]) -> dict[int, dict[str, int]]:
@@ -762,7 +772,8 @@ def _seen(c: str, corpus: Path, sizes: dict[str, int], chats: set[str]) -> dict[
     seen: dict[str, set[int]] = {}
     shown: list[_Shown] = []
     made: dict[str, set[str]] = {}  # {a path outside the corpus: the corpus files the calls whose input gave it name}
-    rows: list[tuple[int, str, set[str], set[str]]] = []  # (call, its output, files it names, paths outside it gives)
+    # (call, its output, files it names, those by their own path or a wildcard, paths outside the corpus it gives)
+    rows: list[tuple[int, str, set[str], set[str], set[str]]] = []
     for k, row in enumerate(_own_calls(c, chats)):
         # a call that printed nothing (a script writing a dump) still names the files it made one from
         result = "" if row.get("is_error") or not isinstance(row.get("result"), str) else row["result"]
@@ -773,27 +784,35 @@ def _seen(c: str, corpus: Path, sizes: dict[str, int], chats: set[str]) -> dict[
             if rel in files and result:
                 seen.setdefault(rel, set()).update(_read_shown(row, rel, records.reader_of(corpus / rel, rel)))
             elif result and not rel:
-                rows.append((k, result, set(), _outside(str(inp.get("file_path") or ""), root)))
+                rows.append((k, result, set(), set(), _outside(str(inp.get("file_path") or ""), root)))
             continue
         text = json.dumps(inp, ensure_ascii=False, default=str)
-        named = _read_by_calls(text, corpus, files) | _globbed(text, files)
+        direct: set[str] = set()
+        globbed = _globbed(text, files)
+        named = _read_by_calls(text, corpus, files, direct) | globbed
+        direct |= globbed
         if name in ("add_card", "edit_card"):
             for cid in _CARD_RE.findall(result[:SEEN_CHARS]):
-                named.update(r for r in cards.get(cid, ()) if r in files)
+                read = {r for r in cards.get(cid, ()) if r in files}
+                named |= read
+                direct |= read
         outside = _outside(text, root)
         for p in outside if named else ():
             made.setdefault(p, set()).update(named)
         if result:
-            rows.append((k, result, named, outside))
-    for k, result, named, outside in rows:
+            rows.append((k, result, named, direct, outside))
+    for k, result, named, direct, outside in rows:
         derived = {f for p, fs in made.items() if any(_nested(p, q) for q in outside) for f in fs} if outside else set()
         for m in _SAVED_RE.finditer(result[:SEEN_CHARS]):
             made.setdefault(os.path.normpath(m.group(1)), set()).update(named | derived)
-        shown.extend(_shown_lines(k, result, named | derived))
+        shown.extend(_shown_lines(k, result, named | derived, direct))
     whole = _whole_hits(corpus, shown, sizes)
     offsets: dict[str, set[int]] = {}
 
-    def credit(hits: dict[str, int], into: dict[str, set[int]]) -> bool:
+    def credit(hits: dict[str, int], into: dict[str, set[int]], direct: frozenset[str]) -> bool:
+        # a line found in a file the call names by its own path came from there, not from the other files that hold
+        # it under a folder the call named (`sqlite3 forge.db "select * from agents"` names agents/ too)
+        hits = {f: at for f, at in hits.items() if f in direct} or hits
         if not 1 <= len(hits) <= SHARED_MAX:
             return False
         for f, at in hits.items():
@@ -802,7 +821,7 @@ def _seen(c: str, corpus: Path, sizes: dict[str, int], chats: set[str]) -> dict[
 
     left: dict[int, list[int]] = {}  # by call, the output lines no whole line of a file was found for
     for i, s in enumerate(shown):
-        if not credit(whole.get(i, {}), seen) and s.pieces:
+        if not credit(whole.get(i, {}), seen, s.direct) and s.pieces:
             left.setdefault(s.call, []).append(i)
     todo = []
     for ids in left.values():  # PIECES_PER_CALL of each call's lines, spread over its output
@@ -817,7 +836,8 @@ def _seen(c: str, corpus: Path, sizes: dict[str, int], chats: set[str]) -> dict[
                     wanted.setdefault(f, set()).add(shown[i].pieces[p])
         found = _piece_hits(corpus, wanted, budget, sizes)
         todo = [i for i in todo if p < len(shown[i].pieces) and not credit(
-            {f: found[(f, shown[i].pieces[p])] for f in shown[i].files if (f, shown[i].pieces[p]) in found}, offsets)]
+            {f: found[(f, shown[i].pieces[p])] for f in shown[i].files if (f, shown[i].pieces[p]) in found}, offsets,
+            shown[i].direct)]
     for f, at in offsets.items():
         seen.setdefault(f, set()).update(_line_numbers(corpus / f, at))
     return seen
