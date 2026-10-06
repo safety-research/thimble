@@ -626,6 +626,13 @@ esac
 # THIMBLE_LAUNCHED tells /thimble that main's prompt is appended already. launch-args starts the server and waits for it
 # before claude starts, so the hooks module registers thimble's agent types inside the session's start; the session
 # opens with /thimble, which opens this folder as a workspace (and starts the server if it is down).
+# Terminal mode (`thimble mode terminal`, backend/app/launch_mode.py; launch-args' mode line names it) starts the same
+# session with no server and no first prompt: launch-args starts no server and writes the hooks module's roles file, the
+# mode line names the renderer plugin (mods/thimble-term), loaded with a second --plugin-dir, and the export line names
+# what the session's processes read (THIMBLE_MODE, THIMBLE_WS, THIMBLE_HOME and the data and workspaces folders), which
+# main's --settings `env` carries too. A THIMBLE_MODE or THIMBLE_WS from the calling shell is dropped first.
+# A workspace is open in one mode at a time: while another terminal runs it in the other mode, launch-args prints why on
+# stderr and exits 3 (cli.LAUNCH_REFUSED_EXIT), and the launcher starts nothing.
 command -v claude >/dev/null 2>&1 || {
   printf 'thimble: the `claude` CLI is not on PATH. thimble runs inside Claude Code: install it (https://docs.anthropic.com/en/docs/claude-code), then run thimble again.\n' >&2
   exit 1; }
@@ -661,8 +668,11 @@ ask=()
 [ "$safe" = 0 ] || ask+=(--safe-mode)
 repo="$("$here/thimble-app-dir")"
 cwd="$PWD"
+unset THIMBLE_MODE THIMBLE_WS
 out="$(cd "$repo/backend" && THIMBLE_CALLER_CWD="$cwd" \
   "$here/thimble-python" -m app.cli launch-args ${ask[@]+"${ask[@]}"} --launcher-pid "$$" --cwd "$cwd")" || {
+  rc=$?
+  [ "$rc" != 3 ] || exit 1  # refused: launch-args said why
   printf 'thimble: could not render the session prompt (see the lines above); run `thimble doctor`\n' >&2; exit 1; }
 plugin_dir="${out%%$'\n'*}"
 rest="${out#*$'\n'}"
@@ -684,6 +694,13 @@ unset_vars="${rest%%$'\n'*}"
 rest="${rest#*$'\n'}"
 notes="${rest%%$'\n'*}"
 rest="${rest#*$'\n'}"
+mode_line="${rest%%$'\n'*}"
+rest="${rest#*$'\n'}"
+exports="${rest%%$'\n'*}"
+rest="${rest#*$'\n'}"
+mode="${mode_line%%$'\t'*}"
+renderer=""
+[ "$mode_line" = "$mode" ] || renderer="${mode_line#*$'\t'}"
 last=""
 if [ "$cont" = 1 ]; then last="${rest%%$'\n'*}"; rest="${rest#*$'\n'}"; fi
 prompt="$rest"
@@ -697,6 +714,10 @@ for a in "$@"; do case "$a" in -n | --name | --name=*) name="";; esac; done
 [ -z "$session_id" ] || tools+=(--session-id "$session_id")
 for kv in $switches; do export "$kv"; done
 for v in $unset_vars; do unset "$v"; done
+if [ -n "$exports" ]; then
+  IFS=$'\t' read -r -a export_pairs <<<"$exports"
+  for kv in "${export_pairs[@]}"; do export "$kv"; done
+fi
 if [ -n "$notes" ]; then
   IFS=$'\t' read -r -a note_lines <<<"$notes"
   for n in "${note_lines[@]}"; do printf '%s\n' "$n" >&2; done
@@ -710,6 +731,9 @@ elif [ "$cont" = 1 ]; then
 fi
 load=()
 [ -z "$plugin_dir" ] || load=(--plugin-dir "$plugin_dir")
+[ -z "$renderer" ] || load+=(--plugin-dir "$renderer")
+first=(-- /thimble)
+[ "$mode" != terminal ] || first=()
 export THIMBLE_LAUNCHED=1
 # Claude Code aborts an MCP call that sends neither a result nor progress for 30 min. The shim reports progress every
 # minute; the longer limit (4 h, in ms) covers a Claude Code that ignores it. A value the analyst set is kept.
@@ -718,4 +742,4 @@ export CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT="${CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT:-1
 # `claude` does not read the variable, and main's prompt then ends such turns with the end token (backend/app/terminal_tools.py).
 [ -z "$turn_tools" ] || export CLAUDE_CODE_TERMINAL_MCP_TOOLS="$turn_tools"
 exec claude ${load[@]+"${load[@]}"} "${tools[@]}" \
-  ${resume[@]+"${resume[@]}"} --append-system-prompt "$prompt" "$@" -- /thimble
+  ${resume[@]+"${resume[@]}"} --append-system-prompt "$prompt" "$@" ${first[@]+"${first[@]}"}
