@@ -382,3 +382,22 @@ test("a label's panel: its definition, its counts and its records with agree and
   expect(card).toContain('disagree')
   await pane.unmount()
 })
+
+test("an agent's pane shows the run it opened on, not an earlier run of the same role that ended", async ($, on) => {
+  const w = world(on)
+  // the orientation's first run ended (done, its thread o0); its second run works (o1): both are thimble:orientation
+  w.states.agents = { ...w.states.agents, rows: [{ name: 'thimble:orientation', label: 'Orientation', state: 'done', kind: 'subagent', chat: 'o0', role: 'orientation' }, { name: 'thimble:orientation', label: 'Orientation', state: 'working', kind: 'subagent', chat: 'o1', role: 'orientation' }] }
+  await start($, w)
+  const above = (await $.ui.mount(ABOVE)) as unknown as M
+  await above.press({ key: 'above-agent-open-0' })
+  await above.unmount()
+  await w.clock.settle()
+  const agent = (await $.ui.mount(PANE)) as unknown as M
+  const text = shown(await agent.drawn())
+  expect(text).toContain('working')
+  expect(text).not.toContain('done')
+  await agent.press({ key: 'agent-stop' })
+  await w.clock.settle()
+  await agent.unmount()
+  expect(w.acts.some(a => a.kind === 'stop' && a.payload.agent === 'o1')).toBe(true)
+})

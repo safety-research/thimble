@@ -814,7 +814,8 @@ async function drawAgent(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEle
   const { Box, Text, Button } = cx.els(e)
   const cols = Math.max(30, e.props.bodyColumns)
   const agents = (await cx.agents()) ?? []
-  const a = agents.find(x => x.chat === p.thread || x.name === p.agent)
+  // by its thread when the panel names one: a role's earlier run that ended (done) has the same name, and is listed first
+  const a = p.thread ? agents.find(x => x.chat === p.thread) : agents.find(x => x.name === p.agent)
   const tt: TermThread | undefined = p.thread ? (await cx.thread(p.thread)) : undefined
   const meta = tt?.meta ?? {}
   const state = a ? a.state : str(meta.status) || 'done'
