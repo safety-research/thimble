@@ -31,7 +31,7 @@ import { findProposal, refreshProposals, useProposals } from '../lib/proposals'
 import { readStorage, storageKey, writeStorage } from '../lib/workspace'
 import { Composer } from './Composer'
 import { mainEffort, mainFast, NEXT_LAUNCH } from './ModelLine'
-import { API_ERROR_KIND, apiRetry, branchIndex, capacityNote, foldRecords, isFollowUpRow, madeBy, mainSkips, orientRuns, orientSummaries, orientWriters, QUIET_RE, sessionSteps, stepEnded, toolSteps, withApiErrors, withBranches, withCallNumbers, type MainContext, type Row, type ShotRow } from './model'
+import { API_ERROR_KIND, apiRetry, branchIndex, capacityNote, foldRecords, landedTexts, madeBy, mainSkips, orientRuns, orientSummaries, orientWriters, QUIET_RE, sessionSteps, stepEnded, toolSteps, withApiErrors, withBranches, withCallNumbers, type MainContext, type Row, type ShotRow } from './model'
 import { Holds, useRetryText } from './Holds'
 import { TicketStatus, useTicket } from './TicketStatus'
 import { Divider, Note, ThreadChip, ThreadsContext } from './Notes'
@@ -1042,7 +1042,7 @@ function SessionView({ ws, id, chat, role, title, running, outbox = [], fromMain
   const meta = chat.meta?.id === id ? chat.meta : null
   const here = orient && !running && meta?.status === 'stopped' && meta.stopped_by === 'quit' && meta.continue === 'here'
   // a message sent from here is shown until the log holds it (a follow-up's first record)
-  const landed = new Set(chat.rows.filter(isFollowUpRow).map((r) => r.text.trim()))
+  const landed = landedTexts(chat.rows)
   const sending = outbox.filter((m) => !landed.has(m.text.trim()))
   return (
     <>

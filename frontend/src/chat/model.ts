@@ -1417,6 +1417,14 @@ export const stepEnded = (s: { state?: StepState }): boolean => s.state !== 'run
  * record that says so by its event or its run, which the orientation's first message never does. Pure. */
 export const isFollowUpRow = (r: Row): r is UserRow => r.kind === 'user' && (r.event === 'orient-follow-up' || (typeof r.run === 'number' && r.run > 0))
 
+/** The texts of the analyst's messages a thread's log holds, by which the browser stops showing one it sent as on its
+ * way: a follow-up's first record (isFollowUpRow), or a message thimble's browser passed on (`by` browser), which the
+ * server records as it sends it (orient_session._show_message) with no `run`, since a message to a running
+ * orientation starts none. Pure. */
+export function landedTexts(rows: readonly Row[]): Set<string> {
+  return new Set(rows.filter((r): r is UserRow => r.kind === 'user' && (r.by === 'browser' || isFollowUpRow(r))).map((r) => r.text.trim()))
+}
+
 /** The latest time a row of `rows` carries (a message, a call, its result, a step's start); null when none does. Pure. */
 export function lastRowTs(rows: readonly Row[]): string | null {
   let best: string | null = null
