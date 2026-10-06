@@ -506,8 +506,8 @@ test('a verification that recomputed the place link words name is ✓; another p
   await clickCite(ui, 'para-1')
   await ui.unmount()
   let pane = (await $.ui.mount(PANE)) as unknown as M
-  // the head says the place resolves, once: not that a value went unchecked, nor the resolver's reason again
-  expect(await pane.find({ type: 'Text', text: /^( {2})?the place resolves$/ })).toBeDefined()
+  // the subtitle says where it was found, in words, once: not that a value went unchecked, nor the resolver's reason
+  expect(await pane.find({ type: 'Text', text: /^found in revisions\.jsonl lines 5603-5625$/ })).toBeDefined()
   expect(JSON.stringify(await pane.drawn())).not.toContain('not checked')
   await pane.press({ key: 'verify' })
   const asked = w.spawned.find(s => s.description === 'verification · checking its revisions')!
@@ -515,8 +515,9 @@ test('a verification that recomputed the place link words name is ✓; another p
   w.files.set(script, 'print("RESULT: L5603-L5625")')
   w.verifyOut = 'revisions of Main: 23\nRESULT: L5603-L5625\n'
   await pane.press({ key: 'rerun' })
-  expect(await pane.find({ type: 'Text', text: /^✓ the script recomputed L5603-L5625, as cited$/ })).toBeDefined()
-  expect(await pane.find({ type: 'Text', text: /^( {2})?the place resolves, and the verification recomputed it$/ })).toBeDefined()
+  // a place in words, never L5603-L5625
+  expect(await pane.find({ type: 'Text', text: /^✓ the script found lines 5603-5625, as cited$/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^found in revisions\.jsonl lines 5603-5625, and a script found the same lines$/ })).toBeDefined()
   await pane.unmount()
   ui = (await $.ui.mount(MESSAGE(text))) as unknown as M
   expect(JSON.stringify(await para(ui, 'para-1'))).toContain('"label":"its revisions","state":"link","mark":"✓","spin":false')
@@ -527,7 +528,7 @@ test('a verification that recomputed the place link words name is ✓; another p
   w.verifyOut = 'RESULT: L100-L120\n'
   pane = (await $.ui.mount(PANE)) as unknown as M
   await pane.press({ key: 'rerun' })
-  expect(await pane.find({ type: 'Text', text: /^× the script recomputed L100-L120, the reply cites L5603-L5625$/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^× the script found lines 100-120; the reply cites lines 5603-5625$/ })).toBeDefined()
   await pane.unmount()
   ui = (await $.ui.mount(MESSAGE(text))) as unknown as M
   expect(JSON.stringify(await para(ui, 'para-1'))).toContain('"label":"its revisions","state":"failed","mark":"×","spin":false')
@@ -536,23 +537,21 @@ test('a verification that recomputed the place link words name is ✓; another p
   expect(notes().at(-1)).toContain(', not L5603-L5625.')
 })
 
-test("the citation panel's head is never cut: what checking found wraps below the citation when it does not fit beside it", async ($, on) => {
+test("the citation panel's subtitle says what checking found in plain words, on a row of its own that wraps, never cut", async ($, on) => {
   const w = world(on)
   await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
   const ui = (await $.ui.mount(MESSAGE(REPLY))) as unknown as M
   await w.clock!.advance(200) // its citations are checked
   await clickCite(ui, 'para-2')
   await ui.unmount()
-  // the innermost Text that says it: beside the value on the title row, or a row of its own under it
-  const said = async (p: M) => {
-    const all = (await p.findAll({ type: 'Text', text: /the value is at the place/ })) as { props: { wrap?: string }; children?: unknown[] }[]
-    return all.find(t => (t.children ?? []).every(c => typeof c === 'string'))
-  }
+  // the Text row that says it, under the title
+  const said = async (p: M) => (await p.find({ type: 'Text', text: /^found on the card$/ })) as { props: { wrap?: string } } | undefined
   const wide = (await $.ui.mount(PANE)) as unknown as M
-  expect(await said(wide)).toMatchObject({ children: ['  the value is at the place'] })
+  expect(await said(wide)).toMatchObject({ props: { wrap: 'wrap' } })
+  expect(await wide.find({ type: 'Text', text: /the value is at the place/ })).toBeUndefined()
   await wide.unmount()
   const narrow = (await $.ui.mount({ plugin: 'thimble-cc-mod', component: 'Pane', requestId: 'thimble', surface: 'terminal', viewport: { columns: 50, rows: 30 }, props: { bodyColumns: 30, bodyRows: 28 } } as never)) as unknown as M
-  expect(await said(narrow)).toMatchObject({ props: { wrap: 'wrap' }, children: ['the value is at the place'] })
+  expect(await said(narrow)).toMatchObject({ props: { wrap: 'wrap' } })
   await narrow.unmount()
 })
 
@@ -795,7 +794,7 @@ test("an answer's footer keeps its problem count whole on a narrow row: its fact
 
 // ------------------------------------------------------------------------------------------------ panes
 
-test('a record panel says the place resolves, wraps the record and lights the quoted passage', async ($, on) => {
+test('a record panel says where the record was found, wraps the record and lights the quoted passage', async ($, on) => {
   const w = world(on)
   const long = `{"name": "Main", "body": "${'x'.repeat(10)} the quoted passage\\nis here ${'y'.repeat(200)}"}`
   w.files.set(`${CWD}/.thimble-cc-mod/cards/ex1.json`, JSON.stringify({ id: 'ex1', kind: 'example', question: 'Which records?', examples: [{ ref: 'pages.jsonl#L3', quote: 'the quoted passage is here', note: '' }] }))
@@ -806,12 +805,12 @@ test('a record panel says the place resolves, wraps the record and lights the qu
   await ui.unmount()
   await w.clock!.advance(200) // the queued check runs
   const pane = (await $.ui.mount(PANE)) as unknown as M
-  expect(await pane.find({ type: 'Text', text: /^( {2})?the place resolves$/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^found in pages\.jsonl line 3$/ })).toBeDefined()
   expect(await pane.find({ type: 'Text', text: /the value is/ })).toBeUndefined()
   expect(await pane.find({ type: 'Text', text: /This citation shows no value to recompute/ })).toBeDefined()
-  // the controls stand on the title row against the right edge, a block that never gives way
+  // the controls stand at the bottom, after the second rule, in a row of their own
   const row = rowOf(await pane.drawn(), 'ask')
-  expect(row?.props).toMatchObject({ flexDirection: 'row', flexShrink: 0 })
+  expect(row?.props).toMatchObject({ flexDirection: 'row' })
   expect(JSON.stringify(row)).not.toContain('no value to recompute')
   const lit = await pane.find({ type: 'Text', text: /^the quoted passage\\nis here$/ })
   expect(lit).toBeDefined()
@@ -842,9 +841,9 @@ test('a side thread about a citation, asked from its panel, shows it as its word
   // the thread replaces the Citation view in the one panel
   expect(w.opened.map(o => o.id)).toEqual(['thimble', 'thimble'])
   const pane = (await $.ui.mount(PANE)) as unknown as M
-  // its title row: what it is about, the citation as its words
-  expect(await pane.find({ type: 'Text', text: /^the citation 13403$/ })).toBeDefined()
-  expect(await pane.find({ type: 'Text', text: /^13403$/ })).toBeDefined()
+  // the threads panel with it selected: what it is about, the citation as its words, and the sentence it stands in
+  expect(await pane.find({ type: 'Text', text: /^about the citation 13403$/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^dse has 13403 of 14416 revisions\.$/ })).toBeDefined()
   expect(await pane.find({ type: 'Text', text: /\[\[/ })).toBeUndefined()
   await pane.unmount()
 })
@@ -1046,15 +1045,13 @@ test('after a resume, a refuted citation is red with ×, a failed fix keeps its 
   expect(JSON.stringify(await para(ui, 'para-3'))).toContain('"label":"1014","state":"failed","mark":"×","spin":false')
   expect(await ui.find({ type: 'Text', text: /^4 citations · 1 card$/ })).toBeDefined()
   expect(await ui.find({ type: 'Button', label: 'ask about this answer ›' } as never)).toBeDefined()
-  expect(await ui.find({ type: 'Button', label: '▶ play' } as never)).toBeDefined()
+  expect(JSON.stringify(await ui.drawn())).not.toContain('▶ play') // the player is gone
   await ui.unmount()
   // the last reply's citations are the answer's own claims, which share its verifications
   await $.command.run({ command: 'thimble-cite', args: '1' } as never)
   const pane = (await $.ui.mount(PANE)) as unknown as M
-  expect(await pane.find({ type: 'Text', text: /but the verification recomputed 5217/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^found on the card, but a script got 5217$/ })).toBeDefined()
   await pane.unmount()
-  // and /thimble-play plays it
-  expect(((await $.command.run({ command: 'thimble-play', args: '' } as never)) as { text?: string }).text).toBe('playing the last answer in the panel')
 })
 
 test('marks read back: a verification or fix its session left running is ended; the newest are kept', () => {
@@ -1130,3 +1127,4 @@ test('the citation under the pointer is inverse; its tip sits on a quiet box on 
   expect(await tipBox()).toEqual({ top: last.line - 1, bg: COLORS.tip })
   await ui.unmount()
 })
+

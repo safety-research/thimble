@@ -148,6 +148,18 @@ function foundWhere(c: Pick<Citation, 'ref'>, v: ChatVerdict | undefined): strin
   return `in ${placeWords(c.ref)}`
 }
 
+/** A verification's result in words: a place a script found (`L100-L120`, `row=12`) as `lines 100-120` or `row 12`, a
+ *  value as written. */
+function resultWords(result: string | null | undefined): string {
+  const r = String(result ?? '')
+  return /^(L\d+(-L?\d+)?|row=\d+)$/.test(r) ? placeWords(`#${r}`).trim() : r
+}
+
+/** Whether a verification checked a place (link words that show no value) rather than a value. */
+function placeRun(run: ChatVerify): boolean {
+  return run.expected !== null && run.expected !== undefined && !showsValue(run.expected) && Boolean(citedPlace(run.ref ?? ''))
+}
+
 /** What a citation's status says, in plain words (views/SPEC.md, "Words that recur"): `found on the card`, `found in
  *  revisions.jsonl line 10566`, `found in the command's output, line 1` or `not found in …`; after a verification,
  *  `…, and a script got the same number` or `…, but a script got 5,883`. It agrees with the link's colour and mark. */
@@ -165,8 +177,8 @@ function statusWords(c: Citation, v: ChatVerdict | undefined, status: string, ru
             : `found ${where}`
   if (!run) return place
   if (run.kind === 'support' && (run.state === 'verified' || run.state === 'refuted')) return `${place}; a subagent read it, and it ${run.state === 'verified' ? 'supports' : 'does not support'} the sentence`
-  if (run.state === 'verified') return `${place}, and a script got the same number`
-  if (run.state === 'refuted') return `${place}, but a script got ${run.result}`
+  if (run.state === 'verified') return `${place}, and a script ${placeRun(run) ? 'found the same lines' : 'got the same number'}`
+  if (run.state === 'refuted') return `${place}, but a script ${placeRun(run) ? 'found' : 'got'} ${resultWords(run.result)}`
   if (run.state === 'asked') return `${place}; ◌ a script is being written`
   if (run.state === 'running') return `${place}; ◌ the script runs`
   return `${place}, but the script failed`
@@ -1423,7 +1435,7 @@ async function drawReply($: Dollar, e: ResolveInput, text: string, width: number
         const { Client } = $.ui.resolve(e as ResolveInput<'AssistantMessage', 'terminal'>)
         // the card draws its own frame (card.tsx); the "?" beside its title row, under the border: a side thread about
         // the card, as a press on its title
-        push(<Client key={`${prefix}card-${n}-${card.id}`} module="./card.tsx" width={w} props={{ card, cols: w, debug, meta, menu: null }} />, ask)
+        push(<Client key={`${prefix}card-${n}-${card.id}`} module="./card.tsx" width={w} props={{ card, cols: w, debug, meta }} />, ask)
       } else push(framedCard($, e, card, w), ask)
       under(m)
       // a figure's caption: dim, right under the card's border
@@ -1449,9 +1461,9 @@ async function drawReply($: Dollar, e: ResolveInput, text: string, width: number
       const first = block.runs[0]
       const co = block.quote && first && !first.cite ? CALLOUT_RUN.exec(first.text) : null
       const para = co ? (
-        calloutRow(co[1]!.toLowerCase(), <Client key={`${prefix}para-${n}`} module="./para.tsx" width={cols - CALLOUT_W} props={{ cols: cols - CALLOUT_W, block: { ...block, quote: false, runs: [{ ...first!, text: first!.text.slice(co[0].length) }, ...block.runs.slice(1)] }, chips, ids, raws, menu: null }} />)
+        calloutRow(co[1]!.toLowerCase(), <Client key={`${prefix}para-${n}`} module="./para.tsx" width={cols - CALLOUT_W} props={{ cols: cols - CALLOUT_W, block: { ...block, quote: false, runs: [{ ...first!, text: first!.text.slice(co[0].length) }, ...block.runs.slice(1)] }, chips, ids, raws }} />)
       ) : (
-        <Client key={`${prefix}para-${n}`} module="./para.tsx" width={cols} props={{ cols, block, chips, ids, raws, menu: null }} />
+        <Client key={`${prefix}para-${n}`} module="./para.tsx" width={cols} props={{ cols, block, chips, ids, raws }} />
       )
       if (block.heading) heading = words
       const m = block.heading ? null : marked(words)
@@ -1850,7 +1862,7 @@ async function act($: Dollar, what: Act, t: Target): Promise<void> {
       if (!(await $.state.get({ ...VERDICTS, id })).value) enqueue($, [c])
       // a reply's citation is verified as the claim of its sentence in its answer, never as another answer's
       const key = t.claim && claimMap.has(t.claim) ? t.claim : id
-      // the citation panel replaces the menu and shows the verification as it runs: its script, output and outcome
+      // the citation panel shows the verification as it runs: its script, output and outcome
       await openPlace($, c, key, await quoteOf($, t))
       await askVerify($, key)
       return
@@ -2561,8 +2573,8 @@ async function drawCite($: Dollar, e: PaneEvent): Promise<RenderElement> {
       asked: `◌ a subagent is writing a script that recomputes ${clip(citeLabel(c), 60)}`,
       running: '◌ running the script',
       missing: `× not written: ${run.stderr ? `the subagent ended without writing the script: ${clip(run.stderr, 200)}` : 'there is no script'}`,
-      verified: `✓ the script got ${run.result}, as cited`,
-      refuted: `× the script got ${run.result}; the reply cites ${citedAs(run.expected, run.ref ?? c.ref)}`,
+      verified: `✓ the script ${placeRun(run) ? 'found' : 'got'} ${resultWords(run.result)}, as cited`,
+      refuted: `× the script ${placeRun(run) ? 'found' : 'got'} ${resultWords(run.result)}; the reply cites ${resultWords(citedAs(run.expected, run.ref ?? c.ref))}`,
       error: `× ${verifyError(run)}`,
       // a citation without a value, judged by a subagent that read its place (a report's "verify this section")
       ...(run.kind === 'support'
@@ -2804,7 +2816,7 @@ async function drawCard($: Dollar, e: PaneEvent): Promise<RenderElement> {
     body.push(...bottomRows($, e, cols, [<Button key="card" label="card" plain onPress={() => void openCardPane($, card.id, '')} />, rerun], [], ['r to run again', 'c for the card', 'b to go back', 'x to close']))
   } else {
     body.push(...headerEls(els, { title: card.question, cols, sub: subLine([card.kind, script ? `made by ${scriptName(script)}` : 'no script recorded', ran]) }))
-    body.push(<Client key={`pane-${id}`} module="./card.tsx" width={w} props={{ card: shownCard, cols: w, plotRows: 16, debug, meta, pane: true, menu: null }} />)
+    body.push(<Client key={`pane-${id}`} module="./card.tsx" width={w} props={{ card: shownCard, cols: w, plotRows: 16, debug, meta, pane: true }} />)
     if (script) keys.push({ key: 'script', hotkey: 's', onPress: () => void openCardPane($, card.id, 'script') })
     body.push(...bottomRows($, e, cols, script ? [<Button key="script" label="script" plain onPress={() => void openCardPane($, card.id, 'script')} />, rerun] : [], [], [...(script ? ['s for the script', 'r to run again'] : []), 'b to go back', 'x to close']))
   }
@@ -2906,7 +2918,7 @@ async function reportCard($: Dollar, e: ResolveInput, id: string, width: number,
   // off the terminal, the card in its frame as the mod draws it; on it, card.tsx draws the frame
   if (e.surface !== 'terminal' && e.surface !== 'desktop') return framedCard($, e, card, width, undefined, key)
   const { Client } = $.ui.resolve(e as ResolveInput<'Pane', 'terminal'>)
-  return <Client key={key} module="./card.tsx" width={width} props={{ card, cols: width, debug, meta: await metaOf($, id), menu: null, ...(focus ? { focus } : {}) }} />
+  return <Client key={key} module="./card.tsx" width={width} props={{ card, cols: width, debug, meta: await metaOf($, id), ...(focus ? { focus } : {}) }} />
 }
 
 /** What main (or a subagent) is told of a Bash output saved as call:<short>, so it can cite its lines. */
@@ -3550,10 +3562,6 @@ export const register: Register = on => {
 
   // ---------------------------------------------------------------------------------------------- citation panel
 
-
-  // ---------------------------------------------------------------------------------------------- the menu
-
-  // a right-click's menu: every action of the target, one row each, its hotkey first; Esc closes it
 
   // ---------------------------------------------------------------------------------------------- side thread pane
 

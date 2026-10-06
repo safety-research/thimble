@@ -15,7 +15,7 @@ import type { ChatHighlightMark } from '../types'
 import type { Focus } from './anim'
 import { focusFromRef, focusItem } from './anim'
 import { blockLayout, plainCites, richMarkdown, scriptAim } from './cite'
-import { MAX_BARS, MAX_TABLE_ROWS, cardLayout, width } from './draw'
+import { MAX_BARS, MAX_TABLE_ROWS, cardLayout, labelHead, width } from './draw'
 import type { CardData } from './draw'
 import { EMBED_RE, askPieces, citations, clip, mdPieces, parseReply } from './lib'
 
@@ -398,9 +398,11 @@ export function buttonRows(labels: readonly string[], cols: number): number {
   return rows
 }
 
-/** The rows a card takes in a report `w` columns wide: its border, its question, its params row and its layout. */
+/** The rows a card takes in a report `w` columns wide: its top and bottom border, its question and the blank row under
+ *  it, its label rows, its params row and its layout (views/SPEC.md, "The visual system", rule 11). */
 export function cardRows(card: CardData, w: number): number {
-  return 3 + (card.params?.length ? 1 : 0) + cardLayout(card, Math.max(20, w - 4), -1).lines.length
+  const inner = Math.max(20, w - 4)
+  return 4 + labelHead(card, inner).lines.length + (card.params?.length ? 1 : 0) + cardLayout(card, inner, -1).lines.length
 }
 
 const FIT_UNITS: Record<string, { field: 'rows' | 'events' | 'examples'; unit: string; cap: number }> = {

@@ -5,7 +5,7 @@ import { expect, mock, test } from 'claude-code/testing'
 import type { Mounted } from 'claude-code/testing'
 
 import { lineWidth } from '../hooks/draw'
-import { HIT_ASK, HIT_MENU, HIT_ROW, RELATED_ROWS, cutMiddle, detail, dur, fitWidths, initialState, keptColumns, namesNumber, overviewCaption, packHits, placeLabel, reduce, tabRows, viewLayout } from '../hooks/viewdraw'
+import { HIT_ASK, HIT_RECORD, HIT_ROW, RELATED_ROWS, cutMiddle, detail, dur, fitWidths, initialState, keptColumns, namesNumber, overviewCaption, packHits, placeLabel, reduce, tabRows, viewLayout } from '../hooks/viewdraw'
 import type { ViewState } from '../hooks/viewdraw'
 import { validateData, validateSpec } from '../hooks/viewspec'
 import type { ViewData, ViewSpec } from '../hooks/viewspec'
@@ -592,7 +592,7 @@ test('the hits reach the Client packed: four numbers each, flags for a row, its 
     expect([y, x0, x1]).toEqual([h.y, h.x0, h.x1])
     expect(Boolean(f! & HIT_ROW)).toBe(Boolean(h.row))
     expect(Boolean(f! & HIT_ASK)).toBe(h.act.op === 'select' || h.act.op === 'follow')
-    expect(Boolean(f! & HIT_MENU)).toBe(h.act.op === 'cite' || Boolean(h.cite))
+    expect(Boolean(f! & HIT_RECORD)).toBe(h.act.op === 'cite' || Boolean(h.cite))
   })
   // the same drawing, the same stamp; another drawing, another
   expect(packHits(viewLayout(ex.spec, ex.data, initialState(), 118, 46).hits).stamp).toBe(p.stamp)

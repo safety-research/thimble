@@ -285,7 +285,18 @@ test('a press on a card\'s label line opens the label in the panel: no card id, 
   await ui.pointer({ type: 'up', x: 12, y: 3, button: 'right', in: 'card-1-use123' } as never)
   await ui.unmount()
   expect(w.opened).toEqual(['thimble'])
-  const pane = (await $.ui.mount(PANE)) as unknown as M
+  let pane = (await $.ui.mount(PANE)) as unknown as M
+  // the examples and the cards are folded until opened (e, c)
+  const folded = shown(await pane.drawn())
+  expect(folded).toContain('what the edit is for')
+  expect(folded).not.toContain('jedoch möchten wir')
+  expect(folded).not.toContain(LABEL_CARD.question)
+  await pane.press({ key: 'hk-examples' })
+  await pane.unmount()
+  pane = (await $.ui.mount(PANE)) as unknown as M
+  await pane.press({ key: 'hk-cards' })
+  await pane.unmount()
+  pane = (await $.ui.mount(PANE)) as unknown as M
   const panel = shown(await pane.drawn())
   expect(panel).toContain('what the edit is for')
   expect(panel).toContain('13 empty replies split and asked again')

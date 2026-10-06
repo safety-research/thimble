@@ -18,9 +18,8 @@ import { onPointer, send } from './gestures'
 import type { Target } from './gestures'
 import { COLORS, paintLine } from './paint'
 
-/** `focus`: a mark to light while nothing is hovered, such as the step a story's beat names. `menu` is no longer
- *  read: a right-click does what a click does. */
-type Props = { card: CardData; cols: number; plotRows?: number; debug?: boolean; meta?: CardMeta; pane?: boolean; menu?: Target | null; focus?: Focus }
+/** `focus`: a mark to light while nothing is hovered, such as the step a story's beat names. */
+type Props = { card: CardData; cols: number; plotRows?: number; debug?: boolean; meta?: CardMeta; pane?: boolean; focus?: Focus }
 /** `cols`: the width the hover was set at; after a reflow it is stale. `act`: the param choice or label under the
  *  pointer. */
 type S = { hover: number; act: string; cols: number }

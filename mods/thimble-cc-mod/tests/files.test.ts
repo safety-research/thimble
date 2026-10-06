@@ -6,7 +6,6 @@ import { expect, mock, test } from 'claude-code/testing'
 import type { Mounted } from 'claude-code/testing'
 
 import { fileRef, recordState } from '../hooks/files'
-import { menuItems } from '../hooks/gestures'
 import { initialState, reduce, rowContext, viewLayout } from '../hooks/viewdraw'
 import { validateData, validateSpec } from '../hooks/viewspec'
 import type { ViewData, ViewSpec } from '../hooks/viewspec'
@@ -137,14 +136,6 @@ test("a side thread about a record is told the file and its line, not a view's f
   expect(about.context).toContain('in the file chat.jsonl')
   expect(about.context).toContain('The file browser (/thimble-files) shows chat.jsonl')
   expect(about.context.includes('.thimble-cc-mod/views/')).toBe(false)
-})
-
-test('the menu of a record or a citation of a file offers it in the file browser; a card or a call does not', () => {
-  const acts = (t: Parameters<typeof menuItems>[0]) => menuItems(t).map(m => m.act)
-  expect(acts({ kind: 'citation', ref: '[[12|revisions.jsonl#L4]]' })).toContain('files')
-  expect(acts({ kind: 'record', ref: 'chat.jsonl#L2', text: 'Bash' })).toContain('files')
-  expect(acts({ kind: 'citation', ref: '[[3|call:abc#L2]]' })).not.toContain('files')
-  expect(acts({ kind: 'card', cardId: 'c1' })).not.toContain('files')
 })
 
 // ------------------------------------------------------------------------------------------------ the panel

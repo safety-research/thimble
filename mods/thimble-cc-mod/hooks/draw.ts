@@ -203,27 +203,6 @@ export function shade(lines: readonly Line[], spans: readonly { line: number; x0
   })
 }
 
-/** A layout's lines with item `i` shaded as the open menu's target: the row or column the layout lights for it, or
- *  else the cells that hit it. No card calls it since round 8 (a right-click does what a click does); the Merge step
- *  deletes it. */
-export function menuShade(lay: Layout, i: number): Line[] {
-  if (i < 0) return lay.lines
-  const spans: { line: number; x0: number; x1: number }[] = []
-  lay.lines.forEach((l, y) => {
-    const w = lineWidth(l)
-    let x0 = -1
-    for (let x = 0; x <= w; x++) {
-      const on = x < w && lay.hit(x, y) === i
-      if (on && x0 < 0) x0 = x
-      if (!on && x0 >= 0) {
-        spans.push({ line: y, x0, x1: x })
-        x0 = -1
-      }
-    }
-  })
-  return shade(lay.lines, spans, COLORS.selected)
-}
-
 // ---------------------------------------------------------------------------------------- cards
 
 const EIGHTHS = ['', '▏', '▎', '▍', '▌', '▋', '▊', '▉']

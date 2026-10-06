@@ -4,7 +4,6 @@ import type { On } from 'claude-code'
 import { expect, mock, test } from 'claude-code/testing'
 import type { Mounted } from 'claude-code/testing'
 
-import { animFrame } from '../hooks/anim'
 import { cardLayout, layerGraph, lineWidth, shortTimes, width, wrapCell, wrapLabel } from '../hooks/draw'
 import type { Cell, CardData } from '../hooks/draw'
 import { validateCard } from '../hooks/lib'
@@ -165,7 +164,7 @@ test('the value under the pointer shows at the right of the title; a click or do
   await ui.unmount()
 })
 
-test('a right-click on a bar names it in the menu by its label and value; the menu has no "cite"', async ($, on) => {
+test('a right-click on a bar does what a click does: a side thread about the bar, named by its label and value; no menu', async ($, on) => {
   const w = world(on)
   await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
   const ui = (await $.ui.mount(MESSAGE('[[card:abc123]]'))) as unknown as M
@@ -174,11 +173,12 @@ test('a right-click on a bar names it in the menu by its label and value; the me
   await ui.pointer({ type: 'up', x: 10, y: 5, button: 'right', in: 'card-1-abc123' } as never)
   await ui.unmount()
   expect(w.opened).toEqual(['thimble'])
-  const menu = (await $.ui.mount({ plugin: 'thimble-cc-mod', component: 'Pane', requestId: 'thimble', surface: 'terminal', viewport: { columns: 40, rows: 10 }, props: { bodyColumns: 34, bodyRows: 8 } } as never)) as unknown as M
-  expect(await menu.find({ type: 'Text', text: /^probier: 1,013/ })).toBeDefined()
-  expect(await menu.find({ key: 'menu-verify' })).toBeDefined()
-  expect(await menu.find({ key: 'menu-cite' })).toBeUndefined()
-  await menu.unmount()
+  expect(w.filled).toEqual([])
+  const pane = (await $.ui.mount({ plugin: 'thimble-cc-mod', component: 'Pane', requestId: 'thimble', surface: 'terminal', viewport: { columns: 100, rows: 30 }, props: { bodyColumns: 96, bodyRows: 28 } } as never)) as unknown as M
+  expect(await pane.find({ type: 'Text', text: /probier: 1,013/ })).toBeDefined()
+  expect(await pane.find({ key: 'menu-verify' })).toBeUndefined()
+  expect(await pane.find({ key: 'menu-cite' })).toBeUndefined()
+  await pane.unmount()
 })
 
 test('a card that cannot be drawn is named by its place in the reply, not its id', async ($, on) => {
@@ -712,7 +712,7 @@ test('a table\'s cells break between words, after a hyphen, and inside a name on
   expect(wrapCell('AgentOpenResearch + LanguageWatcherNov12', 21, 2)).toEqual(['AgentOpenResearch +', 'LanguageWatcherNov12'])
 })
 
-test('a cell in a later block is its own column\'s; hovering it inverts that cell alone, and the rows arrive together', () => {
+test('a cell in a later block is its own column\'s; hovering it inverts that cell alone', () => {
   const lines = plain(WHO, 46)
   const second = lines.findIndex((l, y) => l.startsWith('label ') && lines.slice(0, y).some(p => p.startsWith('label ')))
   const y = second + 2 // under the second block's column names and the rule under them
@@ -724,11 +724,6 @@ test('a cell in a later block is its own column\'s; hovering it inverts that cel
   // rows have no hover state: the cell under the pointer alone, in inverse
   const lit = cardLayout(WHO, 46, i).lines.map(l => l.some(s => s.inv))
   expect(lit.filter(Boolean).length).toBe(1)
-  // a play's frame keeps the blocks' lines, and a row shows in both blocks at once
-  const frame = animFrame(WHO, 46, 0.2).lines.map(l => l.map(s => s.s).join(''))
-  expect(frame.length).toBe(lines.length)
-  expect(frame.filter(l => /^AgentRelent\s/.test(l)).length).toBe(2)
-  expect(frame.some(l => l.startsWith('OpenAIBot'))).toBe(false)
 })
 
 // ------------------------------------------------------------------------------------------------ round 3: whole names

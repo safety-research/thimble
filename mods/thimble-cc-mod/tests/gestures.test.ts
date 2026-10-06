@@ -7,7 +7,7 @@ import { expect, mock, test } from 'claude-code/testing'
 import type { Engine, Mounted } from 'claude-code/testing'
 
 import { blockLayout } from '../hooks/cite'
-import { citationOf, classify, menuItems, menuLines, onPointer, placeOf, send, targetLabel } from '../hooks/gestures'
+import { citationOf, classify, onPointer, placeOf, send, targetLabel } from '../hooks/gestures'
 import type { PointerEv, Sent, Target } from '../hooks/gestures'
 import { parseReply, sectionsOf } from '../hooks/lib'
 import { COLORS } from '../hooks/paint'
@@ -168,14 +168,6 @@ test('a target names its citation, the place a click opens and the actions of it
   // plain words open nothing: only what is drawn as a link opens a panel
   expect(placeOf({ kind: 'row', text: 'dse | [[13403|pages.jsonl#L3]]' })).toBe(null)
   expect(placeOf(card)).toBe(null)
-  // no menu has a "cite": nothing fills main's prompt
-  expect(menuItems(mark).map(m => m.act)).toEqual(['thread', 'verify', 'script', 'rerun'])
-  // a record of a file of the folder also opens in the file browser
-  expect(menuItems(record).map(m => m.act)).toEqual(['open', 'files', 'thread', 'script', 'rerun'])
-  expect(menuItems(chip).map(m => m.act)).toEqual(['open', 'thread', 'verify'])
-  expect(menuItems(card).map(m => m.act)).toEqual(['thread', 'script', 'rerun'])
-  // a card made without a script has nothing to open or rerun
-  expect(menuItems({ ...record, script: undefined }).map(m => m.act)).toEqual(['open', 'files', 'thread'])
 })
 
 test('a click acts at once, a double-click is the same action; a modifier or middle click posts no gesture', () => {
@@ -379,18 +371,6 @@ test('a hovered citation loses its tip when the pointer moves off it, presses, o
   await ui.unmount()
 })
 
-test('the open menu\'s sentence or citation is shaded in its paragraph', () => {
-  const block = parseReply('dse has [[13403|card:abc123#revisions/dse]] revisions. The others are small.')[0]
-  if (block?.type !== 'rich') throw new Error('expected a paragraph with a citation')
-  const chips = [{ label: '13403', state: 'link' as const, mark: '', tip: '', spin: false }]
-  const lay = blockLayout(block, chips, 80, -1)
-  const raws = ['[[13403|card:abc123#revisions/dse]]']
-  const lit = (menu: unknown) => menuLines(lay, raws, menu)[0]!.filter(s => s.bg === COLORS.selected).map(s => s.s).join('')
-  expect(lit(null)).toBe('')
-  expect(lit({ kind: 'citation', ref: raws[0], text: '13403' })).toBe('13403')
-  expect(lit({ kind: 'sentence', text: 'The others are small.' })).toBe('The others are small.')
-})
-
 test('a right-click on a citation opens the citation panel, as a click does: there is no menu', async ($, on) => {
   const w = world(on)
   on('ui.panes', () => ({ value: [{ id: 'thimble', title: 'Citation', isShown: true, isFocused: true, isPlaced: true }] }) as never)
@@ -445,7 +425,7 @@ test('a press on a card\'s title opens a side thread about it in the panel; so d
   expect(w.opened).toEqual([])
   for (const mods of [{ shift: true }, { ctrl: true }, { alt: true }, { button: 'middle' as const }]) await click(50, 0, mods)
   expect(w.opened).toEqual([])
-  await click(10, 3) // probier's bar (border, title, then the bars): "what was going on here?"
+  await click(10, 4) // probier's bar (the top border, the title, the blank row under it, dse's bar): "what was going on here?"
   expect(await ui.find({ type: 'Text', text: /probier {2}1,013/, in: 'card-1-abc123' })).toBeDefined()
   expect(w.opened).toEqual(['thimble'])
   let pane = (await $.ui.mount(PANEL as never)) as unknown as M

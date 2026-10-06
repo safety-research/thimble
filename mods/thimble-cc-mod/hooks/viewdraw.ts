@@ -12,10 +12,9 @@ import { fmt } from './lib'
 import { COLORS } from './paint'
 import { collectionOf, hexId, links, timeMs } from './viewspec'
 
-// same as paint.ts COLORS (accent, link); the Merge step imports them. chrome.tsx holds the same, but tools/
-// render_view.mjs runs this file under Node, which reads no .tsx.
-const ACCENT = 'suggestion'
-const LINK = 'remember'
+// paint.ts's, not chrome.tsx's: tools/render_view.mjs runs this file under Node, which reads no .tsx
+const ACCENT = COLORS.accent
+const LINK = COLORS.link
 /** A zero-width segment that marks the first line of the selected row: the final pass hangs `❯` in the margin before it
  *  and draws its words in the accent (views/SPEC.md, "The visual system", rule 13); `SEL_WHOLE` across the whole row,
  *  its dim parts too, as a table's row is (so the eye follows it across the columns). */
@@ -64,23 +63,23 @@ export type ViewAct =
   | { op: 'page'; d: 1 | -1 }
 
 /** A region of the drawing that acts on a click: cells [x0, x1) of line y. `cite` is the record it stands for, which
- *  a right-click's menu and a side thread act on. `row`: a whole row, which the Client lights under the pointer. */
+ *  a click and a side thread act on. `row`: a whole row, which the Client lights under the pointer. */
 export type Hit = { y: number; x0: number; x1: number; act: ViewAct; cite?: { ref: string; text: string; label: string }; row?: boolean }
 
 /** What the Client posts for a click on a hit region: its index in the layout `s` (packHits' stamp) names, as a click
- *  (`ask`: on the "?" beside its row, `menu`: a right-click). The hooks module keeps the hits and maps it to their act. */
-export type HitAct = { op: 'hit'; i: number; s: string; ask?: true; menu?: true }
+ *  (`ask`: on the "?" beside its row). The hooks module keeps the hits and maps it to their act. */
+export type HitAct = { op: 'hit'; i: number; s: string; ask?: true }
 
-// a hit's flags in packHits: a whole row (lit under the pointer), a row "?" can ask about, a record a right-click acts on
+// a hit's flags in packHits: a whole row (lit under the pointer), a row "?" can ask about, a record a click opens
 export const HIT_ROW = 1
 export const HIT_ASK = 2
-export const HIT_MENU = 4
+export const HIT_RECORD = 4
 
 /** The hits as the Client needs them, four numbers each (y, x0, x1, flags), and a stamp naming this set: a view with
  *  many lane marks has hundreds, whose acts and records would pass the Client's props limit. */
 export function packHits(hits: readonly Hit[]): { hits: number[]; stamp: string } {
   const out: number[] = []
-  for (const h of hits) out.push(h.y, h.x0, h.x1, (h.row ? HIT_ROW : 0) | (hitSel(h) ? HIT_ASK : 0) | (hitRecord(h) ? HIT_MENU : 0))
+  for (const h of hits) out.push(h.y, h.x0, h.x1, (h.row ? HIT_ROW : 0) | (hitSel(h) ? HIT_ASK : 0) | (hitRecord(h) ? HIT_RECORD : 0))
   // FNV-1a over the hits whole, acts included: the same drawing gets the same stamp
   let x = 0x811c9dc5
   const str = JSON.stringify(hits)

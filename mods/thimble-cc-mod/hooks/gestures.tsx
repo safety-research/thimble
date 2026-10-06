@@ -13,21 +13,16 @@
 import type { ClientModule, ClientPointerEvent, JsonValue } from 'claude-code'
 
 import type { ChatTarget } from '../types'
-import { citeLabel, plainCites, sentenceAt } from './cite'
-import type { ParaLayout } from './cite'
-import { fileRef } from './files'
-import { lineWidth, shade } from './draw'
-import type { Line } from './draw'
+import { citeLabel, plainCites } from './cite'
 import { citations } from './lib'
 import type { Citation } from './lib'
-import { COLORS } from './paint'
 
 export type Target = ChatTarget
 
 export type PointerEv = { button: 'left' | 'middle' | 'right'; shift: boolean; ctrl: boolean; alt: boolean; type: 'press' | 'release' | 'double' }
 
-/** `menu` is no longer made (a right-click does what a click does); it stays in the type until the Merge step. */
-export type Gesture = 'primary' | 'menu'
+/** A click's (a right-click does what a click does). */
+export type Gesture = 'primary'
 
 /** One pointer event as posted: what it was, which gesture it made (null: none), and on what. */
 export type Sent = { seq: number; gesture: Gesture | null; target: Target; ev: PointerEv }
@@ -140,23 +135,6 @@ export function placeOf(t: Target): Citation | null {
 }
 
 export type Act = 'open' | 'thread' | 'verify' | 'script' | 'rerun' | 'files'
-/** `hint`: where the choice leads, for a test or a log; the menu prints the label alone, which says what it does. */
-export type MenuItem = { act: Act; label: string; hotkey: string; hint: string }
-
-/** Every action a target has (the menu a right-click opened before there was no menu; the Merge step deletes it). */
-export function menuItems(t: Target): MenuItem[] {
-  const c = citationOf(t)
-  const card = cardOf(t)
-  const out: MenuItem[] = []
-  const place = placeOf(t)
-  if (place) out.push({ act: 'open', label: 'open its lines', hotkey: 'o', hint: 'the lines it cites, in this panel' })
-  if (place && fileRef(place.ref)) out.push({ act: 'files', label: 'open in files', hotkey: 'f', hint: 'its file in the file browser, at this record' })
-  out.push({ act: 'thread', label: 'ask about it', hotkey: 'a', hint: 'a side thread about it, in this panel' })
-  if (c?.display && t.kind !== 'card' && t.kind !== 'sentence') out.push({ act: 'verify', label: 'verify', hotkey: 'v', hint: 'a script recomputes it from the files' })
-  if (card && t.script) out.push({ act: 'script', label: 'open the script', hotkey: 's', hint: 'the Python that made the card' }, { act: 'rerun', label: 'run again', hotkey: 'r', hint: 'run that script again and redraw the card' })
-  return out
-}
-
 /** `s` in at most `n` characters: whole when it fits, else cut at the last space that keeps half of it, then `…`. */
 function shorten(s: string, n: number): string {
   if (s.length <= n) return s
@@ -165,7 +143,7 @@ function shorten(s: string, n: number): string {
   return `${(sp >= room / 2 ? s.slice(0, sp) : s.slice(0, room)).replace(/[\s,;:.]+$/, '')}…`
 }
 
-/** A short name for the target in at most `max` characters, as the menu and the mouse log show it: each citation by
+/** A short name for the target in at most `max` characters, as the mouse log and a thread's title show it: each citation by
  *  its label, never its ref; quoted words keep their closing quote when cut. */
 export function targetLabel(t: Target, max = 48): string {
   const s = plainCites(t.text ?? '')
@@ -184,36 +162,4 @@ export function targetLabel(t: Target, max = 48): string {
     default:
       return shorten(t.label || s || (c ? citeLabel(c) : t.kind), n)
   }
-}
-
-// ------------------------------------------------------------------------------------------------ the menu's target
-
-/** Whether the open menu belongs to `t`. `menu` is the target the hooks module hands each Client in its `menu` prop
- *  while the menu is open (null once it closes). */
-export function isMenuTarget(t: Target, menu: unknown): boolean {
-  return typeof menu === 'object' && menu !== null && targetKey(menu as Target) === targetKey(t)
-}
-
-/** A paragraph's lines with the open menu's target shaded: its citation, its sentence (the words passageAt maps to
- *  it, and the spaces between them) or its table row. */
-export function menuLines(lay: ParaLayout, raws: readonly string[], menu: unknown): Line[] {
-  if (typeof menu !== 'object' || menu === null) return lay.lines
-  const m = menu as Target
-  const cells: { line: number; x0: number; x1: number }[] = []
-  if (m.kind === 'citation') for (const s of lay.spans) if (raws[s.chip] === m.ref) cells.push(s)
-  if (m.kind === 'row' && lay.rows) {
-    lay.rows.forEach((r, y) => {
-      if (r && isMenuTarget({ kind: 'row', text: r }, m)) cells.push({ line: y, x0: 0, x1: lineWidth(lay.lines[y] ?? []) })
-    })
-  }
-  if (m.kind === 'sentence') {
-    const byLine = new Map<number, { x0: number; x1: number }>()
-    for (const w of lay.words) {
-      if (!isMenuTarget({ kind: 'sentence', text: sentenceAt(lay.source, w.at) }, m)) continue
-      const c = byLine.get(w.line)
-      byLine.set(w.line, c ? { x0: Math.min(c.x0, w.x0), x1: Math.max(c.x1, w.x1) } : { x0: w.x0, x1: w.x1 })
-    }
-    for (const [line, c] of byLine) cells.push({ line, ...c })
-  }
-  return cells.length ? shade(lay.lines, cells, COLORS.selected) : lay.lines
 }

@@ -10,7 +10,7 @@ import type { ClientModule } from 'claude-code'
 import { lineWidth, width } from './draw'
 import type { Line } from './draw'
 import { send } from './gestures'
-import { paintLine } from './paint'
+import { COLORS, paintLine } from './paint'
 import { HIT_ASK, HIT_ROW, VIEW_MARGIN as MARGIN } from './viewdraw'
 import type { HitAct, ViewAct } from './viewdraw'
 
@@ -104,7 +104,7 @@ const Views: ClientModule<Props, S> = (props, surface) => {
   const drawn = lines.map((l, y) => {
     const fill = Math.max(0, inner - lineWidth(l))
     // the row's "?" on R, after a 2-cell gutter
-    const margin = y === askRow ? [{ s: ' '.repeat(fill + MARGIN - 1) }, { s: '?', fg: 'remember', ...(st.ask ? { inv: true } : {}) }] : []
+    const margin = y === askRow ? [{ s: ' '.repeat(fill + MARGIN - 1) }, { s: '?', fg: COLORS.link, ...(st.ask ? { inv: true } : {}) }] : []
     return paintLine(Text, [...l, ...margin])
   })
   return Box({ flexDirection: 'column', width: cols, children: drawn })

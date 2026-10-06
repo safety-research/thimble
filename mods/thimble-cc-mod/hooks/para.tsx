@@ -29,8 +29,6 @@ type Props = {
   /** each citation's claim key (cite.ts claimKey) */
   ids: string[]
   raws: string[]
-  /** no longer read: there is no menu */
-  menu?: Target | null
 }
 /** A selection, from the cell pressed to the cell the drag is on (either order). */
 type Sel = { y0: number; x0: number; y1: number; x1: number }

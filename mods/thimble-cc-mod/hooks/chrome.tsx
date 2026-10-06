@@ -12,11 +12,11 @@ import type { Line, Seg } from './draw'
 import { cut, lineWidth, width } from './draw'
 import { COLORS } from './paint'
 
-// same as paint.ts COLORS (link, accent, fresh, tip); the Merge step imports them
-export const LINK = 'remember'
-export const ACCENT = 'suggestion'
-export const FRESH = 'success'
-export const TIP = 'userMessageBackground'
+// the theme keys of paint.ts COLORS that the chrome draws with
+export const LINK = COLORS.link
+export const ACCENT = COLORS.accent
+export const FRESH = COLORS.fresh
+export const TIP = COLORS.tip
 export const CHROME = { link: LINK, accent: ACCENT, fresh: FRESH, tip: TIP } as const
 
 /** The cells a mark hangs in, left of a panel's type area: `❯`, `?`, `↳`, a highlight's `●`. */
