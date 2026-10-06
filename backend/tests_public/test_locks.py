@@ -66,6 +66,28 @@ def test_a_run_saves_into_the_group_as_another_process_left_it(workspaces_tmp: P
     assert titles == ["q", "other"] and target["status"] == "running"
 
 
+def test_a_run_keeps_the_chat_another_process_credited_its_card_to(workspaces_tmp: Path) -> None:
+    """_merge_cell: while a subagent's card runs (thimble-run), the mirror's process credits the card to the subagent's
+    chat (agents.claim_cell); the run's save keeps that credit and its edits' authors, and writes its own state (live
+    check T13: an orientation's cards were left credited to main's `terminal`)."""
+    ws = config.workspace_dir("mini")
+    nb = notebook.create_notebook(ws, "Orientation")
+    first = notebook.insert_cell("mini", nb["id"], notebook.new_cell("code", notebook.TERMINAL_CREATOR, "q", nb["id"],
+                                                                     code="1"))
+    held = json.loads(json.dumps(notebook.read_notebook(ws, nb["id"])))  # what thimble-run held while the code ran
+    data = json.loads(notebook._nb_file(ws, nb["id"]).read_text())
+    data["cells"][0]["created_by"] = "chat:abc12345"  # the mirror's claim, from another process
+    data["cells"][0]["edited"] = [{"by": "chat:abc12345", "ts": "2026-10-06T21:17:00+00:00"}]
+    ledger.atomic_write_text(notebook._nb_file(ws, nb["id"]), json.dumps(data))
+    cell = next(c for c in held["cells"] if c["id"] == first["id"])
+    assert cell["created_by"] == notebook.TERMINAL_CREATOR
+    cell.update(status="ok", outputs=[{"output_type": "stream", "name": "stdout", "text": "1\n"}])
+    notebook._merge_cell(ws, held, cell)
+    stored = json.loads(notebook._nb_file(ws, nb["id"]).read_text())["cells"][0]
+    assert stored["created_by"] == "chat:abc12345" and stored["edited"][0]["by"] == "chat:abc12345"
+    assert stored["status"] == "ok" and stored["outputs"][0]["text"] == "1\n"
+
+
 def test_locked_is_reentrant_and_gives_up_after_its_wait(tmp_path: Path) -> None:
     store = tmp_path / "store.json"
     with ledger.locked(store) as held:

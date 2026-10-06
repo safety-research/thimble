@@ -824,11 +824,16 @@ def _changes(fn: Any) -> Any:
     return wrapper
 
 
+RUN_KEEPS = ("created_by", "edited")  # a cell's fields a run saved from another process leaves as stored (_merge_cell)
+
+
 def _merge_cell(ws: Path, nb: dict, cell: dict, *, add: bool = False) -> tuple[dict, dict]:
     """Save `cell` of the loaded group `nb` under the lock, into the group as its file holds it now: (the group as
     written, the cell in it). A run holds `nb` across its awaits, and another process may have written the group
     meanwhile; then the cell's state replaces its stored copy (`add`: or is appended, for a cell not stored yet) and
-    the other process's changes stay. A cell no longer in the group (deleted or moved meanwhile) is not written back."""
+    the other process's changes stay. Who made and edited the card (RUN_KEEPS) stays as stored, since a run never
+    changes it and the mirror's process credits a subagent's card to its chat while the card runs (agents.claim_cell).
+    A cell no longer in the group (deleted or moved meanwhile) is not written back."""
     with editing(ws):
         current = read_notebook(ws, nb["id"])
         if current is None:
@@ -841,8 +846,10 @@ def _merge_cell(ws: Path, nb: dict, cell: dict, *, add: bool = False) -> tuple[d
                 current["cells"].append(cell)
                 target = cell
             elif target is not cell:
+                kept = {k: target[k] for k in RUN_KEEPS if k in target}
                 target.clear()
                 target.update(cell)
+                target.update(kept)
             nb, cell = current, target
         write_notebook(ws, nb)
         return nb, cell
