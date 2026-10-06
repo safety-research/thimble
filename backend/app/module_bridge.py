@@ -14,9 +14,15 @@ main), or the one `--rekey` moved it to after a /clear or an in-session /resume 
 module sees the new id within tens of milliseconds of the SessionStart hook (spike V2): a hello for an id that is not
 main yet is held up to HELLO_HOLD_S for a rekey that names it. Main must also run inside thimble's fence
 (cc_plugin.main_fenced), so a THIMBLE_LAUNCHED that a child session inherited gets no requests; that is read from main's
-command line once main's session has opened thimble (/thimble attached it, _opened), and a hello before then is asked
-again later rather than refused. The long poll hands out requests for that session only, so two mains in one folder never
-take each other's clicks.
+command line, never from anything the module or main reports. At session start, before /thimble attaches main, the
+command line is that of the process launch.json names (`pid`: the launcher's own, which `exec claude` keeps, _launched):
+the hello is accepted when its session is launch.json's and that process's command line is a fenced `claude` that names
+the session, so the module registers thimble's types inside session.start, in time for main's first agent listing.
+Where that check cannot be made (no pid in launch.json, the process gone, a command line that is not that `claude`, or a
+session /clear moved main to), the fence is read once main's session has opened thimble (/thimble attached it, _opened),
+and a hello before then is asked again later rather than refused. launch.json is the launcher's: the server makes it
+when it registers the workspace, kernels see it read-only and main's Edit is denied it (subagent_files). The long poll
+hands out requests for that session only, so two mains in one folder never take each other's clicks.
 
 `request(c, op, **args)` is how the rest of the server asks (lane B's clicks, follow-ups and stops, lane E's jobs). It
 waits up to REQUEST_TIMEOUT_S for the module's answer, after which the request expires and the answer is `no-module`:
@@ -84,7 +90,7 @@ OPS = ("register", "spawn", "send", "stop", "note")
 ANSWER_KEYS = ("agentId", "deny", "limit", "error", "ok")
 NO_MODULE = "no-module"
 REGISTRY = "subagents.json"  # lane B's record of thimble's agents, in the workspace (module note)
-LAUNCH = "launch.json"  # written by `thimble launch-args` (lane A): {session, at, fenced, switches, unset}
+LAUNCH = "launch.json"  # written by `thimble launch-args` (lane A): {session, at, fenced, switches, unset, pid}
 NOTE_HINT = "module-started-note"  # prompts/tools.md: {role}, {agent}, {what}
 AGENT = "{agent}"  # left in a note for the module to fill with the agent id it got
 WHAT_CHARS = 120
@@ -97,7 +103,7 @@ NOT_FENCED = "main does not run inside thimble's sandbox"
 NO_MAIN = "thimble knows no main session in this folder yet"
 # main's session as launch.json names it has not opened thimble yet: the launcher's first prompt, /thimble, attaches it
 # (session.current) only after the module's first hello at session start, and its `claude` process, whose command line
-# says whether it is fenced, is known only then (session.main_pid)
+# says whether it is fenced, is known only then (session.main_pid), unless launch.json's pid names it (_launched)
 NOT_OPEN = "main's session has not opened thimble yet"
 WAIT_REASONS = (NO_MAIN, NOT_OPEN)  # a hello refused for one of these is asked again later (409), never refused for good
 ENDED_STATES = frozenset({"ended", "stopped", "killed", "completed", "failed", "done", "refused", "expired"})
@@ -300,15 +306,49 @@ def _opened(c: str, sid: str) -> bool:
     return at == sid
 
 
+def _is_claude(argv: list[str]) -> bool:
+    """Whether a command line is Claude Code's `claude`: the program, or the script node runs, is named claude."""
+    return any(Path(a).name.lower() in ("claude", "claude.exe") for a in argv[:2])
+
+
+def _names(argv: list[str], sid: str) -> bool:
+    """Whether a command line names session `sid`, as the launcher passes it: `--session-id <sid>` for a new session,
+    `--resume <sid>` for a continued one, or either flag's `=` form."""
+    return any(a == sid and i and argv[i - 1] in ("--session-id", "--resume", "-r")
+               or a in (f"--session-id={sid}", f"--resume={sid}") for i, a in enumerate(argv))
+
+
+def _launched(c: str, sid: str) -> bool:
+    """Whether main's session `sid` is the one launch.json names, and the process launch.json names (`pid`: the
+    launcher's own, which `exec claude` made main's `claude`) runs now as `claude` (_is_claude) with a command line that
+    names `sid` (_names) and is fenced (cc_plugin.fenced_argv, the check main_fenced makes). False when the check cannot
+    be made: no pid, the process gone, or a command line that is not that `claude`, such as another process that took
+    the pid later."""
+    from . import cc_plugin, procs  # noqa: PLC0415
+
+    rec = _launch(c)
+    pid = rec.get("pid")
+    if not sid or str(rec.get("session") or "") != sid or isinstance(pid, bool) or not isinstance(pid, int) or pid <= 1:
+        return False
+    try:
+        argv = procs.argv(pid)
+        return (_is_claude(argv) and _names(argv, sid)
+                and cc_plugin.fenced_argv(argv, procs.cwd(pid) or Path.cwd()))
+    except Exception:  # noqa: BLE001 — a command line that cannot be read is no proof
+        log.debug("the launcher's process %s in %s could not be read", pid, c, exc_info=True)
+        return False
+
+
 def _refusal(c: str, sid: str) -> str:
-    """'' when a hello from `sid` may be accepted, else why not."""
+    """'' when a hello from `sid` may be accepted, else why not. Before main's session opened thimble, its fence is read
+    from the command line of the process launch.json names (_launched), else the hello waits (NOT_OPEN)."""
     main = main_session(c)
     if not main:
         return NO_MAIN
     if sid != main:
         return NOT_MAIN
     if not _opened(c, sid):
-        return NOT_OPEN
+        return "" if _launched(c, sid) else NOT_OPEN
     if not _fenced(c):
         return NOT_FENCED
     return ""
@@ -580,8 +620,8 @@ class HelloBody(BaseModel):
 async def hello_route(body: HelloBody) -> dict[str, Any]:
     """The module's hello: accepted (200) from main's fenced session, held up to HELLO_HOLD_S for a rekey that names a
     new main, else refused (403, with the reason recorded for why_not). 404 for a folder that is no workspace yet, and
-    409 while no main session is known or main's session has not opened thimble yet (WAIT_REASONS: before /thimble
-    attaches it): the module says hello again later."""
+    409 while no main session is known or main's session has not opened thimble yet and launch.json's process cannot
+    show that main is fenced (WAIT_REASONS): the module says hello again later."""
     _remember_loop()
     c = _workspace(body.cwd)
     b = _bridge(c)

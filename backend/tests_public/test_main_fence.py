@@ -204,6 +204,29 @@ def test_launch_args_on_a_new_folder_registers_it_refreshes_its_extensions_first
     assert REGISTER(home) is None, "the home folder is never a workspace"
 
 
+def test_launch_json_names_the_launchers_pid_where_kernels_and_mains_edits_cannot_change_it(corpus):
+    """The launcher passes its own pid (--launcher-pid $$), which `exec claude` keeps, and launch.json records it, so the
+    module's bridge can read main's fence from that process's command line before /thimble attaches main. launch.json
+    stays a file the hooks trust: written where kernels see it read-only and main's Edit is denied, in no folder main's
+    Bash may write."""
+    from app import kernel_wrap  # noqa: PLC0415
+
+    args = cli.build_parser().parse_args(["launch-args", "--launcher-pid", "4242", "--cwd", str(corpus)])
+    assert args.launcher_pid == 4242
+    cli.launch_args(corpus, launcher_pid=args.launcher_pid)
+    path = config.workspace_dir("logs") / cli.LAUNCH_FILE
+    rec = json.loads(path.read_text())
+    assert rec["pid"] == 4242 and rec["fenced"] is True and cli.SESSION_ID_RE.fullmatch(rec["session"])
+    cli.launch_args(corpus)
+    assert "pid" not in json.loads(path.read_text()), "a launcher that names no pid: the bridge waits for /thimble"
+    cli.launch_args(corpus, launcher_pid=1)
+    assert "pid" not in json.loads(path.read_text()), "never init"
+    assert path.name in kernel_wrap.TRUSTED_FILES
+    fence = cli.main_fence(corpus)
+    assert f"Edit(/{path.resolve()})" in fence["permissions"]["deny"]
+    assert not any(path.resolve().is_relative_to(Path(d)) for d in fence["sandbox"]["filesystem"]["allowWrite"])
+
+
 def test_refresh_extensions_asks_a_running_server_else_finds_them_here(corpus, monkeypatch):
     """A running server of this install refreshes the workspace's extensions (GET /ws/{c}/extensions); without one
     launch-args finds them itself. Neither failing stops the launch."""

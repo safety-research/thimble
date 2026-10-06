@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import subprocess
 import sys
 import threading
 import time
@@ -17,7 +18,7 @@ import httpx
 import pytest
 
 import app
-from app import cc_plugin, config, hook_auth, module_bridge, session, tools
+from app import cc_plugin, config, hook_auth, module_bridge, procs, session, tools
 
 _real_opened = module_bridge._opened  # the autouse fixture stands in for it
 
@@ -201,6 +202,93 @@ async def test_a_hello_before_main_s_session_opened_thimble_is_asked_again_not_r
     # follower moves to it
     module_bridge.rekey(CORPUS, MAIN, CHILD)
     assert (await Module(client, plugin_headers, CHILD).hello()).status_code == 200
+
+
+def _process(tmp_path, name: str, *args: str) -> subprocess.Popen:
+    """A process whose command line is `<tmp_path>/<name> <args>`, as `ps` and /proc show it: the Python running the
+    tests, by a link of that name, sleeping."""
+    link = tmp_path / name
+    if not link.exists():
+        link.symlink_to(sys.executable)
+    return subprocess.Popen([str(link), "-c", "import time; time.sleep(60)", *args])
+
+
+FENCE = json.dumps({"sandbox": {"enabled": True}, "env": {cc_plugin.FENCE_MARK: "1"}})
+
+
+async def test_a_hello_at_session_start_is_accepted_when_launch_json_s_process_is_main_s_fenced_claude(
+        client, plugin_headers, monkeypatch, tmp_path):
+    """At session start /thimble has not attached main, so the server knows no `claude` process of main's; the launcher
+    wrote its own pid into launch.json, which `exec claude` kept. A hello from launch.json's session is accepted at once
+    when that process is a `claude` whose command line names the session and carries thimble's fence, read from /proc as
+    main_fenced reads it, so the module registers thimble's types inside session.start. Every case where that check
+    cannot be made waits (409) for /thimble as before: no pid, a process that is gone, not `claude`, not fenced or for
+    another session, and a session /clear moved main to."""
+    monkeypatch.setattr(module_bridge, "_opened", _real_opened)
+    monkeypatch.setattr(cc_plugin, "main_fenced", lambda c: False, raising=False)  # no main attached: nothing read
+    monkeypatch.setattr(session, "main_pid", lambda c: None)
+    running: list[subprocess.Popen] = []
+
+    def started(name: str, *args: str) -> int:
+        running.append(_process(tmp_path, name, *args))
+        for _ in range(200):  # until /proc shows the command line the test gave it
+            if procs.argv(running[-1].pid)[-1:] == list(args[-1:]):
+                break
+            time.sleep(0.01)
+        return running[-1].pid
+
+    async def hello(pid: int | None, sid: str = MAIN) -> httpx.Response:
+        _launch(**({"pid": pid} if pid is not None else {}))
+        return await Module(client, plugin_headers, sid).hello()
+
+    try:
+        main = started("claude", "--settings", FENCE, "--session-id", MAIN, "--", "/thimble")
+        t0 = time.monotonic()
+        r = await hello(main)
+        assert r.status_code == 200 and r.json() == {"ok": True}
+        assert time.monotonic() - t0 < module_bridge.HELLO_HOLD_S, "accepted at once, inside session.start"
+        assert module_bridge._accepted(CORPUS, MAIN) and "idle" not in _registry()["module"]
+        module_bridge._bridges.clear()
+        resumed = started("claude", "--settings", FENCE, "--resume", MAIN)
+        assert (await hello(resumed)).status_code == 200, "thimble -c passes --resume with the session"
+        module_bridge._bridges.clear()
+
+        waits = {
+            "no pid in launch.json": None,
+            "not claude": started("python3", "--settings", FENCE, "--session-id", MAIN),
+            "not fenced": started("claude", "--settings", "{}", "--session-id", MAIN),
+            "another session's claude": started("claude", "--settings", FENCE, "--session-id", CHILD),
+            "the pid is no process": 2 ** 22 + 7,
+        }
+        for why, pid in waits.items():
+            r = await hello(pid)
+            assert r.status_code == 409 and r.json()["detail"] == module_bridge.NOT_OPEN, why
+            assert not module_bridge._accepted(CORPUS, MAIN), why
+        gone = started("claude", "--settings", FENCE, "--session-id", MAIN)
+        running[-1].kill()
+        running[-1].wait()
+        r = await hello(gone)
+        assert r.status_code == 409 and r.json()["detail"] == module_bridge.NOT_OPEN, "main's process has gone"
+        # /clear moved main to a new id before /thimble attached it: launch.json names the old session, so the new
+        # id's hello waits for /thimble
+        module_bridge.rekey(CORPUS, MAIN, NEW)
+        r = await hello(main, sid=NEW)
+        assert r.status_code == 409 and r.json()["detail"] == module_bridge.NOT_OPEN
+    finally:
+        for p in running:
+            p.kill()
+            p.wait()
+
+
+def test_a_command_line_names_its_session_in_the_forms_the_launcher_passes():
+    for argv in (["claude", "--session-id", MAIN], ["claude", f"--session-id={MAIN}"], ["claude", "--resume", MAIN],
+                 ["claude", "-r", MAIN], ["claude", f"--resume={MAIN}"]):
+        assert module_bridge._names(argv, MAIN), argv
+    for argv in (["claude", MAIN], ["claude", "--session-id", NEW], ["claude", "--name", MAIN], [MAIN, MAIN]):
+        assert not module_bridge._names(argv, MAIN), argv
+    assert module_bridge._is_claude(["claude", "--x"]) and module_bridge._is_claude(["/usr/local/bin/claude"])
+    assert module_bridge._is_claude(["node", "/home/a/.npm-global/bin/claude", "--x"]), "an npm install's script"
+    assert not module_bridge._is_claude(["python3", "-c", "claude"]) and not module_bridge._is_claude([])
 
 
 async def test_without_a_session_in_launch_json_main_is_the_session_thimble_made_main(client, plugin_headers,
