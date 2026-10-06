@@ -67,6 +67,13 @@ export function planLine(role: string | null | undefined): string {
   return `Stopped when your Claude Code session went into plan mode, where thimble's agents would have to ask you before every step. Leave plan mode (shift+tab in your terminal), then ${PLAN_HOW[role ?? ''] ?? 'start it again'}.`
 }
 
+/** The line a thread ends with once thimble stopped its run as main went into plan mode (planLine), or null: an
+ * orientation's, a writer's or a check's thread (ChatPanel SessionView) and a view's build (ViewBuildView), whose
+ * transcript's own end says only "stopped". Pure. */
+export function planStoppedLine(m: Pick<ChatMeta, 'status' | 'stopped_by' | 'role'> | null | undefined, running: boolean): string | null {
+  return !running && m?.status === 'stopped' && m.stopped_by === 'plan' ? planLine(m.role) : null
+}
+
 export type Continue = 'here' | 'earlier-session' | 'earlier-version' | 'stopped-by-user' | null
 
 /** Whether a follow-up can still continue an orientation: `earlier-version` for a chat no subagent ran (0.5.0, or a

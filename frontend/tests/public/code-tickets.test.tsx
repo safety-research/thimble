@@ -95,6 +95,17 @@ describe("a ticket main filed while another runs", () => {
     expect(changed.at(-1)?.held).toBe(false)
   })
 
+  test("a ticket thimble stopped as main went into plan mode says why with Retry, and one the analyst stopped says Stopped (live check U4)", async () => {
+    const plan = "Stopped when your Claude Code session went into plan mode, where thimble's agents would have to ask you before every step. Leave plan mode (shift+tab in your terminal), then choose Retry on the ticket."
+    const stopped: Ticket = { ...held, held: false, status: 'stopped', error: plan }
+    expect(ticketStatusText(stopped)).toBe(plan)
+    expect(ticketStatusText({ ...stopped, error: 'thimble stopped when its Claude Code session ended' })).toBe('thimble stopped when its Claude Code session ended')
+    expect(ticketStatusText({ ...stopped, error: null })).toBe('Stopped')
+    const el = await mount(<TicketStatus ticket={stopped} onChange={() => undefined} />)
+    expect(el.textContent).toContain('then choose Retry on the ticket.')
+    expect(button(el, 'Retry')).toBeTruthy()
+  })
+
   test('a ticket queued by a click shows no Start', async () => {
     const el = await mount(<TicketStatus ticket={{ ...held, held: false }} onChange={() => undefined} />)
     expect(button(el, 'Start')).toBeUndefined()

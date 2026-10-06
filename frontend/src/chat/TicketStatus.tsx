@@ -16,13 +16,14 @@ const ENDED = new Set(['failed', 'needs manual merge', 'rolled back', 'stopped',
 /** The line of main's ticket that waits for the analyst's Start while another ticket runs (backend dev.start_typed). */
 export const HELD_LINE = 'Waits for your Start, since code tickets run one at a time'
 
-/** What the line says for a ticket's status: the reason for a failure, a word for the rest; null for none. Pure. */
+/** What the line says for a ticket's status: the reason for a failure, and for a stop thimble made (main's quit, main
+ * going into plan mode: backend dev._settle_ticket), a word for the rest; null for none. Pure. */
 export function ticketStatusText(t: Pick<Ticket, 'status' | 'error' | 'held'>): string | null {
   switch (t.status) {
     case 'queued':
       return t.held ? HELD_LINE : 'Queued behind another ticket'
     case 'stopped':
-      return 'Stopped'
+      return t.error ? reason(t.error) : 'Stopped'
     case 'reverted':
       return 'Reverted'
     case 'dismissed':
@@ -30,12 +31,15 @@ export function ticketStatusText(t: Pick<Ticket, 'status' | 'error' | 'held'>): 
     case 'failed':
     case 'needs manual merge':
     case 'rolled back':
-      // the reason as the server words it, begun with a capital unless it begins with thimble's lowercase name
-      if (!t.error) return 'Failed'
-      return t.error.startsWith('thimble') ? t.error : t.error.charAt(0).toUpperCase() + t.error.slice(1)
+      return t.error ? reason(t.error) : 'Failed'
     default:
       return null
   }
+}
+
+/** The reason as the server words it, begun with a capital unless it begins with thimble's lowercase name. Pure. */
+function reason(error: string): string {
+  return error.startsWith('thimble') ? error : error.charAt(0).toUpperCase() + error.slice(1)
 }
 
 /** The ticket record, fetched when `id` changes and again on each `ticket` event for it. */
