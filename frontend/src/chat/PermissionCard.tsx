@@ -20,13 +20,11 @@ import { Icon } from '../components/Icon'
 import { TipButton, Tipped } from '../components/Tooltip'
 import { api } from '../lib/api'
 import { bus } from '../lib/bus'
-import { loadSettings } from '../lib/models'
 import { track } from '../lib/telemetry'
 import type { ChatMeta, PermissionRequest } from '../lib/types'
 import { askFields, askWhat, CODE_LANGS } from './Holds'
-import { BYPASS_LINE } from './ModeSwitch'
 import { ThreadChip } from './Notes'
-import { askedBy, askingAgent, asksTo, askThread, askWhy, classifierDown, modeChat, type PendingAsk } from './permissions'
+import { askedBy, askingAgent, asksTo, askThread, askWhy, type PendingAsk } from './permissions'
 
 /** A request's "don't ask again" choice: the button's label, and its tooltip saying what it keeps and where. */
 function alwaysChoice(p: PermissionRequest): { label: string; tip: string } | null {
@@ -80,23 +78,9 @@ export function PermissionCard({ ws, asks, metas, labels }: {
   const [at, setAt] = useState<{ id: string | null; i: number }>({ id: null, i: 0 })
   // the request whose buttons take clicks (ARM_MS after it took the card's place), as `face` names it
   const [armed, setArmed] = useState<string | null>(null)
-  const [busy, setBusy] = useState(false)
   const root = useRef<HTMLDivElement>(null)
   // the requests whose answer was sent, read in the same event as the click, so one request is never answered twice
   const sent = useRef(new Set<string>())
-  // the sessions whose mode the card has switched, which no longer offer the switch
-  const [switched, setSwitched] = useState<ReadonlySet<string>>(new Set())
-  // the modes the analyst's Claude Code settings turn off
-  const [off, setOff] = useState<readonly string[]>([])
-  useEffect(() => {
-    let alive = true
-    loadSettings(ws)
-      .then((s) => alive && setOff(s.disabled_modes ?? []))
-      .catch(() => undefined)
-    return () => {
-      alive = false
-    }
-  }, [ws])
   const shown = useMemo(() => asks.filter((a) => !answered.has(a.request.id) && !sending.has(a.request.id)), [asks, answered, sending])
   const found = shown.findIndex((a) => a.request.id === at.id)
   const i = found >= 0 ? found : Math.min(at.i, Math.max(0, shown.length - 1))
@@ -146,19 +130,8 @@ export function PermissionCard({ ws, asks, metas, labels }: {
   const also = p.also ?? []
   const cut = cutLine(p)
   const always = cut ? null : alwaysChoice(p)
-  // while auto mode's classifier gives no verdict, the session's mode can switch from here
-  const switchChat = classifierDown(p) ? modeChat(ask, metas) : null
-  const switchTo = (mode: 'manual' | 'bypass') => {
-    if (!switchChat) return
-    const chat = switchChat
-    setBusy(true)
-    track('ui-click', { target: `chat:${chat}`, detail: { action: 'permission-mode', mode, from: 'permission-card' } })
-    api
-      .setSessionMode(ws, chat, mode)
-      .then(() => setSwitched((cur) => new Set([...cur, chat])))
-      .catch((e: Error) => bus.emit('toast', { text: `Could not switch to ${mode === 'manual' ? 'Manual' : 'Bypass'}: ${e.message}`, kind: 'error' }))
-      .finally(() => setBusy(false))
-  }
+  // a request of one of thimble's agents: the terminal answers it (U6b), so the card has no buttons
+  const terminal = !!p.terminal
   // the answer to one request: off the card at once, back on it if the answer could not be sent, and off for good when
   // the request had already ended
   const send = (a: PendingAsk, allow: boolean, always = false) => {
@@ -201,7 +174,7 @@ export function PermissionCard({ ws, asks, metas, labels }: {
   }
   const gate = { 'aria-disabled': !ready || undefined }
   return (
-    <div ref={root} tabIndex={-1} className={`chat-perm${shown.length > 1 ? ' chat-perm-stack' : ''}`} role="alertdialog" aria-label={expired ? EXPIRED_TITLE : 'Permission needed'} data-chat={ask.chat} data-request={p.id} data-count={shown.length} data-expired={expired || undefined} data-armed={ready || undefined}>
+    <div ref={root} tabIndex={-1} className={`chat-perm${shown.length > 1 ? ' chat-perm-stack' : ''}${terminal ? ' chat-perm-terminal' : ''}`} role="alertdialog" aria-label={expired ? EXPIRED_TITLE : 'Permission needed'} data-chat={ask.chat} data-request={p.id} data-count={shown.length} data-expired={expired || undefined} data-terminal={terminal || undefined} data-armed={ready || undefined}>
       <div className="chat-perm-head">
         <Icon name="warning" size={13} className="chat-perm-ico" />
         <span className="chat-perm-title">{expired ? EXPIRED_TITLE : 'Permission needed'}</span>
@@ -256,21 +229,9 @@ export function PermissionCard({ ws, asks, metas, labels }: {
             </ul>
           </div>
         )}
-        <p className="chat-perm-why">{askWhy(ask, metas)}</p>
-        {switchChat && !switched.has(switchChat) && (
-          <div className="chat-perm-switch" data-chat={switchChat}>
-            <Button variant="secondary" size="sm" className="chat-perm-manual" disabled={busy} onClick={() => switchTo('manual')}>
-              Switch to Manual
-            </Button>
-            {!off.includes('bypass') && (
-              <Button variant="secondary" size="sm" className="chat-perm-bypass" title={BYPASS_LINE} disabled={busy} onClick={() => switchTo('bypass')}>
-                Switch to Bypass
-              </Button>
-            )}
-          </div>
-        )}
+        <p className="chat-perm-why">{askWhy(ask, metas, labels)}</p>
       </div>
-      {expired ? (
+      {terminal ? null : expired ? (
         <div className="chat-perm-acts">
           <Button variant="secondary" size="sm" className="chat-perm-dismiss" {...gate} onClick={() => reply(false)}>
             Dismiss

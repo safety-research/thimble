@@ -166,10 +166,13 @@ export function ViewPane({ ws, view, path, picked, kind, targetRef, quote, onQuo
   )
 }
 
+/** The rounds a view's reviewer looks at its pictures, at most (backend view_review.ROUNDS, counted by finish_review). */
+export const REVIEW_ROUNDS = 2
+
 /** What the review's mark says of its state, in one line. */
 export function reviewLine(r: ViewReview): string {
   const at = hhmm(r.ts)
-  if (r.state === 'running') return r.round ? `Revising the view from its review (round ${r.round})` : "Reviewing the view's pictures"
+  if (r.state === 'running') return r.round ? `Reviewing the view's pictures, round ${r.round} of ${REVIEW_ROUNDS}` : "Reviewing the view's pictures"
   if (r.state === 'failed') return r.note || 'The review did not finish'
   if (r.state === 'stopped') return (at ? `Stopped at ${at}` : 'Stopped') + (r.note ? `: ${r.note.replace(/\.$/, '')}` : '')
   return at ? `Checked at ${at}` : 'Checked'
@@ -245,7 +248,7 @@ export function ReviewMark({ ws, slug, review: r, onUndo }: { ws: string; slug: 
           {r.state === 'done' && left.length > 0 && <ReviewList title="Left" items={left} />}
           {r.state === 'done' && r.note && <span className="bcell-check-what">{r.note}</span>}
           {r.state === 'done' && !revised.length && !left.length && !r.undo && <span className="bcell-check-what">Nothing to fix.</span>}
-          {(running || ended || revised.length > 0) && (
+          {(running || ended || r.state === 'done') && (
             <span className="bcell-check-acts">
               {running && <ReviewStop revising={!!r.round} onStop={() => (close(), stop())} />}
               {!running && revised.length > 0 && (
@@ -253,7 +256,7 @@ export function ReviewMark({ ws, slug, review: r, onUndo }: { ws: string; slug: 
                   Undo
                 </Button>
               )}
-              {ended && (
+              {!running && (
                 <Button variant="ghost" size="sm" icon="refresh" onClick={() => (close(), again())}>
                   Review again
                 </Button>

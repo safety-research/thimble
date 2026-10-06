@@ -14,6 +14,8 @@ export interface ThreadsCtx {
   labels: ReadonlyMap<string, string>
   /** every chat's meta by id, the agent chats' status among them (a label run's card reads its runs' state here) */
   metas?: ReadonlyMap<string, ChatMeta>
+  /** main's own meta as its chat route answers it: its session, and whether thimble's module runs in it */
+  main?: ChatMeta | null
 }
 
 export const ThreadsContext = createContext<ThreadsCtx>({ labels: new Map() })

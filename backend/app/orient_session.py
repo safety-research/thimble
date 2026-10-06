@@ -1018,6 +1018,20 @@ async def start_route(c: str, body: StartBody, request: Request) -> dict[str, An
     return {**dict(ans), **({"kind": ans.kind, "reason": ans.reason} if ans.refused else {})}
 
 
+RUN_FIELDS = ("status", "query", "passes", "critique", "model", "effort", "route", "started_by", "agent_id", "request",
+              "refused", "requested", "started", "ended", "chats")  # what run_route shows of orient/run.json
+
+
+@router.get("/ws/{c}/orientation")
+async def run_route(c: str) -> dict[str, Any]:
+    """The latest orientation's record as the browser's Start gate and its card read it: its status, the request and
+    switches, the run's exact model and effort, who started it, the pending request, and for a start that did not
+    happen {reason, kind, at, expired?}; {} before any was asked for."""
+    config.workspace_dir(c)
+    rec = orientation.read_run(c) or {}
+    return {k: rec[k] for k in RUN_FIELDS if k in rec}
+
+
 class MessageBody(BaseModel):
     text: str
 

@@ -1,4 +1,6 @@
-// A writer's failure on a document, from the stream's `report {status: failed}` record. It is a state that lasts, so it
+// A writer's failure on a document, from the stream's `report {status: failed}` record, and a writer's start that did
+// not happen, from `report {status: refused, refused}` (backend report_types.write_refused), which the document's card
+// shows as the refused card (chat/Refused) until a later write starts or the analyst dismisses it. It is a state that lasts, so it
 // shows in one place, never as a toast: a ✕ on the document's tab and an error card under the type bar, with Retry and
 // Report a problem, until the analyst dismisses it or a later write starts or saves. Like any report record, a new one
 // lights the Report tab's dot while no pane shows the Report (shell/dots). Dismissals are kept per workspace in localStorage by the
@@ -6,7 +8,7 @@
 import { useSyncExternalStore } from 'react'
 import { apiErrorAt, apiFailureText } from '../chat/model'
 import { bus } from '../lib/bus'
-import type { WsEvent } from '../lib/types'
+import type { Refusal, WsEvent } from '../lib/types'
 import { readStorage, storageKey, writeStorage } from '../lib/workspace'
 import { failureText } from '../shell/ProblemReport'
 
@@ -54,16 +56,62 @@ export function nextFailures(cur: Readonly<Record<string, WriteFailure>>, ev: Ws
   return cur as Record<string, WriteFailure>
 }
 
+/** A writer's start that did not happen, on its document. */
+export interface WriteRefusal {
+  slug: string
+  refusal: Refusal
+  seq: number
+}
+
+/** The refusals standing after `ev`, per document: set by a `refused` record, ended by a later write starting or being
+ * saved. Pure. */
+export function nextRefusals(cur: Readonly<Record<string, WriteRefusal>>, ev: WsEvent): Record<string, WriteRefusal> {
+  const e = ev as { type?: unknown; slug?: unknown; status?: unknown; refused?: unknown; seq?: unknown }
+  if (e.type !== 'report' || typeof e.slug !== 'string' || !e.slug) return cur as Record<string, WriteRefusal>
+  if (e.status === 'refused' && e.refused && typeof e.refused === 'object') {
+    const r = e.refused as Refusal
+    return { ...cur, [e.slug]: { slug: e.slug, refusal: { ...r, kind: r.kind ?? 'error', reason: r.reason ?? '' }, seq: typeof e.seq === 'number' ? e.seq : -1 } }
+  }
+  if ((e.status === 'generating' || e.status === 'generated' || e.status === 'deleted') && cur[e.slug]) {
+    const next = { ...cur }
+    delete next[e.slug]
+    return next
+  }
+  return cur as Record<string, WriteRefusal>
+}
+
+let refusals: Record<string, WriteRefusal> = {}
+
 let failures: Record<string, WriteFailure> = {}
 const subs = new Set<() => void>()
 
 // listening from module load, before the stream opens, so the replayed history reaches the store
 bus.on('wsEvent', (ev) => {
   const next = nextFailures(failures, ev)
-  if (next === failures) return
+  const nextR = nextRefusals(refusals, ev)
+  if (next === failures && nextR === refusals) return
   failures = next
+  refusals = nextR
   subs.forEach((fn) => fn())
 })
+
+/** A refusal this tab's own Write was just answered with, before the stream's record of it arrives. */
+export function noteRefusal(slug: string, refusal: Refusal): void {
+  refusals = { ...refusals, [slug]: { slug, refusal, seq: refusals[slug]?.seq ?? -2 } }
+  subs.forEach((fn) => fn())
+}
+
+/** The writers' refusals standing per document, less those the analyst dismissed in this tab. */
+export function useWriteRefusals(): { refusals: Record<string, WriteRefusal>; dismiss: (slug: string) => void } {
+  const all = useSyncExternalStore(subscribe, () => refusals, () => refusals)
+  const dismiss = (slug: string) => {
+    const next = { ...refusals }
+    delete next[slug]
+    refusals = next
+    subs.forEach((fn) => fn())
+  }
+  return { refusals: all, dismiss }
+}
 
 function subscribe(fn: () => void): () => void {
   subs.add(fn)
