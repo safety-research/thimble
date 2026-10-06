@@ -2799,12 +2799,13 @@ def message(c: str, slug: str, text: str, *, by: str = "browser", route: str = C
 
 def click_refused(c: str, slug: str) -> dict[str, Any] | None:
     """A Build, Retry or accept click that cannot start a builder now, refused at once as Start is
-    (subagents.refusal_before: main not started by `thimble`, main in plan mode, no hooks module): the proposal keeps
-    its status and records the refusal, which its chip shows. None when nothing stands in the way. Queued instead, the
-    build waited for a session that could start it and started by itself later (live check L15)."""
+    (subagents.refusal_before: main not started by `thimble`, or no hooks module; in plan mode --agent-check refuses
+    the builder's start as it runs): the proposal keeps its status and records the refusal, which its chip shows. None
+    when nothing stands in the way. Queued instead, the build waited for a session that could start it and started by
+    itself later (live check L15)."""
     from . import subagents  # noqa: PLC0415
 
-    before = subagents.refusal_before(c)
+    before = subagents.refusal_before(c, click=True)
     if before is None:
         return None
     refused = {"kind": before.kind, "reason": before.reason, "request": None, "at": _now()}

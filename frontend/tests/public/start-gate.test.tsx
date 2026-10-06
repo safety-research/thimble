@@ -76,7 +76,7 @@ describe('the Start gate', () => {
     expect(sent[0].body).toEqual({ deck: true, views: true, critique: false, report: true, model: 'claude-haiku-4-5-20251001' })
   })
 
-  test("without thimble's module, or in plan mode, Start is off and the line says why", async () => {
+  test("without thimble's module Start is off and the line says why; in plan mode the line warns", async () => {
     const off = await mount(<StartGate ws="mini" model="claude-opus-5-5" effort="high" main={{ module: false, module_why: 'THIMBLE_NO_MODULE is set' }} />)
     await settle()
     expect(startButton(off).disabled).toBe(true)
@@ -85,9 +85,12 @@ describe('the Start gate', () => {
     expect(line).toContain('Unset THIMBLE_NO_MODULE, then run `thimble -c`.')
     await click(startButton(off))
     expect(sent).toEqual([])
+    // plan mode warns and leaves Start on (live check L21): the mode thimble knows is stale after a shift+tab while main
+    // is idle, and the server refuses a start in plan mode from the mode as the start runs
     const plan = await mount(<StartGate ws="mini" model="claude-opus-5-5" effort="high" main={{ attached: { session: 's', cwd: '/c', since: '', permission_mode: 'plan' } }} />)
-    expect(startButton(plan).disabled).toBe(true)
+    expect(startButton(plan).disabled).toBe(false)
     expect(plan.querySelector('.chat-gate-mode')!.textContent).toBe(PLAN_MODE_LINE)
+    expect(plan.querySelector('.chat-gate-mode')!.getAttribute('role')).toBe('alert')
   })
 
   test("in a session thimble did not start, Start is off with the plain-claude warning, not the modules-off line", async () => {

@@ -472,8 +472,8 @@ async def test_the_analyst_s_stop_and_main_s_quit_end_a_build_failed_with_retry(
     assert "stopped_by" not in _prop(other), "Retry clears it"
 
 
-async def test_retry_in_a_plain_claude_or_in_plan_mode_is_refused_at_once_and_queues_nothing(board, bridge, gates,
-                                                                                            monkeypatch):
+async def test_retry_in_a_plain_claude_or_without_the_module_is_refused_at_once_and_queues_nothing(board, bridge, gates,
+                                                                                                monkeypatch):
     """Live check L15: Retry clicked while main was a plain `claude` queued the build under the session launch.json
     named, where it waited and would have started by itself once that session came back. A Build, Retry or accept click
     is refused at once as Start is: the proposal stays failed with the refusal, and nothing is queued or spawned."""
@@ -492,11 +492,11 @@ async def test_retry_in_a_plain_claude_or_in_plan_mode_is_refused_at_once_and_qu
     assert views.accept(CORPUS, "viewer")["refused"]["kind"] == subagents.NOT_LAUNCHED
     assert _prop("viewer")["status"] == "suggested"
     monkeypatch.setattr(cc_plugin, "main_fenced", lambda c: True, raising=False)
-    monkeypatch.setattr(session, "main_mode", lambda c: "plan")
-    assert views.retry(CORPUS, "posts")["refused"]["kind"] == subagents.HOOK
+    bridge.is_live, bridge.reason = False, "THIMBLE_NO_MODULE is set"
+    assert views.retry(CORPUS, "posts")["refused"]["kind"] == subagents.NO_MODULE
     await asyncio.sleep(0.05)
     assert (CORPUS, "posts") not in dev._view_queue and not bridge.ops("spawn")
-    monkeypatch.setattr(session, "main_mode", lambda c: "auto")
+    bridge.is_live = True
     assert views.retry(CORPUS, "posts")["status"] == "queued"
     await _until(lambda: bridge.ops("spawn"), "Retry did not start the build once nothing stood in the way")
 

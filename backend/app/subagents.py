@@ -35,6 +35,7 @@ import importlib
 import inspect
 import json
 import logging
+import re
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -79,6 +80,8 @@ STOPPED_REFUSED = "refused"
 QUIT_LINE = "Stopped when Claude Code quit."  # a chat's end line, its card's text is the browser's (AgentCard)
 WORK_DIRS = ("orient/work", "writers", "critique-work", "check-work", "views-work", "extension/views")
 LIMIT_RE_WORDS = ("concurrent", "subagents")  # Claude Code's concurrency-limit text holds both (R2, the module's answer)
+# the label Claude Code puts before a PreToolUse hook's deny in what $.agent.spawn and $.tool.call answer
+HOOK_ERROR_RE = re.compile(r"^\s*PreToolUse:[A-Za-z]+ hook error:\s*")
 
 
 def _now() -> str:
@@ -374,6 +377,8 @@ def _from_module(raw: Any, why: Callable[[], str] = lambda: "") -> Answer:
         if k in raw:
             return Answer({NO_MODULE: str(raw.get(k) or "") or why()})
     ans = Answer(raw)
+    if isinstance(ans.get("deny"), str):  # thimble's own reason, as the analyst reads it, without Claude Code's label
+        ans["deny"] = HOOK_ERROR_RE.sub("", ans["deny"]) or ans["deny"]
     text = str(ans.get("error") or ans.get("deny") or "")
     if "limit" not in ans and text and all(w in text.lower() for w in LIMIT_RE_WORDS):
         return Answer({"limit": text})
@@ -497,7 +502,7 @@ async def start_it(c: str, rid: str) -> Answer:
         return refusal(HOOK, "this request is not refused")
     if r.get("caller_role"):  # the critic: the module would start it as main's subagent, not its orientation's
         return refusal(HOOK, "an agent's own start (the orientation's critic) can't be started from the browser")
-    if (before := refusal_before(c)) is not None:  # as every start: main in plan mode, unfenced, or no module
+    if (before := refusal_before(c, click=True)) is not None:  # as every click: unfenced or no module
         return before
     _set(c, rid, route=CLICK, state="pending", claimed_by=None, reason=None, refused_kind=None, again=files.now())
     return await _spawn(c, rid, r)
@@ -518,15 +523,17 @@ async def again(c: str, rid: str) -> Answer:
 # --------------------------------------------------------------------------- refusals before a start
 
 
-def refusal_before(c: str) -> Answer | None:
+def refusal_before(c: str, click: bool = False) -> Answer | None:
     """Why no agent of thimble's can start now in workspace `c`, before any request is made: main was not started by
     `thimble` (not-launched), main is in plan mode (hook, start-plan-mode), or the module does not hold the long-poll
-    (no-module). None when nothing stands in the way."""
+    (no-module). None when nothing stands in the way. A `click` leaves plan mode to --agent-check, which reads main's mode
+    as the module's call runs: thimble hears main's mode only at main's turns, so after a shift+tab while main is idle
+    the mode it keeps is stale (live check L21), and the click would stay refused after the analyst left plan mode."""
     from . import cc_plugin, module_bridge, session  # noqa: PLC0415
 
     if not cc_plugin.main_fenced(c):
         return refusal(NOT_LAUNCHED, tools.hint("start-refused-not-launched"))
-    if session.main_mode(c) == files.PLAN_MODE:
+    if not click and session.main_mode(c) == files.PLAN_MODE:
         return refusal(HOOK, tools.hint("start-plan-mode"))
     if not module_bridge.live(c):
         return refusal(NO_MODULE, tools.hint("start-refused-no-module", reason=str(module_bridge.why_not(c) or "")))
@@ -558,7 +565,7 @@ async def start_job(c: str, role: str, key: str, task: str, values: dict[str, An
     if role not in TYPES or role == HELPER:
         raise ValueError(f"no role {role!r}")
     if check and not caller_role:
-        before = refusal_before(c)
+        before = refusal_before(c, click=route == CLICK)
         if before is not None:
             return before
     rid = request_id or files.request_id()
@@ -657,7 +664,7 @@ async def send(c: str, agent_id: str, text: str, *, values: dict[str, Any] | Non
     a = agent(c, agent_id)
     if a is None:
         return refusal(EARLIER, tools.hint("orient-continue-earlier-session", resume=""))
-    before = refusal_before(c)
+    before = refusal_before(c, click=route == CLICK)
     if before is not None:
         return before
     vals = dict(values or a.get("values") or {})

@@ -243,18 +243,28 @@ async def test_start_it_never_starts_an_agent_s_own_start_as_main_s_subagent(bri
 
 async def test_start_it_is_refused_as_any_start_is_in_plan_mode_and_without_the_module(bridge, models, monkeypatch):
     """Start it is a click, and like every start it is refused while main is in plan mode (U20) or the module is not
-    live, before anything reaches the module; the request stays refused, so Start it works once that changes."""
+    live; the request stays refused, so Start it works once that changes. Plan mode is --agent-check's to refuse, from
+    main's mode as the module's call runs, since the mode the server keeps is stale after a shift+tab while main is idle
+    (live check L21): a click in a remembered plan mode still reaches the module."""
     from app import session
 
     ans = await subagents.start_job(CORPUS, "writer", "writer:report", "w", {"model": "m", "effort": "e"},
                                     subagents.TYPED)
     subagents.refuse(CORPUS, ans["request"], "[Credential Exploration]", subagents.AUTO_MODE)
     monkeypatch.setattr(session, "main_mode", lambda c: "plan")
+    bridge.answers.append({"deny": f"PreToolUse:Agent hook error: {HINTS['start-plan-mode']}"})  # main is in plan mode
     again = await subagents.start_it(CORPUS, ans["request"])
-    assert again.refused and again.kind == subagents.HOOK and not bridge.ops("spawn")
+    assert again.refused and again.kind == subagents.HOOK and again.reason == HINTS["start-plan-mode"], \
+        "thimble's own reason, without Claude Code's PreToolUse label"
     assert subagents.request(CORPUS, ans["request"])["state"] == "refused"
+    assert (await subagents.start_it(CORPUS, ans["request"])).started, "main left plan mode while idle"
     monkeypatch.setattr(session, "main_mode", lambda c: "default")
-    assert (await subagents.start_it(CORPUS, ans["request"])).started
+    ans2 = await subagents.start_job(CORPUS, "writer", "writer:other", "w", {}, subagents.TYPED)
+    subagents.refuse(CORPUS, ans2["request"], "[Credential Exploration]", subagents.AUTO_MODE)
+    bridge.is_live, bridge.reason = False, "THIMBLE_NO_MODULE is set"
+    spawns = len(bridge.ops("spawn"))
+    assert (await subagents.start_it(CORPUS, ans2["request"])).kind == subagents.NO_MODULE
+    assert len(bridge.ops("spawn")) == spawns, "nothing reaches a module that is not live"
 
 
 # --------------------------------------------------------------------------- follow-ups and stops

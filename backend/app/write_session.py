@@ -114,7 +114,7 @@ async def start(c: str, doc: str, request: str = "", after: str = "", *, route: 
         start_program(c, doc, t, request, after, prompt, agent.replacing, fields)
         return subagents.Answer({"program": agent.replacing.extension})
     if route == subagents.TYPED or route == subagents.CLICK:
-        before = subagents.refusal_before(c)
+        before = subagents.refusal_before(c, click=route == subagents.CLICK)
         if before is not None:
             return before
     path = await asyncio.to_thread(write_context, c, t, request, after)
