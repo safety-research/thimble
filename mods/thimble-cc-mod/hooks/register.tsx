@@ -4856,7 +4856,8 @@ async function drawPipePane($: Dollar, e: PaneEvent): Promise<RenderElement> {
         </Box>
       </Box>
     ) : null
-    // the description and the actions share the second rule (a panel has two at most)
+    // the description and the actions share the second rule (a panel has two at most), a blank row between them
+    if (controls.some(Boolean) || field) out.push(<Text key="vgap"> </Text>)
     out.push(...bottomRows($, e, cols, controls, [field], [...hints, 'f for the files', 'x to close'], false))
   } else out.push(hintsEl(els, ['f for the files', 'x to close'], cols))
   keys.push({ key: 'close', hotkey: 'x', onPress: () => void closePanel($) })
