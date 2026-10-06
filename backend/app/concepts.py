@@ -58,7 +58,7 @@ from fastapi import APIRouter, HTTPException, Response
 from pydantic import BaseModel, Field
 from sse_starlette import EventSourceResponse, ServerSentEvent
 
-from . import capture, cite, concept_scan, config, corpus, labels_store, records, refs
+from . import capture, cite, concept_scan, config, corpus, labels_store, ledger, records, refs
 from .ledger import append_jsonl, append_jsonl_many, atomic_write_text, read_json
 
 log = logging.getLogger("thimble.concepts")
@@ -439,9 +439,11 @@ def read_concept(ws: Path, concept_id: str) -> dict | None:
 
 
 def write_concept(ws: Path, concept: dict) -> None:
+    """Replace the label's definition file whole, under its lock (ledger.locked)."""
     p = _concept_file(ws, concept["id"])
     p.parent.mkdir(parents=True, exist_ok=True)
-    atomic_write_text(p, json.dumps(concept, indent=1, ensure_ascii=False))
+    with ledger.locked(p):
+        atomic_write_text(p, json.dumps(concept, indent=1, ensure_ascii=False))
 
 
 def list_concepts(ws: Path, *, trials: bool = True) -> list[dict]:
@@ -496,15 +498,45 @@ def load_concept(c: str, concept_id: str) -> tuple[Path, dict]:
 INDEX_BUILDING = "the label index is being built; the counts appear when it is done"
 BUILD_WAIT_S = 600.0  # a writer waits this long for a rebuild in progress before it goes on without it
 
-_store_locks: dict[Path, threading.RLock] = {}
+_store_locks: dict[Path, "_StoreLock"] = {}
 _store_locks_guard = threading.Lock()
 _building: dict[Path, threading.Thread] = {}  # rebuilds in progress, by labels file
 _building_answers: dict[Path, dict] = {}  # {path: rows} the jsonl answered while its store is built
 
 
-def _store_lock(p: Path) -> threading.RLock:
+class _StoreLock:
+    """A labels file's lock: this process's threads wait on an RLock, then the process takes ledger.locked on the file,
+    since in terminal mode `thimble-run` (a code label's rows), `thimble act` (a verdict) and the shim (a prompt label's
+    rows) append to one labels file from three processes. Re-entrant, as the RLock it replaces."""
+
+    def __init__(self, p: Path) -> None:
+        self.p = p
+        self.rlock = threading.RLock()
+        self._held = threading.local()
+
+    def __enter__(self) -> "_StoreLock":
+        self.rlock.acquire()
+        cm = ledger.locked(self.p)
+        cm.__enter__()
+        stack = getattr(self._held, "stack", None)
+        if stack is None:
+            stack = self._held.stack = []
+        stack.append(cm)
+        return self
+
+    def __exit__(self, *exc: Any) -> None:
+        try:
+            self._held.stack.pop().__exit__(*exc)
+        finally:
+            self.rlock.release()
+
+
+def _store_lock(p: Path) -> _StoreLock:
     with _store_locks_guard:
-        return _store_locks.setdefault(p, threading.RLock())
+        lock = _store_locks.get(p)
+        if lock is None:
+            lock = _store_locks[p] = _StoreLock(p)
+        return lock
 
 
 def _store_building(p: Path) -> bool:
@@ -3592,12 +3624,13 @@ def label_card(c: str, concept: dict, group: str | None, created_by: str, questi
 
     ws = _ws(c)
     title = " ".join(str(question or "").split())
-    for nb, cell in _label_cards(ws, concept["id"]):
-        if title and cell.get("title") != title and cell.get("locked") is not True:
-            cell["title"] = title
-            cell["ts"] = _now()
-            notebook.write_notebook(ws, nb)
-        return dict(cell)
+    with notebook.editing(ws):
+        for nb, cell in _label_cards(ws, concept["id"]):
+            if title and cell.get("title") != title and cell.get("locked") is not True:
+                cell["title"] = title
+                cell["ts"] = _now()
+                notebook.write_notebook(ws, nb)
+            return dict(cell)
     nb = notebook.read_notebook(ws, group) if group and ID_RE.match(group) else None
     if nb is None:
         from . import tools
@@ -3613,10 +3646,11 @@ def _drop_label_cards(c: str, concept_id: str) -> None:
     from . import notebook
 
     ws = _ws(c)
-    for nb, cell in _label_cards(ws, concept_id):
-        nb["cells"] = [x for x in nb["cells"] if x.get("id") != cell["id"]]
-        notebook.write_notebook(ws, nb)
-        _emit(c, {"type": "cell", "notebook": nb["id"], "cell": cell["id"], "kind": "note", "op": "deleted"})
+    with notebook.editing(ws):
+        for nb, cell in _label_cards(ws, concept_id):
+            nb["cells"] = [x for x in nb["cells"] if x.get("id") != cell["id"]]
+            notebook.write_notebook(ws, nb)
+            _emit(c, {"type": "cell", "notebook": nb["id"], "cell": cell["id"], "kind": "note", "op": "deleted"})
 
 
 # --------------------------------------------------------------------------- refs hook

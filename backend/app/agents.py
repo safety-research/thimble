@@ -26,7 +26,7 @@ from typing import Any, Awaitable, Callable
 from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel
 
-from . import config, investigation, tools
+from . import config, investigation, ledger, tools
 from .ledger import atomic_write_text
 
 log = logging.getLogger("thimble.agents")
@@ -94,8 +94,23 @@ def meta_or_none(c: str, chat_id: str) -> dict | None:
 
 
 def write_meta(c: str, meta: dict) -> None:
+    """Replace the chat's meta whole, under its lock (ledger.locked), which a caller that read the meta to change it
+    holds already (change_meta)."""
     meta_path, _ = paths(c, meta["id"])
-    atomic_write_text(meta_path, json.dumps(meta, indent=1))
+    with ledger.locked(meta_path):
+        atomic_write_text(meta_path, json.dumps(meta, indent=1))
+
+
+def change_meta(c: str, chat_id: str, change: Callable[[dict], Any]) -> dict:
+    """Read the chat's meta, pass it to `change`, which changes it in place, and write it, all under the meta's lock:
+    the mirror, the tools and `thimble act` change metas from more than one process in terminal mode. 404 for a chat
+    that does not exist."""
+    meta_path, _ = paths(c, chat_id)
+    with ledger.locked(meta_path):
+        meta = read_meta(c, chat_id)
+        change(meta)
+        write_meta(c, meta)
+    return meta
 
 
 def _defaults(meta: dict) -> dict:
@@ -120,8 +135,12 @@ def _defaults(meta: dict) -> dict:
 
 
 def append(log_path: Path, record: dict) -> None:
-    with log_path.open("a", encoding="utf-8") as f:
-        f.write(json.dumps(record, ensure_ascii=False) + "\n")
+    """Append one record to a chat's log under the log's lock, since a record's line index is its id and more than one
+    process appends in terminal mode (the mirror, the tools)."""
+    with ledger.locked(log_path):
+        ledger.heal_tail(log_path)
+        with log_path.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(record, ensure_ascii=False) + "\n")
 
 
 # workspaces/<c>/permissions.jsonl: each permission request of the workspace's sessions and its answer, which a problem
@@ -454,7 +473,7 @@ def group_for(c: str, meta: dict) -> str:
     nb = notebook.create_notebook(_ws(c), f"main/{meta.get('title') or meta['id']}", role=notebook.DEFAULT_ROLE,
                                   parent=parent, anchor=m.group(1) if m else None, chat=meta["id"])
     meta["group"] = nb["id"]
-    write_meta(c, meta)
+    change_meta(c, str(meta["id"]), lambda m_: m_.update(group=nb["id"]))
     return nb["id"]
 
 
@@ -507,33 +526,41 @@ def claim_cell(c: str, cid: str, chat_id: str, *, edit: bool = False) -> None:
         from . import notebook  # noqa: PLC0415
 
         ws = notebook._ws(c)
-        hit = notebook._locate(ws, cid)
-        if hit is None:
-            return
-        nb, cell = hit
-        who = f"chat:{chat_id}"
-        changed = False
-        if edit:
-            last = (cell.get("edited") or [None])[-1]
-            if isinstance(last, dict) and last.get("by") == tools.TERMINAL:
-                try:
-                    age = (datetime.now(timezone.utc) - datetime.fromisoformat(str(last.get("ts")))).total_seconds()
-                except ValueError:
-                    age = CLAIM_EDIT_S + 1
-                if age <= CLAIM_EDIT_S:
-                    last["by"] = who
-                    changed = True
-        elif cell.get("created_by") == tools.TERMINAL:
-            kernel = notebook._kernel_for(nb, None, cell, ws)
-            cell["created_by"] = who
-            if cell.get("kernel") is None and notebook._kernel_for(nb, None, cell, ws) != kernel:
-                cell["kernel"] = kernel or ""
-            changed = True
-        if changed:
-            notebook.write_notebook(ws, nb)
-            notebook._emit(c, cell)
+        with notebook.editing(ws):
+            _claim(c, ws, cid, chat_id, edit)
     except Exception:  # noqa: BLE001 — who made a card is bookkeeping; it never breaks the mirror
         log.debug("could not credit cell %s to chat %s", cid, chat_id, exc_info=True)
+
+
+def _claim(c: str, ws: Path, cid: str, chat_id: str, edit: bool) -> None:
+    """claim_cell's change, with the groups' lock held."""
+    from . import notebook  # noqa: PLC0415
+
+    hit = notebook._locate(ws, cid)
+    if hit is None:
+        return
+    nb, cell = hit
+    who = f"chat:{chat_id}"
+    changed = False
+    if edit:
+        last = (cell.get("edited") or [None])[-1]
+        if isinstance(last, dict) and last.get("by") == tools.TERMINAL:
+            try:
+                age = (datetime.now(timezone.utc) - datetime.fromisoformat(str(last.get("ts")))).total_seconds()
+            except ValueError:
+                age = CLAIM_EDIT_S + 1
+            if age <= CLAIM_EDIT_S:
+                last["by"] = who
+                changed = True
+    elif cell.get("created_by") == tools.TERMINAL:
+        kernel = notebook._kernel_for(nb, None, cell, ws)
+        cell["created_by"] = who
+        if cell.get("kernel") is None and notebook._kernel_for(nb, None, cell, ws) != kernel:
+            cell["kernel"] = kernel or ""
+        changed = True
+    if changed:
+        notebook.write_notebook(ws, nb)
+        notebook._emit(c, cell)
 
 
 # --------------------------------------------------------------------------- workspace events (coalesced)
@@ -667,12 +694,13 @@ def on_agent_finished(fn: Callable[[str, dict], None]) -> None:
 
 
 def finish_agent(c: str, chat_id: str, status: str, result: str | None = None, **fields: Any) -> dict:
-    meta = read_meta(c, chat_id)
-    meta["status"] = status if status in AGENT_STATUSES else "done"
-    meta["result"] = result
-    meta["ts_end"] = _now()
-    meta.update({k: v for k, v in fields.items() if v is not None})
-    write_meta(c, meta)
+    def end(meta: dict) -> None:
+        meta["status"] = status if status in AGENT_STATUSES else "done"
+        meta["result"] = result
+        meta["ts_end"] = _now()
+        meta.update({k: v for k, v in fields.items() if v is not None})
+
+    meta = change_meta(c, chat_id, end)
     _, log_path = paths(c, chat_id)
     if status == "done":
         append(log_path, {"type": "done", "ts": _now(), "result": result})
@@ -690,9 +718,7 @@ def finish_agent(c: str, chat_id: str, status: str, result: str | None = None, *
 
 
 def update_agent(c: str, chat_id: str, **fields: Any) -> dict:
-    meta = read_meta(c, chat_id)
-    meta.update(fields)
-    write_meta(c, meta)
+    meta = change_meta(c, chat_id, lambda m: m.update(fields))
     _notify(c, chat_id)
     return meta
 
@@ -838,6 +864,14 @@ async def get_route(c: str, chat_id: str) -> Response:
 
 @router.put("/ws/{c}/chats/{chat_id}")
 async def update_route(c: str, chat_id: str, body: ChatUpdate) -> dict:
+    with ledger.locked(paths(c, chat_id)[0]):
+        meta = _update(c, chat_id, body)
+    _notify(c, chat_id)
+    return meta
+
+
+def _update(c: str, chat_id: str, body: ChatUpdate) -> dict:
+    """update_route's change, with the meta's lock held."""
     meta = read_meta(c, chat_id)
     if body.title is not None:
         old = str(meta.get("title") or "")
@@ -854,7 +888,6 @@ async def update_route(c: str, chat_id: str, body: ChatUpdate) -> dict:
     if body.name is not None:
         _rename(c, meta, body.name)
     write_meta(c, meta)
-    _notify(c, chat_id)
     return meta
 
 
@@ -877,9 +910,7 @@ def _rename(c: str, meta: dict, name: str) -> None:
 
 def rename_chat(c: str, chat_id: str, name: str) -> dict:
     """Rename a chat as the thread tree lists it (_rename); the browser's Rename and main's rename_thread."""
-    meta = read_meta(c, chat_id)
-    _rename(c, meta, name)
-    write_meta(c, meta)
+    meta = change_meta(c, chat_id, lambda m: _rename(c, m, name))
     _notify(c, chat_id)
     return meta
 
@@ -888,10 +919,11 @@ def _rename_group(c: str, group: str, old: str, new: str) -> None:
     """A renamed thread's canvas group follows its name while the group still has the name the thread gave it."""
     from . import notebook  # noqa: PLC0415
 
-    nb = notebook.read_notebook(_ws(c), group)
-    if nb is not None and nb.get("title") == old:
-        nb["title"] = new
-        notebook.write_notebook(_ws(c), nb)
+    with notebook.editing(_ws(c)):
+        nb = notebook.read_notebook(_ws(c), group)
+        if nb is not None and nb.get("title") == old:
+            nb["title"] = new
+            notebook.write_notebook(_ws(c), nb)
 
 
 def _trash(c: str, chat_id: str) -> None:

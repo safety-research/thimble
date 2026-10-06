@@ -493,10 +493,11 @@ def analyst_notebook(c: str) -> str:
     if pick is None:
         pick = notebook.create_notebook(ws, ANALYST_NOTEBOOK_TITLE, role="analyst", created_by=BROWSER_AUTHOR)
     elif not pick.get("created_by"):
-        nb = notebook.read_notebook(ws, pick["id"])
-        if nb is not None:
-            nb["created_by"] = BROWSER_AUTHOR
-            notebook.write_notebook(ws, nb)
+        with notebook.editing(ws):
+            nb = notebook.read_notebook(ws, pick["id"])
+            if nb is not None:
+                nb["created_by"] = BROWSER_AUTHOR
+                notebook.write_notebook(ws, nb)
     if active != pick["id"]:
         settings["active_notebook"] = pick["id"]
         write_json(ws / "settings.json", settings)
@@ -561,9 +562,10 @@ def session_notebook(ctx: "Ctx") -> str:
             if not r.get("parent") and r.get(SESSION_GROUP_KEY) == key]  # notebook.summary carries the stamp
     if mine:
         return str(mine[0]["id"])
-    nb = notebook.create_notebook(ctx.ws, session_group_title(ctx.c, key), created_by=_group_author(ctx))
-    nb[SESSION_GROUP_KEY] = key
-    notebook.write_notebook(ctx.ws, nb)
+    with notebook.editing(ctx.ws):
+        nb = notebook.create_notebook(ctx.ws, session_group_title(ctx.c, key), created_by=_group_author(ctx))
+        nb[SESSION_GROUP_KEY] = key
+        notebook.write_notebook(ctx.ws, nb)
     return str(nb["id"])
 
 
@@ -987,7 +989,15 @@ def _role_by_title(title: str) -> str:
 def group_path(ws: Path, path: str, *, created_by: str | None = None, made: "builtins.list[str] | None" = None) -> str:
     """The group a path of titles names (`Orientation / Final`), made where missing, matched by title without case; a
     group
-    stored under the whole path as one title is that group. Each title made is appended to `made`."""
+    stored under the whole path as one title is that group. Each title made is appended to `made`. Under the groups'
+    lock, so two processes that look for one path make it once."""
+    from . import notebook
+
+    with notebook.editing(ws):
+        return _group_path(ws, path, created_by, made)
+
+
+def _group_path(ws: Path, path: str, created_by: str | None, made: "builtins.list[str] | None") -> str:
     from . import notebook
 
     parts = [p.strip() for p in path.split(GROUP_PATH_SEP.strip()) if p.strip()]
