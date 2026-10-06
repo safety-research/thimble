@@ -1372,6 +1372,9 @@ def install(src: Path, ws: Path, corpus: Path, *, home: Path | None = None,
             meta.update(status="done", precached=mark)
             meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=1), "utf-8")
             (tmp / "chats" / f"{chat}.jsonl").touch()
+        from . import views  # noqa: PLC0415 — the views' module is the server's, loaded only here
+
+        views.keep_installed(tmp)  # the pre-cache leaves out the views' kept versions, which readers need (read_built)
         tmp.rename(ws)
     except BaseException:
         shutil.rmtree(tmp, ignore_errors=True)

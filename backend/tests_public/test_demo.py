@@ -507,6 +507,27 @@ def test_install_fills_the_placeholders_and_marks_the_workspace_precached(tmp_pa
         demo.install(out, new_ws, new_corpus)
 
 
+def test_install_keeps_each_view_at_the_version_it_passed_so_readers_see_it(tmp_path):
+    """A pre-cache leaves out thimble's state of the views (views/), and readers see a view only at a version kept there
+    (views.read_built's digest rule). Install keeps that copy for each view whose files still hash to their stamp, and
+    none for one whose stamp names other files."""
+    from app import views
+
+    out, corpus, _ = made(tmp_path)
+    src = out / "workspace" / "extension" / "views" / "v1"
+    raw = json.loads((src / "view.json").read_text())
+    version = views.view_digest(src)[:12]
+    (src / "view.json").write_text(json.dumps({**raw, "version": version}))
+    new_ws = tmp_path / "b" / "toy"
+    demo.install(out, new_ws, corpus)
+    kept = new_ws / "views" / ".versions" / "v1" / version
+    assert (kept / "view.json").is_file() and (kept / "view.html").read_text() == "<p>view</p>"
+    (src / "view.json").write_text(json.dumps({**raw, "version": "0123456789ab"}))
+    other = tmp_path / "c" / "toy"
+    demo.install(out, other, corpus)
+    assert not (other / "views" / ".versions" / "v1").exists(), "a stamp that names other files is no pass"
+
+
 def test_install_refuses_paths_outside_the_workspace_and_files_of_other_kinds(tmp_path):
     out, corpus, _ = made(tmp_path)
     man = json.loads((out / demo.MANIFEST).read_text())

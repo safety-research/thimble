@@ -954,16 +954,40 @@ def _versions_dir(c: str, slug: str) -> Path:
 
 def _publish(c: str, slug: str, version: str) -> None:
     """Keep the view's files as they passed their checks at `version` (VERSIONS_SUBDIR), the newest VERSIONS_KEPT."""
-    root = _versions_dir(c, slug)
+    _keep_version(views_dir(c) / slug, _versions_dir(c, slug), version)
+
+
+def keep_installed(ws: Path) -> list[str]:
+    """The copies kept at their versions (VERSIONS_SUBDIR) of the views of a workspace folder thimble installs whole (a
+    pre-cache, demo.install), which carries the views' files with their `version` stamps but not thimble's state of
+    them: a view whose files still hash to its stamp gets that copy, so readers see it as it passed when the pre-cache
+    was made (read_built) rather than nothing until its checks run again here. The slugs kept."""
+    root = ws / LOCAL_SUBDIR / VIEWS_SUBDIR
+    kept: list[str] = []
+    if not root.is_dir() or root.is_symlink():
+        return kept
+    for d in sorted(root.iterdir()):
+        if not SLUG_RE.match(d.name) or not d.is_dir() or d.is_symlink():
+            continue
+        raw = _view_json(d)
+        version = str(raw.get("version") or "")
+        if raw.get("built") and VERSION_RE.match(version) and view_digest(d)[:12] == version:
+            _keep_version(d, ws / VIEWS_SUBDIR / VERSIONS_SUBDIR / d.name, version)
+            kept.append(d.name)
+    return kept
+
+
+def _keep_version(src: Path, root: Path, version: str) -> None:
+    """The files of the view folder `src` kept at `version` in `root`, the newest VERSIONS_KEPT of its versions."""
     dst = root / version
     if not dst.is_dir():
         tmp = root / f".{version}.tmp"
         shutil.rmtree(tmp, ignore_errors=True)
         tmp.mkdir(parents=True)
-        for f in (views_dir(c) / slug).iterdir():
+        for f in src.iterdir():
             if f.is_file() and not f.is_symlink():
                 shutil.copy2(f, tmp / f.name)
-        view_libs.copy_lib(views_dir(c) / slug, tmp)
+        view_libs.copy_lib(src, tmp)
         os.replace(tmp, dst)
     os.utime(dst)
     kept = sorted((x for x in root.iterdir() if x.is_dir() and VERSION_RE.match(x.name)),
