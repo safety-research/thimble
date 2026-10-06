@@ -52,7 +52,9 @@ TASKS: dict[str, Task] = {
     "labels": Task("concepts:labels_task", "labels"),
     "label-draft": Task("concepts:draft_task", "labels"),
     "card-check": Task("card_check:check_task", "cardCheck"),
-    "view-review": Task("view_review:review_task", "cardCheck"),
+    # the view review is a subagent with pictures and tools (view_review.py): its prompt part is the reviewer's
+    # registered prompt, and a program does not replace it
+    "view-review": Task("view_review:review_task", "cardCheck", session=True),
     "view-fit": Task("view_fit:fit_task", "labels"),
     "file-viewer": Task("views:file_viewer_task", "dev"),
     "checks": Task("checks:check_task", "checks", ("read_ref", "list_cards", "add_comment"), session=True),

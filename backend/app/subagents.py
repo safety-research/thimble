@@ -1,5 +1,5 @@
-"""thimble's agents as subagents of the analyst's Claude Code session (main): the orientation, its critic and the writers,
-and, with lane E, view builds, view reviews and report checks. Each is a named subagent with a fresh context, of a type
+"""thimble's agents as subagents of the analyst's Claude Code session (main): the orientation, its critic, the writers,
+the view builders and reviewers (dev.py, view_review.py) and the runs of report checks (checks.py). Each is a named subagent with a fresh context, of a type
 thimble's plugin module registers (`thimble:<role>`, roles); the orientation's own subagents run as `thimble:helper`.
 
 Starts. A click in the browser (Start, Write, Start it, …) starts its agent through the plugin's module, with no turn of
@@ -126,6 +126,16 @@ TYPES: dict[str, Type] = {
                    "app.write_session:definition", "app.write_session:OWN_TOOLS",
                    "app.write_session:subagent_started", "app.write_session:subagent_ended",
                    "app.write_session:subagent_refused"),
+    "view-builder": Type("view-builder", tools.VIEW_SESSION, "dev", "dev", "dev", "app.view_tools:builder_definition",
+                         "app.view_tools:BUILDER_TOOLS", "app.dev:build_started", "app.dev:build_ended",
+                         "app.dev:build_refused"),
+    "view-reviewer": Type("view-reviewer", tools.REVIEW_SESSION, "dev", "dev", "dev",
+                          "app.view_tools:reviewer_definition", "app.view_tools:REVIEWER_TOOLS",
+                          "app.view_review:subagent_started", "app.view_review:subagent_ended",
+                          "app.view_review:subagent_refused"),
+    "check": Type("check", tools.CHECK_SESSION, "check", "checks", "checks", "app.checks:definition",
+                  "app.checks:OWN_TOOLS", "app.checks:subagent_started", "app.checks:subagent_ended",
+                  "app.checks:subagent_refused"),
     HELPER: Type(HELPER, None, None, "subagents", "orientation", "app.subagents:helper_definition"),
 }
 
@@ -200,8 +210,6 @@ def roles(c: str) -> dict[str, Role]:
     /api/module/roles): each of TYPES's with its fixed prompt and description, the full model id and explicit effort of
     Settings (values_for), `background: true`, `disallowedTools` with the web tools when its agent's `web` is off and
     `omitClaudeMd` when its `memory` is off; then the extensions' agents (extension_types)."""
-    from . import agent_session  # noqa: PLC0415 — its kept part holds the thimble tools' names
-
     out: dict[str, Role] = {}
     for role, t in TYPES.items():
         try:
@@ -214,7 +222,7 @@ def roles(c: str) -> dict[str, Role]:
         conf = _agent_conf(c, t.agent)
         denied = list(d.get("disallowedTools") or [])
         if conf.get("web") == "off":
-            denied += list(agent_session.WEB_TOOLS)
+            denied += list(tools.WEB_TOOLS)
         if denied:
             d["disallowedTools"] = list(dict.fromkeys(denied))
         if conf.get("memory") == "off":
@@ -576,10 +584,10 @@ async def _spawn(c: str, rid: str, r: dict[str, Any]) -> Answer:
 
 
 def _what(r: dict[str, Any]) -> str:
-    """The server-checked name a module note gives (module-started-note's {what}): a writer's document, a check's name;
-    never text an agent wrote."""
+    """The server-checked name a module note gives (module-started-note's {what}): a writer's document, a view's slug, a
+    check's id and its document; never text an agent wrote."""
     key = str(r.get("key") or "")
-    return key.split(":", 1)[1] if ":" in key else ""
+    return key.split(":", 1)[1].replace(":", " on ") if ":" in key else ""
 
 
 def bind(c: str, agent_id: str, rid: str) -> dict[str, Any] | None:
@@ -1297,11 +1305,9 @@ def _stop_background(short: str) -> None:
     never raises."""
     import subprocess  # noqa: PLC0415
 
-    from . import agent_session  # noqa: PLC0415
-
     try:
         subprocess.run([config.CLAUDE_BIN, "stop", short], capture_output=True, text=True, timeout=30,
-                       env=agent_session.environ())
+                       env=config.launch_environ())
     except (OSError, subprocess.SubprocessError):
         log.debug("background session %s was not stopped", short, exc_info=True)
 

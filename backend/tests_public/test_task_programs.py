@@ -241,7 +241,6 @@ OUTPUTS = {"labels": {"labels": [{"i": 1, "label": "friendly", "confidence": 0.8
            "label": {"name": "Curt", "scope": "files", "kind": "prompt", "text": "Is it curt?",
                      "values": ["curt", "not curt"], "marks": "span"},
            "critique": {"assessment": [{"problem": ""}] * 5, "question": "Q?", "code": "", "takeaway": "T."},
-           "findings": {"problems": ["The legend covers the chart."]},
            "decision": {"fits": True, "reason": "Each record is a post."},
            "proposal": {"help": False, "name": "", "why": "", "arrangement": ""}}
 
@@ -275,19 +274,15 @@ async def test_every_task_s_own_implementation_takes_its_input_from_a_program(tm
         "card-check": {"card": {"id": "c1", "kind": "code", "question": "How many curt replies?", "takeaway": "Two.",
                                 "citations": "", "code": "print(2)", "context": "", "typed": "", "kept": ""},
                        "picture": str(picture), "effort": "low"},
-        "view-review": {"view": {"slug": "board", "name": "Board", "description": "The posts by thread.",
-                                 "claims": ["board.jsonl"], "spec": "Unit: a post", "checks": []},
-                        "pictures": [{"path": str(picture), "about": "the view as it opens, 840 px wide"}],
-                        "controls": ["Day"], "records": "", "ask": False},
         "view-fit": {"view": {"name": "Board", "description": "The posts by thread."}, "files": "board.jsonl",
                      "samples": "board.jsonl\n  line 1: a post"},
         "file-viewer": {"path": "a.cast", "size": "2.0 KB", "count": "3", "suffix": ".cast",
                         "what": "its first 2 lines", "head": "{\"version\": 2}"},
     }
     marks = {"labels": "Thanks so much!", "label": "messages that sound curt", "critique": "How many curt replies?",
-             "findings": "the view as it opens, 840 px wide", "decision": "The posts by thread.", "proposal": "a.cast"}
-    names = {"labels": "labels", "label-draft": "label", "card-check": "critique", "view-review": "findings",
-             "view-fit": "decision", "file-viewer": "proposal"}
+             "decision": "The posts by thread.", "proposal": "a.cast"}
+    names = {"labels": "labels", "label-draft": "label", "card-check": "critique", "view-fit": "decision",
+             "file-viewer": "proposal"}
     for task, inp in inputs.items():
         active[:] = [_program(tmp_path / task, "own", task, DEFAULT)]
         res = await tasks.call(CORPUS, task, inp)
@@ -295,9 +290,9 @@ async def test_every_task_s_own_implementation_takes_its_input_from_a_program(tm
         tool = names[task]
         assert res.output == OUTPUTS[tool], task
         assert marks[tool] in seen[tool], (task, seen[tool][-400:])
-    assert seen["critique"].endswith("1 images") and seen["findings"].endswith("1 images")
+    assert seen["critique"].endswith("1 images")
     assert systems["labels"].startswith("You are a text classifier.")
-    titles = {"critique": "# Card check", "findings": "# View review", "proposal": "# A viewer for a file type"}
+    titles = {"critique": "# Card check", "proposal": "# A viewer for a file type"}
     assert all(systems[tool].startswith(title) for tool, title in titles.items()), systems
 
 

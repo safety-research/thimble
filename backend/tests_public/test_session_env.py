@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from app import agent_session, config, dev, hook_auth, tools, userconf, views
+from app import agent_session, config, dev, hook_auth, tools, userconf
 
 CORPUS = "mini"
 
@@ -61,15 +61,15 @@ def _calls(state: Path) -> list[dict]:
     return [json.loads(line) for line in (state / "calls.jsonl").read_text().splitlines()]
 
 
-async def _view_build(state: Path, c: str = CORPUS) -> dict:
-    """A view build of the dev agent's; the stand-in's record of it."""
-    corpus, folder, work = config.corpus_dir(c), views.views_dir(c) / "posts", dev.view_work_dir(c, "posts")
+async def _ticket_session(state: Path, c: str = CORPUS) -> dict:
+    """A code ticket's session of the dev agent's (a `claude -p` job, which thimble still starts); the stand-in's record
+    of it."""
+    work = config.workspace_dir(c) / "ticket-7"
     work.mkdir(parents=True, exist_ok=True)
     conf = dev.dev_config(c, sandbox=True)
     sessions = dev.Sessions()
-    got = await sessions.start(work, "Build the view.", name="thimble view: Posts", workspace=c,
-                               add_dirs=(folder, corpus), fence=dev.view_fence(c, "posts", corpus, folder, conf),
-                               asking=dev.view_asking(c, "posts", folder, conf))
+    got = await sessions.start(work, "Fix the ticket.", name="thimble ticket 7", workspace=c,
+                               asking={"key": "ticket:7", "config": conf})
     await sessions._turns[got["id"]].task
     return _calls(state)[-1]
 
@@ -83,21 +83,21 @@ def _proven(monkeypatch, env: dict, home: str, c: str = CORPUS) -> bool:
 
 async def test_each_stack_s_session_sees_its_own_values_and_no_claude_process_carries_thimble_s(
         service, monkeypatch, tmp_path):
-    """Stack A's view build and stack B's each see only their own values, in their --settings `env`; the `claude`
-    processes themselves carry none of thimble's variables."""
+    """Stack A's code ticket session and stack B's each see only their own values, in their --settings `env`; the
+    `claude` processes themselves carry none of thimble's variables."""
     a = _stack(monkeypatch, tmp_path / "a", 9721)
-    first = (await _view_build(service))["env"]
+    first = (await _ticket_session(service))["env"]
     a_home = a["THIMBLE_HOME"]
-    assert first["THIMBLE_SESSION"] == "view:posts" and _proven(monkeypatch, first, a_home)
+    assert first["THIMBLE_SESSION"] == "ticket:7" and _proven(monkeypatch, first, a_home)
     assert first["THIMBLE_CALLER_CWD"] == "" and first["THIMBLE_LAUNCHED"] == ""
 
     b = _stack(monkeypatch, tmp_path / "b", 9722)
-    view = (await _view_build(service))["env"]
-    assert view["THIMBLE_SESSION"] == "view:posts" and _proven(monkeypatch, view, b["THIMBLE_HOME"])
+    view = (await _ticket_session(service))["env"]
+    assert view["THIMBLE_SESSION"] == "ticket:7" and _proven(monkeypatch, view, b["THIMBLE_HOME"])
     assert not _proven(monkeypatch, view, a_home), "a token proves its name to its own stack only"
     assert view["THIMBLE_HOME"] == view["THIMBLE_PORT"] == view["THIMBLE_CALLER_CWD"] == ""
     assert view["XDG_CACHE_HOME"] == os.environ.get("XDG_CACHE_HOME", "")
-    assert view[agent_session.MEMORY_ENV] == "1" and view["THIMBLE_RENDERED_PROMPTS"] == ""
+    assert view["THIMBLE_RENDERED_PROMPTS"] == ""
     assert view[agent_session.BG_WAIT_ENV] == agent_session.BG_WAIT_MS
 
     for c in _calls(service):
@@ -219,7 +219,7 @@ def test_every_variable_a_session_s_own_code_reads_is_set_for_it():
     root = config.REPO_ROOT
     files = [*(root / "plugin" / "bin").iterdir(),
              *(root / "backend" / "app" / f"{m}.py" for m in ("permission_hook", "call_ref", "sandbox_allow", "scratch_hook",
-                                                              "work_budget", "view_check", "hook_auth", "cc_plugin",
+                                                              "work_budget", "hook_auth", "cc_plugin",
                                                               "prompts", "config", "tools"))]
     names = {n for f in files if f.is_file() for n in re.findall(r"\bTHIMBLE_[A-Z][A-Z0-9_]*", f.read_text("utf-8"))}
     # a constant's name, the server's fallback model, which no session's code uses, and the mark of main's fence, which

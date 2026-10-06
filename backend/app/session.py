@@ -957,7 +957,7 @@ def handed(c: str, event_id: str, thread: str) -> None:
 
 
 def push_event(c: str, kind: str, text: str, **meta: Any) -> bool:
-    """Server code's way to send the session an event (a built view's `view`, dev.run_view): events.post with `text`
+    """Server code's way to send the session an event (a built view's `view`, dev.register_pass): events.post with `text`
     as the body and `meta` as its attributes; False when no session listens."""
     from fastapi import HTTPException  # noqa: PLC0415
 

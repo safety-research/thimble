@@ -152,32 +152,23 @@ def test_stopping_the_orientation_stops_the_builds_of_its_views_and_no_other(wor
     assert dev._view_queue == [(c, asked)]
 
 
-def test_main_s_end_fails_the_views_the_analyst_asked_for_and_holds_a_session_s_until_a_session_is_main_again(workspaces_tmp):
-    """Main's end (dev.stop_workspace) stops every view build of the workspace: a view the analyst asked for, running or
-    queued, fails with Retry, while a view the orientation proposed waits, and no listing of the proposals queues it
-    again until a session is main again."""
+def test_main_s_end_fails_every_queued_build_with_retry_and_none_starts_again(workspaces_tmp):
+    """Main's end (dev.stop_workspace) fails every queued view build of the workspace with MAIN_ENDED and Retry, the
+    analyst's and the orientation's alike, and nothing starts it again by itself: not a listing of the proposals, not a
+    new main. A builder that ran ended with main (test_view_subagents.py)."""
     from app import config, views
 
     c = "mini"
-    first, second = (views.propose(c, n, "why", ["board.jsonl"], "one row per post", asked=True)["slug"]
-                     for n in ("Posts", "Threads"))
-    ours = views.propose(c, "Timeline", "why", ["events.jsonl"], "one row per event", orientation=True)["slug"]
-
-    async def go() -> None:
-        building = await _running_build(c, first)
-        run = dev._view_runs[(c, first)]
-        assert dev.stop_workspace(c) == 1
-        await asyncio.sleep(0)
-        assert building.cancelled() and run.status == dev.MAIN_ENDED, "its build ends failed (dev._run_view)"
-
-    asyncio.run(go())
-    assert not dev._view_queue, "no queued view starts in a stopped one's place"
-    queued = views.read_proposal(c, second) or {}
-    assert (queued.get("status"), queued.get("error")) == ("failed", dev.MAIN_ENDED)
+    slugs = [views.propose(c, n, "why", ["board.jsonl"], "one row per post", asked=True)["slug"]
+             for n in ("Posts", "Threads")]
+    slugs.append(views.propose(c, "Timeline", "why", ["events.jsonl"], "one row per event", orientation=True)["slug"])
+    assert dev.stop_workspace(c) == 3
+    assert not dev._view_queue
+    assert {s: ((views.read_proposal(c, s) or {}).get("status"), (views.read_proposal(c, s) or {}).get("error"))
+            for s in slugs} == dict.fromkeys(slugs, ("failed", dev.MAIN_ENDED))
     dev.recover_views(c)  # the browser lists the proposals
-    assert (c, ours) not in dev._view_queue
     session.attach(c, "sid-next", str(config.corpus_dir(c)))
     try:
-        assert (c, ours) in dev._view_queue
+        assert not dev._view_queue and not dev._view_runs
     finally:
         session._live.pop(c, None)

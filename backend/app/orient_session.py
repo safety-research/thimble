@@ -211,9 +211,7 @@ def disallowed() -> list[str]:
     """The registration's disallowedTools: the thimble tools that are not the orientation's (main's own among them).
     A part's tools stay, since one registration serves every run; a call of one whose part is off is refused
     (orientation.part_on)."""
-    from . import agent_session  # noqa: PLC0415 — its kept part names the thimble tools as a session sees them
-
-    return agent_session.not_own(list(ORIENT_TOOLS))
+    return tools.not_own(list(ORIENT_TOOLS))
 
 
 def subagent_definition(c: str) -> dict[str, Any]:
@@ -644,11 +642,17 @@ def subagent_refused(c: str, req: dict[str, Any]) -> None:
 def subagent_ended(c: str, run: subagents.Run, status: str, summary: str) -> None:
     """A run of the orientation ended (subagents.run_ended): its record closes (the first run's reveals its outputs),
     and what follows goes on (_go_on): main hears it, the work folder lets go of what it no longer needs, and the
-    report pass is asked for. A run the analyst stopped stops the builds of the views it proposed
-    (dev.stop_orientation_views) first. The first run's end goes on, when it finished, once its coverage line is
+    report pass is asked for. A critic start it never made ends (critique_session.expire_pending). A run the analyst
+    stopped stops the builds of the views it proposed (dev.stop_orientation_views) first. The first run's end goes on, when it finished, once its coverage line is
     measured (_measured). A critique an extension's program runs for it stops with it (critique_session.program_critique).
     """
     _stop_program_critique(c, run)
+    try:
+        from . import critique_session  # noqa: PLC0415 — critique_session imports this module's callers
+
+        critique_session.expire_pending(c, run)
+    except Exception:  # noqa: BLE001 — the run ends either way
+        log.exception("%s: the orientation's pending critic start was not ended", c)
     stopped = _analyst_stopped(c, run, status)
     if stopped:
         from . import dev  # noqa: PLC0415 — dev imports the modules that import this one
