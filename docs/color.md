@@ -24,11 +24,10 @@ the view as text, a glyph or a gray pattern, never in a second palette.
 - thimble keeps the choice, the values turned off, each value's color and the time ranges per view. The page opens on
   them again.
 
-[plugin/viewers/colour-by](../plugin/viewers/colour-by) is a small view that uses all of it, one of the worked examples
-the dev agent reads: a team's messages colored by a message's kind, channel or author, or by a label, with the time
-range selector ([time-range.md](time-range.md)) above the list. `backend/.venv/bin/python scripts/dev/examples.py
-<folder>` opens it, and the other worked examples, on its sample with its sample label, in the environment of your
-stack.
+[plugin/viewers/timeline](../plugin/viewers/timeline), one of the worked examples the dev agent reads, uses it: a
+ferry operator's alerts, deploys, chat and tickets on one time axis, colored by a source or a label, with the time
+range selector ([time-range.md](time-range.md)) above its lanes. `thimble demo --examples` opens it, and the other
+worked examples, each on its sample with its sample labels, on the server of your stack.
 
 ## Mount it
 

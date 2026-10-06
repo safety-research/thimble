@@ -18,5 +18,5 @@ def test_the_note_names_them_and_the_worked_examples_get_none():
     note = views.purple_note(PAGE)
     assert "#7c3aed" in note and "purple" in note.lower()
     assert views.purple_note("<p>no colours</p>") == ""
-    for name in ("timeline", "linked-sessions", "repository", "colour-by"):
+    for name in ("timeline", "linked-sessions", "repository"):
         assert views.purple_note((views.EXAMPLES_DIR / name / "view.html").read_text("utf-8")) == "", name
