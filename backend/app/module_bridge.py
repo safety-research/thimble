@@ -9,10 +9,10 @@ each run of an agent it started (POST /api/module/ended), since its other hooks 
 hook-authenticated (hook_auth.MODULE_PREFIX): a request proves the token of server.json and the answer proves it back,
 so a process that holds the port can neither hand the module requests nor read them.
 
-A hello is accepted only from main's session: the one launch.json names, or the one `--rekey` moved it to after a
-/clear or an in-session /resume (rekey), in either order, since the module sees the new id within tens of milliseconds
-of the SessionStart hook (spike V2): a hello for an id that is not main yet is held up to HELLO_HOLD_S for a rekey that
-names it. Main must also run inside thimble's fence (cc_plugin.main_fenced), so a THIMBLE_LAUNCHED that a child session
+A hello is accepted only from main's session: the one launch.json names (while it names none, the one /thimble made
+main), or the one `--rekey` moved it to after a /clear or an in-session /resume (rekey), in either order, since the
+module sees the new id within tens of milliseconds of the SessionStart hook (spike V2): a hello for an id that is not
+main yet is held up to HELLO_HOLD_S for a rekey that names it. Main must also run inside thimble's fence (cc_plugin.main_fenced), so a THIMBLE_LAUNCHED that a child session
 inherited gets no requests. The long poll hands out requests for that session only, so two mains in one folder never
 take each other's clicks.
 
@@ -91,7 +91,7 @@ NOT_LOADED = "Claude Code did not load thimble's hooks module"
 NOT_ANSWERING = "Your Claude Code session's thimble module did not answer"
 NOT_MAIN = "this Claude Code session is not thimble's main session in this folder"
 NOT_FENCED = "main does not run inside thimble's sandbox"
-NO_LAUNCH = "thimble did not launch main in this folder (no launch.json names its session)"
+NO_MAIN = "thimble knows no main session in this folder yet"
 ENDED_STATES = frozenset({"ended", "stopped", "killed", "completed", "failed", "done", "refused", "expired"})
 TYPED_LIVE = frozenset({"", "pending", "claimed"})  # a typed start's request still waiting for main's Agent call
 ROLE_TYPE = re.compile(r"thimble:(.+)")
@@ -136,7 +136,7 @@ _bridges: dict[str, _Bridge] = {}
 _waiters: dict[str, set[asyncio.Future]] = {}
 _ended: list[Callable[[str, str, str, str], None]] = []
 _loop: asyncio.AbstractEventLoop | None = None
-_file_lock = threading.Lock()
+_file_lock = threading.RLock()  # subagents.json's writes in this process, and the bridges' creation
 
 
 # ---------------------------------------------------------------------------------------------------- the workspace
@@ -237,16 +237,26 @@ def _save(c: str, b: _Bridge) -> None:
 def _bridge(c: str) -> _Bridge:
     b = _bridges.get(c)
     if b is None:
-        b = _bridges[c] = _Bridge()
-        moved = (registry(c).get("module") or {}).get("rekeyed")
-        if isinstance(moved, dict):  # what a server before this one learned
-            b.rekeyed.update({str(k): str(v) for k, v in moved.items() if isinstance(v, str)})
+        with _file_lock:  # rekey may come from a worker thread
+            b = _bridges.get(c)
+            if b is None:
+                b = _Bridge()
+                moved = (registry(c).get("module") or {}).get("rekeyed")
+                if isinstance(moved, dict):  # what a server before this one learned
+                    b.rekeyed.update({str(k): str(v) for k, v in moved.items() if isinstance(v, str)})
+                _bridges[c] = b
     return b
 
 
 def main_session(c: str) -> str:
-    """Main's session in workspace `c`: launch.json's, followed through every move rekey recorded; '' for none."""
+    """Main's session in workspace `c`: launch.json's, or while launch.json names none the session /thimble made main
+    (session.current), followed through every move rekey recorded; '' for none yet."""
     sid = str(_launch(c).get("session") or "")
+    if not sid:
+        from . import session  # noqa: PLC0415
+
+        lv = session.current(c)
+        sid = lv.sid if lv is not None else ""
     moved, seen = _bridge(c).rekeyed, set()
     while sid in moved and sid not in seen:
         seen.add(sid)
@@ -268,7 +278,7 @@ def _refusal(c: str, sid: str) -> str:
     """'' when a hello from `sid` may be accepted, else why not."""
     main = main_session(c)
     if not main:
-        return NO_LAUNCH
+        return NO_MAIN
     if sid != main:
         return NOT_MAIN
     if not _fenced(c):
@@ -540,8 +550,8 @@ class HelloBody(BaseModel):
 @router.post("/module/hello")
 async def hello_route(body: HelloBody) -> dict[str, Any]:
     """The module's hello: accepted (200) from main's fenced session, held up to HELLO_HOLD_S for a rekey that names a
-    new main, else refused (403, with the reason recorded for why_not). 404 for a folder that is no workspace yet: the
-    module says hello again later."""
+    new main, else refused (403, with the reason recorded for why_not). 404 for a folder that is no workspace yet and
+    409 while no main session is known (before /thimble made one main): the module says hello again later."""
     _remember_loop()
     c = _workspace(body.cwd)
     b = _bridge(c)
@@ -551,9 +561,11 @@ async def hello_route(body: HelloBody) -> dict[str, Any]:
         if not why:
             break
         if why != NOT_MAIN or time.monotonic() >= end:
-            if not _accepted(c, b.session):  # a refused stray never unseats the main session's module
+            if not _accepted(c, b.session) and b.idle != why:  # a refused stray never unseats main's module
                 b.idle = why
                 _save(c, b)
+            if why == NO_MAIN:
+                raise HTTPException(409, why)
             log.info("module hello from %s refused in %s: %s", body.session, c, why)
             raise HTTPException(403, why)
         await _wait(c, max(0.0, min(0.25, end - time.monotonic())))

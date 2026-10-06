@@ -16,7 +16,7 @@ from dataclasses import dataclass
 import httpx
 import pytest
 
-from app import cc_plugin, config, hook_auth, module_bridge, tools
+from app import cc_plugin, config, hook_auth, module_bridge, session, tools
 
 CORPUS = "mini"
 MAIN = "11111111-1111-4111-8111-111111111111"
@@ -31,6 +31,7 @@ def _fresh(monkeypatch, workspaces_tmp):
         table.clear()
     module_bridge._ended.clear()
     monkeypatch.setattr(module_bridge, "_loop", None)
+    monkeypatch.setattr(session, "_live", {})  # no main another test left behind
     monkeypatch.setattr(cc_plugin, "main_fenced", lambda c: True, raising=False)
     monkeypatch.setattr(cc_plugin, "managed", lambda environ=None: None)
     monkeypatch.setattr(module_bridge, "HELLO_HOLD_S", 0.6)
@@ -150,10 +151,10 @@ async def test_a_hello_is_accepted_from_main_s_fenced_session_and_recorded_for_d
 
 async def test_a_hello_from_a_session_that_is_not_the_workspace_s_fenced_main_is_refused(client, plugin_headers,
                                                                                          monkeypatch):
-    # no launch.json: thimble did not launch main here
+    # no main known yet (no launch.json names a session, /thimble made none main): asked again later
     r = await Module(client, plugin_headers).hello()
-    assert r.status_code == 403 and r.json()["detail"] == module_bridge.NO_LAUNCH
-    assert module_bridge.why_not(CORPUS) == module_bridge.NO_LAUNCH
+    assert r.status_code == 409 and r.json()["detail"] == module_bridge.NO_MAIN
+    assert module_bridge.why_not(CORPUS) == module_bridge.NO_MAIN
     _launch()
     # another session in the folder (a child `claude` that inherited THIMBLE_LAUNCHED): held, then refused
     t0 = time.monotonic()
@@ -169,6 +170,14 @@ async def test_a_hello_from_a_session_that_is_not_the_workspace_s_fenced_main_is
     # a folder that is no workspace: 404, and the module asks again later
     r = await client.post("/api/module/hello", json={"cwd": "/nowhere", "session": MAIN}, headers=plugin_headers())
     assert r.status_code == 404
+
+
+async def test_without_a_session_in_launch_json_main_is_the_session_thimble_made_main(client, plugin_headers,
+                                                                                     monkeypatch):
+    _launch(session="")
+    monkeypatch.setattr(session, "current", lambda c: types.SimpleNamespace(sid=MAIN) if c == CORPUS else None)
+    assert (await Module(client, plugin_headers).hello()).status_code == 200
+    assert (await Module(client, plugin_headers, CHILD).hello()).status_code == 403
 
 
 async def test_a_stray_hello_never_unseats_main_s_module(client, plugin_headers):
