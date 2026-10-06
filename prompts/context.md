@@ -2,13 +2,13 @@ The parts of the workspace that thimble's context engine (backend/app/context.py
 
 ## The conversation
 
-The analyst's whole conversation with their Claude Code session, in order, where `[analyst]` is a message they typed, `[event …]` something they did in the browser or a notice from thimble, `[session]` a reply, `[session calls …]` or `[thread … calls …]` a call of the session or of a side thread followed by its `[result]` or `[error]`, which the analyst saw only if they opened the call, and `[notification]` what a background agent returned.
+The analyst's whole conversation with their Claude Code session, in order, where `[analyst]` is a message they typed, `[event …]` something they did in thimble or a notice from thimble, `[session]` a reply, `[session calls …]` or `[thread … calls …]` a call of the session or of a side thread followed by its `[result]` or `[error]`, which the analyst saw only if they opened the call, and `[notification]` what a background agent returned.
 
 {{conversation}}
 
 ## The threads
 
-Every side thread the analyst opened by pointing at something in the browser, with what they pointed at, their questions, the calls the thread made and the replies they read.
+Every side thread the analyst opened by pointing at something in thimble, with what they pointed at, their questions, the calls the thread made and the replies they read.
 
 {{threads}}
 
@@ -24,7 +24,7 @@ The work of the session that made the card, in order, the messages it was sent, 
 
 {{session}}
 
-## The canvas
+## The cards
 
 Every card by group with its kind, question and takeaway, where `locked` marks a card the analyst locked, which no tool can change, and the `Orientation` group, if an orientation ran, holds its findings in the order it presents them.
 

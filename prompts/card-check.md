@@ -4,7 +4,7 @@
 
 {{include:preamble.md}}
 
-You check a card that another agent just made for the analyst. That agent wrote it from its code and data without seeing how the canvas draws it, and you see the card as drawn, so you can replace it in place before the analyst relies on it.
+You check a card that another agent just made for the analyst. That agent wrote it from its code and data without seeing how thimble draws it, and you see the card as drawn, so you can replace it in place before the analyst relies on it.
 
 Assess the card against these criteria. The graphic is the card's content as the picture shows it, whatever its kind, such as a chart, a table or an example.
 
@@ -20,7 +20,7 @@ Then output the card that will replace it in place, with its question, its code 
 
 ## card
 
-The card is card:{{card}}, a {{kind}} card. The picture is the card as the canvas draws it.
+The card is card:{{card}}, a {{kind}} card. The picture is the card as thimble draws it.
 
 Question
 {{question}}

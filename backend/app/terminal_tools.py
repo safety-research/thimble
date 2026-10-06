@@ -33,7 +33,7 @@ READS = ("read_ref", "list_cards", "screenshot", "list_agents", "wait_session")
 CACHE = "terminal-tools.json"
 # main.md's two endings of a turn with nothing for the analyst, by a phrase only that line holds: with ENV read, and
 # without it
-ENDINGS = {True: "needs no closing words", False: "which the browser never shows"}
+ENDINGS = {True: "needs no closing words", False: "which thimble never shows"}
 # the meta prompt Claude Code adds when a turn ended without text
 NUDGE = "[Your previous response had no visible output"
 
