@@ -110,6 +110,11 @@ def test_a_run_that_goes_on_keeps_its_extracts_and_a_failed_one_keeps_everything
     monkeypatch.setattr(orient_session, "_tell_main", lambda *a, **kw: None)
     monkeypatch.setattr(orient_session, "_show_queue", lambda *a: None)
     monkeypatch.setattr(orient_session, "_report", lambda c: None)
+
+    async def unmeasured(c, chat):
+        return ""
+
+    monkeypatch.setattr(orient_session, "measure", unmeasured)
     resumed: list = []
 
     async def resume(c, messages, *a, **kw):
@@ -122,7 +127,10 @@ def test_a_run_that_goes_on_keeps_its_extracts_and_a_failed_one_keeps_everything
 
     async def ends(status: str) -> list[tuple]:
         asked.clear()
-        orient_session._ended(run(), status, "")
+        ended = run()
+        orient_session._ended(ended, status, "")
+        if ended.closing is not None:  # a finished first run goes on once its coverage is measured, as the follower waits
+            await ended.closing
         await asyncio.sleep(0)
         return list(asked)
 

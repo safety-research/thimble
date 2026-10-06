@@ -18,7 +18,8 @@ call store (`call:<chat>/<n>`) with its input and the first lines of its result.
 reach. `chat:<orientation chat>` resolves to the same digest, a page at a time.
 
 The first message names what to review, the drafts, the digest, the orientation's context, the coverage checks'
-findings, and ends with the analyst's conversation with main.
+findings, led by the orientation's coverage line (orient_checks.coverage, the line its end adds to its transcript), and
+ends with the analyst's conversation with main.
 
 The chat is a step of the orientation's chat titled `critique`. The critic's last message is returned whole as the
 tool's result. A critique has no time limit: its chat says when it shows no activity (agent_session.wait_done), and the
@@ -337,11 +338,12 @@ def drafts(c: str) -> list[str]:
     return out
 
 
-async def checks_text(c: str) -> str | None:
-    """What the coverage checks found for workspace `c`, as the first message lists it; None when they did not run or
-    failed. The checks run in a child process, which a cancelled critique kills."""
+async def checks_text(c: str, chat: str | None = None) -> str | None:
+    """What the coverage checks found for workspace `c`, as the first message lists it, with the coverage line of the
+    orientation chat `chat` in place of the unread line; None when they did not run or failed. The checks run in a
+    child process, which a cancelled critique kills."""
     try:
-        return orient_checks.text(await orient_checks.check_apart(c))
+        return orient_checks.text(await orient_checks.check_apart(c, coverage_of=chat))
     except ValueError as e:  # a corpus that is gone
         log.info("%s: the coverage checks did not run (%s)", c, e)
     except (TimeoutError, RuntimeError) as e:
@@ -373,7 +375,7 @@ async def start(c: str, caller: agent_session.Run, context: str = "") -> tuple[a
     # Rendering megabytes of transcript runs in a thread and the checks in a child process, off the event loop, which
     # serves every other session meanwhile.
     transcript = await asyncio.to_thread(write_digest, c, caller)
-    checks = await checks_text(c)
+    checks = await checks_text(c, caller.chat)
     prompt = await asyncio.to_thread(first_message, c, transcript, context, checks)
     if agent_session.running(c, key):  # a second call that started while this one rendered
         raise RuntimeError(tools.hint("critique-running"))
@@ -463,7 +465,7 @@ async def program_critique(c: str, caller: agent_session.Run, part: Any, context
     if harness.running(c, key) or agent_session.running(c, key):
         return tools.err(tools.hint("critique-running"))
     transcript = await asyncio.to_thread(write_digest, c, caller)
-    checks = await checks_text(c)
+    checks = await checks_text(c, caller.chat)
     prompt = await asyncio.to_thread(first_message, c, transcript, context, checks)
     done: asyncio.Future = asyncio.get_running_loop().create_future()
 

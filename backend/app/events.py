@@ -245,7 +245,11 @@ def describe(kind: str, payload: dict[str, Any]) -> str:
 
 def terminal_line(kind: str, words: str, fields: dict[str, Any]) -> str:
     """An event's line in main's terminal (module note): the analyst's `words` after SAID, else a short line saying what
-    happened, on one line and cut at LINE_CHARS."""
+    happened, on one line and cut at LINE_CHARS. An `orient` event's text keeps its lines, since its second is the
+    orientation's coverage line (orient_session.status_text), which is cut only past three times that."""
+    if kind == "orient" and "\n" in str(words or "").strip():
+        first, *rest = [part for part in str(words).splitlines() if part.strip()]
+        return "\n".join([terminal_line(kind, first, fields), *(_cut(" ".join(r.split()), 3 * LINE_CHARS) for r in rest)])
     words = " ".join(str(words or "").split())
     if kind in (MAIN, "card"):
         line = SAID + words
@@ -271,11 +275,16 @@ def terminal_line(kind: str, words: str, fields: dict[str, Any]) -> str:
         line = f"agent: {fields.get('name') or ''}"
     else:
         line = words
-    if len(line) <= LINE_CHARS:
+    return _cut(line, LINE_CHARS)
+
+
+def _cut(line: str, n: int) -> str:
+    """`line` cut to `n` characters at a word, with an ellipsis."""
+    if len(line) <= n:
         return line
-    cut = line[: LINE_CHARS - 1]
+    cut = line[: n - 1]
     at_word = cut.rsplit(" ", 1)[0]  # a line with no space late enough, such as a URL or Japanese, is cut mid-word
-    return (at_word if len(at_word) > LINE_CHARS // 2 else cut) + "…"
+    return (at_word if len(at_word) > n // 2 else cut) + "…"
 
 
 def post(c: str, kind: str, payload: dict[str, Any] | None = None, *, check_kind: bool = True,

@@ -15,8 +15,9 @@ the same session, and its changes land in place, one Undo reverting them all.
                       event?, requested?, started, ended, groups: {orientation}, chats: {orient?},
                       session?, pid?, error?, run (0 the first, then one per follow-up), queue: [{text, by,
                       ts}], followups: [{run, status, started, ended, messages, added, revised, deleted, views}],
-                      report_asked?, coverage? (the coverage checks run 0 made, orient_session.coverage)}
-  orient/summary.md  the session's last message, kept as a record for the export
+                      report_asked?, coverage? (run 0's coverage line, orient_session.measure), coverage_told? (a
+                      later run's prompt carried it)}
+  orient/summary.md  the session's last message, then run 0's coverage line, kept as a record for the export
 
 `query` is only ever the analyst's own words typed with Start. A run with a `final` group uses it as its deck. `status`
 is the latest run's, so start_orientation refuses while any run goes.
@@ -52,6 +53,7 @@ AGENT_FILE = config.REPO_ROOT / "prompts" / "orient.md"
 EFFORTS = ("low", "medium", "high", "xhigh", "max")  # Start's effort menu below Ultracode, its highest choice
 DEFAULT_EFFORT = "max"
 DEFAULT_ULTRACODE = True  # an orientation runs with Ultracode unless Start turns it off
+DEFAULT_CRITIQUE = False  # an orientation runs no critique unless Start or start_orientation's `critique` turns it on
 ROLE = "orient"  # the orientation's chat role
 TITLE = "Orientation"  # the agent chat's title
 ORIENT_KIND = "orient"  # the event kind that tells main the orientation ended (prompts/main.md)
@@ -139,12 +141,12 @@ def flag(value: Any, default: bool) -> bool:
 
 def choices(c: str) -> dict[str, Any]:
     """{effort, critique, ultracode} for the next orientation session: the requested run's, recorded from Start, else
-    the defaults."""
+    the defaults (the critique off, DEFAULT_CRITIQUE)."""
     run = read_run(c)
     if run and run.get("status") == "requested":
-        return {"effort": effort(run.get("effort")), "critique": flag(run.get("critique"), True),
+        return {"effort": effort(run.get("effort")), "critique": flag(run.get("critique"), DEFAULT_CRITIQUE),
                 "ultracode": flag(run.get("ultracode"), DEFAULT_ULTRACODE)}
-    return {"effort": DEFAULT_EFFORT, "critique": True, "ultracode": DEFAULT_ULTRACODE}
+    return {"effort": DEFAULT_EFFORT, "critique": DEFAULT_CRITIQUE, "ultracode": DEFAULT_ULTRACODE}
 
 
 def ensure_groups(c: str, deck: bool = False) -> dict[str, str]:
@@ -242,7 +244,7 @@ def start_requested(c: str, payload: dict[str, Any], posted: dict[str, Any]) -> 
     text = str(payload.get("text") or "").strip()
     passes = start_passes(payload)
     _write_run(c, {"status": "requested", "passes": passes, "query": text or None, "effort": effort(payload.get("effort")),
-                   "critique": flag(payload.get("critique"), True),
+                   "critique": flag(payload.get("critique"), DEFAULT_CRITIQUE),
                    "ultracode": flag(payload.get("ultracode"), DEFAULT_ULTRACODE),
                    "event": posted.get("id"), "requested": _now(), "started": None, "ended": None,
                    "groups": ensure_groups(c, deck=True) if "final" in passes else {}, "chats": {}, "error": None})
@@ -279,7 +281,7 @@ def started(c: str, chat_id: str, *, session: str | None = None, pid: int | None
         passes = list((run or {}).get("passes") or ["final", "views"]) if requested else ["final", "views"]
     groups = ensure_groups(c, deck=True) if "final" in passes else {}
     extra = {k: v for k, v in (("session", session), ("pid", pid)) if v is not None}
-    fresh = {"run": 0, "queue": [], "followups": [], "report_asked": False, "coverage": 0}
+    fresh = {"run": 0, "queue": [], "followups": [], "report_asked": False, "coverage": None, "coverage_told": False}
     if run and requested:
         run.update(status="running", started=_now(), passes=list(passes), groups=groups, chats={ROLE: chat_id},
                    **fresh, **extra)

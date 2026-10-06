@@ -66,6 +66,24 @@ describe("the Start card's model", () => {
     expect(el.querySelector('.chat-gate-row[data-pass="critique"]')).not.toBeNull()
     expect(el.querySelector('.chat-gate-perms')).not.toBeNull()
   })
+
+  test('opens with every output on and the critique off, and Start sends what the switches say', async () => {
+    const sent: unknown[] = []
+    vi.stubGlobal('fetch', async (url: string, init?: RequestInit) => {
+      if (init?.method === 'POST') sent.push(JSON.parse(String(init.body)))
+      return new Response(JSON.stringify(SETTINGS), { status: 200, headers: { 'content-type': 'application/json' } })
+    })
+    const el = await mount(<StartGate ws="mini" model="claude-opus-5-5" onModel={() => {}} fast={false} onFast={() => {}} />)
+    await settle()
+    await click(el.querySelector<HTMLButtonElement>('.chat-gate-options-toggle')!)
+    const checked = (pass: string) => el.querySelector(`.chat-gate-row[data-pass="${pass}"] [role="switch"]`)!.getAttribute('aria-checked')
+    expect(['final', 'views', 'report', 'critique'].map(checked)).toEqual(['true', 'true', 'true', 'false'])
+    await click([...el.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent?.trim() === 'Start')!)
+    expect(sent).toHaveLength(1)
+    expect(JSON.stringify(sent[0])).toContain('"critique":false')
+    await click(el.querySelector<HTMLElement>('.chat-gate-row[data-pass="critique"] .chat-gate-label')!)
+    expect(checked('critique')).toBe('true')
+  })
 })
 
 describe("fast mode's bolt", () => {

@@ -23,20 +23,23 @@ files no card or document uses are deleted; a run that goes on (stopped, or with
 
 Permissions. The session runs in the orientation's row of the permission modes (modes.py), which Start's switcher shows
 and edits. Manual and Bypass pass `--permission-mode default` (requests wait on the card, or are granted at once); Auto
-passes `auto`, and a refused call waits on the card. Effort, Ultracode and the critique come from Start's choices, kept
-on the run's record for follow-ups; the model settings come from the `orient` and `subagents` roles
-(config.models_for).
+passes `auto`, and a refused call waits on the card. Effort, Ultracode and the critique (off unless Start or the call
+turns it on) come from Start's choices, kept on the run's record for follow-ups; the model settings come from the
+`orient` and `subagents` roles (config.models_for).
 
 Calls. Each call the session, its agents, its critique and its follow-ups make is numbered in its chat's sequence and
 citable as `call:<chat>/<n>` (calls.py).
 
-Coverage. In the first run, the orientation's first add_card and its `critique` call run orient_checks.unopened, and
-when corpus files were never opened, the call's result names them and asks the orientation to look at each or say why
-not: add_card's after the card is made, critique's in place of the critique, which waits for the next call. The note is
-given at most COVERAGE_NOTES times a run, counted on the record's `coverage` (coverage).
-
 End of the first run. orientation.finished closes the record and reveals the deck (each view proposal reached the
 analyst when its build passed its checks); the report is asked for once no follow-up waits. Main hears an `orient` event with one line counting what was made.
+
+Coverage. When the first run finishes (done; not stopped or failed), its coverage line (orient_checks.coverage: the globs
+of files it viewed and did not, and its share of the files and of their records) is measured in the checks' child
+process before the end goes on; meanwhile the orientation counts as running, so a message waits (measure, _measured).
+The line is one message at the end of the run: a note at the end of its thread, a second line of main's `orient` event
+and of summary.md, and the record's `coverage`. The next run's prompt ends with it (`## orient-coverage-lead`), which
+puts it in the session's own transcript for the model, a later critique's digest and main's context. The run hears
+nothing of it while it works. A critique's first message has the line as measured then (critique_session.checks_text).
 
 Restarts. A run a server stop cut short is resumed by the next server with `--resume` in the same chat. A failed first
 run is resumed as run 0 when start_orientation asks for the same orientation again, rather than redoing its work.
@@ -102,7 +105,8 @@ BROWSER = "browser"  # `by` of a message typed in the orientation's thread
 MAIN = "main"  # `by` of a message main's message_orientation sent
 TERMINAL = "terminal"  # `by` of a message the analyst typed in a tray entry of the orientation or its critic (tray.py)
 EXTENSION = "extension"  # `by` of an extension's orientation instructions, sent when it starts running here
-COVERAGE_NOTES = 2  # the coverage note is given once and repeated at most once in a run (coverage)
+COVERAGE_KIND = "coverage"  # the chip kind of the coverage line at the end of the orientation's thread (_keep_coverage)
+COVERAGE_TIMEOUT_S = 120.0  # the coverage line is given up after this long, so main hears the end without it (measure)
 
 
 class NoOrientation(RuntimeError):
@@ -117,10 +121,14 @@ def current(c: str) -> agent_session.Run | None:
     return agent_session.current(c, KEY)
 
 
+_closing: set[str] = set()  # the workspaces whose orientation's first run ended and is being measured (_measured)
+
+
 def running(c: str) -> bool:
+    """Whether the orientation's session or program runs, or its first run's end waits for its coverage line."""
     from . import harness  # noqa: PLC0415
 
-    return agent_session.running(c, KEY) or harness.running(c, KEY)
+    return c in _closing or agent_session.running(c, KEY) or harness.running(c, KEY)
 
 
 async def stop(c: str) -> bool:
@@ -143,9 +151,9 @@ def effort_of(choices: dict[str, Any]) -> str:
 
 def parts_of(choices: dict[str, Any], passes: "list[str] | tuple[str, ...]") -> list[str]:
     """The parts of the prompt the session gets (the keys of PARTS and LINES): the outputs start_orientation's switches
-    turned on, and the critique when Start left it on."""
+    turned on, and the critique when Start or the call turned it on."""
     on = [p for p in PASSES if p in passes]
-    if choices.get("critique", True):
+    if choices.get("critique", orientation.DEFAULT_CRITIQUE):
         on.append("critique")
     return [p for p in (*PARTS, *LINES) if p in on]
 
@@ -279,12 +287,12 @@ async def _start(c: str, brief: str, passes: "list[str] | tuple[str, ...]", call
     def started(run: agent_session.Run) -> None:
         orientation.started(c, run.chat, session=run.sid, pid=run.pid, passes=passes)
         orientation.record(c, effort=choices.get("effort"), ultracode=bool(choices.get("ultracode")),
-                           critique=bool(choices.get("critique", True)))
+                           critique=bool(choices.get("critique", orientation.DEFAULT_CRITIQUE)))
 
     run = await agent_session.start(
         c, KEY, prompt=tools.hint("orient-start"), on_start=started, on_end=_ended, on_pid=_moved,
-        ultracode=bool(choices.get("ultracode")), critique=bool(choices.get("critique", True)), brief=brief.strip(),
-        call=call, **args)
+        ultracode=bool(choices.get("ultracode")), critique=bool(choices.get("critique", orientation.DEFAULT_CRITIQUE)),
+        brief=brief.strip(), call=call, **args)
     await extensions.mark_oriented(c)
     return run
 
@@ -303,7 +311,8 @@ async def start_program(c: str, part: Any, brief: str, passes: "list[str]", choi
         t for p, names in PART_TOOLS.items() if p not in parts for t in names})
     job = harness.Job(c, "orientation", KEY, orientation.TITLE,
                       {"request": brief.strip(), "outputs": list(passes), "follow_up": follow_up,
-                       "choices": {"effort": effort_of(choices), "critique": bool(choices.get("critique", True))},
+                       "choices": {"effort": effort_of(choices),
+                                   "critique": bool(choices.get("critique", orientation.DEFAULT_CRITIQUE))},
                        "cards": listed.text, "corpus": str(config.corpus_dir(c)), "tools": list(own)},
                       own, work_dir(c), chat_role=orientation.ROLE,
                       fields={"brief": brief.strip(), **({"tool_use_id": call} if call else {})})
@@ -311,7 +320,7 @@ async def start_program(c: str, part: Any, brief: str, passes: "list[str]", choi
     def started(run: Any) -> None:
         orientation.started(c, run.chat, passes=passes)
         orientation.record(c, effort=choices.get("effort"), ultracode=bool(choices.get("ultracode")),
-                           critique=bool(choices.get("critique", True)), program=part.extension)
+                           critique=bool(choices.get("critique", orientation.DEFAULT_CRITIQUE)), program=part.extension)
 
     def ended(run: Any, status: str, summary: str) -> None:
         try:
@@ -349,7 +358,7 @@ async def _restart(c: str, rec: dict[str, Any], chat: str, sid: str, call: str |
     session-resumed` on stdin."""
     meta = agents.meta_or_none(c, chat) or {}
     choices = {"effort": rec.get("effort") or meta.get("effort") or orientation.DEFAULT_EFFORT,
-               "ultracode": rec.get("ultracode"), "critique": rec.get("critique", True)}
+               "ultracode": rec.get("ultracode"), "critique": rec.get("critique", orientation.DEFAULT_CRITIQUE)}
     passes = [p for p in PASSES if p in (rec.get("passes") or [])]
     args = await asyncio.to_thread(_launch, c, str(meta.get("brief") or ""), passes, choices)
     log.info("%s: the orientation's first run failed (%s); resuming its session %s", c,
@@ -372,27 +381,41 @@ def _moved(run: agent_session.Run) -> None:
 # --------------------------------------------------------------------------- coverage
 
 
-async def coverage(c: str, name: str) -> str:
-    """The coverage note for the orientation's call of `name` (module note, coverage): the corpus files its first run
-    never opened, then what to do next, for its first add_card and each critique call while fewer than COVERAGE_NOTES
-    checks ran; '' when none is due or every file was opened. A check is counted before it runs, so a parallel call does
-    not run it again, and one that finds every file opened ends the checks."""
-    rec = orientation.read_run(c) or {}
-    done = int(rec.get("coverage") or 0)
-    first_run = rec.get("status") == "running" and not int(rec.get("run") or 0)
-    if not first_run or done >= COVERAGE_NOTES or (name == "add_card" and done):
-        return ""
-    orientation.record(c, coverage=done + 1)
+async def measure(c: str, chat: str) -> str:
+    """The coverage line of the orientation chat `chat` (orient_checks.coverage), measured in the checks' child process;
+    '' when it could not be measured within COVERAGE_TIMEOUT_S."""
     try:
-        found = await orient_checks.check_apart(c, only_unopened=True)
+        found = await orient_checks.check_apart(c, COVERAGE_TIMEOUT_S, coverage_of=chat, only=True)
     except (ValueError, TimeoutError, RuntimeError) as e:
-        log.warning("%s: the coverage check did not run (%s)", c, e)
+        log.warning("%s: the orientation's coverage was not measured (%s)", c, e)
         return ""
-    if not found:
-        orientation.record(c, coverage=COVERAGE_NOTES)
+    return found[0].text if found else ""
+
+
+def _keep_coverage(c: str, chat: str, line: str, summary: bool) -> None:
+    """The first run's coverage line joins its record, for the next run's prompt (coverage_lead), the end of its thread,
+    as a note, and summary.md when the run wrote one (`summary`)."""
+    orientation.record(c, coverage=line, coverage_told=False)
+    try:
+        _, log_path = agents.paths(c, chat)
+        agents.append(log_path, {"type": "chip", "ts": _now(), "kind": COVERAGE_KIND, "text": line})
+        agents._notify(c, chat)
+    except (HTTPException, OSError) as e:
+        log.warning("%s: the coverage line did not reach the orientation's thread (%s)", c, e)
+    if summary:
+        try:
+            with orientation.summary_file(c).open("a", encoding="utf-8") as f:
+                f.write(f"\n{line}\n")
+        except OSError as e:
+            log.warning("%s: the coverage line did not reach summary.md (%s)", c, e)
+
+
+def coverage_lead(rec: dict[str, Any]) -> str:
+    """The end of the next run's prompt: the first run's coverage line, until a run started with it; '' after."""
+    line = rec.get("coverage")
+    if not isinstance(line, str) or not line.strip() or rec.get("coverage_told"):
         return ""
-    then = tools.hint("orient-unopened-card" if name == "add_card" else "orient-unopened-critique")
-    return f"{found[0].text}\n\n{then}"
+    return tools.hint("orient-coverage-lead", coverage=line.strip())
 
 
 # --------------------------------------------------------------------------- follow-ups
@@ -472,7 +495,7 @@ async def _program_follow_up(c: str, text: str, call: str | None) -> dict[str, A
     if harness.running(c, KEY) or orientation.running(c):
         raise RuntimeError("the orientation is running")
     passes = [p for p in PASSES if p in (rec.get("passes") or [])]
-    choices = {"effort": rec.get("effort"), "critique": rec.get("critique", True)}
+    choices = {"effort": rec.get("effort"), "critique": rec.get("critique", orientation.DEFAULT_CRITIQUE)}
     run = await start_program(c, agent.replacing, text, passes, choices, call=call, follow_up=True)
     return {"status": "resumed", "chat": run.chat, "run": 0}
 
@@ -496,7 +519,7 @@ async def run_program_now(c: str, name: str) -> dict[str, Any]:
     if meta is None:
         raise NoOrientation("no orientation has run in this workspace")
     passes = [p for p in PASSES if p in (rec.get("passes") or [])]
-    choices = {"effort": rec.get("effort"), "critique": rec.get("critique", True)}
+    choices = {"effort": rec.get("effort"), "critique": rec.get("critique", orientation.DEFAULT_CRITIQUE)}
     run = await start_program(c, agent.replacing, str(meta.get("brief") or ""), passes, choices, follow_up=True)
     return {"status": "resumed", "chat": run.chat, "run": 0}
 
@@ -521,15 +544,20 @@ async def resume(c: str, messages: "list[dict[str, Any]]", call: str | None = No
         raise Gone(f"Claude Code no longer keeps the transcript of session {sid}")
     k = int(rec.get("run") or 0) + 1
     meta = agents.meta_or_none(c, chat) or {}
-    choices = {"effort": rec.get("effort"), "ultracode": rec.get("ultracode"), "critique": rec.get("critique", True)}
+    choices = {"effort": rec.get("effort"), "ultracode": rec.get("ultracode"),
+               "critique": rec.get("critique", orientation.DEFAULT_CRITIQUE)}
     if choices["effort"] is None:  # a record without stored choices: the ones its chat names
         choices["effort"] = meta.get("effort") or orientation.DEFAULT_EFFORT
     passes = [p for p in PASSES if p in (rec.get("passes") or [])]
     args = await asyncio.to_thread(_launch, c, str(meta.get("brief") or ""), passes, choices)
     lead = _lead(messages) if messages else ""
+    told = coverage_lead(rec)  # the first run's coverage line closes the next run's prompt (module note, coverage)
+    lead = "\n\n".join(p for p in (lead, told) if p)
 
     def started(run: agent_session.Run) -> None:
         orientation.run_started(c, chat, k, messages, pid=run.pid)
+        if told:
+            orientation.record(c, coverage_told=True)
 
     return await agent_session.start(c, KEY, prompt=lead, on_start=started, on_end=_ended, on_pid=_moved, resume=sid,
                                      chat=chat, run_k=k, leads=[{"text": m.get("text"), "by": m.get("by"),
@@ -608,8 +636,9 @@ def report_cards(c: str) -> set[str]:
 
 def _ended(run: agent_session.Run, status: str, summary: str) -> None:
     """A run of the session ended: its record closes (the first run's reveals its outputs), main hears it, then waiting
-    messages start the next run, or the report pass is asked for. A run the analyst stopped stops the builds of the
-    views the orientation proposed (dev.stop_orientation_views) before main hears what it made."""
+    messages start the next run, or the report pass is asked for (_go_on). A run the analyst stopped stops the builds of
+    the views the orientation proposed (dev.stop_orientation_views) before main hears what it made. The first run's end
+    goes on, when it finished, once its coverage line is measured (_measured)."""
     c = run.c
     stopped = _analyst_stopped(run, status)
     if stopped:
@@ -633,7 +662,55 @@ def _ended(run: agent_session.Run, status: str, summary: str) -> None:
     except Exception:  # noqa: BLE001
         log.exception("%s: the orientation's record was not closed", c)
         made = {}
-    _tell_main(c, status, run.k, made, error=summary if status == "failed" else "")
+    if run.k == 0 and status == "done" and not run.interrupted:
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+        if loop is not None:
+            _closing.add(c)
+            # the follower's task waits for it (agent_session, Run.closing); it lets go of the workspace even when it
+            # is cancelled before it starts
+            run.closing = loop.create_task(_measured(run, status, summary, stopped, made), name=f"orient-coverage:{c}")
+            run.closing.add_done_callback(lambda _t: _closing.discard(c))
+            return
+    _go_on(run, status, summary, stopped, made)
+
+
+async def _measured(run: agent_session.Run, status: str, summary: str, stopped: "bool | list[str]",
+                    made: dict[str, Any]) -> None:
+    """The first run's end once its coverage line is measured: the line is kept (_keep_coverage), then main hears the
+    end with it and what waited goes on (_go_on). The server's stop cuts the measure short: main hears the end without
+    the line, and nothing that waited starts."""
+    c = run.c
+    line = ""
+    try:
+        line = await measure(c, run.chat)
+    except asyncio.CancelledError:
+        _closing.discard(c)
+        try:
+            _tell_main(c, status, 0, made)
+        except Exception:  # noqa: BLE001 — the server is stopping either way
+            log.exception("%s: main did not hear the orientation's end", c)
+        raise
+    except Exception:  # noqa: BLE001 — the run's end goes on without its line
+        log.exception("%s: the orientation's coverage was not measured", c)
+    finally:
+        _closing.discard(c)
+    try:
+        if line:
+            _keep_coverage(c, run.chat, line, summary=bool(str(summary or "").strip()))
+        _go_on(run, status, summary, stopped, made, line)
+    except Exception:  # noqa: BLE001 — as agent_session._end logs an on_end that raises
+        log.exception("%s: the end of the orientation's first run was not recorded", c)
+
+
+def _go_on(run: agent_session.Run, status: str, summary: str, stopped: "bool | list[str]", made: dict[str, Any],
+           coverage: str = "") -> None:
+    """What follows a run's end once its record is closed: main hears it, with the first run's coverage line, the work
+    folder is cleared, then waiting messages start the next run, or the report pass is asked for."""
+    c = run.c
+    _tell_main(c, status, run.k, made, error=summary if status == "failed" else "", coverage=coverage)
     rec = orientation.read_run(c) or {}
     queue = [m for m in rec.get("queue") or [] if isinstance(m, dict)]
     # a run stopped by the analyst, or that a waiting message resumes, goes on with its extracts
@@ -765,10 +842,11 @@ def made_text(c: str, run: dict[str, Any]) -> str:
     return ", ".join(parts) or tools.hint("orient-made-nothing")
 
 
-def status_text(c: str, status: str, k: int = 0, made: "dict[str, Any] | None" = None, error: str = "") -> str:
+def status_text(c: str, status: str, k: int = 0, made: "dict[str, Any] | None" = None, error: str = "",
+                coverage: str = "") -> str:
     """The `orient` event's text: the first run ended (finished, stopped or failed) and what it made, or follow-up `k`
     ended and what it changed; a failed run's line ends with `error`, the failure's own text on one line
-    (agent_session.failure_line), so main can say why."""
+    (agent_session.failure_line), so main can say why. The first run's `coverage` line follows on a line of its own."""
     why = agent_session.failure_line(error)
     run = orientation.read_run(c) or {}
     if k > 0:
@@ -783,13 +861,15 @@ def status_text(c: str, status: str, k: int = 0, made: "dict[str, Any] | None" =
         line = {"stopped": "orient-follow-up-stopped", "failed": "orient-follow-up-failed"}.get(status, "orient-followed-up")
         return tools.hint(line, changed=", ".join(what) or tools.hint("orient-changed-nothing"), error=why)
     line = {"stopped": "orient-stopped", "failed": "orient-failed"}.get(status, "orient-finished")
-    return tools.hint(line, made=made_text(c, run), error=why)
+    text = tools.hint(line, made=made_text(c, run), error=why)
+    return f"{text}\n{coverage.strip()}" if coverage.strip() else text
 
 
-def _tell_main(c: str, status: str, k: int = 0, made: "dict[str, Any] | None" = None, error: str = "") -> None:
+def _tell_main(c: str, status: str, k: int = 0, made: "dict[str, Any] | None" = None, error: str = "",
+               coverage: str = "") -> None:
     """The `orient` browser event: a run of the orientation ended, with status_text as its text (prompts/main.md); it
     waits for main when no session listens (agent_session.tell_main)."""
-    agent_session.tell_main(c, orientation.ORIENT_KIND, {"text": status_text(c, status, k, made, error),
+    agent_session.tell_main(c, orientation.ORIENT_KIND, {"text": status_text(c, status, k, made, error, coverage),
                                                          "status": status, **({"run": k} if k else {})})
 
 
@@ -814,7 +894,7 @@ async def _resume_left(c: str, meta: dict[str, Any], prompt: str) -> agent_sessi
     if (rec.get("chats") or {}).get(orientation.ROLE) != chat or rec.get("status") != "running":
         raise agent_session.NotResumed("another orientation has started since")
     choices = {"effort": rec.get("effort") or meta.get("effort") or orientation.DEFAULT_EFFORT,
-               "ultracode": rec.get("ultracode"), "critique": rec.get("critique", True)}
+               "ultracode": rec.get("ultracode"), "critique": rec.get("critique", orientation.DEFAULT_CRITIQUE)}
     passes = [p for p in PASSES if p in (rec.get("passes") or [])]
     args = await asyncio.to_thread(_launch, c, str(meta.get("brief") or ""), passes, choices)
     return await agent_session.start(c, KEY, prompt=prompt, on_start=_moved, on_end=_ended, on_pid=_moved,
@@ -845,10 +925,10 @@ async def tool_start_orientation(ctx: Any, args: dict[str, Any]) -> Any:
     final = switch("final_notebook" if args.get("final_notebook") is not None else "analyze_data", "final", True)
     views = switch("propose_views", "views", True)
     report = switch("generate_report", "report", False)
-    # the critique from the call (/thimble:orient's --no-critique); left out, Start's or the default holds
+    # the critique from the call (/thimble:orient's --critique); left out, Start's or the default (off) holds
     chosen: dict[str, Any] = {}
     if args.get("critique") is not None:
-        chosen["critique"] = orientation.flag(args["critique"], True)
+        chosen["critique"] = orientation.flag(args["critique"], orientation.DEFAULT_CRITIQUE)
     if running(ctx.c) or starting(ctx.c) or orientation.active(ctx.c):
         return tools.err(tools.hint("start_orientation-running"))
     passes = [p for p, on in (("final", final), ("views", views), ("report", report)) if on]

@@ -39,7 +39,7 @@ If the file isn't valid JSON, or a key or value is unknown, no agent starts. The
 `agents` has one entry per agent:
 
 - **`orientation`**: the orientation and its subagents
-- **`critic`**: the critique of the orientation
+- **`critic`**: the critique of the orientation, which runs only when Start's Critique and revise switch (off by default) or `/thimble:orient --critique` turns it on
 - **`writer`**: the report writers
 - **`checks`**: the report checks
 - **`dev`**: code tickets and view builds

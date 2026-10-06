@@ -1,7 +1,7 @@
 """Run an orientation on a corpus with no model in main, to pre-cache a workspace (the demo's).
 
     <tree>/backend/.venv/bin/python scripts/dev/precache_orientation.py <tree> <corpus folder> <log folder>
-        [--mode auto|manual|bypass] [--no-report] [--attach]
+        [--mode auto|manual|bypass] [--no-report] [--critique] [--attach]
 
 Run it in the environment the server runs in (THIMBLE_HOME, THIMBLE_PORT, THIMBLE_WORKSPACES_DIR), with the server up.
 It registers the folder, then stands in for the analyst's Claude Code session as
@@ -9,8 +9,8 @@ scripts/e2e/standin_session.py does: it holds the shim's subscription (GET /api/
 main's events as the plugin's watcher does (GET /api/events/pull, then POST /api/events/ack) and reports main's
 permission mode (`--mode`, auto by default, as a session whose Claude Code settings say `defaultMode: auto` reports
 it). It presses Start as the browser's
-Start gate sends it with its defaults (deck, views, critique and report on, Ultracode, no instructions; --no-report
-turns the report off) and answers the events main.md asks main to act on: `start` with start_orientation and `write`
+Start gate sends it with its defaults (deck, views and report on, the critique off, Ultracode, no instructions;
+--no-report turns the report off, --critique the critique on) and answers the events main.md asks main to act on: `start` with start_orientation and `write`
 with start_writing, each with the event's attributes. Every event goes to <log folder>/events.jsonl, and
 <log folder>/status.json says every STATUS_S what the workspace holds and whether it is done: the orientation ended,
 no view build or writer runs, and a report asked for is written. --attach skips the Start (a run already going).
@@ -39,6 +39,7 @@ ap.add_argument("corpus")
 ap.add_argument("logs")
 ap.add_argument("--mode", default="auto", choices=("auto", "manual", "bypass"))
 ap.add_argument("--no-report", action="store_true")
+ap.add_argument("--critique", action="store_true")
 ap.add_argument("--attach", action="store_true")
 opts = ap.parse_args()
 tree, corpus, logs = Path(opts.tree).resolve(), str(Path(opts.corpus).resolve()), Path(opts.logs).resolve()
@@ -172,7 +173,7 @@ def main() -> int:
     threading.Thread(target=watch, daemon=True).start()
     if not opts.attach:
         start = {"final_notebook": True, "propose_views": True, "generate_report": not opts.no_report,
-                 "critique": True, "ultracode": True, "effort": "xhigh"}
+                 "critique": opts.critique, "ultracode": True, "effort": "xhigh"}
         s, res = api("POST", f"/api/ws/{c}/events", {"kind": "start", "payload": start})
         note("start", status=s, result=res, payload=start)
     while True:

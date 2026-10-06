@@ -485,7 +485,7 @@ thimble.serve(run)
     monkeypatch.setattr(critique_session, "write_digest", lambda c, run: None)
     monkeypatch.setattr(critique_session, "first_message", lambda c, t, ctx, checks=None: "The digest of the run.")
 
-    async def no_checks(c):
+    async def no_checks(c, chat=None):
         return None
 
     monkeypatch.setattr(critique_session, "checks_text", no_checks)
