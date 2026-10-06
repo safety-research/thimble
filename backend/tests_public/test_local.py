@@ -164,6 +164,7 @@ async def test_state_gives_what_the_routes_give(term):
                paths=["agents/*.jsonl"])
     home = await local.state(CORPUS, "home")
     assert home["cards"] == 2 and home["labels"] == 1 and home["mode"] == "terminal" and home["unread"] == []
+    assert home["views"] == [], "the views built for this corpus, as a list the home panel draws; no built-in viewer"
     cards = await local.state(CORPUS, "cards", ["--since", "2000-01-01"])
     assert {c["title"] for c in cards["cells"]} >= {"Posts?"} and cards["groups"]
     assert (await local.state(CORPUS, "cards", ["--since", "2999-01-01"]))["cells"] == []

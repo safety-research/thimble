@@ -336,10 +336,11 @@ async def _home(c: str, args: list[str], pos: list[str]) -> Any:
     threads = [m for m in agents.list_chats(c) if m.get("kind") == agents.KIND_THREAD]
     out["threads"] = len(threads)
     out["unread"] = [m["id"] for m in threads if _unread(c, m)]
-    try:
-        out["views"] = len(views.list_views(c))
+    try:  # the views built for this corpus, each one line in the terminal (the browser shows the view itself)
+        out["views"] = [{"slug": v["slug"], "name": v["name"], "status": "built" if v.get("ok") else "not built"}
+                        for v in views.list_views(c) if v.get("origin") != "builtin"]
     except Exception:  # noqa: BLE001 — the row above the prompt still shows the rest
-        out["views"] = 0
+        out["views"] = []
     out["orientation"] = (orientation.read_run(c) or {}).get("status")
     out["mode"] = session_mode(config.workspace_path(c))
     return out
