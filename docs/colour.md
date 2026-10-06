@@ -53,7 +53,7 @@ load()
 | option | what it is |
 |---|---|
 | `mount` | an element or a selector in the view's top row. The control fills it and takes the row's free width. |
-| `fields` | the view's own fields it can colour by, in menu order: `{name, title, values?, value?}`. `name` is the field as the records hold it. `values` fixes the order of the values and their colours. `value(record)` gives a record's value when it is not `record[name]`. |
+| `fields` | the view's own fields it can colour by, in menu order: `{name, title, values?, value?}`. `name` is the field as the records hold it. `values` fixes the order of the values and their colours. A value given as `{name, colour}` takes the label palette's colour `colour` (1 to 12), for example so that two values that often sit side by side do not take two blues. `value(record)` gives a record's value when it is not `record[name]`. |
 | `initial` | the field chosen before the analyst picks one; the first field by default |
 | `chips` | `'highlight'` (the default) dims the records of a value turned off; `'filter'` hides them |
 | `strip` | the list that gets the coloured scrollbar: an element, a selector, or `true` for the page |
@@ -108,8 +108,9 @@ for a record the label does not mark.
 - With a label chosen, the label's value is the bar on each anchored record, as in the File browser.
 - A label the analyst turns on, in the menu or anywhere in thimble, takes the colour. When it is turned off again, the
   field chosen last is the colour.
-- A field's values take the label palette's colours: the declared `values` in their order, then the others the first
-  time they show, the most frequent first. Each keeps its colour after that.
+- A field's values take the label palette's colours: the declared `values` in their order, each in the colour it
+  names or else the next free one, then the others the first time they show, the most frequent first. A declared
+  value always has its declared colour; another value keeps its colour after it first shows.
 - A value turned off is hidden (`chips: 'filter'`) or dimmed (`'highlight'`) wherever its records show on the page.
   A page that leaves those records out itself, as the reader above does, loses nothing.
 

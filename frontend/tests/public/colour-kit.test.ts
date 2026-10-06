@@ -183,6 +183,19 @@ describe('Colour by', () => {
   })
 })
 
+describe('a declared value that names its colour', () => {
+  test('takes that palette colour whatever was kept, and the other values take the places left in order', async () => {
+    // kept from an earlier version of the view, which declared 'With links' second
+    await load({ v: 1, by: 'f:kind', field: 'kind', off: {}, seen: [], colours: { kind: { 'Text only': 0, 'With links': 1 } } })
+    const c = win().thimble.colourBy({ mount: '#colour', fields: [{ name: 'kind', title: 'Kind', values: ['Text only', { name: 'With links', colour: 6 }, 'Quote'] }] })
+    c.counts({ 'Text only': 2, 'With links': 1, Quote: 1, Other: 4 })
+    await wait()
+    // jsdom resolves no CSS variable, so a colour reads as the palette token it is
+    expect(['Text only', 'With links', 'Quote', 'Other'].map((v) => c.colourOf(v))).toEqual(['var(--label-1)', 'var(--label-6)', 'var(--label-2)', 'var(--label-3)'])
+    expect(chips().map((x) => x[0])).toEqual(['Text only', 'With links', 'Quote', 'Other'])
+  })
+})
+
 describe('a field that says its own value', () => {
   test('takes any record the page has, such as a row index into columns', async () => {
     await load()

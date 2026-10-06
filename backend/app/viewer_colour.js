@@ -4,6 +4,7 @@
 //   const colour = thimble.colourBy({
 //     mount: '#colour',                        an element in the view's top row, which the control fills
 //     fields: [{ name: 'kind', title: 'Kind', values: ['Text only', 'With links'] }, { name: 'source' }],
+//                                              a declared value may name its palette colour: { name: 'Error', colour: 7 }
 //     chips: 'filter',                         a value turned off hides its records; 'highlight' (the default) dims them
 //     strip: '#list',                          the list that gets the coloured scrollbar, or true for the page
 //     onChange: (colour) => draw(),            the choice, a value turned on or off, or the label values changed
@@ -11,8 +12,8 @@
 //
 // One menu lists together the view's own fields it declares colourable and every label over files, those that mark the
 // view's files first. A field colours by the values its records take, each in a palette colour of its own (the label
-// palette, --label-1 to --label-12, in the order the values come: the declared `values`, then the most frequent first,
-// kept per view so a value keeps its colour). A label colours by its values on each anchored record, in the label's own
+// palette, --label-1 to --label-12, in the order the values come: the declared `values`, each in the colour it names or
+// else the next free one, then the most frequent first, kept per view so a value keeps its colour). A label colours by its values on each anchored record, in the label's own
 // colours; choosing one turns it on, and a label the analyst turns on, here or anywhere in thimble, takes the colour.
 // The chosen field's values are chips in the top row, each with its count and its colour as a bar along the chip's
 // left edge; a click turns a value off or on, an Alt-click or a double click keeps that value alone. Colour is always
@@ -143,6 +144,39 @@
     } catch (e) {}
   }
 
+  // A field's declared values and the palette place of each: a value given as {name, colour} takes the colour it names
+  // (1 to 12, as a label's value names its colour); the others take the free places in their order
+  function declare(list) {
+    if (!Array.isArray(list)) return null
+    var values = []
+    var named = []
+    var taken = {}
+    for (var i = 0; i < list.length; i++) {
+      var v = list[i]
+      var obj = v != null && typeof v === 'object'
+      var name = String(obj ? v.name : v)
+      if (values.indexOf(name) >= 0) continue
+      var c = obj ? Number(v.colour) : NaN
+      var at = c >= 1 && c <= PALETTE && Math.floor(c) === c && !taken[c - 1] ? c - 1 : -1
+      if (at >= 0) taken[at] = true
+      values.push(name)
+      named.push(at)
+    }
+    var next = 0
+    var slots = named.map(function (at) {
+      if (at >= 0) return at
+      while (taken[next]) next++
+      taken[next] = true
+      return next
+    })
+    return { values: values, slots: slots }
+  }
+  // the palette place a field declares for a value, or -1
+  function slotOf(f, key) {
+    var at = f && f.values ? f.values.indexOf(key) : -1
+    return at < 0 ? -1 : f.slots[at]
+  }
+
   // ---------------------------------------------------------------- the control
   function Control(opts) {
     var self = this
@@ -153,7 +187,8 @@
       })
       .map(function (f) {
         if (typeof f === 'string') f = { name: f }
-        return { name: String(f.name), title: String(f.title || f.name), values: Array.isArray(f.values) ? f.values.map(String) : null, value: typeof f.value === 'function' ? f.value : null }
+        var declared = declare(f.values)
+        return { name: String(f.name), title: String(f.title || f.name), values: declared && declared.values, slots: declared && declared.slots, value: typeof f.value === 'function' ? f.value : null }
       })
     this.mode = opts.chips === 'filter' ? 'filter' : 'highlight'
     this.initial = typeof opts.initial === 'string' ? opts.initial : this.fields.length ? this.fields[0].name : null
@@ -241,14 +276,15 @@
   Control.prototype.isOn = function (value) {
     return this.offSet().indexOf(keyOf(value)) < 0
   }
-  // the colour of a field's value, from the palette: the declared values in their order, then the others the first
+  // the colour of a field's value, from the palette: a declared value's own place, always, and the others the first
   // time they are seen, the most frequent first, kept per view so a value keeps its colour
   Control.prototype.fieldColour = function (field, value) {
     var key = keyOf(value)
     if (key === NONE) return null
+    var slot = slotOf(this.field(field), key)
     var map = S.colours[field] || (S.colours[field] = {})
-    if (!(key in map)) this.assign(field, key)
-    var idx = map[key]
+    if (slot < 0 && !(key in map)) this.assign(field, key)
+    var idx = slot >= 0 ? slot : map[key]
     if (typeof idx !== 'number') return kit.realColour('var(--label-none)')
     return kit.realColour(idx < PALETTE ? 'var(--label-' + (idx + 1) + ')' : 'var(--label-none)')
   }
@@ -262,6 +298,8 @@
       used[map[k]] = true
       n++
     }
+    // the declared values' places are theirs whether or not they have shown yet
+    for (var d = 0; d < declared.length; d++) used[f.slots[d]] = true
     var c = this.choice()
     var counts = c && c.field === field ? (this.givenBy === c.key && this.given ? this.given : this.countDom()) : {}
     var fresh = Object.keys(counts).filter(function (v) {
@@ -274,10 +312,10 @@
       if (da >= 0 || db >= 0) return (da < 0 ? 1e9 : da) - (db < 0 ? 1e9 : db)
       return (counts[b] || 0) - (counts[a] || 0) || (a < b ? -1 : a > b ? 1 : 0)
     })
-    var next = declared.length
+    var next = 0
     for (var i = 0; i < fresh.length && n < MAX_KEPT; i++) {
       var v = fresh[i]
-      var at = declared.indexOf(v)
+      var at = slotOf(f, v)
       if (at < 0) {
         while (used[next]) next++
         at = next
