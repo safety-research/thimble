@@ -37,7 +37,7 @@ export function terminalLine(m: Pick<ChatMeta, 'agent_type' | 'role'> | null | u
 
 /** Why the agent's card says it stopped, or ''. An orientation main's quit stopped says how to continue it while no
  * session is back (`back` false); once `thimble --continue` brought main back, its thread says a message continues it
- * (CONTINUE_HERE_LINE). */
+ * (CONTINUE_HERE_LINE). One thimble stopped when main went into plan mode says so, and how to go on (planLine). */
 export function stoppedLine(m: Pick<ChatMeta, 'status' | 'stopped_by' | 'role' | 'route'> | null | undefined, back = false): string {
   if (!m || m.status !== 'stopped' || !isSubagent(m)) return ''
   if (m.stopped_by === 'quit') {
@@ -47,7 +47,24 @@ export function stoppedLine(m: Pick<ChatMeta, 'status' | 'stopped_by' | 'role' |
   }
   if (m.stopped_by === 'analyst') return 'Stopped.'
   if (m.stopped_by === 'user') return 'Stopped with Esc in your terminal.'
+  if (m.stopped_by === 'plan') return planLine(m.role)
   return ''
+}
+
+/** How a run thimble stopped when main went into plan mode goes on once main leaves it, by its chat's role (backend
+ * subagents.PLAN_HOW). */
+const PLAN_HOW: Record<string, string> = {
+  orient: 'send it a message to continue it',
+  step: 'send the orientation a message to continue it',
+  writer: 'choose Write again',
+  dev: 'choose Retry on the view',
+  check: 'choose Run on the check',
+}
+
+/** The line of a run thimble stopped through Claude Code when main went into plan mode, where its agents would have to
+ * ask before every step: why, and how to go on (backend subagents.plan_line). */
+export function planLine(role: string | null | undefined): string {
+  return `Stopped when your Claude Code session went into plan mode, where thimble's agents would have to ask you before every step. Leave plan mode (shift+tab in your terminal), then ${PLAN_HOW[role ?? ''] ?? 'start it again'}.`
 }
 
 export type Continue = 'here' | 'earlier-session' | 'earlier-version' | 'stopped-by-user' | null

@@ -570,8 +570,11 @@ def note_mode(c: str, sid: str | None, mode: str) -> None:
     lv = _live.get(c)
     if lv is None or not sid or lv.sid != sid or mode not in modes.CLAUDE_MODES:
         return
+    was = main_mode(c)
     _modes[c] = (sid, mode)
     _keep_mode(c, sid, mode)
+    if mode == PLAN_MODE and was != PLAN_MODE:
+        _plan_entered(c)
     meta = agents.meta_or_none(c, agents.MAIN_ID) or {}
     held = meta.get("attached") or {}
     if held.get("session") == sid and held.get("permission_mode") != mode:
@@ -581,6 +584,22 @@ def note_mode(c: str, sid: str | None, mode: str) -> None:
 
 
 _before_plan: dict[str, str] = {}  # workspace -> main's mode before thimble's module saw it go into plan mode
+PLAN_MODE = "plan"
+
+
+def _plan_entered(c: str) -> None:
+    """Main went into plan mode, where a subagent inherits it and would ask before every step (U20): thimble's running
+    agents are stopped through the module, as the browser's Stop stops them (subagents.stop_for_plan), and each thread
+    says why and how to go on once main leaves plan mode (U4). Nothing starts them again by itself."""
+    from . import subagents  # noqa: PLC0415
+
+    if not any(a.get("status") in ("running", "waiting") for a in subagents.agents_of(c).values()
+               if a.get("role") in subagents.ROLES):
+        return
+    try:
+        asyncio.get_running_loop().create_task(subagents.stop_for_plan(c), name=f"plan-stop:{c}")
+    except RuntimeError:  # no loop (a synchronous caller)
+        log.warning("%s: main went into plan mode, and no loop stops thimble's agents", c)
 
 
 def note_plan(c: str, sid: str | None, plan: bool) -> None:

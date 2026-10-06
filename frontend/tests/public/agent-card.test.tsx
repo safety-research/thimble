@@ -8,7 +8,7 @@ import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { AgentCard } from '../../src/chat/AgentCard.tsx'
 import { ThreadsContext } from '../../src/chat/Notes.tsx'
-import { STOPPED_CONTINUE_LINE, continueOf, continueText, runValues, stoppedLine, terminalLine, valuesText } from '../../src/chat/subagent.ts'
+import { STOPPED_CONTINUE_LINE, continueOf, continueText, planLine, runValues, stoppedLine, terminalLine, valuesText } from '../../src/chat/subagent.ts'
 import type { ChatMeta, ChatRecord } from '../../src/lib/types.ts'
 import { mount, settle, unmountAll } from './mount.tsx'
 
@@ -56,6 +56,13 @@ describe('the words', () => {
     expect(continueOf(meta({ route: null, agent_id: null }), 's1')).toBe('earlier-version')
     expect(continueText('earlier-session', 'abc-123')).toBe('This orientation ran in an earlier Claude Code session. To continue it, quit and run `thimble -r abc-123` in this folder, or start a new orientation.')
     expect(continueText('earlier-version', '')).toBe('This orientation ran in an earlier version of thimble and cannot be continued. Start a new orientation to explore further.')
+  })
+
+  test('a run thimble stopped when main went into plan mode says why, and how to go on once main leaves it (U4)', () => {
+    expect(stoppedLine(meta({ status: 'stopped', stopped_by: 'plan' }))).toBe(planLine('orient'))
+    expect(planLine('orient')).toMatch(/went into plan mode.*Leave plan mode \(shift\+tab in your terminal\), then send it a message to continue it\.$/)
+    expect(stoppedLine(meta({ role: 'writer', status: 'stopped', stopped_by: 'plan' }))).toMatch(/then choose Write again\.$/)
+    expect(planLine('dev')).toMatch(/Retry/)
   })
 
   test('an orientation stopped with Esc in its agent view, which Claude Code resumes no more, takes a message that continues it (U2)', () => {

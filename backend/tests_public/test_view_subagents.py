@@ -515,6 +515,18 @@ async def test_the_analyst_s_stop_and_main_s_quit_end_a_build_failed_with_retry(
     assert "stopped_by" not in _prop(other), "Retry clears it"
 
 
+async def test_plan_mode_s_stop_ends_a_build_failed_with_retry_saying_why_and_a_review_stopped(board, bridge, gates):
+    """U4: thimble stopped the builder when main went into plan mode: the view fails with the plan line (why, and to
+    choose Retry once main leaves plan mode), with no repair; nothing starts again by itself."""
+    slug = _propose(orientation=True)
+    agent = await _started(slug, route=subagents.FOLLOW_ON)
+    assert await subagents.stop_for_plan(CORPUS) == [agent]
+    subagents.run_ended(CORPUS, agent, "stopped", "", source="notification")
+    await _until(lambda: _prop(slug).get("status") == "failed", "the stopped build never failed")
+    assert _prop(slug)["error"] == subagents.plan_line("view-builder") and "Retry" in _prop(slug)["error"]
+    assert len(bridge.ops("spawn")) == 1, "no repair and no new start"
+
+
 async def test_main_s_quit_stops_a_change_to_a_built_view_which_says_so_and_keeps_the_view(board, bridge, gates,
                                                                                             monkeypatch):
     """A change to a built view that main's quit stopped leaves the view as it passed, and its chip and main's line say

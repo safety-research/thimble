@@ -82,6 +82,14 @@ STOPPED_REFUSED = "refused"
 # more ("Agent … was stopped by the user and won't be resumed"), unlike one a TaskStop stopped (live check L9)
 STOPPED_USER = "user"
 CANCELLED = "stopped-by-user"  # a chat's `continue` then: no follow-up can reach it
+# `stopped_by` of an agent thimble stopped through the module when main went into plan mode (U4), where a subagent would
+# have to ask before every step: a TaskStop, so a follow-up continues it once the analyst leaves plan mode
+STOPPED_PLAN = "plan"
+PLAN_STOPPED_LINE = ("Stopped when your Claude Code session went into plan mode, where thimble's agents would have to ask "
+                     "you before every step. Leave plan mode (shift+tab in your terminal), then {how}.")
+PLAN_HOW = {"orientation": "send it a message to continue it", "critic": "send the orientation a message to continue it",
+            "writer": "choose Write again", "view-builder": "choose Retry on the view",
+            "view-reviewer": "choose Review again on the view", "check": "choose Run on the check"}
 USER_STOP_RE = re.compile(r"stopped by (the )?user", re.I)  # Esc's task notification and a SendMessage's error say so
 QUIT_LINE = "Stopped when Claude Code quit."  # a chat's end line, its card's text is the browser's (AgentCard)
 WORK_DIRS = ("orient/work", "writers", "critique-work", "check-work", "views-work", "extension/views")
@@ -735,32 +743,66 @@ async def send(c: str, agent_id: str, text: str, *, values: dict[str, Any] | Non
     return Answer({**ans, "request": rid})
 
 
+def plan_line(role: str | None) -> str:
+    """The line a run thimble stopped when main went into plan mode ends with, in its thread and on its card: why, and
+    how to go on once main leaves plan mode (PLAN_HOW)."""
+    return PLAN_STOPPED_LINE.format(how=PLAN_HOW.get(str(role or ""), "start it again"))
+
+
 def stop_done(text: str) -> bool:
     """Whether a failed TaskStop says its agent had ended already, so the stop counts as done (U5)."""
     low = text.lower()
     return "is not running" in low or "no task found" in low
 
 
-async def stop(c: str, agent_id: str) -> Answer:
-    """Stop an agent through the module (TaskStop), and the background shells it started (add_shell). Refused when the
-    module is not live: the card then says to press Esc in the agent's view. An agent that had ended already counts as
-    stopped."""
+async def stop(c: str, agent_id: str, who: str = STOPPED_ANALYST) -> Answer:
+    """Stop an agent through the module (TaskStop), and the background shells it started (add_shell), as the analyst's
+    Stop (`who` analyst) or for main's plan mode (`who` plan, marked before the call, so that its end, which may come
+    first, reads it). Refused when the module is not live: the card then says to press Esc in the agent's view. An
+    agent that had ended already counts as stopped."""
     from . import module_bridge  # noqa: PLC0415
 
     a = agent(c, agent_id) or {}
     if not module_bridge.live(c):
         return refusal(NO_MODULE, str(module_bridge.why_not(c) or ""))
+    if who != STOPPED_ANALYST:
+        mark_stopped_by(c, agent_id, who)
     rid = new_request(c, "stop", a.get("key"), {"task_id": agent_id}, None, CLICK, role=a.get("role"), agent=agent_id)
     ans = await _bridge(c, "stop", agent=agent_id, request=rid, shells=list(a.get("shells") or []))
     if ans.refused and (ans.get("gone") or stop_done(ans.reason)):
         ans = Answer({"agentId": agent_id, "done": True})
     _set(c, rid, state="done" if not ans.refused else "refused", at=files.now(), reason=ans.reason or None)
     if not ans.refused:
-        mark_stopped_by(c, agent_id, STOPPED_ANALYST)
+        mark_stopped_by(c, agent_id, who)
+    elif who != STOPPED_ANALYST and (agent(c, agent_id) or {}).get("status") in ("running", "waiting"):
+        mark_stopped_by(c, agent_id, None)  # it runs on
     return Answer({**ans, "request": rid})
 
 
-def mark_stopped_by(c: str, agent_id: str, who: str) -> None:
+async def stop_for_plan(c: str) -> list[str]:
+    """Main went into plan mode while thimble's agents ran (U4): each running agent of thimble's roles is stopped through
+    the module, as the browser's Stop stops it, which leaves it able to continue, marked `stopped_by: plan`, so its run
+    ends with plan_line (run_ended) and its thread and card say why and how to go on once main leaves plan mode. A
+    child before its parent (the critic before the orientation). Nothing starts again by itself. The ids stopped."""
+    running = [k for k, a in agents_of(c).items() if a.get("role") in ROLES and a.get("status") in ("running", "waiting")]
+    running.sort(key=lambda k: 0 if str((agent(c, k) or {}).get("parent") or "") in running else 1)
+    stopped_ids = []
+    for agent_id in running:
+        try:
+            ans = await stop(c, agent_id, who=STOPPED_PLAN)
+        except Exception:  # noqa: BLE001 — the others are stopped either way
+            log.exception("%s: %s was not stopped for plan mode", c, agent_id)
+            continue
+        if ans.refused:
+            log.warning("%s: %s was not stopped for plan mode: %s", c, agent_id, ans.reason)
+            continue
+        stopped_ids.append(agent_id)
+    if stopped_ids:
+        log.info("%s: main went into plan mode, so thimble stopped %s", c, ", ".join(stopped_ids))
+    return stopped_ids
+
+
+def mark_stopped_by(c: str, agent_id: str, who: str | None) -> None:
     with update(c) as state:
         a = files.registry(state).get(agent_id)
         if isinstance(a, dict):
@@ -1056,6 +1098,10 @@ def run_ended(c: str, agent_id: str, status: str, report: str | None, *, source:
         snap = dict(a)
     log.info("%s: %s %s run %s ended %s (%s)", c, snap.get("role") or "agent", agent_id, snap.get("run"), status,
              source or "?")
+    plan = status == "stopped" and snap.get("stopped_by") == STOPPED_PLAN
+    if plan:  # stopped for main's plan mode (U4): its thread says why and how to go on; no end handler takes it as the
+        # analyst's Stop (the orientation's views and report go on once it is continued)
+        report, interrupted = plan_line(snap.get("role")), True
     t = TYPES.get(str(snap.get("role") or ""))
     if snap.get("chat"):
         try:

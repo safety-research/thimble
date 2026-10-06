@@ -2901,8 +2901,9 @@ async def _settle(c: str, slug: str, run: Any, status: str, report: str, why: st
     """What a builder's end means for its view, the backstop of finish_view:
     - it passed: done, its work folder lets go of its extracts, and the review starts; a folder that changed after the
       pass is gated again (views.regate: a pass is the new version, a failure puts the version that passed back);
-    - it was stopped: main's quit fails the view with MAIN_ENDED and Retry, the analyst's Stop with VIEW_STOPPED, and a
-      change, a replacement or a deletion that took it over leaves the view to what took over;
+    - it was stopped: main's quit fails the view with MAIN_ENDED and Retry, thimble's stop for main's plan mode with
+      its line (subagents.plan_line) and Retry, the analyst's Stop with VIEW_STOPPED, and a change, a replacement or a
+      deletion that took it over leaves the view to what took over;
     - it ended without a pass and never called finish_view: the gate runs once, and a pass registers the view;
     - still not built: a change to a built view leaves the view as it was, an orientation's proposal gets up to
       VIEW_REPAIRS new builders started with what failed, and then fails with Retry (_repairs_failed), and a view the
@@ -2928,6 +2929,8 @@ async def _settle(c: str, slug: str, run: Any, status: str, report: str, why: st
             return
         if a.get("stopped_by") == subagents.STOPPED_QUIT:
             _view_failed(c, slug, MAIN_ENDED, run.chat)
+        elif a.get("stopped_by") == subagents.STOPPED_PLAN:  # main went into plan mode: failed with Retry, and why (U4)
+            _view_failed(c, slug, subagents.plan_line("view-builder"), run.chat)
         elif why in (ORIENTATION_STOPPED, "dismissed"):
             if prop.get("revision"):
                 views.end_revision(c, slug)  # its builder has stopped, so nothing writes into the folder any more

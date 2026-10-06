@@ -445,6 +445,69 @@ async def test_main_s_quit_closes_the_running_agents_chats(bridge, models, ended
     assert ended == [("writer", 0, "stopped", subagents.QUIT_LINE)]
 
 
+async def test_plan_mode_stops_the_running_agents_through_the_module_and_their_threads_say_why(bridge, models, ended,
+                                                                                               monkeypatch):
+    """U4: main went into plan mode while thimble's agents ran, where each would have to ask before every step. Each
+    running agent of a role is stopped through the module, as the browser's Stop stops it (a TaskStop, which a follow-up
+    continues), a child before its parent; its run ends stopped with the plan line, its chat `stopped_by: plan`, and
+    no end handler takes it as the analyst's Stop. One that has ended is left alone, and nothing starts again."""
+    writer = await subagents.start_job(CORPUS, "writer", "writer:report", "w", {}, subagents.CLICK)
+    orient = await subagents.start_job(CORPUS, "orientation", "orient", "o", {}, subagents.CLICK)
+    with subagents.update(CORPUS) as state:
+        sf.registry(state)["crit1"] = {"key": "critique:orient", "role": "critic", "status": "running",
+                                       "parent": orient.agent_id}
+    done = await subagents.start_job(CORPUS, "check", "check:unverified:report", "k", {}, subagents.CLICK)
+    subagents.run_ended(CORPUS, done.agent_id, "done", "Two comments.")
+    spawns = len(bridge.ops("spawn"))
+    stopped = await subagents.stop_for_plan(CORPUS)
+    assert stopped[0] == "crit1" and set(stopped) == {"crit1", writer.agent_id, orient.agent_id}
+    assert [s["agent"] for s in bridge.ops("stop")] == stopped
+    for agent_id in ("crit1", writer.agent_id, orient.agent_id):
+        assert subagents.agent(CORPUS, agent_id)["stopped_by"] == subagents.STOPPED_PLAN
+        subagents.run_ended(CORPUS, agent_id, "stopped", "Agent was stopped", source="module")
+    meta = agents.read_meta(CORPUS, subagents.agent(CORPUS, writer.agent_id)["chat"])
+    assert (meta["status"], meta["stopped_by"]) == ("stopped", "plan")
+    assert meta["result"] == subagents.plan_line("writer") and "Write again" in meta["result"]
+    assert "shift+tab" in subagents.plan_line("orientation") and "message" in subagents.plan_line("orientation")
+    assert ("writer", 0, "stopped", subagents.plan_line("writer")) in ended
+    assert len(bridge.ops("spawn")) == spawns, "nothing starts again by itself"
+    again = await subagents.start_job(CORPUS, "writer", "writer:notes", "w", {}, subagents.CLICK)
+    bridge.answers.append({"error": "TaskStop failed for another reason"})
+    assert await subagents.stop_for_plan(CORPUS) == []
+    assert subagents.agent(CORPUS, again.agent_id)["stopped_by"] is None, "a stop that failed leaves it running"
+
+
+async def test_main_s_move_into_plan_mode_stops_thimble_s_agents_once(bridge, models, monkeypatch):
+    """The trigger: main's hooks or thimble's module report plan mode (session.note_mode, note_plan) after another
+    mode, and the stop runs once; staying in plan mode, or leaving it, stops nothing."""
+    from app import session
+
+    calls: list[str] = []
+
+    async def fake(c):
+        calls.append(c)
+        return []
+
+    monkeypatch.setattr(subagents, "stop_for_plan", fake)
+    await subagents.start_job(CORPUS, "writer", "writer:report", "w", {}, subagents.CLICK)
+    lv = session.Live(CORPUS, "sid-plan", "/c", None, None)
+    session._live[CORPUS] = lv
+    monkeypatch.setattr(session, "_keep_mode", lambda c, sid, mode: None)
+    try:
+        session.note_mode(CORPUS, "sid-plan", "auto")
+        session.note_mode(CORPUS, "sid-plan", "plan")
+        session.note_plan(CORPUS, "sid-plan", True)
+        await asyncio.sleep(0)
+        assert calls == [CORPUS]
+        session.note_plan(CORPUS, "sid-plan", False)
+        session.note_mode(CORPUS, "sid-plan", "plan")
+        await asyncio.sleep(0)
+        assert calls == [CORPUS, CORPUS], "a second move into plan mode stops again"
+    finally:
+        session._live.pop(CORPUS, None)
+        session._modes.pop(CORPUS, None)
+
+
 async def test_rekey_moves_the_running_agents_and_their_chats_to_the_new_session(bridge, models):
     started = await subagents.start_job(CORPUS, "writer", "writer:report", "w", {}, subagents.CLICK)
     with subagents.update(CORPUS) as state:
