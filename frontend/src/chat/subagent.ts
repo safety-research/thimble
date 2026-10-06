@@ -54,7 +54,8 @@ export type Continue = 'here' | 'earlier-session' | 'earlier-version' | 'stopped
 
 /** Whether a follow-up can still continue an orientation: `earlier-version` for a chat no subagent ran (0.5.0, or a
  * pre-release 0.6.0 that ran it headless), `stopped-by-user` for one stopped with Esc in its agent view, which Claude
- * Code resumes no more (backend subagents.mark_cancelled), `earlier-session` when its agent belongs to another Claude
+ * Code resumes no more (backend subagents.mark_cancelled), so a message starts a continuation in its thread (backend
+ * orient_session.continue_stopped), `earlier-session` when its agent belongs to another Claude
  * Code session than the one that is main now (`mainSid`), `here` otherwise; null while nothing is known. */
 export function continueOf(m: Pick<ChatMeta, 'continue' | 'route' | 'agent_id' | 'session' | 'sessions' | 'precached'> | null | undefined, mainSid: string | null | undefined): Continue {
   if (!m) return null
@@ -70,10 +71,11 @@ export function continueOf(m: Pick<ChatMeta, 'continue' | 'route' | 'agent_id' |
 /** The latest session id an orientation's records are under, which `thimble -r` resumes. */
 export const lastSession = (m: Pick<ChatMeta, 'session' | 'sessions'> | null | undefined): string => m?.sessions?.[m.sessions.length - 1] || m?.session || ''
 
-/** The composer's text for an orientation that cannot take a message here (backend tools.md orient-continue-*). */
+/** The composer's text for an orientation that cannot take a message here (backend tools.md orient-continue-*); ''
+ * for one that can, an orientation stopped with Esc among them, whose message starts a continuation
+ * (STOPPED_CONTINUE_LINE). */
 export function continueText(kind: Continue, sid: string): string {
   if (kind === 'earlier-version') return 'This orientation ran in an earlier version of thimble and cannot be continued. Start a new orientation to explore further.'
-  if (kind === 'stopped-by-user') return 'This orientation was stopped with Esc in your terminal, and Claude Code does not continue an agent stopped that way. Start a new orientation to explore further.'
   if (kind === 'earlier-session')
     return `This orientation ran in an earlier Claude Code session. To continue it, quit and run \`thimble -r ${sid || '<session id>'}\` in this folder, or start a new orientation.`
   return ''
@@ -81,6 +83,11 @@ export function continueText(kind: Continue, sid: string): string {
 
 /** The line of an orientation stopped by main's quit and resumed with `thimble --continue`: a message continues it. */
 export const CONTINUE_HERE_LINE = 'Stopped when Claude Code quit. Send a message to continue it.'
+
+/** The line of an orientation stopped with Esc in its agent view, which Claude Code resumes no more: a message starts
+ * a new run in its thread with what the stopped run left (backend orient_session.continue_stopped). */
+export const STOPPED_CONTINUE_LINE =
+  'Stopped with Esc in your terminal, and Claude Code does not continue an agent stopped that way. Send a message to continue it: thimble starts a new run in this thread that takes up its work.'
 
 /** The line while the orientation waits for its critic's report. */
 export const PAUSED_LINE = 'Waiting for the critique'

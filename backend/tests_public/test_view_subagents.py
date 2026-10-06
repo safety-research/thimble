@@ -17,7 +17,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from app import agents, config, dev, session, subagents, tools, view_review, view_tools, views
+from app import agents, config, dev, orient_session, orientation, session, subagents, tools, view_review, view_tools, views
 from app import subagent_files as sf
 from subagent_fakes import bridge, hints  # noqa: F401 — fixtures
 
@@ -101,7 +101,7 @@ async def _call(tool: str, args: dict, agent: str, key: str, n: list[int] = [0])
     n[0] += 1
     tid = f"toolu_t{n[0]:06d}"
     a = subagents.agent(CORPUS, agent) or {}
-    sf.add_caller(config.workspace_dir(CORPUS), tid, agent, str(a.get("type") or "thimble:helper"))
+    sf.add_caller(config.workspace_dir(CORPUS), tid, agent, str(a.get("type") or "thimble:orient-helper"))
     return await tools.call(CORPUS, tool, args, session=key, tool_use_id=tid)
 
 
@@ -429,8 +429,13 @@ async def test_a_builder_that_ends_without_finish_view_gets_the_gate_once(board,
     assert gates == [slug] and [k for k, _ in heard] == ["view"]
 
 
-async def test_an_orientation_s_failing_proposal_is_repaired_then_dropped_and_an_asked_one_fails_with_retry(
+async def test_an_orientation_s_failing_proposal_is_repaired_then_fails_with_retry_as_an_asked_one_does(
         board, bridge, gates, monkeypatch):
+    """U3: an orientation's proposal whose build fails gets VIEW_REPAIRS fresh builders; after the last one it fails
+    with Retry, never dropped: its chip shows ✕ (status failed, the gate's line as why) in the views list and in the
+    orientation's thread, which also gets one line with the view's chip. A view the analyst asked for fails at once."""
+    orient = agents.new_agent(CORPUS, orientation.ROLE, orientation.TITLE)["id"]
+    orientation._write_run(CORPUS, {"status": "running", "chats": {orientation.ROLE: orient}})
     slug = _propose(orientation=True)
     agent = await _started(slug, route=subagents.FOLLOW_ON)
     _draft(slug, "<p>FAIL</p>")
@@ -442,8 +447,18 @@ async def test_an_orientation_s_failing_proposal_is_repaired_then_dropped_and_an
         assert subagents.request(CORPUS, spawn["request"])["route"] == "follow-on"
         agent = _prop(slug)["agent_id"]
     subagents.run_ended(CORPUS, agent, "done", "It still fails.", source="handback")
-    await _until(lambda: _prop(slug).get("status") == "dropped", "the proposal was never dropped")
+    await _until(lambda: _prop(slug).get("status") == "failed", "the proposal never failed after its repairs")
     assert len(bridge.ops("spawn")) == dev.VIEW_REPAIRS + 1
+    assert "FAIL" in _prop(slug)["error"] and (views.views_dir(CORPUS) / slug).is_dir(), "its draft stays for Retry"
+    assert "held" not in _prop(slug) and slug not in views.held_slugs(CORPUS), "the views list shows it"
+    _, orient_log = agents.paths(CORPUS, orient)
+    [line] = [r for r in agents.read_events(orient_log) if r.get("kind") == dev.VIEW_FAILED_KIND]
+    assert line["ref"] == f"view:{slug}" and line["view"] == "Posts" and "FAIL" in line["text"]
+    assert f"after {dev.VIEW_REPAIRS} repairs" in line["text"]
+    assert orient_session.view_counts(CORPUS, None)["failed"] == 1, "the orientation's end line counts it as failed"
+    views.retry(CORPUS, slug, {})
+    assert (_prop(slug)["status"], _prop(slug)["repairs"]) == ("queued", 0), "Retry builds it again, with its repairs"
+    dev.stop_view(CORPUS, slug, dev.VIEW_STOPPED)
 
     asked = _propose("Threads", asked=True)
     theirs = await _started(asked)
@@ -499,6 +514,32 @@ async def test_the_analyst_s_stop_and_main_s_quit_end_a_build_failed_with_retry(
     assert "stopped_by" not in _prop(slug), "the analyst's Stop is no quit"
     views.retry(CORPUS, other)
     assert "stopped_by" not in _prop(other), "Retry clears it"
+
+
+async def test_a_build_main_s_plan_mode_held_at_its_end_fails_with_retry_saying_why_and_no_repair(board, bridge, gates):
+    """Main went into plan mode while a builder ran, and thimble stopped nothing, as Claude Code stops no subagent then:
+    the builder followed main and could only read and plan. A build that ends there with no view that passes fails
+    with Retry and the line that says why, and no repair starts; an orientation's proposal shows in the views list,
+    failed. A builder that left a passing view before plan mode held it is built, as the gate says after any run."""
+    slug = _propose(orientation=True)
+    agent = await _started(slug, route=subagents.FOLLOW_ON)
+    subagents.saw_plan_mode(CORPUS, agent)
+    subagents.run_ended(CORPUS, agent, "done", "My plan is in the plan file.", source="handback")
+    await _until(lambda: _prop(slug).get("status") == "failed", "the build plan mode held never failed")
+    line = subagents.plan_failed_line("view-builder")
+    assert _prop(slug)["error"] == line and line.endswith(", then choose Retry on the view.")
+    assert len(bridge.ops("spawn")) == 1, "no repair"
+    assert slug not in views.held_slugs(CORPUS), "the views list shows it"
+    views.retry(CORPUS, slug, {})
+    assert _prop(slug)["status"] == "queued", "Retry builds it again"
+    dev.stop_view(CORPUS, slug, dev.VIEW_STOPPED)
+
+    built = _propose("Threads", asked=True)
+    theirs = await _started(built)
+    _draft(built)
+    subagents.saw_plan_mode(CORPUS, theirs)
+    subagents.run_ended(CORPUS, theirs, "done", "I wrote the view before plan mode came.", source="handback")
+    await _until(lambda: _prop(built).get("status") == "built", "the view it left was not built")
 
 
 async def test_main_s_quit_stops_a_change_to_a_built_view_which_says_so_and_keeps_the_view(board, bridge, gates,
@@ -752,6 +793,28 @@ async def test_a_reviewer_that_ends_without_finish_review_has_its_edit_gated_onc
     assert _prop(slug)["review"]["note"] == view_review.REVISION_FAILED_NOTE
 
 
+async def test_a_review_main_s_plan_mode_held_at_its_end_fails_saying_why_unless_it_finished(board, bridge, gates,
+                                                                                                pictures, hints):
+    """A reviewer main's plan mode held at its end, which could only read and plan, did not finish its review: the
+    review fails with the line that says why and to choose Review again, not done. One that finished it (finish_review)
+    before plan mode held it is done."""
+    slug = _propose(asked=True)
+    reviewer, _ = await _reviewed(slug)
+    subagents.saw_plan_mode(CORPUS, reviewer)
+    subagents.run_ended(CORPUS, reviewer, "done", "My plan is in the plan file.", source="handback")
+    await _until(lambda: (_prop(slug).get("review") or {}).get("state") == "failed", "the review never failed")
+    line = subagents.plan_failed_line("view-reviewer")
+    assert _prop(slug)["review"]["note"] == line and line.endswith(", then choose Review again on the view.")
+    other = _propose("Threads", asked=True)
+    second, key = await _reviewed(other)
+    res = await _call("finish_review", {"left": ["a taste in colours"]}, second, key)
+    assert res.text.endswith(tools.hint("finish-review-done"))
+    subagents.saw_plan_mode(CORPUS, second)
+    subagents.run_ended(CORPUS, second, "done", "Reviewed.", source="handback")
+    await _until(lambda: not view_review.running(CORPUS, other), "the reviewer never ended")
+    assert subagents.agent(CORPUS, second)["status"] == "done" and _prop(other)["review"]["state"] == "done"
+
+
 async def test_a_build_s_pass_starts_its_review_as_a_follow_on_start(board, bridge, gates, pictures, monkeypatch):
     monkeypatch.setenv("THIMBLE_VIEW_REVIEW", "on")
     slug = _propose(asked=True)
@@ -840,7 +903,7 @@ def test_the_module_registers_the_three_job_roles_on_their_settings_rows(board):
     on its checks row, each with an explicit effort, a fixed description, and the thimble tools that are not its own
     taken away."""
     roles = subagents.roles(CORPUS)
-    assert {"orientation", "critic", "writer", "view-builder", "view-reviewer", "check", "helper"} <= set(roles)
+    assert {"orientation", "critic", "writer", "view-builder", "view-reviewer", "check", "orient-helper"} <= set(roles)
     own = {"view-builder": view_tools.BUILDER_TOOLS, "view-reviewer": view_tools.REVIEWER_TOOLS,
            "check": ("read_ref", "list_cards", "add_comment")}
     for role, mine in own.items():

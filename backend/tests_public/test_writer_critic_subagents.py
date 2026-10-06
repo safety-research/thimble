@@ -81,20 +81,54 @@ async def test_a_writer_main_s_plan_mode_caught_mid_run_fails_its_write_and_says
                                                                                     monkeypatch):
     """Live check L21: main went into plan mode while a writer ran, and the writer with it, so it wrote a plan file and
     no document; with the document already there, thimble took that for a revision that changed nothing. The plan_mode
-    attachment in its transcript marks the run, so its end fails the write with what to do, and a next run clears it."""
+    attachment in its transcript marks the run, so its end fails the write with what to do, its run and chat end
+    failed with that line, main hears it failed, and a next run clears the mark."""
     seen: list[dict] = []
+    told: list[dict] = []
     monkeypatch.setattr(report_types, "_emit", lambda c, rec: seen.append(rec))
-    monkeypatch.setattr(subagents, "tell_main", lambda c, kind, payload: None)
+    monkeypatch.setattr(subagents, "tell_main", lambda c, kind, payload: told.append(payload))
     monkeypatch.setattr(report_types, "read_doc", lambda c, inv, slug: {"sections": []})  # the document exists
     ans = await write_session.start(CORPUS, "report", route=subagents.CLICK)
     subagents.saw_plan_mode(CORPUS, ans.agent_id)
     chat = subagents.agent(CORPUS, ans.agent_id)["chat"]
     assert agents.read_meta(CORPUS, chat)["plan_mode"] is True
     subagents.run_ended(CORPUS, ans.agent_id, "done", "I was put into plan mode partway.", source="handback")
+    line = subagents.plan_failed_line("writer")
+    assert line == ("Your Claude Code session went into plan mode while the writer ran, so it could not save the "
+                    "document. Switch out of plan mode (shift+tab in your terminal), then write it again.")
     [end] = [r for r in seen if r.get("status") in ("generated", "failed")]
-    assert end["status"] == "failed" and end["note"] == report_types.WRITER_PLAN_NOTE and not end.get("unchanged")
+    assert end["status"] == "failed" and end["note"] == line and not end.get("unchanged")
+    meta = agents.read_meta(CORPUS, chat)
+    assert (meta["status"], meta["result"]) == ("failed", line)
+    assert subagents.agent(CORPUS, ans.agent_id)["status"] == "failed"
+    assert told == [{"text": line, "status": "failed", "doc": "report"}]
     subagents.run_again(CORPUS, ans.agent_id, "human")
     assert agents.read_meta(CORPUS, chat).get("plan_mode") is None
+
+
+async def test_a_writer_that_saved_before_plan_mode_held_it_or_ran_on_after_it_ends_done(bridge, models, workspaces_tmp,
+                                                                                         monkeypatch):
+    """A writer whose run plan mode held at its end but which had saved its document left its work (its Type's
+    left_work), and one whose transcript then said main left plan mode (plan_mode_exit) went on with it: both end
+    done as before."""
+    seen: list[dict] = []
+    monkeypatch.setattr(report_types, "_emit", lambda c, rec: seen.append(rec))
+    monkeypatch.setattr(subagents, "tell_main", lambda c, kind, payload: None)
+    ans = await write_session.start(CORPUS, "report", route=subagents.CLICK)
+    report_types.write_pending(CORPUS, "report")["saved"] = True
+    subagents.saw_plan_mode(CORPUS, ans.agent_id)
+    subagents.run_ended(CORPUS, ans.agent_id, "done", "Wrote the report.", source="handback")
+    assert subagents.agent(CORPUS, ans.agent_id)["status"] == "done"
+    assert [r["status"] for r in seen if r.get("status") in ("generated", "failed")] == ["generated"]
+    report_types.create_document_type(CORPUS, "casefile", name="Cases", slug="cases")
+    notes = await write_session.start(CORPUS, "cases", route=subagents.CLICK)
+    chat = subagents.agent(CORPUS, notes.agent_id)["chat"]
+    subagents.saw_plan_mode(CORPUS, notes.agent_id)
+    subagents.saw_plan_mode(CORPUS, notes.agent_id, False)
+    assert agents.read_meta(CORPUS, chat).get("plan_mode") is None
+    assert not subagents.ended_in_plan(CORPUS, notes.agent_id)
+    subagents.run_ended(CORPUS, notes.agent_id, "done", "Nothing to change.", source="handback")
+    assert subagents.agent(CORPUS, notes.agent_id)["status"] == "done"
 
 
 # --------------------------------------------------------------------------- the critic
@@ -179,7 +213,7 @@ def test_the_digest_of_a_subagent_orientation_holds_its_descendants_found_by_par
         (folder / f"agent-{agent}.meta.json").write_text(json.dumps(meta))
 
     put("o1", "the orientation's own words", agentType="thimble:orientation")
-    put("h1", "a helper's words", agentType="thimble:helper", parentAgentId="o1", description="survey")
+    put("h1", "a helper's words", agentType="thimble:orient-helper", parentAgentId="o1", description="survey")
     put("g1", "a grandchild's words", agentType="Explore", parentAgentId="h1", description="look closer")
     put("x1", "another agent's words", agentType="general-purpose", description="not ours")
     chat = agents.new_agent(CORPUS, orientation.ROLE, orientation.TITLE, route="subagent", agent_id="o1",

@@ -28,6 +28,9 @@ HINTS = {
     "orient-continue-earlier-version": "EARLIER VERSION",
     "module-started-note": "STARTED {role} {agent} {what}",
     "follow-up-ran-on": "RAN ON {model} {effort}",
+    "orient-continuation-prompt": "{request_id}\nSUMMARY {summary}\nCARDS {cards}\nTRANSCRIPTS {transcripts}\n"
+                                  "OUTPUTS {outputs}\nOFF {off}\nCRITIQUE {critique}\nMESSAGE {message}",
+    "message_orientation-continues": "CONTINUE WITH AGENT CALL {input}",
 }
 
 

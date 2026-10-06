@@ -192,7 +192,7 @@ async def test_a_dev_turn_has_no_time_limit_and_its_thread_says_when_the_session
                                                                                                      monkeypatch):
     """A turn runs until its session ends it. A session whose transcript and subagents' transcripts stay quiet gets
     "no activity" lines in its thread, at QUIET_NOTE_S and each time that time doubles, and runs on; a transcript or a
-    subagent that grows starts the quiet time again, and so does the time a permission request waits on the card."""
+    subagent that grows starts the quiet time again."""
     tx = tmp_path / "ab12cd34-0000.jsonl"
     tx.write_text("")
     sub = tmp_path / "ab12cd34-0000" / "subagents" / "agent-a1.jsonl"
@@ -200,8 +200,6 @@ async def test_a_dev_turn_has_no_time_limit_and_its_thread_says_when_the_session
     monkeypatch.setattr(dev, "SESSIONS", fake)
     monkeypatch.setattr(dev, "POLL_S", 0.01)
     monkeypatch.setattr(dev, "QUIET_NOTE_S", 0.3)
-    card = {"on": False}
-    monkeypatch.setattr(agent_session, "asking", lambda c, key: card["on"] and key == "ticket:t1")
     stages: list[str] = []
 
     class Log(dev.Log):
@@ -228,16 +226,13 @@ async def test_a_dev_turn_has_no_time_limit_and_its_thread_says_when_the_session
         with sub.open("a") as f:
             f.write("{}\n")
 
-    turn = _turn(dev.Run("t1", "a ticket", "now"), Log(None), tmp_path, workspace=CORPUS, asking={"key": "ticket:t1"})
+    turn = _turn(dev.Run("t1", "a ticket", "now"), Log(None), tmp_path, workspace=CORPUS)
     assert await until(2) >= 0.6  # quiet: a line at 0.3 s and one at 0.6 s
     assert not turn.done(), "the turn was stopped"
     assert notes() == [dev.QUIET_LINE.format(minutes=dev._minutes(s)) for s in (0.3, 0.6)]
     await busy(lambda: _line(tx, "working"), 0.7)
     await busy(subagent, 0.7)
-    card["on"] = True
-    await asyncio.sleep(0.7)
-    card["on"] = False
-    assert len(notes()) == 2, "activity, a subagent's or the card's time counted as quiet"
+    assert len(notes()) == 2, "activity, the transcript's or a subagent's, counted as quiet"
     assert await until(3) >= 0.25 and notes()[2] == notes()[0], "the quiet time starts again after activity"
     _line(tx, "done")
     await asyncio.sleep(0.05)

@@ -24,7 +24,8 @@ log = logging.getLogger("thimble.tray")
 router = APIRouter()
 
 STATUS_CHARS = 110  # of one statusline line; more go on further lines
-ROLE_WORDS = {"orientation": "orientation", "critic": "critique", "writer": "writer"}  # how a row names each role
+ROLE_WORDS = {"orientation": "orientation", "critic": "critique", "writer": "writer",  # how a row names each role
+              "dev-ticket": "code ticket"}
 
 
 def statusline_command(own: str = "") -> str:
@@ -51,6 +52,11 @@ def subagent_rows(c: str) -> list[dict[str, Any]]:
         role = str(a["role"])
         key = str(a.get("key") or "")
         what = key.split(":", 1)[1] if ":" in key and role != "critic" else ""
+        if role == "dev-ticket":  # the ticket by its number and title, not its id
+            from . import dev  # noqa: PLC0415 — dev imports the view modules, which import this one's callers
+
+            t = dev._get(what)
+            what = f"#{t.get('n')} {t.get('title') or ''}".strip() if t else what
         word = ROLE_WORDS.get(role, role)
         # waiting for a child: its critic, or the subagents it started (helpers), which critique off never names
         kids = [k for k in every.values() if k.get("parent") == agent_id and k.get("status") in ("running", "waiting")]

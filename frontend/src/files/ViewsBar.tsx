@@ -134,9 +134,9 @@ export function buildLabel(status: Proposal['status'], asking: boolean): string 
 }
 
 /** A proposal in the bar: the view's button as the bar draws a view, its state after the name, a click that opens the
- * build's thread; for a failed build (a view the analyst asked for) a warning icon with why on hover (failedWhy: a stop
- * at main's quit says so, as the chat's chip does), and Retry
- * beside it; × on hover to delete it (`onDismiss` gets the proposal's box, which a confirm sits by). A viewer
+ * build's thread; for a failed build (a view the analyst asked for, or an orientation's proposal after its repairs) a
+ * warning icon with why on hover (failedWhy: a stop at main's quit says so, as the chat's chip does), and Retry beside
+ * it; × on hover to delete it (`onDismiss` gets the proposal's box, which a confirm sits by). A viewer
  * suggested for a file type (in the File browser's mode row) wears the sparkle, shows its `why` on hover, and a click
  * builds it (`onAccept` runs then). */
 export function ProposalOption({ ws, p, onDismiss, onAccept, size, asking = false }: { ws: string; p: Proposal; onDismiss: (at: HTMLElement) => void; onAccept?: () => void; size: 'md' | 'lg'; asking?: boolean }) {

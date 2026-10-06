@@ -564,6 +564,28 @@ End a round of your review: thimble runs the view's checks on what you changed. 
 }
 ```
 
+## ticket_checks
+
+Check the change in your ticket's worktree, as often as you want: thimble's checks run over what the worktree changed, in a sandbox of the server's, and say what failed. Nothing is committed.
+
+```json
+{
+  "type": "object",
+  "properties": {}
+}
+```
+
+## finish_ticket
+
+Finish your ticket: thimble commits every change in the worktree to the ticket's branch and runs the checks as the record of your work. When they pass, thimble asks the analyst whether to apply the change. When they fail, the result says what failed and which attempt it was.
+
+```json
+{
+  "type": "object",
+  "properties": {}
+}
+```
+
 ## instructions
 
 These tools act on thimble, the workspace beside this session where the analyst reads a chat, the corpus's files, a canvas of cards and a report in the browser. A session started with the `thimble` command, and each thimble subagent, also has thimble's full instructions in its system prompt. If yours has none, this session was started some other way and the browser cannot reach it, so tell the analyst to quit and start it again by running `thimble` in this folder.
@@ -824,6 +846,14 @@ No view is named {view}. The views are {views}. File the ticket again with one o
 
 Filed {label}, but it cannot run here, so it failed at once: {why} Tell the analyst, since only they can change this.
 
+## file_dev_ticket-waits
+
+Filed {label}. {running} runs now, and code tickets run one at a time, so this one waits until the analyst starts it with Start on its card in the browser. Tell the analyst in one line.
+
+## file_dev_ticket-start
+
+Filed {label}: {title}. {start}
+
 ## view-media-unplayable
 
 The browser that takes the checks' and the review's pictures cannot play H.264 video or AAC audio, which most MP4, MOV and M4A recordings hold. A player of such a file stays blank or shows an error in the pictures, though the analyst's browser usually plays it, so that is not a problem of the view. A player that stays blank on a WebM, Ogg, MP3 or FLAC file is one.
@@ -855,6 +885,30 @@ Fix what failed, check the view again with `view_check`, then call `finish_view`
 ## finish-view-stop
 
 No attempt is left, so stop now. Change nothing more, and end with one line saying what still fails; thimble shows the failure to the analyst or starts a new build from it.
+
+## finish-ticket-pass
+
+The checks passed, and the change is committed to the ticket's branch: thimble asks the analyst whether to apply it. Change nothing more, and end with one line saying what you changed.
+
+## finish-ticket-fail
+
+The checks failed, attempt {n} of {of}:
+
+{report}
+
+Fix what failed, check again with `ticket_checks`, then call `finish_ticket` again.
+
+## finish-ticket-stop
+
+No attempt is left, so stop now. Change nothing more, and end with one line saying what still fails; thimble shows the failure to the analyst.
+
+## finish-ticket-empty
+
+The worktree holds no change, so there is nothing to check. Make the change first. When the ticket cannot be done safely, end without `finish_ticket` and say why.
+
+## ticket-checks-empty
+
+The worktree holds no change yet, so there is nothing to check.
 
 ## finish-review-again
 
@@ -1071,6 +1125,14 @@ Your Claude Code session is in plan mode, where thimble's agents would have to a
 ## start-refused-not-launched
 
 This session was not started with `thimble`, so it and its subagents run without thimble's sandbox and can change your files, and thimble's agents cannot start in it. Quit and run `thimble` in this folder.
+
+## start-refused-fork
+
+A thread's fork cannot start thimble's agents, since Claude Code does not let a fork start subagents. Tell the analyst in one line in the thread that they can start it in the browser: Start for the orientation, or Write on a document for its writer.
+
+## start-refused-fork-ticket
+
+A thread's fork cannot file a ticket, since its agent is a subagent and Claude Code does not let a fork start subagents. Tell the analyst in one line in the thread that they can file it in the browser with Report a problem.
 
 ## start-refused-no-module
 
@@ -1442,7 +1504,39 @@ This orientation ran in an earlier version of thimble and cannot be continued. S
 
 ## orient-continue-stopped-by-user
 
-This orientation was stopped with Esc in your terminal, and Claude Code does not continue an agent stopped that way. Start a new orientation to explore further.
+This orientation was stopped with Esc in your terminal, and Claude Code does not continue an agent stopped that way. A message to it starts a new run in its thread that takes up its work.
+
+## message_orientation-continues
+
+The analyst stopped this orientation with Esc in their terminal, and Claude Code does not continue an agent stopped that way. So thimble continues it as a new orientation run in its thread, which gets the message and what the stopped run left. Start that run now with one Agent call whose input is exactly this:
+
+{input}
+
+Change nothing in it, since thimble lets only this call through, and end the turn on it, with no words before or after it: the terminal and the browser both show the call.
+
+## orient-continuation-prompt
+
+[thimble request {request_id}]
+
+The analyst stopped the earlier run of this orientation with Esc in their terminal, and Claude Code does not continue a run stopped that way. You are a new run in its place, in the same thread. Take up its work from where it stopped, and do not do again what it did. What it left:
+
+Its last text: {summary}
+
+Its cards:
+{cards}
+
+Its transcript, which you can read for what it did and found:
+{transcripts}
+
+The outputs this run leaves, of those `### Outputs` describes: {outputs}. The ones it leaves out, whose parts of `### Outputs` do not apply: {off}. The critique: {critique}.
+
+The analyst's message:
+
+{message}
+
+## orient-continuation-none
+
+none
 
 ## message_orientation-none
 

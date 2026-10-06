@@ -270,6 +270,13 @@ def subagent_started(c: str, run: subagents.Run, req: dict[str, Any]) -> None:
     _set(c, slug, state="running", agent_id=run.agent_id, chat=run.chat)
 
 
+def left_work(c: str, run: subagents.Run) -> bool:
+    """Whether the reviewer's run finished its review (finish_review; subagents.Type.left_work), so that main's plan
+    mode at its end is no failure."""
+    review = review_of(views.read_proposal(c, run.key.split(":", 1)[-1]))
+    return bool(review.get("finished")) and review.get("agent_id") in (None, run.agent_id)
+
+
 def subagent_refused(c: str, req: dict[str, Any]) -> None:
     """A reviewer's start that did not happen: at Claude Code's subagent limit it waits (`queued`) and is tried again
     LIMIT_RETRY_S later, up to LIMIT_TRIES times, as a build waits in its queue; otherwise, or after the last try, the
@@ -348,6 +355,8 @@ async def _ended(c: str, run: subagents.Run, status: str, report: str, why: str,
             a = subagents.agent(c, run.agent_id) or {}
             quit_ = a.get("stopped_by") == subagents.STOPPED_QUIT
             _set(c, slug, state="stopped", note=note or (QUIT_NOTE if quit_ else why or STOPPED_NOTE))
+        elif status == "failed" and report == subagents.plan_failed_line(REVIEWER):  # main's plan mode held it
+            _set(c, slug, state="failed", note=note or report)
         elif status == "failed":
             said = " ".join(str(report or "").split())[:400]
             _set(c, slug, state="failed", note=note or (f"The review did not finish: {said}" if said else

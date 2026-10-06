@@ -1,15 +1,15 @@
-"""The permission mode of the agents thimble starts. Every agent but the dev agent's code tickets is a subagent of main,
-the analyst's Claude Code session, and runs in main's mode, as Claude Code runs its own subagents. The code tickets stay
-jobs of the server, with one row in the settings (AGENTS): the dev agent's, in Manual, Auto or Bypass (MODES), thimble's
-config's `agents.dev.permissionMode` (userconf.MODE_ROWS). The rows of earlier builds (IGNORED_ROWS) are read and
-ignored, so an earlier config or tab stays valid.
+"""The permission mode of the agents thimble starts. Every agent of thimble's, code tickets' agents among them, is a
+subagent of main, the analyst's Claude Code session, and runs in main's mode, as Claude Code runs its own subagents. An
+extension's program that runs the dev agent stays a job of the server, with one row in thimble's config (AGENTS): the
+dev agent's, in Manual, Auto or Bypass (MODES), `agents.dev.permissionMode` (userconf.MODE_ROWS). The rows of earlier
+builds (IGNORED_ROWS) are read and ignored, so an earlier config or tab stays valid.
 
 A row the analyst has not set follows main: the mode Claude Code reports to main's hooks (session.note_mode), which
 thimble keeps until main reports again, over a restart of the server under the same session too, Manual before the first
-report. So a code ticket runs in Bypass only when main does, or when the analyst chose Bypass for it in thimble's page:
-in Settings, or on a session's card (that session alone, agent_session.set_mode), each a write only the analyst's
-browser may make (hook_auth.analyst). A mode the analyst's or the org's Claude Code settings turn off
-(disabled) is never used. Main's own mode is Claude Code's alone.
+report. So such a program runs in Bypass only when main does, or when the analyst chose Bypass for it in thimble's
+config or on a session's card (that session alone, agent_session.set_mode), each a write only the analyst's browser may
+make (hook_auth.analyst). A mode the analyst's or the org's Claude Code settings turn off (disabled) is never used.
+Main's own mode is Claude Code's alone.
 
 Manual and Bypass both run Claude Code's manual mode (FLAGS): in Bypass thimble grants every request itself
 (agent_session.ask), so a card switches between them without restarting the session. Auto runs Claude Code's auto mode.

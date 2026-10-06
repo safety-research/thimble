@@ -10,7 +10,7 @@
 // process on the port can neither hand it requests nor read them, and nothing it does runs outside the sandbox.
 //
 // What it does once the server accepts it:
-// - registers thimble's six roles and thimble:helper from GET /api/module/roles (each with a full model id and an
+// - registers thimble's roles and thimble:orient-helper from GET /api/module/roles (each with a full model id and an
 //   explicit effort, from Settings); when the server is up at session start this happens inside session.start, so the
 //   types are in main's first agent listing;
 // - asks Claude Code's permission decision for a write it never makes every PLAN_POLL_MS and tells the server when main
@@ -20,7 +20,9 @@
 //   the run's values if they differ, $.agent.spawn with no `model`, then the one-line note the server rendered), send
 //   (register if needed, then SendMessage), stop (TaskStop of the agent and of the shells the server names), note
 //   ($.session.append). It never starts, sends or stops anything the server did not ask for;
-// - agent.spawn: main's Agent call for one of thimble's roles whose prompt's first line names a typed request gets that
+// - agent.spawn: an Agent call for one of thimble's roles whose prompt's first line names a typed request, main's or a
+//   subagent's (a subagent of main's own may start thimble's agents, as Claude Code lets a subagent start subagents;
+//   a thread's fork is refused at its start tool, tools._as_caller), gets that
 //   request's full model id, and the agent it starts that request's effort, which turn.step sets on its every request;
 //   a child of such an agent whose type is not thimble's gets the same effort (its model it inherits already). These
 //   hooks never see a run of an agent this module started, which is why clicks register instead;
@@ -46,7 +48,7 @@ type Hello = 'ok' | 'wait' | 'refused'
 
 export const PLUGIN = 'thimble'
 // thimble's roles: each names its own model and effort, so a typed run's effort never goes to one of them
-export const ROLES = ['orientation', 'critic', 'writer', 'view-builder', 'view-reviewer', 'check']
+export const ROLES = ['orientation', 'critic', 'writer', 'view-builder', 'view-reviewer', 'check', 'dev-ticket']
 export const RETRY_MS = 2000 // between hellos while no server accepts one, and after a failed poll
 export const SESSION_WAIT_MS = 10000 // how long /clear's new session id is waited for
 export const SESSION_TICK_MS = 25
@@ -470,12 +472,14 @@ async function follow($: Engine, m: State, old: string): Promise<void> {
 }
 
 /** What main's (or an agent's) Agent call starts with: a typed start's model, and the effort its agent and that
- *  agent's children of no thimble type run at. Never fails the call: a lookup that fails changes nothing. */
+ *  agent's children of no thimble type run at. A typed start is found by the request its prompt's first line names,
+ *  whoever makes the call: main, a subagent of main's own whose start tool call made the request, or the
+ *  orientation for its critic. Never fails the call: a lookup that fails changes nothing. */
 async function spawning($: Engine, m: State, e: { subagentType?: string; parentAgentId?: string; prompt?: string }): Promise<{ model?: string; effort?: Effort; typed?: string }> {
   try {
     const type = e.subagentType ?? ''
     const role = roleOf(type)
-    if (role && !e.parentAgentId) {
+    if (role) {
       const typed = await typedStart($, m, e.prompt ?? '', role)
       if (!typed) return {}
       const effort = typed.values.effort

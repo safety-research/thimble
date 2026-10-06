@@ -41,7 +41,7 @@ import { countMessages, isUnread, markSeen, readSeen, type SeenMap } from './see
 import { SKIPPED_NOTE, StartGate, restoreOf, startGateShown, startedChat } from './StartGate'
 import { AgentCard, stopSession, useAgentRows } from './AgentCard'
 import { OrientStart, useOrientRun } from './OrientStart'
-import { CONTINUE_HERE_LINE, PAUSED_LINE, continueOf, continueText, lastSession } from './subagent'
+import { CONTINUE_HERE_LINE, PAUSED_LINE, STOPPED_CONTINUE_LINE, continueOf, continueText, lastSession } from './subagent'
 import { UnfencedBanner } from '../shell/UnfencedBanner'
 import { ViewChip } from './ViewChip'
 import { replayHeld } from './pending'
@@ -591,7 +591,9 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
   const agentRows = useAgentRows(ws, [...new Set([...runningAgents.map((m) => m.id), ...orientIds])])
   const orienting = current === 'main' ? runningAgents.find((m) => threadKind(m) === 'orient') : undefined
   const metaMap = useMemo(() => new Map(chats.map((m) => [m.id, m])), [chats])
-  const strip = orienting ? taskStrip('orient', true, agentRows.get(orienting.id) ?? [], metaMap) : taskStrip(kind, running, chat.rows, metaMap, !!curMeta?.view, kind === 'thread' ? threadStage(curMeta, running) : null)
+  // a ticket that waits in the queue, or for the analyst's Start, is not at work: its foot says so (TicketStatus)
+  const waitingTicket = kind === 'dev' && !curMeta?.view && ticket?.status === 'queued'
+  const strip = waitingTicket ? null : orienting ? taskStrip('orient', true, agentRows.get(orienting.id) ?? [], metaMap) : taskStrip(kind, running, chat.rows, metaMap, !!curMeta?.view, kind === 'thread' ? threadStage(curMeta, running) : null)
   // the orientation waits for its critic's report: the strip says so (subagents' `paused: critique`)
   const pausedFor = (orienting ?? (kind === 'orient' ? curMeta : null))?.paused === 'critique'
   if (strip && pausedFor) strip.title = PAUSED_LINE
@@ -714,8 +716,9 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
         })
         .catch((e: Error) => {
           setOutbox((o) => o.filter((m) => m.key !== key))
-          // an orientation of an earlier session or version, or one stopped with Esc: its text takes the composer's place
-          const closed = /^(409|410)\s+(This orientation (?:ran in an earlier|was stopped with Esc).*)$/s.exec(e.message)
+          // an orientation of an earlier session or version: its text takes the composer's place (one stopped with Esc
+          // takes the message, which starts its continuation)
+          const closed = /^(409|410)\s+(This orientation ran in an earlier.*)$/s.exec(e.message)
           if (closed) setOrientClosed({ chat: chatId, text: closed[2] })
           else bus.emit('toast', { text: `Your message was not passed on: ${e.message.replace(/^\d{3}\s+/, '')}`, kind: 'error' })
           return false
@@ -1060,6 +1063,8 @@ function SessionView({ ws, id, chat, role, title, running, outbox = [], fromMain
   const log = useMemo(() => ({ meta: chat.meta, records: chat.records as ChatRecord[], error: chat.error }), [chat.meta, chat.records, chat.error])
   const meta = chat.meta?.id === id ? chat.meta : null
   const here = orient && !running && meta?.status === 'stopped' && meta.stopped_by === 'quit' && meta.continue === 'here'
+  // stopped with Esc, which Claude Code resumes no more: a message starts a continuation in this thread (U2)
+  const escStopped = orient && !running && meta?.continue === 'stopped-by-user'
   // a message sent from here is shown until the log holds it (a follow-up's first record)
   const landed = landedTexts(chat.rows)
   const sending = outbox.filter((m) => !landed.has(m.text.trim()))
@@ -1070,6 +1075,7 @@ function SessionView({ ws, id, chat, role, title, running, outbox = [], fromMain
       <AgentCard ws={ws} chat={id} role={role} title={title} log={log} openWhileRunning stopHere={false} briefAbove={orient} />
       <Rows rows={rows} ws={ws} chat={id} calls={orient ? id : undefined} live={running} />
       {here && <Note className="chat-continue-here" text={CONTINUE_HERE_LINE} />}
+      {escStopped && <Note className="chat-continue-here" data-continue="stopped-by-user" text={STOPPED_CONTINUE_LINE} />}
       {sending.map((m, i) => (
         <PendingMessage key={`s:${i}:${m.text}`} text={m.text} ws={ws} held={!!m.held} />
       ))}

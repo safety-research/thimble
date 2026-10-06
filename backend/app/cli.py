@@ -1682,7 +1682,7 @@ def main_name(cwd: Path) -> str:
 
 # the folders main's Bash may write, under the workspace (subagents.write_dirs, which this list stands in for until the
 # subagent paths are in): the orientation's work folder, the writers', the critics', the checks', the view builders' and
-# the workspace's own views. No code ticket's worktree: code tickets keep their own fence.
+# the workspace's own views. The code tickets' worktrees are outside the workspace (ticket_trees).
 WRITE_DIRS = ("orient/work", "writers", "critique-work", "check-work", "views-work", "extension/views")
 LAUNCH_FILE = "trusted/launch.json"  # in the workspace (subagent_files): {session, at, fenced, switches, unset, pid, modules_off}
 # exported into main's environment: no "Move to background" and no ← agent view, the ↓ tray kept (spike U11);
@@ -1743,12 +1743,19 @@ def fence_off(c: str | None) -> str:
     return "" if cc_settings.sandbox_ok() else "missing"
 
 
+def ticket_trees() -> list[Path]:
+    """The folder of the code tickets' worktrees in a development install (dev.worktrees_dir's rule, which this module
+    does not import), which main's fence lets main's Bash and its subagents write, a ticket's agent among them, and
+    which their Edit and Write tools reach (additionalDirectories); none in an installed copy."""
+    return [home() / "dev" / "trees"] if (config.REPO_ROOT / ".git").exists() else []
+
+
 def main_fence(cwd: Path, c: str | None = None, root: Path | None = None, session: str | None = None,
                given: str = "") -> dict[str, Any]:
     """The --settings keys that put main, and every subagent it starts, inside thimble's fence for the corpus `cwd`,
     workspace `c` (by default the one `cwd` is registered as), the plugin copy at `root`, main's session `session`
-    (module note, main's fence): `sandbox`, `permissions` (userconf.main_rules; no additionalDirectories) and `env`
-    (cc_plugin.FENCE_MARK). With the plugin's hooks off, /thimble's own command for SANDBOX_ACTIONS in that session and
+    (module note, main's fence): `sandbox`, `permissions` (userconf.main_rules, and in a development install the code
+    tickets' worktrees as additionalDirectories, ticket_trees) and `env` (cc_plugin.FENCE_MARK). With the plugin's hooks off, /thimble's own command for SANDBOX_ACTIONS in that session and
     the Monitor route's watcher command for it are let out of the sandbox, and no other (sandbox_rules, watch_rules);
     `given` is the analyst's own --settings to the launcher, which may turn the hooks off (launch_hooks_blocked).
     {} when fence_off says so. A config with an error fences main with the defaults' rules."""
@@ -1768,7 +1775,16 @@ def main_fence(cwd: Path, c: str | None = None, root: Path | None = None, sessio
         # with the hooks off, the Monitor route's watcher must reach the server (spike U15), and /thimble's own command
         # starts the server
         excluded += [*watch_rules(root, cwd, session), *sandbox_rules(root, cwd, session)]
-    fs = {"allowWrite": [str(d) for d in write_dirs(c)],
+    trees = [str(d) for d in ticket_trees()]
+    for tree in trees:
+        # Claude Code drops an additionalDirectories folder that does not exist as main starts, and the first ticket
+        # makes this one later, so outside auto mode a ticket's agent was asked about each Read of its worktree (live
+        # check L27 on 060-s4): the folder is made first
+        try:
+            Path(tree).mkdir(parents=True, exist_ok=True)
+        except OSError:
+            pass
+    fs = {"allowWrite": [*(str(d) for d in write_dirs(c)), *trees],
           "denyWrite": [str(corpus), str(userconf.workspace_file(c)), str(ws / "settings.json")],
           "denyRead": [*userconf.private_paths(), str(home() / LINKS_DIR)]}
     box: dict[str, Any] = {"enabled": True, "failIfUnavailable": bool(conf["sandbox"]["enforce"]),
@@ -1779,6 +1795,8 @@ def main_fence(cwd: Path, c: str | None = None, root: Path | None = None, sessio
     perms: dict[str, list[str]] = {}
     for rule in userconf.main_rules(c):
         perms.setdefault(rule.behavior, []).append(rule.rule)
+    if trees:
+        perms["additionalDirectories"] = trees
     return {"sandbox": box, "permissions": perms, "env": {cc_plugin.FENCE_MARK: "1"}}
 
 
@@ -2574,7 +2592,9 @@ def module_line(cwd: Path) -> str:
 # free disk, who holds the port, how a session started here would hear the browser, and whether the API host answers.
 # Each reader returns a short phrase and never raises, since the doctor must print even on a broken machine.
 
-TESTED_CLAUDE_CODE = "2.1.281"  # INSTALL.md names the same version
+TESTED_CLAUDE_CODE = "2.1.291"  # INSTALL.md and README.md name the same version (test_cli.py)
+MODS_CLAUDE_CODE = "2.1.287"  # the first Claude Code that loads plugin mods, thimble's hooks module, by default
+CLAUDE_CODE_SEEN_FILE = "claude_code.json"  # in <home>: the newer Claude Codes the analyst was told about
 NODE_MIN_MAJOR = 20  # custom views are built with Node 20+ (views.py)
 DISK_LOW_BYTES = 1_000_000_000  # under this much free space the doctor says the disk is low
 LOG_ROTATE_BYTES = 20_000_000  # a server.log past this size is moved to server.log.1 when a server starts
@@ -2601,26 +2621,85 @@ def claude_code_version() -> str | None:
     return ".".join(map(str, v)) if v else None
 
 
-def claude_code_warning(version: str | None) -> str | None:
-    """A line for the analyst when Claude Code is older than the version thimble is tested with; None when it is that
-    version or newer, or its version is not known (config.auth_problem says when `claude` is missing)."""
-    have, tested = version_tuple(version), version_tuple(TESTED_CLAUDE_CODE)
-    if have and tested and have < tested:
-        return (f"thimble: WARNING - Claude Code {version} is older than {TESTED_CLAUDE_CODE}, the version thimble is tested "
-                "with; if something fails, run `claude update` and start thimble again.")
+TOO_OLD_LINE = ("thimble: WARNING - Claude Code {version} does not load plugin mods by default ({mods} or later does), so "
+                "thimble's agents cannot start. Run `claude update`, or `claude install latest` if you follow the stable "
+                "channel.")
+OLDER_LINE = ("thimble: WARNING - Claude Code {version} is older than {tested}, the version thimble is tested with; if "
+              "something fails, run `claude update` and start thimble again.")
+NEWER_LINE = ("thimble: Claude Code {version} is newer than {tested}, the version {thimble} was tested with. If agents do "
+              "not start or their chats stop updating, run `thimble doctor` and report it.")
+NEWER_DOCTOR_TAIL = ("run `thimble doctor` and report it.", "report it (`thimble feedback`).")  # the doctor's own words
+
+
+def _thimble_named() -> str:
+    """`thimble 0.6.0`, from plugin.json (the one source a release takes its version from), or `thimble`."""
+    rec = _read_json(config.REPO_ROOT / "plugin" / ".claude-plugin" / "plugin.json")
+    v = str(rec.get("version") or "") if isinstance(rec, dict) else ""
+    return f"thimble {v}" if v else "thimble"
+
+
+def _first_told(version: str) -> bool:
+    """Whether the analyst is told about this newer Claude Code for the first time on this machine, which it records in
+    <home>/CLAUDE_CODE_SEEN_FILE. Never raises: a home it cannot write tells them again next time."""
+    path = home() / CLAUDE_CODE_SEEN_FILE
+    rec = _read_json(path)
+    told = [str(v) for v in rec.get("newer_told") or []] if isinstance(rec, dict) else []
+    if version in told:
+        return False
+    try:
+        from .ledger import atomic_write_text  # noqa: PLC0415
+
+        ensure_home()
+        atomic_write_text(path, json.dumps({"newer_told": [*told, version][-20:]}, indent=1) + "\n")
+    except (OSError, ValueError) as e:
+        _log(f"{CLAUDE_CODE_SEEN_FILE} was not written: {e}")
+    return True
+
+
+TOO_OLD, OLDER, NEWER = "too old", "older", "newer"  # how a Claude Code's version stands to thimble's (claude_code_case)
+
+
+def claude_code_case(version: str | None) -> str | None:
+    """TOO_OLD below MODS_CLAUDE_CODE, which does not load thimble's hooks module by default, OLDER below the version
+    thimble is tested with, NEWER above it; None for that version, or when `version` names none."""
+    have, tested, mods = version_tuple(version), version_tuple(TESTED_CLAUDE_CODE), version_tuple(MODS_CLAUDE_CODE)
+    if not (have and tested and mods) or have == tested:
+        return None
+    return TOO_OLD if have < mods else OLDER if have < tested else NEWER
+
+
+def claude_code_warning(version: str | None, once: bool = True) -> str | None:
+    """A line for the analyst about the Claude Code thimble runs with (claude_code_case), shown at launch and in
+    /thimble's output; for a newer one a hint that with `once` is given once per version on this machine (_first_told).
+    None for the tested version, or when its version is not known (config.auth_problem says when `claude` is missing)."""
+    case = claude_code_case(version)
+    if case == TOO_OLD:
+        return TOO_OLD_LINE.format(version=version, mods=MODS_CLAUDE_CODE)
+    if case == OLDER:
+        return OLDER_LINE.format(version=version, tested=TESTED_CLAUDE_CODE)
+    if case == NEWER and (not once or _first_told(str(version))):
+        return NEWER_LINE.format(version=version, tested=TESTED_CLAUDE_CODE, thimble=_thimble_named())
     return None
 
 
 def claude_code_line(commands: bool = True) -> str:
+    """The doctor's Claude Code line: its version and what claude_code_warning says of it, the newer hint each time, in
+    the doctor's own words. Without `commands` it names no command to run."""
     v = claude_code_version()
     if v is None:
         return (config.NO_CLAUDE if commands else config.NO_CLAUDE_FOUND) if not config.CLI_PATH else \
             "`claude --version` printed no version"
-    warning = claude_code_warning(v)
-    if warning:
-        return warning.removeprefix("thimble: WARNING - ") if commands else \
-            f"{v}, older than {TESTED_CLAUDE_CODE}, the version thimble is tested with"
-    return f"{v} (thimble is tested with {TESTED_CLAUDE_CODE})"
+    case, warning = claude_code_case(v), claude_code_warning(v, once=False)
+    if not warning:
+        return f"{v} (thimble is tested with {TESTED_CLAUDE_CODE})"
+    if commands:
+        return warning.removeprefix("thimble: WARNING - ").removeprefix("thimble: ").replace(*NEWER_DOCTOR_TAIL)
+    if case == TOO_OLD:
+        return (f"{v}, older than {MODS_CLAUDE_CODE}, the first version that loads plugin mods by default, so thimble's "
+                "agents cannot start")
+    if case == OLDER:
+        return f"{v}, older than {TESTED_CLAUDE_CODE}, the version thimble is tested with"
+    return f"{v}, newer than {TESTED_CLAUDE_CODE}, the version {_thimble_named()} was tested with"
 
 
 def _turn_endings_line() -> str:

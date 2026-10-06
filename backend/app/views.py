@@ -86,9 +86,10 @@ KEY_REFS_FILE = "key-refs.json"  # view:<slug>/<key> -> {refs, excerpt, label, n
 INDEXES_SUBDIR = view_indexes.INDEXES_SUBDIR
 VIEW_JSON, READER_PY, VIEW_HTML = "view.json", "reader.py", "view.html"
 TOOLS_PROMPT = "tools"  # prompts/tools.md, whose lowercase sections are the lines the view tools' results carry
-# a view ticket's status on its proposal row; `dropped` is an orientation proposal that could not be built through its
-# repairs. An orientation's proposal carries `held: true` until its view first passes its checks (mark_built): it builds
-# at once, and the analyst hears of it only then.
+# a view ticket's status on its proposal row; `dropped` is an orientation proposal left out when the analyst stopped the
+# orientation before its view was built. An orientation's proposal carries `held: true` until its view first passes its
+# checks (mark_built) or fails through its repairs (dev._repairs_failed): it builds at once, and the analyst hears of it
+# only then.
 # `suggested` is a viewer for a file type the File browser proposed (suggest), which builds only once the analyst
 # accepts it.
 STATUSES = ("queued", "building", "built", "failed", "dropped", "suggested")
@@ -2876,9 +2877,10 @@ def stop_build(c: str, slug: str) -> dict[str, Any]:
 
 
 def drop(c: str, slug: str, why: str) -> dict[str, Any] | None:
-    """Leave an orientation's proposal out once its build failed through its repairs (dev._view_dropped): the row stays
-    as `dropped` with the reason, so every chip that names it knows to hide, its draft folder is removed, and
-    `view {dropped}` goes on the stream. None when there is no such proposal."""
+    """Leave an orientation's proposal out once the analyst stopped the orientation before its view was built
+    (dev.stop_orientation_views): the row stays as `dropped` with the reason, so every chip that names it knows to hide,
+    its draft folder is removed, and `view {dropped}` goes on the stream. None when there is no such proposal. A
+    proposal whose build failed through its repairs is not dropped: it fails with Retry (dev._repairs_failed)."""
     prop = update_proposal(c, slug, status="dropped", error=" ".join(str(why or "").split())[:ERROR_MAX] or None)
     if prop is None:
         return None

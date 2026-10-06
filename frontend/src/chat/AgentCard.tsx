@@ -458,7 +458,7 @@ function AgentCardView({ ws, chat, role, title, ts, log, openWhileRunning = fals
   }, [running, chat, meta, metas])
   const waiting = !!waitingFor
   // the orientation's cards that name no group are in its deck (backend tools.default_group), so they count there; a
-  // view it proposed that could not be built was dropped and is not among what it made
+  // view it proposed that was dropped when the analyst stopped it is not among what it made
   const proposals = useProposals(ws)
   const made = useMemo(() => withoutDropped(role === 'orient' ? orientMade(madeBy(rows)) : madeBy(rows), proposals), [rows, role, proposals])
   const brief = useMemo(

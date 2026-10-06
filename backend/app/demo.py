@@ -23,7 +23,7 @@ source's notice first, then what the folder holds) and `workspace/`; absolute pa
 (demo_scrub.PLACEHOLDERS) and filled in on install. It ends with an inventory of what it wrote (inventory_lines).
 
 The full export (the default, version FULL_VERSION). Everything of the workspace but what thimble rebuilds or what
-belongs to this machine's processes (full_kept): the cards, documents, labels with every row (rationales and the
+belongs to this machine's processes and sessions (full_kept; the hooks' `trusted` folder among them): the cards, documents, labels with every row (rationales and the
 texts each label marked), views with their earlier versions, every chat and every call with its whole output, the
 orientation's and the agents' work files; and in `transcripts/` the Claude Code transcripts of the sessions thimble
 ran inside the workspace (the orientation, its critic, the writers, view builds: session_transcripts), each cleaned of
@@ -43,9 +43,10 @@ flag lets it through), and, unless --allow-private, while the exporter's user na
 gitleaks finds a secret. scripts/check_content.py allows these folders in the tree on the terms its DEMO note gives,
 and no folder of another version.
 
-Install fills in the placeholders, writes the workspace, ends the orientation's thread with the coverage line the
-manifest keeps (coverage_line), and marks it pre-cached (MARKER, and `precached` in the orientation's record and its
-thread's meta): the orientation's thread then says it ran in advance and offers to attach a fresh session. From the outputs alone a follow-up to it is refused, since its session was not kept; from a full
+Install fills in the placeholders, writes the workspace but a `trusted` folder an older export kept, ends the
+orientation's thread with the coverage line the manifest keeps (coverage_line), and marks it pre-cached (MARKER, and
+`precached` in the orientation's record and its thread's meta): the orientation's thread then says it ran in advance
+and offers to attach a fresh session. From the outputs alone a follow-up to it is refused, since its session was not kept; from a full
 export the mark says `kept` and a follow-up resumes the installed session.
 """
 from __future__ import annotations
@@ -69,6 +70,7 @@ from pathlib import Path
 from typing import Any, Callable, Iterable
 
 from . import config, demo_data, demo_verbatim
+from .subagent_files import DIR as TRUSTED
 from .demo_data import DATASETS, Dataset
 from .demo_scrub import (CALL_CUT_NOTE, CALL_KEPT, CALL_LINE_CHARS, CALL_LINES, DASHED, LABEL_DROPPED, PLACEHOLDERS,
                          TEXT_SUFFIXES, clean_transcript, findings, projects_folder, shape_findings, workspace_kind)
@@ -103,6 +105,10 @@ PROCESS_FIELDS = ("pid", "server", "follow", "background", "bg")
 # CALL_KEPT, CALL_LINE_CHARS) are demo_scrub's, which check_content checks again
 CALL_REF_RE = re.compile(r"call:([A-Za-z0-9_-]{1,64})/(\d+)(?:#L(\d+)(?:-L(\d+))?)?")
 # Why each other part of a workspace is left out, by the first part of its path.
+# the workspace's folder of the files thimble's hooks trust (subagent_files): this machine's Claude Code session ids, its
+# agent records and the launcher's record, which no export holds and no install places, since another machine's would
+# name sessions and agents it never ran and the hooks would trust them
+TRUSTED_WHY = "this machine's Claude Code sessions and thimble's agent records"
 LEFT_OUT = {
     "chats": "a conversation: its tool results quote the corpus",
     "calls": "calls no card or document cites",
@@ -131,6 +137,7 @@ LEFT_OUT = {
     "filters.json": "the canvas's filter",
     "extensions": "the maintainer's extensions",
     "views": "the views' earlier versions and the excerpts their keys cite, rebuilt",
+    TRUSTED: TRUSTED_WHY,
 }
 # paths a pre-cache may hold: relative, no `..`, no backslash
 SAFE_NAME = re.compile(r"^(?!/)(?!.*(?:^|/)\.\.(?:/|$))[^\\\x00]+$")
@@ -613,6 +620,7 @@ def _swap_in(new: Path, out: Path) -> None:
 # What a full export leaves out, by the first part of the path in the workspace: what thimble rebuilds, or what belongs
 # to this machine and the processes that ran there.
 FULL_LEFT_OUT = {
+    TRUSTED: TRUSTED_WHY,
     "scratch": "the kernels' mirror of the corpus, rebuilt",
     "kernels": "kernel state",
     "view-indexes": "views' indexes of the corpus, rebuilt",
@@ -1290,6 +1298,7 @@ def install(src: Path, ws: Path, corpus: Path, *, home: Path | None = None,
     full = manifest.get("version") in FULL_VERSIONS
     names = [str(f.get("path") or "") for f in manifest.get("files") or [] if isinstance(f, dict)]
     trs = [t for t in manifest.get("transcripts") or [] if isinstance(t, dict)] if full else []
+    names = [n for n in names if n.split("/", 1)[0] != TRUSTED]  # an export made while it was kept (TRUSTED_WHY)
     bad = [n for n in names if not n or not SAFE_NAME.match(n) or not (full or workspace_kind(n))]
     for t in trs:
         paths = [str(t.get("path") or ""), *(str(f.get("path") or "") for f in t.get("files") or []

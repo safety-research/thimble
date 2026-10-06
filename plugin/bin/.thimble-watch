@@ -435,9 +435,10 @@ def deny(reason: str) -> None:
                                              "permissionDecisionReason": reason}}))
 
 
-# the types of thimble's six roles (app/subagent_files.py ROLES, which a test holds this to): a start of one is denied
+# the types of thimble's seven roles (app/subagent_files.py ROLES, which a test holds this to): a start of one is denied
 # when the check itself fails, since a hook that fails lets the call run, and no such start may run unasked
-ROLE_TYPES = tuple(f"thimble:{r}" for r in ("orientation", "critic", "writer", "view-builder", "view-reviewer", "check"))
+ROLE_TYPES = tuple(f"thimble:{r}" for r in ("orientation", "critic", "writer", "view-builder", "view-reviewer", "check",
+                                            "dev-ticket"))
 CHECK_FAILED = "thimble could not check this start against the analyst's requests, so it does not run"
 PLUGIN_CALL = "toolu_plugin_"  # app/subagent_files.py PLUGIN_CALL: a call thimble's module made, a click's
 
@@ -505,7 +506,9 @@ def subagent_start(inp: dict) -> int:
 
 
 def subagent_stop(inp: dict) -> int:
-    """The SubagentStop hook (module note)."""
+    """The SubagentStop hook (module note): a registered agent's turn ended; or the turn of another subagent (a
+    thread's fork) ended, and the typed starts its start tool calls asked for that its Agent call never made are
+    refused (subagent_files.refuse_unclaimed)."""
     if inp.get("stop_hook_active") or not str(inp.get("agent_type") or ""):
         return 0
     sf, ws = workspace(inp)
@@ -513,8 +516,9 @@ def subagent_stop(inp: dict) -> int:
         return 0
     with sf.update(ws) as state:
         entry = sf.record_stop(state, inp)
-    if entry is not None:
-        post("/api/subagents/stopped", {"cwd": folder(inp), "hook": inp})
+        refused = sf.refuse_unclaimed(state, inp) if entry is None else []
+    if entry is not None or refused:
+        post("/api/subagents/stopped", {"cwd": folder(inp), "hook": {**inp, "refused": refused}})
     return 0
 
 

@@ -62,14 +62,12 @@ def _calls(state: Path) -> list[dict]:
 
 
 async def _ticket_session(state: Path, c: str = CORPUS) -> dict:
-    """A code ticket's session of the dev agent's (a `claude -p` job, which thimble still starts); the stand-in's record
+    """`thimble fix`'s session of the dev agent's (the one `claude -p` job thimble still starts); the stand-in's record
     of it."""
     work = config.workspace_dir(c) / "ticket-7"
     work.mkdir(parents=True, exist_ok=True)
-    conf = dev.dev_config(c, sandbox=True)
     sessions = dev.Sessions()
-    got = await sessions.start(work, "Fix the ticket.", name="thimble ticket 7", workspace=c,
-                               asking={"key": "ticket:7", "config": conf})
+    got = await sessions.start(work, "Fix the server.", name="thimble fix", workspace=c)
     await sessions._turns[got["id"]].task
     return _calls(state)[-1]
 
@@ -83,17 +81,17 @@ def _proven(monkeypatch, env: dict, home: str, c: str = CORPUS) -> bool:
 
 async def test_each_stack_s_session_sees_its_own_values_and_no_claude_process_carries_thimble_s(
         service, monkeypatch, tmp_path):
-    """Stack A's code ticket session and stack B's each see only their own values, in their --settings `env`; the
+    """Stack A's `thimble fix` session and stack B's each see only their own values, in their --settings `env`; the
     `claude` processes themselves carry none of thimble's variables."""
     a = _stack(monkeypatch, tmp_path / "a", 9721)
     first = (await _ticket_session(service))["env"]
     a_home = a["THIMBLE_HOME"]
-    assert first["THIMBLE_SESSION"] == "ticket:7" and _proven(monkeypatch, first, a_home)
+    assert first["THIMBLE_SESSION"] == dev.SESSION_KEY and _proven(monkeypatch, first, a_home)
     assert first["THIMBLE_CALLER_CWD"] == "" and first["THIMBLE_LAUNCHED"] == ""
 
     b = _stack(monkeypatch, tmp_path / "b", 9722)
     view = (await _ticket_session(service))["env"]
-    assert view["THIMBLE_SESSION"] == "ticket:7" and _proven(monkeypatch, view, b["THIMBLE_HOME"])
+    assert view["THIMBLE_SESSION"] == dev.SESSION_KEY and _proven(monkeypatch, view, b["THIMBLE_HOME"])
     assert not _proven(monkeypatch, view, a_home), "a token proves its name to its own stack only"
     assert view["THIMBLE_HOME"] == view["THIMBLE_PORT"] == view["THIMBLE_CALLER_CWD"] == ""
     assert view["XDG_CACHE_HOME"] == os.environ.get("XDG_CACHE_HOME", "")

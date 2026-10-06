@@ -1051,6 +1051,10 @@ export interface Ticket {
   chat?: string | null
   ts?: string
   error?: string | null
+  /** main's ticket that waits for the analyst's Start while another ticket runs (backend dev.start_typed) */
+  held?: boolean | null
+  /** the id of its agent, a `thimble:dev-ticket` subagent of the analyst's Claude Code session, once it started */
+  agent_id?: string | null
 }
 
 export interface NewTicketBody {
@@ -1058,6 +1062,16 @@ export interface NewTicketBody {
   title: string
   body: string
   target?: unknown
+  /** where it was filed: `ui` for the browser's File a code ticket (backend dev.SOURCES) */
+  source?: 'ui'
+}
+
+/** The ticket runner's state (`GET /dev/status`): `tickets` is '' where code tickets run here (a development install),
+ * else why they do not (backend dev.ticket_problem). */
+export interface DevStatus {
+  running: boolean
+  tickets: string
+  queued: number
 }
 
 // ---- settings ----
