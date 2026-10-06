@@ -218,6 +218,9 @@ class Live:
         self.turn_calls: set[str] = set()  # the ids of main's tool calls in the turn (R3, _end_turn)
         self.turn_text = ""  # main's last text in the turn, the reason R3 quotes
         self.thimble_calls: dict[str, dict] = {}  # tool_use id of main's call for one of thimble's agents -> {name, input}
+        # tool_use id of main's SendMessage to a subagent -> (its Sub, the call's input): shown in its chat once the call
+        # ran, since a hook (thimble's --agent-check) or auto mode may refuse it
+        self.relays: dict[str, tuple] = {}
         self.after_start = False  # main's last call was a start of thimble's or its tool: a bare `Bash true` next is hidden
         self.last_tool: str | None = None  # the name of main's last tool call (_nudged)
         self.last_failed = False  # that call's result was an error, such as a hook's refusal (_nudged)
@@ -1316,7 +1319,7 @@ def _tool_use(lv: Live, tool_use_id: str, name: str, tool_input: Any) -> None:
                 _relayed(sub, inp)
             return
         if sub is not None and sub.owner is None:
-            _relayed(sub, inp)
+            lv.relays[tool_use_id] = (sub, inp)  # _relay_result shows it once the call ran
     _rec(lv, "tool_use", id=tool_use_id, name=name, input=tool_input)
     if name in AGENT_TOOLS:
         _spawn(lv, tool_use_id, None, str(inp.get("description") or ""), inp.get("subagent_type"), inp.get("prompt"))
@@ -1331,6 +1334,19 @@ def _relayed(sub: Sub, inp: dict) -> None:
     text = str(inp.get("message") or inp.get("content") or "").strip()
     if text:
         sub.rec.record("user", text=text, by=RELAYED_BY, **_message_run(sub))
+
+
+def _relay_result(sub: Sub, inp: dict, content: Any, is_error: bool) -> None:
+    """The result of main's SendMessage to a subagent: the message shows in its chat as from main only when the call ran,
+    not when a hook denied it (thimble's --agent-check: no pending request, live check L7), auto mode refused it, or it
+    answered `success: false` (an agent of another session)."""
+    if is_error:
+        return
+    with contextlib.suppress(ValueError, TypeError):
+        parsed = json.loads(response_text(content))
+        if isinstance(parsed, dict) and parsed.get("success") is False:
+            return
+    _relayed(sub, inp)
 
 
 def _message_run(sub: Sub) -> dict[str, int]:
@@ -1365,6 +1381,9 @@ def _tool_result(lv: Live, tool_use_id: str, content: Any, is_error: bool = Fals
             gone.done = True
         lv.forked.discard(tid)
         threads.fork_lost(lv.c, tid)
+    relay = lv.relays.pop(tool_use_id, None)
+    if relay is not None:
+        _relay_result(relay[0], relay[1], content, is_error)
     call = lv.thimble_calls.pop(tool_use_id, None)
     if call is not None:
         _thimble_result(lv, tool_use_id, call, content, is_error)

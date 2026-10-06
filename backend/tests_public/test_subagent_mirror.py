@@ -187,7 +187,8 @@ async def test_each_follow_up_s_message_in_the_thread_names_its_run(bridge, proj
     session.tail_once(lv)
     subagents.message_request(CORPUS, AGENT, "And April?", call="toolu_m1")
     _write(Path(lv.transcript_path), _human("ask it about April"),
-           _assistant(_use("toolu_m1", "SendMessage", {"to": AGENT, "message": "And April?"})))
+           _assistant(_use("toolu_m1", "SendMessage", {"to": AGENT, "message": "And April?"})),
+           _result("toolu_m1", json.dumps({"success": True, "message": f"Resuming agent {AGENT}"})))
     session.tail_once(lv)
     _write(path, {"type": "user", "isMeta": True, "origin": {"kind": "coordinator"},
                   "message": {"content": "The coordinator sent a message while you were working:\nAnd April?"}},
@@ -199,6 +200,31 @@ async def test_each_follow_up_s_message_in_the_thread_names_its_run(bridge, proj
     _, log = agents.paths(CORPUS, chat)
     users = [(e["text"], e.get("by"), e.get("run")) for e in agents.read_events(log) if e.get("type") == "user"]
     assert users == [("And April?", "main", 1), ("And May?", "terminal", 2)]
+
+
+async def test_a_send_message_a_hook_denied_shows_no_message_from_main_in_the_thread(bridge, project, ended):
+    """Live check L7: a second SendMessage with no pending request was denied by thimble's --agent-check, and the thread
+    still showed it as sent from main, since the mirror showed the call as it appeared. A message main sent shows once
+    its call ran: not after a hook's deny, auto mode's refusal or a `success: false` answer."""
+    lv, chat, path = await _click_orientation(bridge, project)
+    _write(path, _assistant(_use("toolu_hb", "SubagentHandback", {"message": "done"})))
+    session.tail_once(lv)
+    deny = ("PreToolUse:SendMessage hook error: thimble's agents continue only when the analyst asks. If they asked, "
+            "call message_orientation and send what it gives; otherwise ask them first.")
+    _write(Path(lv.transcript_path), _human("ask it again"),
+           _assistant(_use("toolu_d1", "SendMessage", {"to": AGENT, "message": "And April?"})))
+    session.tail_once(lv)
+    _, log = agents.paths(CORPUS, chat)
+    assert not [e for e in agents.read_events(log) if e.get("type") == "user" and e.get("by") == "main"], \
+        "nothing shows before the call ran"
+    _write(Path(lv.transcript_path), _result("toolu_d1", deny, error=True),
+           _assistant(_use("toolu_d2", "SendMessage", {"to": AGENT, "message": "And May?"})),
+           _result("toolu_d2", json.dumps({"success": False, "message": "could not be resumed"})),
+           _assistant(_use("toolu_d3", "SendMessage", {"to": AGENT, "message": "And June?"})),
+           _result("toolu_d3", json.dumps({"success": True, "message": f"Resuming agent {AGENT}"})), END)
+    session.tail_once(lv)
+    assert [e["text"] for e in agents.read_events(log) if e.get("type") == "user" and e.get("by") == "main"] \
+        == ["And June?"]
 
 
 async def test_a_run_keeps_the_effort_claude_code_writes_beside_its_message(bridge, project, ended):
