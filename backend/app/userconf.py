@@ -22,11 +22,11 @@ One fence for main and its agents. thimble's agents are subagents of main, the a
 launcher starts inside thimble's fence (cli.main_fence, its permission rules main_rules): they run in main's permission
 mode and share its sandbox, network and rules. So the orientation's `web`, `network` and `data` are main's fence's keys,
 which every agent shares; the other agents keep only `web: off`, which keeps that one agent off the web tools. The dev
-agent alone keeps its own permission mode and fence keys, for code tickets, which stay jobs of the server. Installs
-follow Claude Code's permission mode: thimble adds no rule for them. The keys earlier builds read for this, `installs`,
-and each agent's own `fast` and `permissionMode` and `web` other than "off" but the dev agent's (IGNORED_KEYS), are read
-and ignored, so an earlier config stays valid; `ignored` lists those a file holds, and a save from the Settings pane
-drops them. `suggest` (the viewer suggestion's call) and `refusal` (the model and effort a refused classifier call runs
+agent alone keeps its own permission mode, fast mode and fence keys, for code tickets, which stay jobs of the server.
+Installs follow Claude Code's permission mode: thimble adds no rule for them. The keys earlier builds read for this,
+`installs`, and each agent's own `fast` and `permissionMode` and `web` other than "off" but the dev agent's
+(IGNORED_KEYS), are read and ignored, so an earlier config stays valid; `ignored` lists those a file holds, and a save
+from the Settings pane drops them. `suggest` (the viewer suggestion's call) and `refusal` (the model and effort a refused classifier call runs
 again on, which `off` turns off) are classifier rows.
 
 Extensions' programs. An extension's program that runs an agent or one of its tasks (harness.py) is no subagent of main:
@@ -66,7 +66,6 @@ SUBAGENT_ROLES = ("orientation", "critic", "writer", "checks")  # the agents tha
 # the keys of each agent that earlier builds read and this one reads and ignores (module note, one fence)
 IGNORED_KEYS: dict[str, tuple[str, ...]] = {
     **{a: ("fast", "permissionMode") for a in ("orientation", "critic", "writer", "checks")},
-    "dev": ("fast",),  # its view builds are subagents now, and its code tickets run at standard speed
 }
 IGNORED_TOP = ("installs",)  # top-level keys read and ignored
 # the keys of an agent that runs as a subagent of main which only an extension's program running the agent reads (module
@@ -125,7 +124,7 @@ DEFAULTS: dict[str, Any] = {
         "critic": _subagent(None),
         "writer": _subagent(None),
         "checks": _subagent(None),
-        "dev": {k: v for k, v in _session_agent("off").items() if k != "fast"},
+        "dev": _session_agent("off"),  # its `fast` is code tickets' (config.FAST_OF_TICKETS)
         # `network`, `data` and `env` reach only an extension's program that runs one of their tasks (harness.py)
         **{a: {"model": None, "effort": None, "fast": None, "network": "on", "data": "ask", "env": [], "prompt": None}
            for a in CALLS},

@@ -170,9 +170,9 @@ def test_thimble_s_agents_share_main_s_fence_and_keep_only_web_off(workspaces_tm
 def test_the_keys_this_build_ignores_load_are_listed_and_a_settings_save_drops_them(workspaces_tmp, analyst):
     """An earlier config's `installs`, each agent's own fast mode, and its permission mode and a web other than "off",
     but the dev agent's, load without an error, whatever their value, and change nothing; `ignored` and GET /settings
-    list them, and the next save from the Settings pane drops them from the file it writes. The dev agent's other keys
-    still apply. The fence keys and `env` of an agent that runs as a subagent of main stay: thimble's own agent does not
-    read them, and an extension's program that runs the agent does."""
+    list them, and the next save from the Settings pane drops them from the file it writes. The dev agent's keys still
+    apply, its fast mode for code tickets among them. The fence keys and `env` of an agent that runs as a subagent of
+    main stay: thimble's own agent does not read them, and an extension's program that runs the agent does."""
     old = {"installs": "alow", "agents": {
         "orientation": {"permissionMode": "bypass", "fast": True, "sandbox": "off", "env": ["X"], "effort": "ultracode"},
         "critic": {"network": "off", "data": "allow", "web": "allow", "permissionMode": "auto"},
@@ -190,7 +190,7 @@ def test_the_keys_this_build_ignores_load_are_listed_and_a_settings_save_drops_t
     assert (mine["sandbox"], mine["env"]) == ("off", ["X"])
     assert conf["agents"]["writer"]["web"] == "off" and conf["agents"]["dev"]["network"] == "off"
     want = ["installs", "agents.orientation.fast", "agents.orientation.permissionMode", "agents.critic.permissionMode",
-            "agents.critic.web", "agents.checks.fast", "agents.dev.fast"]
+            "agents.critic.web", "agents.checks.fast"]
     assert sorted(userconf.ignored(CORPUS)) == sorted(want)
     assert sorted(ledger.get_settings(CORPUS)["config_ignored"]) == sorted(want)
     assert config.models_for(CORPUS)["orient"]["effort"] == "xhigh", "a stored ultracode runs at xhigh"
@@ -198,7 +198,7 @@ def test_the_keys_this_build_ignores_load_are_listed_and_a_settings_save_drops_t
     ledger.put_settings_route(CORPUS, analyst, {"models": {"labels": {"effort": "medium"}}})
     assert json.loads(userconf.global_file().read_text()) == {"agents": {
         "orientation": {"sandbox": "off", "env": ["X"], "effort": "ultracode"}, "critic": {"network": "off", "data": "allow"},
-        "checks": {"env": []}, "writer": {"web": "off"}, "dev": {"permissionMode": "auto", "network": "off"},
+        "checks": {"env": []}, "writer": {"web": "off"}, "dev": {"permissionMode": "auto", "fast": False, "network": "off"},
         "labels": {"effort": "medium"}}}
     assert userconf.ignored(CORPUS) == []
 

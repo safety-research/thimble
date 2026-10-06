@@ -208,6 +208,24 @@ def test_a_view_build_runs_on_the_model_of_the_session_that_asked(board, monkeyp
     assert flags({"orientation": True}) == {"model": "claude-opus-5-5", "effort": "xhigh", "fast": False}
 
 
+def test_a_code_ticket_runs_in_the_dev_row_s_fast_mode_and_a_view_build_takes_none_from_it(board, monkeypatch):
+    """Code tickets stay `claude -p` jobs of the server (Q6) and keep the fast mode they had: the dev row's, on by
+    default and off where thimble's config turns it off. A view build takes no fast mode from that row, since thimble's
+    agents have none of their own."""
+    monkeypatch.setitem(userconf.DEFAULTS["sandbox"], "enforce", False)  # the flags below come with no fence
+
+    def fast() -> object:
+        flags = dev.Sessions()._flags(CORPUS, "thimble ticket 1: x")
+        return json.loads(flags[flags.index("--settings") + 1]).get("fastMode")
+
+    assert config.models_for(CORPUS)["dev"]["fast"] is True and fast() is True
+    userconf.global_file().parent.mkdir(parents=True, exist_ok=True)
+    userconf.global_file().write_text(json.dumps({"agents": {"dev": {"fast": False}}}))
+    assert fast() is False
+    userconf.global_file().write_text(json.dumps({"agents": {"dev": {"fast": True}}}))
+    assert fast() is True and "fast" not in config.chosen(CORPUS, "dev")
+
+
 def test_a_resumed_build_keeps_its_fence(board, monkeypatch):
     """Claude Code keeps none of a session's options, so a resume passes every flag a new session gets."""
     import asyncio

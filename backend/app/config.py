@@ -889,8 +889,9 @@ def safe_corpus_path(corpus: Path, rel: str) -> Path:
 # THIMBLE_<ROLE>_MODEL / _EFFORT / _FAST, then thimble's config. Every role resolves to a model id (exact_model) and an
 # effort, never '' (models_for); the orientation's model carries `[1m]` where the model has a 1M-token window
 # (long_context). A stored `ultracode` (LEGACY_EFFORTS) runs at xhigh. `fast` is kept only on a model that has fast mode,
-# and only for ROLES_WITH_FAST, the classifiers: thimble's agents are subagents of main, which have no fast mode of
-# their own.
+# and only for ROLES_WITH_FAST: the classifiers, and the dev row for code tickets, which stay `claude -p` jobs of the
+# server (dev.py). thimble's agents are subagents of main, which have no fast mode of their own, so a view build or
+# review runs without the dev row's (chosen leaves it out).
 MODEL_ROLES = ("orient", "subagents", "critic", "writer", "checks", "verify", "labels", "dev", "suggest", "refusal")
 ROLE_MODELS_DEFAULT: dict[str, dict[str, Any]] = {
     "subagents": {"model": "", "effort": "", "fast": False},  # '' is the orientation's model and effort (models_for)
@@ -898,7 +899,7 @@ ROLE_MODELS_DEFAULT: dict[str, dict[str, Any]] = {
     "writer": {"model": "claude-opus-5-5", "effort": "xhigh", "fast": False},  # under prompts/writer.md's
     "checks": {"model": "claude-opus-5-5", "effort": "high", "fast": False},  # under prompts/check.md's
     "labels": {"model": "claude-opus-5-5", "effort": "low", "fast": False},
-    "dev": {"model": "claude-opus-5-5", "effort": "high", "fast": False},
+    "dev": {"model": "claude-opus-5-5", "effort": "high", "fast": True},  # fast mode for code tickets alone
     "verify": {"model": "claude-opus-5-5", "effort": "high", "fast": True},
     "suggest": {"model": "claude-opus-5-5", "effort": "low", "fast": False},
     "refusal": {"model": FALLBACK_MODEL, "effort": FALLBACK_EFFORT, "fast": False, "off": not FALLBACK_MODEL},
@@ -911,8 +912,11 @@ MODEL_ALIASES = {"opus": "claude-opus-5-5", "sonnet": "claude-sonnet-5", "haiku"
 # (plugin/agents/<name>.md) for `plugin:<name>`.
 ROLE_AGENTS: dict[str, str] = {"critic": "critic", "writer": "writer", "checks": "check"}
 PLUGIN_AGENTS_DIR = REPO_ROOT / "plugin" / "agents"
-# the classifiers, each a call the server makes, which runs at its own speed
-ROLES_WITH_FAST = ("labels", "verify", "suggest")
+# the classifiers, each a call the server makes, which runs at its own speed, and the dev row's code tickets, `claude -p`
+# jobs of the server, which keep the fast mode they had (on by default)
+ROLES_WITH_FAST = ("labels", "verify", "suggest", "dev")
+# the rows whose fast mode reaches only some of their runs: the dev row's, code tickets' alone (chosen)
+FAST_OF_TICKETS = ("dev",)
 ROLE_EFFORTS = ("low", "medium", "high", "xhigh", "max")  # the levels Claude Code takes (cc_settings.EFFORTS)
 # efforts earlier builds stored, read as the level they ran at: Ultracode ran at xhigh (cc_settings.ULTRACODE_EFFORT)
 LEGACY_EFFORTS = {"ultracode": "xhigh"}
@@ -1050,10 +1054,11 @@ def _configured(c: str | None) -> dict[str, dict[str, Any]]:
 
 def chosen(c: str | None, role: str) -> set[str]:
     """The fields of a role (model, effort, fast) set for workspace `c` in thimble's config or with
-    THIMBLE_<ROLE>_MODEL / _EFFORT / _FAST, as models_for reads them."""
+    THIMBLE_<ROLE>_MODEL / _EFFORT / _FAST, as models_for reads them. The dev row's fast mode is code tickets' alone
+    (FAST_OF_TICKETS), so it is never a field a view build takes from it."""
     out = set(_configured(c).get(role) or {})
     env = {f for f in ("model", "effort", "fast") if os.environ.get(f"THIMBLE_{role.upper()}_{f.upper()}", "").strip()}
-    return out | env
+    return (out | env) - ({"fast"} if role in FAST_OF_TICKETS else set())
 
 
 def models_for(c: str | None = None) -> dict[str, dict[str, Any]]:
