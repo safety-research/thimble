@@ -586,8 +586,9 @@ esac
 # into the analyst's own --settings, since Claude Code reads only the last one. --allowedTools lets the thimble tools
 # and the plugin's skills run without a permission prompt, since a fork answering the browser must not wait on a
 # terminal nobody watches; nothing is denied.
-# THIMBLE_LAUNCHED tells /thimble that main's prompt is appended already. The session opens with /thimble, which starts
-# the server and opens this folder as a workspace.
+# THIMBLE_LAUNCHED tells /thimble that main's prompt is appended already. launch-args starts the server and waits for it
+# before claude starts, so the hooks module registers thimble's agent types inside the session's start; the session
+# opens with /thimble, which opens this folder as a workspace (and starts the server if it is down).
 command -v claude >/dev/null 2>&1 || {
   printf 'thimble: the `claude` CLI is not on PATH. thimble runs inside Claude Code: install it (https://docs.anthropic.com/en/docs/claude-code), then run thimble again.\n' >&2
   exit 1; }

@@ -1682,7 +1682,8 @@ UNSET_VARS = (EFFORT_ENV, "CLAUDE_CODE_SUBAGENT_MODEL", "CLAUDE_CODE_SUBAGENT_MO
 UNSET_LINE = "thimble: {name} is unset for this session, so thimble's agents run on the models and efforts Settings name"
 UNSET_EFFORT_LINE = ("thimble: CLAUDE_CODE_EFFORT_LEVEL is unset for this session, so thimble's agents run at the efforts "
                      "Settings name; main runs at {effort} (--effort)")
-# the same for a variable an `env` block of the analyst's Claude Code settings sets, which the fence's env blanks
+# the same for a variable an `env` block of the analyst's Claude Code settings sets, which main's --settings blank
+# (launch_settings)
 BLANKED_LINE = ("thimble: {name}, which your Claude Code settings set, is blank in this session, so thimble's agents run "
                 "on the models and efforts Settings name")
 BLANKED_EFFORT_LINE = ("thimble: CLAUDE_CODE_EFFORT_LEVEL, which your Claude Code settings set, is blank in this session, "
