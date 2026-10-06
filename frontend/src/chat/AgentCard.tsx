@@ -220,7 +220,7 @@ export interface AgentCardProps {
   report?: string | null
   /** the orientation's run the card stands for: 0 its first, then each follow-up; unset, its whole session */
   run?: number
-  /** a stopped background session's Resume shows on the card; its own thread shows it at the end instead */
+  /** a stopped session's Resume shows on the card; its own thread shows it at the end instead */
   resumeHere?: boolean
   /** a running session's Stop shows on the card; its own thread has it on the composer instead */
   stopHere?: boolean
@@ -248,14 +248,15 @@ export function stopSession(ws: string, chat: string, role: string): Promise<boo
 }
 
 /** The card of a session thimble started (the orientation, a writer, a check's run), or a subagent's chip. */
-/** The stopped notice of a session that had not finished its task; one that finished shows as done (backend
- * bg_session._stopped_while_idle). */
+/** The stopped notice of a session that had not finished its task; one that finished shows as done. An earlier
+ * version set it on a background session whose process stopped. */
 export function stoppedAlert(meta: ChatMeta | null | undefined): SessionAlert | null {
   return meta?.alert?.kind === 'stopped' && meta.status !== 'done' ? meta.alert : null
 }
 
-/** A background session whose process stopped (a crash, a kill, `claude stop`): what happened, and Resume, which
- * starts it again under its id with its conversation (backend agent_session.resume_chat). */
+/** A session an earlier version ran as a Claude Code background session, whose process stopped (a crash, a kill,
+ * `claude stop`): what happened, and Resume, which starts it again with its conversation (backend
+ * agent_session.resume_chat). */
 export function StoppedHold({ ws, chat, text }: { ws: string; chat: string; text: string }) {
   const [busy, setBusy] = useState(false)
   const resume = () => {

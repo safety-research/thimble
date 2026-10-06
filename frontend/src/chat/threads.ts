@@ -14,7 +14,7 @@ import { hhmm } from '../lib/time'
 import type { ChatMeta } from '../lib/types'
 
 /** What a chat is: main, a thread (a fork of main), the orientation, a writer, a report check's run on a document, a
- * dev ticket's background session (a view build among them), or a step of the orientation or a writer (a subagent or
+ * dev ticket's session (a view build among them), or a step of the orientation or a writer (a subagent or
  * workflow agent of its session, nested under it and opened from its card). */
 export type ThreadKind = 'main' | 'thread' | 'orient' | 'writer' | 'check' | 'dev' | 'step'
 

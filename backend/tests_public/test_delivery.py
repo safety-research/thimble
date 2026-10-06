@@ -129,7 +129,7 @@ def test_a_message_main_has_not_got_yet_shows_on_its_statusline_until_its_line_p
     """Claude Code gives main a browser message only at its turn's next tool call or once the turn ends, so main's
     statusline shows the analyst's words at once, after QUEUED, until the held hook prints the message's line; an event
     that carries no words of the analyst's shows nothing there, nor does another session's statusline."""
-    from app import bg_session
+    from app import tray
 
     _subscribe(SID)
     session.attach(CORPUS, SID, _cwd(), None)
@@ -139,7 +139,7 @@ def test_a_message_main_has_not_got_yet_shows_on_its_statusline_until_its_line_p
     events.post(CORPUS, "thread", {"thread": thread["id"], "text": "On which days did it change?"})
 
     def line(sid: str = SID) -> str:
-        return asyncio.run(bg_session.agents_route(bg_session.AgentsQuery(cwd=_cwd(), session=sid)))["line"]
+        return asyncio.run(tray.agents_route(tray.AgentsQuery(cwd=_cwd(), session=sid)))["line"]
 
     assert line() == f"thimble · {events.QUEUED}Which kinds of link failed today? (and 1 more)"
     assert line() == line() and first["id"] not in line(), "it shows until main gets it, without ids"
@@ -160,10 +160,10 @@ def test_a_queued_message_leaves_the_statusline_on_the_monitor_route_and_when_an
     """No held hook prints a line on the Monitor route, so the watcher's ack ends the message's place on the
     statusline; a session that is no longer main shows none of the words queued for it, and they go once the new main
     gets a message."""
-    from app import bg_session
+    from app import tray
 
     def line(sid: str = SID) -> str:
-        return asyncio.run(bg_session.agents_route(bg_session.AgentsQuery(cwd=_cwd(), session=sid)))["line"]
+        return asyncio.run(tray.agents_route(tray.AgentsQuery(cwd=_cwd(), session=sid)))["line"]
 
     _subscribe(SID, cc_plugin.MONITOR)
     session.attach(CORPUS, SID, _cwd(), None)
@@ -189,21 +189,20 @@ def test_a_queued_message_leaves_the_statusline_on_the_monitor_route_and_when_an
 
 
 def test_a_tray_entry_claude_code_refuses_is_asked_for_once_and_its_line_prints_once(monkeypatch):
-    """Claude Code may refuse main's Agent call that shows a background session in the agent tray, as auto mode can:
+    """Claude Code may refuse main's Agent call that shows one of thimble's agents in the agent tray, as auto mode can:
     thimble then asks main no more for that session, while its own refusal of a second tray entry is no such refusal.
     Asks that wait for the same turn print their line once."""
-    from app import bg_session
+    from app import tray
 
     _subscribe(SID)
     lv = session.attach(CORPUS, SID, _cwd(), None)
-    monkeypatch.setattr(bg_session, "_save", lambda c: None)
-    e = bg_session.Entry(CORPUS, "orient", bg_session.name_of(CORPUS, "orient"), "ab12cd34", "sid-o", "chat-o", "orient",
-                         "/work/o")
-    monkeypatch.setitem(bg_session._entries, (CORPUS, "orient"), e)
-    monkeypatch.setattr(bg_session, "_loaded", {CORPUS})
+    monkeypatch.setattr(tray, "_save", lambda c: None)
+    e = tray.Entry(CORPUS, "orient", tray.name_of(CORPUS, "orient"), "sid-o", "chat-o", "orient", "/work/o")
+    monkeypatch.setitem(tray._entries, (CORPUS, "orient"), e)
+    monkeypatch.setattr(tray, "_loaded", {CORPUS})
     call = {"subagent_type": "thimble:orient", "description": e.name, "run_in_background": True,
-            "prompt": str(bg_session.proxy_file(CORPUS, "orient"))}
-    assert bg_session.ask_main_for_proxy(CORPUS, "orient") and bg_session.ask_main_for_proxy(CORPUS, "orient")
+            "prompt": str(tray.proxy_file(CORPUS, "orient"))}
+    assert tray.ask_main_for_proxy(CORPUS, "orient") and tray.ask_main_for_proxy(CORPUS, "orient")
 
     async def deliver() -> None:
         for _ in range(2):
@@ -213,13 +212,13 @@ def test_a_tray_entry_claude_code_refuses_is_asked_for_once_and_its_line_prints_
     asyncio.run(deliver())
     said = asyncio.run(events.held_route(events.HeldBody(cwd=_cwd(), session=SID)))["terminal"]
     assert said == f"agent: {e.name}"
-    assert bg_session.agent_check(CORPUS, call, "tu-1") is None
-    assert bg_session.agent_check(CORPUS, call, "tu-2"), "a second tray entry while the first starts"
+    assert tray.agent_check(CORPUS, call, "tu-1") is None
+    assert tray.agent_check(CORPUS, call, "tu-2"), "a second tray entry while the first starts"
     for tid, words in (("tu-2", f"{e.name} already shows in the agent tray."), ("tu-1", "Permission denied")):
         session._tool_use(lv, tid, "Agent", call)
         session._tool_result(lv, tid, words, is_error=True)
         assert e.proxy_refused is (tid == "tu-1")
-    assert not bg_session.ask_main_for_proxy(CORPUS, "orient") and events.pending(CORPUS) == 0
+    assert not tray.ask_main_for_proxy(CORPUS, "orient") and events.pending(CORPUS) == 0
 
 
 # ----------------------------------------------------------------------------- the server: the permission hook

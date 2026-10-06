@@ -453,12 +453,12 @@ def fork_finished(c: str, thread_id: str, status: str = "done", *, kind: str | N
     """The fork stopped: the thread stops running, the run ends in its chat with `done` or why it did not finish, and a
     run
     with no reply leaves a chip in main pointing at the anchor. Waiting messages go to the fork now."""
-    from . import bg_session  # noqa: PLC0415 — bg_session imports session, which imports this module
+    from . import tray  # noqa: PLC0415 — tray imports session, which imports this module
 
     meta = agents.meta_or_none(c, thread_id)
     agents.set_running(c, thread_id, False)
     _awaiting.pop((c, thread_id), None)
-    bg_session.fork_ended(c, thread_id)
+    tray.fork_ended(c, thread_id)
     if meta is None:
         return
     _, log_path = agents.paths(c, thread_id)

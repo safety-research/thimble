@@ -588,7 +588,7 @@ def view_session_name(c: str, slug: str) -> str:
 
 def running_builds(c: str) -> list[dict[str, Any]]:
     """The code ticket, view builds and view review revisions that run for workspace `c`, for the terminal's list of
-    thimble's agents (bg_session.agent_rows): {name, label, state, kind}."""
+    thimble's agents (tray.agent_rows): {name, label, state, kind}."""
     rows: list[dict[str, Any]] = []
     t = _get(_current.ticket_id) if _running() and _current is not None and not _current.ticket_id.startswith("view:") else None
     if t is not None and t.get("workspace") in (None, c):

@@ -17,7 +17,7 @@ import urllib.request
 from pathlib import Path
 
 import pytest
-from conftest import Listener, card_wait, print_sessions
+from conftest import Listener, card_wait
 from fastapi import HTTPException
 
 from app import (agent_session, agents, config, events, hook_auth, ledger, modes, orient_session, permission_hook,
@@ -122,7 +122,6 @@ def fake(tmp_path, monkeypatch) -> Path:
     monkeypatch.setenv("THIMBLE_LAUNCHED", "1")  # the server's own, inherited from main's session
     monkeypatch.delenv("FAKE_MODE", raising=False)
     monkeypatch.delenv("FAKE_SLEEP", raising=False)
-    print_sessions(monkeypatch)
     monkeypatch.setenv("THIMBLE_SANDBOX", "0")  # the fence without the sandbox, which the config then does not require
     monkeypatch.setitem(userconf.DEFAULTS["sandbox"], "enforce", False)
     return out

@@ -4,12 +4,12 @@ The critic reviews the orientation's whole transcript and cards for coverage and
 drafted deck's claims against the calls that should support them. The machinery shared with other agent sessions is
 agent_session.py; this module holds what is the critique's own.
 
-Start. Only the orientation's session lists `critique`. The server starts a Claude Code background session in the
-critic's work folder running as the critic agent (prompts/critic.md via `--agents`, shared.md appended), with the
-`critic` role's model settings. It has every tool of a default Claude Code session and, of thimble's, OWN_TOOLS, so it
-adds no card, and it runs in a work folder of its own with the corpus read-only (agent_session, the fence). One critique
-runs at a time, in the critic's row of the permission modes (modes.py). When it finishes, its subagents' `tmp_*` folders
-and the large files no card or document uses are deleted from its work folder (work_files.after_run).
+Start. Only the orientation's session lists `critique`. The server starts a Claude Code session in the critic's work
+folder running as the critic agent (prompts/critic.md via `--agents`, shared.md appended), with the `critic` role's
+model settings. It has every tool of a default Claude Code session and, of thimble's, OWN_TOOLS, so it adds no card, and
+it runs in a work folder of its own with the corpus read-only (agent_session, the fence). One critique runs at a time,
+in the critic's row of the permission modes (modes.py). When it finishes, its subagents' `tmp_*` folders and the large
+files no card or document uses are deleted from its work folder (work_files.after_run).
 
 The transcript. Raw transcripts run to megabytes of JSON and Read cuts lines at 2,000 characters, so the critique
 renders the session's and its agents' transcripts into one digest, each tool call under its ref in the orientation's
@@ -398,26 +398,8 @@ async def start(c: str, caller: agent_session.Run, context: str = "") -> tuple[a
         agent_type=agent_name, on_end=ended, parent=caller.chat, model=str(agent.get("model") or ""),
         calls=caller.calls or caller.chat,  # numbered in the orientation's sequence
         agent="critic", work=work_dir(c, caller.chat), unasked=True, disallowed=agent_session.not_own(OWN_TOOLS),
-        brief=prompt.split("\n\n", 1)[0], background=True, **fields)  # the critique-task line that opens the first message
+        brief=prompt.split("\n\n", 1)[0], **fields)  # the critique-task line that opens the first message
     return run, done
-
-
-def _relaunch(c: str, meta: dict[str, Any]) -> dict[str, Any]:
-    """The start arguments of a critic's background session that this server did not start, from its chat's meta
-    (agent_session.on_relaunch): a later turn of it is followed, and its Resume starts it again, with no critique
-    waiting on it."""
-    agent_name, agent, conf, effort = _critic(c)
-    transcript = str(meta.get("transcript") or "")
-    readable = ["--add-dir", str(Path(transcript).parent)] if transcript else []
-    parent = str(meta.get("parent") or agents.MAIN_ID)
-    return dict(role=agent_session.STEP_ROLE, title=TITLE,
-                agent_args=["--agents", json.dumps({agent_name: agent}, ensure_ascii=False), "--agent", agent_name, *readable],
-                effort=effort, settings=agent_session.settings_json(effort, fastMode=bool(conf["fast"])),
-                agent_type=agent_name, parent=parent, model=str(agent.get("model") or ""), work=work_dir(c, parent),
-                agent="critic", unasked=True, disallowed=agent_session.not_own(OWN_TOOLS), background=True)
-
-
-agent_session.on_relaunch(tools.CRITIQUE_SESSION, _relaunch)
 
 
 def _critic(c: str) -> tuple[str, dict[str, Any], dict[str, Any], str]:

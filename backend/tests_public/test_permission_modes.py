@@ -14,7 +14,7 @@ import sys
 from pathlib import Path
 
 import pytest
-from conftest import Listener, card_wait, print_sessions
+from conftest import Listener, card_wait
 from fastapi import HTTPException
 
 from app import agent_session, agents, cc_plugin, config, events, ledger, modes, orient_session, session, tools, userconf
@@ -117,7 +117,6 @@ def fake(tmp_path, monkeypatch) -> Path:
     # the fence without the sandbox, which the config then does not require; the fence's test turns it on
     monkeypatch.setenv("THIMBLE_SANDBOX", "0")
     monkeypatch.setitem(userconf.DEFAULTS["sandbox"], "enforce", False)
-    print_sessions(monkeypatch)
     return out
 
 
@@ -244,20 +243,15 @@ def test_a_server_restarted_under_main_follows_its_last_reported_mode_until_main
     assert "permission_mode" not in agents.read_meta(CORPUS, agents.MAIN_ID)["attached"]
 
 
-def test_a_continued_background_session_keeps_the_mode_it_runs_in(fake, monkeypatch):
-    """A background session resumed or sent a message keeps the flags it was launched with (agent_session.BG_AUTO_LINE),
-    so its next run takes the mode its chat's meta records, not the row saved since nor a card's switch; a session of
-    thimble's own, whose process starts again with its flags, takes the switch, else the row."""
+def test_a_continued_session_takes_a_card_s_switch_else_its_row(fake, monkeypatch):
+    """A session thimble continues starts its process again with its flags, so it takes the mode a card switched its
+    chat to while this server runs, else its agent's row; a chat an earlier version ran as a background session too."""
     ledger.put_settings(CORPUS, {modes.SETTING: {"orient": "auto"}})
     chat = agents.new_agent(CORPUS, "orient", "Orientation", permission_mode="bypass", background=True)["id"]
+    assert agent_session.start_mode(CORPUS, "orient", chat=chat) == "auto", "no switch: its row"
     monkeypatch.setitem(agent_session._switched, (CORPUS, chat), "manual")
-    assert agent_session.start_mode(CORPUS, "orient", chat=chat, background=True) == "bypass"
     assert agent_session.start_mode(CORPUS, "orient", chat=chat) == "manual", "a switch while this server runs"
     assert agent_session.start_mode(CORPUS, "orient") == "auto", "a new session: its row"
-    monkeypatch.setattr(modes, "disabled", lambda: {"bypass"})
-    assert agent_session.start_mode(CORPUS, "orient", chat=chat, background=True) == "manual", "Bypass turned off"
-    old = agents.new_agent(CORPUS, "orient", "Orientation", background=True)["id"]
-    assert agent_session.start_mode(CORPUS, "orient", chat=old, background=True) == "auto", "a meta with no mode: the row"
 
 
 # ----------------------------------------------------------------------------- Auto

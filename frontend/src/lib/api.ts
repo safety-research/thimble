@@ -265,12 +265,11 @@ export const api = {
   /** Start a session that is waiting to retry after the API was at capacity (agent_session.retry_route); 404 when it is
      * not waiting. */
   retrySession: (c: string, chat: string) => j<{ retrying: string }>(`${ws(c)}/chats/${enc(chat)}/retry`, { method: 'POST' }),
-  /** a stopped background session's Resume (backend agent_session.resume_chat) */
+  /** a stopped session's Resume (backend agent_session.resume_chat) */
   resumeSession: (c: string, chat: string) => j<{ resumed: string; run: number }>(`${ws(c)}/chats/${enc(chat)}/resume`, { method: 'POST' }),
   /** Change the permission mode of the running session whose chat is `chat` (its card): Manual and Bypass at once,
    * Auto and out of it once the session has paused and resumed (agent_session.mode_route); 403 from a page not opened
-   * from thimble's link (claimKey), 404 when no session runs for it, 409 for a background session's switch into or out
-   * of Auto. */
+   * from thimble's link (claimKey), 404 when no session runs for it, 400 for a mode that cannot be chosen. */
   setSessionMode: (c: string, chat: string, mode: OrientPermissions) =>
     j<{ mode: OrientPermissions; switching: OrientPermissions | null }>(`${ws(c)}/chats/${enc(chat)}/permission-mode`, { method: 'POST', body: JSON.stringify({ mode }) }),
   /** A message to the orientation: resumes a finished orientation's session, or queues while a run goes on (`queued`);

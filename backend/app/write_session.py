@@ -7,7 +7,8 @@ holds the whole context (context.render, CONTEXT_CHARS) followed by the task. On
 `writer` role's model settings and THIMBLE_SESSION `writer:<doc>`; the report checks run once it has ended. Main starts
 it with `start_writing` and hears a `written` browser event when it ends. A writer cut short by a server stop is resumed
 by the next server (_resume_left). A writer answering the orientation's report pass carries `orient` and `orient_run` on
-its meta."""
+its meta. The writer shows in main's agent tray (tray.py), and a message that reaches its tray entry continues its
+session with `--resume` as its chat's next run, at once or when the run that goes ends (message)."""
 from __future__ import annotations
 
 import asyncio
@@ -18,7 +19,7 @@ from typing import Any
 
 from fastapi import HTTPException
 
-from . import agent_session, agents, bg_session, config, context, report_types, tools, work_files
+from . import agent_session, agents, config, context, report_types, tools, work_files
 
 log = logging.getLogger("thimble.write_session")
 
@@ -137,7 +138,7 @@ def _launch(c: str, doc: str) -> dict[str, Any]:
                                                               "--agent", name],
                 effort=effort, settings=agent_session.settings_json(effort, fastMode=bool(models["writer"]["fast"])),
                 agent_type=name, on_end=_ended, model=str(agent.get("model") or ""), work=work_dir(c, doc), unasked=True,
-                agent="writer", disallowed=agent_session.not_own(OWN_TOOLS), doc=doc, background=True)
+                agent="writer", disallowed=agent_session.not_own(OWN_TOOLS), doc=doc)
 
 
 async def _resume_left(c: str, meta: dict[str, Any], prompt: str) -> agent_session.Run:
@@ -156,10 +157,52 @@ async def _resume_left(c: str, meta: dict[str, Any], prompt: str) -> agent_sessi
 def _ended(run: agent_session.Run, status: str, summary: str) -> None:
     """The session ended: main hears the writer's last message (report_types.writer_finished has ended the write), once
     a session listens (agent_session.tell_main), and its work folder lets go of what it no longer needs
-    (work_files.after_run)."""
-    work_files.after_run(run.c, work_dir(run.c, run.key.split(":", 1)[-1]), status)
-    agent_session.tell_main(run.c, WRITTEN_KIND, {"text": summary or "", "status": status,
-                                                  "doc": run.key.split(":", 1)[-1]})
+    (work_files.after_run). Messages that waited for the run to end continue the session (message), unless the analyst
+    stopped it or the server's stop ended it."""
+    doc = run.key.split(":", 1)[-1]
+    work_files.after_run(run.c, work_dir(run.c, doc), status)
+    agent_session.tell_main(run.c, WRITTEN_KIND, {"text": summary or "", "status": status, "doc": doc})
+    waiting = _waiting.pop((run.c, doc), [])
+    if waiting and status != "stopped" and not run.interrupted:
+        asyncio.get_running_loop().create_task(_continue(run.c, doc, waiting, run.chat, run.sid),
+                                               name=f"writer-follow-up:{run.c}:{doc}")
+
+
+# the messages for a writer whose run goes, by (workspace, document), each {text, by}, for the run's end (message)
+_waiting: dict[tuple[str, str], list[dict[str, Any]]] = {}
+
+
+async def message(c: str, doc: str, text: str, by: str, *, chat: str, sid: str) -> dict[str, Any]:
+    """A message for the writer of `doc` from `by` (agents.TERMINAL, typed in its tray entry, or agents.MAIN_ID): it
+    continues the writer's session `sid` in its chat `chat` as the chat's next run, {status: resumed, chat, run}, or
+    waits for the run that goes, {status: queued, chat, queued}. ValueError for an empty message, RuntimeError when the
+    session cannot continue."""
+    text = str(text or "").strip()
+    if not text:
+        raise ValueError("the message is empty")
+    item = {"text": text, "by": by}
+    if running(c, doc):
+        queue = _waiting.setdefault((c, doc), [])
+        queue.append(item)
+        return {"status": "queued", "chat": chat, "queued": len(queue)}
+    run = await _continue(c, doc, [item], chat, sid)
+    return {"status": "resumed", "chat": chat, "run": run.k}
+
+
+async def _continue(c: str, doc: str, messages: "list[dict[str, Any]]", chat: str, sid: str) -> agent_session.Run:
+    """Continue the writer's session `sid` with `messages`, each after the line that says who sent it (the bg-from-*
+    lines of prompts/tools.md), as its chat `chat`'s next run. RuntimeError when its document or transcript is gone."""
+    from . import session  # noqa: PLC0415
+
+    meta = agents.meta_or_none(c, chat)
+    if meta is None or report_types.read_type(c, doc) is None:
+        raise RuntimeError(f"the writer of {doc} is gone")
+    if not session.find_transcript(sid):
+        raise RuntimeError(f"Claude Code no longer keeps the transcript of the writer of {doc}")
+    lead = "\n\n".join(tools.hint("bg-from-main" if m["by"] == agents.MAIN_ID else "bg-from-terminal", text=m["text"])
+                        for m in messages)
+    return await agent_session.start(c, session_key(doc), prompt=lead, resume=sid, chat=chat,
+                                     run_k=int(meta.get("run") or 0) + 1, leads=messages, **_launch(c, doc))
 
 
 def _left(c: str, meta: dict[str, Any], status: str, summary: str) -> None:
@@ -172,22 +215,8 @@ def _left(c: str, meta: dict[str, Any], status: str, summary: str) -> None:
     agent_session.tell_main(c, WRITTEN_KIND, {"text": summary or "", "status": status, "doc": doc})
 
 
-async def _woken(c: str, e: bg_session.Entry) -> agent_session.Run | None:
-    """A writer's background session started a turn with no run of this server's (bg_session.on_wake): the run a
-    restart cut off is followed again as it was, and any other turn is the chat's next run."""
-    meta = agents.meta_or_none(c, e.chat)
-    doc = e.key.split(":", 1)[-1]
-    if meta is None or report_types.read_type(c, doc) is None:
-        return None
-    if meta.get("status") == "running":
-        return await _resume_left(c, meta, "")
-    return await agent_session.start(c, e.key, prompt="", resume=e.sid, chat=e.chat, run_k=int(meta.get("run") or 0) + 1,
-                                     announce=False, **_launch(c, doc))
-
-
 agent_session.on_left(ROLE, _left)
 agent_session.on_resume(ROLE, _resume_left)
-bg_session.on_wake(tools.WRITER_SESSION, _woken)
 
 
 async def tool_start_writing(ctx: Any, args: dict[str, Any]) -> Any:

@@ -24,7 +24,7 @@ as the event's turn begins, to print (held_route); the line of something the ana
 as a follow-up to the orientation, waits there too (show). With every hook off (the Monitor route) nothing can print
 them. A message the analyst sends while main's turn runs reaches the session only at the turn's next tool call, or once
 the turn ends, so main's statusline shows its words at once, after QUEUED, until the held hook prints its line
-(queued_line, which bg_session.agents_route adds to the statusline).
+(queued_line, which tray.agents_route adds to the statusline).
 
 A session started before an update to 0.6.0 runs 0.5.0's MCP shim, and perhaps the hooks of 0.5.0's cached plugin copy,
 until Claude Code restarts. Those call the routes 0.5.0 named for Claude Code channels, which answer as their new routes

@@ -5,10 +5,10 @@ from __future__ import annotations
 
 import asyncio
 
-from app import agent_session, agents, bg_session, card_check, checks, cli, concepts, dev, notebook, session
+from app import agent_session, agents, card_check, checks, cli, concepts, dev, notebook, session
 
 
-def test_stop_all_stops_the_checks_the_builds_the_label_runs_the_sessions_the_live_background_sessions_and_the_kernels(monkeypatch):
+def test_stop_all_stops_the_checks_the_builds_the_label_runs_the_sessions_and_the_kernels(monkeypatch):
     called: list[str] = []
     monkeypatch.setattr(checks, "stop_workspace", lambda c: called.append("report checks") or 0)
     monkeypatch.setattr(card_check, "stop_workspace", lambda c: called.append("card checks") or 0)
@@ -24,18 +24,9 @@ def test_stop_all_stops_the_checks_the_builds_the_label_runs_the_sessions_the_li
 
     monkeypatch.setattr(agent_session, "wind_down", wind_down)
     monkeypatch.setattr(notebook, "shutdown_workspace", kernels)
-
-    class E:
-        def __init__(self, name, short, status):
-            self.name, self.short, self.status, self.replacing = name, short, status, False
-
-    monkeypatch.setattr(bg_session, "entries", lambda c: [E("thimble:critic · w", "abc", "idle"), E("thimble:writer · w", "def", "stopped")])
-    cli_stops: list[str] = []
-    monkeypatch.setattr(bg_session, "stop_cli", cli_stops.append)
     got = asyncio.run(agents.stop_all("w"))
     assert called == ["report checks", "card checks", "builds", "label runs", "sessions", "kernels"], "nothing starts a session after its stop"
-    assert cli_stops == ["abc"], "only a background session still alive"
-    assert got == ["dev build", "Orientation", "thimble:critic · w"]
+    assert got == ["dev build", "Orientation"]
 
 
 def test_a_workspace_s_label_runs_count_as_at_work_and_stop_with_it():

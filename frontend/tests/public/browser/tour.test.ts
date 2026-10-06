@@ -83,7 +83,7 @@ const MAIN = {
 const SETTINGS = {
   run_cell_result_lines: 40,
   models: Object.fromEntries(['orient', 'critic', 'writer', 'checks', 'verify', 'labels', 'dev'].map((r) => [r, { model: 'claude-opus-5-5', effort: 'high', fast: false }])),
-  permission_modes: {}, disabled_modes: [], config_error: '', untrusted: null,
+  permission_modes: {}, disabled_modes: [], config_error: '',
 }
 const FILES = ['README.md', 'deploys.csv', 'agents.log', 'chat/ops.json', 'tickets/index.csv'].map((p) => ({ path: p, kind: 'text', size_bytes: 1200, title: p.split('/').pop() }))
 /** One folder's own entries, as `GET /corpora/{c}/sources?path=&depth=1` answers. */

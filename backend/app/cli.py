@@ -116,15 +116,6 @@ RESUME_LINE = "thimble: resuming the dashboard from your last run; `/thimble fre
 # Stop hook shows it under the reply (leave_link, plugin/bin/.thimble-watch)
 LINK_LINE = "thimble: the dashboard link is under this reply (or run `thimble up` in a shell)"
 LINKS_DIR = "links"  # under <home>: the link each session's Stop hook shows once
-# while Claude Code does not trust thimble's workspaces folder (untrusted): the line for the analyst's terminal, with the
-# command that trusts it, and the line for a model, which leaves that command to the analyst
-UNTRUSTED_LINE = ("thimble: WARNING - Claude Code does not trust thimble's workspaces folder {folder}, so the orientation, "
-                  "its critic, the writers and view builds can't start. To trust it, run this in a terminal:\n"
-                  "  {command}")
-UNTRUSTED_MODEL_LINE = ("thimble: WARNING - Claude Code does not trust thimble's workspaces folder, so the orientation, "
-                        "its critic, the writers and view builds can't start. The analyst trusts it by running "
-                        "thimble's installer again in their own terminal with --trust-workspaces, the command their "
-                        "terminal and thimble's browser show.")
 FRESH_LINE = ("thimble: Cleared the session at {cwd}. The last run is archived at {path}. To bring it back, run: "
               "/thimble restore {name}")
 NOTHING_ARCHIVED_LINE = "thimble: this folder had no workspace to archive"
@@ -301,7 +292,7 @@ def _same_tree(a: Any, b: Path) -> bool:
 def resolve_env() -> dict[str, Any]:
     """The names the server runs with: the caller's THIMBLE_* first, then the last server.json, then the defaults. A
     workspaces folder server.json recorded counts only when a server of this install wrote it, so a new install beside
-    an earlier one never keeps that one's folder (claude_changes.workspaces_dir asks the same)."""
+    an earlier one never keeps that one's folder."""
     state = read_state()
     st = state.get("env") or {}
     data_dir = os.environ.get("THIMBLE_DATA_DIR") or st.get("data_dir") or str(config.default_data_dir())
@@ -1519,9 +1510,9 @@ def launch_settings(cwd: Path, given: str = "") -> str:
     """The one `--settings` value the launcher passes main, since Claude Code reads only the last one: the analyst's own
     `given` (inline JSON, or a file relative to `cwd`) with thimble's statusline, chained to theirs (from `given`, else
     their own settings, cc_settings.own_statusline) at their refresh interval, and the composer's fast mode and
-    ultracode where they name none, and thimble-cc-mod off (config.without_mod), as in thimble's background sessions,
+    ultracode where they name none, and thimble-cc-mod off (config.without_mod), as in the sessions thimble starts,
     whatever the folder's settings say. `given` as it is when it cannot be read."""
-    from . import bg_session, cc_settings  # noqa: PLC0415
+    from . import cc_settings, tray  # noqa: PLC0415
 
     own: Any = {}
     if given:
@@ -1535,7 +1526,7 @@ def launch_settings(cwd: Path, given: str = "") -> str:
             return given.replace("\n", " ")
     line = own.get("statusLine")
     theirs = line if isinstance(line, dict) and isinstance(line.get("command"), str) else cc_settings.own_statusline()
-    out = {**own, "statusLine": {"type": "command", "command": bg_session.statusline_command(theirs.get("command") or ""),
+    out = {**own, "statusLine": {"type": "command", "command": tray.statusline_command(theirs.get("command") or ""),
                                  "refreshInterval": theirs.get("refreshInterval", cc_settings.STATUSLINE_REFRESH_S)}}
     choice = main_choice(cwd)
     if isinstance(choice.get("fast"), bool):
@@ -1570,7 +1561,7 @@ def launch_args(cwd: Path, resume: bool = False, settings: str = "") -> str:
     root = installed.root if installed else plugin_root()
     workspaces = Path(resolve_env()["workspaces_dir"]).resolve()
     anchors = workspaces / "*" / ANCHORS_DIR
-    # the instructions of a background session's tray entry (bg_session.proxy_file)
+    # the instructions of a tray entry of thimble's agents (tray.proxy_file)
     tray_prompts = workspaces / "*" / "bg" / "*.md"
     # on the Monitor route main arms its Monitor on the watcher again every 30 minutes, which must not wait on a prompt;
     # only --stream, since the watcher's other modes report to the server as main's hooks
@@ -1595,9 +1586,6 @@ def cmd_launch_args(args: argparse.Namespace) -> int:
     warning = claude_code_warning(claude_code_version())
     if warning:
         print(warning, file=sys.stderr)
-    folder = untrusted(Path(resolve_env()["workspaces_dir"]))
-    if folder:
-        print(UNTRUSTED_LINE.format(folder=folder, command=trust_command()), file=sys.stderr)
     return 0
 
 
@@ -2075,33 +2063,6 @@ def python_line() -> str:
     return f"{whose}, Python {platform.python_version()}" + (f"; lacks {', '.join(lacking)}" if lacking else "")
 
 
-def trust_command() -> str:
-    """The command that has Claude Code trust thimble's workspaces folder: this install's installer, run again."""
-    return f"bash {shlex.quote(str(config.REPO_ROOT / 'scripts' / 'install.sh'))} --trust-workspaces"
-
-
-def untrusted(workspaces: Path) -> Path | None:
-    """The workspaces folder when Claude Code does not trust it, by the rule `claude --bg` applies
-    (claude_changes.trusted), so the background sessions of the orientation, its critic, the writers and view builds
-    cannot start (bg_session.trusted); None when it does."""
-    from . import bg_session, claude_changes  # noqa: PLC0415
-
-    data = claude_changes._read(bg_session.claude_json())
-    return None if claude_changes.trusted(workspaces, data) else workspaces
-
-
-def trust_line(workspaces: Path, commands: bool = True) -> str:
-    """Whether Claude Code trusts the workspaces folder, which the background sessions of the orientation, its critic,
-    the writers and view builds need (untrusted), and with `commands` the command that trusts it."""
-    from . import bg_session  # noqa: PLC0415
-
-    path = bg_session.claude_json()
-    if not untrusted(workspaces):
-        return f"Claude Code trusts {workspaces} ({path})"
-    return (f"Claude Code does not trust {workspaces} ({path}), so the orientation, its critic, the writers and view "
-            "builds can't start" + (f"; `{trust_command()}` trusts it" if commands else ""))
-
-
 def human_bytes(n: float) -> str:
     for unit in ("B", "KB", "MB", "GB", "TB"):
         if n < 1000 or unit == "TB":
@@ -2290,7 +2251,6 @@ def doctor_text(commands: bool = True) -> str:
     data_src = "THIMBLE_DATA_DIR" if os.environ.get("THIMBLE_DATA_DIR") else "server.json" if recorded else "default $THIMBLE_HOME/data"
     lines.append(f"  data_dir: {env['data_dir']} ({'exists' if Path(env['data_dir']).is_dir() else 'missing'}; {data_src})")
     lines.append(f"  workspaces_dir: {env['workspaces_dir']} ({'exists' if Path(env['workspaces_dir']).is_dir() else 'missing'})")
-    lines.append(f"  trust: {_checked(trust_line, Path(env['workspaces_dir']), commands)}")
     lines.append(f"  disk: {_checked(disk_line, [home(), Path(env['workspaces_dir'])])}")
     status = config.auth_status()
     lines.append(f"  auth: {auth_line(status)}")
@@ -2606,19 +2566,14 @@ def cmd_ensure(args: argparse.Namespace) -> int:
             second = resume_lines(url, name, archive)
         else:
             second = [RESUME_LINE] if not opened and resumes(url, name) else []
-        folder = untrusted(Path(env["workspaces_dir"]))
-        warn = UNTRUSTED_LINE.format(folder=folder, command=trust_command()) if folder else ""
-        # with the plugin's hooks off no Stop hook shows the link, so the page opens without the key; the terminal
-        # shows the trust warning with its command under the link, and the model reads it without the command
+        # with the plugin's hooks off no Stop hook shows the link, so the page opens without the key
         if (args.session and not cc_plugin.hooks_blocked(cwd, plugin_root())
-                and leave_link(str(args.session), ui_url(name), [warn] if warn else [])):
+                and leave_link(str(args.session), ui_url(name), [])):
             print(LINK_LINE)
         else:
             print(f"thimble: {ui_url(name, key=not args.session and to_terminal())}")
         for line in second:
             print(line)
-        if warn:
-            print(warn if not args.session and to_terminal() else UNTRUSTED_MODEL_LINE)
         status = config.auth_status(cwd=cwd)
         if args.session:
             lines = monitor_lines(cwd, str(args.session))

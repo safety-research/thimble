@@ -18,7 +18,6 @@ import sys
 from pathlib import Path
 
 import pytest
-from conftest import print_sessions
 
 from app import (agent_session, cc_settings, checks, config, critique_session, dev, harness, kernel_wrap, notebook,
                  orient_session, roles, srt, userconf, views, write_session)
@@ -94,7 +93,6 @@ async def test_the_orientation_starts_in_its_work_folder_and_each_bash_command_s
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude-config"))
     monkeypatch.setenv("THIMBLE_SANDBOX", "0")
     monkeypatch.setitem(userconf.DEFAULTS["sandbox"], "enforce", False)
-    print_sessions(monkeypatch)
     run = await orient_session.start(CORPUS, "")
     await asyncio.wait_for(run.task, 10)
     launch = json.loads((out / "launch.json").read_text())
