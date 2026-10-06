@@ -18,8 +18,9 @@ trusts, under which e2e_release.sh copies the corpus for this check.
 
 The assertions (each one line of results.jsonl, {step, title, status, detail}; see ASSERTIONS), in order:
   hello            the module's hello is accepted for main's session as launch.json names it;
-  initial-listing  each of thimble's types (subagents.TYPES, `thimble:<name>`) is in main's first agent listing
-                   (agent_listing_delta with isInitial true), and the terminal printed no "agent types available" line;
+  initial-listing  each of thimble's types the install registers (subagents.TYPES, `thimble:<name>`; Type.when) is in
+                   main's first agent listing (agent_listing_delta with isInitial true), and the terminal printed no
+                   "agent types available" line;
   spawn            a spawn through the bridge of thimble:check (thimble:writer while the check role is not in
                    subagents.TYPES), as a click makes it (subagents.start_job), with a full model id and an explicit
                    effort answers an agent id, and the agent transcript's message.model and effort equal them;
@@ -457,8 +458,11 @@ class Check:
         # main's first agent listing (its first request, the /thimble turn)
         self.wait("main's first turn", lambda: first_listing(self.main_rows()) is not None, REPLY_WAIT_S)
         self.wait("main idle", lambda: self.idle(), REPLY_WAIT_S)
-        expected = [subagents.type_name(t) for t in subagents.TYPES]
-        ok, detail = check_listing(first_listing(self.main_rows()), expected, list(subagents.ROLES),
+        # the types the module registers here: every one of subagents.TYPES that this install registers (Type.when:
+        # `thimble:dev-ticket` only in a development install)
+        expected = [subagents.type_name(t) for t in subagents.roles(self.c) if t in subagents.TYPES]
+        ok, detail = check_listing(first_listing(self.main_rows()), expected,
+                                   [r for r in subagents.ROLES if r in subagents.roles(self.c)],
                                    self.term.screen(history=True))
         first = next((r for r in self.main_rows() if r.get("attachment", {}).get("type") == "agent_listing_delta"), {})
         self.result("initial-listing", ok, f"{detail}; main's first request at {first.get('timestamp')}, the module's "

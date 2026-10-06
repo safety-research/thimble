@@ -55,13 +55,16 @@ def _request(tool: str, inp: dict, key: str = KEY, **extra) -> "asyncio.Future":
 
 async def test_an_unanswered_request_is_denied_after_the_wait_and_its_card_says_so_until_dismissed():
     """A hosted session's request nobody answers is denied after its wait, so the build goes on; the model is told to
-    carry on without it, the thread hears of it, and the card keeps it marked denied unanswered until Dismiss or the
-    run's end. Requests that joined it are denied with it. An Allow covers the requests that joined the card before it
-    was clicked, as many as the card says it listed; a later one is asked on its own."""
+    carry on without it, and the card keeps it marked denied unanswered until Dismiss or the run's end. Requests that
+    joined it are denied with it. An Allow covers the requests that joined the card before it was clicked, as many as
+    the card says it listed; a later one is asked on its own."""
     chat = _chat()
-    heard: list[dict] = []
     wait = card_wait(0.002)
-    agent_session.host(CORPUS, KEY, chat, agent="views", on_expired=lambda run, entry: heard.append(entry))
+    agent_session.host(CORPUS, KEY, chat, agent="views")
+
+    def asking() -> bool:
+        run = agent_session.asker(CORPUS, KEY)
+        return run is not None and any(not f.done() for f in run.waits.values())
     one = _request("WebFetch", PAGE)
     await _waiting(chat)
     two = _request("WebFetch", OTHER_PAGE)
@@ -72,8 +75,8 @@ async def test_an_unanswered_request_is_denied_after_the_wait_and_its_card_says_
     assert await one == denied and await two == denied and await long == denied
     assert agent_session.answer(CORPUS, chat, own["id"], False)
     [p] = _card(chat)
-    assert p["expired"] and p["what"] == PAGE["url"] and [e["what"] for e in heard][0] == PAGE["url"]
-    assert not agent_session.asking(CORPUS, KEY)
+    assert p["expired"] and p["what"] == PAGE["url"]
+    assert not asking()
     assert agent_session.answer(CORPUS, chat, p["id"], False) and _card(chat) == []
     assert not agent_session.answer(CORPUS, chat, p["id"], False)
     log = [json.loads(ln) for ln in (config.workspace_dir(CORPUS) / agents.PERMISSIONS_LOG).read_text().splitlines()]
@@ -81,7 +84,7 @@ async def test_an_unanswered_request_is_denied_after_the_wait_and_its_card_says_
     card_wait(None)  # a request still waiting when its session ends, however slowly the test runs
     waiting = _request("Bash", {"command": "curl example.org"})
     await _waiting(chat)
-    assert agent_session.asking(CORPUS, KEY)
+    assert asking()
     agent_session.unhost(CORPUS, KEY)
 
     chat, key, late = _chat("view: Other"), "view:other", {"url": f"{PAGE['url']}?late"}

@@ -2,7 +2,7 @@
 // model is read-only (only /model in the terminal changes it) and whose effort and fast mode are kept for its next
 // launch (PUT session/effort and session/fast); thimble's agents (the orientation, the orientation's subagents run as
 // thimble:helper, the critic, the writers, the dev agent of view builds, reviews and code tickets, the report checks),
-// with a "web" switch that keeps an agent off WebFetch and WebSearch, and on the dev row a fast switch for code tickets
+// with a "web" switch that keeps an agent off WebFetch and WebSearch, and on the dev row a fast switch for `thimble fix`
 // alone (backend config.FAST_OF_TICKETS); the classifiers (labels, the card check, the viewer suggestion), the only
 // other rows with fast mode; and the row a classifier's call runs again on when its model
 // refuses, or off. Then one row per agent of the extensions running here (`<extension>:<agent>`). The effort menu lists
@@ -11,8 +11,9 @@
 // cannot take effect are dimmed with the reason in a tooltip. Every row names its model exactly, never `default`.
 // Under the table, main's fence, which thimble's agents share as subagents of the analyst's Claude Code session (its
 // sandbox, network, web and edits of the data), with the CLAUDE.md files each agent reads; then the one agent with a
-// permission mode of its own, the code tickets' (with cardWait, how long its card waits), and its own fence; then labels
-// and the card check, which have no mode; then the extensions added to thimble, each with its switch for this workspace
+// permission mode of its own, an extension's program that runs the dev agent, shown only where one does, and its own
+// fence; then labels and the card check, which have no mode; then how long a code ticket's question about thimble's code
+// waits on its card (cardWait); then the extensions added to thimble, each with its switch for this workspace
 // (ExtensionsSettings).
 import { useEffect, useState } from 'react'
 import { Button } from '../components/Button'
@@ -32,10 +33,15 @@ import { EFFORT_CHOICES, FastBolt, MODEL_TIP, NEXT_LAUNCH, effortWord, mainEffor
 
 type Models = Record<string, ModelConf>
 
-/** The agents with a permission mode of their own: only the code tickets' (backend modes.AGENTS). */
-export const MODE_ROWS: { agent: ModeAgent; label: string }[] = [{ agent: 'dev', label: 'Code tickets' }]
+/** The agents with a permission mode of their own: only an extension's program that runs the dev agent (backend
+ * modes.AGENTS); code tickets' agents are subagents of the analyst's session and run in its mode. */
+export const MODE_ROWS: { agent: ModeAgent; label: string }[] = [{ agent: 'dev', label: "Dev agent's program" }]
+/** The ways an extension runs an agent as a program of its own, a job of thimble's server (backend roles.CODE_WAYS). */
+const PROGRAM_WAYS = ['sdk', 'command']
+/** Whether a MODE_ROWS row applies: an extension runs that agent with a program of its own. Pure. */
+export const modeRowShown = (row: Pick<AgentRow, 'way'> | undefined): boolean => !!row && PROGRAM_WAYS.includes(row.way)
 const MODE_NAME: Record<OrientPermissions, string> = { manual: 'Manual', auto: 'Auto', bypass: 'Bypass' }
-/** The code tickets' modes, by the names the menu shows. */
+/** The modes of the dev agent's program, by the names the menu shows. */
 export const MODE_OPTIONS: { value: OrientPermissions; label: string }[] = [
   { value: 'manual', label: 'Manual' },
   { value: 'auto', label: 'Auto' },
@@ -44,26 +50,26 @@ export const MODE_OPTIONS: { value: OrientPermissions; label: string }[] = [
 /** The warning Claude Code shows before a session runs in Bypass Permissions mode, its first sentence. */
 export const BYPASS_LINE = 'In Bypass Permissions mode, Claude Code will not ask for your approval before running potentially dangerous commands.'
 /** The one line on the modes of every other agent. */
-export const MAIN_MODE_LINE = "Every other agent of thimble's runs in your Claude Code session's permission mode."
+export const MAIN_MODE_LINE = "thimble's agents, code tickets' among them, run in your Claude Code session's permission mode."
 
-/** A Claude Code permission mode (main's `attached.permission_mode`) as the code tickets' menu names it: Auto for auto,
+/** A Claude Code permission mode (main's `attached.permission_mode`) as the program's menu names it: Auto for auto,
  * Bypass for bypassPermissions, Manual for any other or none known (backend modes.OF_CLAUDE). Pure. */
 export const permissionChoice = (mode: string | null | undefined): OrientPermissions =>
   mode === 'auto' ? 'auto' : mode === 'bypassPermissions' ? 'bypass' : 'manual'
 
-/** The mode code tickets start in: their row, else the mode of the analyst's Claude Code session, else Manual, whichever
- * their Claude Code settings do not turn off (backend modes.mode_for). Pure. */
+/** The mode the dev agent's program starts in: its row, else the mode of the analyst's Claude Code session, else Manual,
+ * whichever their Claude Code settings do not turn off (backend modes.mode_for). Pure. */
 export function agentMode(rows: Settings['permission_modes'], agent: ModeAgent, sessionMode: string | null | undefined, off: readonly string[] = []): OrientPermissions {
   return [rows?.[agent], permissionChoice(sessionMode), 'manual' as const].find((m): m is OrientPermissions => !!m && !off.includes(m))!
 }
 
-/** The agents of thimble's config that are one model call each, listed after the code tickets; their settings reach an
- * extension's program that runs their tasks (backend userconf.CALLS). */
+/** The agents of thimble's config that are one model call each, listed after the dev agent's program; their settings
+ * reach an extension's program that runs their tasks (backend userconf.CALLS). */
 export const CALL_ROWS: { agent: CallAgent; label: string }[] = [
   { agent: 'labels', label: 'Labels' },
   { agent: 'cardCheck', label: 'Card check' },
 ]
-/** What a CALL_ROWS row shows where the code tickets show their permission mode, and why. */
+/** What a CALL_ROWS row shows where the dev agent's program shows its permission mode, and why. */
 export const CALL_CELL = 'Asks nothing'
 const CALL_CELL_TIP = "It has no permission mode. thimble runs it as one model call with no tools, and an extension's program that runs its tasks has no thread to ask you in."
 
@@ -213,15 +219,21 @@ export const ROLE_NOTE: Record<string, string> = {
 }
 /** thimble's agents, whose rows apply to their next start. */
 export const AGENT_ROLES = ['orient', 'subagents', 'critic', 'writer', 'dev', 'checks'] as const
-/** The classifiers: one model call each, the only rows with fast mode but the dev row's, which is code tickets'. */
+/** The classifiers: one model call each, the only rows with fast mode but the dev row's, which is `thimble fix`'s. */
 export const CLASSIFIER_ROLES = ['labels', 'verify', 'suggest'] as const
 /** The agents whose web switch the table offers (backend userconf.SUBAGENT_ROLES less the orientation, whose web is
  * main's fence's). */
 export const WEB_ROWS = ['critic', 'writer', 'checks'] as const
 export type WebRow = (typeof WEB_ROWS)[number]
-/** The dev row's fast switch, by the name it shows: its fast mode reaches code tickets alone, which run as `claude -p`
- * jobs of the server; view builds and reviews run as subagents of main (backend config.FAST_OF_TICKETS). */
-export const TICKET_FAST = "code tickets' fast mode"
+/** The dev row's fast switch, by the name it shows: its fast mode reaches `thimble fix` alone, the one `claude -p` job
+ * of the server; view builds, reviews and code tickets run as subagents of main, which Claude Code gives no fast mode of
+ * their own (backend config.FAST_OF_TICKETS). */
+export const TICKET_FAST = "thimble fix's fast mode"
+/** The dev row's web switch's reason: the dev agent's web in thimble's config reaches all of its work. */
+export const DEV_WEB_WHY = "The dev agent's view builds, reviews and code tickets follow agents.dev.web in thimble's config."
+/** The line on how long a code ticket's question about thimble's own code waits on its card (cardWait). */
+export const cardWaitLine = (minutes: number): string =>
+  `A code ticket asks you before its change reaches thimble's own code; its card waits ${minutes} min (cardWait).`
 /** The line under the table. */
 export const NEXT_START_LINE = "An agent's row applies to its next start; a run that goes on keeps its own model and effort."
 
@@ -239,8 +251,8 @@ export function roleEfforts(role: string): string[] {
   return [...EFFORTS]
 }
 
-/** Why a role's cell cannot be changed here, or null when it can. Fast mode is the classifiers', main's and, for code
- * tickets alone, the dev row's (TICKET_FAST); a model with no effort has no effort to pick. Pure. */
+/** Why a role's cell cannot be changed here, or null when it can. Fast mode is the classifiers', main's and, for
+ * `thimble fix` alone, the dev row's (TICKET_FAST); a model with no effort has no effort to pick. Pure. */
 export function lockedWhy(role: string, cell: 'model' | 'effort' | 'fast', conf: ModelConf, main: { attached: boolean }): string | null {
   if (role === 'main') {
     if (cell === 'model') return MODEL_TIP
@@ -520,7 +532,7 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
                   ) : role === 'orient' || role === 'subagents' ? (
                     <WebSwitch role={role} on={fence?.web !== 'off'} why={`The orientation and its subagents follow your fence's web rule (${fence?.config ?? 'agents.orientation'}.web in thimble's config).`} />
                   ) : role === 'dev' ? (
-                    <WebSwitch role={role} on={settings.agents?.dev?.web !== 'off'} why="Code tickets keep a fence of their own (agents.dev.web in thimble's config); view builds and reviews follow yours." />
+                    <WebSwitch role={role} on={settings.agents?.dev?.web !== 'off'} why={DEV_WEB_WHY} />
                   ) : (
                     <span />
                   )}
@@ -572,7 +584,7 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
               <span className="label">agent</span>
               <span className="label">permission mode</span>
             </div>
-            {MODE_ROWS.map(({ agent, label }) => {
+            {MODE_ROWS.filter(({ agent }) => modeRowShown(settings.agents?.[agent])).map(({ agent, label }) => {
               const picked = modeRows?.[agent]
               const mode = agentMode(modeRows, agent, attached?.permission_mode, off)
               const pick = (m: OrientPermissions | undefined) => setModeRows((r) => ({ ...r, [agent]: m }))
@@ -594,11 +606,6 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
                         </Chip>
                       }
                     />
-                    {settings.card_wait != null && (
-                      <span className="settings-card-wait" title="cardWait in thimble's config">
-                        {`a request waits ${settings.card_wait} min`}
-                      </span>
-                    )}
                   </span>
                   {row && <AgentLine row={row} />}
                 </div>
@@ -617,6 +624,11 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
             <p className="settings-agent-main settings-main-mode" role="note">
               {MAIN_MODE_LINE}
             </p>
+            {settings.card_wait != null && (
+              <p className="settings-agent-main settings-card-wait" role="note" title="cardWait in thimble's config">
+                {cardWaitLine(settings.card_wait)}
+              </p>
+            )}
             {!!settings.agents?.main?.additions.length && (
               <p className="settings-agent-main" role="note">
                 Main: your own session, with {settings.agents.main.additions.join(', ')}'s prompt from its next start
@@ -627,7 +639,7 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
                 Tasks: {tasksLine(settings.tasks)}
               </p>
             )}
-            {MODE_ROWS.some(({ agent }) => agentMode(modeRows, agent, attached?.permission_mode, off) === 'bypass') && (
+            {MODE_ROWS.some(({ agent }) => modeRowShown(settings.agents?.[agent]) && agentMode(modeRows, agent, attached?.permission_mode, off) === 'bypass') && (
               <p className="settings-modes-warn" role="note">
                 {BYPASS_LINE}
               </p>
