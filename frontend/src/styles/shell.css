@@ -719,9 +719,6 @@ button.settings-ext-name:hover .settings-ext-caret {
   height: 20px;
   min-height: 0;
 }
-.shell-toast-report.btn {
-  flex: none;
-}
 
 /* -------- toasts (shell/Toasts): glass at the bottom right with the float. A toast fades in with a small rise.
    -------- */

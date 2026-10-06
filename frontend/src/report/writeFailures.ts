@@ -1,11 +1,11 @@
-// A writer's failure on a document, from the stream's `report {status: failed}` record. Its toast shows once when the
-// record is new; afterwards the failure shows as a ✕ on the document's tab and an error card under the type bar until
-// the analyst dismisses it or a later write starts or saves. Dismissals are kept per workspace in localStorage by the
+// A writer's failure on a document, from the stream's `report {status: failed}` record. It is a state that lasts, so it
+// shows in one place, never as a toast: a ✕ on the document's tab and an error card under the type bar, with Retry and
+// Report a problem, until the analyst dismisses it or a later write starts or saves. Like any report record, a new one
+// lights the Report tab's dot while no pane shows the Report (shell/dots). Dismissals are kept per workspace in localStorage by the
 // record's `seq`, so they hold across loads while a new failure still shows.
 import { useSyncExternalStore } from 'react'
 import { apiErrorAt, apiFailureText } from '../chat/model'
 import { bus } from '../lib/bus'
-import { isReplay } from '../lib/events'
 import type { WsEvent } from '../lib/types'
 import { readStorage, storageKey, writeStorage } from '../lib/workspace'
 import { failureText } from '../shell/ProblemReport'
@@ -20,7 +20,8 @@ export interface WriteFailure {
   seq: number
 }
 
-/** The toast's text and the line's tooltip: the writer's last words, or for Claude Code's API error line what failed. */
+/** The failure card's head and the tab's tooltip: the writer's last words, or for Claude Code's API error line what
+ * failed. */
 export function failedText(f: Pick<WriteFailure, 'slug' | 'note'>): string {
   const at = apiErrorAt(f.note)
   const why = at < 0 ? f.note : `${apiFailureText(f.note.slice(at))}.`
@@ -60,11 +61,8 @@ const subs = new Set<() => void>()
 bus.on('wsEvent', (ev) => {
   const next = nextFailures(failures, ev)
   if (next === failures) return
-  const e = ev as { slug?: string; status?: string }
-  const f = e.status === 'failed' && e.slug ? next[e.slug] : null
   failures = next
   subs.forEach((fn) => fn())
-  if (f && !isReplay()) bus.emit('toast', { text: failedText(f), kind: 'error', report: failedReport(f) })
 })
 
 function subscribe(fn: () => void): () => void {
