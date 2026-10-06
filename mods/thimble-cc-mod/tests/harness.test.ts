@@ -30,7 +30,7 @@ function summary(over: Partial<CoverageSummary> = {}): CoverageSummary {
 type Fake = {
   ctx: HarnessCtx
   files: Map<string, string>
-  runs: { argv: string[]; stdin?: string }[]
+  runs: { argv: string[]; stdin?: string; boxed?: true }[]
   coverage: ChatCoverage | null
   labels: Map<string, ChatLabel>
   reports: Map<string, ChatReport>
@@ -71,6 +71,10 @@ function fake(): Fake {
     list: async dir => [...f.files.keys()].filter(p => p.startsWith(`${dir}/`)).map(p => p.slice(dir.length + 1)),
     run: async (argv, init) => {
       f.runs.push({ argv, ...(init?.stdin ? { stdin: String(init.stdin) } : {}) })
+      return f.answer(argv, init?.stdin ? String(init.stdin) : undefined)
+    },
+    boxed: async (argv, init) => {
+      f.runs.push({ argv, boxed: true, ...(init?.stdin ? { stdin: String(init.stdin) } : {}) })
       return f.answer(argv, init?.stdin ? String(init.stdin) : undefined)
     },
     filmPython: async () => '',
@@ -295,6 +299,8 @@ test('/thimble-label: list, open, a label defined and run in the panel with the 
   await settle()
   const run = f.runs.find(r => r.argv[2] === 'run')!
   expect(run.argv.slice(2, 6)).toEqual(['run', 'deletes-text', '--limit', '30'])
+  // a run labels by the label's own code and writes and runs its card's script: in the scripts' sandbox
+  expect(run.boxed).toBe(true)
   expect(JSON.parse(f.files.get(`${CWD}/.thimble-cc-mod/labels/deletes-text/spec.json`)!)).toMatchObject({ name: 'deletes text', kind: 'regex', definition: 'removed|deleted', values: ['delete', 'keep'], paths: ['revisions.jsonl'], field: 'comment' })
   expect(f.notes.at(-1)).toContain('the analyst defined the label "deletes text" (regex: "removed|deleted" over revisions.jsonl) with /thimble-label and ran it on a sample of 30 records: delete 3, keep 27. Its cards: [[card:ee11ff]].')
   // a label of this folder named with --all runs again as defined
@@ -369,6 +375,9 @@ test('a prompt label runs: a trial\'s records judged in batches, the rows handed
   expect(finished!.trial).toBe(true)
   expect(f.labels.get('asks-for-a-refund')).toMatchObject({ state: 'ready', trial: true, counts: { refund: 5, other: 0 }, cards: ['aa11bb', 'cc22dd'] })
   expect(f.opened).toEqual(['label'])
+  // paging the records runs no code; finishing writes and runs the label card's script, in the scripts' sandbox
+  expect(f.runs.filter(r => r.argv[2] === 'units').every(r => !r.boxed)).toBe(true)
+  expect(f.runs.find(r => r.argv[2] === 'finish')?.boxed).toBe(true)
   // apply to all, the definition unchanged: the trial's rows kept, only the other 20 asked, the analyst's value kept
   f.asked = []
   const all = await runLabel(f.ctx, specOf({ name: 'asks for a refund', kind: 'prompt', definition: 'The customer asks for money back.', values: ['refund', 'other'], paths: ['t.jsonl'], field: 'body' }) as never, 0)

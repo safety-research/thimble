@@ -39,6 +39,8 @@ type AboveEvent = MatchedEvent<'ui.render', { component: 'AbovePrompt' }>
 
 /** What register.tsx shares with the harness, bound to the hook's `$` (register.tsx harnessCtx). */
 export type HarnessCtx = ReportCtx & {
+  /** `run` in the sandbox of the mod's own scripts (register.tsx boxRun), for the label runs that run code */
+  boxed: ReportCtx['run']
   session: () => Promise<string>
   sleep: (ms: number) => Promise<void>
   complete: (req: ModelCompleteRequest) => Promise<ModelCompleteResult>
@@ -946,9 +948,14 @@ async function judge(ctx: HarnessCtx, l: ChatLabel, spec: LabelSpec, units: Unit
   return { rows, errors: problem ? [problem] : [], status: judgedStatus(j, model) }
 }
 
+/** labels.py's steps that run code: a code label's function, and the label card's script that run, finish and verdict
+ *  write and run. They run in the sandbox; listing, showing and paging records do not. */
+const RUNS_CODE = new Set(['run', 'finish', 'verdict'])
+
 async function helper(ctx: HarnessCtx, args: string[], timeoutMs = 600000): Promise<Record<string, unknown>> {
   const { cwd, root } = await ctx.where()
-  const r = await ctx.run(['python3', `${root}/helper/labels.py`, ...args, '--cwd', cwd], { cwd, timeoutMs })
+  const run = RUNS_CODE.has(args[0] ?? '') ? ctx.boxed : ctx.run
+  const r = await run(['python3', `${root}/helper/labels.py`, ...args, '--cwd', cwd], { cwd, timeoutMs })
   if (r.exitCode !== 0) return { error: clip(r.stderr.trim().split('\n').slice(-3).join(' ') || `labels.py exited ${r.exitCode}`, 400) }
   try {
     return JSON.parse(r.stdout) as Record<string, unknown>

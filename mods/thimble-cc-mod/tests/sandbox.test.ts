@@ -5,7 +5,7 @@
 // real. `claude plugin test mods/thimble-cc-mod`.
 import type { On } from 'claude-code'
 import { expect, mock, test } from 'claude-code/testing'
-import type { Mounted } from 'claude-code/testing'
+import type { Engine, Mounted } from 'claude-code/testing'
 
 import { blockLayout, claimsIn } from '../hooks/cite'
 import { TIMELINE } from './view-fixtures'
@@ -35,7 +35,7 @@ const PLAN = {
   prefix: ['/usr/bin/bwrap', '--unshare-all', '--ro-bind', CWD, CWD, '--bind', `${CWD}/.thimble-cc-mod`, `${CWD}/.thimble-cc-mod`, '--'],
   python: '/usr/bin/python3.12',
   env: { PYTHONUSERBASE: '/home/u/.local' },
-  line: 'runs in bubblewrap: it reads this folder, writes only .thimble-cc-mod/, and keeps the network',
+  line: 'run in bubblewrap: it reads this folder, writes only .thimble-cc-mod/, and keeps the network',
   error: '',
 }
 
@@ -144,7 +144,7 @@ function expectBoxed(run: Run | undefined, command: string[]): void {
   expect(run!.env).toMatchObject(PLAN.env)
 }
 
-async function lastReply($: Parameters<Parameters<typeof test>[1]>[0]): Promise<void> {
+async function lastReply($: Engine): Promise<void> {
   await $.turn.start({ text: 'q', turnId: 't1' } as never)
   await $.turn.complete({ turnId: 't1', answer: REPLY, durationMs: 5, reason: 'answer' } as never)
 }
@@ -174,7 +174,7 @@ test('a verification script runs in the sandbox', async ($, on) => {
   const w = world(on)
   await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
   const ui = (await $.ui.mount(MESSAGE)) as unknown as M
-  const el = (await ui.find({ key: 'para-2' })) as { props: { props: { block: never; chips: never; cols: number } } }
+  const el = (await ui.find({ key: 'para-2' })) as unknown as { props: { props: { block: never; chips: never; cols: number } } }
   const p = el.props.props
   const span = blockLayout(p.block, p.chips, p.cols, -1).spans.find(sp => sp.chip === 0)!
   await ui.pointer({ type: 'down', x: span.x0, y: span.line, button: 'left', in: 'para-2' } as never)
@@ -229,7 +229,7 @@ test("a code label's run, which runs the label's code, runs in the sandbox", asy
 
 test('where no sandbox can run, a script runs as before and the transcript says so once', async ($, on) => {
   const w = world(on)
-  w.plan = { ...PLAN, wrap: 'none', prefix: [], python: '/usr/bin/python3.12', env: {}, line: "runs unsandboxed, with your user's access (bubblewrap cannot create namespaces here)" }
+  w.plan = { ...PLAN, wrap: 'none', prefix: [], python: '/usr/bin/python3.12', env: {}, line: "run unsandboxed, with your user's access (bubblewrap cannot create namespaces here)" }
   await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
   await lastReply($)
   for (let i = 0; i < 2; i++) {

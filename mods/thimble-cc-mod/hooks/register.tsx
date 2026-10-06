@@ -79,6 +79,8 @@ import type { SignalFile } from './signal'
 // the harness: coverage, labels, the orientation (hooks/harness.tsx)
 import { LABEL_DESCRIPTION, LABEL_SCHEMA, LABEL_TOOL, ORIENT_DESCRIPTION, ORIENT_SCHEMA, ORIENT_TOOL, coverageAfterTurn, coverageAppend, coverageCommand, coverageContext, coverageDetail, coverageLast, coverageRow, drawCoverage, drawLabel, drawLabels, isOrient, labelCommand, labelTool, labelToolLine, labelVerdict, labelsCommand, openLabel, orientCommand, orientEnded, orientNote, orientTool, orientToolLine } from './harness'
 import type { HarnessCtx } from './harness'
+import { SCRIPTS, boxedArgv, noPlan, parsePlan, unboxedNotice } from './sandbox'
+import type { SandboxPlan } from './sandbox'
 // the home panel (home.ts, drawn by homeview.tsx)
 import { HOME_LAYOUTS, groupCards, homeLayout, homeReduce } from './home'
 import type { HomeAct, HomeCard, HomeCardGroup, HomeData, HomeHit, HomeLayoutName, HomeOpen, HomeUi, SectionId } from './home'
@@ -209,6 +211,42 @@ async function paths($: Dollar): Promise<void> {
   // the project root, which a shell `cd` does not move: a reload of the hooks after Claude cd'd into a folder would
   // otherwise take that folder for the corpus
   if (!cwd) cwd = await $.session.root().catch(() => $.session.cwd())
+}
+
+// ------------------------------------------------------------------------------------------------ the scripts' sandbox
+//
+// The scripts the mod runs itself (a card's script run again, a verification script, a view's checks, the file
+// browser's helper, a label's run) run model-written code on a click, outside Claude Code's tools and so outside its
+// sandbox. They run in the sandbox browser mode's kernels run in (hooks/sandbox.ts, helper/sandbox.py), planned once a
+// session and kept here, never in .thimble-cc-mod/, which the scripts can write.
+
+let planned: Promise<SandboxPlan> | null = null
+let unboxedSaid = false
+
+/** This session's sandbox, planned on first use. */
+function sandboxPlan($: Dollar): Promise<SandboxPlan> {
+  planned ??= (async () => {
+    await paths($)
+    try {
+      const r = await $.process.run(['python3', `${root}/helper/sandbox.py`, 'plan', '--cwd', cwd], { cwd, timeoutMs: 120000 })
+      return parsePlan(r.stdout) ?? noPlan(r.stderr || r.stdout)
+    } catch (err) {
+      return noPlan(String(err))
+    }
+  })()
+  return planned
+}
+
+/** Run one of the mod's own scripts in the sandbox: where none runs, as before, the transcript saying so once; where
+ *  the sandbox THIMBLE_KERNEL_WRAP names cannot run, not at all, the result saying why. */
+async function boxRun($: Dollar, argv: string[], init: { cwd?: string; env?: Record<string, string>; stdin?: string; timeoutMs?: number }): Promise<{ exitCode: number; stdout: string; stderr: string; isStdoutTruncated: boolean; isStderrTruncated: boolean }> {
+  const plan = await sandboxPlan($)
+  if (plan.error) return { exitCode: 126, stdout: '', stderr: `thimble-cc-mod: ${plan.error}, so the script did not run`, isStdoutTruncated: false, isStderrTruncated: false }
+  if (plan.wrap === 'none' && !unboxedSaid) {
+    unboxedSaid = true
+    $.ui.log(unboxedNotice(plan))
+  }
+  return $.process.run(boxedArgv(plan, argv), plan.wrap === 'none' ? init : { ...init, env: { ...(init.env ?? {}), ...plan.env } })
 }
 
 /** The guidance for main (prompt/chat.md), read once; the system prompt can be composed before session.start ends. */
@@ -746,7 +784,7 @@ async function runVerify($: Dollar, id: string): Promise<void> {
   }
   await setVerify($, id, { id, state: 'running', script, expected, ref, source: source.slice(0, 9000) })
   try {
-    const r = await $.process.run(['python3', script], { cwd, timeoutMs: 180000 })
+    const r = await boxRun($, ['python3', script], { cwd, timeoutMs: 180000 })
     const result = scriptResult(r.stdout)
     const ok = r.exitCode === 0 && result !== null && verifyMatches(expected, ref, result)
     await setVerify($, id, {
@@ -822,7 +860,7 @@ async function rerunCard($: Dollar, id: string, change?: { name: string; value: 
   const keep = written ? { written } : {}
   await $.state.set({ ...RUNS, id }, { ...prev, ...keep, busy: change ? `running with ${change.name} = ${change.value}…` : 'running…', error: undefined })
   try {
-    const r = await $.process.run(['python3', script], {
+    const r = await boxRun($, ['python3', script], {
       cwd,
       env: { THIMBLE_CC_MOD_PARAMS: JSON.stringify(values), THIMBLE_CC_MOD_ONLY: `${card.source.index ?? 0}:${id}`, THIMBLE_CC_MOD_ROOT: cwd },
       timeoutMs: 180000,
@@ -3766,6 +3804,7 @@ export const register: Register = on => {
         `guidance: ${g ? `${g.length} characters, ${present ? 'in this conversation' : 'goes with the next prompt'}` : 'not loaded'}`,
         `in ${cwd}/${HOME}: ${await count('cards')} cards, ${await count('answers')} answers, ${await count('threads')} side threads, ${await count('verify')} verification scripts`,
         `mouse log: ${debug ? `on (${HOME}/mouse.log)` : 'off (/thimble-cc-mod debug on)'}`,
+        `${SCRIPTS.replace(/^the /, '')}: ${(await sandboxPlan($)).line}`,
       ].join('\n'),
     }
   })
@@ -3907,6 +3946,7 @@ function labelSlugOf(name: string): string {
 function harnessCtx($: Dollar): HarnessCtx {
   return {
     ...reportCtx($),
+    boxed: (argv, init) => boxRun($, argv, init),
     session: () => $.session.id().catch(() => ''),
     sleep: ms => $.clock.sleep(ms),
     complete: req => $.model.complete(req),
@@ -4676,7 +4716,7 @@ async function startBuild($: Dollar, slug: string, follow: { gates?: string[]; r
 async function runViewChecks($: Dollar, slug: string): Promise<{ ok: boolean; lines: string[] }> {
   await paths($)
   try {
-    const r = await $.process.run(['python3', `${root}/helper/viewpipe.py`, 'check', slug, '--root', cwd], { cwd, timeoutMs: 600000 })
+    const r = await boxRun($, ['python3', `${root}/helper/viewpipe.py`, 'check', slug, '--root', cwd], { cwd, timeoutMs: 600000 })
     const lines = r.stdout.trim().split('\n').filter(Boolean)
     return { ok: r.exitCode === 0, lines: lines.length ? lines : [`problem: ${clip(r.stderr.trim() || 'the checks printed nothing', 600)}`] }
   } catch (err) {
@@ -5069,7 +5109,7 @@ type FilesAnswer = { ok: boolean; slug?: string; name?: string; error?: string }
 async function filesHelper($: Dollar, args: string[]): Promise<FilesAnswer> {
   await paths($)
   try {
-    const r = await $.process.run(['python3', `${root}/helper/files.py`, ...args, '--root', cwd], { cwd, timeoutMs: 180000 })
+    const r = await boxRun($, ['python3', `${root}/helper/files.py`, ...args, '--root', cwd], { cwd, timeoutMs: 180000 })
     const last = String(r.stdout ?? '').trim().split('\n').at(-1) ?? ''
     try {
       return JSON.parse(last) as FilesAnswer
