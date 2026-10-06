@@ -798,11 +798,21 @@ def _watch_roles(c: str) -> None:
 # ---------------------------------------------------------------------------------------------------- terminal mode
 
 
+def _session_specs(c: str) -> dict[str, dict[str, Any]]:
+    """_specs rendered in the mode of workspace `c`'s session (launch.json's `mode`), whichever process asks: the
+    launcher writes roles.json before main starts, from a folder that is no corpus and with no THIMBLE_WS, where the
+    prompts would otherwise render in browser mode."""
+    from . import prompts  # noqa: PLC0415
+
+    with prompts.rendering(sf.session_mode(config.workspace_dir(c))):
+        return _specs(c)
+
+
 def roles_file(c: str) -> Path:
     """trusted/roles.json of workspace `c` written (module note): `{at, digest, roles}`, the roles GET /api/module/roles
     serves (subagents.roles as `$.agent.register` takes them), from which the module registers thimble's types in
     terminal mode. The launcher writes it, and push_roles and sync_roles write it again. Its path."""
-    specs = _specs(c)
+    specs = _session_specs(c)
     ws = config.workspace_dir(c)
     sf.ensure(ws)
     path = sf.roles_path(ws)
@@ -823,7 +833,7 @@ def _sync_roles_file(c: str) -> bool:
     True when it was written."""
     try:
         held = _read_json(sf.roles_path(config.workspace_dir(c)))
-        if held.get("digest") == _digest(_specs(c)):
+        if held.get("digest") == _digest(_session_specs(c)):
             return False
         roles_file(c)
     except Exception:  # noqa: BLE001

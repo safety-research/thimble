@@ -907,6 +907,22 @@ def test_push_roles_writes_roles_json_in_terminal_mode_and_sync_writes_it_only_w
     assert json.loads(path.read_text())["roles"]["orientation"]["prompt"] == "Orient, edited by hand."
 
 
+def test_roles_json_is_rendered_in_the_sessions_mode_from_any_folder(monkeypatch, tmp_path):
+    """The launcher writes roles.json before main starts, from a folder that is no corpus and with no THIMBLE_WS: the
+    agents' prompts are still rendered in the mode launch.json names (preamble.md's terminal text), and in browser
+    mode in browser mode."""
+    ws = config.workspace_dir(CORPUS)
+    monkeypatch.delenv("THIMBLE_WS", raising=False)
+    monkeypatch.delenv("THIMBLE_MODE", raising=False)
+    monkeypatch.chdir(tmp_path)
+    for mode, has, lacks in (("terminal", "the terminal, where thimble shows", "a browser interface"),
+                             ("browser", "a browser interface", "the terminal, where thimble shows")):
+        write_launch(ws, session=MAIN, mode=mode)
+        roles = json.loads(module_bridge.roles_file(CORPUS).read_text())["roles"]
+        text = json.dumps(roles, ensure_ascii=False)
+        assert roles and has in text and lacks not in text, mode
+
+
 def test_rekey_in_terminal_mode_leaves_the_record_the_hook_wrote(terminal):
     with module_bridge.sf.update(terminal) as state:
         module_bridge.sf.rekey(state, MAIN, NEW)
