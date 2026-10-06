@@ -89,7 +89,11 @@ def test_values_for_takes_the_run_s_arguments_over_settings(models):
     assert subagents.values_for(CORPUS, "orientation", {"model": "sonnet", "effort": "high"}) == \
         {"model": "claude-sonnet-5[1m]", "effort": "high"}
     assert subagents.values_for(CORPUS, "writer", {"effort": "ultracode"})["effort"] == "xhigh"
-    assert subagents.values_for(CORPUS, "writer", {"model": "haiku"})["model"] == "claude-haiku-4-5-20251001"
+    assert subagents.values_for(CORPUS, "writer", {"model": "haiku"}) == {"model": "claude-haiku-4-5-20251001",
+                                                                           "effort": ""}, "Haiku runs at no effort"
+    settings = subagents.values_for(CORPUS, "writer")["effort"]
+    assert subagents.values_for(CORPUS, "writer", {"effort": "turbo"})["effort"] == settings, "not a level: Settings'"
+    assert subagents.values_for(CORPUS, "writer", {"effort": "MAX"})["effort"] == "max"
 
 
 def test_the_work_folders_main_s_bash_may_write():

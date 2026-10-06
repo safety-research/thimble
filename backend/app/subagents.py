@@ -165,17 +165,21 @@ def helper_definition(c: str) -> dict[str, Any]:
 def values_for(c: str, role: str, args: dict[str, Any] | None = None) -> dict[str, str]:
     """{model, effort} of a run of `role`: those its arguments name, else Settings' row for the role
     (config.models_for). A model alias is written as its full id, the orientation's with `[1m]` where the model has
-    the 1M window, as Settings shows it; Ultracode's effort is xhigh (cc_settings.ULTRACODE_EFFORT)."""
-    from . import cc_settings  # noqa: PLC0415
-
+    the 1M window, as Settings shows it; Ultracode's effort is xhigh (config.effort_level). An effort that is none of
+    the levels Claude Code takes is not passed on, since the registration would then carry a value Claude Code does not
+    run at: Settings' effort stands. A model Claude Code runs with no effort (config.has_effort) gets none."""
     args = args or {}
     conf = config.models_for(c)[TYPES[role].row]
     model = config.exact_model(str(args.get("model") or "").strip()) or str(conf.get("model") or "")
     if role == "orientation":
         model = config.long_context(model)
-    effort = str(args.get("effort") or "").strip().lower() or str(conf.get("effort") or "")
-    if effort == cc_settings.ULTRACODE:
-        effort = cc_settings.ULTRACODE_EFFORT
+    asked = str(args.get("effort") or "").strip()
+    effort = config.effort_level(asked) or str(conf.get("effort") or "")
+    if asked and not config.effort_level(asked):
+        log.warning("%s: a run of the %s named the effort %r, which Claude Code does not take; it runs at %s",
+                    c, role, asked, effort)
+    if not config.has_effort(model):
+        effort = ""
     return {"model": model, "effort": effort}
 
 
