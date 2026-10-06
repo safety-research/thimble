@@ -185,7 +185,9 @@ SANDBOX_NO_HOOKS_LINE = ("thimble: WARNING - Claude Code's Bash sandbox is on in
 # In thimble's fence with the plugin's hooks off (main_fence), sandbox.excludedCommands lets out only the skill's own
 # command for these actions, exactly as Claude Code spells it for main's session (sandbox_rules): the plain /thimble and
 # /thimble status. Any other action, or the same command under another session id, stays in the sandbox, so main's Bash
-# cannot run `--action fresh` or `fix` outside it; the command then says what to do instead (fenced_sandbox_line).
+# cannot run `--action fresh` or `fix` outside it; the command then says what to do instead (fenced_sandbox_line). The
+# Monitor route's watcher is let out the same way, only as the command /thimble gives main's Monitor for main's session
+# (watch_rules); with the hooks on nothing is let out.
 SANDBOX_ACTIONS = ("", "status")
 FENCE_ACTION_LINE = ("thimble: Claude Code's hooks are off in this session, so thimble's sandbox lets /thimble reach "
                      "thimble's server only to open the workspace or show its status. To run /thimble {words}, run "
@@ -524,8 +526,20 @@ def fenced_sandbox_line(cwd: Path, action: str, archive: str) -> str:
 
 def watch_rule(root: Path | None = None) -> str:
     """The `sandbox.excludedCommands` entry that runs the Monitor route's watcher of the plugin copy at `root` (by
-    default plugin_root) outside the sandbox."""
+    default plugin_root) outside the sandbox, for a session outside thimble's fence (sandbox_line)."""
     return f"{(root or plugin_root()) / WATCHER} --stream *"
+
+
+def watch_rules(root: Path, cwd: Path, session: str | None) -> list[str]:
+    """The `sandbox.excludedCommands` entries that let out the Monitor route's watcher in thimble's fence: exactly the
+    command /thimble gives main's Monitor for main's session `session` (monitor_lines), with the corpus `cwd` as the
+    launcher names it and as its real path names it, as sandbox_rules does for the skill's command. Any other watcher
+    command, such as one for another folder or session, stays in the sandbox, where it cannot read the server's token.
+    None without a session id."""
+    if not session or not SESSION_ID_RE.fullmatch(session):
+        return []
+    return [shlex.join([str(root / WATCHER), "--stream", "--cwd", f, "--session", session])
+            for f in dict.fromkeys([str(cwd), os.path.realpath(cwd)])]
 
 
 def sandbox_line(cwd: Path) -> str:
@@ -1733,9 +1747,9 @@ def main_fence(cwd: Path, c: str | None = None, root: Path | None = None, sessio
     """The --settings keys that put main, and every subagent it starts, inside thimble's fence for the corpus `cwd`,
     workspace `c` (by default the one `cwd` is registered as), the plugin copy at `root`, main's session `session`
     (module note, main's fence): `sandbox`, `permissions` (userconf.main_rules; no additionalDirectories) and `env`
-    (cc_plugin.FENCE_MARK). With the plugin's hooks off, /thimble's own command for SANDBOX_ACTIONS in that session is
-    let out of the sandbox, and no other (sandbox_rules). {} when fence_off says so. A config with an error fences main
-    with the defaults' rules."""
+    (cc_plugin.FENCE_MARK). With the plugin's hooks off, /thimble's own command for SANDBOX_ACTIONS in that session and
+    the Monitor route's watcher command for it are let out of the sandbox, and no other (sandbox_rules, watch_rules).
+    {} when fence_off says so. A config with an error fences main with the defaults' rules."""
     from . import userconf  # noqa: PLC0415
 
     c = c or config.workspace_for_cwd(str(cwd))
@@ -1747,9 +1761,11 @@ def main_fence(cwd: Path, c: str | None = None, root: Path | None = None, sessio
     ws = config.WORKSPACES_DIR.resolve() / c
     corpus = Path(os.path.realpath(config.corpus_dir(c)))
     root = root or plugin_root()
-    excluded = [watch_rule(root)]  # the Monitor route's watcher must reach the server (spike U15)
+    excluded: list[str] = []
     if cc_plugin.hooks_blocked(cwd, root):
-        excluded += sandbox_rules(root, cwd, session)  # with the hooks off, /thimble's own command starts the server
+        # with the hooks off, the Monitor route's watcher must reach the server (spike U15), and /thimble's own command
+        # starts the server
+        excluded += [*watch_rules(root, cwd, session), *sandbox_rules(root, cwd, session)]
     fs = {"allowWrite": [str(d) for d in write_dirs(c)],
           "denyWrite": [str(corpus), str(userconf.workspace_file(c)), str(ws / "settings.json")],
           "denyRead": [*userconf.private_paths(), str(home() / LINKS_DIR)]}

@@ -62,7 +62,7 @@ def test_the_fence_keeps_the_corpus_read_only_and_lets_main_write_only_the_agent
     assert fs["denyWrite"] == [str(corpus.resolve()), str(ws / "config.json"), str(ws / "settings.json")]
     assert fs["denyRead"] == [*userconf.private_paths(), str(cli.home() / "links")]
     assert "network" not in box, "the orientation's network is on by default"
-    assert box["excludedCommands"] == [cli.watch_rule(cli.plugin_root())], "the Monitor route's watcher (U15)"
+    assert box["excludedCommands"] == [], "with the hooks on, no command runs outside the sandbox"
     assert "additionalDirectories" not in perms
     for p in ("checks/**", "chats/**", "extensions/**", "extension/extension.json", "orient/run.json", "subagents.json",
               "callers.jsonl", "launch.json", "views/**"):
@@ -161,13 +161,15 @@ def test_with_fence_joins_the_analysts_own_settings_but_keeps_the_sandbox_closed
            "sandbox": {"autoAllowBashIfSandboxed": True, "enabled": False, "allowUnsandboxedCommands": True,
                        "filesystem": {"allowWrite": ["/srv/out"]}, "excludedCommands": ["docker *"]},
            "env": {"MINE": "1"}}
-    out = cli.with_fence(own, cli.main_fence(corpus))
+    fence = cli.main_fence(corpus)
+    fence["sandbox"]["excludedCommands"] = ["/p/bin/.thimble-watch --stream --cwd /c --session s"]  # hooks off
+    out = cli.with_fence(own, fence)
     assert out["permissions"]["allow"][0] == "Bash(git status)"
     assert out["permissions"]["ask"][0] == "Bash(git push:*)" and len(out["permissions"]["ask"]) > 1
     assert out["sandbox"]["autoAllowBashIfSandboxed"] is True, "the analyst's own sandbox keys win"
     assert out["sandbox"]["enabled"] is True and out["sandbox"]["allowUnsandboxedCommands"] is False
     assert "/srv/out" in out["sandbox"]["filesystem"]["allowWrite"]
-    assert out["sandbox"]["excludedCommands"][0] == "docker *" and len(out["sandbox"]["excludedCommands"]) == 2
+    assert out["sandbox"]["excludedCommands"] == ["docker *", *fence["sandbox"]["excludedCommands"]]
     assert out["env"]["MINE"] == "1" and out["env"][cc_plugin.FENCE_MARK] == "1"
     assert cli.with_fence(own, {}) is own
     settings = json.loads(cli.launch_settings(corpus, json.dumps(own), cli.main_fence(corpus)))
@@ -370,25 +372,37 @@ def test_with_hooks_off_the_fence_lets_out_only_the_skill_s_own_command_for_main
 
     sid = "0b9d2f3e-1c2d-4e5f-8a9b-0c1d2e3f4a5b"
     root = cli.plugin_root()
-    assert cli.main_fence(corpus, session=sid)["sandbox"]["excludedCommands"] == [cli.watch_rule(root)], "hooks on"
+    assert cli.main_fence(corpus, session=sid)["sandbox"]["excludedCommands"] == [], "hooks on"
     (tmp_path / "cc").mkdir(exist_ok=True)
     (tmp_path / "cc" / "settings.json").write_text(json.dumps({"disableAllHooks": True}))
     excluded = cli.main_fence(corpus, session=sid)["sandbox"]["excludedCommands"]
-    assert excluded == [cli.watch_rule(root), *cli.sandbox_rules(root, corpus, sid)] and len(excluded) == 3
-    assert not any(rule.endswith("server up *") for rule in excluded)
+    assert excluded == [*cli.watch_rules(root, corpus, sid), *cli.sandbox_rules(root, corpus, sid)]
+    assert len(excluded) == 3 and not any(rule.endswith("server up *") or rule.endswith(" *") for rule in excluded)
+    # the Monitor route's watcher: exactly the command /thimble gives main's Monitor for main's session (monitor_lines)
+    monkey = pytest.MonkeyPatch()
+    monkey.setattr(cc_plugin, "route", lambda cwd, root, environ=None: cc_plugin.MONITOR)
+    monkey.setattr(cli, "plugin_root", lambda: root)
+    try:
+        watched = next(ln for ln in cli.monitor_lines(corpus, sid) if ln.startswith(cli.MONITOR_MARK))
+    finally:
+        monkey.undo()
+    assert watched.removeprefix(cli.MONITOR_MARK).strip() == excluded[0]
     _, body = split((root / "skills" / "thimble" / "SKILL.md").read_text("utf-8"))
     command = next(ln[2:].split("`")[0] for ln in body.splitlines() if "server up" in ln and ln.startswith("!`"))
     for action in cli.SANDBOX_ACTIONS:
         ran = (command.replace("${CLAUDE_PLUGIN_ROOT}", str(root)).replace("${CLAUDE_PROJECT_DIR}", str(corpus))
                .replace("${CLAUDE_SESSION_ID}", sid).replace("$action", action).replace("$archive", ""))
         assert ran.endswith(" 2>&1") and ran.removesuffix(" 2>&1") in excluded, ran
-    assert cli.main_fence(corpus)["sandbox"]["excludedCommands"] == [cli.watch_rule(root)], "no session id"
+    assert cli.main_fence(corpus)["sandbox"]["excludedCommands"] == [], "no session id"
     lines = cli.launch_args(corpus).split("\n")
     assert cli.sandbox_rules(root, corpus, lines[6])[0] in json.loads(lines[3])["sandbox"]["excludedCommands"]
     link = tmp_path / "work" / "link"
     link.symlink_to(corpus)
     both = cli.sandbox_rules(root, link, sid)
     assert len(both) == 4 and any(f'--cwd "{link}"' in r for r in both) and any(f'--cwd "{corpus}"' in r for r in both)
+    watch = cli.watch_rules(root, link, sid)
+    assert len(watch) == 2 and any(f"--cwd {link} " in r for r in watch) and any(f"--cwd {corpus} " in r for r in watch)
+    assert cli.watch_rules(root, corpus, None) == [] and cli.watch_rules(root, corpus, "x") == []
     assert cli.sandbox_rules(root, tmp_path / 'say "hi"', sid) == [] and cli.sandbox_rules(root, corpus, "x") == []
 
 
