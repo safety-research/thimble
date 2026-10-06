@@ -1635,8 +1635,11 @@ def _request_of(lv: Live, tool_use_id: str, name: str, inp: dict) -> str | None:
     if hit is not None:
         return hit
     want = str(inp.get(key) or "")
+    # never one another call claimed: a later call with the same text may have claimed it before this pass read the
+    # denied call's result (terminal mode reads in passes)
     found = [rid for rid, r in reqs.items() if isinstance(r, dict) and r.get("kind") == kind and r.get("route") == subagents.TYPED
-             and r.get("state") in ("pending", "claimed") and str((r.get("input") or {}).get(key) or "") == want]
+             and r.get("state") in ("pending", "claimed") and not r.get("claimed_by")
+             and str((r.get("input") or {}).get(key) or "") == want]
     return found[-1] if found else None
 
 
