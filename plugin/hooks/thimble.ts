@@ -10,7 +10,7 @@
 // process on the port can neither hand it requests nor read them, and nothing it does runs outside the sandbox.
 //
 // What it does once the server accepts it:
-// - registers thimble's six roles and thimble:helper from GET /api/module/roles (each with a full model id and an
+// - registers thimble's six roles and thimble:orient-helper from GET /api/module/roles (each with a full model id and an
 //   explicit effort, from Settings); when the server is up at session start this happens inside session.start, so the
 //   types are in main's first agent listing;
 // - asks Claude Code's permission decision for a write it never makes every PLAN_POLL_MS and tells the server when main

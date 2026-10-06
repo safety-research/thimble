@@ -19,7 +19,7 @@ fallbacks, interrupts and long waits (read from `<claude config>/sessions/<pid>.
 Each subagent transcript becomes an agent chat, except `thread:<id>` subagents, which are that thread's fork
 (threads.py), and thimble's own agents (subagents.py): an agent of one of thimble's roles goes to its role's chat (made
 by subagents.ensure_chat from the module's answer, its SubagentStart or its transcript, since a plugin start leaves no
-record in main's transcript), and a descendant of one, a `thimble:helper` among them, is a step of its thimble
+record in main's transcript), and a descendant of one, a `thimble:orient-helper` among them, is a step of its thimble
 ancestor. The ends of their runs come from their hand-back (the SubagentHandback call in the agent's transcript, or the
 hand-back in main's), a task notification, or the hooks' and the module's turn ends (subagents.run_ended, stopped,
 ended); a message from main or the analyst to one that finished starts its next run (subagents.run_again). For a typed

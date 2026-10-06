@@ -1344,7 +1344,7 @@ def agent_definitions(c: str | None) -> dict[str, dict[str, Any]]:
 
 def agent_models(c: str | None) -> dict[str, dict[str, Any]]:
     """The Settings rows of the active extensions' agents, by config key ("<ext>:<name>"): the model and effort each
-    runs at (the config's, else its file's, else thimble:helper's row, `subagents`, so that each names an explicit
+    runs at (the config's, else its file's, else thimble:orient-helper's row, `subagents`, so that each names an explicit
     effort), `fast` False since a subagent has no fast mode of its own, and `extension`."""
     conf = userconf.load_or_defaults(c)[0]
     helper = config.models_for(c)["subagents"]

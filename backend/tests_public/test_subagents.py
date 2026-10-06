@@ -39,7 +39,7 @@ def models(monkeypatch):
 
 def test_each_role_is_registered_with_a_full_model_id_an_explicit_effort_and_a_fixed_description(models, hints):
     roles = subagents.roles(CORPUS)
-    assert {"orientation", "critic", "writer", "helper"} <= set(roles)
+    assert {"orientation", "critic", "writer", "orient-helper"} <= set(roles)
     for name, d in roles.items():
         if name not in subagents.TYPES:
             continue
@@ -48,13 +48,13 @@ def test_each_role_is_registered_with_a_full_model_id_an_explicit_effort_and_a_f
         assert d["prompt"].strip() and isinstance(d.get("description"), str)
         assert "hooks" not in d
     assert roles["orientation"]["model"] == "claude-opus-5-5[1m]" and roles["orientation"]["effort"] == "max"
-    assert roles["helper"]["model"] == "claude-sonnet-5" and roles["helper"]["effort"] == "medium", \
+    assert roles["orient-helper"]["model"] == "claude-sonnet-5" and roles["orient-helper"]["effort"] == "medium", \
         "the helper runs on Settings' orientation-subagents row (Q10)"
     from app import prompts  # noqa: PLC0415
 
-    front, body = prompts.frontmatter("helper")
-    assert roles["helper"]["description"] == front["description"].strip() and roles["helper"]["prompt"] == body.strip(), \
-        "the helper's fixed description and prompt are prompts/helper.md's"
+    front, body = prompts.frontmatter("orient-helper")
+    assert roles["orient-helper"]["description"] == front["description"].strip() and roles["orient-helper"]["prompt"] == body.strip(), \
+        "the helper's fixed description and prompt are prompts/orient-helper.md's"
     assert roles["writer"]["skills"][0] == roles["critic"]["skills"][0] == "thimble:shared"
 
 
@@ -425,10 +425,10 @@ async def test_a_call_runs_as_its_agent_s_key_and_a_descendant_s_as_its_ancestor
     started = await subagents.start_job(CORPUS, "writer", "writer:report", "w", {}, subagents.CLICK)
     ws = config.workspace_dir(CORPUS)
     with subagents.update(CORPUS) as state:
-        sf.registry(state)["helper1"] = {"type": "thimble:helper", "role": "helper", "parent": started.agent_id,
+        sf.registry(state)["helper1"] = {"type": "thimble:orient-helper", "role": "orient-helper", "parent": started.agent_id,
                                          "root": started.agent_id, "status": "running", "descendant": True}
     sf.add_caller(ws, "toolu_w", started.agent_id, "thimble:writer")
-    sf.add_caller(ws, "toolu_h", "helper1", "thimble:helper")
+    sf.add_caller(ws, "toolu_h", "helper1", "thimble:orient-helper")
     who = await subagents.caller(CORPUS, "toolu_w")
     assert who.key == "writer:report" and who.role == "writer"
     helper = await subagents.caller(CORPUS, "toolu_h")

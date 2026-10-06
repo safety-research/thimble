@@ -230,19 +230,19 @@ def test_no_prompt_describes_what_went_with_the_headless_agents():
 def test_main_and_the_orientation_say_how_subagents_end_and_start(monkeypatch):
     """main.md tells main to answer a hand-back of one of thimble's agents in one short line, and to write that line
     for a task notification that follows a report it answered too, since a turn without text makes Claude Code ask
-    again (a turn more); orient.md tells the orientation to start its own subagents as thimble:helper."""
+    again (a turn more); orient.md tells the orientation to start its own subagents as thimble:orient-helper."""
     monkeypatch.delenv("THIMBLE_PROMPTS_DIR", raising=False)
     [line] = [line for line in prompts.load("main").splitlines() if "hands back" in line and "one short line" in line]
     assert "task notification comes after a report" in line and "Always write this line" in line
     assert all(end in line for end in ("finished", "stopped", "failed")), "the line says how the agent ended"
-    assert "thimble:helper" in prompts.load("orient")
+    assert "thimble:orient-helper" in prompts.load("orient")
 
 
 def test_agent_definitions_name_a_fixed_description_and_render_clean(monkeypatch):
     """Each agent file a registered role comes from, and the helper's, names the agent and carries the fixed
     description main's agent list shows, and renders with its own slots and no {{...}} left."""
     monkeypatch.delenv("THIMBLE_PROMPTS_DIR", raising=False)
-    for name in (*prompts.AGENT_FILES, "helper"):
+    for name in (*prompts.AGENT_FILES, "orient-helper"):
         front, _ = prompts.frontmatter(name)
         assert str(front.get("name") or "").strip() and str(front.get("description") or "").strip(), name
         out = prompts.render(name, {s: f"<{s}>" for s in prompts.slots(name)})

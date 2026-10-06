@@ -1,6 +1,6 @@
 """thimble's agents as subagents of the analyst's Claude Code session (main): the orientation, its critic, the writers,
 the view builders and reviewers (dev.py, view_review.py) and the runs of report checks (checks.py). Each is a named subagent with a fresh context, of a type
-thimble's plugin module registers (`thimble:<role>`, roles); the orientation's own subagents run as `thimble:helper`.
+thimble's plugin module registers (`thimble:<role>`, roles); the orientation's own subagents run as `thimble:orient-helper`.
 
 Starts. A click in the browser (Start, Write, Start it, …) starts its agent through the plugin's module, with no turn of
 main: start_job writes the pending request, then asks the module (module_bridge.request) to spawn it, and the module's
@@ -182,11 +182,11 @@ def own_tools(role: str) -> tuple[str, ...] | None:
 
 
 def helper_definition(c: str) -> dict[str, Any]:
-    """thimble:helper, the type of the orientation's own subagents (Q10): general-purpose tools, and the fixed
-    description and short prompt of prompts/helper.md (its frontmatter and body)."""
+    """thimble:orient-helper, the type of the orientation's own subagents (Q10): general-purpose tools, and the fixed
+    description and short prompt of prompts/orient-helper.md (its frontmatter and body)."""
     from . import prompts  # noqa: PLC0415
 
-    front, body = prompts.frontmatter("helper")
+    front, body = prompts.frontmatter(HELPER)
     return {"description": str(front.get("description") or "").strip(), "prompt": body.strip()}
 
 

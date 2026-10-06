@@ -86,6 +86,7 @@ from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel
 
 from . import config
+from .subagent_files import HELPER  # the type of the orientation's own subagents, which gets no note
 
 log = logging.getLogger("thimble.module")
 router = APIRouter()
@@ -1026,7 +1027,7 @@ async def state_route(cwd: str, session: str) -> dict[str, Any]:
     notes = []
     for aid, e in running.items():
         role = _role_of(e.get("type"))
-        if role and role != "helper" and not e.get("parent"):
+        if role and role != HELPER and not e.get("parent"):
             line = _note(role, _what(e), str(e.get("route") or ("click" if e.get("plugin_started") else "typed")))
             line = line.replace(AGENT, aid)
             if line:

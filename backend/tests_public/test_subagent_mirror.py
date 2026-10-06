@@ -499,9 +499,9 @@ async def test_main_s_empty_bash_true_after_a_start_is_no_row(bridge, project):
 async def test_a_descendant_of_the_orientation_is_a_step_of_its_chat_with_numbered_calls(bridge, project, ended):
     lv, chat, path = await _click_orientation(bridge, project)
     with subagents.update(CORPUS) as state:
-        sf.registry(state)["h1"] = {"type": "thimble:helper", "role": "helper", "parent": AGENT, "root": AGENT,
+        sf.registry(state)["h1"] = {"type": "thimble:orient-helper", "role": "orient-helper", "parent": AGENT, "root": AGENT,
                                     "status": "running", "descendant": True}
-    child = _agent_file(project, "h1", agentType="thimble:helper", description="survey the files",
+    child = _agent_file(project, "h1", agentType="thimble:orient-helper", description="survey the files",
                         parentAgentId=AGENT, toolUseId="toolu_h")
     _write(child, _assistant(_use("toolu_hr", "Read", {"file_path": "/c/board.jsonl"})), _result("toolu_hr", "1\tx"))
     session.tail_once(lv)

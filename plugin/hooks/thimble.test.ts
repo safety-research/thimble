@@ -14,10 +14,10 @@ const CWD = '/corpora/wiki'
 const MAIN = '11111111-1111-4111-8111-111111111111'
 const NEW = '22222222-2222-4222-8222-222222222222'
 const OPUS = 'claude-opus-5-5[1m]'
-const ROLE_NAMES = ['orientation', 'critic', 'writer', 'view-builder', 'view-reviewer', 'check', 'helper']
+const ROLE_NAMES = ['orientation', 'critic', 'writer', 'view-builder', 'view-reviewer', 'check', 'orient-helper']
 const ROLES: Json = Object.fromEntries(ROLE_NAMES.map((name, i) => [name, {
   name, description: `thimble's ${name}`, prompt: `You are thimble's ${name}.`, background: true,
-  model: name === 'helper' ? 'claude-sonnet-5-5' : OPUS, effort: name === 'helper' ? 'medium' : ['high', 'xhigh', 'max'][i % 3],
+  model: name === 'orient-helper' ? 'claude-sonnet-5-5' : OPUS, effort: name === 'orient-helper' ? 'medium' : ['high', 'xhigh', 'max'][i % 3],
 }]))
 const NOTE = 'The analyst started the writer {agent} (report) in thimble; leave it unless they ask.'
 
@@ -225,7 +225,7 @@ describe('registration', () => {
     expect(e.$.agent.register).toHaveBeenCalledTimes(7)
     expect(Object.keys(e.now).sort()).toEqual(ROLE_NAMES.map(n => `thimble:${n}`).sort())
     for (const name of ROLE_NAMES) expect(e.now[`thimble:${name}`]).toEqual(ROLES[name])
-    expect(e.now['thimble:helper']).toMatchObject({ model: 'claude-sonnet-5-5', effort: 'medium' }) // Settings' subagents row
+    expect(e.now['thimble:orient-helper']).toMatchObject({ model: 'claude-sonnet-5-5', effort: 'medium' }) // Settings' subagents row
     expect(e.server.hellos[0]).toEqual({ cwd: CWD, session: MAIN, version: '0.6.0', problem: '' })
     expect(e.server.calls.slice(0, 3)).toEqual(['POST /api/module/hello', 'GET /api/module/state', 'GET /api/module/roles'])
   })
@@ -424,7 +424,7 @@ describe('typed starts', () => {
     await e.agentCall({ subagentType: 'thimble:orientation', prompt: 'reqrun00001' }, 'aRun')
     await e.agentCall({ subagentType: 'general-purpose', parentAgentId: 'aRun', prompt: 'look' }, 'aGp')
     await e.agentCall({ subagentType: 'Explore', parentAgentId: 'aGp', prompt: 'look deeper' }, 'aEx')
-    await e.agentCall({ subagentType: 'thimble:helper', parentAgentId: 'aRun', prompt: 'help' }, 'aHelp')
+    await e.agentCall({ subagentType: 'thimble:orient-helper', parentAgentId: 'aRun', prompt: 'help' }, 'aHelp')
     await e.agentCall({ subagentType: 'thimble:critic', parentAgentId: 'aRun', prompt: 'critique' }, 'aCrit')
     await e.agentCall({ subagentType: 'general-purpose', parentAgentId: 'aCrit', prompt: 'check' }, 'aCritKid')
     expect([await e.step('aGp'), await e.step('aEx'), await e.step('aHelp'), await e.step('aCrit'), await e.step('aCritKid')])

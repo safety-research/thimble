@@ -53,10 +53,10 @@ DONE_KEEP_S = 24 * 3600.0  # a request that ended is dropped after this long
 REKEYS_KEPT = 16  # the session moves kept under `module.rekeyed`
 PLUGIN = "thimble"
 PREFIX = f"{PLUGIN}:"
-# thimble's six roles: the agents that have a key, a chat and a run of their own. thimble:helper, and an extension's
+# thimble's six roles: the agents that have a key, a chat and a run of their own. thimble:orient-helper, and an extension's
 # agent registered under the plugin's name, are none of them: any agent may start one (agent_check).
 ROLES = ("orientation", "critic", "writer", "view-builder", "view-reviewer", "check")
-HELPER = "helper"
+HELPER = "orient-helper"
 PLUGIN_CALL = "toolu_plugin_"  # the tool_use_id prefix of a call thimble's module made ($.agent.spawn, $.tool.call)
 AGENT_TOOLS = ("Agent", "Task")
 SEND_TOOL = "SendMessage"
@@ -314,7 +314,7 @@ def check_call(state: dict[str, Any], hook: dict[str, Any]) -> str | None:
     aside, which a model copying the call drops or adds): main's own call a typed one, a plugin start (a
     `toolu_plugin_` id) a click or a follow-on one, and an agent's call (the critic's start) one that names that
     agent's role; the request is then claimed by the call. A second orientation, a second writer of a
-    document, `run_in_background: false`, and every start in plan mode are denied. thimble:helper and any type that is
+    document, `run_in_background: false`, and every start in plan mode are denied. thimble:orient-helper and any type that is
     not one of thimble's roles go on.
 
     SendMessage to a registered agent of a role claims the pending message request with the same text; with none it is
@@ -470,7 +470,7 @@ def register(state: dict[str, Any], hook: dict[str, Any]) -> dict[str, Any] | No
 
 def _inherit(state: dict[str, Any], agent_id: str, entry: dict[str, Any], parent: str) -> None:
     """A descendant takes its thimble ancestor (`root`) and work folder from its parent, and, unless its type is one of
-    thimble's (a role, thimble:helper or an extension's agent, each registered with its own model and effort), the
+    thimble's (a role, thimble:orient-helper or an extension's agent, each registered with its own model and effort), the
     effort recorded for its parent's run (the module's step hook, V7d), as the module's own agent.spawn hook gives it."""
     up = registry(state).get(parent) or {}
     entry["root"] = up.get("root") or (parent if up.get("role") in ROLES else None)

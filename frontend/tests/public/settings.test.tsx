@@ -101,7 +101,7 @@ describe('the popover', () => {
     const roles = [...doc.querySelectorAll('.settings-models .settings-row[data-role]')].map((r) => r.getAttribute('data-role'))
     expect(roles).toEqual(['main', 'orient', 'subagents', 'critic', 'writer', 'dev', 'checks', 'labels', 'verify', 'suggest', 'refusal'])
     expect(doc.querySelector('.settings-row[data-role="checks"] [aria-label="checks effort"]')?.textContent).toBe('none')
-    expect(doc.querySelector('.settings-row[data-role="subagents"] .settings-role-note')?.textContent).toMatch(/thimble:helper/)
+    expect(doc.querySelector('.settings-row[data-role="subagents"] .settings-role-note')?.textContent).toMatch(/thimble:orient-helper/)
     expect(doc.querySelectorAll('.settings-row[data-role="orient"] .fast-bolt')).toHaveLength(0)
     expect(doc.querySelectorAll('.settings-row[data-role="labels"] .fast-bolt')).toHaveLength(1)
     expect(doc.querySelector('.settings-row[data-role="critic"] [role="switch"]')?.getAttribute('aria-checked')).toBe('false')

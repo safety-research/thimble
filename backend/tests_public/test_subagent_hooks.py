@@ -123,9 +123,9 @@ def test_a_helper_or_any_other_type_goes_from_any_agent_and_a_subagent_s_call_is
     state: dict = {}
     sf.registry(state)["orient1"] = {"role": "orientation", "key": "orient", "status": "running"}
     call = {**agent_call("look", call="toolu_n1", caller="orient1"), "tool_input": {
-        "subagent_type": "thimble:helper", "description": "survey", "prompt": "look"}}
+        "subagent_type": "thimble:orient-helper", "description": "survey", "prompt": "look"}}
     assert sf.check_call(state, call) is None
-    assert state["nested"][-1]["caller"] == "orient1" and state["nested"][-1]["subagent_type"] == "thimble:helper"
+    assert state["nested"][-1]["caller"] == "orient1" and state["nested"][-1]["subagent_type"] == "thimble:orient-helper"
     general = {**call, "tool_input": {"subagent_type": "general-purpose", "description": "d", "prompt": "q"}}
     assert sf.check_call(state, general) is None
 
@@ -206,15 +206,15 @@ def test_a_descendant_registers_under_its_parent_and_takes_its_effort_unless_it_
 
 
 def test_a_typed_run_s_helper_child_keeps_the_helper_s_own_effort():
-    """thimble:helper is registered with Settings' "orientation subagents" row, so a typed run's effort is not recorded
+    """thimble:orient-helper is registered with Settings' "orientation subagents" row, so a typed run's effort is not recorded
     for it: the module reads the record again after /clear and /resume, and its step hook would then run the helper at
     the run's effort (live check L34, group c)."""
     state: dict = {}
     sf.registry(state)["o1"] = {"role": "orientation", "key": "orient", "status": "running", "work": "/w/o"}
     sf.efforts(state)["o1"] = "high"
     sf.check_call(state, {**agent_call("h", call="toolu_hh1", caller="o1"),
-                          "tool_input": {"subagent_type": "thimble:helper", "description": "d", "prompt": "h"}})
-    helper = sf.register(state, {"agent_id": "h1", "agent_type": "thimble:helper", "session_id": MAIN_SID})
+                          "tool_input": {"subagent_type": "thimble:orient-helper", "description": "d", "prompt": "h"}})
+    helper = sf.register(state, {"agent_id": "h1", "agent_type": "thimble:orient-helper", "session_id": MAIN_SID})
     assert helper["parent"] == "o1" and helper["role"] == sf.HELPER
     assert "h1" not in sf.efforts(state), "the helper runs on its own registration's effort"
 
@@ -414,10 +414,10 @@ def test_a_descendant_gets_its_scratch_folder_in_its_ancestor_s_work_folder(tmp_
     with sf.update(ws) as state:
         sf.registry(state)["o1"] = {"role": "orientation", "key": "orient", "status": "running", "work": str(work)}
     run_hook(tmp_path, "--agent-check", {**agent_call("x", call="toolu_h9", caller="o1"),
-                                         "tool_input": {"subagent_type": "thimble:helper", "description": "d",
+                                         "tool_input": {"subagent_type": "thimble:orient-helper", "description": "d",
                                                         "prompt": "x"}})
     out = run_hook(tmp_path, "--subagent-start", {"hook_event_name": "SubagentStart", "session_id": MAIN_SID,
-                                                  "agent_id": "h1", "agent_type": "thimble:helper"})
+                                                  "agent_id": "h1", "agent_type": "thimble:orient-helper"})
     assert (work / "tmp_h1").is_dir()
     if out.stdout.strip():  # the line is prompts/tools.md's `## session-scratch`
         assert str(work / "tmp_h1") in json.loads(out.stdout)["hookSpecificOutput"]["additionalContext"]

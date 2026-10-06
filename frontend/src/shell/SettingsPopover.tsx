@@ -1,7 +1,7 @@
 // The settings gear's popover. First one table, a row per role with exactly the model and effort that runs: main, whose
 // model is read-only (only /model in the terminal changes it) and whose effort and fast mode are kept for its next
 // launch (PUT session/effort and session/fast); thimble's agents (the orientation, the orientation's subagents run as
-// thimble:helper, the critic, the writers, the dev agent of view builds, reviews and code tickets, the report checks),
+// thimble:orient-helper, the critic, the writers, the dev agent of view builds, reviews and code tickets, the report checks),
 // with a "web" switch that keeps an agent off WebFetch and WebSearch, and on the dev row a fast switch for code tickets
 // alone (backend config.FAST_OF_TICKETS); the classifiers (labels, the card check, the viewer suggestion), the only
 // other rows with fast mode; and the row a classifier's call runs again on when its model
@@ -207,7 +207,7 @@ export const ROLE_LABEL: Record<string, string> = {
 }
 /** A row's note under its name: what it covers, where its id does not say. */
 export const ROLE_NOTE: Record<string, string> = {
-  subagents: "for subagents the orientation starts as thimble:helper; others run on the orientation's own model and effort",
+  subagents: "for subagents the orientation starts as thimble:orient-helper; others run on the orientation's own model and effort",
   dev: 'view builds, view reviews and code tickets',
   refusal: "if a classifier's model refuses: run again on this, or switch it off",
 }

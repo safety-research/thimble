@@ -873,7 +873,7 @@ def safe_corpus_path(corpus: Path, rel: str) -> Path:
 # (userconf: `agents.<agent>.model` and `effort`, and `fast` for a classifier; userconf.ROLES naming each agent's role),
 # applied to the next start:
 #   orient     the orientation, a subagent of main (thimble:orientation)
-#   subagents  the orientation's own subagents, which it starts as thimble:helper; by default the orientation's model
+#   subagents  the orientation's own subagents, which it starts as thimble:orient-helper; by default the orientation's model
 #              without the 1M tag, at its effort
 #   critic     the critic, a subagent of the orientation (thimble:critic)
 #   writer     a writer, a subagent of main (thimble:writer)
@@ -1038,7 +1038,7 @@ def _env_role(role: str, base: dict[str, Any]) -> dict[str, Any]:
 
 def _configured(c: str | None) -> dict[str, dict[str, Any]]:
     """{role: {model, effort, fast, off}} as thimble's config sets them for workspace `c`, each field it leaves unset
-    left out; thimble:helper's model and effort (the orientation's subagentModel and subagentEffort) under `subagents`. A
+    left out; thimble:orient-helper's model and effort (the orientation's subagentModel and subagentEffort) under `subagents`. A
     config with an error sets none (userconf.load_or_defaults)."""
     from . import userconf  # noqa: PLC0415 — userconf imports this module
 
@@ -1063,7 +1063,7 @@ def chosen(c: str | None, role: str) -> set[str]:
 
 def models_for(c: str | None = None) -> dict[str, dict[str, Any]]:
     """{role: {model, effort, fast}} for a workspace, every role of MODEL_ROLES: its default under the environment under
-    thimble's config, with a full model id and an explicit effort, never '' (module note above): thimble:helper's
+    thimble's config, with a full model id and an explicit effort, never '' (module note above): thimble:orient-helper's
     (`subagents`) take the orientation's where nothing sets them, with `follows: orient`, and a stored LEGACY_EFFORTS
     value its level. The `refusal` row adds `off`. The orientation's default reads the analyst's settings for the folder
     of `c` when it is given."""

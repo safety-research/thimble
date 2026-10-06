@@ -101,7 +101,7 @@ async def _call(tool: str, args: dict, agent: str, key: str, n: list[int] = [0])
     n[0] += 1
     tid = f"toolu_t{n[0]:06d}"
     a = subagents.agent(CORPUS, agent) or {}
-    sf.add_caller(config.workspace_dir(CORPUS), tid, agent, str(a.get("type") or "thimble:helper"))
+    sf.add_caller(config.workspace_dir(CORPUS), tid, agent, str(a.get("type") or "thimble:orient-helper"))
     return await tools.call(CORPUS, tool, args, session=key, tool_use_id=tid)
 
 
@@ -840,7 +840,7 @@ def test_the_module_registers_the_three_job_roles_on_their_settings_rows(board):
     on its checks row, each with an explicit effort, a fixed description, and the thimble tools that are not its own
     taken away."""
     roles = subagents.roles(CORPUS)
-    assert {"orientation", "critic", "writer", "view-builder", "view-reviewer", "check", "helper"} <= set(roles)
+    assert {"orientation", "critic", "writer", "view-builder", "view-reviewer", "check", "orient-helper"} <= set(roles)
     own = {"view-builder": view_tools.BUILDER_TOOLS, "view-reviewer": view_tools.REVIEWER_TOOLS,
            "check": ("read_ref", "list_cards", "add_comment")}
     for role, mine in own.items():
