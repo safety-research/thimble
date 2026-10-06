@@ -801,7 +801,7 @@ def read_module(ws: Path) -> dict[str, Any]:
         except OSError:
             return {}
         try:
-            d = json.loads(raw.decode("utf-8") or "{}")
+            d = json.loads(raw.decode("utf-8"))  # an empty file is a write that has only just begun
             return d if isinstance(d, dict) else {}
         except (UnicodeDecodeError, ValueError):
             if i + 1 < MODULE_READS:

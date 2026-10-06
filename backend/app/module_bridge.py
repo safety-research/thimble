@@ -60,6 +60,25 @@ a click's agent runs on the registration in force when it starts, and while a lo
 once a file changed, so that the registration is new before main's next turn, whose own Agent calls ignore a
 registration made during the turn.
 
+Terminal mode (the session launch.json names runs in terminal mode: transport is "file") has no server and no HTTP.
+The module takes the same requests from the workspace's subagents.json and writes everything it says to module.json,
+both in the trusted folder (subagent_files.py):
+    roles       trusted/roles.json {at, digest, roles}: the roles GET /api/module/roles would serve (roles_file, which
+                the launcher writes and push_roles and sync_roles write again); the module registers them again when
+                the file changes
+    requests    entries of subagents.json's `requests` of kind `module`, {op, args, module: pending, session,
+                asked_at, expires_at} (subagent_files.add_module_request): the module takes those of main's session
+                that are pending and not past `expires_at`, one at a time in the order they were asked
+    module.json {session, version, load, beat, plan, plan_at, problem, taken: [id], answers: {id: Answer}, ended:
+                [{n, agentId, answer, reason, refusal?, at}], gone}, times in milliseconds: its heartbeat every
+                FILE_BEAT_MS (live while the last is under FILE_LIVE_S old and its session is main's), its answers, the
+                ends of the runs it started (new_ended hands each to the end rules once, by `load` and `n`), and main's
+                plan mode as its poll saw it
+request() writes the entry and reads module.json for the answer, up to REQUEST_TIMEOUT_S; an entry that expires is
+marked so (the module no longer takes it), and a late answer of a spawn gets its agent stopped (reconcile). Only
+processes outside main's sandbox ask (the MCP shim, the hooks' backend calls, the renderer's acts), since main's Bash
+cannot write the trusted folder.
+
 The browser reads main's state from main's meta (main_meta, which agents.py's main routes add): whether main runs inside
 thimble's fence, whether the launcher started it, and whether the module is live, with why_not when it is not. Each
 time the module goes live or stops being live, main's chat is notified, so an open page reads it again (_show).
@@ -86,6 +105,7 @@ from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel
 
 from . import config
+from . import subagent_files as sf
 from .subagent_files import HELPER  # the type of the orientation's own subagents, which gets no note
 
 log = logging.getLogger("thimble.module")
@@ -104,14 +124,13 @@ ANSWER_KEYS = ("agentId", "deny", "limit", "error", "ok")
 NO_MODULE = "no-module"
 REGISTRY = "trusted/subagents.json"  # lane B's record of thimble's agents, in the workspace (module note; subagent_files)
 LAUNCH = "trusted/launch.json"  # written by `thimble launch-args` (lane A): {session, at, fenced, switches, unset, pid}
-NOTE_HINT = "module-started-note"  # prompts/tools.md: {role}, {agent}, {what}
+NOTE_HINT = sf.NOTE_HINT  # prompts/tools.md: {role}, {agent}, {what}, {how}
 AGENT = "{agent}"  # left in a note for the module to fill with the agent id it got
-WHAT_CHARS = 120
-WHAT_ORIENTATION = "this corpus"  # module-started-note's {what} for an agent whose key has no name (the orientation)
-# module-started-note's {how}, by the route of the agent's start: the analyst's click, the next step of a run they asked
-# for (a writer after the orientation, a view build it proposed), or main's own Agent call for a typed request
-HOW = {"click": "in the browser", "follow-on": "as the next step of a run they asked for in thimble",
-       "typed": "through your own Agent call"}
+HOW = sf.HOW  # module-started-note's {how}, by the route of the agent's start
+HTTP, FILE = "http", "file"  # transport(): the server's routes (browser mode), or the trusted folder (terminal mode)
+FILE_BEAT_MS = 2000  # the module's heartbeat in terminal mode (thimble.ts)
+FILE_LIVE_S = 6.0  # a heartbeat younger than this is a live module
+FILE_POLL_S = 0.05  # how often a request in terminal mode reads module.json for its answer
 NO_MODULE_ENV = "THIMBLE_NO_MODULE"
 NOT_LOADED = "Claude Code did not load thimble's hooks module"
 NOT_ANSWERING = "Your Claude Code session's thimble module did not answer"
@@ -258,10 +277,16 @@ def _bridge(c: str) -> _Bridge:
     return b
 
 
+def _moves(c: str) -> dict[str, str]:
+    """The moves of main's session rekey recorded: this server's, or in terminal mode, where other processes record them,
+    subagents.json's as it is now."""
+    return sf.moves(registry(c)) if transport(c) == FILE else _bridge(c).rekeyed
+
+
 def launch_session(c: str) -> str:
     """The session launch.json names, followed through every move rekey recorded; '' when it names none."""
     sid = str(_launch(c).get("session") or "")
-    moved, seen = _bridge(c).rekeyed, set()
+    moved, seen = _moves(c), set()
     while sid and sid in moved and sid not in seen:
         seen.add(sid)
         sid = moved[sid]
@@ -272,7 +297,7 @@ def main_session(c: str) -> str:
     """Main's session in workspace `c`: launch.json's, or while launch.json names none the session /thimble made main
     (session.current), followed through every move rekey recorded; '' for none yet."""
     sid = str(_launch(c).get("session") or "")
-    if not sid:
+    if not sid and transport(c) == HTTP:
         from . import session  # noqa: PLC0415
 
         lv = session.current(c)
@@ -283,7 +308,7 @@ def main_session(c: str) -> str:
 def moved_to(c: str, sid: str) -> str:
     """Session `sid` followed through every move rekey recorded (a /clear or an in-session /resume of main): the id the
     same `claude` process runs under now."""
-    moved, seen = _bridge(c).rekeyed, set()
+    moved, seen = _moves(c), set()
     while sid in moved and sid not in seen:
         seen.add(sid)
         sid = moved[sid]
@@ -405,8 +430,37 @@ def _remember_loop() -> None:
 
 # ---------------------------------------------------------------------------------------------------- the contract
 
+def transport(c: str) -> str:
+    """How the module of workspace `c` is reached (module note): FILE when the session launch.json names runs in terminal
+    mode, else HTTP."""
+    try:
+        return FILE if sf.terminal(_ws(c)) else HTTP
+    except ValueError:
+        return HTTP
+
+
+def read_out(c: str) -> dict[str, Any]:
+    """module.json of workspace `c` (module note): what the module wrote in terminal mode; {} when there is none."""
+    try:
+        return sf.read_module(_ws(c))
+    except ValueError:
+        return {}
+
+
+def _file_live(c: str, out: dict[str, Any] | None = None) -> bool:
+    out = read_out(c) if out is None else out
+    beat = out.get("beat")
+    if out.get("gone") or isinstance(beat, bool) or not isinstance(beat, (int, float)):
+        return False
+    main = main_session(c)
+    return bool(main) and out.get("session") == main and time.time() - float(beat) / 1000 < FILE_LIVE_S
+
+
 def live(c: str) -> bool:
-    """Whether a module holds the long poll for main's session in workspace `c` (module note)."""
+    """Whether a module holds the long poll for main's session in workspace `c` (module note); in terminal mode, whether
+    main's module wrote its heartbeat lately."""
+    if transport(c) == FILE:
+        return _file_live(c)
     b = _bridges.get(c)
     if b is None or not _accepted(c, b.session):
         return False
@@ -419,13 +473,15 @@ def why_not(c: str) -> str:
     the module (or that it stopped polling)."""
     if live(c):
         return ""
+    file = transport(c) == FILE
     b = _bridges.get(c) or _Bridge()
     rec = registry(c).get("module") or {}
-    idle = b.idle or (str(rec.get("idle") or "") if isinstance(rec, dict) else "")
+    idle = "" if file else b.idle or (str(rec.get("idle") or "") if isinstance(rec, dict) else "")
     if idle:
         return idle
-    if b.problem:
-        return b.problem
+    out = read_out(c) if file else {}
+    if b.problem or out.get("problem"):
+        return str(b.problem or out.get("problem"))
     launch = _launch(c)
     switches = launch.get("switches")
     if isinstance(switches, (list, dict)) and NO_MODULE_ENV in switches:
@@ -438,6 +494,10 @@ def why_not(c: str) -> str:
     for key in ("disableAllHooks", "allowManagedHooksOnly"):
         if tier.get(key) is True:
             return f"your organization's managed settings set {key}"
+    if file and out:
+        if out.get("session") != main_session(c):
+            return NOT_MAIN
+        return f"{NOT_ANSWERING}; " + ("its session ended" if out.get("gone") else "it stopped writing its heartbeat")
     if b.session and b.hello_at:
         return f"{NOT_ANSWERING}; it stopped polling"
     return NOT_LOADED
@@ -496,8 +556,9 @@ def on_ended(fn: Callable[[str, str, str, str], None]) -> None:
 
 def rekey(c: str, old: str, new: str) -> None:
     """Main moved from session `old` to `new` (/clear or an in-session /resume; lane B's `--rekey` calls this). A hello
-    from `new` waiting for it is accepted, whichever came first."""
-    if not (old and new) or old == new:
+    from `new` waiting for it is accepted, whichever came first. In terminal mode the --rekey hook recorded the move in
+    subagents.json itself, which the module and every reader take from there."""
+    if not (old and new) or old == new or transport(c) == FILE:
         return
     b = _bridge(c)
     b.rekeyed.pop(new, None)  # a move back (/resume to the session before) ends the chain at `new`
@@ -514,8 +575,7 @@ def _note(role: str, what: str, route: str = "click") -> str:
     {what})."""
     from . import tools  # noqa: PLC0415
 
-    clean = re.sub(r"[\x00-\x1f\x7f<>]+", " ", str(what or "")).strip()[:WHAT_CHARS] or WHAT_ORIENTATION
-    return tools.hint(NOTE_HINT, role=role, agent=AGENT, what=clean, how=HOW.get(route) or HOW["click"])
+    return tools.hint(NOTE_HINT, role=role, agent=AGENT, what=sf.note_what(what), how=HOW.get(route) or HOW["click"])
 
 
 def _answer(op: str, raw: Any) -> Answer:
@@ -570,6 +630,8 @@ async def request(c: str, op: str, **args: Any) -> Answer:
     its answer. Never raises for the module's sake: no module, a refusal and a timeout are answers."""
     if op not in OPS:
         raise ValueError(f"unknown module op {op!r}")
+    if transport(c) == FILE:
+        return await _file_request(c, op, args)
     _remember_loop()
     if not live(c):
         return {NO_MODULE: why_not(c) or NOT_LOADED}
@@ -595,6 +657,8 @@ def request_blocking(c: str, op: str, **args: Any) -> Answer:
         running = None
     if running is not None:
         raise RuntimeError("module_bridge.request_blocking was called on the event loop; await request() there")
+    if transport(c) == FILE:
+        return asyncio.run(request(c, op, **args))
     if loop is None or not loop.is_running():
         return {NO_MODULE: why_not(c) or NOT_LOADED}
     return asyncio.run_coroutine_threadsafe(request(c, op, **args), loop).result(REQUEST_TIMEOUT_S + 5)
@@ -614,7 +678,14 @@ def _expire(c: str, req: _Request) -> None:
 
 def push_roles(c: str) -> None:
     """Have the module register every role again (Settings, the orientation instructions or the active extensions
-    changed). Returns at once, from any thread; nothing when no module is live or one such request already waits."""
+    changed). Returns at once, from any thread; nothing when no module is live or one such request already waits. In
+    terminal mode roles.json is written again (roles_file), which the module registers again from."""
+    if transport(c) == FILE:
+        try:
+            roles_file(c)
+        except Exception:  # noqa: BLE001 — the registration stays as it is
+            log.warning("the roles of %s were not written for the module", c, exc_info=True)
+        return
 
     def push() -> None:
         if not live(c):
@@ -683,6 +754,8 @@ async def sync_roles(c: str, force: bool = False) -> bool:
     look. Nothing while no server served the module its roles (the record keeps the digest across a restart of the
     server, _save). True when it asked. Never raises: a roles file that cannot be read leaves the registration as it
     is."""
+    if transport(c) == FILE:
+        return await asyncio.to_thread(_sync_roles_file, c)
     b = _bridges.get(c)
     if b is None or not live(c):
         return False
@@ -720,6 +793,135 @@ def _watch_roles(c: str) -> None:
             b.checking = False
 
     asyncio.get_running_loop().create_task(look(), name=f"module-roles-{c}")
+
+
+# ---------------------------------------------------------------------------------------------------- terminal mode
+
+
+def roles_file(c: str) -> Path:
+    """trusted/roles.json of workspace `c` written (module note): `{at, digest, roles}`, the roles GET /api/module/roles
+    serves (subagents.roles as `$.agent.register` takes them), from which the module registers thimble's types in
+    terminal mode. The launcher writes it, and push_roles and sync_roles write it again. Its path."""
+    specs = _specs(c)
+    ws = config.workspace_dir(c)
+    sf.ensure(ws)
+    path = sf.roles_path(ws)
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.{secrets.token_hex(3)}.tmp")
+    try:
+        tmp.write_text(json.dumps({"at": _now(), "digest": _digest(specs), "roles": specs}, indent=1,
+                                  ensure_ascii=False, default=str), "utf-8")
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, path)
+    finally:
+        with contextlib.suppress(OSError):
+            tmp.unlink()
+    return path
+
+
+def _sync_roles_file(c: str) -> bool:
+    """sync_roles in terminal mode: roles.json written again when the roles rendered now differ from those it holds.
+    True when it was written."""
+    try:
+        held = _read_json(sf.roles_path(config.workspace_dir(c)))
+        if held.get("digest") == _digest(_specs(c)):
+            return False
+        roles_file(c)
+    except Exception:  # noqa: BLE001
+        log.warning("the roles of %s could not be compared with roles.json", c, exc_info=True)
+        return False
+    log.info("the roles of %s changed since roles.json was written; written again", c)
+    return True
+
+
+async def _file_request(c: str, op: str, args: dict[str, Any]) -> Answer:
+    """request() in terminal mode (module note): the entry in subagents.json, then module.json read for its answer up to
+    REQUEST_TIMEOUT_S; past it the entry expires and the answer is `no-module`, `expired`."""
+    if not _file_live(c):
+        return {NO_MODULE: why_not(c) or NOT_LOADED}
+    if op == "spawn":
+        await asyncio.to_thread(_sync_roles_file, c)  # registered as the files say now, before the agent starts
+    ws = config.workspace_dir(c)
+    wire = _args(op, args)
+    with _file_lock, sf.update(ws) as state:
+        rid = sf.add_module_request(state, op, wire, sf.main_session(ws, state), REQUEST_TIMEOUT_S,
+                                    of=str(args.get("request") or "") or None)
+    deadline = time.monotonic() + REQUEST_TIMEOUT_S
+    path, seen = sf.module_path(ws), None
+    while True:
+        try:
+            st = path.stat()
+            stamp = (st.st_mtime_ns, st.st_size)
+        except OSError:
+            stamp = None
+        if stamp is not None and stamp != seen:
+            seen = stamp
+            got = (sf.read_module(ws).get("answers") or {}).get(rid)
+            if isinstance(got, dict):
+                with _file_lock, sf.update(ws) as state:
+                    sf.end_module_request(state, rid, "answered")
+                return _answer(op, got)
+        if time.monotonic() >= deadline:
+            break
+        await asyncio.sleep(FILE_POLL_S)
+    with _file_lock, sf.update(ws) as state:
+        sf.end_module_request(state, rid, "expired")
+    log.warning("%s: the module did not answer %s request %s in time", c, op, rid)
+    return {NO_MODULE: NOT_ANSWERING, "expired": True}
+
+
+def reconcile(c: str) -> list[str]:
+    """Terminal mode: a spawn whose request expired but which the module answered late with an agent gets that agent
+    stopped (a stop request nobody waits for), since its caller was told it did not start, as result_route does in
+    browser mode. The agents stopped."""
+    if transport(c) != FILE:
+        return []
+    ws = config.workspace_dir(c)
+    answers = sf.read_module(ws).get("answers") or {}
+    out: list[str] = []
+    with _file_lock, sf.update(ws) as state:
+        reqs = sf.requests(state)
+        for rid, r in list(reqs.items()):
+            if not (isinstance(r, dict) and r.get("kind") == sf.MODULE_KIND and r.get("op") == "spawn"
+                    and r.get("module") == "expired" and not r.get("late_stopped")):
+                continue
+            agent = (answers.get(rid) or {}).get("agentId") if isinstance(answers.get(rid), dict) else None
+            if isinstance(agent, str) and agent:
+                log.warning("the module started %s for an expired request %s; stopping it", agent, rid)
+                r["late_stopped"] = agent
+                sf.add_module_request(state, "stop", {"agent": agent}, sf.main_session(ws, state), None)
+                out.append(agent)
+    return out
+
+
+def new_ended(c: str) -> list[dict[str, Any]]:
+    """Terminal mode: the ends of runs of the agents the module started that module.json holds and no caller took yet
+    ({agentId, answer, reason, refusal?}), now taken: each is handed out once, by the module's load and its `n`, kept
+    under subagents.json's `module.ended_seen`. A refusal that wrote no text has what the API said of it as its answer
+    (refusal_text)."""
+    if transport(c) != FILE:
+        return []
+    ws = config.workspace_dir(c)
+    out = sf.read_module(ws)
+    load = str(out.get("load") or "")
+    ended = [e for e in out.get("ended") or [] if isinstance(e, dict) and isinstance(e.get("n"), int)]
+    if not ended:
+        return []
+    got: list[dict[str, Any]] = []
+    with _file_lock, sf.update(ws) as state:
+        mod = state.get("module") if isinstance(state.get("module"), dict) else {}
+        seen = mod.get("ended_seen") if isinstance(mod.get("ended_seen"), dict) else {}
+        last = int(seen.get("n") or 0) if seen.get("load") == load else 0
+        for e in sorted(ended, key=lambda x: x["n"]):
+            if e["n"] <= last:
+                continue
+            answer = str(e.get("answer") or "")
+            if e.get("reason") == "refusal" and not answer.strip() and isinstance(e.get("refusal"), dict):
+                answer = refusal_text(e["refusal"])
+            got.append({"agentId": str(e.get("agentId") or ""), "answer": answer, "reason": str(e.get("reason") or "")})
+            last = e["n"]
+        if got:
+            state["module"] = {**mod, "ended_seen": {"load": load, "n": last}}
+    return got
 
 
 def _take(c: str, session: str) -> _Request | None:
@@ -967,10 +1169,8 @@ def _running(entry: dict[str, Any]) -> bool:
 
 
 def _what(entry: dict[str, Any]) -> str:
-    """The server-checked name an agent's note gives: the part of its key after the role (a document, a view's slug,
-    a check and its document), worded as the note at its start words it (subagents._what: `unverified on report`)."""
-    key = str(entry.get("key") or "")
-    return key.split(":", 1)[1].replace(":", " on ") if ":" in key else ""
+    """The server-checked name an agent's note gives (subagent_files.key_what)."""
+    return sf.key_what(entry.get("key"))
 
 
 def _efforts(reg: dict[str, Any], agents: dict[str, dict[str, Any]]) -> dict[str, Any]:
