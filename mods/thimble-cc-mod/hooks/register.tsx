@@ -72,12 +72,12 @@ import type { ChatViewPipeRow } from '../types'
 import { FILES_TREE, fileRef, recordState } from './files'
 // the panel's way: its breadcrumb, back and the threads tree (hooks/nav.ts)
 import { NAV_EMPTY, activity, afterGlyph, answered, backTarget, crumbSteps, fitCrumbs, moved, nextTrail, threadBehind, threadOnTrail, threadState, threadTitle, threadTree, unread, withBack } from './nav'
-import type { ChatCoverageCheck, ChatNav, ChatNavStep, ChatNews, ChatSignal } from '../types'
+import type { ChatNav, ChatNavStep, ChatNews, ChatSignal } from '../types'
 // a side thread's answer the analyst did not see come: its row in main's chat, its unread marks (hooks/signal.ts)
 import { SIGNALS_EMPTY, isAnchor, newsOf, parseSignals, signalEnd, signalQuestion, signalRead, signalsJson, withSignal } from './signal'
 import type { SignalFile } from './signal'
 // the harness: coverage, labels, the orientation (hooks/harness.tsx)
-import { LABEL_DESCRIPTION, LABEL_SCHEMA, LABEL_TOOL, ORIENT_DESCRIPTION, ORIENT_SCHEMA, ORIENT_TOOL, coverageAfterTurn, coverageAppend, coverageCommand, coverageContext, coverageDetail, coverageLast, coverageRow, drawCoverage, drawLabel, drawLabels, isOrient, labelCommand, labelTool, labelToolLine, labelVerdict, labelsCommand, openLabel, orientCommand, orientEnded, orientNote, orientTool, orientToolLine } from './harness'
+import { LABEL_DESCRIPTION, LABEL_SCHEMA, LABEL_TOOL, ORIENT_DESCRIPTION, ORIENT_SCHEMA, ORIENT_TOOL, checkNote, coverageAfterTurn, coverageAppend, coverageCommand, coverageContext, coverageDetail, coverageLast, coverageRow, drawCoverage, drawLabel, drawLabels, isOrient, labelCommand, labelTool, labelToolLine, labelVerdict, labelsCommand, openLabel, orientCommand, orientEnded, orientTool, orientToolLine } from './harness'
 import type { HarnessCtx } from './harness'
 import { SCRIPTS, boxedArgv, noPlan, parsePlan, unboxedNotice } from './sandbox'
 import type { SandboxPlan } from './sandbox'
@@ -515,7 +515,7 @@ async function subAnswered($: Dollar, id: string, a: ChatAgent, reason: string, 
   handbacks.delete(id)
   if (a.kind === 'fix') return fixComplete($, a, reason, answer)
   if (a.kind === 'verify') return verifyComplete($, a, answer)
-  // a report's writer, verifier or highlighter; an orientation is a writer that may get a second round first
+  // a report's writer, verifier or highlighter; an orientation is a writer whose critique round may come first
   if ((await isOrient(harnessCtx($), id)) && (await orientEnded(harnessCtx($), id, reason))) return
   if (a.kind.startsWith('report')) return reportAgentDone(reportCtx($), a, reason, answer)
   const said = await threadComplete($, cwd, id, reason, answer)
@@ -3132,7 +3132,7 @@ export const register: Register = on => {
     await $.command.register({ name: 'thimble-coverage', description: 'What this session has read of the files here: each file, the lines read, and what was never opened', immediate: true })
     // the orientation and labels: one interface for the analyst (these commands) and main (the orient and label tools), hooks/commands.ts
     await $.tool.register({ name: 'orient', description: ORIENT_DESCRIPTION, inputSchema: ORIENT_SCHEMA }).catch((err: unknown) => $.ui.log(`thimble-cc-mod: could not offer the orient tool: ${String(err).slice(0, 160)}`))
-    await $.command.register({ name: 'thimble-orient', description: 'Orient: a subagent surveys every file and writes a short document in the panel, with a deck of cards, views, a critique and a report unless turned off', argumentHint: '[focus] [--no-deck] [--no-views] [--no-critique] [--no-report]', immediate: true })
+    await $.command.register({ name: 'thimble-orient', description: 'Orient: a subagent surveys every file and writes a short document in the panel, with a deck of cards, views and a report unless turned off, and a critique when turned on', argumentHint: '[focus] [--no-deck] [--no-views] [--critique] [--no-report]', immediate: true })
     await $.command.register({ name: 'thimble-label', description: 'Define and apply a label, or list the labels or open one', argumentHint: '[list | open <name> | <name> kind= definition= paths= values= limit=]', immediate: true })
     await $.command.register({ name: 'thimble-home', description: 'Everything made in this folder in one panel: views, reports, side threads, cards, labels and files', argumentHint: '[stacked|index]', immediate: true })
     // a resumed session: the band lists the last reply's citations
@@ -3199,10 +3199,6 @@ export const register: Register = on => {
     const from = handbackFrom(e.origin, e.text)
     const sender = from ? ((await agentOf($, from)) ?? viewAgentOf(from)) : undefined
     await logEvent($, { event: 'prompt', origin: e.origin.kind, from: from ?? '', mine: String(Boolean(sender)), during: e.turnId ?? '', text: clip(e.text, 160) })
-    // the hand-back of the subagent that carries the coverage check (sendCheck): the check goes with it as context
-    const check = from ? await checkFor($, from, e.text) : undefined
-    if (check === null) return { drop: 'thimble-cc-mod: coverage check · already sent' }
-    if (check && !e.turnId) checkTurn = check.prompt
     if (from && sender) {
       handbacks.set(from, handbackReport(e.text))
       return { drop: `thimble-cc-mod: ${sender.label} · reported` }
@@ -3224,15 +3220,13 @@ export const register: Register = on => {
     const waiting = await takeNotes($)
     // what this session has read of the corpus (harness.tsx), so main knows what it has not opened
     const coverageLine = from || e.origin.kind === 'task-notification' ? '' : (await coverageContext(harnessCtx($))).replace('{{helper}}', `${root}/helper`)
-    const context = [...(e.context ?? []), ...(guideNow ? [g] : []), ...waiting, ...(coverageLine ? [coverageLine] : []), ...(check ? [check.text] : [])]
+    const context = [...(e.context ?? []), ...(guideNow ? [g] : []), ...waiting, ...(coverageLine ? [coverageLine] : [])]
     const r = await next(context.length === (e.context ?? []).length ? e : { ...e, context })
-    // a prompt dropped beneath leaves its notes, and the check it carried, for the next one
-    const left = [...waiting, ...(check ? [check.text] : [])]
-    if (r.drop !== undefined && left.length) {
-      notes = [...left, ...notes]
+    // a prompt dropped beneath leaves its notes for the next one
+    if (r.drop !== undefined && waiting.length) {
+      notes = [...waiting, ...notes]
       await saveNotes($)
     }
-    if (r.drop !== undefined) checkTurn = null
     return r
   })
 
@@ -3271,10 +3265,7 @@ export const register: Register = on => {
   on('turn.start', async ($, e, next) => {
     mainBusy = true
     turnParts = [{ rows: [] }]
-    // the turn that answers the coverage check revises the answer to the analyst's question: its answer is filed under
-    // that question
-    turnPrompt = checkTurn ?? e.text
-    checkTurn = null
+    turnPrompt = e.text
     return next(e)
   })
 
@@ -3326,8 +3317,6 @@ export const register: Register = on => {
     }
     // a Bash output of a subagent of the mod is saved and noted as main's is (tool.call does not reach a fork's tools)
     if (e.agentId !== undefined && Array.isArray(msg.content)) msg = await subagentCalls($, e.agentId, e.door, msg)
-    // an orientation's tool results carry what it has not opened yet (harness.tsx)
-    if (e.agentId !== undefined && e.door === 'tool-result') msg = await orientNote(harnessCtx($), e.agentId, e.door, msg)
     // the latest row of main's chat a side thread's answer can be told under (hooks/signal.ts), by the id it is stored
     // under
     if (e.agentId === undefined && isAnchor(e)) await anchorAt($, e.uuid)
@@ -3407,11 +3396,16 @@ export const register: Register = on => {
     // a card that cannot be drawn or a citation that fails goes to a fix round, out of main's chat
     if (text.trim() && !fromMod(turnPrompt)) await startFix($, text, rows, lastRow, end)
     await mainEnded($)
-    // an answer that speaks for the whole corpus while a kind of file was never opened: main is sent what it missed,
-    // out of its chat but for one dim line (sendCheck)
-    if (!fromMod(turnPrompt) && !e.isAborted) {
+    // an answer that speaks for the whole corpus while a kind of file was never opened: the check shows under the
+    // answer, and main reads the same words with the analyst's next prompt. Main starts no turn for it.
+    if (!fromMod(turnPrompt) && !e.isAborted && lastRow) {
+      await paths($)
       const missed = await coverageAfterTurn(harnessCtx($), answer).catch(() => null)
-      if (missed) await sendCheck($, missed, turnPrompt)
+      if (missed) {
+        await setEnd($, lastRow, { ...(end ?? { rows: part?.rows.length ? part.rows : [{ id: lastRow, text: answer }], cards: cardsOf, file: '', head: turnPrompt.split('\n')[0] ?? '' }), check: missed }, true)
+        await noteMain($, checkNote(missed, `${root}/helper`))
+        await logEvent($, { event: 'coverage check', row: lastRow })
+      }
     }
     return done
   })
@@ -3440,7 +3434,7 @@ export const register: Register = on => {
     if (unchecked.length) enqueue($, unchecked)
     const { Box, Text, Button } = $.ui.resolve(e)
     const out = await drawReply($, e, text, (e.viewport?.columns ?? 100) - 2 - MARGIN, e.requestId, '', Boolean(e.props.isFirstOfReply))
-    if (end) {
+    if (end?.file) {
       // the footer, one blank row under the answer: its citations and cards dim, the problems left counted from the
       // answer's rows as drawn now (their corrections in place), in red; its controls after a gutter. No file path.
       const left = { problem: 0, fixing: 0, failed: 0, link: 0 }
@@ -3495,6 +3489,19 @@ export const register: Register = on => {
         </Box>,
       )
     }
+    // the coverage check of the answer, whole, under it: main reads the same words with the analyst's next prompt
+    if (end?.check) {
+      out.push(
+        <Box key={`check:${e.requestId}`} marginTop={1} marginLeft={MARGIN} flexDirection="row">
+          <Box width={10} flexShrink={0}>
+            <Text dimColor>coverage</Text>
+          </Box>
+          <Box flexShrink={1}>
+            <Text dimColor wrap="wrap">{end.check.replace(/^Coverage check: /, '')}</Text>
+          </Box>
+        </Box>,
+      )
+    }
     if (told) out.push(told)
     // each block brings its own margin (the ⏺ on the first, its "?" on hover): drawReply
     return <Box flexDirection="column">{out}</Box>
@@ -3528,19 +3535,6 @@ export const register: Register = on => {
     if (e.props.isExpanded || (!a && !MOD_AGENT.test(e.props.text))) return next(e)
     const { Text } = $.ui.resolve(e)
     return <Text dimColor wrap="truncate-end">{`  ${a?.label ?? 'a thimble-cc-mod subagent'} · ${noticeWord(e.props.task?.status)}`}</Text>
-  })
-
-  // the row of the coverage check's hand-back (sendCheck): one dim line, the check's files; ctrl+o shows the engine's row
-  on('ui.render', { component: 'UserMessage', props: { origin: { kind: 'peer' } } }, async ($, e, next) => {
-    const line = e.props.isExpanded ? null : checkWords(e.props.text)
-    if (line === null) return next(e)
-    const { Box, Text } = $.ui.resolve(e)
-    // the blank line above it that the engine's own row of a message has
-    return (
-      <Box marginTop={1}>
-        <Text dimColor wrap="truncate-end">{`  coverage check · ${line}`}</Text>
-      </Box>
-    )
   })
 
   on('ui.render', { component: 'ToolUse', props: { tool: 'Agent' } }, async ($, e, next) => {
@@ -3947,6 +3941,15 @@ function harnessCtx($: Dollar): HarnessCtx {
   return {
     ...reportCtx($),
     boxed: (argv, init) => boxRun($, argv, init),
+    children: async ids => {
+      const all = await $.agent.list().catch(() => [])
+      const out = new Set(ids)
+      for (let grew = true; grew; ) {
+        grew = false
+        for (const a of all) if (a.parentId && out.has(a.parentId) && !out.has(a.id)) grew = Boolean(out.add(a.id))
+      }
+      return [...out]
+    },
     session: () => $.session.id().catch(() => ''),
     sleep: ms => $.clock.sleep(ms),
     complete: req => $.model.complete(req),
@@ -3979,59 +3982,6 @@ function harnessCtx($: Dollar): HarnessCtx {
     toast: text => $.ui.toast(text),
     log: text => $.ui.log(text),
   }
-}
-
-// ------------------------------------------------------------------------------------------------ the coverage check
-//
-// What main is sent after an answer that speaks for the whole corpus while a kind of file was never opened
-// (harness.tsx coverageAfterTurn), so that it reads what it missed and revises the answer, in a turn of its own. In
-// Claude Code 2.1.290 a plugin's own prompt ($.prompt.submit) reaches main's chat as a block, "Prompt from the
-// thimble-cc-mod plugin" and its whole text, which no ui.render hook draws, and it passes none of the plugin's own
-// prompt.submit hooks, so it cannot carry hidden context; classic.Stop does not reach a hooks module. A subagent's
-// hand-back can: a general-purpose subagent a plugin starts hands its report back to main as a delivery that starts
-// main's turn, passes this mod's prompt.submit, which adds the check as context main reads and the analyst does not
-// see, and is drawn as a UserMessage row, which the mod draws as one dim line. So a subagent on a small model carries
-// the check: it only says the check's line back, after words by which its hand-back and its row are known (a resumed
-// session draws the row the same). Where it cannot start, the check goes with the analyst's next prompt, as the mod's
-// other notes do. The carrier is not named (Agent's `name`): a named agent is one SendMessage can reach later.
-
-// the words the carrier says back before the check's line, by which its hand-back and its row are known
-const CHECK_MARK = 'thimble-cc-mod coverage check:'
-const COVERAGE_CHECK = { plugin: 'thimble-cc-mod', key: 'coverageCheck' } as const
-// the analyst's question the check's turn answers again, from the carrier's hand-back to that turn's start
-let checkTurn: string | null = null
-
-/** Send main the check: a subagent carries it, else it waits for the analyst's next prompt. `prompt` is the question
- *  the checked answer answered. */
-async function sendCheck($: Dollar, check: { text: string; line: string }, prompt: string): Promise<void> {
-  const r = await $.agent
-    .spawn({ prompt: `Reply with exactly this line and nothing else, and use no tool: ${CHECK_MARK} ${check.line}`, description: 'coverage check', subagentType: 'general-purpose', model: 'haiku' })
-    .catch((err: unknown) => ({ deny: String(err) }))
-  if (r.deny === undefined && 'agentId' in r && r.agentId) {
-    await $.state.set(COVERAGE_CHECK, { agent: r.agentId, text: check.text, line: check.line, prompt, at: await $.clock.now().catch(() => 0) })
-    await logEvent($, { event: 'coverage check', agent: r.agentId, line: check.line })
-    return
-  }
-  await logEvent($, { event: 'coverage check', result: `no carrier: ${clip(r.deny ?? 'no id', 200)}; noted for the next prompt` })
-  await noteMain($, check.text)
-}
-
-/** The check a hand-back carries: the waiting check when it comes from its carrier, null when a carrier's comes with
- *  no check waiting (sent already), undefined when it is not a carrier's. */
-async function checkFor($: Dollar, from: string, text: string): Promise<ChatCoverageCheck | null | undefined> {
-  const check = (await $.state.get(COVERAGE_CHECK)).value
-  if (check && from === check.agent) {
-    await $.state.set(COVERAGE_CHECK, null)
-    return check
-  }
-  return checkWords(handbackReport(text)) === null ? undefined : null
-}
-
-/** The check's line in a carrier's words ("thimble-cc-mod coverage check: <line>"), or null for any other words. */
-export function checkWords(text: string): string | null {
-  const first = text.trim().split('\n')[0] ?? ''
-  if (!first.startsWith(CHECK_MARK)) return null
-  return clip(first.slice(CHECK_MARK.length).trim(), 200)
 }
 
 // ------------------------------------------------------------------------------------------------ the home panel

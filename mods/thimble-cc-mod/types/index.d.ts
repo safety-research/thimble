@@ -93,8 +93,8 @@ export type ChatViewPipeRow = { slug: string; name: string; mark: string; words:
 export type ChatCorrection = { old: string; new: string; at: number; row: string }
 
 /** The last text row of an answer, which carries the answer's summary line: the answer's rows as written, its cards,
- *  and its file with its heading. */
-export type ChatEnd = { rows: ChatRow[]; cards: string[]; file: string; head: string }
+ *  its file with its heading, and the coverage check of it, shown under it, when there was one. */
+export type ChatEnd = { rows: ChatRow[]; cards: string[]; file: string; head: string; check?: string }
 
 /** What a gesture acts on (hooks/gestures.tsx): `ref` the place it cites (bare, or a whole `[[value|ref]]`), `text` its
  *  shown value or its words, `cardId` the card it is on, `script` that card's script, `claim` the key of a reply
@@ -154,8 +154,8 @@ export type ChatHighlight = { id: string; request: string; label: string; color:
 
 /** A report: its file under .thimble-cc-mod/reports/, its form and title, the analyst's request, its writer's progress
  *  (`writing`, then `ready`, or `error` with why), what its check found, the report it retells, a video's film, the
- *  highlights asked of it. */
-export type ChatReport = { slug: string; form: string; title: string; request: string; file: string; state: string; why?: string; agentId?: string; tools: number; partial: string; problems: string[]; created: number; source?: string; film?: ChatReportFilm; highlights?: ChatHighlight[]; orient?: ChatOrientSwitches }
+ *  highlights asked of it; an orientation's switches and the forks that did its analysis. */
+export type ChatReport = { slug: string; form: string; title: string; request: string; file: string; state: string; why?: string; agentId?: string; tools: number; partial: string; problems: string[]; created: number; source?: string; film?: ChatReportFilm; highlights?: ChatHighlight[]; orient?: ChatOrientSwitches; orientBy?: string[] }
 
 /** An orientation's switches, as thimble's Start gate offers them (hooks/commands.ts). */
 export type ChatOrientSwitches = { deck: boolean; views: boolean; critique: boolean; report: boolean }
@@ -192,10 +192,6 @@ export type ChatLabel = { slug: string; name: string; kind: string; definition: 
 /** The home panel: `stacked` or `index`, the stacked sections folded and shown whole, the section the index draws
  *  whole under it ('' for none). */
 export type ChatHomeUi = { layout: string; folded: string[]; more: string[]; pick: string }
-
-/** The coverage check waiting for its carrier's hand-back (register.tsx sendCheck): the carrier's agent id, the check's
- *  text for main and its line for main's chat, the question the checked answer answered, and when it was sent. */
-export type ChatCoverageCheck = { agent: string; text: string; line: string; prompt: string; at: number }
 
 declare module 'claude-code' {
   interface PluginState {
@@ -246,8 +242,6 @@ declare module 'claude-code' {
       coverage: ChatCoverage | null
       labels: StateFamily<ChatLabel>
       label: string
-      // the coverage check waiting for its carrier's hand-back (register.tsx sendCheck)
-      coverageCheck: ChatCoverageCheck | null
       // the home panel (hooks/home.ts): its layout, the sections folded and shown whole, the index's open one; and a
       // count that draws it again when what it lists changed on disk
       homeUi: ChatHomeUi

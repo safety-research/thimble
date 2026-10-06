@@ -15,8 +15,9 @@
 /** The orientation's switches, as thimble's Start gate offers them, and the analyst's focus. */
 export type OrientOpts = { brief: string; deck: boolean; views: boolean; critique: boolean; report: boolean }
 
-/** thimble's Start gate opens with every switch on (frontend StartGate ALL_ON). */
-export const ORIENT_DEFAULTS: Omit<OrientOpts, 'brief'> = { deck: true, views: true, critique: true, report: true }
+/** The one table of the orientation's defaults, which /thimble-orient and the `orient` tool both read: thimble's Start
+ *  gate's, every output on and the critique off (frontend StartGate DEFAULT_ON, backend orientation.DEFAULT_CRITIQUE). */
+export const ORIENT_DEFAULTS: Omit<OrientOpts, 'brief'> = { deck: true, views: true, critique: false, report: true }
 
 export const ORIENT_SWITCHES = ['deck', 'views', 'critique', 'report'] as const
 type Switch = (typeof ORIENT_SWITCHES)[number]
@@ -42,7 +43,7 @@ const SWITCH_ALIASES: Record<string, Switch> = {
 }
 const BRIEF_KEYS = new Set(['brief', 'focus', 'about'])
 
-export const ORIENT_USAGE = 'brief (or plain words: what to focus on), deck, views, critique, report (each on or off: deck=off, --no-deck, --report)'
+export const ORIENT_USAGE = 'brief (or plain words: what to focus on), deck, views, critique, report (each on or off: deck=off, --no-deck, --critique)'
 
 /** A word read as on or off, or undefined. */
 export function boolOf(raw: unknown): boolean | undefined {

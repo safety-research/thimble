@@ -595,7 +595,7 @@ export function parseMarks(raw: string): Marks {
   if (isObj(v.ends)) {
     for (const [id, e] of Object.entries(v.ends)) {
       if (isObj(e) && Array.isArray(e.rows) && e.rows.every(r => isObj(r) && typeof r.id === 'string' && typeof r.text === 'string') && typeof e.file === 'string') {
-        out.ends[id] = { rows: e.rows as ChatEnd['rows'], cards: Array.isArray(e.cards) ? e.cards.filter((c): c is string => typeof c === 'string') : [], file: e.file, head: typeof e.head === 'string' ? e.head : '' }
+        out.ends[id] = { rows: e.rows as ChatEnd['rows'], cards: Array.isArray(e.cards) ? e.cards.filter((c): c is string => typeof c === 'string') : [], file: e.file, head: typeof e.head === 'string' ? e.head : '', ...(typeof e.check === 'string' && e.check ? { check: e.check } : {}) }
       }
     }
   }

@@ -4,10 +4,10 @@
 // - Coverage. Every tool result of main and of every subagent (session.append) is handed to helper/coverage.py, which
 //   decides which files and records it showed or scanned (helper/pyaudit notes the files Python opens). The row above
 //   the prompt says it in one line ("read 2 of 4 files · 0.4% of records · 1 never opened"), /thimble-coverage and
-//   its "details" open the panel (each file, what was read of it, and what was never opened), main gets the line
-//   with each prompt, and when main ends a turn on an answer that speaks for the corpus as a whole while a kind of
-//   file was never opened, the mod sends it what it missed, once per prompt of the analyst's: as context main reads
-//   and the analyst does not see, while main's chat shows one dim line (register.tsx sendCheck).
+//   its "details" open the panel (each file, what was read of it, and what was never opened), and main gets the line
+//   with each prompt. When main ends a turn on an answer that speaks for the corpus as a whole while a kind of file
+//   was never opened, the check's text shows under the answer, and main reads the same text with the analyst's next
+//   prompt; main starts no turn of its own for it.
 // - Labels. Main's `label` tool defines a category over the records of some files (a prompt, a regex or a code
 //   predicate), tries it on a sample or applies it to all, and answers with the counts, examples of each value and
 //   two cards. A prompt label's records are judged by model calls in batches ($.model.complete, thimble's labels
@@ -15,10 +15,10 @@
 //   examples (the analyst can set a record's value, which wins and teaches the next run), "apply to all" and an
 //   edit field. Labels are kept in .thimble-cc-mod/labels.json, where the views read them.
 // - The orientation. /thimble-orient [brief] starts a fork with prompt/orient.md as a report writer, so the panel shows
-//   it working and then draws its document. Its tool results carry the count's line while files remain unopened;
-//   when it ends with a file unopened, a kind of file with no record read or no document, a second fork
-//   (prompt/orient-again.md) reads what it missed and revises the document; then the mod adds a section of what was
-//   read, each range a citation, before the document is shown.
+//   it working and then draws its document. It hears nothing of the count while it works. When it ends, the
+//   coverage line (thimble's orient_checks.coverage: the files whose lines its calls showed, by glob, and its share of
+//   the files and their lines) ends its document, shows in main's chat, and goes to main with the next prompt, so the
+//   analyst and main read the same line.
 //
 // register.tsx hands this module what it shares (HarnessCtx, built on ReportCtx) and calls it from its hooks.
 import type { MatchedEvent, ModelCompleteRequest, ModelCompleteResult, RenderElement, ResolveInput } from 'claude-code'
@@ -41,6 +41,8 @@ type AboveEvent = MatchedEvent<'ui.render', { component: 'AbovePrompt' }>
 export type HarnessCtx = ReportCtx & {
   /** `run` in the sandbox of the mod's own scripts (register.tsx boxRun), for the label runs that run code */
   boxed: ReportCtx['run']
+  /** the agents `ids` and every agent spawned under them, at any depth */
+  children: (ids: string[]) => Promise<string[]>
   session: () => Promise<string>
   sleep: (ms: number) => Promise<void>
   complete: (req: ModelCompleteRequest) => Promise<ModelCompleteResult>
@@ -162,16 +164,10 @@ export function rangeWords(ranges: number[][], n = 6): string {
 /** Words of a reply that speak for the corpus as a whole. */
 const GENERAL = /\b(all|every|each|most|majority|none|never|always|only|nobody|no one|overall|in general|typically|throughout|across the)\b/i
 
-/** What main is sent after an answer that speaks for the corpus as a whole while a kind of file was never opened, or
- *  had no record read (only counted over by code), or null when nothing calls for it: a short answer with no
- *  citation, card or heading never does. */
+/** The check of an answer that speaks for the corpus as a whole while a kind of file was never opened, or had no record
+ *  read (only counted over by code), or null when nothing calls for it: a short answer with no citation, card or
+ *  heading never does. The analyst reads it under the answer and main with the next prompt, the same words. */
 export function critiqueOf(s: CoverageSummary, answer: string): string | null {
-  return checkOf(s, answer)?.text ?? null
-}
-
-/** The check critiqueOf words for main, and the one line main's chat shows of it ("events.jsonl and labels.jsonl never
- *  opened · pages.jsonl only counted"), or null. */
-export function checkOf(s: CoverageSummary, answer: string): { text: string; line: string } | null {
   const substantial = answer.length > 400 || /\[\[/.test(answer) || /^##\s/m.test(answer)
   if (!substantial || !GENERAL.test(answer) || !s.totals.files) return null
   const missed = new Set(s.kinds.filter(k => k.untouched === k.files).map(k => k.kind))
@@ -181,39 +177,16 @@ export function checkOf(s: CoverageSummary, answer: string): { text: string; lin
   const counted = s.files.filter(f => f.state === 'scanned' && unread.has(kindOf(f.file)))
   const name = (f: CoverageFile) => `${f.file} (${f.records !== null ? `${num(f.records)} records` : `${num(f.size)} bytes`})`
   const list = (fs: CoverageFile[]) => `${fs.slice(0, 8).map(name).join(', ')}${fs.length > 8 ? `, and ${fs.length - 8} more` : ''}`
-  const parts = [`Coverage check from thimble-cc-mod: this session has ${s.line}.`]
+  const parts = [`Coverage check: this session has ${s.line}.`]
   if (missed.size) parts.push(`No call opened ${missed.size === 1 ? 'this kind of file' : `these ${missed.size} kinds of file`}: ${list(untouched)}.`)
-  if (unread.size) parts.push(`Code counted over ${unread.size === 1 ? 'this kind of file' : `these ${unread.size} kinds of file`}, but no call showed you any of ${unread.size === 1 ? 'its' : 'their'} records: ${list(counted)}.`)
-  parts.push(
-    'Your answer speaks for the corpus as a whole. Before you finish, read a few records of each from its start, middle and end, and count over the files no call opened, then revise the answer where they change it, or say in it which files and how much of them it rests on. `python3 {{helper}}/coverage.py` lists what was read of each file.',
-  )
-  const line = [missed.size ? `${fileWords(untouched)} never opened` : '', unread.size ? `${fileWords(counted)} only counted` : ''].filter(Boolean).join(' · ')
-  return { text: parts.join(' '), line }
-}
-
-/** Files by name in a line: "a, b and c", or the first two and how many more. */
-export function fileWords(fs: readonly { file: string }[]): string {
-  const names = fs.map(f => f.file)
-  if (names.length <= 3) return names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names.at(-1)}` : (names[0] ?? '')
-  return `${names.slice(0, 2).join(', ')} and ${num(names.length - 2)} more`
+  if (unread.size) parts.push(`Code counted over ${unread.size === 1 ? 'this kind of file' : `these ${unread.size} kinds of file`}, but no call showed any of ${unread.size === 1 ? 'its' : 'their'} records: ${list(counted)}.`)
+  parts.push('The answer speaks for the corpus as a whole but rests only on the files read.')
+  return parts.join(' ')
 }
 
 /** A file's kind, as helper/coverage.py kind_of masks it: ids and numbers in its path replaced. */
 export function kindOf(file: string): string {
   return file.replace(/(?=[0-9a-f]*\d)[0-9a-f]{8,}/gi, '*').replace(/\d+/g, '#')
-}
-
-/** What the orientation is told when it tries to end too soon, or null: a file nothing opened, a kind of text file
- *  with no record read, or its document not written. */
-export function orientGaps(s: CoverageSummary, written: boolean, file: string): string | null {
-  const untouched = s.files.filter(f => f.state === 'untouched')
-  const unread = s.kinds.filter(k => k.records > 0 && k.records_seen === 0)
-  const out: string[] = []
-  if (!written) out.push(`You have not written the document to ${file}.`)
-  if (untouched.length) out.push(`No call has opened ${untouched.length === 1 ? 'this file' : `these ${untouched.length} files`}: ${untouched.slice(0, 12).map(f => f.file).join(', ')}${untouched.length > 12 ? ', …' : ''}.`)
-  if (unread.length) out.push(`You have read no record of ${unread.length === 1 ? 'this kind of file' : 'these kinds of file'} yourself, only counted over ${unread.length === 1 ? 'it' : 'them'}: ${unread.slice(0, 8).map(k => k.kind).join(', ')}.`)
-  if (!out.length) return null
-  return [`thimble-cc-mod coverage check before the orientation ends (${s.line}):`, ...out, 'Read a sample of each (its start, middle and end) or count over it with a script, revise the document and its cards where what you find changes them, then end.'].join(' ')
 }
 
 /** The line main gets with each prompt: what this session has read, and the files nothing opened. */
@@ -384,28 +357,23 @@ export async function coverageCommand(ctx: HarnessCtx, args = ''): Promise<{ tex
 
 // ------------------------------------------------------------------------------------------------ the check after a turn
 
-// Claude Code here does not hand a hooks module the classic Stop event (checked live on 2.1.290: neither classic.Stop
-// nor classic.UserPromptSubmit reaches one), so the check runs at main's turn.complete, and main answers it in a turn
-// of its own (register.tsx sendCheck says how it reaches main). Once a prompt of the analyst's: the turn it starts is
-// never checked again.
+// The check runs at main's turn.complete (Claude Code hands a hooks module no classic Stop: checked live on 2.1.290).
+// Its text shows under the answer and goes to main with the analyst's next prompt (register.tsx); main starts no turn
+// of its own for it, as thimble's coverage feedback reaches the agent and the analyst at the end of a run.
 let checking = true // /thimble-coverage check on|off
-let followUp = false // the next turn of main answers the check
 
-/** At the end of main's turn: the check (its text for main and its line for main's chat) when the answer speaks for
- *  the whole corpus while a kind of file was never opened, else null. The turn that answers a check is not checked. */
-export async function coverageAfterTurn(ctx: HarnessCtx, answer: string): Promise<{ text: string; line: string } | null> {
-  if (followUp) {
-    followUp = false
-    return null
-  }
+/** At the end of main's turn: the check when the answer speaks for the whole corpus while a kind of file was never
+ *  opened, else null. */
+export async function coverageAfterTurn(ctx: HarnessCtx, answer: string): Promise<string | null> {
   if (!checking || !answer.trim()) return null
   const s = await coverageSummary(ctx)
-  if (!s) return null
-  const check = checkOf(s, answer)
-  if (!check) return null
-  followUp = true
-  const { root } = await ctx.where()
-  return { ...check, text: check.text.replace('{{helper}}', `${root}/helper`) }
+  return s ? critiqueOf(s, answer) : null
+}
+
+/** The check as main reads it with the analyst's next prompt: the words the analyst read under the answer, and where
+ *  to look. */
+export function checkNote(check: string, helper: string): string {
+  return `thimble-cc-mod: the analyst read this coverage check under your last answer: "${check}" \`python3 ${helper}/coverage.py\` lists what was read of each file.`
 }
 
 /** /thimble-coverage check on|off. */
@@ -415,14 +383,12 @@ export function setChecking(on: boolean): void {
 
 // ------------------------------------------------------------------------------------------------ the orientation
 
-/** An orientation's round: its report, the analyst's request and switches, the coverage rounds it had, whether the
- *  critique ran, and the count's line it was last told. */
-type Orient = { slug: string; file: string; brief: string; opts: OrientOpts; rounds: number; critiqued: boolean; noted: string }
+/** An orientation's round: its report, the analyst's request and switches, whether the critique ran, and `by`, the
+ *  forks that did the analysis, whose reads (and their subagents') the coverage line counts, never the critique's. */
+type Orient = { slug: string; file: string; brief: string; opts: OrientOpts; critiqued: boolean; by: string[] }
 
 const orients = new Map<string, Orient>() // an orientation's agent -> its round
 let starting = false // an orientation asked for whose first fork has not started yet
-const ORIENT_ROUNDS = 1 // follow-up rounds an orientation gets for what it left unread
-const AGAIN = ' · reading what it missed'
 const CRITIQUE = ' · critique and revision'
 
 const ORIENT_LABEL = 'report · orientation'
@@ -437,7 +403,7 @@ async function orientOf(ctx: HarnessCtx, agentId: string | undefined): Promise<O
   if (a?.kind !== 'report' || !a.report || !a.label.startsWith(ORIENT_LABEL)) return undefined
   const r = await ctx.report(a.report)
   const brief = r && !/^an orientation of the whole corpus$/.test(r.request) ? r.request : ''
-  const o: Orient = { slug: a.report, file: r?.file ?? `${ctx.home}/reports/${a.report}.md`, brief, opts: { brief, ...ORIENT_DEFAULTS, ...(r?.orient ?? {}) }, rounds: a.label.endsWith(AGAIN) ? 1 : 0, critiqued: a.label.endsWith(CRITIQUE), noted: '' }
+  const o: Orient = { slug: a.report, file: r?.file ?? `${ctx.home}/reports/${a.report}.md`, brief, opts: { brief, ...ORIENT_DEFAULTS, ...(r?.orient ?? {}) }, critiqued: a.label.endsWith(CRITIQUE), by: r?.orientBy ?? [] }
   orients.set(agentId, o)
   return o
 }
@@ -477,7 +443,7 @@ export async function orientCommand(ctx: HarnessCtx, args: string): Promise<{ te
 export const ORIENT_TOOL = 'mcp__thimble-cc-mod__orient'
 export const ORIENT_DESCRIPTION = [
   "Start thimble-cc-mod's orientation, as the analyst's /thimble-orient does: a subagent outside this conversation surveys every file of the corpus and writes a short document the analyst reads in the panel, then the outputs its switches turn on. It returns at once, and thimble-cc-mod tells you when the orientation is done.",
-  'Call it when the analyst asks for an orientation, or for an overview of the whole corpus they have not seen yet, with their focus as `brief`. Set a switch only when the analyst names it, such as "without a report" or "no views"; a switch left out keeps thimble\'s Start default (all on). One orientation runs at a time.',
+  'Call it when the analyst asks for an orientation, or for an overview of the whole corpus they have not seen yet, with their focus as `brief`. Set a switch only when the analyst names it, such as "without a report" or "with a critique"; a switch left out keeps thimble\'s Start default (the deck, views and report on, the critique off). One orientation runs at a time.',
 ].join(' ')
 export const ORIENT_SCHEMA = {
   type: 'object',
@@ -485,7 +451,7 @@ export const ORIENT_SCHEMA = {
     brief: { type: 'string', description: "what the analyst wants the orientation to focus on, in their words; empty for the whole corpus" },
     deck: { type: 'boolean', description: 'the document holds five to eight cards (default true); false: a document without cards' },
     views: { type: 'boolean', description: 'it proposes up to four views, which are built in the background (default true)' },
-    critique: { type: 'boolean', description: 'a reviewer who did not do the analysis checks the document against the records and revises it (default true)' },
+    critique: { type: 'boolean', description: 'a reviewer who did not do the analysis checks the document against the records and revises it (default false)' },
     report: { type: 'boolean', description: "thimble-cc-mod's writer writes a fuller report from the document once the orientation ends (default true)" },
   },
 }
@@ -545,9 +511,9 @@ export async function orientStart(ctx: HarnessCtx, opts: OrientOpts): Promise<{ 
           await ctx.setReport({ ...r, state: 'error', why: `could not start the orientation: ${s.deny}` })
           return
         }
-        orients.set(s.agentId, { slug, file: r.file, brief, opts, rounds: 0, critiqued: false, noted: '' })
+        orients.set(s.agentId, { slug, file: r.file, brief, opts, critiqued: false, by: [s.agentId] })
         await ctx.setAgent(s.agentId, { kind: 'report', label, report: slug })
-        await ctx.setReport({ ...((await ctx.report(slug)) ?? r), agentId: s.agentId })
+        await ctx.setReport({ ...((await ctx.report(slug)) ?? r), agentId: s.agentId, orientBy: [s.agentId] })
       } finally {
         starting = false
       }
@@ -564,40 +530,44 @@ async function orientRound(ctx: HarnessCtx, o: Orient, prompt: string, suffix: s
   const label = `${ORIENT_LABEL}${suffix}`
   const sp = await ctx.spawn(prompt, label, prompt)
   if ('deny' in sp) return false
-  orients.set(sp.agentId, { ...o, ...next, noted: '' })
+  orients.set(sp.agentId, { ...o, ...next })
   await ctx.setAgent(sp.agentId, { kind: 'report', label, report: o.slug })
   const r = await ctx.report(o.slug)
   if (r) await ctx.setReport({ ...r, agentId: sp.agentId, partial })
   return true
 }
 
-/** An orientation's round ended. With gaps (a file unopened, a kind of file with no record read, no document) and a
- *  round left, a follow-up fork reads what it missed and revises the document; then, when the critique is on, a fork
- *  that did not do the analysis reviews the document and revises it; while one runs the report stays "writing"
- *  (true). Else the section of what was read is added, the writer starts when the report is on, and the reports
- *  module may show the document (false). Claude Code here hands a hooks module no classic SubagentStop, which would
- *  have kept the orientation itself going. */
+/** An orientation's round ended. When the critique is on, a fork that did not do the analysis reviews the document and
+ *  revises it; while it runs the report stays "writing" (true). Else the coverage line ends the document, shows in
+ *  main's chat and goes to main with the next prompt, the writer starts when the report is on, and the reports module
+ *  may show the document (false). The orientation hears nothing of the count while it works, and gets no second round:
+ *  the analyst can ask for more, or turn the critique on. Claude Code here hands a hooks module no classic
+ *  SubagentStop, which would have kept the orientation itself going. */
 export async function orientEnded(ctx: HarnessCtx, agentId: string, reason: string): Promise<boolean> {
   const o = await orientOf(ctx, agentId)
   if (!o) return false
   orients.delete(agentId)
   const { cwd, root } = await ctx.where()
   const written = await ctx.read(`${cwd}/${o.file}`).then(t => t.trim().length > 0, () => false)
-  const s = await coverageSummary(ctx)
-  const gaps = s && reason === 'answer' ? orientGaps(s, written, o.file) : null
-  const values: Record<string, string> = { gaps: gaps ?? '', file: o.file, brief: o.brief || '(none: the whole corpus)', helper: `${root}/helper`, slug: o.slug }
+  const values: Record<string, string> = { file: o.file, brief: o.brief || '(none: the whole corpus)', helper: `${root}/helper`, slug: o.slug }
   const on = { deck: o.opts.deck, views: o.opts.views, critique: o.opts.critique, report: o.opts.report }
-  if (gaps && o.rounds < ORIENT_ROUNDS && !o.critiqued) {
-    const prompt = withGuide(await ctx.guide(), fillPrompt(await ctx.read(`${root}/prompt/orient-again.md`), on, values))
-    if (await orientRound(ctx, o, prompt, AGAIN, 'reading the files the first round missed', { rounds: o.rounds + 1 })) return true
-  }
   if (o.opts.critique && !o.critiqued && written && reason === 'answer') {
     const prompt = withGuide(await ctx.guide(), fillPrompt(await ctx.read(`${root}/prompt/orient-critique.md`), on, values))
     if (await orientRound(ctx, o, prompt, CRITIQUE, 'a reviewer checks the document against the records', { critiqued: true })) return true
   }
-  if (written && s) {
+  // an orientation that finished (not one stopped or failed): the coverage line of the forks that did the analysis and
+  // the subagents under them (the whole session's when they are not known: an orientation begun before a reload of
+  // the hooks by an older mod)
+  const roots = o.by.length ? o.by : o.critiqued ? [] : [agentId]
+  const s = reason === 'answer' ? await coverageSummary(ctx, roots.length ? await ctx.children(roots) : []) : null
+  const line = s ? coverageLine(s) : ''
+  if (written && line) {
     const text = await ctx.read(`${cwd}/${o.file}`).catch(() => '')
-    if (text.trim() && !/^## What the orientation read/m.test(text)) await ctx.write(`${cwd}/${o.file}`, `${text.trimEnd()}\n\n${coverageSection(s)}`)
+    if (text.trim() && !/^Coverage: /m.test(text)) await ctx.write(`${cwd}/${o.file}`, `${text.trimEnd()}\n\n${line}\n`)
+  }
+  if (line) {
+    ctx.log(`thimble-cc-mod: the orientation ended · ${line}`)
+    await ctx.noteMain(`thimble-cc-mod: the orientation ended; the analyst read this line in the chat${written ? ` and at the end of its document ${o.file}` : ''}: "${line}"`)
   }
   // the report: thimble starts its writer once the orientation ends; it retells the document, citing its cards. Its
   // working title, and so its file name, leaves out "report": Claude Code refuses a subagent's Write of a file named
@@ -614,48 +584,63 @@ export async function orientEnded(ctx: HarnessCtx, agentId: string, reason: stri
   return false
 }
 
-/** A tool result of an orientation, with the count's line after it when the line changed, so it sees what it has not
- *  opened while it works. */
-export async function orientNote<M extends { content: unknown }>(ctx: HarnessCtx, agentId: string | undefined, door: string, msg: M): Promise<M> {
-  if (door !== 'tool-result' || !Array.isArray(msg.content)) return msg
-  const o = await orientOf(ctx, agentId)
-  if (!o) return msg
-  const c = await ctx.coverage()
-  if (!c || !c.untouched || c.line === o.noted) return msg
-  o.noted = c.line
-  const note = `thimble-cc-mod coverage so far: ${c.line}${c.unopened.length ? `; never opened: ${c.unopened.join(', ')}` : ''}.`
-  const blocks = msg.content as { type?: string; content?: unknown }[]
-  const i = blocks.findIndex(b => b.type === 'tool_result')
-  if (i < 0) return msg
-  const b = blocks[i]!
-  const parts = typeof b.content === 'string' ? [{ type: 'text', text: b.content }] : Array.isArray(b.content) ? (b.content as unknown[]) : []
-  const out = blocks.slice()
-  out[i] = { ...b, content: [...parts, { type: 'text', text: note }] }
-  return { ...msg, content: out }
+const COVERAGE_GLOBS = 8 // globs the line groups files into; past this, by top folder (orient_checks.COVERAGE_GLOBS)
+const COVERAGE_LISTED = 6 // globs of viewed files the line names; the rest are counted
+const COVERAGE_NAMED = 2 // a glob with this few files viewed has them named
+
+/** n of total as a whole percentage, 100% only when it is all, 0% only when none and <1% below a half
+ *  (orient_checks._share). */
+export function share(n: number, total: number): string {
+  if (total <= 0 || n <= 0) return '0%'
+  if (n >= total) return '100%'
+  if ((100 * n) / total < 0.5) return '<1%'
+  return `${Math.min(99, Math.round((100 * n) / total))}%`
 }
 
-/** The section of what an orientation read, from the count, each read range a citation of its lines. */
-export function coverageSection(s: CoverageSummary): string {
-  const lines = ['## What the orientation read', '', `> [!NOTE] thimble-cc-mod's count of this session: ${s.line}, ${num(s.totals.records_seen)} of ${num(s.totals.records)} records seen in a call's output.`, '']
-  const order = { untouched: 0, scanned: 1, read: 2 } as const
-  const files = [...s.files].sort((a, b) => order[a.state] - order[b.state] || a.file.localeCompare(b.file))
-  lines.push('<details><summary>Each file</summary>', '')
-  for (const f of files.slice(0, 60)) {
-    const recs = f.records !== null ? `${num(f.records)} records` : `${num(f.size)} bytes`
-    const what =
-      f.state === 'untouched'
-        ? 'never opened'
-        : f.state === 'scanned'
-          ? 'counted by code, no record read'
-          : `read ${num(f.seen)} (${pct(f.seen, f.records ?? 0)}), such as ${f.ranges
-              .slice(0, 3)
-              .map(([a = 1, b = 1]) => `[[${f.file}#L${a}${b !== a ? `-L${b}` : ''}]]`)
-              .join(' ')}`
-    lines.push(`- \`${f.file}\`, ${recs}: ${what}`)
+/** The glob a file is grouped under: its folder with ids masked and its suffix (`runs/run-12/log.jsonl` is
+ *  `runs/run-*\/*.jsonl`), or with `top` its top folder whole (`runs/**`); a file at the root goes by its suffix
+ *  (orient_checks._glob). */
+export function globOf(rel: string, top = false): string {
+  const cut = rel.lastIndexOf('/')
+  const folder = cut < 0 ? '' : rel.slice(0, cut)
+  const name = rel.slice(cut + 1)
+  const dot = name.lastIndexOf('.')
+  const suffix = dot > 0 ? name.slice(dot) : ''
+  if (folder && top) return `${folder.split('/')[0]}/**`
+  if (folder) return `${kindOf(folder).replaceAll('#', '*')}/*${suffix}`
+  return `*${suffix}`
+}
+
+/** The coverage line of an orientation, as thimble's (orient_checks.coverage) words it: the files whose lines its calls
+ *  showed, grouped by glob (a glob viewed whole, a file alone in its glob, the files of a glob viewed in part when they
+ *  are COVERAGE_NAMED or fewer, else the glob with how many), then its share of the files and of their lines.
+ *  "Coverage: viewed only events/*.jsonl · 22% of files · 12% of lines". A file only counted over by code is not viewed. */
+export function coverageLine(s: CoverageSummary): string {
+  const files = s.files
+  const viewed = files.filter(f => f.state === 'read')
+  const lines = files.reduce((n, f) => n + (f.records ?? 0), 0)
+  const seen = viewed.reduce((n, f) => n + Math.min(f.seen, f.records ?? 0), 0)
+  const shares = lines ? `${share(viewed.length, files.length)} of files · ${share(seen, lines)} of lines` : `${share(viewed.length, files.length)} of files`
+  if (!viewed.length) return `Coverage: viewed no file · ${shares}`
+  if (viewed.length === files.length) return `Coverage: viewed every file · ${shares}`
+  let groups = new Map<string, CoverageFile[]>()
+  for (const f of files) groups.set(globOf(f.file), [...(groups.get(globOf(f.file)) ?? []), f])
+  if (groups.size > COVERAGE_GLOBS) {
+    groups = new Map()
+    for (const f of files) groups.set(globOf(f.file, true), [...(groups.get(globOf(f.file, true)) ?? []), f])
   }
-  if (files.length > 60) lines.push(`- … ${files.length - 60} more files`)
-  lines.push('', '</details>', '')
-  return lines.join('\n')
+  const recs = (fs: CoverageFile[]) => fs.reduce((n, f) => n + (f.records ?? 0), 0)
+  const side: [number, string][] = []
+  for (const [g, fs] of groups) {
+    const opened = fs.filter(f => f.state === 'read')
+    if (!opened.length) continue
+    if (opened.length === fs.length) side.push([recs(fs), fs.length === 1 ? fs[0]!.file : g])
+    else if (opened.length <= COVERAGE_NAMED) side.push(...opened.map(f => [f.records ?? 0, f.file] as [number, string]))
+    else side.push([recs(opened), `${g} (${num(opened.length)} of ${num(fs.length)} ${fs.length === 1 ? 'file' : 'files'})`])
+  }
+  const names = side.sort((a, b) => b[0] - a[0] || a[1].localeCompare(b[1])).map(x => x[1])
+  const listed = names.slice(0, COVERAGE_LISTED).join(', ') + (names.length > COVERAGE_LISTED ? `, and ${num(names.length - COVERAGE_LISTED)} more` : '')
+  return `Coverage: viewed only ${listed} · ${shares}`
 }
 
 // ------------------------------------------------------------------------------------------------ labels

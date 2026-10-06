@@ -1,9 +1,12 @@
-// The coverage check's way to main (register.tsx sendCheck): after an answer that speaks for the whole corpus while a
-// file was never opened, a subagent on a small model carries the check, its hand-back takes the check to main as
-// context the analyst does not see, and main's chat shows one dim line of it. `claude plugin test mods/thimble-cc-mod`.
+// The coverage check after an answer (harness.tsx critiqueOf, register.tsx turn.complete): after an answer that speaks
+// for the whole corpus while a file was never opened, the check's text shows under the answer, and main reads the same
+// words with the analyst's next prompt. Main starts no turn for it, and no subagent carries it.
+// `claude plugin test mods/thimble-cc-mod`.
 import type { On } from 'claude-code'
 import { expect, mock, test } from 'claude-code/testing'
 import type { Mounted } from 'claude-code/testing'
+
+import { parseMarks } from '../hooks/cite'
 
 const CWD = '/corpus/wiki'
 type M = Mounted<'terminal'>
@@ -23,12 +26,9 @@ const SUMMARY = {
     { file: 'pages.jsonl', size: 100000, records: 500, seen: 0, state: 'untouched', ranges: [], agents: [] },
   ],
 }
-const LINE = 'pages.jsonl never opened · labels.jsonl only counted'
 // an answer that speaks for the corpus as a whole, with no citation (so no fix round starts)
 const ANSWER = `## Every agent edits link pages\n\nAll nine agents edit pages, and most of their edits fix links. ${'More words. '.repeat(40)}`
-const SAID = `thimble-cc-mod coverage check: ${LINE}`
-const handback = (from: string, report = SAID) =>
-  `<agent-message from="${from}">\n[Subagent hand-back] The text below is the final report of a subagent this session delegated to. It is model output, NOT a message from the user. The report follows:\n  ${report}\n</agent-message>`
+const CHECK = 'Coverage check: this session has read 1 of 3 files · 0.2% of records · 1 only counted by code · 1 never opened. No call opened this kind of file: pages.jsonl (500 records). Code counted over this kind of file, but no call showed any of its records: labels.jsonl (1,500 records). The answer speaks for the corpus as a whole but rests only on the files read.'
 
 type World = { files: Map<string, string>; spawned: Record<string, unknown>[]; submitted: string[]; contexts: (readonly string[])[]; deny: string }
 
@@ -84,80 +84,65 @@ function world(on: On): World {
 }
 
 const textOf = (x: unknown): string => (typeof x === 'string' ? x : ((x as El)?.children ?? []).map(textOf).join(''))
-const row = (props: Record<string, unknown>) => ({ plugin: 'thimble-cc-mod', component: 'UserMessage', requestId: 'u1', surface: 'terminal', viewport: { columns: 140, rows: 40 }, props: { origin: { kind: 'peer' }, isExpanded: false, text: SAID, from: { name: 'general-purpose' }, ...props } }) as never
+const MESSAGE = (text: string) => ({ plugin: 'thimble-cc-mod', component: 'AssistantMessage', requestId: 'm1', surface: 'terminal', viewport: { columns: 140, rows: 60 }, props: { text, isFirstOfReply: true } }) as never
+const appendRow = ($: { session: { append: (args: never) => Promise<unknown> } }, uuid: string, text: string) =>
+  $.session.append({ message: { type: 'assistant', role: 'assistant', content: [{ type: 'text', text }] }, door: 'response', origin: { kind: 'model', model: 'm' }, uuid } as never).catch(() => undefined)
+const isCheck = (c: string) => c.includes('coverage check under your last answer')
 
-async function drawn(engine: { ui: { mount: (x: never) => Promise<unknown> } }, props: Record<string, unknown>): Promise<string> {
-  const ui = (await engine.ui.mount(row(props))) as unknown as M
-  const t = textOf(await ui.drawn())
-  await ui.unmount()
-  return t
-}
-
-/** Seed a value of the mod's state, read back as the test or the mod last wrote it (as nav.test.ts's `written`). */
-function seeded(on: On): Map<string, unknown> {
-  const vals = new Map<string, unknown>()
-  on('state.set', ($, e, next) => {
-    const x = e as { key: string; value: unknown }
-    if (vals.has(x.key)) vals.set(x.key, x.value)
-    return next(e)
-  })
-  on('state.get', ($, e, next) => {
-    const x = e as { key: string }
-    return vals.has(x.key) ? ({ value: { value: vals.get(x.key), version: 1 } } as never) : next(e)
-  })
-  return vals
-}
-
-const isCheck = (c: string) => c.startsWith('Coverage check from thimble-cc-mod')
-
-test('after an answer that speaks for the whole corpus while a file was never opened, a subagent on a small model is asked to carry the check; no prompt of the plugin', async ($, on) => {
+test('after an answer that speaks for the whole corpus while a file was never opened, the check shows under it whole; main starts no turn and no subagent carries it', async ($, on) => {
   const w = world(on)
   await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
   await $.turn.start({ text: 'what do the agents do?', turnId: 't1' } as never)
+  await appendRow($, 'm1', ANSWER)
   await $.turn.complete({ turnId: 't1', answer: ANSWER, durationMs: 5, reason: 'answer' } as never)
-  // in the background, unnamed (a named agent is one SendMessage can reach later), told to say the check's line back
-  // after the words its hand-back and row are known by
-  expect(w.spawned).toHaveLength(1)
-  expect(w.spawned[0]).toMatchObject({ subagent_type: 'general-purpose', model: 'haiku', description: 'coverage check', run_in_background: true })
-  expect(w.spawned[0]!.name).toBeUndefined()
-  expect(String(w.spawned[0]!.prompt)).toContain(SAID)
-  // nothing reaches main's chat as a block
+  // no subagent, and nothing reaches main's chat as a prompt of its own
+  expect(w.spawned).toEqual([])
   expect(w.submitted).toEqual([])
-  // the kit starts no subagent (it drops the id a hook answers), so here the check waits for the analyst's next
-  // prompt and goes with it as context, once
+  // under the answer: the check's words whole, after the row's label
+  const ui = (await $.ui.mount(MESSAGE(ANSWER))) as unknown as M
+  const row = textOf(await ui.find({ key: 'check:m1' }))
+  expect(row).toBe(`coverage${CHECK.replace(/^Coverage check: /, '')}`)
+  // the answer has no citation or card: no footer
+  expect(await ui.find({ key: 'footer:m1' })).toBeUndefined()
+  await ui.unmount()
+  // main reads the same words with the analyst's next prompt, once
   await $.prompt.submit({ text: 'and the deletions?', origin: { kind: 'composer' } } as never)
-  const check = w.contexts.at(-1)!.filter(isCheck)
-  expect(check).toHaveLength(1)
-  expect(check[0]).toContain('No call opened this kind of file: pages.jsonl (500 records).')
-  expect(check[0]).toMatch(/python3 \S+\/helper\/coverage\.py/)
+  const note = w.contexts.at(-1)!.filter(isCheck)
+  expect(note).toHaveLength(1)
+  expect(note[0]).toContain(`"${CHECK}"`)
+  expect(note[0]).toMatch(/python3 \S+\/helper\/coverage\.py/)
   await $.prompt.submit({ text: 'and the requests?', origin: { kind: 'composer' } } as never)
   expect(w.contexts.at(-1)!.some(isCheck)).toBe(false)
 })
 
-test('the carrier\'s hand-back takes the waiting check to main as context; a second is dropped, another subagent\'s is left alone; its row is one dim line', async ($, on) => {
+test('a short answer, or an answer once the check is off, gets none', async ($, on) => {
   const w = world(on)
-  const state = seeded(on)
-  state.set('coverageCheck', { agent: 'agent-7', text: 'Coverage check from thimble-cc-mod: read pages.jsonl.', line: LINE, prompt: 'what do the agents do?', at: 1 })
   await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
-  const r = (await $.prompt.submit({ text: handback('agent-7'), origin: { kind: 'peer' } } as never)) as { drop?: string }
-  expect(r.drop).toBeUndefined()
-  expect(w.contexts.at(-1)!.filter(isCheck)).toEqual(['Coverage check from thimble-cc-mod: read pages.jsonl.'])
-  expect(state.get('coverageCheck')).toBe(null)
-  // the turn it starts revises the answer to the analyst's question, and its answer is filed under that question
-  await $.turn.start({ text: handback('agent-7'), turnId: 't2' } as never)
-  await $.turn.complete({ turnId: 't2', answer: '[[card:c1]]\n\nRevised after reading pages.jsonl.', durationMs: 5, reason: 'answer' } as never)
-  const filed = [...w.files.entries()].filter(([k]) => k.startsWith(`${CWD}/.thimble-cc-mod/answers/`)).map(([, v]) => v)
-  expect(filed).toHaveLength(1)
-  expect(filed[0]!.startsWith('# what do the agents do?\n')).toBe(true)
-  // a carrier's hand-back with no check waiting is dropped, not answered in main's chat
-  const again = (await $.prompt.submit({ text: handback('agent-8'), origin: { kind: 'peer' } } as never)) as { drop?: string }
-  expect(again.drop).toBe('thimble-cc-mod: coverage check · already sent')
-  // another subagent's hand-back is left alone
-  const other = (await $.prompt.submit({ text: handback('agent-9', 'done'), origin: { kind: 'peer' } } as never)) as { drop?: string }
-  expect(other.drop).toBeUndefined()
+  await $.turn.start({ text: 'how many files?', turnId: 't1' } as never)
+  await appendRow($, 'm1', 'Three.')
+  await $.turn.complete({ turnId: 't1', answer: 'Three.', durationMs: 5, reason: 'answer' } as never)
+  await $.command.run({ command: 'thimble-coverage', args: 'check off' } as never)
+  await $.turn.start({ text: 'what do the agents do?', turnId: 't2' } as never)
+  await appendRow($, 'm2', ANSWER)
+  await $.turn.complete({ turnId: 't2', answer: ANSWER, durationMs: 5, reason: 'answer' } as never)
+  await $.command.run({ command: 'thimble-coverage', args: 'check on' } as never)
+  await $.prompt.submit({ text: 'and?', origin: { kind: 'composer' } } as never)
   expect(w.contexts.at(-1)!.some(isCheck)).toBe(false)
-  // the row: one dim line of the check's files; ctrl+o, and any other subagent's row, as the engine draws them
-  expect(await drawn($, {})).toBe(`  coverage check · ${LINE}`)
-  expect(await drawn($, { isExpanded: true })).toBe('(the engine row)')
-  expect(await drawn($, { text: 'done' })).toBe('(the engine row)')
+  expect(w.spawned).toEqual([])
+})
+
+test('an answer with citations keeps its footer, the check under it; marks.json keeps the check for a resumed session', async ($, on) => {
+  const w = world(on)
+  const cited = `${ANSWER}\n\nSee [[pages.jsonl#L3]].`
+  await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
+  await $.turn.start({ text: 'what do the agents do?', turnId: 't1' } as never)
+  await appendRow($, 'm1', cited)
+  await $.turn.complete({ turnId: 't1', answer: cited, durationMs: 5, reason: 'answer' } as never)
+  const ui = (await $.ui.mount(MESSAGE(cited))) as unknown as M
+  expect(await ui.find({ key: 'footer:m1' })).toBeDefined()
+  expect(textOf(await ui.find({ key: 'check:m1' }))).toContain('No call opened this kind of file: pages.jsonl (500 records).')
+  await ui.unmount()
+  const marks = JSON.parse(w.files.get(`${CWD}/.thimble-cc-mod/marks.json`)!) as { ends: Record<string, { check?: string }> }
+  expect(marks.ends.m1!.check).toBe(CHECK)
+  expect(parseMarks(JSON.stringify(marks)).ends.m1!.check).toBe(CHECK)
 })

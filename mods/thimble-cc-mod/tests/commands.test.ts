@@ -12,22 +12,23 @@ test('words: whitespace splits them except inside quotes, and key="a b" stays on
 })
 
 test('/thimble-orient: words are the brief, switches as flags or key=value, thimble\'s names read too; defaults are the Start gate\'s', () => {
-  expect(ORIENT_DEFAULTS).toEqual({ deck: true, views: true, critique: true, report: true })
-  expect(parseOrientArgs('')).toEqual({ opts: { brief: '', deck: true, views: true, critique: true, report: true } })
-  expect(parseOrientArgs('the moderators --no-views report=off')).toEqual({ opts: { brief: 'the moderators', deck: true, views: false, critique: true, report: false } })
-  expect(parseOrientArgs('focus="who reverts edits" -no-deck critique=no')).toEqual({ opts: { brief: 'who reverts edits', deck: false, views: true, critique: false, report: true } })
-  expect(parseOrientArgs('--final_notebook=false --propose-views=0 --generate_report')).toEqual({ opts: { brief: '', deck: false, views: false, critique: true, report: true } })
+  // the Start gate's: every output on, the critique off
+  expect(ORIENT_DEFAULTS).toEqual({ deck: true, views: true, critique: false, report: true })
+  expect(parseOrientArgs('')).toEqual({ opts: { brief: '', deck: true, views: true, critique: false, report: true } })
+  expect(parseOrientArgs('the moderators --no-views report=off')).toEqual({ opts: { brief: 'the moderators', deck: true, views: false, critique: false, report: false } })
+  expect(parseOrientArgs('focus="who reverts edits" -no-deck critique=yes')).toEqual({ opts: { brief: 'who reverts edits', deck: false, views: true, critique: true, report: true } })
+  expect(parseOrientArgs('--final_notebook=false --propose-views=0 --critique')).toEqual({ opts: { brief: '', deck: false, views: false, critique: true, report: true } })
   expect(parseOrientArgs('pages where 3 > 2, mostly')).toMatchObject({ opts: { brief: 'pages where 3 > 2, mostly' } })
   const bad = parseOrientArgs('the moderators --fast')
-  expect(bad).toEqual({ error: 'unknown option --fast. /thimble-orient takes brief (or plain words: what to focus on), deck, views, critique, report (each on or off: deck=off, --no-deck, --report)' })
+  expect(bad).toEqual({ error: 'unknown option --fast. /thimble-orient takes brief (or plain words: what to focus on), deck, views, critique, report (each on or off: deck=off, --no-deck, --critique)' })
   expect(parseOrientArgs('status=deleted')).toMatchObject({ error: expect.stringContaining('unknown option status=deleted') })
   expect(parseOrientArgs('deck=maybe')).toMatchObject({ error: expect.stringContaining('deck=maybe: deck is on or off') })
   expect(parseOrientArgs('--no-deck=on')).toMatchObject({ error: expect.stringContaining('write --no-deck or deck=off') })
-  expect(orientLine({ brief: '', ...ORIENT_DEFAULTS, report: false })).toBe('the whole corpus · deck on · views on · critique on · report off')
+  expect(orientLine({ brief: '', ...ORIENT_DEFAULTS, report: false })).toBe('the whole corpus · deck on · views on · critique off · report off')
   // the tool: the same names, thimble's start_orientation names as aliases
-  expect(orientOptsOf({ brief: ' edits ', final_notebook: false, propose_views: true })).toEqual({ opts: { brief: 'edits', deck: false, views: true, critique: true, report: true } })
+  expect(orientOptsOf({ brief: ' edits ', final_notebook: false, propose_views: true })).toEqual({ opts: { brief: 'edits', deck: false, views: true, critique: false, report: true } })
   // the keys tool.call carries beside the tool's arguments are not arguments
-  expect(orientOptsOf({ tool: 'mcp__thimble-cc-mod__orient', tool_use_id: 'toolu_1', consent: 'x', agentId: undefined, brief: 'b', report: false })).toEqual({ opts: { brief: 'b', deck: true, views: true, critique: true, report: false } })
+  expect(orientOptsOf({ tool: 'mcp__thimble-cc-mod__orient', tool_use_id: 'toolu_1', consent: 'x', agentId: undefined, brief: 'b', report: false })).toEqual({ opts: { brief: 'b', deck: true, views: true, critique: false, report: false } })
   expect(orientOptsOf({ colour: 'red' })).toEqual({ error: 'unknown argument colour; the orient tool takes brief, deck, views, critique and report' })
 })
 

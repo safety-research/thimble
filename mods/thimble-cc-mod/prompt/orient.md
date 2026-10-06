@@ -22,7 +22,7 @@ Where the request differs from the guidelines below, follow the request.
 
 ## Coverage
 
-thimble-cc-mod counts which files and records you have read: `python3 {{helper}}/coverage.py` prints what this session has read of each file and which files nothing has opened. Every file must be read at least by a sample of its records, or counted over by a script, before you finish, and every kind of file must have records you read yourself. thimble-cc-mod adds a line of the count to your tool results while files remain unopened, and when you end with a file unopened, a kind of file with no record read or no document, it starts a second round that reads what you missed and revises your document. Run the coverage command before you write the document, and again before you end.
+thimble-cc-mod counts which files and records you have read: `python3 {{helper}}/coverage.py` prints what this session has read of each file and which files nothing has opened. Every file must be read at least by a sample of its records, or counted over by a script, before you finish, and every kind of file must have records you read yourself. When you end, thimble-cc-mod adds a line of what you viewed to the end of your document. Run the coverage command before you write the document, and again before you end.
 
 ## Outputs
 

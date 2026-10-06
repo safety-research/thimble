@@ -4,7 +4,7 @@
 import { expect, test } from 'claude-code/testing'
 
 import type { ChatAgent, ChatCoverage, ChatLabel, ChatReport, ChatReportNav } from '../types'
-import { coverageAfterTurn, coverageAppend, coverageCommand, coverageSection, critiqueOf, fileWords, fillPrompt, jsonObjects, labelCommand, orientTool, orientToolLine, judgedProblem, judgedStatus, kindOf, labelAnswer, labelPrompt, labelTool, labelToolLine, labelVerdict, orientCommand, orientEnded, orientGaps, orientNote, parseLabels, rangeWords, runLabel, specOf } from '../hooks/harness'
+import { checkNote, coverageAfterTurn, coverageAppend, coverageCommand, coverageLine, critiqueOf, fillPrompt, globOf, jsonObjects, labelCommand, orientTool, orientToolLine, judgedProblem, judgedStatus, kindOf, labelAnswer, labelPrompt, labelTool, labelToolLine, labelVerdict, orientCommand, orientEnded, parseLabels, rangeWords, runLabel, share, specOf } from '../hooks/harness'
 import type { CoverageSummary, HarnessCtx } from '../hooks/harness'
 
 const CWD = '/corpus/wiki'
@@ -37,6 +37,8 @@ type Fake = {
   agents: Map<string, ChatAgent>
   spawned: { prompt: string; desc: string }[]
   notes: string[]
+  logs: string[]
+  parents: Record<string, string>
   opened: string[]
   asked: string[]
   changed: string[]
@@ -47,7 +49,7 @@ type Fake = {
 }
 
 function fake(): Fake {
-  const f = { files: new Map(), runs: [], coverage: null, labels: new Map(), reports: new Map(), agents: new Map(), spawned: [], notes: [], opened: [], asked: [], changed: [], nav: null } as unknown as Fake
+  const f = { files: new Map(), runs: [], coverage: null, labels: new Map(), reports: new Map(), agents: new Map(), spawned: [], notes: [], logs: [], parents: {}, opened: [], asked: [], changed: [], nav: null } as unknown as Fake
   f.answer = argv => {
     if (String(argv[1]).endsWith('coverage.py') && argv[2] === 'summary') return { exitCode: 0, stdout: JSON.stringify(summary()), stderr: '' }
     if (String(argv[1]).endsWith('coverage.py') && argv[2] === 'record') return { exitCode: 0, stdout: JSON.stringify({ written: 1, line: 'read 1 of 3 files · 0.2% of records', totals: summary().totals }), stderr: '' }
@@ -148,7 +150,17 @@ function fake(): Fake {
     },
     thread: async () => undefined,
     toast: () => undefined,
-    log: () => undefined,
+    log: t => {
+      f.logs.push(t)
+    },
+    children: async ids => {
+      const out = new Set(ids)
+      for (let grew = true; grew; ) {
+        grew = false
+        for (const [id, parent] of Object.entries(f.parents)) if (out.has(parent) && !out.has(id)) grew = Boolean(out.add(id))
+      }
+      return [...out]
+    },
   }
   return f
 }
@@ -169,87 +181,86 @@ test('coverage: each tracked tool result of main and of a subagent goes to the c
   expect(f.coverage).toMatchObject({ line: 'read 1 of 3 files · 0.2% of records', files: 3, untouched: 1, recordsSeen: 10 })
 })
 
-test('the coverage check: an answer that speaks for the whole corpus while a kind of file was never opened, once a prompt of the analyst\'s', async () => {
+test('the coverage check: an answer that speaks for the whole corpus while a kind of file was never opened; one text for the analyst and main', async () => {
   const general = `## Most edits are link fixes\n\nAll nine agents edit pages [[12|card:abc#n/x]]. ${'More words. '.repeat(40)}`
   const why = critiqueOf(summary(), general)
-  expect(why).toContain('No call opened this kind of file: pages.jsonl (500 records).')
-  expect(why).toContain('Code counted over this kind of file, but no call showed you any of its records: labels.jsonl (1,500 records).')
-  expect(why).toContain('read 1 of 3 files')
+  expect(why).toBe(
+    'Coverage check: this session has read 1 of 3 files · 0.2% of records · 1 only counted by code · 1 never opened. No call opened this kind of file: pages.jsonl (500 records). Code counted over this kind of file, but no call showed any of its records: labels.jsonl (1,500 records). The answer speaks for the corpus as a whole but rests only on the files read.',
+  )
   expect(critiqueOf(summary(), 'There are 3 files.')).toBeNull()
   // every kind has records read: no check
   const read = summary({ kinds: summary().kinds.map(k => ({ ...k, untouched: 0, scanned: 0, read: k.files, records_seen: 5 })) })
   expect(critiqueOf(read, general)).toBeNull()
   expect(kindOf('runs/12/a1b2c3d4e5/events.jsonl')).toBe('runs/#/*/events.jsonl')
-  // files by name in the check's line
-  expect(fileWords([{ file: 'a' }])).toBe('a')
-  expect(fileWords([{ file: 'a' }, { file: 'b' }, { file: 'c' }])).toBe('a, b and c')
-  expect(fileWords(Array.from({ length: 1205 }, (_, i) => ({ file: `f${i}` })))).toBe('f0, f1 and 1,203 more')
-  // after main's turn: the check's prompt once; the turn that answers it is not checked; off by the command
+  // after main's turn: the check each time an answer calls for it (main takes no turn of its own to answer it); off by
+  // the command
   const f = fake()
-  const check = await coverageAfterTurn(f.ctx, general)
-  expect(check!.text).toContain('/mod/helper/coverage.py')
-  expect(check!.text.startsWith('thimble-cc-mod')).toBe(false)
-  // the one line main's chat shows of it: the files by name, as the coverage row words them
-  expect(check!.line).toBe('pages.jsonl never opened · labels.jsonl only counted')
-  expect(await coverageAfterTurn(f.ctx, general)).toBeNull()
-  expect(await coverageAfterTurn(f.ctx, general)).not.toBeNull()
-  await coverageAfterTurn(f.ctx, 'short')
+  expect(await coverageAfterTurn(f.ctx, general)).toBe(why)
+  expect(await coverageAfterTurn(f.ctx, general)).toBe(why)
+  expect(await coverageAfterTurn(f.ctx, 'short')).toBeNull()
   expect((await coverageCommand(f.ctx, 'check off')).text).toBe('the coverage check after an answer is off')
   expect(await coverageAfterTurn(f.ctx, general)).toBeNull()
   await coverageCommand(f.ctx, 'check on')
+  // main reads the analyst's words, and where to look
+  expect(checkNote(why!, '/mod/helper')).toBe(`thimble-cc-mod: the analyst read this coverage check under your last answer: "${why}" \`python3 /mod/helper/coverage.py\` lists what was read of each file.`)
 })
 
-test('the orientation: a report writer with the corpus listed; its gaps noted as it works and read by a second round; what it read added', async () => {
+test("the coverage line, as thimble's orientation words it: files viewed by glob, the share of files and of lines", () => {
+  expect(share(0, 10)).toBe('0%')
+  expect(share(1, 1000)).toBe('<1%')
+  expect(share(999, 1000)).toBe('99%')
+  expect(share(10, 10)).toBe('100%')
+  expect(globOf('runs/run-12/log.jsonl')).toBe('runs/run-*/*.jsonl')
+  expect(globOf('runs/run-12/log.jsonl', true)).toBe('runs/**')
+  expect(globOf('notes.md')).toBe('*.md')
+  expect(globOf('Makefile')).toBe('*')
+  // only events.jsonl had lines shown; labels.jsonl was only counted over, which views nothing
+  expect(coverageLine(summary())).toBe('Coverage: viewed only events.jsonl · 33% of files · <1% of lines')
+  const file = (f: string, records: number, seen: number) => ({ file: f, size: 100, records, seen, state: (seen ? 'read' : 'untouched') as 'read' | 'untouched', ranges: [], agents: [] })
+  const runs = summary({ files: [file('runs/1/log.jsonl', 100, 50), file('runs/2/log.jsonl', 100, 10), file('runs/3/log.jsonl', 100, 5), file('runs/4/log.jsonl', 100, 0), file('board.jsonl', 300, 30), file('notes.md', 10, 0)] })
+  expect(coverageLine(runs)).toBe('Coverage: viewed only board.jsonl, runs/*/*.jsonl (3 of 4 files) · 67% of files · 13% of lines')
+  const two = summary({ files: [file('runs/1/log.jsonl', 100, 50), file('runs/2/log.jsonl', 100, 0), file('runs/3/log.jsonl', 100, 0)] })
+  expect(coverageLine(two)).toBe('Coverage: viewed only runs/1/log.jsonl · 33% of files · 17% of lines')
+  expect(coverageLine(summary({ files: [file('a.jsonl', 10, 10), file('b.jsonl', 10, 1)] }))).toBe('Coverage: viewed every file · 100% of files · 55% of lines')
+  expect(coverageLine(summary({ files: [file('a.jsonl', 10, 0)] }))).toBe('Coverage: viewed no file · 0% of files · 0% of lines')
+})
+
+test('the orientation: a report writer with the corpus listed; it hears nothing of the count while it works; its end, the coverage line of its own reads', async () => {
   const f = fake()
-  const said = await orientCommand(f.ctx, 'who edits the most --no-critique report=off')
+  const said = await orientCommand(f.ctx, 'who edits the most report=off')
   await f.started
   expect(said.text).toBe('orienting · brief "who edits the most" · deck on · views on · critique off · report off')
-  expect(f.reports.get('orientation')).toMatchObject({ form: 'document', title: 'Orientation: who edits the most', state: 'writing', agentId: 'agent-1' })
+  expect(f.reports.get('orientation')).toMatchObject({ form: 'document', title: 'Orientation: who edits the most', state: 'writing', agentId: 'agent-1', orientBy: ['agent-1'] })
   expect(f.opened).toEqual(['report'])
   expect(f.spawned[0]!.desc).toBe('report · orientation · who edits the most')
   expect(f.spawned[0]!.prompt).toContain('Request: who edits the most')
   expect(f.spawned[0]!.prompt).toContain('- pages.jsonl: 500 records (lines), 100,000 bytes')
   expect(f.spawned[0]!.prompt).toContain('# thimble-cc-mod guidance')
   expect(f.agents.get('agent-1')).toMatchObject({ kind: 'report', report: 'orientation' })
-  const gaps = orientGaps(summary(), false, '.thimble-cc-mod/reports/orientation.md')
-  expect(gaps).toContain('You have not written the document')
-  expect(gaps).toContain('No call has opened this file: pages.jsonl')
-  expect(gaps).toContain('read no record of these kinds of file yourself, only counted over them: labels.jsonl, pages.jsonl')
-  // its tool results carry the count's line while files remain unopened, once per change of the line
-  f.coverage = { line: 'read 1 of 3 files', files: 3, read: 1, scanned: 1, untouched: 1, records: 5000, recordsSeen: 10, unopened: ['pages.jsonl'], at: 1 }
-  const noted = await orientNote(f.ctx, 'agent-1', 'tool-result', { content: [{ type: 'tool_result', tool_use_id: 'x', content: 'out' }] })
-  expect(JSON.stringify(noted.content)).toContain('thimble-cc-mod coverage so far: read 1 of 3 files; never opened: pages.jsonl.')
-  const again = await orientNote(f.ctx, 'agent-1', 'tool-result', { content: [{ type: 'tool_result', tool_use_id: 'y', content: 'out' }] })
-  expect(JSON.stringify(again.content)).not.toContain('coverage so far')
-  // it ends with gaps: a second round reads what it missed, the report still writing
-  f.files.set('/mod/prompt/orient-again.md', 'Again. Gaps: {{gaps}} File: {{file}}')
-  expect(await orientEnded(f.ctx, 'agent-9', 'answer')).toBe(false)
-  expect(await orientEnded(f.ctx, 'agent-1', 'answer')).toBe(true)
-  expect(f.spawned[1]!.desc).toBe('report · orientation · reading what it missed')
-  expect(f.spawned[1]!.prompt).toContain('Gaps: thimble-cc-mod coverage check before the orientation ends')
-  expect(f.spawned[1]!.prompt).toContain('You have not written the document')
-  expect(f.agents.get('agent-2')).toMatchObject({ kind: 'report', report: 'orientation' })
-  expect(f.reports.get('orientation')).toMatchObject({ agentId: 'agent-2' })
-  // the second round ends: no third; what was read added to the document
+  // it ends with files unopened: no second round; the coverage line of its reads and its subagents' ends the document,
+  // shows in main's chat, and goes to main with the next prompt
+  f.parents = { 'agent-5': 'agent-1', 'agent-6': 'agent-5', 'agent-7': 'main' }
   f.files.set(`${CWD}/.thimble-cc-mod/reports/orientation.md`, '# The wiki has nine editors\n\nText.\n')
-  expect(await orientEnded(f.ctx, 'agent-2', 'answer')).toBe(false)
-  const doc = f.files.get(`${CWD}/.thimble-cc-mod/reports/orientation.md`)!
-  expect(doc).toContain('## What the orientation read')
-  expect(doc).toContain('- `pages.jsonl`, 500 records: never opened')
-  expect(doc).toContain('read 10 (0.3%), such as [[events.jsonl#L1-L5]] [[events.jsonl#L1500-L1504]]')
-  expect(f.spawned.length).toBe(2)
-  expect(coverageSection(summary()).indexOf('pages.jsonl')).toBeLessThan(coverageSection(summary()).indexOf('events.jsonl`'))
+  expect(await orientEnded(f.ctx, 'agent-9', 'answer')).toBe(false)
+  expect(await orientEnded(f.ctx, 'agent-1', 'answer')).toBe(false)
+  expect(f.spawned.length).toBe(1)
+  const summed = f.runs.filter(r => r.argv[2] === 'summary').at(-1)!.argv
+  expect(summed.filter((_, i) => summed[i - 1] === '--agent')).toEqual(['agent-1', 'agent-5', 'agent-6'])
+  const line = 'Coverage: viewed only events.jsonl · 33% of files · <1% of lines'
+  expect(f.files.get(`${CWD}/.thimble-cc-mod/reports/orientation.md`)).toBe(`# The wiki has nine editors\n\nText.\n\n${line}\n`)
+  expect(f.logs).toEqual([`thimble-cc-mod: the orientation ended · ${line}`])
+  expect(f.notes.at(-1)).toBe(`thimble-cc-mod: the orientation ended; the analyst read this line in the chat and at the end of its document .thimble-cc-mod/reports/orientation.md: "${line}"`)
   expect(rangeWords([[1, 5], [88, 88], [1203, 1250]])).toBe('1-5, 88, 1203-1250')
 })
 
 test('the orientation\'s switches: its prompt\'s parts, the critique round, then the report\'s writer; one at a time; main\'s tool takes the same', async () => {
   const f = fake()
-  // every file read: no coverage round
+  // every file read
   const full = summary({ line: 'read 3 of 3 files', totals: { ...summary().totals, read: 3, scanned: 0, untouched: 0 }, kinds: summary().kinds.map(k => ({ ...k, read: k.files, untouched: 0, scanned: 0, records_seen: 5 })), files: summary().files.map(x => ({ ...x, state: 'read' as const, seen: 5, ranges: [[1, 5]] })) })
   f.answer = argv => (String(argv[1]).endsWith('coverage.py') && argv[2] === 'summary' ? { exitCode: 0, stdout: JSON.stringify(full), stderr: '' } : { exitCode: 1, stdout: '', stderr: 'no answer' })
   f.files.set('/mod/prompt/orient.md', 'Orient {{brief}}.{{#deck}} DECK of {{slug}}{{/deck}}{{^deck}} NO CARDS{{/deck}}{{#views}} VIEWS{{/views}}{{#critique}} CRITIQUE{{/critique}}{{#report}} REPORT{{#deck}} citing cards{{/deck}}{{/report}}')
   f.files.set('/mod/prompt/orient-critique.md', 'Review {{file}}{{#deck}} and its cards{{/deck}}{{^deck}}, no cards{{/deck}}.')
-  const said = await orientCommand(f.ctx, 'brief="the moderators" --no-deck views=off')
+  const said = await orientCommand(f.ctx, 'brief="the moderators" --no-deck views=off --critique')
   await f.started
   expect(said.text).toBe('orienting · brief "the moderators" · deck off · views off · critique on · report on')
   expect(f.spawned[0]!.prompt).toContain('Orient the moderators. NO CARDS CRITIQUE REPORT')
@@ -263,10 +274,13 @@ test('the orientation\'s switches: its prompt\'s parts, the critique round, then
   expect(f.spawned[1]!.desc).toBe('report · orientation · critique and revision')
   expect(f.spawned[1]!.prompt).toContain('Review .thimble-cc-mod/reports/orientation.md, no cards.')
   expect(f.reports.get('orientation')).toMatchObject({ agentId: 'agent-2', partial: 'a reviewer checks the document against the records' })
-  // the critique ends: what was read added, and the writer starts on a report that retells the document
+  // the critique ends: the coverage line of the first round's reads (never the critique's) ends the document, and the
+  // writer starts on a report that retells the document
   expect(await orientEnded(f.ctx, 'agent-2', 'answer')).toBe(false)
   await f.started
-  expect(f.files.get(`${CWD}/.thimble-cc-mod/reports/orientation.md`)).toContain('## What the orientation read')
+  const summed = f.runs.filter(r => r.argv[2] === 'summary').at(-1)!.argv
+  expect(summed.filter((_, i) => summed[i - 1] === '--agent')).toEqual(['agent-1'])
+  expect(f.files.get(`${CWD}/.thimble-cc-mod/reports/orientation.md`)).toContain('\n\nCoverage: viewed every file · 100% of files · <1% of lines\n')
   const written = [...f.reports.values()].find(r => r.slug !== 'orientation')!
   expect(written).toMatchObject({ form: 'document', title: 'The moderators', source: '.thimble-cc-mod/reports/orientation.md', state: 'writing' })
   expect(f.spawned[2]!.desc).toBe('report · writing The moderators')
@@ -280,7 +294,7 @@ test('the orientation\'s switches: its prompt\'s parts, the critique round, then
   expect(f.spawned[3]!.prompt).not.toContain('CRITIQUE')
   expect(await orientTool(f.ctx, { agentId: 'a1' })).toMatchObject({ deny: expect.stringContaining('only the main conversation') })
   expect(await orientTool(f.ctx, { deck: 'maybe' })).toMatchObject({ deny: 'thimble-cc-mod orient: deck is true or false' })
-  expect(orientToolLine({ brief: 'edits', views: false })).toBe('  orient · brief "edits" · deck on · views off · critique on · report on')
+  expect(orientToolLine({ brief: 'edits', views: false })).toBe('  orient · brief "edits" · deck on · views off · critique off · report on')
   // the orientation ends early (stopped): no critique, no report
   expect(await orientEnded(f.ctx, 'agent-4', 'stopped')).toBe(false)
   expect(f.spawned.length).toBe(4)

@@ -118,7 +118,7 @@ When the analyst asks to highlight, mark or find something in a report, such as 
 
 ## The orientation
 
-When the analyst asks for an orientation, or for an overview of a corpus they have not seen yet, call thimble-cc-mod's `orient` tool and reply in one line that it has started. A subagent surveys every file and writes a short document the analyst reads in the panel, and thimble-cc-mod tells you when it is done. Its arguments are those of the analyst's `/thimble-orient` and of thimble's Start: `brief`, what the analyst wants it to focus on, in their words (empty for the whole corpus), and four switches, each on unless the analyst turns it off: `deck` (five to eight cards in the document), `views` (it proposes views), `critique` (a reviewer who did not do the analysis checks and revises the document) and `report` (the writer writes a fuller report from it). Set a switch only when the analyst names it, such as "orient me on the moderators, no report" (brief "the moderators", report false). One orientation runs at a time.
+When the analyst asks for an orientation, or for an overview of a corpus they have not seen yet, call thimble-cc-mod's `orient` tool and reply in one line that it has started. A subagent surveys every file and writes a short document the analyst reads in the panel, and thimble-cc-mod tells you when it is done. Its arguments are those of the analyst's `/thimble-orient` and of thimble's Start: `brief`, what the analyst wants it to focus on, in their words (empty for the whole corpus), and four switches with thimble's Start defaults: `deck` (five to eight cards in the document), `views` (it proposes views) and `report` (the writer writes a fuller report from it) are on, and `critique` (a reviewer who did not do the analysis checks and revises the document) is off. Set a switch only when the analyst names it, such as "orient me on the moderators, no report" (brief "the moderators", report false). One orientation runs at a time.
 
 ## Labels
 
@@ -138,7 +138,7 @@ Whenever you sort records into categories, such as what each message asks for, w
 
 ## Coverage
 
-thimble-cc-mod counts which files and records you and your subagents have read in this session, and tells you with each prompt; `python3 {{helper}}/coverage.py` lists what was read of each file and which files nothing has opened. A claim about the corpus as a whole, such as "all", "most" or "never", holds only for the files you counted over, and a count means what you think only after you have read records of each kind of file. When a question is about the whole corpus and files remain unopened, open or count over them before you answer, or say which files the answer rests on. When thimble-cc-mod's coverage check sends you back, follow it up before you finish.
+thimble-cc-mod counts which files and records you and your subagents have read in this session, and tells you with each prompt; `python3 {{helper}}/coverage.py` lists what was read of each file and which files nothing has opened. A claim about the corpus as a whole, such as "all", "most" or "never", holds only for the files you counted over, and a count means what you think only after you have read records of each kind of file. When a question is about the whole corpus and files remain unopened, open or count over them before you answer, or say which files the answer rests on. A coverage check of your last answer, which the analyst read under it, comes with the next prompt.
 
 ## Files
 

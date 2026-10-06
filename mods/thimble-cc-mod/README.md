@@ -157,13 +157,9 @@ passages a phrase applies to. "open as report" under an answer turns the answer 
   are noted through a `sitecustomize` the mod puts on `PYTHONPATH`). A line above the prompt says it ("read 2 of 4
   files · 0.4% of records · 1 never opened"); `/thimble-coverage` or its "details" opens the panel with each file, the
   lines read and what was never opened. Claude gets the line with each prompt. When an answer speaks for the whole
-  corpus while a kind of file was never opened, or had no record read, the mod sends Claude what it missed, once per
-  prompt of yours (`/thimble-coverage check off` turns that off), and Claude answers it in a turn of its own. Main's
-  chat shows one dim line of it (`› coverage check · events.jsonl never opened · pages.jsonl only counted`); ctrl+o
-  shows the row as Claude Code draws it. Claude Code gives a plugin no prompt of its own that the chat does not show in
-  full, so a subagent on a small model carries the check: it says the line back, and its hand-back, which starts
-  Claude's turn, takes the check along as context the chat does not show. Where no subagent can start, the check goes
-  with your next prompt instead.
+  corpus while a kind of file was never opened, or had no record read, a coverage check shows under the answer, whole,
+  and Claude reads the same words with your next prompt. Claude starts no turn of its own for it.
+  `/thimble-coverage check off` turns the check off.
 - **Labels.** Claude's `label` tool sorts the records of some files into values, as thimble's labels do: a prompt (a
   model reads each record, in batches), a regex or code; a trial on a sample first, then every record. Its answer is a
   label card in the reply: the count of each value as bars in the values' colours, and a few records with their words
@@ -179,13 +175,15 @@ passages a phrase applies to. "open as report" under an answer turns the answer 
   `/thimble-label` defines and applies one with the tool's arguments, and lists or opens them (see Orientation and
   labels by command). `THIMBLE_CC_MOD_LABEL_MODEL` picks the model (default `claude-opus-5-5`, low effort).
 - **Orientation.** `/thimble-orient`, or Claude's `orient` tool when you ask for an orientation, starts a fork that
-  surveys every file and writes a short document, shown in the panel as a report. Its tool results carry the coverage
-  line while files remain unopened; if it ends with a file unopened or a kind of file with no record read, a second
-  fork reads what it missed and revises the document. Its switches are thimble's Start gate's, all on by default:
-  `deck` (five to eight cards in the document; off, a document without cards), `views` (it proposes up to four views,
-  built as Claude's are), `critique` (a fork that did not do the analysis reviews the document against the records and
-  revises it) and `report` (the writer then writes a fuller report from the document and its cards). The document ends
-  with what was read of each file, each range a citation. One orientation runs at a time.
+  surveys every file and writes a short document, shown in the panel as a report. Its switches and their defaults are
+  thimble's Start gate's: `deck` (five to eight cards in the document; off, a document without cards), `views` (it
+  proposes up to four views, built as Claude's are) and `report` (the writer then writes a fuller report from the
+  document and its cards) are on, and `critique` (a fork that did not do the analysis reviews the document against the
+  records and revises it) is off. When it ends, thimble's coverage line ends the document, shows in main's chat, and
+  goes to Claude with your next prompt: the files whose lines its calls showed, by glob, and its share of the files and
+  of their lines ("Coverage: viewed only events/*.jsonl · 22% of files · 12% of lines"). Only the orientation's own
+  reads count, its subagents' included and the critique's not. It hears nothing of the count while it works. One
+  orientation runs at a time.
 
 ## Orientation and labels by command
 
@@ -195,7 +193,7 @@ too. They follow thimble's `start_orientation` and `apply_label`; thimble's own 
 with spaces) and `--flag` / `--no-flag`. The command answers with one line of what it understood, or refuses an
 option it does not know and lists those it takes.
 
-    /thimble-orient [brief words] [brief="…"] [deck|views|critique|report=on|off] [--no-deck] [--report] …
+    /thimble-orient [brief words] [brief="…"] [deck|views|critique|report=on|off] [--no-deck] [--critique] …
     /thimble-label                                   the labels, in the panel (or: list)
     /thimble-label open <name>                       one label (its name alone opens it too)
     /thimble-label <name> kind=prompt|regex|code definition="…" paths=a.jsonl,b/*.jsonl [values=yes,no]
