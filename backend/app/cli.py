@@ -3173,15 +3173,17 @@ def cmd_ensure(args: argparse.Namespace) -> int:
         else:
             given = precached_context(url, name, str(args.session)) if name and args.session else ""
             second = [PRECACHED_LINE] if given else [RESUME_LINE] if not opened and resumes(url, name) else []
+        # a plain `claude`: the warning goes under the link too, which the Stop hook shows whatever main's reply holds
+        unfenced = bool(args.session) and not launched() and not fenced_here(cwd)
         # with the plugin's hooks off no Stop hook shows the link, so the page opens without the key
         if (args.session and not cc_plugin.hooks_blocked(cwd, plugin_root())
-                and leave_link(str(args.session), ui_url(name), [])):
+                and leave_link(str(args.session), ui_url(name), [UNFENCED_LINE] if unfenced else [])):
             print(LINK_LINE)
         else:
             print(f"thimble: {ui_url(name, key=not args.session and to_terminal())}")
         for line in second:
             print(line)
-        if args.session and not launched() and not fenced_here(cwd):
+        if unfenced:
             print(UNFENCED_LINE)
         status = config.auth_status(cwd=cwd)
         if args.session:

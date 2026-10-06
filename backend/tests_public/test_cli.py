@@ -152,6 +152,24 @@ def test_up_prints_the_url_and_opens_a_sessions_folder(home, data, monkeypatch, 
     assert cli.build_parser().parse_args(["up"]).cmd == "up" and cli.build_parser().parse_args(["ensure"]).cmd == "ensure"
 
 
+def test_slash_thimble_in_a_plain_claude_leaves_the_warning_for_the_stop_hook(home, data, monkeypatch, capsys):
+    """Live check L15: in a plain `claude`, main's reply to /thimble left out the warning line the skill gave it, so the
+    terminal never showed it. The warning now goes under the link the session's Stop hook shows, whatever main
+    replies; main's text still holds it too. A launched, fenced main gets the link alone."""
+    _healthy_no_process(monkeypatch)
+    monkeypatch.setattr(cli, "_request", lambda m, u, b=None, timeout=5.0: (404, {}))
+    monkeypatch.setattr(cli, "launched", lambda: False)
+    monkeypatch.setattr(cli, "fenced_here", lambda cwd: False)
+    assert cli.main(["up", "--cwd", str(data / "mini" / "agents"), "--session", "s7"]) == 0
+    assert capsys.readouterr().out.splitlines() == [cli.LINK_LINE, cli.UNFENCED_LINE]
+    url, warning = (home / "links" / "s7").read_text().split("\n")
+    assert url.startswith("http://127.0.0.1:5300/?ws=mini#k=") and warning == cli.UNFENCED_LINE
+    monkeypatch.setattr(cli, "launched", lambda: True)
+    assert cli.main(["up", "--cwd", str(data / "mini" / "agents"), "--session", "s6"]) == 0
+    assert capsys.readouterr().out.splitlines() == [cli.LINK_LINE]
+    assert "\n" not in (home / "links" / "s6").read_text()
+
+
 def test_the_launcher_and_slash_thimble_say_nothing_of_claude_code_s_trust(home, data, monkeypatch, capsys,
                                                                        claude_global_config):
     """Neither the launcher nor /thimble warns about trust, whatever Claude Code's config says. Only the doctor's hooks

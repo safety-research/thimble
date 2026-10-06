@@ -446,7 +446,8 @@ def test_slash_thimble_warns_in_a_session_the_launcher_did_not_start(corpus, mon
     assert cli.UNFENCED_LINE.startswith("thimble: WARNING - this session was not started with `thimble`")
     assert "thimble's agents cannot start in it" in cli.UNFENCED_LINE
     src = Path(cli.__file__).read_text("utf-8")
-    assert "if args.session and not launched() and not fenced_here(cwd):\n            print(UNFENCED_LINE)" in src
+    assert "unfenced = bool(args.session) and not launched() and not fenced_here(cwd)" in src
+    assert "if unfenced:\n            print(UNFENCED_LINE)" in src, "test_cli holds what the Stop hook is left"
     fence = {"sandbox": {"enabled": True}, "env": {cc_plugin.FENCE_MARK: "1"}}
     monkeypatch.undo()
     monkeypatch.setattr(cc_plugin, "claude_pid", lambda environ=None: 77)
