@@ -549,3 +549,25 @@ def test_a_role_that_first_speaks_past_the_head_still_starts_a_turn(chats, monke
     page = client.get(f"{CHATS}/source", params={"path": "logs/late.md"}).json()
     assert page["transcript"]["speakers"] == ["assistant", "user"]
     assert [r["meta"].get("turn", {}).get("speaker") for r in page["records"]] == [None, "User", "Assistant", "User", "Assistant", "System"]
+
+
+def test_an_agent_transcript_with_tool_records_is_a_strong_transcript():
+    """A harness that logs each tool call with its result on its own line, between the agent's spoken turns: the tool
+    turns count toward the transcript, so it is strong (Transcript the default), with `tools` set for the view, even
+    though well under half the records carry words. A plain message board, with no tool records, keeps no such flag."""
+    recs = [{"role": "System", "type": "TextMessage", "timestamp": "2026-07-18T21:29:27Z", "content": "You have tools."}]
+    for i in range(20):
+        recs.append({"role": "Assistant", "type": "TextMessage", "timestamp": f"2026-07-18T21:{30 + i}:00Z",
+                     "content": f"<thinking>step {i}</thinking>\n\nI will run a command."})
+        recs.append({"role": "Assistant", "type": "ToolMessage", "timestamp": f"2026-07-18T21:{30 + i}:05Z",
+                     "tool_name": "terminal", "tool_call": {"text": f"ls {i}"}, "tool_result": f"file{i}.txt\n"})
+        recs.append({"role": "Assistant", "type": "ToolMessage", "timestamp": f"2026-07-18T21:{30 + i}:08Z",
+                     "tool_name": "terminal", "tool_call": {"text": f"cat {i}"}, "tool_result": f"line {i}\n"})
+    got = transcripts.sniff_bytes(jsonl(recs).encode(), "transcript.jsonl", complete=True)
+    assert got["format"] == "messages" and got["score"] == transcripts.STRONG and got["tools"] is True
+    assert got["keys"] == {"speaker": "role", "text": "content", "time": "timestamp"}
+    assert transcripts.is_tool_record(recs[2]) is True and transcripts.is_tool_record(recs[1]) is False
+    # a message board of the same shape of words but no tool records is scored on its own merits and carries no flag
+    board = [{"author": f"u{i % 3}", "body": f"post {i}", "created_at": f"2026-07-18T21:{30 + i}:00Z"} for i in range(9)]
+    plain = transcripts.sniff_bytes(jsonl(board).encode(), "board.jsonl", complete=True)
+    assert "tools" not in plain

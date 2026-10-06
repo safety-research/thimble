@@ -1287,6 +1287,9 @@ export interface TranscriptHint {
   keys?: { speaker: string; text: string; time?: string; list?: string }
   pair?: [string, string]
   lines?: boolean
+  /** the records interleave spoken turns with tool records ({tool_name, tool_call, tool_result}): the view shows each
+   * message as one line, a tool call and its result as blocks, terminal output cleaned */
+  tools?: boolean
   /** a stream whose records each nest a Claude Code stream record under this key */
   wrap?: string
   style?: string

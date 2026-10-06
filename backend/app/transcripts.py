@@ -93,6 +93,11 @@ LIST_KEYS = ("messages", "chat_messages", "conversation", "conversations", "turn
 PAIR_KEYS = (("prompt", "response"), ("prompt", "completion"), ("question", "answer"), ("instruction", "output"),
              ("input", "output"))
 STREAM_TYPES = {"assistant", "user", "system", "tool_progress", "result"}
+# an agent's tool record (a tool call and its result on one line, as many harnesses log them, not the Claude Code
+# stream's two records): a tool-name key beside a call key or a result key
+TOOL_NAME_KEYS = ("tool_name", "tool")
+TOOL_CALL_KEYS = ("tool_call", "tool_input", "tool_args", "arguments", "function_call")
+TOOL_RESULT_KEYS = ("tool_result", "tool_response", "observation")
 # where a person object keeps its name: these keys, then a key of NAME_NORMS in any case style (`displayName`), then
 # its role or id
 NAME_FIELDS = ("name", "display_name", "username", "real_name")
@@ -444,6 +449,15 @@ def is_stream(obj: Any) -> bool:
         isinstance(obj.get("message"), dict) or isinstance(obj.get("session_id"), str) or isinstance(obj.get("uuid"), str))
 
 
+def is_tool_record(obj: Any) -> bool:
+    """A record that logs one tool call with its result (an agent harness's `{tool_name, tool_call, tool_result}`), so a
+    transcript's tool turns count toward it beside its spoken turns."""
+    if not isinstance(obj, dict):
+        return False
+    has_name = any(isinstance(obj.get(k), str) and obj.get(k) for k in TOOL_NAME_KEYS)
+    return has_name and (any(k in obj for k in TOOL_CALL_KEYS) or any(k in obj for k in TOOL_RESULT_KEYS))
+
+
 def stream_wrap(obj: Any) -> str | None:
     """Where a record holds a Claude Code stream record: "" for one that is one, the key of one it nests (MORE_WRAPS,
     WRAP_KEYS), else None."""
@@ -586,7 +600,11 @@ def _sniff_jsonl(text: str, parsed: bool) -> dict[str, Any] | None:
         found = [k for k in map(_conversation_keys, objs) if k]
         return {"format": "conversations", "score": STRONG, **lines, **(_commonest(found) if found else {})}
     keyed_objs = [(r, k) for r in objs if (k := message_keys(r))]
-    if not (len(keyed_objs) * 2 >= n or (len(keyed_objs) >= 2 and len(keyed_objs) * 5 >= n)):
+    # tool records carry no words of their own, so they are not keyed; an agent transcript's spoken turns and tool turns
+    # together must dominate the head, and it needs a spoken turn or two to name who speaks
+    tools = sum(1 for r in objs if is_tool_record(r))
+    covered = len(keyed_objs) + tools
+    if not keyed_objs or not (covered * 2 >= n or (covered >= 2 and covered * 5 >= n)):
         return None
     best = _commonest([k for _, k in keyed_objs])
     speakers = [s for r, _ in keyed_objs if (s := _name_of(_get(r, best["speaker"])))]
@@ -600,6 +618,12 @@ def _sniff_jsonl(text: str, parsed: bool) -> dict[str, Any] | None:
     sure_key = roles or _sure_speaker_key(best["speaker"].split("|")[0].rsplit(".", 1)[-1])
     strong = (len(keyed_objs) * 2 >= n and with_speaker * 10 >= n * 7 and sure_key
               and _in_time_order([_get(r, best["time"]) for r in objs] if "time" in best else []))
+    if tools:
+        # an agent transcript: spoken turns interleaved with tool calls, read in file order (its records number
+        # themselves, so the sniff does not weigh time). The view (`tools`) shows the calls and their results as blocks.
+        agent_strong = sure_key and covered * 2 >= n
+        return {"format": "messages", "score": STRONG if (strong or agent_strong) else WEAK, "keys": best,
+                "tools": True, **lines}
     return {"format": "messages", "score": STRONG if strong else WEAK, "keys": best, **lines}
 
 

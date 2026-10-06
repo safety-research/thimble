@@ -16,8 +16,10 @@ import { Chip } from '../../components/Chip'
 import { Spinner } from '../../components/Spinner'
 import { api } from '../../lib/api'
 import { findQuote } from '../../lib/quoteFind'
+import { cleanTerminal, needsClean } from '../../lib/terminal'
 import type { Block, ChatTurn, SourceKind, SourceRecord, SourceTurn, SourceTurns, TranscriptHint } from '../../lib/types'
-import { BlockEl, citedQuote, Collapsible, compact, errMsg, lineCount, quoteTarget, RecordCard, recordExcerpt, targetOf, useTarget, type Target, type ViewDef, type ViewProps } from './common'
+import { BlockEl, citedQuote, Collapsible, compact, errMsg, isTargetLine, lineCount, quoteTarget, RecordCard, recordExcerpt, targetOf, useTarget, type Target, type ViewDef, type ViewProps } from './common'
+import { UNFOLD_EVENT } from '../find'
 import { useDelimited } from './table'
 
 export const CONVERSATIONAL = new Set(['assistant', 'user'])
@@ -54,11 +56,25 @@ function sysSummary(rec: any): string {
   return parts.join(' · ') || 'record'
 }
 
+/** A tool result, its terminal output cleaned for reading (lib/terminal): a redrawn line reads as the line it ended on,
+ * ANSI escapes and counter markers gone. Raw shows the stored bytes. The cleaned text is not the stored block, so it is
+ * drawn with no path (a span ref's offsets do not apply, and a citation of it is of the record); a citation into the
+ * block, whose offsets are the stored text's, opens it Raw so they land. A result with nothing to clean is the block
+ * itself, drawn as before. */
 function ToolResult({ block, path, line, index, target, hit, isError }: { block: Block; path?: string; line: number; index: number; target: Target | null; hit: boolean; isError: boolean }) {
   const forced = !!target && target.line === line && target.block === index
+  const dirty = needsClean(block.text)
+  const [raw, setRaw] = useState(false)
+  const showRaw = raw || forced || !dirty
+  const shown = showRaw ? block.text : cleanTerminal(block.text)
   return (
-    <Collapsible lines={lineCount(block.text)} forced={forced}>
-      <BlockEl block={block} path={path} line={line} index={index} target={target} hit={hit} className={isError ? 'reader-error' : undefined} />
+    <Collapsible lines={lineCount(shown)} forced={forced}>
+      <BlockEl block={{ ...block, text: shown }} path={showRaw ? path : undefined} line={line} index={index} target={showRaw ? target : null} hit={hit} className={isError ? 'reader-error' : undefined} />
+      {dirty && (
+        <Button size="sm" className="reader-raw-toggle" aria-pressed={showRaw} onClick={() => setRaw((o) => !o)}>
+          {showRaw ? 'Cleaned' : 'Raw'}
+        </Button>
+      )}
     </Collapsible>
   )
 }
@@ -131,6 +147,7 @@ export function Transcript(props: ViewProps) {
   const hint = props.transcript
   if (hint?.format === 'json') return <TurnsTranscript {...props} />
   if (hint?.format === 'conversations') return <Conversations {...props} />
+  if (hint?.tools && !hint.lines) return <AgentTranscript {...props} />
   if (hint?.lines) return <MessageBoard {...props} />
   if (hint?.format === 'stream' || props.page.records.some((rec) => isStreamRec(rec.record))) return <StreamTranscript {...props} />
   if (hint?.format === 'text') return <ChatLog {...props} />
@@ -757,6 +774,204 @@ export function madeBlocks(rec: SourceRecord): Block[] | null {
   const r = rec.record
   const whole = rec.blocks.length === 1 && rec.blocks[0].kind === 'raw'
   return whole && CONVERSATIONAL.has(r?.type) && r?.message && typeof r.message === 'object' ? streamBlocks(r) : null
+}
+
+// ---------------------------------------------------------------------- an agent transcript with tool records
+
+// a tool record ({tool_name, tool_call, tool_result}), mirroring backend transcripts.is_tool_record
+const TOOL_NAME_KEYS = ['tool_name', 'tool']
+const TOOL_CALL_KEYS = ['tool_call', 'tool_input', 'tool_args', 'arguments', 'function_call']
+const TOOL_RESULT_KEYS = ['tool_result', 'tool_response', 'observation']
+// the keys of a call whose value glosses it on one line (a command, a path, a query), most telling first
+const GLOSS_KEYS = ['command', 'text', 'cmd', 'input', 'path', 'file', 'query', 'url', 'pattern', 'name', 'session_name']
+
+const firstVal = (r: any, keys: readonly string[]): unknown => {
+  for (const k of keys) {
+    const v = r?.[k]
+    if (v != null && v !== '') return v
+  }
+  return undefined
+}
+
+const firstLine = (s: string): string => {
+  const line = s.split('\n').find((l) => l.trim()) ?? ''
+  return line.length > 200 ? line.slice(0, 200) + '…' : line
+}
+
+/** A record's tool name, its call and its result when it logs one tool call ({tool_name, tool_call, tool_result}); null
+ * for any other record. A null call or result is read as absent (a redacted call). Pure. */
+export function toolParts(r: any): { name: string; call: unknown; result: unknown } | null {
+  if (!r || typeof r !== 'object') return null
+  const name = TOOL_NAME_KEYS.map((k) => r[k]).find((v) => typeof v === 'string' && v) as string | undefined
+  if (!name) return null
+  const call = firstVal(r, TOOL_CALL_KEYS)
+  const result = firstVal(r, TOOL_RESULT_KEYS)
+  if (call == null && result == null) return null
+  return { name, call, result }
+}
+
+/** The `<thinking>…</thinking>` a reply opens with, and the reply after it; the whole text as the reply when it has
+ * none. Pure. */
+export function splitThinking(text: string): { thinking: string | null; reply: string } {
+  const m = /^\s*<thinking>([\s\S]*?)<\/thinking>\s*/.exec(text)
+  return m ? { thinking: m[1].trim(), reply: text.slice(m[0].length) } : { thinking: null, reply: text }
+}
+
+/** A tool call on one line for the overview: the first telling string it holds (a command, a path), else its keys, else
+ * the call as written. Pure. */
+export function callGloss(call: unknown): string {
+  if (call == null) return ''
+  if (typeof call === 'string') return firstLine(call)
+  if (typeof call === 'object' && !Array.isArray(call)) {
+    const v = firstVal(call, GLOSS_KEYS)
+    if (typeof v === 'string') return firstLine(v)
+    const keys = Object.keys(call as object)
+    if (keys.length) return keys.join(', ')
+  }
+  return firstLine(compact(call, 200))
+}
+
+const callText = (call: unknown): string => (typeof call === 'string' ? call : JSON.stringify(call, null, 2) ?? '')
+
+export interface AgentBlock {
+  kind: Block['kind']
+  text: string
+  /** the stored bytes, when `text` is cleaned terminal output: Raw shows them */
+  raw?: string
+}
+
+export interface AgentMsg {
+  kind: 'tool' | 'text' | 'system' | 'other'
+  toolName?: string
+  blocks: AgentBlock[]
+  /** the one line the overview shows for the message */
+  summary: string
+}
+
+/** A record as the agent view shows it: a tool call and its cleaned result as blocks, a reply's leading `<thinking>` as
+ * a quiet block before its words, a system record or plain message as its words; with the one line the overview shows.
+ * `keys` names where the record keeps who speaks, the words and the time. Pure (clean-up aside). */
+export function agentDisplay(r: any, keys: MessageKeys): AgentMsg {
+  const tool = toolParts(r)
+  if (tool) {
+    const blocks: AgentBlock[] = [{ kind: 'tool_use', text: tool.name + (tool.call != null ? '\n' + callText(tool.call) : '') }]
+    if (tool.result != null) {
+      const stored = textOf(tool.result) ?? (typeof tool.result === 'string' ? tool.result : callText(tool.result))
+      blocks.push({ kind: 'tool_result', text: cleanTerminal(stored), raw: needsClean(stored) ? stored : undefined })
+    }
+    const gloss = callGloss(tool.call)
+    return { kind: 'tool', toolName: tool.name, blocks, summary: gloss ? `${tool.name}  ${gloss}` : tool.name }
+  }
+  const body = textOf(pick(r, keys.body))
+  if (body == null) return { kind: 'other', blocks: [{ kind: 'raw', text: JSON.stringify(r, null, 2) ?? '' }], summary: compact(r, 160) }
+  const role = (nameOf(pick(r, keys.author)) ?? '').toLowerCase()
+  const { thinking, reply } = splitThinking(body)
+  const blocks: AgentBlock[] = []
+  if (thinking) blocks.push({ kind: 'thinking', text: thinking })
+  if (reply.trim() || !thinking) blocks.push({ kind: 'text', text: reply })
+  const summary = firstLine(reply.trim() || (thinking ? `thinking: ${thinking}` : '')) || '(empty)'
+  return { kind: role === 'system' ? 'system' : 'text', blocks, summary }
+}
+
+/** A message folded to one line until it is opened. The full message stays in the DOM so a search finds its words and,
+ * finding them folded (`reader-collapsed`), opens it (UNFOLD_EVENT). A citation or search keeps it open (`forced`). */
+function MessageFold({ startOpen, forced, summary, children }: { startOpen: boolean; forced: boolean; summary: string; children: ReactNode }) {
+  const [open, setOpen] = useState(startOpen)
+  const box = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const el = box.current
+    if (!el) return
+    const unfold = () => setOpen(true)
+    el.addEventListener(UNFOLD_EVENT, unfold)
+    return () => el.removeEventListener(UNFOLD_EVENT, unfold)
+  }, [])
+  const expanded = open || forced
+  return (
+    <div ref={box} className={'reader-msgfold' + (expanded ? '' : ' reader-collapsed')}>
+      {!expanded && (
+        <button type="button" className="reader-msg-oneline" onClick={() => setOpen(true)}>
+          {summary}
+        </button>
+      )}
+      <div className="reader-msgfold-full" style={expanded ? undefined : { display: 'none' }}>
+        {children}
+      </div>
+      {expanded && !forced && (
+        <Button size="sm" className="reader-expand reader-msgfold-collapse" onClick={() => setOpen(false)}>
+          Collapse
+        </Button>
+      )}
+    </div>
+  )
+}
+
+/** A made tool-result block: cleaned terminal output, with Raw to see the stored bytes. The block is the view's own, so
+ * a citation of it highlights the words it quotes (`quote`). */
+function AgentResult({ block, line, index, target, hit, quote }: { block: AgentBlock; line: number; index: number; target: Target | null; hit: boolean; quote: string | null }) {
+  const [raw, setRaw] = useState(false)
+  const hasRaw = block.raw != null
+  const text = raw && hasRaw ? block.raw! : block.text
+  const tgt = quoteTarget(target, line, index, text, quote)
+  return (
+    <Collapsible lines={lineCount(text)} forced={!!tgt && tgt.start != null}>
+      <BlockEl block={{ kind: 'tool_result', text }} line={line} index={index} target={tgt} hit={hit} />
+      {hasRaw && (
+        <Button size="sm" className="reader-raw-toggle" aria-pressed={raw} onClick={() => setRaw((o) => !o)}>
+          {raw ? 'Cleaned' : 'Raw'}
+        </Button>
+      )}
+    </Collapsible>
+  )
+}
+
+/** An agent transcript whose records interleave spoken turns with tool records (the sniff's `tools`): one card per
+ * message, its speaker, tool name and time in the head. A spoken reply shows (its `<thinking>` a quiet block); a tool
+ * call and its cleaned result, and a system record, fold to one line until opened. A citation or a search opens the
+ * message it lands in. The blocks are the view's own, so the record's label gutter marks the message and a citation
+ * highlights the words it quotes; a span ref into the stored record still resolves there. */
+function AgentTranscript({ workspace: _workspace, path, page, targetRef, transcript }: ViewProps) {
+  const records = useMemo(() => (transcript?.lines ? parsedLines(page.records) : page.records), [transcript?.lines, page.records])
+  const keys = useMemo(() => keysFor(transcript, records.slice(0, 20).map((r) => r.record)), [transcript, records])
+  const quote = useMemo(() => citedQuote(page.records, targetOf(targetRef, path)), [page.records, targetRef, path])
+  const rootRef = useRef<HTMLDivElement | null>(null)
+  const { target, hit } = useTarget(targetRef, path, rootRef, [records])
+  return (
+    <div className="reader-transcript reader-agent" ref={rootRef}>
+      {records.map((rec) => {
+        const r = rec.record ?? {}
+        const msg = agentDisplay(r, keys)
+        const speaker = nameOf(pick(r, keys.author)) ?? '(unsigned)'
+        const ts = timeOf(pick(r, keys.time))
+        const header = (
+          <>
+            {speaker}
+            {msg.toolName ? <span className="reader-agent-toolname"> · {msg.toolName}</span> : null}
+            {ts ? ` · ${ts}` : ''}
+          </>
+        )
+        const cite = target && target.line === rec.line ? quote : null
+        const forced = isTargetLine(target, rec.line)
+        const startOpen = msg.kind === 'text' || msg.kind === 'other'
+        return (
+          <RecordCard key={rec.line} path={path} line={rec.line} target={target} hit={hit} className={`reader-msg reader-agent-${msg.kind}`} header={header} text={msg.summary}>
+            <MessageFold startOpen={startOpen} forced={forced} summary={msg.summary}>
+              {msg.blocks.map((b, k) =>
+                b.kind === 'tool_result' ? (
+                  <AgentResult key={k} block={b} line={rec.line} index={k} target={target} hit={hit} quote={cite} />
+                ) : b.kind === 'thinking' || b.kind === 'tool_use' || b.kind === 'raw' ? (
+                  <Collapsible key={k} lines={lineCount(b.text)} forced={!!cite && !!quoteTarget(target, rec.line, k, b.text, cite)?.start}>
+                    <BlockEl block={b} line={rec.line} index={k} target={quoteTarget(target, rec.line, k, b.text, cite)} hit={hit} />
+                  </Collapsible>
+                ) : (
+                  <BlockEl key={k} block={b} line={rec.line} index={k} target={quoteTarget(target, rec.line, k, b.text, cite)} hit={hit} />
+                ),
+              )}
+            </MessageFold>
+          </RecordCard>
+        )
+      })}
+    </div>
+  )
 }
 
 function StreamTranscript({ path, page, targetRef, transcript }: ViewProps) {
