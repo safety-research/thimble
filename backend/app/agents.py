@@ -11,6 +11,7 @@ Storage: `workspaces/<c>/chats/<id>.meta.json` and `<id>.jsonl`, append-only, a 
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import os
@@ -22,7 +23,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 
-from fastapi import APIRouter, HTTPException, Response
+from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel
 
 from . import config, investigation, tools
@@ -896,14 +897,16 @@ DELETE_WAIT_S = 8.0  # the longest wait for a stopped server task to end before 
 
 
 async def _stop_for_delete(c: str, meta: dict) -> None:
-    """Stop an agent chat that runs: its Claude Code session (agent_session.stop_chat, which waits for the session to
-    end) or its server task. A thread's fork runs inside main's session, which the server cannot stop."""
-    from . import agent_session  # noqa: PLC0415 — agent_session imports this module
-
+    """Stop an agent chat that runs: one of thimble's agents (through the module, subagents.stop) or its server task.
+    A thread's fork runs inside main's session, which the server cannot stop."""
     if meta.get("kind") != KIND_AGENT:
         return
     cid = str(meta["id"])
-    if await agent_session.stop_chat(c, cid):
+    if meta.get("route") == "subagent" and meta.get("agent_id") and meta.get("status") == "running":
+        from . import subagents  # noqa: PLC0415 — subagents imports this module
+
+        with contextlib.suppress(Exception):
+            await subagents.stop(c, str(meta["agent_id"]))
         return
     task = _agent_tasks.get((c, cid))
     if task is not None:
@@ -945,18 +948,27 @@ async def ask_again_route(c: str, chat_id: str) -> dict:
 
 
 @router.post("/ws/{c}/chats/{chat_id}/interrupt")
-async def interrupt_route(c: str, chat_id: str) -> dict:
-    """Stop an agent chat the server runs: a Claude Code session thimble started beside main or a server task. Main and its
-    threads run in the analyst's session, which the browser cannot interrupt."""
-    from . import agent_session  # noqa: PLC0415 — agent_session imports this module
-
+async def interrupt_route(c: str, chat_id: str, request: Request) -> dict:
+    """Stop: one of thimble's agents, any role's chat (route subagent), through the module (subagents.stop, TaskStop),
+    which is a click, so the analyst's cookie (403 without it); a stop of an agent that had ended counts as done
+    ({stopped, done}); without the module {stopped: false, kind: no-module}, and the card says to press Esc in the
+    agent's view. A server task stops as before. Main and its threads run in the analyst's session, which the browser
+    does not interrupt; the analyst's own subagent of main is main's to stop, so main is asked to."""
     meta = read_meta(c, chat_id)
     if meta.get("kind") != KIND_AGENT:
         return {"stopped": False}
-    if await agent_session.stop_chat(c, chat_id) or await stop_agent(c, chat_id):
+    if meta.get("route") == "subagent" and meta.get("agent_id"):
+        from . import subagents  # noqa: PLC0415 — subagents imports this module
+
+        subagents.analyst_only(request)
+        ans = await subagents.stop(c, str(meta["agent_id"]))
+        if ans.refused:
+            return {"stopped": False, "kind": ans.kind, "reason": ans.reason}
+        return {"stopped": True, **({"done": True} if ans.get("done") else {})}
+    if await stop_agent(c, chat_id):
         return {"stopped": True}
-    if meta.get("agent_id") and meta.get("parent") == MAIN_ID and not meta.get("pid") and meta.get("status") == "running":
-        # a subagent of the analyst's session: only main can stop it
+    if meta.get("agent_id") and meta.get("parent") == MAIN_ID and meta.get("status") == "running":
+        # the analyst's own subagent of main: only main can stop it
         from . import events, tools  # noqa: PLC0415
 
         title = str(meta.get("title") or "a subagent")
@@ -969,11 +981,11 @@ async def interrupt_route(c: str, chat_id: str) -> dict:
 
 async def stop_all(c: str) -> list[str]:
     """Stop everything thimble runs for workspace `c`, main's session having ended with none taking over
-    (session.disconnected), so nothing works on after the analyst quit: its report checks and card checks, its dev
-    ticket and view builds (dev.stop_workspace), its label runs (concepts.stop_workspace), its sessions
-    (agent_session.wind_down, which parks the orientation's and the writers' for the next session that is main in
-    `c`), its server tasks and its kernels. Returns what it stopped, for the log."""
-    from . import agent_session, card_check, checks, concepts, dev, notebook  # noqa: PLC0415 — each imports this module
+    (session.disconnected, or main's SessionEnd hook), so nothing works on after the analyst quit: its report checks and
+    card checks, its dev ticket and view builds (dev.stop_workspace), its label runs (concepts.stop_workspace), the
+    chats of thimble's agents, which died with main (subagents.close_running), its server tasks and its kernels.
+    Returns what it stopped, for the log."""
+    from . import card_check, checks, concepts, dev, notebook, subagents  # noqa: PLC0415 — each imports this module
 
     stopped: list[str] = []
     steps: list[tuple[str, Callable[[str], int]]] = [("report check", checks.stop_workspace),
@@ -984,7 +996,10 @@ async def stop_all(c: str) -> list[str]:
             stopped += [what] * fn(c)
         except Exception:  # noqa: BLE001 — one part that will not stop leaves the others to stop
             log.warning("%s: could not stop the %ss", c, what, exc_info=True)
-    stopped += await agent_session.wind_down(c)
+    try:
+        stopped += [f"agent {a}" for a in subagents.close_running(c, subagents.STOPPED_QUIT)]
+    except Exception:  # noqa: BLE001
+        log.warning("%s: thimble's agents' chats were not closed", c, exc_info=True)
     for cc, chat in [k for k in _agent_tasks if k[0] == c]:
         if await stop_agent(cc, chat):
             stopped.append(str((meta_or_none(c, chat) or {}).get("title") or chat))
@@ -997,10 +1012,9 @@ async def stop_all(c: str) -> list[str]:
 
 def at_work() -> set[str]:
     """The workspaces where this server runs something stop_all stops."""
-    from . import agent_session, concepts, dev  # noqa: PLC0415
+    from . import concepts, dev  # noqa: PLC0415
 
-    return ({c for c, _ in agent_session._runs} | {c for c, _ in _agent_tasks} | dev.workspaces_at_work()
-            | concepts.workspaces_at_work())
+    return {c for c, _ in _agent_tasks} | dev.workspaces_at_work() | concepts.workspaces_at_work()
 
 
 # --------------------------------------------------------------------------- text helpers other modules import

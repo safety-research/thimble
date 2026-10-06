@@ -622,7 +622,7 @@ async def test_switching_on_an_extension_offers_to_run_its_orientation_instructi
         sent.append((extension, text))
         return {"status": "resumed"}
 
-    monkeypatch.setattr(orient_session, "message", message)
+    monkeypatch.setattr(orient_session, "send", message)
     ran = {"yes": False}
     monkeypatch.setattr(extensions, "orientation_ran", lambda c: ran["yes"])
     _add()
@@ -681,7 +681,7 @@ async def test_an_orient_md_that_replaces_takes_the_place_of_thimble_s_instructi
         sent.append(extension)
         return {"status": "resumed"}
 
-    monkeypatch.setattr(orient_session, "message", message)
+    monkeypatch.setattr(orient_session, "send", message)
     monkeypatch.setattr(extensions, "orientation_ran", lambda c: True)
     write_json(config.workspace_dir(CORPUS) / "settings.json", {orient_session.SETTING: "My own way."})
     solo = _copy(tmp_path, "solo")
@@ -973,7 +973,7 @@ async def test_a_folder_used_in_place_cannot_link_to_files_outside_it(corpus, tm
     """thimble reads a folder used in place where it is, so a link in it that leads outside it (here to the file that
     holds thimble's local API token) is a problem: add refuses the folder, and a link made after the add unloads it,
     so the file never reaches the orientation's prompt."""
-    monkeypatch.setattr(orient_session, "message", lambda *a, **k: pytest.fail("nothing is sent"))
+    monkeypatch.setattr(orient_session, "send", lambda *a, **k: pytest.fail("nothing is sent"))
     secret = extensions.home() / "server.json"
     secret.parent.mkdir(parents=True, exist_ok=True)
     secret.write_text('{"token": "not-for-agents"}')
@@ -1070,20 +1070,21 @@ def test_shipping_leaves_a_folder_used_in_place_alone(corpus, tmp_path, monkeypa
 
 
 def test_an_orientation_counts_as_run_only_with_the_thread_a_follow_up_resumes(corpus, monkeypatch):
-    """Settings offers Run now only where a follow-up can reach the orientation: its record names a session and a
-    thread, the thread is there (orient_session._chat_of), and Claude Code still keeps the session's transcript."""
+    """Settings offers Run now only where a follow-up can reach the orientation: its record names a thread that is
+    there, run by an agent of main's session (orient_session.latest), not by an earlier version or session."""
     from app import agents, session
 
-    kept = {"s-1": "/transcripts/s-1.jsonl"}
-    monkeypatch.setattr(session, "find_transcript", lambda sid, config_dir=None: kept.get(sid))
     run = config.workspace_dir(CORPUS) / "orient" / "run.json"
     run.parent.mkdir(parents=True, exist_ok=True)
-    write_json(run, {"session": "s-1", "chats": {"orient": "orient-1"}})
+    write_json(run, {"chats": {"orient": "orient-1"}})
     assert not extensions.orientation_ran(CORPUS)
-    agents.write_meta(CORPUS, {"id": "orient-1", "kind": "agent", "role": "orient"})
+    agents.write_meta(CORPUS, {"id": "orient-1", "kind": "agent", "role": "orient", "session": "s-0"})
+    assert not extensions.orientation_ran(CORPUS), "an earlier version ran it, with no agent"
+    agents.write_meta(CORPUS, {"id": "orient-1", "kind": "agent", "role": "orient", "route": "subagent",
+                               "agent_id": "a1", "sessions": ["s-1"]})
     assert extensions.orientation_ran(CORPUS)
-    kept.clear()
-    assert not extensions.orientation_ran(CORPUS), "a follow-up could not resume it"
+    monkeypatch.setitem(session._live, CORPUS, session.Live(CORPUS, "s-2", "/c", None, None))
+    assert not extensions.orientation_ran(CORPUS), "its agent belongs to an earlier session"
 
 
 def _role_ext(root: Path, name: str, agents: dict[str, dict], files: dict[str, str] | None = None, **manifest) -> Path:

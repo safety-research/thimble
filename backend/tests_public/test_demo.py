@@ -556,7 +556,7 @@ def test_a_fresh_session_on_a_precached_workspace_starts_from_the_canvas_and_the
     assert json.loads((ws / demo.MARKER).read_text())["context_given"] == ["s1", "s2"]
     # its orientation takes no message: its session was not kept
     with pytest.raises(precached.Precached):
-        asyncio.run(orient_session.message(c, "more please"))
+        asyncio.run(orient_session.send(c, "more please"))
     # once a new orientation replaces the pre-cache's, a new session is not told it starts from the pre-cache
     (ws / "orient" / "run.json").write_text(json.dumps({"status": "running", "session": "s-new", "chats": {}}))
     assert precached.take_context(c, "s3") == ""
@@ -943,6 +943,41 @@ def test_the_full_export_writes_everything_with_the_transcripts_and_refuses_noth
     assert inv["typed_in_main"] == 1 and inv["marked_done"] == ["w1"] and inv["calls"] == 3
     assert inv["label_rows"] == 1 and inv["rationales"] == 1 and inv["spans"] == 1
     assert (out / "README.md").read_text().startswith("# toy: full export")
+
+
+def test_the_full_export_holds_a_subagent_orientation_s_transcript_split_by_a_clear(tmp_path):
+    """thimble's agents run as subagents of main, so their records are under main's session folder; after /clear an
+    agent's records go on in the new session's folder (U1). The full export joins both parts, in order, and the
+    agent's descendants'; an install keeps them as data, since no new session continues them."""
+    root = tmp_path / "a"
+    corpus = root / "corpus"
+    corpus.mkdir(parents=True)
+    (corpus / "a.jsonl").write_text(json.dumps({"body": CORPUS_TEXT}) + "\n")
+    ws = make_workspace(root, corpus, root)
+    old, new, agent = "11111111-0000-4000-8000-000000000001", "22222222-0000-4000-8000-000000000002", "abd7be4046c88858c"
+    (ws / "chats" / "o9.meta.json").write_text(json.dumps({
+        "id": "o9", "kind": "agent", "role": "orient", "route": "subagent", "agent_id": agent, "status": "done",
+        "session": new, "sessions": [old, new]}))
+    (ws / "chats" / "o9.jsonl").write_text("")
+    claude = tmp_path / "claude"
+    proj = claude / "projects" / demo.dashed(str(corpus))
+    for sid, line in ((old, "before the clear"), (new, "after the clear")):
+        (proj / sid / "subagents").mkdir(parents=True)
+        (proj / f"{sid}.jsonl").write_text("")
+        (proj / sid / "subagents" / f"agent-{agent}.jsonl").write_text(transcript(corpus, sid, line))
+    (proj / old / "subagents" / "agent-c1.jsonl").write_text(transcript(corpus, old, "a helper's step"))
+    (proj / old / "subagents" / "agent-c1.meta.json").write_text(json.dumps({"parentAgentId": agent}))
+    (proj / old / "subagents" / "agent-x1.jsonl").write_text(transcript(corpus, old, "the analyst's own"))
+    (proj / old / "subagents" / "agent-x1.meta.json").write_text(json.dumps({"agentType": "general-purpose"}))
+    out = tmp_path / "out" / "toy"
+    m = demo.export_full(ws, corpus, out, name="toy", home=root, user="", scan=no_scan, claude_dir=claude)
+    by_path = {t["path"]: t for t in m["transcripts"] if t.get("agent")}
+    assert set(by_path) == {f"transcripts/agent-{agent}.jsonl", "transcripts/agent-c1.jsonl"}
+    assert by_path[f"transcripts/agent-{agent}.jsonl"]["role"] == "orientation"
+    text = (out / "transcripts" / f"agent-{agent}.jsonl").read_text()
+    assert text.index("before the clear") < text.index("after the clear"), "both parts, in order"
+    got = demo.install(out, tmp_path / "b" / "toy", corpus, home=tmp_path / "b", claude_dir=tmp_path / "b-claude")
+    assert got["warnings"] == [] and not [i for i in got["installed_transcripts"] if "agent" in i["path"]]
 
 
 def test_the_full_export_names_what_may_be_private_without_refusing(tmp_path):

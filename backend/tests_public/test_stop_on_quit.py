@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import asyncio
 
-from app import agent_session, agents, card_check, checks, cli, concepts, dev, notebook, session
+from app import agents, card_check, checks, cli, concepts, dev, notebook, session
 
 
 def test_stop_all_stops_the_checks_the_builds_the_label_runs_the_sessions_and_the_kernels(monkeypatch):
@@ -15,18 +15,21 @@ def test_stop_all_stops_the_checks_the_builds_the_label_runs_the_sessions_and_th
     monkeypatch.setattr(dev, "stop_workspace", lambda c: called.append("builds") or 1)
     monkeypatch.setattr(concepts, "stop_workspace", lambda c: called.append("label runs") or 0)
 
-    async def wind_down(c):
-        called.append("sessions")
-        return ["Orientation"]
+    def close_running(c, why):
+        called.append("subagents")
+        return ["a1"]
 
     async def kernels(c):
         called.append("kernels")
 
-    monkeypatch.setattr(agent_session, "wind_down", wind_down)
+    from app import subagents
+
+    monkeypatch.setattr(subagents, "close_running", close_running)
     monkeypatch.setattr(notebook, "shutdown_workspace", kernels)
     got = asyncio.run(agents.stop_all("w"))
-    assert called == ["report checks", "card checks", "builds", "label runs", "sessions", "kernels"], "nothing starts a session after its stop"
-    assert got == ["dev build", "Orientation"]
+    assert called == ["report checks", "card checks", "builds", "label runs", "subagents", "kernels"], \
+        "nothing starts after its stop"
+    assert got == ["dev build", "agent a1"], "the chats of thimble's agents, which died with main, are closed"
 
 
 def test_a_workspace_s_label_runs_count_as_at_work_and_stop_with_it():
@@ -119,24 +122,26 @@ async def _running_build(c: str, slug: str) -> "asyncio.Task":
 
 def test_stopping_the_orientation_stops_the_builds_of_its_views_and_no_other(workspaces_tmp):
     """The analyst's Stop ends the orientation's run stopped: the views it proposed stop building, running or queued,
-    and no listing of the proposals queues them again, while a view the analyst asked for builds on. The server's own
-    stop, which the next server resumes, stops none."""
-    from app import config, orient_session, orientation, views
+    and no listing of the proposals queues them again, while a view the analyst asked for builds on. A run main's quit
+    cut off stops none here (main's end stops the builds, dev.stop_workspace)."""
+    from app import orient_session, views
 
     c = "mini"
     ours = [views.propose(c, n, "why", ["board.jsonl"], "one row per post", orientation=True)["slug"]
             for n in ("Posts", "Threads")]
     asked = views.propose(c, "Timeline", "why", ["events.jsonl"], "one row per event", asked=True)["slug"]
 
+    from app import subagents
+
     def run(**kw):
-        return agent_session.Run(c, orient_session.KEY, "chat-o", "sid-o", config.corpus_dir(c), orientation.ROLE, **kw)
+        return subagents.Run(c, orient_session.KEY, "orientation", "chat-o", "a1", **kw)
 
     async def go() -> None:
         building = await _running_build(c, ours[0])
-        orient_session._ended(run(interrupted="the server stopped"), "failed", "")
+        orient_session.subagent_ended(c, run(interrupted=True), "stopped", "")
         await asyncio.sleep(0)
-        assert not building.done() and (c, ours[1]) in dev._view_queue, "the server's stop leaves them to resume"
-        orient_session._ended(run(), "stopped", "")
+        assert not building.done() and (c, ours[1]) in dev._view_queue, "main's quit stops nothing more here"
+        orient_session.subagent_ended(c, run(), "stopped", "")
         await asyncio.sleep(0)
         assert building.cancelled()
 

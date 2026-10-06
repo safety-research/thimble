@@ -1,14 +1,13 @@
-"""A writer's own Claude Code session, run beside main for one document.
+"""A writer: `thimble:writer`, a subagent of the analyst's Claude Code session for one document (subagents.py).
 
-The writer agent is defined for that session alone with `--agents` from prompts/writer.md and chosen with `--agent`,
-so main's list of agents never shows it. It has every tool of a default Claude Code session and, of thimble's,
-OWN_TOOLS, and runs in a work folder of its own with the corpus read-only (agent_session, the fence). Its first message
-holds the whole context (context.render, CONTEXT_CHARS) followed by the task. One writer runs per document, with the
-`writer` role's model settings and THIMBLE_SESSION `writer:<doc>`; the report checks run once it has ended. Main starts
-it with `start_writing` and hears a `written` browser event when it ends. A writer cut short by a server stop is resumed
-by the next server (_resume_left). A writer answering the orientation's report pass carries `orient` and `orient_run` on
-its meta. The writer shows in main's agent tray (tray.py), and a message that reaches its tray entry continues its
-session with `--resume` as its chat's next run, at once or when the run that goes ends (message)."""
+Its registration (definition) is prompts/writer.md with shared.md loaded as the skill `thimble:shared`, the `writer`
+role's model and effort from Settings, and of thimble's tools OWN_TOOLS. Its run's prompt names its task and a context
+file, writers/<doc>/context.md, that holds the whole context (context.render, CONTEXT_CHARS) followed by the task, which
+it reads first. One writer runs per document. Write in the browser is a click (write_route), the orientation's report
+pass a follow-on start of the same click or typed start (follow_on), both through thimble's plugin module; main's
+`start_writing` gives the exact Agent call main makes (tool_start_writing). Main hears a `written` browser event when a
+writer ends. A writer answering the orientation's report pass carries `orient` and `orient_run` on its chat. A writer
+stopped when Claude Code quit is started again with Write again (subagents.again)."""
 from __future__ import annotations
 
 import asyncio
@@ -17,37 +16,31 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from fastapi import HTTPException
+from fastapi import APIRouter, HTTPException, Request
+from pydantic import BaseModel
 
-from . import agent_session, agents, config, context, report_types, tools, tray, work_files
+from . import config, context, report_types, subagents, tools, work_files
 
 log = logging.getLogger("thimble.write_session")
+router = APIRouter()
 
-AGENT = "writer"  # prompts/writer.md, the agent the session runs as
-ROLE = "writer"  # the agent chat's role
+AGENT = "writer"  # prompts/writer.md, the writer's registered prompt
+ROLE = "writer"  # the agent chat's role, and its role among subagents.TYPES
 WRITTEN_KIND = "written"  # the event kind that tells main a writer ended (prompts/main.md)
-DEFAULT_EFFORT = "high"  # when writer.md names none
-CONTEXT_CHARS = 600_000  # of the first message, about 150k tokens
+CONTEXT_CHARS = 600_000  # of the context file, about 150k tokens
+CONTEXT_FILE = "context.md"  # in its work folder: what it reads first
 WORK_DIR = "writers"  # workspaces/<c>/writers/<doc>, a writer's own folder, where it may write
+SKILLS = ("thimble:shared",)  # shared.md, loaded before its first turn (U3)
 OWN_TOOLS = ("read_ref", "list_cards", "add_card", "edit_card", "delete_card", "screenshot", "write_document",
              "edit_document")  # a writer's thimble tools
 
 
 def session_key(doc: str) -> str:
-    """The THIMBLE_SESSION of the session writing `doc` (tools.session_kind reads its kind)."""
+    """The key of the writer of `doc`, the session its calls run as (tools.session_kind reads its kind)."""
     return f"{tools.WRITER_SESSION}:{doc}"
-
 
 def work_dir(c: str, doc: str) -> Path:
     return config.workspace_dir(c) / WORK_DIR / doc
-
-
-def agent_definition() -> tuple[str, dict[str, Any]]:
-    """(name, definition) of the writer agent for `--agents`, from prompts/writer.md."""
-    from . import cli  # noqa: PLC0415 — cli is large, and the definition's shape is the launcher's
-
-    return cli.agent_definition(AGENT)
-
 
 def task_text(t: dict[str, Any], request: str, after: str) -> str:
     lines = [tools.hint("writer-task", doc=t["slug"], title=t.get("name") or t["slug"])]
@@ -57,47 +50,102 @@ def task_text(t: dict[str, Any], request: str, after: str) -> str:
         lines.append(tools.hint("writer-after", after=after.strip()))
     return "\n".join(x for x in lines if x)
 
-
 def first_message(c: str, t: dict[str, Any], request: str = "", after: str = "") -> str:
-    """The context engine's every part, then the task (module note)."""
+    """The context file's text: the context engine's every part, then the task (module note)."""
     return context.render(c, task_text(t, request, after), budget=CONTEXT_CHARS, focus=(f"report:{t['slug']}",))
 
 
-# --------------------------------------------------------------------------- start and end
+def definition(c: str) -> dict[str, Any]:
+    """The registration of `thimble:writer` for workspace `c` (subagents.roles adds its model, effort and
+    `background`): writer.md's body, its frontmatter's description, shared.md as the skill `thimble:shared`, and the
+    thimble tools that are not a writer's taken away."""
+    from . import agent_session, cli, prompts, userconf  # noqa: PLC0415
+
+    with prompts.custom(userconf.prompt_files(c, "writer")):
+        _, agent = cli.agent_definition(AGENT)
+    out = {k: agent[k] for k in ("description", "prompt") if k in agent}
+    out["skills"] = list(dict.fromkeys([*SKILLS, *(agent.get("skills") or [])]))
+    out["disallowedTools"] = agent_session.not_own(OWN_TOOLS)
+    return out
+
+
+def write_context(c: str, t: dict[str, Any], request: str, after: str) -> Path:
+    """The writer's context file, writers/<doc>/context.md (first_message), which its prompt names."""
+    path = work_dir(c, str(t["slug"])) / CONTEXT_FILE
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(first_message(c, t, request, after) + "\n", "utf-8")
+    return path
+
+
+def task(t: dict[str, Any], request: str, after: str, path: Path) -> str:
+    """A writer's run prompt: its task, the analyst's request and passage, and its context file
+    (`## writer-context-file`)."""
+    return "\n\n".join(x for x in (task_text(t, request, after), tools.hint("writer-context-file", path=str(path))) if x)
 
 
 def running(c: str, doc: str) -> bool:
     from . import harness  # noqa: PLC0415
 
-    return agent_session.running(c, session_key(doc)) or harness.running(c, session_key(doc))
+    return subagents.running(c, session_key(doc)) or harness.running(c, session_key(doc))
 
 
-async def start(c: str, doc: str, request: str = "", after: str = "") -> agent_session.Run:
-    """Start the session writing `doc` for workspace `c` and follow it; ValueError for an unknown document type,
-    RuntimeError
-    when a writer of `doc` runs or claude cannot be started. The first message is rendered off the event loop."""
+async def start(c: str, doc: str, request: str = "", after: str = "", *, route: str = subagents.CLICK,
+                values: "dict[str, Any] | None" = None, call: str | None = None, orient: str | None = None,
+                orient_run: int = 0) -> subagents.Answer:
+    """Start the writer of `doc` for workspace `c` with the analyst's request and passage and the run's values (each
+    defaulting to Settings' writer row): a click or a follow-on start through the module, or a typed one's pending
+    request and exact Agent call (subagents.start_job). The context file is written off the event loop first.
+    ValueError for an unknown document type; a refusal (Answer) when a writer of `doc` runs. An extension whose program
+    runs the writer runs it instead (start_program)."""
     t = report_types.read_type(c, doc) if report_types.SLUG_RE.match(doc or "") else None
     if t is None:
         raise ValueError(f"no document {doc!r}")
     key = session_key(doc)
     if running(c, doc):
-        raise RuntimeError(f"a writer of {doc} is running")
-    prompt = await asyncio.to_thread(first_message, c, t, request, after)
-    if running(c, doc):  # a second call that started while this one rendered
-        raise RuntimeError(f"a writer of {doc} is running")
+        return subagents.refusal(subagents.HOOK, tools.hint("start_writing-running", doc=doc))
     # the orientation's report pass: the writer carries its chat and run, and its card shows the writer (module note)
     pending = report_types.write_pending(c, doc) or {}
-    # `orient: null` on another writer says the analyst asked for it
-    orient = {"orient": pending.get("orient") or None, "orient_run": pending.get("orient_run") or 0}
+    fields = {"orient": orient or pending.get("orient") or None, "orient_run": orient_run or pending.get("orient_run") or 0}
     from . import roles  # noqa: PLC0415
 
     agent = roles.agent_for(c, "writer")
     if agent.code and agent.replacing is not None:
-        return start_program(c, doc, t, request, after, prompt, agent.replacing, orient)
-    run = await agent_session.start(c, key, prompt=prompt, **_launch(c, doc), brief=task_text(t, request, after),
-                                    **orient)
+        prompt = await asyncio.to_thread(first_message, c, t, request, after)
+        start_program(c, doc, t, request, after, prompt, agent.replacing, fields)
+        return subagents.Answer({"program": agent.replacing.extension})
+    if route == subagents.TYPED or route == subagents.CLICK:
+        before = subagents.refusal_before(c)
+        if before is not None:
+            return before
+    path = await asyncio.to_thread(write_context, c, t, request, after)
+    if running(c, doc):  # a second call that started while this one rendered
+        return subagents.refusal(subagents.HOOK, tools.hint("start_writing-running", doc=doc))
     report_types.begin_write(c, doc, request, after)
-    return run
+    ans = await subagents.start_job(c, ROLE, key, task(t, request, after, path), subagents.values_for(c, ROLE, values),
+                                    route, description=f"writer: {doc}",
+                                    chat={"title": f"Write {doc}", "doc": doc, "brief": task_text(t, request, after),
+                                          **fields},
+                                    work=work_dir(c, doc), call=call, check=False)
+    return ans
+
+
+def follow_on(c: str, doc: str, request: str = "", **fields: Any) -> None:
+    """The writer of `doc` as a follow-on start of a run whose own start was the analyst's click or a typed start main
+    made (the orientation's report pass, Q5), through the module, in a task; in plan mode it waits (out_of_plan)."""
+    async def go() -> None:
+        try:
+            await subagents.out_of_plan(c)
+            ans = await start(c, doc, request, route=subagents.FOLLOW_ON, **fields)
+        except Exception:  # noqa: BLE001
+            log.exception("%s: the writer of %s did not start", c, doc)
+            return
+        if ans.refused:
+            log.info("%s: the writer of %s did not start: %s (%s)", c, doc, ans.reason, ans.kind)
+
+    try:
+        asyncio.get_running_loop().create_task(go(), name=f"writer-follow-on:{c}:{doc}")
+    except RuntimeError:
+        log.warning("%s: no loop to start the writer of %s in", c, doc)
 
 
 def start_program(c: str, doc: str, t: dict[str, Any], request: str, after: str, context_text: str, part: Any,
@@ -114,144 +162,42 @@ def start_program(c: str, doc: str, t: dict[str, Any], request: str, after: str,
                       fields={"doc": doc, "brief": task_text(t, request, after), **orient})
 
     def ended(_run: Any, status: str, summary: str) -> None:
-        agent_session.tell_main(c, WRITTEN_KIND, {"text": summary or "", "status": status, "doc": doc})
+        subagents.tell_main(c, WRITTEN_KIND, {"text": summary or "", "status": status, "doc": doc})
 
     run = harness.start(job, part, on_end=ended)
     report_types.begin_write(c, doc, request, after)
     return run
 
 
-def _launch(c: str, doc: str) -> dict[str, Any]:
-    """The arguments of agent_session.start that a start and a resume after a restart share: the writer's agent, its
-    role's model, effort and fast mode, and its document."""
-    from . import prompts, userconf  # noqa: PLC0415
-
-    with prompts.custom(userconf.prompt_files(c, "writer")):
-        name, agent = agent_definition()
-    models = config.models_for(c)
-    agent = agent_session.role_agent(agent, models["writer"])
-    effort = str(agent.get("effort") or DEFAULT_EFFORT)
-    from . import roles  # noqa: PLC0415
-
-    defined = {**roles.subagents(c, "writer"), name: agent}
-    return dict(role=ROLE, title=f"Write {doc}", agent_args=["--agents", json.dumps(defined, ensure_ascii=False),
-                                                              "--agent", name],
-                effort=effort, settings=agent_session.settings_json(effort, fastMode=bool(models["writer"]["fast"])),
-                agent_type=name, on_end=_ended, model=str(agent.get("model") or ""), work=work_dir(c, doc), unasked=True,
-                agent="writer", disallowed=agent_session.not_own(OWN_TOOLS), doc=doc)
+def subagent_started(c: str, run: subagents.Run, req: dict[str, Any]) -> None:
+    """A writer's run started: a follow-up typed to it in Claude Code's agent tray (run k > 0) writes its document
+    again, which the Report tab shows."""
+    if run.k > 0:
+        report_types.begin_write(c, run.key.split(":", 1)[-1])
 
 
-async def _resume_left(c: str, meta: dict[str, Any], prompt: str) -> agent_session.Run:
-    """Resume a writer that a previous server left running (agent_session, restart): its session with `--resume` in its
-    chat, `prompt` on stdin, and its document shown as being written again. NotResumed when its document is gone."""
-    doc = str(meta.get("doc") or "")
-    if not report_types.SLUG_RE.match(doc) or report_types.read_type(c, doc) is None:
-        raise agent_session.NotResumed(f"its document {doc or '(none)'} no longer exists")
-    run = await agent_session.start(c, session_key(doc), prompt=prompt, resume=str(meta.get("session") or ""),
-                                    chat=str(meta["id"]), run_k=int(meta.get("run") or 0), restarted=True,
-                                    **_launch(c, doc))
-    report_types.begin_write(c, doc)
-    return run
-
-
-def _ended(run: agent_session.Run, status: str, summary: str) -> None:
-    """The session ended: main hears the writer's last message (report_types.writer_finished has ended the write), once
-    a session listens (agent_session.tell_main), and its work folder lets go of what it no longer needs
-    (work_files.after_run). Messages that waited for the run to end continue the session (message); when the analyst
-    stopped it, they are dropped and its tray entry says so. A run the server's stop ended keeps them on its chat for
-    the run the next server resumes."""
+def subagent_ended(c: str, run: subagents.Run, status: str, summary: str) -> None:
+    """A writer's run ended: main hears its last message (report_types.writer_finished has ended the write, on its
+    chat's end), and its work folder lets go of what it no longer needs (work_files.after_run)."""
     doc = run.key.split(":", 1)[-1]
-    work_files.after_run(run.c, work_dir(run.c, doc), status)
-    agent_session.tell_main(run.c, WRITTEN_KIND, {"text": summary or "", "status": status, "doc": doc})
-    if run.interrupted:
+    work_files.after_run(c, work_dir(c, doc), status)
+    subagents.tell_main(c, WRITTEN_KIND, {"text": summary or "", "status": status, "doc": doc})
+
+
+def subagent_refused(c: str, req: dict[str, Any]) -> None:
+    """A writer's start that did not happen: its document's card shows the refusal with its kind, and its pending
+    write ends (report_types.write_refused)."""
+    if req.get("kind") != "start":
         return
-    waiting = _queue(run.c, run.chat)
-    if not waiting:
-        return
-    _show_queue(run.c, run.chat, [])
-    if status == "stopped":
-        tray.not_passed_on(run.c, run.key, len(waiting), "it was stopped")
-        return
-    task = asyncio.get_running_loop().create_task(_continue(run.c, doc, waiting, run.chat, run.sid),
-                                                  name=f"writer-follow-up:{run.c}:{doc}")
-    task.add_done_callback(lambda t: _not_continued(t, run.c, run.key, len(waiting)))
-
-
-def _not_continued(task: "asyncio.Task[Any]", c: str, key: str, n: int) -> None:
-    """The end of the task that continues a writer with the messages that waited: when it could not start, its tray
-    entry says so."""
-    if task.cancelled() or task.exception() is None:
-        return
-    why = str(task.exception()) or type(task.exception()).__name__
-    log.warning("%s: the waiting messages for %s did not continue it: %s", c, key, why)
-    tray.not_passed_on(c, key, n, why)
-
-
-# The messages for a writer whose run goes wait on its chat's meta as `queued`, each {text, by}, for the run's end
-# (message), so a server restart keeps them and its thread shows them.
-def _queue(c: str, chat: str) -> "list[dict[str, Any]]":
-    meta = agents.meta_or_none(c, chat) or {}
-    return [m for m in meta.get("queued") or [] if isinstance(m, dict) and str(m.get("text") or "").strip()]
-
-
-def _show_queue(c: str, chat: str, queue: "list[dict[str, Any]]") -> None:
-    try:
-        agents.update_agent(c, chat, queued=list(queue))
-    except HTTPException:
-        pass
-
-
-async def message(c: str, doc: str, text: str, by: str, *, chat: str, sid: str) -> dict[str, Any]:
-    """A message for the writer of `doc` from `by` (agents.TERMINAL, typed in its tray entry, or agents.MAIN_ID): it
-    continues the writer's session `sid` in its chat `chat` as the chat's next run, {status: resumed, chat, run}, or
-    waits for the run that goes, {status: queued, chat, queued}. ValueError for an empty message, RuntimeError when the
-    session cannot continue."""
-    text = str(text or "").strip()
-    if not text:
-        raise ValueError("the message is empty")
-    item = {"text": text, "by": by}
-    if running(c, doc):
-        queue = [*_queue(c, chat), item]
-        _show_queue(c, chat, queue)
-        return {"status": "queued", "chat": chat, "queued": len(queue)}
-    run = await _continue(c, doc, [item], chat, sid)
-    return {"status": "resumed", "chat": chat, "run": run.k}
-
-
-async def _continue(c: str, doc: str, messages: "list[dict[str, Any]]", chat: str, sid: str) -> agent_session.Run:
-    """Continue the writer's session `sid` with `messages`, each after the line that says who sent it (the bg-from-*
-    lines of prompts/tools.md), as its chat `chat`'s next run. RuntimeError when its document or transcript is gone."""
-    from . import session  # noqa: PLC0415
-
-    meta = agents.meta_or_none(c, chat)
-    if meta is None or report_types.read_type(c, doc) is None:
-        raise RuntimeError(f"the writer of {doc} is gone")
-    if not session.find_transcript(sid):
-        raise RuntimeError(f"Claude Code no longer keeps the transcript of the writer of {doc}")
-    lead = "\n\n".join(tools.hint("bg-from-main" if m["by"] == agents.MAIN_ID else "bg-from-terminal", text=m["text"])
-                        for m in messages)
-    return await agent_session.start(c, session_key(doc), prompt=lead, resume=sid, chat=chat,
-                                     run_k=int(meta.get("run") or 0) + 1, leads=messages, **_launch(c, doc))
-
-
-def _left(c: str, meta: dict[str, Any], status: str, summary: str) -> None:
-    """A writer that a previous server left running was closed (agent_session, restart): its document shows the write
-    as failed, since that server's record of the write went with it, and main hears it."""
-    doc = str(meta.get("doc") or "")
-    if doc:
-        report_types._emit(c, {"type": "report", "slug": doc, "status": "failed", "chat": meta.get("id"),
-                               "note": summary or "the writer was stopped before it saved the document"})
-    agent_session.tell_main(c, WRITTEN_KIND, {"text": summary or "", "status": status, "doc": doc})
-
-
-agent_session.on_left(ROLE, _left)
-agent_session.on_resume(ROLE, _resume_left)
+    doc = str(req.get("key") or "").split(":", 1)[-1]
+    report_types.write_refused(c, doc, str(req.get("reason") or ""), str(req.get("refused_kind") or subagents.ERROR),
+                               request=req.get("id"), expired=req.get("expired"))
 
 
 async def tool_start_writing(ctx: Any, args: dict[str, Any]) -> Any:
-    """The `start_writing` tool: start the session writing `doc` with the analyst's request and passage (else the
-    pending
-    write event's). A `doc` no type holds is made first when the call names its `type` and `name`."""
+    """The `start_writing` tool: the pending start of the writer of `doc` with the analyst's request and passage and
+    the run's model and effort, and the exact Agent call main makes (`## start_writing-subagent`). A `doc` no type
+    holds is made first when the call names its `type` and `name`."""
     doc = str(args.get("doc") or "").strip().lower().removeprefix("report:").split("#", 1)[0]
     kind = str(args.get("type") or "").strip().lower()
     made = None
@@ -273,11 +219,41 @@ async def tool_start_writing(ctx: Any, args: dict[str, Any]) -> Any:
     pending = report_types.write_pending(ctx.c, doc) or {}
     request = str(args.get("request") or "").strip() or str(pending.get("request") or "")
     after = str(args.get("after") or "").strip() or str(pending.get("after") or "")
+    values = {k: str(args[k]) for k in ("model", "effort") if args.get(k)}
     try:
-        await start(ctx.c, doc, request, after)
+        ans = await start(ctx.c, doc, request, after, route=subagents.TYPED, values=values, call=ctx.tool_use_id)
     except (RuntimeError, ValueError) as e:
         return tools.err(f"start_writing: {e}")
-    started = tools.hint("start_writing-started", doc=doc)
+    if ans.refused:
+        return tools.err(ans.reason or f"start_writing: {ans.kind}")
+    started = (tools.hint("start_writing-program", doc=doc) if ans.get("program")
+               else tools.hint("start_writing-subagent", input=json.dumps(ans["input"], ensure_ascii=False)))
     if made is not None:
         started = tools.hint("start_writing-made", doc=doc, title=str(made["name"])) + "\n" + started
     return tools.ok(started)
+
+
+class WriteBody(BaseModel):
+    """Write in the browser (POST /ws/{c}/write): the document, the analyst's request and passage, and the run's model
+    and effort."""
+
+    doc: str
+    text: str = ""
+    after: str = ""
+    model: str | None = None
+    effort: str | None = None
+
+
+@router.post("/ws/{c}/write")
+async def write_route(c: str, body: WriteBody, request: Request) -> dict[str, Any]:
+    """Write in the browser: a click, so the analyst's cookie (403 without it), and the writer starts through the module
+    (start). The answer: {agentId} or the refusal's {kind, reason}; 404 for an unknown document."""
+    subagents.analyst_only(request)
+    config.workspace_dir(c)
+    doc = str(body.doc or "").strip().lower().removeprefix("report:").split("#", 1)[0]
+    values = {k: v for k, v in (("model", body.model), ("effort", body.effort)) if v}
+    try:
+        ans = await start(c, doc, body.text, body.after, route=subagents.CLICK, values=values)
+    except ValueError as e:
+        raise HTTPException(404, str(e)) from e
+    return {**dict(ans), **({"kind": ans.kind, "reason": ans.reason} if ans.refused else {})}

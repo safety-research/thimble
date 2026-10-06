@@ -1457,8 +1457,12 @@ class Sessions:
                agent_session.BG_WAIT_ENV: agent_session.BG_WAIT_MS}
         settings["env"] = config.session_env(own, stack=False)
         allowed = [] if hosted else ["--allowedTools", ",".join(UNHOSTED_TOOLS)]
+        # --setting-sources user: no hook, MCP server or setting of the folder's own (project and local) settings runs in
+        # it, which a `claude -p` job would otherwise take up with no approval (U17); --strict-mcp-config stops only
+        # the servers
         flags = [*(["--model", str(conf_models["model"])] if conf_models.get("model") else []), *allowed,
-                 "--disallowedTools", ",".join(dict.fromkeys(denied)), "--strict-mcp-config", "--permission-mode", mode]
+                 "--disallowedTools", ",".join(dict.fromkeys(denied)), "--strict-mcp-config", "--setting-sources",
+                 "user", "--permission-mode", mode]
         for d in add_dirs:
             flags += ["--add-dir", str(d)]
         if conf_models.get("effort"):
@@ -3485,26 +3489,11 @@ async def rebuild_ui(t: dict[str, Any] | None, *, reason: str = "ticket") -> str
 # ----------------------------------------------------------------------------- restart rules
 
 
-def orient_running() -> list[str]:
-    """Workspaces whose orient/run.json says running."""
-    out = []
-    for c in _workspaces():
-        p = config.WORKSPACES_DIR / c / "orient" / "run.json"
-        try:
-            if json.loads(p.read_text("utf-8")).get("status") == "running":
-                out.append(c)
-        except (OSError, ValueError, AttributeError):
-            continue
-    return out
-
-
 def agents_running() -> list[str]:
-    """Workspaces where an orientation runs (orient_running) or another of thimble's agents that show in the agent tray
-    does, a writer or a critique: a restart would cut their runs short, and the critic's is not resumed."""
-    from . import agent_session, tray  # noqa: PLC0415 — both import modules that import this one
-
-    held = {run.c for run in list(agent_session._runs.values()) if tray.shown_in_tray(run.key) and not run.stopping}
-    return sorted({*orient_running(), *held})
+    """Workspaces where an agent of the server's own runs that a restart would cut short. thimble's orientation, critic
+    and writers are subagents of the analyst's session, which a server restart leaves running (subagents.py), so none
+    is listed for them."""
+    return []
 
 
 def restart_file() -> Path:
@@ -3620,8 +3609,8 @@ def recover_rollback() -> dict[str, Any] | None:
 
 
 async def request_restart(t: dict[str, Any] | None, reason: str = "ticket") -> str:
-    """Restart now, or defer while an orientation, a writer or a critique runs (agents_running); on a server the
-    supervisor did not start, neither (the ticket's restart is "manual" and its chip says so). "restarting" | "restart_pending" | "manual"."""
+    """Restart now, or defer while a job of the server's own runs that a restart would cut short (agents_running); on a
+    server the supervisor did not start, neither (the ticket's restart is "manual" and its chip says so). "restarting" | "restart_pending" | "manual"."""
     global _restart_pending, _poller
     title = str((t or {}).get("title") or reason)
     if t and t.get("id") and _reloads(t.get("touched") or []):
@@ -3662,8 +3651,8 @@ async def _pending_poller() -> None:
 
 
 async def orient_ended(c: str | None) -> None:
-    """Fires a deferred restart once no orientation, writer or critique is running (agents_running). The pending poller
-    calls it, since an orientation's end is recorded only in orient/run.json (orientation.finished)."""
+    """Fires a deferred restart once no job of the server's own runs that a restart would cut short
+    (agents_running). The pending poller calls it."""
     global _restart_pending
     if _restart_pending is None or agents_running():
         return

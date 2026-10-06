@@ -1073,14 +1073,14 @@ def install_views(c: str) -> list[str]:
 
 
 def orientation_ran(c: str) -> bool:
-    """Whether an orientation has a session, a thread and a transcript in workspace `c`, which a follow-up can resume
-    (orient_session._chat_of and resume)."""
-    from . import agents, orientation, session  # noqa: PLC0415
+    """Whether an orientation ran in workspace `c` whose agent a follow-up can continue (orient_session.latest)."""
+    from . import orient_session  # noqa: PLC0415
 
-    rec = orientation.read_run(c) or {}
-    chat = str((rec.get("chats") or {}).get(orientation.ROLE) or "")
-    sid = str(rec.get("session") or "")
-    return bool(sid and chat and agents.meta_or_none(c, chat) is not None and session.find_transcript(sid))
+    try:
+        orient_session.latest(c)
+    except (orient_session.NoOrientation, orient_session.EarlierSession, orient_session.EarlierVersion):
+        return False
+    return True
 
 
 def oriented_here(c: str) -> bool:
@@ -1117,7 +1117,7 @@ def _can_run(c: str, name: str, exts: dict[str, Any], replacing: bool, ran: tupl
     """Whether Run now can run extension `name`'s orientation here (`ran`, as _ran gives it): its program runs again
     with the earlier cards wherever an orientation ran, and its instructions go to an orientation a follow-up reaches,
     thimble's own session that can be resumed or the program that ran it, which runs again with them
-    (orient_session.message)."""
+    (orient_session.send)."""
     e = exts.get(name) or {}
     if orient_program(e):
         return _program_runs(name, exts) and ran[0]
@@ -1202,9 +1202,9 @@ def _instructions(c: str, name: str, exts: dict[str, Any]) -> str:
 async def run_orientation(c: str, name: str) -> dict[str, Any]:
     """Run now: an extension whose program runs the orientation runs it again as a follow-up, with the earlier request
     and the cards as they stand, so it adds to them (orient_session.run_program_now); any other extension's
-    instructions are sent to the orientation as a follow-up, resumed or queued behind the run going
-    (orient_session.message). {status: rerun | resumed | queued | nothing}, rerun for a program; NoOrientation, Gone
-    or RuntimeError when it cannot run."""
+    instructions are sent to the orientation as a follow-up, through thimble's module (orient_session.send).
+    {status: rerun | sent | held | nothing}, rerun for a program; NoOrientation, EarlierSession, EarlierVersion or
+    RuntimeError when it cannot run."""
     from . import orient_session  # noqa: PLC0415
 
     exts = read_state(c)["extensions"]
@@ -1215,9 +1215,9 @@ async def run_orientation(c: str, name: str) -> dict[str, Any]:
     text = _instructions(c, name, exts)
     if not text:
         return {"status": "nothing"}
-    got = await orient_session.message(c, text, orient_session.EXTENSION, extension=name)
+    got = await orient_session.send(c, text, orient_session.EXTENSION, extension=name)
     await mark_oriented(c, [name])
-    return {"status": str(got.get("status") or "resumed")}
+    return {"status": str(got.get("status") or "sent")}
 
 
 def set_enabled(c: str, name: str, on: bool) -> None:
@@ -2230,7 +2230,7 @@ async def orientation_route(c: str, name: str, body: OrientBody, request: Reques
             status = (await run_orientation(c, name))["status"]
         except orient_session.NoOrientation:
             raise HTTPException(409, "No orientation has run here yet. It reads the extension when it starts.") from None
-        except (orient_session.Gone, RuntimeError, ValueError) as err:
+        except (orient_session.EarlierSession, orient_session.EarlierVersion, RuntimeError, ValueError) as err:
             raise HTTPException(409, f"{name}'s orientation could not run now: {err}") from None
     else:
         await decline(c, name)

@@ -1,7 +1,7 @@
 """The routes only thimble's plugin and hooks call: the plugin's hooks' (plugin/bin/.thimble-watch, and
 bin/thimble-agents for /api/agents), its MCP shim's (bin/thimble-mcp: the event subscription and tool
 calls), its hooks module's (plugin/hooks/thimble.ts: /api/module/*, app/module_bridge.py), and the hooks of the
-sessions thimble starts (app/permission_hook.py, app/call_ref.py).
+sessions thimble starts (app/permission_hook.py).
 
 Any process on the machine can reach a loopback port, and the plugin runs in every Claude Code session that has it,
 so each side proves it holds the token the supervisor writes into <home>/server.json (readable by its owner alone,
@@ -49,7 +49,10 @@ from starlette.responses import Response
 
 HOOK_PATHS = frozenset({
     "/api/events/pull", "/api/events/ack", "/api/events/held", "/api/events/mode", "/api/events/permission",
-    "/api/agents", "/api/bg/relay", "/api/bg/agent-check", "/api/bg/proxy-stop",
+    "/api/agents", "/api/bg/agent-check",
+    # thimble's agents' hooks (subagents.py), each beside the record it wrote to the workspace's files
+    "/api/subagents/started", "/api/subagents/denied", "/api/subagents/stopped", "/api/subagents/end",
+    "/api/subagents/rekey",
 })
 SHIM_PATHS = frozenset({"/api/events"})
 MODULE_PREFIX = "/api/module/"  # the hooks module's routes (app/module_bridge.py): every one, whatever the method

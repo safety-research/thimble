@@ -18,10 +18,8 @@ OTHER_PAGE = {"url": "https://vega.github.io/vega-lite/docs/line.html", "prompt"
 
 @pytest.fixture(autouse=True)
 def _fresh(workspaces_tmp):
-    agent_session._runs.clear()
     agent_session._hosted.clear()
     yield
-    agent_session._runs.clear()
     agent_session._hosted.clear()
 
 

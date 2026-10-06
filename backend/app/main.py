@@ -84,9 +84,9 @@ ROUTER_MODULES = [
     "events", "session",
     # the plugin's hooks module in main's session, which starts, messages and stops thimble's subagents on a click
     "module_bridge",
-    # the Claude Code sessions thimble starts beside main, the orientation's and each writer's: their permission
+    # thimble's agents as subagents of main (their hooks' routes, Start it), the code tickets' sessions' permission
     # requests (shut down with the server), and the orientation's calls, stored whole and citable
-    "agent_session", "calls", "orient_session",
+    "subagents", "agent_session", "calls", "orient_session", "write_session",
     # the programs an extension runs a role with (an Agent SDK program or a command), and their sessions
     "harness",
     # the orientation's, its critic's and the writers' tray entries in the analyst's terminal

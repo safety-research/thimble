@@ -831,11 +831,15 @@ def private_dir(p: Path) -> Path:
 
 
 def workspace_dir(name: str) -> Path:
-    """workspace_path, created on demand, private (private_dir): for the writers."""
+    """workspace_path, created on demand, private (private_dir): for the writers. A workspace made here has the files
+    thimble's agents' hooks trust from the start (subagent_files.ensure), so no kernel starts before them."""
     p = workspace_path(name)
     if not p.is_dir():
         private_dir(WORKSPACES_DIR)
         p.mkdir(mode=0o700, exist_ok=True)
+        from . import subagent_files  # noqa: PLC0415 — standard library only
+
+        subagent_files.ensure(p)
     return p
 
 

@@ -39,7 +39,7 @@ router = APIRouter()
 SERVER_NAME = "thimble"  # workers see mcp__thimble__<tool>; the user's session mcp__plugin_thimble_thimble__<tool>
 TOOLS_PROMPT = "tools"  # prompts/tools.md: the `## <tool>` sections (description and schema) and the hint sections
 ANALYST = "analyst"
-# The THIMBLE_SESSION of each session thimble starts beside main (agent_session.py): `orient`, or `writer:<doc>` since
+# The key of each of thimble's agents (subagents.py), the session its calls run as: `orient`, or `writer:<doc>` since
 # two documents may be written at once (session_kind).
 ORIENT_SESSION = "orient"
 WRITER_SESSION = "writer"
@@ -185,8 +185,7 @@ REGISTRY: dict[str, Spec] = {
         Spec("reply_in_thread", (ANALYST,), "app.threads:tool_reply_in_thread"),
         # a message typed in the terminal to a thread, sent as that thread's composer would (/thimble:ask); main's
         Spec("message_thread", (ANALYST,), "app.threads:tool_message_thread", sessions=MAIN_ONLY),
-        # a tray entry of thimble's agents waits for its news (tray.py); thimble's agents listed for the terminal
-        Spec("wait_session", (ANALYST,), "app.tray:tool_wait_session", sessions=MAIN_ONLY),
+        # thimble's agents listed for the terminal (tray.py)
         Spec("list_agents", (ANALYST,), "app.tray:tool_list_agents", sessions=MAIN_ONLY),
         # a thread renamed or deleted from the chat, as its row's menu does; main's, as the analyst asks it
         Spec("rename_thread", (ANALYST,), "app.threads:tool_rename_thread", sessions=MAIN_ONLY),
@@ -194,12 +193,10 @@ REGISTRY: dict[str, Spec] = {
         Spec("screenshot", (ANALYST,), _H + "screenshot"),
         Spec("start_orientation", (ANALYST,), "app.orient_session:tool_start_orientation", aliases=("orient",)),
         Spec("start_writing", (ANALYST,), "app.write_session:tool_start_writing"),
-        # the orientation's check of its own analysis, listed by its session alone; it waits for the critic's report, so
-        # a call
-        # Claude Code drops stops the critic (drop_stops)
-        Spec("critique", (ANALYST,), "app.critique_session:tool_critique", sessions=(ORIENT_SESSION,), drop_stops=True),
-        # a message to the orientation after it finished, which resumes its session (orient_session.message); main's
-        # alone
+        # the orientation's check of its own analysis: its result is the Agent call that starts the critic; the
+        # orientation's alone (subagents.allowed)
+        Spec("critique", (ANALYST,), "app.critique_session:tool_critique", sessions=(ORIENT_SESSION,)),
+        # a message to the orientation after it finished, which continues its agent (orient_session); main's alone
         Spec("message_orientation", (ANALYST,), "app.orient_session:tool_message_orientation", sessions=MAIN_ONLY),
         # a report check made or run from the chat; main's alone
         Spec("run_check", (ANALYST,), "app.checks:tool_run_check", sessions=MAIN_ONLY),
@@ -336,11 +333,12 @@ def session_kind(session: str | None) -> str | None:
 
 def list(role: str = ANALYST, session: str | None = None) -> "builtins.list[dict[str, Any]]":  # noqa: A001 — the contract names it `tools.list`
     """[{name, description, input_schema}] for the tools the role may use in the session `session` (a THIMBLE_SESSION),
-    in
-    registry order. A tool with `sessions` of its own is listed in those alone."""
+    in registry order. A tool with `sessions` of its own is listed in those alone, but main's shim (no session) lists
+    them all, since thimble's agents are main's subagents and call through it: each agent's registration takes away
+    the tools that are not its own, and a call is refused when its caller may not make it (call_route)."""
     role_of(role)
     kind = session_kind(session)
-    names = [s.name for s in REGISTRY.values() if role in s.roles and (not s.sessions or kind in s.sessions)]
+    names = [s.name for s in REGISTRY.values() if role in s.roles and (kind is None or not s.sessions or kind in s.sessions)]
     secs = tool_sections(names)
     return [{"name": n, "description": secs[n][0], "input_schema": secs[n][1]} for n in names]
 
@@ -499,11 +497,11 @@ def own_group_session(session: str | None) -> bool:
 
 
 def session_chat(c: str, session: str | None) -> str | None:
-    """The chat of the running session `session` names, None when none runs (the mirror then credits its cards to it,
-    agents.claim_cell)."""
-    from . import agent_session  # noqa: PLC0415 — agent_session imports this module
+    """The chat of the running agent of thimble's whose key `session` is, None when none runs (the mirror then credits
+    its cards to it, agents.claim_cell)."""
+    from . import subagents  # noqa: PLC0415 — subagents imports this module
 
-    run = agent_session.current(c, session) if session else None
+    run = subagents.current(c, session) if session else None
     return run.chat if run is not None and run.chat else None
 
 
@@ -2569,7 +2567,8 @@ async def call_route(name: str, body: CallBody, request: Request) -> dict[str, A
     directory belongs to no corpus; everything else the model should read is an is_error result, never an HTTP error.
     A tool marked drop_stops is cancelled when the shim drops the request (until_dropped). The call runs as the session
     it names only with a token that proves it (hook_auth.session_proven): without one it runs as the analyst's, unless
-    it comes from a workspace's own folder, and with a wrong one it does not run."""
+    it comes from a workspace's own folder, and with a wrong one it does not run. A call through main's shim runs as
+    the agent of thimble's that made it (_as_caller)."""
     if not known(name):
         raise HTTPException(404, f"no such tool: {name}")
     from . import harness, hook_auth  # noqa: PLC0415 — harness imports agent_session's helpers lazily
@@ -2594,12 +2593,39 @@ async def call_route(name: str, body: CallBody, request: Request) -> dict[str, A
             return err(hint("session-unproven", tool=name)).as_dict()
         log.info("a call of %s names the session %s without its token; it runs as the analyst's", name, session)
         session = None
+    if session is None:  # main's shim: main's own call, or one of thimble's agents', told apart by its caller
+        refused, session = await _as_caller(c, name, body.tool_use_id or None)
+        if refused:
+            return err(refused).as_dict()
     work = call(c, name, body.args, actor=body.actor, notebook=body.notebook, session=session,
                 tool_use_id=body.tool_use_id or None)
     if REGISTRY[canonical(name)].drop_stops:
         res = await until_dropped(request.receive, work, name)
         return (res or err(f"{name} was stopped: its caller dropped the call")).as_dict()
     return (await work).as_dict()
+
+
+async def _as_caller(c: str, name: str, tool_use_id: str | None) -> tuple[str, str | None]:
+    """(why the call is refused, '' when it runs; the session it runs as) for a call through main's shim: the key of the
+    agent of thimble's that made it (subagents.caller, from the caller hook's line, else the transcript that holds the
+    call), or None for main's own. A call its caller may not make is refused (subagents.allowed): main's `critique`, the
+    critic's `add_card`, a tool of a part the orientation's run has off (orientation.part_on)."""
+    from . import orientation, orient_session, subagents  # noqa: PLC0415 — each imports this module
+
+    canon = canonical(name)
+    who = await subagents.caller(c, tool_use_id) if tool_use_id else None
+    if who is None:
+        spec = REGISTRY[canon]
+        if spec.sessions and None not in spec.sessions:
+            return f"{canon} is not available to main", None
+        return "", None
+    if not subagents.allowed(who, canon):
+        return f"{canon} is not available to {who.agent_type or 'this agent'}", None
+    if session_kind(who.key) == ORIENT_SESSION:
+        part = next((p for p, names in orient_session.PART_TOOLS.items() if canon in names), None)
+        if part is not None and not orientation.part_on(c, part):
+            return f"{canon} is not available in this run of the orientation, whose {part} output is off", None
+    return "", who.key
 
 
 async def until_dropped(receive: Callable[[], Awaitable[dict[str, Any]]], work: Awaitable[ToolResult],

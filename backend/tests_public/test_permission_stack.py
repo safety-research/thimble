@@ -18,12 +18,10 @@ CORPUS = "mini"
 
 @pytest.fixture(autouse=True)
 def _fresh(workspaces_tmp):
-    agent_session._runs.clear()
     agent_session._hosted.clear()
     yield
     for key in [k for (c, k) in list(agent_session._hosted)]:
         agent_session.unhost(CORPUS, key)
-    agent_session._runs.clear()
 
 
 def _agent(key: str, role: str = "dev", title: str = "view: Posts") -> str:

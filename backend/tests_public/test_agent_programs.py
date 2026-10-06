@@ -487,8 +487,8 @@ thimble.serve(run)
 '''
     active.append(_extension(tmp_path, "crit", {"critic": {"description": "Critiques.", "command": ["python", "c.py"]}},
                              {"agents/critic/c.py": critic}))
-    caller = agent_session.Run(CORPUS, "orient", "chat-o", "sid", config.corpus_dir(CORPUS), orientation.ROLE)
-    monkeypatch.setattr(critique_session, "orientation_run", lambda c, key: caller)
+    caller = critique_session.Caller(CORPUS, "orient", "chat-o", "a1", "sid", str(config.corpus_dir(CORPUS)))
+    monkeypatch.setattr(critique_session, "orientation_caller", lambda c, key: caller)
     monkeypatch.setattr(critique_session, "write_digest", lambda c, run: None)
     monkeypatch.setattr(critique_session, "first_message", lambda c, t, ctx, checks=None: "The digest of the run.")
 
@@ -500,6 +500,39 @@ thimble.serve(run)
     assert not res.is_error, res.text
     assert res.text.splitlines()[-1] == "Report: The digest of the run"
 
+
+
+async def test_a_program_critique_stops_when_the_orientation_s_run_ends(tmp_path, data_tmp, workspaces_tmp, active,
+                                                                        unboxed, monkeypatch):
+    """The program critic is called through the orientation's Caller (its subagent chat) and stops with the
+    orientation's run, since the orientation's end handler stops it (this replaces drop_stops for programs)."""
+    from app import critique_session, harness, orient_session, subagents
+
+    critic = '''import time, thimble
+def run(input):
+    time.sleep(60)
+    return "never"
+thimble.serve(run)
+'''
+    active.append(_extension(tmp_path, "slow", {"critic": {"description": "Critiques.", "command": ["python", "c.py"]}},
+                             {"agents/critic/c.py": critic}))
+    caller = critique_session.Caller(CORPUS, "orient", "chat-o", "a1", "sid", str(config.corpus_dir(CORPUS)))
+    monkeypatch.setattr(critique_session, "orientation_caller", lambda c, key: caller)
+    monkeypatch.setattr(critique_session, "write_digest", lambda c, run: None)
+    monkeypatch.setattr(critique_session, "first_message", lambda c, t, ctx, checks=None: "The digest of the run.")
+    monkeypatch.setattr(orient_session, "_go_on", lambda *a, **k: None)
+
+    async def no_checks(c, chat=None):
+        return None
+
+    monkeypatch.setattr(critique_session, "checks_text", no_checks)
+    call = asyncio.ensure_future(tools.call(CORPUS, "critique", {}, session="orient"))
+    await _until(lambda: harness.running(CORPUS, "critique:orient") or None, what="the program critic to start")
+    orient_session.subagent_ended(CORPUS, subagents.Run(CORPUS, "orient", "orientation", "chat-o", "a1", k=1,
+                                                        interrupted=True), "failed", "the run failed")
+    res = await asyncio.wait_for(call, 30)
+    assert res.is_error and "stopped" in res.text, res.text
+    assert not harness.running(CORPUS, "critique:orient")
 
 def agents_list(c: str) -> list[dict]:
     folder = config.workspace_dir(c) / "chats"

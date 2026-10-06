@@ -993,9 +993,9 @@ def _session_chat(c: str, cell: dict[str, Any], author: str) -> str | None:
     """The chat of the session that made a card that is not main's: the running session's, else the chat the card is
     stamped with, else the orientation's latest chat for the orientation's card, or a writer's latest chat for its
     document once the writer has ended; None when none is found."""
-    from . import agent_session, agents, orientation  # noqa: PLC0415
+    from . import agents, orientation, subagents  # noqa: PLC0415
 
-    run = agent_session.current(c, author)
+    run = subagents.current(c, author)
     if run is not None:
         return run.chat
     by = str(cell.get("created_by") or "")
