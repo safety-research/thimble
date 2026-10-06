@@ -49,6 +49,7 @@ const READY_MS = 10_000
 const PAGES_AT_ONCE = 3 // states loaded side by side, each on its own page
 const MEDIA_CHUNK = 4 * 1024 * 1024 // bytes of one Range answer
 const MEDIA_WHOLE_MAX = 32 * 1024 * 1024 // a request without Range (an <img>) gets a file up to this size whole
+const CHECK_PAGE = 'http://thimble.invalid/view-check' // the page that holds the frame (shootState), never on the network
 // a ref naming one record of a file: a line of any file, or a fragment of a file whose name has an extension (backend
 // records.is_record_ref)
 const RECORD_REF = /^(?!(?:view|card|cell|concept|report|chat|call|group|ui):)[^\s#][^#\n]*(?:#L[1-9]\d*|\.[A-Za-z0-9]{1,8}#\S+)$/
@@ -630,9 +631,17 @@ async function shootState(browser, opt, doc, state, i) {
       if (kind === 'error') errors.push(String(text).slice(0, 400))
     })
     const tokens = readFileSync(new URL('../frontend/src/styles/tokens.css', import.meta.url), 'utf8')
-    await page.setContent(
-      `<!doctype html><html><head><style>${tokens}</style></head><body style="margin:0;background:var(--paper-0,#fbfaf7)"><iframe id="f" sandbox="allow-scripts" style="border:0;width:100%;height:100vh;display:block"></iframe></body></html>`,
+    // served from an http address, as the browser serves thimble's page: a relative URL in the view (a <script src>
+    // the frame's policy blocks) resolves and is refused as in the browser, where under about:blank it resolved to
+    // nothing and failed silently, so a view the browser could not show passed its checks (live check L31)
+    await page.route(CHECK_PAGE, (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'text/html',
+        body: `<!doctype html><html><head><style>${tokens}</style></head><body style="margin:0;background:var(--paper-0,#fbfaf7)"><iframe id="f" sandbox="allow-scripts" style="border:0;width:100%;height:100vh;display:block"></iframe></body></html>`,
+      }),
     )
+    await page.goto(CHECK_PAGE)
     await page.evaluate(
       ({ doc, place, names, fonts }) => {
         const f = document.getElementById('f')

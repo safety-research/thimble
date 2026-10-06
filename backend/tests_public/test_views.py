@@ -1195,6 +1195,25 @@ async def test_a_page_that_changes_labels_by_itself_fails_the_checks_and_a_click
     assert views.self_label_problems([{**plain, "self_labels": []}]) == []
 
 
+SRC_HTML = """<!doctype html><html><head><script src="lib/marked/marked.min.js"></script></head><body>
+<div data-anchor="board.jsonl#L1">one</div><script>thimble.onOpen(() => {})</script></body></html>"""
+
+
+async def test_a_page_that_loads_a_script_by_its_path_fails_the_checks_as_the_browser_refuses_it(ws, inproc, bound):
+    """Live check L31: a builder put `<script src="lib/marked/marked.min.js">` in the page. The browser resolves the
+    path against thimble's address and the frame's policy refuses it ("which a view may not do"), but the checks' page
+    sat at about:blank, where the path resolved to nothing, so the view passed and could not be shown. The checks' page
+    has an http address too, so the page check fails with the same words."""
+    if why := views.build_problem():
+        if os.environ.get("CI") == "true":
+            pytest.fail(why)
+        pytest.skip(why)
+    views.write_view(CORPUS, "src", reader=THREADS_READER, html=SRC_HTML, **{**VIEW, "name": "Src"})
+    (state,) = await views.shoot_states(CORPUS, "src", [{"open": {}}])
+    assert not state["ok"]
+    assert any("lib/marked/marked.min.js, which a view may not do" in e for e in state["errors"]), state["errors"]
+
+
 # what Playwright's own error says to run, which never reaches a model
 INSTALL_WORDS = re.compile(r"playwright install|npx|download new browsers|Executable doesn't exist|install\.sh", re.I)
 
