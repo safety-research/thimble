@@ -35,14 +35,22 @@ For a development build, clone the repo and run `bash scripts/install.sh`.
 ## Usage
 
 - Run `thimble` in a directory, just as you would run `claude` 
-- It starts a Claude Code session there with the thimble plugin loaded and prints the dashboard URL. 
+- It starts a Claude Code session there with the thimble plugin loaded, inside thimble's sandbox, and prints the dashboard URL. 
 - Each run starts a new conversation on the same workspace (cards, report, labels). `thimble --continue` picks up your last conversation in this folder instead.
+
+### thimble's agents
+
+- The orientation, its critic, the writers, view builds, view reviews and report checks run as subagents of your Claude Code session. Claude Code's agent tray shows them beside the browser's threads, and they run in your session's permission mode and sandbox.
+- A button in the browser, such as Start or Write, starts its agent at once, without a turn of Claude's. Asked in the terminal, Claude starts it with its own Agent call.
+- When an agent finishes, your terminal shows its report arriving and one short line from Claude.
+- Quitting Claude Code stops them, and nothing restarts them on its own: `thimble -c` and a message in the agent's thread continue one, and Retry starts a view build, review or check again.
+- Models and efforts in Settings apply to the next start, with no restart. Start, `/thimble:orient` and Claude's start tools take a model and an effort for one run.
 
 ### From a running Claude Code session
 
-In a session started with `thimble`, type `/thimble` to start the thimble server and print the dashboard URL. If a session you started with plain `claude` doesn't recognise `/thimble`, quit it and run `thimble` in that folder.
+In a session started with `thimble`, type `/thimble` to start the thimble server and print the dashboard URL. If a session you started with plain `claude` doesn't recognise `/thimble`, quit it and run `thimble` in that folder. A plain `claude` session that has thimble's plugin runs without thimble's sandbox and can't start thimble's agents, and `/thimble` warns about it.
 
-> **Please note:** thimble connects the browser to your Claude Code session through the plugin's [hooks](https://code.claude.com/docs/en/hooks). If your settings or your organization turn the plugin's hooks off, thimble connects through a Monitor instead: permission prompts appear only in the terminal, you say `/thimble` again after `/clear`, and `/thimble` prints a warning that says so.
+> **Please note:** thimble connects the browser to your Claude Code session through the plugin's [hooks](https://code.claude.com/docs/en/hooks). If your settings or your organization turn the plugin's hooks off, thimble connects through a Monitor instead: permission prompts appear only in the terminal, you say `/thimble` again after `/clear`, and `/thimble` prints a warning that says so. thimble's agents start through the plugin's hooks module, so where Claude Code's hooks modules are off (managed settings with `disableAllHooks` or `allowManagedHooksOnly`, or a folder Claude Code doesn't trust), they can't start. The launcher and the browser say so, and Claude, its threads, cards, labels and code tickets still work.
 
 ## Claude Code Mod (Experimental)
 
@@ -69,7 +77,7 @@ claude
 | `/thimble fix` | in a development install, repair a server that will not start |
 | `/thimble feedback` | write a problem report (a zip), even with the server down |
 | `/thimble:ask <thread> [message]` | send a message to a thread, as its composer in the browser would |
-| `/thimble:orient [focus] [flags]` | start an orientation, with Start's switches as flags |
+| `/thimble:orient [focus] [flags]` | start an orientation, with Start's switches, model and effort as flags |
 
 **From a shell** (`thimble help` lists these)
 
@@ -92,7 +100,7 @@ A development install (a git clone) also has `thimble fix` and `thimble revert`,
 
 ## Requirements
 
-Claude Code (tested with 2.1.281), macOS or Linux, and Python 3.12+ ([uv](https://docs.astral.sh/uv/) recommended). Node 20+ is needed for custom views (the viewers the dev agent builds for your data), for the sandbox card code and code tickets run in, and for a development build. [INSTALL.md](INSTALL.md) has the details.
+Claude Code (tested with 2.1.291), with its hooks modules on, macOS or Linux, and Python 3.12+ ([uv](https://docs.astral.sh/uv/) recommended). Node 20+ is needed for custom views (the viewers the dev agent builds for your data), for the sandbox card code and code tickets run in, and for a development build. [INSTALL.md](INSTALL.md) has the details.
 
 ## Security and privacy
 

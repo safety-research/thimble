@@ -23,7 +23,7 @@ stdin, `{"input": {...}}`, and in the file `$THIMBLE_INPUT`:
 | role | input | its thimble tools | what it returns |
 |---|---|---|---|
 | orientation | `request`, `outputs`, `follow_up`, `choices`, `cards`, `corpus`, `tools` | `read_ref`, `list_cards`, `add_card`, `edit_card`, `delete_card`, `apply_label`, `propose_view`, `screenshot` (as `outputs` allows) | the line main hears |
-| critic | `digest` (what thimble's critic reads), `transcript`, `context` | `read_ref`, `list_cards` | the report the orientation's critique call gets |
+| critic | `digest` (what thimble's critic reads), `transcript`, `context` | `read_ref`, `list_cards` | the report the orientation's `critique` call returns |
 | writer | `doc`, `type`, `request`, `after`, `context` | `read_ref`, `list_cards`, `add_card`, `edit_card`, `delete_card`, `screenshot`, `write_document`, `edit_document` | the line main hears |
 | dev | one turn of a view build: `slug`, `name`, `description`, `scope`, `spec`, `change`, `folder`, `corpus`, `examples`, `message` | `read_ref` | the turn's reply; thimble then checks the view's files in `folder` and runs the program again with what failed in `message` |
 
@@ -110,8 +110,8 @@ thimble.serve(async (input) => {
 ```
 
 `thimble.options()` (in both languages) hands the Agent SDK thimble's `claude`. Its sessions then start on your own
-Claude Code login, in the role's work folder with the corpus added, under the role's permission mode, sandbox and
-config, with thimble's tools. Your program chooses the prompt, the system prompt, the model, the turns and the
+Claude Code login, in the role's work folder with the corpus added, under your Claude Code session's permission mode
+and the role's sandbox and config, with thimble's tools. Your program chooses the prompt, the system prompt, the model, the turns and the
 subagents. thimble keeps the permission mode, the settings, the hooks and the folders. So a subagent's
 `permissionMode`, `hooks` and `memory` are dropped, and so are MCP servers that would run outside the program (only
 the SDK's own `sdk` servers and servers named by their name stay). A request to change the permission mode, the
@@ -138,5 +138,5 @@ its own included.
 - **thimble's key**: no agent, program or session can read `server.json`, which holds the local API's token, or
   `session.key`, which proves which session a call comes from. A program uses its own token instead, and can't read
   Claude Code's credentials file either.
-- A program's sessions ask for permission as thimble's agents do: on the agent's card in the browser, by its row of the
-  permission modes in Settings.
+- A program's sessions run in your Claude Code session's permission mode and ask for permission on the agent's card in
+  the browser.
