@@ -269,9 +269,11 @@ def event(c: str, payload: dict[str, Any], event_id: str) -> tuple[str, dict[str
     waits = awaiting_fork(c, thread_id)
     agents.set_running(c, thread_id, True)
     if waits:
-        queued = [*(meta.get(QUEUED_KEY) or []), {"text": text, "event": event_id, "ts": _now()}]
-        agents.update_agent(c, thread_id, **{QUEUED_KEY: queued})
-        log.info("%s: thread %s: a message waits for its fork (%d queued)", c, thread_id, len(queued))
+        entry = {"text": text, "event": event_id, "ts": _now()}
+        # appended to the list as the meta holds it now, under its lock (agents.change_meta)
+        meta = agents.change_meta(c, thread_id, lambda m: m.update({QUEUED_KEY: [*(m.get(QUEUED_KEY) or []), entry]}))
+        agents._notify(c, thread_id)
+        log.info("%s: thread %s: a message waits for its fork (%d queued)", c, thread_id, len(meta[QUEUED_KEY]))
         return None
     return build(c, thread_id, [text])
 
@@ -335,10 +337,19 @@ def flush(c: str, thread_id: str) -> bool:
     from . import events  # noqa: PLC0415
 
     meta = agents.meta_or_none(c, thread_id)
-    queued = [q for q in (meta or {}).get(QUEUED_KEY) or [] if isinstance(q, dict) and str(q.get("text") or "").strip()]
-    if not queued or not events.reachable(c):
+    if not (meta or {}).get(QUEUED_KEY) or not events.reachable(c):
         return False
-    agents.update_agent(c, thread_id, **{QUEUED_KEY: []})
+    taken: list[Any] = []
+
+    def take(m: dict) -> None:  # the list as the meta holds it now, emptied under its lock (agents.change_meta)
+        taken.extend(m.get(QUEUED_KEY) or [])
+        m[QUEUED_KEY] = []
+
+    agents.change_meta(c, thread_id, take)
+    agents._notify(c, thread_id)
+    queued = [q for q in taken if isinstance(q, dict) and str(q.get("text") or "").strip()]
+    if not queued:
+        return False
     questions = [str(q["text"]) for q in queued]
     body, fields, _ = build(c, thread_id, questions)
     events.send(c, events.THREAD, body, fields, thread=thread_id,
@@ -559,6 +570,36 @@ def reply(c: str, thread_id: str, text: str, *, by: str) -> None:
     _, log_path = agents.paths(c, thread_id)
     agents.append(log_path, {"type": "text", "delta": cite.from_links(text), "reply": True, "by": by})
     agents.notify(c, thread_id)
+
+
+SEEN_KEY = "seen"  # on a thread's meta: how many of its log's records the analyst had when they last opened it
+
+
+def _answers_after(records: list[dict[str, Any]], start: int) -> bool:
+    return any(r.get("type") == "done" or (r.get("type") == "text" and r.get("reply")) for r in records[start:])
+
+
+def unread(c: str, meta: dict[str, Any]) -> bool:
+    """Whether the thread has an answer (a reply or a finished run) the analyst has not opened since it came: one in
+    its log after the records SEEN_KEY counts. A thread never opened counts from its start. Kept on the meta, so it
+    holds across a restart and in both modes."""
+    try:
+        records = agents.read_events(agents.paths(c, str(meta["id"]))[1])
+    except Exception:  # noqa: BLE001 — a thread that cannot be read shows nothing new
+        return False
+    seen = meta.get(SEEN_KEY)
+    return _answers_after(records, seen if isinstance(seen, int) and not isinstance(seen, bool) else 0)
+
+
+def mark_seen(c: str, thread_id: str) -> int:
+    """The analyst opened the thread: every record its log holds now is seen (SEEN_KEY). Returns that count; 404 for a
+    chat that does not exist, 400 for one that is no thread."""
+    meta = agents.read_meta(c, thread_id)
+    if meta.get("kind") != agents.KIND_THREAD:
+        raise HTTPException(400, f"{thread_id} is not a thread")
+    n = len(agents.read_events(agents.paths(c, thread_id)[1]))
+    agents.update_agent(c, thread_id, **{SEEN_KEY: n})
+    return n
 
 
 # --------------------------------------------------------------------------- tools

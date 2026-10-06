@@ -95,7 +95,7 @@ def group_moved(c: str, group: str, *, title: str, by: str, from_parent: str | N
         line = {"ts": _now(), "op": "group-moved", "group": group, "title": title, "by": by, "from": from_parent,
                 "to": to_parent, "cards": list(cards)}
         with _lock:
-            ledger.append_jsonl(log_path(c), line)
+            ledger.append_jsonl_locked(log_path(c), line)
     except Exception:  # noqa: BLE001 — the history never blocks a change
         log.exception("%s: could not record the move of group %s", c, group)
 
@@ -316,7 +316,7 @@ def _record(c: str, cell: dict[str, Any], what: str | None) -> tuple[tuple | Non
         h = _digest(parts)
         line = {"ts": _now(), "op": op, "card": cid, "group": cell.get("notebook"), "by": by,
                 "changed": changed, "h": h, "state": state}
-        ledger.append_jsonl(path, line)
+        ledger.append_jsonl_locked(path, line)  # the shim and the hooks' backend calls write it in terminal mode
         if op == "deleted":
             _last.pop(key, None)
         else:

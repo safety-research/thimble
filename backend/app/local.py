@@ -1,0 +1,636 @@
+"""thimble's backend without its server, for terminal mode.
+
+In browser mode the plugin's MCP shim (plugin/bin/thimble-mcp) posts each tool call to the server, and the browser reads
+the workspace through the server's routes. In terminal mode no server runs. The shim, one process per Claude Code
+session that main and every subagent share, runs the same `tools.call` in its own process (call); the renderer reads the
+same JSON the server's GET routes give the browser with `thimble state <surface>` (state), and makes the changes the
+browser's POST routes make with `thimble act <kind>` (act). Each of these writes the same workspace files the server
+writes, so a workspace made in one mode opens in the other.
+
+Which mode a workspace runs in is the session's, recorded by the launcher as `mode` in the workspace's
+`trusted/launch.json` (session_mode). A tool call here refuses a folder that holds no workspace (no tool call registers
+a corpus: only the launcher, /thimble, `thimble demo` and the browser do) and a workspace whose session runs in browser
+mode, whose server owns it. A process that lost its environment (THIMBLE_HOME) finds no workspace under the default
+home and does nothing.
+
+Code a model wrote never runs in the shim: card code, code labels and the rerun of cards after a label changed run
+through `thimble-run` in the caller's Bash, inside main's sandbox (cardrun.py). The shim runs the jobs a tool leaves
+running (a prompt label's run, the card check of a card `thimble-run` wrote) on its event loop, and they end with the
+session, as browser-mode jobs end with it.
+
+    python -m app.local state <surface> --cwd <dir> [args]    prints JSON (STATE_USAGE)
+    python -m app.local act <kind> --cwd <dir> '<json>'        prints {ok, ...} (ACT_USAGE)
+
+Both print `{error}` and exit 1 when they fail, and open no port.
+"""
+from __future__ import annotations
+
+import asyncio
+import contextlib
+import json
+import logging
+import os
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+from . import config
+
+log = logging.getLogger("thimble.local")
+
+BROWSER, TERMINAL = "browser", "terminal"
+MODES = (BROWSER, TERMINAL)
+LAUNCH_FILE = "trusted/launch.json"  # cli.LAUNCH_FILE: the launcher's record of the session, with its `mode`
+WS_ENV = "THIMBLE_WS"  # the workspace folder, which the launcher exports in terminal mode
+UI_LOG = "ui.jsonl"  # the UI tools' records for the renderer: {n, at, kind, args}
+# the refusals of call(), in the tool route's words where it has them (tools.call_route)
+NO_WORKSPACE = ("{cwd} is not inside a corpus thimble knows, so `{name}` was not run. Start thimble in that folder with "
+                "`thimble`.")
+NOT_TERMINAL = ("`{name}` was not run: this workspace's session runs in browser mode, where the thimble server runs "
+                "the tools. Start it again with `thimble`.")
+
+_started: set[str] = set()  # the workspaces this process has served a call for (_start)
+# The plugin copy this session loaded, which the shim names from its own path (plugin/bin/thimble-mcp): the launcher's
+# `--allowedTools` rule for the card runner names that copy's bin/thimble-run (cli.launch_args), so the commands the
+# tools give name it too (cardrun.bin_path). None outside the shim.
+PLUGIN_ROOT: Path | None = None
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="milliseconds")
+
+
+# --------------------------------------------------------------------------- the session's mode
+
+
+def session_mode(ws: Path) -> str:
+    """The mode the workspace folder `ws`'s session runs in: `mode` in its launch.json, else browser. The mode lane's
+    launch_mode.session_mode when it is installed, which reads the same field."""
+    try:
+        from . import launch_mode  # noqa: PLC0415 — the mode lane's module
+
+        return str(launch_mode.session_mode(Path(ws)))
+    except ImportError:
+        pass
+    try:
+        rec = json.loads((Path(ws) / LAUNCH_FILE).read_text("utf-8"))
+    except (OSError, ValueError):
+        return BROWSER
+    mode = rec.get("mode") if isinstance(rec, dict) else None
+    return TERMINAL if mode == TERMINAL else BROWSER
+
+
+def terminal(c: str) -> bool:
+    """Whether workspace `c`'s session runs in terminal mode (session_mode). False for a workspace that is not there."""
+    try:
+        return session_mode(config.workspace_path(c)) == TERMINAL
+    except (ValueError, OSError):
+        return False
+
+
+def _pid_alive(pid: Any) -> bool:
+    if not isinstance(pid, int) or isinstance(pid, bool) or pid <= 1:
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def live_terminal(ws: Path) -> bool:
+    """Whether the workspace folder `ws` is open in terminal mode in a session that still runs (launch.json's `pid`).
+    A server that starts leaves such a workspace's running cards alone (notebook.mark_interrupted_cells)."""
+    if session_mode(ws) != TERMINAL:
+        return False
+    try:
+        rec = json.loads((Path(ws) / LAUNCH_FILE).read_text("utf-8"))
+    except (OSError, ValueError):
+        return False
+    return _pid_alive(rec.get("pid") if isinstance(rec, dict) else None)
+
+
+def settle_dirs() -> None:
+    """The data and workspaces folders this process reads, as the launcher resolved them for the session
+    (cli.resolve_env): THIMBLE_DATA_DIR and THIMBLE_WORKSPACES_DIR when set, else the folder THIMBLE_WS sits in and the
+    data folder the last server.json names (as subagent_files.workspace_folder reads them), else config's defaults. The
+    shim, `thimble-run` and `thimble state|act` call it before they look for a workspace."""
+    home = Path(os.environ.get("THIMBLE_HOME") or (Path.home() / ".thimble")).expanduser()
+    try:
+        recorded = json.loads((home / "server.json").read_text("utf-8")).get("env") or {}
+    except (OSError, ValueError, AttributeError):
+        recorded = {}
+    if not os.environ.get("THIMBLE_WORKSPACES_DIR"):
+        named = os.environ.get(WS_ENV) or ""
+        if named and Path(named).is_dir():
+            config.WORKSPACES_DIR = Path(named).resolve().parent
+    if not os.environ.get("THIMBLE_DATA_DIR") and isinstance(recorded, dict) and recorded.get("data_dir"):
+        config.DATA_DIR = Path(str(recorded["data_dir"])).expanduser().resolve()
+
+
+def workspace(cwd: str | None) -> str | None:
+    """The workspace of the folder `cwd` (config.workspace_for_cwd), else the one THIMBLE_WS names when it is a
+    workspace of this home; None for neither. Nothing is registered or made."""
+    c = config.workspace_for_cwd(cwd) if cwd else None
+    if c:
+        return c
+    named = os.environ.get(WS_ENV) or ""
+    if named:
+        p = Path(named)
+        if p.parent.resolve() == config.WORKSPACES_DIR.resolve() and p.is_dir():
+            return p.name
+    return None
+
+
+# --------------------------------------------------------------------------- tool calls
+
+
+async def call(name: str, args: dict[str, Any], *, cwd: str, session: str | None = None,
+               session_token: str | None = None, tool_use_id: str | None = None) -> dict[str, Any]:
+    """One tool call in this process: {content, is_error}, the shape the server's tool route answers with
+    (tools.call_route). The session is believed as the route believes it: with a token that proves it, else the call
+    runs as main's, attributed to the agent of thimble's that made it (tools._as_caller)."""
+    from . import hook_auth, tools  # noqa: PLC0415
+
+    if not tools.known(name):
+        return tools.err(f"no such tool: {name}").as_dict()
+    c = workspace(cwd)
+    if not c:
+        return tools.err(NO_WORKSPACE.format(cwd=cwd or "(no folder)", name=name)).as_dict()
+    if not terminal(c):
+        return tools.err(NOT_TERMINAL.format(name=name)).as_dict()
+    _start(c)
+    session = session or None
+    if session and not hook_auth.session_proven(c, session, session_token or ""):
+        if session_token:
+            return tools.err(tools.hint("session-unproven", tool=name)).as_dict()
+        session = None
+    if session is None:
+        refused, session = await tools._as_caller(c, name, tool_use_id or None)
+        if refused:
+            return tools.err(refused).as_dict()
+    res = await tools.call(c, name, args, session=session, tool_use_id=tool_use_id or None)
+    return res.as_dict()
+
+
+def _start(c: str) -> None:
+    """The first call for workspace `c` in this process: the cards an earlier session left `running` are marked
+    interrupted, and the watch that starts the card check of each card `thimble-run` writes begins (cardrun.CardWatch)."""
+    if c in _started:
+        return
+    _started.add(c)
+    from . import cardrun, notebook  # noqa: PLC0415
+
+    try:
+        marked = notebook.mark_interrupted_cells(only=(c,))
+        if marked:
+            log.info("cards left running by an earlier session, marked interrupted: %s", ", ".join(marked))
+    except Exception:  # noqa: BLE001 — never fails the call
+        log.exception("%s: marking interrupted cards failed", c)
+    try:
+        cardrun.CardWatch.start(c)
+    except RuntimeError:  # no running loop: a one-call process (tests, the CLI) checks no cards
+        pass
+
+
+async def close() -> None:
+    """The end of the shim's session in terminal mode: the jobs it ran end with it, as browser-mode jobs end with the
+    session (the card checks, a label's run, the card watch), and the browser and kernels it started stop. Never
+    raises."""
+    from . import cardrun  # noqa: PLC0415
+
+    cardrun.CardWatch.stop_all()
+    mods = sys.modules
+    for c in list(_started):
+        if "app.card_check" in mods:
+            with contextlib.suppress(Exception):
+                mods["app.card_check"].stop_all(c, mods["app.card_check"].SESSION_ENDED)
+        if "app.concepts" in mods:
+            with contextlib.suppress(Exception):
+                mods["app.concepts"].stop_workspace(c)
+    if "app.render" in mods:
+        with contextlib.suppress(Exception):
+            await mods["app.render"].shutdown()
+    if "app.notebook" in mods:
+        with contextlib.suppress(Exception):
+            await mods["app.notebook"].shutdown_all()
+
+
+# --------------------------------------------------------------------------- what the UI tools leave for the renderer
+
+
+def ui_append(c: str, kind: str, args: dict[str, Any]) -> dict[str, Any]:
+    """Append one record to the workspace's ui.jsonl under its lock: {n, at, kind, args}, `n` one past the last. The UI
+    tools (set_layout, open_view, set_filter, clear_filter, show_label) write it in terminal mode, where the renderer
+    follows it (`thimble state ui --after <n>`)."""
+    from . import ledger  # noqa: PLC0415
+
+    path = config.workspace_dir(c) / UI_LOG
+    with ledger.locked(path):
+        ledger.heal_tail(path)
+        rec = {"n": max(ledger.last_seq(path, "n"), 0) + 1, "at": _now(), "kind": kind, "args": args}
+        ledger.append_jsonl(path, rec)
+    return rec
+
+
+UI_KINDS = ("layout", "open_view", "filter", "label")
+
+
+def ui_note(c: str, kind: str, args: dict[str, Any]) -> None:
+    """ui_append in terminal mode, where a UI tool's change reaches the renderer through ui.jsonl alone; nothing in
+    browser mode, whose page hears the stream. Never raises: the tool's change is made either way."""
+    try:
+        if terminal(c):
+            ui_append(c, kind, args)
+    except Exception:  # noqa: BLE001
+        log.warning("%s: the %s record for the terminal was not written", c, kind, exc_info=True)
+
+
+def ui_records(c: str, after: int = 0) -> list[dict[str, Any]]:
+    """The ui.jsonl records with `n` above `after`, oldest first."""
+    path = config.workspace_path(c) / UI_LOG
+    try:
+        text = path.read_text("utf-8")
+    except OSError:
+        return []
+    out = []
+    for line in text.splitlines():
+        try:
+            rec = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(rec, dict) and isinstance(rec.get("n"), int) and rec["n"] > after:
+            out.append(rec)
+    return out
+
+
+# --------------------------------------------------------------------------- thimble state
+
+
+STATE_USAGE = ("thimble state <surface> --cwd <dir> [args]; surfaces: home, cards [--since <iso>], card <id>, labels, "
+               "label <id>, docs, doc <slug>, threads, thread <id> [--after <n>], agents [--tail <n>], files [path], "
+               "resolve <refs json>, ui [--after <n>]")
+
+
+class StateError(Exception):
+    """A state or act request that cannot be answered, with the line `{error}` carries."""
+
+
+def _flag(args: list[str], name: str, default: str | None = None) -> str | None:
+    if name in args:
+        i = args.index(name)
+        if i + 1 < len(args):
+            return args[i + 1]
+        raise StateError(f"{name} needs a value")
+    return default
+
+
+def _positional(args: list[str]) -> list[str]:
+    out, skip = [], False
+    for a in args:
+        if skip:
+            skip = False
+            continue
+        if a.startswith("--"):
+            skip = True
+            continue
+        out.append(a)
+    return out
+
+
+def _int(v: str | None, default: int, what: str) -> int:
+    if v is None:
+        return default
+    try:
+        return int(v)
+    except ValueError:
+        raise StateError(f"{what} must be a whole number, not {v!r}") from None
+
+
+async def state(c: str, surface: str, args: list[str] | None = None) -> Any:
+    """The JSON the server's GET route for `surface` gives the browser (STATE_USAGE), read from the workspace files."""
+    from fastapi import HTTPException  # noqa: PLC0415
+
+    args = list(args or [])
+    pos = _positional(args)
+    fn = _SURFACES.get(surface)
+    if fn is None:
+        raise StateError(f"no surface {surface!r}; {STATE_USAGE}")
+    try:
+        return await fn(c, args, pos)
+    except HTTPException as e:
+        raise StateError(str(e.detail)) from None
+
+
+async def _home(c: str, args: list[str], pos: list[str]) -> Any:
+    from . import agents, orientation, tools, views  # noqa: PLC0415
+
+    out = await asyncio.to_thread(tools.holdings, c)
+    threads = [m for m in agents.list_chats(c) if m.get("kind") == agents.KIND_THREAD]
+    out["threads"] = len(threads)
+    out["unread"] = [m["id"] for m in threads if _unread(c, m)]
+    try:
+        out["views"] = len(views.list_views(c))
+    except Exception:  # noqa: BLE001 — the row above the prompt still shows the rest
+        out["views"] = 0
+    out["orientation"] = (orientation.read_run(c) or {}).get("status")
+    out["mode"] = session_mode(config.workspace_path(c))
+    return out
+
+
+async def _cards(c: str, args: list[str], pos: list[str]) -> Any:
+    from . import notebook  # noqa: PLC0415
+
+    out = await notebook.canvas_route(c)
+    since = _flag(args, "--since")
+    if since:
+        out = {**out, "cells": [x for x in out["cells"] if str(x.get("ts") or "") >= since
+                                or str(x.get("created_ts") or "") >= since]}
+    return out
+
+
+async def _card(c: str, args: list[str], pos: list[str]) -> Any:
+    from . import notebook  # noqa: PLC0415
+
+    if not pos:
+        raise StateError("card needs a card id")
+    return await notebook.get_cell_route(c, pos[0].removeprefix("card:"))
+
+
+async def _labels(c: str, args: list[str], pos: list[str]) -> Any:
+    from . import concepts  # noqa: PLC0415
+
+    return await asyncio.to_thread(concepts.list_concepts_route, c)
+
+
+async def _label(c: str, args: list[str], pos: list[str]) -> Any:
+    from . import concepts  # noqa: PLC0415
+
+    if not pos:
+        raise StateError("label needs a label id or name")
+    ws = config.workspace_dir(c)
+    found = concepts.find_concept(ws, pos[0])
+    if found is None:
+        raise StateError(f"no label {pos[0]!r}")
+    out = await concepts.get_concept_route(c, str(found["id"]))
+    # the examples the label card shows under its bars, per value (the browser asks the rows route for them)
+    ex: dict[str, list[dict[str, str]]] = {}
+    for value in out.get("labels") or []:
+        pairs = await asyncio.to_thread(concepts.examples, c, str(found["id"]), str(value))
+        ex[str(value)] = [{"ref": r, "text": t} for r, t in pairs]
+    return {**out, "examples": ex}
+
+
+async def _docs(c: str, args: list[str], pos: list[str]) -> Any:
+    from . import investigation, report_types  # noqa: PLC0415
+
+    return await report_types.types_state_route(c, investigation.MAIN)
+
+
+async def _doc(c: str, args: list[str], pos: list[str]) -> Any:
+    from . import investigation, report_types  # noqa: PLC0415
+
+    if not pos:
+        raise StateError("doc needs a document's slug")
+    return await report_types.get_doc_route(c, investigation.MAIN, pos[0].removeprefix("report:"))
+
+
+def _unread(c: str, meta: dict[str, Any]) -> bool:
+    """Whether a thread has an answer the analyst has not opened since it came (threads.seen)."""
+    from . import threads  # noqa: PLC0415
+
+    return threads.unread(c, meta)
+
+
+async def _threads(c: str, args: list[str], pos: list[str]) -> Any:
+    from . import agents  # noqa: PLC0415
+
+    out = agents.list_chats(c)
+    for m in out:
+        if m.get("kind") == agents.KIND_THREAD:
+            m["unread"] = _unread(c, m)
+    return out
+
+
+async def _thread(c: str, args: list[str], pos: list[str]) -> Any:
+    from . import agents  # noqa: PLC0415
+
+    if not pos:
+        raise StateError("thread needs a chat id")
+    chat = pos[0].removeprefix("thread:").removeprefix("chat:")
+    resp = await agents.get_route(c, chat)
+    body = json.loads(resp.body)
+    after = _flag(args, "--after")
+    if after is not None:
+        n = _int(after, 0, "--after")
+        body["events"] = body["events"][n:]
+        body["after"] = n
+    if body.get("meta", {}).get("kind") == agents.KIND_THREAD:
+        body["meta"]["unread"] = _unread(c, body["meta"])
+    return body
+
+
+async def _agents(c: str, args: list[str], pos: list[str]) -> Any:
+    from . import agents, orientation  # noqa: PLC0415
+
+    tail = _int(_flag(args, "--tail"), 5, "--tail")
+    out = []
+    for m in agents.list_chats(c):
+        if m.get("kind") != agents.KIND_AGENT:
+            continue
+        _, log_path = agents.paths(c, str(m["id"]))
+        events = agents.read_events(log_path)
+        # the chat's meta, with a row's names as the agents' row above the prompt reads them, and its last records
+        row = {"name": f"thimble:{m.get('role')}", "label": m.get("title") or m.get("role"), "chat": m["id"],
+               "state": m.get("status"), "started": m.get("created_at")}
+        out.append({**m, **row, "tail": events[-tail:] if tail > 0 else []})
+    return {"agents": out, "orientation": orientation.read_run(c)}
+
+
+async def _files(c: str, args: list[str], pos: list[str]) -> Any:
+    from . import corpus  # noqa: PLC0415
+
+    if pos:
+        return await asyncio.to_thread(corpus.get_sources, c, 0, pos[0], 1)
+    return await asyncio.to_thread(corpus.get_sources, c)
+
+
+async def _resolve(c: str, args: list[str], pos: list[str]) -> Any:
+    from . import refs, verify  # noqa: PLC0415
+
+    if not pos:
+        raise StateError("resolve needs a JSON list of refs, each a string or {ref, value}")
+    try:
+        wanted = json.loads(pos[0])
+    except ValueError as e:
+        raise StateError(f"resolve: the refs are not JSON ({e})") from None
+    if not isinstance(wanted, list):
+        raise StateError("resolve needs a JSON list")
+    corpus_dir = config.corpus_dir(c)
+
+    def one(item: Any) -> dict[str, Any]:
+        """The ref route's answer for one ref (refs.resolve), `{ref, error}` when it does not resolve; with `state`
+        (ok, missing, differs) and its `why`, the value checked as the takeaway's links check it (verify)."""
+        ref = str(item.get("ref") if isinstance(item, dict) else item or "").strip()
+        value = item.get("value") if isinstance(item, dict) else None
+        given = {"value": value} if value is not None else {}
+        try:
+            got = dict(refs.resolve(corpus_dir, ref))
+        except refs.RefError as e:
+            return {"ref": ref, **given, "error": str(e.detail), "state": "missing", "why": str(e.detail)}
+        except Exception as e:  # noqa: BLE001 — one bad ref never takes the others down
+            why = f"{type(e).__name__}: {e}"
+            return {"ref": ref, **given, "error": why, "state": "missing", "why": why}
+        got.update(ref=ref, **given)
+        if (got.get("meta") or {}).get("span_missing"):
+            return {**got, "state": "missing", "why": verify.WHY_SPAN_MISSING}
+        if value is not None and not verify._value_matches(str(value), str(got.get("excerpt") or "")):
+            return {**got, "state": "differs", "why": verify.WHY_VALUE}
+        return {**got, "state": "ok"}
+
+    return await asyncio.to_thread(lambda: [one(x) for x in wanted])
+
+
+async def _ui(c: str, args: list[str], pos: list[str]) -> Any:
+    return ui_records(c, _int(_flag(args, "--after"), 0, "--after"))
+
+
+_SURFACES = {"home": _home, "cards": _cards, "card": _card, "labels": _labels, "label": _label, "docs": _docs,
+             "doc": _doc, "threads": _threads, "thread": _thread, "agents": _agents, "files": _files,
+             "resolve": _resolve, "ui": _ui}
+
+
+# --------------------------------------------------------------------------- thimble act
+
+
+ACT_USAGE = ("thimble act <kind> --cwd <dir> '<json>'; kinds: thread {anchor, message}, thread-message {thread, message}, "
+             "verdict {label, ref, value}, seen {thread}, stop {agent}")
+
+
+async def act(c: str, kind: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """The change the browser's POST route for `kind` makes (ACT_USAGE): {ok: true, ...}."""
+    from fastapi import HTTPException  # noqa: PLC0415
+
+    fn = _ACTS.get(kind)
+    if fn is None:
+        raise StateError(f"no act {kind!r}; {ACT_USAGE}")
+    if not isinstance(payload, dict):
+        raise StateError("the act's argument must be a JSON object")
+    try:
+        return {"ok": True, **(await fn(c, payload))}
+    except HTTPException as e:
+        raise StateError(str(e.detail)) from None
+
+
+def _text(payload: dict[str, Any], key: str) -> str:
+    v = " ".join(str(payload.get(key) or "").split()) if key != "message" else str(payload.get(key) or "").strip()
+    if not v:
+        raise StateError(f"`{key}` is empty")
+    return v
+
+
+async def _act_thread(c: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """A new side thread on what the analyst pointed at, with its first question: the browser's ⌘-click
+    (agents.create_route)."""
+    from . import agents  # noqa: PLC0415
+
+    body = agents.NewThread(anchor=_text(payload, "anchor"), anchor_text=payload.get("anchor_text"),
+                            title=payload.get("title"), surface=payload.get("surface") or "terminal",
+                            element=payload.get("element"), parent=payload.get("parent"), text=_text(payload, "message"))
+    meta = await agents.create_route(c, body)
+    return {"thread": meta["id"], "event": meta.get("event")}
+
+
+async def _act_thread_message(c: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """A message to a thread that exists, as its composer sends it (a `thread` event)."""
+    from . import events  # noqa: PLC0415
+
+    thread = _text(payload, "thread").removeprefix("thread:")
+    posted = events.post(c, events.THREAD, {"thread": thread, "text": _text(payload, "message")})
+    return {"thread": thread, "event": posted.get("id"), **({"queued": True} if posted.get("queued") else {})}
+
+
+async def _act_verdict(c: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """The analyst's verdict on one labeled record (concepts.verdict_route)."""
+    from . import concepts  # noqa: PLC0415
+
+    ws = config.workspace_dir(c)
+    found = concepts.find_concept(ws, _text(payload, "label"))
+    if found is None:
+        raise StateError(f"no label {payload.get('label')!r}")
+    body = concepts.VerdictBody(ref=_text(payload, "ref"), label=_text(payload, "value"), note=payload.get("note"))
+    out = await asyncio.to_thread(concepts.verdict_route, c, str(found["id"]), body)
+    return {"label": found["id"], **out}
+
+
+async def _act_seen(c: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """The analyst opened a thread: its answers so far are seen (threads.mark_seen)."""
+    from . import threads  # noqa: PLC0415
+
+    thread = _text(payload, "thread").removeprefix("thread:")
+    return {"thread": thread, "seen": threads.mark_seen(c, thread)}
+
+
+async def _act_stop(c: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """Stop one of thimble's agents, by its chat or its agent id, through the hooks module (subagents.stop), as the
+    browser's Stop does."""
+    from . import agents, subagents  # noqa: PLC0415
+
+    who = _text(payload, "agent").removeprefix("chat:")
+    meta = agents.meta_or_none(c, who) if agents.ID_RE.match(who) else None
+    agent_id = str((meta or {}).get("agent_id") or who)
+    ans = await subagents.stop(c, agent_id)
+    if ans.refused:
+        return {"stopped": False, "kind": ans.kind, "reason": ans.reason}
+    return {"stopped": True, **({"done": True} if ans.get("done") else {})}
+
+
+_ACTS = {"thread": _act_thread, "thread-message": _act_thread_message, "verdict": _act_verdict, "seen": _act_seen,
+         "stop": _act_stop}
+
+
+# --------------------------------------------------------------------------- the command line
+
+
+def _fail(text: str) -> int:
+    sys.stdout.write(json.dumps({"error": text}) + "\n")
+    return 1
+
+
+def main(argv: list[str]) -> int:
+    """`state <surface> --cwd <dir> [args]` or `act <kind> --cwd <dir> '<json>'` (module note)."""
+    logging.basicConfig(level=logging.WARNING, stream=sys.stderr, format="thimble %(levelname)s: %(message)s")
+    if len(argv) < 2 or argv[0] not in ("state", "act"):
+        return _fail(f"usage: {STATE_USAGE} | {ACT_USAGE}")
+    verb, what, rest = argv[0], argv[1], argv[2:]
+    settle_dirs()
+    try:
+        cwd = _flag(rest, "--cwd", os.getcwd()) or os.getcwd()
+        c = workspace(cwd)
+        if not c:
+            return _fail(f"{cwd} is not inside a corpus thimble knows")
+        if verb == "state":
+            out: Any = asyncio.run(state(c, what, [a for a in rest]))
+        else:
+            if not terminal(c):
+                return _fail("this workspace's session runs in browser mode, where the browser makes this change")
+            raw = _positional(rest)
+            try:
+                payload = json.loads(raw[0]) if raw else {}
+            except ValueError as e:
+                return _fail(f"the act's argument is not JSON: {e}")
+            out = asyncio.run(act(c, what, payload))
+    except StateError as e:
+        return _fail(str(e))
+    except Exception as e:  # noqa: BLE001 — the renderer reads {error} rather than a traceback
+        log.debug("thimble %s %s failed", verb, what, exc_info=True)
+        return _fail(f"{type(e).__name__}: {e}")
+    sys.stdout.write(json.dumps(out, ensure_ascii=False, default=str) + "\n")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

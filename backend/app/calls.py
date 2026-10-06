@@ -7,8 +7,10 @@ Code deletes transcripts after 30 days by default, so the output is stored here.
 Store: `workspaces/<c>/calls/<chat>.jsonl`, append-only: `{n, id, chat, name, input, ts, agent?}` when a call is first
 seen, `{n, result, is_error}` when its result is, and `{n, chat}` when the chat whose log holds the call becomes known.
 Numbering: one sequence per orientation chat, keyed by tool_use_id and never reused. The follower (Numbering) and the
-call-ref hook (hook_route) both number calls; whichever sees a call first numbers it. A chat without a store is
-backfilled from its transcripts on first read.
+call-ref hook (hook_route, or in terminal mode the hook itself through calls_file.number) both number calls; whichever
+sees a call first numbers it, under the store's lock (calls_file). Each read goes on from where this process last read
+the file, so a number another process gave is seen. A chat without a store is backfilled from its transcripts on first
+read.
 """
 from __future__ import annotations
 
@@ -24,7 +26,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from . import config
+from . import calls_file, config, ledger
 
 log = logging.getLogger("thimble.calls")
 router = APIRouter()
@@ -51,11 +53,15 @@ def _now() -> str:
 
 @dataclass
 class _Index:
-    """What one chat's store holds, replayed from its file: tool_use_id -> n, each call by n, and the next number."""
+    """What one chat's store holds, replayed from its file up to `offset` (the end of its last whole line): tool_use_id
+    -> n, each call by n, and the next number. Another process appends to the same file (the hooks number calls in
+    terminal mode, calls_file.number), so each use reads on from `offset` (_load)."""
 
     by_id: dict[str, int] = field(default_factory=dict)
     rows: dict[int, dict[str, Any]] = field(default_factory=dict)
     next: int = 1
+    offset: int = 0
+    ino: int | None = None
 
 
 _lock = threading.RLock()
@@ -70,42 +76,64 @@ def path(c: str, chat: str) -> Path:
 
 
 def _load(c: str, chat: str) -> _Index:
+    """The chat's index, brought up to date with what the file gained since it was last read (by this process or
+    another). A file that shrank or was replaced is read again from its start."""
     p = path(c, chat)
     key = str(p)  # by file, so a workspace made again under the same name starts from its own store
     idx = _indexes.get(key)
-    if idx is not None:
-        return idx
-    idx = _Index()
     try:
-        text = p.read_text("utf-8") if p.is_file() else ""
+        st = p.stat()
     except OSError:
-        text = ""
-    for raw in text.splitlines():
+        st = None
+    if idx is not None and (st is None or st.st_ino != idx.ino or st.st_size < idx.offset):
+        idx = None  # the store was removed, replaced or cut: its numbers are read again
+    if idx is None:
+        idx = _indexes[key] = _Index()
+    if st is None or st.st_size == idx.offset:
+        return idx
+    try:
+        with p.open("rb") as f:
+            f.seek(idx.offset)
+            chunk = f.read()
+    except OSError:
+        return idx
+    end = chunk.rfind(b"\n") + 1  # a torn last line waits until it is whole
+    idx.offset += end
+    idx.ino = st.st_ino
+    for raw in chunk[:end].splitlines():
         try:
             rec = json.loads(raw)
         except ValueError:
-            continue  # a torn last line
-        n = rec.get("n") if isinstance(rec, dict) else None
-        if not isinstance(n, int) or isinstance(n, bool):
-            continue
-        if "id" in rec:
-            idx.by_id[str(rec["id"])] = n
-            idx.rows[n] = {k: v for k, v in rec.items()}
-            idx.next = max(idx.next, n + 1)
-        elif "result" in rec and n in idx.rows:
-            idx.rows[n]["result"] = rec.get("result")
-            idx.rows[n]["is_error"] = bool(rec.get("is_error"))
-        elif "chat" in rec and n in idx.rows:
-            idx.rows[n]["chat"] = rec.get("chat")
-    _indexes[key] = idx
+            continue  # a torn line, mended since
+        _replay(idx, rec)
     return idx
 
 
+def _replay(idx: _Index, rec: Any) -> None:
+    n = rec.get("n") if isinstance(rec, dict) else None
+    if not isinstance(n, int) or isinstance(n, bool):
+        return
+    if "id" in rec:
+        if str(rec["id"]) in idx.by_id:
+            return  # numbered twice by an earlier build without the lock: the first number stands
+        idx.by_id[str(rec["id"])] = n
+        idx.rows[n] = {k: v for k, v in rec.items()}
+        idx.next = max(idx.next, n + 1)
+    elif "result" in rec and n in idx.rows:
+        idx.rows[n]["result"] = rec.get("result")
+        idx.rows[n]["is_error"] = bool(rec.get("is_error"))
+    elif "chat" in rec and n in idx.rows:
+        idx.rows[n]["chat"] = rec.get("chat")
+
+
 def _append(c: str, chat: str, rec: dict[str, Any]) -> None:
+    """Append one line under the store's lock (the caller holds it, or it is taken here)."""
     p = path(c, chat)
     p.parent.mkdir(parents=True, exist_ok=True)
-    with p.open("a", encoding="utf-8") as f:
-        f.write(json.dumps(rec, ensure_ascii=False, default=str) + "\n")
+    with ledger.locked(p):
+        ledger.heal_tail(p)
+        with p.open("a", encoding="utf-8") as f:
+            f.write(calls_file.line(rec))
 
 
 def forget(c: str | None = None) -> None:
@@ -131,36 +159,32 @@ def exists(c: str, chat: str) -> bool:
 
 def number(c: str, chat: str, tool_use_id: str, name: str, inp: Any = None, *, agent: str | None = None,
            at: str | None = None) -> int:
-    """The number of the call `tool_use_id` in chat `chat`'s sequence, assigned the first time the call is seen. `at` is
-    the chat whose log holds the call's record, when the caller knows it."""
+    """The number of the call `tool_use_id` in chat `chat`'s sequence, assigned the first time any process sees the call
+    (calls_file.number, under the store's lock). `at` is the chat whose log holds the call's record, when the caller
+    knows it."""
     tid = str(tool_use_id or "")
     if not tid:
         raise ValueError("a call needs its tool_use_id")
-    with _lock:
+    p = path(c, chat)
+    with _lock, ledger.locked(p):
         idx = _load(c, chat)
-        if tid in idx.by_id:
-            n = idx.by_id[tid]
-            row = idx.rows[n]
-            if row.get("input") is None and inp is not None:
-                row["input"] = inp  # the hook saw it first without an input; kept in memory, the file has the first line
-            if at and not row.get("chat"):
-                row["chat"] = at
-                _append(c, chat, {"n": n, "chat": at})
-            return n
-        n = idx.next
-        idx.next += 1
-        rec: dict[str, Any] = {"n": n, "id": tid, "chat": at, "name": str(name or ""), "input": inp, "ts": _now()}
-        if agent:
-            rec["agent"] = agent
-        idx.by_id[tid] = n
-        idx.rows[n] = dict(rec)
-        _append(c, chat, rec)
+        if tid not in idx.by_id:
+            calls_file.number(config.workspace_dir(c), chat, tid, name, inp, agent, at=at, held=True)
+            idx = _load(c, chat)
+        n = idx.by_id[tid]
+        row = idx.rows[n]
+        if row.get("input") is None and inp is not None:
+            row["input"] = inp  # the hook saw it first without an input; kept in memory, the file has the first line
+        if at and not row.get("chat"):
+            row["chat"] = at
+            _append(c, chat, {"n": n, "chat": at})
+            _load(c, chat)  # reads the line just written
         return n
 
 
 def result(c: str, chat: str, tool_use_id: str, text: str, is_error: bool = False) -> int | None:
     """Store the call's whole output (up to RESULT_CHARS) once; None for a call not numbered yet."""
-    with _lock:
+    with _lock, ledger.locked(path(c, chat)):
         idx = _load(c, chat)
         n = idx.by_id.get(str(tool_use_id or ""))
         if n is None:
@@ -171,6 +195,7 @@ def result(c: str, chat: str, tool_use_id: str, text: str, is_error: bool = Fals
         body = text if len(text) <= RESULT_CHARS else text[:RESULT_CHARS]
         row["result"], row["is_error"] = body, bool(is_error)
         _append(c, chat, {"n": n, "result": body, "is_error": bool(is_error)})
+        _load(c, chat)  # reads the line just written, so it is not replayed twice
         return n
 
 

@@ -37,7 +37,7 @@ from pathlib import Path
 from typing import Any
 
 
-from . import agents, config, investigation
+from . import agents, config, investigation, ledger
 from .ledger import read_json, write_json
 
 log = logging.getLogger("thimble.orientation")
@@ -94,10 +94,25 @@ def summary(c: str) -> str | None:
 
 
 def _write_run(c: str, run: dict[str, Any]) -> dict[str, Any]:
-    write_json(run_file(c), run)
+    with ledger.locked(run_file(c)):
+        write_json(run_file(c), run)
     return run
 
 
+def _run_change(fn: Any) -> Any:
+    """Run a change to run.json under its lock (ledger.locked), from its read to its write: the server or the terminal
+    mode's shim, the hooks' backend calls and `thimble act stop` change it from more than one process."""
+    import functools  # noqa: PLC0415
+
+    @functools.wraps(fn)
+    def wrapper(c: str, *args: Any, **kwargs: Any) -> Any:
+        with ledger.locked(run_file(c)):
+            return fn(c, *args, **kwargs)
+
+    return wrapper
+
+
+@_run_change
 def record(c: str, **fields: Any) -> dict[str, Any] | None:
     """Set fields on the run's record (orient_session keeps Start's choices, the queue and the cards a follow-up
     revised there); None when there is no record."""
@@ -143,11 +158,12 @@ def ensure_groups(c: str, deck: bool = False) -> dict[str, str]:
     ws = config.workspace_dir(c)
     notebook.migrate_scratch(c)
     made: list[str] = []
-    top = tools.group_path(ws, GROUP_PATHS["deck"], made=made)
-    nb = notebook.read_notebook(ws, top)
-    if nb is not None and nb.get("kind") != notebook.DEFAULT_GROUP_KIND and (deck or GROUP_PATHS["deck"] in made):
-        nb["kind"] = notebook.DEFAULT_GROUP_KIND
-        notebook.write_notebook(ws, nb)
+    with notebook.editing(ws):
+        top = tools.group_path(ws, GROUP_PATHS["deck"], made=made)
+        nb = notebook.read_notebook(ws, top)
+        if nb is not None and nb.get("kind") != notebook.DEFAULT_GROUP_KIND and (deck or GROUP_PATHS["deck"] in made):
+            nb["kind"] = notebook.DEFAULT_GROUP_KIND
+            notebook.write_notebook(ws, nb)
     return {"orientation": top}
 
 
@@ -219,6 +235,7 @@ def running(c: str) -> bool:
 # --------------------------------------------------------------------------- the three moments
 
 
+@_run_change
 def start_requested(c: str, payload: dict[str, Any]) -> dict[str, Any] | None:
     """A start of the orientation was asked for (orient_session.start): the run is recorded as `starting`, with its
     passes, request, critique, the run's exact model and effort, the request id and who started it (`started_by`:
@@ -237,6 +254,7 @@ def start_requested(c: str, payload: dict[str, Any]) -> dict[str, Any] | None:
                           "groups": ensure_groups(c, deck=True) if "final" in passes else {}, "chats": {}, "error": None})
 
 
+@_run_change
 def refuse(c: str, reason: str, kind: str, **fields: Any) -> dict[str, Any] | None:
     """A start that did not happen: the record ends `refused` with {reason, kind, at} and `fields` (the request, a
     click that expired), which the browser's card shows with the kind's buttons. None when there is no starting
@@ -251,6 +269,7 @@ def refuse(c: str, reason: str, kind: str, **fields: Any) -> dict[str, Any] | No
     return run
 
 
+@_run_change
 def request(c: str, brief: str, passes: "list[str]", **fields: Any) -> dict[str, Any]:
     """Record an orientation main asked for with no Start waiting, as a Start records one (start_requested): requested,
     with its passes and brief, and the deck made when on. `fields` go on the record too."""
@@ -270,6 +289,7 @@ def start_passes(payload: dict[str, Any]) -> list[str]:
     return [p for p, on in (("final", final), ("views", views), ("report", report)) if on]
 
 
+@_run_change
 def started(c: str, chat_id: str, *, session: str | None = None, pid: int | None = None,
             passes: "list[str] | None" = None, agent_id: str | None = None, route: str | None = None) -> dict[str, Any]:
     """The orientation's agent (or program) started: a starting or requested run becomes running with its chat, as
@@ -298,6 +318,7 @@ def started(c: str, chat_id: str, *, session: str | None = None, pid: int | None
     return run
 
 
+@_run_change
 def finished(c: str, chat_id: str, status: str, result: str | None, report: bool = True) -> dict[str, Any] | None:
     """The first run stopped: its last message is kept as summary.md, the run ends with the session's status, and main's
     chat gets the orientation's landing (an `artifact` chip naming its chat), with the deck when it has cards, and for a
@@ -329,6 +350,7 @@ def _has_cards(c: str, group: str) -> bool:
     return bool((notebook.read_notebook(config.workspace_dir(c), group) or {}).get("cells"))
 
 
+@_run_change
 def run_started(c: str, chat_id: str, k: int, messages: "list[dict[str, Any]]", *, pid: int | None = None) -> dict[str, Any] | None:
     """A follow-up of the orientation `chat_id` started as run `k` (orient_session.message): the record runs again,
     with the messages it carries and when it started."""
@@ -344,6 +366,7 @@ def run_started(c: str, chat_id: str, k: int, messages: "list[dict[str, Any]]", 
     return run
 
 
+@_run_change
 def run_finished(c: str, chat_id: str, k: int, status: str, made: dict[str, int]) -> dict[str, Any] | None:
     """A follow-up ended: the record says so, with what it changed (`made`: added, revised, deleted, views), which the
     orientation's chat shows on its card (its meta's `followups`)."""
@@ -362,6 +385,7 @@ def run_finished(c: str, chat_id: str, k: int, status: str, made: dict[str, int]
     return run
 
 
+@_run_change
 def request_report(c: str, request: str = "") -> bool:
     """The report pass: the report's writer, started through thimble's module as part of the orientation's own start
     (write_session.follow_on), with `request` its text (a revision's, naming the cards a follow-up changed), carrying

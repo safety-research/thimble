@@ -6,6 +6,7 @@ settings routes, the workspace reset, its archive (`/thimble fresh`) and an arch
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import os
@@ -14,9 +15,10 @@ import secrets
 import shutil
 import tempfile
 import threading
+import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Iterable, Iterator
 
 from fastapi import APIRouter, Body, HTTPException, Request
 
@@ -132,6 +134,140 @@ def write_json_once(path: Path, obj: Any) -> bool:
 def append_jsonl(path: Path, obj: Any) -> None:
     with open(path, "a", encoding="utf-8") as f:
         f.write(json.dumps(obj, ensure_ascii=False) + "\n")
+
+
+# --------------------------------------------------------------------------- locks between processes
+#
+# A store that more than one process writes (in terminal mode the MCP shim, `thimble-run` in main's Bash, the hooks'
+# backend calls and `thimble act`; in browser mode the server and the hooks) is changed under locked(): an flock on a
+# lock file beside the store, then a read of the store as it is now, then an atomic replace or an append. The lock is
+# re-entrant in one thread, so a store function that calls another under the same lock does not wait on itself. Never
+# await while holding it: the coroutines of one event loop share its thread. A holder that keeps the lock past `wait_s`
+# (a stuck process, or a cell that took the lock file) does not block the caller for ever: the caller waits `wait_s`,
+# logs, and goes on without the lock, as subagents.json's lock does.
+
+LOCK_SUFFIX = ".lock"  # a file store's lock file is <file>.lock beside it
+DIR_LOCK = ".lock"  # a folder store's lock file is <folder>/.lock inside it
+LOCK_WAIT_S = 2.0
+_LOCK_POLL_S = (0.002, 0.005, 0.01, 0.02, 0.05)  # the waits between flock tries, the last repeated until wait_s
+_held = threading.local()  # .depth: {lock file: how many times this thread holds it}
+_guards: dict[str, threading.Lock] = {}  # one per lock file: this process's threads wait here, not on the flock
+_guards_lock = threading.Lock()
+
+
+def lock_file(path: Path) -> Path:
+    """The lock file of the store at `path`: `<path>.lock` beside a file, `<path>/.lock` inside a folder."""
+    path = Path(path)
+    return path / DIR_LOCK if path.is_dir() else path.with_name(path.name + LOCK_SUFFIX)
+
+
+def _guard(key: str) -> threading.Lock:
+    with _guards_lock:
+        g = _guards.get(key)
+        if g is None:
+            g = _guards[key] = threading.Lock()
+        return g
+
+
+def _open_lock(lf: Path) -> int | None:
+    """An fd on the lock file `lf`, made when missing; read-only where this process may not write its folder (a lock
+    file the launcher made beside a store main's sandbox reads); None when it cannot be opened."""
+    cloexec = getattr(os, "O_CLOEXEC", 0)
+    for flags in (os.O_RDWR | os.O_CREAT, os.O_RDONLY):
+        try:
+            return os.open(lf, flags | cloexec, 0o600)
+        except FileNotFoundError:
+            try:
+                lf.parent.mkdir(parents=True, exist_ok=True)
+                return os.open(lf, flags | cloexec, 0o600)
+            except OSError:
+                continue
+        except OSError:
+            continue
+    return None
+
+
+def _flock(lf: Path, deadline: float) -> int | None:
+    """An fd holding an exclusive flock on `lf`, or None when it cannot be opened or stays taken until `deadline`."""
+    import fcntl  # noqa: PLC0415 — POSIX only, and only where a lock is taken
+
+    fd = _open_lock(lf)
+    if fd is None:
+        return None
+    step = 0
+    while True:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return fd
+        except BlockingIOError:
+            pass
+        except OSError:
+            os.close(fd)
+            return None
+        left = deadline - time.monotonic()
+        if left <= 0:
+            os.close(fd)
+            return None
+        time.sleep(min(left, _LOCK_POLL_S[min(step, len(_LOCK_POLL_S) - 1)]))
+        step += 1
+
+
+@contextlib.contextmanager
+def locked(path: Path, wait_s: float = LOCK_WAIT_S) -> Iterator[bool]:
+    """Hold the store at `path` for one change (module note above). Yields True while the lock is held, False when it
+    could not be had within `wait_s`, in which case the change goes on and a warning is logged. Re-entrant in one
+    thread."""
+    lf = lock_file(Path(path))
+    key = str(lf)
+    depth: dict[str, int] | None = getattr(_held, "depth", None)
+    if depth is None:
+        depth = _held.depth = {}
+    if depth.get(key):
+        depth[key] += 1
+        try:
+            yield True
+        finally:
+            depth[key] -= 1
+        return
+    deadline = time.monotonic() + max(0.0, wait_s)
+    guard = _guard(key)
+    got_guard = guard.acquire(timeout=max(0.0, wait_s))
+    fd = _flock(lf, deadline) if got_guard else None
+    if fd is None:
+        log.warning("%s: not locked within %.1f s, so the change goes on without the lock", lf, wait_s)
+    depth[key] = 1
+    try:
+        yield fd is not None
+    finally:
+        depth.pop(key, None)
+        if fd is not None:
+            os.close(fd)  # closing the fd lets the flock go
+        if got_guard:
+            guard.release()
+
+
+def update_json(path: Path, change: Any, default: Any = None, *, indent: int = 2) -> Any:
+    """Read the JSON file at `path` under its lock (locked), pass it to `change` (`default` when the file is missing or
+    unreadable), and write what `change` returns atomically; when `change` returns None nothing is written. Returns what
+    the file holds afterwards."""
+    with locked(path):
+        try:
+            data = json.loads(path.read_text("utf-8")) if path.is_file() else default
+        except (OSError, ValueError):
+            data = default
+        new = change(data)
+        if new is None:
+            return data
+        atomic_write_text(path, json.dumps(new, indent=indent, ensure_ascii=False))
+        return new
+
+
+def append_jsonl_locked(path: Path, obj: Any) -> None:
+    """append_jsonl under the file's lock, after mending a torn last line (heal_tail), for a log that more than one
+    process appends to."""
+    with locked(path):
+        heal_tail(path)
+        append_jsonl(path, obj)
 
 
 APPEND_CHUNK = 10_000  # rows serialised per write in append_jsonl_many

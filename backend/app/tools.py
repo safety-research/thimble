@@ -30,7 +30,7 @@ from urllib.parse import urlsplit, urlunsplit
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
-from . import cite, config, frames, headless, prompts
+from . import cardrun, cite, config, frames, headless, prompts
 from .kernel_thimble import CARD_MIME  # a card type's graphic, which counts as a chart and is read through its listing
 
 log = logging.getLogger("thimble.tools")
@@ -493,10 +493,11 @@ def analyst_notebook(c: str) -> str:
     if pick is None:
         pick = notebook.create_notebook(ws, ANALYST_NOTEBOOK_TITLE, role="analyst", created_by=BROWSER_AUTHOR)
     elif not pick.get("created_by"):
-        nb = notebook.read_notebook(ws, pick["id"])
-        if nb is not None:
-            nb["created_by"] = BROWSER_AUTHOR
-            notebook.write_notebook(ws, nb)
+        with notebook.editing(ws):
+            nb = notebook.read_notebook(ws, pick["id"])
+            if nb is not None:
+                nb["created_by"] = BROWSER_AUTHOR
+                notebook.write_notebook(ws, nb)
     if active != pick["id"]:
         settings["active_notebook"] = pick["id"]
         write_json(ws / "settings.json", settings)
@@ -561,9 +562,10 @@ def session_notebook(ctx: "Ctx") -> str:
             if not r.get("parent") and r.get(SESSION_GROUP_KEY) == key]  # notebook.summary carries the stamp
     if mine:
         return str(mine[0]["id"])
-    nb = notebook.create_notebook(ctx.ws, session_group_title(ctx.c, key), created_by=_group_author(ctx))
-    nb[SESSION_GROUP_KEY] = key
-    notebook.write_notebook(ctx.ws, nb)
+    with notebook.editing(ctx.ws):
+        nb = notebook.create_notebook(ctx.ws, session_group_title(ctx.c, key), created_by=_group_author(ctx))
+        nb[SESSION_GROUP_KEY] = key
+        notebook.write_notebook(ctx.ws, nb)
     return str(nb["id"])
 
 
@@ -863,7 +865,7 @@ def _format_cell_result(cell: dict, lines: int = RESULT_LINES) -> str:
     if body:
         out.append(body)
     if extras:
-        out.append(f"(rendered a chart/table; on the canvas as [[card:{cid}]])")
+        out.append(f"(rendered a chart/table; thimble shows it as [[card:{cid}]])")  # mode-neutral: both modes draw it
     return "\n".join(out)
 
 
@@ -987,7 +989,15 @@ def _role_by_title(title: str) -> str:
 def group_path(ws: Path, path: str, *, created_by: str | None = None, made: "builtins.list[str] | None" = None) -> str:
     """The group a path of titles names (`Orientation / Final`), made where missing, matched by title without case; a
     group
-    stored under the whole path as one title is that group. Each title made is appended to `made`."""
+    stored under the whole path as one title is that group. Each title made is appended to `made`. Under the groups'
+    lock, so two processes that look for one path make it once."""
+    from . import notebook
+
+    with notebook.editing(ws):
+        return _group_path(ws, path, created_by, made)
+
+
+def _group_path(ws: Path, path: str, created_by: str | None, made: "builtins.list[str] | None") -> str:
     from . import notebook
 
     parts = [p.strip() for p in path.split(GROUP_PATH_SEP.strip()) if p.strip()]
@@ -1366,6 +1376,15 @@ async def _h_add_card(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
             # otherwise nothing reminds the caller when no add_card follows
             line = hint("takeaway-missing-shown", cid=new)
         return ok(warn + res.text + (f"\n\n{line}" if line else ""))
+    if cardrun.defers(ctx.c):  # terminal mode: the code runs through `thimble-run` in the caller's Bash
+        await cardrun.ready_types(ctx.c, code)
+        cell = notebook.new_cell(kind, ctx.cell_author, title, nb_id, code=code)
+        cell[notebook.RUN_KEY] = cardrun.run_record(str(cell["id"]), takeaway=takeaway,
+                                                    default_timeout_s=_default_timeout(ctx), session=ctx.session)
+        cell = notebook.insert_cell(ctx.c, nb_id, cell)
+        _remember_cell(ctx, nb_id, str(cell["id"]))
+        _answer_request(ctx, request, str(cell["id"]))
+        return ok(warn + cardrun.waiting(ctx.c, cell, lines))
     cell = await notebook.run_code(ctx.c, code, created_by=ctx.cell_author, title=title, notebook=nb_id,
                                    default_timeout_s=_default_timeout(ctx), kind=kind)
     cid = str(cell.get("id") or "")
@@ -1610,6 +1629,13 @@ async def _h_edit_card(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
     code = str(raw) if raw is not None and str(raw).strip() else str(cell.get("code") or "")
     if not code.strip():
         return err("edit_card: the card has no code, so pass `code`")
+    if cardrun.defers(ctx.c):  # terminal mode: the code runs through `thimble-run` in the caller's Bash
+        await cardrun.ready_types(ctx.c, code)
+        run = cardrun.run_record(cid, takeaway=takeaway, default_timeout_s=_default_timeout(ctx), session=ctx.session)
+        cell = notebook.stage_edit(ctx.c, nb_id, cid, code, run, by=ctx.cell_author, title=title, kind=kind,
+                                   from_dataset=from_dataset)
+        _remember_cell(ctx, nb_id, cid)
+        return ok(cardrun.waiting(ctx.c, cell, lines))
     cell = await notebook.edit_and_run(ctx.c, nb_id, cid, code, by=ctx.cell_author,
                                        default_timeout_s=_default_timeout(ctx), title=title, kind=kind,
                                        from_dataset=from_dataset)
@@ -1870,7 +1896,7 @@ def _read_cell(ctx: Ctx, ref: str) -> ToolResult:
             body = body[:CELL_READ_LIMIT] + f"\n... [truncated, {len(body) - CELL_READ_LIMIT} more chars]"
         lines += ["outputs:", body or "(no text output)"]
         if extras:
-            lines.append(f"({', '.join(sorted(extras))} output rendered on the canvas)")
+            lines.append(f"({', '.join(sorted(extras))} output rendered; thimble shows it)")
     else:
         lines += _payload_lines(kind, cell.get("payload") or {})
     if str(cell.get("takeaway") or "").strip():
@@ -2056,6 +2082,10 @@ async def _h_screenshot(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
     ref = str(args.get("ref") or "").strip().strip("[]").strip()
     if not ref:
         return err("screenshot: `ref` is empty")
+    from . import local  # noqa: PLC0415
+
+    if local.terminal(ctx.c) and not cite.is_card_ref(ref):  # terminal mode has no page to shoot: a card alone
+        return err(hint("screenshot-terminal") or f"screenshot: {headless.NO_SCREENSHOTS} in terminal mode")
     if urlsplit(ref).scheme in ("http", "https"):
         return await _shot_page(ref, str(args.get("selector") or "").strip() or None)
     if cite.is_card_ref(ref):
@@ -2129,6 +2159,10 @@ async def _shot_card(ctx: Ctx, ref: str) -> ToolResult:
     cell = notebook.get_cell(ctx.c, cid, full_outputs=True) if cid else None
     if cell is None:
         return err(f"screenshot: there is no card {cid or ref}")
+    from . import local  # noqa: PLC0415 — imported above too: _shot_card is also reached on its own
+
+    if local.terminal(ctx.c):  # no page to open in terminal mode: the card harness draws the card offscreen
+        return await _shot_card_offscreen(ctx, cid, cell)
     if any(CARD_MIME in b for _, b in cite.iter_outputs(cell.get("outputs"))):
         return await _shot_type_card(ctx, cid, cell)
     ui = ui_base()
@@ -2166,6 +2200,21 @@ async def _shot_card(ctx: Ctx, ref: str) -> ToolResult:
     if not all(p.is_file() for p in VEGA_BUILDS):
         return err(headless.NO_SCREENSHOTS)
     return await _shot_page_file(cid, chart_page(spec))
+
+
+async def _shot_card_offscreen(ctx: Ctx, cid: str, cell: dict) -> ToolResult:
+    """A card drawn by the card harness (render.py, the card check's drawing) in headless Chromium with the built page,
+    as terminal mode's screenshot; the `## screenshot-terminal` line when the harness cannot draw here."""
+    from . import render  # noqa: PLC0415
+
+    try:
+        shot = await render.render_card(ctx.c, cell)
+    except render.Unavailable as e:
+        log.info("screenshot: card:%s not drawn in terminal mode: %s", cid, e)
+        return err(hint("screenshot-terminal") or f"screenshot: {headless.NO_SCREENSHOTS} ({e})")
+    if not shot.ok or shot.png is None:
+        return err(hint("screenshot-terminal") or f"screenshot: card:{cid} was not drawn ({shot.error or 'no picture'})")
+    return _image(base64.b64encode(shot.png).decode("ascii"), "image/png", f"screenshot of card:{cid}")
 
 
 async def _shot_type_card(ctx: Ctx, cid: str, cell: dict) -> ToolResult:
@@ -2363,10 +2412,25 @@ async def _h_apply_label(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
     within = args.get("within") or None
     if isinstance(within, str):
         within = {"label": within}
+    defer = kind == "code" and cardrun.defers(ctx.c)  # terminal mode: the code runs through `thimble-run label`
     s = await concepts.apply_scoped(ctx.c, scope=scope, name=name, kind=kind, text=text, values=values, paths=paths, limit=limit,
                                     comment=bool(args.get("comment")), filter=bool(args.get("filter")),
                                     created_by=ctx.created_by, chat=ctx.chat, group=target, question=question,
-                                    card=not orienting, within=within, show=bool(args.get("show")))
+                                    card=not orienting, within=within, show=bool(args.get("show")), defer=defer)
+    if s.get("deferred"):
+        # the run makes the call again where the code runs; the filter and Files' switch are set already, here
+        again = {k: v for k, v in args.items() if k not in ("filter", "show")}
+        concepts.set_pending_run(ctx.c, str(s["concept"]), again, ctx.session)
+        cmd = cardrun.command("label", str(s["concept"]))
+        cardrun.mirror(ctx.c)
+        line = (f"defined label {s.get('name', name)} [[concept:{s.get('concept')}]]"
+                f"{' over ' + ', '.join(paths) if scope == 'files' else ''}. "
+                + (hint("label-run", command=cmd) or f"Run with Bash: {cmd}"))
+        if s.get("cell"):
+            line += f" The label's card is [[card:{s['cell']}]]."
+        if s.get("filter"):
+            line += f" It is the {scope} filter now."
+        return ok(line)
     if s.get("partial") and not orienting and ctx.session is None:
         concepts.tell_when_done(ctx.c, str(s["concept"]))
     counts = ", ".join(f"{k} {v}" for k, v in sorted((s.get("counts") or {}).items()))
@@ -2394,7 +2458,9 @@ async def _h_apply_label(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
                  " The run goes on in the background; the counts are final when its card stops spinning.")
     if s.get("cell"):
         line += f" The label's card is [[card:{s['cell']}]]."
-    if s.get("stale"):
+    if s.get("stale") and cardrun.defers(ctx.c):  # terminal mode: those cards run again through `thimble-run stale`
+        line += " " + concepts.stale_note(ctx.c, [{"id": x} for x in s["stale"]])
+    elif s.get("stale"):
         line += " " + hint("apply_label-stale", cards=", ".join(f"[[card:{x}]]" for x in s["stale"]))
     if s.get("filter"):
         line += f" It is the {scope} filter now."
@@ -2441,6 +2507,11 @@ async def _h_show_label(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
                         where="the canvas" if where == "canvas" else "the report"))
     was = bool(k["shown"]) if k is not None else None
     k = await asyncio.to_thread(concepts.show_concept, ctx.c, name, on, values, colours)
+    from . import local  # noqa: PLC0415
+
+    local.ui_note(ctx.c, "label", {"label": k["id"], "name": k["name"], "on": bool(k["shown"]),
+                                   "highlight": [cl["name"] for cl in k["classes"] if cl.get("highlight")],
+                                   **({"colours": colours} if colours else {})})
     ref = f"[[concept:{k['id']}]]"
     if on is None:
         painted = ", ".join(f"{v} {n}" for v, n in colours.items())
@@ -2524,6 +2595,12 @@ async def _typed_build(ctx: Ctx, slug: str, values: dict[str, str] | None = None
 
 
 async def _h_file_dev_ticket(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
+    from . import local  # noqa: PLC0415
+
+    # a code ticket's Allow card is in the browser, which terminal mode does not open; a change to a view is a view
+    # build, which runs in both modes
+    if local.terminal(ctx.c) and not " ".join(str(args.get("view") or "").split()):
+        return err(hint("ticket-terminal") or "file_dev_ticket: code tickets are filed in browser mode")
     title = " ".join(str(args.get("title") or "").split())
     body = str(args.get("body") or "").strip()
     if not title:
