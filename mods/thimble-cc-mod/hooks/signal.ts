@@ -67,10 +67,11 @@ export function signalRead(t: Pick<ChatThread, 'turns'>, turn: number, seen: num
 
 /** What signals.json holds: the session it was written in (an anchor names a row of that session's transcript), the
  *  latest anchor, the answers seen of each thread, the thread rows each anchor carries (`waiting`: rows waiting for the
- *  first anchor, when a thread answered before main's chat held one), and the views whose `↳ view` row each carries. */
-export type SignalFile = { session: string; last: string; seen: Record<string, number>; rows: Record<string, ChatSignal[]>; views: Record<string, string[]> }
+ *  first anchor, when a thread answered before main's chat held one), the views whose `↳ view` row each carries, and
+ *  the views built and not yet opened (`new` after their names). */
+export type SignalFile = { session: string; last: string; seen: Record<string, number>; rows: Record<string, ChatSignal[]>; views: Record<string, string[]>; fresh?: string[] }
 
-export const SIGNALS_EMPTY: SignalFile = { session: '', last: '', seen: {}, rows: {}, views: {} }
+export const SIGNALS_EMPTY: SignalFile = { session: '', last: '', seen: {}, rows: {}, views: {}, fresh: [] }
 const ROWS_MAX = 200
 
 function isSignal(x: unknown): x is ChatSignal {
@@ -83,7 +84,7 @@ export function parseSignals(raw: string): SignalFile {
   try {
     v = JSON.parse(raw)
   } catch {
-    return { ...SIGNALS_EMPTY, seen: {}, rows: {}, views: {} }
+    return { ...SIGNALS_EMPTY, seen: {}, rows: {}, views: {}, fresh: [] }
   }
   const o = (v ?? {}) as Partial<Record<keyof SignalFile, unknown>>
   const seen: Record<string, number> = {}
@@ -98,7 +99,8 @@ export function parseSignals(raw: string): SignalFile {
     const ok = Array.isArray(xs) ? xs.filter((x): x is string => typeof x === 'string' && x !== '') : []
     if (ok.length) views[k] = ok
   }
-  return { session: typeof o.session === 'string' ? o.session : '', last: typeof o.last === 'string' ? o.last : '', seen, rows, views }
+  const fresh = Array.isArray(o.fresh) ? o.fresh.filter((x): x is string => typeof x === 'string' && x !== '') : []
+  return { session: typeof o.session === 'string' ? o.session : '', last: typeof o.last === 'string' ? o.last : '', seen, rows, views, fresh }
 }
 
 /** signals.json's text: the rows of the latest 200 anchors. */
@@ -107,7 +109,7 @@ export function signalsJson(f: SignalFile): string {
   const rows = Object.fromEntries(keys.slice(Math.max(0, keys.length - ROWS_MAX)).map(k => [k, f.rows[k]!]))
   const vkeys = Object.keys(f.views ?? {})
   const views = Object.fromEntries(vkeys.slice(Math.max(0, vkeys.length - ROWS_MAX)).map(k => [k, f.views[k]!]))
-  return JSON.stringify({ session: f.session, last: f.last, seen: f.seen, rows, views }, null, 1)
+  return JSON.stringify({ session: f.session, last: f.last, seen: f.seen, rows, views, fresh: f.fresh ?? [] }, null, 1)
 }
 
 /** The rows `anchor` carries once a signal is added: the same turn of a thread is reported once. */

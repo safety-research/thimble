@@ -140,8 +140,10 @@ export async function coverageSummary(ctx: HarnessCtx, agents: string[] = []): P
   await covIdle
   const { cwd, root } = await ctx.where()
   const session = await ctx.session()
-  const r = await ctx.run(['python3', `${root}/helper/coverage.py`, 'summary', '--cwd', cwd, '--session', session, ...agents.flatMap(a => ['--agent', a])], { cwd, timeoutMs: 120000 })
-  if (r.exitCode !== 0) return null
+  // a run cut short (a reload of the hooks, a drawing that gave way to the next) is no summary, never a throw out of a
+  // drawing
+  const r = await ctx.run(['python3', `${root}/helper/coverage.py`, 'summary', '--cwd', cwd, '--session', session, ...agents.flatMap(a => ['--agent', a])], { cwd, timeoutMs: 120000 }).catch(() => null)
+  if (!r || r.exitCode !== 0) return null
   try {
     return JSON.parse(r.stdout) as CoverageSummary
   } catch {
@@ -232,7 +234,11 @@ export function coverageLast(): { at: number; data: CoverageSummary | null } {
 /** The summary as the count last left it, read again only when the count has changed. */
 export async function coverageDetail(ctx: HarnessCtx): Promise<CoverageSummary | null> {
   const at = (await ctx.coverage())?.at ?? 0
-  if (covDetail.at !== at || !covDetail.data) covDetail = { at, data: await coverageSummary(ctx) }
+  if (covDetail.at !== at || !covDetail.data) {
+    const data = await coverageSummary(ctx)
+    if (data) covDetail = { at, data }
+    else return covDetail.data
+  }
   return covDetail.data
 }
 
@@ -331,7 +337,8 @@ export async function coverageCommand(ctx: HarnessCtx, args = ''): Promise<{ tex
     return { text: `the coverage check after an answer is ${m[1]!.toLowerCase()}` }
   }
   await ctx.openHarness('coverage', 'Coverage')
-  return { text: (await ctx.coverage())?.line ?? 'nothing read yet' }
+  const line = (await ctx.coverage())?.line
+  return { text: line ? readLine(line) : 'nothing read yet' }
 }
 
 // ------------------------------------------------------------------------------------------------ the check after a turn
@@ -1470,7 +1477,8 @@ export async function labelsCommand(ctx: HarnessCtx, args: string): Promise<{ te
     return { text: `no label "${want}"` }
   }
   await ctx.openHarness('labels', 'Labels')
-  return { text: `${(await allLabels(ctx)).length} labels` }
+  const n = (await allLabels(ctx)).length
+  return { text: `${n} label${n === 1 ? '' : 's'}` }
 }
 
 /** /thimble-label: the labels (nothing, or `list`), one opened (`open <name>`, or a label's name alone), or a label

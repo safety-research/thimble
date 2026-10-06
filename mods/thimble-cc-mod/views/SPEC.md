@@ -809,7 +809,8 @@ these views use: a collection's `opens`, a field holding a file's path, so a sec
 file, where the first selects it; the spec's `up`, the step the path row shows before the file's name (`files`), which
 ← or backspace go back to when no followed row is left to go back to; the spec's `source`, the file the view shows,
 which a side thread about a row is told. Their tabs may leave out `overview` (a file's raw lines have nothing to
-overview): `validateSpec(spec, {builtin: true})`, `render_view.mjs --builtin`.
+overview): `validateSpec(spec, {builtin: true})`, `render_view.mjs --builtin`. Their title row has no `N files ›`, since
+they read no file but their own (the tree shows it only when it left files out).
 
 The tree (the visual system, section 7, "The file browser"): one tab with no overview, its filter row `type · folder`,
 a table grouped by folder (`▾` or `▸`, the folder and its file count; the first folder open, a folder of more than 20

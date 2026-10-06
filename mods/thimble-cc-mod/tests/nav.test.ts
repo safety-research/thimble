@@ -468,10 +468,12 @@ test('which rows a thread\'s answer is told under, what its row says, and what s
   expect(signalRead(t, 1, undefined)).toBe(false)
   expect(withSignal([{ thread: 't', turn: 1 }], { thread: 't', turn: 1 })).toEqual([{ thread: 't', turn: 1 }])
 
-  const f = parseSignals(signalsJson({ session: 's', last: 'm9', seen: { t: 1 }, rows: { m1: [{ thread: 't', turn: 1 }] }, views: { m2: ['wiki-pages'] } }))
-  expect(f).toEqual({ session: 's', last: 'm9', seen: { t: 1 }, rows: { m1: [{ thread: 't', turn: 1 }] }, views: { m2: ['wiki-pages'] } })
-  expect(parseSignals('not json')).toEqual({ session: '', last: '', seen: {}, rows: {}, views: {} })
-  expect(parseSignals(JSON.stringify({ seen: { a: -1, b: 'x', c: 2 }, rows: { r: [{ thread: 1 }] }, views: { v: [3, ''] } }))).toEqual({ session: '', last: '', seen: { c: 2 }, rows: {}, views: {} })
+  // and the views built and not yet opened, `new` after their names until opened, across a reload or a resume
+  const f = parseSignals(signalsJson({ session: 's', last: 'm9', seen: { t: 1 }, rows: { m1: [{ thread: 't', turn: 1 }] }, views: { m2: ['wiki-pages'] }, fresh: ['wiki-pages'] }))
+  expect(f).toEqual({ session: 's', last: 'm9', seen: { t: 1 }, rows: { m1: [{ thread: 't', turn: 1 }] }, views: { m2: ['wiki-pages'] }, fresh: ['wiki-pages'] })
+  expect(parseSignals('{"session": "s"}').fresh).toEqual([])
+  expect(parseSignals('not json')).toEqual({ session: '', last: '', seen: {}, rows: {}, views: {}, fresh: [] })
+  expect(parseSignals(JSON.stringify({ seen: { a: -1, b: 'x', c: 2 }, rows: { r: [{ thread: 1 }] }, views: { v: [3, ''] } }))).toEqual({ session: '', last: '', seen: { c: 2 }, rows: {}, views: {}, fresh: [] })
   const many = Object.fromEntries(Array.from({ length: 205 }, (_, i) => [`r${i}`, [{ thread: 't', turn: 1 }]]))
   expect(Object.keys(parseSignals(signalsJson({ session: '', last: '', seen: {}, rows: many, views: {} })).rows)).toHaveLength(200)
 

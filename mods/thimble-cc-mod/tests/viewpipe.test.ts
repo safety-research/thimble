@@ -373,16 +373,19 @@ test('a built view opens in the panel from its `↳ view` row and from the views
   w.files.set(`${DIR}/view.json`, JSON.stringify(TIMELINE.spec))
   w.files.set(`${DIR}/rows.json`, JSON.stringify(TIMELINE.data))
   w.files.set(`${DIR}/status.json`, JSON.stringify({ for: PROPOSAL.ts, state: 'built', attempt: 1, round: 1, fixed: ['x'], at: 0 }))
-  // an earlier session left its row under main's answer d1
-  w.files.set(`${CWD}/.thimble-cc-mod/signals.json`, signalsJson({ session: 'session-0', last: 'd1', seen: {}, rows: {}, views: { d1: ['timeline'] } }))
+  // an earlier session left its row under main's answer d1, the view built and not yet opened
+  w.files.set(`${CWD}/.thimble-cc-mod/signals.json`, signalsJson({ session: 'session-0', last: 'd1', seen: {}, rows: {}, views: { d1: ['timeline'] }, fresh: ['timeline'] }))
   const clock = mock.clock(on, { now: 1_790_000_000_000 })
   await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
   await clock.advance(10)
-  expect(await rowUnder($, 'd1')).toBe('↳ view · Timeline · built')
+  expect(await rowUnder($, 'd1')).toBe('↳ view · Timeline · built · new')
   const ui = (await $.ui.mount(TURN('d1') as never)) as unknown as M
   await ui.press({ key: 'view-signal:d1:timeline' })
   await ui.unmount()
   expect(w.opened).toEqual(['thimble'])
+  // opened, it is no longer new, in the row and in signals.json
+  expect(await rowUnder($, 'd1')).toBe('↳ view · Timeline · built')
+  expect(JSON.parse(w.files.get(`${CWD}/.thimble-cc-mod/signals.json`)!).fresh).toEqual([])
   let pane = (await $.ui.mount(PANE as never)) as unknown as M
   expect(textOf(await pane.drawn({ in: 'm:view:timeline' }))).toMatch(/Timeline/)
   await pane.unmount()

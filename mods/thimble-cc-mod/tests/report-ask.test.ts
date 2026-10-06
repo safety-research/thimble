@@ -404,6 +404,11 @@ test('a document: "verify" beside a heading asks for a verifier of its citations
   const pane = await openReport($, 'doc')
   // the report has no row of counts under its title: its title, then the rule
   expect(await json(pane)).not.toContain('5 citations')
+  // a callout: its kind as a dim label, its text after it, drawn as a paragraph rather than a quote
+  expect(await pane.find({ type: 'Text', text: 'note' })).toBeDefined()
+  const note = (await pane.findAll({ type: 'Client' })).map(c => (c as unknown as { props: { props?: { block?: { quote: boolean; runs: { text: string }[] } } } }).props.props?.block).find(b => b?.runs[0]?.text.startsWith('Counts start'))
+  expect(note?.quote).toBe(false)
+  expect(note?.runs[0]?.text).toBe('Counts start in June ')
   expect(await pane.find({ key: 'verify:s1' })).toBeDefined()
   // a section without citations has nothing to verify
   expect(await pane.find({ key: 'verify:s3' })).toBeUndefined()

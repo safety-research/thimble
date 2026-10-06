@@ -97,8 +97,10 @@ test('a click on a file of the tree selects it and shows its first lines, a seco
 
 test("a file's way back to the tree is a step of the panel's path, which ← or backspace takes too", () => {
   const lay = viewLayout(FILE, FILE_ROWS, initialState(), 90, 30)
-  // the title row is the file's name; the path row above the view (register.tsx) holds `files ›`
-  expect(text(lay.lines).split('\n')[0]!.startsWith('chat.jsonl')).toBe(true)
+  // the title row is the file's name alone (no `1 file ›`: the view reads no file but its own); the path row above the
+  // view (register.tsx) holds `files ›`
+  expect(text(lay.lines).split('\n')[0]!.trim()).toBe('chat.jsonl')
+  expect(text(viewLayout(TREE, TREE_ROWS, initialState(), 90, 30).lines).split('\n')[0]!.trim()).toBe(TREE.name)
   expect(lay.hits.find(h => h.act.op === 'up')).toBeUndefined()
   expect(reduce(FILE, FILE_ROWS, initialState(), { op: 'up' }).effect).toEqual({ up: true })
   expect(reduce(FILE, FILE_ROWS, initialState(), { op: 'key', key: 'left' }).effect).toEqual({ up: true })

@@ -1358,6 +1358,18 @@ async function drawReply($: Dollar, e: ResolveInput, text: string, width: number
     )
   }
   const marked = (words: string) => opts.mark?.(words) ?? null
+  // a report's callout (report.ts normalizeDoc writes it as a quote opening with its kind): the kind as a dim label,
+  // red for a warning or a caution, its text after it on L (views/SPEC.md, section 7, "A report")
+  const calloutRow = (kind: string, body: RenderElement) => (
+    <Box flexDirection="row">
+      <Box width={CALLOUT_W} flexShrink={0}>
+        <Text {...(kind === 'warning' || kind === 'caution' ? { color: COLORS.problem } : { dimColor: true })}>{kind}</Text>
+      </Box>
+      <Box flexDirection="column" flexGrow={1} flexShrink={1}>
+        {body}
+      </Box>
+    </Box>
+  )
   const under = (m: ReturnType<typeof marked>) => {
     if (m?.under.length) out.push(<Box marginLeft={M} flexDirection="column">{m.under}</Box>)
   }
@@ -1380,7 +1392,8 @@ async function drawReply($: Dollar, e: ResolveInput, text: string, width: number
         if (isHead) heading = piece.split('\n')[0]!
         const m = marked(piece)
         const ask: Ask = { key: `${prefix}md-${n}-${j}`, askKey: `ask-md:${prefix}${n}-${j}`, press: about(piece), passage: passageOf(piece), ...(m ? { bar: m.color } : {}) }
-        const el = tooled(<Markdown text={plainMarkdown(piece)} />, piece)
+        const co = CALLOUT_MD.exec(piece)
+        const el = co ? calloutRow(co[1]!.toLowerCase(), <Markdown text={plainMarkdown(co[2]!.replace(/^>\s?/gm, ''))} />) : tooled(<Markdown text={plainMarkdown(piece)} />, piece)
         // a list's items follow each other without a blank row, and a heading's text follows it without one
         const afterHead = j > 0 && /^#{1,6}\s/.test(pieces[j - 1]!.text)
         if (j === 0) push(el, ask)
@@ -1433,7 +1446,13 @@ async function drawReply($: Dollar, e: ResolveInput, text: string, width: number
       // the mod's own drawing: each citation a chip (red with a problem, a spinner while worked on, lit under the
       // pointer), a click on it the panel; a drag selects and copies (para.tsx). It fills the column.
       const { Client } = $.ui.resolve(e as ResolveInput<'AssistantMessage', 'terminal'>)
-      const para = <Client key={`${prefix}para-${n}`} module="./para.tsx" width={cols} props={{ cols, block, chips, ids, raws, menu: null }} />
+      const first = block.runs[0]
+      const co = block.quote && first && !first.cite ? CALLOUT_RUN.exec(first.text) : null
+      const para = co ? (
+        calloutRow(co[1]!.toLowerCase(), <Client key={`${prefix}para-${n}`} module="./para.tsx" width={cols - CALLOUT_W} props={{ cols: cols - CALLOUT_W, block: { ...block, quote: false, runs: [{ ...first!, text: first!.text.slice(co[0].length) }, ...block.runs.slice(1)] }, chips, ids, raws, menu: null }} />)
+      ) : (
+        <Client key={`${prefix}para-${n}`} module="./para.tsx" width={cols} props={{ cols, block, chips, ids, raws, menu: null }} />
+      )
       if (block.heading) heading = words
       const m = block.heading ? null : marked(words)
       push(tooled(para, words), { key: `${prefix}parabox-${n}`, askKey: `ask-para:${prefix}${n}`, press: about(words), passage: passageOf(words), ...(m ? { bar: m.color } : {}) })
@@ -1451,6 +1470,11 @@ async function drawReply($: Dollar, e: ResolveInput, text: string, width: number
   }
   return out
 }
+
+// a callout's label column: its longest kind ("important") and a gutter
+const CALLOUT_W = 'important'.length + 2
+const CALLOUT_MD = /^>\s?(note|tip|important|warning|caution) {2}([\s\S]*)$/i
+const CALLOUT_RUN = /^(note|tip|important|warning|caution) {2}/i
 
 /** A card the mod draws itself (off the terminal, the citation panel): a full round border in the rule grey with a
  *  cell of padding (views/SPEC.md, rule 11), its title on the first row inside, a blank row, then its label row and
@@ -2090,7 +2114,8 @@ async function loadSignals($: Dollar): Promise<void> {
     delete got.views[WAITING]
     got.last = ''
   }
-  signals = { ...got, seen: { ...got.seen, ...signals.seen }, rows: { ...got.rows, ...signals.rows }, views: { ...got.views, ...signals.views }, last: signals.last || got.last }
+  for (const slug of got.fresh ?? []) freshViews.add(slug)
+  signals = { ...got, seen: { ...got.seen, ...signals.seen }, rows: { ...got.rows, ...signals.rows }, views: { ...got.views, ...signals.views }, fresh: [...freshViews], last: signals.last || got.last }
   await refreshNews($)
 }
 
@@ -2410,11 +2435,11 @@ function fieldRows($: Dollar, e: PaneEvent, rows: [string, RenderElement | strin
 
 /** The panel's bottom part (rule 25): the second rule, the actions at A0 2 cells apart, the fields under them; then the
  *  key-hint row, the panel's last. */
-function bottomRows($: Dollar, e: PaneEvent, cols: number, controls: (RenderElement | null | false)[], fields: (RenderElement | null | false)[], hints: string[]): RenderElement[] {
+function bottomRows($: Dollar, e: PaneEvent, cols: number, controls: (RenderElement | null | false)[], fields: (RenderElement | null | false)[], hints: string[], rule = true): RenderElement[] {
   const els = $.ui.resolve(e)
   const ctl = controlsEl(els, controls, 'bottom-controls')
   const fs = fields.filter((f): f is RenderElement => Boolean(f))
-  return [...(ctl || fs.length ? [ruleEl(els, cols, 'rule-bottom')] : []), ...(ctl ? [ctl] : []), ...fs, hintsEl(els, hints, cols)]
+  return [...(rule && (ctl || fs.length) ? [ruleEl(els, cols, 'rule-bottom')] : []), ...(ctl ? [ctl] : []), ...fs, hintsEl(els, hints, cols)]
 }
 
 /** The cited value with the value underlined and blue in its sentence (the `source` row). */
@@ -2473,7 +2498,14 @@ async function drawCite($: Dollar, e: PaneEvent): Promise<RenderElement> {
   const rows: [string, RenderElement | string, string?][] = [['from', placeName(c.ref)]]
   if (v?.kind === 'call' && v.command) {
     const cmd = v.command.split('\n').slice(0, 4).join('\n')
-    rows.push(['command', codeRows($, e, cmd, 4, 'bash', null)])
+    // the shell's `$` before it, dim, as the sketch has it (views/SPEC.md, section 7, "The citation panel")
+    rows.push([
+      'command',
+      <Box flexDirection="row">
+        <Text dimColor>{'$ '}</Text>
+        <Box flexGrow={1} flexShrink={1}>{codeRows($, e, cmd, 4, 'bash', null)}</Box>
+      </Box>,
+    ])
   }
   if (sentence) rows.push(['source', lineEl(els, sourceSegs(sentence, c), 'cite-source', true)])
   const choice = await otherChoice($, c.ref)
@@ -4337,7 +4369,7 @@ async function viewWheel($: Dollar, home: string, by: number, row: number | unde
 /** Open a view in the panel (.thimble-cc-mod/views/<slug>/): its spec and rows checked, its state kept, with `patch`
  *  over it (a tab, a row selected for a citation of the view's unit, a facet). */
 async function openView($: Dollar, slug: string, patch: Partial<ViewState> = {}): Promise<void> {
-  freshViews.delete(slug)
+  await markFresh($, slug, false)
   await paths($)
   if (Object.keys(patch).length) await viewTurn(slug, async () => $.state.set({ ...VIEWS, id: slug }, { ...(await viewState($, slug)), ...patch }))
   await $.state.set({ plugin: 'thimble-cc-mod', key: 'view' }, slug)
@@ -4568,7 +4600,7 @@ async function buildComplete($: Dollar, agentId: string, a: ChatAgent, reason: s
 
 /** The built view in the panel, unless the panel shows something else the analyst opened. */
 async function showBuilt($: Dollar, slug: string): Promise<void> {
-  freshViews.add(slug)
+  await markFresh($, slug, true)
   const shown = (await $.ui.panes().catch(() => [])).some(p => p.id === PANEL)
   const what = await read($, viewA)
   if (!shown || what === 'views' || (what === 'view' && (await read($, viewOpenA)) === slug)) await openView($, slug)
@@ -4698,8 +4730,17 @@ function viewGlyph(mark: string): { s: string; colour?: string; dim?: boolean } 
   return mark === '!' || mark === '×' ? { s: mark, colour: COLORS.problem } : mark === '○' ? { s: mark, dim: true } : { s: mark }
 }
 
-// the views built in this session the analyst has not opened yet: `new` in green after their names until opened
+// the views built the analyst has not opened yet: `new` in green after their names until opened; kept in signals.json,
+// so a reload of the hooks or a resume keeps them
 const freshViews = new Set<string>()
+
+async function markFresh($: Dollar, slug: string, on: boolean): Promise<void> {
+  if (freshViews.has(slug) === on) return
+  if (on) freshViews.add(slug)
+  else freshViews.delete(slug)
+  signals.fresh = [...freshViews]
+  await saveSignals($)
+}
 // the views main proposed in its turn, whose `↳ view` row stands under the answer once the turn ends
 let viewRowsPending: string[] = []
 
@@ -4815,7 +4856,8 @@ async function drawPipePane($: Dollar, e: PaneEvent): Promise<RenderElement> {
         </Box>
       </Box>
     ) : null
-    out.push(...bottomRows($, e, cols, controls, [field], [...hints, 'f for the files', 'x to close']))
+    // the description and the actions share the second rule (a panel has two at most)
+    out.push(...bottomRows($, e, cols, controls, [field], [...hints, 'f for the files', 'x to close'], false))
   } else out.push(hintsEl(els, ['f for the files', 'x to close'], cols))
   keys.push({ key: 'close', hotkey: 'x', onPress: () => void closePanel($) })
   const hk = hiddenKeys($, e, keys)

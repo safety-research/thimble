@@ -687,10 +687,15 @@ function header(spec: ViewSpec, data: ViewData, st: ViewState, cols: number, tr?
   const lb = builder()
   const probs = data.problems?.length ?? 0
   const files = data.files !== undefined ? `${num(data.files)} file${data.files === 1 ? '' : 's'}` : 'files'
-  const right = `${files} ›`
+  // the file browser's own views (a file tree, a file) read no files but their own: no `N files ›`, unless the tree
+  // left files out
+  const builtin = Boolean(spec.up) || spec.collections.some(c => c.opens)
+  const right = builtin && !data.hidden?.length ? '' : `${files} ›`
   lb.seg({ s: cut(spec.name, Math.max(8, cols - width(right) - 2)), fg: ACCENT, b: true })
-  lb.seg({ s: ' '.repeat(Math.max(2, cols - lb.x - width(right))) })
-  lb.seg({ s: right, ...(st.panel === 'about' ? { bg: COLORS.selected } : {}) }, { op: 'panel', p: st.panel === 'about' ? '' : 'about' })
+  if (right) {
+    lb.seg({ s: ' '.repeat(Math.max(2, cols - lb.x - width(right))) })
+    lb.seg({ s: right, ...(st.panel === 'about' ? { bg: COLORS.selected } : {}) }, { op: 'panel', p: st.panel === 'about' ? '' : 'about' })
+  }
   lb.nl()
   // the subtitle: the view's numbers, dim; its problems, red; a file's window and its pages against the right edge
   const w = spec.window
