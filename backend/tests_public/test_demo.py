@@ -696,7 +696,7 @@ def test_demo_downloads_installs_opens_and_says_how_to_attach(tmp_path, fake_wor
     assert not (Path(w["env"]["workspaces_dir"]) / "two").exists()
     text = said(w)
     assert "installed as workspace one: 3 cards, 1 label, 1 view, 1 document" in text
-    assert "redistributes none of them" in text and "Published by one's authors" in text
+    assert "downloads these datasets from their sources" in text
     assert "two opens without a pre-cached orientation; Start in the page runs one" in text
     assert f"cd {w['root'] / 'one'} && thimble # one" in text and f"cd {w['root'] / 'two'} && thimble # two" in text
     assert "No Claude Code session is attached" in text and "`thimble -c` in that folder continues" in text
@@ -724,7 +724,7 @@ def test_demo_with_no_precache_opens_each_dataset_with_a_note(fake_world):
         assert not (Path(w["env"]["workspaces_dir"]) / name).exists()
     assert len([x for x in w["lines"] if "opens without a pre-cached orientation" in x]) == 2
     text = said(w)
-    assert "None has a pre-cached orientation here" in text and "No Claude Code session is attached" in text
+    assert "No Claude Code session is attached" in text
     assert "ran in advance" not in text
 
 
@@ -809,14 +809,14 @@ def test_demo_asks_before_downloading_and_needs_a_terminal_to_ask(fake_world, mo
     assert run(w, args(names=["two"], yes=False, dir=str(w["root"]))) == 0 and w["got"] == []
 
 
-def test_demo_list_downloads_nothing_and_shows_credits_and_cautions(fake_world, monkeypatch):
+def test_demo_list_downloads_nothing_and_shows_each_name_sentence_source_and_folder(fake_world, monkeypatch):
     w = fake_world
     monkeypatch.setitem(demo.DATASETS, "one", fake_dataset("one", caution="safeguards may stop it"))
     assert run(w, args(list=True, dir=str(w["root"]))) == 0
     assert w["got"] == [] and not w["root"].exists()
     text = said(w)
-    assert "no pre-cached orientation yet" in text and "Published by one's authors" in text
-    assert "Note: safeguards may stop it" in text
+    assert "one" in text and "example.org" in text and str(w["root"] / "one").replace(str(Path.home()), "~") in text
+    assert "Published by one's authors" not in text and "safeguards may stop it" not in text  # SOURCES.md holds them
 
 
 def test_a_folder_with_other_files_is_left_alone(fake_world):

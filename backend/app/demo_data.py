@@ -79,6 +79,8 @@ class Dataset:
     credit: str = ""               # who published it, and that thimble downloads rather than redistributes it
     caution: str = ""              # what the analyst should know before a session reads it
     folders: tuple[str, ...] = ()  # empty folders the source holds, made in the dataset's folder
+    blurb: str = ""                # one sentence for the listing
+    url: str = ""                  # the page it comes from, for the listing
 
 
 def _dumps(row: Any, compact: bool = False) -> str:
@@ -402,6 +404,8 @@ TL_NOT_OURS = "thimble does not redistribute it: `thimble demo` downloads it fro
 
 COLLUSION_WIKI = Dataset(
     name="collusion-wiki",
+    blurb="Logs of a small wiki that a swarm of AI agents used as a message board.",
+    url="https://collusion.wiki",
     title="collusion.wiki",
     about="The logs of a small German volunteer wiki that a swarm of AI agents used as a message board: its pages, "
           "revisions, request events and editor names, in four JSONL files.",
@@ -425,6 +429,8 @@ COLLUSION_WIKI = Dataset(
 )
 MYTHOS5 = Dataset(
     name="mythos-5",
+    blurb="The transcript Anthropic released of Mythos 5 during a cybersecurity evaluation.",
+    url="https://github.com/anthropics/mythos-5-incident-transcript",
     title="Mythos 5 transcript",
     about="The transcript Anthropic released of Mythos 5 during a cybersecurity evaluation: 2,064 messages of its "
           "reasoning and tool calls.",
@@ -444,6 +450,8 @@ MYTHOS5 = Dataset(
 )
 TRANSLUCE_URLQUERY = Dataset(
     name="transluce-urlquery",
+    blurb="38,160 urlquery.net scans that Transluce found were likely made by AI agents.",
+    url="https://transluce.org/agent-activity",
     title="Transluce urlquery.net agent activity",
     about="A catalog of 38,160 public urlquery.net scan reports that Transluce identified as likely made by autonomous "
           "AI agents, from November 2025 to September 2026. Each report has its date, a confidence label, a method "

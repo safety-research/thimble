@@ -207,7 +207,7 @@ it. To use it without installing thimble, see the [mod's README](mods/thimble-cc
 
 `thimble demo` opens thimble on public data. It lists three datasets with their sources, publishers and sizes, asks
 before each download (`--yes` answers for all, or name the ones you want), and rebuilds each from its publisher's files
-into `~/thimble-demo/<name>` (`--dir` moves it). thimble redistributes none of them: each is downloaded from its
+into `~/.thimble/demo/<name>` (`$THIMBLE_HOME/demo`; `--dir` moves it). thimble redistributes none of them: each is downloaded from its
 publisher on your machine.
 
 | dataset | source | download |
@@ -217,7 +217,7 @@ publisher on your machine.
 | `transluce-urlquery` | Transluce's catalog of 38,160 urlquery.net reports likely made by AI agents, from its report [Early rogue AI agent activity and attempts to hack found on urlquery.net](https://transluce.org/agent-activity) (2026-09-23) | 4.6 MB |
 
 Each build is checked against the copy the demo's orientations ran on; a source that changed since is named in a
-warning, and the Transluce build goes on with what it got. `~/thimble-demo/SOURCES.md` lists who published each
+warning, and the Transluce build goes on with what it got. `~/.thimble/demo/SOURCES.md` lists who published each
 dataset, where it was downloaded from and what each build changes. The Transluce dataset states no licence.
 
 The command then registers each folder. Where [demos/](demos/README.md) in the repository has a pre-cached
@@ -231,8 +231,8 @@ On a terminal it then asks `Attach a Claude Code session now? (requires claude t
 answers yes, `--no-attach` no. Either way it prints how to attach later:
 
 ```bash
-cd ~/thimble-demo/collusion-wiki && thimble     # main, the session you chat with in the page
-cd ~/thimble-demo/collusion-wiki && thimble -c  # continue the last session there
+cd ~/.thimble/demo/collusion-wiki && thimble     # main, the session you chat with in the page
+cd ~/.thimble/demo/collusion-wiki && thimble -c  # continue the last session there
 ```
 
 A session attached to a pre-cached workspace starts fresh, with the orientation's cards and report as its context.

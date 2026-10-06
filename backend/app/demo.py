@@ -88,7 +88,12 @@ WORKSPACE = "workspace"
 TRANSCRIPTS = "transcripts"  # in a full export: transcripts/<session>.jsonl and its folder transcripts/<session>/
 MARKER = "precached.json"  # in an installed workspace: what was installed, from where, and the sessions given it
 PRECACHES = config.REPO_ROOT / "demos"  # demos/<name>/
-DEFAULT_DIR = Path("~/thimble-demo")
+DEFAULT_DIR = Path("$THIMBLE_HOME/demo")  # for the help text; default_dir() is the folder
+
+
+def default_dir() -> Path:
+    """Where the datasets go unless --dir says: demo/ in thimble's own folder (THIMBLE_HOME, ~/.thimble)."""
+    return (Path(os.environ.get("THIMBLE_HOME") or "~/.thimble").expanduser() / "demo").resolve()
 SCRUBBED_USER = "user"  # what --scrub-user writes in place of the exporter's user name
 ATTACH_QUESTION = "Attach a Claude Code session now? (requires claude to be logged in) [Y/n] "
 COVERAGE_CHIP = "coverage"  # the chip kind of the coverage line at the end of the orientation's thread (orient_session)
@@ -1518,30 +1523,18 @@ def sources_md(selected: list[Dataset]) -> str:
 
 
 def listing(selected: list[Dataset], cat: dict[str, dict[str, Any]], root: Path, width: int = 100) -> list[str]:
-    def wrap(text: str, indent: str = "     ") -> list[str]:
-        return textwrap.wrap(text, width, initial_indent=indent, subsequent_indent=indent)
-
-    lead = ("thimble demo: public datasets to try thimble on, each downloaded from its publisher (thimble "
-            "redistributes none of them). One with a pre-cached orientation opens on that orientation's cards, labels, "
-            "views and report; on the others, Start in the page runs one."
-            if any(d.name in cat for d in selected) else
-            "thimble demo: public datasets to try thimble on, each downloaded from its publisher (thimble "
-            "redistributes none of them). None has a pre-cached orientation here, so each opens with no analysis yet, "
-            "and Start in the page runs the orientation.")
-    out = [*wrap(lead, ""), ""]
-    for i, d in enumerate(selected, 1):
-        pc = cat.get(d.name)
-        size = (f"Download {human(d.download_bytes)}, {human(d.disk_bytes)} on disk; "
-                + (f"pre-cached orientation {human(pc.get('bytes') or 0)}"
-                   + (f" ({pc['made_with']})." if pc.get("made_with") else ".") if pc else
-                   "no pre-cached orientation yet."))
-        out += [f"  {i}. {d.name}: {d.title}", *wrap(d.about), *wrap(f"Source: {d.source}")]
-        if d.credit:
-            out += wrap(d.credit)
-        if d.caution:
-            out += wrap(f"Note: {d.caution}")
-        out += [*wrap(size), ""]
-    out += wrap(f"Each goes into {root}/<name>. Nothing is downloaded without a yes.", "")
+    """The datasets, one short block each: name, one sentence, where it comes from and where it goes."""
+    def home(p: Path) -> str:
+        try:
+            return "~/" + str(p.relative_to(Path.home()))
+        except ValueError:
+            return str(p)
+    pad = max(len(d.name) for d in selected) + 2
+    out = ["thimble demo downloads these datasets from their sources, asking before each:", ""]
+    for d in selected:
+        out.append(f"  {d.name.ljust(pad)}{d.blurb or d.title}")
+        out.append(f"  {' ' * pad}{d.url or d.source} → {home(root / d.name)}")
+    out.append("")
     return out
 
 
@@ -1753,7 +1746,7 @@ def run(args: argparse.Namespace, *, get: Callable[[str], bytes] = demo_data.htt
         say(f"thimble demo: no dataset {', '.join(unknown)}; the datasets are {', '.join(DATASETS)}")
         return 2
     selected = [DATASETS[n] for n in names]
-    root = given(args.dir) if args.dir else DEFAULT_DIR.expanduser().resolve()
+    root = given(args.dir) if args.dir else default_dir()
     cat = precaches(given(args.precaches) if args.precaches else PRECACHES)
     for line in listing(selected, cat, root):
         say(line)
@@ -1764,8 +1757,7 @@ def run(args: argparse.Namespace, *, get: Callable[[str], bytes] = demo_data.htt
     failed = 0
     for ds in selected:
         here = complete(ds, root / ds.name)  # nothing to download
-        answer = True if here else _ask(f"Download {ds.name} ({human(ds.download_bytes)}) into {root / ds.name}? "
-                                        "[y/N] ", args.yes)
+        answer = True if here else _ask(f"Download {ds.name} ({human(ds.download_bytes)})? [y/N] ", args.yes)
         if answer is None:
             say("thimble demo: no terminal to ask on; run `thimble demo --yes` (with the names of the datasets you "
                 "want) to download")
