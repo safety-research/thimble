@@ -590,7 +590,8 @@ def _args(op: str, args: dict[str, Any]) -> dict[str, Any]:
         return {"agent": str(args.get("agent") or ""), "text": str(args.get("text") or ""),
                 "role": str(args.get("role") or ""), "values": dict(args.get("values") or {})}
     if op == "stop":
-        return {"agent": str(args.get("agent") or "")}
+        shells = [str(x) for x in args.get("shells") or [] if re.fullmatch(r"[A-Za-z0-9_-]{1,64}", str(x))]
+        return {"agent": str(args.get("agent") or ""), **({"shells": shells} if shells else {})}
     if op == "note":
         return {"text": str(args.get("text") or "")}
     return {}

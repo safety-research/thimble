@@ -16,8 +16,8 @@
 // - holds GET /api/module/next and handles the requests one at a time, in order, so a role's registration and the
 //   spawn that needs it are never split by another request: register (all roles again), spawn (register the role with
 //   the run's values if they differ, $.agent.spawn with no `model`, then the one-line note the server rendered), send
-//   (register if needed, then SendMessage), stop (TaskStop), note ($.session.append). It never starts, sends or stops
-//   anything the server did not ask for;
+//   (register if needed, then SendMessage), stop (TaskStop of the agent and of the shells the server names), note
+//   ($.session.append). It never starts, sends or stops anything the server did not ask for;
 // - agent.spawn: main's Agent call for one of thimble's roles whose prompt's first line names a typed request gets that
 //   request's full model id, and the agent it starts that request's effort, which turn.step sets on its every request;
 //   a child of such an agent whose type is not thimble's gets the same effort (its model it inherits already). These
@@ -329,7 +329,7 @@ async function handle($: Engine, m: State, req: Request): Promise<Answer> {
       case 'send':
         return await send($, m, text(a.agent), text(a.text), text(a.role), values)
       case 'stop':
-        return await stopAgent($, text(a.agent))
+        return await stopAgent($, text(a.agent), Array.isArray(a.shells) ? a.shells.map(text).filter(Boolean) : [])
       case 'note':
         return await note($, text(a.text))
       default:
@@ -382,8 +382,11 @@ async function send($: Engine, m: State, agent: string, message: string, role: s
   return { agentId: agent, text: said, queued: QUEUED.test(said) }
 }
 
-async function stopAgent($: Engine, agent: string): Promise<Answer> {
+async function stopAgent($: Engine, agent: string, shells: string[] = []): Promise<Answer> {
   const r = await $.tool.call({ tool: 'TaskStop', task_id: agent } as Parameters<Engine['tool']['call']>[0])
+  // the background shells the agent started, which Claude Code's TaskStop of the agent leaves running; one that has
+  // ended already answers an error, which changes nothing
+  for (const shell of shells) await $.tool.call({ tool: 'TaskStop', task_id: shell } as Parameters<Engine['tool']['call']>[0]).catch(() => undefined)
   if (r.deny !== undefined) return { deny: r.deny }
   const said = text(r.text)
   if (r.isError) return { error: said || 'TaskStop failed', ...(GONE.test(said) ? { gone: true } : {}) }

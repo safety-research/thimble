@@ -338,6 +338,13 @@ describe('requests', () => {
     expect(await e.server.answer(e.server.push('stop', { agent: 'a6' }))).toMatchObject({ error: expect.any(String), gone: true })
   })
 
+  it('stops the background shells the server names with the agent, and an ended shell changes nothing', async () => {
+    const e = await started()
+    e.onTool((input) => (input.task_id === 'b2' ? { isError: true, text: '<tool_use_error>Task b2 is not running</tool_use_error>' } : { result: { message: 'Successfully stopped task' }, text: 'Successfully stopped task' }))
+    expect(await e.server.answer(e.server.push('stop', { agent: 'a7', shells: ['b1', 'b2'] }))).toEqual({ agentId: 'a7', text: 'Successfully stopped task' })
+    expect(e.$.tool.call.mock.calls.slice(-3).map((c: Json[]) => (c[0] as { task_id: string }).task_id)).toEqual(['a7', 'b1', 'b2'])
+  })
+
   it('appends a note on a note request', async () => {
     const e = await started()
     expect(await e.server.answer(e.server.push('note', { text: 'A line for main.' }))).toEqual({ ok: true })

@@ -728,3 +728,10 @@ async def test_the_module_s_ended_post_reaches_every_observer(client, plugin_hea
         assert seen == [(CORPUS, "a9", want, "refusal")]
     assert module_bridge.refusal_text({"category": None, "explanation": "Flagged."}) == "The API refused the request: Flagged."
     assert module_bridge.refusal_text({}) == ""
+
+
+def test_a_stop_hands_the_module_the_agent_s_shells_and_nothing_that_is_no_task_id():
+    """Live check L33: thimble's stop names the background shells the agent started, which the module stops with it."""
+    got = module_bridge._args("stop", {"agent": "a7", "shells": ["b7xk2q9", "../x", "", "b2"]})
+    assert got == {"agent": "a7", "shells": ["b7xk2q9", "b2"]}
+    assert module_bridge._args("stop", {"agent": "a7"}) == {"agent": "a7"}

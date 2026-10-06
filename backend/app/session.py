@@ -111,6 +111,8 @@ DIDNT_FINISH = "didn't finish"  # a task notification's summary after `thimble -
 # the attachment Claude Code adds to a running subagent's transcript when main goes into plan mode, which the agent then
 # follows: it may only read and write a plan (live check L21)
 PLAN_MODE_ATTACHMENT = "plan_mode"
+# a Bash call's result when it runs in the background: its shell's task id, which TaskStop takes (live check L33)
+BG_SHELL_RE = re.compile(r"\A\s*Command running in background with ID:\s*([A-Za-z0-9_-]+)")
 HANDBACK_RE = re.compile(r"\A\[Subagent hand-back\].*?follows:\n", re.S)  # the harness's lead of a hand-back
 START_TOOLS = ("start_orientation", "start_writing", "message_orientation", "propose_view", "run_check")  # R3, the Bash true
 # R2: what an error result of main's call for one of thimble's agents says, by the kind of refusal it is
@@ -2247,6 +2249,12 @@ def translate_sub(lv: Live, sub: Sub, line: bytes | str) -> int:
             if sub.calls is not None:
                 sub.calls.result(tid, b, rec)
             data = _result_data(tid, sub.names.get(tid, ""), b.get("content"), bool(b.get("is_error")))
+            shell = BG_SHELL_RE.search(data["summary"]) if sub.names.get(tid) == "Bash" else None
+            owner = str(sub.agent_id if sub.thimble else sub.root or "")
+            if shell and owner:  # a background shell of one of thimble's agents, which thimble's stop ends with it
+                from . import subagents  # noqa: PLC0415
+
+                subagents.add_shell(lv.c, owner, shell.group(1))
             sub.rec.tool_result(tid, data.pop("summary"), is_error=bool(data.pop("is_error", False)), by=TERMINAL,
                                 **{k: v for k, v in data.items() if k != "id"})
             if data.get("cell_id"):  # the card is this subagent's or this fork's, not main's

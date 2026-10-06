@@ -681,3 +681,20 @@ async def test_main_s_plan_mode_reaching_a_running_agent_marks_its_run(bridge, p
     session.tail_once(lv)
     assert subagents.agent(CORPUS, AGENT)["plan_run"] == 0
     assert agents.read_meta(CORPUS, chat)["plan_mode"] is True
+
+
+async def test_a_background_shell_of_thimble_s_agent_is_stopped_with_it(bridge, project, ended):
+    """Live check L33: a builder thimble stopped after its last attempt left its background `sleep` running, which held
+    its end notification back, so main replied to the job twice. The mirror keeps each background shell a thimble agent
+    starts, and thimble's stop asks the module to stop those shells with the agent."""
+    lv, chat, path = await _click_orientation(bridge, project)
+    _write(path, {"type": "user", "message": {"role": "user", "content": "the task"}},
+           _assistant(_use("toolu_bg1", "Bash", {"command": "sleep 80", "run_in_background": True})),
+           _result("toolu_bg1", "Command running in background with ID: b7xk2q9. Output is being written to: /tmp/x"),
+           _assistant(_use("toolu_fg1", "Bash", {"command": "echo running in background with ID: fake"})),
+           _result("toolu_fg1", "running in background with ID: notashell"))
+    session.tail_once(lv)
+    assert subagents.agent(CORPUS, AGENT)["shells"] == ["b7xk2q9"], "only Claude Code's own background line counts"
+    await subagents.stop(CORPUS, AGENT)
+    [stop] = bridge.ops("stop")
+    assert stop["agent"] == AGENT and stop["shells"] == ["b7xk2q9"]

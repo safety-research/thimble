@@ -716,15 +716,16 @@ def stop_done(text: str) -> bool:
 
 
 async def stop(c: str, agent_id: str) -> Answer:
-    """Stop an agent through the module (TaskStop). Refused when the module is not live: the card then says to press
-    Esc in the agent's view. An agent that had ended already counts as stopped."""
+    """Stop an agent through the module (TaskStop), and the background shells it started (add_shell). Refused when the
+    module is not live: the card then says to press Esc in the agent's view. An agent that had ended already counts as
+    stopped."""
     from . import module_bridge  # noqa: PLC0415
 
     a = agent(c, agent_id) or {}
     if not module_bridge.live(c):
         return refusal(NO_MODULE, str(module_bridge.why_not(c) or ""))
     rid = new_request(c, "stop", a.get("key"), {"task_id": agent_id}, None, CLICK, role=a.get("role"), agent=agent_id)
-    ans = await _bridge(c, "stop", agent=agent_id, request=rid)
+    ans = await _bridge(c, "stop", agent=agent_id, request=rid, shells=list(a.get("shells") or []))
     if ans.refused and (ans.get("gone") or stop_done(ans.reason)):
         ans = Answer({"agentId": agent_id, "done": True})
     _set(c, rid, state="done" if not ans.refused else "refused", at=files.now(), reason=ans.reason or None)
@@ -752,6 +753,20 @@ def mark_cancelled(c: str, agent_id: str) -> None:
     if chat:
         with contextlib.suppress(Exception):
             agents.update_agent(c, chat, stopped_by=STOPPED_USER, **{"continue": CANCELLED})
+
+
+SHELLS_KEPT = 32  # an agent's background shells remembered, its latest
+
+
+def add_shell(c: str, agent_id: str, shell: str) -> None:
+    """A background shell `agent_id` (or a descendant of it) started: kept on its registry entry, so thimble's own stop
+    of the agent ends it too (stop). Claude Code's TaskStop of an agent leaves its shells running, and a stopped
+    builder's `sleep` held its end notification back until it finished, so main replied to the job twice (live check
+    L33)."""
+    with update(c) as state:
+        a = files.registry(state).get(agent_id)
+        if isinstance(a, dict):
+            a["shells"] = [*[x for x in a.get("shells") or [] if x != shell], shell][-SHELLS_KEPT:]
 
 
 def saw_plan_mode(c: str, agent_id: str) -> None:
