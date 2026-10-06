@@ -244,8 +244,8 @@ def with_features(stored: dict[str, Any], c: str | None = None) -> dict[str, Any
     them from thimble's config with a row per agent of the active extensions (extensions.agent_models), the permission
     modes the config sets (modes.rows), `disabled_modes`, those the analyst's Claude Code settings turn off,
     `config_error`, the config's error or ''; `config_ignored`, the keys its files hold that this build reads and ignores
-    (userconf.ignored); `agents`, agent_rows; `tasks`, task_rows; `card_wait`, the minutes a code ticket's permission
-    request waits (userconf.card_wait_s)."""
+    (userconf.ignored); `agents`, agent_rows; `tasks`, task_rows; `card_wait`, the minutes a code ticket's question on its
+    card waits (userconf.card_wait_s)."""
     from . import extensions, modes, userconf  # noqa: PLC0415 — they import this module
 
     kept = {k: v for k, v in stored.items() if k not in RETIRED_KEYS and k != modes.SETTING}
@@ -260,8 +260,8 @@ def agent_rows(c: str | None) -> dict[str, Any]:
     """Who runs each agent thimble starts and what it may do. Two fences: `main`'s, which thimble's agents share as main's
     subagents (its sandbox, whether the sandbox can run here, its network, web tools and edits of the corpus, the
     orientation's keys in thimble's config, userconf's one fence), with the extensions that add to main's prompt; and
-    `dev`'s, the code tickets', which keep a fence of their own. Each other agent's row (orient, writer, critic,
-    checks) names its role's agent (roles.public: thimble's own, or an extension's prompt, Agent SDK program or command,
+    `dev`'s, which `thimble fix` and an extension's program that runs the dev agent keep. Each other agent's row
+    (orient, writer, critic, checks) names its role's agent (roles.public: thimble's own, or an extension's prompt, Agent SDK program or command,
     with the extensions that add to its prompt and a conflict) and its own `web`, "off" or main's. `labels` and
     `cardCheck` (userconf.CALLS) follow, by their config names: who runs their tasks (`tasks`, the first one an
     extension runs) and the settings a program of those tasks runs under, with the sandbox always on and no web."""

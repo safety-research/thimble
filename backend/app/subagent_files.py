@@ -53,9 +53,9 @@ DONE_KEEP_S = 24 * 3600.0  # a request that ended is dropped after this long
 REKEYS_KEPT = 16  # the session moves kept under `module.rekeyed`
 PLUGIN = "thimble"
 PREFIX = f"{PLUGIN}:"
-# thimble's six roles: the agents that have a key, a chat and a run of their own. thimble:helper, and an extension's
+# thimble's seven roles: the agents that have a key, a chat and a run of their own. thimble:helper, and an extension's
 # agent registered under the plugin's name, are none of them: any agent may start one (agent_check).
-ROLES = ("orientation", "critic", "writer", "view-builder", "view-reviewer", "check")
+ROLES = ("orientation", "critic", "writer", "view-builder", "view-reviewer", "check", "dev-ticket")
 HELPER = "helper"
 PLUGIN_CALL = "toolu_plugin_"  # the tool_use_id prefix of a call thimble's module made ($.agent.spawn, $.tool.call)
 AGENT_TOOLS = ("Agent", "Task")

@@ -1,12 +1,13 @@
-"""The permission requests of the `claude -p` sessions thimble still starts itself: code tickets' (dev.py), `thimble fix`
-and the sessions of an extension's program (harness.py). thimble's own agents, the orientation, its critic and the
-writers, are subagents of the analyst's Claude Code session instead (subagents.py), which asks in its terminal; what
-stays here is what those jobs need: their fence, their config, their permission hooks, and the hosting of their asks on
-a chat's card.
+"""The permission requests of the `claude -p` sessions of an extension's program (harness.py), the helpers `thimble
+fix`'s session uses (dev.py), and the card on which a code ticket asks thimble's own questions about its code
+(dev.CODE_TOOL). thimble's own agents, the code tickets' among them, are subagents of the analyst's Claude Code session
+instead (subagents.py), which asks in its terminal; what stays here is what those jobs need: their fence, their config,
+their permission hooks, and the hosting of their asks on a chat's card.
 
 Hosted sessions. A job's session is not followed here, yet ask answers its PermissionRequest hook (permission_hook.py)
 the same way for each: host registers one on its chat for the length of its run, with its agent's mode (modes.py, the
-dev agent's row for a code ticket). A --print session has no terminal, so its hook hands each request of the session,
+dev agent's row for an extension's program that runs the dev agent). A code ticket's chat is hosted for thimble's own
+questions alone, which ask with `force`. A --print session has no terminal, so its hook hands each request of the session,
 its subagents and workflow agents to ask, which shows it on the chat's card with Allow and Deny. In Bypass ask allows at
 once; a request nobody answers is denied after the card's wait, `cardWait` in thimble's config (userconf.card_wait_s),
 so no request waits for good. A request denied unanswered stays on the card, marked `expired`, until the analyst
@@ -56,7 +57,7 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 from urllib.parse import urlsplit
 
 from fastapi import APIRouter, HTTPException, Request
@@ -185,7 +186,6 @@ class Run:
     # calls the analyst allowed on the card before they ran (module note, the config), by grant_key: when
     cleared: dict[tuple[str | None, str, str], float] = field(default_factory=dict)
     mode: str = "manual"  # the mode it runs in, one of modes.MODES (module note, hosted sessions)
-    on_expired: Callable[["Run", dict[str, Any]], None] | None = None  # told of each request denied unanswered
     groups: dict[str, str] = field(default_factory=dict)  # web rule -> the id of the request waiting for it (module note, the web)
     shown: dict[str, int] = field(default_factory=dict)  # answered request id -> how many joined calls its card listed
     asking: dict[str, tuple[str | None, str]] = field(default_factory=dict)  # request id -> (agent that asked, tool)
@@ -469,13 +469,12 @@ def _by_chat(c: str, chat: str) -> Run | None:
 
 
 def host(c: str, key: str, chat: str, *, agent: str,
-         on_expired: Callable[[Run, dict[str, Any]], None] | None = None,
          sandbox: "tuple[list[str], list[str]] | None" = None, conf: userconf.Session | None = None) -> Run:
     """Answer the permission hook's requests of the session `key`, which this module does not follow, on the chat `chat`
     (module note, hosted sessions): by the mode of the row `agent` (modes.AGENTS), each denied after the card's wait
-    unanswered, when `on_expired` hears of it. With `sandbox` (sandbox_rule) a Bash call that runs in the sandbox is
+    unanswered. With `sandbox` (sandbox_rule) a Bash call that runs in the sandbox is
     allowed at once; `conf` is what thimble's config asks of it (module note, the config)."""
-    run = Run(c, key, chat, "", config.corpus_dir(c), "dev", mode=modes.mode_for(c, agent), on_expired=on_expired,
+    run = Run(c, key, chat, "", config.corpus_dir(c), "dev", mode=modes.mode_for(c, agent),
               sandbox_rule=sandbox, config=conf)
     _hosted[(c, key)] = run
     return run
@@ -499,12 +498,6 @@ def unhost(c: str, key: str) -> None:
             fut.set_result(None)
     with contextlib.suppress(Exception):
         agents.update_agent(run.c, run.chat, permissions=[])
-
-
-def asking(c: str, key: str | None) -> bool:
-    """Whether a permission request of the session `key` waits for the analyst."""
-    run = asker(c, key)
-    return run is not None and any(not f.done() for f in run.waits.values())
 
 
 def web_rule(tool_name: str, inp: Any) -> str | None:
@@ -670,9 +663,6 @@ async def ask(c: str, key: str | None, tool_name: str, inp: Any, agent_id: str |
         with contextlib.suppress(Exception):
             _off_card(run, rid, fut.result() == TIMED_OUT)
     message = _deny_message(run, allow, limit)
-    if allow == TIMED_OUT and run.on_expired is not None and not force:
-        with contextlib.suppress(Exception):
-            run.on_expired(run, entry)
     if allow == ALWAYS and chosen:
         told = _add_rules(run, chosen)
         agents.log_permission(c, "answered", id=rid, chat=run.chat,

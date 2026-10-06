@@ -1682,7 +1682,7 @@ def main_name(cwd: Path) -> str:
 
 # the folders main's Bash may write, under the workspace (subagents.write_dirs, which this list stands in for until the
 # subagent paths are in): the orientation's work folder, the writers', the critics', the checks', the view builders' and
-# the workspace's own views. No code ticket's worktree: code tickets keep their own fence.
+# the workspace's own views. The code tickets' worktrees are outside the workspace (ticket_trees).
 WRITE_DIRS = ("orient/work", "writers", "critique-work", "check-work", "views-work", "extension/views")
 LAUNCH_FILE = "trusted/launch.json"  # in the workspace (subagent_files): {session, at, fenced, switches, unset, pid, modules_off}
 # exported into main's environment: no "Move to background" and no ← agent view, the ↓ tray kept (spike U11);
@@ -1743,12 +1743,19 @@ def fence_off(c: str | None) -> str:
     return "" if cc_settings.sandbox_ok() else "missing"
 
 
+def ticket_trees() -> list[Path]:
+    """The folder of the code tickets' worktrees in a development install (dev.worktrees_dir's rule, which this module
+    does not import), which main's fence lets main's Bash and its subagents write, a ticket's agent among them, and
+    which their Edit and Write tools reach (additionalDirectories); none in an installed copy."""
+    return [home() / "dev" / "trees"] if (config.REPO_ROOT / ".git").exists() else []
+
+
 def main_fence(cwd: Path, c: str | None = None, root: Path | None = None, session: str | None = None,
                given: str = "") -> dict[str, Any]:
     """The --settings keys that put main, and every subagent it starts, inside thimble's fence for the corpus `cwd`,
     workspace `c` (by default the one `cwd` is registered as), the plugin copy at `root`, main's session `session`
-    (module note, main's fence): `sandbox`, `permissions` (userconf.main_rules; no additionalDirectories) and `env`
-    (cc_plugin.FENCE_MARK). With the plugin's hooks off, /thimble's own command for SANDBOX_ACTIONS in that session and
+    (module note, main's fence): `sandbox`, `permissions` (userconf.main_rules, and in a development install the code
+    tickets' worktrees as additionalDirectories, ticket_trees) and `env` (cc_plugin.FENCE_MARK). With the plugin's hooks off, /thimble's own command for SANDBOX_ACTIONS in that session and
     the Monitor route's watcher command for it are let out of the sandbox, and no other (sandbox_rules, watch_rules);
     `given` is the analyst's own --settings to the launcher, which may turn the hooks off (launch_hooks_blocked).
     {} when fence_off says so. A config with an error fences main with the defaults' rules."""
@@ -1768,7 +1775,8 @@ def main_fence(cwd: Path, c: str | None = None, root: Path | None = None, sessio
         # with the hooks off, the Monitor route's watcher must reach the server (spike U15), and /thimble's own command
         # starts the server
         excluded += [*watch_rules(root, cwd, session), *sandbox_rules(root, cwd, session)]
-    fs = {"allowWrite": [str(d) for d in write_dirs(c)],
+    trees = [str(d) for d in ticket_trees()]
+    fs = {"allowWrite": [*(str(d) for d in write_dirs(c)), *trees],
           "denyWrite": [str(corpus), str(userconf.workspace_file(c)), str(ws / "settings.json")],
           "denyRead": [*userconf.private_paths(), str(home() / LINKS_DIR)]}
     box: dict[str, Any] = {"enabled": True, "failIfUnavailable": bool(conf["sandbox"]["enforce"]),
@@ -1779,6 +1787,8 @@ def main_fence(cwd: Path, c: str | None = None, root: Path | None = None, sessio
     perms: dict[str, list[str]] = {}
     for rule in userconf.main_rules(c):
         perms.setdefault(rule.behavior, []).append(rule.rule)
+    if trees:
+        perms["additionalDirectories"] = trees
     return {"sandbox": box, "permissions": perms, "env": {cc_plugin.FENCE_MARK: "1"}}
 
 

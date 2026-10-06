@@ -46,10 +46,13 @@ def _rules(fence) -> dict[str, list[str]]:
     return fence["permissions"]
 
 
-def test_the_fence_keeps_the_corpus_read_only_and_lets_main_write_only_the_agents_work_folders(corpus):
+def test_the_fence_keeps_the_corpus_read_only_and_lets_main_write_only_the_agents_work_folders(corpus, tmp_path,
+                                                                                             monkeypatch):
     """Claude Code's sandbox on with no command outside it and no Bash allowed unasked; writes only in the six work
-    folders, never a ticket's worktree; the corpus and the workspace's config and settings not writable; the token files
-    and the links folder unreadable; thimble's records not editable; no additionalDirectories; the fence's mark."""
+    folders; the corpus and the workspace's config and settings not writable; the token files and the links folder
+    unreadable; thimble's records not editable; in an installed copy no additionalDirectories and no ticket's worktree;
+    the fence's mark."""
+    monkeypatch.setattr(config, "REPO_ROOT", tmp_path / "installed")  # no git checkout
     fence = cli.main_fence(corpus)
     box, perms = fence["sandbox"], _rules(fence)
     ws = config.WORKSPACES_DIR.resolve() / "logs"
@@ -107,15 +110,29 @@ def test_the_fence_s_rules_follow_the_orientation_s_data_web_and_network_and_add
 
 def test_a_development_install_denies_edits_of_the_code_tickets_records(corpus, tmp_path, monkeypatch):
     """In a development install main may not edit the checkout's dev/tickets.jsonl and dev/applies.jsonl, which hold
-    the change a ticket's checks passed; the folders are no write folder either."""
+    the change a ticket's checks passed, nor the checkout's git folder, whose branches only the server moves; the
+    folders are no write folder either. Main's Bash and its subagents, a ticket's agent among them, write the tickets'
+    worktrees, and their Edit and Write tools reach them, but never the boxes beside them in thimble's home."""
+    from app import dev
+
     monkeypatch.setenv("THIMBLE_DEV_DIR", str(tmp_path / "dev"))
     monkeypatch.setattr(config, "REPO_ROOT", tmp_path)
     (tmp_path / ".git").mkdir()
-    perms = _rules(cli.main_fence(corpus))
-    assert {f"Edit(/{tmp_path / 'dev' / 'tickets.jsonl'})", f"Edit(/{tmp_path / 'dev' / 'applies.jsonl'})"} <= \
-        set(perms["deny"])
+    fence = cli.main_fence(corpus)
+    perms = _rules(fence)
+    assert {f"Edit(/{tmp_path / 'dev' / 'tickets.jsonl'})", f"Edit(/{tmp_path / 'dev' / 'applies.jsonl'})",
+            f"Edit(/{tmp_path / '.git'}/**)"} <= set(perms["deny"])
+    trees = str(dev.worktrees_dir())
+    assert trees == str(cli.home() / "dev" / "trees") and cli.ticket_trees() == [dev.worktrees_dir()]
+    assert perms["additionalDirectories"] == [trees] and fence["sandbox"]["filesystem"]["allowWrite"][-1] == trees
+    written = fence["sandbox"]["filesystem"]["allowWrite"]
+    assert str(dev.dev_home()) not in written and str(dev.box_dir("t1")) not in written
+    assert not dev.box_dir("t1").is_relative_to(dev.worktrees_dir()), "a ticket's box is outside what main writes"
+    assert not any(str(tmp_path) == w or str(tmp_path / ".git") == w for w in written), "never the live checkout"
     (tmp_path / ".git").rmdir()
-    assert not any("tickets.jsonl" in r for r in _rules(cli.main_fence(corpus))["deny"]), "an installed copy has none"
+    fence = cli.main_fence(corpus)
+    assert not any("tickets.jsonl" in r or ".git" in r for r in _rules(fence)["deny"]), "an installed copy has none"
+    assert "additionalDirectories" not in _rules(fence) and trees not in fence["sandbox"]["filesystem"]["allowWrite"]
 
 
 def test_no_fence_without_the_sandbox_and_the_launch_says_so(corpus, monkeypatch):

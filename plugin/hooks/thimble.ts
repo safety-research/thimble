@@ -10,7 +10,7 @@
 // process on the port can neither hand it requests nor read them, and nothing it does runs outside the sandbox.
 //
 // What it does once the server accepts it:
-// - registers thimble's six roles and thimble:helper from GET /api/module/roles (each with a full model id and an
+// - registers thimble's roles and thimble:helper from GET /api/module/roles (each with a full model id and an
 //   explicit effort, from Settings); when the server is up at session start this happens inside session.start, so the
 //   types are in main's first agent listing;
 // - asks Claude Code's permission decision for a write it never makes every PLAN_POLL_MS and tells the server when main
@@ -46,7 +46,7 @@ type Hello = 'ok' | 'wait' | 'refused'
 
 export const PLUGIN = 'thimble'
 // thimble's roles: each names its own model and effort, so a typed run's effort never goes to one of them
-export const ROLES = ['orientation', 'critic', 'writer', 'view-builder', 'view-reviewer', 'check']
+export const ROLES = ['orientation', 'critic', 'writer', 'view-builder', 'view-reviewer', 'check', 'dev-ticket']
 export const RETRY_MS = 2000 // between hellos while no server accepts one, and after a failed poll
 export const SESSION_WAIT_MS = 10000 // how long /clear's new session id is waited for
 export const SESSION_TICK_MS = 25

@@ -1,6 +1,14 @@
-"""A code ticket (app/dev.py): contained, it runs its checks and its server in a box (app/ticket_box.py) and asks the
-analyst only before its change reaches thimble's own code; where the box can't run it asks before it starts as well.
-The server's git commands in its worktree run hardened."""
+"""A code ticket (app/dev.py, app/ticket_tools.py): its agent is a `thimble:dev-ticket`, a subagent of main, started
+through thimble's module for the analyst's click or by main's exact Agent call for main's file_dev_ticket. It works in
+the ticket's worktree, checks with `ticket_checks` and finishes with `finish_ticket`, where the server commits its change
+and runs the gates of record, counting the attempts; its end is the backstop. Contained, the gates and the ticket's
+server run in a box (app/ticket_box.py) and the analyst is asked only before the change reaches thimble's own code;
+where the box can't run the analyst is asked before it starts as well. The server's git commands in its worktree run
+hardened.
+
+The module is the fake bridge (subagent_fakes); the agent's calls are made through tools.call with the caller hook's
+line written first, as the PreToolUse hook writes it, and its end is subagents.run_ended, as the mirror or the module's
+`ended` post ends a run. The gates are faked unless a test says otherwise."""
 from __future__ import annotations
 
 import asyncio
@@ -12,17 +20,22 @@ import sys
 from pathlib import Path
 
 import pytest
-from conftest import card_wait
+from conftest import UI_KEY, _record, card_wait
+from fastapi import HTTPException
+from starlette.requests import Request
 
-from app import agent_session, agents, dev, ledger, modes, ticket_box
+from app import agent_session, agents, config, dev, hook_auth, ledger, modes, subagents, ticket_box, tools
+from app import subagent_files as sf
+from subagent_fakes import bridge, hints  # noqa: F401 — fixtures
 
 CORPUS = "mini"
 BACKEND = Path(__file__).resolve().parent.parent
 
 
 @pytest.fixture(autouse=True)
-def _fresh(workspaces_tmp):
+def _fresh(workspaces_tmp, monkeypatch):
     agent_session._hosted.clear()
+    monkeypatch.setattr(dev, "_current", None)
     yield
     agent_session._hosted.clear()
 
@@ -52,156 +65,292 @@ def _repo(tmp_path: Path) -> Path:
     return repo
 
 
-async def test_a_contained_ticket_asks_only_before_its_change_is_applied_in_every_mode(monkeypatch, tmp_path):
-    """A contained ticket starts unasked, runs its gates in its box, stops its session, then waits on its card, in
-    Bypass too, before the merge: a no leaves the live branch where it was and the change on the ticket's branch; an
-    Allow merges the commit it named, and nothing when the branch moved after the question."""
+@pytest.fixture()
+def ticketing(tmp_path, monkeypatch, bridge, hints):
+    """A development install in a scratch git repository whose tickets run contained, with the before and after shots
+    and the gates faked: the gates pass unless the worktree's README says FAIL. The trees the gates ran over and the
+    boxes they ran in."""
     monkeypatch.setenv("THIMBLE_SANDBOX", "1")
     repo = _repo(tmp_path)
     monkeypatch.setattr(dev, "REPO", repo)
-    ledger.put_settings(CORPUS, {modes.SETTING: {"dev": "bypass"}})
-    monkeypatch.setattr(dev, "runner_problem", lambda **_k: "")
+    monkeypatch.setattr(dev, "DEV_DIR", tmp_path / "dev-records")
+    monkeypatch.setattr(dev, "STACK_ENABLED", True)
     monkeypatch.setattr(ticket_box, "works", lambda: True)
-    boxes: list = []
-
-    async def never(_t):
-        raise AssertionError("a contained ticket asked before it started")
-
-    async def turn(run, run_log, wt, prompt, resume, **_k):
-        (wt / "README.md").write_text("b\n")
-        _git(wt, "commit", "-qam", "dev: ticket")
-        run.session = "s1"
-        return "done"
+    seen: list = []
 
     async def gates(tree, touched, *, scratch=None, box=None):
-        boxes.append(box)
-        return {"ok": True, "steps": []}
+        seen.append((Path(tree), touched, box))
+        ok = "FAIL" not in (Path(tree) / "README.md").read_text()
+        return {"ok": ok, "steps": [{"name": "pytest", "ok": ok, "tail": "" if ok else "README says FAIL"}]}
 
     async def no_shot(*_a, **_k):
         return None
 
-    monkeypatch.setattr(dev, "_code_refusal", never)
-    monkeypatch.setattr(dev, "_worker_turn", turn)
     monkeypatch.setattr(dev, "run_gates", gates)
     monkeypatch.setattr(dev, "_preview_shot", no_shot)
-    stopped: list = []
-    monkeypatch.setattr(dev.SESSIONS, "stop", stopped.append)
+    monkeypatch.setattr(dev, "_take_shot", no_shot)
+    return {"repo": repo, "gates": seen, "bridge": bridge}
+
+
+async def _until(cond, what: str, tries: int = 500) -> None:
+    for _ in range(tries):
+        if cond():
+            return
+        await asyncio.sleep(0.01)
+    raise AssertionError(what)
+
+
+async def _call(tool: str, agent: str, tid: str, args: dict | None = None, n: list[int] = [0]) -> tools.ToolResult:  # noqa: B006
+    """A call of `tool` by the agent `agent`, whose calls run as the ticket's key, the caller hook's line written first."""
+    n[0] += 1
+    use = f"toolu_k{n[0]:06d}"
+    a = subagents.agent(CORPUS, agent) or {}
+    sf.add_caller(config.workspace_dir(CORPUS), use, agent, str(a.get("type") or "thimble:helper"))
+    return await tools.call(CORPUS, tool, args or {}, session=dev.ticket_key(tid), tool_use_id=use)
+
+
+async def _clicked_ticket(title: str = "Bigger font") -> tuple[dict, str]:
+    """A ticket the analyst filed in the browser, started through the module: the ticket and its agent's id."""
+    t = dev.file_ticket(CORPUS, title, "the labels are small", source="ui")
+    await _until(lambda: (dev._get(t["id"]) or {}).get("agent_id"), "the ticket's agent did not start")
+    return dev._get(t["id"]), str(dev._get(t["id"])["agent_id"])
+
+
+def _click(path: str = "/") -> Request:
+    """A click from the analyst's browser on localhost: it carries the cookie of the test server's ui_key."""
+    _record(ui_key=UI_KEY)
+    return Request({"type": "http", "path": path, "client": ("127.0.0.1", 1),
+                    "headers": [(b"cookie", f"{hook_auth.ui_cookie()}={UI_KEY}".encode())]})
+
+
+async def test_a_click_prepares_the_ticket_and_starts_its_agent_through_the_module_in_its_thread(ticketing):
+    """A ticket filed in the browser gets its worktree, under the folder of worktrees main's fence lets subagents write,
+    and its agent's own folder, then a `thimble:dev-ticket` through the module on the dev row's model and effort, whose
+    prompt names the worktree; the agent's chat is the ticket's thread."""
+    t, agent = await _clicked_ticket()
+    [spawn] = ticketing["bridge"].ops("spawn")
+    assert spawn["role"] == "dev-ticket" and spawn["route"] == subagents.CLICK
+    assert spawn["values"] == subagents.values_for(CORPUS, "dev-ticket") == {
+        "model": config.models_for(CORPUS)["dev"]["model"], "effort": config.models_for(CORPUS)["dev"]["effort"]}
+    wt = Path(t["worktree"])
+    assert wt.parent == dev.worktrees_dir() and wt.is_dir() and dev.ticket_work_dir(t["id"]).is_dir()
+    assert str(wt) in spawn["prompt"] and spawn["description"] == f"ticket #{t['n']}: Bigger font"
+    meta = agents.read_meta(CORPUS, t["chat"])
+    assert (meta["route"], meta["agent_id"], meta["agent_type"], meta["ticket"]) == (
+        "subagent", agent, "thimble:dev-ticket", t["id"]), "the agent's chat is the ticket's thread"
+    assert subagents.agent(CORPUS, agent)["key"] == dev.ticket_key(t["id"]) and t["in_box"] is True
+    assert dev._current is not None and dev._current.agent == agent
+
+
+async def test_the_agent_checks_finishes_and_the_analyst_s_allow_applies_the_change_that_passed(ticketing):
+    """The agent checks its change with ticket_checks, which commits nothing, and finishes with finish_ticket, where
+    the server commits every change in the worktree and runs the gates of record in the box. After its end the worktree
+    is put back to the commit that passed, and the card asks before the merge, in Bypass too: a no keeps the change on
+    the ticket's branch, an Allow merges that commit and nothing the agent wrote after its pass."""
+    repo = ticketing["repo"]
+    ledger.put_settings(CORPUS, {modes.SETTING: {"dev": "bypass"}})
     live = _git(repo, "rev-parse", "HEAD")
-    for answer in ("no", "moved", "yes"):
-        stopped.clear()
-        t = dev.file_ticket(CORPUS, "Bigger font", "the labels are small", start=False)
-        running = asyncio.ensure_future(dev.run_ticket(t, dev.Run(ticket_id=t["id"], title=t["title"], ts_start="")))
+    for answer in ("no", "yes"):
+        t, agent = await _clicked_ticket()
+        wt = Path(t["worktree"])
+        (wt / "README.md").write_text("b\n")
+        res = await _call("ticket_checks", agent, t["id"])
+        assert not res.is_error and "The checks pass." in res.text and dev.touched_files(wt) == ["README.md"]
+        res = await _call("finish_ticket", agent, t["id"])
+        assert not res.is_error and "thimble asks the analyst" in res.text
+        rec = dev._get(t["id"])
+        assert rec["finish"]["result"] == "pass" and rec["change"] == _git(wt, "rev-parse", "HEAD") != rec["base"]
+        assert dev.touched_files(wt) == [] and rec["touched"] == ["README.md"]
+        assert all(isinstance(b, ticket_box.Box) for _, _, b in ticketing["gates"])
+        (wt / "late.txt").write_text("written after the pass\n")
+        subagents.run_ended(CORPUS, agent, "done", "The font is bigger.", source="handback")
         q = await _question(t["chat"])
         assert (q["tool"], q["what"]) == (dev.CODE_TOOL, dev.APPLY_QUESTION) and "README.md" in q["why"]
-        assert _git(repo, "rev-parse", "HEAD") == live and not running.done() and stopped == ["s1"]
-        wt = Path(dev._get(t["id"])["worktree"])
-        if answer == "moved":
-            (wt / "extra.txt").write_text("x\n")
-            _git(wt, "add", "extra.txt")
-            _git(wt, "commit", "-qm", "after the question")
-        assert agent_session.answer(CORPUS, t["chat"], q["id"], answer != "no")
-        rec = await running
+        assert _git(repo, "rev-parse", "HEAD") == live and not (wt / "late.txt").exists()
+        assert agents.read_meta(CORPUS, t["chat"])["status"] == "running", "the thread runs until the ticket ends"
+        assert agent_session.answer(CORPUS, t["chat"], q["id"], answer == "yes")
+        await _until(lambda: dev._get(t["id"]).get("finished"), "the ticket did not end")
+        rec = dev._get(t["id"])
         branch = f"dev/{t['id']}"
         if answer == "no":
             assert (rec["status"], rec["error"]) == ("stopped", dev.APPLY_NOT_ALLOWED.format(branch=branch))
             assert _git(repo, "rev-parse", "HEAD") == live and _git(repo, "rev-parse", branch) != live
-        elif answer == "moved":
-            assert rec["status"] == "needs manual merge" and dev.BRANCH_MOVED in rec["error"]
-            assert _git(repo, "rev-parse", "HEAD") == live and not (repo / "extra.txt").exists()
         else:
             assert rec["status"] == "applied" and (repo / "README.md").read_text() == "b\n"
-    assert boxes and all(isinstance(b, ticket_box.Box) for b in boxes)
+            assert not (repo / "late.txt").exists() and not _git(repo, "branch", "--list", branch)
+            assert agents.read_meta(CORPUS, t["chat"])["status"] == "done"
+        assert not wt.exists() and not dev.ticket_work_dir(t["id"]).exists() and dev._current is None
 
 
-async def test_a_ticket_the_box_cannot_run_asks_before_it_starts_and_again_before_its_change_is_applied(monkeypatch,
-                                                                                                      tmp_path):
-    """Where the box can't run, the ticket's code runs outside the sandbox during the run, so the analyst is asked
+async def test_finish_ticket_counts_its_attempts_and_only_the_ticket_s_agent_may_call_it(ticketing, bridge):
+    """A failed gate answers what failed and the attempt, as an error result; the last failure, and any call after it,
+    tells the agent to stop, and its end fails the ticket with what the checks found. A call with no change counts no
+    attempt. Main, and any other agent, are refused the ticket's tools."""
+    t, agent = await _clicked_ticket()
+    wt = Path(t["worktree"])
+    res = await _call("finish_ticket", agent, t["id"])
+    assert res.is_error and "holds no change" in res.text and dev._get(t["id"])["attempt"] == 0
+    (wt / "README.md").write_text("FAIL\n")
+    for n in range(1, dev.MAX_ATTEMPTS):
+        res = await _call("finish_ticket", agent, t["id"])
+        assert res.is_error and f"attempt {n} of {dev.MAX_ATTEMPTS}" in res.text and "README says FAIL" in res.text
+    res = await _call("finish_ticket", agent, t["id"])
+    assert res.is_error and "No attempt is left" in res.text
+    ran = len(ticketing["gates"])
+    assert (await _call("finish_ticket", agent, t["id"])).is_error and len(ticketing["gates"]) == ran, \
+        "a call after the last attempt runs nothing"
+    main = await tools.call(CORPUS, "finish_ticket", {}, tool_use_id="toolu_main_finish")
+    assert main.is_error and "not that agent's" in main.text
+    other = await bridge.request(CORPUS, "spawn")  # an agent of another role, registered for the ticket's key: refused
+    with subagents.update(CORPUS) as state:
+        sf.registry(state)[other["agentId"]] = {"key": dev.ticket_key(t["id"]), "type": "thimble:check", "role": "check",
+                                                "status": "running", "started": 0}
+    assert (await _call("ticket_checks", other["agentId"], t["id"])).is_error
+    subagents.run_ended(CORPUS, agent, "done", "It still fails.", source="handback")
+    await _until(lambda: dev._get(t["id"])["status"] == "failed", "the ticket did not fail")
+    assert "README says FAIL" in dev._get(t["id"])["error"] and not wt.exists()
+
+
+async def test_an_agent_that_ends_without_finish_ticket_gets_the_gates_once(ticketing):
+    """The backstop: an agent that ended without calling finish_ticket but left a change gets the gates of record once,
+    and a pass goes on to the analyst's Allow; one that made no change fails with its own last words."""
+    t, agent = await _clicked_ticket()
+    (Path(t["worktree"]) / "README.md").write_text("c\n")
+    subagents.run_ended(CORPUS, agent, "done", "Done.", source="handback")
+    q = await _question(t["chat"])
+    assert q["what"] == dev.APPLY_QUESTION and dev._get(t["id"])["finish"]["result"] == "pass"
+    assert agent_session.answer(CORPUS, t["chat"], q["id"], True)
+    await _until(lambda: dev._get(t["id"])["status"] == "applied" and dev._get(t["id"]).get("finished"),
+                 "the ticket was not applied")
+    t, agent = await _clicked_ticket("Not doable")
+    subagents.run_ended(CORPUS, agent, "done", "This cannot be done safely: it needs a new dependency.", source="handback")
+    await _until(lambda: dev._get(t["id"])["status"] == "failed", "the ticket did not fail")
+    assert dev._get(t["id"])["error"] == f"{dev.NO_CHANGE_LINE}: This cannot be done safely: it needs a new dependency."
+
+
+async def test_main_s_file_dev_ticket_prepares_the_ticket_and_gives_the_exact_agent_call(ticketing, bridge):
+    """Main's file_dev_ticket prepares the ticket, then answers the exact Agent call, which thimble's hook lets through
+    and auto mode judges as main makes it; the agent it starts takes the ticket's thread. A second ticket main files while
+    one runs waits for the analyst's Start on its card, which starts it through the module once the first ends."""
+    res = await tools.call(CORPUS, "file_dev_ticket", {"title": "Bigger font", "body": "the labels are small"},
+                           tool_use_id="toolu_main1")
+    assert not res.is_error and "\nFiled ticket #1: Bigger font. AGENT CALL " in res.text, res.text
+    inp = json.loads(res.text.split("AGENT CALL ", 1)[1].splitlines()[0])
+    assert inp["subagent_type"] == "thimble:dev-ticket" and "model" not in inp
+    assert not bridge.ops("spawn"), "main makes the call, not the module"
+    [t] = [x for x in dev._read() if x["title"] == "Bigger font"]
+    assert t["status"] == "running" and Path(t["worktree"]).is_dir() and t["route"] == "typed"
+    rid = sf.REQUEST_RE.search(inp["prompt"].split("\n", 1)[0]).group(0)
+    assert t["request"] == rid and subagents.request(CORPUS, rid)["route"] == subagents.TYPED
+    with subagents.update(CORPUS) as state:
+        assert sf.check_call(state, {"tool_name": "Agent", "tool_use_id": "toolu_x", "tool_input": inp}) is None
+        sf.register(state, {"agent_id": "a0000000000000ticket", "agent_type": "thimble:dev-ticket", "session_id": "s"})
+    subagents.ensure_chat(CORPUS, "a0000000000000ticket")
+    assert dev._get(t["id"])["agent_id"] == "a0000000000000ticket"
+    assert agents.read_meta(CORPUS, t["chat"])["agent_id"] == "a0000000000000ticket"
+
+    res = await tools.call(CORPUS, "file_dev_ticket", {"title": "Wider pane", "body": "the pane is narrow"},
+                           tool_use_id="toolu_main2")
+    assert "one at a time" in res.text and "Start on its card" in res.text and "AGENT CALL" not in res.text
+    [w] = [x for x in dev._read() if x["title"] == "Wider pane"]
+    assert (w["status"], w["held"]) == ("queued", True)
+    with pytest.raises(HTTPException) as e:
+        await dev.start_ticket(w["id"], Request({"type": "http", "client": ("127.0.0.1", 1), "headers": []}))
+    assert e.value.status_code == 403, "Start is the analyst's click"
+    await dev.start_ticket(w["id"], _click())
+    assert dev._get(w["id"])["status"] == "queued" and not dev._get(w["id"])["held"], "it waits for the running one"
+    subagents.run_ended(CORPUS, "a0000000000000ticket", "done", "nothing to do", source="handback")
+    await _until(lambda: (dev._get(w["id"]) or {}).get("agent_id"), "the waiting ticket did not start")
+    assert bridge.ops("spawn")[-1]["route"] == subagents.CLICK
+
+
+async def test_stop_stops_the_agent_through_the_module_and_main_s_quit_stops_it_with_retry(ticketing, bridge):
+    """Stop on a running ticket stops its agent through main's module, and its end leaves the ticket stopped with its
+    branch and no worktree; main's quit stops a ticket's agent with main, and the ticket says so (MAIN_ENDED). Retry
+    runs it again in a new thread."""
+    t, agent = await _clicked_ticket()
+    assert (await dev.stop_ticket(t["id"], _click()))["ok"]
+    assert bridge.ops("stop")[-1]["agent"] == agent
+    subagents.run_ended(CORPUS, agent, "stopped", "stopped", source="module")
+    await _until(lambda: dev._get(t["id"])["status"] == "stopped", "the ticket did not stop")
+    assert not Path(t["worktree"]).exists() and dev._get(t["id"])["error"] is None
+    old_chat = dev._get(t["id"])["chat"]
+    await dev.retry_ticket(t["id"], _click())
+    await _until(lambda: dev._get(t["id"])["agent_id"] not in (None, agent), "Retry did not start a new agent")
+    new_agent = dev._get(t["id"])["agent_id"]
+    assert dev._get(t["id"])["chat"] != old_chat
+    subagents.close_running(CORPUS)
+    await _until(lambda: dev._get(t["id"])["status"] == "stopped", "main's quit did not stop the ticket")
+    assert dev._get(t["id"])["error"] == dev.MAIN_ENDED and subagents.agent(CORPUS, new_agent)["status"] == "stopped"
+
+
+async def test_a_restarted_server_takes_up_the_running_agent_and_asks_again_for_a_change_that_passed(ticketing):
+    """After a server restart, a ticket whose agent still runs in main is the server's run again; one whose agent
+    passed while no server ran is settled, its Allow asked again; one whose agent ended without a pass, or whose
+    preparation the restart cut short, ends stopped with Retry."""
+    t, agent = await _clicked_ticket()
+    (Path(t["worktree"]) / "README.md").write_text("d\n")
+    assert not (await _call("finish_ticket", agent, t["id"])).is_error
+    dev._current = None  # the server restarted
+    dev._recover()
+    assert dev._current is not None and dev._current.agent == agent and dev._current.task is None
+    with subagents.update(CORPUS) as state:
+        sf.registry(state)[agent]["status"] = "done"  # it handed back while no server ran
+    dev._current = None
+    dev._recover()
+    q = await _question(t["chat"])
+    assert q["what"] == dev.APPLY_QUESTION
+    assert agent_session.answer(CORPUS, t["chat"], q["id"], True)
+    await _until(lambda: dev._get(t["id"])["status"] == "applied" and dev._get(t["id"]).get("finished"),
+                 "the ticket was not applied")
+    gone = dev.file_ticket(CORPUS, "Cut short", "x", start=False)
+    dev._update(gone["id"], status="running", agent_id="a00000000000000gone")
+    orphan = dev.file_ticket(CORPUS, "Prepared", "y", start=False)
+    dev._update(orphan["id"], status="running")
+    dev._current = None
+    dev._recover()
+    assert (dev._get(gone["id"])["status"], dev._get(gone["id"])["error"]) == ("stopped", dev.TICKET_ORPHANED)
+    assert (dev._get(orphan["id"])["status"], dev._get(orphan["id"])["error"]) == ("stopped", dev.TICKET_CUT_SHORT)
+
+
+async def test_a_release_install_registers_no_ticket_agent_and_main_hears_why(ticketing, tmp_path, monkeypatch):
+    """Code tickets run only in a development install: elsewhere the module registers no `thimble:dev-ticket`, the
+    browser offers no ticket, and main's file_dev_ticket fails at once with the reason."""
+    assert "dev-ticket" in subagents.roles(CORPUS) and dev.tickets_run_here(CORPUS)
+    monkeypatch.setattr(dev, "REPO", tmp_path / "installed")
+    assert "dev-ticket" not in subagents.roles(CORPUS) and not dev.tickets_run_here(CORPUS)
+    assert (await dev.status())["tickets"] == dev.RELEASE_LINE
+    res = await tools.call(CORPUS, "file_dev_ticket", {"title": "x", "body": "y"}, tool_use_id="toolu_main3")
+    assert "cannot run here" in res.text and dev.RELEASE_LINE in res.text
+
+
+async def test_a_ticket_the_box_cannot_run_asks_before_it_starts_and_again_before_its_change_is_applied(ticketing,
+                                                                                                      monkeypatch):
+    """Where the box can't run, the ticket's code runs outside the sandbox during its checks, so the analyst is asked
     before it starts, and, like any ticket, again before its change reaches thimble's own code."""
-    monkeypatch.setenv("THIMBLE_SANDBOX", "1")
-    repo = _repo(tmp_path)
-    monkeypatch.setattr(dev, "REPO", repo)
-    monkeypatch.setattr(dev, "runner_problem", lambda **_k: "")
     monkeypatch.setattr(ticket_box, "works", lambda: False)
-
-    async def turn(run, run_log, wt, prompt, resume, **_k):
-        (wt / "README.md").write_text("b\n")
-        _git(wt, "commit", "-qam", "dev: ticket")
-        return "done"
-
-    async def gates(tree, touched, *, scratch=None, box=None):
-        assert box is None
-        return {"ok": True, "steps": []}
 
     async def nothing(*_a, **_k):
         return None
 
-    monkeypatch.setattr(dev, "_worker_turn", turn)
-    monkeypatch.setattr(dev, "run_gates", gates)
     monkeypatch.setattr(dev, "start_stack", nothing)
     monkeypatch.setattr(dev, "stop_stack", nothing)
-    t = dev.file_ticket(CORPUS, "Bigger font", "the labels are small", start=False)
-    running = asyncio.ensure_future(dev.run_ticket(t, dev.Run(ticket_id=t["id"], title=t["title"], ts_start="")))
-    asked: list = []
-    for _ in range(2):
-        q = await _question(t["chat"], tuple(a["id"] for a in asked))
-        asked.append(q)
-        assert agent_session.answer(CORPUS, t["chat"], q["id"], True)
-    assert [q["what"] for q in asked] == [dev.CODE_QUESTION, dev.APPLY_QUESTION]
-    assert (await running)["status"] == "applied" and (repo / "README.md").read_text() == "b\n"
-
-
-async def test_a_ticket_whose_session_shows_no_activity_runs_on_until_the_analyst_stops_it(monkeypatch, tmp_path):
-    """A turn has no time limit: a session that shows no activity gets a line in the ticket's thread and runs on, and
-    the analyst's Stop ends the ticket `stopped` with its session stopped."""
-    monkeypatch.setenv("THIMBLE_SANDBOX", "1")
-    repo = _repo(tmp_path)
-    monkeypatch.setattr(dev, "REPO", repo)
-    monkeypatch.setattr(dev, "runner_problem", lambda **_k: "")
-    monkeypatch.setattr(ticket_box, "works", lambda: True)
-    tx = tmp_path / "s1-0000.jsonl"
-    tx.write_text("")
-    stopped: list = []
-
-    class Sessions:
-        async def start(self, cwd, prompt, **_k):
-            return {"id": "s1", "session_id": "s1-0000"}
-
-        async def state(self, cwd, short):
-            return "working"
-
-        def transcript(self, session_id):
-            return tx
-
-        def stop(self, short):
-            stopped.append(short)
-
-    async def no_shot(*_a, **_k):
-        return None
-
-    monkeypatch.setattr(dev, "SESSIONS", Sessions())
-    monkeypatch.setattr(dev, "_preview_shot", no_shot)
-    monkeypatch.setattr(dev, "POLL_S", 0.01)
-    monkeypatch.setattr(dev, "QUIET_NOTE_S", 0.1)
-    t = dev.file_ticket(CORPUS, "Bigger font", "the labels are small", start=False)
-    rec = dev._claim(t["id"])
-    run = dev.Run(ticket_id=t["id"], title=t["title"], ts_start="")
-    monkeypatch.setattr(dev, "_current", run)
-    run.task = asyncio.ensure_future(dev._run_task(run, rec))
-
-    def thread() -> str:
-        events = agents.read_events(agents.paths(CORPUS, t["chat"])[1])
-        return "".join(str(e.get("delta") or e.get("text") or "") for e in events)
-
-    for _ in range(300):
-        if thread().count("no activity for") >= 2:
-            break
-        await asyncio.sleep(0.01)
-    assert dev.QUIET_LINE.format(minutes=dev._minutes(0.1)) in thread()
-    assert dev.QUIET_LINE.format(minutes=dev._minutes(0.2)) in thread()
-    assert not run.task.done() and dev._get(t["id"])["status"] == "running"
-    assert (await dev.stop_ticket(t["id"]))["ok"]
-    await asyncio.wait_for(run.task, 10)
-    assert dev._get(t["id"])["status"] == "stopped" and "s1" in stopped
+    t = dev.file_ticket(CORPUS, "Bigger font", "the labels are small", source="ui")
+    q = await _question(t["chat"])
+    assert q["what"] == dev.CODE_QUESTION and not dev._get(t["id"]).get("worktree")
+    assert agent_session.answer(CORPUS, t["chat"], q["id"], True)
+    await _until(lambda: (dev._get(t["id"]) or {}).get("agent_id"), "the agent did not start")
+    t = dev._get(t["id"])
+    (Path(t["worktree"]) / "README.md").write_text("b\n")
+    assert not (await _call("finish_ticket", t["agent_id"], t["id"])).is_error
+    assert all(b is None for _, _, b in ticketing["gates"])
+    subagents.run_ended(CORPUS, t["agent_id"], "done", "done", source="handback")
+    q2 = await _question(t["chat"], (q["id"],))
+    assert q2["what"] == dev.APPLY_QUESTION
+    assert agent_session.answer(CORPUS, t["chat"], q2["id"], True)
+    await _until(lambda: dev._get(t["id"])["status"] == "applied" and dev._get(t["id"]).get("finished"),
+                 "the ticket was not applied")
+    assert (ticketing["repo"] / "README.md").read_text() == "b\n"
 
 
 def test_the_box_reads_nothing_its_worktree_s_links_point_to(tmp_path):
@@ -220,7 +369,8 @@ def test_the_box_reads_nothing_its_worktree_s_links_point_to(tmp_path):
         -1, ticket_box.LINK_MOVED.format(link="frontend/node_modules"))
 
 
-async def test_a_ticket_the_box_cannot_run_asks_before_it_starts_and_a_no_stops_it_before_its_worktree(monkeypatch):
+async def test_a_ticket_the_box_cannot_run_asks_before_it_starts_and_a_no_stops_it_before_its_worktree(monkeypatch,
+                                                                                                     bridge):
     """Where the box can't run, the question before the ticket starts waits on its card in Bypass too, with thimble's
     reason; a no stops the ticket before its worktree exists, and a ticket with no workspace never starts."""
     ledger.put_settings(CORPUS, {modes.SETTING: {"dev": "bypass"}})
@@ -249,14 +399,16 @@ async def test_a_ticket_the_box_cannot_run_asks_before_it_starts_and_a_no_stops_
         return None
 
     monkeypatch.setattr(ticket_box, "works", lambda: False)
-    monkeypatch.setattr(dev, "runner_problem", lambda **_k: "")
+    monkeypatch.setattr(dev, "ticket_problem", lambda: "")
     monkeypatch.setattr(dev, "_code_refusal", no)
     monkeypatch.setattr(dev, "create_worktree", never)
     monkeypatch.setattr(dev, "stop_stack", nothing)
-    run = dev.Run(ticket_id=t["id"], title=t["title"], ts_start="")
-    rec = await dev._run_ticket(t, run)
+    run = dev.Run(ticket_id=t["id"], title=t["title"], ts_start="", workspace=CORPUS)
+    await dev._launch_ticket(run, t, subagents.CLICK)
+    rec = dev._get(t["id"])
     assert (rec["status"], rec["error"]) == ("stopped", dev.CODE_NOT_ALLOWED)
-    rec = await dev._run_ticket({**t, "workspace": None}, run)
+    await dev._launch_ticket(run, {**t, "workspace": None}, subagents.CLICK)
+    rec = dev._get(t["id"])
     assert (rec["status"], rec["error"]) == ("stopped", dev.CODE_NOBODY)
 
 

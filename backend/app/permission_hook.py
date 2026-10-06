@@ -1,5 +1,5 @@
-"""The permission hook of the `claude -p` sessions thimble starts itself (a code ticket's, an extension's program's;
-agent_session.py). Claude Code runs it on three events of the session, its subagents and its workflow agents, and it
+"""The permission hook of the `claude -p` sessions of an extension's program that thimble starts itself
+(agent_session.py). Claude Code runs it on three events of the session, its subagents and its workflow agents, and it
 hands each to the server:
 
 - PermissionRequest: answered by the session's mode (agent_session.ask), at once in Bypass, else when the analyst
