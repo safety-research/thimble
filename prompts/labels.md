@@ -24,17 +24,17 @@ For each record, also give `rationale`: one short sentence naming the words in t
 
 ## examples
 
-The analyst has already given these items their values. Read them as the standard for the category and give an item like one of them the same value.
+These items have already been given their values. Read them as the standard for the category and give an item like one of them the same value.
 
 ## example
 
 ### example {{n}} [{{ref}}]
 {{text}}
-The analyst gave it the value {{value}}.
+It was given the value {{value}}.
 
 ## example-note
 
-Their note reads {{note}}
+A note on it reads {{note}}
 
 ## draft
 

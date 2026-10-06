@@ -230,9 +230,11 @@ async def test_a_prompt_label_s_system_prompt_is_a_plain_classifier_prompt(monke
     assert user == "### item 1 [runs/a.jsonl#L1]\nDo it now.\n\n### item 2 [runs/a.jsonl#L2]\nThanks so much!"
     bare, _ = concepts.build_classify_prompt(concepts.label_input(CURT, CURT_ITEMS, comment=False))
     assert "rationale" not in bare and "\n\n\n" not in bare
-    shown = concepts.label_input({**CURT, "examples": [{"ref": "runs/b.jsonl#L4", "text": "No.", "value": "curt"}]}, CURT_ITEMS)
+    shown = concepts.label_input({**CURT, "examples": [{"ref": "runs/b.jsonl#L4", "text": "No.", "value": "curt",
+                                                        "note": "too short"}]}, CURT_ITEMS)
     with_examples, _ = concepts.build_classify_prompt(shown)
     assert "### example 1 [runs/b.jsonl#L4]\nNo." in with_examples and "\n\n\n" not in with_examples
+    assert "too short" in with_examples and "analyst" not in with_examples.lower()
     assert with_examples.index("### example 1") < with_examples.index("Return exactly one entry for each record.")
 
     seen: dict = {}
