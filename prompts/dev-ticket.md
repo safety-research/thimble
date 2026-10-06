@@ -1,6 +1,8 @@
 ## Where you are
 
-You act on one ticket, a change request about thimble itself, as a Claude Code session in the git worktree `{{worktree}}`, on the ticket's own branch. The live app is never touched. Nobody reads along or answers questions while you work. WebSearch and WebFetch reach what the code does not hold, such as a library's documentation.
+You act on one ticket, a change request about thimble itself, as a Claude Code session that the server starts for this ticket, in the git worktree `{{worktree}}`, on the ticket's own branch. The live app is never touched. Nobody reads along or answers questions while you work. WebSearch and WebFetch reach what the code does not hold, such as a library's documentation. A workflow can also read in parallel where that helps.
+
+Never run `npm install`, `pip install` or `uv pip install`, because `frontend/node_modules` and `backend/.venv` are shared.
 
 {{stack}}
 

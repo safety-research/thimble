@@ -498,6 +498,72 @@ File a ticket for thimble's developer agent when thimble itself should change, s
 }
 ```
 
+## view_check
+
+Check the view you build or review, as often as you want: the checks thimble runs on every view, which say what failed and what they noted. Pass as `locators` the refs that sampling may miss, such as a key of each unit the view gives, and `picture` to get a picture of the page as it opens, whose path Read opens.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "locators": {"type": "array", "items": {"type": "string"}, "description": "Refs to check beside the sampled lines, such as `<path>#L<n>` or `view:<slug>/<key>`."},
+    "picture": {"type": "boolean", "description": "Also take a picture of the page as it opens, 1048 px wide with no label on."}
+  }
+}
+```
+
+## finish_view
+
+Finish the view you build: thimble runs the checks as the record of your build. When they pass, the view reaches the analyst. When they fail, the result says what failed and which attempt it was.
+
+```json
+{
+  "type": "object",
+  "properties": {}
+}
+```
+
+## view_pictures
+
+Take pictures of the view you review, whose paths Read opens. The first call of a round gives the view as it opens; ask for other states in `states`, up to three more in each round.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "states": {
+      "type": "array",
+      "maxItems": 3,
+      "description": "States to see beside the overview: `control`, the view as it opens after clicking `controls` in turn, each named by its text as the list of controls gives it, or by an option of a select; `labels`, the view as it opens with a test label on that marks about one record in seven in the colour the analyst's first label takes; `filtered`, the same filtered to the test label, which should keep only what it marks; `detail`, the place the first citation opens; `open`, the place a citation of `ref` opens, a record `<path>#L<n>` or a unit from the records; `narrow`, the view as it opens 798 px wide; `wide`, the view as it opens 1528 px wide.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "state": {"type": "string", "enum": ["control", "labels", "filtered", "detail", "open", "narrow", "wide"]},
+          "controls": {"type": "array", "maxItems": 3, "items": {"type": "string"}, "description": "For `control`: the controls to click in turn, by their text."},
+          "ref": {"type": "string", "description": "For `open`: the ref whose place to see."},
+          "why": {"type": "string", "description": "What you want to check in it, in a few words."}
+        },
+        "required": ["state", "why"]
+      }
+    }
+  }
+}
+```
+
+## finish_review
+
+End a round of your review: thimble runs the view's checks on what you changed. Pass what you revised and what you leave, each as a short phrase; with nothing changed, the review is done.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "revised": {"type": "array", "items": {"type": "string"}, "description": "What you revised in this round, one short phrase each."},
+    "left": {"type": "array", "items": {"type": "string"}, "description": "The problems you leave as they are, one short phrase each, with why when the data shows the view is right."}
+  }
+}
+```
+
 ## instructions
 
 These tools act on thimble, the workspace beside this session where the analyst reads a chat, the corpus's files, a canvas of cards and a report in the browser. A session started with the `thimble` command, and each thimble subagent, also has thimble's full instructions in its system prompt. If yours has none, this session was started some other way and the browser cannot reach it, so tell the analyst to quit and start it again by running `thimble` in this folder.

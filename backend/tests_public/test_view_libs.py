@@ -1,10 +1,11 @@
-"""app.view_libs: a view's page may load any npm package. thimble asks the analyst before it installs a version it has
-not installed for them, remembers the answer per package and version, bundles the package into the view's lib folder
-and inlines it into the page, which then loads nothing from the network. A refused package, or installs turned off,
-leaves the view a problem to fix.
+"""app.view_libs: a view's page may load any npm package. The view's builder installs it in its own folder with its own
+Bash call (`npm install --ignore-scripts`), which Claude Code decides by main's permission mode, and thimble asks
+nothing and installs nothing itself: when the view is checked, it bundles each package from that folder into the view's
+lib folder and inlines it into the page, which then loads nothing from the network. A package the folder does not hold,
+or holds at a version the entry does not allow, leaves the view a problem to fix.
 
-npm is faked (view_libs._run answers `npm view` and `npm install` from PACKAGES); esbuild is the frontend's own, and
-the bundles run in Node with a stand-in window."""
+The builder's install is faked (`install` writes the packages of PACKAGES into a builder's folder as npm would); esbuild
+is the frontend's own, and the bundles run in Node with a stand-in window."""
 from __future__ import annotations
 
 import json
@@ -13,7 +14,6 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from conftest import card_wait
 
 from app import config, view_libs, views
 
@@ -35,39 +35,30 @@ pytestmark = pytest.mark.skipif(view_libs.ESBUILD.is_file() is False or shutil.w
                                 reason="needs the frontend's esbuild and Node")
 
 
+def install(stage: Path, *names: str) -> None:
+    """The builder's `npm install --ignore-scripts <name>` in its own folder `stage`, with what each package needs."""
+    todo = list(names)
+    while todo:
+        name = todo.pop()
+        for rel, text in PACKAGES[name][3].items():
+            f = stage / "node_modules" / name / rel
+            f.parent.mkdir(parents=True, exist_ok=True)
+            f.write_text(text)
+        todo += list(PACKAGES[name][2])
+
+
 @pytest.fixture()
-def npm(tmp_path, monkeypatch):
-    """The faked npm, and thimble's home in the test's folder. Its `calls` lists each npm command run."""
-    monkeypatch.setenv("THIMBLE_HOME", str(tmp_path / "home"))
+def no_npm(monkeypatch):
+    """thimble runs no npm itself: each command it runs is kept, and an npm one fails the test."""
     calls: list[list[str]] = []
     real = view_libs._run
 
     async def run(argv, cwd=None, timeout=view_libs.NPM_TIMEOUT_S):
-        if Path(argv[0]).name != "npm":
-            return await real(argv, cwd, timeout)
         calls.append(argv)
-        if argv[1] == "view":
-            name = argv[2].rsplit("@", 1)[0]
-            if name not in PACKAGES:
-                return 1, "", f"npm error 404 '{name}' is not in this registry."
-            version, size, deps, _ = PACKAGES[name]
-            return 0, json.dumps({"name": name, "version": version, "dist.unpackedSize": size, "dependencies": deps}), ""
-        if argv[1] == "install":
-            assert "--ignore-scripts" in argv
-            want = argv[-1].rsplit("@", 1)[0]
-            todo = [want]
-            while todo:
-                name = todo.pop()
-                for rel, text in PACKAGES[name][3].items():
-                    f = Path(cwd) / "node_modules" / name / rel
-                    f.parent.mkdir(parents=True, exist_ok=True)
-                    f.write_text(text)
-                todo += list(PACKAGES[name][2])
-            return 0, "", ""
-        raise AssertionError(argv)
+        assert Path(argv[0]).name != "npm", argv
+        return await real(argv, cwd, timeout)
 
     monkeypatch.setattr(view_libs, "_run", run)
-    monkeypatch.setattr(view_libs, "_npm", lambda: "npm")
     return calls
 
 
@@ -79,98 +70,59 @@ def _in_node(scripts: list[str], expr: str) -> str:
     return json.loads(out.stdout)
 
 
-async def test_a_package_is_asked_for_once_per_version_bundled_into_the_view_and_runs_in_the_page(tmp_path, npm):
-    asked: list[dict] = []
-
-    async def yes(c, slug, fields):
-        asked.append(fields)
-        return True
-
+async def test_a_package_the_builder_installed_is_bundled_into_the_view_and_runs_in_the_page(tmp_path, no_npm):
+    stage = tmp_path / "work"
+    install(stage, "tiny-graph", "default-only")
     folder = tmp_path / "graph"
     folder.mkdir()
     libs = ["tiny-graph@2", "tiny-graph@2/extra/edges.js", "tiny-graph@2/theme.css", "default-only"]
-    got = await view_libs.ensure("ws", "graph", folder, libs, ask=yes)
+    got = await view_libs.ensure("ws", "graph", folder, libs, source=stage)
     assert got["problems"] == []
-    assert len(got["notes"]) == 4 and "`tinyGraph`" in got["notes"][0]
-    assert [a["description"] for a in asked] == ["Install the npm package tiny-graph 2.1.0 for the view's page",
-                                                 "Install the npm package default-only 0.3.0 for the view's page"]
-    assert asked[0]["size"] == "6 kB, with 1 package it needs"
-    assert asked[0]["needs"] == "tiny-queue 1.4.2"
-    assert set(view_libs.approvals()) == {"tiny-graph@2.1.0", "default-only@0.3.0"}
+    assert len(got["notes"]) == 4 and got["notes"][0].startswith("bundled tiny-graph 2.1.0") and "`tinyGraph`" in got["notes"][0]
+    assert not [c for c in no_npm if Path(c[0]).name == "npm"], "thimble installs nothing itself"
 
     lock = view_libs.lock(folder)
     assert list(lock) == libs and lock["tiny-graph@2/theme.css"]["kind"] == "css"
+    assert lock["tiny-graph@2"]["version"] == "2.1.0"
     scripts = [view_libs.vendored(folder, e)[1] for e in libs if lock[e]["kind"] == "js"]
     result = _in_node(scripts, "[window.tinyGraph.layout(3), window.__thimbleLibs['tiny-graph/extra/edges.js'].twice(2),"
                                " window.defaultOnly(), window.__thimbleLibs['tiny-graph'] === window.tinyGraph]")
     assert result == [[0, 2, 4], [0, 2], "drawn", True], "a file entry shares its package's instance"
 
-    other = tmp_path / "other"
-    other.mkdir()
-    again = await view_libs.ensure("ws", "other", other, ["tiny-graph@2.1.0"], ask=yes)
-    assert again["problems"] == [] and len(asked) == 2, "an approved version is not asked about again"
-    installs = [c for c in npm if c[1] == "install"]
-    assert len(installs) == 2, "the npm install of a version is kept and reused"
-
+    bundles = len(no_npm)
+    again = await view_libs.ensure("ws", "graph", folder, libs, source=stage)
+    assert again == {"problems": [], "notes": []} and len(no_npm) == bundles, "a bundle kept is not made again"
     before = {p.name for p in (folder / view_libs.LIB_DIR).iterdir()}
-    await view_libs.ensure("ws", "graph", folder, ["default-only"], ask=yes)
+    await view_libs.ensure("ws", "graph", folder, ["default-only"], source=stage)
     after = {p.name for p in (folder / view_libs.LIB_DIR).iterdir()}
     assert after == {view_libs.LOCK_FILE, "default-only@0.3.0.js"} and len(before) == 5, "an entry dropped leaves the folder"
 
 
-async def test_a_refused_package_or_installs_turned_off_leave_a_problem_and_nothing_installed(tmp_path, npm, monkeypatch):
-    async def no(c, slug, fields):
-        return False
-
+async def test_a_package_its_folder_lacks_or_holds_at_another_version_is_a_problem_naming_the_install(tmp_path, no_npm,
+                                                                                                    workspaces_tmp):
+    stage = tmp_path / "work"
     folder = tmp_path / "v"
     folder.mkdir()
-    got = await view_libs.ensure("ws", "v", folder, ["tiny-queue@1"], ask=no)
-    assert got["problems"] == ["the analyst did not allow the package tiny-queue 1.4.2, so draw the page without it and "
-                               "take it out of libs"]
-    assert view_libs.approvals() == {} and not (folder / view_libs.LIB_DIR / "tiny-queue@1.4.2.js").exists()
-    assert not [c for c in npm if c[1] == "install"]
-
-    monkeypatch.setattr(view_libs, "_installs", lambda c: "deny")
-    got = await view_libs.ensure("ws", "v", folder, ["tiny-queue@1"], ask=no)
-    assert "thimble's settings refuse installs" in got["problems"][0]
-
-    got = await view_libs.ensure("ws", "v", folder, ["no-such-package@1"], ask=no)
-    assert got["problems"][0].startswith("the package no-such-package@1 could not be found")
+    got = await view_libs.ensure("ws", "v", folder, ["tiny-queue@1"], source=stage)
+    assert got["problems"] == [view_libs.NOT_INSTALLED.format(name="tiny-queue", where=stage, raw="tiny-queue@1")]
+    assert "npm install --ignore-scripts tiny-queue@1" in got["problems"][0]
+    install(stage, "tiny-queue")
+    got = await view_libs.ensure("ws", "v", folder, ["tiny-queue@2"], source=stage)
+    assert "holds tiny-queue 1.4.2, which tiny-queue@2 does not allow" in got["problems"][0]
+    assert not (folder / view_libs.LIB_DIR / "tiny-queue@1.4.2.js").exists()
+    got = await view_libs.ensure("ws", "v", folder, ["tiny-queue@^1.2"], source=stage)
+    assert got["problems"] == [] and view_libs.vendored(folder, "tiny-queue@^1.2") is not None
     assert view_libs.problems(["vega", "d3-force@3", "d3@>=7.8", "d3-array@7.x", "not a package!", "x@file:../y", "x@git+ssh:h"]) == [
         "`libs` names 'not a package!', 'x@file:../y', 'x@git+ssh:h', which is neither vega, vega-lite, vega-embed nor an "
         "npm package as name@version"]
-
-    async def nobody(c, slug, fields):
-        return None
-
-    monkeypatch.setattr(view_libs, "_installs", lambda c: "ask")
-
-    async def late(c, slug, fields):
-        card_wait(5)
-        return view_libs.UNANSWERED
-
-    card_wait(3)
-    got = await view_libs.ensure("ws", "v", folder, ["tiny-queue@1"], ask=late)
-    assert got["problems"][0].startswith("nobody answered within 3 minutes") and "tiny-queue 1.4.2" in got["problems"][0], \
-        "a question nobody answered says so, with the wait its card had, not that the analyst refused"
-    assert view_libs.approvals() == {} and not [c for c in npm if c[1] == "install"]
-
-    got = await view_libs.ensure("ws", "v", folder, ["tiny-queue@1"], ask=nobody)
-    assert got["problems"] == ["thimble could not ask the analyst about the package tiny-queue 1.4.2, since no build of "
-                               "this view is running, so it was not installed"]
+    work = config.workspace_dir("mini") / "views-work" / "v"
+    install(work, "default-only")
+    got = await view_libs.ensure("mini", "v", folder, ["default-only"])
+    assert got["problems"] == [], "by default the builder's own folder, views-work/<slug>"
 
 
-def test_the_card_shows_a_total_size_only_when_npm_gave_every_size():
-    more = [{"name": "a", "version": "1.0.0", "bytes": 1000}, {"name": "b", "version": "2.0.0", "bytes": 500}]
-    assert view_libs._size_line(2500, more, False) == "4 kB, with 2 packages it needs"
-    assert view_libs._size_line(2500, [*more, {"name": "c", "version": "?", "bytes": 0}], False) == \
-        "2 kB for the package itself, plus the 3 packages it needs"
-    assert view_libs._size_line(2500, more, True) == \
-        f"2 kB for the package itself, plus the more than {view_libs.DEPS_MAX} packages it needs"
-    assert view_libs._size_line(2500, [], False) == "2 kB"
-
-
-async def test_the_page_inlines_its_packages_and_a_new_package_is_a_new_version(tmp_path, npm, workspaces_tmp, monkeypatch):
+async def test_the_page_inlines_its_packages_and_a_new_package_is_a_new_version(tmp_path, no_npm, workspaces_tmp,
+                                                                               monkeypatch):
     data = tmp_path / "data" / "boards"
     data.mkdir(parents=True)
     (data / "manifest.json").write_text(json.dumps({"name": "boards", "description": "a board"}))
@@ -183,11 +135,8 @@ async def test_the_page_inlines_its_packages_and_a_new_package_is_a_new_version(
     assert view["libs"] == ["vega", "vega-lite", "tiny-graph@2", "tiny-graph@2/theme.css"]
     first = view["version"]
     folder = Path(view["dir"])
-
-    async def yes(c, slug, fields):
-        return True
-
-    await view_libs.ensure("boards", "graph", folder, view["libs"], ask=yes)
+    install(config.workspace_dir("boards") / "views-work" / "graph", "tiny-graph")
+    await view_libs.ensure("boards", "graph", folder, view["libs"])
     doc = views.frame_document(views.read_view("boards", "graph"))
     assert "the library tiny-graph@2 is not installed here" not in doc
     assert ".tg{color:red}" in doc and "window.__thimbleLibs" in doc
@@ -196,72 +145,3 @@ async def test_the_page_inlines_its_packages_and_a_new_package_is_a_new_version(
     assert second != first, "the vendored packages are part of the view's version"
     kept = views.read_version("boards", "graph", second)
     assert view_libs.vendored(Path(kept["dir"]), "tiny-graph@2") is not None, "a kept version holds its packages"
-
-
-async def test_a_check_and_the_gate_asking_at_once_ask_the_analyst_once(tmp_path, npm):
-    import asyncio  # noqa: PLC0415
-
-    answered = asyncio.Event()
-    asked: list[str] = []
-
-    async def slow_yes(c, slug, fields):
-        asked.append(slug)
-        await answered.wait()
-        return True
-
-    a, b = tmp_path / "a", tmp_path / "b"
-    a.mkdir()
-    b.mkdir()
-    both = asyncio.gather(view_libs.ensure("ws", "a", a, ["tiny-queue@1"], ask=slow_yes),
-                          view_libs.ensure("ws", "a", b, ["tiny-queue@1"], ask=slow_yes))
-    await asyncio.sleep(0.5)
-    answered.set()
-    got = await both
-    assert asked == ["a"], "one question for the package while it waits"
-    assert all(g["problems"] == [] for g in got)
-    assert len([c for c in npm if c[1] == "install"]) == 1, "one npm install of the version"
-
-
-async def test_a_question_outlives_the_check_that_asked_it(tmp_path, npm):
-    import asyncio  # noqa: PLC0415
-
-    answered = asyncio.Event()
-    asked: list[str] = []
-    cancelled: list[bool] = []
-
-    async def slow_yes(c, slug, fields):
-        asked.append(slug)
-        try:
-            await answered.wait()
-        except asyncio.CancelledError:
-            cancelled.append(True)
-            raise
-        return True
-
-    a, b = tmp_path / "a", tmp_path / "b"
-    a.mkdir()
-    b.mkdir()
-    check = asyncio.ensure_future(view_libs.ensure("ws", "a", a, ["tiny-queue@1"], ask=slow_yes))
-    await asyncio.sleep(0.3)
-    check.cancel()  # the session's check command timed out and dropped its request
-    with pytest.raises(asyncio.CancelledError):
-        await check
-    gate = asyncio.ensure_future(view_libs.ensure("ws", "a", b, ["tiny-queue@1"], ask=slow_yes))
-    await asyncio.sleep(0.3)
-    answered.set()
-    got = await gate
-    assert asked == ["a"] and cancelled == [], "the card stayed up, and the gate after the turn heard its answer"
-    assert got["problems"] == [] and view_libs.vendored(b, "tiny-queue@1") is not None
-
-
-async def test_a_package_card_nobody_answers_in_time_is_unanswered_not_refused(tmp_path):
-    from app import agent_session, agents, dev
-
-    meta = agents.new_agent("mini", "dev", "a view build", announce=False)
-    card_wait(0.003)
-    agent_session.host("mini", dev.view_key("v"), str(meta["id"]), agent="dev")
-    try:
-        got = await view_libs._ask_on_card("mini", "v", {"description": "Install the npm package tiny-queue 1.4.2"})
-    finally:
-        agent_session.unhost("mini", dev.view_key("v"))
-    assert got == view_libs.UNANSWERED

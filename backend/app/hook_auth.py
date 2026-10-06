@@ -316,8 +316,8 @@ def _api(path: str) -> bool:
 
 
 def hook_proof(headers: Headers, method: str = "", path: str = "") -> bool:
-    """Whether `headers` carry a valid hook proof: a local tool that read the token (the plugin, the CLI,
-    view_check.py), or an agent's token on a request its grant allows."""
+    """Whether `headers` carry a valid hook proof: a local tool that read the token (the plugin, the CLI), or an agent's
+    token on a request its grant allows."""
     tok = _token_for(headers, method, path)[0]
     nonce = headers.get(NONCE_HEADER, "")
     return bool(tok and nonce and len(nonce) <= NONCE_MAX

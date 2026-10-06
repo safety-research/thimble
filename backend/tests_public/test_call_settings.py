@@ -9,7 +9,7 @@ from types import SimpleNamespace
 import pytest
 from claude_agent_sdk import AssistantMessage, ResultMessage, ToolResultBlock, ToolUseBlock, UserMessage
 
-from app import card_check, concepts, config, harness, ledger, model, userconf, view_fit, view_review, views
+from app import card_check, concepts, config, harness, ledger, model, userconf, view_fit, views
 
 CORPUS = "mini"
 CONCEPT = {"name": "tone", "unit": "record", "kind": "prompt", "spec": "Is the message friendly?", "description": "",
@@ -18,7 +18,6 @@ OUTPUTS = {"labels": {"labels": [{"i": 1, "label": "friendly", "confidence": 0.8
            "label": {"name": "Curt", "scope": "files", "kind": "prompt", "text": "Is it curt?",
                      "values": ["curt", "not curt"], "marks": "span"},
            "critique": {"assessment": [{"problem": ""}] * 5, "question": "Q?", "code": "", "takeaway": "T."},
-           "findings": {"problems": ["The legend covers the chart."]},
            "decision": {"fits": True, "reason": "Each record is a post."},
            "proposal": {"help": False, "name": "", "why": "", "arrangement": ""},
            "answer": {"text": "yes"}}
@@ -67,10 +66,6 @@ def _calls(tmp_path):
     card = {"card": {"id": "c1", "kind": "code", "question": "How many curt replies?", "takeaway": "Two.",
                      "citations": "", "code": "print(2)", "context": "", "typed": "", "kept": ""},
             "picture": str(picture)}
-    review = {"view": {"slug": "board", "name": "Board", "description": "The posts by thread.", "claims": ["board.jsonl"],
-                       "spec": "Unit: a post", "checks": []},
-              "pictures": [{"path": str(picture), "about": "the view as it opens"}], "controls": [], "records": "",
-              "ask": False}
     viewer = {"path": "a.cast", "size": "2.0 KB", "count": "3", "suffix": ".cast", "what": "its first line",
               "head": "{\"version\": 2}"}
     draft = {"description": "messages that sound curt", "records": {"paths": "runs/r1.jsonl", "path": "runs/r1.jsonl",
@@ -85,7 +80,6 @@ def _calls(tmp_path):
         ("label draft", "labels", lambda: concepts.draft_task(CORPUS, draft)),
         ("view fit", "labels", lambda: view_fit.ask(CORPUS, "Does the Board view fit?")),
         ("card check", "verify", lambda: card_check.check_task(CORPUS, card)),
-        ("view review", "verify", lambda: view_review.review_task(CORPUS, review)),
         ("viewer suggestion", "suggest", lambda: views.file_viewer_task(CORPUS, viewer)),
         ("ask (checks)", "checks", asker("checks")),
         ("ask (cardCheck)", "verify", asker("verify")),

@@ -45,6 +45,8 @@ ORIENT_SESSION = "orient"
 WRITER_SESSION = "writer"
 CRITIQUE_SESSION = "critique"  # `critique:orient`, the critic of the orientation's analysis (critique_session.py)
 CHECK_SESSION = "check"  # `check:<id>:<doc>`, a run of a report check on a document (checks.py)
+VIEW_SESSION = "view"  # `view:<slug>`, a build of a view (dev.py, view_tools.py)
+REVIEW_SESSION = "review"  # `review:<slug>`, a review of a built view (view_review.py, view_tools.py)
 MAIN_ONLY: "tuple[str | None, ...]" = (None,)  # Spec.sessions of a tool only main's shim lists (no THIMBLE_SESSION)
 ROLES = (ANALYST,)  # the dev worker is a Claude Code session with its own tools (dev.py)
 ANALYSIS_ROLES = (ANALYST,)  # who reads cards and records
@@ -203,6 +205,15 @@ REGISTRY: dict[str, Spec] = {
         # a report check turned off, as the Checks pane's switch does, its runs stopped; main's, as run_check is
         Spec("stop_check", (ANALYST,), "app.comments:tool_stop_check", sessions=MAIN_ONLY),
         Spec("file_dev_ticket", (ANALYST,), _H + "file_dev_ticket"),
+        # a view's builder and reviewer check the view as often as they want, and finish once, where the server runs the
+        # gates of record (view_tools.py); a gate stops when its caller drops the call (the agent was stopped)
+        Spec("view_check", (ANALYST,), "app.view_tools:tool_view_check", sessions=(VIEW_SESSION, REVIEW_SESSION),
+             drop_stops=True),
+        Spec("finish_view", (ANALYST,), "app.view_tools:tool_finish_view", sessions=(VIEW_SESSION,), drop_stops=True),
+        Spec("view_pictures", (ANALYST,), "app.view_tools:tool_view_pictures", sessions=(REVIEW_SESSION,),
+             drop_stops=True),
+        Spec("finish_review", (ANALYST,), "app.view_tools:tool_finish_review", sessions=(REVIEW_SESSION,),
+             drop_stops=True),
     )
 }
 
@@ -2437,14 +2448,15 @@ async def _h_show_label(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
 
 
 async def _h_propose_view(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
-    """A proposal for a view written for how the corpus arranges its records, a ticket the dev agent builds at once
-    (views.propose, dev.run_view) from its fields (views.SPEC_FIELDS). The orientation's proposals are held until their
-    views pass their checks, so each reaches the analyst as soon as it works. A viewer of unusual file types the
-    orientation proposes
-    (views.offered_type_viewer) is stored `suggested`, offered in the File browser and built once the analyst accepts
-    it. A claim that matches no corpus file is refused, naming real paths near it; where views cannot be built the
-    proposal fails at once. A proposal from main's shim is one the analyst asked for, so the browser opens the view once
-    built."""
+    """A proposal for a view written for how the corpus arranges its records, which a `thimble:view-builder` builds at
+    once (views.propose, dev.start_build) from its fields (views.SPEC_FIELDS), on the model and effort the call names,
+    else Settings' dev row. The orientation's proposals are built as follow-on starts of its own start, and held until
+    their views pass their checks, so each reaches the analyst as soon as it works. A viewer of unusual file types the
+    orientation proposes (views.offered_type_viewer) is stored `suggested`, offered in the File browser and built once
+    the analyst accepts it. A claim that matches no corpus file is refused, naming real paths near it; where views
+    cannot be built the proposal fails at once. A proposal from main's shim is one the analyst asked for: its result is
+    the exact Agent call that starts its builder, which main makes (`## start_job-subagent`), and the browser opens the
+    view once built."""
     from . import views
 
     claims = args.get("claims")
@@ -2461,37 +2473,47 @@ async def _h_propose_view(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
         near = " ".join(hint("propose_view-near", claim=g, paths=", ".join(p)) for g, p in unmatched.items() if p)
         return err(" ".join(hint("propose_view-unmatched", claims=", ".join(unmatched), near=near).split()))
     orient = session_kind(ctx.session) == ORIENT_SESSION
+    typed = ctx.session is None  # main's own call: the build is main's Agent call
+    values = {k: str(args[k]) for k in ("model", "effort") if args.get(k)}
+    if typed:
+        from . import subagents  # noqa: PLC0415
+
+        if (before := subagents.refusal_before(ctx.c)) is not None:
+            return err(before.reason or f"propose_view: {before.kind}")
     prop = await _maybe_await(views.propose(ctx.c, name=str(args["name"]).strip(), why=str(args["why"]).strip(),
                                             claims=claims, arrangement="", proposed_by=ctx.created_by,
-                                            orientation=orient, asked=ctx.session is None,
-                                            suggested=orient and views.offered_type_viewer(claims), spec=spec))
+                                            orientation=orient, asked=typed,
+                                            suggested=orient and views.offered_type_viewer(claims), spec=spec,
+                                            route=views.TYPED if typed else None, values=values or None))
     status = str(prop.get("status") or "queued")
     if not prop.get("held"):
         _chip(ctx.c, "view", str(prop.get("name") or prop.get("slug")), ref=f"view:{prop.get('slug')}", status=status)
     claimed = ", ".join(prop.get("claims") or [])
     if status == "suggested":
         return ok(hint("propose_view-suggested", view=prop.get("name"), slug=prop.get("slug"), claims=claimed))
-    # without Node 20+ or the frontend's packages, or where thimble's config refuses the dev agent's session (the
-    # sandbox), the build fails at once (dev.run_view), and main is told why
-    if why := await asyncio.to_thread(views.build_problem) or await asyncio.to_thread(_view_refusal, ctx.c):
+    # without Node 20+ or the frontend's packages the build fails at once (dev.start_build), and main is told why
+    if why := await asyncio.to_thread(views.build_problem):
+        if typed:
+            views.update_proposal(ctx.c, str(prop["slug"]), status="failed", error=why)
         return ok(hint("propose_view-cannot-build", view=prop.get("name"), slug=prop.get("slug"), why=why))
+    if typed:
+        return await _typed_build(ctx, str(prop["slug"]), values)
     if prop.get("revised") and not prop.get("held"):  # a view built under this name is changed in place (views.revise)
         return ok(hint("view-changing", view=prop.get("name"), slug=prop.get("slug")))
     return ok(hint("propose_view-proposed", view=prop.get("name"), slug=prop.get("slug"), claims=claimed))
 
 
-def _view_refusal(c: str) -> str:
-    """Why thimble's config refuses a view build's session in workspace `c` (dev.dev_config), '' when it doesn't."""
-    config_of = _optional("dev", "dev_config")
-    if config_of is None:
-        return ""
-    from . import userconf  # noqa: PLC0415
+async def _typed_build(ctx: Ctx, slug: str, values: dict[str, str] | None = None) -> ToolResult:
+    """The build of the view `slug` main asked for: its pending start and the exact Agent call main makes
+    (`## start_job-subagent`), or the refusal (dev.start_build)."""
+    from . import dev  # noqa: PLC0415
 
-    try:
-        config_of(c, sandbox=True)
-    except userconf.ConfigError as e:
-        return str(e)
-    return ""
+    ans = await dev.start_build(ctx.c, slug, "typed", values or None, call=ctx.tool_use_id)
+    if ans.get("program"):
+        return ok(hint("view-changing", view=slug, slug=slug))
+    if ans.refused or "input" not in ans:
+        return err(ans.reason or f"propose_view: {ans.kind}")
+    return ok(hint("start_job-subagent", input=json.dumps(ans["input"], ensure_ascii=False)))
 
 
 async def _h_file_dev_ticket(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
@@ -2512,11 +2534,14 @@ async def _h_file_dev_ticket(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
         if slug is None:
             names = [v["name"] for v in views.list_views(ctx.c) if v.get("origin") == "workspace"]
             return err(hint("file_dev_ticket-no-view", view=view, views=", ".join(names) or "none"))
+        typed = ctx.session is None  # main's own call: the change is main's Agent call
         prop = views.revise(ctx.c, slug, f"{title}\n\n{body}", proposed_by=ctx.created_by,  # on the loop: it queues
-                            asked=ctx.session is None)
+                            asked=typed, route=views.TYPED if typed else views.FOLLOW_ON)
         _chip(ctx.c, "view", str(prop.get("name") or slug), ref=f"view:{slug}", status="queued")
         if why := await asyncio.to_thread(views.build_problem):
             return ok(hint("propose_view-cannot-build", view=prop.get("name"), slug=slug, why=why))
+        if typed:
+            return await _typed_build(ctx, slug)
         return ok(hint("view-changing", view=prop.get("name"), slug=slug))
     fn = _optional("dev", "file_ticket")
     if fn is None:

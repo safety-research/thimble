@@ -30,9 +30,6 @@ DATA = Path(tempfile.mkdtemp(prefix="thimble-tests-data-")).resolve()
 MINI = write_mini(DATA / "mini")
 atexit.register(shutil.rmtree, DATA, True)
 os.environ["THIMBLE_DATA_DIR"] = str(DATA)
-# view builds' temp folders (dev.view_tmp_dir) go under a short folder of the suite's own in /tmp
-VIEW_TMP = Path(tempfile.mkdtemp(prefix="tt-", dir="/tmp")).resolve()
-atexit.register(shutil.rmtree, VIEW_TMP, True)
 # The suite tests the default model speed; a test that wants another value sets it with monkeypatch.
 os.environ.pop("THIMBLE_MODEL_SPEED", None)
 # The Host names httpx.ASGITransport and TestClient send (main.ALLOWED_HOSTS is read at import).
@@ -78,14 +75,6 @@ def claude_global_config(tmp_path, tmp_path_factory, monkeypatch) -> Path:
     path.write_text(json.dumps({"projects": {}}))
     monkeypatch.setattr(claude_changes, "global_config", lambda: path)
     return path
-
-
-@pytest.fixture(autouse=True)
-def _view_temp_off_the_user(monkeypatch):
-    """View builds' temp folders are the suite's own, never in the user's /tmp/thimble-<uid>."""
-    from app import dev
-
-    monkeypatch.setattr(dev, "VIEW_TMP_ROOT", VIEW_TMP)
 
 
 @pytest.fixture(autouse=True)
@@ -173,16 +162,19 @@ def _dev_dir_off_the_checkout(tmp_path, monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _view_tickets_held(monkeypatch):
-    """A view proposal queues a ticket at once, and a ticket that starts runs a real `claude -p`. Every test holds
-    them queued with an empty pool."""
+    """A view proposal queues its build at once, and a build that starts asks main's module for a subagent. Every test
+    holds them queued with an empty pool."""
     from app import dev
 
     monkeypatch.setattr(dev, "VIEW_POOL", 0)
     monkeypatch.setattr(dev, "_view_runs", {})
     monkeypatch.setattr(dev, "_view_queue", [])
     monkeypatch.setattr(dev, "_view_stopping", {})
-    monkeypatch.setattr(dev, "_parked", set())
     monkeypatch.setattr(dev, "_closing", False)
+    monkeypatch.setattr(dev, "_retry_handle", None)
+    monkeypatch.setattr(dev, "_no_module_looks", {})
+    monkeypatch.setattr(dev, "_settling", set())
+
 
 
 @pytest.fixture(autouse=True)

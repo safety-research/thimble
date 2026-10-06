@@ -220,39 +220,6 @@ def test_a_cookie_claimed_before_the_port_was_in_its_name_moves_on_the_next_work
     assert c2.put(THEME_PATH, json=THEME).status_code == 403
 
 
-@pytest.mark.real_write_guard
-def test_a_view_builds_check_proves_the_token_so_its_post_passes(app_prod, plugin_headers, monkeypatch):
-    """view_check.py, the view build's check command, runs outside the session's sandbox and proves the token in the
-    server.json of the home its command names (a background session's environment names none), so its post passes the
-    guard that refuses a kernel's."""
-    import importlib.util
-    import os
-    import shlex
-    from pathlib import Path
-
-    from starlette.datastructures import Headers
-
-    from conftest import _record
-
-    from app import dev, hook_auth, views
-
-    _record(port="8300")  # beside the token plugin_headers recorded, as the supervisor writes them
-    home = os.environ["THIMBLE_HOME"]
-    words = shlex.split(dev.view_check_command("mini", "posts"))
-    assert words[3:5] == ["--home", home] and words[5:7] == ["--folder", str(views.views_dir("mini") / "posts")]
-    assert words[7].endswith("/api/ws/mini/views/posts/check")
-    spec = importlib.util.spec_from_file_location("view_check_t", Path(views.__file__).with_name("view_check.py"))
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    monkeypatch.delenv("THIMBLE_HOME")  # as in a background session's environment
-    headers = mod.proof(home)
-    monkeypatch.setenv("THIMBLE_HOME", home)
-    assert headers and hook_auth.hook_proof(Headers(headers=headers))
-    r = TestClient(app_prod).post("/api/ws/mini/views/none/check", json={"locators": []}, headers=headers)
-    assert r.json().get("detail") != hook_auth.WRITE_REFUSED
-    assert mod.proof(str(Path(home) / "nowhere")) == {}
-
-
 # the write routes 0.4.0 added: extensions, card types and a card's Keep and Open as view
 EXTENSION_WRITES = [
     ("PUT", "/api/ws/mini/extensions/video", {"on": False}),
