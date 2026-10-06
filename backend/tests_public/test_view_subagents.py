@@ -472,6 +472,34 @@ async def test_the_analyst_s_stop_and_main_s_quit_end_a_build_failed_with_retry(
     assert "stopped_by" not in _prop(other), "Retry clears it"
 
 
+async def test_main_s_quit_stops_a_change_to_a_built_view_which_says_so_and_keeps_the_view(board, bridge, gates,
+                                                                                            monkeypatch):
+    """A change to a built view that main's quit stopped leaves the view as it passed, and its chip and main's line say
+    it stopped, not that it failed (live check L11)."""
+    slug = _propose(asked=True)
+    agent = await _started(slug)
+    monkeypatch.setattr(dev, "VIEW_POOL", 2)
+    _draft(slug, "<p>v1</p>")
+    await _call("finish_view", {}, agent, view_tools.build_key(slug))
+    subagents.run_ended(CORPUS, agent, "done", "Built.", source="handback")
+    await asyncio.sleep(0.05)
+    monkeypatch.setattr(dev, "_reachable", lambda c, a: a == agent)
+    views.revise(CORPUS, slug, "a legend", asked=True)
+    await _until(lambda: bridge.ops("send"), "the change never reached the last builder")
+    subagents.run_again(CORPUS, agent, "coordinator")
+    (views.views_dir(CORPUS) / slug / views.VIEW_HTML).write_text("<p>half a legend</p>")
+    subagents.close_running(CORPUS)
+    await _until(lambda: _prop(slug).get("failed_change"), "main's quit left the change running")
+    prop = _prop(slug)
+    assert (prop["status"], prop["error"], prop["stopped_by"]) == ("built", dev.MAIN_ENDED, "quit"), "its chip says why"
+    assert (views.views_dir(CORPUS) / slug / views.VIEW_HTML).read_text() == "<p>v1</p>"
+    _, log = agents.paths(CORPUS, agents.MAIN_ID)
+    [chip] = [e for e in agents.read_events(log) if e.get("type") == "chip" and e.get("ref") == f"view:{slug}"]
+    assert chip["status"] == "stopped" and "stopped when your Claude Code session ended" in chip["text"]
+    views.retry(CORPUS, slug)
+    assert "stopped_by" not in _prop(slug), "Retry clears it"
+
+
 async def test_a_proposal_an_earlier_version_queued_starts_no_builder_and_waits_for_retry(board, bridge, gates,
                                                                                          monkeypatch):
     """A proposal still queued from before this version (no route) belongs to no click or start of this one: when the

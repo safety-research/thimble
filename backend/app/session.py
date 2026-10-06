@@ -1317,10 +1317,22 @@ def _tool_use(lv: Live, tool_use_id: str, name: str, tool_input: Any) -> None:
 
 def _relayed(sub: Sub, inp: dict) -> None:
     """Main's SendMessage to a thread's fork or a subagent: its chat shows the message as from main, so the browser
-    holds the same conversation as the terminal's agent view."""
+    holds the same conversation as the terminal's agent view; for one of thimble's agents, with the run it starts or
+    joins (_message_run)."""
     text = str(inp.get("message") or inp.get("content") or "").strip()
     if text:
-        sub.rec.record("user", text=text, by=RELAYED_BY)
+        sub.rec.record("user", text=text, by=RELAYED_BY, **_message_run(sub))
+
+
+def _message_run(sub: Sub) -> dict[str, int]:
+    """{run: k} for a message to one of thimble's agents (subagents.message_run), which the browser shows as that run's;
+    {} for any other subagent."""
+    if not sub.thimble or not sub.agent_id:
+        return {}
+    from . import subagents  # noqa: PLC0415
+
+    k = subagents.message_run(sub.rec.c, str(sub.agent_id))
+    return {"run": k} if k is not None else {}
 
 
 def _tool_result(lv: Live, tool_use_id: str, content: Any, is_error: bool = False) -> None:
@@ -2131,7 +2143,7 @@ def translate_sub(lv: Live, sub: Sub, line: bytes | str) -> int:
         if typed == sub.typed:
             return 0  # the same message in its other shape
         sub.typed = typed
-        sub.rec.record("user", text=typed, by=TERMINAL)
+        sub.rec.record("user", text=typed, by=TERMINAL, **_message_run(sub))
         return 1
     origin = rec.get("origin") if isinstance(rec.get("origin"), dict) else {}
     if rec.get("type") == "user" and origin.get("kind") in ("peer", "task-notification"):
@@ -2170,8 +2182,9 @@ def translate_sub(lv: Live, sub: Sub, line: bytes | str) -> int:
             from . import subagents  # noqa: PLC0415
 
             sub.ran = True
-            subagents.ran_on(lv.c, str(sub.agent_id), msg["model"],
-                             str(msg["effort"]) if isinstance(msg.get("effort"), str) else None)
+            # Claude Code writes the request's effort beside the message, not in it (contract_module.assistant_runs)
+            effort = rec.get("effort") if isinstance(rec.get("effort"), str) else msg.get("effort")
+            subagents.ran_on(lv.c, str(sub.agent_id), msg["model"], effort if isinstance(effort, str) else None)
     for b in _blocks(rec):
         if b["type"] == "text":
             if not isinstance(b.get("text"), str):

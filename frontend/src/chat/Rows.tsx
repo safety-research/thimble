@@ -173,7 +173,7 @@ export function Rows({ rows, ws, chat, streaming = false, nested = false, calls,
             if (r.role === 'orient' && (r.run ?? 0) > 0) return <AgentCard key={r.index} ws={ws} chat={r.chat} role="orient" title="Orientation" ts={r.ts} run={r.run} />
             if (r.role === 'orient') return <Note key={r.index} className="chat-agent-note" data-chat={r.chat} text="Orientation started in" chips={<ThreadChip id={r.chat} />} />
             if (r.role === 'writer') return <Note key={r.index} className="chat-agent-note" data-chat={r.chat} text="Writing started in" chips={<ThreadChip id={r.chat} />} />
-            if (r.role === 'dev') return <Note key={r.index} className="chat-agent-note" data-chat={r.chat} text="Dev ticket started" chips={<ThreadChip id={r.chat} />} />
+            if (r.role === 'dev') return <Note key={r.index} className="chat-agent-note" data-chat={r.chat} text={devStartText(r.title)} chips={<ThreadChip id={r.chat} />} />
             return <AgentCard key={r.index} ws={ws} chat={r.chat} role={r.role} title={r.title} ts={r.ts} />
           case 'branch':
             return (
@@ -638,14 +638,21 @@ function CallOutput({ text, callRef: ref, failed, focus }: { text: string; callR
   )
 }
 
-/** A dev ticket's end in main, in a few words: applied, stopped, or failed (a change to a view that failed puts the view
- * back as it was); the thread its chip opens has the reason. Other chips keep their text. Pure. */
+/** The note in main for a chat of the dev role as it starts: a view build (its chat is titled `view: <name>`, backend
+ * subagents.TYPES) or a code ticket. Pure. */
+export function devStartText(title: string | null | undefined): string {
+  return (title ?? '').startsWith('view: ') ? 'View build started in' : 'Dev ticket started'
+}
+
+/** A dev ticket's end in main, in a few words: applied, stopped, or failed (a change to a view that failed, or that the
+ * analyst's quit stopped, puts the view back as it was); the thread its chip opens has the reason. Other chips keep their
+ * text. Pure. */
 export function ticketChipText(item: Pick<ChipRowT, 'status' | 'text' | 'ref'>): string {
   switch (item.status) {
     case 'applied':
       return 'Dev ticket applied'
     case 'stopped':
-      return 'Dev ticket stopped'
+      return item.ref?.startsWith('view:') ? 'The change to the view stopped when your Claude Code session ended, so it is as it was' : 'Dev ticket stopped'
     case 'failed':
     case 'needs manual merge':
     case 'rolled back':

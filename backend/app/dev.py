@@ -3094,10 +3094,15 @@ def _view_chat(c: str, prop: dict[str, Any]) -> str | None:
 
 
 def _change_failed_chip(c: str, prop: dict[str, Any], why: str) -> None:
-    """Main's chip for a change to a built view that failed, since the view's own chip shows it built again."""
+    """Main's chip for a change to a built view that failed, or that main's quit stopped (MAIN_ENDED), since the view's
+    own chip shows it built again."""
+    name = prop.get("name") or prop.get("slug")
+    quit_ = why == MAIN_ENDED
+    text = (f"the change to the view {name} stopped when your Claude Code session ended, so the view is as it was"
+            if quit_ else f"the change to the view {name} failed, so it is as it was: {why}")
     try:
-        agents.chip(c, "ticket", f"the change to the view {prop.get('name') or prop.get('slug')} failed, so it is as it "
-                    f"was: {why}", ref=f"view:{prop.get('slug')}", chat=prop.get("chat"), status="failed")
+        agents.chip(c, "ticket", text, ref=f"view:{prop.get('slug')}", chat=prop.get("chat"),
+                    status="stopped" if quit_ else "failed")
     except Exception:  # noqa: BLE001
         log.exception("could not chip the failed change to %s/%s", c, prop.get("slug"))
 
@@ -3110,7 +3115,9 @@ def _view_failed(c: str, slug: str, error: str, chat: str | None = None) -> None
     current = views.read_proposal(c, slug) or {}
     chat = chat or current.get("chat")
     if current.get("revision"):
-        views.end_revision(c, slug, error, failed_change=str(current.get("change") or ""))
+        # a change main's quit stopped says so on the view's chip (`stopped_by`), as a stopped build does below
+        views.end_revision(c, slug, error, failed_change=str(current.get("change") or ""),
+                           stopped_by="quit" if error == MAIN_ENDED else None)
         if chat:
             _close_chat({"workspace": c, "chat": chat}, "failed", error)
         _change_failed_chip(c, current, error)

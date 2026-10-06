@@ -198,7 +198,38 @@ async def test_a_browser_follow_up_goes_through_the_module(bridge, models, works
     assert send["agent"] == agent and send["text"] == "And May?"
     chat = orientation.read_run(CORPUS)["chats"]["orient"]
     _, log = agents.paths(CORPUS, chat)
-    assert any(e.get("type") == "user" and e.get("text") == "And May?" for e in agents.read_events(log))
+    assert [e.get("run") for e in agents.read_events(log) if e.get("type") == "user" and e.get("text") == "And May?"] \
+        == [1], "the message names the run it starts, as the browser cuts the thread into runs by it"
+
+
+async def test_a_follow_up_run_is_main_s_card_for_that_run_and_keeps_who_sent_its_message(bridge, models,
+                                                                                           workspaces_tmp, analyst,
+                                                                                           unmeasured):
+    """Each follow-up run puts the orientation's card for that run in main's chat (an `agent` record with its `run`,
+    the browser's AgentCard `run`), and its record keeps the message that started it with who sent it: the browser
+    through the module, or main's message_orientation; a message typed in the agent tray carries no request."""
+    agent = await _orientation()
+    await _ended(agent)
+    await orient_session.message_route(CORPUS, orient_session.MessageBody(text="And May?"), analyst)
+    [rid] = [k for k, r in subagents.read(CORPUS)["requests"].items() if r["kind"] == "message"]
+    with subagents.update(CORPUS) as state:
+        sf.requests(state)[rid].update(state="claimed")
+    subagents.run_again(CORPUS, agent, "coordinator")
+    subagents.run_ended(CORPUS, agent, "done", "May too.", source="handback")
+    assert not (await tools.call(CORPUS, "message_orientation", {"message": "And June?"})).is_error
+    rids = [k for k, r in subagents.read(CORPUS)["requests"].items() if r["kind"] == "message"]
+    with subagents.update(CORPUS) as state:
+        sf.requests(state)[rids[-1]].update(state="claimed")
+    subagents.run_again(CORPUS, agent, "coordinator")
+    subagents.run_ended(CORPUS, agent, "done", "June too.", source="handback")
+    subagents.run_again(CORPUS, agent, "human")
+    ups = orientation.read_run(CORPUS)["followups"]
+    assert [(u["run"], u["messages"]) for u in ups] == [(1, [{"text": "And May?", "by": "browser"}]),
+                                                         (2, [{"text": "And June?", "by": "main"}]), (3, [])]
+    _, main_log = agents.paths(CORPUS, agents.MAIN_ID)
+    chat = orientation.read_run(CORPUS)["chats"]["orient"]
+    assert [(e["chat"], e["run"]) for e in agents.read_events(main_log) if e.get("type") == "agent" and e.get("run")] \
+        == [(chat, 1), (chat, 2), (chat, 3)]
 
 
 async def test_a_follow_up_to_an_earlier_version_s_or_session_s_orientation_is_refused(bridge, models, workspaces_tmp,
