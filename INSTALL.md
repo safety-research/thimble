@@ -150,7 +150,9 @@ session you start with `thimble`. Claude Code's agent tray (↓) lists them, and
   `CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS`; it doesn't apply while your session runs Ultracode. The agents have no
   Workflow tool, which Claude Code gives only to your session and its forks, and no Ultracode mode; its effort, xhigh,
   is one of the efforts Settings offer them. Start is refused while your session is in plan mode, where an agent would
-  have to ask before every card; shift+tab leaves it. Safe mode (`--safe-mode`) turns thimble's plugin off entirely.
+  have to ask before every card; shift+tab leaves it. Agents that already run go on in plan mode, as Claude Code's own
+  subagents do, and can only read and plan there; one that ends there without its work shows failed, with what to do.
+  Safe mode (`--safe-mode`) turns thimble's plugin off entirely.
 
 ## Extensions
 

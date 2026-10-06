@@ -854,7 +854,7 @@ def subagent_ended(c: str, run: subagents.Run, status: str, summary: str) -> Non
         log.exception("%s: the orientation's record was not closed", c)
         made = {}
     if status == "failed":
-        _say_failed(c, run.chat, run.k, summary)
+        _say_failed(c, run.chat, run.k, summary, plan=summary == subagents.plan_failed_line(run.role))
     if run.k == 0 and status == "done" and not run.interrupted:
         try:
             loop = asyncio.get_running_loop()
@@ -867,10 +867,11 @@ def subagent_ended(c: str, run: subagents.Run, status: str, summary: str) -> Non
     _go_on(c, run, status, summary, stopped, made)
 
 
-def _say_failed(c: str, chat: str, k: int, summary: str) -> None:
+def _say_failed(c: str, chat: str, k: int, summary: str, plan: bool = False) -> None:
     """A failed run's last line in the orientation's thread, as a note: it stopped, and why (FAILED_LINES), such as the
-    API error that ended it, which subagents.run_ended gives as its report."""
-    line = FAILED_LINES[k > 0].format(error=failure_line(summary) or "no error text came with it")
+    API error that ended it, which subagents.run_ended gives as its report; for a run main's plan mode held at its end
+    (`plan`), that line itself (subagents.plan_failed_line), which says what to do."""
+    line = summary if plan else FAILED_LINES[k > 0].format(error=failure_line(summary) or "no error text came with it")
     try:
         _, log_path = agents.paths(c, chat)
         agents.append(log_path, {"type": "chip", "ts": _now(), "kind": ERROR_KIND, "text": line})

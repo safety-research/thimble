@@ -83,15 +83,18 @@ STOPPED_REFUSED = "refused"
 # more ("Agent … was stopped by the user and won't be resumed"), unlike one a TaskStop stopped (live check L9)
 STOPPED_USER = "user"
 CANCELLED = "stopped-by-user"  # a chat's `continue` then: no follow-up can reach it
-# `stopped_by` of an agent thimble stopped through the module when main went into plan mode (U4), where a subagent would
-# have to ask before every step: a TaskStop, so a follow-up continues it once the analyst leaves plan mode
-STOPPED_PLAN = "plan"
-PLAN_STOPPED_LINE = ("Stopped when your Claude Code session went into plan mode, where thimble's agents would have to ask "
-                     "you before every step. Leave plan mode (shift+tab in your terminal), then {how}.")
-PLAN_HOW = {"orientation": "send it a message to continue it", "critic": "send the orientation a message to continue it",
-            "writer": "choose Write again", "view-builder": "choose Retry on the view",
-            "view-reviewer": "choose Review again on the view", "check": "choose Run on the check",
-            "dev-ticket": "choose Retry on the ticket"}
+# the line of a run main's plan mode held at its end, which left no work (plan_failed_line), and its parts by role
+PLAN_FAILED_LINE = ("Your Claude Code session went into plan mode while {who} ran, so {what}. Switch out of plan mode "
+                    "(shift+tab in your terminal), then {how}.")
+PLAN_FAILED = {"orientation": ("the orientation", "it could not finish its work", "send it a message to continue it"),
+               "critic": ("the critic", "it could not finish the critique",
+                          "send the orientation a message to continue it"),
+               "writer": ("the writer", "it could not save the document", "write it again"),
+               "view-builder": ("the view's builder", "it could not build the view", "choose Retry on the view"),
+               "view-reviewer": ("the view's reviewer", "it could not finish the review",
+                                 "choose Review again on the view"),
+               "check": ("the check", "it could not comment on every passage", "choose Re-run on the check"),
+               "dev-ticket": ("the ticket's agent", "it could not finish the change", "choose Retry on the ticket")}
 USER_STOP_RE = re.compile(r"stopped by (the )?user", re.I)  # Esc's task notification and a SendMessage's error say so
 QUIT_LINE = "Stopped when Claude Code quit."  # a chat's end line, its card's text is the browser's (AgentCard)
 WORK_DIRS = ("orient/work", "writers", "critique-work", "check-work", "views-work", "extension/views")
@@ -129,7 +132,11 @@ class Type:
     memory). `define`, `own`, `started`, `ended` and `refused` name `module:attr`: the role's definition for a workspace,
     the thimble tools it may call, and its handlers (module note, runs and ends). `when` names `module:attr`, a function
     of the workspace that says whether the role is registered there (none: always). With `keeps_chat` a run's end
-    leaves its chat running, and the role's end handler ends it (a code ticket goes on to the analyst's Allow)."""
+    leaves its chat running, and the role's end handler ends it (a code ticket goes on to the analyst's Allow).
+    Main's plan mode (_plan_end): `left_work` names `module:attr`, a function (c, run) of whether a run that plan mode
+    held at its end left its work all the same (a writer's saved document); one that did not ends failed, not done. A
+    role with none left nothing to count on then. With `gated` the role's end handler judges what the run left by its
+    gate, as after any run, and fails it with plan_failed_line when nothing passes (a view's build, a code ticket)."""
 
     role: str
     kind: str | None
@@ -143,6 +150,8 @@ class Type:
     refused: str = ""
     when: str = ""
     keeps_chat: bool = False
+    left_work: str = ""
+    gated: bool = False
 
 
 TYPES: dict[str, Type] = {
@@ -157,20 +166,20 @@ TYPES: dict[str, Type] = {
     "writer": Type("writer", tools.WRITER_SESSION, "writer", "writer", "writer",
                    "app.write_session:definition", "app.write_session:OWN_TOOLS",
                    "app.write_session:subagent_started", "app.write_session:subagent_ended",
-                   "app.write_session:subagent_refused"),
+                   "app.write_session:subagent_refused", left_work="app.write_session:left_work"),
     "view-builder": Type("view-builder", tools.VIEW_SESSION, "dev", "dev", "dev", "app.view_tools:builder_definition",
                          "app.view_tools:BUILDER_TOOLS", "app.dev:build_started", "app.dev:build_ended",
-                         "app.dev:build_refused"),
+                         "app.dev:build_refused", gated=True),
     "view-reviewer": Type("view-reviewer", tools.REVIEW_SESSION, "dev", "dev", "dev",
                           "app.view_tools:reviewer_definition", "app.view_tools:REVIEWER_TOOLS",
                           "app.view_review:subagent_started", "app.view_review:subagent_ended",
-                          "app.view_review:subagent_refused"),
+                          "app.view_review:subagent_refused", left_work="app.view_review:left_work"),
     "check": Type("check", tools.CHECK_SESSION, "check", "checks", "checks", "app.checks:definition",
                   "app.checks:OWN_TOOLS", "app.checks:subagent_started", "app.checks:subagent_ended",
                   "app.checks:subagent_refused"),
     "dev-ticket": Type("dev-ticket", tools.TICKET_SESSION, "dev", "dev", "dev", "app.ticket_tools:definition",
                        "app.ticket_tools:TICKET_TOOLS", "app.dev:ticket_started", "app.dev:ticket_ended",
-                       "app.dev:ticket_refused", when="app.dev:tickets_run_here", keeps_chat=True),
+                       "app.dev:ticket_refused", when="app.dev:tickets_run_here", keeps_chat=True, gated=True),
     HELPER: Type(HELPER, None, None, "subagents", "orientation", "app.subagents:helper_definition"),
 }
 
@@ -760,66 +769,32 @@ async def send(c: str, agent_id: str, text: str, *, values: dict[str, Any] | Non
     return Answer({**ans, "request": rid})
 
 
-def plan_line(role: str | None) -> str:
-    """The line a run thimble stopped when main went into plan mode ends with, in its thread and on its card: why, and
-    how to go on once main leaves plan mode (PLAN_HOW)."""
-    return PLAN_STOPPED_LINE.format(how=PLAN_HOW.get(str(role or ""), "start it again"))
-
-
 def stop_done(text: str) -> bool:
     """Whether a failed TaskStop says its agent had ended already, so the stop counts as done (U5)."""
     low = text.lower()
     return "is not running" in low or "no task found" in low
 
 
-async def stop(c: str, agent_id: str, who: str = STOPPED_ANALYST) -> Answer:
-    """Stop an agent through the module (TaskStop), and the background shells it started (add_shell), as the analyst's
-    Stop (`who` analyst) or for main's plan mode (`who` plan, marked before the call, so that its end, which may come
-    first, reads it). Refused when the module is not live: the card then says to press Esc in the agent's view. An
-    agent that had ended already counts as stopped."""
+async def stop(c: str, agent_id: str) -> Answer:
+    """Stop an agent through the module (TaskStop), and the background shells it started (add_shell). Refused when the
+    module is not live: the card then says to press Esc in the agent's view. An agent that had ended already counts as
+    stopped."""
     from . import module_bridge  # noqa: PLC0415
 
     a = agent(c, agent_id) or {}
     if not module_bridge.live(c):
         return refusal(NO_MODULE, str(module_bridge.why_not(c) or ""))
-    if who != STOPPED_ANALYST:
-        mark_stopped_by(c, agent_id, who)
     rid = new_request(c, "stop", a.get("key"), {"task_id": agent_id}, None, CLICK, role=a.get("role"), agent=agent_id)
     ans = await _bridge(c, "stop", agent=agent_id, request=rid, shells=list(a.get("shells") or []))
     if ans.refused and (ans.get("gone") or stop_done(ans.reason)):
         ans = Answer({"agentId": agent_id, "done": True})
     _set(c, rid, state="done" if not ans.refused else "refused", at=files.now(), reason=ans.reason or None)
     if not ans.refused:
-        mark_stopped_by(c, agent_id, who)
-    elif who != STOPPED_ANALYST and (agent(c, agent_id) or {}).get("status") in ("running", "waiting"):
-        mark_stopped_by(c, agent_id, None)  # it runs on
+        mark_stopped_by(c, agent_id, STOPPED_ANALYST)
     return Answer({**ans, "request": rid})
 
 
-async def stop_for_plan(c: str) -> list[str]:
-    """Main went into plan mode while thimble's agents ran (U4): each running agent of thimble's roles is stopped through
-    the module, as the browser's Stop stops it, which leaves it able to continue, marked `stopped_by: plan`, so its run
-    ends with plan_line (run_ended) and its thread and card say why and how to go on once main leaves plan mode. A
-    child before its parent (the critic before the orientation). Nothing starts again by itself. The ids stopped."""
-    running = [k for k, a in agents_of(c).items() if a.get("role") in ROLES and a.get("status") in ("running", "waiting")]
-    running.sort(key=lambda k: 0 if str((agent(c, k) or {}).get("parent") or "") in running else 1)
-    stopped_ids = []
-    for agent_id in running:
-        try:
-            ans = await stop(c, agent_id, who=STOPPED_PLAN)
-        except Exception:  # noqa: BLE001 — the others are stopped either way
-            log.exception("%s: %s was not stopped for plan mode", c, agent_id)
-            continue
-        if ans.refused:
-            log.warning("%s: %s was not stopped for plan mode: %s", c, agent_id, ans.reason)
-            continue
-        stopped_ids.append(agent_id)
-    if stopped_ids:
-        log.info("%s: main went into plan mode, so thimble stopped %s", c, ", ".join(stopped_ids))
-    return stopped_ids
-
-
-def mark_stopped_by(c: str, agent_id: str, who: str | None) -> None:
+def mark_stopped_by(c: str, agent_id: str, who: str) -> None:
     with update(c) as state:
         a = files.registry(state).get(agent_id)
         if isinstance(a, dict):
@@ -854,19 +829,59 @@ def add_shell(c: str, agent_id: str, shell: str) -> None:
             a["shells"] = [*[x for x in a.get("shells") or [] if x != shell], shell][-SHELLS_KEPT:]
 
 
-def saw_plan_mode(c: str, agent_id: str) -> None:
+def saw_plan_mode(c: str, agent_id: str, plan: bool = True) -> None:
     """Main went into plan mode while `agent_id` ran, and the agent with it (its transcript's plan_mode attachment): it
-    may only read and write a plan from then on. Its run and its chat say so (`plan_mode`), so its end handler can tell
-    a run that could not do its work (a writer that saved nothing, live check L21) from one that had nothing to do."""
+    may only read and write a plan from then on. Its run and its chat say so (`plan_run`, `plan_mode`), so a run that
+    ends there and could not do its work ends failed (run_ended), not done (live check L21: a writer that saved
+    nothing). With `plan` false main left plan mode again (plan_mode_exit), and the agent goes on with its work: the
+    mark goes."""
     with update(c) as state:
         a = files.registry(state).get(agent_id)
         if not isinstance(a, dict):
             return
-        a["plan_run"] = int(a.get("run") or 0)
+        k = int(a.get("run") or 0)
+        if plan == (a.get("plan_run") == k):
+            return  # Claude Code says it again on later turns
+        a["plan_run"] = k if plan else None
         chat = str(a.get("chat") or "")
     if chat:
         with contextlib.suppress(Exception):
-            agents.update_agent(c, chat, plan_mode=True)
+            agents.update_agent(c, chat, plan_mode=True if plan else None)
+
+
+def ended_in_plan(c: str, agent_id: str, k: int | None = None) -> bool:
+    """Whether main's plan mode held run `k` of `agent_id` (its latest when None) when it ended (saw_plan_mode): the
+    agent could only read and write a plan."""
+    a = agent(c, agent_id) or {}
+    k = int(a.get("run") or 0) if k is None else k
+    return a.get("plan_run") is not None and int(a["plan_run"]) == k
+
+
+def plan_failed_line(role: str) -> str:
+    """The line a run that main's plan mode held at its end, and that left no work, fails with (run_ended): why, and
+    what to do once main leaves plan mode (PLAN_FAILED)."""
+    who, what, how = PLAN_FAILED.get(role, (f"thimble's {role}", "it could not finish its work", "start it again"))
+    return PLAN_FAILED_LINE.format(who=who, what=what, how=how)
+
+
+def _plan_end(c: str, agent_id: str, status: str, report: str | None) -> tuple[str, str | None]:
+    """A run's end status and report once main's plan mode is counted: a run that would end done while plan mode held
+    it, and that left no work (its role's Type.left_work; a role that has none left nothing to count on), fails with
+    its role's line. A role whose end handler gates what the run left (Type.gated) judges it there."""
+    a = agent(c, agent_id) or {}
+    t = TYPES.get(str(a.get("role") or ""))
+    run = _run(c, agent_id, a)
+    if status != "done" or t is None or t.gated or run is None or not ended_in_plan(c, agent_id, run.k):
+        return status, report
+    if a.get("ended_run") == run.k and a.get("status") not in ("running", "waiting"):
+        return status, report  # another signal of an end run_ended has taken already
+    try:
+        if t.left_work and _resolve(t.left_work)(c, run):
+            return status, report
+    except Exception:  # noqa: BLE001 — what it left is not known, so it is not taken for done
+        log.exception("%s: what the %s %s left in plan mode was not read", c, t.role, agent_id)
+    log.info("%s: main's plan mode held the %s %s at its end, and it left no work", c, t.role, agent_id)
+    return "failed", plan_failed_line(t.role)
 
 
 def cancelled(c: str, agent_id: str | None) -> bool:
@@ -1103,12 +1118,14 @@ def run_ended(c: str, agent_id: str, status: str, report: str | None, *, source:
     """End the current run of a registered agent once: its status, its chat ended with the report (unless its type
     keeps its chat, Type.keeps_chat), and its role's end handler (Type.ended). A run whose latest reply is an API error (api_error: a refusal by the model's safeguards,
     retries run out) failed, with Claude Code's error line as its report, whichever signal ends it, unless the agent
-    handed back or was stopped. A run that ended already (another signal of the same end) is left alone. True when this
-    call ended it."""
+    handed back or was stopped. A run that main's plan mode held at its end, and that left no work, failed too, with
+    its role's line (_plan_end). A run that ended already (another signal of the same end) is left alone. True when
+    this call ended it."""
     if source != "handback" and status != "stopped":
         error = api_error(c, agent_id)  # read first: the transcript's tail may hold the run's hand-back, which ends it
         if error:
             status, report = "failed", error
+    status, report = _plan_end(c, agent_id, status, report)
     with update(c) as state:
         a = files.registry(state).get(agent_id)
         if not isinstance(a, dict):
@@ -1122,10 +1139,6 @@ def run_ended(c: str, agent_id: str, status: str, report: str | None, *, source:
         snap = dict(a)
     log.info("%s: %s %s run %s ended %s (%s)", c, snap.get("role") or "agent", agent_id, snap.get("run"), status,
              source or "?")
-    plan = status == "stopped" and snap.get("stopped_by") == STOPPED_PLAN
-    if plan:  # stopped for main's plan mode (U4): its thread says why and how to go on; no end handler takes it as the
-        # analyst's Stop (the orientation's views and report go on once it is continued)
-        report, interrupted = plan_line(snap.get("role")), True
     t = TYPES.get(str(snap.get("role") or ""))
     if snap.get("chat") and not (t is not None and t.keeps_chat):
         try:
