@@ -2747,7 +2747,8 @@ def update_script() -> Path:
 
 
 # install.sh's answers to its questions, --plugin and --no-plugin, and --require-pinned, which `thimble update` passes on
-# to it through update.sh
+# to it through update.sh; --trust-workspaces and --no-trust-workspaces, 0.5.0's, are passed on too for this release,
+# and install.sh ignores them with a line that says so
 INSTALL_FLAGS = ("--sandbox-deps", "--no-sandbox-deps", "--plugin", "--no-plugin", "--trust-workspaces",
                  "--no-trust-workspaces", "--require-pinned")
 

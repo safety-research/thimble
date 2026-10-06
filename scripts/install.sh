@@ -3,8 +3,8 @@
 # ~/.thimble/app (a Global install).
 #
 #   scripts/install.sh [--dry-run] [--verbose] [--browser bundled|system|off] [--sandbox-deps | --no-sandbox-deps]
-#                      [--trust-workspaces | --no-trust-workspaces] [--plugin | --no-plugin] [--dir DIR] [--dev]
-#                      [--python PATH] [--deps-only] [--require-pinned] [--marketplace-name NAME]
+#                      [--plugin | --no-plugin] [--dir DIR] [--dev] [--python PATH] [--deps-only] [--require-pinned]
+#                      [--marketplace-name NAME]
 #
 # It opens with one screen: what it found (Claude Code, Python or uv, Node, a browser, Claude Code's sandbox), what it
 # installs where and about how big, what it changes in your Claude Code setup, and the questions that remain, often
@@ -19,9 +19,6 @@
 #   --sandbox-deps         on Linux, asked only while Claude Code's sandbox can't run: install what it lacks with sudo
 #                          (bubblewrap and socat, and on Ubuntu 23.10+ an AppArmor profile for bwrap). --no-sandbox-deps
 #                          answers no
-#   --trust-workspaces     Claude Code trusts thimble's workspaces folder (one entry in ~/.claude.json), which thimble's
-#                          background agents need. --no-trust-workspaces answers no, and takes back the entry an earlier
-#                          yes added
 # An answer is kept in $THIMBLE_HOME, so a re-run or `thimble update` doesn't ask it again; its flag changes it. Without a
 # terminal install.sh stops while a question remains without its flag, and lists those.
 #
@@ -35,10 +32,12 @@
 #   --dev                  also install the backend's test extras (a checkout always gets them)
 #   --python PATH          use the virtual environment of the python at PATH as backend/.venv: install.sh checks that it
 #                          holds what backend/pyproject.toml asks for and installs nothing into it
-#   --deps-only            stop after the browser: no `thimble` command, plugin, trust or doctor
+#   --deps-only            stop after the browser: no `thimble` command, plugin or doctor
 #   --require-pinned       install only pinned versions: stop where the package index lacks one, and where nothing pins
 #                          them (a Dev install without uv or without backend/uv.lock)
 #   --marketplace-name N   the name Claude Code registers the tree under (default: .claude-plugin/marketplace.json's)
+#   --trust-workspaces, --no-trust-workspaces   accepted and ignored: thimble 0.6.0's agents need no folder Claude Code
+#                          trusts, so install.sh no longer asks about it
 # THIMBLE_BIN_DIR, when set, is the folder the `thimble` link goes into in place of ~/.local/bin.
 set -euo pipefail
 # How it works (not printed by --help).
@@ -46,10 +45,10 @@ set -euo pipefail
 # screen · the questions · the sandbox's packages, right after the questions, so that only sudo asks for more (its
 # password) · copy the release into --dir · backend/.venv · the frontend's packages and frontend/dist · the browser ·
 # the app-dir pointer and `thimble` on PATH (~/.local/bin/thimble → the tree's plugin/bin/thimble) · the plugin, only on
-# --plugin or --no-plugin or an earlier yes (scripts/plugin.sh) · the trust · doctor · what to do next.
+# --plugin or --no-plugin or an earlier yes (scripts/plugin.sh) · doctor · what to do next.
 # Each question is one block of functions named after it, which adds its name to QUESTIONS; the rest of the script
-# reaches a question only through those functions, so deleting its block removes it (see the trust block).
-# The browser, plugin and trust answers are kept in $THIMBLE_HOME (config.json's "browser", plugin.json, trust.json). A
+# reaches a question only through those functions, so deleting its block removes it.
+# The browser and plugin answers are kept in $THIMBLE_HOME (config.json's "browser", plugin.json). A
 # Chrome or Edge used because it was found and started is not recorded: the server picks it too when config.json names
 # no browser (backend/app/userconf.py browser), and a later run asks only if it stops working.
 # Another install's plugin registration (a marketplace added from another folder) and a ~/.local/bin/thimble linked into
@@ -168,7 +167,7 @@ parse_args() {
   src="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
   home="${THIMBLE_HOME:-$HOME/.thimble}"
   bin_dir="${THIMBLE_BIN_DIR:-$HOME/.local/bin}"
-  dir="" mp_name="" dev=0 deps_only=0 plugin="" byo="" require_pinned=0
+  dir="" mp_name="" dev=0 deps_only=0 plugin="" byo="" require_pinned=0 trust_ignored=""
   local q
   while [ $# -gt 0 ]; do
     case "$1" in
@@ -180,6 +179,7 @@ parse_args() {
       --require-pinned) require_pinned=1; shift;;
       --plugin) plugin=yes; shift;;
       --no-plugin) plugin=no; shift;;
+      --trust-workspaces | --no-trust-workspaces) trust_ignored="$1"; shift;;  # 0.5.0's question, gone (opening)
       --dry-run) dry=1; shift;;
       -v | --verbose) verbose=1; shift;;
       -h | --help) usage; exit 0;;
@@ -1042,60 +1042,6 @@ sandbox_step() {  # right after the questions, so that sudo asks for its passwor
   else warn "Claude Code's sandbox still doesn't run (above)"; sandbox_later; fi
 }
 
-# ------------------------------------------------------------------------------ the trust question
-# Claude Code starts a background session (`claude --bg`) only in a folder it trusts, and the orientation, its critic,
-# the writers and view builds run as background sessions in thimble's workspaces folder, so install.sh asks whether
-# Claude Code should trust it. backend/app/claude_changes.py words the question, writes the one entry and records the
-# answer; `thimble uninstall` takes the entry back. Once thimble's agents no longer need trust, delete this block: the
-# rest of install.sh reaches it only through QUESTIONS. Its flags are also passed through by scripts/update.sh and
-# backend/app/cli.py (INSTALL_FLAGS); keep them accepted there, or remove them with the block.
-QUESTIONS+=(trust)
-trust=""  # --trust-workspaces (--yes) or --no-trust-workspaces (--no)
-trust_flag() { case "$1" in --trust-workspaces) trust=--yes;; --no-trust-workspaces) trust=--no;; *) return 1;; esac; took=1; }
-trust_py() { THIMBLE_HOME="$home" "$1" -I "$src/backend/app/claude_changes.py" "${@:2}"; }  # trust_py PYTHON ARGS…
-trust_plan() {  # trust_q, the question when it remains, else trust_why, the state that settles it; trust_late=1 without
-  # python3, when the trust step asks it with the tree's Python (claude_changes.install_trust)
-  trust_q="" trust_why="" trust_late=0
-  [ "$deps_only" = 0 ] || return 0
-  if ! command -v python3 >/dev/null 2>&1; then trust_late=1; return 0; fi
-  trust_q="$(trust_py python3 question "$dir" 2>/dev/null)" || trust_q=""
-  [ -n "$trust_q" ] || trust_why="$(trust_py python3 skipped "$dir" 2>/dev/null)" || trust_why=""
-  trust_q="$(tildes "$trust_q")" trust_why="$(tildes "$trust_why")"
-}
-trust_pending() { [ -z "$trust" ] && { [ -n "$trust_q" ] || [ "$trust_late" = 1 ]; }; }
-trust_setup() {  # its line in the opening screen's "Your Claude Code setup"
-  [ "$deps_only" = 0 ] || return 0
-  if [ "$trust" = --yes ]; then found ok "trust of thimble's folder: added to Claude Code's config if it is missing (--trust-workspaces)"
-  elif [ "$trust" = --no ]; then found ok "trust of thimble's folder: not added, and taken back if an earlier yes added it (--no-trust-workspaces)"
-  elif trust_pending; then found warn "trust of thimble's folder, which its background agents need: a question below"
-  elif [ -n "$trust_why" ]; then
-    case "$trust_why" in "Claude Code trusts"*) found ok "$trust_why";; *) found warn "$trust_why";; esac
-  fi
-}
-trust_title() { if [ -n "$trust_q" ]; then printf '%s\n' "$trust_q" | head -n 1; else echo "Trust thimble's folder in Claude Code?"; fi; }
-trust_text() {
-  if [ -n "$trust_q" ]; then printf '%s\n' "$trust_q" | sed 1d
-  else echo "thimble's background agents run in its workspaces folder, and Claude Code starts them only in a folder you trust. A yes adds that folder to Claude Code's config."; fi
-}
-trust_prompt()  { echo "Trust it?"; }
-trust_default() { echo n; }
-trust_choices() { echo "yes: --trust-workspaces"; echo "no: --no-trust-workspaces"; }
-trust_need()    { echo "trust of thimble's folder: --trust-workspaces or --no-trust-workspaces"; }
-trust_answer()  { if [ "$1" = y ]; then trust=--yes; else trust=--no; fi; }
-trust_phase()   { echo last; }
-trust_step() {  # the one entry thimble writes into Claude Code's global config (claude_changes.py trust: exit 0 when
-  # the folder is trusted after it, 3 when it is not)
-  local line rc=0
-  if [ "$dry" = 1 ]; then say "(the trust question's answer: --trust-workspaces adds the entry, --no-trust-workspaces takes back one an earlier yes added)"; return 0; fi
-  line="$(trust_py "$dir/backend/.venv/bin/python" trust "$dir" $trust 2>&1)" || rc=$?
-  line="$(tildes "$line")"
-  case "$rc" in
-    0) ok "$line";;
-    3) warn "$line"; todo "to start the orientation, its critic, the writers and view builds, trust thimble's folder: bash $(tilde "$dir")/scripts/install.sh --trust-workspaces";;
-    *) warn "the trust step failed: $line"; todo "run the trust step again: bash $(tilde "$dir")/scripts/install.sh --trust-workspaces";;
-  esac
-}
-
 # -------------------------------------------------------------- the `thimble` command and the plugin
 write_pointer() {  # $THIMBLE_HOME/app-dir: how the plugin copy in Claude Code's plugin cache finds this tree (plugin/bin/thimble-app-dir)
   run mkdir -p "$home"
@@ -1238,6 +1184,7 @@ opening() {  # the one screen before the questions: what install.sh found, what 
     heading_q "Your Claude Code setup"
     plugin_setup
     for q in ${QUESTIONS[@]+"${QUESTIONS[@]}"}; do if declare -F "${q}_setup" >/dev/null; then "${q}_setup"; fi; done
+    [ -z "$trust_ignored" ] || found ok "$trust_ignored is ignored: thimble's agents no longer need a folder Claude Code trusts"
   fi
   show ""
   if [ "$n" = 0 ]; then show "Questions: none."
