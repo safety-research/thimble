@@ -892,6 +892,10 @@ def full_made(tmp_path: Path, **kw) -> tuple[Path, Path, Path, dict]:
                                        "session": SID, "pid": 42}),
         "card-checks/c1/shot.png": "\x89PNG\x00",
         "writers/report/notes.md": "the writer's notes",
+        # the hooks' trusted folder: this machine's session ids and agent records, never exported
+        "trusted/subagents.json": json.dumps({"main": {"session": SID}, "agents": {"a1": {"sessions": [SID]}}}),
+        "trusted/callers.jsonl": json.dumps({"tool_use_id": "toolu_1", "agent_id": "a1"}) + "\n",
+        "trusted/launch.json": json.dumps({"session": SID, "pid": 4242}),
     }.items():
         (ws / rel).parent.mkdir(parents=True, exist_ok=True)
         (ws / rel).write_text(text, "utf-8")
@@ -928,7 +932,10 @@ def test_the_full_export_writes_everything_with_the_transcripts_and_refuses_noth
     left = {f["path"]: f["why"] for f in m["left_out"]}
     assert set(left) == {"labels/l1.sqlite", "scratch/a.jsonl", "kernels/k.log", "telemetry.jsonl", "sessions.json",
                          "view-indexes/v1/index.json", "extension/views/v1/cache/x.json",
-                         "orient/work/.claude/settings.json"}
+                         "orient/work/.claude/settings.json", "trusted/subagents.json", "trusted/callers.jsonl",
+                         "trusted/launch.json"}
+    assert left["trusted/launch.json"] == demo.TRUSTED_WHY
+    assert not (out / "workspace" / "trusted").exists(), "this machine's session ids and agent records stay here"
     ws_out = out / "workspace"
     assert (ws_out / "card-checks" / "c1" / "shot.png").read_bytes() == b"\x89PNG\r\n\x00\xff"
     # the labels keep every row whole, the texts each marked too
@@ -1086,6 +1093,26 @@ def test_a_full_export_installs_with_its_sessions_under_new_ids(tmp_path):
     # a second install of the same export gets sessions of its own
     again = demo.install(out, tmp_path / "c" / "toy", new_corpus, home=tmp_path / "b", claude_dir=new_claude)
     assert again["installed_transcripts"][0]["session"] not in (sid, SID)
+
+
+def test_install_leaves_out_the_trusted_folder_an_older_full_export_kept(tmp_path):
+    """An export made while the full export kept the hooks' trusted folder installs without it: another machine's
+    session ids and agent records would name sessions and agents this machine never ran, and the hooks trust them."""
+    out, corpus, claude, m = full_made(tmp_path)
+    older = json.loads((out / demo.MANIFEST).read_text())
+    for name, text in (("trusted/subagents.json", '{"main": {"session": "m-old"}}'), ("trusted/launch.json", "{}")):
+        (out / "workspace" / name).parent.mkdir(parents=True, exist_ok=True)
+        (out / "workspace" / name).write_text(text)
+        older["files"].append({"path": name, "bytes": len(text)})
+    (out / demo.MANIFEST).write_text(json.dumps(older))
+    new_ws = tmp_path / "b" / "toy"
+    got = demo.install(out, new_ws, corpus, home=tmp_path / "b", claude_dir=tmp_path / "b-claude")
+    assert got["warnings"] == [] and (new_ws / "orient" / "run.json").is_file()
+    assert not (new_ws / "trusted").exists()
+
+
+def test_an_outputs_only_export_leaves_out_the_trusted_folder():
+    assert demo.kept(Path("trusted/subagents.json"), "o1") == demo.TRUSTED_WHY
 
 
 def test_a_full_export_whose_transcripts_did_not_come_installs_as_the_outputs_do(tmp_path):

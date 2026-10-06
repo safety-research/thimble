@@ -178,6 +178,26 @@ async def test_a_message_to_the_finished_agent_starts_its_next_run_and_the_short
     assert not any(r.get("tray") for r in users[:-1]), "a prompt or message main's call sent is not typed in the tray"
 
 
+async def test_a_message_after_a_run_the_module_ended_starts_the_next_run(bridge, project, ended):
+    """A run that ended by a sign the mirror does not read (the module's turn end after a TaskStop: the browser's
+    Stop, or thimble's stop when main went into plan mode, U4) leaves the agent able to continue: the message that
+    resumes it starts its next run, which ends again (live: the follow-up after a plan-mode stop was not counted)."""
+    lv, chat, path = await _click_orientation(bridge, project)
+    _write(path, _assistant({"type": "text", "text": "Reading the files."}))
+    session.tail_once(lv)
+    subagents.mark_stopped_by(CORPUS, AGENT, subagents.STOPPED_PLAN)
+    subagents.ended(CORPUS, AGENT, "", "aborted")
+    assert ended[-1][:4] == ("ended", "orientation", 0, "stopped")
+    _write(path, {"type": "user", "isMeta": True, "origin": {"kind": "coordinator"},
+                  "message": {"content": "The coordinator sent a message while you were working:\nGo on."}},
+           _assistant({"type": "text", "text": "Going on."}))
+    session.tail_once(lv)
+    a = subagents.agent(CORPUS, AGENT)
+    assert (a["run"], a["status"], a.get("stopped_by")) == (1, "running", None)
+    subagents.ended(CORPUS, AGENT, "Done.", "answer")
+    assert ended[-1] == ("ended", "orientation", 1, "done", "Done.")
+
+
 async def test_each_follow_up_s_message_in_the_thread_names_its_run(bridge, project, ended):
     """Main's SendMessage to the finished orientation, and a message the analyst typed to it in the agent tray, each
     show in its thread with the run they start (`run`), as the browser cuts the thread into runs by it (orientRuns)
@@ -449,6 +469,32 @@ async def test_r2_main_s_agent_call_that_fails_refuses_its_request_with_the_kind
     assert ended[-1] == ("refused", "writer", kind, text)
 
 
+async def test_r2_a_subagent_s_agent_call_for_a_typed_start_that_fails_refuses_its_request(bridge, project, ended):
+    """U5: a subagent of main's that is no agent of thimble's (a thread's fork; here main's own general-purpose
+    subagent) called start_writing and made the Agent call itself; Claude Code's error for it refuses the request with
+    the kind of its error, as for main's call, so the browser never waits on Starting…"""
+    lv = _attach(project)
+    gp = "a0000000000000gp1"
+    sf.add_caller(config.workspace_dir(CORPUS), "toolu_gp_tool", gp, "general-purpose")
+    ans = await subagents.start_job(CORPUS, "writer", "writer:report", "w", {}, subagents.TYPED, call="toolu_gp_tool")
+    assert subagents.request(CORPUS, ans["request"])["caller_agent"] == gp
+    _write(Path(lv.transcript_path), _human("have a helper start the writer"),
+           _assistant(_use("toolu_gp", "Agent", {"subagent_type": "general-purpose", "description": "helper",
+                                                 "prompt": "start the writer"})),
+           _result("toolu_gp", f"Async agent launched successfully.\nagentId: {gp}"))
+    session.tail_once(lv)
+    path = _agent_file(project, gp, agentType="general-purpose", toolUseId="toolu_gp")
+    text = "Cannot launch: 20 concurrent subagents are already running (the limit is 20)."
+    _write(path, _assistant(_use("toolu_gp_tool", "mcp__plugin_thimble_thimble__start_writing", {"doc": "report"})),
+           _result("toolu_gp_tool", "AGENT CALL"), _assistant(_use("toolu_gp_agent", "Agent", ans["input"])),
+           _result("toolu_gp_agent", text, error=True))
+    session.tail_once(lv)
+    session.tail_once(lv)
+    r = subagents.request(CORPUS, ans["request"])
+    assert (r["state"], r["refused_kind"], r["reason"]) == ("refused", "limit", text)
+    assert ended[-1] == ("refused", "writer", "limit", text)
+
+
 async def test_r2_a_send_message_to_an_agent_of_another_session_and_a_stop_of_an_ended_one(bridge, project, ended):
     lv, chat, path = await _click_orientation(bridge, project)
     ans = subagents.message_request(CORPUS, AGENT, "and April?")
@@ -499,9 +545,9 @@ async def test_main_s_empty_bash_true_after_a_start_is_no_row(bridge, project):
 async def test_a_descendant_of_the_orientation_is_a_step_of_its_chat_with_numbered_calls(bridge, project, ended):
     lv, chat, path = await _click_orientation(bridge, project)
     with subagents.update(CORPUS) as state:
-        sf.registry(state)["h1"] = {"type": "thimble:helper", "role": "helper", "parent": AGENT, "root": AGENT,
+        sf.registry(state)["h1"] = {"type": "thimble:orient-helper", "role": "orient-helper", "parent": AGENT, "root": AGENT,
                                     "status": "running", "descendant": True}
-    child = _agent_file(project, "h1", agentType="thimble:helper", description="survey the files",
+    child = _agent_file(project, "h1", agentType="thimble:orient-helper", description="survey the files",
                         parentAgentId=AGENT, toolUseId="toolu_h")
     _write(child, _assistant(_use("toolu_hr", "Read", {"file_path": "/c/board.jsonl"})), _result("toolu_hr", "1\tx"))
     session.tail_once(lv)
@@ -510,6 +556,37 @@ async def test_a_descendant_of_the_orientation_is_a_step_of_its_chat_with_number
     from app import calls
 
     assert [c.get("agent") for c in calls.listing(CORPUS, chat)] == ["h1"], "numbered in the orientation's sequence"
+
+
+@pytest.mark.parametrize("shape", ["user", "attachment"])
+async def test_a_descendant_s_step_ends_at_its_task_notification_in_either_shape(bridge, project, ended, shape):
+    """Claude Code writes a child's task notification into its parent's transcript as an attachment while the parent's
+    turn runs, and as a user record (origin task-notification, with a preamble) when it comes between the parent's turns
+    (live check L34 on 060-s4, where those steps kept spinning). Either ends the child's step."""
+    lv, chat, path = await _click_orientation(bridge, project)
+    with subagents.update(CORPUS) as state:
+        sf.registry(state)["h1"] = {"type": "thimble:orient-helper", "role": "orient-helper", "parent": AGENT, "root": AGENT,
+                                    "status": "running", "descendant": True}
+    child = _agent_file(project, "h1", agentType="thimble:orient-helper", description="survey the files",
+                        parentAgentId=AGENT, toolUseId="toolu_h")
+    _write(child, _assistant(_use("toolu_hr", "Read", {"file_path": "/c/board.jsonl"})), _result("toolu_hr", "1\tx"))
+    session.tail_once(lv)
+    [step] = [m for m in agents.list_chats(CORPUS) if m.get("role") == agents.STEP_ROLE and m.get("agent_id") == "h1"]
+    assert step["status"] == "running"
+    note = ("<task-notification>\n<task-id>h1</task-id>\n<tool-use-id>toolu_h</tool-use-id>\n<status>completed</status>\n"
+            "<summary>Agent \"survey the files\" finished</summary>\n</task-notification>")
+    if shape == "user":
+        rec = {"type": "user", "isMeta": True, "origin": {"kind": "task-notification"},
+               "message": {"role": "user", "content": "[SYSTEM NOTIFICATION - NOT USER INPUT]\nThis is an automated "
+                                                       "background-task event.\n\n" + note}}
+    else:
+        rec = {"type": "attachment", "attachment": {"type": "queued_command", "prompt": note,
+                                                    "commandMode": "task-notification"}}
+    _write(path, rec)
+    session.tail_once(lv)
+    assert agents.read_meta(CORPUS, step["id"])["status"] == "done"
+    assert not [e for e in agents.read_events(agents.paths(CORPUS, chat)[1]) if e.get("type") == "user"], \
+        "the notice is no line of the orientation's thread"
 
 
 async def test_clear_carries_thimble_s_agents_into_the_new_session_read_from_the_start_of_its_file(bridge, project,
@@ -670,6 +747,43 @@ async def test_an_orientation_stopped_with_esc_is_recorded_as_one_claude_code_re
                                "cancelled; only launch a new agent if the user explicitly asks.", error=True), END)
     session.tail_once(lv)
     assert subagents.cancelled(CORPUS, AGENT), "main's SendMessage got Claude Code's text"
+
+
+async def test_an_esc_stopped_orientation_s_continuation_is_the_next_run_of_its_thread(bridge, project, monkeypatch):
+    """U2: a message to an orientation stopped with Esc starts a continuation, a new agent in the same thread: the
+    mirror writes its transcript into the stopped run's chat, without its prompt (thimble's, with the stopped run's
+    context) as a message, and its run is run 1, which ends as a follow-up's does."""
+    from app import orientation
+
+    monkeypatch.setattr(orient_session, "measure", lambda c, chat: _no_line())
+    told: list[dict] = []
+    monkeypatch.setattr(subagents, "tell_main", lambda c, kind, payload: told.append(payload))
+    lv, chat, path = await _click_orientation(bridge, project)
+    _write(Path(lv.transcript_path), _notice(AGENT, "killed", summary='Agent "orientation: x" was stopped by user'), END)
+    session.tail_once(lv)
+    assert subagents.cancelled(CORPUS, AGENT)
+    new = "a0000000000000c01"
+    bridge.answers.append({"agentId": new})
+    out = await orient_session.send(CORPUS, "And May?")
+    assert out == {"status": "continued", "chat": chat, "agentId": new}
+    assert orientation.read_run(CORPUS)["run"] == 1 and agents.read_meta(CORPUS, chat)["agent_id"] == new
+    cont = _agent_file(project, new, agentType="thimble:orientation", toolUseId="toolu_plugin_c01")
+    _write(cont, {"type": "user", "message": {"role": "user", "content": "[thimble request req_x]\nThe analyst stopped"}},
+           _assistant({"type": "text", "text": "Taking up the work."}),
+           _assistant(_use("toolu_hbc", "SubagentHandback", {"message": "May looks the same."})))
+    session.tail_once(lv)
+    session.tail_once(lv)
+    recs = agents.read_events(agents.paths(CORPUS, chat)[1])
+    users = [r["text"] for r in recs if r.get("type") == "user"]
+    assert "And May?" in users and not [u for u in users if "The analyst stopped" in u], "no prompt as a message"
+    assert "Taking up the work." in json.dumps(recs), [r.get("type") for r in recs]
+    a = subagents.agent(CORPUS, new)
+    assert (a["status"], a["ended_run"]) == ("done", 1)
+    assert orientation.read_run(CORPUS)["followups"][-1]["status"] == "done" and told[-1]["run"] == 1
+
+
+async def _no_line() -> str:
+    return ""
 
 
 async def test_main_s_plan_mode_reaching_a_running_agent_marks_its_run(bridge, project, ended):

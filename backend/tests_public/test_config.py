@@ -61,7 +61,7 @@ def _conf(data) -> None:
 
 
 def test_every_role_resolves_to_a_full_model_id_and_an_explicit_effort(tmp_path, monkeypatch):
-    """No role resolves to an empty model or effort: the agents, thimble:helper's row (`subagents`), the classifiers,
+    """No role resolves to an empty model or effort: the agents, thimble:orient-helper's row (`subagents`), the classifiers,
     the viewer suggestion and the refusal row each name a full id and a level Claude Code takes, also when an agent
     file names none. A stored `ultracode` runs at xhigh, the orientation's default is xhigh, and `fast` is kept only for
     the classifiers."""

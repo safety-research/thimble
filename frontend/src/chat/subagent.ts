@@ -37,8 +37,8 @@ export function terminalLine(m: Pick<ChatMeta, 'agent_type' | 'role'> | null | u
 
 /** Why the agent's card says it stopped, or ''. An orientation main's quit stopped says how to continue it while no
  * session is back (`back` false); once `thimble --continue` brought main back, its thread says a message continues it
- * (CONTINUE_HERE_LINE). */
-export function stoppedLine(m: Pick<ChatMeta, 'status' | 'stopped_by' | 'role' | 'route'> | null | undefined, back = false): string {
+ * (CONTINUE_HERE_LINE). One thimble stopped when main went into plan mode says so, and how to go on (planLine). */
+export function stoppedLine(m: Pick<ChatMeta, 'status' | 'stopped_by' | 'role' | 'route' | 'agent_type'> | null | undefined, back = false): string {
   if (!m || m.status !== 'stopped' || !isSubagent(m)) return ''
   if (m.stopped_by === 'quit') {
     return m.role === 'orient' && !back
@@ -47,14 +47,46 @@ export function stoppedLine(m: Pick<ChatMeta, 'status' | 'stopped_by' | 'role' |
   }
   if (m.stopped_by === 'analyst') return 'Stopped.'
   if (m.stopped_by === 'user') return 'Stopped with Esc in your terminal.'
+  if (m.stopped_by === 'plan') return planLine(m.role, m.agent_type)
   return ''
+}
+
+/** How a run thimble stopped when main went into plan mode goes on once main leaves it, by its agent's role (backend
+ * subagents.PLAN_HOW). A view's build, its review and a code ticket share the chat role `dev`, so the agent's type
+ * names the role; a chat without one goes by its chat role (PLAN_CHAT_ROLES). */
+const PLAN_HOW: Record<string, string> = {
+  orientation: 'send it a message to continue it',
+  critic: 'send the orientation a message to continue it',
+  writer: 'choose Write again',
+  'view-builder': 'choose Retry on the view',
+  'view-reviewer': 'choose Review again on the view',
+  check: 'choose Run on the check',
+  'dev-ticket': 'choose Retry on the ticket',
+}
+const PLAN_CHAT_ROLES: Record<string, string> = { orient: 'orientation', step: 'critic', writer: 'writer', dev: 'view-builder', check: 'check' }
+
+/** The line of a run thimble stopped through Claude Code when main went into plan mode, where its agents would have to
+ * ask before every step: why, and how to go on (backend subagents.plan_line), by the agent's type (`thimble:<role>`)
+ * where it is known, else by its chat's role. */
+export function planLine(role: string | null | undefined, agentType?: string | null): string {
+  const own = agentType?.startsWith('thimble:') ? agentType.slice('thimble:'.length) : ''
+  const how = PLAN_HOW[own] ?? PLAN_HOW[PLAN_CHAT_ROLES[role ?? ''] ?? ''] ?? 'start it again'
+  return `Stopped when your Claude Code session went into plan mode, where thimble's agents would have to ask you before every step. Leave plan mode (shift+tab in your terminal), then ${how}.`
+}
+
+/** The line a thread ends with once thimble stopped its run as main went into plan mode (planLine), or null: an
+ * orientation's, a writer's or a check's thread (ChatPanel SessionView) and a view's build (ViewBuildView), whose
+ * transcript's own end says only "stopped". Pure. */
+export function planStoppedLine(m: Pick<ChatMeta, 'status' | 'stopped_by' | 'role' | 'agent_type'> | null | undefined, running: boolean): string | null {
+  return !running && m?.status === 'stopped' && m.stopped_by === 'plan' ? planLine(m.role, m.agent_type) : null
 }
 
 export type Continue = 'here' | 'earlier-session' | 'earlier-version' | 'stopped-by-user' | null
 
 /** Whether a follow-up can still continue an orientation: `earlier-version` for a chat no subagent ran (0.5.0, or a
  * pre-release 0.6.0 that ran it headless), `stopped-by-user` for one stopped with Esc in its agent view, which Claude
- * Code resumes no more (backend subagents.mark_cancelled), `earlier-session` when its agent belongs to another Claude
+ * Code resumes no more (backend subagents.mark_cancelled), so a message starts a continuation in its thread (backend
+ * orient_session.continue_stopped), `earlier-session` when its agent belongs to another Claude
  * Code session than the one that is main now (`mainSid`), `here` otherwise; null while nothing is known. */
 export function continueOf(m: Pick<ChatMeta, 'continue' | 'route' | 'agent_id' | 'session' | 'sessions' | 'precached'> | null | undefined, mainSid: string | null | undefined): Continue {
   if (!m) return null
@@ -70,10 +102,11 @@ export function continueOf(m: Pick<ChatMeta, 'continue' | 'route' | 'agent_id' |
 /** The latest session id an orientation's records are under, which `thimble -r` resumes. */
 export const lastSession = (m: Pick<ChatMeta, 'session' | 'sessions'> | null | undefined): string => m?.sessions?.[m.sessions.length - 1] || m?.session || ''
 
-/** The composer's text for an orientation that cannot take a message here (backend tools.md orient-continue-*). */
+/** The composer's text for an orientation that cannot take a message here (backend tools.md orient-continue-*); ''
+ * for one that can, an orientation stopped with Esc among them, whose message starts a continuation
+ * (STOPPED_CONTINUE_LINE). */
 export function continueText(kind: Continue, sid: string): string {
   if (kind === 'earlier-version') return 'This orientation ran in an earlier version of thimble and cannot be continued. Start a new orientation to explore further.'
-  if (kind === 'stopped-by-user') return 'This orientation was stopped with Esc in your terminal, and Claude Code does not continue an agent stopped that way. Start a new orientation to explore further.'
   if (kind === 'earlier-session')
     return `This orientation ran in an earlier Claude Code session. To continue it, quit and run \`thimble -r ${sid || '<session id>'}\` in this folder, or start a new orientation.`
   return ''
@@ -81,6 +114,11 @@ export function continueText(kind: Continue, sid: string): string {
 
 /** The line of an orientation stopped by main's quit and resumed with `thimble --continue`: a message continues it. */
 export const CONTINUE_HERE_LINE = 'Stopped when Claude Code quit. Send a message to continue it.'
+
+/** The line of an orientation stopped with Esc in its agent view, which Claude Code resumes no more: a message starts
+ * a new run in its thread with what the stopped run left (backend orient_session.continue_stopped). */
+export const STOPPED_CONTINUE_LINE =
+  'Stopped with Esc in your terminal, and Claude Code does not continue an agent stopped that way. Send a message to continue it: thimble starts a new run in this thread that takes up its work.'
 
 /** The line while the orientation waits for its critic's report. */
 export const PAUSED_LINE = 'Waiting for the critique'

@@ -21,6 +21,7 @@ import type {
   NewCellBody,
   NewThreadBody,
   NewTicketBody,
+  DevStatus,
   OrientRun,
   Proposal,
   ResolvedRef,
@@ -471,6 +472,10 @@ export const api = {
   ticketShotUrl: (id: string, name: string) => `${BASE}/dev/tickets/${enc(id)}/shots/${enc(name)}`,
   fileTicket: (body: NewTicketBody) => j<Ticket>(`${BASE}/dev/tickets`, { method: 'POST', body: JSON.stringify(body) }),
   retryTicket: (id: string) => j<Ticket>(`${BASE}/dev/tickets/${enc(id)}/retry`, { method: 'POST' }),
+  /** Start on main's ticket that waited while another ran: it starts through the plugin module once nothing else runs */
+  startTicket: (id: string) => j<Ticket>(`${BASE}/dev/tickets/${enc(id)}/start`, { method: 'POST' }),
+  /** whether code tickets run here (`tickets` is '' in a development install), for Report a problem's File a code ticket */
+  devStatus: () => j<DevStatus>(`${BASE}/dev/status`),
   dismissTicket: (id: string) => j<Ticket>(`${BASE}/dev/tickets/${enc(id)}/dismiss`, { method: 'POST' }),
   /** stop a running ticket: nothing is applied and it ends `stopped`, which Retry runs again */
   stopTicket: (id: string) => j<{ ok: boolean }>(`${BASE}/dev/tickets/${enc(id)}/stop`, { method: 'POST' }),

@@ -556,7 +556,7 @@ async def test_the_roles_come_from_subagents_roles_as_agent_register_takes_them(
         "orientation": {"name": "x", "prompt": "Orient.", "model": "claude-opus-5-5[1m]", "effort": "xhigh",
                         "description": "thimble's orientation of this corpus", "background": True,
                         "disallowedTools": ["mcp__plugin_thimble_thimble__start_orientation"], "extra": 1},
-        "thimble:helper": Role("Help.", "claude-sonnet-5", "high", skills=["thimble:shared"])}
+        "thimble:orient-helper": Role("Help.", "claude-sonnet-5", "high", skills=["thimble:shared"])}
     monkeypatch.setitem(sys.modules, "app.subagents", fake)
     monkeypatch.setattr(app, "subagents", fake)  # `from . import subagents` reads the package's attribute first
     _launch()
@@ -568,8 +568,8 @@ async def test_the_roles_come_from_subagents_roles_as_agent_register_takes_them(
         "orientation": {"name": "orientation", "prompt": "Orient.", "model": "claude-opus-5-5[1m]", "effort": "xhigh",
                         "description": "thimble's orientation of this corpus", "background": True,
                         "disallowedTools": ["mcp__plugin_thimble_thimble__start_orientation"]},
-        "helper": {"name": "helper", "prompt": "Help.", "model": "claude-sonnet-5", "effort": "high",
-                   "description": "thimble's role", "background": True, "skills": ["thimble:shared"]}}
+        "orient-helper": {"name": "orient-helper", "prompt": "Help.", "model": "claude-sonnet-5", "effort": "high",
+                          "description": "thimble's role", "background": True, "skills": ["thimble:shared"]}}
 
 
 def _fake_roles(monkeypatch, prompt: dict) -> None:

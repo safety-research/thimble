@@ -711,6 +711,12 @@ export function ChipRow({ item, ws }: { item: ChipRowT; ws: string }) {
     )
   }
   if (item.chip === 'follow_up_ran_on') return <Note className="chat-chip-row chat-ran-on" data-chip="follow_up_ran_on" text={item.text} />
+  if (item.chip === 'view_failed') {
+    // an orientation's proposal that failed through its repairs: the line, and the view's chip with ✕ and Retry
+    const target = item.ref ? parseRef(item.ref) : null
+    const slug = target?.kind === 'view' ? target.slug : null
+    return <Note className="chat-chip-row" data-chip="view_failed" text={item.text} chips={<ViewChip ws={ws} slug={slug} name={item.view || slug || ''} />} />
+  }
   if (item.chip === 'say') {
     return (
       <div className="chat-msg chat-assistant chat-say" data-chip="say">
@@ -830,8 +836,8 @@ function LabelRunsCard({ runs, ws }: { runs: AgentRowT[]; ws: string }) {
   )
 }
 
-/** Views proposed in a row, one note: each proposal's ViewChip, which follows its build. A proposal the orientation
- * dropped is left out, and a note left with none is not drawn. */
+/** Views proposed in a row, one note: each proposal's ViewChip, which follows its build. A proposal dropped when the
+ * analyst stopped the orientation is left out, and a note left with none is not drawn. */
 function ViewsNote({ chips, ws }: { chips: ChipRowT[]; ws: string }) {
   const proposals = useProposals(ws)
   const shown = chips

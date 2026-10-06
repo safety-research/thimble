@@ -47,6 +47,7 @@ CRITIQUE_SESSION = "critique"  # `critique:orient`, the critic of the orientatio
 CHECK_SESSION = "check"  # `check:<id>:<doc>`, a run of a report check on a document (checks.py)
 VIEW_SESSION = "view"  # `view:<slug>`, a build of a view (dev.py, view_tools.py)
 REVIEW_SESSION = "review"  # `review:<slug>`, a review of a built view (view_review.py, view_tools.py)
+TICKET_SESSION = "ticket"  # `ticket:<id>`, a code ticket's agent (dev.py, ticket_tools.py)
 MAIN_ONLY: "tuple[str | None, ...]" = (None,)  # Spec.sessions of a tool only main's shim lists (no THIMBLE_SESSION)
 ROLES = (ANALYST,)  # the dev worker is a Claude Code session with its own tools (dev.py)
 ANALYSIS_ROLES = (ANALYST,)  # who reads cards and records
@@ -213,6 +214,12 @@ REGISTRY: dict[str, Spec] = {
         Spec("view_pictures", (ANALYST,), "app.view_tools:tool_view_pictures", sessions=(REVIEW_SESSION,),
              drop_stops=True),
         Spec("finish_review", (ANALYST,), "app.view_tools:tool_finish_review", sessions=(REVIEW_SESSION,),
+             drop_stops=True),
+        # a code ticket's agent checks its change in the ticket's box as often as it wants, and finishes once, where the
+        # server commits the change and runs the gates of record (ticket_tools.py)
+        Spec("ticket_checks", (ANALYST,), "app.ticket_tools:tool_ticket_checks", sessions=(TICKET_SESSION,),
+             drop_stops=True),
+        Spec("finish_ticket", (ANALYST,), "app.ticket_tools:tool_finish_ticket", sessions=(TICKET_SESSION,),
              drop_stops=True),
     )
 }
@@ -2546,20 +2553,20 @@ async def _h_file_dev_ticket(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
     fn = _optional("dev", "file_ticket")
     if fn is None:
         return _not_available("file_dev_ticket", "dev", "file_ticket")
+    from . import dev  # noqa: PLC0415 — dev imports this module's callers
+
     source = ANALYST if ctx.actor == ANALYST else ctx.actor
-    rec = await _maybe_await(fn(ctx.c, title, body, urgent=bool(args.get("urgent")), source=source))
-    n = rec.get("n") if isinstance(rec, dict) else None
-    label = f"ticket #{n}" if n else "ticket"
-    if isinstance(rec, dict) and rec.get("status") == "failed":
-        return ok(hint("file_dev_ticket-cannot-run", label=label, why=rec.get("error") or ""))
-    contained = _optional("dev", "ticket_contained")
-    if contained is not None and await asyncio.to_thread(contained, ctx.c):
-        when = ("It runs now, its checks in a sandbox, and the analyst is asked on its permission card before its change "
-                "reaches thimble's own code.")
-    else:
-        when = ("It starts once the analyst allows it on the permission card, since its checks can't run in a sandbox "
-                "here, and the analyst is asked again before its change reaches thimble's own code.")
-    return ok(f"filed {label}: {title}. {when} The dev agent's row in the chat shows its progress.")
+    rec = await _maybe_await(fn(ctx.c, title, body, urgent=bool(args.get("urgent")), source=source, start=False,
+                                route="typed"))
+    label = dev._label(rec)
+    # main's ticket: prepared, then the exact Agent call that starts its agent, which auto mode judges (dev.start_typed)
+    ans = await dev.start_typed(rec, call=ctx.tool_use_id)
+    if ans.get("held"):
+        return ok(hint("file_dev_ticket-waits", label=label, running=str(ans.get("running") or "another ticket")))
+    if ans.refused or "input" not in ans:
+        return ok(hint("file_dev_ticket-cannot-run", label=label, why=ans.reason or str(ans.kind or "")))
+    return ok(hint("file_dev_ticket-start", label=label, title=title,
+                   start=hint("start_job-subagent", input=json.dumps(ans["input"], ensure_ascii=False))))
 
 # --------------------------------------------------------------------------- HTTP
 
@@ -2645,15 +2652,27 @@ async def call_route(name: str, body: CallBody, request: Request) -> dict[str, A
     return (await work).as_dict()
 
 
+# the start tools, whose result is an Agent call for the caller to make: a thread's fork may not make one, since Claude
+# Code tells its forks not to start subagents, so a fork's call is refused at once with start-refused-fork (U5), and its
+# file_dev_ticket, which starts a code ticket's agent or a view's builder, with start-refused-fork-ticket; another
+# subagent of main's makes the call itself (subagents.typed_caller)
+FORK_REFUSED = ("start_orientation", "start_writing", "propose_view", "run_check", "file_dev_ticket")
+
+
 async def _as_caller(c: str, name: str, tool_use_id: str | None) -> tuple[str, str | None]:
     """(why the call is refused, '' when it runs; the session it runs as) for a call through main's shim: the key of the
     agent of thimble's that made it (subagents.caller, from the caller hook's line, else the transcript that holds the
     call), or None for main's own. A call its caller may not make is refused (subagents.allowed): main's `critique`, the
-    critic's `add_card`, a tool of a part the orientation's run has off (orientation.part_on)."""
+    critic's `add_card`, a tool of a part the orientation's run has off (orientation.part_on), a thread's fork's start
+    tool (FORK_REFUSED)."""
     from . import orientation, orient_session, subagents  # noqa: PLC0415 — each imports this module
 
     canon = canonical(name)
     who = await subagents.caller(c, tool_use_id) if tool_use_id else None
+    if who is None and canon in FORK_REFUSED and subagents.fork_call(c, tool_use_id):
+        if canon == "file_dev_ticket":
+            return hint("start-refused-fork-ticket"), None
+        return hint("start-refused-fork"), None
     if who is None:
         spec = REGISTRY[canon]
         if spec.sessions and None not in spec.sessions:

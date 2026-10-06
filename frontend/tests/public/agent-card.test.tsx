@@ -8,7 +8,7 @@ import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { AgentCard } from '../../src/chat/AgentCard.tsx'
 import { ThreadsContext } from '../../src/chat/Notes.tsx'
-import { continueOf, continueText, runValues, stoppedLine, terminalLine, valuesText } from '../../src/chat/subagent.ts'
+import { STOPPED_CONTINUE_LINE, continueOf, continueText, planLine, planStoppedLine, runValues, stoppedLine, terminalLine, valuesText } from '../../src/chat/subagent.ts'
 import type { ChatMeta, ChatRecord } from '../../src/lib/types.ts'
 import { mount, settle, unmountAll } from './mount.tsx'
 
@@ -58,11 +58,33 @@ describe('the words', () => {
     expect(continueText('earlier-version', '')).toBe('This orientation ran in an earlier version of thimble and cannot be continued. Start a new orientation to explore further.')
   })
 
-  test('an orientation stopped with Esc in its agent view, which Claude Code resumes no more (live check L9)', () => {
+  test('a run thimble stopped when main went into plan mode says why, and how to go on once main leaves it (U4)', () => {
+    expect(stoppedLine(meta({ status: 'stopped', stopped_by: 'plan' }))).toBe(planLine('orient'))
+    expect(planLine('orient')).toMatch(/went into plan mode.*Leave plan mode \(shift\+tab in your terminal\), then send it a message to continue it\.$/)
+    expect(stoppedLine(meta({ role: 'writer', agent_type: 'thimble:writer', status: 'stopped', stopped_by: 'plan' }))).toMatch(/then choose Write again\.$/)
+    expect(planLine('dev')).toMatch(/Retry/)
+  })
+
+  test("the thread's own end line for such a run, a view's build among them, whose transcript ends with only \"stopped\" (live check U4)", () => {
+    const build = meta({ role: 'dev', agent_type: 'thimble:view-builder', status: 'stopped', stopped_by: 'plan' })
+    expect(planStoppedLine(build, false)).toMatch(/went into plan mode.*then choose Retry on the view\.$/)
+    expect(planStoppedLine(meta({ status: 'stopped', stopped_by: 'plan' }), false)).toBe(planLine('orient'))
+    expect(planStoppedLine(build, true)).toBeNull()
+    // a review's thread and a ticket's share the chat role `dev` with a build's: the agent's type names what goes on
+    const review = meta({ role: 'dev', agent_type: 'thimble:view-reviewer', status: 'stopped', stopped_by: 'plan' })
+    expect(planStoppedLine(review, false)).toMatch(/then choose Review again on the view\.$/)
+    expect(stoppedLine(meta({ role: 'dev', agent_type: 'thimble:dev-ticket', status: 'stopped', stopped_by: 'plan' }))).toMatch(/then choose Retry on the ticket\.$/)
+    expect(planStoppedLine(meta({ role: 'dev', status: 'stopped', stopped_by: 'analyst' }), false)).toBeNull()
+    expect(planStoppedLine(null, false)).toBeNull()
+  })
+
+  test('an orientation stopped with Esc in its agent view, which Claude Code resumes no more, takes a message that continues it (U2)', () => {
     const stopped = meta({ status: 'stopped', stopped_by: 'user', continue: 'stopped-by-user' })
     expect(stoppedLine(stopped)).toBe('Stopped with Esc in your terminal.')
     expect(continueOf(stopped, 's1')).toBe('stopped-by-user')
-    expect(continueText('stopped-by-user', '')).toBe('This orientation was stopped with Esc in your terminal, and Claude Code does not continue an agent stopped that way. Start a new orientation to explore further.')
+    // no closed text: the composer stays, and its message starts a new run in the thread (no New orientation offer)
+    expect(continueText('stopped-by-user', '')).toBe('')
+    expect(STOPPED_CONTINUE_LINE).toMatch(/Send a message to continue it/)
   })
 })
 

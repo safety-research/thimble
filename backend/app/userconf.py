@@ -21,8 +21,9 @@ an agent would change in its own permissions and decides; a session nobody answe
 One fence for main and its agents. thimble's agents are subagents of main, the analyst's Claude Code session, which the
 launcher starts inside thimble's fence (cli.main_fence, its permission rules main_rules): they run in main's permission
 mode and share its sandbox, network and rules. So the orientation's `web`, `network` and `data` are main's fence's keys,
-which every agent shares; the other agents keep only `web: off`, which keeps that one agent off the web tools. The dev
-agent alone keeps its own permission mode, fast mode and fence keys, for code tickets, which stay jobs of the server.
+which every agent shares; the other agents keep only `web: off`, which keeps that one agent off the web tools. Code
+tickets' agents are subagents of main too. The dev agent alone keeps its own permission mode, fast mode and fence keys,
+for `thimble fix` and an extension's program that runs the dev agent, which stay jobs of the server.
 Installs follow Claude Code's permission mode: thimble adds no rule for them. The keys earlier builds read for this,
 `installs`, and each agent's own `fast` and `permissionMode` and `web` other than "off" but the dev agent's
 (IGNORED_KEYS), are read and ignored, so an earlier config stays valid; `ignored` lists those a file holds, and a save
@@ -59,8 +60,8 @@ CALLS = ("labels", "cardCheck")  # one model call each, with no tools, unless an
 # each agent's role among config.MODEL_ROLES
 ROLES = {"orientation": "orient", "critic": "critic", "writer": "writer", "checks": "checks", "dev": "dev",
          "labels": "labels", "cardCheck": "verify", "suggest": "suggest", "refusal": "refusal"}
-# each agent's row among modes.AGENTS: the dev agent's alone, whose code tickets run in a mode of their own; every other
-# agent runs in main's mode (module note, one fence)
+# each agent's row among modes.AGENTS: the dev agent's alone, for an extension's program that runs it; every other agent,
+# code tickets' among them, runs in main's mode (module note, one fence)
 MODE_ROWS = {"dev": "dev"}
 SUBAGENT_ROLES = ("orientation", "critic", "writer", "checks")  # the agents that run as subagents of main
 # the keys of each agent that earlier builds read and this one reads and ignores (module note, one fence)
@@ -118,13 +119,13 @@ DEFAULTS: dict[str, Any] = {
     "extensions": {},
     "agents": {
         # the orientation's web, network and data are main's fence's (module note, one fence); subagentModel and
-        # subagentEffort are thimble:helper's, the type of the orientation's own subagents
+        # subagentEffort are thimble:orient-helper's, the type of the orientation's own subagents
         "orientation": {**_subagent("ask"), "network": "on", "data": "ask", "subagentModel": None,
                         "subagentEffort": None},
         "critic": _subagent(None),
         "writer": _subagent(None),
         "checks": _subagent(None),
-        "dev": _session_agent("off"),  # its `fast` is code tickets' (config.FAST_OF_TICKETS)
+        "dev": _session_agent("off"),  # its `fast` is `thimble fix`'s (config.FAST_OF_TICKETS)
         # `network`, `data` and `env` reach only an extension's program that runs one of their tasks (harness.py)
         **{a: {"model": None, "effort": None, "fast": None, "network": "on", "data": "ask", "env": [], "prompt": None}
            for a in CALLS},
@@ -653,7 +654,7 @@ def legacy_patch(models: dict[str, Any], rows: dict[str, Any]) -> dict[str, Any]
 
 def pane_patch(models: dict[str, Any] | None, rows: dict[str, Any] | None) -> dict[str, Any]:
     """The Settings pane's changes as settings of this file: `models` {role: {model?, effort?, fast?, off?}} (main's left
-    out, '' for back to the default; `subagents` is thimble:helper's row, the orientation's subagentModel and
+    out, '' for back to the default; `subagents` is thimble:orient-helper's row, the orientation's subagentModel and
     subagentEffort; `fast` only for an agent that takes it, `off` only for the refusal row; an extension's agent,
     "<ext>:<name>", takes its model and effort only) and `rows` {row of modes.AGENTS: mode, None for main's}, `views`
     being the dev agent's row of earlier builds. A row of an agent that runs in main's mode now, which an earlier tab may
@@ -986,11 +987,20 @@ def dev_files() -> list[Path]:
     return [folder / name for name in TICKET_FILES]
 
 
+def checkout_git() -> list[Path]:
+    """The live checkout's git folder in a development install, which main and its subagents may not edit: only
+    thimble's server commits to a code ticket's branch and moves the live branch (dev.commit_worktree); none in an
+    installed copy."""
+    git = config.REPO_ROOT / ".git"
+    return [git] if git.exists() else []
+
+
 def main_rules(c: str) -> list[Rule]:
     """The permission rules of main's fence for workspace `c` (cli.main_fence; module note, one fence), each with its
     cause: an edit of the corpus asks, or is denied or left to the mode, by the orientation's `data`; an edit of
     thimble's config files or the workspace's settings.json asks; the web tools ask, are denied or are allowed by its
-    `web`; main's kept mode, the workspace's records (STATE_PATHS) and the code tickets' (dev_files) are not edited; the
+    `web`; main's kept mode, the workspace's records (STATE_PATHS), the code tickets' (dev_files) and the live checkout's
+    git folder (checkout_git) are not edited; the
     token files and the links folder are neither read nor edited; the critique folder is read unasked, since the critic
     reads its digest and brief there. No rule for installs, which follow Claude Code's permission mode. A config with an
     error gives the defaults' rules."""
@@ -1008,6 +1018,7 @@ def main_rules(c: str) -> list[Rule]:
     out.append(Rule("deny", f"Edit(/{main_modes_file()})", "state"))
     out += [Rule("deny", f"Edit(/{ws / p})", "state") for p in STATE_PATHS]
     out += [Rule("deny", f"Edit(/{f})", "state") for f in dev_files()]
+    out += [Rule("deny", f"Edit(/{g}/**)", "state") for g in checkout_git()]
     out += [Rule("deny", r, "private") for r in private_rules()]
     links = global_file().parent / LINKS_DIR
     out += [Rule("deny", f"Read(/{links}/**)", "private"), Rule("deny", f"Edit(/{links}/**)", "private")]

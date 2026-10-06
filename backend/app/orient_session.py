@@ -33,8 +33,10 @@ main's `orient` event and of summary.md, and the record's `coverage`.
 Follow-ups. The thread's composer sends a follow-up through the module (message_route, subagents.send); main's
 `message_orientation` returns the exact SendMessage. A follow-up continues the same agent, by its id, as its next run;
 its cards land in place as one undo batch, and when it changes a card the report cites, the report pass runs again as a
-revision. An orientation of an earlier Claude Code session, or of an earlier version of thimble (a chat with no agent
-id), cannot be continued (409, 410). An orientation `thimble demo` installed from a pre-cache cannot either
+revision. One stopped with Esc in its agent view, which Claude Code resumes no more, is continued by a message all the
+same (continue_stopped): a new `thimble:orientation` run in its thread, as its next run, with what the stopped run left
+and on its model and effort. An orientation of an earlier Claude Code session, or of an earlier version of thimble (a
+chat with no agent id), cannot be continued (409, 410). An orientation `thimble demo` installed from a pre-cache cannot either
 (precached.py). An orientation an extension's program runs takes a follow-up by running again with it
 (_program_follow_up); Settings' Run now for an extension whose program runs the orientation runs it again
 (run_program_now).
@@ -133,7 +135,12 @@ class EarlierVersion(RuntimeError):
 
 class StoppedInTerminal(EarlierVersion):
     """The orientation was stopped with Esc in its agent view, after which Claude Code resumes it no more
-    (subagents.mark_cancelled): it cannot be continued either, so every caller of latest treats it as EarlierVersion."""
+    (subagents.mark_cancelled). A message to it starts a continuation (continue_stopped): a new run in its thread with
+    the stopped run's context. `chat` and `agent_id` name the stopped run."""
+
+    def __init__(self, text: str, chat: str = "", agent_id: str = "") -> None:
+        super().__init__(text)
+        self.chat, self.agent_id = chat, agent_id
 
 
 _closing: dict[str, asyncio.Event] = {}  # the workspaces whose first run ended and is being measured (_measured)
@@ -406,12 +413,22 @@ def latest(c: str) -> tuple[dict[str, Any], str, str]:
         raise EarlierVersion(tools.hint("orient-continue-earlier-version"))
     a = subagents.agent(c, agent_id) or {}
     if a.get("cancelled") or meta.get("continue") == subagents.CANCELLED:
-        raise StoppedInTerminal(tools.hint("orient-continue-stopped-by-user"))
+        raise StoppedInTerminal(tools.hint("orient-continue-stopped-by-user"), chat, agent_id)
     sessions = [str(s) for s in a.get("sessions") or meta.get("sessions") or [meta.get("session")] if s]
     lv = session.current(c)
     if lv is not None and sessions and lv.sid not in sessions:
         raise EarlierSession(earlier_text(sessions[-1]))
     return rec, chat, agent_id
+
+
+def stopped_unnamed(c: str, agent_id: str) -> bool:
+    """Whether the orientation's latest run ended stopped with no sign of who stopped it: no stop of thimble's own (the
+    browser's Stop, plan mode, main's quit) and no task notification. Esc on the first run of an agent the plugin
+    started is such a stop, as Claude Code sends main no task notification for that run (live check U2 on 060-s4), and
+    Claude Code resumes that agent no more. So main's message_orientation continues it as it does one stopped with Esc,
+    in place of a SendMessage that Claude Code refuses."""
+    a = subagents.agent(c, agent_id) or {}
+    return a.get("status") == "stopped" and not a.get("stopped_by") and bool(a.get("plugin_started"))
 
 
 def earlier_text(sid: str) -> str:
@@ -481,7 +498,14 @@ async def send(c: str, text: str, by: str = BROWSER, extension: str = "") -> dic
     program = await _program_follow_up(c, text, None)
     if program is not None:
         return program
-    _, chat, agent_id = latest(c)
+    try:
+        _, chat, agent_id = latest(c)
+    except StoppedInTerminal as stopped:
+        _refuse_message(c, text)
+        ans = await continue_stopped(c, stopped.chat, stopped.agent_id, text, by)
+        if ans.refused:
+            raise RuntimeError(ans.reason or ans.kind or "the continuation did not start")
+        return {"status": "continued", "chat": stopped.chat, **({"agentId": ans.agent_id} if ans.agent_id else {})}
     _refuse_message(c, text)
     k = subagents.message_run(c, agent_id)  # before the send, which may start the run
     if c in _closing:
@@ -490,14 +514,124 @@ async def send(c: str, text: str, by: str = BROWSER, extension: str = "") -> dic
         return {"status": "held", "chat": chat}
     body, told = with_lead(c, text)
     ans = await subagents.send(c, agent_id, body)
-    if ans.refused and subagents.cancelled(c, agent_id):  # Claude Code said it resumes it no more (Esc)
-        raise StoppedInTerminal(tools.hint("orient-continue-stopped-by-user"))
+    if ans.refused and subagents.cancelled(c, agent_id):  # Claude Code said it resumes it no more (Esc): continue it
+        ans = await continue_stopped(c, chat, agent_id, text, by)
+        if ans.refused:
+            raise RuntimeError(ans.reason or ans.kind or "the continuation did not start")
+        return {"status": "continued", "chat": chat, **({"agentId": ans.agent_id} if ans.agent_id else {})}
     if ans.refused:
         raise RuntimeError(ans.reason or ans.kind or "the module did not pass it on")
     _show_message(c, chat, text, by, k)
     if told:
         orientation.record(c, coverage_told=True)
     return {"status": "sent", "chat": chat}
+
+
+CONTINUATION_CARDS = 40  # of the stopped run's cards its continuation's prompt lists, by id and question
+SUMMARY_CHARS = 2000  # of the stopped run's last text in the continuation's prompt
+
+
+def _stopped_transcripts(c: str, agent_id: str) -> "list[Path]":
+    """The transcript files of the stopped run's agent: those the mirror follows, else those under main's session
+    folders in Claude Code's projects (one per session it ran under, U1)."""
+    from . import demo, session  # noqa: PLC0415
+
+    paths = [p for p in session.agent_paths(c, [agent_id]) if p.is_file()]
+    if paths:
+        return paths
+    a = subagents.agent(c, agent_id) or {}
+    out: list[Path] = []
+    for sid in dict.fromkeys(str(s) for s in a.get("sessions") or [] if s):
+        out += [f / f"agent-{agent_id}.jsonl" for f in demo._main_folders(demo.claude_config_dir(), sid)
+                if (f / f"agent-{agent_id}.jsonl").is_file()]
+    return out
+
+
+def _last_text(paths: "list[Path]") -> str:
+    """The last text an agent wrote, read from the end of its transcript files; '' when there is none."""
+    for path in reversed(paths):
+        try:
+            lines = path.read_text("utf-8", errors="replace").splitlines()
+        except OSError:
+            continue
+        for line in reversed(lines):
+            try:
+                rec = json.loads(line)
+            except ValueError:
+                continue
+            msg = rec.get("message") if isinstance(rec, dict) and rec.get("type") == "assistant" else None
+            content = msg.get("content") if isinstance(msg, dict) else None
+            texts = [str(b.get("text") or "") for b in content or [] if isinstance(b, dict) and b.get("type") == "text"]
+            text = "\n".join(t for t in texts if t.strip()).strip()
+            if text:
+                return text
+    return ""
+
+
+def _stopped_cards(c: str, rec: dict[str, Any]) -> str:
+    """The cards of the orientation's deck, one line each with its ref and question, at most CONTINUATION_CARDS."""
+    from . import notebook  # noqa: PLC0415
+
+    deck = orientation.deck_of(rec)
+    nb = notebook.read_notebook(config.workspace_dir(c), deck) if deck else None
+    cells = [x for x in (nb or {}).get("cells") or [] if isinstance(x, dict) and x.get("id")]
+    lines = [f"card:{x['id']} {' '.join(str(x.get('title') or '').split())}".rstrip() for x in cells[:CONTINUATION_CARDS]]
+    if len(cells) > CONTINUATION_CARDS:
+        lines.append(f"and {len(cells) - CONTINUATION_CARDS} more (list_cards)")
+    return "\n".join(lines)
+
+
+def continuation_prompt(c: str, rid: str, agent_id: str, message: str, passes: "list[str]", critique: bool) -> str:
+    """The prompt of a continuation (`## orient-continuation-prompt`): the request id on its first line, what the
+    stopped run left (its last text, its deck's cards, the paths of its transcript), the outputs and the critique of the
+    orientation, and the analyst's message."""
+    rec = orientation.read_run(c) or {}
+    paths = _stopped_transcripts(c, agent_id)
+    summary = " ".join((_last_text(paths) or str(orientation.summary(c) or "")).split())
+    if len(summary) > SUMMARY_CHARS:
+        summary = summary[: SUMMARY_CHARS - 1].rstrip() + "…"
+    on = [OUTPUT_WORDS[p] for p in PASSES if p in passes]
+    off = [OUTPUT_WORDS[p] for p in PASSES if p not in passes]
+    none = tools.hint("orient-continuation-none") or "none"
+    return tools.hint("orient-continuation-prompt", request_id=rid, summary=summary or none,
+                      cards=_stopped_cards(c, rec) or none,
+                      transcripts="\n".join(str(p) for p in paths) or none, outputs=", ".join(on) or "none",
+                      off=", ".join(off) or "nothing", critique="on" if critique else "off", message=message.strip())
+
+
+async def continue_stopped(c: str, chat: str, agent_id: str, text: str, by: str = BROWSER, *,
+                           route: str = subagents.CLICK, call: str | None = None) -> subagents.Answer:
+    """A message to an orientation stopped with Esc, which Claude Code resumes no more (U2): a continuation, a new
+    `thimble:orientation` run in the same thread (its chat, as run k+1 of its record), with the stopped run's context
+    (continuation_prompt) and on the stopped run's model and effort, as a click through the module or, for main's
+    message_orientation (`route` typed), the pending request and the exact Agent call. Its message shows in the thread
+    as the run's when the agent starts (subagent_started)."""
+    if running(c) or starting(c):
+        return subagents.refusal(subagents.HOOK, tools.hint("start_orientation-running"))
+    rec = orientation.read_run(c) or {}
+    a = subagents.agent(c, agent_id) or {}
+    passes = [p for p in PASSES if p in (rec.get("passes") or [])]
+    critique = bool(rec.get("critique", orientation.DEFAULT_CRITIQUE))
+    vals = dict(a.get("values") or {}) or subagents.values_for(c, ROLE, {k: rec[k] for k in ("model", "effort")
+                                                                        if rec.get(k)})
+    body, told = with_lead(c, text)
+    rid = subagents.request_id()
+    meta = agents.meta_or_none(c, chat) or {}
+    _starting.add(c)
+    try:
+        task = await asyncio.to_thread(continuation_prompt, c, rid, agent_id, body, passes, critique)
+        ans = await subagents.start_job(
+            c, ROLE, KEY, task, vals, route, description=description(str(meta.get("brief") or rec.get("query") or "")),
+            request_id=rid, chat={"title": orientation.TITLE}, work=work_dir(c), call=call,
+            fields={"continues": {"chat": chat, "agent": agent_id, "run": int(a.get("run") or 0) + 1,
+                                  "message": text.strip(), "by": by}})
+    finally:
+        _starting.discard(c)
+    if told and (ans.started or ans.typed):
+        orientation.record(c, coverage_told=True)
+    log.info("%s: the orientation %s stopped with Esc is continued (%s): %s", c, agent_id, route,
+             ans.agent_id or ans.get("request") or ans.reason)
+    return ans
 
 
 async def _send_held(c: str, chat: str, agent_id: str, text: str) -> None:
@@ -629,7 +763,14 @@ def subagent_started(c: str, run: subagents.Run, req: dict[str, Any]) -> None:
         orientation.started(c, run.chat, session=run.sid, passes=list(rec.get("passes") or ["final", "views"]),
                             agent_id=run.agent_id, route="subagent")
         return
-    orientation.run_started(c, run.chat, run.k, _run_messages(c, run))
+    cont = req.get("continues") if isinstance(req.get("continues"), dict) else {}
+    if cont and int(cont.get("run") or 0) == run.k:  # a continuation's first run: its message is the analyst's (U2)
+        text, by = str(cont.get("message") or ""), str(cont.get("by") or BROWSER)
+        _show_message(c, run.chat, text, by, run.k)
+        orientation.run_started(c, run.chat, run.k, [{"text": text, "by": by}] if text else [])
+        orientation.record(c, agent_id=run.agent_id)
+    else:
+        orientation.run_started(c, run.chat, run.k, _run_messages(c, run))
     try:  # main's chat shows the follow-up as the orientation's card for this run (the browser's AgentCard `run`)
         _, main_log = agents.paths(c, agents.MAIN_ID)
         agents.append(main_log, {"type": "agent", "ts": _now(), "chat": run.chat, "role": orientation.ROLE,
@@ -657,6 +798,10 @@ def _run_messages(c: str, run: subagents.Run) -> "list[dict[str, Any]]":
 def subagent_refused(c: str, req: dict[str, Any]) -> None:
     """A start or follow-up of the orientation that did not happen: a start's record ends `refused` with the reason and
     its kind (the browser's card, with Start it); a follow-up's thread says it was not passed on."""
+    cont = req.get("continues") if isinstance(req.get("continues"), dict) else {}
+    if req.get("kind") == "start" and cont.get("chat"):  # a continuation that did not start: its message was not
+        not_passed_on(c, str(cont["chat"]), str(req.get("reason") or ""), str(cont.get("message") or ""))
+        return
     if req.get("kind") == "start":
         rec = orientation.read_run(c) or {}
         if rec.get("request") in (None, req.get("id")) or rec.get("status") == "starting":
@@ -844,7 +989,8 @@ VIEW_LINES = {"built": "orient-views-built", "failed": "orient-views-failed", "b
 def view_counts(c: str, since: datetime | None) -> dict[str, int]:
     """The views the orientation proposed since `since`, by where their builds stand (built, failed, building; queued or
     held count as building; stopped, those the analyst's Stop dropped), and the viewers for file types it suggested.
-    Proposals main made at the analyst's request, and those dropped as they failed, are not counted."""
+    Proposals main made at the analyst's request are not counted; one that failed through its repairs counts as
+    failed."""
     from . import dev, views  # noqa: PLC0415
 
     counts = dict.fromkeys(VIEW_LINES, 0)
@@ -936,12 +1082,12 @@ def _tell_main(c: str, status: str, k: int = 0, made: "dict[str, Any] | None" = 
                                                      "status": status, **({"run": k} if k else {})})
 
 
-def _wrote_since(c: str, since: str) -> bool:
-    """Whether main's chat holds a message of the analyst's, typed in the terminal or sent from the browser's chat, at
-    or after the ISO time `since`."""
+def _wrote_since(c: str, since: str, chat: str = agents.MAIN_ID) -> bool:
+    """Whether main's chat (or the thread `chat`) holds a message of the analyst's, typed in the terminal or sent from
+    the browser's chat, at or after the ISO time `since`."""
     try:
         floor = datetime.fromisoformat(since.replace("Z", "+00:00"))
-        _, log_path = agents.paths(c, agents.MAIN_ID)
+        _, log_path = agents.paths(c, chat)
         recs = agents.read_events(log_path)
     except (ValueError, HTTPException, OSError):
         return True  # a record or a chat that cannot be read refuses no orientation
@@ -955,16 +1101,17 @@ def _wrote_since(c: str, since: str) -> bool:
         return ts >= floor  # the latest message decides
     return False
 
-async def asked_for(c: str) -> bool:
+async def asked_for(c: str, chat: str = agents.MAIN_ID) -> bool:
     """Whether anyone asked for a new orientation: a Start waits for start_orientation, none has run here yet, or the
-    analyst wrote to main since the latest one ended. Main's chat records a typed message within its follower's tail,
-    so a message not there yet is waited for up to ASKED_WAIT_S."""
+    analyst wrote to main (or to the thread `chat` whose fork calls start_orientation, U5) since the latest one ended.
+    Main's chat records a typed message within its follower's tail, so a message not there yet is waited for up to
+    ASKED_WAIT_S."""
     run = orientation.read_run(c)
     if not run or run.get("status") in orientation.RUNNING or not run.get("ended"):
         return True
     end = asyncio.get_running_loop().time() + ASKED_WAIT_S
     while True:
-        if await asyncio.to_thread(_wrote_since, c, str(run["ended"])):
+        if await asyncio.to_thread(_wrote_since, c, str(run["ended"]), chat):
             return True
         if asyncio.get_running_loop().time() >= end:
             return False
@@ -998,10 +1145,18 @@ async def tool_start_orientation(ctx: Any, args: dict[str, Any]) -> Any:
     run's model and effort (choices_of), and the exact Agent call main makes (`## start_orientation-subagent`).
     Refused while one runs, when nobody asked for a new one since the latest ended (asked_for), without the module, in
     plan mode, and in a session the launcher did not start."""
+    from . import session  # noqa: PLC0415
+
     brief, passes, critique, values = choices_of(args)
     if running(ctx.c) or starting(ctx.c):
         return tools.err(tools.hint("start_orientation-running"))
-    if not await asked_for(ctx.c):
+    # a subagent of main's may start it (U5). A thread's fork answers to the analyst's messages in its thread; any other
+    # answers to the analyst's messages to main, since the prompt its own chat holds is main's words, not the analyst's
+    from . import threads  # noqa: PLC0415
+
+    caller = await subagents.typed_caller(ctx.c, ctx.tool_use_id)
+    asker = session.chat_of_agent(ctx.c, caller) if caller else None
+    if not await asked_for(ctx.c, asker if asker and threads.is_thread(ctx.c, asker) else agents.MAIN_ID):
         return tools.err(tools.hint("start_orientation-unasked"))
     try:
         ans = await start(ctx.c, brief, passes, critique=critique, values=values, route=subagents.TYPED,
@@ -1029,8 +1184,21 @@ async def tool_message_orientation(ctx: Any, args: dict[str, Any]) -> Any:
             return tools.ok(tools.hint("message_orientation-started"))
         _, chat, agent_id = latest(ctx.c)
         _refuse_message(ctx.c, text)
+        if stopped_unnamed(ctx.c, agent_id):  # Esc, as far as thimble can tell: main's SendMessage would be refused
+            raise StoppedInTerminal(tools.hint("orient-continue-stopped-by-user"), chat, agent_id)
     except NoOrientation:
         return tools.err(tools.hint("message_orientation-none"))
+    except StoppedInTerminal as stopped:  # Claude Code resumes it no more: a continuation in its thread (U2)
+        try:
+            _refuse_message(ctx.c, text)
+        except RuntimeError as e:
+            return tools.err(str(e))
+        ans = await continue_stopped(ctx.c, stopped.chat, stopped.agent_id, text, MAIN, route=subagents.TYPED,
+                                     call=ctx.tool_use_id)
+        if ans.refused:
+            return tools.err(ans.reason or f"message_orientation: {ans.kind}")
+        return tools.ok(tools.hint("message_orientation-continues",
+                                   input=json.dumps(ans["input"], ensure_ascii=False)))
     except (EarlierSession, EarlierVersion, RuntimeError) as e:
         return tools.err(str(e))
     await _after_measure(ctx.c)
@@ -1092,7 +1260,8 @@ async def message_route(c: str, body: MessageBody, request: Request) -> dict[str
     """The orientation thread's composer: a click, so the analyst's cookie (403 without it), and the follow-up goes
     through the module (send): {status: sent | held, chat}. 400 for an empty message, 404 when no orientation has run,
     409 with the earlier-session text (and for a pre-cache, plan mode, or a module that did not pass it on), 410 with
-    the earlier-version text or, for an orientation stopped with Esc, the text that it cannot be continued."""
+    the earlier-version text. A message to an orientation stopped with Esc starts its continuation (continue_stopped):
+    {status: continued, chat}."""
     from . import events  # noqa: PLC0415
 
     subagents.analyst_only(request)

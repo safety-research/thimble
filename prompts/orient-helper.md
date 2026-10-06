@@ -1,5 +1,5 @@
 ---
-name: helper
+name: orient-helper
 description: A subagent of thimble's orientation for one part of its analysis, such as reading a set of files and reporting what they hold. It runs on the model and effort that thimble's Settings give the orientation's subagents.
 ---
 

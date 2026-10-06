@@ -53,11 +53,14 @@ DONE_KEEP_S = 24 * 3600.0  # a request that ended is dropped after this long
 REKEYS_KEPT = 16  # the session moves kept under `module.rekeyed`
 PLUGIN = "thimble"
 PREFIX = f"{PLUGIN}:"
-# thimble's six roles: the agents that have a key, a chat and a run of their own. thimble:helper, and an extension's
+# thimble's seven roles: the agents that have a key, a chat and a run of their own. thimble:orient-helper, and an extension's
 # agent registered under the plugin's name, are none of them: any agent may start one (agent_check).
-ROLES = ("orientation", "critic", "writer", "view-builder", "view-reviewer", "check")
-HELPER = "helper"
+ROLES = ("orientation", "critic", "writer", "view-builder", "view-reviewer", "check", "dev-ticket")
+HELPER = "orient-helper"
 PLUGIN_CALL = "toolu_plugin_"  # the tool_use_id prefix of a call thimble's module made ($.agent.spawn, $.tool.call)
+# the agent type of a thread's fork, which Claude Code tells not to start subagents (its fork boilerplate: "Do NOT spawn
+# subagents with the Agent tool"), so a fork's start tool call is refused at once (tools._as_caller)
+FORK_TYPE = "fork"
 AGENT_TOOLS = ("Agent", "Task")
 SEND_TOOL = "SendMessage"
 STOP_TOOL = "TaskStop"
@@ -311,10 +314,12 @@ def check_call(state: dict[str, Any], hook: dict[str, Any]) -> str | None:
 
     Agent: a subagent's call is recorded as a nested start of its caller (the parent of the agent it starts). A call
     for one of thimble's roles must match a pending start exactly (type and prompt, whitespace at the prompt's end
-    aside, which a model copying the call drops or adds): main's own call a typed one, a plugin start (a
-    `toolu_plugin_` id) a click or a follow-on one, and an agent's call (the critic's start) one that names that
-    agent's role; the request is then claimed by the call. A second orientation, a second writer of a
-    document, `run_in_background: false`, and every start in plan mode are denied. thimble:helper and any type that is
+    aside, which a model copying the call drops or adds): main's own call a typed one main's start tool made, a plugin
+    start (a `toolu_plugin_` id) a click or a follow-on one, an agent's call (the critic's start) one that names that
+    agent's role, and the call of a subagent that is no agent of thimble's (a thread's fork, a subagent of main's own)
+    a typed one that same subagent's start tool call made (`caller_agent`), so that the agent becomes its child, as
+    Claude Code lets a subagent start subagents; the request is then claimed by the call. A second orientation, a second writer of a
+    document, `run_in_background: false`, and every start in plan mode are denied. thimble:orient-helper and any type that is
     not one of thimble's roles go on.
 
     SendMessage to a registered agent of a role claims the pending message request with the same text; with none it is
@@ -348,9 +353,11 @@ def check_call(state: dict[str, Any], hook: dict[str, Any]) -> str | None:
                 return False
             if plugin:
                 return route in ("click", "follow-on")
+            if caller and r.get("caller_agent"):
+                return route == "typed" and r.get("caller_agent") == caller
             if caller:
                 return route == "typed" and r.get("caller_role") is not None and _role_of_agent(state, caller) == r.get("caller_role")
-            return route == "typed" and not r.get("caller_role")
+            return route == "typed" and not r.get("caller_role") and not r.get("caller_agent")
 
         found = _pending_for(state, "start", fits)
         if not found:
@@ -470,7 +477,7 @@ def register(state: dict[str, Any], hook: dict[str, Any]) -> dict[str, Any] | No
 
 def _inherit(state: dict[str, Any], agent_id: str, entry: dict[str, Any], parent: str) -> None:
     """A descendant takes its thimble ancestor (`root`) and work folder from its parent, and, unless its type is one of
-    thimble's (a role, thimble:helper or an extension's agent, each registered with its own model and effort), the
+    thimble's (a role, thimble:orient-helper or an extension's agent, each registered with its own model and effort), the
     effort recorded for its parent's run (the module's step hook, V7d), as the module's own agent.spawn hook gives it."""
     up = registry(state).get(parent) or {}
     entry["root"] = up.get("root") or (parent if up.get("role") in ROLES else None)
@@ -502,6 +509,26 @@ def record_stop(state: dict[str, Any], hook: dict[str, Any]) -> dict[str, Any] |
     entry["last_stop"] = now()
     entry["turns"] = int(entry.get("turns") or 0) + 1
     return entry
+
+
+NO_CALL = "no-call"  # subagents.NO_CALL: a typed start whose caller's turn ended without its Agent call
+
+
+def refuse_unclaimed(state: dict[str, Any], hook: dict[str, Any]) -> list[str]:
+    """The SubagentStop hook's record for a subagent that is no agent of thimble's (a thread's fork, a subagent of
+    main's own): a turn of it ended, so the typed starts its own start tool calls asked for (`caller_agent`) that its
+    Agent call never claimed are refused, kind no-call, with its last text (two lines) as the reason, as R3 refuses main's
+    at main's turn end. The ids refused; none for one of thimble's agents or for the second SubagentStop of a
+    hand-back."""
+    agent = str(hook.get("agent_id") or "")
+    if not agent or hook.get("stop_hook_active") or isinstance(registry(state).get(agent), dict):
+        return []
+    said = "\n".join([ln for ln in str(hook.get("last_assistant_message") or "").strip().splitlines() if ln.strip()][:2])
+    out = []
+    for rid, r in _pending_for(state, "start", lambda r: r.get("route") == "typed" and r.get("caller_agent") == agent):
+        r.update(state="refused", reason=said, refused_kind=NO_CALL, at=now())
+        out.append(rid)
+    return out
 
 
 def record_denied(state: dict[str, Any], hook: dict[str, Any]) -> tuple[str, dict[str, Any]] | None:
