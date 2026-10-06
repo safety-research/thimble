@@ -488,6 +488,7 @@ async def test_retry_in_a_plain_claude_or_in_plan_mode_is_refused_at_once_and_qu
     monkeypatch.setattr(cc_plugin, "main_fenced", lambda c: False, raising=False)
     got = views.retry(CORPUS, "posts")
     assert got["status"] == "failed" and got["refused"]["kind"] == subagents.NOT_LAUNCHED
+    assert got["error"] == got["refused"]["reason"], "the toast and the chip say why it did not start"
     assert views.accept(CORPUS, "viewer")["refused"]["kind"] == subagents.NOT_LAUNCHED
     assert _prop("viewer")["status"] == "suggested"
     monkeypatch.setattr(cc_plugin, "main_fenced", lambda c: True, raising=False)

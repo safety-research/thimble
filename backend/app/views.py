@@ -2808,7 +2808,9 @@ def click_refused(c: str, slug: str) -> dict[str, Any] | None:
     if before is None:
         return None
     refused = {"kind": before.kind, "reason": before.reason, "request": None, "at": _now()}
-    prop = update_proposal(c, slug, refused=refused) or read_proposal(c, slug) or {}
+    failed = (read_proposal(c, slug) or {}).get("status") == "failed"
+    prop = update_proposal(c, slug, refused=refused, **({"error": before.reason} if failed else {}))
+    prop = prop or read_proposal(c, slug) or {}
     _emit(c, slug, str(prop.get("status") or "failed"), chat=prop.get("chat"))
     return prop
 
