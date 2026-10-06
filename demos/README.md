@@ -24,7 +24,8 @@ one](#making-one)).
   - `schema` (`thimble-demo-precache`), `version` (3), `format` (`outputs-only`), `dataset`, `created`, `notice`
     (the source's notice), `credit` (who published the data);
   - `thimble` (the version and commit that made it);
-  - `orientation` (status, outputs, effort, Ultracode, critique, model, its chat, start and end);
+  - `orientation` (status, outputs, effort, Ultracode, critique, model, its chat, start and end, and the coverage
+    line its first run ended with);
   - `counts` (cards, labels, views, documents);
   - `corpus` (each file the orientation read, with its size and SHA-256, checked on install);
   - `placeholders`;
@@ -34,7 +35,9 @@ one](#making-one)).
   - `verbatim` (the threshold, and the files that share any stretch with the dataset, with the longest stretch of
     each and the characters all of them hold);
   - `left_out` (each file left out, and why);
-  - `gitleaks`, `user_name_scrubbed` and `flagged` (findings kept with `--allow-private`).
+  - `gitleaks`, `user_name_scrubbed` and `flagged` (findings kept with `--allow-private`);
+  - `views`, when reviewed views took the place of the orientation's own (step 4 of [Making one](#making-one)): each
+    view's slug, name and version, and the reviewed view it came from.
 - `workspace/`: the orientation's outputs, by their paths in the workspace:
   - `notebooks/`: the cards with their outputs;
   - `investigations/main/*.json`: the documents (the report);
@@ -80,7 +83,7 @@ pass. A file is also read with its escapes decoded (`\n`, `\"`, `\u00e4`), and a
 call's input or a record printed as a JSON line, as the strings it holds, so a record copied as escaped text measures
 as the record. PDFs and pictures in a dataset are not indexed. The measure finds long stretches only: short records of
 a JSON or JSONL file, each under 95 characters, copied one after another do not add up to a stretch (rows of a CSV or
-text file printed as they stand do), so reading the cards and the cited calls before committing (step 4 below) still
+text file printed as they stand do), so reading the cards and the cited calls before committing (step 5 below) still
 matters.
 
 Why 400. On 2026-10-05, across nine finished orientations (three each of collusion-wiki, mythos-5 and rubyhack), the
@@ -92,8 +95,9 @@ labels and views held, so a card that quotes a record passes, and a card or call
 
 ## What `thimble demo` does with it
 
-It fills in the placeholders for the new folders and installs `workspace/` as the dataset's workspace. It marks the
-workspace pre-cached: `precached.json` in the workspace, and `precached` in the orientation's record and its thread's
+It fills in the placeholders for the new folders and installs `workspace/` as the dataset's workspace, and ends the
+orientation's thread with the coverage line the manifest's `orientation` keeps, as a live run's thread ends. It marks
+the workspace pre-cached: `precached.json` in the workspace, and `precached` in the orientation's record and its thread's
 meta. In the browser, the orientation's thread then says the orientation ran in advance and shows an "Attach a fresh
 session" button with a short explainer, the command and a Copy button. Until a session first attaches, the page stays
 readable rather than greyed under the card that asks for one, and the composer gives way to the same steps. A message
@@ -135,12 +139,24 @@ each one written (backend/app/precached.py).
 
    It ends with an inventory: the counts, the cited calls, the longest stretch shared with the dataset, the findings
    kept and what it left out. Before it, it names any cited call it could not find in the call logs.
-4. Read it: the README, the report and the cards in a browser, and the cited calls. Run
+
+   `check_content` refuses a label whose rows pass 6 MB, such as a code label over hundreds of thousands of records.
+   When most of its records took one value, write that value as cover lines over the runs of lines that took it
+   (backend/app/labels_store.py: `cover` lines, as a code label run over whole files writes its quiet value), keep the
+   other rows, and export again. Every record then reads the same value and the counts are the same; a record a cover
+   holds reads with confidence 1 and is named by its line (`#L<n>`). transluce-gov's "request kind" is written this
+   way.
+4. To show reviewed views in place of the ones the orientation built, run `scripts/sync_demo_views.sh --from <the
+   THIMBLE_HOME that holds them>`. For each dataset it lists, it takes each reviewed view as thimble serves it there,
+   names it as the dataset's view, stamps it with the digest of its files so that install shows it at once, drops the
+   pre-cache's other views and their proposals, and updates the manifest and README.md (scripts/dev/demo_views.py).
+   Run it again whenever the reviewed views change.
+5. Read it: the README, the report and the cards in a browser, and the cited calls. Run
    `python3 scripts/check_content.py`, which applies the checks below and gitleaks.
-5. Check it on a clean install with a fresh `THIMBLE_HOME`:
+6. Check it on a clean install with a fresh `THIMBLE_HOME`:
    `thimble demo collusion-wiki --precaches demos --dir /tmp/demo-check`. Open a view to see it rebuild its index,
    and attach a session to see it start from the cards and the report.
-6. Commit the folder.
+7. Commit the folder.
 
 ## The full export
 

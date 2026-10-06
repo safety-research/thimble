@@ -528,6 +528,34 @@ def test_install_keeps_each_view_at_the_version_it_passed_so_readers_see_it(tmp_
     assert not (other / "views" / ".versions" / "v1").exists(), "a stamp that names other files is no pass"
 
 
+def test_the_coverage_line_goes_with_the_precache_to_the_end_of_the_orientation_s_thread(tmp_path):
+    """The record and the thread's log stay as the export writes them (no `coverage`, an empty log); the manifest and the
+    README carry the first run's coverage line, and install ends the thread with it, as a live run's end does."""
+    from app import orient_session
+
+    line = "Coverage: viewed only a.jsonl · 50% of files · 12% of lines"
+    root = tmp_path / "a"
+    corpus = root / "corpus"
+    corpus.mkdir(parents=True)
+    (corpus / "a.jsonl").write_text(json.dumps({"body": CORPUS_TEXT}) + "\n")
+    ws = make_workspace(root, corpus, root)
+    run = json.loads((ws / "orient" / "run.json").read_text())
+    (ws / "orient" / "run.json").write_text(json.dumps({**run, "coverage": line, "ended": "2026-10-06T04:05:35+00:00"}))
+    out = tmp_path / "out" / "toy"
+    m = demo.export_outputs(ws, corpus, out, name="toy", home=root, user="", scan=no_scan)
+    assert m["orientation"]["coverage"] == line
+    assert "coverage" not in json.loads((out / "workspace" / "orient" / "run.json").read_text())
+    assert (out / "workspace" / "chats" / "o1.jsonl").read_text() == ""
+    assert f"coverage line, which install puts at the end of its thread: {line}" in (out / "README.md").read_text()
+    new_ws = tmp_path / "b" / "toy"
+    demo.install(out, new_ws, corpus)
+    rows = [json.loads(x) for x in (new_ws / "chats" / "o1.jsonl").read_text().splitlines()]
+    assert rows == [{"type": "chip", "ts": "2026-10-06T04:05:35+00:00", "kind": orient_session.COVERAGE_KIND,
+                     "text": line}]
+    # a record without a line (an export made before it was kept) installs with the empty log
+    assert demo.coverage_line({"coverage": 1}) is None and demo.coverage_line({"coverage": "  "}) is None
+
+
 def test_install_refuses_paths_outside_the_workspace_and_files_of_other_kinds(tmp_path):
     out, corpus, _ = made(tmp_path)
     man = json.loads((out / demo.MANIFEST).read_text())

@@ -43,9 +43,9 @@ flag lets it through), and, unless --allow-private, while the exporter's user na
 gitleaks finds a secret. scripts/check_content.py allows these folders in the tree on the terms its DEMO note gives,
 and no folder of another version.
 
-Install fills in the placeholders, writes the workspace, and marks it pre-cached (MARKER, and `precached` in the
-orientation's record and its thread's meta): the orientation's thread then says it ran in advance and offers to attach
-a fresh session. From the outputs alone a follow-up to it is refused, since its session was not kept; from a full
+Install fills in the placeholders, writes the workspace, ends the orientation's thread with the coverage line the
+manifest keeps (coverage_line), and marks it pre-cached (MARKER, and `precached` in the orientation's record and its
+thread's meta): the orientation's thread then says it ran in advance and offers to attach a fresh session. From the outputs alone a follow-up to it is refused, since its session was not kept; from a full
 export the mark says `kept` and a follow-up resumes the installed session.
 """
 from __future__ import annotations
@@ -87,6 +87,7 @@ PRECACHES = config.REPO_ROOT / "demos"  # demos/<name>/
 DEFAULT_DIR = Path("~/thimble-demo")
 SCRUBBED_USER = "user"  # what --scrub-user writes in place of the exporter's user name
 ATTACH_QUESTION = "Attach a Claude Code session now? (requires claude to be logged in) [Y/n] "
+COVERAGE_CHIP = "coverage"  # the chip kind of the coverage line at the end of the orientation's thread (orient_session)
 LOGIN_HINT = "`claude auth login`, or run `claude` and type /login"
 
 # What the export keeps of the orientation's record and of its thread's meta; the rest belonged to its session.
@@ -382,6 +383,14 @@ def cited_calls(ws: Path, texts: Iterable[str]) -> tuple[dict[str, bytes], list[
     return files, listed
 
 
+def coverage_line(run: Any) -> str | None:
+    """The first run's coverage line in the orientation's record (orient_session._keep_coverage), None when it has
+    none. The pre-cache keeps it in the manifest's `orientation`, and install puts it back at the end of the
+    orientation's thread, whose log the pre-cache writes empty."""
+    line = run.get("coverage") if isinstance(run, dict) else None
+    return line.strip() if isinstance(line, str) and line.strip() else None
+
+
 def chat_summary(ws: Path, chat: str) -> dict[str, Any]:
     """The orientation's chat meta (model, effort), for the manifest."""
     meta = _read_json(ws / "chats" / f"{chat}.meta.json") if chat else None
@@ -532,7 +541,8 @@ def export_outputs(ws: Path, corpus: Path, out: Path, *, name: str, home: Path |
             "thimble": {"version": _thimble_version(), "commit": _commit()},
             "orientation": {k: run.get(k) for k in ("status", "passes", "query", "effort", "ultracode", "critique",
                                                     "started", "ended")}
-                           | {"model": meta.get("model"), "chat_effort": meta.get("effort"), "chat": chat},
+                           | {"model": meta.get("model"), "chat_effort": meta.get("effort"), "chat": chat,
+                              "coverage": coverage_line(run)},
             "counts": counts(ws),
             "corpus": corpus_files(corpus),
             "placeholders": PLACEHOLDERS,
@@ -1184,6 +1194,12 @@ def readme(m: dict[str, Any]) -> str:
               f"- The export measured no stretch of {v.get('long', '?')} characters or more that a file shares with the "
               f"dataset (it finds every stretch of {_sure(v)} or more); the longest it measured is "
               f"{longest.get('chars', 0)} characters" + (f" (`{longest['path']}`)." if longest.get("path") else "."),
+              *([f"- The orientation's coverage line, which install puts at the end of its thread: {o['coverage']}"]
+                if o.get("coverage") else []),
+              *([f"- The views are reviewed versions put in place of the orientation's own after the export "
+                 "(scripts/sync_demo_views.sh), each stamped with the digest of its files so it shows at once: "
+                 + ", ".join(f"{x.get('name')} (`{x.get('slug')}`, from `{x.get('from')}`)" for x in m["views"]) + "."]
+                if m.get("views") else []),
               "- Absolute paths are written as " + ", ".join(f"`{x}`" for x in PLACEHOLDERS.values())
               + " (and as `@@THIMBLE_DASHED_…@@` where a path is spelled with dashes), filled in on install.", "",
               "demos/README.md says how a pre-cache is made and checked.", ""]
@@ -1375,7 +1391,12 @@ def install(src: Path, ws: Path, corpus: Path, *, home: Path | None = None,
                 meta.pop("session", None)
             meta.update(status="done", precached=mark)
             meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=1), "utf-8")
-            (tmp / "chats" / f"{chat}.jsonl").touch()
+            log = tmp / "chats" / f"{chat}.jsonl"
+            log.touch()
+            line = coverage_line(o) if not full else None
+            if line and not log.stat().st_size:  # the note a live run ends its thread with (orient_session)
+                log.write_text(json.dumps({"type": "chip", "ts": o.get("ended") or now(), "kind": COVERAGE_CHIP,
+                                           "text": line}, ensure_ascii=False) + "\n", "utf-8")
         from . import views  # noqa: PLC0415 — the views' module is the server's, loaded only here
 
         views.keep_installed(tmp)  # the pre-cache leaves out the views' kept versions, which readers need (read_built)
