@@ -8,8 +8,8 @@
 //   - main's replies on the mod's grid, each citation a link, red when its place does not hold its value (reply.tsx)
 //   - each card a turn of main added or changed, once, under the turn's last reply, in its last state, its takeaway
 //     under it; no hex id, and Claude Code's tool groups left folded
-//   - the rows above the prompt: what the workspace holds and side threads with news (Claude Code's agent tray shows
-//     thimble's agents, so no row repeats them)
+//   - the rows above the prompt, like toasts: what is new in the workspace since home was last opened (open › opens
+//     home and the row goes), and side threads with news (Claude Code's agent tray shows thimble's agents)
 //   - one panel (panel.tsx): home, a card, a citation's place, a side thread, a label, a document, the files, an agent
 //   - side threads: right-click a card, a citation or a sentence and choose "ask about it", or select text and press
 //     "ask"; a row under main's latest row when an answer comes in while the panel shows something else
@@ -66,6 +66,7 @@ const navRef = { plugin: 'thimble-term', key: 'nav' } as const
 const menuRef = { plugin: 'thimble-term', key: 'menu' } as const
 const pendingRef = { plugin: 'thimble-term', key: 'pending' } as const
 const homeRef = { plugin: 'thimble-term', key: 'home' } as const
+const homeSeenRef = { plugin: 'thimble-term', key: 'homeSeen' } as const
 const agentsRef = { plugin: 'thimble-term', key: 'agents' } as const
 const threadsRef = { plugin: 'thimble-term', key: 'threads' } as const
 const newsRef = { plugin: 'thimble-term', key: 'threadNews' } as const
@@ -128,6 +129,8 @@ function cxOf($: Dollar): Ctx {
     setPending: async p => void (await $.state.set(pendingRef, p)),
     home: async () => (await $.state.get(homeRef)).value ?? null,
     setHome: async h => void (await $.state.set(homeRef, h)),
+    homeSeen: async () => (await $.state.get(homeSeenRef)).value ?? null,
+    setHomeSeen: async h => void (await $.state.set(homeSeenRef, h)),
     agents: async () => (await $.state.get(agentsRef)).value ?? [],
     setAgents: async a => void (await $.state.set(agentsRef, a)),
     threads: async () => (await $.state.get(threadsRef)).value ?? [],
@@ -414,20 +417,25 @@ export const register: Register = on => {
         </Box>,
       )
     }
-    // what the workspace holds
+    // what is new in the workspace since home was last opened, like a toast: open › opens home and the row goes
     const home = await cx.home()
-    if (home && home.cards + home.labels + home.docs + home.threads + home.views > 0) {
-      const plural = (n: number, w: string) => `${n.toLocaleString('en-US')} ${w}${n === 1 ? '' : 's'}`
-      const words = [home.cards ? plural(home.cards, 'card') : '', home.labels ? plural(home.labels, 'label') : '', home.docs ? plural(home.docs, 'document') : '', home.threads ? plural(home.threads, 'thread') : '', home.views ? plural(home.views, 'view') : ''].filter(Boolean).join(' · ')
-      rows.push(
-        <Box key="above-home" flexDirection="row">
-          {label('thimble')}
-          <Box flexDirection="row" columnGap={2} flexShrink={1}>
-            <Text dimColor wrap="truncate-end">{words}</Text>
-            <Button key="above-home-open" label="home ›" plain onPress={() => void openHome(cx)} />
-          </Box>
-        </Box>,
-      )
+    if (home) {
+      // the first count of a session (refreshHome keeps it) is what was there already, so nothing is new yet
+      const seen = (await cx.homeSeen()) ?? home
+      const fresh = (k: 'cards' | 'labels' | 'docs' | 'views') => Math.max(0, home[k] - (seen as typeof home)[k])
+      const plural = (n: number, w: string) => `${n.toLocaleString('en-US')} new ${w}${n === 1 ? '' : 's'}`
+      const words = [fresh('cards') ? plural(fresh('cards'), 'card') : '', fresh('labels') ? plural(fresh('labels'), 'label') : '', fresh('docs') ? plural(fresh('docs'), 'document') : '', fresh('views') ? plural(fresh('views'), 'view') : ''].filter(Boolean).join(' · ')
+      if (words) {
+        rows.push(
+          <Box key="above-home" flexDirection="row">
+            {label('thimble')}
+            <Box flexDirection="row" columnGap={2} flexShrink={1}>
+              <Text wrap="truncate-end">{words}</Text>
+              <Button key="above-home-open" label="open ›" plain onPress={() => void openHome(cx)} />
+            </Box>
+          </Box>,
+        )
+      }
     }
     // side threads with news, or answering
     const threads = await cx.threads()

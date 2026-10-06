@@ -184,18 +184,32 @@ test('a click on plain words opens nothing; a right-click on a sentence offers "
   await pane.unmount()
 })
 
-test('the rows above the prompt: what the workspace holds and threads with news, and no row of agents (Claude Code\'s tray lists them)', async ($, on) => {
+test('the rows above the prompt are toasts: what is new since home was opened, threads with news, no row of agents', async ($, on) => {
   const w = world(on)
   await start($, w)
-  const above = (await $.ui.mount(ABOVE)) as unknown as M
-  const text = shown(await above.drawn())
-  expect(text).toContain('12 cards · 1 label · 1 document · 2 threads')
-  expect(text).toContain('home ›')
+  let above = (await $.ui.mount(ABOVE)) as unknown as M
+  let text = shown(await above.drawn())
+  // what the workspace held when the session started is not new
+  expect(text).not.toContain('new card')
   expect(text).not.toContain('orientation: the whole corpus')
   expect(text).toContain('1 new')
   expect(text).toContain('1 answering')
+  await above.unmount()
+  // two cards arrive: the row says so, and open › opens home
+  w.states.home = { ...w.states.home, cards: 14 }
+  w.stamps.set(`${WS}/notebooks`, 2)
+  await w.clock.advance(1100)
+  above = (await $.ui.mount(ABOVE)) as unknown as M
+  text = shown(await above.drawn())
+  expect(text).toContain('2 new cards')
+  expect(text).toContain('open ›')
   await above.press({ key: 'above-home-open' })
   expect(w.opened).toContain('thimble-term')
+  await above.unmount()
+  await w.clock.settle()
+  // once home is open, the row is gone until something new arrives
+  above = (await $.ui.mount(ABOVE)) as unknown as M
+  expect(shown(await above.drawn())).not.toContain('new card')
   await above.unmount()
 })
 

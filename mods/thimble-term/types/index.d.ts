@@ -147,6 +147,8 @@ declare module 'claude-code' {
       pending: { title: string } | null
       // the rows above the prompt: the workspace's counts, the agents, the threads
       home: TermHome | null
+      // the workspace's counts when home was last opened: the row above the prompt shows only what is new since
+      homeSeen: TermHome | null
       agents: TermAgent[]
       threads: TermThreadRow[]
       threadNews: ChatNews

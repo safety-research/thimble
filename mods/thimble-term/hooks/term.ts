@@ -326,6 +326,9 @@ export async function navBack(cx: Ctx): Promise<void> {
 
 export async function openHome(cx: Ctx): Promise<void> {
   await openPanel(cx, { view: 'home', title: 'Home' })
+  // what home holds now is seen: the row above the prompt shows only what arrives after
+  const home = await cx.home()
+  if (home) await cx.setHomeSeen(home)
 }
 
 // ------------------------------------------------------------------------------------------------ threads
@@ -426,7 +429,11 @@ async function refreshAgents(cx: Ctx): Promise<void> {
 async function refreshHome(cx: Ctx): Promise<void> {
   if (!rt.sc) return
   const got = await readState(cx, rt.sc, 'home')
-  if (got.ok) await cx.setHome(homeOf(got.value, await cx.now()))
+  if (!got.ok) return
+  const home = homeOf(got.value, await cx.now())
+  await cx.setHome(home)
+  // the session's first count is what was there already: the row above the prompt shows only what comes after
+  if (home && !(await cx.homeSeen())) await cx.setHomeSeen(home)
 }
 
 /** The ui.jsonl records past the last one followed, handed to `apply` in order. The first read follows none. */
