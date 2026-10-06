@@ -173,6 +173,10 @@ async def test_state_gives_what_the_routes_give(term):
     assert [k["name"] for k in labels] == ["bash"]
     label = await local.state(CORPUS, "label", ["bash"])
     assert label["examples"]["yes"] and label["examples"]["yes"][0]["ref"].startswith("agents/")
+    # its records as the rows route gives them with their words, for the label card's agree and disagree
+    assert label["rows"] and {r["label"] for r in label["rows"]} <= set(label["labels"])
+    assert all(r["ref"] and "text" in r and "analyst" in r for r in label["rows"])
+    assert len([r for r in label["rows"] if r["label"] == "yes"]) <= local.LABEL_ROWS
     assert set(await local.state(CORPUS, "docs")) >= {"report"}
     meta = agents.new_thread(CORPUS, f"card:{cid}", "Eight.")
     threads = await local.state(CORPUS, "threads")

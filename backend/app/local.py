@@ -275,6 +275,9 @@ STATE_USAGE = ("thimble state <surface> --cwd <dir> [args]; surfaces: home, card
                "resolve <refs json>, ui [--after <n>]")
 
 
+LABEL_ROWS = 3  # records per value `state label` gives with their words (rows)
+
+
 class StateError(Exception):
     """A state or act request that cannot be answered, with the line `{error}` carries."""
 
@@ -376,12 +379,17 @@ async def _label(c: str, args: list[str], pos: list[str]) -> Any:
     if found is None:
         raise StateError(f"no label {pos[0]!r}")
     out = await concepts.get_concept_route(c, str(found["id"]))
-    # the examples the label card shows under its bars, per value (the browser asks the rows route for them)
+    # the examples the label card shows under its bars, per value (the browser asks the rows route for them), and a
+    # page of records per value as the rows route gives them with their words (text=1): each with its value, why, and
+    # the analyst's verdict, which the renderer's label card draws with agree and disagree
     ex: dict[str, list[dict[str, str]]] = {}
+    rows: list[dict[str, Any]] = []
     for value in out.get("labels") or []:
         pairs = await asyncio.to_thread(concepts.examples, c, str(found["id"]), str(value))
         ex[str(value)] = [{"ref": r, "text": t} for r, t in pairs]
-    return {**out, "examples": ex}
+        page = await concepts.rows_route(c, str(found["id"]), value=str(value), limit=LABEL_ROWS, text=True)
+        rows += [r for r in page.get("rows") or [] if isinstance(r, dict)]
+    return {**out, "examples": ex, "rows": rows}
 
 
 async def _docs(c: str, args: list[str], pos: list[str]) -> Any:
