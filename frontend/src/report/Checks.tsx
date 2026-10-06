@@ -152,8 +152,7 @@ function StaleRow({ ws, check, doc, n }: { ws: string; check: Check; doc: string
   const [busy, setBusy] = useState(false)
   return (
     <p className="wu-check-stale" data-stale={n}>
-      <span>{staleText(n)}</span>
-      <span aria-hidden="true">·</span>
+      {`${staleText(n)} · `}
       <Button
         variant="ghost"
         size="sm"

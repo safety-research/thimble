@@ -2972,13 +2972,19 @@ body .bn-mantine .bn-form-popover .mantine-TextInput-input {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 4px;
-  margin: 0 0 4px 26px;
+  gap: 2px 4px;
+  margin: 0 0 4px 22px;
   color: var(--text-tertiary);
   font: var(--type-body-sm);
   overflow-wrap: anywhere;
 }
+.wu-check-stale {
+  display: block;
+}
+/* Run flows on after the words, as a link would, so a narrow pane wraps the words and keeps Run beside the last */
 .wu-check-stale-run.btn {
+  display: inline-flex;
+  vertical-align: baseline;
   height: 20px;
   padding: 0 6px;
 }

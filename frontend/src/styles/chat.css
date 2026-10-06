@@ -717,8 +717,9 @@ button.chat-call-chip:hover,
    then the build's state after it */
 .view-chip {
   display: inline-flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 6px;
+  gap: 4px 6px;
   min-width: 0;
   max-width: 100%;
 }

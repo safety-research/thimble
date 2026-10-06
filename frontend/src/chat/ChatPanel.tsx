@@ -846,8 +846,10 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
               effort={orientConf?.effort ?? null}
               restore={restore}
               onStarting={() => {
+                // the gate closes at once; Starting… shows after a second without the answer, and a refusal opens it again
                 setStartAnswer(null)
                 setPendingStart(Date.now())
+                setStarted(true)
               }}
               onAnswer={onStartAnswer}
               onSkip={() => {
