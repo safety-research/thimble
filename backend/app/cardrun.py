@@ -892,6 +892,9 @@ def main(argv: list[str]) -> int:
         return 2
     kind = argv[0]
     ident = argv[1].strip().removeprefix("card:").removeprefix("concept:") if len(argv) > 1 else ""
+    from . import local  # noqa: PLC0415
+
+    local.settle_dirs()
     try:
         c = _workspace(ident if kind == "card" else None)
         from . import local  # noqa: PLC0415

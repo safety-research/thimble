@@ -26,6 +26,7 @@ Both print `{error}` and exit 1 when they fail, and open no port.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import os
@@ -108,6 +109,24 @@ def live_terminal(ws: Path) -> bool:
     return _pid_alive(rec.get("pid") if isinstance(rec, dict) else None)
 
 
+def settle_dirs() -> None:
+    """The data and workspaces folders this process reads, as the launcher resolved them for the session
+    (cli.resolve_env): THIMBLE_DATA_DIR and THIMBLE_WORKSPACES_DIR when set, else the folder THIMBLE_WS sits in and the
+    data folder the last server.json names (as subagent_files.workspace_folder reads them), else config's defaults. The
+    shim, `thimble-run` and `thimble state|act` call it before they look for a workspace."""
+    home = Path(os.environ.get("THIMBLE_HOME") or (Path.home() / ".thimble")).expanduser()
+    try:
+        recorded = json.loads((home / "server.json").read_text("utf-8")).get("env") or {}
+    except (OSError, ValueError, AttributeError):
+        recorded = {}
+    if not os.environ.get("THIMBLE_WORKSPACES_DIR"):
+        named = os.environ.get(WS_ENV) or ""
+        if named and Path(named).is_dir():
+            config.WORKSPACES_DIR = Path(named).resolve().parent
+    if not os.environ.get("THIMBLE_DATA_DIR") and isinstance(recorded, dict) and recorded.get("data_dir"):
+        config.DATA_DIR = Path(str(recorded["data_dir"])).expanduser().resolve()
+
+
 def workspace(cwd: str | None) -> str | None:
     """The workspace of the folder `cwd` (config.workspace_for_cwd), else the one THIMBLE_WS names when it is a
     workspace of this home; None for neither. Nothing is registered or made."""
@@ -177,8 +196,6 @@ async def close() -> None:
     """The end of the shim's session in terminal mode: the jobs it ran end with it, as browser-mode jobs end with the
     session (the card checks, a label's run, the card watch), and the browser and kernels it started stop. Never
     raises."""
-    import contextlib  # noqa: PLC0415
-
     from . import cardrun  # noqa: PLC0415
 
     cardrun.CardWatch.stop_all()
@@ -578,6 +595,7 @@ def main(argv: list[str]) -> int:
     if len(argv) < 2 or argv[0] not in ("state", "act"):
         return _fail(f"usage: {STATE_USAGE} | {ACT_USAGE}")
     verb, what, rest = argv[0], argv[1], argv[2:]
+    settle_dirs()
     try:
         cwd = _flag(rest, "--cwd", os.getcwd()) or os.getcwd()
         c = workspace(cwd)

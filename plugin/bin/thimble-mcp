@@ -267,6 +267,7 @@ _TERMINAL: list[bool] = []  # the session's mode, read once (terminal)
 def terminal() -> bool:
     """Whether this shim serves a terminal-mode session (module note), read once from the workspace's launch.json."""
     if not _TERMINAL:
+        local.settle_dirs()
         c = local.workspace(cwd())
         _TERMINAL.append(bool(c) and local.terminal(c))
     return _TERMINAL[0]
