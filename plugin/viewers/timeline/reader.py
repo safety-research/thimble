@@ -36,7 +36,7 @@
 #   action, incident, service, what set it off (alert, ticket, or via, the chat message that asked, as
 #   <channel>/<ts>), result, and msg, what it did.
 #
-# The records: every source becomes records with the same fields, which the page filters and colours by.
+# The records: every source becomes records with the same fields, which the page filters and colors by.
 #   time (in UTC), source (alert, deploy, chat, ticket or agent), kind (fired or resolved; started, finished or
 #   rollback; message; opened, updated or closed; an agent's action), actor (the monitor, a person, a customer or an
 #   agent), service, severity (an alert's severity, a ticket's priority), outcome (ok, failed or held), incident,
@@ -66,18 +66,17 @@
 # The method: the index keeps every record as a row of small integers (time, file, line, each field's value as an
 # index into that field's names, the row it answers) in time order, with its id, the lines its record spans, and
 # the byte offset of every line. A record's line is the one that holds its text, so a label, which reads a file line
-# by line, marks that line. `records` sends the rows the label filter keeps as columns, OVERVIEW_ROWS rows a fetch, and
-# the page asks for the next page until it has them all, so it picks days, zooms, filters and lays out lanes without
-# asking again; text, search and a record's details are read back from the files by seeking to the record's lines and
-# parsing them again. A record's details carry its lines as the file holds them, which the page shows beside the
-# fields the reader made of them.
+# by line, marks that line. `records` answers the page's one question, the events it shows: it reads each record's
+# fields and text back from the file by seeking to its lines, keeps those of the incident and the search the page
+# asks for, and gives each its value under the page's Color by, OVERVIEW_ROWS rows a fetch as columns, so the page
+# draws its lanes, its time range and its list from one answer. A record's details carry its lines as the file holds
+# them, which the page shows beside the fields the reader made of them.
 #
 # Units: an incident (INC-312), a day (2026-05-16) and a window of time (2026-05-16T08:00..2026-05-16T09:00).
 #
 # Labels: they apply when records are served, never in the index. Every answer keeps only the records thimble.kept(ref)
-# holds for. `marks` lists the values of the labels that are on, in thimble's order, and each row carries the ones
-# thimble.marked(ref) gives it (the first as `m`, all of them as bits in `mb`), which the page draws in the labels'
-# colours in its charts and lanes, since thimble cannot see inside them.
+# holds for. While a label is the page's Color by, thimble.colour_value gives each record the label's value on it,
+# which the page draws in its lanes and its time range, since thimble cannot see inside them.
 import bisect
 import csv
 import json
@@ -89,7 +88,7 @@ from pathlib import PurePosixPath
 
 import thimble
 
-FIELDS = ("source", "kind", "actor", "service", "severity", "outcome", "incident")  # the fields the page filters by
+FIELDS = ("source", "kind", "actor", "service", "severity", "outcome", "incident")  # every record's fields
 T, F, L = 0, 1, 2  # a row's time, file and line; the fields' values follow, then RE
 RE = 3 + len(FIELDS)  # the row the record answers, or -1
 LOCAL = timezone(timedelta(hours=1))  # the operator's clock in May, which deploys.csv writes
@@ -98,7 +97,6 @@ PRIORITIES = ("urgent", "high", "normal", "low")
 TEXT_MAX = 400  # characters of a record's text a list row gets
 UNIT_REFS = 200  # refs a unit's citation carries
 EXCERPT_RECORDS = 12  # records whose text a unit's excerpt quotes
-MARKS_MAX = 24  # label values the page tells apart, as bits of one number per record
 OVERVIEW_ROWS = 5000  # rows one overview fetch returns
 MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 LOG_LINE = re.compile(r"(\d{4}-\d\d-\d\d[T ]\d\d:\d\d:\d\d(?:\.\d+)?(?:Z|[+-]\d\d:?\d\d)?)\s+([A-Z]+)\s+(\S+)\s+(.*)")
@@ -513,60 +511,46 @@ def _kept(index, i, keep=()):
     return i in keep or thimble.kept(_ref(index, i))
 
 
-def _overview(index, keep, start=0):
-    """The rows the filter keeps, and the rows in `keep` (a citation asked for them), from row `start` on and at most
-    OVERVIEW_ROWS of them, as columns: `r` the row, `t` seconds since `t0`, `f` and `ln` its file and line, a column per
-    field, `re` the row it answers and `tk` the seconds since that row (-1 for none), `m` the index in `marks` of its
-    first mark (-1 for none) and `mb` all its marks as bits; `next` the row the next page starts at, None after the last.
-    The first page also holds `marks`, every value of the labels that are on, each {label, value, colour}, marking
-    records or not, and what the page needs to draw them: `t0`, `span`, `files`, `names` and each incident's start."""
-    on = thimble.view_labels()
+def _overview(index, query, keep):
+    """The events the page shows, from row `from` on and at most OVERVIEW_ROWS of them a fetch: the rows the label
+    filter keeps, and those in `keep` (a citation asked for them), of the incident `incident` whose values hold the
+    words `q`, ignoring case. They come as columns: `r` the row, `t` its time in seconds since 1970, `ref`, a column per
+    field, `text` cut to TEXT_MAX characters, and `value`, its value under the page's Color by (`colour`, the page's
+    colour.query()). A row whose value the analyst turned off is left out, and `counts` counts every value for the
+    chips. `next` is the row the next page starts at, None after the last. The first page also holds `span`, the first
+    and the last time of all the rows, and `starts`, each incident's first time."""
     rows = index["rows"]
-    t0 = rows[0][T] if rows else 0
-    cols = {k: [] for k in ("r", "t", "f", "ln", *FIELDS, "re", "tk", "m", "mb")}
-    marks = [{"label": lab["name"], "value": v["name"], "colour": v["colour"]}
-             for lab in on["labels"] for v in lab["values"]][:MARKS_MAX]
-    mark_at = {(x["label"], x["value"]): m for m, x in enumerate(marks)}
-    i = max(0, start)
+    choice, incident = query.get("colour"), _str(query.get("incident"))
+    q = _str(query.get("q")).lower()
+    start = query.get("from")
+    i = start if isinstance(start, int) and not isinstance(start, bool) and start > 0 else 0
+    cols = {k: [] for k in ("r", "t", "ref", *FIELDS, "text", "value")}
+    counts = {}
     while i < len(rows) and len(cols["r"]) < OVERVIEW_ROWS:
-        row, ref = rows[i], _ref(index, i)
-        i += 1
-        if on["filter"] and i - 1 not in keep and not thimble.kept(ref):
-            continue
-        first, bits = -1, 0
-        for x in thimble.marked(ref) if marks else ():
-            m = mark_at.get((x["label"], x["value"]))
-            if m is not None:
-                first = m if first < 0 else first
-                bits |= 1 << m
-        took = row[T] - rows[row[RE]][T] if row[RE] >= 0 else -1
-        for k, v in zip(cols, (i - 1, row[T] - t0, row[F], row[L], *row[3:RE], row[RE], took, first, bits), strict=True):
-            cols[k].append(v)
-    page = {"cols": cols, "next": i if i < len(rows) else None}
-    if start <= 0:
-        page.update(t0=t0, span=[0, rows[-1][T] - t0 if rows else 0], files=index["files"], names=index["names"],
-                    marks=marks, starts={k: rows[a][T] - t0 for k, (a, _) in index["units"].items()})
+        batch = range(i, min(len(rows), i + OVERVIEW_ROWS - len(cols["r"])))
+        got = _read(index, batch)
+        i = batch.stop
+        for j in batch:
+            r, ref = got[j], _ref(index, j)
+            if incident and r.get("incident") != incident:
+                continue
+            if q and q not in " ".join(v for v in r.values() if isinstance(v, str)).lower():
+                continue
+            if not _kept(index, j, keep):
+                continue
+            value = thimble.colour_value(choice, ref, r)
+            key = "" if value is None else value
+            counts[key] = counts.get(key, 0) + 1
+            if not thimble.colour_on(choice, value):
+                continue
+            for k, v in zip(cols, (j, rows[j][T], ref, *(_text(r, f) for f in FIELDS), _text(r, "text")[:TEXT_MAX],
+                                   value), strict=True):
+                cols[k].append(v)
+    page = {"cols": cols, "counts": counts, "next": i if i < len(rows) else None}
+    if not start:
+        page.update(span=[rows[0][T], rows[-1][T]] if rows else [0, 0],
+                    starts={k: rows[a][T] for k, (a, _) in index["units"].items()})
     return page
-
-
-def _strings(r):
-    return " ".join(r[k] for k in r if isinstance(r[k], str)).lower()
-
-
-def _search(index, q):
-    """The kept rows any of whose values holds `q`, ignoring case."""
-    q = str(q or "").strip().lower()
-    if not q:
-        return {"q": q, "rows": []}
-    got = _read(index, range(len(index["rows"])))
-    return {"q": q, "rows": [i for i in sorted(got) if q in _strings(got[i]) and _kept(index, i)]}
-
-
-def _texts(index, rows):
-    """[[row, text]] for the wanted rows, each text cut to TEXT_MAX characters."""
-    wanted = [i for i in rows if isinstance(i, int) and 0 <= i < len(index["rows"])][:1000]
-    got = _read(index, wanted)
-    return [[i, _text(got.get(i, {}), "text")[:TEXT_MAX]] for i in wanted]
 
 
 def _brief(index, i, r):
@@ -595,21 +579,13 @@ def _record(index, i, keep):
 
 
 def records(index, query):
-    """{op: overview, from?, keep?}: a page of the kept rows as columns (_overview), from row `from` on, `keep` rows
-    kept whatever the filter.
-    {op: texts, rows}: the rows' texts. {op: search, q}: the kept rows holding q. {op: record, r, keep?}: one row in
-    full (_record)."""
+    """{op: overview, from?, colour?, incident?, q?, keep?}: a page of the events the page shows (_overview).
+    {op: record, r, keep?}: one row in full (_record). `keep` rows are kept whatever the label filter."""
     query = query or {}
-    keep = {int(x) for x in query.get("keep") or () if isinstance(x, int)}
-    op = query.get("op")
-    if op == "texts":
-        return {"texts": _texts(index, query.get("rows") or [])}
-    if op == "search":
-        return _search(index, query.get("q"))
-    if op == "record":
+    keep = {x for x in query.get("keep") or () if isinstance(x, int) and not isinstance(x, bool)}
+    if query.get("op") == "record":
         return _record(index, query.get("r"), keep | {query.get("r")})
-    start = query.get("from")
-    return _overview(index, keep, start if isinstance(start, int) and not isinstance(start, bool) else 0)
+    return _overview(index, query, keep)
 
 
 def _unit(index, found, label, key, target):
