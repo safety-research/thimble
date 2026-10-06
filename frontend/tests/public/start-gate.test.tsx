@@ -7,6 +7,7 @@
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { DEFAULT_ON, PLAN_MODE_LINE, StartGate, modeLine, noModuleLine, restoreOf, startBlocked, startBody, startGateOpen } from '../../src/chat/StartGate.tsx'
+import { UNFENCED_LINE } from '../../src/shell/UnfencedBanner.tsx'
 import { invalidateSettings } from '../../src/lib/models.ts'
 import { mount, settle, unmountAll } from './mount.tsx'
 
@@ -87,6 +88,18 @@ describe('the Start gate', () => {
     const plan = await mount(<StartGate ws="mini" model="claude-opus-5-5" effort="high" main={{ attached: { session: 's', cwd: '/c', since: '', permission_mode: 'plan' } }} />)
     expect(startButton(plan).disabled).toBe(true)
     expect(plan.querySelector('.chat-gate-mode')!.textContent).toBe(PLAN_MODE_LINE)
+  })
+
+  test("in a session thimble did not start, Start is off with the plain-claude warning, not the modules-off line", async () => {
+    // live check L15: a plain `claude` with /thimble has no module for that reason, and the modules-off line sent the
+    // analyst to `thimble doctor` and `thimble -c`
+    const main = { attached: { session: 's', cwd: '/c', since: '', permission_mode: 'auto' }, launched: false, fenced: false, module: false, module_why: "Claude Code did not load thimble's hooks module" }
+    const el = await mount(<StartGate ws="mini" model="claude-opus-5-5" effort="high" main={main} />)
+    await settle()
+    expect(startButton(el).disabled).toBe(true)
+    expect(el.querySelector('.chat-gate-mode')!.textContent).toBe(UNFENCED_LINE)
+    expect(startBlocked(main)?.kind).toBe('not-launched')
+    expect(startBlocked({ ...main, launched: true, fenced: true })?.kind).toBe('no-module')
   })
 
   test('a refused start fills the gate with its request, switches, model and effort', async () => {

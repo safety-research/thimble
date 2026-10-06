@@ -7,7 +7,9 @@
 // says how it runs: as a subagent of the analyst's Claude Code session, in that session's permission mode. Start is a
 // click: the server starts the orientation through thimble's plugin with no turn of main (POST /ws/{c}/start), and the
 // answer says whether it started. Start is off, with the reason on that line, while thimble's hooks module is not
-// running in main's session (main's meta `module: false`) or main is in plan mode. Skip leaves main to the analyst.
+// running in main's session (main's meta `module: false`) or main is in plan mode, and with the plain-`claude` warning
+// while main is a session `thimble` did not start (`launched: false`), whose module stays idle for that reason. Skip
+// leaves main to the analyst.
 import { useEffect, useRef, useState } from 'react'
 import { Button } from '../components/Button'
 import { TextArea } from '../components/Field'
@@ -18,6 +20,7 @@ import { hasEffort, loadSettings, modelChoices, onSettingsChange } from '../lib/
 import { track } from '../lib/telemetry'
 import type { ChatMeta, OrientPass, OrientRun, Settings, StartAnswer, StartBody } from '../lib/types'
 import { toastText } from '../shell/Toasts'
+import { unfencedLine } from '../shell/UnfencedBanner'
 import { AGENT_EFFORTS, ModelLine } from './ModelLine'
 
 export const PASSES: { id: OrientPass; label: string }[] = [
@@ -128,9 +131,13 @@ export function noModuleLine(reason: string | null | undefined): string {
   return `thimble's agents can't start in this session: Claude Code's hooks modules are off (${why}). Main, its threads, cards and labels still work. ${noModuleFix(why)}, then run \`thimble -c\`.`
 }
 
-/** Why Start is off now, or null: no hooks module in main's session (`module: false`; a meta that does not say leaves
+/** Why Start is off now, or null: main not started by `thimble` or outside thimble's sandbox (the banner's warning, as
+ * the server refuses such a start: not-launched; its module is idle for that reason, so the modules-off line would
+ * send the analyst the wrong way), no hooks module in main's session (`module: false`; a meta that does not say leaves
  * Start on, and the server refuses a start that cannot happen), then plan mode. Pure. */
-export function startBlocked(main: Pick<ChatMeta, 'module' | 'module_why' | 'attached'> | null | undefined): { kind: 'no-module' | 'plan'; line: string } | null {
+export function startBlocked(main: Pick<ChatMeta, 'module' | 'module_why' | 'attached' | 'launched' | 'fenced'> | null | undefined): { kind: 'not-launched' | 'no-module' | 'plan'; line: string } | null {
+  const unfenced = unfencedLine(main)
+  if (unfenced) return { kind: 'not-launched', line: unfenced }
   if (main?.module === false) return { kind: 'no-module', line: noModuleLine(main.module_why) }
   if (main?.attached?.permission_mode === 'plan') return { kind: 'plan', line: PLAN_MODE_LINE }
   return null
@@ -138,8 +145,9 @@ export function startBlocked(main: Pick<ChatMeta, 'module' | 'module_why' | 'att
 
 export function StartGate({ ws, main, model: rowModel, effort: rowEffort, restore = null, onStarting, onAnswer, onSkip }: {
   ws: string
-  /** main's meta: its permission mode, and whether thimble's hooks module runs in it */
-  main?: Pick<ChatMeta, 'module' | 'module_why' | 'attached'> | null
+  /** main's meta: its permission mode, whether `thimble` started it in its fence, and whether thimble's hooks module
+   * runs in it */
+  main?: Pick<ChatMeta, 'module' | 'module_why' | 'attached' | 'launched' | 'fenced'> | null
   /** the orientation row's model and effort (settings.models.orient), where the menus open; nothing while not read */
   model?: string | null
   effort?: string | null
