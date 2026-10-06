@@ -1,6 +1,6 @@
 // A paragraph (or a table) of a reply that holds citations: a Client surface module, drawn on Claude Code's drawing
-// thread (no `$`). It wraps the block to its region, draws each citation as a link (cite.ts), animates the spinner of
-// a citation a fix round or a verification is working on, shows the hovered citation's ref beside it, and hands each
+// thread (no `$`). It wraps the block to its region, draws each citation as a link (cite.ts), ◌ beside a citation a
+// fix round or a verification is working on, shows the hovered citation's tip in inverse beside it, and hands each
 // press to gestures.tsx with what is under the pointer: a citation, a table row, or the sentence of the word there.
 // While the right-click menu is open on one of its passages, that passage is shaded.
 //
@@ -58,11 +58,6 @@ export function selectedText(lines: readonly { s: string }[][], sel: Sel, table:
     .trim()
 }
 
-const TIP_BG = '#1f2428'
-const TIP_FG = '#e6edf3'
-
-// each instance's latest props, for its spinner tick
-const latest = new WeakMap<object, Props>()
 // the instance whose citation is hovered: one at a time
 let hovered: ClientSurface<S> | null = null
 
@@ -84,7 +79,6 @@ const Para: ClientModule<Props, S> = (props, surface) => {
   const st = surface.state ?? { hover: -1, frame: 0, cols }
   const hover = st.cols === cols ? st.hover : -1
   const lay = blockLayout(props.block, props.chips, cols, hover, st.frame)
-  latest.set(surface, props)
 
   // set on every call, so the listener reads this call's layout
   surface.onPointer(ev => {
@@ -147,22 +141,15 @@ const Para: ClientModule<Props, S> = (props, surface) => {
     // the band shows the hovered citation's ref and status, whatever room the paragraph has for a tip
     send(surface, { type: 'hover', id: props.ids[k] ?? '' })
   })
-  if (surface.state === undefined) {
-    surface.setState(st)
-    surface.every(150, () => {
-      const p = latest.get(surface)
-      const cur = surface.state
-      if (p && cur && p.chips.some(c => c.spin)) surface.setState({ ...cur, frame: cur.frame + 1 })
-    })
-  }
+  if (surface.state === undefined) surface.setState(st)
 
   const sel = st.cols === cols ? st.sel : null
-  const lit = sel ? shade(menuLines(lay, props.raws, props.menu), selCells(sel, lay.lines.length), COLORS.highlight) : menuLines(lay, props.raws, props.menu)
+  const lit = sel ? shade(menuLines(lay, props.raws, props.menu), selCells(sel, lay.lines.length), COLORS.selected) : menuLines(lay, props.raws, props.menu)
   const rows: RenderElement[] = lit.map(l => paintLine(Text, l))
   const span = hover >= 0 ? lay.spans.find(s => s.chip === hover) : undefined
   const tip = hover >= 0 ? props.chips[hover]?.tip : undefined
-  // a tip over the line above the citation, or below it on a first line, or on a one-line paragraph after its text
-  // (an absolute Box is clipped to the region, which is one row tall then)
+  // a tip in inverse over the line above the citation, or below it on a first line, or on a one-line paragraph after
+  // its text (an absolute Box is clipped to the region, which is one row tall then); no box behind it
   if (span && tip) {
     const room = Math.max(10, cols - 3)
     let text = width(tip) > room ? `${tip.slice(0, room - 1)}…` : tip
@@ -175,7 +162,7 @@ const Para: ClientModule<Props, S> = (props, surface) => {
       left = end
       top = 0
     }
-    if (text) rows.push(Box({ position: 'absolute', top, left, children: Text({ backgroundColor: TIP_BG, color: TIP_FG, children: ` ${text} ` }) }))
+    if (text) rows.push(Box({ position: 'absolute', top, left, children: Text({ inverse: true, children: ` ${text} ` }) }))
   }
   // a released selection: "ask about this" on the line below its end, or at the right of its last line
   askAt.delete(surface)

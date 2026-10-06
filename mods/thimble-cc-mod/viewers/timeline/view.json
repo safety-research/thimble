@@ -1,0 +1,139 @@
+{
+  "version": 1,
+  "name": "Timeline",
+  "slug": "timeline",
+  "description": "A ferry operator's alerts, deploys, chat, support tickets and automated agents' actions over four days on one time axis, a lane per source, each event beside the event it answers and the events that answer it, and each incident as a unit.",
+  "data": "Five systems' exports over 16 to 19 May, each in its own format and clock, which the reader turns into events with the same fields. alerts/*.jsonl: the monitor's alerts, a file per start of the monitor, epoch-millisecond times, svc and msg renamed service and summary by its 4.0 upgrade, an alert delivered twice and a start line that is no alert. deploys.csv: deploy events in local time (UTC+1), some rows with an offset and some without. chat/*.json: a channel per file, with threads, bot posts and join notices, people named by chat id in chat/users.json. tickets/*.txt: email-like threads dated in the sender's zone; tickets/index.csv gives priority, service and incident, lists a ticket that is gone and misses a new one. agents.log: the automated agents' key=value lines in UTC, ending in a torn line the reader reports.",
+  "scope": ["agents.log", "alerts/*.jsonl", "chat/*.json", "deploys.csv", "tickets/*.txt", "tickets/index.csv"],
+  "collections": [
+    {
+      "name": "events",
+      "one": "one alert, deploy step, chat message, ticket message or agent action",
+      "key": "ref",
+      "title": "text",
+      "fields": [
+        {"name": "ref", "type": "ref"},
+        {"name": "id", "type": "text"},
+        {"name": "time", "type": "time", "derived": "cleaned", "from": "ts, time, Date or the log line's time", "how": "read in UTC, a deploys.csv time without an offset as UTC+1"},
+        {"name": "day", "type": "category", "derived": "computed", "from": "time", "how": "the day it falls on in UTC"},
+        {"name": "clock", "type": "text", "label": "time", "derived": "computed", "from": "time", "how": "its time of day in UTC"},
+        {"name": "source", "type": "category", "derived": "computed", "from": "the file it is in", "how": "alert, deploy, chat, ticket or agent"},
+        {"name": "kind", "type": "category", "derived": "cleaned", "from": "state, event, Status or action", "how": "firing read as fired, a ticket's first message as opened"},
+        {"name": "actor", "type": "category", "derived": "cleaned", "from": "by, user, From or the agent", "how": "a login or chat id as chat/users.json names it"},
+        {"name": "service", "type": "category", "derived": "computed", "from": "svc or service, the summary, tickets/index.csv", "how": "a missing service from the summary's first word"},
+        {"name": "severity", "type": "category", "derived": "cleaned", "from": "severity, or a ticket's priority in tickets/index.csv", "how": "the priority word in free text"},
+        {"name": "outcome", "type": "category", "derived": "cleaned", "from": "result", "how": "ok, failed or held, other words dropped", "flag": ["failed"]},
+        {"name": "incident", "type": "category", "link": "incidents", "derived": "computed", "from": "incident, an inc- channel or an INC number in the text", "how": "a deploy's later steps take its incident"},
+        {"name": "thread", "type": "category", "derived": "computed", "from": "the channel file or the ticket file", "how": "the conversation a message is part of"},
+        {"name": "answers", "type": "text", "link": "events", "derived": "computed", "from": "resolves, deploy, thread_ts, ticket order, alert, ticket or via", "how": "the event this one answers"},
+        {"name": "took", "type": "duration", "label": "took to answer", "derived": "computed", "from": "time and answers", "how": "seconds since the event it answers"},
+        {"name": "into", "type": "duration", "label": "into incident", "derived": "computed", "from": "time and incident", "how": "seconds since its incident's first event"},
+        {"name": "text", "type": "text"}
+      ],
+      "detail": {
+        "meta": ["source", "kind", "actor", "service"],
+        "fields": ["time", "incident", "severity", "outcome", "answers", "took", "into", "thread", "id"],
+        "text": "text",
+        "related": [
+          {
+            "title": "Answered by",
+            "collection": "events",
+            "via": "answers",
+            "show": {
+              "kind": "table",
+              "columns": [{"field": "time"}, {"field": "took"}, {"field": "source"}, {"field": "actor"}, {"field": "text"}],
+              "sort": {"field": "time"}
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "incidents",
+      "one": "one incident and every event that names it",
+      "key": "name",
+      "title": "name",
+      "fields": [
+        {"name": "name", "type": "text", "label": "incident"},
+        {"name": "ref", "type": "ref"},
+        {"name": "first", "type": "time", "derived": "computed", "from": "its events' times", "how": "the time of its first event"},
+        {"name": "last", "type": "time", "derived": "computed", "from": "its events' times", "how": "the time of its last event"},
+        {"name": "span", "type": "duration", "derived": "computed", "from": "first and last", "how": "the time between them"},
+        {"name": "events", "type": "number", "derived": "computed", "from": "the events' incident", "how": "the events that name it"},
+        {"name": "opened by", "type": "text", "link": "events", "derived": "computed", "from": "its events' times", "how": "its first event"},
+        {"name": "sources", "type": "list", "derived": "computed", "from": "its events' sources", "how": "every source among them"},
+        {"name": "services", "type": "list", "derived": "computed", "from": "its events' services", "how": "every service among them"}
+      ],
+      "detail": {
+        "fields": ["first", "last", "span", "events", "opened by", "sources", "services"],
+        "related": [
+          {
+            "title": "Events",
+            "collection": "events",
+            "via": "incident",
+            "show": {
+              "kind": "table",
+              "columns": [{"field": "time"}, {"field": "into"}, {"field": "source"}, {"field": "actor"}, {"field": "text"}],
+              "sort": {"field": "time"}
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "stats": [
+    {"label": "events", "collection": "events", "agg": "count"},
+    {"label": "sources", "collection": "events", "agg": "distinct", "field": "source"},
+    {"label": "incidents", "collection": "incidents", "agg": "count"},
+    {"label": "spanned", "collection": "events", "agg": "span", "field": "time"}
+  ],
+  "tabs": [
+    {
+      "name": "Events",
+      "collection": "events",
+      "overview": {"kind": "histogram", "time": "time", "color": "source"},
+      "zoom": "a click on the strip narrows the lanes and the list to that time",
+      "filter": {"fields": ["day", "incident", "source", "thread", "actor", "kind", "service", "severity", "outcome"], "search": ["text", "actor", "id"]},
+      "body": [
+        {"kind": "lanes", "lane": "source", "time": "time", "color": "source"},
+        {
+          "kind": "table",
+          "columns": [
+            {"field": "clock"},
+            {"field": "source"},
+            {"field": "kind"},
+            {"field": "actor"},
+            {"field": "incident"},
+            {"field": "text"}
+          ],
+          "sort": {"field": "time"},
+          "group": "day"
+        }
+      ]
+    },
+    {
+      "name": "Incidents",
+      "collection": "events",
+      "where": {"field": "incident", "not": null},
+      "overview": {
+        "kind": "lanes",
+        "lane": "incident",
+        "time": "time",
+        "color": "source",
+        "lanes": {"collection": "incidents", "start": "first", "end": "last", "meta": ["events"], "label": "name"}
+      },
+      "zoom": "a click on the axis narrows to that time, on an incident opens it",
+      "filter": {"fields": ["incident", "source", "thread", "actor", "service"], "search": ["text", "actor"]},
+      "body": [
+        {
+          "kind": "table",
+          "columns": [{"field": "into"}, {"field": "source"}, {"field": "kind"}, {"field": "actor"}, {"field": "text"}],
+          "sort": {"field": "time"},
+          "group": "incident"
+        }
+      ]
+    }
+  ],
+  "accepts": [{"form": "L<n>", "means": "the event on line <n>, selected with its detail"}],
+  "units": [{"form": "<incident>", "means": "one incident, such as INC-312, selected with its events"}]
+}

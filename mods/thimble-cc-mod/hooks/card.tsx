@@ -1,22 +1,31 @@
-// A card as an interactive panel: a Client surface module, drawn on Claude Code's drawing thread (no `$`).
-// The chart is text (block, braille and box-drawing characters), so the Client can redraw it per pointer move: the mark
-// under the pointer is highlighted and its value shows at the right of the title. Presses on a mark, a record, a node or
+// A card as an interactive panel: a Client surface module, drawn on Claude Code's drawing thread (no `$`). It stands
+// between a rule above and a rule below, as wide as the card, with no side borders, so its text keeps the stream's
+// text axis (views/SPEC.md, "The visual system", rule 11). The chart is text (block, braille and box-drawing
+// characters), so the Client can redraw it per pointer move: the mark under the pointer has its label in inverse and
+// its value shows at the right of the title. Presses on a mark, a record, a node or
 // the card itself go to the gestures (onPointer), which decide what a click, a double-click or a right-click does. The
-// one control row is the card's params: a choice runs the card's script again with it. As in para.tsx, a move off the
-// card, a reflow or a hover on another card clears the hovered mark.
+// one control row is the card's params: a choice runs the card's script again with it. A card that read a label shows
+// it on a line under its title, and a press there (any button) opens the label in the panel. A label card's records
+// carry "agree" and "disagree", whose presses go to register.tsx as the label's verdicts. As in para.tsx, a move off
+// the card, a reflow or a hover on another card clears the hovered mark.
 import type { ClientModule, ClientSurface } from 'claude-code'
 
-import { cardLayout, cut, menuShade, width } from './draw'
-import type { CardData, CardMeta, Item, Line, Seg } from './draw'
+import { focusItem } from './anim'
+import type { Focus } from './anim'
+import { cardLayout, cut, labelHead, menuShade, width } from './draw'
+import type { CardData, CardMeta, Item, LabelUi, Line, Seg } from './draw'
 import { isMenuTarget, onPointer, send } from './gestures'
 import type { Target } from './gestures'
 import { COLORS, paintLine } from './paint'
 
-type Props = { card: CardData; cols: number; plotRows?: number; debug?: boolean; meta?: CardMeta; pane?: boolean; menu?: Target | null }
-/** `cols`: the width the hover was set at; after a reflow it is stale. */
-type S = { hover: number; act: string; cols: number }
+/** `focus`: a mark to light while nothing is hovered, such as the step a story's beat names. */
+type Props = { card: CardData; cols: number; plotRows?: number; debug?: boolean; meta?: CardMeta; pane?: boolean; menu?: Target | null; focus?: Focus }
+/** `cols`: the width the hover was set at; after a reflow it is stale. `act`: the param choice, label or label card
+ *  control under the pointer. On a label card, `choose`: the record whose other values show; `pending`: a verdict sent
+ *  (`<ref>=<value>`) and `was`, that record as the card showed it then, so "saving…" lasts until the card changes. */
+type S = { hover: number; act: string; cols: number; choose?: string; pending?: string; was?: string }
 
-const PAD_X = 2 // border and padding on the left
+const PAD_X = 0 // no border or padding at the left: the card's text starts on the stream's axis
 
 // the card whose mark or param is hovered: one at a time
 let hovered: ClientSurface<S> | null = null
@@ -34,7 +43,8 @@ function unhover(surface: ClientSurface<S>): void {
 
 type Hot = { x0: number; x1: number; param: string; value: string }
 
-/** The params row: each choice of each param, the current one inverted, and where each other choice is. */
+/** The params row: each param's name dim, its choices 2 cells apart, the one in use on the selection background, one
+ *  under the pointer in inverse; and where each other choice is. */
 function paramRow(card: CardData, hoverKey: string): { line: Line; hots: Hot[] } | null {
   const params = card.params ?? []
   if (!params.length) return null
@@ -47,15 +57,15 @@ function paramRow(card: CardData, hoverKey: string): { line: Line; hots: Hot[] }
     x += width(seg.s)
   }
   params.forEach((p, i) => {
-    if (i) push({ s: '   ' })
-    push({ s: `${p.name} `, fg: COLORS.dim })
+    if (i) push({ s: '    ' })
+    push({ s: `${p.name}  `, fg: COLORS.dim })
     p.choices.forEach((c, j) => {
-      if (j) push({ s: ' ' })
+      if (j) push({ s: '  ' })
       const value = String(c)
-      if (value === String(p.value)) push({ s: ` ${c} `, inv: true, b: true })
+      if (value === String(p.value)) push({ s: String(c), bg: COLORS.selected })
       else {
         const on = hoverKey === `${p.name}=${value}`
-        push({ s: ` ${c} `, fg: on ? COLORS.accent : COLORS.dim, u: on }, { param: p.name, value })
+        push({ s: String(c), ...(on ? { inv: true } : {}) }, { param: p.name, value })
       }
     })
   })
@@ -80,7 +90,7 @@ function cardTarget(card: CardData): Target {
 const Card: ClientModule<Props, S> = (props, surface) => {
   const { Box, Text, Button } = surface.elements
   const cols = surface.columns || props.cols || 80
-  const inner = Math.max(20, cols - 4)
+  const inner = Math.max(20, cols)
   const fresh: S = { hover: -1, act: '', cols }
   const st = surface.state ?? fresh
   const stale = st.cols !== cols
@@ -91,12 +101,17 @@ const Card: ClientModule<Props, S> = (props, surface) => {
   // while a right-click's menu is open on the card its border is lit and its title shaded; on one of its marks, that
   // mark is drawn hovered and shaded
   const menuOnCard = isMenuTarget(cardTarget(card), props.menu)
-  let lay = cardLayout(card, inner, hover, props.plotRows)
+  // a verdict waits until the record it was sent for changes on the card (labels.py writes the card again)
+  const [pRef] = (st.pending ?? '').split('=')
+  const waiting = Boolean(st.pending) && JSON.stringify((card.examples ?? []).find(x => x.ref === pRef) ?? null) === st.was
+  const ui: LabelUi = { act: stale ? '' : st.act, ...(st.choose ? { choose: st.choose } : {}), ...(waiting ? { pending: st.pending! } : {}) }
+  let lay = cardLayout(card, inner, hover, props.plotRows, ui)
   const menuItem = props.menu ? lay.items.findIndex(it => isMenuTarget(itemTarget(it, card), props.menu)) : -1
-  const shown = hover >= 0 ? hover : menuItem
-  if (shown !== hover) lay = cardLayout(card, inner, shown, props.plotRows)
+  const shown = hover >= 0 ? hover : menuItem >= 0 ? menuItem : props.focus ? focusItem(card, lay.items, props.focus) : -1
+  if (shown !== hover) lay = cardLayout(card, inner, shown, props.plotRows, ui)
   const prow = paramRow(card, stale ? '' : st.act)
-  const top = 2 + (prow ? 1 : 0) // border, title, params
+  const head = labelHead(card, inner, !stale && st.act.startsWith('label:') ? st.act.slice(6) : '')
+  const top = 2 + head.lines.length + (prow ? 1 : 0) // border, title, labels, params
   const rowsTall = surface.rows || Infinity
 
   const targetAt = (i: number): Target => (i >= 0 && lay.items[i] ? itemTarget(lay.items[i]!, card) : cardTarget(card))
@@ -112,13 +127,30 @@ const Card: ClientModule<Props, S> = (props, surface) => {
   surface.onPointer(ev => {
     const cur = surface.state ?? fresh
     const cx = ev.x - PAD_X
-    const hot = prow && ev.y === 2 ? prow.hots.find(h => cx >= h.x0 && cx < h.x1) : undefined
-    const i = hot ? -1 : lay.hit(cx, ev.y - top)
-    const act = hot ? `${hot.param}=${hot.value}` : ''
+    const prowY = 2 + head.lines.length
+    const hot = prow && ev.y === prowY ? prow.hots.find(h => cx >= h.x0 && cx < h.x1) : undefined
+    // a label line: the whole line names its label
+    const slug = ev.y >= 2 && ev.y < 2 + head.lines.length && cx >= 0 && cx < inner ? head.slugs[ev.y - 2] : undefined
+    const ctl = lay.hots?.find(h => h.line === ev.y - top && cx >= h.x0 && cx < h.x1 && h.key)
+    const i = hot || slug || ctl ? -1 : lay.hit(cx, ev.y - top)
+    const act = hot ? `${hot.param}=${hot.value}` : slug ? `label:${slug}` : ctl ? ctl.key : ''
     const plain = !ev.shift && !ev.ctrl && !ev.alt
     // the title is a Button (its press opens the card's thread, as the person's own click): a left click there is its
-    if (ev.y === 1 && (ev.button ?? 'left') === 'left' && (ev.type === 'down' || ev.type === 'up')) return
+    if (ev.y === (props.pane ? 0 : 1) && (ev.button ?? 'left') === 'left' && (ev.type === 'down' || ev.type === 'up')) return
     if (ev.type === 'down' || ev.type === 'up') {
+      if (slug) {
+        if (ev.type === 'down') send(surface, { type: 'label-open', slug })
+        return
+      }
+      if (ctl && plain && (ev.button ?? 'left') === 'left') {
+        if (ev.type !== 'down') return
+        const a = ctl.act
+        if (a.op === 'verdict') {
+          send(surface, { type: 'label-verdict', card: card.id, slug: a.slug, ref: a.ref, value: a.value })
+          surface.setState({ ...cur, cols, act: '', choose: '', pending: `${a.ref}=${a.value}`, was: JSON.stringify((card.examples ?? []).find(x => x.ref === a.ref) ?? null) })
+        } else surface.setState({ ...cur, cols, act: '', choose: a.op === 'choose' ? a.ref : '' })
+        return
+      }
       if (hot && plain && (ev.button ?? 'left') === 'left') {
         if (ev.type === 'down') send(surface, { type: 'param', card: card.id, name: hot.param, value: hot.value })
         return
@@ -154,7 +186,7 @@ const Card: ClientModule<Props, S> = (props, surface) => {
   // the title, and at its right the value under the pointer, or what the mod is doing to the card
   const item = shown >= 0 ? lay.items[shown] : undefined
   const right: Seg | null = item
-    ? { s: cut(item.value ? `${item.label}: ${item.value}` : item.label, Math.max(12, Math.floor(inner * 0.6))), b: true, fg: COLORS.accent }
+    ? { s: cut(item.value ? `${item.label}  ${item.value}` : item.label, Math.max(12, Math.floor(inner * 0.6))) }
     : meta.busy
       ? { s: cut(meta.busy, 40), fg: COLORS.dim }
       : meta.error
@@ -162,27 +194,20 @@ const Card: ClientModule<Props, S> = (props, surface) => {
         : null
   const rw = right ? width(right.s) + 2 : 0
   const title = cut(card.question, Math.max(8, inner - rw))
-  // the title: a Button, lit and underlined under the pointer, whose press register.tsx answers (ui.press) with a side
-  // thread about the card; at its right the value under the pointer
+  // the title: a plain Button (the pointer inverts it), whose press register.tsx answers (ui.press) with a side thread
+  // about the card; at its right the value under the pointer, against the card's right edge
   const tail: Line = right ? [{ s: ' '.repeat(Math.max(2, inner - width(title) - width(right.s))) }, right] : []
-  const titleButton = Button({
-    key: `card-title:${card.id}`,
-    label: title,
-    plain: true,
-    hover: { scope: `card-title-${card.id}`, color: COLORS.accent, underline: true },
-    onPress: () => undefined,
-  })
-  const rows = [Box({ flexDirection: 'row', ...(menuOnCard ? { backgroundColor: COLORS.menu } : {}), children: [titleButton, paintLine(Text, tail)] })]
+  const titleButton = Button({ key: `card-title:${card.id}`, label: title, plain: true, onPress: () => undefined })
+  const rule = paintLine(Text, [{ s: '─'.repeat(cols), fg: COLORS.rule }])
+  const titleRow = Box({ flexDirection: 'row', ...(menuOnCard ? { backgroundColor: COLORS.selected } : {}), children: [titleButton, paintLine(Text, tail)] })
+  // in a stream the card stands between rules; in the card pane its title is the panel's title row, the rule under it
+  // the header's (views/SPEC.md, "A panel's header")
+  const rows = props.pane ? [titleRow, rule] : [rule, titleRow]
+  rows.push(...head.lines.map(l => paintLine(Text, l)))
   if (prow) rows.push(paintLine(Text, prow.line))
   rows.push(...(menuItem >= 0 && shown === menuItem ? menuShade(lay, menuItem) : lay.lines).map(l => paintLine(Text, l)))
-  return Box({
-    flexDirection: 'column',
-    borderStyle: 'round',
-    borderColor: meta.error ? COLORS.problem : menuOnCard || menuItem >= 0 ? COLORS.accent : COLORS.rule,
-    paddingX: 1,
-    width: cols,
-    children: rows,
-  })
+  rows.push(rule)
+  return Box({ flexDirection: 'column', width: cols, children: rows })
 }
 
 export default Card

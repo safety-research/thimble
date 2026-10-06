@@ -15,6 +15,14 @@ export type Cell = string | number | boolean | null
 export type CardParam = { name: string; value: string | number; default: string | number; choices: (string | number)[] }
 export type DiagramNode = { id: string; label: string; ref?: string; detail?: string }
 export type DiagramEdge = { source: string; target: string; label?: string }
+/** A label a card's script read (tcard.label): its values, and the value of each record the card names (`marks`, by
+ *  ref). `stale`: the label changed after the card was made (register.tsx sets it). */
+export type CardLabel = { slug: string; name: string; values: string[]; marks?: Record<string, string>; stale?: boolean }
+/** A label card's own label (helper/labels.py): how its records were labeled and how many. */
+export type LabelInfo = { slug: string; name: string; kind: string; values: string[]; labeled: number; total: number; trial: boolean; paths?: string[] }
+/** An example: its record, its words, and on a label card its value now, why, and whether the analyst set or agreed
+ *  with it (`set`; `was` the value the label gave). */
+export type CardExample = { ref: string; quote: string; note: string; value?: string; why?: string; set?: boolean; was?: string }
 export type CardData = {
   id: string
   kind: string
@@ -29,9 +37,11 @@ export type CardData = {
   columns?: string[]
   series?: { name: string; points: [string | number, number][] }[]
   events?: { time: string; label: string; ref: string; shown?: string }[]
-  examples?: { ref: string; quote: string; note: string }[]
+  examples?: CardExample[]
   nodes?: DiagramNode[]
   edges?: DiagramEdge[]
+  labels?: CardLabel[]
+  label?: LabelInfo
 }
 
 /** What the mod is doing to a card now: running its script, or why the last run failed. */
@@ -41,7 +51,16 @@ export type CardMeta = { busy?: string; error?: string }
  *  opens, and how it reaches the gestures (`kind` and `text`, the shown value or words, of its Target). */
 export type Item = { label: string; value: string; cite: string; open: string; kind: 'mark' | 'row' | 'record' | 'node'; text: string }
 
-export type Layout = { lines: Line[]; items: Item[]; hit: (x: number, y: number) => number }
+/** What a press on a label card's controls does: set an example's value (its own value: agree), show the other values
+ *  to pick from, or put them away. */
+export type LabelAct = { op: 'verdict'; slug: string; ref: string; value: string } | { op: 'choose'; ref: string } | { op: 'cancel' }
+/** A control of a layout: the cells [x0, x1) of its line, a key the hover names it by, and what a press does. */
+export type Hot = { line: number; x0: number; x1: number; key: string; act: LabelAct }
+
+export type Layout = { lines: Line[]; items: Item[]; hit: (x: number, y: number) => number; hots?: Hot[] }
+/** A label card's state in its Client: the hovered control, the example whose other values show, and a verdict sent
+ *  but not yet in the card (`pending`: `<ref>=<value>`). */
+export type LabelUi = { act?: string; choose?: string; pending?: string }
 
 // ---------------------------------------------------------------------------------------- text width
 
@@ -74,6 +93,34 @@ export function cut(s: string, n: number): string {
   return `${out}…`
 }
 
+// a byte of a UTF-8 sequence after its first, as Windows-1252 shows it (helper/refs.py _CONT)
+const CP1252: Record<number, number> = { 0x20ac: 0x80, 0x201a: 0x82, 0x192: 0x83, 0x201e: 0x84, 0x2026: 0x85, 0x2020: 0x86, 0x2021: 0x87, 0x2c6: 0x88, 0x2030: 0x89, 0x160: 0x8a, 0x2039: 0x8b, 0x152: 0x8c, 0x17d: 0x8e, 0x2018: 0x91, 0x2019: 0x92, 0x201c: 0x93, 0x201d: 0x94, 0x2022: 0x95, 0x2013: 0x96, 0x2014: 0x97, 0x2dc: 0x98, 0x2122: 0x99, 0x161: 0x9a, 0x203a: 0x9b, 0x153: 0x9c, 0x17e: 0x9e, 0x178: 0x9f }
+const CONT = '[\\u0080-\\u00bf\\u0152\\u0153\\u0160\\u0161\\u0178\\u017d\\u017e\\u0192\\u02c6\\u02dc\\u2013\\u2014\\u2018-\\u201a\\u201c-\\u201e\\u2020-\\u2022\\u2026\\u2030\\u2039\\u203a\\u20ac\\u2122]'
+const MOJIBAKE = new RegExp(`[\\u00c2-\\u00df]${CONT}|[\\u00e0-\\u00ef]${CONT}{2}|[\\u00f0-\\u00f4]${CONT}{3}`, 'g')
+
+/**
+ * Text whose UTF-8 bytes were once read as Windows-1252 or Latin-1 and saved again ("mÃ¶chten"), each such character
+ * back as written ("möchten"); a run that is not one UTF-8 character is kept. For display only. helper/refs.py
+ * demojibake has the same rule.
+ */
+export function demojibake(s: string): string {
+  if (!/[\u00c2-\u00f4]/.test(s)) return s
+  return s.replace(MOJIBAKE, run => {
+    const bytes = [...run].map(ch => CP1252[ch.codePointAt(0)!] ?? ch.codePointAt(0)!)
+    const lead = bytes[0]!
+    const n = bytes.length
+    let cp = lead & (n === 2 ? 0x1f : n === 3 ? 0x0f : 0x07)
+    for (const b of bytes.slice(1)) {
+      if ((b & 0xc0) !== 0x80) return run
+      cp = (cp << 6) | (b & 0x3f)
+    }
+    // an overlong form, a surrogate or past Unicode is not a character UTF-8 writes
+    const least = n === 2 ? 0x80 : n === 3 ? 0x800 : 0x10000
+    if (cp < least || (cp >= 0xd800 && cp <= 0xdfff) || cp > 0x10ffff) return run
+    return String.fromCodePoint(cp)
+  })
+}
+
 /** `s` in at most two lines of `n` columns: broken at the last space that fits, else as wrapLabel breaks a word; the
  *  second line cut. */
 export function fold(s: string, n: number): string[] {
@@ -93,7 +140,7 @@ export function fold(s: string, n: number): string[] {
   return [t.slice(0, sp), cut(t.slice(sp + 1), n)]
 }
 
-function pad(s: string, n: number, right = false): string {
+export function pad(s: string, n: number, right = false): string {
   const c = cut(s, n)
   const fill = ' '.repeat(Math.max(0, n - width(c)))
   return right ? fill + c : c + fill
@@ -165,7 +212,6 @@ export function shade(lines: readonly Line[], spans: readonly { line: number; x0
  *  else the cells that hit it. */
 export function menuShade(lay: Layout, i: number): Line[] {
   if (i < 0) return lay.lines
-  if (lay.lines.some(l => l.some(s => s.bg === COLORS.cursor))) return lay.lines.map(l => l.map(s => (s.bg === COLORS.cursor ? { ...s, bg: COLORS.menu } : s)))
   const spans: { line: number; x0: number; x1: number }[] = []
   lay.lines.forEach((l, y) => {
     const w = lineWidth(l)
@@ -179,14 +225,14 @@ export function menuShade(lay: Layout, i: number): Line[] {
       }
     }
   })
-  return shade(lay.lines, spans, COLORS.menu)
+  return shade(lay.lines, spans, COLORS.selected)
 }
 
 // ---------------------------------------------------------------------------------------- cards
 
 const EIGHTHS = ['', '▏', '▎', '▍', '▌', '▋', '▊', '▉']
 
-function bar(v: number, max: number, w: number): string {
+export function bar(v: number, max: number, w: number): string {
   if (max <= 0 || w <= 0) return ''
   const n8 = Math.max(v !== 0 ? 1 : 0, Math.round((Math.abs(v) / max) * w * 8))
   return '█'.repeat(Math.floor(n8 / 8)) + EIGHTHS[n8 % 8]!
@@ -198,7 +244,12 @@ function compact(v: number): string {
   if (a >= 1e6) return `${fmt(+(v / 1e6).toFixed(1))}M`
   if (a >= 1e5) return `${fmt(+(v / 1e3).toFixed(0))}k`
   if (a >= 1e4) return `${fmt(+(v / 1e3).toFixed(1))}k`
-  return fmt(+v.toPrecision(4))
+  return amount(+v.toPrecision(4))
+}
+
+/** A number as the mod draws a count: thousands separators from 1,000 on a whole number, else as written. */
+export function amount(v: number): string {
+  return Number.isInteger(v) && Math.abs(v) >= 1000 ? v.toLocaleString('en-US') : fmt(v)
 }
 
 function cite(display: string, ref: string): string {
@@ -208,13 +259,129 @@ function cite(display: string, ref: string): string {
 export const MAX_BARS = 30
 export const MAX_TABLE_ROWS = 15
 
+// ---------------------------------------------------------------------------------------- labels on cards
+
+/** A count with thousands separators, as the label panel writes it. */
+export function count(n: number): string {
+  return n.toLocaleString('en-US')
+}
+
+/** A share as the label panel writes it (harness.tsx pct). */
+export function share(a: number, b: number): string {
+  if (!b || !a) return '0%'
+  const p = (100 * a) / b
+  return p < 0.1 ? '<0.1%' : p < 10 ? `${p.toFixed(1)}%` : `${Math.round(p)}%`
+}
+
+/** The colour of a label's value, as the label panel draws it: the categorical palette in the label's order, and the
+ *  last value of two or more, the one that is not the category, dim. */
+export function valueColour(values: readonly string[], value: string): string | undefined {
+  const i = values.indexOf(value)
+  if (i < 0) return undefined
+  return values.length > 1 && i === values.length - 1 ? COLORS.dim : COLORS.series[i % COLORS.series.length]
+}
+
+/** The labels a card shows: a label card's own, else those its script read. */
+export function cardLabels(card: CardData): CardLabel[] {
+  if (card.kind === 'label' && card.label) return [{ slug: card.label.slug, name: card.label.name, values: card.label.values }]
+  return card.labels ?? []
+}
+
+/** The colour a mark takes from the labels the card read: its record's value (`ref`), else the value its name is. */
+function classColour(card: CardData, name?: string, ref?: string): string | undefined {
+  for (const l of cardLabels(card)) {
+    const v = (ref ? l.marks?.[ref] : undefined) ?? (name !== undefined && l.values.includes(name) ? name : undefined)
+    if (v !== undefined) return valueColour(l.values, v)
+  }
+  return undefined
+}
+
+/** A place as the analyst reads it: `revisions.jsonl line 10566`, `lines 3-8`, `row 12`; any other as written. */
+export function placeWords(ref: string): string {
+  const at = ref.indexOf('#')
+  if (at < 0) return ref
+  const path = ref.slice(0, at)
+  const frag = ref.slice(at + 1)
+  const lines = /^L(\d+)(?:-L?(\d+))?$/.exec(frag)
+  if (lines) return `${path} ${lines[2] && lines[2] !== lines[1] ? `lines ${lines[1]}-${lines[2]}` : `line ${lines[1]}`}`
+  const row = /^row=(\d+)$/.exec(frag)
+  if (row) return `${path} row ${row[1]}`
+  return ref
+}
+
+/** A place in words in `n` columns: its file's path cut, its line or row kept ("revisi… line 10904"). */
+export function cutRef(ref: string, n: number): string {
+  const words = placeWords(ref)
+  if (width(words) <= n) return words
+  const frag = / (?:line|lines|row) [\d-]+$/.exec(words)?.[0] ?? ''
+  return frag && n - width(frag) >= 4 ? `${cut(words.slice(0, words.length - frag.length), n - width(frag))}${frag}` : cut(words, n)
+}
+
+/** What the label line of a label card says after the name, in `n` columns: how its records were labeled, how many,
+ *  and of which files; when it is too long the files go first, then how. */
+function labelScope(l: LabelInfo, n: number): string {
+  const kind = l.kind === 'prompt' ? 'a model read each record' : l.kind === 'regex' ? 'a regex matched each record' : l.kind === 'code' ? 'code decided each record' : l.kind
+  const files = (l.paths ?? []).length ? ` of ${(l.paths ?? []).length > 2 ? `${l.paths!.slice(0, 2).join(', ')} +${l.paths!.length - 2}` : l.paths!.join(', ')}` : ''
+  const many = l.trial ? `a trial on ${count(l.labeled)} of ${count(l.total)} records` : `all ${count(l.labeled)} records`
+  const whole = [kind, `${many}${files}`].filter(Boolean).join(' · ')
+  const shorter = [kind, many].filter(Boolean).join(' · ')
+  return width(whole) <= n ? whole : width(shorter) <= n ? shorter : cut(many, n)
+}
+
+/**
+ * The card's label lines, under its question, one per label: "label", the label's name (a press opens it in the
+ * panel), then its values each after a dot in its colour; on a label card, how its records were labeled instead, since
+ * its bars name the values. `hover`: the slug of the label under the pointer, its name lit.
+ */
+export function labelHead(card: CardData, cols: number, hover = ''): { lines: Line[]; slugs: string[] } {
+  const lines: Line[] = []
+  const slugs: string[] = []
+  for (const l of cardLabels(card)) {
+    const on = l.slug === hover
+    const head: Line = [{ s: 'label  ', fg: COLORS.dim }]
+    const nameW = Math.max(8, Math.min(width(l.name), Math.floor(cols * 0.55)))
+    head.push({ s: cut(l.name, nameW), ...(on ? { inv: true } : {}) })
+    let tail: Line
+    if (card.kind === 'label' && card.label) tail = [{ s: `  ${labelScope(card.label, Math.max(1, cols - lineWidth(head) - 2))}`, fg: COLORS.dim }]
+    else {
+      tail = []
+      const room = cols - lineWidth(head) - (l.stale ? 16 : 0)
+      let w = 0
+      l.values.forEach((v, i) => {
+        const entry = width(v) + 4
+        if (w < 0) return
+        const left = l.values.length - i - 1
+        if (w + entry + (left ? 4 : 0) > room) {
+          tail.push({ s: `  +${l.values.length - i}`, fg: COLORS.dim })
+          w = -1
+          return
+        }
+        tail.push({ s: '  ●', fg: valueColour(l.values, v) }, { s: ` ${v}` })
+        w += entry
+      })
+    }
+    if (l.stale) tail.push({ s: '  changed since', fg: COLORS.dim })
+    const line = [...head, ...tail]
+    lines.push(lineWidth(line) > cols ? [...head, { ...tail[0]!, s: cut(tail.map(x => x.s).join(''), Math.max(1, cols - lineWidth(head))) }] : line)
+    slugs.push(l.slug)
+  }
+  return { lines, slugs }
+}
+
 function barLayout(card: CardData, cols: number, hover: number): Layout {
   const rows = ((card.rows ?? []) as BarRow[]).slice(0, MAX_BARS)
   const more = (card.rows?.length ?? 0) - rows.length
   const col = card.y || 'value'
   const groups = [...new Set(rows.map(r => r.group).filter(Boolean))]
-  const valueW = Math.max(...rows.map(r => fmt(r.value).length), 1)
-  const room = cols - valueW - 3
+  // a label card's counts as its panel writes them, each with its share of all
+  const own = card.kind === 'label'
+  const sum = own ? (card.total ?? rows.reduce((a, r) => a + r.value, 0)) : 0
+  // a count reads with thousands separators from 1,000, as everywhere the mod draws one
+  const shown = (v: number) => (own || (Number.isInteger(v) && Math.abs(v) >= 1000) ? count(v) : fmt(v))
+  const shareW = own ? Math.max(...rows.map(r => share(r.value, sum).length)) + 2 : 0
+  const valueW = Math.max(...rows.map(r => shown(r.value).length), 1)
+  // 2-cell gutters after the names and before the numbers (rule 3)
+  const room = cols - valueW - 4 - shareW
   // the bars keep two fifths of the room; a label longer than the rest takes two lines
   const labelW = Math.min(Math.max(4, ...rows.map(r => width(r.label))), Math.max(8, room - Math.max(12, Math.ceil(room * 0.4))))
   const barW = Math.max(4, room - labelW)
@@ -223,36 +390,41 @@ function barLayout(card: CardData, cols: number, hover: number): Layout {
   const owner: number[] = []
   const items: Item[] = rows.map(r => ({
     label: r.label,
-    value: `${fmt(r.value)} ${col}`,
+    value: `${shown(r.value)} ${col}`,
     cite: cite(fmt(r.value), `card:${card.id}#${col}/${r.label}`),
     open: `card:${card.id}#${col}/${r.label}`,
     kind: 'mark',
-    text: fmt(r.value),
+    text: shown(r.value),
   }))
   rows.forEach((r, i) => {
     const on = i === hover
-    const color = on ? COLORS.accent : r.value < 0 ? COLORS.negative : COLORS.series[Math.max(0, groups.indexOf(r.group)) % COLORS.series.length]!
+    // a hue only for a value of the card's colour field (its groups, or a label it read); a mark no colour names is
+    // dim (rule 20)
+    const color = classColour(card, r.group || r.label) ?? (groups.length ? COLORS.series[Math.max(0, groups.indexOf(r.group)) % COLORS.series.length]! : COLORS.dim)
     const b = bar(r.value, max, barW)
     const [first, second] = fold(r.label, labelW)
-    const style = { fg: on ? COLORS.accent : COLORS.dim, b: on }
+    // the label of the mark under the pointer in inverse; a label card's bars are parts of a whole, on a track to it
+    const track = own ? '─'.repeat(Math.max(0, barW - width(b))) : ''
     lines.push([
-      { s: pad(first!, labelW), ...style },
-      { s: ' ' },
+      { s: first!, inv: on },
+      { s: ' '.repeat(Math.max(0, labelW - width(first!)) + 2) },
       { s: b, fg: color },
-      { s: ' '.repeat(Math.max(1, barW - width(b) + 1)) },
-      { s: pad(fmt(r.value), valueW, true), b: on },
+      ...(track ? [{ s: track, fg: COLORS.rule }] : []),
+      { s: ' '.repeat(Math.max(2, barW - width(b) - width(track) + 2)) },
+      { s: pad(shown(r.value), valueW, true) },
+      ...(own ? [{ s: pad(share(r.value, sum), shareW, true), fg: COLORS.dim }] : []),
     ])
     owner.push(i)
     if (second) {
-      lines.push([{ s: pad(second, labelW), ...style }])
+      lines.push([{ s: second, inv: on }])
       owner.push(i)
     }
   })
-  const foot: Line[] = []
-  if (more > 0) foot.push([{ s: `… ${more} more rows`, fg: COLORS.dim }])
-  if (card.total !== undefined) foot.push([{ s: `all: ${fmt(card.total)}`, fg: COLORS.dim }])
-  groups.forEach((g, j) => foot.push([{ s: '■ ', fg: COLORS.series[j % COLORS.series.length] }, { s: g, fg: COLORS.dim }]))
-  lines.push(...flow(foot, cols))
+  if (more > 0) lines.push([{ s: `… ${more} more`, fg: COLORS.dim }])
+  if (card.total !== undefined) lines.push([{ s: 'all  ', fg: COLORS.dim }, { s: shown(card.total) }])
+  // the legend on its own row under the chart; none when a label it read names the groups on its label row
+  const named = new Set(cardLabels(card).flatMap(l => l.values))
+  if (groups.length && !groups.every(g => named.has(g))) lines.push(...flow(groups.map((g, j) => [{ s: '● ', fg: classColour(card, g) ?? COLORS.series[j % COLORS.series.length] }, { s: g }]), cols))
   return { lines, items, hit: (_x, y) => owner[y] ?? -1 }
 }
 
@@ -324,7 +496,7 @@ function lineLayout(card: CardData, cols: number, hover: number, plotRows = 10):
   series.forEach((s, si) =>
     s.points.forEach((p, i) => {
       const xLabel = String(p[0])
-      items.push({ label: xLabel, value: `${s.name} ${fmt(p[1])}`, cite: cite(fmt(p[1]), `card:${card.id}#${s.name}/${xLabel}`), open: `card:${card.id}#${s.name}/${xLabel}`, kind: 'mark', text: fmt(p[1]) })
+      items.push({ label: xLabel, value: `${s.name} ${amount(p[1])}`, cite: cite(fmt(p[1]), `card:${card.id}#${s.name}/${xLabel}`), open: `card:${card.id}#${s.name}/${xLabel}`, kind: 'mark', text: amount(p[1]) })
       at.push({ s: si, i, cx: px(xOf(p, i)) >> 1, cy: py(p[1]) >> 2 })
     }),
   )
@@ -343,6 +515,8 @@ function lineLayout(card: CardData, cols: number, hover: number, plotRows = 10):
     return best
   }
   const hot = hover >= 0 ? at[hover] : undefined
+  // one series with no label is dim: a hue names a value of the colour field, and a mark no colour names is dim
+  const seriesColour = (si: number) => classColour(card, series[si]?.name) ?? (series.length > 1 ? COLORS.series[si % COLORS.series.length]! : COLORS.dim)
   const lines: Line[] = []
   for (let r = 0; r < plotRows; r++) {
     const yl = r === 0 ? labels[0]! : r === plotRows - 1 ? labels[2]! : r === Math.floor((plotRows - 1) / 2) ? labels[1]! : ''
@@ -352,11 +526,11 @@ function lineLayout(card: CardData, cols: number, hover: number, plotRows = 10):
       const o = owner[r]![c]!
       const isHot = hot && c === hot.cx
       const isPoint = hot && c === hot.cx && r === hot.cy
+      // the pointer's column a ┊ in the rule grey, the point under it in inverse
       row.push({
         s: b ? String.fromCodePoint(0x2800 + b) : isHot ? '┊' : ' ',
-        fg: isPoint ? COLORS.accent : b ? COLORS.series[Math.max(0, o) % COLORS.series.length] : COLORS.dim,
-        bg: isHot ? COLORS.cursor : undefined,
-        b: Boolean(isPoint),
+        fg: b ? seriesColour(Math.max(0, o)) : COLORS.rule,
+        ...(isPoint ? { inv: true } : {}),
       })
     }
     lines.push(row)
@@ -368,7 +542,7 @@ function lineLayout(card: CardData, cols: number, hover: number, plotRows = 10):
   lines.push([{ s: axis, fg: COLORS.rule }])
   const xl = first.length + last.length + 2 <= pw ? first + ' '.repeat(pw - first.length - last.length) + last : first
   lines.push([{ s: ' '.repeat(yW + 1) + xl, fg: COLORS.dim }])
-  if (series.length > 1) lines.push(...flow(series.map((s, si) => [{ s: '━ ', fg: COLORS.series[si % COLORS.series.length] }, { s: s.name, fg: COLORS.dim }]), cols))
+  if (series.length > 1) lines.push(...flow(series.map((s, si) => [{ s: '● ', fg: seriesColour(si) }, { s: s.name }]), cols))
   return { lines, items, hit: (x, y) => nearest(x, y) }
 }
 
@@ -412,22 +586,24 @@ function timelineLayout(card: CardData, cols: number, hover: number): Layout {
     text: e.ref ? e.label : shown[i]!,
   }))
   let axisRows = 0
+  // with a label read, each event's value as a dot in its colour, and an event the label does not mark dim
+  const valued = cardLabels(card).length > 0
   if (isTime && evs.length > 1) {
     const t0 = Math.min(...times)
     const t1 = Math.max(...times)
-    const aw = Math.max(10, cols - 2)
+    // the axis takes the card's width from its A0, its end times under its ends
+    const aw = Math.max(10, cols)
     const cells = new Array<number>(aw).fill(-1)
     times.forEach((t, i) => {
       const x = t1 === t0 ? 0 : Math.round(((t - t0) / (t1 - t0)) * (aw - 1))
       cells[x] = cells[x] === -1 || i === hover ? i : cells[x]!
     })
-    lines.push([
-      { s: ' ' },
-      ...cells.map((c): Seg => (c >= 0 ? { s: '●', fg: c === hover ? COLORS.accent : COLORS.series[0], b: c === hover } : { s: '─', fg: COLORS.rule })),
-    ])
+    // each event a ● on the axis, in its value's hue when the card read a label, else dim (a mark no colour names);
+    // the one under the pointer in inverse
+    lines.push(cells.map((c): Seg => (c >= 0 ? { s: '●', fg: classColour(card, evs[c]!.label, evs[c]!.ref) ?? COLORS.dim, ...(c === hover ? { inv: true } : {}) } : { s: '─', fg: COLORS.rule })))
     const a = shown[times.indexOf(t0)]!
     const b = shown[times.indexOf(t1)]!
-    lines.push([{ s: ` ${a}${' '.repeat(Math.max(1, aw - width(a) - width(b)))}${b}`, fg: COLORS.dim }])
+    lines.push([{ s: `${a}${' '.repeat(Math.max(2, aw - width(a) - width(b)))}${b}`, fg: COLORS.dim }])
     axisRows = 2
   }
   const tW = Math.min(Math.max(...shown.map(t => width(t))), 22)
@@ -435,35 +611,310 @@ function timelineLayout(card: CardData, cols: number, hover: number): Layout {
   evs.forEach((e, i) => {
     const on = i === hover
     const label = fold(e.label, Math.max(8, cols - tW - 6))
-    const arrow: Seg[] = e.ref ? [{ s: ' ↗', fg: COLORS.dim }] : []
+    // a bare ↗: the event has a record a click opens
+    const arrow: Seg[] = e.ref ? [{ s: ' ↗' }] : []
+    const dot = valued ? classColour(card, e.label, e.ref) : undefined
+    // its value's ● hanging at the left when the card read a label; its time dim, in inverse under the pointer
+    const time = pad(shown[i]!, tW, isTime)
     lines.push([
-      { s: on ? '▶ ' : '  ', fg: COLORS.accent },
-      { s: pad(shown[i]!, tW, isTime), fg: on ? COLORS.accent : COLORS.dim, b: on },
+      dot ? { s: '● ', fg: dot } : { s: '  ' },
+      on ? { s: time, inv: true } : { s: time, fg: COLORS.dim },
       { s: '  ' },
-      { s: label[0]!, b: on },
+      { s: label[0]! },
       ...(label.length === 1 ? arrow : []),
     ])
     owner.push(i)
     if (label[1]) {
-      lines.push([{ s: ' '.repeat(tW + 4) }, { s: label[1], b: on }, ...arrow])
+      lines.push([{ s: ' '.repeat(tW + 4) }, { s: label[1] }, ...arrow])
       owner.push(i)
     }
   })
   return { lines, items, hit: (_x, y) => owner[y] ?? -1 }
 }
 
+// ---------------------------------------------------------------------------------------- tables
+
+// columns between a table's columns: two, or one where that saves a cut, a broken word or a block
+const GAPS = [2, 1]
+
+/** A piece of a cell, where a table's line may end before it: `sp`, a space comes before it; `r`, how much a break
+ *  before it costs the reader: 0 at a space, 1 at a space after a word of symbols alone (so `A + B` breaks as `A` /
+ *  `+ B`) or after a hyphen or slash that follows a letter, 2 inside a word, between the parts of a name. */
+type Piece = { t: string; sp: boolean; r: number }
+
+const SYMBOLS = /^[^\p{L}\p{N}]+$/u
+
+/** `s` as pieces: its words, and inside a word the parts before a capital that follows a lower-case letter or a digit
+ *  that follows two letters, after a hyphen or slash that follows a letter, after an underscore, and after a dot
+ *  between letters. A date, a time, a number or a line's ref (#L1234) stays one piece. */
+const pieced = new Map<string, Piece[]>()
+
+function pieces(s: string): Piece[] {
+  const known = pieced.get(s)
+  if (known) return known
+  if (pieced.size > 4000) pieced.clear()
+  const out: Piece[] = []
+  const words = s.replace(/\s+/g, ' ').trim().split(' ').filter(Boolean)
+  words.forEach((word, wi) => {
+    const ch = [...word]
+    let cur = ''
+    let r = wi > 0 && SYMBOLS.test(words[wi - 1]!) && !SYMBOLS.test(word) ? 1 : 0
+    let sp = wi > 0
+    ch.forEach((c, i) => {
+      const a = ch[i - 1] ?? ''
+      const b = ch[i - 2] ?? ''
+      const soft = /\p{L}/u.test(b) && /[-/]/.test(a)
+      const hard =
+        (/\p{Ll}/u.test(a) && /\p{Lu}/u.test(c)) ||
+        (/\p{L}/u.test(b) && /\p{L}/u.test(a) && /\d/.test(c)) ||
+        (/\p{L}/u.test(b) && a === '_') ||
+        (/\p{L}/u.test(b) && a === '.' && /\p{L}/u.test(c))
+      if ((soft || hard) && cur) {
+        out.push({ t: cur, sp, r })
+        sp = false
+        r = soft ? 1 : 2
+        cur = ''
+      }
+      cur += c
+    })
+    out.push({ t: cur, sp, r })
+  })
+  pieced.set(s, out)
+  return out
+}
+
+function joinPieces(ps: readonly Piece[]): string {
+  return ps.reduce((a, p, i) => `${a}${i && p.sp ? ' ' : ''}${p.t}`, '')
+}
+
+/** Pieces joined where a break would cost more than `most`: the units a line may end between. */
+function units(ps: readonly Piece[], most: number): Piece[] {
+  const out: Piece[] = []
+  for (const p of ps) {
+    const last = out.at(-1)
+    if (last && p.r > most) out[out.length - 1] = { ...last, t: `${last.t}${p.sp ? ' ' : ''}${p.t}` }
+    else out.push({ ...p })
+  }
+  return out
+}
+
+/** Units in lines of `w` columns, as many to a line as fit; from line `max` on, the rest on the last line. The lines and
+ *  the most a break among them costs. */
+function fill(us: readonly Piece[], w: number, max: number): { lines: string[]; r: number } {
+  const lines: string[] = []
+  let r = 0
+  let cur = us[0]?.t ?? ''
+  for (const u of us.slice(1)) {
+    const next = `${cur}${u.sp ? ' ' : ''}${u.t}`
+    if (width(next) <= w || lines.length >= max - 1) cur = next
+    else {
+      lines.push(cur)
+      cur = u.t
+      r = Math.max(r, u.r)
+    }
+  }
+  lines.push(cur)
+  return { lines, r }
+}
+
+type Wrapped = { lines: string[]; cut: boolean; r: number }
+
+/** `s` in at most `max` lines of `w` columns, broken between words where they fit, else after a hyphen or slash, and
+ *  inside a word only where a word alone is wider than `w`; what does not fit is cut on the last line. Two lines that
+ *  hold it all are balanced, at the cheapest break. */
+export function wrapCell(s: string, w: number, max: number): string[] {
+  return wrapped(s, w, max).lines
+}
+
+const wraps = new Map<string, Wrapped>()
+
+/** wrapCell's lines, whether any of `s` is cut from them, and the most a break among them costs (`r` of a Piece). */
+function wrapped(s: string, w: number, max: number): Wrapped {
+  const key = `${w} ${max} ${s}`
+  const known = wraps.get(key)
+  if (known) return known
+  if (wraps.size > 8000) wraps.clear()
+  const ps = pieces(s)
+  let out: Wrapped | null = null
+  for (const most of [0, 1, 2]) {
+    const f = fill(units(ps, most), w, max)
+    if (f.lines.every(l => width(l) <= w)) {
+      out = { lines: f.lines, cut: false, r: f.r }
+      break
+    }
+  }
+  if (!out) {
+    const f = fill(ps, w, max)
+    out = { lines: f.lines.map(l => cut(l, w)), cut: true, r: f.r }
+  }
+  if (out.lines.length === 2 && !out.cut) {
+    let score = Number.POSITIVE_INFINITY
+    for (let i = 1; i < ps.length; i++) {
+      const a = joinPieces(ps.slice(0, i))
+      const b = joinPieces(ps.slice(i))
+      const sc = ps[i]!.r * 1000 + Math.max(width(a), width(b))
+      if (ps[i]!.r <= out.r && width(a) <= w && width(b) <= w && sc < score) {
+        score = sc
+        out = { lines: [a, b], cut: false, r: ps[i]!.r }
+      }
+    }
+  }
+  wraps.set(key, out)
+  return out
+}
+
+/** The fewest columns that hold `s` in at most `max` lines with nothing cut and no break costing more than `most`. */
+function fitWidth(s: string, max: number, most = 1): number {
+  const us = units(pieces(s), most)
+  if (!us.length) return 0
+  let lo = Math.max(...us.map(u => width(u.t)))
+  let hi = Math.max(lo, width(joinPieces(us)))
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1
+    if (fill(us, mid, max + 1).lines.length <= max) hi = mid
+    else lo = mid + 1
+  }
+  return lo
+}
+
+type TableGeometry = { k: number; ws: number[]; packed: number[][]; gap: number }
+
+const geometries = new Map<string, TableGeometry>()
+
+/** Where a table's columns go in `cols` columns (see tableLayout): the first column's width `k`, each column's width,
+ *  and the other columns in blocks. Kept by the table's text and width, as a pointer's moves draw it again and again. */
+function tableGeometry(heads: readonly string[], cells: readonly string[][], numeric: readonly boolean[], cols: number): TableGeometry {
+  const key = JSON.stringify([cols, heads, cells, numeric])
+  const known = geometries.get(key)
+  if (known) return known
+  if (geometries.size > 64) geometries.clear()
+  const n = heads.length
+  if (!n) return { k: 0, ws: [], packed: [], gap: GAPS[0]! }
+  const whole = heads.map((_, c) => Math.max(0, ...cells.map(r => width(r[c]!))))
+  const nat = heads.map((h, c) => Math.max(width(h), whole[c]!))
+  // the narrowest a column can be with no word broken: its header in three lines, its other cells in two, a number whole
+  const floor = heads.map((h, c) => Math.max(fitWidth(h, 3), ...cells.map(r => (numeric[c] ? width(r[c]!) : fitWidth(r[c]!, 2)))))
+  const others = heads.map((_, c) => c).slice(1)
+  /** Beside a first column k wide, `gap` between columns: the blocks the other columns fill at their narrowest, then
+   *  each column's width, widened by what its block has left: text columns towards their whole cells, the smallest
+   *  gaps first, then the headers to as few lines as it allows. */
+  const geometry = (k: number, gap: number): TableGeometry => {
+    const room = cols - k - gap
+    const ws = heads.map((_, c) => (c === 0 ? k : Math.max(1, Math.min(floor[c]!, room))))
+    const packed: number[][] = []
+    let cur: number[] = []
+    let used = 0
+    for (const c of others) {
+      if (cur.length && used + gap + ws[c]! > room) {
+        packed.push(cur)
+        cur = []
+        used = 0
+      }
+      used += (cur.length ? gap : 0) + ws[c]!
+      cur.push(c)
+    }
+    if (cur.length) packed.push(cur)
+    for (const b of packed) {
+      let left = room - b.reduce((a, c) => a + ws[c]!, 0) - gap * (b.length - 1)
+      for (const c of b.filter(c => !numeric[c]).sort((p, q) => whole[p]! - ws[p]! - (whole[q]! - ws[q]!))) {
+        const add = Math.max(0, Math.min(left, whole[c]! - ws[c]!))
+        ws[c] = ws[c]! + add
+        left -= add
+      }
+      for (let l = Math.max(1, wrapCell(heads[0]!, k, 3).length); l <= 3; l++) {
+        const want = b.map(c => Math.max(0, Math.min(fitWidth(heads[c]!, l), room) - ws[c]!))
+        if (want.reduce((a, x) => a + x, 0) > left) continue
+        b.forEach((c, i) => (ws[c] = ws[c]! + want[i]!))
+        break
+      }
+      // a header still broken after a hyphen takes what is left to break between words only
+      for (const c of b) {
+        const need = fitWidth(heads[c]!, 3, 0) - ws[c]!
+        if (need > 0 && need <= left && wrapped(heads[c]!, ws[c]!, 3).r > 0) {
+          ws[c] = ws[c]! + need
+          left -= need
+        }
+      }
+    }
+    return { k, ws, packed, gap }
+  }
+  // what a geometry costs, in this order: the characters its cut cells and headers hide, the words it breaks, its
+  // blocks, a narrow gap, the words it breaks after a hyphen or slash, and the lines it takes; null once it hides or
+  // breaks more than `bound`
+  const cost = (g: TableGeometry, bound: number[]): number[] | null => {
+    let hidden = 0
+    let broken = 0
+    let soft = 0
+    let tall = 0
+    const blocks = g.packed.length ? g.packed : [[]]
+    const see = (s: string, c: number, max: number, count: boolean): number => {
+      if (numeric[c] && max === 2) {
+        hidden += Math.max(0, width(s) - g.ws[c]!)
+        return 1
+      }
+      const w = wrapped(s, g.ws[c]!, max)
+      if (count) {
+        if (w.cut) hidden += Math.max(1, width(s) - w.lines.reduce((a, l) => a + width(l) - 1, 0))
+        if (w.r > 1) broken += 1
+        else if (w.r > 0 && /[-/]/.test(s)) soft += 1
+      }
+      return w.lines.length
+    }
+    const over = () => bound.length > 0 && (hidden > bound[0]! || (hidden === bound[0] && broken > bound[1]!))
+    for (const [bi, b] of blocks.entries()) {
+      const cs = [0, ...b]
+      // the first column is the same in every block: what it hides or breaks counts once
+      tall += 1 + Math.max(...cs.map(c => see(heads[c]!, c, 3, c > 0 || bi === 0)))
+      for (const r of cells) {
+        tall += Math.max(...cs.map(c => see(r[c]!, c, 2, c > 0 || bi === 0)))
+        if (over()) return null
+      }
+    }
+    return [hidden, broken, blocks.length, g.gap < GAPS[0]! ? 1 : 0, soft, tall]
+  }
+  const less = (a: number[], b: number[]) => {
+    const i = a.findIndex((x, j) => x !== b[j])
+    return i >= 0 && a[i]! < b[i]!
+  }
+  // the first column at each width from the narrowest that cuts nothing to its whole width, with each gap: the geometry
+  // that costs least, the widest of those
+  const narrowest = Math.max(fitWidth(heads[0]!, 3, 2), ...cells.map(r => (numeric[0] ? width(r[0]!) : fitWidth(r[0]!, 2, 2))))
+  const kLo = n > 1 ? Math.max(1, Math.min(narrowest, cols - 2)) : Math.min(nat[0]!, cols)
+  const kHi = n > 1 ? Math.max(kLo, Math.min(nat[0]!, cols - 2)) : kLo
+  let best: TableGeometry | null = null
+  let least: number[] = []
+  for (const gap of n > 1 ? GAPS : GAPS.slice(0, 1)) {
+    const most = n > 1 ? cols - gap - 1 : cols
+    for (let k = Math.min(kHi, most); k >= Math.min(kLo, most); k--) {
+      const g = geometry(k, gap)
+      const c = cost(g, least)
+      if (c && (!best || less(c, least))) {
+        best = g
+        least = c
+      }
+    }
+  }
+  const out = best ?? geometry(kLo, GAPS[0]!)
+  geometries.set(key, out)
+  return out
+}
+
+/**
+ * A table in `cols` columns. A word is broken only where it alone is wider than its column: a column is never
+ * narrower than its widest number, its header in three lines or its other cells in two, broken between words; the first
+ * column, which names the rows, then takes all it can, and the others widen with what is left. Columns that do not fit
+ * beside each other go into blocks one under another, each led by the first column, as R prints a wide data frame.
+ */
 function tableLayout(card: CardData, cols: number, hover: number): Layout {
   const heads = card.columns ?? []
+  const n = heads.length
   const all = (card.rows ?? []) as Cell[][]
   const rows = all.slice(0, MAX_TABLE_ROWS)
-  const numeric = heads.map((_, c) => rows.every(r => typeof r[c] === 'number' || r[c] === null))
-  const nat = heads.map((h, c) => Math.max(width(h), ...rows.map(r => width(fmt(r[c])))))
-  const gap = 2
-  // the widest columns narrow until the table fits; a cell wider than its column takes two lines
-  const ws = nat.map(n => Math.min(n, cols))
-  while (ws.reduce((a, b) => a + b, 0) + gap * (ws.length - 1) > cols && Math.max(...ws) > 6) ws[ws.indexOf(Math.max(...ws))]! -= 1
-  const xs: number[] = []
-  ws.reduce((x, w) => (xs.push(x), x + w + gap), 0)
+  const cells = rows.map(r => heads.map((_, c) => fmt(r[c])))
+  // a blank cell does not make a column of numbers text
+  const numeric = heads.map((_, c) => rows.every(r => typeof r[c] === 'number' || r[c] === null || (typeof r[c] === 'string' && !r[c].trim())))
+  const { ws, packed, gap } = tableGeometry(heads, cells, numeric, cols)
+  const blocks = n ? (packed.length ? packed : [[]]).map(b => [0, ...b]) : []
   const items: Item[] = []
   rows.forEach(r =>
     heads.forEach((h, c) => {
@@ -472,46 +923,67 @@ function tableLayout(card: CardData, cols: number, hover: number): Layout {
       items.push({ label: `${fmt(r[0])} · ${h}`, value: v, cite: c === 0 ? v : cite(v, ref), open: ref, kind: c === 0 ? 'row' : 'mark', text: v })
     }),
   )
-  const hr = hover >= 0 ? Math.floor(hover / Math.max(1, heads.length)) : -1
-  const hc = hover >= 0 ? hover % Math.max(1, heads.length) : -1
-  const cell = (s: string, c: number) => pad(s, ws[c]!, numeric[c])
-  // a row's cells, each in one or two lines
-  const parts = (r: string[]) => r.map((s, c) => (numeric[c] ? [s] : fold(s, ws[c]!)))
+  const hr = hover >= 0 ? Math.floor(hover / Math.max(1, n)) : -1
+  const hc = hover >= 0 ? hover % Math.max(1, n) : -1
   const lines: Line[] = []
-  const owner: number[] = []
-  // a header folds whatever its column holds, so a number column's name is not cut
-  const head = heads.map((h, c) => fold(h, ws[c]!))
-  for (let k = 0; k < Math.max(...head.map(p => p.length)); k++) {
-    lines.push(heads.flatMap((_, c): Seg[] => [{ s: cell(head[c]![k] ?? '', c), b: true }, ...(c < heads.length - 1 ? [{ s: '  ' }] : [])]))
-    owner.push(-1)
+  const owner: number[] = [] // the row a line draws, -1 for none
+  const within: number[] = [] // the block a line is in
+  const push = (l: Line, ri: number, bi: number) => {
+    lines.push(l)
+    owner.push(ri)
+    within.push(bi)
   }
-  lines.push([{ s: ws.map(w => '─'.repeat(w)).join('  '), fg: COLORS.rule }])
-  owner.push(-1)
-  rows.forEach((r, ri) => {
-    const p = parts(heads.map((_, c) => fmt(r[c])))
-    const bg = ri === hr ? COLORS.cursor : undefined
-    for (let k = 0; k < Math.max(...p.map(q => q.length)); k++) {
-      lines.push(
-        heads.flatMap((_, c): Seg[] => [
-          { s: cell(p[c]![k] ?? '', c), bg, b: ri === hr && c === hc, u: ri === hr && c === hc && k < p[c]!.length },
-          ...(c < heads.length - 1 ? [{ s: '  ', bg }] : []),
-        ]),
-      )
-      owner.push(ri)
-    }
+  const join = (cs: number[], segs: (c: number, i: number) => Seg[]): Line => cs.flatMap((c, i): Seg[] => [...segs(c, i), ...(i < cs.length - 1 ? [{ s: ' '.repeat(gap) }] : [])])
+  blocks.forEach((cs, bi) => {
+    if (bi) push([], -1, bi)
+    // the headers sit on the rule: a shorter one starts lower
+    const head = cs.map(c => wrapCell(heads[c]!, ws[c]!, 3))
+    const hl = Math.max(...head.map(h => h.length))
+    // the column names dim, with no rule under them; the words of the cell under the pointer in inverse
+    for (let j = 0; j < hl; j++) push(join(cs, (c, i) => [{ s: pad(head[i]![j - hl + head[i]!.length] ?? '', ws[c]!, numeric[c]), fg: COLORS.dim }]), -1, bi)
+    cells.forEach((r, ri) => {
+      const p = cs.map(c => (numeric[c] ? [r[c]!] : wrapCell(r[c]!, ws[c]!, 2)))
+      for (let j = 0; j < Math.max(...p.map(q => q.length)); j++) {
+        push(
+          join(cs, (c, i) => {
+            const cell = pad(p[i]![j] ?? '', ws[c]!, numeric[c])
+            const body = cell.trim()
+            if (!(ri === hr && c === hc && body)) return [{ s: cell }]
+            const before = cell.indexOf(body)
+            return [{ s: cell.slice(0, before) }, { s: body, inv: true }, { s: cell.slice(before + body.length) }].filter(x => x.s)
+          }),
+          ri,
+          bi,
+        )
+      }
+    })
   })
-  if (all.length > rows.length) lines.push([{ s: `… ${all.length - rows.length} more rows`, fg: COLORS.dim }])
+  if (all.length > rows.length) push([{ s: `… ${all.length - rows.length} more`, fg: COLORS.dim }], -1, -1)
+  const lefts = blocks.map(cs => {
+    const xs: number[] = []
+    cs.reduce((x, c) => (xs.push(x), x + ws[c]! + gap), 0)
+    return xs
+  })
   return {
     lines,
     items,
     hit: (x, y) => {
       const ri = owner[y] ?? -1
       if (ri < 0) return -1
-      let c = xs.findIndex((x0, i) => x >= x0 && x < x0 + ws[i]! + (i < ws.length - 1 ? gap : 0))
-      if (c < 0) c = 0
-      return ri * heads.length + c
+      const cs = blocks[within[y]!]!
+      const i = lefts[within[y]!]!.findIndex((x0, j) => x >= x0 && x < x0 + ws[cs[j]!]! + (j < cs.length - 1 ? gap : 0))
+      return ri * n + cs[Math.max(0, i)]!
     },
   }
+}
+
+/** A record's head: its value's ● hanging at the left (none for a record of no colour field), its words, then `↗` and
+ *  its place underlined, a link to the record; the place in inverse while the record is under the pointer. */
+function recordHead(glyph: Seg | null, words: Seg[], ref: string, on: boolean, room: number): Line {
+  const lead: Seg = glyph ?? { s: '  ' }
+  const used = 2 + words.reduce((n, w) => n + width(w.s), 0) + (words.length ? 2 : 0) + 2
+  const place = cutRef(ref, Math.max(8, room - used))
+  return [lead, ...words, ...(words.length ? [{ s: '  ' }] : []), { s: '↗ ' }, { s: place, u: true, ...(on ? { inv: true } : {}) }]
 }
 
 function exampleLayout(card: CardData, cols: number, hover: number): Layout {
@@ -521,40 +993,132 @@ function exampleLayout(card: CardData, cols: number, hover: number): Layout {
   const items: Item[] = exs.map(e => ({ label: e.ref, value: e.note || e.quote.slice(0, 60), cite: `[[${e.ref}]]`, open: e.ref, kind: 'record', text: e.note || e.quote }))
   exs.forEach((e, i) => {
     const on = i === hover
-    const color = on ? COLORS.accent : COLORS.series[0]
-    const room = Math.max(10, cols - 4)
-    // the note in up to two lines, its record after it where it fits, else on a line of its own
-    const ref: Seg = { s: e.ref, fg: on ? COLORS.link : COLORS.dim, u: on }
-    const note = e.note ? (width(e.note) + 2 + width(e.ref) <= room ? [e.note] : fold(e.note, room)) : []
-    note.forEach((t, k) => {
-      const last = k === note.length - 1 && width(t) + 2 + width(e.ref) <= room
-      lines.push([{ s: '▍ ', fg: color }, { s: t, b: true }, ...(last ? [{ s: '  ' }, ref] : [])])
-      owner.push(i)
-    })
-    if (!note.length || width(note.at(-1)!) + 2 + width(e.ref) > room) {
-      lines.push([{ s: '▍ ', fg: color }, ref])
-      owner.push(i)
+    // each record's ● hanging at A0 on its first row, in its value's hue when a label the card read marks it, else dim
+    // (a mark no colour names), so the records part without blank rows; its words in italic, its own among the model's
+    const colour = classColour(card, e.value, e.ref)
+    const glyph: Seg = { s: '● ', fg: colour ?? COLORS.dim }
+    const room = Math.max(10, cols - 2)
+    // the note on the head's row with the place where it fits, else on rows of its own above it
+    const note = e.note ? (width(e.note) + 4 + Math.min(24, width(placeWords(e.ref))) <= room ? [e.note] : fold(e.note, room)) : []
+    const beside = note.length === 1 && width(note[0]!) + 4 + Math.min(24, width(placeWords(e.ref))) <= room
+    if (beside) lines.push(recordHead(glyph, [{ s: note[0]! }], e.ref, on, cols))
+    else {
+      note.forEach((t, k) => lines.push([k === 0 && glyph ? glyph : { s: '  ' }, { s: t }]))
+      lines.push(recordHead(note.length ? null : glyph, [], e.ref, on, cols))
     }
-    const words = e.quote.replace(/\s+/g, ' ').trim()
-    let rest = words
-    let n = 0
-    while (rest && n < 4) {
-      let take = rest
-      if (width(take) > room) {
-        const sp = take.lastIndexOf(' ', room)
-        take = take.slice(0, sp > room / 2 ? sp : room)
-      }
-      rest = rest.slice(take.length).trimStart()
-      n++
-      lines.push([{ s: '▍ ', fg: color }, { s: n === 4 && rest ? `${take.slice(0, room - 1)}…` : take, i: true }])
+    for (let k = 0; k < (beside ? 1 : note.length + 1); k++) owner.push(i)
+    for (const t of wrapCell(demojibake(e.quote).replace(/\s+/g, ' ').trim(), room, 3).filter(Boolean)) {
+      lines.push([{ s: '  ' }, { s: t, i: true }])
       owner.push(i)
-    }
-    if (i < exs.length - 1) {
-      lines.push([])
-      owner.push(-1)
     }
   })
   return { lines, items, hit: (_x, y) => owner[y] ?? -1 }
+}
+
+// ---------------------------------------------------------------------------------------- label cards
+
+/**
+ * A label card (the label tool's, helper/labels.py): its count of each value as bars in the values' colours with each
+ * share on a track to the whole, then the records it picked, each with its value's ●, its value, its place, its words
+ * and why, and the controls that judge it: "agree" keeps its value as the analyst's, "disagree" sets the other value
+ * (or shows the others to pick from). A record the analyst judged says so in place of the controls. Items: the bars,
+ * then the records.
+ */
+function labelLayout(card: CardData, cols: number, hover: number, ui: LabelUi = {}): Layout {
+  const l = card.label
+  const bars = barLayout(card, cols, hover)
+  const nBars = bars.items.length
+  const exs = (card.examples ?? []).slice(0, 8)
+  if (!l || !exs.length) return bars
+  const lines: Line[] = [...bars.lines]
+  const owner: number[] = bars.lines.map((_, y) => bars.hit(0, y))
+  const hots: Hot[] = []
+  const items: Item[] = [...bars.items, ...exs.map((e): Item => ({ label: e.ref, value: e.value ?? '', cite: `[[${e.ref}]]`, open: e.ref, kind: 'record', text: e.quote }))]
+  const room = Math.max(10, cols - 2)
+  const pending = ui.pending ? ui.pending.split('=') : null
+  const push = (line: Line, own: number) => {
+    lines.push(line)
+    owner.push(own)
+  }
+  /** A record's head line with, at its end, its controls (each a hot region, two cells apart) or what the analyst
+   *  did; where they do not fit beside it, the head alone, its place cut, and they on a line of their own under it. */
+  const withControls = (line: Line, ctrls: { s: string; key: string; act: LabelAct }[], own: number): void => {
+    const w = ctrls.reduce((a, c) => a + width(c.s), 0) + 2 * Math.max(0, ctrls.length - 1)
+    const fit = (l: Line, n: number): Line => {
+      const over = lineWidth(l) - n
+      if (over <= 0) return l
+      // the place is the last segment: cut it, not the value, keeping its line
+      const last = l.at(-1)!
+      return [...l.slice(0, -1), { ...last, s: cutRef(last.s, Math.max(4, width(last.s) - over)) }]
+    }
+    // beside the head when the place keeps a dozen cells, else under it
+    const beside = lineWidth(line) - width(line.at(-1)!.s) + Math.min(12, width(line.at(-1)!.s)) + 2 + w <= cols
+    const head = beside ? fit(line, cols - w - 2) : fit(line, cols)
+    let x = beside ? cols - w : 2
+    const out: Line = beside ? [...head, { s: ' '.repeat(x - lineWidth(head)) }] : [{ s: '  ' }]
+    if (!beside) push(head, own)
+    ctrls.forEach((c, k) => {
+      if (k) {
+        out.push({ s: '  ' })
+        x += 2
+      }
+      // a control in the text colour, in inverse under the pointer; what the analyst did, dim
+      const on = Boolean(c.key) && ui.act === c.key
+      out.push(c.key ? { s: c.s, ...(on ? { inv: true } : {}) } : { s: c.s, fg: COLORS.dim })
+      if (c.key) hots.push({ line: lines.length, x0: x, x1: x + width(c.s), key: c.key, act: c.act })
+      x += width(c.s)
+    })
+    push(out, own)
+  }
+  push([], -1)
+  exs.forEach((e, i) => {
+    const k = nBars + i
+    const on = k === hover
+    const value = e.value ?? ''
+    const others = l.values.filter(v => v !== value)
+    const head = recordHead({ s: '● ', fg: valueColour(l.values, value) ?? COLORS.dim }, [{ s: value }], e.ref, on, cols * 4)
+    const waiting = pending && pending[0] === e.ref
+    if (waiting) withControls(head, [{ s: '◌ saving', key: '', act: { op: 'cancel' } }], k)
+    else if (e.set) withControls(head, [{ s: e.was && e.was !== value ? '✓ set by you' : '✓ agreed', key: '', act: { op: 'cancel' } }], k)
+    else if (ui.choose === e.ref) withControls(head, [{ s: 'cancel', key: `cancel:${e.ref}`, act: { op: 'cancel' } }], k)
+    else
+      withControls(
+        head,
+        [
+          { s: 'agree', key: `agree:${e.ref}`, act: { op: 'verdict', slug: l.slug, ref: e.ref, value } },
+          { s: 'disagree', key: `disagree:${e.ref}`, act: others.length === 1 ? { op: 'verdict', slug: l.slug, ref: e.ref, value: others[0]! } : { op: 'choose', ref: e.ref } },
+        ],
+        k,
+      )
+    // the other values to pick from, after "it is"
+    if (ui.choose === e.ref && !e.set && !waiting) {
+      const line: Line = [{ s: '  it is', fg: COLORS.dim }]
+      let x = lineWidth(line)
+      for (const v of others) {
+        const s = `● ${v}`
+        if (x + 2 + width(s) > cols) {
+          push(line.splice(0), k)
+          line.push({ s: '   ' })
+          x = 3
+        } else {
+          line.push({ s: '  ' })
+          x += 2
+        }
+        const key = `set:${e.ref}=${v}`
+        const lit = ui.act === key
+        line.push({ s: '● ', fg: valueColour(l.values, v) ?? COLORS.dim }, { s: v, ...(lit ? { inv: true } : {}) })
+        hots.push({ line: lines.length, x0: x, x1: x + width(s), key, act: { op: 'verdict', slug: l.slug, ref: e.ref, value: v } })
+        x += width(s)
+      }
+      push(line, k)
+    }
+    // its words in italic in up to three lines, then why the label gave its value; no blank row between records
+    const words = demojibake(e.quote).replace(/\s+/g, ' ').trim()
+    const wrapped = words ? wrapCell(words, room, 3) : []
+    wrapped.forEach(t => push([{ s: '  ' }, { s: t, i: true }], k))
+    if (e.why && !(e.set && e.was && e.was !== value)) push([{ s: `  why  ${cut(e.why.replace(/\s+/g, ' ').trim(), room - 5)}`, fg: COLORS.dim }], k)
+  })
+  return { lines, items, hots, hit: (_x, y) => owner[y] ?? -1 }
 }
 
 // ---------------------------------------------------------------------------------------- diagrams
@@ -1336,7 +1900,8 @@ function diagramLayout(card: CardData, cols: number, hover: number): Layout {
   }
   const { grid, notes } = g!
 
-  // the grid as lines; the hovered node or edge drawn in the accent colour
+  // the grid as lines: boxes, lines and arrows in the rule grey, node text in the text colour, edge labels and note
+  // numbers dim; the node or edge under the pointer has its words in inverse
   const hotNode = hover >= 0 && hover < N ? hover : -1
   const hotEdge = hover >= N ? hover - N : -1
   const owners: number[][] = grid.map(r => r.map(c => c.item))
@@ -1345,14 +1910,12 @@ function diagramLayout(card: CardData, cols: number, hover: number): Layout {
     for (const c of r) {
       const ch = c.ch ?? ' '
       let seg: Seg
-      if (c.kind === 'text') seg = { s: ch, b: c.item === hotNode, fg: c.item === hotNode ? COLORS.accent : undefined }
-      else if (c.kind === 'box') seg = { s: ch, fg: c.item === hotNode ? COLORS.accent : COLORS.dim, b: c.item === hotNode }
-      else if (c.kind === 'line' || c.kind === 'arrow' || c.kind === 'label') {
-        const on = c.item - N === hotEdge && hotEdge >= 0
-        seg = { s: ch, fg: on ? COLORS.accent : COLORS.dim, b: on || Boolean(c.num), i: c.kind === 'label' && !c.num }
-      } else seg = { s: ch }
+      if (c.kind === 'text') seg = c.item === hotNode && ch !== ' ' ? { s: ch, inv: true } : { s: ch }
+      else if (c.kind === 'box' || c.kind === 'line' || c.kind === 'arrow') seg = { s: ch, fg: COLORS.rule }
+      else if (c.kind === 'label') seg = c.item - N === hotEdge && hotEdge >= 0 && ch !== ' ' ? { s: ch, inv: true } : { s: ch, fg: COLORS.dim }
+      else seg = { s: ch }
       const prev = line.at(-1)
-      if (prev && prev.fg === seg.fg && prev.b === seg.b && prev.i === seg.i) prev.s += seg.s
+      if (prev && prev.fg === seg.fg && !prev.inv === !seg.inv) prev.s += seg.s
       else line.push(seg)
     }
     return line
@@ -1374,8 +1937,8 @@ function diagramLayout(card: CardData, cols: number, hover: number): Layout {
     const left = room - width(ends)
     const first = left >= 10 || left >= width(e.label ?? '') ? left : 0
     const label = noteLines(e.label ?? '', first, room, first ? 4 : 5)
-    const style = { fg: on ? COLORS.accent : COLORS.dim, b: on }
-    const text = { i: true, fg: on ? COLORS.accent : undefined }
+    const style = { fg: COLORS.dim }
+    const text: Omit<Seg, 's'> = on ? { inv: true } : { fg: COLORS.dim }
     lines.push([{ s: num + ends, ...style }, ...(first && label[0] ? [{ s: label.shift()!, ...text }] : [])])
     if (!first) label.shift()
     for (const l of label) lines.push([{ s: ' '.repeat(width(num)) + l, ...text }])
@@ -1406,10 +1969,12 @@ function diagramLayout(card: CardData, cols: number, hover: number): Layout {
   return { lines, items, hit: (x, yy) => owners[yy]?.[x] ?? -1 }
 }
 
-export function cardLayout(card: CardData, cols: number, hover: number, plotRows?: number): Layout {
+export function cardLayout(card: CardData, cols: number, hover: number, plotRows?: number, ui?: LabelUi): Layout {
   switch (card.kind) {
     case 'bar':
       return barLayout(card, cols, hover)
+    case 'label':
+      return labelLayout(card, cols, hover, ui)
     case 'line':
       return lineLayout(card, cols, hover, plotRows)
     case 'timeline':

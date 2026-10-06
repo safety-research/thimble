@@ -1,0 +1,63 @@
+{
+  "version": 1,
+  "name": "Timeline",
+  "slug": "timeline",
+  "description": "A ferry operator's alerts, deploys, chat, tickets and agents' actions on one time axis, a lane per source, each event beside the event it answers and those that answer it.",
+  "scope": ["agents.log", "alerts/*.jsonl", "chat/*.json", "deploys.csv", "tickets/*.txt", "tickets/index.csv"],
+  "collections": [
+    {
+      "name": "events",
+      "one": "one alert, deploy step, chat message, ticket message or agent action",
+      "key": "ref",
+      "title": "text",
+      "fields": [
+        {"name": "ref", "type": "ref"},
+        {"name": "time", "type": "time", "derived": "cleaned", "from": "ts, time or Date", "how": "read in UTC, a deploys.csv time without an offset as UTC+1"},
+        {"name": "source", "type": "category"},
+        {"name": "kind", "type": "category", "derived": "cleaned", "from": "state, event, Status or action", "how": "firing read as fired, a ticket's first message as opened"},
+        {"name": "actor", "type": "category", "derived": "cleaned", "from": "by, user, From or the agent", "how": "a login or chat id as chat/users.json names it"},
+        {"name": "service", "type": "category", "derived": "computed", "from": "svc or service, the summary, tickets/index.csv", "how": "a missing service from the summary's first word"},
+        {"name": "severity", "type": "category"},
+        {"name": "outcome", "type": "category"},
+        {"name": "incident", "type": "category", "derived": "computed", "from": "incident, an inc- channel or an INC number in the text", "how": "a deploy's later steps take its incident"},
+        {"name": "answers", "type": "text", "link": "events", "derived": "computed", "from": "resolves, deploy, thread_ts, ticket order, alert, ticket or via", "how": "the event this one answers"},
+        {"name": "took", "type": "duration", "derived": "computed", "from": "time and answers", "how": "seconds since the event it answers"},
+        {"name": "text", "type": "text"}
+      ],
+      "detail": {
+        "meta": ["source", "kind", "actor", "service"],
+        "fields": ["time", "incident", "severity", "outcome", "answers", "took"],
+        "text": "text",
+        "related": [
+          {"title": "Answered by", "collection": "events", "via": "answers", "show": {"kind": "list", "meta": ["time", "actor", "kind"], "sort": {"field": "time"}}}
+        ]
+      }
+    }
+  ],
+  "stats": [
+    {"label": "events", "collection": "events", "agg": "count"},
+    {"label": "incidents", "collection": "events", "agg": "distinct", "field": "incident"},
+    {"label": "spanned", "collection": "events", "agg": "span", "field": "time"}
+  ],
+  "tabs": [
+    {
+      "name": "Events",
+      "collection": "events",
+      "overview": {"kind": "lanes", "lane": "source", "time": "time", "color": "kind"},
+      "zoom": "a click on the axis narrows to that time, on a lane to its source",
+      "filter": {"fields": ["incident", "source", "service"]},
+      "body": [{"kind": "list", "meta": ["time", "actor", "incident"], "sort": {"field": "time"}}]
+    },
+    {
+      "name": "Threads",
+      "collection": "events",
+      "where": {"field": "source", "is": ["chat", "ticket"]},
+      "overview": {"kind": "bars", "field": "actor"},
+      "zoom": "a click on a speaker keeps their messages",
+      "filter": {"fields": ["incident", "actor"]},
+      "body": [{"kind": "transcript", "speaker": "actor", "text": "text", "time": "time"}]
+    }
+  ],
+  "accepts": [{"form": "L<n>", "means": "the event on line <n>, selected in its list"}],
+  "units": [{"form": "<incident>", "means": "one incident's events, the incident facet chosen"}]
+}

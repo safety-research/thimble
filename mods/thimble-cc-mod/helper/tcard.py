@@ -11,6 +11,7 @@
          edges=[("a3", "Agent 7", "assigns pages")])
 
     by = param("by", "wiki", ["wiki", "label"])   # a control on the card: picking a choice runs the script again
+    kinds = label("what the edit is for")          # {ref: value} of a label the label tool made; the cards after it show it
 
 Each call writes .thimble-cc-mod/cards/<id>.json in the session's folder, wherever the script runs (THIMBLE_CC_MOD_ROOT,
 which thimble-cc-mod sets for the session; else the folder holding the script's .thimble-cc-mod; else the nearest folder up
@@ -32,9 +33,10 @@ import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from refs import HOME, LINES_RE, fmt, read_lines, record_text, resolve, safe_path, split_ref  # noqa: E402
+from refs import HOME, LINES_RE, demojibake, fmt, read_lines, record_text, resolve, safe_path, split_ref  # noqa: E402
 
-KINDS = ("bar", "line", "timeline", "table", "example", "diagram")
+# "label" is the label tool's own card (helper/labels.py): a label's count of each value and records to judge
+KINDS = ("bar", "line", "timeline", "table", "example", "diagram", "label")
 MAX_NODES = 40
 MAX_EDGES = 80
 MAX_ROWS = 2000
@@ -42,6 +44,7 @@ MAX_QUOTE = 600
 MAX_CHOICES = 12
 
 _params: list[dict] = []  # the params this script declared, in order
+_labels: list[dict] = []  # the labels this script read with label(), in order
 _count = 0  # card() calls so far in this run
 
 
@@ -113,6 +116,53 @@ def param(name: str, default, choices):
     value = next((c for c in choices if str(c) == str(want)), default)
     _params.append({"name": str(name), "value": value, "default": default, "choices": choices})
     return value
+
+
+def _slug(name: str) -> str:
+    s = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")[:48]
+    return s or "label"
+
+
+def label(name: str) -> dict[str, str]:
+    """The value the label tool's label `name` gave each record it labeled, by ref ("tickets.jsonl#L12",
+    "orders.csv#row=3"), with the analyst's corrections. Every card this script writes after reading it shows the label
+    and its values, and draws a bar, series, cell, event or example whose name (or record) is one of its values in that
+    value's colour."""
+    root = _root()
+    try:
+        with open(os.path.join(root, HOME, "labels.json"), encoding="utf-8") as f:
+            reg = [e for e in json.load(f) if isinstance(e, dict)]
+    except (OSError, ValueError):
+        reg = []
+    hit = next((e for e in reg if e.get("slug") == _slug(name) or str(e.get("name", "")).lower() == name.strip().lower()), None)
+    slug = str(hit["slug"]) if hit else _slug(name)
+    try:
+        with open(os.path.join(root, HOME, "labels", slug, "rows.json"), encoding="utf-8") as f:
+            rows = json.load(f).get("rows") or {}
+        with open(os.path.join(root, HOME, "labels", slug, "spec.json"), encoding="utf-8") as f:
+            spec = json.load(f)
+    except (OSError, ValueError):
+        known = ", ".join(repr(e.get("name")) for e in reg) or "none yet"
+        raise LookupError(f"no label {name!r} in this folder (labels: {known}); make it with the label tool first") from None
+    if not any(x["slug"] == slug for x in _labels):
+        _labels.append({"slug": slug, "name": str(spec.get("name") or name), "values": [str(v) for v in spec.get("values") or ["yes", "no"]]})
+    return {str(ref): str(r.get("value")) for ref, r in rows.items() if isinstance(r, dict) and r.get("value") is not None}
+
+
+def _label_marks(data: dict) -> None:
+    """The labels this script read, on the card, each with the values of the records the card names (an event's, an
+    example's or a node's ref)."""
+    if not _labels:
+        return
+    refs = {str(x.get("ref")) for k in ("events", "examples", "nodes") for x in data.get(k) or [] if isinstance(x, dict) and x.get("ref")}
+    out = []
+    for lb in _labels:
+        marks = {}
+        if refs:
+            values = label(lb["name"]) if lb.get("name") else {}
+            marks = {r: values[r] for r in refs if r in values}
+        out.append({**lb, **({"marks": marks} if marks else {})})
+    data["labels"] = out
 
 
 def _num(v: object, what: str) -> float | int:
@@ -238,11 +288,32 @@ def _diagram(root: str, nodes, edges) -> tuple[list[dict], list[dict]]:
     return ns, es
 
 
+def _label_card(lb, examples, values: list[str]) -> tuple[dict, list[dict]]:
+    """A label card's label (its slug, name, kind, values and how many records it labeled) and its examples, each a
+    record with its words, its value, why, and whether the analyst set or agreed with it (`set`, `was` the value
+    before)."""
+    if not isinstance(lb, dict) or not lb.get("slug") or not lb.get("name"):
+        raise ValueError("a label card needs label={slug, name, kind, values, ...}; the label tool writes it")
+    info = {"slug": str(lb["slug"]), "name": str(lb["name"]), "kind": str(lb.get("kind") or ""), "values": values,
+            "labeled": int(lb.get("labeled") or 0), "total": int(lb.get("total") or 0), "trial": bool(lb.get("trial")),
+            "paths": [str(p) for p in lb.get("paths") or []]}
+    out = []
+    for ex in examples or []:
+        v = str(ex.get("value", ""))
+        if v not in values:
+            raise ValueError(f"example {ex.get('ref')}: {v!r} is not one of the label's values")
+        q = demojibake(" ".join(str(ex.get("quote") or "").split()))
+        out.append({"ref": str(ex["ref"]), "quote": q if len(q) <= MAX_QUOTE else q[:MAX_QUOTE] + "…", "note": "", "value": v,
+                    "why": str(ex.get("why") or ""), "set": bool(ex.get("set")), "was": str(ex.get("was") or "")})
+    return info, out
+
+
 def card(kind: str, question: str, *, rows=None, columns=None, series=None, points=None, events=None, examples=None,
          nodes=None, edges=None, x: str = "", y: str = "", total: bool | float | int = False, note: str = "",
-         id: str | None = None) -> str:
+         id: str | None = None, label: dict | None = None) -> str:
     """Write a card and print how to embed and cite it. Returns the card's id."""
     global _count
+    label_info = label  # `label` names each bar row's label below
     if kind not in KINDS:
         raise ValueError(f"kind must be one of {', '.join(KINDS)}")
     if not question or not str(question).strip():
@@ -264,7 +335,7 @@ def card(kind: str, question: str, *, rows=None, columns=None, series=None, poin
     if _params:
         data["params"] = [dict(p) for p in _params]
     cites: list[str] = []
-    if kind == "bar":
+    if kind in ("bar", "label"):
         out = []
         for r in rows or []:
             label, value, group = (r["label"], r["value"], r.get("group", "")) if isinstance(r, dict) else (list(r) + [""])[:3]
@@ -281,6 +352,9 @@ def card(kind: str, question: str, *, rows=None, columns=None, series=None, poin
         cites = [f"[[{fmt(r['value'])}|card:{cid}#{col}/{r['label']}]]" for r in out]
         if "total" in data:
             cites.append(f"[[{fmt(data['total'])}|card:{cid}#{col}/all]]")
+        if kind == "label":
+            data["label"], data["examples"] = _label_card(label_info, examples, [r["label"] for r in out])
+            cites += [f"[[{ex['ref']}]]" for ex in data["examples"]]
     elif kind == "line":
         if points is not None:
             series = {y or "value": points}
@@ -320,6 +394,8 @@ def card(kind: str, question: str, *, rows=None, columns=None, series=None, poin
     elif kind == "diagram":
         data["nodes"], data["edges"] = _diagram(root, nodes, edges)
         cites = [f"[[{n['ref']}]]" for n in data["nodes"] if n.get("ref")]
+    if kind != "label":
+        _label_marks(data)
     folder = os.path.join(root, HOME, "cards")
     os.makedirs(folder, exist_ok=True)
     with open(os.path.join(folder, f"{cid}.json"), "w", encoding="utf-8") as f:
