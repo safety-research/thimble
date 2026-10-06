@@ -1486,10 +1486,6 @@ The analyst asks the thread {thread} its questions again. Handle the thread's ev
 
 The message is in the thread {thread}, which waits for the fork you started for it and gets the message once that fork is known, so this turn needs no words from you.
 
-## message_thread-view
-
-The change is queued for the view's build in {thread}, which the browser shows, so this turn needs no words from you.
-
 ## message_thread-empty
 
 {thread} takes no empty message. Pass what the analyst wrote as `message`.
