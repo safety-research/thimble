@@ -7,7 +7,11 @@ the canvas or the dashboard."""
 import ast
 import re
 import string
+import sys
+import types
 from pathlib import Path
+
+import pytest
 
 from app import prompts
 
@@ -257,11 +261,6 @@ def test_agent_definitions_name_a_fixed_description_and_render_clean(monkeypatch
 
 
 # --------------------------------------------------------------------------- modes: browser and terminal
-
-import sys  # noqa: E402
-import types  # noqa: E402
-
-import pytest  # noqa: E402
 
 
 def _fixture(tmp_path, monkeypatch, files: dict[str, str]) -> None:
