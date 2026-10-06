@@ -527,9 +527,10 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
                   {ROLE_NOTE[role] && (
                     <span className="settings-role-note">
                       {ROLE_NOTE[role]}
+                      {role === 'dev' && ' · '}
                       {role === 'dev' && (
                         <span className="settings-ticket-fast">
-                          {` · ${TICKET_FAST}`}
+                          {TICKET_FAST}
                           <FastBolt on={!!conf.fast && (!conf.model || hasFastMode(conf.model))} why={why('fast')} label={TICKET_FAST} onChange={(fast) => set(role, { fast })} className={`settings-fast${why('fast') ? ' settings-locked' : ''}`} />
                         </span>
                       )}
