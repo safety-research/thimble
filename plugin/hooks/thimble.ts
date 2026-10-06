@@ -33,6 +33,17 @@
 //   any other reason it stops polling.
 // Its state lives in this module's memory, which /clear and /resume keep, with subagents.json as the record it
 // refetches at session start and after a change of session; never in $.state, which both commands reset.
+//
+// Terminal mode (THIMBLE_WS names the workspace folder and its trusted/launch.json says `mode: terminal`) has no
+// server, and the module makes no HTTP request there, even when server.json names a live server. Its scope check reads
+// launch.json: terminal mode, `fenced: true`, and a session that is $.session.id() or one --rekey moved it to (the
+// moves subagents.json records). It reads the roles from trusted/roles.json and registers them again whenever that
+// file changes; it takes the requests addressed to it from subagents.json (entries of `requests` of kind `module`
+// whose `module` is pending, for its session, not past `expires_at`), polling every FILE_POLL_MS, and handles them one
+// at a time as it handles the long poll's; and it writes everything it says to trusted/module.json, which only it
+// writes: its heartbeat every FILE_BEAT_MS, the requests it took, its answers, the ends of the runs it started, main's
+// plan mode as its poll sees it, and what it could not register (backend/app/module_bridge.py has the file's form).
+// After /clear it appends the notes --rekey left for the new main in subagents.json (`module.notes`).
 import type { EngineInterface, Register } from 'claude-code'
 
 type Engine = EngineInterface
@@ -69,6 +80,13 @@ export const PLAN_POLL_MS = 2000
 // nothing of plan mode (main's corpus is an ask rule)
 const PLAN_PROBE = '/tmp/.thimble-plan-probe'
 const PLAN_REASON = /\bplan mode\b/i
+
+// terminal mode (module note)
+export const FILE_POLL_MS = 500 // how often subagents.json and roles.json are looked at
+export const FILE_BEAT_MS = 2000 // the heartbeat in module.json; module_bridge counts a module live while it is fresh
+const KEPT = 64 // the requests taken, the answers and the ends module.json keeps, the newest
+const TYPED_LIVE = new Set(['', 'pending', 'claimed']) // module_bridge.TYPED_LIVE
+const MODULE_KIND = 'module' // subagent_files.MODULE_KIND
 
 const isObj = (v: unknown): v is Json => typeof v === 'object' && v !== null && !Array.isArray(v)
 const text = (v: unknown): string => (typeof v === 'string' ? v : '')
@@ -124,8 +142,20 @@ async function findServer($: Engine): Promise<Server | null> {
 // One State per load of the module (register runs once per load); the functions below take `$` and it. Claude Code's
 // check of a module (claude plugin validate) allows `$` to pass only to plain functions, never to a method.
 
+type Ended = { n: number; agentId: string; answer: string; reason: string; refusal?: Json; at: number }
+type Out = {
+  session: string; version: string; load: string; beat: number; plan: boolean | null; plan_at: number; problem: string
+  taken: string[]; answers: Record<string, Answer>; ended: Ended[]; gone?: boolean
+}
+
 type State = {
   active: boolean // in thimble's launched interactive main (the scope check passed) and not ended
+  file: boolean // terminal mode: the trusted folder, not the server (module note)
+  ws: string // the workspace folder, in terminal mode
+  out: Out // what module.json holds, in terminal mode
+  writing: Promise<void> // module.json's writes, one at a time
+  stamps: Record<string, string> // the files' stamps (mtime and size) as last read, in terminal mode
+  n: number // the ends written to module.json, in terminal mode
   cwd: string
   session: string // main's session id, as the server accepted it
   version: string
@@ -146,6 +176,8 @@ function fresh(): State {
   return {
     active: false, cwd: '', session: '', version: '', gen: 0, server: null, roles: {}, registered: {}, efforts: {},
     requests: {}, started: new Set(), queue: Promise.resolve(), helloing: null, leaving: '', plan: null,
+    file: false, ws: '', writing: Promise.resolve(), stamps: {}, n: 0,
+    out: { session: '', version: '', load: '', beat: 0, plan: null, plan_at: 0, problem: '', taken: [], answers: {}, ended: [] },
   }
 }
 
@@ -220,6 +252,10 @@ async function fetchRoles($: Engine, m: State): Promise<boolean> {
 /** What subagents.json holds: the per-run efforts, the typed starts, the agents this module started. The notes it
  *  answers for the running agents are returned, for a new main after /clear or /resume. */
 async function fetchState($: Engine, m: State): Promise<string[]> {
+  if (m.file) {
+    await fetchStateFile($, m)
+    return []
+  }
   const r = await call($, m, 'GET', `/api/module/state?${where(m)}`)
   if (!r || r.status !== 200) return []
   if (isObj(r.data.efforts)) {
@@ -251,7 +287,17 @@ async function registerAll($: Engine, m: State): Promise<void> {
       problems.push(`${PLUGIN}:${name}: ${String(err)}`)
     }
   }
-  if (problems.length) await hello($, m, `Claude Code did not register ${problems.join('; ')}`)
+  if (problems.length) await say($, m, `Claude Code did not register ${problems.join('; ')}`)
+}
+
+/** What the module could not do: in the hello's `problem` (browser mode), or module.json's (terminal mode). */
+async function say($: Engine, m: State, problem: string): Promise<void> {
+  if (!m.file) {
+    await hello($, m, problem)
+    return
+  }
+  m.out.problem = problem
+  await writeOut($, m)
 }
 
 // ------------------------------------------------------------------------------------------------ the session
@@ -296,6 +342,13 @@ async function watchPlan($: Engine, m: State, gen: number): Promise<void> {
       continue
     }
     if (plan === m.plan) continue
+    if (m.file) {
+      m.plan = plan
+      m.out.plan = plan
+      m.out.plan_at = Date.now()
+      await writeOut($, m)
+      continue
+    }
     const r = await call($, m, 'POST', '/api/module/mode', { cwd: m.cwd, session: m.session, plan })
     if (r?.status === 200) m.plan = plan
   }
@@ -355,7 +408,7 @@ async function handle($: Engine, m: State, req: Request): Promise<Answer> {
   try {
     switch (req.op) {
       case 'register':
-        if (!(await fetchRoles($, m))) return { error: 'the roles could not be fetched' }
+        if (!(await (m.file ? readRoles($, m) : fetchRoles($, m)))) return { error: 'the roles could not be fetched' }
         await registerAll($, m)
         return { ok: true }
       case 'spawn':
@@ -496,6 +549,215 @@ async function spawning($: Engine, m: State, e: { subagentType?: string; parentA
   return {}
 }
 
+// ------------------------------------------------------------------------------------------------ terminal mode
+
+async function readJson($: Engine, path: string): Promise<Json | null> {
+  try {
+    const data = JSON.parse(await $.fs.read(path))
+    return isObj(data) ? data : null
+  } catch {
+    return null
+  }
+}
+
+/** A file's stamp (mtime and size), '' when it is missing. */
+async function stamp($: Engine, path: string): Promise<string> {
+  try {
+    const st = await $.fs.stat(path)
+    return `${st.mtimeMs}:${st.size}`
+  } catch {
+    return ''
+  }
+}
+
+const trusted = (m: State, name: string): string => `${m.ws}/trusted/${name}`
+
+/** Session `sid` followed through the moves --rekey recorded (subagents.json `module.rekeyed`). */
+function movedTo(state: Json, sid: string): string {
+  const moves = isObj(state.module) && isObj(state.module.rekeyed) ? (state.module.rekeyed as Json) : {}
+  const seen = new Set<string>()
+  while (sid && typeof moves[sid] === 'string' && !seen.has(sid)) {
+    seen.add(sid)
+    sid = moves[sid] as string
+  }
+  return sid
+}
+
+/** module.json written whole, one write at a time, with a fresh heartbeat (module note). */
+function writeOut($: Engine, m: State): Promise<void> {
+  m.writing = m.writing
+    .then(async () => {
+      m.out.beat = Date.now()
+      await $.fs.write(trusted(m, 'module.json'), JSON.stringify(m.out))
+    })
+    .catch(() => undefined)
+  return m.writing
+}
+
+async function readRoles($: Engine, m: State): Promise<boolean> {
+  const got = await readJson($, trusted(m, 'roles.json'))
+  if (!got || !isObj(got.roles)) return false
+  const roles: Record<string, Spec> = {}
+  for (const [name, spec] of Object.entries(got.roles)) {
+    if (isObj(spec) && text(spec.model) && text(spec.prompt)) roles[name] = { ...spec, name, description: text(spec.description), prompt: text(spec.prompt), background: true } as Spec
+  }
+  m.roles = roles
+  return true
+}
+
+/** module_bridge._efforts: the per-run efforts of the typed starts and their children of no thimble type, then the
+ *  record's own. */
+function effortsOf(state: Json): Record<string, Effort> {
+  const agents = isObj(state.agents) ? Object.entries(state.agents).filter((x): x is [string, Json] => isObj(x[1])) : []
+  const out: Record<string, Effort> = {}
+  for (const [id, e] of agents) {
+    const effort = isObj(e.values) ? e.values.effort : undefined
+    if (text(e.type).startsWith(`${PLUGIN}:`) && !e.plugin_started && (typeof effort === 'string' || typeof effort === 'number') && effort !== '') out[id] = effort
+  }
+  for (let changed = true; changed;) {
+    changed = false
+    for (const [id, e] of agents) {
+      const parent = text(e.parent)
+      if (!(id in out) && parent in out && !text(e.type).startsWith(`${PLUGIN}:`)) {
+        out[id] = out[parent]
+        changed = true
+      }
+    }
+  }
+  if (isObj(state.efforts)) for (const [id, v] of Object.entries(state.efforts)) if ((typeof v === 'string' || typeof v === 'number') && v !== '') out[id] = v
+  return out
+}
+
+/** What fetchState fetches in browser mode, from subagents.json: the per-run efforts, the typed starts waiting for an
+ *  Agent call (module_bridge._typed), the agents this module started. */
+async function fetchStateFile($: Engine, m: State): Promise<Json> {
+  const state = (await readJson($, trusted(m, 'subagents.json'))) ?? {}
+  Object.assign(m.efforts, effortsOf(state))
+  const requests: State['requests'] = {}
+  for (const table of ['pending', 'requests']) {
+    if (!isObj(state[table])) continue
+    for (const [id, r] of Object.entries(state[table] as Json)) {
+      if (!isObj(r) || r.route !== 'typed' || (text(r.kind) || 'start') !== 'start' || !TYPED_LIVE.has(text(r.state))) continue
+      requests[text(r.id) || id] = { role: text(r.role).replace(/^thimble:/, ''), values: isObj(r.values) ? (r.values as Values) : {} }
+    }
+  }
+  m.requests = requests
+  if (isObj(state.agents)) for (const [id, a] of Object.entries(state.agents)) if (isObj(a) && a.plugin_started === true) m.started.add(id)
+  return state
+}
+
+/** Terminal mode's start (module note): the scope check against launch.json, the roles from roles.json, the record,
+ *  module.json, then the poll of the files and the plan poll. */
+async function fileBegin($: Engine, m: State, cwd: string, ws: string, launch: Json): Promise<void> {
+  m.file = true
+  m.ws = ws.replace(/\/+$/, '')
+  m.cwd = cwd
+  m.session = await $.session.id()
+  const state = (await readJson($, trusted(m, 'subagents.json'))) ?? {}
+  if (launch.fenced !== true || !text(launch.session) || movedTo(state, text(launch.session)) !== m.session) return stop(m)
+  try {
+    const manifest = JSON.parse(await $.fs.read(`${$.plugin.root}/.claude-plugin/plugin.json`))
+    m.version = isObj(manifest) ? text(manifest.version) : ''
+  } catch {
+    m.version = ''
+  }
+  m.out = { ...m.out, session: m.session, version: m.version, load: hex(crypto.getRandomValues(new Uint8Array(8))), gone: false }
+  await fetchStateFile($, m)
+  m.stamps.roles = await stamp($, trusted(m, 'roles.json'))
+  if (await readRoles($, m)) await registerAll($, m)
+  else m.out.problem = 'thimble’s module could not read the roles it registers (trusted/roles.json)'
+  await writeOut($, m)
+  const gen = m.gen
+  void watchPlan($, m, gen)
+  void pollFiles($, m, gen)
+}
+
+/** Every FILE_POLL_MS: roles.json registered again when it changed, the requests subagents.json addresses to this
+ *  module taken when it changed, and the heartbeat every FILE_BEAT_MS (module note). */
+async function pollFiles($: Engine, m: State, gen: number): Promise<void> {
+  let beat = Date.now()
+  while (m.active && gen === m.gen) {
+    try {
+      const roles = await stamp($, trusted(m, 'roles.json'))
+      if (roles && roles !== m.stamps.roles) {
+        m.stamps.roles = roles
+        if (await readRoles($, m)) {
+          m.queue = m.queue.then(() => registerAll($, m)).catch(() => undefined)
+          await m.queue
+        }
+      }
+      const state = await stamp($, trusted(m, 'subagents.json'))
+      if (state && state !== m.stamps.state) {
+        m.stamps.state = state
+        await takeFile($, m)
+      }
+      if (Date.now() - beat >= FILE_BEAT_MS) {
+        beat = Date.now()
+        await writeOut($, m)
+      }
+    } catch {
+      // the next look tries again
+    }
+    await $.clock.sleep(FILE_POLL_MS)
+  }
+}
+
+/** The requests subagents.json addresses to this module that it has not taken, oldest first, each taken (module.json
+ *  `taken`) and handled in turn, its answer written under its id. */
+async function takeFile($: Engine, m: State): Promise<void> {
+  const state = await readJson($, trusted(m, 'subagents.json'))
+  if (!state || !isObj(state.requests)) return
+  const now = Date.now()
+  const mine = Object.entries(state.requests)
+    .filter((x): x is [string, Json] => isObj(x[1]) && x[1].kind === MODULE_KIND && x[1].module === 'pending' && !m.out.taken.includes(x[0])
+      && (!text(x[1].session) || text(x[1].session) === m.session) && typeof x[1].expires_at === 'number' && x[1].expires_at * 1000 > now)
+    .sort((a, b) => Number(a[1].asked_at ?? 0) - Number(b[1].asked_at ?? 0))
+  if (!mine.length) return
+  m.out.taken = [...m.out.taken, ...mine.map(([id]) => id)].slice(-KEPT)
+  await writeOut($, m)
+  for (const [id, r] of mine) {
+    const req: Request = { id, op: text(r.op), args: isObj(r.args) ? r.args : {} }
+    const due = Number(r.expires_at) * 1000
+    m.queue = m.queue
+      .then(async () => {
+        const answer = Date.now() > due ? { error: 'the request expired before thimble’s module reached it' } : await handle($, m, req)
+        const answers = { ...m.out.answers, [id]: answer }
+        m.out.answers = Object.fromEntries(Object.entries(answers).slice(-KEPT))
+        await writeOut($, m)
+      })
+      .catch(() => undefined)
+  }
+}
+
+/** After /clear or /resume in terminal mode: the new session id, the move --rekey recorded to it, module.json under it,
+ *  the record again, and the notes --rekey left for the new main (subagents.json `module.notes`). */
+async function followFile($: Engine, m: State, old: string): Promise<void> {
+  let sid = old
+  for (let waited = 0; waited < SESSION_WAIT_MS && sid === old; waited += SESSION_TICK_MS) {
+    await $.clock.sleep(SESSION_TICK_MS)
+    sid = await $.session.id()
+  }
+  if (!m.active || sid === old) return
+  let state: Json = {}
+  for (let waited = 0; waited < SESSION_WAIT_MS; waited += RETRY_MS / 4) {
+    state = (await readJson($, trusted(m, 'subagents.json'))) ?? {}
+    if (movedTo(state, old) === sid) break
+    await $.clock.sleep(RETRY_MS / 4)
+  }
+  if (movedTo(state, old) !== sid) {
+    stop(m) // no record says the new session is main's: idle, as a refused hello leaves it
+    return
+  }
+  m.session = sid
+  m.out.session = sid
+  await writeOut($, m)
+  await fetchStateFile($, m)
+  const notes = isObj(state.module) && isObj(state.module.notes) ? (state.module.notes as Json) : {}
+  if (text(notes.session) === sid && Array.isArray(notes.lines)) {
+    for (const line of notes.lines) if (typeof line === 'string' && line) await note($, line)
+  }
+}
+
 export const register: Register = on => {
   const m = fresh()
 
@@ -505,8 +767,13 @@ export const register: Register = on => {
     if (!e.isInteractive) return r
     if (!(await $.env.get('THIMBLE_LAUNCHED'))) return r
     if (!OFF.has(((await $.env.get('THIMBLE_NO_MODULE')) ?? '').trim().toLowerCase())) return r
+    // terminal mode: THIMBLE_WS's launch.json says so (module note); browser mode otherwise
+    const ws = (await $.env.get('THIMBLE_WS')) ?? ''
+    const launch = ws ? await readJson($, `${ws}/trusted/launch.json`) : null
+    if (ws && launch === null) return r // a workspace the launcher named whose launch.json cannot be read: idle
     m.active = true
-    await begin($, m, e.cwd)
+    if (launch !== null && launch.mode === 'terminal') await fileBegin($, m, e.cwd, ws, launch)
+    else await begin($, m, e.cwd)
     return r
   })
 
@@ -531,7 +798,12 @@ export const register: Register = on => {
     const r = await next(e)
     if (m.active && e.agentId !== undefined && m.started.has(e.agentId)) {
       const refusal = e.reason === 'refusal' && isObj(e.refusal) ? { refusal: e.refusal } : {}
-      void call($, m, 'POST', '/api/module/ended', { cwd: m.cwd, session: m.session, agentId: e.agentId, answer: e.answer, reason: e.reason, ...refusal })
+      if (m.file) {
+        m.out.ended = [...m.out.ended, { n: ++m.n, agentId: e.agentId, answer: text(e.answer), reason: text(e.reason), ...refusal, at: Date.now() }].slice(-KEPT)
+        void writeOut($, m)
+      } else {
+        void call($, m, 'POST', '/api/module/ended', { cwd: m.cwd, session: m.session, agentId: e.agentId, answer: e.answer, reason: e.reason, ...refusal })
+      }
     }
     return r
   })
@@ -539,8 +811,14 @@ export const register: Register = on => {
   on('session.end', async ($, e, next) => {
     const r = await next(e)
     if (!m.active) return r
-    if (e.reason === 'clear' || e.reason === 'resume') void follow($, m, e.sessionId)
-    else stop(m)
+    if (e.reason === 'clear' || e.reason === 'resume') void (m.file ? followFile($, m, e.sessionId) : follow($, m, e.sessionId))
+    else {
+      stop(m)
+      if (m.file) {
+        m.out.gone = true
+        await writeOut($, m)
+      }
+    }
     return r
   })
 }
