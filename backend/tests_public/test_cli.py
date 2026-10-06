@@ -371,7 +371,9 @@ def test_slash_thimble_in_terminal_mode_starts_nothing_and_prints_the_home_hint(
     assert cli.hook_up(json.dumps(hook)) == 0 and capsys.readouterr().out == ""
     skill = ["server", "up", "--cwd", str(folder), "--session", "s7", "--action", "", "--archive", ""]
     assert cli.main(skill) == 0
-    assert capsys.readouterr().out.splitlines() == [cli.TERMINAL_HOME_LINE], "the hook's result; no hint in this build"
+    hint = tools.hint(cli.TERMINAL_HOME_HINT).strip()
+    assert hint.startswith("thimble: ") and cli.terminal_home_line() == hint, "prompts/tools.md's hint, not the fallback"
+    assert capsys.readouterr().out.splitlines() == [hint], "the hook's result"
     monkeypatch.setattr(tools, "descriptions", lambda: {cli.TERMINAL_HOME_HINT: "thimble: terminal mode. The home panel is open."})
     monkeypatch.setenv(cli.SANDBOX_ENV, "1")  # the skill's own `up`, in main's sandbox, with no result of the hook's
     assert cli.main(skill) == 0
