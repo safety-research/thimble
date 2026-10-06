@@ -2798,8 +2798,11 @@ def terminal_module_notes(ws: Path) -> list[str]:
     except (OSError, ValueError):
         out = None
     if isinstance(out, dict) and out.get("session"):
+        beat = out.get("beat")
+        if isinstance(beat, (int, float)) and not isinstance(beat, bool) and beat > 0:  # the module's milliseconds
+            beat = datetime.fromtimestamp(beat / 1000, timezone.utc).isoformat(timespec="seconds")
         note = (f"it ran in the last session (terminal mode; heartbeat from {str(out['session'])[:8]} at "
-                f"{out.get('beat') or '?'}" + (f", version {out['version']}" if out.get("version") else "") + ")")
+                f"{beat or '?'}" + (f", version {out['version']}" if out.get("version") else "") + ")")
         notes = [note + (f"; it reported: {out['problem']}" if out.get("problem") else "")]
     else:
         notes = ["no terminal-mode session here has run it yet (it writes trusted/module.json when `thimble` starts "

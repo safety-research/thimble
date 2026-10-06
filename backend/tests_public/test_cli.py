@@ -337,6 +337,9 @@ def test_the_doctor_names_the_mode_its_source_the_renderer_and_what_terminal_mod
     got = line(cli.doctor_text(), "hooks module")
     assert ("it ran in the last session (terminal mode; heartbeat from 0b9d2f3e at t2, version 0.6.0); it reported: no "
             "roles yet; Claude Code does not trust") in got and "roles file" not in got
+    # the module writes its times in milliseconds since the epoch (plugin/hooks/thimble.ts)
+    (ws / cli.MODULE_OUT).write_text(json.dumps({"session": "0b9d2f3e-1c2d", "version": "0.6.0", "beat": 1791262800000}))
+    assert "heartbeat from 0b9d2f3e at 2026-10-06T05:00:00+00:00, version 0.6.0)" in line(cli.doctor_text(), "hooks module")
 
 
 def _claude_process(tmp_path: Path, *args: str) -> subprocess.Popen:
