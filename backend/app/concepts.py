@@ -3903,10 +3903,13 @@ async def apply_scoped(c: str, *, scope: str, name: str, kind: str, text: str, v
                 "stale": [x["id"] for x in stale]}
     if not joined and not unchanged:
         await start_apply(c, concept["id"], paths or [], limit, author, comment=comment, sources=sources)
+        from . import cardrun  # noqa: PLC0415
+
         try:
             from . import agents
 
-            agents.start_agent(c, "labels", f"label {concept['name']}", _follow(c, concept))
+            if not cardrun.in_runner():  # a card runner writes no chat: main's sandbox keeps chats/ read-only
+                agents.start_agent(c, "labels", f"label {concept['name']}", _follow(c, concept))
         except Exception:  # noqa: BLE001
             log.debug("the labels agent chat was not started", exc_info=True)
     chosen = None

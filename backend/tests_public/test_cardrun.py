@@ -9,6 +9,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -211,6 +212,7 @@ async def test_a_code_label_runs_through_thimble_run_and_its_readers_go_stale(te
     res = await call(term, "apply_label", scope="files", name="long", predicate={"kind": "regex", "text": "Bash"},
                      paths=["agents/*.jsonl"], values=["long", "short"])
     assert f"[[card:{cid}]]" in text(res) and cardrun.command("stale") in text(res), text(res)
+    await call(term, "edit_card", card=cid, takeaway="Some records are long.")  # a takeaway the new output leaves behind
     done = run(term, "stale")
     assert done.returncode == 0 and f"[[card:{cid}]]" in done.stdout, done.stdout + done.stderr
     now = re.search(r": long (\d+)", text(res)).group(1)
@@ -232,6 +234,11 @@ async def test_the_shims_watch_starts_the_check_of_a_card_run_with_a_takeaway(te
     assert notebook.get_cell(CORPUS, cid).get("check") == "pending"
     watch.look()
     assert started == [(cid, "main")] and "check" not in notebook.get_cell(CORPUS, cid)
+    # the runner wrote no history (main's sandbox cannot write the workspace's logs); the watch records its run
+    lines = [json.loads(x) for x in (config.workspace_dir(CORPUS) / "canvas-history.jsonl").read_text().splitlines()]
+    mine = [x for x in lines if x.get("card") == cid]
+    assert [x["op"] for x in mine] == ["created", "edited"], "the run and its takeaway, in one line from the watch"
+    assert mine[-1]["state"]["status"] == "ok" and mine[-1]["state"]["takeaway"].startswith("There are")
 
 
 async def test_the_watch_ends_a_run_whose_process_is_gone(term):
@@ -240,8 +247,21 @@ async def test_the_watch_ends_a_run_whose_process_is_gone(term):
     with notebook.editing(ws):
         nb, cell = notebook._locate(ws, cid)
         cell["status"] = "running"
-        cell["run"] = {**cell["run"], "state": "running", "pid": 2 ** 22 + 12345}
+        cell["run"] = {**cell["run"], "state": "running", "pid": 12345}
         notebook.write_notebook(ws, nb)
+    # a run whose process holds its run lock is left alone, whatever its pid says (main's sandbox has its own pids)
+    holder = subprocess.Popen([sys.executable, "-c", (
+        f"import sys; sys.path.insert(0, {str(Path(__file__).resolve().parents[1])!r})\n"
+        "from pathlib import Path\nfrom app import cardrun\n"
+        f"cardrun.hold_run(Path({str(ws)!r}), {cid!r})\nprint('held', flush=True)\nimport time; time.sleep(30)")],
+        stdout=subprocess.PIPE, text=True)
+    try:
+        assert holder.stdout.readline().strip() == "held"
+        cardrun.CardWatch(CORPUS).look()
+        assert notebook.get_cell(CORPUS, cid)["status"] == "running"
+    finally:
+        holder.kill()
+        holder.wait()
     cardrun.CardWatch(CORPUS).look()
     cell = notebook.get_cell(CORPUS, cid)
     assert cell["status"] == "error" and cell["run"]["state"] == "done"
@@ -260,8 +280,8 @@ async def test_thimble_run_refuses_a_browser_mode_workspace_and_a_missing_card(t
 
 def test_write_dirs_are_the_folders_a_run_writes(term):
     ws = config.workspace_dir(CORPUS)
-    assert cardrun.write_dirs(CORPUS) == [ws / "notebooks", ws / "notebooks" / "outputs", ws / "labels", ws / "card-runs",
-                                          ws / "scratch"]
+    assert cardrun.write_dirs(CORPUS) == [ws / "notebooks", ws / "notebooks" / "outputs", ws / "labels", ws / "concepts",
+                                          ws / "card-runs", ws / "scratch"]
 
 
 async def test_a_card_type_card_draws_the_same_in_both(workspaces_tmp, tmp_path, monkeypatch):

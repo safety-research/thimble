@@ -923,7 +923,7 @@ def write_notebook(ws: Path, nb: dict) -> None:
 
 
 INTERRUPTED_ENAME = "Interrupted"
-INTERRUPTED_EVALUE = "the server stopped while this card ran; run it again"
+INTERRUPTED_EVALUE = "thimble stopped while this card ran; run it again"  # the server, or a terminal session
 
 
 def mark_interrupted_cells(root: Path | None = None, only: "tuple[str, ...] | None" = None) -> list[str]:
@@ -1471,7 +1471,9 @@ def _emit(workspace: str, cell: dict, *, what: str | None = None) -> None:
     for q in _subscribers.get((workspace, cell.get("notebook", MAIN)), ()):
         q.put_nowait(data)
     cid = str(cell.get("id") or "")
-    if not cid:
+    if not cid or local_kernel is not None:
+        # a card runner (cardrun.py) writes no history: main's sandbox cannot write the workspace's logs, and the shim's
+        # CardWatch records the run once it ends (canvas_history, undo)
         return
     from . import canvas_history  # noqa: PLC0415 — every version of every card, for the workspace export
 

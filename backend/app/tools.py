@@ -865,7 +865,7 @@ def _format_cell_result(cell: dict, lines: int = RESULT_LINES) -> str:
     if body:
         out.append(body)
     if extras:
-        out.append(f"(rendered a chart/table; on the canvas as [[card:{cid}]])")
+        out.append(f"(rendered a chart/table; thimble shows it as [[card:{cid}]])")  # mode-neutral: both modes draw it
     return "\n".join(out)
 
 
@@ -1896,7 +1896,7 @@ def _read_cell(ctx: Ctx, ref: str) -> ToolResult:
             body = body[:CELL_READ_LIMIT] + f"\n... [truncated, {len(body) - CELL_READ_LIMIT} more chars]"
         lines += ["outputs:", body or "(no text output)"]
         if extras:
-            lines.append(f"({', '.join(sorted(extras))} output rendered on the canvas)")
+            lines.append(f"({', '.join(sorted(extras))} output rendered; thimble shows it)")
     else:
         lines += _payload_lines(kind, cell.get("payload") or {})
     if str(cell.get("takeaway") or "").strip():
@@ -2082,6 +2082,10 @@ async def _h_screenshot(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
     ref = str(args.get("ref") or "").strip().strip("[]").strip()
     if not ref:
         return err("screenshot: `ref` is empty")
+    from . import local  # noqa: PLC0415
+
+    if local.terminal(ctx.c) and not cite.is_card_ref(ref):  # terminal mode has no page to shoot: a card alone
+        return err(hint("screenshot-terminal") or f"screenshot: {headless.NO_SCREENSHOTS} in terminal mode")
     if urlsplit(ref).scheme in ("http", "https"):
         return await _shot_page(ref, str(args.get("selector") or "").strip() or None)
     if cite.is_card_ref(ref):
@@ -2155,7 +2159,7 @@ async def _shot_card(ctx: Ctx, ref: str) -> ToolResult:
     cell = notebook.get_cell(ctx.c, cid, full_outputs=True) if cid else None
     if cell is None:
         return err(f"screenshot: there is no card {cid or ref}")
-    from . import local  # noqa: PLC0415
+    from . import local  # noqa: PLC0415 — imported above too: _shot_card is also reached on its own
 
     if local.terminal(ctx.c):  # no page to open in terminal mode: the card harness draws the card offscreen
         return await _shot_card_offscreen(ctx, cid, cell)

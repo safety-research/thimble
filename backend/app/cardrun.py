@@ -81,11 +81,13 @@ def command(kind: str, ident: str = "") -> str:
 
 def write_dirs(c: str) -> list[Path]:
     """The folders of workspace `c` a card run writes, which main's fence gives its Bash (allowWrite): the groups, their
-    outputs' side files, the labels, this module's folder and the scratch mirror the code runs in (the kernels' cwd)."""
+    outputs' side files, the labels' rows and definitions (a code label's run records its application there), this
+    module's folder and the scratch mirror the code runs in (the kernels' cwd)."""
     from . import notebook  # noqa: PLC0415
 
     ws = config.workspace_dir(c)
-    return [ws / "notebooks", ws / notebook.OUTPUTS_DIR, ws / "labels", ws / RUNS_DIR, ws / notebook.SCRATCH_DIR]
+    return [ws / "notebooks", ws / notebook.OUTPUTS_DIR, ws / "labels", ws / "concepts", ws / RUNS_DIR,
+            ws / notebook.SCRATCH_DIR]
 
 
 def waiting(c: str, cell: dict[str, Any], lines: list[str]) -> str:
@@ -599,12 +601,52 @@ def _ctx(c: str) -> Any:
     return tools.Ctx(c, tools.ANALYST)
 
 
+def _run_lock(ws: Path, cid: str) -> Path:
+    return ws / RUNS_DIR / f"{cid}.run.lock"
+
+
+_held_runs: list[int] = []  # the fds of the run locks this process holds until it ends
+
+
+def hold_run(ws: Path, cid: str) -> None:
+    """Take card `cid`'s run lock for the rest of this process: the shim's CardWatch reads a run whose lock is free as
+    one whose process is gone. A lock, not the pid, since main's sandbox runs `thimble-run` in a pid namespace of its
+    own."""
+    import fcntl  # noqa: PLC0415
+
+    p = _run_lock(ws, cid)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(p, os.O_RDWR | os.O_CREAT | getattr(os, "O_CLOEXEC", 0), 0o600)
+    fcntl.flock(fd, fcntl.LOCK_EX)
+    _held_runs.append(fd)
+
+
+def run_alive(ws: Path, cid: str) -> bool:
+    """Whether a `thimble-run` process holds card `cid`'s run lock (hold_run)."""
+    import fcntl  # noqa: PLC0415
+
+    try:
+        fd = os.open(_run_lock(ws, cid), os.O_RDONLY | getattr(os, "O_CLOEXEC", 0))
+    except OSError:
+        return False
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        return True
+    except OSError:
+        return False
+    finally:
+        os.close(fd)  # closing it lets go of a lock taken here
+    return False
+
+
 async def run_card(c: str, cid: str) -> tuple[str, int]:
     """Run card `cid`'s code (module note): (the text add_card answers with in browser mode, 0, or 1 when the code
     errored)."""
     from . import card_check, notebook, tools  # noqa: PLC0415
 
     ws = config.workspace_dir(c)
+    hold_run(ws, cid)
     with notebook.editing(ws):
         hit = notebook._locate(ws, cid)
         if hit is None:
@@ -685,7 +727,8 @@ async def run_label(c: str, ident: str) -> tuple[str, int]:
 
 async def run_stale(c: str) -> tuple[str, int]:
     """Run again every card that read a label at an older revision (concepts.stale_cards, notebook.rerun_on_labels).
-    (What changed, card by card, 0 or 1 when one errored.)"""
+    (The cards that need their author, as rerun_readers tells main of them in browser mode: each one whose takeaway the
+    new output left behind, or that failed, with its output; 0, or 1 when one failed.)"""
     from . import concepts, notebook  # noqa: PLC0415
 
     ws = config.workspace_dir(c)
@@ -701,8 +744,10 @@ async def run_stale(c: str) -> tuple[str, int]:
             ran.append(notebook.get_cell(c, str(cell["id"])) or got)
     if not ran:
         return "thimble-run: no card needed to run again.", 0
-    text = concepts.rerun_text(c, ran)
-    return text, 1 if any(x.get("status") != "ok" for x in ran) else 0
+    told = [x for x in ran if x.get("status") != "ok" or x.get(notebook.TAKEAWAY_STALE)]
+    if not told:
+        return f"thimble-run: ran {len(ran)} card(s) again; none needs you.", 0
+    return concepts.rerun_text(c, told), 1 if any(x.get("status") != "ok" for x in told) else 0
 
 
 # --------------------------------------------------------------------------- the shim's watch
@@ -712,8 +757,8 @@ class CardWatch:
     """A task of the shim's event loop in terminal mode: once a second it looks at the workspace's group files, and
     when one changed it starts the card check of each card marked `check: "pending"` (card_check.start, which skips a
     card without Chromium or the built frontend as browser mode does) and marks interrupted a card whose `thimble-run`
-    process is gone mid-run. The check runs on this loop and ends with the session, as a browser-mode check ends with
-    its server."""
+    process is gone mid-run (its run lock is free: hold_run). The check runs on this loop and ends with the session, as a
+    browser-mode check ends with its server."""
 
     _tasks: dict[str, asyncio.Task] = {}
 
@@ -736,6 +781,8 @@ class CardWatch:
     def __init__(self, c: str) -> None:
         self.c = c
         self.seen: dict[str, tuple[int, int]] = {}
+        self.ended: dict[str, Any] = {}  # card -> its run's `ended` as last seen, so each run is recorded once
+        self.primed = False  # the first look only notes the runs that ended before this session
 
     async def run(self) -> None:
         while True:
@@ -762,7 +809,7 @@ class CardWatch:
         return out
 
     def look(self) -> None:
-        from . import card_check, notebook  # noqa: PLC0415
+        from . import canvas_history, card_check, notebook  # noqa: PLC0415
 
         ws = config.workspace_dir(self.c)
         for p in self.changed():
@@ -771,12 +818,19 @@ class CardWatch:
             nb = notebook.read_notebook(ws, p.stem)
             for cell in (nb or {}).get("cells") or []:
                 run = cell.get(notebook.RUN_KEY) if isinstance(cell.get(notebook.RUN_KEY), dict) else {}
+                cid = str(cell.get("id") or "")
+                if run.get("state") == DONE and self.ended.get(cid) != run.get("ended"):
+                    self.ended[cid] = run.get("ended")
+                    if self.primed:  # the run's change, recorded here as the server records a kernel run's
+                        with canvas_history.acting(str(cell.get("created_by") or "") or None):
+                            notebook._emit(self.c, cell)
                 if cell.get("check") == PENDING:
                     author = card_check.author_of(run.get("session") or None)
                     self._clear_pending(ws, str(cell["id"]))
                     card_check.start(self.c, str(cell["id"]), author)
-                elif run.get("state") == RUNNING and not _alive(run.get("pid")):
-                    self._interrupted(ws, str(cell["id"]))
+                elif run.get("state") == RUNNING and not run_alive(ws, cid):
+                    self._interrupted(ws, cid)
+        self.primed = True
 
     def _clear_pending(self, ws: Path, cid: str) -> None:
         from . import notebook  # noqa: PLC0415
@@ -796,7 +850,7 @@ class CardWatch:
                 return
             nb, cell = hit
             run = cell.get(notebook.RUN_KEY) or {}
-            if run.get("state") != RUNNING or _alive(run.get("pid")):
+            if run.get("state") != RUNNING or run_alive(ws, cid):
                 return
             cell[notebook.RUN_KEY] = {**{k: v for k, v in run.items() if k != "pid"}, "state": DONE, "ended": _now(),
                                       "status": "error"}
@@ -804,12 +858,6 @@ class CardWatch:
                 cell.update(status="error", outputs=[notebook._error_bundle(DEAD_ENAME, DEAD_EVALUE)], ts=_now())
             notebook.write_notebook(ws, nb)
         notebook._emit(self.c, cell)
-
-
-def _alive(pid: Any) -> bool:
-    from . import local  # noqa: PLC0415
-
-    return local._pid_alive(pid)
 
 
 # --------------------------------------------------------------------------- the command line
