@@ -1,7 +1,7 @@
 """The file browser (/thimble-files): the folder's files as a tree, and one file opened in the modes its kind offers,
 written as views (views/SPEC.md) under .thimble-cc-mod/files/ for the panel to draw as it draws any view.
 
-    python3 files.py tree --root DIR --out DIR         every file: folder, kind, size, records
+    python3 files.py tree --root DIR --out DIR         every file: folder, type, size, records, its first lines
     python3 files.py open PATH [--at N | --from N] --root DIR --out DIR
                                                        one file's records: Transcript, Table and Raw tabs, WINDOW
                                                        lines (a JSON list's items) at a time, the window holding
@@ -37,7 +37,9 @@ SKIP_DIRS = {".git", ".hg", ".svn", "node_modules", "__pycache__", ".venv", "ven
 FILES_MAX = 20_000  # files the tree lists
 COUNT_BYTES = 1_000_000_000  # bytes the tree reads in all to count records; later files show none
 HEAD_BYTES = 256 * 1024
-HEADS_FULL = 2_000  # files of the tree whose kind is read from HEAD_BYTES; later ones from SHORT_HEAD
+HEADS_FULL = 2_000  # files of the tree whose kind is read from HEAD_BYTES, and whose first lines it keeps; later ones from SHORT_HEAD
+HEAD_LINES = 6  # a file's first lines the tree keeps, for its detail
+HEAD_CHARS = 160  # characters of each of them
 SHORT_HEAD = 16 * 1024
 WINDOW = 4_000  # lines (a JSON list's items) a file's view holds
 CELL = 80  # characters of a table cell
@@ -399,6 +401,32 @@ def kb(size: int) -> float:
     return round(k, 1) if k < 10 else round(k)
 
 
+def type_of(rel: str) -> str:
+    """A file's type as its name says it: its extension without the dot, or "none"."""
+    ext = os.path.splitext(rel)[1].lower().lstrip(".")
+    return ext or "none"
+
+
+def head_lines(path: str) -> list[str]:
+    """A text file's first HEAD_LINES lines, each cut to HEAD_CHARS characters, read without reading the whole file."""
+    out: list[str] = []
+    try:
+        with open(path, "rb") as f:
+            for _ in range(HEAD_LINES):
+                raw = f.readline(HEAD_CHARS * 4 + 1)
+                if not raw:
+                    break
+                ln = raw.decode("utf-8", errors="replace").rstrip("\r\n")
+                out.append(cut(ln.expandtabs(2), HEAD_CHARS) or " ")
+                # a line longer than the read: skip to its end
+                if not raw.endswith(b"\n"):
+                    while (rest := f.readline(1 << 16)) and not rest.endswith(b"\n"):
+                        pass
+    except OSError:
+        return []
+    return out
+
+
 def tree(root: str, out: str) -> dict:
     paths, more = walk(root)
     base = os.path.basename(os.path.abspath(root)) or "folder"
@@ -412,12 +440,16 @@ def tree(root: str, out: str) -> dict:
             continue
         kind, _ = kind_of(full, rel, HEAD_BYTES if i < HEADS_FULL else SHORT_HEAD)
         folder = os.path.dirname(rel)
-        rows.append({"path": rel, "name": os.path.basename(rel), "folder": f"{base}/{folder}/" if folder else f"{base}/",
-                     "kind": kind, "size": kb(size), "records": count_records(full, kind, size, budget),
-                     "ref": f"{rel}#L1" if kind in OPENS else rel})
+        row = {"path": rel, "name": os.path.basename(rel), "folder": f"{base}/{folder}/" if folder else f"{base}/",
+               "type": type_of(rel), "kind": kind, "size": kb(size), "records": count_records(full, kind, size, budget),
+               "ref": f"{rel}#L1" if kind in OPENS else rel}
+        # its first lines, which its detail shows before it is opened
+        if i < HEADS_FULL and kind in OPENS:
+            row["head"] = head_lines(full)
+        rows.append(row)
     spec = {
         "version": 1, "name": "Files", "slug": "files",
-        "description": "Every file of the folder, by folder, with its kind, size and records; a click opens one.",
+        "description": "Every file of the folder, by folder, with its type, records and size; a click shows its first lines, a second opens it.",
         "scope": ["**/*"],
         "collections": [{
             "name": "files", "one": "one file of the folder", "key": "path", "title": "name", "ref": "ref",
@@ -426,24 +458,27 @@ def tree(root: str, out: str) -> dict:
                 {"name": "path", "type": "text"},
                 {"name": "name", "type": "text"},
                 {"name": "folder", "type": "category"},
-                {"name": "kind", "type": "category"},
+                {"name": "type", "type": "category", "label": "type"},
+                {"name": "kind", "type": "category", "label": "opens as"},
                 {"name": "records", "type": "number", "label": "records", "derived": "computed",
                  "from": "the file's lines", "how": "lines counted, a CSV file's header left out"},
                 {"name": "size", "type": "number", "unit": "KB"},
+                {"name": "head", "type": "list", "label": "first lines"},
                 {"name": "ref", "type": "ref"},
             ],
-            "detail": {"meta": ["folder", "kind"], "fields": ["path", "records", "size"]},
+            # the detail: the file's first lines, and what opening it shows
+            "detail": {"fields": [], "lines": "head"},
         }],
         "stats": [{"label": "files", "collection": "files", "agg": "count"},
                   {"label": "records", "collection": "files", "agg": "sum", "field": "records"}],
         "tabs": [{
             "name": "Files", "collection": "files",
-            "overview": {"kind": "bars", "field": "kind"},
-            "zoom": "a click on a bar keeps the files of that kind",
-            "filter": {"fields": ["kind", "folder"], "search": ["path"]},
-            # in the walk's order: folders as a tree, names with their numbers as numbers
-            "body": [{"kind": "table", "group": "folder",
-                      "columns": [{"field": "name"}, {"field": "kind"}, {"field": "records"}, {"field": "size"}]}],
+            "zoom": "nothing: the tree has no overview",
+            "filter": {"fields": ["type", "folder"], "search": ["path"]},
+            # in the walk's order: folders that fold, names with their numbers as numbers, each file's dot in its type's
+            # hue
+            "body": [{"kind": "table", "group": "folder", "color": "type",
+                      "columns": [{"field": "name"}, {"field": "type"}, {"field": "records"}, {"field": "size"}]}],
         }],
         "labels": False,
     }
@@ -700,18 +735,12 @@ def open_file(root: str, rel: str, out: str, start: int = 1) -> dict:
         if merged:
             shown = [x for x in ("speaker", "time") if x in meta] + shown
         tab = {"name": "Table", "collection": "records",
-               "zoom": "a click on a bar keeps the records with that value",
+               "zoom": "nothing: the table has no overview",
                "filter": {"fields": [f["name"] for f in cats[:3]],
                           "search": [f["name"] for f in fields if f["type"] in ("text", "category", "list")] + (["said", "speaker"] if merged else []) or ["n"]},
                "body": [{"kind": "table", "sort": {"field": "n"},
                          "columns": [{"field": "n"}] + ([{"field": title}] if title else []) + [{"field": x} for x in shown[:8]]}]}
-        best = next((f for f in cats if 2 <= len({x.get(f["name"]) for x in rows[:3000]} - {None}) <= 12), None)
-        timef = next((f["name"] for f in fields if f["type"] == "time"), None) or ("time" if merged and timed else None)
-        if best:
-            tab["overview"] = {"kind": "bars", "field": best["name"]}
-        elif timef:
-            tab["overview"] = {"kind": "histogram", "time": timef}
-            tab["zoom"] = "a click on the strip narrows to that time"
+        # no overview: a table shows the records, and its filter narrows them (views/SPEC.md, "The file browser")
         # Table first unless the file reads surely as a transcript
         if sniffed and sniffed.get("strong"):
             tabs.append(tab)

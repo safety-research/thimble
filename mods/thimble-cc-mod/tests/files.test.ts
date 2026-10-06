@@ -83,11 +83,12 @@ test("the views the mod writes validate as its own: a tab may leave out its over
   expect(validateData(FILE, FILE_ROWS).problems).toEqual([])
 })
 
-test('a click on a file of the tree opens it, and Enter on the selected one; other views select as before', () => {
+test('a click on a file of the tree selects it and shows its first lines, a second click or Enter opens it; other views select as before', () => {
   const r = reduce(TREE, TREE_ROWS, initialState(), { op: 'select', c: 'files', k: 'runs/r1/log.txt' })
-  expect(r.effect).toEqual({ file: 'runs/r1/log.txt' })
+  expect(r.effect).toBeUndefined()
   // the tree keeps the file selected, so it shows where the analyst was when they come back
   expect(r.state.sel).toEqual({ c: 'files', k: 'runs/r1/log.txt' })
+  expect(reduce(TREE, TREE_ROWS, r.state, { op: 'select', c: 'files', k: 'runs/r1/log.txt' }).effect).toEqual({ file: 'runs/r1/log.txt' })
   expect(reduce(TREE, TREE_ROWS, r.state, { op: 'key', key: 'return' }).effect).toEqual({ file: 'runs/r1/log.txt' })
   const f = reduce(FILE, FILE_ROWS, initialState(), { op: 'select', c: 'records', k: '1' })
   expect(f.effect).toBeUndefined()
@@ -96,8 +97,10 @@ test('a click on a file of the tree opens it, and Enter on the selected one; oth
 
 test("a file's way back to the tree is a step of the panel's path, which ← or backspace takes too", () => {
   const lay = viewLayout(FILE, FILE_ROWS, initialState(), 90, 30)
-  // the title row is the file's name; the path row above the view (register.tsx) holds `files ›`
-  expect(text(lay.lines).split('\n')[0]!.startsWith('chat.jsonl')).toBe(true)
+  // the title row is the file's name alone (no `1 file ›`: the view reads no file but its own); the path row above the
+  // view (register.tsx) holds `files ›`
+  expect(text(lay.lines).split('\n')[0]!.trim()).toBe('chat.jsonl')
+  expect(text(viewLayout(TREE, TREE_ROWS, initialState(), 90, 30).lines).split('\n')[0]!.trim()).toBe(TREE.name)
   expect(lay.hits.find(h => h.act.op === 'up')).toBeUndefined()
   expect(reduce(FILE, FILE_ROWS, initialState(), { op: 'up' }).effect).toEqual({ up: true })
   expect(reduce(FILE, FILE_ROWS, initialState(), { op: 'key', key: 'left' }).effect).toEqual({ up: true })
@@ -151,9 +154,11 @@ const PANE = { plugin: 'thimble-cc-mod', component: 'Pane', requestId: 'thimble'
 type M = Mounted<'terminal'>
 type El = { type: string; props: Record<string, unknown>; children?: unknown[] }
 const textOf = (x: unknown): string => (typeof x === 'string' ? x : ((x as El).children ?? []).map(textOf).join(''))
+/** A view's lines as its Client draws them, without the 2-cell margin where `❯` marks the selected row. */
+const M2 = 2
 async function screen(ui: M, key: string): Promise<string[]> {
   const root = (await ui.drawn({ in: key })) as unknown as El
-  return ((root.children ?? []) as El[]).map(c => textOf(c).trimEnd())
+  return ((root.children ?? []) as El[]).map(c => textOf(c).slice(M2).trimEnd())
 }
 
 /** A folder whose file browser helper/files.py has written: the tree and chat.jsonl's view. */
@@ -214,15 +219,21 @@ test('/thimble-files opens the tree; a click on a file opens it, "?" beside a re
   expect((r as { text?: string }).text).toBe('opened the files')
   expect(w.runs.at(-1)).toContain('tree')
   let pane = (await $.ui.mount(PANE as never)) as unknown as M
-  let lines = await screen(pane, 'view:@files')
-  expect(lines[0]).toMatch(/^Files +2 files/)
+  let lines = await screen(pane, 'm:view:@files')
+  expect(lines[0]).toMatch(/^Files/)
+  expect(lines[1]).toMatch(/^2 files/)
   const row = lines.findIndex(l => l.includes('chat.jsonl'))
-  await pane.pointer({ type: 'down', x: 4, y: row, button: 'left', in: 'view:@files' })
+  // a first click selects the file, a second opens it
+  await pane.pointer({ type: 'down', x: 4, y: row, button: 'left', in: 'm:view:@files' })
+  await pane.unmount()
+  pane = (await $.ui.mount(PANE as never)) as unknown as M
+  lines = await screen(pane, 'm:view:@files')
+  await pane.pointer({ type: 'down', x: 4, y: lines.findIndex(l => l.includes('chat.jsonl')), button: 'left', in: 'm:view:@files' })
   await pane.unmount()
   // the helper wrote the file's view, which the panel now shows
   expect(['open', 'chat.jsonl'].every(a => w.runs.at(-1)!.includes(a))).toBe(true)
   pane = (await $.ui.mount(PANE as never)) as unknown as M
-  const IN = { in: 'view:@file-0123456789ab' }
+  const IN = { in: 'm:view:@file-0123456789ab' }
   lines = await screen(pane, IN.in)
   expect(lines[0]).toMatch(/^chat\.jsonl/)
   // "?" in the margin of a turn: a side thread about that record
@@ -244,7 +255,7 @@ test('/thimble-files opens the tree; a click on a file opens it, "?" beside a re
   await pane.press({ key: 'crumb-up' })
   await pane.unmount()
   pane = (await $.ui.mount(PANE as never)) as unknown as M
-  expect((await screen(pane, 'view:@files'))[0]).toMatch(/^Files/)
+  expect((await screen(pane, 'm:view:@files'))[0]).toMatch(/^Files/)
   await pane.unmount()
 })
 
@@ -252,7 +263,7 @@ test("a window of a longer file says which lines it holds, and pages to the wind
   const spec: ViewSpec = { ...FILE, window: { from: 4001, to: 8000, total: 14591, unit: 'lines' } }
   expect(validateSpec(spec, { builtin: true })).toEqual([])
   const lay = viewLayout(spec, FILE_ROWS, initialState(), 90, 30)
-  expect(text(lay.lines).split('\n')[1]).toMatch(/lines 4001-8000 of 14,591 {2}earlier {2}later$/)
+  expect(text(lay.lines).split('\n')[1]).toMatch(/lines 4001-8000 of 14,591 +earlier {2}later$/)
   const pages = lay.hits.filter(h => h.act.op === 'page').map(h => (h.act as { d: number }).d)
   expect(pages).toEqual([-1, 1])
   expect(reduce(spec, FILE_ROWS, initialState(), { op: 'page', d: 1 }).effect).toEqual({ file: 'chat.jsonl', from: 8001 })

@@ -1,16 +1,17 @@
 // A view in the panel: a Client surface module (no `$`) that draws the lines the hooks module laid out (viewdraw.ts)
 // and maps the pointer to their hit regions. The hits come packed (packHits: where each stands and what kind it is);
 // their acts and records stay in the hooks module, so a click posts the hit's index and the stamp of the drawing it
-// was in, and the hooks module acts on it: a tab, a facet, a sort, a row, a link followed, a label, a place opened, or
-// on a right-click the menu of the record. A row under the pointer shows "?" in its margin, a side thread about the
-// row, and has no other hover state; any other region under the pointer is a control, drawn in inverse. Keys reach it once a click has given it the focus, and go to the hooks module as they are.
+// was in, and the hooks module acts on it: a tab, a facet, a sort, a row, a link followed, a label, a place opened. A
+// right-click does what a click does. A row under the pointer shows "?" at its right, a side thread about the row, and
+// has no other hover state; any other region under the pointer is a control, drawn in inverse. Keys reach it once a
+// click has given it the focus, and go to the hooks module as they are.
 import type { ClientModule } from 'claude-code'
 
 import { lineWidth, width } from './draw'
 import type { Line } from './draw'
 import { send } from './gestures'
 import { paintLine } from './paint'
-import { HIT_ASK, HIT_MENU, HIT_ROW, VIEW_MARGIN as MARGIN } from './viewdraw'
+import { HIT_ASK, HIT_ROW, VIEW_MARGIN as MARGIN } from './viewdraw'
 import type { HitAct, ViewAct } from './viewdraw'
 
 type Props = { lines: Line[]; hits: number[]; stamp: string; cols: number; view: string }
@@ -62,9 +63,7 @@ const Views: ClientModule<Props, S> = (props, surface) => {
       // the press acts; a modified left click and the middle button are the terminal's
       if (ev.type !== 'down' || !h) return
       const button = ev.button ?? 'left'
-      if (button === 'right') {
-        if (h.f & HIT_MENU) post(surface, props.view, { op: 'hit', i, s: props.stamp, menu: true })
-      } else if (button === 'left' && !ev.shift && !ev.ctrl && !ev.alt) {
+      if ((button === 'left' || button === 'right') && !ev.shift && !ev.ctrl && !ev.alt) {
         post(surface, props.view, { op: 'hit', i, s: props.stamp, ...(inMargin && h.f & HIT_ASK ? { ask: true as const } : {}) })
       }
       return
@@ -105,7 +104,7 @@ const Views: ClientModule<Props, S> = (props, surface) => {
   const drawn = lines.map((l, y) => {
     const fill = Math.max(0, inner - lineWidth(l))
     // the row's "?" on R, after a 2-cell gutter
-    const margin = y === askRow ? [{ s: ' '.repeat(fill + MARGIN - 1) }, { s: '?', ...(st.ask ? { inv: true } : {}) }] : []
+    const margin = y === askRow ? [{ s: ' '.repeat(fill + MARGIN - 1) }, { s: '?', fg: 'remember', ...(st.ask ? { inv: true } : {}) }] : []
     return paintLine(Text, [...l, ...margin])
   })
   return Box({ flexDirection: 'column', width: cols, children: drawn })

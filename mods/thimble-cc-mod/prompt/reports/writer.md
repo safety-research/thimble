@@ -30,4 +30,4 @@ A figure lets the reader see the evidence for a finding at a glance. Use the car
 
 Run `python3 {{helper}}/report.py check {{file}} --contract {{contract}}`. It lists each citation that does not resolve or whose place does not show its value, each card that was not written, and what the form lacks. Re-cite each sentence where the evidence shows it, or reword it to what the evidence shows, fix the rest, and run it again until it prints `ok`.
 
-Your last message is one line for the analyst: the document and what it holds, such as "Wrote the video, eight scenes and four cards, about 1:40."
+Your last message is one line for the analyst: the document and what it holds, such as "Wrote the document, six sections and four cards."

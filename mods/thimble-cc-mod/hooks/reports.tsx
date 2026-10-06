@@ -1,38 +1,34 @@
 // Reports: a writer subagent ("report · writing <title>") writes a report of the work under .thimble-cc-mod/reports/,
-// of one of the types report.ts registers (a document unless the analyst names another, such as a video or an
+// of one of the types report.ts registers (a document unless the analyst names another, such as slides or an
 // interactive story), started from a prompt (main's `report` tool, /thimble-report), from an answer ("open as report"
 // makes the answer a document at once, no model call), or from a report (the types' retell buttons). The panel draws
-// each type by its renderer: a document as a page with its contents, toggles and callouts; slides one at a time
-// (‹ ›, b and n); a story stepped through beat by beat, its figure lit at each beat's step; a video's storyboard,
-// played in the panel's play view and filmed to an MP4 (film.ts frames, helper/film.py). Citations are chips and cards
-// are drawn as in any reply (register.tsx drawReply), so citations work in them, and:
+// each type by its renderer: a document as a page with its contents, toggles and callouts, drawn as main's chat draws a
+// reply; slides one at a time (‹ ›, b and n); a story stepped through beat by beat, its figure lit at each beat's
+// step. Citations are chips and cards are drawn as in any reply (register.tsx drawReply), so citations work in them,
+// and:
 //
 // - "?" beside any passage (a paragraph, a list item, a callout, a table, a card) starts a side thread told where the
 //   passage stands: the report, its file and its section.
 // - "verify" beside a section's heading (and "verify all") has subagents check every citation of it: a value is
 //   recomputed by a script the mod runs, a citation without one is judged by reading its place. Each chip shows its
 //   state (a spinner, ✓, red ✗), the heading and the contents a tally.
-// - "highlight" (the field under the title, or main's `report_highlight` tool) has a subagent mark the passages the
-//   analyst's words name, each with the place that shows it: a coloured bar beside the passage, its reason under it
-//   (a press opens the place), and a one-line legend of the sets.
+// - main's `report_highlight` tool (the analyst asks in the chat) has a subagent mark the passages the analyst's words
+//   name, each with the place that shows it: a `●` in the set's hue beside the passage, its reason under it (`↗` opens
+//   the place), and a one-line legend of the sets.
 //
 // register.tsx hands this module what it shares (ReportCtx) and calls it from its own hooks: the panel's views, the
 // subagents' progress (session.append) and ends (turn.complete), the page row's keys (ui.message).
 import type { Elements, MatchedEvent, ProcessRunInit, RenderElement, ResolveInput } from 'claude-code'
 
-import type { ChatAgent, ChatHighlight, ChatReport, ChatReportFilm, ChatReportNav, ChatRow, ChatVerify } from '../types'
+import type { ChatAgent, ChatHighlight, ChatReport, ChatReportNav, ChatVerify } from '../types'
 import type { Focus } from './anim'
-import { focusFromRef, focusItem } from './anim'
 import { claimsIn, plainCites } from './cite'
 import type { Claim } from './cite'
-import { cardLayout } from './draw'
-import type { CardData } from './draw'
-import { filmOf } from './film'
-import type { FilmScene } from './film'
+import type { CardData, Line } from './draw'
+import { ACCENT, FRESH, LINK, MARGIN_W, headerEls, hintsEl, lineEl, marginKey, pointed, ruleEl, spread, subLine } from './chrome'
 import { clip } from './lib'
 import { COLORS, SERIES } from './paint'
-import { tilePlace, timing } from './play'
-import { TYPES, buttonRows, calloutOf, docSegments, fitCard, formProblems, guessType, headingKey, highlightLabel, highlightPrompt, isForm, parseMarks, parseVerdicts, passageKey, reportCards, reportPassages, reportSections, sectionOfHeading, settleType, slidesOf, slugOf, splitTitle, stepCount, stepFocus, storyOf, storyboardText, textRows, tocOf, typeOf, verifyPrompt, videoScenes, wrapRows } from './report'
+import { TYPES, buttonRows, calloutOf, docSegments, fitCard, formProblems, guessType, headingKey, highlightLabel, highlightPrompt, isForm, parseMarks, parseVerdicts, passageKey, reportCards, reportPassages, reportSections, sectionOfHeading, settleType, slidesOf, slugOf, splitTitle, stepCount, stepFocus, storyOf, textRows, tocOf, typeOf, verifyPrompt, wrapRows } from './report'
 import type { ReportForm, Section, VerifyItem } from './report'
 import { withGuide, withoutTaskLine } from './threads'
 
@@ -43,7 +39,7 @@ type Spawned = { agentId: string; engine: string } | { deny: string }
  *  its section's heading line, '' before any), what stands right of a heading line, a highlighted passage's bar colour
  *  and the rows under it (`words` as drawReply hands its "?"), and list items asked about one by one. */
 export type ReplyOpts = {
-  /** the columns left of the text: a reply's 4 (⏺, a space, "?", a space), a report's 2 (a panel's A0 and A2) */
+  /** the columns left of the text: a reply's 4 (⏺, a space, "?", a space), a panel's 2 (its margin M) */
   margin?: number
   where?: (heading: string) => string
   tools?: (line: string) => RenderElement | null
@@ -64,8 +60,6 @@ export type ReportCtx = {
   mtime: (path: string) => Promise<number>
   list: (dir: string) => Promise<string[]>
   run: (argv: string[], init: ProcessRunInit) => Promise<{ exitCode: number; stdout: string; stderr: string }>
-  /** THIMBLE_CC_MOD_PYTHON: a Python with Playwright for helper/film.py, when set */
-  filmPython: () => Promise<string>
   report: (slug: string) => Promise<ChatReport | undefined>
   setReport: (r: ChatReport) => Promise<void>
   agent: (id: string) => Promise<ChatAgent | undefined>
@@ -84,7 +78,14 @@ export type ReportCtx = {
   closePanel: () => Promise<void>
   spawn: (prompt: string, desc: string, fresh: string) => Promise<Spawned>
   noteMain: (text: string) => Promise<void>
-  play: (text: string, rows: ChatRow[], head: string) => Promise<void>
+  /** a part drawn from styled lines (homeview.tsx): its hits run their closures on a click, its keys go to `onKey` */
+  link: (e: ResolveInput, key: string, lines: Line[], hits: { y: number; x0: number; x1: number; row: boolean; run: () => Promise<void> | void }[], cols: number, onKey?: (k: string) => Promise<void> | void) => RenderElement
+  /** a card in its frame as the mod draws it itself (register.tsx framedCard) */
+  framed: (e: ResolveInput, card: CardData, w: number, lines?: Line[], key?: string) => RenderElement
+  /** code as Claude Code colours it, with a gutter of line numbers from `startLine` */
+  code: (e: ResolveInput, source: string, max?: number, language?: string, startLine?: number) => RenderElement
+  /** a side thread about something, in the panel */
+  thread: (about: { label: string; context: string }) => Promise<void>
   /** check a text's citations (their chips show the verdicts) and count those that fail */
   checkCites: (text: string) => Promise<number>
   /** run `fn` once main's turn has ended (at once when none runs): a subagent started inside main's turn would hold
@@ -105,7 +106,7 @@ export const TOOL_DESCRIPTION = [
   "Start thimble-cc-mod's writer: a subagent that writes a report of the work for the analyst, outside this conversation, while the analyst watches it in the panel.",
   `Types (form): ${TYPES.map(t => `${t.id}, ${t.blurb}`).join('; ')}.`,
   `Write a document unless the analyst names another type; ${TYPES.filter(t => t.onRequest).map(t => t.id).join(' and ')} only when they ask for one.`,
-  'Call it when the analyst asks for a report, a write-up, a deck, a story, a video or a page of the findings, and do not write it yourself. It returns at once; thimble-cc-mod tells you when the writer is done.',
+  'Call it when the analyst asks for a report, a write-up, a deck, a story or a page of the findings, and do not write it yourself. It returns at once; thimble-cc-mod tells you when the writer is done.',
 ].join(' ')
 export const TOOL_SCHEMA = {
   type: 'object',
@@ -177,8 +178,7 @@ function parseRecord(raw: string): ChatReport | null {
     if (!r || typeof r.slug !== 'string' || typeof r.file !== 'string') return null
     // a writer still running when its session ended never finished
     const state = r.state === 'writing' ? 'error' : (r.state ?? 'ready')
-    const film = r.film?.state === 'rendering' ? { ...r.film, state: 'error', error: 'the session ended while it rendered' } : r.film
-    return { slug: r.slug, form: r.form ?? 'document', title: r.title ?? r.slug, request: r.request ?? '', file: r.file, state, ...(state === 'error' && r.state === 'writing' ? { why: 'the session ended before the writer finished' } : r.why ? { why: r.why } : {}), tools: r.tools ?? 0, partial: r.partial ?? '', problems: r.problems ?? [], created: r.created ?? 0, ...(r.source ? { source: r.source } : {}), ...(r.orient ? { orient: r.orient } : {}), ...(film ? { film } : {}), ...(r.highlights?.length ? { highlights: r.highlights.map(x => (x.state === 'working' ? { ...x, state: 'error', why: 'the session ended before it finished' } : x)) } : {}) }
+    return { slug: r.slug, form: r.form ?? 'document', title: r.title ?? r.slug, request: r.request ?? '', file: r.file, state, ...(state === 'error' && r.state === 'writing' ? { why: 'the session ended before the writer finished' } : r.why ? { why: r.why } : {}), tools: r.tools ?? 0, partial: r.partial ?? '', problems: r.problems ?? [], created: r.created ?? 0, ...(r.source ? { source: r.source } : {}), ...(r.orient ? { orient: r.orient } : {}), ...(r.highlights?.length ? { highlights: r.highlights.map(x => (x.state === 'working' ? { ...x, state: 'error', why: 'the session ended before it finished' } : x)) } : {}) }
   } catch {
     return null
   }
@@ -216,7 +216,7 @@ export async function allReports(ctx: ReportCtx): Promise<ChatReport[]> {
   const { cwd } = await ctx.where()
   let names: string[] = []
   try {
-    names = (await ctx.list(`${cwd}/${ctx.home}/reports`)).filter(f => f.endsWith('.json') && !f.endsWith('.film.json'))
+    names = (await ctx.list(`${cwd}/${ctx.home}/reports`)).filter(f => f.endsWith('.json'))
   } catch {
     names = []
   }
@@ -231,7 +231,7 @@ export async function allReports(ctx: ReportCtx): Promise<ChatReport[]> {
 async function takenSlugs(ctx: ReportCtx): Promise<Set<string>> {
   const { cwd } = await ctx.where()
   try {
-    return new Set((await ctx.list(`${cwd}/${ctx.home}/reports`)).map(f => f.replace(/\.(film\.json|json|md|mp4)$/, '')))
+    return new Set((await ctx.list(`${cwd}/${ctx.home}/reports`)).map(f => f.replace(/\.(json|md)$/, '')))
   } catch {
     return new Set()
   }
@@ -303,7 +303,7 @@ export async function reportAppend(ctx: ReportCtx, agentId: string | undefined, 
   if (tools || text) await ctx.setReport({ ...r, tools: r.tools + tools, partial: text ? clip(text.replace(/\s+/g, ' '), 200) : r.partial })
 }
 
-/** The writer ended: its file checked (citations, the form), main told, the report shown; a video goes to be filmed. */
+/** The writer ended: its file checked (citations, the form), main told, the report shown. */
 export async function reportComplete(ctx: ReportCtx, a: ChatAgent, reason: string, answer: string): Promise<void> {
   const r = await getReport(ctx, a.report)
   if (!r || r.state !== 'writing') return
@@ -320,11 +320,9 @@ export async function reportComplete(ctx: ReportCtx, a: ChatAgent, reason: strin
   const problems = [...formProblems(text, form), ...(bad ? [`${bad} citation${bad === 1 ? '' : 's'} do not resolve or do not show their value`] : [])]
   const title = plainCites(splitTitle(text).title).replace(/\*\*|__|`/g, '') || r.title
   const t = typeOf(form)
-  const py = t.renderer === 'video' ? await filmPython(ctx) : null
-  await patchReport(ctx, r.slug, { state: 'ready', title, problems, partial: clip(withoutTaskLine(answer).replace(/\s+/g, ' ').trim(), 200), ...(t.renderer === 'video' && !py ? { film: NO_FILM } : {}) })
-  await ctx.noteMain(`thimble-cc-mod: its writer finished the ${t.name} "${title}", saved as ${r.file}; the analyst reads it in the panel.${py ? ` thimble-cc-mod films it to ${ctx.home}/reports/${r.slug}.mp4.` : ''}`)
+  await patchReport(ctx, r.slug, { state: 'ready', title, problems, partial: clip(withoutTaskLine(answer).replace(/\s+/g, ' ').trim(), 200) })
+  await ctx.noteMain(`thimble-cc-mod: its writer finished the ${t.name} "${title}", saved as ${r.file}; the analyst reads it in the panel.`)
   await showReport(ctx, r.slug)
-  if (py) void renderFilm(ctx, r.slug, py)
 }
 
 /** "open as report": an answer as a document report, at once, without a model. */
@@ -338,90 +336,6 @@ export async function openAsReport(ctx: ReportCtx, text: string, head: string): 
   const problems = formProblems(own ? text : `# ${title}\n\n${text}`, 'document')
   await saveReport(ctx, { slug, form: 'document', title: plainCites(title), request: head, file, state: 'ready', tools: 0, partial: '', problems, created: await ctx.now() })
   await showReport(ctx, slug)
-}
-
-// ------------------------------------------------------------------------------------------------ the film
-
-/** A Python that has Playwright, for helper/film.py: THIMBLE_CC_MOD_PYTHON, python3, or thimble's backend venv in the
- *  checkout the mod ships in. */
-async function filmPython(ctx: ReportCtx): Promise<string | null> {
-  const { root } = await ctx.where()
-  const env = (await ctx.filmPython()).trim()
-  for (const py of [env, 'python3', `${root}/../../backend/.venv/bin/python`].filter(Boolean)) {
-    const r = await ctx.run([py, '-c', 'import playwright.sync_api'], { timeoutMs: 20000 }).catch(() => null)
-    if (r?.exitCode === 0) return py
-  }
-  return null
-}
-
-/** A video's scenes as the film and the panel play them, with its cards loaded and each text scene's tiles. */
-async function videoParts(ctx: ReportCtx, text: string): Promise<{ scenes: FilmScene[]; cards: Map<string, CardData | null> }> {
-  const cards = new Map<string, CardData | null>()
-  for (const id of reportCards(text)) cards.set(id, await ctx.loadCard(id))
-  const scenes: FilmScene[] = videoScenes(text, { card: id => cards.get(id), focusOf: drawsMark }).map(s =>
-    s.numbers ? { ...s, tiles: s.numbers.map(n => ({ ref: n.ref, display: n.display ?? '', place: tilePlace(n.ref, id => cards.get(id)) })) } : s,
-  )
-  return { scenes, cards }
-}
-
-/** Whether a cited place is something the card draws (a card's total, such as a bar card's "all", is not). */
-function drawsMark(card: CardData, ref: string): boolean {
-  const f = focusFromRef(card, ref)
-  return f !== undefined && focusItem(card, cardLayout(card, 80, -1).items, f) >= 0
-}
-
-async function setFilm(ctx: ReportCtx, slug: string, film: ChatReportFilm): Promise<void> {
-  await patchReport(ctx, slug, { film })
-}
-
-// Without a Python that has Playwright there is no film, and the panel says nothing of one: the video plays in the panel.
-const NO_FILM: ChatReportFilm = { state: 'none', error: 'no Python with Playwright' }
-
-/** Film a video report: its frames drawn here (film.ts), rendered and encoded by helper/film.py with `python`, or with
- *  the Python filmPython finds. */
-export async function renderFilm(ctx: ReportCtx, slug: string, python?: string): Promise<void> {
-  const r = await getReport(ctx, slug)
-  if (!r || r.film?.state === 'rendering') return
-  const { cwd, root } = await ctx.where()
-  const text = await readText(ctx, r.file)
-  if (!text.trim()) return
-  const { scenes, cards } = await videoParts(ctx, text)
-  const film = filmOf(scenes, id => cards.get(id))
-  await setFilm(ctx, slug, { state: 'rendering', frames: film.frames.length, seconds: film.seconds, at: await ctx.now() })
-  const py = python ?? (await filmPython(ctx))
-  if (!py) {
-    await setFilm(ctx, slug, NO_FILM)
-    return
-  }
-  const json = `${cwd}/${ctx.home}/reports/${slug}.film.json`
-  const mp4 = `${ctx.home}/reports/${slug}.mp4`
-  try {
-    await ctx.write(json, JSON.stringify(film))
-    const out = await ctx.run([py, `${root}/helper/film.py`, json, `${cwd}/${mp4}`], { cwd, timeoutMs: 600000 })
-    const last = out.stdout.trim().split('\n').at(-1) ?? ''
-    if (out.exitCode !== 0) throw new Error(out.stderr.trim().split('\n').at(-1) || `film.py exited with ${out.exitCode}`)
-    const got = JSON.parse(last) as { seconds?: number; frames?: number; voice?: string | null }
-    await setFilm(ctx, slug, { state: 'done', file: mp4, seconds: got.seconds ?? film.seconds, frames: got.frames ?? film.frames.length, voice: got.voice ?? null, at: await ctx.now() })
-  } catch (err) {
-    await setFilm(ctx, slug, { state: 'error', error: clip(String(err).replace(/^Error:\s*/, ''), 300) })
-  } finally {
-    await ctx.run(['rm', '-f', json], { timeoutMs: 10000 }).catch(() => undefined)
-  }
-}
-
-function filmWords(f: ChatReportFilm | undefined): { text: string; red: boolean } | null {
-  if (!f) return { text: 'film: waiting for the storyboard', red: false }
-  const len = (s?: number) => (s ? `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, '0')}` : '')
-  switch (f.state) {
-    case 'rendering':
-      return { text: `film: rendering ${f.frames ?? ''} frames, ${len(f.seconds)}…`, red: false }
-    case 'done':
-      return { text: `film: ${f.file} · ${len(f.seconds)} · ${f.voice ? `narrated by ${f.voice}` : 'narration as captions (no offline voice on this machine)'}`, red: false }
-    case 'none':
-      return null
-    default:
-      return { text: `film: failed: ${f.error ?? ''}`, red: true }
-  }
 }
 
 // ------------------------------------------------------------------------------------------------ verify this section
@@ -678,7 +592,7 @@ function sectionTool(e: PaneEvent, ctx: ReportCtx, slug: string, sec: Section, l
 /** How drawReply draws this report's text: list items asked about one by one, each thread told where its passage
  *  stands, a section's verification beside its heading, a highlighted passage's bar and reasons. */
 function replyOpts(e: PaneEvent, ctx: ReportCtx, r: ChatReport, look: Look, cols: number): ReplyOpts {
-  const { Box, Text, Button } = ctx.els(e)
+  const { Text } = ctx.els(e)
   return {
     margin: ctx.margin,
     items: true,
@@ -694,53 +608,40 @@ function replyOpts(e: PaneEvent, ctx: ReportCtx, r: ChatReport, look: Look, cols
         color: hits[0]!.hl.color,
         under: hits.map(({ hl, i }) => {
           const m = hl.marks[i]!
-          return (
-            <Box key={`mark:${hl.id}:${i}`} flexDirection="row">
-              {m.ref ? <Button key={`mark-open:${hl.id}:${i}`} label="↗" plain onPress={() => void ctx.openRef(m.ref!)} /> : <Text> </Text>}
-              <Text dimColor wrap="truncate-end">{` ${clip(m.why || hl.label, Math.max(20, cols - 10))}`}</Text>
-            </Box>
-          )
+          const why = clip(m.why || hl.label, Math.max(20, cols - 6))
+          // `↗` blue, a link to the place that shows it; its reason dim
+          return m.ref
+            ? ctx.link(e, `mark:${hl.id}:${i}`, [[{ s: '↗', fg: LINK }, { s: ` ${why}`, fg: COLORS.dim }]], [{ y: 0, x0: 0, x1: 1, row: false, run: () => ctx.openRef(m.ref!) }], cols)
+            : <Text key={`mark:${hl.id}:${i}`} dimColor wrap="truncate-end">{`  ${why}`}</Text>
         }),
       }
     },
   }
 }
 
-/** The report the panel shows: its title, its state with its citations' tally, its highlights' legend and the field
- *  that asks for more, its type drawn, and its buttons. */
+/** The report the panel shows (views/SPEC.md, section 7, "A report"): its title in the accent and bold, wrapped, with
+ *  no subtitle (but while its writer writes, or when it failed); its problems in red; its highlights' legend; under the
+ *  rule, its type drawn as main's chat draws a reply, at A0; at the bottom, after the second rule, `verify all`, its
+ *  retellings and `all reports ›`, then the key hints. No stats row and no file path. */
 export async function drawReport(e: PaneEvent, ctx: ReportCtx): Promise<RenderElement> {
-  const { Box, Text, Button, Input } = ctx.els(e)
+  const { Box, Text, Button } = ctx.els(e)
+  const els = { Box, Text, Button }
   const nav = await ctx.nav()
   const r = await getReport(ctx, nav?.slug)
-  if (!nav || !r) return <Text dimColor>none</Text>
+  if (!nav || !r) return <Box flexDirection="column"><Text dimColor>none</Text></Box>
   const cols = Math.max(30, e.props.bodyColumns)
   const t = typeOf(r.form)
   const view = t.renderer
   const text = await readText(ctx, r.file)
   const look = await lookOf(ctx, r, text)
   const opts = replyOpts(e, ctx, r, look, cols)
-  const live = e.surface === 'terminal' || e.surface === 'desktop'
   const ready = r.state === 'ready'
   const body: RenderElement[] = []
   const slides = view === 'slides' && text ? slidesOf(text) : null
   const shownTitle = plainCites(slides?.title || splitTitle(text).title || r.title).replace(/\*\*|__|`/g, '')
-  // the title row: the title, wrapped at the measure; its kind and counts dim on the next row, the tallies in words
-  body.push(
-    <Box key="report-title" width={Math.min(72, cols)}>
-      <Text wrap="wrap">{shownTitle}</Text>
-    </Box>,
-  )
-  const all = tally([...look.claims.values()].flat(), look.states)
-  const nCards = text ? reportCards(text).length : 0
-  body.push(
-    <Text wrap="truncate-end">
-      <Text {...(r.state === 'error' ? { color: COLORS.problem } : { dimColor: true })}>{stateWords(r)}</Text>
-      {look.secs.length ? <Text dimColor>{` · ${look.secs.length} section${look.secs.length === 1 ? '' : 's'}`}</Text> : null}
-      {all.all ? <Text dimColor>{` · ${all.all} citation${all.all === 1 ? '' : 's'}`}</Text> : null}
-      {nCards ? <Text dimColor>{` · ${nCards} card${nCards === 1 ? '' : 's'}`}</Text> : null}
-      {tallyWords(e, ctx, all, 'lead')}
-    </Text>,
-  )
+  // the subtitle only says what is not done: the writer writing, or why it failed
+  const sub: Line = r.state === 'writing' ? subLine([`◌ writing · ${r.tools} tool call${r.tools === 1 ? '' : 's'}`, r.partial || '']) : r.state === 'error' ? [{ s: r.why ?? 'failed', fg: COLORS.problem }] : []
+  body.push(...headerEls(els, { title: shownTitle, cols, sub, rule: false }))
   for (const p of r.problems.slice(0, 3)) body.push(<Text color={COLORS.problem} wrap="wrap">{`× ${p}`}</Text>)
   // the legend: one entry per highlight set, a press goes to its next mark
   const sets = r.highlights ?? []
@@ -763,51 +664,34 @@ export async function drawReport(e: PaneEvent, ctx: ReportCtx): Promise<RenderEl
       </Box>,
     )
   }
-  if (ready && live && text.trim())
-    body.push(
-      <Box key="highlight-row" flexDirection="row">
-        <Text dimColor>{'highlight  '}</Text>
-        <Box flexGrow={1} flexShrink={1}>
-          <Input key="highlight" submitLabel="highlight" onSubmit={v => void startHighlight(ctx, r.slug, v)} />
-        </Box>
-      </Box>,
-    )
-  const rule = (k: string) => <Text key={k} color={COLORS.rule}>{'─'.repeat(cols)}</Text>
-  const width = cols - ctx.margin
+  const all = tally([...look.claims.values()].flat(), look.states)
   const answer = `report:${r.slug}`
   const retellTypes = ready ? TYPES.filter(to => to.retell && to.id !== t.id && to.renderer !== view) : []
   const verifyAll = ready && all.all > 0 && all.ok + all.bad + all.busy < all.all
+  body.push(ruleEl(els, cols, 'rule-top'))
   if (text.trim()) {
-    body.push(rule('rule-top'))
     if (view === 'slides' && slides) {
-      // the rows the slide may take: the panel's, less the rows above it (title, state, problems, legend, the field, the
-      // rule) and below it (the rule and the buttons)
-      const above = wrapRows(shownTitle, Math.min(72, cols)) + 1 + r.problems.slice(0, 3).reduce((n, p) => n + wrapRows(`× ${p}`, cols), 0) + (sets.length ? wrapRows(sets.map(hl => `● ${hl.label} ${hl.marks.length}  remove`).join('  '), cols) : 0) + (ready && live ? 1 : 0) + 1
-      const below = 1 + buttonRows([...(verifyAll ? ['verify all'] : []), ...retellTypes.map(to => to.retell!.label), 'all reports ›'], cols)
+      // the rows the slide may take: the panel's, less the rows above it (the path, title, problems, legend, the rule)
+      // and below it (the rule, the buttons and the key hints)
+      const above = 1 + wrapRows(shownTitle, cols) + r.problems.slice(0, 3).reduce((n, p) => n + wrapRows(`× ${p}`, cols), 0) + (sets.length ? wrapRows(sets.map(hl => `● ${hl.label} ${hl.marks.length}  remove`).join('  '), cols) : 0) + 1
+      const below = 2 + buttonRows([...(verifyAll ? ['verify all'] : []), ...retellTypes.map(to => to.retell!.label), 'all reports ›'], cols)
       const rows = e.props.scroll?.bodyRows ?? 0
       body.push(...(await drawSlides(e, ctx, r, slides, nav.slide, nav.notes, cols, opts, look, rows ? rows - above - below : 0)))
     } else if (view === 'story') body.push(...(await drawStory(e, ctx, r, text, nav, cols, answer, opts, look)))
-    else if (view === 'video') body.push(...(await drawVideo(e, ctx, r, text, width, answer, opts)))
     else body.push(...(await drawDocument(e, ctx, text, nav.open, cols, answer, opts, look)))
-    body.push(rule('rule-end'))
   } else if (r.state === 'writing') body.push(<Text dimColor wrap="wrap">{`the request: ${r.request}`}</Text>)
   const retellOf = (to: (typeof retellTypes)[number]) => () => void startReport(ctx, { form: to.id, title: r.title, request: `Retell the ${t.name} "${r.title}" as ${to.name}.`, source: r.file })
-  const retell = retellTypes.map(to => <Button key={`retell-${to.id}`} label={to.retell!.label} plain onPress={retellOf(to)} />)
-  const play = () => void ctx.play(text, [{ id: answer, text }], r.request)
-  const canFilm = view === 'video' && ready && r.film?.state !== 'rendering' && r.film?.state !== 'none'
-  // the report's controls, plain words 2 cells apart
+  // the report's actions, plain words 2 cells apart, after the second rule
+  body.push(ruleEl(els, cols, 'rule-end'))
   body.push(
-    <Box flexDirection="row" columnGap={2} flexWrap="wrap">
-      {view === 'video' && text ? <Button key="report-play" label="▶ play" plain onPress={play} /> : null}
-      {canFilm ? <Button key="report-film" label="film again" plain onPress={() => void renderFilm(ctx, r.slug)} /> : null}
+    <Box key="report-controls" flexDirection="row" columnGap={2} flexWrap="wrap">
       {verifyAll ? <Button key="verify-all" label="verify all" plain onPress={() => void verifySection(ctx, r.slug)} /> : null}
-      {retell}
+      {retellTypes.map(to => <Button key={`retell-${to.id}`} label={to.retell!.label} plain onPress={retellOf(to)} />)}
       <Button key="report-list" label="all reports ›" plain onPress={() => void ctx.openPane('reports', 'Reports')} />
     </Box>,
   )
+  body.push(hintsEl(els, [...(verifyAll ? ['c to verify all'] : []), ...retellTypes.map(to => `${to.retell!.hotkey} ${to.retell!.label}`), 'l for all reports', 'x to close'], cols))
   const hk = hiddenKeys(e, ctx, [
-    ...(view === 'video' && text ? [{ key: 'play', hotkey: 'p', onPress: play }] : []),
-    ...(canFilm ? [{ key: 'film', hotkey: 'f', onPress: () => void renderFilm(ctx, r.slug) }] : []),
     ...(verifyAll ? [{ key: 'verify', hotkey: 'c', onPress: () => void verifySection(ctx, r.slug) }] : []),
     ...retellTypes.map(to => ({ key: `retell-${to.id}`, hotkey: to.retell!.hotkey, onPress: retellOf(to) })),
     { key: 'list', hotkey: 'l', onPress: () => void ctx.openPane('reports', 'Reports') },
@@ -817,17 +701,16 @@ export async function drawReport(e: PaneEvent, ctx: ReportCtx): Promise<RenderEl
   return <Box flexDirection="column">{body}</Box>
 }
 
-/** A document: its contents (each heading a button that scrolls the panel to it, its section's tally beside it), then
- *  its segments, a toggle's body once opened. */
+/** A document: its contents (`Contents` bold, each section's number in a dim column at A0 and its title a button that
+ *  scrolls the panel to it, its tally beside it), then its segments drawn as main's chat draws a reply at A0, a
+ *  toggle's body once opened. */
 async function drawDocument(e: PaneEvent, ctx: ReportCtx, text: string, open: readonly string[], cols: number, answer: string, opts: ReplyOpts, look: Look): Promise<RenderElement[]> {
   const { Box, Text, Button } = ctx.els(e)
   const segs = docSegments(splitTitle(text).body)
   const toc = tocOf(segs)
   const out: RenderElement[] = []
   if (toc.length >= 3) {
-    // `Contents` as a heading; each section's number right-aligned in a dim column at A2, its title after a gutter, a
-    // subsection 2 cells further in; its tally in words
-    out.push(<Text key="toc-head">Contents</Text>)
+    out.push(<Text key="toc-head" bold>Contents</Text>)
     const shown = toc.slice(0, 24)
     const nw = String(shown.length).length
     const keys: { key: string; hotkey: string; onPress: () => void }[] = []
@@ -840,7 +723,7 @@ async function drawDocument(e: PaneEvent, ctx: ReportCtx, text: string, open: re
       if (i < 9) keys.push({ key: `toc${i}`, hotkey: String(i + 1), onPress: go })
       out.push(
         <Box key={`toc-row:${i}`} flexDirection="row">
-          <Text dimColor>{`  ${String(i + 1).padStart(nw)}  ${t.level === 3 ? '  ' : ''}`}</Text>
+          <Text dimColor>{`${String(i + 1).padStart(nw)}  ${t.level === 3 ? '  ' : ''}`}</Text>
           <Button key={`toc:${i}`} label={clip(t.text, cols - 24)} plain onPress={go} />
           {tl && (tl.ok || tl.bad || tl.busy) ? <Text>{'  '}</Text> : null}
           {tl ? <Text>{tallyWords(e, ctx, tl)}</Text> : null}
@@ -854,22 +737,23 @@ async function drawDocument(e: PaneEvent, ctx: ReportCtx, text: string, open: re
   for (let i = 0; i < segs.length; i++) {
     const s = segs[i]!
     if (s.kind === 'md') {
-      out.push(<Box key={`seg:${i}`} flexDirection="column">{await ctx.drawReply(e, s.text, cols - ctx.margin, answer, `r${i}-`, opts)}</Box>)
+      // the reply's rows bring their margin: the passage's "?" or ↳ and a highlight's ● at M, the text at A0
+      out.push(<Box key={marginKey(`seg:${i}`)} flexDirection="column">{await ctx.drawReply(e, s.text, cols, answer, `r${i}-`, opts)}</Box>)
       continue
     }
     const isOpen = open.includes(s.key)
     out.push(
-      <Box key={`toggle-row:${i}`} marginTop={1} marginBottom={isOpen ? 0 : 1} marginLeft={ctx.margin}>
+      <Box key={`toggle-row:${i}`} marginTop={1} marginBottom={isOpen ? 0 : 1}>
         {isOpen ? (
           <Box backgroundColor={COLORS.selected}>
-            <Button key={`toggle:${s.key}`} label={s.summary} plain onPress={() => void toggle(ctx, s.key)} />
+            <Button key={`toggle:${s.key}`} label={`▾ ${s.summary}`} plain onPress={() => void toggle(ctx, s.key)} />
           </Box>
         ) : (
-          <Button key={`toggle:${s.key}`} label={`${s.summary} ›`} plain onPress={() => void toggle(ctx, s.key)} />
+          <Button key={`toggle:${s.key}`} label={`▸ ${s.summary}`} plain onPress={() => void toggle(ctx, s.key)} />
         )}
       </Box>,
     )
-    if (isOpen) out.push(<Box key={`toggle-body:${i}`} flexDirection="column" marginLeft={2} marginBottom={1}>{await ctx.drawReply(e, s.body, cols - ctx.margin - 2, answer, `t${i}-`, opts)}</Box>)
+    if (isOpen) out.push(<Box key={marginKey(`toggle-body:${i}`)} flexDirection="column" marginLeft={2} marginBottom={1}>{await ctx.drawReply(e, s.body, cols - 2, answer, `t${i}-`, opts)}</Box>)
   }
   return out
 }
@@ -889,7 +773,7 @@ async function drawSlides(e: PaneEvent, ctx: ReportCtx, r: ChatReport, deck: Ret
   if (s.kind === 'title') {
     out.push(<Text key="slide-gap"> </Text>)
     out.push(<Text key="slide-title" wrap="wrap">{plainCites(s.heading).replace(/\*\*|__|`/g, '') || ' '}</Text>)
-    if (s.body) out.push(<Box key="slide-body" flexDirection="column" marginTop={1}>{await ctx.drawReply(e, s.body, cols - ctx.margin, answer, `s${i}-`, opts)}</Box>)
+    if (s.body) out.push(<Box key={marginKey('slide-body')} flexDirection="column" marginTop={1}>{await ctx.drawReply(e, s.body, cols, answer, `s${i}-`, opts)}</Box>)
   } else {
     out.push(<Text key="slide-head" wrap="wrap">{plainCites(s.heading).replace(/\*\*|__|`/g, '')}</Text>)
     if (s.cards.length) {
@@ -899,8 +783,8 @@ async function drawSlides(e: PaneEvent, ctx: ReportCtx, r: ChatReport, deck: Ret
       const lines = Math.ceil(s.cards.length / per)
       const rest =
         wrapRows(plainCites(s.heading), cols) +
-        (s.body ? 1 + textRows(s.body, cols - ctx.margin) : 0) +
-        (notes && s.notes ? 1 + textRows(s.notes, cols - ctx.margin) : 0) +
+        (s.body ? 1 + textRows(s.body, cols) : 0) +
+        (notes && s.notes ? 1 + textRows(s.notes, cols) : 0) +
         2 + buttonRows(['back', 'next', ...(any ? [notes ? 'hide notes' : 'notes'] : []), ...(sec ? ['0 verified · verify the rest'] : [])], cols)
       const share = room ? Math.floor((room - rest - lines - 1) / lines) : 0
       for (let k = 0; k < s.cards.length; k += per) {
@@ -921,10 +805,10 @@ async function drawSlides(e: PaneEvent, ctx: ReportCtx, r: ChatReport, deck: Ret
         out.push(<Box key={`slide-cards:${k}`} flexDirection="row" columnGap={2} marginTop={1}>{row}</Box>)
       }
     }
-    if (s.body) out.push(<Box key="slide-body" flexDirection="column" marginTop={1}>{await ctx.drawReply(e, s.body, cols - ctx.margin, answer, `s${i}-`, opts)}</Box>)
+    if (s.body) out.push(<Box key={marginKey('slide-body')} flexDirection="column" marginTop={1}>{await ctx.drawReply(e, s.body, cols, answer, `s${i}-`, opts)}</Box>)
     if (notes && s.notes) {
-      out.push(<Text key="notes-head">Notes</Text>)
-      out.push(<Box key="slide-notes" flexDirection="column">{await ctx.drawReply(e, s.notes, cols - ctx.margin, answer, `n${i}-`, opts)}</Box>)
+      out.push(<Text key="notes-head" bold>Notes</Text>)
+      out.push(<Box key={marginKey('slide-notes')} flexDirection="column">{await ctx.drawReply(e, s.notes, cols, answer, `n${i}-`, opts)}</Box>)
     }
   }
   out.push(<Box key="slide-pad" marginTop={1}><Client key="slide-keys" module="./keys.tsx" width={cols} props={{ label: `${i + 1} / ${n}`, cols }} /></Box>)
@@ -975,7 +859,7 @@ async function drawStory(e: PaneEvent, ctx: ReportCtx, r: ChatReport, text: stri
     </Text>
   )
   if (nav.page) {
-    if (st.lead) out.push(<Box key="story-lead" flexDirection="column">{await ctx.drawReply(e, st.lead, cols - ctx.margin, answer, 'lead-', opts)}</Box>)
+    if (st.lead) out.push(<Box key={marginKey('story-lead')} flexDirection="column">{await ctx.drawReply(e, st.lead, cols, answer, 'lead-', opts)}</Box>)
     for (let k = 0; k < st.beats.length; k++) out.push(<Box key={`beat:${k}`} flexDirection="column" marginTop={1}>{[head(k, st.beats[k]!.heading), ...(await drawBeat(e, ctx, st.beats[k]!, k, cols, answer, opts))]}</Box>)
     out.push(<Box key="story-buttons" flexDirection="row" columnGap={2} marginTop={1}><Button key="story-page" label="step through" plain onPress={() => void reportNav(ctx, 'page')} />{hiddenKeys(e, ctx, [{ key: 'page', hotkey: 'a', onPress: () => void reportNav(ctx, 'page') }])}</Box>)
     return out
@@ -983,7 +867,7 @@ async function drawStory(e: PaneEvent, ctx: ReportCtx, r: ChatReport, text: stri
   const n = st.beats.length + 1
   const i = Math.max(0, Math.min(n - 1, nav.slide))
   if (i === 0) {
-    if (st.lead) out.push(<Box key="story-lead" flexDirection="column">{await ctx.drawReply(e, st.lead, cols - ctx.margin, answer, 'lead-', opts)}</Box>)
+    if (st.lead) out.push(<Box key={marginKey('story-lead')} flexDirection="column">{await ctx.drawReply(e, st.lead, cols, answer, 'lead-', opts)}</Box>)
     out.push(<Text key="story-beats"><Text>Beats</Text><Text dimColor>{`  ${st.beats.length}`}</Text></Text>)
     st.beats.forEach((b, k) =>
       out.push(
@@ -1015,57 +899,53 @@ async function drawStory(e: PaneEvent, ctx: ReportCtx, r: ChatReport, text: stri
   return out
 }
 
-/** A video: its film's state, then its storyboard, each scene under the time it starts, its verification beside it. */
-async function drawVideo(e: PaneEvent, ctx: ReportCtx, r: ChatReport, text: string, width: number, answer: string, opts: ReplyOpts): Promise<RenderElement[]> {
-  const { Box, Text } = ctx.els(e)
-  const { scenes } = await videoParts(ctx, text)
-  const starts: number[] = []
-  let at = 0
-  for (const s of scenes) {
-    starts.push(at)
-    at += timing(s).total
-  }
-  const fw = r.state === 'ready' ? filmWords(r.film) : null
-  return [
-    ...(fw ? [<Text key="film-state" color={fw.red ? COLORS.problem : COLORS.dim} wrap="wrap">{fw.text}</Text>] : []),
-    <Box key="storyboard" flexDirection="column">{await ctx.drawReply(e, storyboardText(text, starts), width, answer, 'v-', opts)}</Box>,
-  ]
-}
+// the reports list's row the keys chose
+let reportPick = ''
 
-/** Every report in the folder: the title row and the count; under the rule, each report an item, its state at A0
- *  (● written, ◌ writing, × failed) and its title at A2, its kind, sections and cards dim under it; a press shows it. */
+/** Every report in the folder (views/SPEC.md, section 7, "A report", the reports list): its title and a dim subtitle;
+ *  under the rule, one row per report (its state glyph, its title, its kind and card count dim at R), `❯` and the
+ *  accent on the row the keys chose; a click or Enter shows it. */
 export async function drawReports(e: PaneEvent, ctx: ReportCtx): Promise<RenderElement> {
   const { Box, Text, Button } = ctx.els(e)
+  const els = { Box, Text, Button }
   const cols = Math.max(30, e.props.bodyColumns)
-  const all = await allReports(ctx)
-  const rows: RenderElement[] = [<Text><Text>Reports</Text><Text dimColor>{`  ${all.length}`}</Text></Text>, <Text color={COLORS.rule}>{'─'.repeat(cols)}</Text>]
-  if (!all.length) rows.push(<Text dimColor>{'  none'}</Text>)
-  for (const r of all.slice(0, 30)) {
-    // its kind, sections and cards, dim (views/SPEC.md, "Lists and trees"); its state is its glyph's
+  const all = (await allReports(ctx)).slice(0, 40)
+  const body: RenderElement[] = [...headerEls(els, { title: 'Reports', cols, sub: subLine([`${all.length} report${all.length === 1 ? '' : 's'}`]) })]
+  const lines: Line[] = []
+  const hits: { y: number; x0: number; x1: number; row: boolean; run: () => Promise<void> | void }[] = []
+  const pick = all.find(r => r.slug === reportPick)?.slug ?? all[0]?.slug ?? ''
+  for (const r of all) {
+    // its kind and cards, dim at R; its state is its glyph's
     const text = r.state === 'ready' ? await readText(ctx, r.file).catch(() => '') : ''
-    const secs = text ? reportSections(text, typeOf(r.form).renderer, r.slug).length : 0
     const nCards = text ? reportCards(text).length : 0
-    const facts = [typeOf(r.form).name, secs ? `${secs} section${secs === 1 ? '' : 's'}` : '', nCards ? `${nCards} card${nCards === 1 ? '' : 's'}` : ''].filter(Boolean).join(' · ')
-    const g = r.state === 'writing' ? <Text>{'◌ '}</Text> : r.state === 'error' ? <Text color={COLORS.problem}>{'× '}</Text> : <Text>{'● '}</Text>
-    rows.push(
-      <Box key={`report-row:${r.slug}`} flexDirection="column">
-        <Box flexDirection="row">
-          {g}
-          <Button key={`report-open:${r.slug}`} label={clip(r.title, cols - 4)} plain onPress={() => void showReport(ctx, r.slug)} />
-        </Box>
-        <Text dimColor wrap="truncate-end">{`  ${facts}`}</Text>
-      </Box>,
-    )
+    const facts = [typeOf(r.form).name, r.state === 'writing' ? `${r.tools} tool call${r.tools === 1 ? '' : 's'}` : '', nCards ? `${nCards} card${nCards === 1 ? '' : 's'}` : ''].filter(Boolean).join(' · ')
+    const g = r.state === 'writing' ? { s: '◌' } : r.state === 'error' ? { s: '×', fg: COLORS.problem } : { s: '●' }
+    hits.push({ y: lines.length, x0: MARGIN_W, x1: cols + MARGIN_W, row: true, run: () => showReport(ctx, r.slug) })
+    lines.push(pointed(spread([g, { s: ' ' }, { s: r.title }], [{ s: facts, fg: COLORS.dim }], cols), r.slug === pick))
   }
+  if (!all.length) lines.push(pointed([{ s: '  ' }, { s: 'none', fg: COLORS.dim }], false))
+  const step = (d: number) => {
+    const at = all.findIndex(r => r.slug === pick)
+    reportPick = all[Math.max(0, Math.min(all.length - 1, at + d))]?.slug ?? ''
+    return ctx.openPane('reports', 'Reports')
+  }
+  body.push(ctx.link(e, marginKey('reports-list'), lines, hits, cols + MARGIN_W, k => (k === 'up' || k === 'k' ? step(-1) : k === 'down' || k === 'j' ? step(1) : (k === 'return' || k === 'enter') && pick ? showReport(ctx, pick) : undefined)))
+  // each report a press away by its key too, for a surface that draws no Client: no row of its own
+  body.unshift(
+    <Box key="report-presses" width={0} height={0} flexShrink={0} overflow="hidden" flexDirection="row">
+      {all.map(r => <Button key={`report-open:${r.slug}`} label={r.title} plain onPress={() => void showReport(ctx, r.slug)} />)}
+    </Box>,
+  )
+  body.push(hintsEl(els, ['↑↓ to choose', 'Enter to open', 'x to close'], cols))
   const hk = hiddenKeys(e, ctx, [...all.slice(0, 9).map((r, i) => ({ key: `r${i}`, hotkey: String(i + 1), onPress: () => void showReport(ctx, r.slug) })), { key: 'close', hotkey: 'x', onPress: () => void ctx.closePanel() }])
-  if (hk) rows.unshift(hk)
-  return <Box flexDirection="column">{rows}</Box>
+  if (hk) body.unshift(hk)
+  return <Box flexDirection="column">{body}</Box>
 }
 
 // ------------------------------------------------------------------------------------------------ hooks
 
 /** Main's call of the `report` tool: a writer started, and what main is told. A writer's own call is refused. A type
- *  written only on request (a video, a story) needs the analyst's words to name it, else the writer writes a document. */
+ *  written only on request (a story) needs the analyst's words to name it, else the writer writes a document. */
 export async function reportTool(ctx: ReportCtx, e: { agentId?: string }): Promise<{ result: string } | { deny: string }> {
   if (e.agentId !== undefined) return { deny: 'thimble-cc-mod: the writer writes the document itself; it starts no other writer' }
   const x = e as unknown as { form?: unknown; title?: unknown; request?: unknown }

@@ -45,14 +45,13 @@ run without the mod; plain `claude` in the folder uses it.
   value or a Bash output. A citation whose place does not exist or does not hold the value is red. A fork of the
   conversation repairs it while ◌ shows, and the fixed sentence replaces the old one in place. A citation the
   fork could not fix keeps a ×, and its panel says why.
-- **Verification.** "verify" (in the menu, or `v` in a citation's panel) has a fork write a script that recomputes
+- **Verification.** "verify" (at the bottom of a citation's panel, or `v` there) has a fork write a script that recomputes
   the value from the raw files. The mod runs it and shows the script and its output: ✓ when it recomputed the cited
   value, × and red when it got another.
 - **Side threads.** Ask about anything on screen. A fork answers in the panel, and Claude gets a hidden one-line note,
   so you can refer to the thread later. Threads are saved under `.thimble-cc-mod/threads/` and reopen from
   `/thimble-threads`. A thread asked from inside another thread hangs under it (see the panel's way under Gestures).
-- **Play.** "▶ play" under an answer plays it in the panel as an animated report built from its own text and cards:
-  each card is drawn in while the sentences around it appear, and the value a sentence cites is lit on the card.
+  Once a thread is asked about a passage, a blue `↳` stays in that passage's margin, and a click on it opens the thread.
 - **Forks.** Every agent the mod starts (repairs, verifications, side threads, report writers, highlighters, view
   builders, reviewers) is a fork that inherits the main conversation. None posts a notice in the main chat: the panel
   shows the result and Claude gets a hidden note. The mod stops each fork once its answer is in.
@@ -71,46 +70,49 @@ so once. `/thimble-cc-mod` shows which sandbox is in use. `THIMBLE_KERNEL_WRAP=n
 browser mode (`helper/sandbox.py`).
 
 How the mod draws, its grid, type, colour and symbols, each with one meaning, is written in `views/SPEC.md`
-("The visual system"): bold marks only what is new, red only a problem, a palette hue only a value of a category.
+("The visual system"): bold is for titles and headings, green marks what is new, blue a link, red only a problem, and a
+palette hue only a value of a category. Every panel opens with its path row, its title in the accent colour and a dim
+subtitle, and ends with a dim row of the keys that work on it.
 
 ## Gestures
 
-One panel shows everything: a citation's place, a card's script, a side thread, a menu, a view or a report. A click
-changes what it shows; Claude Code's close mark, or the `x` key, closes it. The panel draws no key hints: its keys
-(`b` back, `t` threads, `x` close, and the letters of a view's controls) work once it has the keyboard.
+One panel shows everything: a citation's place, a card's script, a side thread, a view or a report. A click changes
+what it shows; Claude Code's close mark, or the `x` key, closes it. Its last row names the keys that work on it
+(`b` back, `t` threads, `x` close, and the letters of its controls) once it has the keyboard.
 
 | Gesture | Does |
 | --- | --- |
 | click (double-click is the same) | a citation or example record: its place. A card's mark, row or node, or the card: a side thread about it |
-| right-click | a menu: open, ask, verify, open the script, rerun |
-| "?" in a block's margin (on hover) | a side thread about that paragraph, code block or card; beside a heading, about its section |
+| right-click | what a click does; there is no menu |
+| "?" in a block's margin (on hover, blue) | a side thread about that paragraph, code block or card; beside a heading, about its section |
+| a blue "↳" in a block's margin | the thread asked about that passage |
 | a card's title | a side thread about the card |
 | "ask about this answer ›" | a side thread about the whole answer |
 | drag-select in a paragraph with citations | copies the text; "ask about this" starts a side thread about the selection |
 
 The panel's top row is its path: `‹ back`, the steps from home to what the panel shows
-(`home › thread "…" › citation …`, each crumb a click away, home opening the home panel), and `threads`, which
-counts the threads answering and those with answers not yet read. A citation, record or card opened from inside the
+(`home › threads › "…" › citation …`, each crumb a click away, home opening the home panel), and `show all threads`,
+which opens the threads panel, then `N new` in green while answers wait unread. A citation, record or card opened from inside the
 panel keeps what the panel showed one step back; one opened from main starts the breadcrumb over, and back still leads
 to what the panel showed before. A citation opened from a thread has a "follow-up" field whose question goes on in that
-thread. A thread keeps answering when the panel moves on or closes: its step shows `◌` while it answers and `new`, in bold, when
-its answer waits unread, and its "stop" ends it. When it answers while the panel does not show it, main's chat gets one
-row at that moment, under its latest row (`↳ thread · "<question>" · answered`, `new` in bold until read; a click opens the
-thread), and a row above the prompt counts the threads with answers unread until they are read (a click opens the
-thread, or the home panel when several have news). Claude reads neither row, only the hidden note. The threads tree
-(`/thimble-threads`) draws every thread, this session's and earlier ones, under the thread it was asked from, with what
-it is doing and its unread answers. The answers read and the rows are kept in `.thimble-cc-mod/signals.json`, so
-`claude --resume` shows them again.
+thread. A thread keeps answering when the panel moves on or closes: its step shows `◌` while it answers and `new`, in
+green, when its answer waits unread, and its "stop" ends it. When it answers while the panel does not show it, main's
+chat gets one row at that moment, under its latest row (`↳ thread · "<question>" · answered`, `new` in green until read;
+a click opens the thread). Claude does not read the row, only the hidden note. The threads panel (`/thimble-threads`,
+or `show all threads`) draws every thread, this session's and earlier ones, as a tree under where it was asked (`main`,
+a report, a card) with `├ └` guides, a thread asked from a thread one level deeper; the selected thread's questions and
+answers follow under a rule, then the `ask` field. The answers read and the rows are kept in
+`.thimble-cc-mod/signals.json`, so `claude --resume` shows them again.
 
 ## Home
 
-The home panel lists everything made in the folder: views (built, building, proposed), reports, side threads (those
-with new answers first), cards grouped by the question that made them, labels with their counts, and the files with
-what this session read of them. A click on an item opens it in the panel, after `home` on the breadcrumb, so back
-returns to the list. It opens from the breadcrumb's first step, from the row above the prompt when several threads have
-new answers, and by `/thimble-home [stacked|index]`. The sections are stacked, each with its first items and "… N
-more"; the header switches to an index, every section in two columns, a section opening whole under them. The panel
-stays live while it shows: counts, states and new answers change as they come.
+The home panel lists everything made in the folder, in one column: views (built, building, proposed), reports, side
+threads (those with new answers first), cards grouped by what made them (an answer, a report, a thread), labels with
+their counts, and the files by folder with their records and what this session read of them. A click on an item, or
+Enter on the chosen one, opens it in the panel, after `home` on the breadcrumb, so back returns to the list; a click on
+a heading opens that section's own panel. Each section shows its first five items and "… N more"; card groups and
+folders fold with `▸ ▾` (a click, or Space). It opens from the breadcrumb's first step and by `/thimble-home`. The
+panel stays live while it shows: counts, states and new answers change as they come.
 
 Modifier clicks and middle clicks are left to the terminal. Nothing a gesture does writes into the prompt. Below 144
 columns a click does not open the panel by itself; a row above the prompt offers "open panel".
@@ -121,21 +123,22 @@ Ask for a view ("a view of the agents' sessions, linked by who spawned whom"). C
 fields (what it shows and why, files, unit, overview, zoom, filter, details). A builder fork writes its reader and spec
 from thimble's view prompt and three worked examples (`viewers/`), and the mod runs thimble's checks and sends failures
 back to a new builder. The view opens in the panel when the checks pass; a reviewer fork then reads it and may send
-problems back. A view has a compact header, one filter row, an overview of every row (a click on it narrows the
-rows), the records, and the selected row's details. `/thimble-view <name>` opens one; `/thimble-views` lists them with
-their checks and review. The spec format is in `views/SPEC.md`. The checks fail a view whose rows take more than
+problems back. A view main proposed has a `↳ view · <name> · <state>` row under the answer that proposed it (`new` in
+green once built, until opened; `build` while only proposed). A view has a header with a search box, one filter row, an
+overview of every row (a click on it narrows the rows), the records, and the selected row's details. `/thimble-view
+<name>` opens one; `/thimble-views` lists them, each with its description, `open`, and `ask for a change`, whose words
+go to a builder that changes the view. The spec format is in `views/SPEC.md`. The checks fail a view whose rows take more than
 10 MB, since the panel holds every row at once.
 
 ## Files
 
-`/thimble-files` opens the file browser in the panel: every file of the folder by folder, with its kind (transcript,
-records, table, json, text, markdown, code, binary, ...), its records and its size. A click on a file opens it in the
-modes its kind offers, as tabs: Transcript (who speaks, when, what they said, a tool call folded to one line), Table
-(the records' keys as columns: a click on a column sorts, a bar narrows) and Raw (the lines with their numbers;
-markdown under its headings). Every tab has search, filters and the labels of `.thimble-cc-mod/labels.json` marked on
+`/thimble-files` opens the file browser in the panel: every file of the folder by folder, its dot in the colour of its
+type (its extension; dim when every file has the same type), with its type, records and size. A click on a file selects
+it, and its detail shows what it opens as and its first lines; a second click, or Enter, opens it in the modes its kind
+offers, as tabs: Transcript (who speaks, when, what they said, a tool call folded to one line), Table (the records'
+keys as columns: a click on a column sorts) and Raw (the lines with their numbers; markdown under its headings). Every tab has search, filters and the labels of `.thimble-cc-mod/labels.json` marked on
 its records; a record's "↗ line" opens its whole lines, "?" beside it starts a side thread about it, and "‹ files" (or
-←) goes back to the tree. "in files" under a citation of a file, and "open in files" in a record's menu, open the file
-at that record. `/thimble-files <path>[:<line>]` opens one file directly. `helper/files.py` writes these as views under
+←) goes back to the tree. "in files" under a citation of a file opens the file at that record. `/thimble-files <path>[:<line>]` opens one file directly. `helper/files.py` writes these as views under
 `.thimble-cc-mod/files/`, again only when the file changed. A view holds 4,000 lines of a file at a time ("‹ earlier"
 and "later ›" page through a longer one) and cuts long text, so search reads what the view holds; a label reads whole
 lines, and a record's citation opens the rest.
@@ -144,31 +147,30 @@ lines, and a record's citation opens the rest.
 
 Ask for a report ("write up what happened in the wiki"). A writer fork writes it to `.thimble-cc-mod/reports/` and
 checks its citations; the panel shows it being written, then draws it. The default is a document with contents,
-callouts and toggles. Slides, an interactive story and a video are written only when asked for; a video plays in the
-panel and is filmed to an MP4 when ffmpeg and a Python with Playwright and its Chromium are available (`python3`, or
-the Python `THIMBLE_CC_MOD_PYTHON` names); without them the panel does not mention a film. A slide fits the panel: a
+callouts and toggles. Slides and an interactive story are written only when asked for. A slide fits the panel: a
 card taller than its room shows its first rows, and the line under it opens the card whole. The types are one registry
 (`TYPES` in `hooks/report.ts`, guidance in `prompt/reports/`). In a report, "?" beside a passage starts a side thread
-about it, "verify" beside a heading checks every citation of that section, and the "highlight" field marks the
-passages a phrase applies to. "open as report" under an answer turns the answer into a document at once.
+about it, "verify" beside a heading checks every citation of that section, and a highlight Claude makes when you ask
+(its `report_highlight` tool) marks the passages a phrase applies to, each with its evidence. "open as report" under an answer turns the answer into a document at once.
 
 ## Coverage, labels and the orientation
 
 - **Coverage.** The mod counts what this session's agents (main, its forks and any subagent) have read of the corpus:
   the records each Read, Bash or Grep result showed, and the files a script or command only went over (Python's opens
-  are noted through a `sitecustomize` the mod puts on `PYTHONPATH`). A line above the prompt says it ("read 2 of 4
-  files · 0.4% of records · 1 never opened"); `/thimble-coverage` or its "details" opens the panel with each file, the
-  lines read and what was never opened. Claude gets the line with each prompt. When an answer speaks for the whole
+  are noted through a `sitecustomize` the mod puts on `PYTHONPATH`). Home's Files section shows each folder's and
+  file's records and the share read; `/thimble-coverage` opens the panel with each file, the lines read and what was
+  never opened. Claude gets a line of it ("read 2 of 4 files · 0.4% of records · 1 never opened") with each prompt. When an answer speaks for the whole
   corpus while a kind of file was never opened, or had no record read, a coverage check shows under the answer, whole,
   and Claude reads the same words with your next prompt. Claude starts no turn of its own for it.
   `/thimble-coverage check off` turns the check off.
 - **Labels.** Claude's `label` tool sorts the records of some files into values, as thimble's labels do: a prompt (a
   model reads each record, in batches), a regex or code; a trial on a sample first, then every record. Its answer is a
-  label card in the reply: the count of each value as bars in the values' colours, and a few records with their words
-  and the model's reason, each with "agree" and "disagree" (with more than two values, disagree shows the others to
-  pick from). A verdict is kept as the label's correction, which wins and teaches the next run, and the card is made
-  again with the same records. The panel shows the same and more: the definition, what the model calls recovered from
-  in one dim line, the records of each value, and the field that runs it again with a new definition. A card whose
+  label card in the reply: the count of each value as bars in the values' colours, under the label's name, a link to
+  the label panel. The label panel shows its type, scope, definition (`edit` changes it and runs it again), values and
+  sample, the counts, the examples of each value (the record's words in quotation marks, the model's reason, `agree`
+  and `it is …`), the cards that read the label, and `run on the sample` and `run on all N`. A verdict is kept as the
+  label's correction, which wins and teaches the next run. The labels list (`/thimble-label`) has the field
+  `describe a new label`, whose words go to Claude, which makes the label with a trial. A card whose
   script read a label (`label(name)` in `tcard`) shows it on a line under its question, its values after dots in their
   colours ("changed since" when the label changed after the card was made), and draws its bars, series, cells, events
   and examples in the colours of their values; a press on that line opens the label in the panel. Record text whose
@@ -213,7 +215,7 @@ plugin serves is "Unknown command" before any hook sees it, and a plugin named `
 ## Commands
 
 `/thimble-card <n>` and `/thimble-cite <n>` (the last answer's n-th card or citation), `/thimble-check`,
-`/thimble-ask <question>`, `/thimble-play`, `/thimble-home [stacked|index]`, `/thimble-threads`,
+`/thimble-ask <question>`, `/thimble-home`, `/thimble-threads`,
 `/thimble-report [type] <request>`,
 `/thimble-reports`, `/thimble-view <name>`, `/thimble-views [build] <name>`, `/thimble-files [path[:line]]`,
 `/thimble-band`, `/thimble-coverage [check on|off]`, `/thimble-label [list | open <name> | <name> …]`,

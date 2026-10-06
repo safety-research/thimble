@@ -195,12 +195,12 @@ test('a verification script runs in the sandbox', async ($, on) => {
 
 test("a view's checks, which run its reader, and the drawings its reviewer reads run in the sandbox", async ($, on) => {
   const w = world(on)
+  // a builder taken up after a reload ends: its checks run, then the drawings for the reviewer
+  w.files.set(`${VIEW}/status.json`, JSON.stringify({ for: PROPOSAL.ts, state: 'building', attempt: 1, round: 0, agent: 'agent-b', at: 0 }))
+  w.agents.push({ id: 'agent-b', status: 'running', spawnedBy: 'thimble-cc-mod' })
   await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
-  await $.command.run({ command: 'thimble-views', args: 'timeline' } as never)
-  const pane = (await $.ui.mount(PANE)) as unknown as M
-  await pane.press({ key: 'vreview' })
-  await pane.unmount()
-  await w.clock.advance(10)
+  await $.turn.complete({ turnId: 'b1', agentId: 'agent-b', answer: 'built', durationMs: 5, reason: 'answer' } as never)
+  await w.clock.advance(1100)
   await settle()
   const run = runOf(w, '/helper/viewpipe.py')
   expect(run).toBeDefined()

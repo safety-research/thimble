@@ -1,25 +1,23 @@
-// The home panel (/thimble-home, and the breadcrumb's first step): one panel listing what this folder's sessions made,
+// The home panel (/thimble-home, and the path row's first step): one panel listing what this folder's sessions made,
 // as thimble's workbench lists them in its tabs: views (built, building, proposed), reports, side threads (those with
-// answers not yet read first), cards grouped by the question they answered, labels with their counts, and the files
-// with what this session read of them. Each is a click away from the panel that opens it. The sections stacked, each
-// with its first items and "… N more"; the header offers a compact index instead, every section in two columns, a
-// section's full list opening under it.
+// answers not yet read first), cards grouped by the question that made them, labels with their counts, and the files
+// by folder with what this session read of them. Each is a click away from the panel that opens it.
 //
 // This file lays the panel out as styled lines and their hit regions, without `$`; register.tsx gathers the data
-// (homeData), draws the lines in the Client homeview.tsx and acts on a click. It follows the visual system
-// (views/SPEC.md, section 7, "Home"): a heading at A0, its name regular and its count dim, a blank row above it; an
-// item's state glyph at A0 and its name at A2, regular (bold only while it is new: a thread's unread answer), its
-// category in the panel's shared column and its number against the right edge, its secondary text dim at A2; a
-// question's cards at A4, their kind as a word in the category column.
+// (homeData), draws the lines in the Client homeview.tsx and acts on a click or a key. It follows the visual system
+// (views/SPEC.md, section 7, "Home"): one column; the title `Home`; a section heading bold with its count dim in
+// parentheses and `N new` in green, a blank row above it; an item's state glyph at A0 and its name at A2, regular,
+// its metadata dim against the right edge and `new` in green there while it is new; card groups and folders that fold
+// with `▸ ▾`, the newest group and the first folder open. Each line starts with the 2-cell margin, where `❯` marks the
+// row the keys chose.
 import type { Line, Seg } from './draw'
-import { cut, lineWidth, valueColour, width } from './draw'
+import { lineWidth, valueColour, width } from './draw'
+import { ACCENT, FRESH, MARGIN_W, fitTo, headingLine, hintLine, pointed, ruleLine, spread } from './chrome'
 import { COLORS } from './paint'
 
 export type SectionId = 'views' | 'reports' | 'threads' | 'cards' | 'labels' | 'files'
-export type HomeLayoutName = 'stacked' | 'index'
-export const HOME_LAYOUTS: readonly HomeLayoutName[] = ['stacked', 'index']
 
-/** What a click opens: an item in its own panel, or a section's full list in the panel that lists it. */
+/** What a click opens: an item in its own panel, or a section's own panel. */
 export type HomeOpen =
   | { kind: 'view'; slug: string; built: boolean }
   | { kind: 'report'; slug: string }
@@ -29,15 +27,20 @@ export type HomeOpen =
   | { kind: 'file'; path: string }
   | { kind: 'pane'; view: 'views' | 'reports' | 'threads' | 'labels' | 'coverage'; title: string }
 
-export type HomeAct = { op: 'open'; open: HomeOpen } | { op: 'layout'; layout: HomeLayoutName } | { op: 'fold'; sec: SectionId } | { op: 'more'; sec: SectionId } | { op: 'pick'; sec: SectionId | '' }
+/** A click's act: open something, fold or unfold a card group or a folder (`key`, `open` as it is drawn now), show a
+ *  section whole. */
+export type HomeAct = { op: 'open'; open: HomeOpen } | { op: 'fold'; key: string; open: boolean } | { op: 'more'; sec: SectionId }
 
-/** What the analyst chose: the layout, the stacked sections folded and shown whole, the section the index opens. */
-export type HomeUi = { layout: HomeLayoutName; folded: string[]; more: string[]; pick: string }
+/** What the analyst chose: the groups and folders folded or unfolded against their default (the newest group and the
+ *  first folder open), the sections shown whole, and the row the keys chose (its key). */
+export type HomeUi = { folded: string[]; unfolded: string[]; more: string[]; pick: string }
+
+export const HOME_UI_EMPTY: HomeUi = { folded: [], unfolded: [], more: [], pick: '' }
 
 // ------------------------------------------------------------------------------------------------ the data
 
-export type HomeView = { slug: string; name: string; state: string; words: string; files: string[]; unit: string; drawable: boolean; left: number; at: number }
-export type HomeReport = { slug: string; title: string; form: string; state: string; cards: number; tools: number; at: number }
+export type HomeView = { slug: string; name: string; state: string; words: string; files: string[]; unit: string; drawable: boolean; left: number; at: number; fresh?: boolean }
+export type HomeReport = { slug: string; title: string; form: string; state: string; cards: number; tools: number; at: number; fresh?: boolean }
 export type HomeThread = { id: string; title: string; about: string; words: string; tone: string; unread: number; earlier: boolean; at: number }
 export type HomeCard = { id: string; kind: string; question: string }
 /** Cards by the question they answered: an answer's prompt, a side thread's question, a report's title, or none. */
@@ -52,6 +55,8 @@ export type HomeData = {
   labels: HomeLabel[]
   files: HomeFile[]
   coverage: string
+  /** the folder's own name, which heads the files at its top */
+  root?: string
 }
 
 /** The cards of answers, threads and reports, each under the first question that made it (`groups` in the order the
@@ -73,24 +78,36 @@ export function groupCards(groups: readonly HomeCardGroup[], all: readonly HomeC
 
 // ------------------------------------------------------------------------------------------------ the rows
 
-type Glyph = { mark: string; fg?: string; d?: boolean }
+type Glyph = { mark: string; fg?: string }
 
-/** One item: its state glyph, its title (bold while `fresh`: new since the analyst last opened it), its category (in the
- *  panel's shared column), its figure at the right (a number in the text colour, `dimRight` for words), a stacked bar
- *  before the figure, its secondary line, the shorter figure the index shows, and what a click on it does. A question
- *  of the cards has where it was asked as its category and holds its cards (`kids`). */
-export type HomeRow = { key: string; glyph: Glyph | null; title: string; fresh?: boolean; cat?: string; right?: string; dimRight?: boolean; bar?: { n: number; fg: string }[]; meta?: Seg[]; short?: string; kids?: HomeRow[]; act: HomeAct }
+/** One row of a section: its glyph (or fold marker) at A0, its name at A2 (or A4 under a folder), its metadata dim
+ *  against the right edge, `new` in green there, a bar before the figure; a secondary row at A2; what a click does. A
+ *  row with `kids` folds (`fold`: its key, `open`: shown open). */
+export type HomeRow = {
+  key: string
+  glyph: Glyph | null
+  title: string
+  fresh?: boolean
+  right?: Seg[]
+  bar?: { n: number; fg: string }[]
+  meta?: Seg[]
+  kids?: HomeRow[]
+  fold?: string
+  open?: boolean
+  depth?: number
+  more?: number
+  act: HomeAct
+}
 
-/** A section: its heading's name and count, `news` in bold after them (a count of what is new), `unit` the name of the
- *  number column at the right, the items the stacked layout shows before "… N more" when not STACK_FIRST's. `summary`
- *  and `brief` say in words what the glyphs show (for the tests and the thread a section is asked about). */
-export type HomeSection = { id: SectionId; name: string; count: number; news?: string; unit?: string; summary: Seg[]; brief?: Seg[]; rows: HomeRow[]; pane?: HomeOpen; first?: number }
+/** A section: its heading's name and count, what is new, the panel its heading opens, the column heads at the right,
+ *  and its rows. `summary` says in words what the glyphs show (for the tests and a thread about the panel). */
+export type HomeSection = { id: SectionId; name: string; count: number; news?: number; heads?: Seg[]; summary: Seg[]; rows: HomeRow[]; pane?: HomeOpen }
 
 // state glyphs (views/SPEC.md, "The visual system", section 5): done ● and working ◌ in the text colour, not started ○
 // dim, a problem × or ! in red
 const DONE: Glyph = { mark: '●' }
 const WORKING: Glyph = { mark: '◌' }
-const NOT_STARTED: Glyph = { mark: '○', d: true }
+const NOT_STARTED: Glyph = { mark: '○', fg: COLORS.dim }
 
 export function num(n: number): string {
   return Math.round(n).toLocaleString('en-US')
@@ -101,14 +118,13 @@ function plural(n: number, one: string, many = `${one}s`): string {
 }
 
 const dim = (s: string): Seg => ({ s, fg: COLORS.dim })
-const sep = (): Seg => dim(' · ')
 
-/** Words parted by a dim dot, each its own colour when given. */
+/** Words parted by a dim dot, each dim unless it is a segment of its own. */
 function joined(parts: (Seg | string | null | undefined | false)[]): Seg[] {
   const out: Seg[] = []
   for (const p of parts) {
     if (!p) continue
-    if (out.length) out.push(sep())
+    if (out.length) out.push(dim(' · '))
     out.push(typeof p === 'string' ? dim(p) : p)
   }
   return out
@@ -129,38 +145,34 @@ function afterMark(words: string): string {
   return words.replace(/^(built|proposed)(\s·\s|$)/, '').replace(/^failed:\s*/, '')
 }
 
-/** A view's state in a word or two, for the index and the section's count. */
-function viewWord(v: HomeView): string {
-  if (v.state === 'failed') return 'failed'
-  if (v.state === 'built' || (v.state === 'stopped' && v.drawable)) return 'built'
-  if (ACTIVE_VIEW.has(v.state)) return v.drawable ? 'built · in review' : 'building'
-  return 'proposed'
-}
-
 function countBy(words: readonly string[], order: readonly string[]): string[] {
   const by = new Map<string, number>()
   for (const w of words) by.set(w, (by.get(w) ?? 0) + 1)
   return order.filter(w => by.has(w)).map(w => `${by.get(w)} ${w}`)
 }
 
+/** What stands against the right edge: the metadata dim, then `new` in green while the item is new. */
+function rightOf(meta: (string | null | undefined | false)[], fresh?: boolean): Seg[] {
+  const m = joined(meta)
+  return [...m, ...(fresh ? [...(m.length ? [{ s: '  ' }] : []), { s: 'new', fg: FRESH }] : [])]
+}
+
 function viewsSection(vs: readonly HomeView[]): HomeSection {
   const sorted = [...vs].sort((a, b) => b.at - a.at)
-  const words = sorted.map(v => viewWord(v).replace(' · in review', ''))
+  const word = (v: HomeView) => (v.state === 'failed' ? 'failed' : v.state === 'built' || (v.state === 'stopped' && v.drawable) ? 'built' : ACTIVE_VIEW.has(v.state) ? (v.drawable ? 'built' : 'building') : 'proposed')
   return {
     id: 'views',
     name: 'Views',
     count: vs.length,
-    summary: joined(countBy(words, ['built', 'building', 'proposed', 'failed'])),
+    news: vs.filter(v => v.fresh).length,
+    summary: joined(countBy(sorted.map(word), ['built', 'building', 'proposed', 'failed'])),
     pane: { kind: 'pane', view: 'views', title: 'Views' },
     rows: sorted.map(v => ({
       key: `view:${v.slug}`,
       glyph: viewGlyph(v),
       title: v.name,
-      right: afterMark(v.words),
-      dimRight: true,
-      // in the index, only what the glyph does not say
-      short: ACTIVE_VIEW.has(v.state) && v.drawable ? 'in review' : '',
-      meta: joined([v.files.join(', '), v.unit]),
+      fresh: v.fresh,
+      right: rightOf([v.files.join(', '), afterMark(v.words)], v.fresh),
       act: { op: 'open', open: { kind: 'view', slug: v.slug, built: v.drawable } },
     })),
   }
@@ -173,16 +185,16 @@ function reportsSection(rs: readonly HomeReport[]): HomeSection {
     id: 'reports',
     name: 'Reports',
     count: rs.length,
+    news: rs.filter(r => r.fresh).length,
     summary: joined(countBy(sorted.map(word), ['written', 'writing', 'failed'])),
     pane: { kind: 'pane', view: 'reports', title: 'Reports' },
     rows: sorted.map(r => ({
       key: `report:${r.slug}`,
       glyph: r.state === 'writing' ? WORKING : r.state === 'error' ? { mark: '×', fg: COLORS.problem } : DONE,
       title: r.title,
-      cat: r.form,
-      short: r.state === 'writing' ? 'writing' : r.form,
-      // what the glyph does not say (◌ writing, × failed, ● written): its tool calls while writing, its cards
-      meta: joined([r.state === 'writing' ? plural(r.tools, 'tool call') : '', r.cards ? plural(r.cards, 'card') : '']),
+      fresh: r.fresh,
+      // what the glyph does not say (◌ writing, × failed, ● written): its kind, its tool calls while writing, its cards
+      right: rightOf([r.form, r.state === 'writing' ? plural(r.tools, 'tool call') : '', r.cards ? plural(r.cards, 'card') : ''], r.fresh),
       act: { op: 'open', open: { kind: 'report', slug: r.slug } },
     })),
   }
@@ -195,63 +207,57 @@ function threadsSection(ts: readonly HomeThread[]): HomeSection {
   const running = ts.filter(t => t.tone === 'run').length
   return {
     id: 'threads',
-    name: 'Side threads',
+    name: 'Threads',
     count: ts.length,
-    // every thread with new answers shows, however many
-    first: Math.max(STACK_FIRST.threads, fresh),
-    ...(fresh ? { news: `${num(fresh)} new` } : {}),
+    news: fresh,
     summary: joined([fresh ? `${fresh} with new answers` : '', running ? `${running} answering` : '', ts.some(t => t.earlier) ? `${ts.filter(t => t.earlier).length} from earlier sessions` : '']),
-    pane: { kind: 'pane', view: 'threads', title: 'Side threads' },
+    pane: { kind: 'pane', view: 'threads', title: 'Threads' },
     rows: sorted.map(t => ({
       key: `thread:${t.id}`,
       glyph: t.tone === 'run' ? WORKING : t.tone === 'problem' ? { mark: '×', fg: COLORS.problem } : t.tone === 'ok' || t.unread ? DONE : NOT_STARTED,
       title: t.title,
-      // an answer not yet read: its name bold, until the thread is opened
       fresh: t.unread > 0,
-      short: t.tone === 'run' ? 'answering' : '',
-      meta: joined([t.words, t.about, t.earlier ? 'earlier session' : '']),
+      right: rightOf([t.earlier ? 'earlier session' : ''], t.unread > 0),
       act: { op: 'open', open: { kind: 'thread', id: t.id } },
     })),
   }
 }
 
-// where a question was asked, in the category column
-const FROM_TAG: Record<HomeCardGroup['from'], string> = { answer: 'main', thread: 'thread', report: 'report', other: '' }
+/** What a group of cards holds, in words: the question it answered, the report or the thread it stands in. */
+function groupName(g: HomeCardGroup): string {
+  const head = g.head.replace(/\s+/g, ' ').trim()
+  if (g.from === 'answer') return `answer to "${head}"`
+  if (g.from === 'report') return `in the report "${head}"`
+  if (g.from === 'thread') return `in the thread ${head.startsWith('"') ? head : `"${head}"`}`
+  return head
+}
 
-function cardsSection(groups: readonly HomeCardGroup[]): HomeSection {
+function cardsSection(groups: readonly HomeCardGroup[], ui: HomeUi): HomeSection {
   const n = groups.reduce((k, g) => k + g.cards.length, 0)
   const by = (from: HomeCardGroup['from']) => groups.filter(g => g.from === from).reduce((k, g) => k + g.cards.length, 0)
   return {
     id: 'cards',
     name: 'Cards',
     count: n,
-    summary: joined([by('answer') ? `${num(by('answer'))} in main` : '', by('thread') ? `${num(by('thread'))} in side threads` : '', by('report') ? `${num(by('report'))} in reports` : '']),
-    brief: joined([groups.length ? `from ${plural(groups.filter(g => g.from !== 'other').length, 'question')}` : '']),
+    summary: joined([by('answer') ? `${num(by('answer'))} in answers` : '', by('thread') ? `${num(by('thread'))} in side threads` : '', by('report') ? `${num(by('report'))} in reports` : '']),
     rows: groups.map((g, i) => {
-      // a card's kind as a word in the category column: card kinds have no glyphs
-      const kids: HomeRow[] = g.cards.map(c => ({
-        key: `card:${c.id}`,
-        glyph: null,
-        title: c.question,
-        cat: c.kind,
-        act: { op: 'open', open: { kind: 'card', id: c.id } },
-      }))
-      const first = g.cards[0]
+      const fold = `cards:${g.from}:${g.head}`
+      const open = isOpen(ui, fold, i === 0)
       return {
-        key: `cards:${i}`,
-        glyph: null,
-        cat: FROM_TAG[g.from],
-        title: g.head,
-        right: plural(g.cards.length, 'card'),
-        short: plural(g.cards.length, 'card'),
-        kids,
-        act: g.cards.length === 1 && first ? { op: 'open', open: { kind: 'card', id: first.id } } : { op: 'pick', sec: 'cards' },
+        key: `group:${fold}`,
+        glyph: { mark: open ? '▾' : '▸' },
+        title: groupName(g),
+        right: [dim(plural(g.cards.length, 'card'))],
+        fold,
+        open,
+        kids: g.cards.map(c => ({ key: `card:${c.id}`, glyph: null, title: c.question, right: [dim(c.kind)], act: { op: 'open', open: { kind: 'card', id: c.id } } })),
+        act: { op: 'fold', key: fold, open },
       }
     }),
   }
 }
 
-const BAR_W = 12
+const BAR_W = 20
 
 /** A label's counts as a bar of BAR_W cells, each value in its colour as the label panel draws it (draw.ts valueColour). */
 function countBar(values: readonly string[], counts: Record<string, number>): { n: number; fg: string }[] {
@@ -270,11 +276,11 @@ function labelsSection(ls: readonly HomeLabel[]): HomeSection {
     id: 'labels',
     name: 'Labels',
     count: ls.length,
-    summary: joined(countBy(ls.map(l => (l.running ? 'running' : l.trial ? 'trial' : 'on every record')), ['on every record', 'trial', 'running'])),
+    summary: joined(countBy(ls.map(l => (l.running ? 'running' : l.trial ? 'on a sample' : 'on every record')), ['on every record', 'on a sample', 'running'])),
     pane: { kind: 'pane', view: 'labels', title: 'Labels' },
     rows: ls.map(l => {
       const labeled = l.values.reduce((k, v) => k + (l.counts[v] ?? 0), 0)
-      // a legend: each value's ● in its hue, its word dim as the rest of the secondary row, its count dim
+      // a legend: each value's ● in its hue, its word and count dim as the rest of the secondary row
       const legend: Seg[] = []
       l.values.forEach((v, i) => {
         if (i) legend.push(dim('  '))
@@ -285,289 +291,201 @@ function labelsSection(ls: readonly HomeLabel[]): HomeSection {
         glyph: l.running ? WORKING : DONE,
         title: l.name,
         bar: countBar(l.values, l.counts),
-        right: num(labeled),
-        short: `${l.trial ? 'trial · ' : ''}${num(labeled)}`,
-        meta: [...joined([l.kind, l.trial ? 'trial' : '', l.paths.join(', ')]), dim('  '), ...legend],
+        right: [{ s: num(labeled) }],
+        meta: [...joined([l.kind, l.trial ? `a sample of ${num(labeled)}` : 'every record', l.paths.join(', ')]), dim('  '), ...legend],
         act: { op: 'open', open: { kind: 'label', name: l.name } },
       }
     }),
   }
 }
 
-function filesSection(fs: readonly HomeFile[], coverage: string): HomeSection {
-  const order = { untouched: 0, scanned: 1, read: 2 } as const
-  const sorted = [...fs].sort((a, b) => order[a.state] - order[b.state] || b.size - a.size)
+/** A share of records read as the coverage panel words it. */
+function share(seen: number, total: number): string {
+  if (!total || !seen) return ''
+  const p = (100 * seen) / total
+  return p < 0.1 ? '<0.1%' : p < 10 ? `${p.toFixed(1)}%` : `${Math.round(p)}%`
+}
+
+/** The files at most an open folder lists before `… N more`. */
+const FOLDER_FILES = 20
+
+function filesSection(fs: readonly HomeFile[], root: string, ui: HomeUi): HomeSection {
+  const by = new Map<string, HomeFile[]>()
+  for (const f of fs) {
+    const cut = f.file.lastIndexOf('/')
+    const folder = `${root}/${cut < 0 ? '' : `${f.file.slice(0, cut)}/`}`
+    by.set(folder, [...(by.get(folder) ?? []), f])
+  }
+  const folders = [...by.entries()]
+  const recs = (xs: readonly HomeFile[]) => xs.reduce((k, f) => k + (f.records ?? 0), 0)
+  const seen = (xs: readonly HomeFile[]) => xs.reduce((k, f) => k + Math.min(f.seen, f.records ?? 0), 0)
+  const cols = (records: string, read: string): Seg[] => [{ s: records }, { s: '  ' }, dim(read)]
   return {
     id: 'files',
     name: 'Files',
     count: fs.length,
-    unit: 'records',
-    summary: joined([coverage || 'nothing read yet']),
-    brief: joined([fs.length ? `${num(fs.filter(f => f.state === 'read').length)} of ${num(fs.length)} read` : '']),
+    heads: [dim('records'), { s: '  ' }, dim('read')],
+    summary: joined([fs.length ? `${num(fs.filter(f => f.state === 'read').length)} of ${num(fs.length)} read` : '']),
     pane: { kind: 'pane', view: 'coverage', title: 'Coverage' },
-    rows: sorted.map(f => {
-      const total = f.records ?? 0
-      const share = f.state === 'read' && total ? f.seen / total : 0
-      const pct = share >= 0.1 ? `${Math.round(share * 100)}%` : share > 0 ? (share >= 0.001 ? `${(share * 100).toFixed(1)}%` : '<0.1%') : ''
-      // a file never opened is a state (○), not a warning
-      const what: Seg = f.state === 'untouched' ? dim('never opened') : f.state === 'scanned' ? dim('counted by code, no record read') : dim(`${num(f.seen)} read${pct ? ` (${pct})` : ''}${f.ranges.length ? ` · lines ${rangeText(f.ranges)}` : ''}`)
+    rows: folders.map(([folder, files], i) => {
+      const fold = `files:${folder}`
+      const open = isOpen(ui, fold, i === 0)
+      const sorted = [...files].sort((a, b) => a.file.localeCompare(b.file, undefined, { numeric: true }))
       return {
-        key: `file:${f.file}`,
-        glyph: f.state === 'read' ? DONE : NOT_STARTED,
-        title: f.file,
-        right: f.records !== null ? num(f.records) : `${num(f.size)} B`,
-        short: f.state === 'untouched' ? 'never opened' : f.state === 'scanned' ? 'counted' : pct || 'read',
-        meta: [what],
-        act: { op: 'open', open: { kind: 'file', path: f.file } },
+        key: `folder:${folder}`,
+        glyph: { mark: open ? '▾' : '▸' },
+        title: folder,
+        right: [dim(plural(files.length, 'file')), { s: '  ' }, ...cols(num(recs(files)), share(seen(files), recs(files)) || '0%')],
+        fold,
+        open,
+        more: Math.max(0, sorted.length - FOLDER_FILES),
+        kids: sorted.slice(0, sorted.length > FOLDER_FILES + 1 ? FOLDER_FILES : sorted.length).map(f => ({
+          key: `file:${f.file}`,
+          glyph: f.state === 'read' ? DONE : NOT_STARTED,
+          title: f.file.split('/').at(-1) ?? f.file,
+          right: cols(f.records !== null ? num(f.records) : `${num(f.size)} B`, f.state === 'read' ? share(f.seen, f.records ?? 0) || '0%' : f.state === 'scanned' ? 'counted' : ''),
+          act: { op: 'open', open: { kind: 'file', path: f.file } } as HomeAct,
+        })),
+        act: { op: 'fold', key: fold, open },
       }
     }),
   }
 }
 
-function rangeText(ranges: readonly number[][], n = 3): string {
-  const shown = ranges.slice(0, n).map(([a, b]) => (a === b ? `${a}` : `${a}-${b}`))
-  return `${shown.join(', ')}${ranges.length > n ? ` and ${ranges.length - n} more` : ''}`
+/** Whether a group or folder shows open: its default unless the analyst folded or unfolded it. */
+function isOpen(ui: HomeUi, key: string, byDefault: boolean): boolean {
+  return byDefault ? !ui.folded.includes(key) : ui.unfolded.includes(key)
 }
 
 /** Every section, in the order of thimble's workbench: what it built, what it wrote, what it asked, then its parts. */
-export function homeSections(d: HomeData): HomeSection[] {
-  return [viewsSection(d.views), reportsSection(d.reports), threadsSection(d.threads), cardsSection(d.cardGroups), labelsSection(d.labels), filesSection(d.files, d.coverage)]
+export function homeSections(d: HomeData, ui: HomeUi = HOME_UI_EMPTY): HomeSection[] {
+  return [viewsSection(d.views), reportsSection(d.reports), threadsSection(d.threads), cardsSection(d.cardGroups, ui), labelsSection(d.labels), filesSection(d.files, d.root || 'folder', ui)]
 }
 
 // ------------------------------------------------------------------------------------------------ the layout
 
-/** A region a click acts on: its line, its cells, and whether the pointer lights its row (else it is underlined). */
-export type HomeHit = { y: number; x0: number; x1: number; row: boolean; act: HomeAct }
-export type HomeLayout = { lines: Line[]; hits: HomeHit[] }
+/** A region a click acts on: its line, its cells, and whether the pointer lights its row (else it is a control, which
+ *  the pointer inverts). `pick`: the key of the row it stands for, which the keys step through. */
+export type HomeHit = { y: number; x0: number; x1: number; row: boolean; act: HomeAct; pick?: string }
+export type HomeLayout = { lines: Line[]; hits: HomeHit[]; picks: { key: string; act: HomeAct }[] }
 
-/** The first items a stacked section shows before "… N more" (the cards: questions). */
-const STACK_FIRST: Record<SectionId, number> = { views: 3, reports: 3, threads: 3, cards: 3, labels: 3, files: 4 }
-/** The items a section shows in the index. */
-const INDEX_FIRST = 4
-const GAP = 2
+/** The items a section shows before `… N more` (card groups and folders count as items). */
+const FIRST = 5
+
+export const HOME_HINTS = ['↑↓ to choose', 'Enter to open', 'Space to fold', 'x to close']
 
 class Lines {
   lines: Line[] = []
   hits: HomeHit[] = []
+  picks: HomeLayout['picks'] = []
+  constructor(readonly pick: string) {}
+  /** A line of the type area, its margin before it: `❯` when it is the row the keys chose. */
   push(l: Line, hit?: Omit<HomeHit, 'y'>): void {
-    if (hit) this.hits.push({ ...hit, y: this.lines.length })
-    this.lines.push(l)
+    const on = Boolean(hit?.pick) && hit!.pick === this.pick
+    if (hit) this.hits.push({ ...hit, x0: hit.x0 + MARGIN_W, x1: hit.x1 + MARGIN_W, y: this.lines.length })
+    if (hit?.pick) this.picks.push({ key: hit.pick, act: hit.act })
+    this.lines.push(pointed(l, on))
   }
   blank(): void {
-    if (this.lines.length && this.lines.at(-1)!.length) this.lines.push([])
+    if (this.lines.length && lineWidth(this.lines.at(-1)!) > MARGIN_W) this.lines.push([])
   }
 }
 
-/** `l` cut to `w` cells, its last segment ending in "…" when cut. */
-function fit(l: Line, w: number): Line {
-  if (lineWidth(l) <= w) return l
-  const out: Line = []
-  let left = w
-  for (const s of l) {
-    if (left <= 0) break
-    const sw = width(s.s)
-    if (sw <= left) {
-      out.push(s)
-      left -= sw
-    } else {
-      out.push({ ...s, s: cut(s.s, left) })
-      left = 0
-    }
-  }
-  return out
-}
-
-/** `left` with `right` set against the right edge at `w`. The left part is cut first, so the right stays whole (an
- *  item's figure); with `keepLeft` the right part is (a heading's summary). */
-function spread(left: Line, right: Line, w: number, keepLeft = false): Line {
-  if (!lineWidth(right)) return fit(left, w)
-  const r = keepLeft ? fit(right, Math.max(0, w - lineWidth(left) - 2)) : right
-  const rw = lineWidth(r)
-  const l = fit(left, Math.max(0, w - rw - 2))
-  return [...l, { s: ' '.repeat(Math.max(rw ? 2 : 0, w - lineWidth(l) - rw)) }, ...r]
-}
-
-/** The two cells a state glyph hangs in: the glyph and a space, or two spaces for an item with no state. */
+/** The two cells a glyph or fold marker hangs in, or two spaces. */
 function glyphSeg(g: Glyph | null): Seg[] {
   if (!g) return [{ s: '  ' }]
-  return [{ s: g.mark, ...(g.fg ? { fg: g.fg } : {}), ...(g.d ? { fg: COLORS.dim } : {}) }, { s: ' ' }]
+  return [{ s: g.mark, ...(g.fg ? { fg: g.fg } : {}) }, { s: ' ' }]
 }
 
-/** A section's heading at A0: its name regular, its count dim after a gutter, what is new in bold after another; at the
- *  right the name of its number column, dim. No marker. */
-function headingLine(sec: HomeSection, w: number): Line {
-  const head: Line = [{ s: sec.name }, dim(`  ${num(sec.count)}`), ...(sec.news ? [{ s: '  ' }, { s: sec.news, b: true }] : [])]
-  return spread(head, sec.unit ? [dim(sec.unit)] : [], w, true)
-}
-
-/** The panel's shared columns: where the category column starts and how wide the figures at the right are. */
-type Cols = { cat: number; catW: number }
-
-function sharedCols(sections: readonly HomeSection[], w: number): Cols {
-  const rows = sections.flatMap(s => s.rows.flatMap(r => [r, ...(r.kids ?? [])]))
-  const catW = Math.min(10, Math.max(0, ...rows.map(r => width(r.cat ?? ''))))
-  const rightW = Math.min(Math.floor(w / 3), Math.max(0, ...rows.map(r => (r.dimRight ? 0 : width(r.right ?? '')))))
-  return { cat: Math.max(20, w - rightW - 2 - catW - (catW ? 2 : 0)), catW }
-}
-
-/** An item's line at `x`: its glyph hanging, its title (bold while new), its category at the shared column, its figure
- *  and bar against the right edge. */
-function itemLine(row: HomeRow, x: number, w: number, cols: Cols, short = false): Line {
-  const fig = short ? row.short : row.right
-  const right: Line = [
-    ...(!short && row.bar?.length ? [...row.bar.map(b => ({ s: '█'.repeat(b.n), fg: b.fg })), ...(fig ? [{ s: '  ' }] : [])] : []),
-    ...(fig ? [row.dimRight || short ? dim(fig) : { s: fig }] : []),
-  ]
+/** An item's line at `x`: its glyph hanging, its name, its bar and figure against the right edge. */
+function itemLine(row: HomeRow, x: number, w: number): Line {
+  const right: Line = [...(row.bar?.length ? [...row.bar.map(b => ({ s: '█'.repeat(b.n), fg: b.fg })), { s: '  ' }] : []), ...(row.right ?? [])]
   const lead: Line = [...(x ? [{ s: ' '.repeat(x) }] : []), ...glyphSeg(row.glyph)]
-  const title: Seg = { s: row.title, ...(row.fresh ? { b: true } : {}) }
-  if (short || !row.cat || !cols.catW) return spread([...lead, title], right, w)
-  // the title cut before the category column, the category at it, the figure against the right edge
-  const titleW = Math.max(8, cols.cat - lineWidth(lead) - 2)
-  const left: Line = [...lead, { ...title, s: cut(row.title, titleW) }]
-  const pad = Math.max(2, cols.cat - lineWidth(left))
-  return spread([...left, { s: ' '.repeat(pad) }, { s: row.cat }], right, w)
+  return spread([...lead, { s: row.title }], right, w)
 }
 
-/** An item as the stacked layout draws it: its line, its secondary line at A2, its cards at A4. */
-function itemLines(out: Lines, row: HomeRow, w: number, cols: Cols): void {
-  out.push(itemLine(row, 0, w, cols), { x0: 0, x1: w, row: true, act: row.act })
-  if (row.meta?.length) out.push([{ s: '  ' }, ...fit(row.meta, w - 2)], { x0: 0, x1: w, row: true, act: row.act })
-  for (const k of row.kids ?? []) out.push(itemLine(k, 2, w, cols), { x0: 2, x1: w, row: true, act: k.act })
+/** The figures of a section's rows set in shared columns: each row's right part padded so its last column ends on R
+ *  and the columns before it line up (the files' records and share). */
+function alignRight(sec: HomeSection): void {
+  if (sec.id !== 'files') return
+  const rows = sec.rows.flatMap(r => [r, ...(r.kids ?? [])])
+  // the files' right parts are [count?, gap, records, gap, read]: pad records and read to their columns
+  const parts = rows.map(r => r.right ?? [])
+  const recW = Math.max(width('records'), ...parts.map(p => width(p.at(-3)?.s ?? '')))
+  const readW = Math.max(width('read'), ...parts.map(p => width(p.at(-1)?.s ?? '')))
+  for (const r of rows) {
+    const p = r.right ?? []
+    if (p.length < 3) continue
+    const rec = p.at(-3)!
+    const read = p.at(-1)!
+    r.right = [...p.slice(0, -3), { ...rec, s: rec.s.padStart(recW) }, { s: '  ' }, { ...read, s: read.s.padStart(readW) }]
+  }
+  sec.heads = [dim('records'.padStart(recW)), { s: '  ' }, dim('read'.padStart(readW))]
 }
 
-function moreLine(out: Lines, sec: HomeSection, shown: number, whole: boolean, w: number): void {
-  const left = sec.rows.length - shown
-  if (left > 0) out.push([{ s: '  ' }, dim(`… ${num(left)} more`)], { x0: 2, x1: 2 + width(`… ${num(left)} more`), row: false, act: { op: 'more', sec: sec.id } })
-  else if (whole && sec.rows.length > (sec.first ?? STACK_FIRST[sec.id])) out.push([{ s: '  ' }, { s: 'fewer' }], { x0: 2, x1: 7, row: false, act: { op: 'more', sec: sec.id } })
-  void w
-}
-
-/** A section drawn whole or folded (its heading alone), as the stacked layout and the index's open section draw it. */
-function stackedSection(out: Lines, sec: HomeSection, ui: HomeUi, w: number, cols: Cols, headAct: HomeAct, open: boolean, all = false): void {
-  out.push(headingLine(sec, w), { x0: 0, x1: w, row: true, act: headAct })
-  if (!open) return
+function sectionLines(out: Lines, sec: HomeSection, ui: HomeUi, w: number): void {
+  alignRight(sec)
+  const head = headingLine(sec.name, sec.count, sec.news ?? 0)
+  out.push(spread(head, sec.heads ?? [], w), sec.pane ? { x0: 0, x1: lineWidth(head), row: false, act: { op: 'open', open: sec.pane } } : undefined)
   if (!sec.rows.length) {
     out.push([{ s: '  ' }, dim('none')])
     return
   }
-  const whole = all || ui.more.includes(sec.id)
-  const rows = whole ? sec.rows : sec.rows.slice(0, sec.first ?? STACK_FIRST[sec.id])
-  for (const r of rows) itemLines(out, r, w, cols)
-  if (!all) moreLine(out, sec, rows.length, whole, w)
-}
-
-/** The title row: `Home` and what the panel holds, dim; the two layouts against the right edge, 2 cells apart, the one
- *  shown on the selection background; then the rule. The path row above it names the panel ("home"). */
-function headerLine(out: Lines, sections: readonly HomeSection[], ui: HomeUi, w: number): void {
-  const counts = sections.map(s => plural(s.count, s.id === 'threads' ? 'thread' : s.name.toLowerCase().replace(/s$/, ''))).join(' · ')
-  const tabs: Line = []
-  const spans: { x0: number; x1: number; layout: HomeLayoutName }[] = []
-  let tw = 0
-  for (const name of HOME_LAYOUTS) {
-    if (tabs.length) {
-      tabs.push({ s: '  ' })
-      tw += 2
+  const whole = ui.more.includes(sec.id) || sec.rows.length <= FIRST + 1
+  const shown = whole ? sec.rows : sec.rows.slice(0, FIRST)
+  for (const r of shown) {
+    out.push(itemLine(r, 0, w), { x0: 0, x1: w, row: true, act: r.act, pick: r.key })
+    if (r.meta?.length) out.push([{ s: '  ' }, ...fitTo(r.meta, w - 2)], { x0: 0, x1: w, row: true, act: r.act })
+    if (r.kids && r.open) {
+      // a group's cards at A2 under its name; a folder's files with their glyphs at A2 and their names at A4
+      for (const k of r.kids) out.push(itemLine(k, k.glyph ? 2 : 0, w), { x0: 2, x1: w, row: true, act: k.act, pick: k.key })
+      if (r.more) out.push([{ s: '    ' }, dim(`… ${num(r.more)} more`)], { x0: 4, x1: 4 + width(`… ${num(r.more)} more`), row: false, act: { op: 'open', open: { kind: 'pane', view: 'coverage', title: 'Coverage' } } })
     }
-    tabs.push({ s: name, ...(ui.layout === name ? { bg: COLORS.selected } : {}) })
-    spans.push({ x0: tw, x1: tw + name.length, layout: name })
-    tw += name.length
   }
-  const line = spread([{ s: 'Home' }, dim(`  ${counts}`)], tabs, w)
-  const at = lineWidth(line) - tw
-  const y = out.lines.length
-  out.push(line)
-  for (const s of spans) out.hits.push({ y, x0: at + s.x0, x1: at + s.x1, row: false, act: { op: 'layout', layout: s.layout } })
-  out.push([{ s: '─'.repeat(w), fg: COLORS.rule }])
+  const left = sec.rows.length - shown.length
+  if (left > 0) out.push([{ s: '  ' }, dim(`… ${num(left)} more`)], { x0: 2, x1: 2 + width(`… ${num(left)} more`), row: false, act: { op: 'more', sec: sec.id } })
 }
 
-/** The stacked layout: every section under its heading, its first items with their secondary lines, and "… N more". */
-function stacked(sections: readonly HomeSection[], ui: HomeUi, w: number): HomeLayout {
-  const out = new Lines()
-  headerLine(out, sections, ui, w)
-  const cols = sharedCols(sections, w)
+/** The whole panel below its path row: the title `Home`, the rule, every section, the key hints. */
+export function homeLayout(d: HomeData, ui: HomeUi, w: number): HomeLayout {
+  const sections = homeSections(d, ui)
+  // the row the keys chose: the one named, else the first
+  const first = sections.flatMap(s => s.rows.slice(0, 1).map(r => r.key))[0] ?? ''
+  const out = new Lines(ui.pick || first)
+  out.push([{ s: 'Home', fg: ACCENT, b: true }])
+  out.push(ruleLine(w))
   sections.forEach((sec, i) => {
     if (i) out.blank()
-    stackedSection(out, sec, ui, w, cols, { op: 'fold', sec: sec.id }, !ui.folded.includes(sec.id))
+    sectionLines(out, sec, ui, w)
   })
-  return { lines: out.lines, hits: out.hits }
-}
-
-/** One section of the index at `w` cells: its heading and its first items on a line each, the one picked on the
- *  selection background. */
-function indexBlock(sec: HomeSection, picked: boolean, w: number): HomeLayout {
-  const out = new Lines()
-  const head = headingLine({ ...sec, unit: undefined }, w)
-  out.push(picked ? head.map(x => ({ ...x, bg: COLORS.selected })) : head, { x0: 0, x1: w, row: true, act: { op: 'pick', sec: picked ? '' : sec.id } })
-  if (!sec.rows.length) out.push([{ s: '  ' }, dim('none')])
-  for (const r of sec.rows.slice(0, INDEX_FIRST)) out.push(itemLine(r, 0, w, { cat: 0, catW: 0 }, true), { x0: 0, x1: w, row: true, act: r.act })
-  const left = sec.rows.length - INDEX_FIRST
-  if (left > 0) out.push([{ s: '  ' }, dim(`… ${num(left)} more`)], { x0: 2, x1: 2 + width(`… ${num(left)} more`), row: false, act: { op: 'pick', sec: sec.id } })
-  return { lines: out.lines, hits: out.hits }
-}
-
-/** Blocks one under another, a blank line between them. */
-function column(blocks: readonly HomeLayout[]): HomeLayout {
-  const out = new Lines()
-  blocks.forEach((b, i) => {
-    if (i) out.push([])
-    const y0 = out.lines.length
-    out.lines.push(...b.lines)
-    out.hits.push(...b.hits.map(h => ({ ...h, y: h.y + y0 })))
-  })
-  return { lines: out.lines, hits: out.hits }
-}
-
-/** The index: every section in two columns, the second at A0 + ⌈T/2⌉, an item a line; the section picked is drawn
- *  whole under them, after a blank row. */
-function index(sections: readonly HomeSection[], ui: HomeUi, w: number): HomeLayout {
-  const out = new Lines()
-  headerLine(out, sections, ui, w)
-  const colW = Math.ceil(w / 2) - GAP
-  const blocks = sections.map(s => indexBlock(s, ui.pick === s.id, colW))
-  // the sections in their order, the left column taking them until it holds about half the lines
-  const total = blocks.reduce((k, b) => k + b.lines.length + 1, 0)
-  let split = 0
-  for (let h = 0; split < blocks.length - 1 && h + blocks[split]!.lines.length + 1 <= total / 2 + 1; split++) h += blocks[split]!.lines.length + 1
-  split = Math.max(1, split)
-  const left = column(blocks.slice(0, split))
-  const right = column(blocks.slice(split))
-  const y0 = out.lines.length
-  for (let y = 0; y < Math.max(left.lines.length, right.lines.length); y++) {
-    const l = left.lines[y] ?? []
-    out.lines.push([...l, { s: ' '.repeat(Math.max(0, colW - lineWidth(l)) + GAP) }, ...(right.lines[y] ?? [])])
-  }
-  out.hits.push(...left.hits.map(h => ({ ...h, y: h.y + y0 })), ...right.hits.map(h => ({ ...h, y: h.y + y0, x0: h.x0 + colW + GAP, x1: h.x1 + colW + GAP })))
-  const sec = sections.find(s => s.id === ui.pick)
-  if (sec) {
-    out.push([])
-    stackedSection(out, sec, ui, w, sharedCols([sec], w), { op: 'pick', sec: '' }, true, true)
-  }
-  return { lines: out.lines, hits: out.hits }
-}
-
-export function homeLayout(d: HomeData, ui: HomeUi, w: number): HomeLayout {
-  const sections = homeSections(d)
-  return ui.layout === 'index' ? index(sections, ui, w) : stacked(sections, ui, w)
+  out.push(hintLine(HOME_HINTS, w))
+  return { lines: out.lines, hits: out.hits, picks: out.picks }
 }
 
 /** The UI state after an act that changes it (an act that opens something leaves it as it is). */
 export function homeReduce(ui: HomeUi, act: HomeAct): HomeUi {
-  const flip = (xs: string[], x: string) => (xs.includes(x) ? xs.filter(y => y !== x) : [...xs, x])
+  const without = (xs: string[], x: string) => xs.filter(y => y !== x)
   switch (act.op) {
-    case 'layout':
-      return { ...ui, layout: act.layout }
     case 'fold':
-      return { ...ui, folded: flip(ui.folded, act.sec) }
+      return act.open ? { ...ui, folded: [...without(ui.folded, act.key), act.key], unfolded: without(ui.unfolded, act.key) } : { ...ui, folded: without(ui.folded, act.key), unfolded: [...without(ui.unfolded, act.key), act.key] }
     case 'more':
-      return { ...ui, more: flip(ui.more, act.sec) }
-    case 'pick':
-      return { ...ui, pick: act.sec }
+      return { ...ui, more: ui.more.includes(act.sec) ? without(ui.more, act.sec) : [...ui.more, act.sec] }
     default:
       return ui
   }
 }
 
-/** The lines as plain text, for the tests. */
-export function plainLines(lines: readonly Line[]): string[] {
-  return lines.map(l => l.map(s => s.s).join('').replace(/\s+$/, ''))
+/** The row the keys choose after `key` (up or down, home or end), from the layout's rows in order. */
+export function homePick(lay: HomeLayout, ui: HomeUi, key: string): string {
+  const keys = lay.picks.map(p => p.key)
+  if (!keys.length) return ui.pick
+  const at = Math.max(0, keys.indexOf(ui.pick || keys[0]!))
+  const to = key === 'up' || key === 'k' ? at - 1 : key === 'down' || key === 'j' ? at + 1 : key === 'home' ? 0 : key === 'end' ? keys.length - 1 : at
+  return keys[Math.max(0, Math.min(keys.length - 1, to))]!
 }
+
+/** The lines as plain text, for the tests: without the margin's two cells. */
+export function plainLines(lines: readonly Line[]): string[] {
+  return lines.map(l => l.map(s => s.s).join('').slice(MARGIN_W).replace(/\s+$/, ''))
+}
+

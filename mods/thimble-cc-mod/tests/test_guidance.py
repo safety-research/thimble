@@ -46,8 +46,8 @@ def test_view_size_guidance_matches_the_checks_and_the_drawing() -> None:
     import viewpipe
     mb = f"{viewpipe.ROWS_MAX / 1e6:g} MB"
     parts = f"{viewpipe.PART_BYTES / 1e6:g} MB"
-    # the detail's text wraps at the measure (72 cells, or the panel's width when narrower), to its lines at most
-    lines = int(re.search(r"wrap\(t, Math\.min\(72, cols - 2\), (\d+)\)", read("hooks/viewdraw.ts")).group(1))
+    # the detail's text wraps at the type area's width, to its lines at most
+    lines = int(re.search(r"wrap\(t, cols - 2, (\d+)\)", read("hooks/viewdraw.ts")).group(1))
     for path in ("prompt/view-build.md", "prompt/view-review.md", "prompt/view-revise.md", "views/SPEC.md"):
         text = " ".join(read(path).split())
         assert mb in text, f"{path} does not give the rows' limit, {mb}"

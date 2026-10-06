@@ -92,12 +92,25 @@ test('every view fits the panel: no line wider than it, no more lines than its r
   }
 })
 
-test('the header is one line; one filter row whose field opens its values; no hex id anywhere', () => {
+test('the header: the title with `N files ›`, the dim subtitle, the tabs, the search box; one filter row whose field opens its values; no hex id anywhere', () => {
   const lay = viewLayout(SESSIONS.spec, SESSIONS.data, initialState(), 94, 46)
   const t = text(lay.lines)
-  expect(t.split('\n')[0]).toMatch(/^Linked sessions {2}3 runs · 17 sessions · 90 calls +1 unreadable line {2}20 files ›$/)
-  expect(t).toMatch(/^Sessions {2}Calls {2}Team/m)
-  expect(t.split('\n')[2]).toMatch(/^search {2}filter {2}run · tool · .*labels +\d+ calls$/)
+  const head = t.split('\n')
+  // the title in the accent and bold, its navigation against R; its facts dim under it, a problem in red
+  expect(head[0]).toMatch(/^Linked sessions +20 files ›$/)
+  expect(lay.lines[0]!.find(x => x.s === 'Linked sessions')).toMatchObject({ fg: 'suggestion', b: true })
+  expect(head[1]).toMatch(/^3 runs · 17 sessions · 90 calls · 1 unreadable line$/)
+  expect(lay.lines[1]!.find(x => x.s.includes('unreadable'))!.fg).toBe('error')
+  // the tabs, the selected one inverse
+  expect(head[2]).toMatch(/^ Sessions {3}Calls {3}Team/)
+  expect(lay.lines[2]!.find(x => x.s === ' Sessions ')!.inv).toBe(true)
+  // the bordered search box
+  expect(head[3]).toMatch(/^╭─+╮$/)
+  expect(head[4]).toMatch(/^│ ⌕ Search calls… +│$/)
+  expect(head[5]).toMatch(/^╰─+╯$/)
+  expect(head[6]).toMatch(/^filter {2}run · tool · .*labels +\d+ calls$/)
+  // the key hints end it
+  expect(head.at(-1)).toMatch(/to choose · \/ to search .* x to close$/)
   expect(t).not.toMatch(/^tool +\w+ \d+ +\w+ \d+/m)
   const open = reduce(SESSIONS.spec, SESSIONS.data, initialState(), lay.hits.find(h => h.act.op === 'field' && h.act.field === 'tool')!.act).state
   expect(text(viewLayout(SESSIONS.spec, SESSIONS.data, open, 94, 46).lines)).toMatch(/^tool +(● )?\w+ \d+ +(● )?\w+ \d+/m)
@@ -134,13 +147,16 @@ test('a table sorts by a column, groups fold, and a bar column draws bars', () =
   const sorted = reduce(REPOSITORY.spec, REPOSITORY.data, st, sortHit.act).state
   lay = viewLayout(REPOSITORY.spec, REPOSITORY.data, sorted, 94, 46)
   expect(text(lay.lines)).toMatch(/title ▲/)
-  // a group's heading: its name and its count, its ● in the group's hue (the tab's colour field), no marker
-  expect(text(lay.lines)).toMatch(/^● fixed {2}28$/m)
-  const folded = reduce(REPOSITORY.spec, REPOSITORY.data, sorted, { op: 'group', g: 'fixed' }).state
+  // a group's heading: ▾ open, its ● in the group's hue (the tab's colour field), its name and count dim
+  expect(text(lay.lines)).toMatch(/^▾ ● fixed {2}28$/m)
+  const fold = lay.hits.find(h => h.act.op === 'group' && h.act.g === 'fixed')!
+  expect(fold.act).toEqual({ op: 'group', g: 'fixed', open: true })
+  const folded = reduce(REPOSITORY.spec, REPOSITORY.data, sorted, fold.act).state
   const f = text(viewLayout(REPOSITORY.spec, REPOSITORY.data, folded, 94, 46).lines)
-  expect(f).toMatch(/^● open {2}8$/m)
-  // folded: its heading, then "… N more"
-  expect(f).toMatch(/^● fixed {2}28\n {2}… 28 more$/m)
+  expect(f).toMatch(/^▾ ● open {2}8$/m)
+  // folded: its heading alone, ▸
+  expect(f).toMatch(/^▸ ● fixed {2}28$/m)
+  expect(f).not.toMatch(/… 28 more/)
   expect(text(viewLayout(REPOSITORY.spec, REPOSITORY.data, initialState(), 94, 46).lines)).toMatch(/\d m \d\d s █/)
 })
 
@@ -333,8 +349,9 @@ test('the rule above a bars or strip overview names what it counts, in the words
   const { spec, data } = wikiView()
   // under the rule, a dim title row names the overview
   const top = text(viewLayout(spec, data, initialState(), 94, 48).lines).split('\n')
-  expect(top[2]).toMatch(/^─+$/)
-  expect(top[3]).toBe('pages by week first stored')
+  const rule = top.findIndex(l => /^─+$/.test(l))
+  expect(rule).toBeGreaterThan(0)
+  expect(top[rule + 1]).toBe('pages by week first stored')
   const pages = spec.collections[0]!
   expect(overviewCaption(spec, pages, { kind: 'bars', field: 'wiki', value: 'revs' })).toBe('revs by wiki')
   expect(overviewCaption(spec, pages, { kind: 'bars', field: 'wiki', value: 'revs', agg: 'mean' })).toBe('mean revs by wiki')
@@ -377,9 +394,9 @@ test('a strip\'s scale is as wide as its largest bin at the width the scale leav
   } as unknown as ViewSpec
   const lines = text(viewLayout(spec, { collections: { events: rows } }, initialState(), 94, 40).lines).split('\n')
   // the strip's top line, under the rule and the title row that names it
-  expect(lines[2]).toMatch(/^─+$/)
-  expect(lines[3]).toBe('events by time')
-  expect(lines[4]).toMatch(/^ *(601|1,200) ┤/)
+  const rule = lines.findIndex(l => /^─+$/.test(l))
+  expect(lines[rule + 1]).toBe('events by time')
+  expect(lines[rule + 2]).toMatch(/^ *(601|1,200) ┤/)
 })
 
 test('the row\'s name takes its room first: nine in ten names whole before another column widens', () => {
@@ -403,19 +420,19 @@ test('the filter row counts what the header counts, in its words; numbers of a t
   const n = (x: number) => x.toLocaleString('en-US')
   for (const tab of [0, 1]) {
     const lines = text(viewLayout(spec, data, { ...initialState(), tab }, 96, 46).lines).split('\n')
-    expect(lines[0]).toContain(`300 lanes · ${n(revs)} revisions · ${n(dels)} deletions`)
+    expect(lines[1]).toContain(`300 lanes · ${n(revs)} revisions · ${n(dels)} deletions`)
     // the bundles a lane draws are not rows the header counts
-    expect(lineOf(lines, /^search /)).toMatch(new RegExp(`${n(revs)} revisions · ${n(dels)} deletions$`))
+    expect(lineOf(lines, /^filter /)).toMatch(new RegExp(`${n(revs)} revisions · ${n(dels)} deletions$`))
   }
   const st = reduce(spec, data, { ...initialState(), tab: 1 }, { op: 'facet', field: 'kind', value: 'deletion' }).state
-  expect(lineOf(text(viewLayout(spec, data, st, 96, 46).lines).split('\n'), /^search /)).toMatch(new RegExp(`0 of ${n(revs)} revisions · ${n(dels)} deletions$`))
+  expect(lineOf(text(viewLayout(spec, data, st, 96, 46).lines).split('\n'), /^filter /)).toMatch(new RegExp(`0 of ${n(revs)} revisions · ${n(dels)} deletions$`))
   // a tab whose own where leaves out some of what the header counts says so
   const narrower = { ...spec, tabs: [{ ...spec.tabs[1]!, where: { field: 'summary', not: '*' } }] }
   const shown = data.collections.changes!.filter(r => r.kind === 'revision' && r.summary !== '*').length
-  expect(lineOf(text(viewLayout(narrower, data, initialState(), 96, 46).lines).split('\n'), /^search /)).toMatch(new RegExp(`${n(shown)} of ${n(revs)} revisions · `))
+  expect(lineOf(text(viewLayout(narrower, data, initialState(), 96, 46).lines).split('\n'), /^filter /)).toMatch(new RegExp(`${n(shown)} of ${n(revs)} revisions · `))
   // a stat of rows another stat counted (errors among calls) is not counted again
   const ls = VIEWERS['linked-sessions']!
-  expect(lineOf(text(viewLayout(ls.spec, ls.data, { ...initialState(), tab: 1 }, 96, 46).lines).split('\n'), /^search /)).toMatch(/ 316 calls$/)
+  expect(lineOf(text(viewLayout(ls.spec, ls.data, { ...initialState(), tab: 1 }, 96, 46).lines).split('\n'), /^filter /)).toMatch(/ 316 calls$/)
 })
 
 test('a strip over a table shows its scale; a legend takes a second line rather than drop a value', () => {
@@ -462,21 +479,21 @@ const PANE = { plugin: 'thimble-cc-mod', component: 'Pane', requestId: 'thimble'
 type M = Mounted<'terminal'>
 type El = { type: string; props: Record<string, unknown>; children?: unknown[] }
 const textOf = (x: unknown): string => (typeof x === 'string' ? x : ((x as El).children ?? []).map(textOf).join(''))
-/** The panel's column inside its type area (the Box that insets it 1 cell from each edge). */
-const column = (x: unknown): El => {
-  const el = x as El
-  return el.props?.paddingLeft === 1 && (el.children ?? []).length === 1 ? (el.children![0] as El) : el
-}
-/** The panel's view without its top row, the way (back, the breadcrumb, the threads tree). */
-const viewOf = (x: unknown): El => ({ ...column(x), children: (column(x).children ?? []).filter(c => (c as El).props?.key !== 'way') })
+/** The element keyed `key` anywhere under `x`. */
+const keyed = (x: unknown, key: string): El | undefined => ((x as El)?.props?.key === key ? (x as El) : (((x as El)?.children ?? []) as unknown[]).map(c => keyed(c, key)).find(Boolean))
+/** The panel's view without its top row, the way (back, the breadcrumb, `show all threads`). */
+const viewOf = (x: unknown): El => ({ ...(x as El), children: ((x as El).children ?? []).filter(c => !keyed(c, 'way')) })
 /** The way's row as the terminal draws it: a plain Button as its label (no hotkey shows), a Text as its text. */
 const wayText = (x: unknown): string => {
-  const way = (column(x).children ?? []).find(c => (c as El).props?.key === 'way') as El | undefined
+  const way = keyed(x, 'way')
   return ((way?.children ?? []) as El[]).map(c => (c.type === 'Button' ? `${c.props.hotkey ? `${String(c.props.hotkey)}: ` : ''}${String(c.props.label)}` : textOf(c))).join('')
 }
+/** A view's lines as its Client draws them, without the 2-cell margin where `❯` marks the selected row: a point on a
+ *  line is 2 cells further right in the Client (M). */
+const M2 = 2
 async function screen(ui: M, key: string): Promise<string[]> {
   const root = (await ui.drawn({ in: key })) as unknown as El
-  return ((root.children ?? []) as El[]).map(c => textOf(c).trimEnd())
+  return ((root.children ?? []) as El[]).map(c => textOf(c).slice(M2).trimEnd())
 }
 
 function world(on: On, views: Record<string, { spec: ViewSpec; data: ViewData }> = { timeline: TIMELINE }): { opened: string[]; threads: string[]; columns: (number | undefined)[] } {
@@ -537,29 +554,29 @@ test('/thimble-view opens a view in the panel; a click on a facet narrows it, a 
   expect((r as { text?: string }).text).toBe('opened Timeline')
   expect(w.opened).toEqual(['thimble'])
   const pane = (await $.ui.mount(PANE as never)) as unknown as M
-  const IN = { in: 'view:timeline' }
-  let lines = await screen(pane, 'view:timeline')
-  expect(lines[0]).toMatch(/^Timeline +60 events/)
+  const IN = { in: 'm:view:timeline' }
+  let lines = await screen(pane, 'm:view:timeline')
+  expect(lines[1]).toMatch(/^60 events/)
   // the filter row's field opens its values; a value narrows the rows
-  const fy = lines.findIndex(l => l.startsWith('search'))
-  await pane.pointer({ type: 'down', x: lines[fy]!.indexOf('source') + 1, y: fy, button: 'left', ...IN })
+  const fy = lines.findIndex(l => l.startsWith('filter'))
+  await pane.pointer({ type: 'down', x: M2 + lines[fy]!.indexOf('source') + 1, y: fy, button: 'left', ...IN })
   await pane.unmount()
   const opened = (await $.ui.mount(PANE as never)) as unknown as M
-  lines = await screen(opened, 'view:timeline')
+  lines = await screen(opened, 'm:view:timeline')
   const y = lines.findIndex(l => l.startsWith('source'))
-  const x = lines[y]!.indexOf('chat') + 1
+  const x = M2 + lines[y]!.indexOf('chat') + 1
   await opened.pointer({ type: 'down', x, y, button: 'left', ...IN })
   await opened.pointer({ type: 'up', x, y, button: 'left', ...IN })
   await opened.unmount()
   const again = (await $.ui.mount(PANE as never)) as unknown as M
-  lines = await screen(again, 'view:timeline')
+  lines = await screen(again, 'm:view:timeline')
   expect(lines.join('\n')).toMatch(/\d+ of 60 events/)
   // a row of the list: its detail opens under the view
   const row = lines.findIndex(l => /^[●•×!] [A-Z].*\d\d May \d\d:\d\d/.test(l))
   await again.pointer({ type: 'down', x: 2, y: row, button: 'left', ...IN })
   await again.unmount()
   const third = (await $.ui.mount(PANE as never)) as unknown as M
-  lines = await screen(third, 'view:timeline')
+  lines = await screen(third, 'm:view:timeline')
   expect(lines.some(l => /↗ .*line \d+ {2}\?$/.test(l))).toBe(true)
   await third.unmount()
 })
@@ -589,11 +606,11 @@ test('a view of many lane marks draws at 120 columns, opening and after a row is
   world(on, { 'linked-sessions': VIEWERS['linked-sessions']! })
   await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
   await $.command.run({ command: 'thimble-view', args: 'linked-sessions' } as never)
-  const IN = { in: 'view:linked-sessions' }
+  const IN = { in: 'm:view:linked-sessions' }
   const size = async (ui: M) => JSON.stringify((await ui.find({ type: 'Client' }))!.props.props).length
   let pane = (await $.ui.mount(NARROW as never)) as unknown as M
   expect(await size(pane)).toBeLessThan(50000)
-  let lines = await screen(pane, 'view:linked-sessions')
+  let lines = await screen(pane, 'm:view:linked-sessions')
   expect(lines[0]).toMatch(/^Linked sessions/)
   // a session's row: selected, then deselected by a second click, the whole view drawn again each time
   const row = lines.findIndex(l => /^ {2}lead /.test(l))
@@ -604,7 +621,7 @@ test('a view of many lane marks draws at 120 columns, opening and after a row is
     await pane.unmount()
     pane = (await $.ui.mount(NARROW as never)) as unknown as M
     expect(await size(pane)).toBeLessThan(50000)
-    lines = await screen(pane, 'view:linked-sessions')
+    lines = await screen(pane, 'm:view:linked-sessions')
     if (i === 0) expect(lines.join('\n')).not.toBe(opening)
   }
   expect(lines.join('\n')).toBe(opening)
@@ -615,32 +632,34 @@ test('a record a view opens is named as a record, and "‹ <view>" goes back to 
   const w = world(on)
   await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
   await $.command.run({ command: 'thimble-view', args: 'timeline' } as never)
-  const IN = { in: 'view:timeline' }
+  const IN = { in: 'm:view:timeline' }
   let pane = (await $.ui.mount(PANE as never)) as unknown as M
-  let lines = await screen(pane, 'view:timeline')
+  let lines = await screen(pane, 'm:view:timeline')
   const row = lines.findIndex(l => /^[●•×!] [A-Z].*\d\d May \d\d:\d\d/.test(l))
   await pane.pointer({ type: 'down', x: 2, y: row, button: 'left', ...IN })
   await pane.unmount()
   pane = (await $.ui.mount(PANE as never)) as unknown as M
-  lines = await screen(pane, 'view:timeline')
+  lines = await screen(pane, 'm:view:timeline')
   const y = lines.findIndex(l => /↗ .*line \d+ {2}\?$/.test(l))
   const title = lines[y]!.replace(/^[^A-Za-z]*/, '').replace(/\s+↗.*$/, '').trim()
-  await pane.pointer({ type: 'down', x: lines[y]!.indexOf('↗') + 2, y, button: 'left', ...IN })
+  await pane.pointer({ type: 'down', x: M2 + lines[y]!.indexOf('↗') + 2, y, button: 'left', ...IN })
   await pane.unmount()
   // the place of the row, in the panel: the row's title, no word of a value to recompute; the path names it a record
   pane = (await $.ui.mount(PANE as never)) as unknown as M
   const text = textOf(viewOf(await pane.drawn()))
-  expect(text.startsWith(title.slice(0, 20))).toBe(true)
+  // the title, a link to its place, drawn by the Client of lines
+  const head = (await pane.find({ key: 'cite-title' })) as unknown as { props: { props: { lines: { s: string }[][] } } }
+  expect(head.props.props.lines[0]!.map(x => x.s).join('').startsWith(title.slice(0, 20))).toBe(true)
   expect(text).not.toContain('This citation shows no value to recompute.')
-  // the breadcrumb: home › Timeline › record "…"; back leads to the view
-  expect((await pane.find({ key: 'crumb-1' }))?.props.label).toBe('Timeline')
-  expect(wayText(await pane.drawn())).toMatch(/^‹ back {2}home › Timeline › record "/)
+  // the breadcrumb: home › views › Timeline › record "…"; back leads to the view
+  expect((await pane.find({ key: 'crumb-2' }))?.props.label).toBe('Timeline')
+  expect(wayText(await pane.drawn())).toMatch(/^‹ back {2}home › views › Timeline › record "/)
   await pane.press({ key: 'nav-back' })
   await pane.unmount()
   // the view again, its row still selected
   pane = (await $.ui.mount(PANE as never)) as unknown as M
-  lines = await screen(pane, 'view:timeline')
-  expect(lines[0]).toMatch(/^Timeline +60 events/)
+  lines = await screen(pane, 'm:view:timeline')
+  expect(lines[1]).toMatch(/^60 events/)
   expect(lines.some(l => /↗ .*line \d+ {2}\?$/.test(l))).toBe(true)
   await pane.unmount()
   expect(w.opened.length).toBe(3)
@@ -650,49 +669,48 @@ test('in a narrow panel the breadcrumb fits its row: the crumbs between home and
   world(on, { timeline: { spec: { ...TIMELINE.spec, name: 'Timeline of every source and incident' }, data: TIMELINE.data } })
   await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
   await $.command.run({ command: 'thimble-view', args: 'timeline' } as never)
-  const IN = { in: 'view:timeline' }
+  const IN = { in: 'm:view:timeline' }
   const P49 = { ...PANE, props: { bodyColumns: 49, scroll: { bodyRows: 46 } } }
   let pane = (await $.ui.mount(P49 as never)) as unknown as M
-  let lines = await screen(pane, 'view:timeline')
+  let lines = await screen(pane, 'm:view:timeline')
   const row = lines.findIndex(l => /^[●•×!] [A-Z]/.test(l))
   await pane.pointer({ type: 'down', x: 3, y: row, button: 'left', ...IN })
   await pane.unmount()
   pane = (await $.ui.mount(P49 as never)) as unknown as M
-  lines = await screen(pane, 'view:timeline')
+  lines = await screen(pane, 'm:view:timeline')
   const y = lines.findIndex(l => /↗ /.test(l))
-  await pane.pointer({ type: 'down', x: lines[y]!.indexOf('↗') + 2, y, button: 'left', ...IN })
+  await pane.pointer({ type: 'down', x: M2 + lines[y]!.indexOf('↗') + 2, y, button: 'left', ...IN })
   await pane.unmount()
   pane = (await $.ui.mount(P49 as never)) as unknown as M
-  expect(await pane.find({ key: 'crumb-1' })).toBeUndefined()
-  // back, main, the record and the threads button within the 48 columns the row has; back still leads to the view
+  expect(await pane.find({ key: 'crumb-2' })).toBeUndefined()
+  // back, main, the record and `show all threads` within the 48 columns the row has; back still leads to the view
   const way = wayText(await pane.drawn())
-  expect(way).toMatch(/^‹ back {2}home › … › record ".*…threads$/)
+  expect(way).toMatch(/^‹ back {2}home › … › record.*…show all threads$/)
   expect(way.length).toBeLessThanOrEqual(48)
   await pane.unmount()
   // at 96 columns the view's crumb shows, at most 34 columns of it
   pane = (await $.ui.mount(PANE as never)) as unknown as M
-  expect((await pane.find({ key: 'crumb-1' }))?.props.label).toMatch(/^Timeline of every source and i/)
+  expect((await pane.find({ key: 'crumb-2' }))?.props.label).toMatch(/^Timeline of every sour/)
   await pane.unmount()
 })
 
-test('a right-click on a row opens its record\'s menu; its "open" leads to the record with the way back', async ($, on) => {
+test('a right-click on a row does what a click does: it selects the row; there is no menu', async ($, on) => {
   world(on)
   await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
   await $.command.run({ command: 'thimble-view', args: 'timeline' } as never)
-  const IN = { in: 'view:timeline' }
+  const IN = { in: 'm:view:timeline' }
   let pane = (await $.ui.mount(PANE as never)) as unknown as M
-  const lines = await screen(pane, 'view:timeline')
+  const lines = await screen(pane, 'm:view:timeline')
   const row = lines.findIndex(l => /^[●•×!] [A-Z].*\d\d May \d\d:\d\d/.test(l))
   await pane.pointer({ type: 'down', x: 2, y: row, button: 'right', ...IN })
   await pane.unmount()
   pane = (await $.ui.mount(PANE as never)) as unknown as M
-  expect(await pane.find({ key: 'menu-open' })).toBeDefined()
-  await pane.press({ key: 'menu-open' })
-  await pane.unmount()
-  pane = (await $.ui.mount(PANE as never)) as unknown as M
-  expect(wayText(await pane.drawn())).toMatch(/› record "/)
-  expect(await pane.find({ key: 'nav-back' })).toBeDefined()
-  expect((await pane.find({ key: 'crumb-1' }))?.props.label).toBe('Timeline')
+  expect(await pane.find({ key: 'menu-open' })).toBeUndefined()
+  // the row selected: `❯` in its margin, its detail under the view
+  const after = await screen(pane, 'm:view:timeline')
+  const drawn = (await pane.drawn({ in: 'm:view:timeline' })) as unknown as El
+  expect(((drawn.children ?? []) as El[]).some(c => textOf(c).startsWith('❯'))).toBe(true)
+  expect(after.some(l => /↗ .*line \d+ {2}\?$/.test(l))).toBe(true)
   await pane.unmount()
 })
 

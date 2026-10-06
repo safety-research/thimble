@@ -78,6 +78,14 @@ def test_tree() -> None:
                                                           "runs/r1/votes.csv": "table"}
         assert by["pages.jsonl"]["records"] == 31 and by["runs/r1/votes.csv"]["records"] == 12 and by["blob.bin"]["records"] is None
         assert by["runs/r1/votes.csv"]["folder"].endswith("/runs/r1/") and spec["collections"][0]["opens"] == "path"
+        # each file's type as its name says it, which colours its glyph, and its first lines, which its detail shows
+        assert {p: r["type"] for p, r in by.items()} == {"blob.bin": "bin", "chat.jsonl": "jsonl", "log.txt": "txt", "pages.jsonl": "jsonl",
+                                                          "runs/r1/notes.md": "md", "runs/r1/votes.csv": "csv"}
+        assert by["log.txt"]["head"] == ["User: hello there", "Assistant: hi, how can I help", "User: count the pages", "Assistant: 4,579"]
+        assert len(by["pages.jsonl"]["head"]) == files.HEAD_LINES and "head" not in by["blob.bin"]
+        tab = spec["tabs"][0]
+        assert "overview" not in tab and tab["filter"]["fields"] == ["type", "folder"] and tab["body"][0]["color"] == "type"
+        assert spec["collections"][0]["detail"] == {"fields": [], "lines": "head"}
         assert drawn(root, "files")["ok"]
 
 
@@ -103,10 +111,9 @@ def test_records_table_first_csv_markdown_and_chat_log() -> None:
         got = run(root, "open", "pages.jsonl")
         assert got["tabs"] == ["Table", "Raw"], got
         spec, rows = view(root, got["slug"])
-        table = spec["tabs"][0]
-        assert table["overview"] == {"kind": "bars", "field": next(f["name"] for f in spec["collections"][0]["fields"] if f.get("label") == "wiki")}
+        # no overview: a table shows its records, and its filter narrows them
+        assert "overview" not in spec["tabs"][0] and "overview" not in spec["tabs"][1]
         assert len(rows["collections"]["records"]) == 30 and len(rows["collections"]["lines"]) == 31
-        assert "overview" not in spec["tabs"][1]
         csv_ = run(root, "open", "runs/r1/votes.csv")
         spec, rows = view(root, csv_["slug"])
         assert csv_["tabs"] == ["Table", "Raw"] and rows["collections"]["records"][0]["ref"] == "runs/r1/votes.csv#L2"
