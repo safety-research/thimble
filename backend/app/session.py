@@ -2321,7 +2321,12 @@ def translate_sub(lv: Live, sub: Sub, line: bytes | str) -> int:
         return 1
     origin = rec.get("origin") if isinstance(rec.get("origin"), dict) else {}
     if rec.get("type") == "user" and origin.get("kind") in ("peer", "task-notification"):
-        return 0  # a hand-back or a notice from a subagent this one started, which is no line of this chat
+        # a hand-back or a notice from a subagent this one started, which is no line of this chat; the notice comes as
+        # this user record, not an attachment, when it reaches the agent between its turns (live check L34 on 060-s4)
+        text = _user_text(rec) or ""
+        if origin.get("kind") == "task-notification" and "<task-notification>" in text:
+            _child_finished(lv, text)
+        return 0
     # a compaction's summary (isCompactSummary) is Claude Code's, written as a user record: no message of anyone's
     if rec.get("type") == "user" and not sub.thread and not rec.get("isMeta") and not rec.get("isCompactSummary"):
         prompt = _user_text(rec)

@@ -558,6 +558,37 @@ async def test_a_descendant_of_the_orientation_is_a_step_of_its_chat_with_number
     assert [c.get("agent") for c in calls.listing(CORPUS, chat)] == ["h1"], "numbered in the orientation's sequence"
 
 
+@pytest.mark.parametrize("shape", ["user", "attachment"])
+async def test_a_descendant_s_step_ends_at_its_task_notification_in_either_shape(bridge, project, ended, shape):
+    """Claude Code writes a child's task notification into its parent's transcript as an attachment while the parent's
+    turn runs, and as a user record (origin task-notification, with a preamble) when it comes between the parent's turns
+    (live check L34 on 060-s4, where those steps kept spinning). Either ends the child's step."""
+    lv, chat, path = await _click_orientation(bridge, project)
+    with subagents.update(CORPUS) as state:
+        sf.registry(state)["h1"] = {"type": "thimble:orient-helper", "role": "orient-helper", "parent": AGENT, "root": AGENT,
+                                    "status": "running", "descendant": True}
+    child = _agent_file(project, "h1", agentType="thimble:orient-helper", description="survey the files",
+                        parentAgentId=AGENT, toolUseId="toolu_h")
+    _write(child, _assistant(_use("toolu_hr", "Read", {"file_path": "/c/board.jsonl"})), _result("toolu_hr", "1\tx"))
+    session.tail_once(lv)
+    [step] = [m for m in agents.list_chats(CORPUS) if m.get("role") == agents.STEP_ROLE and m.get("agent_id") == "h1"]
+    assert step["status"] == "running"
+    note = ("<task-notification>\n<task-id>h1</task-id>\n<tool-use-id>toolu_h</tool-use-id>\n<status>completed</status>\n"
+            "<summary>Agent \"survey the files\" finished</summary>\n</task-notification>")
+    if shape == "user":
+        rec = {"type": "user", "isMeta": True, "origin": {"kind": "task-notification"},
+               "message": {"role": "user", "content": "[SYSTEM NOTIFICATION - NOT USER INPUT]\nThis is an automated "
+                                                       "background-task event.\n\n" + note}}
+    else:
+        rec = {"type": "attachment", "attachment": {"type": "queued_command", "prompt": note,
+                                                    "commandMode": "task-notification"}}
+    _write(path, rec)
+    session.tail_once(lv)
+    assert agents.read_meta(CORPUS, step["id"])["status"] == "done"
+    assert not [e for e in agents.read_events(agents.paths(CORPUS, chat)[1]) if e.get("type") == "user"], \
+        "the notice is no line of the orientation's thread"
+
+
 async def test_clear_carries_thimble_s_agents_into_the_new_session_read_from_the_start_of_its_file(bridge, project,
                                                                                                 ended):
     lv, chat, path = await _click_orientation(bridge, project)
