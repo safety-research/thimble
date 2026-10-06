@@ -635,3 +635,13 @@ def test_the_module_registers_the_three_job_roles_on_their_settings_rows(board):
     assert str(views.EXAMPLES_DIR) in roles["view-builder"]["prompt"] and "finish_view" in roles["view-builder"]["prompt"]
     assert "view_pictures" in roles["view-reviewer"]["prompt"] and "finish_review" in roles["view-reviewer"]["prompt"]
     assert "WebFetch" in roles["view-builder"]["disallowedTools"], "the dev agent's web is off by default"
+
+
+def test_the_finish_tools_stop_their_gate_when_their_caller_drops_the_call_and_main_lists_none_of_them_as_its_own():
+    """A finish tool blocks while its gate runs and is cancelled when Claude Code closes the call of a stopped agent
+    (tools.Spec.drop_stops, call_route's until_dropped, V6); each names only the job sessions that may call it."""
+    for name, kinds in (("view_check", ("view", "review")), ("finish_view", ("view",)),
+                        ("view_pictures", ("review",)), ("finish_review", ("review",))):
+        spec = tools.REGISTRY[name]
+        assert spec.drop_stops and spec.sessions == kinds, name
+    assert all(n in tools.tool_sections() for n in ("view_check", "finish_view", "view_pictures", "finish_review"))

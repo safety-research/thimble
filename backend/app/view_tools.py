@@ -23,9 +23,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import json
 import logging
-from pathlib import Path
 from typing import Any
 
 from . import config, subagents, tools
@@ -36,7 +34,6 @@ BUILDER = "view-builder"  # subagents.TYPES
 REVIEWER = "view-reviewer"
 BUILDER_TOOLS = ("read_ref", "view_check", "finish_view")  # a builder's thimble tools
 REVIEWER_TOOLS = ("read_ref", "view_check", "view_pictures", "finish_review")  # a reviewer's
-PROGRAM_TOOLS = ("read_ref", "view_check")  # an extension's program that builds a view (dev.VIEW_PROGRAM_TOOLS)
 FINISH_GRACE_S = 120.0  # after a pass or the last attempt, how long the agent may still run before it is stopped
 # the fixed descriptions main's agent list shows (V5: main keeps the first description it sees)
 BUILDER_DESCRIPTION = ("thimble's builder of one view of the analyst's corpus. thimble starts it, or gives the exact "
@@ -305,16 +302,6 @@ def fenced_proposal(prop: dict[str, Any]) -> str:
                                  f"- The files it reads: {', '.join(prop.get('claims') or [])}",
                                  views.spec_lines(prop)) if x)
     return dev.fenced("the proposal", text)
-
-
-def work_folder(c: str, slug: str) -> Path:
-    from . import dev  # noqa: PLC0415
-
-    return dev.view_work_dir(c, slug)
-
-
-def as_json(obj: Any) -> str:
-    return json.dumps(obj, ensure_ascii=False)
 
 
 async def shutdown() -> None:
