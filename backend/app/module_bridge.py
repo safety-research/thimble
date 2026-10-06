@@ -708,16 +708,34 @@ class EndedBody(BaseModel):
     session: str = ""
     agentId: str
     answer: str = ""
-    reason: str = ""
+    reason: str = ""  # turn.complete's: answer, aborted, refusal or error
+    refusal: dict[str, Any] = {}  # with reason `refusal`: what the API said of it, {category, explanation}
+
+
+REFUSAL_TEXT = "The API refused the request{category}: {explanation}"  # a refusal's answer when its turn wrote none
+
+
+def refusal_text(refusal: dict[str, Any]) -> str:
+    """What the API said of a refusal that ended a turn with no fallback model (turn.complete's `refusal`), as one line
+    for the run's end; '' when it said nothing."""
+    explanation = " ".join(str(refusal.get("explanation") or "").split())
+    if not explanation:
+        return ""
+    category = str(refusal.get("category") or "").strip()
+    return REFUSAL_TEXT.format(category=f" ({category})" if category else "", explanation=explanation)
 
 
 @router.post("/module/ended")
 async def ended_route(body: EndedBody) -> dict[str, Any]:
-    """The end of a run of an agent the module started (its turn.complete), for lane B's end rules (on_ended)."""
+    """The end of a run of an agent the module started (its turn.complete), for lane B's end rules (on_ended). A turn
+    the model refused that wrote no text has what the API said of the refusal as its answer (refusal_text)."""
     c = _workspace(body.cwd)
+    answer = body.answer
+    if body.reason == "refusal" and not answer.strip():
+        answer = refusal_text(body.refusal)
     for fn in list(_ended):
         try:
-            fn(c, body.agentId, body.answer, body.reason)
+            fn(c, body.agentId, answer, body.reason)
         except Exception:  # noqa: BLE001 — one observer's failure is logged, never the module's
             log.exception("an observer of the module's ended post failed")
     return {"ok": True}

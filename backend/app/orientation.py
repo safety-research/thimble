@@ -299,9 +299,11 @@ def started(c: str, chat_id: str, *, session: str | None = None, pid: int | None
 
 
 def finished(c: str, chat_id: str, status: str, result: str | None, report: bool = True) -> dict[str, Any] | None:
-    """The first run stopped: its last message is kept as summary.md, the run ends with the session's status, and the orientation's chat gets a chip for the deck.
-    With `report`, a done run that asked for the report asks for it. A notification for another session, or for a run
-    already ended, changes nothing."""
+    """The first run stopped: its last message is kept as summary.md, the run ends with the session's status, and main's
+    chat gets the orientation's landing (an `artifact` chip naming its chat), with the deck when it has cards, and for a
+    failed run always, since the landing is where main's chat says it failed and why. With `report`, a done run that
+    asked for the report asks for it. A notification for another session, or for a run already ended, changes
+    nothing."""
     run = read_run(c)
     if not run or (run.get("chats") or {}).get(ROLE) != chat_id or run.get("status") not in RUNNING:
         return None
@@ -312,8 +314,9 @@ def finished(c: str, chat_id: str, status: str, result: str | None, report: bool
                error=None if status == "done" else (text[:400] or status))
     _write_run(c, run)
     deck = deck_of(run)
-    if deck and _has_cards(c, deck):
-        agents.chip(c, "artifact", CARDS_CHIP, ref=f"group:{deck}", chat=chat_id)
+    cards = bool(deck and _has_cards(c, deck))
+    if cards or run["status"] == "failed":
+        agents.chip(c, "artifact", CARDS_CHIP, ref=f"group:{deck}" if cards else None, chat=chat_id)
     _emit(c, run["status"], **({"error": run["error"]} if run.get("error") else {}))
     if report and status == "done" and "report" in (run.get("passes") or []):
         request_report(c)

@@ -345,6 +345,50 @@ async def test_a_run_the_analyst_stopped_stops_its_views_and_asks_for_no_report(
     assert len(bridge.ops("spawn")) == 1, "no report pass"
 
 
+SAFEGUARD = ("API Error: Opus 4.8's safeguards flagged this message. Our intentionally broad safeguards allow us to "
+             "deliver more capabilities faster, but can sometimes flag legitimate cybersecurity work.")
+
+
+async def test_an_orientation_an_api_error_stopped_says_so_and_why_in_its_thread_main_s_event_and_main_s_chat(
+        bridge, models, workspaces_tmp, monkeypatch):
+    """A refusal by the model's safeguards ends the orientation's first run before it made a card: the module's turn end
+    says `refusal`, with Claude Code's error line. The run ends failed, and each place the analyst looks says that it
+    stopped and why, in the API's words: its thread ends with a line that says so, the `orient` event main gets says it
+    failed with the error, and main's chat gets the orientation's landing (which the browser shows as failed, with the
+    API error's card) although there are no cards. No report pass starts."""
+    told: list[tuple] = []
+    monkeypatch.setattr(subagents, "tell_main", lambda c, kind, payload: told.append((kind, payload)))
+    ans = await orient_session.start(CORPUS, "", ["final", "report"], route=subagents.CLICK)
+    chat = orientation.read_run(CORPUS)["chats"]["orient"]
+    assert subagents.ended(CORPUS, ans.agent_id, SAFEGUARD, "refusal")
+
+    rec = orientation.read_run(CORPUS)
+    assert rec["status"] == "failed" and rec["error"] == SAFEGUARD[:400]
+    [(kind, payload)] = told
+    assert kind == orientation.ORIENT_KIND and payload["status"] == "failed"
+    assert payload["text"].startswith("The orientation failed:") and payload["text"].endswith(f"Its error: {SAFEGUARD}")
+
+    _, thread = agents.paths(CORPUS, chat)
+    lines = agents.read_events(thread)
+    assert lines[-2]["type"] == "error" and lines[-2]["kind"] == "failed" and lines[-2]["message"] == SAFEGUARD[:400]
+    assert lines[-1] == {**lines[-1], "type": "chip", "kind": orient_session.ERROR_KIND,
+                         "text": f"The orientation stopped because of an error: {SAFEGUARD}"}
+    meta = agents.read_meta(CORPUS, chat)
+    assert meta["status"] == "failed" and meta["result"] == SAFEGUARD[:400]
+
+    _, main_log = agents.paths(CORPUS, agents.MAIN_ID)
+    [landing] = [e for e in agents.read_events(main_log) if e.get("type") == "chip" and e.get("kind") == "artifact"]
+    assert landing["chat"] == chat and "ref" not in landing, "the landing with no deck: there are no cards"
+    assert len(bridge.ops("spawn")) == 1, "no report pass"
+
+    # a follow-up the API error stops: its thread says the follow-up stopped, and why
+    subagents.run_again(CORPUS, ans.agent_id, "coordinator")
+    assert subagents.ended(CORPUS, ans.agent_id, "API Error: Repeated 529 Overloaded errors", "error")
+    assert agents.read_events(thread)[-1]["text"] == ("The orientation's follow-up stopped because of an error: API "
+                                                      "Error: Repeated 529 Overloaded errors")
+    assert told[-1][1]["status"] == "failed" and told[-1][1]["text"].endswith("Repeated 529 Overloaded errors")
+
+
 async def test_a_workspace_0_5_0_left_loads_lists_and_renders_and_its_orientation_takes_no_message(
         bridge, models, workspaces_tmp, analyst, monkeypatch):
     """A workspace thimble 0.5.0 left: its orientation ran as a background session of Claude Code's (`bg` on the meta,

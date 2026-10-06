@@ -172,6 +172,9 @@ class Sub:
         self.thimble: str | None = None  # the role of one of thimble's agents (subagents.TYPES), else None
         self.root: str | None = None  # the agent id of the thimble agent a descendant's chat is a step of
         self.last_text: str | None = None  # the last text it wrote, a turn's answer (agent_answer)
+        # Claude Code's error line when the latest reply of its current run is an API error (isApiErrorMessage: a
+        # refusal by the model's safeguards, retries run out), else None (agent_error)
+        self.api_error: str | None = None
         self.ran = False  # the model of its current run is recorded (subagents.ran_on)
         self.quiet_since = time.monotonic()
         self.done = False
@@ -1508,6 +1511,34 @@ def rekeyed(c: str, old: str, new: str, moved: "list[str]") -> None:
     lv.wake.set()
 
 
+def api_error_of(rec: dict) -> str | None:
+    """The error line of an assistant record Claude Code wrote for an API error that ended a turn (isApiErrorMessage,
+    the synthetic model): its text, such as "API Error: Opus 4.8's safeguards flagged this message. …", else None."""
+    if rec.get("type") != "assistant" or rec.get("isApiErrorMessage") is not True:
+        return None
+    msg = rec.get("message") if isinstance(rec.get("message"), dict) else {}
+    content = msg.get("content")
+    blocks = [{"type": "text", "text": content}] if isinstance(content, str) else content if isinstance(content, list) else []
+    text = "\n".join(str(b.get("text") or "") for b in blocks if isinstance(b, dict) and b.get("type") == "text").strip()
+    return text or str(rec.get("error") or "") or "API Error"
+
+
+def agent_error(c: str, agent_id: str) -> str | None:
+    """Claude Code's error line when the latest reply of the current run of one of thimble's agents is an API error
+    (api_error_of): why the run failed. None when the mirror does not follow the agent, or its latest reply is not one."""
+    lv = _live.get(c)
+    if lv is None:
+        return None
+    sub = _sub_by(lv, agent_id=agent_id)
+    if sub is None or sub.path is None:  # its transcript not found yet: look for it now, since its end is being decided
+        _scan_subs(lv)
+        sub = _sub_by(lv, agent_id=agent_id)
+    if sub is None:
+        return None
+    _tail_sub(lv, sub)
+    return sub.api_error
+
+
 def agent_answer(c: str, agent_id: str) -> str | None:
     """The last text one of thimble's agents wrote, its turn's answer: the report of a run that ended without a
     hand-back (default mode, `claude -p`). None when the mirror does not follow it."""
@@ -2110,6 +2141,7 @@ def translate_sub(lv: Live, sub: Sub, line: bytes | str) -> int:
         if prompt and prompt.strip() and not prompt.lstrip().startswith("<"):
             if INTERRUPT_RE.match(prompt.strip()):
                 return 0  # the stop's own line: the chat's end says it was stopped
+            sub.api_error = None  # a new run's prompt
             sub.rec.record("user", text=prompt.strip(), by=TERMINAL)
             return 1
     if rec.get("type") == "user":
@@ -2131,6 +2163,7 @@ def translate_sub(lv: Live, sub: Sub, line: bytes | str) -> int:
         return n
     if rec.get("type") != "assistant":
         return 0
+    sub.api_error = api_error_of(rec)
     if sub.thimble and not sub.ran:
         msg = rec.get("message") if isinstance(rec.get("message"), dict) else {}
         if isinstance(msg.get("model"), str):

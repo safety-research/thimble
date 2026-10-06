@@ -22,8 +22,8 @@
 //   request's full model id, and the agent it starts that request's effort, which turn.step sets on its every request;
 //   a child of such an agent whose type is not thimble's gets the same effort (its model it inherits already). These
 //   hooks never see a run of an agent this module started, which is why clicks register instead;
-// - turn.complete: posts the end of each run of an agent it started (POST /api/module/ended), since its other hooks
-//   skip those agents;
+// - turn.complete: posts the end of each run of an agent it started (POST /api/module/ended), with why it ended and,
+//   for a refusal, what the API said of it, since its other hooks skip those agents;
 // - session.end: on /clear and /resume keeps its poll, waits for the new session id, says hello again under it,
 //   refetches what the workspace's record holds and appends to the new main one note per running thimble agent; on
 //   any other reason it stops polling.
@@ -488,7 +488,8 @@ export const register: Register = on => {
   on('turn.complete', async ($, e, next) => {
     const r = await next(e)
     if (m.active && e.agentId !== undefined && m.started.has(e.agentId)) {
-      void call($, m, 'POST', '/api/module/ended', { cwd: m.cwd, session: m.session, agentId: e.agentId, answer: e.answer, reason: e.reason })
+      const refusal = e.reason === 'refusal' && isObj(e.refusal) ? { refusal: e.refusal } : {}
+      void call($, m, 'POST', '/api/module/ended', { cwd: m.cwd, session: m.session, agentId: e.agentId, answer: e.answer, reason: e.reason, ...refusal })
     }
     return r
   })

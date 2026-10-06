@@ -556,3 +556,14 @@ async def test_the_module_s_ended_post_reaches_every_observer(client, plugin_hea
                           json={"cwd": _cwd(), "session": MAIN, "agentId": "a9", "answer": "Done.", "reason": "answer"})
     assert r.json() == {"ok": True}
     assert seen == [(CORPUS, "a9", "Done.", "answer")]
+    # a turn the model refused with no fallback model and no text: what the API said of it is the answer, so the run's
+    # end can say why it failed; a refusal that brought text keeps it
+    refusal = {"category": "cyber", "explanation": "This request triggered cyber-related  safeguards."}
+    for answer, want in (("", "The API refused the request (cyber): This request triggered cyber-related safeguards."),
+                         ("API Error: flagged", "API Error: flagged")):
+        seen.clear()
+        await client.post("/api/module/ended", headers=plugin_headers(), json={
+            "cwd": _cwd(), "session": MAIN, "agentId": "a9", "answer": answer, "reason": "refusal", "refusal": refusal})
+        assert seen == [(CORPUS, "a9", want, "refusal")]
+    assert module_bridge.refusal_text({"category": None, "explanation": "Flagged."}) == "The API refused the request: Flagged."
+    assert module_bridge.refusal_text({}) == ""
