@@ -352,10 +352,11 @@ async def test_a_program_s_box_hides_server_json_and_keeps_the_corpus_read_only(
     _config({"sandbox": {"enforce": False}})
     secret = userconf.global_file().parent / "server.json"
     secret.write_text('{"token": "not-for-agents"}')
+    # the path is written into the program: the agents' `env` key is read and ignored now (main's fence only)
     probe = '''import json, os, thimble
 def run(input):
     out = {}
-    for name, path in (("secret", os.environ["SECRET"]), ("corpus", os.path.join(input["corpus"], "x.txt")),
+    for name, path in (("secret", SECRET), ("corpus", os.path.join(input["corpus"], "x.txt")),
                        ("work", os.path.join(os.environ["THIMBLE_WORK"], "x.txt"))):
         try:
             if name == "secret":
@@ -367,9 +368,7 @@ def run(input):
             out[name] = type(e).__name__
     return json.dumps(out)
 thimble.serve(run)
-'''
-    monkeypatch.setenv("SECRET", str(secret))
-    _config({"sandbox": {"enforce": False}, "agents": {"orientation": {"env": ["SECRET"]}}})
+'''.replace("SECRET", json.dumps(str(secret)))
     active.append(_extension(tmp_path, "probe", {"orientation": {"description": "Probes.", "command": ["python", "p.py"]}},
                              {"agents/orientation/p.py": probe}))
     res = await tools.call(CORPUS, "start_orientation", {"brief": ""})

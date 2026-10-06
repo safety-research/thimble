@@ -1057,11 +1057,11 @@ def test_install_refuses_a_full_export_whose_transcripts_reach_outside(tmp_path)
         assert not (tmp_path / "ws").exists() and not (tmp_path / "c").exists()
 
 
-def test_a_fresh_session_on_a_full_install_is_told_the_orientation_continues(tmp_path, mini_dir):
+def test_a_fresh_session_on_a_full_install_is_told_the_orientation_can_be_read_but_not_continued(tmp_path, mini_dir):
     out, _, _, _ = full_made(tmp_path)
     ws = config.workspace_path("mini")
     demo.install(out, ws, mini_dir, home=tmp_path, claude_dir=tmp_path / "b-claude")
     text = precached.take_context("mini", "s1")
     assert text.startswith("This workspace was installed from a full export")
-    assert "came with it, so `message_orientation` continues it" in text
+    assert "so `message_orientation` cannot reach it" in text, "a subagent of the exporter's session (lane D's wording)"
     assert precached.take_context("mini", "s1") == ""
