@@ -41,6 +41,14 @@ type Dollar = EngineInterface
 export const HOME_LINE = 'thimble: terminal mode. The home panel is open. For the browser workspace, quit, run `thimble mode browser`, and start `thimble` again.'
 
 const THIMBLE_TOOL = /^mcp__plugin_thimble_thimble__/
+const CARD_TOOL = /^mcp__plugin_thimble_thimble__(add_card|edit_card|apply_label)$/
+
+/** The text of a tool's result as the transcript holds it: a string, or content blocks. */
+function resultText(output: unknown): string {
+  if (typeof output === 'string') return output
+  const blocks = Array.isArray(output) ? output : (output as { content?: unknown } | undefined)?.content
+  return Array.isArray(blocks) ? blocks.map(b => (b && typeof b === 'object' && 'text' in b ? String((b as { text: unknown }).text) : '')).join('\n') : ''
+}
 const ID_IN_TEXT = /\b(?:card|cell):([A-Za-z0-9_-]{4,})/g
 const ABOVE_LABEL = 12
 const paneTurns = turns()
@@ -354,6 +362,17 @@ export const register: Register = on => {
       return next({ ...e, props: { ...e.props, input: { ...input, command: shown } } })
     }
     return next(e)
+  })
+
+  // a card tool's result row: the card by its question, since the card itself is drawn under the turn's last reply
+  on('ui.render', { component: 'ToolResult' }, async ($, e, next) => {
+    if (!rt.sc || e.props.isErrored || !CARD_TOOL.test(String(e.props.tool))) return next(e)
+    const ids = cardsOfCall(String(e.props.tool), {}, resultText(e.props.output))
+    const tc = ids[0] ? await cxOf($).card(ids[0]) : undefined
+    const q = (tc?.data as { question?: string } | undefined)?.question
+    if (!q) return next(e)
+    const { Text } = $.ui.resolve(e)
+    return <Text dimColor wrap="truncate-end">{`  ⎿  card "${q}"${tc?.busy ? ` · ${tc.busy}` : ''}`}</Text>
   })
 
   // ---------------------------------------------------------------------------------------------- above the prompt

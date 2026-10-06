@@ -78,6 +78,21 @@ test("a turn's card is drawn once, under the turn's last reply, with its takeawa
   expect(w.calls.filter(c => c[2] === 'resolve').length).toBe(1)
 })
 
+test("a card tool's result row names the card by its question, never its id", async ($, on) => {
+  const w = world(on)
+  await start($, w)
+  await turn($, w, [['r1', 'Here.']])
+  const row = await $.ui.mount({ plugin: 'thimble-term', component: 'ToolResult', requestId: 'u1', surface: 'terminal', viewport: { columns: 140, rows: 40 }, props: { tool_use_id: 'u1', tool: 'mcp__plugin_thimble_thimble__add_card', output: [{ type: 'text', text: 'card:ff73e071\n[out0: table]' }], isErrored: false } } as never)
+  const text = shown(await row.drawn())
+  expect(text).toBe('  ⎿  card "What does the export hold per wiki?"')
+  await row.unmount()
+  // another tool's row is Claude Code's own
+  const other = await $.ui.mount({ plugin: 'thimble-term', component: 'ToolResult', requestId: 'u2', surface: 'terminal', viewport: { columns: 140, rows: 40 }, props: { tool_use_id: 'u2', tool: 'mcp__plugin_thimble_thimble__read_ref', output: 'card:ff73e071', isErrored: false } } as never)
+  expect(shown(await other.drawn())).toBe('(the engine row)')
+  await other.unmount()
+  void w
+})
+
 test('a card shows its last state: a change on disk draws it again', async ($, on) => {
   const w = world(on)
   await start($, w)
