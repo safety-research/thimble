@@ -981,6 +981,36 @@ def keep_installed(ws: Path) -> list[str]:
     return kept
 
 
+def install_view(ws: Path, src: Path, slug: str | None = None) -> str:
+    """The view in the folder `src` (its view.json, reader.py, view.html and vendored packages) installed as the view
+    `slug`, by default the folder's name, of the workspace folder `ws`, replacing a view of that slug: stamped built at
+    its files' digest, with the copy kept at that version, as keep_installed leaves a pre-cache's views, so readers see
+    it at once without its checks running here (read_built). The folder is written beside the views and renamed into
+    place, so a server reading the workspace meanwhile never sees it half written. The version."""
+    slug = _check_slug(slug or src.name)
+    root = ensure_local(ws) / VIEWS_SUBDIR
+    tmp = root / f".{slug}.install-{os.getpid()}-{time.monotonic_ns()}"
+    old = tmp.with_name(tmp.name.replace(".install-", ".old-"))
+    tmp.mkdir()
+    try:
+        for name in (READER_PY, VIEW_HTML):
+            shutil.copyfile(src / name, tmp / name)
+        view_libs.copy_lib(src, tmp)
+        raw = {k: v for k, v in _view_json(src).items() if k not in ("built", "version")}
+        write_json(tmp / VIEW_JSON, raw)
+        version = view_digest(tmp)[:12]
+        write_json(tmp / VIEW_JSON, {**raw, "built": _now(), "version": version})
+        _keep_version(tmp, ws / VIEWS_SUBDIR / VERSIONS_SUBDIR / slug, version)
+        if (root / slug).exists():
+            (root / slug).rename(old)
+        tmp.rename(root / slug)
+    except BaseException:
+        shutil.rmtree(tmp, ignore_errors=True)
+        raise
+    shutil.rmtree(old, ignore_errors=True)
+    return version
+
+
 def _keep_version(src: Path, root: Path, version: str) -> None:
     """The files of the view folder `src` kept at `version` in `root`, the newest VERSIONS_KEPT of its versions."""
     dst = root / version

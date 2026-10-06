@@ -1,4 +1,0 @@
-[
-  {"name": "Deadline", "kind": "regex", "spec": "(?i)\\bdeadline\\b|\\bdue by\\b", "labels": ["deadline", "other"],
-   "paths": ["messages.jsonl"]}
-]

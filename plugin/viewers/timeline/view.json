@@ -1,6 +1,6 @@
 {
   "name": "Timeline",
-  "description": "A ferry operator's alerts, deploys, chat, support tickets and automated agents' actions on one time axis over any days picked, with any window, incident, source or other field narrowed to, the events laid out in lanes by a field, and each event's details beside the event it answers and those that answer it.",
+  "description": "A ferry operator's alerts, deploys, chat, support tickets and automated agents' actions on one time axis: a lane per source under the time range's viewfinder, narrowed to an incident or a search and colored by any field or label, and the events in the range in a list where each opens in place with the event it answers and those that answer it.",
   "scope": ["agents.log", "alerts/*.jsonl", "chat/*.json", "deploys.csv", "tickets/*.txt", "tickets/index.csv"],
   "records": [
     {"name": "event", "one": "one alert, deploy step, chat message, ticket message or agent action", "fields": [
@@ -16,11 +16,11 @@
     ]}
   ],
   "accepts": [
-    {"form": "L<n>", "means": "the event on line <n>, or the nearest event when the line holds none, opened in its list with its day picked"}
+    {"form": "L<n>", "means": "the event on line <n>, or the nearest event when the line holds none, opened in place in the list"}
   ],
   "units": [
-    {"form": "<incident>", "means": "one incident's events, such as INC-312, narrowed to it and zoomed to its span"},
-    {"form": "<YYYY-MM-DD>", "means": "one day's events in UTC, that day picked"},
-    {"form": "<from>..<to>", "means": "the events between two UTC times written YYYY-MM-DDTHH:MM, zoomed to that window"}
+    {"form": "<incident>", "means": "one incident's events, such as INC-312, narrowed to it with the viewfinder on its span"},
+    {"form": "<YYYY-MM-DD>", "means": "one day's events in UTC, the viewfinder on that day"},
+    {"form": "<from>..<to>", "means": "the events between two UTC times written YYYY-MM-DDTHH:MM, the viewfinder on that window"}
   ]
 }

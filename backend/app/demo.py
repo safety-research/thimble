@@ -3,6 +3,7 @@
     thimble demo [NAME...] [--yes] [--dir DIR] [--attach | --no-attach] [--replace] [--precaches DIR] [--list]
     thimble demo --export WORKSPACE OUT [--outputs-only] [--dataset NAME] [--corpus DIR] [--claude-config DIR]
         [--scrub-user] [--allow-private]
+    thimble demo --examples [--refresh]
 
 The command lists the datasets (demo_data.DATASETS) with their sources, credits and sizes, asks before each download
 (--yes answers yes for all), rebuilds each dataset from its publisher's files into DIR/<name> (default ~/thimble-demo)
@@ -10,6 +11,7 @@ and checks it against the copy the orientations ran on. thimble redistributes no
 its publisher, and DIR/SOURCES.md says from where. It then registers the folder as a corpus, installs that dataset's
 pre-cache as its workspace when demos/ (or --precaches DIR) has one (a dataset without one opens with no analysis yet,
 with a line saying so), and opens the workspace in the browser without a Claude Code session (as `thimble up` does).
+--examples opens the worked examples of custom views on the same server instead (demo_examples.py).
 
 Attaching. On a terminal it then asks "Attach a Claude Code session now? (requires claude to be logged in)", Enter for
 yes, after `claude auth status` says a login is configured (when it says none, it says how to log in and asks
@@ -1739,6 +1741,10 @@ def run(args: argparse.Namespace, *, get: Callable[[str], bytes] = demo_data.htt
         show: Callable[[str], bool] = open_page,
         auth: Callable[[], dict[str, Any] | None] = config.auth_status) -> int:
     say = wrapped(say)
+    if getattr(args, "examples", False):
+        from . import demo_examples  # noqa: PLC0415
+
+        return demo_examples.run(args, say, server)
     if args.export:
         return run_export(args, say)
     names = list(args.names or DATASETS)
@@ -1918,6 +1924,13 @@ def add_parser(sub: Any) -> None:
                         "CLAUDE_CONFIG_DIR, else ~/.claude)")
     p.add_argument("--scrub-user", action="store_true",
                    help="with --export: write `user` in place of your user name where it stands as a word")
+    p.add_argument("--examples", action="store_true",
+                   help="for development and review: open each worked example of custom views (plugin/viewers) as the "
+                        "workspace example-<name> on its sample, with its view built and its sample labels on, and print "
+                        "their URLs")
+    p.add_argument("--refresh", action="store_true",
+                   help="with --examples: copy each example's sample and view again and redefine its labels, so edits "
+                        "in plugin/viewers show")
     p.add_argument("--allow-private", action="store_true",
                    help="with --export --outputs-only: write the pre-cache even when it holds the user name or "
                         "absolute paths (never one that copies long stretches of the corpus)")
