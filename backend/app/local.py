@@ -51,6 +51,10 @@ NOT_TERMINAL = ("`{name}` was not run: this workspace's session runs in browser 
                 "the tools. Start it again with `thimble`.")
 
 _started: set[str] = set()  # the workspaces this process has served a call for (_start)
+# The plugin copy this session loaded, which the shim names from its own path (plugin/bin/thimble-mcp): the launcher's
+# `--allowedTools` rule for the card runner names that copy's bin/thimble-run (cli.launch_args), so the commands the
+# tools give name it too (cardrun.bin_path). None outside the shim.
+PLUGIN_ROOT: Path | None = None
 
 
 def _now() -> str:

@@ -71,7 +71,11 @@ def defers(c: str) -> bool:
 
 
 def bin_path() -> Path:
-    return config.REPO_ROOT / "plugin" / "bin" / BIN
+    """`thimble-run` in the plugin copy this session loaded (local.PLUGIN_ROOT), whose path the launcher's allow rule
+    names, else in this tree's plugin/."""
+    from . import local  # noqa: PLC0415
+
+    return (local.PLUGIN_ROOT or config.REPO_ROOT / "plugin") / "bin" / BIN
 
 
 def command(kind: str, ident: str = "") -> str:
