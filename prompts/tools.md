@@ -1234,6 +1234,10 @@ This orientation ran in advance, before this workspace was installed, and its se
 
 This workspace was installed from a pre-cache: its orientation ran in advance on these same files ({made}), and its Claude Code session was not kept, so `message_orientation` cannot reach it. What it left follows: the cards on the canvas, the views and the documents, with the full text of each one written. Take it as what the analyst sees in the browser; read a card, a view or a ref with `read_ref` before you rely on its details, and answer what its cards already answer yourself.
 
+## precached-context-kept
+
+This workspace was installed from a full export: its orientation ran in advance on these same files ({made}), and its Claude Code session came with it, so `message_orientation` continues it. What it left follows: the cards on the canvas, the views and the documents, with the full text of each one written. Take it as what the analyst sees in the browser; read a card, a view or a ref with `read_ref` before you rely on its details, and answer what its cards already answer yourself.
+
 ## bg-carry-on
 
 Carry on with your task from where you left off.

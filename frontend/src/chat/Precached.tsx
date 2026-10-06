@@ -1,5 +1,6 @@
 // A workspace `thimble demo` installed from a pre-cache (backend precached.py): its orientation ran in advance, on the
-// same files, and its Claude Code session was not kept. The orientation's thread opens with a card that says so, and,
+// same files. From the outputs alone its Claude Code session was not kept; from a full export it was (the mark's `kept`),
+// and a message in its thread continues it. The orientation's thread opens with a card that says which, and,
 // while no session is attached, an "Attach a fresh session" button that shows what a fresh session is, the command that
 // attaches one in a terminal with a Copy button, and how to continue it later. The same steps stand in for the
 // composer while no session was ever attached, since nothing would read a message sent from it.
@@ -31,12 +32,20 @@ export function attachInstead(mark: PrecachedMark | null, neverAttached: boolean
   return !!mark && neverAttached && (to === 'here' || to === 'main')
 }
 
+/** Whether the pre-cached orientation takes a message: its session came with a full export. Pure. */
+export function takesFollowUps(mark: PrecachedMark | null): boolean {
+  return !!mark?.kept
+}
+
 /** What the card says of the run: when, on what model, and what was kept. Pure. */
 export function precachedText(mark: PrecachedMark): string {
   const ran = mark.ran ?? mark.created
   const when = ran ? ` on ${ran.slice(0, 10)}` : ''
   const model = mark.model ? ` with ${mark.model.replace('[1m]', '')}` : ''
-  return `It ran${when}${model}, on these same files, before thimble was installed here. Its cards, labels, views and report are here. Its Claude Code session is not, so it takes no follow-ups.`
+  const session = takesFollowUps(mark)
+    ? 'Its Claude Code session came with them, so a message here continues it.'
+    : 'Its Claude Code session is not, so it takes no follow-ups.'
+  return `It ran${when}${model}, on these same files, before thimble was installed here. Its cards, labels, views and report are here. ${session}`
 }
 
 /** The command that attaches a fresh session: `thimble` in the folder the pre-cache was installed for. Pure. */

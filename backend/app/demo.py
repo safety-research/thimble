@@ -1,14 +1,15 @@
 """`thimble demo`: public datasets, each opened on an orientation run ahead of time where demos/ has one.
 
     thimble demo [NAME...] [--yes] [--dir DIR] [--attach | --no-attach] [--replace] [--precaches DIR] [--list]
-    thimble demo --export WORKSPACE OUT [--dataset NAME] [--corpus DIR] [--scrub-user] [--allow-private]  (maintainers)
+    thimble demo --export WORKSPACE OUT [--outputs-only] [--dataset NAME] [--corpus DIR] [--claude-config DIR]
+        [--scrub-user] [--allow-private]
 
 The command lists the datasets (demo_data.DATASETS) with their sources, credits and sizes, asks before each download
 (--yes answers yes for all), rebuilds each dataset from its publisher's files into DIR/<name> (default ~/thimble-demo)
 and checks it against the copy the orientations ran on. thimble redistributes none of the data: each dataset comes from
 its publisher, and DIR/SOURCES.md says from where. It then registers the folder as a corpus, installs that dataset's
-pre-cache as its workspace when demos/ has one (a dataset without one opens with no analysis yet, with a line saying
-so), and opens the workspace in the browser without a Claude Code session (as `thimble up` does).
+pre-cache as its workspace when demos/ (or --precaches DIR) has one (a dataset without one opens with no analysis yet,
+with a line saying so), and opens the workspace in the browser without a Claude Code session (as `thimble up` does).
 
 Attaching. On a terminal it then asks "Attach a Claude Code session now? (requires claude to be logged in)", Enter for
 yes, after `claude auth status` says a login is configured (when it says none, it says how to log in and asks
@@ -17,21 +18,35 @@ Without a terminal it asks nothing. Either way it prints how to attach later: `c
 -c` there continues the last session. A session attached to a pre-cached workspace starts fresh, with the canvas and
 the report as its context (precached.py).
 
-The pre-cache. A folder, demos/<name>/ in the repository, of plain files a reviewer reads in a diff:
-`thimble-demo-precache.json` (the manifest, version 3), `README.md` (the source's notice first, then what the folder
-holds) and `workspace/`, the orientation's outputs by their paths in the workspace (demo_scrub.workspace_kind): the
-cards with their outputs, the documents, the labels' definitions and their values by record ref (no record text), the
-views' code and manifests, the orientation's record and its thread's meta, and the calls the report or a card cites,
-each cut to an excerpt (cited_calls). No Claude Code transcript, no conversation, no work file and no data a view or a
-label index derived from the records: views rebuild their indexes from the download when first opened. Absolute paths
-are written as placeholders (demo_scrub.PLACEHOLDERS) and filled in on install. The export refuses, naming each file,
-when a file it would write shares a stretch of demo_verbatim.LONG characters or more with the corpus (no flag lets it
-through), and, unless --allow-private, while the exporter's user name or another absolute path remains or gitleaks
-finds a secret. scripts/check_content.py allows these folders in the tree on the terms its DEMO note gives.
+The export writes one of two formats, a folder with `thimble-demo-precache.json` (the manifest), `README.md` (the
+source's notice first, then what the folder holds) and `workspace/`; absolute paths are written as placeholders
+(demo_scrub.PLACEHOLDERS) and filled in on install. It ends with an inventory of what it wrote (inventory_lines).
+
+The full export (the default, version FULL_VERSION). Everything of the workspace but what thimble rebuilds or what
+belongs to this machine's processes (full_kept): the cards, documents, labels with every row (rationales and the
+texts each label marked), views with their earlier versions, every chat and every call with its whole output, the
+orientation's and the agents' work files; and in `transcripts/` the Claude Code transcripts of the sessions thimble
+ran inside the workspace (the orientation, its critic, the writers, view builds: session_transcripts), each cleaned of
+what Claude Code told the model about the exporter's machine and account (demo_scrub.clean_transcript). It refuses
+nothing for its content: the inventory says how much of the dataset's text it holds, what may be private (the user
+name, other absolute paths, gitleaks' findings) and what it left out. Install places each transcript where Claude Code
+resumes it, under a new session id, so the orientation, the writers and the view builds continue from a message.
+
+The outputs alone (--outputs-only, version VERSION): what demos/<name>/ in the repository holds, plain files a reviewer
+reads in a diff: the orientation's outputs by their paths in the workspace (demo_scrub.workspace_kind): the cards with
+their outputs, the documents, the labels' definitions and their values by record ref (no record text), the views' code
+and manifests, the orientation's record and its thread's meta, and the calls the report or a card cites, each cut to
+an excerpt (cited_calls). No Claude Code transcript, no conversation, no work file and no data a view or a label index
+derived from the records: views rebuild their indexes from the download when first opened. The export refuses, naming
+each file, when a file it would write shares a stretch of demo_verbatim.LONG characters or more with the corpus (no
+flag lets it through), and, unless --allow-private, while the exporter's user name or another absolute path remains or
+gitleaks finds a secret. scripts/check_content.py allows these folders in the tree on the terms its DEMO note gives,
+and no folder of another version.
 
 Install fills in the placeholders, writes the workspace, and marks it pre-cached (MARKER, and `precached` in the
 orientation's record and its thread's meta): the orientation's thread then says it ran in advance and offers to attach
-a fresh session, and a follow-up to it is refused, since its session was not kept.
+a fresh session. From the outputs alone a follow-up to it is refused, since its session was not kept; from a full
+export the mark says `kept` and a follow-up resumes the installed session.
 """
 from __future__ import annotations
 
@@ -47,6 +62,7 @@ import subprocess
 import sys
 import tempfile
 import textwrap
+import uuid
 import webbrowser
 from datetime import datetime, timezone
 from pathlib import Path
@@ -55,13 +71,17 @@ from typing import Any, Callable, Iterable
 from . import config, demo_data, demo_verbatim
 from .demo_data import DATASETS, Dataset
 from .demo_scrub import (CALL_CUT_NOTE, CALL_KEPT, CALL_LINE_CHARS, CALL_LINES, DASHED, LABEL_DROPPED, PLACEHOLDERS,
-                         TEXT_SUFFIXES, findings, shape_findings, workspace_kind)
+                         TEXT_SUFFIXES, clean_transcript, findings, projects_folder, shape_findings, workspace_kind)
 
 SCHEMA = "thimble-demo-precache"
-VERSION = 3  # 1 was a zip (release assets); 2 a folder with the orientation's transcript; 3 the outputs alone
+# 1 was a zip (release assets); 2 a folder with the orientation's transcript, which install reads as a full export
+VERSION = 3  # the outputs alone (--outputs-only): what demos/ holds
+FULL_VERSION = 4  # the full export (module note)
+FULL_VERSIONS = (2, FULL_VERSION)
 MANIFEST = "thimble-demo-precache.json"
 README = "README.md"
 WORKSPACE = "workspace"
+TRANSCRIPTS = "transcripts"  # in a full export: transcripts/<session>.jsonl and its folder transcripts/<session>/
 MARKER = "precached.json"  # in an installed workspace: what was installed, from where, and the sessions given it
 PRECACHES = config.REPO_ROOT / "demos"  # demos/<name>/
 DEFAULT_DIR = Path("~/thimble-demo")
@@ -422,15 +442,15 @@ def verbatim_check(staged: dict[str, str], corpus: demo_verbatim.Corpus,
     return refused, sorted(longest, key=lambda f: -f["chars"])
 
 
-def export(ws: Path, corpus: Path, out: Path, *, name: str, home: Path | None = None, user: str | None = None,
-           allow_private: bool = False, scrub_user: bool = False, app: Path | None = None,
-           scan: Callable[[Path], list[str] | None] = gitleaks_scan, long: int = demo_verbatim.LONG,
-           index: demo_verbatim.Corpus | None = None) -> dict[str, Any]:
-    """Write the pre-cache of workspace folder `ws`, made on corpus folder `corpus`, as the folder `out` (replacing a
-    pre-cache there); the manifest. DemoError, and nothing written, when a file would share a stretch of `long`
-    characters or more with the corpus (`index`, else built from `corpus`), when something private remains (unless
-    `allow_private`), or when `out` holds files that are not a pre-cache's. `scrub_user` writes SCRUBBED_USER in place
-    of the user name where it stands as a word (in `ls -l` output, say)."""
+def export_outputs(ws: Path, corpus: Path, out: Path, *, name: str, home: Path | None = None, user: str | None = None,
+                   allow_private: bool = False, scrub_user: bool = False, app: Path | None = None,
+                   scan: Callable[[Path], list[str] | None] = gitleaks_scan, long: int = demo_verbatim.LONG,
+                   index: demo_verbatim.Corpus | None = None) -> dict[str, Any]:
+    """Write the outputs-only pre-cache (version VERSION) of workspace folder `ws`, made on corpus folder `corpus`, as
+    the folder `out` (replacing an export there); the manifest. DemoError, and nothing written, when a file would share
+    a stretch of `long` characters or more with the corpus (`index`, else built from `corpus`), when something private
+    remains (unless `allow_private`), or when `out` holds files that are not a pre-cache's. `scrub_user` writes
+    SCRUBBED_USER in place of the user name where it stands as a word (in `ls -l` output, say)."""
     home = home or Path.home()
     user = getpass.getuser() if user is None else user
     if out.exists() and any(out.iterdir()) and not (out / MANIFEST).is_file():
@@ -505,7 +525,7 @@ def export(ws: Path, corpus: Path, out: Path, *, name: str, home: Path | None = 
         flagged += [f"gitleaks: {x}" for x in leaks or []]
         meta = chat_summary(ws, chat)
         manifest = {
-            "schema": SCHEMA, "version": VERSION, "dataset": name, "created": now(),
+            "schema": SCHEMA, "version": VERSION, "format": "outputs-only", "dataset": name, "created": now(),
             # the source's own notice travels with excerpts of it (mythos-5's asks to stay out of training corpora)
             "notice": DATASETS[name].notice if name in DATASETS else "",
             "credit": DATASETS[name].credit if name in DATASETS else "",
@@ -551,20 +571,469 @@ def export(ws: Path, corpus: Path, out: Path, *, name: str, home: Path | None = 
         (stage / MANIFEST).write_text(json.dumps(manifest, ensure_ascii=False, indent=1) + "\n", "utf-8")
         (stage / README).write_text(readme(manifest), "utf-8")
         out.parent.mkdir(parents=True, exist_ok=True)
-        token = secrets.token_hex(4)
-        new, old = out.parent / f".{out.name}.new-{token}", out.parent / f".{out.name}.old-{token}"
+        new = out.parent / f".{out.name}.new-{secrets.token_hex(4)}"
         try:
             shutil.copytree(stage, new)
-            if out.exists():
-                out.rename(old)
-            new.rename(out)
         except BaseException:
             shutil.rmtree(new, ignore_errors=True)
-            if old.exists() and not out.exists():
-                old.rename(out)
             raise
-        shutil.rmtree(old, ignore_errors=True)
+        _swap_in(new, out)
     return manifest
+
+
+def _swap_in(new: Path, out: Path) -> None:
+    """Put the folder `new` (beside `out`) in place of `out`, which an earlier export may hold; `new` is removed when
+    that fails."""
+    old = out.parent / f".{out.name}.old-{secrets.token_hex(4)}"
+    try:
+        if out.exists():
+            out.rename(old)
+        new.rename(out)
+    except BaseException:
+        shutil.rmtree(new, ignore_errors=True)
+        if old.exists() and not out.exists():
+            old.rename(out)
+        raise
+    shutil.rmtree(old, ignore_errors=True)
+
+
+# --------------------------------------------------------------------------- the full export
+
+
+# What a full export leaves out, by the first part of the path in the workspace: what thimble rebuilds, or what belongs
+# to this machine and the processes that ran there.
+FULL_LEFT_OUT = {
+    "scratch": "the kernels' mirror of the corpus, rebuilt",
+    "kernels": "kernel state",
+    "view-indexes": "views' indexes of the corpus, rebuilt",
+    "sessions.json": "this machine's Claude Code sessions",
+    "bg-sessions.json": "an earlier version's background sessions",
+    "bg": "the agent tray's instructions, written again",
+    "held-events.json": "per session",
+    "unheard.json": "per session",
+    "telemetry.jsonl": "the browser's telemetry",
+}
+FULL_SKIPPED_PARTS = {"__pycache__": "compiled Python", "cache": "a cache, rebuilt", "tmp": "a temporary file",
+                      ".claude": "Claude Code's settings for one session, written again when it starts"}
+FULL_SKIPPED_SUFFIXES = (".sqlite", ".sqlite-wal", ".sqlite-shm", ".lock", ".pyc")
+SECRET_KEY_RE = re.compile(r"key|token|secret|password|credential", re.I)
+# what install takes out of a chat's meta in a full export: the process that ran it, and the session attached to main
+FULL_META_DROPPED = (*PROCESS_FIELDS, "attached")
+LIVE = ("running", "working", "starting", "queued", "pending")  # a chat's statuses while its session runs
+# the files of a transcript's folder (tool outputs Claude Code saved, subagents, workflows) read as text
+TRANSCRIPT_TEXT = (".jsonl", ".json", ".txt", ".md", ".js", ".mjs", ".py", ".html", ".css", ".csv", ".log")
+# the role of a session thimble ran in the workspace, by the first part of its folder there
+SESSION_ROLES = {"orient": "orientation", "critique": "critic", "writers": "writer", "views-work": "view build"}
+# what the inventory counts apart, by the first part of a path in the workspace
+OUTPUT_KINDS = {"notebooks": "cards", "investigations": "documents", "concepts": "labels", "labels": "labels",
+                "extension": "views", "views": "views", "chats": "chats", "calls": "calls", "orient": "work files",
+                "critique": "work files", "writers": "work files", "views-work": "work files",
+                "card-checks": "card checks"}
+
+
+def full_kept(rel: Path) -> str | None:
+    """None when a full export keeps the workspace file `rel` (relative to the workspace), else why it is left out."""
+    top = rel.parts[0]
+    if top in FULL_LEFT_OUT:
+        return FULL_LEFT_OUT[top]
+    for part in rel.parts[:-1]:
+        if part in FULL_SKIPPED_PARTS:
+            return FULL_SKIPPED_PARTS[part]
+    if rel.name.endswith(FULL_SKIPPED_SUFFIXES):
+        return "an index or lock thimble rebuilds"
+    return None
+
+
+def kind_of(path: str) -> str:
+    """What the inventory counts a path of a full export under: `transcripts`, or OUTPUT_KINDS of its workspace path."""
+    if path.startswith(f"{TRANSCRIPTS}/"):
+        return "transcripts"
+    return OUTPUT_KINDS.get(path.removeprefix(f"{WORKSPACE}/").split("/", 1)[0], "other")
+
+
+def secrets_out(data: bytes) -> bytes:
+    """A settings file without the keys that name a secret."""
+    try:
+        obj = json.loads(data)
+    except ValueError:
+        return data
+    if not isinstance(obj, dict):
+        return data
+    return _dump({k: v for k, v in obj.items() if not SECRET_KEY_RE.search(k)})
+
+
+def chat_meta(data: bytes) -> tuple[bytes, bool]:
+    """A chat's meta without FULL_META_DROPPED, and a status that says it runs written `done`, since nothing runs in an
+    installed export (a `stopped` card offers a Resume with no run to resume); and whether it said so."""
+    try:
+        meta = json.loads(data)
+    except ValueError:
+        return data, False
+    if not isinstance(meta, dict):
+        return data, False
+    for k in FULL_META_DROPPED:
+        meta.pop(k, None)
+    live = meta.get("status") in LIVE
+    if live:
+        meta["status"] = "done"
+    return _dump(meta), live
+
+
+def main_chat(data: bytes) -> tuple[bytes, list[str]]:
+    """Main's chat without the slash commands typed in it (/exit, /thimble), and the other messages typed, for the
+    inventory."""
+    kept_lines, typed = [], []
+    for line in data.decode("utf-8", "replace").split("\n"):
+        try:
+            rec = json.loads(line) if line.strip() else None
+        except ValueError:
+            rec = None
+        if isinstance(rec, dict) and rec.get("type") == "user" and not rec.get("event"):
+            text = str(rec.get("text") or "")
+            if text.strip().startswith("/"):
+                continue
+            typed.append(text[:120])
+        kept_lines.append(line)
+    return "\n".join(kept_lines).encode("utf-8"), typed
+
+
+def claude_config_dir() -> Path:
+    """The config folder of the Claude Code this command's user runs: CLAUDE_CONFIG_DIR, else ~/.claude."""
+    return config.config_dir_of(config.own_claude_config()).expanduser()
+
+
+def _transcript_cwd(path: Path) -> str:
+    """The folder the session of transcript `path` ran in, from the first record that names one; '' when none does."""
+    try:
+        with path.open("rb") as f:
+            for i, line in enumerate(f):
+                if i >= 2000:
+                    break
+                if b'"cwd"' not in line:
+                    continue
+                try:
+                    rec = json.loads(line)
+                except ValueError:
+                    continue
+                if isinstance(rec, dict) and isinstance(rec.get("cwd"), str):
+                    return rec["cwd"]
+    except OSError:
+        pass
+    return ""
+
+
+def session_transcripts(ws: Path, claude_dir: Path) -> list[tuple[str, Path, str]]:
+    """The Claude Code transcripts of the sessions that ran in workspace folder `ws` or a folder inside it (thimble's
+    agents: the orientation in orient/work, its critic, the writers, view builds), as (session id, the transcript, its
+    folder relative to `ws`), by folder and session. Main ran in the corpus's folder, so its session is not one."""
+    roots = sorted({str(ws), str(ws.resolve())})
+    prefixes = {projects_folder(r)[:200] for r in roots}
+    out = []
+    try:
+        folders = [d for d in (claude_dir / "projects").iterdir() if d.is_dir() and d.name.startswith(tuple(prefixes))]
+    except OSError:
+        return []
+    for d in folders:
+        for t in sorted(d.glob("*.jsonl")):
+            cwd = _transcript_cwd(t)
+            for r in roots:
+                if cwd == r or cwd.startswith(r + "/"):
+                    out.append((t.stem, t, cwd[len(r):].strip("/")))
+                    break
+    return sorted(out, key=lambda x: (x[2], x[0]))
+
+
+def session_role(folder: str) -> str:
+    return SESSION_ROLES.get(folder.split("/", 1)[0], "other")
+
+
+def export_full(ws: Path, corpus: Path, out: Path, *, name: str, home: Path | None = None, user: str | None = None,
+                scrub_user: bool = False, app: Path | None = None, claude_dir: Path | None = None,
+                scan: Callable[[Path], list[str] | None] = gitleaks_scan,
+                index: demo_verbatim.Corpus | None = None) -> dict[str, Any]:
+    """Write the full export (version FULL_VERSION, module note) of workspace folder `ws`, made on corpus folder
+    `corpus`, as the folder `out` (replacing an export there), with the transcripts of its sessions from `claude_dir`
+    (claude_config_dir()); the manifest, whose `inventory` says what it holds. It refuses nothing for its content;
+    DemoError only when `out` holds files that are not an export's. `scrub_user` writes SCRUBBED_USER in place of the
+    user name where it stands as a word."""
+    home = home or Path.home()
+    user = getpass.getuser() if user is None else user
+    claude_dir = claude_dir or claude_config_dir()
+    if out.exists() and any(out.iterdir()) and not (out / MANIFEST).is_file():
+        raise DemoError(f"{out} holds files that are not an export; choose another folder")
+    run = _read_json(ws / "orient" / "run.json")
+    run = run if isinstance(run, dict) else {}
+    chat = orient_chat(run)
+    pairs = placeholder_pairs(ws, corpus, home, app or config.REPO_ROOT)
+    user_re = re.compile(rf"(?<![\w]){re.escape(user)}(?![\w])") if user and len(user) >= 3 else None
+    corpus_index = index or demo_verbatim.Corpus(corpus)
+    state: dict[str, Any] = {"scrubbed": 0, "user_files": 0, "paths": set(), "flagged": [], "text": 0}
+    shared: dict[str, dict[str, int]] = {}  # kind -> {chars, longest, files, long_files}
+    longest: list[dict[str, Any]] = []
+    sizes: dict[str, int] = {}
+    files_n: dict[str, int] = {}
+    left: list[dict[str, Any]] = []
+    typed: list[str] = []
+    stopped: list[str] = []
+    tally = {"chats": 0, "chat_records": 0, "calls": 0, "call_logs": 0, "label_rows": 0, "rationales": 0, "spans": 0}
+
+    def scrub(path: str, text: str) -> str:
+        text = with_placeholders(text, pairs)
+        if scrub_user and user_re is not None:
+            text, n = user_re.subn(SCRUBBED_USER, text)
+            state["scrubbed"] += n
+        found = findings(text, user)
+        if found:
+            state["flagged"].extend(f"{path}: {f}" for f in found)
+            state["user_files"] += any(f.startswith("the user name") for f in found)
+            state["paths"].update(f for f in found if not f.startswith("the user name"))
+        return text
+
+    def measure(path: str, text: str) -> None:
+        state["text"] += len(text)
+        got = demo_verbatim.scan(corpus_index, path, text)
+        if not got.shared:
+            return
+        k = shared.setdefault(kind_of(path), {"chars": 0, "longest": 0, "files": 0, "long_files": 0})
+        k["chars"] += got.shared
+        k["longest"] = max(k["longest"], got.longest)
+        k["files"] += 1
+        k["long_files"] += bool(got.long_runs)
+        longest.append({"path": path, "chars": got.longest, "shared": got.shared})
+
+    def write(stage: Path, path: str, body: bytes) -> dict[str, Any]:
+        dest = stage / path
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(body)
+        k = kind_of(path)
+        sizes[k] = sizes.get(k, 0) + len(body)
+        files_n[k] = files_n.get(k, 0) + 1
+        return {"path": path.split("/", 1)[1] if path.startswith(f"{WORKSPACE}/") else path, "bytes": len(body),
+                "sha256": hashlib.sha256(body).hexdigest()}
+
+    def tally_file(rel: Path, text: str) -> None:
+        top = rel.parts[0]
+        if top == "chats" and rel.name.endswith(".meta.json"):
+            tally["chats"] += 1
+        elif top == "chats" and rel.name.endswith(".jsonl"):
+            tally["chat_records"] += sum(1 for x in text.split("\n") if x.strip())
+        elif top in ("calls", "labels") and rel.name.endswith(".jsonl"):
+            rows = [r for r in (_json_line(x) for x in text.split("\n")) if isinstance(r, dict)]
+            if top == "calls":
+                tally["call_logs"] += 1
+                tally["calls"] += sum(1 for r in rows if "result" in r)
+            else:
+                rows = [r for r in rows if "ref" in r]
+                tally["label_rows"] += len(rows)
+                tally["rationales"] += sum(1 for r in rows if r.get("rationale"))
+                tally["spans"] += sum(1 for r in rows if r.get("spans"))
+
+    out.parent.mkdir(parents=True, exist_ok=True)
+    stage = out.parent / f".{out.name}.new-{secrets.token_hex(4)}"
+    try:
+        files: list[dict[str, Any]] = []
+        for p in sorted(ws.rglob("*")):
+            if not p.is_file() or p.is_symlink():
+                continue
+            rel = p.relative_to(ws)
+            s = rel.as_posix()
+            why = full_kept(rel)
+            if why:
+                left.append({"path": s, "bytes": p.stat().st_size, "why": why})
+                continue
+            data = p.read_bytes()
+            if s in ("settings.json", "config.json"):
+                data = secrets_out(data)
+            elif s == "orient/run.json":
+                data = _without(data, ("pid", "agent_id"))
+            elif s == "chats/main.jsonl":
+                data, typed = main_chat(data)
+            elif rel.parts[0] == "chats" and rel.name.endswith(".meta.json"):
+                data, live = chat_meta(data)
+                if live:
+                    stopped.append(rel.name[: -len(".meta.json")])
+            path = f"{WORKSPACE}/{s}"
+            try:
+                text = data.decode("utf-8")
+            except UnicodeDecodeError:
+                files.append(write(stage, path, data))  # a picture, a parquet file: kept as it is
+                continue
+            text = scrub(path, text)
+            tally_file(rel, text)
+            measure(path, text)
+            files.append(write(stage, path, text.encode("utf-8")))
+        transcripts: list[dict[str, Any]] = []
+        for sid, found, folder in session_transcripts(ws, claude_dir):
+            path = f"{TRANSCRIPTS}/{sid}.jsonl"
+            data, stats = clean_transcript(found.read_bytes())
+            text = scrub(path, data.decode("utf-8"))
+            measure(path, text)
+            entry = {"session": sid, "role": session_role(folder), "folder": folder, "path": path,
+                     **{k: v for k, v in write(stage, path, text.encode("utf-8")).items() if k != "path"}, **stats,
+                     "files": []}
+            side = found.parent / sid  # what Claude Code keeps beside the transcript: tool outputs, subagents
+            for q in sorted(side.rglob("*")) if side.is_dir() else []:
+                if not q.is_file() or q.is_symlink():
+                    continue
+                qpath = f"{TRANSCRIPTS}/{sid}/{q.relative_to(side).as_posix()}"
+                body = q.read_bytes()
+                if q.suffix.lower() == ".jsonl":
+                    body, more = clean_transcript(body)
+                    for k, n in more["dropped"].items():
+                        entry["dropped"][k] = entry["dropped"].get(k, 0) + n
+                if q.suffix.lower() in TRANSCRIPT_TEXT:
+                    try:
+                        qtext = scrub(qpath, body.decode("utf-8"))
+                        measure(qpath, qtext)
+                        body = qtext.encode("utf-8")
+                    except UnicodeDecodeError:
+                        pass
+                entry["files"].append(write(stage, qpath, body))
+            transcripts.append(entry)
+        leaks = scan(stage)
+        meta = chat_summary(ws, chat)
+        dropped = sum(n for t in transcripts for n in t["dropped"].values())
+        manifest: dict[str, Any] = {
+            "schema": SCHEMA, "version": FULL_VERSION, "format": "full", "dataset": name, "created": now(),
+            "notice": DATASETS[name].notice if name in DATASETS else "",
+            "credit": DATASETS[name].credit if name in DATASETS else "",
+            "thimble": {"version": _thimble_version(), "commit": _commit()},
+            "orientation": {k: run.get(k) for k in ("status", "passes", "query", "effort", "ultracode", "critique",
+                                                    "started", "ended")}
+                           | {"model": meta.get("model"), "chat_effort": meta.get("effort"), "chat": chat},
+            "counts": counts(ws),
+            "corpus": corpus_files(corpus),
+            "placeholders": PLACEHOLDERS,
+            "files": files,
+            "transcripts": transcripts,
+            "inventory": {
+                "bytes": dict(sorted(sizes.items())), "files": dict(sorted(files_n.items())), **tally,
+                "typed_in_main": len(typed), "marked_done": stopped,
+                "sessions": {r: n for r in (*SESSION_ROLES.values(), "other")
+                             if (n := sum(1 for t in transcripts if t["role"] == r))},
+                "transcript_records": sum(int(t.get("kept") or 0) for t in transcripts),
+                "dropped_records": dropped,
+                "left_out_bytes": sum(int(f["bytes"]) for f in left),
+                "user_name_files": state["user_files"],
+                "paths": sorted(state["paths"])[:10],
+                "gitleaks": None if leaks is None else leaks[:20],
+            },
+            "verbatim": {"window": demo_verbatim.WINDOW, "stride": demo_verbatim.STRIDE, "long": demo_verbatim.LONG,
+                         "text": state["text"], "shared": sum(k["chars"] for k in shared.values()),
+                         "by_kind": dict(sorted(shared.items())),
+                         "longest": sorted(longest, key=lambda f: -f["chars"])[:20]},
+            "left_out": left,
+            "gitleaks": "not installed" if leaks is None else f"{len(leaks)} findings",
+            "user_name_scrubbed": state["scrubbed"],
+            "flagged": state["flagged"][:200],
+        }
+        (stage / MANIFEST).write_text(json.dumps(manifest, ensure_ascii=False, indent=1) + "\n", "utf-8")
+        (stage / README).write_text(readme(manifest), "utf-8")
+    except BaseException:
+        shutil.rmtree(stage, ignore_errors=True)
+        raise
+    _swap_in(stage, out)
+    return manifest
+
+
+def _json_line(line: str) -> Any:
+    try:
+        return json.loads(line) if line.strip() else None
+    except ValueError:
+        return None
+
+
+def _share(n: int, of: int) -> str:
+    return f"{100 * n / of:.0f}%" if of else "0%"
+
+
+def characters(n: int) -> str:
+    """A count of characters in a few words: `840 characters`, `52 thousand characters`, `4.1 million characters`."""
+    if n < 10_000:
+        return f"{n:,} characters"
+    return f"{n / 1000:.0f} thousand characters" if n < 1_000_000 else f"{n / 1_000_000:.1f} million characters"
+
+
+def inventory_lines(m: dict[str, Any], folder: Path, size: int) -> list[str]:
+    """What an export wrote, in plain lines: its size, each kind of thing it holds with its size, how much of the
+    dataset's text it holds, what may be private, and what it left out."""
+    c, v = m.get("counts") or {}, m.get("verbatim") or {}
+    full = m.get("version") in FULL_VERSIONS
+    out = [f"wrote {folder} ({human(size)}), " + ("a full export: everything the workspace holds but what thimble "
+                                                   "rebuilds" if full else "the orientation's outputs alone")]
+    rows: list[tuple[str, str]] = []
+    if full:
+        inv = m.get("inventory") or {}
+        b = inv.get("bytes") or {}
+        sessions = inv.get("sessions") or {}
+        trs = m.get("transcripts") or []
+        rows.append(("transcripts", (f"{plural(len(trs), 'Claude Code session')} ("
+                                     + ", ".join(f"{plural(n, r)}" for r, n in sessions.items()) + "), "
+                                     f"{inv.get('transcript_records', 0):,} records, {human(b.get('transcripts', 0))}; "
+                                     f"{inv.get('dropped_records', 0):,} records Claude Code added about your machine "
+                                     "and account (CLAUDE.md files, email, organization, skills, environment, system "
+                                     "prompt) left out")
+                     if trs else "none: no Claude Code transcript of a session in the workspace was found"))
+        typed = int(inv.get("typed_in_main") or 0)
+        rows.append(("chats", f"{plural(inv.get('chats', 0), 'thread')} with every message, "
+                              f"{inv.get('chat_records', 0):,} records, {human(b.get('chats', 0))}; main's chat keeps "
+                              + (f"{plural(typed, 'message')} you typed" if typed else "no message you typed")))
+        rows.append(("call outputs", f"{inv.get('calls', 0):,} calls with their whole outputs, in "
+                                     f"{plural(inv.get('call_logs', 0), 'log')}, {human(b.get('calls', 0))}"))
+        rows.append(("labels", f"{plural(c.get('labels', 0), 'label')}, {inv.get('label_rows', 0):,} rows, "
+                               f"{inv.get('rationales', 0):,} with the labeler's rationale and "
+                               f"{inv.get('spans', 0):,} with the texts it marked, {human(b.get('labels', 0))}"))
+        rows.append(("outputs", f"{plural(c.get('cards', 0), 'card')}, {plural(c.get('documents', 0), 'document')}, "
+                                f"{plural(c.get('views', 0), 'view')}, "
+                                f"{human(b.get('cards', 0) + b.get('documents', 0) + b.get('views', 0))}"))
+        rows.append(("work files", f"the orientation's and the agents' folders, {human(b.get('work files', 0))}"
+                                   + (f"; card checks {human(b['card checks'])}" if b.get("card checks") else "")))
+        by = v.get("by_kind") or {}
+        top = sorted(by.items(), key=lambda kv: -kv[1]["chars"])[:3]
+        rows.append(("dataset text", (f"about {characters(int(v.get('shared', 0)))} copied from the dataset "
+                                      f"({_share(int(v.get('shared', 0)), int(v.get('text') or 0))} of the export's "
+                                      "text), most in " + ", ".join(f"{k} ({characters(x['chars'])})" for k, x in top)
+                                      + f"; the longest stretch {(v.get('longest') or [{}])[0].get('chars', 0):,} "
+                                      "characters") if v.get("shared") else "none found"))
+        private = []
+        if inv.get("user_name_files"):
+            private.append(f"your user name in {plural(inv['user_name_files'], 'file')} (--scrub-user replaces it)")
+        if inv.get("paths"):
+            private.append("absolute paths such as " + ", ".join(inv["paths"][:3]))
+        leaks = inv.get("gitleaks")
+        private.append("gitleaks not installed" if leaks is None else
+                       f"gitleaks: {plural(len(leaks), 'finding')}" + (f" ({'; '.join(leaks[:3])})" if leaks else ""))
+        rows.append(("may be private", "; ".join(private)))
+        if inv.get("marked_done"):
+            rows.append(("still running", f"{plural(len(inv['marked_done']), 'chat')} said it ran and is written done: "
+                                          + ", ".join(inv["marked_done"][:5])))
+    else:
+        longest = (v.get("longest") or [{"chars": 0}])[0]
+        rows.append(("outputs", f"{plural(c.get('cards', 0), 'card')}, {plural(c.get('labels', 0), 'label')} (values "
+                                "by record ref with the labeler's rationale, no texts marked), "
+                                f"{plural(c.get('views', 0), 'view')} (code alone), "
+                                f"{plural(c.get('documents', 0), 'document')}"))
+        rows.append(("call outputs",
+                     f"{plural(len(m.get('cited_calls') or []), 'cited call')}, each cut to an excerpt"))
+        rows.append(("transcripts", "none; no conversation either"))
+        rows.append(("dataset text", f"the longest stretch shared with the dataset {longest.get('chars', 0):,} "
+                                     f"characters (refused from {v.get('long', '?')})"))
+        flagged = len(m.get("flagged") or [])
+        rows.append(("may be private", (f"{plural(flagged, 'finding')} kept with --allow-private (the manifest's "
+                                        "`flagged` lists them)" if flagged else "no user name or absolute path")
+                                       + f"; gitleaks: {m.get('gitleaks')}"))
+    left = m.get("left_out") or []
+    reasons: dict[str, int] = {}
+    for f in left:
+        reasons[str(f.get("why"))] = reasons.get(str(f.get("why")), 0) + 1
+    common = "; ".join(r for r, _ in sorted(reasons.items(), key=lambda kv: -kv[1])[:3])
+    rows.append(("left out", f"{plural(len(left), 'file')}, {human(sum(int(f.get('bytes') or 0) for f in left))}"
+                             + (f": {common}" if common else "") + " (the manifest lists each)"))
+    width = max(len(k) for k, _ in rows)
+    for k, text in rows:  # wrapped under the column of values
+        out += textwrap.wrap(text, 108, initial_indent=f"  {k.ljust(width)}  ", subsequent_indent=" " * (width + 4),
+                             break_long_words=False, break_on_hyphens=False)
+    return out
 
 
 def made_with(o: dict[str, Any]) -> str:
@@ -582,8 +1051,38 @@ def _sure(v: dict[str, Any]) -> Any:
         return "?"
 
 
+def readme_full(m: dict[str, Any]) -> str:
+    """A full export's README.md: the source's notice first, then what the folder holds (inventory_lines), and that it
+    holds the dataset's text."""
+    o, t = m.get("orientation") or {}, m.get("thimble") or {}
+    lines = []
+    if m.get("notice"):
+        lines += [f"> Notice from the source: {m['notice']}", ""]
+    lines += [f"# {m['dataset']}: full export", "",
+              "`thimble demo --export` wrote this folder from a thimble workspace: everything it holds but what "
+              "thimble rebuilds, with the Claude Code transcripts of the sessions thimble ran in it. `thimble demo "
+              f"{m['dataset']} --precaches <the folder above this one>` installs it, and a message in the "
+              "orientation's thread continues the orientation's session.", "",
+              "It holds the dataset's own text, which the transcripts and the call outputs quote: share it only where "
+              "you may share the dataset.", ""]
+    if m.get("credit"):
+        lines += [f"The data: {m['credit']}", ""]
+    size = sum(int(f.get("bytes") or 0) for f in m.get("files") or []) + sum(
+        int(x.get("bytes") or 0) + sum(int(f.get("bytes") or 0) for f in x.get("files") or [])
+        for x in m.get("transcripts") or [])
+    lines += [f"Made {str(m.get('created') or '')[:10]} with thimble {t.get('version') or '?'} "
+              f"({t.get('commit') or '?'}): {made_with(o)}; outputs {', '.join(o.get('passes') or []) or 'none'}"
+              f"{', critique on' if o.get('critique') else ''}.", "", "```",
+              *inventory_lines(m, Path(str(m["dataset"])), size), "```", "",
+              "Absolute paths are written as " + ", ".join(f"`{x}`" for x in PLACEHOLDERS.values())
+              + " (and as `@@THIMBLE_DASHED_…@@` where a path is spelled with dashes), filled in on install.", ""]
+    return "\n".join(lines)
+
+
 def readme(m: dict[str, Any]) -> str:
     """The pre-cache folder's README.md: the source's notice first, then what the folder holds and how it was made."""
+    if m.get("version") in FULL_VERSIONS:
+        return readme_full(m)
     c, o, t = m.get("counts") or {}, m.get("orientation") or {}, m.get("thimble") or {}
     v = m.get("verbatim") or {}
     lines = []
@@ -641,7 +1140,7 @@ def read_manifest(src: Path) -> dict[str, Any]:
     m = _read_json(src / MANIFEST)
     if not isinstance(m, dict):
         raise DemoError(f"{src} is not a thimble demo pre-cache ({MANIFEST} missing or unreadable)")
-    if m.get("schema") != SCHEMA or m.get("version") != VERSION:
+    if m.get("schema") != SCHEMA or m.get("version") not in (VERSION, *FULL_VERSIONS):
         raise DemoError(f"a pre-cache of another format ({m.get('schema')} v{m.get('version')}); "
                         "`thimble update` brings a thimble that reads it")
     return m
@@ -681,20 +1180,35 @@ def _without(data: bytes, keys: "tuple[str, ...]") -> bytes:
     return json.dumps({k: v for k, v in obj.items() if k not in keys}, ensure_ascii=False, indent=1).encode()
 
 
-def install(src: Path, ws: Path, corpus: Path, *, home: Path | None = None) -> dict[str, Any]:
-    """Install the pre-cache folder `src` as the workspace folder `ws` (which must not exist), its placeholders filled
-    with `ws`, `corpus` and the home folder, and marked pre-cached (MARKER, and `precached` in the orientation's record
-    and its thread's meta); the manifest, with `warnings` for corpus files that differ."""
+def install(src: Path, ws: Path, corpus: Path, *, home: Path | None = None,
+            claude_dir: Path | None = None) -> dict[str, Any]:
+    """Install the export folder `src` as the workspace folder `ws` (which must not exist), its placeholders filled with
+    `ws`, `corpus` and the home folder, and marked pre-cached (MARKER, and `precached` in the orientation's record and
+    its thread's meta); the manifest, with `warnings` for corpus files that differ and transcripts that could not be
+    placed. A full export's transcripts go where Claude Code in `claude_dir` (claude_config_dir()) resumes them, each
+    under a new session id that the workspace's files name in place of the old one (`installed_transcripts`); when the
+    orientation's is among them the mark says `kept`, and its record keeps its session, so a follow-up resumes it."""
     home = home or Path.home()
     values = {"workspace": str(ws), "corpus": str(corpus), "app": str(config.REPO_ROOT),
               "thimble_home": str(thimble_home()), "home": str(home)}
     if ws.exists():
         raise DemoError(f"{ws} exists")
     manifest = read_manifest(src)
+    full = manifest.get("version") in FULL_VERSIONS
     names = [str(f.get("path") or "") for f in manifest.get("files") or [] if isinstance(f, dict)]
-    bad = [n for n in names if not n or not SAFE_NAME.match(n) or not workspace_kind(n)]
+    trs = [t for t in manifest.get("transcripts") or [] if isinstance(t, dict)] if full else []
+    bad = [n for n in names if not n or not SAFE_NAME.match(n) or not (full or workspace_kind(n))]
+    for t in trs:
+        paths = [str(t.get("path") or ""), *(str(f.get("path") or "") for f in t.get("files") or []
+                                             if isinstance(f, dict))]
+        bad += [n for n in paths if not SAFE_NAME.match(n) or not n.startswith(f"{TRANSCRIPTS}/")]
+        if t.get("folder") and not SAFE_NAME.match(str(t["folder"])):
+            bad.append(str(t["folder"]))
     if bad:
         raise DemoError(f"the pre-cache holds paths it may not: {bad[:3]}")
+    sids = {str(t["session"]): str(uuid.uuid4()) for t in trs
+            if re.fullmatch(r"[A-Za-z0-9-]{8,64}", str(t.get("session") or ""))}
+    claude_dir = claude_dir or claude_config_dir()
 
     def fill(rel: str, text: str) -> str:
         js = rel.endswith((".json", ".jsonl"))
@@ -703,46 +1217,94 @@ def install(src: Path, ws: Path, corpus: Path, *, home: Path | None = None) -> d
                 text = text.replace(ph, json.dumps(values[key])[1:-1] if js else values[key])
             if DASHED[key] in text:
                 text = text.replace(DASHED[key], dashed(values[key]))
+        for old, new in sids.items():
+            text = text.replace(old, new)
         return text
+
+    def filled(rel: str, data: bytes) -> bytes:
+        try:
+            return fill(rel, data.decode("utf-8")).encode("utf-8")
+        except UnicodeDecodeError:
+            return data  # a picture, a parquet file
 
     ws.parent.mkdir(parents=True, exist_ok=True)
     tmp = ws.parent / f".{ws.name}.demo-{secrets.token_hex(4)}"
+    placed: list[Path] = []
+    warnings: list[str] = []
+    installed: list[dict[str, Any]] = []
     try:
         for rel in names:
             p = src / WORKSPACE / rel
             if not p.is_file():
                 raise DemoError(f"the pre-cache lacks {WORKSPACE}/{rel}, which its manifest lists")
-            data = p.read_bytes()
-            if is_text(Path(rel), data):
-                data = fill(rel, data.decode("utf-8")).encode("utf-8")
-            if CHAT_META_RE.match(rel):  # a pre-cache exported while META_KEYS kept `background`
-                data = _without(data, PROCESS_FIELDS)
+            data = filled(rel, p.read_bytes())
+            if CHAT_META_RE.match(rel):  # an export made while these were kept
+                data = _without(data, FULL_META_DROPPED)
             dest = tmp / rel
             dest.parent.mkdir(parents=True, exist_ok=True)
             dest.write_bytes(data)
+        for t in trs:
+            p, old = src / str(t["path"]), str(t.get("session") or "")
+            sid, folder = sids.get(old), str(t.get("folder") or "")
+            if not sid or not p.is_file():
+                warnings.append(f"the transcript {t.get('path')} is missing, so its session cannot continue")
+                continue
+            (tmp / folder).mkdir(parents=True, exist_ok=True)
+            # Claude Code names the folder after the session's working directory as the system reports it, with
+            # symlinks resolved
+            cwd = ws.parent.resolve() / ws.name / folder if folder else ws.parent.resolve() / ws.name
+            proj = claude_dir / "projects" / projects_folder(str(cwd))
+            dest = proj / f"{sid}.jsonl"
+            try:
+                proj.mkdir(parents=True, exist_ok=True)
+                dest.write_bytes(filled(str(t["path"]), p.read_bytes()))
+                placed.append(dest)
+                side = f"{TRANSCRIPTS}/{old}/"
+                for f in t.get("files") or []:
+                    fp = str(f.get("path") or "") if isinstance(f, dict) else ""
+                    q = src / fp
+                    if not fp.startswith(side) or not q.is_file():
+                        continue
+                    d = proj / sid / fp[len(side):]
+                    d.parent.mkdir(parents=True, exist_ok=True)
+                    d.write_bytes(filled(fp, q.read_bytes()))
+                    placed.append(d)
+            except OSError as e:
+                warnings.append(f"the transcript of {t.get('role') or 'a session'} could not be written to {dest} "
+                                f"({e}), so it cannot continue")
+                continue
+            installed.append({"role": t.get("role"), "folder": folder, "session": sid, "path": str(dest)})
         run = _read_json(tmp / "orient" / "run.json")
         chat = orient_chat(run)
+        kept = bool(isinstance(run, dict) and run.get("session")
+                    and any(i["session"] == run["session"] for i in installed))
         o = manifest.get("orientation") or {}
         mark = {"dataset": manifest.get("dataset"), "created": manifest.get("created"), "installed": now(),
                 "thimble": manifest.get("thimble"), "folder": str(corpus), "orientation": chat or None,
-                "ran": o.get("ended") or o.get("started"), "model": o.get("model")}
+                "ran": o.get("ended") or o.get("started"), "model": o.get("model"),
+                "format": "full" if full else "outputs-only", "kept": kept}
         (tmp / MARKER).write_text(json.dumps(mark, ensure_ascii=False, indent=1), "utf-8")
         if isinstance(run, dict):
-            run.pop("session", None)
+            if not kept:
+                run.pop("session", None)
             run["precached"] = mark
             (tmp / "orient" / "run.json").write_text(json.dumps(run, ensure_ascii=False, indent=2), "utf-8")
         meta_path = tmp / "chats" / f"{chat}.meta.json"
         meta = _read_json(meta_path) if chat else None
         if isinstance(meta, dict):
-            meta.pop("session", None)
+            if not kept:
+                meta.pop("session", None)
             meta.update(status="done", precached=mark)
             meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=1), "utf-8")
             (tmp / "chats" / f"{chat}.jsonl").touch()
         tmp.rename(ws)
     except BaseException:
         shutil.rmtree(tmp, ignore_errors=True)
+        for q in placed:
+            q.unlink(missing_ok=True)
         raise
-    manifest["warnings"] = corpus_mismatches(manifest, corpus)
+    manifest["warnings"] = corpus_mismatches(manifest, corpus) + warnings
+    manifest["installed_transcripts"] = installed
     return manifest
 
 
@@ -750,7 +1312,7 @@ def install(src: Path, ws: Path, corpus: Path, *, home: Path | None = None) -> d
 
 
 def precaches(folder: Path) -> dict[str, dict[str, Any]]:
-    """The pre-caches in `folder` (demos/ by default), by dataset: {path, bytes, made_with}."""
+    """The pre-caches in `folder` (demos/ by default), by dataset: {path, bytes, made_with, full}."""
     out = {}
     for name in DATASETS:
         p = folder / name
@@ -759,7 +1321,8 @@ def precaches(folder: Path) -> dict[str, dict[str, Any]]:
         except DemoError:
             continue
         size = sum(f.stat().st_size for f in p.rglob("*") if f.is_file())
-        out[name] = {"path": p, "bytes": size, "made_with": made_with(m.get("orientation") or {})}
+        out[name] = {"path": p, "bytes": size, "made_with": made_with(m.get("orientation") or {}),
+                     "full": m.get("version") in FULL_VERSIONS}
     return out
 
 
@@ -947,9 +1510,11 @@ def place_precache(ds: Dataset, folder: Path, cat: dict[str, dict[str, Any]], ur
             say(f"  the earlier workspace {name} is archived at {archived}")
     m = install(Path(pc["path"]), ws, folder)
     c = m.get("counts") or {}
+    trs = m.get("installed_transcripts") or []
     say(f"  pre-cached orientation installed as workspace {name}: {plural(c.get('cards', 0), 'card')}, "
         f"{plural(c.get('labels', 0), 'label')}, {plural(c.get('views', 0), 'view')}, "
-        f"{plural(c.get('documents', 0), 'document')}")
+        f"{plural(c.get('documents', 0), 'document')}"
+        + (f"; {plural(len(trs), 'session')} of its agents can continue" if trs else ""))
     for w in m["warnings"]:
         say(f"  warning: {w}")
     return name
@@ -1017,9 +1582,9 @@ def attach_choice(args: argparse.Namespace, folders: list[Path], say: Callable[[
 
 
 def attach_lines(opened: list[tuple[Dataset, Path, str | None]], precached: bool, attaching: Path | None,
-                 login_said: bool = False) -> list[str]:
+                 login_said: bool = False, kept: bool = False) -> list[str]:
     """How to attach a Claude Code session to each opened workspace later, and to continue it; how to log in unless
-    `login_said`."""
+    `login_said`. `kept`: a pre-cache was a full export, whose orientation's session came with it."""
     out = [""]
     if attaching is None:
         out.append("No Claude Code session is attached. To attach one (main, which you chat with in the page), run in "
@@ -1029,7 +1594,11 @@ def attach_lines(opened: list[tuple[Dataset, Path, str | None]], precached: bool
     for ds, folder, _ in opened:
         out.append(f"  cd {folder} && thimble" + (f"    # {ds.name}" if len(opened) > 1 else ""))
     out.append("`thimble -c` in that folder continues the last session there.")
-    if precached:
+    if precached and kept:
+        out.append("The pre-cached orientation ran in advance and its Claude Code session came with it: a message in "
+                   "its thread continues it. A session you attach starts fresh, with the orientation's cards and report "
+                   "as its context.")
+    elif precached:
         out.append("The pre-cached orientation ran in advance and its session is not included: a session you attach "
                    "starts fresh, with the orientation's cards and report as its context.")
     if not login_said:
@@ -1127,7 +1696,8 @@ def run(args: argparse.Namespace, *, get: Callable[[str], bytes] = demo_data.htt
     if not url:
         say("  the server is not running, so nothing is open; `thimble` in a folder below starts it")
     pick, login_said = attach_choice(args, [f for _, f, _ in opened], say, auth)
-    for line in attach_lines(opened, any(ds.name in cat for ds, _, _ in opened), pick, login_said):
+    for line in attach_lines(opened, any(ds.name in cat for ds, _, _ in opened), pick, login_said,
+                             kept=any(cat[ds.name].get("full") for ds, _, name in opened if name and ds.name in cat)):
         say(line)
     if pick is not None:
         start(pick)
@@ -1151,6 +1721,7 @@ def run_export(args: argparse.Namespace, say: Callable[[str], None]) -> int:
     from . import cli  # noqa: PLC0415
 
     workspace, out = args.export
+    outputs_only = bool(getattr(args, "outputs_only", False))
     env = cli.resolve_env()
     ws = Path(env["workspaces_dir"]) / workspace
     if not ws.is_dir():
@@ -1159,7 +1730,9 @@ def run_export(args: argparse.Namespace, say: Callable[[str], None]) -> int:
     if not isinstance(run_rec, dict):
         say(f"thimble demo --export: {workspace} is no workspace with an orientation")
         return 1
-    if run_rec.get("status") != "done" or run_rec.get("queue"):
+    # the outputs alone are the finished orientation's; a full export takes the workspace as it stands once nothing runs
+    busy = run_rec.get("status") != "done" if outputs_only else run_rec.get("status") in ("requested", "running")
+    if busy or run_rec.get("queue"):
         say(f"thimble demo --export: the orientation of {ws.name} is {run_rec.get('status')}"
             + (" with follow-ups waiting" if run_rec.get("queue") else "") + "; export it once it is done")
         return 1
@@ -1172,29 +1745,35 @@ def run_export(args: argparse.Namespace, say: Callable[[str], None]) -> int:
     out_path = given(out)
     if not (out_path / MANIFEST).is_file() and out_path.name != name:
         out_path = out_path / name
+    app = given(args.app) if args.app else None
+    if not outputs_only:
+        say(f"thimble demo --export: writing everything in workspace {ws.name}, with the transcripts of its sessions, "
+            f"to {out_path} (--outputs-only writes the outputs alone, for demos/) …")
     try:
-        m = export(ws, corpus, out_path, name=name, allow_private=args.allow_private, scrub_user=args.scrub_user,
-                   app=given(args.app) if args.app else None)
+        if outputs_only:
+            m = export_outputs(ws, corpus, out_path, name=name, allow_private=args.allow_private,
+                               scrub_user=args.scrub_user, app=app)
+        else:
+            m = export_full(ws, corpus, out_path, name=name, scrub_user=args.scrub_user, app=app,
+                            claude_dir=given(args.claude_config) if getattr(args, "claude_config", None) else None)
     except DemoError as e:
         say(f"thimble demo --export: {e}")
         return 1
     size = sum(f.stat().st_size for f in out_path.rglob("*") if f.is_file())
-    c = m["counts"]
-    longest = (m["verbatim"]["longest"] or [{"chars": 0}])[0]
-    say(f"wrote {out_path} ({human(size)}): {plural(c['cards'], 'card')}, {plural(c['labels'], 'label')}, "
-        f"{plural(c['views'], 'view')}, {plural(c['documents'], 'document')}, {plural(len(m['cited_calls']), 'cited call')}; "
-        f"{len(m['files'])} files kept, {len(m['left_out'])} left out; the longest stretch shared with the corpus "
-        f"{longest['chars']} characters (refused from {m['verbatim']['long']}); gitleaks: {m['gitleaks']}")
-    missing = [f"call:{x['chat']}/{x['n']}" for x in m["cited_calls"] if not x["found"]]
+    missing = [f"call:{x['chat']}/{x['n']}" for x in m.get("cited_calls") or [] if not x["found"]]
     if missing:
         say(f"  {len(missing)} cited calls are not in the workspace's call logs: {', '.join(missing[:5])}")
-    if m["flagged"]:
-        say(f"  {len(m['flagged'])} findings kept with --allow-private; they are listed in the manifest")
     if name in DATASETS:
         mism = [f["path"] for f in m["corpus"] if DATASETS[name].expected.get(f["path"]) not in (None, f["sha256"])]
         if mism:
             say(f"  warning: the corpus differs from what `thimble demo` downloads: {', '.join(mism[:5])}")
-    say("  read it before you commit it (demos/README.md), then `python3 scripts/check_content.py` checks it")
+    if outputs_only:
+        say("  read it before you commit it (demos/README.md), then `python3 scripts/check_content.py` checks it")
+    elif out_path.resolve().is_relative_to(PRECACHES.resolve()):
+        say("  demos/ in the repository takes the outputs alone (--outputs-only); scripts/check_content.py refuses "
+            "a full export there")
+    for line in inventory_lines(m, out_path, size):
+        say(line)
     return 0
 
 
@@ -1214,14 +1793,20 @@ def add_parser(sub: Any) -> None:
     p.add_argument("--precaches", metavar="DIR",
                    help="install the pre-caches in DIR/<name> instead of the repository's demos/<name>")
     p.add_argument("--export", nargs=2, metavar=("WORKSPACE", "OUT"),
-                   help="maintainers: write the pre-cache of WORKSPACE (a name or a folder) as the folder "
-                        "OUT/<dataset>")
-    p.add_argument("--dataset", help="with --export: the dataset the pre-cache is for (default: the workspace's name)")
+                   help="write everything in WORKSPACE (a name or a folder), with the transcripts of its sessions, as "
+                        "the folder OUT/<dataset>, and list what it holds; `thimble demo --precaches OUT` installs it")
+    p.add_argument("--outputs-only", action="store_true",
+                   help="with --export: the orientation's outputs alone, checked against the dataset's text: the "
+                        "pre-caches demos/ holds")
+    p.add_argument("--dataset", help="with --export: the dataset the export is for (default: the workspace's name)")
     p.add_argument("--corpus", help="with --export: the workspace's corpus folder, when thimble does not know it")
     p.add_argument("--app", help="with --export: the thimble install the orientation ran in, when it is not this one")
+    p.add_argument("--claude-config", metavar="DIR",
+                   help="with --export: the Claude Code config folder the workspace's sessions ran with (default "
+                        "CLAUDE_CONFIG_DIR, else ~/.claude)")
     p.add_argument("--scrub-user", action="store_true",
                    help="with --export: write `user` in place of your user name where it stands as a word")
     p.add_argument("--allow-private", action="store_true",
-                   help="with --export: write the pre-cache even when it holds the user name or absolute paths (never "
-                        "one that copies long stretches of the corpus)")
+                   help="with --export --outputs-only: write the pre-cache even when it holds the user name or "
+                        "absolute paths (never one that copies long stretches of the corpus)")
     p.set_defaults(fn=lambda a: run(a))

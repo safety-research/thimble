@@ -16,12 +16,13 @@ Kinds of hit:
     demo        a file of a pre-cached orientation (demos/<dataset>/) outside the terms of the exception below
     secret      a gitleaks finding
 
-The one exception: demos/<dataset>/. A pre-cached orientation that `thimble demo --export` wrote, which a maintainer
-read before committing it (demos/README.md), holds .jsonl files and files over 2 MB. Under demos/<dataset>/ these are
-allowed, on these terms only (demo_hits):
+The one exception: demos/<dataset>/. A pre-cached orientation that `thimble demo --export --outputs-only` wrote, which a
+maintainer read before committing it (demos/README.md), holds .jsonl files and files over 2 MB. Under demos/<dataset>/
+these are allowed, on these terms only (demo_hits):
     - the folder holds the export's manifest, thimble-demo-precache.json with schema thimble-demo-precache and version
-      DEMO_VERSION (the outputs alone, no transcript), and its README.md, and every other file in it is one the manifest
-      lists as workspace/<path> among its `files`
+      DEMO_VERSION (the outputs alone, no transcript; a full export, the default of `thimble demo --export`, is another
+      version and is refused), and its README.md, and every other file in it is one the manifest lists as
+      workspace/<path> among its `files`
     - each such <path> is of a kind the export writes (backend/app/demo_scrub.py workspace_kind): the cards
       (notebooks/), the documents (investigations/<name>/*.json), the labels' definitions (concepts/*.json) and values
       (labels/*.jsonl), the views' code and manifests (extension/extension.json, extension/views/<slug>/ view.json and
@@ -67,7 +68,8 @@ MAX_BYTES = 2_000_000
 DEMO = re.compile(r"^demos/([a-z0-9][a-z0-9-]*)/(.+)$")
 DEMO_MANIFEST = "thimble-demo-precache.json"
 DEMO_SCHEMA = "thimble-demo-precache"
-DEMO_VERSION = 3  # the outputs alone (backend/app/demo.py VERSION); 2 carried the orientation's transcript
+# the outputs alone (backend/app/demo.py VERSION); 2 carried the orientation's transcript, and 4 is the full export
+DEMO_VERSION = 3
 DEMO_FILE_MAX = 6_000_000
 DEMO_TOTAL_MAX = 30_000_000
 SCRUB = Path(__file__).resolve().parent.parent / "backend" / "app" / "demo_scrub.py"  # standard library only
@@ -128,7 +130,8 @@ def demo_hits(root: Path, rels: list[str]) -> list[tuple[str, int, str, str]]:
             continue
         if man.get("version") != DEMO_VERSION:
             hits += [(f"{folder}/{sub}", 0, "demo", f"{folder} is a pre-cache of version {man.get('version')}, not "
-                      f"{DEMO_VERSION} (the outputs alone, with no transcript)") for sub in inner]
+                      f"{DEMO_VERSION} (the outputs alone, with no transcript: `thimble demo --export --outputs-only`)")
+                     for sub in inner]
             continue
         listed = {DEMO_MANIFEST, "README.md"} | {f"workspace/{f.get('path')}" for f in man.get("files") or []
                                                  if isinstance(f, dict)}

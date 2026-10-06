@@ -1,5 +1,6 @@
-"""What a demo pre-cache may hold, in the standard library alone: `thimble demo --export` (demo.py) writes pre-caches
-with it, and scripts/check_content.py loads this file by its path to check demos/<dataset>/ the same way.
+"""What a demo pre-cache may hold, in the standard library alone: `thimble demo --export --outputs-only` (demo.py)
+writes pre-caches with it, and scripts/check_content.py loads this file by its path to check demos/<dataset>/ the same
+way. A full export (`thimble demo --export`) also uses its placeholders, its scrub check and clean_transcript.
 
 The kinds of file (workspace_kind): a pre-cache holds the orientation's outputs and nothing else, each under its path in
 the workspace. The cards (notebooks/), the documents (investigations/<name>/*.json), the labels' definitions
@@ -15,6 +16,15 @@ most CALL_KEPT lines of at most CALL_LINE_CHARS characters; a label row holds no
 
 The scrub check (findings): a file's text after the export wrote its absolute paths as placeholders holds no absolute
 path under /home, /Users, /mnt or /root, and not the maintainer's user name as a word.
+
+The transcripts of a full export. Claude Code's transcript of a session (`<config>/projects/<folder>/<session>.jsonl`)
+holds, besides the conversation, what Claude Code told the model about the exporter's machine and account: their
+CLAUDE.md files, their email, their organization, their skills, agents and MCP servers, the machine and the sandbox's
+paths, the system prompt. clean_transcript drops those attachments (MACHINE_ATTACHMENTS) and keeps every other record,
+so the conversation stays whole (the messages queued to the session, the files it edited, the call refs thimble's
+hooks added), linking each record whose parent it dropped to the dropped record's parent, so Claude Code's resume still
+reads one unbroken conversation; a resumed session is told its own machine's again. The install writes each
+transcript into Claude Code's projects folder for its new place (projects_folder).
 """
 from __future__ import annotations
 
@@ -43,6 +53,13 @@ CALL_LINE_CHARS = 500
 CALL_CUT_NOTE = ("[thimble demo: the pre-cache keeps only the first lines of this output and the lines a card or the "
                  "report cites]")
 LABEL_DROPPED = ("spans",)  # a label row's field that holds the record's own text (labels_store: the texts it marks)
+# The attachments clean_transcript drops (module note): what Claude Code told the model about the exporter's machine,
+# account and setup (CLAUDE.md files, email, organization, skills, agents, MCP servers, environment, system prompt).
+MACHINE_ATTACHMENTS = {"instructions", "nested_memory", "session_context", "credential_org", "skill_listing",
+                       "agent_listing_delta", "mcp_instructions_delta", "environment", "sandbox_instructions",
+                       "remote_session_change", "prompt_snapshot"}
+DROPPED_FIELDS = ("serverClassifierContext",)  # per record: the classifier's view of the machine (git state, cwd)
+LINK_FIELDS = ("parentUuid", "logicalParentUuid", "leafUuid")
 
 
 def workspace_kind(rel: str) -> bool:
@@ -122,3 +139,83 @@ def findings(text: str, user: str) -> list[str]:
         out.append(f"the user name {user!r}")
     out += sorted({m.group() for m in ABS_PATH_RE.finditer(text)})[:5]
     return out
+
+
+def clean_transcript(data: bytes) -> tuple[bytes, dict[str, Any]]:
+    """The transcript `data` with only the conversation kept (module note), and what was dropped: {kept, dropped: {kind:
+    n}, unreadable}. Lines are split at `\n` alone, since a record may hold U+2028."""
+    records: list[dict[str, Any]] = []
+    unreadable = 0
+    for line in data.decode("utf-8", "replace").split("\n"):
+        if not line.strip():
+            continue
+        try:
+            rec = json.loads(line)
+        except ValueError:
+            unreadable += 1
+            continue
+        if isinstance(rec, dict):
+            records.append(rec)
+    parent: dict[str, Any] = {}  # a dropped record's uuid -> its parent's
+    dropped: dict[str, int] = {}
+    kept: list[dict[str, Any]] = []
+    for rec in records:
+        kind = _dropped_kind(rec)
+        if kind:
+            dropped[kind] = dropped.get(kind, 0) + 1
+            if rec.get("uuid"):
+                parent[str(rec["uuid"])] = rec.get("parentUuid")
+            continue
+        kept.append(rec)
+
+    def resolve(u: Any) -> Any:
+        seen = set()
+        while isinstance(u, str) and u in parent and u not in seen:
+            seen.add(u)
+            u = parent[u]
+        return u
+
+    lines = []
+    for rec in kept:
+        for f in LINK_FIELDS:
+            if f in rec:
+                rec[f] = resolve(rec[f])
+        for f in DROPPED_FIELDS:
+            rec.pop(f, None)
+        lines.append(json.dumps(rec, ensure_ascii=False, separators=(",", ":")))
+    out = ("\n".join(lines) + "\n").encode("utf-8") if lines else b""
+    return out, {"kept": len(kept), "dropped": dict(sorted(dropped.items())), "unreadable": unreadable}
+
+
+def _dropped_kind(rec: dict[str, Any]) -> str:
+    """The kind under which clean_transcript drops `rec`, or '' when it is kept."""
+    if rec.get("type") != "attachment":
+        return ""
+    att = rec.get("attachment")
+    kind = str(att.get("type") or "") if isinstance(att, dict) else ""
+    return f"attachment:{kind}" if kind in MACHINE_ATTACHMENTS else ""
+
+
+def _java_hash(s: str) -> int:
+    """Claude Code's string hash (a 32-bit `h * 31 + c` over UTF-16 code units), for a long folder's name."""
+    data, h = s.encode("utf-16-le"), 0
+    for i in range(0, len(data), 2):
+        h = (h * 31 + (data[i] | data[i + 1] << 8)) & 0xFFFFFFFF
+    return h - (1 << 32) if h >= 1 << 31 else h
+
+
+def _base36(n: int) -> str:
+    digits = "0123456789abcdefghijklmnopqrstuvwxyz"
+    out = ""
+    while True:
+        n, r = divmod(n, 36)
+        out = digits[r] + out
+        if n == 0:
+            return out
+
+
+def projects_folder(path: str) -> str:
+    """The name of Claude Code's projects folder for a session run in `path`: every character but a letter or digit as
+    `-`, and over 200 characters the first 200 and a hash of the path."""
+    name = re.sub(r"[^A-Za-z0-9]", lambda m: "--" if ord(m.group()) > 0xFFFF else "-", path)  # per UTF-16 unit
+    return name if len(name) <= 200 else f"{name[:200]}-{_base36(abs(_java_hash(path)))}"

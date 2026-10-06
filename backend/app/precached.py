@@ -1,16 +1,18 @@
-"""A workspace `thimble demo` installed from a pre-cache (demo.py): its orientation ran in advance, on the same files,
-and its Claude Code session was not kept.
+"""A workspace `thimble demo` installed from a pre-cache (demo.py): its orientation ran in advance, on the same files.
+From the outputs alone (`thimble demo --export --outputs-only`, what demos/ holds) its Claude Code session was not
+kept; from a full export it was, and the mark says `kept`.
 
 The mark. demo.install writes MARKER (precached.json) in the workspace, and `precached` in the orientation's record
 and in its thread's meta. The browser reads the meta: the thread says the orientation ran in advance and offers to
 attach a fresh session (frontend chat/Precached.tsx), and while no session was ever attached the page stays open to
-read rather than greyed under the card that asks for one (shell/SessionGone). A message to the orientation is refused
-with `Precached` (orient_session.message).
+read rather than greyed under the card that asks for one (shell/SessionGone). When the session was not kept, a message
+to the orientation is refused with `Precached` (orient_session.message); when it was, the record keeps its session and
+a message resumes it.
 
 The context. A session attached to the workspace starts fresh, so /thimble (cli.cmd_ensure) gives it what the
 orientation left as its context, once per session: POST /api/ws/{c}/precached/context {session} answers with
 context_text the first time a session asks, and with '' after that, for a workspace not pre-cached, or once a new
-orientation has replaced the pre-cache's (its record no longer is_precached_run). The sessions given it are kept in the
+orientation has replaced the pre-cache's (its record no longer is_installed_run). The sessions given it are kept in the
 mark's `context_given`.
 """
 from __future__ import annotations
@@ -49,8 +51,14 @@ def read(c: str) -> dict[str, Any] | None:
 
 
 def is_precached_run(rec: dict[str, Any] | None) -> bool:
-    """Whether an orientation's record is a pre-cache's: marked, with no session of its own."""
+    """Whether an orientation's record is a pre-cache's that takes no follow-up: marked, with no session of its own."""
     return bool(rec and rec.get("precached") and not rec.get("session"))
+
+
+def is_installed_run(rec: dict[str, Any] | None) -> bool:
+    """Whether an orientation's record is the one `thimble demo` installed, with its session or without; a new
+    orientation writes a record of its own."""
+    return bool(rec and rec.get("precached"))
 
 
 def made_text(mark: dict[str, Any]) -> str:
@@ -83,7 +91,8 @@ def context_text(c: str) -> str:
     from . import context, tools  # noqa: PLC0415
 
     mark = read(c) or {}
-    parts = [tools.hint("precached-context", made=made_text(mark)).strip(),
+    lead = "precached-context-kept" if mark.get("kept") else "precached-context"
+    parts = [tools.hint(lead, made=made_text(mark)).strip(),
              context.render(c, budget=CONTEXT_CHARS, parts=("canvas", "views", "documents"))]
     docs = documents_text(c)
     if docs:
@@ -99,7 +108,7 @@ def take_context(c: str, session: str) -> str:
 
     with _lock:
         mark = read(c)
-        if mark is None or not is_precached_run(orientation.read_run(c)):
+        if mark is None or not is_installed_run(orientation.read_run(c)):
             return ""
         given = [str(s) for s in mark.get("context_given") or []]
         if session and session in given:

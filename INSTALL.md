@@ -179,8 +179,17 @@ cd ~/thimble-demo/collusion-wiki && thimble -c  # continue the last session ther
 A session attached to a pre-cached workspace starts fresh, with the orientation's cards and report as its context.
 
 A workspace that holds an analysis already is left as it is unless `--replace`, which archives it first. Run again,
-it downloads nothing it already has. [demos/README.md](demos/README.md) says what a pre-cache holds and how a
-maintainer makes one with `thimble demo --export`.
+it downloads nothing it already has.
+
+`thimble demo --export <workspace> <out>` writes everything in a workspace as `<out>/<dataset>/`: the cards, labels,
+views and documents, every chat and call output, the work files, and the Claude Code transcripts of the sessions
+thimble ran in it (the orientation, its critic, the writers, view builds). It ends with an inventory of what it wrote:
+the transcripts, the chats, the call outputs, the label rationales, how much of the dataset's text it holds, what may
+be private (your user name, absolute paths, gitleaks' findings), what it left out and the size of each. It holds the
+dataset's text, so share it only where you may share the dataset. `thimble demo <dataset> --precaches <out>` installs
+it, and a message in the orientation's thread continues the orientation's session. `--outputs-only` writes the
+orientation's outputs alone, the pre-caches demos/ holds; [demos/README.md](demos/README.md) says what one holds and
+how a maintainer makes one.
 
 ## Update
 

@@ -4,7 +4,7 @@
 // command and a Copy button. The page stays readable without a session until the first one attaches (isGone).
 import { act } from 'react'
 import { afterEach, expect, test, vi } from 'vitest'
-import { ATTACH_EXPLAINER, ATTACH_LABEL, AttachBar, PRECACHED_TITLE, PrecachedCard, attachCommand, attachInstead, precachedMark, precachedText } from '../../src/chat/Precached.tsx'
+import { ATTACH_EXPLAINER, ATTACH_LABEL, AttachBar, PRECACHED_TITLE, PrecachedCard, attachCommand, attachInstead, precachedMark, precachedText, takesFollowUps } from '../../src/chat/Precached.tsx'
 import type { ChatMeta, PrecachedMark } from '../../src/lib/types.ts'
 import { isGone } from '../../src/shell/SessionGone.tsx'
 import { mount, settle, unmountAll } from './mount.tsx'
@@ -24,6 +24,10 @@ test('the mark is read from the orientation that carries one', () => {
   expect(precachedMark([MAIN, { ...ORIENT, precached: null }])).toBeNull()
   expect(precachedText(MARK)).toContain('ran on 2026-10-05 with claude-opus-5-5,')
   expect(precachedText(MARK)).toContain('takes no follow-ups')
+  expect(takesFollowUps(MARK)).toBe(false)
+  // from a full export the orientation's session came with it
+  expect(precachedText({ ...MARK, format: 'full', kept: true })).toContain('a message here continues it')
+  expect(takesFollowUps({ ...MARK, kept: true })).toBe(true)
   expect(attachCommand(MARK)).toBe('cd /srv/thimble-demo/collusion-wiki && thimble')
   expect(attachCommand({ ...MARK, folder: '/srv/a b' })).toBe("cd '/srv/a b' && thimble")
 })

@@ -99,6 +99,8 @@ def test_a_precache_folder_is_allowed_on_the_terms_of_its_exception_only(cc, tmp
                      "demos/toy/workspace/labels/l.db": b"\0",
                      "demos/other/workspace/a.jsonl": "{}\n",
                      "demos/old/thimble-demo-precache.json": json.dumps({"schema": "thimble-demo-precache", "version": 2}),
+                     "demos/full/thimble-demo-precache.json": json.dumps({"schema": "thimble-demo-precache", "version": 4,
+                                                                          "format": "full"}),
                      "elsewhere/run.jsonl": "{}\n"})
     rels = cc.files_of(tmp_path)
     got = {(h[0], h[3]) for h in hits(cc, tmp_path) + cc.demo_hits(tmp_path, rels)}
@@ -114,8 +116,10 @@ def test_a_precache_folder_is_allowed_on_the_terms_of_its_exception_only(cc, tmp
         ("demos/toy/workspace/labels/l.db", "a file of a kind that never belongs in the tree"),
         ("demos/toy/workspace/labels/l.db", unlisted),
         ("demos/other/workspace/a.jsonl", "demos/other has no thimble-demo-precache.json of the export"),
-        ("demos/old/thimble-demo-precache.json",
-         "demos/old is a pre-cache of version 2, not 3 (the outputs alone, with no transcript)"),
+        ("demos/old/thimble-demo-precache.json", "demos/old is a pre-cache of version 2, not 3 (the outputs alone, "
+         "with no transcript: `thimble demo --export --outputs-only`)"),
+        ("demos/full/thimble-demo-precache.json", "demos/full is a pre-cache of version 4, not 3 (the outputs alone, "
+         "with no transcript: `thimble demo --export --outputs-only`)"),
         ("elsewhere/run.jsonl", "a file of a kind that never belongs in the tree")}
 
 

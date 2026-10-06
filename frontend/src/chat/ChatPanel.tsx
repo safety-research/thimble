@@ -47,7 +47,7 @@ import { RoleChip } from './RoleChip'
 import { useChat, type ChatState } from './useChat'
 import { pendingAsks, waitingAt, waitingChats } from './waiting'
 import { PermissionCard } from './PermissionCard'
-import { AttachBar, PrecachedCard, attachInstead, precachedMark } from './Precached'
+import { AttachBar, PrecachedCard, attachInstead, precachedMark, takesFollowUps } from './Precached'
 import { pendingRequests } from './permissions'
 
 const LIST_DEBOUNCE_MS = 300
@@ -603,11 +603,11 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
   const retryAlert = retryMeta?.alert?.kind === 'retry' ? retryMeta.alert : null
   // the latest orientation, which the orientation's composer and main's message_orientation reach
   const latestOrient = orientIds.length ? [...chats].filter((m) => threadKind(m) === 'orient').sort((a, b) => (a.created_at < b.created_at ? 1 : -1))[0]?.id ?? null : null
-  // a workspace installed from a pre-cache (chat/Precached): its orientation keeps no session
+  // a workspace installed from a pre-cache (chat/Precached): its orientation keeps a session only from a full export
   const precached = useMemo(() => precachedMark(chats), [chats])
   // where the composer sends (threads.composerTarget), which its placeholder names and whose model its chip shows; in
-  // a pre-cached orientation's thread, main
-  const target = composerTarget(kind, curMeta, latestOrient && precached?.orientation === latestOrient ? null : latestOrient)
+  // the thread of a pre-cached orientation that kept no session, main
+  const target = composerTarget(kind, curMeta, latestOrient && precached?.orientation === latestOrient && !takesFollowUps(precached) ? null : latestOrient)
   const [sendingView, setSendingView] = useState(false)
   // the analyst's messages to the orientation, from their send until its log or its queue holds them
   const [outbox, setOutbox] = useState<{ chat: string; text: string; key: number }[]>([])

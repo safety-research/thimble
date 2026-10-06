@@ -5,10 +5,12 @@
 labels, views and report. Each folder holds plain text files, so a reviewer can read it in a diff before it is
 committed.
 
-A pre-cache holds the orientation's outputs and nothing else. thimble redistributes none of the datasets, so a
-pre-cache carries no copy of their records: no Claude Code transcript, no conversation, no work file, and no data a
-view or a label derived from the records. Views rebuild their indexes from the download the first time they open. The
-export refuses a file that copies a long stretch of the dataset ([The threshold](#the-threshold)).
+A pre-cache holds the orientation's outputs and nothing else: `thimble demo --export --outputs-only` writes it. thimble
+redistributes none of the datasets, so a pre-cache carries no copy of their records: no Claude Code transcript, no
+conversation, no work file, and no data a view or a label derived from the records. Views rebuild their indexes from
+the download the first time they open. The export refuses a file that copies a long stretch of the dataset ([The
+threshold](#the-threshold)). `thimble demo --export` without `--outputs-only` writes a full export, which does not
+belong here ([The full export](#the-full-export)).
 
 A dataset with no folder here opens with no analysis yet: `thimble demo` says so in one line, and Start in the page
 runs the orientation. A folder is committed only after a maintainer has exported a run and reviewed it ([Making
@@ -19,8 +21,8 @@ one](#making-one)).
 - `README.md`: the source's own notice first, verbatim (mythos-5's carries a canary string), then the publisher's
   credit, how the orientation was made and what the folder holds.
 - `thimble-demo-precache.json`, the manifest:
-  - `schema` (`thimble-demo-precache`), `version` (3), `dataset`, `created`, `notice` (the source's notice),
-    `credit` (who published the data);
+  - `schema` (`thimble-demo-precache`), `version` (3), `format` (`outputs-only`), `dataset`, `created`, `notice`
+    (the source's notice), `credit` (who published the data);
   - `thimble` (the version and commit that made it);
   - `orientation` (status, outputs, effort, Ultracode, critique, model, its chat, start and end);
   - `counts` (cards, labels, views, documents);
@@ -120,18 +122,18 @@ each one written (backend/app/precached.py).
    5.5, and stopped an Opus 5.5 session that read a sample of transluce-gov (2026-10-06). On 2026-10-05, an earlier
    demo dataset ran to the end on claude-opus-4-8, but the same safeguard stopped its critic, two verification agents
    and one view build (the orientation's thread says so).
-3. Export it from the checkout: `thimble demo --export collusion-wiki demos/` (the workspace's name, or its folder).
-   This writes `demos/collusion-wiki/`, replacing an earlier pre-cache there. The export refuses, listing each
-   finding, when a file copies a long stretch of the dataset, and while it finds your user name, another absolute
-   path or a gitleaks finding.
+3. Export it from the checkout: `thimble demo --export collusion-wiki demos/ --outputs-only` (the workspace's name, or
+   its folder). This writes `demos/collusion-wiki/`, replacing an earlier pre-cache there. The export refuses, listing
+   each finding, when a file copies a long stretch of the dataset, and while it finds your user name, another
+   absolute path or a gitleaks finding.
    - `--scrub-user` writes `user` in place of your user name.
    - `--allow-private` keeps the private findings that are left, after you have looked. The manifest's `flagged`
      lists what was kept. It never lets through a file that copies the dataset.
    - `--corpus <folder>` names the dataset's folder, when thimble does not know it.
    - `--app <folder>` names the thimble install the orientation ran in, when it was another.
 
-   It prints the counts, the cited calls, the longest stretch shared with the dataset, and any cited call it could not
-   find in the call logs.
+   It ends with an inventory: the counts, the cited calls, the longest stretch shared with the dataset, the findings
+   kept and what it left out. Before it, it names any cited call it could not find in the call logs.
 4. Read it: the README, the report and the cards in a browser, and the cited calls. Run
    `python3 scripts/check_content.py`, which applies the checks below and gitleaks.
 5. Check it on a clean install with a fresh `THIMBLE_HOME`:
@@ -139,13 +141,38 @@ each one written (backend/app/precached.py).
    and attach a session to see it start from the cards and the report.
 6. Commit the folder.
 
+## The full export
+
+`thimble demo --export <workspace> <out>`, without `--outputs-only`, writes version 4: everything in the workspace but
+what thimble rebuilds (label and view indexes, caches, kernels, the scratch mirror of the corpus) or what belonged to
+the exporter's processes (sessions, the agent tray's instructions, the browser's telemetry). That is every chat and
+call output, the labels with each row's rationale and the texts it marked, the views with their earlier versions, the
+work files and card checks, and in `transcripts/` the Claude Code transcripts of the sessions thimble ran in the
+workspace (the orientation, its critic, the writers, view builds), with what Claude Code keeps beside each (saved tool
+outputs, subagents). Each transcript drops the records Claude Code added about the exporter's machine and account
+(their CLAUDE.md files, email, organization, skills), as `demo_scrub.clean_transcript` describes. Absolute paths are
+written as the same placeholders, and `--scrub-user` writes `user` in place of your user name.
+
+It refuses nothing for its content. It ends with an inventory: the transcripts, the chats, the call outputs, the label
+rationales, how much of the dataset's text it holds and where, what may be private (your user name, absolute paths,
+gitleaks' findings) and what it left out, each with its size. The manifest holds the same in `inventory` and
+`verbatim`, and lists each file and transcript with its SHA-256.
+
+`thimble demo <dataset> --precaches <out>` installs it. Each transcript goes where Claude Code resumes it, under a new
+session id that the workspace's files name in place of the old one, so a message in the orientation's thread continues
+the orientation's session, and a writer or a view build continues too. The mark says `kept`, and the orientation's
+thread says its session came with it.
+
+A full export holds the dataset's text, so `scripts/check_content.py` refuses it under `demos/`.
+
 ## What scripts/check_content.py allows here
 
 `check_content` refuses `.jsonl` files and files over 2 MB anywhere in the tree. Under `demos/<dataset>/` it allows
 them, on these terms only:
 - **The manifest lists every file, and it is version 3.** The folder holds `thimble-demo-precache.json` (schema
   `thimble-demo-precache`, version 3: the outputs alone) and `README.md`. Every other file is `workspace/<path>` for
-  one of the manifest's `files`. A folder of an older version, which carried the orientation's transcript, is refused.
+  one of the manifest's `files`. A folder of another version is refused: version 2 carried the orientation's
+  transcript, and version 4 is a full export.
 - **Outputs only.** Each `<path>` is one of the kinds listed in [What a folder holds](#what-a-folder-holds)
   (backend/app/demo_scrub.py `workspace_kind`): no transcript, no work file, no view index or cache.
 - **In the shape the export writes** (demo_scrub.py `shape_findings`, which the export also applies). The only chat

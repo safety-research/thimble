@@ -9,12 +9,13 @@ import io
 import json
 import random
 import re
+import shutil
 import zipfile
 from pathlib import Path
 
 import pytest
 
-from app import config, demo, demo_data, demo_verbatim
+from app import config, demo, demo_data, demo_verbatim, precached
 from app.demo_data import Built, Dataset
 
 
@@ -288,12 +289,12 @@ def made(tmp_path: Path, where: str = "a", name: str = "toy", **kw) -> tuple[Pat
     (corpus / "a.jsonl").write_text(json.dumps({"body": CORPUS_TEXT}) + "\n")
     ws = make_workspace(root, corpus, root)
     out = tmp_path / "out" / name
-    m = demo.export(ws, corpus, out, name=name, home=root, user="", scan=no_scan, **kw)
+    m = demo.export_outputs(ws, corpus, out, name=name, home=root, user="", scan=no_scan, **kw)
     return out, corpus, m
 
 
 def tree_text(folder: Path) -> str:
-    return "".join(p.read_text() for p in sorted(folder.rglob("*")) if p.is_file())
+    return "".join(p.read_bytes().decode("utf-8", "replace") for p in sorted(folder.rglob("*")) if p.is_file())
 
 
 def test_export_keeps_the_outputs_alone(tmp_path):
@@ -377,20 +378,20 @@ def test_export_refuses_a_file_that_copies_a_long_stretch_of_the_corpus(tmp_path
     nb.write_text(json.dumps(cards))
     out = tmp_path / "out"
     with pytest.raises(demo.DemoError) as e:  # --allow-private does not let it through
-        demo.export(ws, corpus, out, name="toy", home=tmp_path, user="", scan=no_scan, allow_private=True)
+        demo.export_outputs(ws, corpus, out, name="toy", home=tmp_path, user="", scan=no_scan, allow_private=True)
     assert "notebooks/g1.json: 1 stretch of 400+ characters copied from the corpus" in str(e.value)
     assert "nothing was written" in str(e.value) and not out.exists()
     assert not [x for x in tmp_path.iterdir() if x.name.startswith(".")]  # not even a folder it staged in
     # an excerpt under the threshold, as a card quotes a record, passes
     cards["cells"][0]["outputs"] = [{"text/plain": "head:\n" + CORPUS_TEXT[:300]}]
     nb.write_text(json.dumps(cards))
-    m = demo.export(ws, corpus, out, name="toy", home=tmp_path, user="", scan=no_scan)
+    m = demo.export_outputs(ws, corpus, out, name="toy", home=tmp_path, user="", scan=no_scan)
     assert m["verbatim"]["longest"][0]["path"] == "notebooks/g1.json" and m["verbatim"]["longest"][0]["chars"] < 400
     # rows of a CSV file printed as they stand are one stretch of it
     cards["cells"][0]["outputs"] = [{"text/plain": (corpus / "b.csv").read_text()[:700]}]
     nb.write_text(json.dumps(cards))
     with pytest.raises(demo.DemoError, match="notebooks/g1.json"):
-        demo.export(ws, corpus, out, name="toy", home=tmp_path, user="", scan=no_scan)
+        demo.export_outputs(ws, corpus, out, name="toy", home=tmp_path, user="", scan=no_scan)
 
 
 def test_the_verbatim_index_finds_every_long_shared_stretch():
@@ -423,17 +424,17 @@ def test_export_refuses_what_may_be_private(tmp_path):
     (ws / "orient" / "summary.md").write_text("by maintainername from /mnt/disk/x")
     out = tmp_path / "p"
     with pytest.raises(demo.DemoError) as e:
-        demo.export(ws, corpus, out, name="toy", home=tmp_path / "nohome", user="maintainername",
+        demo.export_outputs(ws, corpus, out, name="toy", home=tmp_path / "nohome", user="maintainername",
                     scan=lambda _: ["workspace/orient/summary.md:1: generic-api-key"])
     assert "maintainername" in str(e.value) and "/mnt/disk" in str(e.value) and "generic-api-key" in str(e.value)
     assert not out.exists()
-    m = demo.export(ws, corpus, out, name="toy", home=tmp_path / "nohome", user="maintainername", allow_private=True,
+    m = demo.export_outputs(ws, corpus, out, name="toy", home=tmp_path / "nohome", user="maintainername", allow_private=True,
                     scan=no_scan)
     assert out.is_dir() and "workspace/orient/summary.md: /mnt/disk" in m["flagged"]
     (tmp_path / "mine").mkdir()
     (tmp_path / "mine" / "notes.txt").write_text("keep")
     with pytest.raises(demo.DemoError, match="not a pre-cache"):
-        demo.export(ws, corpus, tmp_path / "mine", name="toy", home=tmp_path, user="", scan=no_scan)
+        demo.export_outputs(ws, corpus, tmp_path / "mine", name="toy", home=tmp_path, user="", scan=no_scan)
     assert (tmp_path / "mine" / "notes.txt").read_text() == "keep"
 
 
@@ -447,8 +448,8 @@ def test_export_scrubs_and_checks_its_manifest(tmp_path):
     (ws / "orient" / "run.json").write_text(json.dumps({**run, "query": f"look at {corpus}/a.jsonl"}))
     (ws / "kernels" / "maintainername-k.log").write_text("log")
     with pytest.raises(demo.DemoError, match="thimble-demo-precache.json: the user name 'maintainername'"):
-        demo.export(ws, corpus, tmp_path / "m", name="toy", home=tmp_path, user="maintainername", scan=no_scan)
-    m = demo.export(ws, corpus, tmp_path / "m", name="toy", home=tmp_path, user="maintainername", scrub_user=True,
+        demo.export_outputs(ws, corpus, tmp_path / "m", name="toy", home=tmp_path, user="maintainername", scan=no_scan)
+    m = demo.export_outputs(ws, corpus, tmp_path / "m", name="toy", home=tmp_path, user="maintainername", scrub_user=True,
                     scan=no_scan)
     text = (tmp_path / "m" / demo.MANIFEST).read_text()
     assert m["orientation"]["query"] == "look at @@THIMBLE_CORPUS@@/a.jsonl" and str(tmp_path) not in text
@@ -462,7 +463,7 @@ def test_export_refuses_a_file_of_a_shape_it_never_writes(tmp_path, monkeypatch)
     corpus.mkdir()
     ws = make_workspace(tmp_path, corpus, tmp_path)
     with pytest.raises(demo.DemoError, match="labels/l1.jsonl: a label row with spans"):
-        demo.export(ws, corpus, tmp_path / "x", name="toy", home=tmp_path, user="", scan=no_scan, allow_private=True)
+        demo.export_outputs(ws, corpus, tmp_path / "x", name="toy", home=tmp_path, user="", scan=no_scan, allow_private=True)
 
 
 def test_export_scrubs_the_user_name_and_paths_a_summary_cut_short(tmp_path):
@@ -472,7 +473,7 @@ def test_export_scrubs_the_user_name_and_paths_a_summary_cut_short(tmp_path):
     cut = str(ws)[: len(str(ws)) - 4] + "…"
     (ws / "orient" / "summary.md").write_text(f"drwx maintainername maintainername x\n{cut}\n")
     out = tmp_path / "s"
-    m = demo.export(ws, corpus, out, name="toy", home=tmp_path, user="maintainername", scrub_user=True, scan=no_scan)
+    m = demo.export_outputs(ws, corpus, out, name="toy", home=tmp_path, user="maintainername", scrub_user=True, scan=no_scan)
     summary = (out / "workspace" / "orient" / "summary.md").read_text()
     assert "drwx user user x" in summary and "@@THIMBLE_WORKSPACE@@…" in summary and str(tmp_path) not in summary
     assert m["user_name_scrubbed"] == 2 and m["flagged"] == []
@@ -515,9 +516,10 @@ def test_install_refuses_paths_outside_the_workspace_and_files_of_other_kinds(tm
         with pytest.raises(demo.DemoError, match="paths it may not"):
             demo.install(out, tmp_path / "ws", corpus)
         assert not (tmp_path / "ws").exists()
-    (out / demo.MANIFEST).write_text(json.dumps({**man, "version": 2, "transcripts": [{"path": "t.jsonl"}]}))
-    with pytest.raises(demo.DemoError, match="another format"):
-        demo.install(out, tmp_path / "ws", corpus)
+    for version in (1, 5):
+        (out / demo.MANIFEST).write_text(json.dumps({**man, "version": version}))
+        with pytest.raises(demo.DemoError, match="another format"):
+            demo.install(out, tmp_path / "ws", corpus)
 
 
 def test_a_precache_carries_its_sources_notice_first_in_its_readme(tmp_path):
@@ -536,7 +538,7 @@ def test_a_precache_carries_its_sources_notice_first_in_its_readme(tmp_path):
 
 
 def test_a_fresh_session_on_a_precached_workspace_starts_from_the_canvas_and_the_report(tmp_path, mini_dir):
-    from app import orient_session, precached
+    from app import orient_session
 
     c = "mini"
     assert precached.take_context(c, "s1") == ""  # a workspace not installed from a pre-cache
@@ -573,7 +575,8 @@ def fake_dataset(name: str, caution: str = "") -> Dataset:
 
 def args(**kw) -> argparse.Namespace:
     base = dict(names=[], yes=True, dir=None, list=False, attach=False, no_attach=False, replace=False, precaches=None,
-                export=None, dataset=None, corpus=None, allow_private=False, scrub_user=False, app=None)
+                export=None, outputs_only=False, dataset=None, corpus=None, allow_private=False, scrub_user=False,
+                app=None, claude_config=None)
     return argparse.Namespace(**{**base, **kw})
 
 
@@ -615,7 +618,7 @@ def precache_for(tmp_path: Path, name: str) -> Path:
     corpus.mkdir(parents=True)
     (corpus / "a.jsonl").write_bytes(b'{"n": 1}\n')
     ws = make_workspace(root, corpus, root)
-    demo.export(ws, corpus, tmp_path / "pre" / name, name=name, home=root, user="", scan=no_scan)
+    demo.export_outputs(ws, corpus, tmp_path / "pre" / name, name=name, home=root, user="", scan=no_scan)
     return tmp_path / "pre"
 
 
@@ -788,15 +791,31 @@ def test_export_command_waits_for_a_finished_orientation(tmp_path, monkeypatch):
     run_rec = json.loads(run_path.read_text())
     run_path.write_text(json.dumps({**run_rec, "status": "running"}))
     lines: list[str] = []
-    a = args(export=[str(ws), str(tmp_path / "out")], corpus=str(corpus))
-    assert demo.run(a, say=lines.append) == 1 and "is running; export it once it is done" in " ".join(lines)
+    for outputs_only in (True, False):
+        a = args(export=[str(ws), str(tmp_path / "out")], corpus=str(corpus), outputs_only=outputs_only)
+        assert demo.run(a, say=lines.append) == 1 and "is running; export it once it is done" in " ".join(lines)
     run_path.write_text(json.dumps(run_rec))
+    a = args(export=[str(ws), str(tmp_path / "out")], corpus=str(corpus), outputs_only=True)
     assert demo.run(a, say=lines.append) == 0
     assert (tmp_path / "out" / "toy" / demo.MANIFEST).is_file()
     assert "2 cited calls" in " ".join(lines) and "refused from 400" in " ".join(lines)
     # OUT naming the pre-cache folder itself writes it again in place
-    assert demo.run(args(export=[str(ws), str(tmp_path / "out" / "toy")], corpus=str(corpus)), say=lines.append) == 0
+    a = args(export=[str(ws), str(tmp_path / "out" / "toy")], corpus=str(corpus), outputs_only=True)
+    assert demo.run(a, say=lines.append) == 0
     assert not (tmp_path / "out" / "toy" / "toy").exists()
+    # a stopped orientation leaves the workspace as it stands: a full export takes it, the outputs alone do not
+    run_path.write_text(json.dumps({**run_rec, "status": "stopped"}))
+    assert demo.run(a, say=lines.append) == 1
+    lines.clear()
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude"))
+    assert demo.run(args(export=[str(ws), str(tmp_path / "full")], corpus=str(corpus)), say=lines.append) == 0
+    assert json.loads((tmp_path / "full" / "toy" / demo.MANIFEST).read_text())["version"] == demo.FULL_VERSION
+    # the command ends with the inventory
+    tail = lines[next(i for i, x in enumerate(lines) if x.startswith("wrote ")):]
+    keys = [x[2:].split("  ")[0] for x in tail[1:] if x.startswith("  ") and x[2] != " " and "  " in x[2:]]
+    assert keys == ["transcripts", "chats", "call outputs", "labels", "outputs", "work files", "dataset text",
+                    "may be private", "still running", "left out"]  # the orientation's chat said it ran
+    assert any(x.startswith("wrote ") and "a full export" in x for x in lines)
 
 
 def test_the_analyst_picks_the_folder_a_session_attaches_in(tmp_path, monkeypatch):
@@ -806,3 +825,208 @@ def test_the_analyst_picks_the_folder_a_session_attaches_in(tmp_path, monkeypatc
         monkeypatch.setattr("builtins.input", lambda q, typed=typed: typed)
         assert demo.pick_folder(folders) == want
     assert demo.pick_folder(folders[:1]) == folders[0]
+
+
+# --------------------------------------------------------------------------- the full export
+
+SID = "1aa1c8a9-6569-4fc1-bb3c-22fbbdcea3a8"
+WRITER_SID = "88a66a70-db02-4243-8751-f910748b9383"
+
+
+def transcript(cwd: Path, sid: str, text: str) -> str:
+    """A Claude Code transcript of session `sid` run in `cwd`: a CLAUDE.md attachment the export drops, the analyst's
+    message, a tool result that quotes `text`, a message queued to the session, and a record holding U+2028."""
+    recs = [{"type": "attachment", "uuid": "a0", "parentUuid": None, "attachment": {"type": "nested_memory",
+                                                                                  "content": "my CLAUDE.md"}},
+            {"type": "user", "uuid": "u1", "parentUuid": "a0", "cwd": str(cwd), "sessionId": sid,
+             "message": {"role": "user", "content": "start"}},
+            {"type": "user", "uuid": "u2", "parentUuid": "u1", "cwd": str(cwd), "sessionId": sid,
+             "message": {"role": "user", "content": [{"type": "tool_result", "content": text}]}},
+            {"type": "attachment", "uuid": "q1", "parentUuid": "u2", "attachment": {"type": "queued_command",
+                                                                                  "prompt": "and the timing?"}},
+            {"type": "assistant", "uuid": "u3", "parentUuid": "q1", "cwd": str(cwd), "sessionId": sid,
+             "message": {"role": "assistant", "content": "line\u2028break"}}]
+    return "".join(json.dumps(r, ensure_ascii=False) + "\n" for r in recs)
+
+
+def full_made(tmp_path: Path, **kw) -> tuple[Path, Path, Path, dict]:
+    """A workspace with its sessions' transcripts in a Claude Code config folder, exported whole to tmp_path/out/toy:
+    (the export, the corpus, the config folder, the manifest)."""
+    root = tmp_path / "a"
+    corpus = root / "corpus"
+    corpus.mkdir(parents=True)
+    (corpus / "a.jsonl").write_text(json.dumps({"body": CORPUS_TEXT}) + "\n")
+    ws = make_workspace(root, corpus, root)
+    for rel, text in {
+        "chats/o1.meta.json": json.dumps({"id": "o1", "kind": "agent", "role": "orient", "model": "claude-opus-5-5",
+                                         "status": "done", "session": SID, "pid": 7, "background": True, "bg": "b1",
+                                         "workspace_dir": str(ws), "follow": {"offset": 9, "session": SID}}),
+        "chats/w1.meta.json": json.dumps({"id": "w1", "kind": "agent", "role": "writer", "status": "running",
+                                         "session": WRITER_SID}),
+        "chats/w1.jsonl": "",
+        "chats/main.meta.json": json.dumps({"id": "main", "kind": "main", "attached": {"session": "m-1"}}),
+        "chats/main.jsonl": "".join(json.dumps(r) + "\n" for r in (
+            {"type": "user", "text": "/exit", "by": "terminal"}, {"type": "user", "text": "hello", "by": "browser"})),
+        "orient/run.json": json.dumps({"status": "done", "passes": ["final"], "chats": {"orient": "o1"},
+                                       "session": SID, "pid": 42}),
+        "card-checks/c1/shot.png": "\x89PNG\x00",
+        "writers/report/notes.md": "the writer's notes",
+    }.items():
+        (ws / rel).parent.mkdir(parents=True, exist_ok=True)
+        (ws / rel).write_text(text, "utf-8")
+    (ws / "card-checks" / "c1" / "shot.png").write_bytes(b"\x89PNG\r\n\x00\xff")
+    claude = tmp_path / "claude"
+    for folder, sid in (("orient/work", SID), ("writers/report", WRITER_SID)):
+        proj = claude / "projects" / demo.dashed(str(ws / folder))
+        proj.mkdir(parents=True)
+        (proj / f"{sid}.jsonl").write_text(transcript(ws / folder, sid, CORPUS_TEXT), "utf-8")
+    side = claude / "projects" / demo.dashed(str(ws / "orient" / "work")) / SID
+    (side / "tool-results").mkdir(parents=True)
+    (side / "tool-results" / "b1.txt").write_text(f"saved output of {ws}/orient/work")
+    (side / "subagents").mkdir()
+    (side / "subagents" / "agent-1.jsonl").write_text(transcript(ws / "orient" / "work", SID, "a step"))
+    # a sibling workspace whose folder Claude Code names with the same start: not this workspace's
+    other = root / "workspaces" / "toy-2" / "orient" / "work"
+    proj = claude / "projects" / demo.dashed(str(other))
+    proj.mkdir(parents=True)
+    (proj / "99999999-0000-0000-0000-000000000000.jsonl").write_text(transcript(other, "x", "other"))
+    out = tmp_path / "out" / "toy"
+    m = demo.export_full(ws, corpus, out, name="toy", home=root, user="", scan=no_scan, claude_dir=claude, **kw)
+    return out, corpus, claude, m
+
+
+def test_the_full_export_writes_everything_with_the_transcripts_and_refuses_nothing(tmp_path):
+    out, corpus, claude, m = full_made(tmp_path)
+    assert m["version"] == demo.FULL_VERSION and m["format"] == "full"
+    names = {f["path"] for f in m["files"]}
+    # the conversations, every call, the work files, the card checks and the history are kept
+    assert {"chats/main.jsonl", "chats/t9.jsonl", "chats/o1.jsonl", "calls/zz.jsonl", "calls/o1.jsonl",
+            "orient/work/t.csv", "writers/report/notes.md", "card-checks/c1/shot.png", "canvas-history.jsonl",
+            "views/key-refs.json", "views/.versions/v1/abc/view.html", "extension/views/v1/rows.json",
+            "notebooks/outputs/c1-1.parquet", "notebooks/trash/old.json", "settings.json"} <= names
+    left = {f["path"]: f["why"] for f in m["left_out"]}
+    assert set(left) == {"labels/l1.sqlite", "scratch/a.jsonl", "kernels/k.log", "telemetry.jsonl", "sessions.json",
+                         "view-indexes/v1/index.json", "extension/views/v1/cache/x.json",
+                         "orient/work/.claude/settings.json"}
+    ws_out = out / "workspace"
+    assert (ws_out / "card-checks" / "c1" / "shot.png").read_bytes() == b"\x89PNG\r\n\x00\xff"
+    # the labels keep every row whole, the texts each marked too
+    assert "the time it expected" in (ws_out / "labels" / "l1.jsonl").read_text()
+    assert "api_token" not in (ws_out / "settings.json").read_text()
+    # main's chat without the slash commands; no chat names the process or the session that ran it
+    assert "/exit" not in (ws_out / "chats" / "main.jsonl").read_text()
+    for meta in (ws_out / "chats").glob("*.meta.json"):
+        assert not {"pid", "server", "follow", "background", "bg", "attached"} & set(json.loads(meta.read_text()))
+    assert json.loads((ws_out / "chats" / "w1.meta.json").read_text())["status"] == "done"
+    assert json.loads((ws_out / "chats" / "o1.meta.json").read_text())["session"] == SID
+    assert "pid" not in json.loads((ws_out / "orient" / "run.json").read_text())
+    # the transcripts of the workspace's sessions, cleaned, and what Claude Code kept beside them
+    trs = {t["folder"]: t for t in m["transcripts"]}
+    assert set(trs) == {"orient/work", "writers/report"}
+    assert trs["orient/work"]["role"] == "orientation" and trs["writers/report"]["role"] == "writer"
+    assert trs["orient/work"]["session"] == SID and trs["orient/work"]["path"] == f"transcripts/{SID}.jsonl"
+    assert trs["orient/work"]["dropped"] == {"attachment:nested_memory": 2}  # its own, and its subagent's
+    assert {f["path"] for f in trs["orient/work"]["files"]} == {f"transcripts/{SID}/tool-results/b1.txt",
+                                                               f"transcripts/{SID}/subagents/agent-1.jsonl"}
+    text = (out / "transcripts" / f"{SID}.jsonl").read_text()
+    assert "my CLAUDE.md" not in text and "line\u2028break" in text
+    assert [json.loads(x)["uuid"] for x in text.split("\n") if x] == ["u1", "u2", "q1", "u3"]  # the queued message too
+    assert json.loads(text.split("\n")[0])["parentUuid"] is None  # linked past the record it dropped
+    assert '"cwd":"@@THIMBLE_WORKSPACE@@/orient/work"' in text
+    assert "@@THIMBLE_WORKSPACE@@/orient/work" in (out / "transcripts" / SID / "tool-results" / "b1.txt").read_text()
+    assert str(tmp_path) not in tree_text(out)
+    # it holds the dataset's text and says how much, refusing nothing
+    v = m["verbatim"]
+    assert v["shared"] > 2 * len(CORPUS_TEXT) and {"transcripts", "chats", "calls"} <= set(v["by_kind"])
+    inv = m["inventory"]
+    assert inv["sessions"] == {"orientation": 1, "writer": 1} and inv["dropped_records"] == 3
+    assert inv["typed_in_main"] == 1 and inv["marked_done"] == ["w1"] and inv["calls"] == 3
+    assert inv["label_rows"] == 1 and inv["rationales"] == 1 and inv["spans"] == 1
+    assert (out / "README.md").read_text().startswith("# toy: full export")
+
+
+def test_the_full_export_names_what_may_be_private_without_refusing(tmp_path):
+    full_made(tmp_path / "x")
+    ws = tmp_path / "x" / "a" / "workspaces" / "toy"
+    (ws / "notebooks" / "outputs" / "c9.txt").write_text("ls -l: maintainername staff /home/maintainername/notes")
+    m = demo.export_full(ws, tmp_path / "x" / "a" / "corpus", tmp_path / "y", name="toy", home=tmp_path / "nohome",
+                         user="maintainername", scan=lambda _: ["chats/x.jsonl:1: generic-api-key"],
+                         claude_dir=tmp_path / "x" / "claude")
+    inv = m["inventory"]
+    assert inv["user_name_files"] == 1 and inv["paths"] == ["/home/maintainername"]
+    assert inv["gitleaks"] == ["chats/x.jsonl:1: generic-api-key"]
+    assert (tmp_path / "y" / "workspace" / "notebooks" / "outputs" / "c9.txt").is_file()
+    lines = demo.inventory_lines(m, tmp_path / "y", 1000)
+    private = " ".join(" ".join(lines[next(i for i, x in enumerate(lines) if x.startswith("  may be private")):]).split())
+    assert "your user name in 1 file (--scrub-user replaces it)" in private
+    assert "absolute paths such as /home/maintainername" in private and "gitleaks: 1 finding" in private
+    # --scrub-user writes `user` in its place
+    m = demo.export_full(ws, tmp_path / "x" / "a" / "corpus", tmp_path / "y", name="toy", home=tmp_path / "nohome",
+                         user="maintainername", scrub_user=True, scan=no_scan, claude_dir=tmp_path / "x" / "claude")
+    assert m["inventory"]["user_name_files"] == 0 and m["user_name_scrubbed"] == 2
+
+
+def test_a_full_export_installs_with_its_sessions_under_new_ids(tmp_path):
+    out, corpus, claude, m = full_made(tmp_path)
+    new_ws = tmp_path / "b" / "workspaces" / "toy"
+    new_corpus = tmp_path / "b" / "corpus"
+    new_corpus.mkdir(parents=True)
+    (new_corpus / "a.jsonl").write_text(json.dumps({"body": CORPUS_TEXT}) + "\n")
+    new_claude = tmp_path / "b-claude"
+    got = demo.install(out, new_ws, new_corpus, home=tmp_path / "b", claude_dir=new_claude)
+    assert got["warnings"] == [] and len(got["installed_transcripts"]) == 2
+    by_folder = {i["folder"]: i for i in got["installed_transcripts"]}
+    sid = by_folder["orient/work"]["session"]
+    assert sid != SID
+    placed = new_claude / "projects" / demo.projects_folder(str(new_ws.resolve() / "orient" / "work")) / f"{sid}.jsonl"
+    assert placed.is_file() and by_folder["orient/work"]["path"] == str(placed)
+    text = placed.read_text()
+    assert SID not in text and f'"sessionId": "{sid}"' not in text and f'"sessionId":"{sid}"' in text
+    assert f'"cwd":"{new_ws}/orient/work"' in text
+    assert (placed.parent / sid / "tool-results" / "b1.txt").read_text() == f"saved output of {new_ws}/orient/work"
+    assert (placed.parent / sid / "subagents" / "agent-1.jsonl").is_file()
+    # the workspace names the new sessions, and the orientation keeps its own, so a message resumes it
+    run = json.loads((new_ws / "orient" / "run.json").read_text())
+    assert run["session"] == sid and run["precached"]["kept"] is True and run["precached"]["format"] == "full"
+    assert not precached.is_precached_run(run) and precached.is_installed_run(run)
+    meta = json.loads((new_ws / "chats" / "o1.meta.json").read_text())
+    assert meta["session"] == sid and meta["precached"]["kept"] is True
+    writer = json.loads((new_ws / "chats" / "w1.meta.json").read_text())
+    assert writer["session"] == by_folder["writers/report"]["session"] != WRITER_SID
+    assert (new_ws / "writers" / "report" / "notes.md").read_text() == "the writer's notes"
+    assert (new_ws / "card-checks" / "c1" / "shot.png").read_bytes() == b"\x89PNG\r\n\x00\xff"
+    assert SID not in tree_text(new_ws / "chats")
+    # a second install of the same export gets sessions of its own
+    again = demo.install(out, tmp_path / "c" / "toy", new_corpus, home=tmp_path / "b", claude_dir=new_claude)
+    assert again["installed_transcripts"][0]["session"] not in (sid, SID)
+
+
+def test_a_full_export_whose_transcripts_did_not_come_installs_as_the_outputs_do(tmp_path):
+    out, corpus, claude, m = full_made(tmp_path)
+    shutil.rmtree(out / "transcripts")
+    new_ws = tmp_path / "b" / "toy"
+    got = demo.install(out, new_ws, corpus, home=tmp_path / "b", claude_dir=tmp_path / "b-claude")
+    assert len(got["warnings"]) == 2 and "cannot continue" in got["warnings"][0]
+    run = json.loads((new_ws / "orient" / "run.json").read_text())
+    assert "session" not in run and run["precached"]["kept"] is False and precached.is_precached_run(run)
+
+
+def test_install_refuses_a_full_export_whose_transcripts_reach_outside(tmp_path):
+    out, corpus, claude, m = full_made(tmp_path)
+    man = json.loads((out / demo.MANIFEST).read_text())
+    for bad in ({"path": "../x.jsonl"}, {"path": "workspace/notes.jsonl"}, {"folder": "../../elsewhere"}):
+        changed = {**man, "transcripts": [{**man["transcripts"][0], **bad}]}
+        (out / demo.MANIFEST).write_text(json.dumps(changed))
+        with pytest.raises(demo.DemoError, match="paths it may not"):
+            demo.install(out, tmp_path / "ws", corpus, claude_dir=tmp_path / "c")
+        assert not (tmp_path / "ws").exists() and not (tmp_path / "c").exists()
+
+
+def test_a_fresh_session_on_a_full_install_is_told_the_orientation_continues(tmp_path, mini_dir):
+    out, _, _, _ = full_made(tmp_path)
+    ws = config.workspace_path("mini")
+    demo.install(out, ws, mini_dir, home=tmp_path, claude_dir=tmp_path / "b-claude")
+    text = precached.take_context("mini", "s1")
+    assert text.startswith("This workspace was installed from a full export")
+    assert "came with it, so `message_orientation` continues it" in text
+    assert precached.take_context("mini", "s1") == ""
