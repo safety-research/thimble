@@ -226,9 +226,9 @@ pre-cache holds the orientation's outputs alone, so its Claude Code session is n
 opens with no analysis yet, and Start in the page runs the orientation. It opens the workspace in your browser without
 a Claude Code session; in the orientation's thread, "Attach a fresh session" shows the command that attaches one.
 
-On a terminal it then asks `Attach a Claude Code session now? (requires claude to be logged in)`, Enter for yes, once
-`claude auth status` says you are logged in (when you are not, it says how to log in and asks nothing). `--attach`
-answers yes, `--no-attach` no. Either way it prints how to attach later:
+The demo is static: it starts no Claude Code session and asks nothing about one. `--attach` starts one in the
+dataset's folder, once `claude auth status` says you are logged in (when you are not, it says how to log in). It
+prints how to attach later:
 
 ```bash
 cd ~/.thimble/demo/collusion-wiki && thimble     # main, the session you chat with in the page

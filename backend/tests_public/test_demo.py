@@ -728,35 +728,31 @@ def test_demo_with_no_precache_opens_each_dataset_with_a_note(fake_world):
     assert "ran in advance" not in text
 
 
-def test_demo_asks_to_attach_on_a_terminal_and_enter_attaches(tmp_path, fake_world, monkeypatch):
+def test_demo_is_static_by_default_and_asks_nothing(tmp_path, fake_world, monkeypatch):
     w = fake_world
     pre = precache_for(tmp_path, "one")
-    asked = terminal(monkeypatch, [""])
+    asked = terminal(monkeypatch, [])
     assert run(w, args(names=["one"], dir=str(w["root"]), precaches=str(pre))) == 0
-    assert asked == [demo.ATTACH_QUESTION] and "(requires claude to be logged in)" in asked[0]
-    assert w["started"] == [w["root"] / "one"]
+    assert asked == [] and w["started"] == []
     text = said(w)
-    assert f"Attaching a Claude Code session in {w['root'] / 'one'}" in text
+    assert "No Claude Code session is attached" in text
     assert f"cd {w['root'] / 'one'} && thimble" in text and "`thimble -c` in that folder continues" in text
 
 
-def test_demo_attaches_nothing_on_a_no(fake_world, monkeypatch):
+def test_demo_attach_with_two_datasets_asks_which(fake_world, monkeypatch):
     w = fake_world
-    terminal(monkeypatch, ["n"])
-    assert run(w, args(names=["one"], dir=str(w["root"]))) == 0
-    assert w["started"] == [] and "No Claude Code session is attached" in said(w)
-    # two datasets: the yes then asks which
-    asked = terminal(monkeypatch, ["y", "2"])
-    assert run(w, args(names=["one", "two"], dir=str(w["root"]))) == 0
-    assert asked[0] == demo.ATTACH_QUESTION and asked[1].startswith("Attach in which?")
+    asked = terminal(monkeypatch, ["2"])
+    assert run(w, args(names=["one", "two"], dir=str(w["root"]), attach=True)) == 0
+    assert asked[0].startswith("Attach in which?")
     assert w["started"] == [w["root"] / "two"]
+    assert f"Attaching a Claude Code session in {w['root'] / 'two'}" in said(w)
 
 
 def test_demo_says_how_to_log_in_when_claude_is_not_logged_in(fake_world, monkeypatch):
     w = fake_world
     w["auth"] = {"loggedIn": False}
     asked = terminal(monkeypatch, [])
-    assert run(w, args(names=["one"], dir=str(w["root"]))) == 0
+    assert run(w, args(names=["one"], dir=str(w["root"]), attach=True)) == 0
     assert asked == [] and w["started"] == []
     text = said(w)
     assert "Claude Code is not logged in" in text and "`claude auth login`" in text
@@ -764,7 +760,7 @@ def test_demo_says_how_to_log_in_when_claude_is_not_logged_in(fake_world, monkey
     # no claude on PATH at all
     monkeypatch.setattr(config, "CLI_PATH", None)
     w["lines"].clear()
-    assert run(w, args(names=["one"], dir=str(w["root"]))) == 0
+    assert run(w, args(names=["one"], dir=str(w["root"]), attach=True)) == 0
     assert asked == [] and "is not on PATH" in said(w)
 
 

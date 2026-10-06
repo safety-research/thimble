@@ -13,10 +13,9 @@ pre-cache as its workspace when demos/ (or --precaches DIR) has one (a dataset w
 with a line saying so), and opens the workspace in the browser without a Claude Code session (as `thimble up` does).
 --examples opens the worked examples of custom views on the same server instead (demo_examples.py).
 
-Attaching. On a terminal it then asks "Attach a Claude Code session now? (requires claude to be logged in)", Enter for
-yes, after `claude auth status` says a login is configured (when it says none, it says how to log in and asks
-nothing); a yes replaces the command with `thimble` in the dataset's folder. --attach answers yes and --no-attach no.
-Without a terminal it asks nothing. Either way it prints how to attach later: `cd <folder> && thimble`, and `thimble
+Attaching. The demo is static: it opens the workspace and starts no Claude Code session. --attach starts one (`thimble`
+in the dataset's folder), after `claude auth status` says a login is configured (when it says none, it says how to log
+in). Either way it prints how to attach later: `cd <folder> && thimble`, and `thimble
 -c` there continues the last session. A session attached to a pre-cached workspace starts fresh, with the canvas and
 the report as its context (precached.py).
 
@@ -95,7 +94,6 @@ def default_dir() -> Path:
     """Where the datasets go unless --dir says: demo/ in thimble's own folder (THIMBLE_HOME, ~/.thimble)."""
     return (Path(os.environ.get("THIMBLE_HOME") or "~/.thimble").expanduser() / "demo").resolve()
 SCRUBBED_USER = "user"  # what --scrub-user writes in place of the exporter's user name
-ATTACH_QUESTION = "Attach a Claude Code session now? (requires claude to be logged in) [Y/n] "
 COVERAGE_CHIP = "coverage"  # the chip kind of the coverage line at the end of the orientation's thread (orient_session)
 LOGIN_HINT = "`claude auth login`, or run `claude` and type /login"
 
@@ -1671,9 +1669,9 @@ def claude_login(auth: Callable[[], dict[str, Any] | None]) -> tuple[bool | None
 
 def attach_choice(args: argparse.Namespace, folders: list[Path], say: Callable[[str], None],
                   auth: Callable[[], dict[str, Any] | None]) -> tuple[Path | None, bool]:
-    """The folder to attach a session in now, or None: asked on a terminal (Enter for yes) once Claude Code has a login
-    (module note); --attach answers yes and --no-attach no. And whether it said why Claude Code cannot attach one."""
-    if not folders or args.no_attach:
+    """The folder to attach a session in now, or None: the demo is static unless --attach asks for a session (module
+    note). And whether it said why Claude Code cannot attach one."""
+    if not folders or not args.attach:
         return None, False
     if not (sys.stdin.isatty() and sys.stdout.isatty()):
         if args.attach:
@@ -1683,8 +1681,6 @@ def attach_choice(args: argparse.Namespace, folders: list[Path], say: Callable[[
     if logged_in is False:
         say(f"  {why}")
         return None, True
-    if not args.attach and not _ask(ATTACH_QUESTION, False, default=True):
-        return None, False
     return pick_folder(folders), False
 
 
@@ -1896,8 +1892,8 @@ def add_parser(sub: Any) -> None:
     p.add_argument("--list", action="store_true", help="list the datasets and their sources; download nothing")
     attach = p.add_mutually_exclusive_group()
     attach.add_argument("--attach", action="store_true",
-                        help="attach a Claude Code session (thimble) without asking")
-    attach.add_argument("--no-attach", action="store_true", help="open the workspace without asking to attach")
+                        help="also start a Claude Code session (thimble) in the dataset's folder")
+    attach.add_argument("--no-attach", action="store_true", help=argparse.SUPPRESS)  # the default; kept for scripts
     p.add_argument("--replace", action="store_true",
                    help="archive a workspace that holds an analysis already and install the pre-cache in its place")
     p.add_argument("--precaches", metavar="DIR",

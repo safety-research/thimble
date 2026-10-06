@@ -33,7 +33,7 @@
 #   thimble state <surface> --cwd <p> [args] | act <kind> --cwd <p> <json>
 #                                        terminal mode's renderer: the JSON a surface's GET route gives the browser, or
 #                                        what a click's POST route does, with no server and no port (backend/app/local.py)
-#   thimble demo [name…] [--yes] [--dir <d>] [--attach | --no-attach] | --export <workspace> <out> [--outputs-only]
+#   thimble demo [name…] [--yes] [--dir <d>] [--attach] | --export <workspace> <out> [--outputs-only]
 #                                        download the demo datasets from their public sources (asking first), open each
 #                                        in the browser, on its pre-cached orientation where demos/ has one, ask on a
 #                                        terminal whether to attach a session and print how to attach one later;
@@ -94,7 +94,7 @@ usage: thimble [claude flags...]          start thimble in this folder: a new Cl
                                           thimble plugin (the cards, report and labels stay)
        thimble -c, --continue             continue the most recent thimble session in this folder
        thimble -r, --resume [value]       resume a conversation by session ID, or pick one
-       thimble demo [name...] [--yes] [--dir <d>] [--attach | --no-attach]
+       thimble demo [name...] [--yes] [--dir <d>] [--attach]
                                           download public datasets (collusion-wiki, mythos-5,
                                           transluce-urlquery), asking first, open each, and ask whether to
                                           attach a session
