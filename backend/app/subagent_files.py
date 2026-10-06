@@ -281,9 +281,10 @@ def check_call(state: dict[str, Any], hook: dict[str, Any]) -> str | None:
     asks or judges as usual).
 
     Agent: a subagent's call is recorded as a nested start of its caller (the parent of the agent it starts). A call
-    for one of thimble's roles must match a pending start exactly (type and prompt): main's own call a typed one, a
-    plugin start (a `toolu_plugin_` id) a click or a follow-on one, and an agent's call (the critic's start) one that
-    names that agent's role; the request is then claimed by the call. A second orientation, a second writer of a
+    for one of thimble's roles must match a pending start exactly (type and prompt, whitespace at the prompt's end
+    aside, which a model copying the call drops or adds): main's own call a typed one, a plugin start (a
+    `toolu_plugin_` id) a click or a follow-on one, and an agent's call (the critic's start) one that names that
+    agent's role; the request is then claimed by the call. A second orientation, a second writer of a
     document, `run_in_background: false`, and every start in plan mode are denied. thimble:helper and any type that is
     not one of thimble's roles go on.
 

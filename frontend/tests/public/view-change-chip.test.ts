@@ -2,7 +2,7 @@
 // its checks, and one the analyst's quit stopped, each say the view is as it was; a dev ticket's own end keeps its words
 // (live check L11: a change that main's quit stopped read as failed). A view build's start in main says it is one.
 import { expect, test } from 'vitest'
-import { devStartText, ticketChipText } from '../../src/chat/Rows.tsx'
+import { devStarted, ticketChipText } from '../../src/chat/Rows.tsx'
 
 test("a change to a view that main's quit stopped says it stopped, not that it failed", () => {
   expect(ticketChipText({ status: 'stopped', text: '', ref: 'view:posts' })).toBe(
@@ -13,7 +13,7 @@ test("a change to a view that main's quit stopped says it stopped, not that it f
 })
 
 test('a view build that main started reads as a view build in main, not as a dev ticket', () => {
-  expect(devStartText('view: Page Revisions')).toBe('View build started in')
-  expect(devStartText('Fix the login page')).toBe('Dev ticket started')
-  expect(devStartText(undefined)).toBe('Dev ticket started')
+  expect(devStarted({ title: 'view: Page Revisions' })).toBe('View build started in')
+  expect(devStarted({ title: 'Fix the login page' })).toBe('Dev ticket started')
+  expect(devStarted({ title: undefined })).toBe('Dev ticket started')
 })

@@ -1157,7 +1157,7 @@ async def test_an_extension_s_task_prompts_and_report_checks_are_used(corpus, tm
     """A task's prompt adds to thimble's part of the task's prompt file, or takes its place with `replace` and pulls
     thimble's back in with {{default}}, wherever that part is (a whole file, its head or one section); two replacements
     leave thimble's own. A report check of an extension is offered among the checks, off, after the built-ins."""
-    from app import checks, prompts, tasks
+    from app import checks, prompts, tasks, view_review
 
     ext = _role_ext(tmp_path, "tuned", {}, {
         "tasks/view-fit/task.json": json.dumps({"description": "Stricter.", "prompt": "fit.md"}),
@@ -1181,6 +1181,15 @@ async def test_an_extension_s_task_prompts_and_report_checks_are_used(corpus, tm
     default = prompts.section("card-check", "check").strip()
     assert secs["check"].startswith(default[:200]) and "Also read every axis title of (none)." in secs["check"]
     assert "card" in secs and "## " not in secs["check"], "the other sections stay apart"
+    # live check L26 (live-d): an addition to the view review's section that opens with a `## ` heading was cut off
+    review = _role_ext(tmp_path, "headed", {}, {
+        "tasks/view-review/task.json": json.dumps({"description": "Restore.", "prompt": "r.md"}),
+        "tasks/view-review/r.md": "## A test of the restore\n\nBreak the view once.\n\n```\n# a comment in code\n```"})
+    _add(review)
+    await extensions.refresh(CORPUS)
+    with prompts.custom(tasks.files(CORPUS, view_review.PROMPT)):
+        reviewer = view_review.reviewer_prompt(CORPUS)
+    assert "#### A test of the restore\n\nBreak the view once." in reviewer and "\n# a comment in code\n" in reviewer
     with prompts.custom(userconf.prompt_files(CORPUS, "labels")):
         head = prompts.render_head("labels", {"name": "x", "unit": "record", "definition": "d", "labels": "a, b",
                                               "comment": "", "examples": ""})

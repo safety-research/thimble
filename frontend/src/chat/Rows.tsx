@@ -145,7 +145,7 @@ export function Rows({ rows, ws, chat, streaming = false, nested = false, calls,
             return (
               <div key={r.index} className="chat-msg chat-user" data-event={r.event}>
                 {r.by === 'main' && <Note className="chat-origin" text="From" chips={<ThreadChip id="main" />} />}
-                {byLabel(r.by, chat) && <Note className="chat-origin chat-by" data-by={r.by} text={byLabel(r.by, chat)!} />}
+                {byLabel(r.by, chat, r.tray) && <Note className="chat-origin chat-by" data-by={r.by} text={byLabel(r.by, chat, r.tray)!} />}
                 <UserMessage className="chat-message" data-anchor={anchorOf(r.index)} data-anchor-text={chat ? r.text : undefined} data-by={r.by}>
                   <RefText text={stripHarness(r.text)} workspace={ws} />
                 </UserMessage>
@@ -174,7 +174,7 @@ export function Rows({ rows, ws, chat, streaming = false, nested = false, calls,
             if (r.role === 'orient' && (r.run ?? 0) > 0) return <AgentCard key={r.index} ws={ws} chat={r.chat} role="orient" title="Orientation" ts={r.ts} run={r.run} />
             if (r.role === 'orient') return <Note key={r.index} className="chat-agent-note" data-chat={r.chat} text="Orientation started in" chips={<ThreadChip id={r.chat} />} />
             if (r.role === 'writer') return <Note key={r.index} className="chat-agent-note" data-chat={r.chat} text="Writing started in" chips={<ThreadChip id={r.chat} />} />
-            if (r.role === 'dev') return <Note key={r.index} className="chat-agent-note" data-chat={r.chat} text={devStartText(r.title)} chips={<ThreadChip id={r.chat} />} />
+            if (r.role === 'dev') return <Note key={r.index} className="chat-agent-note" data-chat={r.chat} text={devStarted(r)} chips={<ThreadChip id={r.chat} />} />
             return <AgentCard key={r.index} ws={ws} chat={r.chat} role={r.role} title={r.title} ts={r.ts} />
           case 'branch':
             return (
@@ -209,12 +209,19 @@ export function Rows({ rows, ws, chat, streaming = false, nested = false, calls,
 
 const EMPTY: ReadonlySet<string> = new Set()
 
-/** Where a message to one of thimble's agents came from, in its thread: typed in Claude Code's agent tray (`terminal`,
- * the record's origin `human`) or sent from thimble's browser (`browser`); none in main, whose own messages are the
- * analyst's. Pure. */
-export function byLabel(by: string | undefined, chat: string | undefined): string | null {
+/** Main's note for a dev chat that started: a view's build (`view`, on the backend's agent row), else a code ticket.
+ * Pure. */
+export function devStarted(r: { view?: string; title?: string | null }): string {
+  // the agent row's `view`; a row an earlier build wrote names a view build only by its title
+  return r.view || (r.title ?? '').startsWith('view: ') ? 'View build started in' : 'Dev ticket started'
+}
+
+/** Where a message to one of thimble's agents came from, in its thread: typed in Claude Code's agent tray (`terminal`
+ * with `tray`, the record's origin `human`) or sent from thimble's browser (`browser`); none for a prompt main's call
+ * sent (`terminal` alone), and none in main, whose own messages are the analyst's. Pure. */
+export function byLabel(by: string | undefined, chat: string | undefined, tray?: boolean): string | null {
   if (!chat || chat === 'main') return null
-  if (by === 'terminal') return 'typed in the agent tray'
+  if (by === 'terminal') return tray ? 'typed in the agent tray' : null
   if (by === 'browser') return 'sent from thimble'
   return null
 }
@@ -639,12 +646,6 @@ function CallOutput({ text, callRef: ref, failed, focus }: { text: string; callR
       )}
     </>
   )
-}
-
-/** The note in main for a chat of the dev role as it starts: a view build (its chat is titled `view: <name>`, backend
- * subagents.TYPES) or a code ticket. Pure. */
-export function devStartText(title: string | null | undefined): string {
-  return (title ?? '').startsWith('view: ') ? 'View build started in' : 'Dev ticket started'
 }
 
 /** A dev ticket's end in main, in a few words: applied, stopped, or failed (a change to a view that failed, or that the

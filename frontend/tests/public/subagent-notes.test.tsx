@@ -5,7 +5,7 @@
 // again, and the line when a typed follow-up ran on the role's current values (src/chat/Rows.tsx).
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
-import { ChipRow, byLabel, notPassedOn } from '../../src/chat/Rows.tsx'
+import { ChipRow, byLabel, devStarted, notPassedOn } from '../../src/chat/Rows.tsx'
 import { stoppedAgentsLine } from '../../src/shell/SessionGone.tsx'
 import { NO_SANDBOX_LINE, UNFENCED_LINE, UnfencedBanner, unfencedLine } from '../../src/shell/UnfencedBanner.tsx'
 import type { ChatMeta } from '../../src/lib/types.ts'
@@ -49,8 +49,14 @@ describe('the session-gone card', () => {
 })
 
 describe('in a thread', () => {
+  test("main's note names a view build as one, and a code ticket as a ticket (live check L25)", () => {
+    expect(devStarted({ view: 'wiki-page-history' })).toBe('View build started in')
+    expect(devStarted({})).toBe('Dev ticket started')
+  })
+
   test('a message says where it came from: the agent tray or thimble; none in main', () => {
-    expect(byLabel('terminal', 'o1')).toBe('typed in the agent tray')
+    expect(byLabel('terminal', 'o1', true)).toBe('typed in the agent tray')
+    expect(byLabel('terminal', 'o1'), "the prompt main's Agent call sent, live check L25 (live-d)").toBeNull()
     expect(byLabel('browser', 'o1')).toBe('sent from thimble')
     expect(byLabel('browser', 'main')).toBeNull()
   })

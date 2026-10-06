@@ -13,6 +13,7 @@ import { Menu, Popover } from '../components/Menu'
 import { Spinner } from '../components/Spinner'
 import { Tipped, useTooltip } from '../components/Tooltip'
 import { pendingAsks, useChatMetas } from '../chat/waiting'
+import { failedWhy } from '../chat/ViewChip'
 import { api } from '../lib/api'
 import { bus } from '../lib/bus'
 import { refreshProposals, useProposals } from '../lib/proposals'
@@ -83,6 +84,8 @@ export interface BuiltView {
   updating?: boolean
   /** its page draws label controls of its own (elements with data-label), so the Labels sidebar does not open by itself */
   label_controls?: boolean
+  /** the npm packages its page loads (view.json's `libs`), which its head names */
+  libs?: string[]
 }
 
 /** Whether a proposal is a view the bar lists: built, or built before and being changed now. Pure. */
@@ -106,11 +109,11 @@ export function barList(list: readonly View[], all: readonly Proposal[]): { view
   const built: BuiltView[] = [
     ...listed.map((p) => {
       const v = known.get(p.slug)
-      return { slug: p.slug, name: p.name, first_file: v?.first_file, files: v?.files, n_files: v?.n_files, claims: v?.claims, built: v?.built, version: v?.version, label_controls: v?.label_controls, review: p.review, ...(p.status !== 'built' ? { updating: true } : {}) }
+      return { slug: p.slug, name: p.name, first_file: v?.first_file, files: v?.files, n_files: v?.n_files, claims: v?.claims, built: v?.built, version: v?.version, label_controls: v?.label_controls, libs: v?.libs, review: p.review, ...(p.status !== 'built' ? { updating: true } : {}) }
     }),
     ...views
       .filter((v) => !proposals.some((p) => p.slug === v.slug))
-      .map((v) => ({ slug: v.slug, name: v.name, first_file: v.first_file, files: v.files, n_files: v.n_files, claims: v.claims, built: v.built, version: v.version, label_controls: v.label_controls, builtin: v.origin === 'builtin' })),
+      .map((v) => ({ slug: v.slug, name: v.name, first_file: v.first_file, files: v.files, n_files: v.n_files, claims: v.claims, built: v.built, version: v.version, label_controls: v.label_controls, libs: v.libs, builtin: v.origin === 'builtin' })),
   ]
   // a viewer the File browser suggests for a file type shows there alone until it is accepted, and an orientation's
   // view appears once it is built
@@ -131,7 +134,8 @@ export function buildLabel(status: Proposal['status'], asking: boolean): string 
 }
 
 /** A proposal in the bar: the view's button as the bar draws a view, its state after the name, a click that opens the
- * build's thread; for a failed build (a view the analyst asked for) a warning icon with the error on hover, and Retry
+ * build's thread; for a failed build (a view the analyst asked for) a warning icon with why on hover (failedWhy: a stop
+ * at main's quit says so, as the chat's chip does), and Retry
  * beside it; × on hover to delete it (`onDismiss` gets the proposal's box, which a confirm sits by). A viewer
  * suggested for a file type (in the File browser's mode row) wears the sparkle, shows its `why` on hover, and a click
  * builds it (`onAccept` runs then). */
@@ -179,7 +183,7 @@ export function ProposalOption({ ws, p, onDismiss, onAccept, size, asking = fals
           }}
           {...tipProps}
         >
-          {failed && p.error ? <Tipped text={p.error}>{icon}</Tipped> : icon}
+          {failed && failedWhy(p) ? <Tipped text={failedWhy(p)}>{icon}</Tipped> : icon}
           <span className="seg-label">{p.name}</span>
           {pending &&
             (asking ? (

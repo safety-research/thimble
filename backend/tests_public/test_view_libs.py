@@ -105,7 +105,8 @@ async def test_a_package_its_folder_lacks_or_holds_at_another_version_is_a_probl
     folder.mkdir()
     got = await view_libs.ensure("ws", "v", folder, ["tiny-queue@1"], source=stage)
     assert got["problems"] == [view_libs.NOT_INSTALLED.format(name="tiny-queue", where=stage, raw="tiny-queue@1")]
-    assert "npm install --ignore-scripts tiny-queue@1" in got["problems"][0]
+    # live check L31 (live-d): npm's cache in the home folder is read-only in the sandbox (EROFS), so the cache is local
+    assert "npm install --ignore-scripts --cache .npm-cache tiny-queue@1" in got["problems"][0]
     install(stage, "tiny-queue")
     got = await view_libs.ensure("ws", "v", folder, ["tiny-queue@2"], source=stage)
     assert "holds tiny-queue 1.4.2, which tiny-queue@2 does not allow" in got["problems"][0]

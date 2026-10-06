@@ -130,6 +130,7 @@ export function ViewPane({ ws, view, path, picked, kind, targetRef, quote, onQuo
             onResidue={toggleResidue}
             files={{ list: files, n: view.n_files ?? files.length, current: mode === 'raw' ? rawPath : null, onPick: (f) => showRaw({ path: f }) }}
             after={mode === 'raw' && rawPath && (view.n_files ?? 0) > 1 ? <span className="view-pane-file mono">{rawPath}</span> : undefined}
+            libs={view.libs}
           />
         </div>
         {pin.stale && mode === 'view' && <ViewUpdated onReload={reload} className="view-pane-updated" />}

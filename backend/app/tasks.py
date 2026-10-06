@@ -256,6 +256,24 @@ def _span(text: str, part: str) -> tuple[int, int] | None:
     return None
 
 
+FENCE_RE = re.compile(r"^\s*(```|~~~)")
+HEADING_RE = re.compile(r"^(#{1,4})(?=\s)")
+
+
+def _demoted(text: str) -> str:
+    """An extension's text for one part of a prompt file that `## ` headings split into parts: each of its headings two
+    levels down (`## A test` is `#### A test`), as its `From the … extension` heading is, so none of them starts a part
+    of its own and the text stays in the part it changes. Lines in fenced code are left as they are."""
+    out, fenced = [], False
+    for line in text.split("\n"):
+        if FENCE_RE.match(line):
+            fenced = not fenced
+        elif not fenced:
+            line = HEADING_RE.sub(lambda m: "#" * min(6, len(m.group(1)) + 2), line)
+        out.append(line)
+    return "\n".join(out)
+
+
 def _fill(text: str, part: TaskPart, default: str, whole: str, slots: set[str]) -> str:
     """An extension's prompt text with its placeholders filled, thimble's slots kept for prompts.render and every other
     double brace of the extension's text kept as text."""
@@ -300,12 +318,14 @@ def text_of(c: str | None, name: str) -> str | None:
         prompts_replacing = [p for p in found if p.replace]
         others = [p.extension for p in code_parts(c, t)]
         body = default
+        # a part of a sectioned file: the extension's own headings go down two levels (_demoted)
+        own = (lambda x: x) if TASK_PROMPTS[t][1] == WHOLE else _demoted
         if len(prompts_replacing) == 1 and not others:
-            body = _fill(prompts_replacing[0].text, prompts_replacing[0], default, whole, slots) or default
+            body = _fill(own(prompts_replacing[0].text), prompts_replacing[0], default, whole, slots) or default
         elif prompts_replacing:
             log.warning("%s: %s all replace the %s task, so thimble's own prompt is used", c,
                         " and ".join([*(p.extension for p in prompts_replacing), *others]), t)
-        added = [f"{roles.ADDED_HEADING.format(name=p.extension).replace('## ', '#### ')}\n\n{_fill(p.text, p, default, whole, slots)}"
+        added = [f"{roles.ADDED_HEADING.format(name=p.extension).replace('## ', '#### ')}\n\n{_fill(own(p.text), p, default, whole, slots)}"
                  for p in found if not p.replace]
         if added:
             body = "\n\n".join([body, *added])

@@ -141,6 +141,14 @@ async def test_a_click_starts_a_builder_through_the_module_on_the_values_it_name
     assert again != agent
 
 
+def test_main_s_note_of_a_view_build_names_its_view_and_a_ticket_s_names_none(board):
+    # live check L25 (live-d): main's chat said "Dev ticket started" for a typed view build
+    agents.new_agent(CORPUS, "dev", "view: Posts", view="posts")
+    agents.new_agent(CORPUS, "dev", "Ticket t1")
+    rows = [r for r in agents.read_events(agents.paths(CORPUS, agents.MAIN_ID)[1]) if r.get("type") == "agent"]
+    assert [r.get("view") for r in rows[-2:]] == ["posts", None]
+
+
 async def test_main_s_propose_view_gives_the_exact_agent_call_its_hook_lets_through(board, bridge, gates, hints):
     res = await tools.call(CORPUS, "propose_view", {"name": "Posts", "why": "to read the board",
                                                     "claims": ["board.jsonl"], "unit": "a post", "overview": "a list",

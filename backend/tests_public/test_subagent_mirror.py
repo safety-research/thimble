@@ -173,6 +173,9 @@ async def test_a_message_to_the_finished_agent_starts_its_next_run_and_the_short
     session.tail_once(lv)
     a = subagents.agent(CORPUS, AGENT)
     assert a["run"] == 2 and a["by"] == "human" and agents.read_meta(CORPUS, chat)["typed_in_tray"] is True
+    users = [r for r in agents.read_events(agents.paths(CORPUS, chat)[1]) if r.get("type") == "user"]
+    assert users[-1].get("tray") is True and users[-1]["text"] == "And May?", "the browser labels it typed in the tray"
+    assert not any(r.get("tray") for r in users[:-1]), "a prompt or message main's call sent is not typed in the tray"
 
 
 async def test_each_follow_up_s_message_in_the_thread_names_its_run(bridge, project, ended):
