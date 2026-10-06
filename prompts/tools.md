@@ -888,19 +888,27 @@ No check found anything.
 
 ## orient-coverage
 
-Coverage: viewed {viewed} · not viewed {unviewed} · {files} of {total}, holding {records} of the {measure}
+Coverage: viewed only {viewed} · {shares}
 
 ## orient-coverage-every
 
-Coverage: viewed every file · 100% of {total}, holding 100% of the {measure}
+Coverage: viewed every file · {shares}
 
 ## orient-coverage-nothing
 
-no file
+Coverage: viewed no file · {shares}
+
+## orient-coverage-shares
+
+{files} of files · {share} of {measure}
+
+## orient-coverage-files
+
+{files} of files
 
 ## orient-coverage-lead
 
-When your first run ended, thimble measured which corpus files it opened, by a card's code, a Read call or a path in a command, and showed the analyst this line in your thread.
+When your first run ended, thimble measured how much of the corpus it saw, from the lines and records its tool outputs showed (Read ranges, and lines or records that commands and cards printed), and showed the analyst this line in your thread.
 
 {coverage}
 

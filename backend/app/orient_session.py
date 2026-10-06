@@ -34,8 +34,8 @@ End of the first run. orientation.finished closes the record and reveals the dec
 analyst when its build passed its checks); the report is asked for once no follow-up waits. Main hears an `orient` event with one line counting what was made.
 
 Coverage. When the first run finishes (done; not stopped or failed), its coverage line (orient_checks.coverage: the globs
-of files it viewed and did not, and its share of the files and of their records) is measured in the checks' child
-process before the end goes on; meanwhile the orientation counts as running, so a message waits (measure, _measured).
+of the files whose lines or records its tool outputs showed, and its share of the files and of their lines) is measured
+in the checks' child process before the end goes on; meanwhile the orientation counts as running, so a message waits (measure, _measured).
 The line is one message at the end of the run: a note at the end of its thread, a second line of main's `orient` event
 and of summary.md, and the record's `coverage`. The next run's prompt ends with it (`## orient-coverage-lead`), which
 puts it in the session's own transcript for the model, a later critique's digest and main's context. The run hears

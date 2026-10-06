@@ -17,15 +17,23 @@ is a set lookup. The checks run in a child process (check_apart), since pure-Pyt
 hold the interpreter lock; an abandoned critique kills the child. Every line the model reads is a `## check-*` section
 of prompts/tools.md.
 
-The coverage line says how much of the corpus one orientation opened, grouped by glob, with its share of the files and
-of the records they hold: `Coverage: viewed board.jsonl, agents/agent-01.jsonl · not viewed agents/*.jsonl (2 of 3
-files), *.md (2 files) · 33% of 6 files, holding 41% of the records`. It is the unread check made stricter and kept to the orientation: only the orientation's chat
-and the chats under it (its subagents' and workflow agents', never a critique's) count, with the cards of its deck and
-the input of its calls alone, since a survey's listing names every file without opening one; and a folder counts only
-where a command names it whole or by a wildcard, since reading one file of a folder opens none of the others. The
-orientation's end adds it to its transcript (orient_session.measure), and a critique's first message gives it in place
-of the unread line. A file's records are records.count's, estimated from its bytes past COUNT_BYTES (`~`), and the
-bytes stand in when no file holds records.
+The coverage line says how much of the corpus one orientation saw: the files whose lines or records its tool outputs
+showed, grouped by glob, then its share of the files and of their lines: `Coverage: viewed only src/*.jsonl,
+board.jsonl · 22% of files · 12% of lines` (`of records` when a file of the corpus is not read by lines, such as a
+database or a PDF). Only the calls of the orientation's chat and the chats under it (its subagents' and workflow
+agents', never a critique's) count, each by what its stored output (calls.py) showed (_seen):
+
+  Read         the lines its output numbers; a PDF's pages
+  any other    each line of its output (SEEN_CHARS at most, as much as Claude Code shows of a Bash output) that is a
+               line of a file the call's input names (by path, folder or wildcard; for add_card and edit_card also the
+               files the card's code read), or a long enough piece of one, such as a field a script printed or a cell
+               of a table; a line found in more than SHARED_MAX of those files counts in none
+
+So a command that only counts or lists (wc, ls, find, grep -c) shows no line of a file and counts nothing. The search
+reads each file up to LINE_SCAN_BYTES for whole lines and PIECE_SCAN_BYTES for pieces, within LINE_SCAN_TOTAL and
+PIECE_SCAN_TOTAL in all, so in a very large corpus the line can count less than was seen. The orientation's end adds it
+to its transcript (orient_session.measure), and a critique's first message gives it in place of the unread line. A
+file's lines or records are records.count's, estimated from its bytes past COUNT_BYTES (`~`).
 """
 from __future__ import annotations
 
@@ -44,7 +52,6 @@ import time
 from collections import Counter
 from collections.abc import Iterator
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -75,9 +82,33 @@ BACKEND_DIR = Path(__file__).resolve().parent.parent  # where `python -m app.ori
 COVERAGE_FLAG = "--coverage"  # the child adds the coverage line of the orientation chat named next (coverage)
 ONLY_FLAG = "--only"  # with COVERAGE_FLAG, the child computes the coverage line alone
 COVERAGE_GLOBS = 8  # globs of folder and suffix the coverage line groups files into; past this, by top folder
-COVERAGE_LISTED = 6  # globs the coverage line names on each side, viewed and not viewed; the rest are counted
-COVERAGE_NAMED = 2  # a glob with this few files viewed has them named, and the rest of it named as not viewed
+COVERAGE_LISTED = 6  # globs of viewed files the coverage line names; the rest are counted
+COVERAGE_NAMED = 2  # a glob with this few files viewed has them named
 COUNT_BYTES = 500_000_000  # of files whose records the coverage line counts; the rest are estimated from their bytes
+LINE_READERS = ("lines", "csv")  # the records.reader_of readers whose records are lines, which the line counts as lines
+# what the orientation saw (_seen, module note)
+SEEN_CHARS = 30_000  # of one call's output read: as much as Claude Code shows of a Bash output by default
+SEEN_LINES = 2_000  # of one call's output lines read
+LINE_MIN = 8  # characters an output line holds at least to be looked for whole among a file's lines
+PIECE_MIN = 20  # characters a piece of an output line holds at least to be searched for inside a file
+PIECE_WINDOW = 40  # of a longer piece, the characters at its middle that are searched for
+PIECES_PER_LINE = 2  # pieces of one output line searched for, the longest first, until one is found
+PIECES_PER_CALL = 100  # output lines of one call whose pieces are searched for, spread over its output
+SHARED_MAX = 3  # files an output line may be found in and still count as a line seen in each
+LINE_SCAN_BYTES = 1 << 30  # of one file read for whole lines
+LINE_SCAN_TOTAL = 8 << 30  # of every file together
+PIECE_SCAN_BYTES = 64 << 20  # of one file searched for a piece
+PIECE_SCAN_TOTAL = 24 << 30  # searched for pieces in all, each search counting the bytes it went through
+PDF_PAGES = 10  # pages Read shows of a PDF without `pages`, which it takes only for PDFs past this many
+# a prefix an output line may carry before a file's line: Read's and cat -n's number, an add_card output's address, and
+# grep's file name and line number
+_LINE_PREFIX_RE = re.compile(r"^(?:\s*\d+(?:\t|→)|L\d+\||(?:[\w./-]+:)?\d+[:-]|[\w./-]+\.\w+:)")
+_NUMBERED_RE = re.compile(r"^\s*(\d+)(?:\t|→)")  # a line of a Read result: its number, then the file's line
+# where an output line is cut into pieces: what JSON escapes (a quote, a backslash with what it escapes, a character past
+# ASCII), and the separators of printed columns (a tab, a bar, two spaces)
+_PIECE_SPLIT_RE = re.compile(r'\\u[0-9a-fA-F]{4}|\\.|["\t|]| {2,}|[^\x20-\x7e]')
+_CARD_RE = re.compile(r"\bcard:([A-Za-z0-9_-]+)")
+_PAGES_RE = re.compile(r"(\d+)(?:\s*-\s*(\d+))?")
 _DIGITS_RE = re.compile(r"\d+")
 _UUID_RE = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", re.I)
 _TOKEN_RE = re.compile(r"[A-Za-z0-9]+")
@@ -138,36 +169,42 @@ def _read_by_cells(cells: list[dict[str, Any]], files: set[str]) -> set[str]:
     return out
 
 
-def _read_by_agents(c: str, corpus: Path, chats: "set[str] | None" = None) -> set[str]:
-    """The corpus files a Read call opened in any chat of the workspace but a critique's, or in `chats` alone. A file
-    only a critic opened is still one the analysis never read."""
+def _read_by_agents(c: str, corpus: Path) -> set[str]:
+    """The corpus files a Read call opened in any chat of the workspace but a critique's. A file only a critic opened is
+    still one the analysis never read."""
     from . import agents  # noqa: PLC0415
 
-    root = corpus.resolve()
     out: set[str] = set()
     for meta in agents.list_chats(c):
-        if meta.get("agent_type") == CRITIC or (chats is not None and str(meta.get("id")) not in chats):
+        if meta.get("agent_type") == CRITIC:
             continue
         _, log_path = agents.paths(c, str(meta["id"]))
         for rec in agents.read_events(log_path):
             if rec.get("type") != "tool_use" or rec.get("name") not in READ_TOOLS:
                 continue
             inp = rec.get("input") if isinstance(rec.get("input"), dict) else {}
-            raw = str(inp.get("file_path") or "").strip()
-            if not raw:
-                continue
-            p = Path(raw) if os.path.isabs(raw) else root / raw
-            try:
-                out.add(p.resolve().relative_to(root).as_posix())
-            except (OSError, ValueError):
-                continue
+            rel = _corpus_rel(corpus, inp.get("file_path"))
+            if rel:
+                out.add(rel)
     return out
 
 
-def _calls_text(c: str, results: bool = True, chats: "set[str] | None" = None) -> str:
-    """The input and output (only the input without `results`) of every stored call of the workspace's orientations
-    (calls.py), each cut to CALL_TEXT_CHARS, together up to CALLS_TEXT_CHARS; a critic's own calls are left out, as its
-    Reads are. With `chats`, only the calls made in those chats (or in a chat not yet known) are read."""
+def _corpus_rel(corpus: Path, raw: Any) -> str:
+    """A path a call gave, absolute or from the corpus folder, as a corpus-relative path; '' outside the corpus."""
+    raw = str(raw or "").strip()
+    if not raw:
+        return ""
+    root = corpus.resolve()
+    p = Path(raw) if os.path.isabs(raw) else root / raw
+    try:
+        return p.resolve().relative_to(root).as_posix()
+    except (OSError, ValueError):
+        return ""
+
+
+def _calls_text(c: str) -> str:
+    """The input and output of every stored call of the workspace's orientations (calls.py), each cut to
+    CALL_TEXT_CHARS, together up to CALLS_TEXT_CHARS; a critic's own calls are left out, as its Reads are."""
     from . import calls  # noqa: PLC0415
 
     ws = config.workspace_dir(c)
@@ -177,20 +214,34 @@ def _calls_text(c: str, results: bool = True, chats: "set[str] | None" = None) -
     critics = _critic_chats(c) if folder.is_dir() else set()
     for path in sorted(folder.glob("*.jsonl")) if folder.is_dir() else []:
         chat = path.stem
-        if chats is not None and chat not in chats:
-            continue
         for row in calls.listing(c, chat):
-            if row.get("chat") in critics or (chats is not None and row.get("chat") and row["chat"] not in chats):
+            if row.get("chat") in critics:
                 continue
             full = calls.get(c, chat, int(row["n"])) or {}
-            text = json.dumps(full.get("input"), ensure_ascii=False, default=str)
-            text += "\n" + str(full.get("result") or "") if results else ""
+            text = json.dumps(full.get("input"), ensure_ascii=False, default=str) + "\n" + str(full.get("result") or "")
             text = text[:CALL_TEXT_CHARS]
             parts.append(text)
             total += len(text)
             if total > CALLS_TEXT_CHARS:
                 return "\n".join(parts)
     return "\n".join(parts)
+
+
+def _own_calls(c: str, chats: set[str]) -> Iterator[dict[str, Any]]:
+    """Each stored call (calls.py) made in `chats`, or in a chat of theirs not yet known, whole: {name, input, result?,
+    is_error?, ...}."""
+    from . import calls  # noqa: PLC0415
+
+    folder = config.workspace_dir(c) / calls.CALLS_DIR
+    for path in sorted(folder.glob("*.jsonl")) if folder.is_dir() else []:
+        if path.stem not in chats:
+            continue
+        for row in calls.listing(c, path.stem):
+            if row.get("chat") and row["chat"] not in chats:
+                continue
+            full = calls.get(c, path.stem, int(row["n"]))
+            if full:
+                yield full
 
 
 def _critic_chats(c: str) -> set[str]:
@@ -224,59 +275,21 @@ def _orientation_chats(c: str, chat: str) -> set[str]:
     return out
 
 
-def _deck_cells(c: str) -> list[dict[str, Any]]:
-    """The cards of the latest orientation's deck, where every card it adds goes, that it made or changed: an earlier
-    orientation's card in the same deck counts only once this one edited it. None when its deck is off."""
-    from . import notebook, orientation  # noqa: PLC0415
-
-    run = orientation.read_run(c) or {}
-    deck = orientation.deck_of(run)
-    nb = notebook.read_notebook(config.workspace_dir(c), deck) if deck else None
-    since = str(run.get("started") or "")
-
-    def touched(cell: dict[str, Any]) -> bool:
-        stamps = [cell.get("created_ts") or cell.get("ts"), *(e.get("ts") for e in cell.get("edited") or []
-                                                              if isinstance(e, dict))]
-        return not since or any(_after(t, since) for t in stamps)
-
-    return [cell for cell in (nb or {}).get("cells") or [] if isinstance(cell, dict) and touched(cell)]
-
-
-def _after(ts: Any, since: str) -> bool:
-    """Whether the ISO time `ts` is at or after `since`; a time that does not parse counts."""
-
-    def at(v: Any) -> datetime | None:
-        try:
-            t = datetime.fromisoformat(str(v).replace("Z", "+00:00"))
-        except ValueError:
-            return None
-        return t if t.tzinfo else t.replace(tzinfo=timezone.utc)
-
-    t, s = at(ts), at(since)
-    return t is None or s is None or t >= s
-
-
-def _read_by_calls(text: str, corpus: Path, files: set[str], whole: bool = False) -> set[str]:
-    """The corpus files the orientation's calls named: a file by its corpus-relative or absolute path filling whole
-    components of a run of path characters, and every file under a folder named the same way. With `whole`, a folder
-    is named only where a run holding a slash ends at it (`ls tickets/`, `tickets/*.txt`, `ls <corpus>/tickets`), not
-    where it leads a file's path, so reading one file of a folder leaves the others unread, nor as a bare word, which
-    prose holds too; and a wildcard pattern names the files it matches (_globbed). A path holding other characters (a
-    space) is searched for in the whole text instead."""
+def _read_by_calls(text: str, corpus: Path, files: set[str]) -> set[str]:
+    """The corpus files a call's text names: a file by its corpus-relative or absolute path filling whole components of
+    a run of path characters, and every file under a folder named the same way, as a bare word too (`os.listdir('runs')`).
+    A path holding other characters (a space) is searched for in the whole text instead. A wildcard pattern's files are
+    _globbed's."""
     if not text:
         return set()
     root = str(corpus.resolve()).rstrip("/") + "/"
-    text = text.replace(root, "/" if whole else "")  # with `whole`, a path from the corpus keeps a slash
+    text = text.replace(root, "")
     depth = max((f.count("/") + 1 for f in files), default=1)
-    heads: set[str] = set()  # the leading components of each run (trailing with `whole`), where a folder can be named
+    heads: set[str] = set()  # the leading components of each run, where a folder can be named
     spans: set[str] = set()  # each sequence of up to `depth` whole components of a run, where a file can be named
     for run in set(_PATH_RE.findall(text)):
-        if whole:
-            parts = run.rstrip("/").split("/") if "/" in run else []
-            heads.update("/".join(parts[i:]) for i in range(len(parts)))
-        else:
-            parts = run.split("/")
-            heads.update("/".join(parts[:j]) for j in range(1, min(len(parts), depth) + 1))
+        parts = run.split("/")
+        heads.update("/".join(parts[:j]) for j in range(1, min(len(parts), depth) + 1))
         for r in {run, run.rstrip(".")}:  # a path at the end of a sentence is still named
             parts = r.split("/")
             for i in range(len(parts)):
@@ -287,17 +300,13 @@ def _read_by_calls(text: str, corpus: Path, files: set[str], whole: bool = False
 
     out = {f for f in files if (f in spans if plain(f) else f in text)}
     folders = {os.path.dirname(f) for f in files} - {""}
-
-    def spaced(d: str) -> str:  # the regex of a folder whose name holds a space, named as `whole` or not asks
-        e = re.escape(d)
-        return rf"/{e}/?(?![\w./-])|(?<![\w./-]){e}/(?![\w.-])" if whole else rf"(?<![\w./-]){e}(?:/|(?![\w.-]))"
-
-    named = {d for d in folders if (d in heads if plain(d) else re.search(spaced(d), text))}
+    named = {d for d in folders
+             if (d in heads if plain(d) else re.search(rf"(?<![\w./-]){re.escape(d)}(?:/|(?![\w.-]))", text))}
     for f in files:
         parts = f.split("/")
         if any("/".join(parts[:i]) in named for i in range(1, len(parts))):
             out.add(f)
-    return out | _globbed(text, files) if whole else out
+    return out
 
 
 def _globbed(text: str, files: set[str]) -> set[str]:
@@ -436,11 +445,10 @@ class _Text:
 # --------------------------------------------------------------------------- the checks
 
 
-def _unread_files(c: str, corpus: Path, files: list[str], cells: list[dict[str, Any]], calls_text: str = "",
-                  whole: bool = False, chats: "set[str] | None" = None) -> list[str]:
+def _unread_files(c: str, corpus: Path, files: list[str], cells: list[dict[str, Any]], calls_text: str = "") -> list[str]:
     fileset = set(files)
-    return sorted(fileset - _read_by_cells(cells, fileset) - _read_by_agents(c, corpus, chats)
-                  - _read_by_calls(calls_text, corpus, fileset, whole))
+    return sorted(fileset - _read_by_cells(cells, fileset) - _read_by_agents(c, corpus)
+                  - _read_by_calls(calls_text, corpus, fileset))
 
 
 def _unread(unread: list[str], files: list[str]) -> list[Finding]:
@@ -557,44 +565,244 @@ def _records_of(corpus: Path, sizes: dict[str, int]) -> tuple[dict[str, int], bo
 
 
 def _share(n: float, total: float) -> str:
-    """n of total as a whole percentage, 100% only when it is all and 0% only when it is none."""
+    """n of total as a whole percentage, 100% only when it is all, 0% only when it is none and <1% below a half."""
     if total <= 0 or n <= 0:
         return "0%"
     if n >= total:
         return "100%"
-    return f"{min(99, max(1, round(100 * n / total)))}%"
+    if 100 * n / total < 0.5:
+        return "<1%"
+    return f"{min(99, round(100 * n / total))}%"
+
+
+# --------------------------------------------------------------------------- what the orientation saw
+
+
+@dataclass
+class _Shown:
+    """One line of a call's output: the call, the forms in which it may be a file's line whole, its pieces as searched
+    for (_pieces), and the files the call names."""
+
+    call: int
+    wholes: tuple[bytes, ...]
+    pieces: tuple[bytes, ...]
+    files: tuple[str, ...]
+
+
+def _read_shown(row: dict[str, Any], rel: str, reader: str | None) -> set[int]:
+    """The lines a Read call's output showed of the file `rel`, by the numbers it gives them; for a PDF its pages."""
+    result = str(row.get("result") or "")
+    if reader == "pdf":
+        inp = row.get("input") if isinstance(row.get("input"), dict) else {}
+        pages: set[int] = set()
+        for m in _PAGES_RE.finditer(str(inp.get("pages") or "")):
+            lo = int(m.group(1))
+            pages.update(range(lo, int(m.group(2) or lo) + 1))
+        return pages or set(range(1, PDF_PAGES + 1))
+    return {int(m.group(1)) for line in result.split("\n") if (m := _NUMBERED_RE.match(line))}
+
+
+def _pieces(line: str) -> tuple[bytes, ...]:
+    """What is searched for of an output line inside a file's lines: its PIECES_PER_LINE longest pieces of PIECE_MIN
+    characters or more, cut where JSON escapes or printed columns split a line (_PIECE_SPLIT_RE), each the PIECE_WINDOW
+    characters at its middle when longer, so a field printed after another, or cut short, is still found."""
+    found = []
+    for p in _PIECE_SPLIT_RE.split(line):
+        p = p.strip().rstrip(".").strip()  # a value printed cut short ends with ...
+        if len(p) >= PIECE_MIN:
+            found.append(p)
+    out = []
+    for p in sorted(found, key=len, reverse=True)[:PIECES_PER_LINE]:
+        if len(p) > PIECE_WINDOW:
+            mid = (len(p) - PIECE_WINDOW) // 2
+            p = p[mid: mid + PIECE_WINDOW]
+        out.append(p.encode("ascii"))
+    return tuple(out)
+
+
+def _shown_lines(k: int, text: str, files: set[str]) -> Iterator[_Shown]:
+    """The output lines of call `k` (SEEN_CHARS and SEEN_LINES at most) that may be lines of `files`."""
+    if not files:
+        return
+    names = tuple(sorted(files))
+    for line in text[:SEEN_CHARS].split("\n")[:SEEN_LINES]:
+        line = line.rstrip("\r")
+        bare = _LINE_PREFIX_RE.sub("", line, count=1)
+        wholes = tuple(dict.fromkeys(x.encode("utf-8", "replace") for x in (line, bare) if len(x.strip()) >= LINE_MIN))
+        pieces = _pieces(bare)
+        if wholes or pieces:
+            yield _Shown(k, wholes, pieces, names)
+
+
+def _whole_hits(corpus: Path, shown: list[_Shown], sizes: dict[str, int]) -> dict[int, dict[str, int]]:
+    """{output line: {file: the number of its first line equal to it}}, each file read once, the smallest first, up to
+    LINE_SCAN_BYTES, LINE_SCAN_TOTAL in all, and only until every output line looked for in it was found."""
+    wanted: dict[str, dict[bytes, list[int]]] = {}
+    for i, s in enumerate(shown):
+        for f in s.files:
+            for w in s.wholes:
+                wanted.setdefault(f, {}).setdefault(w, []).append(i)
+    hits: dict[int, dict[str, int]] = {}
+    total = LINE_SCAN_TOTAL
+    for f in sorted(wanted, key=lambda f: sizes.get(f, 0)):
+        lines = wanted[f]
+        left = {i for ids in lines.values() for i in ids}
+        cap = min(LINE_SCAN_BYTES, total)
+        read = 0
+        try:
+            with open(corpus / f, "rb") as fh:
+                for n, raw in enumerate(fh, 1):
+                    read += len(raw)
+                    ids = lines.get(raw.rstrip(b"\r\n"))
+                    if ids:
+                        for i in ids:
+                            hits.setdefault(i, {}).setdefault(f, n)
+                            left.discard(i)
+                        if not left:
+                            break
+                    if read >= cap:
+                        break
+        except OSError:
+            continue
+        total -= read
+        if total <= 0:
+            break
+    return hits
+
+
+def _piece_hits(corpus: Path, wanted: dict[str, set[bytes]], budget: list[int]) -> dict[tuple[str, bytes], int]:
+    """{(file, piece): the offset of its first occurrence in the file} for each piece searched for in each file, within
+    PIECE_SCAN_BYTES of the file and what is left of `budget` (one int, the bytes the searches may still go through)."""
+    import mmap  # noqa: PLC0415
+
+    out: dict[tuple[str, bytes], int] = {}
+    for f in sorted(wanted):
+        if budget[0] <= 0:
+            break
+        try:
+            with open(corpus / f, "rb") as fh:
+                size = os.fstat(fh.fileno()).st_size
+                if not size:
+                    continue
+                with mmap.mmap(fh.fileno(), 0, access=mmap.ACCESS_READ) as mm:
+                    end = min(size, PIECE_SCAN_BYTES)
+                    for piece in sorted(wanted[f]):
+                        if budget[0] <= 0:
+                            break
+                        at = mm.find(piece, 0, end)
+                        budget[0] -= at + len(piece) if at >= 0 else end
+                        if at >= 0:
+                            out[(f, piece)] = at
+        except (OSError, ValueError):
+            continue
+    return out
+
+
+def _line_numbers(path: Path, offsets: set[int]) -> set[int]:
+    """The numbers of the lines that hold these byte offsets of a file."""
+    out: set[int] = set()
+    n, pos = 1, 0
+    try:
+        with open(path, "rb") as fh:
+            for at in sorted(offsets):
+                while pos < at:
+                    block = fh.read(min(1 << 24, at - pos))
+                    if not block:
+                        return out
+                    n += block.count(b"\n")
+                    pos += len(block)
+                out.add(n)
+    except OSError:
+        pass
+    return out
+
+
+def _seen(c: str, corpus: Path, sizes: dict[str, int], chats: set[str]) -> dict[str, set[int]]:
+    """{file: the numbers of its lines (a PDF's pages) that the calls made in `chats` showed} (module note): a Read's
+    numbered lines, and each output line of any other call that is, or holds a piece of, a line of a file the call
+    names, found in SHARED_MAX of those files at most."""
+    from . import records  # noqa: PLC0415
+
+    files = set(sizes)
+    cards = {str(cell.get("id")): [str(r) for r in cell.get("reads") or [] if isinstance(r, str)]
+             for cell in _cells(config.workspace_dir(c))}
+    seen: dict[str, set[int]] = {}
+    shown: list[_Shown] = []
+    for k, row in enumerate(_own_calls(c, chats)):
+        if row.get("is_error") or not isinstance(row.get("result"), str) or not row["result"]:
+            continue
+        name = str(row.get("name") or "").rsplit("__", 1)[-1]
+        inp = row.get("input") if isinstance(row.get("input"), dict) else {}
+        if name == "Read":
+            rel = _corpus_rel(corpus, inp.get("file_path"))
+            if rel in files:
+                seen.setdefault(rel, set()).update(_read_shown(row, rel, records.reader_of(corpus / rel, rel)))
+            continue
+        text = json.dumps(inp, ensure_ascii=False, default=str)
+        named = _read_by_calls(text, corpus, files) | _globbed(text, files)
+        if name in ("add_card", "edit_card"):
+            for cid in _CARD_RE.findall(row["result"][:200]):
+                named.update(r for r in cards.get(cid, ()) if r in files)
+        shown.extend(_shown_lines(k, row["result"], named))
+    whole = _whole_hits(corpus, shown, sizes)
+    offsets: dict[str, set[int]] = {}
+
+    def credit(hits: dict[str, int], into: dict[str, set[int]]) -> bool:
+        if not 1 <= len(hits) <= SHARED_MAX:
+            return False
+        for f, at in hits.items():
+            into.setdefault(f, set()).add(at)
+        return True
+
+    left: dict[int, list[int]] = {}  # by call, the output lines no whole line of a file was found for
+    for i, s in enumerate(shown):
+        if not credit(whole.get(i, {}), seen) and s.pieces:
+            left.setdefault(s.call, []).append(i)
+    todo = []
+    for ids in left.values():  # PIECES_PER_CALL of each call's lines, spread over its output
+        step = max(1, len(ids) / PIECES_PER_CALL)
+        todo.extend(ids[int(j * step)] for j in range(min(len(ids), PIECES_PER_CALL)))
+    budget = [PIECE_SCAN_TOTAL]
+    for p in range(PIECES_PER_LINE):
+        wanted: dict[str, set[bytes]] = {}
+        for i in todo:
+            if p < len(shown[i].pieces):
+                for f in shown[i].files:
+                    wanted.setdefault(f, set()).add(shown[i].pieces[p])
+        found = _piece_hits(corpus, wanted, budget)
+        todo = [i for i in todo if p < len(shown[i].pieces) and not credit(
+            {f: found[(f, shown[i].pieces[p])] for f in shown[i].files if (f, shown[i].pieces[p]) in found}, offsets)]
+    for f, at in offsets.items():
+        seen.setdefault(f, set()).update(_line_numbers(corpus / f, at))
+    return seen
 
 
 def coverage(c: str, chat: str) -> Finding:
-    """The coverage line of the orientation chat `chat` in workspace `c` (module note): the corpus files no card of its
-    deck read, no Read call of it or the chats under it opened and no call's input named, by its path or its folder's
-    whole, grouped by glob: each glob it viewed whole, each it never viewed with its count of files, and of a glob it
-    viewed in part, the files it viewed and the rest of the glob when they are COVERAGE_NAMED or fewer, else the glob
-    with how many of its files; then the share of the files viewed and of the records they hold (of their bytes when
-    no file holds records). ValueError for a workspace whose corpus is gone."""
-    from . import corpus as corpus_mod  # noqa: PLC0415
+    """The coverage line of the orientation chat `chat` in workspace `c` (module note): the files whose lines or
+    records the calls of it and the chats under it showed (_seen), grouped by glob: each glob whose every file it
+    viewed, a file alone in its glob, and of a glob it viewed in part, its viewed files when they are COVERAGE_NAMED or
+    fewer, else the glob with how many of its files; then the share of the files viewed and of their lines (records
+    when a file is not read by lines). ValueError for a workspace whose corpus is gone."""
+    from . import corpus as corpus_mod, records  # noqa: PLC0415
     from .tools import hint  # noqa: PLC0415
 
     corpus = config.corpus_dir(c)
     sizes = {s["path"]: int(s.get("size_bytes") or 0) for s in corpus_mod.list_sources(corpus) if not s.get("hidden")}
     files = list(sizes)
-    own = _orientation_chats(c, chat)
-    unread = set(_unread_files(c, corpus, files, _deck_cells(c), _calls_text(c, results=False, chats=own),
-                               whole=True, chats=own))
+    seen = _seen(c, corpus, sizes, _orientation_chats(c, chat))
     counts, estimated = _records_of(corpus, sizes)
-    weight = counts if sum(counts.values()) else sizes
-    measure = "records" if weight is counts else "bytes"
-    viewed = [f for f in files if f not in unread]
-
-    def files_word(n: int) -> str:
-        return f"{n:,} file" if n == 1 else f"{n:,} files"
-
-    total = files_word(len(files))
-    files_share = _share(len(viewed), len(files))
-    part_share = ("~" if estimated and measure == "records" else "") + _share(sum(weight[f] for f in viewed),
-                                                                              sum(weight.values()))
-    if not unread:
-        return Finding("coverage", hint("orient-coverage-every", total=total, measure=measure))
+    viewed = [f for f in files if seen.get(f)]
+    shares = hint("orient-coverage-files", files=_share(len(viewed), len(files)))
+    if sum(counts.values()):
+        lines = all(records.reader_of(corpus / f, f) in LINE_READERS for f in files if counts.get(f))
+        part = ("~" if estimated else "") + _share(sum(min(len(seen[f]), counts.get(f, 0)) for f in viewed),
+                                                   sum(counts.values()))
+        shares = hint("orient-coverage-shares", files=_share(len(viewed), len(files)), share=part,
+                      measure="lines" if lines else "records")
+    if not viewed:
+        return Finding("coverage", hint("orient-coverage-nothing", shares=shares))
+    if len(viewed) == len(files):
+        return Finding("coverage", hint("orient-coverage-every", shares=shares))
     groups: dict[str, list[str]] = {}
     for f in files:
         groups.setdefault(_glob(f), []).append(f)
@@ -602,31 +810,26 @@ def coverage(c: str, chat: str) -> Finding:
         groups = {}
         for f in files:
             groups.setdefault(_glob(f, top=True), []).append(f)
-    seen: list[tuple[int, str]] = []  # (weight, name) of each side, listed the heaviest first
-    unseen: list[tuple[int, str]] = []
+
+    def files_word(n: int) -> str:
+        return f"{n:,} file" if n == 1 else f"{n:,} files"
+
+    side: list[tuple[int, str]] = []  # (records, name) of each viewed group, listed the most records first
     for g, fs in groups.items():
-        opened = [f for f in fs if f not in unread]
-        rest = [f for f in fs if f in unread]
-        if not rest:
-            seen.append((sum(weight[f] for f in fs), fs[0] if len(fs) == 1 else g))
-        elif not opened:
-            unseen.append((sum(weight[f] for f in fs), fs[0] if len(fs) == 1 else f"{g} ({files_word(len(fs))})"))
-        elif len(opened) <= COVERAGE_NAMED:  # a few files of a glob viewed: those files, and the rest of the glob
-            seen.extend((weight[f], f) for f in opened)
-            unseen.append((sum(weight[f] for f in rest),
-                           rest[0] if len(rest) == 1 else f"{g} ({len(rest):,} of {files_word(len(fs))})"))
+        opened = [f for f in fs if seen.get(f)]
+        if not opened:
+            continue
+        if len(opened) == len(fs):
+            side.append((sum(counts.get(f, 0) for f in fs), fs[0] if len(fs) == 1 else g))
+        elif len(opened) <= COVERAGE_NAMED:
+            side.extend((counts.get(f, 0), f) for f in opened)
         else:
-            seen.append((sum(weight[f] for f in opened), f"{g} ({len(opened):,} of {files_word(len(fs))})"))
-
-    def listed(side: "list[tuple[int, str]]") -> str:
-        names = [name for _, name in sorted(side, key=lambda x: (-x[0], x[1]))]
-        if len(names) <= COVERAGE_LISTED:
-            return ", ".join(names)
-        return ", ".join(names[:COVERAGE_LISTED]) + f", and {len(names) - COVERAGE_LISTED:,} more"
-
-    return Finding("coverage", hint("orient-coverage", viewed=listed(seen) if seen else hint("orient-coverage-nothing"),
-                                    unviewed=listed(unseen), files=files_share, total=total, records=part_share,
-                                    measure=measure))
+            side.append((sum(counts.get(f, 0) for f in opened), f"{g} ({len(opened):,} of {files_word(len(fs))})"))
+    names = [name for _, name in sorted(side, key=lambda x: (-x[0], x[1]))]
+    listed = ", ".join(names[:COVERAGE_LISTED])
+    if len(names) > COVERAGE_LISTED:
+        listed += f", and {len(names) - COVERAGE_LISTED:,} more"
+    return Finding("coverage", hint("orient-coverage", viewed=listed, shares=shares))
 
 
 def child_argv(c: str, *flags: str) -> list[str]:
