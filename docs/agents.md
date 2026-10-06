@@ -44,7 +44,7 @@ answers or check one.
 | labels | `label` (`name`, `unit`, `definition`, `values`, `marks`, `examples`, `comment`, `model`?), `items` (`i`, `ref`, `text`) | `read_ref` | `{labels: [{i, label, confidence, rationale?, quote?}]}`, one entry per item |
 | label-draft | `description`, `paths`, `records` (`paths`, `path`, `cut`, `lines`) | `read_ref` | a label: `{name, scope, kind, text, values, marks?}` |
 | card-check | `card` (`id`, `kind`, `question`, `takeaway`, `citations`, `code`, `context`, `typed`, `kept`), `picture` (a PNG's path, or null), `effort` | `read_ref` | `{assessment: [{problem}] × 5, question, code, takeaway}`, the replacement card |
-| view-review | `view` (`slug`, `name`, `description`, `claims`, `spec`, `checks`), `pictures` (`path`, `about`), `controls`, `records`, `ask` | `read_ref` | `{problems: [...], more?: [{state, ref?, controls?, why}]}`, `more` only when `ask` |
+| view-review | `view` (`slug`, `name`, `description`, `claims`, `spec`, `checks`), `pictures` (`path`, `about`), `controls`, `records`, `ask` (false) | `read_ref` | `{problems: [...]}`, which thimble's reviewer then fixes; it asks for more pictures itself, and `thimble.default` has no reading to lend |
 | view-fit | `view` (`name`, `description`), `files`, `samples` | `read_ref` | `{fits, reason}` |
 | file-viewer | `path`, `size`, `count`, `suffix`, `what`, `head` | `read_ref` | `{help, name, why, arrangement}`, the words empty when a viewer would not help |
 | checks | `check` (`id`, `name`, `prompt`), `doc`, `passages` (`ref`, `kind`, `anchor`), `context` | `read_ref`, `list_cards`, `add_comment` | the run's summary line; its comments go through `add_comment` |

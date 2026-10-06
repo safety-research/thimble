@@ -252,8 +252,8 @@ async def tool_finish_view(ctx: Any, args: dict[str, Any]) -> Any:
 
 async def tool_view_pictures(ctx: Any, args: dict[str, Any]) -> Any:
     """`view_pictures`: pictures of the view the caller reviews, the overview first in each round, then the states it
-    asks for, up to view_review.EXTRA_SHOTS more a round, with the records the pages fetched and what the checks found
-    (view_review.pictures)."""
+    asks for, up to view_review.EXTRA_SHOTS more a round, with the records the pages fetched, what the checks found and
+    what an extension's program that replaces the view-review task found in them (view_review.pictures)."""
     from . import view_review  # noqa: PLC0415
 
     try:
@@ -261,10 +261,10 @@ async def tool_view_pictures(ctx: Any, args: dict[str, Any]) -> Any:
     except Refused as e:
         return tools.err(str(e))
     try:
-        paths, records = await view_review.pictures(ctx.c, slug, agent_id, args.get("states") or [])
+        paths, records, reading = await view_review.pictures(ctx.c, slug, agent_id, args.get("states") or [])
     except view_review.NoPictures as e:
         return tools.err(str(e))
-    return tools.ok(tools.hint("view-pictures", paths=paths, records=records))
+    return tools.ok("\n\n".join(x for x in (tools.hint("view-pictures", paths=paths, records=records), reading) if x))
 
 
 # --------------------------------------------------------------------------- finish_review

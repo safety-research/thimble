@@ -874,6 +874,18 @@ The records they show:
 
 {records}
 
+## view-review-program
+
+{extension}'s program reviews views in this workspace in place of your own reading of the pictures. It read these pictures and found these problems:
+
+{problems}
+
+Fix these problems, and only these. When it found none, call `finish_review` with nothing revised.
+
+## view-review-program-failed
+
+{extension}'s program reviews views in this workspace in place of your own reading of the pictures, and it failed: {why}. Change nothing, and end with one line that says so.
+
 ## view-no-forms
 
 no citation resolves, because its `accepts` and `units` are empty
