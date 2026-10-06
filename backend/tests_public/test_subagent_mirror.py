@@ -438,6 +438,58 @@ async def test_clear_carries_thimble_s_agents_into_the_new_session_read_from_the
     assert agents.read_meta(CORPUS, chat)["session"] == NEW
 
 
+def _at(t: float) -> str:
+    from datetime import datetime, timezone
+
+    return datetime.fromtimestamp(t, timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+
+def _left(old: str, reason: str, at: float) -> None:
+    """main's SessionEnd hook recorded that main left session `old` (/clear, /resume), as --end writes it."""
+    with subagents.update(CORPUS) as state:
+        state["main_end"] = {"session": old, "reason": reason, "at": at}
+
+
+async def test_resume_back_to_the_first_session_reads_on_without_its_earlier_records(bridge, project, ended):
+    """/clear, then /resume back to the session before it, while the orientation runs: Claude Code appends the agent's
+    records to its file in that session's folder again, which holds what the mirror read there before /clear. Those
+    records are not read again: no second copy of the task, which the chat would show as typed in the agent tray (live
+    check L17, group c)."""
+    t0 = time.time() - 600
+    lv, chat, path = await _click_orientation(bridge, project)
+    _write(path, {"type": "user", "timestamp": _at(t0), "message": {"role": "user", "content": "the task"}},
+           {**_assistant({"type": "text", "text": "Working in the first session."}), "timestamp": _at(t0 + 1)},
+           {**_assistant(_use("toolu_s1", "Bash", {"command": "sleep-ish 120"})), "timestamp": _at(t0 + 2)})
+    session.tail_once(lv)
+    _left(SID, "clear", t0 + 10)
+    session._follow(CORPUS, SID, NEW, lv.cwd, None)
+    with subagents.update(CORPUS) as state:
+        sf.rekey(state, SID, NEW)
+    subagents.rekey(CORPUS, SID, NEW)
+    nv = session.current(CORPUS)
+    cont = _agent_file(project, AGENT, sid=NEW)
+    (project / f"{NEW}.jsonl").touch()
+    _write(cont, {**_result("toolu_s1", "Exit code 137", error=True), "timestamp": _at(t0 + 11)},
+           {**_assistant(_use("toolu_s2", "Bash", {"command": "sleep-ish 120"})), "timestamp": _at(t0 + 12)})
+    session.tail_once(nv)
+    _left(NEW, "resume", t0 + 20)
+    session._follow(CORPUS, NEW, SID, lv.cwd, None)
+    with subagents.update(CORPUS) as state:
+        sf.rekey(state, NEW, SID)
+    subagents.rekey(CORPUS, NEW, SID)
+    back = session.current(CORPUS)
+    _write(path, {**_result("toolu_s2", "(Bash completed with no output)"), "timestamp": _at(t0 + 140)},
+           {**_assistant({"type": "text", "text": "Back in the first session."}), "timestamp": _at(t0 + 141)},
+           {**_assistant(_use("toolu_hb", "SubagentHandback", {"message": "done after the resume"})),
+            "timestamp": _at(t0 + 142)})
+    session.tail_once(back)
+    log = agents.read_events(agents.paths(CORPUS, chat)[1])
+    texts = [r.get("delta") for r in log if r.get("type") == "text"]
+    assert texts.count("Working in the first session.") == 1 and texts[-1] == "Back in the first session."
+    assert [r.get("text") for r in log if r.get("type") == "user"].count("the task") <= 1, "the task is not read again"
+    assert ended[-1] == ("ended", "orientation", 0, "done", "done after the resume")
+
+
 async def test_main_s_quit_closes_the_chats_and_stops_the_jobs_at_once(bridge, project, ended, monkeypatch):
     stopped: list[str] = []
     monkeypatch.setattr(session, "_stop_agents", lambda c: stopped.append(c))
