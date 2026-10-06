@@ -2377,7 +2377,8 @@ async def _settle_ticket(run: Run, t: dict[str, Any], agent_id: str, status: str
       ticket's card in every mode (APPLY_QUESTION) and the apply of that commit (_apply), as before; an agent thimble
       stopped after its pass (view_tools.FINISH_GRACE_S) passed all the same;
     - its last attempt failed: the ticket fails with what the checks found;
-    - it was stopped otherwise: the ticket ends stopped, MAIN_ENDED when main's quit stopped it, with Retry;
+    - it was stopped otherwise: the ticket ends stopped, MAIN_ENDED when main's quit stopped it, the plan line when
+      thimble stopped it as main went into plan mode (subagents.plan_line), with Retry;
     - it ended without calling finish_ticket and left a change: the gates run once, and a pass goes on as above;
     - otherwise it failed, with what the checks found, or the agent's last words when it made no change."""
     from . import subagents  # noqa: PLC0415
@@ -2401,7 +2402,9 @@ async def _settle_ticket(run: Run, t: dict[str, Any], agent_id: str, status: str
             if status == "stopped":
                 a = subagents.agent(c, agent_id) or {}
                 st = run.stop_reason or "stopped"
-                err = MAIN_ENDED if a.get("stopped_by") == subagents.STOPPED_QUIT else run.why
+                err = (MAIN_ENDED if a.get("stopped_by") == subagents.STOPPED_QUIT
+                       else subagents.plan_line(TICKET_ROLE) if a.get("stopped_by") == subagents.STOPPED_PLAN
+                       else run.why)
                 return
             got = None
             if not int(t.get("attempt") or 0) and t.get("worktree") and Path(str(t["worktree"])).is_dir():

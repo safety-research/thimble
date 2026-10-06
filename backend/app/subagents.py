@@ -90,7 +90,8 @@ PLAN_STOPPED_LINE = ("Stopped when your Claude Code session went into plan mode,
                      "you before every step. Leave plan mode (shift+tab in your terminal), then {how}.")
 PLAN_HOW = {"orientation": "send it a message to continue it", "critic": "send the orientation a message to continue it",
             "writer": "choose Write again", "view-builder": "choose Retry on the view",
-            "view-reviewer": "choose Review again on the view", "check": "choose Run on the check"}
+            "view-reviewer": "choose Review again on the view", "check": "choose Run on the check",
+            "dev-ticket": "choose Retry on the ticket"}
 USER_STOP_RE = re.compile(r"stopped by (the )?user", re.I)  # Esc's task notification and a SendMessage's error say so
 QUIT_LINE = "Stopped when Claude Code quit."  # a chat's end line, its card's text is the browser's (AgentCard)
 WORK_DIRS = ("orient/work", "writers", "critique-work", "check-work", "views-work", "extension/views")

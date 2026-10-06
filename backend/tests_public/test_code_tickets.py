@@ -318,6 +318,20 @@ async def test_stop_stops_the_agent_through_the_module_and_main_s_quit_stops_it_
     assert dev._get(t["id"])["error"] == dev.MAIN_ENDED and subagents.agent(CORPUS, new_agent)["status"] == "stopped"
 
 
+async def test_plan_mode_s_stop_ends_the_ticket_stopped_saying_why_and_to_choose_retry(ticketing, bridge):
+    """U4: thimble stopped the ticket's agent through the module when main went into plan mode: the ticket ends stopped,
+    and the ticket and its thread say why and to choose Retry once main leaves plan mode; nothing starts again."""
+    t, agent = await _clicked_ticket()
+    assert await subagents.stop_for_plan(CORPUS) == [agent]
+    assert bridge.ops("stop")[-1]["agent"] == agent
+    subagents.run_ended(CORPUS, agent, "stopped", "", source="notification")
+    await _until(lambda: dev._get(t["id"])["status"] == "stopped", "the ticket did not stop")
+    line = subagents.plan_line("dev-ticket")
+    assert dev._get(t["id"])["error"] == line and "plan mode" in line and "Retry on the ticket" in line
+    assert agents.read_meta(CORPUS, t["chat"])["result"] == line, "its thread ends saying why"
+    assert len(bridge.ops("spawn")) == 1, "nothing starts again by itself"
+
+
 async def test_a_restarted_server_takes_up_the_running_agent_and_asks_again_for_a_change_that_passed(ticketing):
     """After a server restart, a ticket whose agent still runs in main is the server's run again; one whose agent
     passed while no server ran is settled, its Allow asked again; one whose agent ended without a pass, or whose
