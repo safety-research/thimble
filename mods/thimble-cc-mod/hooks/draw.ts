@@ -204,7 +204,8 @@ export function shade(lines: readonly Line[], spans: readonly { line: number; x0
 }
 
 /** A layout's lines with item `i` shaded as the open menu's target: the row or column the layout lights for it, or
- *  else the cells that hit it. */
+ *  else the cells that hit it. No card calls it since round 8 (a right-click does what a click does); the Merge step
+ *  deletes it. */
 export function menuShade(lay: Layout, i: number): Line[] {
   if (i < 0) return lay.lines
   const spans: { line: number; x0: number; x1: number }[] = []
