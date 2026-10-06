@@ -91,6 +91,23 @@ test('a card shows its last state: a change on disk draws it again', async ($, o
   expect(w.calls.some(c => c[2] === 'cards' && c.includes('--since'))).toBe(true)
 })
 
+test("a card made by add_card waits for its run, then shows what `thimble-run` wrote, though its stamp did not move", async ($, on) => {
+  const w = world(on)
+  await start($, w)
+  await turn($, w, [['r1', 'Running it.']], { tool: 'mcp__plugin_thimble_thimble__add_card', text: 'card:w0wait00\nRun this command with Bash to run the card: thimble-run card w0wait00' })
+  const ui = (await $.ui.mount(MESSAGE('r1', 'Running it.'))) as unknown as M
+  expect(shown(await ui.drawn({ in: 'card-t0-w0wait00' }))).toContain('waiting for its run')
+  // thimble-run writes the cell's outputs; the cell keeps its stamp
+  Object.assign(w.cells.w0wait00!, { run: { state: 'done', by: 'bash' }, status: 'ok', outputs: (w.cells.a0frame0 as { outputs: unknown }).outputs })
+  w.stamps.set(`${WS}/notebooks`, 3)
+  await w.clock.advance(1100)
+  await ui.redraw()
+  const text = shown(await ui.drawn({ in: 'card-t0-w0wait00' }))
+  expect(text).not.toContain('waiting for its run')
+  expect(text).toContain('events.jsonl')
+  await ui.unmount()
+})
+
 test("main's end token is hidden; a reply that is only the token draws nothing", async ($, on) => {
   const w = world(on)
   await start($, w)

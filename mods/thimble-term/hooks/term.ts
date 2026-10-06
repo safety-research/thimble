@@ -118,9 +118,16 @@ async function refreshCards(cx: Ctx, labels: boolean): Promise<void> {
   const since = rt.cardsAt || iso(0)
   rt.cardsAt = iso((await cx.now()) - 5000)
   const got = await readState(cx, rt.sc, 'cards', ['--since', since])
+  const read = new Set<string>()
   if (got.ok) {
-    for (const cell of cellsOf(got.value)) if (rt.shown.has(cell.id)) await putCard(cx, cell)
+    for (const cell of cellsOf(got.value)) {
+      if (!rt.shown.has(cell.id)) continue
+      read.add(cell.id)
+      await putCard(cx, cell)
+    }
   }
+  // a card that waits for its run, runs or is checked is read whole, whatever its stamp says
+  for (const id of rt.shown) if (!read.has(id) && (await cx.card(id))?.busy) await loadCards(cx, [id])
   if (labels) for (const id of rt.labelOf.keys()) if (rt.shown.has(id)) await loadCards(cx, [id])
 }
 
