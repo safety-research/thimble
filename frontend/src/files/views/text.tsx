@@ -145,7 +145,7 @@ export function TextView({ path, page, targetRef }: ViewProps) {
       {md && !raw ? (
         <div className="reader-md reader-md-file" data-anchor={path} data-anchor-text={path}>
           {meta > 0 && <FrontMatter path={path} records={records.slice(0, meta)} />}
-          <Markdown remarkPlugins={[remarkGfm]} rehypePlugins={rehype} components={MD_COMPONENTS}>
+          <Markdown remarkPlugins={[[remarkGfm, { singleTilde: false }]]} rehypePlugins={rehype} components={MD_COMPONENTS}>
             {body.map(lineText).join('\n')}
           </Markdown>
         </div>
