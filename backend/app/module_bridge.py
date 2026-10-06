@@ -109,6 +109,10 @@ NOTE_HINT = "module-started-note"  # prompts/tools.md: {role}, {agent}, {what}
 AGENT = "{agent}"  # left in a note for the module to fill with the agent id it got
 WHAT_CHARS = 120
 WHAT_ORIENTATION = "this corpus"  # module-started-note's {what} for an agent whose key has no name (the orientation)
+# module-started-note's {how}, by the route of the agent's start: the analyst's click, the next step of a run they asked
+# for (a writer after the orientation, a view build it proposed), or main's own Agent call for a typed request
+HOW = {"click": "in the browser", "follow-on": "as the next step of a run they asked for in thimble",
+       "typed": "through your own Agent call"}
 NO_MODULE_ENV = "THIMBLE_NO_MODULE"
 NOT_LOADED = "Claude Code did not load thimble's hooks module"
 NOT_ANSWERING = "Your Claude Code session's thimble module did not answer"
@@ -535,14 +539,15 @@ def rekey(c: str, old: str, new: str) -> None:
         _loop.call_soon_threadsafe(_wake, c)
 
 
-def _note(role: str, what: str) -> str:
+def _note(role: str, what: str, route: str = "click") -> str:
     """The one line the module appends to main at a start: hint module-started-note with the role and `what`, a
-    server-checked name, and AGENT left for the module to fill. '' when the hint is missing. An agent whose key names
-    nothing after its role, the orientation's, is "for this corpus" (lane D's {what})."""
+    server-checked name, how it started (`route`: HOW), and AGENT left for the module to fill. '' when the hint is
+    missing. An agent whose key names nothing after its role, the orientation's, is "for this corpus" (lane D's
+    {what})."""
     from . import tools  # noqa: PLC0415
 
     clean = re.sub(r"[\x00-\x1f\x7f<>]+", " ", str(what or "")).strip()[:WHAT_CHARS] or WHAT_ORIENTATION
-    return tools.hint(NOTE_HINT, role=role, agent=AGENT, what=clean)
+    return tools.hint(NOTE_HINT, role=role, agent=AGENT, what=clean, how=HOW.get(route) or HOW["click"])
 
 
 def _answer(op: str, raw: Any) -> Answer:
@@ -576,7 +581,8 @@ def _args(op: str, args: dict[str, Any]) -> dict[str, Any]:
     if op == "spawn":
         role = str(args.get("role") or "")
         out = {"role": role, "prompt": str(args.get("prompt") or ""), "description": str(args.get("description") or ""),
-               "values": dict(args.get("values") or {}), "note": _note(role, str(args.get("what") or ""))}
+               "values": dict(args.get("values") or {}),
+               "note": _note(role, str(args.get("what") or ""), str(args.get("route") or "click"))}
         if args.get("request"):
             out["request"] = str(args["request"])
         return out
@@ -1034,7 +1040,8 @@ async def state_route(cwd: str, session: str) -> dict[str, Any]:
     for aid, e in running.items():
         role = _role_of(e.get("type"))
         if role and role != "helper" and not e.get("parent"):
-            line = _note(role, _what(e)).replace(AGENT, aid)
+            line = _note(role, _what(e), str(e.get("route") or ("click" if e.get("plugin_started") else "typed")))
+            line = line.replace(AGENT, aid)
             if line:
                 notes.append(line)
     return {

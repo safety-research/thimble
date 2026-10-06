@@ -1074,7 +1074,7 @@ thimble's agents can't start in this session: Claude Code's hooks modules are of
 
 ## module-started-note
 
-thimble: the analyst started thimble's {role} for {what} in the browser, as your subagent {agent}. Its report goes to the analyst in thimble, so when it hands back, reply in one short line, and do nothing about it unless the analyst asks.
+thimble: the analyst started thimble's {role} for {what} {how}, as your subagent {agent}. Its report goes to the analyst in thimble, so when it hands back, reply in one short line, and do nothing about it unless the analyst asks.
 
 ## follow-up-ran-on
 

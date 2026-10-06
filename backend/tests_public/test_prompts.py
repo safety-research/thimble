@@ -65,7 +65,7 @@ SUBAGENT_HINTS = {
     "start-refused-no-module": {"reason"},
     "orient-continue-earlier-session": {"resume"},
     "orient-continue-earlier-version": set(),
-    "module-started-note": {"role", "agent", "what"},
+    "module-started-note": {"role", "agent", "what", "how"},
     "follow-up-ran-on": {"model", "effort"},
     "finish-view-pass": set(),
     "finish-view-fail": {"report", "n", "of"},

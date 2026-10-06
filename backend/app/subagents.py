@@ -625,7 +625,7 @@ async def _spawn(c: str, rid: str, r: dict[str, Any]) -> Answer:
         make_work(c, Path(str(r["work"])))
     inp = r.get("input") or {}
     ans = await _bridge(c, "spawn", role=r.get("role"), values=r.get("values") or {}, prompt=inp.get("prompt"),
-                        description=inp.get("description"), request=rid, what=_what(r))
+                        description=inp.get("description"), request=rid, what=_what(r), route=r.get("route") or CLICK)
     if ans.started:
         meta = bind(c, str(ans.agent_id), rid)  # its chat, which the browser opens after a click (Start's thread)
         return Answer({**ans, "request": rid, **({"chat": meta["id"]} if meta and meta.get("id") else {})})

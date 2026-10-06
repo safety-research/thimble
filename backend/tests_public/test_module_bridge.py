@@ -27,6 +27,7 @@ MAIN = "11111111-1111-4111-8111-111111111111"
 NEW = "22222222-2222-4222-8222-222222222222"
 CHILD = "33333333-3333-4333-8333-333333333333"
 NOTE = "The analyst started {role} {agent} ({what}) in thimble; its report goes to them there."
+REAL_HINT = tools.hint
 
 
 @pytest.fixture(autouse=True)
@@ -405,6 +406,20 @@ async def test_the_long_poll_hands_requests_to_main_s_session_alone(client, plug
     assert (await child.next(wait=0)).status_code == 409
     await mod.result(req["id"], {"agentId": "a7", "model": "claude-opus-5-5[1m]", "junk": 1})
     assert await ask == {"agentId": "a7", "model": "claude-opus-5-5[1m]"}
+
+
+def test_the_note_says_how_the_agent_started_in_the_real_hint(monkeypatch):
+    """Live checks L2 and L17: the note for a writer that follows a typed orientation, and the note after /clear for a
+    typed-started agent, said the analyst started it "in the browser". The note says how it started: a click in the
+    browser, the next step of a run they asked for, or main's own Agent call."""
+    monkeypatch.setattr(tools, "hint", REAL_HINT)  # the real hint of prompts/tools.md
+    click = module_bridge._note("writer", "report")
+    assert "started thimble's writer for report in the browser, as your subagent {agent}" in click
+    follow = module_bridge._note("writer", "report", "follow-on")
+    assert "for report as the next step of a run they asked for in thimble," in follow and "browser" not in follow
+    typed = module_bridge._note("orientation", "", "typed")
+    assert "for this corpus through your own Agent call," in typed and "browser" not in typed
+    assert module_bridge._args("spawn", {"role": "writer", "what": "report", "route": "follow-on"})["note"] == follow
 
 
 async def test_answers_reach_their_own_callers_in_any_order_and_take_one_shape(client, plugin_headers):
