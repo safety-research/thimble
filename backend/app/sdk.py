@@ -66,8 +66,8 @@ MAX_BUFFER_SIZE = int(os.environ.get("THIMBLE_CLI_MAX_BUFFER", str(32 * 1024 * 1
 # which prints "Permission denied" at the top of every Bash result.
 SHELL_LEVEL_ENV = {"SHLVL": "1"}
 # The SDK runs `claude -v` before each call with this process's whole environment, thimble's variables among them
-# (config.launch_environ says why none may reach a `claude`). This variable turns that off. thimble warns about an old
-# Claude Code itself (cli.claude_code_warning). Its name does not pass to a `claude` thimble starts (config.passes).
+# (config.launch_environ says why none may reach a `claude`). This variable turns that off. thimble checks Claude
+# Code's version itself (cli.claude_code_warning). Its name does not pass to a `claude` thimble starts (config.passes).
 SKIP_VERSION_CHECK_ENV = "CLAUDE_AGENT_SDK_SKIP_VERSION_CHECK"
 # The variables that would choose a call's model or effort over its `--model` and `--effort` (module note), each passed
 # to the call's `claude` as "" (the SDK starts it with this process's environment under the call's own, so a variable

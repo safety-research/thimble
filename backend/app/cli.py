@@ -2592,7 +2592,9 @@ def module_line(cwd: Path) -> str:
 # free disk, who holds the port, how a session started here would hear the browser, and whether the API host answers.
 # Each reader returns a short phrase and never raises, since the doctor must print even on a broken machine.
 
-TESTED_CLAUDE_CODE = "2.1.281"  # INSTALL.md names the same version
+TESTED_CLAUDE_CODE = "2.1.291"  # INSTALL.md and README.md name the same version (test_cli.py)
+MODS_CLAUDE_CODE = "2.1.287"  # the first Claude Code that loads plugin mods, thimble's hooks module, by default
+CLAUDE_CODE_SEEN_FILE = "claude_code.json"  # in <home>: the newer Claude Codes the analyst was told about
 NODE_MIN_MAJOR = 20  # custom views are built with Node 20+ (views.py)
 DISK_LOW_BYTES = 1_000_000_000  # under this much free space the doctor says the disk is low
 LOG_ROTATE_BYTES = 20_000_000  # a server.log past this size is moved to server.log.1 when a server starts
@@ -2619,26 +2621,85 @@ def claude_code_version() -> str | None:
     return ".".join(map(str, v)) if v else None
 
 
-def claude_code_warning(version: str | None) -> str | None:
-    """A line for the analyst when Claude Code is older than the version thimble is tested with; None when it is that
-    version or newer, or its version is not known (config.auth_problem says when `claude` is missing)."""
-    have, tested = version_tuple(version), version_tuple(TESTED_CLAUDE_CODE)
-    if have and tested and have < tested:
-        return (f"thimble: WARNING - Claude Code {version} is older than {TESTED_CLAUDE_CODE}, the version thimble is tested "
-                "with; if something fails, run `claude update` and start thimble again.")
+TOO_OLD_LINE = ("thimble: WARNING - Claude Code {version} does not load plugin mods by default ({mods} or later does), so "
+                "thimble's agents cannot start. Run `claude update`, or `claude install latest` if you follow the stable "
+                "channel.")
+OLDER_LINE = ("thimble: WARNING - Claude Code {version} is older than {tested}, the version thimble is tested with; if "
+              "something fails, run `claude update` and start thimble again.")
+NEWER_LINE = ("thimble: Claude Code {version} is newer than {tested}, the version {thimble} was tested with. If agents do "
+              "not start or their chats stop updating, run `thimble doctor` and report it.")
+NEWER_DOCTOR_TAIL = ("run `thimble doctor` and report it.", "report it (`thimble feedback`).")  # the doctor's own words
+
+
+def _thimble_named() -> str:
+    """`thimble 0.6.0`, from plugin.json (the one source a release takes its version from), or `thimble`."""
+    rec = _read_json(config.REPO_ROOT / "plugin" / ".claude-plugin" / "plugin.json")
+    v = str(rec.get("version") or "") if isinstance(rec, dict) else ""
+    return f"thimble {v}" if v else "thimble"
+
+
+def _first_told(version: str) -> bool:
+    """Whether the analyst is told about this newer Claude Code for the first time on this machine, which it records in
+    <home>/CLAUDE_CODE_SEEN_FILE. Never raises: a home it cannot write tells them again next time."""
+    path = home() / CLAUDE_CODE_SEEN_FILE
+    rec = _read_json(path)
+    told = [str(v) for v in rec.get("newer_told") or []] if isinstance(rec, dict) else []
+    if version in told:
+        return False
+    try:
+        from .ledger import atomic_write_text  # noqa: PLC0415
+
+        ensure_home()
+        atomic_write_text(path, json.dumps({"newer_told": [*told, version][-20:]}, indent=1) + "\n")
+    except (OSError, ValueError) as e:
+        _log(f"{CLAUDE_CODE_SEEN_FILE} was not written: {e}")
+    return True
+
+
+TOO_OLD, OLDER, NEWER = "too old", "older", "newer"  # how a Claude Code's version stands to thimble's (claude_code_case)
+
+
+def claude_code_case(version: str | None) -> str | None:
+    """TOO_OLD below MODS_CLAUDE_CODE, which does not load thimble's hooks module by default, OLDER below the version
+    thimble is tested with, NEWER above it; None for that version, or when `version` names none."""
+    have, tested, mods = version_tuple(version), version_tuple(TESTED_CLAUDE_CODE), version_tuple(MODS_CLAUDE_CODE)
+    if not (have and tested and mods) or have == tested:
+        return None
+    return TOO_OLD if have < mods else OLDER if have < tested else NEWER
+
+
+def claude_code_warning(version: str | None, once: bool = True) -> str | None:
+    """A line for the analyst about the Claude Code thimble runs with (claude_code_case), shown at launch and in
+    /thimble's output; for a newer one a hint that with `once` is given once per version on this machine (_first_told).
+    None for the tested version, or when its version is not known (config.auth_problem says when `claude` is missing)."""
+    case = claude_code_case(version)
+    if case == TOO_OLD:
+        return TOO_OLD_LINE.format(version=version, mods=MODS_CLAUDE_CODE)
+    if case == OLDER:
+        return OLDER_LINE.format(version=version, tested=TESTED_CLAUDE_CODE)
+    if case == NEWER and (not once or _first_told(str(version))):
+        return NEWER_LINE.format(version=version, tested=TESTED_CLAUDE_CODE, thimble=_thimble_named())
     return None
 
 
 def claude_code_line(commands: bool = True) -> str:
+    """The doctor's Claude Code line: its version and what claude_code_warning says of it, the newer hint each time, in
+    the doctor's own words. Without `commands` it names no command to run."""
     v = claude_code_version()
     if v is None:
         return (config.NO_CLAUDE if commands else config.NO_CLAUDE_FOUND) if not config.CLI_PATH else \
             "`claude --version` printed no version"
-    warning = claude_code_warning(v)
-    if warning:
-        return warning.removeprefix("thimble: WARNING - ") if commands else \
-            f"{v}, older than {TESTED_CLAUDE_CODE}, the version thimble is tested with"
-    return f"{v} (thimble is tested with {TESTED_CLAUDE_CODE})"
+    case, warning = claude_code_case(v), claude_code_warning(v, once=False)
+    if not warning:
+        return f"{v} (thimble is tested with {TESTED_CLAUDE_CODE})"
+    if commands:
+        return warning.removeprefix("thimble: WARNING - ").removeprefix("thimble: ").replace(*NEWER_DOCTOR_TAIL)
+    if case == TOO_OLD:
+        return (f"{v}, older than {MODS_CLAUDE_CODE}, the first version that loads plugin mods by default, so thimble's "
+                "agents cannot start")
+    if case == OLDER:
+        return f"{v}, older than {TESTED_CLAUDE_CODE}, the version thimble is tested with"
+    return f"{v}, newer than {TESTED_CLAUDE_CODE}, the version {_thimble_named()} was tested with"
 
 
 def _turn_endings_line() -> str:
