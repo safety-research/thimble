@@ -1001,6 +1001,37 @@ def test_the_full_export_holds_a_subagent_orientation_s_transcript_split_by_a_cl
     assert got["warnings"] == [] and not [i for i in got["installed_transcripts"] if "agent" in i["path"]]
 
 
+def test_the_full_export_holds_every_role_s_subagent_transcript(tmp_path):
+    """View builds, view reviews and report checks are subagents of main now, like the orientation: their records are
+    under main's session folder, not a session of their own in the workspace (which is how 0.6.0's full export found a
+    view build's), so the export finds them by their chats, each under its own role."""
+    root = tmp_path / "a"
+    corpus = root / "corpus"
+    corpus.mkdir(parents=True)
+    (corpus / "a.jsonl").write_text(json.dumps({"body": CORPUS_TEXT}) + "\n")
+    ws = make_workspace(root, corpus, root)
+    sid = "33333333-0000-4000-8000-000000000003"
+    claude = tmp_path / "claude"
+    proj = claude / "projects" / demo.dashed(str(corpus))
+    (proj / sid / "subagents").mkdir(parents=True)
+    (proj / f"{sid}.jsonl").write_text("")
+    chats = {"b1": ("dev", {"view": "posts"}), "r1": ("dev", {"view": "posts", "review": True}),
+             "k1": ("check", {"check": "unverified", "doc": "report"})}
+    for chat, (role, extra) in chats.items():
+        agent = f"a{chat}"
+        (ws / "chats" / f"{chat}.meta.json").write_text(json.dumps({
+            "id": chat, "kind": "agent", "role": role, "route": "subagent", "agent_id": agent, "status": "done",
+            "session": sid, "sessions": [sid], **extra}))
+        (ws / "chats" / f"{chat}.jsonl").write_text("")
+        (proj / sid / "subagents" / f"agent-{agent}.jsonl").write_text(transcript(corpus, sid, f"the {chat} ran"))
+    out = tmp_path / "out" / "toy"
+    m = demo.export_full(ws, corpus, out, name="toy", home=root, user="", scan=no_scan, claude_dir=claude)
+    roles = {t["path"]: t["role"] for t in m["transcripts"] if t.get("agent")}
+    assert roles == {"transcripts/agent-ab1.jsonl": "view build", "transcripts/agent-ar1.jsonl": "view review",
+                     "transcripts/agent-ak1.jsonl": "report check"}
+    assert m["inventory"]["sessions"] == {"view build": 1, "report check": 1, "view review": 1}
+
+
 def test_the_full_export_names_what_may_be_private_without_refusing(tmp_path):
     full_made(tmp_path / "x")
     ws = tmp_path / "x" / "a" / "workspaces" / "toy"

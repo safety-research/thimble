@@ -747,8 +747,11 @@ def session_role(folder: str) -> str:
     return SESSION_ROLES.get(folder.split("/", 1)[0], "other")
 
 
-# the role a chat of thimble's agents (route subagent) names its transcript by, by the chat's role
-SUBAGENT_ROLES = {"orient": "orientation", "writer": "writer", "step": "critic"}
+# the role a chat of thimble's agents (route subagent) names its transcript by, by the chat's role; a view's reviewer has
+# the builder's chat role and `review` set (SUBAGENT_REVIEW)
+SUBAGENT_ROLES = {"orient": "orientation", "writer": "writer", "step": "critic", "dev": "view build",
+                  "check": "report check"}
+SUBAGENT_REVIEW = "view review"
 
 
 def _main_folders(claude_dir: Path, sid: str) -> list[Path]:
@@ -781,7 +784,7 @@ def subagent_transcripts(ws: Path, claude_dir: Path) -> list[tuple[str, list[Pat
         own = [f / f"agent-{agent}.jsonl" for f in folders if (f / f"agent-{agent}.jsonl").is_file()]
         if not own:
             continue
-        out.append((agent, own, SUBAGENT_ROLES[str(meta["role"])]))
+        out.append((agent, own, SUBAGENT_REVIEW if meta.get("review") else SUBAGENT_ROLES[str(meta["role"])]))
         mine, metas = {agent}, {}
         for f in folders:
             for mp in sorted(f.glob("agent-*.meta.json")):
@@ -982,7 +985,8 @@ def export_full(ws: Path, corpus: Path, out: Path, *, name: str, home: Path | No
             "inventory": {
                 "bytes": dict(sorted(sizes.items())), "files": dict(sorted(files_n.items())), **tally,
                 "typed_in_main": len(typed), "marked_done": stopped,
-                "sessions": {r: n for r in (*SESSION_ROLES.values(), "other")
+                "sessions": {r: n for r in dict.fromkeys((*SESSION_ROLES.values(), *SUBAGENT_ROLES.values(),
+                                                          SUBAGENT_REVIEW, "other"))
                              if (n := sum(1 for t in transcripts if t["role"] == r))},
                 "transcript_records": sum(int(t.get("kept") or 0) for t in transcripts),
                 "dropped_records": dropped,
