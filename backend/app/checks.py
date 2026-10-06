@@ -41,7 +41,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from . import config, investigation, prompts, tools, userconf, work_files
-from .ledger import read_json, write_json
+from .ledger import read_json, write_json, write_under
 
 log = logging.getLogger("thimble.checks")
 router = APIRouter()
@@ -606,7 +606,7 @@ async def _launch(act: _Active) -> None:
         return
     work = work_dir(c, act.check, act.doc)
     path = work / TASK_FILE
-    await asyncio.to_thread(_write_task, path, text)
+    await asyncio.to_thread(_write_task, c, path, text)
     if act.route == subagents.FOLLOW_ON:
         await subagents.out_of_plan(c)
     if act.ended:
@@ -627,9 +627,9 @@ async def _launch(act: _Active) -> None:
         act.request = str(ans.get("request") or "") or None
 
 
-def _write_task(path: Path, text: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text + "\n", "utf-8")
+def _write_task(c: str, path: Path, text: str) -> None:
+    """The run's task file, in a folder its agent and main's Bash can write, so never through a link (write_under)."""
+    write_under(config.workspace_dir(c), path, text + "\n")
 
 
 def subagent_started(c: str, run: Any, req: dict[str, Any]) -> None:

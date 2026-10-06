@@ -34,6 +34,7 @@ from pathlib import Path
 from typing import Any
 
 from . import agents, config, orient_checks, orientation, session, subagents, tools, work_files
+from .ledger import write_under
 
 log = logging.getLogger("thimble.critique_session")
 
@@ -404,8 +405,7 @@ def write_digest(c: str, caller: Caller) -> Path | None:
         return None
     path = digest_dir(c, caller.chat) / DIGEST_FILE
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(text + "\n", "utf-8")
+        write_under(config.workspace_dir(c), path, text + "\n")  # a kernel can write the workspace
     except OSError as e:
         log.warning("%s: the transcript digest of %s was not written (%s)", c, caller.chat, e)
         return None
@@ -482,8 +482,7 @@ async def tool_critique(ctx: Any, args: dict[str, Any]) -> Any:
     _, text = await brief(ctx.c, caller, str(args.get("context") or ""))
     path = digest_dir(ctx.c, caller.chat) / BRIEF_FILE
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(text + "\n", "utf-8")
+        write_under(config.workspace_dir(ctx.c), path, text + "\n")  # a kernel can write the workspace
     except OSError as e:
         return tools.err(f"critique: the brief was not written ({e})")
     task = "\n\n".join(x for x in (tools.hint("critique-task"), tools.hint("critic-brief-file", path=str(path))) if x)

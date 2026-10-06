@@ -20,6 +20,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from . import config, context, report_types, subagents, tools, work_files
+from .ledger import write_under
 
 log = logging.getLogger("thimble.write_session")
 router = APIRouter()
@@ -72,8 +73,7 @@ def definition(c: str) -> dict[str, Any]:
 def write_context(c: str, t: dict[str, Any], request: str, after: str) -> Path:
     """The writer's context file, writers/<doc>/context.md (first_message), which its prompt names."""
     path = work_dir(c, str(t["slug"])) / CONTEXT_FILE
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(first_message(c, t, request, after) + "\n", "utf-8")
+    write_under(config.workspace_dir(c), path, first_message(c, t, request, after) + "\n")  # a folder agents write
     return path
 
 

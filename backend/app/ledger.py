@@ -98,6 +98,19 @@ def unlinked(base: Path, path: Path) -> Path:
     return path
 
 
+def write_under(base: Path, path: Path, text: str) -> None:
+    """`text` written to `path` under `base` by the server: its folders made, none of them a symlink (unlinked), and a
+    symlink at `path` itself replaced rather than followed (atomic_write_text). For a file thimble writes into a folder
+    that its agents' Bash or a kernel can write (a check's task file, a writer's context file, the critic's brief and
+    digest), where a planted link would have the server, which no sandbox holds, write outside it. OSError for a link."""
+    try:
+        unlinked(base, path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        atomic_write_text(unlinked(base, path), text)
+    except ValueError as e:
+        raise OSError(str(e)) from None
+
+
 def write_json(path: Path, obj: Any) -> None:
     atomic_write_text(path, json.dumps(obj, indent=2, ensure_ascii=False))
 

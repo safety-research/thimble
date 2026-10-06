@@ -182,6 +182,30 @@ async def test_main_s_quit_stops_a_queued_run_and_its_agent_s_end_stops_a_runnin
     assert len(bridge.ops("spawn")) == 1, "nothing starts in a stopped run's place"
 
 
+async def test_a_run_s_task_file_is_never_written_through_a_link(doc, bridge, tmp_path):
+    """check-work/ is a folder the agents' Bash and a kernel can write, and the server, which no sandbox holds, writes
+    each run's task file there: a link planted at the file is replaced, never followed, and a run whose folder is a link
+    fails without writing through it (ledger.write_under, which the writers' context files and the critic's brief use
+    too)."""
+    from app import ledger
+
+    await _write()
+    outside = tmp_path / "outside.txt"
+    outside.write_text("keep me")
+    task = checks.work_dir(CORPUS, "unverified", "report") / checks.TASK_FILE
+    task.parent.mkdir(parents=True, exist_ok=True)
+    task.symlink_to(outside)
+    await _started("unverified")
+    assert outside.read_text() == "keep me" and not task.is_symlink() and task.read_text().strip()
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    checks.work_dir(CORPUS, "judgment", "report").symlink_to(elsewhere, target_is_directory=True)
+    act = await _started("judgment")
+    assert act.ended and _run("judgment")["status"] == "failed" and not list(elsewhere.iterdir())
+    with pytest.raises(OSError):
+        ledger.write_under(config.workspace_dir(CORPUS), checks.work_dir(CORPUS, "judgment", "report") / "x.md", "x")
+
+
 CHECK_CLICKS = [("post", "/api/ws/mini/checks/unverified/run", {"doc": "report"}),
                 ("post", "/api/ws/mini/checks/unverified/runs", {"doc": "report"}),
                 ("post", "/api/ws/mini/checks", {"name": "Dates", "prompt": "Mark the dates."}),
