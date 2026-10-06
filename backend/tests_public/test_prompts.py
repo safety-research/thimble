@@ -234,6 +234,7 @@ def test_main_and_the_orientation_say_how_subagents_end_and_start(monkeypatch):
     monkeypatch.delenv("THIMBLE_PROMPTS_DIR", raising=False)
     [line] = [line for line in prompts.load("main").splitlines() if "hands back" in line and "one short line" in line]
     assert "task notification comes after a report" in line and "Always write this line" in line
+    assert all(end in line for end in ("finished", "stopped", "failed")), "the line says how the agent ended"
     assert "thimble:helper" in prompts.load("orient")
 
 
