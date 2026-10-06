@@ -8,12 +8,14 @@
 //   words around it, with where each citation, word and table row lands, so a pointer finds what it is over.
 // - Fix rounds: the sentences a forked subagent is asked to rewrite, its answer read, and each corrected sentence put
 //   in place of the old one, unmarked.
+// - Marks: each answer's footer rows and each citation's fix and verification, as the file that keeps them across a
+//   resume.
 // - Streaming: a reply's text as the engine shows it while it streams, citations as links and card lines as
 //   placeholders, before the mod draws the finished block.
-import type { ChatCorrection, ChatFixItem } from '../types'
+import type { ChatCorrection, ChatEnd, ChatFix, ChatFixItem, ChatVerify } from '../types'
 import { cut, lineWidth, width } from './draw'
 import type { Line, Seg } from './draw'
-import { EMBED_RE, chipLabel, cid, citations, parseReply } from './lib'
+import { EMBED_RE, chipLabel, cid, citations, citeEnd, citeSpans, parseReply, shownMatches, valueIn } from './lib'
 import type { Citation, Run, TableRuns } from './lib'
 import { COLORS } from './paint'
 
@@ -21,7 +23,8 @@ import { COLORS } from './paint'
  *  not at the place or the place does not exist; `fixing` while a fix round runs on it; `failed` when the fix round
  *  could not correct it or its verification failed (another value, a crash, no script). */
 export type ChipState = 'link' | 'problem' | 'fixing' | 'failed'
-/** `mark` is ✓, ✗ or nothing; `spin` while a fix round or a verification works on the citation. */
+/** `mark` is ✓ (a script recomputed the value), × (failed) or nothing; `spin` while a fix round or a verification works
+ *  on the citation, drawn as ◌. */
 export type ChipView = { label: string; state: ChipState; mark: string; spin: boolean; tip: string }
 
 /** What a citation's link says: its shown value whole, or a short name of the place for one without a value. */
@@ -29,7 +32,8 @@ export function citeLabel(c: Citation): string {
   return c.display ?? chipLabel(c)
 }
 
-export const SPIN = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
+/** The glyph of a citation being worked on: running (views/SPEC.md, "The visual system", section 5). */
+export const SPIN = '◌'
 
 /** A verification that failed: its script recomputed another value, crashed, printed no result, or was never written. */
 export function verifyFailed(verify: string | undefined): boolean {
@@ -53,16 +57,75 @@ export function verifying(verify: string | undefined): boolean {
 export function chipLook(status: string | undefined, fix: string | undefined, verify: string | undefined): Pick<ChipView, 'state' | 'mark' | 'spin'> {
   const state = chipState(status, fix, verify)
   const spin = state === 'fixing' || verifying(verify)
-  const mark = spin ? '' : state === 'failed' ? '✗' : state === 'link' && verify === 'verified' ? '✓' : ''
+  const mark = spin ? '' : state === 'failed' ? '×' : state === 'link' && verify === 'verified' ? '✓' : ''
   return { state, mark, spin }
 }
 
-/** A citation as styled segments: the underlined label, then its spinner or its mark. */
-export function chipSegs(c: ChipView, hover: boolean, frame = 0): Seg[] {
-  const segs: Seg[] = [{ s: c.label, fg: c.state === 'link' ? COLORS.link : COLORS.problem, u: true, inv: hover }]
-  if (c.spin) segs.push({ s: ` ${SPIN[frame % SPIN.length]}`, fg: c.state === 'link' ? COLORS.dim : COLORS.problem })
-  else if (c.mark) segs.push({ s: c.mark, fg: c.mark === '✓' ? COLORS.ok : COLORS.problem })
+/** A citation as styled segments: its label underlined in the text colour (red with a problem), in inverse under the
+ *  pointer, then ◌ while it is worked on or its mark: ✓ in the text colour, × in red. */
+export function chipSegs(c: ChipView, hover: boolean, _frame = 0): Seg[] {
+  const segs: Seg[] = [{ s: c.label, ...(c.state === 'link' ? {} : { fg: COLORS.problem }), u: true, ...(hover ? { inv: true } : {}) }]
+  if (c.spin) segs.push({ s: ` ${SPIN}`, ...(c.state === 'link' ? {} : { fg: COLORS.problem }) })
+  else if (c.mark) segs.push({ s: c.mark, ...(c.mark === '✓' ? {} : { fg: COLORS.problem }) })
   return segs
+}
+
+// ---------------------------------------------------------------------------------------- what a verification compares
+
+const NUMBER_RE = /^[-−]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?%?$/
+
+/** Whether a citation's words are a value its place can show, a number or a quote, as the resolver (refs.py) reads
+ *  them. Other words, as in [[its revisions|revisions.jsonl#L5603-L5625]], name the place and show no value. */
+export function showsValue(display: string | null): boolean {
+  return display !== null && (NUMBER_RE.test(display.trim()) || quotedWords(display) !== '')
+}
+
+/** The place a file citation names after its "#" (L5603-L5625, row=12, a JSON pointer, table/key), or '' for a whole
+ *  file, a card or a call: what a verification of words that show no value recomputes. */
+export function citedPlace(ref: string | undefined): string {
+  if (!ref || /^(?:card|call):/.test(ref)) return ''
+  const hash = ref.indexOf('#')
+  return hash < 0 ? '' : ref.slice(hash + 1).trim()
+}
+
+const PLACE_LINES = /^L(\d+)(?:-L?(\d+))?$/
+
+/** Whether a script's RESULT names the place `ref` cites: the same lines (L5603-L5625, lines 5603-5625), the same
+ *  row, or the place as the citation writes it. */
+export function placeIn(ref: string | undefined, result: string): boolean {
+  const place = citedPlace(ref)
+  if (!place) return false
+  const lines = PLACE_LINES.exec(place)
+  if (lines) {
+    const [a, b] = [Number(lines[1]), Number(lines[2] ?? lines[1])]
+    return [...result.matchAll(/(?:\bL|\blines?\s+)(\d+)(?:\s*(?:-|–|to)\s*L?(\d+))?/gi)].some(m => Number(m[1]) === a && Number(m[2] ?? m[1]) === b)
+  }
+  const row = /^row=(\d+)$/.exec(place)
+  if (row) return [...result.matchAll(/\brow\s*=?\s*(\d+)/gi)].some(m => m[1] === row[1])
+  return result.includes(place)
+}
+
+/** Whether a verification's RESULT agrees with its citation: the value the words show, or for words that show no
+ *  value, those words or the place the citation names. */
+export function verifyMatches(expected: string | null, ref: string | undefined, result: string): boolean {
+  if (expected === null) return true
+  if (shownMatches(expected, result) || valueIn(expected, result)) return true
+  return !showsValue(expected) && placeIn(ref, result)
+}
+
+/** What a verification compared its RESULT with, in words: the value the citation shows, or the place its words name. */
+export function citedAs(expected: string | null, ref: string | undefined): string {
+  if (expected === null) return ''
+  return showsValue(expected) || !citedPlace(ref) ? expected : citedPlace(ref)
+}
+
+/** What a verification script is asked to do for a citation: recompute the value its words show, or, for words that
+ *  name a place, find the records that show the sentence's claim and print their place, which the mod compares. */
+export function scriptAim(display: string, ref: string): string {
+  const place = citedPlace(ref)
+  if (showsValue(display) || !place) return `recomputes ${display} from the raw files`
+  const form = PLACE_LINES.test(place) ? 'L<first>-L<last>' : /^row=\d+$/.test(place) ? 'row=<n>' : 'a citation writes it after "#"'
+  return `finds in the raw files the records that show what the sentence claims and ends with \`RESULT: <their place>\`, written as ${form}`
 }
 
 // ---------------------------------------------------------------------------------------- layout
@@ -79,8 +142,9 @@ const segsWidth = (segs: Seg[]) => segs.reduce((n, s) => n + width(s.s), 0)
  *  any others, its mark or spinner stays with its last word. `at` is where a plain word starts in the source. */
 type Tok = { segs: Seg[]; space: boolean; chip: number; at: number }
 
-/** Runs as words and spaces, their citations numbered from `k0`; `bold` for a heading or a table's header. */
-function tokens(runs: Run[], chips: ChipView[], k0: number, hover: number, frame: number, bold: boolean): { toks: Tok[]; source: string; next: number } {
+/** Runs as words and spaces, their citations numbered from `k0`; `head` for a table's column names, drawn dim. The
+ *  model's bold, italic and code are drawn as the text around them: bold means new, italic a record's own words. */
+function tokens(runs: Run[], chips: ChipView[], k0: number, hover: number, frame: number, head: boolean): { toks: Tok[]; source: string; next: number } {
   const toks: Tok[] = []
   let source = ''
   let k = k0
@@ -104,10 +168,8 @@ function tokens(runs: Run[], chips: ChipView[], k0: number, hover: number, frame
       if (!part) continue
       const space = /^\s+$/.test(part)
       const style: Seg = { s: space ? ' ' : part }
-      if (r.b || bold) style.b = true
-      if (r.i) style.i = true
+      if (head) style.fg = COLORS.dim
       if (r.u) style.u = true
-      if (r.code) style.fg = COLORS.code
       toks.push({ segs: [style], space, chip: -1, at })
       at += part.length
     }
@@ -189,22 +251,23 @@ export function paraLayout(
   hover: number,
   frame = 0,
 ): ParaLayout {
-  const lead = block.quote ? '│ ' : block.prefix
-  const indent = block.quote ? '│ ' : ' '.repeat(width(block.prefix))
+  // a heading regular, as every Markdown level; a quote 2 cells in, in italic, a record's own words
+  const lead = block.quote ? '  ' : block.prefix
+  const indent = block.quote ? '  ' : ' '.repeat(width(block.prefix))
   const room = Math.max(10, cols - width(lead))
-  const { toks, source } = tokens(block.runs, chips, 0, hover, frame, block.heading > 0)
+  const { toks, source } = tokens(block.runs, chips, 0, hover, frame, false)
+  if (block.quote) for (const t of toks) if (t.chip < 0) t.segs = t.segs.map(g => ({ ...g, i: true }))
   const f = flow(toks, room)
   const x0 = width(lead)
-  const dimLead: Seg = { s: lead, fg: block.quote ? COLORS.dim : undefined, b: !block.quote && block.heading > 0 }
   return {
-    lines: f.lines.map((l, i) => [i === 0 ? dimLead : { s: indent, fg: block.quote ? COLORS.dim : undefined }, ...l]),
+    lines: f.lines.map((l, i) => [{ s: i === 0 ? lead : indent }, ...l]),
     spans: f.spans.map(s => ({ ...s, x0: s.x0 + x0, x1: s.x1 + x0 })),
     words: f.words.map(w => ({ ...w, x0: w.x0 + x0, x1: w.x1 + x0 })),
     source,
   }
 }
 
-/** A table block in aligned columns, the header bold over a rule, each citation one link. Columns wider than `cols`
+/** A table block in aligned columns, the column names dim with no rule under them, each citation one link. Columns wider than `cols`
  *  allows are narrowed from the widest, and a cell's words (a citation's too) wrap within its column. */
 export function mdTableLayout(table: TableRuns, chips: ChipView[], cols: number, hover: number, frame = 0): ParaLayout {
   const GAP = 2
@@ -254,10 +317,6 @@ export function mdTableLayout(table: TableRuns, chips: ChipView[], cols: number,
       lines.push(line)
       rows.push(rowSource[r] ?? '')
     }
-    if (r === 0 && grid.length > 1) {
-      lines.push([{ s: w.map(n => '─'.repeat(n)).join(' '.repeat(GAP)), fg: COLORS.rule }])
-      rows.push('')
-    }
   })
   return { lines, spans, words: [], source: rowSource.join('\n'), rows }
 }
@@ -276,13 +335,13 @@ export function blockLayout(
 /** The sentence of a source text around an offset, its citations as written. */
 export function sentenceAt(source: string, at: number): string {
   const ends = /[.!?](?=\s|$)/g
+  const spans = citeSpans(source)
   let start = 0
   let end = source.length
   for (const m of source.matchAll(ends)) {
     const i = (m.index ?? 0) + 1
     // a full stop inside a citation ([[3.5|x]]) is no sentence end
-    const before = source.slice(0, i)
-    if (before.lastIndexOf('[[') > before.lastIndexOf(']]')) continue
+    if (spans.some(sp => sp.at < i && i < sp.end)) continue
     if (i <= at) start = i
     else {
       end = i
@@ -362,20 +421,23 @@ export function capLine<T extends { text: string; spans?: number[][] }>(w: T, ca
 }
 
 /** Where a quoted passage stands in a record's line as written: as is, JSON-escaped, or its words apart by any
- *  whitespace or escaped line break. */
+ *  whitespace or escaped line break; a quote whose inner quote marks are escaped also as unescaped. */
 export function quoteSpan(line: string, quote: string): [number, number] | null {
-  const q = quote.trim()
-  if (!q) return null
   const escaped = (s: string) => JSON.stringify(s).slice(1, -1)
   const ascii = (s: string) => escaped(s).replace(/[\u0080-￿]/g, ch => `\\u${ch.charCodeAt(0).toString(16).padStart(4, '0')}`)
-  for (const form of [q, escaped(q), ascii(q)]) {
-    const at = line.indexOf(form)
-    if (at >= 0) return [at, at + form.length]
-  }
   const lit = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-  const words = q.split(/\s+/).map(w => `(?:${[...new Set([w, escaped(w), ascii(w)])].map(lit).join('|')})`)
-  const m = new RegExp(words.join('(?:\\s|\\\\[nrt])+')).exec(line)
-  return m ? [m.index, m.index + m[0].length] : null
+  const q = quote.trim()
+  for (const quoted of new Set([q, q.replace(/\\(["'\\])/g, '$1')])) {
+    if (!quoted) return null
+    for (const form of [quoted, escaped(quoted), ascii(quoted)]) {
+      const at = line.indexOf(form)
+      if (at >= 0) return [at, at + form.length]
+    }
+    const words = quoted.split(/\s+/).map(w => `(?:${[...new Set([w, escaped(w), ascii(w)])].map(lit).join('|')})`)
+    const m = new RegExp(words.join('(?:\\s|\\\\[nrt])+')).exec(line)
+    if (m) return [m.index, m.index + m[0].length]
+  }
+  return null
 }
 
 /** A long line wrapped to `room` columns in at most `rows` rows, the rows around `span` when it does not fit; each row
@@ -449,10 +511,13 @@ export function fixItems(text: string, problems: Problem[]): ChatFixItem[] {
 }
 
 /** What the fix round's forked subagent is asked: each passage and its problems, answered with each sentence
- *  rewritten whole, one line per passage. */
-export function fixPrompt(items: ChatFixItem[]): string {
+ *  rewritten whole, one line per passage. `thread`: the side thread's answer the passages are in, which the fork's
+ *  conversation does not hold; absent for main's last reply. */
+export function fixPrompt(items: ChatFixItem[], thread?: string): string {
+  const whose = thread === undefined ? 'your last reply has' : "a side thread's answer, which the analyst reads in the panel, has"
   return [
-    "thimble-cc-mod: your last reply has problems the analyst sees in red. Fix them here: rerun or fix a card's script, or cite the value the place shows. Do not change the corpus; write only under .thimble-cc-mod/.",
+    `thimble-cc-mod: ${whose} problems the analyst sees in red. Fix them here: rerun or fix a card's script, or cite the value the place shows. Do not change the corpus; write only under .thimble-cc-mod/.`,
+    ...(thread === undefined ? [] : ['The answer:', thread, '', 'Its problems:']),
     ...items.map((it, i) => `${i + 1}. ${it.old}\n   ${it.problems.map(p => (p.raw === it.old ? p.why : `${p.raw}: ${p.why}`)).join('; ')}`),
     'Then answer with one line per item and nothing else: `<n>: <the corrected item>`, or `<n>: CANNOT <why>`.',
     'thimble-cc-mod puts each corrected item in place of the old one. Give a sentence whole, rewritten so that every word of it agrees with the corrected values (a comparison, a ranking, a share such as "about a third"), its citations included; a table row whole, its cells between | as before; a card by its embed line.',
@@ -495,6 +560,73 @@ export function applyCorrections(text: string, corrections: readonly ChatCorrect
 /** An answer's file: its heading and its rows, each with the corrections made for it. */
 export function answerFile(end: { rows: { id: string; text: string }[]; head: string }, corrections: readonly ChatCorrection[]): string {
   return `# ${end.head}\n\n${end.rows.map(r => applyCorrections(r.text, corrections, r.id)).join('\n\n')}\n`
+}
+
+/** A side thread's answer with each corrected passage in place of the old one. */
+export function correctText(text: string, corrections: readonly { old: string; new: string }[]): string {
+  return corrections.reduce((out, c) => (c.old && out.includes(c.old) ? out.replace(c.old, () => c.new) : out), text)
+}
+
+// ---------------------------------------------------------------------------------------- marks kept across sessions
+
+/** What the chat draws on answers beyond their text, kept in a file so a resumed session draws the same: each answer's
+ *  end (its footer and rows) by its last row, each claim's verification and fix by its key, and the last answer's row. */
+export type Marks = { ends: Record<string, ChatEnd>; verify: Record<string, ChatVerify>; fixes: Record<string, ChatFix>; last: string }
+
+export const MARKS_CAP = 300
+
+export function emptyMarks(): Marks {
+  return { ends: {}, verify: {}, fixes: {}, last: '' }
+}
+
+const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v)
+
+/** Marks read back from their file; a verification or fix its session left running is marked ended. */
+export function parseMarks(raw: string): Marks {
+  let v: unknown
+  try {
+    v = JSON.parse(raw)
+  } catch {
+    return emptyMarks()
+  }
+  const out = emptyMarks()
+  if (!isObj(v)) return out
+  const ended = 'the session ended before it finished'
+  if (isObj(v.ends)) {
+    for (const [id, e] of Object.entries(v.ends)) {
+      if (isObj(e) && Array.isArray(e.rows) && e.rows.every(r => isObj(r) && typeof r.id === 'string' && typeof r.text === 'string') && typeof e.file === 'string') {
+        out.ends[id] = { rows: e.rows as ChatEnd['rows'], cards: Array.isArray(e.cards) ? e.cards.filter((c): c is string => typeof c === 'string') : [], file: e.file, head: typeof e.head === 'string' ? e.head : '' }
+      }
+    }
+  }
+  if (isObj(v.verify)) {
+    for (const [id, r] of Object.entries(v.verify)) {
+      if (!isObj(r) || typeof r.state !== 'string' || typeof r.script !== 'string') continue
+      const run = { ...r, id } as ChatVerify
+      out.verify[id] = verifying(run.state) ? { ...run, state: 'error', stderr: run.stderr || ended } : run
+    }
+  }
+  if (isObj(v.fixes)) {
+    for (const [id, f] of Object.entries(v.fixes)) {
+      if (!isObj(f) || typeof f.state !== 'string') continue
+      out.fixes[id] = f.state === 'fixing' ? { state: 'failed', why: ended } : { state: f.state, ...(typeof f.why === 'string' ? { why: f.why } : {}) }
+    }
+  }
+  if (typeof v.last === 'string') out.last = v.last
+  return out
+}
+
+/** Marks as their file holds them: the newest `cap` of each kind. */
+export function marksJson(m: Marks, cap = MARKS_CAP): string {
+  const newest = <T>(r: Record<string, T>) => Object.fromEntries(Object.entries(r).slice(-cap))
+  return JSON.stringify({ ends: newest(m.ends), verify: newest(m.verify), fixes: newest(m.fixes), last: m.last })
+}
+
+/** One mark set, made the newest of its kind (so a cap drops the oldest). */
+export function setMark<K extends 'ends' | 'verify' | 'fixes'>(m: Marks, kind: K, id: string, value: Marks[K][string]): void {
+  const r = m[kind] as Record<string, unknown>
+  delete r[id]
+  r[id] = value
 }
 
 /** A text's words and numbers outside its citations. */
@@ -590,15 +722,15 @@ function streamLine(line: string, partial: boolean, look: StreamLook): string {
       }
       if (partial) return out
     } else if (ch === '[' && line[i + 1] === '[') {
-      const j = line.indexOf(']]', i + 2)
-      const inner = j >= 0 ? line.slice(i + 2, j) : ''
-      const c = j >= 0 && inner.trim() && !/[[\]]/.test(inner) ? citations(`[[${inner}]]`)[0] : undefined
+      const end = citeEnd(line, i)
+      const c = end >= 0 ? citations(line.slice(i, end))[0] : undefined
       if (c) {
         out += look.link(c)
-        i = j + 2
+        i = end
         continue
       }
-      if (partial && j < 0 && /^[^[\]]*\]?$/.test(line.slice(i + 2))) return out
+      // a citation still being written, whose value may hold brackets
+      if (partial && end < 0) return out
     } else if (ch === '[' && partial && i === line.length - 1) return out
     out += ch
     i++

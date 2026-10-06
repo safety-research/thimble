@@ -11,28 +11,27 @@ import type { Line, Seg } from './draw'
 type TextC = ElementConstructor<TextProps>
 type BoxC = ElementConstructor<BoxProps>
 
-export const SERIES = ['#2f7de1', '#c2710c', '#1f9d55', '#9061f9', '#0f9a8f', '#e0457b'] as const
+// thimble's workbench palette (frontend/src/styles/tokens.css --viz-*, --label-*: Okabe–Ito with a violet), its red
+// left out for problems, each hue's lightness moved so it keeps 3:1 on white, the light panel, black and the dark panel
+export const SERIES = ['#1d7fc0', '#b77300', '#00946a', '#b96895', '#8c65e8', '#927543', '#87861a'] as const
 
+// What each colour means (views/SPEC.md, "The visual system", section 4): letters in the text colour or dim; lines in
+// the rule grey; a palette hue only on the glyphs and marks of a region's one colour field; red only for a problem; the
+// selection background on the current or chosen one. No other colour: no link, code, success, warning or accent colour.
 export const COLORS = {
   series: [...SERIES] as string[],
-  negative: '#e5484d',
-  /** a mark under the pointer, and the readout of its value */
-  accent: 'text',
   text: 'text',
+  /** secondary: read after the thing it belongs to */
   dim: 'inactive',
-  /** borders, axes and rules */
+  /** lines only: rules, tracks, axes, tree guides, a diagram's boxes and edges */
   rule: 'subtle',
-  /** the background of the row or column under the pointer */
-  cursor: 'userMessageBackground',
-  /** the background of a cited value in the lines a citation panel shows */
-  highlight: 'selectionBg',
-  /** the background of the open menu's target (a passage, a card's title, a mark), clear on light and dark themes */
-  menu: 'selectionBg',
-  code: 'permission',
-  link: 'remember',
+  /** the background Claude Code draws a docked pane on, the whole panel */
+  panel: 'composerSidebarBackground',
+  /** the current or chosen one: a selected row or mark, the active tab, a filter that is on, a cited value, the open
+   *  menu's target, text being dragged; clear on the panel in light and dark themes */
+  selected: 'selectionBg',
+  /** a problem, and only a problem */
   problem: 'error',
-  ok: 'success',
-  warn: 'warning',
 }
 
 function seg(Text: TextC, s: Seg): RenderElement {
@@ -47,8 +46,21 @@ function seg(Text: TextC, s: Seg): RenderElement {
   return Text({ ...p, children: s.s })
 }
 
+const same = (a: Seg, b: Seg) => a.fg === b.fg && a.bg === b.bg && !a.b === !b.b && !a.d === !b.d && !a.i === !b.i && !a.u === !b.u && !a.inv === !b.inv
+
+/** Neighbouring segments of one style as one, so a chart drawn cell by cell stays a small tree. */
+function merged(l: Line): Line {
+  const out: Line = []
+  for (const s of l) {
+    const prev = out.at(-1)
+    if (prev && same(prev, s)) out[out.length - 1] = { ...prev, s: prev.s + s.s }
+    else out.push(s)
+  }
+  return out
+}
+
 export function paintLine(Text: TextC, l: Line): RenderElement {
-  return Text({ wrap: 'truncate-end', children: l.length ? l.map(s => seg(Text, s)) : ' ' })
+  return Text({ wrap: 'truncate-end', children: l.length ? merged(l).map(s => seg(Text, s)) : ' ' })
 }
 
 export function paintLines(Box: BoxC, Text: TextC, lines: Line[]): RenderElement {

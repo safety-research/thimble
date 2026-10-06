@@ -4,8 +4,9 @@ import type { On } from 'claude-code'
 import { expect, mock, test } from 'claude-code/testing'
 import type { Mounted } from 'claude-code/testing'
 
-import { cardLayout, layerGraph, lineWidth, menuShade, shortTimes, width, wrapLabel } from '../hooks/draw'
-import type { CardData } from '../hooks/draw'
+import { animFrame } from '../hooks/anim'
+import { cardLayout, layerGraph, lineWidth, menuShade, shortTimes, width, wrapCell, wrapLabel } from '../hooks/draw'
+import type { Cell, CardData } from '../hooks/draw'
 import { validateCard } from '../hooks/lib'
 import { COLORS, SERIES } from '../hooks/paint'
 
@@ -153,9 +154,9 @@ test('the value under the pointer shows at the right of the title; a click or do
   const ui = (await $.ui.mount(MESSAGE('[[card:abc123]]'))) as unknown as M
   await ui.resize({ columns: 100, rows: 12, in: 'card-1-abc123' })
   await ui.pointer({ type: 'move', x: 10, y: 4, in: 'card-1-abc123' } as never)
-  expect(await ui.find({ type: 'Text', text: /probier: 1013 revisions/, in: 'card-1-abc123' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /probier {2}1,013 revisions/, in: 'card-1-abc123' })).toBeDefined()
   for (const type of ['down', 'up', 'down', 'up']) await ui.pointer({ type, x: 10, y: 4, button: 'left', in: 'card-1-abc123' } as never)
-  expect(await ui.find({ type: 'Text', text: /probier: 1013 revisions/, in: 'card-1-abc123' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /probier {2}1,013 revisions/, in: 'card-1-abc123' })).toBeDefined()
   // a card value cites the card itself: a click is a side thread about it (twice for a double-click, the one panel);
   // nothing reaches main's prompt
   expect(w.opened).toEqual(['thimble', 'thimble'])
@@ -173,7 +174,7 @@ test('a right-click on a bar names it in the menu by its label and value; the me
   await ui.unmount()
   expect(w.opened).toEqual(['thimble'])
   const menu = (await $.ui.mount({ plugin: 'thimble-cc-mod', component: 'Pane', requestId: 'thimble', surface: 'terminal', viewport: { columns: 40, rows: 10 }, props: { bodyColumns: 34, bodyRows: 8 } } as never)) as unknown as M
-  expect(await menu.find({ type: 'Text', text: /^probier: 1013/ })).toBeDefined()
+  expect(await menu.find({ type: 'Text', text: /^probier: 1,013/ })).toBeDefined()
   expect(await menu.find({ key: 'menu-verify' })).toBeDefined()
   expect(await menu.find({ key: 'menu-cite' })).toBeUndefined()
   await menu.unmount()
@@ -183,7 +184,7 @@ test('a card that cannot be drawn is named by its place in the reply, not its id
   world(on)
   await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
   const ui = await $.ui.mount(MESSAGE('[[card:abc123]]\n\nthen\n\n[[card:831a65]]'))
-  const err = await ui.find({ type: 'Text', text: /Card 2 cannot be drawn: its card file was not written/ })
+  const err = await ui.find({ type: 'Text', text: /^× card 2 cannot be drawn: its card file was not written/ })
   expect(err).toBeDefined()
   expect(JSON.stringify(err)).not.toContain('831a65')
   await ui.unmount()
@@ -214,19 +215,19 @@ test('/thimble-card takes a card by its place in the last reply', async ($, on) 
 const THEMES: Record<string, { bg: string[]; keys: Record<string, string> }> = {
   light: {
     bg: ['#ffffff', '#f6f6f6'],
-    keys: { text: 'rgb(0,0,0)', inverseText: 'rgb(255,255,255)', inactive: 'rgb(102,102,102)', subtle: 'rgb(175,175,175)', remember: 'rgb(0,0,255)', permission: 'rgb(87,105,247)', success: 'rgb(44,122,57)', error: 'rgb(171,43,63)', warning: 'rgb(150,108,30)', userMessageBackground: 'rgb(240,240,240)', selectionBg: 'rgb(180,213,255)' },
+    keys: { text: 'rgb(0,0,0)', inverseText: 'rgb(255,255,255)', inactive: 'rgb(102,102,102)', subtle: 'rgb(175,175,175)', remember: 'rgb(0,0,255)', permission: 'rgb(87,105,247)', success: 'rgb(44,122,57)', error: 'rgb(171,43,63)', warning: 'rgb(150,108,30)', userMessageBackground: 'rgb(240,240,240)', selectionBg: 'rgb(180,213,255)', composerSidebarBackground: 'rgb(245,245,245)' },
   },
   'light-daltonized': {
     bg: ['#ffffff', '#f6f6f6'],
-    keys: { text: 'rgb(0,0,0)', inverseText: 'rgb(255,255,255)', inactive: 'rgb(102,102,102)', subtle: 'rgb(175,175,175)', remember: 'rgb(51,102,255)', permission: 'rgb(51,102,255)', success: 'rgb(0,102,153)', error: 'rgb(204,0,0)', warning: 'rgb(255,153,0)', userMessageBackground: 'rgb(220,220,220)', selectionBg: 'rgb(180,213,255)' },
+    keys: { text: 'rgb(0,0,0)', inverseText: 'rgb(255,255,255)', inactive: 'rgb(102,102,102)', subtle: 'rgb(175,175,175)', remember: 'rgb(51,102,255)', permission: 'rgb(51,102,255)', success: 'rgb(0,102,153)', error: 'rgb(204,0,0)', warning: 'rgb(255,153,0)', userMessageBackground: 'rgb(220,220,220)', selectionBg: 'rgb(180,213,255)', composerSidebarBackground: 'rgb(235,235,235)' },
   },
   dark: {
     bg: ['#000000', '#1e1e1e', '#282c34'],
-    keys: { text: 'rgb(255,255,255)', inverseText: 'rgb(0,0,0)', inactive: 'rgb(153,153,153)', subtle: 'rgb(80,80,80)', remember: 'rgb(177,185,249)', permission: 'rgb(177,185,249)', success: 'rgb(78,186,101)', error: 'rgb(255,107,128)', warning: 'rgb(255,193,7)', userMessageBackground: 'rgb(55,55,55)', selectionBg: 'rgb(38,79,120)' },
+    keys: { text: 'rgb(255,255,255)', inverseText: 'rgb(0,0,0)', inactive: 'rgb(153,153,153)', subtle: 'rgb(80,80,80)', remember: 'rgb(177,185,249)', permission: 'rgb(177,185,249)', success: 'rgb(78,186,101)', error: 'rgb(255,107,128)', warning: 'rgb(255,193,7)', userMessageBackground: 'rgb(55,55,55)', selectionBg: 'rgb(38,79,120)', composerSidebarBackground: 'rgb(38,38,38)' },
   },
   'dark-daltonized': {
     bg: ['#000000', '#1e1e1e', '#282c34'],
-    keys: { text: 'rgb(255,255,255)', inverseText: 'rgb(0,0,0)', inactive: 'rgb(153,153,153)', subtle: 'rgb(80,80,80)', remember: 'rgb(153,204,255)', permission: 'rgb(153,204,255)', success: 'rgb(51,153,255)', error: 'rgb(255,102,102)', warning: 'rgb(255,204,0)', userMessageBackground: 'rgb(55,55,55)', selectionBg: 'rgb(38,79,120)' },
+    keys: { text: 'rgb(255,255,255)', inverseText: 'rgb(0,0,0)', inactive: 'rgb(153,153,153)', subtle: 'rgb(80,80,80)', remember: 'rgb(153,204,255)', permission: 'rgb(153,204,255)', success: 'rgb(51,153,255)', error: 'rgb(255,102,102)', warning: 'rgb(255,204,0)', userMessageBackground: 'rgb(55,55,55)', selectionBg: 'rgb(38,79,120)', composerSidebarBackground: 'rgb(38,38,38)' },
   },
 }
 
@@ -256,17 +257,23 @@ test('colours: theme keys for text and highlights, a series palette that reads o
       // text: 4.5:1 on the theme's own background (white or black), 4:1 on an off-white or grey one; marks (bars,
       // lines, points): 3:1 on any
       const least = bg === t.bg[0] ? 4.5 : 4
-      for (const token of [COLORS.text, COLORS.dim, COLORS.link, COLORS.problem, COLORS.ok, COLORS.accent]) {
+      for (const token of [COLORS.text, COLORS.dim, COLORS.problem]) {
         expect(contrast(resolve(name, token), bg)).toBeGreaterThanOrEqual(least)
       }
-      // inline code keeps Claude Code's own colour for it
-      expect(contrast(resolve(name, COLORS.code), bg)).toBeGreaterThanOrEqual(4)
-      for (const c of [...SERIES, COLORS.negative]) expect(contrast(c, bg)).toBeGreaterThanOrEqual(3)
+      for (const c of SERIES) expect(contrast(c, bg)).toBeGreaterThanOrEqual(3)
     }
-    // the hovered row's background, a cited value's and the open menu's target's keep the theme's text readable
-    for (const bg of [COLORS.cursor, COLORS.highlight, COLORS.menu]) expect(contrast(resolve(name, COLORS.text), resolve(name, bg))).toBeGreaterThanOrEqual(4.5)
+    // the selection background (a selected row, a cited value, the open menu's target) keeps the theme's text readable
+    expect(contrast(resolve(name, COLORS.text), resolve(name, COLORS.selected))).toBeGreaterThanOrEqual(4.5)
+    // on the panel Claude Code draws a docked pane on (its light themes' 245 or 235 grey): marks keep 3:1, and the
+    // theme's own text colours, which the mod does not choose, stay readable
+    for (const bg of name.startsWith('light') ? ['#f5f5f5', '#ebebeb'] : ['#262626']) {
+      for (const c of SERIES) expect(contrast(c, bg)).toBeGreaterThanOrEqual(3)
+      for (const token of [COLORS.text, COLORS.dim, COLORS.problem]) expect(contrast(resolve(name, token), bg)).toBeGreaterThanOrEqual(3.5)
+    }
+    // the selected row and an active chip stand out from the panel, a blue on a grey
+    expect(contrast(resolve(name, COLORS.selected), resolve(name, COLORS.panel))).toBeGreaterThanOrEqual(1.25)
     // the open menu's target stands out from every background of the theme
-    for (const bg of t.bg) expect(contrast(resolve(name, COLORS.menu), bg)).toBeGreaterThanOrEqual(1.3)
+    for (const bg of t.bg) expect(contrast(resolve(name, COLORS.selected), bg)).toBeGreaterThanOrEqual(1.3)
   }
   // every token that is not a raw colour is a key of Claude Code's theme
   const tokens: string[] = Object.values(COLORS).flatMap(v => (typeof v === 'string' ? [v] : v))
@@ -311,9 +318,9 @@ test('a diagram is drawn in boxes and box-drawing lines, a long label as a numbe
   // the note line is its edge too
   const note = text.findIndex(t => t.startsWith('1  '))
   expect(lay.items[lay.hit(0, note)]).toMatchObject({ label: 'Coder → Reviewer' })
-  // hovering a node draws it in the accent colour
+  // hovering a node draws its words in inverse
   const hot = cardLayout(DIAGRAM, 70, 0)
-  expect(hot.lines[box]!.some(s => s.s.includes('Planner') && s.fg === COLORS.accent)).toBe(true)
+  expect(hot.lines[box]!.filter(s => s.inv).map(s => s.s).join('')).toContain('Planner')
 })
 
 test('a row too wide for the card moves nodes to a row of their own', () => {
@@ -421,20 +428,19 @@ test('a diagram in a reply is a Client card; a press on a node with a record ope
 
 // ------------------------------------------------------------------------------------------------ round 4: menu shading, dense diagrams
 
-test('the open menu\'s mark is shaded in the menu colour: a bar\'s row, a table\'s row, a diagram\'s box', () => {
-  const lit = (lines: { s: string; bg?: string }[][]) => lines.map(l => l.filter(s => s.bg === COLORS.menu).map(s => s.s).join(''))
+test('the open menu\'s mark is shaded on the selection background: a bar\'s row, a table\'s cell, a diagram\'s box', () => {
+  const lit = (lines: { s: string; bg?: string }[][]) => lines.map(l => l.filter(s => s.bg === COLORS.selected).map(s => s.s).join(''))
   const bars = menuShade(cardLayout(BAR, 60, 1), 1)
   expect(lit(bars)[0]).toBe('')
   expect(lit(bars)[1]).toContain('probier')
   const table: CardData = { ...BAR, kind: 'table', columns: ['wiki', 'revisions'], rows: [['dse', 13403], ['probier', 1013]] }
-  const rows = menuShade(cardLayout(table, 60, 2), 2) // the second row's first cell
-  expect(lit(rows)[3]).toContain('probier')
-  expect(rows.flat().some(s => s.bg === COLORS.cursor)).toBe(false)
+  const rows = menuShade(cardLayout(table, 60, 2), 2) // the second row's first cell, under the column names
+  expect(lit(rows)[2]).toContain('probier')
   const nodes = menuShade(cardLayout(DIAGRAM, 70, 0), 0)
   const box = nodes.findIndex(l => l.map(s => s.s).join('').includes('Planner'))
   expect(lit(nodes)[box]).toContain('Planner')
   expect(lit(nodes).filter(Boolean).length).toBe(3) // the box's three rows, nothing else
-  expect(menuShade(cardLayout(BAR, 60, -1), -1).flat().some(s => s.bg === COLORS.menu)).toBe(false)
+  expect(menuShade(cardLayout(BAR, 60, -1), -1).flat().some(s => s.bg === COLORS.selected)).toBe(false)
 })
 
 test('a right-click on a card shades its title while the menu is open', async ($, on) => {
@@ -444,7 +450,7 @@ test('a right-click on a card shades its title while the menu is open', async ($
   await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
   const ui = (await $.ui.mount(MESSAGE('[[card:d1a9e0]]'))) as unknown as M
   await ui.resize({ columns: 80, rows: 30, in: 'card-1-d1a9e0' })
-  const lit = async () => JSON.stringify(await ui.drawn({ in: 'card-1-d1a9e0' })).includes(COLORS.menu)
+  const lit = async () => JSON.stringify(await ui.drawn({ in: 'card-1-d1a9e0' })).includes(COLORS.selected)
   expect(await lit()).toBe(false)
   await ui.pointer({ type: 'down', x: 4, y: 1, button: 'right', in: 'card-1-d1a9e0' } as never)
   await ui.pointer({ type: 'up', x: 4, y: 1, button: 'right', in: 'card-1-d1a9e0' } as never)
@@ -523,14 +529,16 @@ test('labels take the room the card has, and wrap to two lines before they are c
   expect([narrow.hit(0, 0), narrow.hit(0, 1), narrow.hit(0, 2)]).toEqual([0, 0, 1])
   const first = 'save event revision_ref found in revisions and the audit log'
   const table: CardData = { ...BAR, kind: 'table', columns: ['pattern', 'count'], rows: [[first, 312], ['short', 9]] }
-  expect(text(table, 116)[2]).toContain(first)
+  // under the column names, with no rule under them
+  expect(text(table, 116)[1]).toContain(first)
   const wrapped = cardLayout(table, 40, -1)
-  expect(text(table, 40).slice(2, 4).join(' ')).toContain('audit log')
-  expect([wrapped.hit(0, 2), wrapped.hit(0, 3), wrapped.hit(0, 4)]).toEqual([0, 0, 2])
+  expect(text(table, 40).slice(1, 3).join(' ')).toContain('audit log')
+  expect([wrapped.hit(0, 1), wrapped.hit(0, 2), wrapped.hit(0, 3)]).toEqual([0, 0, 2])
   const note = 'Agent posts a note to the other agents about splitting the edit work before the deadline'
   const ex: CardData = { ...BAR, kind: 'example', examples: [{ ref: 'wiki/revisions.jsonl#L12345', quote: 'the quote', note }] }
   expect(text(ex, 116).join(' ')).toContain(note)
-  expect(text(ex, 116).join(' ')).toContain('wiki/revisions.jsonl#L12345')
+  // its place in words: the file and its line
+  expect(text(ex, 116).join(' ')).toContain('wiki/revisions.jsonl line 12345')
   const dg = graph('n0te', [['AgentRelent posting coordination notes', 'wiki dse', 'writes three hundred and seventeen revisions over two days, most of them reverting other agents']])
   expect(text(dg, 116).join(' ')).toContain('AgentRelent posting coordination notes → wiki dse: writes')
   expect(text(dg, 116).join(' ')).not.toContain('…')
@@ -600,7 +608,7 @@ test('a card in a side thread\'s answer takes the panel\'s width less the reply\
   await pane.press({ key: 'thread-open:tsaved' })
   await pane.unmount()
   pane = (await $.ui.mount(PANE)) as unknown as M
-  const room = 70 - 1 - 4 // the panel's body, less a column at its right and the reply's margin
+  const room = 70 - 2 - 2 // the panel's body, less its type area's margins and the answer's margin (its A2)
   const card = (await pane.find({ type: 'Client', key: 't1-card-2-g4bars' })) as { props: { width: number; props: { cols: number } } } | undefined
   expect(card?.props.width).toBe(room)
   expect(card?.props.props.cols).toBe(room)
@@ -609,6 +617,196 @@ test('a card in a side thread\'s answer takes the panel\'s width less the reply\
   const widths = lineWidths(await pane.drawn({ in: 't1-card-2-g4bars' }))
   expect(widths.length).toBeGreaterThan(4)
   expect(shown(await pane.drawn({ in: 't1-card-2-g4bars' }))).toContain('help agents posting notes')
-  expect(Math.max(...widths)).toBeLessThanOrEqual(room - 4) // its border and padding
+  expect(Math.max(...widths)).toBeLessThanOrEqual(room) // no border or padding: rules above and below
+  await pane.unmount()
+})
+
+// ------------------------------------------------------------------------------------------------ round 2: tables at a narrow panel
+
+// names longer than a third of a narrow card, times as text, headers longer than their numbers
+const NAMES = ['AgentRelent', 'ResearchReaderMN', 'GuestResearch378611', 'OpenAIResearchSec2027', 'BridgeFresh12', 'ResearchHelperArchiveCofcY', 'ZZUniqueAgentJun18Citations', 'OpenAIBot']
+const WHO: CardData = {
+  ...BAR,
+  id: 'wh0ed1',
+  kind: 'table',
+  params: [],
+  question: 'Who edited the welcome page in the ten minutes around this revision?',
+  columns: ['label', 'revisions', 'first (UTC)', 'last (UTC)', 'IP /16 values'],
+  rows: NAMES.map((n, i) => [n, 94 - i * 11, `20:0${i}:27`, `20:1${i}:06`, 55 - i * 6]),
+}
+const FOLLOW: CardData = {
+  ...BAR,
+  id: 'f0110w',
+  kind: 'table',
+  params: [],
+  question: 'When a different label edits the same page within the window, what does it do to the version before?',
+  columns: ['pages', 'quick follow-ups', 'pages involved', 'built on previous', 'replaced previous', 'other'],
+  rows: [
+    ['3 shared default pages', 2808, 3, 339, 2235, 234],
+    ['all other pages', 3583, 698, 2541, 786, 256],
+    ['all pages', 6391, 701, 2880, 3021, 490],
+  ],
+}
+const plain = (c: CardData, cols: number, hover = -1) => cardLayout(c, cols, hover).lines.map(l => l.map(s => s.s).join(''))
+
+test('in a narrow card a table keeps every column whole: blocks one under another, each led by the names, no word broken', () => {
+  for (const card of [WHO, FOLLOW]) {
+    for (const cols of [36, 42, 46]) {
+      const lines = plain(card, cols)
+      const all = lines.join('\n')
+      expect(Math.max(...cardLayout(card, cols, -1).lines.map(lineWidth))).toBeLessThanOrEqual(cols)
+      expect(all).not.toContain('…') // no column cut, no cell cut
+      // a header breaks only at a space or after a hyphen
+      for (const h of card.columns!) for (const piece of h.split(/ |(?<=-)/)) expect(lines.some(l => l.includes(piece))).toBe(true)
+      for (const r of card.rows as Cell[][]) for (const v of r.slice(1)) expect(all).toMatch(new RegExp(`(^|\\s)${v}(\\s|$)`, 'm'))
+      // the first column's header leads each block
+      expect(lines.filter(l => l.startsWith(`${card.columns![0]} `)).length).toBeGreaterThanOrEqual(2)
+    }
+  }
+  // every name whole while one fits beside the widest other column: at 42 columns its columns take more blocks
+  const who = plain(WHO, 42)
+  for (const name of NAMES) expect(who.some(l => l.startsWith(`${name} `))).toBe(true)
+  expect(who.filter(l => /^AgentRelent\s/.test(l)).length).toBe(who.filter(l => l.startsWith('label ')).length)
+  expect(who.some(l => l.includes('20:00:27'))).toBe(true) // a time is never broken at its colons
+  // a name wider than the room the other columns leave breaks before a capital, both halves its row's
+  const narrow = plain(WHO, 36)
+  const at = narrow.findIndex(l => l.startsWith('ZZUniqueAgent '))
+  expect(narrow[at + 1]!.trim()).toBe('Jun18Citations')
+  expect(narrow.filter(l => /^ResearchHelperArchiveCofcY\s/.test(l)).length).toBeGreaterThan(0) // the next longest is whole
+  const lay = cardLayout(WHO, 36, -1)
+  expect([lay.hit(0, at), lay.hit(0, at + 1)]).toEqual([6 * 5, 6 * 5])
+  // where there is room it is one table, its headers on one line
+  const wide = plain(WHO, 96)
+  expect(wide[0]).toMatch(/^label +revisions +first \(UTC\) +last \(UTC\) +IP \/16 values$/)
+  expect(wide.filter(l => l.startsWith('label ')).length).toBe(1)
+  expect(wide.some(l => l.includes('ZZUniqueAgentJun18Citations'))).toBe(true)
+})
+
+test('a table\'s cells break between words, after a hyphen, and inside a name only where it alone is too wide', () => {
+  expect(wrapCell('quick follow-ups', 7, 3)).toEqual(['quick', 'follow-', 'ups'])
+  expect(wrapCell('ZZUniqueAgentJun18Citations', 16, 2)).toEqual(['ZZUniqueAgent', 'Jun18Citations'])
+  expect(wrapCell('2026-06-16 20:49', 12, 2)).toEqual(['2026-06-16', '20:49'])
+  expect(wrapCell('revisions.jsonl#L1234', 12, 2)).toEqual(['revisions.', 'jsonl#L1234'])
+  expect(wrapCell('3 shared default pages', 15, 2)).toEqual(['3 shared', 'default pages'])
+  expect(wrapCell('revisions', 6, 2)).toEqual(['revis…']) // a word wider than its column is cut, not split
+  // a pair of names breaks at a space, never inside a name that fits; before its "+", so the next line reads as the
+  // same row, and after it only where "+ name" does not fit
+  expect(wrapCell('OpenAIResearchSec2028 + OurMassFinal', 27, 2)).toEqual(['OpenAIResearchSec2028', '+ OurMassFinal'])
+  expect(wrapCell('MapHelper + OpenAIResearchSec2028', 27, 2)).toEqual(['MapHelper', '+ OpenAIResearchSec2028'])
+  expect(wrapCell('AgentSECCountyLinker99172 + OAIHelperSec', 27, 2)).toEqual(['AgentSECCountyLinker99172', '+ OAIHelperSec'])
+  expect(wrapCell('AgentOpenResearch + LanguageWatcherNov12', 21, 2)).toEqual(['AgentOpenResearch +', 'LanguageWatcherNov12'])
+})
+
+test('a cell in a later block is its own column\'s; hovering it inverts that cell alone, and the rows arrive together', () => {
+  const lines = plain(WHO, 46)
+  const second = lines.findIndex((l, y) => l.startsWith('label ') && lines.slice(0, y).some(p => p.startsWith('label ')))
+  const y = second + 1 // under the second block's column names
+  expect(lines[y]).toMatch(/^AgentRelent\s/)
+  const lay = cardLayout(WHO, 46, -1)
+  const i = lay.hit(lines[y]!.indexOf('20:10:06'), y)
+  expect(lay.items[i]!.label).toBe('AgentRelent · last (UTC)')
+  expect(lay.hit(0, y)).toBe(0) // the name there is the row's, as in the first block
+  // rows have no hover state: the cell under the pointer alone, in inverse
+  const lit = cardLayout(WHO, 46, i).lines.map(l => l.some(s => s.inv))
+  expect(lit.filter(Boolean).length).toBe(1)
+  // a play's frame keeps the blocks' lines, and a row shows in both blocks at once
+  const frame = animFrame(WHO, 46, 0.2).lines.map(l => l.map(s => s.s).join(''))
+  expect(frame.length).toBe(lines.length)
+  expect(frame.filter(l => /^AgentRelent\s/.test(l)).length).toBe(2)
+  expect(frame.some(l => l.startsWith('OpenAIBot'))).toBe(false)
+})
+
+// ------------------------------------------------------------------------------------------------ round 3: whole names
+
+// the audit's tables at 120 columns: label names as this corpus writes them, pairs of them, small counts under long
+// headers, a blank cell in a column of numbers
+const PAIRS: CardData = {
+  ...BAR,
+  id: 'pa1rs0',
+  kind: 'table',
+  params: [],
+  question: 'Which label pairs write to the most of the same pages?',
+  columns: ['pair', 'shared pages', 'median minutes apart'],
+  rows: [
+    ['OpenAIResearchSec2028 + OurMassFinal', 9, 20.6], ['MapHelper + ResearchHelper', 9, 63.1], ['MapHelper + OpenAIResearchSec2028', 8, 20],
+    ['MassUpdater + OurMassFinal', 8, 25], ['AgentSECCountyLinker99172 + OAIHelperSec', 8, 30.4], ['AgentSECCountyLinker99172 + MapHelper', 8, 51.2],
+    ['AgentTester + MapHelper', 8, 202.9], ['LanguageWatcherNov12 + OpenAIResearchFeb17', 7, 4.7], ['AgentOpenResearch + LanguageWatcherNov12', 7, 4.8],
+    ['AgentOpenResearch + OpenAIHelperJun01X', 7, 5.7], ['OpenAIResearchSec2028 + ResearchHelper', 7, 27.6],
+    ['AgentSECCountyLinker99172 + OpenAIResearchSec2028', 7, 27.6], ['OpenAIMay31Maids + OpenAIWatcherOct30', 7, 62.6],
+  ],
+}
+const LABELS: CardData = {
+  ...BAR,
+  id: 'labe1s',
+  kind: 'table',
+  params: [],
+  question: 'For every label on DataUSALanguageSequenceFeb17, its revisions and IP blocks',
+  columns: ['label', 'revisions', 'IP block count', 'IP blocks'],
+  rows: [
+    ['OpenAIResearchFeb17', 3, 3, '20.245, 52.225, 52.238'], ['AgentOpenResearch', 3, 3, '20.62, 40.78, 65.52'], ['OpenAIHelperJun01X', 3, 2, '172.173, 20.69'],
+    ['LanguageHelperJul17', 3, 2, '20.12, 52.225'], ['LanguageWatcherNov12', 3, 3, '20.29, 20.9, 23.100'], ['AgentJune21Prep', 2, 2, '20.165, 52.242'],
+    ['OpenAIHelperOct20X', 2, 2, '157.55, 20.114'], ['OpenAIResearchSep23Lang', 2, 2, '172.184, 20.225'], ['Sep26ClothingAgent', 1, 1, '52.251'],
+    ['OpenAIResearchSep17X', 1, 1, '23.1'],
+  ],
+}
+const FOUR: CardData = {
+  ...BAR,
+  id: 'f0ur00',
+  kind: 'table',
+  params: [],
+  question: 'How much do the four labels share?',
+  columns: ['label', 'revisions', 'pages', 'IP blocks'],
+  rows: [['AgentOpenResearch', 28, 21, 21], ['LanguageWatcherNov12', 41, 28, 29], ['OpenAIHelperJun01X', 20, 15, 15], ['OpenAIResearchFeb17', 22, 18, 17], ['two or more of the four', '', 13, '']],
+}
+
+test('at the widths a 120-column terminal gives a card, a table breaks no name inside a word, and cuts nothing', () => {
+  for (const card of [PAIRS, LABELS, FOUR]) {
+    const words = [...card.columns!, ...(card.rows as Cell[][]).flat().map(String)].flatMap(s => s.split(/\s+/)).filter(Boolean)
+    for (let cols = 38; cols <= 60; cols++) {
+      const lines = plain(card, cols)
+      const shown = new Set(lines.join(' ').split(/\s+/))
+      expect(words.filter(w => !shown.has(w))).toEqual([])
+      expect(lines.join('\n')).not.toContain('…')
+      expect(Math.max(...cardLayout(card, cols, -1).lines.map(lineWidth))).toBeLessThanOrEqual(cols)
+    }
+  }
+  // a pair too long for its column goes on with "+ name" on the next line
+  const pairs = plain(PAIRS, 44)
+  const at = pairs.findIndex(l => /^OpenAIResearchSec2028 +9 +20\.6$/.test(l))
+  expect(pairs[at + 1]!.trim()).toBe('+ OurMassFinal')
+  expect(pairs.filter(l => l.startsWith('pair ')).length).toBe(1)
+  // the side thread's card: every label whole beside its counts, the IP blocks in a block of their own
+  const labels = plain(LABELS, 40)
+  expect(labels.some(l => /^OpenAIResearchSep23Lang +2 +2$/.test(l))).toBe(true)
+  expect(labels.filter(l => l.startsWith('label ')).length).toBe(2)
+  // small counts under long headers sit a column apart rather than break a name or take a block; a blank cell leaves
+  // its column right-aligned
+  const four = plain(FOUR, 44)
+  expect(four.filter(l => l.startsWith('label ')).length).toBe(1)
+  expect(four.some(l => /^LanguageWatcherNov12 +41 +28 +29$/.test(l))).toBe(true)
+  expect(four.some(l => /^OpenAIResearchFeb17 +22 +18 +17$/.test(l))).toBe(true)
+})
+
+test('a table card in a side thread at a 120-column terminal fits the panel: every column shown, nothing cut', async ($, on) => {
+  const w = world(on)
+  w.files.set(`${CWD}/.thimble-cc-mod/cards/wh0ed1.json`, JSON.stringify(WHO))
+  const turn = { q: 'who else edited this page in the ten minutes around this revision?', a: 'These labels:\n\n[[card:wh0ed1]]', state: 'done', tools: 2, partial: '' }
+  const saved = { id: 'twho', label: 'the welcome page', ref: '', context: '', engine: 'fork', turns: [turn], file: '.thimble-cc-mod/threads/twho.md' }
+  w.files.set(`${CWD}/.thimble-cc-mod/threads/twho.json`, JSON.stringify(saved))
+  await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
+  const PANE = { plugin: 'thimble-cc-mod', component: 'Pane', requestId: 'thimble', surface: 'terminal', viewport: { columns: 120, rows: 50 }, props: { bodyColumns: 48, bodyRows: 46 } } as never
+  await $.command.run({ command: 'thimble-threads', args: '' } as never)
+  let pane = (await $.ui.mount(PANE)) as unknown as M
+  await pane.press({ key: 'thread-open:twho' })
+  await pane.unmount()
+  pane = (await $.ui.mount(PANE)) as unknown as M
+  const card = (await pane.find({ type: 'Client', key: 't1-card-2-wh0ed1' })) as { props: { width: number } } | undefined
+  expect(card).toBeDefined()
+  await pane.resize({ columns: card!.props.width, rows: 40, in: 't1-card-2-wh0ed1' })
+  const drawn = await pane.drawn({ in: 't1-card-2-wh0ed1' })
+  expect(Math.max(...lineWidths(drawn))).toBeLessThanOrEqual(card!.props.width)
+  const text = shown(drawn)
+  for (const h of ['revisions', 'first', 'last', '(UTC)', 'IP /16', 'values', 'AgentRelent', 'ResearchReaderMN', 'Jun18Citations', '20:17:06']) expect(text).toContain(h)
+  expect(text.replace(/Who edited.*?…/, '')).not.toContain('…') // only the title, one line, may be cut
   await pane.unmount()
 })

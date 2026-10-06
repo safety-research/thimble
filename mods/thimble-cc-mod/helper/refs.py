@@ -3,7 +3,7 @@ compared with the value at a ref (a port of thimble's backend/app/cite.py shown_
 
 Refs read here:
     card:<id>                       a card
-    card:<id>#<column>/<row>        a value of a card (bar: the y title and the label; table: a column and the first
+    card:<id>#<column>/<row>        a value of a card (bar, label: the y title and the label; table: a column and the first
                                     column's value; line: the series and the x value; timeline: event and its number;
                                     diagram: node and its id, edge and its number)
     call:<id>#L<n>[-L<m>]           lines of a Bash call's output, as thimble-cc-mod saved it (.thimble-cc-mod/calls)
@@ -35,6 +35,37 @@ LINES_RE = re.compile(r"^L(\d+)(?:-L?(\d+))?$")
 
 def home(cwd: str) -> str:
     return os.path.join(cwd, HOME)
+
+
+# ------------------------------------------------------------------------------------------------ mojibake
+
+# A byte of a UTF-8 sequence after its first, as Windows-1252 (or Latin-1) shows it.
+_CONT = "[\u0080-¿ŒœŠšŸŽžƒˆ˜–—‘-‚“-„†-•…‰‹›€™]"
+_MOJIBAKE = re.compile(f"[Â-ß]{_CONT}|[à-ï]{_CONT}{{2}}|[ð-ô]{_CONT}{{3}}")
+
+
+def _byte(ch: str) -> bytes:
+    """The byte Windows-1252 shows as `ch`, or Latin-1 for the five bytes Windows-1252 leaves undefined."""
+    try:
+        return ch.encode("cp1252")
+    except UnicodeEncodeError:
+        return ch.encode("latin-1")
+
+
+def _unmangle(m: re.Match) -> str:
+    t = m.group(0)
+    try:
+        return b"".join(_byte(ch) for ch in t).decode("utf-8")
+    except (UnicodeEncodeError, UnicodeDecodeError):
+        return t
+
+
+def demojibake(s: str) -> str:
+    """Text whose UTF-8 bytes were once read as Windows-1252 or Latin-1 and saved again, as some wikis store it
+    ("mÃ¶chten"), with each such character back as written ("möchten"). A run is changed only when its bytes are one
+    UTF-8 character, so text that reads right stays as it is. For display only: the file keeps its own bytes, and a
+    citation's quote is checked against them. hooks/draw.ts demojibake has the same rule."""
+    return _MOJIBAKE.sub(_unmangle, s) if s and any("Â" <= ch <= "ô" for ch in s) else s
 
 
 # ------------------------------------------------------------------------------------------------ numbers
@@ -178,7 +209,7 @@ def card_values(card: dict) -> dict[str, dict[str, object]]:
     """Every value a card shows, by column then row key, as `card:<id>#<column>/<row>` cites it."""
     kind = card.get("kind")
     out: dict[str, dict[str, object]] = {}
-    if kind == "bar":
+    if kind in ("bar", "label"):
         col = card.get("y") or "value"
         out[col] = {str(r["label"]): r["value"] for r in card.get("rows", [])}
         if card.get("total") is not None:
@@ -427,7 +458,8 @@ def compact_record(t: str, spans: list, fit: int = RECORD_FIT) -> tuple[str, lis
 
 def quote_spans(quote: str, text: str) -> list[list[int]]:
     """Where a quoted passage stands in a line: as written, JSON-escaped, or its words apart by any whitespace or
-    escaped line break (hooks/cite.ts quoteSpan)."""
+    escaped line break; a quote whose inner quote marks are escaped (`"counts[\\"dse\\"]"`) also as unescaped
+    (hooks/cite.ts quoteSpan)."""
     q = quote.strip()
     if not q:
         return []
@@ -435,12 +467,15 @@ def quote_spans(quote: str, text: str) -> list[list[int]]:
     def forms(w: str) -> list[str]:
         return list(dict.fromkeys((w, json.dumps(w, ensure_ascii=False)[1:-1], json.dumps(w)[1:-1])))
 
-    for form in forms(q):
-        i = text.find(form)
-        if i >= 0:
-            return [[i, i + len(form)]]
-    m = re.search(r"(?:\s|\\[nrt])+".join("(?:" + "|".join(map(re.escape, forms(w))) + ")" for w in q.split()), text)
-    return [[m.start(), m.end()]] if m else []
+    for quoted in dict.fromkeys((q, re.sub(r"""\\(["'\\])""", r"\1", q))):
+        for form in forms(quoted):
+            i = text.find(form)
+            if i >= 0:
+                return [[i, i + len(form)]]
+        m = re.search(r"(?:\s|\\[nrt])+".join("(?:" + "|".join(map(re.escape, forms(w))) + ")" for w in quoted.split()), text)
+        if m:
+            return [[m.start(), m.end()]]
+    return []
 
 
 def cap_window(res: dict, cap: int = LINE_CAP, quote: str = "") -> dict:

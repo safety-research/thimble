@@ -13,8 +13,9 @@
 import type { ClientModule, ClientPointerEvent, JsonValue } from 'claude-code'
 
 import type { ChatTarget } from '../types'
-import { citeLabel, sentenceAt } from './cite'
+import { citeLabel, plainCites, sentenceAt } from './cite'
 import type { ParaLayout } from './cite'
+import { fileRef } from './files'
 import { lineWidth, shade } from './draw'
 import type { Line } from './draw'
 import { citations } from './lib'
@@ -137,18 +138,21 @@ export function placeOf(t: Target): Citation | null {
   return t.kind === 'citation' || !CARD_REF.test(c.ref) ? c : null
 }
 
-export type Act = 'open' | 'thread' | 'verify' | 'script' | 'rerun'
-export type MenuItem = { act: Act; label: string; hotkey: string }
+export type Act = 'open' | 'thread' | 'verify' | 'script' | 'rerun' | 'files'
+/** `hint`: where the choice leads, for a test or a log; the menu prints the label alone, which says what it does. */
+export type MenuItem = { act: Act; label: string; hotkey: string; hint: string }
 
 /** The menu a right-click opens: every action the target has. */
 export function menuItems(t: Target): MenuItem[] {
   const c = citationOf(t)
   const card = cardOf(t)
   const out: MenuItem[] = []
-  if (placeOf(t)) out.push({ act: 'open', label: 'open', hotkey: 'o' })
-  out.push({ act: 'thread', label: 'ask', hotkey: 'a' })
-  if (c?.display && t.kind !== 'card' && t.kind !== 'sentence') out.push({ act: 'verify', label: 'verify', hotkey: 'v' })
-  if (card && t.script) out.push({ act: 'script', label: 'open the script', hotkey: 's' }, { act: 'rerun', label: 'rerun', hotkey: 'r' })
+  const place = placeOf(t)
+  if (place) out.push({ act: 'open', label: 'open its lines', hotkey: 'o', hint: 'the lines it cites, in this panel' })
+  if (place && fileRef(place.ref)) out.push({ act: 'files', label: 'open in files', hotkey: 'f', hint: 'its file in the file browser, at this record' })
+  out.push({ act: 'thread', label: 'ask about it', hotkey: 'a', hint: 'a side thread about it, in this panel' })
+  if (c?.display && t.kind !== 'card' && t.kind !== 'sentence') out.push({ act: 'verify', label: 'verify', hotkey: 'v', hint: 'a script recomputes it from the files' })
+  if (card && t.script) out.push({ act: 'script', label: 'open the script', hotkey: 's', hint: 'the Python that made the card' }, { act: 'rerun', label: 'run again', hotkey: 'r', hint: 'run that script again and redraw the card' })
   return out
 }
 
@@ -163,11 +167,7 @@ function shorten(s: string, n: number): string {
 /** A short name for the target in at most `max` characters, as the menu and the mouse log show it: each citation by
  *  its label, never its ref; quoted words keep their closing quote when cut. */
 export function targetLabel(t: Target, max = 48): string {
-  const s = (t.text ?? '')
-    .replace(/\[\[[^\[\]]+?\]\]/g, m => {
-      const c = citations(m)[0]
-      return c ? citeLabel(c) : m
-    })
+  const s = plainCites(t.text ?? '')
     .replace(/[`*_]+|^\s*(#+|[-*+]|\d+[.)])\s+/g, '')
     .replace(/\s+/g, ' ')
     .trim()
@@ -214,5 +214,5 @@ export function menuLines(lay: ParaLayout, raws: readonly string[], menu: unknow
     }
     for (const [line, c] of byLine) cells.push({ line, ...c })
   }
-  return cells.length ? shade(lay.lines, cells, COLORS.menu) : lay.lines
+  return cells.length ? shade(lay.lines, cells, COLORS.selected) : lay.lines
 }

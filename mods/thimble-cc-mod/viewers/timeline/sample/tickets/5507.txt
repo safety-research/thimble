@@ -1,0 +1,21 @@
+Ticket: 5507
+Subject: Charged but no confirmation
+Requester: S. Achebe <s.achebe@example.net>
+
+From: S. Achebe <s.achebe@example.net>
+Date: Sat, 16 May 2026 08:55:42 +0100
+Status: open
+
+My card was charged but I got no booking confirmation.
+
+From: Mateo <mateo@marrowby-ferries.example>
+Date: Sat, 16 May 2026 09:47:20 +0100
+Status: pending
+
+Your booking went through and the confirmation has been sent again.
+
+From: Mateo <mateo@marrowby-ferries.example>
+Date: Sat, 16 May 2026 10:06:30 +0100
+Status: closed
+
+Confirmation received.

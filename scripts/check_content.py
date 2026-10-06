@@ -60,9 +60,9 @@ from pathlib import Path
 
 NEVER = re.compile(r"(^|/)(__pycache__|node_modules|\.venv)(/|$)|^(data|dev|notes|context|experiments|"
                    r"workspaces[^/]*|\.claude|docs/archive|docs/proposals)/|\.(db|sqlite3?|jsonl|pyc)$")
-# the invented sample files of the worked examples and of the extensions' views and card types, in their folders, which
-# are data on purpose
-SAMPLES = re.compile(r"^(plugin/viewers|extensions/[\w-]+/(views|cards))/[\w-]+/sample/.+$")
+# the invented sample files of the worked examples (thimble's and a mod's copy of them) and of the extensions' views and
+# card types, in their folders, which are data on purpose
+SAMPLES = re.compile(r"^(plugin/viewers|mods/[\w-]+/viewers|extensions/[\w-]+/(views|cards))/[\w-]+/sample/.+$")
 MAX_BYTES = 2_000_000
 # demos/<dataset>/<file>: a pre-cached orientation, checked by demo_hits instead of NEVER's .jsonl and MAX_BYTES
 DEMO = re.compile(r"^demos/([a-z0-9][a-z0-9-]*)/(.+)$")

@@ -33,6 +33,17 @@ def test_lines_quotes_and_link_words() -> None:
         assert resolve(d, "nope.jsonl#L1", None)["status"] == "missing"
 
 
+def test_quote_with_escaped_inner_quotes() -> None:
+    # a quoted line of code whose inner quote marks the writer escaped is the line as the output shows it
+    with tempfile.TemporaryDirectory() as d:
+        os.makedirs(os.path.join(d, ".thimble-cc-mod", "calls"))
+        with open(os.path.join(d, ".thimble-cc-mod", "calls", "c1.json"), "w") as f:
+            json.dump({"id": "c1", "command": "grep -n dse s.py", "output": 'counts = {}\n6:    counts["dse"] += 100'}, f)
+        assert resolve(d, "call:c1#L2", '"counts[\\"dse\\"] += 100"')["status"] == "ok"
+        assert resolve(d, "call:c1#L2", '"counts["dse"] += 100"')["status"] == "ok"
+        assert resolve(d, "call:c1#L2", '"counts[\\"wiki\\"] += 100"')["status"] == "differs"
+
+
 def test_long_record_shows_every_field() -> None:
     with tempfile.TemporaryDirectory() as d:
         body = " ".join(f"word{i}?" for i in range(900))
