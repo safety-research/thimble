@@ -1,0 +1,361 @@
+{"ts": "2026-06-16T07:13:00Z", "author": "fern", "channel": "random", "text": "The review queue finished. See https://tracker.example.org/T-118 Due by end of day."}
+{"ts": "2026-06-16T07:14:00Z", "author": "dune", "channel": "wiki", "text": "The scraper finished. See https://docs.example.org/export Due by end of day."}
+{"ts": "2026-06-16T07:16:00Z", "author": "gale", "channel": "research", "text": "The export job failed again. The deadline is Thursday."}
+{"ts": "2026-06-16T07:17:00Z", "author": "birch", "channel": "random", "text": "The export job needs a second look."}
+{"ts": "2026-06-16T07:25:00Z", "author": "fern", "channel": "research", "text": "The weekly report failed again."}
+{"ts": "2026-06-16T07:27:00Z", "author": "gale", "channel": "research", "text": "The wiki page on cohorts finished. No rush."}
+{"ts": "2026-06-16T07:40:00Z", "author": "dune", "channel": "research", "text": "The deploy is blocked."}
+{"ts": "2026-06-16T07:42:00Z", "author": "birch", "channel": "research", "text": "The deploy is blocked."}
+{"ts": "2026-06-16T07:44:00Z", "author": "ash", "channel": "research", "text": "The weekly report is blocked. See https://docs.example.org/export Thanks!"}
+{"ts": "2026-06-16T07:46:00Z", "author": "hazel", "channel": "wiki", "text": "The census table is blocked. No rush."}
+{"ts": "2026-06-16T07:48:00Z", "author": "ash", "channel": "wiki", "text": "The dashboard was rolled back. Due by end of day."}
+{"ts": "2026-06-16T07:56:00Z", "author": "ash", "channel": "research", "text": "The deploy moved to Friday. Can someone pick this up?"}
+{"ts": "2026-06-16T08:30:00Z", "author": "dune", "channel": "ops", "text": "The wiki page on cohorts was rolled back. See https://ci.example.org/run/4412"}
+{"ts": "2026-06-16T08:51:00Z", "author": "elm", "channel": "research", "text": "The deploy failed again. See https://docs.example.org/export"}
+{"ts": "2026-06-16T08:54:00Z", "author": "dune", "channel": "wiki", "text": "The dashboard looks fine now. Thanks!"}
+{"ts": "2026-06-16T08:57:00Z", "author": "hazel", "channel": "ops", "text": "The weekly report is waiting on review. The deadline is Thursday."}
+{"ts": "2026-06-16T09:00:00Z", "author": "fern", "channel": "ops", "text": "The export job needs a second look. Can someone pick this up?"}
+{"ts": "2026-06-16T09:03:00Z", "author": "gale", "channel": "research", "text": "The export job was rolled back."}
+{"ts": "2026-06-16T09:24:00Z", "author": "dune", "channel": "research", "text": "The wiki page on cohorts was rolled back. The deadline is Thursday."}
+{"ts": "2026-06-16T09:26:00Z", "author": "birch", "channel": "random", "text": "The deploy needs a second look. See https://tracker.example.org/T-118 The deadline is Thursday."}
+{"ts": "2026-06-16T09:27:00Z", "author": "dune", "channel": "research", "text": "The wiki page on cohorts is blocked. Due by end of day."}
+{"ts": "2026-06-16T09:48:00Z", "author": "birch", "channel": "ops", "text": "The dashboard is blocked. No rush."}
+{"ts": "2026-06-16T09:50:00Z", "author": "birch", "channel": "wiki", "text": "The deploy was rolled back. See https://wiki.example.org/cohorts"}
+{"ts": "2026-06-16T10:03:00Z", "author": "fern", "channel": "wiki", "text": "The deploy needs a second look. See https://data.example.org/census/2021"}
+{"ts": "2026-06-16T10:06:00Z", "author": "elm", "channel": "research", "text": "The export job moved to Friday. Due by end of day."}
+{"ts": "2026-06-16T10:19:00Z", "author": "dune", "channel": "wiki", "text": "The census table is waiting on review. See https://tracker.example.org/T-118 Can someone pick this up?"}
+{"ts": "2026-06-16T10:24:00Z", "author": "ash", "channel": "wiki", "text": "The review queue is waiting on review. See https://docs.example.org/export Can someone pick this up?"}
+{"ts": "2026-06-16T10:25:00Z", "author": "hazel", "channel": "wiki", "text": "The deploy moved to Friday. See https://tracker.example.org/T-118 Can someone pick this up?"}
+{"ts": "2026-06-16T10:38:00Z", "author": "dune", "channel": "random", "text": "The census table failed again. See https://data.example.org/census/2021 No rush."}
+{"ts": "2026-06-16T10:51:00Z", "author": "birch", "channel": "ops", "text": "The export job was rolled back. Can someone pick this up?"}
+{"ts": "2026-06-16T10:53:00Z", "author": "fern", "channel": "wiki", "text": "The scraper was rolled back. Thanks!"}
+{"ts": "2026-06-16T10:55:00Z", "author": "cedar", "channel": "wiki", "text": "The review queue was rolled back. See https://wiki.example.org/cohorts"}
+{"ts": "2026-06-16T10:58:00Z", "author": "fern", "channel": "ops", "text": "The deploy needs a second look. No rush."}
+{"ts": "2026-06-16T11:01:00Z", "author": "cedar", "channel": "research", "text": "The weekly report finished. See https://wiki.example.org/cohorts"}
+{"ts": "2026-06-16T11:22:00Z", "author": "dune", "channel": "random", "text": "The scraper is waiting on review. See https://data.example.org/census/2021"}
+{"ts": "2026-06-16T11:35:00Z", "author": "gale", "channel": "ops", "text": "The review queue needs a second look. See https://ci.example.org/run/4412 No rush."}
+{"ts": "2026-06-16T11:38:00Z", "author": "cedar", "channel": "research", "text": "The export job was rolled back. The deadline is Thursday."}
+{"ts": "2026-06-16T11:41:00Z", "author": "hazel", "channel": "ops", "text": "The wiki page on cohorts finished."}
+{"ts": "2026-06-16T11:43:00Z", "author": "hazel", "channel": "wiki", "text": "The export job is waiting on review. See https://wiki.example.org/cohorts Due by end of day."}
+{"ts": "2026-06-16T11:44:00Z", "author": "dune", "channel": "wiki", "text": "The wiki page on cohorts was rolled back. See https://tracker.example.org/T-118"}
+{"ts": "2026-06-16T11:52:00Z", "author": "dune", "channel": "research", "text": "The deploy is waiting on review."}
+{"ts": "2026-06-16T12:26:00Z", "author": "dune", "channel": "ops", "text": "The wiki page on cohorts looks fine now. Due by end of day."}
+{"ts": "2026-06-16T12:47:00Z", "author": "fern", "channel": "ops", "text": "The dashboard failed again."}
+{"ts": "2026-06-16T12:50:00Z", "author": "hazel", "channel": "ops", "text": "The weekly report was rolled back. See https://wiki.example.org/cohorts Thanks!"}
+{"ts": "2026-06-16T12:53:00Z", "author": "gale", "channel": "random", "text": "The scraper needs a second look."}
+{"ts": "2026-06-16T13:06:00Z", "author": "fern", "channel": "research", "text": "The census table is blocked. See https://ci.example.org/run/4412 The deadline is Thursday."}
+{"ts": "2026-06-16T13:40:00Z", "author": "birch", "channel": "research", "text": "The export job looks fine now."}
+{"ts": "2026-06-16T13:42:00Z", "author": "cedar", "channel": "random", "text": "The scraper failed again. See https://ci.example.org/run/4412 The deadline is Thursday."}
+{"ts": "2026-06-16T13:50:00Z", "author": "hazel", "channel": "wiki", "text": "The review queue moved to Friday. See https://tracker.example.org/T-118"}
+{"ts": "2026-06-16T14:03:00Z", "author": "elm", "channel": "ops", "text": "The export job needs a second look. Due by end of day."}
+{"ts": "16/06/2026 14:04", "author": "birch", "channel": "research", "text": "The dashboard failed again."}
+{"ts": "2026-06-16T14:12:00Z", "author": "elm", "channel": "wiki", "text": "The deploy finished. See https://tracker.example.org/T-118 Thanks!"}
+{"ts": "2026-06-16T14:15:00Z", "author": "ash", "channel": "ops", "text": "The scraper failed again."}
+{"ts": "2026-06-16T14:18:00Z", "author": "elm", "channel": "ops", "text": "The dashboard moved to Friday."}
+{"ts": "2026-06-16T14:52:00Z", "author": "elm", "channel": "research", "text": "The weekly report moved to Friday. The deadline is Thursday."}
+{"ts": "2026-06-16T14:53:00Z", "author": "gale", "channel": "ops", "text": "The scraper was rolled back. See https://docs.example.org/export Due by end of day."}
+{"ts": "2026-06-16T15:27:00Z", "author": "fern", "channel": "research", "text": "The review queue moved to Friday."}
+{"ts": "2026-06-16T15:32:00Z", "author": "cedar", "channel": "wiki", "text": "The weekly report looks fine now. The deadline is Thursday."}
+{"ts": "2026-06-16T15:33:00Z", "author": "elm", "channel": "ops", "text": "The dashboard looks fine now. See https://wiki.example.org/cohorts Thanks!"}
+{"ts": "2026-06-16T15:38:00Z", "author": "ash", "channel": "wiki", "text": "The export job was rolled back. See https://ci.example.org/run/4412 No rush."}
+{"ts": "2026-06-16T15:46:00Z", "author": "fern", "channel": "ops", "text": "The census table is blocked. See https://ci.example.org/run/4412"}
+{"ts": "2026-06-16T15:49:00Z", "author": "dune", "channel": "ops", "text": "The review queue failed again."}
+{"ts": "2026-06-16T15:54:00Z", "author": "cedar", "channel": "research", "text": "The export job failed again. Due by end of day."}
+{"ts": "2026-06-16T16:15:00Z", "author": "birch", "channel": "research", "text": "The review queue finished."}
+{"ts": "2026-06-16T16:18:00Z", "author": "cedar", "channel": "research", "text": "The review queue is blocked. No rush."}
+{"ts": "2026-06-16T16:26:00Z", "author": "gale", "channel": "wiki", "text": "The weekly report finished."}
+{"ts": "2026-06-16T16:29:00Z", "author": "fern", "channel": "wiki", "text": "The export job is waiting on review. See https://wiki.example.org/cohorts"}
+{"ts": "2026-06-16T16:31:00Z", "author": "dune", "channel": "ops", "text": "The deploy finished."}
+{"ts": "2026-06-16T17:05:00Z", "author": "birch", "channel": "ops", "text": "The deploy failed again."}
+{"ts": "2026-06-16T17:07:00Z", "author": "dune", "channel": "wiki", "text": "The deploy moved to Friday."}
+{"ts": "2026-06-16T17:12:00Z", "author": "hazel", "channel": "ops", "text": "The deploy was rolled back. Due by end of day."}
+{"ts": "2026-06-16T17:20:00Z", "author": "elm", "channel": "wiki", "text": "The scraper failed again. Can someone pick this up?"}
+{"ts": "2026-06-16T17:28:00Z", "author": "elm", "channel": "research", "text": "The weekly report finished. No rush."}
+{"ts": "2026-06-16T17:30:00Z", "author": "hazel", "channel": "research", "text": "The deploy moved to Friday."}
+{"ts": "2026-06-16T18:04:00Z", "author": "hazel", "channel": "research", "text": "The wiki page on cohorts is waiting on review. Due by end of day."}
+{"ts": "2026-06-16T18:05:00Z", "author": "dune", "channel": "ops", "text": "The wiki page on cohorts was rolled back. Thanks!"}
+{"ts": "2026-06-16T18:10:00Z", "author": "fern", "channel": "ops", "text": "The wiki page on cohorts needs a second look."}
+{"ts": "2026-06-16T18:13:00Z", "author": "hazel", "channel": "research", "text": "The dashboard failed again."}
+{"ts": "2026-06-16T18:47:00Z", "author": "gale", "channel": "research", "text": "The weekly report finished. No rush."}
+{"ts": "2026-06-16T18:55:00Z", "author": "ash", "channel": "wiki", "text": "The review queue is blocked. See https://wiki.example.org/cohorts Can someone pick this up?"}
+{"ts": "2026-06-16T19:08:00Z", "author": "ash", "channel": "wiki", "text": "The review queue failed again."}
+{"ts": "2026-06-16T19:16:00Z", "author": "fern", "channel": "ops", "text": "The wiki page on cohorts looks fine now. Due by end of day."}
+{"ts": "2026-06-16T19:37:00Z", "author": "dune", "channel": "wiki", "text": "The export job moved to Friday. See https://ci.example.org/run/4412"}
+{"ts": "2026-06-16T19:45:00Z", "author": "ash", "channel": "research", "text": "The census table is waiting on review. Thanks!"}
+{"ts": "2026-06-16T20:06:00Z", "author": "cedar", "channel": "wiki", "text": "The scraper failed again. See https://docs.example.org/export No rush."}
+{"ts": "2026-06-16T20:14:00Z", "author": "elm", "channel": "research", "text": "The weekly report needs a second look. Can someone pick this up?"}
+{"ts": "2026-06-16T20:22:00Z", "author": "hazel", "channel": "ops", "text": "The dashboard looks fine now."}
+{"ts": "2026-06-16T20:43:00Z", "author": "dune", "channel": "ops", "text": "The weekly report failed again. See https://docs.example.org/export"}
+{"ts": "2026-06-16T21:17:00Z", "author": "birch", "channel": "wiki", "text": "The deploy looks fine now. See https://data.example.org/census/2021"}
+{"ts": "2026-06-16T21:20:00Z", "author": "ash", "channel": "ops", "text": "The wiki page on cohorts is blocked. See https://ci.example.org/run/4412"}
+{"ts": "2026-06-16T21:41:00Z", "author": "hazel", "channel": "ops", "text": "The scraper looks fine now. The deadline is Thursday."}
+{"ts": "2026-06-16T21:49:00Z", "author": "dune", "channel": "research", "text": "The census table needs a second look."}
+{"ts": "2026-06-16T21:51:00Z", "author": "gale", "channel": "ops", "text": "The scraper looks fine now. No rush."}
+{"ts": "2026-06-16T21:59:00Z", "author": "ash", "channel": "wiki", "text": "The export job needs a second look. See https://docs.example.org/export No rush."}
+{"ts": "2026-06-16T22:01:00Z", "author": "cedar", "channel": "research", "text": "The deploy was rolled back. See https://wiki.example.org/cohorts"}
+{"ts": "2026-06-16T22:04:00Z", "author": "cedar", "channel": "research", "text": "The wiki page on cohorts was rolled back. See https://wiki.example.org/cohorts The deadline is Thursday."}
+{"ts": "2026-06-16T22:09:00Z", "author": "gale", "channel": "research", "text": "The export job moved to Friday."}
+{"ts": "2026-06-16T22:11:00Z", "author": "ash", "channel": "ops", "text": "The dashboard is waiting on review."}
+{"ts": "2026-06-16T22:12:00Z", "author": "hazel", "channel": "research", "text": "The deploy moved to Friday."}
+{"ts": "2026-06-16T22:17:00Z", "author": "ash", "channel": "research", "text": "The export job looks fine now."}
+{"ts": "2026-06-16T22:18:00Z", "author": "fern", "channel": "ops", "text": "The review queue failed again. Thanks!"}
+{"ts": "2026-06-16T22:23:00Z", "author": "dune", "channel": "research", "text": "The census table looks fine now. Thanks!"}
+{"ts": "2026-06-16T22:24:00Z", "author": "dune", "channel": "wiki", "text": "The wiki page on cohorts is waiting on review. See https://data.example.org/census/2021"}
+{"ts": "2026-06-16T22:29:00Z", "author": "cedar", "channel": "research", "text": "The dashboard moved to Friday. See https://tracker.example.org/T-118 No rush."}
+{"ts": "2026-06-16T22:34:00Z", "author": "dune", "channel": "research", "text": "The export job needs a second look. The deadline is Thursday."}
+{"ts": "2026-06-16T22:35:00Z", "author": "gale", "channel": "random", "text": "The weekly report looks fine now. See https://wiki.example.org/cohorts"}
+{"ts": "2026-06-16T23:09:00Z", "author": "fern", "channel": "wiki", "text": "The census table failed again."}
+{"ts": "2026-06-16T23:14:00Z", "author": "fern", "channel": "ops", "text": "The deploy finished. Thanks!"}
+{"ts": "2026-06-16T23:27:00Z", "author": "gale", "channel": "research", "text": "The wiki page on cohorts finished. See https://wiki.example.org/cohorts Can someone pick this up?"}
+{"ts": "2026-06-16T23:29:00Z", "author": "gale", "channel": "research", "text": "The scraper looks fine now."}
+{"ts": "2026-06-16T23:31:00Z", "author": "dune", "channel": "ops", "text": "The deploy is waiting on review. No rush."}
+{"ts": "2026-06-16T23:44:00Z", "author": "gale", "channel": "ops", "text": "The deploy finished."}
+{"ts": "2026-06-16T23:45:00Z", "author": "elm", "channel": "ops", "text": "The deploy failed again. The deadline is Thursday."}
+{"ts": "2026-06-16T23:50:00Z", "author": "elm", "channel": "wiki", "text": "The census table is blocked. See https://tracker.example.org/T-118 The deadline is Thursday."}
+{"ts": "2026-06-17T00:03:00Z", "author": "ash", "channel": "random", "text": "The dashboard finished. Due by end of day."}
+{"ts": "2026-06-17T00:08:00Z", "author": "hazel", "channel": "ops", "text": "The deploy looks fine now. Thanks!"}
+{"ts": "2026-06-17T00:11:00Z", "author": "cedar", "channel": "random", "text": "The weekly report finished."}
+{"ts": "2026-06-17T00:16:00Z", "author": "dune", "channel": "ops", "text": "The census table was rolled back. Due by end of day."}
+{"ts": "2026-06-17T00:37:00Z", "author": "fern", "channel": "wiki", "text": "The scraper looks fine now. See https://wiki.example.org/cohorts No rush."}
+{"ts": "2026-06-17T00:40:00Z", "author": "dune", "channel": "random", "text": "The wiki page on cohorts failed again. Due by end of day."}
+{"ts": "2026-06-17T00:42:00Z", "author": "dune", "channel": "research", "text": "The deploy needs a second look. See https://docs.example.org/export No rush."}
+{"ts": "2026-06-17T00:44:00Z", "author": "elm", "channel": "wiki", "text": "The dashboard moved to Friday. See https://ci.example.org/run/4412 Can someone pick this up?"}
+{"ts": "2026-06-17T00:52:00Z", "author": "dune", "channel": "ops", "text": "The scraper needs a second look. See https://data.example.org/census/2021"}
+{"ts": "2026-06-17T01:05:00Z", "author": "birch", "channel": "ops", "text": "The dashboard is waiting on review."}
+{"ts": "2026-06-17T01:39:00Z", "author": "hazel", "channel": "random", "text": "The wiki page on cohorts finished."}
+{"ts": "2026-06-17T01:52:00Z", "author": "birch", "channel": "ops", "text": "The dashboard is waiting on review. See https://data.example.org/census/2021"}
+{"ts": "2026-06-17T02:05:00Z", "author": "birch", "channel": "research", "text": "The weekly report was rolled back. The deadline is Thursday."}
+{"ts": "2026-06-17T02:18:00Z", "author": "ash", "channel": "ops", "text": "The census table is blocked. See https://data.example.org/census/2021"}
+{"ts": "2026-06-17T02:23:00Z", "author": "elm", "channel": "wiki", "text": "The census table looks fine now."}
+{"ts": "2026-06-17T02:25:00Z", "author": "cedar", "channel": "ops", "text": "The deploy was rolled back. See https://wiki.example.org/cohorts Thanks!"}
+{"ts": "2026-06-17T02:27:00Z", "author": "elm", "channel": "research", "text": "The review queue moved to Friday."}
+{"ts": "2026-06-17T02:48:00Z", "author": "fern", "channel": "random", "text": "The dashboard is blocked. The deadline is Thursday."}
+{"ts": "2026-06-17T02:53:00Z", "author": "cedar", "channel": "research", "text": "The review queue is waiting on review. Thanks!"}
+{"ts": "2026-06-17T03:14:00Z", "author": "hazel", "channel": "ops", "text": "The wiki page on cohorts looks fine now. Can someone pick this up?"}
+{"ts": "2026-06-17T03:17:00Z", "author": "birch", "channel": "ops", "text": "The export job needs a second look. Thanks!"}
+{"ts": "2026-06-17T03:30:00Z", "author": "cedar", "channel": "wiki", "text": "The weekly report needs a second look. See https://data.example.org/census/2021"}
+{"ts": "2026-06-17T03:32:00Z", "author": "hazel", "channel": "ops", "text": "The deploy is waiting on review. The deadline is Thursday."}
+{"ts": "2026-06-17T03:45:00Z", "author": "dune", "channel": "ops", "text": "The review queue failed again."}
+{"ts": "2026-06-17T04:06:00Z", "author": "gale", "channel": "research", "text": "The scraper was rolled back. See https://data.example.org/census/2021 The deadline is Thursday."}
+{"ts": "2026-06-17T04:09:00Z", "author": "ash", "channel": "ops", "text": "The wiki page on cohorts needs a second look. See https://data.example.org/census/2021 The deadline is Thursday."}
+{"ts": "2026-06-17T04:22:00Z", "author": "dune", "channel": "ops", "text": "The deploy moved to Friday."}
+{"ts": "2026-06-17T04:43:00Z", "author": "ash", "channel": "research", "text": "The census table was rolled back."}
+{"ts": "2026-06-17T04:44:00Z", "author": "cedar", "channel": "research", "text": "The deploy was rolled back. See https://tracker.example.org/T-118 No rush."}
+{"ts": "2026-06-17T05:18:00Z", "author": "birch", "channel": "research", "text": "The wiki page on cohorts needs a second look. Can someone pick this up?"}
+{"ts": "2026-06-17T05:52:00Z", "author": "fern", "channel": "research", "text": "The export job finished. Due by end of day."}
+{"ts": "2026-06-17T05:54:00Z", "author": "dune", "channel": "ops", "text": "The review queue needs a second look. See https://wiki.example.org/cohorts Due by end of day."}
+{"ts": "2026-06-17T05:57:00Z", "author": "dune", "channel": "random", "text": "The deploy moved to Friday."}
+{"ts": "17/06/2026 05:59", "author": "hazel", "channel": "wiki", "text": "The dashboard needs a second look. See https://tracker.example.org/T-118"}
+{"ts": "2026-06-17T06:02:00Z", "author": "dune", "channel": "ops", "text": "The deploy is waiting on review."}
+{"ts": "2026-06-17T06:15:00Z", "author": "fern", "channel": "ops", "text": "The scraper needs a second look."}
+{"ts": "2026-06-17T06:36:00Z", "author": "fern", "channel": "ops", "text": "The dashboard failed again. The deadline is Thursday."}
+{"ts": "2026-06-17T07:10:00Z", "author": "fern", "channel": "research", "text": "The wiki page on cohorts moved to Friday. Thanks!"}
+{"ts": "2026-06-17T07:18:00Z", "author": "hazel", "channel": "ops", "text": "The census table needs a second look. Due by end of day."}
+{"ts": "2026-06-17T07:23:00Z", "author": "elm", "channel": "ops", "text": "The export job moved to Friday."}
+{"ts": "2026-06-17T07:36:00Z", "author": "gale", "channel": "wiki", "text": "The export job is waiting on review. See https://tracker.example.org/T-118 Thanks!"}
+{"ts": "2026-06-17T07:49:00Z", "author": "ash", "channel": "wiki", "text": "The weekly report was rolled back. See https://wiki.example.org/cohorts The deadline is Thursday."}
+{"ts": "2026-06-17T07:50:00Z", "author": "dune", "channel": "research", "text": "The dashboard failed again."}
+{"ts": "2026-06-17T08:11:00Z", "author": "cedar", "channel": "research", "text": "The weekly report is waiting on review. No rush."}
+{"ts": "2026-06-17T08:14:00Z", "author": "cedar", "channel": "ops", "text": "The scraper needs a second look. Due by end of day."}
+{"ts": "2026-06-17T08:22:00Z", "author": "hazel", "channel": "research", "text": "The dashboard finished. See https://tracker.example.org/T-118 Can someone pick this up?"}
+{"ts": "2026-06-17T08:56:00Z", "author": "cedar", "channel": "ops", "text": "The export job finished. See https://wiki.example.org/cohorts Thanks!"}
+{"ts": "2026-06-17T09:01:00Z", "author": "cedar", "channel": "ops", "text": "The wiki page on cohorts finished."}
+{"ts": "2026-06-17T09:22:00Z", "author": "elm", "channel": "ops", "text": "The review queue needs a second look. Due by end of day."}
+{"ts": "2026-06-17T09:23:00Z", "author": "hazel", "channel": "random", "text": "The deploy finished. Thanks!"}
+{"ts": "2026-06-17T09:25:00Z", "author": "dune", "channel": "wiki", "text": "The deploy needs a second look. See https://wiki.example.org/cohorts"}
+{"ts": "2026-06-17T09:26:00Z", "author": "gale", "channel": "ops", "text": "The dashboard finished."}
+{"ts": "2026-06-17T09:34:00Z", "author": "cedar", "channel": "ops", "text": "The scraper failed again. The deadline is Thursday."}
+{"ts": "2026-06-17T09:42:00Z", "author": "dune", "channel": "wiki", "text": "The scraper needs a second look. Can someone pick this up?"}
+{"ts": "2026-06-17T10:03:00Z", "author": "hazel", "channel": "ops", "text": "The scraper looks fine now."}
+{"ts": "2026-06-17T10:37:00Z", "author": "dune", "channel": "wiki", "text": "The export job finished. See https://data.example.org/census/2021"}
+{"ts": "2026-06-17T10:58:00Z", "author": "birch", "channel": "research", "text": "The wiki page on cohorts needs a second look. See https://wiki.example.org/cohorts Due by end of day."}
+{"ts": "2026-06-17T11:01:00Z", "author": "birch", "channel": "ops", "text": "The weekly report finished. See https://data.example.org/census/2021 The deadline is Thursday."}
+{"ts": "2026-06-17T11:02:00Z", "author": "birch", "channel": "ops", "text": "The census table is waiting on review."}
+{"ts": "2026-06-17T11:23:00Z", "author": "elm", "channel": "ops", "text": "The scraper is waiting on review. See https://wiki.example.org/cohorts Due by end of day."}
+{"ts": "2026-06-17T11:57:00Z", "author": "gale", "channel": "ops", "text": "The wiki page on cohorts is waiting on review. Can someone pick this up?"}
+{"ts": "2026-06-17T12:05:00Z", "author": "hazel", "channel": "ops", "text": "The dashboard moved to Friday. See https://ci.example.org/run/4412 Can someone pick this up?"}
+{"ts": "2026-06-17T12:13:00Z", "author": "fern", "channel": "research", "text": "The export job looks fine now. See https://tracker.example.org/T-118 Due by end of day."}
+{"ts": "2026-06-17T12:47:00Z", "author": "cedar", "channel": "wiki", "text": "The scraper failed again."}
+{"ts": "2026-06-17T13:08:00Z", "author": "ash", "channel": "ops", "text": "The scraper moved to Friday. The deadline is Thursday."}
+{"ts": "2026-06-17T13:21:00Z", "author": "elm", "channel": "research", "text": "The deploy needs a second look. Can someone pick this up?"}
+{"ts": "2026-06-17T13:24:00Z", "author": "birch", "channel": "ops", "text": "The scraper is waiting on review. Due by end of day."}
+{"ts": "2026-06-17T13:58:00Z", "author": "birch", "channel": "wiki", "text": "The wiki page on cohorts is blocked. See https://docs.example.org/export Thanks!"}
+{"ts": "2026-06-17T14:19:00Z", "author": "cedar", "channel": "wiki", "text": "The export job is blocked. See https://ci.example.org/run/4412 Thanks!"}
+{"ts": "2026-06-17T14:40:00Z", "author": "fern", "channel": "random", "text": "The scraper was rolled back. See https://tracker.example.org/T-118 The deadline is Thursday."}
+{"ts": "2026-06-17T14:53:00Z", "author": "dune", "channel": "research", "text": "The deploy is blocked. See https://docs.example.org/export"}
+{"ts": "2026-06-17T14:56:00Z", "author": "cedar", "channel": "ops", "text": "The scraper is waiting on review."}
+{"ts": "2026-06-17T15:01:00Z", "author": "birch", "channel": "wiki", "text": "The census table needs a second look. See https://data.example.org/census/2021"}
+{"ts": "2026-06-17T15:04:00Z", "author": "elm", "channel": "random", "text": "The wiki page on cohorts is waiting on review."}
+{"ts": "2026-06-17T15:12:00Z", "author": "elm", "channel": "research", "text": "The scraper failed again. Due by end of day."}
+{"ts": "2026-06-17T15:17:00Z", "author": "elm", "channel": "wiki", "text": "The deploy finished. See https://docs.example.org/export"}
+{"ts": "2026-06-17T15:51:00Z", "author": "gale", "channel": "ops", "text": "The dashboard looks fine now. See https://data.example.org/census/2021 Thanks!"}
+{"ts": "2026-06-17T15:56:00Z", "author": "gale", "channel": "research", "text": "The scraper needs a second look. No rush."}
+{"ts": "2026-06-17T16:09:00Z", "author": "elm", "channel": "ops", "text": "The wiki page on cohorts looks fine now. See https://docs.example.org/export"}
+{"ts": "2026-06-17T16:30:00Z", "author": "fern", "channel": "research", "text": "The export job looks fine now."}
+{"ts": "2026-06-17T16:31:00Z", "author": "cedar", "channel": "research", "text": "The deploy failed again. See https://tracker.example.org/T-118"}
+{"ts": "2026-06-17T16:36:00Z", "author": "ash", "channel": "research", "text": "The wiki page on cohorts was rolled back. No rush."}
+{"ts": "2026-06-17T16:49:00Z", "author": "birch", "channel": "research", "text": "The review queue was rolled back. See https://data.example.org/census/2021 Thanks!"}
+{"ts": "2026-06-17T17:02:00Z", "author": "ash", "channel": "research", "text": "The dashboard moved to Friday. The deadline is Thursday."}
+{"ts": "2026-06-17T17:04:00Z", "author": "dune", "channel": "research", "text": "The review queue is blocked. Due by end of day."}
+{"ts": "2026-06-17T17:12:00Z", "author": "birch", "channel": "wiki", "text": "The scraper looks fine now. See https://data.example.org/census/2021"}
+{"ts": "2026-06-17T17:17:00Z", "author": "hazel", "channel": "research", "text": "The scraper needs a second look. Thanks!"}
+{"ts": "2026-06-17T17:25:00Z", "author": "gale", "channel": "wiki", "text": "The weekly report was rolled back. See https://data.example.org/census/2021"}
+{"ts": "2026-06-17T17:33:00Z", "author": "dune", "channel": "random", "text": "The weekly report was rolled back. See https://ci.example.org/run/4412 Can someone pick this up?"}
+{"ts": "2026-06-17T17:41:00Z", "author": "fern", "channel": "ops", "text": "The deploy looks fine now. Due by end of day."}
+{"ts": "2026-06-17T17:44:00Z", "author": "cedar", "channel": "random", "text": "The review queue finished. See https://tracker.example.org/T-118 Can someone pick this up?"}
+{"ts": "2026-06-17T17:57:00Z", "author": "elm", "channel": "research", "text": "The export job finished. See https://wiki.example.org/cohorts"}
+{"ts": "2026-06-17T17:59:00Z", "author": "cedar", "channel": "research", "text": "The scraper needs a second look. Can someone pick this up?"}
+{"ts": "2026-06-17T18:04:00Z", "author": "elm", "channel": "wiki", "text": "The weekly report failed again."}
+{"ts": "2026-06-17T18:09:00Z", "author": "birch", "channel": "research", "text": "The scraper failed again. No rush."}
+{"ts": "2026-06-17T18:11:00Z", "author": "ash", "channel": "ops", "text": "The scraper needs a second look."}
+{"ts": "2026-06-17T18:45:00Z", "author": "ash", "channel": "research", "text": "The weekly report was rolled back. See https://data.example.org/census/2021"}
+{"ts": "2026-06-18T02:00:00Z", "author": "gale", "channel": "ops", "text": "half a line
+{"ts": "2026-06-17T18:48:00Z", "author": "fern", "channel": "wiki", "text": "The deploy was rolled back. No rush."}
+{"ts": "2026-06-17T19:09:00Z", "author": "ash", "channel": "research", "text": "The wiki page on cohorts needs a second look. The deadline is Thursday."}
+{"ts": "2026-06-17T19:10:00Z", "author": "cedar", "channel": "research", "text": "The census table failed again. No rush."}
+{"ts": "2026-06-17T19:11:00Z", "author": "fern", "channel": "ops", "text": "The review queue needs a second look. Can someone pick this up?"}
+{"ts": "2026-06-17T19:45:00Z", "author": "ash", "channel": "wiki", "text": "The scraper moved to Friday. See https://docs.example.org/export"}
+{"ts": "2026-06-17T19:53:00Z", "author": "fern", "channel": "ops", "text": "The deploy looks fine now."}
+{"ts": "2026-06-17T19:58:00Z", "author": "birch", "channel": "research", "text": "The wiki page on cohorts is blocked. See https://ci.example.org/run/4412"}
+{"ts": "2026-06-17T19:59:00Z", "author": "ash", "channel": "research", "text": "The review queue finished. Due by end of day."}
+{"ts": "2026-06-17T20:00:00Z", "author": "gale", "channel": "ops", "text": "The deploy finished."}
+{"ts": "2026-06-17T20:03:00Z", "author": "birch", "channel": "research", "text": "The wiki page on cohorts is waiting on review. See https://docs.example.org/export"}
+{"ts": "2026-06-17T20:06:00Z", "author": "fern", "channel": "wiki", "text": "The review queue failed again. The deadline is Thursday."}
+{"ts": "2026-06-17T20:09:00Z", "author": "ash", "channel": "wiki", "text": "The dashboard moved to Friday. See https://wiki.example.org/cohorts Can someone pick this up?"}
+{"ts": "2026-06-17T20:30:00Z", "author": "birch", "channel": "research", "text": "The export job was rolled back. The deadline is Thursday."}
+{"ts": "2026-06-17T20:51:00Z", "author": "hazel", "channel": "research", "text": "The review queue was rolled back. See https://docs.example.org/export"}
+{"ts": "2026-06-17T21:12:00Z", "author": "gale", "channel": "research", "text": "The wiki page on cohorts was rolled back. See https://data.example.org/census/2021 The deadline is Thursday."}
+{"ts": "2026-06-17T21:13:00Z", "author": "hazel", "channel": "ops", "text": "The wiki page on cohorts failed again. See https://wiki.example.org/cohorts"}
+{"ts": "2026-06-17T21:14:00Z", "author": "ash", "channel": "ops", "text": "The scraper was rolled back."}
+{"ts": "2026-06-17T21:27:00Z", "author": "hazel", "channel": "wiki", "text": "The weekly report failed again. See https://tracker.example.org/T-118 No rush."}
+{"ts": "2026-06-17T21:35:00Z", "author": "gale", "channel": "wiki", "text": "The export job finished. See https://wiki.example.org/cohorts Due by end of day."}
+{"ts": "2026-06-17T21:43:00Z", "author": "fern", "channel": "ops", "text": "The weekly report was rolled back. Can someone pick this up?"}
+{"ts": "2026-06-17T22:17:00Z", "author": "fern", "channel": "research", "text": "The weekly report needs a second look. Due by end of day."}
+{"ts": "2026-06-17T22:20:00Z", "author": "elm", "channel": "research", "text": "The review queue was rolled back. No rush."}
+{"ts": "2026-06-17T22:33:00Z", "author": "cedar", "channel": "ops", "text": "The export job is blocked. The deadline is Thursday."}
+{"ts": "2026-06-17T22:41:00Z", "author": "dune", "channel": "research", "text": "The scraper looks fine now. Thanks!"}
+{"ts": "2026-06-17T23:15:00Z", "author": "cedar", "channel": "ops", "text": "The export job is blocked. Thanks!"}
+{"ts": "2026-06-17T23:16:00Z", "author": "hazel", "channel": "ops", "text": "The weekly report needs a second look."}
+{"ts": "2026-06-17T23:29:00Z", "author": "ash", "channel": "research", "text": "The deploy looks fine now. See https://data.example.org/census/2021"}
+{"ts": "2026-06-17T23:50:00Z", "author": "gale", "channel": "research", "text": "The scraper moved to Friday. The deadline is Thursday."}
+{"ts": "2026-06-18T00:24:00Z", "author": "elm", "channel": "research", "text": "The census table failed again. See https://tracker.example.org/T-118"}
+{"ts": "2026-06-18T00:37:00Z", "author": "elm", "channel": "research", "text": "The scraper is waiting on review. See https://wiki.example.org/cohorts"}
+{"ts": "2026-06-18T00:50:00Z", "author": "dune", "channel": "research", "text": "The census table looks fine now."}
+{"ts": "2026-06-18T00:51:00Z", "author": "hazel", "channel": "wiki", "text": "The deploy is blocked. Can someone pick this up?"}
+{"ts": "2026-06-18T00:53:00Z", "author": "birch", "channel": "ops", "text": "The export job is blocked. The deadline is Thursday."}
+{"ts": "18/06/2026 00:54", "author": "gale", "channel": "ops", "text": "The deploy is waiting on review."}
+{"ts": "2026-06-18T00:56:00Z", "author": "dune", "channel": "random", "text": "The weekly report moved to Friday. Can someone pick this up?"}
+{"ts": "2026-06-18T00:59:00Z", "author": "hazel", "channel": "ops", "text": "The export job finished. See https://ci.example.org/run/4412 No rush."}
+{"ts": "2026-06-18T01:01:00Z", "author": "elm", "channel": "wiki", "text": "The review queue failed again. Due by end of day."}
+{"ts": "2026-06-18T01:14:00Z", "author": "dune", "channel": "research", "text": "The wiki page on cohorts looks fine now. See https://data.example.org/census/2021 Can someone pick this up?"}
+{"ts": "2026-06-18T01:19:00Z", "author": "ash", "channel": "ops", "text": "The dashboard is blocked. See https://tracker.example.org/T-118 The deadline is Thursday."}
+{"ts": "2026-06-18T01:27:00Z", "author": "dune", "channel": "wiki", "text": "The deploy finished. See https://ci.example.org/run/4412 The deadline is Thursday."}
+{"ts": "2026-06-18T01:35:00Z", "author": "elm", "channel": "research", "text": "The deploy failed again. Can someone pick this up?"}
+{"ts": "2026-06-18T01:56:00Z", "author": "ash", "channel": "ops", "text": "The deploy looks fine now. See https://data.example.org/census/2021"}
+{"ts": "2026-06-18T02:30:00Z", "author": "fern", "channel": "wiki", "text": "The scraper finished. See https://data.example.org/census/2021 Due by end of day."}
+{"ts": "2026-06-18T02:33:00Z", "author": "hazel", "channel": "wiki", "text": "The wiki page on cohorts looks fine now. Due by end of day."}
+{"ts": "2026-06-18T02:46:00Z", "author": "fern", "channel": "ops", "text": "The scraper was rolled back. See https://ci.example.org/run/4412"}
+{"ts": "2026-06-18T02:51:00Z", "author": "hazel", "channel": "wiki", "text": "The weekly report was rolled back."}
+{"ts": "2026-06-18T02:54:00Z", "author": "fern", "channel": "ops", "text": "The review queue is waiting on review. See https://ci.example.org/run/4412"}
+{"ts": "2026-06-18T02:57:00Z", "author": "birch", "channel": "ops", "text": "The wiki page on cohorts is blocked. No rush."}
+{"ts": "2026-06-18T03:00:00Z", "author": "birch", "channel": "random", "text": "The export job is waiting on review."}
+{"ts": "2026-06-18T03:08:00Z", "author": "dune", "channel": "wiki", "text": "The census table looks fine now."}
+{"ts": "2026-06-18T03:10:00Z", "author": "ash", "channel": "research", "text": "The review queue needs a second look. See https://ci.example.org/run/4412"}
+{"ts": "2026-06-18T03:44:00Z", "author": "cedar", "channel": "wiki", "text": "The census table needs a second look. See https://tracker.example.org/T-118"}
+{"ts": "2026-06-18T03:57:00Z", "author": "cedar", "channel": "research", "text": "The review queue is waiting on review."}
+{"ts": "2026-06-18T04:00:00Z", "author": "hazel", "channel": "research", "text": "The scraper needs a second look. See https://wiki.example.org/cohorts Due by end of day."}
+{"ts": "2026-06-18T04:08:00Z", "author": "ash", "channel": "ops", "text": "The weekly report is waiting on review."}
+{"ts": "2026-06-18T04:10:00Z", "author": "fern", "channel": "research", "text": "The review queue finished. Can someone pick this up?"}
+{"ts": "2026-06-18T04:18:00Z", "author": "elm", "channel": "wiki", "text": "The deploy failed again. See https://docs.example.org/export"}
+{"ts": "2026-06-18T04:23:00Z", "author": "fern", "channel": "ops", "text": "The census table finished. See https://ci.example.org/run/4412 The deadline is Thursday."}
+{"ts": "2026-06-18T04:57:00Z", "author": "fern", "channel": "random", "text": "The wiki page on cohorts failed again."}
+{"ts": "2026-06-18T05:18:00Z", "author": "hazel", "channel": "research", "text": "The export job moved to Friday. No rush."}
+{"ts": "2026-06-18T05:19:00Z", "author": "cedar", "channel": "research", "text": "The weekly report finished. See https://wiki.example.org/cohorts"}
+{"ts": "2026-06-18T05:22:00Z", "author": "ash", "channel": "ops", "text": "The dashboard finished. See https://data.example.org/census/2021"}
+{"ts": "2026-06-18T05:56:00Z", "author": "cedar", "channel": "research", "text": "The deploy failed again. Due by end of day."}
+{"ts": "2026-06-18T05:57:00Z", "author": "birch", "channel": "ops", "text": "The deploy was rolled back."}
+{"ts": "2026-06-18T05:59:00Z", "author": "hazel", "channel": "ops", "text": "The weekly report is waiting on review."}
+{"ts": "2026-06-18T06:20:00Z", "author": "ash", "channel": "ops", "text": "The export job looks fine now."}
+{"ts": "2026-06-18T06:41:00Z", "author": "fern", "channel": "random", "text": "The export job is blocked."}
+{"ts": "2026-06-18T07:02:00Z", "author": "fern", "channel": "wiki", "text": "The census table looks fine now. The deadline is Thursday."}
+{"ts": "2026-06-18T07:05:00Z", "author": "fern", "channel": "random", "text": "The census table is waiting on review. The deadline is Thursday."}
+{"ts": "2026-06-18T07:07:00Z", "author": "ash", "channel": "research", "text": "The wiki page on cohorts is blocked."}
+{"ts": "2026-06-18T07:12:00Z", "author": "ash", "channel": "ops", "text": "The review queue was rolled back. The deadline is Thursday."}
+{"ts": "2026-06-18T07:20:00Z", "author": "birch", "channel": "wiki", "text": "The dashboard finished."}
+{"ts": "2026-06-18T07:21:00Z", "author": "birch", "channel": "research", "text": "The export job moved to Friday. See https://ci.example.org/run/4412"}
+{"ts": "2026-06-18T07:22:00Z", "author": "cedar", "channel": "research", "text": "The dashboard failed again."}
+{"ts": "2026-06-18T07:56:00Z", "author": "elm", "channel": "ops", "text": "The weekly report moved to Friday."}
+{"ts": "2026-06-18T08:01:00Z", "author": "gale", "channel": "wiki", "text": "The dashboard was rolled back."}
+{"ts": "2026-06-18T08:06:00Z", "author": "hazel", "channel": "research", "text": "The census table was rolled back."}
+{"ts": "2026-06-18T08:40:00Z", "author": "gale", "channel": "wiki", "text": "The export job is waiting on review. See https://data.example.org/census/2021"}
+{"ts": "2026-06-18T09:01:00Z", "author": "fern", "channel": "ops", "text": "The census table needs a second look."}
+{"ts": "2026-06-18T09:14:00Z", "author": "cedar", "channel": "research", "text": "The dashboard is waiting on review. The deadline is Thursday."}
+{"ts": "2026-06-18T09:16:00Z", "author": "gale", "channel": "research", "text": "The census table was rolled back."}
+{"ts": "2026-06-18T09:50:00Z", "author": "gale", "channel": "ops", "text": "The wiki page on cohorts is waiting on review."}
+{"ts": "2026-06-18T10:03:00Z", "author": "birch", "channel": "research", "text": "The weekly report is waiting on review."}
+{"ts": "2026-06-18T10:37:00Z", "author": "gale", "channel": "ops", "text": "The weekly report looks fine now. The deadline is Thursday."}
+{"ts": "2026-06-18T10:39:00Z", "author": "birch", "channel": "research", "text": "The weekly report looks fine now."}
+{"ts": "2026-06-18T11:00:00Z", "author": "fern", "channel": "wiki", "text": "The deploy moved to Friday."}
+{"ts": "2026-06-18T11:21:00Z", "author": "hazel", "channel": "research", "text": "The review queue is blocked. See https://docs.example.org/export Thanks!"}
+{"ts": "2026-06-18T11:29:00Z", "author": "dune", "channel": "ops", "text": "The dashboard needs a second look. Thanks!"}
+{"ts": "2026-06-18T11:31:00Z", "author": "fern", "channel": "wiki", "text": "The census table is blocked."}
+{"ts": "2026-06-18T11:36:00Z", "author": "elm", "channel": "random", "text": "The export job finished. See https://tracker.example.org/T-118 No rush."}
+{"ts": "2026-06-18T11:44:00Z", "author": "ash", "channel": "research", "text": "The review queue looks fine now. Can someone pick this up?"}
+{"ts": "2026-06-18T11:57:00Z", "author": "gale", "channel": "research", "text": "The export job failed again. Due by end of day."}
+{"ts": "2026-06-18T12:10:00Z", "author": "gale", "channel": "research", "text": "The weekly report is waiting on review. No rush."}
+{"ts": "2026-06-18T12:44:00Z", "author": "birch", "channel": "wiki", "text": "The census table failed again. See https://ci.example.org/run/4412 Can someone pick this up?"}
+{"ts": "2026-06-18T12:52:00Z", "author": "gale", "channel": "research", "text": "The wiki page on cohorts moved to Friday."}
+{"ts": "2026-06-18T12:55:00Z", "author": "birch", "channel": "research", "text": "The scraper is waiting on review. The deadline is Thursday."}
+{"ts": "2026-06-18T13:08:00Z", "author": "ash", "channel": "research", "text": "The export job looks fine now. See https://wiki.example.org/cohorts"}
+{"ts": "2026-06-18T13:16:00Z", "author": "cedar", "channel": "research", "text": "The wiki page on cohorts finished."}
+{"ts": "2026-06-18T13:50:00Z", "author": "birch", "channel": "wiki", "text": "The dashboard needs a second look. Thanks!"}
+{"ts": "2026-06-18T13:53:00Z", "author": "hazel", "channel": "ops", "text": "The wiki page on cohorts finished. See https://data.example.org/census/2021"}
+{"ts": "2026-06-18T14:27:00Z", "author": "cedar", "channel": "research", "text": "The export job finished. Can someone pick this up?"}
+{"ts": "2026-06-18T14:32:00Z", "author": "birch", "channel": "ops", "text": "The weekly report finished. Due by end of day."}
+{"ts": "2026-06-18T14:45:00Z", "author": "hazel", "channel": "ops", "text": "The review queue finished. See https://docs.example.org/export The deadline is Thursday."}
+{"ts": "2026-06-18T14:46:00Z", "author": "fern", "channel": "research", "text": "The scraper is waiting on review. See https://tracker.example.org/T-118"}
+{"ts": "2026-06-18T14:47:00Z", "author": "birch", "channel": "wiki", "text": "The deploy moved to Friday. See https://ci.example.org/run/4412 No rush."}
+{"ts": "2026-06-18T14:52:00Z", "author": "ash", "channel": "research", "text": "The scraper looks fine now. No rush."}
+{"ts": "2026-06-18T14:57:00Z", "author": "elm", "channel": "ops", "text": "The weekly report is blocked. The deadline is Thursday."}
+{"ts": "2026-06-18T15:18:00Z", "author": "fern", "channel": "research", "text": "The wiki page on cohorts is blocked. Thanks!"}
+{"ts": "2026-06-18T15:39:00Z", "author": "dune", "channel": "research", "text": "The wiki page on cohorts looks fine now. Can someone pick this up?"}
+{"ts": "2026-06-18T16:00:00Z", "author": "ash", "channel": "ops", "text": "The dashboard is blocked. See https://wiki.example.org/cohorts"}
+{"ts": "2026-06-18T16:13:00Z", "author": "cedar", "channel": "wiki", "text": "The scraper needs a second look. See https://ci.example.org/run/4412"}
+{"ts": "2026-06-18T16:47:00Z", "author": "gale", "channel": "research", "text": "The scraper needs a second look."}
+{"ts": "2026-06-18T17:08:00Z", "author": "dune", "channel": "research", "text": "The scraper moved to Friday."}
+{"ts": "2026-06-18T17:13:00Z", "author": "fern", "channel": "wiki", "text": "The weekly report moved to Friday. No rush."}
+{"ts": "2026-06-18T17:18:00Z", "author": "birch", "channel": "research", "text": "The scraper needs a second look. Due by end of day."}
+{"ts": "2026-06-18T17:26:00Z", "author": "elm", "channel": "wiki", "text": "The review queue finished."}
+{"ts": "2026-06-18T17:27:00Z", "author": "fern", "channel": "research", "text": "The wiki page on cohorts needs a second look."}
+{"ts": "2026-06-18T17:32:00Z", "author": "elm", "channel": "research", "text": "The wiki page on cohorts failed again. Can someone pick this up?"}
+{"ts": "2026-06-18T17:37:00Z", "author": "elm", "channel": "ops", "text": "The dashboard failed again. See https://data.example.org/census/2021 Thanks!"}
+{"ts": "2026-06-18T17:50:00Z", "author": "ash", "channel": "research", "text": "The deploy needs a second look."}
+{"ts": "2026-06-18T18:03:00Z", "author": "gale", "channel": "research", "text": "The census table looks fine now. See https://docs.example.org/export"}
+{"ts": "2026-06-18T18:16:00Z", "author": "ash", "channel": "wiki", "text": "The wiki page on cohorts needs a second look. See https://ci.example.org/run/4412"}
+{"ts": "2026-06-18T18:37:00Z", "author": "gale", "channel": "ops", "text": "The weekly report looks fine now. See https://ci.example.org/run/4412"}
+{"ts": "2026-06-18T18:38:00Z", "author": "elm", "channel": "research", "text": "The weekly report is waiting on review."}
+{"ts": "2026-06-18T18:59:00Z", "author": "ash", "channel": "research", "text": "The census table finished. See https://ci.example.org/run/4412 The deadline is Thursday."}
+{"ts": "2026-06-18T19:04:00Z", "author": "gale", "channel": "research", "text": "The export job is blocked. See https://ci.example.org/run/4412 Due by end of day."}
+{"ts": "2026-06-18T19:25:00Z", "author": "gale", "channel": "random", "text": "The scraper moved to Friday. Can someone pick this up?"}
+{"ts": "2026-06-18T19:59:00Z", "author": "gale", "channel": "random", "text": "The deploy finished."}
+{"ts": "2026-06-18T20:02:00Z", "author": "elm", "channel": "research", "text": "The scraper finished."}
+{"ts": "2026-06-18T20:05:00Z", "author": "fern", "channel": "research", "text": "The scraper moved to Friday. See https://wiki.example.org/cohorts"}
+{"ts": "18/06/2026 20:18", "author": "dune", "channel": "research", "text": "The scraper moved to Friday. See https://docs.example.org/export No rush."}
+{"ts": "2026-06-18T20:23:00Z", "author": "elm", "channel": "ops", "text": "The deploy needs a second look. Can someone pick this up?"}
+{"ts": "2026-06-18T20:26:00Z", "author": "gale", "channel": "wiki", "text": "The weekly report is waiting on review. See https://wiki.example.org/cohorts"}
+{"ts": "2026-06-18T20:29:00Z", "author": "dune", "channel": "research", "text": "The weekly report was rolled back. Thanks!"}
+{"ts": "2026-06-18T20:31:00Z", "author": "ash", "channel": "research", "text": "The export job is blocked. The deadline is Thursday."}
+{"ts": "2026-06-18T20:39:00Z", "author": "cedar", "channel": "ops", "text": "The wiki page on cohorts moved to Friday. Due by end of day."}
+{"ts": "2026-06-18T20:52:00Z", "author": "ash", "channel": "research", "text": "The census table moved to Friday. See https://wiki.example.org/cohorts The deadline is Thursday."}
+{"ts": "2026-06-18T21:26:00Z", "author": "elm", "channel": "random", "text": "The deploy failed again. Can someone pick this up?"}
+{"ts": "2026-06-18T21:28:00Z", "author": "ash", "channel": "research", "text": "The review queue was rolled back. See https://tracker.example.org/T-118 Can someone pick this up?"}
+{"ts": "2026-06-18T21:41:00Z", "author": "cedar", "channel": "wiki", "text": "The dashboard moved to Friday. Due by end of day."}
+{"ts": "2026-06-18T21:42:00Z", "author": "cedar", "channel": "ops", "text": "The review queue needs a second look."}
+{"ts": "2026-06-18T21:44:00Z", "author": "dune", "channel": "wiki", "text": "The dashboard is blocked. See https://ci.example.org/run/4412 Can someone pick this up?"}
+{"ts": "2026-06-18T21:57:00Z", "author": "gale", "channel": "ops", "text": "The census table moved to Friday. See https://wiki.example.org/cohorts Due by end of day."}
+{"ts": "2026-06-18T21:58:00Z", "author": "elm", "channel": "random", "text": "The deploy looks fine now."}
+{"ts": "2026-06-18T22:00:00Z", "author": "ash", "channel": "ops", "text": "The scraper needs a second look. See https://docs.example.org/export Due by end of day."}
+{"ts": "2026-06-18T22:34:00Z", "author": "gale", "channel": "research", "text": "The scraper is blocked. See https://tracker.example.org/T-118"}
+{"ts": "2026-06-18T22:37:00Z", "author": "hazel", "channel": "ops", "text": "The export job looks fine now. Due by end of day."}
+{"ts": "2026-06-18T22:38:00Z", "author": "hazel", "channel": "research", "text": "The weekly report needs a second look. The deadline is Thursday."}
+{"ts": "2026-06-18T22:51:00Z", "author": "hazel", "channel": "research", "text": "The deploy failed again."}

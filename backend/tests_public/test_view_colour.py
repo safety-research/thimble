@@ -1,11 +1,19 @@
 """The view kit's Colour by (backend/app/viewer_colour.js, thimble.colourBy) on the server's side: every view page loads
 it after the bridge; a page that mounts it has label controls, since the control draws them; the reader takes the
-page's choice with thimble.colour_value and colour_on."""
+page's choice with thimble.colour_value and colour_on; and the worked example plugin/viewers/colour-by, which shows the
+control, draws the test label through it and has no label control of its own."""
+import json
+import os
+import shutil
 import sys
+from pathlib import Path
 
 import pytest
 
-from app import views
+from app import config, views
+
+DEMO = config.REPO_ROOT / "plugin" / "viewers" / "colour-by"
+KEYS = ("name", "description", "scope", "records", "accepts", "units", "libs")
 
 
 @pytest.fixture(autouse=True)
@@ -70,3 +78,34 @@ def test_the_reader_takes_the_page_s_colour_choice():
         assert kt.colour_value({"label": "another"}, "messages.jsonl#L14") is None, "a label that is not on marks nothing"
     finally:
         kt._view_ctx = None
+
+
+@pytest.fixture()
+def demo(workspaces_tmp, tmp_path, monkeypatch) -> str:
+    """The demo's sample as the corpus `colour-demo`, with the demo saved as a view of it."""
+    d = tmp_path / "data"
+    shutil.copytree(DEMO / "sample", d / "colour-demo")
+    (d / "colour-demo" / "manifest.json").write_text(json.dumps({"name": "colour-demo", "description": "a team's board"}))
+    monkeypatch.setattr(config, "DATA_DIR", d.resolve())
+    raw = json.loads((DEMO / "view.json").read_text("utf-8"))
+    views.write_view("colour-demo", "colour-demo", reader=(DEMO / "reader.py").read_text("utf-8"),
+                     html=(DEMO / "view.html").read_text("utf-8"), **{k: raw.get(k) for k in KEYS})
+    return "colour-demo"
+
+
+async def test_the_colour_by_example_draws_the_test_label_through_colour_by(demo, bound, tmp_path):
+    """plugin/viewers/colour-by mounts the control and draws no label control of its own: with the test label on, the
+    control colours by it, so every marked message shows the label's bar and its chip names the label; the checks pass,
+    the page loaded headless included (the worked examples' own tests in test_views.py check it as they check the
+    others)."""
+    if why := views.build_problem():
+        if os.environ.get("CI") == "true":
+            pytest.fail(why)
+        pytest.skip(why)
+    rep = await views.check(demo, "colour-demo", ["messages.jsonl#L7"], shot_dir=tmp_path, picture=True)
+    assert rep["ok"], views.gate_lines(rep)
+    first = rep["shots"][0]
+    assert first["shown"]["due"] and first["shown"]["due"] == first["shown"]["drawn"], first["shown"]
+    assert first["label_controls"] >= 1, "the chips and Colour by name the test label with data-label"
+    assert first["painted"]["seen"] == first["painted"]["checked"] > 0, first["painted"]
+    assert Path(rep["page"]["png"]).is_file()
