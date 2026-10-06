@@ -20,6 +20,8 @@ TITLES = {
     "server": "The server up and the corpus copy opened as a workspace",
     "cleanup": "Every process the run started is stopped",
     "claude-files": "The caller's Claude Code plugins, marketplaces, trusted folders and ~/.local/bin/thimble are as they were",
+    "contract-print": "The `claude -p` contract check against Claude Code (THIMBLE_LIVE_CLAUDE=1)",
+    "contract-module": "The interactive contract check of thimble's hooks module (THIMBLE_LIVE_CLAUDE=1)",
 }
 
 
@@ -62,7 +64,9 @@ def main() -> int:
         out.append(f"| {i} | {title} | {result} | {detail} | {shots} |")
     if "now passes" in marks:
         out += ["", "A step marked as waiting now passes: its pending mark in scripts/e2e/release.mjs can go."]
-    out += ["", "Logs are in logs/: install-plan.log, install.log, doctor.txt, server-up.log, workspace.log, ui.log, standin.log, stop.log."]
+    out += ["", "Logs are in logs/: install-plan.log, install.log, doctor.txt, server-up.log, workspace.log, ui.log, standin.log, stop.log, "
+            "and with THIMBLE_LIVE_CLAUDE=1 contract-print.log, contract-module.log and contract-module-server.log; the contract "
+            "checks' evidence is in contract-print/ and contract-module/."]
     Path(a.report).write_text("\n".join(out) + "\n", "utf-8")
     return 1 if failed else 0
 
