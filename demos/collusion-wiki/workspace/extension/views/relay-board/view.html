@@ -2,8 +2,8 @@
 <html>
 <head>
 <style>
-  /* thimble's parts (.field, .chip, .btn, .seg, .table, .avatar), its Colour by control and the theme's tokens come with
-     the frame; this page lays out the control bar, the task table, the thread and the save beside it */
+  /* thimble's parts (.field, .chip, .btn, .seg, .table, .avatar), its Color by control, its time range selector and the
+     theme's tokens come with the frame; this page lays out the control bar, the range, the task table and the thread */
   html, body { margin: 0; height: 100%; }
   body { display: flex; flex-direction: column; overflow: hidden; background: var(--surface-card); color: var(--text-primary); font: 400 var(--text-ui-sm) / 1.4 var(--font-body);
     --add-bg: color-mix(in oklab, var(--status-positive) 13%, transparent); --rem-bg: color-mix(in oklab, var(--status-negative) 11%, transparent); }
@@ -11,8 +11,8 @@
   .ico { width: 14px; height: 14px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; }
   .mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
 
-  /* ---- the control bar and the key */
-  #bar { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 8px 12px 6px; }
+  /* ---- the control bar and the range */
+  #bar { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 8px 12px 8px; border-bottom: 1px solid var(--border-hairline); }
   .search { position: relative; flex: 0 1 220px; min-width: 130px; }
   .search .field { width: 100%; padding-left: 27px; box-sizing: border-box; }
   .search .ico { position: absolute; left: 8px; top: 50%; margin-top: -7px; color: var(--text-tertiary); pointer-events: none; }
@@ -20,19 +20,19 @@
   .fbtn .ico { width: 12px; height: 12px; color: var(--text-tertiary); }
   .fbtn .v { font-weight: 500; max-width: 180px; overflow: hidden; text-overflow: ellipsis; }
   .fbtn .n { color: var(--text-tertiary); font: 400 var(--text-mono-sm) / 1 var(--font-mono); }
-  #bar { border-bottom: 1px solid var(--border-hairline); padding-bottom: 8px; }
   #colour { min-width: 340px; }
+  #range { flex: none; padding: 8px 12px 6px; border-bottom: 1px solid var(--border-hairline); }
   .sw { display: inline-block; flex: none; width: 10px; height: 10px; border-radius: 2px; background: var(--c); }
 
-  /* ---- the three panes */
-  #main { flex: 1; min-height: 0; display: grid; grid-template-columns: var(--famw, 560px) minmax(0, 1fr) var(--detw, 0px); grid-template-rows: minmax(0, 1fr); }
+  /* ---- the two panes */
+  #main { flex: 1; min-height: 0; display: grid; grid-template-columns: var(--famw, 560px) minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
   #fams { grid-column: 1; min-width: 0; overflow-y: auto; overflow-x: hidden; border-right: 1px solid var(--border-hairline); position: relative; }
+  body.fm-hidden #main { grid-template-columns: minmax(0, 1fr); }
   body.fm-hidden #fams { display: none; }
+  body.fm-hidden #thread { grid-column: 1; }
   #thread { grid-column: 2; min-width: 0; display: flex; flex-direction: column; }
-  #det { grid-column: 3; min-width: 0; display: none; flex-direction: column; border-left: 1px solid var(--border-hairline); background: var(--surface-card); }
-  body.det-open #det { display: flex; }
 
-  /* the task table: one row per timed task, its strip its messages per hour on the axis the header draws */
+  /* the task table: one row per timed task, its strip its messages over the range, on the axis the header draws */
   #ft { width: 100%; table-layout: fixed; border-collapse: collapse; }
   #ft th, #ft td { padding: 0 6px; height: 20px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   #ft th:first-child, #ft td:first-child { padding-left: 12px; }
@@ -40,7 +40,6 @@
   #ft th.num, #ft td.num { text-align: right; }
   #ft td { cursor: pointer; font: 400 var(--text-mono-sm) / 1.2 var(--font-mono); font-variant-numeric: tabular-nums; color: var(--text-primary); }
   #ft td.nm { font: 400 var(--text-ui-sm) / 1.2 var(--font-body); }
-  #ft td.t { color: var(--text-secondary); }
   #ft td.st { padding: 0 8px 0 6px; overflow: visible; }
   #ft tr.fam:hover td { background: var(--surface-hover); }
   #ft tr.all td { height: 26px; border-bottom: 1px solid var(--border-strong); }
@@ -50,8 +49,7 @@
   #ft tr.none td { color: var(--text-tertiary); }
   #ft tr.active td { background: var(--surface-selected); }
   #ft tr.active td.nm { font-weight: 600; color: var(--text-primary); }
-  #ft th.st { padding: 0 8px 0 6px; overflow: visible; }
-  #ft th.st svg { margin-bottom: -5px; }
+  #ft th.st { padding: 0 8px 0 6px; overflow: visible; vertical-align: bottom; text-transform: none; letter-spacing: 0; }
   body.fm-compact #ft .wide { display: none; }
   body.fm-compact #ft tr.fam td { height: 17px; border-bottom: 0; }
   body.fm-compact #ft tr.fam.all td { height: 20px; }
@@ -64,14 +62,9 @@
   body.fm-compact tr.all .strip { height: 16px; }
   .strip { display: block; width: 100%; height: 14px; overflow: visible; touch-action: none; cursor: crosshair; }
   tr.all .strip { height: 19px; }
-  #axis { display: block; width: 100%; height: 30px; overflow: visible; touch-action: none; cursor: crosshair; }
-  svg text { font: 400 10px var(--font-mono); fill: var(--text-tertiary); font-variant-numeric: tabular-nums; }
-  svg text.day { fill: var(--text-secondary); }
-  svg text.edge { font: 400 9.5px var(--font-body); fill: var(--text-secondary); }
-  #ft th svg text { text-transform: none; letter-spacing: 0; }
-  svg .tick { stroke: var(--border-strong); }
+  #axis { display: block; width: 100%; }
   svg .base { stroke: rgba(var(--ink-rgb), 0.14); }
-  .edge { cursor: pointer; text-decoration: underline; text-decoration-color: rgba(var(--ink-rgb), 0.3); }
+  svg .gapline { stroke: rgba(var(--ink-rgb), 0.18); stroke-dasharray: 2 2; }
   #brush { position: absolute; display: none; pointer-events: none; background: rgba(var(--ink-rgb), 0.08); box-shadow: inset 1px 0 0 var(--text-primary), inset -1px 0 0 var(--text-primary); }
 
   /* the thread */
@@ -89,7 +82,7 @@
   .day .n { color: var(--text-secondary); font: 400 var(--text-mono-sm) / 1 var(--font-mono); }
   .msg { content-visibility: auto; contain-intrinsic-size: auto var(--est, 80px); position: relative; display: grid; grid-template-columns: 26px minmax(0, 1fr); column-gap: 10px; padding: 8px 16px 8px 14px; cursor: pointer; border-bottom: 1px solid rgba(var(--ink-rgb), 0.05); }
   .msg:hover { background: rgba(var(--ink-rgb), 0.035); }
-  .msg.sel { background: var(--surface-selected); outline: 1px solid var(--border-strong); outline-offset: -1px; }
+  .msg.sel { content-visibility: visible; background: rgba(var(--ink-rgb), 0.025); }
   .msg .avatar { margin-top: 1px; }
   .mh { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; min-width: 0; font-size: var(--text-xs); line-height: 1.35; color: var(--text-secondary); }
   .mh time { color: var(--text-secondary); font: 400 var(--text-mono-sm) / 1.35 var(--font-mono); }
@@ -99,35 +92,28 @@
   .mh .who.none { color: var(--text-tertiary); font-weight: 400; font-style: italic; }
   .mh .pg { color: var(--text-secondary); cursor: pointer; overflow-wrap: anywhere; }
   .mh .fam { color: var(--text-secondary); }
-  .mh .kd { display: inline-flex; align-items: center; gap: 4px; color: var(--text-secondary); }
-  .mh .kd .sw { width: 8px; height: 8px; }
   .mh .chip b { font-weight: 600; }
   .nw { white-space: nowrap; }
-  .mh .lv { display: inline-flex; align-items: center; gap: 4px; color: var(--text-primary); }
   .mtx { margin-top: 3px; font: 400 var(--text-ui-sm) / 1.5 var(--font-body); white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text-primary); }
   .mtx.wait { height: var(--wait, 1.5em); border-radius: 3px; background: rgba(var(--ink-rgb), 0.05); }
   .more { margin-top: 2px; padding: 0; border: 0; background: none; color: var(--text-secondary); font: 400 var(--text-xs) / 1.4 var(--font-body); cursor: pointer; }
   .more:hover { color: var(--text-primary); text-decoration: underline; }
   .tok { padding: 0 2px; border-radius: 3px; background: rgba(var(--ink-rgb), 0.08); font-weight: 600; }
   .hit { border-radius: 2px; background: var(--hl-bg-strong); text-decoration: underline; text-decoration-thickness: 1.5px; text-underline-offset: 2px; }
-  .sys { content-visibility: auto; contain-intrinsic-size: auto 26px; display: flex; align-items: baseline; gap: 8px; padding: 4px 16px 4px 50px; color: var(--text-secondary); font: 400 var(--text-xs) / 1.4 var(--font-body); cursor: pointer; }
+  .sys { content-visibility: auto; contain-intrinsic-size: auto 26px; display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; padding: 4px 16px 4px 50px; color: var(--text-secondary); font: 400 var(--text-xs) / 1.4 var(--font-body); cursor: pointer; }
   .sys time { font: 400 var(--text-mono-sm) / 1.4 var(--font-mono); }
   .sys:hover { color: var(--text-primary); }
-  .sys.sel { background: var(--surface-selected); outline: 1px solid var(--border-strong); outline-offset: -1px; color: var(--text-primary); }
+  .sys.sel { content-visibility: visible; color: var(--text-primary); }
+  .sys .thimble-details { flex-basis: 100%; }
   .empty { padding: 32px 16px; color: var(--text-secondary); font-size: var(--text-xs); }
   .empty button { margin-left: 6px; }
-  .earlier { padding: 10px 16px 2px; }
 
-  /* the save beside the thread */
-  .dh { flex: none; display: flex; align-items: flex-start; gap: 6px; padding: 10px 10px 8px 14px; border-bottom: 1px solid var(--border-hairline); }
-  .dh-main { flex: 1; min-width: 0; }
-  .dh-title { font: 600 var(--text-sm) / 1.3 var(--font-body); overflow-wrap: anywhere; cursor: pointer; }
-  .dh-title:hover { text-decoration: underline; text-underline-offset: 2px; }
-  .dh-sub { margin-top: 2px; color: var(--text-secondary); font-size: var(--text-xs); }
-  .dh-sub .mono { color: var(--text-secondary); }
-  .dh > .btn { flex: none; }
-  .dacts { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 8px 14px 0; }
-  .facts { flex: none; display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 3px 14px; margin: 0; padding: 8px 14px; border-bottom: 1px solid var(--border-hairline); }
+  /* a save opened in place under its line: its actions, its facts, then the page at that save, the page's saves or the
+     username's messages */
+  .msg .thimble-details { grid-column: 2; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border-hairline); cursor: default; }
+  .thimble-details { color: var(--text-primary); }
+  .dacts { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+  .facts { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 3px 14px; margin: 8px 0 0; padding: 0; }
   .fact { display: flex; align-items: baseline; gap: 8px; min-width: 0; margin: 0; }
   .fact dt { flex: none; width: 64px; color: var(--text-secondary); font-size: var(--text-xs); }
   .fact dd { margin: 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 400 var(--text-mono-sm) / 1.5 var(--font-mono); }
@@ -135,11 +121,11 @@
   .fact dd.wrap { white-space: normal; overflow-wrap: anywhere; font-family: var(--font-body); font-size: var(--text-xs); }
   .fact dd .addn { color: var(--status-positive); }
   .fact dd .remn { color: var(--status-negative); }
-  .tabs { flex: none; padding: 8px 12px 6px; border-bottom: 1px solid var(--border-hairline); }
+  .tabs { margin: 10px 0 6px; }
   .tabs .seg { flex-wrap: wrap; }
   .tabs .n { color: var(--text-tertiary); font: 400 var(--text-mono-sm) / 1 var(--font-mono); }
-  .dbody { flex: 1; min-height: 0; overflow: auto; padding: 8px 0 16px; }
-  .body { margin: 0 12px; padding: 6px 0; border-radius: var(--radius-ui); box-shadow: inset 0 0 0 1px var(--border-hairline); font: 400 var(--text-mono-sm) / 1.55 var(--font-mono); }
+  .dbody { max-height: 380px; overflow: auto; border-radius: var(--radius-ui); box-shadow: inset 0 0 0 1px var(--border-hairline); padding: 4px 0 8px; }
+  .body { margin: 0 8px; padding: 6px 0; font: 400 var(--text-mono-sm) / 1.55 var(--font-mono); }
   .bl { display: grid; grid-template-columns: 32px 14px minmax(0, 1fr); padding-right: 10px; white-space: pre-wrap; overflow-wrap: anywhere; }
   .bl .ln { color: var(--text-tertiary); text-align: right; padding-right: 6px; user-select: none; }
   .bl .pl { user-select: none; font-weight: 600; }
@@ -147,22 +133,21 @@
   .bl.add .pl { color: var(--status-positive); }
   .bl.rem { background: var(--rem-bg); }
   .bl.rem .pl { color: var(--status-negative); }
-  .bhead { margin: 12px 14px 4px; font: 500 var(--text-xs) / 1.3 var(--font-body); color: var(--text-secondary); }
-  .note { margin: 0 14px 8px; color: var(--text-secondary); font-size: var(--text-xs); }
-  .lrow { display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: 2px 10px; padding: 5px 14px; cursor: pointer; font-size: var(--text-xs); }
+  .bhead { margin: 12px 10px 4px; font: 500 var(--text-xs) / 1.3 var(--font-body); color: var(--text-secondary); }
+  .note { margin: 4px 10px 8px; color: var(--text-secondary); font-size: var(--text-xs); }
+  .lrow { display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: 2px 10px; padding: 5px 10px; cursor: pointer; font-size: var(--text-xs); }
   .lrow:hover { background: rgba(var(--ink-rgb), 0.04); }
   .lrow.cur { background: var(--surface-selected); }
   .lrow time { color: var(--text-secondary); font: 400 var(--text-mono-sm) / 1.45 var(--font-mono); white-space: nowrap; }
-  .lrow .w { color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-flex; align-items: center; gap: 5px; }
-  .lrow .w .sw { width: 8px; height: 8px; }
+  .lrow .w { color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .lrow .x { grid-column: 2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .lrow .x.dim { color: var(--text-tertiary); font-style: italic; }
-  .lhead { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 6px; padding: 10px 14px 3px; font: 500 var(--text-ui-sm) / 1.3 var(--font-body); }
+  .lhead { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 6px; padding: 8px 10px 3px; font: 500 var(--text-ui-sm) / 1.3 var(--font-body); }
   .lhead .t { min-width: 0; overflow-wrap: anywhere; }
   .lhead .n { color: var(--text-secondary); font: 400 var(--text-mono-sm) / 1 var(--font-mono); white-space: nowrap; }
   .lhead .linkbtn { margin-left: auto; }
 
-  /* popovers and the tip, above the coloured scrollbar the Colour by control lays over the thread */
+  /* popovers and the tip, above the tracks the Color by control lays beside the thread */
   .pop { position: fixed; z-index: 2147482500; min-width: 200px; max-width: 320px; max-height: 72vh; overflow: auto; padding: 4px; border-radius: var(--radius-ui); background: var(--raised-bg); box-shadow: var(--raised-ring), 0 10px 28px rgba(0, 0, 0, 0.18); font: 400 var(--text-ui-sm) / 1.3 var(--font-body); }
   .pop .head { padding: 8px 8px 4px; font: 500 var(--text-xs) / 1 var(--font-body); color: var(--text-secondary); }
   .pop .sep { height: 1px; margin: 4px 0; background: var(--border-hairline); }
@@ -170,26 +155,12 @@
   .pop .field.find { width: calc(100% - 8px); margin: 4px; box-sizing: border-box; }
   .item { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 28px; padding: 0 8px; border: 0; border-radius: 4px; background: none; text-align: left; cursor: pointer; }
   .item:hover { background: var(--surface-hover); }
-  .item.sub { padding-left: 30px; min-height: 26px; }
   .item.cur { background: var(--surface-selected); }
   .item .lab { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .item .n { color: var(--text-secondary); font: 400 var(--text-mono-sm) / 1 var(--font-mono); }
-  .item .act { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 4px; color: var(--text-secondary); }
-  .item .act:hover { background: var(--track-bg); color: var(--text-primary); }
-  .item .act .ico { width: 12px; height: 12px; }
-  .item .tick-on { width: 13px; height: 13px; }
   .box { display: inline-grid; place-items: center; flex: none; width: 14px; height: 14px; box-sizing: border-box; border: 1.5px solid rgba(var(--ink-rgb), 0.4); border-radius: 3px; }
   .box.on { border-color: var(--text-primary); background: var(--text-primary); }
   .box.on::after { content: ''; width: 6px; height: 3px; margin-top: -2px; border: solid var(--surface-card); border-width: 0 0 1.6px 1.6px; transform: rotate(-45deg); }
-  .switch { position: relative; flex: none; width: 24px; height: 14px; border-radius: 7px; background: rgba(var(--ink-rgb), 0.22); }
-  .switch::after { content: ''; position: absolute; top: 2px; left: 2px; width: 10px; height: 10px; border-radius: 50%; background: var(--surface-card); transition: left 0.12s; }
-  .switch.on { background: var(--text-primary); }
-  .switch.on::after { left: 12px; }
-  .range { display: grid; grid-template-columns: minmax(0, 1fr) 84px; align-items: center; gap: 6px; padding: 2px 8px 4px; }
-  .range .field { width: 100%; }
-  .pal { display: grid; grid-template-columns: repeat(6, 22px); gap: 4px; padding: 6px; }
-  .pal button { width: 22px; height: 22px; padding: 0; border: 0; border-radius: 4px; background: var(--c); cursor: pointer; }
-  .pal button.cur { box-shadow: 0 0 0 2px var(--surface-card), 0 0 0 3.5px var(--text-primary); }
   #tip { position: fixed; z-index: 2147482600; display: none; max-width: 260px; padding: 6px 8px; border-radius: var(--radius-ui); background: var(--raised-bg); box-shadow: var(--raised-ring), 0 8px 22px rgba(0, 0, 0, 0.18); pointer-events: none; font: 400 var(--text-xs) / 1.45 var(--font-body); color: var(--text-primary); }
   #tip .h { color: var(--text-secondary); font: 400 var(--text-mono-sm) / 1.4 var(--font-mono); }
   #tip .r { display: flex; align-items: center; gap: 6px; }
@@ -199,53 +170,49 @@
 <body>
 <div id="bar">
   <label class="search"><svg class="ico" viewBox="0 0 24 24"><path d="M4 10.5a6.5 6.5 0 1 0 13 0a6.5 6.5 0 1 0-13 0M15.2 15.2L20 20"/></svg><input id="q" class="field" type="search" placeholder="Search the added text" autocomplete="off" spellcheck="false"></label>
-  <button id="f-when" class="field fbtn" type="button" aria-haspopup="menu" aria-expanded="false"></button>
   <button id="f-user" class="field fbtn" type="button" aria-haspopup="menu" aria-expanded="false"></button>
   <span id="colour"></span>
 </div>
+<div id="range"></div>
 <div id="main">
   <section id="fams"><table id="ft" class="table"><colgroup id="fcols"></colgroup><thead id="fh"></thead><tbody id="fb"></tbody></table><div id="brush"></div></section>
   <section id="thread"><div id="thead"></div><div id="msgs" tabindex="0"></div></section>
-  <aside id="det"></aside>
 </div>
 <div id="tip"></div>
 <script>
 'use strict'
-// Relay Board: every save of the wiki pages as the message it added, threaded by timed task. The table on the
-// left counts each task's messages, pages and usernames in the filters, with a strip of its messages per hour on one
-// shared axis, stacked by the values of what the Colour by control colours by; a drag on any strip picks a time window.
-// The thread holds the chosen task's messages in time order, each with the colour's bar on its left edge and the
-// thread's coloured scrollbar beside it, and a click opens the save beside it: the page at that save with the lines it
-// added and removed, the page's other saves and the username's messages in every task. The bar searches the added
-// text, picks days, hours and usernames, and holds the Colour by control: a message's kind, wiki or signature, or any
-// label, each value a chip that turns its messages off or on.
+// Relay Board: every save of the wiki pages as the message it added, threaded by timed task. The range row holds the
+// time range selector over every message, which opens on the whole span; the table below counts each task's messages,
+// pages and usernames in the range and the filters, with a strip of its messages over the range on the axis the strip
+// column's header draws, stacked by the values of what the Color by control colors by; a drag on any strip frames a
+// range. The thread holds the chosen task's messages in the range in time order, each with the color's bar on its left
+// edge and the thread's tracks beside it, and a click opens the save in place under its line: its facts, the page at
+// that save with the lines it added and removed, the page's saves and the username's messages in every task. The bar
+// searches the added text, picks usernames, and holds the Color by control: a message's kind, wiki or signature, or any
+// label, each value a chip that turns its messages off or on, and Reset.
 // Labels: the reader keeps only the records the label filter keeps and hands each its marks, from which the page reads
-// the value of the label coloured by; every message, in the thread and beside it, carries its line's ref as
+// the value of the label colored by; every message, in the thread and in a save's details, carries its line's ref as
 // data-anchor, so thimble draws the label's bar.
 const slug = (thimble.view && thimble.view.slug) || 'relay-board'
 const HISTORY = 'wiki-page-history'
 const MONTH = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 const WEEKDAY = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const CHUNK = 120 // a thread longer than this opens at the axis's span, its earlier rows behind a button
 const CLAMP = 12 // lines of a long message shown before it is opened
-const AXIS_SHARE = 0.005 // the axis spans the days around the busiest that hold at least this share of its messages
+const GAP = 2 * 86400 // two days with no save break the time axis
 const ICON = {
   down: 'M6 9l6 6 6-6', x: 'M6 6l12 12M18 6L6 18', check: 'M5 12.5l4.5 4.5L19 7',
   file: 'M8 3h6l5 5v11a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2zM14 3v5h5',
-  tag: 'M3 12V4a1 1 0 0 1 1-1h8l9 9-9 9zM7.5 7.5h.01', plus: 'M12 5v14M5 12h14', edit: 'M4 20h4L19 9l-4-4L4 16zM14 6l4 4',
-  clock: 'M12 3a9 9 0 1 0 0 18 9 9 0 1 0 0-18zM12 7v5l3 2', user: 'M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM4 21a8 8 0 0 1 16 0',
+  user: 'M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM4 21a8 8 0 0 1 16 0',
   hist: 'M3 12a9 9 0 1 0 3-6.7M3 4v4h4M12 8v4l3 2', filter: 'M4 5h16l-6 7v6l-4 2v-8z',
 }
 const ico = (n, c = 'ico') => `<svg class="${c}" viewBox="0 0 24 24"><path d="${ICON[n]}"/></svg>`
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c])
 const num = (n) => Number(n).toLocaleString('en-US')
 const plural = (n, one, many = one + 's') => `${num(n)} ${n === 1 ? one : many}`
-const pad2 = (n) => String(n).padStart(2, '0')
 const $ = (id) => document.getElementById(id)
 
 // ---------------------------------------------------------------- time, in UTC
 const dayKey = (t) => new Date(t * 1000).toISOString().slice(0, 10)
-const midnight = (k) => Date.parse(k + 'T00:00:00Z') / 1000
 const dm = (t) => { const d = new Date(t * 1000); return `${d.getUTCDate()} ${MONTH[d.getUTCMonth()]}` }
 const hm = (t) => new Date(t * 1000).toISOString().slice(11, 16)
 const hms = (t) => new Date(t * 1000).toISOString().slice(11, 19)
@@ -269,6 +236,7 @@ const S = {
   open: null, detail: null, tab: 'page', keepRow: null, expanded: new Set(),
 }
 let loading = null
+let firstFam = null // the task the board opens on
 
 async function load() {
   const my = ++loadSeq
@@ -296,6 +264,7 @@ async function load() {
   for (let i = 0; i < N; i++) rowAt.set(C.r[i], i)
   taskName = D.tasks.map((f) => f[1])
   D.sig = labelSig(D.on || [], D.filter)
+  computeSpan()
   return true
 }
 let taskName = []
@@ -308,7 +277,7 @@ const userName = (u) => D.users[u] || ''
 const refOf = (i) => `${D.path}#L${C.ln[i]}`
 const isMsg = (i) => C.k[i] > 0
 // whether save i meets every filter but those `skip` names (one name or a list of them); a message whose value the
-// Colour by control turned off meets none
+// Color by control turned off meets none
 function passes(i, skip) {
   const sk = (k) => skip === k || (Array.isArray(skip) && skip.includes(k))
   if (isMsg(i)) { if (!sk('colour') && !colour.isOn(valOf(i))) return false }
@@ -323,44 +292,50 @@ function passes(i, skip) {
   return true
 }
 
-// ---------------------------------------------------------------- the axis
-// The strips share one axis: the unbroken run of days around the busiest day, each with at least AXIS_SHARE of that
-// day's messages, or the window picked.
-let AX = [0, 1]
-let SPAN0 = [0, 1]
+// ---------------------------------------------------------------- the range
+// The time range selector over every message in the filters but the range and the task, in the Color by colors, on the
+// whole span of the messages; two days with no save are a narrow break. The strips, the counts and the thread show the
+// range.
+let SPAN = [0, 86400]
 function computeSpan() {
-  const per = new Map()
-  let lo = Infinity, hi = -Infinity, total = 0
-  for (let i = 0; i < N; i++) {
-    if (!isMsg(i)) continue
-    const d = Math.floor(T[i] / 86400)
-    per.set(d, (per.get(d) || 0) + 1)
-    lo = Math.min(lo, d); hi = Math.max(hi, d); total++
-  }
-  if (!total) { SPAN0 = [0, 86400]; return }
-  let peak = lo
-  for (const [d, n] of per) if (n > per.get(peak)) peak = d
-  const min = per.get(peak) * AXIS_SHARE
-  const best = [peak, peak]
-  while ((per.get(best[0] - 1) || 0) >= min && best[0] - 1 >= lo) best[0]--
-  while ((per.get(best[1] + 1) || 0) >= min && best[1] + 1 <= hi) best[1]++
-  SPAN0 = [best[0] * 86400, (best[1] + 1) * 86400]
+  let lo = Infinity, hi = -Infinity
+  for (let i = 0; i < N; i++) if (isMsg(i)) { lo = Math.min(lo, T[i]); hi = Math.max(hi, T[i]) }
+  if (!(lo <= hi)) { SPAN = [0, 86400]; return }
+  const room = Math.max(600, (hi - lo) * 0.004)
+  SPAN = [lo - room, hi + room]
 }
-function axis() { AX = S.win ? [S.win[0], S.win[1]] : SPAN0 }
+const range = thimble.timeRange({
+  mount: '#range',
+  gap: GAP,
+  onChange: () => {
+    const w = range.full ? null : [range.from, range.to]
+    if (JSON.stringify(w) === JSON.stringify(S.win)) return
+    S.win = w
+    if (D) render(true)
+  },
+})
+let rangeIdx = []
+function feedRange() {
+  rangeIdx = []
+  for (let i = 0; i < N; i++) if (isMsg(i) && passes(i, ['win', 'task', 'colour'])) rangeIdx.push(i)
+  range.data({ span: SPAN, times: rangeIdx.map((i) => T[i]), values: (k) => valOf(rangeIdx[k]) })
+  S.win = range.full ? null : [range.from, range.to]
+}
+const AX = () => (S.win ? S.win : SPAN)
 let stripW = 200
-const binSize = (span) => [300, 900, 1800, 3600, 7200, 10800, 21600, 43200, 86400].find((b) => span / b <= Math.max(24, stripW / 2.5)) || 86400
+let SC = null // the strips' scale: the range across the strip column
 
-// ---------------------------------------------------------------- colour
-// thimble's Colour by control, in the bar: a message's kind, its page's wiki or its signature, or any label, in one
-// menu; the values as chips that turn their messages off or on; the colour as a bar on each message's left edge and
-// as the thread's scrollbar. Each field's value is worked out here from the columns the reader sent (the row index is
-// the record the control is handed); a label's is the value of that label among the row's marks.
+// ---------------------------------------------------------------- color
+// thimble's Color by control, in the bar: a message's kind, its page's wiki or its signature, or any label, in one
+// menu; the values as chips that turn their messages off or on; the color as a bar on each message's left edge and in
+// the thread's tracks. Each field's value is worked out here from the columns the reader sent (the row index is the
+// record the control is handed); a label's is the value of that label among the row's marks.
 const SIGNED = ['Username', 'Another name', 'Unsigned'] // the added text signed with its username, with another name, or not
 function sigOf(i) {
   const sg = D.sigs[C.sg[i]] || ''
   return !sg ? SIGNED[2] : sg.toLowerCase() === userName(C.u[i]).toLowerCase() ? SIGNED[0] : SIGNED[1]
 }
-const colour = thimble.colourBy({
+const colour = thimble.colorBy({
   mount: '#colour',
   fields: [
     { name: 'kind', title: 'Kind', values: ['Text only', 'With links'], value: (i) => (isMsg(i) ? D.kinds[C.k[i]] : null) },
@@ -371,7 +346,18 @@ const colour = thimble.colourBy({
   strip: '#msgs',
   onChange: () => { if (D) render(true) },
 })
-// the value message i takes under the colour, null for none
+// the tracks' preview of a message: its day and time, and its username and first line
+colour.strip('#msgs', {
+  preview: (el) => {
+    const r = el.dataset ? el.dataset.r : null
+    const i = r != null && r !== '' ? rowAt.get(+r) : null
+    if (i == null) return null
+    const [t] = texts.get(C.r[i]) || ['']
+    const first = isMsg(i) ? (t.split('\n').find((s) => s.trim()) || '') : 'no new text'
+    return { when: `${dm(T[i])} ${hm(T[i])}`, text: `${userName(C.u[i]) || 'no username'}: ${first}` }
+  },
+})
+// the value message i takes under the color, null for none
 function valOf(i) {
   if (!D) return null
   const lab = colour.label
@@ -381,36 +367,36 @@ function valOf(i) {
   for (let j = 0; j < D.marks.length; j++) if (C.mb[i] & (1 << j) && D.marks[j].label === l.name) return D.marks[j].value
   return null
 }
-// the strips' slots: the chips' values in their order, the messages with no value last
+// the strips' slots: the chips' values in their order, the messages with no value last (gray, as with Color by Off)
 let SLOT = new Map(), SLOTS = []
 const nSlots = () => SLOTS.length + 1
 const slotOf = (i) => { const v = valOf(i); return v == null ? SLOTS.length : SLOT.has(v) ? SLOT.get(v) : SLOTS.length }
-const slotColour = (j) => (j < SLOTS.length ? colour.colourOf(SLOTS[j]) || 'var(--label-none)' : 'var(--viz-ink-4)')
-const slotName = (j) => (j < SLOTS.length ? SLOTS[j] : 'No value')
+const GRAY = 'rgba(var(--ink-rgb), 0.34)'
+const slotColour = (j) => (j < SLOTS.length ? colour.colourOf(SLOTS[j]) || GRAY : GRAY)
+const slotName = (j) => (j < SLOTS.length ? SLOTS[j] : colour.off ? 'Messages' : 'No value')
 
 // ---------------------------------------------------------------- per task
-let FAM = [], ALL = null
+let FAM = [], ALL = null, BINS = []
 function computeFams() {
-  const B = binSize(AX[1] - AX[0])
-  const mk = () => ({ msgs: 0, pages: new Set(), users: new Set(), first: Infinity, last: -Infinity, bins: new Map(), before: 0, after: 0 })
+  SC = range.scale(stripW)
+  BINS = SC.bins(2.5)
+  const mk = () => ({ msgs: 0, pages: new Set(), users: new Set(), first: Infinity, last: -Infinity, bins: new Map() })
   FAM = taskName.map(mk)
   ALL = mk()
   const ns = nSlots()
   for (let i = 0; i < N; i++) {
     if (!isMsg(i) || !passes(i, 'task')) continue
+    const b = SC.binOf(T[i])
     for (const f of [FAM[C.tk[i]], ALL]) {
       f.msgs++; f.pages.add(C.pg[i]); if (C.u[i]) f.users.add(C.u[i]) // a save with no username counts toward no username
       if (T[i] < f.first) f.first = T[i]
       if (T[i] > f.last) f.last = T[i]
-      if (T[i] < AX[0]) { f.before++; continue }
-      if (T[i] >= AX[1]) { f.after++; continue }
-      const b = Math.floor((T[i] - AX[0]) / B)
+      if (b < 0) continue
       let a = f.bins.get(b)
       if (!a) { a = new Int32Array(ns); f.bins.set(b, a) }
       a[slotOf(i)]++
     }
   }
-  return B
 }
 
 // ---------------------------------------------------------------- popovers: one at a time, closed by a click outside or Escape
@@ -437,11 +423,8 @@ function place(p, anchor, align) {
 document.addEventListener('mousedown', (e) => { if (openPop && !openPop.contains(e.target) && !openPop.anchor.contains(e.target)) close() })
 const toggled = (anchor) => (openPop && openPop.anchor === anchor ? (close(), true) : false)
 
-// ---------------------------------------------------------------- the bar and the colour's counts
+// ---------------------------------------------------------------- the bar and the color's counts
 function renderBar() {
-  const w = $('f-when')
-  w.classList.toggle('active', !!S.win)
-  w.innerHTML = `${ico('clock')}${S.win ? `<span class="v">${winText(S.win)}</span>` : 'When'}${ico('down')}`
   const u = $('f-user')
   u.classList.toggle('active', S.users.size > 0)
   u.innerHTML = `${ico('user')}${S.users.size === 1 ? `<span class="v">${esc(userName([...S.users][0]) || 'no username')}</span>` : S.users.size ? `Usernames <span class="n">${S.users.size}</span>` : 'Username'}${ico('down')}`
@@ -449,11 +432,10 @@ function renderBar() {
 }
 function winText(w) {
   const a = w[0], b = w[1] - 1
-  return dayKey(a) === dayKey(b) ? `${dm(a)} ${hm(a)}–${hm(w[1]) === '00:00' ? '24:00' : hm(w[1])}` : `${when(a)} – ${dm(b)} ${hm(w[1]) === '00:00' ? '24:00' : hm(w[1])}`
+  return dayKey(a) === dayKey(b) ? `${dm(a)} ${hm(a)}–${hm(w[1])}` : `${when(a)} – ${when(w[1])}`
 }
 // the chips' counts: the messages of every task in the other filters that take each value, as the table's first row
 // counts them, a value turned off counted too; then the strips' slots in the chips' order
-let curBin = 3600
 function renderColour() {
   if (!D) return
   const counts = {}
@@ -466,38 +448,6 @@ function renderColour() {
   SLOTS = colour.values.map((x) => x.value).filter((v) => v != null)
   SLOT = new Map(SLOTS.map((v, j) => [v, j]))
 }
-
-// when: whole days, or a window from a day and hour to another
-$('f-when').onclick = () => whenMenu()
-function whenMenu() {
-  const b = $('f-when')
-  if (toggled(b)) return
-  const per = new Map()
-  for (let i = 0; i < N; i++) if (isMsg(i) && passes(i, 'win')) { const k = dayKey(T[i]); per.set(k, (per.get(k) || 0) + 1) }
-  const days = [...per.keys()].sort()
-  if (!days.length) return
-  const a = S.win ? S.win[0] : SPAN0[0], z = S.win ? S.win[1] : SPAN0[1]
-  const dayOpts = (sel) => days.map((d) => `<option value="${d}"${d === sel ? ' selected' : ''}>${dayName(midnight(d))}</option>`).join('')
-  const hourOpts = (sel, end) => Array.from({ length: 24 }, (_, h) => h + (end ? 1 : 0)).map((h) => `<option value="${h}"${h === sel ? ' selected' : ''}>${pad2(h)}:00</option>`).join('')
-  const zd = dayKey(z - 1), zh = Math.round((z - midnight(zd)) / 3600)
-  const html = `<div class="head">From</div><div class="range"><select class="field" id="w-ad">${dayOpts(dayKey(a))}</select><select class="field" id="w-ah">${hourOpts(Math.floor((a - midnight(dayKey(a))) / 3600))}</select></div>
-    <div class="head">To</div><div class="range"><select class="field" id="w-zd">${dayOpts(zd)}</select><select class="field" id="w-zh">${hourOpts(zh, true)}</select></div>
-    <div class="sep"></div><div class="head">Days, with their messages</div>${days.map((d) => `<button class="item${S.win && S.win[0] === midnight(d) && S.win[1] === midnight(d) + 86400 ? ' cur' : ''}" data-day="${d}" type="button"><span class="lab">${dayName(midnight(d))}</span><span class="n">${num(per.get(d))}</span></button>`).join('')}
-    ${S.win ? '<div class="sep"></div><button class="item" data-clear type="button"><span class="lab">Every day</span></button>' : ''}`
-  const p = pop(b, html)
-  const apply = () => {
-    const from = midnight(p.querySelector('#w-ad').value) + 3600 * +p.querySelector('#w-ah').value
-    const to = midnight(p.querySelector('#w-zd').value) + 3600 * +p.querySelector('#w-zh').value
-    if (to > from) setWin([from, to])
-  }
-  for (const s of p.querySelectorAll('select')) s.onchange = apply
-  p.onclick = (ev) => {
-    const d = ev.target.closest('[data-day]')
-    if (d) { setWin([midnight(d.dataset.day), midnight(d.dataset.day) + 86400]); close(); return }
-    if (ev.target.closest('[data-clear]')) { setWin(null); close() }
-  }
-}
-function setWin(w) { S.win = w; rescope() }
 
 // usernames: the most active in the filters, narrowed by typing
 $('f-user').onclick = () => userMenu()
@@ -529,20 +479,16 @@ function userMenu(find = '') {
 }
 
 // ---------------------------------------------------------------- layout
-// The table shows every column while there is room, only the name, messages and strip when the save is open beside a
-// narrow pane, and folds into the thread's title when there is no room for it at all.
+// The table shows every column while there is room, only the name, messages and strip in a narrower frame, and folds
+// into the thread's title when there is no room for it at all.
 function layout() {
-  const W = document.body.clientWidth, open = S.open != null
-  const mode = !open ? (W >= 1000 ? 'full' : 'compact') : W >= 1600 ? 'full' : W >= 1000 ? 'compact' : 'hidden'
+  const W = document.body.clientWidth
+  const mode = W >= 1000 ? 'full' : W >= 640 ? 'compact' : 'hidden'
   document.body.classList.toggle('fm-full', mode === 'full')
   document.body.classList.toggle('fm-compact', mode === 'compact')
   document.body.classList.toggle('fm-hidden', mode === 'hidden')
-  document.body.classList.toggle('det-open', open)
-  const famw = mode === 'full' ? Math.round(Math.min(660, Math.max(560, W * 0.56))) : mode === 'compact' ? Math.round(Math.min(340, Math.max(300, W * 0.3))) : 0
-  const detw = open ? Math.round(Math.min(520, Math.max(340, W * (mode === 'hidden' ? 0.48 : 0.36)))) : 0
-  const main = $('main')
-  main.style.setProperty('--famw', famw + 'px')
-  main.style.setProperty('--detw', detw + 'px')
+  const famw = mode === 'full' ? Math.round(Math.min(660, Math.max(560, W * 0.5))) : mode === 'compact' ? Math.round(Math.min(340, Math.max(300, W * 0.36))) : 0
+  $('main').style.setProperty('--famw', famw + 'px')
   return mode
 }
 
@@ -556,9 +502,9 @@ function renderFams() {
     : '<col style="width:124px"><col style="width:56px"><col>'
   $('fcols').innerHTML = cols
   const wide = (h) => (mode === 'full' ? h : '')
-  $('fh').innerHTML = `<tr><th>Task</th><th class="num" title="Messages: saves that added text">Msgs</th>${wide('<th class="num" title="Pages with a message">Pages</th><th class="num" title="Usernames with a message; a save with no username counts toward none">Usernames</th>')}<th class="st"><svg id="axis"></svg></th></tr>`
-  axis(); computeFams()
+  $('fh').innerHTML = `<tr><th>Task</th><th class="num" title="Messages: saves that added text, in the range">Msgs</th>${wide('<th class="num" title="Pages with a message in the range">Pages</th><th class="num" title="Usernames with a message in the range; a save with no username counts toward none">Usernames</th>')}<th class="st"><div id="axis"></div></th></tr>`
   const [shared, other] = SPECIAL()
+  computeFams()
   const order = taskName.map((_, f) => f).filter((f) => f !== shared && f !== other).sort((a, b) => FAM[b].msgs - FAM[a].msgs)
   const act = (f) => ((f === -1 ? S.task == null && S.page == null : S.task === f) ? ' active' : '')
   const row = (f, cls, name, anchor) => `<tr class="fam ${cls}${act(f)}" data-f="${f}"${anchor}><td class="nm" title="${esc(name)}">${esc(name)}</td><td class="num" data-k="msgs"></td>${wide('<td class="num" data-k="pages"></td><td class="num" data-k="users"></td>')}<td class="st"><svg class="strip" data-f="${f}"></svg></td></tr>`
@@ -571,34 +517,37 @@ function renderFams() {
   $('fb').innerHTML = h
   const svgs = $('fb').querySelectorAll('svg.strip')
   stripW = Math.max(40, (svgs[0] && svgs[0].getBoundingClientRect().width) || 200)
-  const B = computeFams() // again, with the bins the strip's width takes
-  curBin = B
+  computeFams() // again, with the bins the strip's width takes
   for (const tr of $('fb').querySelectorAll('tr[data-f]')) {
     const f = +tr.dataset.f, x = f === -1 ? ALL : FAM[f]
     tr.title = x.msgs ? `${plural(x.msgs, 'message')} on ${plural(x.pages.size, 'page')} by ${plural(x.users.size, 'username')}, ${when(x.first)} – ${when(x.last)} UTC` : ''
     tr.classList.toggle('none', !x.msgs)
     for (const td of tr.querySelectorAll('[data-k]')) td.textContent = cell(x, td.dataset.k)
   }
-  drawAxis()
+  // the strip column's axis: the one readable axis of the range
+  thimble.timeAxis('#axis', SC, { px: 40 })
   const hs = mode === 'full' ? [19, 14] : [16, 13]
   // the tasks' strips on one scale, the two rows of pages with no task on another, All tasks on its own
   const taskMax = Math.max(1, ...order.map((f) => peak(FAM[f]))), specialMax = Math.max(1, peak(FAM[shared]), peak(FAM[other]))
   scaleOf = (f) => (f === -1 ? peak(ALL) : f === shared || f === other ? specialMax : taskMax)
-  for (const sv of svgs) { const f = +sv.dataset.f; drawStrip(sv, f === -1 ? ALL : FAM[f], B, f === -1 ? hs[0] : hs[1], scaleOf(f)) }
+  for (const sv of svgs) { const f = +sv.dataset.f; drawStrip(sv, f === -1 ? ALL : FAM[f], f === -1 ? hs[0] : hs[1], scaleOf(f)) }
 }
-const span = (x) => (dayKey(x.first) === dayKey(x.last) ? `${when(x.first)}–${hm(x.last)}` : `${when(x.first)} – ${when(x.last)}`)
-const cell = (x, k) => k === 'sub' ? (x.msgs ? `${plural(x.pages.size, 'page')} · ${plural(x.users.size, 'username')} · ${dayKey(x.first) === dayKey(x.last) ? dm(x.first) : `${dm(x.first)} – ${dm(x.last)}`}` : '') : k === 'pages' ? num(x.pages.size) : k === 'msgs' ? num(x.msgs) : k === 'users' ? num(x.users.size) : !x.msgs ? '' : when(k === 'first' ? x.first : x.last)
+const cell = (x, k) => k === 'sub' ? (x.msgs ? `${plural(x.pages.size, 'page')} · ${plural(x.users.size, 'username')} · ${dayKey(x.first) === dayKey(x.last) ? dm(x.first) : `${dm(x.first)} – ${dm(x.last)}`}` : '') : k === 'pages' ? num(x.pages.size) : k === 'msgs' ? num(x.msgs) : k === 'users' ? num(x.users.size) : ''
 let scaleOf = () => 1
 function peak(x) { let max = 1; for (const a of x.bins.values()) { let n = 0; for (const v of a) n += v; if (n > max) max = n } return max }
-function drawStrip(svg, x, B, h, max) {
-  const w = stripW, sp = AX[1] - AX[0], nb = Math.ceil(sp / B), bw = w / nb
+function drawStrip(svg, x, h, max) {
+  const w = stripW
   const ns = nSlots()
   const paths = Array.from({ length: ns }, () => '')
   // a bar's height is the square root of its share of the scale, so that a task with few messages still shows beside
-  // the busiest; its kinds (or label values) split the bar by their counts
+  // the busiest; its values split the bar by their counts
   for (const [b, a] of x.bins) {
+    const bin = BINS[b]
+    if (!bin) continue
     let y = h
-    const x0 = (b * bw).toFixed(2), ww = Math.max(0.8, bw - (bw > 3 ? 0.6 : 0)).toFixed(2)
+    const xa = SC.x(bin[0]), xb = SC.x(bin[1])
+    const bw = xb - xa
+    const x0 = xa.toFixed(2), ww = Math.max(0.8, bw - (bw > 3 ? 0.6 : 0)).toFixed(2)
     let tot = 0
     for (const v of a) tot += v
     const full = Math.max(1, Math.sqrt(Math.min(1, tot / max)) * (h - 1))
@@ -610,46 +559,16 @@ function drawStrip(svg, x, B, h, max) {
     }
   }
   let s = `<line class="base" x1="0" x2="${w}" y1="${h - 0.5}" y2="${h - 0.5}"/>`
+  for (const g of SC.gaps()) { const gx = ((g[0] + g[1]) / 2).toFixed(1); s += `<line class="gapline" x1="${gx}" x2="${gx}" y1="1" y2="${h - 1}"/>` }
   for (let j = ns - 1; j >= 0; j--) if (paths[j]) s += `<path d="${paths[j]}" fill="${esc(slotColour(j))}"/>`
   svg.setAttribute('viewBox', `0 0 ${w} ${h}`)
   svg.setAttribute('height', h)
   svg.innerHTML = s
 }
-// day (or hour) labels on one line, with the messages before and after the span at its ends; a label that would run
-// into another is left out
-function drawAxis() {
-  const svg = $('axis'), w = stripW, h = 30, y = 22, sp = AX[1] - AX[0], cw = 6.4
-  const X = (t) => ((t - AX[0]) / sp) * w
-  const taken = []
-  const free = (a, b) => taken.every(([p, q]) => b + 7 <= p || a >= q + 7)
-  let s = ''
-  const pre = `‹ ${num(ALL.before)} before`, post = `${num(ALL.after)} after ›`
-  const long = (ALL.before ? pre.length : 0) * 5.3 + (ALL.after ? post.length : 0) * 5.3 + 8 <= w
-  if (ALL.before) s += `<text class="edge" data-edge="before" x="0" y="8"><title>${plural(ALL.before, 'message')} before these days: show every day</title>${long ? pre : `‹ ${num(ALL.before)}`}</text>`
-  if (ALL.after) s += `<text class="edge" data-edge="after" x="${w}" y="8" text-anchor="end"><title>${plural(ALL.after, 'message')} after these days: show every day</title>${long ? post : `${num(ALL.after)} ›`}</text>`
-  const step = sp > 86400 * 4 ? 86400 : [3600, 7200, 10800, 21600, 43200, 86400].find((st) => w / (sp / st) >= 44) || 86400
-  for (let t = Math.ceil(AX[0] / step) * step; t < AX[1]; t += step) {
-    const x = X(t), isDay = t % 86400 === 0
-    s += `<line class="tick" x1="${x}" x2="${x}" y1="${h - 6}" y2="${h}"/>`
-    const lab = step === 86400 ? (w / (sp / 86400) >= 44 ? dm(t) : String(new Date(t * 1000).getUTCDate())) : isDay ? dm(t) : hm(t)
-    const a = step === 86400 ? x + 3 : x - (lab.length * cw) / 2, b = a + lab.length * cw
-    if (a < 0 || b > w || !free(a, b)) continue
-    taken.push([a, b])
-    s += `<text${isDay ? ' class="day"' : ''} x="${a}" y="${y}">${lab}</text>`
-  }
-  svg.setAttribute('viewBox', `0 0 ${w} ${h}`)
-  svg.innerHTML = s
-}
-// a click on a row picks its task; a drag across any strip picks a window, a double click lets it go
+// a click on a row picks its task; a drag across any strip frames a range, a double click shows the whole span
 let drag = null
 $('fams').addEventListener('pointerdown', (ev) => {
-  const svg = ev.target.closest('svg.strip, #axis')
-  if (ev.target.closest('[data-edge]')) {
-    let lo = Infinity, hi = -Infinity
-    for (let i = 0; i < N; i++) if (isMsg(i) && passes(i, 'win')) { lo = Math.min(lo, T[i]); hi = Math.max(hi, T[i]) }
-    if (lo <= hi) setWin([Math.floor(lo / 86400) * 86400, (Math.floor(hi / 86400) + 1) * 86400])
-    return
-  }
+  const svg = ev.target.closest('svg.strip')
   if (!svg || ev.button !== 0) return
   const r = svg.getBoundingClientRect()
   drag = { x0: ev.clientX, left: r.left, width: r.width, moved: false, f: svg.dataset.f }
@@ -676,13 +595,11 @@ $('fams').addEventListener('pointerup', (ev) => {
   drag = null
   $('brush').style.display = 'none'
   if (!d.moved) return d.f == null ? undefined : pickTask(d.f === '-1' ? null : +d.f)
-  const sp = AX[1] - AX[0], snap = sp > 86400 * 2 ? 3600 : sp > 21600 ? 900 : 300
-  const tAt = (x) => AX[0] + ((Math.max(d.left, Math.min(d.left + d.width, x)) - d.left) / d.width) * sp
-  let a = Math.floor(tAt(Math.min(ev.clientX, d.x0)) / snap) * snap, b = Math.ceil(tAt(Math.max(ev.clientX, d.x0)) / snap) * snap
-  if (b <= a) b = a + snap
-  setWin([a, b])
+  const px = (x) => (Math.max(d.left, Math.min(d.left + d.width, x)) - d.left) * (stripW / d.width)
+  const a = SC.t(px(Math.min(ev.clientX, d.x0))), b = SC.t(px(Math.max(ev.clientX, d.x0)))
+  if (b > a) range.set(a, b)
 })
-$('fams').addEventListener('dblclick', (ev) => { if (ev.target.closest('svg.strip, #axis') && S.win) setWin(null) })
+$('fams').addEventListener('dblclick', (ev) => { if (ev.target.closest('svg.strip') && !range.full) range.fit() })
 $('fams').addEventListener('pointerleave', () => { $('tip').style.display = 'none' })
 $('fb').addEventListener('click', (ev) => {
   if (ev.target.closest('svg.strip')) return
@@ -692,15 +609,17 @@ $('fb').addEventListener('click', (ev) => {
 function tipAt(ev) {
   const svg = ev.target.closest && ev.target.closest('svg.strip[data-f]')
   const tip = $('tip')
-  if (!svg) { tip.style.display = 'none'; return }
-  const r = svg.getBoundingClientRect(), sp = AX[1] - AX[0], B = binSize(sp)
-  const b = Math.floor((((ev.clientX - r.left) / r.width) * sp) / B), f = +svg.dataset.f
+  if (!svg || !SC) { tip.style.display = 'none'; return }
+  const r = svg.getBoundingClientRect()
+  const t = SC.t(((ev.clientX - r.left) / r.width) * stripW)
+  const b = SC.binOf(t), f = +svg.dataset.f
   const x = f === -1 ? ALL : FAM[f]
   const a = x && x.bins.get(b)
-  const t = AX[0] + b * B
+  const bin = BINS[b]
+  if (!bin) { tip.style.display = 'none'; return }
   let n = 0, rows = ''
   if (a) for (let j = 0; j < a.length; j++) { if (!a[j]) continue; n += a[j]; rows += `<div class="r"><span class="sw" style="--c:${esc(slotColour(j))}"></span>${esc(slotName(j))}: ${num(a[j])}</div>` }
-  tip.innerHTML = `<div class="h">${dayName(t)} ${hm(t)}–${hm(t + B)} UTC</div>${f === -1 ? 'All messages' : esc(taskName[f])}: ${plural(n, 'message')}${rows}<div class="h">a full bar: ${plural(scaleOf(f), 'message')}; a bar's height is the square root of its count</div>`
+  tip.innerHTML = `<div class="h">${dayName(bin[0])} ${hm(bin[0])}–${hm(bin[1])} UTC</div>${f === -1 ? 'All messages' : esc(taskName[f])}: ${plural(n, 'message')}${rows}<div class="h">a full bar: ${plural(scaleOf(f), 'message')}; a bar's height is the square root of its count</div>`
   tip.style.display = 'block'
   tip.style.left = Math.max(4, Math.min(innerWidth - tip.offsetWidth - 8, ev.clientX + 12)) + 'px'
   tip.style.top = Math.min(innerHeight - tip.offsetHeight - 8, ev.clientY + 14) + 'px'
@@ -713,7 +632,6 @@ function pickTask(f) {
 
 // ---------------------------------------------------------------- the thread
 let thread = [] // column indices of the saves in the filters, in time order
-let first = 0 // the thread's first row drawn: the rows before the axis's span wait behind a button
 let threadSeq = 0
 function computeThread() {
   thread = []
@@ -738,9 +656,7 @@ function renderHead() {
   const fchip = (k, v, attrs, label) => `<button class="chip chip-tone-neutral chip-act active" type="button" ${attrs} aria-label="${label}" title="${label}"><span class="chip-text">${k} · ${v}</span>${ico('x')}</button>`
   if (S.page != null) chips.push(fchip('Page', esc(pageName(S.page)), `data-unset="page" data-anchor="view:${slug}/${esc(pageKey(S.page))}" data-anchor-text="${esc(pageName(S.page))}"`, 'Show every page of the task'))
   for (const u of S.users) chips.push(fchip('Username', esc(userName(u) || 'no username'), `data-unset="user" data-u="${u}"`, 'Show every username'))
-  if (S.win) chips.push(fchip('When', winText(S.win), 'data-unset="win"', 'Show every day'))
   if (S.q) chips.push(fchip('Text', esc(S.q), 'data-unset="q"', 'Clear the search'))
-  if (chips.length > 1) chips.push('<button class="btn btn-ghost btn-sm" type="button" data-unset="all">Clear all</button>')
   if (S.page != null) chips.push(`<button class="chip chip-sans chip-act" type="button" data-history="${esc(pageId(S.page))}" title="Open the page's saves and deletes in Wiki Page History">${ico('hist')}Page history</button>`)
   const titleHtml = hidden || S.page != null
     ? `<button class="field fbtn" id="famPick" type="button" aria-haspopup="menu" aria-expanded="false"><span class="v">${esc(S.task == null ? 'All messages' : taskName[S.task])}</span>${ico('down')}</button>${S.page != null ? `<span class="th-title">${esc(title)}</span>` : ''}`
@@ -755,11 +671,9 @@ $('thead').addEventListener('click', (ev) => {
   const b = ev.target.closest('[data-unset]')
   if (!b) return
   const k = b.dataset.unset
-  if (k === 'page' || k === 'all') S.page = null
+  if (k === 'page') S.page = null
   if (k === 'user') S.users.delete(+b.dataset.u)
-  if (k === 'all') S.users.clear()
-  if (k === 'win' || k === 'all') S.win = null
-  if (k === 'q' || k === 'all') { S.q = ''; S.found = null; $('q').value = '' }
+  if (k === 'q') { S.q = ''; S.found = null; $('q').value = '' }
   rescope()
 })
 function famMenu(anchor) {
@@ -808,25 +722,27 @@ const initial = (u) => ((u || '').replace(/^(?:OpenAI|OAI|Agent|ChatGPT)(?=[A-Z0
 const shade = (s) => { let h = 0; for (let k = 0; k < s.length; k++) h = (h * 31 + s.charCodeAt(k)) >>> 0; return (0.08 + (h % 17) / 100).toFixed(2) }
 function msgHtml(i) {
   const r = C.r[i], u = userName(C.u[i]), ref = refOf(i)
+  const open = S.open === r
   if (!isMsg(i)) {
     const what = C.nr[i] ? `removed ${plural(C.nr[i], 'line')} and added no new text` : 'saved the page with no new text'
-    return `<div class="sys${S.open === r ? ' sel' : ''}" data-r="${r}" data-anchor="${esc(ref)}" data-anchor-text="${esc(`${u || 'no username'} ${what} on ${pageName(C.pg[i])}`)}"><time>${hms(T[i])}</time><span>${esc(u || 'no username')} ${what}</span></div>`
+    return `<div class="sys${open ? ' sel' : ''}" data-r="${r}" data-anchor="${esc(ref)}" data-anchor-text="${esc(`${u || 'no username'} ${what} on ${pageName(C.pg[i])}`)}"><time>${hms(T[i])}</time><span>${esc(u || 'no username')} ${what}</span>${open ? `<div class="thimble-details">${detailsHtml(i)}</div>` : ''}</div>`
   }
   const [text, cut] = texts.get(r) || ['', false]
   const lines = text.split('\n')
-  const open = S.expanded.has(r)
-  const shown = open || lines.length <= CLAMP + 2 ? text : lines.slice(0, CLAMP).join('\n')
-  const hidden = open ? 0 : lines.length - shown.split('\n').length
+  const whole = S.expanded.has(r) || open
+  const shown = whole || lines.length <= CLAMP + 2 ? text : lines.slice(0, CLAMP).join('\n')
+  const hidden = whole ? 0 : lines.length - shown.split('\n').length
   const sig = D.sigs[C.sg[i]] || ''
   const other = sig && sig.toLowerCase() !== u.toLowerCase() // a signature that is not the username
   const restarted = D.afterDelete.has(r) ? '<span class="chip chip-tone-neutral" title="The page was deleted before this save, so every line of it counts as added">after a delete</span>' : ''
   const signed = !sig ? '' : other ? `<span class="chip chip-tone-neutral" title="The added text is signed with a name that is not the username">signed <b>${esc(sig)}</b></span>` : `<span class="chip chip-tone-neutral">signed</span>`
   const has = texts.has(r)
   const est = estOf(i, has ? shown.split('\n') : null)
-  return `<article class="msg${S.open === r ? ' sel' : ''}" role="button" data-r="${r}" data-anchor="${esc(ref)}" data-anchor-text="${esc(text)}"${colour.attr(i)}${has ? '' : ' data-wait'} style="--est:${est}px${has ? '' : `;--wait:${est - 38}px`}">`
+  return `<article class="msg${open ? ' sel' : ''}" role="button" aria-expanded="${open}" data-r="${r}" data-anchor="${esc(ref)}" data-anchor-text="${esc(text)}"${colour.attr(i)}${has ? '' : ' data-wait'} style="--est:${est}px${has ? '' : `;--wait:${est - 38}px`}">`
     + `<span class="avatar" style="--a:${shade(u)}" aria-hidden="true">${esc(initial(u))}</span>`
     + `<div><div class="mh" data-thimble-chrome><button class="who${u ? '' : ' none'}" type="button" data-who="${r}">${esc(u || 'no username')}</button>${signed}${restarted}${S.page == null ? `<span class="on">on <button class="pg" type="button" data-pg="${C.pg[i]}">${esc(pageName(C.pg[i]))}</button></span>` : ''}${S.task == null && S.page == null ? `<span class="fam">${esc(taskName[C.tk[i]])}</span>` : ''}<time>${hms(T[i])}</time></div>`
-    + `<div class="mtx${has ? '' : ' wait'}">${marked(shown, true)}</div>${hidden > 0 ? `<button class="more" data-more="${r}" type="button">${plural(hidden, 'more line')}</button>` : cut && open ? '<span class="more">…</span>' : ''}</div></article>`
+    + `<div class="mtx${has ? '' : ' wait'}">${marked(shown, true)}</div>${hidden > 0 ? `<button class="more" data-more="${r}" type="button">${plural(hidden, 'more line')}</button>` : cut && whole ? '<span class="more">…</span>' : ''}</div>`
+    + (open ? `<div class="thimble-details">${detailsHtml(i)}</div>` : '') + `</article>`
 }
 // the height a message takes, in px: its header and padding, and its lines (each long line wrapped at about 92
 // characters), from its text when it has come, else from the lines it added
@@ -838,7 +754,7 @@ function estOf(i, lines) {
 }
 function dayHtml(t, n) { return `<div class="day">${dayName(t)} <span class="n">${plural(n, 'message')}</span></div>` }
 let perDay = new Map()
-// The whole thread is drawn, so its coloured scrollbar shows where every message of each value is: a row out of view
+// The whole thread in the range is drawn, so its tracks show where every message of each value is: a row out of view
 // is laid out by its estimated height (content-visibility), and its text is fetched when it comes near the view.
 async function renderThread(keepScroll) {
   ++threadSeq
@@ -847,16 +763,8 @@ async function renderThread(keepScroll) {
   pending.clear()
   perDay = new Map()
   for (const i of thread) if (isMsg(i)) { const k = dayKey(T[i]); perDay.set(k, (perDay.get(k) || 0) + 1) }
-  const want = S.open != null && rowAt.has(S.open) ? thread.indexOf(rowAt.get(S.open)) : -1
-  first = 0
-  if (thread.length > CHUNK && !S.win && S.page == null && !S.found) {
-    let k = 0
-    while (k < thread.length && T[thread[k]] < SPAN0[0]) k++
-    if (k < thread.length) first = k
-  }
-  if (want >= 0 && want < first) first = Math.max(0, want - 40) // a save opened before the span: from just before it
   const top = box.scrollTop
-  box.innerHTML = thread.length ? earlierHtml() + rowsHtml(first, thread.length) : emptyHtml()
+  box.innerHTML = thread.length ? rowsHtml(0, thread.length) : emptyHtml()
   watchTexts()
   box.scrollTop = keepScroll ? top : 0
 }
@@ -868,23 +776,6 @@ function rowsHtml(a, b) {
     h += msgHtml(i)
   }
   return h
-}
-function earlierHtml() {
-  let n = 0
-  for (let k = 0; k < first; k++) if (isMsg(thread[k])) n++
-  return first ? `<div class="earlier"><button class="btn btn-secondary btn-sm" type="button" data-earlier>${plural(n, 'earlier message')}</button></div>` : ''
-}
-// every earlier row, keeping the row that was first where it was
-async function showEarlier() {
-  const box = $('msgs'), was = thread[first]
-  const el = box.querySelector(`[data-r="${C.r[was]}"]`)
-  const y = el ? el.getBoundingClientRect().top : 0
-  first = 0
-  textSeen.disconnect()
-  box.innerHTML = rowsHtml(0, thread.length)
-  watchTexts()
-  const again = box.querySelector(`[data-r="${C.r[was]}"]`)
-  if (again) box.scrollTop += again.getBoundingClientRect().top - y
 }
 // the texts of the rows that come near the view, fetched together, each row drawn again with its text
 const pending = new Set()
@@ -908,26 +799,25 @@ async function fillPending() {
   const again = S.open != null ? box.querySelector(`[data-r="${S.open}"]`) : null
   if (again && y != null) box.scrollTop += again.getBoundingClientRect().top - y
 }
-// no message in the thread: say which filters leave it empty, with a way out (every task, or no filter)
+// no message in the thread: say which filters leave it empty, with a way to every task
 function emptyHtml() {
   let elsewhere = 0
   if (S.task != null || S.page != null) for (let i = 0; i < N; i++) if (isMsg(i) && passes(i, 'task')) elsewhere++
   const what = S.page != null ? `No message on ${esc(pageName(S.page))} meets these filters.` : S.task != null ? `No message of ${esc(taskName[S.task])} meets these filters.` : 'No message meets these filters.'
-  return `<div class="empty">${what}${elsewhere ? `<button class="btn btn-secondary btn-sm" type="button" data-alltasks>Show all messages <span class="mono">${num(elsewhere)}</span></button>` : ''}${anyFilter() ? '<button class="btn btn-secondary btn-sm" type="button" data-clearall>Clear filters</button>' : ''}</div>`
+  return `<div class="empty">${what}${elsewhere ? `<button class="btn btn-secondary btn-sm" type="button" data-alltasks>Show all messages <span class="mono">${num(elsewhere)}</span></button>` : ''}</div>`
 }
-function anyFilter() { return S.page != null || S.users.size || S.win || S.q }
 $('msgs').addEventListener('click', (ev) => {
-  if (ev.target.closest('[data-earlier]')) return showEarlier()
-  if (ev.target.closest('[data-clearall]')) { clearFilters(); return rescope() }
   if (ev.target.closest('[data-alltasks]')) return pickTask(null)
+  const inDetails = ev.target.closest('.thimble-details')
+  if (inDetails) return detailsClick(ev)
   const mo = ev.target.closest('[data-more]')
   if (mo) { const r = +mo.dataset.more; S.expanded.add(r); redrawRow(r); return }
   const pg = ev.target.closest('[data-pg]')
   if (pg) { narrowPage(+pg.dataset.pg); return }
   const who = ev.target.closest('[data-who]')
-  if (who) { S.tab = 'user'; pick(+who.dataset.who); return }
+  if (who) { const r = +who.dataset.who; if (S.open === r) { S.tab = 'user'; refreshDetails(); return } S.tab = 'user'; pick(r); return }
   const row = ev.target.closest('[data-r]')
-  if (row && !window.getSelection().toString()) { S.tab = 'page'; pick(+row.dataset.r) }
+  if (row && !window.getSelection().toString()) { if (S.open !== +row.dataset.r) S.tab = 'page'; pick(+row.dataset.r) }
 })
 function redrawRow(r) {
   const el = $('msgs').querySelector(`[data-r="${r}"]`)
@@ -940,44 +830,59 @@ function narrowPage(p) {
 }
 $('msgs').addEventListener('keydown', (ev) => {
   if (ev.key !== 'ArrowDown' && ev.key !== 'ArrowUp' && ev.key !== 'j' && ev.key !== 'k') return
+  if (ev.target.closest && ev.target.closest('.thimble-details')) return
   ev.preventDefault()
   const at = S.open != null && rowAt.has(S.open) ? thread.indexOf(rowAt.get(S.open)) : -1
   const k = Math.max(0, Math.min(thread.length - 1, at + (ev.key === 'ArrowDown' || ev.key === 'j' ? 1 : -1)))
-  if (thread[k] != null) goTo(C.r[thread[k]], 'nearest')
+  if (thread[k] != null && C.r[thread[k]] !== S.open) goTo(C.r[thread[k]])
 })
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape') return
   if (openPop) return close()
-  if (S.open != null) closeDetail()
+  if (S.open != null) pick(S.open)
 })
 
-// ---------------------------------------------------------------- the save beside the thread
-async function pick(r, scroll, block = 'nearest') {
-  const was = S.open
-  S.open = r
-  S.tab = S.tab || 'page'
+// ---------------------------------------------------------------- a save opened in place
+// A click on a message opens it under its own line, the row kept under the pointer; a second click closes it. The save
+// is read in full, with the texts of the page's other saves and the username's other messages.
+async function pick(r, scroll) {
   const i = rowAt.get(r)
   if (i == null) return
-  const modeBefore = document.body.className
-  layout()
-  if (document.body.className !== modeBefore) { renderFams(); renderHead() }
-  for (const el of $('msgs').querySelectorAll('.sel')) el.classList.remove('sel')
   const el = $('msgs').querySelector(`[data-r="${r}"]`)
-  if (el) { el.classList.add('sel'); if (scroll) el.scrollIntoView({ block }) }
-  if (was !== r) S.detail = null
-  renderDetail()
+  const was = S.open
+  if (was === r) {
+    S.open = null; S.detail = null
+    thimble.expand(el, () => redrawRow(r))
+    return
+  }
+  S.open = r
+  S.detail = null
+  thimble.expand(el, () => { if (was != null) redrawRow(was); redrawRow(r) })
+  const again = $('msgs').querySelector(`[data-r="${r}"]`)
+  if (scroll && again) again.scrollIntoView({ block: 'center' })
   const d = await thimble.fetch({ op: 'record', r }, { key: 'record' })
   if (S.open !== r) return
   S.detail = d
   const others = [...pageRows(i), ...userRows(i)].map((j) => C.r[j])
+  refreshDetails()
   await fetchTexts(others.filter((x) => isMsg(rowAt.get(x))))
   if (S.open !== r) return
-  renderDetail()
+  refreshDetails()
 }
-function closeDetail() {
-  S.open = null; S.detail = null
-  for (const el of $('msgs').querySelectorAll('.sel')) el.classList.remove('sel')
-  layout(); renderFams(); renderHead()
+// the open save's details drawn again in place, the row where it is
+function refreshDetails() {
+  if (S.open == null || !rowAt.has(S.open)) return
+  const box = $('msgs').querySelector(`[data-r="${S.open}"] > .thimble-details, [data-r="${S.open}"] .thimble-details`)
+  if (!box) return
+  const db = box.querySelector('.dbody')
+  const keep = db ? db.scrollTop : 0
+  box.innerHTML = detailsHtml(rowAt.get(S.open))
+  const nb = box.querySelector('.dbody')
+  if (!nb) return
+  const firstAdd = nb.querySelector('.bl.add')
+  if (S.detail && S.tab === 'page' && firstAdd && S.scrolled !== S.open) { S.scrolled = S.open; nb.scrollTop = Math.max(0, firstAdd.offsetTop - 40) }
+  else if (S.tabWas === S.tab) nb.scrollTop = keep
+  S.tabWas = S.tab
 }
 const pageRows = (i) => { const out = []; for (let j = 0; j < N; j++) if (C.pg[j] === C.pg[i]) out.push(j); return out }
 const userRows = (i) => { const out = []; if (!C.u[i]) return out; for (let j = 0; j < N; j++) if (C.u[j] === C.u[i] && isMsg(j)) out.push(j); return out }
@@ -985,12 +890,10 @@ function lrow(j, i, withPage) {
   const r = C.r[j], [t] = texts.get(r) || ['']
   const msg = isMsg(j)
   const first = msg ? (t.split('\n').find((s) => s.trim()) || '') : C.nr[j] ? `removed ${plural(C.nr[j], 'line')}, no new text` : 'no new text'
-  return `<div class="lrow${j === i ? ' cur' : ''}" data-go="${r}" data-anchor="${esc(refOf(j))}" data-anchor-text="${esc(t || first)}"${msg ? colour.attr(j) : ''}><time>${dm(T[j])} ${hm(T[j])}</time><span class="w">${esc(withPage ? pageName(C.pg[j]) : userName(C.u[j]) || 'no username')}</span><span class="x${msg ? '' : ' dim'}">${msg ? marked(first, true) : esc(first)}</span></div>`
+  return `<div class="lrow${j === i ? ' cur' : ''}" data-go="${r}" data-anchor="${esc(refOf(j))}" data-anchor-text="${esc(t || first)}"><time>${dm(T[j])} ${hm(T[j])}</time><span class="w">${esc(withPage ? pageName(C.pg[j]) : userName(C.u[j]) || 'no username')}</span><span class="x${msg ? '' : ' dim'}">${msg ? marked(first, true) : esc(first)}</span></div>`
 }
-function renderDetail() {
-  const box = $('det'), r = S.open
-  if (r == null || !rowAt.has(r)) { box.innerHTML = ''; return }
-  const i = rowAt.get(r), d = S.detail && S.detail.row === r ? S.detail : null
+function detailsHtml(i) {
+  const r = C.r[i], d = S.detail && S.detail.row === r ? S.detail : null
   const u = userName(C.u[i]), ref = refOf(i)
   const prows = pageRows(i), urows = userRows(i)
   const tabs = [['page', 'Page then', ''], ['pagemsgs', 'Page’s saves', num(prows.length)], ['user', 'Username’s messages', num(urows.length)]]
@@ -1017,21 +920,14 @@ function renderDetail() {
     for (const j of urows) { const f = C.tk[j]; if (!byFam.has(f)) byFam.set(f, []); byFam.get(f).push(j) }
     body = u ? `<div class="lhead"><span class="t">${esc(u)}</span><span class="n">${plural(urows.length, 'message')}</span><button class="btn btn-ghost btn-sm linkbtn" type="button" data-only="${C.u[i]}">${ico('filter')}Only this username</button></div>` + [...byFam].sort((a, b) => b[1].length - a[1].length).map(([f, js]) => `<div class="lhead">${esc(taskName[f])}<span class="n">${num(js.length)}</span></div>${js.map((j) => lrow(j, i, true)).join('')}`).join('') : '<div class="note">This save has no username</div>'
   }
-  const keepTop = box.querySelector('.dbody') ? box.querySelector('.dbody').scrollTop : 0
-  box.innerHTML = `<div class="dh" data-anchor="${esc(ref)}" data-anchor-text="${esc((texts.get(r) || [''])[0])}"><div class="dh-main"><div class="dh-title" data-pg="${C.pg[i]}" data-thimble-chrome title="Show this page's messages in the thread">${esc(pageName(C.pg[i]))}</div><div class="dh-sub" data-thimble-chrome>${esc(taskName[C.tk[i]])} · ${esc(u || 'no username')} · <span class="mono nw">${dayName(T[i])} ${hms(T[i])} UTC</span></div></div><button class="btn btn-ghost btn-sm" type="button" data-close aria-label="Close">${ico('x')}</button></div>`
-    + `<div class="dacts"><button class="chip chip-tone-evidence chip-act" type="button" data-file="${esc(ref)}" title="Open the line in the File browser">${ico('file')}Line ${C.ln[i]}</button><button class="chip chip-sans chip-act" type="button" data-history="${esc(pageId(C.pg[i]) + (d && d.seq != null ? `@${d.seq}` : ''))}" title="Open this save in its page's history in Wiki Page History">${ico('hist')}Page history</button></div>`
+  return `<div class="dacts" data-thimble-chrome><button class="chip chip-tone-evidence chip-act" type="button" data-file="${esc(ref)}" title="Open the line in the File browser">${ico('file')}Line ${C.ln[i]}</button><button class="chip chip-sans chip-act" type="button" data-history="${esc(pageId(C.pg[i]) + (d && d.seq != null ? `@${d.seq}` : ''))}" title="Open this save in its page's history in Wiki Page History">${ico('hist')}Page history</button></div>`
     + `<dl class="facts">${facts}</dl>`
-    + `<div class="tabs"><div class="seg seg-track" role="tablist">${tabs.map(([k, t, n]) => `<button class="seg-opt${S.tab === k ? ' active' : ''}" data-tab="${k}" type="button" role="tab" aria-selected="${S.tab === k}">${t}${n ? ` <span class="n">${n}</span>` : ''}</button>`).join('')}</div></div>`
+    + `<div class="tabs" data-thimble-chrome><div class="seg seg-track" role="tablist">${tabs.map(([k, t, n]) => `<button class="seg-opt${S.tab === k ? ' active' : ''}" data-tab="${k}" type="button" role="tab" aria-selected="${S.tab === k}">${t}${n ? ` <span class="n">${n}</span>` : ''}</button>`).join('')}</div></div>`
     + `<div class="dbody">${body}</div>`
-  const db = box.querySelector('.dbody'), firstAdd = db.querySelector('.bl.add')
-  if (d && S.tab === 'page' && firstAdd && S.scrolled !== r) { S.scrolled = r; db.scrollTop = Math.max(0, firstAdd.getBoundingClientRect().top - db.getBoundingClientRect().top + db.scrollTop - 40) }
-  else if (S.scrolled === r && S.tabWas === S.tab) db.scrollTop = keepTop
-  S.tabWas = S.tab
 }
-$('det').addEventListener('click', (ev) => {
-  if (ev.target.closest('[data-close]')) return closeDetail()
+function detailsClick(ev) {
   const tb = ev.target.closest('[data-tab]')
-  if (tb) { S.tab = tb.dataset.tab; renderDetail(); return }
+  if (tb) { S.tab = tb.dataset.tab; refreshDetails(); return }
   const fc = ev.target.closest('[data-file]')
   if (fc) return thimble.navigate(fc.dataset.file, { browser: true })
   const hb = ev.target.closest('[data-history]')
@@ -1040,31 +936,32 @@ $('det').addEventListener('click', (ev) => {
   if (nr) return narrowPage(+nr.dataset.narrow)
   const on = ev.target.closest('[data-only]')
   if (on) { S.users = new Set([+on.dataset.only]); S.task = null; S.page = null; return rescope() }
-  const pg = ev.target.closest('[data-pg]')
-  if (pg) return narrowPage(+pg.dataset.pg)
   const go = ev.target.closest('[data-go]')
   if (go) return goTo(+go.dataset.go)
-})
-// open another save: in the thread when the filters show it, else beside the thread as it is
-async function goTo(r, block = 'center') {
+}
+// open another save: in the thread when the filters show it, else in its task's thread with the filters that hide it
+// cleared
+async function goTo(r) {
   const i = rowAt.get(r)
   if (i == null) return
-  const k = thread.indexOf(i)
-  if (k >= 0 && k < first) await showEarlier()
-  pick(r, true, block)
+  if (thread.indexOf(i) < 0) return openPlace({ r })
+  if (S.open === r) return
+  pick(r, true)
 }
 
 // ---------------------------------------------------------------- render
 function render(keepScroll) {
   if (!D) return Promise.resolve()
   if (S.open != null && !rowAt.has(S.open)) { S.open = null; S.detail = null }
-  axis()
+  feedRange()
   computeThread()
+  if (S.open != null && !thread.includes(rowAt.get(S.open))) { S.open = null; S.detail = null }
   renderBar()
   renderFams()
   renderHead()
-  renderDetail()
-  return renderThread(keepScroll)
+  const p = renderThread(keepScroll)
+  if (S.open != null && S.detail == null) { const r = S.open; S.open = null; pick(r) }
+  return p
 }
 function rescope(keepScroll) { return render(keepScroll) }
 let typing = null
@@ -1072,6 +969,7 @@ $('q').addEventListener('input', (e) => {
   clearTimeout(typing)
   typing = setTimeout(async () => {
     const q = e.target.value.trim()
+    if (q === S.q && (q ? S.found : !S.found)) return
     S.q = q
     if (!q) S.found = null
     else {
@@ -1086,34 +984,54 @@ $('q').addEventListener('input', (e) => {
 let resizeTimer = null
 addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(() => { if (D) { renderBar(); renderFams(); renderHead() } }, 120) })
 
+// ---------------------------------------------------------------- Reset
+// Reset in Color by's row puts back what the board opens on: every username and page, the busiest task, no save open,
+// no message opened past its first lines; the kit has put back the search, the chips and the whole range.
+const resetter = thimble.onReset({
+  changed: () => !!D && (S.users.size > 0 || S.page != null || S.task !== firstFam || S.open != null || S.expanded.size > 0),
+  reset: () => {
+    S.users.clear(); S.page = null; S.task = firstFam; S.open = null; S.detail = null; S.expanded.clear()
+    S.q = ''; S.found = null
+    S.win = null
+    render()
+  },
+})
+
 // ---------------------------------------------------------------- places
-// A save opens in its task's thread, the filters that would hide it cleared, with the page at that save beside it; a
-// task opens its thread; a page opens its messages.
-function clearFilters() { S.page = null; S.users.clear(); S.win = null; S.q = ''; S.found = null; $('q').value = '' }
+// A save opens in its task's thread, the filters that would hide it cleared, open in place; a task opens its thread; a
+// page opens its messages.
+function clearFilters() {
+  S.page = null; S.users.clear(); S.q = ''; S.found = null; $('q').value = ''
+  S.win = null
+  if (!range.full) range.set(null)
+}
 async function openPlace(t) {
   if (t.r != null && rowAt.has(t.r)) {
     const i = rowAt.get(t.r)
     clearFilters()
     S.task = C.tk[i]
     if (!isMsg(i)) S.page = C.pg[i]
-    S.open = t.r
+    S.open = null
     await render()
-    await goTo(t.r)
+    await pick(t.r, true)
+    resetter.check()
     return
   }
   if (t.task) {
     const f = D.tasks.findIndex((x) => x[0] === t.task)
     clearFilters()
     S.task = f >= 0 ? f : null
-    return render()
+    render()
+    return resetter.check()
   }
   if (t.page) {
     const p = D.pages.findIndex((x) => x[5] === t.page || x[4] === t.page)
     clearFilters()
     if (p >= 0) { S.page = p; S.task = pageTask(p) }
-    return render()
+    render()
+    return resetter.check()
   }
-  if (S.task == null && S.page == null && !S.users.size && !S.win && !S.q) S.task = firstTask()
+  if (S.task == null && S.page == null && !S.users.size && !S.q) S.task = firstFam
   render()
 }
 // with no place to open, the board opens on the task with the most messages, so its thread shows relay messages first
@@ -1124,18 +1042,19 @@ function firstTask() {
   for (const [f, n] of per) if (best == null || n > per.get(best)) best = f
   return best
 }
-loading = load().then((ok) => { if (ok) { computeSpan(); if (!opened) { S.task = firstTask(); render() } } return ok })
+loading = load().then((ok) => { if (ok) { firstFam = firstTask(); if (!opened) { S.task = firstFam; render() } } return ok })
 let opened = false
 thimble.onOpen(async (place) => {
   const t = (place && place.target) || {}
   opened = true
   if (t.r != null && S.keepRow !== t.r) {
     S.keepRow = t.r
-    if (D && !rowAt.has(t.r)) { await load(); computeSpan() }
+    if (D && !rowAt.has(t.r)) await load()
   }
-  if (!D) { await loading; if (!D) { await load(); computeSpan() } }
+  if (!D) { await loading; if (!D) await load() }
   if (!D) return
-  if (t.r != null && !rowAt.has(t.r)) { await load(); computeSpan() }
+  if (firstFam == null) firstFam = firstTask()
+  if (t.r != null && !rowAt.has(t.r)) await load()
   await openPlace(t)
 })
 // what the reader's marks and filter answered for: the names of the labels on, and the filter
@@ -1143,9 +1062,8 @@ const labelSig = (names, f) => JSON.stringify([[...names].sort(), f ? [f.label, 
 thimble.onLabels(async (state) => {
   labelState = { labels: state.labels || [], filter: state.filter || null, all: state.all || null, palette: state.palette || null }
   if (!D) return
-  if (labelSig(labelState.labels.map((l) => l.name), labelState.filter) === D.sig) { renderBar(); renderFams(); if (S.open != null) renderDetail(); return } // colours only
+  if (labelSig(labelState.labels.map((l) => l.name), labelState.filter) === D.sig) { feedRange(); renderBar(); renderFams(); return } // colors only
   if (!(await load())) return
-  computeSpan()
   if (S.open != null && !rowAt.has(S.open)) { S.open = null; S.detail = null }
   render(true)
 })

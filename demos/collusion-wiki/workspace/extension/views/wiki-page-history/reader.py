@@ -36,7 +36,7 @@
 # seeking to their lines, so a diff is worked out again when the page shows it. Labels apply when records are served:
 # a page stays when thimble.kept_unit holds for its records (its pages.jsonl line, its deletes and its revisions), a
 # revision or an event when thimble.kept holds for its line, and each carries the marks thimble.marked gives it, from
-# which the page reads the value of the label its Colour by control colours by.
+# which the page reads the value of the label its Color by control colors by.
 import difflib
 import json
 import re
@@ -582,8 +582,9 @@ def _page(index, q):
     filter keeps, as columns `k` (r, d or q), `x` (the revision's or event's index), `t` (seconds since t0), `u`
     (username), `a` and `r` (lines added and removed), `m` (first mark), `s` (seq), `b` (marks as bits) and `kb` (a
     revision's base, an index into BASES, -1 for an event); `users` [[username index,
-    revisions]] of the page; `total` the items the username filter `user` also keeps; and `blocks`, those items from
-    `from` (or from just before `focus`, a cited record kept whatever the label filter says) read in full."""
+    revisions]] of the page; `total` the items the username filter `user` and the time range [`since`, `until`) (seconds
+    since 1970, either left out for no bound) also keep; and `blocks`, those items from `from` (or from just before
+    `focus`, a cited record kept whatever the label filter says) read in full."""
     p = q.get("p")
     if not isinstance(p, int) or not 0 <= p < len(index["pages"]):
         return None
@@ -598,6 +599,13 @@ def _page(index, q):
                  _event_ref(index, (index["deletes"] if want[0] == "d" else index["requests"])[want[1]][1]))
     every = _history(index, p, None, keep, filtering)
     hist = every if user is None else _history(index, p, user, keep, filtering)
+    since = q.get("since") if isinstance(q.get("since"), (int, float)) else None
+    until = q.get("until") if isinstance(q.get("until"), (int, float)) else None
+    if since is not None or until is not None:
+        def _t(item):
+            kind, i = item
+            return index["r_t"][i] if kind == "r" else (index["deletes"] if kind == "d" else index["requests"])[i][0]
+        hist = [x for x in hist if x == want or ((since is None or _t(x) >= since) and (until is None or _t(x) < until))]
     t0 = index["t0"]
     S = {k: [] for k in ("k", "x", "t", "u", "a", "r", "m", "s", "b", "kb")}
     for kind, i in every:

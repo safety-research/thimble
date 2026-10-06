@@ -1,6 +1,6 @@
 {
   "name": "Activity Timeline",
-  "description": "Every record of the agent's transcript on one time axis, one lane per activity, so the long stretches of captcha-solving, account sign-up and money-hunting stand apart from the thin sliver of exploit work at the very end; the marks, the run strip and the list colour by Activity, Tool or any label from one Colour by control, and a record opens in full in the list with a button that opens the transcript at that message.",
+  "description": "Every record of the agent's transcript on one time axis, one lane per activity, so the long stretches of captcha-solving, account sign-up and money-hunting stand apart from the thin sliver of exploit work at the very end; a time range selector holds the whole run and frames the part the lanes and the list show, the marks, the overview and the list color by Activity, Tool or any label from one Color by control, the context compaction is a flag on the axis, and a record opens in place in the list with a button that opens the transcript at that message.",
   "claims": [
     "transcript.jsonl"
   ],
@@ -40,12 +40,12 @@
           "name": "value",
           "type": "category",
           "derived": "computed",
-          "from": "the Colour by choice",
+          "from": "the Color by choice",
           "how": "the record's activity, its tool (Reasoning for a message with no tool), or a label's value on it"
         }
       ]
     }
   ],
-  "built": "2026-10-06T21:50:06+00:00",
-  "version": "7deb9fb3ab86"
+  "built": "2026-10-06T22:40:40+00:00",
+  "version": "afb2940f6330"
 }

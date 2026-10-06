@@ -2,9 +2,9 @@
 <html>
 <head>
 <style>
-  /* thimble's parts (.field, .chip, .btn, .seg, .table), its Colour by control and the theme's tokens come with the
-     frame; this page lays out a control row, the strip of every episode in time, and the list of episodes, an episode
-     opening under its row */
+  /* thimble's parts (.field, .chip, .btn, .seg, .table), its Color by control, its time range selector and the theme's
+     tokens come with the frame; this page lays out a control row, the time range over every episode, the lanes of the
+     episodes in the range, and the list of episodes, an episode opening under its row */
   html, body { margin: 0; height: 100%; }
   body { display: flex; flex-direction: column; overflow: hidden; background: var(--surface-card); color: var(--text-primary); font: 400 var(--text-ui-sm) / 1.4 var(--font-body); }
   .ico { width: 14px; height: 14px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; }
@@ -20,7 +20,7 @@
   .fbtn .n { color: var(--text-tertiary); font: 400 var(--text-mono-sm) / 1 var(--font-mono); }
   #chips { display: contents; }
   .chip .ico { width: 10px; height: 10px; }
-  /* the Colour by control takes the row's free width, and a line of its own when less than its least is left */
+  /* the Color by control takes the row's free width, and a line of its own when less than its least is left */
   #colour { flex: 1 1 320px; min-width: 260px; margin-left: 4px; }
   .sw { display: inline-block; flex: none; width: 10px; height: 10px; border-radius: 2px; background: var(--c); }
 
@@ -28,16 +28,23 @@
      first in the document */
   #body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
   #strip { order: 1; flex: none; position: relative; padding: 8px 0 2px 0; border-bottom: 1px solid var(--border-hairline); }
+  /* the time range: its readout in the lanes' name column, the overview over the lanes' time */
+  #rhead { position: relative; display: flex; align-items: center; min-height: 40px; padding-bottom: 6px; }
+  #rread { flex: none; box-sizing: border-box; padding: 0 10px 0 14px; overflow: hidden; }
+  #rread .thimble-range-dates { white-space: normal; }
+  #range { flex: none; }
+  #lanes { position: relative; }
+  #axis { margin-top: 1px; }
   #main { order: 2; flex: 1; min-height: 0; display: flex; position: relative; }
 
-  #gut { position: absolute; left: 0; top: 8px; }
+  #gut { position: absolute; left: 0; top: 0; }
   .lane { position: absolute; left: 0; display: flex; align-items: center; gap: 6px; box-sizing: border-box; padding: 0 10px 0 14px; color: var(--text-primary); font: 400 var(--text-xs) / 1 var(--font-body); cursor: pointer; white-space: nowrap; }
   .lane:hover .nm { text-decoration: underline; text-underline-offset: 2px; }
   .lane .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
   .lane .n { flex: none; color: var(--text-tertiary); font: 400 var(--text-mono-sm) / 1 var(--font-mono); }
   .lane.sel .nm { font-weight: 600; }
   .lane.other { color: var(--text-secondary); }
-  #plot { display: block; overflow: visible; user-select: none; -webkit-user-select: none; cursor: crosshair; }
+  #plot { display: block; overflow: visible; user-select: none; -webkit-user-select: none; }
   #plot text { font: 400 10.5px var(--font-mono); fill: var(--text-tertiary); font-variant-numeric: tabular-nums; }
   #plot text.maj { fill: var(--text-secondary); }
   #plot .lanerule { stroke: rgba(var(--ink-rgb), 0.06); }
@@ -49,15 +56,7 @@
   #plot .brk { stroke: var(--text-tertiary); stroke-width: 1.2; fill: none; }
   #plot .dot { cursor: pointer; }
   #plot .dot.hl > :first-child { stroke: var(--text-primary); stroke-width: 1.5; stroke-opacity: 1; }
-  #plot .brush { fill: rgba(var(--ink-rgb), 0.07); stroke: var(--text-primary); stroke-width: 1; stroke-dasharray: 3 2; }
-  #plot .track { fill: rgba(var(--ink-rgb), 0.05); }
-  #plot .bticks { stroke: var(--viz-ink-2); stroke-opacity: 0.35; stroke-width: 1; }
-  #plot .win { fill: rgba(var(--ink-rgb), 0.06); stroke: var(--text-primary); stroke-width: 1.25; }
   #plot .gline { stroke: var(--text-primary); stroke-opacity: 0.35; pointer-events: none; }
-  #plot .glab { fill: var(--surface-card); stroke: rgba(var(--ink-rgb), 0.2); pointer-events: none; }
-  #plot #guide text { pointer-events: none; }
-  .unzoom { position: absolute; left: 6px; gap: 4px; }
-  .unzoom .ico { width: 12px; height: 12px; }
 
   /* the list of episodes */
   #list { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; }
@@ -119,6 +118,7 @@
   #tbl tbody tr.epx:hover > td { background: var(--surface-card); }
   #tbl tbody tr.active > td { border-bottom-color: transparent; }
   #ep { display: flex; flex-direction: column; min-width: 0; padding-bottom: 6px; }
+  #rtbl tr.more > td { height: 1px; padding: 0; border: 0; }
   .ep-head { flex: none; padding: 10px 14px 8px; }
   .ep-top { display: flex; align-items: center; gap: 8px; min-width: 0; }
   .ep-top h2 { margin: 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 600 var(--text-sm) / 1.3 var(--font-body); }
@@ -158,7 +158,6 @@
   #rtbl tbody tr.day:hover, #rtbl tbody tr.det:hover, #rtbl tbody tr.more:hover { background: none; }
   #rtbl tr.sel > td { background: var(--surface-selected); }
   #rtbl tr.det > td { padding: 4px 14px 14px; background: var(--surface-selected); white-space: normal; cursor: default; font-family: var(--font-body); }
-  #rtbl tr.more > td { padding: 10px 14px; cursor: default; }
   #rtbl tr.flash > td { animation: flash 1.2s ease-out; }
   @keyframes flash { from { background: rgba(var(--ink-rgb), 0.12); } to { background: transparent; } }
   a.ext { display: inline-grid; place-items: center; width: 20px; height: 18px; border-radius: 4px; color: var(--text-tertiary); vertical-align: middle; }
@@ -203,7 +202,6 @@
 <body>
 <header id="bar">
   <button id="f-src" class="field fbtn" type="button" aria-haspopup="menu" aria-expanded="false"></button>
-  <button id="f-dates" class="field fbtn" type="button" aria-haspopup="menu" aria-expanded="false"></button>
   <button id="f-disp" class="field fbtn" type="button" aria-haspopup="menu" aria-expanded="false"></button>
   <button id="f-more" class="field fbtn" type="button" aria-haspopup="menu" aria-expanded="false"></button>
   <span id="chips"></span>
@@ -224,23 +222,26 @@
     </section>
   </main>
   <section id="strip">
-    <div id="gut"></div>
-    <svg id="plot"></svg>
+    <div id="rhead"><div id="rread"></div><div id="range"></div></div>
+    <div id="lanes"><div id="gut"></div><svg id="plot"></svg></div>
+    <div id="axis"></div>
   </section>
 </div>
 <div id="tip"></div>
 <div id="toast" role="status"></div>
 <script>
 'use strict'
-// Episode Browser: the catalog as episodes, the reports of one data source less than two hours apart. The strip shows
-// every episode as a dot at its start, one lane per data source, sized by its reports, and a drag across it picks the
-// dates; the list holds one row per episode, sorted by size or time; a click opens an episode under its row with its
-// reports in time order and their rate, and a click on a report opens it in full. "All episodes" sums up the episodes
-// in view above the list. The control row narrows by source, dates, disposition, size and the broad classes an episode
-// holds, and holds thimble's Colour by control.
-// Colour: the Colour by control (thimble.colourBy) colours by confidence, class, disposition, source basis or cohort, or
-// by a label; the reader gives each report its value and each episode its reports per value, which colour the dots,
-// the list's mix bars, the rate chart and a report row's left edge. A value whose chip is off leaves the counts.
+// Episode Browser: the catalog as episodes, the reports of one data source less than two hours apart. thimble's time
+// range selector holds every episode's start over the whole span, and its viewfinder picks the time the page shows; the
+// lanes under it show each episode in that time as a dot at its start, one lane per data source, sized by its reports;
+// the list holds one row per episode that starts in the range, sorted by size or time; a click opens an episode under
+// its row with its reports in time order and their rate, and a click on a report opens it in full under its own row.
+// "All episodes" sums up the episodes in view above the list. The control row narrows by source, disposition, size and
+// the broad classes an episode holds, and holds thimble's Color by control and its Reset.
+// Color: the Color by control (thimble.colorBy) colors by confidence, class, disposition, source basis or cohort, or
+// by a label; the reader gives each report its value and each episode its reports per value, which color the dots,
+// the overview, the list's color bars, the rate chart and a report row's left edge. A value whose chip is off leaves
+// the counts. The broad classes are drawn in grey inks only, so the Color by choice is the page's one color.
 // Labels: the reader counts only the reports the label filter keeps. List rows and dots carry their episode as
 // data-anchor, report rows their catalog row, so thimble marks them.
 const slug = (thimble.view && thimble.view.slug) || 'episode-browser'
@@ -306,12 +307,11 @@ const monthStart = (y, m) => Date.UTC(y, m, 1) / 1000
 let D = null // the overview's answer
 let E = [] // one object per episode
 let byKey = new Map()
-let BASE = null // the strip's whole span and the stretch it squeezes: {a, b, cut}
+let BASE = null // the whole span of the episodes' starts: {a, b}
 let labelState = { labels: [], filter: null, all: null, palette: null }
 let loadSeq = 0
 const S = {
   src: new Set(), // the groups narrowed to; none for every group
-  from: null, to: null, // the start times narrowed to, inclusive
   disp: 'all',
   minN: 1,
   cls: new Set(), // the broad classes an episode must hold
@@ -343,41 +343,17 @@ async function loadOverview() {
 const gname = (g) => D.groups[g]
 const gdisp = (g) => D.disp[g]
 
-// The strip's whole span. The early stretch is squeezed when few episodes start in a long time: the stretch up to the
-// first month by whose start more than an eighth of the episodes have begun, when it is at least two fifths of the span.
-// After it each month is as wide as the episodes that start in it make it, (episodes + 1) to the power MONTH_POWER, so
-// the busy months spread their dots out; `knots` are the month starts and `w` each month's width in those units.
-const MONTH_POWER = 0.85
+// the whole span of the episodes' starts, which the time range selector shows; its long empty stretches are breaks
+const GAP = 90 * DAY
 function baseSpan(list) {
-  const starts = list.map((e) => e.start).sort((x, y) => x - y)
-  const a = starts[0], b = Math.max(list.reduce((m, e) => Math.max(m, e.start), 0), a + 3600)
-  let cut = null
-  const lim = starts[Math.floor(starts.length / 8)]
-  const d = dt(lim)
-  const m = monthStart(d.getUTCFullYear(), d.getUTCMonth())
-  if (m - a >= 0.4 * (b - a) && b - m > 30 * DAY) cut = m
-  const padT = Math.max(3600, (b - a) * 0.01)
-  const out = { a: a - (cut ? 0 : padT), b: b + padT, cut }
-  const a1 = cut || out.a
-  if (out.b - a1 < 60 * DAY) return out
-  const per = new Map(), key = (t) => dt(t).getUTCFullYear() * 12 + dt(t).getUTCMonth()
-  for (const t of starts) if (t >= a1) per.set(key(t), (per.get(key(t)) || 0) + 1)
-  const knots = [a1], w = []
-  let y = dt(a1).getUTCFullYear(), mo = dt(a1).getUTCMonth()
-  for (;;) {
-    mo++; if (mo > 11) { mo = 0; y++ }
-    const t = Math.min(monthStart(y, mo), out.b)
-    const from = knots[knots.length - 1]
-    const whole = monthStart(y, mo) - monthStart(dt(from).getUTCFullYear(), dt(from).getUTCMonth())
-    w.push(Math.pow((per.get(key(from)) || 0) + 1, MONTH_POWER) * ((t - from) / whole))
-    knots.push(t)
-    if (t >= out.b) break
-  }
-  return { ...out, knots, w }
+  let a = Infinity, b = -Infinity
+  for (const e of list) { a = Math.min(a, e.start); b = Math.max(b, e.start) }
+  const pad = Math.max(3600, (b - a) * 0.004)
+  return { a: a - pad, b: b + pad }
 }
 
 // ---------------------------------------------------------------- filters
-const inDates = (e) => (S.from == null || e.start >= S.from) && (S.to == null || e.start <= S.to)
+const inDates = (e) => range.has(e.start)
 function passes(e, skip) {
   if (skip !== 'disp' && S.disp !== 'all' && gdisp(e.g) !== S.disp) return false
   if (skip !== 'src' && S.src.size && !S.src.has(e.g)) return false
@@ -400,11 +376,11 @@ function compute() {
   shown.sort((x, y) => { const a = f(x), b = f(y); return (a < b ? -1 : a > b ? 1 : 0) * dir || x.start - y.start })
 }
 const leadShare = (e) => (LEAD != null && e.cv ? (e.cv[LEAD] || 0) / (e.n || 1) : 0)
-const filtersSet = () => S.src.size || S.from != null || S.to != null || S.disp !== 'all' || S.minN > 1 || S.cls.size
+const filtersSet = () => S.src.size || !range.full || S.disp !== 'all' || S.minN > 1 || S.cls.size
 
 // ---------------------------------------------------------------- colour
 const clsColour = (k) => token(INK[k])
-// thimble's Colour by control: the fields the reader gives each report a value of, and the labels; a report row of an
+// thimble's Color by control: the fields the reader gives each report a value of, and the labels; a report row of an
 // open episode is coloured by the value the reader gave it under the choice
 const FIELDS_BY = [
   { name: 'confidence', title: 'Confidence', values: [{ name: 'significant', colour: 2 }, { name: 'suggestive', colour: 1 }] },
@@ -413,12 +389,28 @@ const FIELDS_BY = [
   { name: 'source_basis', title: 'Source basis' },
   { name: 'cohort', title: 'Cohort', values: ['external cohort'] },
 ]
-const colour = thimble.colourBy({
+const colour = thimble.colorBy({
   mount: '#colour',
   fields: FIELDS_BY.map((f) => ({ ...f, value: (r) => (r && typeof r === 'object' && r.value != null ? r.value : null) })),
   chips: 'filter',
   strip: '#lscroll',
   onChange: () => recolour(),
+})
+// the list's tracks preview an episode by its start and its source
+colour.strip('#lscroll', { preview: (el) => { const e = el && el.dataset && byKey.get(el.dataset.key); return e ? { when: when(e.start), text: `${gname(e.g)} · ${plural(e.n, 'report')}` } : null } })
+// the one control for time: every episode's start over the whole span, in the Color by colors, and the viewfinder over
+// it; the lanes and the list show the episodes that start in its range. It opens on the whole span.
+const range = thimble.timeRange({ mount: '#range', readout: '#rread', gap: GAP, onChange: () => rescope() })
+// the episodes the other filters keep, for the overview: each one's start, in the color most of its reports take
+function feedRange() {
+  if (!BASE) return
+  const list = E.filter((e) => passes(e, 'dates'))
+  range.data({ span: [BASE.a, BASE.b], times: list.map((e) => e.start), values: list.map((e) => mainValue(e)) })
+}
+// what Reset puts back of the page's own state: the menus, the order and the open episode
+thimble.onReset({
+  changed: () => S.src.size > 0 || S.disp !== 'all' || S.minN > 1 || S.cls.size > 0 || S.sort.k !== 'n' || S.sort.dir !== -1 || S.open != null,
+  reset: () => { clearFilters(); S.sort = { k: 'n', dir: -1 }; S.open = null; S.rep = null; S.keep = null; EP = null; REP = null; rescope() },
 })
 const noneColour = () => token('--label-none') || '#a09c93'
 const valColour = (v) => (v == null || v === '' ? noneColour() : colour.colourOf(v) || noneColour())
@@ -521,9 +513,6 @@ function renderBar() {
   const one = S.src.size === 1 ? gname([...S.src][0]) : null
   src.innerHTML = `<span class="k">${S.src.size > 1 ? 'Sources:' : 'Source:'}</span> <span class="v">${esc(one || (S.src.size ? S.src.size : 'All'))}</span>${ico('down')}`
   src.classList.toggle('active', S.src.size > 0)
-  const dates = $('f-dates')
-  dates.innerHTML = `<span class="k">Start:</span> <span class="v">${esc(datesText())}</span>${ico('down')}`
-  dates.classList.toggle('active', S.from != null || S.to != null)
   const disp = $('f-disp')
   disp.innerHTML = `<span class="k">Disposition:</span> <span class="v">${esc(DISP.find((x) => x[0] === S.disp)[1])}</span>${ico('down')}`
   disp.classList.toggle('active', S.disp !== 'all')
@@ -537,19 +526,6 @@ function renderBar() {
   if (S.minN > 1) chips.push(fchip(`≥ ${num(S.minN)} reports`, ' data-chip="minN"'))
   for (const c of S.cls) chips.push(fchip(`Class · ${CLS_NAME[c]}`, ` data-chip="cls" data-c="${c}"`))
   $('chips').innerHTML = chips.join('')
-}
-function datesText() {
-  if (S.from == null && S.to == null) return 'Any time'
-  const a = S.from, b = S.to
-  const len = (b ?? (BASE ? BASE.b : a)) - (a ?? (BASE ? BASE.a : b))
-  const days = (a == null || a % DAY === 0) && (b == null || (b + 1) % DAY === 0) // whole days, as the date fields set them
-  const timed = !days && len < 3 * DAY
-  const ya = a != null ? dt(a).getUTCFullYear() : null, yb = b != null ? dt(b).getUTCFullYear() : null
-  if (days && a != null && b != null && b - a < DAY) return dmy(a)
-  if (!timed && a != null && b != null && ya === yb && dt(a).getUTCMonth() === dt(b).getUTCMonth()) return `${dt(a).getUTCDate()}–${dm(b)} ${yb}`
-  const left = a == null ? '…' : `${dm(a)}${ya !== yb ? ` ${ya}` : ''}${timed ? ` ${hm(a)}` : ''}`
-  const right = b == null ? '…' : timed && a != null && dayKey(a) === dayKey(b) ? hm(b) : `${dm(b)} ${yb}${timed ? ` ${hm(b)}` : ''}`
-  return `${left} – ${right}`
 }
 $('chips').onclick = (ev) => {
   const b = ev.target.closest('[data-chip]')
@@ -584,19 +560,16 @@ function drawSrc(p, q) {
   }
   p.querySelector('.items').innerHTML = `<button class="item" data-g="*"><span class="box${S.src.size ? '' : ' on'}"></span><span class="lab">All sources</span></button><div class="sep"></div>${rows || '<div class="note">None</div>'}`
 }
-function datesMenu(anchor) {
+function dispMenu(anchor) {
   if (toggled(anchor)) return
-  const v = (t) => (t == null ? '' : dayKey(t))
-  const lo = BASE ? dayKey(BASE.a + 1) : '', hi = BASE ? dayKey(BASE.b) : ''
-  const p = pop(anchor, `<div class="head">Episodes that start</div><div class="range"><input class="field" type="date" data-d="from" value="${v(S.from)}" min="${lo}" max="${hi}"> to <input class="field" type="date" data-d="to" value="${v(S.to)}" min="${lo}" max="${hi}"></div><div class="sep"></div><button class="item" data-d="all"><span class="lab">Any time</span></button>`)
-  for (const i of p.querySelectorAll('input[data-d]')) i.onchange = () => {
-    const t = i.value ? Date.parse(i.value + 'T00:00:00Z') / 1000 : null
-    if (i.dataset.d === 'from') S.from = t
-    else S.to = t == null ? null : t + DAY - 1
-    if (S.from != null && S.to != null && S.to < S.from) [S.from, S.to] = [S.to - DAY + 1, S.from + DAY - 1]
+  const p = pop(anchor, `<div class="head">Disposition</div>${DISP.map(([k, n]) => `<button class="item" data-disp="${k}"><span class="box${S.disp === k ? ' on' : ''}"></span><span class="lab">${esc(n)}</span></button>`).join('')}`)
+  p.onclick = (ev) => {
+    const it = ev.target.closest('[data-disp]')
+    if (!it) return
+    S.disp = it.dataset.disp
+    close()
     rescope()
   }
-  p.querySelector('[data-d="all"]').onclick = () => { S.from = S.to = null; close(); rescope() }
 }
 function moreMenu(anchor) {
   if (toggled(anchor)) return
@@ -616,7 +589,7 @@ function moreMenu(anchor) {
   }
 }
 $('f-src').onclick = (ev) => srcMenu(ev.currentTarget)
-$('f-dates').onclick = (ev) => datesMenu(ev.currentTarget)
+$('f-disp').onclick = (ev) => dispMenu(ev.currentTarget)
 $('f-more').onclick = (ev) => moreMenu(ev.currentTarget)
 
 // ---------------------------------------------------------------- the strip
@@ -645,61 +618,7 @@ function computeLanes(list) {
   lanes.forEach((l, i) => { if (l.other) for (const g of l.other) laneOf.set(g, i); else laneOf.set(l.g, i) })
   return firstTail
 }
-function span() {
-  if (S.from != null || S.to != null) {
-    const list = E.filter((e) => passes(e))
-    const a = S.from != null ? S.from : Math.min(...list.map((e) => e.start), BASE.b)
-    const b = S.to != null ? S.to : Math.max(...list.map((e) => e.start), BASE.a)
-    const padT = Math.max(60, (b - a) * 0.01)
-    return { a: a - (S.from != null ? 0 : padT), b: b + (S.to != null ? 0 : padT), cut: null }
-  }
-  return BASE
-}
 const R = (n, max) => Math.max(1.75, Math.sqrt(n / Math.max(1, max)) * RMAX)
-function niceTicks(a, b, px) {
-  const H = 3600, spanS = b - a, out = []
-  const steps = [[H, 'h'], [3 * H, 'h'], [6 * H, 'h'], [12 * H, 'h'], [DAY, 'd'], [2 * DAY, 'd'], [7 * DAY, 'd'], [1, 'mo'], [2, 'mo'], [3, 'mo'], [6, 'mo'], [12, 'mo']]
-  const st = steps.find(([s, u]) => px / (spanS / (u === 'mo' ? s * 30.44 * DAY : s)) >= 62) || steps[steps.length - 1]
-  const [s, u] = st
-  if (u === 'mo') {
-    const d = dt(a)
-    let y = d.getUTCFullYear(), m = d.getUTCMonth()
-    for (;;) {
-      const t = monthStart(y, m)
-      if (t > b) break
-      if (t >= a && m % s === 0) out.push({ t, text: m === 0 ? String(y) : MONTH[m], maj: m === 0 })
-      m++; if (m > 11) { m = 0; y++ }
-    }
-  } else {
-    for (let t = Math.ceil(a / s) * s; t <= b; t += s) {
-      const mid = t % DAY === 0
-      out.push({ t, text: u === 'h' && !mid ? hm(t) : dm(t), maj: mid && u === 'h' })
-    }
-  }
-  return out
-}
-// A time scale over the plot from x0 to x1: linear, or with the stretch before `cut` squeezed into its left eighth
-// A time scale over the plot from x0 to x1: linear, or with the stretch before `cut` squeezed into its left eighth, and
-// with `knots` each month after it as wide as its weight
-function scale(sp, x0, x1) {
-  let wL = 0, gapW = 0
-  if (sp.cut) { wL = Math.round(Math.max(70, (x1 - x0) * 0.12)); gapW = 10 }
-  const xr0 = x0 + wL + gapW, a1 = sp.cut || sp.a
-  let right = (t) => xr0 + ((t - a1) / (sp.b - a1 || 1)) * (x1 - xr0)
-  let back = (x) => a1 + ((Math.min(x1, Math.max(xr0, x)) - xr0) / (x1 - xr0)) * (sp.b - a1)
-  if (sp.knots) {
-    const k = sp.knots, cum = [0]
-    for (const v of sp.w) cum.push(cum[cum.length - 1] + v)
-    const tot = cum[cum.length - 1], px = (x1 - xr0) / tot
-    const seg = (arr, v) => { let lo = 0, hi = arr.length - 2; while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (arr[mid] <= v) lo = mid; else hi = mid - 1 } return lo }
-    right = (t) => { if (t <= k[0]) return xr0; if (t >= k[k.length - 1]) return x1; const i = seg(k, t); return xr0 + (cum[i] + ((t - k[i]) / (k[i + 1] - k[i])) * sp.w[i]) * px }
-    back = (x) => { const u = Math.max(0, Math.min(tot, (x - xr0) / px)); const i = seg(cum, u); return k[i] + ((u - cum[i]) / (sp.w[i] || 1)) * (k[i + 1] - k[i]) }
-  }
-  const X = (t) => (sp.cut && t < sp.cut ? x0 + ((t - sp.a) / (sp.cut - sp.a)) * wL : right(t))
-  const T = (x) => (sp.cut && x < x0 + wL + gapW / 2 ? sp.a + ((Math.max(x0, x) - x0) / wL) * (sp.cut - sp.a) : back(x))
-  return { X, T, wL, gapW, xr0, sp }
-}
-let BX = null // the whole span's scale, which the band under a zoomed strip draws
 let ctx2d = null, laneFont = null
 const laneName = (l) => (l.other ? `${l.other.size} more sources` : gname(l.g))
 // the lane names' column, as wide as the widest name and count in their own fonts, up to a quarter of the strip
@@ -724,58 +643,29 @@ function laneGutter(W) {
   }
   return Math.round(Math.min(W * 0.27, Math.max(110, w + 14 + 6 + 12 + 6)))
 }
-const zoomed = () => S.from != null || S.to != null
 function renderStrip() {
   const strip = $('strip'), svg = $('plot'), gut = $('gut')
   const list = shown
   const firstTail = computeLanes(list)
   const W = strip.clientWidth, G = laneGutter(W)
-  const x0 = G, x1 = W - 16 - RMAX, h = LANES.length * LH
+  const x0 = G, x1 = W - 16 - RMAX, h = LANES.length * LH, w = Math.max(40, x1 - x0)
   plotX0 = x0; plotX1 = x1
-  const M = scale(BASE ? span() : { a: 0, b: 1, cut: null }, x0, x1)
-  X = M.X; TOF = M.T
-  BX = BASE ? scale(BASE, x0, x1) : null
-  const { sp, wL, gapW, xr0 } = M
+  // the time range above the lanes, its readout in the names' column and its overview as wide as the lanes' time; the
+  // lanes and the axis under them draw its range
+  $('rread').style.width = G + 'px'
+  $('range').style.width = w + 'px'
+  const axis = $('axis')
+  axis.style.marginLeft = x0 + 'px'
+  axis.style.width = w + 'px'
+  const sc = range.scale(w)
+  X = (t) => x0 + sc.x(t)
+  TOF = (x) => sc.t(x - x0)
   let s = ''
-  // lanes and the squeezed stretch
-  if (sp.cut) s += `<rect class="squeeze" x="${x0}" y="0" width="${wL + gapW / 2}" height="${h}"/>`
+  // a band where a break leaves out a long empty stretch, a light line at each labelled tick
+  for (const [ga, gb] of sc.gaps()) s += `<rect class="squeeze" x="${x0 + ga}" y="0" width="${Math.max(0, gb - ga)}" height="${h}"/>`
+  for (const tk of sc.ticks(72)) if (tk.label) s += `<line class="grid" x1="${x0 + tk.x}" x2="${x0 + tk.x}" y1="0" y2="${h}"/>`
   LANES.forEach((l, i) => { s += `<line class="${i === firstTail && i ? 'sep' : 'lanerule'}" x1="${x0 - 6}" x2="${x1 + RMAX}" y1="${i * LH + 0.5}" y2="${i * LH + 0.5}"/>` })
   s += `<line class="axis" x1="${x0 - 6}" x2="${x1 + RMAX}" y1="${h + 0.5}" y2="${h + 0.5}"/>`
-  // ticks
-  let lastX = -1e9
-  if (sp.cut) {
-    const ya = dt(sp.a).getUTCFullYear(), yb = dt(sp.cut - 1).getUTCFullYear()
-    const text = ya === yb ? String(ya) : `${ya}–${String(yb).slice(-2)}`
-    s += `<text class="maj" x="${x0 + wL / 2}" y="${h + 13}" text-anchor="middle">${text}</text>`
-    const brx = x0 + wL + gapW / 2
-    s += `<path class="brk" d="M${brx - 3},${h + 5} L${brx + 1},${h - 4} M${brx},${h + 5} L${brx + 4},${h - 4}"/>`
-    lastX = brx + 6
-  }
-  if (sp.knots) {
-    // a line at every month start and alternate months shaded; each month named at its middle where the name fits,
-    // a year's January first, then the busiest months
-    const k = sp.knots, cand = []
-    for (let i = 0; i + 1 < k.length; i++) {
-      const xa = X(k[i]), xb = Math.min(X(k[i + 1]), x1)
-      if (i % 2) s += `<rect class="month" x="${xa}" y="0" width="${Math.max(0, xb - xa)}" height="${h}"/>`
-      const d = dt(k[i])
-      if (d.getUTCDate() !== 1 || d.getUTCHours()) continue
-      s += `<line class="grid" x1="${xa}" x2="${xa}" y1="0" y2="${h}"/>`
-      const jan = d.getUTCMonth() === 0
-      cand.push({ x: (xa + xb) / 2, w: xb - xa, jan, text: jan ? String(d.getUTCFullYear()) : MONTH[d.getUTCMonth()] })
-    }
-    const placed = []
-    const free = (x) => x - lastX >= 26 && x <= x1 + RMAX - 10 && placed.every((p) => Math.abs(p.x - x) >= (p.jan ? 34 : 28))
-    for (const c of [...cand].sort((p, q) => q.jan - p.jan || q.w - p.w)) if (free(c.x)) placed.push(c)
-    for (const c of placed) s += `<text x="${c.x}" y="${h + 13}" text-anchor="middle"${c.jan ? ' class="maj"' : ''}>${c.text}</text>`
-  } else {
-    for (const t of niceTicks(sp.cut || sp.a, sp.b, x1 - xr0)) {
-      const x = X(t.t)
-      if (x - lastX < 34) continue
-      lastX = x
-      s += `<line class="grid" x1="${x}" x2="${x}" y1="0" y2="${h}"/><text x="${x}" y="${h + 13}" text-anchor="middle"${t.maj ? ' class="maj"' : ''}>${esc(t.text)}</text>`
-    }
-  }
   // dots: the largest first, the open one last
   const max = Math.max(1, ...E.map((e) => e.n))
   const order = list.filter((e) => laneOf.has(e.g)).sort((p, q) => (p.key === S.open) - (q.key === S.open) || q.n - p.n)
@@ -783,28 +673,20 @@ function renderStrip() {
   for (const e of order) s += dotSvg(e, max)
   s += '</g>'
   s += `<defs><clipPath id="plotclip"><rect x="${x0 - RMAX}" y="-${RMAX}" width="${x1 - x0 + 2 * RMAX}" height="${h + 2 * RMAX}"/></clipPath></defs>`
-  // while zoomed, a band under the axis: the whole span with every episode's start, and the window shown
-  let height = h + 18
-  const bandY = h + 22, bandH = 10
-  if (zoomed() && BX) {
-    let ticks = ''
-    for (const e of E) if (passes(e, 'dates')) ticks += `M${BX.X(e.start).toFixed(1)},${bandY + 1}v${bandH - 2}`
-    const wa = Math.max(x0, BX.X(sp.a)), wb = Math.min(x1, BX.X(sp.b))
-    s += `<g id="band"><rect class="track" x="${x0}" y="${bandY}" width="${x1 - x0}" height="${bandH}" rx="2"/><path class="bticks" d="${ticks}"/>`
-      + `<rect class="win" x="${wa}" y="${bandY - 1.5}" width="${Math.max(2, wb - wa)}" height="${bandH + 3}" rx="2"/></g>`
-    height = bandY + bandH + 4
-  }
-  s += `<g id="guide" style="display:none"><line class="gline" x1="0" x2="0" y1="0" y2="${h}"/><rect class="glab" x="0" y="${h + 2}" width="0" height="15" rx="3"/><text class="maj" x="0" y="${h + 13}" text-anchor="middle"></text></g>`
+  s += `<g id="guide" style="display:none"><line class="gline" x1="0" x2="0" y1="0" y2="${h}"/></g>`
   svg.setAttribute('width', W)
-  svg.setAttribute('height', height)
+  svg.setAttribute('height', h + 2)
   svg.innerHTML = s
   svg.dataset.h = h
+  $('lanes').style.height = h + 2 + 'px'
   gut.style.width = G + 'px'
   gut.innerHTML = LANES.map((l, i) => {
     const name = laneName(l)
     const anchor = l.other || !unitsAnchored() ? '' : ` data-anchor="${esc(unitRef(D.keys[l.g]))}" data-anchor-name="${esc(name)}, every episode"`
     return `<div class="lane${l.other ? ' other' : ''}${!l.other && S.src.has(l.g) ? ' sel' : ''}" style="top:${i * LH}px;height:${LH}px;width:${G - 4}px" data-lane="${i}"${anchor}><span class="nm">${esc(name)}</span><span class="n">${num(l.s.eps)}</span></div>`
-  }).join('') + (zoomed() ? `<button class="btn btn-ghost btn-sm unzoom" type="button" style="top:${bandY - 6}px">${ico('x')}All time</button>` : '')
+  }).join('')
+  // the one readable axis, under the lanes
+  thimble.timeAxis(axis, sc)
 }
 const CENTRE = (i) => i * LH + LH / 2
 function dotSvg(e, max) {
@@ -836,104 +718,23 @@ function pie(x, y, r, e, ps) {
   }
   return s + `<circle cx="${x}" cy="${y}" r="${r - 0.75}" fill="none" stroke="${esc(base)}" stroke-width="1.5"/>`
 }
-// zoom: the window of start times shown, about time t by the factor f (above 1 out), within the whole span; the
-// whole span again once the window covers it
-function zoomAt(t, f) {
-  if (!BASE) return
-  const sp = span()
-  let a = t - (t - sp.a) * f, b = t + (sp.b - t) * f
-  if (b - a < 1800) { const m = (a + b) / 2; a = m - 900; b = m + 900 }
-  if (a <= BASE.a && b >= BASE.b) { S.from = S.to = null } else {
-    if (a < BASE.a) { b += BASE.a - a; a = BASE.a }
-    if (b > BASE.b) { a -= b - BASE.b; b = BASE.b }
-    S.from = Math.floor(Math.max(a, BASE.a)); S.to = Math.ceil(b)
-  }
-  rescope()
-}
-function guideText(t) {
-  const sp = span(), len = sp.b - sp.a
-  if (len > 40 * DAY) return dmy(t)
-  return len > 2 * DAY ? `${dm(t)} ${hm(t)}` : `${dm(t)} ${hms(t).slice(0, 5)}`
-}
-// pointer: a click on a dot opens its episode, a drag across the lanes or the band zooms to the start times it spans,
-// a click on the band moves the window there, the wheel zooms about the pointer, a double click shows the whole span
+// pointer: a click on a dot opens its episode under its row in the list; hovering shows the episode and a guide line
 ;(() => {
   const svg = $('plot'), tip = $('tip')
-  let drag = null, wheel = 0, wheelX = 0, wheelRaf = 0
   const xAt = (ev) => ev.clientX - svg.getBoundingClientRect().left
-  const yAt = (ev) => ev.clientY - svg.getBoundingClientRect().top
-  const inBand = (ev) => zoomed() && yAt(ev) > +svg.dataset.h + 18
-  svg.addEventListener('pointerdown', (ev) => {
-    if (ev.button !== 0 || !X || ev.metaKey || ev.ctrlKey) return
-    drag = { x: xAt(ev), band: inBand(ev), dot: ev.target.closest('.dot'), moved: false }
-    svg.setPointerCapture(ev.pointerId)
+  svg.addEventListener('click', (ev) => {
+    const d = ev.target.closest('.dot')
+    if (d) openEpisode(E[+d.dataset.k].key, { scrollList: true })
   })
-  svg.addEventListener('pointermove', (ev) => {
-    if (!drag) return hover(ev)
-    const x = xAt(ev)
-    if (!drag.moved && Math.abs(x - drag.x) < 5) return
-    drag.moved = true
-    tip.style.display = 'none'
-    guide(null)
-    let b = svg.querySelector('.brush')
-    if (!b) { b = document.createElementNS('http://www.w3.org/2000/svg', 'rect'); b.setAttribute('class', 'brush'); svg.appendChild(b) }
-    const a = Math.max(plotX0, Math.min(drag.x, x)), z = Math.min(plotX1, Math.max(drag.x, x)), h = +svg.dataset.h
-    b.setAttribute('x', a); b.setAttribute('width', Math.max(0, z - a))
-    b.setAttribute('y', drag.band ? h + 20 : 0); b.setAttribute('height', drag.band ? 14 : h)
-  })
-  svg.addEventListener('pointerup', (ev) => {
-    if (!drag) return
-    const d = drag
-    drag = null
-    const T = d.band ? BX.T : TOF
-    if (d.moved) {
-      const x = xAt(ev)
-      let a = T(Math.min(d.x, x)), b = T(Math.max(d.x, x))
-      a = Math.floor(a / 60) * 60; b = Math.ceil(b / 60) * 60 - 1
-      if (b > a) { S.from = a; S.to = b; rescope() } else renderStrip()
-      return
-    }
-    if (d.band) {
-      const sp = span(), half = (sp.b - sp.a) / 2, t = BX.T(d.x)
-      const a = Math.max(BASE.a, Math.min(BASE.b - 2 * half, t - half))
-      S.from = Math.floor(a); S.to = Math.ceil(a + 2 * half)
-      return rescope()
-    }
-    if (d.dot) openEpisode(E[+d.dot.dataset.k].key, { scrollList: true })
-  })
-  svg.addEventListener('dblclick', (ev) => { if (!ev.target.closest('.dot') && zoomed()) { S.from = S.to = null; rescope() } })
-  svg.addEventListener('wheel', (ev) => {
-    if (!X || !BASE) return
-    const x = xAt(ev)
-    if (x < plotX0 - RMAX || x > plotX1 + RMAX) return
-    ev.preventDefault()
-    wheel += ev.deltaY * (ev.deltaMode === 1 ? 16 : ev.deltaMode === 2 ? 400 : 1)
-    wheelX = x
-    if (!wheelRaf) wheelRaf = requestAnimationFrame(() => {
-      wheelRaf = 0
-      const f = Math.exp(Math.max(-1.5, Math.min(1.5, wheel * 0.0025)))
-      wheel = 0
-      zoomAt(TOF(wheelX), f)
-    })
-  }, { passive: false })
-  // the time under the pointer, on the axis
   function guide(x) {
     const g = svg.querySelector('#guide')
     if (!g) return
     if (x == null || x < plotX0 || x > plotX1) { g.style.display = 'none'; return }
-    const text = guideText(TOF(x))
     g.style.display = ''
     g.querySelector('line').setAttribute('x1', x); g.querySelector('line').setAttribute('x2', x)
-    const tx = g.querySelector('text')
-    tx.textContent = text
-    const w = tx.getComputedTextLength() + 10
-    const cx = Math.max(plotX0 + w / 2, Math.min(plotX1 + RMAX - w / 2, x))
-    tx.setAttribute('x', cx)
-    const r = g.querySelector('rect')
-    r.setAttribute('x', cx - w / 2); r.setAttribute('width', w)
   }
-  function hover(ev) {
-    guide(yAt(ev) <= +svg.dataset.h + 18 ? xAt(ev) : null)
+  svg.addEventListener('pointermove', (ev) => {
+    guide(xAt(ev))
     const g = ev.target.closest('.dot')
     if (!g) { tip.style.display = 'none'; return }
     const e = E[+g.dataset.k]
@@ -942,11 +743,10 @@ function guideText(t) {
     tip.style.display = 'block'
     tip.style.left = Math.max(4, Math.min(innerWidth - tip.offsetWidth - 8, ev.clientX + 12)) + 'px'
     tip.style.top = Math.min(innerHeight - tip.offsetHeight - 8, ev.clientY + 14) + 'px'
-  }
+  })
   svg.addEventListener('mouseleave', () => { tip.style.display = 'none'; guide(null) })
 })()
 $('gut').onclick = (ev) => {
-  if (ev.target.closest('.unzoom')) { S.from = S.to = null; return rescope() }
   const el = ev.target.closest('[data-lane]')
   if (!el) return
   const l = LANES[+el.dataset.lane]
@@ -966,13 +766,13 @@ const COLDEF = {
   src: ['Source', ''], start: ['Start (UTC)', '', '28 May 2026 16:59'], end: ['End', '', '28 May 23:59'],
   se: ['Start – end (UTC)', 'se', '28 May 2026 16:59'], dur: ['Duration', '', '21h 05m'], n: ['Reports', 'num', '4,812'],
   mix: ['Classes', '', '', 60], rate: ['Rate', '', '', 96], pm: ['Peak/min', 'num', '46'], sig: ['Significant', 'num', '4,812'],
-  coh: ['Cohort', 'num', '100%'], lab: ['Colour', '', '', 64],
+  coh: ['Cohort', 'num', '100%'], lab: ['Color', '', '', 64],
 }
 const ORDER = ['src', 'start', 'end', 'se', 'dur', 'n', 'mix', 'rate', 'pm', 'sig', 'coh', 'lab']
 const SRC_MIN = 124, SRC_CAP = 210, SRC_MAX = 250, MIX_GROW = 70
 let srcNeed = SRC_MIN
 let colKeys = '', colW = null
-// the colour column as wide as its heading, the Colour by choice's name, needs
+// the color column as wide as its heading, the Color by choice's name, needs
 const headW = new Map()
 function headWidth(text) {
   if (headW.has(text)) return headW.get(text)
@@ -1092,11 +892,11 @@ function rowHtml(e, cols) {
   // the open episode under its row, as wide as the list
   return S.open === e.key ? `${row}<tr class="epx"><td colspan="${cols.length}"><div id="ep"></div></td></tr>` : row
 }
-// the classes' key beside the count, whose click keeps the episodes holding that class; hidden where it does not fit
+// the classes' key beside the count: the grey ink each broad class takes in the Classes bars (Size and class in the
+// control row keeps the episodes that hold one); hidden where it does not fit
 function renderKeys() {
   const ck = $('ckeys')
-  // each class a key chip; the one the list keeps is thimble's chosen chip
-  ck.innerHTML = CLS.map(([k, n]) => `<button class="chip chip-key chip-act${S.cls.has(k) ? ' active' : ''}" type="button" data-cls="${k}" style="--c:${clsColour(k)}" title="${S.cls.has(k) ? 'Show every episode again' : `Keep the episodes that hold ${esc(n)}`}"><span class="chip-sw"></span><span class="chip-text">${n}</span></button>`).join('')
+  ck.innerHTML = CLS.map(([k, n]) => `<span class="chip chip-key" style="--c:${clsColour(k)}"><span class="chip-sw"></span><span class="chip-text">${n}</span></span>`).join('')
   fitKeys()
 }
 function fitKeys() {
@@ -1104,21 +904,13 @@ function fitKeys() {
   ck.hidden = false
   if (lh.scrollWidth > lh.clientWidth + 1) ck.hidden = true
 }
-$('ckeys').onclick = (ev) => {
-  const b = ev.target.closest('[data-cls]')
-  if (!b) return
-  const k = b.dataset.cls
-  S.cls.has(k) ? S.cls.delete(k) : S.cls.add(k)
-  rescope()
-}
 function renderList() {
   renderKeys()
   const cols = listCols()
   colKeys = cols.map((c) => c[0]).join()
   renderHead(cols)
   const reports = shown.reduce((a, e) => a + e.n, 0)
-  const all = E.length
-  $('count').innerHTML = `<b>${num(shown.length)}</b> ${shown.length === 1 ? 'episode' : 'episodes'}${shown.length < all ? ` of ${num(all)}` : ''} · <b>${num(reports)}</b> reports`
+  $('count').innerHTML = `<b>${num(shown.length)}</b> ${shown.length === 1 ? 'episode' : 'episodes'} · <b>${num(reports)}</b> reports`
   if (!shown.length) {
     $('tb').innerHTML = `<tr><td colspan="${cols.length}" class="empty">No episode passes these filters${filtersSet() ? '<button class="btn btn-secondary btn-sm" id="clearAll" type="button">Clear filters</button>' : ''}</td></tr>`
     const c = $('clearAll')
@@ -1163,12 +955,14 @@ $('tb').addEventListener('mouseover', (ev) => {
   if (dot) { dot.classList.add('hl'); dot.parentNode.appendChild(dot) }
 })
 $('tb').addEventListener('mouseleave', () => { if (hlDot) hlDot.classList.remove('hl'); hlDot = null })
+// a click opens an episode under its row, which stays under the pointer, and a second click closes it
 $('tb').onclick = (ev) => {
   if (ev.target.closest('#ep')) return epClick(ev)
   const tr = ev.target.closest('tr[data-key]')
   if (!tr) return
-  if (tr.dataset.key === S.open) closeEpisode()
-  else openEpisode(tr.dataset.key, { scrollList: true })
+  const key = tr.dataset.key
+  const find = () => $('tb').querySelector(`tr[data-key="${CSS.escape(key)}"]`)
+  thimble.expand(tr, () => (key === S.open ? closeEpisode() : openEpisode(key)), { details: '#ep', find })
 }
 
 // ---------------------------------------------------------------- all episodes
@@ -1261,7 +1055,7 @@ function renderEpisode() {
   const at = shown.findIndex((x) => x.key === d.key)
   const disp = e ? gdisp(e.g) : 'included'
   const stats = [
-    ['Reports', `${num(n)}${n < d.all ? ` <small>of ${num(d.all)}</small>` : ''}`],
+    ['Reports', num(n)],
     ...(d.all > 1 ? [['Peak minute', num(d.peak_minute)], ['Peak hour', num(d.peak_hour)]] : []),
     ['Significant', num(sig)],
     ['Cohort', share(coh, n)],
@@ -1298,7 +1092,7 @@ function renderRate() {
   if (!box) return
   if (rows.length < 3 || d.end - d.start < 120) { box.innerHTML = ''; box.style.display = 'none'; return }
   box.style.display = ''
-  const L = 46, w = box.clientWidth - 28, h = 54
+  const L = 0, w = box.clientWidth - 28, h = 54
   const spanS = d.end - d.start
   const B = [10, 30, 60, 120, 300, 600, 900, 1800, 3600, 7200, 10800, 21600, 43200, DAY].find((b) => spanS / b <= Math.max(24, Math.min(110, w / 6))) || DAY
   const a = Math.floor(d.start / B) * B, nb = Math.floor((d.end - a) / B) + 1
@@ -1315,7 +1109,7 @@ function renderRate() {
   const fill = (k) => valColour(k === '' ? null : k)
   const order = [...colour.values.map((v) => (v.value == null ? '' : v.value))]
   for (const r of rows) { const k = r.value == null ? '' : r.value; if (!order.includes(k)) order.push(k) }
-  let s = `<line class="base" x1="${L}" x2="${w}" y1="${h + 0.5}" y2="${h + 0.5}"/><line class="base" x1="${L - 3}" x2="${L}" y1="2.5" y2="2.5"/>`
+  let s = `<line class="base" x1="${L}" x2="${w}" y1="${h + 0.5}" y2="${h + 0.5}"/>`
   bins.forEach((b, i) => {
     if (!b.n) return
     let y = h
@@ -1328,10 +1122,9 @@ function renderRate() {
       g += `<rect x="${L + i * bw + 0.5}" y="${y}" width="${Math.max(1, bw - 1)}" height="${hh}" fill="${esc(fill(k))}"/>`
     }
     const t0 = a + i * B
-    g += `<rect x="${L + i * bw}" y="0" width="${bw}" height="${h}" fill="transparent"><title>${hm(Math.max(t0, d.start))}–${hm(Math.min(t0 + B, d.end + 1))} · ${plural(b.n, 'report')}</title></rect>`
+    g += `<rect x="${L + i * bw}" y="0" width="${bw}" height="${h}" fill="transparent"><title>${hm(Math.max(t0, d.start))}–${hm(Math.min(t0 + B, d.end + 1))} · ${plural(b.n, 'report')} · the tallest bar ${plural(max, 'report')}</title></rect>`
     s += `<g class="bin" data-first="${b.first}">${g}</g>`
   })
-  s += `<text x="${L - 6}" y="6" text-anchor="end">${num(max)}</text><text x="${L - 6}" y="17" text-anchor="end">${binName(B)}</text><text x="${L - 6}" y="${h + 3}" text-anchor="end">0</text>`
   const ticks = []
   const step = [60, 300, 600, 900, 1800, 3600, 7200, 10800, 21600, 43200, DAY, 2 * DAY].find((st) => (w - L) / (spanS / st) >= 70) || 2 * DAY
   for (let t = Math.ceil(d.start / step) * step; t <= d.end; t += step) ticks.push(t)
@@ -1390,12 +1183,19 @@ function renderReports() {
     }
     h += reportRow(r)
   }
-  if (rows.length > drawn.length) h += `<tr class="more"><td colspan="${repCols()}"><button class="btn btn-secondary btn-sm" id="moreRows" type="button">Show ${num(Math.min(ROWS, rows.length - drawn.length))} more of ${num(rows.length - drawn.length)}</button></td></tr>`
+  if (rows.length > drawn.length) h += `<tr class="more"><td colspan="${repCols()}"></td></tr>`
   if (!rows.length) h = `<tr><td colspan="${repCols()}" class="empty">No report of this episode passes the label filter</td></tr>`
   tb.innerHTML = h
-  const more = $('moreRows')
-  if (more) more.onclick = () => { S.limit += ROWS; renderReports() }
+  moreSeen.disconnect()
+  const more = tb.querySelector('tr.more')
+  if (more) moreSeen.observe(more)
 }
+// the next reports drawn as the list scrolls near the last
+const moreSeen = new IntersectionObserver((es) => {
+  if (!es.some((x) => x.isIntersecting) || !EP || S.limit >= EP.rows.length) return
+  S.limit += ROWS
+  renderReports()
+}, { root: $('lscroll'), rootMargin: '600px 0px' })
 document.addEventListener('click', (ev) => {
   const a = ev.target.closest('a.ext, [data-copy]')
   if (!a || ev.metaKey || ev.ctrlKey) return
@@ -1429,7 +1229,9 @@ function epClick(ev) {
   if (fc) return thimble.navigate(fc.dataset.file, { browser: true })
   if (ev.target.closest('tr.det')) return
   const tr = ev.target.closest('#rtb tr[data-i]')
-  if (tr) openReport(+tr.dataset.i)
+  if (!tr) return
+  const i = +tr.dataset.i
+  thimble.expand(tr, () => openReport(i), { find: () => $('rtb') && $('rtb').querySelector(`tr[data-i="${i}"]`) })
 }
 async function openReport(i, opts = {}) {
   if (S.rep === i && !opts.keepOpen) { S.rep = null; REP = null; return renderReports() }
@@ -1445,13 +1247,16 @@ async function openReport(i, opts = {}) {
     if (!tr || !rs) return
     box.scrollTop += tr.getBoundingClientRect().top - box.getBoundingClientRect().top - $('thead').getBoundingClientRect().height - rs.querySelector('thead').getBoundingClientRect().height
   }
-  scrollTo()
+  if (opts.scroll) scrollTo()
   let d
   try { d = await thimble.fetch({ op: 'report', i }, { key: 'report' }) } catch (e) { if (e && e.name === 'AbortError') return; throw e }
   if (S.rep !== i) return
   REP = d
-  renderReports()
-  scrollTo()
+  // drawn again where it is: the row stays under the pointer, its details grow under it
+  const tr = $('rtb') && $('rtb').querySelector(`tr[data-i="${i}"]`)
+  if (tr && !opts.scroll) thimble.expand(tr, renderReports, { find: () => $('rtb') && $('rtb').querySelector(`tr[data-i="${i}"]`) })
+  else renderReports()
+  if (opts.scroll) scrollTo()
 }
 function dl(rec, keys, mono = []) {
   return `<dl>${keys.filter((k) => rec[k] != null && rec[k] !== '').map((k) => {
@@ -1470,7 +1275,7 @@ function section(title, part, keys, mono, wide) {
 function details() {
   const d = REP
   if (!d || d.i !== S.rep) return '<div class="empty">Reading the report</div>'
-  return `<div class="det-grid">${section('Catalog row', d.catalog, ['report_id', 'report_url', 'report_date_utc', 'timestamp_precision', 'disposition', 'confidence', 'broad_class', 'why_included', 'caveat'], ['report_id', 'report_url', 'report_date_utc'], true)}`
+  return `<div class="det-grid thimble-details">${section('Catalog row', d.catalog, ['report_id', 'report_url', 'report_date_utc', 'timestamp_precision', 'disposition', 'confidence', 'broad_class', 'why_included', 'caveat'], ['report_id', 'report_url', 'report_date_utc'], true)}`
     + section('Source row', d.source, ['data_source', 'source_basis', 'matched_sources', 'report_date_utc'], ['report_date_utc'])
     + section('Selection provenance', d.provenance, ['source_batch', 'group', 'source', 'record_kind', 'selection_basis', 'description'])
     + section('Supplemental decision', d.supplement, ['source_batch', 'disposition', 'confidence', 'broad_class', 'basis', 'reason', 'classification_provenance'])
@@ -1481,6 +1286,7 @@ function details() {
 // ---------------------------------------------------------------- render
 function renderAll() {
   if (!D) return
+  feedRange()
   compute()
   chipCounts()
   renderBar()
@@ -1490,6 +1296,7 @@ function renderAll() {
 }
 function rescope() {
   if (!D) return
+  feedRange()
   compute()
   chipCounts()
   renderBar()
@@ -1498,7 +1305,7 @@ function rescope() {
   markOpen()
   $('lscroll').scrollTop = 0
 }
-function clearFilters() { S.src.clear(); S.from = S.to = null; S.disp = 'all'; S.minN = 1; S.cls.clear() }
+function clearFilters() { S.src.clear(); S.disp = 'all'; S.minN = 1; S.cls.clear(); range.set(null) }
 let resizeTimer = null
 addEventListener('resize', () => {
   clearTimeout(resizeTimer)

@@ -1,6 +1,6 @@
 {
   "name": "Relay Board",
-  "description": "The messages AI agents left on wiki pages while they ran the same timed tasks: each save read as the lines it added, threaded by task in time order, coloured by kind, wiki, signature or any label with the colour on each message's edge and in the thread's scrollbar, with the page at that save beside it.",
+  "description": "The messages AI agents left on wiki pages while they ran the same timed tasks: each save read as the lines it added, threaded by task in time order, colored by kind, wiki, signature or any label with the color on each message's edge and in the thread's tracks, over a time range that opens on the whole span, with the page at that save opened in place under its message.",
   "claims": [
     "revisions.jsonl",
     "events.jsonl"
@@ -121,6 +121,6 @@
       ]
     }
   ],
-  "built": "2026-10-06T21:49:19+00:00",
-  "version": "49d7f058840e"
+  "built": "2026-10-06T22:42:49+00:00",
+  "version": "499de4d25bb4"
 }

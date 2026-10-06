@@ -1,6 +1,6 @@
 {
   "name": "Wiki Page History",
-  "description": "Every wiki page with its revisions over time, coloured by wiki, kind of save, whether the page was deleted or any label, filtered by wiki, username, dates and name, and one page's edit history read as a wiki shows it: each revision a diff against the one before, by which username and IP prefix, with a link to its line and the administrator's deletes in place.",
+  "description": "Every wiki page with its revisions over time, colored by wiki, kind of save, the page's status (deleted or never deleted) or any label, filtered by wiki, username, name and the time range, and one page's edit history in the range read as a wiki shows it: each revision a diff against the one before, by which username and IP prefix, with a link to its line and the administrator's deletes in place.",
   "claims": [
     "pages.jsonl",
     "revisions.jsonl",
@@ -38,6 +38,13 @@
           "derived": "cleaned",
           "from": "first_write and last_write",
           "how": "read as UTC seconds for the time axis"
+        },
+        {
+          "name": "status",
+          "type": "category",
+          "derived": "computed",
+          "from": "the page's delete events in events.jsonl",
+          "how": "deleted when at least one delete event names the page, else never deleted"
         }
       ]
     },
@@ -130,6 +137,6 @@
       ]
     }
   ],
-  "built": "2026-10-06T21:49:37+00:00",
-  "version": "654330f0c454"
+  "built": "2026-10-06T22:46:06+00:00",
+  "version": "4193ae5338b4"
 }

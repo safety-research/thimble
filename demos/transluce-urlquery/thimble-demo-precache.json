@@ -156,13 +156,13 @@
   },
   {
    "path": "extension/views/activity-timeline/view.html",
-   "bytes": 80836,
-   "sha256": "379564b773a0853661b684c53fc3c65597b63594baff53870fde8f20555e2bfc"
+   "bytes": 65621,
+   "sha256": "aec6b6c8eddc1ce77400b8a4033a18747863ba3c7249d1727f63a928c52b1668"
   },
   {
    "path": "extension/views/activity-timeline/view.json",
-   "bytes": 2778,
-   "sha256": "84646a9721f892226c09fd42717b91395944d14080c8eea946aa48d7106915c5"
+   "bytes": 2730,
+   "sha256": "4a12a156e6daf2c3a9d02cd04a0cbe7ea75ce4017c4ebd1eafc0b12e073fd728"
   },
   {
    "path": "extension/views/episode-browser/reader.py",
@@ -171,13 +171,13 @@
   },
   {
    "path": "extension/views/episode-browser/view.html",
-   "bytes": 91934,
-   "sha256": "5aba7209478597180414b51e62b8aee96ea4832c85d9ed4b7547c7d1e6000eed"
+   "bytes": 81198,
+   "sha256": "d7935280880cf108d4fcd56fc883ff22b3e6d1b757849d58178db06fa10c6fcb"
   },
   {
    "path": "extension/views/episode-browser/view.json",
-   "bytes": 5503,
-   "sha256": "6ceae74510b0ce5d627c497cb287b6b3484adae2b8d07bf99cef54fe16ee8566"
+   "bytes": 5545,
+   "sha256": "46a6136a4b56bb9a426b04fcf8d70e76faf00a6cee9a80dec4a3381c93a40879"
   },
   {
    "path": "investigations/main/investigation.json",
@@ -2940,18 +2940,18 @@
   {
    "slug": "activity-timeline",
    "name": "Activity Timeline",
-   "version": "8650116bd270",
+   "version": "aa07e9ef2008",
    "from": "activity-timeline",
-   "from_version": "8650116bd270",
-   "picked": "live at 8650116bd270"
+   "from_version": "aa07e9ef2008",
+   "picked": "live at aa07e9ef2008"
   },
   {
    "slug": "episode-browser",
    "name": "Episode Browser",
-   "version": "cc9f24c6a856",
+   "version": "e0548901f6c5",
    "from": "episode-browser",
-   "from_version": "cc9f24c6a856",
-   "picked": "live at cc9f24c6a856"
+   "from_version": "e0548901f6c5",
+   "picked": "live at e0548901f6c5"
   }
  ]
 }

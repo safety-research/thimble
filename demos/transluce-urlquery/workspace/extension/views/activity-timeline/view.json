@@ -1,6 +1,6 @@
 {
   "name": "Activity Timeline",
-  "description": "Every URLQuery report on one UTC time axis, a lane per data source, opening on the months that hold 99% of the reports with the data's whole span boxed in the strip above, zoomable from years to single seconds, coloured by confidence, class, disposition, source basis, catalog or a label with thimble's Colour by, a lane opened taller with its reports listed, and any report opened in full beside the lanes.",
+  "description": "Every URLQuery report on one UTC time axis, a lane per data source, under thimble's time range selector, which opens on the data's whole span and zooms from years to single seconds with its viewfinder; colored by confidence, class, disposition, source basis, catalog or a label with thimble's Color by; each report opens in place in the list beside the lanes.",
   "scope": [
     "all-reports.csv",
     "report-sources.csv",
@@ -71,6 +71,6 @@
     }
   ],
   "libs": [],
-  "built": "2026-10-06T21:51:58+00:00",
-  "version": "8650116bd270"
+  "built": "2026-10-06T22:41:31+00:00",
+  "version": "aa07e9ef2008"
 }

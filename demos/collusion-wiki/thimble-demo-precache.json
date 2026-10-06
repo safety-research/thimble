@@ -116,28 +116,28 @@
   },
   {
    "path": "extension/views/relay-board/view.html",
-   "bytes": 74337,
-   "sha256": "4199e72a15ed8c155d19b33a69137959aa90cab5c4c8a9340edeb4fbe16a493c"
+   "bytes": 65959,
+   "sha256": "69286cd60cebbe405f97fad088a893ffda85a026a6a6fd98c9d0d67e8340f919"
   },
   {
    "path": "extension/views/relay-board/view.json",
-   "bytes": 4896,
-   "sha256": "cbbe29323a0f787b955f0d67c430169497b96aaaa22538559bdc7cad2470466f"
+   "bytes": 4963,
+   "sha256": "cf025a2e30e971a755f8c53fbe1de92c495e6f06d1e733544adc6b5d62a91ba1"
   },
   {
    "path": "extension/views/wiki-page-history/reader.py",
-   "bytes": 42212,
-   "sha256": "c7c787239455d9280889a77a34af3f6be84323997fd375575425990fee2c0b9c"
+   "bytes": 42800,
+   "sha256": "396498721a520f11c59d0b5e54303f2bf97c868c0da1f8cb30f21675f3d81435"
   },
   {
    "path": "extension/views/wiki-page-history/view.html",
-   "bytes": 80833,
-   "sha256": "0faa8f0f546f299a246d9a570714c83c09c1f4f7b4fef091b387a8fd892680a9"
+   "bytes": 80708,
+   "sha256": "98b935ac73fc09d44bb84e232bbce67a989d4dcdeaa91b89a609fa373156a512"
   },
   {
    "path": "extension/views/wiki-page-history/view.json",
-   "bytes": 4579,
-   "sha256": "f29baf0107c947dd0c14915fa8de39387c7d2e613aea3129d39a287fee007016"
+   "bytes": 4883,
+   "sha256": "ab60b61e25e20d5826bfdfb5a1657ad79a9e29219e829ff791e2b17d5ae949c0"
   },
   {
    "path": "investigations/main/investigation.json",
@@ -1748,18 +1748,18 @@
   {
    "slug": "relay-board",
    "name": "Relay Board",
-   "version": "49d7f058840e",
+   "version": "499de4d25bb4",
    "from": "relay-board",
-   "from_version": "49d7f058840e",
-   "picked": "live at 49d7f058840e"
+   "from_version": "499de4d25bb4",
+   "picked": "live at 499de4d25bb4"
   },
   {
    "slug": "wiki-page-history",
    "name": "Wiki Page History",
-   "version": "654330f0c454",
+   "version": "4193ae5338b4",
    "from": "wiki-page-history",
-   "from_version": "654330f0c454",
-   "picked": "live at 654330f0c454"
+   "from_version": "4193ae5338b4",
+   "picked": "live at 4193ae5338b4"
   }
  ]
 }

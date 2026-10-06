@@ -1,6 +1,6 @@
 {
   "name": "Episode Browser",
-  "description": "The URLQuery report catalog grouped into episodes, the bursts of one data source's reports less than two hours apart, as a strip of every episode in time and a sortable list with each one's span, size and mix of direct requests, proxies and submitted programs, coloured by confidence, class, disposition, source basis, cohort or a label with thimble's Colour by; the episodes in view summed up on demand, any episode opened under its row with its reports in time order and any report in full with its source row, provenance and decisions.",
+  "description": "The URLQuery report catalog grouped into episodes, the bursts of one data source's reports less than two hours apart, as a time range over every episode with lanes of the episodes in it and a sortable list with each one's span, size and mix of direct requests, proxies and submitted programs, colored by confidence, class, disposition, source basis, cohort or a label with thimble's Color by; the episodes in view summed up on demand, any episode opened under its row with its reports in time order and any report in full under its row with its source row, provenance and decisions.",
   "scope": [
     "all-reports.csv",
     "report-sources.csv",
@@ -52,7 +52,7 @@
           "name": "value",
           "type": "category",
           "derived": "computed",
-          "from": "the Colour by choice",
+          "from": "the Color by choice",
           "how": "the report's confidence, broad_class, disposition, source_basis or cohort, or a label's value on its catalog row or source row"
         }
       ]
@@ -114,7 +114,7 @@
           "name": "cv",
           "type": "list",
           "derived": "computed",
-          "from": "the Colour by choice",
+          "from": "the Color by choice",
           "how": "the episode's reports the label filter keeps, per value of the choice"
         }
       ]
@@ -145,6 +145,6 @@
     }
   ],
   "libs": [],
-  "built": "2026-10-06T21:52:08+00:00",
-  "version": "cc9f24c6a856"
+  "built": "2026-10-06T22:42:32+00:00",
+  "version": "e0548901f6c5"
 }
