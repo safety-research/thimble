@@ -1005,29 +1005,29 @@ def _session_chat(c: str, cell: dict[str, Any], author: str) -> str | None:
     return None
 
 
-def _role(c: str) -> dict[str, Any]:
-    return config.models_for(c).get("verify") or dict(config.ROLE_MODELS_DEFAULT["verify"])
+def _role(c: str) -> dict[str, str]:
+    """The model, effort and speed of the `verify` role's calls (config.call_settings)."""
+    return config.call_settings(c, "verify")
 
 
 def read_effort(c: str) -> str:
-    """The effort the card check reads a card at: the `verify` role's (config.models_for)."""
-    return str(_role(c).get("effort") or config.ROLE_MODELS_DEFAULT["verify"]["effort"])
+    """The effort the card check reads a card at: the `verify` role's (config.call_settings)."""
+    return _role(c)["effort"]
 
 
 async def _call(c: str, system: str, user: str, tool: Any, images: list[tuple[bytes, str]], *, effort: str,
                 model: str | None = None) -> Any:
-    """The reading: one model.structured call on `model`, else the `verify` role's model, and that role's fast mode at
-    `effort`. Retry waits and a refused reading before the fallback are left out of the check's time (_on_retry,
-    _on_fallback)."""
+    """The reading: one model.structured call on `model`, else the `verify` role's model, at that role's speed and
+    `effort`, else the role's. Retry waits and a refused reading before the fallback are left out of the check's time
+    (_on_retry, _on_fallback)."""
     from . import model as model_mod  # noqa: PLC0415
 
     role = _role(c)
     run = _current.get()
     return await model_mod.structured(
-        user, tool=tool, model=model or role.get("model") or config.ROLE_MODELS_DEFAULT["verify"]["model"],
-        effort=effort or None,
+        user, tool=tool, model=model or role["model"], effort=effort or role["effort"],
         system=system, cwd=config.corpus_dir(c),
-        speed="fast" if role.get("fast") else "standard", images=images, idle_timeout_s=READ_IDLE_S,
+        speed=role["speed"], images=images, idle_timeout_s=READ_IDLE_S,
         on_retry=_on_retry(run) if run is not None else None,
         on_fallback=_on_fallback(run) if run is not None else None)
 

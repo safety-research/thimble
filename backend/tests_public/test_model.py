@@ -105,6 +105,8 @@ def install(monkeypatch, sessions, cls=FakeClient, **extra):
 async def call(**kw):
     kw.setdefault("tool", SPEC)
     kw.setdefault("model", "claude-sonnet-5")
+    kw.setdefault("effort", "low")
+    kw.setdefault("speed", "standard")
     kw.setdefault("cwd", "/tmp")
     return await model.structured("the prompt", **kw)
 

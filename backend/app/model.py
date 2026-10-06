@@ -1,5 +1,6 @@
 """model.structured: one structured call on a model, whose answer is the input of one output tool. Its callers are the
-labels classifier (concepts.classify_structured), the card check, view review and the viewer suggestion.
+labels classifier (concepts.classify_structured), the label draft, view fit, the card check, view review, the viewer
+suggestion and a program's `ask` (harness.ask), each at its role's model, effort and speed (config.call_settings).
 
 Each call is an Agent SDK session on the user's own `claude` (sdk.build) whose one in-process MCP tool's schema is the
 output schema. It returns a CallResult status (ok, refused, rate_limited, truncated, no_tool_call, timeout, error) and
@@ -560,22 +561,24 @@ async def structured(
     *,
     tool: ToolSpec,
     model: str,
-    effort: str | None = None,
+    effort: str,
+    speed: str,
     system: str = "",
     cwd: str | Path,
     idle_timeout_s: float = DEFAULT_IDLE_TIMEOUT_S,
     corrective_retries: int = 1,
-    speed: str | None = None,
     images: Sequence[tuple[bytes, str]] = (),
     on_retry: Callable[[int, float, str, BaseException | None], Any] | None = None,
     on_fallback: Callable[[float], Any] | None = None,
 ) -> CallResult:
     """One structured call. Never raises; every failure is a CallResult.
 
-    `system` is the call's own system prompt, sent whole with the output tool's instruction after it (no Claude Code
-    preset). `images` are (bytes, media type) pairs sent before the prompt's text. `on_retry(n, wait_s, error_class,
-    exc)` hears each wait before a rule 2 or 4 retry and `on_fallback(spent_s)` the time a refused call took, so a
-    caller's own time limit can exclude them. `speed` runs the call in fast mode on a model that has it.
+    `model`, `effort` and `speed` are the caller's role's (config.call_settings), always given, so nothing comes from
+    the analyst's Claude Code settings; a call without a model or an effort ends `error` before it starts. `speed` fast
+    runs the call in fast mode on a model that has it. `system` is the call's own system prompt, sent whole with the
+    output tool's instruction after it (no Claude Code preset). `images` are (bytes, media type) pairs sent before the
+    prompt's text. `on_retry(n, wait_s, error_class, exc)` hears each wait before a rule 2 or 4 retry and
+    `on_fallback(spent_s)` the time a refused call took, so a caller's own time limit can exclude them.
 
     Retry rules: (1) no_tool_call or schema-invalid: up to `corrective_retries` extra turns
     saying what was wrong; (2) a transient failure: a fresh conversation after each wait of retry.model_knobs()'s
@@ -611,12 +614,12 @@ async def _structured(
     *,
     tool: ToolSpec,
     model: str,
-    effort: str | None = None,
+    effort: str,
+    speed: str,
     system: str = "",
     cwd: str | Path,
     idle_timeout_s: float = DEFAULT_IDLE_TIMEOUT_S,
     corrective_retries: int = 1,
-    speed: str | None = None,
     images: Sequence[tuple[bytes, str]] = (),
     on_retry: Callable[[int, float, str, BaseException | None], Any] | None = None,
 ) -> CallResult:
@@ -647,6 +650,9 @@ async def _structured(
 
     if not config.CLI_PATH:
         return finish(CallResult(status="error", detail=config.NO_CLAUDE_FOUND))
+    if not str(requested or "").strip() or not str(effort or "").strip():
+        return finish(CallResult(status="error", detail=f"the {tool.name} call names no model or no effort, which "
+                                                        "it would take from Claude Code's settings (config.call_settings)"))
     try:
         # the metaschema walk, off the loop
         await asyncio.to_thread(jsonschema.Draft202012Validator.check_schema, tool.input_schema)

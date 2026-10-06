@@ -486,8 +486,9 @@ def records_text(shots: list[dict[str, Any]]) -> str:
     return text if len(text) <= RECORDS_CHARS else text[: RECORDS_CHARS - 1] + "…"
 
 
-def _role(c: str) -> dict[str, Any]:
-    return config.models_for(c).get("verify") or dict(config.ROLE_MODELS_DEFAULT["verify"])
+def _role(c: str) -> dict[str, str]:
+    """The model, effort and speed of the `verify` role's calls (config.call_settings)."""
+    return config.call_settings(c, "verify")
 
 
 def _semaphore() -> asyncio.Semaphore:
@@ -500,16 +501,15 @@ def _semaphore() -> asyncio.Semaphore:
 
 async def _call(c: str, system: str, user: str, tool: Any, images: list[tuple[bytes, str]], effort: str,
                 model: str | None = None) -> Any:
-    """The reading: one model.structured call on `model`, else the `verify` role's model, at `effort`. Tests replace
-    it."""
+    """The reading: one model.structured call on `model`, else the `verify` role's model, at that role's speed and
+    `effort`, else the role's. Tests replace it."""
     from . import model as model_mod  # noqa: PLC0415
 
     role = _role(c)
     return await model_mod.structured(
-        user, tool=tool, model=model or role.get("model") or config.ROLE_MODELS_DEFAULT["verify"]["model"],
-        effort=effort or None,
+        user, tool=tool, model=model or role["model"], effort=effort or role["effort"],
         system=system, cwd=config.corpus_dir(c),
-        speed="fast" if role.get("fast") else "standard", images=images, idle_timeout_s=READ_IDLE_S)
+        speed=role["speed"], images=images, idle_timeout_s=READ_IDLE_S)
 
 
 def review_input(c: str, prop: dict[str, Any], view: dict[str, Any], shots: list[dict[str, Any]], ask: bool) -> dict[str, Any]:
@@ -563,7 +563,7 @@ async def review_task(c: str, inp: dict[str, Any], *, model: str | None = None) 
         except OSError:
             continue
         images.append((await asyncio.to_thread(card_check.fit_image, png), "image/png"))
-    effort = str(_role(c).get("effort") or config.ROLE_MODELS_DEFAULT["verify"]["effort"])
+    effort = _role(c)["effort"]
     kw = {"model": model} if model else {}
     return await _call(c, _fill(secs["review"], {}), user, findings_tool(c, ask), images, effort, **kw)
 
@@ -578,7 +578,7 @@ async def read(c: str, run: _Run, prop: dict[str, Any], view: dict[str, Any], sh
 
     inp = review_input(c, prop, view, shots, ask)
     schema = findings_tool(c, ask).input_schema
-    effort = str(_role(c).get("effort") or config.ROLE_MODELS_DEFAULT["verify"]["effort"])
+    effort = _role(c)["effort"]
     wait = CAPACITY_WAIT_S
     while True:
         async with _semaphore():

@@ -166,10 +166,9 @@ def apply_workers() -> int:
     return max(1, min((os.cpu_count() or 2) - 1, 8))
 
 
-def labels_model(c: str) -> tuple[str, str | None]:
-    """(model, effort) of the labels role for a workspace (config.models_for)."""
-    conf = config.models_for(c)["labels"]
-    return str(conf["model"]), conf.get("effort")
+def labels_model(c: str) -> dict[str, str]:
+    """The model, effort and speed of the labels role's calls for a workspace (config.call_settings)."""
+    return config.call_settings(c, "labels")
 
 
 # --------------------------------------------------------------------------- storage
@@ -1823,14 +1822,15 @@ async def labels_task(c: str, inp: dict, *, model: str | None = None,
 
     with prompts.custom(userconf.prompt_files(c, "labels")):
         system, user = build_classify_prompt(inp)
-    model_name, effort = labels_model(c)
-    model_name = model or str(inp["label"].get("model") or "") or model_name
+    role = labels_model(c)
+    model_name = model or str(inp["label"].get("model") or "") or role["model"]
     with capture.scope("concepts labels", keep=True):
         return await model_mod.structured(
             user,
             tool=labels_tool(inp["label"]),
             model=model_name,
-            effort=effort,
+            effort=role["effort"],
+            speed=role["speed"],
             system=system,
             cwd=config.corpus_dir(c),
             on_retry=on_retry,
@@ -4609,10 +4609,10 @@ async def draft_task(c: str, inp: dict, *, model: str | None = None) -> Any:
     with prompts.custom(tasks.files(c, "labels")):
         prompt = labels_part("draft", description=str(inp.get("description") or ""),
                              records=labels_part("records", **slots) if slots["lines"] else "")
-    model_name, effort = labels_model(c)
+    role = labels_model(c)
     with capture.scope("concepts draft", keep=True):
-        return await model_mod.structured(prompt, tool=draft_tool(), model=model or model_name, effort=effort,
-                                          cwd=config.corpus_dir(c))
+        return await model_mod.structured(prompt, tool=draft_tool(), model=model or role["model"],
+                                          effort=role["effort"], speed=role["speed"], cwd=config.corpus_dir(c))
 
 
 def _call_failed(call: Any) -> HTTPException:

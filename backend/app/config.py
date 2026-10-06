@@ -1039,3 +1039,13 @@ def models_for(c: str | None = None) -> dict[str, dict[str, Any]]:
         conf["fast"] = role in ROLES_WITH_FAST and bool(conf.get("fast")) and has_fast_mode(conf["model"])
         out[role] = conf
     return out
+
+
+def call_settings(c: str | None, role: str) -> dict[str, str]:
+    """The model, effort and speed of a structured call (model.structured) made for `role` in workspace `c`: the role's
+    model, effort and fast mode as models_for resolves them, the values GET /settings reports for the role, so a call
+    takes none of them from the analyst's Claude Code settings. Every caller passes all three, and model.structured
+    refuses a call without a model or an effort; the orientation's ultracode runs at its level (sdk.build)."""
+    conf = models_for(c)[role]
+    return {"model": str(conf["model"]), "effort": str(conf["effort"]),
+            "speed": "fast" if conf.get("fast") else "standard"}

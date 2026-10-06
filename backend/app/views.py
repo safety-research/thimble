@@ -4233,14 +4233,13 @@ def _fmt_size(n: int) -> str:
 
 
 async def _suggest_call(c: str, system: str, user: str, tool: Any, model: str | None = None) -> Any:
-    """The proposal's one model call: `model`, else the `dev` role's model, at low effort (the fallback model after a
-    refusal, as model.structured runs it). Tests replace it."""
+    """The proposal's one model call: `model`, else the `dev` role's model, at the `dev` role's effort and speed
+    (config.call_settings; the fallback model after a refusal, as model.structured runs it). Tests replace it."""
     from . import model as model_mod  # noqa: PLC0415
 
-    role = config.models_for(c).get("dev") or dict(config.ROLE_MODELS_DEFAULT["dev"])
-    return await model_mod.structured(user, tool=tool,
-                                      model=model or role.get("model") or config.ROLE_MODELS_DEFAULT["dev"]["model"],
-                                      effort="low", system=system, cwd=config.corpus_dir(c))
+    role = config.call_settings(c, "dev")
+    return await model_mod.structured(user, tool=tool, model=model or role["model"], effort=role["effort"],
+                                      speed=role["speed"], system=system, cwd=config.corpus_dir(c))
 
 
 def _suggest_sections(c: str) -> tuple[dict[str, str], Any]:
