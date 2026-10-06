@@ -63,7 +63,9 @@ const OFF = new Set(['', '0', 'false', 'no', 'off'])
 // every PLAN_POLL_MS, and plan mode says so in the reason ("Cannot write to … while in plan mode"); the server hears a
 // change at once, not at main's next turn (live check L21)
 export const PLAN_POLL_MS = 2000
-const PLAN_PROBE = '.thimble-plan-probe' // in main's folder; never written
+// never written; outside main's folder and every rule of thimble's fence, whose ask or deny would decide first and say
+// nothing of plan mode (main's corpus is an ask rule)
+const PLAN_PROBE = '/tmp/.thimble-plan-probe'
 const PLAN_REASON = /\bplan mode\b/i
 
 const isObj = (v: unknown): v is Json => typeof v === 'object' && v !== null && !Array.isArray(v)
@@ -286,7 +288,7 @@ async function watchPlan($: Engine, m: State, gen: number): Promise<void> {
     if (!m.active || gen !== m.gen) return
     let plan: boolean
     try {
-      const got = await $.tool.check({ tool: 'Write', input: { file_path: `${m.cwd}/${PLAN_PROBE}`, content: '' } } as Parameters<Engine['tool']['check']>[0])
+      const got = await $.tool.check({ tool: 'Write', input: { file_path: PLAN_PROBE, content: '' } } as Parameters<Engine['tool']['check']>[0])
       plan = PLAN_REASON.test(text((got as Json).reason))
     } catch {
       continue

@@ -357,13 +357,14 @@ describe('requests', () => {
     const until = async (n: number) => { for (let i = 0; i < 400 && e.server.modes.length < n; i++) await new Promise(r => setTimeout(r, 5)) }
     await until(1)
     expect(e.server.modes[0]).toEqual({ cwd: CWD, session: MAIN, plan: false })
-    e.onCheck('Cannot write to /c/.thimble-plan-probe while in plan mode.')
+    e.onCheck('Cannot write to /tmp/.thimble-plan-probe while in plan mode.')
     await until(2)
     expect(e.server.modes.map((b) => b.plan)).toEqual([false, true])
     e.onCheck("Claude requested permissions to write, but you haven't granted it yet.")
     await until(3)
     expect(e.server.modes.map((b) => b.plan)).toEqual([false, true, false])
-    expect(e.$.tool.check).toHaveBeenLastCalledWith({ tool: 'Write', input: { file_path: `${CWD}/.thimble-plan-probe`, content: '' } })
+    // a path no rule of thimble's fence names, so that plan mode is what decides it (main's corpus is an ask rule)
+    expect(e.$.tool.check).toHaveBeenLastCalledWith({ tool: 'Write', input: { file_path: '/tmp/.thimble-plan-probe', content: '' } })
     expect(e.$.tool.call).not.toHaveBeenCalledWith(expect.objectContaining({ tool: 'Write' })) // never written
     await e.end('other')
   })
