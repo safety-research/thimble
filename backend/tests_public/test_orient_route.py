@@ -259,6 +259,35 @@ async def test_a_follow_up_to_an_earlier_version_s_or_session_s_orientation_is_r
         session._live.pop(CORPUS, None)
 
 
+async def test_an_orientation_stopped_with_esc_takes_no_follow_up_and_says_to_start_a_new_one(bridge, models,
+                                                                                            workspaces_tmp, analyst,
+                                                                                            unmeasured):
+    """Live check L9: after Esc in its agent view Claude Code resumes the orientation no more, and the browser showed its
+    refusal with a Send again that could never work. The composer's message now gets thimble's text that it cannot be
+    continued (410, as an earlier version's) and main's message_orientation the same, with nothing sent; when only
+    Claude Code's answer to the send says so, that answer marks it the same way."""
+    agent = await _orientation()
+    await _ended(agent)
+    bridge.answers.append({"error": f"Agent {agent} was stopped by the user and won't be resumed. Treat its work as "
+                                    "cancelled; only launch a new agent if the user explicitly asks."})
+    with pytest.raises(HTTPException) as e:
+        await orient_session.message_route(CORPUS, orient_session.MessageBody(text="And May?"), analyst)
+    assert e.value.status_code == 410 and e.value.detail == tools.hint("orient-continue-stopped-by-user")
+    assert "Start a new orientation" in e.value.detail
+    assert subagents.cancelled(CORPUS, agent)
+    sent = len(bridge.ops("send"))
+    with pytest.raises(HTTPException) as e:
+        await orient_session.message_route(CORPUS, orient_session.MessageBody(text="And June?"), analyst)
+    assert e.value.status_code == 410
+    res = await tools.call(CORPUS, "message_orientation", {"message": "And June?"})
+    assert res.is_error and res.text.endswith(tools.hint("orient-continue-stopped-by-user"))
+    assert len(bridge.ops("send")) == sent, "nothing more reaches the module"
+    chat = orientation.read_run(CORPUS)["chats"]["orient"]
+    assert agents.read_meta(CORPUS, chat)["continue"] == subagents.CANCELLED
+    subagents.run_again(CORPUS, agent, "human")  # should Claude Code ever run it again, it takes messages again
+    assert not subagents.cancelled(CORPUS, agent) and agents.read_meta(CORPUS, chat).get("continue") is None
+
+
 MAIN_SID, EARLIER_SID = "11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222"
 
 

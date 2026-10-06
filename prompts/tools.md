@@ -1436,6 +1436,10 @@ This orientation ran in an earlier Claude Code session. To continue it, quit and
 
 This orientation ran in an earlier version of thimble and cannot be continued. Start a new orientation to explore further.
 
+## orient-continue-stopped-by-user
+
+This orientation was stopped with Esc in your terminal, and Claude Code does not continue an agent stopped that way. Start a new orientation to explore further.
+
 ## message_orientation-none
 
 No orientation has run in this workspace. Call `start_orientation` to start one.

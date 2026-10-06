@@ -738,8 +738,9 @@ export interface OrientRun {
   chats?: { orient?: string }
 }
 
-/** Why a run of one of thimble's agents stopped (subagents.STOPPED_*): the analyst's Stop, main's quit, a refusal. */
-export type StoppedBy = 'analyst' | 'quit' | 'refused' | (string & {})
+/** Why a run of one of thimble's agents stopped (subagents.STOPPED_*): the analyst's Stop, main's quit, a refusal, or
+ * Esc in its agent view (`user`), after which Claude Code resumes it no more. */
+export type StoppedBy = 'analyst' | 'quit' | 'refused' | 'user' | (string & {})
 
 /** The code tickets' permission mode, the one agent with a mode of its own (backend modes.AGENTS): `manual` sends each
  * request to the card, `auto` runs in Claude Code's auto mode, `bypass` grants every request. */
@@ -1868,8 +1869,8 @@ export interface ChatMeta {
   /** why it stopped: the analyst's Stop, main's quit, a refusal */
   stopped_by?: StoppedBy | null
   /** where a follow-up can continue it: `here` (after `thimble --continue`), an earlier Claude Code session, or an
-   * earlier version of thimble */
-  continue?: 'here' | 'earlier-session' | 'earlier-version' | (string & {}) | null
+   * earlier version of thimble; nowhere after Esc in its agent view (`stopped-by-user`) */
+  continue?: 'here' | 'earlier-session' | 'earlier-version' | 'stopped-by-user' | (string & {}) | null
   /** a job waiting in its queue (a view build, a report check) */
   waiting?: 'queued' | (string & {}) | null
   /** the orientation while it waits for its critic's report */

@@ -131,6 +131,11 @@ class EarlierVersion(RuntimeError):
     """The orientation ran in an earlier version of thimble (its chat has no agent id), so it cannot be continued."""
 
 
+class StoppedInTerminal(EarlierVersion):
+    """The orientation was stopped with Esc in its agent view, after which Claude Code resumes it no more
+    (subagents.mark_cancelled): it cannot be continued either, so every caller of latest treats it as EarlierVersion."""
+
+
 _closing: dict[str, asyncio.Event] = {}  # the workspaces whose first run ended and is being measured (_measured)
 
 
@@ -400,6 +405,8 @@ def latest(c: str) -> tuple[dict[str, Any], str, str]:
     if not agent_id or meta.get("route") != "subagent":
         raise EarlierVersion(tools.hint("orient-continue-earlier-version"))
     a = subagents.agent(c, agent_id) or {}
+    if a.get("cancelled") or meta.get("continue") == subagents.CANCELLED:
+        raise StoppedInTerminal(tools.hint("orient-continue-stopped-by-user"))
     sessions = [str(s) for s in a.get("sessions") or meta.get("sessions") or [meta.get("session")] if s]
     lv = session.current(c)
     if lv is not None and sessions and lv.sid not in sessions:
@@ -483,6 +490,8 @@ async def send(c: str, text: str, by: str = BROWSER, extension: str = "") -> dic
         return {"status": "held", "chat": chat}
     body, told = with_lead(c, text)
     ans = await subagents.send(c, agent_id, body)
+    if ans.refused and subagents.cancelled(c, agent_id):  # Claude Code said it resumes it no more (Esc)
+        raise StoppedInTerminal(tools.hint("orient-continue-stopped-by-user"))
     if ans.refused:
         raise RuntimeError(ans.reason or ans.kind or "the module did not pass it on")
     _show_message(c, chat, text, by, k)
@@ -1081,7 +1090,7 @@ async def message_route(c: str, body: MessageBody, request: Request) -> dict[str
     """The orientation thread's composer: a click, so the analyst's cookie (403 without it), and the follow-up goes
     through the module (send): {status: sent | held, chat}. 400 for an empty message, 404 when no orientation has run,
     409 with the earlier-session text (and for a pre-cache, plan mode, or a module that did not pass it on), 410 with
-    the earlier-version text."""
+    the earlier-version text or, for an orientation stopped with Esc, the text that it cannot be continued."""
     from . import events  # noqa: PLC0415
 
     subagents.analyst_only(request)

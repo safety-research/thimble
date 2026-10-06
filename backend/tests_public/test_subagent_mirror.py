@@ -263,10 +263,13 @@ async def test_a_later_run_s_task_notification_ends_it_once_and_an_older_one_is_
 
 async def test_a_killed_run_ends_stopped_and_one_cut_off_by_the_quit_says_continue_here(bridge, project, ended):
     lv, chat, path = await _click_orientation(bridge, project)
-    _write(Path(lv.transcript_path), _notice(AGENT, "killed", summary="stopped by user"), END)
+    # a TaskStop's notification, the browser's Stop or main's (Claude Code 2.1.291's words)
+    _write(Path(lv.transcript_path), _notice(AGENT, "killed", summary='Agent "orientation: x" was stopped by Claude'),
+           END)
     session.tail_once(lv)
     assert ended[-1][:4] == ("ended", "orientation", 0, "stopped")
     assert subagents.agent(CORPUS, AGENT)["stopped_by"] == "analyst"
+    assert not subagents.cancelled(CORPUS, AGENT), "a TaskStop leaves it resumable"
     subagents.run_again(CORPUS, AGENT, "coordinator")
     _write(Path(lv.transcript_path), _notice(AGENT, "stopped", summary='Background agent "orientation" didn\'t finish '
                                              "before the previous session ended"), END)
@@ -587,3 +590,27 @@ async def test_the_server_restarted_under_main_follows_the_running_agents_again(
     time.sleep(0.01)
     session.tail_once(lv2)
     assert ended[-1] == ("ended", "orientation", 0, "done", "after the restart")
+
+
+async def test_an_orientation_stopped_with_esc_is_recorded_as_one_claude_code_resumes_no_more(bridge, project, ended):
+    """Live check L9: Esc in the agent view makes Claude Code mark the agent stopped by the user ("was stopped by user"
+    in its notification), and every later SendMessage fails with "was stopped by the user and won't be resumed". The
+    mirror records that stop as final (stopped_by user, the chat's `continue: stopped-by-user`), from the notification
+    or from the error main's own SendMessage got, so the browser offers a new orientation instead of a follow-up."""
+    lv, chat, path = await _click_orientation(bridge, project)
+    _write(Path(lv.transcript_path), _notice(AGENT, "killed", summary='Agent "orientation: x" was stopped by user'), END)
+    session.tail_once(lv)
+    assert ended[-1][:4] == ("ended", "orientation", 0, "stopped")
+    assert subagents.agent(CORPUS, AGENT)["stopped_by"] == subagents.STOPPED_USER
+    assert subagents.cancelled(CORPUS, AGENT)
+    meta = agents.read_meta(CORPUS, chat)
+    assert (meta["continue"], meta["stopped_by"]) == (subagents.CANCELLED, "user")
+
+    with subagents.update(CORPUS) as state:  # as if no notification had said so
+        sf.registry(state)[AGENT]["cancelled"] = None
+    _write(Path(lv.transcript_path), _human("ask it"),
+           _assistant(_use("toolu_s1", "SendMessage", {"to": AGENT, "message": "and April?"})),
+           _result("toolu_s1", f"Agent {AGENT} was stopped by the user and won't be resumed. Treat its work as "
+                               "cancelled; only launch a new agent if the user explicitly asks.", error=True), END)
+    session.tail_once(lv)
+    assert subagents.cancelled(CORPUS, AGENT), "main's SendMessage got Claude Code's text"

@@ -50,11 +50,12 @@ export function startGateOpen(orientation: string | null | undefined, orientChat
   return orientation === 'refused' || (!orientation && orientChats === 0)
 }
 
-/** Whether main's chat shows the gate in place of its composer: main is shown and loaded, the analyst neither skipped
- * nor pressed Start in this tab, and the gate is open. Whether main is running plays no part: Start takes no turn of
- * main. Pure. */
-export function startGateShown(s: { main: boolean; skipped: boolean; started: boolean; loading: boolean; error: unknown; orientation: string | null | undefined; orientChats: number }): boolean {
-  return s.main && !s.skipped && !s.started && !s.loading && !s.error && startGateOpen(s.orientation, s.orientChats)
+/** Whether main's chat shows the gate in place of its composer: main is shown and loaded, the analyst did not press
+ * Start in this tab, and either the analyst asked for a new orientation (`again`: New orientation where the latest one
+ * cannot be continued) or, not having skipped it, the gate is open. Whether main is running plays no part: Start takes
+ * no turn of main. Pure. */
+export function startGateShown(s: { main: boolean; skipped: boolean; started: boolean; loading: boolean; error: unknown; orientation: string | null | undefined; orientChats: number; again?: boolean }): boolean {
+  return s.main && !s.started && !s.loading && !s.error && (!!s.again || (!s.skipped && startGateOpen(s.orientation, s.orientChats)))
 }
 
 /** The switches that are on, in the gate's order. */

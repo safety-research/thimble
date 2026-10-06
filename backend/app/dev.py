@@ -2636,12 +2636,12 @@ async def _launch(c: str, slug: str) -> None:
 
 def _reachable(c: str, agent_id: str | None) -> bool:
     """Whether `agent_id`, an earlier builder of a view, can take a message: the registry holds it under main's session
-    now, so it keeps its context (V1)."""
+    now, so it keeps its context (V1), and it was not stopped with Esc, after which Claude Code resumes it no more."""
     from . import session, subagents  # noqa: PLC0415
 
     a = subagents.agent(c, agent_id) if agent_id else None
     lv = session.current(c)
-    return bool(a and lv is not None and lv.sid in (a.get("sessions") or []))
+    return bool(a and not a.get("cancelled") and lv is not None and lv.sid in (a.get("sessions") or []))
 
 
 def change_text(c: str, prop: dict[str, Any]) -> str:

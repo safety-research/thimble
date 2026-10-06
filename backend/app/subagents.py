@@ -77,6 +77,11 @@ CALLER_WAIT_S = 2.0  # how long caller() waits for the caller hook's line before
 STOPPED_QUIT = "quit"  # `stopped_by` of a chat that main's quit stopped
 STOPPED_ANALYST = "analyst"
 STOPPED_REFUSED = "refused"
+# `stopped_by` of an agent stopped with Esc in its view: Claude Code marks it stopped by the user and resumes it no
+# more ("Agent … was stopped by the user and won't be resumed"), unlike one a TaskStop stopped (live check L9)
+STOPPED_USER = "user"
+CANCELLED = "stopped-by-user"  # a chat's `continue` then: no follow-up can reach it
+USER_STOP_RE = re.compile(r"stopped by (the )?user", re.I)  # Esc's task notification and a SendMessage's error say so
 QUIT_LINE = "Stopped when Claude Code quit."  # a chat's end line, its card's text is the browser's (AgentCard)
 WORK_DIRS = ("orient/work", "writers", "critique-work", "check-work", "views-work", "extension/views")
 LIMIT_RE_WORDS = ("concurrent", "subagents")  # Claude Code's concurrency-limit text holds both (R2, the module's answer)
@@ -695,6 +700,8 @@ async def send(c: str, agent_id: str, text: str, *, values: dict[str, Any] | Non
     if ans.started or (not ans.refused and "error" not in ans):
         _set(c, rid, state="done", at=files.now())
         return Answer({**ans, "agentId": agent_id, "request": rid})
+    if USER_STOP_RE.search(ans.reason):  # stopped with Esc in its view, though no notification said so here
+        mark_cancelled(c, agent_id)
     if ans.get("expired"):
         expire(c, rid)
     else:
@@ -731,6 +738,25 @@ def mark_stopped_by(c: str, agent_id: str, who: str) -> None:
         a = files.registry(state).get(agent_id)
         if isinstance(a, dict):
             a["stopped_by"] = who
+
+
+def mark_cancelled(c: str, agent_id: str) -> None:
+    """An agent stopped with Esc in its view (STOPPED_USER), which Claude Code resumes no more: the registry and its chat
+    say so (`continue: stopped-by-user`), so the browser offers a new start in place of a follow-up that cannot work."""
+    with update(c) as state:
+        a = files.registry(state).get(agent_id)
+        if not isinstance(a, dict):
+            return
+        a.update(stopped_by=STOPPED_USER, cancelled=True)
+        chat = str(a.get("chat") or "")
+    if chat:
+        with contextlib.suppress(Exception):
+            agents.update_agent(c, chat, stopped_by=STOPPED_USER, **{"continue": CANCELLED})
+
+
+def cancelled(c: str, agent_id: str | None) -> bool:
+    """Whether Claude Code resumes `agent_id` no more, since it was stopped with Esc in its view (mark_cancelled)."""
+    return bool((agent(c, agent_id) or {}).get("cancelled"))
 
 
 # --------------------------------------------------------------------------- runs
@@ -847,13 +873,15 @@ def run_again(c: str, agent_id: str, by: str = "") -> Run | None:
             return None
         if a.get("status") in ("running", "waiting"):
             return _run(c, agent_id, dict(a))
+        was_cancelled = bool(a.get("cancelled"))
         a.update(run=int(a.get("run") or 0) + 1, status="running", handed_back=False, by=by or None,
-                 stopped_by=None, run_started=files.now())
+                 stopped_by=None, run_started=files.now(), cancelled=None)
         snap = dict(a)
     if snap.get("chat"):
         with contextlib.suppress(Exception):
             agents.update_agent(c, str(snap["chat"]), status="running", ts_end=None, result=None, run=snap["run"],
-                                stopped_by=None, typed_in_tray=by == "human" or None, paused=None)
+                                stopped_by=None, typed_in_tray=by == "human" or None, paused=None,
+                                **({"continue": None} if was_cancelled else {}))
     run = _run(c, agent_id, snap)
     t = TYPES[str(snap["role"])]
     if run is not None and t.started:

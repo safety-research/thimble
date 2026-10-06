@@ -57,6 +57,13 @@ describe('the words', () => {
     expect(continueText('earlier-session', 'abc-123')).toBe('This orientation ran in an earlier Claude Code session. To continue it, quit and run `thimble -r abc-123` in this folder, or start a new orientation.')
     expect(continueText('earlier-version', '')).toBe('This orientation ran in an earlier version of thimble and cannot be continued. Start a new orientation to explore further.')
   })
+
+  test('an orientation stopped with Esc in its agent view, which Claude Code resumes no more (live check L9)', () => {
+    const stopped = meta({ status: 'stopped', stopped_by: 'user', continue: 'stopped-by-user' })
+    expect(stoppedLine(stopped)).toBe('Stopped with Esc in your terminal.')
+    expect(continueOf(stopped, 's1')).toBe('stopped-by-user')
+    expect(continueText('stopped-by-user', '')).toBe('This orientation was stopped with Esc in your terminal, and Claude Code does not continue an agent stopped that way. Start a new orientation to explore further.')
+  })
 })
 
 describe('the card', () => {

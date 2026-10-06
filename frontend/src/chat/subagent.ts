@@ -46,17 +46,20 @@ export function stoppedLine(m: Pick<ChatMeta, 'status' | 'stopped_by' | 'role' |
       : 'Stopped when your Claude Code session ended.'
   }
   if (m.stopped_by === 'analyst') return 'Stopped.'
+  if (m.stopped_by === 'user') return 'Stopped with Esc in your terminal.'
   return ''
 }
 
-export type Continue = 'here' | 'earlier-session' | 'earlier-version' | null
+export type Continue = 'here' | 'earlier-session' | 'earlier-version' | 'stopped-by-user' | null
 
 /** Whether a follow-up can still continue an orientation: `earlier-version` for a chat no subagent ran (0.5.0, or a
- * pre-release 0.6.0 that ran it headless), `earlier-session` when its agent belongs to another Claude Code session than
- * the one that is main now (`mainSid`), `here` otherwise; null while nothing is known. */
+ * pre-release 0.6.0 that ran it headless), `stopped-by-user` for one stopped with Esc in its agent view, which Claude
+ * Code resumes no more (backend subagents.mark_cancelled), `earlier-session` when its agent belongs to another Claude
+ * Code session than the one that is main now (`mainSid`), `here` otherwise; null while nothing is known. */
 export function continueOf(m: Pick<ChatMeta, 'continue' | 'route' | 'agent_id' | 'session' | 'sessions' | 'precached'> | null | undefined, mainSid: string | null | undefined): Continue {
   if (!m) return null
   if (m.continue === 'earlier-version') return 'earlier-version'
+  if (m.continue === 'stopped-by-user') return 'stopped-by-user'
   if (m.precached) return null
   if (!isSubagent(m) || !m.agent_id) return 'earlier-version'
   const sessions = [...(m.sessions ?? []), ...(m.session ? [m.session] : [])].filter(Boolean)
@@ -70,6 +73,7 @@ export const lastSession = (m: Pick<ChatMeta, 'session' | 'sessions'> | null | u
 /** The composer's text for an orientation that cannot take a message here (backend tools.md orient-continue-*). */
 export function continueText(kind: Continue, sid: string): string {
   if (kind === 'earlier-version') return 'This orientation ran in an earlier version of thimble and cannot be continued. Start a new orientation to explore further.'
+  if (kind === 'stopped-by-user') return 'This orientation was stopped with Esc in your terminal, and Claude Code does not continue an agent stopped that way. Start a new orientation to explore further.'
   if (kind === 'earlier-session')
     return `This orientation ran in an earlier Claude Code session. To continue it, quit and run \`thimble -r ${sid || '<session id>'}\` in this folder, or start a new orientation.`
   return ''

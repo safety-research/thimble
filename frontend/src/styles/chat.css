@@ -1869,6 +1869,10 @@ button.model-line-part[aria-expanded='true'] {
   flex: none;
   margin-top: 2px;
 }
+.chat-continue-new {
+  flex: none;
+  margin-left: auto;
+}
 /* a request of one of thimble's agents, which the terminal answers: no buttons, the line says where */
 .chat-perm-terminal .chat-perm-why {
   color: var(--text-primary);

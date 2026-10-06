@@ -567,7 +567,9 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
   const runningAgents = useMemo(() => chats.filter((m) => (threadKind(m) === 'orient' || threadKind(m) === 'writer' || threadKind(m) === 'dev') && m.status === 'running').sort((a, b) => (a.created_at < b.created_at ? 1 : -1)), [chats])
   // the orientations' logs are read as well: main leaves out its relay of the summary one handed back
   const orientIds = useMemo(() => chats.filter((m) => threadKind(m) === 'orient').map((m) => m.id), [chats])
-  const showGate = startGateShown({ main: current === 'main', skipped, started, loading: main.loading, error: main.error, orientation: main.meta?.orientation, orientChats: orientIds.length })
+  // New orientation, where the latest one cannot be continued: the gate opens in main though an orientation ran
+  const [againGate, setAgainGate] = useState(false)
+  const showGate = startGateShown({ main: current === 'main', skipped, started, loading: main.loading, error: main.error, orientation: main.meta?.orientation, orientChats: orientIds.length, again: againGate })
   // the orientation's record: Starting…, a start that did not happen, and the gate filled in again from it
   const orientRun = useOrientRun(ws, main.meta?.orientation)
   const restore = useMemo(() => restoreOf(orientRun.run), [orientRun.run])
@@ -581,6 +583,7 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
     void main.reload()
     // started (or an extension's program runs it): the gate gives way at once; refused: it comes back, filled in
     setStarted(!!a && (!!a.agentId || !!a.program))
+    if (a && (a.agentId || a.program)) setAgainGate(false)
   }
   const agentRows = useAgentRows(ws, [...new Set([...runningAgents.map((m) => m.id), ...orientIds])])
   const orienting = current === 'main' ? runningAgents.find((m) => threadKind(m) === 'orient') : undefined
@@ -708,8 +711,8 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
         })
         .catch((e: Error) => {
           setOutbox((o) => o.filter((m) => m.key !== key))
-          // an orientation of an earlier session or version: its text takes the composer's place
-          const closed = /^(409|410)\s+(This orientation ran in an earlier.*)$/s.exec(e.message)
+          // an orientation of an earlier session or version, or one stopped with Esc: its text takes the composer's place
+          const closed = /^(409|410)\s+(This orientation (?:ran in an earlier|was stopped with Esc).*)$/s.exec(e.message)
           if (closed) setOrientClosed({ chat: chatId, text: closed[2] })
           else bus.emit('toast', { text: `Your message was not passed on: ${e.message.replace(/^\d{3}\s+/, '')}`, kind: 'error' })
           return false
@@ -863,6 +866,19 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
             <div className="chat-continue" role="note" data-continue={orientContinue ?? undefined}>
               <Icon name="terminal" size={13} className="chat-continue-ico" />
               <span>{orientClosedText}</span>
+              <Button
+                size="sm"
+                variant="secondary"
+                className="chat-continue-new"
+                onClick={() => {
+                  // the Start gate in main, as before the first orientation, since this one takes no message
+                  setCurrent('main')
+                  setStarted(false)
+                  setAgainGate(true)
+                }}
+              >
+                New orientation
+              </Button>
             </div>
           ) : (
             <Composer

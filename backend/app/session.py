@@ -118,6 +118,7 @@ ASYNC_RESULT_RE = re.compile(r"^\s*Async agent launched")
 AGENT_ID_RE = re.compile(r"agentId:\s*([A-Za-z0-9_-]+)")
 TASK_DONE = ("completed", "done", "success")
 TASK_STOPPED = ("killed", "stopped", "cancelled")  # a task stopped with TaskStop, or Esc in the agent view
+# (Esc's summary says "was stopped by user", subagents.USER_STOP_RE; a TaskStop's "was stopped by Claude")
 CALL_WAIT_S = 2.0  # caller_sub's longest wait for a call's line in a transcript
 CALL_POLL_S = 0.02
 CALL_TAIL = 262_144  # bytes at a transcript's end that caller_sub reads first
@@ -1189,9 +1190,14 @@ def _thimble_notice(lv: Live, fields: dict, at: float, sub: "Sub | None" = None)
     summary = str(fields.get("summary") or "")
     report = str(fields.get("result") or "").strip() or None
     cut = DIDNT_FINISH in summary
-    if status == "stopped" and not cut and not a.get("stopped_by"):
+    by_user = status == "stopped" and subagents.USER_STOP_RE.search(summary) is not None
+    if by_user:  # Esc in the agent view: Claude Code resumes it no more (live check L9)
+        subagents.mark_stopped_by(lv.c, agent_id, subagents.STOPPED_USER)
+    elif status == "stopped" and not cut and not a.get("stopped_by"):
         subagents.mark_stopped_by(lv.c, agent_id, subagents.STOPPED_ANALYST)
     subagents.run_ended(lv.c, agent_id, status, report or summary or None, source="notification", interrupted=cut)
+    if by_user:
+        subagents.mark_cancelled(lv.c, agent_id)
     if cut and a.get("chat"):
         with contextlib.suppress(Exception):
             agents.update_agent(lv.c, str(a["chat"]), **{"continue": "here"})
@@ -1406,6 +1412,8 @@ def _thimble_result(lv: Live, tool_use_id: str, call: dict, content: Any, is_err
         if is_error and subagents.stop_done(text):
             log.info("%s: TaskStop found %s ended already; the stop is done", lv.c, inp.get("task_id"))
         return
+    if name == SEND_TOOL and subagents.USER_STOP_RE.search(text) and "resume" in text.lower():
+        subagents.mark_cancelled(lv.c, str(inp.get("to") or inp.get("recipient") or ""))  # stopped with Esc: never again
     rid = _request_of(lv, tool_use_id, name, inp)
     if rid is None:
         return
