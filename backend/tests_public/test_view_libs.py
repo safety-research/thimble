@@ -121,6 +121,42 @@ async def test_a_package_its_folder_lacks_or_holds_at_another_version_is_a_probl
     assert got["problems"] == [], "by default the builder's own folder, views-work/<slug>"
 
 
+async def test_a_bundle_holds_only_files_from_the_builder_s_node_modules(tmp_path, no_npm):
+    """esbuild runs as thimble's server, outside the sandbox, on files the builder wrote: a package that requires a file
+    outside its folder's node_modules (a token file the sandbox hides), or links out of it, is not bundled, so the file
+    never reaches the view's lib, which the builder can read."""
+    secret = tmp_path / "home" / "server.json"
+    secret.parent.mkdir()
+    secret.write_text(json.dumps({"token": "SECRET-TOKEN"}))
+    folder = tmp_path / "v"
+    folder.mkdir()
+
+    def package(stage: Path, name: str, index: str) -> None:
+        d = stage / "node_modules" / name
+        d.mkdir(parents=True)
+        (d / "package.json").write_text(json.dumps({"name": name, "version": "1.0.0", "main": "index.js"}))
+        (d / "index.js").write_text(index)
+
+    stage = tmp_path / "work"
+    package(stage, "reads-out", f"module.exports = require({json.dumps(str(secret))});")
+    got = await view_libs.ensure("ws", "v", folder, ["reads-out@1"], source=stage)
+    assert len(got["problems"]) == 1 and "outside" in got["problems"][0] and str(secret) in got["problems"][0]
+    stage2 = tmp_path / "work2"
+    package(stage2, "plain", "module.exports = require('linked/server.json');")
+    (stage2 / "node_modules" / "linked").symlink_to(secret.parent)
+    got = await view_libs.ensure("ws", "v", folder, ["plain@1"], source=stage2)
+    assert len(got["problems"]) == 1 and "outside" in got["problems"][0]
+    package(secret.parent, "evil", "module.exports = require('../../server.json');")  # beside the token file
+    stage3 = tmp_path / "work3"
+    stage3.mkdir()
+    (stage3 / "node_modules").symlink_to(secret.parent / "node_modules")
+    got = await view_libs.ensure("ws", "v", folder, ["evil@1"], source=stage3)
+    assert len(got["problems"]) == 1 and "not a folder of its own" in got["problems"][0]
+    lib = folder / view_libs.LIB_DIR
+    assert not any("SECRET-TOKEN" in p.read_text() for p in lib.iterdir() if p.is_file())
+    assert all(view_libs.vendored(folder, x) is None for x in ("reads-out@1", "plain@1", "evil@1"))
+
+
 async def test_the_page_inlines_its_packages_and_a_new_package_is_a_new_version(tmp_path, no_npm, workspaces_tmp,
                                                                                monkeypatch):
     data = tmp_path / "data" / "boards"

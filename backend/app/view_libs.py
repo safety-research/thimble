@@ -10,8 +10,9 @@ The view's builder installs a package it needs with its own Bash call, `npm inst
 in its own folder (dev.view_work_dir), which Claude Code decides by main's permission mode; thimble approves no install
 of its own. When the view is checked, ensure bundles each entry from that folder's node_modules with esbuild into one
 script, or one stylesheet for a .css entry, with its images and fonts inlined; an entry its folder does not hold, or
-holds at a version its range does not allow, is a problem the check names. The bundle is written to the
-view's `lib/` folder beside LOCK_FILE, which maps each entry to its file. views.frame_document inlines those files into
+holds at a version its range does not allow, is a problem the check names. esbuild runs as thimble's server, outside
+the sandbox, so a bundle that would hold a file from outside that folder's node_modules is a problem too (_outside). The
+bundle is written to the view's `lib/` folder beside LOCK_FILE, which maps each entry to its file. views.frame_document inlines those files into
 the page in order: a script sets `window.__thimbleLibs[name]` (which thimble.lib(name) reads) and, when that name is
 free, a global named after the package in camel case (`d3-force` as `d3Force`). A file entry's own imports of the
 view's other packages resolve to those packages' globals, so it shares their instances.
@@ -217,17 +218,49 @@ def fits(version: str, rng: str) -> bool:
     return have[:keep] == want[:keep] if len(want) >= keep else have[:len(want)] == want
 
 
+OUTSIDE = ("{name} reads {path}, which is outside {where}: a package's files must all be in that folder's "
+           "node_modules, as npm installs them, with no link out of it")
+
+
+def _outside(stage: Path, work: Path, meta: Path) -> str:
+    """The first file esbuild read for a bundle (its metafile's inputs, by their real paths) that is neither in
+    `stage`'s node_modules nor the bundle's own entry in `work`; '' when there is none. esbuild runs as thimble's server,
+    outside any sandbox, on files the builder wrote, so a require of an absolute path, or a link out of node_modules,
+    would bundle a file the builder cannot read (a token file) into the view's lib, which it can."""
+    nm = (stage / "node_modules").resolve()
+    try:
+        inputs = json.loads(meta.read_text("utf-8")).get("inputs") or {}
+    except (OSError, ValueError, AttributeError):
+        return str(meta)
+    for name in inputs:
+        if str(name).startswith("(disabled):"):  # a module the package's `browser` field maps to nothing
+            continue
+        real = (stage / str(name)).resolve()
+        if not (real.is_relative_to(nm) or real.is_relative_to(work.resolve())):
+            return str(real)
+    return ""
+
+
 async def bundle(stage: Path, e: Entry, others: list[str], out: Path) -> str:
     """Bundle the entry from the npm install in `stage` into `out` (a script, or a stylesheet for a .css entry); the
     kind. A script's imports of `others` (the view's other packages) are left to their globals. RuntimeError with
-    esbuild's words when it fails."""
+    esbuild's words when it fails, and when the bundle would hold a file from outside `stage`'s node_modules (_outside),
+    whose output is then thrown away."""
     esbuild = _esbuild()
     if esbuild is None:
         raise RuntimeError(build_problem())
     loaders = [f"--loader:.{x}=dataurl" for x in ASSET_LOADERS]
+    if stage.is_symlink() or (stage / "node_modules").is_symlink() or not (stage / "node_modules").is_dir():
+        raise RuntimeError(f"{stage / 'node_modules'} is not a folder of its own")
     work = stage / f".build-{os.getpid()}-{hashlib.sha1(str(out).encode()).hexdigest()[:8]}"  # resolves from stage
     shutil.rmtree(work, ignore_errors=True)
     work.mkdir(parents=True)
+    meta = work / "meta.json"
+
+    def confined() -> None:
+        if bad := _outside(stage, work, meta):
+            raise RuntimeError(OUTSIDE.format(name=e.name, path=bad, where=stage))
+
     try:
         src = stage / "node_modules" / e.name / e.path
         if e.path and (not src.resolve().is_relative_to((stage / "node_modules" / e.name).resolve())
@@ -235,9 +268,10 @@ async def bundle(stage: Path, e: Entry, others: list[str], out: Path) -> str:
             raise RuntimeError(f"{e.name} has no file {e.path}")
         if e.kind == "css":
             code, _, err = await _run([str(esbuild), str(src), "--bundle", "--minify", "--log-level=error",
-                                       *loaders, f"--outfile={work / 'out.css'}"], cwd=stage)
+                                       *loaders, f"--metafile={meta}", f"--outfile={work / 'out.css'}"], cwd=stage)
             if code != 0:
                 raise RuntimeError(_last_line(err) or "esbuild failed")
+            confined()
             atomic_write_text(out, (work / "out.css").read_text("utf-8"))
             return "css"
         entry = work / "entry.cjs"
@@ -250,9 +284,10 @@ async def bundle(stage: Path, e: Entry, others: list[str], out: Path) -> str:
                                    "--platform=browser", "--minify", "--log-level=error", "--charset=utf8",
                                    "--define:process.env.NODE_ENV=\"production\"", "--define:global=globalThis",
                                    "--resolve-extensions=.mjs,.js,.cjs,.json", *loaders, *externals,
-                                   f"--outfile={work / 'out.js'}"], cwd=stage)
+                                   f"--metafile={meta}", f"--outfile={work / 'out.js'}"], cwd=stage)
         if code != 0:
             raise RuntimeError(_last_line(err) or "esbuild failed")
+        confined()
         js = (work / "out.js").read_text("utf-8")
         text = WRAP_HEAD + js + WRAP_TAIL % {"key": json.dumps(e.key), "glob": json.dumps(global_name(e))}
         css = work / "out.css"  # a package whose script imports its own stylesheet
