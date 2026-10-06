@@ -1,6 +1,7 @@
 """The routes only thimble's plugin and hooks call: the plugin's hooks' (plugin/bin/.thimble-watch, and
 bin/thimble-agents for /api/agents), its MCP shim's (bin/thimble-mcp: the event subscription and tool
-calls), and the hooks of the sessions thimble starts (app/permission_hook.py, app/call_ref.py).
+calls), its hooks module's (plugin/hooks/thimble.ts: /api/module/*, app/module_bridge.py), and the hooks of the
+sessions thimble starts (app/permission_hook.py, app/call_ref.py).
 
 Any process on the machine can reach a loopback port, and the plugin runs in every Claude Code session that has it,
 so each side proves it holds the token the supervisor writes into <home>/server.json (readable by its owner alone,
@@ -51,6 +52,7 @@ HOOK_PATHS = frozenset({
     "/api/agents", "/api/bg/relay", "/api/bg/agent-check", "/api/bg/proxy-stop",
 })
 SHIM_PATHS = frozenset({"/api/events"})
+MODULE_PREFIX = "/api/module/"  # the hooks module's routes (app/module_bridge.py): every one, whatever the method
 TOOL_PREFIX = "/api/tools/"  # POST /api/tools/<name>; GET /api/tools/holdings is the CLI's and stays open
 SESSION_HOOK_PATHS = re.compile(r"/api/ws/[^/]+/(sessions/permission|calls/ref)")
 NONCE_HEADER = "x-thimble-nonce"
@@ -121,9 +123,9 @@ def headers(token: str, nonce: str) -> dict[str, str]:
 
 
 def guarded(method: str, path: str) -> bool:
-    """Whether a request needs the proof: a hook's or shim route's, or a tool call."""
-    return (path in HOOK_PATHS or path in SHIM_PATHS or (method == "POST" and path.startswith(TOOL_PREFIX))
-            or SESSION_HOOK_PATHS.fullmatch(path) is not None)
+    """Whether a request needs the proof: a hook's, the shim's or the hooks module's route, or a tool call."""
+    return (path in HOOK_PATHS or path in SHIM_PATHS or path.startswith(MODULE_PREFIX)
+            or (method == "POST" and path.startswith(TOOL_PREFIX)) or SESSION_HOOK_PATHS.fullmatch(path) is not None)
 
 
 def _state() -> dict:

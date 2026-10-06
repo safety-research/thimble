@@ -130,6 +130,16 @@ def test_the_zip_carries_the_config_s_reference_the_install_guide_links(tmp_path
 
 
 @NEEDS
+def test_the_zip_carries_the_plugin_s_hooks_module_without_its_tests(tmp_path):
+    """plugin/hooks/thimble.ts is the module Claude Code loads; its vitest file beside it is the checkout's alone."""
+    root = small_repo(tmp_path, "plugin/hooks/hooks.json", "plugin/hooks/thimble.ts", "plugin/hooks/thimble.test.ts")
+    r, files, _ = release(root, tmp_path / "out")
+    assert r.returncode == 0, r.stderr
+    assert {"plugin/hooks/hooks.json", "plugin/hooks/thimble.ts"} <= files
+    assert "plugin/hooks/thimble.test.ts" not in files
+
+
+@NEEDS
 def test_the_zip_carries_thimble_cc_mod_and_its_marketplace_lists_both_plugins_under_the_install_s_name(tmp_path):
     """mods/thimble-cc-mod ships without its tests, and nothing else under mods/; the zip's marketplace lists thimble
     and thimble-cc-mod under the --marketplace-name, thimble-local by default. A plugin the marketplace lists without

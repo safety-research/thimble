@@ -9,6 +9,8 @@ __pycache__/
 frontend/node_modules/
 frontend/dist/
 frontend/*.tsbuildinfo
+# the types Claude Code writes beside the plugin's hooks module when it loads the plugin from this checkout
+plugin/.claude-plugin/types/
 release/
 .claude/settings.local.json
 .claude/worktrees/
