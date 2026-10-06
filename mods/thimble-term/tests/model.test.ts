@@ -5,7 +5,8 @@ import { expect, test } from 'claude-code/testing'
 
 import { changed, cliOf, launchMode, parsePrinted } from '../hooks/data'
 import { citations } from '../hooks/lib'
-import { agentsOf, cardsOfCall, cellsOf, docsOf, homeOf, labelIdOf, resolutionOf, threadOf, threadRowsOf, verdictOf, withoutEnd } from '../hooks/model'
+import { labelCard } from '../hooks/cell'
+import { agentsOf, cardsOfCall, cellsOf, docsOf, homeOf, labelIdOf, labelOf, labelsOf, resolutionOf, threadOf, threadRowsOf, verdictOf, withoutEnd } from '../hooks/model'
 import { AGENTS, CELLS, RESOLVE, STATES, THREAD_T1, THREADS } from './fixtures'
 
 const check = (raw: string) => {
@@ -101,4 +102,21 @@ test('the thimble command beside the plugin, the session mode, what a run printe
   const a = { cards: '1', labels: '', docs: '', chats: '', agents: '', ui: '' }
   expect(changed(null, a).length).toBe(6)
   expect(changed(a, { ...a, cards: '2' })).toEqual(['cards'])
+})
+
+test("a label's counts as the concept routes give them, beside its fields, reach its card and the labels list", () => {
+  // the shape of GET /concepts/<id> and of `thimble state label` (concepts.with_stats): counts and n_labeled at the top
+  const route = {
+    id: 'k1', name: 'author a', kind: 'regex', unit: 'record', labels: ['yes', 'no'], counts: { yes: 2, no: 1 }, n_labeled: 3,
+    applications: [{ total: 3, labeled: 3, status: 'done', paths: ['posts.jsonl'] }],
+    rows: [{ ref: 'posts.jsonl#L2', label: 'no', analyst: 'yes', text: 'world peace', rationale: '' }],
+  }
+  const label = labelOf(route)!
+  expect(label.label_stats).toEqual({ counts: { yes: 2, no: 1 }, n_labeled: 3 })
+  const card = labelCard({ id: 'c1', kind: 'label', title: 'author a', payload: { concept: 'k1' } } as never, label)
+  expect((card.rows as { label: string; value: number }[]).map(r => [r.label, r.value])).toEqual([['yes', 2], ['no', 1]])
+  expect(card.examples![0]).toMatchObject({ ref: 'posts.jsonl#L2', value: 'yes', set: true, was: 'no' })
+  expect(labelsOf([route])[0]!.label_stats?.counts).toEqual({ yes: 2, no: 1 })
+  // a label that already carries label_stats (the stored file's field) keeps them
+  expect(labelOf({ id: 'k2', label_stats: { counts: { a: 1 } }, counts: { a: 9 } })!.label_stats).toEqual({ counts: { a: 1 } })
 })

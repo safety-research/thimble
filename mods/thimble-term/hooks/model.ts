@@ -30,17 +30,24 @@ export function cellOf(v: unknown): ThimbleCell | null {
   return isObj(c) && typeof c.id === 'string' ? (c as ThimbleCell) : null
 }
 
+/** A label with its counts in `label_stats`, where the drawing reads them: the concept routes give them as `counts`
+ *  and `n_labeled` beside the concept's fields (concepts.with_stats); the label's stored file holds `label_stats`. */
+function withStats(c: Obj): ThimbleLabel {
+  if (isObj(c.label_stats) || !isObj(c.counts)) return c as ThimbleLabel
+  return { ...c, label_stats: { counts: c.counts as Record<string, number>, ...(typeof c.n_labeled === 'number' ? { n_labeled: c.n_labeled } : {}) } } as ThimbleLabel
+}
+
 /** The label `thimble state label <id>` printed: the concept route's concept, or `{concept, rows}`. */
 export function labelOf(v: unknown): ThimbleLabel | null {
   if (!isObj(v)) return null
   const c = isObj(v.concept) && typeof v.concept.id === 'string' ? { ...v.concept, ...(Array.isArray(v.rows) ? { rows: v.rows } : {}) } : v
-  return typeof c.id === 'string' ? (c as ThimbleLabel) : null
+  return typeof c.id === 'string' ? withStats(c) : null
 }
 
 /** The labels `thimble state labels` printed: the concepts route's list. */
 export function labelsOf(v: unknown): ThimbleLabel[] {
   const list = Array.isArray(v) ? v : isObj(v) && Array.isArray(v.labels) ? v.labels : isObj(v) && Array.isArray(v.concepts) ? v.concepts : []
-  return list.filter((c): c is ThimbleLabel => isObj(c) && typeof c.id === 'string')
+  return list.filter((c): c is Obj => isObj(c) && typeof c.id === 'string').map(withStats)
 }
 
 /** The label a label card counts: its payload's concept, else the first label it carries. */
