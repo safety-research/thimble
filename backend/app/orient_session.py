@@ -845,6 +845,11 @@ def made_text(c: str, run: dict[str, Any]) -> str:
         parts.append(tools._count("card", cards))
     return ", ".join(parts) or tools.hint("orient-made-nothing")
 
+
+CHANGED_LINES = {"added": "orient-changed-added", "revised": "orient-changed-revised",
+                 "deleted": "orient-changed-deleted"}  # a follow-up's card counts in its `orient` event (status_text)
+
+
 def status_text(c: str, status: str, k: int = 0, made: "dict[str, Any] | None" = None, error: str = "",
                 coverage: str = "") -> str:
     """The `orient` event's text: the first run ended (finished, stopped or failed) and what it made, or follow-up `k`
@@ -854,17 +859,16 @@ def status_text(c: str, status: str, k: int = 0, made: "dict[str, Any] | None" =
     run = orientation.read_run(c) or {}
     if k > 0:
         m = made or {}
-        what = [tools.hint(line, cards=tools._count("card", int(m[key])))
-                for key, line in (("added", "orient-changed-added"), ("revised", "orient-changed-revised"),
-                                  ("deleted", "orient-changed-deleted")) if m.get(key)]
+        what = [tools.hint(CHANGED_LINES[key], cards=tools._count("card", int(m[key])))
+                for key in CHANGED_LINES if m.get(key)]
         if m.get("views"):
             states = m.get("view_states") if isinstance(m.get("view_states"), dict) else {}
             what.append(views_text({k: int(states.get(k) or 0) for k in VIEW_LINES}) if any(states.values())
                         else tools.hint("orient-changed-views", views=tools._count("view", int(m["views"]))))
-        line = {"stopped": "orient-follow-up-stopped", "failed": "orient-follow-up-failed"}.get(status, "orient-followed-up")
-        return tools.hint(line, changed=", ".join(what) or tools.hint("orient-changed-nothing"), error=why)
-    line = {"stopped": "orient-stopped", "failed": "orient-failed"}.get(status, "orient-finished")
-    text = tools.hint(line, made=made_text(c, run), error=why)
+        follow = {"stopped": "orient-follow-up-stopped", "failed": "orient-follow-up-failed"}.get(status, "orient-followed-up")
+        return tools.hint(follow, changed=", ".join(what) or tools.hint("orient-changed-nothing"), error=why)
+    first = {"stopped": "orient-stopped", "failed": "orient-failed"}.get(status, "orient-finished")
+    text = tools.hint(first, made=made_text(c, run), error=why)
     return f"{text}\n{coverage.strip()}" if coverage.strip() else text
 
 
