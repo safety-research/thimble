@@ -1,12 +1,12 @@
 // The start gate: until an orientation has been asked for (main's meta `orientation`) or the analyst skips it, the offer
 // of an orientation wraps main's composer. Show options opens the orientation's switches (Write Orientation deck,
-// Propose views, Critique and revise, Generate report) and its permission mode, the orientation's row of the settings'
-// permission modes, which a pick here saves (manual, auto, bypass; Claude Code's own warning shows under Bypass). The
-// field's text is the orientation's instructions and may stay empty; its model line (ModelLine) edits the orientation
-// role's settings: the model (a menu of lib/models modelChoices, as RoleChip's), the effort and fast mode. Start sends
-// the analyst's session the `start` event with the instructions as its text and the choices as attributes
-// (prompts/main.md); Skip leaves main to the analyst. The orientation runs as a Claude Code session of its own, shown
-// in the agent tray as `thimble:orient · <workspace>`, with every one of these choices.
+// Propose views, Critique and revise, the one off by default, Generate report) and its permission mode, the
+// orientation's row of the settings' permission modes, which a pick here saves (manual, auto, bypass; Claude Code's
+// own warning shows under Bypass). The field's text is the orientation's instructions and may stay empty; its model
+// line (ModelLine) edits the orientation role's settings: the model (a menu of lib/models modelChoices, as RoleChip's),
+// the effort and fast mode. Start sends the analyst's session the `start` event with the instructions as its text and
+// the choices as attributes (prompts/main.md); Skip leaves main to the analyst. The orientation runs as a Claude Code
+// session of its own, shown in the agent tray as `thimble:orient · <workspace>`, with every one of these choices.
 import { useEffect, useRef, useState } from 'react'
 import { Button, Segmented, type SegmentedOption } from '../components/Button'
 import { TextArea } from '../components/Field'
@@ -33,7 +33,8 @@ export const ULTRACODE_LEVEL = 'xhigh'
 export const SKIPPED_NOTE = 'Orientation skipped. You can ask Thimble to orient itself later.'
 
 export type Passes = Record<OrientPass, boolean>
-export const ALL_ON: Passes = { final: true, views: true, critique: true, report: true }
+/** The switches as the gate opens: every output on, the critique off (backend orientation.DEFAULT_CRITIQUE). */
+export const DEFAULT_ON: Passes = { final: true, views: true, critique: false, report: true }
 
 /** The analyst's choices after one is toggled; each switch is on its own. Pure. */
 export function togglePass(cur: Passes, id: OrientPass): Passes {
@@ -120,7 +121,7 @@ export function StartGate({ ws, model, onModel, defaultEffort = ORIENT_DEFAULT_E
   onStarted?: () => void
   onSkip?: () => void
 }) {
-  const [on, setOn] = useState<Passes>(ALL_ON)
+  const [on, setOn] = useState<Passes>(DEFAULT_ON)
   const [picked, setPicked] = useState<MainEffort | null>(null)
   const effort = picked ?? defaultEffort
   // the role's effort changed (a pick saved from here, or the settings popover): the line shows the role's

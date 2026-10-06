@@ -599,14 +599,10 @@ async def call(c: str, name: str, args: dict[str, Any] | None, *, actor: str = A
     spec = REGISTRY[name]
     # a follow-up of the orientation is one change the analyst asked for, so its steps are one undo (undo.batching)
     batch = None
-    orienting = session_kind(session) == ORIENT_SESSION
-    if orienting:
+    if session_kind(session) == ORIENT_SESSION:
         from . import orient_session  # noqa: PLC0415 — orient_session imports this module
 
         batch = orient_session.undo_batch(c)
-        # the files the orientation never opened, named before its critique starts (orient_session, coverage)
-        if name == "critique" and (note := await orient_session.coverage(c, name)):
-            return with_call_line(name, args, ok(note))
     # a session thimble started (the orientation, a writer) owns the steps its calls make (undo, sessions)
     with undo.batching(batch), undo.acting_session(session):
         with canvas_history.acting(Ctx(c, actor, notebook, terminal, anchor, chat, session).cell_author):  # who changed a card
@@ -616,8 +612,6 @@ async def call(c: str, name: str, args: dict[str, Any] | None, *, actor: str = A
         from . import card_check  # noqa: PLC0415 — card_check imports the harness
 
         res = await card_check.after_tool(c, name, args, res, session=session, anchor=anchor)
-    if orienting and name == "add_card" and not res.is_error and (note := await orient_session.coverage(c, name)):
-        res = ok(f"{res.text}\n\n{note}")  # add_card's result is text alone
     return with_call_line(name, args, res)
 
 

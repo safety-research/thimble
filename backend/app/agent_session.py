@@ -82,8 +82,9 @@ the follower starts from the offset the chat's meta keeps (`follow`), so nothing
 Follow. The session's transcript, its subagents' transcripts and its workflows' journals are copied into its agent chat
 and into step chats (role `step`) with the mirror's translator (session.translate_sub).
 
-End. The last `result` line on stdout is the summary; the caller's `on_end` hears status and summary. Stop signals the
-process group and also kills the processes below it, since Claude Code runs each Bash command in a group of its own.
+End. The last `result` line on stdout is the summary; the caller's `on_end` hears status and summary, and the follower's
+task ends once the task on_end left in `closing` has (the orientation's coverage, orient_session._measured). Stop signals
+the process group and also kills the processes below it, since Claude Code runs each Bash command in a group of its own.
 
 Retry. A session that exits because the API is at capacity (CAPACITY) is started again with `--resume` and
 `## session-retry` after a wait from retry_wait, for as long as the API stays at capacity. Retry now and Stop end the
@@ -333,6 +334,7 @@ class Run:
     waits: dict[str, asyncio.Future] = field(default_factory=dict)  # permission request id -> the analyst's answer
     alerted: bool = False
     on_end: Callable[["Run", str, str], None] | None = None  # (run, status, summary), once its chat has ended
+    closing: asyncio.Task | None = None  # what on_end left to finish (the orientation's coverage), which `task` awaits
     calls: str | None = None  # the orientation chat whose sequence numbers its calls (module note, calls)
     k: int = 0  # the run's number in its chat: 0 for the session's start, then one per resume
     lead: str = ""  # a resume's stdin prompt, whose copy in the transcript the follower leaves out (module note, resume)
@@ -924,6 +926,8 @@ async def _follow(run: Run) -> None:
                     or await _resume_unfinished(run)):
                 break
         _end(run)
+        if run.closing is not None:  # the end's own work, such as measuring the orientation's coverage
+            await run.closing
     except asyncio.CancelledError:
         _kill(run)
         raise

@@ -17,10 +17,15 @@ is a set lookup. The checks run in a child process (check_apart), since pure-Pyt
 hold the interpreter lock; an abandoned critique kills the child. Every line the model reads is a `## check-*` section
 of prompts/tools.md.
 
-The orientation itself hears of the files it never opened, at its first card and when it asks for its critique
-(orient_session.coverage). That check, `unopened`, reads only the calls' input, since a survey's listing names every
-file without opening one; a folder counts only where a command names it whole or by a wildcard, since reading one file
-of a folder opens none of the others. It names each file with its records and its share of the corpus.
+The coverage line says how much of the corpus one orientation opened, grouped by glob, with its share of the files and
+of the records they hold: `Coverage: viewed board.jsonl, agents/agent-01.jsonl · not viewed agents/*.jsonl (2 of 3
+files), *.md (2 files) · 33% of 6 files, holding 41% of the records`. It is the unread check made stricter and kept to the orientation: only the orientation's chat
+and the chats under it (its subagents' and workflow agents', never a critique's) count, with the cards of its deck and
+the input of its calls alone, since a survey's listing names every file without opening one; and a folder counts only
+where a command names it whole or by a wildcard, since reading one file of a folder opens none of the others. The
+orientation's end adds it to its transcript (orient_session.measure), and a critique's first message gives it in place
+of the unread line. A file's records are records.count's, estimated from its bytes past COUNT_BYTES (`~`), and the
+bytes stand in when no file holds records.
 """
 from __future__ import annotations
 
@@ -32,10 +37,14 @@ import json
 import logging
 import os
 import re
+import subprocess
 import sys
+import tempfile
+import time
 from collections import Counter
 from collections.abc import Iterator
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -52,17 +61,23 @@ SAMPLE_RECORDS = 600  # parsed from one file at most
 KINDS_SAMPLED = 200  # kinds of file sampled at most, spread over the corpus's order
 SAMPLE_TOTAL_BYTES = 200_000_000  # read from every sampled file together
 CHECK_TIMEOUT_S = 600.0  # check_apart's child is stopped after this long
+CHILD_POLL_S = 0.05  # how often check_apart looks whether its child has ended
 JSONL_SUFFIXES = (".jsonl", ".ndjson")
 READ_TOOLS = ("Read",)  # a Grep or Glob call searches or lists a file without reading it
 UNREAD_LISTED = 12  # unread files named one by one; past this, by kind of file with a count
-RECORDS_MAX_BYTES = 200_000_000  # an unopened file past this size gives its size: its records take long to count
+RECORDS_MAX_BYTES = 200_000_000  # a file past this size has its records estimated (coverage): they take long to count
 UNUSED_PER_KIND = 5  # unused fields and values named per kind of file, the most filled first
 UNUSED_LISTED = 20
 CALL_TEXT_CHARS = 200_000  # of one call's input and output read for the checks
 CALLS_TEXT_CHARS = 30_000_000  # of every call's, together
 CRITIC = "critic"  # a critique's chat's agent_type (critique_session.AGENT, which imports this module)
 BACKEND_DIR = Path(__file__).resolve().parent.parent  # where `python -m app.orient_checks` runs (check_apart)
-UNOPENED_FLAG = "--unopened"  # the child computes unopened rather than check
+COVERAGE_FLAG = "--coverage"  # the child adds the coverage line of the orientation chat named next (coverage)
+ONLY_FLAG = "--only"  # with COVERAGE_FLAG, the child computes the coverage line alone
+COVERAGE_GLOBS = 8  # globs of folder and suffix the coverage line groups files into; past this, by top folder
+COVERAGE_LISTED = 6  # globs the coverage line names on each side, viewed and not viewed; the rest are counted
+COVERAGE_NAMED = 2  # a glob with this few files viewed has them named, and the rest of it named as not viewed
+COUNT_BYTES = 500_000_000  # of files whose records the coverage line counts; the rest are estimated from their bytes
 _DIGITS_RE = re.compile(r"\d+")
 _UUID_RE = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", re.I)
 _TOKEN_RE = re.compile(r"[A-Za-z0-9]+")
@@ -123,15 +138,15 @@ def _read_by_cells(cells: list[dict[str, Any]], files: set[str]) -> set[str]:
     return out
 
 
-def _read_by_agents(c: str, corpus: Path) -> set[str]:
-    """The corpus files a Read call opened in any chat of the workspace but a critique's. A file only a critic opened is
-    still one the analysis never read."""
+def _read_by_agents(c: str, corpus: Path, chats: "set[str] | None" = None) -> set[str]:
+    """The corpus files a Read call opened in any chat of the workspace but a critique's, or in `chats` alone. A file
+    only a critic opened is still one the analysis never read."""
     from . import agents  # noqa: PLC0415
 
     root = corpus.resolve()
     out: set[str] = set()
     for meta in agents.list_chats(c):
-        if meta.get("agent_type") == CRITIC:
+        if meta.get("agent_type") == CRITIC or (chats is not None and str(meta.get("id")) not in chats):
             continue
         _, log_path = agents.paths(c, str(meta["id"]))
         for rec in agents.read_events(log_path):
@@ -149,10 +164,10 @@ def _read_by_agents(c: str, corpus: Path) -> set[str]:
     return out
 
 
-def _calls_text(c: str, results: bool = True) -> str:
+def _calls_text(c: str, results: bool = True, chats: "set[str] | None" = None) -> str:
     """The input and output (only the input without `results`) of every stored call of the workspace's orientations
     (calls.py), each cut to CALL_TEXT_CHARS, together up to CALLS_TEXT_CHARS; a critic's own calls are left out, as its
-    Reads are."""
+    Reads are. With `chats`, only the calls made in those chats (or in a chat not yet known) are read."""
     from . import calls  # noqa: PLC0415
 
     ws = config.workspace_dir(c)
@@ -162,8 +177,10 @@ def _calls_text(c: str, results: bool = True) -> str:
     critics = _critic_chats(c) if folder.is_dir() else set()
     for path in sorted(folder.glob("*.jsonl")) if folder.is_dir() else []:
         chat = path.stem
+        if chats is not None and chat not in chats:
+            continue
         for row in calls.listing(c, chat):
-            if row.get("chat") in critics:
+            if row.get("chat") in critics or (chats is not None and row.get("chat") and row["chat"] not in chats):
                 continue
             full = calls.get(c, chat, int(row["n"])) or {}
             text = json.dumps(full.get("input"), ensure_ascii=False, default=str)
@@ -180,6 +197,63 @@ def _critic_chats(c: str) -> set[str]:
     from . import agents  # noqa: PLC0415
 
     return {str(m["id"]) for m in agents.list_chats(c) if m.get("agent_type") == CRITIC}
+
+
+def _critic(meta: dict[str, Any]) -> bool:
+    """Whether a chat is a critique's: thimble's critic, or an extension's (`<extension>:critic`)."""
+    kind = str(meta.get("agent_type") or "")
+    return kind == CRITIC or kind.endswith(":" + CRITIC) or meta.get("mode_agent") == CRITIC
+
+
+def _orientation_chats(c: str, chat: str) -> set[str]:
+    """The orientation chat `chat` and every chat under it, its subagents' and workflow agents' steps, less a
+    critique's chat and the chats under that."""
+    from . import agents  # noqa: PLC0415
+
+    under: dict[str, list[dict[str, Any]]] = {}
+    for meta in agents.list_chats(c):
+        under.setdefault(str(meta.get("parent") or ""), []).append(meta)
+    out: set[str] = set()
+    todo = [chat]
+    while todo:
+        cur = todo.pop()
+        if cur in out:
+            continue
+        out.add(cur)
+        todo.extend(str(m["id"]) for m in under.get(cur, []) if m.get("id") and not _critic(m))
+    return out
+
+
+def _deck_cells(c: str) -> list[dict[str, Any]]:
+    """The cards of the latest orientation's deck, where every card it adds goes, that it made or changed: an earlier
+    orientation's card in the same deck counts only once this one edited it. None when its deck is off."""
+    from . import notebook, orientation  # noqa: PLC0415
+
+    run = orientation.read_run(c) or {}
+    deck = orientation.deck_of(run)
+    nb = notebook.read_notebook(config.workspace_dir(c), deck) if deck else None
+    since = str(run.get("started") or "")
+
+    def touched(cell: dict[str, Any]) -> bool:
+        stamps = [cell.get("created_ts") or cell.get("ts"), *(e.get("ts") for e in cell.get("edited") or []
+                                                              if isinstance(e, dict))]
+        return not since or any(_after(t, since) for t in stamps)
+
+    return [cell for cell in (nb or {}).get("cells") or [] if isinstance(cell, dict) and touched(cell)]
+
+
+def _after(ts: Any, since: str) -> bool:
+    """Whether the ISO time `ts` is at or after `since`; a time that does not parse counts."""
+
+    def at(v: Any) -> datetime | None:
+        try:
+            t = datetime.fromisoformat(str(v).replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        return t if t.tzinfo else t.replace(tzinfo=timezone.utc)
+
+    t, s = at(ts), at(since)
+    return t is None or s is None or t >= s
 
 
 def _read_by_calls(text: str, corpus: Path, files: set[str], whole: bool = False) -> set[str]:
@@ -363,9 +437,9 @@ class _Text:
 
 
 def _unread_files(c: str, corpus: Path, files: list[str], cells: list[dict[str, Any]], calls_text: str = "",
-                  whole: bool = False) -> list[str]:
+                  whole: bool = False, chats: "set[str] | None" = None) -> list[str]:
     fileset = set(files)
-    return sorted(fileset - _read_by_cells(cells, fileset) - _read_by_agents(c, corpus)
+    return sorted(fileset - _read_by_cells(cells, fileset) - _read_by_agents(c, corpus, chats)
                   - _read_by_calls(calls_text, corpus, fileset, whole))
 
 
@@ -414,9 +488,10 @@ def _unused_of(kind: _Kind, text: _Text) -> Iterator[Finding]:
                                          sampled=f"{kind.records:,}"))
 
 
-def check(c: str) -> list[Finding]:
+def check(c: str, coverage_of: str | None = None) -> list[Finding]:
     """The coverage findings for workspace `c`: the corpus files nothing opened, then the unused fields and record kinds
-    of the opened files. ValueError for a workspace whose corpus is gone."""
+    of the opened files. With `coverage_of`, an orientation chat, its coverage line stands in for the unread line.
+    ValueError for a workspace whose corpus is gone."""
     from . import corpus as corpus_mod  # noqa: PLC0415
 
     ws = config.workspace_dir(c)
@@ -426,46 +501,132 @@ def check(c: str) -> list[Finding]:
     calls_text = _calls_text(c)
     unread = _unread_files(c, corpus, files, cells, calls_text)
     opened = set(files) - set(unread)
-    return _unread(unread, files) + _unused(corpus, [f for f in files if f in opened], cells, calls_text)
+    first = [coverage(c, coverage_of)] if coverage_of else _unread(unread, files)
+    return first + _unused(corpus, [f for f in files if f in opened], cells, calls_text)
 
 
-def unopened(c: str) -> list[Finding]:
-    """The orientation's coverage note for workspace `c` (orient_session.coverage), one finding or none: the corpus
-    files no card read, no Read call opened and no call's input named, by its path or its folder's whole, the largest
-    first, each with its records (its size past RECORDS_MAX_BYTES) and its share of the corpus's bytes; past
-    UNREAD_LISTED files, each kind of file with its count and share (a kind of one file as that file). ValueError for a
-    workspace whose corpus is gone."""
-    from . import corpus as corpus_mod, records  # noqa: PLC0415
+def _glob(rel: str, top: bool = False) -> str:
+    """The glob a file is grouped under in the coverage line: its folder with ids masked, and its suffix
+    (`runs/run-12/log.jsonl` is `runs/run-*/*.jsonl`), or with `top` its top folder whole (`runs/**`); a file at the
+    corpus's root goes by its suffix (`*.md`)."""
+    folder, _, name = rel.rpartition("/")
+    stem, dot, ext = name.rpartition(".")
+    suffix = f".{ext}" if dot and stem else ""
+    if folder and top:
+        return folder.split("/", 1)[0] + "/**"
+    if folder:
+        return _kind_key(folder).replace("#", "*") + "/*" + suffix
+    return "*" + suffix
+
+
+def _records_of(corpus: Path, sizes: dict[str, int]) -> tuple[dict[str, int], bool]:
+    """Each file's records (records.count), and whether any was estimated: the smallest files are counted first, up to
+    COUNT_BYTES in all and RECORDS_MAX_BYTES a file, and each other file's records are estimated from its bytes at the
+    rate of the counted files with its suffix, else of all the counted files."""
+    from . import records  # noqa: PLC0415
+
+    counts: dict[str, int] = {}
+    budget = COUNT_BYTES
+    for f in sorted(sizes, key=lambda f: sizes[f]):
+        if sizes[f] > RECORDS_MAX_BYTES or sizes[f] > budget:
+            continue
+        try:
+            counts[f] = records.count(corpus / f, f)
+        except Exception:  # noqa: BLE001 — a file that cannot be read holds no records the analysis could read
+            counts[f] = 0
+        budget -= sizes[f]
+    rest = [f for f in sizes if f not in counts]
+    if not rest:
+        return counts, False
+
+    def rate(fs: "list[str]") -> float:
+        n, b = sum(counts[f] for f in fs), sum(sizes[f] for f in fs)
+        return n / b if n and b else 0.0
+
+    def suffix(f: str) -> str:
+        name = f.rpartition("/")[2]
+        return name.rpartition(".")[2] if "." in name else ""
+
+    overall = rate(list(counts))
+    by_suffix: dict[str, list[str]] = {}
+    for f in counts:
+        by_suffix.setdefault(suffix(f), []).append(f)
+    for f in rest:
+        counts[f] = round(sizes[f] * (rate(by_suffix.get(suffix(f), [])) or overall))
+    return counts, True
+
+
+def _share(n: float, total: float) -> str:
+    """n of total as a whole percentage, 100% only when it is all and 0% only when it is none."""
+    if total <= 0 or n <= 0:
+        return "0%"
+    if n >= total:
+        return "100%"
+    return f"{min(99, max(1, round(100 * n / total)))}%"
+
+
+def coverage(c: str, chat: str) -> Finding:
+    """The coverage line of the orientation chat `chat` in workspace `c` (module note): the corpus files no card of its
+    deck read, no Read call of it or the chats under it opened and no call's input named, by its path or its folder's
+    whole, grouped by glob: each glob it viewed whole, each it never viewed with its count of files, and of a glob it
+    viewed in part, the files it viewed and the rest of the glob when they are COVERAGE_NAMED or fewer, else the glob
+    with how many of its files; then the share of the files viewed and of the records they hold (of their bytes when
+    no file holds records). ValueError for a workspace whose corpus is gone."""
+    from . import corpus as corpus_mod  # noqa: PLC0415
     from .tools import hint  # noqa: PLC0415
 
     corpus = config.corpus_dir(c)
     sizes = {s["path"]: int(s.get("size_bytes") or 0) for s in corpus_mod.list_sources(corpus) if not s.get("hidden")}
     files = list(sizes)
-    unread = _unread_files(c, corpus, files, _cells(config.workspace_dir(c)), _calls_text(c, results=False), whole=True)
+    own = _orientation_chats(c, chat)
+    unread = set(_unread_files(c, corpus, files, _deck_cells(c), _calls_text(c, results=False, chats=own),
+                               whole=True, chats=own))
+    counts, estimated = _records_of(corpus, sizes)
+    weight = counts if sum(counts.values()) else sizes
+    measure = "records" if weight is counts else "bytes"
+    viewed = [f for f in files if f not in unread]
+
+    def files_word(n: int) -> str:
+        return f"{n:,} file" if n == 1 else f"{n:,} files"
+
+    total = files_word(len(files))
+    files_share = _share(len(viewed), len(files))
+    part_share = ("~" if estimated and measure == "records" else "") + _share(sum(weight[f] for f in viewed),
+                                                                              sum(weight.values()))
     if not unread:
-        return []
-    total = sum(sizes.values()) or 1
+        return Finding("coverage", hint("orient-coverage-every", total=total, measure=measure))
+    groups: dict[str, list[str]] = {}
+    for f in files:
+        groups.setdefault(_glob(f), []).append(f)
+    if len(groups) > COVERAGE_GLOBS:
+        groups = {}
+        for f in files:
+            groups.setdefault(_glob(f, top=True), []).append(f)
+    seen: list[tuple[int, str]] = []  # (weight, name) of each side, listed the heaviest first
+    unseen: list[tuple[int, str]] = []
+    for g, fs in groups.items():
+        opened = [f for f in fs if f not in unread]
+        rest = [f for f in fs if f in unread]
+        if not rest:
+            seen.append((sum(weight[f] for f in fs), fs[0] if len(fs) == 1 else g))
+        elif not opened:
+            unseen.append((sum(weight[f] for f in fs), fs[0] if len(fs) == 1 else f"{g} ({files_word(len(fs))})"))
+        elif len(opened) <= COVERAGE_NAMED:  # a few files of a glob viewed: those files, and the rest of the glob
+            seen.extend((weight[f], f) for f in opened)
+            unseen.append((sum(weight[f] for f in rest),
+                           rest[0] if len(rest) == 1 else f"{g} ({len(rest):,} of {files_word(len(fs))})"))
+        else:
+            seen.append((sum(weight[f] for f in opened), f"{g} ({len(opened):,} of {files_word(len(fs))})"))
 
-    def share(n: int) -> str:
-        return f"{n / total:.0%} of the corpus" if n >= total / 100 else "under 1% of the corpus"
+    def listed(side: "list[tuple[int, str]]") -> str:
+        names = [name for _, name in sorted(side, key=lambda x: (-x[0], x[1]))]
+        if len(names) <= COVERAGE_LISTED:
+            return ", ".join(names)
+        return ", ".join(names[:COVERAGE_LISTED]) + f", and {len(names) - COVERAGE_LISTED:,} more"
 
-    def row(f: str) -> str:
-        n = records.count(corpus / f, f) if sizes[f] <= RECORDS_MAX_BYTES else 0
-        return f"- `{f}`: {f'{n:,} records' if n else f'{sizes[f] / 1e6:,.1f} MB'}, {share(sizes[f])}"
-
-    if len(unread) <= UNREAD_LISTED:
-        rows = [row(f) for f in sorted(unread, key=lambda f: -sizes[f])]
-    else:
-        kinds: dict[str, list[str]] = {}
-        for f in unread:
-            kinds.setdefault(_kind_key(f).replace("#", "*"), []).append(f)
-        ranked = sorted(kinds.items(), key=lambda kv: -sum(sizes[f] for f in kv[1]))
-        rows = [row(fs[0]) if len(fs) == 1 else f"- `{k}`: {len(fs):,} files, {share(sum(sizes[f] for f in fs))}"
-                for k, fs in ranked[:UNREAD_LISTED]]
-        if len(ranked) > UNREAD_LISTED:
-            rows.append(f"- {len(ranked) - UNREAD_LISTED:,} more kinds of file")
-    return [Finding("unopened", hint("orient-unopened", n=f"{len(unread):,}", total=f"{len(files):,}", root=str(corpus),
-                                     files="\n".join(rows)))]
+    return Finding("coverage", hint("orient-coverage", viewed=listed(seen) if seen else hint("orient-coverage-nothing"),
+                                    unviewed=listed(unseen), files=files_share, total=total, records=part_share,
+                                    measure=measure))
 
 
 def child_argv(c: str, *flags: str) -> list[str]:
@@ -473,24 +634,37 @@ def child_argv(c: str, *flags: str) -> list[str]:
     return [sys.executable, "-m", "app.orient_checks", c, *flags]
 
 
-async def check_apart(c: str, timeout_s: float = CHECK_TIMEOUT_S, only_unopened: bool = False) -> list[Finding]:
-    """check(c), or unopened(c) with `only_unopened`, run in a child process that reads the same workspaces and registry
-    folders as the server. ValueError as check raises it, TimeoutError past `timeout_s`, RuntimeError otherwise. The
-    child is killed whenever it is still running as this returns, including when the caller is cancelled."""
+async def check_apart(c: str, timeout_s: float = CHECK_TIMEOUT_S, coverage_of: str | None = None,
+                      only: bool = False) -> list[Finding]:
+    """check(c, coverage_of), or with `only` the coverage line of the orientation chat `coverage_of` alone, run in a
+    child process that reads the same workspaces and registry folders as the server. ValueError as check raises it,
+    TimeoutError past `timeout_s`, RuntimeError otherwise. The child is killed whenever it is still running as this
+    returns, including when the caller is cancelled. It is started with Popen and polled, writing into temporary files,
+    rather than through asyncio's subprocess transport, whose start, when cancelled as the event loop closes (the
+    server's stop just as an orientation ends), leaves the loop waiting for good."""
     env = {**os.environ, "THIMBLE_WORKSPACES_DIR": str(config.WORKSPACES_DIR), "THIMBLE_DATA_DIR": str(config.DATA_DIR)}
-    argv = child_argv(c, UNOPENED_FLAG) if only_unopened else child_argv(c)
-    proc = await asyncio.create_subprocess_exec(*argv, cwd=str(BACKEND_DIR), env=env,
-                                                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
-    try:
-        out, err = await asyncio.wait_for(proc.communicate(), timeout_s)
-    except TimeoutError as e:
-        raise TimeoutError(f"the coverage checks ran past {timeout_s:.0f} s") from e
-    finally:
-        if proc.returncode is None:
-            with contextlib.suppress(ProcessLookupError):
-                proc.kill()
-            await proc.wait()
-    stderr = err.decode("utf-8", "replace")
+    flags = [COVERAGE_FLAG, coverage_of, *([ONLY_FLAG] if only else [])] if coverage_of else []
+    argv = child_argv(c, *flags)
+    with tempfile.TemporaryFile() as out_f, tempfile.TemporaryFile() as err_f:
+        try:
+            proc = subprocess.Popen(argv, cwd=str(BACKEND_DIR), env=env, stdin=subprocess.DEVNULL, stdout=out_f,
+                                    stderr=err_f)
+        except OSError as e:
+            raise RuntimeError(f"the coverage checks did not start: {e}") from e
+        try:
+            deadline = time.monotonic() + timeout_s
+            while proc.poll() is None:
+                if time.monotonic() > deadline:
+                    raise TimeoutError(f"the coverage checks ran past {timeout_s:.0f} s")
+                await asyncio.sleep(CHILD_POLL_S)
+        finally:
+            if proc.poll() is None:
+                with contextlib.suppress(ProcessLookupError):
+                    proc.kill()
+                proc.wait()
+        out_f.seek(0)
+        err_f.seek(0)
+        out, stderr = out_f.read(), err_f.read().decode("utf-8", "replace")
     last = (stderr.strip().splitlines() or [""])[-1]
     if proc.returncode == 2:
         raise ValueError(last)
@@ -504,10 +678,12 @@ async def check_apart(c: str, timeout_s: float = CHECK_TIMEOUT_S, only_unopened:
 
 
 def main(argv: list[str]) -> int:
-    """`python -m app.orient_checks <workspace> [--unopened]`, check_apart's child: the findings as a JSON list on
-    stdout, or exit 2 with the reason on stderr for a workspace whose corpus is gone."""
+    """`python -m app.orient_checks <workspace> [--coverage <orientation chat> [--only]]`, check_apart's child: the
+    findings as a JSON list on stdout, or exit 2 with the reason on stderr for a workspace whose corpus is gone."""
+    rest = argv[1:]
+    chat = rest[rest.index(COVERAGE_FLAG) + 1] if COVERAGE_FLAG in rest[:-1] else None
     try:
-        found = unopened(argv[0]) if UNOPENED_FLAG in argv[1:] else check(argv[0])
+        found = [coverage(argv[0], chat)] if chat and ONLY_FLAG in rest else check(argv[0], chat)
     except ValueError as e:
         print(e, file=sys.stderr)
         return 2

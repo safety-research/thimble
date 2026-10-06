@@ -409,7 +409,7 @@ Start an orientation, a broad analysis of the corpus that helps the analyst unde
     "final_notebook": {"type": "boolean", "description": "Leave a deck of cards for the analyst, the group `Orientation`, which appears when the orientation ends. Default true."},
     "propose_views": {"type": "boolean", "description": "Propose views of the files. Default true."},
     "generate_report": {"type": "boolean", "description": "Write the report when the orientation ends. Default false."},
-    "critique": {"type": "boolean", "description": "Have a critic review the analysis before the outputs are written. Default true."}
+    "critique": {"type": "boolean", "description": "Have a critic review the analysis before the outputs are written. Default false."}
   }
 }
 ```
@@ -886,21 +886,23 @@ In {file}, no card names `{value}`, a value of `{field}` in {count} of {sampled}
 
 No check found anything.
 
-## orient-unopened
+## orient-coverage
 
-{n} of the {total} files in {root} were never opened by a card's code, a Read call or a command or script of yours, so your analysis says nothing about them:
+Coverage: viewed {viewed} · not viewed {unviewed} · {files} of {total}, holding {records} of the {measure}
 
-{files}
+## orient-coverage-every
 
-Look at each one, at least a sample of its records, or say in a line why it does not bear on the analysis.
+Coverage: viewed every file · 100% of {total}, holding 100% of the {measure}
 
-## orient-unopened-card
+## orient-coverage-nothing
 
-Then go on drafting, and revise each card that what you find changes.
+no file
 
-## orient-unopened-critique
+## orient-coverage-lead
 
-The critique did not start. Call `critique` again once you have looked.
+When your first run ended, thimble measured which corpus files it opened, by a card's code, a Read call or a path in a command, and showed the analyst this line in your thread.
+
+{coverage}
 
 ## start_orientation-started
 
