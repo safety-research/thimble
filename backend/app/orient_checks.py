@@ -28,6 +28,11 @@ agents', never a critique's) count, each by what its stored output (calls.py) sh
                line of a file the call's input names (by path, folder or wildcard; for add_card and edit_card also the
                files the card's code read), or a long enough piece of one, such as a field a script printed or a cell
                of a table; a line found in more than SHARED_MAX of those files counts in none
+  a file made  a call that reads a file outside the corpus (a Read, cat, grep, ...) by its absolute path counts as
+               above against the corpus files named by the calls whose input gave that path, its folder or a path in
+               it: a dump the orientation wrote of agents/a.jsonl into work/dumps/ and read there counts as lines of
+               agents/a.jsonl. So does a long output Claude Code saved to a file, against the files of the call it came
+               from
 
 So a command that only counts or lists (wc, ls, find, grep -c) shows no line of a file and counts nothing. The search
 reads each file up to LINE_SCAN_BYTES for whole lines and PIECE_SCAN_BYTES for pieces, within LINE_SCAN_TOTAL and
@@ -93,7 +98,7 @@ LINE_MIN = 8  # characters an output line holds at least to be looked for whole 
 PIECE_MIN = 20  # characters a piece of an output line holds at least to be searched for inside a file
 PIECE_WINDOW = 40  # of a longer piece, the characters at its middle that are searched for
 PIECES_PER_LINE = 2  # pieces of one output line searched for, the longest first, until one is found
-PIECES_PER_CALL = 100  # output lines of one call whose pieces are searched for, spread over its output
+PIECES_PER_CALL = 400  # output lines of one call whose pieces are searched for, spread over its output
 SHARED_MAX = 3  # files an output line may be found in and still count as a line seen in each
 LINE_SCAN_BYTES = 1 << 30  # of one file read for whole lines
 LINE_SCAN_TOTAL = 8 << 30  # of every file together
@@ -115,6 +120,10 @@ _TOKEN_RE = re.compile(r"[A-Za-z0-9]+")
 _HEX_ID_RE = re.compile(r"(?=.*\d)[0-9a-f]{3,}", re.I)  # a whole token of hex digits, at least one of them a digit
 _WORD_RE = re.compile(r"[A-Za-z0-9_]+")  # the characters of a whole word, as _Text.names bounds one
 _PATH_RE = re.compile(r"[\w./-]+")  # the characters a path is written with, as _read_by_calls splits the text
+# where Claude Code says it put a long output it showed only the start of, which the agent then reads with Read
+_SAVED_RE = re.compile(r"saved to:?\s+(/[^\s'\"<>]+)", re.I)
+# folders whose paths name no file an orientation made from the corpus (`2>/dev/null`, `/usr/bin/python3`)
+SYSTEM_DIRS = ("/dev", "/proc", "/sys", "/usr", "/bin", "/sbin", "/lib", "/lib64", "/etc")
 _GLOB_RE = re.compile(r"[\w./*?-]+")  # a run of path characters that may hold a wildcard (_globbed)
 
 
@@ -700,6 +709,26 @@ def _piece_hits(corpus: Path, wanted: dict[str, set[bytes]], budget: list[int],
     return out
 
 
+def _outside(text: str, root: Path) -> set[str]:
+    """The absolute paths a call's text gives that are outside the corpus `root`, neither the corpus's folder nor one
+    above it, nor in SYSTEM_DIRS; normalized, without a trailing slash."""
+    top = root.as_posix()
+    out: set[str] = set()
+    for run in set(_PATH_RE.findall(text)):
+        if not run.startswith("/") or run.startswith("//"):
+            continue
+        p = os.path.normpath(run)
+        if p == "/" or _nested(p, top) or any(p == d or p.startswith(d + "/") for d in SYSTEM_DIRS):
+            continue
+        out.add(p)
+    return out
+
+
+def _nested(a: str, b: str) -> bool:
+    """Whether one of two normalized absolute paths is the other or in it."""
+    return a == b or a.startswith(b.rstrip("/") + "/") or b.startswith(a.rstrip("/") + "/")
+
+
 def _line_numbers(path: Path, offsets: set[int]) -> set[int]:
     """The numbers of the lines that hold these byte offsets of a file."""
     out: set[int] = set()
@@ -721,31 +750,46 @@ def _line_numbers(path: Path, offsets: set[int]) -> set[int]:
 
 def _seen(c: str, corpus: Path, sizes: dict[str, int], chats: set[str]) -> dict[str, set[int]]:
     """{file: the numbers of its lines (a PDF's pages) that the calls made in `chats` showed} (module note): a Read's
-    numbered lines, and each output line of any other call that is, or holds a piece of, a line of a file the call
-    names, found in SHARED_MAX of those files at most."""
+    numbered lines, and each output line of any other call, or of a Read outside the corpus, that is, or holds a piece
+    of, a line of a file the call names or made the file it reads (a path outside the corpus that a call naming corpus
+    files gave, or a saved output of one), found in SHARED_MAX of those files at most."""
     from . import records  # noqa: PLC0415
 
     files = set(sizes)
+    root = corpus.resolve()
     cards = {str(cell.get("id")): [str(r) for r in cell.get("reads") or [] if isinstance(r, str)]
              for cell in _cells(config.workspace_dir(c))}
     seen: dict[str, set[int]] = {}
     shown: list[_Shown] = []
+    made: dict[str, set[str]] = {}  # {a path outside the corpus: the corpus files the calls whose input gave it name}
+    rows: list[tuple[int, str, set[str], set[str]]] = []  # (call, its output, files it names, paths outside it gives)
     for k, row in enumerate(_own_calls(c, chats)):
-        if row.get("is_error") or not isinstance(row.get("result"), str) or not row["result"]:
-            continue
+        # a call that printed nothing (a script writing a dump) still names the files it made one from
+        result = "" if row.get("is_error") or not isinstance(row.get("result"), str) else row["result"]
         name = str(row.get("name") or "").rsplit("__", 1)[-1]
         inp = row.get("input") if isinstance(row.get("input"), dict) else {}
         if name == "Read":
             rel = _corpus_rel(corpus, inp.get("file_path"))
-            if rel in files:
+            if rel in files and result:
                 seen.setdefault(rel, set()).update(_read_shown(row, rel, records.reader_of(corpus / rel, rel)))
+            elif result and not rel:
+                rows.append((k, result, set(), _outside(str(inp.get("file_path") or ""), root)))
             continue
         text = json.dumps(inp, ensure_ascii=False, default=str)
         named = _read_by_calls(text, corpus, files) | _globbed(text, files)
         if name in ("add_card", "edit_card"):
-            for cid in _CARD_RE.findall(row["result"][:SEEN_CHARS]):
+            for cid in _CARD_RE.findall(result[:SEEN_CHARS]):
                 named.update(r for r in cards.get(cid, ()) if r in files)
-        shown.extend(_shown_lines(k, row["result"], named))
+        outside = _outside(text, root)
+        for p in outside if named else ():
+            made.setdefault(p, set()).update(named)
+        if result:
+            rows.append((k, result, named, outside))
+    for k, result, named, outside in rows:
+        derived = {f for p, fs in made.items() if any(_nested(p, q) for q in outside) for f in fs} if outside else set()
+        for m in _SAVED_RE.finditer(result[:SEEN_CHARS]):
+            made.setdefault(os.path.normpath(m.group(1)), set()).update(named | derived)
+        shown.extend(_shown_lines(k, result, named | derived))
     whole = _whole_hits(corpus, shown, sizes)
     offsets: dict[str, set[int]] = {}
 
