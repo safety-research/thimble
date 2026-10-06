@@ -193,8 +193,13 @@ async def test_the_shim_never_runs_card_code_in_terminal_mode(term):
 async def test_a_code_label_runs_through_thimble_run_and_its_readers_go_stale(term):
     rule = "def label(u):\n    return 'long' if len(str(u)) > 300 else 'short'"
     res = await call(term, "apply_label", scope="files", name="long", predicate={"kind": "code", "text": rule},
-                     paths=["agents/*.jsonl"], values=["long", "short"])
+                     paths=["agents/*.jsonl"], values=["long", "short"], filter=True)
     assert not res["is_error"], text(res)
+    assert "It is the files filter now." in text(res), "the shim sets the filter: the run may not write filters.json"
+    from app import concepts as _c
+
+    assert "filter" not in _c.read_concept(config.workspace_dir(CORPUS),
+                                           re.search(r"concept:([A-Za-z0-9_-]+)", text(res)).group(1))["pending_run"]["args"]
     lid = re.search(r"concept:([A-Za-z0-9_-]+)", text(res)).group(1)
     assert cardrun.command("label", lid) in text(res) and "applied label" not in text(res)
     from app import concepts

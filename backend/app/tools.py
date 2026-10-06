@@ -2418,7 +2418,9 @@ async def _h_apply_label(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
                                     created_by=ctx.created_by, chat=ctx.chat, group=target, question=question,
                                     card=not orienting, within=within, show=bool(args.get("show")), defer=defer)
     if s.get("deferred"):
-        concepts.set_pending_run(ctx.c, str(s["concept"]), dict(args), ctx.session)
+        # the run makes the call again where the code runs; the filter and Files' switch are set already, here
+        again = {k: v for k, v in args.items() if k not in ("filter", "show")}
+        concepts.set_pending_run(ctx.c, str(s["concept"]), again, ctx.session)
         cmd = cardrun.command("label", str(s["concept"]))
         cardrun.mirror(ctx.c)
         line = (f"defined label {s.get('name', name)} [[concept:{s.get('concept')}]]"
@@ -2426,6 +2428,8 @@ async def _h_apply_label(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
                 + (hint("label-run", command=cmd) or f"Run with Bash: {cmd}"))
         if s.get("cell"):
             line += f" The label's card is [[card:{s['cell']}]]."
+        if s.get("filter"):
+            line += f" It is the {scope} filter now."
         return ok(line)
     if s.get("partial") and not orienting and ctx.session is None:
         concepts.tell_when_done(ctx.c, str(s["concept"]))

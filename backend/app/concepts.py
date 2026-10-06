@@ -3895,10 +3895,12 @@ async def apply_scoped(c: str, *, scope: str, name: str, kind: str, text: str, v
     if show and unit in FILE_UNITS:
         show_concept(c, concept["id"], True)
     if defer and not joined and not unchanged:
+        # the scope's filter is set here, where its file and main's chat may be written, and not by the run
+        chosen_now = _filter_to(c, scope, concept) if filter else None
         stale = await asyncio.to_thread(stale_cards, ws, read_concept(ws, concept["id"]) or concept)
         return {"concept": concept["id"], "name": concept["name"], "unit": unit, "total": None,
                 "counts": await asyncio.to_thread(_live_counts, ws, concept["id"]), "failed": 0, "message": None,
-                "partial": False, "cell": made["id"] if made else None, "filter": None,
+                "partial": False, "cell": made["id"] if made else None, "filter": chosen_now,
                 "labels_path": str(labels_file(ws, concept["id"])), "unchanged": False, "deferred": True,
                 "stale": [x["id"] for x in stale]}
     if not joined and not unchanged:
@@ -3912,16 +3914,7 @@ async def apply_scoped(c: str, *, scope: str, name: str, kind: str, text: str, v
                 agents.start_agent(c, "labels", f"label {concept['name']}", _follow(c, concept))
         except Exception:  # noqa: BLE001
             log.debug("the labels agent chat was not started", exc_info=True)
-    chosen = None
-    if filter:
-        chosen = set_filter(c, scope, concept["id"], concept["labels"][0])[scope]
-        try:
-            from . import agents
-
-            agents.chip(c, "filter", f"filter {scope}: {concept['name']} = {concept['labels'][0]}", ref=f"concept:{concept['id']}",
-                        scope=scope, concept=concept["id"], value=concept["labels"][0])
-        except Exception:  # noqa: BLE001
-            log.debug("the filter chip was not written", exc_info=True)
+    chosen = _filter_to(c, scope, concept) if filter else None
     if unchanged:
         result = {"total": concept["applications"][-1].get("total"), "counts": await asyncio.to_thread(_live_counts, ws, concept["id"])}
     else:
@@ -3933,6 +3926,20 @@ async def apply_scoped(c: str, *, scope: str, name: str, kind: str, text: str, v
             "failed": result.get("failed") or 0, "message": result.get("message"), "partial": partial,
             "cell": made["id"] if made else None, "filter": chosen, "labels_path": str(labels_file(ws, concept["id"])),
             "unchanged": unchanged, "stale": [x["id"] for x in stale]}
+
+
+def _filter_to(c: str, scope: str, concept: dict) -> dict:
+    """apply_scoped's `filter`: the scope's filter set to the label's first value, with its chip in main's chat. The
+    scope's filter as it stands after."""
+    chosen = set_filter(c, scope, concept["id"], concept["labels"][0])[scope]
+    try:
+        from . import agents
+
+        agents.chip(c, "filter", f"filter {scope}: {concept['name']} = {concept['labels'][0]}", ref=f"concept:{concept['id']}",
+                    scope=scope, concept=concept["id"], value=concept["labels"][0])
+    except Exception:  # noqa: BLE001
+        log.debug("the filter chip was not written", exc_info=True)
+    return chosen
 
 
 # the label colours by the names show_label takes (--label-1..12)
