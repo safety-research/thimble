@@ -136,6 +136,48 @@ async def test_every_module_route_answers_only_a_request_that_proves_the_token(c
     assert hook_auth.guarded("GET", "/api/module/anything") and hook_auth.guarded("POST", "/api/module/hello")
 
 
+# ----------------------------------------------------------------------------------------------- main's meta
+
+
+async def test_main_s_meta_says_whether_main_is_fenced_launched_and_the_module_live(client, plugin_headers, monkeypatch):
+    """The browser's unfenced banner and Start's no-module line read main's meta: `fenced`, `launched`, `module` and,
+    while the module is not live, `module_why`. Each time the module goes live or stops being live, main's chat is
+    notified, so an open page reads the meta again."""
+    from app import agents
+
+    notified: list = []
+    monkeypatch.setattr(agents, "notify", lambda c, chat: notified.append((c, chat)))
+    monkeypatch.setattr(cc_plugin, "main_launched", lambda c: True, raising=False)
+    monkeypatch.setattr(module_bridge, "LIVE_GAP_S", 0.2)
+    _launch()
+
+    async def meta() -> dict:
+        r = await client.get(f"/api/ws/{CORPUS}/chats/main")
+        assert r.status_code == 200
+        got = r.json()["meta"]
+        assert got == {**got, **(await client.get(f"/api/ws/{CORPUS}/chats/main")).json()["meta"]}
+        return {k: got[k] for k in ("fenced", "launched", "module", "module_why")}
+
+    assert await meta() == {"fenced": True, "launched": True, "module": False, "module_why": module_bridge.NOT_LOADED}
+    mod = Module(client, plugin_headers)
+    poll = await _live(mod)
+    assert await meta() == {"fenced": True, "launched": True, "module": True, "module_why": ""}
+    assert notified == [(CORPUS, agents.MAIN_ID)], "once, as it went live"
+    module_bridge._enqueue(CORPUS, "note", {"text": "x"}, MAIN, None)  # ends the poll, which the test does not renew
+    assert (await poll).status_code == 200
+    for _ in range(100):
+        if len(notified) == 2:
+            break
+        await asyncio.sleep(0.02)
+    assert notified == [(CORPUS, agents.MAIN_ID)] * 2, "and once as it stopped polling"
+    got = await meta()
+    assert not got["module"] and got["module_why"].startswith(module_bridge.NOT_ANSWERING)
+    monkeypatch.setattr(cc_plugin, "main_fenced", lambda c: False, raising=False)
+    monkeypatch.setattr(cc_plugin, "main_launched", lambda c: False, raising=False)
+    assert {k: v for k, v in (await meta()).items() if k != "module_why"} == \
+        {"fenced": False, "launched": False, "module": False}
+
+
 # ----------------------------------------------------------------------------------------------- the hello
 
 

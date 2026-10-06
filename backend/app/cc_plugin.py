@@ -12,7 +12,8 @@ managed-settings.d drop-ins in the platform's managed folder (`managed`).
 Main started by the `thimble` launcher runs inside thimble's fence (cli.main_fence): the last `--settings` on its
 command line turns Claude Code's sandbox on and carries FENCE_MARK in its `env` (`main_fenced`). The server reads that
 from main's command line rather than from anything main reports, since a session that was not started fenced must not
-be able to claim it.
+be able to claim it. Whether the launcher started main at all (`main_launched`) is read from main's environment, which
+holds LAUNCHED_ENV, where it can be read.
 
 A plugin copy names its marketplace (`marketplace`): `inline` for a `--plugin-dir` copy, `<marketplace>` for an
 installed one, which is a copy in Claude Code's plugin cache or, for a directory marketplace, the plugin folder in that
@@ -45,6 +46,7 @@ USER_SETTINGS = "settings.json"
 PROJECT_SETTINGS = (Path(".claude") / "settings.json", Path(".claude") / "settings.local.json")
 HOOK, MONITOR = "hook", "monitor"  # the routes (module note)
 FENCE_MARK = "THIMBLE_MAIN_FENCE"  # "1" in the --settings `env` of a main thimble's launcher fenced (cli.main_fence)
+LAUNCHED_ENV = "THIMBLE_LAUNCHED"  # set in the environment of every `claude` the launcher starts (cli.LAUNCHED_ENV)
 ROUTES = (HOOK, MONITOR)
 
 
@@ -178,6 +180,24 @@ def main_fenced(c: str) -> bool:
     if not pid:
         return False
     return fenced_argv(procs.argv(pid), procs.cwd(pid) or Path.cwd())
+
+
+def main_launched(c: str) -> bool:
+    """Whether the `thimble` launcher started main's `claude` process in workspace `c` (session.main_pid): its
+    environment, as the process started (`/proc/<pid>/environ`), holds LAUNCHED_ENV. Where that cannot be read (no
+    /proc), main's session is the one launch.json names, followed through /clear and /resume (module_bridge
+    .launch_session), or main runs inside thimble's fence, which only the launcher adds. False without a main."""
+    from . import module_bridge, session  # noqa: PLC0415 — both import far more than the launcher's checks need
+
+    pid = session.main_pid(c)
+    if not pid:
+        return False
+    env = procs.environ(pid)
+    if env is not None:
+        return bool(str(env.get(LAUNCHED_ENV) or "").strip())
+    lv = session.current(c)
+    launch = module_bridge.launch_session(c)
+    return bool(lv is not None and launch and lv.sid == launch) or main_fenced(c)
 
 
 def hooks_blocked(cwd: Path, root: Path, environ: Mapping[str, str] | None = None) -> bool:

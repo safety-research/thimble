@@ -44,6 +44,10 @@ The workspace's subagents.json holds, under `module`, the last hello `{session, 
 module stays idle (`idle`), what it could not register (`problem`), and the session moves rekey learned (`rekeyed`),
 for `doctor`, the browser and a restarted server. It is written under an flock of subagents.json.lock beside it, with an
 atomic replace, keeping every other key.
+
+The browser reads main's state from main's meta (main_meta, which agents.py's main routes add): whether main runs inside
+thimble's fence, whether the launcher started it, and whether the module is live, with why_not when it is not. Each
+time the module goes live or stops being live, main's chat is notified, so an open page reads it again (_show).
 """
 from __future__ import annotations
 
@@ -138,6 +142,7 @@ class _Bridge:
     rekeyed: dict[str, str] = field(default_factory=dict)  # old main session -> new
     idle: str = ""  # why the last hello was refused
     problem: str = ""  # what the module reported it could not do (a role it could not register)
+    shown: bool = False  # live() as main's chat was last notified of it (_show); a page reads it when it opens
 
 
 _bridges: dict[str, _Bridge] = {}
@@ -254,6 +259,16 @@ def _bridge(c: str) -> _Bridge:
                     b.rekeyed.update({str(k): str(v) for k, v in moved.items() if isinstance(v, str)})
                 _bridges[c] = b
     return b
+
+
+def launch_session(c: str) -> str:
+    """The session launch.json names, followed through every move rekey recorded; '' when it names none."""
+    sid = str(_launch(c).get("session") or "")
+    moved, seen = _bridge(c).rekeyed, set()
+    while sid and sid in moved and sid not in seen:
+        seen.add(sid)
+        sid = moved[sid]
+    return sid
 
 
 def main_session(c: str) -> str:
@@ -385,6 +400,50 @@ def why_not(c: str) -> str:
     if b.session and b.hello_at:
         return f"{NOT_ANSWERING}; it stopped polling"
     return NOT_LOADED
+
+
+def main_meta(c: str) -> dict[str, Any]:
+    """What main's meta adds for the browser (module note): `fenced` (cc_plugin.main_fenced), `launched`
+    (cc_plugin.main_launched), `module` (live) and `module_why` (why_not, '' while live). Each is False, or the reason,
+    when main's session has not opened thimble yet. Never raises."""
+    from . import cc_plugin  # noqa: PLC0415
+
+    out: dict[str, Any] = {"fenced": False, "launched": False, "module": False, "module_why": ""}
+    for key, read in (("fenced", cc_plugin.main_fenced), ("launched", cc_plugin.main_launched), ("module", live)):
+        try:
+            out[key] = bool(read(c))
+        except Exception:  # noqa: BLE001 — a page still shows when one cannot be read
+            log.debug("main's %s in %s could not be read", key, c, exc_info=True)
+    if not out["module"]:
+        try:
+            out["module_why"] = why_not(c) or NOT_LOADED
+        except Exception:  # noqa: BLE001
+            out["module_why"] = NOT_LOADED
+    return out
+
+
+def _show(c: str) -> None:
+    """Notify main's chat when live() changed since it was last notified, so the browser reads main's meta again (module
+    note)."""
+    b = _bridges.get(c)
+    if b is None:
+        return
+    now = live(c)
+    if b.shown == now:
+        return
+    b.shown = now
+    try:
+        from . import agents  # noqa: PLC0415
+
+        agents.notify(c, agents.MAIN_ID)
+    except Exception:  # noqa: BLE001 — the page reads it at its next read either way
+        log.debug("main's chat in %s was not notified", c, exc_info=True)
+
+
+def _show_later(c: str) -> None:
+    """_show once a module that stopped polling has had LIVE_GAP_S to poll again."""
+    if _loop is not None and _loop.is_running():
+        _loop.call_later(LIVE_GAP_S + 0.1, _show, c)
 
 
 def on_ended(fn: Callable[[str, str, str, str], None]) -> None:
@@ -594,6 +653,7 @@ async def hello_route(body: HelloBody) -> dict[str, Any]:
             if not _accepted(c, b.session) and b.idle != why:  # a refused stray never unseats main's module
                 b.idle = why
                 _save(c, b)
+                _show(c)
             if why in WAIT_REASONS:
                 raise HTTPException(409, why)
             log.info("module hello from %s refused in %s: %s", body.session, c, why)
@@ -606,6 +666,7 @@ async def hello_route(body: HelloBody) -> dict[str, Any]:
     if moved:
         _drop_session(c, body.session)
     _wake(c)
+    _show(c)
     log.info("module %s said hello for %s in %s", body.version or "?", body.session, c)
     return {"ok": True}
 
@@ -618,6 +679,7 @@ async def next_route(request: Request, cwd: str, session: str, wait: float = POL
     c = _workspace(cwd)
     b = _require(c, session)
     b.polls += 1
+    _show(c)
     try:
         deadline = time.monotonic() + min(max(wait, 0.0), POLL_WAIT_S)
         while True:
@@ -635,6 +697,8 @@ async def next_route(request: Request, cwd: str, session: str, wait: float = POL
     finally:
         b.polls -= 1
         b.last_poll = time.monotonic()
+        if not b.polls:
+            _show_later(c)
 
 
 class ResultBody(BaseModel):

@@ -154,7 +154,7 @@ ARCHIVE_TIMEOUT_S = 60.0  # the archive stops an orientation's or a writer's ses
 SUPERVISED_ENV = "THIMBLE_SUPERVISED"
 # the launcher exports it (plugin/bin/thimble), and Claude Code passes it on to the skill's command: main's prompt is
 # appended to the session's system prompt already (launched)
-LAUNCHED_ENV = "THIMBLE_LAUNCHED"
+LAUNCHED_ENV = cc_plugin.LAUNCHED_ENV  # "THIMBLE_LAUNCHED"
 PLUGIN_ROOT_ENV = "THIMBLE_PLUGIN_ROOT"  # bin/thimble exports its plugin copy: the tree's plugin/, or an installed copy
 MCP_TOOLS_RULE = "mcp__plugin_thimble_thimble"  # every tool of the plugin's thimble server, in a permission rule
 # The agents defined for a session thimble starts with `--agents` (agent_definition: the writer's, the orientation's and
