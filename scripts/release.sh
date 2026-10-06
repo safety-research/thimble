@@ -33,6 +33,8 @@
 #   README.md LICENSE INSTALL.md docs/config.md docs/assets/thimble-banner.svg   the readme, the Apache-2.0 license,
 #                         the install guide, the config's reference it links and the banner the readme links; a link of
 #                         these pages to a file the zip does not carry points at that file on GitHub, at the release's commit
+#   docs/color.md docs/time-range.md   the view kit's Color by and time range, which the view builder's prompt
+#                         points to (prompts/dev-view.md)
 #   THIRD_PARTY_NOTICES   the licenses of the npm packages and fonts frontend/dist bundles, which ask for their notices
 #                         to travel with it; written by scripts/third_party_notices.py from frontend/node_modules, and
 #                         only when the zip carries frontend/dist
@@ -87,6 +89,7 @@ version="$(python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1]))["v
 sha="$(git -C "$repo" rev-parse --short HEAD)"
 full_sha="$(git -C "$repo" rev-parse HEAD)"
 allow=(plugin mods/thimble-cc-mod mods/thimble-term extensions backend prompts demos .claude-plugin README.md INSTALL.md docs/config.md docs/assets/thimble-banner.svg LICENSE
+       docs/color.md docs/time-range.md
        scripts/install.sh scripts/plugin.sh scripts/update.sh scripts/rebuild_ui.sh scripts/view_shot.mjs scripts/ui_shot.mjs
        frontend/src frontend/public frontend/index.html frontend/package.json
        frontend/package-lock.json frontend/vite.config.ts frontend/tsconfig.json frontend/tsconfig.app.json frontend/tsconfig.node.json)
