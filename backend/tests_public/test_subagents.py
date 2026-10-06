@@ -116,6 +116,20 @@ def test_a_new_workspace_has_the_trusted_files_and_the_kernel_binds_them_read_on
         assert str(ws / name) in rules["filesystem"]["denyWrite"], name
 
 
+def test_the_kernel_can_neither_hold_nor_swap_the_lock_of_subagents_json(tmp_path):
+    """A read-only lock can still be opened and flocked, which would make every writer wait for it and then write
+    without it, so the kernel sees an empty file in its place (bwrap) or none (srt)."""
+    ws = config.workspace_dir(CORPUS)
+    assert kernel_wrap.LOCK_FILES == (sf.LOCK,) and (ws / sf.LOCK).is_file()
+    argv = kernel_wrap.kernel_wrap_argv(["python"], corpus_dir=tmp_path / "c", workspace_dir=ws, connection_dir=tmp_path,
+                                        venv=None, python="/usr/bin/python3")
+    i = argv.index(str(ws / sf.LOCK))
+    assert argv[i - 2:i] == ["--ro-bind", kernel_wrap.EMPTY_FILE]
+    rules = kernel_wrap.srt_rules(corpus_dir=tmp_path / "c", workspace_dir=ws, venv=None, python="/usr/bin/python3",
+                                  srt_dir=tmp_path, home=tmp_path / "h", platform="linux")["filesystem"]
+    assert str(ws / sf.LOCK) in rules["denyRead"] and str(ws / sf.LOCK) in rules["denyWrite"]
+
+
 # --------------------------------------------------------------------------- starts
 
 

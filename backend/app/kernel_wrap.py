@@ -11,7 +11,7 @@ Both draw the same boundary:
            the kernel can neither read nor write, and telemetry.jsonl, viewed.jsonl (the view log, which the telemetry
            export merges), the files thimble's agents' hooks trust (TRUSTED_FILES), the registry folder
            (REGISTRY_DIR), the views' state (VIEWS_DIR) and the workspace's local extension (LOCAL_DIR), which it can
-           read only.
+           read only, and the lock of subagents.json's writers (LOCK_FILES), which it can neither read nor write.
            HOME and TMPDIR are fresh at each start: a private /tmp under bwrap, the kernel's kernels/<key>.home folder
            under srt
   hidden   the home folder, thimble's own folders (THIMBLE_HOME, the workspaces, the install tree), Claude Code's config
@@ -57,11 +57,15 @@ EMPTY_FILE = "/dev/null"
 # read-only over the writable workspace (the server writes them from outside)
 READ_ONLY_FILES = ("telemetry.jsonl", "viewed.jsonl")
 # what the plugin's --agent-check hook and the gate tools trust (subagent_files.FILES): the pending requests and the
-# agent registry, the callers of thimble's tools, what main was launched with, and the lock of subagents.json's writers.
-# A cell that could write them could make a request a plugin start claims, credit its call to an agent, or swap the lock
-# for a file of its own so that two writers no longer exclude each other. Bound read-only with --ro-bind, never
+# agent registry, the callers of thimble's tools and what main was launched with. A cell that could write them could
+# make a request a plugin start claims, or credit its call to an agent. Bound read-only with --ro-bind, never
 # --ro-bind-try, which would skip a missing one and let a cell create it; the server makes each before a kernel starts
-TRUSTED_FILES = ("subagents.json", "callers.jsonl", "launch.json", "subagents.json.lock")
+TRUSTED_FILES = ("subagents.json", "callers.jsonl", "launch.json")
+# the lock subagents.json's writers take (subagent_files.LOCK), hidden as HIDDEN_FILES are rather than read-only: a
+# read-only file can still be opened and flocked, and a cell that held the lock would make every hook and the server
+# wait for it and then write without it, so that two writers no longer exclude each other; a cell that swapped it for a
+# file of its own would do the same. The server makes it before a kernel starts
+LOCK_FILES = ("subagents.json.lock",)
 # the workspace's folders that main's and the orientation's prompts are made from, which a card's code reads: read-only,
 # each as a folder so that what the server writes later (its atomic rewrites among it) shows inside; the server creates
 # them before the kernel starts
@@ -154,7 +158,7 @@ def srt_rules(*, corpus_dir: str | Path, workspace_dir: str | Path, venv: str | 
     config, hidden besides `home` and SRT_HIDDEN[platform] (sys.platform: linux or darwin)."""
     ws = Path(workspace_dir)
     system = "darwin" if platform == "darwin" else "linux"
-    hidden = [str(ws / name) for name in HIDDEN_FILES]
+    hidden = [str(ws / name) for name in (*HIDDEN_FILES, *LOCK_FILES)]
     deny_read = [str(home), *SRT_HIDDEN[system], *map(str, hide), *hidden]
     allow_read = [str(corpus_dir), str(ws), *map(str, interpreter_dirs(python)), *map(str, read)]
     if venv is not None:
@@ -225,7 +229,7 @@ def kernel_wrap_argv(argv: Sequence[str], *, corpus_dir: str | Path, workspace_d
     for p in read:
         out += ["--ro-bind-try", str(p), str(p)]
     out += ["--ro-bind", str(corpus), str(corpus), "--bind", str(ws), str(ws), "--bind", str(conn), str(conn)]
-    for name in HIDDEN_FILES:
+    for name in (*HIDDEN_FILES, *LOCK_FILES):  # LOCK_FILES: a flock the cell takes is on EMPTY_FILE, never the lock
         out += ["--ro-bind", EMPTY_FILE, str(ws / name)]
     for name in READ_ONLY_FILES:  # read-only over the workspace bind (the server writes from outside)
         out += ["--ro-bind-try", str(ws / name), str(ws / name)]

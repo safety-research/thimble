@@ -17,8 +17,8 @@ A write takes an exclusive flock on subagents.json.lock (LOCK), the lock lane M'
 the module's record, then one on subagents.json as it is, checks that the path still names the file it locked, and
 replaces the file whole (a temporary file renamed over it), so a reader never sees half a file and needs no lock. A lock
 that does not come within LOCK_WAIT_S (a process that holds it and never lets go) is given up, and the write goes on
-without it. LOCK is made with the other files and bound read-only for kernels too, so a cell cannot replace it with a
-file of its own and take writers' exclusion away.
+without it. LOCK is made with the other files and hidden from kernels (kernel_wrap.LOCK_FILES), so a cell can neither
+hold it nor replace it with a file of its own and take writers' exclusion away.
 
 Standard library only: the plugin's hooks (plugin/bin/.thimble-watch) import this module under `python -S`.
 """

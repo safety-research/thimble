@@ -47,14 +47,14 @@ def test_on_macos_srt_hides_the_home_and_user_data_and_shows_the_kernel_its_own_
     workspace's local extension read-only, and so are the files thimble's agents' hooks trust."""
     rules, (venv, minor, real) = _rules(tmp_path, "darwin")
     fs = rules["filesystem"]
-    hidden = {f"{WS}/settings.json", f"{WS}/config.json"}
+    hidden = {f"{WS}/settings.json", f"{WS}/config.json", f"{WS}/subagents.json.lock"}
     assert {HOME, "/Users", "/Volumes", "/private/tmp", "/private/var/folders", f"{HOME}/.thimble", f"{HOME}/.claude",
             *hidden} <= set(fs["denyRead"])
     assert {CORPUS, WS, str(venv), str(minor), str(real), "/app/backend/app/fonts"} <= set(fs["allowRead"])
     assert not any("sandbox-runtime" in p for p in fs["allowRead"]), "apply-seccomp runs only on Linux"
     assert fs["allowWrite"] == [WS]
     read_only = {f"{WS}/telemetry.jsonl", f"{WS}/viewed.jsonl", f"{WS}/registry", f"{WS}/views", f"{WS}/extension",
-                 f"{WS}/subagents.json", f"{WS}/callers.jsonl", f"{WS}/launch.json", f"{WS}/subagents.json.lock"}
+                 f"{WS}/subagents.json", f"{WS}/callers.jsonl", f"{WS}/launch.json"}
     assert set(fs["denyWrite"]) == {*hidden, *read_only, "/tmp/claude", "/private/tmp/claude"}
     linux = _rules(tmp_path / "l", "linux")[0]["filesystem"]
     assert {"/home", "/tmp", "/mnt", "/run/user"} <= set(linux["denyRead"]) and "/Users" not in linux["denyRead"]
@@ -130,7 +130,7 @@ def test_on_linux_a_venv_whose_python_goes_through_uv_s_minor_version_folder_run
         d.mkdir()
     for name in kernel_wrap.HIDDEN_FILES:
         (ws / name).write_text("{}\n")
-    for name in kernel_wrap.TRUSTED_FILES:  # as the server makes them before a kernel starts
+    for name in (*kernel_wrap.TRUSTED_FILES, *kernel_wrap.LOCK_FILES):  # as the server makes them before a kernel starts
         (ws / name).write_text("")
     py = str(venv / "bin" / "python")
     cmd = [py, "-c", "print('ran')"]
