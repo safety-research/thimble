@@ -1960,6 +1960,51 @@
 .reader-sys-summary .btn-label {
   font: var(--type-mono-sm);
 }
+/* -------- an agent transcript (views/transcript AgentTranscript): the tool name in the head, a tool call and its result
+   and a system record folded to one line until opened, the cleaned/raw toggle on a tool result -------- */
+.reader-agent-toolname {
+  color: var(--text-secondary);
+}
+.reader-msgfold {
+  position: relative;
+}
+/* MessageFold keeps the full message in the DOM when folded (so a search finds it); it is not a .reader-block, so the
+   .reader-collapsed clip and gradient do not apply, and we drop the gradient here */
+.reader-msgfold.reader-collapsed::after {
+  content: none;
+}
+/* the one line a folded message shows: the whole row, clickable, its overflow cut; a tool call reads in mono */
+.reader-msg-oneline {
+  display: block;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-secondary);
+  font: 400 var(--text-ui-sm) / 1.6 var(--font-body);
+}
+.reader-agent-tool .reader-msg-oneline,
+.reader-agent-system .reader-msg-oneline {
+  font: var(--type-mono);
+  color: var(--text-tertiary);
+}
+.reader-msg-oneline:hover {
+  color: var(--text-primary);
+}
+.reader-msg-oneline::before {
+  content: '▸ ';
+  color: var(--text-placeholder);
+}
+.reader-raw-toggle {
+  margin: 2px 0 0;
+  color: var(--text-tertiary);
+}
 .reader-session {
   display: flex;
   align-items: center;
