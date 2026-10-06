@@ -14,8 +14,10 @@ import json
 
 import pytest
 
-from app import (agent_session, agents, calls, config, corpus as corpus_mod, critique_session, events, orient_checks,
-                 orient_session, orientation, records, session, tools)
+from app import (agents, calls, config, corpus as corpus_mod, critique_session, events, orient_checks, orient_session,
+                 orientation, records, subagents, tools)
+from app import subagent_files as sf
+from subagent_fakes import bridge  # noqa: F401 — a fixture
 
 CORPUS = "mini"
 NOTE = {"question": "What does the corpus hold?", "kind": "note", "text": "Three agents.", "takeaway": "Three agents."}
@@ -29,7 +31,7 @@ async def chat(workspaces_tmp):
     orientation.started(CORPUS, made, passes=["final"])
     yield made
     calls.forget()
-    orient_session._closing.discard(CORPUS)
+    orient_session._closing.pop(CORPUS, None)
 
 
 @pytest.fixture()
@@ -49,7 +51,7 @@ def critiques(monkeypatch) -> list[dict]:
 def told(monkeypatch) -> list[dict]:
     """The events main was told, as tell_main posts them."""
     out: list[dict] = []
-    monkeypatch.setattr(agent_session, "tell_main", lambda c, kind, payload: out.append({"kind": kind, **payload}))
+    monkeypatch.setattr(subagents, "tell_main", lambda c, kind, payload: out.append({"kind": kind, **payload}))
     return out
 
 
@@ -78,8 +80,8 @@ def _read(chat: str, n: int, rel: str, a: int = 1, b: int | None = None, at: str
     _call(chat, n, "Read", {"file_path": str(config.corpus_dir(CORPUS) / rel), "offset": a}, numbered, at)
 
 
-def _run(chat: str) -> agent_session.Run:
-    return agent_session.Run(CORPUS, orient_session.KEY, chat, "sid-o", config.corpus_dir(CORPUS), orientation.ROLE)
+def _run(chat: str, k: int = 0) -> subagents.Run:
+    return subagents.Run(CORPUS, orient_session.KEY, "orientation", chat, "a1", k=k)
 
 
 async def _closed() -> None:
@@ -194,10 +196,10 @@ async def test_a_card_s_output_counts_by_the_files_its_code_read(chat):
 
 def test_only_the_orientation_and_the_chats_under_it_count_never_a_critique_or_another_chat(chat):
     root = config.corpus_dir(CORPUS)
-    step = agents.new_agent(CORPUS, agent_session.STEP_ROLE, "survey", parent=chat, announce=False)["id"]
-    critic = agents.new_agent(CORPUS, agent_session.STEP_ROLE, "critique", parent=chat, announce=False,
+    step = agents.new_agent(CORPUS, agents.STEP_ROLE, "survey", parent=chat, announce=False)["id"]
+    critic = agents.new_agent(CORPUS, agents.STEP_ROLE, "critique", parent=chat, announce=False,
                               agent_type=orient_checks.CRITIC)["id"]
-    critic_step = agents.new_agent(CORPUS, agent_session.STEP_ROLE, "verify", parent=critic, announce=False)["id"]
+    critic_step = agents.new_agent(CORPUS, agents.STEP_ROLE, "verify", parent=critic, announce=False)["id"]
     _read(chat, 1, "board.jsonl", 1, 2, at=step)
     _read(chat, 2, "events.jsonl", 1, 2, at=critic)
     _read(chat, 3, "README.md", 1, 2, at=critic_step)
@@ -261,7 +263,7 @@ async def test_the_first_run_s_end_adds_the_line_to_its_thread_main_s_event_and_
                            "manifest.json", "README.md", "prompts/worker.md"), 1):
         _read(chat, n, f, 1, 2)
     want = orient_checks.coverage(CORPUS, chat).text
-    orient_session._ended(_run(chat), "done", "Done.")
+    orient_session.subagent_ended(CORPUS, _run(chat), "done", "Done.")
     assert orient_session.running(CORPUS), "while it is measured, the orientation counts as running"
     await _closed()
     _, log_path = agents.paths(CORPUS, chat)
@@ -275,37 +277,29 @@ async def test_the_first_run_s_end_adds_the_line_to_its_thread_main_s_event_and_
     assert len(want) > events.LINE_CHARS and events.terminal_line(event["kind"], event["text"], {}).splitlines()[1] == want
 
 
-async def test_a_message_sent_while_it_is_measured_waits_and_its_run_starts_with_the_line(chat, told, monkeypatch):
+async def test_a_message_sent_while_it_is_measured_waits_and_carries_the_line(chat, told, bridge):
+    """A follow-up from the browser while the first run's coverage line is measured is held, then sent with the line
+    after it (`## orient-coverage-lead`); the next one carries no line."""
     root = config.corpus_dir(CORPUS)
     _bash(chat, 1, f"head -3 {root}/board.jsonl")
     want = orient_checks.coverage(CORPUS, chat).text
-    started: list[dict] = []
-
-    async def start(c, key, **kw):
-        run = agent_session.Run(c, key, chat, "sid-o", config.corpus_dir(c), orientation.ROLE, k=kw.get("run_k", 0))
-        kw["on_start"](run)
-        started.append(kw)
-        return run
-
-    monkeypatch.setattr(agent_session, "start", start)
-    monkeypatch.setattr(session, "find_transcript", lambda sid, config_dir=None: "/x.jsonl")
-    orientation.record(CORPUS, session="sid-o")
-    orient_session._ended(_run(chat), "done", "Done.")
-    got = await orient_session.message(CORPUS, "And the weekends?", orient_session.BROWSER)
-    assert got["status"] == "queued"
+    agents.update_agent(CORPUS, chat, route="subagent", agent_id="a1")
+    with subagents.update(CORPUS) as state:
+        sf.registry(state)["a1"] = {"role": "orientation", "key": "orient", "chat": chat, "status": "running",
+                                    "values": {"model": "m", "effort": "max"}}
+    orient_session.subagent_ended(CORPUS, _run(chat), "done", "Done.")
+    got = await orient_session.send(CORPUS, "And the weekends?", orient_session.BROWSER)
+    assert got == {"status": "held", "chat": chat}
     await _closed()
     for _ in range(100):
-        if started:
+        if bridge.ops("send"):
             break
         await asyncio.sleep(0.02)
-    [first] = started
-    assert first["prompt"].endswith("\n\n" + tools.hint("orient-coverage-lead", coverage=want))
-    assert "And the weekends?" in first["prompt"] and first["leads"] == [{"text": "And the weekends?",
-                                                                         "by": orient_session.BROWSER}]
+    [first] = bridge.ops("send")
+    assert first["text"] == "And the weekends?\n\n" + tools.hint("orient-coverage-lead", coverage=want)
     assert orientation.read_run(CORPUS)["coverage_told"] is True
-    orientation.record(CORPUS, status="done")
-    await orient_session.resume(CORPUS, [{"text": "And Mondays?", "by": orient_session.BROWSER}])
-    assert "Coverage:" not in started[-1]["prompt"], "the line ends one run's prompt"
+    assert (await orient_session.send(CORPUS, "And Mondays?", orient_session.BROWSER))["status"] == "sent"
+    assert bridge.ops("send")[-1]["text"] == "And Mondays?", "the line ends one run's prompt"
 
 
 async def test_a_stopped_or_failed_first_run_or_a_follow_up_is_not_measured(chat, told, monkeypatch):
@@ -315,12 +309,10 @@ async def test_a_stopped_or_failed_first_run_or_a_follow_up_is_not_measured(chat
     monkeypatch.setattr(orient_session, "measure", no_measure)
     for status in ("failed", "stopped"):
         orientation.record(CORPUS, status="running")
-        orient_session._ended(_run(chat), status, "")
+        orient_session.subagent_ended(CORPUS, _run(chat), status, "")
         assert not orient_session.running(CORPUS) and "Coverage" not in told[-1]["text"], status
-    follow_up = _run(chat)
-    follow_up.k = 1
     orientation.record(CORPUS, run=1, status="running")
-    orient_session._ended(follow_up, "done", "Revised card 2.")
+    orient_session.subagent_ended(CORPUS, _run(chat, k=1), "done", "Revised card 2.")
     assert not orient_session.running(CORPUS) and "Coverage" not in told[-1]["text"]
 
 
@@ -333,15 +325,12 @@ async def test_the_critic_s_first_message_has_the_line_in_place_of_the_unread_ch
 
 
 def test_the_critique_is_off_unless_start_or_the_call_turns_it_on(workspaces_tmp):
-    assert orientation.choices(CORPUS)["critique"] is False
     assert "critique" not in orient_session.parts_of({}, ("final", "views"))
     assert "critique" in orient_session.parts_of({"critique": True}, ("final", "views"))
-    assert agent_session.thimble_tool("critique") in orient_session.disallowed(orient_session.parts_of({}, ("final",)))
     assert "`critique`" not in orient_session.system_prompt(CORPUS, "", orient_session.parts_of({}, ("final",)))
-    orientation.start_requested(CORPUS, {"final_notebook": True}, {"id": "e1"})
-    assert orientation.read_run(CORPUS)["critique"] is False and orientation.choices(CORPUS)["critique"] is False
+    orientation.start_requested(CORPUS, {"passes": ["final"]})
+    assert orientation.read_run(CORPUS)["critique"] is False and not orientation.part_on(CORPUS, "critique")
     orientation.run_file(CORPUS).unlink()
-    orientation.start_requested(CORPUS, {"final_notebook": True, "critique": "true"}, {"id": "e2"})
-    assert orientation.choices(CORPUS)["critique"] is True
-    [schema] = [t["input_schema"] for t in tools.list() if t["name"] == "start_orientation"]
-    assert schema["properties"]["critique"]["description"].endswith("Default false.")
+    orientation.start_requested(CORPUS, {"passes": ["final"], "critique": "true"})
+    assert orientation.part_on(CORPUS, "critique") and orientation.part_on(CORPUS, "final")
+    assert not orientation.part_on(CORPUS, "views")

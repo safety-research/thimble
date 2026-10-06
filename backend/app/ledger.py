@@ -379,12 +379,16 @@ async def _end_work(c: str) -> None:
 
 
 async def _stop_sessions(c: str, why: str) -> None:
-    """Stop the Claude Code sessions the server runs for the workspace (an orientation's, a writer's: they never
-    subscribe to its events) and detach the analyst's session from it, before its folder goes."""
-    from . import agent_session, session  # lazy: session imports this module
+    """Stop thimble's agents in the workspace (through the module, subagents.stop) and detach the analyst's session from
+    it, before its folder goes."""
+    from . import session, subagents  # lazy: session imports this module
 
-    for run in [r for (cc, _), r in list(agent_session._runs.items()) if cc == c]:
-        await agent_session.stop_run(run)
+    for agent_id, a in subagents.agents_of(c).items():
+        if a.get("status") in ("running", "waiting"):
+            try:
+                await subagents.stop(c, agent_id)
+            except Exception:  # noqa: BLE001 — the folder goes either way
+                log.warning("%s: the agent %s was not stopped", c, agent_id, exc_info=True)
     lv = session.current(c)
     if lv is not None:
         session.detach(c, lv.sid, why)
