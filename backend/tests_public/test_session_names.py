@@ -241,3 +241,21 @@ async def test_the_statusline_shows_the_orientation_and_its_cards_and_the_listin
     monkeypatch.setattr(tray, "agent_rows", lambda c: rows)
     got = await tray.agents_route(tray.AgentsQuery(cwd="/work", session="main-1", announce=True))
     assert got["line"] == "thimble · orientation working · 7 cards" and got["announce"] == ""
+
+
+def test_the_orientation_waiting_names_its_critic_or_its_own_subagents(workspaces_tmp, monkeypatch):
+    """Live check L13: with critique off the statusline said the orientation was waiting for its critique while it
+    waited for a helper it had started. The row names the child it waits for: its critic, else its subagents."""
+    from app import events, subagent_files as sf, subagents
+
+    monkeypatch.setattr(events, "asking", lambda c: set())
+    with subagents.update(CORPUS) as state:
+        sf.registry(state)["o1"] = {"role": "orientation", "key": "orient", "status": "waiting", "started": 1}
+        sf.registry(state)["h1"] = {"role": None, "type": "thimble:helper", "parent": "o1", "status": "running",
+                                    "started": 2}
+    [row] = tray.subagent_rows(CORPUS)
+    assert row["state"] == "waiting for its subagents"
+    with subagents.update(CORPUS) as state:
+        sf.registry(state)["k1"] = {"role": "critic", "key": "critique", "parent": "o1", "status": "running",
+                                    "started": 3}
+    assert tray.subagent_rows(CORPUS)[0]["state"] == "waiting for its critique"

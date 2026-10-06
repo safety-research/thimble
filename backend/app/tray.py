@@ -44,15 +44,19 @@ def subagent_rows(c: str) -> list[dict[str, Any]]:
 
     rows: list[dict[str, Any]] = []
     asking = events.asking(c)
-    for agent_id, a in subagents.agents_of(c).items():
+    every = subagents.agents_of(c)
+    for agent_id, a in every.items():
         if a.get("role") not in subagents.ROLES or a.get("status") not in ("running", "waiting"):
             continue
         role = str(a["role"])
         key = str(a.get("key") or "")
         what = key.split(":", 1)[1] if ":" in key and role != "critic" else ""
         word = ROLE_WORDS.get(role, role)
+        # waiting for a child: its critic, or the subagents it started (helpers), which critique off never names
+        kids = [k for k in every.values() if k.get("parent") == agent_id and k.get("status") in ("running", "waiting")]
+        waits = "waiting for its critique" if any(k.get("role") == "critic" for k in kids) else "waiting for its subagents"
         state = "waiting for a permission" if agent_id in asking else (
-            "waiting for its critique" if a.get("status") == "waiting" else "working")
+            waits if a.get("status") == "waiting" else "working")
         rows.append({"name": subagents.type_name(role), "label": f"{word}: {what}" if what else word, "state": state,
                      "kind": "subagent", "chat": a.get("chat"), "role": role})
     return rows
