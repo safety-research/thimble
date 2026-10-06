@@ -1,7 +1,7 @@
-"""prompts.py and the repository's own prompt files: every one loads and renders with its own slots and no `{{` left;
-every hint the code names is a section of prompts/tools.md with the placeholders the code fills; and no prompt still
-describes what went when thimble's agents became subagents of main (tray entries, sessions of their own, the start and
-write events)."""
+"""prompts.py and the repository's own prompt files: every one loads and renders with its own slots and no `{{` left, in
+browser mode and in terminal mode; every hint the code names is a section of prompts/tools.md with the placeholders the
+code fills; and no prompt still describes what went when thimble's agents became subagents of main (tray entries,
+sessions of their own, the start and write events)."""
 
 import ast
 import re
@@ -12,22 +12,27 @@ from app import prompts
 
 
 def test_real_prompts_render_clean(monkeypatch):
-    """Every prompt renders with its own slots and no {{...}} survives — nothing half-filled can reach a model."""
+    """Every prompt renders with its own slots and no {{...}} survives, in each mode — nothing half-filled can reach a
+    model."""
     monkeypatch.delenv("THIMBLE_PROMPTS_DIR", raising=False)
-    for name in (*prompts.PROMPT_NAMES, *prompts.TYPE_FILES.values(), *prompts.DEV_FILES):
-        values = {s: f"<{s}>" for s in prompts.slots(name)}
-        out = prompts.render(name, values)
-        assert "{{" not in out and "}}" not in out, name
+    for mode in prompts.MODES:
+        for name in (*prompts.PROMPT_NAMES, *prompts.TYPE_FILES.values(), *prompts.DEV_FILES):
+            values = {s: f"<{s}>" for s in prompts.slots(name, mode)}
+            out = prompts.render(name, values, mode)
+            assert "{{" not in out and "}}" not in out, (mode, name)
 
 
 def test_main_renders_with_either_ending(tmp_path, monkeypatch):
-    """Main's prompt renders with the ending of each mode (terminal_tools.ENDINGS), each found on exactly one line."""
+    """Main's prompt renders with the ending of each Claude Code (terminal_tools.ENDINGS), each found on exactly one
+    line, in browser mode and in terminal mode."""
     from app import events, terminal_tools
 
     monkeypatch.delenv("THIMBLE_PROMPTS_DIR", raising=False)
-    for terminal in (True, False):
-        out = events.render_prompts(["main"], str(tmp_path), terminal=terminal)
-        assert terminal_tools.ENDINGS[terminal] in out and terminal_tools.ENDINGS[not terminal] not in out
+    for mode in prompts.MODES:
+        with prompts.rendering(mode):
+            for terminal in (True, False):
+                out = events.render_prompts(["main"], str(tmp_path), terminal=terminal)
+                assert terminal_tools.ENDINGS[terminal] in out and terminal_tools.ENDINGS[not terminal] not in out
 
 
 def test_the_terminal_tools_name_the_subagent_calls():
@@ -242,8 +247,132 @@ def test_agent_definitions_name_a_fixed_description_and_render_clean(monkeypatch
     """Each agent file a registered role comes from, and the helper's, names the agent and carries the fixed
     description main's agent list shows, and renders with its own slots and no {{...}} left."""
     monkeypatch.delenv("THIMBLE_PROMPTS_DIR", raising=False)
-    for name in (*prompts.AGENT_FILES, "orient-helper"):
-        front, _ = prompts.frontmatter(name)
-        assert str(front.get("name") or "").strip() and str(front.get("description") or "").strip(), name
-        out = prompts.render(name, {s: f"<{s}>" for s in prompts.slots(name)})
-        assert "{{" not in out and "}}" not in out, name
+    for mode in prompts.MODES:
+        for name in (*prompts.AGENT_FILES, "orient-helper"):
+            front, _ = prompts.frontmatter(name, mode)
+            assert str(front.get("name") or "").strip() and str(front.get("description") or "").strip(), name
+            out = prompts.render(name, {s: f"<{s}>" for s in prompts.slots(name, mode)}, mode)
+            assert "{{" not in out and "}}" not in out, (mode, name)
+
+
+# --------------------------------------------------------------------------- modes: browser and terminal
+
+import sys  # noqa: E402
+import types  # noqa: E402
+
+import pytest  # noqa: E402
+
+
+def _fixture(tmp_path, monkeypatch, files: dict[str, str]) -> None:
+    for name, text in files.items():
+        (tmp_path / name).write_text(text, "utf-8")
+    monkeypatch.setenv("THIMBLE_PROMPTS_DIR", str(tmp_path))
+
+
+def test_a_mode_block_keeps_its_text_only_in_its_mode(tmp_path, monkeypatch):
+    """`{{if:<mode>}}…{{end}}` keeps its text in its mode and drops it in the other; a marker alone on its line takes
+    the line with it; an include or a slot inside a block left out is never read or asked for."""
+    _fixture(tmp_path, monkeypatch, {
+        "a.md": "Top {{if:browser}}B{{end}}{{if:terminal}}T {{who}}{{end}} end.\n\n{{if:terminal}}\n{{include:t}}\n"
+                "{{end}}\nlast\n",
+        "t.md": "terminal line\n",
+    })
+    assert prompts.load("a", "browser") == "Top B end.\n\nlast\n"
+    assert prompts.load("a", "terminal") == "Top T {{who}} end.\n\nterminal line\nlast\n"
+    assert prompts.files("a", "browser") == ["a.md"] and prompts.files("a", "terminal") == ["a.md", "t.md"]
+    assert prompts.render("a", {}, "browser") == "Top B end.\n\nlast\n"
+    assert prompts.slots("a", "terminal") == {"who"}
+    (tmp_path / "t.md").unlink()
+    assert prompts.load("a", "browser")  # the include is in a block browser mode leaves out
+    with pytest.raises(prompts.PromptError, match="t.md"):
+        prompts.load("a", "terminal")
+
+
+@pytest.mark.parametrize(("text", "says"), [
+    ("{{if:web}}x{{end}}", "unknown mode 'web'"),
+    ("{{if:browser}}x{{if:terminal}}y{{end}}", "inside the"),
+    ("x{{end}}", "no {{if:<mode>}} block open"),
+    ("{{if:terminal}}x", "not closed"),
+])
+def test_a_broken_mode_block_names_its_file(tmp_path, monkeypatch, text, says):
+    """An unknown mode, a block inside a block, an `{{end}}` with no block open and a block left open each raise
+    PromptError naming the file, in either mode, as an unknown directive does."""
+    _fixture(tmp_path, monkeypatch, {"bad.md": text})
+    for mode in prompts.MODES:
+        with pytest.raises(prompts.PromptError, match="bad.md") as e:
+            prompts.load("bad", mode)
+        assert says in str(e.value)
+
+
+def test_a_mode_section_replaces_its_section_in_its_mode(tmp_path, monkeypatch):
+    """`## <name>@terminal` gives `## <name>` its body in terminal mode, in place, and is left out in browser mode; one
+    with no `## <name>` is that section in its own mode only; two of one name and mode raise PromptError."""
+    _fixture(tmp_path, monkeypatch, {"h.md": "Head.\n\n## x\n\nbrowser {a}\n\n## x@terminal\n\nterminal {a}\n\n"
+                                             "## y@terminal\n\nonly here\n\n## z\n\nz body\n"})
+    assert prompts.load("h", "browser") == "Head.\n\n## x\n\nbrowser {a}\n\n## z\n\nz body\n"
+    assert prompts.load("h", "terminal") == "Head.\n\n## x\n\nterminal {a}\n\n## y\n\nonly here\n\n## z\n\nz body\n"
+    assert prompts.section("h", "x", "terminal") == "terminal {a}\n"
+    assert prompts.render_section("h", "y", {}, "terminal") == "only here\n"
+    with pytest.raises(prompts.PromptError, match="no section"):
+        prompts.section("h", "y", "browser")
+    _fixture(tmp_path, monkeypatch, {"last.md": "## x\n\nb\n\n## z\n\nz\n\n## x@terminal\n\nt\n"})
+    assert prompts.load("last", "terminal") == "## x\n\nt\n\n## z\n\nz\n\n"
+    _fixture(tmp_path, monkeypatch, {"two.md": "## x@terminal\n\none\n\n## x@terminal\n\ntwo\n"})
+    assert prompts.load("two", "browser") == ""
+    with pytest.raises(prompts.PromptError, match="two sections"):
+        prompts.load("two", "terminal")
+
+
+def test_a_heading_with_a_mode_block_is_found_by_its_browser_text(tmp_path, monkeypatch):
+    """Code names a section by its heading as browser mode writes it (events.EVENTS_SECTION), so a heading whose words
+    differ by mode is found by those words in terminal mode too."""
+    _fixture(tmp_path, monkeypatch, {"m.md": "## Events from {{if:browser}}the browser{{end}}{{if:terminal}}thimble"
+                                             "{{end}}\n\n- `a` one{{if:terminal}} here{{end}}\n\n## Other\n\nx\n"})
+    assert prompts.load("m", "terminal").startswith("## Events from thimble\n")
+    assert prompts.section("m", "Events from the browser", "terminal") == "- `a` one here\n"
+    assert prompts.section("m", "Events from thimble", "terminal") == "- `a` one here\n"
+    assert prompts.section("m", "Events from the browser", "browser") == "- `a` one\n"
+
+
+class _FakeLaunchMode(types.ModuleType):
+    """app.launch_mode as the mode lane builds it, reduced to current(): the session's mode, counted."""
+
+    def __init__(self, mode: str) -> None:
+        super().__init__("app.launch_mode")
+        self.mode, self.asked = mode, 0
+
+    def current(self, cwd=None) -> str:  # noqa: ARG002 — the real one reads the session's launch record
+        self.asked += 1
+        return self.mode
+
+
+def _session_mode(monkeypatch, fake: "types.ModuleType | None") -> None:
+    import app
+
+    monkeypatch.setitem(sys.modules, "app.launch_mode", fake)
+    if fake is None:
+        monkeypatch.delattr(app, "launch_mode", raising=False)
+    else:
+        monkeypatch.setattr(app, "launch_mode", fake, raising=False)
+
+
+def test_the_mode_comes_from_the_call_the_block_or_the_session(tmp_path, monkeypatch):
+    """A prompt renders in the call's mode, else the `rendering` block's, else the session's (launch_mode.current()),
+    else browser; a file with no mode block or mode section never asks the session."""
+    _fixture(tmp_path, monkeypatch, {"a.md": "{{if:browser}}B{{end}}{{if:terminal}}T{{end}}", "plain.md": "P"})
+    fake = _FakeLaunchMode("terminal")
+    _session_mode(monkeypatch, fake)
+    assert prompts.load("plain") == "P" and fake.asked == 0
+    assert prompts.load("a") == "T" and fake.asked == 1
+    with prompts.rendering("browser"):
+        assert prompts.load("a") == "B" and prompts.load("a", "terminal") == "T"
+    assert prompts.current_mode() == "terminal"
+    fake.mode = "neither"
+    assert prompts.load("a") == "B"  # a session mode thimble does not know renders browser mode
+    _session_mode(monkeypatch, None)  # a tree without app.launch_mode has browser mode only
+    assert prompts.load("a") == "B"
+    with pytest.raises(prompts.PromptError, match="unknown mode"):
+        prompts.load("a", "web")
+    with pytest.raises(prompts.PromptError, match="unknown mode"):
+        with prompts.rendering("web"):
+            pass
