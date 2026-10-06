@@ -58,6 +58,9 @@ PREFIX = f"{PLUGIN}:"
 ROLES = ("orientation", "critic", "writer", "view-builder", "view-reviewer", "check")
 HELPER = "orient-helper"
 PLUGIN_CALL = "toolu_plugin_"  # the tool_use_id prefix of a call thimble's module made ($.agent.spawn, $.tool.call)
+# the agent type of a thread's fork, which Claude Code tells not to start subagents (its fork boilerplate: "Do NOT spawn
+# subagents with the Agent tool"), so a fork's start tool call is refused at once (tools._as_caller)
+FORK_TYPE = "fork"
 AGENT_TOOLS = ("Agent", "Task")
 SEND_TOOL = "SendMessage"
 STOP_TOOL = "TaskStop"

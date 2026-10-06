@@ -2645,15 +2645,24 @@ async def call_route(name: str, body: CallBody, request: Request) -> dict[str, A
     return (await work).as_dict()
 
 
+# the start tools, whose result is an Agent call for the caller to make: a thread's fork may not make one, since Claude
+# Code tells its forks not to start subagents, so a fork's call is refused at once with start-refused-fork (U5); another
+# subagent of main's makes the call itself (subagents.typed_caller)
+FORK_REFUSED = ("start_orientation", "start_writing", "propose_view", "run_check")
+
+
 async def _as_caller(c: str, name: str, tool_use_id: str | None) -> tuple[str, str | None]:
     """(why the call is refused, '' when it runs; the session it runs as) for a call through main's shim: the key of the
     agent of thimble's that made it (subagents.caller, from the caller hook's line, else the transcript that holds the
     call), or None for main's own. A call its caller may not make is refused (subagents.allowed): main's `critique`, the
-    critic's `add_card`, a tool of a part the orientation's run has off (orientation.part_on)."""
+    critic's `add_card`, a tool of a part the orientation's run has off (orientation.part_on), a thread's fork's start
+    tool (FORK_REFUSED)."""
     from . import orientation, orient_session, subagents  # noqa: PLC0415 — each imports this module
 
     canon = canonical(name)
     who = await subagents.caller(c, tool_use_id) if tool_use_id else None
+    if who is None and canon in FORK_REFUSED and subagents.fork_call(c, tool_use_id):
+        return hint("start-refused-fork"), None
     if who is None:
         spec = REGISTRY[canon]
         if spec.sessions and None not in spec.sessions:

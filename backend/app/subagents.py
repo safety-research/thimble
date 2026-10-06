@@ -585,6 +585,12 @@ def call_input(role: str, prompt: str, description: str) -> dict[str, Any]:
     return {"subagent_type": type_name(role), "description": description, "prompt": prompt}
 
 
+def fork_call(c: str, call: str | None) -> bool:
+    """Whether the thimble call `call` is a thread's fork's (the caller hook's line names its type, FORK_TYPE)."""
+    line = files.find_caller(ws(c), call or "") if call else None
+    return bool(line) and str(line.get("agent_type") or "") == files.FORK_TYPE
+
+
 async def typed_caller(c: str, call: str | None) -> str | None:
     """The subagent that made the start tool call `call`, when it is no agent of thimble's: a thread's fork, or a
     subagent of main's own. Its agent id, which a typed start's request keeps (`caller_agent`), so that its own Agent

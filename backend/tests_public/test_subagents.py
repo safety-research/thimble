@@ -586,6 +586,26 @@ async def test_main_s_own_call_runs_at_once_and_a_subagent_s_is_found_by_its_tra
         session._live.pop(CORPUS, None)
 
 
+async def test_a_thread_s_fork_s_start_tool_call_is_refused_at_once_and_another_subagent_s_runs(bridge, monkeypatch):
+    """U5: Claude Code tells a thread's fork not to start subagents (its fork boilerplate; live: the fork would not
+    make the Agent call), so a fork's call of a start tool is refused at once with a plain line that names Start and
+    Write in the browser; nothing is recorded. A subagent of main's own (general-purpose) makes the call itself, so its
+    start tool call runs, and its other thimble calls run as main's for a fork too."""
+    from app import tools
+
+    ws = config.workspace_dir(CORPUS)
+    sf.add_caller(ws, "toolu_fork_sw", "fork1", "fork")
+    sf.add_caller(ws, "toolu_gp_sw", "gp1", "general-purpose")
+    sf.add_caller(ws, "toolu_fork_card", "fork1", "fork")
+    for name in ("start_writing", "start_orientation", "propose_view", "run_check"):
+        refused, _ = await tools._as_caller(CORPUS, name, "toolu_fork_sw")
+        assert refused == tools.hint("start-refused-fork"), name
+    assert "Start" in refused and "Write" in refused and "browser" in refused
+    assert await tools._as_caller(CORPUS, "start_writing", "toolu_gp_sw") == ("", None)
+    assert await tools._as_caller(CORPUS, "add_card", "toolu_fork_card") == ("", None)
+    assert not subagents.read(CORPUS).get("requests")
+
+
 def test_the_shim_of_main_lists_every_tool_and_the_critique_among_them():
     from app import tools
 
