@@ -50,7 +50,7 @@ def test_the_note_names_them_and_the_worked_examples_get_none():
     note = views.own_parts_note(PAGE)
     assert "`.chip` sets border-radius" in note and "and 2 more" in note and "chip-key" in note
     assert views.own_parts_note("<style>.search .field { width: 100% }</style>") == ""
-    for name in ("timeline", "linked-sessions", "repository", "colour-by"):
+    for name in ("timeline", "linked-sessions", "repository"):
         assert views.own_parts((views.EXAMPLES_DIR / name / "view.html").read_text("utf-8")) == [], name
 
 

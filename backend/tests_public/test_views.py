@@ -826,8 +826,8 @@ async def test_no_thread_is_read_as_a_question_from_a_view_s_own_box(ws, inproc,
 
 # ------------------------------------------------------------------------------------------------- worked examples
 #
-# plugin/viewers/timeline, linked-sessions, repository and colour-by are the worked examples a view ticket's session
-# reads (prompts/dev-view.md), and never views of a workspace; colour-by shows the view kit's Colour by. Each ships an invented sample of the files it claims under
+# plugin/viewers/timeline, linked-sessions and repository are the worked examples a view ticket's session reads
+# (prompts/dev-view.md), and never views of a workspace. Each ships an invented sample of the files it claims under
 # sample/, and passes over it the checks a view a session writes must pass. Each sample is copied into the temp DATA_DIR
 # as a corpus named after its example.
 
@@ -838,7 +838,6 @@ EXAMPLES = {
     "repository": ("repository", ["view:repository/r1/pull/11", "view:repository/r3", "view:repository/r2/issues/6",
                                   "view:repository/r3/discussions/2", "view:repository/r4/agents/moss"]),
     "linked-sessions": ("linked-sessions", ["view:linked-sessions/r1", "view:linked-sessions/a07a4da7"]),
-    "colour-by": ("colour-by", ["messages.jsonl#L7"]),
 }
 
 
@@ -878,7 +877,6 @@ BROKEN = {
                    ("runs/r1/events.jsonl",
                     '{"id": "x1", "type": "label.added", "ts": "2026-05-20T10:00:00Z", "number": 11}\n'
                     '{"id": "x2", "type": "comment", "ts": "yesterday", "actor": "ash", "number": 11}\n', 2)],
-    "colour-by": [("messages.jsonl", '{"ts": "yesterday", "author": "ash", "channel": "ops", "text": "no time"}\n', 1)],
     "linked-sessions": [("runs/r1/sessions-index.json", "not json", 1),
                         ("runs/r1/36fe6b9d-6e6d-4582-aef9-c97a0fe8f576.jsonl",
                          '{"type": "user", "uuid": "x9", "timestamp": "2026-09-12T14:50:00Z", "message": {"role": '
@@ -963,13 +961,11 @@ async def test_every_worked_example_answers_the_checks_over_its_sample(name, sam
 
 async def _every_answer(name: str, slug: str) -> list:
     """What the example's page fetches, over every place: each Timeline event in full, each session's transcript and
-    the runs and sessions compared, each Repository tab and unit, the Message board under three Colour by choices."""
+    the runs and sessions compared, each Repository tab and unit."""
     call = functools.partial(views.reader_call, name, slug, "records")
     if name == "timeline":
         rows = (await call({"op": "overview"}))["cols"]["r"]
         return [{"ref": got["ref"], **got["record"]} for got in [await call({"op": "record", "r": r}) for r in rows]]
-    if name == "colour-by":
-        return [await call({"op": "board", "colour": c}) for c in (None, {"field": "channel", "off": []}, {"field": "kind", "off": ["Text only"]})]
     if name == "linked-sessions":
         ov = await call({"op": "overview"})
         out = [await call({"op": "session", "id": s["id"]}) for s in ov["sessions"]]
