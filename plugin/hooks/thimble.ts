@@ -21,7 +21,8 @@
 //   (register if needed, then SendMessage), stop (TaskStop of the agent and of the shells the server names), note
 //   ($.session.append). It never starts, sends or stops anything the server did not ask for;
 // - agent.spawn: an Agent call for one of thimble's roles whose prompt's first line names a typed request, main's or a
-//   subagent's (a thread's fork may start thimble's agents as Claude Code lets any subagent start subagents), gets that
+//   subagent's (a subagent of main's own may start thimble's agents, as Claude Code lets a subagent start subagents;
+//   a thread's fork is refused at its start tool, tools._as_caller), gets that
 //   request's full model id, and the agent it starts that request's effort, which turn.step sets on its every request;
 //   a child of such an agent whose type is not thimble's gets the same effort (its model it inherits already). These
 //   hooks never see a run of an agent this module started, which is why clicks register instead;
@@ -472,7 +473,7 @@ async function follow($: Engine, m: State, old: string): Promise<void> {
 
 /** What main's (or an agent's) Agent call starts with: a typed start's model, and the effort its agent and that
  *  agent's children of no thimble type run at. A typed start is found by the request its prompt's first line names,
- *  whoever makes the call: main, a thread's fork or another subagent whose start tool call made the request, or the
+ *  whoever makes the call: main, a subagent of main's own whose start tool call made the request, or the
  *  orientation for its critic. Never fails the call: a lookup that fails changes nothing. */
 async function spawning($: Engine, m: State, e: { subagentType?: string; parentAgentId?: string; prompt?: string }): Promise<{ model?: string; effort?: Effort; typed?: string }> {
   try {
