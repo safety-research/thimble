@@ -7,9 +7,23 @@ both (subagents.py has the design):
                   moves (`main`) and main's end (`main_end`)
   callers.jsonl   one line per thimble tool call of a subagent: {tool_use_id, agent_id, agent_type, ts}, trimmed to the
                   last CALLERS_KEEP_S
-  launch.json     what the launcher started main with (lane A writes it)
+  launch.json     what the launcher started main with (lane A writes it), with the session's mode (`mode`: browser or
+                  terminal), which every process of the session reads here (session_mode)
 
-The three files are in the workspace's `trusted` folder (DIR). The server makes the folder and the files when it
+In terminal mode (no server) two more files are in the folder, and subagents.json holds more:
+
+  roles.json      the roles the module registers ({at, digest, roles: {name: spec}}), as GET /api/module/roles serves
+                  them in browser mode (module_bridge.roles_file writes it)
+  module.json     what the module writes, and only the module: {session, version, load, beat, plan, plan_at, problem,
+                  taken, answers, ended, gone}, its times in milliseconds since the epoch (module_bridge has the
+                  design); a reader retries a read that a write cut short (read_module), since the module can only
+                  write a file whole in place
+  subagents.json  the module's requests, entries of `requests` of kind `module` ({op, args, module: pending | answered
+                  | expired, session, asked_at, expires_at}, add_module_request), main's permission mode (`main`:
+                  record_mode), the notes for a new main after /clear (`module.notes`: rekey) and the forks of threads
+                  that are starting (`forking`)
+
+The files are in the workspace's `trusted` folder (DIR). The server makes the folder and the files when it
 registers the workspace, and both kernel wrappers bind the folder read-only (kernel_wrap.TRUSTED_DIR), since a notebook
 cell runs model-written code with the workspace writable: a pending request it wrote would let a plugin start claim it,
 and a caller line it wrote would credit its call to an agent. The folder is bound, not each file: a write replaces a
@@ -43,6 +57,11 @@ STATE = "subagents.json"
 CALLERS = "callers.jsonl"
 LAUNCH = "launch.json"
 FILES = (STATE, CALLERS, LAUNCH)  # in DIR
+ROLES_FILE = "roles.json"  # in DIR, terminal mode: the roles the module registers (module note)
+MODULE_OUT = "module.json"  # in DIR, terminal mode: what the module writes, and only the module (module note)
+BROWSER, TERMINAL = "browser", "terminal"  # the session's mode, launch.json's `mode` (session_mode)
+MODES = (BROWSER, TERMINAL)
+WS_ENV = "THIMBLE_WS"  # the workspace folder, which the launcher exports in terminal mode only
 LOCK = f"{STATE}.lock"  # the lock of subagents.json's writers, this module's and module_bridge's, in the workspace folder
 LOCK_WAIT_S = 2.0
 LOCK_POLL_S = 0.01
@@ -270,14 +289,21 @@ def tree() -> Path:
     return Path(named) if named else Path(__file__).resolve().parents[2]
 
 
-def hint(name: str, **values: Any) -> str:
-    """A hint section of prompts/tools.md with its {placeholders} filled, as app.tools.hint reads it; '' when absent."""
+def hint(name: str, *, session_mode: str | None = None, **values: Any) -> str:
+    """A hint section of prompts/tools.md with its {placeholders} filled, as app.tools.hint reads it; '' when absent.
+    In terminal mode (`session_mode`, else THIMBLE_MODE) the section `## <name>@terminal` comes first when there is one
+    (prompts.section's rule)."""
     try:
         text = tree().joinpath(*TOOLS_MD).read_text("utf-8")
     except OSError:
         return ""
-    m = re.search(rf"^## {re.escape(name)}[ \t]*\n(.*?)(?=^## \S|\Z)", text, re.M | re.S)
-    body = m.group(1).strip() if m else ""
+    mode = session_mode or os.environ.get("THIMBLE_MODE") or ""
+    body = ""
+    for heading in ([f"{name}@{mode}"] if mode in MODES else []) + [name]:
+        m = re.search(rf"^## {re.escape(heading)}[ \t]*\n(.*?)(?=^## \S|\Z)", text, re.M | re.S)
+        if m:
+            body = m.group(1).strip()
+            break
     try:
         return body.format(**values) if body else ""
     except (KeyError, IndexError, ValueError):
@@ -591,8 +617,61 @@ def rekey(state: dict[str, Any], old: str, new: str) -> list[str]:
         module.get("rekeyed"), dict) else {}
     moves.pop(new, None)  # a move back (/resume to the session before) ends the chain at `new`
     moves[old] = new
-    state["module"] = {**module, "rekeyed": dict(list(moves.items())[-REKEYS_KEPT:])}
+    state["module"] = {**module, "rekeyed": dict(list(moves.items())[-REKEYS_KEPT:]),
+                       # terminal mode: the lines the module appends to the new main, one per running agent, which has
+                       # no record of them (module_bridge.state_route gives the same lines in browser mode)
+                       "notes": {"session": new, "lines": started_notes(state), "at": now()}}
     return moved
+
+
+# --------------------------------------------------------------------------- the note at a start
+
+
+# module-started-note's {how}, by the route of the agent's start: the analyst's click, the next step of a run they asked
+# for (a writer after the orientation, a view build it proposed), or main's own Agent call for a typed request
+HOW = {"click": "in the browser", "follow-on": "as the next step of a run they asked for in thimble",
+       "typed": "through your own Agent call"}
+NOTE_HINT = "module-started-note"  # prompts/tools.md: {role}, {agent}, {what}, {how}
+WHAT_CHARS = 120
+WHAT_ORIENTATION = "this corpus"  # module-started-note's {what} for an agent whose key has no name (the orientation)
+RUNNING = ("running", "waiting")
+
+
+def note_what(what: Any) -> str:
+    """module-started-note's {what}: a server-checked name with no control characters and no markup, cut at WHAT_CHARS;
+    WHAT_ORIENTATION for none."""
+    return re.sub(r"[\x00-\x1f\x7f<>]+", " ", str(what or "")).strip()[:WHAT_CHARS] or WHAT_ORIENTATION
+
+
+def key_what(key: Any) -> str:
+    """The server-checked name an agent's note gives: the part of its key after the role (a document, a view's slug, a
+    check and its document), worded as the note at its start words it (`unverified on report`)."""
+    key = str(key or "")
+    return key.split(":", 1)[1].replace(":", " on ") if ":" in key else ""
+
+
+def started_notes(state: dict[str, Any], session_mode: str | None = None) -> list[str]:
+    """The note a new main gets for each running agent of thimble's roles (but the orientation's own children, which its
+    orientation tells of, and the helper): hint module-started-note, with the agent's id, its role, its key's name and
+    how it started."""
+    agents = registry(state)
+    out = []
+    for aid, e in agents.items():
+        if not isinstance(e, dict):
+            continue
+        state_ = str(e.get("status") or "")
+        role = role_of(e.get("type")) or (str(e.get("role") or "") if e.get("role") in ROLES else None)
+        if not role or (state_ and state_ not in RUNNING) or (not state_ and e.get("ended")):
+            continue
+        parent = str(e.get("parent") or "")
+        if parent and parent in agents:
+            continue
+        route = str(e.get("route") or ("click" if e.get("plugin_started") else "typed"))
+        line = hint(NOTE_HINT, session_mode=session_mode, role=role, agent=aid, what=note_what(key_what(e.get("key"))),
+                    how=HOW.get(route) or HOW["click"])
+        if line:
+            out.append(line)
+    return out
 
 
 # --------------------------------------------------------------------------- callers.jsonl
@@ -658,6 +737,199 @@ def find_caller(ws: Path, tool_use_id: str) -> dict[str, Any] | None:
     return None
 
 
+# --------------------------------------------------------------------------- terminal mode
+
+
+def _json_file(path: Path) -> dict[str, Any]:
+    try:
+        return _load(path.read_bytes())
+    except OSError:
+        return {}
+
+
+_launches: dict[str, tuple[tuple, dict[str, Any]]] = {}  # launch.json's path -> (its stat, what it held)
+
+
+def launch(ws: Path) -> dict[str, Any]:
+    """launch.json of the workspace folder `ws`, {} when it is missing or unreadable; read again when its stat
+    changed."""
+    path = launch_path(ws)
+    try:
+        st = os.stat(path)
+    except OSError:
+        return {}
+    key = (st.st_mtime_ns, st.st_size, st.st_ino)
+    hit = _launches.get(str(path))
+    if hit is None or hit[0] != key:
+        hit = _launches[str(path)] = (key, _json_file(path))
+    return dict(hit[1])
+
+
+def session_mode(ws: Path | None) -> str:
+    """The mode of the session launch.json names (`mode`: browser or terminal), as launch_mode.session_mode reads it;
+    browser when it names none, or for no workspace."""
+    if ws is None:
+        return BROWSER
+    mode = launch(ws).get("mode")
+    return mode if mode in MODES else BROWSER
+
+
+def terminal(ws: Path | None) -> bool:
+    """Whether the session of the workspace folder `ws` runs in terminal mode (session_mode)."""
+    return session_mode(ws) == TERMINAL
+
+
+def roles_path(ws: Path) -> Path:
+    return trusted_dir(ws) / ROLES_FILE
+
+
+def module_path(ws: Path) -> Path:
+    return trusted_dir(ws) / MODULE_OUT
+
+
+MODULE_READS = 5  # tries at module.json before a read that a write cut short counts as no file
+MODULE_READ_GAP_S = 0.01
+
+
+def read_module(ws: Path) -> dict[str, Any]:
+    """module.json of the workspace folder `ws` (module note): what the module wrote, {} when there is none. The module
+    can write a file only whole and in place, so a read that finds half a file reads again."""
+    path = module_path(ws)
+    for i in range(MODULE_READS):
+        try:
+            raw = path.read_bytes()
+        except OSError:
+            return {}
+        try:
+            d = json.loads(raw.decode("utf-8"))  # an empty file is a write that has only just begun
+            return d if isinstance(d, dict) else {}
+        except (UnicodeDecodeError, ValueError):
+            if i + 1 < MODULE_READS:
+                time.sleep(MODULE_READ_GAP_S)
+    return {}
+
+
+def moves(state: dict[str, Any]) -> dict[str, str]:
+    """The moves of main's session that --rekey recorded (`module.rekeyed`: old session to new)."""
+    module = state.get("module") if isinstance(state.get("module"), dict) else {}
+    got = module.get("rekeyed")
+    return {str(k): str(v) for k, v in got.items() if isinstance(v, str)} if isinstance(got, dict) else {}
+
+
+def moved_to(state: dict[str, Any], sid: str) -> str:
+    """Session `sid` followed through every move --rekey recorded: the id the same `claude` process runs under now."""
+    moved, seen = moves(state), set()
+    while sid in moved and sid not in seen:
+        seen.add(sid)
+        sid = moved[sid]
+    return sid
+
+
+def main_session(ws: Path, state: dict[str, Any] | None = None) -> str:
+    """Main's session in the workspace folder `ws`: the one launch.json names, followed through every move --rekey
+    recorded in subagents.json (`state`, read when not given); '' when launch.json names none."""
+    sid = str(launch(ws).get("session") or "")
+    return moved_to(read(ws) if state is None else state, sid) if sid else ""
+
+
+def main_pid(ws: Path) -> int | None:
+    """The pid of main's `claude` process: launch.json's `pid` (the launcher's own, which `exec claude` keeps for the
+    session's whole life, /clear and /resume included), when that process runs; None otherwise."""
+    pid = launch(ws).get("pid")
+    if isinstance(pid, bool) or not isinstance(pid, int) or pid <= 1:
+        return None
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return None
+    except PermissionError:
+        pass
+    return pid
+
+
+def record_mode(state: dict[str, Any], session: str, mode: str) -> bool:
+    """The mode hook's record in terminal mode: the permission mode Claude Code reports for main's session `session`
+    (`main.permission_mode`, `main.mode_at`), and the mode before plan mode (`main.before_plan`). True when it changed."""
+    if not mode:
+        return False
+    main = state.get("main") if isinstance(state.get("main"), dict) else {}
+    if main.get("permission_mode") == mode and main.get("mode_session") == session:
+        return False
+    was = str(main.get("permission_mode") or "")
+    out = {**main, "permission_mode": mode, "mode_session": session, "mode_at": now()}
+    if mode == PLAN_MODE and was and was != PLAN_MODE:
+        out["before_plan"] = was
+    state["main"] = out
+    return True
+
+
+def main_mode(ws: Path, state: dict[str, Any] | None = None, module: dict[str, Any] | None = None) -> str | None:
+    """Main's permission mode in terminal mode: what main's hooks reported last (record_mode), unless the module saw
+    plan mode begin or end since (module.json `plan`, `plan_at`), while main was idle; None before any report."""
+    state = read(ws) if state is None else state
+    module = read_module(ws) if module is None else module
+    main = state.get("main") if isinstance(state.get("main"), dict) else {}
+    mode = str(main.get("permission_mode") or "") or None
+    at = float(main.get("mode_at") or 0)
+    plan = module.get("plan")
+    if isinstance(plan, bool) and float(module.get("plan_at") or 0) / 1000 > at and not module.get("gone"):
+        if plan:
+            return PLAN_MODE
+        if mode == PLAN_MODE:
+            return str(main.get("before_plan") or "") or "default"
+    return mode
+
+
+MODULE_KIND = "module"  # the kind of a request entry that asks the module for an op (terminal mode)
+
+
+def add_module_request(state: dict[str, Any], op: str, args: dict[str, Any], session: str, wait_s: float | None,
+                       of: str | None = None) -> str:
+    """A request to the module in terminal mode (module note): an entry of `requests` of kind MODULE_KIND, which the
+    module takes while `module` is pending and `expires_at` (time.time()) is ahead, answering it in module.json under
+    the entry's id. `of` names the start, message or stop request it stands for. With `wait_s` None nobody waits for
+    the answer (a stop of a late spawn, a register): it expires after DONE_KEEP_S. The id."""
+    rid = f"mod_{secrets.token_hex(6)}"
+    t = now()
+    requests(state)[rid] = {"kind": MODULE_KIND, "op": op, "args": args, "module": "pending", "session": session,
+                            "asked_at": t, "expires_at": t + (DONE_KEEP_S if wait_s is None else wait_s),
+                            "state": "pending", "created": t, **({"of": of} if of else {})}
+    return rid
+
+
+def end_module_request(state: dict[str, Any], rid: str, how: str) -> None:
+    """The module request `rid` ended: answered or expired (`how`); it leaves the open states, so _prune drops it."""
+    r = requests(state).get(rid)
+    if isinstance(r, dict) and r.get("kind") == MODULE_KIND:
+        r.update(module=how, state="done" if how == "answered" else "expired", at=now())
+
+
+FORKING = "forking"  # subagents.json: the forks of threads that are starting, by the Agent call's description
+FORK_DEDUPE_S = 600.0  # subagents.FORK_DEDUPE_S
+
+
+def fork_check(state: dict[str, Any], tool_input: dict[str, Any]) -> str | None:
+    """Terminal mode's dedupe of a thread's fork (subagents.fork_check in browser mode): main's Agent call that would
+    start a second fork of the thread its description names (`thread:<name>`) while the first starts or runs: why it
+    must not run; else None, and the call is recorded."""
+    if str(tool_input.get("subagent_type") or "") != FORK_TYPE:
+        return None
+    desc = str(tool_input.get("description") or "")
+    if not desc.startswith("thread:"):
+        return None
+    table = state.setdefault(FORKING, {})
+    if not isinstance(table, dict):
+        table = state[FORKING] = {}
+    t = now()
+    at = table.get(desc)
+    if isinstance(at, (int, float)) and t - float(at) < FORK_DEDUPE_S:
+        return f"The fork of thread {desc.removeprefix('thread:')} is running already; it answers in the thread."
+    table[desc] = t
+    for k in [k for k, v in table.items() if not isinstance(v, (int, float)) or t - float(v) >= FORK_DEDUPE_S]:
+        table.pop(k, None)
+    return None
+
+
 # --------------------------------------------------------------------------- the workspace of a hook
 
 
@@ -670,15 +942,25 @@ def _server_env(home: Path) -> dict[str, Any]:
     return env if isinstance(env, dict) else {}
 
 
-def workspace_folder(cwd: str) -> Path | None:
-    """The workspace folder of the corpus folder `cwd`, as the server would name it (config.workspace_for_cwd under the
-    data and workspaces folders cli.resolve_env picks: THIMBLE_DATA_DIR and THIMBLE_WORKSPACES_DIR, else those the
-    last server.json names, else the defaults); None for a folder of no corpus."""
+def use_env() -> None:
+    """The data and workspaces folders a hook's process names, as cli.resolve_env picks them: THIMBLE_DATA_DIR and
+    THIMBLE_WORKSPACES_DIR, else in terminal mode the folder above THIMBLE_WS (the workspace folder the launcher
+    exports), else those the last server.json names, else the defaults. Set in this process's environment before
+    app.config is imported."""
+    ws = os.environ.get(WS_ENV) or ""
+    if ws and not os.environ.get("THIMBLE_WORKSPACES_DIR"):
+        os.environ["THIMBLE_WORKSPACES_DIR"] = str(Path(ws).expanduser().parent)
     home = Path(os.environ.get("THIMBLE_HOME") or (Path.home() / ".thimble")).expanduser()
     env = _server_env(home)
     for var, key in (("THIMBLE_DATA_DIR", "data_dir"), ("THIMBLE_WORKSPACES_DIR", "workspaces_dir")):
         if not os.environ.get(var) and env.get(key):
             os.environ[var] = str(env[key])
+
+
+def workspace_folder(cwd: str) -> Path | None:
+    """The workspace folder of the corpus folder `cwd`, as the server would name it (config.workspace_for_cwd under the
+    data and workspaces folders use_env picks); None for a folder of no corpus."""
+    use_env()
     import sys  # noqa: PLC0415
 
     backend = str(tree() / "backend")

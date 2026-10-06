@@ -113,6 +113,9 @@ function engine(opts: Options = {}) {
     '/plugin/.claude-plugin/plugin.json': JSON.stringify({ name: 'thimble', version: '0.6.0' }),
     ...(opts.serverUp === false ? {} : { [`${HOME}/.thimble/server.json`]: JSON.stringify({ port: 21125, token: TOKEN }) }),
   }
+  const mtimes: Json = {} // each file's mtime, which a write moves on
+  let tick = 1
+  const writeFile = (path: string, data: unknown) => { files[path] = typeof data === 'string' ? data : JSON.stringify(data); mtimes[path] = ++tick }
   const hooks: Json = {}
   register(((name: string, a: any, b?: any) => { hooks[name] = b ?? a; return { catch: (h: any) => { hooks[`${name}.catch`] = h } } }) as any, {} as any)
   const now: Json = {} // each type's registration as Claude Code holds it
@@ -123,7 +126,14 @@ function engine(opts: Options = {}) {
   let checkReason = 'Claude requested permissions to write, but you haven\'t granted it yet.' // Claude Code's decision for a write
   const $ = {
     env: { get: vi.fn(async (name: string) => env[name]), set: async () => undefined },
-    fs: { read: vi.fn(async (path: string) => { if (path in files) return files[path]; throw new Error(`ENOENT ${path}`) }) },
+    fs: {
+      read: vi.fn(async (path: string) => { if (path in files) return files[path]; throw new Error(`ENOENT ${path}`) }),
+      write: vi.fn(async (path: string, data: string) => { writeFile(path, data) }),
+      stat: vi.fn(async (path: string) => {
+        if (!(path in files)) throw new Error(`ENOENT ${path}`)
+        return { kind: 'file', size: String(files[path]).length, mtimeMs: mtimes[path] ?? 1, isLink: false }
+      }),
+    },
     http: { fetch: vi.fn((url: string, init?: Json) => server.fetch(url, init)) },
     agent: {
       register: vi.fn(async (spec: Json) => {
@@ -148,7 +158,7 @@ function engine(opts: Options = {}) {
   }
   const notes = () => $.session.append.mock.calls.map(([a]) => a.message.content[0].text as string)
   return {
-    $, server, env, files, now, log, notes,
+    $, server, env, files, now, log, notes, writeFile,
     setSession: (s: string) => { sid = s },
     onSpawn: (f: (args: Json) => Json) => { spawnAnswer = f },
     onTool: (f: (input: Json) => Json) => { toolAnswer = f },
@@ -523,5 +533,189 @@ describe('the proof', () => {
     for (const key of [TOKEN, 'k'.repeat(64), 'long-'.repeat(40)]) {
       expect(await hmac(key, 'hook:abc123')).toBe(createHmac('sha256', key).update('hook:abc123').digest('hex'))
     }
+  })
+})
+
+describe('terminal mode', () => {
+  const WS = '/workspaces/wiki'
+  const T = `${WS}/trusted`
+  const out = (e: { files: Json }): Json => JSON.parse(e.files[`${T}/module.json`])
+  const launch = (more: Json = {}) => ({ session: MAIN, mode: 'terminal', fenced: true, at: '2026-10-06T10:00:00+00:00', pid: 4242, ...more })
+
+  /** an engine in terminal mode: THIMBLE_WS, launch.json, roles.json and subagents.json as the launcher and the backend
+   *  write them, and server.json naming a live server, which the module must never ask */
+  function terminal(opts: { launch?: Json; state?: Json; roles?: Json | null } = {}) {
+    const e = engine({ env: { THIMBLE_WS: WS } })
+    e.writeFile(`${T}/launch.json`, opts.launch ?? launch())
+    if (opts.roles !== null) e.writeFile(`${T}/roles.json`, { at: 'now', digest: 'd1', roles: opts.roles ?? ROLES })
+    e.writeFile(`${T}/subagents.json`, opts.state ?? {})
+    return e
+  }
+
+  async function begun(opts: Parameters<typeof terminal>[0] = {}) {
+    const e = terminal(opts)
+    await e.start()
+    await until(() => `${T}/module.json` in e.files)
+    return e
+  }
+
+  /** a request as module_bridge's file transport writes it: an entry of `requests` of kind module */
+  function ask(e: ReturnType<typeof terminal>, id: string, op: string, args: Json, more: Json = {}) {
+    const state = JSON.parse(e.files[`${T}/subagents.json`])
+    state.requests = { ...(state.requests ?? {}), [id]: { kind: 'module', op, args, module: 'pending', session: MAIN, asked_at: Date.now() / 1000, expires_at: Date.now() / 1000 + 10, state: 'pending', ...more } }
+    e.writeFile(`${T}/subagents.json`, state)
+  }
+
+  const answered = async (e: ReturnType<typeof terminal>, id: string): Promise<Json> => {
+    await until(() => `${T}/module.json` in e.files && id in (out(e).answers ?? {}))
+    return out(e).answers[id]
+  }
+
+  it('registers the roles from roles.json inside session.start, writes module.json, and makes no HTTP request at all', async () => {
+    const e = terminal()
+    await e.start()
+    expect(e.$.agent.register).toHaveBeenCalledTimes(7)
+    for (const name of ROLE_NAMES) expect(e.now[`thimble:${name}`]).toEqual(ROLES[name])
+    const o = out(e)
+    expect(o).toMatchObject({ session: MAIN, version: '0.6.0', problem: '', taken: [], answers: {}, ended: [], gone: false })
+    expect(o.load).toMatch(/^[0-9a-f]{16}$/)
+    expect(Math.abs(o.beat - Date.now())).toBeLessThan(2000)
+    await new Promise(r => setTimeout(r, 40))
+    expect(e.$.http.fetch).not.toHaveBeenCalled()
+  })
+
+  for (const [why, more] of [
+    ['a session launch.json does not name', { session: NEW }],
+    ['main outside thimble’s fence', { fenced: false }],
+  ] as [string, Json][]) {
+    it(`stays idle for ${why}: no registration, no module.json, no fetch`, async () => {
+      const e = terminal({ launch: launch(more) })
+      await e.start()
+      await new Promise(r => setTimeout(r, 30))
+      expect(e.$.agent.register).not.toHaveBeenCalled()
+      expect(`${T}/module.json` in e.files).toBe(false)
+      expect(e.$.http.fetch).not.toHaveBeenCalled()
+    })
+  }
+
+  it('stays idle when THIMBLE_WS names a folder with no launch.json, and asks no server', async () => {
+    const e = engine({ env: { THIMBLE_WS: WS } })
+    await e.start()
+    await new Promise(r => setTimeout(r, 30))
+    expect(e.$.agent.register).not.toHaveBeenCalled()
+    expect(e.$.http.fetch).not.toHaveBeenCalled()
+  })
+
+  it('accepts a session --rekey moved launch.json’s to (the moves subagents.json records)', async () => {
+    const e = terminal({ launch: launch({ session: 'first' }), state: { module: { rekeyed: { first: MAIN } } } })
+    await e.start()
+    expect(e.$.agent.register).toHaveBeenCalledTimes(7)
+  })
+
+  it('registers the roles again when roles.json changes', async () => {
+    const e = await begun()
+    e.writeFile(`${T}/roles.json`, { at: 'later', digest: 'd2', roles: { ...ROLES, writer: { ...ROLES.writer, effort: 'low' } } })
+    await until(() => e.$.agent.register.mock.calls.length === 14)
+    expect(e.now['thimble:writer'].effort).toBe('low')
+    expect(e.$.http.fetch).not.toHaveBeenCalled()
+  })
+
+  it('answers a spawn subagents.json addresses to it in module.json, with the agent id, and takes it once', async () => {
+    const e = await begun()
+    ask(e, 'mod_spawn1', 'spawn', { role: 'writer', prompt: 'Write the report.', description: 'writer: report', values: { model: OPUS, effort: ROLES.writer.effort }, note: NOTE })
+    expect(await answered(e, 'mod_spawn1')).toEqual({ agentId: 'agent-8', model: OPUS })
+    expect(out(e).taken).toEqual(['mod_spawn1'])
+    expect(e.$.agent.spawn).toHaveBeenCalledWith({ subagentType: 'thimble:writer', prompt: 'Write the report.', description: 'writer: report' })
+    expect(e.notes()).toEqual([NOTE.replace('{agent}', 'agent-8')])
+    e.writeFile(`${T}/subagents.json`, JSON.parse(e.files[`${T}/subagents.json`])) // the file changes again
+    await new Promise(r => setTimeout(r, 30))
+    expect(e.$.agent.spawn).toHaveBeenCalledTimes(1)
+    expect(e.$.http.fetch).not.toHaveBeenCalled()
+  })
+
+  it('takes requests one at a time in the order they were asked, and none for another session, answered, or expired', async () => {
+    const e = await begun()
+    const state = { requests: {
+      mod_b: { kind: 'module', op: 'note', args: { text: 'second' }, module: 'pending', session: MAIN, asked_at: 2, expires_at: Date.now() / 1000 + 10 },
+      mod_a: { kind: 'module', op: 'note', args: { text: 'first' }, module: 'pending', session: MAIN, asked_at: 1, expires_at: Date.now() / 1000 + 10 },
+      mod_other: { kind: 'module', op: 'note', args: { text: 'other session' }, module: 'pending', session: NEW, asked_at: 0, expires_at: Date.now() / 1000 + 10 },
+      mod_old: { kind: 'module', op: 'note', args: { text: 'expired' }, module: 'pending', session: MAIN, asked_at: 0, expires_at: Date.now() / 1000 - 1 },
+      mod_done: { kind: 'module', op: 'note', args: { text: 'answered' }, module: 'answered', session: MAIN, asked_at: 0, expires_at: Date.now() / 1000 + 10 },
+      req_start: { kind: 'start', route: 'typed', state: 'pending', input: {} },
+    } }
+    e.writeFile(`${T}/subagents.json`, state)
+    await answered(e, 'mod_b')
+    expect(e.notes()).toEqual(['first', 'second'])
+    expect(out(e).taken).toEqual(['mod_a', 'mod_b'])
+  })
+
+  it('writes the end of each run of an agent it started, numbered, and of no other', async () => {
+    const e = await begun()
+    ask(e, 'mod_s', 'spawn', { role: 'check', prompt: 'p', description: 'check', values: {}, note: '' })
+    await answered(e, 'mod_s')
+    await e.complete('agent-8', 'Two comments.')
+    await e.complete('someone-else')
+    const refusal = { category: 'cyber', explanation: 'flagged' }
+    await e.complete('agent-8', '', { reason: 'refusal', refusal })
+    await until(() => out(e).ended.length === 2)
+    expect(out(e).ended.map((x: Json) => ({ ...x, at: typeof x.at }))).toEqual([
+      { n: 1, agentId: 'agent-8', answer: 'Two comments.', reason: 'answer', at: 'number' },
+      { n: 2, agentId: 'agent-8', answer: '', reason: 'refusal', refusal, at: 'number' },
+    ])
+  })
+
+  it('writes main’s plan mode as its poll sees it, with when it saw it', async () => {
+    const e = await begun()
+    await until(() => out(e).plan === false)
+    e.onCheck('Cannot write to /tmp/.thimble-plan-probe while in plan mode.')
+    await until(() => out(e).plan === true)
+    expect(out(e).plan_at).toBeGreaterThan(0)
+    expect(e.$.http.fetch).not.toHaveBeenCalled()
+    await e.end('other')
+  })
+
+  it('gives a typed start the model and effort its request in subagents.json names', async () => {
+    const e = await begun()
+    const state = JSON.parse(e.files[`${T}/subagents.json`])
+    state.requests = { req_00000001ab: { kind: 'start', route: 'typed', role: 'orientation', state: 'pending', values: { model: 'claude-sonnet-5-5', effort: 'max' } } }
+    e.writeFile(`${T}/subagents.json`, state)
+    const { seen } = await e.agentCall({ subagentType: 'thimble:orientation', prompt: '[thimble request req_00000001ab]\nOrient.' }, 'aT')
+    expect(seen.model).toBe('claude-sonnet-5-5')
+    expect(await e.step('aT', 'high')).toBe('max')
+  })
+
+  it('takes the per-run efforts subagents.json holds at session start', async () => {
+    const e = await begun({ state: { efforts: { aBefore: 'xhigh' }, agents: { aTyped: { type: 'thimble:writer', values: { effort: 'low' } }, aKid: { type: 'general-purpose', parent: 'aTyped' } } } })
+    expect([await e.step('aBefore', 'high'), await e.step('aTyped', 'high'), await e.step('aKid', 'high')]).toEqual(['xhigh', 'low', 'low'])
+  })
+
+  it('follows /clear once --rekey recorded the move, writes module.json under the new session and appends its notes', async () => {
+    const e = await begun()
+    await e.end('clear', MAIN)
+    setTimeout(() => e.setSession(NEW), 15)
+    setTimeout(() => e.writeFile(`${T}/subagents.json`, { module: { rekeyed: { [MAIN]: NEW }, notes: { session: NEW, lines: ['STARTED orientation aRun this corpus'] } } }), 40)
+    await until(() => e.notes().length === 1)
+    expect(e.notes()).toEqual(['STARTED orientation aRun this corpus'])
+    expect(out(e).session).toBe(NEW)
+    ask(e, 'mod_after', 'note', { text: 'after clear' }, { session: NEW })
+    expect(await answered(e, 'mod_after')).toEqual({ ok: true })
+    expect(e.$.http.fetch).not.toHaveBeenCalled()
+  })
+
+  it('says its session ended in module.json when main quits, and stops polling', async () => {
+    const e = await begun()
+    await e.end('prompt_input_exit')
+    expect(out(e).gone).toBe(true)
+    ask(e, 'mod_late', 'note', { text: 'too late' })
+    await new Promise(r => setTimeout(r, 30))
+    expect(e.notes()).toEqual([])
+  })
+
+  it('says in module.json what it could not register', async () => {
+    const e = terminal()
+    e.$.agent.register.mockImplementation(async (spec: Json) => { if (spec.name === 'critic') throw new Error('bad spec'); return { agent: spec.name } })
+    await e.start()
+    await until(() => `${T}/module.json` in e.files)
+    expect(out(e).problem).toContain('thimble:critic')
   })
 })
