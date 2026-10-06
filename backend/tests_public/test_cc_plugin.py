@@ -169,3 +169,31 @@ def test_main_fenced_takes_the_last_settings_and_a_settings_file(tmp_path, monke
     assert cc_plugin.fenced_argv(split, tmp_path)
     assert not cc_plugin.fenced_argv(["claude", "--settings", json.dumps({**fence, "env": {cc_plugin.FENCE_MARK: "0"}})],
                                      tmp_path)
+
+
+def test_main_launched_is_read_from_main_s_environment_else_from_launch_json_or_the_fence(monkeypatch, workspaces_tmp):
+    """The browser's unfenced banner tells a plain `claude` with /thimble from a session the launcher started without
+    the fence: the launcher exports THIMBLE_LAUNCHED into main's environment. Where that cannot be read, main's session
+    is the one launch.json names, or main runs inside thimble's fence, which only the launcher adds."""
+    import types
+
+    from app import module_bridge, procs, session
+
+    monkeypatch.setattr(session, "main_pid", lambda c: None)
+    assert not cc_plugin.main_launched("mini"), "no main"
+    monkeypatch.setattr(session, "main_pid", lambda c: 4242)
+    monkeypatch.setattr(procs, "environ", lambda pid: {"THIMBLE_LAUNCHED": "1"} if pid == 4242 else None)
+    assert cc_plugin.main_launched("mini")
+    monkeypatch.setattr(procs, "environ", lambda pid: {"PATH": "/bin"})
+    monkeypatch.setattr(cc_plugin, "main_fenced", lambda c: True)
+    assert not cc_plugin.main_launched("mini"), "the environment, when it can be read, decides"
+    monkeypatch.setattr(procs, "environ", lambda pid: None)  # no /proc
+    monkeypatch.setattr(cc_plugin, "main_fenced", lambda c: False)
+    monkeypatch.setattr(session, "current", lambda c: types.SimpleNamespace(sid="s-main"))
+    monkeypatch.setattr(module_bridge, "launch_session", lambda c: "s-other")
+    assert not cc_plugin.main_launched("mini")
+    monkeypatch.setattr(module_bridge, "launch_session", lambda c: "s-main")
+    assert cc_plugin.main_launched("mini")
+    monkeypatch.setattr(module_bridge, "launch_session", lambda c: "")
+    monkeypatch.setattr(cc_plugin, "main_fenced", lambda c: True)
+    assert cc_plugin.main_launched("mini")

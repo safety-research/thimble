@@ -779,11 +779,20 @@ async def instance_route(c: str) -> dict:
     return {"stamp": ensure_main(c).get("created_at") or None}
 
 
+def _main_state(c: str) -> dict:
+    """What main's meta adds for the browser (module_bridge.main_meta): `fenced`, `launched`, `module` and `module_why`,
+    which the unfenced banner and Start's no-module line read."""
+    from . import module_bridge  # noqa: PLC0415 — module_bridge imports the session modules
+
+    return module_bridge.main_meta(c)
+
+
 @router.get("/ws/{c}/chats/main")
 async def main_route(c: str) -> Response:
     meta = ensure_main(c)
     meta["running"] = _running(c, MAIN_ID)
     meta["orientation"] = _orientation_status(c)
+    meta.update(_main_state(c))
     _, log_path = paths(c, MAIN_ID)
     return chat_response(meta, log_path)
 
@@ -821,6 +830,7 @@ async def get_route(c: str, chat_id: str) -> Response:
     meta["running"] = _running(c, chat_id)
     if chat_id == MAIN_ID:
         meta["orientation"] = _orientation_status(c)
+        meta.update(_main_state(c))
     return chat_response(meta, log_path)
 
 

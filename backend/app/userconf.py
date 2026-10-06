@@ -22,12 +22,18 @@ One fence for main and its agents. thimble's agents are subagents of main, the a
 launcher starts inside thimble's fence (cli.main_fence, its permission rules main_rules): they run in main's permission
 mode and share its sandbox, network and rules. So the orientation's `web`, `network` and `data` are main's fence's keys,
 which every agent shares; the other agents keep only `web: off`, which keeps that one agent off the web tools. The dev
-agent alone keeps its own permission mode and fence keys, for code tickets, which stay jobs of the server. Installs
-follow Claude Code's permission mode: thimble adds no rule for them. The keys earlier builds read for this, `installs`,
-and each agent's own `fast`, and its `permissionMode`, `network`, `data`, `sandbox` and `env` and `web` other than "off"
-but the dev agent's (IGNORED_KEYS), are read and ignored, so an earlier config stays valid; `ignored` lists those a file
-holds, and a save from the Settings pane drops them. `suggest` (the viewer suggestion's call) and `refusal` (the model
-and effort a refused classifier call runs again on, which `off` turns off) are classifier rows.
+agent alone keeps its own permission mode, fast mode and fence keys, for code tickets, which stay jobs of the server.
+Installs follow Claude Code's permission mode: thimble adds no rule for them. The keys earlier builds read for this,
+`installs`, and each agent's own `fast` and `permissionMode` and `web` other than "off" but the dev agent's
+(IGNORED_KEYS), are read and ignored, so an earlier config stays valid; `ignored` lists those a file holds, and a save
+from the Settings pane drops them. `suggest` (the viewer suggestion's call) and `refusal` (the model and effort a refused classifier call runs
+again on, which `off` turns off) are classifier rows.
+
+Extensions' programs. An extension's program that runs an agent or one of its tasks (harness.py) is no subagent of main:
+it runs in a box of its own and keeps its power. So it takes its agent's own `env`, `sandbox`, `network` and `data`
+(PROGRAM_KEYS; agent_conf with `program`), which thimble's own agent of that role does not read, since it shares main's
+fence. Where the agent sets none of them, as for the dev agent and the classifiers, the program's network and sandbox
+are on, its edits of the corpus ask, and it gets no variable of the server's.
 """
 from __future__ import annotations
 
@@ -59,11 +65,13 @@ MODE_ROWS = {"dev": "dev"}
 SUBAGENT_ROLES = ("orientation", "critic", "writer", "checks")  # the agents that run as subagents of main
 # the keys of each agent that earlier builds read and this one reads and ignores (module note, one fence)
 IGNORED_KEYS: dict[str, tuple[str, ...]] = {
-    "orientation": ("fast", "permissionMode", "sandbox", "env"),
-    **{a: ("fast", "permissionMode", "network", "sandbox", "data", "env") for a in ("critic", "writer", "checks")},
-    "dev": ("fast",),  # its view builds are subagents now, and its code tickets run at standard speed
+    **{a: ("fast", "permissionMode") for a in ("orientation", "critic", "writer", "checks")},
 }
 IGNORED_TOP = ("installs",)  # top-level keys read and ignored
+# the keys of an agent that runs as a subagent of main which only an extension's program running the agent reads (module
+# note, extensions' programs), and what the program gets where the agent sets none (null in DEFAULTS)
+PROGRAM_KEYS = ("env", "sandbox", "network", "data")
+PROGRAM_DEFAULTS = {"env": [], "sandbox": "on", "network": "on", "data": "ask"}
 # the prompt file under prompts/ that an agent's `prompt` replaces
 PROMPT_FILES = {"orientation": "orient", "critic": "critic", "writer": "writer", "checks": "check", "dev": "dev",
                 "labels": "labels", "cardCheck": "card-check"}
@@ -97,8 +105,10 @@ def _session_agent(web: str, network: str = "on") -> dict[str, Any]:
 
 def _subagent(web: str | None) -> dict[str, Any]:
     """An agent that runs as a subagent of main (module note, one fence): its model and effort, `web` ("off", or null
-    for main's), its CLAUDE.md files (`memory`) and its prompt."""
-    return {"model": None, "effort": None, "web": web, "memory": "inherit", "prompt": None}
+    for main's), its CLAUDE.md files (`memory`) and its prompt, and PROGRAM_KEYS for an extension's program that runs it
+    (module note, extensions' programs)."""
+    return {"model": None, "effort": None, "web": web, "memory": "inherit", "prompt": None,
+            **{k: None for k in PROGRAM_KEYS}}
 
 
 DEFAULTS: dict[str, Any] = {
@@ -114,7 +124,7 @@ DEFAULTS: dict[str, Any] = {
         "critic": _subagent(None),
         "writer": _subagent(None),
         "checks": _subagent(None),
-        "dev": {k: v for k, v in _session_agent("off").items() if k != "fast"},
+        "dev": _session_agent("off"),  # its `fast` is code tickets' (config.FAST_OF_TICKETS)
         # `network`, `data` and `env` reach only an extension's program that runs one of their tasks (harness.py)
         **{a: {"model": None, "effort": None, "fast": None, "network": "on", "data": "ask", "env": [], "prompt": None}
            for a in CALLS},
@@ -900,29 +910,33 @@ NO_SANDBOX_WHY = {
 }
 
 
-def agent_conf(conf: dict[str, Any], agent: str) -> dict[str, Any]:
+def agent_conf(conf: dict[str, Any], agent: str, *, program: bool = False) -> dict[str, Any]:
     """The settings a session of `agent` runs with, from a loaded config: an agent that runs as a subagent of main takes
     main's fence's `network`, `data` and `web` (the orientation's), and its own `web` only when that is "off" (module
-    note, one fence); the dev agent and the classifiers keep their own."""
+    note, one fence); the dev agent and the classifiers keep their own. With `program`, for an extension's program that
+    runs the agent, the agent's own PROGRAM_KEYS, each PROGRAM_DEFAULTS' where it sets none (module note, extensions'
+    programs)."""
     mine = dict(conf["agents"][agent])
     if agent not in SUBAGENT_ROLES:
         return mine
+    own = {k: copy.deepcopy(mine[k]) if mine.get(k) is not None else copy.deepcopy(v) for k, v in PROGRAM_DEFAULTS.items()}
     main = conf["agents"]["orientation"]
     own_web = mine.get("web")
     mine.update(network=main.get("network") or "on", data=main.get("data") or "ask",
                 web="off" if own_web == "off" else main.get("web") or "ask")
-    return mine
+    return {**mine, **own} if program else mine
 
 
-def session(c: str | None, agent: str, *, sandbox: bool = True) -> Session:
+def session(c: str | None, agent: str, *, sandbox: bool = True, program: bool = False) -> Session:
     """What the config asks of a session of `agent` in workspace `c` (agent_conf); `sandbox` False for a session the
-    caller runs outside the sandbox. The dev agent, when its own `sandbox` is "off", runs outside it. ConfigError when
-    the config has an error, or requires the sandbox (`sandbox.enforce`, on by default) and the session of an agent whose
-    sandbox is on would run outside it (NO_SANDBOX)."""
+    caller runs outside the sandbox, `program` for an extension's program that runs the agent or one of its tasks
+    (module note, extensions' programs). The dev agent, or a program, runs outside the sandbox when its own `sandbox` is
+    "off". ConfigError when the config has an error, or requires the sandbox (`sandbox.enforce`, on by default) and the
+    session of an agent whose sandbox is on would run outside it (NO_SANDBOX)."""
     conf = load(c)
     box = conf["sandbox"]
-    mine = agent_conf(conf, agent)
-    if agent not in SUBAGENT_ROLES and mine.get("sandbox") == "off":
+    mine = agent_conf(conf, agent, program=program)
+    if (program or agent not in SUBAGENT_ROLES) and mine.get("sandbox") == "off":
         return Session(c, agent, mine, False)
     runs = box["use"] != "never" and sandbox_runs()
     if box["enforce"] and sandbox and not runs and box["use"] != "never":

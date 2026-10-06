@@ -125,6 +125,17 @@ def _efforts(cwd: Path, environ: Mapping[str, str] | None = None) -> tuple[bool,
     return named, by_env, ultracode, level, unread
 
 
+def settings_env(cwd: Path, name: str) -> str | None:
+    """The value the `env` blocks of the analyst's settings files give the variable `name` for a session in `cwd`: the
+    highest file's that sets it (sources), '' included; None when none sets it."""
+    found = None
+    for path in sources(cwd):
+        block = _read(path).get("env")
+        if isinstance(block, dict) and name in block and block[name] is not None:
+            found = str(block[name])
+    return found
+
+
 def names_effort(cwd: Path, environ: dict[str, str] | None = None) -> bool:
     """Whether the analyst's own settings or environment choose an effort or ultracode for a session in `cwd` that
     Claude Code runs at (module note: not the user file's top-level `effortLevel`, which it reads only for older models)."""

@@ -572,7 +572,8 @@ esac
 # instructions at about 2 KB and an appended prompt reaches every fork whole.
 # --effort is passed only when neither the analyst's settings nor their flags name one, unless the composer chose one or
 # the analyst's CLAUDE_CODE_EFFORT_LEVEL did: the launch unsets that variable, which would override every agent's effort,
-# and passes its value as main's --effort instead.
+# and passes its value as main's --effort instead. Set in an `env` block of the analyst's Claude Code settings, it is
+# blank in main's --settings, which rank above those files, and its value is main's --effort the same way.
 # --session-id is the id launch-args chose for a new session and wrote into the workspace's launch.json, from which the
 # hooks module's bridge takes main's session; it is left out when the analyst's flags name the session themselves.
 # The env line's switches are exported (CLAUDE_CODE_DISABLE_AGENT_VIEW=1: no "Move to background" and no ← agent view),
@@ -585,8 +586,9 @@ esac
 # into the analyst's own --settings, since Claude Code reads only the last one. --allowedTools lets the thimble tools
 # and the plugin's skills run without a permission prompt, since a fork answering the browser must not wait on a
 # terminal nobody watches; nothing is denied.
-# THIMBLE_LAUNCHED tells /thimble that main's prompt is appended already. The session opens with /thimble, which starts
-# the server and opens this folder as a workspace.
+# THIMBLE_LAUNCHED tells /thimble that main's prompt is appended already. launch-args starts the server and waits for it
+# before claude starts, so the hooks module registers thimble's agent types inside the session's start; the session
+# opens with /thimble, which opens this folder as a workspace (and starts the server if it is down).
 command -v claude >/dev/null 2>&1 || {
   printf 'thimble: the `claude` CLI is not on PATH. thimble runs inside Claude Code: install it (https://docs.anthropic.com/en/docs/claude-code), then run thimble again.\n' >&2
   exit 1; }

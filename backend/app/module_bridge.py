@@ -14,8 +14,11 @@ main), or the one `--rekey` moved it to after a /clear or an in-session /resume 
 module sees the new id within tens of milliseconds of the SessionStart hook (spike V2): a hello for an id that is not
 main yet is held up to HELLO_HOLD_S for a rekey that names it. Main must also run inside thimble's fence
 (cc_plugin.main_fenced), so a THIMBLE_LAUNCHED that a child session inherited gets no requests; that is read from main's
-command line once main's session has opened thimble (/thimble attached it, _opened), and a hello before then is asked
-again later rather than refused. The long poll hands out requests for that session only, so two mains in one folder never
+command line once main's session has opened thimble (/thimble attached it), or, at session start, before /thimble
+has, from the command line of the `claude` process Claude Code's own record names for the session launch.json names
+(_launch_pid), which the launcher started the server for, so that the module registers thimble's types inside session
+start and they are in main's first agent listing (_opened). A hello before either is asked again later rather than
+refused. The long poll hands out requests for that session only, so two mains in one folder never
 take each other's clicks.
 
 `request(c, op, **args)` is how the rest of the server asks (lane B's clicks, follow-ups and stops, lane E's jobs). It
@@ -42,14 +45,27 @@ Ops and their arguments:
 
 The workspace's subagents.json holds, under `module`, the last hello `{session, version, at}`, or the reason the
 module stays idle (`idle`), what it could not register (`problem`), and the session moves rekey learned (`rekeyed`),
-for `doctor`, the browser and a restarted server. It is written under an flock of subagents.json.lock beside it, with an
-atomic replace, keeping every other key.
+and the digest of the roles it fetched last (`served`), for `doctor`, the browser and a restarted server. It is written
+under an flock of subagents.json.lock beside it, with an atomic replace, keeping every other key.
+
+The roles the module registers are rendered from files the analyst may edit by hand: the workspace's settings.json (its
+orientation instructions), thimble's config files and the prompt files an agent's `prompt` names, and thimble's own
+prompt files (roles_stamp). A Settings save and a change of the active extensions ask for a register (push_roles), and
+so does sync_roles whenever the roles rendered now differ from those the module fetched last: before every spawn, since
+a click's agent runs on the registration in force when it starts, and while a long poll is held, every ROLES_CHECK_S
+once a file changed, so that the registration is new before main's next turn, whose own Agent calls ignore a
+registration made during the turn.
+
+The browser reads main's state from main's meta (main_meta, which agents.py's main routes add): whether main runs inside
+thimble's fence, whether the launcher started it, and whether the module is live, with why_not when it is not. Each
+time the module goes live or stops being live, main's chat is notified, so an open page reads it again (_show).
 """
 from __future__ import annotations
 
 import asyncio
 import contextlib
 import fcntl
+import hashlib
 import json
 import logging
 import os
@@ -77,6 +93,7 @@ POLL_WAIT_S = 25.0  # the server holds a long poll this long
 POLL_TICK_S = 1.0  # how often a held poll looks again whether its session is still main's
 LIVE_GAP_S = 3.0  # a module whose last poll ended this recently still holds it: it polls again at once
 HELLO_HOLD_S = 5.0  # a hello for a session that is not main yet waits this long for a rekey naming it
+ROLES_CHECK_S = 2.0  # how often a held long poll looks whether the files the roles are rendered from changed
 LOCK_WAIT_S = 2.0  # the most a write of subagents.json waits for its lock
 EXPIRED_KEPT = 64  # expired requests remembered for their late answers
 REKEYS_KEPT = 32
@@ -138,6 +155,11 @@ class _Bridge:
     rekeyed: dict[str, str] = field(default_factory=dict)  # old main session -> new
     idle: str = ""  # why the last hello was refused
     problem: str = ""  # what the module reported it could not do (a role it could not register)
+    shown: bool = False  # live() as main's chat was last notified of it (_show); a page reads it when it opens
+    served: str = ""  # the digest of the roles the module fetched last (roles_route)
+    stamp: tuple = ()  # roles_stamp when the roles were last compared with `served`
+    checked: float = 0.0  # monotonic, when a held poll last looked at roles_stamp (_watch_roles)
+    checking: bool = False
 
 
 _bridges: dict[str, _Bridge] = {}
@@ -239,6 +261,8 @@ def _save(c: str, b: _Bridge) -> None:
         rec["problem"] = b.problem
     if b.rekeyed:
         rec["rekeyed"] = dict(list(b.rekeyed.items())[-REKEYS_KEPT:])
+    if b.served:
+        rec["served"] = b.served
     _record(c, rec)
 
 
@@ -249,11 +273,24 @@ def _bridge(c: str) -> _Bridge:
             b = _bridges.get(c)
             if b is None:
                 b = _Bridge()
-                moved = (registry(c).get("module") or {}).get("rekeyed")
+                rec = registry(c).get("module") or {}
+                moved = rec.get("rekeyed") if isinstance(rec, dict) else None
                 if isinstance(moved, dict):  # what a server before this one learned
                     b.rekeyed.update({str(k): str(v) for k, v in moved.items() if isinstance(v, str)})
+                if isinstance(rec, dict) and isinstance(rec.get("served"), str):  # the roles it served the module
+                    b.served = rec["served"]
                 _bridges[c] = b
     return b
+
+
+def launch_session(c: str) -> str:
+    """The session launch.json names, followed through every move rekey recorded; '' when it names none."""
+    sid = str(_launch(c).get("session") or "")
+    moved, seen = _bridge(c).rekeyed, set()
+    while sid and sid in moved and sid not in seen:
+        seen.add(sid)
+        sid = moved[sid]
+    return sid
 
 
 def main_session(c: str) -> str:
@@ -272,10 +309,41 @@ def main_session(c: str) -> str:
     return sid
 
 
-def _fenced(c: str) -> bool:
-    from . import cc_plugin  # noqa: PLC0415
+def _launch_pid(c: str, sid: str) -> int | None:
+    """The `claude` process of main's session `sid` when it is the one launch.json names: the live pid Claude Code's own
+    record of its running processes (<config>/sessions/<pid>.json, cc_plugin.SESSIONS) gives with that session id, which
+    it writes before the session's start hooks run. None for any other session, or without such a record."""
+    from . import cc_plugin, procs  # noqa: PLC0415
+
+    if not sid or str(_launch(c).get("session") or "") != sid:
+        return None
+    try:
+        records = sorted((config.claude_config_dir() / cc_plugin.SESSIONS).glob("*.json"))
+    except OSError:
+        return None
+    for path in records:
+        rec = _read_json(path)
+        if rec.get("sessionId") != sid:
+            continue
+        try:
+            pid = int(rec.get("pid") or path.stem)
+        except (TypeError, ValueError):
+            continue
+        if procs.alive(pid):
+            return pid
+    return None
+
+
+def _fenced(c: str, sid: str = "") -> bool:
+    """Whether main runs inside thimble's fence, read from its `claude` process's command line: the launch session's
+    process (_launch_pid) while the server does not follow `sid` yet, else main's as the server follows it
+    (cc_plugin.main_fenced)."""
+    from . import cc_plugin, procs  # noqa: PLC0415
 
     try:
+        pid = None if _follows(c, sid) else _launch_pid(c, sid)
+        if pid:
+            return cc_plugin.fenced_argv(procs.argv(pid), procs.cwd(pid) or Path.cwd())
         return bool(cc_plugin.main_fenced(c))
     except Exception:  # noqa: BLE001 — main's command line could not be read
         log.debug("main_fenced(%s) failed", c, exc_info=True)
@@ -285,9 +353,16 @@ def _fenced(c: str) -> bool:
 def _opened(c: str, sid: str) -> bool:
     """Whether main's session `sid` is the one the server follows (session.current: /thimble attached it), or one that
     session moved to within its `claude` process by /clear or /resume (rekey) before the server followed, and its
-    `claude` process is known (session.main_pid). Until then main's command line cannot be read, so whether main is
-    fenced is not known yet: a server that was already up when `thimble` started main would otherwise read no command
-    line, or the last main's, and refuse the module for the whole session (NOT_OPEN)."""
+    `claude` process is known (session.main_pid); or, before /thimble has attached it, `sid` is the session launch.json
+    names and Claude Code's own record names its `claude` process (_launch_pid). Until then main's command line cannot
+    be read, so whether main is fenced is not known yet: a server that was already up when `thimble` started main would
+    otherwise read no command line, or the last main's, and refuse the module for the whole session (NOT_OPEN)."""
+    return _follows(c, sid) or _launch_pid(c, sid) is not None
+
+
+def _follows(c: str, sid: str) -> bool:
+    """Whether the server follows main's session `sid` (session.current, through the moves rekey recorded) and knows its
+    `claude` process (session.main_pid): /thimble attached it."""
     from . import session  # noqa: PLC0415
 
     cur = session.current(c)
@@ -309,7 +384,7 @@ def _refusal(c: str, sid: str) -> str:
         return NOT_MAIN
     if not _opened(c, sid):
         return NOT_OPEN
-    if not _fenced(c):
+    if not _fenced(c, sid):
         return NOT_FENCED
     return ""
 
@@ -385,6 +460,50 @@ def why_not(c: str) -> str:
     if b.session and b.hello_at:
         return f"{NOT_ANSWERING}; it stopped polling"
     return NOT_LOADED
+
+
+def main_meta(c: str) -> dict[str, Any]:
+    """What main's meta adds for the browser (module note): `fenced` (cc_plugin.main_fenced), `launched`
+    (cc_plugin.main_launched), `module` (live) and `module_why` (why_not, '' while live). Each is False, or the reason,
+    when main's session has not opened thimble yet. Never raises."""
+    from . import cc_plugin  # noqa: PLC0415
+
+    out: dict[str, Any] = {"fenced": False, "launched": False, "module": False, "module_why": ""}
+    for key, read in (("fenced", cc_plugin.main_fenced), ("launched", cc_plugin.main_launched), ("module", live)):
+        try:
+            out[key] = bool(read(c))
+        except Exception:  # noqa: BLE001 — a page still shows when one cannot be read
+            log.debug("main's %s in %s could not be read", key, c, exc_info=True)
+    if not out["module"]:
+        try:
+            out["module_why"] = why_not(c) or NOT_LOADED
+        except Exception:  # noqa: BLE001
+            out["module_why"] = NOT_LOADED
+    return out
+
+
+def _show(c: str) -> None:
+    """Notify main's chat when live() changed since it was last notified, so the browser reads main's meta again (module
+    note)."""
+    b = _bridges.get(c)
+    if b is None:
+        return
+    now = live(c)
+    if b.shown == now:
+        return
+    b.shown = now
+    try:
+        from . import agents  # noqa: PLC0415
+
+        agents.notify(c, agents.MAIN_ID)
+    except Exception:  # noqa: BLE001 — the page reads it at its next read either way
+        log.debug("main's chat in %s was not notified", c, exc_info=True)
+
+
+def _show_later(c: str) -> None:
+    """_show once a module that stopped polling has had LIVE_GAP_S to poll again."""
+    if _loop is not None and _loop.is_running():
+        _loop.call_later(LIVE_GAP_S + 0.1, _show, c)
 
 
 def on_ended(fn: Callable[[str, str, str, str], None]) -> None:
@@ -470,6 +589,8 @@ async def request(c: str, op: str, **args: Any) -> Answer:
     _remember_loop()
     if not live(c):
         return {NO_MODULE: why_not(c) or NOT_LOADED}
+    if op == "spawn":
+        await sync_roles(c, force=True)  # module note: registered as the files say now, before the agent starts
     b = _bridge(c)
     req = _enqueue(c, op, _args(op, args), b.session, REQUEST_TIMEOUT_S)
     try:
@@ -525,6 +646,96 @@ def push_roles(c: str) -> None:
     except RuntimeError:
         if _loop is not None and _loop.is_running():
             _loop.call_soon_threadsafe(push)
+
+
+def roles_stamp(c: str) -> tuple:
+    """(path, mtime_ns, size) of each file the roles are rendered from that may change while main runs (module note):
+    the workspace's settings.json, thimble's config files, the prompt files an agent's `prompt` names in them, the
+    prompt files under thimble's prompts folder, and the records of the workspace's card types and views, whose forms
+    the orientation's prompt lists; (path, None, None) for one that is missing."""
+    from . import cardtypes, prompts, userconf, views  # noqa: PLC0415
+
+    paths = [_ws(c) / "settings.json", *userconf.config_files(c)]
+    try:
+        agents = userconf.load_or_defaults(c)[0].get("agents") or {}
+    except Exception:  # noqa: BLE001 — the config's own files are stamped either way
+        agents = {}
+    paths += sorted(Path(str(a["prompt"])) for a in agents.values() if isinstance(a, dict) and a.get("prompt"))
+    with contextlib.suppress(OSError):
+        paths += sorted(prompts._dir().rglob("*.md"))
+    with contextlib.suppress(OSError, ValueError):
+        paths.append(config.registry_dir(c) / cardtypes.REGISTRY_FILE)
+        base = views.views_dir(c)
+        paths += [base, *sorted(base.glob(f"*/{views.VIEW_JSON}"))]
+    out = []
+    for path in paths:
+        try:
+            st = path.stat()
+            out.append((str(path), st.st_mtime_ns, st.st_size))
+        except OSError:
+            out.append((str(path), None, None))
+    return tuple(out)
+
+
+def _specs(c: str) -> dict[str, dict[str, Any]]:
+    """subagents.roles of workspace `c` as `$.agent.register` takes them, by name (_spec)."""
+    from . import subagents  # noqa: PLC0415
+
+    out: dict[str, dict[str, Any]] = {}
+    for name, role in (subagents.roles(c) or {}).items():
+        spec = _spec(str(name), role)
+        if spec is not None:
+            out[spec["name"]] = spec
+    return out
+
+
+def _digest(specs: dict[str, Any]) -> str:
+    return hashlib.sha256(json.dumps(specs, sort_keys=True, ensure_ascii=False, default=str).encode("utf-8")).hexdigest()
+
+
+async def sync_roles(c: str, force: bool = False) -> bool:
+    """Have the module register the roles again (push_roles) when those rendered now differ from those it fetched last
+    (module note): always compared with `force`, as before a spawn, else only once roles_stamp changed since the last
+    look. Nothing while no server served the module its roles (the record keeps the digest across a restart of the
+    server, _save). True when it asked. Never raises: a roles file that cannot be read leaves the registration as it
+    is."""
+    b = _bridges.get(c)
+    if b is None or not live(c):
+        return False
+    try:
+        stamp = await asyncio.to_thread(roles_stamp, c)
+        if not force and stamp == b.stamp:
+            return False
+        b.stamp = stamp
+        if not b.served:
+            return False
+        digest = _digest(await asyncio.to_thread(_specs, c))
+    except Exception:  # noqa: BLE001
+        log.warning("the roles of %s could not be compared with the module's registration", c, exc_info=True)
+        return False
+    if digest == b.served:
+        return False
+    log.info("the roles of %s changed since the module registered them; it registers them again", c)
+    push_roles(c)
+    return True
+
+
+def _watch_roles(c: str) -> None:
+    """From a held long poll: sync_roles once ROLES_CHECK_S passed since the last look, in a task of its own, one at a
+    time."""
+    b = _bridge(c)
+    now = time.monotonic()
+    if b.checking or now - b.checked < ROLES_CHECK_S:
+        return
+    b.checked, b.checking = now, True
+
+    async def look() -> None:
+        try:
+            await sync_roles(c)
+        finally:
+            b.checking = False
+
+    asyncio.get_running_loop().create_task(look(), name=f"module-roles-{c}")
 
 
 def _take(c: str, session: str) -> _Request | None:
@@ -594,6 +805,7 @@ async def hello_route(body: HelloBody) -> dict[str, Any]:
             if not _accepted(c, b.session) and b.idle != why:  # a refused stray never unseats main's module
                 b.idle = why
                 _save(c, b)
+                _show(c)
             if why in WAIT_REASONS:
                 raise HTTPException(409, why)
             log.info("module hello from %s refused in %s: %s", body.session, c, why)
@@ -606,6 +818,7 @@ async def hello_route(body: HelloBody) -> dict[str, Any]:
     if moved:
         _drop_session(c, body.session)
     _wake(c)
+    _show(c)
     log.info("module %s said hello for %s in %s", body.version or "?", body.session, c)
     return {"ok": True}
 
@@ -618,6 +831,7 @@ async def next_route(request: Request, cwd: str, session: str, wait: float = POL
     c = _workspace(cwd)
     b = _require(c, session)
     b.polls += 1
+    _show(c)
     try:
         deadline = time.monotonic() + min(max(wait, 0.0), POLL_WAIT_S)
         while True:
@@ -631,10 +845,13 @@ async def next_route(request: Request, cwd: str, session: str, wait: float = POL
             left = deadline - time.monotonic()
             if left <= 0:
                 return Response(status_code=204)
+            _watch_roles(c)
             await _wait(c, min(left, POLL_TICK_S))
     finally:
         b.polls -= 1
         b.last_poll = time.monotonic()
+        if not b.polls:
+            _show_later(c)
 
 
 class ResultBody(BaseModel):
@@ -702,15 +919,14 @@ def _spec(name: str, role: Any) -> dict[str, Any] | None:
 async def roles_route(cwd: str, session: str) -> dict[str, Any]:
     """The roles the module registers, from subagents.roles: `{roles: {name: spec}}`."""
     c = _workspace(cwd)
-    _require(c, session)
-    from . import subagents  # noqa: PLC0415
-
-    roles = await asyncio.to_thread(subagents.roles, c)
-    out: dict[str, dict[str, Any]] = {}
-    for name, role in (roles or {}).items():
-        spec = _spec(str(name), role)
-        if spec is not None:
-            out[spec["name"]] = spec
+    b = _require(c, session)
+    stamp = await asyncio.to_thread(roles_stamp, c)  # before the rendering, so a change during it is seen next time
+    out = await asyncio.to_thread(_specs, c)
+    digest = _digest(out)
+    if digest != b.served:
+        b.served = digest
+        await asyncio.to_thread(_save, c, b)
+    b.stamp = stamp
     return {"roles": out}
 
 

@@ -12,6 +12,7 @@ from app import cc_plugin, cli, config, userconf
 
 REGISTER = cli.register_here  # the real one, which conftest replaces for the other tests
 REFRESH = cli.refresh_extensions
+SERVER_FOR_LAUNCH = cli.server_for_launch
 
 
 @pytest.fixture()
@@ -204,6 +205,55 @@ def test_launch_args_on_a_new_folder_registers_it_refreshes_its_extensions_first
     assert REGISTER(home) is None, "the home folder is never a workspace"
 
 
+def test_the_launch_starts_the_server_before_main_and_before_it_finds_the_extensions(corpus, monkeypatch):
+    """A server that is not up when `claude` starts lets the hooks module register thimble's agent types only later,
+    and Claude Code then prints "N agent type(s) available" instead of listing them from main's first turn. So the
+    launch starts the server and waits for it first, then finds the extensions through it, and prints what the start
+    said; a folder thimble does not open starts none."""
+    order: list[str] = []
+    monkeypatch.setattr(cli, "server_for_launch", lambda c: order.append(f"server {c}") or ["thimble: restarted"])
+    monkeypatch.setattr(cli, "refresh_extensions", lambda c: order.append(f"extensions {c}"))
+    lines = cli.launch_args(corpus).split("\n")
+    assert order == ["server logs", "extensions logs"] and "thimble: restarted" in lines[9].split("\t")
+    order.clear()
+    monkeypatch.setattr(cli, "register_here", lambda cwd: None)
+    cli.launch_args(corpus)
+    assert order == []
+
+
+def test_server_for_launch_starts_and_waits_for_the_server_and_never_stops_the_launch(corpus, monkeypatch):
+    """server_for_launch runs `up`'s start (ensure_running) with its wait and passes on its notices; another install's
+    server on the port, a server that does not answer in time and a start that fails each give a line or nothing, and
+    the launch goes on."""
+    monkeypatch.setattr(cli, "foreign_home", lambda url=None: None)
+    waits: list[float] = []
+
+    def running(wait: float) -> bool:
+        waits.append(wait)
+        cli.NOTICES.append("thimble: the server restarted")
+        return True
+
+    monkeypatch.setattr(cli, "ensure_running", running)
+    assert SERVER_FOR_LAUNCH("logs") == ["thimble: the server restarted"] and waits == [cli.WAIT_S]
+    monkeypatch.setattr(cli, "ensure_running", lambda wait: False)
+    assert SERVER_FOR_LAUNCH("logs") == [cli.LAUNCH_NO_SERVER_LINE.format(wait=cli.WAIT_S, log=cli.log_path())]
+
+    def slow(wait: float) -> bool:
+        raise TimeoutError("still starting")
+
+    monkeypatch.setattr(cli, "ensure_running", slow)
+    monkeypatch.setattr(cli, "healthy", lambda url=None, timeout=1.0: True)
+    assert SERVER_FOR_LAUNCH("logs") == [], "it answered after all"
+
+    def broken(wait: float) -> bool:
+        raise OSError("no port")
+
+    monkeypatch.setattr(cli, "ensure_running", broken)
+    assert SERVER_FOR_LAUNCH("logs") == []
+    monkeypatch.setattr(cli, "foreign_home", lambda url=None: "/other/home")
+    assert SERVER_FOR_LAUNCH("logs") == [cli.FOREIGN_LINE.format(port=cli.port(), other="/other/home")]
+
+
 def test_refresh_extensions_asks_a_running_server_else_finds_them_here(corpus, monkeypatch):
     """A running server of this install refreshes the workspace's extensions (GET /ws/{c}/extensions); without one
     launch-args finds them itself. Neither failing stops the launch."""
@@ -252,6 +302,71 @@ def test_the_launch_unsets_the_effort_and_subagent_model_variables_and_gives_mai
     monkeypatch.delenv("CLAUDE_CODE_SUBAGENT_MODEL")
     monkeypatch.delenv("CLAUDE_CODE_SUBAGENT_MODEL_FORCE")
     assert cli.launch_args(corpus).split("\n")[8] == ""
+
+
+def test_main_s_settings_blank_the_variables_a_settings_file_s_env_would_set_and_main_keeps_its_effort(corpus, tmp_path,
+                                                                                                     monkeypatch):
+    """An `env` block in the analyst's Claude Code settings sets CLAUDE_CODE_EFFORT_LEVEL, which would override every
+    agent's effort (live check L30), past the launcher's unset line. Main's --settings, which rank above the analyst's
+    files, give each of the three variables '', which Claude Code reads as unset (a stand-in API received the --effort
+    level under such a block once main's settings blanked it, and the settings file's level without), fenced or not.
+    Main runs at the level the settings file named, passed as --effort, unless models.main names one; a note names each
+    variable a settings file set."""
+    def env_of(lines: list[str]) -> dict:
+        return json.loads(lines[3])["env"]
+
+    blank = {name: "" for name in cli.UNSET_VARS}
+    lines = cli.launch_args(corpus).split("\n")
+    assert env_of(lines) == {**blank, cc_plugin.FENCE_MARK: "1"}
+    assert not any("is blank in this session" in n for n in lines[9].split("\t"))
+    (tmp_path / "cc").mkdir(exist_ok=True)
+    (tmp_path / "cc" / "settings.json").write_text(json.dumps({"env": {"CLAUDE_CODE_EFFORT_LEVEL": "medium",
+                                                                         "CLAUDE_CODE_SUBAGENT_MODEL": "haiku"}}))
+    lines = cli.launch_args(corpus).split("\n")
+    assert env_of(lines) == {**blank, cc_plugin.FENCE_MARK: "1"} and lines[2] == "medium" and lines[8] == ""
+    notes = lines[9].split("\t")
+    assert cli.BLANKED_EFFORT_LINE.format(effort="medium") in notes
+    assert cli.BLANKED_LINE.format(name="CLAUDE_CODE_SUBAGENT_MODEL") in notes
+    assert not any("CLAUDE_CODE_SUBAGENT_MODEL_FORCE" in n for n in notes)
+    lines = cli.launch_args(corpus, settings=json.dumps({"env": {"CLAUDE_CODE_EFFORT_LEVEL": "max", "MINE": "1"}}))
+    assert env_of(lines.split("\n")) == {**blank, "MINE": "1", cc_plugin.FENCE_MARK: "1"}, "their own --settings too"
+    (config.WORKSPACES_DIR / "logs").mkdir(parents=True, exist_ok=True)
+    (config.WORKSPACES_DIR / "logs" / "settings.json").write_text(json.dumps({"models": {"main": {"effort": "low"}}}))
+    assert cli.launch_args(corpus).split("\n")[2] == "low", "the composer's choice for main wins"
+    _conf({"sandbox": {"use": "never", "enforce": False}})
+    assert env_of(cli.launch_args(corpus).split("\n")) == blank, "without the fence as well"
+
+
+def test_with_hooks_off_the_fence_lets_out_only_the_skill_s_own_command_for_main_s_session(corpus, tmp_path):
+    """With the plugin's hooks off, /thimble's own command must reach the server from outside the sandbox. The fence
+    lets out exactly that command as Claude Code runs it for main's session, for the plain /thimble and /thimble status
+    alone, never `server up *`, which would let main's Bash run `--action fresh` or `fix` outside the sandbox. Claude
+    Code 2.1.291 matched these entries against the skill's command as it ran it, without its `2>&1`, let the plain and the
+    status one out, and kept fresh and fix in the sandbox. Without a session id for main, none is let out."""
+    from test_plugin_agents import split
+
+    sid = "0b9d2f3e-1c2d-4e5f-8a9b-0c1d2e3f4a5b"
+    root = cli.plugin_root()
+    assert cli.main_fence(corpus, session=sid)["sandbox"]["excludedCommands"] == [cli.watch_rule(root)], "hooks on"
+    (tmp_path / "cc").mkdir(exist_ok=True)
+    (tmp_path / "cc" / "settings.json").write_text(json.dumps({"disableAllHooks": True}))
+    excluded = cli.main_fence(corpus, session=sid)["sandbox"]["excludedCommands"]
+    assert excluded == [cli.watch_rule(root), *cli.sandbox_rules(root, corpus, sid)] and len(excluded) == 3
+    assert not any(rule.endswith("server up *") for rule in excluded)
+    _, body = split((root / "skills" / "thimble" / "SKILL.md").read_text("utf-8"))
+    command = next(ln[2:].split("`")[0] for ln in body.splitlines() if "server up" in ln and ln.startswith("!`"))
+    for action in cli.SANDBOX_ACTIONS:
+        ran = (command.replace("${CLAUDE_PLUGIN_ROOT}", str(root)).replace("${CLAUDE_PROJECT_DIR}", str(corpus))
+               .replace("${CLAUDE_SESSION_ID}", sid).replace("$action", action).replace("$archive", ""))
+        assert ran.endswith(" 2>&1") and ran.removesuffix(" 2>&1") in excluded, ran
+    assert cli.main_fence(corpus)["sandbox"]["excludedCommands"] == [cli.watch_rule(root)], "no session id"
+    lines = cli.launch_args(corpus).split("\n")
+    assert cli.sandbox_rules(root, corpus, lines[6])[0] in json.loads(lines[3])["sandbox"]["excludedCommands"]
+    link = tmp_path / "work" / "link"
+    link.symlink_to(corpus)
+    both = cli.sandbox_rules(root, link, sid)
+    assert len(both) == 4 and any(f'--cwd "{link}"' in r for r in both) and any(f'--cwd "{corpus}"' in r for r in both)
+    assert cli.sandbox_rules(root, tmp_path / 'say "hi"', sid) == [] and cli.sandbox_rules(root, corpus, "x") == []
 
 
 def test_the_launch_says_plainly_when_hooks_modules_are_off_and_still_launches(corpus, tmp_path, monkeypatch):

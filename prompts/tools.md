@@ -1024,6 +1024,10 @@ Start the orientation now as a subagent of this session, with one Agent call who
 
 Change nothing in it, since thimble lets only this call through, and end the turn on it, with no words before or after it: the terminal and the browser both show the call.
 
+## start_orientation-program
+
+The extension {extension} runs the orientation with its own program. The program has started, and the browser shows it, so this turn needs no words from you unless it has something else for the analyst. An `orient` event tells you when it ends.
+
 ## start_job-subagent
 
 Start it now as a subagent of this session, with one Agent call whose input is exactly this:
@@ -1075,6 +1079,10 @@ Start the writer now as a subagent of this session, with one Agent call whose in
 {input}
 
 Change nothing in it, since thimble lets only this call through, and end the turn on it, with no words before or after it: the terminal and the browser both show the call.
+
+## start_writing-program
+
+An extension's program writes {doc}. The program has started, and the browser shows it, so this turn needs no words from you unless it has something else for the analyst. Its last message reaches you as a `written` event.
 
 ## writer-context-file
 

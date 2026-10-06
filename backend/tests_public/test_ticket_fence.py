@@ -59,3 +59,20 @@ def test_a_code_ticket_s_session_runs_in_the_sandbox_writing_its_worktree_and_it
     assert dev.TICKET_STACK_LINES[True].split(":")[0] in boxed and "ui_shot" not in boxed
     assert "ui_shot" in dev.build_prompt(t, worktree=wt, ui_url="u", api_url="a", before_shot=None)
 
+
+def test_a_code_ticket_runs_in_the_dev_row_s_fast_mode_and_a_view_build_takes_none_from_it(board, monkeypatch):
+    """Code tickets stay `claude -p` jobs of the server (Q6) and keep the fast mode they had: the dev row's, on by
+    default and off where thimble's config turns it off. A view build takes no fast mode from that row, since thimble's
+    agents have none of their own."""
+    monkeypatch.setitem(userconf.DEFAULTS["sandbox"], "enforce", False)  # the flags below come with no fence
+
+    def fast() -> object:
+        flags = dev.Sessions()._flags(CORPUS, "thimble ticket 1: x")
+        return json.loads(flags[flags.index("--settings") + 1]).get("fastMode")
+
+    assert config.models_for(CORPUS)["dev"]["fast"] is True and fast() is True
+    userconf.global_file().parent.mkdir(parents=True, exist_ok=True)
+    userconf.global_file().write_text(json.dumps({"agents": {"dev": {"fast": False}}}))
+    assert fast() is False
+    userconf.global_file().write_text(json.dumps({"agents": {"dev": {"fast": True}}}))
+    assert fast() is True and "fast" not in config.chosen(CORPUS, "dev")

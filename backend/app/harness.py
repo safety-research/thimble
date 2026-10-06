@@ -891,7 +891,7 @@ def _prepare(job: Job, part: roles.Part) -> tuple[Run, list[str]]:
     if running(job.c, job.key):
         raise RuntimeError(f"{job.what} of {job.key} is running")
     try:
-        conf = userconf.session(job.c, job.role, sandbox=True)
+        conf = userconf.session(job.c, job.role, sandbox=True, program=True)
     except userconf.ConfigError as e:
         raise RuntimeError(str(e)) from e
     token_id = secrets.token_hex(8)

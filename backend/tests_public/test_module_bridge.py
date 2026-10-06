@@ -136,6 +136,48 @@ async def test_every_module_route_answers_only_a_request_that_proves_the_token(c
     assert hook_auth.guarded("GET", "/api/module/anything") and hook_auth.guarded("POST", "/api/module/hello")
 
 
+# ----------------------------------------------------------------------------------------------- main's meta
+
+
+async def test_main_s_meta_says_whether_main_is_fenced_launched_and_the_module_live(client, plugin_headers, monkeypatch):
+    """The browser's unfenced banner and Start's no-module line read main's meta: `fenced`, `launched`, `module` and,
+    while the module is not live, `module_why`. Each time the module goes live or stops being live, main's chat is
+    notified, so an open page reads the meta again."""
+    from app import agents
+
+    notified: list = []
+    monkeypatch.setattr(agents, "notify", lambda c, chat: notified.append((c, chat)))
+    monkeypatch.setattr(cc_plugin, "main_launched", lambda c: True, raising=False)
+    monkeypatch.setattr(module_bridge, "LIVE_GAP_S", 0.2)
+    _launch()
+
+    async def meta() -> dict:
+        r = await client.get(f"/api/ws/{CORPUS}/chats/main")
+        assert r.status_code == 200
+        got = r.json()["meta"]
+        assert got == {**got, **(await client.get(f"/api/ws/{CORPUS}/chats/main")).json()["meta"]}
+        return {k: got[k] for k in ("fenced", "launched", "module", "module_why")}
+
+    assert await meta() == {"fenced": True, "launched": True, "module": False, "module_why": module_bridge.NOT_LOADED}
+    mod = Module(client, plugin_headers)
+    poll = await _live(mod)
+    assert await meta() == {"fenced": True, "launched": True, "module": True, "module_why": ""}
+    assert notified == [(CORPUS, agents.MAIN_ID)], "once, as it went live"
+    module_bridge._enqueue(CORPUS, "note", {"text": "x"}, MAIN, None)  # ends the poll, which the test does not renew
+    assert (await poll).status_code == 200
+    for _ in range(100):
+        if len(notified) == 2:
+            break
+        await asyncio.sleep(0.02)
+    assert notified == [(CORPUS, agents.MAIN_ID)] * 2, "and once as it stopped polling"
+    got = await meta()
+    assert not got["module"] and got["module_why"].startswith(module_bridge.NOT_ANSWERING)
+    monkeypatch.setattr(cc_plugin, "main_fenced", lambda c: False, raising=False)
+    monkeypatch.setattr(cc_plugin, "main_launched", lambda c: False, raising=False)
+    assert {k: v for k, v in (await meta()).items() if k != "module_why"} == \
+        {"fenced": False, "launched": False, "module": False}
+
+
 # ----------------------------------------------------------------------------------------------- the hello
 
 
@@ -201,6 +243,52 @@ async def test_a_hello_before_main_s_session_opened_thimble_is_asked_again_not_r
     # follower moves to it
     module_bridge.rekey(CORPUS, MAIN, CHILD)
     assert (await Module(client, plugin_headers, CHILD).hello()).status_code == 200
+
+
+async def test_a_hello_at_session_start_is_accepted_from_the_launch_session_s_fenced_process(client, plugin_headers,
+                                                                                            monkeypatch, tmp_path):
+    """The launcher starts the server before main, so the module says hello inside main's session start, before
+    /thimble attaches main. The hello is accepted then when it is from the session launch.json names and Claude Code's
+    own record of its running processes (<config>/sessions/<pid>.json) names a live `claude` process for that session
+    whose command line is fenced: the module registers thimble's types inside session start, and they are in main's
+    first agent listing. That process unfenced is refused; without such a record, or for its process gone, the hello
+    is asked again later. Once /thimble attached main, main's own process decides."""
+    from app import procs
+
+    _launch()
+    monkeypatch.setattr(module_bridge, "_opened", _real_opened)
+    monkeypatch.setattr(session, "current", lambda c: None)
+    fenced = ["claude", "--settings", json.dumps({"sandbox": {"enabled": True}, "env": {cc_plugin.FENCE_MARK: "1"}})]
+    argv = {4242: fenced}
+    monkeypatch.setattr(cc_plugin, "main_fenced", lambda c: False, raising=False)
+    monkeypatch.setattr(procs, "alive", lambda pid: pid in argv)
+    monkeypatch.setattr(procs, "argv", lambda pid: argv.get(pid, []))
+    monkeypatch.setattr(procs, "cwd", lambda pid: tmp_path)
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "cc"))
+    records = tmp_path / "cc" / "sessions"
+    records.mkdir(parents=True)
+    r = await Module(client, plugin_headers).hello()
+    assert r.status_code == 409 and r.json()["detail"] == module_bridge.NOT_OPEN, "no record yet"
+    (records / "4242.json").write_text(json.dumps({"pid": 4242, "sessionId": NEW, "kind": "interactive"}))
+    r = await Module(client, plugin_headers).hello()
+    assert r.status_code == 409 and r.json()["detail"] == module_bridge.NOT_OPEN, "a record of another session"
+    (records / "4242.json").write_text(json.dumps({"pid": 4242, "sessionId": MAIN, "kind": "interactive"}))
+    assert (await Module(client, plugin_headers).hello()).status_code == 200
+    assert module_bridge._launch_pid(CORPUS, MAIN) == 4242 and module_bridge._launch_pid(CORPUS, CHILD) is None
+    argv[4242] = ["claude", "--settings", "{}"]
+    r = await Module(client, plugin_headers).hello()
+    assert r.status_code == 403 and r.json()["detail"] == module_bridge.NOT_FENCED
+    argv.clear()
+    r = await Module(client, plugin_headers).hello()
+    assert r.status_code == 409 and r.json()["detail"] == module_bridge.NOT_OPEN, "its process is gone"
+    # /thimble attached main: main's own process decides, whatever the record says
+    argv[4242] = fenced
+    monkeypatch.setattr(session, "current", lambda c: types.SimpleNamespace(sid=MAIN))
+    monkeypatch.setattr(session, "main_pid", lambda c: 77)
+    r = await Module(client, plugin_headers).hello()
+    assert r.status_code == 403 and r.json()["detail"] == module_bridge.NOT_FENCED
+    monkeypatch.setattr(cc_plugin, "main_fenced", lambda c: True, raising=False)
+    assert (await Module(client, plugin_headers).hello()).status_code == 200
 
 
 async def test_without_a_session_in_launch_json_main_is_the_session_thimble_made_main(client, plugin_headers,
@@ -421,6 +509,99 @@ async def test_the_roles_come_from_subagents_roles_as_agent_register_takes_them(
                         "disallowedTools": ["mcp__plugin_thimble_thimble__start_orientation"]},
         "helper": {"name": "helper", "prompt": "Help.", "model": "claude-sonnet-5", "effort": "high",
                    "description": "thimble's role", "background": True, "skills": ["thimble:shared"]}}
+
+
+def _fake_roles(monkeypatch, prompt: dict) -> None:
+    """subagents.roles replaced by one role whose prompt is prompt["text"]."""
+    fake = types.ModuleType("app.subagents")
+    fake.roles = lambda c: {"orientation": {"prompt": prompt["text"], "model": "claude-opus-5-5[1m]", "effort": "xhigh",
+                                            "description": "thimble's orientation of this corpus", "background": True}}
+    monkeypatch.setitem(sys.modules, "app.subagents", fake)
+    monkeypatch.setattr(app, "subagents", fake)  # `from . import subagents` reads the package's attribute first
+
+
+async def _ops(mod: Module, n: int) -> list[dict]:
+    """The next `n` requests of the long poll, each answered as the module would."""
+    out = []
+    for _ in range(n):
+        out.append(await mod.serve(lambda req: {"ok": True} if req["op"] == "register" else {"agentId": "a1"}))
+    return out
+
+
+async def test_a_spawn_registers_the_roles_again_first_when_they_changed_since_the_module_fetched_them(
+        client, plugin_headers, monkeypatch):
+    """A click's agent runs on the registration in force when the module spawns it, so a spawn first has the module
+    register the roles again when they render otherwise than when it fetched them (the orientation instructions or a
+    prompt file edited by hand), and not when they render the same. A restarted server knows what the module fetched
+    from the record."""
+    prompt = {"text": "Orient."}
+    _fake_roles(monkeypatch, prompt)
+    _launch()
+    mod = Module(client, plugin_headers)
+    assert (await mod.hello()).status_code == 200
+    assert (await mod.get("roles")).json()["roles"]["orientation"]["prompt"] == "Orient."
+    spawn = asyncio.create_task(module_bridge.request(CORPUS, "spawn", role="orientation", prompt="p", what=""))
+    assert [r["op"] for r in await _ops(mod, 1)] == ["spawn"]
+    assert (await spawn) == {"agentId": "a1"}
+    prompt["text"] = "Orient, with the analyst's own instructions."
+    spawn = asyncio.create_task(module_bridge.request(CORPUS, "spawn", role="orientation", prompt="p", what=""))
+    assert [r["op"] for r in await _ops(mod, 2)] == ["register", "spawn"]
+    assert (await spawn) == {"agentId": "a1"}
+    assert (await mod.get("roles")).json()["roles"]["orientation"]["prompt"] == prompt["text"]
+    module_bridge._bridges.clear()  # what a restart forgets; the module keeps its registration and says hello again
+    assert (await mod.hello()).status_code == 200
+    spawn = asyncio.create_task(module_bridge.request(CORPUS, "spawn", role="orientation", prompt="p", what=""))
+    assert [r["op"] for r in await _ops(mod, 1)] == ["spawn"], "the record says what it fetched"
+    await spawn
+
+
+async def test_a_held_poll_has_the_roles_registered_again_once_their_files_change(client, plugin_headers, monkeypatch,
+                                                                                tmp_path):
+    """While main is idle its module holds the long poll, which looks every ROLES_CHECK_S whether the files the roles
+    are rendered from changed: the workspace's settings.json, whose orient_instructions an analyst edits by hand, and a
+    prompt file an agent's `prompt` names. A change that renders the roles otherwise has the module register them again,
+    so main's next turn, whose own Agent calls ignore a registration made during the turn, starts on them; a file saved
+    with the same text asks nothing."""
+    from app import ledger, orient_session, userconf
+
+    monkeypatch.setattr(module_bridge, "ROLES_CHECK_S", 0.05)
+    monkeypatch.setattr(module_bridge, "POLL_TICK_S", 0.05)
+    _launch()
+    mod = Module(client, plugin_headers)
+    assert (await mod.hello()).status_code == 200
+    assert "orientation" in (await mod.get("roles")).json()["roles"]
+
+    async def next_op() -> str:
+        r = await mod.next(wait=3.0)
+        if r.status_code == 204:
+            return ""
+        req = r.json()["request"]
+        await mod.result(req["id"], {"ok": True})
+        return req["op"]
+
+    settings = config.workspace_dir(CORPUS) / "settings.json"
+    settings.write_text(json.dumps({**ledger.stored_settings(CORPUS), orient_session.SETTING: "Read every log first."}))
+    assert await next_op() == "register"
+    roles = (await mod.get("roles")).json()["roles"]
+    assert "Read every log first." in roles["orientation"]["prompt"]
+    settings.write_text(settings.read_text())  # saved again, the same text
+    r = await mod.next(wait=0.5)
+    assert r.status_code == 204, r.text
+    own = tmp_path / "my-critic.md"
+    original = (config.REPO_ROOT / "prompts" / "critic.md").read_text("utf-8")
+    own.write_text(original + "\nCheck every count twice.\n")
+    userconf.global_file().parent.mkdir(parents=True, exist_ok=True)
+    userconf.global_file().write_text(json.dumps({"agents": {"critic": {"prompt": str(own)}}}))
+    assert await next_op() == "register"
+    assert "Check every count twice." in (await mod.get("roles")).json()["roles"]["critic"]["prompt"]
+    own.write_text(original + "\nCheck every count three times.\n")
+    assert await next_op() == "register"
+    assert "three times" in (await mod.get("roles")).json()["roles"]["critic"]["prompt"]
+    from app import cardtypes, views
+
+    stamped = {path for path, *_ in module_bridge.roles_stamp(CORPUS)}
+    assert str(config.registry_dir(CORPUS) / cardtypes.REGISTRY_FILE) in stamped, "the card types the prompt lists"
+    assert str(views.views_dir(CORPUS)) in stamped, "and the views, whose forms it lists"
 
 
 async def test_the_state_holds_running_agents_their_efforts_the_typed_starts_and_a_note_for_each(client,

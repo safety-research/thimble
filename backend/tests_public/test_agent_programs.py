@@ -229,17 +229,20 @@ def test_an_edit_of_thimble_s_config_asks_in_every_session_somebody_answers_and_
 def test_an_agent_s_own_sandbox_switch_runs_it_outside_the_sandbox_without_the_enforce_refusal(workspaces_tmp,
                                                                                                 monkeypatch):
     """The dev agent's own `sandbox: off` (code tickets keep their fence keys) runs it outside the sandbox without the
-    enforce refusal; a writer's is read and ignored, since the writers share main's fence."""
+    enforce refusal, and so does a writer's for an extension's program that runs the writer, since a program is no
+    subagent of main and keeps its agent's box keys. thimble's own writer does not read it: the writers share main's
+    fence. A value the key does not take is an error for either agent."""
     monkeypatch.setattr(userconf, "sandbox_runs", lambda refresh=False: False)
     with pytest.raises(userconf.ConfigError):
         userconf.session(CORPUS, "dev")
     _config({"agents": {"dev": {"sandbox": "off"}, "writer": {"sandbox": "off"}}})
     assert not userconf.session(CORPUS, "dev").sandboxed
+    assert not userconf.session(CORPUS, "writer", program=True).sandboxed
     with pytest.raises(userconf.ConfigError):
         userconf.session(CORPUS, "writer")
     _config({"agents": {"dev": {"sandbox": "maybe", "env": ["NOT A NAME"]}, "writer": {"sandbox": "maybe"}}})
     problem = userconf.problem(CORPUS)
-    assert "agents.dev.sandbox" in problem and "agents.dev.env" in problem and "agents.writer" not in problem
+    assert "agents.dev.sandbox" in problem and "agents.dev.env" in problem and "agents.writer.sandbox" in problem
 
 
 def test_a_program_s_token_works_for_its_role_s_own_tools_only_and_only_while_it_runs(data_tmp, workspaces_tmp):
@@ -351,11 +354,12 @@ async def test_a_program_s_box_hides_server_json_and_keeps_the_corpus_read_only(
     _config({"sandbox": {"enforce": False}})
     secret = userconf.global_file().parent / "server.json"
     secret.write_text('{"token": "not-for-agents"}')
-    # the path is written into the program: the agents' `env` key is read and ignored now (main's fence only)
+    # the path reaches the program through the orientation's `env`, which an extension's program keeps (userconf
+    # PROGRAM_KEYS), although thimble's own orientation does not read it
     probe = '''import json, os, thimble
 def run(input):
     out = {}
-    for name, path in (("secret", SECRET), ("corpus", os.path.join(input["corpus"], "x.txt")),
+    for name, path in (("secret", os.environ["SECRET"]), ("corpus", os.path.join(input["corpus"], "x.txt")),
                        ("work", os.path.join(os.environ["THIMBLE_WORK"], "x.txt"))):
         try:
             if name == "secret":
@@ -367,7 +371,9 @@ def run(input):
             out[name] = type(e).__name__
     return json.dumps(out)
 thimble.serve(run)
-'''.replace("SECRET", json.dumps(str(secret)))
+'''
+    monkeypatch.setenv("SECRET", str(secret))
+    _config({"sandbox": {"enforce": False}, "agents": {"orientation": {"env": ["SECRET"]}}})
     active.append(_extension(tmp_path, "probe", {"orientation": {"description": "Probes.", "command": ["python", "p.py"]}},
                              {"agents/orientation/p.py": probe}))
     res = await tools.call(CORPUS, "start_orientation", {"brief": ""})
