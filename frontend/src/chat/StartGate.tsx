@@ -1,23 +1,24 @@
 // The start gate: until an orientation has been asked for (main's meta `orientation`) or the analyst skips it, the offer
-// of an orientation wraps main's composer. Show options opens the orientation's switches (Write Orientation deck,
-// Propose views, Critique and revise, the one off by default, Generate report) and its permission mode, the
-// orientation's row of the settings' permission modes, which a pick here saves (manual, auto, bypass; Claude Code's
-// own warning shows under Bypass). The field's text is the orientation's instructions and may stay empty; its model
-// line (ModelLine) edits the orientation role's settings: the model (a menu of lib/models modelChoices, as RoleChip's),
-// the effort and fast mode. Start sends the analyst's session the `start` event with the instructions as its text and
-// the choices as attributes (prompts/main.md); Skip leaves main to the analyst. The orientation runs as a Claude Code
-// session of its own, shown in the agent tray as `thimble:orient · <workspace>`, with every one of these choices.
+// of an orientation wraps main's composer; it comes back, filled in, when a start did not happen (`restore`). Show
+// options opens start_orientation's four switches (Write Orientation deck, Propose views, Critique and revise, the one
+// off by default, Generate report). The field's text is the request (the focus) and may stay empty; its model line
+// (ModelLine) picks the run's model (a menu of lib/models modelChoices) and effort (Claude Code's levels, none for a
+// model that runs with none), which start at Settings' orientation row and apply to this run only. One line under it
+// says how it runs: as a subagent of the analyst's Claude Code session, in that session's permission mode. Start is a
+// click: the server starts the orientation through thimble's plugin with no turn of main (POST /ws/{c}/start), and the
+// answer says whether it started. Start is off, with the reason on that line, while thimble's hooks module is not
+// running in main's session (main's meta `module: false`) or main is in plan mode. Skip leaves main to the analyst.
 import { useEffect, useRef, useState } from 'react'
-import { Button, Segmented, type SegmentedOption } from '../components/Button'
+import { Button } from '../components/Button'
 import { TextArea } from '../components/Field'
 import { Icon } from '../components/Icon'
 import { Switch } from '../components/Switch'
 import { api } from '../lib/api'
-import { loadSettings, modelChoices, onSettingsChange } from '../lib/models'
+import { hasEffort, loadSettings, modelChoices, onSettingsChange } from '../lib/models'
 import { track } from '../lib/telemetry'
-import type { MainEffort, ModeAgent, OrientPass, OrientPermissions, Settings, StartBody } from '../lib/types'
+import type { ChatMeta, OrientPass, OrientRun, Settings, StartAnswer, StartBody } from '../lib/types'
 import { toastText } from '../shell/Toasts'
-import { EFFORT_CHOICES, ModelLine, ORIENT_DEFAULT_EFFORT } from './ModelLine'
+import { AGENT_EFFORTS, ModelLine } from './ModelLine'
 
 export const PASSES: { id: OrientPass; label: string }[] = [
   { id: 'final', label: 'Write Orientation deck' },
@@ -25,9 +26,6 @@ export const PASSES: { id: OrientPass; label: string }[] = [
   { id: 'critique', label: 'Critique and revise' },
   { id: 'report', label: 'Generate report' },
 ]
-
-/** The level Ultracode runs at, sent as the `start` event's `effort` beside `ultracode` (cc_settings.ULTRACODE_EFFORT). */
-export const ULTRACODE_LEVEL = 'xhigh'
 
 /** The note main keeps once the gate is skipped. */
 export const SKIPPED_NOTE = 'Orientation skipped. You can ask Thimble to orient itself later.'
@@ -42,14 +40,15 @@ export function togglePass(cur: Passes, id: OrientPass): Passes {
 }
 
 /** Whether the start gate is open: no orientation was asked for (main's meta `orientation` is null) and none has a
- * thread (`orientChats`). What main holds does not close it. Pure. */
+ * thread (`orientChats`), or the latest start did not happen (`refused`), whose gate comes back filled in. What main
+ * holds does not close it. Pure. */
 export function startGateOpen(orientation: string | null | undefined, orientChats = 0): boolean {
-  return !orientation && orientChats === 0
+  return orientation === 'refused' || (!orientation && orientChats === 0)
 }
 
 /** Whether main's chat shows the gate in place of its composer: main is shown and loaded, the analyst neither skipped
- * nor pressed Start in this tab, and the gate is open. Whether main is running plays no part: a Start pressed while
- * main works is queued like any browser event. Pure. */
+ * nor pressed Start in this tab, and the gate is open. Whether main is running plays no part: Start takes no turn of
+ * main. Pure. */
 export function startGateShown(s: { main: boolean; skipped: boolean; started: boolean; loading: boolean; error: unknown; orientation: string | null | undefined; orientChats: number }): boolean {
   return s.main && !s.skipped && !s.started && !s.loading && !s.error && startGateOpen(s.orientation, s.orientChats)
 }
@@ -57,78 +56,106 @@ export function startGateShown(s: { main: boolean; skipped: boolean; started: bo
 /** The switches that are on, in the gate's order. */
 export const chosenPasses = (on: Passes): OrientPass[] => PASSES.map((p) => p.id).filter((id) => on[id])
 
-/** The body of the `start` event: start_orientation's three switches, the session's settings (the critique, the
- * effort, Ultracode as `ultracode` at its level), and the instructions when the analyst wrote any. Pure. */
-export function startBody(on: Passes, instructions: string, effort: MainEffort = ORIENT_DEFAULT_EFFORT): StartBody {
-  const text = instructions.trim()
-  const ultracode = effort === 'ultracode'
+/** The body of Start: the request when the analyst wrote one, the four switches, and the run's model and effort (left
+ * out when not known yet, so the server takes Settings'); a model that runs with no effort sends none. Pure. */
+export function startBody(on: Passes, text: string, values: { model?: string | null; effort?: string | null } = {}): StartBody {
+  const request = text.trim()
+  const model = values.model || undefined
+  const effort = model && !hasEffort(model) ? undefined : values.effort || undefined
   return {
-    final_notebook: on.final,
-    propose_views: on.views,
-    generate_report: on.report,
+    deck: on.final,
+    views: on.views,
     critique: on.critique,
-    ultracode,
-    effort: effort === 'ultracode' ? ULTRACODE_LEVEL : effort,
-    ...(text ? { text } : {}),
+    report: on.report,
+    ...(model ? { model } : {}),
+    ...(effort ? { effort } : {}),
+    ...(request ? { text: request } : {}),
   }
 }
 
-/** A Claude Code permission mode (main's `attached.permission_mode`) as thimble's: Auto for auto, Bypass for
- * bypassPermissions, Manual for any other (acceptEdits, plan and dontAsk are not offered) or none known (backend
- * modes.OF_CLAUDE). Pure. */
-export const permissionChoice = (mode: string | null | undefined): OrientPermissions =>
-  mode === 'auto' ? 'auto' : mode === 'bypassPermissions' ? 'bypass' : 'manual'
-
-/** The mode an agent starts in: its row, else the mode of the analyst's Claude Code session, else Manual, whichever
- * their Claude Code settings do not turn off (backend modes.mode_for). Pure. */
-export function agentMode(rows: Settings['permission_modes'], agent: ModeAgent, sessionMode: string | null | undefined, off: readonly string[] = []): OrientPermissions {
-  return [rows?.[agent], permissionChoice(sessionMode), 'manual' as const].find((m): m is OrientPermissions => !!m && !off.includes(m))!
+/** The gate's fields filled in from a start that did not happen (orient/run.json): its request, switches, model and
+ * effort. */
+export interface Restore {
+  text: string
+  on: Passes
+  model?: string | null
+  effort?: string | null
 }
 
-/** Claude Code's modes by the names its own switcher shows (backend modes.MODES). Manual and Bypass both run in
- * Claude Code's manual mode (thimble grants every request in Bypass), so the card can switch between them live. */
-export const PERMISSION_OPTIONS: SegmentedOption<OrientPermissions>[] = [
-  { value: 'manual', label: 'Manual', icon: 'pause' },
-  { value: 'auto', label: 'Auto', icon: 'run' },
-  { value: 'bypass', label: 'Bypass', icon: 'exclaim' },
-]
+/** A refused run's record as the gate's fields; null for any other record. Pure. */
+export function restoreOf(run: OrientRun | null | undefined): Restore | null {
+  if (!run || run.status !== 'refused') return null
+  const passes = run.passes ?? []
+  return {
+    text: run.query ?? '',
+    on: { final: passes.includes('final'), views: passes.includes('views'), report: passes.includes('report'), critique: !!run.critique },
+    model: run.model ?? null,
+    effort: run.effort ?? null,
+  }
+}
 
-/** The warning Claude Code shows before a session runs in Bypass Permissions mode, its first two sentences. */
-export const BYPASS_WARNING =
-  'In Bypass Permissions mode, Claude Code will not ask for your approval before running potentially dangerous commands. ' +
-  'This mode should only be used in a sandboxed container/VM that has restricted internet access and can easily be restored if damaged.'
+/** Claude Code's permission modes by the names its own mode line shows. */
+const MODE_WORDS: Readonly<Record<string, string>> = {
+  default: 'default mode',
+  acceptEdits: 'accept edits mode',
+  auto: 'auto mode',
+  bypassPermissions: 'bypass permissions mode',
+  dontAsk: "don't ask mode",
+}
 
-export function StartGate({ ws, model, onModel, defaultEffort = ORIENT_DEFAULT_EFFORT, fast = null, onEffort, onFast, mode: rowMode = 'manual', offModes = [], onMode, onStarted, onSkip }: {
+/** The line under the gate's field: how the orientation runs, from main's reported permission mode. Pure. */
+export function modeLine(mode: string | null | undefined): string {
+  const words = mode ? MODE_WORDS[mode] : null
+  return `Runs as a subagent of your Claude Code session, ${words ? `in ${words}` : 'in its permission mode'}.`
+}
+
+/** Why Start is off while main is in plan mode, where a subagent would ask before every card (U20). */
+export const PLAN_MODE_LINE = 'Your session is in plan mode, where the orientation would have to ask you before every card. Switch out of plan mode first (shift+tab in your terminal).'
+
+/** What to change so that thimble's hooks module runs, for the reason module_bridge.why_not gives. Pure. */
+export function noModuleFix(reason: string): string {
+  const r = reason.toLowerCase()
+  if (r.includes('thimble_no_module')) return 'Unset THIMBLE_NO_MODULE'
+  if (r.includes('managed settings') || r.includes('disableallhooks') || r.includes('allowmanagedhooksonly')) return "Ask whoever manages your Claude Code settings to allow plugins' hooks modules"
+  if (r.includes('trust')) return 'Trust this folder in Claude Code'
+  return 'Run `thimble doctor` to see why'
+}
+
+/** Why Start is off without thimble's hooks module in main's session (Q7): the plain line, its reason, and what to
+ * change. Pure. */
+export function noModuleLine(reason: string | null | undefined): string {
+  const why = (reason ?? '').trim() || "Claude Code did not load thimble's hooks module"
+  return `thimble's agents can't start in this session: Claude Code's hooks modules are off (${why}). Main, its threads, cards and labels still work. ${noModuleFix(why)}, then run \`thimble -c\`.`
+}
+
+/** Why Start is off now, or null: no hooks module in main's session (`module: false`; a meta that does not say leaves
+ * Start on, and the server refuses a start that cannot happen), then plan mode. Pure. */
+export function startBlocked(main: Pick<ChatMeta, 'module' | 'module_why' | 'attached'> | null | undefined): { kind: 'no-module' | 'plan'; line: string } | null {
+  if (main?.module === false) return { kind: 'no-module', line: noModuleLine(main.module_why) }
+  if (main?.attached?.permission_mode === 'plan') return { kind: 'plan', line: PLAN_MODE_LINE }
+  return null
+}
+
+export function StartGate({ ws, main, model: rowModel, effort: rowEffort, restore = null, onStarting, onAnswer, onSkip }: {
   ws: string
-  /** the orientation role's model (settings.models.orient); nothing while it is not read yet */
+  /** main's meta: its permission mode, and whether thimble's hooks module runs in it */
+  main?: Pick<ChatMeta, 'module' | 'module_why' | 'attached'> | null
+  /** the orientation row's model and effort (settings.models.orient), where the menus open; nothing while not read */
   model?: string | null
-  /** saves a model picked here to the orientation's role; without it the model is text */
-  onModel?: (model: string) => void
-  /** the orientation role's effort, where the menu opens (ModelLine.ORIENT_DEFAULT_EFFORT while it is not read yet) */
-  defaultEffort?: MainEffort
-  /** the orientation role's fast mode; null while it is not read yet */
-  fast?: boolean | null
-  /** saves an effort picked here to the orientation's role */
-  onEffort?: (e: MainEffort) => void
-  /** switches the orientation role's fast mode */
-  onFast?: (on: boolean) => void
-  /** the orientation's permission mode (agentMode), where the switcher opens */
-  mode?: OrientPermissions
-  /** the modes the analyst's Claude Code settings turn off, which the switcher leaves out */
-  offModes?: readonly string[]
-  /** saves a mode picked here to the orientation's row */
-  onMode?: (m: OrientPermissions) => void
-  onStarted?: () => void
+  effort?: string | null
+  /** a start that did not happen, whose request, switches, model and effort fill the gate */
+  restore?: Restore | null
+  /** Start was pressed: the request is on its way */
+  onStarting?: () => void
+  /** what the server answered: started, or why not (the gate then comes back) */
+  onAnswer?: (answer: StartAnswer | null, error?: string) => void
   onSkip?: () => void
 }) {
-  const [on, setOn] = useState<Passes>(DEFAULT_ON)
-  const [picked, setPicked] = useState<MainEffort | null>(null)
-  const effort = picked ?? defaultEffort
-  // the role's effort changed (a pick saved from here, or the settings popover): the line shows the role's
-  useEffect(() => setPicked(null), [defaultEffort])
-  const [pickedMode, setPickedMode] = useState<OrientPermissions | null>(null)
-  useEffect(() => setPickedMode(null), [rowMode])
-  const mode = pickedMode ?? rowMode
+  const [on, setOn] = useState<Passes>(restore?.on ?? DEFAULT_ON)
+  const [pickedModel, setPickedModel] = useState<string | null>(restore?.model ?? null)
+  const [pickedEffort, setPickedEffort] = useState<string | null>(restore?.effort ?? null)
+  const model = pickedModel ?? rowModel ?? null
+  const effort = model && !hasEffort(model) ? null : pickedEffort ?? rowEffort ?? null
   // the model menu's choices: the models the settings name across roles, then the current ones (lib/models)
   const [settings, setSettings] = useState<Settings | null>(null)
   useEffect(() => {
@@ -144,41 +171,37 @@ export function StartGate({ ws, model, onModel, defaultEffort = ORIENT_DEFAULT_E
       off()
     }
   }, [ws])
-  const [text, setText] = useState('')
+  const [text, setText] = useState(restore?.text ?? '')
   const [optionsOpen, setOptionsOpen] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const taRef = useRef<HTMLTextAreaElement>(null)
+  const blocked = startBlocked(main)
   const toggle = (id: OrientPass) => {
     const next = togglePass(on, id)
     track('start-toggle', { target: `orient:${id}`, detail: { on: next[id] } })
     setOn(next)
   }
-  const pickEffort = (e: MainEffort) => {
-    track('start-toggle', { target: 'orient:effort', detail: { effort: e } })
-    setPicked(e)
-    onEffort?.(e)
-  }
-  const pickModel = (m: string) => {
-    track('start-toggle', { target: 'orient:model', detail: { model: m } })
-    onModel?.(m)
-  }
   const start = async () => {
-    if (busy) return
+    if (busy || blocked) return
     setBusy(true)
     setError(null)
+    onStarting?.()
     try {
-      await api.start(ws, startBody(on, text, effort))
-      onStarted?.()
+      const answer = await api.start(ws, startBody(on, text, { model, effort }))
+      onAnswer?.(answer)
     } catch (e) {
       // the refusal stays beside Start until the next try; it is not also a toast (shell/Toasts)
-      setError(toastText((e as Error).message))
+      const why = toastText((e as Error).message)
+      setError(why)
+      onAnswer?.(null, why)
     } finally {
       setBusy(false)
     }
   }
+  const mode = main?.attached?.permission_mode
   return (
-    <div className="chat-gate" data-panel="chat" role="group" aria-label="Start orientation">
+    <div className="chat-gate" data-panel="chat" role="group" aria-label="Start orientation" data-blocked={blocked?.kind}>
       <div className="chat-gate-top">
         <div className="chat-gate-title">Start orientation</div>
         <button
@@ -209,31 +232,7 @@ export function StartGate({ ws, model, onModel, defaultEffort = ORIENT_DEFAULT_E
                 )
               })}
             </div>
-            <div className="chat-gate-perms" data-choice={mode}>
-              <span className="chat-gate-perms-label" id="chat-gate-perms">
-                Permissions
-              </span>
-              <Segmented
-                size="sm"
-                track
-                block
-                label="The orientation's permission mode"
-                options={PERMISSION_OPTIONS.filter((o) => !offModes.includes(o.value))}
-                value={mode}
-                onChange={(v) => {
-                  track('start-toggle', { target: 'orient:permissions', detail: { permissions: v } })
-                  setPickedMode(v)
-                  onMode?.(v)
-                }}
-              />
-            </div>
           </div>
-        )}
-        {mode === 'bypass' && (
-          <p className="chat-gate-warn" role="alert">
-            <Icon name="warning" size={13} className="chat-gate-warn-ico" />
-            <span>{BYPASS_WARNING}</span>
-          </p>
         )}
       </div>
       <div className="chat-gate-field" onClick={() => taRef.current?.focus()}>
@@ -257,10 +256,30 @@ export function StartGate({ ws, model, onModel, defaultEffort = ORIENT_DEFAULT_E
         />
         <div className="chat-gate-meta">
           <span className="composer-model">
-            <ModelLine model={model} models={onModel ? modelChoices(settings, model) : undefined} onModel={onModel && pickModel} effort={effort} efforts={EFFORT_CHOICES} onEffort={(e) => pickEffort(e as MainEffort)} fast={fast} onFast={onFast} label="the orientation" className="chat-gate-line" />
+            <ModelLine
+              model={model}
+              models={modelChoices(settings, model)}
+              onModel={(m) => {
+                track('start-toggle', { target: 'orient:model', detail: { model: m } })
+                setPickedModel(m)
+              }}
+              effort={effort}
+              efforts={AGENT_EFFORTS}
+              onEffort={(e) => {
+                track('start-toggle', { target: 'orient:effort', detail: { effort: e } })
+                setPickedEffort(e)
+              }}
+              noFast
+              label="the orientation"
+              className="chat-gate-line"
+            />
           </span>
         </div>
       </div>
+      <p className={`chat-gate-mode${blocked ? ' chat-gate-blocked' : ''}`} data-mode={mode ?? undefined} role={blocked ? 'alert' : undefined}>
+        {blocked && <Icon name="warning" size={13} className="chat-gate-warn-ico" />}
+        <span>{blocked ? blocked.line : modeLine(mode)}</span>
+      </p>
       <div className="chat-gate-foot">
         {error && <span className="chat-gate-error">{error}</span>}
         {onSkip && (
@@ -268,7 +287,7 @@ export function StartGate({ ws, model, onModel, defaultEffort = ORIENT_DEFAULT_E
             Skip
           </Button>
         )}
-        <Button variant="primary" className="chat-gate-go" busy={busy} onClick={() => void start()}>
+        <Button variant="primary" className="chat-gate-go" busy={busy} disabled={!!blocked} title={blocked ? blocked.line : undefined} onClick={() => void start()}>
           Start
         </Button>
       </div>

@@ -80,14 +80,27 @@ describe('the API client', () => {
     }
   })
 
-  test("a message, the Report tab's Write and the Start panel reach the session as events of the one events route", async () => {
+  test("a message reaches main as an event; the Report tab's Write, Start and the refused card's buttons are clicks of their own routes", async () => {
     await client.api.postEvent('w', 'main', { text: 'How many reviews?' })
     await client.api.write('w', 'report', { text: 'Add the review load.', after: 'report:report#p1' })
-    await client.api.start('w', { effort: 'high' } as never)
+    await client.api.start('w', { deck: true, views: false, critique: false, report: true, model: 'claude-opus-5-5', effort: 'max' })
+    await client.api.startIt('w', 'r1')
+    await client.api.again('w', 'r2')
+    await client.api.buildView('w', 'posts', { model: 'claude-opus-5-5', effort: 'high' })
+    await client.checksApi.run('w', 'unverified', 'report')
     expect(calls.map((c) => [c.method, c.url, JSON.parse(String(c.body))])).toEqual([
       ['POST', '/api/ws/w/events', { kind: 'main', payload: { text: 'How many reviews?' } }],
-      ['POST', '/api/ws/w/events', { kind: 'write', payload: { doc: 'report', text: 'Add the review load.', after: 'report:report#p1' } }],
-      ['POST', '/api/ws/w/events', { kind: 'start', payload: { effort: 'high' } }],
+      ['POST', '/api/ws/w/write', { doc: 'report', text: 'Add the review load.', after: 'report:report#p1' }],
+      ['POST', '/api/ws/w/start', { deck: true, views: false, critique: false, report: true, model: 'claude-opus-5-5', effort: 'max' }],
+      ['POST', '/api/ws/w/subagents/start-it', { request: 'r1' }],
+      ['POST', '/api/ws/w/subagents/again', { request: 'r2' }],
+      ['POST', '/api/ws/w/views/posts/build', { model: 'claude-opus-5-5', effort: 'high' }],
+      ['POST', '/api/ws/w/checks/unverified/run', { doc: 'report' }],
     ])
+  })
+
+  test('the routes thimble removed with its headless agents are gone from the client', () => {
+    const names = Object.keys(client.api)
+    for (const gone of ['resumeSession', 'retrySession', 'setSessionMode']) expect(names, gone).not.toContain(gone)
   })
 })

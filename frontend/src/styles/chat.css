@@ -1062,30 +1062,23 @@ button.label-chip:hover {
   user-select: none;
   transition: color var(--dur-base) var(--ease-out);
 }
-/* the permission mode: its name, then the three modes as a track the gate's width */
-.chat-gate-perms {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  font: var(--type-body);
-  color: var(--text-primary);
-}
-/* Bypass chosen: its option and Claude Code's warning under the switcher in the error colour, the one mode of the three
-   that is marked, as Claude Code marks it */
-.chat-gate-perms[data-choice='bypass'] .seg-opt.active {
-  color: var(--status-negative);
-}
-.chat-gate-warn {
-  display: flex;
-  align-items: flex-start;
-  gap: 6px;
-  margin: -4px 0 0;
-  color: var(--status-negative);
-  font: var(--type-body-sm);
-}
 .chat-gate-warn-ico {
   flex: none;
   margin-top: 2px;
+}
+/* the line under the gate's field: how the orientation runs (as a subagent, in main's mode), or why Start is off (no
+   hooks module, plan mode) in the warning's colour */
+.chat-gate-mode {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 0;
+  padding: 0 4px;
+  color: var(--text-tertiary);
+  font: var(--type-body-sm);
+}
+.chat-gate-mode.chat-gate-blocked {
+  color: var(--status-negative);
 }
 .chat-gate-field {
   display: flex;
@@ -1487,12 +1480,6 @@ button.model-line-part[aria-expanded='true'] {
 .chat-perm[data-expired] .chat-perm-head {
   color: var(--text-secondary);
 }
-/* a call auto mode's classifier could not judge: the orientation's switch to Manual or Bypass, under the reason */
-.chat-perm-switch {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
 .chat-perm-acts {
   display: flex;
   align-items: center;
@@ -1559,13 +1546,6 @@ button.model-line-part[aria-expanded='true'] {
   color: var(--text-primary);
 }
 /* the rules the analyst's "don't ask again" added to a session, in mono, wrapping when long */
-/* a session whose process stopped: what happened, then Resume */
-.chat-hold-stopped {
-  flex-direction: row;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-}
 .chat-hold-rule {
   font: 400 var(--text-mono) / 1.35 var(--font-mono);
   overflow-wrap: anywhere;
@@ -1603,46 +1583,6 @@ button.model-line-part[aria-expanded='true'] {
   text-decoration: underline;
   text-underline-offset: 2px;
 }
-/* the orientation's permission mode on its card while it runs (chat/ModeSwitch): its name, then the three modes as a
-   small segmented track, and in Bypass the first sentence of Claude Code's warning */
-.chat-perms {
-  display: flex;
-  flex-basis: 100%;
-  flex-direction: column;
-  gap: 4px;
-  margin: 0 0 6px;
-}
-.chat-perms-row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px 8px;
-}
-.chat-perms-label {
-  font: var(--type-body-sm);
-  color: var(--text-secondary);
-}
-.chat-perms[data-mode='bypass'] .seg-opt.active {
-  color: var(--status-negative);
-}
-.chat-perms-warn {
-  display: flex;
-  align-items: flex-start;
-  gap: 6px;
-  margin: 0;
-  color: var(--status-negative);
-  font: var(--type-body-sm);
-}
-.chat-perms-warn-ico {
-  flex: none;
-  margin-top: 2px;
-}
-.chat-perms-note {
-  margin: 0;
-  color: var(--text-secondary);
-  font: var(--type-body-sm);
-}
-
 /* A failed Anthropic API request (chat/ApiError.tsx): one card on the negative's soft wash, the glyph and what happened,
    the error's words behind a chevron, whether thimble retries, and Retry. A wait that ends by itself takes the
    warning's colours instead. */
@@ -1790,5 +1730,185 @@ button.model-line-part[aria-expanded='true'] {
 }
 .precached-note code {
   font: var(--type-mono);
+  color: var(--text-secondary);
+}
+
+/* -------- thimble's agents as subagents of main -------- */
+/* the orientation's start before its thread exists: Starting…, in the transcript's quiet ink */
+.chat-starting {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-secondary);
+  font: var(--type-body-sm);
+}
+/* a start that did not happen (chat/Refused): one card on the warning's soft wash, the agent named, why on one line,
+   the request in full behind a disclosure, and the kind's buttons */
+.chat-refused {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--status-warning);
+  border-radius: var(--radius-card);
+  background: var(--status-warning-soft);
+  color: var(--text-primary);
+  font: var(--type-body-sm);
+}
+.chat-refused-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font: var(--type-ui-sm);
+  font-weight: 600;
+}
+.chat-refused-ico {
+  flex: none;
+  color: var(--status-warning);
+}
+.chat-refused-why,
+.chat-refused-note,
+.chat-refused-line {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.chat-refused-note,
+.chat-refused-line {
+  color: var(--text-secondary);
+}
+.chat-refused-request summary {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  cursor: pointer;
+  color: var(--text-secondary);
+}
+.chat-refused-text {
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+.chat-refused-prompt {
+  max-height: 160px;
+  margin: 4px 0 0;
+  padding: 6px 8px;
+  overflow: auto;
+  border-radius: var(--radius-ui);
+  background: var(--surface-card);
+  font: 400 var(--text-mono) / 1.4 var(--font-mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.chat-refused-acts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+/* what a subagent's card says under its steps: the critic's wait, the terminal, why it stopped */
+.chat-sub-notes {
+  display: flex;
+  flex-basis: 100%;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+}
+.chat-sub-notes p {
+  margin: 0;
+  font: var(--type-body-sm);
+  color: var(--text-tertiary);
+  overflow-wrap: anywhere;
+}
+.chat-sub-paused {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-secondary) !important;
+}
+.chat-sub-stopped {
+  flex-basis: 100%;
+  color: var(--text-secondary) !important;
+}
+/* the plain-claude warning at the top of the chat (shell/UnfencedBanner) */
+.chat-unfenced {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 0 8px 6px;
+  padding: 8px 10px;
+  border: 1px solid var(--status-negative);
+  border-radius: var(--radius-card);
+  background: var(--status-negative-soft);
+  color: var(--text-primary);
+  font: var(--type-body-sm);
+  overflow-wrap: anywhere;
+}
+.chat-unfenced-ico {
+  flex: none;
+  margin-top: 2px;
+  color: var(--status-negative);
+}
+/* in place of the composer: an orientation an earlier session or version ran, which takes no message here */
+.chat-continue {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: var(--radius-card);
+  background: var(--surface-card);
+  box-shadow: 0 0 0 1px rgba(var(--ink-rgb), 0.1);
+  color: var(--text-secondary);
+  font: var(--type-body-sm);
+  overflow-wrap: anywhere;
+}
+.chat-continue-ico {
+  flex: none;
+  margin-top: 2px;
+}
+/* a request of one of thimble's agents, which the terminal answers: no buttons, the line says where */
+.chat-perm-terminal .chat-perm-why {
+  color: var(--text-primary);
+}
+/* a follow-up that was not passed on: the reason, Send again, and the message */
+.chat-not-passed {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.chat-not-passed-text {
+  margin: 0;
+  padding-left: 12px;
+  border-left: 2px solid var(--border-subtle);
+  color: var(--text-secondary);
+  font: var(--type-body-sm);
+  overflow-wrap: anywhere;
+}
+.chat-by {
+  margin-bottom: 2px;
+}
+/* a view chip's state word (queued with the pool, building, repair n of 2, stopped, didn't start) and its Build menu */
+.view-chip-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.view-chip-word {
+  color: var(--text-tertiary);
+  font: var(--type-body-sm);
+  white-space: nowrap;
+}
+button.view-chip-values {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 0 2px;
+  border: 0;
+  background: transparent;
+  color: var(--text-tertiary);
+  font: var(--type-body-sm);
+  white-space: nowrap;
+  cursor: pointer;
+}
+button.view-chip-values:hover,
+button.view-chip-values[aria-expanded='true'] {
   color: var(--text-secondary);
 }

@@ -1,6 +1,7 @@
 // The permission requests waiting for the analyst from every session, and the plain words the permission card says
 // about each: who asks, what it asks to do, and why. Main's requests are the analyst's own Claude Code session's
-// prompts, relayed by the shim; every other session thimble started asks through its chat's meta (backend
+// prompts, relayed by its PermissionRequest hook, and so are those of thimble's agents, its subagents, which Claude
+// Code asks in the terminal (`terminal`); a code ticket's session asks through its chat's meta (backend
 // agent_session.ask). Pure.
 import type { ChatMeta, PermissionRequest } from '../lib/types'
 import { toolDisplayName } from './model'
@@ -59,7 +60,6 @@ const ASKS_TO: Readonly<Record<string, string>> = {
   Agent: 'start an agent',
   Task: 'start an agent',
   ThimbleCode: "change thimble's own code",
-  ThimblePackage: 'install a package',
 }
 
 /** What the request asks to do, in words (run a command); another tool is named (use thimble's add_card). Pure. */
@@ -74,6 +74,8 @@ export function asksTo(tool: string): string {
 export function askedBy(ask: PendingAsk, metas: ReadonlyMap<string, ChatMeta>, labels: ReadonlyMap<string, string> = new Map()): string {
   if (ask.chat === 'main') {
     const id = ask.request.chat
+    const own = id ? metas.get(id) : undefined
+    if (own?.route === 'subagent') return subagentName(own)
     const from = id ? labels.get(id) : null
     if (from && from !== 'main') return from === 'orient' || from.startsWith('orient-') ? 'The orientation' : `The thread ${from}`
     // a subagent of main, or (in a chat an earlier build left) one an orientation run as main's subagent started, which
@@ -96,6 +98,15 @@ export function askedBy(ask: PendingAsk, metas: ReadonlyMap<string, ChatMeta>, l
     return parent && threadKind(parent) === 'orient' ? `The orientation's ${title}` : `The step ${title}`
   }
   return labels.get(ask.chat) ?? 'A session'
+}
+
+/** One of thimble's agents run as a subagent of main, as the card names it: the orientation, the writer of a document,
+ * a report check. Pure. */
+export function subagentName(m: Pick<ChatMeta, 'role' | 'title' | 'doc'>): string {
+  if (m.role === 'orient') return 'The orientation'
+  if (m.role === 'writer') return m.doc ? `The writer of the ${m.doc}` : 'The report writer'
+  if (m.role === 'check') return m.title ? `The ${m.title} check` : 'A report check'
+  return m.title ? `The ${m.title}` : "One of thimble's agents"
 }
 
 /** A dev chat's task as its title names it (backend dev: `view: <name>`, `ticket #<n>: <title>`): `view <name>`,
@@ -129,22 +140,16 @@ export function classifierDown(p: Pick<PermissionRequest, 'refused'>): boolean {
   return !!p.refused && CLASSIFIER_DOWN.test(p.refused)
 }
 
-/** The chat whose permission mode the card can switch out of Auto for this request: the asking session's own, when it
- * runs one (its card's switcher is ModeSwitch); null for main and the dev agent's sessions. Pure. */
-export function modeChat(ask: PendingAsk, metas: ReadonlyMap<string, ChatMeta>): string | null {
-  const m = metas.get(ask.chat)
-  return ask.chat !== 'main' && m?.permission_mode ? ask.chat : null
-}
-
-/** Why thimble's config sends a call to the analyst whatever the session's permission mode (PermissionRequest.asked_by). */
+/** Why main's fence sends a call to the analyst whatever the session's permission mode (PermissionRequest.asked_by). */
 const ASKED_BY: Readonly<Record<string, string>> = {
   config: "thimble asks before an agent changes thimble's config, in every permission mode.",
   data: 'thimble asks before an agent changes your files, in every permission mode.',
+  web: 'Your settings ask before any agent fetches a web page or searches the web.',
   installs: 'thimble asks before an agent installs software, in every permission mode.',
   commands: 'thimble asks about each command this agent runs outside its sandbox.',
 }
 
-/** The modes an orientation runs in, as its switcher names them. */
+/** The modes a code ticket's session runs in, as the settings name them. */
 const MODE_NAMES: Readonly<Record<string, string>> = { manual: 'Manual', auto: 'Auto', bypass: 'Bypass' }
 
 /** The line that says when an unanswered request is declined, '' for one that names no wait. Pure. */
@@ -152,12 +157,31 @@ function declineLine(seconds: number | null | undefined): string {
   return seconds ? ` If nobody answers within ${waitWords(seconds)}, it is declined.` : ''
 }
 
-/** Why the session asks, in one line: thimble's own reason when it gives one (a code ticket's question), auto mode
- * could not judge the call or left it to the analyst, the session runs in Manual, or main's prompt also waits in the
- * terminal, where the first answer counts; then when an unanswered request is declined. For a request declined
- * unanswered, that it was, and for one of the session's own calls that the agent went on without it. Pure. */
-export function askWhy(ask: PendingAsk, metas: ReadonlyMap<string, ChatMeta>): string {
+/** Main's own request: Claude Code's dialog stays open in the terminal while the hook waits, and either answers (U6a). */
+export const MAIN_ASKS_LINE = 'Answer here or in your terminal.'
+
+/** Where a request of one of thimble's agents is answered: in the terminal, which asks at once (U6b). `who` is the
+ * agent as the card names it ("The orientation"); `plugin` says Claude Code names it as from thimble's plugin, for an
+ * agent a click started (spike T2d). Pure. */
+export function terminalAsksLine(who: string, plugin: boolean): string {
+  const name = who.replace(/^The /, 'the ')
+  return `${who} asks in your terminal. Answer it there (↓ to ${name} in the agent tray if it is not shown).${plugin ? ' Claude Code shows it as from the thimble plugin.' : ''}`
+}
+
+/** Why the session asks, in one line: main's fence's rule when one sends it, then where it is answered (main's in the
+ * browser or the terminal, a subagent's in the terminal). A code ticket's request keeps its own reasons: thimble's own
+ * (`why`), auto mode could not judge the call or left it to the analyst, the session runs in Manual, then when an
+ * unanswered request is declined; for one declined unanswered, that it was. Pure. */
+export function askWhy(ask: PendingAsk, metas: ReadonlyMap<string, ChatMeta>, labels: ReadonlyMap<string, string> = new Map()): string {
   const p = ask.request
+  const rule = p.asked_by && (ask.chat === 'main' || p.asked_by !== 'web') ? ASKED_BY[p.asked_by] : ''
+  if (ask.chat === 'main') {
+    if (p.terminal) {
+      const asker = p.chat ? metas.get(p.chat) : undefined
+      return [rule, terminalAsksLine(askedBy(ask, metas, labels), asker?.started_by === 'click')].filter(Boolean).join(' ')
+    }
+    return [rule, MAIN_ASKS_LINE].filter(Boolean).join(' ')
+  }
   if (p.expired) return `Nobody answered ${p.wait_s ? `within ${waitWords(p.wait_s)}` : 'in time'}, so thimble declined it${p.why ? '' : ' and the agent went on without it'}.`
   if (p.why) return p.why
   if (classifierDown(p)) {
@@ -165,12 +189,8 @@ export function askWhy(ask: PendingAsk, metas: ReadonlyMap<string, ChatMeta>): s
     return `Auto mode could not judge this call: Claude Code's classifier was unavailable${tries}.${declineLine(p.deny_after_s)}`
   }
   if (p.refused) return `Auto mode did not allow it on its own: ${p.refused.replace(/[.\s]+$/, '')}.${declineLine(p.wait_s)}`
-  if (ask.chat === 'main') return 'Claude Code asks in your terminal too. The first answer counts.'
-  const m = metas.get(ask.chat)
-  const name = m?.permission_mode ?? p.mode
+  const name = p.mode ?? (metas.get(ask.chat) as { permission_mode?: string } | undefined)?.permission_mode
   const mode = name ? MODE_NAMES[name] : null
-  const why =
-    (p.asked_by && ASKED_BY[p.asked_by]) ||
-    (mode === 'Manual' ? 'It runs in Manual, which asks before each call.' : mode === 'Auto' ? 'Auto mode asks you about this call.' : 'Its permission mode asks for this call.')
+  const why = rule || (mode === 'Manual' ? 'It runs in Manual, which asks before each call.' : mode === 'Auto' ? 'Auto mode asks you about this call.' : 'Its permission mode asks for this call.')
   return `${why}${declineLine(p.wait_s)}`
 }
