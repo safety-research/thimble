@@ -399,7 +399,9 @@ def _current(c: str, cid: str, doc: str) -> _Active | None:
     rec = ((read(c, cid) or {}).get("runs") or {}).get(doc)
     live = isinstance(rec, dict) and rec.get("status") == "running" and bool(rec.get("run"))
     if act is not None and not act.ended and (not live or rec.get("run") != act.run):
-        if act.task is None or act.task.done():  # not a start this process has under way
+        under_way = act.task is not None and not act.task.done()  # a start this process has under way
+        unsaved = not act.agent and not act.request and act.task is None  # one start_run makes before its record
+        if not under_way and not unsaved:
             _active.pop((c, cid, doc), None)
             if act in _queue:
                 _queue.remove(act)
@@ -858,9 +860,13 @@ def _finish(act: _Active, status: str, summary: str) -> None:
         rec = ((check or {}).get("runs") or {}).get(act.doc)
         if check is None or rec is None or rec.get("run") != act.run:
             return  # a newer run took its place
+        doc = _doc(c, act.doc)
+        # the run's comments as the document holds them: in terminal mode the shim takes them, in another process
+        act.comments = max(act.comments, sum(1 for cm in (doc or {}).get("comments") or []
+                                             if isinstance(cm, dict) and cm.get("check") == act.check
+                                             and cm.get("run") == act.run))
         rec.update(status=status, ended=_now(), summary=last[:SUMMARY_CHARS], comments=act.comments)
         rec.pop("waiting", None)
-        doc = _doc(c, act.doc)
         if status == "done":
             ps = passages(act.doc, doc)
             covered = set(act.covered)

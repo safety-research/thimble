@@ -280,3 +280,26 @@ async def test_in_terminal_mode_each_process_takes_up_a_run_from_the_check_s_fil
     _writer_done()  # a writer's end starts the shown checks on what they have not seen, this one among them
     await _until(lambda: _run("judgment")["status"] == "running" and _run("judgment")["run"] != shim[
         (CORPUS, "judgment", "report")].run, "the writer's end started no run of judgment")
+
+
+async def test_in_terminal_mode_a_run_counts_the_comments_the_shim_took(doc, bridge, monkeypatch):
+    """A writer's end starts a check in a hook's process, which holds the run until its agent ends; the agent's comments
+    go through the shim, another process. The run's end counts the comments its document holds (live check T6: a
+    check that left a comment recorded none)."""
+    from terminal_fakes import write_launch
+
+    write_launch(config.workspace_dir(CORPUS))
+    await _write()
+    hook = await _started("judgment")  # the hook's process holds it
+    held = dict(checks._active)
+    key = checks.session_key("judgment", "report")
+    monkeypatch.setattr(checks, "_active", {})  # the shim takes the agent's comment
+    d = report_types.read_doc(CORPUS, investigation.MAIN, "report")
+    sid = report_types.all_sentences(d)[0]["id"]
+    sf.add_caller(config.workspace_dir(CORPUS), "toolu_c1", hook.agent, "thimble:check")
+    res = await tools.call(CORPUS, "add_comment", {"ref": f"report:report#{sid}", "text": "No card shows this."},
+                           session=key, tool_use_id="toolu_c1")
+    assert not res.is_error, res.text
+    monkeypatch.setattr(checks, "_active", held)  # back in the hook's process: the agent ends
+    subagents.run_ended(CORPUS, hook.agent, "done", "Commented on 1 passage.", source="handback")
+    assert (_run("judgment")["status"], _run("judgment")["comments"]) == ("done", 1)
