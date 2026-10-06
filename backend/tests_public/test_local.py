@@ -193,6 +193,13 @@ async def test_state_gives_what_the_routes_give(term):
     assert row["answers"] == 2 and row["unread"] is True
     assert (await local.state(CORPUS, "files"))[0]["path"]
     assert [f["path"] for f in (await local.state(CORPUS, "files", ["agents"]))["files"]][0] == "agents/agent-01.jsonl"
+    # a file: a page of its records from --start, as GET /source gives it, for the renderer's file view
+    page = await local.state(CORPUS, "files", ["board.jsonl"])
+    assert page["path"] == "board.jsonl" and page["start"] == 1 and page["records"] and page["total_lines"] >= 1
+    later = await local.state(CORPUS, "files", ["board.jsonl", "--start", "2"])
+    assert later["start"] == 2 and len(later["records"]) == len(page["records"]) - 1
+    with pytest.raises(local.StateError):
+        await local.state(CORPUS, "files", ["../outside.txt"])
     got = await local.state(CORPUS, "resolve", [json.dumps(["board.jsonl#L1", {"ref": "board.jsonl#L1", "value": "REVIEW WANTED"},
                                                            {"ref": "board.jsonl#L1", "value": "nope 4242"}, "gone.jsonl#L1"])])
     assert [g["state"] for g in got] == ["ok", "ok", "differs", "missing"]

@@ -271,11 +271,12 @@ def ui_records(c: str, after: int = 0) -> list[dict[str, Any]]:
 
 
 STATE_USAGE = ("thimble state <surface> --cwd <dir> [args]; surfaces: home, cards [--since <iso>], card <id>, labels, "
-               "label <id>, docs, doc <slug>, threads, thread <id> [--after <n>], agents [--tail <n>], files [path], "
-               "resolve <refs json>, ui [--after <n>]")
+               "label <id>, docs, doc <slug>, threads, thread <id> [--after <n>], agents [--tail <n>], "
+               "files [path] [--start <n>], resolve <refs json>, ui [--after <n>]")
 
 
 LABEL_ROWS = 3  # records per value `state label` gives with their words (rows)
+FILE_PAGE = 200  # lines of a file `state files <file>` gives, the renderer's page (its earlier and later steps)
 
 
 class StateError(Exception):
@@ -476,9 +477,19 @@ async def _agents(c: str, args: list[str], pos: list[str]) -> Any:
 
 
 async def _files(c: str, args: list[str], pos: list[str]) -> Any:
+    """Every source (GET /sources); with a folder, its own entries (?path=&depth=1); with a file, a page of its records
+    from `--start` (GET /source, FILE_PAGE lines), which the renderer's file view pages through."""
     from . import corpus  # noqa: PLC0415
 
     if pos:
+        rel = pos[0].strip().strip("/")
+        try:
+            is_file = config.safe_corpus_path(config.corpus_dir(c), rel or ".").is_file()
+        except ValueError as e:
+            raise StateError(str(e)) from None
+        if is_file:
+            start = max(1, _int(_flag(args, "--start"), 1, "--start"))
+            return await asyncio.to_thread(corpus._page, config.corpus_dir(c), rel, start, start + FILE_PAGE - 1)
         return await asyncio.to_thread(corpus.get_sources, c, 0, pos[0], 1)
     return await asyncio.to_thread(corpus.get_sources, c)
 
