@@ -1,15 +1,16 @@
-"""No agent thimble starts leaves anything in the corpus folder. Claude Code's Bash sandbox makes a folder of its own in
-the folder a sandboxed command starts in, so every agent's Claude Code session runs in a folder of its own with the
-corpus added, and each of its Bash commands starts there again: a `cd` into the corpus does not carry over to the next
-command (agent_session.HOME_SHELL_ENV).
+"""No agent thimble starts leaves anything in the corpus folder. thimble's own agents are subagents of main, whose fence
+keeps the corpus read-only (cli.main_fence), and write in work folders outside it (subagents.write_dirs). Claude Code's
+Bash sandbox makes a folder of its own in the folder a sandboxed command starts in, so every `claude -p` session thimble
+starts itself (a view build's, an extension's program's) runs in a folder of its own with the corpus added, and each of
+its Bash commands starts there again: a `cd` into the corpus does not carry over to the next command
+(agent_session.HOME_SHELL_ENV).
 
-The tests marked live run sandboxed Bash commands, on the user's own `claude`, in each kind of agent session as thimble
-starts it, and check that a copy of a corpus is left as it was. They need THIMBLE_LIVE_CLAUDE=1, a logged-in `claude`
-and Claude Code's sandbox. The card and label kernels need no model and run wherever their sandbox runs."""
+The tests marked live run sandboxed Bash commands, on the user's own `claude`, in those sessions as thimble starts them,
+and check that a copy of a corpus is left as it was. They need THIMBLE_LIVE_CLAUDE=1, a logged-in `claude` and Claude
+Code's sandbox. The card and label kernels need no model and run wherever their sandbox runs."""
 from __future__ import annotations
 
 import asyncio
-import inspect
 import json
 import os
 import shutil
@@ -27,19 +28,6 @@ LIVE = os.environ.get("THIMBLE_LIVE_CLAUDE") == "1"
 REAL_CLAUDE = shutil.which("claude")  # read at import, before the suite's stand-in goes first on PATH
 LIVE_MODEL = os.environ.get("THIMBLE_LIVE_MODEL") or "claude-haiku-4-5"
 LIVE_TIMEOUT_S = 300
-STAND_IN = r'''
-import json, os, sys
-from pathlib import Path
-argv = sys.argv[1:]
-out = Path(os.environ["STAND_IN_DIR"])
-(out / "launch.json").write_text(json.dumps({"argv": argv, "cwd": os.getcwd()}))
-sys.stdin.read()
-sid = argv[argv.index("--session-id") + 1]
-proj = Path(os.environ["CLAUDE_CONFIG_DIR"]) / "projects" / "-work"
-proj.mkdir(parents=True, exist_ok=True)
-(proj / f"{sid}.jsonl").write_text(json.dumps({"type": "assistant", "message": {"content": [{"type": "text", "text": "done"}]}}) + "\n")
-print(json.dumps({"type": "result", "subtype": "success", "is_error": False, "result": "done"}), flush=True)
-'''
 
 
 @pytest.fixture()
@@ -49,9 +37,7 @@ def corpus(tmp_path, monkeypatch, mini_dir) -> Path:
     shutil.copytree(mini_dir, data / CORPUS)
     (data / CORPUS / "manifest.json").write_text(json.dumps({"name": CORPUS}))
     monkeypatch.setattr(config, "DATA_DIR", data.resolve())
-    agent_session._runs.clear()
     yield (data / CORPUS).resolve()
-    agent_session._runs.clear()
 
 
 def snapshot(root: Path) -> dict[str, tuple[int, int]]:
@@ -71,34 +57,17 @@ def _added(argv: list[str]) -> list[str]:
     return [argv[i + 1] for i, a in enumerate(argv) if a == "--add-dir"]
 
 
-def test_every_agent_s_session_runs_in_a_folder_of_its_own_outside_the_corpus(corpus):
-    """agent_session.start takes no session without its work folder, and the work folder of every kind of agent lies
-    outside the corpus folder."""
-    assert inspect.signature(agent_session.start).parameters["work"].default is inspect.Parameter.empty
+def test_every_agent_s_work_folder_lies_outside_the_corpus(corpus):
+    """The work folder of every kind of agent, and every folder main's Bash may write, lies outside the corpus folder."""
+    from app import subagents
+
+    for folder in subagents.write_dirs(CORPUS):
+        assert not folder.resolve().is_relative_to(corpus), folder
     folders = {"orientation": orient_session.work_dir(CORPUS), "critic": critique_session.work_dir(CORPUS, "c1"),
                "writer": write_session.work_dir(CORPUS, "report"), "check": checks.work_dir(CORPUS, "k1", "report"),
                "view build": dev.view_work_dir(CORPUS, "posts")}
     for kind, folder in folders.items():
         assert not folder.resolve().is_relative_to(corpus), kind
-
-
-async def test_the_orientation_starts_in_its_work_folder_and_each_bash_command_starts_there(corpus, tmp_path, monkeypatch):
-    script, out = tmp_path / "claude", tmp_path / "stand-in"
-    script.write_text(f"#!{sys.executable}\n{STAND_IN}")
-    script.chmod(0o755)
-    out.mkdir()
-    monkeypatch.setattr(agent_session, "CLAUDE_BIN", str(script))
-    monkeypatch.setattr(agent_session, "POLL_S", 0.05)
-    monkeypatch.setenv("STAND_IN_DIR", str(out))
-    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude-config"))
-    monkeypatch.setenv("THIMBLE_SANDBOX", "0")
-    monkeypatch.setitem(userconf.DEFAULTS["sandbox"], "enforce", False)
-    run = await orient_session.start(CORPUS, "")
-    await asyncio.wait_for(run.task, 10)
-    launch = json.loads((out / "launch.json").read_text())
-    assert Path(launch["cwd"]).resolve() == orient_session.work_dir(CORPUS).resolve()
-    assert str(corpus) in _added(launch["argv"])
-    assert _settings(launch["argv"])["env"][agent_session.HOME_SHELL_ENV] == "1"
 
 
 def test_a_view_build_runs_in_its_own_folder_with_the_view_s_folder_and_the_corpus_added(corpus, monkeypatch):
@@ -221,34 +190,6 @@ def _bash_in(argv: list[str], folder: Path, env: dict[str, str], corpus: Path) -
     assert len(ran) >= 3 and f"cd {corpus}" in ran[0][0], (ran, proc.stdout[-2000:], proc.stderr[-2000:])
     assert ran[1][1].strip() == str(folder.resolve()), ran
     assert snapshot(corpus) == before, sorted(set(snapshot(corpus)) ^ set(before))
-
-
-async def _launch(c: str, key: str, agent: str, work: Path, unasked: bool, monkeypatch) -> tuple[list[str], Path, dict]:
-    """The argv, folder and environment agent_session.start gives the session `key` of the agent row `agent`."""
-    got: dict = {}
-
-    async def capture(argv, folder, env):
-        got.update(argv=argv, folder=folder, env=env)
-        raise RuntimeError("captured")
-
-    monkeypatch.setattr(agent_session, "_exec", capture)
-    with pytest.raises(RuntimeError, match="captured"):
-        await agent_session.start(c, key, role="step", title=key, agent_args=[], effort="low",
-                                  settings=agent_session.settings_json("low"), prompt="", agent_type=key, work=work,
-                                  agent=agent, unasked=unasked)
-    return got["argv"], got["folder"], got["env"]
-
-
-@pytest.mark.parametrize("kind", ["orientation", "critic", "writer", "check"])
-async def test_live_an_agent_session_s_sandboxed_bash_leaves_the_corpus_as_it_was(kind, corpus, monkeypatch):
-    if why := _live_ok():
-        pytest.skip(why)
-    row, work, unasked = {"orientation": ("orient", orient_session.work_dir(CORPUS), False),
-                          "critic": ("critic", critique_session.work_dir(CORPUS, "c1"), True),
-                          "writer": ("writer", write_session.work_dir(CORPUS, "report"), True),
-                          "check": ("checks", checks.work_dir(CORPUS, "k1", "report"), True)}[kind]
-    argv, folder, env = await _launch(CORPUS, f"live-{kind}", row, work, unasked, monkeypatch)
-    await asyncio.to_thread(_bash_in, argv, folder, env, corpus)
 
 
 def test_live_a_view_build_s_sandboxed_bash_leaves_the_corpus_as_it_was(corpus):

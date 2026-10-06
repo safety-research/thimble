@@ -4,7 +4,7 @@ given to the view's check route and prints the server's answer.
 The session's Bash sandbox has no network (on Linux a network namespace of its own), so this one command is excluded
 from the sandbox by its exact prefix (`sandbox.excludedCommands`). curl is not excluded instead because it can reach any
 URL or write files; this script only posts to a view's check route on 127.0.0.1. The post proves it holds the token in
-the server.json of thimble's home `--home` (app/call_ref.py's server) as the plugin's hooks do, since the server refuses
+the server.json of thimble's home `--home` (app/permission_hook.py's server) as the plugin's hooks do, since the server refuses
 a write that proves neither the token nor the analyst's cookie (hook_auth.LocalWriteGuard).
 
 A command that runs inside the sandbox, as one after `cd` or in a pipeline does, reaches neither the server nor
@@ -36,11 +36,11 @@ POLL_S = 0.25
 
 
 def proof(home: str = "") -> dict[str, str]:
-    """The headers that prove the token in `home`'s server.json (call_ref.server and sign, loaded from the file beside
-    this one, as this runs as a script outside the app package); {} when there is no token to prove, and the server
-    refuses."""
+    """The headers that prove the token in `home`'s server.json (permission_hook.server and sign, loaded from the file
+    beside this one, as this runs as a script outside the app package); {} when there is no token to prove, and the
+    server refuses."""
     try:
-        spec = importlib.util.spec_from_file_location("thimble_call_ref", Path(__file__).with_name("call_ref.py"))
+        spec = importlib.util.spec_from_file_location("thimble_permission_hook", Path(__file__).with_name("permission_hook.py"))
         if spec is None or spec.loader is None:
             return {}
         mod = importlib.util.module_from_spec(spec)

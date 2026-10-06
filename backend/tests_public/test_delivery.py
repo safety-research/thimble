@@ -188,42 +188,6 @@ def test_a_queued_message_leaves_the_statusline_on_the_monitor_route_and_when_an
     assert (CORPUS, SID) not in events._notices
 
 
-def test_a_tray_entry_claude_code_refuses_is_asked_for_once_and_its_line_prints_once(monkeypatch):
-    """Claude Code may refuse main's Agent call that shows one of thimble's agents in the agent tray, as auto mode can:
-    thimble then asks main no more for that session, while its own refusal of a second tray entry is no such refusal.
-    Asks that wait for the same turn print their line once."""
-    from app import tray
-
-    _subscribe(SID)
-    lv = session.attach(CORPUS, SID, _cwd(), None)
-    monkeypatch.setattr(tray, "_save", lambda c: None)
-    e = tray.Entry(CORPUS, "orient", tray.name_of(CORPUS, "orient"), "sid-o", "chat-o", "orient", "/work/o")
-    monkeypatch.setitem(tray._entries, (CORPUS, "orient"), e)
-    monkeypatch.setattr(tray, "_loaded", {CORPUS})
-    call = {"subagent_type": "thimble:orient", "description": e.name, "run_in_background": True,
-            "prompt": str(tray.proxy_file(CORPUS, "orient"))}
-    assert tray.ask_main_for_proxy(CORPUS, "orient") and tray.ask_main_for_proxy(CORPUS, "orient")
-
-    async def deliver() -> None:
-        for _ in range(2):
-            got = await events.pull_route(Req(), cwd=_cwd(), session=SID, wait=1)
-            await events.ack_route(events.AckBody(cwd=_cwd(), session=SID, id=got["id"], terminal=True))
-
-    asyncio.run(deliver())
-    said = asyncio.run(events.held_route(events.HeldBody(cwd=_cwd(), session=SID)))["terminal"]
-    assert said == f"agent: {e.name}"
-    assert tray.agent_check(CORPUS, call, "tu-1") is None
-    assert tray.agent_check(CORPUS, call, "tu-2"), "a second tray entry while the first starts"
-    for tid, words in (("tu-2", f"{e.name} already shows in the agent tray."), ("tu-1", "Permission denied")):
-        session._tool_use(lv, tid, "Agent", call)
-        session._tool_result(lv, tid, words, is_error=True)
-        assert e.proxy_refused is (tid == "tu-1")
-    assert not tray.ask_main_for_proxy(CORPUS, "orient") and events.pending(CORPUS) == 0
-
-
-# ----------------------------------------------------------------------------- the server: the permission hook
-
-
 def test_the_permission_hook_waits_on_main_s_meta_until_the_browser_answers(monkeypatch, tmp_path):
     monkeypatch.setenv("THIMBLE_HOME", str(tmp_path / "thome"))
     _record_token(tmp_path / "thome", ui_key=UI_KEY)
@@ -445,3 +409,28 @@ def test_the_hooks_do_nothing_without_server_json_or_with_a_server_that_cannot_p
     finally:
         stand.close()
     assert json.loads(r.stdout)["hookSpecificOutput"]["decision"] == {"behavior": "allow"} and stand.unproven == 0
+
+
+def test_the_held_hook_lets_each_hand_back_through_and_still_delivers_the_held_events(tmp_path):
+    """Q2: the held hook never blocks a prompt. A subagent's hand-back in auto mode (the `isMeta` row with
+    `origin.kind: "peer"`, a plugin-started agent's included) and a later run's `<task-notification>` in default mode reach
+    main as Claude Code sends them, with the events held for main added as context, as for any prompt."""
+    handbacks = [
+        "[Subagent hand-back] The orientation (agent a1f0c2d3e4b5a6f7) handed back. The report follows:\n  Done: 14 cards.",
+        "<task-notification>\n<task-id>a1f0c2d3e4b5a6f7</task-id>\n<status>completed</status>\n"
+        "<summary>Agent \"orientation: the corpus\" completed</summary>\n<result>Revised the deck.</result>\n"
+        "</task-notification>",
+    ]
+    stand = _Stand([], held=(200, {"text": "MEANWHILE\n[kind=\"report\"] the report was written", "terminal": ""}))
+    try:
+        for prompt in handbacks:
+            inp = {"session_id": SID, "cwd": "/data/mini", "hook_event_name": "UserPromptSubmit", "prompt": prompt}
+            r = _watch(tmp_path, stand.port, inp, "--held")
+            out = json.loads(r.stdout)
+            assert r.returncode == 0 and "decision" not in out and "continue" not in out, prompt
+            assert out["hookSpecificOutput"]["additionalContext"].startswith("MEANWHILE"), "held events still delivered"
+        sub = _watch(tmp_path, stand.port, {**inp, "agent_id": "a1f0c2d3e4b5a6f7"}, "--held")
+        assert sub.returncode == 0 and sub.stdout == "", "a subagent's prompt gets nothing"
+    finally:
+        stand.close()
+    assert [p for _, p, _ in stand.seen].count("/api/events/held") == 2
