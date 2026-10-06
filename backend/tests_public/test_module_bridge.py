@@ -19,6 +19,8 @@ import pytest
 import app
 from app import cc_plugin, config, hook_auth, module_bridge, session, tools
 
+_real_opened = module_bridge._opened  # the autouse fixture stands in for it
+
 CORPUS = "mini"
 MAIN = "11111111-1111-4111-8111-111111111111"
 NEW = "22222222-2222-4222-8222-222222222222"
@@ -34,6 +36,7 @@ def _fresh(monkeypatch, workspaces_tmp):
     monkeypatch.setattr(module_bridge, "_loop", None)
     monkeypatch.setattr(session, "_live", {})  # no main another test left behind
     monkeypatch.setattr(cc_plugin, "main_fenced", lambda c: True, raising=False)
+    monkeypatch.setattr(module_bridge, "_opened", lambda c, sid: True)  # main's session attached (/thimble ran)
     monkeypatch.setattr(cc_plugin, "managed", lambda environ=None: None)
     monkeypatch.setattr(module_bridge, "HELLO_HOLD_S", 0.6)
     real = tools.hint
@@ -171,6 +174,33 @@ async def test_a_hello_from_a_session_that_is_not_the_workspace_s_fenced_main_is
     # a folder that is no workspace: 404, and the module asks again later
     r = await client.post("/api/module/hello", json={"cwd": "/nowhere", "session": MAIN}, headers=plugin_headers())
     assert r.status_code == 404
+
+
+async def test_a_hello_before_main_s_session_opened_thimble_is_asked_again_not_refused(client, plugin_headers,
+                                                                                         monkeypatch):
+    """At session start the module says hello before the launcher's first prompt, /thimble, attaches main, so main's
+    `claude` process is not known yet (or only the last main's is): the hello waits (409) rather than being refused as
+    unfenced, which would leave the module idle for the whole session."""
+    _launch()
+    monkeypatch.setattr(module_bridge, "_opened", _real_opened)
+    monkeypatch.setattr(cc_plugin, "main_fenced", lambda c: session.main_pid(c) == 4242, raising=False)
+    monkeypatch.setattr(session, "main_pid", lambda c: None)
+    r = await Module(client, plugin_headers).hello()
+    assert r.status_code == 409 and r.json()["detail"] == module_bridge.NOT_OPEN
+    # the last main is still the one the server follows, its process gone: still asked again
+    monkeypatch.setattr(session, "current", lambda c: types.SimpleNamespace(sid=NEW))
+    monkeypatch.setattr(session, "main_pid", lambda c: 999)
+    r = await Module(client, plugin_headers).hello()
+    assert r.status_code == 409 and r.json()["detail"] == module_bridge.NOT_OPEN
+    # /thimble attached main and its shim named its process
+    monkeypatch.setattr(session, "current", lambda c: types.SimpleNamespace(sid=MAIN))
+    monkeypatch.setattr(session, "main_pid", lambda c: 4242)
+    assert (await Module(client, plugin_headers).hello()).status_code == 200
+    assert "idle" not in _registry()["module"], "the wait left no idle reason behind"
+    # /clear moved main within its process: the new id's hello is accepted once --rekey names it, before the server's
+    # follower moves to it
+    module_bridge.rekey(CORPUS, MAIN, CHILD)
+    assert (await Module(client, plugin_headers, CHILD).hello()).status_code == 200
 
 
 async def test_without_a_session_in_launch_json_main_is_the_session_thimble_made_main(client, plugin_headers,

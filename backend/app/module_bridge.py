@@ -12,8 +12,10 @@ so a process that holds the port can neither hand the module requests nor read t
 A hello is accepted only from main's session: the one launch.json names (while it names none, the one /thimble made
 main), or the one `--rekey` moved it to after a /clear or an in-session /resume (rekey), in either order, since the
 module sees the new id within tens of milliseconds of the SessionStart hook (spike V2): a hello for an id that is not
-main yet is held up to HELLO_HOLD_S for a rekey that names it. Main must also run inside thimble's fence (cc_plugin.main_fenced), so a THIMBLE_LAUNCHED that a child session
-inherited gets no requests. The long poll hands out requests for that session only, so two mains in one folder never
+main yet is held up to HELLO_HOLD_S for a rekey that names it. Main must also run inside thimble's fence
+(cc_plugin.main_fenced), so a THIMBLE_LAUNCHED that a child session inherited gets no requests; that is read from main's
+command line once main's session has opened thimble (/thimble attached it, _opened), and a hello before then is asked
+again later rather than refused. The long poll hands out requests for that session only, so two mains in one folder never
 take each other's clicks.
 
 `request(c, op, **args)` is how the rest of the server asks (lane B's clicks, follow-ups and stops, lane E's jobs). It
@@ -93,6 +95,11 @@ NOT_ANSWERING = "Your Claude Code session's thimble module did not answer"
 NOT_MAIN = "this Claude Code session is not thimble's main session in this folder"
 NOT_FENCED = "main does not run inside thimble's sandbox"
 NO_MAIN = "thimble knows no main session in this folder yet"
+# main's session as launch.json names it has not opened thimble yet: the launcher's first prompt, /thimble, attaches it
+# (session.current) only after the module's first hello at session start, and its `claude` process, whose command line
+# says whether it is fenced, is known only then (session.main_pid)
+NOT_OPEN = "main's session has not opened thimble yet"
+WAIT_REASONS = (NO_MAIN, NOT_OPEN)  # a hello refused for one of these is asked again later (409), never refused for good
 ENDED_STATES = frozenset({"ended", "stopped", "killed", "completed", "failed", "done", "refused", "expired"})
 TYPED_LIVE = frozenset({"", "pending", "claimed"})  # a typed start's request still waiting for main's Agent call
 ROLE_TYPE = re.compile(r"thimble:(.+)")
@@ -275,6 +282,24 @@ def _fenced(c: str) -> bool:
         return False
 
 
+def _opened(c: str, sid: str) -> bool:
+    """Whether main's session `sid` is the one the server follows (session.current: /thimble attached it), or one that
+    session moved to within its `claude` process by /clear or /resume (rekey) before the server followed, and its
+    `claude` process is known (session.main_pid). Until then main's command line cannot be read, so whether main is
+    fenced is not known yet: a server that was already up when `thimble` started main would otherwise read no command
+    line, or the last main's, and refuse the module for the whole session (NOT_OPEN)."""
+    from . import session  # noqa: PLC0415
+
+    cur = session.current(c)
+    if cur is None or not session.main_pid(c):
+        return False
+    moved, seen, at = _bridge(c).rekeyed, set(), cur.sid
+    while at != sid and at in moved and at not in seen:
+        seen.add(at)
+        at = moved[at]
+    return at == sid
+
+
 def _refusal(c: str, sid: str) -> str:
     """'' when a hello from `sid` may be accepted, else why not."""
     main = main_session(c)
@@ -282,6 +307,8 @@ def _refusal(c: str, sid: str) -> str:
         return NO_MAIN
     if sid != main:
         return NOT_MAIN
+    if not _opened(c, sid):
+        return NOT_OPEN
     if not _fenced(c):
         return NOT_FENCED
     return ""
@@ -552,8 +579,9 @@ class HelloBody(BaseModel):
 @router.post("/module/hello")
 async def hello_route(body: HelloBody) -> dict[str, Any]:
     """The module's hello: accepted (200) from main's fenced session, held up to HELLO_HOLD_S for a rekey that names a
-    new main, else refused (403, with the reason recorded for why_not). 404 for a folder that is no workspace yet and
-    409 while no main session is known (before /thimble made one main): the module says hello again later."""
+    new main, else refused (403, with the reason recorded for why_not). 404 for a folder that is no workspace yet, and
+    409 while no main session is known or main's session has not opened thimble yet (WAIT_REASONS: before /thimble
+    attaches it): the module says hello again later."""
     _remember_loop()
     c = _workspace(body.cwd)
     b = _bridge(c)
@@ -566,7 +594,7 @@ async def hello_route(body: HelloBody) -> dict[str, Any]:
             if not _accepted(c, b.session) and b.idle != why:  # a refused stray never unseats main's module
                 b.idle = why
                 _save(c, b)
-            if why == NO_MAIN:
+            if why in WAIT_REASONS:
                 raise HTTPException(409, why)
             log.info("module hello from %s refused in %s: %s", body.session, c, why)
             raise HTTPException(403, why)
