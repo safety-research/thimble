@@ -65,7 +65,7 @@ from typing import Any, Callable
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
-from contract_print import SESSION_VARS, jsonl, other_thimbles, text_of  # noqa: E402
+from contract_print import SESSION_VARS, deliveries, jsonl, other_thimbles  # noqa: E402
 
 HEALTH_WAIT_S = 60.0
 HELLO_WAIT_S = 240.0  # the launcher, Claude Code's start, /thimble and the module's hello
@@ -194,24 +194,30 @@ def last_handback_at(rows: list[dict]) -> float:
 
 
 def main_rows_from(rows: list[dict], agent: str, after: float = 0.0) -> dict[str, list[dict]]:
-    """What main's transcript holds for `agent` at or after `after`: its hand-back rows (origin kind peer), its task
-    notifications (task-id), and main's own calls naming it (TaskStop, SendMessage)."""
+    """What main's transcript holds for `agent` at or after `after`: its hand-backs (origin kind peer) and its task
+    notifications (task-id), each as a user row or a queued_command attachment (contract_print.deliveries), and main's
+    own calls naming it (TaskStop, SendMessage)."""
     out: dict[str, list[dict]] = {"handbacks": [], "notifications": [], "calls": []}
-    for r in rows:
-        if when(r) < after:
-            continue
-        origin = r.get("origin") if isinstance(r.get("origin"), dict) else {}
-        if r.get("type") == "user" and origin.get("kind") == "peer" and origin.get("from") == agent:
+    for origin, text, r in deliveries([r for r in rows if when(r) >= after]):
+        if origin.get("kind") == "peer" and origin.get("from") == agent:
             out["handbacks"].append(r)
-        elif r.get("type") == "user" and origin.get("kind") == "task-notification" and \
-                re.search(rf"<task-id>\s*{re.escape(agent)}\s*</task-id>", text_of((r.get("message") or {}).get("content"))):
+        elif origin.get("kind") == "task-notification" and re.search(rf"<task-id>\s*{re.escape(agent)}\s*</task-id>", text):
             out["notifications"].append(r)
-        elif r.get("type") == "assistant":
+    for r in rows:
+        if r.get("type") == "assistant" and when(r) >= after:
             for b in (r.get("message") or {}).get("content") or []:
                 if isinstance(b, dict) and b.get("type") == "tool_use" and b.get("name") in ("TaskStop", "SendMessage") \
                         and agent in json.dumps(b.get("input") or {}):
                     out["calls"].append(r)
     return out
+
+
+def origin_of(rec: dict) -> dict:
+    """The origin of a user row, or of a queued_command attachment (a delivery that came mid-turn)."""
+    if isinstance(rec.get("origin"), dict):
+        return rec["origin"]
+    att = rec.get("attachment") if isinstance(rec.get("attachment"), dict) else {}
+    return att.get("origin") if isinstance(att.get("origin"), dict) else {}
 
 
 def answered_after(rows: list[dict], at: float) -> bool:
@@ -501,9 +507,9 @@ class Check:
         got = main_rows_from(self.main_rows(), agent)
         hb = got["handbacks"][0] if got["handbacks"] else {}
         answered = answered_after(self.main_rows(), when(hb)) if hb else False
-        self.result("handback", bool(hb) and (hb.get("origin") or {}).get("handback") is True and answered,
-                    f"hand-back rows from {agent} in main: {len(got['handbacks'])}, origin "
-                    f"{ {k: v for k, v in (hb.get('origin') or {}).items() if k != 'body'} }; main answered after it: {answered}")
+        self.result("handback", bool(hb) and origin_of(hb).get("handback") is True and answered,
+                    f"hand-backs from {agent} in main: {len(got['handbacks'])}, the first a {hb.get('type')} record with "
+                    f"origin { {k: v for k, v in origin_of(hb).items() if k != 'body'} }; main answered after it: {answered}")
         self.wait("main idle", self.idle, REPLY_WAIT_S)
 
         # a follow-up through the bridge to the finished agent, on another effort
@@ -559,7 +565,8 @@ class Check:
             sid = module_bridge._bridge(self.c).session
             return sid if sid and sid != old_sid and module_bridge.live(self.c) and module_bridge.main_session(self.c) == sid \
                 else None
-        new_sid = self.wait("the hello after /clear", moved, CLEAR_WAIT_S, 0.5)
+        new_sid = self.wait("the hello after /clear", moved, CLEAR_WAIT_S, 0.25)
+        hello_s = time.time() - cleared_at
         if new_sid:
             self.wait("main's new transcript", lambda: (self.main_path() or Path()).stem == new_sid, REPLY_WAIT_S, 0.5)
             self.info["second_main"] = str(self.main_path() or "")
@@ -569,8 +576,8 @@ class Check:
                                                 subagents.CLICK, description="contract check stop")) if new_sid else {}
         agent2 = str(ans2.get("agentId") or "")
         self.result("clear", bool(new_sid) and bool(agent2),
-                    f"main's session {old_sid} → {new_sid or '(no new hello)'}, the hello {time.time() - cleared_at:.1f} s "
-                    f"after /clear; subagents.json module {rec}; the spawn after it answered {dict(ans2) if ans2 else '(not tried)'}")
+                    f"main's session {old_sid} → {new_sid or '(no new hello)'}, the hello accepted {hello_s:.1f} s "
+                    f"after /clear was typed; subagents.json module {rec}; the spawn after it answered {dict(ans2) if ans2 else '(not tried)'}")
         if not agent2:
             raise RuntimeError("no spawn after /clear")
 

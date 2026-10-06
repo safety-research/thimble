@@ -122,9 +122,21 @@ def _main_rows(second_note=True) -> list[dict]:
     return rows
 
 
+def _queued(rows: list[dict]) -> list[dict]:
+    """The same deliveries as main gets them mid-turn: queued_command attachments."""
+    out = []
+    for r in rows:
+        att = {"type": "queued_command", "prompt": r["message"]["content"], "origin": r["origin"],
+               "commandMode": "task-notification" if r["origin"]["kind"] == "task-notification" else "prompt"}
+        out.append({"type": "attachment", "attachment": att})
+    return out
+
+
 def test_the_notification_reads_as_the_mirror_reads_it():
     ok, detail = cp.check_notification(_main_rows(), "P", "toolu_main", FMT)
     assert ok, detail
+    ok, detail = cp.check_notification(_queued(_main_rows()), "P", "toolu_main", FMT)
+    assert ok and "attachment/queued_command" in detail, detail
     assert not cp.check_notification(_main_rows(), "P", "toolu_other", FMT)[0]
     rows = _main_rows()[1:]  # no hand-back row
     assert not cp.check_notification(rows, "P", "toolu_main", FMT)[0]
@@ -253,6 +265,10 @@ def test_what_main_got_for_an_agent():
                 {"type": "tool_use", "name": "TaskStop", "input": {"task_id": "a1"}}]}}]
     got = cm.main_rows_from(rows, "a1")
     assert [len(got[k]) for k in ("handbacks", "notifications", "calls")] == [1, 1, 1]
+    queued = [{"type": "attachment", "timestamp": _at(10), "attachment": {
+        "type": "queued_command", "commandMode": "prompt", "prompt": "hand-back",
+        "origin": {"kind": "peer", "from": "a1", "handback": True}}}]
+    assert len(cm.main_rows_from(queued, "a1")["handbacks"]) == 1 and cm.origin_of(queued[0])["handback"] is True
     assert not any(cm.main_rows_from(rows, "a1", after=14).values())
     assert cm.answered_after(rows, 12) and not cm.answered_after(rows, 13)
 

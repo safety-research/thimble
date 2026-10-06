@@ -244,23 +244,41 @@ def check_nested_meta(metas: dict[str, dict], parent: str, child: str) -> tuple[
                 f"agentType {meta.get('agentType')!r}, spawnDepth {meta.get('spawnDepth')!r}")
 
 
+def deliveries(main_rows: list[dict]) -> list[tuple[dict, str, dict]]:
+    """What reached main from its agents, as the mirror reads it (session.py): (origin, text, record) of each user row
+    with an origin, and of each queued_command attachment, the shape a hand-back or notification takes when it comes
+    while main's turn goes on."""
+    out = []
+    for r in main_rows:
+        if r.get("type") == "user" and isinstance(r.get("origin"), dict):
+            out.append((r["origin"], text_of((r.get("message") or {}).get("content")), r))
+        att = r.get("attachment") if r.get("type") == "attachment" else None
+        if isinstance(att, dict) and att.get("type") == "queued_command":
+            origin = dict(att.get("origin") or {}) if isinstance(att.get("origin"), dict) else {}
+            if att.get("commandMode") == "task-notification":
+                origin.setdefault("kind", "task-notification")
+            out.append((origin, str(att.get("prompt") or ""), r))
+    return out
+
+
 def check_notification(main_rows: list[dict], parent: str, parent_call: str, fmt: dict) -> tuple[bool, str]:
-    """The parent's hand-back as a user row with origin kind `peer`, `handback` and the hand-back lead, and its task
-    notifications with task-id, status, summary and result as TASK_FIELD_RE reads them; the first run's names the start
-    call's tool-use-id (a later run's has none, spike U10)."""
-    handbacks = [r for r in main_rows if r.get("type") == "user" and (r.get("origin") or {}).get("kind") == "peer"
-                 and (r.get("origin") or {}).get("from") == parent and (r.get("origin") or {}).get("handback")]
-    lead = bool(handbacks) and all(fmt["handback_lead"] in text_of((r.get("message") or {}).get("content")) for r in handbacks)
-    notes = [dict(fmt["task_fields"].findall(text_of((r.get("message") or {}).get("content")))) for r in main_rows
-             if r.get("type") == "user" and (r.get("origin") or {}).get("kind") == "task-notification"]
+    """The parent's hand-back, with origin kind `peer` and the hand-back lead, and its task notifications with task-id,
+    status, summary and result as TASK_FIELD_RE reads them, each as a user row or, mid-turn, a queued_command
+    attachment; the first run's names the start call's tool-use-id (a later run's has none, spike U10)."""
+    got = deliveries(main_rows)
+    handbacks = [(o, t, r) for o, t, r in got if o.get("kind") == "peer" and o.get("from") == parent]
+    lead = bool(handbacks) and all(fmt["handback_lead"] in t for _, t, _ in handbacks)
+    notes = [dict(fmt["task_fields"].findall(t)) for o, t, _ in got if o.get("kind") == "task-notification"]
     notes = [n for n in notes if n.get("task-id", "").strip() == parent]
     wrong = [f"#{i + 1} {k}" for i, n in enumerate(notes) for k in ("status", "summary", "result") if not n.get(k, "").strip()]
     wrong += [f"#{i + 1} status {n.get('status')!r}" for i, n in enumerate(notes) if n.get("status", "").strip() != "completed"]
     if notes and notes[0].get("tool-use-id", "").strip() != parent_call:
         wrong.append(f"#1 tool-use-id {notes[0].get('tool-use-id')!r}, not the start's {parent_call!r}")
+    shapes = sorted({r.get("type", "") + ("/" + str((r.get("attachment") or {}).get("type")) if r.get("type") == "attachment" else "")
+                     for o, _, r in got if o.get("from") == parent or o.get("kind") == "task-notification"})
     ok = bool(parent) and bool(handbacks) and lead and bool(notes) and not wrong
-    return ok, (f"hand-back rows from {parent or '(no parent)'}: {len(handbacks)} (lead {'in each' if lead else 'missing'}); "
-                f"its task notifications: {len(notes)}, fields {[sorted(n) for n in notes]}"
+    return ok, (f"hand-backs from {parent or '(no parent)'}: {len(handbacks)} (lead {'in each' if lead else 'missing'}); "
+                f"its task notifications: {len(notes)}, fields {[sorted(n) for n in notes]}; as {shapes}"
                 + (f"; wrong or missing: {wrong}" if wrong else ""))
 
 
