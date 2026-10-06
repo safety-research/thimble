@@ -445,7 +445,8 @@ export interface Proposal {
 /** The review of a built view's pictures: running, done (with what it revised and what problems are left), failed
  * or stopped, with a note that says why; `undo` once the analyst put the view back as it was built. */
 export interface ViewReview {
-  state: 'running' | 'done' | 'failed' | 'stopped'
+  /** `queued`: its start waits for a free subagent, Claude Code's limit reached */
+  state: 'running' | 'queued' | 'done' | 'failed' | 'stopped'
   round?: number
   ts?: string
   revised?: string[]

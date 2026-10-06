@@ -88,6 +88,12 @@ CONTROLS_CLICKED = 3  # controls one `control` state clicks in turn
 
 _stopping: dict[tuple[str, str], tuple[str, bool]] = {}  # (workspace, agent id) -> (why stop() stopped it, forget)
 _restart: set[tuple[str, str]] = set()  # (workspace, slug): a build passed while its review was being stopped
+# a reviewer's start Claude Code refused at its subagent limit waits and is tried again, as a build's does (live check
+# L19: the builder that had just passed still counted as running, so its review was refused and failed)
+LIMIT_TRIES = 10  # tries at most, LIMIT_RETRY_S apart (dev.LIMIT_RETRY_S), before the review fails with the limit's text
+QUEUED_NOTE = "Waits for a free subagent: Claude Code runs only so many at once."
+_limit_tries: dict[tuple[str, str], int] = {}  # (workspace, slug) -> starts refused at the limit so far
+_again: dict[tuple[str, str], bool] = {}  # (workspace, slug) -> whether the start waiting for a free place was Review again
 
 
 class NoPictures(Exception):
@@ -244,6 +250,7 @@ async def begin(c: str, slug: str, *, again: bool = False, route: str = subagent
     work_dir(c, slug).mkdir(parents=True, exist_ok=True)
     _set(c, slug, state="running", round=0, revised=revised, left=[], note="", undo=False, shots=0, agent_id=None,
          chat=None, finished=None, digest=views.digest(d), pictured=None, extra_left=None, refused=None)
+    _again[(c, slug)] = again
     if route == subagents.FOLLOW_ON:
         await subagents.out_of_plan(c)
     name = str(prop.get("name") or slug)
@@ -259,17 +266,44 @@ async def begin(c: str, slug: str, *, again: bool = False, route: str = subagent
 def subagent_started(c: str, run: subagents.Run, req: dict[str, Any]) -> None:
     """A reviewer's run started: the review names its agent and chat."""
     slug = run.key.split(":", 1)[-1]
+    _limit_tries.pop((c, slug), None)
     _set(c, slug, state="running", agent_id=run.agent_id, chat=run.chat)
 
 
 def subagent_refused(c: str, req: dict[str, Any]) -> None:
-    """A reviewer's start that did not happen: the review fails with the refusal, and Review again starts it."""
+    """A reviewer's start that did not happen: at Claude Code's subagent limit it waits (`queued`) and is tried again
+    LIMIT_RETRY_S later, up to LIMIT_TRIES times, as a build waits in its queue; otherwise, or after the last try, the
+    review fails with the refusal, and Review again starts it."""
     if req.get("kind") != "start":
         return
     slug = str(req.get("key") or "").split(":", 1)[-1]
     reason = str(req.get("reason") or req.get("refused_kind") or "")
+    if req.get("refused_kind") == subagents.LIMIT and req.get("route") != subagents.TYPED:
+        tries = _limit_tries.get((c, slug), 0) + 1
+        if tries <= LIMIT_TRIES and _retry(c, slug, str(req.get("route") or subagents.FOLLOW_ON)):
+            _limit_tries[(c, slug)] = tries
+            _set(c, slug, state="queued", note=QUEUED_NOTE, refused=None)
+            return
+    _limit_tries.pop((c, slug), None)
     _set(c, slug, state="failed", note=reason, refused={"kind": req.get("refused_kind"), "reason": reason,
                                                         "request": req.get("id")})
+
+
+def _retry(c: str, slug: str, route: str) -> bool:
+    """The review's start tried again in dev.LIMIT_RETRY_S, on the server's loop; False with no loop to wait on."""
+    from . import dev  # noqa: PLC0415
+
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return False
+
+    def again() -> None:
+        if review_of(views.read_proposal(c, slug)).get("state") == "queued" and not running(c, slug):
+            start(c, slug, again=_again.get((c, slug), False), route=route)
+
+    loop.call_later(dev.LIMIT_RETRY_S, again)
+    return True
 
 
 def subagent_ended(c: str, run: subagents.Run, status: str, report: str) -> None:

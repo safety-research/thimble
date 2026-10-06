@@ -174,6 +174,7 @@ export const REVIEW_ROUNDS = 2
 export function reviewLine(r: ViewReview): string {
   const at = hhmm(r.ts)
   if (r.state === 'running') return r.round ? `Reviewing the view's pictures, round ${r.round} of ${REVIEW_ROUNDS}` : "Reviewing the view's pictures"
+  if (r.state === 'queued') return r.note || 'Waits for a free subagent'
   if (r.state === 'failed') return r.note || 'The review did not finish'
   if (r.state === 'stopped') return (at ? `Stopped at ${at}` : 'Stopped') + (r.note ? `: ${r.note.replace(/\.$/, '')}` : '')
   return at ? `Checked at ${at}` : 'Checked'
@@ -235,7 +236,7 @@ export function ReviewMark({ ws, slug, review: r, onUndo }: { ws: string; slug: 
   const line = reviewLine(r)
   return (
     <CheckMark
-      state={r.state}
+      state={r.state === 'queued' ? 'running' : r.state /* a start that waits for a free subagent turns as one */}
       flagged={r.state === 'done' && left.length > 0}
       label={[line, ended ? 'Review again' : ''].filter(Boolean).join('. ')}
       popLabel="The view's review"

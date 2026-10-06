@@ -763,6 +763,35 @@ async def test_a_build_s_pass_starts_its_review_as_a_follow_on_start(board, brid
     assert str(views.views_dir(CORPUS) / slug) in spawn["prompt"] and spawn["description"] == "review: Posts"
 
 
+async def test_a_review_refused_at_the_subagent_limit_waits_and_starts_when_tried_again(board, bridge, gates,
+                                                                                       pictures, monkeypatch):
+    """Live check L19: with a cap of 2 the reviewer started while the builder that had just passed still counted, so
+    Claude Code refused it at its limit and the review failed. It now waits, queued with that said, and its start is
+    tried again LIMIT_RETRY_S later, as a build's is; a refusal of another kind still fails it."""
+    monkeypatch.setattr(dev, "LIMIT_RETRY_S", 0.05)
+    slug = _propose(asked=True)
+    agent = await _started(slug)
+    _draft(slug, "<p>v1</p>")
+    await _call("finish_view", {}, agent, view_tools.build_key(slug))
+    subagents.run_ended(CORPUS, agent, "done", "Built.", source="handback")
+    await _until(lambda: (CORPUS, slug) not in dev._settling, "the build's end was never settled")
+    bridge.answers.append({"error": "thimble: $.agent.spawn refused: 2 spawns are running at once"})
+    ans = await view_review.begin(CORPUS, slug, route=subagents.FOLLOW_ON)
+    assert ans.kind == subagents.LIMIT
+    review = view_review.review_of(_prop(slug))
+    assert (review["state"], review["note"]) == ("queued", view_review.QUEUED_NOTE)
+    await _until(lambda: view_review.review_of(_prop(slug)).get("state") == "running"
+                 and view_review.review_of(_prop(slug)).get("agent_id"), "the review never started on its next try")
+    assert sum(s["role"] == "view-reviewer" for s in bridge.ops("spawn")) == 2
+    reviewer = str(view_review.review_of(_prop(slug))["agent_id"])
+    subagents.run_ended(CORPUS, reviewer, "stopped", None, source="module")
+    await _until(lambda: not view_review.running(CORPUS, slug), "the reviewer never ended")
+    await asyncio.sleep(0.05)
+    bridge.answers.append({"deny": "PreToolUse:Agent hook error: PLAN MODE"})
+    await view_review.begin(CORPUS, slug, route=subagents.FOLLOW_ON)
+    assert view_review.review_of(_prop(slug))["state"] == "failed", "a refusal of another kind fails it"
+
+
 # --------------------------------------------------------------------------- the clicks are the analyst's
 
 
