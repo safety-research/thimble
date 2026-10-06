@@ -198,6 +198,25 @@ async def test_an_orientation_s_proposal_builds_as_a_follow_on_start_when_the_po
     assert req["route"] == "follow-on" and _prop(first)["held"]
 
 
+async def test_a_held_proposal_s_build_sends_its_view_events_marked_held_for_its_chip(board, bridge, gates,
+                                                                                    monkeypatch):
+    """Live checks L19 and L25: the orientation's proposals sent no `view` event before their first pass, so their chips
+    in its thread showed no build state, or stayed "queued" after the build started, until a reload. Each now goes out
+    marked `held`, which the chip follows and the views bar and the view-ready toast leave alone."""
+    from app import investigation
+
+    sent: list[dict] = []
+    monkeypatch.setattr(investigation, "emit", lambda c, inv, event: sent.append(event))
+    monkeypatch.setattr(dev, "VIEW_POOL", 1)
+    first, second = _propose("Posts", orientation=True), _propose("Threads", orientation=True)
+    await _until(lambda: any(e["slug"] == first and e["status"] == "building" for e in sent), "no building event")
+    held = [e for e in sent if e["slug"] in (first, second)]
+    assert held and all(e.get("held") is True for e in held), held
+    assert any(e["slug"] == second and e["status"] == "queued" for e in held), "the queued one says so too"
+    asked = _propose("Replies", asked=True)
+    assert all(not e.get("held") for e in sent if e["slug"] == asked), "a view the analyst asked for is no held one"
+
+
 async def test_a_start_refused_at_the_subagent_limit_goes_back_to_the_queue_with_no_failure(board, bridge, gates,
                                                                                            monkeypatch):
     monkeypatch.setattr(dev, "VIEW_POOL", 1)

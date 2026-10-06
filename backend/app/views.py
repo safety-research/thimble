@@ -206,11 +206,12 @@ def _now() -> str:
 
 def _emit(c: str, slug: str, status: str, **extra: Any) -> None:
     """The `view` event on the workspace stream. investigation.emit runs on the event loop only, so a caller in a
-    worker thread (a route's blocking part) hands it to the bound loop. A held proposal's build sends none: the analyst
-    hears of it once its view is built (mark_built)."""
-    if slug in held_slugs(c):
-        return
+    worker thread (a route's blocking part) hands it to the bound loop. A held proposal's build (one of the
+    orientation's, before its view first passes) says `held`: its chip in the orientation's thread follows it, while
+    the views bar and the view-ready toast wait for the view to be built (mark_built) (live checks L19, L25)."""
     event = {"type": "view", "slug": slug, "status": status, **extra}
+    if slug in held_slugs(c):
+        event["held"] = True
 
     def send() -> None:
         try:
