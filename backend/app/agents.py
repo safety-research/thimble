@@ -648,7 +648,9 @@ def new_agent(c: str, role: str, title: str, *, parent: str = MAIN_ID, by: str |
     if parent and announce:
         _, main_log = paths(c, parent)
         append(main_log, {"type": "agent", "ts": _now(), "chat": cid, "role": role, "title": title, **({"by": by} if by else {}),
-                          **({"tool_use_id": call} if call else {})})
+                          **({"tool_use_id": call} if call else {}),
+                          # a view's build (a dev chat that is no code ticket), which main's note names so
+                          **({"view": str(fields["view"])} if fields.get("view") else {})})
         _notify(c, parent)
     _notify(c, cid)
     return meta

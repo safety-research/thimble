@@ -79,6 +79,8 @@ export interface AgentRow {
   ts?: string
   /** an orientation's follow-up, in main: the run of its session a message started (1 for the first) */
   run?: number
+  /** a dev chat that builds or reviews this view rather than running a code ticket */
+  view?: string
 }
 export interface ErrorRow {
   kind: 'error'
@@ -193,7 +195,7 @@ export function foldRecords(records: readonly ChatRecord[], skip?: ReadonlySet<n
         return
       }
       case 'agent': {
-        const row: AgentRow = { kind: 'agent', index, chat: e.chat, role: e.role, title: e.title, ts: e.ts, ...(typeof e.run === 'number' ? { run: e.run } : {}) }
+        const row: AgentRow = { kind: 'agent', index, chat: e.chat, role: e.role, title: e.title, ts: e.ts, ...(typeof e.run === 'number' ? { run: e.run } : {}), ...(e.view ? { view: e.view } : {}) }
         const call = e.tool_use_id ? calls.get(e.tool_use_id) : undefined
         if (e.tool_use_id && call !== undefined && call > index) held.set(e.tool_use_id, [...(held.get(e.tool_use_id) ?? []), row])
         else rows.push(row)

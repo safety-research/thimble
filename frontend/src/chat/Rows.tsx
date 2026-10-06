@@ -173,7 +173,7 @@ export function Rows({ rows, ws, chat, streaming = false, nested = false, calls,
             if (r.role === 'orient' && (r.run ?? 0) > 0) return <AgentCard key={r.index} ws={ws} chat={r.chat} role="orient" title="Orientation" ts={r.ts} run={r.run} />
             if (r.role === 'orient') return <Note key={r.index} className="chat-agent-note" data-chat={r.chat} text="Orientation started in" chips={<ThreadChip id={r.chat} />} />
             if (r.role === 'writer') return <Note key={r.index} className="chat-agent-note" data-chat={r.chat} text="Writing started in" chips={<ThreadChip id={r.chat} />} />
-            if (r.role === 'dev') return <Note key={r.index} className="chat-agent-note" data-chat={r.chat} text="Dev ticket started" chips={<ThreadChip id={r.chat} />} />
+            if (r.role === 'dev') return <Note key={r.index} className="chat-agent-note" data-chat={r.chat} text={devStarted(r)} chips={<ThreadChip id={r.chat} />} />
             return <AgentCard key={r.index} ws={ws} chat={r.chat} role={r.role} title={r.title} ts={r.ts} />
           case 'branch':
             return (
@@ -207,6 +207,12 @@ export function Rows({ rows, ws, chat, streaming = false, nested = false, calls,
 }
 
 const EMPTY: ReadonlySet<string> = new Set()
+
+/** Main's note for a dev chat that started: a view's build (`view`, on the backend's agent row), else a code ticket.
+ * Pure. */
+export function devStarted(r: { view?: string }): string {
+  return r.view ? 'View build started in' : 'Dev ticket started'
+}
 
 /** Where a message to one of thimble's agents came from, in its thread: typed in Claude Code's agent tray (`terminal`
  * with `tray`, the record's origin `human`) or sent from thimble's browser (`browser`); none for a prompt main's call
