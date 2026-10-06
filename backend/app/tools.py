@@ -2653,9 +2653,10 @@ async def call_route(name: str, body: CallBody, request: Request) -> dict[str, A
 
 
 # the start tools, whose result is an Agent call for the caller to make: a thread's fork may not make one, since Claude
-# Code tells its forks not to start subagents, so a fork's call is refused at once with start-refused-fork (U5); another
+# Code tells its forks not to start subagents, so a fork's call is refused at once with start-refused-fork (U5), and its
+# file_dev_ticket, which starts a code ticket's agent or a view's builder, with start-refused-fork-ticket; another
 # subagent of main's makes the call itself (subagents.typed_caller)
-FORK_REFUSED = ("start_orientation", "start_writing", "propose_view", "run_check")
+FORK_REFUSED = ("start_orientation", "start_writing", "propose_view", "run_check", "file_dev_ticket")
 
 
 async def _as_caller(c: str, name: str, tool_use_id: str | None) -> tuple[str, str | None]:
@@ -2669,6 +2670,8 @@ async def _as_caller(c: str, name: str, tool_use_id: str | None) -> tuple[str, s
     canon = canonical(name)
     who = await subagents.caller(c, tool_use_id) if tool_use_id else None
     if who is None and canon in FORK_REFUSED and subagents.fork_call(c, tool_use_id):
+        if canon == "file_dev_ticket":
+            return hint("start-refused-fork-ticket"), None
         return hint("start-refused-fork"), None
     if who is None:
         spec = REGISTRY[canon]

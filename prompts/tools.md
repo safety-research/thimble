@@ -1126,6 +1126,10 @@ This session was not started with `thimble`, so it and its subagents run without
 
 A thread's fork cannot start thimble's agents, since Claude Code does not let a fork start subagents. Tell the analyst in one line in the thread that they can start it in the browser: Start for the orientation, or Write on a document for its writer.
 
+## start-refused-fork-ticket
+
+A thread's fork cannot file a ticket, since its agent is a subagent and Claude Code does not let a fork start subagents. Tell the analyst in one line in the thread that they can file it in the browser with Report a problem.
+
 ## start-refused-no-module
 
 thimble's agents can't start in this session: Claude Code's hooks modules are off ({reason}). Main, its threads, cards and labels still work. Once modules are on, quit and run `thimble -c` in this folder.
