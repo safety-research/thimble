@@ -42,6 +42,7 @@ class Server {
   queue: Json[] = []
   results: Json[] = []
   ended: Json[] = []
+  modes: Json[] = [] // what the module posted of main's plan mode
   nextStatus: number | null = null // one forced answer to the next poll
   waiters: (() => void)[] = []
 
@@ -94,6 +95,9 @@ class Server {
       case 'POST /api/module/ended':
         this.ended.push(body)
         return reply(200, { ok: true })
+      case 'POST /api/module/mode':
+        this.modes.push(body)
+        return reply(200, { ok: true })
     }
     return reply(404)
   }
@@ -116,6 +120,7 @@ function engine(opts: Options = {}) {
   let sid = MAIN
   let spawnAnswer = (args: Json): Json => ({ agentId: `agent-${log.length}`, model: now[args.subagentType]?.model })
   let toolAnswer = (input: Json): Json => ({ result: { success: true }, text: `Resuming agent ${input.to}` })
+  let checkReason = 'Claude requested permissions to write, but you haven\'t granted it yet.' // Claude Code's decision for a write
   const $ = {
     env: { get: vi.fn(async (name: string) => env[name]), set: async () => undefined },
     fs: { read: vi.fn(async (path: string) => { if (path in files) return files[path]; throw new Error(`ENOENT ${path}`) }) },
@@ -133,7 +138,7 @@ function engine(opts: Options = {}) {
         return spawnAnswer(args)
       }),
     },
-    tool: { call: vi.fn(async (input: Json) => toolAnswer(input)) },
+    tool: { call: vi.fn(async (input: Json) => toolAnswer(input)), check: vi.fn(async (_input: Json) => ({ decision: 'ask', reason: checkReason })) },
     session: {
       id: vi.fn(async () => sid),
       append: vi.fn(async (args: Json) => ({ uuid: 'u1', message: args.message })),
@@ -147,6 +152,8 @@ function engine(opts: Options = {}) {
     setSession: (s: string) => { sid = s },
     onSpawn: (f: (args: Json) => Json) => { spawnAnswer = f },
     onTool: (f: (input: Json) => Json) => { toolAnswer = f },
+    /** the reason Claude Code's permission decision gives for a write now: in plan mode it says so */
+    onCheck: (reason: string) => { checkReason = reason },
     start: () => hooks['session.start']($, { cwd: CWD, surface: opts.interactive === false ? null : 'terminal', isInteractive: opts.interactive ?? true }, async () => ({ cwd: CWD })),
     end: (reason: string, sessionId = MAIN) => hooks['session.end']($, { reason, sessionId, resume: {} }, async () => ({ sessionId })),
     /** main's (or an agent's) Agent call through the agent.spawn hook: the input Claude Code went on with, and its answer */
@@ -343,6 +350,22 @@ describe('requests', () => {
     e.onTool((input) => (input.task_id === 'b2' ? { isError: true, text: '<tool_use_error>Task b2 is not running</tool_use_error>' } : { result: { message: 'Successfully stopped task' }, text: 'Successfully stopped task' }))
     expect(await e.server.answer(e.server.push('stop', { agent: 'a7', shells: ['b1', 'b2'] }))).toEqual({ agentId: 'a7', text: 'Successfully stopped task' })
     expect(e.$.tool.call.mock.calls.slice(-3).map((c: Json[]) => (c[0] as { task_id: string }).task_id)).toEqual(['a7', 'b1', 'b2'])
+  })
+
+  it('tells the server when main goes into plan mode and out of it while idle, and only on a change', async () => {
+    const e = await started()
+    const until = async (n: number) => { for (let i = 0; i < 400 && e.server.modes.length < n; i++) await new Promise(r => setTimeout(r, 5)) }
+    await until(1)
+    expect(e.server.modes[0]).toEqual({ cwd: CWD, session: MAIN, plan: false })
+    e.onCheck('Cannot write to /c/.thimble-plan-probe while in plan mode.')
+    await until(2)
+    expect(e.server.modes.map((b) => b.plan)).toEqual([false, true])
+    e.onCheck("Claude requested permissions to write, but you haven't granted it yet.")
+    await until(3)
+    expect(e.server.modes.map((b) => b.plan)).toEqual([false, true, false])
+    expect(e.$.tool.check).toHaveBeenLastCalledWith({ tool: 'Write', input: { file_path: `${CWD}/.thimble-plan-probe`, content: '' } })
+    expect(e.$.tool.call).not.toHaveBeenCalledWith(expect.objectContaining({ tool: 'Write' })) // never written
+    await e.end('other')
   })
 
   it('appends a note on a note request', async () => {

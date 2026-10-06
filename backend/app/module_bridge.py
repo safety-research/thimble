@@ -896,6 +896,25 @@ async def result_route(body: ResultBody) -> dict[str, Any]:
     return {"ok": True}
 
 
+class ModeBody(BaseModel):
+    cwd: str
+    session: str
+    plan: bool
+
+
+@router.post("/module/mode")
+async def mode_route(body: ModeBody) -> dict[str, Any]:
+    """The module saw main's session go into plan mode or out of it (its poll of Claude Code's permission decision),
+    which thimble otherwise hears only at main's turns (session.note_plan). 409 from a session that is not the accepted
+    one."""
+    from . import session  # noqa: PLC0415
+
+    c = _workspace(body.cwd)
+    _require(c, body.session)
+    session.note_plan(c, body.session, body.plan)
+    return {"ok": True}
+
+
 class EndedBody(BaseModel):
     cwd: str
     session: str = ""

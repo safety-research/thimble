@@ -546,3 +546,24 @@ def test_a_transcript_thimble_0_5_0_wrote_keeps_its_browser_events_in_the_contex
     assert said == [("[analyst]", "first, on the channel"), ("[analyst]", "second, by the hook"),
                     ("[analyst]", "third, in 0.6.0")]
     assert session.browser_events('<channel source="plugin:other:x" kind="main">not ours</channel>') == []
+
+
+def test_the_module_s_plan_mode_report_moves_main_s_mode_and_back(workspaces_tmp, monkeypatch):
+    """Live check L21: a shift+tab while main is idle reaches thimble through the module (session.note_plan): plan mode,
+    then on leaving it the mode main's hooks last reported, or default."""
+    from app import session as s
+
+    monkeypatch.setattr(s, "_live", {"mini": s.Live("mini", "sid-1", "/c", None, None)})
+    monkeypatch.setattr(s, "_modes", {})
+    monkeypatch.setattr(s, "_before_plan", {})
+    monkeypatch.setattr(s, "_keep_mode", lambda c, sid, mode: None)
+    s.note_mode("mini", "sid-1", "auto")
+    s.note_plan("mini", "sid-1", True)
+    assert s.main_mode("mini") == "plan"
+    s.note_plan("mini", "sid-1", True)
+    s.note_plan("mini", "sid-1", False)
+    assert s.main_mode("mini") == "auto", "back to the mode before"
+    s.note_plan("mini", "sid-1", False)
+    assert s.main_mode("mini") == "auto", "out of plan mode already: nothing changes"
+    s.note_plan("mini", "other-sid", True)
+    assert s.main_mode("mini") == "auto", "another session's report counts for nothing"

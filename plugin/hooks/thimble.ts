@@ -13,6 +13,8 @@
 // - registers thimble's six roles and thimble:helper from GET /api/module/roles (each with a full model id and an
 //   explicit effort, from Settings); when the server is up at session start this happens inside session.start, so the
 //   types are in main's first agent listing;
+// - asks Claude Code's permission decision for a write it never makes every PLAN_POLL_MS and tells the server when main
+//   went into plan mode or out of it (POST /api/module/mode), which no event of Claude Code's says while main is idle;
 // - holds GET /api/module/next and handles the requests one at a time, in order, so a role's registration and the
 //   spawn that needs it are never split by another request: register (all roles again), spawn (register the role with
 //   the run's values if they differ, $.agent.spawn with no `model`, then the one-line note the server rendered), send
@@ -57,6 +59,12 @@ const GONE = /is not running|no task found|could not be resumed|no transcript fo
 const QUEUED = /queued for delivery/i
 const REQUEST_WORD = /[A-Za-z0-9_-]{8,64}/g // a request id on the first line of a typed start's prompt
 const OFF = new Set(['', '0', 'false', 'no', 'off'])
+// Claude Code tells no plugin of a mode change, so the module asks its permission decision for a write it never makes
+// every PLAN_POLL_MS, and plan mode says so in the reason ("Cannot write to … while in plan mode"); the server hears a
+// change at once, not at main's next turn (live check L21)
+export const PLAN_POLL_MS = 2000
+const PLAN_PROBE = '.thimble-plan-probe' // in main's folder; never written
+const PLAN_REASON = /\bplan mode\b/i
 
 const isObj = (v: unknown): v is Json => typeof v === 'object' && v !== null && !Array.isArray(v)
 const text = (v: unknown): string => (typeof v === 'string' ? v : '')
@@ -127,12 +135,13 @@ type State = {
   queue: Promise<void> // the requests, one at a time
   helloing: { sid: string; said: Promise<Hello> } | null
   leaving: string // the session /clear or /resume is taking main away from, until the new one is known
+  plan: boolean | null // whether main's session was in plan mode at the last look, as the server heard it
 }
 
 function fresh(): State {
   return {
     active: false, cwd: '', session: '', version: '', gen: 0, server: null, roles: {}, registered: {}, efforts: {},
-    requests: {}, started: new Set(), queue: Promise.resolve(), helloing: null, leaving: '',
+    requests: {}, started: new Set(), queue: Promise.resolve(), helloing: null, leaving: '', plan: null,
   }
 }
 
@@ -262,9 +271,30 @@ async function begin($: Engine, m: State, cwd: string): Promise<void> {
       await $.clock.sleep(RETRY_MS)
       state = await connect($, m)
     }
-    if (state === 'ok' && gen === m.gen) await poll($, m, gen)
-    else if (state === 'refused') stop(m)
+    if (state === 'ok' && gen === m.gen) {
+      void watchPlan($, m, gen)
+      await poll($, m, gen)
+    } else if (state === 'refused') stop(m)
   })()
+}
+
+/** Every PLAN_POLL_MS: whether main's session is in plan mode now (Claude Code's decision for a write the module never
+ *  makes, PLAN_REASON), posted to the server when it changed. */
+async function watchPlan($: Engine, m: State, gen: number): Promise<void> {
+  while (m.active && gen === m.gen) {
+    await $.clock.sleep(PLAN_POLL_MS)
+    if (!m.active || gen !== m.gen) return
+    let plan: boolean
+    try {
+      const got = await $.tool.check({ tool: 'Write', input: { file_path: `${m.cwd}/${PLAN_PROBE}`, content: '' } } as Parameters<Engine['tool']['check']>[0])
+      plan = PLAN_REASON.test(text((got as Json).reason))
+    } catch {
+      continue
+    }
+    if (plan === m.plan) continue
+    const r = await call($, m, 'POST', '/api/module/mode', { cwd: m.cwd, session: m.session, plan })
+    if (r?.status === 200) m.plan = plan
+  }
 }
 
 async function connect($: Engine, m: State): Promise<Hello> {

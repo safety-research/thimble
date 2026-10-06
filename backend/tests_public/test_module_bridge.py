@@ -735,3 +735,19 @@ def test_a_stop_hands_the_module_the_agent_s_shells_and_nothing_that_is_no_task_
     got = module_bridge._args("stop", {"agent": "a7", "shells": ["b7xk2q9", "../x", "", "b2"]})
     assert got == {"agent": "a7", "shells": ["b7xk2q9", "b2"]}
     assert module_bridge._args("stop", {"agent": "a7"}) == {"agent": "a7"}
+
+
+async def test_the_module_s_plan_mode_post_reaches_main_s_mode_from_the_accepted_session_only(client, plugin_headers,
+                                                                                             monkeypatch):
+    """Live check L21: the module asks Claude Code's permission decision every few seconds and posts when main went
+    into plan mode or out of it while idle; only the accepted session's post counts (session.note_plan)."""
+    _launch()
+    heard: list[tuple] = []
+    monkeypatch.setattr(session, "note_plan", lambda c, sid, plan: heard.append((c, sid, plan)))
+    mod = Module(client, plugin_headers)
+    stray = await client.post("/api/module/mode", headers=plugin_headers(),
+                              json={"cwd": _cwd(), "session": MAIN, "plan": True})
+    assert stray.status_code == 409 and not heard, "say hello first"
+    await mod.hello()
+    r = await mod._go("POST", "/api/module/mode", json={"cwd": _cwd(), "session": MAIN, "plan": True})
+    assert r.json() == {"ok": True} and heard == [(CORPUS, MAIN, True)]

@@ -571,6 +571,24 @@ def note_mode(c: str, sid: str | None, mode: str) -> None:
         agents.notify(c, agents.MAIN_ID)
 
 
+_before_plan: dict[str, str] = {}  # workspace -> main's mode before thimble's module saw it go into plan mode
+
+
+def note_plan(c: str, sid: str | None, plan: bool) -> None:
+    """thimble's module saw main's session go into plan mode, or out of it, while main was idle (it asks Claude Code's
+    permission decision every few seconds, module_bridge.mode_route): the mode becomes plan, or goes back to the one
+    before (default when none was known), until main's hooks report the mode at its next turn (live check L21: a
+    shift+tab while main was idle reached thimble only at main's next turn, so held checks waited and the Start line
+    was stale)."""
+    cur = main_mode(c)
+    if plan and cur != "plan":
+        if cur:
+            _before_plan[c] = cur
+        note_mode(c, sid, "plan")
+    elif not plan and cur == "plan":
+        note_mode(c, sid, _before_plan.pop(c, "") or "default")
+
+
 def main_mode(c: str) -> str | None:
     """The permission mode main's hooks last reported (note_mode), by Claude Code's name, to this server or, for the
     session it restarted under, to the one before it; None before the first report."""
