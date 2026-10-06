@@ -29,9 +29,9 @@ The assertions (each one line of results.jsonl, {step, title, status, detail}; s
   handback         in auto mode the run's hand-back reaches main as a user row from the agent, and main answers it;
   resume           a SendMessage through the bridge to the finished agent, with another effort, answers "Resuming
                    agent", and the resumed run's records carry the registration in force at the send (V1);
-  descendants      a thimble:helper spawned through the bridge on the run values (thimble's roles keep to their own
+  descendants      a thimble:orient-helper spawned through the bridge on the run values (thimble's roles keep to their own
                    work and decline a test's errand) starts a general-purpose child, which runs on its run values, and
-                   a thimble:helper child, which runs on the helper's registration (V7);
+                   a thimble:orient-helper child, which runs on the helper's registration (V7);
   clear            after /clear the module's hello arrives under the new session id, and a click's spawn through it
                    answers an agent id;
   stop             TaskStop through the bridge (subagents.stop) stops that agent as soon as it runs: the agent ends
@@ -82,7 +82,7 @@ EXIT_CHOICE = "Exit and stop tasks"
 TYPES_LINE = re.compile(r"agent types? available", re.I)
 RESUMING = "Resuming agent"
 HANDBACK = "SubagentHandback"
-GP, HELPER_TYPE = "general-purpose", "thimble:helper"
+GP, HELPER_TYPE = "general-purpose", "thimble:orient-helper"
 GP_DONE, HELPER_DONE, SPAWN_DONE, RESUMED_DONE = "GP-OK", "HELPER-OK", "SPAWN-OK", "RESUMED-OK"
 
 ASSERTIONS = {
@@ -93,7 +93,7 @@ ASSERTIONS = {
     "deny": "A spawn with no pending request comes back as {deny} from --agent-check",
     "handback": "In auto mode the run's hand-back reaches main, and main answers it",
     "resume": "SendMessage through the bridge answers Resuming agent, on the registration in force at the send",
-    "descendants": "A general-purpose child runs on its parent's run values, a thimble:helper child on the helper's",
+    "descendants": "A general-purpose child runs on its parent's run values, a thimble:orient-helper child on the helper's",
     "clear": "After /clear the hello arrives under the new session id and a spawn through it answers",
     "stop": "TaskStop through the bridge stops an agent with nothing reaching main",
     "classifier": "A structured call's claude argv carries --model and --effort while CLAUDE_CODE_EFFORT_LEVEL is set",
@@ -529,8 +529,8 @@ class Check:
         self.shot("resumed")
         self.wait("main idle", self.idle, REPLY_WAIT_S)
 
-        # descendants: a thimble:helper started through the bridge on run values starts a general-purpose child and a
-        # thimble:helper child (thimble's roles keep to their own work, so a role is not asked to)
+        # descendants: a thimble:orient-helper started through the bridge on run values starts a general-purpose child and a
+        # thimble:orient-helper child (thimble's roles keep to their own work, so a role is not asked to)
         ans = self.on_loop(module_bridge.request(self.c, "spawn", role=subagents.HELPER, prompt=SPAWN_TASK,
                                                  description="contract helper", values=values, what="contract"))
         parent = str(ans.get("agentId") or "")
@@ -552,7 +552,7 @@ class Check:
                      if hp else (False, "no child"))
         main_runs = sorted({(m, e) for _, m, e in assistant_runs(self.main_rows())}, key=str)
         self.result("descendants", pok and gok and hok,
-                    f"parent thimble:helper {parent or '-'}: {pdet}; children {kids}; {GP} {gp or '-'} (wants the "
+                    f"parent thimble:orient-helper {parent or '-'}: {pdet}; children {kids}; {GP} {gp or '-'} (wants the "
                     f"parent's run values): {gdet}; {HELPER_TYPE} {hp or '-'} (wants the helper's registration, which the "
                     f"bridge set to the run values; Settings' is {helper.get('model')!r}, {helper.get('effort')!r}): {hdet}; "
                     f"main runs on {main_runs}")

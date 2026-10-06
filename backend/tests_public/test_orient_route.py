@@ -260,36 +260,80 @@ async def test_a_follow_up_to_an_earlier_version_s_or_session_s_orientation_is_r
         session._live.pop(CORPUS, None)
 
 
-async def test_an_orientation_stopped_with_esc_takes_no_follow_up_and_says_to_start_a_new_one(bridge, models,
-                                                                                            workspaces_tmp, analyst,
-                                                                                            unmeasured):
-    """Live check L9: after Esc in its agent view Claude Code resumes the orientation no more, and the browser showed its
-    refusal with a Send again that could never work. The composer's message now gets thimble's text that it cannot be
-    continued (410, as an earlier version's) and main's message_orientation the same, with nothing sent; when only
-    Claude Code's answer to the send says so, that answer marks it the same way."""
+async def test_an_orientation_stopped_with_esc_is_continued_by_a_message_in_its_thread(bridge, models, workspaces_tmp,
+                                                                                    analyst, unmeasured):
+    """U2: after Esc in its agent view Claude Code resumes the orientation no more (live check L9). A message from the
+    thread's composer then starts a continuation: a new thimble:orientation run in the same thread (its chat, as run 1
+    of the record), through the module, on the stopped run's model and effort, with what the stopped run left; the
+    message shows as that run's. When only Claude Code's answer to the send says it was stopped, that answer starts it
+    the same way. The next message reaches the continuation's own agent."""
     agent = await _orientation()
     await _ended(agent)
+    chat = orientation.read_run(CORPUS)["chats"]["orient"]
     bridge.answers.append({"error": f"Agent {agent} was stopped by the user and won't be resumed. Treat its work as "
                                     "cancelled; only launch a new agent if the user explicitly asks."})
-    with pytest.raises(HTTPException) as e:
-        await orient_session.message_route(CORPUS, orient_session.MessageBody(text="And May?"), analyst)
-    assert e.value.status_code == 410 and e.value.detail == tools.hint("orient-continue-stopped-by-user")
-    assert "Start a new orientation" in e.value.detail
+    out = await orient_session.message_route(CORPUS, orient_session.MessageBody(text="And May?"), analyst)
+    assert out["status"] == "continued" and out["chat"] == chat
     assert subagents.cancelled(CORPUS, agent)
-    chips = [r for r in agents.read_events(agents.paths(CORPUS, agents.MAIN_ID)[1]) if r.get("type") == "chip"]
-    assert not [r for r in chips if r.get("kind") == orient_session.NOT_PASSED_ON], \
-        "no not-passed-on line with a Send again that cannot work (live recheck of L9)"
-    sent = len(bridge.ops("send"))
-    with pytest.raises(HTTPException) as e:
-        await orient_session.message_route(CORPUS, orient_session.MessageBody(text="And June?"), analyst)
-    assert e.value.status_code == 410
+    spawn = bridge.ops("spawn")[-1]
+    assert spawn["role"] == "orientation" and spawn["values"] == {"model": "claude-opus-5-5[1m]", "effort": "max"}
+    assert "MESSAGE And May?" in spawn["prompt"] and "OUTPUTS the deck" in spawn["prompt"]
+    new = out["agentId"]
+    assert new != agent
+    meta = agents.read_meta(CORPUS, chat)
+    assert (meta["agent_id"], meta["run"], meta["status"], meta.get("continue")) == (new, 1, "running", None)
+    a = subagents.agent(CORPUS, new)
+    assert (a["chat"], a["run"], a["continues"]["agent"]) == (chat, 1, agent)
+    rec = orientation.read_run(CORPUS)
+    assert rec["agent_id"] == new and rec["followups"][-1]["messages"] == [{"text": "And May?", "by": "browser"}]
+    users = [r for r in agents.read_events(agents.paths(CORPUS, chat)[1]) if r.get("type") == "user"]
+    assert [(u["text"], u.get("run")) for u in users] == [("And May?", 1)], "the message shows as the run's own"
+    subagents.run_ended(CORPUS, new, "done", "Revised.", source="handback")
+    out = await orient_session.message_route(CORPUS, orient_session.MessageBody(text="And June?"), analyst)
+    assert out["status"] == "sent" and bridge.ops("send")[-1]["agent"] == new, "the continuation takes messages itself"
+
+
+async def test_main_s_message_to_an_orientation_stopped_with_esc_gives_the_continuation_s_exact_agent_call(
+        bridge, models, workspaces_tmp, unmeasured):
+    """Main's message_orientation to an orientation stopped with Esc says that thimble continues it, and gives the
+    continuation's exact Agent call (a typed start on the stopped run's values); a refusal of that start, such as main's
+    turn ending without the call, says in the thread that the message was not passed on."""
+    agent = await _orientation()
+    await _ended(agent)
+    subagents.mark_cancelled(CORPUS, agent)
     res = await tools.call(CORPUS, "message_orientation", {"message": "And June?"})
-    assert res.is_error and res.text.endswith(tools.hint("orient-continue-stopped-by-user"))
-    assert len(bridge.ops("send")) == sent, "nothing more reaches the module"
+    assert not res.is_error and "\nCONTINUE WITH AGENT CALL " in res.text
+    inp = json.loads(res.text.split("AGENT CALL ", 1)[1].splitlines()[0])
+    assert inp["subagent_type"] == "thimble:orientation" and "MESSAGE And June?" in inp["prompt"]
+    rid = inp["prompt"].split("\n")[0]
+    r = subagents.request(CORPUS, rid)
+    assert (r["route"], r["state"], r["continues"]["by"]) == ("typed", "pending", "main")
+    assert r["values"] == {"model": "claude-opus-5-5[1m]", "effort": "max"}
+    assert not bridge.ops("spawn")[1:], "main makes the call"
+    subagents.refuse(CORPUS, rid, "I will not start it.", subagents.NO_CALL)
     chat = orientation.read_run(CORPUS)["chats"]["orient"]
-    assert agents.read_meta(CORPUS, chat)["continue"] == subagents.CANCELLED
-    subagents.run_again(CORPUS, agent, "human")  # should Claude Code ever run it again, it takes messages again
-    assert not subagents.cancelled(CORPUS, agent) and agents.read_meta(CORPUS, chat).get("continue") is None
+    [chip] = [x for x in agents.read_events(agents.paths(CORPUS, agents.MAIN_ID)[1]) if x.get("kind") == orient_session.NOT_PASSED_ON]
+    assert chip["chat"] == chat and chip["message"] == "And June?"
+    assert orientation.read_run(CORPUS)["status"] != "refused", "the orientation's own record stays as it was"
+
+
+def test_a_continuation_s_prompt_holds_the_stopped_run_s_last_text_cards_and_transcript(bridge, models, workspaces_tmp,
+                                                                                      tmp_path, monkeypatch):
+    from app import notebook
+
+    tr = tmp_path / "agent-old.jsonl"
+    tr.write_text("\n".join(json.dumps(r) for r in (
+        {"type": "assistant", "message": {"content": [{"type": "text", "text": "Counted the merges."}]}},
+        {"type": "assistant", "message": {"content": [{"type": "tool_use", "id": "t", "name": "Bash", "input": {}}]}},
+    )) + "\n")
+    monkeypatch.setattr(orient_session, "_stopped_transcripts", lambda c, a: [tr])
+    cells = [{"id": "c1", "title": "How many merges?"}, {"id": "c2", "title": "Who reviewed?"}]
+    monkeypatch.setattr(notebook, "read_notebook", lambda ws, nb_id: {"cells": cells} if nb_id == "deck1" else None)
+    orientation._write_run(CORPUS, {"passes": ["final"], "groups": {"final": "deck1"}, "critique": False})
+    text = orient_session.continuation_prompt(CORPUS, "req_0123456789", "old", "And May?", ["final"], False)
+    assert text.startswith("req_0123456789\n")
+    assert "SUMMARY Counted the merges." in text and f"TRANSCRIPTS {tr}" in text
+    assert "card:c1 How many merges?\ncard:c2 Who reviewed?" in text and "OFF view proposals, the report" in text
 
 
 MAIN_SID, EARLIER_SID = "11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222"

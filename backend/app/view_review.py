@@ -347,7 +347,9 @@ async def _ended(c: str, run: subagents.Run, status: str, report: str, why: str,
         elif status == "stopped":
             a = subagents.agent(c, run.agent_id) or {}
             quit_ = a.get("stopped_by") == subagents.STOPPED_QUIT
-            _set(c, slug, state="stopped", note=note or (QUIT_NOTE if quit_ else why or STOPPED_NOTE))
+            plan = a.get("stopped_by") == subagents.STOPPED_PLAN  # main went into plan mode (U4)
+            _set(c, slug, state="stopped", note=note or (QUIT_NOTE if quit_ else subagents.plan_line("view-reviewer")
+                                                         if plan else why or STOPPED_NOTE))
         elif status == "failed":
             said = " ".join(str(report or "").split())[:400]
             _set(c, slug, state="failed", note=note or (f"The review did not finish: {said}" if said else

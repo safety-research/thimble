@@ -39,7 +39,7 @@ def models(monkeypatch):
 
 def test_each_role_is_registered_with_a_full_model_id_an_explicit_effort_and_a_fixed_description(models, hints):
     roles = subagents.roles(CORPUS)
-    assert {"orientation", "critic", "writer", "helper"} <= set(roles)
+    assert {"orientation", "critic", "writer", "orient-helper"} <= set(roles)
     for name, d in roles.items():
         if name not in subagents.TYPES:
             continue
@@ -48,13 +48,13 @@ def test_each_role_is_registered_with_a_full_model_id_an_explicit_effort_and_a_f
         assert d["prompt"].strip() and isinstance(d.get("description"), str)
         assert "hooks" not in d
     assert roles["orientation"]["model"] == "claude-opus-5-5[1m]" and roles["orientation"]["effort"] == "max"
-    assert roles["helper"]["model"] == "claude-sonnet-5" and roles["helper"]["effort"] == "medium", \
+    assert roles["orient-helper"]["model"] == "claude-sonnet-5" and roles["orient-helper"]["effort"] == "medium", \
         "the helper runs on Settings' orientation-subagents row (Q10)"
     from app import prompts  # noqa: PLC0415
 
-    front, body = prompts.frontmatter("helper")
-    assert roles["helper"]["description"] == front["description"].strip() and roles["helper"]["prompt"] == body.strip(), \
-        "the helper's fixed description and prompt are prompts/helper.md's"
+    front, body = prompts.frontmatter("orient-helper")
+    assert roles["orient-helper"]["description"] == front["description"].strip() and roles["orient-helper"]["prompt"] == body.strip(), \
+        "the helper's fixed description and prompt are prompts/orient-helper.md's"
     assert roles["writer"]["skills"][0] == roles["critic"]["skills"][0] == "thimble:shared"
 
 
@@ -223,6 +223,42 @@ async def test_a_typed_start_answers_the_exact_agent_call_with_the_request_id_on
     assert inp["subagent_type"] == "thimble:writer" and inp["prompt"].split("\n")[0] == f"[thimble request {ans['request']}]"
     r = subagents.request(CORPUS, ans["request"])
     assert r["values"] == {"model": "m", "effort": "e"} and r["call"] == "toolu_tool" and r["state"] == "pending"
+
+
+async def test_a_typed_start_a_fork_asked_for_names_the_fork_so_only_its_call_claims_it(bridge, models, monkeypatch):
+    """U5: the start tool called by a thread's fork (the caller hook's line names it, and the registry does not) keeps
+    the fork as the request's `caller_agent`; one called by main, or by one of thimble's agents, keeps none."""
+    ws = config.workspace_dir(CORPUS)
+    sf.add_caller(ws, "toolu_fork_tool", "fork1", "fork")
+    ans = await subagents.start_job(CORPUS, "writer", "writer:report", "Write.", {}, subagents.TYPED, call="toolu_fork_tool")
+    assert subagents.request(CORPUS, ans["request"])["caller_agent"] == "fork1"
+    main = await subagents.start_job(CORPUS, "writer", "writer:notes", "Write.", {}, subagents.TYPED, call="toolu_main_tool")
+    assert "caller_agent" not in subagents.request(CORPUS, main["request"])
+    with subagents.update(CORPUS) as state:
+        sf.registry(state)["orient1"] = {"key": "orient", "role": "orientation", "status": "running"}
+    sf.add_caller(ws, "toolu_orient_tool", "orient1", "thimble:orientation")
+    ours = await subagents.start_job(CORPUS, "writer", "writer:x", "Write.", {}, subagents.TYPED, call="toolu_orient_tool")
+    assert "caller_agent" not in subagents.request(CORPUS, ours["request"])
+    assert subagents.claim(CORPUS, "toolu_f1", ans["input"], caller="fork1") is None
+    assert subagents.request(CORPUS, ans["request"])["state"] == "claimed"
+
+
+def test_a_fork_s_turn_end_tells_the_browser_its_typed_start_was_never_made(bridge, models, monkeypatch, plugin_headers):
+    """The SubagentStop hook refused, in the file, the typed start a fork's turn never made (subagent_files
+    .refuse_unclaimed) and posts the ids: the role's refusal handler tells the browser at once, with no Starting… left
+    until a timeout."""
+    told: list[dict] = []
+    monkeypatch.setattr(subagents, "_refused", lambda c, rec: told.append(rec))
+    rid = subagents.new_request(CORPUS, "start", "writer:report", {"subagent_type": "thimble:writer", "prompt": "p"},
+                                {}, subagents.TYPED, role="writer", caller_agent="fork1")
+    with subagents.update(CORPUS) as state:
+        assert sf.refuse_unclaimed(state, {"agent_id": "fork1", "agent_type": "fork", "last_assistant_message": "No."})
+    from app import main
+
+    r = TestClient(main.create_app()).post("/api/subagents/stopped", headers=plugin_headers(), json={
+        "cwd": str(config.corpus_dir(CORPUS)), "hook": {"agent_id": "fork1", "agent_type": "fork", "refused": [rid]}})
+    assert r.status_code == 200
+    assert [(x["id"], x["refused_kind"], x["reason"]) for x in told] == [(rid, "no-call", "No.")]
 
 
 async def test_start_it_starts_a_refused_typed_start_as_a_click_with_the_same_call(bridge, models):
@@ -409,6 +445,69 @@ async def test_main_s_quit_closes_the_running_agents_chats(bridge, models, ended
     assert ended == [("writer", 0, "stopped", subagents.QUIT_LINE)]
 
 
+async def test_plan_mode_stops_the_running_agents_through_the_module_and_their_threads_say_why(bridge, models, ended,
+                                                                                               monkeypatch):
+    """U4: main went into plan mode while thimble's agents ran, where each would have to ask before every step. Each
+    running agent of a role is stopped through the module, as the browser's Stop stops it (a TaskStop, which a follow-up
+    continues), a child before its parent; its run ends stopped with the plan line, its chat `stopped_by: plan`, and
+    no end handler takes it as the analyst's Stop. One that has ended is left alone, and nothing starts again."""
+    writer = await subagents.start_job(CORPUS, "writer", "writer:report", "w", {}, subagents.CLICK)
+    orient = await subagents.start_job(CORPUS, "orientation", "orient", "o", {}, subagents.CLICK)
+    with subagents.update(CORPUS) as state:
+        sf.registry(state)["crit1"] = {"key": "critique:orient", "role": "critic", "status": "running",
+                                       "parent": orient.agent_id}
+    done = await subagents.start_job(CORPUS, "check", "check:unverified:report", "k", {}, subagents.CLICK)
+    subagents.run_ended(CORPUS, done.agent_id, "done", "Two comments.")
+    spawns = len(bridge.ops("spawn"))
+    stopped = await subagents.stop_for_plan(CORPUS)
+    assert stopped[0] == "crit1" and set(stopped) == {"crit1", writer.agent_id, orient.agent_id}
+    assert [s["agent"] for s in bridge.ops("stop")] == stopped
+    for agent_id in ("crit1", writer.agent_id, orient.agent_id):
+        assert subagents.agent(CORPUS, agent_id)["stopped_by"] == subagents.STOPPED_PLAN
+        subagents.run_ended(CORPUS, agent_id, "stopped", "Agent was stopped", source="module")
+    meta = agents.read_meta(CORPUS, subagents.agent(CORPUS, writer.agent_id)["chat"])
+    assert (meta["status"], meta["stopped_by"]) == ("stopped", "plan")
+    assert meta["result"] == subagents.plan_line("writer") and "Write again" in meta["result"]
+    assert "shift+tab" in subagents.plan_line("orientation") and "message" in subagents.plan_line("orientation")
+    assert ("writer", 0, "stopped", subagents.plan_line("writer")) in ended
+    assert len(bridge.ops("spawn")) == spawns, "nothing starts again by itself"
+    again = await subagents.start_job(CORPUS, "writer", "writer:notes", "w", {}, subagents.CLICK)
+    bridge.answers.append({"error": "TaskStop failed for another reason"})
+    assert await subagents.stop_for_plan(CORPUS) == []
+    assert subagents.agent(CORPUS, again.agent_id)["stopped_by"] is None, "a stop that failed leaves it running"
+
+
+async def test_main_s_move_into_plan_mode_stops_thimble_s_agents_once(bridge, models, monkeypatch):
+    """The trigger: main's hooks or thimble's module report plan mode (session.note_mode, note_plan) after another
+    mode, and the stop runs once; staying in plan mode, or leaving it, stops nothing."""
+    from app import session
+
+    calls: list[str] = []
+
+    async def fake(c):
+        calls.append(c)
+        return []
+
+    monkeypatch.setattr(subagents, "stop_for_plan", fake)
+    await subagents.start_job(CORPUS, "writer", "writer:report", "w", {}, subagents.CLICK)
+    lv = session.Live(CORPUS, "sid-plan", "/c", None, None)
+    session._live[CORPUS] = lv
+    monkeypatch.setattr(session, "_keep_mode", lambda c, sid, mode: None)
+    try:
+        session.note_mode(CORPUS, "sid-plan", "auto")
+        session.note_mode(CORPUS, "sid-plan", "plan")
+        session.note_plan(CORPUS, "sid-plan", True)
+        await asyncio.sleep(0)
+        assert calls == [CORPUS]
+        session.note_plan(CORPUS, "sid-plan", False)
+        session.note_mode(CORPUS, "sid-plan", "plan")
+        await asyncio.sleep(0)
+        assert calls == [CORPUS, CORPUS], "a second move into plan mode stops again"
+    finally:
+        session._live.pop(CORPUS, None)
+        session._modes.pop(CORPUS, None)
+
+
 async def test_rekey_moves_the_running_agents_and_their_chats_to_the_new_session(bridge, models):
     started = await subagents.start_job(CORPUS, "writer", "writer:report", "w", {}, subagents.CLICK)
     with subagents.update(CORPUS) as state:
@@ -425,10 +524,10 @@ async def test_a_call_runs_as_its_agent_s_key_and_a_descendant_s_as_its_ancestor
     started = await subagents.start_job(CORPUS, "writer", "writer:report", "w", {}, subagents.CLICK)
     ws = config.workspace_dir(CORPUS)
     with subagents.update(CORPUS) as state:
-        sf.registry(state)["helper1"] = {"type": "thimble:helper", "role": "helper", "parent": started.agent_id,
+        sf.registry(state)["helper1"] = {"type": "thimble:orient-helper", "role": "orient-helper", "parent": started.agent_id,
                                          "root": started.agent_id, "status": "running", "descendant": True}
     sf.add_caller(ws, "toolu_w", started.agent_id, "thimble:writer")
-    sf.add_caller(ws, "toolu_h", "helper1", "thimble:helper")
+    sf.add_caller(ws, "toolu_h", "helper1", "thimble:orient-helper")
     who = await subagents.caller(CORPUS, "toolu_w")
     assert who.key == "writer:report" and who.role == "writer"
     helper = await subagents.caller(CORPUS, "toolu_h")
@@ -485,6 +584,26 @@ async def test_main_s_own_call_runs_at_once_and_a_subagent_s_is_found_by_its_tra
         assert who is not None and who.key == "orient", "a subagent's call is found by the transcript that holds it"
     finally:
         session._live.pop(CORPUS, None)
+
+
+async def test_a_thread_s_fork_s_start_tool_call_is_refused_at_once_and_another_subagent_s_runs(bridge, monkeypatch):
+    """U5: Claude Code tells a thread's fork not to start subagents (its fork boilerplate; live: the fork would not
+    make the Agent call), so a fork's call of a start tool is refused at once with a plain line that names Start and
+    Write in the browser; nothing is recorded. A subagent of main's own (general-purpose) makes the call itself, so its
+    start tool call runs, and its other thimble calls run as main's for a fork too."""
+    from app import tools
+
+    ws = config.workspace_dir(CORPUS)
+    sf.add_caller(ws, "toolu_fork_sw", "fork1", "fork")
+    sf.add_caller(ws, "toolu_gp_sw", "gp1", "general-purpose")
+    sf.add_caller(ws, "toolu_fork_card", "fork1", "fork")
+    for name in ("start_writing", "start_orientation", "propose_view", "run_check"):
+        refused, _ = await tools._as_caller(CORPUS, name, "toolu_fork_sw")
+        assert refused == tools.hint("start-refused-fork"), name
+    assert "Start" in refused and "Write" in refused and "browser" in refused
+    assert await tools._as_caller(CORPUS, "start_writing", "toolu_gp_sw") == ("", None)
+    assert await tools._as_caller(CORPUS, "add_card", "toolu_fork_card") == ("", None)
+    assert not subagents.read(CORPUS).get("requests")
 
 
 def test_the_shim_of_main_lists_every_tool_and_the_critique_among_them():

@@ -221,11 +221,11 @@ def _at(s: float) -> str:
 
 def test_the_first_listing_must_hold_every_type_and_no_terminal_line():
     rows = [{"type": "attachment", "attachment": {"type": "agent_listing_delta", "isInitial": True,
-                                                  "addedTypes": ["Explore", "thimble:writer", "thimble:helper"]}},
+                                                  "addedTypes": ["Explore", "thimble:writer", "thimble:orient-helper"]}},
             {"type": "attachment", "attachment": {"type": "agent_listing_delta", "isInitial": False,
                                                   "addedTypes": ["thimble:critic"]}}]
     listing = cm.first_listing(rows)
-    ok, detail = cm.check_listing(listing, ["thimble:writer", "thimble:helper"], ["writer", "check"], "")
+    ok, detail = cm.check_listing(listing, ["thimble:writer", "thimble:orient-helper"], ["writer", "check"], "")
     assert ok and "thimble:check" in detail  # a role subagents.TYPES lacks is named, not required
     assert not cm.check_listing(listing, ["thimble:writer", "thimble:critic"], [], "")[0]
     assert not cm.check_listing(listing, ["thimble:writer"], [], "⎿  4 agent types available")[0]

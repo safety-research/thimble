@@ -117,7 +117,7 @@ session you start with `thimble`. Claude Code's agent tray (↓) lists them, and
 - **Models and efforts.** Each agent runs on exactly the model and effort that Settings name for it, and a change
   applies to the next start, with no restart. Start, `/thimble:orient --model <model> --effort <level>` and the start
   tools take a model and an effort for one run. The orientation's own subagents run on the "orientation subagents" row
-  when it starts them as `thimble:helper`; one it starts as another type runs on the orientation's own model and
+  when it starts them as `thimble:orient-helper`; one it starts as another type runs on the orientation's own model and
   effort. A follow-up runs on its run's model and effort, except one typed in the terminal to an agent started from
   the browser after that role's settings changed, which runs on the new ones; its thread says so. The launcher unsets
   `CLAUDE_CODE_EFFORT_LEVEL` (passing it on as your session's own effort), `CLAUDE_CODE_SUBAGENT_MODEL` and

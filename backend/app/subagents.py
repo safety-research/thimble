@@ -1,7 +1,7 @@
 """thimble's agents as subagents of the analyst's Claude Code session (main): the orientation, its critic, the writers,
 the view builders and reviewers (dev.py, view_review.py), the runs of report checks (checks.py) and the agents of code
 tickets (dev.py, ticket_tools.py). Each is a named subagent with a fresh context, of a type thimble's plugin module
-registers (`thimble:<role>`, roles); the orientation's own subagents run as `thimble:helper`.
+registers (`thimble:<role>`, roles); the orientation's own subagents run as `thimble:orient-helper`.
 
 Starts. A click in the browser (Start, Write, Start it, …) starts its agent through the plugin's module, with no turn of
 main: start_job writes the pending request, then asks the module (module_bridge.request) to spawn it, and the module's
@@ -83,6 +83,14 @@ STOPPED_REFUSED = "refused"
 # more ("Agent … was stopped by the user and won't be resumed"), unlike one a TaskStop stopped (live check L9)
 STOPPED_USER = "user"
 CANCELLED = "stopped-by-user"  # a chat's `continue` then: no follow-up can reach it
+# `stopped_by` of an agent thimble stopped through the module when main went into plan mode (U4), where a subagent would
+# have to ask before every step: a TaskStop, so a follow-up continues it once the analyst leaves plan mode
+STOPPED_PLAN = "plan"
+PLAN_STOPPED_LINE = ("Stopped when your Claude Code session went into plan mode, where thimble's agents would have to ask "
+                     "you before every step. Leave plan mode (shift+tab in your terminal), then {how}.")
+PLAN_HOW = {"orientation": "send it a message to continue it", "critic": "send the orientation a message to continue it",
+            "writer": "choose Write again", "view-builder": "choose Retry on the view",
+            "view-reviewer": "choose Review again on the view", "check": "choose Run on the check"}
 USER_STOP_RE = re.compile(r"stopped by (the )?user", re.I)  # Esc's task notification and a SendMessage's error say so
 QUIT_LINE = "Stopped when Claude Code quit."  # a chat's end line, its card's text is the browser's (AgentCard)
 WORK_DIRS = ("orient/work", "writers", "critique-work", "check-work", "views-work", "extension/views")
@@ -190,11 +198,11 @@ def own_tools(role: str) -> tuple[str, ...] | None:
 
 
 def helper_definition(c: str) -> dict[str, Any]:
-    """thimble:helper, the type of the orientation's own subagents (Q10): general-purpose tools, and the fixed
-    description and short prompt of prompts/helper.md (its frontmatter and body)."""
+    """thimble:orient-helper, the type of the orientation's own subagents (Q10): general-purpose tools, and the fixed
+    description and short prompt of prompts/orient-helper.md (its frontmatter and body)."""
     from . import prompts  # noqa: PLC0415
 
-    front, body = prompts.frontmatter("helper")
+    front, body = prompts.frontmatter(HELPER)
     return {"description": str(front.get("description") or "").strip(), "prompt": body.strip()}
 
 
@@ -587,10 +595,36 @@ def call_input(role: str, prompt: str, description: str) -> dict[str, Any]:
     return {"subagent_type": type_name(role), "description": description, "prompt": prompt}
 
 
+def fork_call(c: str, call: str | None) -> bool:
+    """Whether the thimble call `call` is a thread's fork's (the caller hook's line names its type, FORK_TYPE)."""
+    line = files.find_caller(ws(c), call or "") if call else None
+    return bool(line) and str(line.get("agent_type") or "") == files.FORK_TYPE
+
+
+async def typed_caller(c: str, call: str | None) -> str | None:
+    """The subagent that made the start tool call `call`, when it is no agent of thimble's: a thread's fork, or a
+    subagent of main's own. Its agent id, which a typed start's request keeps (`caller_agent`), so that its own Agent
+    call claims the request and the agent becomes its child, as Claude Code lets a subagent start subagents (U5). Read
+    from the caller hook's line, else from the mirror's search of the transcripts (session.call_holder). None for main's
+    own call, and for one of thimble's agents or their descendants, whose starts are their role's (`caller_role`)."""
+    from . import session  # noqa: PLC0415
+
+    if not call:
+        return None
+    line = files.find_caller(ws(c), call)
+    agent_id = str((line or {}).get("agent_id") or "")
+    if not agent_id:
+        held = await session.call_holder(c, call, CALLER_WAIT_S)
+        agent_id = str(held.agent_id or "") if isinstance(held, session.Sub) else ""
+    if not agent_id or agent(c, agent_id) is not None:
+        return None
+    return agent_id
+
+
 async def start_job(c: str, role: str, key: str, task: str, values: dict[str, Any], route: str, *,
                     description: str = "", request_id: str | None = None, chat: dict[str, Any] | None = None,
                     work: Path | str | None = None, call: str | None = None, caller_role: str | None = None,
-                    check: bool = True) -> Answer:
+                    check: bool = True, fields: dict[str, Any] | None = None) -> Answer:
     """One start of any role, for the agent of `key`, with the prompt `task` and the run's values. A click or a
     follow-on start writes the pending request, then asks the module to spawn it, and answers what the module did
     (Answer); a typed one records the request and answers the exact Agent call for the start tool's result. Without a
@@ -599,7 +633,9 @@ async def start_job(c: str, role: str, key: str, task: str, values: dict[str, An
     (request_id), for a prompt that names it. `chat` holds the fields of the agent's chat (its title, a
     writer's document), `work` its work folder (the scratch folders of its subagents), `call` the start tool's call
     in main (R3), and `caller_role` the role of the agent that makes a typed call itself (the critic's start, made by
-    the orientation)."""
+    the orientation). A typed start whose tool call a thread's fork or another subagent of main's made keeps that
+    subagent (`caller_agent`, typed_caller): only its Agent call claims the request. `fields` are more fields of the
+    request, such as an orientation's continuation's `continues` (ensure_chat)."""
     if role not in TYPES or role == HELPER:
         raise ValueError(f"no role {role!r}")
     if check and not caller_role:
@@ -609,8 +645,10 @@ async def start_job(c: str, role: str, key: str, task: str, values: dict[str, An
     rid = request_id or files.request_id()
     prompt = with_request_line(task, rid) if route == TYPED else task
     inp = call_input(role, prompt, description or role)
+    caller_agent = await typed_caller(c, call) if route == TYPED and not caller_role else None
     rid = new_request(c, "start", key, inp, values, route, role=role, rid=rid, chat=dict(chat or {}),
-                      work=str(work) if work else None, call=call, caller_role=caller_role)
+                      work=str(work) if work else None, call=call, caller_role=caller_role,
+                      **({"caller_agent": caller_agent} if caller_agent else {}), **(fields or {}))
     if route == TYPED:
         if work:
             make_work(c, Path(work))
@@ -721,32 +759,66 @@ async def send(c: str, agent_id: str, text: str, *, values: dict[str, Any] | Non
     return Answer({**ans, "request": rid})
 
 
+def plan_line(role: str | None) -> str:
+    """The line a run thimble stopped when main went into plan mode ends with, in its thread and on its card: why, and
+    how to go on once main leaves plan mode (PLAN_HOW)."""
+    return PLAN_STOPPED_LINE.format(how=PLAN_HOW.get(str(role or ""), "start it again"))
+
+
 def stop_done(text: str) -> bool:
     """Whether a failed TaskStop says its agent had ended already, so the stop counts as done (U5)."""
     low = text.lower()
     return "is not running" in low or "no task found" in low
 
 
-async def stop(c: str, agent_id: str) -> Answer:
-    """Stop an agent through the module (TaskStop), and the background shells it started (add_shell). Refused when the
-    module is not live: the card then says to press Esc in the agent's view. An agent that had ended already counts as
-    stopped."""
+async def stop(c: str, agent_id: str, who: str = STOPPED_ANALYST) -> Answer:
+    """Stop an agent through the module (TaskStop), and the background shells it started (add_shell), as the analyst's
+    Stop (`who` analyst) or for main's plan mode (`who` plan, marked before the call, so that its end, which may come
+    first, reads it). Refused when the module is not live: the card then says to press Esc in the agent's view. An
+    agent that had ended already counts as stopped."""
     from . import module_bridge  # noqa: PLC0415
 
     a = agent(c, agent_id) or {}
     if not module_bridge.live(c):
         return refusal(NO_MODULE, str(module_bridge.why_not(c) or ""))
+    if who != STOPPED_ANALYST:
+        mark_stopped_by(c, agent_id, who)
     rid = new_request(c, "stop", a.get("key"), {"task_id": agent_id}, None, CLICK, role=a.get("role"), agent=agent_id)
     ans = await _bridge(c, "stop", agent=agent_id, request=rid, shells=list(a.get("shells") or []))
     if ans.refused and (ans.get("gone") or stop_done(ans.reason)):
         ans = Answer({"agentId": agent_id, "done": True})
     _set(c, rid, state="done" if not ans.refused else "refused", at=files.now(), reason=ans.reason or None)
     if not ans.refused:
-        mark_stopped_by(c, agent_id, STOPPED_ANALYST)
+        mark_stopped_by(c, agent_id, who)
+    elif who != STOPPED_ANALYST and (agent(c, agent_id) or {}).get("status") in ("running", "waiting"):
+        mark_stopped_by(c, agent_id, None)  # it runs on
     return Answer({**ans, "request": rid})
 
 
-def mark_stopped_by(c: str, agent_id: str, who: str) -> None:
+async def stop_for_plan(c: str) -> list[str]:
+    """Main went into plan mode while thimble's agents ran (U4): each running agent of thimble's roles is stopped through
+    the module, as the browser's Stop stops it, which leaves it able to continue, marked `stopped_by: plan`, so its run
+    ends with plan_line (run_ended) and its thread and card say why and how to go on once main leaves plan mode. A
+    child before its parent (the critic before the orientation). Nothing starts again by itself. The ids stopped."""
+    running = [k for k, a in agents_of(c).items() if a.get("role") in ROLES and a.get("status") in ("running", "waiting")]
+    running.sort(key=lambda k: 0 if str((agent(c, k) or {}).get("parent") or "") in running else 1)
+    stopped_ids = []
+    for agent_id in running:
+        try:
+            ans = await stop(c, agent_id, who=STOPPED_PLAN)
+        except Exception:  # noqa: BLE001 — the others are stopped either way
+            log.exception("%s: %s was not stopped for plan mode", c, agent_id)
+            continue
+        if ans.refused:
+            log.warning("%s: %s was not stopped for plan mode: %s", c, agent_id, ans.reason)
+            continue
+        stopped_ids.append(agent_id)
+    if stopped_ids:
+        log.info("%s: main went into plan mode, so thimble stopped %s", c, ", ".join(stopped_ids))
+    return stopped_ids
+
+
+def mark_stopped_by(c: str, agent_id: str, who: str | None) -> None:
     with update(c) as state:
         a = files.registry(state).get(agent_id)
         if isinstance(a, dict):
@@ -883,6 +955,9 @@ def ensure_chat(c: str, agent_id: str) -> dict[str, Any] | None:
         if meta is not None:
             return meta
     r = request(c, str(a.get("request") or "")) or {}
+    cont = r.get("continues") if isinstance(r.get("continues"), dict) else {}
+    if cont.get("chat") and agents.meta_or_none(c, str(cont["chat"])) is not None:
+        return _continue_chat(c, agent_id, a, r, t, str(cont["chat"]), int(cont.get("run") or 1))
     fields = dict(r.get("chat") or {})
     title = str(fields.pop("title", "") or t.role)
     parent = str(fields.pop("parent", "") or agents.MAIN_ID)
@@ -911,6 +986,38 @@ def ensure_chat(c: str, agent_id: str) -> dict[str, Any] | None:
         except Exception:  # noqa: BLE001 — the chat is made either way
             log.exception("%s: the %s's start handler failed", c, t.role)
     return meta
+
+
+def _continue_chat(c: str, agent_id: str, a: dict[str, Any], r: dict[str, Any], t: Type, chat: str,
+                   k: int) -> dict[str, Any] | None:
+    """A continuation's agent (U2: an orientation stopped with Esc, which Claude Code resumes no more) takes up the
+    stopped run's chat as its run `k`: the chat names the new agent and runs again, the registry entry carries the chat,
+    the run and `continues`, so the mirror shows its prompt not as a message (session._thimble_sub), and the role's
+    start handler sees run k > 0 with the request."""
+    from . import session  # noqa: PLC0415
+
+    sid = (a.get("sessions") or [""])[-1] or (session.current(c).sid if session.current(c) is not None else "")
+    old = agents.meta_or_none(c, chat) or {}
+    sessions = [*[x for x in old.get("sessions") or [] if x and x != sid], *([sid] if sid else [])]
+    agents.update_agent(c, chat, agent_id=agent_id, agent_type=type_name(t.role), values=a.get("values") or {},
+                        session=sid or old.get("session"), sessions=sessions, request=a.get("request"), run=k,
+                        status="running", ts_end=None, result=None, stopped_by=None, paused=None, plan_mode=None,
+                        started_by=CLICK if a.get("route") in (CLICK, FOLLOW_ON) else TYPED,
+                        tool_use_id=r.get("claimed_by"), **{"continue": None})
+    with update(c) as state:
+        reg = files.registry(state)
+        if isinstance(reg.get(agent_id), dict):
+            reg[agent_id].update(chat=chat, run=k, continues=r.get("continues"))
+        snap = dict(reg.get(agent_id) or {**a, "chat": chat, "run": k})
+    run = _run(c, agent_id, {**snap, "chat": chat, "run": k})
+    with contextlib.suppress(Exception):
+        session.expect_agent(c, agent_id, chat, t.chat_role)
+    if run is not None and t.started:
+        try:
+            _resolve(t.started)(c, run, r)
+        except Exception:  # noqa: BLE001 — the chat runs either way
+            log.exception("%s: the %s's start handler failed for its continuation", c, t.role)
+    return agents.meta_or_none(c, chat)
 
 
 def run_again(c: str, agent_id: str, by: str = "") -> Run | None:
@@ -1014,6 +1121,10 @@ def run_ended(c: str, agent_id: str, status: str, report: str | None, *, source:
         snap = dict(a)
     log.info("%s: %s %s run %s ended %s (%s)", c, snap.get("role") or "agent", agent_id, snap.get("run"), status,
              source or "?")
+    plan = status == "stopped" and snap.get("stopped_by") == STOPPED_PLAN
+    if plan:  # stopped for main's plan mode (U4): its thread says why and how to go on; no end handler takes it as the
+        # analyst's Stop (the orientation's views and report go on once it is continued)
+        report, interrupted = plan_line(snap.get("role")), True
     t = TYPES.get(str(snap.get("role") or ""))
     if snap.get("chat") and not (t is not None and t.keeps_chat):
         try:
@@ -1322,11 +1433,21 @@ async def denied_route(body: HookBody) -> dict[str, Any]:
 
 @router.post("/subagents/stopped")
 async def stopped_route(body: HookBody) -> dict[str, Any]:
-    """SubagentStop: a turn's end of a registered agent (stopped)."""
+    """SubagentStop: a turn's end of a registered agent (stopped), or of a subagent that is no agent of thimble's whose
+    typed starts the hook refused as never claimed (`refused`, subagent_files.refuse_unclaimed): their role's refusal
+    handler tells the browser."""
     c = _workspace(body)
     if body.hook.get("stop_hook_active") or not str(body.hook.get("agent_type") or ""):
         return {}
-    stopped(c, str(body.hook.get("agent_id") or ""))
+    for rid in [str(x) for x in body.hook.get("refused") or [] if x]:
+        r = request(c, rid)
+        if r is not None and r.get("state") == "refused":
+            log.info("%s: the typed start %s of %s was never made: %s", c, rid, body.hook.get("agent_id"),
+                     str(r.get("reason") or "")[:200])
+            _refused(c, {**r, "id": rid})
+    agent_id = str(body.hook.get("agent_id") or "")
+    if agent(c, agent_id) is not None:
+        stopped(c, agent_id)
     return {}
 
 

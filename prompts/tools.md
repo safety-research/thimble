@@ -1122,6 +1122,10 @@ Your Claude Code session is in plan mode, where thimble's agents would have to a
 
 This session was not started with `thimble`, so it and its subagents run without thimble's sandbox and can change your files, and thimble's agents cannot start in it. Quit and run `thimble` in this folder.
 
+## start-refused-fork
+
+A thread's fork cannot start thimble's agents, since Claude Code does not let a fork start subagents. Tell the analyst in one line in the thread that they can start it in the browser: Start for the orientation, or Write on a document for its writer.
+
 ## start-refused-no-module
 
 thimble's agents can't start in this session: Claude Code's hooks modules are off ({reason}). Main, its threads, cards and labels still work. Once modules are on, quit and run `thimble -c` in this folder.
@@ -1492,7 +1496,39 @@ This orientation ran in an earlier version of thimble and cannot be continued. S
 
 ## orient-continue-stopped-by-user
 
-This orientation was stopped with Esc in your terminal, and Claude Code does not continue an agent stopped that way. Start a new orientation to explore further.
+This orientation was stopped with Esc in your terminal, and Claude Code does not continue an agent stopped that way. A message to it starts a new run in its thread that takes up its work.
+
+## message_orientation-continues
+
+The analyst stopped this orientation with Esc in their terminal, and Claude Code does not continue an agent stopped that way. So thimble continues it as a new orientation run in its thread, which gets the message and what the stopped run left. Start that run now with one Agent call whose input is exactly this:
+
+{input}
+
+Change nothing in it, since thimble lets only this call through, and end the turn on it, with no words before or after it: the terminal and the browser both show the call.
+
+## orient-continuation-prompt
+
+[thimble request {request_id}]
+
+The analyst stopped the earlier run of this orientation with Esc in their terminal, and Claude Code does not continue a run stopped that way. You are a new run in its place, in the same thread. Take up its work from where it stopped, and do not do again what it did. What it left:
+
+Its last text: {summary}
+
+Its cards:
+{cards}
+
+Its transcript, which you can read for what it did and found:
+{transcripts}
+
+The outputs this run leaves, of those `### Outputs` describes: {outputs}. The ones it leaves out, whose parts of `### Outputs` do not apply: {off}. The critique: {critique}.
+
+The analyst's message:
+
+{message}
+
+## orient-continuation-none
+
+none
 
 ## message_orientation-none
 

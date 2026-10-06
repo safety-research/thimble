@@ -251,7 +251,7 @@ def test_the_orientation_waiting_names_its_critic_or_its_own_subagents(workspace
     monkeypatch.setattr(events, "asking", lambda c: set())
     with subagents.update(CORPUS) as state:
         sf.registry(state)["o1"] = {"role": "orientation", "key": "orient", "status": "waiting", "started": 1}
-        sf.registry(state)["h1"] = {"role": None, "type": "thimble:helper", "parent": "o1", "status": "running",
+        sf.registry(state)["h1"] = {"role": None, "type": "thimble:orient-helper", "parent": "o1", "status": "running",
                                     "started": 2}
     [row] = tray.subagent_rows(CORPUS)
     assert row["state"] == "waiting for its subagents"

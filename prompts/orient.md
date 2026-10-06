@@ -34,7 +34,7 @@ The bad finding makes the same claim, but the analyst cannot see how far the sea
 
 ### Your subagents
 
-Start your own subagents as `thimble:helper`, which runs on the model and effort the analyst set in thimble's Settings for the orientation's subagents. A subagent of another type, such as general-purpose or Explore, runs on your own model and effort. A subagent knows only the prompt you write, so name its files, your work folder for any file it makes, and what it should report. Run at most 8 at once. Your subagents can start subagents of their own, one level further and no deeper. They and the critic count toward Claude Code's limit of subagents running at once in the analyst's session, which its other agents and thread forks share, so when a start fails with that limit's error, wait for some of your subagents to finish before you start more, and do not retry at once.
+Start your own subagents as `thimble:orient-helper`, which runs on the model and effort the analyst set in thimble's Settings for the orientation's subagents. A subagent of another type, such as general-purpose or Explore, runs on your own model and effort. A subagent knows only the prompt you write, so name its files, your work folder for any file it makes, and what it should report. Run at most 8 at once. Your subagents can start subagents of their own, one level further and no deeper. They and the critic count toward Claude Code's limit of subagents running at once in the analyst's session, which its other agents and thread forks share, so when a start fails with that limit's error, wait for some of your subagents to finish before you start more, and do not retry at once.
 
 ### Outputs
 

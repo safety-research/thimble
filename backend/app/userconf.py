@@ -119,7 +119,7 @@ DEFAULTS: dict[str, Any] = {
     "extensions": {},
     "agents": {
         # the orientation's web, network and data are main's fence's (module note, one fence); subagentModel and
-        # subagentEffort are thimble:helper's, the type of the orientation's own subagents
+        # subagentEffort are thimble:orient-helper's, the type of the orientation's own subagents
         "orientation": {**_subagent("ask"), "network": "on", "data": "ask", "subagentModel": None,
                         "subagentEffort": None},
         "critic": _subagent(None),
@@ -654,7 +654,7 @@ def legacy_patch(models: dict[str, Any], rows: dict[str, Any]) -> dict[str, Any]
 
 def pane_patch(models: dict[str, Any] | None, rows: dict[str, Any] | None) -> dict[str, Any]:
     """The Settings pane's changes as settings of this file: `models` {role: {model?, effort?, fast?, off?}} (main's left
-    out, '' for back to the default; `subagents` is thimble:helper's row, the orientation's subagentModel and
+    out, '' for back to the default; `subagents` is thimble:orient-helper's row, the orientation's subagentModel and
     subagentEffort; `fast` only for an agent that takes it, `off` only for the refusal row; an extension's agent,
     "<ext>:<name>", takes its model and effort only) and `rows` {row of modes.AGENTS: mode, None for main's}, `views`
     being the dev agent's row of earlier builds. A row of an agent that runs in main's mode now, which an earlier tab may

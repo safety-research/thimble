@@ -37,7 +37,7 @@ If the file isn't valid JSON, or a key or value is unknown, no agent starts. The
 
 `agents` has one entry per agent:
 
-- **`orientation`**: the orientation. Its `data`, `web` and `network` also set the fence of your Claude Code session, which every one of thimble's agents shares, and its `subagentModel` and `subagentEffort` set `thimble:helper`, the type the orientation starts its own subagents as
+- **`orientation`**: the orientation. Its `data`, `web` and `network` also set the fence of your Claude Code session, which every one of thimble's agents shares, and its `subagentModel` and `subagentEffort` set `thimble:orient-helper`, the type the orientation starts its own subagents as
 - **`critic`**: the critique of the orientation, which runs only when Start's Critique and revise switch (off by default) or `/thimble:orient --critique` turns it on
 - **`writer`**: the report writers
 - **`checks`**: the report checks
@@ -67,8 +67,8 @@ An extension's agent has the entry `"<extension>:<agent>"`, such as `"swarm-orie
 | `memory` | `"inherit"`, `"on"`, `"off"` | `"inherit"` | Whether the agent reads CLAUDE.md files. `"off"` leaves them out of its context; `"on"` and `"inherit"` give it the CLAUDE.md files your session reads. |
 | `prompt` | a file path, or `null` | `null` | Replaces the agent's prompt file from thimble's `prompts/` folder (`orient.md`, `critic.md`, `writer.md`, `check.md`, `dev.md`, `labels.md`, `card-check.md`). Copy the original and edit it. It is filled in the same way, and relative paths are resolved from the config file's folder. A replacement prompt can drop the rules that keep an agent within its task. |
 | `auto` | `true`, `false`, `null` | `null`: on | Only for `cardCheck`: whether the card check reads each new card by itself. With `false`, a card is checked only when you click Check the card or Check again in its details. A card shows the check only for a real problem it found, as a red ✕ at its takeaway; a fix is applied in place, with Undo in the card's details. |
-| `subagentModel` | a model id, or `null` | `null`: the orientation's model | Only for `orientation`: the model of `thimble:helper`, the type the orientation starts its own subagents as. A subagent it starts as another type, such as general-purpose or Explore, runs on the orientation's own model and effort. |
-| `subagentEffort` | `"low"`, `"medium"`, `"high"`, `"xhigh"`, `"max"`, or `null` | `null`: the orientation's effort | Only for `orientation`: the effort of `thimble:helper`. |
+| `subagentModel` | a model id, or `null` | `null`: the orientation's model | Only for `orientation`: the model of `thimble:orient-helper`, the type the orientation starts its own subagents as. A subagent it starts as another type, such as general-purpose or Explore, runs on the orientation's own model and effort. |
+| `subagentEffort` | `"low"`, `"medium"`, `"high"`, `"xhigh"`, `"max"`, or `null` | `null`: the orientation's effort | Only for `orientation`: the effort of `thimble:orient-helper`. |
 
 ## What stays as it is
 

@@ -19,7 +19,7 @@ fallbacks, interrupts and long waits (read from `<claude config>/sessions/<pid>.
 Each subagent transcript becomes an agent chat, except `thread:<id>` subagents, which are that thread's fork
 (threads.py), and thimble's own agents (subagents.py): an agent of one of thimble's roles goes to its role's chat (made
 by subagents.ensure_chat from the module's answer, its SubagentStart or its transcript, since a plugin start leaves no
-record in main's transcript), and a descendant of one, a `thimble:helper` among them, is a step of its thimble
+record in main's transcript), and a descendant of one, a `thimble:orient-helper` among them, is a step of its thimble
 ancestor. The ends of their runs come from their hand-back (the SubagentHandback call in the agent's transcript, or the
 hand-back in main's), a task notification, or the hooks' and the module's turn ends (subagents.run_ended, stopped,
 ended); a message from main or the analyst to one that finished starts its next run (subagents.run_again). For a typed
@@ -179,6 +179,12 @@ class Sub:
         self.call_keys: dict[str, tuple[str, str]] = {}  # tool_use id -> its events.call_key (_results)
         self.on_results: Any = None  # told the calls whose results each read found, when set (_results)
         self.thimble: str | None = None  # the role of one of thimble's agents (subagents.TYPES), else None
+        # tool_use id -> input of an Agent call of this subagent for one of thimble's roles, when it is no agent of
+        # thimble's (a thread's fork): its result is watched as main's is (R2, _sub_start_result)
+        self.starts: dict[str, dict] = {}
+        # an orientation's continuation (U2): its first prompt is thimble's, holding the stopped run's context, and the
+        # analyst's message shows as the run's own (orient_session.subagent_started), so the prompt is no message
+        self.skip_prompt = False
         self.root: str | None = None  # the agent id of the thimble agent a descendant's chat is a step of
         self.last_text: str | None = None  # the last text it wrote, a turn's answer (agent_answer)
         # Claude Code's error line when the latest reply of its current run is an API error (isApiErrorMessage: a
@@ -564,8 +570,11 @@ def note_mode(c: str, sid: str | None, mode: str) -> None:
     lv = _live.get(c)
     if lv is None or not sid or lv.sid != sid or mode not in modes.CLAUDE_MODES:
         return
+    was = main_mode(c)
     _modes[c] = (sid, mode)
     _keep_mode(c, sid, mode)
+    if mode == PLAN_MODE and was != PLAN_MODE:
+        _plan_entered(c)
     meta = agents.meta_or_none(c, agents.MAIN_ID) or {}
     held = meta.get("attached") or {}
     if held.get("session") == sid and held.get("permission_mode") != mode:
@@ -575,6 +584,22 @@ def note_mode(c: str, sid: str | None, mode: str) -> None:
 
 
 _before_plan: dict[str, str] = {}  # workspace -> main's mode before thimble's module saw it go into plan mode
+PLAN_MODE = "plan"
+
+
+def _plan_entered(c: str) -> None:
+    """Main went into plan mode, where a subagent inherits it and would ask before every step (U20): thimble's running
+    agents are stopped through the module, as the browser's Stop stops them (subagents.stop_for_plan), and each thread
+    says why and how to go on once main leaves plan mode (U4). Nothing starts them again by itself."""
+    from . import subagents  # noqa: PLC0415
+
+    if not any(a.get("status") in ("running", "waiting") for a in subagents.agents_of(c).values()
+               if a.get("role") in subagents.ROLES):
+        return
+    try:
+        asyncio.get_running_loop().create_task(subagents.stop_for_plan(c), name=f"plan-stop:{c}")
+    except RuntimeError:  # no loop (a synchronous caller)
+        log.warning("%s: main went into plan mode, and no loop stops thimble's agents", c)
 
 
 def note_plan(c: str, sid: str | None, plan: bool) -> None:
@@ -1107,7 +1132,7 @@ def _no_call(lv: Live) -> None:
     said = "\n".join([ln for ln in lv.turn_text.strip().splitlines() if ln.strip()][:2])
     for rid, r in list(reqs.items()):
         if (isinstance(r, dict) and r.get("route") == subagents.TYPED and r.get("state") == "pending"
-                and r.get("call") in lv.turn_calls and not r.get("caller_role")):
+                and r.get("call") in lv.turn_calls and not r.get("caller_role") and not r.get("caller_agent")):
             subagents.refuse(lv.c, rid, said, subagents.NO_CALL)
 
 
@@ -1481,6 +1506,23 @@ def _thimble_result(lv: Live, tool_use_id: str, call: dict, content: Any, is_err
         subagents.refuse(lv.c, rid, m.group(1).strip() if m else text.strip(), kind)
 
 
+def _sub_start_result(lv: Live, tool_use_id: str, inp: dict, content: Any, is_error: bool) -> None:
+    """R2 for a subagent that is no agent of thimble's (a thread's fork, U5): the result of its Agent call for one of
+    thimble's roles. An error is a start that did not happen, its kind read from Claude Code's text (_refused_kind),
+    such as thimble's own deny of a call that differs from the one the start tool gave, or the concurrency limit."""
+    from . import subagents  # noqa: PLC0415
+
+    if not is_error:
+        return
+    rid = _request_of(lv, tool_use_id, AGENT_TOOLS[0], inp)
+    if rid is None:
+        return
+    text = response_text(content)
+    kind = _refused_kind(text)
+    m = AUTO_MODE_RE.search(text) if kind == subagents.AUTO_MODE else None
+    subagents.refuse(lv.c, rid, m.group(1).strip() if m else text.strip(), kind)
+
+
 def _refused_kind(text: str) -> str:
     """The kind of a start or message that did not happen, from the error Claude Code gave main's call: thimble's own
     --agent-check deny (hook), its concurrency limit (limit), a type no module registered (no-module), an agent of
@@ -1527,6 +1569,7 @@ def _thimble_sub(lv: Live, chat: str, agent_id: str, tool_use_id: str | None, ch
     a = subagents.agent(lv.c, agent_id) or {}
     if a.get("role") in subagents.ROLES:
         sub.thimble = str(a["role"])
+        sub.skip_prompt = bool(a.get("continues"))
         sub.of_main = not a.get("parent")
         up = subagents.agent(lv.c, str(a.get("parent") or "")) or {}
         if sub.thimble == "orientation":
@@ -1570,6 +1613,10 @@ def expect_agent(c: str, agent_id: str, chat: str, chat_role: str) -> None:
         lv.subs.append(sub)
     elif sub.chat != chat:
         sub.chat, sub.rec = chat, agents.Recorder(c, chat)
+        if sub.offset == 0:  # found before its chat: an orientation's continuation goes to the stopped run's (U2)
+            from . import subagents  # noqa: PLC0415
+
+            sub.skip_prompt = bool((subagents.agent(c, agent_id) or {}).get("continues"))
     lv.wake.set()
 
 
@@ -1649,6 +1696,14 @@ def thread_for(c: str, description: Any) -> str | None:
     if tid and not threads.is_thread(c, tid):
         tid = _event_threads.get(tid) or threads.by_fork_name(c, tid)
     return tid if tid and threads.is_thread(c, tid) else None
+
+
+def chat_of_agent(c: str, agent_id: str | None) -> str | None:
+    """The chat the mirror writes the subagent `agent_id` into (a thread's fork: its thread), or None when it follows
+    no such subagent."""
+    lv = _live.get(c)
+    sub = _sub_by(lv, agent_id=agent_id) if lv is not None and agent_id else None
+    return sub.chat if sub is not None else None
 
 
 def _sub_by(lv: Live, *, tool_use_id: str | None = None, agent_id: str | None = None) -> Sub | None:
@@ -1934,6 +1989,13 @@ def _tail_sub(lv: Live, sub: Sub) -> int:
     sub.buf = lines.pop()
     if sub.skip_before is not None:
         lines = _after_move(sub, lines)
+    if not sub.done and sub.thimble and sub.agent_id and any(b'"coordinator"' in ln or b'"human"' in ln for ln in lines):
+        from . import subagents  # noqa: PLC0415
+
+        if (subagents.agent(lv.c, str(sub.agent_id)) or {}).get("status") not in ("running", "waiting"):
+            # its run ended by a sign the mirror did not read (the module's turn end, a TaskStop's notification: the
+            # browser's Stop, or thimble's stop for plan mode), so a message now starts its next run (_revive)
+            sub.done = True
     if sub.done and not sub.thread and sub.owner is None and not sub.workflow:
         how = _resumed(lines, strict=bool(sub.thimble))
         if how:
@@ -2267,6 +2329,9 @@ def translate_sub(lv: Live, sub: Sub, line: bytes | str) -> int:
             if INTERRUPT_RE.match(prompt.strip()):
                 return 0  # the stop's own line: the chat's end says it was stopped
             sub.api_error = None  # a new run's prompt
+            if sub.skip_prompt:
+                sub.skip_prompt = False
+                return 0
             sub.rec.record("user", text=prompt.strip(), by=TERMINAL)
             return 1
     if rec.get("type") == "user":
@@ -2286,6 +2351,8 @@ def translate_sub(lv: Live, sub: Sub, line: bytes | str) -> int:
                 from . import subagents  # noqa: PLC0415
 
                 subagents.add_shell(lv.c, owner, shell.group(1))
+            if tid in sub.starts:
+                _sub_start_result(lv, tid, sub.starts.pop(tid), b.get("content"), bool(b.get("is_error")))
             sub.rec.tool_result(tid, data.pop("summary"), is_error=bool(data.pop("is_error", False)), by=TERMINAL,
                                 **{k: v for k, v in data.items() if k != "id"})
             if data.get("cell_id"):  # the card is this subagent's or this fork's, not main's
@@ -2327,6 +2394,11 @@ def translate_sub(lv: Live, sub: Sub, line: bytes | str) -> int:
             n_ = sub.calls.use(tid, name, b.get("input")) if sub.calls is not None else None
             sub.rec.tool_use(tid, name, b.get("input"), by=TERMINAL, **({"n": n_} if n_ else {}))
             inp = b.get("input") if isinstance(b.get("input"), dict) else {}
+            if name in AGENT_TOOLS and not sub.thimble and not sub.root:
+                from . import subagents  # noqa: PLC0415
+
+                if subagents.role_of(inp.get("subagent_type")):
+                    sub.starts[tid] = inp
             if name == HANDBACK_TOOL and str(inp.get("message") or "").strip():
                 sub.report = str(inp["message"]).strip()
                 if sub.thimble:  # auto mode: the run's end and its report (module note)

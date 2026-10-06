@@ -110,7 +110,7 @@ async def _call(tool: str, agent: str, tid: str, args: dict | None = None, n: li
     n[0] += 1
     use = f"toolu_k{n[0]:06d}"
     a = subagents.agent(CORPUS, agent) or {}
-    sf.add_caller(config.workspace_dir(CORPUS), use, agent, str(a.get("type") or "thimble:helper"))
+    sf.add_caller(config.workspace_dir(CORPUS), use, agent, str(a.get("type") or "thimble:orient-helper"))
     return await tools.call(CORPUS, tool, args or {}, session=dev.ticket_key(tid), tool_use_id=use)
 
 

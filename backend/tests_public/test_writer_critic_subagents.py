@@ -179,7 +179,7 @@ def test_the_digest_of_a_subagent_orientation_holds_its_descendants_found_by_par
         (folder / f"agent-{agent}.meta.json").write_text(json.dumps(meta))
 
     put("o1", "the orientation's own words", agentType="thimble:orientation")
-    put("h1", "a helper's words", agentType="thimble:helper", parentAgentId="o1", description="survey")
+    put("h1", "a helper's words", agentType="thimble:orient-helper", parentAgentId="o1", description="survey")
     put("g1", "a grandchild's words", agentType="Explore", parentAgentId="h1", description="look closer")
     put("x1", "another agent's words", agentType="general-purpose", description="not ours")
     chat = agents.new_agent(CORPUS, orientation.ROLE, orientation.TITLE, route="subagent", agent_id="o1",
