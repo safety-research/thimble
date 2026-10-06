@@ -207,7 +207,8 @@ def _finished(prop: dict[str, Any], agent_id: str) -> dict[str, Any] | None:
 async def tool_finish_view(ctx: Any, args: dict[str, Any]) -> Any:
     """`finish_view`: the builder's end. The gates of record run on the view's folder (views.gate, with the locators the
     builder last checked); a pass registers the view and tells main, a failure answers what failed and the attempt, and
-    the last failure, or a call after it, tells the builder to stop. The attempts are counted on the proposal."""
+    the last failure, or a call after it, tells the builder to stop, each of these as an error result. The attempts are
+    counted on the proposal."""
     from . import dev, views  # noqa: PLC0415
 
     try:
@@ -222,8 +223,8 @@ async def tool_finish_view(ctx: Any, args: dict[str, Any]) -> Any:
     if done is not None and done.get("result") == "pass":
         return tools.ok(tools.hint("finish-view-pass"))
     attempt = int(prop.get("attempt") or 0)
-    if attempt >= dev.MAX_ATTEMPTS:
-        return tools.ok(tools.hint("finish-view-stop"))
+    if attempt >= dev.MAX_ATTEMPTS:  # a failure's answer is an error result, so the build's thread marks it so
+        return tools.err(tools.hint("finish-view-stop"))
     attempt += 1
     views.update_proposal(c, slug, attempt=attempt)
     report = await views.gate(c, slug, views._kept_locators(c, slug))
@@ -242,9 +243,10 @@ async def tool_finish_view(ctx: Any, args: dict[str, Any]) -> Any:
     if attempt >= dev.MAX_ATTEMPTS:
         views.update_proposal(c, slug, finish={"agent": agent_id, "result": "stop", "report": lines[:dev.ERROR_CHARS]})
         stop_after_grace(c, key, agent_id)
-        return tools.ok(tools.hint("finish-view-stop"))
+        return tools.err(tools.hint("finish-view-stop"))
     views.update_proposal(c, slug, last_report=lines[:dev.ERROR_CHARS])
-    return tools.ok(tools.hint("finish-view-fail", report=lines, n=str(attempt), of=str(dev.MAX_ATTEMPTS)))
+    # an error result: the build's thread shows the failed gate on its finish_view row, not a ✓ (live check L25)
+    return tools.err(tools.hint("finish-view-fail", report=lines, n=str(attempt), of=str(dev.MAX_ATTEMPTS)))
 
 
 # --------------------------------------------------------------------------- view_pictures

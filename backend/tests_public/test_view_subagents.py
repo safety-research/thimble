@@ -270,12 +270,14 @@ async def test_finish_view_counts_the_attempts_and_a_call_after_the_last_runs_no
     for n in range(1, dev.MAX_ATTEMPTS):
         res = await _call("finish_view", {}, agent, key)
         assert f"attempt {n} of {dev.MAX_ATTEMPTS}" in res.text and "problem: the page says FAIL" in res.text
+        assert res.is_error, "a failed gate is an error result, which the build's thread marks failed (live check L25)"
     res = await _call("finish_view", {}, agent, key)
-    assert res.text.endswith(tools.hint("finish-view-stop"))
+    assert res.text.endswith(tools.hint("finish-view-stop")) and res.is_error
     gated = len(gates)
     _draft(slug)
     res = await _call("finish_view", {}, agent, key)
     assert res.text.endswith(tools.hint("finish-view-stop")) and len(gates) == gated, "no gate after the last attempt"
+    assert res.is_error
     assert _prop(slug)["status"] == "building" and views.read_built(CORPUS, slug) is None
 
 
