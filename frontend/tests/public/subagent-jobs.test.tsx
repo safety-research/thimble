@@ -7,6 +7,7 @@
 import { act } from 'react'
 import { buildStage } from '../../src/chat/ChatPanel.tsx'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
+import { ChipRow } from '../../src/chat/Rows.tsx'
 import { ViewChip, buildingText, failedWhy, queuedText } from '../../src/chat/ViewChip.tsx'
 import { ProposalOption } from '../../src/files/ViewsBar.tsx'
 import { bus } from '../../src/lib/bus.ts'
@@ -93,6 +94,19 @@ describe('a view build\'s chip', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+
+  test("an orientation's proposal that failed through its repairs: its thread's line shows the chip with ✕ and Retry (U3)", async () => {
+    proposals = [P('posts', { status: 'failed', repairs: 2, error: 'problem: the page says FAIL' })]
+    await act(async () => refreshProposals('jobs'))
+    const item = { kind: 'chip' as const, index: 3, chip: 'view_failed', text: 'The view posts did not pass its checks after 2 repairs, so it shows as failed: problem: the page says FAIL', ref: 'view:posts', view: 'posts' }
+    const el = await mount(<ChipRow item={item} ws="jobs" />)
+    await settle()
+    expect(el.querySelector('[data-chip="view_failed"]')?.textContent).toContain('after 2 repairs')
+    expect(el.querySelector('.view-chip')?.getAttribute('data-status')).toBe('failed')
+    await act(async () => el.querySelector<HTMLButtonElement>('.view-chip-retry')!.click())
+    await settle()
+    expect(posted.map(([url]) => url)).toEqual(['/api/ws/jobs/views/posts/build'])
   })
 
   test('a typed build auto mode refused offers Start it, which posts start-it', async () => {

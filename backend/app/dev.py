@@ -24,8 +24,8 @@ started through thimble's plugin module; main's propose_view gives main the exac
 writes the view's three files in the view's folder, checks its draft with the `view_check` tool as often as it wants,
 and calls `finish_view`, where the server runs the gates of record and counts its attempts (view_tools.py). Its end
 (build_ended, _settle) is the backstop: a builder that ended without a pass gets the gate once; an orientation's
-proposal that still fails gets up to VIEW_REPAIRS new builders started with what failed, and is then dropped quietly; a
-view the analyst asked for fails with Retry. A change to a built view goes to the view's last builder as a message when
+proposal that still fails gets up to VIEW_REPAIRS new builders started with what failed, and then fails with Retry,
+which the orientation's thread says (_repairs_failed); a view the analyst asked for fails with Retry at once. A change to a built view goes to the view's last builder as a message when
 it can still be reached in main's session, so it keeps its context, else to a new builder; a change that fails leaves
 the view as it was (views.end_revision). A pass starts the view's review (view_review.py). The orientation's Stop stops
 the builds of the views it proposed (stop_orientation_views); the Stop in a build's thread, or on its builder, ends the
@@ -2905,8 +2905,8 @@ async def _settle(c: str, slug: str, run: Any, status: str, report: str, why: st
       change, a replacement or a deletion that took it over leaves the view to what took over;
     - it ended without a pass and never called finish_view: the gate runs once, and a pass registers the view;
     - still not built: a change to a built view leaves the view as it was, an orientation's proposal gets up to
-      VIEW_REPAIRS new builders started with what failed, and then is dropped quietly, and a view the analyst asked for
-      fails with Retry."""
+      VIEW_REPAIRS new builders started with what failed, and then fails with Retry (_repairs_failed), and a view the
+      analyst asked for fails with Retry."""
     from . import subagents, view_review, views  # noqa: PLC0415
 
     prop = views.read_proposal(c, slug)
@@ -2966,7 +2966,7 @@ async def _settle(c: str, slug: str, run: Any, status: str, report: str, why: st
             log.info("%s: the repair of %s did not start: %s", c, slug, ans.reason)
         return
     if not prop.get("asked"):
-        _view_dropped(c, slug, shown, run.chat)
+        _repairs_failed(c, slug, shown, run.chat)
         return
     _view_failed(c, slug, shown, run.chat)
 
@@ -3148,31 +3148,41 @@ def _view_stopped(c: str, slug: str, chat: str | None = None) -> None:
         _close_chat({"workspace": c, "chat": chat}, "stopped", VIEW_STOPPED)
 
 
-# the line an orientation's thread gets for a proposal of its own that could not be built
-DROPPED_LINE = "The view {name} could not be built, so it was left out of the proposals: {why}"
-DROPPED_WHY_CHARS = 240
+# the line an orientation's thread gets for a proposal of its own whose build failed through its repairs, and its view
+# chip there with Retry (chat/ViewChip), since the proposal's own chip may be far up the thread
+REPAIRS_FAILED_LINE = "The view {name} did not pass its checks after {repairs}, so it shows as failed: {why}"
+FAILED_WHY_CHARS = 240
 
 
-def _view_dropped(c: str, slug: str, why: str, chat: str | None = None) -> None:
-    """An orientation's proposal whose build failed through its repairs is dropped quietly: its chat ends failed with
-    the reason and the orientation's thread gets one line. Nothing is chipped in main, since the analyst never asked for
-    it."""
+def _repairs_failed(c: str, slug: str, why: str, chat: str | None = None) -> None:
+    """An orientation's proposal whose build failed through its VIEW_REPAIRS repairs fails as a view the analyst asked
+    for does (_view_failed): its chip, in the views list and in the orientation's thread, shows ✕ with why and Retry,
+    which builds it again with its repairs. The orientation's thread also gets one line that says so, with the view's
+    chip. Nothing is chipped in main, since the analyst never asked for it."""
     from . import orientation, views  # noqa: PLC0415
 
-    prop = views.drop(c, slug, why) or {}
-    if chat:
-        _close_chat({"workspace": c, "chat": chat}, "failed", why)
+    _view_failed(c, slug, why, chat)
+    prop = views.read_proposal(c, slug) or {}
     reason = " ".join(str(why or "").split())
-    if len(reason) > DROPPED_WHY_CHARS:
-        reason = reason[: DROPPED_WHY_CHARS - 1].rstrip() + "…"
+    if len(reason) > FAILED_WHY_CHARS:
+        reason = reason[: FAILED_WHY_CHARS - 1].rstrip() + "…"
     orient = ((orientation.read_run(c) or {}).get("chats") or {}).get(orientation.ROLE)
     if not orient or agents.meta_or_none(c, str(orient)) is None:
         return
-    line = DROPPED_LINE.format(name=prop.get("name") or slug, why=reason or "its checks did not pass")
+    name = str(prop.get("name") or slug)
+    line = REPAIRS_FAILED_LINE.format(name=name, why=reason or "its checks did not pass",
+                                      repairs=f"{VIEW_REPAIRS} repair{'s' if VIEW_REPAIRS != 1 else ''}"
+                                      if VIEW_REPAIRS else "its build")
     try:
-        agents.Recorder(c, str(orient)).text(f"\n· {line}\n")
-    except Exception:  # noqa: BLE001 — the proposal is dropped either way
-        log.exception("could not note the dropped view %s/%s in the orientation's thread", c, slug)
+        _, log_path = agents.paths(c, str(orient))
+        agents.append(log_path, {"type": "chip", "ts": _now(), "kind": VIEW_FAILED_KIND, "text": line,
+                                 "ref": f"view:{slug}", "view": name})
+        agents._notify(c, str(orient))
+    except Exception:  # noqa: BLE001 — the proposal has failed either way
+        log.exception("could not note the failed view %s/%s in the orientation's thread", c, slug)
+
+
+VIEW_FAILED_KIND = "view_failed"  # the chip kind of REPAIRS_FAILED_LINE in the orientation's thread
 
 
 # --------------------------------------------------------------------------- an extension's program builds the view
@@ -3296,7 +3306,7 @@ async def program_build(c: str, slug: str, part: Any) -> None:
         _change_failed_chip(c, current, why)
         return
     if not current.get("asked"):
-        _view_dropped(c, slug, why, chat)
+        _repairs_failed(c, slug, why, chat)
         return
     _view_failed(c, slug, why, chat)
 

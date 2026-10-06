@@ -69,6 +69,8 @@ export interface ChipRow {
   writer?: string
   /** a follow-up that was not passed on (orient_session.not_passed_on): the message, which Send again sends */
   message?: string
+  /** the view a `view_failed` line names (backend dev._repairs_failed), whose chip it shows */
+  view?: string
 }
 export interface AgentRow {
   kind: 'agent'
@@ -191,7 +193,7 @@ export function foldRecords(records: readonly ChatRecord[], skip?: ReadonlySet<n
         return
       }
       case 'chip': {
-        rows.push({ kind: 'chip', index, chip: String(e.kind), text: chipText(String(e.kind), e.text), ref: e.ref, ts: e.ts, status: typeof e.status === 'string' ? e.status : undefined, chat: typeof e.chat === 'string' ? e.chat : undefined, generation: typeof e.generation === 'number' ? e.generation : undefined, writer: typeof e.writer === 'string' ? e.writer : undefined, message: typeof e.message === 'string' ? e.message : undefined })
+        rows.push({ kind: 'chip', index, chip: String(e.kind), text: chipText(String(e.kind), e.text), ref: e.ref, ts: e.ts, status: typeof e.status === 'string' ? e.status : undefined, chat: typeof e.chat === 'string' ? e.chat : undefined, generation: typeof e.generation === 'number' ? e.generation : undefined, writer: typeof e.writer === 'string' ? e.writer : undefined, message: typeof e.message === 'string' ? e.message : undefined, view: typeof e.view === 'string' ? e.view : undefined })
         return
       }
       case 'agent': {

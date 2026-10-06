@@ -17,7 +17,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from app import agents, config, dev, session, subagents, tools, view_review, view_tools, views
+from app import agents, config, dev, orient_session, orientation, session, subagents, tools, view_review, view_tools, views
 from app import subagent_files as sf
 from subagent_fakes import bridge, hints  # noqa: F401 — fixtures
 
@@ -429,8 +429,13 @@ async def test_a_builder_that_ends_without_finish_view_gets_the_gate_once(board,
     assert gates == [slug] and [k for k, _ in heard] == ["view"]
 
 
-async def test_an_orientation_s_failing_proposal_is_repaired_then_dropped_and_an_asked_one_fails_with_retry(
+async def test_an_orientation_s_failing_proposal_is_repaired_then_fails_with_retry_as_an_asked_one_does(
         board, bridge, gates, monkeypatch):
+    """U3: an orientation's proposal whose build fails gets VIEW_REPAIRS fresh builders; after the last one it fails
+    with Retry, never dropped: its chip shows ✕ (status failed, the gate's line as why) in the views list and in the
+    orientation's thread, which also gets one line with the view's chip. A view the analyst asked for fails at once."""
+    orient = agents.new_agent(CORPUS, orientation.ROLE, orientation.TITLE)["id"]
+    orientation._write_run(CORPUS, {"status": "running", "chats": {orientation.ROLE: orient}})
     slug = _propose(orientation=True)
     agent = await _started(slug, route=subagents.FOLLOW_ON)
     _draft(slug, "<p>FAIL</p>")
@@ -442,8 +447,17 @@ async def test_an_orientation_s_failing_proposal_is_repaired_then_dropped_and_an
         assert subagents.request(CORPUS, spawn["request"])["route"] == "follow-on"
         agent = _prop(slug)["agent_id"]
     subagents.run_ended(CORPUS, agent, "done", "It still fails.", source="handback")
-    await _until(lambda: _prop(slug).get("status") == "dropped", "the proposal was never dropped")
+    await _until(lambda: _prop(slug).get("status") == "failed", "the proposal never failed after its repairs")
     assert len(bridge.ops("spawn")) == dev.VIEW_REPAIRS + 1
+    assert "FAIL" in _prop(slug)["error"] and (views.views_dir(CORPUS) / slug).is_dir(), "its draft stays for Retry"
+    _, orient_log = agents.paths(CORPUS, orient)
+    [line] = [r for r in agents.read_events(orient_log) if r.get("kind") == dev.VIEW_FAILED_KIND]
+    assert line["ref"] == f"view:{slug}" and line["view"] == "Posts" and "FAIL" in line["text"]
+    assert f"after {dev.VIEW_REPAIRS} repairs" in line["text"]
+    assert orient_session.view_counts(CORPUS, None)["failed"] == 1, "the orientation's end line counts it as failed"
+    views.retry(CORPUS, slug, {})
+    assert (_prop(slug)["status"], _prop(slug)["repairs"]) == ("queued", 0), "Retry builds it again, with its repairs"
+    dev.stop_view(CORPUS, slug, dev.VIEW_STOPPED)
 
     asked = _propose("Threads", asked=True)
     theirs = await _started(asked)

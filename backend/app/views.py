@@ -2859,9 +2859,10 @@ def stop_build(c: str, slug: str) -> dict[str, Any]:
 
 
 def drop(c: str, slug: str, why: str) -> dict[str, Any] | None:
-    """Leave an orientation's proposal out once its build failed through its repairs (dev._view_dropped): the row stays
-    as `dropped` with the reason, so every chip that names it knows to hide, its draft folder is removed, and
-    `view {dropped}` goes on the stream. None when there is no such proposal."""
+    """Leave an orientation's proposal out once the analyst stopped the orientation before its view was built
+    (dev.stop_orientation_views): the row stays as `dropped` with the reason, so every chip that names it knows to hide,
+    its draft folder is removed, and `view {dropped}` goes on the stream. None when there is no such proposal. A
+    proposal whose build failed through its repairs is not dropped: it fails with Retry (dev._repairs_failed)."""
     prop = update_proposal(c, slug, status="dropped", error=" ".join(str(why or "").split())[:ERROR_MAX] or None)
     if prop is None:
         return None

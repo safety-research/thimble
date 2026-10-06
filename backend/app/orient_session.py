@@ -844,7 +844,8 @@ VIEW_LINES = {"built": "orient-views-built", "failed": "orient-views-failed", "b
 def view_counts(c: str, since: datetime | None) -> dict[str, int]:
     """The views the orientation proposed since `since`, by where their builds stand (built, failed, building; queued or
     held count as building; stopped, those the analyst's Stop dropped), and the viewers for file types it suggested.
-    Proposals main made at the analyst's request, and those dropped as they failed, are not counted."""
+    Proposals main made at the analyst's request are not counted; one that failed through its repairs counts as
+    failed."""
     from . import dev, views  # noqa: PLC0415
 
     counts = dict.fromkeys(VIEW_LINES, 0)
