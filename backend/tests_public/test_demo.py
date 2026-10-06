@@ -179,16 +179,15 @@ def test_write_dataset_writes_subfolders_and_empty_folders(tmp_path):
 
 
 def test_the_registry_pins_every_dataset_and_its_sources():
-    assert list(demo_data.DATASETS) == ["collusion-wiki", "mythos-5", "transluce-gov", "transluce-urlquery"]
+    assert list(demo_data.DATASETS) == ["collusion-wiki", "mythos-5", "transluce-urlquery"]
     for d in demo_data.DATASETS.values():
         assert d.expected and all(len(h) == 64 for h in d.expected.values())
         assert all(u.startswith("https://") for u in d.sources)
-    gov, uq = demo_data.DATASETS["transluce-gov"], demo_data.DATASETS["transluce-urlquery"]
-    assert len(gov.expected) == 91 and gov.folders == ("13-census",) and len(uq.expected) == 16
-    for d in (gov, uq):
-        assert d.sources[0].startswith("https://transluce.org/data/")
-        assert "Published by Transluce" in d.credit and "does not redistribute" in d.credit
-        assert d.licence.startswith("No licence stated")
+    uq = demo_data.DATASETS["transluce-urlquery"]
+    assert len(uq.expected) == 16
+    assert uq.sources[0].startswith("https://transluce.org/data/")
+    assert "Published by Transluce" in uq.credit and "does not redistribute" in uq.credit
+    assert uq.licence.startswith("No licence stated")
     # the repository's pre-caches read as this thimble reads them
     for name in demo.precaches(demo.PRECACHES):
         assert name in demo_data.DATASETS
@@ -579,7 +578,7 @@ def test_a_precache_carries_its_sources_notice_first_in_its_readme(tmp_path):
     assert json.loads((out / demo.MANIFEST).read_text())["notice"] == m["notice"]
     assert "session is not here" in readme and "measured no stretch of 400 characters or more" in readme
     assert "every stretch of 462 or more" in readme
-    out, _, m = made(tmp_path, where="t", name="transluce-gov")
+    out, _, m = made(tmp_path, where="t", name="transluce-urlquery")
     assert "Published by Transluce" in m["credit"] and "Published by Transluce" in (out / "README.md").read_text()
 
 

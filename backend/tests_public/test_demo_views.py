@@ -165,6 +165,6 @@ def test_a_view_that_would_not_pass_the_export_s_checks_is_refused_and_nothing_w
 
 def test_the_sync_script_maps_each_dataset_s_reviewed_views():
     text = (ROOT / "scripts" / "sync_demo_views.sh").read_text()
-    for ds in ("collusion-wiki", "mythos-5", "transluce-urlquery", "transluce-gov"):
+    for ds in ("collusion-wiki", "mythos-5", "transluce-urlquery"):
         assert f"    {ds}) echo " in text
     assert "demo_views.py" in text and "check_content.py" in text

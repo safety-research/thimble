@@ -91,7 +91,7 @@ usage: thimble [claude flags...]          start thimble in this folder: a new Cl
        thimble -c, --continue             continue the most recent thimble session in this folder
        thimble -r, --resume [value]       resume a conversation by session ID, or pick one
        thimble demo [name...] [--yes] [--dir <d>] [--attach | --no-attach]
-                                          download public datasets (collusion-wiki, mythos-5, transluce-gov,
+                                          download public datasets (collusion-wiki, mythos-5,
                                           transluce-urlquery), asking first, open each, and ask whether to
                                           attach a session
        thimble demo --export <workspace> <out> [--outputs-only]

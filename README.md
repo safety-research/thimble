@@ -86,7 +86,7 @@ claude
 | Command | What it does |
 |---|---|
 | `thimble` | start thimble in this folder; `thimble -c` continues the last thimble session here |
-| `thimble demo [<name>...]` | download public datasets (collusion-wiki, mythos-5, transluce-gov, transluce-urlquery) from their publishers, asking before each, and open each in the browser, on an orientation run ahead of time where [demos/](demos/README.md) has one; then asks whether to attach a Claude Code session (`cd <folder> && thimble` later, `thimble -c` to continue). `thimble demo --export <workspace> <out>` writes a workspace whole, with the transcripts of its sessions, and lists what it holds ([INSTALL.md](INSTALL.md#demo-datasets)) |
+| `thimble demo [<name>...]` | download public datasets (collusion-wiki, mythos-5, transluce-urlquery) from their publishers, asking before each, and open each in the browser, on an orientation run ahead of time where [demos/](demos/README.md) has one; then asks whether to attach a Claude Code session (`cd <folder> && thimble` later, `thimble -c` to continue). `thimble demo --export <workspace> <out>` writes a workspace whole, with the transcripts of its sessions, and lists what it holds ([INSTALL.md](INSTALL.md#demo-datasets)) |
 | `thimble list` | list the workspaces by id (each folder's, and its archived runs), when each was last used and its open sessions |
 | `thimble purge <id>... [-y] [--dry-run]` | delete workspaces or archived runs by id and print what was deleted (`--dry-run` only shows what would go); never your data folder or Claude Code's transcripts |
 | `thimble extension add <folder\|git URL>` | add an extension and switch it on, after showing what it gives |

@@ -124,9 +124,8 @@ each one written (backend/app/precached.py).
      presses Start as the browser does.
 
    Wait until it is done: its views built and its report written. Claude's cyber safeguards flag mythos-5 under Opus
-   5.5, and stopped an Opus 5.5 session that read a sample of transluce-gov (2026-10-06). On 2026-10-05, an earlier
-   demo dataset ran to the end on claude-opus-4-8, but the same safeguard stopped its critic, two verification agents
-   and one view build (the orientation's thread says so).
+   5.5. On 2026-10-05, an earlier demo dataset ran to the end on claude-opus-4-8, but the same safeguard stopped its
+   critic, two verification agents and one view build (the orientation's thread says so).
 3. Export it from the checkout: `thimble demo --export collusion-wiki demos/ --outputs-only` (the workspace's name, or
    its folder). This writes `demos/collusion-wiki/`, replacing an earlier pre-cache there. The export refuses, listing
    each finding, when a file copies a long stretch of the dataset, and while it finds your user name, another
@@ -144,8 +143,7 @@ each one written (backend/app/precached.py).
    When most of its records took one value, write that value as cover lines over the runs of lines that took it
    (backend/app/labels_store.py: `cover` lines, as a code label run over whole files writes its quiet value), keep the
    other rows, and export again. Every record then reads the same value and the counts are the same; a record a cover
-   holds reads with confidence 1 and is named by its line (`#L<n>`). transluce-gov's "request kind" is written this
-   way.
+   holds reads with confidence 1 and is named by its line (`#L<n>`).
 4. To show reviewed views in place of the ones the orientation built, run `scripts/sync_demo_views.sh --from <the
    THIMBLE_HOME that holds them>`. For each dataset it lists, it takes each reviewed view as thimble serves it there,
    names it as the dataset's view, stamps it with the digest of its files so that install shows it at once, drops the

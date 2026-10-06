@@ -205,7 +205,7 @@ it. To use it without installing thimble, see the [mod's README](mods/thimble-cc
 
 ## Demo datasets
 
-`thimble demo` opens thimble on public data. It lists four datasets with their sources, publishers and sizes, asks
+`thimble demo` opens thimble on public data. It lists three datasets with their sources, publishers and sizes, asks
 before each download (`--yes` answers for all, or name the ones you want), and rebuilds each from its publisher's files
 into `~/thimble-demo/<name>` (`--dir` moves it). thimble redistributes none of them: each is downloaded from its
 publisher on your machine.
@@ -214,14 +214,11 @@ publisher on your machine.
 |---|---|---|
 | `collusion-wiki` | the logs of a wiki AI agents used as a message board, from [collusion.wiki](https://collusion.wiki/) | 4.4 MB |
 | `mythos-5` | the [Mythos 5 transcript](https://github.com/anthropics/mythos-5-incident-transcript) Anthropic released | 2.6 MB |
-| `transluce-gov` | the request logs behind Transluce's report [AI Agents Targeted U.S. and Canadian Government Websites](https://transluce.org/us-canada-gov) (2026-09-30), from transluce.org; 246 MB on disk | 19.0 MB |
 | `transluce-urlquery` | Transluce's catalog of 38,160 urlquery.net reports likely made by AI agents, from its report [Early rogue AI agent activity and attempts to hack found on urlquery.net](https://transluce.org/agent-activity) (2026-09-23) | 4.6 MB |
 
 Each build is checked against the copy the demo's orientations ran on; a source that changed since is named in a
-warning, and the Transluce builds go on with what they got. `~/thimble-demo/SOURCES.md` lists who published each
-dataset, where it was downloaded from and what each build changes. Neither Transluce dataset states a licence. Claude's
-cyber safeguards stopped an Opus 5.5 session that read a sample of `transluce-gov`, which holds SQL injection and other
-probe requests, so an orientation or a session on it may be stopped too.
+warning, and the Transluce build goes on with what it got. `~/thimble-demo/SOURCES.md` lists who published each
+dataset, where it was downloaded from and what each build changes. The Transluce dataset states no licence.
 
 The command then registers each folder. Where [demos/](demos/README.md) in the repository has a pre-cached
 orientation for the dataset, it installs it as the folder's workspace: the cards, labels, views and report. A

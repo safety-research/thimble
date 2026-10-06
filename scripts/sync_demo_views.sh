@@ -29,11 +29,10 @@ views_of() {
     collusion-wiki) echo "relay-board-v2=relay-board wiki-page-history-v2=wiki-page-history";;
     mythos-5) echo "activity-timeline-v2=activity-timeline";;
     transluce-urlquery) echo "activity-timeline-v2=activity-timeline episode-browser-v2=episode-browser";;
-    transluce-gov) echo "capture-timeline-v2=capture-timeline variant-families-v2=variant-families";;
     *) return 1;;
   esac
 }
-all="collusion-wiki mythos-5 transluce-urlquery transluce-gov"
+all="collusion-wiki mythos-5 transluce-urlquery"
 
 home="" dry="" names=""
 while [ $# -gt 0 ]; do
