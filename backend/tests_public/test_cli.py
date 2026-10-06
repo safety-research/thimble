@@ -276,6 +276,147 @@ def test_the_doctor_says_whether_main_runs_fenced_what_the_launch_sets_and_wheth
     assert "off: Claude Code's Bash sandbox can't run" in line(cli.doctor_text(), "main's fence")
 
 
+def test_the_doctor_names_the_mode_its_source_the_renderer_and_what_terminal_mode_needs(
+        home, monkeypatch, fake_claude, tmp_path):
+    """For a session `thimble` starts in the folder: its mode and where that comes from, the mode the last launch here
+    ran in when that was another, whether terminal mode's renderer can load, and in terminal mode where a card's code
+    runs (main's Bash, in Claude Code's sandbox when it can run) and whether its optional card checks run (a headless
+    Chromium and the built frontend)."""
+    from app import cc_plugin, launch_mode
+
+    monkeypatch.setattr(cli, "healthy", lambda url=None, timeout=1.0: False)
+    monkeypatch.setattr(cli, "listening", lambda p: False)
+    monkeypatch.setattr(cc_plugin, "MANAGED_DIRS", {})
+    monkeypatch.setenv("THIMBLE_SANDBOX", "1")
+    data = tmp_path / "data"
+    data.mkdir()
+    monkeypatch.setenv("THIMBLE_DATA_DIR", str(data))
+    monkeypatch.setenv("THIMBLE_WORKSPACES_DIR", str(tmp_path / "ws"))
+    corpus = tmp_path / "logs"
+    corpus.mkdir()
+    monkeypatch.setenv("THIMBLE_CALLER_CWD", str(corpus))
+    renderer = tmp_path / "tree" / "mods" / "thimble-term"
+    monkeypatch.setattr(cli, "renderer_root", lambda: renderer)
+    text = cli.doctor_text()
+    assert line(text, "mode (") == (f"  mode (a session `thimble` starts in {corpus}): browser (thimble's default; "
+                                    "`thimble mode` changes it)")
+    assert line(text, "terminal renderer") == (f"  terminal renderer: cannot load ({renderer} is missing), so terminal "
+                                               "mode draws none of thimble's work; browser mode does not need it")
+    assert "terminal mode's card" not in text, "browser mode needs neither"
+    (renderer / ".claude-plugin").mkdir(parents=True)
+    (renderer / ".claude-plugin" / "plugin.json").write_text(json.dumps({"name": "thimble-term"}))
+    launch_mode.set_folder(corpus, "terminal")
+    monkeypatch.setattr(cli, "_browser_choice", lambda: ("bundled", ""))
+    monkeypatch.setattr(cli, "headless_fetched", lambda browsers_json: True)
+    text = cli.doctor_text()
+    assert line(text, "mode (").endswith("terminal (set for this folder; `thimble mode` changes it)")
+    assert line(text, "terminal renderer") == f"  terminal renderer: {renderer} (thimble-term), loaded only in terminal mode"
+    assert "runs in main's Bash, inside Claude Code's sandbox" in line(text, "terminal mode's card code")
+    assert line(text, "terminal mode's card checks").endswith("on: a card is checked, and a screenshot drawn, with the "
+                                                              "headless Chromium and the built frontend")
+    monkeypatch.setattr(cli, "headless_fetched", lambda browsers_json: False)
+    monkeypatch.setattr(cli, "has_ui_build", lambda: False)
+    monkeypatch.setenv("THIMBLE_SANDBOX", "0")
+    text = cli.doctor_text()
+    assert line(text, "terminal mode's card checks").endswith("off, since there is no headless Chromium and no "
+                                                              "frontend build: cards are not checked and screenshots "
+                                                              "are not drawn")
+    assert "without a sandbox, with your user's access" in line(text, "terminal mode's card code")
+    with cli.server_dirs():
+        config.register_corpus(corpus, exact=True)
+        ws = config.workspace_dir("logs")
+    (ws / cli.LAUNCH_FILE).write_text(json.dumps({"session": "s1", "at": "2026-10-06T05:00:00", "mode": "browser"}))
+    assert line(cli.doctor_text(), "mode (").endswith("; the last launch here (2026-10-06T05:00:00) ran in browser mode")
+    # after a terminal-mode launch the module reads its roles from roles.json and writes its heartbeat to module.json
+    (ws / cli.LAUNCH_FILE).write_text(json.dumps({"session": "s1", "at": "2026-10-06T05:00:00", "mode": "terminal"}))
+    got = line(cli.doctor_text(), "hooks module")
+    assert "no terminal-mode session here has run it yet" in got and "wrote no roles file" in got
+    (ws / cli.ROLES_FILE).write_text(json.dumps({"at": "t", "roles": {}}))
+    (ws / cli.MODULE_OUT).write_text(json.dumps({"session": "0b9d2f3e-1c2d", "version": "0.6.0", "beat": "t2",
+                                                 "problem": "no roles yet"}))
+    got = line(cli.doctor_text(), "hooks module")
+    assert ("it ran in the last session (terminal mode; heartbeat from 0b9d2f3e at t2, version 0.6.0); it reported: no "
+            "roles yet; Claude Code does not trust") in got and "roles file" not in got
+
+
+def _claude_process(tmp_path: Path, *args: str) -> subprocess.Popen:
+    """A process whose command line is `<tmp_path>/claude <args>`, as /proc shows it: this Python by a link named
+    claude, sleeping."""
+    link = tmp_path / "claude"
+    if not link.exists():
+        link.symlink_to(sys.executable)
+    p = subprocess.Popen([str(link), "-c", "import time; time.sleep(60)", *args])
+    for _ in range(300):
+        if procs.argv(p.pid)[-1:] == list(args[-1:]):
+            break
+        time.sleep(0.01)
+    return p
+
+
+def test_slash_thimble_in_terminal_mode_starts_nothing_and_prints_the_home_hint(home, data, monkeypatch, capsys,
+                                                                               tmp_path):
+    """In a session the launcher started in terminal mode, /thimble's hook and the skill's `up` start no server and
+    open nothing: the skill prints the `thimble-terminal-home` hint, which main repeats while the renderer opens the
+    home panel; `/thimble fresh` and the like say they need browser mode. A session that lost THIMBLE_MODE is still
+    known by launch.json's mode and session. The control, a browser-mode session, starts the server."""
+    from app import tools
+
+    started = []
+    monkeypatch.setattr(cli, "ensure_running", lambda wait: started.append(1) or True)
+    monkeypatch.setattr(cli, "_request", lambda *a, **k: (500, {}))
+    folder = data / "mini"
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(folder))
+    monkeypatch.setenv("THIMBLE_MODE", "terminal")
+    hook = {"session_id": "s7", "cwd": str(folder), "command_name": "thimble:thimble", "command_args": ""}
+    assert cli.hook_up(json.dumps(hook)) == 0 and capsys.readouterr().out == ""
+    skill = ["server", "up", "--cwd", str(folder), "--session", "s7", "--action", "", "--archive", ""]
+    assert cli.main(skill) == 0
+    assert capsys.readouterr().out.splitlines() == [cli.TERMINAL_HOME_LINE], "the hook's result; no hint in this build"
+    monkeypatch.setattr(tools, "descriptions", lambda: {cli.TERMINAL_HOME_HINT: "thimble: terminal mode. The home panel is open."})
+    monkeypatch.setenv(cli.SANDBOX_ENV, "1")  # the skill's own `up`, in main's sandbox, with no result of the hook's
+    assert cli.main(skill) == 0
+    assert capsys.readouterr().out.splitlines() == ["thimble: terminal mode. The home panel is open."]
+    assert cli.main([*skill[:-3], "fresh", "--archive", ""]) == 0
+    assert capsys.readouterr().out.splitlines() == [cli.TERMINAL_ACTION_LINE.format(action="fresh")]
+    assert cli.main(["server", "up", "--cwd", str(folder)]) == 0 and "terminal mode" in capsys.readouterr().out
+    assert started == [] and not cli.server_json().exists() and not (home / "links").exists()
+    monkeypatch.delenv(cli.SANDBOX_ENV)
+    monkeypatch.delenv("THIMBLE_MODE")
+    with cli.server_dirs():
+        ws = config.workspace_dir("mini")
+    (ws / cli.LAUNCH_FILE).write_text(json.dumps({"session": "s7", "mode": "terminal"}))
+    assert cli.main(skill) == 0 and capsys.readouterr().out.splitlines()[0].startswith("thimble: terminal mode")
+    assert started == []
+    (ws / cli.LAUNCH_FILE).write_text(json.dumps({"session": "s7", "mode": "browser"}))
+    assert cli.main(skill) == 0 and started == [1], "the control: browser mode starts the server"
+
+
+def test_slash_thimble_refuses_the_browser_while_the_workspace_is_open_in_terminal_mode(home, data, monkeypatch, capsys,
+                                                                                       tmp_path):
+    """One mode per workspace at a time: a /thimble that would open the browser on a workspace a terminal-mode session
+    runs in another terminal refuses, starting nothing; once that session is gone it opens as before."""
+    started = []
+    monkeypatch.setattr(cli, "ensure_running", lambda wait: started.append(1) or True)
+    monkeypatch.setattr(cli, "_request", lambda *a, **k: (500, {}))
+    folder = data / "mini"
+    with cli.server_dirs():
+        ws = config.workspace_dir("mini")
+    sid = "0b9d2f3e-1c2d-4e5f-8a9b-0c1d2e3f4a5b"
+    main = _claude_process(tmp_path, "--session-id", sid)
+    try:
+        (ws / cli.LAUNCH_FILE).write_text(json.dumps({"session": sid, "pid": main.pid, "mode": "terminal"}))
+        assert cli.main(["up", "--cwd", str(folder), "--session", "s2"]) == 0
+        assert capsys.readouterr().out.splitlines() == [cli.OPEN_ELSEWHERE_LINE.format(mode="terminal")]
+        assert started == []
+        assert cli.main(["up", "--cwd", str(folder), "--session", "s2", "--action", "status"]) == 0
+        assert "open in terminal mode" not in capsys.readouterr().out, "a status line opens nothing"
+    finally:
+        main.kill()
+        main.wait()
+    assert cli.main(["up", "--cwd", str(folder), "--session", "s2"]) == 0
+    assert "open in terminal mode" not in capsys.readouterr().out and started == [1]
+
+
 DEV_LINES = ("turn endings:", "source changed since start:", "validation stack:", "last apply:", "dev tickets:",
              "last ticket error:")
 

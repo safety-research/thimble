@@ -25,6 +25,8 @@ thimble doctor                     # the install state, versions, port and the l
 thimble fix                        # the server will not start: the dev agent repairs it in the checkout, asking first
 thimble revert                     # undo the last change thimble's dev agent applied
 thimble launch-args | prompt <name>   # what a session starts with, and a prompt as a session gets it
+thimble mode [browser | terminal]  # the mode `thimble` starts this folder in; terminal mode starts no server
+thimble state <surface> | act <kind>  # terminal mode's renderer: a surface's JSON, or a click's effect, with no server
 ```
 
 `thimble help` lists the commands an analyst uses, and in a development install `fix` and `revert` too; the ones above
