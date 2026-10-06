@@ -57,10 +57,10 @@ function draw() {
 | `times` | each record's time, an array or a typed array |
 | `values` | each record's Color by value, an array beside `times` or a function of the record's index; by default `colour.valueOf(i)` |
 | `bins` | counts already binned, in place of `times`: `{from, step, counts}`, `counts[i]` a number or `{value: n}` for the bin starting at `from + i * step` |
-| `span` | the whole span `[first, last]`, when it is not that of `times` or `bins` |
+| `span` | the whole span `[first, last]`, when it is not that of `times` or `bins`; the readout gives it while the range is whole |
 | `unit` | `'s'` seconds since 1970 (the default), `'ms'`, or `'n'` a plain number such as a row or a turn |
 | `utc` | times shown in UTC (the default); `false` shows them in the browser's zone |
-| `gap` | an empty stretch longer than this, in the units, is drawn as a narrow break on the overview and on the range's scale |
+| `gap` | an empty stretch longer than this, in the units, is drawn as a narrow break on the overview and on the range's scale; an edge of the range that lands in a break moves to the data beside it |
 | `marks` | point events, `[{t, label, colour?}]`, drawn as flags |
 | `min` | the shortest range, in the units |
 | `height` | the overview's height in px, 28 by default |

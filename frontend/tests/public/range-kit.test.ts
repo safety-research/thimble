@@ -118,6 +118,11 @@ describe('the time range selector', () => {
     const bins = s.bins(3)
     expect(bins[0][0] % s.step(3)).toBe(0)
     expect(s.binOf(TIMES[0])).toBeGreaterThanOrEqual(0)
+    // an edge set in the break moves to the data beside it
+    r.set(T0 + 24 * H, T0 + 60 * H)
+    expect(r.from).toBe(TIMES[61])
+    r.set(T0 + H, T0 + 24 * H)
+    expect(r.to).toBe(TIMES[60])
     // the range zoomed into the first burst: no break in it
     r.set(T0, T0 + 6 * H)
     expect(r.scale(600).broken).toBe(false)
@@ -138,6 +143,26 @@ describe('the time range selector', () => {
     expect(hovered).toEqual({ t: T0 + 3 * H, label: 'context compaction' })
     ax.dispatchEvent(new dom.window.Event('pointerleave'))
     expect(hovered).toBeNull()
+  })
+
+  test('a long range reads in months and years', async () => {
+    await load()
+    win().thimble.colorBy({ mount: '#colour', fields: [] })
+    const r = win().thimble.timeRange({ mount: '#range', span: [Date.UTC(2023, 8, 22) / 1000, Date.UTC(2026, 8, 20) / 1000] })
+    await wait()
+    expect(doc().querySelector('.thimble-range-len')!.textContent).toBe('2y 11mo')
+    r.set(Date.UTC(2026, 0, 1) / 1000, Date.UTC(2026, 3, 12) / 1000)
+    await wait()
+    expect(doc().querySelector('.thimble-range-len')!.textContent).toBe('3mo 10d')
+  })
+
+  test('a span the page gives is the whole range the readout gives, beyond the records', async () => {
+    await load()
+    const r = mount()
+    r.data({ times: TIMES, span: [T0, T0 + 4 * 24 * H] })
+    await wait()
+    expect(doc().querySelector('.thimble-range-dates')!.textContent).toBe('16 Jun – 19 Jun')
+    expect(r.span).toEqual([T0, T0 + 4 * 24 * H])
   })
 
   test('plain numbers, such as turns, read as numbers', async () => {

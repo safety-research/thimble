@@ -110,10 +110,13 @@
     var y = this.parts(b)
     return x.y === y.y && x.mo === y.mo && x.d === y.d
   }
-  // a length of time in words: 4d 15h, 3h 20m, 45m, 12s; a count for plain numbers
+  // a length of time in words: 2y 11mo, 3mo 12d, 4d 15h, 3h 20m, 45m, 12s; a count for plain numbers
   Units.prototype.length = function (len) {
     if (!this.time) return num(Math.round(len))
     var ms = this.ms(len)
+    var mo = ms / (30.44 * DAY)
+    if (mo >= 24) return Math.floor(mo / 12) + 'y' + (Math.floor(mo % 12) ? ' ' + Math.floor(mo % 12) + 'mo' : '')
+    if (mo >= 2) return Math.floor(mo) + 'mo' + (mo % 1 >= 0.25 && mo < 6 ? ' ' + Math.round((mo % 1) * 30.44) + 'd' : '')
     if (ms >= 2 * DAY) return Math.floor(ms / DAY) + 'd' + (ms % DAY >= HOUR ? ' ' + Math.floor((ms % DAY) / HOUR) + 'h' : '')
     if (ms >= HOUR) return Math.floor(ms / HOUR) + 'h' + (ms % HOUR >= MIN ? ' ' + Math.floor((ms % HOUR) / MIN) + 'm' : '')
     if (ms >= MIN) return Math.floor(ms / MIN) + 'm' + (ms % MIN >= SEC && ms < 10 * MIN ? ' ' + Math.floor((ms % MIN) / SEC) + 's' : '')
@@ -521,6 +524,9 @@
       span = [span[0] - room, span[1] + room]
     }
     this.span = [span[0], span[1]]
+    // a span the page gives is what the readout gives while the range is whole
+    if (Array.isArray(d.span) && d.span[1] > d.span[0]) this.extent = [d.span[0], d.span[1]]
+    else if (Array.isArray(this.opts.span) && this.opts.span[1] > this.opts.span[0]) this.extent = [this.opts.span[0], this.opts.span[1]]
     var gap = Number(this.opts.gap)
     this.segs = gap > 0 && sorted && sorted.length ? stretches(sorted, gap) : null
     if (this.segs) {
@@ -551,6 +557,14 @@
       b = Math.min(this.span[1], a + least)
       a = Math.max(this.span[0], b - least)
     }
+    // an edge in a break moves to the data beside it: the start to where the next stretch begins, the end to where the
+    // last one ends, so the range never starts or ends in time that holds nothing
+    var sg = this.segs
+    if (sg && sg.length > 1)
+      for (var k = 0; k + 1 < sg.length; k++) {
+        if (a > sg[k][1] && a < sg[k + 1][0] && sg[k + 1][0] < b) a = sg[k + 1][0]
+        if (b > sg[k][1] && b < sg[k + 1][0] && sg[k][1] > a) b = sg[k][1]
+      }
     if (a <= this.span[0] + 1e-9 * Math.abs(this.span[0] || 1) && b >= this.span[1] - 1e-9 * Math.abs(this.span[1] || 1)) return null
     if (!(b > a)) return null
     return [a, b]
