@@ -481,12 +481,37 @@ async def test_a_proposal_an_earlier_version_queued_starts_no_builder_and_waits_
     row = {"name": "Posts", "why": "to read the board", "claims": ["board.jsonl"], "arrangement": "one row per post",
            "proposed_by": "orient", "status": "queued", "ts": "2026-10-01T00:00:00+00:00"}
     views._save_proposals(CORPUS, [{**row, "slug": "posts"}, {**row, "slug": "threads", "name": "Threads",
-                                                               "route": subagents.CLICK}])
+                                                               "route": subagents.CLICK, "queued_in": bridge.main}])
     dev.recover_views(CORPUS)
     await _until(lambda: bridge.ops("spawn"), "the click's queued build never started")
     await asyncio.sleep(0.05)
     assert [a.get("prompt", "").count("threads") > 0 for a in bridge.ops("spawn")] == [True]
     assert _prop("posts")["status"] == "failed" and _prop("posts")["error"] == dev.OLD_BUILD_LINE
+
+
+async def test_a_build_queued_in_a_main_session_that_ended_starts_no_builder_in_a_new_one(board, bridge, gates,
+                                                                                        monkeypatch):
+    """A click's build still queued when the server restarted is queued again (recover_views), and starts only in the
+    main session that queued it, or the one /clear or /resume moved it to: in a new main session it fails with
+    MAIN_ENDED and Retry, as main's quit fails a queued build while the server runs. A build queued here records main's
+    session (`queued_in`)."""
+    monkeypatch.setattr(dev, "VIEW_POOL", 3)
+    row = {"why": "to read the board", "claims": ["board.jsonl"], "arrangement": "one row per post",
+           "proposed_by": "analyst", "status": "queued", "ts": "2026-10-01T00:00:00+00:00", "route": subagents.CLICK}
+    bridge.main, bridge.moved = "new-session", {"cleared": "new-session"}
+    views._save_proposals(CORPUS, [{**row, "slug": "posts", "name": "Posts", "queued_in": "old-session"},
+                                   {**row, "slug": "threads", "name": "Threads", "queued_in": "cleared"},
+                                   {**row, "slug": "replies", "name": "Replies"}])
+    dev.recover_views(CORPUS)
+    await _until(lambda: bridge.ops("spawn"), "the build of the session /clear moved never started")
+    await asyncio.sleep(0.05)
+    assert [a.get("prompt", "").count("threads") > 0 for a in bridge.ops("spawn")] == [True]
+    for slug in ("posts", "replies"):
+        assert _prop(slug)["status"] == "failed" and _prop(slug)["error"] == dev.MAIN_ENDED, slug
+        assert _prop(slug)["stopped_by"] == "quit", "its chip says it stopped when Claude Code quit, with Retry"
+    views.retry(CORPUS, "posts")
+    assert _prop("posts")["queued_in"] == "new-session", "Retry, a click in this session, queues it here"
+    await _until(lambda: len(bridge.ops("spawn")) == 2, "Retry did not start the build")
 
 
 # --------------------------------------------------------------------------- changes

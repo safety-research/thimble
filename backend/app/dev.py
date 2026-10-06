@@ -2456,6 +2456,8 @@ LIMIT_RETRY_S = 30.0  # a start Claude Code refused at its subagent limit is tri
 NO_MODULE_RETRY_S = 5.0  # a queued build waits for main's module this long between looks
 NO_MODULE_LOOKS = 24  # looks before the queue waits for the next listing or main session (about two minutes)
 _no_module_looks: dict[str, int] = {}
+# (workspace, slug) that recover_views queued again after a restart: it starts only in the main session that queued it
+_recovered: set[tuple[str, str]] = set()
 VIEW_STOPPED = "The build was stopped."  # a build the analyst stopped: its chat's end and its proposal's error
 ORIENTATION_STOPPED = "the orientation was stopped"  # the builds of the views an orientation proposed (stop_orientation_views)
 WORKSPACE_CLOSED = "the workspace was archived"  # the builds of a workspace that is archived or reset (stop_views)
@@ -2510,19 +2512,39 @@ def _soon(make: Callable[[], Awaitable[Any]], name: str) -> None:
         bound.call_soon_threadsafe(lambda: bound.create_task(make(), name=name))
 
 
-def queue_view(c: str, slug: str) -> None:
+def queue_view(c: str, slug: str, recovered: bool = False) -> None:
     """Queue the build of the proposal `slug` and start what the pool has room for (views.propose, views.retry,
     views.revise, recover_views). A build queued already is left as it is; a change to a view whose builder runs goes to
-    that builder as a message (change_view)."""
+    that builder as a message (change_view). The proposal records main's session (`queued_in`), unless `recovered`
+    (recover_views queued it again after a restart): a queued build starts only in that session (_same_main)."""
+    from . import module_bridge, views  # noqa: PLC0415
+
     key = (c, slug)
     b = _view_runs.get(key)
     if b is not None:
         if b.agent:
             _soon(lambda: change_view(c, slug), f"view-change:{c}:{slug}")
         return
+    if recovered:
+        _recovered.add(key)
+    else:
+        _recovered.discard(key)
+        views.update_proposal(c, slug, queued_in=module_bridge.main_session(c) or None)
     if key not in _view_queue:
         _view_queue.append(key)
     _start_views()
+
+
+def _same_main(c: str, prop: dict[str, Any]) -> bool:
+    """Whether a queued build may start in main's session now: the session that queued it (`queued_in`) is main's, or
+    the one main moved to from it by /clear or /resume. A build queued before main's session was known starts in the
+    first one, unless a restart queued it again (_recovered), since then nothing shows which session asked for it."""
+    from . import module_bridge  # noqa: PLC0415
+
+    was = str(prop.get("queued_in") or "")
+    if not was:
+        return (c, str(prop.get("slug") or "")) not in _recovered
+    return module_bridge.moved_to(c, was) == module_bridge.main_session(c)
 
 
 def _start_views() -> None:
@@ -2553,6 +2575,12 @@ def _start_views() -> None:
             continue
         _view_queue.remove(key)
         _no_module_looks.pop(c, None)
+        if view_program(c) is None and not _same_main(c, prop):
+            # queued in a Claude Code session that has ended (its quit came while no server ran): Retry starts it here
+            _recovered.discard(key)
+            _view_failed(c, slug, MAIN_ENDED, prop.get("chat"))
+            continue
+        _recovered.discard(key)
         _view_runs[key] = _Build(route=str(prop.get("route") or ""))
         asyncio.get_running_loop().create_task(_launch(c, slug), name=f"view-start:{c}:{slug}")
     if waiting:
@@ -3013,7 +3041,8 @@ def recover_views(c: str) -> None:
     building proposal whose builder still runs in main takes its place in the pool again, one whose builder ended while
     no server ran fails with Retry (ORPHANED_LINE), one from an earlier version, with a session and no builder, fails
     with Retry, which builds it afresh (OLD_BUILD_LINE); a queued one is queued again as part of the click or start
-    that queued it, and one an earlier version queued, with no such route, fails with Retry (OLD_BUILD_LINE)."""
+    that queued it, and starts only in the main session that queued it, else fails with MAIN_ENDED and Retry
+    (_start_views); one an earlier version queued, with no such route, fails with Retry (OLD_BUILD_LINE)."""
     from . import subagents, views  # noqa: PLC0415
 
     for p in views.list_proposals(c):
@@ -3033,7 +3062,7 @@ def recover_views(c: str) -> None:
                 continue
             if p.get("program") and not aid:  # a program's build the last server's shutdown cut short
                 views.update_proposal(c, slug, status="queued")
-                queue_view(c, slug)
+                queue_view(c, slug, recovered=True)
                 continue
             _view_failed(c, slug, OLD_BUILD_LINE if p.get("session_id") and not aid else ORPHANED_LINE, p.get("chat"))
             continue
@@ -3043,7 +3072,7 @@ def recover_views(c: str) -> None:
             # queued by an earlier version, which no click or start of this one asked for: Retry is that click
             _view_failed(c, slug, OLD_BUILD_LINE, p.get("chat"))
             continue
-        queue_view(c, slug)
+        queue_view(c, slug, recovered=True)
 
 
 def _view_chat(c: str, prop: dict[str, Any]) -> str | None:

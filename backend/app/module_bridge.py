@@ -305,6 +305,12 @@ def main_session(c: str) -> str:
 
         lv = session.current(c)
         sid = lv.sid if lv is not None else ""
+    return moved_to(c, sid)
+
+
+def moved_to(c: str, sid: str) -> str:
+    """Session `sid` followed through every move rekey recorded (a /clear or an in-session /resume of main): the id the
+    same `claude` process runs under now."""
     moved, seen = _bridge(c).rekeyed, set()
     while sid in moved and sid not in seen:
         seen.add(sid)

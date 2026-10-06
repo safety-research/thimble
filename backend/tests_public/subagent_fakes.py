@@ -32,9 +32,9 @@ HINTS = {
 
 
 class FakeBridge:
-    """app.module_bridge as lane M names it: live, why_not, request (async, answering each op), push_roles. `answers`
-    are what the next requests answer, in order; without one a spawn answers a new agent id and a send or stop
-    {agentId}. Each request is kept in `calls` as (op, args)."""
+    """app.module_bridge as lane M names it: live, why_not, request (async, answering each op), push_roles, main_session
+    (`main`) and moved_to (through `moved`). `answers` are what the next requests answer, in order; without one a spawn
+    answers a new agent id and a send or stop {agentId}. Each request is kept in `calls` as (op, args)."""
 
     def __init__(self) -> None:
         self.calls: list[tuple[str, dict[str, Any]]] = []
@@ -42,6 +42,16 @@ class FakeBridge:
         self.is_live = True
         self.reason = ""
         self.n = 0
+        self.main = "main-session"
+        self.moved: dict[str, str] = {}
+
+    def main_session(self, c: str) -> str:
+        return self.main
+
+    def moved_to(self, c: str, sid: str) -> str:
+        while sid in self.moved:
+            sid = self.moved[sid]
+        return sid
 
     def live(self, c: str) -> bool:
         return self.is_live
@@ -73,7 +83,7 @@ def bridge(monkeypatch) -> FakeBridge:
 
     fake = FakeBridge()
     mod = types.ModuleType("app.module_bridge")
-    for name in ("live", "why_not", "request", "push_roles"):
+    for name in ("live", "why_not", "request", "push_roles", "main_session", "moved_to"):
         setattr(mod, name, getattr(fake, name))
     monkeypatch.setitem(sys.modules, "app.module_bridge", mod)
     # `from . import module_bridge` reads the package's attribute first, which the real bridge sets once any test has
