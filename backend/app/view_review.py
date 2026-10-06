@@ -290,7 +290,10 @@ async def _ended(c: str, run: subagents.Run, status: str, report: str, why: str,
         if prop is None or forget or review.get("agent_id") not in (None, run.agent_id):
             return
         note = ""
-        if not review.get("finished"):
+        from . import view_tools  # noqa: PLC0415
+
+        taken_over = why == CHANGED_NOTE or subagents.running(c, view_tools.build_key(slug))
+        if not review.get("finished") and not taken_over:  # a change's builder owns the folder now
             rep = await views.regate(c, slug)
             if rep is not None and not rep.get("ok"):
                 note = REVISION_FAILED_NOTE

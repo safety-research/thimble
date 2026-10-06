@@ -2928,7 +2928,7 @@ async def _settle(c: str, slug: str, run: Any, status: str, report: str, why: st
         _change_failed_chip(c, prop, shown)
         return
     done = int(prop.get("repairs") or 0)
-    if not prop.get("asked") and done < VIEW_REPAIRS and status != "stopped":
+    if not prop.get("asked") and done < VIEW_REPAIRS:
         views.update_proposal(c, slug, repairs=done + 1, status="queued")
         if run.chat and agents.meta_or_none(c, str(run.chat)) is not None:
             Log(agents.Recorder(c, str(run.chat))).stage(REPAIR_LINE.format(n=done + 1, of=VIEW_REPAIRS))
@@ -3036,6 +3036,8 @@ def recover_views(c: str) -> None:
                 continue
             _view_failed(c, slug, OLD_BUILD_LINE if p.get("session_id") and not aid else ORPHANED_LINE, p.get("chat"))
             continue
+        if p.get("route") == subagents.TYPED:
+            continue  # main's own start, which its propose_view call makes: never started by the server
         queue_view(c, slug)
 
 

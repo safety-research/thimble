@@ -382,6 +382,32 @@ async def test_an_orientation_s_failing_proposal_is_repaired_then_dropped_and_an
     assert _prop(asked)["status"] == "queued" and _prop(asked)["values"] == {"effort": "low"}
 
 
+async def test_a_builder_stopped_after_its_last_attempt_ends_as_finish_view_said_and_is_repaired(board, bridge, gates,
+                                                                                                hints, monkeypatch):
+    monkeypatch.setattr(view_tools, "FINISH_GRACE_S", 0.05)
+    slug = _propose(orientation=True)
+    agent = await _started(slug, route=subagents.FOLLOW_ON)
+    _draft(slug, "<p>FAIL</p>")
+    for _ in range(dev.MAX_ATTEMPTS):
+        res = await _call("finish_view", {}, agent, view_tools.build_key(slug))
+    assert res.text.endswith(tools.hint("finish-view-stop"))
+    await _until(lambda: bridge.ops("stop"), "the builder that went on was never stopped")
+    subagents.run_ended(CORPUS, agent, "stopped", "", source="notification")
+    await _until(lambda: len(bridge.ops("spawn")) == 2, "no repair started from what failed")
+    assert "repair 1 of" in bridge.ops("spawn")[-1]["prompt"] and _prop(slug).get("error") != dev.VIEW_STOPPED
+
+
+async def test_a_reviewer_a_change_stopped_leaves_the_folder_to_the_change_s_builder(board, bridge, gates, pictures):
+    slug = _propose(asked=True)
+    reviewer, _ = await _reviewed(slug)
+    views.revise(CORPUS, slug, "a legend", asked=True)  # the change stops the review (views._stop_review)
+    (views.views_dir(CORPUS) / slug / views.VIEW_HTML).write_text("<p>FAIL, the change half made</p>")
+    subagents.run_ended(CORPUS, reviewer, "stopped", "", source="notification")
+    await _until(lambda: (_prop(slug).get("review") or {}).get("state") == "stopped", "the review never ended")
+    assert (views.views_dir(CORPUS) / slug / views.VIEW_HTML).read_text() == "<p>FAIL, the change half made</p>"
+    assert _prop(slug)["review"]["note"] == view_review.CHANGED_NOTE
+
+
 async def test_the_analyst_s_stop_and_main_s_quit_end_a_build_failed_with_retry(board, bridge, gates):
     slug = _propose(asked=True)
     agent = await _started(slug)
@@ -478,6 +504,8 @@ async def _reviewed(slug: str) -> tuple[str, str]:
     agent = await _started(slug)
     _draft(slug, "<p>v1</p>")
     await _call("finish_view", {}, agent, view_tools.build_key(slug))
+    subagents.run_ended(CORPUS, agent, "done", "Built.", source="handback")
+    await _until(lambda: (CORPUS, slug) not in dev._settling, "the build's end was never settled")
     ans = await view_review.begin(CORPUS, slug, route=subagents.FOLLOW_ON)
     assert ans.started, dict(ans)
     return str(ans.agent_id), view_tools.review_key(slug)

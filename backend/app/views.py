@@ -669,10 +669,10 @@ def _found_change(c: str, slug: str) -> None:
     now = digest(views_dir(c) / slug)
     if not now or _found.get((c, slug)) == now:
         return
-    _found[(c, slug)] = now
     loop = _thread_loop() or (_loop if _loop is not None and _loop.is_running() and not _loop.is_closed() else None)
     if loop is None:
         return
+    _found[(c, slug)] = now
 
     def arm() -> None:
         old = _found_timers.pop((c, slug), None)
