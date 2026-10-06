@@ -437,10 +437,11 @@ async def _after_measure(c: str) -> None:
             pass
 
 
-def _show_message(c: str, chat: str, text: str, by: str) -> None:
-    """The analyst's message in the orientation's thread, from the browser or main, as it is sent."""
+def _show_message(c: str, chat: str, text: str, by: str, run: int | None = None) -> None:
+    """The analyst's message in the orientation's thread, from the browser or main, as it is sent, with the run it
+    starts or joins (subagents.message_run), so the browser shows it as that follow-up's."""
     try:
-        agents.Recorder(c, chat).record("user", text=text, by=by)
+        agents.Recorder(c, chat).record("user", text=text, by=by, **({"run": run} if run is not None else {}))
     except Exception:  # noqa: BLE001 — a chat deleted under the message
         log.debug("%s: the message was not shown in %s", c, chat, exc_info=True)
 
@@ -475,15 +476,16 @@ async def send(c: str, text: str, by: str = BROWSER, extension: str = "") -> dic
         return program
     _, chat, agent_id = latest(c)
     _refuse_message(c, text)
+    k = subagents.message_run(c, agent_id)  # before the send, which may start the run
     if c in _closing:
-        _show_message(c, chat, text, by)
+        _show_message(c, chat, text, by, k)
         asyncio.get_running_loop().create_task(_send_held(c, chat, agent_id, text), name=f"orient-held:{c}")
         return {"status": "held", "chat": chat}
     body, told = with_lead(c, text)
     ans = await subagents.send(c, agent_id, body)
     if ans.refused:
         raise RuntimeError(ans.reason or ans.kind or "the module did not pass it on")
-    _show_message(c, chat, text, by)
+    _show_message(c, chat, text, by, k)
     if told:
         orientation.record(c, coverage_told=True)
     return {"status": "sent", "chat": chat}
@@ -618,13 +620,29 @@ def subagent_started(c: str, run: subagents.Run, req: dict[str, Any]) -> None:
         orientation.started(c, run.chat, session=run.sid, passes=list(rec.get("passes") or ["final", "views"]),
                             agent_id=run.agent_id, route="subagent")
         return
-    text = ""
+    orientation.run_started(c, run.chat, run.k, _run_messages(c, run))
+    try:  # main's chat shows the follow-up as the orientation's card for this run (the browser's AgentCard `run`)
+        _, main_log = agents.paths(c, agents.MAIN_ID)
+        agents.append(main_log, {"type": "agent", "ts": _now(), "chat": run.chat, "role": orientation.ROLE,
+                                 "title": "Orientation", "run": run.k, "by": agents.TERMINAL})
+        agents._notify(c, agents.MAIN_ID)
+    except (HTTPException, OSError) as e:
+        log.warning("%s: main's chat did not get the orientation's run %s (%s)", c, run.k, e)
+
+
+def _run_messages(c: str, run: subagents.Run) -> "list[dict[str, Any]]":
+    """The message that started a follow-up run, as its record keeps it: the message request a SendMessage claimed for
+    the agent (from main's message_orientation, `by` MAIN, or the browser through the module, `by` BROWSER); none for a
+    message the analyst typed in the agent tray, which no request carries (the mirror shows it in the thread)."""
+    a = subagents.agent(c, run.agent_id) or {}
+    if a.get("by") == "human":
+        return []
     for r in reversed(list((subagents.read(c).get("requests") or {}).values())):
-        if isinstance(r, dict) and r.get("kind") == "message" and r.get("agent") == run.agent_id:
+        if isinstance(r, dict) and r.get("kind") == "message" and r.get("agent") == run.agent_id \
+                and r.get("state") in ("claimed", "done"):
             text = str((r.get("input") or {}).get("message") or "")
-            break
-    by = MAIN if run.route == subagents.TYPED else BROWSER
-    orientation.run_started(c, run.chat, run.k, [{"text": text, "by": by}] if text else [])
+            return [{"text": text, "by": MAIN if r.get("route") == subagents.TYPED else BROWSER}] if text else []
+    return []
 
 
 def subagent_refused(c: str, req: dict[str, Any]) -> None:

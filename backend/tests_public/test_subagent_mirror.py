@@ -175,6 +175,41 @@ async def test_a_message_to_the_finished_agent_starts_its_next_run_and_the_short
     assert a["run"] == 2 and a["by"] == "human" and agents.read_meta(CORPUS, chat)["typed_in_tray"] is True
 
 
+async def test_each_follow_up_s_message_in_the_thread_names_its_run(bridge, project, ended):
+    """Main's SendMessage to the finished orientation, and a message the analyst typed to it in the agent tray, each
+    show in its thread with the run they start (`run`), as the browser cuts the thread into runs by it (orientRuns)
+    and takes a message it sent off its outbox once the thread holds it (live check L7)."""
+    lv, chat, path = await _click_orientation(bridge, project)
+    _write(path, _assistant(_use("toolu_hb", "SubagentHandback", {"message": "done"})))
+    session.tail_once(lv)
+    subagents.message_request(CORPUS, AGENT, "And April?", call="toolu_m1")
+    _write(Path(lv.transcript_path), _human("ask it about April"),
+           _assistant(_use("toolu_m1", "SendMessage", {"to": AGENT, "message": "And April?"})))
+    session.tail_once(lv)
+    _write(path, {"type": "user", "isMeta": True, "origin": {"kind": "coordinator"},
+                  "message": {"content": "The coordinator sent a message while you were working:\nAnd April?"}},
+           _assistant(_use("toolu_hb2", "SubagentHandback", {"message": "April is the same."})))
+    session.tail_once(lv)
+    _write(path, {"type": "user", "isMeta": True, "origin": {"kind": "human"},
+                  "message": {"content": "Message from the user while you were working:\nAnd May?"}})
+    session.tail_once(lv)
+    _, log = agents.paths(CORPUS, chat)
+    users = [(e["text"], e.get("by"), e.get("run")) for e in agents.read_events(log) if e.get("type") == "user"]
+    assert users == [("And April?", "main", 1), ("And May?", "terminal", 2)]
+
+
+async def test_a_run_keeps_the_effort_claude_code_writes_beside_its_message(bridge, project, ended):
+    """Claude Code writes a request's effort on the transcript record, beside `message` (contract_module), so each run's
+    `ran` names it and the thread's header shows the run's model and effort (live check L1)."""
+    lv, chat, path = await _click_orientation(bridge, project)
+    rec = _assistant(_use("toolu_hb", "SubagentHandback", {"message": "done"}))
+    rec["effort"] = "medium"
+    _write(path, rec)
+    session.tail_once(lv)
+    assert subagents.agent(CORPUS, AGENT)["ran"] == {"0": {"model": "claude-opus-5-5", "effort": "medium"}}
+    assert agents.read_meta(CORPUS, chat)["ran"] == {"0": {"model": "claude-opus-5-5", "effort": "medium"}}
+
+
 async def test_each_run_keeps_the_model_it_ran_on_and_a_typed_follow_up_on_another_shows_it(bridge, project, ended):
     """A typed follow-up (main's SendMessage) runs on the role's registration in force, not on the run's values; when
     its transcript names another model, main's chat says so (`follow-up-ran-on`)."""

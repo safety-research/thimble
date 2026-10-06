@@ -289,6 +289,18 @@ def agent(c: str, agent_id: str | None) -> dict[str, Any] | None:
     return dict(a) if isinstance(a, dict) else None
 
 
+def message_run(c: str, agent_id: str | None) -> int | None:
+    """The run a message to one of thimble's agents belongs to, which its chat's `user` record names (`run`) so the
+    browser shows each follow-up as its own run: the run going on while the agent runs (a queued message joins it),
+    else the next one, whether or not the mirror has seen that run begin yet (run_again). None for an agent not in the
+    registry."""
+    a = agent(c, agent_id)
+    if a is None or a.get("role") not in TYPES:
+        return None
+    k = int(a.get("run") or 0)
+    return k if a.get("status") in ("running", "waiting") else k + 1
+
+
 def agents_of(c: str, role: str | None = None, key: str | None = None) -> dict[str, dict[str, Any]]:
     """The registered agents of `role` (and `key`), by id, newest last."""
     out = {k: dict(a) for k, a in files.registry(read(c)).items() if isinstance(a, dict)
