@@ -178,6 +178,26 @@ async def test_a_message_to_the_finished_agent_starts_its_next_run_and_the_short
     assert not any(r.get("tray") for r in users[:-1]), "a prompt or message main's call sent is not typed in the tray"
 
 
+async def test_a_message_after_a_run_the_module_ended_starts_the_next_run(bridge, project, ended):
+    """A run that ended by a sign the mirror does not read (the module's turn end after a TaskStop: the browser's
+    Stop, or thimble's stop when main went into plan mode, U4) leaves the agent able to continue: the message that
+    resumes it starts its next run, which ends again (live: the follow-up after a plan-mode stop was not counted)."""
+    lv, chat, path = await _click_orientation(bridge, project)
+    _write(path, _assistant({"type": "text", "text": "Reading the files."}))
+    session.tail_once(lv)
+    subagents.mark_stopped_by(CORPUS, AGENT, subagents.STOPPED_PLAN)
+    subagents.ended(CORPUS, AGENT, "", "aborted")
+    assert ended[-1][:4] == ("ended", "orientation", 0, "stopped")
+    _write(path, {"type": "user", "isMeta": True, "origin": {"kind": "coordinator"},
+                  "message": {"content": "The coordinator sent a message while you were working:\nGo on."}},
+           _assistant({"type": "text", "text": "Going on."}))
+    session.tail_once(lv)
+    a = subagents.agent(CORPUS, AGENT)
+    assert (a["run"], a["status"], a.get("stopped_by")) == (1, "running", None)
+    subagents.ended(CORPUS, AGENT, "Done.", "answer")
+    assert ended[-1] == ("ended", "orientation", 1, "done", "Done.")
+
+
 async def test_each_follow_up_s_message_in_the_thread_names_its_run(bridge, project, ended):
     """Main's SendMessage to the finished orientation, and a message the analyst typed to it in the agent tray, each
     show in its thread with the run they start (`run`), as the browser cuts the thread into runs by it (orientRuns)

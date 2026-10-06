@@ -1989,6 +1989,13 @@ def _tail_sub(lv: Live, sub: Sub) -> int:
     sub.buf = lines.pop()
     if sub.skip_before is not None:
         lines = _after_move(sub, lines)
+    if not sub.done and sub.thimble and sub.agent_id and any(b'"coordinator"' in ln or b'"human"' in ln for ln in lines):
+        from . import subagents  # noqa: PLC0415
+
+        if (subagents.agent(lv.c, str(sub.agent_id)) or {}).get("status") not in ("running", "waiting"):
+            # its run ended by a sign the mirror did not read (the module's turn end, a TaskStop's notification: the
+            # browser's Stop, or thimble's stop for plan mode), so a message now starts its next run (_revive)
+            sub.done = True
     if sub.done and not sub.thread and sub.owner is None and not sub.workflow:
         how = _resumed(lines, strict=bool(sub.thimble))
         if how:
