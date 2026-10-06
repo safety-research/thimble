@@ -611,8 +611,8 @@ body[data-cmd] .board-stage * {
     animation: none;
   }
 }
-/* the card check's mark at the takeaway's bottom right (CardFace CheckMark): a spinner while it runs, then a check or
-   run-again glyph; a click runs the check again */
+/* the mark at the takeaway's bottom right: the card check's red ✕ for a real problem (CardFace ProblemMark), and the
+   view review's mark (files/ViewPane), which share components/CheckMark */
 .bcell-check {
   flex: none;
   align-self: flex-end;
@@ -637,9 +637,17 @@ body[data-cmd] .board-stage * {
   color: var(--text-primary);
   background: var(--surface-hover);
 }
-/* checked, with numbers its code types in (lib/cardCheck typedLine): a flag in the warning tone */
+/* a view review that left problems: a flag in the warning tone */
 .bcell-check-mark.is-flagged {
   color: var(--status-warning);
+}
+/* the card check found a real problem: the ✕ stays red, hovered or not */
+.bcell-check-mark.is-problem,
+.bcell-check-mark.is-problem:hover {
+  color: var(--status-negative);
+}
+.bcell-check-mark.is-problem .mark {
+  font-size: 12px;
 }
 .bcell-take-none::before {
   visibility: hidden;
@@ -690,26 +698,6 @@ body[data-cmd] .board-stage * {
   display: flex;
   justify-content: flex-end;
   gap: 4px;
-}
-/* a card never checked: a faint mark on hover, whose click checks it. It takes no room in the takeaway's row */
-.bcell-take:has(> .bcell-check-idle) {
-  position: relative;
-}
-.bcell-check-idle {
-  position: absolute;
-  right: 0;
-  bottom: 0;
-}
-.bcell-check-mark.is-idle {
-  opacity: 0;
-  transition: opacity var(--dur-fast) var(--ease-out);
-}
-.canvas-card:hover .bcell-check-mark.is-idle,
-.bcell-check-mark.is-idle:focus-visible {
-  opacity: 0.6;
-}
-.bcell-check-mark.is-idle:hover {
-  opacity: 1;
 }
 /* a collapsed frame's first card: the edges of the others stacked under it */
 .bcell-deck {
@@ -1517,9 +1505,7 @@ audio.bcell-media {
 .bfilter-check.is-off {
   visibility: hidden;
 }
-/* the card check's part of the search menu (CheckStatus): its automatic switch as a row, its name at the left and the
-   switch at the right, then while checks run their count with Stop */
-.bfilter-auto,
+/* the card check's part of the search menu (CheckStatus): while checks run, their count with Stop */
 .bfilter-running {
   display: flex;
   align-items: center;
@@ -1529,9 +1515,6 @@ audio.bcell-media {
   padding: 0 8px;
   font: var(--type-body-sm);
   color: var(--text-primary);
-}
-.bfilter-auto {
-  cursor: pointer;
 }
 .bfilter-running {
   color: var(--text-secondary);
@@ -1939,6 +1922,52 @@ audio.bcell-media {
 }
 .bdetail-take-empty {
   color: var(--text-placeholder);
+}
+/* the card check in the details (CheckDetails): its line, the problem with its red ✕, the fix with what the card said
+   before, then Undo and Check again */
+.bdetail-check-line,
+.bdetail-check-note,
+.bdetail-check-fix {
+  font: var(--type-body-sm);
+  color: var(--text-secondary);
+}
+.bdetail-check-problem {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font: var(--type-body-sm);
+  color: var(--text-primary);
+}
+.bdetail-check-fix {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: var(--text-primary);
+}
+.bdetail-check-before {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-left: 10px;
+  border-left: 2px solid var(--border-hairline);
+  color: var(--text-secondary);
+}
+.bdetail-check-before .chat-text {
+  font: inherit;
+}
+.bdetail-check-before .chat-text p {
+  margin: 0;
+}
+.bdetail-check-q {
+  color: var(--text-primary);
+}
+.bdetail-check-acts {
+  display: flex;
+  gap: 4px;
+  margin-left: -8px;
+}
+.bdetail-check-acts:empty {
+  display: none;
 }
 .bdetail-hist {
   display: flex;

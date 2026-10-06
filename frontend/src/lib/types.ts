@@ -911,7 +911,8 @@ export interface CheckPatch {
 }
 
 /** `GET /ws/{c}/card-checks` (backend card_check.status_route): whether the card check runs, whether it starts by
- * itself on a new card (`auto`, the canvas's switch), and the checks running now, each with its phase. */
+ * itself on a new card (`auto`, thimble's config `agents.cardCheck.auto`), and the checks running now, each with its
+ * phase. */
 export interface CardCheckStatus {
   enabled: boolean
   auto: boolean

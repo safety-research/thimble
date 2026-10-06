@@ -27,12 +27,14 @@ _WORD_BREAK = re.compile(r"[^\w]+")  # what separates words for a text filter: a
 PART_WORDS = {"kinds": "Kind", "groups": "Group", "makers": "Made by", "checks": "Check", "starred": "Starred",
               "locked": "Locked", "text": "Text"}
 SCOPE_UNITS = {"files": concepts.FILE_UNITS, "canvas": ("cell",), "report": ("span",)}
-# A card's check state and its words in the Filter menu and chips: verified, a check read the card to the end;
-# unverified, a check runs on it or was stopped; failed, the check could not finish; unchecked, no check read it.
+# A card's check state and its words in the Filter menu and chips, by the mark the card shows (lib/cardCheck.ts
+# checkState): failed, the red ✕ for a real problem the check found (numbers its code types in, or a revision of the
+# check's that would not run); verified, a check read the card to the end and found no such problem; unverified, a check
+# runs on it, was stopped or could not finish; unchecked, no check read it.
 CHECK_WORDS = {"verified": "Verified", "unverified": "Unverified", "failed": "Failed", "unchecked": "Not checked"}
 CHECK_STATES = tuple(CHECK_WORDS)
 _CHECK_OF_STATUS = {"ok": "verified", "fixed": "verified", "pending": "unverified", "stopped": "unverified",
-                    "error": "failed"}
+                    "error": "unverified"}
 FIX_FIELDS = ("title", "code", "takeaway")  # checkstore.FIX_FIELDS
 
 
@@ -77,9 +79,9 @@ def _read_text(t: Any) -> str:
     return " ".join(_CITE_BARE.sub("", _CITE_LABELLED.sub(r"\1", str(t or ""))).split())
 
 
-def _live_fix(cell: dict) -> bool:
-    """Whether the card's newest applied check fix is still in effect (lib/cardCheck.ts liveFix): its fields as the fix
-    left them, and more than the takeaway's links changed."""
+def _live_fix_fields(cell: dict) -> list[str] | None:
+    """The fields of the card's newest applied check fix while it is still in effect (lib/cardCheck.ts liveFix): its
+    fields as the fix left them, and more than the takeaway's links changed; else None."""
     for f in reversed(cell.get("fixes") if isinstance(cell.get("fixes"), list) else []):
         if not isinstance(f, dict) or f.get("state") != "applied":
             continue
@@ -88,18 +90,41 @@ def _live_fix(cell: dict) -> bool:
             continue
         after = f.get("after") if isinstance(f.get("after"), dict) else {}
         if any((after.get(k) or "") != (cell.get(k) or "") for k in fields):
-            return False
+            return None
         before = f.get("before") if isinstance(f.get("before"), dict) else {}
-        return not (fields == ["takeaway"] and _read_text(before.get("takeaway")) == _read_text(after.get("takeaway")))
+        same_text = fields == ["takeaway"] and _read_text(before.get("takeaway")) == _read_text(after.get("takeaway"))
+        return None if same_text else fields
+    return None
+
+
+def _live_fix(cell: dict) -> bool:
+    """Whether the card's newest applied check fix is still in effect (_live_fix_fields)."""
+    return _live_fix_fields(cell) is not None
+
+
+def _check_problem(cell: dict, rec: dict) -> bool:
+    """Whether the card shows the check's red ✕ (lib/cardCheck.ts checkProblem): a check read it to the end and found
+    numbers its code types in, unless a fix of the check's has replaced the code since; or the check ended `error` with
+    a revision of its own recorded as not kept (checkstore.record_rejected)."""
+    status = str(rec.get("status") or "")
+    if status in ("ok", "fixed"):
+        render = (rec.get("stages") or {}).get("render") if isinstance(rec.get("stages"), dict) else None
+        typed = render.get("typed") if isinstance(render, dict) else None
+        return bool(isinstance(typed, list) and typed and "code" not in (_live_fix_fields(cell) or []))
+    if status == "error" and rec.get("id"):
+        fixes = cell.get("fixes") if isinstance(cell.get("fixes"), list) else []
+        return any(isinstance(f, dict) and f.get("state") == "rejected" and f.get("check") == rec["id"] for f in fixes)
     return False
 
 
 def check_state(cell: dict) -> str:
-    """The card's check state, as its check mark shows it: by its latest check's status, else verified while an applied
-    fix is in effect, else unchecked. A label card is never checked."""
+    """The card's check state, by the mark the card shows: failed for the red ✕ (_check_problem), else by its latest
+    check's status, else verified while an applied fix is in effect, else unchecked. A label card is never checked."""
     if cell.get("kind") == "label":
         return "unchecked"
     rec = cell.get("check") if isinstance(cell.get("check"), dict) else {}
+    if rec and _check_problem(cell, rec):
+        return "failed"
     return _CHECK_OF_STATUS.get(str(rec.get("status") or "")) or ("verified" if _live_fix(cell) else "unchecked")
 
 

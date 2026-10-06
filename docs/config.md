@@ -63,6 +63,7 @@ An extension's agent has the entry `"<extension>:<agent>"`, such as `"swarm-orie
 | `env` | a list of environment variable names, such as `["OPENAI_API_KEY"]` | `[]` | Variables of thimble's server that an extension's program running this agent or one of its tasks gets, such as the API key of a harness that brings its own model. A program gets no other variable of yours. |
 | `memory` | `"inherit"`, `"on"`, `"off"` | `"inherit"` | Claude Code's auto memory. `"inherit"` keeps your own setting. With memory on, an agent can write notes that your later sessions in that folder read back. |
 | `prompt` | a file path, or `null` | `null` | Replaces the agent's prompt file from thimble's `prompts/` folder (`orient.md`, `critic.md`, `writer.md`, `check.md`, `dev.md`, `labels.md`, `card-check.md`). Copy the original and edit it. It is filled in the same way, and relative paths are resolved from the config file's folder. A replacement prompt can drop the rules that keep an agent within its task. |
+| `auto` | `true`, `false`, `null` | `null`: on | Only for `cardCheck`: whether the card check reads each new card by itself. With `false`, a card is checked only when you click Check the card or Check again in its details. A card shows the check only for a real problem it found, as a red ✕ at its takeaway; a fix is applied in place, with Undo in the card's details. |
 | `subagentModel` | a model id, or `null` | `null`: the orientation's model | Only for `orientation`: the model of its subagents and workflow agents. |
 
 ## What stays as it is

@@ -1,6 +1,7 @@
 // A card's details in a panel at the right of the board: the question, its provenance (thread, run, files read), the
 // code for a card that runs code (editable; Run or ⌘↵ saves and runs it again), the output and what it printed, the
-// takeaway (editable with RefEditor), and the card's history. What the analyst types is saved when the field is left.
+// takeaway (editable with RefEditor), the card check (CheckDetails, with the Undo of its fix), and the card's history.
+// What the analyst types is saved when the field is left.
 // LabelPanel is the same panel for a label with no card of its own.
 import { useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent, type MouseEvent, type RefObject } from 'react'
 import { ChatMarkdown } from '../chat/markdown'
@@ -21,6 +22,7 @@ import { teleport } from '../lib/teleport'
 import { track } from '../lib/telemetry'
 import type { Cell } from '../lib/types'
 import { shortcutLabel } from '../lib/platform'
+import { CheckDetails } from './CheckDetails'
 import { useConceptDetail } from './concepts'
 import { CanvasContext } from './context'
 import { detailBlocks, formatDuration, groupInputs, truncatedSize, type DetailBlock } from './details'
@@ -236,6 +238,7 @@ export function DetailPanel({ cell, cite = null, onClose }: { cell: Cell; cite?:
             </div>
           </section>
         )}
+        <CheckDetails cell={cell} />
         {history.length > 0 && (
           <section className="bdetail-sec">
             <span className="bdetail-label">History</span>

@@ -92,6 +92,8 @@ DEFAULTS: dict[str, Any] = {
            for a in CALLS},
     },
 }
+# `agents.cardCheck.auto`: whether the card check reads each new card by itself (card_check.auto); null is on
+DEFAULTS["agents"]["cardCheck"]["auto"] = None
 
 # An extension's agent, `agents."<extension>:<agent>"` (extensions.agent_definitions), runs as a subagent of the
 # orientation's session, under that session's sandbox, installs rules, permission mode, fast mode and memory. Its web
@@ -345,7 +347,7 @@ def _agent_problems(name: str, conf: Any, base: Path) -> list[str]:
             efforts = config.role_efforts(ROLES[name]) if name in ROLES else config.ROLE_EFFORTS
             if v not in efforts:
                 out.append(f"{at} is {json.dumps(v)}; it takes {_words(tuple(e for e in efforts if e))} or null")
-        elif k == "fast":
+        elif k in ("fast", "auto"):
             if not isinstance(v, bool):
                 out.append(f"{at} is {json.dumps(v)}; it takes true, false or null")
         elif k == "permissionMode":

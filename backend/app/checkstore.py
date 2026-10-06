@@ -200,7 +200,7 @@ def _clear_phase(rec: dict) -> None:
 
 def finish(c: str, cid: str, check_id: str, status: str, reason: str = "", note: str = "") -> bool:
     """End check `check_id`: `ok`, `fixed`, `error` or `stopped`, with `reason` for an error or a stop and `note` for a line
-    whatever the outcome, both shown in the check mark's hover. False when the check is stale."""
+    whatever the outcome, both shown in the card's details. False when the check is stale."""
     if status not in FINISHED:
         raise ValueError(f"a check ends {', '.join(FINISHED)}, not {status!r}")
     hit = _locate(c, cid)
