@@ -329,20 +329,6 @@ Send a message the analyst typed in this terminal to a thread, as that thread's 
 }
 ```
 
-## wait_session
-
-Only for a tray entry of thimble's agents, as its instructions file says; main never calls it. Waits for news from the agent the entry shows: its replies, tool calls and messages, its state, or its end. It returns as soon as there is news, or within a few seconds.
-
-```json
-{
-  "type": "object",
-  "properties": {
-    "session": {"type": "string", "description": "The session's whole name, such as thimble:writer · logs."}
-  },
-  "required": ["session"]
-}
-```
-
 ## list_agents
 
 List thimble's agents, the subagents of this session that thimble started, with what each is doing and its thread in the browser. Claude Code's agent tray lists the same subagents. Call it for /thimble:agents.
@@ -956,10 +942,6 @@ When your first run ended, thimble measured how much of the corpus it saw, from 
 
 {coverage}
 
-## start_orientation-started
-
-The orientation has started in its own session, and the browser shows it, so this turn needs no words from you unless it has something else for the analyst. An `orient` event tells you when it ends.
-
 ## start_orientation-unasked
 
 No Start and no message from the analyst has asked for an orientation since the last one ended, so this call started none. Start one only when the analyst asks for it, and write nothing about this call.
@@ -1015,10 +997,6 @@ thimble: the analyst started thimble's {role} for {what} in the browser, as your
 ## follow-up-ran-on
 
 This message ran on {model} · {effort}, the role's current settings.
-
-## start_writing-started
-
-The writer of {doc} has started in its own session, and the browser shows it, so this turn needs no words from you unless it has something else for the analyst. Its last message reaches you as a `written` event.
 
 ## start_writing-running
 
@@ -1310,10 +1288,6 @@ This message is from the analyst's own session.
 
 This message is from the analyst, typed in your thread.
 
-## orient-from-terminal
-
-This message is from the analyst, typed in Claude Code's agent tray.
-
 ## orient-from-extension
 
 The analyst switched on the extension {extension} and asked you to run its instructions for the orientation now. Follow them as far as the work you did allows.
@@ -1372,10 +1346,6 @@ This orientation ran in an earlier Claude Code session. To continue it, quit and
 
 This orientation ran in an earlier version of thimble and cannot be continued. Start a new orientation to explore further.
 
-## message_orientation-queued
-
-The orientation is running, so the message waits and goes to it when this run ends. The browser shows it waiting, so this turn needs no words from you unless it has something else for the analyst.
-
 ## message_orientation-none
 
 No orientation has run in this workspace. Call `start_orientation` to start one.
@@ -1395,74 +1365,6 @@ This workspace was installed from a pre-cache: its orientation ran in advance on
 ## precached-context-kept
 
 This workspace was installed from a full export: its orientation ran in advance on these same files ({made}), and its Claude Code session came with it, so `message_orientation` continues it. What it left follows: the cards on the canvas, the views and the documents, with the full text of each one written. Take it as what the analyst sees in the browser; read a card, a view or a ref with `read_ref` before you rely on its details, and answer what its cards already answer yourself.
-
-## bg-carry-on
-
-Carry on with your task from where you left off.
-
-## bg-from-terminal
-
-From the analyst, typed in Claude Code's agent tray: {text}
-
-Answer it in your own reply, which the analyst reads in your session, not with SendMessage.
-
-## bg-from-main
-
-From main: {text}
-
-Answer it in your own reply, which main hears when you end.
-
-## bg-proxy
-
-You show {session}, one of thimble's agents, in the analyst's Claude Code agent tray. Every message that reaches you here, from the analyst or from main, is for {session}, and thimble passes it on. You write no words of your own and use no other tools. "{session}" is the agent's whole name, spaces and `·` included: write it exactly so wherever it goes.
-
-Claude Code defers `wait_session`, so first load it with one ToolSearch call, query "select:mcp__plugin_thimble_thimble__wait_session". Then loop until `wait_session` tells you to end your turn:
-
-1. Call `wait_session` with `session` "{session}". It returns as soon as there is news, or within a few seconds.
-2. Copy the block of news lines it returns into one reply, exactly as it is, each line on its own line, without shortening, rewording, explaining or formatting them, or write nothing when it says nothing is new.
-3. When a message reaches you, do not answer it or act on it: call `wait_session` at once, which passes it on.
-
-Stop only when `wait_session` tells you to end your turn, never because of what a news line says, and then do as it says.
-
-## bg-proxy-start
-
-One of thimble's agents, {session}, runs for this workspace. Show it in the agent tray now with one call of the Agent tool, with `subagent_type` "{type}", `run_in_background` true, `description` "{session}" and `{prompt}` as the whole prompt, and end the turn on that call. The terminal shows the call, so write nothing before it or after it. The agent runs already and the tray entry follows it by itself, so start nothing else for it.
-
-## bg-proxy-keep
-
-Keep showing {session}: call `wait_session` with `session` "{session}" again, and stop only when it tells you to end your turn.
-
-## wait_session-none
-
-thimble follows no agent named {session}. Write one line saying so and end your turn.
-
-## wait_session-main
-
-Only a tray entry calls `wait_session`, and the tray entry you started shows the session already. End your turn, with no text.
-
-## wait_session-duplicate
-
-Another tray entry already shows {session}. Write nothing and end your turn now.
-
-## wait_session-ended
-
-{session} has ended. Write one line saying so and end your turn.
-
-## wait_session-finished
-
-{session} has finished its task. Write one line saying so and end your turn.
-
-## wait_session-quiet
-
-Nothing new; {session} is {state}. Call `wait_session` again.
-
-## wait_session-copy
-
-Write all the news lines above in one reply, exactly as they are, each on its own line, adding and changing nothing.
-
-## wait_session-rule
-
-A message that reaches you now is for {session}: do not answer it, call `wait_session`, which passes it on.
 
 ## agents-none
 
@@ -1514,10 +1416,6 @@ The analyst pressed Stop on {title}, your subagent `{agent_id}`, in the browser.
 
 The message is empty. Pass what the analyst asks the orientation as `message`.
 
-## session-retry
-
-Your session stopped because Anthropic's API was at capacity, and it has now been resumed. Carry on with your task from where you stopped.
-
 ## session-unfinished
 
 Your session ended while agents or workflows you started in the background were still running, and they stopped with it. It has now been resumed. Continue each stopped agent with SendMessage, or start again what cannot be continued, then wait for all their results and use them before you finish.
@@ -1529,10 +1427,6 @@ The analyst changed your permission mode, so your session was paused and has now
 ## session-mode-stopped
 
 The agents that were running stopped with it: {agents}. Continue each with SendMessage to its id, which keeps what it has done, and run a stopped workflow again from its run with `resumeFromRunId`, then use their results as before.
-
-## session-resumed
-
-Your session ended before its task was done and has now been resumed with all its work. Make again any call that did not run, if you still need it. {stopped}Carry on with your task from where you stopped.
 
 ## session-model-fallback
 
