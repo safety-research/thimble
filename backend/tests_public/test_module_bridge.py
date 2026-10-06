@@ -436,6 +436,10 @@ async def test_without_a_live_module_a_request_answers_no_module_with_the_reason
     monkeypatch.setattr(cc_plugin, "managed", lambda environ=None: {"disableAllHooks": True})
     assert "disableAllHooks" in module_bridge.why_not(CORPUS)
     monkeypatch.setattr(cc_plugin, "managed", lambda environ=None: None)
+    # live check L29: what the launcher found, such as its own --settings, is the reason the browser gives
+    _launch(modules_off="your --settings set disableAllHooks")
+    assert module_bridge.why_not(CORPUS) == "your --settings set disableAllHooks"
+    _launch()
     # a module that said hello but holds no poll is not live once LIVE_GAP_S has passed
     monkeypatch.setattr(module_bridge, "LIVE_GAP_S", 0.05)
     mod = Module(client, plugin_headers)

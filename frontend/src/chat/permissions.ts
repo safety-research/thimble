@@ -132,6 +132,17 @@ export function askingAgent(p: Pick<PermissionRequest, 'agent_id' | 'agent_type'
   return { title: p.agent_title || '', type, chat: p.agent_chat || null }
 }
 
+/** The tool result Claude Code gives a call that auto mode's classifier refused, with its reason as given. */
+const AUTO_MODE_REFUSED = /^\s*Permission for this action was denied by the Claude Code auto mode classifier\.\s*Reason:\s*(.+?)\.(?:\s|$)/
+
+/** The step a call auto mode refused shows in its thread in place of Claude Code's long tool result: the reason as
+ * given, and where the analyst can approve it, since the browser cannot (plan section 2, a permission prompt). null for
+ * any other result. Pure. */
+export function autoModeRefusal(result: string | null | undefined): string | null {
+  const m = AUTO_MODE_REFUSED.exec(result ?? '')
+  return m ? `Auto mode refused: ${m[1]}. To approve it, open /permissions → Recently denied in your terminal.` : null
+}
+
 /** Claude Code's reason when auto mode's classifier gave no verdict on a call (backend agent_session.CLASSIFIER_DOWN). */
 const CLASSIFIER_DOWN = /\bclassifier\b.*\bunavailable\b|\bno safety verdict\b/i
 

@@ -284,7 +284,7 @@ async def start(c: str, brief: str, passes: "list[str] | tuple[str, ...]" = ("fi
             return subagents.Answer({"program": agent.replacing.extension})
         rid = subagents.request_id()
         started_by = "typed" if route == subagents.TYPED else "click"
-        before = subagents.refusal_before(c)
+        before = subagents.refusal_before(c, click=route == subagents.CLICK)
         if before is not None and route == subagents.TYPED:
             return before  # main reads why; the analyst typed it in the terminal and reads main's answer there
         orientation.start_requested(c, {"text": brief, "passes": passes, "critique": critique, **vals,

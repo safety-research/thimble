@@ -58,6 +58,7 @@ BUILTINS = ("unverified", "verified", "judgment")  # prompts/checks/<id>.md, lis
 COLOURS = tuple(range(1, 9))
 CONTEXT_CHARS = 400_000  # of the context engine's part of a run's first message
 WAITING_QUEUED = "queued"  # a run's `waiting` while it waits for a place (MAX_SESSIONS)
+WAITING_PLAN = "plan"  # a run's `waiting` while main is in plan mode, where a writer's end holds the runs it starts
 MAX_SESSIONS = 3  # runs whose agents run at once
 LIMIT_RETRY_S = 30.0  # a start Claude Code refused at its subagent limit is tried again after this long, or at an end
 TYPED = "typed"  # subagents.TYPED: main's run_check makes the Agent call
@@ -537,6 +538,34 @@ def _places() -> int:
                and (a.agent or a.request or (a.task is not None and not a.task.done()) or a.program))
 
 
+async def _wait_out_of_plan(act: _Active) -> None:
+    """A run a writer's end started waits while main is in plan mode (subagents.out_of_plan), its record `waiting` for
+    plan mode meanwhile, so its row says what it waits for (live check L21: it said it waited for a free session)."""
+    from . import session, subagents  # noqa: PLC0415
+    from .subagent_files import PLAN_MODE  # noqa: PLC0415
+
+    if session.main_mode(act.c) != PLAN_MODE:
+        return
+    _set_waiting(act, WAITING_PLAN)
+    try:
+        await subagents.out_of_plan(act.c)
+    finally:
+        _set_waiting(act, None)
+
+
+def _set_waiting(act: _Active, waiting: str | None) -> None:
+    check = read(act.c, act.check)
+    rec = ((check or {}).get("runs") or {}).get(act.doc)
+    if check is None or not isinstance(rec, dict) or rec.get("run") != act.run:
+        return
+    if waiting:
+        rec["waiting"] = waiting
+    else:
+        rec.pop("waiting", None)
+    save(act.c, check)
+    _stream(act.c, act.check, act.doc, "running", act.run, "", **({"waiting": waiting} if waiting else {}))
+
+
 def _pump() -> None:
     """Start the queued runs a place frees for, in order."""
     try:
@@ -608,7 +637,7 @@ async def _launch(act: _Active) -> None:
     path = work / TASK_FILE
     await asyncio.to_thread(_write_task, c, path, text)
     if act.route == subagents.FOLLOW_ON:
-        await subagents.out_of_plan(c)
+        await _wait_out_of_plan(act)
     if act.ended:
         return
     ans = await subagents.start_job(

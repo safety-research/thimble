@@ -51,6 +51,23 @@ def test_a_typed_start_claims_its_request_and_a_different_one_is_denied():
         "a second identical call finds no pending request"
 
 
+def test_a_typed_start_whose_prompt_ends_in_blank_lines_is_claimed_by_the_call_without_them():
+    """Live check L32: a view build's prompt ended in blank lines, which main's Agent call does not carry, so its exact
+    call was denied twice. Whitespace at the end does not count; anything else still does."""
+    state: dict = {}
+    pending_start(state, "req_0000000009", "typed", "req_0000000009\nbuild the view\n\n\n", role="view-builder",
+                  key="view:v")
+    assert sf.check_call(state, agent_call("req_0000000009\nbuild the view!", role="view-builder")) is not None
+    assert sf.check_call(state, agent_call("req_0000000009\nbuild the view", role="view-builder")) is None
+    assert sf.requests(state)["req_0000000009"]["state"] == "claimed"
+    sf.registry(state)[AGENT] = {"role": "orientation", "key": "orient", "status": "done"}
+    sf.requests(state)["req_msg0000009"] = {"kind": "message", "route": "typed", "agent": AGENT, "state": "pending",
+                                            "input": {"to": AGENT, "message": "and April?\n"}}
+    send = {"hook_event_name": "PreToolUse", "tool_name": "SendMessage", "tool_use_id": "toolu_s9",
+            "tool_input": {"to": AGENT, "message": "and April?"}}
+    assert sf.check_call(state, send) is None
+
+
 def test_a_missing_run_in_background_counts_as_background_and_false_is_denied():
     state: dict = {}
     pending_start(state, "req_0000000002", "typed", "p")
@@ -316,6 +333,33 @@ def test_the_watcher_s_role_types_are_thimble_s_roles():
     watcher = importlib.util.module_from_spec(importlib.util.spec_from_loader(loader.name, loader))
     loader.exec_module(watcher)
     assert watcher.ROLE_TYPES == tuple(sf.type_name(r) for r in sf.ROLES)
+    assert watcher.PLUGIN_CALL == sf.PLUGIN_CALL
+
+
+def test_a_click_s_agent_check_tells_the_server_main_s_mode_as_the_call_runs(ws, monkeypatch, capsys):
+    """Live check L21: thimble hears main's permission mode at main's turns, so a shift+tab while main is idle was
+    unseen. A click's call through the module (a toolu_plugin_ id, main's) carries the mode as it runs, so its
+    agent-check reports it, before any deny, whether it is denied or goes on; main's own calls and an agent's report
+    nothing."""
+    import importlib.util
+    from importlib.machinery import SourceFileLoader
+
+    loader = SourceFileLoader("thimble_watch_mode", str(WATCHER))
+    watcher = importlib.util.module_from_spec(importlib.util.spec_from_loader(loader.name, loader))
+    loader.exec_module(watcher)
+    reported: list[str] = []
+    monkeypatch.setattr(watcher, "mode", lambda inp: reported.append(str(inp.get("permission_mode"))) or 0)
+    monkeypatch.setattr(watcher, "post", lambda path, body: {})
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(config.corpus_dir(CORPUS)))
+    with sf.update(ws) as state:
+        pending_start(state, "req_hook000009", "click", "the click")
+    watcher.agent_check({**agent_call("the click", call=PLUGIN_CALL), "permission_mode": "plan"})
+    assert reported == ["plan"] and '"deny"' in capsys.readouterr().out, "denied in plan mode, and the mode told"
+    watcher.agent_check(agent_call("the click", call=PLUGIN_CALL))
+    assert reported == ["plan", "auto"] and capsys.readouterr().out == "", "claimed once main left plan mode"
+    watcher.agent_check(agent_call("main's own", call="toolu_01own"))
+    watcher.agent_check(agent_call("an agent's", call=PLUGIN_CALL, caller=AGENT))
+    assert reported == ["plan", "auto"]
 
 
 def test_without_a_server_each_new_hook_writes_its_record(tmp_path, ws):

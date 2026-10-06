@@ -306,6 +306,10 @@
 .chat-tool-result-error {
   color: var(--status-negative);
 }
+/* a call auto mode refused: the reason as given and where to approve it, in place of Claude Code's tool result */
+.chat-tool-refused {
+  color: var(--status-negative);
+}
 
 /* raw calls (Read, Grep, Glob, Bash): one line each, as Claude Code prints a tool line: the state's glyph, the tool at
    500 and its target in the secondary ink, in mono, cut to the column. Open, the input and result in a tonal inset. */

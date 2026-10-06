@@ -7,7 +7,10 @@
 // says how it runs: as a subagent of the analyst's Claude Code session, in that session's permission mode. Start is a
 // click: the server starts the orientation through thimble's plugin with no turn of main (POST /ws/{c}/start), and the
 // answer says whether it started. Start is off, with the reason on that line, while thimble's hooks module is not
-// running in main's session (main's meta `module: false`) or main is in plan mode. Skip leaves main to the analyst.
+// running in main's session (main's meta `module: false`), and with the plain-`claude` warning
+// while main is a session `thimble` did not start (`launched: false`), whose module stays idle for that reason; in
+// plan mode the line warns and Start stays on, since thimble hears main's mode only at main's turns and the server
+// refuses a start in plan mode as it runs. Skip leaves main to the analyst.
 import { useEffect, useRef, useState } from 'react'
 import { Button } from '../components/Button'
 import { TextArea } from '../components/Field'
@@ -18,6 +21,7 @@ import { hasEffort, loadSettings, modelChoices, onSettingsChange } from '../lib/
 import { track } from '../lib/telemetry'
 import type { ChatMeta, OrientPass, OrientRun, Settings, StartAnswer, StartBody } from '../lib/types'
 import { toastText } from '../shell/Toasts'
+import { unfencedLine } from '../shell/UnfencedBanner'
 import { AGENT_EFFORTS, ModelLine } from './ModelLine'
 
 export const PASSES: { id: OrientPass; label: string }[] = [
@@ -109,13 +113,16 @@ export function modeLine(mode: string | null | undefined): string {
   return `Runs as a subagent of your Claude Code session, ${words ? `in ${words}` : 'in its permission mode'}.`
 }
 
-/** Why Start is off while main is in plan mode, where a subagent would ask before every card (U20). */
+/** Why Start would be refused while main is in plan mode, where a subagent would ask before every card (U20): a warning,
+ * since the mode thimble knows may be stale after a shift+tab while main is idle (StartGate leaves Start on). */
 export const PLAN_MODE_LINE = 'Your session is in plan mode, where the orientation would have to ask you before every card. Switch out of plan mode first (shift+tab in your terminal).'
 
 /** What to change so that thimble's hooks module runs, for the reason module_bridge.why_not gives. Pure. */
 export function noModuleFix(reason: string): string {
   const r = reason.toLowerCase()
   if (r.includes('thimble_no_module')) return 'Unset THIMBLE_NO_MODULE'
+  if (r.includes('your --settings')) return 'Leave disableAllHooks out of the --settings you give `thimble`'
+  if (r.includes('your claude code settings')) return 'Turn disableAllHooks off in your Claude Code settings'
   if (r.includes('managed settings') || r.includes('disableallhooks') || r.includes('allowmanagedhooksonly')) return "Ask whoever manages your Claude Code settings to allow plugins' hooks modules"
   if (r.includes('trust')) return 'Trust this folder in Claude Code'
   return 'Run `thimble doctor` to see why'
@@ -128,9 +135,13 @@ export function noModuleLine(reason: string | null | undefined): string {
   return `thimble's agents can't start in this session: Claude Code's hooks modules are off (${why}). Main, its threads, cards and labels still work. ${noModuleFix(why)}, then run \`thimble -c\`.`
 }
 
-/** Why Start is off now, or null: no hooks module in main's session (`module: false`; a meta that does not say leaves
+/** Why Start is off now, or null: main not started by `thimble` or outside thimble's sandbox (the banner's warning, as
+ * the server refuses such a start: not-launched; its module is idle for that reason, so the modules-off line would
+ * send the analyst the wrong way), no hooks module in main's session (`module: false`; a meta that does not say leaves
  * Start on, and the server refuses a start that cannot happen), then plan mode. Pure. */
-export function startBlocked(main: Pick<ChatMeta, 'module' | 'module_why' | 'attached'> | null | undefined): { kind: 'no-module' | 'plan'; line: string } | null {
+export function startBlocked(main: Pick<ChatMeta, 'module' | 'module_why' | 'attached' | 'launched' | 'fenced'> | null | undefined): { kind: 'not-launched' | 'no-module' | 'plan'; line: string } | null {
+  const unfenced = unfencedLine(main)
+  if (unfenced) return { kind: 'not-launched', line: unfenced }
   if (main?.module === false) return { kind: 'no-module', line: noModuleLine(main.module_why) }
   if (main?.attached?.permission_mode === 'plan') return { kind: 'plan', line: PLAN_MODE_LINE }
   return null
@@ -138,8 +149,9 @@ export function startBlocked(main: Pick<ChatMeta, 'module' | 'module_why' | 'att
 
 export function StartGate({ ws, main, model: rowModel, effort: rowEffort, restore = null, onStarting, onAnswer, onSkip }: {
   ws: string
-  /** main's meta: its permission mode, and whether thimble's hooks module runs in it */
-  main?: Pick<ChatMeta, 'module' | 'module_why' | 'attached'> | null
+  /** main's meta: its permission mode, whether `thimble` started it in its fence, and whether thimble's hooks module
+   * runs in it */
+  main?: Pick<ChatMeta, 'module' | 'module_why' | 'attached' | 'launched' | 'fenced'> | null
   /** the orientation row's model and effort (settings.models.orient), where the menus open; nothing while not read */
   model?: string | null
   effort?: string | null
@@ -177,13 +189,16 @@ export function StartGate({ ws, main, model: rowModel, effort: rowEffort, restor
   const [error, setError] = useState<string | null>(null)
   const taRef = useRef<HTMLTextAreaElement>(null)
   const blocked = startBlocked(main)
+  // plan mode warns and leaves Start on: thimble hears main's mode only at main's turns, so it may be stale after a
+  // shift+tab while main is idle, and the server's --agent-check refuses a start in plan mode from the mode as it runs
+  const off = !!blocked && blocked.kind !== 'plan'
   const toggle = (id: OrientPass) => {
     const next = togglePass(on, id)
     track('start-toggle', { target: `orient:${id}`, detail: { on: next[id] } })
     setOn(next)
   }
   const start = async () => {
-    if (busy || blocked) return
+    if (busy || off) return
     setBusy(true)
     setError(null)
     onStarting?.()
@@ -287,7 +302,7 @@ export function StartGate({ ws, main, model: rowModel, effort: rowEffort, restor
             Skip
           </Button>
         )}
-        <Button variant="primary" className="chat-gate-go" busy={busy} disabled={!!blocked} title={blocked ? blocked.line : undefined} onClick={() => void start()}>
+        <Button variant="primary" className="chat-gate-go" busy={busy} disabled={off} title={off ? blocked?.line : undefined} onClick={() => void start()}>
           Start
         </Button>
       </div>

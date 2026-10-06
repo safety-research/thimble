@@ -439,6 +439,7 @@ def deny(reason: str) -> None:
 # when the check itself fails, since a hook that fails lets the call run, and no such start may run unasked
 ROLE_TYPES = tuple(f"thimble:{r}" for r in ("orientation", "critic", "writer", "view-builder", "view-reviewer", "check"))
 CHECK_FAILED = "thimble could not check this start against the analyst's requests, so it does not run"
+PLUGIN_CALL = "toolu_plugin_"  # app/subagent_files.py PLUGIN_CALL: a call thimble's module made, a click's
 
 
 def agent_check(inp: dict) -> int:
@@ -459,6 +460,10 @@ def agent_check(inp: dict) -> int:
                 str(tool_input.get("subagent_type") or "") not in ROLE_TYPES:
             return 0
         reason = CHECK_FAILED
+    if not inp.get("agent_id") and str(inp.get("tool_use_id") or "").startswith(PLUGIN_CALL):
+        # a click's call through the module carries main's permission mode as it runs, which thimble otherwise hears
+        # only at main's turns: a shift+tab while main is idle shows in the browser from here (live check L21)
+        mode(inp)
     if reason is not None:
         deny(reason)
         return 0

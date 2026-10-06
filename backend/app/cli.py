@@ -1684,7 +1684,7 @@ def main_name(cwd: Path) -> str:
 # subagent paths are in): the orientation's work folder, the writers', the critics', the checks', the view builders' and
 # the workspace's own views. No code ticket's worktree: code tickets keep their own fence.
 WRITE_DIRS = ("orient/work", "writers", "critique-work", "check-work", "views-work", "extension/views")
-LAUNCH_FILE = "launch.json"  # in the workspace: {session, at, fenced, switches, unset, pid}
+LAUNCH_FILE = "launch.json"  # in the workspace: {session, at, fenced, switches, unset, pid, modules_off}
 # exported into main's environment: no "Move to background" and no ← agent view, the ↓ tray kept (spike U11);
 # CLAUDE_DISABLE_ADOPT adds nothing to the first but does no harm
 SWITCHES = {"CLAUDE_CODE_DISABLE_AGENT_VIEW": "1", "CLAUDE_DISABLE_ADOPT": "1"}
@@ -1743,12 +1743,14 @@ def fence_off(c: str | None) -> str:
     return "" if cc_settings.sandbox_ok() else "missing"
 
 
-def main_fence(cwd: Path, c: str | None = None, root: Path | None = None, session: str | None = None) -> dict[str, Any]:
+def main_fence(cwd: Path, c: str | None = None, root: Path | None = None, session: str | None = None,
+               given: str = "") -> dict[str, Any]:
     """The --settings keys that put main, and every subagent it starts, inside thimble's fence for the corpus `cwd`,
     workspace `c` (by default the one `cwd` is registered as), the plugin copy at `root`, main's session `session`
     (module note, main's fence): `sandbox`, `permissions` (userconf.main_rules; no additionalDirectories) and `env`
     (cc_plugin.FENCE_MARK). With the plugin's hooks off, /thimble's own command for SANDBOX_ACTIONS in that session and
-    the Monitor route's watcher command for it are let out of the sandbox, and no other (sandbox_rules, watch_rules).
+    the Monitor route's watcher command for it are let out of the sandbox, and no other (sandbox_rules, watch_rules);
+    `given` is the analyst's own --settings to the launcher, which may turn the hooks off (launch_hooks_blocked).
     {} when fence_off says so. A config with an error fences main with the defaults' rules."""
     from . import userconf  # noqa: PLC0415
 
@@ -1762,7 +1764,7 @@ def main_fence(cwd: Path, c: str | None = None, root: Path | None = None, sessio
     corpus = Path(os.path.realpath(config.corpus_dir(c)))
     root = root or plugin_root()
     excluded: list[str] = []
-    if cc_plugin.hooks_blocked(cwd, root):
+    if launch_hooks_blocked(cwd, root, given):
         # with the hooks off, the Monitor route's watcher must reach the server (spike U15), and /thimble's own command
         # starts the server
         excluded += [*watch_rules(root, cwd, session), *sandbox_rules(root, cwd, session)]
@@ -1811,6 +1813,31 @@ def with_fence(out: dict[str, Any], fence: dict[str, Any]) -> dict[str, Any]:
     return merged
 
 
+def given_settings(cwd: Path, given: str) -> Any:
+    """The analyst's own --settings to the launcher, `given` (inline JSON, or a file relative to `cwd`), parsed; None
+    when there are none or they cannot be read."""
+    if not given:
+        return None
+    try:
+        return json.loads(given if given.lstrip().startswith("{") else (cwd / Path(given).expanduser()).read_text("utf-8"))
+    except (OSError, ValueError):
+        return None
+
+
+def launch_hooks_blocked(cwd: Path, root: Path, given: str = "") -> bool:
+    """cc_plugin.hooks_blocked for the session the launcher is about to start: its --settings, `given`, rank above the
+    analyst's settings files as Claude Code ranks them, but cc_plugin.flag_settings cannot read them while that `claude`
+    does not run yet (live check L29: `--settings '{"disableAllHooks": true}'` left /thimble's command in the sandbox,
+    so /thimble could not reach the server). The org's managed tier still wins."""
+    own = given_settings(cwd, given)
+    v = own.get("disableAllHooks") if isinstance(own, dict) else None
+    if v is True:
+        return True
+    if v is False:
+        return cc_plugin.managed_blocks(root)
+    return cc_plugin.hooks_blocked(cwd, root)
+
+
 def modules_off(cwd: Path, given: str = "") -> str:
     """Why Claude Code will not load thimble's hooks module in a session the launcher starts in `cwd`, as far as the
     launch can tell: the org's managed settings turn hooks modules off (`disableAllHooks`, or `allowManagedHooksOnly`
@@ -1826,12 +1853,7 @@ def modules_off(cwd: Path, given: str = "") -> str:
             return "your organization's managed settings set allowManagedHooksOnly"
     if os.environ.get(NO_MODULE_ENV, "").strip():
         return f"{NO_MODULE_ENV} is set"
-    own: Any = None
-    if given:
-        try:
-            own = json.loads(given if given.lstrip().startswith("{") else (cwd / Path(given).expanduser()).read_text("utf-8"))
-        except (OSError, ValueError):
-            own = None
+    own = given_settings(cwd, given)
     if isinstance(own, dict) and isinstance(own.get("disableAllHooks"), bool):
         return "your --settings set disableAllHooks" if own["disableAllHooks"] else ""
     value = None
@@ -1916,10 +1938,11 @@ def refresh_extensions(c: str) -> None:
 
 
 def launch_record(c: str, session: str | None, fenced: bool, switches: dict[str, str], unset: list[str],
-                  pid: int | None = None) -> None:
+                  pid: int | None = None, modules_off: str = "") -> None:
     """Write launch.json in workspace `c` (module note, main's fence), with `pid`, the launcher's own process, which
-    becomes main's `claude` when the launcher execs it, when the launcher names it. Never raises: a launch that cannot
-    write it starts main, whose hooks module then stays idle."""
+    becomes main's `claude` when the launcher execs it, when the launcher names it, and `modules_off`, why the launch
+    found Claude Code's hooks modules off (modules_off), which the browser and the doctor give as the reason. Never
+    raises: a launch that cannot write it starts main, whose hooks module then stays idle."""
     from .ledger import atomic_write_text  # noqa: PLC0415
 
     try:
@@ -1928,6 +1951,8 @@ def launch_record(c: str, session: str | None, fenced: bool, switches: dict[str,
                                "unset": unset}
         if pid and pid > 1:
             rec["pid"] = int(pid)
+        if modules_off:
+            rec["modules_off"] = modules_off
         atomic_write_text(path, json.dumps(rec, indent=1) + "\n")
     except (OSError, ValueError) as e:
         _log(f"launch-args: {LAUNCH_FILE} of {c} was not written: {e}")
@@ -2009,7 +2034,7 @@ def _launch_args(cwd: Path, resume: bool, settings: str, own_session: str | None
     else:
         session = session_id = str(uuid.uuid4())
     why_off = fence_off(c)
-    fence = {} if why_off else main_fence(cwd, c, root, session)
+    fence = {} if why_off else main_fence(cwd, c, root, session, given=settings)
     if why_off in NO_FENCE_LINES:
         notes.append(NO_FENCE_LINES[why_off])
     unset = [name for name in UNSET_VARS if os.environ.get(name, "").strip()]
@@ -2038,7 +2063,7 @@ def _launch_args(cwd: Path, resume: bool, settings: str, own_session: str | None
     settings_value = launch_settings(cwd, settings, fence)
     if c:  # fenced as main's command line will show it (an unreadable --settings of the analyst's carries no fence)
         launch_record(c, session, cc_plugin.fenced_argv(["claude", "--settings", settings_value], cwd), switches, unset,
-                      launcher_pid)
+                      launcher_pid, modules_off=why_idle)
     load = "" if installed or cc_plugin.marketplace(root) != cc_plugin.INLINE else str(root)
     return "\n".join([load, tools_line, effort, settings_value, turn_tools,
                       main_name(cwd), session_id, " ".join(f"{k}={v}" for k, v in switches.items()), " ".join(unset),
@@ -2513,10 +2538,14 @@ def module_line(cwd: Path) -> str:
     if why:
         return f"off: Claude Code's hooks modules are off ({why}), so thimble's agents cannot start in this folder"
     notes = []
+    c = config.workspace_for_cwd(str(cwd))
+    launch = read_launch(c)
+    if launch.get("modules_off"):  # what the last launch alone could see, such as its own --settings
+        return (f"off in the last launch here ({launch.get('at') or '?'}): Claude Code's hooks modules were off "
+                f"({launch['modules_off']}), so thimble's agents could not start in it")
     if folder_trusted(cwd) is False:
         notes.append(f"Claude Code does not trust {cwd} yet; it asks at the first launch, and loads the module only "
                      "in a folder you trust")
-    c = config.workspace_for_cwd(str(cwd))
     try:
         rec = (_read_json(config.workspace_path(c) / "subagents.json") or {}).get("module") if c else None
     except (OSError, ValueError, KeyError, AttributeError):
@@ -3173,15 +3202,17 @@ def cmd_ensure(args: argparse.Namespace) -> int:
         else:
             given = precached_context(url, name, str(args.session)) if name and args.session else ""
             second = [PRECACHED_LINE] if given else [RESUME_LINE] if not opened and resumes(url, name) else []
+        # a plain `claude`: the warning goes under the link too, which the Stop hook shows whatever main's reply holds
+        unfenced = bool(args.session) and not launched() and not fenced_here(cwd)
         # with the plugin's hooks off no Stop hook shows the link, so the page opens without the key
         if (args.session and not cc_plugin.hooks_blocked(cwd, plugin_root())
-                and leave_link(str(args.session), ui_url(name), [])):
+                and leave_link(str(args.session), ui_url(name), [UNFENCED_LINE] if unfenced else [])):
             print(LINK_LINE)
         else:
             print(f"thimble: {ui_url(name, key=not args.session and to_terminal())}")
         for line in second:
             print(line)
-        if args.session and not launched() and not fenced_here(cwd):
+        if unfenced:
             print(UNFENCED_LINE)
         status = config.auth_status(cwd=cwd)
         if args.session:

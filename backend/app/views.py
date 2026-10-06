@@ -2799,6 +2799,25 @@ def message(c: str, slug: str, text: str, *, by: str = "browser", route: str = C
     return revise(c, slug, text, asked=True, route=route)
 
 
+def click_refused(c: str, slug: str) -> dict[str, Any] | None:
+    """A Build, Retry or accept click that cannot start a builder now, refused at once as Start is
+    (subagents.refusal_before: main not started by `thimble`, or no hooks module; in plan mode --agent-check refuses
+    the builder's start as it runs): the proposal keeps its status and records the refusal, which its chip shows. None
+    when nothing stands in the way. Queued instead, the build waited for a session that could start it and started by
+    itself later (live check L15)."""
+    from . import subagents  # noqa: PLC0415
+
+    before = subagents.refusal_before(c, click=True)
+    if before is None:
+        return None
+    refused = {"kind": before.kind, "reason": before.reason, "request": None, "at": _now()}
+    failed = (read_proposal(c, slug) or {}).get("status") == "failed"
+    prop = update_proposal(c, slug, refused=refused, **({"error": before.reason} if failed else {}))
+    prop = prop or read_proposal(c, slug) or {}
+    _emit(c, slug, str(prop.get("status") or "failed"), chat=prop.get("chat"))
+    return prop
+
+
 def retry(c: str, slug: str, values: dict[str, Any] | None = None) -> dict[str, Any]:
     """Queue a failed proposal again (Build or Retry on its chip, a click), with the run's `values` when the Build menu
     names them, else Settings' dev row; a new builder goes on from the draft in the view's folder. A built view whose
@@ -2808,6 +2827,9 @@ def retry(c: str, slug: str, values: dict[str, Any] | None = None) -> dict[str, 
     if prop is None:
         raise HTTPException(404, f"no such proposal: {slug}")
     vals = {k: str(v) for k, v in (values or {}).items() if v} or None
+    again = prop.get("status") == "failed" or (prop.get("status") == "built" and prop.get("failed_change") is not None)
+    if again and (refused := click_refused(c, slug)) is not None:
+        return refused
     if prop.get("status") == "built" and prop.get("failed_change") is not None:
         return revise(c, slug, str(prop["failed_change"]), asked=True, route=CLICK, values=vals)
     if prop.get("status") != "failed":
@@ -4521,6 +4543,8 @@ def accept(c: str, slug: str) -> dict[str, Any]:
         raise HTTPException(404, f"no such proposal: {slug}")
     if prop.get("status") != "suggested":
         raise HTTPException(409, f"the view {prop['name']!r} is {prop.get('status')}, not suggested")
+    if (refused := click_refused(c, slug)) is not None:
+        return refused
     prop = update_proposal(c, slug, status="queued", asked=True, accepted=True, ts=_now(), route=CLICK) or prop
     _emit(c, slug, "queued", asked=True)
     _queue(c, slug)

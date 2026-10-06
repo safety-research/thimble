@@ -7,6 +7,7 @@
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { DEFAULT_ON, PLAN_MODE_LINE, StartGate, modeLine, noModuleLine, restoreOf, startBlocked, startBody, startGateOpen } from '../../src/chat/StartGate.tsx'
+import { UNFENCED_LINE } from '../../src/shell/UnfencedBanner.tsx'
 import { invalidateSettings } from '../../src/lib/models.ts'
 import { mount, settle, unmountAll } from './mount.tsx'
 
@@ -75,7 +76,7 @@ describe('the Start gate', () => {
     expect(sent[0].body).toEqual({ deck: true, views: true, critique: false, report: true, model: 'claude-haiku-4-5-20251001' })
   })
 
-  test("without thimble's module, or in plan mode, Start is off and the line says why", async () => {
+  test("without thimble's module Start is off and the line says why; in plan mode the line warns", async () => {
     const off = await mount(<StartGate ws="mini" model="claude-opus-5-5" effort="high" main={{ module: false, module_why: 'THIMBLE_NO_MODULE is set' }} />)
     await settle()
     expect(startButton(off).disabled).toBe(true)
@@ -84,9 +85,24 @@ describe('the Start gate', () => {
     expect(line).toContain('Unset THIMBLE_NO_MODULE, then run `thimble -c`.')
     await click(startButton(off))
     expect(sent).toEqual([])
+    // plan mode warns and leaves Start on (live check L21): the mode thimble knows is stale after a shift+tab while main
+    // is idle, and the server refuses a start in plan mode from the mode as the start runs
     const plan = await mount(<StartGate ws="mini" model="claude-opus-5-5" effort="high" main={{ attached: { session: 's', cwd: '/c', since: '', permission_mode: 'plan' } }} />)
-    expect(startButton(plan).disabled).toBe(true)
+    expect(startButton(plan).disabled).toBe(false)
     expect(plan.querySelector('.chat-gate-mode')!.textContent).toBe(PLAN_MODE_LINE)
+    expect(plan.querySelector('.chat-gate-mode')!.getAttribute('role')).toBe('alert')
+  })
+
+  test("in a session thimble did not start, Start is off with the plain-claude warning, not the modules-off line", async () => {
+    // live check L15: a plain `claude` with /thimble has no module for that reason, and the modules-off line sent the
+    // analyst to `thimble doctor` and `thimble -c`
+    const main = { attached: { session: 's', cwd: '/c', since: '', permission_mode: 'auto' }, launched: false, fenced: false, module: false, module_why: "Claude Code did not load thimble's hooks module" }
+    const el = await mount(<StartGate ws="mini" model="claude-opus-5-5" effort="high" main={main} />)
+    await settle()
+    expect(startButton(el).disabled).toBe(true)
+    expect(el.querySelector('.chat-gate-mode')!.textContent).toBe(UNFENCED_LINE)
+    expect(startBlocked(main)?.kind).toBe('not-launched')
+    expect(startBlocked({ ...main, launched: true, fenced: true })?.kind).toBe('no-module')
   })
 
   test('a refused start fills the gate with its request, switches, model and effort', async () => {
@@ -117,6 +133,9 @@ describe('its rules', () => {
     expect(startBlocked({ module: true })).toBeNull()
     expect(startBlocked({})).toBeNull()
     expect(noModuleLine('your organization\'s managed settings set disableAllHooks')).toContain("Ask whoever manages your Claude Code settings")
+    // live check L29: the launcher's own --settings, or the analyst's settings files, are the analyst's to change
+    expect(noModuleLine('your --settings set disableAllHooks')).toContain('Leave disableAllHooks out of the --settings you give `thimble`')
+    expect(noModuleLine('your Claude Code settings set disableAllHooks')).toContain('Turn disableAllHooks off in your Claude Code settings')
     expect(noModuleLine('')).toContain("Claude Code did not load thimble's hooks module")
   })
 })

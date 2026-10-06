@@ -88,6 +88,29 @@ async def test_a_writer_s_end_starts_each_shown_check_through_the_module_with_it
     assert _run(cid)["stale"] == 0
 
 
+async def test_in_plan_mode_a_writer_s_end_holds_its_checks_which_say_so_and_start_after(doc, bridge, monkeypatch):
+    """Live check L21: the runs a writer's end starts wait while main is in plan mode; their rows said they waited for
+    a free session. Their records say `waiting: plan` meanwhile, and they start once main leaves plan mode."""
+    from app import session
+
+    mode = {"now": "plan"}
+    monkeypatch.setattr(session, "main_mode", lambda c: mode["now"])
+
+    async def out_of_plan(c, poll_s=2.0):  # subagents.out_of_plan, polled fast, with main's session there
+        while mode["now"] == "plan":
+            await asyncio.sleep(0.01)
+
+    monkeypatch.setattr(subagents, "out_of_plan", out_of_plan)
+    await _write()
+    _writer_done()
+    await _until(lambda: _run("unverified").get("waiting") == checks.WAITING_PLAN, "the run did not say it waits")
+    await asyncio.sleep(0.05)
+    assert not bridge.ops("spawn"), "nothing starts in plan mode"
+    mode["now"] = "auto"
+    await _until(lambda: len(bridge.ops("spawn")) == 2, "the held checks never started")
+    assert "waiting" not in _run("unverified") or _run("unverified")["waiting"] != checks.WAITING_PLAN
+
+
 async def test_the_analyst_s_edit_starts_nothing_and_marks_the_checks_stale_with_the_count(doc, bridge):
     await _write()
     _writer_done()

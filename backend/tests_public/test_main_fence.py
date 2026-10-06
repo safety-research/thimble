@@ -406,6 +406,25 @@ def test_with_hooks_off_the_fence_lets_out_only_the_skill_s_own_command_for_main
     assert cli.sandbox_rules(root, tmp_path / 'say "hi"', sid) == [] and cli.sandbox_rules(root, corpus, "x") == []
 
 
+def test_hooks_turned_off_by_the_launcher_s_own_settings_let_out_the_skill_s_command_too(corpus, tmp_path, monkeypatch):
+    """Live check L29: `thimble --settings '{"disableAllHooks": true}'` launched with the plain no-module line, but the
+    fence read the hooks as on (cc_plugin.flag_settings reads a running claude's --settings, and main did not run yet),
+    so /thimble's own command stayed in the sandbox and could not reach the server. The launcher's --settings count,
+    above the analyst's settings files; the org's managed tier still wins."""
+    sid = "0b9d2f3e-1c2d-4e5f-8a9b-0c1d2e3f4a5b"
+    root = cli.plugin_root()
+    rules = [*cli.watch_rules(root, corpus, sid), *cli.sandbox_rules(root, corpus, sid)]
+    assert cli.main_fence(corpus, session=sid, given='{"disableAllHooks": true}')["sandbox"]["excludedCommands"] == rules
+    lines = cli.launch_args(corpus, settings='{"disableAllHooks": true}').split("\n")
+    assert cli.sandbox_rules(root, corpus, lines[6])[0] in json.loads(lines[3])["sandbox"]["excludedCommands"]
+    (tmp_path / "cc").mkdir(exist_ok=True)
+    (tmp_path / "cc" / "settings.json").write_text(json.dumps({"disableAllHooks": True}))
+    assert cli.main_fence(corpus, session=sid, given='{"disableAllHooks": false}')["sandbox"]["excludedCommands"] == [], \
+        "the launcher's settings rank above the analyst's"
+    monkeypatch.setattr(cc_plugin, "managed", lambda environ=None: {"disableAllHooks": True})
+    assert cli.main_fence(corpus, session=sid, given='{"disableAllHooks": false}')["sandbox"]["excludedCommands"] == rules
+
+
 def test_the_launch_says_plainly_when_hooks_modules_are_off_and_still_launches(corpus, tmp_path, monkeypatch):
     """Managed settings that set disableAllHooks or allowManagedHooksOnly, the analyst's own disableAllHooks or
     THIMBLE_NO_MODULE: the note line says thimble's agents can't start and why, and the launch goes on; THIMBLE_NO_MODULE
@@ -433,6 +452,15 @@ def test_the_launch_says_plainly_when_hooks_modules_are_off_and_still_launches(c
     (tmp_path / "cc" / "settings.json").write_text(json.dumps({"disableAllHooks": True}))
     assert cli.MODULES_OFF_LINE.format(reason="your Claude Code settings set disableAllHooks") in note()
     (tmp_path / "cc" / "settings.json").write_text("{}")
+    # live check L29: what only the launch can see, its own --settings, is kept in launch.json for the browser and the
+    # doctor, which run outside that session
+    assert cli.launch_args(corpus, settings='{"disableAllHooks": true}')
+    rec = json.loads((config.WORKSPACES_DIR / "logs" / cli.LAUNCH_FILE).read_text())
+    assert rec["modules_off"] == "your --settings set disableAllHooks"
+    line = cli.module_line(corpus)
+    assert line.startswith("off in the last launch here") and "your --settings set disableAllHooks" in line
+    cli.launch_args(corpus)
+    assert "modules_off" not in json.loads((config.WORKSPACES_DIR / "logs" / cli.LAUNCH_FILE).read_text())
     assert cli.SAFE_MODE_LINE in note(safe_mode=True)
     monkeypatch.setenv(cli.SAFE_MODE_ENV, "1")
     assert cli.SAFE_MODE_LINE in note()
@@ -446,7 +474,8 @@ def test_slash_thimble_warns_in_a_session_the_launcher_did_not_start(corpus, mon
     assert cli.UNFENCED_LINE.startswith("thimble: WARNING - this session was not started with `thimble`")
     assert "thimble's agents cannot start in it" in cli.UNFENCED_LINE
     src = Path(cli.__file__).read_text("utf-8")
-    assert "if args.session and not launched() and not fenced_here(cwd):\n            print(UNFENCED_LINE)" in src
+    assert "unfenced = bool(args.session) and not launched() and not fenced_here(cwd)" in src
+    assert "if unfenced:\n            print(UNFENCED_LINE)" in src, "test_cli holds what the Stop hook is left"
     fence = {"sandbox": {"enabled": True}, "env": {cc_plugin.FENCE_MARK: "1"}}
     monkeypatch.undo()
     monkeypatch.setattr(cc_plugin, "claude_pid", lambda environ=None: 77)
