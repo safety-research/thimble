@@ -51,6 +51,16 @@ def test_a_typed_start_claims_its_request_and_a_different_one_is_denied():
         "a second identical call finds no pending request"
 
 
+def test_a_typed_start_whose_copy_differs_only_in_blank_lines_at_its_end_claims_its_request():
+    # live check L25 (live-d): main copied a view build's call, whose prompt ends with blank lines, without them twice
+    state: dict = {}
+    pending_start(state, "req_0000000009", "typed", "req_0000000009\nthe view\n```\n\n\n")
+    assert sf.check_call(state, agent_call("req_0000000009\nthe view\n```")) is None
+    assert sf.requests(state)["req_0000000009"]["state"] == "claimed"
+    pending_start(state, "req_0000000010", "typed", "req_0000000010\nthe view")
+    assert sf.check_call(state, agent_call("req_0000000010\nthe view, changed")) is not None
+
+
 def test_a_missing_run_in_background_counts_as_background_and_false_is_denied():
     state: dict = {}
     pending_start(state, "req_0000000002", "typed", "p")
