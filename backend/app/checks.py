@@ -371,11 +371,52 @@ def _of_session(c: str, key: str | None) -> _Active | None:
     parts = str(key or "").split(":")
     if len(parts) != 3 or parts[0] != tools.CHECK_SESSION:
         return None
-    return _active.get((c, parts[1], parts[2]))
+    return _current(c, parts[1], parts[2])
 
 
 def running(c: str, cid: str, doc: str) -> bool:
-    return (c, cid, doc) in _active
+    return _current(c, cid, doc) is not None
+
+
+def _terminal(c: str) -> bool:
+    from . import subagent_files  # noqa: PLC0415
+
+    try:
+        return subagent_files.terminal(config.workspace_dir(c))
+    except (OSError, ValueError):
+        return False
+
+
+def _current(c: str, cid: str, doc: str) -> _Active | None:
+    """The run of check `cid` on `doc` that goes. In browser mode the server holds every run (_active). In terminal mode
+    the process that starts a run (the shim for main's run_check, a hook's process for a writer's follow-on) is not the
+    one that hears its agent start and end (a hook's process) or takes its comments (the shim), so the check's file
+    decides: a run it records `running` that this process does not hold is taken up from the record, as recover takes
+    up a previous server's, and a run this process holds that the file records ended, or replaced, is let go."""
+    act = _active.get((c, cid, doc))
+    if not _terminal(c):
+        return act
+    rec = ((read(c, cid) or {}).get("runs") or {}).get(doc)
+    live = isinstance(rec, dict) and rec.get("status") == "running" and bool(rec.get("run"))
+    if act is not None and not act.ended and (not live or rec.get("run") != act.run):
+        if act.task is None or act.task.done():  # not a start this process has under way
+            _active.pop((c, cid, doc), None)
+            if act in _queue:
+                _queue.remove(act)
+            act = None
+    if act is None and live:
+        act = _Active(c, cid, doc, str(rec["run"]), bool(rec.get("notify")), list(rec.get("covered") or []),
+                      list(rec.get("fps") or []), agent=str(rec.get("agent_id") or "") or None,
+                      comments=int(rec.get("comments") or 0))
+        _active[(c, cid, doc)] = act
+    return act
+
+
+def _prune(c: str | None = None) -> None:
+    """In terminal mode, let go of the runs this process holds that another process ended (_current)."""
+    for (cc, cid, doc) in list(_active):
+        if c is None or cc == c:
+            _current(cc, cid, doc)
 
 
 def recover(root: Path | None = None) -> list[str]:
@@ -503,7 +544,7 @@ async def start_run(c: str, cid: str, doc: str, *, passages_: list[str] | None =
     cover = to_cover(check, doc, d, passages_, force) if d is not None else []
     if not cover:
         return None
-    old = _active.get((c, cid, doc))
+    old = _current(c, cid, doc)
     if old is not None:
         await stop(old)
         check = read(c, cid) or check
@@ -533,7 +574,8 @@ async def start_run(c: str, cid: str, doc: str, *, passages_: list[str] | None =
 
 
 def _places() -> int:
-    """The runs holding a place: started, or starting."""
+    """The runs holding a place: started, or starting; in terminal mode not one another process ended (_prune)."""
+    _prune()
     return sum(1 for a in _active.values() if not a.ended and a not in _queue
                and (a.agent or a.request or (a.task is not None and not a.task.done()) or a.program))
 

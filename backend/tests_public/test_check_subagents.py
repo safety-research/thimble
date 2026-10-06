@@ -246,3 +246,37 @@ def test_every_check_click_route_refuses_the_server_s_token_without_the_analyst_
         r = getattr(client, method)(path, json=body)
         assert r.status_code == 403, ("neither cookie nor token, as a kernel cell posts it", path)
     assert not bridge.calls, "the module is never asked"
+
+
+async def test_in_terminal_mode_each_process_takes_up_a_run_from_the_check_s_file(doc, bridge, monkeypatch):
+    """Terminal mode has no server to hold a run: main's run_check starts it in the shim, a hook's process hears its
+    agent start and end, and the shim takes its comments. Each process takes the run up from the check's file, so its
+    comments land and its end is recorded, and a process that held it lets it go once another ended it (live check
+    T6: a typed check stayed `running` for good, and the next writer's end started no check)."""
+    from terminal_fakes import write_launch
+
+    write_launch(config.workspace_dir(CORPUS))
+    await _write()
+    res = await tools.call(CORPUS, "run_check", {"name": "Judgment"}, tool_use_id="toolu_main1")
+    assert not res.is_error, res.text
+    shim = dict(checks._active)  # the shim's process: it started the run
+    key = checks.session_key("judgment", "report")
+    monkeypatch.setattr(checks, "_active", {})  # a hook's process: the agent starts
+    checks.subagent_started(CORPUS, subagents.Run(CORPUS, key, "check", "c0ffee00", "agentcheck1"), {})
+    assert _run("judgment")["agent_id"] == "agentcheck1"
+    monkeypatch.setattr(checks, "_active", dict(shim))  # the shim again: the agent comments
+    d = report_types.read_doc(CORPUS, investigation.MAIN, "report")
+    sid = report_types.all_sentences(d)[0]["id"]
+    sf.add_caller(config.workspace_dir(CORPUS), "toolu_c1", "agentcheck1", "thimble:check")
+    res = await tools.call(CORPUS, "add_comment", {"ref": f"report:report#{sid}", "text": "No card shows this."},
+                           session=key, tool_use_id="toolu_c1")
+    assert not res.is_error, res.text
+    monkeypatch.setattr(checks, "_active", {})  # another hook's process: the agent ends
+    checks.subagent_ended(CORPUS, subagents.Run(CORPUS, key, "check", "c0ffee00", "agentcheck1"), "done", "One comment.")
+    assert (_run("judgment")["status"], _run("judgment")["comments"]) == ("done", 1)
+    monkeypatch.setattr(checks, "_active", dict(shim))  # the shim lets go of the run that ended elsewhere
+    assert not checks.running(CORPUS, "judgment", "report") and checks._active == {}
+    await _write(TEXT + "\n## Later\n\nA second account joined in the second week.\n")
+    _writer_done()  # a writer's end starts the shown checks on what they have not seen, this one among them
+    await _until(lambda: _run("judgment")["status"] == "running" and _run("judgment")["run"] != shim[
+        (CORPUS, "judgment", "report")].run, "the writer's end started no run of judgment")
