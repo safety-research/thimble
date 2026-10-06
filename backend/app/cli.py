@@ -1684,7 +1684,7 @@ def main_name(cwd: Path) -> str:
 # subagent paths are in): the orientation's work folder, the writers', the critics', the checks', the view builders' and
 # the workspace's own views. No code ticket's worktree: code tickets keep their own fence.
 WRITE_DIRS = ("orient/work", "writers", "critique-work", "check-work", "views-work", "extension/views")
-LAUNCH_FILE = "launch.json"  # in the workspace: {session, at, fenced, switches, unset, pid, modules_off}
+LAUNCH_FILE = "trusted/launch.json"  # in the workspace (subagent_files): {session, at, fenced, switches, unset, pid, modules_off}
 # exported into main's environment: no "Move to background" and no ← agent view, the ↓ tray kept (spike U11);
 # CLAUDE_DISABLE_ADOPT adds nothing to the first but does no harm
 SWITCHES = {"CLAUDE_CODE_DISABLE_AGENT_VIEW": "1", "CLAUDE_DISABLE_ADOPT": "1"}
@@ -1945,8 +1945,12 @@ def launch_record(c: str, session: str | None, fenced: bool, switches: dict[str,
     raises: a launch that cannot write it starts main, whose hooks module then stays idle."""
     from .ledger import atomic_write_text  # noqa: PLC0415
 
+    from . import subagent_files  # noqa: PLC0415 — standard library only
+
     try:
-        path = config.workspace_dir(c) / LAUNCH_FILE
+        ws = config.workspace_dir(c)
+        subagent_files.ensure(ws)  # the trusted folder, in a workspace made before it
+        path = ws / LAUNCH_FILE
         rec: dict[str, Any] = {"session": session, "at": _now(), "fenced": fenced, "switches": switches,
                                "unset": unset}
         if pid and pid > 1:
@@ -2547,7 +2551,9 @@ def module_line(cwd: Path) -> str:
         notes.append(f"Claude Code does not trust {cwd} yet; it asks at the first launch, and loads the module only "
                      "in a folder you trust")
     try:
-        rec = (_read_json(config.workspace_path(c) / "subagents.json") or {}).get("module") if c else None
+        from . import subagent_files  # noqa: PLC0415 — standard library only
+
+        rec = (_read_json(subagent_files.state_path(config.workspace_path(c))) or {}).get("module") if c else None
     except (OSError, ValueError, KeyError, AttributeError):
         rec = None
     if isinstance(rec, dict) and rec.get("idle"):

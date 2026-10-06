@@ -251,7 +251,7 @@ def test_the_doctor_says_whether_main_runs_fenced_what_the_launch_sets_and_wheth
         config.register_corpus(corpus, exact=True)
         ws = config.workspace_dir("logs")
     (ws / cli.LAUNCH_FILE).write_text(json.dumps({"session": "s1", "at": "2026-10-06T05:00:00", "fenced": True}))
-    (ws / "subagents.json").write_text(json.dumps({"module": {"session": "0b9d2f3e-1c2d", "version": "0.6.0",
+    (ws / "trusted" / "subagents.json").write_text(json.dumps({"module": {"session": "0b9d2f3e-1c2d", "version": "0.6.0",
                                                               "at": "2026-10-06T05:00:01"}}))
     claude_global_config.write_text(json.dumps({"projects": {str(tmp_path): {"hasTrustDialogAccepted": True}}}))
     monkeypatch.setenv("CLAUDE_CODE_EFFORT_LEVEL", "high")
@@ -260,7 +260,7 @@ def test_the_doctor_says_whether_main_runs_fenced_what_the_launch_sets_and_wheth
     assert "unsets CLAUDE_CODE_EFFORT_LEVEL (set here)" in line(text, "launch switches")
     assert line(text, "hooks module").endswith("it ran in the last session (hello from 0b9d2f3e at 2026-10-06T05:00:01, "
                                                "version 0.6.0)")
-    (ws / "subagents.json").write_text(json.dumps({"module": {"session": "s2", "at": "t", "idle": "main does not run "
+    (ws / "trusted" / "subagents.json").write_text(json.dumps({"module": {"session": "s2", "at": "t", "idle": "main does not run "
                                                                                                 "inside thimble's sandbox"}}))
     claude_global_config.write_text("{}")
     got = line(cli.doctor_text(), "hooks module")

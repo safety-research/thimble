@@ -64,8 +64,8 @@ def test_the_fence_keeps_the_corpus_read_only_and_lets_main_write_only_the_agent
     assert "network" not in box, "the orientation's network is on by default"
     assert box["excludedCommands"] == [], "with the hooks on, no command runs outside the sandbox"
     assert "additionalDirectories" not in perms
-    for p in ("checks/**", "chats/**", "extensions/**", "extension/extension.json", "orient/run.json", "subagents.json",
-              "callers.jsonl", "launch.json", "views/**"):
+    for p in ("checks/**", "chats/**", "extensions/**", "extension/extension.json", "orient/run.json", "trusted/**",
+              "views/**"):
         assert f"Edit(/{ws / p})" in perms["deny"], p
     assert f"Edit(/{userconf.main_modes_file()})" in perms["deny"]
     assert all(r in perms["deny"] for r in userconf.private_rules())
@@ -273,9 +273,9 @@ def test_launch_json_names_the_launchers_pid_where_kernels_and_mains_edits_canno
     assert "pid" not in json.loads(path.read_text()), "a launcher that names no pid: the bridge waits for /thimble"
     cli.launch_args(corpus, launcher_pid=1)
     assert "pid" not in json.loads(path.read_text()), "never init"
-    assert path.name in kernel_wrap.TRUSTED_FILES
+    assert path.parent.name == kernel_wrap.TRUSTED_DIR in kernel_wrap.READ_ONLY_DIRS
     fence = cli.main_fence(corpus)
-    assert f"Edit(/{path.resolve()})" in fence["permissions"]["deny"]
+    assert f"Edit(/{path.parent.resolve()}/**)" in fence["permissions"]["deny"]
     assert not any(path.resolve().is_relative_to(Path(d)) for d in fence["sandbox"]["filesystem"]["allowWrite"])
 
 

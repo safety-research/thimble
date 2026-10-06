@@ -105,19 +105,22 @@ def test_the_work_folders_main_s_bash_may_write():
 # --------------------------------------------------------------------------- the files the hooks trust
 
 
-def test_a_new_workspace_has_the_trusted_files_and_the_kernel_binds_them_read_only(tmp_path):
+def test_a_new_workspace_has_the_trusted_files_and_the_kernel_binds_their_folder_read_only(tmp_path):
+    """The kernel binds the trusted folder, not each file: the writers replace a file whole, and Linux takes the bind
+    off a file another namespace renames a new file over (test_kernel_sandbox has the kernel's own test)."""
     ws = config.workspace_dir(CORPUS)
-    for name in kernel_wrap.TRUSTED_FILES:
-        assert (ws / name).is_file(), name
+    trusted = ws / kernel_wrap.TRUSTED_DIR
+    assert trusted == sf.trusted_dir(ws) and kernel_wrap.TRUSTED_DIR in kernel_wrap.READ_ONLY_DIRS
+    for name in sf.FILES:
+        assert (trusted / name).is_file(), name
     argv = kernel_wrap.kernel_wrap_argv(["python"], corpus_dir=tmp_path / "c", workspace_dir=ws, connection_dir=tmp_path,
                                         venv=None, python="/usr/bin/python3")
-    for name in kernel_wrap.TRUSTED_FILES:
-        i = argv.index(str(ws / name))
-        assert argv[i - 1] == "--ro-bind" and argv[i + 1] == str(ws / name), name
+    i = argv.index(str(trusted))
+    assert argv[i - 1] == "--ro-bind" and argv[i + 1] == str(trusted)
+    assert not any(str(trusted / name) in argv for name in sf.FILES), "no bind of a file the writers replace"
     rules = kernel_wrap.srt_rules(corpus_dir=tmp_path / "c", workspace_dir=ws, venv=None, python="/usr/bin/python3",
                                   srt_dir=tmp_path, home=tmp_path / "h", platform="linux")
-    for name in kernel_wrap.TRUSTED_FILES:
-        assert str(ws / name) in rules["filesystem"]["denyWrite"], name
+    assert str(trusted) in rules["filesystem"]["denyWrite"]
 
 
 def test_the_kernel_can_neither_hold_nor_swap_the_lock_of_subagents_json(tmp_path):
@@ -447,6 +450,41 @@ async def test_the_critic_may_not_add_a_card_and_main_may_not_critique(bridge, m
     monkeypatch.setattr(subagents, "CALLER_WAIT_S", 0.05)
     refused, _ = await tools._as_caller(CORPUS, "critique", "toolu_main")
     assert refused, "main's own call of the orientation's tool"
+
+
+async def test_main_s_own_call_runs_at_once_and_a_subagent_s_is_found_by_its_transcript(bridge, tmp_path):
+    """The caller hook writes a line only for a subagent's call, and before Claude Code makes it, so main's own call has
+    none: it is told apart by main's transcript at once, not after CALLER_WAIT_S (live: each of main's thimble calls
+    took 2 s longer, start_orientation 4.2 s). A subagent's call with no line yet is found by its own transcript."""
+    import time
+
+    from app import session, tools
+
+    assert subagents.CALLER_WAIT_S >= 1.0, "the wait this test shows main's calls no longer take"
+    t = time.monotonic()
+    assert await subagents.caller(CORPUS, "toolu_main_no_session") is None
+    assert time.monotonic() - t < 0.5, "with no session attached, main's call waits for nothing"
+    main = tmp_path / "main.jsonl"
+    main.write_text(json.dumps({"type": "assistant", "message": {"content": [
+        {"type": "tool_use", "id": "toolu_main1", "name": "mcp__plugin_thimble_thimble__add_card"}]}}) + "\n")
+    lv = session.Live(CORPUS, "sid-main", "/tmp", str(main), None)
+    with subagents.update(CORPUS) as state:
+        sf.registry(state)["orient1"] = {"key": "orient", "role": "orientation", "status": "running", "chat": "o1"}
+    sub = session.Sub(CORPUS, "o1", None, "orient1", role="orient")
+    sub.path = tmp_path / "agent-orient1.jsonl"
+    sub.path.write_text(json.dumps({"type": "assistant", "message": {"content": [
+        {"type": "tool_use", "id": "toolu_sub1", "name": "mcp__plugin_thimble_thimble__add_card"}]}}) + "\n")
+    lv.subs.append(sub)
+    session._live[CORPUS] = lv
+    try:
+        t = time.monotonic()
+        refused, as_session = await tools._as_caller(CORPUS, "add_card", "toolu_main1")
+        assert not refused and as_session is None
+        assert time.monotonic() - t < 0.5, "main's own call runs at once"
+        who = await subagents.caller(CORPUS, "toolu_sub1")
+        assert who is not None and who.key == "orient", "a subagent's call is found by the transcript that holds it"
+    finally:
+        session._live.pop(CORPUS, None)
 
 
 def test_the_shim_of_main_lists_every_tool_and_the_critique_among_them():

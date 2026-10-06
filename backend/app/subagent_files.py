@@ -9,16 +9,20 @@ both (subagents.py has the design):
                   last CALLERS_KEEP_S
   launch.json     what the launcher started main with (lane A writes it)
 
-The server creates the three files when it registers the workspace, and both kernel wrappers bind them read-only
-(kernel_wrap.TRUSTED_FILES), since a notebook cell runs model-written code with the workspace writable: a pending request
-it wrote would let a plugin start claim it, and a caller line it wrote would credit its call to an agent.
+The three files are in the workspace's `trusted` folder (DIR). The server makes the folder and the files when it
+registers the workspace, and both kernel wrappers bind the folder read-only (kernel_wrap.TRUSTED_DIR), since a notebook
+cell runs model-written code with the workspace writable: a pending request it wrote would let a plugin start claim it,
+and a caller line it wrote would credit its call to an agent. The folder is bound, not each file: a write replaces a
+file whole, and Linux takes a bind off a file that another mount namespace renames a new file over, so a read-only bind
+of the file itself held only until the server's first write, after which the cell could write the file.
 
-A write takes an exclusive flock on subagents.json.lock (LOCK), the lock lane M's module_bridge takes before it writes
-the module's record, then one on subagents.json as it is, checks that the path still names the file it locked, and
-replaces the file whole (a temporary file renamed over it), so a reader never sees half a file and needs no lock. A lock
-that does not come within LOCK_WAIT_S (a process that holds it and never lets go) is given up, and the write goes on
-without it. LOCK is made with the other files and hidden from kernels (kernel_wrap.LOCK_FILES), so a cell can neither
-hold it nor replace it with a file of its own and take writers' exclusion away.
+A write takes an exclusive flock on subagents.json.lock (LOCK, in the workspace folder itself), the lock module_bridge
+takes too before it writes the module's record, then one on subagents.json as it is, checks that the path still names
+the file it locked, and replaces the file whole (a temporary file renamed over it), so a reader never sees half a file
+and needs no lock. A lock that does not come within LOCK_WAIT_S (a process that holds it and never lets go) is given
+up, and the write goes on without it. LOCK is made with the other files and hidden from kernels
+(kernel_wrap.LOCK_FILES), so a cell can neither hold it nor replace it with a file of its own and take writers'
+exclusion away; nothing renames it, so its bind holds.
 
 Standard library only: the plugin's hooks (plugin/bin/.thimble-watch) import this module under `python -S`.
 """
@@ -34,11 +38,12 @@ import time
 from pathlib import Path
 from typing import Any, Iterator
 
+DIR = "trusted"  # the workspace's folder of the files the hooks trust, read-only to kernels as a folder (module note)
 STATE = "subagents.json"
 CALLERS = "callers.jsonl"
 LAUNCH = "launch.json"
-LOCK = f"{STATE}.lock"  # the lock of subagents.json's writers, this module's and module_bridge's
-FILES = (STATE, CALLERS, LAUNCH, LOCK)
+FILES = (STATE, CALLERS, LAUNCH)  # in DIR
+LOCK = f"{STATE}.lock"  # the lock of subagents.json's writers, this module's and module_bridge's, in the workspace folder
 LOCK_WAIT_S = 2.0
 LOCK_POLL_S = 0.01
 CALLERS_KEEP_S = 3600.0
@@ -95,14 +100,38 @@ def role_of(agent_type: Any) -> str | None:
 # --------------------------------------------------------------------------- the files
 
 
+def trusted_dir(ws: Path) -> Path:
+    """The folder of the files the hooks trust in the workspace folder `ws` (DIR)."""
+    return Path(ws) / DIR
+
+
 def state_path(ws: Path) -> Path:
-    return Path(ws) / STATE
+    return trusted_dir(ws) / STATE
+
+
+def callers_path(ws: Path) -> Path:
+    return trusted_dir(ws) / CALLERS
+
+
+def launch_path(ws: Path) -> Path:
+    return trusted_dir(ws) / LAUNCH
+
+
+def lock_path(ws: Path) -> Path:
+    return Path(ws) / LOCK
 
 
 def ensure(ws: Path) -> None:
-    """Each of FILES made, empty, in the workspace folder `ws` when it is missing (module note)."""
-    for name in FILES:
-        p = Path(ws) / name
+    """The trusted folder (DIR), each of FILES in it and LOCK made, empty, in the workspace folder `ws` when missing
+    (module note); a link or a file in the folder's place goes first, since a kernel wrapper would bind a link's
+    target."""
+    d = trusted_dir(ws)
+    with contextlib.suppress(OSError):
+        if d.is_symlink() or (d.exists() and not d.is_dir()):
+            d.unlink()
+    with contextlib.suppress(OSError):
+        d.mkdir(mode=0o700, exist_ok=True)
+    for p in [*(d / name for name in FILES), lock_path(ws)]:
         if p.is_symlink():
             with contextlib.suppress(OSError):
                 p.unlink()
@@ -158,10 +187,10 @@ def update(ws: Path, wait_s: float = LOCK_WAIT_S) -> Iterator[dict[str, Any]]:
     """subagents.json of `ws` to change in place: the dict the block changes is written back whole when the block ends
     without an exception (module note)."""
     path = state_path(ws)
-    path.parent.mkdir(parents=True, exist_ok=True)
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     end = time.monotonic() + wait_s
     try:
-        outer = os.open(path.with_name(LOCK), os.O_RDONLY | os.O_CREAT, 0o600)
+        outer = os.open(lock_path(ws), os.O_RDONLY | os.O_CREAT, 0o600)
     except OSError:
         outer = -1
     if outer >= 0 and not _flock(outer, wait_s):
@@ -547,8 +576,9 @@ def add_caller(ws: Path, tool_use_id: str, agent_id: str, agent_type: str) -> No
     trimmed to CALLERS_KEEP_S once it grows past CALLERS_TRIM_BYTES."""
     if not tool_use_id or not agent_id:
         return
-    path = Path(ws) / CALLERS
+    path = callers_path(ws)
     line = json.dumps({"tool_use_id": tool_use_id, "agent_id": agent_id, "agent_type": agent_type, "ts": now()}) + "\n"
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     fd = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
     try:
         os.write(fd, line.encode("utf-8"))
@@ -560,7 +590,7 @@ def add_caller(ws: Path, tool_use_id: str, agent_id: str, agent_type: str) -> No
 
 
 def trim_callers(ws: Path) -> None:
-    path = Path(ws) / CALLERS
+    path = callers_path(ws)
     floor = now() - CALLERS_KEEP_S
     with update(ws):  # one writer at a time
         try:
@@ -585,7 +615,7 @@ def find_caller(ws: Path, tool_use_id: str) -> dict[str, Any] | None:
     if not tool_use_id:
         return None
     try:
-        data = (Path(ws) / CALLERS).read_bytes()
+        data = callers_path(ws).read_bytes()
     except OSError:
         return None
     needle = tool_use_id.encode("utf-8")

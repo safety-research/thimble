@@ -46,10 +46,11 @@ Ops and their arguments:
     note   text                           `$.session.append` to main
 `request` is a coroutine for the server's loop; request_blocking is the same call from a worker thread.
 
-The workspace's subagents.json holds, under `module`, the last hello `{session, version, at}`, or the reason the
-module stays idle (`idle`), what it could not register (`problem`), and the session moves rekey learned (`rekeyed`),
-and the digest of the roles it fetched last (`served`), for `doctor`, the browser and a restarted server. It is written
-under an flock of subagents.json.lock beside it, with an atomic replace, keeping every other key.
+The workspace's subagents.json (in its trusted folder) holds, under `module`, the last hello `{session, version, at}`,
+or the reason the module stays idle (`idle`), what it could not register (`problem`), and the session moves rekey
+learned (`rekeyed`), and the digest of the roles it fetched last (`served`), for `doctor`, the browser and a restarted
+server. It is written as every writer of the file writes it (subagent_files.update: the flock of subagents.json.lock,
+an atomic replace), keeping every other key.
 
 The roles the module registers are rendered from files the analyst may edit by hand: the workspace's settings.json (its
 orientation instructions), thimble's config files and the prompt files an agent's `prompt` names, and thimble's own
@@ -67,14 +68,12 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import fcntl
 import hashlib
 import json
 import logging
 import os
 import re
 import secrets
-import tempfile
 import threading
 import time
 from collections import deque
@@ -97,14 +96,13 @@ POLL_TICK_S = 1.0  # how often a held poll looks again whether its session is st
 LIVE_GAP_S = 3.0  # a module whose last poll ended this recently still holds it: it polls again at once
 HELLO_HOLD_S = 5.0  # a hello for a session that is not main yet waits this long for a rekey naming it
 ROLES_CHECK_S = 2.0  # how often a held long poll looks whether the files the roles are rendered from changed
-LOCK_WAIT_S = 2.0  # the most a write of subagents.json waits for its lock
 EXPIRED_KEPT = 64  # expired requests remembered for their late answers
 REKEYS_KEPT = 32
 OPS = ("register", "spawn", "send", "stop", "note")
 ANSWER_KEYS = ("agentId", "deny", "limit", "error", "ok")
 NO_MODULE = "no-module"
-REGISTRY = "subagents.json"  # lane B's record of thimble's agents, in the workspace (module note)
-LAUNCH = "launch.json"  # written by `thimble launch-args` (lane A): {session, at, fenced, switches, unset, pid}
+REGISTRY = "trusted/subagents.json"  # lane B's record of thimble's agents, in the workspace (module note; subagent_files)
+LAUNCH = "trusted/launch.json"  # written by `thimble launch-args` (lane A): {session, at, fenced, switches, unset, pid}
 NOTE_HINT = "module-started-note"  # prompts/tools.md: {role}, {agent}, {what}
 AGENT = "{agent}"  # left in a note for the module to fill with the agent id it got
 WHAT_CHARS = 120
@@ -210,52 +208,21 @@ def registry(c: str) -> dict[str, Any]:
         return {}
 
 
-@contextlib.contextmanager
-def _locked(path: Path):
-    """An exclusive flock of `path`.lock, waiting up to LOCK_WAIT_S; past that the write goes on without it, since the
-    module's record is advisory and a lock nobody releases must not stop the bridge."""
-    fd = None
-    try:
-        fd = os.open(f"{path}.lock", os.O_RDWR | os.O_CREAT, 0o600)
-        end = time.monotonic() + LOCK_WAIT_S
-        while True:
-            try:
-                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                break
-            except OSError:
-                if time.monotonic() >= end:
-                    log.warning("%s.lock is held past %.0f s; writing without it", path, LOCK_WAIT_S)
-                    break
-                time.sleep(0.02)
-    except OSError:
-        fd = None
-    try:
-        yield
-    finally:
-        if fd is not None:
-            with contextlib.suppress(OSError):
-                fcntl.flock(fd, fcntl.LOCK_UN)
-            os.close(fd)
-
-
 def _record(c: str, module: dict[str, Any]) -> None:
-    """subagents.json's `module` key set to `module`, every other key kept (module note)."""
+    """subagents.json's `module` key set to `module`, every other key kept (module note), under the lock lane B's
+    writers take (subagent_files.update), which gives a lock nobody releases up after its wait, since the module's
+    record is advisory and must not stop the bridge."""
+    from . import subagent_files  # noqa: PLC0415 — standard library only
+
     try:
-        path = config.workspace_dir(c) / REGISTRY
+        ws = config.workspace_dir(c)
     except (OSError, ValueError):
         return
-    with _file_lock, _locked(path):
-        data = _read_json(path)
-        data["module"] = module
-        fd, tmp = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=str(path.parent))
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                f.write(json.dumps(data, indent=1, ensure_ascii=False) + "\n")
-            os.replace(tmp, path)
-        except OSError:
-            log.exception("writing the module's record into %s failed", path)
-            with contextlib.suppress(OSError):
-                os.unlink(tmp)
+    try:
+        with _file_lock, subagent_files.update(ws) as state:
+            state["module"] = module
+    except OSError:
+        log.exception("writing the module's record into %s failed", ws / REGISTRY)
 
 
 def _save(c: str, b: _Bridge) -> None:
