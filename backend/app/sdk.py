@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:  # annotations only: the names are bound at first use (_bind_sdk, below)
     from claude_agent_sdk import ClaudeAgentOptions
 
-from . import config
+from . import cc_settings, config
 
 log = logging.getLogger("thimble.sdk")
 
@@ -82,11 +82,14 @@ def build(
     persist: bool = True,
 ) -> ClaudeAgentOptions:
     """The one constructor of ClaudeAgentOptions (module note). `tools` are the MCP tool names the call may use; `system`
-    is the whole system prompt; `env` is added to the server's environment, where every THIMBLE_* variable is ""
-    (config.launch_environ says why); `speed` switches on fast mode where the model has it; `persist` False writes no
-    transcript."""
+    is the whole system prompt; `effort` ultracode (the orientation role's, which harness.ask passes) runs at its level,
+    xhigh, since the call's settings turn ultracode off and `claude --effort` takes only the levels; `env` is added to
+    the server's environment, where every THIMBLE_* variable is "" (config.launch_environ says why); `speed` switches on
+    fast mode where the model has it; `persist` False writes no transcript."""
     _bind_sdk()
     os.environ.setdefault(SKIP_VERSION_CHECK_ENV, "1")
+    if effort == cc_settings.ULTRACODE:
+        effort = cc_settings.ULTRACODE_EFFORT
     return ClaudeAgentOptions(
         cwd=str(cwd),
         tools=[],

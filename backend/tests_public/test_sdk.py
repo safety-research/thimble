@@ -20,6 +20,15 @@ def test_a_call_takes_the_users_auth_but_not_their_memory_effort_or_mode(tmp_pat
     assert opts.system_prompt == "You are a text classifier.", "the caller's system prompt, whole, in place of a preset"
 
 
+def test_a_call_at_ultracode_runs_at_xhigh_with_ultracode_off(tmp_path):
+    """The orientation role's effort, ultracode, reaches a call through harness.ask; the call runs at ultracode's level
+    and asks the CLI for no effort it does not take."""
+    opts = sdk.build(cwd=tmp_path, tools=[], mcp_servers={}, system="s", model="claude-opus-5-5", effort="ultracode",
+                     env=None, speed="standard")
+    assert opts.effort == "xhigh"
+    assert json.loads(opts.settings) == {"fastMode": False, "ultracode": False, "env": {"CLAUDE_CODE_EFFORT_LEVEL": "xhigh"}}
+
+
 async def test_the_cli_gets_the_system_prompt_whole_and_ultracode_off(tmp_path, monkeypatch):
     """The `claude` a call starts gets the caller's system prompt as --system-prompt, with no claude_code preset to
     append it to, and --settings that turn the user's ultracode off."""
