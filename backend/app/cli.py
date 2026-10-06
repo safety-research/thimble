@@ -2775,6 +2775,52 @@ def module_line(cwd: Path) -> str:
     return "; ".join(notes)
 
 
+def mode_line(cwd: Path) -> str:
+    """The doctor's line on the mode a session `thimble` starts in `cwd` takes (launch_mode.resolve) and where it comes
+    from, with the mode the last launch here recorded when that was another."""
+    mode, source = launch_mode.resolve(cwd)
+    text = f"{mode} ({launch_mode.source_text(cwd, source)}; `thimble mode` changes it)"
+    last = read_launch(config.workspace_for_cwd(str(cwd)))
+    if last and (last.get("mode") or launch_mode.BROWSER) != mode:
+        text += f"; the last launch here ({last.get('at') or '?'}) ran in {last.get('mode') or launch_mode.BROWSER} mode"
+    return text
+
+
+def renderer_line() -> str:
+    """The doctor's line on terminal mode's renderer plugin (TERMINAL_RENDERER, renderer_problem)."""
+    why = renderer_problem()
+    if why:
+        return f"cannot load ({why}), so terminal mode draws none of thimble's work; browser mode does not need it"
+    return f"{renderer_root()} ({RENDERER_NAME}), loaded only in terminal mode"
+
+
+def terminal_card_line() -> str:
+    """The doctor's line on where a card's code runs in terminal mode: in main's Bash, through the card runner, inside
+    Claude Code's sandbox when it can run (Seatbelt on macOS, bubblewrap and socat on Linux)."""
+    from . import cc_settings  # noqa: PLC0415
+
+    engine = "Seatbelt" if sys.platform == "darwin" else "bubblewrap and socat"
+    if cc_settings.sandbox_ok():
+        return f"runs in main's Bash, inside Claude Code's sandbox ({engine}): it reads the corpus and writes only the card folders"
+    missing = cc_settings.sandbox_missing()
+    return (f"runs in main's Bash without a sandbox, with your user's access, since Claude Code's sandbox ({engine}) "
+            f"can't run here{': missing ' + ', '.join(missing) if missing else ''} (the bash sandbox line says how to fix it)")
+
+
+def terminal_checks_line() -> str:
+    """The doctor's line on terminal mode's card checks and screenshots, which are optional there: they draw a card in
+    a headless Chromium with the built frontend (render.py), and are skipped without either."""
+    spec = importlib.util.find_spec("playwright")
+    which, what = _browser_choice()
+    browser = which == "system" or (which != "off" and headless_fetched(
+        Path(spec.origin).parent / "driver" / "package" / "browsers.json" if spec and spec.origin else Path("-")))
+    lacking = ([] if browser else [f"browser ({what})" if which == "off" else "headless Chromium"]) + \
+              ([] if has_ui_build() else ["frontend build"])
+    if not lacking:
+        return "on: a card is checked, and a screenshot drawn, with the headless Chromium and the built frontend"
+    return f"off, since there is no {' and no '.join(lacking)}: cards are not checked and screenshots are not drawn"
+
+
 # ----------------------------------------------------------------------------- versions and the machine
 #
 # What the doctor, the startup line of server.log and a failed `server up` say about the machine: the versions in play,
@@ -3103,6 +3149,11 @@ def doctor_text(commands: bool = True) -> str:
         lines.append(f"  launch switches: {_checked(switches_line)}")
         lines.append(f"  safe mode: {_checked(safe_mode_line)}")
         lines.append(f"  hooks module (thimble's agents start through it): {_checked(module_line, caller)}")
+        lines.append(f"  mode (a session `thimble` starts in {caller}): {_checked(mode_line, caller)}")
+        lines.append(f"  terminal renderer: {_checked(renderer_line)}")
+        if launch_mode.resolve(caller)[0] == launch_mode.TERMINAL:
+            lines.append(f"  terminal mode's card code: {_checked(terminal_card_line)}")
+            lines.append(f"  terminal mode's card checks (optional): {_checked(terminal_checks_line)}")
     lines.append(f"  config: {_checked(config_line, Path(env['workspaces_dir']))}")
     lines.append(f"  browser: {_checked(browser_line)}")
     lines.append(f"  card code: {_checked(kernel_line)}")

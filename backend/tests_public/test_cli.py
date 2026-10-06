@@ -276,6 +276,59 @@ def test_the_doctor_says_whether_main_runs_fenced_what_the_launch_sets_and_wheth
     assert "off: Claude Code's Bash sandbox can't run" in line(cli.doctor_text(), "main's fence")
 
 
+def test_the_doctor_names_the_mode_its_source_the_renderer_and_what_terminal_mode_needs(
+        home, monkeypatch, fake_claude, tmp_path):
+    """For a session `thimble` starts in the folder: its mode and where that comes from, the mode the last launch here
+    ran in when that was another, whether terminal mode's renderer can load, and in terminal mode where a card's code
+    runs (main's Bash, in Claude Code's sandbox when it can run) and whether its optional card checks run (a headless
+    Chromium and the built frontend)."""
+    from app import cc_plugin, launch_mode
+
+    monkeypatch.setattr(cli, "healthy", lambda url=None, timeout=1.0: False)
+    monkeypatch.setattr(cli, "listening", lambda p: False)
+    monkeypatch.setattr(cc_plugin, "MANAGED_DIRS", {})
+    monkeypatch.setenv("THIMBLE_SANDBOX", "1")
+    data = tmp_path / "data"
+    data.mkdir()
+    monkeypatch.setenv("THIMBLE_DATA_DIR", str(data))
+    monkeypatch.setenv("THIMBLE_WORKSPACES_DIR", str(tmp_path / "ws"))
+    corpus = tmp_path / "logs"
+    corpus.mkdir()
+    monkeypatch.setenv("THIMBLE_CALLER_CWD", str(corpus))
+    renderer = tmp_path / "tree" / "mods" / "thimble-term"
+    monkeypatch.setattr(cli, "renderer_root", lambda: renderer)
+    text = cli.doctor_text()
+    assert line(text, "mode (") == (f"  mode (a session `thimble` starts in {corpus}): browser (thimble's default; "
+                                    "`thimble mode` changes it)")
+    assert line(text, "terminal renderer") == (f"  terminal renderer: cannot load ({renderer} is missing), so terminal "
+                                               "mode draws none of thimble's work; browser mode does not need it")
+    assert "terminal mode's card" not in text, "browser mode needs neither"
+    (renderer / ".claude-plugin").mkdir(parents=True)
+    (renderer / ".claude-plugin" / "plugin.json").write_text(json.dumps({"name": "thimble-term"}))
+    launch_mode.set_folder(corpus, "terminal")
+    monkeypatch.setattr(cli, "_browser_choice", lambda: ("bundled", ""))
+    monkeypatch.setattr(cli, "headless_fetched", lambda browsers_json: True)
+    text = cli.doctor_text()
+    assert line(text, "mode (").endswith("terminal (set for this folder; `thimble mode` changes it)")
+    assert line(text, "terminal renderer") == f"  terminal renderer: {renderer} (thimble-term), loaded only in terminal mode"
+    assert "runs in main's Bash, inside Claude Code's sandbox" in line(text, "terminal mode's card code")
+    assert line(text, "terminal mode's card checks").endswith("on: a card is checked, and a screenshot drawn, with the "
+                                                              "headless Chromium and the built frontend")
+    monkeypatch.setattr(cli, "headless_fetched", lambda browsers_json: False)
+    monkeypatch.setattr(cli, "has_ui_build", lambda: False)
+    monkeypatch.setenv("THIMBLE_SANDBOX", "0")
+    text = cli.doctor_text()
+    assert line(text, "terminal mode's card checks").endswith("off, since there is no headless Chromium and no "
+                                                              "frontend build: cards are not checked and screenshots "
+                                                              "are not drawn")
+    assert "without a sandbox, with your user's access" in line(text, "terminal mode's card code")
+    with cli.server_dirs():
+        config.register_corpus(corpus, exact=True)
+        ws = config.workspace_dir("logs")
+    (ws / cli.LAUNCH_FILE).write_text(json.dumps({"session": "s1", "at": "2026-10-06T05:00:00", "mode": "browser"}))
+    assert line(cli.doctor_text(), "mode (").endswith("; the last launch here (2026-10-06T05:00:00) ran in browser mode")
+
+
 DEV_LINES = ("turn endings:", "source changed since start:", "validation stack:", "last apply:", "dev tickets:",
              "last ticket error:")
 
