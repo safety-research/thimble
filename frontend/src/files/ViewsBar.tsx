@@ -13,6 +13,7 @@ import { Menu, Popover } from '../components/Menu'
 import { Spinner } from '../components/Spinner'
 import { Tipped, useTooltip } from '../components/Tooltip'
 import { pendingAsks, useChatMetas } from '../chat/waiting'
+import { failedWhy } from '../chat/ViewChip'
 import { api } from '../lib/api'
 import { bus } from '../lib/bus'
 import { refreshProposals, useProposals } from '../lib/proposals'
@@ -133,7 +134,8 @@ export function buildLabel(status: Proposal['status'], asking: boolean): string 
 }
 
 /** A proposal in the bar: the view's button as the bar draws a view, its state after the name, a click that opens the
- * build's thread; for a failed build (a view the analyst asked for) a warning icon with the error on hover, and Retry
+ * build's thread; for a failed build (a view the analyst asked for) a warning icon with why on hover (failedWhy: a stop
+ * at main's quit says so, as the chat's chip does), and Retry
  * beside it; × on hover to delete it (`onDismiss` gets the proposal's box, which a confirm sits by). A viewer
  * suggested for a file type (in the File browser's mode row) wears the sparkle, shows its `why` on hover, and a click
  * builds it (`onAccept` runs then). */
@@ -181,7 +183,7 @@ export function ProposalOption({ ws, p, onDismiss, onAccept, size, asking = fals
           }}
           {...tipProps}
         >
-          {failed && p.error ? <Tipped text={p.error}>{icon}</Tipped> : icon}
+          {failed && failedWhy(p) ? <Tipped text={failedWhy(p)}>{icon}</Tipped> : icon}
           <span className="seg-label">{p.name}</span>
           {pending &&
             (asking ? (

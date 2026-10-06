@@ -8,6 +8,7 @@ import { act } from 'react'
 import { buildStage } from '../../src/chat/ChatPanel.tsx'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { ViewChip, buildingText, failedWhy, queuedText } from '../../src/chat/ViewChip.tsx'
+import { ProposalOption } from '../../src/files/ViewsBar.tsx'
 import { bus } from '../../src/lib/bus.ts'
 import { invalidateSettings } from '../../src/lib/models.ts'
 import { refreshProposals } from '../../src/lib/proposals.ts'
@@ -76,6 +77,22 @@ describe('a view build\'s chip', () => {
     await act(async () => el.querySelector<HTMLButtonElement>('.view-chip-retry')!.click())
     await settle()
     expect(posted).toEqual([['/api/ws/jobs/views/posts/build', { model: 'claude-opus-5-5', effort: 'max' }]])
+  })
+
+  test("the views bar's warning on a build main's quit stopped says so, as the chip does (live check L14)", async () => {
+    vi.useFakeTimers()
+    try {
+      const el = await mount(<ProposalOption ws="jobs" p={P('posts', { status: 'failed', stopped_by: 'quit', error: 'thimble stopped when its Claude Code session ended' })} onDismiss={() => undefined} size="md" />)
+      const tipped = el.querySelector<HTMLElement>('.files-proposal-opt .tipped')!
+      await act(async () => {
+        tipped.dispatchEvent(new PointerEvent('pointerover', { bubbles: true, pointerType: 'mouse' }))
+        tipped.dispatchEvent(new PointerEvent('pointerenter', { bubbles: false, pointerType: 'mouse' }))
+        vi.advanceTimersByTime(1000)
+      })
+      expect(document.querySelector('[role=tooltip]')?.textContent).toBe('Stopped when your Claude Code session ended.')
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   test('a typed build auto mode refused offers Start it, which posts start-it', async () => {
