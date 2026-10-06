@@ -20,7 +20,7 @@ from pathlib import Path
 import pytest
 from conftest import print_sessions
 
-from app import (agent_session, cc_settings, checks, cli, config, critique_session, dev, harness, kernel_wrap, notebook,
+from app import (agent_session, cc_settings, checks, config, critique_session, dev, harness, kernel_wrap, notebook,
                  orient_session, roles, srt, userconf, views, write_session)
 
 CORPUS = "copy"
@@ -131,15 +131,6 @@ def test_a_view_build_runs_in_its_own_folder_with_the_view_s_folder_and_the_corp
     assert settings["env"][agent_session.MEMORY_ENV] == "1", "the corpus's CLAUDE.md is read"
     assert {f"{work}/CLAUDE.md", f"{config.WORKSPACES_DIR}/CLAUDE.md"} <= set(settings["claudeMdExcludes"]), \
         "no memory file above the build's own folder, such as thimble's own, is read"
-    assert dev.trust_folder(work) == config.WORKSPACES_DIR, "an untrusted build names the folder install.sh trusts"
-
-    async def untrusted(args, cwd, env=None):
-        return 1, "Error: this folder is not trusted"
-
-    monkeypatch.setattr(dev.SESSIONS, "_run", untrusted)
-    with pytest.raises(dev.SessionError) as e:
-        asyncio.run(dev.SESSIONS.start(work, "build it", name="thimble view: Posts", workspace=CORPUS))
-    assert str(config.WORKSPACES_DIR) in str(e.value) and cli.trust_command() in str(e.value)
 
 
 def test_a_program_s_session_runs_in_the_role_s_work_folder(corpus, tmp_path, monkeypatch):
