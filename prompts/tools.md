@@ -1174,6 +1174,10 @@ Change nothing in it, since thimble lets only this call through. Then end your t
 
 Your brief is in {path}. Read it whole before anything else.
 
+## critique-work-folder
+
+Your own folder, where you may put a script or a scratch file, is {path}.
+
 ## writer-task
 
 Write `report:{doc}`, the document named {title}.
