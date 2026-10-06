@@ -78,6 +78,8 @@ claude
 | `/thimble feedback` | write a problem report (a zip), even with the server down |
 | `/thimble:ask <thread> [message]` | send a message to a thread, as its composer in the browser would |
 | `/thimble:orient [focus] [flags]` | start an orientation, with Start's switches, model and effort as flags |
+| `/thimble:label <name> [definition] [kind=regex\|code\|prompt] [paths=<glob>,…] [values=a,b] [limit=N]` | define a label and apply it to the corpus's records |
+| `/thimble:write [report\|slides\|story\|<type>] [request]` | start a writer on a document, the report when none is named |
 
 **From a shell** (`thimble help` lists these)
 

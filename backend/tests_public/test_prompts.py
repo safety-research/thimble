@@ -514,3 +514,43 @@ def test_no_terminal_mode_prompt_names_the_browser(tmp_path, monkeypatch):
     assert not found, found
     with prompts.rendering("browser"):
         assert _browser_words(events.render_prompts(["main"], str(tmp_path), True)), "the scan finds browser mode's words"
+
+
+def _skill(name: str) -> "tuple[dict, str]":
+    import yaml
+
+    head, _, body = (PLUGIN / "skills" / name / "SKILL.md").read_text("utf-8").removeprefix("---\n").partition("\n---\n")
+    return yaml.safe_load(head), body
+
+
+def test_the_skills_flags_match_their_tools_arguments():
+    """/thimble:orient's flags are one set, each naming one argument of start_orientation, with every argument but the
+    brief set by one; /thimble:label's keys are apply_label's arguments, its kinds the predicate's; /thimble:write
+    names only start_writing's arguments. Each skill's description shows the syntax of its argument hint."""
+    from app import tools
+
+    front, body = _skill("orient")
+    schema = tools.schema_of("start_orientation")["properties"]
+    flags = dict(re.findall(r"`--([a-z]+)` sets `([a-z_]+)`", body))
+    assert set(flags.values()) == set(schema) - {"brief"}, flags
+    booleans = {f for f, arg in flags.items() if schema[arg].get("type") == "boolean"}
+    hint = front["argument-hint"]
+    assert all(f"[--[no-]{f}]" in hint for f in booleans), hint
+    assert all(f"[--{f} <" in hint for f in set(flags) - booleans), hint
+    assert hint.removeprefix("[focus] ") in front["description"]
+
+    front, body = _skill("label")
+    schema = tools.schema_of("apply_label")["properties"]
+    hint = front["argument-hint"]
+    keys = dict(re.findall(r"\[([a-z]+)=([^\]]+)\]", hint))
+    assert set(keys) == {"kind", "paths", "values", "limit"}, keys
+    assert set(keys["kind"].split("|")) == set(schema["predicate"]["properties"]["kind"]["enum"])
+    assert {"paths", "values", "limit"} <= set(schema) and "scope" in body and "`files`" in body
+    assert hint in front["description"] and front.get("disable-model-invocation") is True
+
+    front, body = _skill("write")
+    schema = tools.schema_of("start_writing")["properties"]
+    named = set(re.findall(r"as `([a-z_]+)`|`([a-z_]+)` is|are `([a-z_]+)`", body))
+    args = {a for group in named for a in group if a}
+    assert args and args <= set(schema), args
+    assert front["argument-hint"] in front["description"] and front.get("disable-model-invocation") is True
