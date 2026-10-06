@@ -665,6 +665,8 @@ def subagent_refused(c: str, req: dict[str, Any]) -> None:
         return
     if req.get("kind") == "message":
         a = subagents.agent(c, str(req.get("agent") or "")) or {}
+        if a.get("cancelled"):
+            return  # stopped with Esc: no Send again that cannot work; the composer's place says why (latest)
         if a.get("chat"):
             not_passed_on(c, str(a["chat"]), str(req.get("reason") or ""),
                           str((req.get("input") or {}).get("message") or ""))

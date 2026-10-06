@@ -276,6 +276,9 @@ async def test_an_orientation_stopped_with_esc_takes_no_follow_up_and_says_to_st
     assert e.value.status_code == 410 and e.value.detail == tools.hint("orient-continue-stopped-by-user")
     assert "Start a new orientation" in e.value.detail
     assert subagents.cancelled(CORPUS, agent)
+    chips = [r for r in agents.read_events(agents.paths(CORPUS, agents.MAIN_ID)[1]) if r.get("type") == "chip"]
+    assert not [r for r in chips if r.get("kind") == orient_session.NOT_PASSED_ON], \
+        "no not-passed-on line with a Send again that cannot work (live recheck of L9)"
     sent = len(bridge.ops("send"))
     with pytest.raises(HTTPException) as e:
         await orient_session.message_route(CORPUS, orient_session.MessageBody(text="And June?"), analyst)
