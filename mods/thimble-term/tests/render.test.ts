@@ -151,11 +151,45 @@ test('/thimble opens the home panel with no model turn; the panel lists the docu
   await start($, w)
   const r = (await $.command.run({ command: 'thimble:thimble', args: '' } as never)) as { text?: string }
   expect(r.text).toBe(HOME_LINE)
+  // its row says the line as thimble's, not under the plugin's name
+  const row = await $.ui.mount({ plugin: 'thimble-term', component: 'CommandOutput', requestId: 'c1', surface: 'terminal', viewport: { columns: 140, rows: 40 }, props: { command: 'thimble:thimble', args: '', text: `thimble-term: ${HOME_LINE}`, isErrored: false } } as never)
+  expect(shown(await row.drawn())).toBe(HOME_LINE)
+  await row.unmount()
   expect(w.opened).toEqual(['thimble-term'])
   await w.clock.settle()
   const pane = (await $.ui.mount(PANE)) as unknown as M
   const home = shown(await pane.drawn({ in: 'home' }))
   for (const s of ['Reports', 'Agents used the dse wiki as a relay', 'Side threads', '"why is events.jsonl bigger?"', 'Cards', 'Your work', 'Labels', 'links through a fetch proxy', 'Files', 'revisions.jsonl']) expect(home).toContain(s)
+  await pane.unmount()
+})
+
+test("a right-click on a card's cell: the menu opens its cell, asks about it, opens the card", async ($, on) => {
+  const w = world(on)
+  await start($, w)
+  await turn($, w, [['r1', 'Here.']])
+  const ui = (await $.ui.mount(MESSAGE('r1', 'Here.'))) as unknown as M
+  const key = 'card-t0-ff73e071'
+  await ui.resize({ columns: 100, rows: 14, in: key })
+  // the table's first row of cells (rule, title, column names, then dse): its pages
+  const lines = ((await ui.drawn({ in: key })) as { children?: unknown[] }).children ?? []
+  const y = lines.findIndex(l => /^dse/.test(shown(l)))
+  expect(y).toBeGreaterThan(0)
+  await ui.pointer({ type: 'down', x: 12, y, button: 'right', in: key } as never)
+  await ui.pointer({ type: 'up', x: 12, y, button: 'right', in: key } as never)
+  await ui.unmount()
+  const pane = (await $.ui.mount(PANE)) as unknown as M
+  expect(shown(await pane.drawn())).toContain('dse · pages: 3908')
+  expect((await pane.find({ key: 'menu-open' }))?.text).toBe('open its cell')
+  expect(await pane.find({ key: 'menu-thread' })).toBeDefined()
+  expect(await pane.find({ key: 'menu-card' })).toBeDefined()
+  await pane.press({ key: 'menu-open' })
+  await w.clock.settle()
+  await pane.redraw()
+  const text = shown(await pane.drawn())
+  expect(text).toContain('the value is at its place')
+  expect(text).toContain('What does the export hold per wiki?')
+  // the cited cell on the selection background, in the card drawn under it
+  expect(JSON.stringify(await pane.drawn())).toMatch(/"backgroundColor":"selectionBg"\},"children":\["3908"\]/)
   await pane.unmount()
 })
 

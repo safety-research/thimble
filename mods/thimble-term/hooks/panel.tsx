@@ -502,6 +502,8 @@ async function drawMenu(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElem
   const cols = Math.max(20, e.props.bodyColumns)
   // the mod's choices that thimble-term has: open the place, open its file, ask; and a card's own panel
   const items = menuItems(t).filter(m => m.act === 'open' || m.act === 'files' || m.act === 'thread')
+  // a card's cell, bar or point: its citation's panel, the card with the cell marked
+  if (t.cardId && (t.kind === 'mark' || t.kind === 'row') && citationOf(t) && !items.some(m => m.act === 'open')) items.unshift({ act: 'open', label: 'open its cell', hotkey: 'o', hint: '' })
   if (t.cardId && t.kind !== 'card') items.push({ act: 'card' as never, label: 'open the card', hotkey: 'c', hint: '' })
   if (t.kind === 'card') items.unshift({ act: 'card' as never, label: 'open the card', hotkey: 'o', hint: '' })
   return (
@@ -825,7 +827,7 @@ async function drawAgent(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEle
     if (ev.type === 'tool_use') {
       const inp = isObj(ev.input) ? ev.input : {}
       const what = str(inp.question ?? inp.command ?? inp.file_path ?? inp.pattern ?? inp.name ?? inp.description ?? '')
-      steps.push(`${str(ev.name).replace(/^mcp__plugin_thimble_thimble__/, '')}${what ? ` · ${what.replace(/\s+/g, ' ')}` : ''}`)
+      steps.push(`${str(ev.name).replace(/^mcp__.*__/, '')}${what ? ` · ${what.replace(/\s+/g, ' ')}` : ''}`)
       text = ''
     } else if (ev.type === 'text') text += str(ev.delta ?? ev.text)
     else if (ev.type === 'done' && ev.result) text = str(ev.result)

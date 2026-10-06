@@ -94,26 +94,26 @@ export async function act<T = Record<string, unknown>>(cx: Ctx, sc: Scope, kind:
 
 // ------------------------------------------------------------------------------------------------ what changed
 
-/** The parts of a workspace a surface reads, each with the folders or files whose listing says it changed. */
+/** The parts of a workspace a surface reads, each with the folders whose listing says it changed: a folder whole, or
+ *  the entries of it that `names` lists. Only listings: a file that is not there yet costs no failed call. */
 export const AREAS = {
-  cards: ['notebooks'],
-  labels: ['concepts', 'labels'],
-  docs: ['investigations/main', 'investigations/main/report'],
-  chats: ['chats'],
-  agents: ['trusted/subagents.json', 'orient/run.json', 'trusted/module.json'],
-  ui: ['ui.jsonl'],
-} as const
+  cards: [{ dir: 'notebooks' }],
+  labels: [{ dir: 'concepts' }, { dir: 'labels' }],
+  docs: [{ dir: 'investigations/main' }],
+  chats: [{ dir: 'chats' }],
+  agents: [{ dir: 'trusted', names: ['subagents.json', 'module.json'] }, { dir: 'orient', names: ['run.json'] }],
+  ui: [{ dir: '', names: ['ui.jsonl'] }],
+} as const satisfies Record<string, readonly { dir: string; names?: readonly string[] }[]>
 
 export type Area = keyof typeof AREAS
 export type Signature = Record<Area, string>
 
-async function stamp(cx: Ctx, path: string): Promise<string> {
+async function stamp(cx: Ctx, path: string, names?: readonly string[]): Promise<string> {
   try {
-    const st = await cx.stat(path)
-    if (st.kind !== 'dir') return `${st.size}:${st.mtimeMs}`
     const entries = await cx.list(path)
     // a file's size and time, a folder's name: what an edit, an add or a remove changes
     return entries
+      .filter(e => !names || names.includes(e.name))
       .map(e => `${e.name}:${e.kind === 'file' ? `${e.size}:${e.mtimeMs}` : e.kind}`)
       .sort()
       .join('|')
@@ -122,12 +122,17 @@ async function stamp(cx: Ctx, path: string): Promise<string> {
   }
 }
 
-/** One stamp per area: a change of any file it reads changes it. */
+/** One stamp per area: a change of any file it reads changes it. Each folder is listed once a pass. */
 export async function signature(cx: Ctx, sc: Scope): Promise<Signature> {
   const out = {} as Signature
+  const listed = new Map<string, Promise<string>>()
   for (const area of Object.keys(AREAS) as Area[]) {
     const parts: string[] = []
-    for (const rel of AREAS[area]) parts.push(await stamp(cx, `${sc.ws}/${rel}`))
+    for (const spec of AREAS[area] as readonly { dir: string; names?: readonly string[] }[]) {
+      const key = `${spec.dir}|${(spec.names ?? []).join(',')}`
+      if (!listed.has(key)) listed.set(key, stamp(cx, spec.dir ? `${sc.ws}/${spec.dir}` : sc.ws, spec.names))
+      parts.push(await listed.get(key)!)
+    }
     out[area] = parts.join('#')
   }
   return out

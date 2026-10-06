@@ -223,6 +223,8 @@ export const register: Register = on => {
     $.clock.every(1000, () => void tick(cx, applyUi))
     $.clock.every(250, () => void checkQueued(cx))
     void tick(cx, applyUi)
+    // what drew before the scope was known (the band above the prompt) draws again, now reading thimble-term's state
+    $.ui.invalidate('ui.render')
     return started
   })
 
@@ -320,7 +322,13 @@ export const register: Register = on => {
 
   on('ui.render', { component: 'UserMessage', props: { origin: { kind: 'composer' } } }, async ($, e, next) => (rt.sc ? underRow(cxOf($), e, () => next(e)) : next(e)))
   on('ui.render', { component: 'TurnDuration' }, async ($, e, next) => (rt.sc ? underRow(cxOf($), e, () => next(e)) : next(e)))
-  on('ui.render', { component: 'CommandOutput' }, async ($, e, next) => (rt.sc ? underRow(cxOf($), e, () => next(e)) : next(e)))
+  // /thimble's line as thimble says it, not under the plugin's name, which Claude Code puts before a hook's answer
+  on('ui.render', { component: 'CommandOutput' }, async ($, e, next) => {
+    if (!rt.sc) return next(e)
+    const own = (e.props.command === 'thimble:thimble' || e.props.command === 'thimble') && e.props.text.includes(HOME_LINE.slice(9, 40))
+    const shown = own ? { ...e, props: { ...e.props, text: HOME_LINE } } : e
+    return underRow(cxOf($), e, () => next(shown))
+  })
 
   // a thimble tool's row, and a card's run in Bash, name the card by its question, never by its id
   on('ui.render', { component: 'ToolUse' }, async ($, e, next) => {

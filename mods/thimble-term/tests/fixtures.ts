@@ -84,6 +84,7 @@ export const RESOLVE: Record<string, unknown> = {
   'README.md#L5': { ref: 'README.md#L5', kind: 'record', path: 'README.md', line: 5, blocks: [{ text: 'Each record is one saved revision.' }], excerpt: 'Each record is one saved revision.' },
   'README.md#L99': { error: 'line 99 out of range (README.md has 20 lines)', status: 404 },
   'card:ff73e071#pages/TOTAL': { ref: 'card:ff73e071#pages/TOTAL', kind: 'cell', cell_id: 'ff73e071', excerpt: 'pages × TOTAL = 4579', meta: { span: { col: 'pages', row: 'TOTAL', value: '4579' } } },
+  'card:ff73e071#pages/dse': { ref: 'card:ff73e071#pages/dse', kind: 'cell', cell_id: 'ff73e071', excerpt: 'pages × dse = 3908', meta: { span: { col: 'pages', row: 'dse', value: '3908' } } },
   'card:ff73e071#revisions/TOTAL': { ref: 'card:ff73e071#revisions/TOTAL', kind: 'cell', cell_id: 'ff73e071', excerpt: 'revisions × TOTAL = 14591', meta: { span: { col: 'revisions', row: 'TOTAL', value: '14591' } } },
 }
 
@@ -184,7 +185,11 @@ export function world(on: On, opts: { mode?: string; ws?: string | null } = {}):
     if (t === undefined) return { deny: `ENOENT: ${e.path}` } as never
     return { value: { kind: 'file', size: 1, mtimeMs: t, isLink: false } }
   })
-  on('fs.list', () => ({ value: [] }) as never)
+  // a folder's listing: one entry per stamp under it, its time the stamp (`ui.jsonl` sits in the workspace itself)
+  on('fs.list', ($, e) => {
+    const out = [...w.stamps.entries()].filter(([p]) => p === e.path || p.startsWith(`${e.path}/`)).map(([p, t]) => ({ name: p === e.path ? '.' : p.slice(e.path.length + 1), kind: 'file', size: 1, mtimeMs: t, isLink: false }))
+    return { value: out } as never
+  })
   const out = (v: unknown, code = 0) => ({ value: { exitCode: code, stdout: JSON.stringify(v), stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
   on('process.run', ($, e) => {
     const argv = [...e.argv]
@@ -252,6 +257,8 @@ export function world(on: On, opts: { mode?: string; ws?: string | null } = {}):
   on('ui.copy', () => ({ value: { isCopied: true } }) as never)
   on('ui.render', ($, e) => {
     const { Text } = $.ui.resolve(e)
+    // a command's output row as the engine draws it: its text
+    if (e.component === 'CommandOutput') return Text({ children: [String((e.props as { text?: unknown }).text ?? '')] })
     return Text({ children: ['(the engine row)'] })
   })
   return w
