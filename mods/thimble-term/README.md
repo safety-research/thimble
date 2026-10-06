@@ -19,8 +19,8 @@ any session whose `THIMBLE_WS` does not name a workspace with `mode: "terminal"`
   stay folded, and no hex id is drawn: a thimble tool's row names a card by its question. A table, a timeline, a
   diagram, an example and a label draw directly; a simple bar or line chart draws as text; any other chart as a table
   of its rows; a note, a custom card, a code card and a card type's card as their words.
-- **The rows above the prompt:** what the workspace holds (`home ›`), thimble's agents at work (`open ›` shows one's
-  latest steps), side threads with answers not read.
+- **The rows above the prompt:** what the workspace holds (`home ›`) and side threads with answers not read.
+  thimble's agents show in Claude Code's own agent tray, so no row repeats them.
 - **One panel:** home (documents, side threads, cards by group, labels, files), a card whole with its code, a
   citation's place with the value marked, a side thread, a label with its records and agree / disagree, the documents
   and one document with its figures as cards, the files and a file's lines, an agent, and a view as one line (the

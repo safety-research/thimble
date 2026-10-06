@@ -184,15 +184,14 @@ test('a click on plain words opens nothing; a right-click on a sentence offers "
   await pane.unmount()
 })
 
-test('the rows above the prompt: what the workspace holds, the agents at work, threads with news', async ($, on) => {
+test('the rows above the prompt: what the workspace holds and threads with news, and no row of agents (Claude Code\'s tray lists them)', async ($, on) => {
   const w = world(on)
   await start($, w)
   const above = (await $.ui.mount(ABOVE)) as unknown as M
   const text = shown(await above.drawn())
   expect(text).toContain('12 cards · 1 label · 1 document · 2 threads')
   expect(text).toContain('home ›')
-  expect(text).toContain('orientation: the whole corpus')
-  expect(text).toContain('working')
+  expect(text).not.toContain('orientation: the whole corpus')
   expect(text).toContain('1 new')
   expect(text).toContain('1 answering')
   await above.press({ key: 'above-home-open' })
@@ -200,15 +199,14 @@ test('the rows above the prompt: what the workspace holds, the agents at work, t
   await above.unmount()
 })
 
-test('an agent whose run ended is not listed above the prompt', async ($, on) => {
+test('no agent is listed above the prompt, whatever its state', async ($, on) => {
   const w = world(on)
-  w.states.agents = { ...w.states.agents, rows: [{ ...w.states.agents.rows[0]!, state: 'done' }, { name: 'thimble:writer', label: 'writer: report', state: 'waiting for a permission', kind: 'subagent', chat: 'w1', role: 'writer' }] }
+  w.states.agents = { ...w.states.agents, rows: [{ ...w.states.agents.rows[0]!, state: 'working' }, { name: 'thimble:writer', label: 'writer: report', state: 'waiting for a permission', kind: 'subagent', chat: 'w1', role: 'writer' }] }
   await start($, w)
   const above = (await $.ui.mount(ABOVE)) as unknown as M
   const text = shown(await above.drawn())
   expect(text).not.toContain('orientation: the whole corpus')
-  expect(text).toContain('writer: report')
-  expect(text).toContain('waiting for a permission')
+  expect(text).not.toContain('writer: report')
   await above.unmount()
 })
 
@@ -355,15 +353,6 @@ test("a tool's layout record opens the files; a file opens on its lines; an agen
   for (const s of ['README.md', 'markdown · 20 lines · lines 1-3', 'Collusion wiki', 'An export of 4,579']) expect(text).toContain(s)
   expect(w.calls.some(c => c[2] === 'files' && c[5] === 'README.md')).toBe(true)
   await pane.unmount()
-  // an agent at work, from the row above the prompt
-  const above = (await $.ui.mount(ABOVE)) as unknown as M
-  await above.press({ key: 'above-agent-open-0' })
-  await above.unmount()
-  await w.clock.settle()
-  const agent = (await $.ui.mount(PANE)) as unknown as M
-  expect(shown(await agent.drawn())).toContain('orientation: the whole corpus')
-  await agent.unmount()
-  expect(w.calls.some(c => c[2] === 'thread' && c[5] === 'o1')).toBe(true)
 })
 
 test("a label's panel: its definition, its counts and its records with agree and disagree", async ($, on) => {
@@ -381,25 +370,6 @@ test("a label's panel: its definition, its counts and its records with agree and
   expect(card).toContain('proxy-link')
   expect(card).toContain('disagree')
   await pane.unmount()
-})
-
-test("an agent's pane shows the run it opened on, not an earlier run of the same role that ended", async ($, on) => {
-  const w = world(on)
-  // the orientation's first run ended (done, its thread o0); its second run works (o1): both are thimble:orientation
-  w.states.agents = { ...w.states.agents, rows: [{ name: 'thimble:orientation', label: 'Orientation', state: 'done', kind: 'subagent', chat: 'o0', role: 'orientation' }, { name: 'thimble:orientation', label: 'Orientation', state: 'working', kind: 'subagent', chat: 'o1', role: 'orientation' }] }
-  await start($, w)
-  const above = (await $.ui.mount(ABOVE)) as unknown as M
-  await above.press({ key: 'above-agent-open-0' })
-  await above.unmount()
-  await w.clock.settle()
-  const agent = (await $.ui.mount(PANE)) as unknown as M
-  const text = shown(await agent.drawn())
-  expect(text).toContain('working')
-  expect(text).not.toContain('done')
-  await agent.press({ key: 'agent-stop' })
-  await w.clock.settle()
-  await agent.unmount()
-  expect(w.acts.some(a => a.kind === 'stop' && a.payload.agent === 'o1')).toBe(true)
 })
 
 test('a deck opens with its slides: each heading, its sentences as bullets, its figure as a card', async ($, on) => {

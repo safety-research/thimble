@@ -8,7 +8,8 @@
 //   - main's replies on the mod's grid, each citation a link, red when its place does not hold its value (reply.tsx)
 //   - each card a turn of main added or changed, once, under the turn's last reply, in its last state, its takeaway
 //     under it; no hex id, and Claude Code's tool groups left folded
-//   - the rows above the prompt: what the workspace holds, thimble's agents at work, side threads with news
+//   - the rows above the prompt: what the workspace holds and side threads with news (Claude Code's agent tray shows
+//     thimble's agents, so no row repeats them)
 //   - one panel (panel.tsx): home, a card, a citation's place, a side thread, a label, a document, the files, an agent
 //   - side threads: right-click a card, a citation or a sentence and choose "ask about it", or select text and press
 //     "ask"; a row under main's latest row when an answer comes in while the panel shows something else
@@ -428,25 +429,6 @@ export const register: Register = on => {
         </Box>,
       )
     }
-    // thimble's agents at work
-    // the agents at work: a run that ended (done, idle, ended) is not listed
-    const agents = (await cx.agents()).filter(a => (a.kind === 'subagent' || a.role) && !/^(done|idle|ended|stopped|failed)\b/.test(a.state))
-    for (const [i, a] of agents.slice(0, 3).entries()) {
-      rows.push(
-        <Box key={`above-agent-${i}`} flexDirection="row">
-          {label(i === 0 ? 'agents' : '')}
-          <Box flexDirection="row" columnGap={2} flexShrink={1}>
-            <Text wrap="truncate-end">
-              <Text>{'◌ '}</Text>
-              <Text>{a.label}</Text>
-              <Text dimColor>{`  ${a.state}`}</Text>
-            </Text>
-            <Button key={`above-agent-open-${i}`} label="open ›" plain onPress={() => void openPanel(cx, { view: 'agent', title: a.label, agent: a.name, thread: a.chat })} />
-          </Box>
-        </Box>,
-      )
-    }
-    if (agents.length > 3) rows.push(<Box key="above-agents-more" flexDirection="row">{label('')}<Text dimColor>{`… ${agents.length - 3} more`}</Text></Box>)
     // side threads with news, or answering
     const threads = await cx.threads()
     const news = await cx.news()
