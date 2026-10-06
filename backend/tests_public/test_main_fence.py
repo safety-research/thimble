@@ -254,6 +254,39 @@ def test_the_launch_unsets_the_effort_and_subagent_model_variables_and_gives_mai
     assert cli.launch_args(corpus).split("\n")[8] == ""
 
 
+def test_main_s_settings_blank_the_variables_a_settings_file_s_env_would_set_and_main_keeps_its_effort(corpus, tmp_path,
+                                                                                                     monkeypatch):
+    """An `env` block in the analyst's Claude Code settings sets CLAUDE_CODE_EFFORT_LEVEL, which would override every
+    agent's effort (live check L30), past the launcher's unset line. Main's --settings, which rank above the analyst's
+    files, give each of the three variables '', which Claude Code reads as unset (a stand-in API received the --effort
+    level under such a block once main's settings blanked it, and the settings file's level without), fenced or not.
+    Main runs at the level the settings file named, passed as --effort, unless models.main names one; a note names each
+    variable a settings file set."""
+    def env_of(lines: list[str]) -> dict:
+        return json.loads(lines[3])["env"]
+
+    blank = {name: "" for name in cli.UNSET_VARS}
+    lines = cli.launch_args(corpus).split("\n")
+    assert env_of(lines) == {**blank, cc_plugin.FENCE_MARK: "1"}
+    assert not any("is blank in this session" in n for n in lines[9].split("\t"))
+    (tmp_path / "cc").mkdir(exist_ok=True)
+    (tmp_path / "cc" / "settings.json").write_text(json.dumps({"env": {"CLAUDE_CODE_EFFORT_LEVEL": "medium",
+                                                                         "CLAUDE_CODE_SUBAGENT_MODEL": "haiku"}}))
+    lines = cli.launch_args(corpus).split("\n")
+    assert env_of(lines) == {**blank, cc_plugin.FENCE_MARK: "1"} and lines[2] == "medium" and lines[8] == ""
+    notes = lines[9].split("\t")
+    assert cli.BLANKED_EFFORT_LINE.format(effort="medium") in notes
+    assert cli.BLANKED_LINE.format(name="CLAUDE_CODE_SUBAGENT_MODEL") in notes
+    assert not any("CLAUDE_CODE_SUBAGENT_MODEL_FORCE" in n for n in notes)
+    lines = cli.launch_args(corpus, settings=json.dumps({"env": {"CLAUDE_CODE_EFFORT_LEVEL": "max", "MINE": "1"}}))
+    assert env_of(lines.split("\n")) == {**blank, "MINE": "1", cc_plugin.FENCE_MARK: "1"}, "their own --settings too"
+    (config.WORKSPACES_DIR / "logs").mkdir(parents=True, exist_ok=True)
+    (config.WORKSPACES_DIR / "logs" / "settings.json").write_text(json.dumps({"models": {"main": {"effort": "low"}}}))
+    assert cli.launch_args(corpus).split("\n")[2] == "low", "the composer's choice for main wins"
+    _conf({"sandbox": {"use": "never", "enforce": False}})
+    assert env_of(cli.launch_args(corpus).split("\n")) == blank, "without the fence as well"
+
+
 def test_the_launch_says_plainly_when_hooks_modules_are_off_and_still_launches(corpus, tmp_path, monkeypatch):
     """Managed settings that set disableAllHooks or allowManagedHooksOnly, the analyst's own disableAllHooks or
     THIMBLE_NO_MODULE: the note line says thimble's agents can't start and why, and the launch goes on; THIMBLE_NO_MODULE

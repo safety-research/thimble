@@ -121,8 +121,8 @@ session you start with `thimble`. Claude Code's agent tray (↓) lists them, and
   effort. A follow-up runs on its run's model and effort, except one typed in the terminal to an agent started from
   the browser after that role's settings changed, which runs on the new ones; its thread says so. The launcher unsets
   `CLAUDE_CODE_EFFORT_LEVEL` (passing it on as your session's own effort), `CLAUDE_CODE_SUBAGENT_MODEL` and
-  `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` for the session and prints a line for each, so that they can't change the agents'
-  models and efforts.
+  `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` for the session, blanks them where an `env` block of your Claude Code settings sets
+  them, and prints a line for each, so that they can't change the agents' models and efforts.
 - **Ending.** When an agent finishes, its report reaches your session, and Claude answers in one short line; the result
   is in the browser. Quitting Claude Code stops every agent, and nothing restarts on its own: `thimble -c` and a
   message in an agent's thread continue it, and Retry starts a view build, review or check again. An orientation from

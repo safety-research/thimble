@@ -1557,8 +1557,10 @@ def launch_settings(cwd: Path, given: str = "", fence: dict[str, Any] | None = N
     `given` (inline JSON, or a file relative to `cwd`) with thimble's statusline, chained to theirs (from `given`, else
     their own settings, cc_settings.own_statusline) at their refresh interval, and the composer's fast mode and
     ultracode where they name none, thimble-cc-mod off (config.without_mod), as in the sessions thimble starts, whatever
-    the folder's settings say, and thimble's `fence` joined in (main_fence, with_fence). `given` as it is when it cannot
-    be read."""
+    the folder's settings say, and thimble's `fence` joined in (main_fence, with_fence). Its `env` holds UNSET_VARS
+    each as '', fenced or not: Claude Code reads an empty value as unset, and --settings rank above the analyst's own
+    settings files, so an `env` block there that sets one cannot override the agents' efforts and models either, as the
+    launcher's unset line keeps their shell's from it (BLANKED_LINE). `given` as it is when it cannot be read."""
     from . import cc_settings, tray  # noqa: PLC0415
 
     own: Any = {}
@@ -1580,6 +1582,7 @@ def launch_settings(cwd: Path, given: str = "", fence: dict[str, Any] | None = N
         out.setdefault("fastMode", choice["fast"])
     if choice.get("effort") == cc_settings.ULTRACODE:
         out.setdefault("ultracode", True)
+    out["env"] = {**(out.get("env") if isinstance(out.get("env"), dict) else {}), **{name: "" for name in UNSET_VARS}}
     return json.dumps(config.without_mod(with_fence(out, fence or {})))
 
 
@@ -1635,6 +1638,11 @@ UNSET_VARS = (EFFORT_ENV, "CLAUDE_CODE_SUBAGENT_MODEL", "CLAUDE_CODE_SUBAGENT_MO
 UNSET_LINE = "thimble: {name} is unset for this session, so thimble's agents run on the models and efforts Settings name"
 UNSET_EFFORT_LINE = ("thimble: CLAUDE_CODE_EFFORT_LEVEL is unset for this session, so thimble's agents run at the efforts "
                      "Settings name; main runs at {effort} (--effort)")
+# the same for a variable an `env` block of the analyst's Claude Code settings sets, which the fence's env blanks
+BLANKED_LINE = ("thimble: {name}, which your Claude Code settings set, is blank in this session, so thimble's agents run "
+                "on the models and efforts Settings name")
+BLANKED_EFFORT_LINE = ("thimble: CLAUDE_CODE_EFFORT_LEVEL, which your Claude Code settings set, is blank in this session, "
+                       "so thimble's agents run at the efforts Settings name; main runs at {effort} (--effort)")
 SAFE_MODE_ENV = "CLAUDE_CODE_SAFE_MODE"
 SAFE_MODE_LINE = ("thimble: WARNING - Claude Code's safe mode is on (CLAUDE_CODE_SAFE_MODE or --safe-mode), which turns "
                   "thimble's plugin off: this session gets no thimble tools, hooks or /thimble, and thimble's agents "
@@ -1892,15 +1900,20 @@ def _launch_args(cwd: Path, resume: bool, settings: str, own_session: str | None
     if why_off in NO_FENCE_LINES:
         notes.append(NO_FENCE_LINES[why_off])
     unset = [name for name in UNSET_VARS if os.environ.get(name, "").strip()]
+    # set by an `env` block of the analyst's Claude Code settings: main's --settings blank them (launch_settings)
+    blanked = [name for name in UNSET_VARS if name not in unset and (cc_settings.settings_env(cwd, name) or "").strip()]
     chosen = main_choice(cwd).get("effort")
     effort = cc_settings.level_of(chosen) if chosen in (*cc_settings.EFFORTS, cc_settings.ULTRACODE) else ""
-    env_effort = os.environ.get(EFFORT_ENV, "").strip().lower()
-    if EFFORT_ENV in unset:
+    env_effort = (os.environ.get(EFFORT_ENV, "") if EFFORT_ENV in unset else
+                  cc_settings.settings_env(cwd, EFFORT_ENV) if EFFORT_ENV in blanked else "").strip().lower()
+    if EFFORT_ENV in unset or EFFORT_ENV in blanked:
         effort = effort or (env_effort if env_effort in cc_settings.EFFORTS else "")
-        notes.append(UNSET_EFFORT_LINE.format(effort=effort or "its own settings' effort"))
+        line = UNSET_EFFORT_LINE if EFFORT_ENV in unset else BLANKED_EFFORT_LINE
+        notes.append(line.format(effort=effort or "its own settings' effort"))
     else:
         effort = effort or cc_settings.main_effort_flag(cwd)
     notes += [UNSET_LINE.format(name=name) for name in unset if name != EFFORT_ENV]
+    notes += [BLANKED_LINE.format(name=name) for name in blanked if name != EFFORT_ENV]
     switches = dict(SWITCHES)
     if os.environ.get(NO_MODULE_ENV, "").strip():
         switches[NO_MODULE_ENV] = os.environ[NO_MODULE_ENV].strip()
