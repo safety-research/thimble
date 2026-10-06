@@ -18,8 +18,18 @@ bash scripts/install.sh   # backend/.venv with the test extras, frontend/dist, ~
 thimble server up                  # the server on port 8300, detached; prints the URL
 THIMBLE_DEV=1 thimble server up    # plus Vite on 5300 with hot reload; the URL is Vite's
 thimble server status | stop | restart
-thimble doctor                     # the install state, versions, port and the log's recent errors
+thimble status                     # one line: the server, the orientation, the queue
+thimble doctor                     # the install state, versions, port and the log's recent errors, with the lines
+                                   # only a development install prints: the turn endings, the source changed since
+                                   # the server started, the validation stack, the last apply and the dev tickets
+thimble fix                        # the server will not start: the dev agent repairs it in the checkout, asking first
+thimble revert                     # undo the last change thimble's dev agent applied
+thimble launch-args | prompt <name>   # what a session starts with, and a prompt as a session gets it
 ```
+
+`thimble help` lists the commands an analyst uses, and in a development install `fix` and `revert` too; the ones above
+run whether or not they are listed. `fix` and `revert` refuse on a release install, since they change thimble's own
+code.
 
 `thimble` alone starts a Claude Code session in the current folder with the plugin loaded. Edits to `prompts/main.md` or
 `prompts/shared.md` reach a session only when it is started again, since they are its system prompt.

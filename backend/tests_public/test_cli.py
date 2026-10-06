@@ -197,6 +197,41 @@ def test_the_doctor_a_model_reads_names_no_install_command_even_when_the_log_doe
     assert text.count(cli.LOG_LINE_LEFT_OUT) == 4, "three in the tail, one in the errors"
 
 
+DEV_LINES = ("turn endings:", "source changed since start:", "validation stack:", "last apply:", "dev tickets:",
+             "last ticket error:")
+
+
+def test_doctor_prints_the_developer_s_lines_only_in_a_development_install(home, monkeypatch, fake_claude):
+    """The turn endings, the source changed since start, the validation stack, the last apply and the dev tickets are a
+    developer's lines, so a release install's doctor leaves them out and a git clone's prints them."""
+    monkeypatch.setattr(cli, "healthy", lambda url=None, timeout=1.0: False)
+    monkeypatch.setattr(cli, "listening", lambda p: False)
+    monkeypatch.setattr(cli, "is_git_checkout", lambda: False)
+    release = cli.doctor_text()
+    assert not [k for k in DEV_LINES if f"\n  {k}" in release], release
+    assert "\n  server:" in release and "\n  auth:" in release
+    monkeypatch.setattr(cli, "is_git_checkout", lambda: True)
+    monkeypatch.setattr(cli, "_git", lambda *a: "")
+    clone = cli.doctor_text()
+    assert all(f"\n  {k}" in clone for k in DEV_LINES), clone
+
+
+def test_fix_and_revert_run_only_in_a_development_install(home, monkeypatch, capsys):
+    """`thimble fix` and `thimble revert` change thimble's own code, which a release install cannot: each says so and
+    exits 1 before it asks or touches anything, and /thimble fix says the same to the session."""
+    monkeypatch.setattr(cli, "is_git_checkout", lambda: False)
+    touched: list[str] = []
+    for name in ("healthy", "fix", "revert", "fix_refusal", "restart"):
+        monkeypatch.setattr(cli, name, lambda *a, _n=name, **k: touched.append(_n))
+    assert cli.main(["fix"]) == 1
+    assert capsys.readouterr().out.strip() == cli.DEV_ONLY_LINES["fix"]
+    assert cli.main(["revert"]) == 1
+    assert capsys.readouterr().out.strip() == cli.DEV_ONLY_LINES["revert"]
+    assert cli._action(type("A", (), {"action": "fix"})(), True, "http://127.0.0.1:1") == 0
+    assert capsys.readouterr().out.strip() == cli.DEV_ONLY_LINES["fix"]
+    assert touched == []
+
+
 SERVER_LIKE = [sys.executable, "-c", "import time; time.sleep(60)", "-m", "uvicorn", "app.main:app", "--host", "127.0.0.1",
                "--port", "8398", "--timeout-graceful-shutdown", "3"]
 
