@@ -86,9 +86,10 @@ KEY_REFS_FILE = "key-refs.json"  # view:<slug>/<key> -> {refs, excerpt, label, n
 INDEXES_SUBDIR = view_indexes.INDEXES_SUBDIR
 VIEW_JSON, READER_PY, VIEW_HTML = "view.json", "reader.py", "view.html"
 TOOLS_PROMPT = "tools"  # prompts/tools.md, whose lowercase sections are the lines the view tools' results carry
-# a view ticket's status on its proposal row; `dropped` is an orientation proposal that could not be built through its
-# repairs. An orientation's proposal carries `held: true` until its view first passes its checks (mark_built): it builds
-# at once, and the analyst hears of it only then.
+# a view ticket's status on its proposal row; `dropped` is an orientation proposal left out when the analyst stopped the
+# orientation before its view was built. An orientation's proposal carries `held: true` until its view first passes its
+# checks (mark_built) or fails through its repairs (dev._repairs_failed): it builds at once, and the analyst hears of it
+# only then.
 # `suggested` is a viewer for a file type the File browser proposed (suggest), which builds only once the analyst
 # accepts it.
 STATUSES = ("queued", "building", "built", "failed", "dropped", "suggested")

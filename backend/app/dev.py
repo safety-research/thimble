@@ -3159,11 +3159,12 @@ FAILED_WHY_CHARS = 240
 
 def _repairs_failed(c: str, slug: str, why: str, chat: str | None = None) -> None:
     """An orientation's proposal whose build failed through its VIEW_REPAIRS repairs fails as a view the analyst asked
-    for does (_view_failed): its chip, in the views list and in the orientation's thread, shows ✕ with why and Retry,
-    which builds it again with its repairs. The orientation's thread also gets one line that says so, with the view's
-    chip. Nothing is chipped in main, since the analyst never asked for it."""
+    for does (_view_failed), no longer held: its chip, in the views list and in the orientation's thread, shows ✕ with
+    why and Retry, which builds it again with its repairs. The orientation's thread also gets one line that says so,
+    with the view's chip. Nothing is chipped in main, since the analyst never asked for it."""
     from . import orientation, views  # noqa: PLC0415
 
+    views.update_proposal(c, slug, held=None)  # no longer held back from the views list (views.held_slugs)
     _view_failed(c, slug, why, chat)
     prop = views.read_proposal(c, slug) or {}
     reason = " ".join(str(why or "").split())

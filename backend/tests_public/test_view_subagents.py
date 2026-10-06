@@ -450,6 +450,7 @@ async def test_an_orientation_s_failing_proposal_is_repaired_then_fails_with_ret
     await _until(lambda: _prop(slug).get("status") == "failed", "the proposal never failed after its repairs")
     assert len(bridge.ops("spawn")) == dev.VIEW_REPAIRS + 1
     assert "FAIL" in _prop(slug)["error"] and (views.views_dir(CORPUS) / slug).is_dir(), "its draft stays for Retry"
+    assert "held" not in _prop(slug) and slug not in views.held_slugs(CORPUS), "the views list shows it"
     _, orient_log = agents.paths(CORPUS, orient)
     [line] = [r for r in agents.read_events(orient_log) if r.get("kind") == dev.VIEW_FAILED_KIND]
     assert line["ref"] == f"view:{slug}" and line["view"] == "Posts" and "FAIL" in line["text"]
