@@ -27,7 +27,7 @@ PROMPT = "context"  # prompts/context.md
 PARTS = ("conversation", "threads", "orientation", "canvas", "views", "documents")  # every part render gives by default
 # each part's `## ` heading in prompts/context.md, in the order render sends them; `session` is asked for by name
 HEADINGS = {"conversation": "The conversation", "threads": "The threads", "orientation": "The orientation",
-            "session": "The session", "canvas": "The canvas", "views": "The views", "documents": "The documents"}
+            "session": "The session", "canvas": "The cards", "views": "The views", "documents": "The documents"}
 TASK_HEADING = "Your task"
 ALWAYS = ("conversation", "orientation", "canvas")  # the parts that say they are empty rather than being left out
 OUTPUT_CHARS = 6_000  # of one tool result

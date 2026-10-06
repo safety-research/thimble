@@ -32,7 +32,7 @@ List a group's cards, one line each with its id, kind, question and the start of
 
 ## add_card
 
-Add a card to the canvas, with its question and its content in one call. thimble runs the code and returns `card:<id>` and the start of each output. Give its takeaway here, or with `edit_card` once you have read the output.
+Add a card, with its question and its content in one call. {{if:browser}}thimble runs the code and returns `card:<id>` and the start of each output.{{end}}{{if:terminal}}thimble returns `card:<id>` and a command that runs the code. Run it with Bash, and it prints the start of each output.{{end}} Give its takeaway here, or with `edit_card` once you have read the output.
 
 ```json
 {
@@ -147,7 +147,7 @@ Turn a label over files on or off in Files and the views, where it marks the rec
 
 ## set_filter
 
-Filter the canvas's cards, the records in Files or the report's sentences by a value of a label that exists, and the canvas's cards also by their kind, group, maker, card check, star, lock or words. It makes no label and no card. The parts you give replace those parts of the scope's filter, and the others stay.
+Filter the cards, the records in Files or the report's sentences by a value of a label that exists, and the cards also by their kind, group, maker, card check, star, lock or words. It makes no label and no card. The parts you give replace those parts of the scope's filter, and the others stay.
 
 ```json
 {
@@ -184,7 +184,7 @@ Clear a scope's whole filter, so all its cards, records or sentences show again.
 
 ## set_layout
 
-Lay out the browser's main area, right of the chat, as panes that each show one surface: `files`, `canvas`, `report`, or a view on its own as `view:<slug>`. Call it when the analyst asks to see surfaces together, such as the files beside the report. The analyst can also drag the panes into place.
+{{if:browser}}Lay out the browser's main area, right of the chat, as panes that each show one surface: `files`, `canvas`, `report`, or a view on its own as `view:<slug>`. Call it when the analyst asks to see surfaces together, such as the files beside the report. The analyst can also drag the panes into place.{{end}}{{if:terminal}}Open thimble's panel in the terminal on surfaces, each in a pane: `files`, `canvas` for the cards, `report`, or a view on its own as `view:<slug>`. Call it when the analyst asks to see surfaces together, such as the files beside the report.{{end}}
 
 ```json
 {
@@ -316,7 +316,7 @@ Post the reply the analyst reads in a thread.
 
 ## message_thread
 
-Send a message the analyst typed in this terminal to a thread, as that thread's composer in the browser sends it: a side thread's follow-up, or with no message its unanswered questions asked again, whose `thread` event, with the thread's anchor, comes back in the result for you to handle at once; a follow-up for the orientation; or a change to a view for the view's build thread. The browser shows the message in that thread. Call it for /thimble:ask.
+Send a message the analyst typed in this terminal to a thread, as that thread's own composer sends it: a side thread's follow-up, or with no message its unanswered questions asked again, whose `thread` event, with the thread's anchor, comes back in the result for you to handle at once; a follow-up for the orientation; or a change to a view for the view's build thread. thimble shows the message in that thread. Call it for /thimble:ask.
 
 ```json
 {
@@ -331,7 +331,7 @@ Send a message the analyst typed in this terminal to a thread, as that thread's 
 
 ## list_agents
 
-List thimble's agents, the subagents of this session that thimble started, with what each is doing and its thread in the browser. Claude Code's agent tray lists the same subagents. Call it for /thimble:agents.
+List thimble's agents, the subagents of this session that thimble started, with what each is doing and its thread. Claude Code's agent tray lists the same subagents. Call it for /thimble:agents.
 
 ```json
 {
@@ -342,7 +342,7 @@ List thimble's agents, the subagents of this session that thimble started, with 
 
 ## rename_thread
 
-Rename a thread in the browser's thread list, when the analyst asks you to.
+Rename a thread in thimble's thread list, when the analyst asks you to.
 
 ```json
 {
@@ -371,7 +371,7 @@ Delete a thread and its chat from the workspace, stopping its session if it runs
 
 ## screenshot
 
-Get a picture of what the analyst sees in the browser, such as a card as the canvas draws it. It is slow, so use it only when the look matters, such as when the analyst asks you to fix how something appears.
+{{if:browser}}Get a picture of what the analyst sees in the browser, such as a card as thimble draws it.{{end}}{{if:terminal}}Get a picture of a card as thimble draws it. In terminal mode it takes no other picture.{{end}} It is slow, so use it only when the look matters, such as when the analyst asks you to fix how something appears.
 
 ```json
 {
@@ -387,7 +387,7 @@ Get a picture of what the analyst sees in the browser, such as a card as the can
 
 ## start_orientation
 
-Start an orientation, a broad analysis of the corpus that helps the analyst understand it, as a subagent of this session, which shows the analyst when it finishes the outputs its switches turn on. The browser shows it as a thread, Claude Code's agent tray shows it as a row, and an `orient` event tells you when it ends. Call it when the analyst asks for a new orientation, which adds to the cards the earlier ones left, and `message_orientation` to explore further within one that has finished. Its result is the exact Agent call that starts the orientation, which you then make. Pass only the model, effort and switches the analyst named, so that the others take the values thimble's Settings give them. One orientation runs at a time, so while one runs the call starts nothing.
+Start an orientation, a broad analysis of the corpus that helps the analyst understand it, as a subagent of this session, which shows the analyst when it finishes the outputs its switches turn on. thimble shows it as a thread, Claude Code's agent tray shows it as a row, and an `orient` event tells you when it ends. Call it when the analyst asks for a new orientation, which adds to the cards the earlier ones left, and `message_orientation` to explore further within one that has finished. Its result is the exact Agent call that starts the orientation, which you then make. Pass only the model, effort and switches the analyst named, so that the others take the values thimble's Settings give them. One orientation runs at a time, so while one runs the call starts nothing.
 
 ```json
 {
@@ -406,7 +406,7 @@ Start an orientation, a broad analysis of the corpus that helps the analyst unde
 
 ## start_writing
 
-Start a writer, as a subagent of this session, which writes or revises one document from this conversation, the canvas and the documents. The browser shows its steps, and its last message reaches you as a `written` event when it ends. Its result is the exact Agent call that starts the writer, which you then make. Call it when the analyst asks for a document or for a change to one, and use `edit_document` yourself to change one passage, slide or layout of a written document. Pass a model or an effort only when the analyst names one, so that the writer otherwise runs on the values thimble's Settings give it.
+Start a writer, as a subagent of this session, which writes or revises one document from this conversation, the cards and the documents. thimble shows its steps, and its last message reaches you as a `written` event when it ends. Its result is the exact Agent call that starts the writer, which you then make. Call it when the analyst asks for a document or for a change to one, and use `edit_document` yourself to change one passage, slide or layout of a written document. Pass a model or an effort only when the analyst names one, so that the writer otherwise runs on the values thimble's Settings give it.
 
 ```json
 {
@@ -416,7 +416,7 @@ Start a writer, as a subagent of this session, which writes or revises one docum
     "request": {"type": "string", "description": "What the analyst asked for, in their words. Empty for the document as its form asks."},
     "after": {"type": "string", "description": "The passage the request is about, such as a `card` event's `after`."},
     "type": {"type": "string", "description": "Only for a document that does not exist yet, which is then made: casefile (one document, a section per case, such as an agent, a run or a session), comparison (a page with a grid of the cases against measures), timeline (dated events in phases), page, or document, slides or story for one the request describes."},
-    "name": {"type": "string", "description": "The new document's name in the browser, such as Case file."},
+    "name": {"type": "string", "description": "The new document's name in thimble, such as Case file."},
     "model": {"type": "string", "description": "The model to run the writer on, such as opus, sonnet or a full model id, only when the analyst names one. Default: the writer's model in Settings."},
     "effort": {"type": "string", "enum": ["low", "medium", "high", "xhigh", "max"], "description": "The effort to run the writer at, only when the analyst names one. Default: the writer's effort in Settings."}
   },
@@ -588,7 +588,7 @@ Finish your ticket: thimble commits every change in the worktree to the ticket's
 
 ## instructions
 
-These tools act on thimble, the workspace beside this session where the analyst reads a chat, the corpus's files, a canvas of cards and a report in the browser. A session started with the `thimble` command, and each thimble subagent, also has thimble's full instructions in its system prompt. If yours has none, this session was started some other way and the browser cannot reach it, so tell the analyst to quit and start it again by running `thimble` in this folder.
+These tools act on thimble, the analyst's workspace for this corpus beside this session: a chat, the corpus's files, cards and a report, which thimble shows {{if:browser}}in the browser{{end}}{{if:terminal}}in the terminal{{end}}. A session started with the `thimble` command, and each thimble subagent, also has thimble's full instructions in its system prompt. If yours has none, this session was started some other way and thimble cannot reach it, so tell the analyst to quit and start it again by running `thimble` in this folder.
 
 ## card-errored
 
@@ -597,6 +597,10 @@ This card errored. Fix the code with `edit_card`.
 ## card-timeout
 
 The code was stopped after {limit}. Make it faster and run it again with `edit_card`.
+
+## card-run
+
+The card's code did not run yet. Run this command with Bash next: `{command}`. It runs the code and prints the card's result with the start of each output. thimble shows the card when its code has run.
 
 ## kind-mismatch
 
@@ -706,6 +710,14 @@ The takeaway of its card card:{cid} was written for the run before; write it aga
 
 {cards} read this label before it changed. Once its counts are final, thimble runs each of them again on the label as it is now, so leave them as they are.
 
+## label-run
+
+The label's code did not run yet. Run this command with Bash next: `{command}`. It runs your function on each unit and prints the label's result with its counts.
+
+## cards-stale
+
+{cards} read this label before it changed, so their outputs are old. When the label's counts are final, run them again with Bash: `{command}`. It prints each card whose takeaway the new output leaves behind, or that fails, with that output. Write each of those takeaways again with `edit_card`, and fix each card that fails.
+
 ## show_label-not-files
 
 {label} is a label over {units}, which Files does not show. To show it, filter {where} by one of its values.
@@ -716,7 +728,7 @@ The {scope} filter is now {filter}.
 
 ## set_filter-kept
 
-It keeps {kept} of the canvas's {total} cards, and the analyst sees the rest dimmed.
+It keeps {kept} of the {total} cards, and the analyst sees the rest dimmed.
 
 ## set_filter-files
 
@@ -724,7 +736,7 @@ Files shows the label turned on with that value highlighted, and its views keep 
 
 ## set_layout-set
 
-The browser shows {surfaces} {layout}.
+thimble shows {surfaces} {layout}.
 
 ## open_view-card
 
@@ -740,7 +752,7 @@ The {scope} filter is cleared.
 
 ## list_cards-filter
 
-The canvas filter {filter} keeps {kept} of the canvas's {total} cards. The analyst sees the cards tagged filtered out dimmed.
+The card filter {filter} keeps {kept} of the {total} cards. The analyst sees the cards tagged filtered out dimmed.
 
 ## takeaway-long
 
@@ -802,13 +814,17 @@ The film of {ref}, {duration} s long, its lines at {windows} s.
 
 The film reported: {errors}
 
+## screenshot-terminal
+
+screenshot cannot take this picture in terminal mode. There it draws only a card, and only when Chromium and thimble's built page are installed, which `thimble doctor` shows. `read_ref` on the card reads what the analyst sees.
+
 ## propose_view-proposed
 
 Proposed the view {view} (view:{slug}) over {claims}. The dev agent is building it now, and it opens in Files when its checks pass.
 
 ## propose_view-suggested
 
-Proposed the viewer {view} (view:{slug}) for {claims}. The File browser offers it beside Raw on those files, and it is built when the analyst picks it.
+Proposed the viewer {view} (view:{slug}) for {claims}. Files offers it beside Raw on those files, and it is built when the analyst picks it.
 
 ## propose_view-unmatched
 
@@ -848,11 +864,15 @@ Filed {label}, but it cannot run here, so it failed at once: {why} Tell the anal
 
 ## file_dev_ticket-waits
 
-Filed {label}. {running} runs now, and code tickets run one at a time, so this one waits until the analyst starts it with Start on its card in the browser. Tell the analyst in one line.
+Filed {label}. {running} runs now, and code tickets run one at a time, so this one waits until the analyst starts it with Start on its card{{if:browser}} in the browser{{end}}. Tell the analyst in one line.
 
 ## file_dev_ticket-start
 
 Filed {label}: {title}. {start}
+
+## ticket-terminal
+
+This call filed nothing: code tickets run only in browser mode for now, since the analyst allows each one on its card there. Tell the analyst so in one line: to file it, they quit, run `thimble mode browser`, start `thimble` again and ask again.
 
 ## view-media-unplayable
 
@@ -1080,7 +1100,7 @@ No Start and no message from the analyst has asked for an orientation since the 
 
 ## start_orientation-running
 
-An orientation runs already, so this call started none: one orientation runs at a time. The browser shows the one that runs, so write nothing about it, unless the analyst asked for a new orientation in this turn: then tell them in one line that one runs and that they can stop it in its thread first.
+An orientation runs already, so this call started none: one orientation runs at a time. thimble shows the one that runs, so write nothing about it, unless the analyst asked for a new orientation in this turn: then tell them in one line that one runs and that they can stop it in its thread first.
 
 ## start_orientation-subagent
 
@@ -1088,11 +1108,11 @@ Start the orientation now as a subagent of this session, with one Agent call who
 
 {input}
 
-Change nothing in it, since thimble lets only this call through, and end the turn on it, with no words before or after it: the terminal and the browser both show the call.
+Change nothing in it, since thimble lets only this call through, and end the turn on it, with no words before or after it: the analyst sees the call.
 
 ## start_orientation-program
 
-The extension {extension} runs the orientation with its own program. The program has started, and the browser shows it, so this turn needs no words from you unless it has something else for the analyst. An `orient` event tells you when it ends.
+The extension {extension} runs the orientation with its own program. The program has started, and thimble shows it, so this turn needs no words from you unless it has something else for the analyst. An `orient` event tells you when it ends.
 
 ## start_job-subagent
 
@@ -1100,7 +1120,7 @@ Start it now as a subagent of this session, with one Agent call whose input is e
 
 {input}
 
-Change nothing in it, since thimble lets only this call through, and end the turn on it, with no words before or after it: the terminal and the browser both show the call.
+Change nothing in it, since thimble lets only this call through, and end the turn on it, with no words before or after it: the analyst sees the call.
 
 ## subagent-request
 
@@ -1124,11 +1144,11 @@ This session was not started with `thimble`, so it and its subagents run without
 
 ## start-refused-fork
 
-A thread's fork cannot start thimble's agents, since Claude Code does not let a fork start subagents. Tell the analyst in one line in the thread that they can start it in the browser: Start for the orientation, or Write on a document for its writer.
+A thread's fork cannot start thimble's agents, since Claude Code does not let a fork start subagents. Tell the analyst in one line in the thread that they can start it {{if:browser}}in the browser: Start for the orientation, or Write on a document for its writer{{end}}{{if:terminal}}from main: `/thimble:orient` for the orientation, or `/thimble:write` for a writer{{end}}.
 
 ## start-refused-fork-ticket
 
-A thread's fork cannot file a ticket, since its agent is a subagent and Claude Code does not let a fork start subagents. Tell the analyst in one line in the thread that they can file it in the browser with Report a problem.
+A thread's fork cannot file a ticket, since its agent is a subagent and Claude Code does not let a fork start subagents. Tell the analyst in one line in the thread that they can file it {{if:browser}}in the browser{{end}}{{if:terminal}}in browser mode{{end}} with Report a problem.
 
 ## start-refused-no-module
 
@@ -1152,11 +1172,11 @@ Start the writer now as a subagent of this session, with one Agent call whose in
 
 {input}
 
-Change nothing in it, since thimble lets only this call through, and end the turn on it, with no words before or after it: the terminal and the browser both show the call.
+Change nothing in it, since thimble lets only this call through, and end the turn on it, with no words before or after it: the analyst sees the call.
 
 ## start_writing-program
 
-An extension's program writes {doc}. The program has started, and the browser shows it, so this turn needs no words from you unless it has something else for the analyst. Its last message reaches you as a `written` event.
+An extension's program writes {doc}. The program has started, and thimble shows it, so this turn needs no words from you unless it has something else for the analyst. Its last message reaches you as a `written` event.
 
 ## writer-context-file
 
@@ -1346,7 +1366,7 @@ The analyst's session has no conversation yet.
 
 ## context-no-cards
 
-The canvas has no cards yet.
+There are no cards yet.
 
 ## context-cut
 
@@ -1482,7 +1502,7 @@ A follow-up of the orientation changed these cards, which the report cites: {car
 
 ## message_orientation-started
 
-The orientation has the message, and the browser shows it, so this turn needs no words from you unless it has something else for the analyst. An `orient` event tells you when it ends.
+The orientation has the message, and thimble shows it, so this turn needs no words from you unless it has something else for the analyst. An `orient` event tells you when it ends.
 
 ## orient-subagent-message
 
@@ -1508,7 +1528,7 @@ The analyst stopped this orientation with Esc in their terminal, and Claude Code
 
 {input}
 
-Change nothing in it, since thimble lets only this call through, and end the turn on it, with no words before or after it: the terminal and the browser both show the call.
+Change nothing in it, since thimble lets only this call through, and end the turn on it, with no words before or after it: the analyst sees the call.
 
 ## orient-continuation-prompt
 
@@ -1548,11 +1568,15 @@ This orientation ran in advance, before this workspace was installed, and its se
 
 ## precached-context
 
-This workspace was installed from a pre-cache: its orientation ran in advance on these same files ({made}), and its Claude Code session was not kept, so `message_orientation` cannot reach it. What it left follows: the cards on the canvas, the views and the documents, with the full text of each one written. Take it as what the analyst sees in the browser; read a card, a view or a ref with `read_ref` before you rely on its details, and answer what its cards already answer yourself.
+This workspace was installed from a pre-cache: its orientation ran in advance on these same files ({made}), and its Claude Code session was not kept, so `message_orientation` cannot reach it. What it left follows: the cards, the views and the documents, with the full text of each one written. Take it as what the analyst sees in thimble; read a card, a view or a ref with `read_ref` before you rely on its details, and answer what its cards already answer yourself.
 
 ## precached-context-kept
 
-This workspace was installed from a full export: its orientation ran in advance on these same files ({made}), as a subagent of the exporter's Claude Code session, so `message_orientation` cannot reach it, though its thread shows every step it took. What it left follows: the cards on the canvas, the views and the documents, with the full text of each one written. Take it as what the analyst sees in the browser; read a card, a view or a ref with `read_ref` before you rely on its details, and answer what its cards already answer yourself.
+This workspace was installed from a full export: its orientation ran in advance on these same files ({made}), as a subagent of the exporter's Claude Code session, so `message_orientation` cannot reach it, though its thread shows every step it took. What it left follows: the cards, the views and the documents, with the full text of each one written. Take it as what the analyst sees in thimble; read a card, a view or a ref with `read_ref` before you rely on its details, and answer what its cards already answer yourself.
+
+## thimble-terminal-home
+
+thimble: this session runs in terminal mode, so thimble shows this workspace here in the terminal and starts no server. To switch to browser mode, quit, run `thimble mode browser` and start `thimble` again.
 
 ## agents-none
 
@@ -1570,7 +1594,7 @@ Print the text below in a code block, as it is, and add nothing else.
 
 ## message_thread-event
 
-The browser shows the message in the thread {thread}. Handle the thread's event now, as its bullet in your prompt says, and end the turn on that call, with no text after it: the terminal shows the call, and the thread shows the answer.
+thimble shows the message in the thread {thread}. Handle the thread's event now, as its bullet in your prompt says, and end the turn on that call, with no text after it: the terminal shows the call, and the thread shows the answer.
 
 {event}
 
@@ -1594,7 +1618,7 @@ The message is in the thread {thread}, which waits for the fork you started for 
 
 ## stop-subagent
 
-The analyst pressed Stop on {title}, your subagent `{agent_id}`, in the browser. Stop it with TaskStop.
+The analyst pressed Stop on {title}, your subagent `{agent_id}`, in thimble. Stop it with TaskStop.
 
 ## message_orientation-empty
 

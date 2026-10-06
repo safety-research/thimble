@@ -38,7 +38,7 @@ A note on it reads {{note}}
 
 ## draft
 
-The analyst described a label in their own words, and thimble applies the label you define at once, over the records of files, the canvas's cards or the report's sentences. Define it with the classifier that decides the description most exactly and most cheaply.
+The analyst described a label in their own words, and thimble applies the label you define at once, over the records of files, the cards or the report's sentences. Define it with the classifier that decides the description most exactly and most cheaply.
 
 - A regex fits when a pattern in the text settles the value, such as a word, a field's value or a link. Python's re searches each record's line as the file holds it, so a JSON line is matched with its keys and quotes, and a row of a database or a CSV file as one `column: value` line per column. A unit that matches takes the first value and any other the second. Start the pattern with (?i) to ignore case.
 - Code fits when a field, a count or a comparison settles the value. Define `label(unit)` in Python returning (value, confidence), where a JSON lines record is its dict, a line of text is {"text": the line}, a row of a database or a CSV file is a dict of its columns, a record of a JSON document is its value, a page of a PDF is {"page", "text"}, and a card is a dict with its text, kind, question, takeaway, group and groups.

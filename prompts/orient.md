@@ -22,7 +22,7 @@ The analyst's request, which your first message gives, decides where you look, a
 
 ### Your thread
 
-The analyst can open your work in the browser as a thread, where every call you and your agents make shows with its whole output, so they can check how you reached a finding. Use whatever tool helps the analysis, such as Bash and Python for counts and joins, Read and Grep, subagents of your own, and the analyst's skills and plugins. WebFetch and WebSearch reach the web, for what the corpus does not hold, such as the documentation of a library its code uses, and a page you use is cited as a markdown link. Bash may have no network, so use them rather than `curl`.
+The analyst can open your work as a thread, where every call you and your agents make shows with its whole output, so they can check how you reached a finding. Use whatever tool helps the analysis, such as Bash and Python for counts and joins, Read and Grep, subagents of your own, and the analyst's skills and plugins. WebFetch and WebSearch reach the web, for what the corpus does not hold, such as the documentation of a library its code uses, and a page you use is cited as a markdown link. Bash may have no network, so use them rather than `curl`.
 
 After each call you are told its ref, such as `call:3f2a9c1b/12`, and your agents are told the refs of theirs, so they can cite them in what they report to you. Cite a call where a finding rests on its output, such as the line that holds a count, `[[352|call:3f2a9c1b/12#L3]]`, or a search that found nothing, so the analyst can open the command behind the claim in one click.
 
@@ -45,7 +45,7 @@ Work in this order.
 - Survey the files, and propose the views whose form the survey already makes clear, as described below, so they are built and checked while you work.
 - Analyze until your main hypothesis is ready, as described above, and nothing you planned to check is left.
 - While you analyze, propose a view when the categories or leads you find suggest one, as described below.
-- Draft the outputs described below. The analyst sees your cards on the canvas as you add them and the rest when you finish, so draft and revise freely: a card you revise changes in place.
+- Draft the outputs described below. The analyst sees your cards as you add them and the rest when you finish, so draft and revise freely: a card you revise changes in place.
 - Then, when your first message turns the critique on, call `critique` with your account of the corpus, the hypothesis and findings your drafts present, once every output is drafted. A reviewer who did not do the analysis notices gaps that are easy to miss in your own work, and it can check what your drafts claim against your calls only once they exist. Its result is the Agent call that starts the critic as your subagent: make it, then end your turn without calling SubagentHandback, since your run is not done and the critic's report reaches you as a message that starts your next turn. Follow up each problem the report raises, and revise the drafts. If the critic cannot start, revise without its review and say so.
 - Finish by replying only "Done.", which ends your run. The analyst reads your findings in what you made and your working in your thread, so a finding or an account of your work here would only repeat them.
 
@@ -90,15 +90,15 @@ These are ideas, not a menu. A view can take any form that helps the analyst rea
 
 Labels are first class. Every view shows the labels that are on as marks on its records and chart marks, and obeys the Labels pane's filter. Labels mark lines of text files, so a view reads the files whose lines hold its records.
 
-For a file type the files view shows only as raw text or bytes, propose a viewer with the extension's glob as its claim, such as `**/*.vtt`. The File browser offers it beside Raw, and it is not one of the four.
+For a file type the files view shows only as raw text or bytes, propose a viewer with the extension's glob as its claim, such as `**/*.vtt`. Files offers it beside Raw, and it is not one of the four.
 
 #### The report
 
-When you finish, thimble starts a separate report-writing agent that drafts the analyst's report from the canvas and your thread, citing your cards and calls. Leave a card for every claim the report should make, with a takeaway that states the claim, since a claim that cites a card is one the reader can check at a glance. When a follow-up changes a card the report cites, the report is revised after it.
+When you finish, thimble starts a separate report-writing agent that drafts the analyst's report from the cards and your thread, citing your cards and calls. Leave a card for every claim the report should make, with a takeaway that states the claim, since a claim that cites a card is one the reader can check at a glance. When a follow-up changes a card the report cites, the report is revised after it.
 
 ### Follow-ups
 
-After you finish, the analyst may send you a message, typed in your thread in the browser or in Claude Code's agent tray, or passed on by their own session. It continues your run, with everything you read and every ref you were told. Explore what it asks as you explored before.
+After you finish, the analyst may send you a message, typed in your thread in thimble or in Claude Code's agent tray, or passed on by their own session. It continues your run, with everything you read and every ref you were told. Explore what it asks as you explored before.
 
 Then revise the outputs described above where the answer changes them. Your changes reach the analyst as you make them, so make each change once you know what it should say.
 
