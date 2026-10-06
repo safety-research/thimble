@@ -55,7 +55,7 @@ import time
 from collections import OrderedDict
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Iterator
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse
@@ -1405,6 +1405,27 @@ def snippet(req: dict[str, Any]) -> str:
 _runner = view_calls.execute
 # the limit of the reader calls made in this context: CHECK_CALL_S within gate(), else none
 _call_limit: contextvars.ContextVar[float | None] = contextvars.ContextVar("view_call_limit", default=None)
+# whether the reader calls made in this context read the view's live folder (live_reads), else the view as it last
+# passed its checks (read_built)
+_live: contextvars.ContextVar[bool] = contextvars.ContextVar("view_live_reads", default=False)
+
+
+@contextlib.contextmanager
+def live_reads() -> Iterator[None]:
+    """The reader calls made inside, without a version, read the view's live folder, its draft: the checks of a view
+    (check, which the gates run) and a reviewer's pictures (view_review.pictures). Every other reader call without a
+    version reads the view as it last passed (read_built), so a citation, a page, main's screenshot or the views kernel
+    never runs files no gate passed (the digest rule)."""
+    token = _live.set(True)
+    try:
+        yield
+    finally:
+        _live.reset(token)
+
+
+def _current(c: str, slug: str) -> dict[str, Any] | None:
+    """The view a reader call without a version reads: the live folder inside live_reads, else read_built."""
+    return read_view(c, slug) if _live.get() else read_built(c, slug)
 
 
 def _answer_from(outputs: list[dict]) -> dict[str, Any] | None:
@@ -1440,8 +1461,9 @@ def _prepare(c: str, slug: str, version: str | None = None) -> tuple[dict[str, A
 
 def _prepared(c: str, slug: str, version: str | None = None) -> tuple[dict[str, Any], dict[str, Any],
                                                                        list[tuple[str, int, int]]]:
-    """_prepare's view and request, and the claimed files they were made from."""
-    view = read_version(c, slug, version) if version else read_view(c, slug)
+    """_prepare's view and request, and the claimed files they were made from: with `version` the view at that version,
+    else the view as it last passed, or its live folder inside live_reads (_current)."""
+    view = read_version(c, slug, version) if version else _current(c, slug)
     if view is None:
         raise ReaderError(f"no view {slug!r}" + (f" at version {version}; reload it" if version else ""))
     if not view["ok"]:
@@ -3110,8 +3132,9 @@ async def shoot_states(c: str, slug: str, states: list[dict[str, Any]], *, width
     `width` by `height`. Returns one result per state, {ok, errors, fetches, height, refs, records, units, marked, hidden,
     shown, layout, controls, actions, fonts, fetched_records, png?}, and with `answers` the first that many reader answers each
     state's page got; without Node or the frontend's packages each has build_problem's line as its one error. With
-    `prepared`, a reader request of its own (robust_check's), the page's fetches are answered from it."""
-    view = read_view(c, slug)
+    `prepared`, a reader request of its own (robust_check's), the page's fetches are answered from it. The page is the
+    view as it last passed, or its live folder inside live_reads (_current)."""
+    view = _current(c, slug)
     if view is None:
         return [{"ok": False, "errors": [f"no view {slug!r}"], "fetches": 0} for _ in states]
     media = media_url(SHOT_MEDIA_ORIGIN, c, slug)
@@ -3425,6 +3448,13 @@ def _is_line_form(form: str) -> bool:
 
 async def check(c: str, slug: str, locators: list[str] | None = None, *, shot_dir: Path | None = None,
                 picture: bool = False, need_locators: bool = True) -> dict[str, Any]:
+    """_check on the view's live folder (live_reads): what the gates check is the draft, not the view as it last passed."""
+    with live_reads():
+        return await _check(c, slug, locators, shot_dir=shot_dir, picture=picture, need_locators=need_locators)
+
+
+async def _check(c: str, slug: str, locators: list[str] | None = None, *, shot_dir: Path | None = None,
+                 picture: bool = False, need_locators: bool = True) -> dict[str, Any]:
     """A view's checks, all by code: the index builds, every claimed file is read or hidden with a why, locators and
     sampled lines round-trip (the answer cites the line back and its excerpt is literal source), declared keys resolve,
     the page loads headless without errors, and the test label's marks show on the records it shows (label_problems).

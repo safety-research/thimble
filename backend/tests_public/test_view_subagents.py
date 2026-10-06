@@ -303,6 +303,30 @@ async def test_readers_see_only_what_a_gate_passed(board, bridge, gates):
     assert views.read_built(CORPUS, fresh) is None, "a view no gate passed reaches no reader"
 
 
+async def test_a_reader_call_without_a_version_runs_the_reader_a_gate_passed(board, bridge, gates, monkeypatch):
+    """A citation, main's screenshot, the views kernel and a page loaded without a version reach the reader through
+    _prepare with no version: they run reader.py as the view last passed, never an edit made after the pass. The checks
+    (views.check) and a reviewer's pictures read the live folder (views.live_reads)."""
+    from app import notebook  # noqa: PLC0415 — the kernel's scratch mirror, which these calls need not build
+
+    monkeypatch.setattr(notebook, "scratch_dir", lambda *a, **k: None)
+    slug = _propose(asked=True)
+    agent = await _started(slug)
+    _draft(slug, "<p>v1</p>")
+    await _call("finish_view", {}, agent, view_tools.build_key(slug))
+    live = views.views_dir(CORPUS) / slug / views.READER_PY
+    live.write_text(READER + "\nEDITED_AFTER_THE_PASS = True\n")
+    _, req = views._prepare(CORPUS, slug)
+    assert Path(req["reader"]).read_text() == READER, "the reader as it passed"
+    with views.live_reads():
+        _, req = views._prepare(CORPUS, slug)
+    assert req["reader"] == str(live.resolve()), "the checks read the draft"
+    fresh = _propose("Threads", asked=True)
+    _draft(fresh)
+    with pytest.raises(views.ReaderError):
+        views._prepare(CORPUS, fresh)
+
+
 async def test_the_builder_s_end_gates_a_folder_that_changed_after_its_pass(board, bridge, gates):
     slug = _propose(asked=True)
     agent = await _started(slug)

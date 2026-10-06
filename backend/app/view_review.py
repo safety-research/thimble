@@ -480,7 +480,8 @@ async def pictures(c: str, slug: str, agent_id: str, states: Any) -> tuple[str, 
         raise NoPictures(NO_MORE.format(n=EXTRA_SHOTS))
     files = await asyncio.to_thread(views.claimed_files, c, view)
     done = int(review.get("shots") or 0)
-    shots = await shoot(c, slug, view, files, wanted, work_dir(c, slug) / "review" / str(rnd + 1), first=done + 1)
+    with views.live_reads():  # the reviewer looks at its own revision, which no gate has passed yet
+        shots = await shoot(c, slug, view, files, wanted, work_dir(c, slug) / "review" / str(rnd + 1), first=done + 1)
     if any(s.get("unavailable") for s in shots):
         raise NoPictures(NO_BROWSER_NOTE)
     if why := _unusable(shots):
