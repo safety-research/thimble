@@ -899,16 +899,27 @@ def _asked_by(c: str, tool: str, tool_input: Any) -> str | None:
             elif isinstance(r, (list, tuple)) and len(r) >= 2:
                 pairs.append((str(r[0]), str(r[1])))
     inp = tool_input if isinstance(tool_input, dict) else {}
-    target = str(inp.get(CALL_FIELDS.get(tool, "")) or "") if CALL_FIELDS.get(tool) else ""
+    field = CALL_FIELDS.get(tool) or ("file_path" if tool in EDIT_TOOLS else "")
+    target = str(inp.get(field) or "") if field else ""
+    names = {tool, "Edit"} if tool in EDIT_TOOLS else {tool}  # an Edit rule covers every tool that writes a file
     for rule, cause in pairs:
         name, _, pattern = rule.partition("(")
-        if name.strip() != tool or not cause:
+        if name.strip() not in names or not cause:
             continue
         pattern = pattern.rstrip(")")
+        if not pattern:
+            return cause
         path = pattern[1:] if pattern.startswith("//") else pattern
-        if not pattern or (target and fnmatch.fnmatch(target, path.replace("/**", "*")) ):
+        if path.endswith("/**"):  # the folder and everything under it, not every path that starts with its name
+            hit = target == path[:-3] or target.startswith(path[:-2])
+        else:
+            hit = fnmatch.fnmatch(target, path)
+        if target and hit:
             return cause
     return None
+
+
+EDIT_TOOLS = ("Edit", "Write", "MultiEdit", "NotebookEdit")  # the tools Claude Code's Edit(...) rules cover
 
 
 def _thimble_agent(c: str, agent: str | None) -> bool:

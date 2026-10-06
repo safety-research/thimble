@@ -201,6 +201,9 @@ def test_the_card_names_the_fence_s_rule_that_asks(monkeypatch, workspaces_tmp):
     assert events._asked_by(CORPUS, "WebFetch", {"url": "https://x"}) == "web"
     assert events._asked_by(CORPUS, "WebSearch", {"query": "x"}) is None, "an allow rule sends nothing"
     assert events._asked_by(CORPUS, "Bash", {"command": "ls"}) is None
+    assert events._asked_by(CORPUS, "Write", {"file_path": "/data/corpus/new.txt"}) == "data", "Edit covers Write"
+    assert events._asked_by(CORPUS, "NotebookEdit", {"notebook_path": "/data/corpus/n.ipynb"}) == "data"
+    assert events._asked_by(CORPUS, "Edit", {"file_path": "/data/corpus-2/a.jsonl"}) is None, "a folder, not a prefix"
 
 
 def test_a_code_ticket_s_runner_reads_no_project_settings(workspaces_tmp, monkeypatch):
