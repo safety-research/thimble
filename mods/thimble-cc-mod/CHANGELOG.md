@@ -48,12 +48,14 @@ system", has the new rules.
 - **The citation panel:** the cited value as the title, blue and underlined; its status in plain words
   (`found in revisions.jsonl line 10566`, `found on the card, but a script got 5883`); then `from`, `command` and
   `source`, with the cited value underlined in the source sentence. No `why` or `made by` rows. Commands and scripts
-  are coloured as Claude Code colours code, and a cited card is drawn in its border.
+  are coloured as Claude Code colours code, and a cited card is drawn in its border. A record cited without words of
+  its own is named by its place (`revisions.jsonl line 10879`), and a verification of a place says lines
+  (`a script found the same lines`).
 - **Threads are one panel:** the tree under `main` with `├ └` guides, then the selected thread's questions and answers,
   then the `ask` field.
 - **Home** has one layout, a single column. The title is `Home` alone. Card groups say what they hold
-  (`answer to "…"`, `in the report "…"`); the newest is open and the others fold. Files are listed by folder, and
-  folders fold.
+  (`answer to "…"`, `in the report "…"`, `other cards`); the newest is open and the others fold. Files are listed by
+  folder, and folders fold.
 - **The file browser:** folders fold, an open folder shows its first 20 files, files are coloured by their type, and the
   selected file's first lines show under it. No bar chart over the tree or over a file's table.
 - **The label panel** follows the browser's label editor: editable fields for the type, the scope, the prompt (or
@@ -67,6 +69,12 @@ system", has the new rules.
 - **Coverage** no longer says how many records a label judged.
 - **Transcripts:** the time dim at the left, the speaker's name bold after a coloured dot, and the text indented under
   the name.
+
+### Fixed
+
+- **A slow panel shows.** A panel whose drawing took longer than 50 ms, such as a view of a few thousand rows, could
+  stay hidden behind the panel before it: each drawing set off the next and Claude Code dropped each one unfinished.
+  An interrupted drawing now draws again only when no newer drawing has begun.
 
 ### Removed
 

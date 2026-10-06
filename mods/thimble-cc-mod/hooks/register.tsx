@@ -2978,15 +2978,20 @@ async function subagentCalls($: Dollar, agentId: string, door: string, msg: Sess
  *  most): Claude Code shows the later one but keeps the buttons and fields of whichever settles last, so should this one
  *  settle last, or be abandoned, the shown panel's buttons and fields would do nothing. The panel then draws once more
  *  after it. */
-async function panelDrawn($: Dollar, next: { readonly signal: AbortSignal }, s: { draws: number; redrawing: boolean }, draw: () => Promise<RenderElement>): Promise<RenderElement> {
+async function panelDrawn($: Dollar, next: { readonly signal: AbortSignal }, s: { draws: number; settled: number; redrawing: boolean }, draw: () => Promise<RenderElement>): Promise<RenderElement> {
   const n = ++s.draws
   await read($, panelRedrawA)
   const tree = await draw()
-  if ((n !== s.draws || next.signal.aborted) && !s.redrawing) {
+  // a later drawing settled first, so this one, settling last, is the one whose buttons and fields Claude Code keeps
+  const late = s.settled > n
+  s.settled = Math.max(s.settled, n)
+  if ((late || next.signal.aborted) && !s.redrawing) {
     s.redrawing = true
     $.clock.after(50, () => {
       s.redrawing = false
-      void update($, panelRedrawA, k => (k ?? 0) + 1)
+      // an aborted drawing draws again only when no drawing began since: one that did shows the panel as it is now.
+      // Drawing again regardless would abort a drawing slower than 50 ms each time, and the panel would never show it.
+      if (late || s.draws === n) void update($, panelRedrawA, k => (k ?? 0) + 1)
     })
   }
   return tree
@@ -3007,7 +3012,7 @@ export const register: Register = on => {
   // the one ui.render hook of the panel draws the view `panelView` names (drawCite, drawCard, drawThreads, …),
   // each drawing once the one before it has settled (turns.ts), or two seconds at most; one that still settles after a
   // later one began, or that Claude Code abandoned, is followed by one more (panelDrawn)
-  const panel = { draws: 0, redrawing: false }
+  const panel = { draws: 0, settled: 0, redrawing: false }
   on('ui.render', { component: 'Pane', requestId: PANEL }, async ($, pe, next) => paneTurns.run(() => panelDrawn($, next, panel, async () => {
     measurePanel($, pe)
     // the panel's top row is its way (back, the breadcrumb, the threads tree); the view below it has a row less
