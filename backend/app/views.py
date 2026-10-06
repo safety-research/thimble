@@ -2754,10 +2754,11 @@ def revise(c: str, slug: str, request: str, *, why: str | None = None, claims: A
     return {**prop, "revised": True}
 
 
-def message(c: str, slug: str, text: str) -> dict[str, Any]:
+def message(c: str, slug: str, text: str, *, by: str = "browser", route: str = CLICK) -> dict[str, Any]:
     """What the analyst typed in the thread of the view's build: logged there, then applied as a change to the view
-    (revise,
-    `asked`) in the same session. 400 for an empty message, 404 for no such view or proposal."""
+    (revise, `asked`), as part of the click that sent it from the browser; one typed in the terminal (/thimble:ask,
+    threads.tool_message_thread, `by` terminal) is a typed change, which main's exact Agent call starts (`route`
+    typed). 400 for an empty message, 404 for no such view or proposal."""
     from . import agents  # noqa: PLC0415
 
     text = str(text or "").strip()
@@ -2768,8 +2769,8 @@ def message(c: str, slug: str, text: str) -> dict[str, Any]:
         raise HTTPException(404, f"no such view: {slug}")
     chat = str((prop or {}).get("chat") or "")
     if chat and agents.meta_or_none(c, chat) is not None:
-        agents.Recorder(c, chat).record("user", text=text, by=agents.BROWSER)
-    return revise(c, slug, text, asked=True, route=CLICK)
+        agents.Recorder(c, chat).record("user", text=text, by=by)
+    return revise(c, slug, text, asked=True, route=route)
 
 
 def retry(c: str, slug: str, values: dict[str, Any] | None = None) -> dict[str, Any]:

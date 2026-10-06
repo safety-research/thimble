@@ -159,6 +159,26 @@ async def test_main_s_propose_view_gives_the_exact_agent_call_its_hook_lets_thro
     assert _prop(slug)["status"] == "building" and (CORPUS, slug) in dev._view_runs
 
 
+async def test_main_s_message_to_a_view_s_build_thread_gives_the_exact_agent_call(board, bridge, gates, hints):
+    """/thimble:ask typed into a view's build thread (message_thread, main's tool) is a typed change, as main's
+    file_dev_ticket on a view is: main's exact Agent call starts its builder, so auto mode judges the start, and the
+    module neither starts nor messages a builder for it."""
+    slug = _propose(asked=True)
+    agent = await _started(slug)
+    _draft(slug, "<p>v1</p>")
+    await _call("finish_view", {}, agent, view_tools.build_key(slug))
+    builders = lambda: [a for a in bridge.ops("spawn") if "view-builder" in str(a.get("role"))]  # noqa: E731
+    spawned, sent = len(builders()), len(bridge.ops("send"))
+    res = await tools.call(CORPUS, "message_thread", {"thread": _prop(slug)["chat"], "message": "Make the rows blue."},
+                           tool_use_id="toolu_main2")
+    assert not res.is_error, res.text
+    inp = json.loads(res.text.split("AGENT CALL ", 1)[1].splitlines()[0])
+    assert inp["subagent_type"] == "thimble:view-builder"
+    await asyncio.sleep(0.05)
+    assert (len(builders()), len(bridge.ops("send"))) == (spawned, sent), "main makes the call, not the module"
+    assert _prop(slug)["route"] == "typed" and "Make the rows blue." in _prop(slug)["change"]
+
+
 async def test_an_orientation_s_proposal_builds_as_a_follow_on_start_when_the_pool_has_room(board, bridge, gates,
                                                                                              monkeypatch):
     monkeypatch.setattr(dev, "VIEW_POOL", 1)

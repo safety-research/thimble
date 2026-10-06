@@ -706,9 +706,12 @@ async def tool_message_thread(ctx: Any, args: dict[str, Any]) -> Any:
         if meta.get("role") == orientation.ROLE and tid == latest:  # main's follow-up: its exact SendMessage
             return await orient_session.tool_message_orientation(ctx, {"message": text})
         if meta.get("role") == "dev" and meta.get("view"):
+            # a change typed in the terminal: main's exact Agent call starts its builder, as file_dev_ticket's does, so
+            # auto mode judges the start (a browser message is the analyst's click, views.message_route)
             views._bind_loop()
-            views.message(ctx.c, str(meta["view"]), text)
-            return tools.ok(tools.hint("message_thread-view", thread=name))
+            slug = str(meta["view"])
+            views.message(ctx.c, slug, text, by=agents.TERMINAL, route=views.TYPED)
+            return await tools._typed_build(ctx, slug)
     except HTTPException as e:
         return tools.err(f"message_thread: {e.detail}")
     except (orient_session.NoOrientation, RuntimeError) as e:
