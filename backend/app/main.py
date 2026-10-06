@@ -82,6 +82,8 @@ ROUTER_MODULES = [
     "undo",
     # browser events to the analyst's Claude Code session, and the mirror of its transcript (listed for its shutdown)
     "events", "session",
+    # the plugin's hooks module in main's session, which starts, messages and stops thimble's subagents on a click
+    "module_bridge",
     # the Claude Code sessions thimble starts beside main, the orientation's and each writer's: their permission
     # requests (shut down with the server), and the orientation's calls, stored whole and citable
     "agent_session", "calls", "orient_session",
@@ -105,8 +107,9 @@ ALLOWED_HOSTS = [h.strip() for h in os.environ.get("THIMBLE_ALLOWED_HOSTS", "127
 # Request timing: a request slower than this many ms is logged at WARNING, every other one at DEBUG. Every response
 # carries `Server-Timing: app;dur=<ms>`, so the browser's Network panel shows the backend's own time.
 SLOW_REQUEST_MS = float(os.environ.get("THIMBLE_SLOW_MS", "300"))
-# the watcher's long polls (events.py), slow by design: logged at DEBUG like a fast request
-LONG_POLLS = ("/api/events/pull", "/api/events/permission")
+# the watcher's long polls (events.py) and the hooks module's (module_bridge.py, whose hello may wait for a rekey),
+# slow by design: logged at DEBUG like a fast request
+LONG_POLLS = ("/api/events/pull", "/api/events/permission", "/api/module/next", "/api/module/hello")
 timing_log = logging.getLogger("thimble.timing")
 
 class RequestTiming:
