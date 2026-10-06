@@ -7,6 +7,7 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import re
 import socket
 import subprocess
 import sys
@@ -181,7 +182,7 @@ def test_the_launcher_and_slash_thimble_say_nothing_of_claude_code_s_trust(home,
     assert capsys.readouterr().out.splitlines() == [cli.LINK_LINE]
     assert (home / "links" / "s9").read_text().strip().count("\n") == 0, "the Stop hook shows the link alone"
     monkeypatch.setattr(cli, "launch_args", lambda cwd, resume=False, settings="", **kw: "args")
-    monkeypatch.setattr(cli, "claude_code_warning", lambda v: None)
+    monkeypatch.setattr(cli, "claude_code_warning", lambda v, once=True: None)
     assert cli.main(["launch-args", "--cwd", str(data / "mini")]) == 0
     assert capsys.readouterr().err == ""
     text = cli.doctor_text()
@@ -192,6 +193,108 @@ def test_the_launcher_and_slash_thimble_say_nothing_of_claude_code_s_trust(home,
 def line(text: str, key: str) -> str:
     """The first line of doctor's text that starts with `key`."""
     return next(ln for ln in text.splitlines() if ln.strip().startswith(key))
+
+
+def test_install_md_and_readme_name_the_claude_code_version_thimble_is_tested_with():
+    root = BACKEND.parent
+    for doc in ("INSTALL.md", "README.md"):
+        named = re.findall(r"tested with (\d+\.\d+\.\d+)", (root / doc).read_text("utf-8"))
+        assert named and set(named) == {cli.TESTED_CLAUDE_CODE}, f"{doc} names {named}, cli.py {cli.TESTED_CLAUDE_CODE}"
+
+
+def claude_at(tmp_path: Path, monkeypatch, version: str) -> None:
+    """A stand-in `claude` that names itself `version`, as config.CLI_PATH."""
+    exe = tmp_path / f"claude-{version}"
+    exe.write_text(f'#!/bin/sh\n[ "$1" = --version ] && echo "{version} (Claude Code)"\nexit 0\n')
+    exe.chmod(0o755)
+    monkeypatch.setattr(config, "CLI_PATH", str(exe))
+
+
+def version_key(v: str) -> tuple[int, ...]:
+    return tuple(int(x) for x in v.split("."))
+
+
+def test_claude_code_too_old_for_mods_older_or_newer_than_tested_each_get_their_line(home, monkeypatch, tmp_path):
+    """Below 2.1.287 Claude Code does not load plugin mods by default, so thimble's agents cannot start; below the tested
+    version thimble may fail; above it, a hint that comes once per version on this machine, recorded in THIMBLE_HOME,
+    and every time in the doctor. The tested version itself gets none."""
+    tested = cli.TESTED_CLAUDE_CODE
+    thimble = json.loads((BACKEND.parent / "plugin" / ".claude-plugin" / "plugin.json").read_text())["version"]
+    assert version_key(cli.MODS_CLAUDE_CODE) == (2, 1, 287) and version_key(tested) >= (2, 1, 291)
+    assert cli.claude_code_warning("2.1.285") == (
+        "thimble: WARNING - Claude Code 2.1.285 does not load plugin mods by default (2.1.287 or later does), so "
+        "thimble's agents cannot start. Run `claude update`, or `claude install latest` if you follow the stable channel.")
+    assert cli.claude_code_warning("1.0.99").startswith("thimble: WARNING - Claude Code 1.0.99 does not")
+    for v in ("2.1.287", "2.1.290"):
+        assert cli.claude_code_warning(v) == (f"thimble: WARNING - Claude Code {v} is older than {tested}, the version "
+                                              "thimble is tested with; if something fails, run `claude update` and start "
+                                              "thimble again.")
+    assert cli.claude_code_warning(tested) is None and cli.claude_code_warning(None) is None
+    assert cli.claude_code_warning("no version") is None
+    newer = (f"thimble: Claude Code 2.1.293 is newer than {tested}, the version thimble {thimble} was tested with. If "
+             "agents do not start or their chats stop updating, run `thimble doctor` and report it.")
+    seen = home / cli.CLAUDE_CODE_SEEN_FILE
+    assert not seen.exists()
+    assert cli.claude_code_warning("2.1.293") == newer
+    assert json.loads(seen.read_text()) == {"newer_told": ["2.1.293"]}
+    assert cli.claude_code_warning("2.1.293") is None, "once per version on this machine"
+    assert cli.claude_code_warning("2.1.293", once=False) == newer, "the doctor's, each time"
+    assert cli.claude_code_warning("2.1.294") == newer.replace("2.1.293", "2.1.294"), "a newer one is told again"
+    assert cli.claude_code_warning("2.1.293") is None and json.loads(seen.read_text())["newer_told"] == ["2.1.293", "2.1.294"]
+    seen.write_text("not json")
+    assert cli.claude_code_warning("2.1.293") == newer, "an unreadable record tells again"
+    monkeypatch.setattr(cli, "healthy", lambda url=None, timeout=1.0: False)
+    monkeypatch.setattr(cli, "listening", lambda p: False)
+    for v, doctor, for_a_model in (
+            ("2.1.285", "Claude Code 2.1.285 does not load plugin mods by default (2.1.287 or later does), so thimble's "
+                        "agents cannot start. Run `claude update`, or `claude install latest` if you follow the stable "
+                        "channel.",
+             "2.1.285, older than 2.1.287, the first version that loads plugin mods by default, so thimble's agents "
+             "cannot start"),
+            ("2.1.290", f"Claude Code 2.1.290 is older than {tested}, the version thimble is tested with; if something "
+                        "fails, run `claude update` and start thimble again.",
+             f"2.1.290, older than {tested}, the version thimble is tested with"),
+            ("2.1.293", f"Claude Code 2.1.293 is newer than {tested}, the version thimble {thimble} was tested with. If "
+                        "agents do not start or their chats stop updating, report it (`thimble feedback`).",
+             f"2.1.293, newer than {tested}, the version thimble {thimble} was tested with"),
+            (tested, f"{tested} (thimble is tested with {tested})", f"{tested} (thimble is tested with {tested})")):
+        claude_at(tmp_path, monkeypatch, v)
+        assert line(cli.doctor_text(), "claude code:") == f"  claude code: {doctor}"
+        text = cli.doctor_text(commands=False)
+        assert line(text, "claude code:") == f"  claude code: {for_a_model}"
+        assert not cli._INSTALL_COMMAND.search(text) and "claude update" not in text and "claude install" not in text
+
+
+def test_the_launcher_and_slash_thimble_say_how_claude_code_s_version_stands(home, data, monkeypatch, capsys, tmp_path):
+    """The launcher prints the version's line on the terminal before Claude Code starts, and /thimble in its output;
+    a newer Claude Code's hint comes once, at whichever shows it first."""
+    _healthy_no_process(monkeypatch)
+    monkeypatch.setattr(cli, "_request", lambda m, u, b=None, timeout=5.0: (404, {}))
+    monkeypatch.setattr(cli, "launch_args", lambda cwd, resume=False, settings="", **kw: "args")
+
+    def launch() -> str:
+        assert cli.main(["launch-args", "--cwd", str(data / "mini")]) == 0
+        return capsys.readouterr().err
+
+    def slash_thimble() -> list[str]:
+        assert cli.main(["up", "--cwd", str(data / "mini" / "agents"), "--session", "s9"]) == 0
+        return capsys.readouterr().out.splitlines()
+
+    for v in ("2.1.285", "2.1.290"):
+        claude_at(tmp_path, monkeypatch, v)
+        warning = cli.claude_code_warning(v)
+        assert warning.startswith("thimble: WARNING - ")
+        assert launch() == warning + "\n" and launch() == warning + "\n", "each launch"
+        assert slash_thimble() == [cli.LINK_LINE, warning]
+    claude_at(tmp_path, monkeypatch, cli.TESTED_CLAUDE_CODE)
+    assert launch() == "" and slash_thimble() == [cli.LINK_LINE]
+    claude_at(tmp_path, monkeypatch, "2.1.300")
+    newer = cli.claude_code_warning("2.1.300", once=False)
+    assert launch() == newer + "\n"
+    assert launch() == "" and slash_thimble() == [cli.LINK_LINE], "told once on this machine"
+    claude_at(tmp_path, monkeypatch, "2.1.301")
+    assert slash_thimble() == [cli.LINK_LINE, newer.replace("2.1.300", "2.1.301")] and launch() == ""
+    assert "2.1.301 is newer" in line(cli.doctor_text(), "claude code:"), "the doctor says it each time"
 
 
 def test_doctor_says_what_claude_reports_about_its_login_and_never_a_value(home, monkeypatch, fake_claude):

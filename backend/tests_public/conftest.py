@@ -353,13 +353,15 @@ def data(tmp_path, monkeypatch):
 
 def fake_claude_bin(folder: Path, status: dict) -> Path:
     """A stand-in `claude` in `folder` whose `auth status --json` prints `status` (config.auth_status), and which names
-    itself a recent version."""
+    itself the version thimble is tested with, about which thimble says nothing (cli.claude_code_warning)."""
     import json
     import shlex
 
+    from app import cli
+
     (folder / "auth-status.json").write_text(json.dumps(status))
     bin_ = folder / "fake-claude"
-    bin_.write_text(f'#!/bin/sh\ncase "$1" in --version) echo "9.9.9 (Claude Code)";; '
+    bin_.write_text(f'#!/bin/sh\ncase "$1" in --version) echo "{cli.TESTED_CLAUDE_CODE} (Claude Code)";; '
                     f'auth) cat {shlex.quote(str(folder / "auth-status.json"))};; esac\n')
     bin_.chmod(0o755)
     return bin_

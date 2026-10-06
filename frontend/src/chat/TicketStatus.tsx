@@ -16,8 +16,8 @@ const ENDED = new Set(['failed', 'needs manual merge', 'rolled back', 'stopped',
 /** The line of main's ticket that waits for the analyst's Start while another ticket runs (backend dev.start_typed). */
 export const HELD_LINE = 'Waits for your Start, since code tickets run one at a time'
 
-/** What the line says for a ticket's status: the reason for a failure, and for a stop thimble made (main's quit, main
- * going into plan mode: backend dev._settle_ticket), a word for the rest; null for none. Pure. */
+/** What the line says for a ticket's status: the reason for a failure, and for a stop thimble made (main's quit:
+ * backend dev._settle_ticket), a word for the rest; null for none. Pure. */
 export function ticketStatusText(t: Pick<Ticket, 'status' | 'error' | 'held'>): string | null {
   switch (t.status) {
     case 'queued':

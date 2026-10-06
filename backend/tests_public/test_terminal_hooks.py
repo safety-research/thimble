@@ -156,11 +156,11 @@ def test_the_mode_hook_records_main_s_mode_and_starts_the_backend_s_call_on_main
     watcher.mode_files({"session_id": MAIN, "hook_event_name": "Stop", "permission_mode": "auto"}, ws)
     assert [k for k, _ in spawned] == ["main-stop"]
     watcher.mode_files({"session_id": MAIN, "hook_event_name": "UserPromptSubmit", "permission_mode": "plan"}, ws)
-    assert [k for k, _ in spawned] == ["main-stop", "plan"]
+    assert [k for k, _ in spawned] == ["main-stop"], "plan mode starts no backend call: it stops no running agent"
     assert sf.read(ws)["main"]["before_plan"] == "auto"
     watcher.mode_files({"session_id": "not-main", "hook_event_name": "Stop", "permission_mode": "default"}, ws)
     watcher.mode_files({"session_id": MAIN, "agent_id": AGENT, "hook_event_name": "Stop", "permission_mode": "default"}, ws)
-    assert len(spawned) == 2 and sf.read(ws)["main"]["permission_mode"] == "plan"
+    assert len(spawned) == 1 and sf.read(ws)["main"]["permission_mode"] == "plan"
 
 
 def test_no_hook_opens_a_socket_in_terminal_mode_and_each_file_first_hook_starts_the_backend_s_call(
@@ -235,7 +235,7 @@ def test_the_agents_hook_numbers_an_orientation_s_call_and_tells_it_its_ref(tmp_
     assert "call:orient-chat/7" in ctx and numbered == [("orient-chat", "toolu_r", "Read", None)]
     watcher.agents_hook({"session_id": MAIN, "agent_id": AGENT, "tool_use_id": "toolu_p", "tool_name": "Read",
                          "tool_input": {"file_path": "x"}, "permission_mode": "plan"})
-    assert [k for k, _ in spawned] == ["plan"], "an agent's call in plan mode starts the backend's plan call"
+    assert spawned == [], "an agent's call in plan mode starts no backend call: plan mode stops no running agent"
 
 
 def test_the_statusline_reads_the_files_in_terminal_mode(tmp_path, ws):
@@ -320,30 +320,16 @@ def test_the_monitor_route_streams_main_s_events_from_the_queue_until_main_exits
     assert event_files.waiting(ws) == []
 
 
-def test_the_waker_starts_the_backend_s_plan_call_once_the_module_sees_plan_mode_while_agents_run(tmp_path, ws,
-                                                                                                 monkeypatch):
+def test_the_waker_starts_no_backend_call_when_the_module_sees_plan_mode_while_agents_run(tmp_path, ws, monkeypatch):
+    """Plan mode stops no running agent, as in browser mode, so the waker starts nothing when the module's plan poll
+    sees plan mode begin while one of thimble's agents runs, nor for an agent's tool call in plan mode."""
     from terminal_fakes import FileModule
 
     watcher, spawned = loaded(monkeypatch, tmp_path, ws)
-    mod = FileModule(ws, session=MAIN)
-    mod.write()
-    look = watcher.PlanWatch(ws, MAIN)
-    look.look()
-    mod.plan(True)
-    look.look()
-    assert spawned == [], "no agent of thimble's runs"
+    assert not hasattr(watcher, "PlanWatch") and not hasattr(watcher, "plan_call")
     with sf.update(ws) as state:
         sf.registry(state)[AGENT] = {"role": "orientation", "key": "orient", "status": "running"}
-    time.sleep(0.01)
-    mod.plan(True)
-    look.look()
-    assert [k for k, _ in spawned] == ["plan"]
-    mod.write()  # a heartbeat: the same plan mode
-    look.look()
-    assert len(spawned) == 1
-    with sf.update(ws) as state:
-        sf.registry(state)[AGENT]["stopped_by"] = "plan"
-    time.sleep(0.01)
-    mod.plan(True)
-    look.look()
-    assert len(spawned) == 1, "stopped for plan mode already"
+    FileModule(ws, session=MAIN).plan(True)
+    assert watcher.watch_files({"session_id": MAIN, "agent_id": AGENT, "hook_event_name": "PreToolUse",
+                                "permission_mode": "plan"}, ws) == 0
+    assert spawned == []

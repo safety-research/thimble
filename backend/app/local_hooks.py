@@ -12,19 +12,18 @@ The file-first hooks of plugin/bin/.thimble-watch write their record to the work
     end         SessionEnd of main (subagents.hook_end: the running agents' chats end, "Stopped when Claude Code quit.")
     rekey       SessionStart of main for clear and resume (subagents.hook_rekey: the chats and the mirror follow)
     main-stop   Stop of main's turn (only the pass below: the mirror, R3, the hand-backs, the task notifications)
-    plan        an agent's tool call in plan mode (subagents.plan_check, which every pass also runs)
 
 One process holds the workspace's MIRROR_LOCK at a time. A call that finds it held adds its kind and input to TODO and
 exits, and the holder takes it. The holder runs passes until nothing is left to do: each pass applies what module.json
 says (the ends of the runs the module started, module_bridge.new_ended; a late spawn's stop, module_bridge.reconcile),
-runs the mirror to the end of main's and every subagent's transcript (session.catch_up: chats, thread forks,
-hand-backs, task notifications, R2 and R3, so subagents.run_ended and each role's end handler run as on the server),
-stops thimble's agents when main is in plan mode (subagents.plan_check), and runs each kind's body. Between passes it
-waits TICK_S while work it started goes on: the tasks the end handlers started (the coverage line, at most 120 s; a
-follow-on start through the module), a hand-back's wait (subagents.stopped), and the view builds and report checks it
-started, whose ends its own passes must see, since their queues live in its memory (dev, checks). It exits SETTLE_S
-after the last of these, or once main's `claude` process has gone, and after MAX_S at the latest. Nothing runs in
-browser mode: a call for a workspace whose session is not in terminal mode exits at once.
+runs the mirror to the end of main's and every subagent's transcript (session.catch_up: chats, thread forks, hand-backs,
+task notifications, R2 and R3, so subagents.run_ended and each role's end handler run as on the server), and runs each
+kind's body. Plan mode stops no running agent, as in browser mode. Between passes it waits TICK_S while work it started
+goes on: the tasks the end handlers started (the coverage line, at most 120 s; a follow-on start through the module), a
+hand-back's wait (subagents.stopped), and the view builds and report checks it started, whose ends its own passes must
+see, since their queues live in its memory (dev, checks). It exits SETTLE_S after the last of these, or once main's
+`claude` process has gone, and after MAX_S at the latest. Nothing runs in browser mode: a call for a workspace whose
+session is not in terminal mode exits at once.
 
 The SubagentStart hook's process then follows the running agents (follow): while one of thimble's agents runs, it makes
 a call with no kind every FOLLOW_S, so an agent's thread shows its steps while it works, as the server's resident mirror
@@ -47,7 +46,7 @@ from . import subagent_files as sf
 
 log = logging.getLogger("thimble.local_hooks")
 
-KINDS = ("started", "stopped", "denied", "end", "rekey", "main-stop", "plan")
+KINDS = ("started", "stopped", "denied", "end", "rekey", "main-stop")
 MIRROR_LOCK = "mirror.lock"  # in the workspace folder: held by the one process that runs passes
 TODO = "mirror.todo.jsonl"  # in the workspace folder: the calls that found the lock held, for the holder
 TICK_S = 1.0
@@ -225,11 +224,6 @@ async def _pass(c: str, items: list[tuple[str, dict[str, Any]]]) -> None:
         elif kind == "rekey":
             _step(kind, subagents.hook_rekey, c, hook)
             _step("the mirror", session.catch_up, c)
-    if not any(k == "end" for k, _ in items):
-        try:
-            await subagents.plan_check(c)
-        except Exception:  # noqa: BLE001 — the pass goes on
-            log.exception("%s: the agents were not stopped for plan mode", c)
 
 
 def _step(what: str, fn: Any, *args: Any) -> Any:

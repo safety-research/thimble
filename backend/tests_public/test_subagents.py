@@ -355,7 +355,7 @@ def ended(monkeypatch) -> list[tuple]:
         if t.ended:
             monkeypatch.setitem(subagents.TYPES, role, subagents.Type(
                 t.role, t.kind, t.chat_role, t.row, t.agent, t.define, t.own, "", f"{__name__}:_ended",
-                t.refused))
+                t.refused, left_work=t.left_work, gated=t.gated))
     _seen.clear()
     yield _seen
     _seen.clear()
@@ -445,67 +445,67 @@ async def test_main_s_quit_closes_the_running_agents_chats(bridge, models, ended
     assert ended == [("writer", 0, "stopped", subagents.QUIT_LINE)]
 
 
-async def test_plan_mode_stops_the_running_agents_through_the_module_and_their_threads_say_why(bridge, models, ended,
-                                                                                               monkeypatch):
-    """U4: main went into plan mode while thimble's agents ran, where each would have to ask before every step. Each
-    running agent of a role is stopped through the module, as the browser's Stop stops it (a TaskStop, which a follow-up
-    continues), a child before its parent; its run ends stopped with the plan line, its chat `stopped_by: plan`, and
-    no end handler takes it as the analyst's Stop. One that has ended is left alone, and nothing starts again."""
-    writer = await subagents.start_job(CORPUS, "writer", "writer:report", "w", {}, subagents.CLICK)
-    orient = await subagents.start_job(CORPUS, "orientation", "orient", "o", {}, subagents.CLICK)
-    with subagents.update(CORPUS) as state:
-        sf.registry(state)["crit1"] = {"key": "critique:orient", "role": "critic", "status": "running",
-                                       "parent": orient.agent_id}
-    done = await subagents.start_job(CORPUS, "check", "check:unverified:report", "k", {}, subagents.CLICK)
-    subagents.run_ended(CORPUS, done.agent_id, "done", "Two comments.")
-    spawns = len(bridge.ops("spawn"))
-    stopped = await subagents.stop_for_plan(CORPUS)
-    assert stopped[0] == "crit1" and set(stopped) == {"crit1", writer.agent_id, orient.agent_id}
-    assert [s["agent"] for s in bridge.ops("stop")] == stopped
-    for agent_id in ("crit1", writer.agent_id, orient.agent_id):
-        assert subagents.agent(CORPUS, agent_id)["stopped_by"] == subagents.STOPPED_PLAN
-        subagents.run_ended(CORPUS, agent_id, "stopped", "Agent was stopped", source="module")
-    meta = agents.read_meta(CORPUS, subagents.agent(CORPUS, writer.agent_id)["chat"])
-    assert (meta["status"], meta["stopped_by"]) == ("stopped", "plan")
-    assert meta["result"] == subagents.plan_line("writer") and "Write again" in meta["result"]
-    assert "shift+tab" in subagents.plan_line("orientation") and "message" in subagents.plan_line("orientation")
-    assert ("writer", 0, "stopped", subagents.plan_line("writer")) in ended
-    assert len(bridge.ops("spawn")) == spawns, "nothing starts again by itself"
-    again = await subagents.start_job(CORPUS, "writer", "writer:notes", "w", {}, subagents.CLICK)
-    bridge.answers.append({"error": "TaskStop failed for another reason"})
-    assert await subagents.stop_for_plan(CORPUS) == []
-    assert subagents.agent(CORPUS, again.agent_id)["stopped_by"] is None, "a stop that failed leaves it running"
-
-
-async def test_main_s_move_into_plan_mode_stops_thimble_s_agents_once(bridge, models, monkeypatch):
-    """The trigger: main's hooks or thimble's module report plan mode (session.note_mode, note_plan) after another
-    mode, and the stop runs once; staying in plan mode, or leaving it, stops nothing."""
+async def test_main_going_into_plan_mode_stops_none_of_thimble_s_agents(bridge, models, ended, monkeypatch):
+    """Claude Code lets a running subagent go on when main goes into plan mode, where the agent follows main, so thimble
+    does the same (Matt's ruling, 2026-10-06): main's hooks or the module reporting plan mode stop no agent of
+    thimble's, and each runs on to its own end."""
     from app import session
 
-    calls: list[str] = []
-
-    async def fake(c):
-        calls.append(c)
-        return []
-
-    monkeypatch.setattr(subagents, "stop_for_plan", fake)
-    await subagents.start_job(CORPUS, "writer", "writer:report", "w", {}, subagents.CLICK)
-    lv = session.Live(CORPUS, "sid-plan", "/c", None, None)
-    session._live[CORPUS] = lv
+    writer = await subagents.start_job(CORPUS, "writer", "writer:report", "w", {}, subagents.CLICK)
+    orient = await subagents.start_job(CORPUS, "orientation", "orient", "o", {}, subagents.CLICK)
+    session._live[CORPUS] = session.Live(CORPUS, "sid-plan", "/c", None, None)
     monkeypatch.setattr(session, "_keep_mode", lambda c, sid, mode: None)
     try:
         session.note_mode(CORPUS, "sid-plan", "auto")
         session.note_mode(CORPUS, "sid-plan", "plan")
-        session.note_plan(CORPUS, "sid-plan", True)
-        await asyncio.sleep(0)
-        assert calls == [CORPUS]
         session.note_plan(CORPUS, "sid-plan", False)
-        session.note_mode(CORPUS, "sid-plan", "plan")
-        await asyncio.sleep(0)
-        assert calls == [CORPUS, CORPUS], "a second move into plan mode stops again"
+        session.note_plan(CORPUS, "sid-plan", True)
+        await asyncio.sleep(0.05)
+        assert session.main_mode(CORPUS) == "plan"
+        assert bridge.ops("stop") == [], "no TaskStop"
+        for agent_id in (writer.agent_id, orient.agent_id):
+            a = subagents.agent(CORPUS, agent_id)
+            assert a["status"] == "running" and not a.get("stopped_by")
+        assert ended == []
     finally:
         session._live.pop(CORPUS, None)
         session._modes.pop(CORPUS, None)
+        session._before_plan.pop(CORPUS, None)
+
+
+async def test_a_run_main_s_plan_mode_held_at_its_end_fails_with_its_role_s_line(bridge, models, ended):
+    """A running agent that main's plan mode reached (its transcript's plan_mode attachment) follows it and may only
+    read and write a plan. A run of a role with no work to count (the orientation, its critic, a check) that then ends
+    done ends failed with its role's line, which says why and what to do once main leaves plan mode; its chat ends so.
+    A run in which main left plan mode again (plan_mode_exit) ends done, and a stop stays a stop."""
+    with subagents.update(CORPUS) as state:
+        sf.registry(state)["crit1"] = {"key": "critique:orient", "role": "critic", "status": "running", "run": 0,
+                                       "chat": agents.new_agent(CORPUS, "step", "Critique")["id"]}
+    orient = await subagents.start_job(CORPUS, "orientation", "orient", "o", {}, subagents.CLICK)
+    check = await subagents.start_job(CORPUS, "check", "check:unverified:report", "k", {}, subagents.CLICK)
+    for role, agent_id, how in (("orientation", orient.agent_id, "send it a message to continue it"),
+                                ("critic", "crit1", "send the orientation a message to continue it"),
+                                ("check", check.agent_id, "choose Re-run on the check")):
+        subagents.saw_plan_mode(CORPUS, agent_id)
+        subagents.run_ended(CORPUS, agent_id, "done", "I wrote my plan to the plan file.", source="handback")
+        line = subagents.plan_failed_line(role)
+        assert line.startswith("Your Claude Code session went into plan mode while ")
+        assert line.endswith(f", then {how}.")
+        assert "Switch out of plan mode (shift+tab in your terminal)" in line
+        assert ended[-1] == (role, 0, "failed", line)
+        a = subagents.agent(CORPUS, agent_id)
+        meta = agents.read_meta(CORPUS, a["chat"])
+        assert a["status"] == "failed" and (meta["status"], meta["result"]) == ("failed", line)
+    subagents.run_again(CORPUS, orient.agent_id, "coordinator")
+    assert not subagents.ended_in_plan(CORPUS, orient.agent_id), "a new run is no longer held"
+    subagents.saw_plan_mode(CORPUS, orient.agent_id)
+    subagents.saw_plan_mode(CORPUS, orient.agent_id, False)
+    subagents.run_ended(CORPUS, orient.agent_id, "done", "Added two cards.", source="handback")
+    assert ended[-1] == ("orientation", 1, "done", "Added two cards.")
+    stopped = await subagents.start_job(CORPUS, "writer", "writer:report", "w", {}, subagents.CLICK)
+    subagents.saw_plan_mode(CORPUS, stopped.agent_id)
+    assert subagents.ended(CORPUS, stopped.agent_id, "", "aborted")
+    assert ended[-1] == ("writer", 0, "stopped", ""), "a stop is a stop"
 
 
 async def test_rekey_moves_the_running_agents_and_their_chats_to_the_new_session(bridge, models):

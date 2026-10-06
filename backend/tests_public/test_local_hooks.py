@@ -286,15 +286,20 @@ async def test_the_end_the_module_writes_for_an_agent_it_started_ends_its_run(ws
     assert "flagged" in str(agents.meta_or_none(CORPUS, chat).get("result") or "")
 
 
-async def test_plan_mode_stops_thimble_s_running_agents_through_the_module(ws, project, module):
+async def test_plan_mode_stops_none_of_thimble_s_running_agents(ws, project, module):
+    """Plan mode stops no running agent in terminal mode, as in browser mode: Claude Code's own subagents go on in plan
+    mode, and so do thimble's. Main's Stop in plan mode runs the pass and asks the module to stop nothing."""
     chat = await _typed_orientation(project, passes=("final",))
     module.plan(True)
-    await _call("plan", {"session_id": SID, "agent_id": AGENT, "permission_mode": "plan"})
-    assert module.ops("stop") == [{"agent": AGENT}]
-    assert subagents.agent(CORPUS, AGENT)["stopped_by"] == subagents.STOPPED_PLAN
-    await _call("plan", {"session_id": SID, "agent_id": AGENT, "permission_mode": "plan"})
-    assert len(module.ops("stop")) == 1, "stopped once"
-    assert agents.meta_or_none(CORPUS, chat)["status"] == "running", "its end comes from Claude Code"
+    with sf.update(ws) as state:
+        sf.record_mode(state, SID, "plan")
+    assert session.main_mode(CORPUS) == "plan"
+    await _call("main-stop", {"session_id": SID, "hook_event_name": "Stop", "permission_mode": "plan"})
+    assert module.ops("stop") == []
+    assert subagents.agent(CORPUS, AGENT)["status"] == "running"
+    assert not subagents.agent(CORPUS, AGENT).get("stopped_by")
+    assert agents.meta_or_none(CORPUS, chat)["status"] == "running"
+    assert "plan" not in local_hooks.KINDS
 
 
 def test_a_call_for_a_workspace_in_browser_mode_does_nothing(workspaces_tmp, monkeypatch, capsys):

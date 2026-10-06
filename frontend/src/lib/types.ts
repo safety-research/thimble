@@ -741,10 +741,9 @@ export interface OrientRun {
   chats?: { orient?: string }
 }
 
-/** Why a run of one of thimble's agents stopped (subagents.STOPPED_*): the analyst's Stop, main's quit, a refusal,
- * Esc in its agent view (`user`), after which Claude Code resumes it no more, or thimble's stop when main went into plan
- * mode (`plan`). */
-export type StoppedBy = 'analyst' | 'quit' | 'refused' | 'user' | 'plan' | (string & {})
+/** Why a run of one of thimble's agents stopped (subagents.STOPPED_*): the analyst's Stop, main's quit, a refusal, or
+ * Esc in its agent view (`user`), after which Claude Code resumes it no more. */
+export type StoppedBy = 'analyst' | 'quit' | 'refused' | 'user' | (string & {})
 
 /** The code tickets' permission mode, the one agent with a mode of its own (backend modes.AGENTS): `manual` sends each
  * request to the card, `auto` runs in Claude Code's auto mode, `bypass` grants every request. */

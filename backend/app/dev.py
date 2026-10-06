@@ -2403,10 +2403,10 @@ async def _settle_ticket(run: Run, t: dict[str, Any], agent_id: str, status: str
       ticket's card in every mode (APPLY_QUESTION) and the apply of that commit (_apply), as before; an agent thimble
       stopped after its pass (view_tools.FINISH_GRACE_S) passed all the same;
     - its last attempt failed: the ticket fails with what the checks found;
-    - it was stopped otherwise: the ticket ends stopped, MAIN_ENDED when main's quit stopped it, the plan line when
-      thimble stopped it as main went into plan mode (subagents.plan_line), with Retry;
+    - it was stopped otherwise: the ticket ends stopped, MAIN_ENDED when main's quit stopped it, with Retry;
     - it ended without calling finish_ticket and left a change: the gates run once, and a pass goes on as above;
-    - otherwise it failed, with what the checks found, or the agent's last words when it made no change."""
+    - otherwise it failed, with what the checks found, or the agent's last words when it made no change; when main's
+      plan mode held it at its end, where it could only read and plan, with that reason (subagents.plan_failed_line)."""
     from . import subagents  # noqa: PLC0415
 
     tid, c = t["id"], str(t.get("workspace") or "")
@@ -2428,9 +2428,7 @@ async def _settle_ticket(run: Run, t: dict[str, Any], agent_id: str, status: str
             if status == "stopped":
                 a = subagents.agent(c, agent_id) or {}
                 st = run.stop_reason or "stopped"
-                err = (MAIN_ENDED if a.get("stopped_by") == subagents.STOPPED_QUIT
-                       else subagents.plan_line(TICKET_ROLE) if a.get("stopped_by") == subagents.STOPPED_PLAN
-                       else run.why)
+                err = MAIN_ENDED if a.get("stopped_by") == subagents.STOPPED_QUIT else run.why
                 return
             got = None
             if not int(t.get("attempt") or 0) and t.get("worktree") and Path(str(t["worktree"])).is_dir():
@@ -2447,6 +2445,8 @@ async def _settle_ticket(run: Run, t: dict[str, Any], agent_id: str, status: str
                 err = (str(finish.get("report") or t.get("last_report") or "")[:ERROR_CHARS]
                        or (f"{NO_PASS_LINE}: {words}" if made and words else NO_PASS_LINE if made else
                            f"{NO_CHANGE_LINE}: {words}" if words else NO_CHANGE_LINE))
+                if status == "done" and subagents.ended_in_plan(c, agent_id):
+                    err = subagents.plan_failed_line(TICKET_ROLE)
                 st = "failed"
                 return
         wt, branch, base = Path(str(t["worktree"])), str(t["branch"]), str(t["base"])
@@ -3271,14 +3271,15 @@ async def _settle(c: str, slug: str, run: Any, status: str, report: str, why: st
     """What a builder's end means for its view, the backstop of finish_view:
     - it passed: done, its work folder lets go of its extracts, and the review starts; a folder that changed after the
       pass is gated again (views.regate: a pass is the new version, a failure puts the version that passed back);
-    - it was stopped: main's quit fails the view with MAIN_ENDED and Retry, thimble's stop for main's plan mode with
-      its line (subagents.plan_line) and Retry, the analyst's Stop with VIEW_STOPPED, and a change, a replacement or a
-      deletion that took it over leaves the view to what took over;
+    - it was stopped: main's quit fails the view with MAIN_ENDED and Retry, the analyst's Stop with VIEW_STOPPED, and a
+      change, a replacement or a deletion that took it over leaves the view to what took over;
     - it ended without a pass and never called finish_view: the gate runs once, and a pass registers the view;
+    - still not built while main's plan mode held it at its end, where it could only read and plan: the view fails
+      with Retry and that reason (subagents.plan_failed_line), and no repair starts;
     - still not built: a change to a built view leaves the view as it was, an orientation's proposal gets up to
       VIEW_REPAIRS new builders started with what failed, and then fails with Retry (_repairs_failed), and a view the
       analyst asked for fails with Retry."""
-    from . import subagents, view_review, views  # noqa: PLC0415
+    from . import subagents, view_review, view_tools, views  # noqa: PLC0415
 
     prop = views.read_proposal(c, slug)
     if prop is None or prop.get("agent_id") != run.agent_id:
@@ -3299,8 +3300,6 @@ async def _settle(c: str, slug: str, run: Any, status: str, report: str, why: st
             return
         if a.get("stopped_by") == subagents.STOPPED_QUIT:
             _view_failed(c, slug, MAIN_ENDED, run.chat)
-        elif a.get("stopped_by") == subagents.STOPPED_PLAN:  # main went into plan mode: failed with Retry, and why (U4)
-            _view_failed(c, slug, subagents.plan_line("view-builder"), run.chat)
         elif why in (ORIENTATION_STOPPED, "dismissed"):
             if prop.get("revision"):
                 views.end_revision(c, slug)  # its builder has stopped, so nothing writes into the folder any more
@@ -3318,6 +3317,11 @@ async def _settle(c: str, slug: str, run: Any, status: str, report: str, why: st
             return
         if not rep.get("ok"):
             prop = views.update_proposal(c, slug, last_report="\n".join(views.gate_lines(rep))[:ERROR_CHARS]) or prop
+    if status == "done" and finish.get("result") != "stop" and subagents.ended_in_plan(c, run.agent_id, run.k):
+        if not prop.get("revision"):
+            views.update_proposal(c, slug, held=None)  # an orientation's proposal shows in the views list, failed
+        _view_failed(c, slug, subagents.plan_failed_line(view_tools.BUILDER), run.chat)
+        return
     failure = (str(finish.get("report") or prop.get("last_report") or "")
                or (UNCHANGED_LINE if prop.get("revision") and views.unchanged_since_built(c, slug) else "")
                or " ".join(str(report or "").split())[:ERROR_CHARS] or "the checks did not pass")

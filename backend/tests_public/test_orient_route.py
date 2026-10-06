@@ -545,6 +545,34 @@ async def test_an_orientation_an_api_error_stopped_says_so_and_why_in_its_thread
     assert told[-1][1]["status"] == "failed" and told[-1][1]["text"].endswith("Repeated 529 Overloaded errors")
 
 
+async def test_an_orientation_main_s_plan_mode_held_at_its_end_fails_saying_why_and_that_a_message_continues_it(
+        bridge, models, workspaces_tmp, monkeypatch):
+    """Main went into plan mode while the orientation ran, and thimble stopped nothing, as Claude Code stops no subagent
+    then: the orientation followed main and could only read and write a plan. Its run, ending there, ends failed, not
+    done: its thread ends with the line that says why and that a message continues it once main leaves plan mode, the
+    `orient` event main gets says it failed with that line, and no report pass starts."""
+    told: list[tuple] = []
+    monkeypatch.setattr(subagents, "tell_main", lambda c, kind, payload: told.append((kind, payload)))
+    ans = await orient_session.start(CORPUS, "", ["final", "report"], route=subagents.CLICK)
+    chat = orientation.read_run(CORPUS)["chats"]["orient"]
+    subagents.saw_plan_mode(CORPUS, ans.agent_id)
+    subagents.run_ended(CORPUS, ans.agent_id, "done", "My plan is in the plan file.", source="handback")
+    line = subagents.plan_failed_line("orientation")
+    assert line == ("Your Claude Code session went into plan mode while the orientation ran, so it could not finish "
+                    "its work. Switch out of plan mode (shift+tab in your terminal), then send it a message to "
+                    "continue it.")
+    assert orientation.read_run(CORPUS)["status"] == "failed"
+    meta = agents.read_meta(CORPUS, chat)
+    assert (meta["status"], meta["result"]) == ("failed", line)
+    _, thread = agents.paths(CORPUS, chat)
+    last = agents.read_events(thread)[-1]
+    assert (last["type"], last["kind"], last["text"]) == ("chip", orient_session.ERROR_KIND, line)
+    [(kind, payload)] = told
+    assert kind == orientation.ORIENT_KIND and payload["status"] == "failed"
+    assert payload["text"].endswith(f"Its error: {line}")
+    assert len(bridge.ops("spawn")) == 1, "no report pass"
+
+
 async def test_a_workspace_0_5_0_left_loads_lists_and_renders_and_its_orientation_takes_no_message(
         bridge, models, workspaces_tmp, analyst, monkeypatch):
     """A workspace thimble 0.5.0 left: its orientation ran as a background session of Claude Code's (`bg` on the meta,

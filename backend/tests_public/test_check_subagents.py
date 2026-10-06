@@ -167,6 +167,32 @@ async def test_a_run_s_end_supersedes_its_covered_comments_and_records_what_it_s
     assert cm["status"] != "open" and cm["superseded_by"] == second.run
 
 
+async def test_a_run_main_s_plan_mode_held_at_its_end_fails_saying_why_and_supersedes_nothing(doc, bridge):
+    """Main went into plan mode while a check ran, and thimble stopped nothing, as Claude Code stops no subagent then:
+    the check's agent followed main and could only read and plan, so it may not have commented where it would have.
+    Its run ends failed with the line that says why and to choose Re-run, not done, and the check's earlier comments
+    on the passages it covered stay open."""
+    await _write()
+    first = await _started("judgment")
+    key = checks.session_key("judgment", "report")
+    d = report_types.read_doc(CORPUS, investigation.MAIN, "report")
+    sid = report_types.all_sentences(d)[0]["id"]
+    sf.add_caller(config.workspace_dir(CORPUS), "toolu_p1", first.agent, "thimble:check")
+    res = await tools.call(CORPUS, "add_comment", {"ref": f"report:report#{sid}", "text": "No card shows this."},
+                           session=key, tool_use_id="toolu_p1")
+    assert not res.is_error, res.text
+    subagents.run_ended(CORPUS, first.agent, "done", "Commented on 1 passage.", source="handback")
+    second = await _started("judgment")
+    subagents.saw_plan_mode(CORPUS, second.agent)
+    subagents.run_ended(CORPUS, second.agent, "done", "My plan is in the plan file.", source="handback")
+    line = subagents.plan_failed_line("check")
+    assert (_run("judgment")["status"], _run("judgment")["summary"]) == ("failed", line)
+    assert line.endswith(", then choose Re-run on the check.")
+    d = report_types.read_doc(CORPUS, investigation.MAIN, "report")
+    [cm] = [c for c in d.get("comments") or [] if c.get("check") == "judgment"]
+    assert (cm.get("status") or "open") == "open" and not cm.get("superseded_by")
+
+
 async def test_a_start_at_the_subagent_limit_waits_and_a_refused_one_fails_with_its_refusal(doc, bridge, monkeypatch):
     monkeypatch.setattr(checks, "LIMIT_RETRY_S", 0.05)
     await _write()

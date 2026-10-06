@@ -115,9 +115,10 @@ LOCAL_CAVEAT = "<local-command-caveat>"  # the meta record before a local comman
 CONNECT_COMMANDS = ("/thimble", "/thimble:thimble")  # /thimble's command line, whose turn is not mirrored (module note)
 TASK_FIELD_RE = re.compile(r"<(task-id|tool-use-id|status|result|summary)>(.*?)</\1>", re.S)
 DIDNT_FINISH = "didn't finish"  # a task notification's summary after `thimble --continue`: the agent was cut off by the quit
-# the attachment Claude Code adds to a running subagent's transcript when main goes into plan mode, which the agent then
-# follows: it may only read and write a plan (live check L21)
-PLAN_MODE_ATTACHMENT = "plan_mode"
+# the attachments Claude Code adds to a running subagent's transcript when main goes into plan mode (again), which the
+# agent then follows: it may only read and write a plan (live check L21); and the one it adds when main leaves plan mode
+PLAN_MODE_ATTACHMENTS = ("plan_mode", "plan_mode_reentry")
+PLAN_EXIT_ATTACHMENT = "plan_mode_exit"
 # a Bash call's result when it runs in the background: its shell's task id, which TaskStop takes (live check L33)
 BG_SHELL_RE = re.compile(r"\A\s*Command running in background with ID:\s*([A-Za-z0-9_-]+)")
 HANDBACK_RE = re.compile(r"\A\[Subagent hand-back\].*?follows:\n", re.S)  # the harness's lead of a hand-back
@@ -634,11 +635,8 @@ def note_mode(c: str, sid: str | None, mode: str) -> None:
     lv = _live.get(c)
     if lv is None or not sid or lv.sid != sid or mode not in modes.CLAUDE_MODES:
         return
-    was = main_mode(c)
     _modes[c] = (sid, mode)
     _keep_mode(c, sid, mode)
-    if mode == PLAN_MODE and was != PLAN_MODE:
-        _plan_entered(c)
     meta = agents.meta_or_none(c, agents.MAIN_ID) or {}
     held = meta.get("attached") or {}
     if held.get("session") == sid and held.get("permission_mode") != mode:
@@ -648,22 +646,6 @@ def note_mode(c: str, sid: str | None, mode: str) -> None:
 
 
 _before_plan: dict[str, str] = {}  # workspace -> main's mode before thimble's module saw it go into plan mode
-PLAN_MODE = "plan"
-
-
-def _plan_entered(c: str) -> None:
-    """Main went into plan mode, where a subagent inherits it and would ask before every step (U20): thimble's running
-    agents are stopped through the module, as the browser's Stop stops them (subagents.stop_for_plan), and each thread
-    says why and how to go on once main leaves plan mode (U4). Nothing starts them again by itself."""
-    from . import subagents  # noqa: PLC0415
-
-    if not any(a.get("status") in ("running", "waiting") for a in subagents.agents_of(c).values()
-               if a.get("role") in subagents.ROLES):
-        return
-    try:
-        asyncio.get_running_loop().create_task(subagents.stop_for_plan(c), name=f"plan-stop:{c}")
-    except RuntimeError:  # no loop (a synchronous caller)
-        log.warning("%s: main went into plan mode, and no loop stops thimble's agents", c)
 
 
 def note_plan(c: str, sid: str | None, plan: bool) -> None:
@@ -2081,7 +2063,7 @@ def _tail_sub(lv: Live, sub: Sub) -> int:
 
         if (subagents.agent(lv.c, str(sub.agent_id)) or {}).get("status") not in ("running", "waiting"):
             # its run ended by a sign the mirror did not read (the module's turn end, a TaskStop's notification: the
-            # browser's Stop, or thimble's stop for plan mode), so a message now starts its next run (_revive)
+            # browser's Stop), so a message now starts its next run (_revive)
             sub.done = True
     if sub.done and not sub.thread and sub.owner is None and not sub.workflow:
         how = _resumed(lines, strict=bool(sub.thimble))
@@ -2393,10 +2375,12 @@ def translate_sub(lv: Live, sub: Sub, line: bytes | str) -> int:
     if att is not None and "<task-notification>" in str(att.get("prompt") or ""):
         _child_finished(lv, str(att["prompt"]))  # a subagent this one started has stopped
         return 0
-    if att is not None and att.get("type") == PLAN_MODE_ATTACHMENT and sub.thimble and sub.agent_id:
+    if att is not None and att.get("type") in (*PLAN_MODE_ATTACHMENTS, PLAN_EXIT_ATTACHMENT) and sub.thimble \
+            and sub.agent_id:
         from . import subagents  # noqa: PLC0415
 
-        subagents.saw_plan_mode(lv.c, str(sub.agent_id))  # main went into plan mode, and the agent with it (U20)
+        # main went into plan mode, and the agent with it (U20), or out of it again
+        subagents.saw_plan_mode(lv.c, str(sub.agent_id), att.get("type") != PLAN_EXIT_ATTACHMENT)
         return 0
     typed = _typed(rec)
     if typed is not None:

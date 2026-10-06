@@ -2192,6 +2192,12 @@ def write_pending(c: str, slug: str) -> dict[str, Any] | None:
     return w
 
 
+def write_saved(c: str, slug: str) -> bool:
+    """Whether the pending write of `slug` saved the document."""
+    w = _writes.get((c, slug))
+    return bool(w and w.get("saved"))
+
+
 def write_for_orientation(c: str, slug: str, chat: str, run: int = 0) -> None:
     """The pending write of `slug` is the orientation's report pass (orientation.request_report): its writer carries the
     orientation's chat and run, and the browser shows it on the orientation's card."""
@@ -2235,10 +2241,6 @@ def _write_saved(c: str, slug: str, *, whole: bool) -> dict[str, Any] | None:
     return w
 
 
-WRITER_PLAN_NOTE = ("Your Claude Code session went into plan mode while the writer ran, so it could not save the "
-                    "document. Switch out of plan mode (shift+tab in your terminal), then write it again.")
-
-
 def writer_finished(c: str, meta: dict[str, Any]) -> None:
     """An agent chat ended: when it was a writer's, the write of its own document ends (found by the chat's `doc`, its
     title,
@@ -2262,8 +2264,10 @@ def writer_finished(c: str, meta: dict[str, Any]) -> None:
         elif meta.get("plan_mode"):
             # main went into plan mode while it wrote, and the writer with it, so it could only write a plan (live check
             # L21): a failure the analyst can write again, never a document found to need no change
+            from . import subagents  # noqa: PLC0415
+
             _emit(c, {"type": "report", "slug": slug, "status": "failed", "run": w.get("event"), "chat": meta.get("id"),
-                      "note": WRITER_PLAN_NOTE})
+                      "note": subagents.plan_failed_line(WRITER_AGENT)})
         elif meta.get("status") == "done" and read_doc(c, investigation.MAIN, slug) is not None:
             # a revision whose writer ended well and changed nothing (it read the document and found nothing to change)
             _emit(c, {"type": "report", "slug": slug, "status": "generated", "unchanged": True, "run": w.get("event"),

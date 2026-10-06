@@ -79,9 +79,9 @@ thread's fork too. --agent-check also refuses a second fork of a thread from sub
 fork_check). The waker polls the workspace's events/queue.jsonl (app/event_files.py) for an event main's watcher has not
 taken, takes it, writes it to stderr and exits 2. --held prints the held events from held-events.json and the lines of
 the events the waker wrote out. --mode records main's permission mode in subagents.json, and on main's Stop starts the
-backend's `main-stop` call; plan mode, there or in an agent's tool call, starts its `plan` call. --permission exits at
-once with no decision, so Claude Code asks in its own dialog. --agents numbers an orientation's calls in its sequence
-(app/calls_file.py) and gives the ref as the server would.
+backend's `main-stop` call. Plan mode stops none of thimble's running agents, as in browser mode (Claude Code's own
+subagents go on in plan mode). --permission exits at once with no decision, so Claude Code asks in its own dialog.
+--agents numbers an orientation's calls in its sequence (app/calls_file.py) and gives the ref as the server would.
 
 The stream writes each event as one block of lines. Claude Code truncates Monitor output at 500 characters per line and
 about 3,000 per event, so lines are wrapped under LINE_CHARS and a longer event is cut and saved whole under
@@ -436,8 +436,6 @@ def watch_files(inp: dict, ws: Path) -> int:
     if not session:
         return 0
     if inp.get("agent_id"):
-        if inp.get("permission_mode") == "plan" and inp.get("hook_event_name") == "PreToolUse":
-            plan_call(inp, ws)
         return 0
     if not is_main(ws, session, MAIN_WAIT_S):
         return 0
@@ -448,7 +446,6 @@ def watch_files(inp: dict, ws: Path) -> int:
     pid = claude_pid()
     path = ef.queue_path(ws)
     seen = None
-    plan = PlanWatch(ws, session)
     until = time.monotonic() + LIFETIME_S
     while time.monotonic() < until:
         if pid and not alive(pid):
@@ -456,7 +453,6 @@ def watch_files(inp: dict, ws: Path) -> int:
         now = process_session(pid)
         if now and now != session:
             return 0
-        plan.look()
         try:
             st = path.stat()
             stamp = (st.st_mtime_ns, st.st_size)
@@ -498,47 +494,6 @@ def stream_files(args: list[str], ws: Path) -> int:
         sys.stdout.flush()
 
 
-class PlanWatch:
-    """What the waker, which runs for as long as main's session does, sees of main's plan mode in module.json (the
-    module's poll of it, which no process can hear otherwise while main is idle): when plan mode began since the waker
-    last looked and agents of thimble's roles run, the backend's `plan` call stops them (app/subagents.py plan_check),
-    within a tick of the module's poll rather than at an agent's next tool call."""
-
-    def __init__(self, ws: Path, session: str) -> None:
-        self.ws, self.session = ws, session
-        self.stamp: tuple | None = None
-        self.told = 0.0  # module.json's plan_at of the plan mode the backend's call was started for
-
-    def look(self) -> None:
-        sf = files()
-        try:
-            st = sf.module_path(self.ws).stat()
-            stamp = (st.st_mtime_ns, st.st_size)
-        except OSError:
-            return
-        if stamp == self.stamp:
-            return
-        self.stamp = stamp
-        out = sf.read_module(self.ws)
-        at = float(out.get("plan_at") or 0)
-        if out.get("plan") is not True or at <= self.told or out.get("session") != self.session:
-            return
-        self.told = at
-        running = [a for a in sf.registry(sf.read(self.ws)).values() if isinstance(a, dict) and a.get("role") in sf.ROLES
-                   and a.get("status") in ("running", "waiting") and a.get("stopped_by") != "plan"]
-        if running:
-            spawn_local("plan", {"session_id": self.session, "hook_event_name": "PlanPoll", "cwd": folder({})})
-
-
-def plan_call(inp: dict, ws: Path) -> None:
-    """An agent's tool call in plan mode, in terminal mode: the backend's `plan` call stops thimble's running agents,
-    unless this agent is none of theirs or was stopped for plan mode already."""
-    sf = files()
-    entry = sf.registry(sf.read(ws)).get(str(inp.get("agent_id") or ""))
-    if isinstance(entry, dict) and entry.get("status") in ("running", "waiting") and entry.get("stopped_by") != "plan":
-        spawn_local("plan", inp)
-
-
 def held_files(inp: dict, ws: Path) -> int:
     """The held hook in terminal mode: the held events as the prompt's added context, and as its systemMessage the lines
     of the events the waker wrote out, the held events' and those that send main no event."""
@@ -560,7 +515,7 @@ def held_files(inp: dict, ws: Path) -> int:
 
 def mode_files(inp: dict, ws: Path) -> int:
     """The mode hook in terminal mode: main's permission mode recorded in subagents.json (app/subagent_files.py
-    record_mode); on main's Stop the backend's `main-stop` call, and in plan mode its `plan` call."""
+    record_mode), and on main's Stop the backend's `main-stop` call."""
     session = str(inp.get("session_id") or "")
     if inp.get("agent_id") or not session or not is_main(ws, session):
         return 0
@@ -571,8 +526,6 @@ def mode_files(inp: dict, ws: Path) -> int:
             sf.record_mode(state, session, mode)
     if inp.get("hook_event_name") == "Stop":
         spawn_local("main-stop", inp)
-    elif mode == sf.PLAN_MODE:
-        spawn_local("plan", inp)
     return 0
 
 
@@ -930,9 +883,6 @@ def agents_hook(inp: dict) -> int:
         root = reg[root_id]
     lines = []
     term = sf.terminal(ws)
-    if term and inp.get("permission_mode") == sf.PLAN_MODE and root.get("status") in ("running", "waiting") \
-            and root.get("stopped_by") != "plan":
-        spawn_local("plan", inp)  # main went into plan mode while this agent ran (app/subagents.py plan_check)
     if root.get("role") == "orientation" and inp.get("tool_use_id") and not name.startswith(THIMBLE_PREFIXES) \
             and name not in PLUMBING:
         if term:
