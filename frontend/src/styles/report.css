@@ -2965,3 +2965,24 @@ body .bn-mantine .bn-form-popover .mantine-TextInput-input {
     background-image: linear-gradient(color-mix(in oklab, var(--accent) 8%, transparent), color-mix(in oklab, var(--accent) 8%, transparent));
   }
 }
+
+/* a check whose passages the analyst changed since it ran: how many, then Run (Checks.StaleRow) */
+.wu-check-stale,
+.wu-check-refused {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin: 0 0 4px 26px;
+  color: var(--text-tertiary);
+  font: var(--type-body-sm);
+  overflow-wrap: anywhere;
+}
+.wu-check-stale-run.btn {
+  height: 20px;
+  padding: 0 6px;
+}
+/* a writer's start that did not happen, under the type bar (chat/Refused) */
+.wu-refused {
+  margin: 8px 16px 0;
+}

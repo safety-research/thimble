@@ -16,7 +16,8 @@ import { colourVar } from '../files/labels'
 import { checksApi } from '../lib/api'
 import { bus } from '../lib/bus'
 import { track } from '../lib/telemetry'
-import type { Check } from '../lib/types'
+import type { Check, CheckRun } from '../lib/types'
+import { refusalLine } from '../chat/Refused'
 import { readStorage, storageKey, writeStorage } from '../lib/workspace'
 import { useDock, useFoldingSide, type FoldingSide } from '../shell/dock'
 import { sideKey } from './cards'
@@ -134,6 +135,46 @@ export function useChecks(ws: string): Checks {
   const on = useMemo(() => shownIds(list), [list])
   const look = useMemo(() => checkLook(list), [list])
   return { list, on, look, toggle, create, editPrompt }
+}
+
+/** The passages that changed since a run checked them (the analyst's own edits), while it does not run. Pure. */
+export function staleOf(run: Pick<CheckRun, 'stale' | 'status'> | null | undefined): number {
+  return run && run.status !== 'running' && typeof run.stale === 'number' && run.stale > 0 ? run.stale : 0
+}
+
+/** A stale row's words: how many passages changed since the check last ran on them. Pure. */
+export const staleText = (n: number): string => `${n} passage${n === 1 ? '' : 's'} changed since checked`
+
+/** A check whose passages the analyst changed since it ran: nothing runs by itself (a writer's save runs the checks, the
+ * analyst's own edits do not), so the row says how many changed, and Run is a click that starts the check's agent
+ * through thimble's plugin on them (POST /checks/{id}/run). */
+function StaleRow({ ws, check, doc, n }: { ws: string; check: Check; doc: string; n: number }) {
+  const [busy, setBusy] = useState(false)
+  return (
+    <p className="wu-check-stale" data-stale={n}>
+      <span>{staleText(n)}</span>
+      <span aria-hidden="true">·</span>
+      <Button
+        variant="ghost"
+        size="sm"
+        className="wu-check-stale-run"
+        busy={busy}
+        onClick={() => {
+          setBusy(true)
+          track('ui-click', { target: 'ui:report-check-run', detail: { check: check.id, doc, stale: n } })
+          checksApi
+            .run(ws, check.id, doc)
+            .then((r) => {
+              if (r?.refused) bus.emit('toast', { text: `${check.name} didn't start: ${refusalLine(r.refused)}`, kind: 'error' })
+            })
+            .catch((e) => toast(`Could not run ${check.name}.`, e))
+            .finally(() => setBusy(false))
+        }}
+      >
+        Run
+      </Button>
+    </p>
+  )
 }
 
 /** The width of a document's sidebar, as .wu-side sets it in report.css. */
@@ -262,6 +303,8 @@ export function ChecksPane({ ws, doc, checks, comments, onHide }: ChecksPaneProp
                     <Icon name="more-horizontal" size={14} />
                   </IconButton>
                 </div>
+                {staleOf(run) > 0 && <StaleRow ws={ws} check={c} doc={doc} n={staleOf(run)} />}
+                {run?.refused && run.status !== 'running' && <p className="wu-check-refused" role="status">{`Didn't start: ${refusalLine(run.refused)}`}</p>}
               </div>
             )
           })}
