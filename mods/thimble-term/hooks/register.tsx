@@ -429,7 +429,8 @@ export const register: Register = on => {
       )
     }
     // thimble's agents at work
-    const agents = (await cx.agents()).filter(a => a.kind === 'subagent' || a.role)
+    // the agents at work: a run that ended (done, idle, ended) is not listed
+    const agents = (await cx.agents()).filter(a => (a.kind === 'subagent' || a.role) && !/^(done|idle|ended|stopped|failed)\b/.test(a.state))
     for (const [i, a] of agents.slice(0, 3).entries()) {
       rows.push(
         <Box key={`above-agent-${i}`} flexDirection="row">

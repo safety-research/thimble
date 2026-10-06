@@ -178,6 +178,18 @@ test('the rows above the prompt: what the workspace holds, the agents at work, t
   await above.unmount()
 })
 
+test('an agent whose run ended is not listed above the prompt', async ($, on) => {
+  const w = world(on)
+  w.states.agents = { ...w.states.agents, rows: [{ ...w.states.agents.rows[0]!, state: 'done' }, { name: 'thimble:writer', label: 'writer: report', state: 'waiting for a permission', kind: 'subagent', chat: 'w1', role: 'writer' }] }
+  await start($, w)
+  const above = (await $.ui.mount(ABOVE)) as unknown as M
+  const text = shown(await above.drawn())
+  expect(text).not.toContain('orientation: the whole corpus')
+  expect(text).toContain('writer: report')
+  expect(text).toContain('waiting for a permission')
+  await above.unmount()
+})
+
 test('/thimble opens the home panel with no model turn; the panel lists the documents, threads, cards, labels and files', async ($, on) => {
   const w = world(on)
   await start($, w)
