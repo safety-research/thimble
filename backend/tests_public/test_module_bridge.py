@@ -423,7 +423,7 @@ async def test_the_state_holds_running_agents_their_efforts_the_typed_starts_and
     assert state["requests"] == {"req0001orient": {"role": "orientation", "key": "",
                                                    "values": {"model": "claude-opus-5-5[1m]", "effort": "max"}}}
     assert sorted(state["notes"]) == sorted([
-        "The analyst started orientation aTyped () in thimble; its report goes to them there.",
+        "The analyst started orientation aTyped (this corpus) in thimble; its report goes to them there.",
         "The analyst started writer aClick (report) in thimble; its report goes to them there."])
 
 

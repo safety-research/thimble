@@ -219,12 +219,13 @@ def disallowed() -> list[str]:
 def subagent_definition(c: str) -> dict[str, Any]:
     """The registration of `thimble:orientation` for workspace `c` (subagents.roles adds its model, effort and
     `background`): orient.md's body rendered with every part, shared.md embedded, the workspace's instructions and the
-    extensions' blocks, with the request left to each run's prompt (`## orient-subagent-request`), its frontmatter's
-    description, and the thimble tools that are not the orientation's taken away."""
+    extensions' blocks, with the request left to each run's prompt (`## orient-subagent-prompt`), its frontmatter's
+    description, and the thimble tools that are not the orientation's taken away. orient.md has no `{{request}}` slot;
+    an analyst's own copy that still has one loses the no-request line there, since each run's prompt says it."""
     front = prompts.agent_file(PROMPT)[0]
     with prompts.custom(userconf.prompt_files(c, "orientation")):
         body = system_prompt(c, "", [*PARTS, *LINES])
-    body = body.replace(tools.hint("orient-no-request"), tools.hint("orient-subagent-request"), 1)
+    body = body.replace(tools.hint("orient-no-request"), "", 1)
     return {"description": str(front.get("description") or ""), "prompt": body, "disallowedTools": disallowed()}
 
 

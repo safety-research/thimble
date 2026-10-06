@@ -17,7 +17,6 @@ HINTS = {
     "critique-subagent": "AGENT CALL {input}",
     "orient-subagent-prompt": "{request_id}\nREQUEST {request}\nOUTPUTS {outputs}\nOFF {off}\nCRITIQUE {critique}",
     "orient-subagent-message": "SEND TO {agent}\n{text}",
-    "orient-subagent-request": "THE REQUEST IS IN YOUR FIRST MESSAGE",
     "agent-check-exact": "MAKE THE CALL EXACTLY",
     "agent-check-message": "ONLY WHEN THE ANALYST ASKS",
     "start-plan-mode": "PLAN MODE",
@@ -29,8 +28,6 @@ HINTS = {
     "orient-continue-earlier-version": "EARLIER VERSION",
     "module-started-note": "STARTED {role} {agent} {what}",
     "follow-up-ran-on": "RAN ON {model} {effort}",
-    "helper-prompt": "HELPER PROMPT",
-    "helper-description": "HELPER DESCRIPTION",
 }
 
 

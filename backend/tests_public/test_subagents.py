@@ -49,6 +49,11 @@ def test_each_role_is_registered_with_a_full_model_id_an_explicit_effort_and_a_f
     assert roles["orientation"]["model"] == "claude-opus-5-5[1m]" and roles["orientation"]["effort"] == "max"
     assert roles["helper"]["model"] == "claude-sonnet-5" and roles["helper"]["effort"] == "medium", \
         "the helper runs on Settings' orientation-subagents row (Q10)"
+    from app import prompts  # noqa: PLC0415
+
+    front, body = prompts.frontmatter("helper")
+    assert roles["helper"]["description"] == front["description"].strip() and roles["helper"]["prompt"] == body.strip(), \
+        "the helper's fixed description and prompt are prompts/helper.md's"
     assert roles["writer"]["skills"][0] == roles["critic"]["skills"][0] == "thimble:shared"
 
 
@@ -58,7 +63,9 @@ def test_the_orientation_s_registration_holds_every_part_and_takes_main_s_tools_
     assert "mcp__plugin_thimble_thimble__start_orientation" in denied
     assert "mcp__plugin_thimble_thimble__message_orientation" in denied
     assert "mcp__plugin_thimble_thimble__add_card" not in denied and "mcp__plugin_thimble_thimble__critique" not in denied
-    assert HINTS["orient-subagent-request"] in d["prompt"], "a run's request is in its own prompt"
+    from app import tools  # noqa: PLC0415
+
+    assert tools.hint("orient-no-request") not in d["prompt"], "a run's request is in its own prompt"
     for heading in ("The deck", "Views", "The report"):
         assert heading in d["prompt"], heading
     critic = set(subagents.roles(CORPUS)["critic"]["disallowedTools"])
@@ -170,7 +177,7 @@ async def test_a_typed_start_answers_the_exact_agent_call_with_the_request_id_on
     assert ans.typed and not bridge.calls
     inp = ans["input"]
     assert set(inp) == {"subagent_type", "description", "prompt"}, "no run_in_background (F1), no model"
-    assert inp["subagent_type"] == "thimble:writer" and inp["prompt"].split("\n")[0] == ans["request"]
+    assert inp["subagent_type"] == "thimble:writer" and inp["prompt"].split("\n")[0] == f"[thimble request {ans['request']}]"
     r = subagents.request(CORPUS, ans["request"])
     assert r["values"] == {"model": "m", "effort": "e"} and r["call"] == "toolu_tool" and r["state"] == "pending"
 

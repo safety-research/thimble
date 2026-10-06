@@ -86,6 +86,7 @@ LAUNCH = "launch.json"  # written by `thimble launch-args` (lane A): {session, a
 NOTE_HINT = "module-started-note"  # prompts/tools.md: {role}, {agent}, {what}
 AGENT = "{agent}"  # left in a note for the module to fill with the agent id it got
 WHAT_CHARS = 120
+WHAT_ORIENTATION = "this corpus"  # module-started-note's {what} for an agent whose key has no name (the orientation)
 NO_MODULE_ENV = "THIMBLE_NO_MODULE"
 NOT_LOADED = "Claude Code did not load thimble's hooks module"
 NOT_ANSWERING = "Your Claude Code session's thimble module did not answer"
@@ -381,10 +382,11 @@ def rekey(c: str, old: str, new: str) -> None:
 
 def _note(role: str, what: str) -> str:
     """The one line the module appends to main at a start: hint module-started-note with the role and `what`, a
-    server-checked name, and AGENT left for the module to fill. '' when the hint is missing."""
+    server-checked name, and AGENT left for the module to fill. '' when the hint is missing. An agent whose key names
+    nothing after its role, the orientation's, is "for this corpus" (lane D's {what})."""
     from . import tools  # noqa: PLC0415
 
-    clean = re.sub(r"[\x00-\x1f\x7f<>]+", " ", str(what or "")).strip()[:WHAT_CHARS]
+    clean = re.sub(r"[\x00-\x1f\x7f<>]+", " ", str(what or "")).strip()[:WHAT_CHARS] or WHAT_ORIENTATION
     return tools.hint(NOTE_HINT, role=role, agent=AGENT, what=clean)
 
 

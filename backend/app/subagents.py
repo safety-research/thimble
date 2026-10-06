@@ -154,9 +154,12 @@ def own_tools(role: str) -> tuple[str, ...] | None:
 
 
 def helper_definition(c: str) -> dict[str, Any]:
-    """thimble:helper, the type of the orientation's own subagents (Q10): general-purpose tools and a short fixed
-    prompt (prompts/tools.md `## helper-prompt`)."""
-    return {"description": tools.hint("helper-description"), "prompt": tools.hint("helper-prompt")}
+    """thimble:helper, the type of the orientation's own subagents (Q10): general-purpose tools, and the fixed
+    description and short prompt of prompts/helper.md (its frontmatter and body)."""
+    from . import prompts  # noqa: PLC0415
+
+    front, body = prompts.frontmatter("helper")
+    return {"description": str(front.get("description") or "").strip(), "prompt": body.strip()}
 
 
 def values_for(c: str, role: str, args: dict[str, Any] | None = None) -> dict[str, str]:
@@ -409,9 +412,9 @@ def request_id() -> str:
 def with_request_line(prompt: str, rid: str) -> str:
     """`prompt` whose first line names the request `rid`, which the module's spawn hook finds a typed start by: as it
     is when its first line carries the id already (the orientation's prompt does, orient-subagent-prompt), else with
-    the id as a line of its own before it."""
+    the line `## subagent-request` gives it (`[thimble request <id>]`) before it."""
     first = prompt.split("\n", 1)[0]
-    return prompt if rid in first else f"{rid}\n{prompt}"
+    return prompt if rid in first else f"{tools.hint('subagent-request', request_id=rid) or rid}\n{prompt}"
 
 
 def _set(c: str, rid: str, **fields: Any) -> dict[str, Any] | None:
