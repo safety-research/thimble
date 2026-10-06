@@ -8,7 +8,7 @@ import { act, useState } from 'react'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { ThreadsContext } from '../../src/chat/Notes.tsx'
 import { ARM_MS, EXPIRED_TITLE, PermissionCard } from '../../src/chat/PermissionCard.tsx'
-import { askWhy, autoModeRefusal, pendingRequests, type PendingAsk } from '../../src/chat/permissions.ts'
+import { askWhy, autoModeRefusal, pendingRequests, pluginSteered, type PendingAsk } from '../../src/chat/permissions.ts'
 import { bus } from '../../src/lib/bus.ts'
 import { newest, STALE } from '../../src/lib/newest.ts'
 import type { ChatMeta, PermissionRequest } from '../../src/lib/types.ts'
@@ -177,6 +177,15 @@ describe("main's requests and those of thimble's agents, its subagents", () => {
     expect(askWhy({ chat: 'main', request: req('t2', { terminal: true, chat: 'o9', asked_by: 'data' }) }, metas)).toBe(
       'thimble asks before an agent changes your files, in every permission mode. The orientation asks in your terminal. Answer it there (↓ to the orientation in the agent tray if it is not shown). Claude Code shows it as from the thimble plugin.',
     )
+  })
+
+  test("the critic of a click-started orientation is shown as from the thimble plugin too (live check L13)", () => {
+    const critic = chat('k9', { role: 'step', title: 'critique', parent: 'o9', route: 'subagent', agent_id: 'ag3', started_by: 'typed' })
+    const typedCritic = chat('k8', { role: 'step', title: 'critique', parent: 'o8', route: 'subagent', agent_id: 'ag4', started_by: 'typed' })
+    const all = new Map([...metas, [critic.id, critic], [typedCritic.id, typedCritic]])
+    expect(pluginSteered('k9', all)).toBe(true)
+    expect(pluginSteered('k8', all)).toBe(false)
+    expect(askWhy({ chat: 'main', request: req('t4', { terminal: true, chat: 'k9' }) }, all)).toMatch(/Claude Code shows it as from the thimble plugin\.$/)
   })
 
   test('the card shows a subagent\'s request with no buttons, and names the agent', async () => {

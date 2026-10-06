@@ -179,6 +179,18 @@ export function terminalAsksLine(who: string, plugin: boolean): string {
   return `${who} asks in your terminal. Answer it there (↓ to ${name} in the agent tray if it is not shown).${plugin ? ' Claude Code shows it as from the thimble plugin.' : ''}`
 }
 
+/** Whether Claude Code names a request of the agent of chat `id` as from thimble's plugin: the agent, or an agent it
+ * descends from (the critic of a click-started orientation, live check L13), was started by a click through the
+ * plugin, and Claude Code marks every descendant of such an agent plugin-steered (V1). Pure. */
+export function pluginSteered(id: string | null | undefined, metas: ReadonlyMap<string, ChatMeta>): boolean {
+  const seen = new Set<string>()
+  for (let m = id ? metas.get(id) : undefined; m && !seen.has(m.id) && m.id !== 'main'; m = m.parent ? metas.get(m.parent) : undefined) {
+    if (m.started_by === 'click') return true
+    seen.add(m.id)
+  }
+  return false
+}
+
 /** Why the session asks, in one line: main's fence's rule when one sends it, then where it is answered (main's in the
  * browser or the terminal, a subagent's in the terminal). A code ticket's request keeps its own reasons: thimble's own
  * (`why`), auto mode could not judge the call or left it to the analyst, the session runs in Manual, then when an
@@ -188,8 +200,7 @@ export function askWhy(ask: PendingAsk, metas: ReadonlyMap<string, ChatMeta>, la
   const rule = p.asked_by && (ask.chat === 'main' || p.asked_by !== 'web') ? ASKED_BY[p.asked_by] : ''
   if (ask.chat === 'main') {
     if (p.terminal) {
-      const asker = p.chat ? metas.get(p.chat) : undefined
-      return [rule, terminalAsksLine(askedBy(ask, metas, labels), asker?.started_by === 'click')].filter(Boolean).join(' ')
+      return [rule, terminalAsksLine(askedBy(ask, metas, labels), pluginSteered(p.chat, metas))].filter(Boolean).join(' ')
     }
     return [rule, MAIN_ASKS_LINE].filter(Boolean).join(' ')
   }
