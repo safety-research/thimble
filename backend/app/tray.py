@@ -9,6 +9,10 @@ Claude Code's tray, so the statusline does not list them.
 
 /thimble:agents lists thimble's running agents from the agent registry (subagent_rows), the code ticket and view builds
 the server runs (dev.running_builds), and main's other subagents and threads' forks (session.running_agents).
+
+In terminal mode no server runs. The list_agents tool runs in the MCP shim, where the registry (subagents.json) gives
+thimble's subagents as in browser mode, and the statusline command reads the workspace's files itself
+(plugin/bin/thimble-agents file_agents), as agents_route would answer.
 """
 from __future__ import annotations
 
