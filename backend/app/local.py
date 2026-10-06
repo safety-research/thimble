@@ -405,13 +405,30 @@ def _unread(c: str, meta: dict[str, Any]) -> bool:
     return threads.unread(c, meta)
 
 
+def _answers(c: str, meta: dict[str, Any]) -> int:
+    """How many of a thread's runs ended with an answer: the `done` records of its log, one per question answered,
+    which the renderer counts to put a row under main's latest reply when a new one comes."""
+    from . import agents  # noqa: PLC0415
+
+    try:
+        return sum(1 for r in agents.read_events(agents.paths(c, str(meta["id"]))[1]) if r.get("type") == "done")
+    except Exception:  # noqa: BLE001 — a thread that cannot be read shows nothing new
+        return 0
+
+
+def _thread_marks(c: str, meta: dict[str, Any]) -> None:
+    """A thread's meta with `unread` and `answers` (_unread, _answers)."""
+    meta["unread"] = _unread(c, meta)
+    meta["answers"] = _answers(c, meta)
+
+
 async def _threads(c: str, args: list[str], pos: list[str]) -> Any:
     from . import agents  # noqa: PLC0415
 
     out = agents.list_chats(c)
     for m in out:
         if m.get("kind") == agents.KIND_THREAD:
-            m["unread"] = _unread(c, m)
+            _thread_marks(c, m)
     return out
 
 
@@ -429,7 +446,7 @@ async def _thread(c: str, args: list[str], pos: list[str]) -> Any:
         body["events"] = body["events"][n:]
         body["after"] = n
     if body.get("meta", {}).get("kind") == agents.KIND_THREAD:
-        body["meta"]["unread"] = _unread(c, body["meta"])
+        _thread_marks(c, body["meta"])
     return body
 
 

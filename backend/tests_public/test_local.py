@@ -176,9 +176,17 @@ async def test_state_gives_what_the_routes_give(term):
     assert set(await local.state(CORPUS, "docs")) >= {"report"}
     meta = agents.new_thread(CORPUS, f"card:{cid}", "Eight.")
     threads = await local.state(CORPUS, "threads")
-    assert any(t["id"] == meta["id"] and t["unread"] is False for t in threads)
+    assert any(t["id"] == meta["id"] and t["unread"] is False and t["answers"] == 0 for t in threads)
     thread = await local.state(CORPUS, "thread", [meta["id"], "--after", "0"])
-    assert thread["meta"]["id"] == meta["id"] and thread["events"] == []
+    assert thread["meta"]["id"] == meta["id"] and thread["events"] == [] and thread["meta"]["answers"] == 0
+    # each run that ends with an answer counts, which the renderer's row under main's latest reply follows
+    _, log_path = agents.paths(CORPUS, meta["id"])
+    for _ in range(2):
+        agents.append(log_path, {"type": "user", "text": "Why?"})
+        agents.append(log_path, {"type": "text", "delta": "Because.", "reply": True})
+        agents.append(log_path, {"type": "done", "result": None})
+    [row] = [t for t in await local.state(CORPUS, "threads") if t["id"] == meta["id"]]
+    assert row["answers"] == 2 and row["unread"] is True
     assert (await local.state(CORPUS, "files"))[0]["path"]
     assert [f["path"] for f in (await local.state(CORPUS, "files", ["agents"]))["files"]][0] == "agents/agent-01.jsonl"
     got = await local.state(CORPUS, "resolve", [json.dumps(["board.jsonl#L1", {"ref": "board.jsonl#L1", "value": "REVIEW WANTED"},
