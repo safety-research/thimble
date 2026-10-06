@@ -2751,7 +2751,8 @@ def folder_trusted(cwd: Path) -> bool | None:
 def module_line(cwd: Path) -> str:
     """The doctor's line on thimble's hooks module for a session the launcher starts in `cwd`: what keeps Claude Code
     from loading it (modules_off, an untrusted folder), else what the last session here recorded (subagents.json's
-    `module`: its hello, or why it stayed idle). thimble's agents cannot start without it."""
+    `module`: its hello, or why it stayed idle; after a terminal-mode launch, terminal_module_notes). thimble's agents
+    cannot start without it."""
     why = modules_off(cwd)
     if why:
         return f"off: Claude Code's hooks modules are off ({why}), so thimble's agents cannot start in this folder"
@@ -2764,6 +2765,8 @@ def module_line(cwd: Path) -> str:
     if folder_trusted(cwd) is False:
         notes.append(f"Claude Code does not trust {cwd} yet; it asks at the first launch, and loads the module only "
                      "in a folder you trust")
+    if c and launch.get("mode") == launch_mode.TERMINAL:
+        return "; ".join([*terminal_module_notes(config.workspace_path(c)), *notes])
     try:
         from . import subagent_files  # noqa: PLC0415 — standard library only
 
@@ -2780,6 +2783,31 @@ def module_line(cwd: Path) -> str:
         notes.insert(0, "no session here has run it yet (it says hello when `thimble` starts main); thimble's agents "
                         "cannot start without it")
     return "; ".join(notes)
+
+
+MODULE_OUT = "trusted/module.json"  # in the workspace: what the hooks module writes in terminal mode (the agents lane's)
+ROLES_FILE = "trusted/roles.json"  # in the workspace: the roles the module registers in terminal mode (write_roles)
+
+
+def terminal_module_notes(ws: Path) -> list[str]:
+    """The module line's notes after a terminal-mode launch in workspace folder `ws`, where the module reads its roles
+    from ROLES_FILE and writes its heartbeat to MODULE_OUT, and no server hears from it: its last heartbeat, with its
+    version and the problem it reported, else that no session ran it; and a missing roles file."""
+    try:
+        out = _read_json(ws / MODULE_OUT)
+    except (OSError, ValueError):
+        out = None
+    if isinstance(out, dict) and out.get("session"):
+        note = (f"it ran in the last session (terminal mode; heartbeat from {str(out['session'])[:8]} at "
+                f"{out.get('beat') or '?'}" + (f", version {out['version']}" if out.get("version") else "") + ")")
+        notes = [note + (f"; it reported: {out['problem']}" if out.get("problem") else "")]
+    else:
+        notes = ["no terminal-mode session here has run it yet (it writes trusted/module.json when `thimble` starts "
+                 "main); thimble's agents cannot start without it"]
+    if not (ws / ROLES_FILE).is_file():
+        notes.append("the last launch wrote no roles file (trusted/roles.json), so the module registers none of "
+                     "thimble's agents")
+    return notes
 
 
 def mode_line(cwd: Path) -> str:

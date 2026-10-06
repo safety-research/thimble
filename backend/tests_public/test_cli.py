@@ -327,6 +327,16 @@ def test_the_doctor_names_the_mode_its_source_the_renderer_and_what_terminal_mod
         ws = config.workspace_dir("logs")
     (ws / cli.LAUNCH_FILE).write_text(json.dumps({"session": "s1", "at": "2026-10-06T05:00:00", "mode": "browser"}))
     assert line(cli.doctor_text(), "mode (").endswith("; the last launch here (2026-10-06T05:00:00) ran in browser mode")
+    # after a terminal-mode launch the module reads its roles from roles.json and writes its heartbeat to module.json
+    (ws / cli.LAUNCH_FILE).write_text(json.dumps({"session": "s1", "at": "2026-10-06T05:00:00", "mode": "terminal"}))
+    got = line(cli.doctor_text(), "hooks module")
+    assert "no terminal-mode session here has run it yet" in got and "wrote no roles file" in got
+    (ws / cli.ROLES_FILE).write_text(json.dumps({"at": "t", "roles": {}}))
+    (ws / cli.MODULE_OUT).write_text(json.dumps({"session": "0b9d2f3e-1c2d", "version": "0.6.0", "beat": "t2",
+                                                 "problem": "no roles yet"}))
+    got = line(cli.doctor_text(), "hooks module")
+    assert ("it ran in the last session (terminal mode; heartbeat from 0b9d2f3e at t2, version 0.6.0); it reported: no "
+            "roles yet; Claude Code does not trust") in got and "roles file" not in got
 
 
 def _claude_process(tmp_path: Path, *args: str) -> subprocess.Popen:
