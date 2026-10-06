@@ -170,6 +170,25 @@ async def test_each_answer_of_the_module_ends_the_request_with_its_kind(bridge, 
     assert r["refused_kind"] == kind and r["state"] == ("expired" if kind == "no-module" else "refused")
 
 
+@pytest.mark.parametrize("route", [subagents.CLICK, subagents.TYPED])
+async def test_a_start_makes_its_agent_s_work_folder_which_main_s_sandbox_cannot(bridge, models, route, tmp_path):
+    """Main's sandbox lets Bash write in a work folder but not in the workspace around it, so the agent could not make
+    a missing folder itself (live check L16: orient/work was missing). Start it makes it again; a folder outside the
+    workspace is not made."""
+    ws = config.workspace_dir(CORPUS)
+    work = ws / "writers" / "report"
+    assert not work.exists()
+    ans = await subagents.start_job(CORPUS, "writer", "writer:report", "w", {}, route, work=work)
+    assert work.is_dir() and not ans.refused
+    work.rmdir()
+    if route == subagents.TYPED:
+        subagents.refuse(CORPUS, ans["request"], "[Credential Exploration]", subagents.AUTO_MODE)
+        assert (await subagents.start_it(CORPUS, ans["request"])).started and work.is_dir()
+    outside = tmp_path / "elsewhere"
+    await subagents.start_job(CORPUS, "writer", "writer:other", "w", {}, route, work=outside)
+    assert not outside.exists()
+
+
 async def test_without_a_live_module_a_start_is_refused_before_any_request(bridge, models):
     bridge.is_live, bridge.reason = False, "THIMBLE_NO_MODULE is set"
     ans = await subagents.start_job(CORPUS, "writer", "writer:report", "w", {}, subagents.CLICK)

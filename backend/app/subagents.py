@@ -567,11 +567,29 @@ async def start_job(c: str, role: str, key: str, task: str, values: dict[str, An
     rid = new_request(c, "start", key, inp, values, route, role=role, rid=rid, chat=dict(chat or {}),
                       work=str(work) if work else None, call=call, caller_role=caller_role)
     if route == TYPED:
+        if work:
+            make_work(c, Path(work))
         return Answer({"request": rid, "input": inp})
     return await _spawn(c, rid, request(c, rid) or {})
 
 
+def make_work(c: str, work: Path) -> None:
+    """The agent's work folder made before it starts, as agent_session made a session's: main's sandbox lets Bash write
+    in the work folders (write_dirs) but not in the workspace around them, so an agent cannot make its own folder.
+    Only a folder inside the workspace."""
+    root = ws(c).resolve()
+    try:
+        if root not in work.resolve().parents:
+            log.warning("%s: the work folder %s is outside the workspace; not made", c, work)
+            return
+        work.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        log.warning("%s: the work folder %s was not made: %s", c, work, e)
+
+
 async def _spawn(c: str, rid: str, r: dict[str, Any]) -> Answer:
+    if r.get("work"):
+        make_work(c, Path(str(r["work"])))
     inp = r.get("input") or {}
     ans = await _bridge(c, "spawn", role=r.get("role"), values=r.get("values") or {}, prompt=inp.get("prompt"),
                         description=inp.get("description"), request=rid, what=_what(r))
