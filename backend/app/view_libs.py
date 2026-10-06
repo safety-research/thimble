@@ -6,9 +6,9 @@ other entry is an npm package, `name@version` (a range, such as `d3-force@3`, ta
 optionally with a file inside the package after it, `three@0.160.0/examples/jsm/controls/OrbitControls.js` or
 `leaflet@1.9.4/dist/leaflet.css`.
 
-The view's builder installs a package it needs with its own Bash call, `npm install --ignore-scripts <name>@<version>`
-in its own folder (dev.view_work_dir), which Claude Code decides by main's permission mode; thimble approves no install
-of its own. When the view is checked, ensure bundles each entry from that folder's node_modules with esbuild into one
+The view's builder installs a package it needs with its own Bash call, `npm install --ignore-scripts --cache .npm-cache
+<name>@<version>` in its own folder (dev.view_work_dir), with npm's cache there too since the sandbox keeps the home
+folder read-only, which Claude Code decides by main's permission mode; thimble approves no install of its own. When the view is checked, ensure bundles each entry from that folder's node_modules with esbuild into one
 script, or one stylesheet for a .css entry, with its images and fonts inlined; an entry its folder does not hold, or
 holds at a version its range does not allow, is a problem the check names. esbuild runs as thimble's server, outside
 the sandbox, so a bundle that would hold a file from outside that folder's node_modules is a problem too (_outside). The
@@ -46,7 +46,7 @@ VERSION_RE = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.+-]+)?$")
 ASSET_LOADERS = ("png", "jpg", "jpeg", "gif", "svg", "webp", "woff", "woff2", "ttf", "otf", "eot")
 
 NOT_INSTALLED = ("the package {name} is not installed in {where}. Install it there with `cd {where} && npm install "
-                 "--ignore-scripts {raw}`, or draw the page without it and take it out of libs")
+                 "--ignore-scripts --cache .npm-cache {raw}`, or draw the page without it and take it out of libs")
 OTHER_VERSION = ("{where} holds {name} {version}, which {raw} does not allow. Install the version libs names there, or "
                  "name the one installed")
 
