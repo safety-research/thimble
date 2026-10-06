@@ -1559,7 +1559,7 @@ button.model-line-part[aria-expanded='true'] {
   color: var(--text-primary);
 }
 /* the rules the analyst's "don't ask again" added to a session, in mono, wrapping when long */
-/* a background session whose process stopped: what happened, then Resume */
+/* a session whose process stopped: what happened, then Resume */
 .chat-hold-stopped {
   flex-direction: row;
   align-items: center;

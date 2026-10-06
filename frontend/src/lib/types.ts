@@ -987,8 +987,6 @@ export interface Settings {
   disabled_modes?: OrientPermissions[]
   /** why thimble's config cannot be used, '' when it can (backend userconf.problem) */
   config_error?: string
-  /** while Claude Code does not trust thimble's workspaces folder: the folder and the command that trusts it (shell/Untrusted) */
-  untrusted?: { folder: string; command: string } | null
   /** who runs each agent thimble starts and what it may do, by its permission-mode row (backend ledger.agent_rows) */
   agents?: Partial<Record<ModeAgent | CallAgent, AgentRow>> & { main?: { additions: string[] } }
   /** who runs each of thimble's seven tasks (backend ledger.task_rows) */
@@ -1714,10 +1712,7 @@ export interface ChatMeta {
   permission_mode?: OrientPermissions
   /** the mode a switch into or out of Auto goes to, while the session waits for a pause to restart in it */
   mode_switch?: OrientPermissions | null
-  /** a session thimble runs as a Claude Code background session (backend bg_session) */
-  background?: boolean
-  /** a session thimble started: its agent's row of the permission modes (backend modes.AGENTS), which a pick its card
-   * cannot make while it runs saves to (ModeSwitch) */
+  /** a session thimble started: its agent's row of the permission modes (backend modes.AGENTS) */
   mode_agent?: ModeAgent
   /** the agent a session or a program runs as: an extension's program's is `<extension>:<role or task>` (backend
    * harness.start) */

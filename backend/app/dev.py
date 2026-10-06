@@ -4,34 +4,32 @@ A ticket is one record of dev/tickets.jsonl (repo root, gitignored), numbered pe
 dev/tickets/<id>/shots/. Filing opens a dev agent chat (the ticket's thread) and lands a chip in main; tickets run one
 at a time, urgent first.
 
-The worker is a Claude Code background session (`claude --bg`), so the analyst can attach to it. A run cuts a git
-worktree from the live branch, takes a before shot, then starts the session with prompts/dev.md. The server polls until
-the turn is done and copies the transcript into the chat, then runs the gates over what the branch changed; a failure
-wakes the session with the output, up to MAX_ATTEMPTS turns. Then an after shot, the analyst's Allow, a fast-forward of
-the live branch (rebasing once if it moved), a UI rebuild, and a restart when backend or plugin files changed, deferred
-while an orientation runs. Only a supervised server (`thimble server up`) restarts itself.
-`fix_offline` is `thimble fix`, `revert_last_apply` is `thimble revert`.
+The worker is a Claude Code session run with `claude -p`, one process per turn (Sessions), which needs no folder Claude
+Code trusts. A run cuts a git worktree from the live branch, takes a before shot, then starts the session with
+prompts/dev.md. The server follows the turn until its process ends and copies the transcript into the chat, then runs
+the gates over what the branch changed; a failure wakes the session with the output, up to MAX_ATTEMPTS turns. Then an
+after shot, the analyst's Allow, a fast-forward of the live branch (rebasing once if it moved), a UI rebuild, and a
+restart when backend or plugin files changed, deferred while an orientation runs. Only a supervised server (`thimble
+server up`) restarts itself. `fix_offline` is `thimble fix`, `revert_last_apply` is `thimble revert`.
 
 Recovery. The live checkout changes only in the fast-forward, after every gate passed. A restart runs under
-restart_watch.py, which rolls the apply back when the server does not come back. A turn has no time limit, and a question
-left unanswered for ASK_TIMEOUT_S fails the ticket; a server restart queues an interrupted run again with its worktree
-(_recover).
+restart_watch.py, which rolls the apply back when the server does not come back. A turn has no time limit; a server
+restart queues an interrupted run again with its worktree (_recover).
 
 View tickets. View proposals build at once, each as a ticket on its row of views/proposals.json, run by queue_view in a
 pool of its own (VIEW_POOL). A view is three files of the workspace, so there is no worktree, stack or restart. run_view
-starts a session on prompts/dev-view.md in the build's own folder (view_work_dir, below thimble's workspaces folder,
-which Claude Code trusts) with `--add-dir` for the view's folder and the corpus, never in the corpus, where Claude
-Code's sandbox would make a folder of its own; the worked examples are fenced read-only, and an edit of the corpus goes
-as the dev agent's `data` says, by default to the analyst first (view_fence). After each turn the server runs the view's
-gate; a failure wakes the session, a pass registers the view and clears the extracts the session left in its own folder
-(work_files). Where an active extension runs the dev agent with a
-program (roles.py), each turn is a run of that program instead (program_view_turn), checked the same way. A turn the API
-ended at capacity is no attempt: the build waits and wakes the session again. An orientation's proposal that runs out of
-attempts gets up to VIEW_REPAIRS new sessions, and is then dropped quietly; a view the analyst asked for fails with
-Retry. The orientation's Stop stops the builds of the views it proposed (stop_orientation_views). The Stop in a build's
-thread ends that build failed, with Retry (views.stop_build, _view_stopped). Main's end stops every build of the
-workspace (stop_workspace): a view the analyst asked for fails with Retry, and a session's proposal waits, queued, until
-a session is main again (resume_views).
+starts a session on prompts/dev-view.md in the build's own folder (view_work_dir, below thimble's workspaces folder)
+with `--add-dir` for the view's folder and the corpus, never in the corpus, where Claude Code's sandbox would make a
+folder of its own; the worked examples are fenced read-only, and an edit of the corpus goes as the dev agent's `data`
+says, by default to the analyst first (view_fence). After each turn the server runs the view's gate; a failure wakes the
+session, a pass registers the view and clears the extracts the session left in its own folder (work_files). Where an
+active extension runs the dev agent with a program (roles.py), each turn is a run of that program instead
+(program_view_turn), checked the same way. A turn the API ended at capacity is no attempt: the build waits and wakes the
+session again. An orientation's proposal that runs out of attempts gets up to VIEW_REPAIRS new sessions, and is then
+dropped quietly; a view the analyst asked for fails with Retry. The orientation's Stop stops the builds of the views it
+proposed (stop_orientation_views). The Stop in a build's thread ends that build failed, with Retry (views.stop_build,
+_view_stopped). Main's end stops every build of the workspace (stop_workspace): a view the analyst asked for fails with
+Retry, and a session's proposal waits, queued, until a session is main again (resume_views).
 
 Permissions. A session of a workspace asks the analyst like the other agents: its --settings carry agent_session's
 permission hook with the session's key (`view:<slug>`, `ticket:<id>`), and the run hosts that key on its chat
@@ -85,6 +83,7 @@ import tempfile
 import threading
 import time
 import urllib.request
+import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -139,8 +138,8 @@ OFFLINE_COMMANDS = ("git clone", "git fetch", "git pull", "git push", "git ls-re
 OFFLINE_MODULES = ("pip", "ensurepip", "playwright", "uv")
 # A view build's environment beside its key (view_env): the package managers and Playwright's browser download offline,
 # and as CLAUDE_ENV_FILE, which Claude Code sources before each Bash command, OFFLINE_ENV_FILE. Neither reaches the
-# session's own calls to the API. It goes in the session's --settings `env`, since Claude Code's background service
-# starts a session with its own environment rather than the environment of the `claude --bg` that asked for it.
+# session's own calls to the API. It goes in the session's --settings `env`, with the rest of the session's own
+# environment (Sessions._flags).
 OFFLINE_ENV = {"npm_config_offline": "true", "PIP_NO_INDEX": "1", "UV_OFFLINE": "1",
                "PLAYWRIGHT_DOWNLOAD_HOST": "http://127.0.0.1:9"}
 OFFLINE_ENV_FILE = Path(__file__).with_name("offline_env.sh")
@@ -149,31 +148,19 @@ CLAUDE_BIN = config.CLAUDE_BIN
 VIEW_CHECK = Path(__file__).with_name("view_check.py")  # the command a view build checks its draft with (view_fence)
 CLI_TIMEOUT_S = 60
 POLL_S = float(os.environ.get("THIMBLE_DEV_POLL_S", "3") or "3")  # between two reads of the session's transcript
-# the longest gap between two looks at `claude agents` while the session's transcript is quiet and it is listed working
-# or blocked: each look starts a `claude` process, and a growing transcript says the session works without one
-STATE_GAP_MAX_S = float(os.environ.get("THIMBLE_DEV_STATE_GAP_S", "30") or "30")
-UNLISTED_POLLS = 10  # polls a session just started may be missing from `claude agents` before the run gives up on it
+UNLISTED_POLLS = 10  # polls a session's state may be unknown before the run gives up on it
 LOOPBACK = {"127.0.0.1", "::1", "localhost", "testclient"}
 MAX_ATTEMPTS = max(1, int(os.environ.get("THIMBLE_DEV_MAX_ATTEMPTS", "3") or "3"))
 _capacity_sleep = asyncio.sleep  # a view build's wait while the API is at capacity (view_capacity_wait); tests replace it
 # the new sessions an orientation's view build gets after its attempts ran out, each told what failed (run_view)
 VIEW_REPAIRS = max(0, int(os.environ.get("THIMBLE_VIEW_REPAIRS", "2") or "2"))
-# A session that has waited ASK_TIMEOUT_S for an answer is stopped and its ticket fails, so one stuck session cannot hold
-# the queue or a pool slot. A turn otherwise runs until its session ends it or the analyst stops it: once the session
-# has shown no activity for QUIET_NOTE_S (nothing new in its transcript or its subagents'), its thread says so
-# (QUIET_LINE), and again each time that quiet time doubles.
-ASK_TIMEOUT_S = float(os.environ.get("THIMBLE_DEV_ASK_TIMEOUT_S", "") or 15 * 60)
+# A turn runs until its session ends it or the analyst stops it: once the session has shown no activity for
+# QUIET_NOTE_S (nothing new in its transcript or its subagents'), its thread says so (QUIET_LINE), and again each time
+# that quiet time doubles.
 QUIET_NOTE_S = max(1.0, float(os.environ.get("THIMBLE_DEV_QUIET_NOTE_S", "") or 10 * 60))
 QUIET_LINE = "no activity for {minutes}"
-ASK_TIMED_OUT = "stopped because nobody answered the session's question within {wait}. Retry wakes it again."
-# A turn that ends while the session's own workflows or background agents run is not over: their results start its next
-# turn, and stopping the session would lose them (Tail.background). Its thread says so once (BACKGROUND_LINE).
-BACKGROUND_LINE = "the session waits for its background work to finish ({n} running)"
 # the turn_duration record's counts of the session's workflows and background agents still running when its turn ended
 PENDING_COUNTS = ("pendingWorkflowCount", "pendingBackgroundAgentCount")
-# the `claude agents` states of a session that may still run; whether its process does is Sessions.has_process
-LIVE_STATES = ("working", "idle", "blocked", "done")
-LOST_LINE = "the background session ended before its background work finished"
 # How long a server may take to answer /api/health (boot_check, restart_watch.py) before the change counts as breaking
 # its start.
 BOOT_TIMEOUT_S = float(os.environ.get("THIMBLE_DEV_BOOT_TIMEOUT_S", "") or 90)
@@ -211,8 +198,8 @@ KERNEL_RESET_LINE = ("thimble restarted after a change ({title}). Cards keep the
 KERNEL_RESET_LINE_PLAIN = "thimble restarted. Cards keep their outputs, but run a card again before building on what it computed."
 KERNEL_KEPT_LINE = "thimble restarted after a change ({title}); your notebook picked up where it left off."
 KERNEL_KEPT_LINE_PLAIN = "thimble restarted; your notebook picked up where it left off."
-RESTART_PENDING_LINE = "thimble will restart after a change ({title}) when orientation finishes"
-RESTART_PENDING_LINE_PLAIN = "thimble will restart when orientation finishes"
+RESTART_PENDING_LINE = "thimble will restart after a change ({title}) when its agents finish"
+RESTART_PENDING_LINE_PLAIN = "thimble will restart when its agents finish"
 PLAIN_REASONS = ("manual restart", SOURCE_CHANGED)
 PLAIN_PREFIXES = ("revert of ", "rollback of ")  # a restart for a revert or a rollback names no change of its own
 SUPERVISED_ENV = cli.SUPERVISED_ENV  # set by `thimble server up` on the uvicorn it spawns (cli._server_environ)
@@ -572,7 +559,7 @@ class Run:
     title: str
     ts_start: str
     status: str = "running"
-    session: str | None = None  # the background session's short id, as `claude agents` lists it and `claude attach` takes
+    session: str | None = None  # the id of the session's current turn, as Sessions takes it
     session_id: str | None = None  # its full id: the transcript's name and what `--resume` continues
     task: asyncio.Task | None = None
     stop_reason: str | None = None  # `stopped` or `dismissed` when the analyst ended the run (stop_ticket)
@@ -589,19 +576,19 @@ def _running() -> bool:
 
 
 def dev_session_name(workspace: str | None) -> str:
-    """The name `claude agents` shows a code ticket's background session under: thimble:dev · <workspace>, or
-    thimble:dev for a ticket of no workspace (config.session_name)."""
+    """The name a code ticket's session goes by for the analyst, as the statusline lists it: thimble:dev · <workspace>,
+    or thimble:dev for a ticket of no workspace (config.session_name)."""
     return config.session_name("dev", workspace)
 
 
 def view_session_name(c: str, slug: str) -> str:
-    """The name `claude agents` shows a view build's background session under: thimble:view-<slug> · <c>."""
+    """The name a view build's session goes by for the analyst, as the statusline lists it: thimble:view-<slug> · <c>."""
     return config.session_name(f"view-{slug}", c)
 
 
 def running_builds(c: str) -> list[dict[str, Any]]:
     """The code ticket, view builds and view review revisions that run for workspace `c`, for the terminal's list of
-    thimble's agents (bg_session.agent_rows): {name, label, state, kind}."""
+    thimble's agents (tray.agent_rows): {name, label, state, kind}."""
     rows: list[dict[str, Any]] = []
     t = _get(_current.ticket_id) if _running() and _current is not None and not _current.ticket_id.startswith("view:") else None
     if t is not None and t.get("workspace") in (None, c):
@@ -1270,7 +1257,7 @@ async def _take_shot(t: dict[str, Any], run_log: Log, phase: str, base_url: str 
     return stored
 
 
-# ----------------------------------------------------------------------------- the worker: a Claude Code background session
+# ----------------------------------------------------------------------------- the worker: a Claude Code session
 
 
 def _fence(*texts: str) -> str:
@@ -1325,23 +1312,13 @@ def _cli_env() -> dict[str, str]:
 
 
 class SessionError(RuntimeError):
-    """A background session that could not start, did not end its turn, or ended it any way but done. Its message is
-    written for the analyst and becomes the ticket's error as it is."""
-
-
-# `claude --bg` refuses a folder Claude Code does not trust. A code ticket's worktree is trusted when the live checkout
-# is, so the line names the checkout rather than the temporary worktree.
-UNTRUSTED_RE = re.compile(r"not trusted", re.IGNORECASE)
-UNTRUSTED_LINE = ("Claude Code does not trust {folder}, so the dev agent's session could not start. Run `claude` in "
-                  "{folder} once and accept its trust prompt, then Retry.")
-# for a view build, whose folder is below thimble's workspaces folder, which thimble's installer trusts
-UNTRUSTED_WORKSPACES_LINE = ("Claude Code does not trust thimble's workspaces folder {folder}, so the view can't be "
-                             "built. To trust it, run this in a terminal, then Retry: {command}")
+    """A session that could not start, or whose turn ended any way but done. Its message is written for the analyst and
+    becomes the ticket's error as it is."""
 
 
 def read_only_fence(folders: "tuple[Path, ...] | list[Path]", outside: "tuple[str, ...] | list[str]" = (),
                     conf: "userconf.Session | None" = None) -> dict[str, Any]:
-    """The --settings keys that keep `folders` unchanged by a background session: a deny of Edit in each (which Claude
+    """The --settings keys that keep `folders` unchanged by a session: a deny of Edit in each (which Claude
     Code's path checks also apply to Bash commands naming those files) and, where the session's Bash runs in the
     sandbox (`conf`, by default where the sandbox can run), the sandbox, with no network unless the config's is on,
     which turns the deny into a write deny for scripts too, and whose commands run unasked unless the config asks about
@@ -1400,27 +1377,6 @@ def _unhost(c: str | None, key: str) -> None:
         agent_session.unhost(c, key)
 
 
-def trust_folder(cwd: Path) -> Path:
-    """The folder the analyst must trust for a session in `cwd`: the live checkout for a ticket's worktree, thimble's
-    workspaces folder for a view build's own folder, else cwd."""
-    try:
-        here = Path(cwd).resolve()
-        if here.is_relative_to(worktrees_dir().resolve()):
-            return REPO
-        return config.WORKSPACES_DIR if here.is_relative_to(config.WORKSPACES_DIR.resolve()) else Path(cwd)
-    except OSError:
-        return Path(cwd)
-
-
-def untrusted_line(cwd: Path) -> str:
-    """Why a session in `cwd` could not start while Claude Code does not trust its folder (trust_folder), and how the
-    analyst trusts it."""
-    folder = trust_folder(cwd)
-    if folder == config.WORKSPACES_DIR:
-        return UNTRUSTED_WORKSPACES_LINE.format(folder=folder, command=cli.trust_command())
-    return UNTRUSTED_LINE.format(folder=folder)
-
-
 def ticket_fence(wt: Path, network: bool = False, required: bool = False) -> dict[str, Any]:
     """The --settings of a code ticket's session whose Bash runs in the sandbox: no network unless the dev agent's is
     on, and writes to the worktree, its session's folder, and to what a commit there writes into the checkout's git
@@ -1436,16 +1392,16 @@ def ticket_fence(wt: Path, network: bool = False, required: bool = False) -> dic
 
 
 class Sessions:
-    """Claude Code background sessions through the `claude` CLI: `claude --bg` starts one and prints its short id,
-    `claude agents --json --all --cwd` reports its state, `claude --bg --resume <session id>` wakes it with a new
-    message, and `claude stop` ends its process while keeping the conversation. Tests replace dev.SESSIONS with a fake.
-    """
+    """Claude Code sessions run with `claude -p`, one process per turn: start runs a new session's first turn
+    (`--session-id`), resume a later turn of the same session (`--resume`), each with its message on stdin and the
+    turn's result on stdout as stream-json, and stop ends a process early, its conversation kept. A `claude -p` session
+    needs no folder Claude Code trusts. A session keeps its id, which its transcript is named for, across its turns, so
+    each turn has an id of its own, `<session id>/<n>` (Run.session): a late stop of a turn that ended never reaches
+    the next turn of the same session. Tests replace dev.SESSIONS with a fake."""
 
     def __init__(self) -> None:
-        self._process: dict[str, bool] = {}  # by short id: whether the session had a process at the last state()
-
-    async def _run(self, args: list[str], cwd: Path) -> tuple[int, str]:
-        return await _run([CLAUDE_BIN, *args], cwd=cwd, timeout=CLI_TIMEOUT_S, env=None, environ=_cli_env())
+        self._turns: dict[str, _Turn] = {}  # by turn id: each turn's process
+        self._count = 0
 
     def problem(self) -> str:
         """Why no session can start here, '' when the CLI is on the PATH (runner_problem)."""
@@ -1457,14 +1413,16 @@ class Sessions:
         """The session's flags: its `models` ({model, effort, fast}, where None leaves one to the analyst's Claude Code
         settings), else the dev role's, `--add-dir` folders, the `fence` settings, thimble's config for the dev agent and
         how it asks (module note, permissions). Its environment goes in the settings' `env` (config.session_env,
-        without this server's THIMBLE_* values): the fence's, `env`, and its key as THIMBLE_SESSION with the token that
-        proves it (hook_auth.session_token). `asking` names the session's key, {key, allow, sandbox?, config?}, the
-        allow rules of its work in its own folder, for a session whose Bash runs in the sandbox, sandbox_allow's rule,
-        and what the config asks of it (dev_config); with it and a workspace, the permission hook answers its requests by
-        the dev agent's mode, and a process in Auto runs in auto mode. Without, it keeps UNHOSTED_TOOLS and gets no web
-        tools. It gets no MCP server, since its task needs none of the analyst's, not the tools that schedule a later
-        turn (agent_session.LATER_TOOLS), since the session is stopped once its turn ends, and, when fenced, not
-        FENCED_OFF_TOOLS."""
+        without this server's THIMBLE_* values): the fence's, `env`, its key as THIMBLE_SESSION with the token that
+        proves it (hook_auth.session_token), and no ceiling on --print's wait for its background work
+        (agent_session.BG_WAIT_ENV). `asking` names the session's key, {key, allow, sandbox?, config?}, the allow rules
+        of its work in its own folder, for a session whose Bash runs in the sandbox, sandbox_allow's rule, and what the
+        config asks of it (dev_config); with it and a workspace, the permission hook answers its requests by the dev
+        agent's mode, and a process in Auto runs in auto mode. Without, it keeps UNHOSTED_TOOLS and gets no web tools.
+        It gets no MCP server, since its task needs none of the analyst's, not the tools that schedule a later turn
+        (agent_session.LATER_TOOLS), since its process ends with its turn, and, when fenced, not FENCED_OFF_TOOLS.
+        `name` is the session's name for the analyst (dev_session_name, view_session_name), which a `claude -p` session
+        does not take."""
         from . import agent_session  # noqa: PLC0415 — agent_session is large and this module otherwise needs none of it
 
         conf_models = models or config.models_for(workspace)["dev"]
@@ -1495,10 +1453,11 @@ class Sessions:
             denied += agent_session.WEB_TOOLS
         key = str((asking or {}).get("key") or SESSION_KEY)
         own = {**(settings.get("env") or {}), **(env or {}), SESSION_ENV: key,
-               hook_auth.SESSION_TOKEN_ENV: hook_auth.session_token(str(workspace or ""), key)}
+               hook_auth.SESSION_TOKEN_ENV: hook_auth.session_token(str(workspace or ""), key),
+               agent_session.BG_WAIT_ENV: agent_session.BG_WAIT_MS}
         settings["env"] = config.session_env(own, stack=False)
         allowed = [] if hosted else ["--allowedTools", ",".join(UNHOSTED_TOOLS)]
-        flags = ["-n", name, *(["--model", str(conf_models["model"])] if conf_models.get("model") else []), *allowed,
+        flags = [*(["--model", str(conf_models["model"])] if conf_models.get("model") else []), *allowed,
                  "--disallowedTools", ",".join(dict.fromkeys(denied)), "--strict-mcp-config", "--permission-mode", mode]
         for d in add_dirs:
             flags += ["--add-dir", str(d)]
@@ -1507,131 +1466,172 @@ class Sessions:
         flags += ["--settings", json.dumps(config.without_mod(settings))]
         return flags
 
+    async def _spawn(self, cwd: Path, sid: str, prompt: str, flags: list[str], *, resume: bool) -> dict[str, str]:
+        """One turn of the session `sid`: `claude -p` in `cwd`, in a process group of its own so that stop reaches the
+        processes it starts, with `prompt` on stdin. {id, session_id}: the turn's id and the session's; SessionError
+        when the CLI cannot start."""
+        argv = [CLAUDE_BIN, "-p", "--resume" if resume else "--session-id", sid, "--output-format", "stream-json",
+                "--verbose", *flags]
+        try:
+            proc = await asyncio.create_subprocess_exec(*argv, cwd=str(cwd), env=_cli_env(), stdin=asyncio.subprocess.PIPE,
+                                                        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+                                                        start_new_session=True, limit=16 * 1024 * 1024)
+        except OSError as e:
+            raise SessionError(f"could not start `{CLAUDE_BIN}`: {e}") from e
+        self._count += 1
+        tid = f"{sid}/{self._count}"
+        turn = _Turn(proc, sid)
+        turn.task = asyncio.get_running_loop().create_task(turn.follow(prompt), name=f"dev-session:{tid}")
+        self._turns[tid] = turn
+        return {"id": tid, "session_id": sid}
+
     async def start(self, cwd: Path, prompt: str, *, name: str, workspace: str | None,
                     add_dirs: "tuple[Path, ...] | list[Path]" = (), env: dict[str, str] | None = None,
                     fence: dict[str, Any] | None = None, asking: dict[str, Any] | None = None,
                     models: dict[str, Any] | None = None) -> dict[str, str]:
-        """A new background session in `cwd` whose first message is `prompt`, with `env` in its environment, the
-        settings `fence`, how it asks, `asking`, and its `models` (_flags). {id, session_id}; RuntimeError when the CLI
-        could not start one."""
-        since = time.time() * 1000 - 5000
+        """A new session in `cwd` whose first message is `prompt`, with `env` in its environment, the settings `fence`,
+        how it asks, `asking`, and its `models` (_flags). {id, session_id}; SessionError when the CLI could not start
+        one."""
         flags = self._flags(workspace, name, add_dirs, fence, asking, models, env)
-        code, out = await self._run(["--bg", *flags, "--", prompt], cwd)
-        if code != 0 and UNTRUSTED_RE.search(out):
-            raise SessionError(untrusted_line(cwd))
-        if code != 0:
-            raise SessionError(f"`claude --bg` failed (exit {code}): {out.strip()[-400:]}")
-        return await self._identify(cwd, _bg_id(out), since)
+        return await self._spawn(cwd, str(uuid.uuid4()), prompt, flags, resume=False)
 
     async def resume(self, cwd: Path, session_id: str, prompt: str, *, env: dict[str, str] | None = None,
                      name: str = "", workspace: str | None = None,
                      add_dirs: "tuple[Path, ...] | list[Path]" = (),
                      fence: dict[str, Any] | None = None, asking: dict[str, Any] | None = None,
                      models: dict[str, Any] | None = None) -> dict[str, str]:
-        """Wake the session `session_id` with `prompt` in a copy under a new id, started with the same flags as a new
-        session (_flags), since Claude Code keeps none of a stopped session's options. A process that still runs is
-        stopped first; the caller follows the copy by the returned ids."""
-        short = session_id[:8]
-        await self._running(cwd, short)
+        """A later turn of the session `session_id` with `prompt`, started with the same flags as a new session
+        (_flags), since Claude Code keeps none of a session's options. A turn of it that still runs is stopped first."""
+        await asyncio.to_thread(self.stop, session_id)
         flags = self._flags(workspace, name, add_dirs, fence, asking, models, env)
-        code, out = await self._run(["--bg", "--resume", session_id, *flags, "--", prompt], cwd)
-        if code != 0:
-            raise SessionError(f"`claude --bg --resume` failed (exit {code}): {out.strip()[-400:]}")
-        return await self._identify(cwd, _bg_id(out) or short, 0)
+        return await self._spawn(cwd, session_id, prompt, flags, resume=True)
 
-    async def _running(self, cwd: Path, short: str) -> bool:
-        """Whether the session's process is still up (the listing's `pid`) after `claude stop` and a wait of up to
-        UNLISTED_POLLS seconds for it to exit."""
-        for n in range(UNLISTED_POLLS):
-            hit = next((e for e in await self._listing(cwd) if e.get("id") == short), None)
-            if hit is None or not hit.get("pid"):
-                return False
-            if n == 0:
-                await asyncio.to_thread(self.stop, short)
-            await asyncio.sleep(1.0)
-        return True
-
-    async def _listing(self, cwd: Path) -> list[dict[str, Any]]:
-        code, out = await self._run(["agents", "--json", "--all", "--cwd", str(cwd)], cwd)
-        if code != 0:
-            return []
-        try:
-            data = json.loads(out[out.index("["):]) if "[" in out else []
-        except ValueError:
-            return []
-        return [e for e in data if isinstance(e, dict) and e.get("kind", "background") == "background"]
-
-    async def _identify(self, cwd: Path, short: str | None, since_ms: float) -> dict[str, str]:
-        """The session's short and full ids: the `claude agents` entry with the printed short id, else the newest one
-        started in `cwd` since the call. Only an entry whose session id begins with its id counts (_names_itself), since
-        right after a resume the listing can briefly pair the id with another session id."""
-        for _ in range(UNLISTED_POLLS):
-            entries = [e for e in await self._listing(cwd) if _names_itself(e)]
-            hit = next((e for e in entries if short and e.get("id") == short), None)
-            if hit is None and not short:
-                recent = [e for e in entries if float(e.get("startedAt") or 0) >= since_ms]
-                hit = max(recent, key=lambda e: float(e.get("startedAt") or 0), default=None)
-            if hit is not None and hit.get("sessionId"):
-                return {"id": str(hit.get("id") or str(hit["sessionId"])[:8]), "session_id": str(hit["sessionId"])}
-            await asyncio.sleep(IDENTIFY_POLL_S)
-        raise SessionError("the background session did not appear in `claude agents`")
+    def _turn(self, tid: str) -> "_Turn | None":
+        """The turn `tid`, or for a session's id its latest turn."""
+        turn = self._turns.get(tid or "")
+        if turn is None and tid:
+            turn = next((t for t in reversed(self._turns.values()) if t.sid == tid), None)
+        return turn
 
     async def state(self, cwd: Path, short: str) -> str | None:
-        """The session's state as `claude agents` reports it, or None when not listed; `idle` for a session whose
-        process is idle while its state says working. That state summarizes whether the task looks finished, not whether
-        the turn is, so the caller decides from the transcript."""
-        hit = next((e for e in await self._listing(cwd) if e.get("id") == short), None)
-        if hit is None:
+        """The state of the turn `short`: `working` while its process runs, then `done` when the turn ended well,
+        `api error` when it ended on Anthropic's API's error, `failed` for any other end; None for a turn this server
+        did not start."""
+        turn = self._turn(short)
+        if turn is None:
             return None
-        self._process[short] = bool(hit.get("pid") or hit.get("status"))
-        state = str(hit.get("state") or hit.get("status") or "")
-        if state == "working" and hit.get("status") == "idle":
-            return "idle"
-        return state or None
+        if turn.proc.returncode is None or (turn.task is not None and not turn.task.done()):
+            return "working"
+        if turn.proc.returncode == 0 and not turn.is_error:
+            return "done"
+        return "api error" if turn.is_error and turn.api_status else "failed"
 
     def has_process(self, short: str) -> bool:
-        """Whether the session's process ran at the last look at its state: a session that ended stays listed, with
-        its last state but no pid or status."""
-        return self._process.get(short, False)
+        """Whether the turn's process runs now."""
+        turn = self._turn(short)
+        return turn is not None and turn.proc.returncode is None
+
+    def result(self, short: str) -> tuple[str, str]:
+        """(the result line's text, the end of stderr) of the turn, '' for each it lacks."""
+        turn = self._turn(short)
+        return (turn.result, turn.stderr.strip()[-SESSION_WORDS_CHARS:]) if turn is not None else ("", "")
 
     def stop(self, short: str | None) -> None:
-        """End the session's process; its conversation stays. Blocking and quick; never raises."""
+        """End a process and the processes it started; the conversation stays. A turn's id ends that turn alone, once
+        it has ended nothing; a session's id ends each of its turns that runs. A session this server runs no turn of,
+        whose process a server that died left running, is found by its id on a `claude` command line. Blocking and
+        quick; never raises."""
         if not short:
             return
-        self._process.pop(short, None)
-        try:
-            subprocess.run([CLAUDE_BIN, "stop", short], capture_output=True, text=True, timeout=CLI_TIMEOUT_S,
-                           env=_cli_env())
-        except (OSError, subprocess.SubprocessError):
-            log.debug("could not stop background session %s", short, exc_info=True)
+        turn = self._turns.get(short)
+        if turn is not None:
+            pids = [turn.proc.pid] if turn.proc.returncode is None else []
+        else:
+            sid = short.split("/", 1)[0]
+            mine = [t for t in self._turns.values() if t.sid == sid]
+            pids = [t.proc.pid for t in mine if t.proc.returncode is None]
+            if not mine and len(sid) >= 32:
+                pids = [pid for pid, argv in procs.commands().items()
+                        if sid in argv and any(a in ("-p", "--print") for a in argv)]
+        for pid in pids:
+            _end_group(pid)
 
     def transcript(self, session_id: str) -> Path | None:
         found = find_transcript(session_id)
         return Path(found) if found else None
 
 
+class _Turn:
+    """The process of one turn of a `claude -p` session (Sessions): its stdin fed with the message and closed, its
+    stdout read for the last `result` line, its stderr kept for a failure."""
+
+    def __init__(self, proc: asyncio.subprocess.Process, sid: str) -> None:
+        self.proc, self.sid = proc, sid
+        self.task: asyncio.Task | None = None
+        self.result = ""
+        self.is_error = False
+        self.api_status: int | None = None
+        self.stderr = ""
+
+    async def follow(self, prompt: str) -> None:
+        assert self.proc.stdin is not None and self.proc.stdout is not None and self.proc.stderr is not None
+        with contextlib.suppress(BrokenPipeError, ConnectionResetError):
+            self.proc.stdin.write(prompt.encode("utf-8"))
+            await self.proc.stdin.drain()
+        with contextlib.suppress(Exception):
+            self.proc.stdin.close()
+
+        async def errors() -> None:
+            async for raw in self.proc.stderr:  # type: ignore[union-attr]
+                self.stderr = (self.stderr + raw.decode("utf-8", "replace"))[-4000:]
+
+        reading = asyncio.ensure_future(errors())
+        try:
+            async for raw in self.proc.stdout:
+                try:
+                    rec = json.loads(raw)
+                except ValueError:
+                    continue
+                if isinstance(rec, dict) and rec.get("type") == "result":
+                    self.result = str(rec.get("result") or "").strip() or self.result
+                    self.is_error = bool(rec.get("is_error"))
+                    status = rec.get("api_error_status")
+                    self.api_status = status if isinstance(status, int) else None
+            await self.proc.wait()
+            with contextlib.suppress(asyncio.TimeoutError):
+                await asyncio.wait_for(reading, 5.0)
+        finally:
+            reading.cancel()
+
+
+STOP_WAIT_S = 3.0  # after SIGTERM to a session's process group, before SIGKILL (_end_group)
+
+
+def _end_group(pid: int) -> None:
+    """SIGTERM to the process group of `pid`, SIGKILL after STOP_WAIT_S, then SIGKILL to whatever is left of the
+    processes it started, since Claude Code runs each Bash command in a group of its own. Blocking."""
+    tree = procs.descendants(pid)
+    for sig in (signal.SIGTERM, signal.SIGKILL):
+        with contextlib.suppress(ProcessLookupError, PermissionError):
+            os.killpg(pid, sig)
+        deadline = time.monotonic() + STOP_WAIT_S
+        while procs.alive(pid) and time.monotonic() < deadline:
+            time.sleep(0.1)
+        if not procs.alive(pid):
+            break
+    for child in tree:
+        if procs.alive(child):
+            with contextlib.suppress(ProcessLookupError, PermissionError):
+                os.kill(child, signal.SIGKILL)
+
+
 SESSIONS = Sessions()
-_BG_ID_RE = re.compile(r"^backgrounded\W+([0-9a-f]{8})\b", re.MULTILINE)
-IDENTIFY_POLL_S = 1.0  # between two listings while a session is identified (Sessions._identify)
-
-
-def _names_itself(entry: dict[str, Any]) -> bool:
-    """Whether a `claude agents` entry's session id is the session its id names: a background session's id is the
-    first eight characters of its session id (Sessions._identify)."""
-    short, sid = str(entry.get("id") or ""), str(entry.get("sessionId") or "")
-    return not short or not sid or sid.startswith(short)
-
-
-def _bg_id(out: str) -> str | None:
-    """The short id `claude --bg` prints on its `backgrounded · <id> · <name>` line, or None."""
-    m = _BG_ID_RE.search(out or "")
-    return m.group(1) if m else None
 
 
 class Tail:
-    """A background session's transcript read as it grows, written into the ticket's chat: the assistant's text and tool
+    """A session's transcript read as it grows, written into the ticket's chat: the assistant's text and tool
     calls (summarized, never file contents) and the results that answer them. Other records and lines that do not parse
-    are skipped: the chat is a view of the session, and the session itself stays the record (`claude attach`)."""
+    are skipped: the chat is a view of the session, and the session itself stays the record."""
 
     def __init__(self, session_id: str, pos: int = 0, *, after: str | None = None, copied: "set[str] | None" = None) -> None:
         self.session_id = session_id
@@ -1800,21 +1800,15 @@ async def _worker_turn(run: Run, run_log: Log, cwd: Path, prompt: str, resume: s
                        add_dirs: "tuple[Path, ...] | list[Path]" = (), env: dict[str, str] | None = None,
                        answered: bool = True, fence: dict[str, Any] | None = None,
                        asking: dict[str, Any] | None = None, models: dict[str, Any] | None = None) -> str:
-    """One turn of a ticket's background session, started with `prompt` or woken with it when `resume` names the
-    session, then watched until the turn ends, its transcript copied into the chat. A turn that ends while the session's
-    own workflows or background agents run (Tail.background) goes on, since their results start its next turn: the
-    session is not stopped while one of them runs, and the turn ends with the last turn they lead to, or when the
-    session itself ends. The transcript is read every POLL_S;
-    while it grows the session works, and once it is quiet `claude agents` is asked for the session's state, at gaps that
-    double up to STATE_GAP_MAX_S while that state stays working or blocked. `on_session(short id, full id)` records the
-    session. The turn has no time limit: once neither its transcript nor its subagents' have grown for QUIET_NOTE_S, the
-    chat gets QUIET_LINE, and again each time that time doubles, unless the session waits on the analyst (a permission
-    request on the card or a question). Returns the session's report; SessionError when it ended any way but done or
-    waited ASK_TIMEOUT_S on a question (the session is then stopped). With `answered` False, a
-    `blocked` session whose transcript shows its turn ended counts as ended, since Claude Code lists a finished turn
-    `blocked` when its last message reads as a question. A turn that ended on an API error is not a question: a view
-    ticket's turn returns the error text, a code ticket's raises it. `asking` is how it asks and `models` its model
-    settings (Sessions._flags); while one of its permission requests waits on the card, it is no question."""
+    """One turn of a ticket's session, started with `prompt` or continued with it when `resume` names the session, then
+    watched until its process ends, its transcript copied into the chat. --print waits for the session's own workflows
+    and background agents before it ends (agent_session.BG_WAIT_ENV), so the turn ends with the last turn they lead to.
+    The transcript is read every POLL_S. `on_session(id, session id)` records the session. The turn has no time limit:
+    once neither its transcript nor its subagents' have grown for QUIET_NOTE_S, the chat gets QUIET_LINE, and again each
+    time that time doubles, unless a permission request of its waits on the card. Returns the session's report;
+    SessionError when it ended any way but done. A turn that ended on an API error returns the error text when
+    `answered` is False (a view build, which tells a capacity error from others), and raises it otherwise. `asking` is
+    how it asks and `models` its model settings (Sessions._flags)."""
     from . import agent_session  # noqa: PLC0415
 
     fenced = {**({"fence": fence} if fence else {}), **({"asking": asking} if asking else {}),
@@ -1827,7 +1821,7 @@ async def _worker_turn(run: Run, run_log: Log, cwd: Path, prompt: str, resume: s
         sess = await SESSIONS.resume(cwd, resume, prompt, env=env, name=name, workspace=workspace,
                                      add_dirs=add_dirs, **fenced)
         if sess["session_id"] != resume:
-            # the resume started a copy under a new id: follow the turn in the copy's transcript
+            # the resume continued the conversation under a new id: follow the turn in that transcript
             tail = Tail(sess["session_id"], after=prompt, copied=_uuids(SESSIONS.transcript(resume)))
     else:
         sess = await SESSIONS.start(cwd, prompt, name=name, workspace=workspace, add_dirs=add_dirs, env=env,
@@ -1836,113 +1830,48 @@ async def _worker_turn(run: Run, run_log: Log, cwd: Path, prompt: str, resume: s
     run.session, run.session_id = sess["id"], sess["session_id"]
     on_session(run.session, run.session_id)
     if answered:
-        run_log.stage(f"background session {run.session} woken" if resume else
-                      f"background session {run.session} (`claude attach {run.session}` opens it)")
-    waiting, unlisted, early, idle = False, 0, 0, 0
-    asked_at = 0.0
-    gap, looked = POLL_S, 0.0  # between two looks at the session's state, which doubles while it stays the same
+        run_log.stage(f"session {run.session_id[:8]} continued" if resume else f"session {run.session_id[:8]} started")
+    unlisted = 0
     active, quiet_note = time.monotonic(), QUIET_NOTE_S  # the session's last sign of activity; the next QUIET_LINE's time
-    held = False  # the thread has said that the session waits for its own background work (BACKGROUND_LINE)
-    gone = 0  # looks in a row that found no process running the session's background work
     while True:
         await asyncio.sleep(POLL_S)
         pos = tail.pos
         tail.read(run_log)
         now = time.monotonic()
         on_card = bool(key and workspace and agent_session.asking(workspace, key))
-        if tail.subagents_grew() or tail.pos != pos or on_card or waiting:
+        if tail.subagents_grew() or tail.pos != pos or on_card:
             active, quiet_note = now, QUIET_NOTE_S
         elif now - active >= quiet_note:
             run_log.stage(QUIET_LINE.format(minutes=_minutes(quiet_note)))
             quiet_note *= 2
-        if waiting and time.monotonic() - asked_at > ASK_TIMEOUT_S:
-            state = "unanswered"
-            break
-        held = held and bool(tail.background())
-        ended = tail.turn_ended and not tail.background()  # the turn is over and so is the session's background work
-        if tail.pos != pos and not ended:
-            unlisted, gap = 0, POLL_S
-            if not waiting:
-                continue  # the transcript grew: the session works
-            looked = 0.0  # it grew while the session waited for an answer: its state says whether it still waits
-        if not ended and time.monotonic() - looked < gap:
-            continue
         state = await SESSIONS.state(cwd, run.session)
-        looked = time.monotonic()
-        pos = tail.pos
-        tail.read(run_log)
-        if tail.pos != pos and not waiting and not (tail.turn_ended and not tail.background()):
-            continue  # the transcript grew during the look: the session works, or a turn its background work started
-        if tail.background() and state in LIVE_STATES and (tail.turn_ended or state in ("idle", "done")):
-            # its own workflows or background agents run on, and their results start its next turn: the session is not
-            # stopped, whatever its state says of the task, while its process runs them
-            if not SESSIONS.has_process(run.session):
-                gone += 1  # it takes two looks in a row, so that one odd listing fails no build
-                if gone > 1:
-                    state = "lost"
-                    break
-                gap = POLL_S
-                continue
-            gone = 0
-            if not held:
-                run_log.stage(BACKGROUND_LINE.format(n=tail.background()))
-                held = True
-            waiting, unlisted, idle, early = False, 0, 0, 0
-            gap = min(gap * 2, STATE_GAP_MAX_S)
-            continue
-        gone = 0
-        gap = min(gap * 2, STATE_GAP_MAX_S) if state in ("working", "blocked") else POLL_S
         if state == "working":
-            waiting, unlisted = False, 0
-            continue
-        if state == "idle":
-            # the process is idle while the listing says working: the turn is over once the transcript says so, or after
-            # as many polls as a session may go unlisted
-            idle += 1
-            if tail.turn_ended or idle > UNLISTED_POLLS:
-                state = "done"
-                break
-            continue
-        if state == "blocked":
-            # Claude Code lists the session blocked a moment before the transcript's turn_duration record, so read it
-            # again first
-            tail.read(run_log)
-            if tail.turn_ended and (tail.api_error or not answered):
-                state = "done" if not answered else "api error"
-                break
-            if key and workspace and agent_session.asking(workspace, key):
-                waiting = False  # it waits on the card, which denies the request in time
-                continue
-            if not waiting:
-                if not tail.api_error:
-                    run_log.stage(f"the session is waiting for an answer; `claude attach {run.session}` opens it")
-                waiting, asked_at = True, time.monotonic()
+            unlisted = 0
             continue
         if state is None and unlisted < UNLISTED_POLLS:
             unlisted += 1
             continue
-        if state == "done" and not tail.turn_ended and early < UNLISTED_POLLS:
-            early += 1  # a woken session can still list its last turn's `done` before this turn begins
-            continue
         break
     tail.read(run_log)
-    # Stopping an idle session frees its process; a follow-up starts it again (Sessions.resume).
-    await asyncio.to_thread(SESSIONS.stop, run.session)
-    if state == "unanswered":
-        raise SessionError(ASK_TIMED_OUT.format(wait=_minutes(ASK_TIMEOUT_S)))
-    if state != "done":
-        # the session's last words are most often the reason, so they go in the error
-        last = " ".join(tail.last_text.split())[:SESSION_WORDS_CHARS]
-        if state == "api error":
-            raise SessionError(f"Anthropic's API ended the session's turn: {last}")
-        if state == "lost":
-            raise SessionError(LOST_LINE + (f": {last}" if last else ""))
-        raise SessionError(f"the background session ended {state or 'without a trace in claude agents'}"
-                           + (f": {last}" if last else ""))
-    return tail.last_text
+    await asyncio.to_thread(SESSIONS.stop, run.session)  # whatever it started that outlived it
+    if state == "done" and not tail.background():
+        return tail.last_text
+    # the session's last words are most often the reason, so they go in the error
+    said, errors = SESSIONS.result(run.session)
+    last = " ".join((tail.last_text or said or errors).split())[:SESSION_WORDS_CHARS]
+    if state == "done":
+        # --print ended while a workflow or background agent of the session still ran (a wait Claude Code cut short),
+        # so the gates would run on half-finished work
+        raise SessionError(LOST_LINE + (f": {last}" if last else ""))
+    if state == "api error":
+        if not answered:
+            return tail.last_text or said
+        raise SessionError(f"Anthropic's API ended the session's turn: {last}")
+    raise SessionError(f"the session ended {state or 'without a trace'}" + (f": {last}" if last else ""))
 
 
 SESSION_WORDS_CHARS = 300  # of a session's last text in the error of a session that ended any way but done
+LOST_LINE = "the session ended before its background work finished"
 
 
 def _minutes(seconds: float) -> str:
@@ -2755,7 +2684,7 @@ def view_network_line(c: str) -> str:
 
 def view_check_command(c: str, slug: str) -> str:
     """The command a view build's session checks its draft with (view_check.py): this server's interpreter without
-    site-packages, the script, thimble's home (whose server.json holds the token the post proves; a background session's
+    site-packages, the script, thimble's home (whose server.json holds the token the post proves; the session's
     environment does not name it), the view's folder (where the request goes as a file when the post cannot reach the
     server) and the view's check URL. The fence runs it outside the sandbox by this prefix."""
     from . import views  # noqa: PLC0415
@@ -3318,7 +3247,7 @@ _review_runs: dict[tuple[str, str], Run] = {}  # (workspace, slug) -> the revisi
 
 
 def stop_review_session(c: str, slug: str) -> None:
-    """Stop the background session of the view review's revision, if one runs (view_review.stop)."""
+    """Stop the session of the view review's revision, if one runs (view_review.stop)."""
     run = _review_runs.get((c, slug))
     if run is not None:
         SESSIONS.stop(run.session)
@@ -3463,7 +3392,7 @@ def fix_contained() -> bool:
 
 
 async def fix_offline(doctor: str, approve: Approve, title: str = "fix: thimble server is down") -> str:
-    """`thimble fix`: one ticket on prompts/dev-fix.md, run by a background session in a worktree without a stack and
+    """`thimble fix`: one ticket on prompts/dev-fix.md, run by a session in a worktree without a stack and
     fast-forwarded into the live checkout once `approve` says yes; the caller restarts the server, and has asked the
     analyst's Allow (CODE_QUESTION) in the terminal first where the ticket is not contained (fix_contained)."""
     t = file_ticket(None, title, FIX_BODY, "terminal", start=False)
@@ -3567,6 +3496,15 @@ def orient_running() -> list[str]:
         except (OSError, ValueError, AttributeError):
             continue
     return out
+
+
+def agents_running() -> list[str]:
+    """Workspaces where an orientation runs (orient_running) or another of thimble's agents that show in the agent tray
+    does, a writer or a critique: a restart would cut their runs short, and the critic's is not resumed."""
+    from . import agent_session, tray  # noqa: PLC0415 — both import modules that import this one
+
+    held = {run.c for run in list(agent_session._runs.values()) if tray.shown_in_tray(run.key) and not run.stopping}
+    return sorted({*orient_running(), *held})
 
 
 def restart_file() -> Path:
@@ -3682,8 +3620,8 @@ def recover_rollback() -> dict[str, Any] | None:
 
 
 async def request_restart(t: dict[str, Any] | None, reason: str = "ticket") -> str:
-    """Restart now, or defer while an orientation runs; on a server the supervisor did not start, neither (the ticket's
-    restart is "manual" and its chip says so). "restarting" | "restart_pending" | "manual"."""
+    """Restart now, or defer while an orientation, a writer or a critique runs (agents_running); on a server the
+    supervisor did not start, neither (the ticket's restart is "manual" and its chip says so). "restarting" | "restart_pending" | "manual"."""
     global _restart_pending, _poller
     title = str((t or {}).get("title") or reason)
     if t and t.get("id") and _reloads(t.get("touched") or []):
@@ -3697,7 +3635,7 @@ async def request_restart(t: dict[str, Any] | None, reason: str = "ticket") -> s
                 _chip(rec, APPLIED_RESTART_LINE.format(label=_label(rec)))
         log.info("not restarting for %r: this server was not started by the supervisor", title)
         return "manual"
-    running = orient_running()
+    running = agents_running()
     if running:
         _restart_pending = {"ticket_id": (t or {}).get("id"), "title": title, "requested": _now(), "waiting_on": running}
         if t and t.get("id"):
@@ -3718,16 +3656,16 @@ async def request_restart(t: dict[str, Any] | None, reason: str = "ticket") -> s
 async def _pending_poller() -> None:
     while _restart_pending is not None:
         await asyncio.sleep(2.0)
-        if _restart_pending is not None and not orient_running():
+        if _restart_pending is not None and not agents_running():
             await orient_ended(None)
             return
 
 
 async def orient_ended(c: str | None) -> None:
-    """Fires a deferred restart once no orientation is running. The pending poller calls it, since an
-    orientation's end is recorded only in orient/run.json (orientation.finished)."""
+    """Fires a deferred restart once no orientation, writer or critique is running (agents_running). The pending poller
+    calls it, since an orientation's end is recorded only in orient/run.json (orientation.finished)."""
     global _restart_pending
-    if _restart_pending is None or orient_running():
+    if _restart_pending is None or agents_running():
         return
     pending, _restart_pending = _restart_pending, None
     if pending.get("ticket_id"):

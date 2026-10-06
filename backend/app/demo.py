@@ -228,9 +228,14 @@ def _run_record(data: bytes) -> bytes:
 LIVE = ("running", "working", "starting", "queued", "pending")  # a chat's statuses while its session runs
 
 
+# what a chat's meta keeps of the process that ran it, and of the background session an earlier version ran it as,
+# whose short id names a session of the maintainer's machine (chat_meta, install)
+PROCESS_FIELDS = ("pid", "server", "follow", "background", "bg")
+
+
 def chat_meta(data: bytes) -> tuple[bytes, bool]:
-    """A chat's meta with what belonged to a running process taken out (pid, server, the transcript offset its follower
-    kept), and a status that says it runs written `done`, since nothing runs in an installed pre-cache (a `stopped` card
+    """A chat's meta with what belonged to a running process taken out (PROCESS_FIELDS: pid, server, the transcript
+    offset its follower kept, the background session an earlier version ran it as), and a status that says it runs written `done`, since nothing runs in an installed pre-cache (a `stopped` card
     offers a Resume that has no session to resume); and whether it said so. The export names these chats, as one may not
     have finished."""
     try:
@@ -239,7 +244,7 @@ def chat_meta(data: bytes) -> tuple[bytes, bool]:
         return data, False
     if not isinstance(meta, dict):
         return data, False
-    for k in ("pid", "server", "follow"):
+    for k in PROCESS_FIELDS:
         meta.pop(k, None)
     live = meta.get("status") in LIVE
     if live:
@@ -538,6 +543,20 @@ def holds_work(ws: Path) -> bool:
     return any(p.name != "investigation.json" for p in (ws / "investigations" / "main").glob("*.json"))
 
 
+CHAT_META_RE = re.compile(r"^chats/[^/]+\.meta\.json$")
+
+
+def _without(data: bytes, keys: "tuple[str, ...]") -> bytes:
+    """A JSON object's bytes without `keys`; `data` itself when it is no object or has none of them."""
+    try:
+        obj = json.loads(data)
+    except ValueError:
+        return data
+    if not isinstance(obj, dict) or not any(k in obj for k in keys):
+        return data
+    return json.dumps({k: v for k, v in obj.items() if k not in keys}, ensure_ascii=False, indent=1).encode()
+
+
 def install(src: Path, ws: Path, corpus: Path, *, home: Path | None = None,
             claude_dir: Path | None = None) -> dict[str, Any]:
     """Install the pre-cache folder `src` as the workspace folder `ws` (which must not exist), its placeholders filled
@@ -582,6 +601,8 @@ def install(src: Path, ws: Path, corpus: Path, *, home: Path | None = None,
             data = p.read_bytes()
             if is_text(Path(rel), data):
                 data = fill(rel, data.decode("utf-8")).encode("utf-8")
+            if CHAT_META_RE.match(rel):  # a pre-cache exported before chat_meta took these out
+                data = _without(data, PROCESS_FIELDS)
             dest = tmp / rel
             dest.parent.mkdir(parents=True, exist_ok=True)
             dest.write_bytes(data)
@@ -854,8 +875,8 @@ def attach_lines(opened: list[tuple[Dataset, Path, str | None]], precached: bool
     if precached:
         out.append("To continue a pre-cached orientation, type in its thread (Orientation) in the page, or ask main to "
                    "message the orientation: its Claude Code session resumes with everything it read and did. While "
-                   "it runs, `claude agents` lists it as `thimble:orient · <name>` and `claude attach <id>` opens it in "
-                   "a terminal.")
+                   "it runs, its thread shows its work, and an attached session shows it in Claude Code's agent tray "
+                   "as `thimble:orient · <name>`.")
     out.append("`thimble demo --attach` starts main directly.")
     return out
 

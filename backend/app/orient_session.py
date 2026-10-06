@@ -41,8 +41,7 @@ analyst when its build passed its checks); the report is asked for once no follo
 Restarts. A run a server stop cut short is resumed by the next server with `--resume` in the same chat. A failed first
 run is resumed as run 0 when start_orientation asks for the same orientation again, rather than redoing its work.
 
-The session runs as the background session `thimble:orient · <c>` (agent_session's `background`), which the analyst's
-terminal shows in its agent tray.
+The session shows in the analyst's agent tray as `thimble:orient · <c>` (tray.py).
 
 Follow-ups. Messages from main's `message_orientation` tool or the thread's composer go through message(): a finished
 orientation's session is resumed with the message in `## orient-follow-up`; a message sent while a run goes waits in the
@@ -65,8 +64,8 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from . import (agent_session, agents, bg_session, cc_settings, config, ledger, orient_checks, orientation, prompts,
-               tools, userconf, work_files)
+from . import (agent_session, agents, cc_settings, config, ledger, orient_checks, orientation, prompts, tools, tray,
+               userconf, work_files)
 
 log = logging.getLogger("thimble.orient_session")
 router = APIRouter()
@@ -99,6 +98,7 @@ BLOCKS = {"instructions": INSTRUCTIONS}
 _MARKS = {"request": "\x00request\x00", "instructions": "\x00instructions\x00"}
 BROWSER = "browser"  # `by` of a message typed in the orientation's thread
 MAIN = "main"  # `by` of a message main's message_orientation sent
+TERMINAL = "terminal"  # `by` of a message the analyst typed in a tray entry of the orientation or its critic (tray.py)
 EXTENSION = "extension"  # `by` of an extension's orientation instructions, sent when it starts running here
 COVERAGE_NOTES = 2  # the coverage note is given once and repeated at most once in a run (coverage)
 
@@ -221,7 +221,7 @@ def _launch(c: str, brief: str, passes: "list[str]", choices: dict[str, Any]) ->
                 agent_args=["--agents", json.dumps(defined, ensure_ascii=False), "--agent", name], effort=effort,
                 settings=agent_session.settings_json(effort, env, ultracode=ultracode, fastMode=bool(own["fast"])),
                 agent_type=name, append_shared=False, model=own["model"], work=work_dir(c), calls=True,
-                agent="orient", disallowed=disallowed(parts), background=True)
+                agent="orient", disallowed=disallowed(parts))
 
 
 _starting: set[str] = set()  # the workspaces whose orientation is starting now (start)
@@ -413,7 +413,8 @@ def _lead(messages: "list[dict[str, Any]]") -> str:
         if m.get("by") == EXTENSION:
             who = tools.hint("orient-from-extension", extension=m.get("extension") or "")
         else:
-            who = tools.hint("orient-from-main" if m.get("by") == MAIN else "orient-from-analyst")
+            who = tools.hint({MAIN: "orient-from-main", TERMINAL: "orient-from-terminal"}.get(str(m.get("by") or ""),
+                                                                                           "orient-from-analyst"))
         parts.append(f"{who}\n\n{str(m.get('text') or '').strip()}")
     return tools.hint("orient-follow-up", messages="\n\n".join(parts))
 
@@ -430,9 +431,9 @@ def _chat_of(c: str) -> tuple[dict[str, Any], str, str]:
 
 
 async def message(c: str, text: str, by: str = MAIN, call: str | None = None, extension: str = "") -> dict[str, Any]:
-    """The one server function a follow-up goes through: `text` from `by` (MAIN, BROWSER or EXTENSION, whose title is
-    `extension`) resumes the finished orientation, {status: resumed, chat, run}, or waits for the run going, {status:
-    queued, chat, queued}. `call` is main's message_orientation call. ValueError for an empty message, NoOrientation,
+    """The one server function a follow-up goes through: `text` from `by` (MAIN, BROWSER, TERMINAL or EXTENSION, whose
+    title is `extension`) resumes the finished orientation, {status: resumed, chat, run}, or waits for the run going,
+    {status: queued, chat, queued}. `call` is main's message_orientation call. ValueError for an empty message, NoOrientation,
     Gone."""
     text = str(text or "").strip()
     if not text:
@@ -441,7 +442,7 @@ async def message(c: str, text: str, by: str = MAIN, call: str | None = None, ex
     if program is not None:
         return program
     rec, chat, sid = _chat_of(c)
-    entry = {"text": text, "by": by if by in (MAIN, BROWSER, EXTENSION) else MAIN, "ts": _now()}
+    entry = {"text": text, "by": by if by in (MAIN, BROWSER, TERMINAL, EXTENSION) else MAIN, "ts": _now()}
     if entry["by"] == EXTENSION:
         entry["extension"] = extension
     if running(c) or orientation.running(c):
@@ -504,8 +505,7 @@ def _show_queue(c: str, chat: str, queue: "list[dict[str, Any]]") -> None:
 async def resume(c: str, messages: "list[dict[str, Any]]", call: str | None = None,
                  announce: bool = True) -> agent_session.Run:
     """Resume the orientation's session with `messages` as run k+1; Gone when Claude Code no longer keeps its
-    transcript, NoOrientation when there is none, RuntimeError when it cannot start. A background session that started
-    a turn on its own takes no messages: the run follows it (_woken)."""
+    transcript, NoOrientation when there is none, RuntimeError when it cannot start."""
     from . import session  # noqa: PLC0415
 
     rec, chat, sid = _chat_of(c)
@@ -636,6 +636,8 @@ def _ended(run: agent_session.Run, status: str, summary: str) -> None:
         orientation.record(c, queue=[])
         _show_queue(c, run.chat, [])
     if status == "stopped" or run.interrupted:
+        if queue:
+            tray.not_passed_on(c, KEY, len(queue), "it was stopped")
         return  # the analyst's Stop clears what waited, and asks for no report; so does the server's own stop
     if queue:
         asyncio.get_running_loop().create_task(_resume_queued(c, queue), name=f"orient-follow-up:{c}")
@@ -645,11 +647,8 @@ def _ended(run: agent_session.Run, status: str, summary: str) -> None:
 
 
 def _analyst_stopped(run: agent_session.Run, status: str) -> bool:
-    """Whether the analyst stopped the run: with Stop, or, for a background session, with `claude stop` or the agent
-    view. The server's own stop and a failure are not."""
-    if run.interrupted:
-        return False
-    return status == "stopped" or (run.bg and bg_session.stopped_in_claude(run.c, run.key))
+    """Whether the analyst stopped the run with Stop. The server's own stop and a failure are not."""
+    return not run.interrupted and status == "stopped"
 
 
 async def _resume_queued(c: str, queue: "list[dict[str, Any]]") -> None:
@@ -817,20 +816,6 @@ async def _resume_left(c: str, meta: dict[str, Any], prompt: str) -> agent_sessi
 
 
 agent_session.on_resume(orientation.ROLE, _resume_left)
-
-
-async def _woken(c: str, e: bg_session.Entry) -> agent_session.Run | None:
-    """The orientation's background session started a turn with no run of this server's (bg_session.on_wake): the run a
-    restart cut off is followed again as it was, and any other turn is a follow-up, run k+1."""
-    meta = agents.meta_or_none(c, e.chat)
-    if meta is None:
-        return None
-    if meta.get("status") == "running":
-        return await _resume_left(c, meta, "")
-    return await resume(c, [], announce=False)
-
-
-bg_session.on_wake(tools.ORIENT_SESSION, _woken)
 
 
 # --------------------------------------------------------------------------- tools and routes

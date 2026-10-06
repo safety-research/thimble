@@ -87,8 +87,8 @@ ROUTER_MODULES = [
     "agent_session", "calls", "orient_session",
     # the programs an extension runs a role with (an Agent SDK program or a command), and their sessions
     "harness",
-    # the orientation's, its critic's and the writers' Claude Code background sessions, and their tray entries
-    "bg_session",
+    # the orientation's, its critic's and the writers' tray entries in the analyst's terminal
+    "tray",
     # the card harness (a headless Chromium that draws every card offscreen) and the card check that reads it, and
     # where the check's records and fixes are kept (the Undo of a fix)
     "render", "card_check", "checkstore",

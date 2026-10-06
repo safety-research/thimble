@@ -970,11 +970,10 @@ async def interrupt_route(c: str, chat_id: str) -> dict:
 async def stop_all(c: str) -> list[str]:
     """Stop everything thimble runs for workspace `c`, main's session having ended with none taking over
     (session.disconnected), so nothing works on after the analyst quit: its report checks and card checks, its dev
-    ticket and view builds (dev.stop_workspace), its label runs (concepts.stop_workspace), its sessions (agent_session.wind_down, which parks the orientation's and
-    the writers' for the next session that is main in `c`), its server tasks, its background sessions still alive with
-    no run open (`claude stop`, which keeps their conversations for `claude attach`) and its kernels. Returns what it
-    stopped, for the log."""
-    from . import agent_session, bg_session, card_check, checks, concepts, dev, notebook  # noqa: PLC0415 — each imports this module
+    ticket and view builds (dev.stop_workspace), its label runs (concepts.stop_workspace), its sessions
+    (agent_session.wind_down, which parks the orientation's and the writers' for the next session that is main in
+    `c`), its server tasks and its kernels. Returns what it stopped, for the log."""
+    from . import agent_session, card_check, checks, concepts, dev, notebook  # noqa: PLC0415 — each imports this module
 
     stopped: list[str] = []
     steps: list[tuple[str, Callable[[str], int]]] = [("report check", checks.stop_workspace),
@@ -989,13 +988,6 @@ async def stop_all(c: str) -> list[str]:
     for cc, chat in [k for k in _agent_tasks if k[0] == c]:
         if await stop_agent(cc, chat):
             stopped.append(str((meta_or_none(c, chat) or {}).get("title") or chat))
-    for e in bg_session.entries(c):
-        if bg_session.alive(e) and e.short:
-            try:
-                await asyncio.to_thread(bg_session.stop_cli, e.short)
-                stopped.append(e.name)
-            except Exception:  # noqa: BLE001
-                log.warning("%s: could not stop background session %s", c, e.name, exc_info=True)
     try:
         await notebook.shutdown_workspace(c)
     except Exception:  # noqa: BLE001
@@ -1005,11 +997,10 @@ async def stop_all(c: str) -> list[str]:
 
 def at_work() -> set[str]:
     """The workspaces where this server runs something stop_all stops."""
-    from . import agent_session, bg_session, concepts, dev  # noqa: PLC0415
+    from . import agent_session, concepts, dev  # noqa: PLC0415
 
     return ({c for c, _ in agent_session._runs} | {c for c, _ in _agent_tasks} | dev.workspaces_at_work()
-            | concepts.workspaces_at_work()
-            | {e.c for e in bg_session.entries() if bg_session.alive(e)})
+            | concepts.workspaces_at_work())
 
 
 # --------------------------------------------------------------------------- text helpers other modules import

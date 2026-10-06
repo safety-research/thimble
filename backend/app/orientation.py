@@ -21,10 +21,10 @@ the same session, and its changes land in place, one Undo reverting them all.
 `query` is only ever the analyst's own words typed with Start. A run with a `final` group uses it as its deck. `status`
 is the latest run's, so start_orientation refuses while any run goes.
 
-The orientation's session runs as the Claude Code background session `thimble:orient · <workspace>` (bg_session), which
-the analyst sees in the agent tray of their own terminal through its tray entry (plugin/agents/orient-tray.md) and can
-attach to and message, with everything Start chooses: the orientation role's model, effort and Ultracode, fast mode, its
-permission mode, the critique, the work-folder fence and the editable instructions.
+The orientation's session runs as a `claude -p` session of its own, which the analyst sees in the agent tray of their
+own terminal as `thimble:orient · <workspace>` through its tray entry (tray.py, plugin/agents/orient-tray.md), with
+everything Start chooses: the orientation role's model, effort and Ultracode, fast mode, its permission mode, the
+critique, the work-folder fence and the editable instructions.
 
 When run 0 ends, the held proposals appear, and the orientation's chat gets chips for them. A failed run 0
 runs again in its session when a start asks for the same orientation. When the report was asked for, orient_session

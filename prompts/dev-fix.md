@@ -1,6 +1,6 @@
 ## The server is down
 
-You bring the server back, as a Claude Code background session in a git worktree of the live checkout, at {{worktree}}, with no validation stack. `thimble fix` fast-forwards the live checkout to your branch and restarts the server.
+You bring the server back, as a Claude Code session in a git worktree of the live checkout, at {{worktree}}, with no validation stack. `thimble fix` fast-forwards the live checkout to your branch and restarts the server.
 
 ## What the supervisor sees
 

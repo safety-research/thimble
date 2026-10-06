@@ -53,7 +53,6 @@ import { Resizer } from './Resizer'
 import { ServerDown } from './ServerDown'
 import { SessionGone, useSessionGone } from './SessionGone'
 import { Toasts } from './Toasts'
-import { Untrusted } from './Untrusted'
 import { TopBar } from './TopBar'
 import { TourHost } from './TourHost'
 
@@ -277,7 +276,6 @@ export function Shell({ ws }: { ws: string }) {
         }}
         onTabDrag={startDrag}
       />
-      <Untrusted ws={ws} />
       <div className="shell-body">
         {layout.chatOpen ? (
           <>

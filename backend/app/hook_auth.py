@@ -16,11 +16,11 @@ with the id and prove the whole token the same way, and the answer proves it bac
 id under AGENT_SCOPE, so a route acts for that agent alone.
 
 A session thimble starts tells its tool calls apart from main's by THIMBLE_SESSION, which its shim sends with each
-call. Claude Code's background service hands one session's environment on to others (config.session_env), so that
-name alone proves nothing: each session also gets THIMBLE_SESSION_TOKEN in its --settings `env`, a nonce and its
+call. Any process can set that variable, the user's own sessions included, so the name alone
+proves nothing: each session also gets THIMBLE_SESSION_TOKEN in its --settings `env`, a nonce and its
 HMAC-SHA256 under SESSION_KEY with the workspace and the session's key (session_token), and the server believes the
 name only with a token it signed for that workspace (session_proven). The key is a file in thimble's home that no agent
-may read (userconf.private_paths), and it outlives a restart, as the background sessions do.
+may read (userconf.private_paths), and it outlives a restart, as the sessions a restart resumes do.
 
 A change of permission modes, and an answer to a permission request, must come from the analyst's browser (analyst).
 The dashboard link carries the `ui_key` of server.json after `#k=`; the page trades it for an HttpOnly, SameSite=Strict

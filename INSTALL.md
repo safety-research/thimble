@@ -62,10 +62,10 @@ It asks a question only when this machine leaves it open, so often it asks none:
   bwrap. A yes installs them with sudo and your package manager (apt, dnf or pacman); the question shows the exact
   commands. With a no, thimble's agents won't start until the sandbox works; run install.sh again to set it up.
   `--sandbox-deps` or `--no-sandbox-deps` answers it. macOS has the sandbox built in.
-- **Trust of thimble's folder**, while Claude Code doesn't trust it. The orientation, its critic, the writers and view
-  builds run as Claude Code background sessions in thimble's workspaces folder, which Claude Code starts only in a
-  folder you trust. A yes adds that one folder to `~/.claude.json`. `--trust-workspaces` or `--no-trust-workspaces`
-  answers it.
+
+install.sh no longer asks whether Claude Code should trust thimble's folder: the orientation, its critic, the writers
+and view builds run as `claude -p` sessions, which need no trusted folder. It accepts and ignores `--trust-workspaces`
+and `--no-trust-workspaces` from an earlier version's command line.
 
 install.sh doesn't add thimble to every Claude Code session, and doesn't ask about it: the `thimble` command loads
 thimble's plugin into the sessions it starts. If an earlier install added thimble to every session, that stays;
@@ -137,7 +137,7 @@ marketplace yet (a default install doesn't register it), `on` lists its registra
 the steps it asks about and runs it first. That adds no plugin to your sessions, and `thimble
 uninstall` takes it back. `thimble cc-mod off` undoes it, and `thimble
 cc-mod status` says whether each of the two plugins is on in the folder. They are switched independently: `on` and `off`
-leave the thimble plugin as it is. Sessions you start with `thimble`, and thimble's background sessions (the
+leave the thimble plugin as it is. Sessions you start with `thimble`, and the sessions thimble starts (the
 orientation, critic, writers, checks, task programs and builds), run without the mod; plain `claude` in the folder uses
 it. To use it without installing thimble, see the [mod's README](mods/thimble-cc-mod/README.md).
 
@@ -165,9 +165,9 @@ cd ~/thimble-demo/collusion-wiki && thimble   # main, the session you chat with 
 ```
 
 To continue a pre-cached orientation, type in its thread in the page or ask main to message the orientation: its
-session resumes with everything it read and did. While it runs, `claude agents` lists it as
-`thimble:orient · <name>`, and `claude attach <id>` opens it in a terminal. `--attach` starts main directly instead
-of only opening the page.
+session resumes with everything it read and did. While it runs, its thread shows its work, and an attached session
+shows it in Claude Code's agent tray as `thimble:orient · <name>`. `--attach` starts main directly instead of only
+opening the page.
 
 A workspace that holds an analysis already is left as it is unless `--replace`, which archives it first. Run again,
 it downloads nothing it already has. [demos/README.md](demos/README.md) says what a pre-cache holds and how a
@@ -183,11 +183,11 @@ until `thimble server restart`.
 
 ## Uninstall
 
-`thimble uninstall` asks, then removes the trust entry the install added, the plugin registration that put thimble in
-every Claude Code session, if there is one (or the marketplace `thimble cc-mod on` registered, which turns
-thimble-cc-mod off in the folders it is on in), `~/.local/bin/thimble`, and `~/.thimble`, which holds a Global
-install's workspaces. `--keep-home` keeps `~/.thimble`.
-A clone stays where it is, and so does a downloaded headless Chromium, in Playwright's cache folder.
+`thimble uninstall` asks, then removes the trust entry an earlier install added, the plugin registration that put
+thimble in every Claude Code session, if there is one (or the marketplace `thimble cc-mod on` registered, which turns
+thimble-cc-mod off in the folders it is on in), `~/.local/bin/thimble`, and `~/.thimble`, which holds a Global install's
+workspaces. `--keep-home` keeps `~/.thimble`. A clone stays where it is, and so does a downloaded headless Chromium, in
+Playwright's cache folder.
 
 To delete one workspace and keep the install, `thimble list` shows the workspaces by id and `thimble purge <id>` deletes
 that one and prints each path it deleted. The folder it read and your Claude Code transcripts stay.
@@ -200,10 +200,6 @@ that one and prints each path it deleted. The folder it read and your Claude Cod
 - An empty `.claude/.cc-writes/` folder appears in the folder you start `thimble` in: Claude Code's sandbox is on in
   your own settings, and it makes that folder for main's Bash, which runs in your session. thimble leaves your
   session's settings as they are, and `thimble doctor` says when that sandbox is on.
-- thimble warns that Claude Code does not trust its workspaces folder: the orientation, its critic, the writers and
-  view builds can't start until it does, while your own session keeps working. Run the command the warning gives,
-  `bash <install dir>/scripts/install.sh --trust-workspaces`. Claude Code reads trust only up to the root of a git
-  clone, so a trusted folder above a Dev install's clone doesn't count.
 - Cards are not checked, views are checked without loading their page, or screenshots are unavailable: there is no
   browser (the install's answer, or no Chrome or Edge found), or the machine lacks the headless Chromium's system
   libraries. thimble never downloads a browser by itself. `install.sh --browser system` or `--browser bundled` sets one

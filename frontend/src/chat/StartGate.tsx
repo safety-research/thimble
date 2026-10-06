@@ -5,8 +5,8 @@
 // field's text is the orientation's instructions and may stay empty; its model line (ModelLine) edits the orientation
 // role's settings: the model (a menu of lib/models modelChoices, as RoleChip's), the effort and fast mode. Start sends
 // the analyst's session the `start` event with the instructions as its text and the choices as attributes
-// (prompts/main.md); Skip leaves main to the analyst. The orientation runs as the background session
-// `thimble:orient · <workspace>` with every one of these choices.
+// (prompts/main.md); Skip leaves main to the analyst. The orientation runs as a Claude Code session of its own, shown
+// in the agent tray as `thimble:orient · <workspace>`, with every one of these choices.
 import { useEffect, useRef, useState } from 'react'
 import { Button, Segmented, type SegmentedOption } from '../components/Button'
 import { TextArea } from '../components/Field'

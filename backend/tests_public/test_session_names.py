@@ -1,16 +1,15 @@
 """The names of the Claude Code sessions thimble starts (config.session_name): `thimble:<role> · <workspace>`, since
-`claude agents` lists the sessions of every folder; how bg_session addresses and shows them, a name an earlier build
-gave (`thimble:writer`) or one a model wrote with another separator included, a long name kept short and distinct, and
-main's name as launch-args prints it (cli.main_name) and the launcher passes it."""
+`claude agents` and the agent tray list the sessions of every folder; how tray addresses and shows them, a name an
+earlier build gave (`thimble:writer`) or one a model wrote with another separator included, a long name kept short and
+distinct, and main's name as launch-args prints it (cli.main_name) and the launcher passes it."""
 from __future__ import annotations
 
 import json
-import time
 from pathlib import Path
 
 import pytest
 
-from app import bg_session, cli, config, dev, tools
+from app import tray, cli, config, dev, tools
 
 CORPUS = "mini"
 INSTALLED_COPY = cli.installed_copy  # before conftest's autouse fixture stands it in
@@ -19,10 +18,10 @@ INSTALLED_COPY = cli.installed_copy  # before conftest's autouse fixture stands 
 def test_names_carry_the_workspace():
     assert config.session_name("main", "logs-2") == "thimble:main · logs-2"
     assert config.session_name("dev", None) == "thimble:dev", "a ticket of no workspace"
-    assert bg_session.name_of(CORPUS, "orient") == "thimble:orient · mini"
-    assert bg_session.name_of(CORPUS, "writer:report") == "thimble:writer · mini"
-    assert bg_session.name_of(CORPUS, "writer:story") == "thimble:writer-story · mini"
-    assert bg_session.name_of(CORPUS, "critique") == "thimble:critic · mini"
+    assert tray.name_of(CORPUS, "orient") == "thimble:orient · mini"
+    assert tray.name_of(CORPUS, "writer:report") == "thimble:writer · mini"
+    assert tray.name_of(CORPUS, "writer:story") == "thimble:writer-story · mini"
+    assert tray.name_of(CORPUS, "critique") == "thimble:critic · mini"
     assert dev.dev_session_name(CORPUS) == "thimble:dev · mini"
     assert dev.view_session_name(CORPUS, "board") == "thimble:view-board · mini"
 
@@ -54,99 +53,93 @@ def test_role_drops_the_workspace_only_from_thimble_names():
 @pytest.fixture()
 def followed():
     """Two followed sessions of the workspace: a new one, and one an earlier build named without the workspace."""
-    new = bg_session.Entry(CORPUS, "writer:report", bg_session.name_of(CORPUS, "writer:report"), "ab12cd34", "sid-1",
-                           "chat-1", "writer", "/work/report")
-    old = bg_session.Entry(CORPUS, "critique", "thimble:critic", "ef56ab78", "sid-2", "chat-2", "critique", "/work/c")
-    bg_session._loaded.add(CORPUS)
-    bg_session._entries[(CORPUS, new.key)] = new
-    bg_session._entries[(CORPUS, old.key)] = old
+    new = tray.Entry(CORPUS, "writer:report", tray.name_of(CORPUS, "writer:report"), "ab12cd34-1", "chat-1", "writer",
+                     "/work/report")
+    old = tray.Entry(CORPUS, "critique", "thimble:critic", "ef56ab78-2", "chat-2", "critique", "/work/c")
+    tray._loaded.add(CORPUS)
+    tray._entries[(CORPUS, new.key)] = new
+    tray._entries[(CORPUS, old.key)] = old
     yield new, old
-    bg_session._entries.pop((CORPUS, new.key), None)
-    bg_session._entries.pop((CORPUS, old.key), None)
-    bg_session._loaded.discard(CORPUS)
+    tray._entries.pop((CORPUS, new.key), None)
+    tray._entries.pop((CORPUS, old.key), None)
+    tray._loaded.discard(CORPUS)
 
 
 def test_by_name_matches_the_whole_name_and_its_ref(followed):
     new, old = followed
-    assert bg_session.by_name(CORPUS, "thimble:writer · mini") is new
-    assert bg_session.by_name(CORPUS, "Thimble:Writer · mini [3fa9c1]") is new, "SendMessage's ` [ref]`, any case"
-    assert bg_session.by_name(CORPUS, "thimble:critic") is old, "an earlier build's name is still its address"
+    assert tray.by_name(CORPUS, "thimble:writer · mini") is new
+    assert tray.by_name(CORPUS, "Thimble:Writer · mini [3fa9c1]") is new, "ListAgents' ` [ref]`, any case"
+    assert tray.by_name(CORPUS, "thimble:critic") is old, "an earlier build's name is still its address"
 
 
 def test_by_name_takes_the_role_alone_unless_exact(followed):
     new, _old = followed
-    assert bg_session.by_name(CORPUS, "thimble:writer") is new, "wait_session with the role alone"
-    assert bg_session.by_name(CORPUS, "ab12cd34") is new
-    # Claude Code delivers a SendMessage by the whole name, so `thimble:writer` reaches some other session
-    assert bg_session.by_name(CORPUS, "thimble:writer", exact=True) is None
-    assert bg_session.relay_check(CORPUS, None, "thimble:writer", "hello") is None
+    assert tray.by_name(CORPUS, "thimble:writer") is new, "wait_session with the role alone"
+    assert tray.by_name(CORPUS, "ab12cd34") is new, "the start of its session id"
+    assert tray.by_name(CORPUS, "thimble:writer", exact=True) is None
 
 
 def test_the_tray_entry_is_described_by_the_session_name(followed):
     new, _old = followed
-    hint = bg_session.proxy_start_hint(CORPUS, new.key)
+    hint = tray.proxy_start_hint(CORPUS, new.key)
     assert '`description` "thimble:writer · mini"' in hint
-    prompt = Path(bg_session.proxy_prompt(CORPUS, new.key)).read_text("utf-8")
-    assert 'SendMessage with `to` "thimble:writer · mini"' in prompt
-    assert bg_session._by_tray(CORPUS, "thimble:writer", "thimble:writer · mini") is new
+    prompt = Path(tray.proxy_prompt(CORPUS, new.key)).read_text("utf-8")
+    assert '`wait_session` with `session` "thimble:writer · mini"' in prompt
+    assert "SendMessage" not in prompt and "claude attach" not in prompt and "claude attach" not in hint
+    assert tray._by_tray(CORPUS, "thimble:writer", "thimble:writer · mini") is new
 
 
-def test_record_keeps_the_name_claude_agents_lists(followed, monkeypatch):
-    monkeypatch.setattr(bg_session, "_ensure_watcher", lambda: None)
-    monkeypatch.setattr(bg_session.session, "find_transcript", lambda sid, config_dir=None: None)
-    e = bg_session.record(CORPUS, "orient", short="99aa88bb", sid="sid-9", chat="chat-9", role="orient",
-                          folder=Path("/work/o"), name="thimble:orient")
-    assert e.name == "thimble:orient" and e.shown == "thimble:orient"
-    bg_session._entries.pop((CORPUS, "orient"), None)
-    e = bg_session.record(CORPUS, "orient", short="99aa88bc", sid="sid-9", chat="chat-9", role="orient",
-                          folder=Path("/work/o"))
+def test_a_new_entry_gets_the_name_with_its_workspace(followed, monkeypatch):
+    monkeypatch.setattr(tray, "_ensure_watcher", lambda: None)
+    monkeypatch.setattr(tray.session, "find_transcript", lambda sid, config_dir=None: None)
+    e = tray.record(CORPUS, "orient", sid="sid-9", chat="chat-9", role="orient", folder=Path("/work/o"))
     assert e.name == "thimble:orient · mini" and e.shown == "thimble:orient"
-    bg_session._entries.pop((CORPUS, "orient"), None)
+    tray._entries.pop((CORPUS, "orient"), None)
 
 
 def test_the_statusline_shows_roles_and_the_listing_plain_names():
     rows = [{"name": "thimble:writer · mini", "label": "writer: story", "state": "working"},
             {"name": "fork(thread:probe)", "state": "idle"}]
-    assert bg_session.status_line(rows) == "thimble · ● thimble:writer working · ○ fork(thread:probe) idle"
-    assert bg_session.listing_text(rows).splitlines()[:2] == [f"{'writer: story':<18}  working",
+    assert tray.status_line(rows) == "thimble · ● thimble:writer working · ○ fork(thread:probe) idle"
+    assert tray.listing_text(rows).splitlines()[:2] == [f"{'writer: story':<18}  working",
                                                               "fork(thread:probe)  done"]
-    assert [bg_session.label_of(k) for k in ("orient", "critique:orient", "writer:report", "writer:story")] == [
+    assert [tray.label_of(k) for k in ("orient", "critique:orient", "writer:report", "writer:story")] == [
         "orientation", "critic", "writer", "writer: story"]
-    assert "{label}" not in tools.hint("bg-proxy-start", type="t", session="s", prompt="p", short="x")
+    assert "{label}" not in tools.hint("bg-proxy-start", type="t", session="s", prompt="p")
 
 
 async def test_the_agents_list_and_the_start_lines_name_each_agent_in_plain_words(followed, monkeypatch):
     """/thimble:agents and the lines main's terminal prints as a session starts name it by what it does, with no
     session name, id or command; the statusline keeps the roles."""
     _new, old = followed
-    old.status, old.waiting_for = "waiting", "permission"
+    old.status = "waiting"
     monkeypatch.setattr(config, "workspace_for_cwd", lambda cwd: CORPUS)
-    monkeypatch.setattr(bg_session, "_announced", {})
-    monkeypatch.setattr(bg_session, "_announced_loaded", {CORPUS})
-    monkeypatch.setattr(bg_session, "_save_announced", lambda c: None)
-    got = await bg_session.agents_route(bg_session.AgentsQuery(cwd="/work", session="main-1", announce=True))
+    monkeypatch.setattr(tray, "_announced", {})
+    monkeypatch.setattr(tray, "_announced_loaded", {CORPUS})
+    monkeypatch.setattr(tray, "_save_announced", lambda c: None)
+    got = await tray.agents_route(tray.AgentsQuery(cwd="/work", session="main-1", announce=True))
     assert got["text"] == "writer  working\ncritic  waiting for you\n\n↓ to follow any of them"
     assert got["announce"] == "writer started: ↓ to follow it\ncritic started: ↓ to follow it"
     assert got["line"] == "thimble · ● thimble:writer working · ◐ thimble:critic waiting for a permission"
 
 
-async def test_a_new_session_is_starting_and_a_finish_line_leaves_out_a_result_of_a_word_or_two(followed, monkeypatch):
-    """A session the listings have not shown yet is starting, not restarting; a run's finish line in main's terminal
-    carries the session's result unless it is a word or two, such as "Done.", which says no more than the line."""
+async def test_a_run_s_end_line_leaves_out_a_result_of_a_word_or_two_and_says_how_it_ended(followed, monkeypatch):
+    """A run's end line in main's terminal carries the session's result unless it is a word or two, such as "Done.",
+    which says no more than the line, and says when the run was stopped or failed."""
     new, old = followed
-    new.missing_since, new.pid = time.monotonic(), None
-    old.missing_since, old.pid = time.monotonic(), 4242
-    assert [bg_session.state_words(e) for e in (new, old)] == ["starting", "restarting"]
-    assert bg_session.plain_state("starting") == "starting"
-    new.missing_since = old.missing_since = 0.0
     monkeypatch.setattr(config, "workspace_for_cwd", lambda cwd: CORPUS)
-    monkeypatch.setattr(bg_session, "_announced", {(CORPUS, "main-1"): ({new.short, old.short}, {})})
-    monkeypatch.setattr(bg_session, "_announced_loaded", {CORPUS})
-    monkeypatch.setattr(bg_session, "_save_announced", lambda c: None)
-    new.ended_at, new.run_open, new.result = 1.0, False, "Done."
-    old.ended_at, old.run_open, old.result = 2.0, False, "Wrote three cards about the failed links."
-    got = await bg_session.agents_route(bg_session.AgentsQuery(cwd="/work", session="main-1", announce=True))
-    assert got["announce"] == "writer finished\ncritic finished: Wrote three cards about the failed links."
+    monkeypatch.setattr(tray, "_announced", {(CORPUS, "main-1"): ({new.short, old.short}, {})})
+    monkeypatch.setattr(tray, "_announced_loaded", {CORPUS})
+    monkeypatch.setattr(tray, "_save_announced", lambda c: None)
+    new.ended_at, new.run_open, new.result, new.status = 1.0, False, "Done.", "done"
+    old.ended_at, old.run_open, old.result, old.status = 2.0, False, "Wrote three cards about the failed links.", "done"
+    got = await tray.agents_route(tray.AgentsQuery(cwd="/work", session="main-1", announce=True))
+    assert got["announce"] == "writer finished its task\ncritic finished its task: Wrote three cards about the failed links."
+    new.ended_at, new.status, new.result = 3.0, "stopped", ""
+    old.ended_at, old.status, old.result = 4.0, "failed", "Anthropic's API is overloaded right now"
+    got = await tray.agents_route(tray.AgentsQuery(cwd="/work", session="main-1", announce=True))
+    assert got["announce"] == "writer was stopped\ncritic failed: Anthropic's API is overloaded right now"
+    assert got["rows"] == [] or all(r["kind"] != "session" for r in got["rows"]), "no run goes"
 
 
 def test_main_name_is_the_workspace_slash_thimble_opens(tmp_path, monkeypatch):
@@ -287,36 +280,14 @@ def test_without_the_plugin_registered_the_launcher_loads_its_own_plugin_folder(
 def test_by_name_takes_the_role_before_any_separator(followed):
     new, _old = followed
     for mangled in ("thimble:writer - mini", "thimble:writer • mini", "thimble:writer·mini", "thimble:writer  ·  mini"):
-        assert bg_session.by_name(CORPUS, mangled) is new, mangled
-        assert bg_session.by_name(CORPUS, mangled, exact=True) is None
+        assert tray.by_name(CORPUS, mangled) is new, mangled
+        assert tray.by_name(CORPUS, mangled, exact=True) is None
 
 
 def test_a_peer_messages_sender_is_found_in_a_slugged_name(followed):
     new, old = followed
-    assert bg_session.by_origin(CORPUS, "thimble:writer · mini") is new
-    assert bg_session.by_origin(CORPUS, "thimble-writer-mini") is new
-    assert bg_session.by_origin(CORPUS, "thimble-writer") is new
-    assert bg_session.by_origin(CORPUS, "thimble-critic") is old
-    assert bg_session.by_origin(CORPUS, "thimble-dev") is None
-
-
-def test_a_session_started_again_keeps_its_start_flags(monkeypatch, tmp_path, workspaces_tmp):
-    """Claude Code keeps none of an ended session's options, so a session started again is passed its whole argv."""
-    import asyncio
-
-    calls: list[list[str]] = []
-    sid = "0123abcd-0000-0000-0000-000000000000"
-
-    def cli(bin_, args, env, cwd=None, timeout=0):
-        calls.append(args)
-        return 0, "backgrounded · 9999ffff"
-
-    monkeypatch.setattr(bg_session.shutil, "which", lambda *a, **k: "/bin/claude")
-    monkeypatch.setattr(bg_session, "_cli", cli)
-    monkeypatch.setattr(bg_session, "listing", lambda *a: [{"id": "9999ffff", "sessionId": "9999ffff-1", "pid": 1}])
-    argv = ["claude", "-p", "--resume", sid, "--disallowedTools", "WebFetch", "--settings", json.dumps({"hooks": {}})]
-    proc = asyncio.run(bg_session.start(CORPUS, "orient", argv, tmp_path, {}, "go on", sid, "chat", "orient"))
-    got = calls[-1]
-    assert got[:3] == ["--bg", "--resume", sid] and got.count("--resume") == 1
-    assert "--settings" in got and got[got.index("--disallowedTools") + 1] == "WebFetch"
-    assert got[got.index("-n") + 1] == bg_session.name_of(CORPUS, "orient") and proc.session_id == "9999ffff-1"
+    assert tray.by_origin(CORPUS, "thimble:writer · mini") is new
+    assert tray.by_origin(CORPUS, "thimble-writer-mini") is new
+    assert tray.by_origin(CORPUS, "thimble-writer") is new
+    assert tray.by_origin(CORPUS, "thimble-critic") is old
+    assert tray.by_origin(CORPUS, "thimble-dev") is None

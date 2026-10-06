@@ -52,7 +52,7 @@ CELL_TOOLS = ("add_card", "edit_card", "add_cell", "edit_cell")  # the card tool
 LABEL_TOOL = "apply_label"
 LABEL_CARD_RE = re.compile(r"The label's card is \[\[card:([A-Za-z0-9_-]+)\]\]")
 AGENT_TOOLS = ("Agent", "Task")  # the CLI's subagent tool, by either of its names
-WAIT_SESSION = "wait_session"  # the thimble tool of a background session's tray entry
+WAIT_SESSION = "wait_session"  # the thimble tool of a tray entry of thimble's agents (tray.py)
 WORKFLOW_TOOL = "Workflow"  # Claude Code's dynamic workflows (module note, workflows)
 WORKFLOW_TITLE = "workflow"  # when the script's meta names nothing
 WORKFLOW_DIR_RE = re.compile(r"^Transcript dir:[ \t]*(\S.*?)[ \t]*$", re.M)  # in the Workflow call's result
@@ -156,7 +156,7 @@ class Sub:
         self.of_main = False  # a subagent main started with the Agent tool (_spawn)
         self.call_keys: dict[str, tuple[str, str]] = {}  # tool_use id -> its events.call_key (_results)
         self.on_results: Any = None  # told the calls whose results each read found, when set (_results)
-        self.proxy = False  # the tray entry of a background session of thimble's, whose transcript no chat shows
+        self.proxy = False  # a tray entry of one of thimble's agents, whose transcript no chat shows
         self.quiet_since = time.monotonic()
         self.done = False
         self.workflow = False  # a Workflow call of main's, whose members are its agents (module note, workflows)
@@ -481,7 +481,7 @@ def attach(c: str, sid: Any, cwd: Any, transcript_path: str | None = None, pid: 
     _ensure_tail(lv)
     if not restored:
         with contextlib.suppress(Exception):
-            _bg().new_main(c)
+            _tray().new_main(c)
     _resume_work(c)
     log.info("%s: session %s attached (%s)", c, sid, "restored" if restored else "new")
     return lv
@@ -1130,7 +1130,7 @@ def _child_finished(lv: Live, text: str) -> None:
 
 def _peer(lv: Live, *, mid_turn: bool, origin: Any = None) -> None:
     """A message another session sent main (module note), a subagent's hand-back among them: no row of its own, since
-    it is neither the analyst's line nor main's, except a message from a background session of thimble's, which main's
+    it is neither the analyst's line nor main's, except a message from one of thimble's agents, which main's
     chat shows as a chip naming it. A hand-back, and any message of a tray entry, which writes no words of its own,
     shows nothing: the session's own chat has its end, and the harness's frame around it is not for the analyst. On its
     own record it opens main's turn."""
@@ -1139,10 +1139,10 @@ def _peer(lv: Live, *, mid_turn: bool, origin: Any = None) -> None:
     o = origin if isinstance(origin, dict) else {}
     raw = str(o.get("body") or "")
     sender = str(o.get("from") or o.get("senderTaskId") or "")
-    if raw.lstrip().startswith(HANDBACK_LEAD) or (sender and _bg().proxy_of(lv.c, sender, None) is not None):
+    if raw.lstrip().startswith(HANDBACK_LEAD) or (sender and _tray().proxy_of(lv.c, sender, None) is not None):
         return
     name, body = str(o.get("name") or ""), " ".join(cite.prose(raw).split())
-    e = _bg().by_origin(lv.c, name) if name.startswith("thimble") else None
+    e = _tray().by_origin(lv.c, name) if name.startswith("thimble") else None
     if e is not None and body:
         with contextlib.suppress(Exception):
             agents.chip(lv.c, CHIP_KIND, f"{e.shown} to main: {body[:RESULT_LIMIT]}", chat=e.chat)
@@ -1177,7 +1177,7 @@ def _tool_use(lv: Live, tool_use_id: str, name: str, tool_input: Any) -> None:
         return
     inp = tool_input if isinstance(tool_input, dict) else {}
     if name.startswith("mcp__") and _short(name) == WAIT_SESSION:
-        lv.hidden.add(tool_use_id)  # a tray entry's tool, which main's call only gets refused (bg_session)
+        lv.hidden.add(tool_use_id)  # a tray entry's tool, which main's call only gets refused (tray)
         return
     if name == MONITOR_TOOL and WATCHER in str(inp.get("command") or ""):
         lv.hidden.add(tool_use_id)  # thimble's own plumbing on the Monitor route (module note)
@@ -1190,8 +1190,8 @@ def _tool_use(lv: Live, tool_use_id: str, name: str, tool_input: Any) -> None:
             lv.forked.add(tid)
             _spawn(lv, tool_use_id, None, str(inp.get("description") or ""), inp.get("subagent_type"))
             return
-        if _bg().is_proxy(lv.c, inp.get("subagent_type"), inp.get("description"), inp.get("prompt")):
-            lv.hidden.add(tool_use_id)  # a background session's tray entry, which that session's chat stands for
+        if _tray().is_proxy(lv.c, inp.get("subagent_type"), inp.get("description"), inp.get("prompt")):
+            lv.hidden.add(tool_use_id)  # a tray entry of thimble's agents, whose own chat stands for it
             _spawn(lv, tool_use_id, None, str(inp.get("description") or ""), inp.get("subagent_type"), inp.get("prompt"))
             return
     if name == SEND_TOOL:
@@ -1205,7 +1205,7 @@ def _tool_use(lv: Live, tool_use_id: str, name: str, tool_input: Any) -> None:
             if sub.chat not in lv.turn_threads:  # not the relay of a message the browser logged in the thread
                 _relayed(sub, inp)
             return
-        if sub is not None and sub.owner is None and not sub.proxy:  # a proxy's session's chat logs it (bg_session)
+        if sub is not None and sub.owner is None and not sub.proxy:  # a tray entry's agent's chat logs it (tray)
             _relayed(sub, inp)
     _rec(lv, "tool_use", id=tool_use_id, name=name, input=tool_input)
     if name in AGENT_TOOLS:
@@ -1245,7 +1245,7 @@ def _tool_result(lv: Live, tool_use_id: str, content: Any, is_error: bool = Fals
         threads.fork_lost(lv.c, tid)
     sub = _sub_by(lv, tool_use_id=tool_use_id)
     if sub is not None and sub.proxy and is_error and sub.report:
-        _bg().proxy_refused(lv.c, sub.report, tool_use_id)
+        _tray().proxy_refused(lv.c, sub.report, tool_use_id)
     if sub is not None and name in AGENT_TOOLS:
         _agent_result(lv, sub, content, is_error)
     elif sub is not None and sub.workflow:
@@ -1278,10 +1278,10 @@ def _spawn(lv: Live, tool_use_id: str | None, agent_id: str | None, title: str, 
     """The Sub for an Agent call, made on its first sighting (the tool_use, or the file's meta json) and completed by
     the later one. A `thread:<id>` description joins the thread's chat; any other is a new agent chat in main."""
     sub = _sub_by(lv, tool_use_id=tool_use_id) or _sub_by(lv, agent_id=agent_id)
-    if sub is None and _bg().is_proxy(lv.c, agent_type, title, prompt):
+    if sub is None and _tray().is_proxy(lv.c, agent_type, title, prompt):
         sub = Sub(lv.c, agents.MAIN_ID, tool_use_id, agent_id)  # it records nothing (proxy)
         sub.proxy = sub.of_main = True
-        sub.report = _bg().proxy_started(lv.c, str(agent_type), str(title), agent_id, prompt)  # the session it shows
+        sub.report = _tray().proxy_started(lv.c, str(agent_type), str(title), agent_id, prompt)  # the session it shows
         lv.subs.append(sub)
         return sub
     if sub is None:
@@ -1305,7 +1305,7 @@ def _spawn(lv: Live, tool_use_id: str | None, agent_id: str | None, title: str, 
         sub.agent_id = fields["agent_id"] = agent_id
     if sub.proxy:
         if fields.get("agent_id") and sub.report:
-            _bg().proxy_agent(lv.c, sub.report, sub.agent_id)
+            _tray().proxy_agent(lv.c, sub.report, sub.agent_id)
         return sub
     if sub.thread:
         if not sub.done:  # a finished fork's file found again (a restart) is not a fork starting; a follow-up wakes it
@@ -1338,7 +1338,7 @@ def _finish_sub(lv: Live, sub: Sub, status: str, result: str | None, *, kind: st
         return
     if sub.proxy:
         sub.done = True
-        _bg().proxy_ended(lv.c, sub.agent_id)
+        _tray().proxy_ended(lv.c, sub.agent_id)
         return
     if sub.agent_id and sub.agent_id in _events().asking(lv.c):
         _events().agent_moved(lv.c, sub.agent_id, float("inf"))  # a stopped agent's prompt is gone
@@ -1503,7 +1503,7 @@ def _tail_sub(lv: Live, sub: Sub) -> int:
         return 0
     size = _size(sub.path)
     if sub.proxy:
-        sub.offset = size  # a proxy's lines are the background session's own, which that session's chat shows
+        sub.offset = size  # a tray entry's lines are its agent's own, which that agent's chat shows
         return 0
     if size < sub.offset:
         sub.offset, sub.buf = 0, b""
@@ -1650,14 +1650,14 @@ def _call_holder(lv: Live, tool_use_id: str, needle: bytes, read: dict[str, int]
     return None
 
 
-def _bg() -> Any:
-    from . import bg_session  # noqa: PLC0415 — bg_session imports this module
+def _tray() -> Any:
+    from . import tray  # noqa: PLC0415 — tray imports this module
 
-    return bg_session
+    return tray
 
 
 def running_agents(c: str) -> list[dict[str, Any]]:
-    """The agents of main's session that run now, for the terminal's list of thimble's agents (bg_session.agent_rows):
+    """The agents of main's session that run now, for the terminal's list of thimble's agents (tray.agent_rows):
     each thread's fork by its fork name and main's other subagents, {name, state, kind}."""
     lv = _live.get(c)
     out: list[dict[str, Any]] = []

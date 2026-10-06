@@ -21,7 +21,7 @@
 #   --keep-install   leave the clone and THIMBLE_HOME in --out (the report, shots and logs always stay)
 #
 # Steps: clone REF into <out>/clone; install it (or the zip) with install.sh's flags, non-interactive, into a fresh
-# THIMBLE_HOME (<out>/thimble-home) with --no-plugin --no-trust-workspaces; `thimble doctor`; copy the corpus to
+# THIMBLE_HOME (<out>/thimble-home) with --no-plugin; `thimble doctor`; copy the corpus to
 # <out>/corpus, add a few files the UI steps open (chat logs in Markdown, CSV and SQLite, a PDF) and a fixture view;
 # start the server and a stand-in for the analyst's Claude Code session (scripts/e2e/standin_session.py: no model runs);
 # walk the UI (scripts/e2e/release.mjs): the first-launch welcome and the tour, the File browser, a transcript, a PDF, the
@@ -199,7 +199,7 @@ if ! claude_files > "$logs/claude-files-before.json" 2>&1; then
   record claude-files fail "could not read Claude Code's files: $(tail -n 1 "$logs/claude-files-before.json")"; exit 1
 fi
 files_before="$logs/claude-files-before.json"
-flags=(--browser bundled --no-sandbox-deps --no-plugin --no-trust-workspaces)
+flags=(--browser bundled --no-sandbox-deps --no-plugin)
 # --verbose: the dry run then prints every step's commands, which the check below reads
 if ! (cd "$src_tree" && in_env bash scripts/install.sh "${flags[@]}" --dry-run --verbose) < /dev/null > "$logs/install-plan.log" 2>&1; then
   record install fail "install.sh --dry-run exited non-zero; see logs/install-plan.log"; exit 1

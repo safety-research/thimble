@@ -1,13 +1,14 @@
-"""start_orientation starts the orientation's own session as the background session `thimble:orient · <workspace>`
-(orient_session._launch's `background`), with the Start card's critique, Ultracode and effort, and never asks main to
-start a subagent. agent_session.start is replaced by a stand-in that records its arguments."""
+"""start_orientation starts the orientation's own `claude -p` session, shown in the agent tray as
+`thimble:orient · <workspace>`, with the Start card's critique, Ultracode and effort, and never asks main to start a
+subagent; it needs no folder Claude Code trusts. agent_session.start is replaced by a stand-in that records its
+arguments."""
 from __future__ import annotations
 
 import json
 
 import pytest
 
-from app import agent_session, bg_session, cli, config, dev, ledger, orient_session, orientation, tools
+from app import agent_session, config, ledger, orient_session, orientation, tools
 
 CORPUS = "mini"
 
@@ -25,14 +26,14 @@ def launched(workspaces_tmp, monkeypatch) -> list[dict]:
     return calls
 
 
-async def test_start_orientation_runs_the_session_in_the_background(launched):
+async def test_start_orientation_runs_the_session_beside_main(launched):
     orientation.start_requested(CORPUS, {"text": "", "final_notebook": True, "propose_views": True,
                                          "critique": True, "ultracode": True, "effort": "xhigh"}, {"id": "e1"})
     res = await tools.call(CORPUS, "start_orientation", {"brief": ""})
     assert not res.is_error, res
     assert res.text.endswith(tools.hint("start_orientation-started")), "main is never asked to start a subagent"
     [call] = launched
-    assert call["key"] == orient_session.KEY and call["background"] is True
+    assert call["key"] == orient_session.KEY and "background" not in call
     assert call["critique"] is True and call["ultracode"] is True
     assert "route" not in (orientation.read_run(CORPUS) or {})
 
@@ -40,7 +41,7 @@ async def test_start_orientation_runs_the_session_in_the_background(launched):
 async def test_settings_of_earlier_builds_load_and_change_nothing(launched):
     """A workspace's settings.json from an earlier build that still holds terminal_first (off: the orientation ran as a
     subagent of main) and hide_chat (on: no chat column) loads as one that never held them, and the orientation still
-    starts as the background session."""
+    starts as its own session."""
     default = ledger.get_settings(CORPUS)
     old = {"terminal_first": False, "hide_chat": True}
     (config.workspace_dir(CORPUS) / "settings.json").write_text(json.dumps(old))
@@ -49,33 +50,19 @@ async def test_settings_of_earlier_builds_load_and_change_nothing(launched):
     res = await tools.call(CORPUS, "start_orientation", {"brief": ""})
     assert not res.is_error, res
     [call] = launched
-    assert call["key"] == orient_session.KEY and call["background"] is True
+    assert call["key"] == orient_session.KEY
 
 
-async def test_without_claude_code_s_trust_the_orientation_does_not_start_and_the_settings_say_how_to_trust(
-        workspaces_tmp, claude_global_config, monkeypatch):
-    """`claude --bg` refuses a folder Claude Code does not trust. Where the workspaces folder is not trusted (install.sh's
-    trust question answered no), start_orientation starts nothing and its error, which main reads, says the analyst
-    reruns the installer with --trust-workspaces; the settings give the browser the command itself, except on a code
-    ticket's test server, whose workspaces folder is never trusted."""
-    started = []
-
-    async def bg_start(*args, **kw):
-        started.append(args)
-
-    monkeypatch.setattr(bg_session, "start", bg_start)
+async def test_without_claude_code_s_trust_the_orientation_starts_and_the_settings_name_no_trust(
+        workspaces_tmp, claude_global_config, launched):
+    """Claude Code trusts no folder here, and the orientation starts all the same; the settings say nothing of trust."""
     claude_global_config.write_text("{}")
     orientation.start_requested(CORPUS, {"text": "", "final_notebook": True, "propose_views": True}, {"id": "e1"})
     res = await tools.call(CORPUS, "start_orientation", {"brief": ""})
-    assert res.is_error and "--trust-workspaces" in res.text and "install.sh" not in res.text
-    assert started == [] and not orient_session.running(CORPUS)
-    assert ledger.get_settings(CORPUS)["untrusted"] == {"folder": str(config.WORKSPACES_DIR),
-                                                        "command": cli.trust_command()}
-    claude_global_config.write_text(json.dumps({"projects": {str(config.WORKSPACES_DIR): {"hasTrustDialogAccepted": True}}}))
-    assert ledger.get_settings(CORPUS)["untrusted"] is None
-    claude_global_config.write_text("{}")
-    monkeypatch.setattr(dev, "STACK_ENABLED", False)
-    assert ledger.get_settings(CORPUS)["untrusted"] is None
+    assert not res.is_error, res
+    assert [c["key"] for c in launched] == [orient_session.KEY]
+    assert "untrusted" not in ledger.get_settings(CORPUS)
+    assert claude_global_config.read_text() == "{}"
 
 
 def test_an_orientation_an_earlier_build_ran_as_main_s_subagent_ends_its_record_with_its_chat(workspaces_tmp):
@@ -108,7 +95,7 @@ async def test_a_second_start_orientation_while_one_starts_or_runs_starts_nothin
 
     async def slow_start(c, key, **kw):
         calls.append(key)
-        await gate.wait()  # `claude --bg` takes a while
+        await gate.wait()  # a start takes a while
 
     monkeypatch.setattr(agent_session, "start", slow_start)
     orientation.start_requested(CORPUS, {"text": "", "final_notebook": True, "propose_views": True}, {"id": "e1"})

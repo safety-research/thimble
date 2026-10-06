@@ -2,17 +2,17 @@
 // every session's requests (chat/permissions.ts pendingRequests), oldest first and those declined unanswered last, one
 // at a time with paging, whose `1 of 3` counts the requests that still wait, or on one declined unanswered those
 // declined unanswered. The card keeps showing the request it shows while others arrive, are answered or time out. Its
-// head names the requesting thread (askThread); the body says who asks, what the call does, every later call that
-// waits on the same answer (scrolled), and why it asks, then Allow, Always allow (where Claude Code offers a rule for
-// the session, or for a web call its site or web search in the workspace; the scope in its tooltip) and Deny, in one
-// row. A request declined unanswered says so, with Dismiss, and Dismiss all when several were. When auto mode's
-// classifier could not judge a call, the request of a session that is not a background one offers the switch to
-// Manual, and to Bypass unless the analyst's Claude Code settings turn it off. An answer takes its request off the card
-// at once and the next request can be answered while it is sent; one that fails puts its request back, and one whose
-// request had already ended leaves it off. A request that just took the card's place, or was just declined, ignores
-// clicks and keys for ARM_MS, so a double click never answers the next request unread. Allow covers only the later
-// calls the card listed. A long command wraps and scrolls past 96px. A request too long to show whole says how much of
-// it shows and offers no "don't ask again".
+// head names the requesting thread (askThread); the body says who asks, what the call does, every later call that waits
+// on the same answer (scrolled), and why it asks, then Allow, Always allow (where Claude Code offers a rule for the
+// session, or for a web call its site or web search in the workspace; the scope in its tooltip) and Deny, in one row. A
+// request declined unanswered says so, with Dismiss, and Dismiss all when several were. When auto mode's classifier
+// could not judge a call, the request of a session thimble started offers the switch to Manual, and to Bypass unless
+// the analyst's Claude Code settings turn it off. An answer takes its request off the card at once and the next request
+// can be answered while it is sent; one that fails puts its request back, and one whose request had already ended
+// leaves it off. A request that just took the card's place, or was just declined, ignores clicks and keys for ARM_MS,
+// so a double click never answers the next request unread. Allow covers only the later calls the card listed. A long
+// command wraps and scrolls past 96px. A request too long to show whole says how much of it shows and offers no "don't
+// ask again".
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Button } from '../components/Button'
 import { CodeText } from '../components/Code'

@@ -3,8 +3,8 @@
     <tree>/backend/.venv/bin/python scripts/dev/precache_orientation.py <tree> <corpus folder> <log folder>
         [--mode auto|manual|bypass] [--no-report] [--attach]
 
-Run it in the environment the server runs in (THIMBLE_HOME, THIMBLE_PORT, THIMBLE_WORKSPACES_DIR), with the server up
-and its workspaces folder trusted. It registers the folder, then stands in for the analyst's Claude Code session as
+Run it in the environment the server runs in (THIMBLE_HOME, THIMBLE_PORT, THIMBLE_WORKSPACES_DIR), with the server up.
+It registers the folder, then stands in for the analyst's Claude Code session as
 scripts/e2e/standin_session.py does: it holds the shim's subscription (GET /api/events), names itself main, takes
 main's events as the plugin's watcher does (GET /api/events/pull, then POST /api/events/ack) and reports main's
 permission mode (`--mode`, auto by default, as a session whose Claude Code settings say `defaultMode: auto` reports

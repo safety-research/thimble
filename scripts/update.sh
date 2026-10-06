@@ -3,9 +3,10 @@
 #
 #   scripts/update.sh [--dir DIR] [--from ZIP|URL] [--sums FILE] [--marketplace-name NAME] [--dry-run] [INSTALL FLAGS]
 #
-# INSTALL FLAGS are install.sh's answers to its questions (--browser, --sandbox-deps, --trust-workspaces and their no-
-# forms), --plugin and --no-plugin, and --require-pinned, passed on to it: without a terminal it runs only with a flag
-# for each question that remains.
+# INSTALL FLAGS are install.sh's answers to its questions (--browser, --sandbox-deps and its no- form), --plugin and
+# --no-plugin, and --require-pinned, passed on to it: without a terminal it runs only with a flag for each question that
+# remains. --trust-workspaces and --no-trust-workspaces, an earlier version's, are passed on too, and install.sh ignores
+# them.
 # The install: --dir, else the one $THIMBLE_HOME/app-dir names, else the tree this script is in. A git checkout gets
 # `git pull --ff-only` + install.sh in place; a release install needs --from (a release zip, path or https URL), which is
 # unpacked and installed over it with ITS install.sh (backend/.venv, frontend/node_modules, workspaces/ and data/ kept).

@@ -150,7 +150,8 @@ def make_workspace(root: Path, corpus: Path, home: Path) -> Path:
         "chats/o1.jsonl": json.dumps({"tool_use": {"input": {"path": f"{corpus}/a.jsonl"}}}) + "\n",
         "chats/o1.meta.json": json.dumps({"id": "o1", "kind": "agent", "role": "orient", "model": "claude-opus-5-5",
                                          "effort": "ultracode", "status": "running", "pid": 7, "server": 8,
-                                         "session": SID, "follow": {"offset": 999, "session": SID}}),
+                                         "session": SID, "follow": {"offset": 999, "session": SID},
+                                         "background": True, "bg": SID[:8]}),
         "calls/o1.jsonl": "{}\n",
         "chats/main.jsonl": "".join(json.dumps(r) + "\n" for r in (
             {"type": "user", "text": "/exit", "by": "terminal"}, {"type": "user", "text": "hello", "by": "browser"},
@@ -247,7 +248,7 @@ def test_export_keeps_state_leaves_out_what_is_rebuilt_and_writes_placeholders(t
     assert "api_token" not in text and '"pid"' not in text and "/exit" not in text
     assert m["typed_in_main"] == ["hello"] and '"start"' in text
     meta = json.loads((out / "workspace" / "chats" / "o1.meta.json").read_text())
-    assert meta["status"] == "done" and not {"pid", "server", "follow"} & set(meta) and m["marked_done"] == ["o1"]
+    assert meta["status"] == "done" and not set(demo.PROCESS_FIELDS) & set(meta) and m["marked_done"] == ["o1"]
     assert m["counts"] == {"cards": 2, "labels": 1, "views": 1, "documents": 1, "chats": 1}
     assert m["orientation"]["model"] == "claude-opus-5-5" and m["orientation"]["ultracode"] is True
     assert m["corpus"] == [{"path": "a.jsonl", "bytes": 9, "sha256": sha(b'{"x": 1}\n')}]
@@ -317,6 +318,8 @@ def test_export_refuses_what_may_be_private(tmp_path):
 
 def test_install_fills_the_placeholders_and_places_the_transcript_where_claude_code_resumes_it(tmp_path):
     out, corpus, _ = made(tmp_path)
+    old = out / "workspace" / "chats" / "o1.meta.json"  # as an export made before chat_meta took these out wrote it
+    old.write_text(json.dumps({**json.loads(old.read_text()), "background": True, "bg": SID[:8], "pid": 7}))
     new_corpus = tmp_path / 'b "quoted"' / "corpus"
     new_corpus.mkdir(parents=True)
     (new_corpus / "a.jsonl").write_text('{"x": 2}\n')
@@ -338,6 +341,7 @@ def test_install_fills_the_placeholders_and_places_the_transcript_where_claude_c
     assert f'"cwd":"{new_ws}/orient/work"' in text and json.dumps(f"head {new_corpus}/a.jsonl")[1:-1] in text
     meta = json.loads((new_ws / "chats" / "o1.meta.json").read_text())
     assert meta["session"] == sid and meta["follow"] == {"offset": path.stat().st_size, "session": sid}
+    assert not {"background", "bg", "pid"} & set(meta), "no session of the maintainer's machine is named"
     assert (new_ws / "orient" / "work" / "t.csv").read_text() == "a,b\n1,2\n"
     assert m["warnings"] == ["a.jsonl differs from the file the orientation read"]
     assert not list(new_ws.parent.glob(".toy-2.demo-*"))

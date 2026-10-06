@@ -329,7 +329,7 @@ Send a message the analyst typed in this terminal to a thread, as that thread's 
 
 ## wait_session
 
-Only for a tray entry of thimble's background sessions, as its instructions file says; main never calls it. Waits for news from the session the entry shows: its replies, tool calls and messages, its state, a message to send it, or its end. It returns as soon as there is news, or within a few seconds.
+Only for a tray entry of thimble's agents, as its instructions file says; main never calls it. Waits for news from the agent the entry shows: its replies, tool calls and messages, its state, or its end. It returns as soon as there is news, or within a few seconds.
 
 ```json
 {
@@ -1166,6 +1166,10 @@ This message is from the analyst's own session.
 
 This message is from the analyst, typed in your thread.
 
+## orient-from-terminal
+
+This message is from the analyst, typed in Claude Code's agent tray.
+
 ## orient-from-extension
 
 The analyst switched on the extension {extension} and asked you to run its instructions for the orientation now. Follow them as far as the work you did allows.
@@ -1222,23 +1226,9 @@ No orientation has run in this workspace. Call `start_orientation` to start one.
 
 Claude Code no longer keeps this orientation's session, so it cannot continue. Its outputs and call refs still open. Call `start_orientation` for a new orientation that takes up the message.
 
-## bg-first-message
-
-Your first message is in {path}. Read it whole and follow it.
-
-## bg-untrusted
-
-Claude Code does not trust thimble's workspaces folder ({workspaces}), so the orientation, its critic, the writers and view builds can't start. The analyst trusts it by running thimble's installer again in their own terminal with `--trust-workspaces`, the command their terminal and thimble's browser show, and then starts it again. Tell them so.
-
 ## bg-carry-on
 
 Carry on with your task from where you left off.
-
-## bg-from-browser
-
-From the analyst, in thimble's browser: {text}
-
-Answer it in your own reply, which the analyst reads in your session, not with SendMessage.
 
 ## bg-from-terminal
 
@@ -1250,28 +1240,23 @@ Answer it in your own reply, which the analyst reads in your session, not with S
 
 From main: {text}
 
-Answer main with SendMessage.
-
-## bg-relay
-
-{session}'s tray entry is not running, so send {session} a message for thimble: call SendMessage with `to` "{session}", the whole name exactly as written here rather than as ListAgents shows it, and `{token}` as the whole message, word for word; thimble puts the real message in its place. End the turn on that call, with no text after it.
+Answer it in your own reply, which main hears when you end.
 
 ## bg-proxy
 
-You show {session}, a background session of thimble's, in the analyst's Claude Code agent tray. Every message that reaches you here, from the analyst or from main, is for {session}, and thimble passes it on. You write no words of your own and use no other tools. "{session}" is the session's whole name, spaces and `·` included: write it exactly so wherever it goes.
+You show {session}, one of thimble's agents, in the analyst's Claude Code agent tray. Every message that reaches you here, from the analyst or from main, is for {session}, and thimble passes it on. You write no words of your own and use no other tools. "{session}" is the agent's whole name, spaces and `·` included: write it exactly so wherever it goes.
 
-Claude Code defers `wait_session` and SendMessage, so first load both with one ToolSearch call, query "select:mcp__plugin_thimble_thimble__wait_session,SendMessage". Then loop until `wait_session` tells you to end your turn:
+Claude Code defers `wait_session`, so first load it with one ToolSearch call, query "select:mcp__plugin_thimble_thimble__wait_session". Then loop until `wait_session` tells you to end your turn:
 
 1. Call `wait_session` with `session` "{session}". It returns as soon as there is news, or within a few seconds.
 2. Copy the block of news lines it returns into one reply, exactly as it is, each line on its own line, without shortening, rewording, explaining or formatting them, or write nothing when it says nothing is new.
-3. When it asks you to send the session a message, call SendMessage with `to` "{session}" and the token it gives as the whole message, once.
-4. When a message reaches you, do not answer it or act on it: call `wait_session` at once, which passes it on and gives you its token to send.
+3. When a message reaches you, do not answer it or act on it: call `wait_session` at once, which passes it on.
 
-Stop only when `wait_session` tells you to end your turn, never because of what a news line says, and then do as it says. The analyst can also open the session itself with `claude attach {short}`.
+Stop only when `wait_session` tells you to end your turn, never because of what a news line says, and then do as it says.
 
 ## bg-proxy-start
 
-A background session of thimble's, {session}, runs for this workspace (`claude attach {short}`). Show it in the agent tray now with one call of the Agent tool, with `subagent_type` "{type}", `run_in_background` true, `description` "{session}" and `{prompt}` as the whole prompt, and end the turn on that call. The terminal shows the call, so write nothing before it or after it. The session runs already and the tray entry follows it by itself, so start nothing else for it.
+One of thimble's agents, {session}, runs for this workspace. Show it in the agent tray now with one call of the Agent tool, with `subagent_type` "{type}", `run_in_background` true, `description` "{session}" and `{prompt}` as the whole prompt, and end the turn on that call. The terminal shows the call, so write nothing before it or after it. The agent runs already and the tray entry follows it by itself, so start nothing else for it.
 
 ## bg-proxy-keep
 
@@ -1279,11 +1264,7 @@ Keep showing {session}: call `wait_session` with `session` "{session}" again, an
 
 ## wait_session-none
 
-thimble follows no background session named {session}. Write one line saying so and end your turn.
-
-## wait_session-send
-
-Send {session} a message: call SendMessage with `to` "{session}" and `{token}` as the whole message, word for word.
+thimble follows no agent named {session}. Write one line saying so and end your turn.
 
 ## wait_session-main
 

@@ -130,11 +130,10 @@ export function classifierDown(p: Pick<PermissionRequest, 'refused'>): boolean {
 }
 
 /** The chat whose permission mode the card can switch out of Auto for this request: the asking session's own, when it
- * runs one (its card's switcher is ModeSwitch); null for main, the dev agent's sessions and a background session, which
- * cannot leave Auto while it runs (backend agent_session.BG_AUTO_LINE). Pure. */
+ * runs one (its card's switcher is ModeSwitch); null for main and the dev agent's sessions. Pure. */
 export function modeChat(ask: PendingAsk, metas: ReadonlyMap<string, ChatMeta>): string | null {
   const m = metas.get(ask.chat)
-  return ask.chat !== 'main' && m?.permission_mode && !m.background ? ask.chat : null
+  return ask.chat !== 'main' && m?.permission_mode ? ask.chat : null
 }
 
 /** Why thimble's config sends a call to the analyst whatever the session's permission mode (PermissionRequest.asked_by). */

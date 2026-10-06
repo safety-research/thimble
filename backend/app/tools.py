@@ -46,10 +46,10 @@ WRITER_SESSION = "writer"
 CRITIQUE_SESSION = "critique"  # `critique:orient`, the critic of the orientation's analysis (critique_session.py)
 CHECK_SESSION = "check"  # `check:<id>:<doc>`, a run of a report check on a document (checks.py)
 MAIN_ONLY: "tuple[str | None, ...]" = (None,)  # Spec.sessions of a tool only main's shim lists (no THIMBLE_SESSION)
-ROLES = (ANALYST,)  # the dev worker is a Claude Code background session with its own tools (dev.py)
+ROLES = (ANALYST,)  # the dev worker is a Claude Code session with its own tools (dev.py)
 ANALYSIS_ROLES = (ANALYST,)  # who reads cards and records
 # The callers whose cards answer the analyst as they wait: main and its threads. Their cards get
-# notebook.CHAT_EXEC_TIMEOUT when the card names no allowance (_default_timeout); the background sessions in
+# notebook.CHAT_EXEC_TIMEOUT when the card names no allowance (_default_timeout); the sessions in
 # FULL_TIME_SESSIONS keep notebook.EXEC_TIMEOUT.
 CHAT_ACTORS = (ANALYST,)
 FULL_TIME_SESSIONS = (ORIENT_SESSION, WRITER_SESSION)
@@ -185,9 +185,9 @@ REGISTRY: dict[str, Spec] = {
         Spec("reply_in_thread", (ANALYST,), "app.threads:tool_reply_in_thread"),
         # a message typed in the terminal to a thread, sent as that thread's composer would (/thimble:ask); main's
         Spec("message_thread", (ANALYST,), "app.threads:tool_message_thread", sessions=MAIN_ONLY),
-        # a background session's tray entry waits for its news (bg_session.py); thimble's agents listed for the terminal
-        Spec("wait_session", (ANALYST,), "app.bg_session:tool_wait_session", sessions=MAIN_ONLY),
-        Spec("list_agents", (ANALYST,), "app.bg_session:tool_list_agents", sessions=MAIN_ONLY),
+        # a tray entry of thimble's agents waits for its news (tray.py); thimble's agents listed for the terminal
+        Spec("wait_session", (ANALYST,), "app.tray:tool_wait_session", sessions=MAIN_ONLY),
+        Spec("list_agents", (ANALYST,), "app.tray:tool_list_agents", sessions=MAIN_ONLY),
         # a thread renamed or deleted from the chat, as its row's menu does; main's, as the analyst asks it
         Spec("rename_thread", (ANALYST,), "app.threads:tool_rename_thread", sessions=MAIN_ONLY),
         Spec("delete_thread", (ANALYST,), "app.threads:tool_delete_thread", sessions=MAIN_ONLY),

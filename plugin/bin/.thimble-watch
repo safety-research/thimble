@@ -13,11 +13,10 @@ Python runs with -S, since the file uses only the standard library and runs on e
     .thimble-watch --held               the UserPromptSubmit hook that adds the events held for main to the prompt
                                         and prints the lines of the events the watcher wrote out
     .thimble-watch --mode               the UserPromptSubmit and Stop hook that reports the session's permission mode
-    .thimble-watch --agents             the PostToolUse hook that prints the start and finish lines of thimble's
-                                        background sessions
-    .thimble-watch --relay              the PreToolUse hook of SendMessage to a background session of thimble's
+    .thimble-watch --agents             the PostToolUse hook that prints the start and end lines of thimble's
+                                        agents
     .thimble-watch --agent-check        the PreToolUse hook of main's Agent calls
-    .thimble-watch --proxy-stop         the SubagentStop hook that keeps a background session's tray entry going
+    .thimble-watch --proxy-stop         the SubagentStop hook that keeps an agent's tray entry going
     .thimble-watch --stream --cwd <folder> --session <id>
                                         the Monitor route
 
@@ -45,13 +44,12 @@ subagent. As a turn ends it also shows, once, as its systemMessage, the dashboar
 (app/cli.py leave_link): the link carries the key that lets the browser answer permission requests and change
 permission modes, and a systemMessage reaches the analyst's terminal but not the model's context.
 
-The agents hook asks the server (POST /api/agents) for the lines main's terminal has not shown about thimble's
-background sessions, each one's start and its finish, and prints them as the hook's systemMessage. The held hook prints
-them too. The relay hook hands a SendMessage bound for a background session to the server (POST /api/bg/relay), which
-answers with the message to send in its place, or refuses one sent already. The proxy-stop hook asks the server (POST
-/api/bg/proxy-stop) whether a tray entry's session still runs, and if so tells Claude Code to keep the entry going. The
-agent-check hook asks the server (POST /api/bg/agent-check) whether main's Agent call would start a second tray entry of
-a session or a second fork of a thread, and refuses such a call. Each prints nothing when no server answers.
+The agents hook asks the server (POST /api/agents) for the lines main's terminal has not shown about thimble's agents,
+each one's start and the end of each run, and prints them as the hook's systemMessage. The held hook prints them too.
+The proxy-stop hook asks the server (POST /api/bg/proxy-stop) whether a tray entry's agent still runs, and if so tells
+Claude Code to keep the entry going. The agent-check hook asks the server (POST /api/bg/agent-check) whether main's
+Agent call would start a second tray entry of an agent or a second fork of a thread, and refuses such a call. Each
+prints nothing when no server answers.
 
 The stream writes each event as one block of lines. Claude Code truncates Monitor output at 500 characters per line and
 about 3,000 per event, so lines are wrapped under LINE_CHARS and a longer event is cut and saved whole under
@@ -382,7 +380,7 @@ def show_link(session: str) -> None:
 
 
 def announcements(inp: dict) -> str:
-    """The start and finish lines of thimble's background sessions main's terminal has not shown yet (module note)."""
+    """The start and end lines of thimble's agents main's terminal has not shown yet (module note)."""
     body = {"cwd": folder(inp), "session": str(inp.get("session_id") or "") or None, "announce": True}
     try:
         status, answer = request("POST", "/api/agents", body, timeout=AGENTS_WAIT_S)
@@ -398,30 +396,6 @@ def agents_hook(inp: dict) -> int:
     lines = announcements(inp)
     if lines:
         print(json.dumps({"systemMessage": lines}))
-    return 0
-
-
-def relay(inp: dict) -> int:
-    """The relay hook (module note)."""
-    tool_input = inp.get("tool_input") if isinstance(inp.get("tool_input"), dict) else {}
-    to = str(tool_input.get("to") or "")
-    if not to.startswith("thimble:"):
-        return 0
-    body = {"cwd": folder(inp), "agent_id": inp.get("agent_id") or None, "agent_type": inp.get("agent_type") or None,
-            "transcript_path": inp.get("transcript_path") or None, "to": to,
-            "message": str(tool_input.get("message") or "")}
-    try:
-        status, answer = request("POST", "/api/bg/relay", body, timeout=AGENTS_WAIT_S)
-    except (OSError, http.client.HTTPException):
-        return 0
-    decision = answer.get("decision") if status == 200 else None
-    if decision == "allow":
-        updated = {**tool_input, "message": str(answer.get("message") or tool_input.get("message") or "")}
-        print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "allow",
-                                                 "updatedInput": updated}}))
-    elif decision == "deny":
-        print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
-                                                 "permissionDecisionReason": str(answer.get("reason") or "")}}))
     return 0
 
 
@@ -542,8 +516,6 @@ def main() -> int:
             return mode(hook_input())
         if "--agents" in args:
             return agents_hook(hook_input())
-        if "--relay" in args:
-            return relay(hook_input())
         if "--proxy-stop" in args:
             return proxy_stop(hook_input())
         if "--agent-check" in args:
