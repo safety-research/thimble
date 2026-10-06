@@ -203,6 +203,13 @@ FENCE_SESSION_LINE = ("thimble: Claude Code's hooks are off in this session, so 
                       "thimble's server only in the session `thimble` started, and /clear or /resume gave this session "
                       "a new id. Quit, and run `thimble -c` in this folder.")
 HOOK_RESULTS_DIR = "up"  # under <home>: what /thimble's hook left for the skill's command to print (hook_up)
+# /thimble in a session the launcher started in terminal mode starts nothing: the renderer opens the home panel, and the
+# skill's command prints this hint of prompts/tools.md (TERMINAL_HOME_LINE when the file has none), which main repeats
+TERMINAL_HOME_HINT = "thimble-terminal-home"
+TERMINAL_HOME_LINE = ("thimble: terminal mode. For the browser workspace, quit, run `thimble mode browser`, and start "
+                      "`thimble` again.")
+TERMINAL_ACTION_LINE = ("thimble: `/thimble {action}` works only in browser mode. For the browser workspace, quit, run "
+                        "`thimble mode browser`, and start `thimble` again.")
 HOOK_RESULT_S = 60.0  # a result older than this is not the one the hook left for this /thimble
 MANUAL_RESTART = "manual restart"  # dev.PLAIN_REASONS
 # what `restart` says before it asks (running_work, module note)
@@ -3389,6 +3396,30 @@ def take_hook_result(session: str, cwd: Path, action: str, archive: str) -> str 
     return result["text"]
 
 
+def terminal_session(cwd: Path, session: str | None) -> bool:
+    """Whether this command runs for a session the launcher started in terminal mode: launch_mode.ENV says so (the
+    launcher exports it, and main's --settings `env` carries it), or the workspace of `cwd` records terminal mode for
+    `session` itself in launch.json, for a session that lost both."""
+    if os.environ.get(launch_mode.ENV) == launch_mode.TERMINAL:
+        return True
+    if not session:
+        return False
+    with server_dirs():
+        rec = read_launch(config.workspace_for_cwd(str(cwd)))
+    return rec.get("mode") == launch_mode.TERMINAL and str(rec.get("session") or "") == session
+
+
+def terminal_home_line() -> str:
+    """What /thimble prints in terminal mode: the TERMINAL_HOME_HINT section of prompts/tools.md, else
+    TERMINAL_HOME_LINE."""
+    try:
+        from . import tools  # noqa: PLC0415 — the hints, needed here alone
+
+        return tools.hint(TERMINAL_HOME_HINT).strip() or TERMINAL_HOME_LINE
+    except Exception:  # noqa: BLE001 — never a traceback in the skill text
+        return TERMINAL_HOME_LINE
+
+
 def cmd_ensure(args: argparse.Namespace) -> int:
     cwd = Path(args.cwd or os.environ.get("THIMBLE_CALLER_CWD") or os.getcwd())
     if args.session:
@@ -3404,6 +3435,16 @@ def cmd_ensure(args: argparse.Namespace) -> int:
         from . import feedback  # noqa: PLC0415
 
         return feedback.run("", cwd=cwd, skill=True)
+    if terminal_session(cwd, args.session):  # no server in terminal mode: the renderer's panel
+        print(terminal_home_line() if action in ("", "on", "status") else TERMINAL_ACTION_LINE.format(action=action))
+        return 0
+    if args.session and action in OPENING and not refused(cwd):  # one mode per workspace at a time
+        with server_dirs():
+            c = config.workspace_for_cwd(str(cwd))
+            elsewhere = open_elsewhere(c, launch_mode.BROWSER) if c else None
+        if elsewhere:
+            print(elsewhere)
+            return 0
     if refused(cwd) and action != "status":  # $HOME or / as a corpus would index the analyst's whole machine
         print(REFUSED_LINE.format(path=cwd))
         return 0
