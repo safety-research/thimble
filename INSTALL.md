@@ -7,7 +7,7 @@
 
 thimble uses whichever auth path you have configured for `claude`: every model call runs through your own `claude`, in
 your config dir with your user settings. thimble's agents run as subagents of the session you start with `thimble`;
-its single model calls (labels, card checks) and code tickets run as `claude -p` jobs in folders of their own, so auth
+its single model calls (labels, card checks) and `thimble fix` run as `claude -p` jobs in folders of their own, so auth
 set only in a project's `.claude/` settings does not reach them. thimble tells you when `claude` is missing or not
 logged in.
 
@@ -131,8 +131,11 @@ session you start with `thimble`. Claude Code's agent tray (↓) lists them, and
   are turned off. `/clear` keeps the agents running, but it stops the orientation's current command, which it may run
   again or skip.
 - **Report checks** run after a writer saves a document. After your own edits a check shows how many passages changed,
-  and Run starts it. **Code tickets** stay jobs of thimble's server, with their own sandbox and checks, and don't show
-  in Claude Code's tray.
+  and Run starts it.
+- **Code tickets**, in a development install only, are changes to thimble's own code: file one with Report a problem →
+  File a code ticket, or ask Claude. Its agent, `thimble:dev-ticket`, works in a git worktree of thimble's code, which
+  your session's sandbox lets its Bash write; its checks run in thimble's sandbox runtime, and the browser asks you before
+  its change reaches thimble's code. Code tickets run one at a time.
 - **One sandbox.** Your session and its agents share one fence: Bash can write only thimble's work folders, the
   folder you opened is read-only, an edit of it or of thimble's config asks you, and so do web fetches and searches as
   Settings say. View builders use your session's network. Installs follow your Claude Code permission mode; thimble
@@ -195,7 +198,7 @@ the steps it asks about and runs it first. That adds no plugin to your sessions,
 uninstall` takes it back. `thimble cc-mod off` undoes it, and `thimble
 cc-mod status` says whether each of the two plugins is on in the folder. They are switched independently: `on` and `off`
 leave the thimble plugin as it is. Sessions you start with `thimble`, with the agents thimble starts in them, and the jobs thimble's server
-starts (classifier calls, task programs and code tickets), run without the mod; plain `claude` in the folder uses
+starts (classifier calls, task programs and `thimble fix`), run without the mod; plain `claude` in the folder uses
 it. To use it without installing thimble, see the [mod's README](mods/thimble-cc-mod/README.md).
 
 ## Demo datasets
@@ -275,7 +278,7 @@ that one and prints each path it deleted. The folder it read and your Claude Cod
   Linux `install.sh --sandbox-deps` installs it.
 - thimble's agents don't start, and the browser says Claude Code's hooks modules are off: managed settings
   (`disableAllHooks`, `allowManagedHooksOnly`) turn them off, or Claude Code doesn't trust the folder. `thimble doctor`
-  names the reason. Fix it, then run `thimble -c`. Claude, its threads, cards, labels and code tickets work meanwhile.
+  names the reason. Fix it, then run `thimble -c`. Claude, its threads, cards and labels work meanwhile.
 - Start is greyed out with a line about plan mode: your session is in plan mode, where an agent would ask before every
   card. Leave it with shift+tab in the terminal.
 - An empty `.claude/.cc-writes/` folder appears in the folder you start `thimble` in: Claude Code's sandbox makes it
