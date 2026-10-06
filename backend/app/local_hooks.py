@@ -100,6 +100,20 @@ def _try_lock(ws: Path) -> int | None:
     return fd
 
 
+# the modules that hear an agent's end only once imported (agents.on_agent_finished at their import), as the server
+# imports every module at its start: a writer's end starts the shown checks (checks), the orientation's report pass
+# follows its writer (orient_session), and the document follows its writer (report_types)
+END_LISTENERS = ("checks", "orient_session", "report_types")
+
+
+def listen() -> None:
+    """Import END_LISTENERS, so this process's passes run every handler of an agent's end the server would."""
+    import importlib  # noqa: PLC0415
+
+    for name in END_LISTENERS:
+        importlib.import_module(f"{__package__}.{name}")
+
+
 def run(c: str, kind: str, body: dict[str, Any]) -> int:
     """One call (module note): its kind and input go to the holder, which is this process when it takes MIRROR_LOCK.
     Returns the number of passes this process ran (0 when another held the lock)."""
@@ -113,6 +127,7 @@ def run(c: str, kind: str, body: dict[str, Any]) -> int:
         fd = _try_lock(ws)
         if fd is None:
             return passes
+        listen()
         try:
             passes += asyncio.run(_hold(c, ws))
         finally:

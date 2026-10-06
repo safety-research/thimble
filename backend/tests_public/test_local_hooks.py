@@ -318,3 +318,34 @@ async def test_a_subagent_stop_of_a_finished_orientation_ends_its_run_after_the_
     [held] = event_files.held(ws)
     assert held["meta"]["kind"] == orientation.ORIENT_KIND and COVERAGE in held["content"]
     assert module.ops("spawn") == [], "no report pass was asked for"
+
+
+def test_the_holder_hears_every_agent_end_the_server_hears(workspaces_tmp, tmp_path):
+    """The modules that listen for an agent's end (checks: a writer's end starts the shown checks) register at their
+    import, which the server makes at its start; a hook's process imports them before its passes, else a writer's end
+    in terminal mode started no report check (live check T6)."""
+    import subprocess
+    import sys
+
+    probe = tmp_path / "probe.py"
+    probe.write_text(
+        "import json, sys\n"
+        f"sys.path.insert(0, {str(Path(__file__).resolve().parents[1])!r})\n"
+        "from app import local_hooks\n"
+        "seen = {}\n"
+        "async def hold(c, ws):\n"
+        "    from app import agents\n"
+        "    seen['before'] = [n for n in local_hooks.END_LISTENERS if f'app.{n}' in sys.modules]\n"
+        "    seen['hooks'] = sorted(f'{f.__module__}.{f.__name__}' for f in agents._finish_hooks)\n"
+        "    return 1\n"
+        "local_hooks._hold = hold\n"
+        "local_hooks._try_lock = lambda ws: __import__('os').open(__import__('os').devnull, 0)\n"
+        "from app import config\n"
+        "config.workspace_dir = lambda c: __import__('pathlib').Path(sys.argv[1])\n"
+        "local_hooks.run('mini', '', {})\n"
+        "print(json.dumps(seen))\n")
+    out = subprocess.run([sys.executable, str(probe), str(tmp_path)], capture_output=True, text=True, timeout=120)
+    assert out.returncode == 0, out.stderr
+    seen = json.loads(out.stdout.strip().splitlines()[-1])
+    assert seen["before"] == list(local_hooks.END_LISTENERS)
+    assert "app.checks._writer_ended" in seen["hooks"]
