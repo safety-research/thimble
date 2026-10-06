@@ -115,6 +115,27 @@ describe('the agent transcript view', () => {
     expect(lit('3')).toBe(true)
     expect(lit('2')).toBe(false)
   })
+  test('a Claude Code stream tool result is cleaned too, with Raw for the stored bytes, and a clean result is unchanged', async () => {
+    const dirtyRec = { type: 'user', session_id: 's1', message: { role: 'user', content: [{ type: 'tool_result', content: DIRTY }] } }
+    const cleanRec = { type: 'user', session_id: 's1', message: { role: 'user', content: [{ type: 'tool_result', content: 'all good\nno control bytes' }] } }
+    const records: SourceRecord[] = [
+      { line: 1, record: { type: 'assistant', session_id: 's1', message: { role: 'assistant', content: [{ type: 'text', text: 'Running it.' }] } }, blocks: [{ kind: 'text', text: 'Running it.' }], meta: {} },
+      { line: 2, record: dirtyRec, blocks: [{ kind: 'tool_result', text: DIRTY }], meta: {} },
+      { line: 3, record: cleanRec, blocks: [{ kind: 'tool_result', text: 'all good\nno control bytes' }], meta: {} },
+    ]
+    const streamPage: SourcePage = { path: 'run.jsonl', kind: 'text', total_lines: 3, start: 1, records }
+    const el = await mount(<View workspace="w" path="run.jsonl" kind="text" page={streamPage} loadMore={() => undefined} transcript={{ format: 'stream', score: 1 }} />)
+    const dirty = el.querySelector('.reader-card[data-line="2"]')!
+    expect(dirty.querySelector('.reader-tool_result')?.textContent).toContain('user@host:~$ done')
+    expect(dirty.querySelector('.reader-tool_result')?.textContent).not.toContain('<counter>')
+    expect((dirty.querySelector('.reader-raw-toggle') as HTMLElement).textContent).toBe('Raw')
+    await act(async () => (dirty.querySelector('.reader-raw-toggle') as HTMLElement).click())
+    expect(dirty.querySelector('.reader-tool_result')?.textContent).toContain('<counter>3</counter>')
+    // a clean result needs no toggle and is shown as stored
+    const clean = el.querySelector('.reader-card[data-line="3"]')!
+    expect(clean.querySelector('.reader-raw-toggle')).toBeNull()
+    expect(clean.querySelector('.reader-tool_result')?.textContent).toContain('all good')
+  })
   test('a citation of words in a tool result opens the message and highlights them', async () => {
     Element.prototype.scrollIntoView = () => undefined
     try {
