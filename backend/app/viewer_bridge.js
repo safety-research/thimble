@@ -959,17 +959,16 @@
         if (el.tagName === 'CANVAS') continue
         var ref = el.getAttribute('data-anchor')
         var m = ref ? marks[ref] : null
-        var top = !ref || outermost(el, ref)
         var unmarked = el.hasAttribute('data-anchor-unmarked')
         var bar = null
         var shows = ''
         var kind = 'label'
         if (!hook) {
-          if (!m || !top || unmarked) continue
+          if (!m || unmarked || !outermost(el, ref)) continue
           bar = m.bar
           shows = (m.names || []).join(', ')
         } else if (hook.mode === 'label') {
-          if (!ref || !top) continue
+          if (!ref || !outermost(el, ref)) continue
           var hit = valueIn(m, hook)
           offs.push([el, hook.off(hit ? hit.value : null)])
           if (m && !unmarked) spanned.push([el, m])
@@ -981,7 +980,7 @@
           var v = own ? el.getAttribute('data-colour') : null
           if (v === '') v = null
           if (own) offs.push([el, hook.off(v)])
-          if (m && top && !unmarked) spanned.push([el, m])
+          if (m && !unmarked && outermost(el, ref)) spanned.push([el, m])
           if (!own || v == null || unmarked || el instanceof SVGElement) continue
           bar = hook.colourOf(v)
           shows = v

@@ -97,6 +97,20 @@ describe('Colour by in a frame', () => {
     await page.close()
   })
 
+  test('a list that draws only the rows in view gives every row its value, and the scrollbar draws those', async () => {
+    const { page, frame } = await framed()
+    // the page says the list holds 1,000 rows, the last tenth With links, though it shows only sixty
+    await frame().evaluate(() => (window as any).colour.strip('#list', { rows: Array.from({ length: 1000 }, (_, i) => (i < 900 ? 'Text only' : 'With links')) }))
+    await page.waitForTimeout(150)
+    const px = await frame().evaluate(() => {
+      const cv = document.querySelector('.thimble-colour-strip canvas') as HTMLCanvasElement
+      const at = (f: number) => [...cv.getContext('2d')!.getImageData(Math.floor(cv.width / 2), Math.floor(cv.height * f), 1, 1).data].slice(0, 3)
+      return { mid: at(0.85), end: at(0.97), strips: document.querySelectorAll('.thimble-colour-strip').length }
+    })
+    assert.deepEqual(px, { mid: [2, 90, 195], end: [208, 117, 10], strips: 1 }, 'the rows given, not the sixty drawn, and still one scrollbar')
+    await page.close()
+  })
+
   test('a value turned off has its records dimmed and leaves the scrollbar', async () => {
     const { page, frame } = await framed()
     await frame().locator('.thimble-colour-chip').nth(1).click()
