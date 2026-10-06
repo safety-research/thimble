@@ -140,6 +140,53 @@ def test_the_critic_s_start_is_the_orientation_s_own_call():
     assert sf.requests(state)["req_critic0001"]["caller"] == "orient1"
 
 
+FORK = "a5c0f0e1d2b3a4f56"  # a thread's fork: a subagent of main that is no agent of thimble's
+
+
+def test_a_fork_s_typed_start_is_claimed_by_that_fork_s_exact_call_and_by_no_one_else():
+    """U5: a thread's fork (or another subagent of main's) that called a start tool makes the exact Agent call itself,
+    as Claude Code lets a subagent start subagents: the request names the fork (`caller_agent`), so only that fork's
+    exact call claims it, and the agent it starts is the fork's child. Main's call, another subagent's and a changed
+    call are denied."""
+    state: dict = {}
+    pending_start(state, "req_fork000001", "typed", "req_fork000001\nwrite", role="writer", key="writer:report",
+                  caller_agent=FORK)
+    assert sf.check_call(state, agent_call("req_fork000001\nwrite", role="writer")) is not None, "not main's"
+    assert sf.check_call(state, agent_call("req_fork000001\nwrite", call="toolu_o", caller="other1", role="writer")) \
+        is not None, "not another subagent's"
+    assert sf.check_call(state, agent_call("req_fork000001\nwrite more", call="toolu_f0", caller=FORK, role="writer")) \
+        is not None, "not a changed call"
+    assert sf.check_call(state, agent_call("req_fork000001\nwrite", call="toolu_f1", caller=FORK, role="writer")) is None
+    r = sf.requests(state)["req_fork000001"]
+    assert (r["state"], r["claimed_by"], r["caller"]) == ("claimed", "toolu_f1", FORK)
+    entry = sf.register(state, {"agent_id": "w1", "agent_type": "thimble:writer", "session_id": MAIN_SID})
+    assert entry["parent"] == FORK and entry["key"] == "writer:report", "the writer is the fork's child"
+    pending_start(state, "req_main000001", "typed", "req_main000001\nwrite", role="writer", key="writer:notes")
+    assert sf.check_call(state, agent_call("req_main000001\nwrite", call="toolu_f2", caller=FORK, role="writer")) \
+        is not None, "a fork cannot claim main's own request"
+
+
+def test_a_fork_s_turn_that_ends_without_its_call_refuses_its_typed_start():
+    """R3 for a subagent caller: the fork's turn ended (SubagentStop) and its Agent call never claimed the typed start
+    its start tool call made, so the request is refused, kind no-call, with the fork's last text; a registered agent's
+    turn end refuses nothing, nor does another subagent's, nor the second stop of a hand-back."""
+    state: dict = {}
+    pending_start(state, "req_fork000002", "typed", "req_fork000002\nwrite", role="writer", key="writer:report",
+                  caller_agent=FORK)
+    stop = {"hook_event_name": "SubagentStop", "agent_id": FORK, "agent_type": "fork",
+            "last_assistant_message": "I would rather not start a writer.\n\nAsk me again later.\nThird line."}
+    assert sf.refuse_unclaimed(state, {**stop, "agent_id": "other1"}) == []
+    assert sf.refuse_unclaimed(state, {**stop, "stop_hook_active": True}) == []
+    assert sf.refuse_unclaimed(state, stop) == ["req_fork000002"]
+    r = sf.requests(state)["req_fork000002"]
+    assert (r["state"], r["refused_kind"]) == ("refused", "no-call")
+    assert r["reason"] == "I would rather not start a writer.\nAsk me again later."
+    assert sf.refuse_unclaimed(state, stop) == [], "once"
+    sf.registry(state)[AGENT] = {"role": "orientation", "key": "orient", "status": "running"}
+    pending_start(state, "req_fork000003", "typed", "p3", role="writer", key="writer:x", caller_agent=AGENT)
+    assert sf.refuse_unclaimed(state, {**stop, "agent_id": AGENT}) == []
+
+
 def test_a_send_message_needs_its_pending_message_request_and_a_second_copy_is_denied():
     state: dict = {}
     sf.registry(state)[AGENT] = {"role": "orientation", "key": "orient", "status": "done"}
@@ -407,6 +454,17 @@ def test_without_a_server_each_new_hook_writes_its_record(tmp_path, ws):
     assert sf.read(ws)["main_end"]["reason"] == "clear"
     run_hook(tmp_path, "--rekey", {"hook_event_name": "SessionStart", "session_id": "new-sid", "source": "clear"})
     assert sf.read(ws)["agents"][AGENT]["sessions"] == [MAIN_SID, "new-sid"]
+
+
+def test_without_a_server_a_fork_s_turn_end_refuses_its_unclaimed_typed_start_in_the_file(tmp_path, ws):
+    with sf.update(ws) as state:
+        pending_start(state, "req_hookfork01", "typed", "req_hookfork01\nw", role="writer", key="writer:report",
+                      caller_agent=FORK)
+    out = run_hook(tmp_path, "--subagent-stop", {"hook_event_name": "SubagentStop", "agent_id": FORK,
+                                                 "agent_type": "fork", "last_assistant_message": "No."})
+    assert out.returncode == 0
+    r = sf.read(ws)["requests"]["req_hookfork01"]
+    assert (r["state"], r["refused_kind"], r["reason"]) == ("refused", "no-call", "No.")
 
 
 def test_a_descendant_gets_its_scratch_folder_in_its_ancestor_s_work_folder(tmp_path, ws):

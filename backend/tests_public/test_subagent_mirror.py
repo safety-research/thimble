@@ -449,6 +449,32 @@ async def test_r2_main_s_agent_call_that_fails_refuses_its_request_with_the_kind
     assert ended[-1] == ("refused", "writer", kind, text)
 
 
+async def test_r2_a_subagent_s_agent_call_for_a_typed_start_that_fails_refuses_its_request(bridge, project, ended):
+    """U5: a subagent of main's that is no agent of thimble's (a thread's fork; here main's own general-purpose
+    subagent) called start_writing and made the Agent call itself; Claude Code's error for it refuses the request with
+    the kind of its error, as for main's call, so the browser never waits on Starting…"""
+    lv = _attach(project)
+    gp = "a0000000000000gp1"
+    sf.add_caller(config.workspace_dir(CORPUS), "toolu_gp_tool", gp, "general-purpose")
+    ans = await subagents.start_job(CORPUS, "writer", "writer:report", "w", {}, subagents.TYPED, call="toolu_gp_tool")
+    assert subagents.request(CORPUS, ans["request"])["caller_agent"] == gp
+    _write(Path(lv.transcript_path), _human("have a helper start the writer"),
+           _assistant(_use("toolu_gp", "Agent", {"subagent_type": "general-purpose", "description": "helper",
+                                                 "prompt": "start the writer"})),
+           _result("toolu_gp", f"Async agent launched successfully.\nagentId: {gp}"))
+    session.tail_once(lv)
+    path = _agent_file(project, gp, agentType="general-purpose", toolUseId="toolu_gp")
+    text = "Cannot launch: 20 concurrent subagents are already running (the limit is 20)."
+    _write(path, _assistant(_use("toolu_gp_tool", "mcp__plugin_thimble_thimble__start_writing", {"doc": "report"})),
+           _result("toolu_gp_tool", "AGENT CALL"), _assistant(_use("toolu_gp_agent", "Agent", ans["input"])),
+           _result("toolu_gp_agent", text, error=True))
+    session.tail_once(lv)
+    session.tail_once(lv)
+    r = subagents.request(CORPUS, ans["request"])
+    assert (r["state"], r["refused_kind"], r["reason"]) == ("refused", "limit", text)
+    assert ended[-1] == ("refused", "writer", "limit", text)
+
+
 async def test_r2_a_send_message_to_an_agent_of_another_session_and_a_stop_of_an_ended_one(bridge, project, ended):
     lv, chat, path = await _click_orientation(bridge, project)
     ans = subagents.message_request(CORPUS, AGENT, "and April?")

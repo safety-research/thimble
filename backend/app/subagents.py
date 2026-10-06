@@ -577,6 +577,26 @@ def call_input(role: str, prompt: str, description: str) -> dict[str, Any]:
     return {"subagent_type": type_name(role), "description": description, "prompt": prompt}
 
 
+async def typed_caller(c: str, call: str | None) -> str | None:
+    """The subagent that made the start tool call `call`, when it is no agent of thimble's: a thread's fork, or a
+    subagent of main's own. Its agent id, which a typed start's request keeps (`caller_agent`), so that its own Agent
+    call claims the request and the agent becomes its child, as Claude Code lets a subagent start subagents (U5). Read
+    from the caller hook's line, else from the mirror's search of the transcripts (session.call_holder). None for main's
+    own call, and for one of thimble's agents or their descendants, whose starts are their role's (`caller_role`)."""
+    from . import session  # noqa: PLC0415
+
+    if not call:
+        return None
+    line = files.find_caller(ws(c), call)
+    agent_id = str((line or {}).get("agent_id") or "")
+    if not agent_id:
+        held = await session.call_holder(c, call, CALLER_WAIT_S)
+        agent_id = str(held.agent_id or "") if isinstance(held, session.Sub) else ""
+    if not agent_id or agent(c, agent_id) is not None:
+        return None
+    return agent_id
+
+
 async def start_job(c: str, role: str, key: str, task: str, values: dict[str, Any], route: str, *,
                     description: str = "", request_id: str | None = None, chat: dict[str, Any] | None = None,
                     work: Path | str | None = None, call: str | None = None, caller_role: str | None = None,
@@ -589,7 +609,8 @@ async def start_job(c: str, role: str, key: str, task: str, values: dict[str, An
     (request_id), for a prompt that names it. `chat` holds the fields of the agent's chat (its title, a
     writer's document), `work` its work folder (the scratch folders of its subagents), `call` the start tool's call
     in main (R3), and `caller_role` the role of the agent that makes a typed call itself (the critic's start, made by
-    the orientation)."""
+    the orientation). A typed start whose tool call a thread's fork or another subagent of main's made keeps that
+    subagent (`caller_agent`, typed_caller): only its Agent call claims the request."""
     if role not in TYPES or role == HELPER:
         raise ValueError(f"no role {role!r}")
     if check and not caller_role:
@@ -599,8 +620,10 @@ async def start_job(c: str, role: str, key: str, task: str, values: dict[str, An
     rid = request_id or files.request_id()
     prompt = with_request_line(task, rid) if route == TYPED else task
     inp = call_input(role, prompt, description or role)
+    caller_agent = await typed_caller(c, call) if route == TYPED and not caller_role else None
     rid = new_request(c, "start", key, inp, values, route, role=role, rid=rid, chat=dict(chat or {}),
-                      work=str(work) if work else None, call=call, caller_role=caller_role)
+                      work=str(work) if work else None, call=call, caller_role=caller_role,
+                      **({"caller_agent": caller_agent} if caller_agent else {}))
     if route == TYPED:
         if work:
             make_work(c, Path(work))
@@ -1304,11 +1327,21 @@ async def denied_route(body: HookBody) -> dict[str, Any]:
 
 @router.post("/subagents/stopped")
 async def stopped_route(body: HookBody) -> dict[str, Any]:
-    """SubagentStop: a turn's end of a registered agent (stopped)."""
+    """SubagentStop: a turn's end of a registered agent (stopped), or of a subagent that is no agent of thimble's whose
+    typed starts the hook refused as never claimed (`refused`, subagent_files.refuse_unclaimed): their role's refusal
+    handler tells the browser."""
     c = _workspace(body)
     if body.hook.get("stop_hook_active") or not str(body.hook.get("agent_type") or ""):
         return {}
-    stopped(c, str(body.hook.get("agent_id") or ""))
+    for rid in [str(x) for x in body.hook.get("refused") or [] if x]:
+        r = request(c, rid)
+        if r is not None and r.get("state") == "refused":
+            log.info("%s: the typed start %s of %s was never made: %s", c, rid, body.hook.get("agent_id"),
+                     str(r.get("reason") or "")[:200])
+            _refused(c, {**r, "id": rid})
+    agent_id = str(body.hook.get("agent_id") or "")
+    if agent(c, agent_id) is not None:
+        stopped(c, agent_id)
     return {}
 
 

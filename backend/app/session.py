@@ -179,6 +179,9 @@ class Sub:
         self.call_keys: dict[str, tuple[str, str]] = {}  # tool_use id -> its events.call_key (_results)
         self.on_results: Any = None  # told the calls whose results each read found, when set (_results)
         self.thimble: str | None = None  # the role of one of thimble's agents (subagents.TYPES), else None
+        # tool_use id -> input of an Agent call of this subagent for one of thimble's roles, when it is no agent of
+        # thimble's (a thread's fork): its result is watched as main's is (R2, _sub_start_result)
+        self.starts: dict[str, dict] = {}
         self.root: str | None = None  # the agent id of the thimble agent a descendant's chat is a step of
         self.last_text: str | None = None  # the last text it wrote, a turn's answer (agent_answer)
         # Claude Code's error line when the latest reply of its current run is an API error (isApiErrorMessage: a
@@ -1107,7 +1110,7 @@ def _no_call(lv: Live) -> None:
     said = "\n".join([ln for ln in lv.turn_text.strip().splitlines() if ln.strip()][:2])
     for rid, r in list(reqs.items()):
         if (isinstance(r, dict) and r.get("route") == subagents.TYPED and r.get("state") == "pending"
-                and r.get("call") in lv.turn_calls and not r.get("caller_role")):
+                and r.get("call") in lv.turn_calls and not r.get("caller_role") and not r.get("caller_agent")):
             subagents.refuse(lv.c, rid, said, subagents.NO_CALL)
 
 
@@ -1481,6 +1484,23 @@ def _thimble_result(lv: Live, tool_use_id: str, call: dict, content: Any, is_err
         subagents.refuse(lv.c, rid, m.group(1).strip() if m else text.strip(), kind)
 
 
+def _sub_start_result(lv: Live, tool_use_id: str, inp: dict, content: Any, is_error: bool) -> None:
+    """R2 for a subagent that is no agent of thimble's (a thread's fork, U5): the result of its Agent call for one of
+    thimble's roles. An error is a start that did not happen, its kind read from Claude Code's text (_refused_kind),
+    such as thimble's own deny of a call that differs from the one the start tool gave, or the concurrency limit."""
+    from . import subagents  # noqa: PLC0415
+
+    if not is_error:
+        return
+    rid = _request_of(lv, tool_use_id, AGENT_TOOLS[0], inp)
+    if rid is None:
+        return
+    text = response_text(content)
+    kind = _refused_kind(text)
+    m = AUTO_MODE_RE.search(text) if kind == subagents.AUTO_MODE else None
+    subagents.refuse(lv.c, rid, m.group(1).strip() if m else text.strip(), kind)
+
+
 def _refused_kind(text: str) -> str:
     """The kind of a start or message that did not happen, from the error Claude Code gave main's call: thimble's own
     --agent-check deny (hook), its concurrency limit (limit), a type no module registered (no-module), an agent of
@@ -1649,6 +1669,14 @@ def thread_for(c: str, description: Any) -> str | None:
     if tid and not threads.is_thread(c, tid):
         tid = _event_threads.get(tid) or threads.by_fork_name(c, tid)
     return tid if tid and threads.is_thread(c, tid) else None
+
+
+def chat_of_agent(c: str, agent_id: str | None) -> str | None:
+    """The chat the mirror writes the subagent `agent_id` into (a thread's fork: its thread), or None when it follows
+    no such subagent."""
+    lv = _live.get(c)
+    sub = _sub_by(lv, agent_id=agent_id) if lv is not None and agent_id else None
+    return sub.chat if sub is not None else None
 
 
 def _sub_by(lv: Live, *, tool_use_id: str | None = None, agent_id: str | None = None) -> Sub | None:
@@ -2286,6 +2314,8 @@ def translate_sub(lv: Live, sub: Sub, line: bytes | str) -> int:
                 from . import subagents  # noqa: PLC0415
 
                 subagents.add_shell(lv.c, owner, shell.group(1))
+            if tid in sub.starts:
+                _sub_start_result(lv, tid, sub.starts.pop(tid), b.get("content"), bool(b.get("is_error")))
             sub.rec.tool_result(tid, data.pop("summary"), is_error=bool(data.pop("is_error", False)), by=TERMINAL,
                                 **{k: v for k, v in data.items() if k != "id"})
             if data.get("cell_id"):  # the card is this subagent's or this fork's, not main's
@@ -2327,6 +2357,11 @@ def translate_sub(lv: Live, sub: Sub, line: bytes | str) -> int:
             n_ = sub.calls.use(tid, name, b.get("input")) if sub.calls is not None else None
             sub.rec.tool_use(tid, name, b.get("input"), by=TERMINAL, **({"n": n_} if n_ else {}))
             inp = b.get("input") if isinstance(b.get("input"), dict) else {}
+            if name in AGENT_TOOLS and not sub.thimble and not sub.root:
+                from . import subagents  # noqa: PLC0415
+
+                if subagents.role_of(inp.get("subagent_type")):
+                    sub.starts[tid] = inp
             if name == HANDBACK_TOOL and str(inp.get("message") or "").strip():
                 sub.report = str(inp["message"]).strip()
                 if sub.thimble:  # auto mode: the run's end and its report (module note)

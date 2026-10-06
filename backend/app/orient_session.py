@@ -937,12 +937,12 @@ def _tell_main(c: str, status: str, k: int = 0, made: "dict[str, Any] | None" = 
                                                      "status": status, **({"run": k} if k else {})})
 
 
-def _wrote_since(c: str, since: str) -> bool:
-    """Whether main's chat holds a message of the analyst's, typed in the terminal or sent from the browser's chat, at
-    or after the ISO time `since`."""
+def _wrote_since(c: str, since: str, chat: str = agents.MAIN_ID) -> bool:
+    """Whether main's chat (or the thread `chat`) holds a message of the analyst's, typed in the terminal or sent from
+    the browser's chat, at or after the ISO time `since`."""
     try:
         floor = datetime.fromisoformat(since.replace("Z", "+00:00"))
-        _, log_path = agents.paths(c, agents.MAIN_ID)
+        _, log_path = agents.paths(c, chat)
         recs = agents.read_events(log_path)
     except (ValueError, HTTPException, OSError):
         return True  # a record or a chat that cannot be read refuses no orientation
@@ -956,16 +956,17 @@ def _wrote_since(c: str, since: str) -> bool:
         return ts >= floor  # the latest message decides
     return False
 
-async def asked_for(c: str) -> bool:
+async def asked_for(c: str, chat: str = agents.MAIN_ID) -> bool:
     """Whether anyone asked for a new orientation: a Start waits for start_orientation, none has run here yet, or the
-    analyst wrote to main since the latest one ended. Main's chat records a typed message within its follower's tail,
-    so a message not there yet is waited for up to ASKED_WAIT_S."""
+    analyst wrote to main (or to the thread `chat` whose fork calls start_orientation, U5) since the latest one ended.
+    Main's chat records a typed message within its follower's tail, so a message not there yet is waited for up to
+    ASKED_WAIT_S."""
     run = orientation.read_run(c)
     if not run or run.get("status") in orientation.RUNNING or not run.get("ended"):
         return True
     end = asyncio.get_running_loop().time() + ASKED_WAIT_S
     while True:
-        if await asyncio.to_thread(_wrote_since, c, str(run["ended"])):
+        if await asyncio.to_thread(_wrote_since, c, str(run["ended"]), chat):
             return True
         if asyncio.get_running_loop().time() >= end:
             return False
@@ -999,10 +1000,14 @@ async def tool_start_orientation(ctx: Any, args: dict[str, Any]) -> Any:
     run's model and effort (choices_of), and the exact Agent call main makes (`## start_orientation-subagent`).
     Refused while one runs, when nobody asked for a new one since the latest ended (asked_for), without the module, in
     plan mode, and in a session the launcher did not start."""
+    from . import session  # noqa: PLC0415
+
     brief, passes, critique, values = choices_of(args)
     if running(ctx.c) or starting(ctx.c):
         return tools.err(tools.hint("start_orientation-running"))
-    if not await asked_for(ctx.c):
+    # a thread's fork may start it (U5): the analyst asked in its thread
+    fork = await subagents.typed_caller(ctx.c, ctx.tool_use_id)
+    if not await asked_for(ctx.c, session.chat_of_agent(ctx.c, fork) or agents.MAIN_ID):
         return tools.err(tools.hint("start_orientation-unasked"))
     try:
         ans = await start(ctx.c, brief, passes, critique=critique, values=values, route=subagents.TYPED,

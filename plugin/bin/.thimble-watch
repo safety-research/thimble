@@ -505,7 +505,9 @@ def subagent_start(inp: dict) -> int:
 
 
 def subagent_stop(inp: dict) -> int:
-    """The SubagentStop hook (module note)."""
+    """The SubagentStop hook (module note): a registered agent's turn ended; or the turn of another subagent (a
+    thread's fork) ended, and the typed starts its start tool calls asked for that its Agent call never made are
+    refused (subagent_files.refuse_unclaimed)."""
     if inp.get("stop_hook_active") or not str(inp.get("agent_type") or ""):
         return 0
     sf, ws = workspace(inp)
@@ -513,8 +515,9 @@ def subagent_stop(inp: dict) -> int:
         return 0
     with sf.update(ws) as state:
         entry = sf.record_stop(state, inp)
-    if entry is not None:
-        post("/api/subagents/stopped", {"cwd": folder(inp), "hook": inp})
+        refused = sf.refuse_unclaimed(state, inp) if entry is None else []
+    if entry is not None or refused:
+        post("/api/subagents/stopped", {"cwd": folder(inp), "hook": {**inp, "refused": refused}})
     return 0
 
 

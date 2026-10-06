@@ -1027,7 +1027,9 @@ async def state_route(cwd: str, session: str) -> dict[str, Any]:
     notes = []
     for aid, e in running.items():
         role = _role_of(e.get("type"))
-        if role and role != HELPER and not e.get("parent"):
+        parent = str(e.get("parent") or "")
+        # a role's own child (the critic) is its parent's to tell of; one a thread's fork started (U5) is main's
+        if role and role != HELPER and not (parent and parent in agents):
             line = _note(role, _what(e), str(e.get("route") or ("click" if e.get("plugin_started") else "typed")))
             line = line.replace(AGENT, aid)
             if line:

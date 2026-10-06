@@ -225,6 +225,42 @@ async def test_a_typed_start_answers_the_exact_agent_call_with_the_request_id_on
     assert r["values"] == {"model": "m", "effort": "e"} and r["call"] == "toolu_tool" and r["state"] == "pending"
 
 
+async def test_a_typed_start_a_fork_asked_for_names_the_fork_so_only_its_call_claims_it(bridge, models, monkeypatch):
+    """U5: the start tool called by a thread's fork (the caller hook's line names it, and the registry does not) keeps
+    the fork as the request's `caller_agent`; one called by main, or by one of thimble's agents, keeps none."""
+    ws = config.workspace_dir(CORPUS)
+    sf.add_caller(ws, "toolu_fork_tool", "fork1", "fork")
+    ans = await subagents.start_job(CORPUS, "writer", "writer:report", "Write.", {}, subagents.TYPED, call="toolu_fork_tool")
+    assert subagents.request(CORPUS, ans["request"])["caller_agent"] == "fork1"
+    main = await subagents.start_job(CORPUS, "writer", "writer:notes", "Write.", {}, subagents.TYPED, call="toolu_main_tool")
+    assert "caller_agent" not in subagents.request(CORPUS, main["request"])
+    with subagents.update(CORPUS) as state:
+        sf.registry(state)["orient1"] = {"key": "orient", "role": "orientation", "status": "running"}
+    sf.add_caller(ws, "toolu_orient_tool", "orient1", "thimble:orientation")
+    ours = await subagents.start_job(CORPUS, "writer", "writer:x", "Write.", {}, subagents.TYPED, call="toolu_orient_tool")
+    assert "caller_agent" not in subagents.request(CORPUS, ours["request"])
+    assert subagents.claim(CORPUS, "toolu_f1", ans["input"], caller="fork1") is None
+    assert subagents.request(CORPUS, ans["request"])["state"] == "claimed"
+
+
+def test_a_fork_s_turn_end_tells_the_browser_its_typed_start_was_never_made(bridge, models, monkeypatch, plugin_headers):
+    """The SubagentStop hook refused, in the file, the typed start a fork's turn never made (subagent_files
+    .refuse_unclaimed) and posts the ids: the role's refusal handler tells the browser at once, with no Starting… left
+    until a timeout."""
+    told: list[dict] = []
+    monkeypatch.setattr(subagents, "_refused", lambda c, rec: told.append(rec))
+    rid = subagents.new_request(CORPUS, "start", "writer:report", {"subagent_type": "thimble:writer", "prompt": "p"},
+                                {}, subagents.TYPED, role="writer", caller_agent="fork1")
+    with subagents.update(CORPUS) as state:
+        assert sf.refuse_unclaimed(state, {"agent_id": "fork1", "agent_type": "fork", "last_assistant_message": "No."})
+    from app import main
+
+    r = TestClient(main.create_app()).post("/api/subagents/stopped", headers=plugin_headers(), json={
+        "cwd": str(config.corpus_dir(CORPUS)), "hook": {"agent_id": "fork1", "agent_type": "fork", "refused": [rid]}})
+    assert r.status_code == 200
+    assert [(x["id"], x["refused_kind"], x["reason"]) for x in told] == [(rid, "no-call", "No.")]
+
+
 async def test_start_it_starts_a_refused_typed_start_as_a_click_with_the_same_call(bridge, models):
     ans = await subagents.start_job(CORPUS, "writer", "writer:report", "w", {"model": "m", "effort": "e"},
                                     subagents.TYPED)

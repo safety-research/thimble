@@ -418,6 +418,16 @@ describe('typed starts', () => {
     expect([await e.step('aW'), await e.step('aO'), await e.step('aN'), await e.step('aC')]).toEqual(['low', 'medium', 'high', 'high'])
   })
 
+  it("gives a thread's fork's Agent call for a typed start the request's model, and its agent the effort (U5)", async () => {
+    const e = await started()
+    e.server.state = { ...e.server.state, ...typedState('reqfork0001', 'writer', 'claude-sonnet-5-5', 'low') }
+    const { seen } = await e.agentCall({ subagentType: 'thimble:writer', parentAgentId: 'aFork', prompt: '[thimble request: reqfork0001]\nWrite.' }, 'aWr')
+    expect(seen.model).toBe('claude-sonnet-5-5')
+    expect(await e.step('aWr', 'high')).toBe('low')
+    await e.agentCall({ subagentType: 'general-purpose', parentAgentId: 'aWr', prompt: 'verify' }, 'aWrKid')
+    expect(await e.step('aWrKid', 'high')).toBe('low')
+  })
+
   it("gives a typed run's effort to its general-purpose and Explore children, and not to a thimble type's", async () => {
     const e = await started()
     e.server.state = { ...e.server.state, ...typedState('reqrun00001', 'orientation', OPUS, 'max') }
