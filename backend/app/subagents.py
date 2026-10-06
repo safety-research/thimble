@@ -1270,6 +1270,21 @@ def tell_main(c: str, kind: str, payload: dict[str, Any]) -> bool:
     return True
 
 
+async def plan_check(c: str) -> list[str]:
+    """Terminal mode, at each pass of the hooks' backend calls (local_hooks.py): main is in plan mode, as its hooks or
+    the module's plan poll last said (session.main_mode), and agents of thimble's roles run, so each stops as
+    stop_for_plan stops them in browser mode, where the module's post of plan mode starts it (session.note_plan). The
+    ids stopped."""
+    from . import session  # noqa: PLC0415
+
+    if session.main_mode(c) != files.PLAN_MODE:
+        return []
+    if not any(a.get("role") in ROLES and a.get("status") in ("running", "waiting") and a.get("stopped_by") != STOPPED_PLAN
+               for a in agents_of(c).values()):
+        return []
+    return await stop_for_plan(c)
+
+
 async def out_of_plan(c: str, poll_s: float = 2.0) -> None:
     """Wait while main is in plan mode, where a subagent would ask before every call (U20): a follow-on start waits
     rather than being refused."""
@@ -1399,12 +1414,14 @@ def _workspace(body: HookBody) -> str:
     return c
 
 
-@router.post("/subagents/started")
-async def started_route(body: HookBody) -> dict[str, Any]:
+# Each hook's body below is what its route does once the hook wrote its record: the server's route in browser mode, and
+# in terminal mode the hook's backend call (local_hooks.py), with no HTTP.
+
+
+def hook_started(c: str, hook: dict[str, Any]) -> dict[str, Any]:
     """SubagentStart: an agent the hook registered gets its chat (ensure_chat); a child of a waiting agent wakes nothing.
     {agent, chat}."""
-    c = _workspace(body)
-    agent_id = str(body.hook.get("agent_id") or "")
+    agent_id = str(hook.get("agent_id") or "")
     a = agent(c, agent_id)
     if a is None:
         return {"agent": None}
@@ -1414,53 +1431,66 @@ async def started_route(body: HookBody) -> dict[str, Any]:
     return {"agent": agent_id, "chat": (meta or {}).get("id")}
 
 
+@router.post("/subagents/started")
+async def started_route(body: HookBody) -> dict[str, Any]:
+    """SubagentStart (hook_started)."""
+    return hook_started(_workspace(body), body.hook)
+
+
 @router.post("/subagents/caller")
 async def caller_route(body: HookBody) -> dict[str, Any]:
     """PreToolUse on thimble's tools: the caller hook wrote its line; nothing more is needed here."""
     return {}
 
 
-@router.post("/subagents/denied")
-async def denied_route(body: HookBody) -> dict[str, Any]:
-    """PermissionDenied: R1. The hook refused the request in subagents.json; here its role's refusal handler tells
-    the run record and the browser."""
-    c = _workspace(body)
-    rid = str(body.hook.get("request") or "")
+def hook_denied(c: str, hook: dict[str, Any]) -> dict[str, Any]:
+    """PermissionDenied: R1. The hook refused the request in subagents.json (its `request`); here its role's refusal
+    handler tells the run record and the browser."""
+    rid = str(hook.get("request") or "")
     r = request(c, rid) if rid else None
     if r is not None and r.get("state") == "refused":
         _refused(c, {**r, "id": rid})
     return {"request": rid or None}
 
 
-@router.post("/subagents/stopped")
-async def stopped_route(body: HookBody) -> dict[str, Any]:
+@router.post("/subagents/denied")
+async def denied_route(body: HookBody) -> dict[str, Any]:
+    """PermissionDenied (hook_denied)."""
+    return hook_denied(_workspace(body), body.hook)
+
+
+def hook_stopped(c: str, hook: dict[str, Any]) -> dict[str, Any]:
     """SubagentStop: a turn's end of a registered agent (stopped), or of a subagent that is no agent of thimble's whose
     typed starts the hook refused as never claimed (`refused`, subagent_files.refuse_unclaimed): their role's refusal
     handler tells the browser."""
-    c = _workspace(body)
-    if body.hook.get("stop_hook_active") or not str(body.hook.get("agent_type") or ""):
+    if hook.get("stop_hook_active") or not str(hook.get("agent_type") or ""):
         return {}
-    for rid in [str(x) for x in body.hook.get("refused") or [] if x]:
+    for rid in [str(x) for x in hook.get("refused") or [] if x]:
         r = request(c, rid)
         if r is not None and r.get("state") == "refused":
-            log.info("%s: the typed start %s of %s was never made: %s", c, rid, body.hook.get("agent_id"),
+            log.info("%s: the typed start %s of %s was never made: %s", c, rid, hook.get("agent_id"),
                      str(r.get("reason") or "")[:200])
             _refused(c, {**r, "id": rid})
-    agent_id = str(body.hook.get("agent_id") or "")
+    agent_id = str(hook.get("agent_id") or "")
     if agent(c, agent_id) is not None:
         stopped(c, agent_id)
     return {}
 
 
-@router.post("/subagents/end")
-async def end_route(body: HookBody) -> dict[str, Any]:
+@router.post("/subagents/stopped")
+async def stopped_route(body: HookBody) -> dict[str, Any]:
+    """SubagentStop (hook_stopped)."""
+    return hook_stopped(_workspace(body), body.hook)
+
+
+def hook_end(c: str, hook: dict[str, Any]) -> dict[str, Any]:
     """SessionEnd: main quit, so its thimble agents' chats close (close_running) and the server's jobs stop at once
-    (agents.stop_all); on `clear` and `resume` only the record, which the hook made."""
+    (session.main_quit); on `clear` and `resume`, and for a session that is not main, only the record, which the hook
+    made."""
     from . import session  # noqa: PLC0415
 
-    c = _workspace(body)
-    reason = str(body.hook.get("reason") or "")
-    sid = str(body.hook.get("session_id") or "")
+    reason = str(hook.get("reason") or "")
+    sid = str(hook.get("session_id") or "")
     lv = session.current(c)
     if reason in ("clear", "resume") or (lv is not None and sid and lv.sid != sid):
         return {"closed": []}
@@ -1469,12 +1499,16 @@ async def end_route(body: HookBody) -> dict[str, Any]:
     return {"closed": closed}
 
 
-@router.post("/subagents/rekey")
-async def rekey_route(body: HookBody) -> dict[str, Any]:
+@router.post("/subagents/end")
+async def end_route(body: HookBody) -> dict[str, Any]:
+    """SessionEnd (hook_end)."""
+    return hook_end(_workspace(body), body.hook)
+
+
+def hook_rekey(c: str, hook: dict[str, Any]) -> dict[str, Any]:
     """SessionStart `clear` or `resume`: the hook moved the agents to the new session in subagents.json (its `old`); the
     chats and the mirror follow (rekey)."""
-    c = _workspace(body)
-    old, new = str(body.hook.get("old") or ""), str(body.hook.get("session_id") or "")
+    old, new = str(hook.get("old") or ""), str(hook.get("session_id") or "")
     if old and new:
         try:
             from . import module_bridge  # noqa: PLC0415
@@ -1485,6 +1519,12 @@ async def rekey_route(body: HookBody) -> dict[str, Any]:
         except ImportError:
             pass
     return {"moved": rekey(c, old, new) if old and new else []}
+
+
+@router.post("/subagents/rekey")
+async def rekey_route(body: HookBody) -> dict[str, Any]:
+    """SessionStart `clear` or `resume` (hook_rekey)."""
+    return hook_rekey(_workspace(body), body.hook)
 
 
 FORK_DEDUPE_S = 600.0  # how long a thread's fork counts as starting, until the mirror sees it finish
@@ -1510,8 +1550,19 @@ def fork_check(c: str, tool_input: dict[str, Any]) -> str | None:
 
 
 def fork_ended(c: str, thread_id: str) -> None:
-    """A thread's fork stopped, so a new Agent call may fork it again (fork_check)."""
+    """A thread's fork stopped, so a new Agent call may fork it again (fork_check); in terminal mode, where the
+    --agent-check hook keeps the forks starting in subagents.json by their description (subagent_files.fork_check),
+    each description that names the thread goes."""
+    from . import session  # noqa: PLC0415
+
     _forking.pop((c, thread_id), None)
+    if not files.terminal(config.workspace_path(c)):
+        return
+    with update(c) as state:
+        table = state.get(files.FORKING)
+        if isinstance(table, dict):
+            for desc in [d for d in table if session.thread_for(c, d) == thread_id]:
+                table.pop(desc, None)
 
 
 class AgentCheckBody(BaseModel):
