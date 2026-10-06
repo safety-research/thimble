@@ -356,6 +356,36 @@ async def test_a_run_an_api_error_ended_fails_with_claude_code_s_error_line_whic
     assert ended[-1] == ("ended", "orientation", 2, "failed", "API Error: 400 prompt is too long")
 
 
+async def test_a_failed_end_that_comes_before_claude_code_writes_the_error_line_waits_for_it(bridge, project, ended,
+                                                                                         monkeypatch):
+    """Live check L18: the module's end (reason error) came 19 ms before Claude Code wrote its API error line, and the
+    thread said "Claude Code ended the run (error) and gave no error text". A failed end with no text reads the
+    transcript again ERROR_TEXT_WAIT_S later; with no line even then it says so."""
+    import asyncio
+
+    monkeypatch.setattr(subagents, "ERROR_TEXT_WAIT_S", 0.05)
+    lv, chat, path = await _click_orientation(bridge, project)
+    _write(path, {"type": "user", "message": {"role": "user", "content": "the task"}},
+           _assistant(_use("toolu_b1", "Bash", {"command": "ls"})), _result("toolu_b1", "a b"))
+    subagents.ended(CORPUS, AGENT, "", "error")
+    assert subagents.agent(CORPUS, AGENT)["status"] == "running", "not ended before the line had its moment"
+    _write(path, _api_error("API Error: Repeated 529 Overloaded errors"))
+    for _ in range(100):
+        if ended and ended[-1][:3] == ("ended", "orientation", 0):
+            break
+        await asyncio.sleep(0.01)
+    assert ended[-1] == ("ended", "orientation", 0, "failed", "API Error: Repeated 529 Overloaded errors")
+
+    subagents.run_again(CORPUS, AGENT, "coordinator")
+    _write(path, {"type": "user", "message": {"role": "user", "content": "And April?"}})
+    subagents.ended(CORPUS, AGENT, "", "error")
+    for _ in range(100):
+        if ended[-1][:3] == ("ended", "orientation", 1):
+            break
+        await asyncio.sleep(0.01)
+    assert ended[-1] == ("ended", "orientation", 1, "failed", subagents.NO_ERROR_TEXT.format(reason="error"))
+
+
 async def test_an_api_error_the_run_went_on_from_and_a_stop_are_no_failure(bridge, project, ended):
     """Only the latest reply counts: a run that went on after an API error (Claude Code retried on a fallback model, or
     nudged it to hand back) ends as its hand-back or answer says; and a run the analyst stopped ends stopped."""

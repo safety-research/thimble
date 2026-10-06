@@ -1053,6 +1053,9 @@ STOPPED_REASONS = ("abort", "interrupt", "cancel", "kill", "stop")  # a turn.com
 # model to retry on (`refusal`)
 FAILED_REASONS = ("error", "fail", "refus")
 NO_ERROR_TEXT = "Claude Code ended the run ({reason}) and gave no error text"  # a failed run's report when none came
+# Claude Code writes an API error's line to the agent's transcript a moment after the module hears the turn end (19 ms
+# in live check L18): a failed end with no text waits this long before it reads the transcript again
+ERROR_TEXT_WAIT_S = 1.0
 
 
 def ended(c: str, agent_id: str, answer: str | None = None, reason: str = "") -> bool:
@@ -1069,6 +1072,18 @@ def ended(c: str, agent_id: str, answer: str | None = None, reason: str = "") ->
         w in why for w in FAILED_REASONS) else "done"
     if status == "failed" and not str(answer or "").strip():
         answer = NO_ERROR_TEXT.format(reason=why)
+        if api_error(c, agent_id) is None:  # not written yet: read again in a moment (run_ended reads it then)
+            k = int(a.get("run") or 0)
+
+            def late() -> None:
+                if int((agent(c, agent_id) or {}).get("run") or 0) == k:
+                    run_ended(c, agent_id, status, answer, source="module")
+
+            try:
+                asyncio.get_running_loop().call_later(ERROR_TEXT_WAIT_S, late)
+                return True
+            except RuntimeError:  # no loop (a synchronous caller): at once
+                pass
     return run_ended(c, agent_id, status, answer, source="module")
 
 
