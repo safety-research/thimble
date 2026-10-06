@@ -39,14 +39,21 @@ cd thimble
 bash scripts/install.sh
 ```
 
-Either install links the `thimble` command into `~/.local/bin` (and says which line to add to your shell startup file
-when that folder is not on your PATH) and runs `thimble doctor`. A `thimble` command or Claude Code plugin that another
-thimble install set up stays as it is unless you agree, on a terminal, to switch it.
+Either install links the `thimble` command into `~/.local/bin` and runs `thimble doctor`. While that folder is not on
+your PATH, it adds a line that puts it there to your shell's startup file, so that a new terminal finds `thimble`:
+`~/.zshrc` for zsh, `~/.bashrc` and the file a login shell reads for bash, `~/.config/fish/conf.d/thimble.fish` for fish,
+`~/.profile` for sh. With a `THIMBLE_HOME` other than `~/.thimble`, a second line sets it. Each line ends with
+`# added by thimble's installer`, goes in only once, and `thimble uninstall` removes exactly those lines.
+`--no-modify-path` leaves the startup files alone, then and in later updates (`--modify-path` takes that back). A
+`thimble` command or Claude Code plugin that another thimble install set up stays as it is unless you agree, on a
+terminal, to switch it.
 
 install.sh opens with one screen: what it found (Claude Code, Python or uv, Node, a browser, Claude Code's sandbox),
-what it installs where and about how big, what it changes in your Claude Code setup, and how many questions remain.
-Then it asks those, and prints a line per step: ✓ when the step is done, ! when it needs you. It ends with what is left
-for you to do, if anything. Every command it runs, with its output, goes to `~/.thimble/install.log`.
+what it installs where and about how big, the line it adds to your shell's startup file, what it changes in your
+Claude Code setup, and how many questions remain. Then it asks those, and prints a line per step: ✓ when the step is
+done, ! when it needs you, with what fixes it under it. It ends with the command to run, and when the terminal you ran
+it in started before the new line, the command that works in that terminal. Every command it runs, with its output,
+goes to `~/.thimble/install.log`.
 
 It asks a question only when this machine leaves it open, so often it asks none:
 
@@ -203,8 +210,9 @@ until `thimble server restart`.
 
 `thimble uninstall` asks, then removes the trust entry an earlier install added, the plugin registration that put
 thimble in every Claude Code session, if there is one (or the marketplace `thimble cc-mod on` registered, which turns
-thimble-cc-mod off in the folders it is on in), `~/.local/bin/thimble`, and `~/.thimble`, which holds a Global install's
-workspaces. `--keep-home` keeps `~/.thimble`. A clone stays where it is, and so does a downloaded headless Chromium, in
+thimble-cc-mod off in the folders it is on in), `~/.local/bin/thimble`, the lines install.sh added to your shell's
+startup files (and a startup file it created, once nothing else is in it), and `~/.thimble`, which holds a Global
+install's workspaces. `--keep-home` keeps `~/.thimble`. A clone stays where it is, and so does a downloaded headless Chromium, in
 Playwright's cache folder.
 
 To delete one workspace and keep the install, `thimble list` shows the workspaces by id and `thimble purge <id>` deletes

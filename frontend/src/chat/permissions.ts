@@ -138,6 +138,7 @@ export function modeChat(ask: PendingAsk, metas: ReadonlyMap<string, ChatMeta>):
 
 /** Why thimble's config sends a call to the analyst whatever the session's permission mode (PermissionRequest.asked_by). */
 const ASKED_BY: Readonly<Record<string, string>> = {
+  config: "thimble asks before an agent changes thimble's config, in every permission mode.",
   data: 'thimble asks before an agent changes your files, in every permission mode.',
   installs: 'thimble asks before an agent installs software, in every permission mode.',
   commands: 'thimble asks about each command this agent runs outside its sandbox.',

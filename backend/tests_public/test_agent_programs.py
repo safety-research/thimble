@@ -202,6 +202,31 @@ def test_an_edit_of_the_corpus_asks_by_default_and_the_config_can_allow_or_refus
     assert allowed["sandbox"]["filesystem"]["allowWrite"] == [str(corpus)] and "ask" not in allowed["permissions"]
 
 
+def test_an_edit_of_thimble_s_config_asks_in_every_session_somebody_answers_and_is_refused_in_one_nobody_does(
+        workspaces_tmp, monkeypatch):
+    """An edit of the config in thimble's home or of the workspace's goes to the analyst whatever `data` says, through a
+    link to the file too, with `config` as the card's reason; a session nobody answers (a dev run with no host) is
+    refused it, its --settings denying both files. main's kept mode stays denied, and other files are left to the rest
+    of the config."""
+    monkeypatch.setenv("THIMBLE_SANDBOX", "1")
+    home_file, ws_file = userconf.global_file(), userconf.workspace_file(CORPUS)
+    _config({"agents": {"orientation": {"data": "allow"}}})
+    conf = userconf.session(CORPUS, "orientation")
+    link = workspaces_tmp / "link.json"
+    link.symlink_to(home_file)
+    for tool, inp in (("Edit", {"file_path": str(home_file)}), ("Write", {"file_path": str(ws_file)}),
+                      ("MultiEdit", {"file_path": str(link)}), ("NotebookEdit", {"notebook_path": str(ws_file)})):
+        assert conf.verdict(tool, inp) == "ask" and conf.ask_cause(tool, inp) == "config", (tool, inp)
+    assert conf.verdict("Edit", {"file_path": str(userconf.main_modes_file())}) == ""
+    assert f"Edit(/{userconf.main_modes_file()})" in conf.settings()["permissions"]["deny"]
+    assert conf.verdict("Read", {"file_path": str(home_file)}) == "" and conf.may_ask()
+    unhosted = userconf.session(CORPUS, "dev")
+    unhosted.hosted = False
+    assert unhosted.verdict("Write", {"file_path": str(home_file), "content": "{}"}) == "deny"
+    perms = unhosted.settings()["permissions"]
+    assert {f"Edit(/{home_file})", f"Edit(/{ws_file})"} <= set(perms["deny"]) and not perms.get("ask")
+
+
 def test_an_agent_s_own_sandbox_switch_runs_it_outside_the_sandbox_without_the_enforce_refusal(workspaces_tmp,
                                                                                                 monkeypatch):
     monkeypatch.setattr(userconf, "sandbox_runs", lambda refresh=False: False)

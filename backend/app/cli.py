@@ -2772,11 +2772,11 @@ def update_script() -> Path:
     return config.REPO_ROOT / "scripts" / "update.sh"
 
 
-# install.sh's answers to its questions, --plugin and --no-plugin, and --require-pinned, which `thimble update` passes on
-# to it through update.sh; --trust-workspaces and --no-trust-workspaces, 0.5.0's, are passed on too for this release,
-# and install.sh ignores them with a line that says so
-INSTALL_FLAGS = ("--sandbox-deps", "--no-sandbox-deps", "--plugin", "--no-plugin", "--trust-workspaces",
-                 "--no-trust-workspaces", "--require-pinned")
+# install.sh's answers to its questions, --plugin and --no-plugin, --no-modify-path and --modify-path, and
+# --require-pinned, which `thimble update` passes on to it through update.sh; --trust-workspaces and
+# --no-trust-workspaces, 0.5.0's, are passed on too for this release, and install.sh ignores them with a line that says so
+INSTALL_FLAGS = ("--sandbox-deps", "--no-sandbox-deps", "--plugin", "--no-plugin", "--no-modify-path", "--modify-path",
+                 "--trust-workspaces", "--no-trust-workspaces", "--require-pinned")
 
 
 def _gh_ok(gh: str, *args: str) -> bool:

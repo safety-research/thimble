@@ -39,9 +39,11 @@ def fake_tree(root: Path, *, checkout: bool = False) -> Path:
 
 
 def env_for(tmp_path: Path, **extra: str) -> dict[str, str]:
+    """A throwaway HOME, and SHELL so that the startup file install.sh writes does not depend on the machine's user."""
     home = tmp_path / "home"
     home.mkdir(exist_ok=True)
-    return {"PATH": "/usr/bin:/bin", "HOME": str(home), "THIMBLE_HOME": str(home / ".thimble"), **extra}
+    return {"PATH": "/usr/bin:/bin", "HOME": str(home), "THIMBLE_HOME": str(home / ".thimble"), "SHELL": "/bin/sh",
+            **extra}
 
 
 # uv's stand-in: `uv venv DIR` makes DIR/bin/python the base interpreter without site-packages, so it holds no package
@@ -320,9 +322,10 @@ def update(tmp_path: Path, *args: str, path: str = "/usr/bin:/bin", **extra: str
 def test_update_from_a_zip_checks_it_against_sha256sums_before_running_its_installer(tmp_path):
     zp = release_zip(tmp_path)
     sums = zp.parent / "SHA256SUMS"
-    r = update(tmp_path, "--from", str(zp), "--browser", "off", "--no-plugin")
+    r = update(tmp_path, "--from", str(zp), "--browser", "off", "--no-plugin", "--no-modify-path")
     assert r.returncode == 0 and f"the SHA-256 of {zp.name} matches" in r.stdout, r.stdout + r.stderr
-    assert f"install.sh ran: --dir {tmp_path / 'inst'} --browser off --no-plugin" in r.stdout, "the answers passed on"
+    assert f"install.sh ran: --dir {tmp_path / 'inst'} --browser off --no-plugin --no-modify-path" in r.stdout, \
+        "the answers passed on"
     listed = sums.read_text()
     sums.write_text("0" * 64 + f"  {zp.name}\n")
     r = update(tmp_path, "--from", str(zp))
@@ -753,8 +756,8 @@ def test_install_sh_leaves_another_installs_plugin_and_command_as_they_are(tmp_p
         assert r.returncode == 0, r.stdout + r.stderr
         return r, plugin_changes(log)
 
-    def untouched() -> bool:
-        return state.read_text() == registered and os.readlink(link) == linked
+    def untouched() -> bool:  # no startup file gets a line either, while `thimble` runs the first install
+        return state.read_text() == registered and os.readlink(link) == linked and marked(Path(env["HOME"])) == {}
 
     for flags in (("--plugin",), ("--no-plugin",), ("--plugin", "--dry-run"), ("--no-plugin", "--dry-run")):
         r, changes = run(*flags)
@@ -771,6 +774,10 @@ def test_install_sh_leaves_another_installs_plugin_and_command_as_they_are(tmp_p
                        "plugin install --scope user thimble@thimble", "plugin update --scope user thimble@thimble"]
     assert json.loads(state.read_text())["marketplaces"] == {"thimble": str(second)}
     assert os.readlink(link) == f"{second}/plugin/bin/thimble"
+    assert marked(Path(env["HOME"])) == {".profile": [f'export PATH="$HOME/.local/bin:$PATH"  {MARK}',
+                                                      f'export THIMBLE_HOME="{env["THIMBLE_HOME"]}"  {MARK}']}, \
+        "once `thimble` runs the second install, its lines go in"
+    (Path(env["HOME"]) / ".profile").unlink()
     # the first install's own record, in a THIMBLE_HOME both installs share
     state.write_text(registered)
     link.unlink()
@@ -825,3 +832,147 @@ def test_thimble_bin_dir_moves_the_command_s_link_and_leaves_the_one_in_local_bi
     assert r.returncode == 0, r.stdout + r.stderr
     assert os.readlink(own / "thimble") == str(dest / "plugin" / "bin" / "thimble")
     assert os.readlink(local) == str(other)
+
+
+# ----------------------------------------------------------------------------- the shell startup files
+
+MARK = "# added by thimble's installer"
+
+
+def full_install(tree: Path, env: dict[str, str], *flags: str, dest: Path | None = None) -> subprocess.CompletedProcess:
+    """install.sh with every question answered and --no-plugin, into $THIMBLE_HOME/app unless `dest`."""
+    dest = dest or Path(env["THIMBLE_HOME"]) / "app"
+    return subprocess.run(["bash", str(tree / "scripts" / "install.sh"), "--dir", str(dest), *ANSWERS, "--no-plugin",
+                           *flags], capture_output=True, text=True, env=env, stdin=subprocess.DEVNULL, timeout=60)
+
+
+def uninstall_cmd(env: dict[str, str]) -> subprocess.CompletedProcess:
+    app = Path(env["THIMBLE_HOME"]) / "app"
+    return subprocess.run(["bash", str(app / "plugin" / "bin" / "thimble"), "uninstall", "--yes"], capture_output=True,
+                          text=True, env=env, stdin=subprocess.DEVNULL, timeout=60)
+
+
+STARTUP_FILES = (".bash_login", ".bash_profile", ".bashrc", ".config/fish/conf.d/thimble.fish", ".profile", ".zshrc")
+
+
+def marked(home: Path) -> dict[str, list[str]]:
+    """{a startup file under HOME: its lines that end with install.sh's mark}, for each that has one."""
+    found = {f: [ln for ln in (home / f).read_text().splitlines() if ln.endswith(MARK)]
+             for f in STARTUP_FILES if (home / f).is_file()}
+    return {f: lines for f, lines in found.items() if lines}
+
+
+def test_install_sh_puts_the_command_on_path_in_zsh_s_startup_file_once_and_uninstall_takes_back_exactly_that_line(
+        tmp_path):
+    """While PATH lacks ~/.local/bin, install.sh adds one line to ~/.zshrc, which the opening screen and the dry run name,
+    leaving every other byte of the file and its link into a dotfiles folder as they were; it ends with the command for
+    the terminal it ran in, which lacks the line, and no list of things left to do. A re-run adds nothing. Uninstall
+    removes exactly that line, and with it nothing else."""
+    tree = fake_tree(tmp_path / "release")
+    env = env_for(tmp_path, PATH=f"{stub_bin(tmp_path)}:/usr/bin:/bin", SHELL="/usr/bin/zsh")
+    home = Path(env["HOME"])
+    dotfiles = tmp_path / "dotfiles" / "zshrc"
+    dotfiles.parent.mkdir()
+    mine = "# mine\nalias ll='ls -l'\nexport EDITOR=vi"  # no newline at its end
+    dotfiles.write_text(mine)
+    (home / ".zshrc").symlink_to(dotfiles)
+    line = f'export PATH="$HOME/.local/bin:$PATH"  {MARK}'
+    dry = full_install(tree, env, "--dry-run")
+    assert "  shell startup         ~/.zshrc: a line that puts ~/.local/bin on PATH (--no-modify-path leaves it out)" \
+        in dry.stdout, dry.stdout
+    assert dotfiles.read_text() == mine, "a dry run writes nothing"
+    r = full_install(tree, env)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert f"✓ Added to ~/.zshrc, so that a new terminal finds thimble:\n    {line}\n" in r.stdout, r.stdout
+    assert "This terminal started before ~/.zshrc had that line, so in it run: ~/.local/bin/thimble" in r.stdout
+    assert "Left for you" not in r.stdout and "add this line" not in r.stdout
+    assert (home / ".zshrc").is_symlink() and dotfiles.read_text() == f"{mine}\n{line}\n"
+    again = full_install(tree, env)
+    assert again.returncode == 0 and "shell startup" not in again.stdout and "Added to" not in again.stdout
+    assert dotfiles.read_text() == f"{mine}\n{line}\n", "a re-run adds nothing"
+    record = home / ".thimble" / "shell-startup"
+    assert f"added\t{home}/.zshrc\t{line}" in record.read_text().splitlines()
+    r = uninstall_cmd(env)
+    assert r.returncode == 0 and f"+ remove from {home}/.zshrc: {line}" in r.stdout, r.stdout + r.stderr
+    assert dotfiles.read_text() == f"{mine}\n" and (home / ".zshrc").is_symlink()
+
+
+@pytest.mark.parametrize("shell, files, path_line, home_line", [
+    ("/bin/bash", [".bashrc", ".profile"], 'export PATH="$HOME/.local/bin:$PATH"', 'export THIMBLE_HOME="$HOME/th"'),
+    ("/usr/bin/fish", [".config/fish/conf.d/thimble.fish"],
+     'contains -- "$HOME/.local/bin" $PATH; or set -gx PATH "$HOME/.local/bin" $PATH', 'set -gx THIMBLE_HOME "$HOME/th"'),
+    ("/bin/dash", [".profile"], 'export PATH="$HOME/.local/bin:$PATH"', 'export THIMBLE_HOME="$HOME/th"'),
+])
+def test_each_shell_gets_its_own_startup_files_and_a_home_other_than_the_default_is_kept_set(tmp_path, shell, files,
+                                                                                              path_line, home_line):
+    """bash gets ~/.bashrc and the file a login shell reads, fish a conf.d file of its own in its syntax, sh ~/.profile;
+    with a THIMBLE_HOME other than ~/.thimble a second line sets it, and this terminal's command carries it. Uninstall
+    removes the lines and the files install.sh created."""
+    tree = fake_tree(tmp_path / "release")
+    env = env_for(tmp_path, PATH=f"{stub_bin(tmp_path)}:/usr/bin:/bin", SHELL=shell)
+    home = Path(env["HOME"])
+    env["THIMBLE_HOME"] = str(home / "th")
+    r = full_install(tree, env)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert marked(home) == {f: [f"{path_line}  {MARK}", f"{home_line}  {MARK}"] for f in files}, r.stdout
+    assert "lines that put ~/.local/bin on PATH and set THIMBLE_HOME (--no-modify-path leaves them out)" in r.stdout
+    assert "so in it run: THIMBLE_HOME=~/th ~/.local/bin/thimble" in r.stdout, r.stdout
+    assert uninstall_cmd(env).returncode == 0
+    assert not any((home / f).exists() for f in files), "the files it created are gone with their lines"
+
+
+def test_bash_s_login_file_that_sources_bashrc_gets_no_line_of_its_own(tmp_path):
+    tree = fake_tree(tmp_path / "release")
+    env = env_for(tmp_path, PATH=f"{stub_bin(tmp_path)}:/usr/bin:/bin", SHELL="/bin/bash")
+    home = Path(env["HOME"])
+    (home / ".bash_profile").write_text('[ -f ~/.bashrc ] && . ~/.bashrc\n')
+    (home / ".profile").write_text("# read only without ~/.bash_profile\n")
+    assert full_install(tree, env).returncode == 0
+    assert list(marked(home)) == [".bashrc"]
+
+
+def test_no_modify_path_is_kept_until_modify_path_and_a_needless_or_unwritable_line_is_not_written(tmp_path):
+    """--no-modify-path writes nothing and says how to run thimble; a later run without the flag keeps that answer, and
+    --modify-path takes it back. With ~/.local/bin on PATH and the default home nothing is needed, so nothing is
+    written or shown. A shell install.sh writes no file for gets a warning that names what to set."""
+    tree = fake_tree(tmp_path / "release")
+    bin_ = stub_bin(tmp_path)
+    env = env_for(tmp_path, PATH=f"{bin_}:/usr/bin:/bin", SHELL="/bin/zsh")
+    home = Path(env["HOME"])
+    r = full_install(tree, env, "--no-modify-path")
+    assert r.returncode == 0 and marked(home) == {}, r.stdout + r.stderr
+    assert "  shell startup         left as it is (--no-modify-path)" in r.stdout
+    assert "Next: run ~/.local/bin/thimble in a folder of transcripts" in r.stdout
+    r = full_install(tree, env)
+    assert marked(home) == {} and "left as it is (your earlier --no-modify-path; --modify-path changes it)" in r.stdout
+    r = full_install(tree, env, "--modify-path")
+    assert list(marked(home)) == [".zshrc"] and "skip" not in (home / ".thimble" / "shell-startup").read_text().splitlines()
+    (tmp_path / "o").mkdir()
+    (tmp_path / "c").mkdir()
+    other = env_for(tmp_path / "o", PATH=f"{bin_}:{tmp_path}/o/home/.local/bin:/usr/bin:/bin", SHELL="/bin/zsh")
+    r = full_install(tree, other)
+    assert r.returncode == 0 and "shell startup" not in r.stdout and marked(Path(other["HOME"])) == {}
+    assert "Next: run thimble in a folder of transcripts" in r.stdout, r.stdout
+    csh = env_for(tmp_path / "c", PATH=f"{bin_}:/usr/bin:/bin", SHELL="/bin/tcsh")
+    r = full_install(tree, csh)
+    assert r.returncode == 0 and marked(Path(csh["HOME"])) == {}
+    assert "! install.sh writes no startup file for your shell, tcsh, so set these in it for a new terminal:\n" \
+           "    ~/.local/bin on PATH" in r.stdout, r.stdout
+
+
+@pytest.mark.parametrize("shell, run", [("bash", ["bash", "-lic"]), ("zsh", ["zsh", "-lic"]), ("fish", ["fish", "-lc"])])
+def test_a_new_login_shell_finds_thimble_and_its_home(tmp_path, shell, run):
+    """The lines install.sh wrote, read by the shell itself: a new login shell of the user's shell finds `thimble` at
+    the link and has THIMBLE_HOME."""
+    exe = shutil.which(shell)
+    if not exe:
+        pytest.skip(f"no {shell} here")
+    tree = fake_tree(tmp_path / "release")
+    env = env_for(tmp_path, PATH=f"{stub_bin(tmp_path)}:/usr/bin:/bin", SHELL=exe)
+    home = Path(env["HOME"])
+    env["THIMBLE_HOME"] = str(home / "th")
+    assert full_install(tree, env).returncode == 0
+    login = {"HOME": str(home), "PATH": "/usr/bin:/bin", "TERM": "dumb", "SHELL": exe}
+    out = subprocess.run([*run, 'command -v thimble; echo "home=$THIMBLE_HOME"'], capture_output=True, text=True,
+                         env=login, stdin=subprocess.DEVNULL, timeout=60).stdout
+    assert f"{home}/.local/bin/thimble" in out.splitlines() and f"home={home}/th" in out.splitlines(), out

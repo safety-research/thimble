@@ -4,7 +4,7 @@
 #   scripts/update.sh [--dir DIR] [--from ZIP|URL] [--sums FILE] [--marketplace-name NAME] [--dry-run] [INSTALL FLAGS]
 #
 # INSTALL FLAGS are install.sh's answers to its questions (--browser, --sandbox-deps and its no- form), --plugin and
-# --no-plugin, and --require-pinned, passed on to it: without a terminal it runs only with a flag for each question that
+# --no-plugin, --no-modify-path and --modify-path, and --require-pinned, passed on to it: without a terminal it runs only with a flag for each question that
 # remains. --trust-workspaces and --no-trust-workspaces, an earlier version's, are passed on too, and install.sh ignores
 # them.
 # The install: --dir, else the one $THIMBLE_HOME/app-dir names, else the tree this script is in. A git checkout gets
@@ -37,7 +37,7 @@ while [ $# -gt 0 ]; do
     --dry-run) dry=1; shift;;
     --browser) install_flags+=("$1" "${2:-}"); shift $(( $# > 1 ? 2 : 1 ));;
     --browser=* | --sandbox-deps | --no-sandbox-deps | --plugin | --no-plugin | --trust-workspaces | --no-trust-workspaces \
-      | --require-pinned) install_flags+=("$1"); shift;;
+      | --no-modify-path | --modify-path | --require-pinned) install_flags+=("$1"); shift;;
     -h|--help) usage; exit 0;;
     *) echo "update.sh: unknown argument $1" >&2; usage >&2; exit 2;;
   esac

@@ -40,8 +40,9 @@
 #                                        thimble started in its own work folder, the ones its server rendered
 #                                        (rendered_prompts, below)
 #   thimble uninstall [--yes] [--keep-home]
-#                                        remove the install: the plugin registration, ~/.local/bin/thimble, $THIMBLE_HOME
-#                                        (bash, below: it needs no venv; a clone folder is left in place)
+#                                        remove the install: the plugin registration, ~/.local/bin/thimble, the lines
+#                                        install.sh added to shell startup files, $THIMBLE_HOME (bash, below: it needs no
+#                                        venv; a clone folder is left in place)
 #
 #   thimble status                       one line: the server, the orientation, the queue (`server status`)
 #   thimble help | -h | --help           thimble's usage (usage, below)
@@ -147,8 +148,10 @@ feedback() {
 }
 
 # thimble uninstall [--yes] [--keep-home]: bash, so it works when the venv is missing or inside the tree being removed.
-# It touches only the plugin registration and the trust entry install.sh added, ~/.local/bin/thimble and $THIMBLE_HOME;
-# a tree outside $THIMBLE_HOME (a clone) is left in place with its workspaces. The `rm -rf` is guarded:
+# It touches only the plugin registration and the trust entry install.sh added, the lines install.sh added to shell
+# startup files (recorded in $THIMBLE_HOME/shell-startup: exactly those lines go, and a file it created goes once it holds
+# nothing else), ~/.local/bin/thimble and $THIMBLE_HOME; a tree outside $THIMBLE_HOME (a clone) is left in place with
+# its workspaces. The `rm -rf` is guarded:
 # $THIMBLE_HOME is canonicalized once, `/`, $HOME and relative paths are refused, and it is removed only when it holds
 # thimble state. The recorded
 # server is stopped only when its command line is a thimble server on the recorded port (argv[0] is not checked, since
@@ -167,7 +170,7 @@ uninstall() {
       -h | --help)
         printf 'usage: thimble uninstall [--yes] [--keep-home]\n'
         printf '  --yes        remove without asking\n'
-        printf '  --keep-home  keep ~/.thimble (server state; after a release install also the app copy and its workspaces); remove only the plugin registration and the link\n'
+        printf '  --keep-home  keep ~/.thimble (server state; after a release install also the app copy and its workspaces); remove only the plugin registration, the link and the lines install.sh added to shell startup files\n'
         exit 0;;
       *) printf 'thimble uninstall: unknown argument %s\n' "$arg" >&2; exit 2;;
     esac
@@ -176,7 +179,7 @@ uninstall() {
   local home_raw="${THIMBLE_HOME:-}" home home_note="" home_state=0 link="$HOME/.local/bin/thimble" tree="" kind="" name="" name_note=""
   local inside=0 pid="" port="" pid_note="" conf="" planned="" pport="" link_ours=0 link_why="" stop_how="" have_claude=0 ans cwd rc
   local nsteps=0 ndone=0 nleft=0 left="" id_ok=0 id_conf="" id_note="" changed=0 undo=0 undo_py="" undo_cmd="" undone=1
-  local reg="" reg_ok=1 reg_from="" reg_other="" mkt="" mod_in=""
+  local reg="" reg_ok=1 reg_from="" reg_other="" mkt="" mod_in="" sh_record="" sh_files=() sh_ok=1 kind_ f_ line_
   case "$home_raw" in *[![:space:]]*) ;; *) home_raw="$HOME/.thimble";; esac   # unset or blank: the default
   home="${home_raw%/}"; [ -n "$home" ] || home=/
   enable -n kill 2>/dev/null || true   # `kill` is the program on PATH, not the builtin: the `+ kill …` line names what ran, and a test can stand a failing one in for it
@@ -198,6 +201,30 @@ uninstall() {
   json_num() {  # json_num FILE KEY — a top-level integer value, else nothing
     if command -v python3 >/dev/null 2>&1; then python3 -I -c 'import json,sys; v=json.load(open(sys.argv[1])).get(sys.argv[2]); print(v if isinstance(v, int) and not isinstance(v, bool) else "")' "$1" "$2" 2>/dev/null || true
     else sed -n "s/.*\"$2\": *\([0-9][0-9]*\).*/\1/p" "$1" | head -n 1; fi
+  }
+  sh_lines_of() {  # sh_lines_of FILE: the lines install.sh's record says it added to FILE, that FILE still has
+    local k f l
+    while IFS=$'\t' read -r k f l; do
+      if [ "$k" = added ] && [ "$f" = "$1" ] && grep -qxF -- "$l" "$1"; then printf '%s\n' "$l"; fi
+    done < "$sh_record"
+  }
+  sh_created() { grep -qxF -- "created"$'\t'"$1" "$sh_record"; }  # sh_created FILE: install.sh created FILE
+  sh_without() {  # sh_without FILE: FILE's text without the lines install.sh added to it, every other byte as it was
+    local l t; t="$(mktemp)" || return 1
+    cp "$1" "$t" || { rm -f "$t"; return 1; }
+    while IFS= read -r l; do
+      { grep -vxF -- "$l" "$t" || true; } > "$t.next" && mv "$t.next" "$t" || { rm -f "$t" "$t.next"; return 1; }
+    done < <(sh_lines_of "$1")
+    cat "$t"; rm -f "$t"
+  }
+  sh_goes() { sh_created "$1" && ! sh_without "$1" | grep -q '[^[:space:]]'; }  # sh_goes FILE: install.sh created FILE, and nothing else is in it
+  sh_take_back() {  # sh_take_back FILE: FILE without the lines install.sh added, written in place (a link stays a link),
+    # or removed when sh_goes
+    local f="$1" l t
+    while IFS= read -r l; do printf '+ remove from %s: %s\n' "$f" "$l"; done < <(sh_lines_of "$f")
+    if sh_goes "$f"; then run rm -f "$f"; return; fi
+    t="$(mktemp)" || return 1
+    if sh_without "$f" > "$t" && cat "$t" > "$f"; then rm -f "$t"; else rm -f "$t"; return 1; fi
   }
   read_record() {  # read_record: pid and port from $home/server.json into pid and port — positive integers only (a pid of 0 would
     # reach ps: on macOS `ps -p 0` shows kernel_task, and `kill 0` in the by-hand line would signal the user's own process group)
@@ -358,6 +385,19 @@ print(", ".join(sorted({str(p.get("projectPath") or "a folder") for p in rows if
   [ -z "$mod_in" ] || printf "  removing thimble's marketplace also turns thimble-cc-mod off where it is on: %s\n" "$mod_in"
   if [ "$link_ours" = 1 ]; then step "rm $link ($link_why)"
   elif [ -e "$link" ] || [ -L "$link" ]; then printf '  %s is left alone: not a link into this tree\n' "$link"; fi
+  # the lines install.sh added to shell startup files, which its record names: one step per file that still has one
+  [ ! -f "$home/shell-startup" ] || sh_record="$home/shell-startup"
+  if [ -n "$sh_record" ]; then
+    while IFS=$'\t' read -r kind_ f_ line_; do
+      [ "$kind_" = added ] && [ -f "$f_" ] && grep -qxF -- "$line_" "$f_" || continue
+      case " ${sh_files[*]+"${sh_files[*]}"} " in *" $f_ "*) continue;; esac
+      sh_files+=("$f_")
+    done < "$sh_record"
+    for f_ in ${sh_files[@]+"${sh_files[@]}"}; do
+      step "remove from $f_ the lines install.sh added$(sh_goes "$f_" && echo ', and the file, which it created and which holds nothing else'):"
+      sh_lines_of "$f_" | while IFS= read -r line_; do printf '       %s\n' "$line_"; done
+    done
+  fi
   # what $THIMBLE_HOME holds: the registry of folders (data/) and server state; the app copy and its workspaces
   # only when the tree is inside it
   local holds="the registry of folders you opened with /thimble (data/) and server state (app-dir, server.json, server.log)"
@@ -430,6 +470,12 @@ print(", ".join(sorted({str(p.get("projectPath") or "a folder") for p in rows if
   if [ "$link_ours" = 1 ]; then
     if run rm -f "$link"; then ndone=$((ndone + 1)); else add_left "$link was not removed" "rm -f $link"; fi
   fi
+  for f_ in ${sh_files[@]+"${sh_files[@]}"}; do
+    if sh_take_back "$f_"; then ndone=$((ndone + 1))
+    else sh_ok=0; add_left "the lines install.sh added to $f_ are still there" "remove from $f_ each line that ends with: # added by thimble's installer"; fi
+  done
+  # the record goes with what it records, --keep-home or not
+  [ -z "$sh_record" ] || [ "$sh_ok" = 0 ] || rm -f "$sh_record"
   if [ "$keep_home" != 1 ] && [ "$home_state" = 1 ] && [ "$undone" = 0 ]; then
     add_left "$home was kept: it records what the command above puts back" "rm -rf $home   # once that has run"
   elif [ "$keep_home" != 1 ] && [ "$home_state" = 1 ]; then

@@ -622,9 +622,9 @@ export interface PermissionRequest {
   cut?: number
   /** why thimble itself asks, which the card says in place of the mode's reason (backend dev.CODE_WHY) */
   why?: string
-  /** what in thimble's config sends the call to the analyst in every permission mode: an edit of the corpus, an
-   * install, or any command (backend userconf.Session.ask_cause) */
-  asked_by?: 'data' | 'installs' | 'commands'
+  /** what in thimble's config sends the call to the analyst in every permission mode: an edit of thimble's config
+   * files, an edit of the corpus, an install, or any command (backend userconf.Session.ask_cause) */
+  asked_by?: 'config' | 'data' | 'installs' | 'commands'
 }
 
 /** A session held where the browser cannot answer: the model-switch dialog after a safety stop (session.py). */

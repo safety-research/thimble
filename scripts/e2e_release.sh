@@ -32,10 +32,11 @@
 # exit, and <out>/report.md lists each step.
 #
 # The run keeps the caller's HOME, so thimble and claude use the caller's own Claude login and config, and it leaves
-# them as they were: it puts the `thimble` link in <out>/bin (THIMBLE_BIN_DIR) in place of ~/.local/bin, and installs
-# only when install.sh --dry-run plans no `claude plugin` command and no write to ~/.local/bin/thimble. The last step
-# checks that Claude Code's plugins and marketplaces, its trusted folders and ~/.local/bin/thimble are as they were
-# before the run.
+# them as they were: it puts the `thimble` link in <out>/bin (THIMBLE_BIN_DIR) in place of ~/.local/bin, passes
+# --no-modify-path so that no shell startup file gets a line, and installs only when install.sh --dry-run plans no
+# `claude plugin` command, no write to ~/.local/bin/thimble and no line in a startup file. The last step checks that
+# Claude Code's plugins and marketplaces, its trusted folders, ~/.local/bin/thimble and the lines thimble's installer
+# added to the startup files are as they were before the run.
 #
 # A step marked pending waits for work that is not merged yet: its failure is reported as expected and does not fail the
 # run (unless --strict), and once it passes the report says so. Exit 0 when no step failed, 1 otherwise.
@@ -153,7 +154,7 @@ cleanup() {
   else record cleanup fail "still running: $left"; fi
   if [ -n "$files_before" ]; then
     if changed="$(claude_files --against "$files_before" 2>&1)"; then
-      record claude-files pass "Claude Code's plugins, marketplaces and trusted folders and ~/.local/bin/thimble as before the run"
+      record claude-files pass "Claude Code's plugins, marketplaces and trusted folders, ~/.local/bin/thimble and the shell startup files as before the run"
     else record claude-files fail "changed during the run: $changed"; fi
   fi
   if [ "$keep_install" = 0 ]; then rm -rf "$clone" "$thome" "$bin" "$out/release"; fi
@@ -199,13 +200,14 @@ if ! claude_files > "$logs/claude-files-before.json" 2>&1; then
   record claude-files fail "could not read Claude Code's files: $(tail -n 1 "$logs/claude-files-before.json")"; exit 1
 fi
 files_before="$logs/claude-files-before.json"
-flags=(--browser bundled --no-sandbox-deps --no-plugin)
+flags=(--browser bundled --no-sandbox-deps --no-plugin --no-modify-path)
 # --verbose: the dry run then prints every step's commands, which the check below reads
 if ! (cd "$src_tree" && in_env bash scripts/install.sh "${flags[@]}" --dry-run --verbose) < /dev/null > "$logs/install-plan.log" 2>&1; then
   record install fail "install.sh --dry-run exited non-zero; see logs/install-plan.log"; exit 1
 fi
 planned="$(grep -E '^\+ claude plugin ' "$logs/install-plan.log" || true)"
 planned="$planned$(grep -F -- "$HOME/.local/bin/thimble" "$logs/install-plan.log" | grep -E '^\+ ' || true)"
+planned="$planned$(grep -E '^\+ append to ' "$logs/install-plan.log" || true)"
 if [ -n "$planned" ]; then
   record install fail "not installed: install.sh's dry run plans changes to the caller's files: $(printf '%s' "$planned" | head -n 3 | tr '\n' ';')"; exit 1
 fi
