@@ -474,6 +474,8 @@ def test_every_click_route_refuses_the_server_s_token_without_the_analyst_s_cook
     for method, path, body in CLICKS:
         r = getattr(client, method)(path, json=body, headers=plugin_headers())
         assert r.status_code == 403, (path, r.status_code, r.text)
+        # it names the clicks it guards, not only permission answers (live check L32)
+        assert "start, message or stop thimble's agents" in r.json()["detail"], path
         r = getattr(client, method)(path, json=body)
         assert r.status_code == 403, ("neither cookie nor token, as a kernel cell posts it", path)
     meta = agents.new_agent(CORPUS, "writer", "Write report", route="subagent", agent_id="a1", status="running")

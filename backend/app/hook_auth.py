@@ -74,8 +74,10 @@ UI_COOKIE_AGE_S = 400 * 24 * 3600  # the longest a browser keeps a cookie
 # paths. It covers the whole API, not just /api/ws/, so a browser proves itself to LocalWriteGuard on every write route.
 UI_COOKIE_PATH = "/api/"
 LEGACY_COOKIE_PATHS = ("/api/ws/", "/api/")  # where UI_COOKIE was set; claim and a moved cookie delete it there
-ANALYST_ONLY = ("open thimble from the link shown under /thimble's reply, or printed by `thimble up` in a shell, to"
-                " answer permission requests or change permission modes")
+# a click route's 403 without the analyst's cookie: every such click, not only the permission answers (live check L32)
+ANALYST_ONLY = ("only the analyst's own thimble page can do this (start, message or stop thimble's agents, build a view,"
+                " answer a permission request, change a permission mode): open it from the link shown under /thimble's"
+                " reply, or printed by `thimble up` in a shell, and click there")
 
 # A write to the local API (any method but GET/HEAD/OPTIONS) must prove it comes from thimble's own browser (the ui_key
 # cookie) or a local tool that can read server.json (the hook proof). A notebook kernel runs model-authored code with
