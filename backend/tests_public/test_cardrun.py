@@ -4,7 +4,6 @@ kernel run stores; a code label runs through `thimble-run label`, and the cards 
 `thimble-run stale`. The kernel runs here are real kernels, the card runs real `thimble-run` processes."""
 from __future__ import annotations
 
-import asyncio
 import json
 import os
 import re
