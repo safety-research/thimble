@@ -472,6 +472,23 @@ async def test_the_analyst_s_stop_and_main_s_quit_end_a_build_failed_with_retry(
     assert "stopped_by" not in _prop(other), "Retry clears it"
 
 
+async def test_a_proposal_an_earlier_version_queued_starts_no_builder_and_waits_for_retry(board, bridge, gates,
+                                                                                         monkeypatch):
+    """A proposal still queued from before this version (no route) belongs to no click or start of this one: when the
+    server finds it (recover_views, at each listing) it starts nothing and fails it with Retry, the click that builds
+    it. One a click queued is queued again, as part of that click."""
+    monkeypatch.setattr(dev, "VIEW_POOL", 2)
+    row = {"name": "Posts", "why": "to read the board", "claims": ["board.jsonl"], "arrangement": "one row per post",
+           "proposed_by": "orient", "status": "queued", "ts": "2026-10-01T00:00:00+00:00"}
+    views._save_proposals(CORPUS, [{**row, "slug": "posts"}, {**row, "slug": "threads", "name": "Threads",
+                                                               "route": subagents.CLICK}])
+    dev.recover_views(CORPUS)
+    await _until(lambda: bridge.ops("spawn"), "the click's queued build never started")
+    await asyncio.sleep(0.05)
+    assert [a.get("prompt", "").count("threads") > 0 for a in bridge.ops("spawn")] == [True]
+    assert _prop("posts")["status"] == "failed" and _prop("posts")["error"] == dev.OLD_BUILD_LINE
+
+
 # --------------------------------------------------------------------------- changes
 
 

@@ -3012,7 +3012,8 @@ def recover_views(c: str) -> None:
     """The workspace's builds after a server restart or an archive restore, each time its proposals are listed: a
     building proposal whose builder still runs in main takes its place in the pool again, one whose builder ended while
     no server ran fails with Retry (ORPHANED_LINE), one from an earlier version, with a session and no builder, fails
-    with Retry, which builds it afresh (OLD_BUILD_LINE); a queued one is queued again."""
+    with Retry, which builds it afresh (OLD_BUILD_LINE); a queued one is queued again as part of the click or start
+    that queued it, and one an earlier version queued, with no such route, fails with Retry (OLD_BUILD_LINE)."""
     from . import subagents, views  # noqa: PLC0415
 
     for p in views.list_proposals(c):
@@ -3038,6 +3039,10 @@ def recover_views(c: str) -> None:
             continue
         if p.get("route") == subagents.TYPED:
             continue  # main's own start, which its propose_view call makes: never started by the server
+        if p.get("route") not in (subagents.CLICK, subagents.FOLLOW_ON):
+            # queued by an earlier version, which no click or start of this one asked for: Retry is that click
+            _view_failed(c, slug, OLD_BUILD_LINE, p.get("chat"))
+            continue
         queue_view(c, slug)
 
 
