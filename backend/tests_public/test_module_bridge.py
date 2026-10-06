@@ -597,6 +597,11 @@ async def test_a_held_poll_has_the_roles_registered_again_once_their_files_chang
     own.write_text(original + "\nCheck every count three times.\n")
     assert await next_op() == "register"
     assert "three times" in (await mod.get("roles")).json()["roles"]["critic"]["prompt"]
+    from app import cardtypes, views
+
+    stamped = {path for path, *_ in module_bridge.roles_stamp(CORPUS)}
+    assert str(config.registry_dir(CORPUS) / cardtypes.REGISTRY_FILE) in stamped, "the card types the prompt lists"
+    assert str(views.views_dir(CORPUS)) in stamped, "and the views, whose forms it lists"
 
 
 async def test_the_state_holds_running_agents_their_efforts_the_typed_starts_and_a_note_for_each(client,

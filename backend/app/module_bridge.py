@@ -650,9 +650,10 @@ def push_roles(c: str) -> None:
 
 def roles_stamp(c: str) -> tuple:
     """(path, mtime_ns, size) of each file the roles are rendered from that may change while main runs (module note):
-    the workspace's settings.json, thimble's config files, the prompt files an agent's `prompt` names in them, and the
-    prompt files under thimble's prompts folder; (path, None, None) for one that is missing."""
-    from . import prompts, userconf  # noqa: PLC0415
+    the workspace's settings.json, thimble's config files, the prompt files an agent's `prompt` names in them, the
+    prompt files under thimble's prompts folder, and the records of the workspace's card types and views, whose forms
+    the orientation's prompt lists; (path, None, None) for one that is missing."""
+    from . import cardtypes, prompts, userconf, views  # noqa: PLC0415
 
     paths = [_ws(c) / "settings.json", *userconf.config_files(c)]
     try:
@@ -662,6 +663,10 @@ def roles_stamp(c: str) -> tuple:
     paths += sorted(Path(str(a["prompt"])) for a in agents.values() if isinstance(a, dict) and a.get("prompt"))
     with contextlib.suppress(OSError):
         paths += sorted(prompts._dir().rglob("*.md"))
+    with contextlib.suppress(OSError, ValueError):
+        paths.append(config.registry_dir(c) / cardtypes.REGISTRY_FILE)
+        base = views.views_dir(c)
+        paths += [base, *sorted(base.glob(f"*/{views.VIEW_JSON}"))]
     out = []
     for path in paths:
         try:
