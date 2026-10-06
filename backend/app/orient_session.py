@@ -1260,7 +1260,8 @@ async def message_route(c: str, body: MessageBody, request: Request) -> dict[str
     """The orientation thread's composer: a click, so the analyst's cookie (403 without it), and the follow-up goes
     through the module (send): {status: sent | held, chat}. 400 for an empty message, 404 when no orientation has run,
     409 with the earlier-session text (and for a pre-cache, plan mode, or a module that did not pass it on), 410 with
-    the earlier-version text or, for an orientation stopped with Esc, the text that it cannot be continued."""
+    the earlier-version text. A message to an orientation stopped with Esc starts its continuation (continue_stopped):
+    {status: continued, chat}."""
     from . import events  # noqa: PLC0415
 
     subagents.analyst_only(request)
