@@ -208,6 +208,21 @@ test('/thimble-card takes a card by its place in the last reply', async ($, on) 
   // the panel shows the card view
   const pane = (await $.ui.mount({ plugin: 'thimble-cc-mod', component: 'Pane', requestId: 'thimble', surface: 'terminal', viewport: { columns: 140, rows: 40 }, props: { bodyColumns: 96, bodyRows: 30 } } as never)) as unknown as M
   expect(await pane.find({ type: 'Client', key: 'pane-d1a9e0' })).toBeDefined()
+  // in the pane the card is boxed as in the chat; the question is the panel's title, so the box opens with the readout
+  // row, blank until a mark is under the pointer, and draws no title of its own
+  await pane.resize({ columns: 96, rows: 30, in: 'pane-d1a9e0' })
+  const box = (await pane.drawn({ in: 'pane-d1a9e0' })) as unknown as { type: string; props: Record<string, unknown>; children?: unknown[] }
+  expect(box.props).toMatchObject({ borderStyle: 'round', borderColor: COLORS.rule, paddingX: 1 })
+  const rows = ((box.children ?? box.props.children) as unknown[]).map(c => shown(c))
+  expect(rows[0]!.trim()).toBe('')
+  expect(rows.join('\n')).not.toContain('Who hands work to whom?')
+  expect(await pane.find({ type: 'Button', key: 'card-title:d1a9e0', in: 'pane-d1a9e0' })).toBeUndefined()
+  // a mark under the pointer: its readout against the box's right edge
+  const lay = cardLayout(DIAGRAM, 92, -1)
+  const y = lay.lines.findIndex(l => l.map(x => x.s).join('').includes('Planner'))
+  const x = lay.lines[y]!.map(x => x.s).join('').indexOf('Planner')
+  await pane.pointer({ type: 'move', x: x + 2, y: y + 2, in: 'pane-d1a9e0' } as never)
+  expect(await pane.find({ type: 'Text', text: /^ +Planner {2}events\.jsonl line 3$/, in: 'pane-d1a9e0' })).toBeDefined()
   await pane.unmount()
 })
 

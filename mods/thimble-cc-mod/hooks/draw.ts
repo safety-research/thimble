@@ -1006,7 +1006,7 @@ function exampleLayout(card: CardData, cols: number, hover: number): Layout {
   const exs = (card.examples ?? []).slice(0, 8)
   const lines: Line[] = []
   const owner: number[] = []
-  const items: Item[] = exs.map(e => ({ label: e.ref, value: e.note || e.quote.slice(0, 60), cite: `[[${e.ref}]]`, open: e.ref, kind: 'record', text: e.note || e.quote }))
+  const items: Item[] = exs.map(e => ({ label: placeWords(e.ref), value: e.note || e.quote.slice(0, 60), cite: `[[${e.ref}]]`, open: e.ref, kind: 'record', text: e.note || e.quote }))
   const valued = cardLabels(card).length > 0
   const room = Math.max(10, cols - 2)
   exs.forEach((e, i) => {
@@ -1864,7 +1864,7 @@ function diagramLayout(card: CardData, cols: number, hover: number): Layout {
     ...nodes.map(
       (n): Item => ({
         label: n.label,
-        value: [n.detail, n.ref].filter(Boolean).join(' · '),
+        value: [n.detail, n.ref ? placeWords(n.ref) : ''].filter(Boolean).join(' · '),
         cite: n.ref ? `[[${n.ref}]]` : cite(n.label, `card:${card.id}#node/${n.id}`),
         open: n.ref || `card:${card.id}#node/${n.id}`,
         kind: 'node',
