@@ -1731,12 +1731,31 @@ def _cancel_event(c: str, concept_id: str) -> threading.Event:
     return _cancels.setdefault((c, concept_id), threading.Event())
 
 
+PARENT_WATCH_S = 1.0  # how often a scan worker looks whether the process that made its pool still runs
+
+
+def _watch_parent(parent: int) -> None:
+    """A scan worker's initializer: the worker ends once the process that made its pool has gone. That process ends
+    its workers when it can (_pool_shutdown); the terminal mode's shim is ended by a signal as Claude Code quits, and a
+    worker it leaves waits on its queue for good (live check T9)."""
+
+    def watch() -> None:
+        while True:
+            time.sleep(PARENT_WATCH_S)
+            if os.getppid() != parent:
+                os._exit(0)
+
+    threading.Thread(target=watch, name="scan-parent-watch", daemon=True).start()
+
+
 def _pool_get() -> ProcessPoolExecutor:
-    """The scan pool: spawned interpreters, apply_workers() of them, kept for the process's life."""
+    """The scan pool: spawned interpreters, apply_workers() of them, kept for the process's life, each ending once this
+    process has gone (_watch_parent)."""
     global _pool, _pool_workers
     if _pool is None:
         _pool_workers = apply_workers()
-        _pool = ProcessPoolExecutor(max_workers=_pool_workers, mp_context=multiprocessing.get_context("spawn"))
+        _pool = ProcessPoolExecutor(max_workers=_pool_workers, mp_context=multiprocessing.get_context("spawn"),
+                                    initializer=_watch_parent, initargs=(os.getpid(),))
     return _pool
 
 
