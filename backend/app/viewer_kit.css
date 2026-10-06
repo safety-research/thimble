@@ -9,7 +9,8 @@
                        .chip-key is a value with its colour, as a key or a toggle: a .chip-sw swatch, its name and its
                        count, aria-pressed false when the value is off
      .btn              an action: .btn-primary, .btn-secondary or .btn-ghost, .btn-sm for the small size,
-                       .btn-square for an icon alone
+                       .btn-square for an icon alone; a toggle or a menu's trigger in a view's top row is
+                       .btn-secondary, so it reads as a button, .active (or aria-pressed) when on
      .seg + .seg-opt   an exclusive choice, the chosen option .active; .seg-track sets the options on a tint
      .field            a text input or a select, or a button that opens a menu (button.field), .active when its menu
                        has a choice set, aria-invalid when what was typed cannot be used
@@ -247,6 +248,11 @@ a.btn {
 }
 .btn-secondary:hover {
   background: var(--surface-hover);
+}
+/* a toggle that is on, such as a view's Density or "Got through": the secondary button on a light fill */
+.btn-secondary.active,
+.btn-secondary[aria-pressed='true'] {
+  background: var(--surface-selected);
 }
 .btn-primary {
   border-color: var(--accent);
