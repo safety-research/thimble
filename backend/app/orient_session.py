@@ -1150,9 +1150,13 @@ async def tool_start_orientation(ctx: Any, args: dict[str, Any]) -> Any:
     brief, passes, critique, values = choices_of(args)
     if running(ctx.c) or starting(ctx.c):
         return tools.err(tools.hint("start_orientation-running"))
-    # a thread's fork may start it (U5): the analyst asked in its thread
-    fork = await subagents.typed_caller(ctx.c, ctx.tool_use_id)
-    if not await asked_for(ctx.c, session.chat_of_agent(ctx.c, fork) or agents.MAIN_ID):
+    # a subagent of main's may start it (U5). A thread's fork answers to the analyst's messages in its thread; any other
+    # answers to the analyst's messages to main, since the prompt its own chat holds is main's words, not the analyst's
+    from . import threads  # noqa: PLC0415
+
+    caller = await subagents.typed_caller(ctx.c, ctx.tool_use_id)
+    asker = session.chat_of_agent(ctx.c, caller) if caller else None
+    if not await asked_for(ctx.c, asker if asker and threads.is_thread(ctx.c, asker) else agents.MAIN_ID):
         return tools.err(tools.hint("start_orientation-unasked"))
     try:
         ans = await start(ctx.c, brief, passes, critique=critique, values=values, route=subagents.TYPED,

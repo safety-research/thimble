@@ -135,6 +135,29 @@ async def test_once_an_orientation_ended_only_the_analyst_s_message_starts_anoth
         assert not (await tools.call(CORPUS, "start_orientation", {"brief": "the moderators"})).is_error, by
 
 
+async def test_a_subagent_of_main_s_own_is_held_to_the_analyst_s_messages_to_main(bridge, models, workspaces_tmp,
+                                                                                 monkeypatch):
+    """U5: a subagent of main's own may call start_orientation, but the prompt its own chat holds is main's words, not
+    the analyst's, so once an orientation ended it starts another only after the analyst's message to main."""
+    from app import session
+    from app.ledger import write_json
+
+    monkeypatch.setattr(orient_session, "ASKED_WAIT_S", 0.05)
+    orientation.run_file(CORPUS).parent.mkdir(parents=True, exist_ok=True)
+    write_json(orientation.run_file(CORPUS), {"status": "done", "passes": ["final", "views"],
+                                              "started": "2026-10-06T03:30:00+00:00",
+                                              "ended": "2026-10-06T03:36:15+00:00", "chats": {"orient": "o1"}})
+    agents.mirror(CORPUS, "user", by=agents.TERMINAL, text="Start the orientation.", ts="2026-10-06T03:29:00.000+00:00")
+    gp = agents.new_agent(CORPUS, "agent", "general-purpose", parent=agents.MAIN_ID, by=agents.TERMINAL)
+    agents.Recorder(CORPUS, gp["id"]).record("user", text="Orient on the moderators.", by=agents.TERMINAL)
+    sf.add_caller(config.workspace_dir(CORPUS), "toolu_gp_start", "agp1", "general-purpose")
+    monkeypatch.setattr(session, "chat_of_agent", lambda c, a: gp["id"] if a == "agp1" else None)
+    res = await tools.call(CORPUS, "start_orientation", {}, tool_use_id="toolu_gp_start")
+    assert res.is_error and res.text.endswith(tools.hint("start_orientation-unasked")), res.text
+    agents.mirror(CORPUS, "user", by=agents.BROWSER, text="Orient again, on the moderators this time.")
+    assert not (await tools.call(CORPUS, "start_orientation", {}, tool_use_id="toolu_gp_start")).is_error
+
+
 async def test_start_in_the_browser_spawns_through_the_module_with_the_gate_s_values(bridge, models, workspaces_tmp):
     ans = await orient_session.start(CORPUS, "the moderators", ["final", "views"], critique=False,
                                      values={"model": "opus", "effort": "xhigh"}, route=subagents.CLICK)
