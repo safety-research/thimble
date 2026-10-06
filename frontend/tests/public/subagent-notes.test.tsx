@@ -50,7 +50,8 @@ describe('the session-gone card', () => {
 
 describe('in a thread', () => {
   test('a message says where it came from: the agent tray or thimble; none in main', () => {
-    expect(byLabel('terminal', 'o1')).toBe('typed in the agent tray')
+    expect(byLabel('terminal', 'o1', true)).toBe('typed in the agent tray')
+    expect(byLabel('terminal', 'o1'), "the prompt main's Agent call sent, live check L25 (live-d)").toBeNull()
     expect(byLabel('browser', 'o1')).toBe('sent from thimble')
     expect(byLabel('browser', 'main')).toBeNull()
   })

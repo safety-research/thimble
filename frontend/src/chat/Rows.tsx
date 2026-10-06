@@ -144,7 +144,7 @@ export function Rows({ rows, ws, chat, streaming = false, nested = false, calls,
             return (
               <div key={r.index} className="chat-msg chat-user" data-event={r.event}>
                 {r.by === 'main' && <Note className="chat-origin" text="From" chips={<ThreadChip id="main" />} />}
-                {byLabel(r.by, chat) && <Note className="chat-origin chat-by" data-by={r.by} text={byLabel(r.by, chat)!} />}
+                {byLabel(r.by, chat, r.tray) && <Note className="chat-origin chat-by" data-by={r.by} text={byLabel(r.by, chat, r.tray)!} />}
                 <UserMessage className="chat-message" data-anchor={anchorOf(r.index)} data-anchor-text={chat ? r.text : undefined} data-by={r.by}>
                   <RefText text={stripHarness(r.text)} workspace={ws} />
                 </UserMessage>
@@ -208,12 +208,12 @@ export function Rows({ rows, ws, chat, streaming = false, nested = false, calls,
 
 const EMPTY: ReadonlySet<string> = new Set()
 
-/** Where a message to one of thimble's agents came from, in its thread: typed in Claude Code's agent tray (`terminal`,
- * the record's origin `human`) or sent from thimble's browser (`browser`); none in main, whose own messages are the
- * analyst's. Pure. */
-export function byLabel(by: string | undefined, chat: string | undefined): string | null {
+/** Where a message to one of thimble's agents came from, in its thread: typed in Claude Code's agent tray (`terminal`
+ * with `tray`, the record's origin `human`) or sent from thimble's browser (`browser`); none for a prompt main's call
+ * sent (`terminal` alone), and none in main, whose own messages are the analyst's. Pure. */
+export function byLabel(by: string | undefined, chat: string | undefined, tray?: boolean): string | null {
   if (!chat || chat === 'main') return null
-  if (by === 'terminal') return 'typed in the agent tray'
+  if (by === 'terminal') return tray ? 'typed in the agent tray' : null
   if (by === 'browser') return 'sent from thimble'
   return null
 }

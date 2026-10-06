@@ -2131,7 +2131,8 @@ def translate_sub(lv: Live, sub: Sub, line: bytes | str) -> int:
         if typed == sub.typed:
             return 0  # the same message in its other shape
         sub.typed = typed
-        sub.rec.record("user", text=typed, by=TERMINAL)
+        # `tray`: the analyst typed it in Claude Code's agent tray, unlike the prompts main's calls sent, which are TERMINAL too
+        sub.rec.record("user", text=typed, by=TERMINAL, tray=True)
         return 1
     origin = rec.get("origin") if isinstance(rec.get("origin"), dict) else {}
     if rec.get("type") == "user" and origin.get("kind") in ("peer", "task-notification"):

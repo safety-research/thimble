@@ -11,6 +11,8 @@ export interface UserRow {
   ts?: string
   /** where the analyst typed it: the session's terminal or the browser; `main` for a message main sent the orientation */
   by?: string
+  /** with `by` terminal: the analyst typed it in Claude Code's agent tray, not a prompt main's call sent */
+  tray?: boolean
   /** `orient-follow-up` on a message an earlier build passed to the orientation through main, kept in older logs; a
    * follow-up's message now says so by its `run` */
   event?: string
@@ -159,7 +161,7 @@ export function foldRecords(records: readonly ChatRecord[], skip?: ReadonlySet<n
     const into = parent ? parent.children : rows
     switch (e.type) {
       case 'user':
-        rows.push({ kind: 'user', index, text: e.text, ts: e.ts, by: e.by, event: e.event, run: e.run, extension: e.extension })
+        rows.push({ kind: 'user', index, text: e.text, ts: e.ts, by: e.by, ...(e.tray ? { tray: true } : {}), event: e.event, run: e.run, extension: e.extension })
         return
       case 'text': {
         // a Claude Code notification the model copied into its reply is harness text, not words for the analyst
