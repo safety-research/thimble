@@ -1622,13 +1622,14 @@ def cmd_launch_args(args: argparse.Namespace) -> int:
 def cmd_prompt(args: argparse.Namespace) -> int:
     """Print prompt files for a skill's injected command. A missing file prints the loader's error line. With
     --unless-launched, nothing in a session the launcher started or for an action that opens no workspace. With --if-main
-    (the SessionStart hook), nothing unless this runs in main's `claude` process (is_main); --lead is printed first."""
+    (the SessionStart hook), nothing unless this runs in main's `claude` process (is_main) and main itself cleared or
+    compacted, not one of its subagents (main_itself); --lead is printed first."""
     if getattr(args, "unless_launched", False):
         action = ALIASES.get((args.action or "").strip(), (args.action or "").strip())
         if launched() or action not in OPENING or (action == RESUME and not (args.archive or "").strip()):
             return 0
     cwd = Path(args.cwd or os.environ.get("THIMBLE_CALLER_CWD") or os.getcwd())
-    if getattr(args, "if_main", False) and not is_main(cwd):
+    if getattr(args, "if_main", False) and not (is_main(cwd) and main_itself(_hook_input())):
         return 0
     from . import events, prompts  # noqa: PLC0415 — the renderer, needed by this subcommand alone
 
@@ -1640,6 +1641,49 @@ def cmd_prompt(args: argparse.Namespace) -> int:
     lead = (getattr(args, "lead", None) or "").strip()
     print(f"{lead}\n\n{text}" if lead else text)
     return 0
+
+
+COMPACT_FRESH_S = 120.0  # a compact_boundary in main's transcript this recent is main's own compaction (main_itself)
+COMPACT_TAIL = 262_144  # bytes at the end of main's transcript where main_itself looks for it
+
+
+def _hook_input() -> dict[str, Any]:
+    """The JSON Claude Code gives a hook on stdin, {} when there is none (a terminal) or it does not parse."""
+    if sys.stdin is None or sys.stdin.isatty():
+        return {}
+    try:
+        data = json.loads(sys.stdin.read(1_000_000) or "{}")
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def main_itself(hook: dict[str, Any]) -> bool:
+    """Whether the SessionStart a hook heard is main's own: a /clear always is, and a compaction is when main's
+    transcript ends with a compact_boundary of its own written in the last COMPACT_FRESH_S. A subagent's compaction
+    fires SessionStart `compact` with main's session id and no agent id (U2), and writes its boundary into its own
+    transcript, not main's. A hook input that names no compaction, or no transcript, counts as main's."""
+    if str(hook.get("source") or "") != "compact" or not hook.get("transcript_path"):
+        return True
+    try:
+        path = Path(str(hook["transcript_path"]))
+        with path.open("rb") as f:
+            f.seek(max(0, path.stat().st_size - COMPACT_TAIL))
+            tail = f.read().splitlines()
+    except OSError:
+        return True
+    for line in reversed(tail):
+        try:
+            rec = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(rec, dict) and rec.get("subtype") == "compact_boundary" and not rec.get("isSidechain"):
+            try:
+                at = datetime.fromisoformat(str(rec.get("timestamp") or "").replace("Z", "+00:00"))
+            except ValueError:
+                return True
+            return (datetime.now(timezone.utc) - at).total_seconds() <= COMPACT_FRESH_S
+    return False
 
 
 def is_main(cwd: Path) -> bool:
