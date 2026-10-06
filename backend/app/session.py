@@ -108,6 +108,9 @@ LOCAL_CAVEAT = "<local-command-caveat>"  # the meta record before a local comman
 CONNECT_COMMANDS = ("/thimble", "/thimble:thimble")  # /thimble's command line, whose turn is not mirrored (module note)
 TASK_FIELD_RE = re.compile(r"<(task-id|tool-use-id|status|result|summary)>(.*?)</\1>", re.S)
 DIDNT_FINISH = "didn't finish"  # a task notification's summary after `thimble --continue`: the agent was cut off by the quit
+# the attachment Claude Code adds to a running subagent's transcript when main goes into plan mode, which the agent then
+# follows: it may only read and write a plan (live check L21)
+PLAN_MODE_ATTACHMENT = "plan_mode"
 HANDBACK_RE = re.compile(r"\A\[Subagent hand-back\].*?follows:\n", re.S)  # the harness's lead of a hand-back
 START_TOOLS = ("start_orientation", "start_writing", "message_orientation", "propose_view", "run_check")  # R3, the Bash true
 # R2: what an error result of main's call for one of thimble's agents says, by the kind of refusal it is
@@ -2207,6 +2210,11 @@ def translate_sub(lv: Live, sub: Sub, line: bytes | str) -> int:
     att = rec.get("attachment") if rec.get("type") == "attachment" and isinstance(rec.get("attachment"), dict) else None
     if att is not None and "<task-notification>" in str(att.get("prompt") or ""):
         _child_finished(lv, str(att["prompt"]))  # a subagent this one started has stopped
+        return 0
+    if att is not None and att.get("type") == PLAN_MODE_ATTACHMENT and sub.thimble and sub.agent_id:
+        from . import subagents  # noqa: PLC0415
+
+        subagents.saw_plan_mode(lv.c, str(sub.agent_id))  # main went into plan mode, and the agent with it (U20)
         return 0
     typed = _typed(rec)
     if typed is not None:

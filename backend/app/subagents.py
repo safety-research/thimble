@@ -754,6 +754,21 @@ def mark_cancelled(c: str, agent_id: str) -> None:
             agents.update_agent(c, chat, stopped_by=STOPPED_USER, **{"continue": CANCELLED})
 
 
+def saw_plan_mode(c: str, agent_id: str) -> None:
+    """Main went into plan mode while `agent_id` ran, and the agent with it (its transcript's plan_mode attachment): it
+    may only read and write a plan from then on. Its run and its chat say so (`plan_mode`), so its end handler can tell
+    a run that could not do its work (a writer that saved nothing, live check L21) from one that had nothing to do."""
+    with update(c) as state:
+        a = files.registry(state).get(agent_id)
+        if not isinstance(a, dict):
+            return
+        a["plan_run"] = int(a.get("run") or 0)
+        chat = str(a.get("chat") or "")
+    if chat:
+        with contextlib.suppress(Exception):
+            agents.update_agent(c, chat, plan_mode=True)
+
+
 def cancelled(c: str, agent_id: str | None) -> bool:
     """Whether Claude Code resumes `agent_id` no more, since it was stopped with Esc in its view (mark_cancelled)."""
     return bool((agent(c, agent_id) or {}).get("cancelled"))
@@ -880,7 +895,7 @@ def run_again(c: str, agent_id: str, by: str = "") -> Run | None:
     if snap.get("chat"):
         with contextlib.suppress(Exception):
             agents.update_agent(c, str(snap["chat"]), status="running", ts_end=None, result=None, run=snap["run"],
-                                stopped_by=None, typed_in_tray=by == "human" or None, paused=None,
+                                stopped_by=None, typed_in_tray=by == "human" or None, paused=None, plan_mode=None,
                                 **({"continue": None} if was_cancelled else {}))
     run = _run(c, agent_id, snap)
     t = TYPES[str(snap["role"])]

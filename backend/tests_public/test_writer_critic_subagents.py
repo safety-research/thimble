@@ -77,6 +77,26 @@ async def test_the_writer_s_end_tells_main_and_lets_go_of_its_work_files(bridge,
     assert told == [(write_session.WRITTEN_KIND, {"text": "Wrote the report.", "status": "done", "doc": "report"})]
 
 
+async def test_a_writer_main_s_plan_mode_caught_mid_run_fails_its_write_and_says_why(bridge, models, workspaces_tmp,
+                                                                                    monkeypatch):
+    """Live check L21: main went into plan mode while a writer ran, and the writer with it, so it wrote a plan file and
+    no document; with the document already there, thimble took that for a revision that changed nothing. The plan_mode
+    attachment in its transcript marks the run, so its end fails the write with what to do, and a next run clears it."""
+    seen: list[dict] = []
+    monkeypatch.setattr(report_types, "_emit", lambda c, rec: seen.append(rec))
+    monkeypatch.setattr(subagents, "tell_main", lambda c, kind, payload: None)
+    monkeypatch.setattr(report_types, "read_doc", lambda c, inv, slug: {"sections": []})  # the document exists
+    ans = await write_session.start(CORPUS, "report", route=subagents.CLICK)
+    subagents.saw_plan_mode(CORPUS, ans.agent_id)
+    chat = subagents.agent(CORPUS, ans.agent_id)["chat"]
+    assert agents.read_meta(CORPUS, chat)["plan_mode"] is True
+    subagents.run_ended(CORPUS, ans.agent_id, "done", "I was put into plan mode partway.", source="handback")
+    [end] = [r for r in seen if r.get("status") in ("generated", "failed")]
+    assert end["status"] == "failed" and end["note"] == report_types.WRITER_PLAN_NOTE and not end.get("unchanged")
+    subagents.run_again(CORPUS, ans.agent_id, "human")
+    assert agents.read_meta(CORPUS, chat).get("plan_mode") is None
+
+
 # --------------------------------------------------------------------------- the critic
 
 

@@ -640,3 +640,14 @@ async def test_an_orientation_stopped_with_esc_is_recorded_as_one_claude_code_re
                                "cancelled; only launch a new agent if the user explicitly asks.", error=True), END)
     session.tail_once(lv)
     assert subagents.cancelled(CORPUS, AGENT), "main's SendMessage got Claude Code's text"
+
+
+async def test_main_s_plan_mode_reaching_a_running_agent_marks_its_run(bridge, project, ended):
+    """Live check L21: Claude Code adds a plan_mode attachment to a running subagent's transcript when main goes into
+    plan mode, and the agent follows it; the mirror marks its run and chat so (subagents.saw_plan_mode)."""
+    lv, chat, path = await _click_orientation(bridge, project)
+    _write(path, {"type": "user", "message": {"role": "user", "content": "the task"}},
+           {"type": "attachment", "attachment": {"type": "plan_mode", "reminderType": "full"}})
+    session.tail_once(lv)
+    assert subagents.agent(CORPUS, AGENT)["plan_run"] == 0
+    assert agents.read_meta(CORPUS, chat)["plan_mode"] is True

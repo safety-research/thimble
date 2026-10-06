@@ -2227,6 +2227,10 @@ def _write_saved(c: str, slug: str, *, whole: bool) -> dict[str, Any] | None:
     return w
 
 
+WRITER_PLAN_NOTE = ("Your Claude Code session went into plan mode while the writer ran, so it could not save the "
+                    "document. Switch out of plan mode (shift+tab in your terminal), then write it again.")
+
+
 def writer_finished(c: str, meta: dict[str, Any]) -> None:
     """An agent chat ended: when it was a writer's, the write of its own document ends (found by the chat's `doc`, its
     title,
@@ -2247,6 +2251,11 @@ def writer_finished(c: str, meta: dict[str, Any]) -> None:
             continue
         if w["saved"]:
             _emit(c, {"type": "report", "slug": slug, "status": "generated", "run": w.get("event")})
+        elif meta.get("plan_mode"):
+            # main went into plan mode while it wrote, and the writer with it, so it could only write a plan (live check
+            # L21): a failure the analyst can write again, never a document found to need no change
+            _emit(c, {"type": "report", "slug": slug, "status": "failed", "run": w.get("event"), "chat": meta.get("id"),
+                      "note": WRITER_PLAN_NOTE})
         elif meta.get("status") == "done" and read_doc(c, investigation.MAIN, slug) is not None:
             # a revision whose writer ended well and changed nothing (it read the document and found nothing to change)
             _emit(c, {"type": "report", "slug": slug, "status": "generated", "unchanged": True, "run": w.get("event"),
