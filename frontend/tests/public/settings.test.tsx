@@ -1,12 +1,13 @@
 // @vitest-environment jsdom
 // The settings popover (src/shell/SettingsPopover.tsx): one model table with a row per role and exactly the model and
 // effort that runs, Claude Code's levels in every agent's effort menu and none for a model that runs with none, fast
-// mode only for the classifiers, main and code tickets (on the dev row), the viewer suggestion's and the refusal's rows, the orientation subagents' row
-// with its effort, a web switch per agent; main's fence, which thimble's agents share; one permission row, the code
-// tickets', with cardWait; no installs row.
+// mode only for the classifiers, main and `thimble fix` (on the dev row), the viewer suggestion's and the refusal's
+// rows, the orientation subagents' row with its effort, a web switch per agent; main's fence, which thimble's agents,
+// code tickets' among them, share; one permission row, the dev agent's program's, only where an extension runs one;
+// cardWait; no installs row.
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
-import { SettingsPopover, changedRoles, changedWeb, fenceLine, lockedWhy, memoryWords, rolesOf, roleEfforts, webRows } from '../../src/shell/SettingsPopover.tsx'
+import { MAIN_MODE_LINE, SettingsPopover, TICKET_FAST, cardWaitLine, changedRoles, changedWeb, fenceLine, lockedWhy, memoryWords, modeRowShown, rolesOf, roleEfforts, webRows } from '../../src/shell/SettingsPopover.tsx'
 import { invalidateSettings } from '../../src/lib/models.ts'
 import type { Settings } from '../../src/lib/types.ts'
 import { mount, settle, unmountAll } from './mount.tsx'
@@ -91,7 +92,7 @@ describe('the rules', () => {
 })
 
 describe('the popover', () => {
-  test('one model table, the fence, the code tickets\' row with cardWait, and no installs or per-agent mode rows', async () => {
+  test('one model table, the fence, cardWait, and no installs or per-agent mode rows: code tickets run in your mode', async () => {
     const anchor = document.createElement('button')
     document.body.appendChild(anchor)
     await mount(<SettingsPopover ws="mini" anchor={anchor} open onClose={() => {}} />)
@@ -107,9 +108,9 @@ describe('the popover', () => {
     expect(doc.querySelector('.settings-row[data-role="critic"] [role="switch"]')?.getAttribute('aria-checked')).toBe('false')
     expect(doc.querySelector('.settings-next-start')?.textContent).toMatch(/applies to its next start/)
     expect(doc.querySelector('.settings-fence-line')?.textContent).toBe('sandbox on · network on · asks before the web · asks to edit data')
-    expect([...doc.querySelectorAll('[data-mode-agent]')].map((r) => r.getAttribute('data-mode-agent'))).toEqual(['dev'])
-    expect(doc.querySelector('[data-mode-agent="dev"] .settings-role')?.textContent).toBe('Code tickets')
-    expect(doc.querySelector('.settings-card-wait')?.textContent).toBe('a request waits 10 min')
+    expect(doc.querySelectorAll('[data-mode-agent]')).toHaveLength(0)
+    expect(doc.querySelector('.settings-main-mode')?.textContent).toBe(MAIN_MODE_LINE)
+    expect(doc.querySelector('.settings-card-wait')?.textContent).toBe(cardWaitLine(10))
     expect(doc.querySelector('[data-memory-agent="writer"]')?.textContent).toContain('CLAUDE.md files: off')
     expect(doc.textContent).not.toMatch(/installs/i)
     expect(doc.querySelector('.settings-ignored')?.textContent).toContain('agents.writer.fast')
@@ -120,7 +121,7 @@ describe('the popover', () => {
     expect(puts).toEqual([['/api/ws/mini/settings', { web: { writer: 'off' } }]])
   })
 
-  test("the dev row's fast switch is code tickets', and a save sends it", async () => {
+  test("the dev row's fast switch is thimble fix's, and a save sends it", async () => {
     const anchor = document.createElement('button')
     document.body.appendChild(anchor)
     await mount(<SettingsPopover ws="mini" anchor={anchor} open onClose={() => {}} />)
@@ -128,12 +129,32 @@ describe('the popover', () => {
     await settle()
     const doc = document.body
     const note = doc.querySelector('.settings-row[data-role="dev"] .settings-role-note')!
-    expect(note.textContent).toBe("view builds, view reviews and code tickets · code tickets' fast mode")
-    const bolt = note.querySelector<HTMLButtonElement>(".fast-bolt[aria-label=\"code tickets' fast mode\"]")!
+    expect(note.textContent).toBe("view builds, view reviews and code tickets · thimble fix's fast mode")
+    const bolt = note.querySelector<HTMLButtonElement>(`.fast-bolt[aria-label="${TICKET_FAST}"]`)!
     expect(bolt.getAttribute('aria-disabled')).toBeNull()
     await act(async () => bolt.click())
     await act(async () => [...doc.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent === 'Save')!.click())
     await settle()
     expect(puts).toEqual([['/api/ws/mini/settings', { models: { dev: { fast: true } } }]])
+  })
+
+  test("the dev agent's permission mode shows only where an extension runs it with a program of its own", async () => {
+    expect(modeRowShown(undefined)).toBe(false)
+    expect(modeRowShown({ way: 'thimble' })).toBe(false)
+    expect(modeRowShown({ way: 'prompt' })).toBe(false)
+    expect(modeRowShown({ way: 'sdk' })).toBe(true)
+    expect(modeRowShown({ way: 'command' })).toBe(true)
+    const anchor = document.createElement('button')
+    document.body.appendChild(anchor)
+    const dev = SETTINGS.agents!.dev!
+    SETTINGS.agents!.dev = { ...dev, way: 'sdk', extension: 'ext' }
+    try {
+      await mount(<SettingsPopover ws="mini" anchor={anchor} open onClose={() => {}} />)
+      await settle()
+      await settle()
+      expect(document.body.querySelector('[data-mode-agent="dev"] .settings-role')?.textContent).toBe("Dev agent's program")
+    } finally {
+      SETTINGS.agents!.dev = dev
+    }
   })
 })
