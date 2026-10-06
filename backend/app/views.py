@@ -151,7 +151,8 @@ LIBS: dict[str, Path] = {
 LIB_NEEDS = {"vega-lite": ("vega",), "vega-embed": ("vega", "vega-lite")}
 BRIDGE_JS = Path(__file__).with_name("viewer_bridge.js")
 KIT_CSS = Path(__file__).with_name("viewer_kit.css")  # thimble's chips, buttons, segmented controls, tables and list rows
-COLOUR_JS = Path(__file__).with_name("viewer_colour.js")  # the view kit's Colour by control, thimble.colourBy
+COLOUR_JS = Path(__file__).with_name("viewer_colour.js")  # the view kit's Color by control, thimble.colorBy
+RANGE_JS = Path(__file__).with_name("viewer_range.js")  # the view kit's time range selector, thimble.timeRange
 HOST_PY = Path(__file__).with_name("view_host.py")
 KERNEL_THIMBLE = Path(__file__).with_name("kernel_thimble.py")  # the `thimble` module a reader imports (view_host)
 # The test label of the checks and the review: it marks every record whose line is a multiple of PROBE_EVERY, about one
@@ -3098,7 +3099,8 @@ def _style_text(css: str) -> str:
 def frame_document(view: dict[str, Any], media: str | None = None, *, card: bool = False,
                    derived: list[dict[str, str]] | None = None) -> str:
     """The view's page as a frame loads it: the policy that blocks every load but the view's media route, the bridge
-    (viewer_bridge.js), the kit's Colour by control (viewer_colour.js), thimble's parts (viewer_kit.css), the vendored
+    (viewer_bridge.js), the kit's Color by control (viewer_colour.js) and time range selector (viewer_range.js),
+    thimble's parts (viewer_kit.css), the vendored
     libraries the view names, then view.html, whose
     own styles come after the parts. The browser adds the theme's tokens (ViewerFrame.tsx). `media` is the media
     route's absolute URL (media_url), which the policy allows for images, audio and video and thimble.mediaUrl builds
@@ -3119,6 +3121,7 @@ def frame_document(view: dict[str, Any], media: str | None = None, *, card: bool
             f"<script>window.__thimbleView = {_script_text(who)}</script>",
             f"<script>{_script_text(BRIDGE_JS.read_text('utf-8'))}</script>",
             f"<script>{_script_text(COLOUR_JS.read_text('utf-8'))}</script>",
+            f"<script>{_script_text(RANGE_JS.read_text('utf-8'))}</script>",
             f"<style>{KIT_CSS.read_text('utf-8')}</style>"]
     for name in view.get("libs") or []:
         p = LIBS.get(name)
@@ -3215,6 +3218,9 @@ async def shoot_states(c: str, slug: str, states: list[dict[str, Any]], *, width
 
     async def answer(kind: str, i: int, msg: dict[str, Any]) -> dict[str, Any]:
         if kind == "fetch":
+            kit, data = kit_answer(c, msg.get("query"))
+            if kit:
+                return {"data": data}
             try:
                 if prepared is not None:
                     data = await _call(c, {**prepared, "labels": _wire(ctxs[i])}, "records", msg.get("query"))
@@ -4243,11 +4249,12 @@ def purple_note(html: str) -> str:
     return _hint("view-purple", colours=shown)
 
 
-# thimble's parts as a view's styles may touch them: the frame styles .chip, .btn, .seg, .field and the Colour by
-# control (viewer_kit.css), and a view lays them out but does not restyle them or draw chips of its own
+# thimble's parts as a view's styles may touch them: the frame styles .chip, .btn, .seg, .field, the Color by control
+# and the time range selector (viewer_kit.css), and a view lays them out but does not restyle them or draw chips of its
+# own
 _STYLE_RE = re.compile(r"<style\b[^>]*>(.*?)</style\s*>", re.S | re.I)
 _CSS_COMMENT_RE = re.compile(r"/\*.*?\*/", re.S)
-_KIT_PART_RE = re.compile(r"\.(?:chip|btn|seg|field|thimble-colour)(?:-[\w-]+)?(?![\w-])")
+_KIT_PART_RE = re.compile(r"\.(?:chip|btn|seg|field|thimble-(?:colour|range|axis|def|peek|reset|tip))(?:-[\w-]+)?(?![\w-])")
 _CLASS_RE = re.compile(r"\.(-?[_a-zA-Z][\w-]*)")
 # what a part looks like, which the kit sets: its edge, fill, corners, colours, type and height. Its width, margins,
 # padding, flex and place are the page's layout.
@@ -4736,8 +4743,8 @@ _controls_seen: dict[tuple[str, int, int], bool] = {}
 
 def label_controls(v: dict[str, Any]) -> bool:
     """Whether the view's page draws label controls of its own: its view.html gives an element `data-label`
-    (prompts/dev-view.md), even one only a menu shows, and calls `thimble.setLabel`, or it mounts the kit's Colour by
-    control (`thimble.colourBy`, viewer_colour.js), which draws them. thimble draws no label control above a view, so
+    (prompts/dev-view.md), even one only a menu shows, and calls `thimble.setLabel`, or it mounts the kit's Color by
+    control (`thimble.colorBy`, or `thimble.colourBy`, viewer_colour.js), which draws them. thimble draws no label control above a view, so
     beside a view without them its Labels sidebar opens while a label is on."""
     d = v.get("dir")
     if not d:
@@ -4753,7 +4760,8 @@ def label_controls(v: dict[str, Any]) -> bool:
             _controls_seen.clear()
         try:
             text = page.read_text("utf-8", "replace")
-            _controls_seen[key] = ("data-label" in text and "setLabel" in text) or "thimble.colourBy(" in text
+            _controls_seen[key] = ("data-label" in text and "setLabel" in text) or "thimble.colourBy(" in text \
+                or "thimble.colorBy(" in text
         except OSError:
             return False
     return _controls_seen[key]
@@ -4998,6 +5006,66 @@ async def card_media_route(c: str, path: str) -> FileResponse:
     return FileResponse(f, media_type=media_type, headers=MEDIA_HEADERS)
 
 
+# A fetch the view kit sends (viewer_colour.js), {"$thimble": <what>, ...}, which thimble answers itself rather than the
+# view's reader: "label", a label's definition for Color by's menu.
+KIT_QUERY = "$thimble"
+_MEANING_SPLIT = re.compile(r"(?<=[.;?!])\s+|\n+")
+
+
+def _meanings(text: str, values: list[str]) -> dict[str, str]:
+    """What a label's text says each value means, where it says it as `<value> = <meaning>` or `<value>: <meaning>` at
+    the start of a sentence, a clause or a line: {value: meaning}."""
+    out: dict[str, str] = {}
+    for part in _MEANING_SPLIT.split(text or ""):
+        part = part.strip().lstrip("-*• ").strip()
+        for v in values:
+            m = re.match(rf"[\"'`]?{re.escape(v)}[\"'`]?\s*(?:=|:|—|–| - )\s*(.+)", part, re.I | re.S)
+            if m and v not in out:
+                out[v] = m.group(1).strip().rstrip(".;").strip()
+                break
+    return out
+
+
+def label_definition(c: str, concept_id: str) -> dict[str, Any] | None:
+    """A label over files as Color by's menu shows its definition: {id, name, kind, text, spec, scope, unit, labeled,
+    values: [{name, highlight, n, meaning}]}. `text` is what the label asks or describes (a prompt label's prompt), `spec`
+    the pattern or the code of the other kinds, `labeled` how many records the label has read, each value's `n` how
+    many records took it. None for a label thimble does not know (the checks' test label among them) or one of cards or
+    sentences."""
+    from . import concepts  # noqa: PLC0415
+
+    try:
+        ws = config.workspace_dir(c)
+        k = concepts.read_concept(ws, str(concept_id))
+    except (HTTPException, OSError, ValueError):
+        return None
+    if k is None or k["unit"] not in concepts.FILE_UNITS:
+        return None
+    try:
+        stats = concepts.concept_stats(ws, k)
+    except (OSError, ValueError):
+        stats = {"n_labeled": None, "counts": {}}
+    prompt = k["kind"] == "prompt"
+    text = (k["spec"].strip() or k["description"].strip()) if prompt else k["description"].strip()
+    names = [cl["name"] for cl in k.get("classes") or []] or list(k.get("labels") or [])
+    meant = _meanings(text, names)
+    counts = stats.get("counts") or {}
+    return {"id": k["id"], "name": k["name"], "kind": k["kind"], "text": text, "spec": "" if prompt else k["spec"],
+            "scope": k.get("glob") or "", "unit": k["unit"], "labeled": stats.get("n_labeled"),
+            "values": [{"name": cl["name"], "highlight": bool(cl.get("highlight", True)), "n": counts.get(cl["name"]),
+                        "meaning": meant.get(cl["name"], "")} for cl in (k.get("classes") or [])]}
+
+
+def kit_answer(c: str, query: Any) -> tuple[bool, Any]:
+    """(True, the answer) for a fetch the view kit sent ({KIT_QUERY: ...}), which never reaches the reader; (False, None)
+    for any other query."""
+    if not isinstance(query, dict) or KIT_QUERY not in query:
+        return False, None
+    if query.get(KIT_QUERY) == "label" and isinstance(query.get("id"), str):
+        return True, label_definition(c, query["id"])
+    return True, None
+
+
 class RecordsBody(BaseModel):
     query: Any = None
     call: str | None = None
@@ -5016,6 +5084,8 @@ async def records_route(c: str, slug: str, body: RecordsBody, request: Request, 
     from .tools import until_dropped  # noqa: PLC0415 — tools imports this module
 
     _view_or_404(c, slug, v)
+    if isinstance(body.query, dict) and KIT_QUERY in body.query:
+        return {"data": (await asyncio.to_thread(kit_answer, c, body.query))[1]}
     cid = view_calls.call_id(body.call)
     if view_calls.cancelled_before(c, cid):
         raise HTTPException(409, {"message": "the call was cancelled", "cancelled": True})

@@ -425,6 +425,8 @@ async def records_route(c: str, name: str, body: RecordsBody) -> dict[str, Any]:
     t = find(c, name)
     if t is None:
         raise HTTPException(404, f"no card type {name!r} in this workspace")
+    if isinstance(body.query, dict) and views.KIT_QUERY in body.query:  # the view kit's own fetch (views.kit_answer)
+        return {"data": (await asyncio.to_thread(views.kit_answer, c, body.query))[1]}
     cell = await asyncio.to_thread(notebook.get_cell, c, body.card) if body.card else None
     made = card_of((cell or {}).get("outputs")) or {}
     ids = [str(x.get("id")) for x in made.get("labels") or [] if isinstance(x, dict) and x.get("id")]

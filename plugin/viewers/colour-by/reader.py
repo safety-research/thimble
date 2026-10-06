@@ -1,4 +1,5 @@
-# Message board: a team's messages, to show the view kit's Colour by (thimble.colourBy) and little else.
+# Message board: a team's messages, to show the view kit's Color by (thimble.colorBy) and time range selector
+# (thimble.timeRange), and little else.
 #
 # The data (sample/messages.jsonl): one message per line, {ts, author, channel, text}. ts is ISO 8601 in UTC, or on a few
 # lines an older export's "DD/MM/YYYY HH:MM", read as UTC. A line that does not parse whole, such as a message cut
@@ -9,9 +10,8 @@
 #
 # What the page asks (records(index, query)):
 #   {"op": "board", "colour": <the page's colour.query()>}
-#       the messages the label filter keeps (thimble.kept) in time order, each with its value under the Colour by
-#       choice (thimble.colour_value), those of a value turned off left out (thimble.colour_on); per hour the messages
-#       of each value that is on; and the counts of every value for the chips
+#       the messages the label filter keeps (thimble.kept) in time order, each with its value under the Color by choice (thimble.colour_value), those of a value turned off left out (thimble.colour_on); and
+#       the counts of every value for the chips. The page's time range selector draws the messages over time itself.
 import json
 import re
 from collections import Counter
@@ -68,22 +68,19 @@ def _ref(index, r):
 
 
 def _board(index, choice):
-    out, hours, counts = [], {}, Counter()
+    out, counts = [], Counter()
     for r in index["rows"]:
         ref = _ref(index, r)
         if not thimble.kept(ref):
             continue
         value = thimble.colour_value(choice, ref, r)
         counts["" if value is None else value] += 1
-        # a value whose chip the analyst turned off leaves the list and the chart, and stays in the chips' counts
+        # a value whose chip the analyst turned off leaves the list and the overview, and stays in the chips' counts
         if not thimble.colour_on(choice, value):
             continue
         out.append({"ref": ref, "ts": _iso(r["t"]), "author": r["author"], "channel": r["channel"], "text": r["text"],
                     "kind": r["kind"], "value": value})
-        hour = _iso(r["t"] - r["t"] % 3600)
-        by = hours.setdefault(hour, Counter())
-        by["" if value is None else value] += 1
-    return {"messages": out, "hours": [[h, dict(c)] for h, c in sorted(hours.items())], "counts": dict(counts)}
+    return {"messages": out, "counts": dict(counts)}
 
 
 def records(index, query):

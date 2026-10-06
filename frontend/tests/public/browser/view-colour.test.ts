@@ -173,7 +173,8 @@ describe('Colour by through ViewerFrame', () => {
     await page.waitForTimeout(500)
     await frame().waitForSelector('.thimble-colour-chip')
     await frame().locator('.thimble-colour-chip').first().click()
-    await page.waitForFunction(() => !!localStorage.getItem('thimble:w:view-colour:board'))
+    // the colours the values took are kept as soon as the page counts them; the chip turned off comes after
+    await page.waitForFunction(() => (localStorage.getItem('thimble:w:view-colour:board') ?? '').includes('"off":{"f:kind"'))
     const kept = await page.evaluate(() => JSON.parse(localStorage.getItem('thimble:w:view-colour:board')!))
     assert.deepEqual([kept.by ?? null, kept.off], [null, { 'f:kind': ['Text only'] }])
     await page.evaluate(() => (window as any).__mount())
