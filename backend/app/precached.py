@@ -9,8 +9,9 @@ with `Precached` (orient_session.message).
 
 The context. A session attached to the workspace starts fresh, so /thimble (cli.cmd_ensure) gives it what the
 orientation left as its context, once per session: POST /api/ws/{c}/precached/context {session} answers with
-context_text the first time a session asks, and with '' after that, or for a workspace not pre-cached. The sessions
-given it are kept in the mark's `context_given`.
+context_text the first time a session asks, and with '' after that, for a workspace not pre-cached, or once a new
+orientation has replaced the pre-cache's (its record no longer is_precached_run). The sessions given it are kept in the
+mark's `context_given`.
 """
 from __future__ import annotations
 
@@ -93,11 +94,12 @@ def context_text(c: str) -> str:
 
 def take_context(c: str, session: str) -> str:
     """context_text the first time `session` asks on a pre-cached workspace, else ''; the session is remembered."""
+    from . import orientation  # noqa: PLC0415
     from .ledger import atomic_write_text  # noqa: PLC0415
 
     with _lock:
         mark = read(c)
-        if mark is None:
+        if mark is None or not is_precached_run(orientation.read_run(c)):
             return ""
         given = [str(s) for s in mark.get("context_given") or []]
         if session and session in given:

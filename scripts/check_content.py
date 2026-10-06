@@ -26,8 +26,14 @@ allowed, on these terms only (demo_hits):
       (notebooks/), the documents (investigations/<name>/*.json), the labels' definitions (concepts/*.json) and values
       (labels/*.jsonl), the views' code and manifests (extension/extension.json, extension/views/<slug>/ view.json and
       .html, .js, .mjs, .css, .py, .md or .svg files outside cache/, views/proposals.json), the orientation's record
-      (orient/run.json, orient/summary.md), the meta and log of a chat (chats/<id>.meta.json, chats/<id>.jsonl) and
-      cited calls (calls/<id>.jsonl); no Claude Code transcript, no work file, no view index or cache
+      (orient/run.json, orient/summary.md), the orientation's chat meta and its empty log (chats/<id>.meta.json,
+      chats/<id>.jsonl) and cited calls (calls/<id>.jsonl); no Claude Code transcript, no work file, no view index or
+      cache
+    - each such file has the shape the export writes (demo_scrub.shape_findings): no chat but the orientation's
+      (the manifest's orientation.chat) and its log empty; in a call log only the calls the manifest's `cited_calls`
+      lists, each output at most demo_scrub.CALL_KEPT lines of at most CALL_LINE_CHARS characters; no label row with
+      the texts a label marked (`spans`)
+    - README.md is there, and holds the manifest's `notice` (the source's own notice, such as mythos-5's canary string)
     - each file is UTF-8 text of a kind the export writes (demo_scrub.TEXT_SUFFIXES: .json, .jsonl, .md, .txt, .py,
       .html, .js, .mjs, .css, .svg), at most DEMO_FILE_MAX bytes, and the folder's files together at most DEMO_TOTAL_MAX
     - each file passes the export's scrub check (demo_scrub.findings): no absolute path under /home, /Users, /mnt or
@@ -127,6 +133,12 @@ def demo_hits(root: Path, rels: list[str]) -> list[tuple[str, int, str, str]]:
         listed = {DEMO_MANIFEST, "README.md"} | {f"workspace/{f.get('path')}" for f in man.get("files") or []
                                                  if isinstance(f, dict)}
         kept = {str(x) for x in man.get("flagged") or []}
+        try:
+            notice_ok = str(man.get("notice") or "") in (root / folder / "README.md").read_text("utf-8")
+        except (OSError, UnicodeDecodeError):
+            notice_ok = False
+        if not notice_ok:
+            hits.append((f"{folder}/README.md", 0, "demo", "missing, or without the source's notice the manifest names"))
         total = 0
         for sub in sorted(inner):
             rel, p = f"{folder}/{sub}", root / folder / sub
@@ -153,6 +165,9 @@ def demo_hits(root: Path, rels: list[str]) -> list[tuple[str, int, str, str]]:
                 text = json.dumps({k: v for k, v in man.items() if k != "flagged"}, ensure_ascii=False)
             found = [f for f in scrub.findings(text, user) if f"{sub}: {f}" not in kept]
             hits += [(rel, 0, "demo", f"the export's scrub check: {f}") for f in found]
+            if sub.startswith("workspace/"):
+                hits += [(rel, 0, "demo", f"not as the export writes it: {f}")
+                         for f in scrub.shape_findings(sub[len("workspace/"):], text, man)]
         if total > DEMO_TOTAL_MAX:
             hits.append((folder + "/", 0, "demo", f"{total} bytes in all, over {DEMO_TOTAL_MAX}"))
     return hits

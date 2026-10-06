@@ -47,7 +47,7 @@ import { RoleChip } from './RoleChip'
 import { useChat, type ChatState } from './useChat'
 import { pendingAsks, waitingAt, waitingChats } from './waiting'
 import { PermissionCard } from './PermissionCard'
-import { AttachBar, PrecachedCard, precachedMark } from './Precached'
+import { AttachBar, PrecachedCard, attachInstead, precachedMark } from './Precached'
 import { pendingRequests } from './permissions'
 
 const LIST_DEBOUNCE_MS = 300
@@ -838,7 +838,7 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
                 setSkipped(true)
               }}
             />
-          ) : precached && neverAttached ? (
+          ) : precached && attachInstead(precached, neverAttached, target.to) ? (
             <AttachBar mark={precached} />
           ) : (
             <Composer

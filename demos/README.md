@@ -44,8 +44,9 @@ one](#making-one)).
   - `orient/run.json` and `orient/summary.md`: the orientation's record, without its session;
   - `chats/<id>.meta.json` and an empty `chats/<id>.jsonl`: the orientation's thread, without its log;
   - `calls/<id>.jsonl`: the calls the report or a card cites (`call:<chat>/<n>`), each with its input and an
-    excerpt of its output: the first 30 lines unless only lines are cited, and the lines cited in place, each cut to
-    500 characters, with every other line left empty so that a cited line number still holds.
+    excerpt of its output: the first 30 lines unless only lines are cited, and the lines cited in place, at most 100
+    lines in all, each cut to 500 characters, with every other line left empty so that a cited line number still
+    holds.
 
 Absolute paths are written as placeholders:
 - `@@THIMBLE_WORKSPACE@@` (the workspace);
@@ -60,7 +61,8 @@ Left out: the conversations (main's chat, the threads, the orientation's log and
 the calls cited, the orientation's work files, label indexes (`*.sqlite`), views' indexes, caches, earlier versions and
 the excerpts their keys cite (`views/key-refs.json`), the cards' edit history and card checks, the event stream,
 kernels, the scratch mirror of the corpus, telemetry, settings, sessions, permissions, undo, hidden files, pictures and
-every file that is not text. The manifest lists each with the reason.
+every file that is not text. The manifest lists each with the reason. The manifest itself is scrubbed and checked
+like the workspace's files, since it carries the orientation's request and the paths of the files left out.
 
 ## The threshold
 
@@ -72,7 +74,12 @@ How a stretch is measured (backend/app/demo_verbatim.py): every string value of 
 of any other text file (a CSV file is one string), with white space collapsed. The index hashes the dataset's text in
 64-character windows every 32 characters, and a file's text at every position. A stretch can measure up to 31
 characters short at each end, so every stretch of 462 characters or more is refused, and one between 400 and 461 may
-pass. PDFs and pictures in a dataset are not indexed.
+pass. A file is also read with its escapes decoded (`\n`, `\"`, `\u00e4`), and a string of it that is JSON, such as a
+call's input or a record printed as a JSON line, as the strings it holds, so a record copied as escaped text measures
+as the record. PDFs and pictures in a dataset are not indexed. The measure finds long stretches only: short records of
+a JSON or JSONL file, each under 95 characters, copied one after another do not add up to a stretch (rows of a CSV or
+text file printed as they stand do), so reading the cards and the cited calls before committing (step 4 below) still
+matters.
 
 Why 400. On 2026-10-05, across nine finished orientations (three each of collusion-wiki, mythos-5 and rubyhack), the
 longest stretch the kept kinds of file shared with the corpus measured 105 characters (a view's reader); cards and
@@ -141,6 +148,10 @@ them, on these terms only:
   one of the manifest's `files`. A folder of an older version, which carried the orientation's transcript, is refused.
 - **Outputs only.** Each `<path>` is one of the kinds listed in [What a folder holds](#what-a-folder-holds)
   (backend/app/demo_scrub.py `workspace_kind`): no transcript, no work file, no view index or cache.
+- **In the shape the export writes** (demo_scrub.py `shape_findings`, which the export also applies). The only chat
+  is the manifest's `orientation.chat`, and its log is empty. A call log holds only the calls the manifest's
+  `cited_calls` lists, each output at most 100 non-empty lines of at most 500 characters. No label row carries `spans`.
+- **The README carries the source's notice.** `README.md` holds the manifest's `notice` (mythos-5's canary string).
 - **Text, and capped in size.** Each file is UTF-8 text of a kind the export writes (`.json`, `.jsonl`, `.md`,
   `.txt`, `.py`, `.html`, `.js`, `.mjs`, `.css`, `.svg`) and at most 6 MB. The folder is at most 30 MB in all.
 - **The export's scrub check passes.** No file holds an absolute path under `/home`, `/Users`, `/mnt` or `/root`, or

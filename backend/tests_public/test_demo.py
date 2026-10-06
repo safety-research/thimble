@@ -341,6 +341,7 @@ def test_export_keeps_the_outputs_alone(tmp_path):
     (out / "workspace" / "stale.json").write_text("{}")
     made(tmp_path, where="b")
     assert not (out / "workspace" / "stale.json").exists()
+    assert sorted(x.name for x in out.parent.iterdir()) == ["toy"]
 
 
 def test_export_keeps_the_cited_calls_cut_to_an_excerpt(tmp_path):
@@ -356,6 +357,10 @@ def test_export_keeps_the_cited_calls_cut_to_an_excerpt(tmp_path):
     lines = out_lines.split("\n")
     assert cut and lines[2:4] == ["l3", "l4"] and lines[49] == "l50" and lines[0] == ""
     assert lines[-1] == demo.CALL_CUT_NOTE
+    # a citation of a whole range keeps at most CALL_KEPT lines of it
+    out_text, cut = demo.call_excerpt("\n".join(f"l{i}" for i in range(1, 1000)), [(1, 100000)])
+    assert cut and sum(1 for x in out_text.split("\n") if x) == demo.CALL_KEPT + 1
+    assert demo.call_excerpt({"rows": ["a"]}, None) == ('{\n "rows": [\n  "a"\n ]\n}', False)
     assert demo.citations(["[[call:o1/2#L3-L4]] [[call:o1/2#L9]]", "call:x/1"]) == {("o1", 2): [(3, 4), (9, 9)],
                                                                                     ("x", 1): None}
 
@@ -375,6 +380,7 @@ def test_export_refuses_a_file_that_copies_a_long_stretch_of_the_corpus(tmp_path
         demo.export(ws, corpus, out, name="toy", home=tmp_path, user="", scan=no_scan, allow_private=True)
     assert "notebooks/g1.json: 1 stretch of 400+ characters copied from the corpus" in str(e.value)
     assert "nothing was written" in str(e.value) and not out.exists()
+    assert not [x for x in tmp_path.iterdir() if x.name.startswith(".")]  # not even a folder it staged in
     # an excerpt under the threshold, as a card quotes a record, passes
     cards["cells"][0]["outputs"] = [{"text/plain": "head:\n" + CORPUS_TEXT[:300]}]
     nb.write_text(json.dumps(cards))
@@ -399,6 +405,17 @@ def test_the_verbatim_index_finds_every_long_shared_stretch():
     assert demo_verbatim.scan(corpus, "card.json", json.dumps({"out": "NOTHING OF IT " * 20})).longest == 0
 
 
+def test_a_record_copied_as_escaped_text_measures_as_the_record():
+    """A call's input is JSON in a string, and a printed record keeps its escapes: both measure as the record."""
+    record = ('Grüße an alle Agenten: bitte "lest" die Regeln.\nZweite Zeile mit Umlauten äöü und mehr Text, damit es '
+              'lang genug wird. ') * 6
+    corpus = demo_verbatim.Corpus(files=[("a.jsonl", json.dumps({"body": record}) + "\n")])
+    call = json.dumps({"n": 1, "input": json.dumps({"command": "cat <<EOF\n" + record + "\nEOF"})})
+    for name, text in (("calls/o1.jsonl", call), ("card.txt", repr(record)), ("card.txt", json.dumps(record))):
+        found = demo_verbatim.scan(corpus, name, text)
+        assert found.long_runs == 1 and found.longest >= len(record.strip()) - 2 * (demo_verbatim.STRIDE - 1), name
+
+
 def test_export_refuses_what_may_be_private(tmp_path):
     corpus = tmp_path / "corpus"
     corpus.mkdir()
@@ -418,6 +435,34 @@ def test_export_refuses_what_may_be_private(tmp_path):
     with pytest.raises(demo.DemoError, match="not a pre-cache"):
         demo.export(ws, corpus, tmp_path / "mine", name="toy", home=tmp_path, user="", scan=no_scan)
     assert (tmp_path / "mine" / "notes.txt").read_text() == "keep"
+
+
+def test_export_scrubs_and_checks_its_manifest(tmp_path):
+    """The manifest carries the orientation's request and the paths left out: written with placeholders, and refused
+    while it holds the user name, as check_content would refuse it."""
+    corpus = tmp_path / "corpus"
+    corpus.mkdir()
+    ws = make_workspace(tmp_path, corpus, tmp_path)
+    run = json.loads((ws / "orient" / "run.json").read_text())
+    (ws / "orient" / "run.json").write_text(json.dumps({**run, "query": f"look at {corpus}/a.jsonl"}))
+    (ws / "kernels" / "maintainername-k.log").write_text("log")
+    with pytest.raises(demo.DemoError, match="thimble-demo-precache.json: the user name 'maintainername'"):
+        demo.export(ws, corpus, tmp_path / "m", name="toy", home=tmp_path, user="maintainername", scan=no_scan)
+    m = demo.export(ws, corpus, tmp_path / "m", name="toy", home=tmp_path, user="maintainername", scrub_user=True,
+                    scan=no_scan)
+    text = (tmp_path / "m" / demo.MANIFEST).read_text()
+    assert m["orientation"]["query"] == "look at @@THIMBLE_CORPUS@@/a.jsonl" and str(tmp_path) not in text
+    assert "kernels/user-k.log" in text and "maintainername" not in text and m["flagged"] == []
+
+
+def test_export_refuses_a_file_of_a_shape_it_never_writes(tmp_path, monkeypatch):
+    """The export checks what it writes as check_content will: here, label rows that still carry their spans."""
+    monkeypatch.setattr(demo, "label_rows", lambda data: data)
+    corpus = tmp_path / "corpus"
+    corpus.mkdir()
+    ws = make_workspace(tmp_path, corpus, tmp_path)
+    with pytest.raises(demo.DemoError, match="labels/l1.jsonl: a label row with spans"):
+        demo.export(ws, corpus, tmp_path / "x", name="toy", home=tmp_path, user="", scan=no_scan, allow_private=True)
 
 
 def test_export_scrubs_the_user_name_and_paths_a_summary_cut_short(tmp_path):
@@ -478,7 +523,8 @@ def test_a_precache_carries_its_sources_notice_first_in_its_readme(tmp_path):
     readme = (out / "README.md").read_text()
     assert readme.startswith("> Notice from the source: This document should not be included")
     assert json.loads((out / demo.MANIFEST).read_text())["notice"] == m["notice"]
-    assert "session is not here" in readme and "No file shares a stretch of 400 characters" in readme
+    assert "session is not here" in readme and "measured no stretch of 400 characters or more" in readme
+    assert "every stretch of 462 or more" in readme
     out, _, m = made(tmp_path, where="t", name="transluce-gov")
     assert "Published by Transluce" in m["credit"] and "Published by Transluce" in (out / "README.md").read_text()
 
@@ -506,6 +552,9 @@ def test_a_fresh_session_on_a_precached_workspace_starts_from_the_canvas_and_the
     # its orientation takes no message: its session was not kept
     with pytest.raises(precached.Precached):
         asyncio.run(orient_session.message(c, "more please"))
+    # once a new orientation replaces the pre-cache's, a new session is not told it starts from the pre-cache
+    (ws / "orient" / "run.json").write_text(json.dumps({"status": "running", "session": "s-new", "chats": {}}))
+    assert precached.take_context(c, "s3") == ""
 
 
 # --------------------------------------------------------------------------- the command

@@ -554,8 +554,8 @@ TRANSLUCE_GOV = Dataset(
                "(us-canada-government-evidence-2026-09-30-v3/), and its one empty folder, 13-census/, which the report "
                "leaves empty because it withholds those URLs.",
     licence="No licence stated. Published by Transluce with its report at https://transluce.org/us-canada-gov; thimble "
-            "downloads it from there and does not redistribute it. The saved responses are Arquivo.pt copies of "
-            "government pages, under Arquivo.pt's terms.",
+            "downloads it from there and does not redistribute it. The saved responses are web-archive captures of "
+            "government pages, most from Arquivo.pt; each folder's sources.csv names the capture.",
     credit="Published by Transluce (Cable, Chiu, Pernice, Ruis, Zhang, Bas, Chetty, Kaiyom, Shen, Stosz, Steinhardt; "
            "Corridor, MIT, Transluce, AIUC, Hertz Foundation) with \"AI Agents Targeted U.S. and Canadian Government "
            "Websites\", 2026-09-30. " + TL_NOT_OURS,

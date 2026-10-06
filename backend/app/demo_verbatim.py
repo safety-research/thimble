@@ -7,7 +7,10 @@ pre-cache may carry long stretches of a record. This module finds those stretche
 The text compared. Every string value of a JSON or JSONL file (a record, a card, a label's row), so the comparison
 does not depend on how either side escaped or indented it, and the whole of any other text file (a CSV file is one
 string), each with its runs of white space collapsed to one space. A string shorter than WINDOW cannot match and is
-skipped. Files that are not text (PDFs, pictures) are not indexed.
+skipped. Files that are not text (PDFs, pictures) are not indexed. A file scanned against the index is also read with
+its escapes decoded (`\n`, `\"`, `ä` and the like) and, where a string of it is JSON (a call's input, a record
+printed as a JSON line), as the strings that JSON holds, so a record copied as escaped text measures as the record;
+each string counts in the reading with the longest stretch shared with the corpus (readings).
 
 The index. Corpus(folder) hashes the WINDOW characters at every STRIDE-th position of every corpus string. A file's
 text is then hashed at every position, and the windows found in the index are merged where they overlap. Any stretch
@@ -36,6 +39,8 @@ LONG = 400  # characters; a stretch measured this long is refused (module note)
 TEXT_SUFFIXES = (".json", ".jsonl", ".md", ".txt", ".csv", ".tsv", ".html", ".htm", ".xml", ".yaml", ".yml", ".py",
                  ".js", ".log", ".vtt", ".srt")
 _WS = re.compile(r"\s+")
+_ESC = re.compile(r"\\(u[0-9a-fA-F]{4}|x[0-9a-fA-F]{2}|[nrtbf\"'\\/])")
+_ESC_CHARS = {"n": "\n", "r": "\r", "t": "\t", "b": " ", "f": " "}
 
 
 def _norm(s: str) -> str:
@@ -76,6 +81,34 @@ def segments(name: str, text: str) -> Iterator[str]:
         except ValueError:
             pass
     yield _norm(text)
+
+
+def _unescape(s: str) -> str:
+    """`s` with its JSON and Python string escapes decoded, a surrogate pair as its one character."""
+    def one(m: re.Match[str]) -> str:
+        g = m.group(1)
+        return chr(int(g[1:], 16)) if len(g) > 1 else _ESC_CHARS.get(g, g)
+
+    out = _ESC.sub(one, s)
+    try:
+        return out.encode("utf-16", "surrogatepass").decode("utf-16")
+    except UnicodeError:
+        return out
+
+
+def readings(s: str) -> list[list[str]]:
+    """The readings of a scanned, normalized string `s` (module note), each a list of normalized strings: `s` itself,
+    `s` with its escapes decoded, and the strings of the JSON `s` is."""
+    out = [[s]]
+    if "\\" in s:
+        out.append([_norm(_unescape(s))])
+    t = s.strip()
+    if t[:1] in "{[":
+        try:
+            out.append([_norm(x) for x in _strings(json.loads(t))])
+        except ValueError:
+            pass
+    return out
 
 
 class Corpus:
@@ -132,10 +165,17 @@ def scan(corpus: Corpus, name: str, text: str, long: int = LONG) -> Found:
     found = Found()
     if not corpus.index:
         return found
-    for s in segments(name, text):
-        if len(s) < WINDOW:
+    for seg in segments(name, text):
+        if len(seg) < WINDOW:
             continue
-        for a, b in runs(corpus, s):
+        best: tuple[int, int] = (0, 0)
+        chosen: list[tuple[str, int, int]] = []
+        for reading in readings(seg):
+            got = [(s, a, b) for s in reading if len(s) >= WINDOW for a, b in runs(corpus, s)]
+            key = (max((b - a for _, a, b in got), default=0), sum(b - a for _, a, b in got))
+            if key > best:
+                best, chosen = key, got
+        for s, a, b in chosen:
             n = b - a
             found.shared += n
             if n > found.longest:

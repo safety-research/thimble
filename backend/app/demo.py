@@ -54,7 +54,8 @@ from typing import Any, Callable, Iterable
 
 from . import config, demo_data, demo_verbatim
 from .demo_data import DATASETS, Dataset
-from .demo_scrub import DASHED, PLACEHOLDERS, TEXT_SUFFIXES, findings, workspace_kind
+from .demo_scrub import (CALL_CUT_NOTE, CALL_KEPT, CALL_LINE_CHARS, CALL_LINES, DASHED, LABEL_DROPPED, PLACEHOLDERS,
+                         TEXT_SUFFIXES, findings, shape_findings, workspace_kind)
 
 SCHEMA = "thimble-demo-precache"
 VERSION = 3  # 1 was a zip (release assets); 2 a folder with the orientation's transcript; 3 the outputs alone
@@ -73,13 +74,9 @@ RUN_KEYS = ("status", "passes", "query", "effort", "critique", "ultracode", "req
             "chats", "error", "run", "report_asked", "revised_cards")
 META_KEYS = ("id", "kind", "role", "title", "created_at", "parent", "agent_type", "effort", "model", "background",
              "mode_agent", "ultracode", "critique", "brief", "anchor", "anchor_text", "group", "result", "ts_end")
-LABEL_DROPPED = ("spans",)  # a label row's field that holds the record's own text (labels_store: the texts it marks)
-# A cited call's output as the pre-cache keeps it (cited_calls): its first lines and the lines cited, each cut
-CALL_LINES = 30
-CALL_LINE_CHARS = 500
+# a call a card or the report cites; LABEL_DROPPED and how much of a cited call's output is kept (CALL_LINES,
+# CALL_KEPT, CALL_LINE_CHARS) are demo_scrub's, which check_content checks again
 CALL_REF_RE = re.compile(r"call:([A-Za-z0-9_-]{1,64})/(\d+)(?:#L(\d+)(?:-L(\d+))?)?")
-CALL_CUT_NOTE = ("[thimble demo: the pre-cache keeps only the first lines of this output and the lines a card or the "
-                 "report cites]")
 # Why each other part of a workspace is left out, by the first part of its path.
 LEFT_OUT = {
     "chats": "a conversation: its tool results quote the corpus",
@@ -301,13 +298,19 @@ def citations(texts: Iterable[str]) -> dict[tuple[str, int], list[tuple[int, int
 
 def call_excerpt(result: Any, ranges: list[tuple[int, int]] | None) -> tuple[Any, bool]:
     """A cited call's output as the pre-cache keeps it: its first CALL_LINES lines unless only lines are cited, and
-    the lines cited (`ranges`) in place, every other line left empty so that the cited numbers still hold, each line
-    cut to CALL_LINE_CHARS; and whether anything was cut."""
-    if not isinstance(result, str):
+    the lines cited (`ranges`) in place, at most CALL_KEPT lines in all, every other line left empty so that the cited
+    numbers still hold, each line cut to CALL_LINE_CHARS; and whether anything was cut. An output that is not text is
+    kept as its JSON text, cut the same way."""
+    if result is None:
         return result, False
+    if not isinstance(result, str):
+        result = json.dumps(result, ensure_ascii=False, indent=1)
     lines = result.split("\n")
-    keep = [((ranges is None and i <= CALL_LINES) or any(a <= i <= b for a, b in ranges or ())) for i in
-            range(1, len(lines) + 1)]
+    keep, kept_n = [], 0
+    for i, ln in enumerate(lines, 1):
+        k = kept_n < CALL_KEPT and ((ranges is None and i <= CALL_LINES) or any(a <= i <= b for a, b in ranges or ()))
+        kept_n += bool(k and ln)
+        keep.append(k)
     out = [(ln[:CALL_LINE_CHARS] if k else "") for ln, k in zip(lines, keep)]
     while out and not out[-1]:
         out.pop()
@@ -480,8 +483,12 @@ def export(ws: Path, corpus: Path, out: Path, *, name: str, home: Path | None = 
     left = [f for f in left if f["path"] not in calls]
     staged = {s: scrub(s, text) for s, text in sorted(staged.items())}
     refused, longest = verbatim_check(staged, index or demo_verbatim.Corpus(corpus), long)
-    out.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(prefix=f".{out.name}.export-", dir=out.parent) as tmp:
+    # what check_content checks again in the tree (demo_scrub.shape_findings): no flag lets it through
+    shape = {"orientation": {"chat": chat}, "cited_calls": cited}
+    misshapen = [f"{s}: {f}" for s, text in staged.items() for f in shape_findings(s, text, shape)]
+    # staged outside the checkout, so a file refused below, or one gitleaks reads, is never written there, not even
+    # when the export is killed before it cleans up
+    with tempfile.TemporaryDirectory(prefix="thimble-demo-export-") as tmp:
         stage = Path(tmp) / "precache"
         files: list[dict[str, Any]] = []
         for s, text in staged.items():
@@ -492,17 +499,6 @@ def export(ws: Path, corpus: Path, out: Path, *, name: str, home: Path | None = 
             files.append({"path": s, "bytes": len(body), "sha256": hashlib.sha256(body).hexdigest()})
         leaks = scan(stage)
         flagged += [f"gitleaks: {x}" for x in leaks or []]
-        problems = []
-        if refused:
-            problems.append(f"{len(refused)} file{'s' if len(refused) > 1 else ''} would copy long stretches of the "
-                            f"corpus ({long} characters or more; demos/README.md), which a pre-cache may not "
-                            "redistribute:\n  " + "\n  ".join(refused))
-        if flagged and not allow_private:
-            problems.append("the pre-cache would carry what may be private:\n  " + "\n  ".join(flagged[:40])
-                            + ("\n  …" if len(flagged) > 40 else "")
-                            + "\n--scrub-user writes `user` in place of the user name; --allow-private keeps the rest")
-        if problems:
-            raise DemoError("nothing was written: " + "\n".join(problems))
         meta = chat_summary(ws, chat)
         manifest = {
             "schema": SCHEMA, "version": VERSION, "dataset": name, "created": now(),
@@ -523,14 +519,47 @@ def export(ws: Path, corpus: Path, out: Path, *, name: str, home: Path | None = 
             "left_out": left,
             "gitleaks": "not installed" if leaks is None else f"{len(leaks)} findings",
             "user_name_scrubbed": scrubbed,
-            "flagged": flagged,
+            "flagged": [],
         }
+        # the manifest carries the orientation's request and the paths of the files left out: scrubbed and checked
+        # as the workspace's files are (check_content checks it without its `flagged`)
+        text = with_placeholders(json.dumps(manifest, ensure_ascii=False), pairs)
+        if scrub_user and user_re is not None:
+            text, n = user_re.subn(SCRUBBED_USER, text)
+            scrubbed += n
+        manifest = json.loads(text)
+        flagged += [f"{MANIFEST}: {f}" for f in findings(text, user)]
+        manifest.update(user_name_scrubbed=scrubbed, flagged=flagged)
+        problems = []
+        if refused:
+            problems.append(f"{len(refused)} file{'s' if len(refused) > 1 else ''} would copy long stretches of the "
+                            f"corpus ({long} characters or more; demos/README.md), which a pre-cache may not "
+                            "redistribute:\n  " + "\n  ".join(refused))
+        if misshapen:
+            problems.append("files not in the shape the export writes, which check_content would refuse:\n  "
+                            + "\n  ".join(misshapen))
+        if flagged and not allow_private:
+            problems.append("the pre-cache would carry what may be private:\n  " + "\n  ".join(flagged[:40])
+                            + ("\n  …" if len(flagged) > 40 else "")
+                            + "\n--scrub-user writes `user` in place of the user name; --allow-private keeps the rest")
+        if problems:
+            raise DemoError("nothing was written: " + "\n".join(problems))
         (stage / MANIFEST).write_text(json.dumps(manifest, ensure_ascii=False, indent=1) + "\n", "utf-8")
         (stage / README).write_text(readme(manifest), "utf-8")
-        old = Path(tmp) / "old"
-        if out.exists():
-            out.rename(old)
-        stage.rename(out)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        token = secrets.token_hex(4)
+        new, old = out.parent / f".{out.name}.new-{token}", out.parent / f".{out.name}.old-{token}"
+        try:
+            shutil.copytree(stage, new)
+            if out.exists():
+                out.rename(old)
+            new.rename(out)
+        except BaseException:
+            shutil.rmtree(new, ignore_errors=True)
+            if old.exists() and not out.exists():
+                old.rename(out)
+            raise
+        shutil.rmtree(old, ignore_errors=True)
     return manifest
 
 
@@ -539,6 +568,14 @@ def made_with(o: dict[str, Any]) -> str:
     return ", ".join(x for x in (str(o.get("model") or "").replace("[1m]", ""),
                                  "Ultracode" if o.get("ultracode") else str(o.get("effort") or ""),
                                  "no prompt" if not o.get("query") else "") if x)
+
+
+def _sure(v: dict[str, Any]) -> Any:
+    """The length from which the export finds every shared stretch (demo_verbatim module note), '?' when unknown."""
+    try:
+        return int(v["long"]) + 2 * (int(v["stride"]) - 1)
+    except (KeyError, TypeError, ValueError):
+        return "?"
 
 
 def readme(m: dict[str, Any]) -> str:
@@ -564,9 +601,9 @@ def readme(m: dict[str, Any]) -> str:
               f"{plural(len(m.get('cited_calls') or []), 'call')} the report or a card cites, each cut to an excerpt.",
               f"- `{WORKSPACE}/`: {len(m.get('files') or [])} files of the workspace. `{MANIFEST}` lists each with its "
               f"SHA-256, and the {len(m.get('left_out') or [])} files left out with the reason for each.",
-              f"- No file shares a stretch of {v.get('long', '?')} characters or more with the dataset; the longest "
-              f"stretch shared is {longest.get('chars', 0)} characters"
-              + (f" (`{longest['path']}`)." if longest.get("path") else "."),
+              f"- The export measured no stretch of {v.get('long', '?')} characters or more that a file shares with the "
+              f"dataset (it finds every stretch of {_sure(v)} or more); the longest it measured is "
+              f"{longest.get('chars', 0)} characters" + (f" (`{longest['path']}`)." if longest.get("path") else "."),
               "- Absolute paths are written as " + ", ".join(f"`{x}`" for x in PLACEHOLDERS.values())
               + " (and as `@@THIMBLE_DASHED_…@@` where a path is spelled with dashes), filled in on install.", "",
               "demos/README.md says how a pre-cache is made and checked.", ""]

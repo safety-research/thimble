@@ -4,7 +4,7 @@
 // command and a Copy button. The page stays readable without a session until the first one attaches (isGone).
 import { act } from 'react'
 import { afterEach, expect, test, vi } from 'vitest'
-import { ATTACH_EXPLAINER, ATTACH_LABEL, AttachBar, PRECACHED_TITLE, PrecachedCard, attachCommand, precachedMark, precachedText } from '../../src/chat/Precached.tsx'
+import { ATTACH_EXPLAINER, ATTACH_LABEL, AttachBar, PRECACHED_TITLE, PrecachedCard, attachCommand, attachInstead, precachedMark, precachedText } from '../../src/chat/Precached.tsx'
 import type { ChatMeta, PrecachedMark } from '../../src/lib/types.ts'
 import { isGone } from '../../src/shell/SessionGone.tsx'
 import { mount, settle, unmountAll } from './mount.tsx'
@@ -33,6 +33,15 @@ test('a pre-cached workspace is read without a session until one attached and en
   expect(isGone({ ...MAIN, ended: { session: 's', cwd: '/srv' } } as unknown as ChatMeta, true, true)).toBe(true)
   expect(isGone(MAIN, true, false)).toBe(true)
   expect(isGone({ ...MAIN, attached: { session: 's' } } as unknown as ChatMeta, true, true)).toBe(false)
+})
+
+test('the attach steps stand in for the composer only where it would reach main', () => {
+  expect(attachInstead(MARK, true, 'here')).toBe(true)
+  expect(attachInstead(MARK, true, 'main')).toBe(true)
+  expect(attachInstead(MARK, true, 'orient')).toBe(false) // a later orientation, with a session of its own
+  expect(attachInstead(MARK, true, 'view')).toBe(false)
+  expect(attachInstead(MARK, false, 'here')).toBe(false)
+  expect(attachInstead(null, true, 'here')).toBe(false)
 })
 
 test('the card says the orientation ran in advance and the button shows the command with a Copy button', async () => {

@@ -24,6 +24,13 @@ export function precachedMark(metas: readonly ChatMeta[]): PrecachedMark | null 
   return m?.precached ? { ...m.precached, orientation: m.precached.orientation ?? m.id } : null
 }
 
+/** Whether the attach steps stand in for the composer: in a pre-cached workspace no session was ever attached to, where
+ * the composer would send to main or a side thread (threads.composerTarget `here` or `main`), which nothing reads yet.
+ * A later orientation's thread or a view's build still takes messages. Pure. */
+export function attachInstead(mark: PrecachedMark | null, neverAttached: boolean, to: string): boolean {
+  return !!mark && neverAttached && (to === 'here' || to === 'main')
+}
+
 /** What the card says of the run: when, on what model, and what was kept. Pure. */
 export function precachedText(mark: PrecachedMark): string {
   const ran = mark.ran ?? mark.created
