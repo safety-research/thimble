@@ -891,7 +891,10 @@ def _asked_by(c: str, tool: str, tool_input: Any) -> str | None:
                 pairs.append((str(k), v))
     elif isinstance(rules, (list, tuple)):
         for r in rules:
-            if isinstance(r, dict):
+            if hasattr(r, "rule") and hasattr(r, "cause"):  # userconf.Rule(behavior, rule, cause): its ask rules
+                if getattr(r, "behavior", "ask") == "ask":
+                    pairs.append((str(r.rule), str(r.cause)))
+            elif isinstance(r, dict):
                 pairs.append((str(r.get("rule") or ""), str(r.get("cause") or "")))
             elif isinstance(r, (list, tuple)) and len(r) >= 2:
                 pairs.append((str(r[0]), str(r[1])))
