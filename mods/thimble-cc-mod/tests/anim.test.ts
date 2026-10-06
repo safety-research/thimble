@@ -155,9 +155,9 @@ test('a diagram shows its nodes layer by layer, then its edges', () => {
   expect(first).not.toContain('Merger')
   const nodes = text(animFrame(DIAGRAM, 70, 0.5).lines).join('\n')
   expect(nodes).toContain('Merger')
-  expect(nodes).not.toContain('▼')
+  expect(nodes).not.toContain('↓')
   expect(nodes).not.toContain('assigns')
-  expect(text(animFrame(DIAGRAM, 70, 1).lines).join('\n')).toContain('▼')
+  expect(text(animFrame(DIAGRAM, 70, 1).lines).join('\n')).toContain('↓')
 })
 
 test('a focus lights the value it names, and labels a line\'s point with its value', () => {

@@ -51,16 +51,11 @@ export type CardMeta = { busy?: string; error?: string }
  *  opens, and how it reaches the gestures (`kind` and `text`, the shown value or words, of its Target). */
 export type Item = { label: string; value: string; cite: string; open: string; kind: 'mark' | 'row' | 'record' | 'node'; text: string }
 
-/** What a press on a label card's controls does: set an example's value (its own value: agree), show the other values
- *  to pick from, or put them away. */
-export type LabelAct = { op: 'verdict'; slug: string; ref: string; value: string } | { op: 'choose'; ref: string } | { op: 'cancel' }
-/** A control of a layout: the cells [x0, x1) of its line, a key the hover names it by, and what a press does. */
-export type Hot = { line: number; x0: number; x1: number; key: string; act: LabelAct }
+export type Layout = { lines: Line[]; items: Item[]; hit: (x: number, y: number) => number }
 
-export type Layout = { lines: Line[]; items: Item[]; hit: (x: number, y: number) => number; hots?: Hot[] }
-/** A label card's state in its Client: the hovered control, the example whose other values show, and a verdict sent
- *  but not yet in the card (`pending`: `<ref>=<value>`). */
-export type LabelUi = { act?: string; choose?: string; pending?: string }
+/** The first palette hue: the marks of a chart with no colour field, which is one series (views/SPEC.md, "The visual
+ *  system", rule 12). */
+export const ONE = COLORS.series[0]!
 
 // ---------------------------------------------------------------------------------------- text width
 
@@ -209,7 +204,8 @@ export function shade(lines: readonly Line[], spans: readonly { line: number; x0
 }
 
 /** A layout's lines with item `i` shaded as the open menu's target: the row or column the layout lights for it, or
- *  else the cells that hit it. */
+ *  else the cells that hit it. No card calls it since round 8 (a right-click does what a click does); the Merge step
+ *  deletes it. */
 export function menuShade(lay: Layout, i: number): Line[] {
   if (i < 0) return lay.lines
   const spans: { line: number; x0: number; x1: number }[] = []
@@ -317,34 +313,25 @@ export function cutRef(ref: string, n: number): string {
   return frag && n - width(frag) >= 4 ? `${cut(words.slice(0, words.length - frag.length), n - width(frag))}${frag}` : cut(words, n)
 }
 
-/** What the label line of a label card says after the name, in `n` columns: how its records were labeled, how many,
- *  and of which files; when it is too long the files go first, then how. */
-function labelScope(l: LabelInfo, n: number): string {
-  const kind = l.kind === 'prompt' ? 'a model read each record' : l.kind === 'regex' ? 'a regex matched each record' : l.kind === 'code' ? 'code decided each record' : l.kind
-  const files = (l.paths ?? []).length ? ` of ${(l.paths ?? []).length > 2 ? `${l.paths!.slice(0, 2).join(', ')} +${l.paths!.length - 2}` : l.paths!.join(', ')}` : ''
-  const many = l.trial ? `a trial on ${count(l.labeled)} of ${count(l.total)} records` : `all ${count(l.labeled)} records`
-  const whole = [kind, `${many}${files}`].filter(Boolean).join(' · ')
-  const shorter = [kind, many].filter(Boolean).join(' · ')
-  return width(whole) <= n ? whole : width(shorter) <= n ? shorter : cut(many, n)
-}
-
 /**
- * The card's label lines, under its question, one per label: "label", the label's name (a press opens it in the
- * panel), then its values each after a dot in its colour; on a label card, how its records were labeled instead, since
- * its bars name the values. `hover`: the slug of the label under the pointer, its name lit.
+ * The card's label rows, under its title, one per label: "label" dim, the label's name in blue and underlined, then a
+ * blue ↗ (a press on either opens the label in the panel), then its values each after a ● in its hue. A label card's
+ * row stops after the ↗, since its bars name the values. `hover`: the slug of the label under the pointer, its name and
+ * ↗ in inverse. `hots`: where each row's name and ↗ stand, the cells a press opens the label from.
  */
-export function labelHead(card: CardData, cols: number, hover = ''): { lines: Line[]; slugs: string[] } {
+export function labelHead(card: CardData, cols: number, hover = ''): { lines: Line[]; slugs: string[]; hots: { x0: number; x1: number }[] } {
   const lines: Line[] = []
   const slugs: string[] = []
+  const hots: { x0: number; x1: number }[] = []
   for (const l of cardLabels(card)) {
     const on = l.slug === hover
     const head: Line = [{ s: 'label  ', fg: COLORS.dim }]
     const nameW = Math.max(8, Math.min(width(l.name), Math.floor(cols * 0.55)))
-    head.push({ s: cut(l.name, nameW), ...(on ? { inv: true } : {}) })
-    let tail: Line
-    if (card.kind === 'label' && card.label) tail = [{ s: `  ${labelScope(card.label, Math.max(1, cols - lineWidth(head) - 2))}`, fg: COLORS.dim }]
-    else {
-      tail = []
+    const x0 = lineWidth(head)
+    head.push({ s: cut(l.name, nameW), fg: COLORS.link, u: true, ...(on ? { inv: true } : {}) }, { s: ' ' }, { s: '↗', fg: COLORS.link, ...(on ? { inv: true } : {}) })
+    hots.push({ x0, x1: lineWidth(head) })
+    const tail: Line = []
+    if (!(card.kind === 'label' && card.label)) {
       const room = cols - lineWidth(head) - (l.stale ? 16 : 0)
       let w = 0
       l.values.forEach((v, i) => {
@@ -356,16 +343,16 @@ export function labelHead(card: CardData, cols: number, hover = ''): { lines: Li
           w = -1
           return
         }
-        tail.push({ s: '  ●', fg: valueColour(l.values, v) }, { s: ` ${v}` })
+        tail.push({ s: '  ' }, { s: '●', fg: valueColour(l.values, v) }, { s: ` ${v}` })
         w += entry
       })
     }
     if (l.stale) tail.push({ s: '  changed since', fg: COLORS.dim })
     const line = [...head, ...tail]
-    lines.push(lineWidth(line) > cols ? [...head, { ...tail[0]!, s: cut(tail.map(x => x.s).join(''), Math.max(1, cols - lineWidth(head))) }] : line)
+    lines.push(lineWidth(line) > cols && tail.length ? [...head, { s: cut(tail.map(x => x.s).join(''), Math.max(1, cols - lineWidth(head))), fg: COLORS.dim }] : line)
     slugs.push(l.slug)
   }
-  return { lines, slugs }
+  return { lines, slugs, hots }
 }
 
 function barLayout(card: CardData, cols: number, hover: number): Layout {
@@ -398,9 +385,10 @@ function barLayout(card: CardData, cols: number, hover: number): Layout {
   }))
   rows.forEach((r, i) => {
     const on = i === hover
-    // a hue only for a value of the card's colour field (its groups, or a label it read); a mark no colour names is
-    // dim (rule 20)
-    const color = classColour(card, r.group || r.label) ?? (groups.length ? COLORS.series[Math.max(0, groups.indexOf(r.group)) % COLORS.series.length]! : COLORS.dim)
+    // a hue for a value of the card's colour field (its groups, or a label it read); with no colour field the bars are
+    // one series, in the first hue (rule 20); the bar under the pointer turns the text colour
+    const hue = classColour(card, r.group || r.label) ?? (groups.length ? COLORS.series[Math.max(0, groups.indexOf(r.group)) % COLORS.series.length]! : ONE)
+    const color = on ? COLORS.text : hue
     const b = bar(r.value, max, barW)
     const [first, second] = fold(r.label, labelW)
     // the label of the mark under the pointer in inverse; a label card's bars are parts of a whole, on a track to it
@@ -515,8 +503,8 @@ function lineLayout(card: CardData, cols: number, hover: number, plotRows = 10):
     return best
   }
   const hot = hover >= 0 ? at[hover] : undefined
-  // one series with no label is dim: a hue names a value of the colour field, and a mark no colour names is dim
-  const seriesColour = (si: number) => classColour(card, series[si]?.name) ?? (series.length > 1 ? COLORS.series[si % COLORS.series.length]! : COLORS.dim)
+  // a chart with no colour field is one series, in the first hue (rule 12); with several, each its hue
+  const seriesColour = (si: number) => classColour(card, series[si]?.name) ?? (series.length > 1 ? COLORS.series[si % COLORS.series.length]! : ONE)
   const lines: Line[] = []
   for (let r = 0; r < plotRows; r++) {
     const yl = r === 0 ? labels[0]! : r === plotRows - 1 ? labels[2]! : r === Math.floor((plotRows - 1) / 2) ? labels[1]! : ''
@@ -535,12 +523,20 @@ function lineLayout(card: CardData, cols: number, hover: number, plotRows = 10):
     }
     lines.push(row)
   }
-  const first = kind === 'cat' ? cats[0] ?? '' : String(series[0]?.points[0]?.[0] ?? '')
-  const lastPts = series[0]?.points ?? []
-  const last = kind === 'cat' ? cats.at(-1) ?? '' : String(lastPts.at(-1)?.[0] ?? '')
+  // the x labels, dim: the first and the last x, and the one nearest the middle where it fits between them with a
+  // gutter at each side
+  const xsAt = series.flatMap(s => s.points.map((p, i) => ({ label: String(p[0]), x: px(xOf(p, i)) >> 1 })))
+  const ends = xsAt.reduce((m, q) => ({ lo: q.x < m.lo.x ? q : m.lo, hi: q.x > m.hi.x ? q : m.hi }), { lo: xsAt[0] ?? { label: '', x: 0 }, hi: xsAt[0] ?? { label: '', x: 0 } })
+  const first = kind === 'cat' ? cats[0] ?? '' : ends.lo.label
+  const last = kind === 'cat' ? cats.at(-1) ?? '' : ends.hi.label
+  const mid = xsAt.reduce<{ label: string; x: number } | null>((m, q) => (!m || Math.abs(q.x - pw / 2) < Math.abs(m.x - pw / 2) ? q : m), null)
   const axis = ' '.repeat(yW) + '└' + '─'.repeat(pw)
   lines.push([{ s: axis, fg: COLORS.rule }])
-  const xl = first.length + last.length + 2 <= pw ? first + ' '.repeat(pw - first.length - last.length) + last : first
+  let xl = first.length + last.length + 2 <= pw ? first + ' '.repeat(pw - first.length - last.length) + last : first
+  if (mid && mid.label !== first && mid.label !== last && xl.length === pw) {
+    const m0 = Math.round(pw / 2 - width(mid.label) / 2)
+    if (m0 >= width(first) + 2 && m0 + width(mid.label) + 2 <= pw - width(last)) xl = xl.slice(0, m0) + mid.label + xl.slice(m0 + mid.label.length)
+  }
   lines.push([{ s: ' '.repeat(yW + 1) + xl, fg: COLORS.dim }])
   if (series.length > 1) lines.push(...flow(series.map((s, si) => [{ s: '● ', fg: seriesColour(si) }, { s: s.name }]), cols))
   return { lines, items, hit: (x, y) => nearest(x, y) }
@@ -586,8 +582,10 @@ function timelineLayout(card: CardData, cols: number, hover: number): Layout {
     text: e.ref ? e.label : shown[i]!,
   }))
   let axisRows = 0
-  // with a label read, each event's value as a dot in its colour, and an event the label does not mark dim
+  // with a label read, each event's value as a dot in its colour, and an event the label does not mark dim; with none,
+  // every event's dot in the first hue
   const valued = cardLabels(card).length > 0
+  const mark = (e: { label: string; ref: string }) => classColour(card, e.label, e.ref) ?? (valued ? COLORS.dim : ONE)
   if (isTime && evs.length > 1) {
     const t0 = Math.min(...times)
     const t1 = Math.max(...times)
@@ -598,31 +596,24 @@ function timelineLayout(card: CardData, cols: number, hover: number): Layout {
       const x = t1 === t0 ? 0 : Math.round(((t - t0) / (t1 - t0)) * (aw - 1))
       cells[x] = cells[x] === -1 || i === hover ? i : cells[x]!
     })
-    // each event a ● on the axis, in its value's hue when the card read a label, else dim (a mark no colour names);
-    // the one under the pointer in inverse
-    lines.push(cells.map((c): Seg => (c >= 0 ? { s: '●', fg: classColour(card, evs[c]!.label, evs[c]!.ref) ?? COLORS.dim, ...(c === hover ? { inv: true } : {}) } : { s: '─', fg: COLORS.rule })))
+    // each event a ● on the axis, in the first hue, or in its value's hue when the card read a label (dim for an event
+    // the label does not mark); the one under the pointer in inverse
+    lines.push(cells.map((c): Seg => (c >= 0 ? { s: '●', fg: mark(evs[c]!), ...(c === hover ? { inv: true } : {}) } : { s: '─', fg: COLORS.rule })))
     const a = shown[times.indexOf(t0)]!
     const b = shown[times.indexOf(t1)]!
     lines.push([{ s: `${a}${' '.repeat(Math.max(2, aw - width(a) - width(b)))}${b}`, fg: COLORS.dim }])
     axisRows = 2
   }
+  // one row per event: its time dim at the content's edge, under the axis's start time (in inverse under the
+  // pointer), its ● in hue, its words, and a blue ↗ when it has a record a click opens
   const tW = Math.min(Math.max(...shown.map(t => width(t))), 22)
   const owner: number[] = lines.map(() => -1)
   evs.forEach((e, i) => {
     const on = i === hover
     const label = fold(e.label, Math.max(8, cols - tW - 6))
-    // a bare ↗: the event has a record a click opens
-    const arrow: Seg[] = e.ref ? [{ s: ' ↗' }] : []
-    const dot = valued ? classColour(card, e.label, e.ref) : undefined
-    // its value's ● hanging at the left when the card read a label; its time dim, in inverse under the pointer
-    const time = pad(shown[i]!, tW, isTime)
-    lines.push([
-      dot ? { s: '● ', fg: dot } : { s: '  ' },
-      on ? { s: time, inv: true } : { s: time, fg: COLORS.dim },
-      { s: '  ' },
-      { s: label[0]! },
-      ...(label.length === 1 ? arrow : []),
-    ])
+    const arrow: Seg[] = e.ref ? [{ s: ' ' }, { s: '↗', fg: COLORS.link }] : []
+    const time = pad(shown[i]!, tW)
+    lines.push([on ? { s: time, inv: true } : { s: time, fg: COLORS.dim }, { s: '  ' }, { s: '●', fg: mark(e) }, { s: ' ' }, { s: label[0]! }, ...(label.length === 1 ? arrow : [])])
     owner.push(i)
     if (label[1]) {
       lines.push([{ s: ' '.repeat(tW + 4) }, { s: label[1] }, ...arrow])
@@ -899,6 +890,14 @@ function tableGeometry(heads: readonly string[], cells: readonly string[][], num
   return out
 }
 
+/** A padded cell as a table's header draws it: its words bold, the spaces around them plain. */
+export function boldCell(cell: string): Seg[] {
+  const body = cell.trim()
+  if (!body) return [{ s: cell }]
+  const at = cell.indexOf(body)
+  return [{ s: cell.slice(0, at) }, { s: body, b: true }, { s: cell.slice(at + body.length) }].filter(x => x.s)
+}
+
 /**
  * A table in `cols` columns. A word is broken only where it alone is wider than its column: a column is never
  * narrower than its widest number, its header in three lines or its other cells in two, broken between words; the first
@@ -939,8 +938,10 @@ function tableLayout(card: CardData, cols: number, hover: number): Layout {
     // the headers sit on the rule: a shorter one starts lower
     const head = cs.map(c => wrapCell(heads[c]!, ws[c]!, 3))
     const hl = Math.max(...head.map(h => h.length))
-    // the column names dim, with no rule under them; the words of the cell under the pointer in inverse
-    for (let j = 0; j < hl; j++) push(join(cs, (c, i) => [{ s: pad(head[i]![j - hl + head[i]!.length] ?? '', ws[c]!, numeric[c]), fg: COLORS.dim }]), -1, bi)
+    // the column names bold, a rule in the rule grey under each as wide as its column, the rows right under it; the
+    // words of the cell under the pointer in inverse
+    for (let j = 0; j < hl; j++) push(join(cs, (c, i) => boldCell(pad(head[i]![j - hl + head[i]!.length] ?? '', ws[c]!, numeric[c]))), -1, bi)
+    push(join(cs, c => [{ s: '─'.repeat(ws[c]!), fg: COLORS.rule }]), -1, bi)
     cells.forEach((r, ri) => {
       const p = cs.map(c => (numeric[c] ? [r[c]!] : wrapCell(r[c]!, ws[c]!, 2)))
       for (let j = 0; j < Math.max(...p.map(q => q.length)); j++) {
@@ -977,148 +978,63 @@ function tableLayout(card: CardData, cols: number, hover: number): Layout {
   }
 }
 
-/** A record's head: its value's ● hanging at the left (none for a record of no colour field), its words, then `↗` and
- *  its place underlined, a link to the record; the place in inverse while the record is under the pointer. */
-function recordHead(glyph: Seg | null, words: Seg[], ref: string, on: boolean, room: number): Line {
-  const lead: Seg = glyph ?? { s: '  ' }
-  const used = 2 + words.reduce((n, w) => n + width(w.s), 0) + (words.length ? 2 : 0) + 2
-  const place = cutRef(ref, Math.max(8, room - used))
-  return [lead, ...words, ...(words.length ? [{ s: '  ' }] : []), { s: '↗ ' }, { s: place, u: true, ...(on ? { inv: true } : {}) }]
+/** A record's place as a link: a blue ↗, then its place in words, blue and underlined, in inverse while the record is
+ *  under the pointer. */
+function placeLink(ref: string, n: number, on: boolean): Seg[] {
+  return [{ s: '↗', fg: COLORS.link }, { s: ' ' }, { s: cutRef(ref, Math.max(4, n - 2)), fg: COLORS.link, u: true, ...(on ? { inv: true } : {}) }]
 }
 
+/** A record's own words in quotation marks, in at most `max` rows of `room` columns; words that do not fit end in
+ *  `…"`. */
+function quoteLines(words: string, room: number, max: number): string[] {
+  const lines = wrapCell(`"${words}"`, room, max).filter(Boolean)
+  const last = lines.at(-1)
+  if (last && last.endsWith('…')) {
+    let t = last.slice(0, -1)
+    while (t && width(t) + 2 > room) t = t.slice(0, -1)
+    lines[lines.length - 1] = `${t.trimEnd()}…"`
+  }
+  return lines
+}
+
+/**
+ * Example records: per record, a ● at the content's edge (in its value's hue when a label the card read marks it, dim
+ * when it marks it not, else the first hue) and thimble's note after it, regular; under the note, 2 cells in, the
+ * record's words in quotation marks and italic, up to three rows, then ↗ and its place in blue and underlined, on the
+ * quote's last row where it fits, else on the row under it. A blank row between records.
+ */
 function exampleLayout(card: CardData, cols: number, hover: number): Layout {
   const exs = (card.examples ?? []).slice(0, 8)
   const lines: Line[] = []
   const owner: number[] = []
-  const items: Item[] = exs.map(e => ({ label: e.ref, value: e.note || e.quote.slice(0, 60), cite: `[[${e.ref}]]`, open: e.ref, kind: 'record', text: e.note || e.quote }))
+  const items: Item[] = exs.map(e => ({ label: placeWords(e.ref), value: e.note || e.quote.slice(0, 60), cite: `[[${e.ref}]]`, open: e.ref, kind: 'record', text: e.note || e.quote }))
+  const valued = cardLabels(card).length > 0
+  const room = Math.max(10, cols - 2)
   exs.forEach((e, i) => {
     const on = i === hover
-    // each record's ● hanging at A0 on its first row, in its value's hue when a label the card read marks it, else dim
-    // (a mark no colour names), so the records part without blank rows; its words in italic, its own among the model's
-    const colour = classColour(card, e.value, e.ref)
-    const glyph: Seg = { s: '● ', fg: colour ?? COLORS.dim }
-    const room = Math.max(10, cols - 2)
-    // the note on the head's row with the place where it fits, else on rows of its own above it
-    const note = e.note ? (width(e.note) + 4 + Math.min(24, width(placeWords(e.ref))) <= room ? [e.note] : fold(e.note, room)) : []
-    const beside = note.length === 1 && width(note[0]!) + 4 + Math.min(24, width(placeWords(e.ref))) <= room
-    if (beside) lines.push(recordHead(glyph, [{ s: note[0]! }], e.ref, on, cols))
-    else {
-      note.forEach((t, k) => lines.push([k === 0 && glyph ? glyph : { s: '  ' }, { s: t }]))
-      lines.push(recordHead(note.length ? null : glyph, [], e.ref, on, cols))
+    if (i) {
+      lines.push([])
+      owner.push(-1)
     }
-    for (let k = 0; k < (beside ? 1 : note.length + 1); k++) owner.push(i)
-    for (const t of wrapCell(demojibake(e.quote).replace(/\s+/g, ' ').trim(), room, 3).filter(Boolean)) {
-      lines.push([{ s: '  ' }, { s: t, i: true }])
+    const glyph: Seg = { s: '● ', fg: classColour(card, e.value, e.ref) ?? (valued ? COLORS.dim : ONE) }
+    const rows: Line[] = []
+    const lead = () => (rows.length ? { s: '  ' } : glyph)
+    const note = e.note ? wrapCell(e.note.replace(/\s+/g, ' ').trim(), room, 3).filter(Boolean) : []
+    for (const t of note) rows.push([lead(), { s: t }])
+    const words = demojibake(e.quote).replace(/\s+/g, ' ').trim()
+    const quote = words ? quoteLines(words, room, 3) : []
+    for (const t of quote) rows.push([lead(), { s: t, i: true }])
+    // the place after the quote's last row (or the note's, with no quote) when it fits there with a gutter
+    const last = rows.at(-1)
+    const want = 2 + width(placeWords(e.ref))
+    if (last && lineWidth(last) + 2 + want <= cols) last.push({ s: '  ' }, ...placeLink(e.ref, cols - lineWidth(last) - 2, on))
+    else rows.push([lead(), ...placeLink(e.ref, room, on)])
+    for (const r of rows) {
+      lines.push(r)
       owner.push(i)
     }
   })
   return { lines, items, hit: (_x, y) => owner[y] ?? -1 }
-}
-
-// ---------------------------------------------------------------------------------------- label cards
-
-/**
- * A label card (the label tool's, helper/labels.py): its count of each value as bars in the values' colours with each
- * share on a track to the whole, then the records it picked, each with its value's ●, its value, its place, its words
- * and why, and the controls that judge it: "agree" keeps its value as the analyst's, "disagree" sets the other value
- * (or shows the others to pick from). A record the analyst judged says so in place of the controls. Items: the bars,
- * then the records.
- */
-function labelLayout(card: CardData, cols: number, hover: number, ui: LabelUi = {}): Layout {
-  const l = card.label
-  const bars = barLayout(card, cols, hover)
-  const nBars = bars.items.length
-  const exs = (card.examples ?? []).slice(0, 8)
-  if (!l || !exs.length) return bars
-  const lines: Line[] = [...bars.lines]
-  const owner: number[] = bars.lines.map((_, y) => bars.hit(0, y))
-  const hots: Hot[] = []
-  const items: Item[] = [...bars.items, ...exs.map((e): Item => ({ label: e.ref, value: e.value ?? '', cite: `[[${e.ref}]]`, open: e.ref, kind: 'record', text: e.quote }))]
-  const room = Math.max(10, cols - 2)
-  const pending = ui.pending ? ui.pending.split('=') : null
-  const push = (line: Line, own: number) => {
-    lines.push(line)
-    owner.push(own)
-  }
-  /** A record's head line with, at its end, its controls (each a hot region, two cells apart) or what the analyst
-   *  did; where they do not fit beside it, the head alone, its place cut, and they on a line of their own under it. */
-  const withControls = (line: Line, ctrls: { s: string; key: string; act: LabelAct }[], own: number): void => {
-    const w = ctrls.reduce((a, c) => a + width(c.s), 0) + 2 * Math.max(0, ctrls.length - 1)
-    const fit = (l: Line, n: number): Line => {
-      const over = lineWidth(l) - n
-      if (over <= 0) return l
-      // the place is the last segment: cut it, not the value, keeping its line
-      const last = l.at(-1)!
-      return [...l.slice(0, -1), { ...last, s: cutRef(last.s, Math.max(4, width(last.s) - over)) }]
-    }
-    // beside the head when the place keeps a dozen cells, else under it
-    const beside = lineWidth(line) - width(line.at(-1)!.s) + Math.min(12, width(line.at(-1)!.s)) + 2 + w <= cols
-    const head = beside ? fit(line, cols - w - 2) : fit(line, cols)
-    let x = beside ? cols - w : 2
-    const out: Line = beside ? [...head, { s: ' '.repeat(x - lineWidth(head)) }] : [{ s: '  ' }]
-    if (!beside) push(head, own)
-    ctrls.forEach((c, k) => {
-      if (k) {
-        out.push({ s: '  ' })
-        x += 2
-      }
-      // a control in the text colour, in inverse under the pointer; what the analyst did, dim
-      const on = Boolean(c.key) && ui.act === c.key
-      out.push(c.key ? { s: c.s, ...(on ? { inv: true } : {}) } : { s: c.s, fg: COLORS.dim })
-      if (c.key) hots.push({ line: lines.length, x0: x, x1: x + width(c.s), key: c.key, act: c.act })
-      x += width(c.s)
-    })
-    push(out, own)
-  }
-  push([], -1)
-  exs.forEach((e, i) => {
-    const k = nBars + i
-    const on = k === hover
-    const value = e.value ?? ''
-    const others = l.values.filter(v => v !== value)
-    const head = recordHead({ s: '● ', fg: valueColour(l.values, value) ?? COLORS.dim }, [{ s: value }], e.ref, on, cols * 4)
-    const waiting = pending && pending[0] === e.ref
-    if (waiting) withControls(head, [{ s: '◌ saving', key: '', act: { op: 'cancel' } }], k)
-    else if (e.set) withControls(head, [{ s: e.was && e.was !== value ? '✓ set by you' : '✓ agreed', key: '', act: { op: 'cancel' } }], k)
-    else if (ui.choose === e.ref) withControls(head, [{ s: 'cancel', key: `cancel:${e.ref}`, act: { op: 'cancel' } }], k)
-    else
-      withControls(
-        head,
-        [
-          { s: 'agree', key: `agree:${e.ref}`, act: { op: 'verdict', slug: l.slug, ref: e.ref, value } },
-          { s: 'disagree', key: `disagree:${e.ref}`, act: others.length === 1 ? { op: 'verdict', slug: l.slug, ref: e.ref, value: others[0]! } : { op: 'choose', ref: e.ref } },
-        ],
-        k,
-      )
-    // the other values to pick from, after "it is"
-    if (ui.choose === e.ref && !e.set && !waiting) {
-      const line: Line = [{ s: '  it is', fg: COLORS.dim }]
-      let x = lineWidth(line)
-      for (const v of others) {
-        const s = `● ${v}`
-        if (x + 2 + width(s) > cols) {
-          push(line.splice(0), k)
-          line.push({ s: '   ' })
-          x = 3
-        } else {
-          line.push({ s: '  ' })
-          x += 2
-        }
-        const key = `set:${e.ref}=${v}`
-        const lit = ui.act === key
-        line.push({ s: '● ', fg: valueColour(l.values, v) ?? COLORS.dim }, { s: v, ...(lit ? { inv: true } : {}) })
-        hots.push({ line: lines.length, x0: x, x1: x + width(s), key, act: { op: 'verdict', slug: l.slug, ref: e.ref, value: v } })
-        x += width(s)
-      }
-      push(line, k)
-    }
-    // its words in italic in up to three lines, then why the label gave its value; no blank row between records
-    const words = demojibake(e.quote).replace(/\s+/g, ' ').trim()
-    const wrapped = words ? wrapCell(words, room, 3) : []
-    wrapped.forEach(t => push([{ s: '  ' }, { s: t, i: true }], k))
-    if (e.why && !(e.set && e.was && e.was !== value)) push([{ s: `  why  ${cut(e.why.replace(/\s+/g, ' ').trim(), room - 5)}`, fg: COLORS.dim }], k)
-  })
-  return { lines, items, hots, hit: (_x, y) => owner[y] ?? -1 }
 }
 
 // ---------------------------------------------------------------------------------------- diagrams
@@ -1750,18 +1666,19 @@ function diagramGrid(nodes: DiagramNode[], edges: DiagramEdge[], cols: number, f
       }
     }
   })
-  // ports and arrows on the borders
+  // ports and arrows on the borders: ↓ where an edge reaches its target's top, ↑ where one drawn against the layers
+  // reaches its target's bottom (views/SPEC.md, "The visual system", section 5: ▼ ▲ name a table's sorted column)
   segs.forEach(s => {
     const k = s.edge
     const { rev } = dirs[k]!
     const lu = rowOf.get(s.up.key)!
     if (s.up.node >= 0) {
       const c = grid[top[lu]! + bh[lu]! - 1]![s.xa]!
-      Object.assign(c, rev ? { ch: '▲', kind: 'arrow', item: N + k } : { ch: c.ch === '▲' ? '▲' : '┬', kind: c.ch === '▲' ? 'arrow' : 'box' })
+      Object.assign(c, rev ? { ch: '↑', kind: 'arrow', item: N + k } : { ch: c.ch === '↑' ? '↑' : '┬', kind: c.ch === '↑' ? 'arrow' : 'box' })
     }
     if (s.low.node >= 0) {
       const c = grid[top[lu + 1]!]![s.xb]!
-      Object.assign(c, rev ? { ch: c.ch === '▼' ? '▼' : '┴', kind: c.ch === '▼' ? 'arrow' : 'box' } : { ch: '▼', kind: 'arrow', item: N + k })
+      Object.assign(c, rev ? { ch: c.ch === '↓' ? '↓' : '┴', kind: c.ch === '↓' ? 'arrow' : 'box' } : { ch: '↓', kind: 'arrow', item: N + k })
     }
   })
 
@@ -1948,7 +1865,7 @@ function diagramLayout(card: CardData, cols: number, hover: number): Layout {
     ...nodes.map(
       (n): Item => ({
         label: n.label,
-        value: [n.detail, n.ref].filter(Boolean).join(' · '),
+        value: [n.detail, n.ref ? placeWords(n.ref) : ''].filter(Boolean).join(' · '),
         cite: n.ref ? `[[${n.ref}]]` : cite(n.label, `card:${card.id}#node/${n.id}`),
         open: n.ref || `card:${card.id}#node/${n.id}`,
         kind: 'node',
@@ -1969,12 +1886,13 @@ function diagramLayout(card: CardData, cols: number, hover: number): Layout {
   return { lines, items, hit: (x, yy) => owners[yy]?.[x] ?? -1 }
 }
 
-export function cardLayout(card: CardData, cols: number, hover: number, plotRows?: number, ui?: LabelUi): Layout {
+export function cardLayout(card: CardData, cols: number, hover: number, plotRows?: number): Layout {
   switch (card.kind) {
     case 'bar':
       return barLayout(card, cols, hover)
     case 'label':
-      return labelLayout(card, cols, hover, ui)
+      // a label card is a bar card of its label's counts; its records live in the label panel
+      return barLayout(card, cols, hover)
     case 'line':
       return lineLayout(card, cols, hover, plotRows)
     case 'timeline':

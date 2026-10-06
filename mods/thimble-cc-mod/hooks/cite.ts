@@ -1,9 +1,10 @@
 // Citations as the analyst sees them (no `$`), shared by the hooks module, para.tsx and the tests.
 //
-// - Display: every citation is a plain underlined link. Only a problem has colour: red when the value is not at the
-//   cited place or the place does not exist. A spinner follows a citation while a fix round or its verification works
-//   on it; then ✓ when its verification recomputed the value, or ✗ (and red) when the verification failed (another
-//   value, a crash, no script written) or the fix round could not correct it.
+// - Display: every citation is a link, blue and underlined; red when the value is not at the cited place or the place
+//   does not exist. A spinner follows a citation while a fix round or its verification works on it; then ✓ when its
+//   verification recomputed the value, or × (and red) when the verification failed (another value, a crash, no script
+//   written) or the fix round could not correct it. The model's Markdown is drawn as Claude Code draws it: bold bold,
+//   italic italic, inline code in the code colour, a heading bold.
 // - Layout: a reply's paragraph or table wrapped to its width, a citation's shown value whole and wrapping like the
 //   words around it, with where each citation, word and table row lands, so a pointer finds what it is over.
 // - Fix rounds: the sentences a forked subagent is asked to rewrite, its answer read, and each corrected sentence put
@@ -61,10 +62,10 @@ export function chipLook(status: string | undefined, fix: string | undefined, ve
   return { state, mark, spin }
 }
 
-/** A citation as styled segments: its label underlined in the text colour (red with a problem), in inverse under the
- *  pointer, then ◌ while it is worked on or its mark: ✓ in the text colour, × in red. */
+/** A citation as styled segments: its label blue and underlined (red with a problem), in inverse under the pointer, so
+ *  its blue becomes the background; then ◌ while it is worked on or its mark: ✓ in the text colour, × in red. */
 export function chipSegs(c: ChipView, hover: boolean, _frame = 0): Seg[] {
-  const segs: Seg[] = [{ s: c.label, ...(c.state === 'link' ? {} : { fg: COLORS.problem }), u: true, ...(hover ? { inv: true } : {}) }]
+  const segs: Seg[] = [{ s: c.label, fg: c.state === 'link' ? COLORS.link : COLORS.problem, u: true, ...(hover ? { inv: true } : {}) }]
   if (c.spin) segs.push({ s: ` ${SPIN}`, ...(c.state === 'link' ? {} : { fg: COLORS.problem }) })
   else if (c.mark) segs.push({ s: c.mark, ...(c.mark === '✓' ? {} : { fg: COLORS.problem }) })
   return segs
@@ -142,9 +143,10 @@ const segsWidth = (segs: Seg[]) => segs.reduce((n, s) => n + width(s.s), 0)
  *  any others, its mark or spinner stays with its last word. `at` is where a plain word starts in the source. */
 type Tok = { segs: Seg[]; space: boolean; chip: number; at: number }
 
-/** Runs as words and spaces, their citations numbered from `k0`; `head` for a table's column names, drawn dim. The
- *  model's bold, italic and code are drawn as the text around them: bold means new, italic a record's own words. */
-function tokens(runs: Run[], chips: ChipView[], k0: number, hover: number, frame: number, head: boolean): { toks: Tok[]; source: string; next: number } {
+/** Runs as words and spaces, their citations numbered from `k0`; `bold` for a table's column names and a heading's
+ *  words. The model's Markdown as Claude Code draws it: its bold bold, its italic italic, its inline code in the code
+ *  colour, a link's words blue and underlined. */
+function tokens(runs: Run[], chips: ChipView[], k0: number, hover: number, frame: number, bold: boolean): { toks: Tok[]; source: string; next: number } {
   const toks: Tok[] = []
   let source = ''
   let k = k0
@@ -168,8 +170,13 @@ function tokens(runs: Run[], chips: ChipView[], k0: number, hover: number, frame
       if (!part) continue
       const space = /^\s+$/.test(part)
       const style: Seg = { s: space ? ' ' : part }
-      if (head) style.fg = COLORS.dim
-      if (r.u) style.u = true
+      if (bold || r.b) style.b = true
+      if (r.i) style.i = true
+      if (r.code) style.fg = COLORS.code
+      if (r.u) {
+        style.fg = COLORS.link
+        style.u = true
+      }
       toks.push({ segs: [style], space, chip: -1, at })
       at += part.length
     }
@@ -251,11 +258,11 @@ export function paraLayout(
   hover: number,
   frame = 0,
 ): ParaLayout {
-  // a heading regular, as every Markdown level; a quote 2 cells in, in italic, a record's own words
+  // a heading bold, as Claude Code draws every Markdown level; a quote 2 cells in, in italic
   const lead = block.quote ? '  ' : block.prefix
   const indent = block.quote ? '  ' : ' '.repeat(width(block.prefix))
   const room = Math.max(10, cols - width(lead))
-  const { toks, source } = tokens(block.runs, chips, 0, hover, frame, false)
+  const { toks, source } = tokens(block.runs, chips, 0, hover, frame, block.heading > 0)
   if (block.quote) for (const t of toks) if (t.chip < 0) t.segs = t.segs.map(g => ({ ...g, i: true }))
   const f = flow(toks, room)
   const x0 = width(lead)
@@ -267,8 +274,9 @@ export function paraLayout(
   }
 }
 
-/** A table block in aligned columns, the column names dim with no rule under them, each citation one link. Columns wider than `cols`
- *  allows are narrowed from the widest, and a cell's words (a citation's too) wrap within its column. */
+/** A table block in aligned columns, each citation one link: the column names bold, a rule in the rule grey under each as
+ *  wide as its column, the rows right under it, as a card's table draws its header. Columns wider than `cols` allows are
+ *  narrowed from the widest, and a cell's words (a citation's too) wrap within its column. */
 export function mdTableLayout(table: TableRuns, chips: ChipView[], cols: number, hover: number, frame = 0): ParaLayout {
   const GAP = 2
   let k = 0
@@ -316,6 +324,11 @@ export function mdTableLayout(table: TableRuns, chips: ChipView[], cols: number,
       }
       lines.push(line)
       rows.push(rowSource[r] ?? '')
+    }
+    // under the column names, a rule under each as wide as its column
+    if (r === 0) {
+      lines.push(w.flatMap((cw, c): Seg[] => [...(c > 0 ? [{ s: ' '.repeat(GAP) }] : []), { s: '─'.repeat(cw), fg: COLORS.rule }]))
+      rows.push('')
     }
   })
   return { lines, spans, words: [], source: rowSource.join('\n'), rows }
