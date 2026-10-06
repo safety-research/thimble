@@ -592,10 +592,18 @@ async def test_the_stored_state_names_only_extensions_of_thimble_s_home(corpus, 
     assert "Injected." not in orient_session.instructions_of(CORPUS)
 
 
-async def test_an_extension_switched_off_does_not_run_and_its_unchanged_view_goes(corpus):
+async def test_an_extension_switched_off_does_not_run_and_its_unchanged_view_goes(corpus, monkeypatch):
+    from app import ledger
+
+    pushed: list[str] = []
+    monkeypatch.setattr(ledger, "push_roles", pushed.append)
     _add()
     await extensions.refresh(CORPUS, wait=10)
     assert views.read_proposal(CORPUS, "tally") is not None
+    assert pushed, "the module registers the types again with the new extension's blocks and agents"
+    pushed.clear()
+    await extensions.refresh(CORPUS)
+    assert not pushed, "nothing changed"
 
     write_json(extensions.home() / "config.json", {"extensions": {"ext-min": {"enabled": False}}})
     e = (await extensions.refresh(CORPUS))["extensions"]["ext-min"]
@@ -607,9 +615,11 @@ async def test_an_extension_switched_off_does_not_run_and_its_unchanged_view_goe
     (extensions.home() / "config.json").unlink()
     extensions.set_enabled(CORPUS, "ext-min", False)
     assert (await extensions.refresh(CORPUS))["extensions"]["ext-min"]["why"] == "off in this workspace"
+    pushed.clear()
     extensions.set_enabled(CORPUS, "ext-min", True)
     assert (await extensions.refresh(CORPUS, wait=10))["extensions"]["ext-min"]["active"]
     assert views.read_proposal(CORPUS, "tally") is not None
+    assert pushed == [CORPUS]
 
 
 async def test_switching_on_an_extension_offers_to_run_its_orientation_instructions(corpus, monkeypatch, analyst):

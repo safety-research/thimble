@@ -941,6 +941,8 @@ async def _refresh(c: str) -> dict[str, Any]:
                      "oriented": [n for n in state["oriented"] if n in on],
                      "declined": [n for n in state["declined"] if n in on], "extensions": exts}
         await asyncio.to_thread(write_json, _state_path(c), new_state)
+        if _active(state["extensions"]) != _active(exts):
+            _push_roles(c)
         old = {n for n in RENAMED if os.path.lexists(workspace_path(c, n))}
         for name in sorted((set(state["extensions"]) | old) - set(exts)):
             try:
@@ -955,6 +957,20 @@ async def _refresh(c: str) -> dict[str, Any]:
             await asyncio.to_thread(views.withdraw, c, slug, None)
     _gate_installed(c, exts, gates)
     return new_state
+
+
+def _active(exts: dict[str, Any]) -> dict[str, Any]:
+    """The active extensions of a state's `extensions`, each with the digest of its folder."""
+    return {n: e.get("digest") for n, e in exts.items() if isinstance(e, dict) and e.get("active")}
+
+
+def _push_roles(c: str) -> None:
+    """The active extensions changed (one switched, added, removed or changed): main's hooks module registers thimble's
+    agent types again (ledger.push_roles), since the orientation's registered prompt holds their blocks and the types
+    hold their agents, so the next start runs with them, as a Settings save does."""
+    from . import ledger  # noqa: PLC0415
+
+    ledger.push_roles(c)
 
 
 def gates_on() -> bool:
