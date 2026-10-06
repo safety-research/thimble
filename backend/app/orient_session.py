@@ -28,7 +28,9 @@ the analyst stopped stops the builds of the views it proposed.
 Coverage. When the first run finishes (done; not stopped or failed), its coverage line (orient_checks.coverage) is
 measured in the checks' child process before the end goes on; meanwhile a follow-up waits (at most COVERAGE_TIMEOUT_S),
 so that it carries the line (`## orient-coverage-lead`). The line is a note at the end of its thread, a second line of
-main's `orient` event and of summary.md, and the record's `coverage`.
+main's `orient` event and of summary.md, and the record's `coverage`. It stays due (coverage_lead) until a run starts
+with it (_told_if_carried): main's message_orientation gives it in each exact SendMessage until one reaches the agent, so
+a SendMessage that --agent-check denied, and the call main makes again after it, do not lose it (live check T5).
 
 Follow-ups. The thread's composer sends a follow-up through the module (message_route, subagents.send); main's
 `message_orientation` returns the exact SendMessage. A follow-up continues the same agent, by its id, as its next run;
@@ -387,6 +389,15 @@ def coverage_lead(rec: dict[str, Any]) -> str:
     return tools.hint("orient-coverage-lead", coverage=line.strip())
 
 
+def _told_if_carried(c: str, carried: str) -> None:
+    """A run started with the text `carried` (its message, or a continuation's prompt): when that holds the first run's
+    coverage line while it is due, the line is told (coverage_lead gives it no more)."""
+    rec = orientation.read_run(c) or {}
+    line = rec.get("coverage")
+    if isinstance(line, str) and line.strip() and not rec.get("coverage_told") and line.strip() in carried:
+        orientation.record(c, coverage_told=True)
+
+
 def undo_batch(c: str) -> tuple[str, str] | None:
     """(id, label) of the undo batch a call of the orientation belongs to: its follow-up's, `<chat>/<run>`, while one
     runs; None during the first run, whose cards are each a step."""
@@ -627,7 +638,7 @@ async def continue_stopped(c: str, chat: str, agent_id: str, text: str, by: str 
                                   "message": text.strip(), "by": by}})
     finally:
         _starting.discard(c)
-    if told and (ans.started or ans.typed):
+    if told and ans.started:  # a typed one's prompt tells it when its run starts (_told_if_carried)
         orientation.record(c, coverage_told=True)
     log.info("%s: the orientation %s stopped with Esc is continued (%s): %s", c, agent_id, route,
              ans.agent_id or ans.get("request") or ans.reason)
@@ -769,8 +780,11 @@ def subagent_started(c: str, run: subagents.Run, req: dict[str, Any]) -> None:
         _show_message(c, run.chat, text, by, run.k)
         orientation.run_started(c, run.chat, run.k, [{"text": text, "by": by}] if text else [])
         orientation.record(c, agent_id=run.agent_id)
+        _told_if_carried(c, str((req.get("input") or {}).get("prompt") or ""))
     else:
-        orientation.run_started(c, run.chat, run.k, _run_messages(c, run))
+        messages = _run_messages(c, run)
+        orientation.run_started(c, run.chat, run.k, messages)
+        _told_if_carried(c, "\n".join(str(m.get("text") or "") for m in messages))
     try:  # main's chat shows the follow-up as the orientation's card for this run (the browser's AgentCard `run`)
         _, main_log = agents.paths(c, agents.MAIN_ID)
         agents.append(main_log, {"type": "agent", "ts": _now(), "chat": run.chat, "role": orientation.ROLE,
@@ -1203,10 +1217,8 @@ async def tool_message_orientation(ctx: Any, args: dict[str, Any]) -> Any:
     except (EarlierSession, EarlierVersion, RuntimeError) as e:
         return tools.err(str(e))
     await _after_measure(ctx.c)
-    body, told = with_lead(ctx.c, text)
+    body, _ = with_lead(ctx.c, text)  # told once the run starts with it (_told_if_carried), not when main is given it
     ans = subagents.message_request(ctx.c, agent_id, body, call=ctx.tool_use_id)
-    if told:
-        orientation.record(ctx.c, coverage_told=True)
     return tools.ok(tools.hint("orient-subagent-message", agent=agent_id, text=body,
                                input=json.dumps(ans["input"], ensure_ascii=False)))
 

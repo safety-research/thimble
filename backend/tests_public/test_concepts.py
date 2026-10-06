@@ -574,3 +574,37 @@ async def test_a_run_that_fails_after_labeling_its_examples_still_leaves_them_ou
 
     s = (await api.post(f"{base}/apply", json={"wait": True, "paths": ["board.jsonl"]})).json()
     assert s["status"] == "done" and s["examples"] == 4 and (s["calibration"]["n"], s["calibration"]["taught"]) == (0, 4)
+
+
+def test_a_scan_worker_ends_once_the_process_that_made_its_pool_is_killed(tmp_path):
+    """The terminal mode's shim makes the scan pool and is ended by a signal as Claude Code quits, before it can end its
+    workers; each worker then ends by itself (concepts._watch_parent; live check T9 found one left)."""
+    import os
+    import signal
+    import subprocess
+    import sys
+    import time
+    from pathlib import Path
+
+    backend = Path(__file__).resolve().parents[1]
+    script = tmp_path / "pool.py"
+    script.write_text(
+        "import sys, time\n"
+        f"sys.path.insert(0, {str(backend)!r})\n"
+        "from app import concepts\n"
+        "if __name__ == '__main__':\n"
+        "    pool = concepts._pool_get()\n"
+        "    pool.submit(time.sleep, 0.1).result(timeout=60)\n"
+        "    print(' '.join(str(p) for p in pool._processes), flush=True)\n"
+        "    time.sleep(300)\n")
+    proc = subprocess.Popen([sys.executable, str(script)], stdout=subprocess.PIPE, text=True)
+    pids = [int(p) for p in proc.stdout.readline().split()]
+    assert pids
+    os.kill(proc.pid, signal.SIGKILL)
+    proc.wait(timeout=30)
+    deadline = time.monotonic() + 20
+    left = pids
+    while left and time.monotonic() < deadline:
+        time.sleep(0.2)
+        left = [p for p in left if os.path.exists(f"/proc/{p}") and "Z" not in open(f"/proc/{p}/stat").read().split()[2]]
+    assert not left, f"the pool's workers {left} still run after the process that made the pool was killed"

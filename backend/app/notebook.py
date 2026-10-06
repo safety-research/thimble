@@ -4,7 +4,13 @@ A group is a notebook file, workspaces/<c>/notebooks/<id>.json, carrying tree fi
 role and its cells. Runnable cells carry code and outputs and run on a kernel; data cells carry a payload. Kernels are
 detached processes the workspace owns (see the kernels section): one shared kernel for exploration groups, one per group
 for everything else (_kernel_for). Oversized stream outputs are bounded to a head and tail with the full text in a side
-file. The in-memory notebook cache is used by the event-loop thread only.
+file. The in-memory notebook cache is used by the event-loop thread only, and is trusted only while the file is
+unchanged (mtime_ns, size and inode).
+
+More than one process writes the groups: the server or, in terminal mode, the MCP shim, and `thimble-run`, which runs a
+card's code in main's Bash and writes its outputs (cardrun.py). Every change therefore holds the store's lock (editing:
+ledger.locked on the notebooks folder) from its read to its write, and a run, which cannot hold it while the code runs,
+saves its cell into the group as the file holds it then (_merge_cell).
 """
 from __future__ import annotations
 
@@ -40,7 +46,7 @@ from jupyter_client.connect import write_connection_file
 from pydantic import BaseModel, Field
 from sse_starlette import EventSourceResponse, ServerSentEvent
 
-from . import cite, config, frames, kernel_wrap, page_fonts, procs, srt, view_calls
+from . import cite, config, frames, kernel_wrap, ledger, page_fonts, procs, srt, view_calls
 from .ledger import atomic_write_text, read_json, unlinked, write_json
 
 log = logging.getLogger("thimble.notebook")
@@ -99,8 +105,12 @@ _SECRET_ENV_RE = re.compile(r"API_?KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL", re.I)
 
 def kernel_env() -> dict[str, str]:
     """The backend's environment minus anything that looks like a secret."""
-    return {k: v for k, v in os.environ.items()
-            if not k.startswith(_SECRET_ENV_PREFIXES) and not _SECRET_ENV_RE.search(k)}
+    return kernel_env_of(os.environ)
+
+
+def kernel_env_of(env: Any) -> dict[str, str]:
+    """`env` minus anything that looks like a secret (kernel_env)."""
+    return {k: v for k, v in env.items() if not k.startswith(_SECRET_ENV_PREFIXES) and not _SECRET_ENV_RE.search(k)}
 
 
 SCRATCH_DIR = "scratch"  # workspace-relative: the kernels' cwd, a symlink mirror of the corpus plus what cells write
@@ -789,6 +799,62 @@ def hydrate_outputs(ws: Path, outputs: list | None) -> list:
     return out
 
 
+# --- the store's lock ---
+
+
+def editing(ws: Path):
+    """The lock of the workspace's groups (module note): ledger.locked on the notebooks folder, its lock file `.lock`
+    inside it, so `thimble-run`, which may write only that folder in main's sandbox, can take it. Held from the read of
+    a change to its write; never across an await."""
+    d = ws / "notebooks"
+    d.mkdir(parents=True, exist_ok=True)
+    return ledger.locked(d)
+
+
+def _changes(fn: Any) -> Any:
+    """Run a change to the groups under their lock (editing). The function's first argument is the workspace folder or
+    the workspace's name."""
+    import functools  # noqa: PLC0415
+
+    @functools.wraps(fn)
+    def wrapper(first: Any, *args: Any, **kwargs: Any) -> Any:
+        with editing(first if isinstance(first, Path) else _ws(first)):
+            return fn(first, *args, **kwargs)
+
+    return wrapper
+
+
+RUN_KEEPS = ("created_by", "edited")  # a cell's fields a run saved from another process leaves as stored (_merge_cell)
+
+
+def _merge_cell(ws: Path, nb: dict, cell: dict, *, add: bool = False) -> tuple[dict, dict]:
+    """Save `cell` of the loaded group `nb` under the lock, into the group as its file holds it now: (the group as
+    written, the cell in it). A run holds `nb` across its awaits, and another process may have written the group
+    meanwhile; then the cell's state replaces its stored copy (`add`: or is appended, for a cell not stored yet) and
+    the other process's changes stay. Who made and edited the card (RUN_KEEPS) stays as stored, since a run never
+    changes it and the mirror's process credits a subagent's card to its chat while the card runs (agents.claim_cell).
+    A cell no longer in the group (deleted or moved meanwhile) is not written back."""
+    with editing(ws):
+        current = read_notebook(ws, nb["id"])
+        if current is None:
+            return nb, cell
+        if current is not nb:
+            target = next((c for c in current["cells"] if c.get("id") == cell.get("id")), None)
+            if target is None:
+                if not add:
+                    return current, cell
+                current["cells"].append(cell)
+                target = cell
+            elif target is not cell:
+                kept = {k: target[k] for k in RUN_KEEPS if k in target}
+                target.clear()
+                target.update(cell)
+                target.update(kept)
+            nb, cell = current, target
+        write_notebook(ws, nb)
+        return nb, cell
+
+
 # --- in-memory cache ---
 
 _cache: dict[Path, tuple[tuple[int, int, int], dict]] = {}  # notebook file -> ((mtime_ns, size, inode), notebook)
@@ -844,63 +910,82 @@ def read_notebook(ws: Path, nb_id: str) -> dict | None:
     if caching:
         if _bound_cells(ws, nb):
             log.info("bounded oversized stream outputs in %s", p)
-            write_notebook(ws, nb)  # caches the written state
+            with editing(ws):
+                if _sig(p.stat()) == sig:  # not rewritten by another process since it was read
+                    write_notebook(ws, nb)  # caches the written state
         else:
             _cache_put(p, sig, nb)
     return nb
 
 
 def write_notebook(ws: Path, nb: dict) -> None:
+    """Replace the group's file whole, under the store's lock (editing), which a caller that read the group holds
+    already."""
     p = _nb_file(ws, nb["id"])
     p.parent.mkdir(parents=True, exist_ok=True)
-    atomic_write_text(p, json.dumps(nb, indent=1))  # a temp of the writer's own: a route and a kernel thread never share one
-    if _caching():
-        _cache_put(p, _sig(p.stat()), nb)
+    with editing(ws):
+        atomic_write_text(p, json.dumps(nb, indent=1))  # a temp of the writer's own: a route and a kernel thread never share one
+        if _caching():
+            _cache_put(p, _sig(p.stat()), nb)
 
 
 INTERRUPTED_ENAME = "Interrupted"
-INTERRUPTED_EVALUE = "the server stopped while this card ran; run it again"
+INTERRUPTED_EVALUE = "thimble stopped while this card ran; run it again"  # the server, or a terminal session
 
 
-def mark_interrupted_cells(root: Path | None = None) -> list[str]:
+def mark_interrupted_cells(root: Path | None = None, only: "tuple[str, ...] | None" = None) -> list[str]:
     """Server start: a cell stored `running` was mid-run when the previous server went away, and nothing will write its
     result. Mark each such cell errored with one Interrupted output (code, title and place stay), and end a pending card
-    check the same way. Reads every workspace under `root` directly and writes changed notebooks back atomically.
-    Returns `<workspace>/<notebook>/<cell>` per cell marked."""
-    from . import checkstore  # noqa: PLC0415 — checkstore imports this module
+    check the same way. Reads every workspace under `root` directly, or only the workspaces `only` names (the terminal
+    mode's shim, which serves one), and writes changed notebooks back atomically under the store's lock. A workspace
+    open in terminal mode in a session that still runs is left alone, since its cards run in that session's Bash
+    (local.live_terminal). Returns `<workspace>/<notebook>/<cell>` per cell marked."""
+    from . import checkstore, local  # noqa: PLC0415 — checkstore imports this module
 
     root = config.WORKSPACES_DIR if root is None else root
     marked: list[str] = []
     files = sorted(root.glob("*/notebooks/*.json")) if root.is_dir() else []
+    if only is not None:
+        files = [p for p in files if p.parent.parent.name in only]
+    live: dict[Path, bool] = {}
     for p in files:
         if not ID_RE.match(p.stem):
             continue
-        try:
-            nb = json.loads(p.read_text("utf-8"))
-        except (OSError, ValueError):
+        wsd = p.parent.parent
+        if only is None and live.setdefault(wsd, local.live_terminal(wsd)):
             continue
-        cells = nb.get("cells") if isinstance(nb, dict) else None
-        if not isinstance(cells, list):
+        with editing(wsd):
+            marked.extend(_mark_interrupted(p, checkstore))
+    return marked
+
+
+def _mark_interrupted(p: Path, checkstore: Any) -> list[str]:
+    """mark_interrupted_cells for one group file, with the store's lock held."""
+    marked: list[str] = []
+    try:
+        nb = json.loads(p.read_text("utf-8"))
+    except (OSError, ValueError):
+        return marked
+    cells = nb.get("cells") if isinstance(nb, dict) else None
+    if not isinstance(cells, list):
+        return marked
+    changed = False
+    for cell in cells:
+        if not isinstance(cell, dict):
             continue
-        changed = False
-        for cell in cells:
-            if not isinstance(cell, dict):
-                continue
-            # a card check the previous server left pending ends too, so its card does not keep the check's spinner
-            if checkstore.interrupted(cell):
-                changed = True
-                marked.append(f"{p.parent.parent.name}/{p.stem}/{cell.get('id')} (its check)")
-            if cell.get("status") != "running":
-                continue
-            cell.update(status="error", outputs=[_error_bundle(INTERRUPTED_ENAME, INTERRUPTED_EVALUE)], ts=_now())
-            cell.pop(REGENERATING_FOR, None)
+        # a card check the previous server left pending ends too, so its card does not keep the check's spinner
+        if checkstore.interrupted(cell):
             changed = True
-            marked.append(f"{p.parent.parent.name}/{p.stem}/{cell.get('id')}")
-        if changed:
-            tmp = p.with_suffix(".json.tmp")
-            tmp.write_text(json.dumps(nb, indent=1))
-            tmp.replace(p)
-            _cache.pop(p, None)
+            marked.append(f"{p.parent.parent.name}/{p.stem}/{cell.get('id')} (its check)")
+        if cell.get("status") != "running":
+            continue
+        cell.update(status="error", outputs=[_error_bundle(INTERRUPTED_ENAME, INTERRUPTED_EVALUE)], ts=_now())
+        cell.pop(REGENERATING_FOR, None)
+        changed = True
+        marked.append(f"{p.parent.parent.name}/{p.stem}/{cell.get('id')}")
+    if changed:
+        atomic_write_text(p, json.dumps(nb, indent=1))
+        _cache.pop(p, None)
     return marked
 
 
@@ -1075,6 +1160,7 @@ def canvas(ws: Path) -> dict:
     return {"groups": groups, "cells": with_slugs(ws, cells), "hidden": left_out}
 
 
+@_changes
 def create_notebook(ws: Path, title: str | None = None, *, role: str = DEFAULT_ROLE, investigation: str | None = None,
                     finding: int | None = None, created_by: str | None = None, parent: str | None = None,
                     anchor: str | None = None, chat: str | None = None, kind: str | None = None,
@@ -1144,6 +1230,7 @@ def get_cell(workspace: str, cell_id: str, *, full_outputs: bool = False) -> dic
     return dict(cell)  # a copy: the stored cell is the cached object, which later runs and edits mutate in place
 
 
+@_changes
 def active_notebook_id(workspace: str) -> str:
     """settings.active_notebook when it names an existing notebook; else `main`, created if it does not exist yet."""
     ws = _ws(workspace)
@@ -1200,6 +1287,7 @@ def new_cell(kind: str, created_by: str, title: str = "", notebook: str = MAIN, 
     return cell
 
 
+@_changes
 def insert_cell(workspace: str, nb_id: str, cell: dict, after: str | None = None) -> dict:
     """Store a new cell in a group, at the end or after the cell `after` names, with its name (slug_of), and announce it.
     404 for an unknown group."""
@@ -1219,6 +1307,7 @@ def insert_cell(workspace: str, nb_id: str, cell: dict, after: str | None = None
     return cell
 
 
+@_changes
 def edit_cell(workspace: str, cell_id: str, *, code: str | None = None, title: str | None = None,
               takeaway: str | None = None, payload: dict | None = None, locked: bool | None = None,
               by: str | None = None, width: int | None = None, height: int | None = None,
@@ -1287,6 +1376,7 @@ def edit_cell(workspace: str, cell_id: str, *, code: str | None = None, title: s
     return cell
 
 
+@_changes
 def delete_cell(workspace: str, cell_id: str) -> None:
     """Remove a cell from its group, with its outputs' side files. 404 for an unknown cell."""
     ws = _ws(workspace)
@@ -1300,6 +1390,7 @@ def delete_cell(workspace: str, cell_id: str) -> None:
     _emit(workspace, {**_cell, "notebook": nb["id"]}, what="deleted")
 
 
+@_changes
 def loose_group(ws: Path) -> str:
     """The id of the workspace's loose group (LOOSE_KIND), made on first use: a card dragged out of every group lives
     there, at its own place on the board."""
@@ -1312,6 +1403,7 @@ def loose_group(ws: Path) -> str:
 _LAST = object()  # move_cells' default `after`: the end of the group's flow
 
 
+@_changes
 def move_cells(workspace: str, cell_ids: list[str], group: str | None, *, after: Any = _LAST, pos: Any = None) -> list[dict]:
     """Move cards into `group` (None for the loose group) in the order given: into its flow after the card `after` names
     (None first, default last), or one card free at `pos`. A runnable card that changes group keeps the kernel it ran
@@ -1386,7 +1478,9 @@ def _emit(workspace: str, cell: dict, *, what: str | None = None) -> None:
     for q in _subscribers.get((workspace, cell.get("notebook", MAIN)), ()):
         q.put_nowait(data)
     cid = str(cell.get("id") or "")
-    if not cid:
+    if not cid or local_kernel is not None:
+        # a card runner (cardrun.py) writes no history: main's sandbox cannot write the workspace's logs, and the shim's
+        # CardWatch records the run once it ends (canvas_history, undo)
         return
     from . import canvas_history  # noqa: PLC0415 — every version of every card, for the workspace export
 
@@ -1591,29 +1685,49 @@ def kernel_argv(connection_file: Path, record: Path, ttl: float | None = None, p
     `lease` makes the watchdog read the server's presence off that file's flock instead of the recorded pid."""
     watchdog = {"RECORD": str(record), "TTL": KERNEL_TTL_S if ttl is None else ttl, "POLL": WATCHDOG_POLL_S if poll is None else poll,
                 "LEASE": str(lease) if lease is not None else None}
-    reads = ([f"--IPKernelApp.exec_lines=exec({_READS_SRC!r}, {{'ROOTS': {tuple(str(r) for r in roots)!r}, 'CAP': {READS_CAP!r}, 'MIME': {READS_MIME!r}}})"]
-             if roots else [])
-    helpers = ([f"--IPKernelApp.exec_lines=exec({_THIMBLE_INSTALL!r}, {{'SRC': {_thimble_src()!r}, 'WS': {str(workspace)!r}}})"]
-               if workspace is not None else [])
+    lines = startup_lines(roots, workspace)
+    first = len(SHELL_LINES) + 2  # the shell's own lines, the figure formatter and the page's faces; the watchdog next
     return [
         PYTHON, "-m", "ipykernel_launcher", "-f", str(connection_file),
         # no ~/.ipython history.sqlite: cell code (which may quote corpus text) stays in workspaces/<c>/
         "--HistoryManager.enabled=False",
         # crisp fonts: matplotlib inline figures as SVG
         "--InlineBackend.figure_format=svg",
-        # interactive charts: Altair emits the Vega-Lite mime instead of an html+script blob
-        "--IPKernelApp.exec_lines=import altair as _alt; _alt.renderers.enable('mimetype'); del _alt",
-        # a DataFrame shows each value up to PANDAS_COLWIDTH characters instead of pandas' 50, so refs, paths and ids
-        # reach the card and the model whole
-        f"--IPKernelApp.exec_lines=import pandas as _pd; _pd.set_option('display.max_colwidth', {PANDAS_COLWIDTH}); del _pd",
+        *(f"--IPKernelApp.exec_lines={line}" for line in lines[:first]),
+        f"--IPKernelApp.exec_lines=exec({_WATCHDOG_SRC!r}, {watchdog!r})",
+        *(f"--IPKernelApp.exec_lines={line}" for line in lines[first:]),
+    ]
+
+
+# What every card's shell runs before its first cell, in a kernel (kernel_argv) and in a card runner's shell
+# (cardrun.LocalKernel), so a card draws the same in both.
+SHELL_LINES = (
+    # interactive charts: Altair emits the Vega-Lite mime instead of an html+script blob
+    "import altair as _alt; _alt.renderers.enable('mimetype'); del _alt",
+    # a DataFrame shows each value up to PANDAS_COLWIDTH characters instead of pandas' 50, so refs, paths and ids reach
+    # the card and the model whole
+    f"import pandas as _pd; _pd.set_option('display.max_colwidth', {PANDAS_COLWIDTH}); del _pd",
+)
+
+
+def startup_lines(roots: tuple[str, ...] | None = None, workspace: Path | None = None) -> list[str]:
+    """The lines a card's shell runs at its start (SHELL_LINES, then the figure formatter and the page's faces, then
+    with `roots` the cell-reads audit hook and with `workspace` the `thimble` module): kernel_argv passes them as
+    exec_lines, cardrun.LocalKernel runs them in its shell."""
+    lines = [
+        *SHELL_LINES,
         # a matplotlib figure ending a cell is drawn whatever the backend: with `matplotlib.use("Agg")` IPython has no
         # Figure formatter, so the formatter registered by name below draws through print_figure. The same line wraps
         # the displayhook so a figure is drawn once under the inline backend (see _FIGURE_FORMAT_SRC).
-        f"--IPKernelApp.exec_lines=exec({_FIGURE_FORMAT_SRC!r})",
+        f"exec({_FIGURE_FORMAT_SRC!r})",
         # the page's faces for matplotlib, added when a card first imports it (page_fonts.py)
-        f"--IPKernelApp.exec_lines=exec({page_fonts.HOOK_SRC!r}, {{'FONTS': {page_fonts.files()!r}}})",
-        f"--IPKernelApp.exec_lines=exec({_WATCHDOG_SRC!r}, {watchdog!r})",
-    ] + reads + helpers
+        f"exec({page_fonts.HOOK_SRC!r}, {{'FONTS': {page_fonts.files()!r}}})",
+    ]
+    if roots:
+        lines.append(f"exec({_READS_SRC!r}, {{'ROOTS': {tuple(str(r) for r in roots)!r}, 'CAP': {READS_CAP!r}, 'MIME': {READS_MIME!r}}})")
+    if workspace is not None:
+        lines.append(f"exec({_THIMBLE_INSTALL!r}, {{'SRC': {_thimble_src()!r}, 'WS': {str(workspace)!r}}})")
+    return lines
 
 
 # The figure formatter kernel_argv registers: by type name, so nothing imports matplotlib at start; the inline backend,
@@ -1735,11 +1849,33 @@ class _Kernel:
 
 _kernels: dict[str, _Kernel] = {}  # the shared per-workspace kernel: the run session's exploration notebooks
 _exec_kernels: dict[tuple[str, str], _Kernel] = {}  # named dedicated execution kernels, keyed (workspace, name)
+# In a card runner (`thimble-run`, cardrun.py), the in-process shell that stands in for every kernel: a function of
+# (workspace, kernel name) returning an object with the kernel's fields and `local = True`, which _ensure_started and
+# _execute hand over to (cardrun.LocalKernel). None everywhere else.
+local_kernel: Any = None
+
+
+class TerminalRun(RuntimeError):
+    """A card's code asked to run in a process of a terminal-mode workspace that is no card runner: there, card code
+    runs through `thimble-run` in the caller's Bash (cardrun.py), never in the MCP shim."""
+
+
+def _no_kernel_here(workspace: str) -> None:
+    """TerminalRun when this process may not run card code for `workspace` (TerminalRun)."""
+    if local_kernel is not None:
+        return
+    from . import local  # noqa: PLC0415
+
+    if local.terminal(workspace):
+        raise TerminalRun(f"in terminal mode, card code in {workspace} runs through thimble-run, not in this process")
 
 
 def _kernel(workspace: str, kernel: str | None = None) -> _Kernel:
     """The workspace's shared kernel, or (with `kernel`) the named dedicated execution kernel, which starts in the same
-    scratch cwd but shares no state, lock or lifecycle with the shared one."""
+    scratch cwd but shares no state, lock or lifecycle with the shared one. In a card runner, its in-process shell
+    (local_kernel)."""
+    if local_kernel is not None:
+        return local_kernel(workspace, kernel)
     if kernel:
         key = (workspace, kernel)
         k = _exec_kernels.get(key)
@@ -2148,7 +2284,11 @@ async def _attach(k: _Kernel) -> bool:
 
 async def _ensure_started(k: _Kernel, workspace: str, kernel: str | None = None) -> None:
     """Start the kernel if it is not running: keep a live connection, reconnect a recorded kernel, else launch a fresh
-    one. Call with k.lock held. `kernel` is the dedicated kernel's name (kept for callers)."""
+    one. Call with k.lock held. `kernel` is the dedicated kernel's name (kept for callers). A card runner's shell
+    (local_kernel) starts itself."""
+    if getattr(k, "local", False):
+        await k.start()
+        return
     if k.kc is not None:
         if k.alive():
             return
@@ -2427,6 +2567,8 @@ async def _execute(k: _Kernel, code: str, timeout: float | None = None,
     land on k.last_expr and the execute_result's position on k.last_result.
     """
     timeout = EXEC_TIMEOUT if timeout is None else timeout
+    if getattr(k, "local", False):  # a card runner's in-process shell (local_kernel) collects the same bundles
+        return await k.execute(code, timeout, user_expressions)
     kc = k.kc
     assert kc is not None
     k.last_expr = None
@@ -2583,7 +2725,7 @@ async def _execute_cell(workspace: str, nb: dict, cell: dict, kernel: str | None
             timeout_s = positive_timeout(default_s)
     cell["status"] = "running"
     cell["started"] = _now()
-    write_notebook(ws, nb)
+    nb, cell = _merge_cell(ws, nb, cell, add=True)
     _emit(workspace, cell)
     code = cell["code"]
 
@@ -2604,29 +2746,31 @@ async def _execute_cell(workspace: str, nb: dict, cell: dict, kernel: str | None
         log.exception("run failed")
         outputs, exec_count, status = [_error_bundle(type(e).__name__, str(e))], None, "error"
 
-    # the group may have been rewritten or the cell deleted meanwhile: re-read and update the cell where it lives now;
-    # a deleted cell gets its result returned without being resurrected
-    current = read_notebook(ws, nb["id"])
-    target = next((c for c in current["cells"] if c.get("id") == cell["id"]), None) if current else None
-    if target is None:
-        gone = {**cell, "outputs": outputs, "exec_count": exec_count, "status": status}
-        return gone, gone
-    memo = _memo_of(target)
-    number_outputs(memo, outputs)  # an output the last productive run also had keeps its @out index
-    if _has_output(outputs):
-        target[OUT_MEMO] = output_memo(outputs, memo)
-    stored = bound_outputs(ws, cell["id"], outputs, fresh=True)
-    target.update(outputs=stored, exec_count=exec_count, status=status, ts=_now(),
-                  duration_s=round(duration, 3), labels=labels, label_revs=revs)
-    target.pop(REGENERATING_FOR, None)
-    if reads is not None:
-        target["reads"] = reads["reads"]
-        if reads["n"] > len(reads["reads"]):
-            target["reads_more"] = reads["n"] - len(reads["reads"])
-        else:
-            target.pop("reads_more", None)
-    _verify_hook("ran", workspace, current, target)
-    write_notebook(ws, current)
+    # the group may have been rewritten (by this process or another) or the cell deleted meanwhile: re-read it under
+    # the store's lock and update the cell where it lives now; a deleted cell gets its result returned without being
+    # resurrected
+    with editing(ws):
+        current = read_notebook(ws, nb["id"])
+        target = next((c for c in current["cells"] if c.get("id") == cell["id"]), None) if current else None
+        if target is None:
+            gone = {**cell, "outputs": outputs, "exec_count": exec_count, "status": status}
+            return gone, gone
+        memo = _memo_of(target)
+        number_outputs(memo, outputs)  # an output the last productive run also had keeps its @out index
+        if _has_output(outputs):
+            target[OUT_MEMO] = output_memo(outputs, memo)
+        stored = bound_outputs(ws, cell["id"], outputs, fresh=True)
+        target.update(outputs=stored, exec_count=exec_count, status=status, ts=_now(),
+                      duration_s=round(duration, 3), labels=labels, label_revs=revs)
+        target.pop(REGENERATING_FOR, None)
+        if reads is not None:
+            target["reads"] = reads["reads"]
+            if reads["n"] > len(reads["reads"]):
+                target["reads_more"] = reads["n"] - len(reads["reads"])
+            else:
+                target.pop("reads_more", None)
+        _verify_hook("ran", workspace, current, target)
+        write_notebook(ws, current)
     _emit(workspace, target)
     return target, (target if stored is outputs else {**target, "outputs": outputs})
 
@@ -2664,7 +2808,7 @@ async def _run_card_code(k: _Kernel, code: str, kind: str | None, timeout_s: flo
     k.last_label_revs. `extra_exprs` are more user expressions for the same request."""
     from . import cardtypes  # noqa: PLC0415 — cardtypes imports views, which imports this module lazily
 
-    if cardtypes.CARD_CALL in code:
+    if cardtypes.CARD_CALL in code and not getattr(k, "local", False):  # a card runner's types: the shim's (cardrun)
         await cardtypes.refresh_quietly(k.workspace, warm=False)
     exprs = {frames.EXPR_KEY: frames.CAPTURE} if frames.captures(kind) else {}
     exprs[LABELS_EXPR_KEY] = LABELS_EXPR
@@ -2699,6 +2843,7 @@ async def execute_on(workspace: str, kernel: str, code: str, timeout_s: float | 
     a cell. Raises when the kernel cannot start; a code error is an `error` status with its bundle."""
     if not kernel:
         raise ValueError("execute_on needs a dedicated kernel name")
+    _no_kernel_here(workspace)
     k = _kernel(workspace, kernel)
     async with k.lock:
         await _ensure_started(k, workspace, kernel)
@@ -2727,6 +2872,11 @@ async def trial_run(workspace: str, cell_id: str, code: str) -> dict:
     nb, cell = hit
     if not runnable(cell):
         raise ValueError(f"a {cell.get('kind', DEFAULT_KIND)} card has no code to run")
+    try:
+        _no_kernel_here(workspace)
+    except TerminalRun as e:  # the check keeps no fix of code it cannot run here: the trial fails as a run would
+        return {**copy.deepcopy(cell), "code": code, "outputs": [_error_bundle("TerminalRun", str(e))], "status": "error",
+                "exec_count": None, "labels": [], "label_revs": {}, "trial": ""}
     kernel = _kernel_for(nb, None, cell, ws)
     try:
         timeout_s = positive_timeout(cell.get("timeout_s"))
@@ -2757,6 +2907,8 @@ async def trial_settle(workspace: str, cell_id: str, tid: str, *, keep: bool) ->
     if hit is None or not tid:
         return
     nb, cell = hit
+    if local_kernel is None and _terminal(workspace):
+        return
     key = _kernel_for(nb, None, cell, ws)
     k = _kernel(workspace, key)
     async with k.lock:
@@ -2783,9 +2935,16 @@ def land_run(workspace: str, nb: dict, cell: dict, code: str, outputs: list[dict
         _verify_hook("ran", workspace, nb, cell)
 
 
+def _terminal(workspace: str) -> bool:
+    from . import local  # noqa: PLC0415
+
+    return local.terminal(workspace)
+
+
 async def _run_cell(workspace: str, nb_id: str, cell_id: str, kernel: str | None = None,
                     timeout_s: float | None = None) -> dict:
     """Run an existing cell; the cell as stored (bounded outputs). 400 for a data cell."""
+    _no_kernel_here(workspace)
     nb = load_notebook(workspace, nb_id)
     cell = _find(nb, cell_id)
     _reject_data_run(cell)
@@ -2801,8 +2960,26 @@ async def edit_and_run(workspace: str, nb_id: str, cell_id: str, code: str, *, b
     kind keeps the takeaway, marked TAKEAWAY_STALE when the outputs' text changed. `title` and `kind` change in the
     same edit when given. `from_dataset` turns a diagram or timeline stored with a dataset into a card of code. Returns
     the cell with complete outputs. 404 for an unknown cell, 400 for a data cell or a kind without code."""
+    _no_kernel_here(workspace)
     nb = load_notebook(workspace, nb_id)
     cell = _find(nb, cell_id)
+    changed = _edit_code(cell, code, by=by, title=title, kind=kind, from_dataset=from_dataset)
+    if not changed and (live := _label_reruns.get((workspace, cell_id))) is not None:
+        rerun = await asyncio.shield(live)
+        if rerun is not None:
+            return dict(rerun)
+    kept, before = _keep_takeaway(workspace, cell, changed)
+    _, full = await _execute_cell(workspace, nb, cell, None, timeout_s, default_timeout_s)
+    if kept and outputs_text(full.get("outputs") or []) != before:
+        full[TAKEAWAY_STALE] = True
+        _mark_takeaway_stale(workspace, cell_id)
+    return dict(full)  # a copy: the stored cell is the cached object
+
+
+def _edit_code(cell: dict, code: str, *, by: str, title: str | None = None, kind: str | None = None,
+               from_dataset: bool = False) -> bool:
+    """edit_and_run's change to the card before it runs: the code (the replaced code kept as `previous_code`), the
+    title and the kind, recorded in `edited`. Whether anything changed. 400 for a data cell or a kind without code."""
     if from_dataset and cell.get("kind") in ("diagram", "timeline") and isinstance(cell.get("payload"), dict):
         cell.pop("payload", None)
     _reject_data_run(cell)
@@ -2819,23 +2996,51 @@ async def edit_and_run(workspace: str, nb_id: str, cell_id: str, code: str, *, b
         cell["kind"] = kind
     if changed:
         cell.setdefault("edited", []).append({"by": by, "ts": _now()})
-    if not changed and (live := _label_reruns.get((workspace, cell_id))) is not None:
-        rerun = await asyncio.shield(live)
-        if rerun is not None:
-            return dict(rerun)
+    return bool(changed)
+
+
+def _keep_takeaway(workspace: str, cell: dict, changed: bool) -> tuple[str, str]:
+    """(the takeaway a run keeps, the text of the outputs it was written for): a run of unchanged code, title and kind
+    keeps the takeaway, to be marked TAKEAWAY_STALE when the outputs' text changes; any other run clears it."""
     kept = "" if changed else str(cell.get("takeaway") or "").strip()
     before = outputs_text(hydrate_outputs(_ws(workspace), cell.get("outputs"))) if kept else ""
     if not kept:
         cell["takeaway"] = ""
         cell["takeaway_author"] = None
         cell.pop(TAKEAWAY_STALE, None)
-    _, full = await _execute_cell(workspace, nb, cell, None, timeout_s, default_timeout_s)
-    if kept and outputs_text(full.get("outputs") or []) != before:
-        cell[TAKEAWAY_STALE] = True
-        full[TAKEAWAY_STALE] = True
-        write_notebook(_ws(workspace), nb)
-        _emit(workspace, cell)
-    return dict(full)  # a copy: the stored cell is the cached object
+    return kept, before
+
+
+RUN_KEY = "run"  # a card whose code runs through `thimble-run` (terminal mode): {state, by, script, ...} (cardrun.py)
+
+
+@_changes
+def stage_edit(workspace: str, nb_id: str, cell_id: str, code: str, run: dict, *, by: str, title: str | None = None,
+               kind: str | None = None, from_dataset: bool = False) -> dict:
+    """edit_and_run's change to a card stored to run later through `thimble-run` (terminal mode), with its RUN_KEY
+    record. A kept takeaway's outputs text goes in the record as `kept`, so the run marks it stale when its outputs
+    differ. Returns a copy of the stored cell."""
+    ws = _ws(workspace)
+    nb = load_notebook(workspace, nb_id)
+    cell = _find(nb, cell_id)
+    changed = _edit_code(cell, code, by=by, title=title, kind=kind, from_dataset=from_dataset)
+    kept, before = _keep_takeaway(workspace, cell, changed)
+    cell[RUN_KEY] = {**run, **({"kept": before} if kept else {})}
+    write_notebook(ws, nb)
+    _emit(workspace, cell, what="edited")
+    return dict(cell)
+
+
+def _mark_takeaway_stale(workspace: str, cell_id: str) -> None:
+    """Mark the card's takeaway TAKEAWAY_STALE where the card is stored now, after a run changed its outputs' text."""
+    ws = _ws(workspace)
+    with editing(ws):
+        hit = _locate(ws, cell_id)
+        if hit is None:
+            return
+        hit[1][TAKEAWAY_STALE] = True
+        write_notebook(ws, hit[0])
+    _emit(workspace, hit[1])
 
 
 # Each card's reruns for changed labels run one at a time, and the run under way is held here so that an unchanged
@@ -2854,6 +3059,7 @@ async def rerun_on_labels(workspace: str, cell_id: str) -> dict | None:
     when nothing ran."""
     from . import concepts  # noqa: PLC0415 — concepts imports this module
 
+    _no_kernel_here(workspace)
     key = (workspace, cell_id)
     ws = _ws(workspace)
     async with _label_rerun_locks.setdefault(key, asyncio.Lock()):
@@ -2878,12 +3084,9 @@ async def rerun_on_labels(workspace: str, cell_id: str) -> dict | None:
         full = None
         try:
             _, full = await _execute_cell(workspace, nb, cell)
-            after = _locate(ws, cell_id)
-            if after is not None and kept and outputs_text(full.get("outputs") or []) != before:
-                after[1][TAKEAWAY_STALE] = True
+            if kept and outputs_text(full.get("outputs") or []) != before:
                 full = {**full, TAKEAWAY_STALE: True}
-                write_notebook(ws, after[0])
-                _emit(workspace, after[1])
+                _mark_takeaway_stale(workspace, cell_id)
         finally:
             _label_reruns.pop(key, None)
             live.set_result(full)
@@ -2944,6 +3147,7 @@ def outputs_text(outputs: list[dict], limit: int = OUTPUTS_TEXT_CHARS) -> str:
     return text
 
 
+@_changes
 def append_takeaway(workspace: str, cell_id: str, text: str, *, only_if_empty: bool = False, overwrite: bool = False,
                     author: str | None = None) -> bool:
     """Attach a takeaway to a cell: appended by default, replaced with `overwrite`, left alone with `only_if_empty`
@@ -3008,6 +3212,7 @@ async def _run_code(
     kind: str | None = None,
 ) -> tuple[dict, dict]:
     """run_code returning (the cell as stored, the cell with its complete outputs). One load, one save."""
+    _no_kernel_here(workspace)
     timeout_s = positive_timeout(timeout_s)  # reject a bad value before anything is written
     if kind is not None and kind not in RUNNABLE_KINDS:
         raise ValueError(f"a {kind} card has no code to run; the runnable kinds are {', '.join(RUNNABLE_KINDS)}")
@@ -3160,22 +3365,23 @@ def migrate_scratch(c: str) -> list[str]:
               and SCRATCH_KEY not in data):
             marked.append(p.stem)
     moved: list[str] = []
-    for gid, data in raw.items():
-        nb = read_notebook(ws, gid)
-        if nb is None:
-            continue
-        nb["role"] = "exploration"
-        if data.get("parent") not in raw:
-            nb.update(parent=None, title=SCRATCH_TITLE, kind=DEFAULT_GROUP_KIND, pos=None, order=None, ts=_created())
-            nb[SCRATCH_KEY] = True
-            moved.append(gid)
-        write_notebook(ws, nb)
-    for gid in marked:
-        nb = read_notebook(ws, gid)
-        if nb is not None:
-            nb[SCRATCH_KEY] = True
+    with editing(ws) if raw or marked else contextlib.nullcontext():
+        for gid, data in raw.items():
+            nb = read_notebook(ws, gid)
+            if nb is None:
+                continue
+            nb["role"] = "exploration"
+            if data.get("parent") not in raw:
+                nb.update(parent=None, title=SCRATCH_TITLE, kind=DEFAULT_GROUP_KIND, pos=None, order=None, ts=_created())
+                nb[SCRATCH_KEY] = True
+                moved.append(gid)
             write_notebook(ws, nb)
-            moved.append(gid)
+        for gid in marked:
+            nb = read_notebook(ws, gid)
+            if nb is not None:
+                nb[SCRATCH_KEY] = True
+                write_notebook(ws, nb)
+                moved.append(gid)
     if moved:
         log.info("%s: moved and marked the orientation's old Scratch, off the canvas (%s)", c, ", ".join(moved))
     return moved
@@ -3250,16 +3456,17 @@ def migrate_writer_groups(c: str) -> list[str]:
             docs = docs_of(gid, set())
             if not docs:  # someone else's card in it, or no card at all
                 continue
-            nb = read_notebook(ws, gid)
-            if nb is None:
-                continue
-            cards = [str(x.get("id")) for x in nb.get("cells") or []]
-            nb.update(parent=None, pos=None, order=None)
-            key = f"writer:{sorted(docs)[0]}" if len(docs) == 1 else None
-            if key and key not in stamped:
-                nb[session_key] = key
-                stamped.add(key)
-            write_notebook(ws, nb)
+            with editing(ws):
+                nb = read_notebook(ws, gid)
+                if nb is None:
+                    continue
+                cards = [str(x.get("id")) for x in nb.get("cells") or []]
+                nb.update(parent=None, pos=None, order=None)
+                key = f"writer:{sorted(docs)[0]}" if len(docs) == 1 else None
+                if key and key not in stamped:
+                    nb[session_key] = key
+                    stamped.add(key)
+                write_notebook(ws, nb)
             canvas_history.group_moved(c, gid, title=str(nb.get("title") or ""), by="migration", from_parent=root_id,
                                        to_parent=None, cards=cards)
             moved.append(gid)
@@ -3319,6 +3526,11 @@ async def update_notebook(c: str, nb: str, body: NotebookMeta) -> dict:
     """Rename a group, move it under another group (`parent`, null for the root), change its kind, or place its frame
     (`pos` {x, y} and `order`, the layout fields; null for the default placement). Returns the summary. 404 for an
     unknown parent, 400 for a move that would make a cycle or a pos that is not {x, y}; nothing changes on an error."""
+    with editing(_ws(c)):
+        return _update_notebook(c, nb, body)
+
+
+def _update_notebook(c: str, nb: str, body: NotebookMeta) -> dict:
     notebook = load_notebook(c, nb)
     ws = _ws(c)
     fields = body.model_fields_set
@@ -3343,6 +3555,7 @@ async def update_notebook(c: str, nb: str, body: NotebookMeta) -> dict:
     return summary(notebook)
 
 
+@_changes
 def trash_notebook(ws: Path, nb_id: str) -> bool:
     """Remove a group from the workspace's list: its file moves to TRASH_DIR whole (its cells' side files stay where
     the file names them), the read cache forgets it, and settings.active_notebook is cleared when it named it. False
@@ -3385,10 +3598,11 @@ async def delete_notebook(c: str, nb: str) -> dict:
     if read_notebook(ws, nb) is None or not _nb_file(ws, nb).is_file():
         raise HTTPException(404, f"no such notebook: {nb}")
     gone: list[dict] = []
-    for gid in subtree(ws, nb):
-        g = read_notebook(ws, gid)
-        if g is not None and trash_notebook(ws, gid):
-            gone.extend({**cell, "notebook": gid} for cell in g["cells"])
+    with editing(ws):
+        for gid in subtree(ws, nb):
+            g = read_notebook(ws, gid)
+            if g is not None and trash_notebook(ws, gid):
+                gone.extend({**cell, "notebook": gid} for cell in g["cells"])
     for cell in gone:
         _emit(c, cell, what="deleted")
     return {"ok": True}

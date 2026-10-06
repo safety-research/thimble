@@ -751,3 +751,181 @@ async def test_the_module_s_plan_mode_post_reaches_main_s_mode_from_the_accepted
     await mod.hello()
     r = await mod._go("POST", "/api/module/mode", json={"cwd": _cwd(), "session": MAIN, "plan": True})
     assert r.json() == {"ok": True} and heard == [(CORPUS, MAIN, True)]
+
+
+# ----------------------------------------------------------------------------------------------- terminal mode
+
+
+from terminal_fakes import FileModule, write_launch  # noqa: E402
+
+
+@pytest.fixture()
+def terminal(monkeypatch):
+    """The mini corpus's session in terminal mode, with one role to register (_fake_roles)."""
+    from app import subagents  # noqa: F401 — imported, so _fake_roles can stand in for it
+
+    _fake_roles(monkeypatch, {"text": "Orient."})
+    ws = config.workspace_dir(CORPUS)
+    write_launch(ws, session=MAIN)
+    return ws
+
+
+def test_the_transport_is_the_file_in_terminal_mode_and_http_otherwise(terminal):
+    assert module_bridge.transport(CORPUS) == module_bridge.FILE
+    write_launch(terminal, session=MAIN, mode="browser")
+    assert module_bridge.transport(CORPUS) == module_bridge.HTTP
+    _launch()  # an older launcher's launch.json, with no mode
+    assert module_bridge.transport(CORPUS) == module_bridge.HTTP
+
+
+def test_in_terminal_mode_the_module_is_live_while_main_s_module_writes_its_heartbeat(terminal, monkeypatch):
+    assert not module_bridge.live(CORPUS)
+    assert module_bridge.why_not(CORPUS) == module_bridge.NOT_LOADED
+    mod = FileModule(terminal, session=MAIN)
+    mod.write()
+    assert module_bridge.live(CORPUS) and module_bridge.why_not(CORPUS) == ""
+    mod.out["beat"] = int((time.time() - module_bridge.FILE_LIVE_S - 1) * 1000)
+    sf_path = module_bridge.sf.module_path(terminal)
+    sf_path.write_text(json.dumps(mod.out))
+    assert not module_bridge.live(CORPUS)
+    assert "heartbeat" in module_bridge.why_not(CORPUS)
+    mod.out.update(session=NEW)
+    mod.write()
+    assert not module_bridge.live(CORPUS) and module_bridge.why_not(CORPUS) == module_bridge.NOT_MAIN
+    with module_bridge.sf.update(terminal) as state:  # --rekey recorded the move: the new session is main's
+        module_bridge.sf.rekey(state, MAIN, NEW)
+    assert module_bridge.live(CORPUS) and module_bridge.main_session(CORPUS) == NEW
+    mod.out.update(gone=True)
+    mod.write()
+    assert not module_bridge.live(CORPUS) and "session ended" in module_bridge.why_not(CORPUS)
+    mod.out.update(gone=False, beat=0, problem="Claude Code did not register thimble:critic: bad")
+    sf_path.write_text(json.dumps(mod.out))
+    assert module_bridge.why_not(CORPUS) == "Claude Code did not register thimble:critic: bad"
+
+
+async def test_a_request_in_terminal_mode_goes_through_subagents_json_and_module_json(terminal, monkeypatch):
+    import socket
+
+    def no_socket(*a, **k):
+        raise AssertionError("terminal mode opens no socket")
+
+    mod = FileModule(terminal, session=MAIN).start()
+    try:
+        monkeypatch.setattr(socket, "socket", no_socket)
+        got = await module_bridge.request(CORPUS, "spawn", role="writer", prompt="Write.", description="writer: report",
+                                          values={"model": "m", "effort": "low"}, what="report", request="req_0000000001")
+        assert got == {"agentId": "a0000000000000001"}
+        assert await module_bridge.request(CORPUS, "note", text="A line.") == {"ok": True}
+    finally:
+        mod.stop()
+    [spawn] = mod.ops("spawn")
+    assert spawn == {"role": "writer", "prompt": "Write.", "description": "writer: report",
+                     "values": {"model": "m", "effort": "low"}, "request": "req_0000000001",
+                     "note": NOTE.format(role="writer", agent="{agent}", what="report")}
+    reqs = module_bridge.sf.requests(module_bridge.sf.read(terminal))
+    entries = [r for r in reqs.values() if r.get("kind") == "module"]
+    assert [(r["op"], r["module"], r["state"], r["session"]) for r in entries] == [
+        ("spawn", "answered", "done", MAIN), ("note", "answered", "done", MAIN)]
+    assert entries[0]["of"] == "req_0000000001"
+    held = json.loads(module_bridge.sf.roles_path(terminal).read_text())
+    assert list(held["roles"]) == ["orientation"], "roles.json written before the spawn"
+
+
+async def test_a_request_the_module_does_not_answer_in_time_expires_and_a_late_spawn_is_stopped(terminal, monkeypatch):
+    monkeypatch.setattr(module_bridge, "REQUEST_TIMEOUT_S", 0.3)
+    late: list[str] = []
+    mod = FileModule(terminal, session=MAIN, answer=lambda op, args: None if op == "spawn" else {"agentId": args.get("agent")})
+    mod.start()
+    try:
+        got = await module_bridge.request(CORPUS, "spawn", role="writer", prompt="p", description="d", values={})
+        assert got == {"no-module": module_bridge.NOT_ANSWERING, "expired": True}
+        [(rid, _, _)] = mod.seen
+        r = module_bridge.sf.requests(module_bridge.sf.read(terminal))[rid]
+        assert (r["module"], r["state"]) == ("expired", "expired")
+        mod.out["answers"][rid] = {"agentId": "aLate"}  # the module's answer comes after all
+        mod.write()
+        assert module_bridge.reconcile(CORPUS) == ["aLate"]
+        assert module_bridge.reconcile(CORPUS) == [], "stopped once"
+        for _ in range(100):
+            if mod.ops("stop"):
+                break
+            await asyncio.sleep(0.02)
+        assert mod.ops("stop") == [{"agent": "aLate"}]
+    finally:
+        mod.stop()
+    assert not late
+
+
+async def test_without_a_live_module_a_request_in_terminal_mode_answers_no_module_and_writes_nothing(terminal):
+    got = await module_bridge.request(CORPUS, "spawn", role="writer", prompt="p", description="d", values={})
+    assert got == {"no-module": module_bridge.NOT_LOADED}
+    assert not [r for r in module_bridge.sf.requests(module_bridge.sf.read(terminal)).values() if r.get("kind") == "module"]
+
+
+def test_request_blocking_works_from_a_thread_in_terminal_mode(terminal):
+    mod = FileModule(terminal, session=MAIN).start()
+    out: list = []
+    try:
+        t = threading.Thread(target=lambda: out.append(module_bridge.request_blocking(CORPUS, "stop", agent="a9")))
+        t.start()
+        t.join(timeout=15)
+    finally:
+        mod.stop()
+    assert out == [{"agentId": "a9"}]
+
+
+def test_the_ends_the_module_writes_are_handed_out_once_each_by_its_load(terminal):
+    mod = FileModule(terminal, session=MAIN)
+    mod.write()
+    assert module_bridge.new_ended(CORPUS) == []
+    mod.ended("a1", "Done.")
+    mod.ended("a2", "", reason="refusal", refusal={"category": "cyber", "explanation": "flagged"})
+    assert module_bridge.new_ended(CORPUS) == [
+        {"agentId": "a1", "answer": "Done.", "reason": "answer"},
+        {"agentId": "a2", "answer": "The API refused the request (cyber): flagged", "reason": "refusal"}]
+    assert module_bridge.new_ended(CORPUS) == []
+    mod.ended("a3", "Later.")
+    assert [e["agentId"] for e in module_bridge.new_ended(CORPUS)] == ["a3"]
+    restarted = FileModule(terminal, session=MAIN)  # a new load of the module counts its ends from 1 again
+    restarted.out["load"] = "an0ther"
+    restarted.ended("a4", "After a restart.")
+    assert [e["agentId"] for e in module_bridge.new_ended(CORPUS)] == ["a4"]
+
+
+def test_push_roles_writes_roles_json_in_terminal_mode_and_sync_writes_it_only_when_the_roles_changed(terminal,
+                                                                                                       monkeypatch):
+    prompt = {"text": "Orient."}
+    _fake_roles(monkeypatch, prompt)
+    module_bridge.push_roles(CORPUS)
+    path = module_bridge.sf.roles_path(terminal)
+    first = json.loads(path.read_text())
+    assert first["roles"]["orientation"]["prompt"] == "Orient." and first["digest"]
+    assert path.stat().st_mode & 0o777 == 0o600
+    assert asyncio.run(module_bridge.sync_roles(CORPUS, force=True)) is False
+    prompt["text"] = "Orient, edited by hand."
+    assert asyncio.run(module_bridge.sync_roles(CORPUS, force=True)) is True
+    assert json.loads(path.read_text())["roles"]["orientation"]["prompt"] == "Orient, edited by hand."
+
+
+def test_roles_json_is_rendered_in_the_sessions_mode_from_any_folder(monkeypatch, tmp_path):
+    """The launcher writes roles.json before main starts, from a folder that is no corpus and with no THIMBLE_WS: the
+    agents' prompts are still rendered in the mode launch.json names (preamble.md's terminal text), and in browser
+    mode in browser mode."""
+    ws = config.workspace_dir(CORPUS)
+    monkeypatch.delenv("THIMBLE_WS", raising=False)
+    monkeypatch.delenv("THIMBLE_MODE", raising=False)
+    monkeypatch.chdir(tmp_path)
+    for mode, has, lacks in (("terminal", "the terminal, where thimble shows", "a browser interface"),
+                             ("browser", "a browser interface", "the terminal, where thimble shows")):
+        write_launch(ws, session=MAIN, mode=mode)
+        roles = json.loads(module_bridge.roles_file(CORPUS).read_text())["roles"]
+        text = json.dumps(roles, ensure_ascii=False)
+        assert roles and has in text and lacks not in text, mode
+
+
+def test_rekey_in_terminal_mode_leaves_the_record_the_hook_wrote(terminal):
+    with module_bridge.sf.update(terminal) as state:
+        module_bridge.sf.rekey(state, MAIN, NEW)
+    before = _registry()["module"]
+    module_bridge.rekey(CORPUS, MAIN, NEW)
+    assert _registry()["module"] == before and before["notes"]["session"] == NEW

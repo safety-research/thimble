@@ -26,7 +26,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
-from . import cite, config, investigation, notebook, prompts, refs, slides, undo
+from . import cite, config, investigation, ledger, notebook, prompts, refs, slides, undo
 from .ledger import atomic_write_text, read_json, unlinked, write_json
 from .report import (_Refs, _collapse, _cut, _new_id, _put_text, _replace_text, _title_ok, plain_text, reopen_comment,
                      settle_carried_comment)
@@ -596,12 +596,20 @@ def _inv(c: str, inv_id: str) -> Path:
 _UNREAD: Any = object()  # write_doc's `before` when the caller has not read the document as it was
 
 
+def docs_lock(c: str, inv_id: str = investigation.MAIN):
+    """The lock of an investigation's documents (ledger.locked on its folder): held from a document's read to its write
+    by a change that reads it first (comments.py), since more than one process can write documents in terminal mode."""
+    return ledger.locked(_inv(c, inv_id))
+
+
 def write_doc(c: str, inv_id: str, slug: str, doc: dict[str, Any], *, before: Any = _UNREAD) -> None:
-    """Store a document; a write that changes its text is an undo step (undo.doc_written) with the document as it was,
-    read here unless the caller hands it over (`before`, None for none)."""
+    """Store a document under the documents' lock (docs_lock); a write that changes its text is an undo step
+    (undo.doc_written) with the document as it was, read here unless the caller hands it over (`before`, None for
+    none)."""
     path = _inv(c, inv_id) / f"{slug}.json"
-    prior = read_json(path, None) if before is _UNREAD else before
-    write_json(path, doc)
+    with docs_lock(c, inv_id):
+        prior = read_json(path, None) if before is _UNREAD else before
+        write_json(path, doc)
     undo.doc_written(c, inv_id, slug, "doc", prior if isinstance(prior, dict) else None, doc)
 
 

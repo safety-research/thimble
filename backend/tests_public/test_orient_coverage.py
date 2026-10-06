@@ -340,6 +340,25 @@ async def test_a_message_sent_while_it_is_measured_waits_and_carries_the_line(ch
     assert bridge.ops("send")[-1]["text"] == "And Mondays?", "the line ends one run's prompt"
 
 
+def test_a_denied_send_never_stands_for_a_request_another_send_claimed(chat):
+    """The mirror reads a denied SendMessage's result in a later pass in terminal mode; by then main's next, identical
+    SendMessage may have claimed the request message_orientation made for it. The denied call stands for no request
+    (session._request_of), so the sent one is not marked refused (live check T5)."""
+    with subagents.update(CORPUS) as state:
+        sf.registry(state)["a1"] = {"role": "orientation", "key": "orient", "chat": chat, "status": "done"}
+    ans = subagents.message_request(CORPUS, "a1", "And the weekends?", call="toolu_m1")
+    with subagents.update(CORPUS) as state:
+        assert sf.check_call(state, {"tool_name": "SendMessage", "tool_use_id": "toolu_s2",
+                                     "tool_input": ans["input"]}) is None
+    from types import SimpleNamespace
+
+    from app import session
+
+    lv = SimpleNamespace(c=CORPUS)  # all _request_of reads of the pass
+    assert session._request_of(lv, "toolu_s1", "SendMessage", ans["input"]) is None
+    assert session._request_of(lv, "toolu_s2", "SendMessage", ans["input"]) == ans["request"]
+
+
 async def test_a_stopped_or_failed_first_run_or_a_follow_up_is_not_measured(chat, told, monkeypatch):
     async def no_measure(*a, **kw):
         raise AssertionError("not measured")

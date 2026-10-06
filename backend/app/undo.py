@@ -11,7 +11,9 @@ THIMBLE_SESSION; while it runs, Undo passes over them, refusing when one of them
 
 The journal, workspaces/<c>/undo.jsonl, holds `step`, `undo`, `redo` and `ran` lines, replayed into the two stacks
 and
-rewritten to MAX_STEPS per stack past MAX_LINES lines. POST /ws/{c}/undo and /redo apply a step inside `applying()`,
+rewritten to MAX_STEPS per stack past MAX_LINES lines. In terminal mode a second process writes it (`thimble-run`, whose
+runs fill in `ran` lines), so each line is appended under the journal's lock (ledger.locked), and the stacks held in
+memory are replayed again when the file is not as this process left it. POST /ws/{c}/undo and /redo apply a step inside `applying()`,
 so those writes make no step of their own; GET /ws/{c}/undo names {undo, redo, held}."""
 from __future__ import annotations
 
@@ -60,6 +62,7 @@ _SESSION: contextvars.ContextVar[tuple[str, Any] | None] = contextvars.ContextVa
 GENERIC_BY = ("", "terminal", "analyst")
 _lock = threading.RLock()
 _stacks: dict[str, tuple[list[dict[str, Any]], list[dict[str, Any]]]] = {}  # workspace -> (undo, redo)
+_sigs: dict[str, tuple[int, int, int] | None] = {}  # workspace -> its journal's (inode, size, mtime) as _stacks holds it
 
 
 @contextmanager
@@ -134,9 +137,18 @@ def _now() -> str:
 # --------------------------------------------------------------------------- the stacks
 
 
+def _sig(c: str) -> tuple[int, int, int] | None:
+    try:
+        st = log_path(c).stat()
+    except (OSError, ValueError, HTTPException):
+        return None
+    return st.st_ino, st.st_size, st.st_mtime_ns
+
+
 def _load(c: str) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    """The workspace's stacks, replayed from its journal on first use."""
-    if c in _stacks:
+    """The workspace's stacks, replayed from its journal on first use and again when another process changed the
+    journal since (module note)."""
+    if c in _stacks and _sigs.get(c) == _sig(c):
         return _stacks[c]
     undo: list[dict[str, Any]] = []
     redo: list[dict[str, Any]] = []
@@ -168,6 +180,7 @@ def _load(c: str) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
             if step is not None and isinstance(step.get("after"), dict):
                 step["after"].update(r["after"])
     _stacks[c] = (undo, redo)
+    _sigs[c] = _sig(c)
     if lines > MAX_LINES:
         _rewrite(c)
     return _stacks[c]
@@ -181,23 +194,38 @@ def _index(stack: list[dict[str, Any]], step_id: Any) -> int | None:
 def _rewrite(c: str) -> None:
     """The journal as the newest MAX_STEPS steps of each stack, each in order: the undo stack's, then the redo stack's
     marked for it."""
-    undo, redo = _stacks[c]
-    del undo[:-MAX_STEPS]
-    del redo[:-MAX_STEPS]
-    plain = lambda s: {k: v for k, v in s.items() if k != "stack"}  # noqa: E731
-    lines = [json.dumps(plain(s), ensure_ascii=False) for s in undo]
-    lines += [json.dumps({**plain(s), "stack": "redo"}, ensure_ascii=False) for s in redo]
-    ledger.atomic_write_text(log_path(c), "\n".join(lines) + ("\n" if lines else ""))
+    with ledger.locked(log_path(c)):
+        if _sigs.get(c) != _sig(c):
+            _stacks.pop(c, None)
+            _load(c)  # another process's lines first: the rewrite keeps them
+        undo, redo = _stacks[c]
+        del undo[:-MAX_STEPS]
+        del redo[:-MAX_STEPS]
+        plain = lambda s: {k: v for k, v in s.items() if k != "stack"}  # noqa: E731
+        lines = [json.dumps(plain(s), ensure_ascii=False) for s in undo]
+        lines += [json.dumps({**plain(s), "stack": "redo"}, ensure_ascii=False) for s in redo]
+        ledger.atomic_write_text(log_path(c), "\n".join(lines) + ("\n" if lines else ""))
+        _sigs[c] = _sig(c)
 
 
 def _append(c: str, line: dict[str, Any]) -> None:
-    ledger.append_jsonl(log_path(c), line)
+    """Append a line under the journal's lock. When another process wrote the journal since this one read it, the
+    stacks are dropped, to be replayed with both processes' lines at their next use."""
+    path = log_path(c)
+    with ledger.locked(path):
+        before = _sig(c)
+        ledger.heal_tail(path)
+        ledger.append_jsonl(path, line)
+        if c in _stacks and before == _sigs.get(c):
+            _sigs[c] = _sig(c)
+        else:
+            _stacks.pop(c, None)
 
 
 def push(c: str, step: dict[str, Any]) -> None:
     """Add a step: onto the undo stack, into the journal; a new change empties the redo stack. Never raises."""
     try:
-        with _lock:
+        with _lock, ledger.locked(log_path(c)):
             undo, redo = _load(c)
             step = {"type": "step", "id": secrets.token_hex(4), "ts": _now(), **step}
             batch = _BATCH.get()
@@ -310,8 +338,10 @@ def forget(c: str | None = None) -> None:
     with _lock:
         if c is None:
             _stacks.clear()
+            _sigs.clear()
         else:
             _stacks.pop(c, None)
+            _sigs.pop(c, None)
 
 
 # --------------------------------------------------------------------------- recording
@@ -392,7 +422,7 @@ def card_ran(c: str, cell: dict[str, Any]) -> None:
         return
     try:
         cid = str(cell.get("id") or "")
-        with _lock:
+        with _lock, ledger.locked(log_path(c)):
             undo_stack, _ = _load(c)
             step = next((s for s in reversed(undo_stack) if s.get("kind") == "card" and s.get("target") == cid), None)
             after = step.get("after") if step is not None else None
@@ -459,6 +489,14 @@ def _set_card(c: str, cid: str, fields: dict[str, Any]) -> None:
     from . import notebook  # noqa: PLC0415
 
     ws = config.workspace_dir(c)
+    with notebook.editing(ws):
+        _set_card_locked(c, ws, cid, fields)
+
+
+def _set_card_locked(c: str, ws: Path, cid: str, fields: dict[str, Any]) -> None:
+    """_set_card with the groups' lock held (notebook.editing)."""
+    from . import notebook  # noqa: PLC0415
+
     hit = notebook._locate(ws, cid)
     if hit is None:
         raise HTTPException(409, f"card {cid} is no longer on the canvas")

@@ -45,7 +45,15 @@ def _emit(c: str, slug: str, span: str) -> None:
 
 
 async def tool_add_comment(ctx: Any, args: dict[str, Any]) -> Any:
-    """`add_comment` from main's shim: a note of main's beside the passage `ref` names."""
+    """`add_comment` from main's shim: a note of main's beside the passage `ref` names, under the documents' lock from
+    the document's read to its write (report_types.docs_lock)."""
+    from . import report_types  # noqa: PLC0415
+
+    with report_types.docs_lock(ctx.c):
+        return _add_comment(ctx, args)
+
+
+def _add_comment(ctx: Any, args: dict[str, Any]) -> Any:
     from . import checks, refs, report, report_types  # noqa: PLC0415
 
     ref = _clean_ref(args.get("ref"))
@@ -120,7 +128,14 @@ def _targets(c: str, value: str, want_open: bool) -> tuple[str, list[dict[str, A
 
 
 async def tool_resolve_comment(ctx: Any, args: dict[str, Any]) -> Any:
-    """The `resolve_comment` tool."""
+    """The `resolve_comment` tool, under the documents' lock (report_types.docs_lock)."""
+    from . import report_types  # noqa: PLC0415
+
+    with report_types.docs_lock(ctx.c):
+        return _resolve_comment(ctx, args)
+
+
+def _resolve_comment(ctx: Any, args: dict[str, Any]) -> Any:
     from . import report, report_types  # noqa: PLC0415
 
     value = _clean_ref(args.get("comment"))

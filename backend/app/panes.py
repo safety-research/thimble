@@ -71,5 +71,8 @@ async def tool_set_layout(ctx: Any, args: dict[str, Any]) -> Any:
     except Exception:  # noqa: BLE001 — a page that misses the record keeps its layout
         log.warning("set_layout: could not send the layout for %s", ctx.c, exc_info=True)
         return tools.err("set_layout: the layout could not be sent to the browser")
+    from . import local  # noqa: PLC0415
+
+    local.ui_note(ctx.c, "layout", {"layout": layout, "surfaces": picked})
     listed = picked[0] if len(picked) == 1 else f"{', '.join(picked[:-1])} and {picked[-1]}"
     return tools.ok(tools.hint("set_layout-set", surfaces=listed, layout=WORDS[layout]))

@@ -760,6 +760,9 @@ async def tool_open_view(ctx: Any, args: dict[str, Any]) -> Any:
     except Exception:  # noqa: BLE001 — a page that misses the record stays as it is
         log.warning("open_view: could not send the view for %s", ctx.c, exc_info=True)
         return tools.err("open_view: the view could not be sent to the browser")
+    from . import local  # noqa: PLC0415
+
+    local.ui_note(ctx.c, "open_view", {"slug": slug, "query": query, **({"card": raw_card} if raw_card else {})})
     if query:
         return tools.ok(tools.hint("open_view-card", card=f"card:{raw_card}", view=slug))
     return tools.ok(tools.hint("open_view-view", view=slug))
