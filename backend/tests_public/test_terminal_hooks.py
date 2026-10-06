@@ -61,7 +61,8 @@ def env_for(tmp_path: Path, ws: Path, **more: str) -> dict:
     env = {k: v for k, v in os.environ.items() if not k.startswith(("CLAUDE", "THIMBLE_"))}
     env.update(THIMBLE_HOME=str(home), THIMBLE_MODE="terminal", THIMBLE_WS=str(ws),
                THIMBLE_DATA_DIR=str(config.DATA_DIR), CLAUDE_PROJECT_DIR=str(config.corpus_dir(CORPUS)),
-               CLAUDE_CONFIG_DIR=str(tmp_path / "claude-config"), CLAUDE_PID=str(_CLAUDE[0]), **more)
+               CLAUDE_CONFIG_DIR=str(tmp_path / "claude-config"), CLAUDE_PID=str(_CLAUDE[0]))
+    env.update(more)
     return env
 
 
@@ -299,3 +300,21 @@ def test_main_s_stop_starts_the_backend_s_call_as_a_process_of_its_own_that_runs
 
     said = [r.get("text") for r in agents.read_events(agents.paths(CORPUS, agents.MAIN_ID)[1]) if r.get("type") == "user"]
     assert said == ["How many files?"]
+
+
+def test_the_monitor_route_streams_main_s_events_from_the_queue_until_main_exits(tmp_path, ws):
+    a = events.post(CORPUS, "label_done", {"text": "first", "name": "a"}, check_kind=False)
+    b = events.post(CORPUS, "rerun", {"text": "second", "name": "b"}, check_kind=False)
+    short = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(2)"])
+    import threading
+
+    threading.Thread(target=short.wait, daemon=True).start()  # reaped as main's shell reaps it, so it is gone
+    try:
+        out = subprocess.run([str(WATCHER), "--stream", "--cwd", str(config.corpus_dir(CORPUS)), "--session", MAIN],
+                             capture_output=True, text=True, env=env_for(tmp_path, ws, CLAUDE_PID=str(short.pid)),
+                             timeout=30)
+    finally:
+        short.wait()
+    assert out.returncode == 0
+    assert out.stdout.index(f'event="{a["id"]}"') < out.stdout.index(f'event="{b["id"]}"')
+    assert event_files.waiting(ws) == []

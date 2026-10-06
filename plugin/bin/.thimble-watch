@@ -473,6 +473,29 @@ def watch_files(inp: dict, ws: Path) -> int:
     return 0
 
 
+def stream_files(args: list[str], ws: Path) -> int:
+    """The Monitor route in terminal mode: every event of main's session from the queue, one block of lines each, until
+    main's `claude` process exits or the session is no longer main's."""
+    def arg(name: str) -> str:
+        return args[args.index(name) + 1] if name in args and args.index(name) + 1 < len(args) else ""
+
+    session = arg("--session")
+    ef, sf = events(), files()
+    pid = claude_pid()
+    while True:
+        if pid and not alive(pid):
+            return 0
+        session = process_session(pid) or session
+        if not session or sf.main_session(ws) != session:
+            return 0
+        got = ef.take(ws, session)
+        if got is None:
+            time.sleep(FILE_TICK_S)
+            continue
+        sys.stdout.write(fit(str(got.get("id") or ""), str(got.get("text") or "")) + "\n")
+        sys.stdout.flush()
+
+
 def plan_call(inp: dict, ws: Path) -> None:
     """An agent's tool call in plan mode, in terminal mode: the backend's `plan` call stops thimble's running agents,
     unless this agent is none of theirs or was stopped for plan mode already."""
@@ -1048,7 +1071,8 @@ def main() -> int:
     args = sys.argv[1:]
     try:
         if "--stream" in args:
-            return stream(args)
+            ws = term_ws()
+            return stream(args) if ws is None else stream_files(args, ws)
         if "--scratch" in args:
             return scratch(hook_input(), args)
         if "--work-budget" in args:

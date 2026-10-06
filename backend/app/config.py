@@ -342,7 +342,9 @@ def claude_env(env: dict[str, str]) -> dict[str, str]:
 # own value, else "".
 SESSION_VARS = ("THIMBLE_SESSION", "THIMBLE_SESSION_TOKEN", "THIMBLE_RENDERED_PROMPTS", "THIMBLE_AGENT_TOKEN",
                 "THIMBLE_API", "THIMBLE_LAUNCHED", "THIMBLE_CALLER_CWD", "THIMBLE_CWD", "XDG_CACHE_HOME", "MPLCONFIGDIR",
-                "CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD")
+                "CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD",
+                # terminal mode: the launcher's main session's mode and workspace folder, never another session's
+                "THIMBLE_MODE", "THIMBLE_WS")
 # The names that place a stack and tune its plugin and hooks, which the code a session runs reads: the server's value
 # in a session that talks to this server (session_env's `stack`), else "". Every reader takes "" as unset.
 STACK_VARS = ("THIMBLE_HOME", "THIMBLE_PORT", "THIMBLE_UI_PORT", "THIMBLE_WORKSPACES_DIR", "THIMBLE_DATA_DIR",
