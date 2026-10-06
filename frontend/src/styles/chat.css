@@ -1570,6 +1570,11 @@ button.model-line-part[aria-expanded='true'] {
   margin: 0 0 6px;
   border-radius: var(--radius-card);
 }
+/* above the composer the foot floats over the chat's rows, so the card's wash sits on the card's own surface, as the
+   permission card's does, and no row shows through its text (live check L3) */
+.chat-foot .chat-hold {
+  background: color-mix(in oklab, var(--status-warning) 12%, var(--surface-card));
+}
 /* a critique's prompts at the top of its own thread (a step that is a session of its own) */
 .chat-step-holds {
   margin: 6px 0;
