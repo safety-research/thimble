@@ -26,7 +26,7 @@ The assertions (each one line of results.jsonl, {step, title, status, detail}; s
     the waker holds no long poll, and each run ends within END_S of its last turn's result line.
 The format run is made once more (run-format-2) when its child handed back by itself, since the plain-text ending was
 then not exercised. Everything goes to <out folder>: run-<name>/{argv.json, stream.jsonl, stderr.txt, hooks.jsonl,
-mcp.jsonl, transcripts/}, stub-requests.jsonl and summary.json. Exit 0 when every assertion passed, 1 otherwise.
+mcp.jsonl, transcripts/}, stub-requests.jsonl and summary.json; the stand-in server's home is removed at the end. Exit 0 when every assertion passed, 1 otherwise.
 """
 from __future__ import annotations
 
@@ -587,6 +587,7 @@ def main(argv: list[str] | None = None) -> int:
             runs[name] = r
     finally:
         stub.close()
+        shutil.rmtree(home, ignore_errors=True)  # the stand-in server's home: its server.json and token
 
     fr, cr = runs["format"], runs["cap"]
     starts = [e for e in fr["events"] if e.get("hook_event_name") == "SubagentStart"]
