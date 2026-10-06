@@ -35,6 +35,13 @@ const NEAR_MARGIN = '150% 0px'
 /** frames after the last scroll or change in which the hook still looks at the start of each frame */
 const IDLE_FRAMES = 30
 
+/** An element's height inside its padding and border, which contain-intrinsic-size gives. */
+function contentHeight(el: HTMLElement): number {
+  const cs = getComputedStyle(el)
+  const px = (v: string) => parseFloat(v) || 0
+  return Math.max(0, el.getBoundingClientRect().height - px(cs.paddingTop) - px(cs.paddingBottom) - px(cs.borderTopWidth) - px(cs.borderBottomWidth))
+}
+
 /** An element's top in the scrolled content of `body`, px. */
 export function contentTop(body: HTMLElement, el: HTMLElement): number {
   return el.getBoundingClientRect().top - body.getBoundingClientRect().top + body.scrollTop
@@ -150,8 +157,14 @@ export function useScrollAnchor(bodyRef: RefObject<HTMLElement | null>, deps: re
         : new IntersectionObserver(
             (entries) => {
               for (const e of entries) {
-                if (e.isIntersecting) e.target.setAttribute('data-near', '')
-                else e.target.removeAttribute('data-near')
+                const el = e.target as HTMLElement
+                if (e.isIntersecting) el.setAttribute('data-near', '')
+                else if (el.hasAttribute('data-near')) {
+                  // a record that leaves keeps the height it was drawn at, which its estimate would otherwise replace
+                  // when the browser stops drawing it (Safari remembers no size of a record drawn while near)
+                  el.style.containIntrinsicSize = `auto ${contentHeight(el)}px`
+                  el.removeAttribute('data-near')
+                }
               }
               // Safari calls this inside the frame, after the frame's other callbacks and before its paint: the
               // records drawn now are made up for at once

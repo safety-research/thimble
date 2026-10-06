@@ -1268,6 +1268,28 @@ export interface Block {
   text: string
 }
 
+/** One key of `GET /corpora/{c}/source/keys`: its commonest values with their counts, most frequent first, how many
+ * values and records the rest hold, how many records have none, and per bin of the file's lines the rank of its most
+ * frequent value (-1 for none). */
+export interface SourceKey {
+  key: string
+  values: { value: string; n: number }[]
+  more: { values: number; n: number }
+  none: number
+  at: number[]
+}
+
+/** `GET /corpora/{c}/source/keys?path=`: the keys of a file's records that name a kind or a who, over the whole file
+ * (backend source_keys.py), and each bin's bytes. */
+export interface SourceKeys {
+  path: string
+  total: number
+  bins: number
+  partial: boolean
+  bytes: number[]
+  keys: SourceKey[]
+}
+
 export interface SourceRecord {
   line: number
   record: any

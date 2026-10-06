@@ -1574,6 +1574,352 @@
   margin-top: -1px;
   background: var(--surface-card);
 }
+/* -------- the reader's two tracks (Tracks.tsx ReaderTracks), after an editor's navigator and zoom bar: the zoomed
+   track (the stretch around what the reader shows, its colors faded past it), then at the edge the overview (the whole
+   file in the Color by colors or the file's density, the labels' markers in thin lanes at its left), each with a frame
+   as wide as the track over what the reader shows -------- */
+.tracks {
+  flex: none;
+  box-sizing: border-box;
+  display: flex;
+  gap: 6px;
+  padding: 6px;
+  background: var(--bg-sunken);
+  box-shadow: inset 1px 0 0 var(--border-hairline);
+  user-select: none;
+  touch-action: none;
+}
+.track {
+  position: relative;
+  flex: none;
+  overflow: hidden;
+  border-radius: 2px;
+  background: rgba(var(--ink-rgb), 0.04);
+}
+.track-over {
+  cursor: pointer;
+}
+.track-canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+}
+/* the frame over what the reader shows: exactly as wide as its track, an ink outline over the colors */
+.track-frame {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  box-sizing: border-box;
+  border: 1.5px solid rgba(var(--ink-rgb), 0.72);
+  border-radius: 2px;
+  background: rgba(var(--ink-rgb), 0.06);
+  pointer-events: none;
+}
+.track-frame-over {
+  pointer-events: auto;
+  cursor: grab;
+}
+.tracks[data-drag] .track-frame-over {
+  border-color: var(--text-primary);
+  cursor: grabbing;
+}
+.track-zoom {
+  cursor: pointer;
+}
+.track-zoom-faded,
+.track-zoom-shown {
+  position: absolute;
+  left: 0;
+  right: 0;
+}
+.track-zoom-faded {
+  top: 0;
+  bottom: 0;
+}
+.track-zoom-shown {
+  overflow: hidden;
+}
+/* a record on the zoomed track: a block of its height in its color, grey with no color; its labels' markers at its left */
+.track-rec {
+  position: absolute;
+  left: 0;
+  right: 0;
+  display: block;
+  border-radius: 1px;
+  background: rgba(var(--ink-rgb), 0.2);
+}
+.track-rec b {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+}
+/* the hover preview: the records at the point of the file under the pointer, beside the tracks */
+.track-preview {
+  position: fixed;
+  z-index: var(--z-popover);
+  box-sizing: border-box;
+  width: 340px;
+  max-width: calc(100vw - 80px);
+  padding: 4px;
+  border-radius: var(--radius-card);
+  pointer-events: none;
+}
+.track-preview-rec {
+  padding: 6px 8px 6px 10px;
+  border-radius: var(--radius-ui);
+  box-shadow: inset 3px 0 0 var(--c, transparent);
+}
+.track-preview-rec + .track-preview-rec {
+  border-top: 1px solid var(--border-hairline);
+}
+.track-preview-head {
+  overflow: hidden;
+  color: var(--text-tertiary);
+  font: var(--type-mono-sm);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.track-preview-line {
+  margin-right: 8px;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+.track-preview-text {
+  display: -webkit-box;
+  margin-top: 2px;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  color: var(--text-primary);
+  font: var(--type-ui-sm);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+/* -------- Color by in the Transcript mode (ColorBy.tsx): thimble's bordered button with the choice, then a key chip per
+   value (a square swatch of its color, its name, its count, in a small bordered box; the view kit's .chip-key) that
+   turns its records off and on. A record carries the color as a bar on its left edge. -------- */
+.reader-colorbar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  padding: 6px 14px;
+  border-bottom: 1px solid var(--border-hairline);
+  background: var(--surface-card);
+}
+.colorby {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+}
+.colorby-trigger.btn {
+  flex: none;
+  gap: 5px;
+  font-weight: 400;
+}
+.colorby-trigger .btn-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.colorby-trigger[aria-expanded='true'] {
+  background: var(--surface-hover);
+}
+.colorby-k {
+  color: var(--text-secondary);
+}
+.colorby-trigger b {
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+.colorby-caret {
+  color: var(--text-tertiary);
+}
+.colorby-info {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 22px;
+  height: 22px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-ui);
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+}
+.colorby-info:hover,
+.colorby-info[aria-expanded='true'] {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+.colorby-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+.colorby-chip {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  gap: 5px;
+  box-sizing: border-box;
+  height: var(--h-control);
+  margin: 0;
+  padding: 0 7px 0 6px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-chip);
+  background: transparent;
+  color: var(--text-secondary);
+  font: 400 var(--text-xs) / 1 var(--font-body);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.colorby-chip:hover {
+  border-color: rgba(var(--ink-rgb), 0.3);
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+.colorby-chip[aria-pressed='false'] {
+  border-color: transparent;
+  color: var(--text-tertiary);
+}
+.colorby-chip[aria-pressed='false']:hover {
+  border-color: var(--border-subtle);
+  background: transparent;
+}
+.colorby-chip:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 1.5px var(--accent);
+}
+.colorby-name {
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.colorby-sw {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  background: var(--c, transparent);
+  box-shadow: inset 0 0 0 1px var(--c, rgba(var(--ink-rgb), 0.45));
+}
+.colorby-chip[aria-pressed='false'] .colorby-sw {
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--c, rgba(var(--ink-rgb), 0.3));
+}
+.colorby-n {
+  flex: none;
+  color: var(--text-tertiary);
+  font: 400 var(--text-mono-sm) / 1 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+/* the menu: Off, the keys, the labels with their info buttons */
+.colorby-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.colorby-item.menu-item {
+  flex: 1 1 auto;
+  justify-content: flex-start;
+  min-width: 0;
+}
+.colorby-tick {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 14px;
+}
+.colorby-item .menu-item-note {
+  margin-left: auto;
+}
+/* a label's definition, in the menu under its row or in the popover of the info button beside Color by */
+.colorby-def {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 10px 10px;
+  font: var(--type-ui-sm);
+  color: var(--text-primary);
+}
+.colorby-def.in-menu {
+  margin: 0 4px 6px 24px;
+  border-radius: var(--radius-ui);
+  background: var(--track-bg);
+}
+.colorby-def-name {
+  font-weight: 500;
+}
+.colorby-def-text {
+  margin: 0;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+.colorby-def-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  color: var(--text-tertiary);
+}
+.colorby-def-meta .mono,
+.colorby-def-kind {
+  font: var(--type-mono-sm);
+}
+.colorby-def-spec {
+  max-height: 180px;
+  margin: 0;
+  padding: 6px 8px;
+  overflow: auto;
+  border: 1px solid var(--border-hairline);
+  border-radius: var(--radius-ui);
+  background: var(--surface-card);
+  color: var(--text-secondary);
+  font: var(--type-mono-sm);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.colorby-def-values {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.colorby-def-values li {
+  display: grid;
+  grid-template-columns: 8px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 2px 8px;
+}
+.colorby-def-value {
+  font-weight: 500;
+}
+.colorby-def-meaning {
+  grid-column: 2 / 4;
+  color: var(--text-secondary);
+}
+.colorby-def-acts {
+  display: flex;
+  justify-content: flex-end;
+}
+/* a record's Color by color: a bar on its left edge */
+.reader-record.has-cb {
+  box-shadow: inset 3px 0 0 var(--cb);
+}
 .reader-more {
   display: flex;
   justify-content: center;
