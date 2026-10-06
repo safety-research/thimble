@@ -317,6 +317,31 @@ async def test_main_s_message_to_an_orientation_stopped_with_esc_gives_the_conti
     assert orientation.read_run(CORPUS)["status"] != "refused", "the orientation's own record stays as it was"
 
 
+async def test_main_s_message_to_a_click_started_run_stopped_with_no_sign_of_who_continues_it(bridge, models,
+                                                                                              workspaces_tmp,
+                                                                                              unmeasured):
+    """Esc on the first run of an agent the plugin started brings main no task notification (live check U2 on 060-s4),
+    so its run ends stopped with no `stopped_by`, and Claude Code refused main's SendMessage. Main's message_orientation
+    then gives the continuation's Agent call as for Esc; a run the browser's Stop stopped still takes the SendMessage."""
+    agent = await _orientation()
+    subagents.run_ended(CORPUS, agent, "stopped", None, source="module")
+    assert not subagents.agent(CORPUS, agent).get("stopped_by")
+    res = await tools.call(CORPUS, "message_orientation", {"message": "And June?"})
+    assert not res.is_error and "\nCONTINUE WITH AGENT CALL " in res.text, res.text
+    inp = json.loads(res.text.split("AGENT CALL ", 1)[1].splitlines()[0])
+    assert inp["subagent_type"] == "thimble:orientation" and "MESSAGE And June?" in inp["prompt"]
+    assert not [r for r in subagents.read(CORPUS)["requests"].values() if r["kind"] == "message"]
+
+
+async def test_main_s_message_to_a_run_the_browser_s_stop_stopped_is_a_send_message(bridge, models, workspaces_tmp,
+                                                                                   unmeasured):
+    agent = await _orientation()
+    subagents.mark_stopped_by(CORPUS, agent, subagents.STOPPED_ANALYST)
+    subagents.run_ended(CORPUS, agent, "stopped", None, source="module")
+    res = await tools.call(CORPUS, "message_orientation", {"message": "And June?"})
+    assert not res.is_error and res.text.endswith(f"SEND TO {agent}\nAnd June?"), res.text
+
+
 def test_a_continuation_s_prompt_holds_the_stopped_run_s_last_text_cards_and_transcript(bridge, models, workspaces_tmp,
                                                                                       tmp_path, monkeypatch):
     from app import notebook

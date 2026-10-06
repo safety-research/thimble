@@ -421,6 +421,16 @@ def latest(c: str) -> tuple[dict[str, Any], str, str]:
     return rec, chat, agent_id
 
 
+def stopped_unnamed(c: str, agent_id: str) -> bool:
+    """Whether the orientation's latest run ended stopped with no sign of who stopped it: no stop of thimble's own (the
+    browser's Stop, plan mode, main's quit) and no task notification. Esc on the first run of an agent the plugin
+    started is such a stop, as Claude Code sends main no task notification for that run (live check U2 on 060-s4), and
+    Claude Code resumes that agent no more. So main's message_orientation continues it as it does one stopped with Esc,
+    in place of a SendMessage that Claude Code refuses."""
+    a = subagents.agent(c, agent_id) or {}
+    return a.get("status") == "stopped" and not a.get("stopped_by") and bool(a.get("plugin_started"))
+
+
 def earlier_text(sid: str) -> str:
     """The text for an orientation of an earlier Claude Code session, naming the full session id to resume."""
     return tools.hint("orient-continue-earlier-session", resume=f"thimble -r {sid}")
@@ -1170,6 +1180,8 @@ async def tool_message_orientation(ctx: Any, args: dict[str, Any]) -> Any:
             return tools.ok(tools.hint("message_orientation-started"))
         _, chat, agent_id = latest(ctx.c)
         _refuse_message(ctx.c, text)
+        if stopped_unnamed(ctx.c, agent_id):  # Esc, as far as thimble can tell: main's SendMessage would be refused
+            raise StoppedInTerminal(tools.hint("orient-continue-stopped-by-user"), chat, agent_id)
     except NoOrientation:
         return tools.err(tools.hint("message_orientation-none"))
     except StoppedInTerminal as stopped:  # Claude Code resumes it no more: a continuation in its thread (U2)
