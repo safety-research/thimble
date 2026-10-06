@@ -497,6 +497,8 @@ async def start_it(c: str, rid: str) -> Answer:
         return refusal(HOOK, "this request is not refused")
     if r.get("caller_role"):  # the critic: the module would start it as main's subagent, not its orientation's
         return refusal(HOOK, "an agent's own start (the orientation's critic) can't be started from the browser")
+    if (before := refusal_before(c)) is not None:  # as every start: main in plan mode, unfenced, or no module
+        return before
     _set(c, rid, route=CLICK, state="pending", claimed_by=None, reason=None, refused_kind=None, again=files.now())
     return await _spawn(c, rid, r)
 
@@ -1267,7 +1269,7 @@ async def start_it_route(c: str, body: RequestBody, http: Request) -> dict[str, 
     """Start it: a refused typed start, started through the module with the same request and values."""
     analyst_only(http)
     config.workspace_dir(c)
-    return dict(await start_it(c, body.request))
+    return _answered(await start_it(c, body.request))
 
 
 @router.post("/ws/{c}/subagents/again")
@@ -1275,7 +1277,12 @@ async def again_route(c: str, body: RequestBody, http: Request) -> dict[str, Any
     """Try again, Send again and Write again: the request made anew as a click."""
     analyst_only(http)
     config.workspace_dir(c)
-    return dict(await again(c, body.request))
+    return _answered(await again(c, body.request))
+
+
+def _answered(ans: Answer) -> dict[str, Any]:
+    """A click route's answer as /start and /write give it: the module's answer, with {kind, reason} when refused."""
+    return {**dict(ans), **({"kind": ans.kind, "reason": ans.reason} if ans.refused else {})}
 
 
 @router.get("/ws/{c}/subagents/requests/{rid}")

@@ -222,6 +222,22 @@ async def test_start_it_never_starts_an_agent_s_own_start_as_main_s_subagent(bri
     assert again.refused and again.kind == subagents.HOOK and not bridge.ops("spawn")
 
 
+async def test_start_it_is_refused_as_any_start_is_in_plan_mode_and_without_the_module(bridge, models, monkeypatch):
+    """Start it is a click, and like every start it is refused while main is in plan mode (U20) or the module is not
+    live, before anything reaches the module; the request stays refused, so Start it works once that changes."""
+    from app import session
+
+    ans = await subagents.start_job(CORPUS, "writer", "writer:report", "w", {"model": "m", "effort": "e"},
+                                    subagents.TYPED)
+    subagents.refuse(CORPUS, ans["request"], "[Credential Exploration]", subagents.AUTO_MODE)
+    monkeypatch.setattr(session, "main_mode", lambda c: "plan")
+    again = await subagents.start_it(CORPUS, ans["request"])
+    assert again.refused and again.kind == subagents.HOOK and not bridge.ops("spawn")
+    assert subagents.request(CORPUS, ans["request"])["state"] == "refused"
+    monkeypatch.setattr(session, "main_mode", lambda c: "default")
+    assert (await subagents.start_it(CORPUS, ans["request"])).started
+
+
 # --------------------------------------------------------------------------- follow-ups and stops
 
 
