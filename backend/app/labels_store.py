@@ -762,10 +762,22 @@ class Store:
         finally:
             conn.close()
 
-    def calibration_pairs(self) -> list[tuple[str, str]]:
-        """(classifier label, analyst label) for every ref the analyst judged that has a classifier label, its cover's
-        value for a record a cover holds."""
-        return [(str(a), str(b)) for a, b in self._q(f"SELECT {_LABEL} AS l, analyst FROM current WHERE analyst IS NOT NULL AND l IS NOT NULL")]
+    def calibration_rows(self) -> list[tuple[str, str, str, str | None]]:
+        """(ref, classifier label, analyst label, the classifier row's ts) for every ref the analyst judged that has a
+        classifier label; a record a cover holds reads its cover's value and has no ts of its own."""
+        return [(str(r), str(a), str(b), t) for r, a, b, t in
+                self._q(f"SELECT ref, {_LABEL} AS l, analyst, ts FROM current WHERE analyst IS NOT NULL AND l IS NOT NULL")]
+
+    def model_ts(self, refs: Iterable[str]) -> dict[str, str]:
+        """{ref: ts} of the classifier rows of these refs that have one."""
+        wanted = sorted({canon_ref(r) for r in refs})
+        out: dict[str, str] = {}
+        for i in range(0, len(wanted), 500):
+            part = wanted[i:i + 500]
+            out.update({str(r): str(t) for r, t in self._q(
+                f"SELECT ref, ts FROM current WHERE label IS NOT NULL AND ts IS NOT NULL AND ref IN ({','.join('?' * len(part))})",
+                tuple(part))})
+        return out
 
     def refs(self) -> set[str]:
         """The refs of the rows (the records the covers hold without a row are not listed)."""

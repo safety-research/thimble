@@ -159,7 +159,8 @@ export function formatDuration(s: number | null | undefined): string {
 
 // --------------------------------------------------------------------------- the label card's drawer
 
-/** The rows EXAMPLES shows per page, and the most verdicts a prompt apply carries as examples (concepts.EXAMPLES_MAX). */
+/** The rows EXAMPLES shows per page, and the most of the analyst's values every prompt run carries as examples
+ * (concepts.EXAMPLES_MAX). */
 export const EXAMPLES_PAGE = 5
 export const EXAMPLES_MAX = 8
 
@@ -267,11 +268,25 @@ export function scopeWord(unit: string | undefined): string {
   }
 }
 
-/** How many examples `apply with N examples` carries: the verdicts, capped at EXAMPLES_MAX. */
-export const exampleCount = (nReviewed: number | null | undefined): number => Math.min(EXAMPLES_MAX, Math.max(0, Math.floor(nReviewed ?? 0)))
+/** How many of the analyst's values a prompt run carries as examples: the values they set, capped at EXAMPLES_MAX. */
+export const exampleCount = (nMarked: number | null | undefined): number => Math.min(EXAMPLES_MAX, Math.max(0, Math.floor(nMarked ?? 0)))
 
-/** The paths a re-apply runs over: the last run's, else the whole corpus. */
-export const reapplyPaths = (last: { paths?: string[] | null } | null | undefined): string[] => (last?.paths?.length ? [...last.paths] : ['**/*'])
+/** What Re-run of a prompt label says it does with the analyst's values (every run carries them as examples,
+ * backend concepts.few_shot_examples); '' for another kind or no values. Pure. */
+export function examplesNote(kind: string | null | undefined, nMarked: number | null | undefined): string {
+  const n = exampleCount(nMarked)
+  return kind === 'prompt' && n > 0 ? `uses your ${n} ${n === 1 ? 'value' : 'values'} as examples` : ''
+}
+
+/** The label's agreement with the analyst (backend concepts.held_out): over the values they set that it was not given
+ * as examples, how often it agreed and on how many, and how many it was given; '' with no value set. Pure. */
+export function agreementLine(cal: { n: number; agreed: number; taught?: number } | null | undefined): string {
+  if (!cal) return ''
+  const taught = cal.taught ?? 0
+  const given = taught ? `, not counting the ${taught} given as examples` : ''
+  if (cal.n > 0) return `${Math.round((cal.agreed / cal.n) * 100)}% agreed on ${cal.n} ${cal.n === 1 ? 'value' : 'values'} you set${given}`
+  return taught ? `Your ${taught} ${taught === 1 ? 'value was' : 'values were'} given as examples, so none tests the label yet` : ''
+}
 
 // ---- the label card's face (canvas/bodies.tsx LabelBody): its values, glob and examples ----
 

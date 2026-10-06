@@ -976,3 +976,24 @@ def test_a_new_login_shell_finds_thimble_and_its_home(tmp_path, shell, run):
     out = subprocess.run([*run, 'command -v thimble; echo "home=$THIMBLE_HOME"'], capture_output=True, text=True,
                          env=login, stdin=subprocess.DEVNULL, timeout=60).stdout
     assert f"{home}/.local/bin/thimble" in out.splitlines() and f"home={home}/th" in out.splitlines(), out
+
+
+def test_help_lists_the_commands_an_analyst_uses_and_fix_and_revert_only_in_a_clone(tmp_path):
+    """`thimble help` lists the commands an analyst uses. server, status, launch-args and prompt still run when typed but
+    are not listed; fix and revert change thimble's own code, so only a development install (a git clone) lists them."""
+    listed = ("thimble [claude flags...]", "thimble demo", "thimble list", "thimble purge", "thimble extension",
+              "thimble cc-mod", "thimble plugin", "thimble doctor", "thimble feedback", "thimble update",
+              "thimble uninstall")
+    unlisted = ("thimble server", "thimble status", "thimble launch-args", "thimble prompt")
+    for checkout in (False, True):
+        tree = fake_tree(tmp_path / f"tree-{checkout}", checkout=checkout)
+        thimble = ["bash", str(tree / "plugin" / "bin" / "thimble")]
+        r = subprocess.run([*thimble, "help"], capture_output=True, text=True, env=env_for(tmp_path), timeout=30)
+        assert r.returncode == 0, r.stderr
+        assert all(c in r.stdout for c in listed), r.stdout
+        assert not [c for c in unlisted if c in r.stdout], r.stdout
+        assert ("thimble fix" in r.stdout and "thimble revert" in r.stdout) is checkout, r.stdout
+        for word in ("status", "server", "launch-args", "prompt"):
+            typed = subprocess.run([*thimble, word], capture_output=True, text=True, env=env_for(tmp_path),
+                                   stdin=subprocess.DEVNULL, timeout=30)
+            assert "unknown command" not in typed.stderr and typed.returncode != 2, (word, typed.stderr)

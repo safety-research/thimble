@@ -13,7 +13,8 @@
 #                                        write a problem report (a zip) to send the developer, and say how to send it
 #                                        (bash, below: it needs no server and no working supervisor)
 #   thimble doctor | fix | revert | stop | restart | up
-#                                        the supervisor's subcommands (backend/app/cli.py)
+#                                        the supervisor's subcommands (backend/app/cli.py); fix and revert only in a
+#                                        development install (a git clone), since they change thimble's own code
 #   thimble list                         the workspaces by id: each registered folder's, and its archived runs, with when
 #                                        each was last used and the sessions open on it (backend/app/runs.py)
 #   thimble purge <id>… [-y] [--dry-run] delete workspaces or archived runs by id, printing what went; never the folder a
@@ -45,7 +46,9 @@
 #                                        venv; a clone folder is left in place)
 #
 #   thimble status                       one line: the server, the orientation, the queue (`server status`)
-#   thimble help | -h | --help           thimble's usage (usage, below)
+#   thimble help | -h | --help           thimble's usage (usage, below): the commands an analyst uses; server, status,
+#                                        launch-args and prompt are left out, and fix and revert are listed only in a
+#                                        development install
 #
 # Dispatch: no arguments, or a first argument that starts with `-`, launches a session (the arguments go to `claude`);
 # a supervisor subcommand runs backend/app/cli.py with THIMBLE_CALLER_CWD set; any other word prints the usage and
@@ -69,24 +72,25 @@ plugin="$(cd "$here/.." && pwd -P)"
 # `uninstall` is the bash function below, so it works with backend/.venv missing or broken.
 SUPERVISOR_COMMANDS=" server up ensure stop restart doctor fix revert update list purge extension cc-mod launch-args prompt demo "
 
-# usage: what `thimble help` prints; the header above has the details.
+# usage: what `thimble help` prints, the commands an analyst uses; the header above has the details. `server`,
+# `status`, `launch-args` and `prompt` run when typed and are not listed (CONTRIBUTING.md has them). `fix` and `revert`
+# change thimble's own code, which only a development install can do, so they are listed there alone.
 usage() {
   cat <<'EOF'
 usage: thimble [claude flags...]          start thimble in this folder: a new Claude Code session with the
                                           thimble plugin (the cards, report and labels stay)
-       thimble -c, --continue             continue the most recent thimble session in the current directory
-       thimble -r, --resume [value]       resume a conversation by session ID, or open interactive picker with
-                                          optional search term
-       thimble status                     one line: the server, the orientation, the queue
-       thimble server up | status | stop | restart | repair
-       thimble doctor                     what is installed and running, and what is wrong
-       thimble fix                        repair a server that will not start
-       thimble revert                     undo the last change thimble's dev agent applied
+       thimble -c, --continue             continue the most recent thimble session in this folder
+       thimble -r, --resume [value]       resume a conversation by session ID, or pick one
+       thimble demo [name...] [--yes] [--dir <d>] [--attach | --no-attach]
+                                          download public datasets (collusion-wiki, mythos-5, transluce-gov,
+                                          transluce-urlquery), asking first, open each, and ask whether to
+                                          attach a session
+       thimble demo --export <workspace> <out> [--outputs-only]
+                                          write a workspace whole, with its sessions' transcripts;
+                                          --outputs-only writes the outputs alone
        thimble list                       the workspaces by id: each folder's, and its archived runs
        thimble purge <id>... [-y] [--dry-run]
                                           delete workspaces or archived runs by id, after asking
-       thimble feedback ["what went wrong"] [--no-logs]
-                                          write a problem report to send the developer
        thimble extension add <folder | git URL | name> [--yes] | on <name> | off <name> | list | remove <name>
                                           add, switch on or off, list or remove extensions
        thimble cc-mod on [--yes] | off | status
@@ -94,16 +98,27 @@ usage: thimble [claude flags...]          start thimble in this folder: a new Cl
                                           folder
        thimble plugin on | off | status   thimble in every Claude Code session (/thimble in any `claude`), or
                                           only in the sessions `thimble` starts
-       thimble demo [name...] [--yes] [--dir <d>] [--attach | --no-attach]
-                                          download public datasets (collusion-wiki, mythos-5, transluce-gov,
-                                          transluce-urlquery), asking first, open each, on a pre-cached
-                                          orientation where there is one, and ask whether to attach a session
-       thimble demo --export <workspace> <out> [--outputs-only]
-                                          write a workspace whole, with its sessions' transcripts, and list
-                                          what it holds; --outputs-only writes the outputs alone (demos/)
+       thimble doctor                     what is installed and running, and what is wrong
+       thimble feedback ["what went wrong"] [--no-logs]
+                                          write a problem report to send the developer
        thimble update [--from <zip>]      bring the install up to date
        thimble uninstall [--yes] [--keep-home]
+                                          remove thimble from this machine
 EOF
+  dev_install || return 0
+  cat <<'EOF'
+
+in a development install (a git clone of thimble):
+       thimble fix                        repair a server that will not start, with thimble's dev agent
+       thimble revert                     undo the last change thimble's dev agent applied
+EOF
+}
+
+# dev_install: true when this copy's tree (bin/thimble-app-dir) is a development install, a git clone of thimble
+dev_install() {
+  local repo
+  repo="$("$here/thimble-app-dir" 2>/dev/null)" || return 1
+  [ -e "$repo/.git" ]
 }
 
 # rendered_prompts NAME… [--cwd P]: `prompt` in a session thimble started in a work folder of its own. The server has

@@ -299,16 +299,14 @@ export const api = {
   /** `POST …/cells/{id}/fixes/{fix}/undo`: restore the card from before a check's fix (backend checkstore.undo_fix); the
      * fix is marked undone and is not applied again. */
   undoCardFix: (c: string, id: string, fix: string) => j<Cell>(`${ws(c)}/cells/${enc(id)}/fixes/${enc(fix)}/undo`, { method: 'POST' }),
-  /** `POST …/cells/{id}/check`: run the card's check again (the click on its check mark); 409 for a card that gets none. */
+  /** `POST …/cells/{id}/check`: run the card's check again (Check again in its details or its ✕); 409 for a card that gets none. */
   checkCardAgain: (c: string, id: string) => j<{ card: string; check: string }>(`${ws(c)}/cells/${enc(id)}/check`, { method: 'POST' }),
-  /** `POST …/cells/{id}/check/stop`: stop the card's check (the click on a running mark); the card stays as it is. */
+  /** `POST …/cells/{id}/check/stop`: stop the card's check (Stop in its details); the card stays as it is. */
   stopCardCheck: (c: string, id: string) => j<{ card: string; stopped: boolean }>(`${ws(c)}/cells/${enc(id)}/check/stop`, { method: 'POST' }),
   /** `GET /card-checks`: whether the automatic check is on, and the checks running now with their phase. */
   cardChecks: (c: string) => j<CardCheckStatus>(`${ws(c)}/card-checks`),
   /** `POST /card-checks/stop`: stop every card check of the workspace. */
   stopCardChecks: (c: string) => j<{ stopped: string[] }>(`${ws(c)}/card-checks/stop`, { method: 'POST' }),
-  /** `PUT /card-checks/auto`: the automatic check on or off; off stops the checks that run. */
-  setCardCheckAuto: (c: string, on: boolean) => j<CardCheckStatus>(`${ws(c)}/card-checks/auto`, { method: 'PUT', body: JSON.stringify({ on }) }),
   /** `POST /notebooks/{nb}/run`: a runnable card made and run in one call; `created_by` defaults to the analyst. */
   runCode: (c: string, nb: string, body: { code: string; title: string; created_by?: string; kind?: 'code' | 'plot' | 'table' }) =>
     j<Cell>(`${ws(c)}/notebooks/${enc(nb)}/run`, { method: 'POST', body: JSON.stringify({ created_by: 'user', ...body }) }),
@@ -547,7 +545,7 @@ export const labelApi = {
   /** `POST /concepts/{id}/labels`: the analyst's verdict on one unit. */
   verdict: (c: string, id: string, ref: string, label: string, note?: string) =>
     j<VerdictResult>(`${ws(c)}/concepts/${enc(id)}/labels`, { method: 'POST', body: JSON.stringify({ ref, label, note }) }),
-  /** `POST /concepts/{id}/apply`: start a run (202 with the run record); `examples` carries the verdicts as few-shot examples. */
+  /** `POST /concepts/{id}/apply`: start a run (202 with the run record); a prompt label's carries the analyst's values as examples. */
   apply: (c: string, id: string, body: ApplyBody) => j<ConceptRun>(`${ws(c)}/concepts/${enc(id)}/apply`, { method: 'POST', body: JSON.stringify(body) }),
 }
 

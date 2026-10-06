@@ -85,6 +85,15 @@ STOP_WAIT_S = 6.0
 HEALTH_TIMEOUT_S = 1.0
 LOG_TAIL = 15
 FIX_INSTRUCTION = "File a `file_dev_ticket` titled 'fix: …' describing what broke; the dev agent runs it as a ticket."
+# `thimble fix` and `thimble revert` change thimble's own code, which only a development install (a git clone of thimble)
+# can do: a release install has no dev agent to repair it and no applied change to take back (dev.RELEASE_LINE)
+DEV_ONLY_LINES = {
+    "fix": ("thimble fix changes thimble's own code, which only a development install (a git clone of thimble) can do, "
+            "and this is a release install. `thimble doctor` says what is wrong, and `thimble feedback` writes a problem "
+            "report to send the developer."),
+    "revert": ("thimble revert takes back a change thimble's dev agent made to thimble's own code, which happens only in a "
+               "development install (a git clone of thimble). This is a release install, so there is nothing to revert."),
+}
 FINGERPRINT_GLOBS = ("backend/app/**/*.py", "prompts/**/*", "plugin/bin/*", "plugin/.mcp.json")
 NO_AUTORESTART_ENV = "THIMBLE_NO_AUTORESTART"
 SOURCE_CHANGED = "source changed"  # restart.json's title; dev.PLAIN_REASONS
@@ -2234,7 +2243,9 @@ def extensions_line() -> str:
 
 def doctor_text(commands: bool = True) -> str:
     """What `thimble doctor` prints. Without `commands` its lines name no command that installs anything, for a model
-    to read (`thimble fix`, `/thimble fix`)."""
+    to read (`thimble fix`, `/thimble fix`). The lines only a developer of thimble reads (turn endings, source changed
+    since start, the validation stack, the last apply, the dev tickets and their last error) are printed only in a
+    development install."""
     st = read_state()
     env = resolve_env()
     p = int(st.get("port") or port())
@@ -2244,7 +2255,9 @@ def doctor_text(commands: bool = True) -> str:
     lines = ["thimble doctor"]
     lines.append(f"  versions: {_checked(versions_line)}")
     lines.append(f"  claude code: {_checked(claude_code_line, commands)}")
-    lines.append(f"  turn endings: {_checked(_turn_endings_line)}")
+    dev = is_git_checkout()  # a development install, the only one whose doctor prints the developer's lines
+    if dev:
+        lines.append(f"  turn endings: {_checked(_turn_endings_line)}")
     lines.append(f"  node: {_checked(node_line, commands)}")
     lines.append(f"  python: {_checked(python_line)}")
     lines.append(f"  port: {_checked(port_line, p, up)}")
@@ -2258,14 +2271,15 @@ def doctor_text(commands: bool = True) -> str:
         lines.append(f"  ui: {url} (the built UI at {config.FRONTEND_DIST}); dev mode off")
     else:
         lines.append(f"  ui: {config.NO_UI_BUILD_HINT}; dev mode off")
-    if is_git_checkout():
+    if dev:
         dirty = _git("status", "--porcelain")
         lines.append(f"  repo: {config.REPO_ROOT} (branch {git_branch()} @ {_git('rev-parse', '--short', 'HEAD') or '?'}, "
                      f"{len(dirty.splitlines())} uncommitted paths)")
     else:
         rel = release_line()
         lines.append(f"  repo: {config.REPO_ROOT} (not a git checkout{'; ' + rel if rel else ''})")
-    lines.append(f"  source changed since start: {source_changed_text(st, up)}")
+    if dev:
+        lines.append(f"  source changed since start: {source_changed_text(st, up)}")
     lines.append(f"  home: {home()} ({'THIMBLE_HOME' if os.environ.get('THIMBLE_HOME') else 'default'}); "
                  f"server.json {'present' if server_json().is_file() else 'absent'}")
     recorded = (st.get("env") or {}).get("data_dir")
@@ -2286,16 +2300,17 @@ def doctor_text(commands: bool = True) -> str:
     lines.append(f"  views and screenshots: {_checked(pages_line, commands)}")
     lines += sandbox_lines(commands)
     lines.append(f"  extensions: {_checked(extensions_line)}")
-    lines.append("  validation stack: "
-                 + ", ".join(f"{q} {'busy' if listening(q) else 'free'}" for q in validation_ports())
-                 + f"; env from server.json: {'yes' if st.get('env') else 'no (defaults)'}")
-    la = _last_jsonl(dev_dir() / "applies.jsonl")
-    # the last line of applies.jsonl is an apply or a revert (a rollback by the restart watch among them)
-    lines.append("  last apply: " + (f"{la.get('ts')} {la.get('kind') or 'apply'} {la.get('title')!r} "
-                                     f"{str(la.get('commit') or '')[:7]}{' (' + str(la['why']) + ')' if la.get('why') else ''}"
-                                     if la else "none"))
-    lines.append(f"  dev tickets: {tickets_line()}")
-    lines.append(f"  last ticket error: {_last_ticket_error()}")
+    if dev:
+        lines.append("  validation stack: "
+                     + ", ".join(f"{q} {'busy' if listening(q) else 'free'}" for q in validation_ports())
+                     + f"; env from server.json: {'yes' if st.get('env') else 'no (defaults)'}")
+        la = _last_jsonl(dev_dir() / "applies.jsonl")
+        # the last line of applies.jsonl is an apply or a revert (a rollback by the restart watch among them)
+        lines.append("  last apply: " + (f"{la.get('ts')} {la.get('kind') or 'apply'} {la.get('title')!r} "
+                                         f"{str(la.get('commit') or '')[:7]}{' (' + str(la['why']) + ')' if la.get('why') else ''}"
+                                         if la else "none"))
+        lines.append(f"  dev tickets: {tickets_line()}")
+        lines.append(f"  last ticket error: {_last_ticket_error()}")
     # the log's lines come last, so a problem report sent without the logs cuts them all (feedback.DOCTOR_LOG_MARK)
     lines.append(f"  log tail ({log_path()}):")
     recent = _log_lines(LOG_SCAN_BYTES)
@@ -2629,6 +2644,9 @@ def cmd_ensure(args: argparse.Namespace) -> int:
 def _action(args: argparse.Namespace, up: bool, url: str) -> int:
     a = args.action
     if a in ("fix", "repair"):
+        if not is_git_checkout():
+            print(DEV_ONLY_LINES["fix"])
+            return 0
         if up:
             print(doctor_text(commands=False))
             print(FIX_INSTRUCTION)
@@ -2703,6 +2721,9 @@ def cmd_doctor(_: argparse.Namespace) -> int:
 
 
 def cmd_fix(_: argparse.Namespace) -> int:
+    if not is_git_checkout():
+        print(DEV_ONLY_LINES["fix"])
+        return 1
     if healthy():
         print(doctor_text())
         print(FIX_INSTRUCTION)
@@ -2719,7 +2740,10 @@ def cmd_fix(_: argparse.Namespace) -> int:
 
 def cmd_revert(_: argparse.Namespace) -> int:
     """`thimble revert`. With the server down the revert happens in the checkout, and the server is started only when
-    a change was taken back, since that change may be what kept it from starting."""
+    a change was taken back, since that change may be what kept it from starting. Only in a development install."""
+    if not is_git_checkout():
+        print(DEV_ONLY_LINES["revert"])
+        return 1
     res = revert()
     for ln in revert_lines(res):
         print(ln)
@@ -3166,8 +3190,9 @@ def build_parser() -> argparse.ArgumentParser:
     add_yes_flag(sp, "stop")
     sp.set_defaults(fn=cmd_stop)
     for name, fn, help_ in (("doctor", cmd_doctor, "print the state; works with the server down"),
-                            ("fix", cmd_fix, "server down: run the fix ticket in the live checkout, then restart"),
-                            ("revert", cmd_revert, "undo the last change thimble's dev agent applied")):
+                            ("fix", cmd_fix, "development install, server down: run the fix ticket in the live checkout, "
+                                                    "then restart"),
+                            ("revert", cmd_revert, "development install: undo the last change thimble's dev agent applied")):
         sub.add_parser(name, help=help_).set_defaults(fn=fn)
     fb = sub.add_parser("feedback", help="write a problem report (a zip) to send the developer, and say how to send it")
     fb.add_argument("description", nargs="*", help="what went wrong")

@@ -232,3 +232,34 @@ def test_the_kernel_runs_in_srt_where_it_works_else_in_bubblewrap_on_linux_else_
     monkeypatch.setattr(cc_settings, "_sandbox", {})
     monkeypatch.setattr(cc_settings.Path, "exists", lambda p: str(p) == "/usr/bin/sandbox-exec")
     assert cc_settings.sandbox_ok() and userconf.session(None, "writer").sandboxed
+
+
+def test_whether_new_cards_are_checked_by_themselves_is_the_card_check_s_config(workspaces_tmp):
+    """`agents.cardCheck.auto` turns the automatic card check on or off, the workspace's file over thimble's home; unset,
+    the setting the canvas's old switch stored stands, else the check is on. Only the card check takes the key, and the
+    canvas has no switch for it any more."""
+    from app import card_check  # noqa: PLC0415
+
+    assert card_check.auto(CORPUS) is True
+    _write(userconf.global_file(), {"agents": {"cardCheck": {"auto": False}}})
+    assert card_check.auto(CORPUS) is False
+    _write(userconf.workspace_file(CORPUS), {"agents": {"cardCheck": {"auto": True}}})
+    assert card_check.auto(CORPUS) is True
+    _write(userconf.global_file(), {})
+    _write(userconf.workspace_file(CORPUS), {})
+    ledger.put_settings(CORPUS, {card_check.AUTO_KEY: False})
+    assert card_check.auto(CORPUS) is False, "a workspace whose check the old switch turned off stays off"
+    _write(userconf.workspace_file(CORPUS), {"agents": {"cardCheck": {"auto": True}}})
+    assert card_check.auto(CORPUS) is True, "the config wins over the old switch"
+    _write(userconf.global_file(), {"agents": {"cardCheck": {"auto": "yes"}, "labels": {"auto": True}}})
+    problem = userconf.problem()
+    assert 'agents.cardCheck.auto is "yes"; it takes true, false or null' in problem
+    assert "agents.labels.auto is not a setting" in problem
+    from fastapi.testclient import TestClient  # noqa: PLC0415
+
+    from app.main import app  # noqa: PLC0415
+
+    _write(userconf.global_file(), {})
+    with TestClient(app, base_url="http://127.0.0.1") as client:
+        assert client.put(f"/api/ws/{CORPUS}/card-checks/auto", json={"on": False}).status_code in (404, 405)
+        assert client.get(f"/api/ws/{CORPUS}/card-checks").json()["auto"] is True

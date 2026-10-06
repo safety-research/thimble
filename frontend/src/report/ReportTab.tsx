@@ -198,7 +198,7 @@ export function ReportTab({ ws, active }: { ws: string; active: boolean }) {
         const e = ev as { slug?: unknown; status?: unknown; client?: unknown }
         const evSlug = typeof e.slug === 'string' ? e.slug : ''
         if (!evSlug) return
-        // a failure's toast and its mark on the document come from writeFailures.ts
+        // a failure's mark on the document and its card come from writeFailures.ts
         if (e.status === 'generating') setGenerating((g) => ({ ...g, [evSlug]: true }))
         else if (e.status === 'generated' || e.status === 'failed') setGenerating((g) => ({ ...g, [evSlug]: false }))
         if (e.status === 'deleted' || e.status === 'created' || e.status === 'renamed') {

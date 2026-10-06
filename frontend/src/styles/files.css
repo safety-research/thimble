@@ -1064,6 +1064,12 @@
   padding: 10px 12px;
   border-top: 1px solid var(--border-hairline);
 }
+/* what Re-run of a prompt label does with the analyst's values, at the foot's left */
+.label-card-note {
+  margin-right: auto;
+  color: var(--text-secondary);
+  font: var(--type-body-sm);
+}
 
 /* the edit card in a popover on a card (LabelCard LabelSheet): the card's head, the same fields, and each class's
    count before its switch */

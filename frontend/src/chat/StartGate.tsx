@@ -13,10 +13,10 @@ import { TextArea } from '../components/Field'
 import { Icon } from '../components/Icon'
 import { Switch } from '../components/Switch'
 import { api } from '../lib/api'
-import { bus } from '../lib/bus'
 import { loadSettings, modelChoices, onSettingsChange } from '../lib/models'
 import { track } from '../lib/telemetry'
 import type { MainEffort, ModeAgent, OrientPass, OrientPermissions, Settings, StartBody } from '../lib/types'
+import { toastText } from '../shell/Toasts'
 import { EFFORT_CHOICES, ModelLine, ORIENT_DEFAULT_EFFORT } from './ModelLine'
 
 export const PASSES: { id: OrientPass; label: string }[] = [
@@ -171,9 +171,8 @@ export function StartGate({ ws, model, onModel, defaultEffort = ORIENT_DEFAULT_E
       await api.start(ws, startBody(on, text, effort))
       onStarted?.()
     } catch (e) {
-      const msg = (e as Error).message
-      setError(msg)
-      bus.emit('toast', { text: `Could not start. ${msg}`, kind: 'error' })
+      // the refusal stays beside Start until the next try; it is not also a toast (shell/Toasts)
+      setError(toastText((e as Error).message))
     } finally {
       setBusy(false)
     }

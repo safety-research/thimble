@@ -18,6 +18,7 @@ import { loadSettings, modelChoices, modelLabel } from '../lib/models'
 import { track } from '../lib/telemetry'
 import { hhmm } from '../lib/time'
 import type { Concept, ConceptKind, ConceptPatch, ConceptRun, LabelClass, LabelDraft, LabelMarks } from '../lib/types'
+import { examplesNote } from '../canvas/details'
 import { classesOf, colourVar, draftClasses, freeColour, isFilesLabel, isMultiClass, LABEL_COLOURS, MULTI_COLOUR, labelStatus, marksOf, nextColour, overOf, ownColour, progressText, unitOfOver, unitWord, usedColours, type LabelOver } from './labels'
 import { useFilesLabels, type FilesLabels } from './useLabels'
 
@@ -232,6 +233,7 @@ export function LabelCard({ ws, label, labels, appliesTo, draft: drafted = null,
       </div>
       <LabelFields ws={ws} label={label} labels={labels} draft={draft} classes={classes} set={set} />
       <div className="label-card-foot">
+        {!isNew && examplesNote(draft.kind, label?.n_marked) && <span className="label-card-note">{examplesNote(draft.kind, label?.n_marked)}</span>}
         <Button onClick={onClose}>Cancel</Button>
         <Button variant="primary" busy={saving} onClick={() => void run()}>
           {isNew ? 'Run' : 'Re-run'}
@@ -486,6 +488,7 @@ export function LabelSheet({ ws, label, draft, onDraft, onClose, onOpen, onRevie
       <div className="label-card-foot">
         {draft ? (
           <>
+            {examplesNote(draft.kind, k.n_marked) && <span className="label-card-note">{examplesNote(draft.kind, k.n_marked)}</span>}
             <Button onClick={() => onDraft(null)}>Discard</Button>
             <Button variant="primary" busy={saving} onClick={() => void rerun()}>
               Re-run

@@ -1,11 +1,12 @@
 """The card check: once a card has its takeaway, it is drawn offscreen, one model reading of the picture assesses it
 against five criteria (prompts/card-check.md) and gives the card that replaces it, and the replacement is applied in
-place, with Undo. Nothing of the check goes back to the card's author. Label cards are drawn from their label and get
-no reading.
+place, with Undo in the card's details. The card shows the check only for a real problem: a red ✕ for numbers its code
+types in, or for a replacement that would not run. Nothing of the check goes back to the card's author. Label cards
+are drawn from their label and get no reading.
 
 tools.call hands every thimble tool result to after_tool(); an add_card or edit_card result starts a check of its card
-when wants_check() holds and the workspace's automatic check is on (settings.json `card_check`). A new change to the
-card cancels a running check and starts the next. At most READ_CONCURRENCY readings run at once. Each check:
+when wants_check() holds and the workspace's automatic check is on (auto: thimble's config `agents.cardCheck.auto`). A
+new change to the card cancels a running check and starts the next. At most READ_CONCURRENCY readings run at once. Each check:
 1. Draw: render.render_card shoots the card with the app's own card face; a card that did not draw ends the check
    `error`. Where no card can be drawn (render.down), no check begins, and one that began is taken off the card.
 2. Critique: the `verify` role's model reads the question, takeaway, resolved links, code, the work that led to the
@@ -35,7 +36,6 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
 
 from . import config, render, retry
 
@@ -58,11 +58,10 @@ READ_CONCURRENCY = max(1, int(os.environ.get("THIMBLE_CARD_CHECK_CONCURRENCY", "
 CAPACITY_WAITS_S = (30.0, 60.0, 120.0)
 CAPACITY = ("overloaded", "rate_limited")  # the classes of retry.transient_class that mean the API is at capacity
 CAPACITY_WORDS = {"overloaded": "Anthropic's API is overloaded", "rate_limited": "Anthropic's API rate limit was reached"}
-AUTO_KEY = "card_check"  # settings.json: false turns the automatic check off for the workspace
+AUTO_KEY = "card_check"  # settings.json: the canvas's old switch, read while thimble's config leaves `auto` unset
 TIMINGS_FILE = "timings.jsonl"  # under SHOTS_DIR: one line per finished check
-# the reasons a check ends `stopped`, which the check mark's hover shows
+# the reasons a check ends `stopped`, which the card's details show
 STOPPED = ""  # the analyst stopped it: the hover says only when
-AUTO_OFF = "the automatic card check was turned off"
 CHANGED = "the card changed while it was checked"
 SERVER_STOPPED = "the server stopped while the check ran"
 SESSION_ENDED = "thimble stopped when its Claude Code session ended"  # a check stop_workspace ended
@@ -91,10 +90,16 @@ def enabled() -> bool:
 
 
 def auto(c: str) -> bool:
-    """Whether a card add_card or edit_card wrote is checked by itself in workspace `c`: settings.json `card_check`,
-    on unless the analyst turned it off (auto_route)."""
-    from . import ledger  # noqa: PLC0415
+    """Whether a card add_card or edit_card wrote is checked by itself in workspace `c`: thimble's config
+    `agents.cardCheck.auto` (docs/config.md), the workspace's file over the one in thimble's home. While neither sets
+    it, the workspace's settings.json `card_check` that the canvas's old switch wrote, else on. A config with an error
+    leaves the check on, as a fresh workspace has it."""
+    from . import ledger, userconf  # noqa: PLC0415
 
+    conf, _err = userconf.load_or_defaults(c)
+    set_ = ((conf.get("agents") or {}).get("cardCheck") or {}).get("auto")
+    if isinstance(set_, bool):
+        return set_
     try:
         return ledger.stored_settings(c).get(AUTO_KEY) is not False
     except Exception:  # noqa: BLE001 — an unreadable settings file leaves the check on, as a fresh workspace has it
@@ -554,7 +559,7 @@ def merge_edit(field: str, before: str, after: str, new: str) -> str | None:
 # --------------------------------------------------------------------------- numbers typed into the code
 
 # A card whose code types in the numbers it shows shows numbers nothing on the card computes, so no rerun can catch one
-# that is wrong. The check flags them on its record (the render stage's `typed`), and the card's check mark shows it.
+# that is wrong. The check flags them on its record (the render stage's `typed`), and the card shows a red ✕ for it.
 # How many numbers one list, tuple, set or dict of the code must hold, and how many of them the card must show, for its
 # numbers to count as typed in rather than as settings of the code.
 TYPED_MIN = 3
@@ -1165,7 +1170,7 @@ def _kept_text(c: str, cell: dict[str, Any], secs: dict[str, str]) -> str:
 
 
 def _read_failure(status: str, detail: str) -> str:
-    """Why a reading failed, in the words the check mark's hover shows."""
+    """Why a reading failed, in the words the card's details show."""
     lead = {"refused": "the model declined to read the card", "truncated": "the model's reading was cut off",
             "no_tool_call": "the model gave no assessment", "timeout": "the model stopped answering"}.get(
         status, "the model's reading failed")
@@ -1193,25 +1198,9 @@ async def status_route(c: str) -> dict[str, Any]:
             "timings": [t for t in _timings if not t.get("ws") or t.get("ws") == c]}
 
 
-class AutoBody(BaseModel):
-    on: bool
-
-
-@router.put("/ws/{c}/card-checks/auto")
-async def auto_route(c: str, body: AutoBody) -> dict[str, Any]:
-    """The canvas's switch: the automatic check on or off for the workspace (settings.json `card_check`). Off stops the
-    checks that run (stop_all); a card's mark still runs its check on a click. Answers status_route's record."""
-    from . import ledger  # noqa: PLC0415
-
-    ledger.put_settings(c, {AUTO_KEY: body.on})
-    if not body.on:
-        stop_all(c, AUTO_OFF)
-    return await status_route(c)
-
-
 @router.post("/ws/{c}/cells/{cid}/check/stop")
 async def stop_route(c: str, cid: str) -> dict[str, Any]:
-    """Stop the card's check (the click on a running mark): its record ends `stopped` and the card stays as it is. 404
+    """Stop the card's check (Stop in the card's details): its record ends `stopped` and the card stays as it is. 404
     for a card that is gone; `stopped` false when the card had no check running."""
     from . import notebook  # noqa: PLC0415
 
@@ -1228,8 +1217,9 @@ async def stop_all_route(c: str) -> dict[str, Any]:
 
 @router.post("/ws/{c}/cells/{cid}/check")
 async def again_route(c: str, cid: str) -> dict[str, Any]:
-    """Run the card's check again, from the click on its check mark, with the work of the author the last check named as its
-    context, else main's. 409 when the card gets no check (wants_check) or the check is off."""
+    """Run the card's check again, from Check again in the card's details or the hover of its ✕, with the work of the
+    author the last check named as its context, else main's. 409 when the card gets no check (wants_check) or the
+    check is off."""
     from . import checkstore, notebook  # noqa: PLC0415
 
     cell = notebook.get_cell(c, cid)
