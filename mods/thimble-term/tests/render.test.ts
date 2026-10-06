@@ -162,6 +162,28 @@ test("a reply's citation is a link; a click opens the panel on its place with th
   await pane.unmount()
 })
 
+test('a click on plain words opens nothing; a right-click on a sentence offers "ask about it", which asks about its words', async ($, on) => {
+  const w = world(on)
+  await start($, w)
+  const ui = (await $.ui.mount(MESSAGE('m5', 'Most saves came in June. The README says [4,579](README.md#L3) pages.'))) as unknown as M
+  await ui.pointer({ type: 'down', x: 2, y: 0, button: 'left', in: 'para-1' } as never)
+  await ui.pointer({ type: 'up', x: 2, y: 0, button: 'left', in: 'para-1' } as never)
+  expect(w.opened).toEqual([])
+  await ui.pointer({ type: 'down', x: 2, y: 0, button: 'right', in: 'para-1' } as never)
+  await ui.pointer({ type: 'up', x: 2, y: 0, button: 'right', in: 'para-1' } as never)
+  await ui.unmount()
+  expect(w.opened).toEqual(['thimble-term'])
+  const pane = (await $.ui.mount(PANE)) as unknown as M
+  expect(shown(await pane.drawn())).toContain('"Most saves came in June."')
+  await pane.press({ key: 'menu-thread' })
+  await w.clock.settle()
+  await pane.redraw()
+  await pane.input({ key: 'ask-new', text: 'Which day?' })
+  await w.clock.settle()
+  expect(w.acts).toContainEqual({ kind: 'thread', payload: { anchor: null, message: 'Which day?', anchor_text: 'Most saves came in June.' } })
+  await pane.unmount()
+})
+
 test('the rows above the prompt: what the workspace holds, the agents at work, threads with news', async ($, on) => {
   const w = world(on)
   await start($, w)

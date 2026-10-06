@@ -82,7 +82,8 @@ export async function openFile(cx: Ctx, path: string, start = 1): Promise<void> 
   await openPanel(cx, { view: 'file', title: path.split('/').at(-1) ?? path, path, start })
 }
 
-/** What a click on a target opens: a citation's or a record's place, a card whole; a right-click, the menu. */
+/** What a click on a target opens: a citation's or a record's place, a card whole; plain words open nothing (only
+ *  what is drawn as a link opens a panel). A right-click opens the menu. */
 export async function onGesture(cx: Ctx, gesture: 'primary' | 'menu', t: Target): Promise<void> {
   if (gesture === 'menu') {
     await cx.setMenu(t)
@@ -92,7 +93,6 @@ export async function onGesture(cx: Ctx, gesture: 'primary' | 'menu', t: Target)
   const place = placeOf(t)
   if (place) return openCite(cx, place.ref, place.display)
   if (t.cardId) return openCard(cx, t.cardId)
-  if (t.kind === 'sentence' && t.text) return openAsk(cx, t)
 }
 
 async function menuAct(cx: Ctx, what: string, t: Target): Promise<void> {
