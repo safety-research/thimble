@@ -1,16 +1,16 @@
 // A view picked in the views bar: the corpus's view drawing its files in its sandboxed frame (ViewerFrame) at the place a
-// ref names, with Raw one click away when it reads one file. Under the name, one quiet line of thimble's notes on the
-// view (ViewChrome ViewHeadLine): the files it reads (a click lists them, and a file picked opens in Raw), what it leaves
-// out, which opens the list of it under the head, and what it derived. The view draws its own label controls, and
-// thimble draws none in the head. A view that fails says so with Raw beside it. While a Files label filter is set, the
-// head shows it as a chip that clears it, with how many records the filter hides in the view. At the head's right end,
-// for a view of one file, Open in (the other views that claim the file shown, and the File browser) and the mode switch,
-// then the mark of the review of the view's pictures (ReviewMark).
+// ref names. Under the name, one quiet line of thimble's notes on the view (ViewChrome ViewHeadLine): the files it reads
+// (a click lists them, and a file picked opens in the File browser), what it leaves out, which opens the list of it
+// under the head, and what it derived. The view draws its own label controls, and thimble draws none in the head. A view
+// that fails says so, with Raw beside it when it reads a file, which opens that file in the File browser. While a Files
+// label filter is set, the head shows it as a chip that clears it, with how many records the filter hides in the view.
+// At the head's right end, the mark of the review of the view's pictures (ReviewMark). The head offers no other view and
+// no Raw: a file's own modes (Transcript, Table, Raw, its viewers) are the File browser's.
 // The pane keeps the version of the view it opened (usePinnedView): a newer one, from a change, the review or the
 // orientation, never reloads under the analyst. The head says Updated with Reload, which loads it where they were: the
 // element they picked, the scroll positions, the fields and the label filter. Undo in the review's mark loads at once.
 import { useEffect, useMemo, useState } from 'react'
-import { Button, Segmented } from '../components/Button'
+import { Button } from '../components/Button'
 import { CheckMark } from '../components/CheckMark'
 import { api } from '../lib/api'
 import { bus } from '../lib/bus'
@@ -19,11 +19,7 @@ import { refPath } from '../lib/refs'
 import { track } from '../lib/telemetry'
 import { hhmm } from '../lib/time'
 import type { ViewQuery, ViewReview } from '../lib/types'
-import type { SourceKind } from '../lib/types'
-import { OpenIn } from './OpenIn'
-import { inferKind } from './params'
-import { Reader, ViewFailed } from './Reader'
-import { kindIn, useFolderStore } from './Tree'
+import { ViewFailed } from './Reader'
 import { useFilesFilter, type FilesLabels } from './useLabels'
 import { ResidueList, useResidueOpen, useShownLabels, useViewNotes, ViewFilter, ViewHeadLine } from './ViewChrome'
 import { ViewerFrame, type ViewLabelActions, type ViewQuote } from './ViewerFrame'
@@ -33,12 +29,10 @@ import type { BuiltView } from './ViewsBar'
 interface Props {
   ws: string
   view: BuiltView
-  /** the file Raw shows: the one a ref named, else the first the view claims */
+  /** the file the view opens at: the one a ref named, else the first the view claims */
   path: string | null
   /** the analyst opened the view on `path` (Open in), rather than thimble on its first file */
   picked?: boolean
-  /** the file's kind, from the folder listing */
-  kind: SourceKind
   targetRef?: string
   /** a passage inside the record `targetRef` names, which the view's page highlights */
   quote?: ViewQuote
@@ -56,11 +50,7 @@ interface Props {
   onClearQuery?: () => void
 }
 
-export function ViewPane({ ws, view, path, picked, kind, targetRef, quote, onQuoteMissing, labels, onMode, first, onEditLabel, query, onClearQuery }: Props) {
-  const [mode, setMode] = useState<'view' | 'raw'>('view')
-  // a file or line picked in the head, which Raw shows in place of `path`
-  const [rawAt, setRawAt] = useState<{ path: string; ref?: string } | null>(null)
-  const folders = useFolderStore(ws)
+export function ViewPane({ ws, view, path, picked, targetRef, quote, onQuoteMissing, labels, onMode, first, onEditLabel, query, onClearQuery }: Props) {
   const [failure, setFailure] = useState<string | null>(null)
   const filter = useFilesFilter(ws)
   const filterLabel = filter ? labels.byId.get(filter.concept) : undefined
@@ -81,11 +71,7 @@ export function ViewPane({ ws, view, path, picked, kind, targetRef, quote, onQuo
   )
   // how many records the label filter hides in the view, null while there is no filter or no exact count yet
   const [hidden, setHidden] = useState<number | null>(null)
-  useEffect(() => {
-    setMode('view')
-    setFailure(null)
-    setRawAt(null)
-  }, [view.slug, targetRef])
+  useEffect(() => setFailure(null), [view.slug, targetRef])
   useEffect(() => setHidden(null), [view.slug, pin.pinned])
   const reload = () => {
     track('view-open', { target: `view:${view.slug}`, detail: { from: 'view-pane', to: 'reload' } })
@@ -93,75 +79,32 @@ export function ViewPane({ ws, view, path, picked, kind, targetRef, quote, onQuo
     void pin.reload()
   }
   useEffect(() => {
-    if (mode === 'view') onMode?.(view.name)
-  }, [mode, view.name, onMode])
-  const pick = (m: 'view' | 'raw') => {
-    track('view-open', { target: `view:${view.slug}`, detail: { from: 'view-pane', to: m } })
-    setMode(m)
+    onMode?.(view.name)
+  }, [view.name, onMode])
+  // a file or a record picked in the head opens in the File browser, where the file's own modes are
+  const openFile = (ref: string) => {
+    track('view-open', { target: `view:${view.slug}`, detail: { from: 'view-pane', to: 'file' } })
+    bus.emit('openRef', { ref, browser: true })
   }
-  const showRaw = (at: { path: string; ref?: string }) => {
-    setRawAt(at)
-    pick('raw')
-  }
-  const rawPath = rawAt?.path ?? path
-  // a view over many files offers neither Raw nor Open in, which are for one file; a file picked in its head still
-  // shows in Raw, with the switch back
-  const oneFile = (view.n_files ?? 0) <= 1
-  const rawKind = rawAt ? (kindIn(folders.store, rawAt.path) ?? inferKind(rawAt.path)) : kind
   const notes = useViewNotes(ws, view.slug, pin.pinned || undefined)
   const shownLabels = useShownLabels(labels, view.claims)
   const [residueOpen, toggleResidue] = useResidueOpen(ws, view.slug)
   const files = view.files ?? (view.first_file ? [view.first_file] : [])
-  const pickRef = (ref: string) => {
-    const p = refPath(ref) ?? ref
-    showRaw(p === ref ? { path: p } : { path: p, ref })
-  }
   return (
     <div className="view-pane">
       <div className="view-pane-head">
         <div className="view-pane-title">
           <span className="view-pane-name">{view.name}</span>
-          <ViewHeadLine
-            ws={ws}
-            name={view.name}
-            notes={notes}
-            shownLabels={shownLabels}
-            residueOpen={residueOpen}
-            onResidue={toggleResidue}
-            files={{ list: files, n: view.n_files ?? files.length, current: mode === 'raw' ? rawPath : null, onPick: (f) => showRaw({ path: f }) }}
-            after={mode === 'raw' && rawPath && (view.n_files ?? 0) > 1 ? <span className="view-pane-file mono">{rawPath}</span> : undefined}
-            libs={view.libs}
-          />
+          <ViewHeadLine ws={ws} name={view.name} notes={notes} shownLabels={shownLabels} residueOpen={residueOpen} onResidue={toggleResidue} files={{ list: files, n: view.n_files ?? files.length, onPick: openFile }} libs={view.libs} />
         </div>
-        {pin.stale && mode === 'view' && <ViewUpdated onReload={reload} className="view-pane-updated" />}
-        {filter && filterLabel && <ViewFilter ws={ws} filter={filter} name={filterLabel.name} hidden={mode === 'view' ? hidden : null} className="view-pane-filter" />}
-        {path && oneFile && <OpenIn ws={ws} path={rawAt?.path ?? path} current={view.slug} onOpen={(slug) => bus.emit('openIn', { path: rawAt?.path ?? path, ref: rawAt?.ref ?? targetRef, slug })} />}
-        {path && (oneFile || mode === 'raw') && (
-          <Segmented
-            label="Mode"
-            size="md"
-            value={mode}
-            onChange={pick}
-            options={[
-              { value: 'view', label: view.name },
-              { value: 'raw', label: 'Raw' },
-            ]}
-          />
-        )}
+        {pin.stale && <ViewUpdated onReload={reload} className="view-pane-updated" />}
+        {filter && filterLabel && <ViewFilter ws={ws} filter={filter} name={filterLabel.name} hidden={hidden} className="view-pane-filter" />}
         {view.review && <ReviewMark ws={ws} slug={view.slug} review={view.review} onUndo={pin.follow} />}
       </div>
-      {residueOpen && <ResidueList notes={notes} onPick={pickRef} />}
+      {residueOpen && <ResidueList notes={notes} onPick={openFile} />}
       <div className="view-pane-body">
-        {mode === 'raw' && rawPath ? (
-          <div className="view-pane-raw">
-            <Reader workspace={ws} path={rawPath} kind={rawKind} targetRef={rawAt ? rawAt.ref : targetRef} labels={labels} only="raw" onMode={onMode} />
-          </div>
-        ) : (
-          <>
-            {failure && <ViewFailed name={view.name} detail={failure} onRaw={path ? () => pick('raw') : undefined} />}
-            <ViewerFrame key={`${view.slug}:${pin.pinned ?? ''}`} ws={ws} slug={view.slug} version={pin.pinned || undefined} restore={pin.restore} handle={pin.frame} targetRef={targetRef} path={path ?? undefined} pathPicked={picked} title={view.name} labels={labels.on} filter={filter} filterFiles={filter ? labels.presence.get(filter.concept) : undefined} byId={labels.byId} first={first} labelActions={labelActions} onHidden={setHidden} onError={setFailure} quote={quote} onQuoteMissing={onQuoteMissing} query={query} onQuery={(p) => !p && onClearQuery?.()} className="view-pane-frame" />
-          </>
-        )}
+        {failure && <ViewFailed name={view.name} detail={failure} onRaw={path ? () => openFile(targetRef && refPath(targetRef) === path ? targetRef : path) : undefined} />}
+        <ViewerFrame key={`${view.slug}:${pin.pinned ?? ''}`} ws={ws} slug={view.slug} version={pin.pinned || undefined} restore={pin.restore} handle={pin.frame} targetRef={targetRef} path={path ?? undefined} pathPicked={picked} title={view.name} labels={labels.on} filter={filter} filterFiles={filter ? labels.presence.get(filter.concept) : undefined} byId={labels.byId} first={first} labelActions={labelActions} onHidden={setHidden} onError={setFailure} quote={quote} onQuoteMissing={onQuoteMissing} query={query} onQuery={(p) => !p && onClearQuery?.()} className="view-pane-frame" />
       </div>
     </div>
   )

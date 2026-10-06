@@ -34,6 +34,7 @@ import type {
   SourceFind,
   SourceInfo,
   SourceLines,
+  SourceKeys,
   SourcePage,
   SourceTurns,
   StartAnswer,
@@ -188,6 +189,8 @@ export const api = {
   /** `GET /corpora/{c}/source/speakers`: the names the corpus gives speaker ids (`ids`, joined by commas) that a file
    * keeps under `key` (an agents.jsonl beside it, whose records carry an id and a name). */
   speakerNames: (c: string, path: string, key: string, ids: string) => j<{ names: Record<string, string> }>(`${BASE}/corpora/${enc(c)}/source/speakers${q({ path, key, ids })}`),
+  /** the keys of the file's records that name a kind or a who, over the whole file (backend source_keys.py) */
+  sourceKeys: (c: string, path: string, bins?: number) => j<SourceKeys>(`${BASE}/corpora/${enc(c)}/source/keys${q({ path, bins })}`),
   /** The URL a PDF of the corpus opens from in the browser's viewer, at `page` when given. */
   pdfUrl: (c: string, path: string, page?: number | null) => `${BASE}/corpora/${enc(c)}/pdf/${path.split('/').map(enc).join('/')}${page ? `#page=${page}` : ''}`,
   /** `GET /corpora/{c}/source/find`: the lines of one file past `after` that hold `text`, searched on the server. */

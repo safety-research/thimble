@@ -1,7 +1,7 @@
 // Shared pieces for the file views: the record row, the line row, the verbatim block with the texts a span label marks,
 // ref targets and the scroll-and-highlight hook. Rows carry `data-anchor="<path>#L<n>"` and the class `reader-card`;
 // a marked text carries its own span anchor (`<path>#L<n>.b<k>:c<a>-<b>`), so ⌘ picks records and spans alike.
-import { useEffect, useMemo, useRef, useState, type ComponentType, type CSSProperties, type ReactNode, type RefObject } from 'react'
+import { useContext, useEffect, useMemo, useRef, useState, type ComponentType, type CSSProperties, type ReactNode, type RefObject } from 'react'
 import { Button } from '../../components/Button'
 import { Tipped } from '../../components/Tooltip'
 import { findQuote } from '../../lib/quoteFind'
@@ -11,6 +11,7 @@ import { UNFOLD_EVENT } from '../find'
 import { cellFill, markSegments, type LaneCell, type LaneTag, type RecordMarks, type Segment, type SpanMark } from '../labels'
 import { useMarksAt, useMarksOver } from '../marks'
 import { LabelMark } from '../LabelMark'
+import { ColorContext } from '../colorContext'
 
 export interface ViewProps {
   workspace: string
@@ -213,13 +214,17 @@ export function LaneHead({ tags }: { tags: readonly LaneTag[] }) {
 export const LANE_GLYPH_PX = 13
 
 /** One record as a row: the label gutter, the line number, the head in mono, the blocks under it; a highlighted value
- * with nothing to mark as a tint behind the text. */
+ * with nothing to mark as a tint behind the text. In the Transcript mode, the Color by choice's color as a bar on its
+ * left edge, and no row while its value is turned off, unless a ref points at it (ColorContext). */
 export function RecordCard({ path, line, target, hit, className, header, text, children, end }: RecordProps) {
   const isT = isTargetLine(target, line)
   const marks = useMarksOver(path, line, end ?? line)
-  const cls = ['reader-card', 'reader-record', className, isT && 'reader-target', isT && hit && 'reader-hit', marks.cells.length && 'has-gutter', marks.tint && 'has-tint'].filter(Boolean).join(' ')
+  const cb = useContext(ColorContext)?.get(line)
+  if (cb?.hidden && !isT) return null
+  const cls = ['reader-card', 'reader-record', className, isT && 'reader-target', isT && hit && 'reader-hit', marks.cells.length && 'has-gutter', marks.tint && 'has-tint', cb?.color && 'has-cb'].filter(Boolean).join(' ')
+  const style = cb?.color ? ({ ...markStyle(marks), '--cb': cb.color } as CSSProperties) : markStyle(marks)
   return (
-    <div className={cls} data-line={line} data-anchor={`${path}#L${line}`} data-anchor-text={text || undefined} style={markStyle(marks)}>
+    <div className={cls} data-line={line} data-anchor={`${path}#L${line}`} data-anchor-text={text || undefined} style={style}>
       <LaneGutter cells={marks.cells} />
       <span className="reader-lineno mono">{line}</span>
       <div className="reader-record-main">

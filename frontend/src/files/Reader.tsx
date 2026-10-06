@@ -13,14 +13,20 @@ import { mediaOf, mediaUrl, type MediaRef } from '../lib/media'
 import { refreshProposals } from '../lib/proposals'
 import { fragmentIn, nearestLine, parseRef } from '../lib/refs'
 import { track } from '../lib/telemetry'
-import type { LabelsForPath, Proposal, SourceKind, SourcePage, SourceRecord, TranscriptHint, View } from '../lib/types'
+import type { Concept, LabelsForPath, Proposal, SourceKind, SourcePage, SourceRecord, TranscriptHint, View } from '../lib/types'
 import { readStorage, storageKey, writeStorage } from '../lib/workspace'
 import { failureText, ReportProblemButton } from '../shell/ProblemReport'
 import { clearMatches, firstMatchFrom, lineAsked, markMatches, markSpots, matchCount, matchNumber, stepInLine, stepMatch, unfoldAt, type MatchAt } from './find'
 import { countsOf, FindBar, useSourceFind } from './FindBar'
 import { classesOf, colourVar, laneTags, litClass, marksOf, valueOf } from './labels'
+import { useScrollAnchor } from './anchor'
 import { ReaderLabelsContext, useReaderLabels } from './marks'
-import { FIND_MARK, findColumn, ReaderRuler, rulerColumns, useRuler, type LensTick, type RulerTick, type Seen, type Shown } from './Ruler'
+import { findColumn, rulerColumns, useRuler, type RulerTick, type Seen, type Shown } from './Ruler'
+import { ColorBy } from './ColorBy'
+import { keyColor, KEY_COLORS, OTHER, recordObject } from './colorChoice'
+import { ColorContext } from './colorContext'
+import { ReaderTracks, zoomWindow, type OverviewPaint, type PreviewRecord, type ZoomView } from './Tracks'
+import { useColorBy } from './useColorBy'
 import { fmtSize } from './Tree'
 import { useFilesFilter, type FilesLabels } from './useLabels'
 import { accepts, slugOf, viewValue } from './viewChoice'
@@ -29,7 +35,8 @@ import { ViewerFrame } from './ViewerFrame'
 import { usePinnedView, ViewUpdated } from './viewVersion'
 import { DeleteViewConfirm, ProposalOption } from './ViewsBar'
 import { useTypeViewers } from './typeViewers'
-import { errMsg, LaneHead, targetOf, type ViewDef, type ViewProps } from './views/common'
+import { compact, errMsg, LaneHead, recordExcerpt, targetOf, type ViewDef, type ViewProps } from './views/common'
+import { messageKeys, nameOf, pick, textOf, timeOf } from './views/transcript'
 import { withoutEscapes } from './views/raw'
 import { pickView, scoreViews, viewByType } from './views/registry'
 
@@ -612,6 +619,70 @@ export function useRecordLines(ws: string, ref: string | undefined, path: string
   return { at: mine?.at ?? null, pending: asks && !mine }
 }
 
+/** The stretch of the body the zoomed track shows, and where each record drawn in it stands, px of the body's content. */
+interface ZoomGeom {
+  from: number
+  to: number
+  viewTop: number
+  viewBottom: number
+  recs: { line: number; top: number; bottom: number }[]
+}
+
+/** records the zoomed track draws at most */
+const ZOOM_RECORDS = 400
+
+/** The zoomed track's stretch of the body (Tracks zoomWindow) and the records in it; null when the body draws none. */
+export function zoomGeomOf(body: HTMLElement): ZoomGeom | null {
+  const cards = body.querySelectorAll<HTMLElement>('.reader-card[data-line]')
+  if (!cards.length) return null
+  const st = body.scrollTop
+  const h = body.clientHeight
+  const [from, to] = zoomWindow(st, h, body.scrollHeight)
+  const base = body.getBoundingClientRect().top - st
+  let lo = 0
+  let hi = cards.length - 1
+  let first = cards.length
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1
+    if (cards[mid].getBoundingClientRect().bottom - base > from) {
+      first = mid
+      hi = mid - 1
+    } else lo = mid + 1
+  }
+  const recs: ZoomGeom['recs'] = []
+  for (let i = first; i < cards.length && recs.length < ZOOM_RECORDS; i++) {
+    const r = cards[i].getBoundingClientRect()
+    const top = r.top - base
+    if (top >= to) break
+    recs.push({ line: Number(cards[i].dataset.line), top, bottom: r.bottom - base })
+  }
+  return { from, to, viewTop: st, viewBottom: st + h, recs }
+}
+
+const sameZoom = (x: ZoomGeom | null, y: ZoomGeom | null) =>
+  x === y || (!!x && !!y && x.from === y.from && x.to === y.to && x.viewTop === y.viewTop && x.viewBottom === y.viewBottom && x.recs.length === y.recs.length && x.recs.every((r, i) => r.line === y.recs[i].line && r.top === y.recs[i].top && r.bottom === y.recs[i].bottom))
+
+/** A record as the overview's hover shows it: its index, who and when (the sniff's keys, else those the record
+ * carries), and its first two lines of words. */
+export function previewOf(rec: SourceRecord, hint: TranscriptHint | null, color: string | null): PreviewRecord {
+  const first = (s: string) =>
+    s
+      .split('\n')
+      .filter((l) => l.trim())
+      .slice(0, 2)
+      .join('\n')
+      .slice(0, 280)
+  const obj = recordObject(rec)
+  if (!obj) return { line: rec.line, who: null, when: null, text: first(recordExcerpt(rec)), color }
+  const keys = hint?.keys ? { author: hint.keys.speaker, time: hint.keys.time, body: hint.keys.text } : messageKeys([obj])
+  const who = nameOf(pick(obj, keys.author)) ?? (typeof obj.type === 'string' ? obj.type : null)
+  const when = timeOf(pick(obj, keys.time))
+  const body = textOf(pick(obj, keys.body)) ?? rec.blocks.find((b) => b.kind !== 'raw')?.text ?? compact(obj, 300)
+  return { line: rec.line, who, when, text: first(body), color }
+}
+
+const NO_LANES: Concept[] = []
+
 const sameShown = (x: Shown, y: Shown) =>
   x.top === y.top && x.height === y.height && x.seen.length === y.seen.length && x.seen.every((s, i) => s.line === y.seen[i].line && s.top === y.seen[i].top && s.bottom === y.seen[i].bottom)
 
@@ -622,6 +693,10 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
   const [pick, setPick] = useState<string | null>(() => readStorage<string | null>(memoryKey, null))
   useEffect(() => bus.on('fileMode', (e) => e.path === path && setPick(e.mode)), [path])
   const fragment = fragmentIn(targetRef, path)
+  const picked = viewByType(only ?? pick)
+  const view: ViewDef | undefined = picked && (only || builtins.listed.includes(picked)) ? picked : builtins.auto
+  // the Transcript mode colors its records by Color by and marks the labels on the tracks, with no gutter of lanes
+  const isTranscript = view?.type === 'transcript'
   const [records, setRecords] = useState<SourceRecord[]>([])
   const [total, setTotal] = useState<number | null>(null)
   // the server estimated `total` (a big file whose line index is being built): it is asked for again until it is exact,
@@ -652,12 +727,12 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
   const [findRef, setFindRef] = useState<string | null>(null)
   const [cursor, setCursor] = useState<MatchAt>(NO_MATCH)
   const [shown, setShown] = useState<Shown>({ top: 0, height: 1, seen: [] })
+  const [zoomGeom, setZoomGeom] = useState<ZoomGeom | null>(null)
   // columns lie past the right edge of the body (a wide table): a fade at the edge says so
   const [moreRight, setMoreRight] = useState(false)
   const bodyRef = useRef<HTMLDivElement | null>(null)
   const recordsRef = useRef(records)
   recordsRef.current = records
-  const pendingScroll = useRef<{ h: number; t: number } | null>(null)
   // a page is being read: the scroll, the fill below and a resize can each ask for the next page in the same frame,
   // before the `loading` they see has turned true
   const reading = useRef(false)
@@ -677,12 +752,13 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
     setJumpLine(null)
     setFindRef(null)
   }, [targetRef, setJumpLine])
-  // every label over files that is on has a column in each record's gutter; a label over files marks each record of
-  // the file with the file's value
+  // every label over files that is on has a column in each record's gutter (but in the Transcript mode, where the
+  // tracks mark them); a label over files marks each record of the file with the file's value
   const lanes = labels.on
+  const gutterLanes = isTranscript ? NO_LANES : lanes
   const fileOf = useCallback((id: string) => labels.presence.get(id)?.[path], [labels.presence, path])
-  const readerLabels = useReaderLabels(workspace, path, on, lanes, labels.focus, fileOf)
-  const tags = useMemo(() => laneTags(lanes), [lanes])
+  const readerLabels = useReaderLabels(workspace, path, on, gutterLanes, labels.focus, fileOf)
+  const tags = useMemo(() => laneTags(gutterLanes), [gutterLanes])
   const fileLanes = useMemo(() => new Set(lanes.filter((k) => marksOf(k) === 'file').map((k) => k.id)), [lanes])
   const ruler = useRuler(workspace, path, lanes.length > 0)
   const columns = useMemo(() => rulerColumns(lanes, ruler, fileOf), [lanes, ruler, fileOf])
@@ -755,21 +831,21 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
       (total ? shownIn(el, total) : null) ??
       (!total || first == null || last == null ? { top: a, height: b - a, seen: [] } : { top: (first - 1 + a * (last - first + 1)) / total, height: ((b - a) * (last - first + 1)) / total, seen: [] })
     setShown((cur) => (sameShown(cur, next) ? cur : next))
+    const z = zoomGeomOf(el)
+    setZoomGeom((cur) => (sameZoom(cur, z) ? cur : z))
   }, [total, first, last])
 
+  // the record at the top of the reader keeps its place while records above it change height: as they are drawn near
+  // the view, and across a page loaded above or records dropped above (hold, in loadMore)
+  const viewType = viewByType(only ?? pick)?.type ?? builtins.auto.type
+  const { hold } = useScrollAnchor(bodyRef, [records, viewType, pick])
+
   useLayoutEffect(() => {
-    const p = pendingScroll.current
-    const root = bodyRef.current
-    if (p && root) {
-      root.scrollTop = p.t + (root.scrollHeight - p.h)
-      pendingScroll.current = null
-    }
     measure()
   }, [records, measure])
 
   // the body or the view in it changed size (the reader resized, a label's column came in): measure again. A pick
   // (a file-type viewer's page in place of the body, and back) can mount a new body.
-  const viewType = viewByType(only ?? pick)?.type ?? builtins.auto.type
   useEffect(() => {
     const el = bodyRef.current
     if (!el || typeof ResizeObserver === 'undefined') return
@@ -849,8 +925,7 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
         if (dir === 'earlier') {
           const start = Math.max(1, f - PAGE)
           const page = await api.source(workspace, path, start, f - start)
-          const root = bodyRef.current
-          pendingScroll.current = root ? { h: root.scrollHeight, t: root.scrollTop } : null
+          hold()
           setRecords((c) => {
             const merged = [...page.records, ...c]
             return merged.length > CAP ? merged.slice(0, CAP) : merged
@@ -859,6 +934,8 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
         } else {
           const page = await api.source(workspace, path, l + 1, PAGE)
           if (!page.records.length) dryAfter.current = l
+          // records dropped from the start are above the view
+          if (recordsRef.current.length + page.records.length > CAP) hold()
           setRecords((c) => {
             const merged = [...c, ...page.records]
             return merged.length > CAP ? merged.slice(merged.length - CAP) : merged
@@ -872,7 +949,7 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
         setLoading(false)
       }
     },
-    [workspace, path, loading, total, takeTotal],
+    [workspace, path, loading, total, takeTotal, hold],
   )
 
   const frame = useRef<number | null>(null)
@@ -1032,36 +1109,71 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
   }, [markText, shownMatch, shownK])
   const findStatus = !finder ? '' : lineAsk != null ? (total && !estimated ? `of ${linesText(total, estimated)}` : '') : search.error ? 'Could not search' : found ? matchCount(cursor.i < 0 ? -1 : matchNumber(cursor, countsOf(found)), found.matches ?? found.total, !found.complete) : ''
   const rulerCols = useMemo(() => (found && found.total && total ? [...columns, findColumn(found.lines, total, findText)] : columns), [columns, found, total, findText])
-  const foundLines = useMemo(() => new Set(found?.lines ?? []), [found])
-  // inside the ruler's thumb, per lane, the records on screen it marks: a label's highlighted value, or each place of a
-  // find's match where the record shows it marked (else the whole record)
-  const rows = readerLabels.rows
-  const lens = useMemo(() => {
-    const out = new Map<string, LensTick[]>()
-    for (const col of rulerCols) {
-      const ticks: LensTick[] = []
-      if (col.id === 'find') {
-        for (const s of shown.seen) {
-          const places = spots.get(s.line)
-          if (places?.length) for (const p of places) ticks.push({ line: s.line, top: s.top + p * (s.bottom - s.top), bottom: s.top + p * (s.bottom - s.top), colour: FIND_MARK, hit: true })
-          else if (foundLines.has(s.line)) ticks.push({ ...s, colour: FIND_MARK })
-        }
-      } else if (fileLanes.has(col.id)) {
-        // a label over files marks every record of the file with the file's value, its lane's one mark
-        const whole = col.ticks[0]
-        if (whole) for (const s of shown.seen) ticks.push({ ...s, colour: whole.colour })
-      } else {
-        const k = on.find((x) => x.id === col.id)
-        for (const s of k ? shown.seen : []) {
-          const row = rows.get(`${path}#L${s.line}`)?.get(k!.id)
-          const c = row ? litClass(k!, valueOf(row)) : undefined
-          if (c) ticks.push({ ...s, colour: colourVar(c.color) })
+
+  // ---- Color by and the tracks
+  const color = useColorBy(workspace, path, isTranscript && !binary && !isDatabase, labels, records, readerLabels.rows, total)
+  const colorChoice = color.choice
+  const chosenLabel = colorChoice.by === 'label' ? colorChoice.id : null
+  // the overview's colors: the chosen key's commonest value per bin, the chosen label's values, else the density
+  const paint = useMemo<OverviewPaint>(() => {
+    if (!isTranscript) return { kind: 'none' }
+    if (colorChoice.by === 'key') {
+      const k = color.keys?.keys.find((x) => x.key === colorChoice.key)
+      if (k) {
+        const ranks = Math.max(1, k.values.length)
+        const offSet = new Set(color.off)
+        return {
+          kind: 'bins',
+          at: k.at,
+          colors: Array.from({ length: ranks }, (_, r) => keyColor(r)),
+          faded: Array.from({ length: ranks }, (_, r) => offSet.has(r < KEY_COLORS ? k.values[r].value : OTHER)),
         }
       }
-      out.set(col.id, ticks)
     }
-    return out
-  }, [rulerCols, shown.seen, spots, foundLines, on, fileLanes, rows, path])
+    if (colorChoice.by === 'label') {
+      const col = columns.find((c) => c.id === colorChoice.id)
+      if (col) return { kind: 'ticks', total: col.total, ticks: col.ticks, off: new Set(color.off) }
+    }
+    return color.keys?.bytes.length ? { kind: 'density', bytes: color.keys.bytes } : { kind: 'none' }
+  }, [isTranscript, colorChoice, color.keys, color.off, columns])
+  // the markers: a lane per label that is on but the one colored by, and the find's matches
+  const markers = useMemo(() => rulerCols.filter((c) => c.id !== chosenLabel), [rulerCols, chosenLabel])
+  const markerLabels = useMemo(() => on.filter((k) => k.id !== chosenLabel), [on, chosenLabel])
+  const recordAtLine = useMemo(() => new Map(records.map((r) => [r.line, r])), [records])
+  const zoom = useMemo<ZoomView | null>(() => {
+    if (!zoomGeom) return null
+    const names = new Map(color.values.map((v) => [v.id, v.name]))
+    return {
+      ...zoomGeom,
+      records: zoomGeom.recs.map((r) => {
+        const mine = readerLabels.rows.get(`${path}#L${r.line}`)
+        const valued = markerLabels.map((k) => {
+          const row = mine?.get(k.id)
+          const c = row ? litClass(k, valueOf(row)) : undefined
+          return c ? { colour: colourVar(c.color), text: `${k.name}: ${c.name}` } : null
+        })
+        const rec = recordAtLine.get(r.line)
+        const chip = rec ? color.chipOf(rec) : undefined
+        const title = [chip != null ? names.get(chip) : null, ...valued.map((v) => v?.text)].filter(Boolean).join(' · ')
+        return { line: r.line, top: r.top, bottom: r.bottom, color: color.colors?.get(r.line)?.color ?? null, marks: valued.map((v) => v?.colour ?? null), title }
+      }),
+    }
+  }, [zoomGeom, color, readerLabels.rows, path, markerLabels, recordAtLine])
+  const hint = builtins.transcript
+  const preview = useCallback(
+    (line: number) =>
+      api.source(workspace, path, line, 3).then((p) =>
+        p.records.map((rec) => {
+          const chip = color.chipOf(rec)
+          return previewOf(rec, hint, chip != null ? (color.values.find((v) => v.id === chip)?.color ?? null) : null)
+        }),
+      ),
+    [workspace, path, color, hint],
+  )
+  const scrollToLine = (line: number) => {
+    track('reader-find', { target: `${path}#L${line}`, detail: { from: 'ruler' } })
+    setJumpLine(line)
+  }
   // the record a mark of the ruler stands for: its line when it stands for one, else the first of its lines whose value
   // of the label is the mark's, read from the server once per mark
   const markLines = useMemo(() => new Map<string, Promise<number | null>>(), [ruler, on])
@@ -1100,8 +1212,6 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
     })
   }
 
-  const picked = viewByType(only ?? pick)
-  const view: ViewDef | undefined = picked && (only || builtins.listed.includes(picked)) ? picked : builtins.auto
   // a viewer for the file's type shows in its place: the one picked for this file, else, while no built-in mode is
   // picked and the best one is Raw, the first that reads the ref's fragment
   const rawBest = builtins.loaded && (builtins.auto.type === 'raw' || binary)
@@ -1192,33 +1302,42 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
         {viewer ? (
           <ReaderViewer key={viewer.slug} ws={workspace} view={viewer} path={path} targetRef={fragment != null && accepts(viewer, fragment) ? targetRef : undefined} labels={labels} onRaw={() => onPick('raw')} />
         ) : (
-          <div className="reader-main">
-            <div className="reader-scroll" data-more-right={moreRight || undefined}>
-              <div className={'reader-body' + (isDatabase ? ' reader-body-fill' : '')} ref={bodyRef} onScroll={onScroll} style={{ ...(tags.length ? { '--lanes': tags.length } : {}), '--digits': String(total ?? 0).length } as CSSProperties}>
-                {tags.length > 0 && view && GUTTERED.has(view.type) && loaded && !noViewReason && <LaneHead tags={tags} />}
-                {error && !noViewReason && <div className="reader-error-text">{error}</div>}
-                {noViewReason && (
-                  <div className="reader-noview">
-                    <div className="reader-noview-reason dim">{noViewReason}</div>
-                  </div>
-                )}
-                {ViewComponent && loaded && !noViewReason && (
-                  <ViewBoundary key={`${view!.type}|${path}`} viewType={view!.type} onFallback={() => onPick('raw')}>
-                    {viewEl}
-                  </ViewBoundary>
-                )}
-                {loading && (
-                  <div className="reader-more">
-                    <Spinner size={14} label="Loading" />
-                  </div>
-                )}
+          <>
+            {isTranscript && !binary && !isDatabase && loaded && !noViewReason && (
+              <div className="reader-colorbar">
+                <ColorBy choice={color.choice} keys={color.keys?.keys ?? []} labels={color.fileLabels} values={color.values} off={color.off} onChoose={color.choose} onToggle={color.toggle} countsOf={fileOf} />
               </div>
-              {moreRight && <div className="reader-edge" aria-hidden />}
-            </div>
-            {!isDatabase && !binary && (
-              <ReaderRuler columns={rulerCols} view={shown} lens={lens} onJump={jump} onMark={onMark} lineOf={markLine} onLine={(line) => goTo(line, 'ruler')} onSeek={seek} onWheel={wheel} />
             )}
-          </div>
+            <div className="reader-main">
+              <div className="reader-scroll" data-more-right={moreRight || undefined}>
+                <div className={'reader-body' + (isDatabase ? ' reader-body-fill' : '')} ref={bodyRef} onScroll={onScroll} style={{ ...(tags.length ? { '--lanes': tags.length } : {}), '--digits': String(total ?? 0).length } as CSSProperties}>
+                  {tags.length > 0 && view && GUTTERED.has(view.type) && loaded && !noViewReason && <LaneHead tags={tags} />}
+                  {error && !noViewReason && <div className="reader-error-text">{error}</div>}
+                  {noViewReason && (
+                    <div className="reader-noview">
+                      <div className="reader-noview-reason dim">{noViewReason}</div>
+                    </div>
+                  )}
+                  {ViewComponent && loaded && !noViewReason && (
+                    <ColorContext.Provider value={isTranscript ? color.colors : null}>
+                      <ViewBoundary key={`${view!.type}|${path}`} viewType={view!.type} onFallback={() => onPick('raw')}>
+                        {viewEl}
+                      </ViewBoundary>
+                    </ColorContext.Provider>
+                  )}
+                  {loading && (
+                    <div className="reader-more">
+                      <Spinner size={14} label="Loading" />
+                    </div>
+                  )}
+                </div>
+                {moreRight && <div className="reader-edge" aria-hidden />}
+              </div>
+              {!isDatabase && !binary && (
+                <ReaderTracks total={total} view={shown} paint={paint} markers={markers} zoom={zoom} onJump={jump} onSeek={seek} onWheel={wheel} onLine={scrollToLine} onMark={onMark} preview={preview} />
+              )}
+            </div>
+          </>
         )}
       </div>
     </ReaderLabelsContext.Provider>

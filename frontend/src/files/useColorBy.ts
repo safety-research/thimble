@@ -1,0 +1,152 @@
+// Color by's state in Files' Transcript mode (colorChoice.ts): the file's keys from the server, the choice and the values
+// turned off kept per file, the labels that mark the file, each value's chip, and per record loaded its color and
+// whether it is hidden. A label the analyst turns on, here or anywhere in thimble, takes the color, as in a view's Color
+// by; choosing a label that is off turns it on.
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { api } from '../lib/api'
+import type { Concept, LabelRow, SourceKeys, SourceRecord } from '../lib/types'
+import { chipOfKeyValue, chipOfLabel, choiceId, defaultChoice, keyChips, keyValue, labelChips, parseChoice, readColor, writeColor, type ColorChoice, type ColorKept, type ColorValue } from './colorChoice'
+import type { RecordColor } from './colorContext'
+import { isFilesLabel, marksOf } from './labels'
+import type { FilesLabels } from './useLabels'
+
+export interface ColorBy {
+  keys: SourceKeys | null
+  choice: ColorChoice
+  /** the labels over files that mark this file, on or off */
+  fileLabels: Concept[]
+  values: ColorValue[]
+  off: string[]
+  /** per line loaded, its color and whether it is hidden; null with Color by off */
+  colors: ReadonlyMap<number, RecordColor> | null
+  /** the chip a record falls under */
+  chipOf: (rec: SourceRecord) => string | undefined
+  choose: (c: ColorChoice) => void
+  toggle: (value: string, alone: boolean) => void
+}
+
+/** The file's keys (GET /source/keys), asked once per file while `on`. */
+export function useSourceKeys(ws: string, path: string, on: boolean): SourceKeys | null {
+  const [got, setGot] = useState<{ path: string; keys: SourceKeys } | null>(null)
+  useEffect(() => {
+    if (!on) return
+    let alive = true
+    api
+      .sourceKeys(ws, path)
+      .then((k) => alive && setGot({ path, keys: k }))
+      .catch(
+        () =>
+          alive &&
+          setGot({
+            path,
+            keys: {
+              path,
+              total: 0,
+              bins: 0,
+              partial: false,
+              bytes: [],
+              keys: [],
+            },
+          }),
+      )
+    return () => {
+      alive = false
+    }
+  }, [ws, path, on])
+  return got?.path === path ? got.keys : null
+}
+
+export function useColorBy(ws: string, path: string, on: boolean, labels: FilesLabels, records: readonly SourceRecord[], rows: ReadonlyMap<string, ReadonlyMap<string, LabelRow>>, total: number | null): ColorBy {
+  const keys = useSourceKeys(ws, path, on)
+  const [kept, setKept] = useState<ColorKept>(() => readColor(ws, path))
+  const keep = useCallback(
+    (next: ColorKept) => {
+      setKept(next)
+      writeColor(ws, path, next)
+    },
+    [ws, path],
+  )
+  const fileLabels = useMemo(() => [...labels.byId.values()].filter((k) => isFilesLabel(k) && marksOf(k) !== 'file' && !k.trial && !!labels.presence.get(k.id)?.[path]), [labels.byId, labels.presence, path])
+  const onIds = useMemo(() => new Set(labels.on.map((k) => k.id)), [labels.on])
+  // the choice kept, while it still stands (its key is the file's, its label is on), else the file's default
+  const choice = useMemo<ColorChoice>(() => {
+    const c = parseChoice(kept.by)
+    if (c?.by === 'off') return c
+    if (c?.by === 'label' && onIds.has(c.id) && fileLabels.some((k) => k.id === c.id)) return c
+    if (c?.by === 'key' && keys?.keys.some((k) => k.key === c.key)) return c
+    return defaultChoice(keys?.keys ?? [])
+  }, [kept.by, onIds, fileLabels, keys])
+  // a label turned on since the labels first came, that marks this file, takes the color
+  const seenOn = useRef<Set<string> | null>(null)
+  const loaded = labels.all.length > 0
+  useEffect(() => {
+    if (!loaded) return
+    const before = seenOn.current
+    seenOn.current = onIds
+    if (!before || !on) return
+    const fresh = labels.on.filter((k) => !before.has(k.id) && fileLabels.some((f) => f.id === k.id))
+    if (fresh.length) keep({ ...kept, by: `l:${fresh[fresh.length - 1].id}` })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [onIds, loaded])
+  const id = choiceId(choice)
+  const off = useMemo(() => kept.off[id] ?? [], [kept.off, id])
+  const key = choice.by === 'key' ? keys?.keys.find((k) => k.key === choice.key) : undefined
+  const label = choice.by === 'label' ? labels.byId.get(choice.id) : undefined
+  const values = useMemo<ColorValue[]>(() => (key ? keyChips(key) : label ? labelChips(label, labels.presence.get(label.id)?.[path], total) : []), [key, label, labels.presence, path, total])
+  const chipOf = useCallback(
+    (rec: SourceRecord): string | undefined => {
+      if (key) return chipOfKeyValue(key, keyValue(rec, key.key))
+      if (label) return chipOfLabel(label, rows.get(`${path}#L${rec.line}`)?.get(label.id), true)
+      return undefined
+    },
+    [key, label, rows, path],
+  )
+  const colors = useMemo(() => {
+    if (!on || choice.by === 'off' || (!key && !label)) return null
+    const colorOf = new Map(values.map((v) => [v.id, v.color]))
+    const offSet = new Set(off)
+    const out = new Map<number, RecordColor>()
+    for (const rec of records) {
+      const chip = chipOf(rec)
+      if (chip == null) continue
+      out.set(rec.line, {
+        color: colorOf.get(chip) ?? null,
+        hidden: offSet.has(chip),
+      })
+    }
+    return out
+  }, [on, choice.by, key, label, values, off, records, chipOf])
+  const { setFocus, toggle: toggleLabel } = labels
+  const choose = useCallback(
+    (c: ColorChoice) => {
+      if (c.by === 'label' && !onIds.has(c.id)) {
+        setFocus(c.id)
+        toggleLabel(c.id)
+      }
+      keep({ ...kept, by: choiceId(c) })
+    },
+    [onIds, setFocus, toggleLabel, keep, kept],
+  )
+  const toggle = useCallback(
+    (value: string, alone: boolean) => {
+      const all = values.map((v) => v.id)
+      const now = new Set(off)
+      let next: string[]
+      if (alone) next = now.size === all.length - 1 && !now.has(value) ? [] : all.filter((v) => v !== value)
+      else next = now.has(value) ? off.filter((v) => v !== value) : [...off, value]
+      keep({ ...kept, off: { ...kept.off, [id]: next } })
+    },
+    [values, off, keep, kept, id],
+  )
+  return {
+    keys,
+    choice,
+    fileLabels,
+    values,
+    off,
+    colors,
+    chipOf,
+    choose,
+    toggle,
+  }
+}

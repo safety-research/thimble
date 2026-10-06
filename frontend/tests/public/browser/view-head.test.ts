@@ -22,7 +22,7 @@ beforeAll(async () => {
       `import { flushSync } from 'react-dom'`,
       `import { ViewHeadLine } from '${src('files/ViewChrome.tsx')}'`,
       `let root = null`,
-      `const files = { list: ['runs/r1/events.jsonl'], n: 25, current: null, onPick: () => {} }`,
+      `const files = { list: ['runs/r1/events.jsonl'], n: 25, onPick: () => {} }`,
       `const derived = [{ field: 'time', from: 'ts', how: 'parsed to UTC' }]`,
       `;(window as any).__head = (problems) => flushSync(() => {`,
       `  root ??= createRoot(document.getElementById('root')!)`,
