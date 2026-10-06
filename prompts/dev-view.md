@@ -8,7 +8,7 @@ A proposal whose claim is one extension's glob, such as `**/*.vtt`, asks for a v
 
 ## A good view
 
-The analyst uses the view to understand records, often thousands of them, without reading every file. Build it to "overview first, zoom and filter, details on demand". The page opens on the whole of what it covers at a glance, with records in view, so the analyst sees the shape of the data before any detail. They narrow it to what they care about, and any one record opens in full beside the overview, so they keep their place.
+The analyst uses the view to understand records, often thousands of them, without reading every file. Build it to "overview first, zoom and filter, details on demand". The page opens on the whole of what it covers at a glance, with records in view, so the analyst sees the shape of the data before any detail. They narrow it to what they care about, and any one record opens in full where they clicked it while the rest stays where it was, so they keep their place.
 
 The rest is your judgment. Aim for the page a demanding designer would ship, one that reads at once without instructions:
 
@@ -17,6 +17,7 @@ The rest is your judgment. Aim for the page a demanding designer would ship, one
 - Scales and sizes come from the data. First read the claimed files, a jsonl file a few lines at a time since a line can be long, and count what the page must fit: the units, the time span, the longest names.
 - The layout is fluid. The pane is 1048 px wide as the view opens in a laptop's window, 798 px with the Labels pane open beside it, and 1528 px on a large screen.
 - The page explains nothing in words. The analyst learns it by using it, so a line that explains the page, a hint or a caption is clutter, even where the proposal asks for one.
+- The reviewer judges the page by established principles, so design with them from the start: zoom and filter by acting on the data's own marks and axes, details that open in place, each control once in the top row, one visual channel for each attribute with color only for the one the analyst colors by, one scale and mark for each quantity in every part, keys that match the marks, no ink that shows no data, each encoding's meaning one click away, and thimble's own parts and readers.
 
 thimble's parts are in every page, so a view can look like the rest of thimble: `chip`, `btn` (`btn-secondary`, `btn-ghost`, `btn-sm`), `seg` with `seg-opt` (`active` on the chosen one), `field`, `table` and `list-row`.
 
