@@ -726,7 +726,7 @@ async def start(c: str, key: str, *, role: str, title: str, agent_args: list[str
     rule: tuple[list[str], list[str]] | None = None
     work.mkdir(parents=True, exist_ok=True)
     fenced = fence(cwd, work, sandbox=conf.sandboxed, unasked=unasked, network=conf.network,
-                   auto_allow=not conf.install_asks(), required=conf.enforced, data=conf.data)
+                   auto_allow=False, required=conf.enforced, data=conf.data)
     perms = given.get("permissions") if isinstance(given.get("permissions"), dict) else {}
     given = {**given, **fenced, "permissions": {**perms, **fenced["permissions"]}}
     extra_env.update(fence_env(work))
@@ -734,7 +734,7 @@ async def start(c: str, key: str, *, role: str, title: str, agent_args: list[str
     hooks.update(scratch_hooks(work))
     if "sandbox" in fenced and unasked:
         rule = sandbox_rule(cwd)
-        hooks.update(sandbox_hooks(rule, conf.install_asks()))
+        hooks.update(sandbox_hooks(rule, installs=True))
     given = with_config(given, conf.settings())
     if conf.web == "ask":
         given = with_web_asks(given, permission_mode)

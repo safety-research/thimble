@@ -230,36 +230,49 @@ def with_features(stored: dict[str, Any], c: str | None = None) -> dict[str, Any
     """The effective settings: SETTINGS_DEFAULTS under `stored` less RETIRED_KEYS, `models` as config.models_for resolves
     them from thimble's config with a row per agent of the active extensions (extensions.agent_models), the permission
     modes the config sets (modes.rows), `disabled_modes`, those the analyst's Claude Code settings turn off,
-    `config_error`, the config's error or ''; `agents`, agent_rows; `tasks`, task_rows."""
+    `config_error`, the config's error or ''; `config_ignored`, the keys its files hold that this build reads and ignores
+    (userconf.ignored); `agents`, agent_rows; `tasks`, task_rows."""
     from . import extensions, modes, userconf  # noqa: PLC0415 — they import this module
 
     kept = {k: v for k, v in stored.items() if k not in RETIRED_KEYS and k != modes.SETTING}
     models = {**config.models_for(c), **extensions.agent_models(c)}
     return {**SETTINGS_DEFAULTS, **kept, config.MODELS_KEY: models, modes.SETTING: modes.rows(c) if c else {},
             "disabled_modes": sorted(modes.disabled()), "config_error": userconf.problem(c),
-            "agents": agent_rows(c), "tasks": task_rows(c)}
+            "config_ignored": userconf.ignored(c), "agents": agent_rows(c), "tasks": task_rows(c)}
 
 
 def agent_rows(c: str | None) -> dict[str, Any]:
-    """Who runs each agent thimble starts and what it may do, by its row of the permission modes (modes.AGENTS): its
-    role's agent (roles.public: thimble's own, or an extension's prompt, Agent SDK program or command, with the
-    extensions that add to its prompt and a conflict), and from thimble's config its sandbox, whether the sandbox can
-    run here, its network, web tools and edits of the corpus; `main` names the extensions that add to main's prompt.
-    `labels` and `cardCheck` (userconf.CALLS) follow, by their config names: who runs their tasks (`tasks`, the first
-    one an extension runs) and the settings a program of those tasks runs under, with the sandbox always on and no web."""
+    """Who runs each agent thimble starts and what it may do. Two fences: `main`'s, which thimble's agents share as main's
+    subagents (its sandbox, whether the sandbox can run here, its network, web tools and edits of the corpus, the
+    orientation's keys in thimble's config, userconf's one fence), with the extensions that add to main's prompt; and
+    `dev`'s, the code tickets', which keep a fence of their own. Each other agent's row (orient, writer, critic,
+    checks) names its role's agent (roles.public: thimble's own, or an extension's prompt, Agent SDK program or command,
+    with the extensions that add to its prompt and a conflict) and its own `web`, "off" or main's. `labels` and
+    `cardCheck` (userconf.CALLS) follow, by their config names: who runs their tasks (`tasks`, the first one an
+    extension runs) and the settings a program of those tasks runs under, with the sandbox always on and no web."""
     from . import roles, tasks, userconf  # noqa: PLC0415
 
     conf = userconf.load_or_defaults(c)[0]
     runs = conf["sandbox"]["use"] != "never" and userconf.sandbox_runs()
     by_role = {r["role"]: r for r in roles.public(c)}
-    out: dict[str, Any] = {"main": {"additions": by_role["main"]["additions"]}}
+    blank = {"way": "thimble", "extension": "", "additions": [], "conflict": []}
+
+    def fence(agent: str) -> dict[str, Any]:
+        mine = userconf.agent_conf(conf, agent)
+        on = conf["sandbox"]["use"] != "never" and (agent == "orientation" or mine.get("sandbox", "on") == "on")
+        return {"sandbox": "on" if on else "off", "sandbox_runs": runs, "network": mine.get("network") or "on",
+                "web": mine.get("web") or "ask", "data": mine.get("data") or "ask", "config": f"agents.{agent}"}
+
+    out: dict[str, Any] = {"main": {"additions": by_role["main"]["additions"], **fence("orientation")}}
+    for agent in userconf.SUBAGENT_ROLES:
+        role = by_role.get(agent) or blank
+        out[userconf.ROLES[agent]] = {"way": role["way"], "extension": role["extension"],
+                                      "additions": role["additions"], "conflict": role["conflict"],
+                                      "web": userconf.agent_conf(conf, agent)["web"], "config": f"agents.{agent}"}
     for agent, row in userconf.MODE_ROWS.items():
-        mine = conf["agents"][agent]
-        role = by_role.get(agent) or {"way": "thimble", "extension": "", "additions": [], "conflict": []}
+        role = by_role.get(agent) or blank
         out[row] = {"way": role["way"], "extension": role["extension"], "additions": role["additions"],
-                    "conflict": role["conflict"], "sandbox": mine.get("sandbox", "on"), "sandbox_runs": runs,
-                    "network": mine.get("network", "on"), "web": mine.get("web", "ask"), "data": mine.get("data", "ask"),
-                    "config": f"agents.{agent}"}
+                    "conflict": role["conflict"], **fence(agent)}
     by_task = task_rows(c)
     for agent in userconf.CALLS:
         mine = conf["agents"][agent]
@@ -334,6 +347,7 @@ def put_settings(c: str, settings: dict[str, Any]) -> dict[str, Any]:
                                 else None)
     if patch:
         userconf.save(c, patch)
+        push_roles(c)
     settings = {k: v for k, v in settings.items() if k != modes.SETTING}
     if config.MODELS_KEY in settings:
         settings[config.MODELS_KEY] = {k: v for k, v in models.items() if k == "main"}
@@ -352,6 +366,18 @@ def put_settings(c: str, settings: dict[str, Any]) -> dict[str, Any]:
     if merged != stored or not path.exists() and settings:
         write_json(path, merged)
     return with_features(merged, c)
+
+
+def push_roles(c: str) -> None:
+    """Have main's hooks module register thimble's agent types again with the values Settings now name
+    (module_bridge.push_roles), so the next start of each runs on them. Never raises: a module that is not running
+    registers them at its next session's start."""
+    try:
+        from . import module_bridge  # noqa: PLC0415 — module_bridge imports the session modules
+
+        module_bridge.push_roles(c)
+    except Exception:  # noqa: BLE001 — the save stands; the module registers the roles when it next starts
+        log.warning("%s: the agent types were not registered again after a Settings save", c, exc_info=True)
 
 
 # --------------------------------------------------------------------------- reset and archive

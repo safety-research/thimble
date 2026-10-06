@@ -1327,7 +1327,7 @@ def read_only_fence(folders: "tuple[Path, ...] | list[Path]", outside: "tuple[st
         return {}
     out: dict[str, Any] = {"permissions": {"deny": [f"Edit(/{Path(f)}/**)" for f in folders]}}
     if conf.sandboxed if conf is not None else cc_settings.sandbox_ok():
-        box = cc_settings.offline_sandbox(auto_allow=not (conf and conf.install_asks()),
+        box = cc_settings.offline_sandbox(auto_allow=conf is None,
                                           network=bool(conf and conf.network), required=bool(conf and conf.enforced))
         out["sandbox"] = {**box, **({"excludedCommands": list(outside)} if outside else {})}
     return out
@@ -1445,7 +1445,7 @@ class Sessions:
             box = (asking or {}).get("sandbox")
             if box and "sandbox" in settings:
                 # before a call both hooks run; a request is the permission hook's alone, which applies the same rule
-                pre = agent_session.sandbox_hooks((list(box[0]), list(box[1])), conf.install_asks())[agent_session.PRE]
+                pre = agent_session.sandbox_hooks((list(box[0]), list(box[1])), installs=True)[agent_session.PRE]
                 hooks[agent_session.PRE] = [*pre, *hooks.get(agent_session.PRE, [])]
             settings["hooks"] = hooks
         settings = agent_session.with_home_shell(settings)
