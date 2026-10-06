@@ -2724,13 +2724,15 @@ def unchanged_since_built(c: str, slug: str) -> bool:
     return kept.is_dir() and view_digest(kept) == view_digest(views_dir(c) / slug)
 
 
-def end_revision(c: str, slug: str, error: str | None = None, *, failed_change: str | None = None) -> None:
-    """A change to a built view that failed (`error`) or was dismissed: the view as it was, its proposal built again
-    with the error kept, and `view {built}` on the stream. `failed_change`, the request of a change that failed, stays
-    on the proposal for retry."""
+def end_revision(c: str, slug: str, error: str | None = None, *, failed_change: str | None = None,
+                 stopped_by: str | None = None) -> None:
+    """A change to a built view that failed (`error`), was dismissed or was stopped by main's quit (`stopped_by`
+    "quit", which its chip shows as stopped): the view as it was, its proposal built again with the error kept, and
+    `view {built}` on the stream. `failed_change`, the request of a change that failed, stays on the proposal for
+    retry."""
     restore_built(c, slug)
     update_proposal(c, slug, status="built", change=None, changed=None, revision=None, error=error,
-                    failed_change=failed_change)
+                    failed_change=failed_change, stopped_by=stopped_by)
     _emit(c, slug, "built")
 
 
