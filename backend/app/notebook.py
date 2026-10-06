@@ -1977,7 +1977,8 @@ def _kernel_hides() -> list[Path]:
 
 
 def _guarded_files(workspace: str) -> None:
-    """Each of kernel_wrap.HIDDEN_FILES (`{}`) and READ_ONLY_FILES (empty) made in the workspace when missing: a wrapper
+    """Each of kernel_wrap.HIDDEN_FILES (`{}`), READ_ONLY_FILES and TRUSTED_FILES (empty) made in the workspace when
+    missing: a wrapper
     guards a file that exists, where for a missing one bwrap would guard nothing and srt would leave an empty read-only
     file in its place while the kernel runs, which the server could not write. Each of READ_ONLY_DIRS is made too, since
     bwrap fails on a missing one, in place of a link or a file a kernel left there: the wrapper would show it a link's
@@ -1987,7 +1988,8 @@ def _guarded_files(workspace: str) -> None:
         if d.is_symlink() or (d.exists() and not d.is_dir()):
             d.unlink()
         config.private_dir(d)
-    files = [*((n, "{}\n") for n in kernel_wrap.HIDDEN_FILES), *((n, "") for n in kernel_wrap.READ_ONLY_FILES)]
+    files = [*((n, "{}\n") for n in kernel_wrap.HIDDEN_FILES),
+             *((n, "") for n in (*kernel_wrap.READ_ONLY_FILES, *kernel_wrap.TRUSTED_FILES))]
     for name, text in files:
         p = _ws_dir(workspace) / name
         with contextlib.suppress(FileExistsError):

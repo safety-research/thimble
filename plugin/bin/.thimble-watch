@@ -13,16 +13,29 @@ Python runs with -S, since the file uses only the standard library and runs on e
     .thimble-watch --held               the UserPromptSubmit hook that adds the events held for main to the prompt
                                         and prints the lines of the events the watcher wrote out
     .thimble-watch --mode               the UserPromptSubmit and Stop hook that reports the session's permission mode
-    .thimble-watch --agents             the PostToolUse hook that prints the start and end lines of thimble's
-                                        agents
-    .thimble-watch --agent-check        the PreToolUse hook of main's Agent calls
-    .thimble-watch --proxy-stop         the SubagentStop hook that keeps an agent's tray entry going
+    .thimble-watch --agents             the PostToolUse hook that tells thimble's agents and their descendants the ref
+                                        of each call and when their work folder grows past its budget
+    .thimble-watch --agent-check        the PreToolUse hook of Agent and SendMessage calls, main's and its subagents'
+    .thimble-watch --subagent-start     the SubagentStart hook: registers one of thimble's agents or a descendant
+    .thimble-watch --subagent-stop      the SubagentStop hook: a registered agent's turn ended
+    .thimble-watch --caller             the PreToolUse hook of thimble's tools: which agent makes the call
+    .thimble-watch --denied             the PermissionDenied hook: auto mode refused a start or a message (R1)
+    .thimble-watch --end                the SessionEnd hook: main's end
+    .thimble-watch --rekey              the SessionStart hook for clear and resume: the agents move to the new session
+    .thimble-watch --scratch --work <folder> --text <line>
+    .thimble-watch --work-budget --work <folder> --budget <bytes> --text <line>
+                                        the SubagentStart and PostToolUse hooks of an extension's program session
+                                        (app/agent_session.py scratch_hooks)
     .thimble-watch --stream --cwd <folder> --session <id>
                                         the Monitor route
 
-Every hook but the stream does nothing without $THIMBLE_HOME/server.json and the token in it. Each request proves it
-holds the token and each answer must prove the server does (app/hook_auth.py); an answer without that proof counts as
-no server, so a process on the recorded port is neither told anything nor believed.
+The hooks of thimble's agents (--agent-check, --subagent-start, --subagent-stop, --caller, --denied, --end, --rekey)
+write their record to the workspace's files first, under a file lock (app/subagent_files.py: subagents.json and
+callers.jsonl), and post to the server only when server.json names one; --agent-check decides from subagents.json alone.
+They find the workspace from the session's folder as the server does, importing app/subagent_files.py from the tree
+(which is standard library only). Every other hook but the stream does nothing without $THIMBLE_HOME/server.json and the
+token in it. Each request proves it holds the token and each answer must prove the server does (app/hook_auth.py); an
+answer without that proof counts as no server, so a process on the recorded port is neither told anything nor believed.
 
 The hook long-polls the server for the session's next event (GET /api/events/pull), writes it to stderr in the
 `<thimble-event …>` form, acknowledges it and exits 2, which makes Claude Code wake the session. It exits 0 in a
@@ -36,7 +49,9 @@ The held hook runs as each of main's turns begins, on a prompt the analyst typed
 with: it takes the events the server holds for main (app/events.py QUIET_KINDS) and prints them as the prompt's added
 context, and prints the lines main's terminal shows of the events the watcher wrote out (app/events.py terminal_line)
 as its systemMessage, since Claude Code shows such an event only as the fixed rewakeSummary. It prints nothing in a
-subagent, when nothing waits or when no server answers within HELD_WAIT_S.
+subagent, when nothing waits or when no server answers within HELD_WAIT_S. It never blocks a prompt: the hand-back of one
+of thimble's agents, and in default mode a later run's task notification, reach main as Claude Code sends them, and
+main replies in one line (prompts/main.md).
 
 The mode hook tells the server (POST /api/events/mode) the permission mode Claude Code reports for the session as each
 of its turns begins and ends, which is the mode the agents thimble starts follow by default. It sends nothing in a
@@ -44,12 +59,17 @@ subagent. As a turn ends it also shows, once, as its systemMessage, the dashboar
 (app/cli.py leave_link): the link carries the key that lets the browser answer permission requests and change
 permission modes, and a systemMessage reaches the analyst's terminal but not the model's context.
 
-The agents hook asks the server (POST /api/agents) for the lines main's terminal has not shown about thimble's agents,
-each one's start and the end of each run, and prints them as the hook's systemMessage. The held hook prints them too.
-The proxy-stop hook asks the server (POST /api/bg/proxy-stop) whether a tray entry's agent still runs, and if so tells
-Claude Code to keep the entry going. The agent-check hook asks the server (POST /api/bg/agent-check) whether main's
-Agent call would start a second tray entry of an agent or a second fork of a thread, and refuses such a call. Each
-prints nothing when no server answers.
+The agents hook tells one of thimble's agents, or a descendant of one, the ref of each call it made (POST
+/api/ws/<c>/calls/ref, for the orientation and its descendants, whose calls its thread numbers) and, after a Bash call,
+when the work folder of its thimble ancestor holds more than WORK_BUDGET (`## work-budget` of prompts/tools.md), at most
+once per budget step and every CHECK_S. It prints nothing for main.
+
+The agent-check hook runs on main's Agent and SendMessage calls and on those of its subagents (app/subagent_files.py
+check_call): it lets a start of one of thimble's roles through only when it matches a pending request exactly, records a
+subagent's Agent call as a nested start, denies a SendMessage to one of thimble's agents that no pending message request
+names, and asks the server (POST /api/bg/agent-check) only whether main's Agent call would start a second fork of a
+thread. It never answers allow and never rewrites the call. The waker exits at once in `claude -p` (main's command line
+has -p or --print), which would otherwise wait for it and never call the model.
 
 The stream writes each event as one block of lines. Claude Code truncates Monitor output at 500 characters per line and
 about 3,000 per event, so lines are wrapped under LINE_CHARS and a longer event is cut and saved whole under
@@ -340,9 +360,8 @@ def held(inp: dict) -> int:
         return 0
     text, said = (str(answer.get("text") or ""), str(answer.get("terminal") or "")) if status == 200 else ("", "")
     out: dict = {"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": text}} if text else {}
-    lines = "\n".join(x for x in (said, announcements(inp)) if x)
-    if lines:
-        out["systemMessage"] = lines
+    if said:
+        out["systemMessage"] = said
     if out:
         print(json.dumps(out))
     return 0
@@ -379,57 +398,337 @@ def show_link(session: str) -> None:
         print(json.dumps({"systemMessage": f"thimble: {url}" + (f"\n{notes}" if notes else "")}))
 
 
-def announcements(inp: dict) -> str:
-    """The start and end lines of thimble's agents main's terminal has not shown yet (module note)."""
-    body = {"cwd": folder(inp), "session": str(inp.get("session_id") or "") or None, "announce": True}
+# --------------------------------------------------------------------------- the hooks of thimble's agents
+
+
+def files():
+    """app/subagent_files.py from the tree this plugin copy belongs to (module note)."""
+    tree = os.environ.get("THIMBLE_APP_DIR") or str(Path(__file__).resolve().parents[2])
+    backend = str(Path(tree) / "backend")
+    if backend not in sys.path:
+        sys.path.insert(0, backend)
+    from app import subagent_files  # noqa: PLC0415
+
+    return subagent_files
+
+
+def workspace(inp: dict):
+    """(app/subagent_files.py, the workspace folder of the session's folder), or (the module, None) for a folder of no
+    workspace."""
+    sf = files()
+    return sf, sf.workspace_folder(folder(inp))
+
+
+def post(path: str, body: dict, timeout: float = AGENTS_WAIT_S) -> dict:
+    """The server's JSON answer to `body` posted to `path`, {} when no server runs or it does not answer."""
+    if server() is None:
+        return {}
     try:
-        status, answer = request("POST", "/api/agents", body, timeout=AGENTS_WAIT_S)
+        status, answer = request("POST", path, body, timeout=timeout)
     except (OSError, http.client.HTTPException):
-        return ""
-    return str(answer.get("announce") or "") if status == 200 else ""
+        return {}
+    return answer if status == 200 else {}
 
 
-def agents_hook(inp: dict) -> int:
-    """The agents hook (module note)."""
-    if inp.get("agent_id"):
-        return 0
-    lines = announcements(inp)
-    if lines:
-        print(json.dumps({"systemMessage": lines}))
-    return 0
+def deny(reason: str) -> None:
+    print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
+                                             "permissionDecisionReason": reason}}))
 
 
 def agent_check(inp: dict) -> int:
     """The agent-check hook (module note)."""
     tool_input = inp.get("tool_input") if isinstance(inp.get("tool_input"), dict) else {}
-    if inp.get("agent_id") or not tool_input:
+    if not tool_input:
         return 0
-    body = {"cwd": folder(inp), "agent_id": None, "tool_use_id": inp.get("tool_use_id") or None,
-            "tool_input": tool_input}
-    try:
-        status, answer = request("POST", "/api/bg/agent-check", body, timeout=AGENTS_WAIT_S)
-    except (OSError, http.client.HTTPException):
+    sf, ws = workspace(inp)
+    if ws is None:
         return 0
-    if status == 200 and answer.get("deny"):
-        print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
-                                                 "permissionDecisionReason": str(answer.get("reason") or "")}}))
+    with sf.update(ws) as state:
+        reason = sf.check_call(state, inp)
+    if reason is not None:
+        deny(reason or sf.hint("agent-check-exact") or "thimble did not ask for this call")
+        return 0
+    if inp.get("agent_id") or str(inp.get("tool_name") or "") not in sf.AGENT_TOOLS:
+        return 0
+    answer = post("/api/bg/agent-check", {"cwd": folder(inp), "agent_id": None, "tool_use_id": inp.get("tool_use_id"),
+                                          "tool_input": tool_input})
+    if answer.get("deny"):
+        deny(str(answer.get("reason") or ""))
     return 0
 
 
-def proxy_stop(inp: dict) -> int:
-    """The proxy-stop hook (module note)."""
-    body = {"cwd": folder(inp), "agent_id": inp.get("agent_id") or None, "agent_type": str(inp.get("agent_type") or ""),
-            "agent_transcript_path": inp.get("agent_transcript_path") or None,
-            "stop_hook_active": bool(inp.get("stop_hook_active"))}
-    if not body["agent_type"].startswith("thimble:"):
+SCRATCH_PREFIX = "tmp_"  # app/work_files.py: the scratch folders a run's end deletes
+
+
+def subagent_start(inp: dict) -> int:
+    """The SubagentStart hook (module note): the agent registered, then the scratch line for a descendant of one of
+    thimble's agents, a folder of its own in its ancestor's work folder (## session-scratch)."""
+    sf, ws = workspace(inp)
+    if ws is None:
         return 0
-    try:
-        status, answer = request("POST", "/api/bg/proxy-stop", body, timeout=AGENTS_WAIT_S)
-    except (OSError, http.client.HTTPException):
+    with sf.update(ws) as state:
+        entry = sf.register(state, inp)
+    if entry is None:
         return 0
-    if status == 200 and answer.get("block"):
-        print(json.dumps({"decision": "block", "reason": str(answer.get("reason") or "")}))
+    post("/api/subagents/started", {"cwd": folder(inp), "hook": inp})
+    work = entry.get("work") if entry.get("descendant") else None
+    agent = "".join(ch for ch in str(inp.get("agent_id") or "") if ch.isalnum() or ch in "-_")[:64]
+    if work and agent:
+        scratch = Path(str(work)) / f"{SCRATCH_PREFIX}{agent}"
+        try:
+            scratch.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            return 0
+        text = sf.hint("session-scratch", folder=str(scratch))
+        if text:
+            print(json.dumps({"hookSpecificOutput": {"hookEventName": "SubagentStart", "additionalContext": text}}))
     return 0
+
+
+def subagent_stop(inp: dict) -> int:
+    """The SubagentStop hook (module note)."""
+    if inp.get("stop_hook_active") or not str(inp.get("agent_type") or ""):
+        return 0
+    sf, ws = workspace(inp)
+    if ws is None:
+        return 0
+    with sf.update(ws) as state:
+        entry = sf.record_stop(state, inp)
+    if entry is not None:
+        post("/api/subagents/stopped", {"cwd": folder(inp), "hook": inp})
+    return 0
+
+
+def caller(inp: dict) -> int:
+    """The caller hook (module note): the line of callers.jsonl that names the agent making a thimble call, and the
+    parent of a descendant whose nested start was ambiguous, from its meta.json."""
+    agent = str(inp.get("agent_id") or "")
+    if not agent:
+        return 0
+    sf, ws = workspace(inp)
+    if ws is None:
+        return 0
+    sf.add_caller(ws, str(inp.get("tool_use_id") or ""), agent, str(inp.get("agent_type") or ""))
+    entry = sf.registry(sf.read(ws)).get(agent)
+    if isinstance(entry, dict) and entry.get("candidates") and not entry.get("parent"):
+        parent = parent_of(inp, agent)
+        if parent:
+            with sf.update(ws) as state:
+                sf.resolve_parent(state, agent, parent)
+    return 0
+
+
+def parent_of(inp: dict, agent: str) -> str:
+    """`parentAgentId` in the agent's meta.json, beside its transcript under main's session folder."""
+    main = str(inp.get("transcript_path") or "")
+    sid = str(inp.get("session_id") or "")
+    if not main or not sid:
+        return ""
+    meta = Path(main).parent / sid / "subagents" / f"agent-{agent}.meta.json"
+    try:
+        data = json.loads(meta.read_text("utf-8"))
+    except (OSError, ValueError):
+        return ""
+    return str(data.get("parentAgentId") or "") if isinstance(data, dict) else ""
+
+
+def denied(inp: dict) -> int:
+    """The PermissionDenied hook (module note): R1."""
+    sf, ws = workspace(inp)
+    if ws is None:
+        return 0
+    with sf.update(ws) as state:
+        hit = sf.record_denied(state, inp)
+    if hit is not None:
+        post("/api/subagents/denied", {"cwd": folder(inp), "hook": {**inp, "request": hit[0]}})
+    return 0
+
+
+END_POST_S = 1.0  # the SessionEnd hook's post is sent and not waited for longer than this
+
+
+def end(inp: dict) -> int:
+    """The SessionEnd hook (module note): main's end recorded, with its `claude` process (the --rekey that follows a
+    /clear finds it by it); on clear and resume only that, since the new session waits for this hook."""
+    if inp.get("agent_id"):
+        return 0
+    sf, ws = workspace(inp)
+    if ws is None:
+        return 0
+    with sf.update(ws) as state:
+        sf.record_end(state, {**inp, "pid": claude_pid()})
+    if str(inp.get("reason") or "") in ("clear", "resume"):
+        return 0
+    post("/api/subagents/end", {"cwd": folder(inp), "hook": inp}, timeout=END_POST_S)
+    return 0
+
+
+def rekey(inp: dict) -> int:
+    """The SessionStart hook for clear and resume (module note): the agents the session that ended in this `claude`
+    process (its SessionEnd record) left running move to the new session."""
+    if inp.get("agent_id") or str(inp.get("source") or "") not in ("clear", "resume"):
+        return 0
+    sf, ws = workspace(inp)
+    if ws is None:
+        return 0
+    new = str(inp.get("session_id") or "")
+    pid = claude_pid()
+    with sf.update(ws) as state:
+        last = state.get("main_end") if isinstance(state.get("main_end"), dict) else {}
+        old = str(last.get("session") or "") if not pid or not last.get("pid") or last.get("pid") == pid else ""
+        moved = sf.rekey(state, old, new) if old else []
+    if old:
+        post("/api/subagents/rekey", {"cwd": folder(inp), "hook": {**inp, "old": old, "moved": moved}})
+    return 0
+
+
+WORK_BUDGET = 2 * 1000 ** 3  # bytes: app/agent_session.py WORK_BUDGET
+CHECK_S = 30.0  # the work folder is measured at most this often
+BUDGET_FILE = ".thimble-budget.json"  # in the work folder: when it was measured, and the last budget step warned of
+WALK_MAX = 500_000  # the entries of the folder counted at most, so that a measure stays short
+
+
+def size_of(work: Path) -> int:
+    """The bytes of the files under `work`, links counted as links and never followed."""
+    total = n = 0
+    for root, dirs, names in os.walk(work):
+        for name in names:
+            try:
+                total += os.lstat(os.path.join(root, name)).st_size
+            except OSError:
+                pass
+        n += len(names) + len(dirs)
+        if n > WALK_MAX:
+            break
+    return total
+
+
+def _size(n: int) -> str:
+    return f"{n / 1e9:.1f} GB" if n >= 1e9 else f"{n / 1e6:.0f} MB"
+
+
+def budget_line(work: Path, budget: int, text: str) -> str:
+    """The work-budget warning for `work` when it grew past another whole `budget` since the last one, at most every
+    CHECK_S ('' otherwise); `{size}`, `{budget}` and `{folder}` in `text` filled."""
+    if budget <= 0 or not work.is_dir() or not text:
+        return ""
+    state_file = work / BUDGET_FILE
+    try:
+        state = json.loads(state_file.read_text("utf-8"))
+        checked, warned = float(state["checked"]), int(state["warned"])
+    except (OSError, ValueError, TypeError, KeyError):
+        checked, warned = 0.0, 0
+    now = time.time()
+    if now - checked < CHECK_S:
+        return ""
+    size = size_of(work)
+    step = size // budget
+    say = step > warned
+    try:
+        tmp = state_file.with_name(f"{BUDGET_FILE}.{os.getpid()}.tmp")
+        tmp.write_text(json.dumps({"checked": now, "size": size, "warned": step if say else min(warned, step)}), "utf-8")
+        os.replace(tmp, state_file)
+    except OSError:
+        return ""
+    if not say:
+        return ""
+    return text.replace("{size}", _size(size)).replace("{budget}", _size(budget)).replace("{folder}", str(work))
+
+
+THIMBLE_PREFIXES = ("mcp__plugin_thimble_thimble__", "mcp__thimble__")  # app/calls.py THIMBLE_PREFIXES
+PLUMBING = ("ToolSearch",)  # app/session.py PLUMBING_TOOLS
+
+
+def agents_hook(inp: dict) -> int:
+    """The agents hook (module note)."""
+    agent = str(inp.get("agent_id") or "")
+    name = str(inp.get("tool_name") or "")
+    if not agent or not name:
+        return 0
+    sf, ws = workspace(inp)
+    if ws is None:
+        return 0
+    reg = sf.registry(sf.read(ws))
+    entry = reg.get(agent)
+    if not isinstance(entry, dict):
+        return 0
+    root_id = agent if entry.get("role") in sf.ROLES else str(entry.get("root") or "")
+    root = reg.get(root_id) if root_id else None
+    if not isinstance(root, dict):
+        return 0
+    if root.get("role") == "critic" and isinstance(reg.get(str(root.get("parent") or "")), dict):
+        root_id = str(root["parent"])  # the critic's calls are numbered in its orientation's sequence
+        root = reg[root_id]
+    lines = []
+    if root.get("role") == "orientation" and inp.get("tool_use_id") and not name.startswith(THIMBLE_PREFIXES) \
+            and name not in PLUMBING:
+        body = {"session": str(root.get("key") or ""), "tool_use_id": inp.get("tool_use_id"), "tool_name": name,
+                "tool_input": inp.get("tool_input"), "agent_id": None if agent == root_id else agent}
+        answer = post(f"/api/ws/{urllib.parse.quote(ws.name, safe='')}/calls/ref", body)
+        if answer.get("context"):
+            lines.append(str(answer["context"]))
+    work = entry.get("work") or root.get("work")
+    if name == "Bash" and work:
+        warn = budget_line(Path(str(work)), WORK_BUDGET, sf.hint("work-budget", folder="{folder}", size="{size}",
+                                                                  budget="{budget}"))
+        if warn:
+            lines.append(warn)
+    if lines:
+        event = str(inp.get("hook_event_name") or "PostToolUse")
+        print(json.dumps({"hookSpecificOutput": {"hookEventName": event, "additionalContext": "\n".join(lines)}}))
+    return 0
+
+
+def scratch(inp: dict, args: list[str]) -> int:
+    """An extension's program session's SubagentStart hook: the subagent's own scratch folder in the session's work
+    folder (--work), named in --text's `{folder}`."""
+    def arg(name: str) -> str:
+        return args[args.index(name) + 1] if name in args and args.index(name) + 1 < len(args) else ""
+
+    work, text = arg("--work"), arg("--text")
+    agent = "".join(ch for ch in str(inp.get("agent_id") or "") if ch.isalnum() or ch in "-_")[:64]
+    if not work or not text or not agent:
+        return 0
+    folder_ = Path(work) / f"{SCRATCH_PREFIX}{agent}"
+    try:
+        folder_.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        return 0
+    print(json.dumps({"hookSpecificOutput": {"hookEventName": "SubagentStart",
+                                             "additionalContext": text.replace("{folder}", str(folder_))}}))
+    return 0
+
+
+def budget(args: list[str]) -> int:
+    """An extension's program session's PostToolUse hook of Bash: the work-budget warning for --work (budget_line)."""
+    def arg(name: str) -> str:
+        return args[args.index(name) + 1] if name in args and args.index(name) + 1 < len(args) else ""
+
+    try:
+        n = int(arg("--budget"))
+    except ValueError:
+        return 0
+    line = budget_line(Path(arg("--work")), n, arg("--text")) if arg("--work") else ""
+    if line:
+        print(json.dumps({"hookSpecificOutput": {"hookEventName": "PostToolUse", "additionalContext": line}}))
+    return 0
+
+
+def printing(pid: int | None) -> bool:
+    """Whether the `claude` process `pid` runs with -p or --print (module note, the waker)."""
+    if not pid:
+        return False
+    try:
+        argv = Path(f"/proc/{pid}/cmdline").read_bytes().split(b"\0")
+        args = [a.decode("utf-8", "replace") for a in argv if a]
+    except OSError:
+        import subprocess  # noqa: PLC0415 — macOS: no /proc
+        try:
+            out = subprocess.run(["ps", "-o", "args=", "-p", str(pid)], capture_output=True, text=True, timeout=2).stdout
+        except (OSError, subprocess.SubprocessError):
+            return False
+        args = out.split()
+    return any(a in ("-p", "--print") or a.startswith("--print=") for a in args[1:])
 
 
 def units(s: str) -> int:
@@ -501,12 +800,23 @@ def stream(args: list[str]) -> int:
         ack(cwd, got[2], got[0])
 
 
+FILE_FIRST = {"--agent-check": agent_check, "--subagent-start": subagent_start, "--subagent-stop": subagent_stop,
+              "--caller": caller, "--denied": denied, "--end": end, "--rekey": rekey, "--agents": agents_hook}
+
+
 def main() -> int:
     args = sys.argv[1:]
     try:
         if "--stream" in args:
             return stream(args)
-        if server() is None:  # no thimble server recorded: every hook does nothing (module note)
+        if "--scratch" in args:
+            return scratch(hook_input(), args)
+        if "--work-budget" in args:
+            return budget(args)
+        for flag, fn in FILE_FIRST.items():  # these write the workspace's files first, with or without a server
+            if flag in args:
+                return fn(hook_input())
+        if server() is None:  # no thimble server recorded: every other hook does nothing (module note)
             return 0
         if "--permission" in args:
             return permission(hook_input())
@@ -514,12 +824,8 @@ def main() -> int:
             return held(hook_input())
         if "--mode" in args:
             return mode(hook_input())
-        if "--agents" in args:
-            return agents_hook(hook_input())
-        if "--proxy-stop" in args:
-            return proxy_stop(hook_input())
-        if "--agent-check" in args:
-            return agent_check(hook_input())
+        if printing(claude_pid()):
+            return 0  # the waker in `claude -p` (module note)
         return watch(hook_input())
     except KeyboardInterrupt:
         return 0

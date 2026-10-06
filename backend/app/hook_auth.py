@@ -1,6 +1,6 @@
 """The routes only thimble's plugin and hooks call: the plugin's hooks' (plugin/bin/.thimble-watch, and
 bin/thimble-agents for /api/agents), its MCP shim's (bin/thimble-mcp: the event subscription and tool
-calls), and the hooks of the sessions thimble starts (app/permission_hook.py, app/call_ref.py).
+calls), and the hooks of the sessions thimble starts (app/permission_hook.py).
 
 Any process on the machine can reach a loopback port, and the plugin runs in every Claude Code session that has it,
 so each side proves it holds the token the supervisor writes into <home>/server.json (readable by its owner alone,
@@ -48,7 +48,10 @@ from starlette.responses import Response
 
 HOOK_PATHS = frozenset({
     "/api/events/pull", "/api/events/ack", "/api/events/held", "/api/events/mode", "/api/events/permission",
-    "/api/agents", "/api/bg/relay", "/api/bg/agent-check", "/api/bg/proxy-stop",
+    "/api/agents", "/api/bg/agent-check",
+    # thimble's agents' hooks (subagents.py), each beside the record it wrote to the workspace's files
+    "/api/subagents/started", "/api/subagents/denied", "/api/subagents/stopped", "/api/subagents/end",
+    "/api/subagents/rekey",
 })
 SHIM_PATHS = frozenset({"/api/events"})
 TOOL_PREFIX = "/api/tools/"  # POST /api/tools/<name>; GET /api/tools/holdings is the CLI's and stays open
