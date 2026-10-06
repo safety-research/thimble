@@ -489,6 +489,40 @@ def test_the_server_runs_no_git_in_a_worktree_that_points_elsewhere(monkeypatch,
     assert not marker.exists()
 
 
+def test_a_link_in_place_of_a_worktree_leads_no_git_command_or_removal_elsewhere(monkeypatch, tmp_path):
+    """Main's fence lets main's Bash and its subagents write the folder of the tickets' worktrees, so an agent can put a
+    link there in place of its worktree. The server then runs no git command where the link leads (the live checkout,
+    where a commit, a reset and a clean would change the analyst's work), its box runs nothing, and removing the
+    ticket's worktree removes the link alone, never another worktree of the live checkout it leads to."""
+    repo = _repo(tmp_path)
+    monkeypatch.setattr(dev, "REPO", repo)
+    (repo / "mine.txt").write_text("the analyst's work in progress\n")
+    other = tmp_path / "other-worktree"
+    _git(repo, "worktree", "add", "-q", "-b", "other", str(other))
+    (other / "draft.txt").write_text("not committed\n")
+    head = _git(repo, "rev-parse", "HEAD")
+    wt, _branch, _base = dev.create_worktree("t8")
+    shutil.rmtree(wt)
+    wt.symlink_to(repo)
+    for git_call in (lambda: dev.touched_files(wt), lambda: dev.commit_worktree(wt, "t8"),
+                     lambda: dev.reset_worktree(wt, head)):
+        with pytest.raises(dev.GitError, match="a link"):
+            git_call()
+    assert _git(repo, "rev-parse", "HEAD") == head and (repo / "mine.txt").exists()
+    assert _git(repo, "status", "--porcelain") == "?? mine.txt", "nothing was staged or committed in the live checkout"
+    box = ticket_box.Box(wt, tmp_path / "cache", tmp_path / "srt", live=repo)
+    assert asyncio.run(ticket_box.run(box, ["true"], cwd=wt, timeout=5)) == (-1, ticket_box.TREE_LINKED)
+    wt.unlink()
+    wt.symlink_to(other)
+    dev.remove_worktree(wt)
+    assert not wt.is_symlink() and not wt.exists()
+    assert (other / "draft.txt").read_text() == "not committed\n", "the worktree the link led to is still there"
+    assert str(other) in _git(repo, "worktree", "list")
+    dev.worktree_path("t7").symlink_to(other)  # planted before the ticket was filed
+    wt7, _b, _s = dev.create_worktree("t7")
+    assert wt7.is_dir() and not wt7.is_symlink() and (other / "draft.txt").exists()
+
+
 APP = '''
 import json, pathlib, socket
 def attempt(f):

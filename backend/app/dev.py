@@ -613,10 +613,26 @@ WORKTREE_MOVED = ("the ticket's worktree no longer points at the live checkout's
 
 
 def _in_worktrees(cwd: Path) -> bool:
+    """Whether `cwd` is in the folder of the tickets' worktrees, by its name or by where it leads. Main's fence lets
+    main's Bash and its subagents write that folder, so a link there in place of a worktree is in it too: its git
+    commands are checked (_check_worktree), and never run in the folder the link leads to, such as the live checkout."""
+    trees = worktrees_dir()
     try:
-        return Path(cwd).resolve().is_relative_to(worktrees_dir().resolve())
+        named = Path(os.path.abspath(cwd))
+        return (named.is_relative_to(Path(os.path.abspath(trees))) or named.is_relative_to(trees.resolve())
+                or Path(cwd).resolve().is_relative_to(trees.resolve()))
     except OSError:
         return False
+
+
+def _drop_link(wt: Path) -> bool:
+    """Remove `wt` when it is a link, which an agent may have put in place of a ticket's worktree, and never what it
+    leads to. Whether it was a link."""
+    if not Path(wt).is_symlink():
+        return False
+    with contextlib.suppress(OSError):
+        Path(wt).unlink()
+    return True
 
 
 def _own_config(own: Path) -> bool:
@@ -628,13 +644,19 @@ def _own_config(own: Path) -> bool:
 
 def _check_worktree(wt: Path) -> tuple[Path, Path]:
     """(the worktree's own git folder, the live checkout's git folder): the checkout's `worktrees/<name>`. GitError
-    (WORKTREE_MOVED) unless `wt/.git` names that folder, whose commondir is the checkout's git folder, with no config of
-    its own (_own_config)."""
+    (WORKTREE_MOVED) unless `wt` is a folder of worktrees_dir itself, not a link, and `wt/.git` is a file (no link)
+    that names that folder, whose commondir is the checkout's git folder, with no config of its own (_own_config)."""
     common = Path(subprocess.run(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"], cwd=str(REPO),
                                  capture_output=True, text=True, timeout=60).stdout.strip()).resolve()
     own = common / "worktrees" / Path(wt).name
+    dot = Path(wt) / ".git"
     try:
-        text = (Path(wt) / ".git").read_text("utf-8").strip()
+        if Path(wt).is_symlink() or Path(wt).resolve().parent != worktrees_dir().resolve():
+            raise GitError(WORKTREE_MOVED.format(why="it is a link or lies outside thimble's folder of worktrees"))
+        if dot.is_symlink() or not dot.is_file():
+            raise GitError(WORKTREE_MOVED.format(why="its .git is not a file"))
+        with dot.open("r", encoding="utf-8", errors="replace") as f:
+            text = f.read(4096).strip()
         why = ("its .git is not a gitdir line" if not text.startswith("gitdir: ") else
                "its .git names another git folder" if Path(text.removeprefix("gitdir: ")).resolve() != own else
                "its git folder names another commondir"
@@ -722,7 +744,7 @@ def create_worktree(tid: str) -> tuple[Path, str, str]:
     """`git worktree add -b dev/<id>` off the live branch, node_modules and .venv linked in. (path, branch, base sha)."""
     wt = worktree_path(tid)
     branch = f"dev/{tid}"
-    if wt.exists():
+    if not _drop_link(wt) and wt.exists():
         _git(REPO, "worktree", "remove", "--force", str(wt), check=False)
         shutil.rmtree(wt, ignore_errors=True)
     _git(REPO, "worktree", "prune", check=False)
@@ -739,8 +761,12 @@ def create_worktree(tid: str) -> tuple[Path, str, str]:
 
 
 def remove_worktree(wt: Path) -> None:
-    _git(REPO, "worktree", "remove", "--force", str(wt), check=False)
-    shutil.rmtree(wt, ignore_errors=True)
+    """Remove a ticket's worktree and its record in the live checkout's git folder. A link in its place goes alone:
+    `git worktree remove --force` given a link would remove the worktree the link leads to, which can be another
+    worktree of the live checkout (_drop_link)."""
+    if not _drop_link(wt):
+        _git(REPO, "worktree", "remove", "--force", str(wt), check=False)
+        shutil.rmtree(wt, ignore_errors=True)
     _git(REPO, "worktree", "prune", check=False)
 
 
@@ -751,7 +777,7 @@ def delete_branch(branch: str) -> None:
 
 def remove_ticket_tree(t: dict[str, Any]) -> None:
     wt = t.get("worktree")
-    if wt and Path(wt) != REPO and Path(wt).exists():
+    if wt and Path(wt) != REPO and (Path(wt).exists() or Path(wt).is_symlink()):
         remove_worktree(Path(wt))
     delete_branch(str(t.get("branch") or ""))
 
@@ -2476,7 +2502,7 @@ async def _end_ticket(run: Run, t: dict[str, Any], status: str, error: str | Non
         if now.get("in_box") is not True:
             await stop_stack(tid)
         wt = now.get("worktree")
-        if wt and Path(str(wt)) != REPO and Path(str(wt)).exists():
+        if wt and Path(str(wt)) != REPO and (Path(str(wt)).exists() or Path(str(wt)).is_symlink()):
             await asyncio.to_thread(remove_worktree, Path(str(wt)))
         await asyncio.to_thread(remove_box, tid)
         await asyncio.to_thread(shutil.rmtree, ticket_work_dir(tid), True)
@@ -2514,7 +2540,7 @@ def _end_now(t: dict[str, Any], status: str, error: str) -> None:
     try:
         _unhost_card(t)
         wt = t.get("worktree")
-        if wt and Path(str(wt)) != REPO and Path(str(wt)).exists():
+        if wt and Path(str(wt)) != REPO and (Path(str(wt)).exists() or Path(str(wt)).is_symlink()):
             remove_worktree(Path(str(wt)))
         remove_box(t["id"])
         shutil.rmtree(ticket_work_dir(t["id"]), ignore_errors=True)
