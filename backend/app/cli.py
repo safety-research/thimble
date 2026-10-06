@@ -2261,7 +2261,7 @@ def _launch_args(cwd: Path, resume: bool, settings: str, own_session: str | None
     load = "" if installed or cc_plugin.marketplace(root) != cc_plugin.INLINE else str(root)
     # main's prompt, rendered once launch.json names the session's mode, in the environment the session gets, so that
     # launch_mode.current finds that mode here as in the session
-    with environ(exports):
+    with with_environ(exports):
         prompt = events.session_prompt(str(cwd.resolve()), bool(turn_tools))
     return "\n".join([load, tools_line, effort, settings_value, turn_tools,
                       main_name(cwd), session_id, " ".join(f"{k}={v}" for k, v in switches.items()), " ".join(unset),
@@ -2269,7 +2269,7 @@ def _launch_args(cwd: Path, resume: bool, settings: str, own_session: str | None
 
 
 @contextmanager
-def environ(values: Mapping[str, str]) -> Iterator[None]:
+def with_environ(values: Mapping[str, str]) -> Iterator[None]:
     """This process's environment with `values` set for the block, and put back after it."""
     held = {k: os.environ.get(k) for k in values}
     os.environ.update(values)
