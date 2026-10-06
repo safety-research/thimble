@@ -2237,7 +2237,6 @@ async def _launch_ticket(run: Run, t: dict[str, Any], route: str, call: str | No
         raise
     except Exception as e:  # noqa: BLE001
         status, error = _failure(e)
-        _log_for(t).error(error)
         await _end_ticket(run, t, status, error)
         return subagents.refusal(subagents.HOOK, error)
 
@@ -2312,8 +2311,6 @@ def ticket_refused(c: str, req: dict[str, Any]) -> None:
     reason = str(req.get("reason") or req.get("refused_kind") or "no reason given")
     status = run.stop_reason or "failed"
     error = run.why if run.stop_reason else NOT_STARTED_LINE.format(reason=reason)
-    if not run.stop_reason:
-        _log_for(t).error(error)
     _soon(lambda: _end_ticket(run, t, status, error), f"ticket-refused:{tid}")
 
 
@@ -2399,7 +2396,6 @@ async def _settle_ticket(run: Run, t: dict[str, Any], agent_id: str, status: str
             return
         if finish.get("result") == "stop":
             st, err = "failed", str(finish.get("report") or NO_PASS_LINE)[:ERROR_CHARS]
-            run_log.error(err)
             return
         if finish.get("result") != "pass":
             if status == "stopped":
@@ -2423,7 +2419,6 @@ async def _settle_ticket(run: Run, t: dict[str, Any], agent_id: str, status: str
                        or (f"{NO_PASS_LINE}: {words}" if made and words else NO_PASS_LINE if made else
                            f"{NO_CHANGE_LINE}: {words}" if words else NO_CHANGE_LINE))
                 st = "failed"
-                run_log.error(err)
                 return
         wt, branch, base = Path(str(t["worktree"])), str(t["branch"]), str(t["base"])
         change = str(finish.get("change") or t.get("change") or "")
@@ -2449,7 +2444,6 @@ async def _settle_ticket(run: Run, t: dict[str, Any], agent_id: str, status: str
             run_log.stage(f"applied to the live branch ({str(res['commit'])[:7]})")
         else:
             st, err, restart = res["status"], res["error"], None
-            run_log.error(err or "apply failed")
     except asyncio.CancelledError:
         if not applied:
             shut = _closing
@@ -2458,7 +2452,6 @@ async def _settle_ticket(run: Run, t: dict[str, Any], agent_id: str, status: str
     except Exception as e:  # noqa: BLE001
         if not applied:
             st, err = _failure(e)
-            run_log.error(err)
             restart = None
     finally:
         if not shut:  # a shutdown leaves the ticket to the next server, which asks for the Allow again (_recover)
