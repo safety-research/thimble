@@ -38,7 +38,7 @@ import { Divider, Note, ThreadChip, ThreadsContext } from './Notes'
 import { RefText } from './markdown'
 import { CallFocusContext, MAIN_RETRY_NOTE, Rows, THREAD_RETRY_NOTE, type CallFocus, type ErrorRetry } from './Rows'
 import { countMessages, isUnread, markSeen, readSeen, type SeenMap } from './seen'
-import { SKIPPED_NOTE, StartGate, restoreOf, startGateShown } from './StartGate'
+import { SKIPPED_NOTE, StartGate, restoreOf, startGateShown, startedChat } from './StartGate'
 import { AgentCard, stopSession, useAgentRows } from './AgentCard'
 import { OrientStart, useOrientRun } from './OrientStart'
 import { CONTINUE_HERE_LINE, PAUSED_LINE, continueOf, continueText, lastSession } from './subagent'
@@ -584,6 +584,9 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
     // started (or an extension's program runs it): the gate gives way at once; refused: it comes back, filled in
     setStarted(!!a && (!!a.agentId || !!a.program))
     if (a && (a.agentId || a.program)) setAgainGate(false)
+    // the orientation's thread opens on its first steps, as Start was the analyst's own click here
+    const opened = startedChat(a)
+    if (opened) setCurrent(opened)
   }
   const agentRows = useAgentRows(ws, [...new Set([...runningAgents.map((m) => m.id), ...orientIds])])
   const orienting = current === 'main' ? runningAgents.find((m) => threadKind(m) === 'orient') : undefined

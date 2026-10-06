@@ -689,6 +689,8 @@ export interface Refusal {
  * that runs it instead. */
 export interface StartAnswer {
   agentId?: string
+  /** the started agent's chat, which the browser opens (its thread, on its first steps) */
+  chat?: string
   request?: string
   kind?: RefusalKind
   reason?: string

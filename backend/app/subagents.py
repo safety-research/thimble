@@ -627,8 +627,8 @@ async def _spawn(c: str, rid: str, r: dict[str, Any]) -> Answer:
     ans = await _bridge(c, "spawn", role=r.get("role"), values=r.get("values") or {}, prompt=inp.get("prompt"),
                         description=inp.get("description"), request=rid, what=_what(r))
     if ans.started:
-        bind(c, str(ans.agent_id), rid)
-        return Answer({**ans, "request": rid})
+        meta = bind(c, str(ans.agent_id), rid)  # its chat, which the browser opens after a click (Start's thread)
+        return Answer({**ans, "request": rid, **({"chat": meta["id"]} if meta and meta.get("id") else {})})
     if ans.get("expired"):
         expire(c, rid)
     else:

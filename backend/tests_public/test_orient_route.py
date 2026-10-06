@@ -147,6 +147,7 @@ async def test_start_in_the_browser_spawns_through_the_module_with_the_gate_s_va
     assert rec["started_by"] == "click" and rec["chats"]["orient"]
     meta = agents.read_meta(CORPUS, rec["chats"]["orient"])
     assert meta["route"] == "subagent" and meta["agent_id"] == ans.agent_id and meta["title"] == orientation.TITLE
+    assert ans["chat"] == rec["chats"]["orient"], "the answer names its thread, which the browser opens (live check L1)"
 
 
 async def test_a_start_refused_by_the_module_ends_the_record_refused_with_its_kind(bridge, models, workspaces_tmp):

@@ -58,6 +58,11 @@ export function startGateShown(s: { main: boolean; skipped: boolean; started: bo
   return s.main && !s.started && !s.loading && !s.error && (!!s.again || (!s.skipped && startGateOpen(s.orientation, s.orientChats)))
 }
 
+/** The chat a click start opens: the started agent's (its thread opens on its first steps), else none. Pure. */
+export function startedChat(a: StartAnswer | null | undefined): string | null {
+  return a?.agentId && a.chat ? a.chat : null
+}
+
 /** The switches that are on, in the gate's order. */
 export const chosenPasses = (on: Passes): OrientPass[] => PASSES.map((p) => p.id).filter((id) => on[id])
 

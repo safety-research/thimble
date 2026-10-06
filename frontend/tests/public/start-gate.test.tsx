@@ -6,7 +6,7 @@
 // while thimble's hooks module is not in main's session or main is in plan mode; a refused start fills the gate again.
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
-import { DEFAULT_ON, PLAN_MODE_LINE, StartGate, modeLine, noModuleLine, restoreOf, startBlocked, startBody, startGateOpen, startGateShown } from '../../src/chat/StartGate.tsx'
+import { DEFAULT_ON, PLAN_MODE_LINE, StartGate, modeLine, noModuleLine, restoreOf, startBlocked, startBody, startGateOpen, startGateShown, startedChat } from '../../src/chat/StartGate.tsx'
 import { UNFENCED_LINE } from '../../src/shell/UnfencedBanner.tsx'
 import { invalidateSettings } from '../../src/lib/models.ts'
 import { mount, settle, unmountAll } from './mount.tsx'
@@ -124,6 +124,13 @@ describe('its rules', () => {
     expect(startGateOpen('running', 1)).toBe(false)
     expect(startGateOpen('refused', 1)).toBe(true)
     expect(startGateOpen('starting', 0)).toBe(false)
+  })
+
+  test("a started orientation's thread opens; a refused start opens none (live check L1)", () => {
+    expect(startedChat({ agentId: 'a1', chat: 'c1', request: 'r' })).toBe('c1')
+    expect(startedChat({ kind: 'hook', reason: 'An orientation is already running.' })).toBeNull()
+    expect(startedChat({ program: 'ext' })).toBeNull()
+    expect(startedChat(null)).toBeNull()
   })
 
   test("New orientation opens the gate in main though one ran, unless main is not shown or Start was pressed", () => {
