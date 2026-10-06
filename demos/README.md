@@ -113,10 +113,11 @@ each one written (backend/app/precached.py).
 1. Download the dataset as a user would, so the orientation runs on the same bytes. Point `--precaches` at an empty
    folder so that no pre-cache is installed: `thimble demo collusion-wiki --dir ~/demo-src --precaches /tmp/none`.
 2. Run the orientation in `~/demo-src/collusion-wiki` by one of two routes:
-   - **By hand.** Run `thimble` there. In Start, set the orientation's model to Opus 5.5 with Ultracode, and start it
-     with no prompt. Keep the page open (a request waits on its card unless the permission modes are Bypass) and the
-     session running (main asks for the report).
-   - **With no model in main.** Run `scripts/dev/precache_orientation.py`.
+   - **By hand.** Run `thimble` there. In Start, set the orientation's model to Opus 5.5 at xhigh effort, and start
+     it with no prompt. Keep the session running, since the orientation and the writer of its report run as its
+     subagents, and answer in the terminal any permission request your permission mode leaves to you.
+   - **Scripted.** Run `scripts/dev/precache_orientation.py`, which runs `thimble` on a tmux socket of its own and
+     presses Start as the browser does.
 
    Wait until it is done: its views built and its report written. Claude's cyber safeguards flag mythos-5 under Opus
    5.5, and stopped an Opus 5.5 session that read a sample of transluce-gov (2026-10-06). On 2026-10-05, an earlier
@@ -147,9 +148,9 @@ each one written (backend/app/precached.py).
 what thimble rebuilds (label and view indexes, caches, kernels, the scratch mirror of the corpus) or what belonged to
 the exporter's processes (sessions, the agent tray's instructions, the browser's telemetry). That is every chat and
 call output, the labels with each row's rationale and the texts it marked, the views with their earlier versions, the
-work files and card checks, and in `transcripts/` the Claude Code transcripts of the sessions thimble ran in the
-workspace (the orientation, its critic, the writers, view builds), with what Claude Code keeps beside each (saved tool
-outputs, subagents). Each transcript drops the records Claude Code added about the exporter's machine and account
+work files and card checks, and in `transcripts/` the Claude Code transcripts of the workspace's sessions with the
+subagents thimble ran in them (the orientation, its critic, the writers, view builds, reviews and checks), and what
+Claude Code keeps beside each (saved tool outputs). Each transcript drops the records Claude Code added about the exporter's machine and account
 (their CLAUDE.md files, email, organization, skills), as `demo_scrub.clean_transcript` describes. Absolute paths are
 written as the same placeholders, and `--scrub-user` writes `user` in place of your user name.
 
@@ -158,10 +159,10 @@ rationales, how much of the dataset's text it holds and where, what may be priva
 gitleaks' findings) and what it left out, each with its size. The manifest holds the same in `inventory` and
 `verbatim`, and lists each file and transcript with its SHA-256.
 
-`thimble demo <dataset> --precaches <out>` installs it. Each transcript goes where Claude Code resumes it, under a new
-session id that the workspace's files name in place of the old one, so a message in the orientation's thread continues
-the orientation's session, and a writer or a view build continues too. The mark says `kept`, and the orientation's
-thread says its session came with it.
+`thimble demo <dataset> --precaches <out>` installs it. Each transcript goes where Claude Code keeps it, under a new
+session id that the workspace's files name in place of the old one, so every thread shows its steps. Its agents ran as
+subagents of the exporter's session, so none of them can be continued: the orientation's thread says so, and Start
+runs a new orientation.
 
 A full export holds the dataset's text, so `scripts/check_content.py` refuses it under `demos/`.
 
