@@ -8,7 +8,7 @@ import { act, useState } from 'react'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { ThreadsContext } from '../../src/chat/Notes.tsx'
 import { ARM_MS, EXPIRED_TITLE, PermissionCard } from '../../src/chat/PermissionCard.tsx'
-import { askWhy, pendingRequests, type PendingAsk } from '../../src/chat/permissions.ts'
+import { askWhy, autoModeRefusal, pendingRequests, type PendingAsk } from '../../src/chat/permissions.ts'
 import { bus } from '../../src/lib/bus.ts'
 import { newest, STALE } from '../../src/lib/newest.ts'
 import type { ChatMeta, PermissionRequest } from '../../src/lib/types.ts'
@@ -45,6 +45,15 @@ const METAS = new Map([[ORIENT.id, ORIENT]])
 const req = (id: string, extra: Partial<PermissionRequest> = {}): PermissionRequest => ({ id, tool: 'Bash', what: 'Count the runs', ...extra }) as PermissionRequest
 
 describe('the requests and their words', () => {
+  test("a call auto mode refused reads as the plan's step: the reason as given and where to approve it", () => {
+    // live check L3: the orientation's own probing call was refused, and its thread showed Claude Code's whole tool
+    // result, with no word of /permissions
+    const result = 'Permission for this action was denied by the Claude Code auto mode classifier. Reason: [Credential Exploration]. If you have other tasks that don\'t depend on this action, continue working on those.'
+    expect(autoModeRefusal(result)).toBe('Auto mode refused: [Credential Exploration]. To approve it, open /permissions → Recently denied in your terminal.')
+    expect(autoModeRefusal('Exit code 1\ntouch: cannot touch: Read-only file system')).toBeNull()
+    expect(autoModeRefusal(undefined)).toBeNull()
+  })
+
   test("every session's requests while it runs, main's among them, the one asked first first", () => {
     const main = { permissions: [req('m1', { since: T(5) })] }
     const metas: ChatMeta[] = [chat('main', { kind: 'main' } as Partial<ChatMeta>), { ...ORIENT, permissions: [req('o1', { since: T(3) }), req('o2', { since: T(7) })] }, chat('w1', { role: 'writer', status: 'done', permissions: [req('w1', { since: T(1) })] })]

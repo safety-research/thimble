@@ -30,6 +30,7 @@ import { AgentCard, OrientLanding, openLabel } from './AgentCard'
 import { ApiErrorCard } from './ApiError'
 import { DocChip, GroupChip, LabelChip } from './SurfaceChips'
 import { ViewChip } from './ViewChip'
+import { autoModeRefusal } from './permissions'
 
 /** The working mark while a reply streams and no tool is pending: the spinner, the one thing that loops. */
 export function Working() {
@@ -298,6 +299,7 @@ function CallBody({ tool, ws, summary, stored = null, callRef: ref = null, focus
   const whole = ref && stored?.state === 'ok' ? stored : null
   const loading = !!ref && (stored == null || stored.state === 'loading')
   if (!rows.length && !result && !ref) return null
+  const refused = failed || whole?.failed ? autoModeRefusal(whole?.text || result) : null
   const fields = rows.length > 0 && (
     <div className="chat-tool-fields">
       {rows.map((r, i) => (
@@ -316,8 +318,9 @@ function CallBody({ tool, ws, summary, stored = null, callRef: ref = null, focus
       ))}
     </div>
   )
-  const output =
-    whole && ref ? (
+  const output = refused ? (
+    <div className="chat-tool-result chat-tool-refused">{refused}</div>
+  ) : whole && ref ? (
       running && !whole.text ? null : <CallOutput text={whole.text} callRef={ref} failed={whole.failed || failed} focus={focus} />
     ) : loading ? (
       <div className="chat-call-loading">
