@@ -303,6 +303,7 @@ export class Drawing {
     this.binds = parent ? parent.binds : []
     this.facts = parent ? parent.facts : []
     this.typer = null
+    this.focusY = null
   }
 
   /** The row the next line goes on. */
@@ -370,6 +371,12 @@ export class Drawing {
     root.typer = { onKey: o.onKey || (() => {}), onText: o.onText || null, text: String(o.text ?? ''), hints: o.hints || ['Enter to finish'] }
   }
 
+  /** Keep the next row drawn in view: in a row's details, the record a citation opened, which a list shows however far
+   *  down its details it is. */
+  focus() {
+    this.focusY = this.lines.length
+  }
+
   /** A drawing `cols` wide whose lines stand `indent` cells in from this one's edge (a row's details at A2), to be
    *  put in with `put`. */
   inner(indent = 2, rows = this.left) {
@@ -379,6 +386,7 @@ export class Drawing {
   /** The lines of an inner drawing, in at this one's row. */
   put(inner, from = 0, to = inner.lines.length) {
     const y0 = this.lines.length
+    if (inner.focusY !== null && inner.focusY >= from && inner.focusY < to) this.focusY = inner.focusY - from + y0
     for (const l of inner.lines.slice(from, to)) this.lines.push({ margin: l.margin, runs: clipLine([{ s: ' '.repeat(inner.indent) }, ...l.runs], this.cols) })
     for (const h of inner.hits) if (h.y >= from && h.y < to) this.hits.push({ ...h, y: h.y - from + y0, x0: h.x0 + inner.indent, x1: h.x1 + inner.indent })
   }
@@ -1235,17 +1243,18 @@ export function bar(n, max) {
  * whole span, each cell its records in the Color by hue most of them take, with the window over it on the selection
  * background and the cells outside it dim. A click on the strip moves the window there; a drag frames a new range,
  * moves the window from inside it, or moves an edge from the edge; `[` `]` pan and `+` `-` zoom. The range opens on
- * the whole span, and thimble keeps a range zoomed in per view.
+ * the whole span, and thimble keeps a range zoomed in per view. With `gap`, an empty stretch longer than it is a break
+ * of one cell (`│` in the rule gray) on the strip and on the range's scale, so bursts far apart share the width.
  *
  * opts: onChange(range), unit ('s' seconds since 1970, the default, or 'n' a plain number), key (the name it is kept
- * under), min (the shortest range).
+ * under), min (the shortest range), gap (in the unit).
  */
 export function timeRange(opts = {}) {
   const key = opts.key || 'time'
   const unit = opts.unit === 'n' ? 'n' : 's'
   const onChange = typeof opts.onChange === 'function' ? opts.onChange : () => {}
   const keptRange = (kept('ranges') || {})[key]
-  const r = { times: [], values: [], span: null, marks: [], from: null, to: null, valueOf: null }
+  const r = { times: [], values: [], span: null, marks: [], from: null, to: null, valueOf: null, gap: Number(opts.gap) || 0, segs: null }
   if (Array.isArray(keptRange)) [r.from, r.to] = keptRange
   const save = () => keep('ranges', { ...(kept('ranges') || {}), [key]: r.from === null ? undefined : [r.from, r.to] })
   const span = () => r.span || [0, 1]
@@ -1274,12 +1283,13 @@ export function timeRange(opts = {}) {
       return span().slice()
     },
     /** New data: `times` (a list), `values` (each record's Color by value, or a function of its index), `span`
-     *  ([first, last], else the times'), `marks` ([{t, label}], point events drawn as flags under the chart). The range
-     *  is kept where it can be. */
+     *  ([first, last], else the times'), `marks` ([{t, label}], point events drawn as flags under the chart), `gap`
+     *  (as the option). The range is kept where it can be. */
     data(d = {}) {
       if (d.times) r.times = Array.from(d.times)
       if (d.values !== undefined) r.values = d.values
       if (d.marks) r.marks = d.marks.slice()
+      if (d.gap !== undefined) r.gap = Number(d.gap) || 0
       if (d.span) r.span = [Number(d.span[0]), Number(d.span[1])]
       else if (d.times) {
         let a = Infinity
@@ -1289,6 +1299,13 @@ export function timeRange(opts = {}) {
           if (t > b) b = t
         }
         r.span = Number.isFinite(a) ? [a, b > a ? b : a + 1] : null
+      }
+      // the stretches of time the records fill, the first and the last reaching the span's ends
+      r.segs = null
+      if (r.gap > 0 && r.span && r.times.length) {
+        r.segs = stretches(r.times.slice().sort((a, b) => a - b), r.gap)
+        r.segs[0][0] = Math.min(r.segs[0][0], r.span[0])
+        r.segs.at(-1)[1] = Math.max(r.segs.at(-1)[1], r.span[1])
       }
       if (r.from !== null) [r.from, r.to] = clamp(r.from, r.to)
       redraw()
@@ -1308,10 +1325,11 @@ export function timeRange(opts = {}) {
     fit() {
       api.set(null)
     },
-    /** The scale of the range across `cols` cells: `{from, to, cols, x(t), t(x), binOf(t), step, ticks(gap)}`; x(t) the
-     *  cell a time falls in, binOf(t) the same or -1 outside the range, step the time a cell spans. */
+    /** The scale of the range across `cols` cells: `{from, to, cols, x(t), t(x), binOf(t), step, ticks(gap), breaks}`;
+     *  x(t) the cell a time falls in, binOf(t) the same or -1 outside the range, step the time a cell spans (where the
+     *  records are), breaks the cells of the breaks with `gap`. */
     scale(cols) {
-      return scaleOf(api.from, api.to, Math.max(1, cols | 0), unit)
+      return scaleOf(api.from, api.to, Math.max(1, cols | 0), unit, r.segs)
     },
     /** A time in the readout's words, as precise as `step` needs. */
     format(t, step = (api.to - api.from) / 60) {
@@ -1336,16 +1354,18 @@ export function timeRange(opts = {}) {
       d.row().add(api.readout(), { d: true }).end()
       const row = d.row()
       if (gutter) row.gap(gutter)
-      const cells = overview(w)
-      const lo = r.from === null ? 0 : Math.floor(((api.from - span()[0]) / (span()[1] - span()[0])) * w)
-      const hi = r.from === null ? w - 1 : Math.min(w - 1, Math.max(lo, Math.ceil(((api.to - span()[0]) / (span()[1] - span()[0])) * w) - 1))
+      const sc = whole(w)
+      const cells = overview(sc)
+      const lo = r.from === null ? 0 : Math.floor(sc.fx(api.from))
+      const hi = r.from === null ? w - 1 : Math.min(w - 1, Math.max(lo, Math.ceil(sc.fx(api.to)) - 1))
       const x0 = row.x
+      const breaks = new Set(sc.breaks)
       cells.forEach((cell, i) => {
         const inside = i >= lo && i <= hi
-        const style = cell.colour && cell.colour !== COLORS.dim ? { fg: cell.colour } : { d: true }
-        row.add(cell.glyph, { ...style, ...(inside && r.from !== null ? { bg: COLORS.selected } : {}), ...(!inside ? { d: true } : {}) })
+        const style = breaks.has(i) ? { fg: COLORS.rule } : cell.colour && cell.colour !== COLORS.dim ? { fg: cell.colour } : { d: true }
+        row.add(breaks.has(i) ? '│' : cell.glyph, { ...style, ...(inside && r.from !== null ? { bg: COLORS.selected } : {}), ...(!inside && !breaks.has(i) ? { d: true } : {}) })
       })
-      const sx = (x) => span()[0] + ((x + 0.5) / w) * (span()[1] - span()[0])
+      const sx = (x) => sc.t(x)
       row.hits.push({
         x0,
         x1: x0 + w,
@@ -1358,15 +1378,14 @@ export function timeRange(opts = {}) {
         },
         drag: (a, b) => {
           if (Math.abs(b - a) < 1) return
-          const len = api.to - api.from
           if (r.from !== null && a > lo && a < hi) {
+            if (sc.broken) return api.set(sc.tx(sc.fx(api.from) + b - a), sc.tx(sc.fx(api.to) + b - a))
             const dt = ((b - a) / w) * (span()[1] - span()[0])
             return api.set(api.from + dt, api.to + dt)
           }
           if (r.from !== null && a === lo) return api.set(Math.min(sx(b), api.to - minLen()), api.to)
           if (r.from !== null && a === hi) return api.set(api.from, Math.max(sx(b), api.from + minLen()))
-          void len
-          api.set(sx(Math.min(a, b)) - (span()[1] - span()[0]) / w / 2, sx(Math.max(a, b)) + (span()[1] - span()[0]) / w / 2)
+          api.set(sc.tx(Math.min(a, b)), sc.tx(Math.max(a, b) + 1))
         },
       })
       row.end()
@@ -1374,13 +1393,18 @@ export function timeRange(opts = {}) {
     },
   }
 
-  function overview(w) {
-    const [s0, s1] = span()
+  // the scale of the whole span across the strip's `w` cells, with its breaks
+  function whole(w) {
+    return scaleOf(span()[0], span()[1], w, unit, r.segs)
+  }
+
+  function overview(sc) {
+    const w = sc.cols
     const n = new Array(w).fill(0)
     const by = Array.from({ length: w }, () => new Map())
     const valueAt = typeof r.values === 'function' ? r.values : (i) => (r.values ? r.values[i] : null)
     r.times.forEach((t, i) => {
-      const x = Math.min(w - 1, Math.max(0, Math.floor(((t - s0) / (s1 - s0)) * w)))
+      const x = sc.x(t)
       n[x]++
       const v = valueAt(i)
       const k = v === null || v === undefined ? '' : String(v)
@@ -1397,13 +1421,26 @@ export function timeRange(opts = {}) {
   }
 
   function bindKeys(d) {
+    // with breaks, a pan and a zoom go by the strip's cells, so a pan crosses a break as it crosses any cell
     const pan = (k) => {
       if (r.from === null) return
+      const sc = whole(1000)
+      if (sc.broken) {
+        const [a, b] = [sc.fx(api.from), sc.fx(api.to)]
+        const by = (k === ']' ? 1 : -1) * (b - a) / 4
+        return api.set(sc.tx(a + by), sc.tx(b + by))
+      }
       const len = api.to - api.from
       const by = (k === ']' ? 1 : -1) * len / 4
       api.set(api.from + by, api.to + by)
     }
     const zoom = (k) => {
+      const sc = whole(1000)
+      if (sc.broken) {
+        const [a, b] = [sc.fx(api.from), sc.fx(api.to)]
+        const half = ((b - a) * (k === '+' ? 2 / 3 : 1.5)) / 2
+        return api.set(sc.tx((a + b) / 2 - half), sc.tx((a + b) / 2 + half))
+      }
       const mid = (api.from + api.to) / 2
       const len = (api.to - api.from) * (k === '+' ? 2 / 3 : 1.5)
       api.set(mid - len / 2, mid + len / 2)
@@ -1430,7 +1467,25 @@ function hueFn(c) {
   return by ? (v) => by.colourOf(v) : () => null
 }
 
-function scaleOf(from, to, cols, unit) {
+// a break in the time takes one cell, and a stretch of time between breaks at least two (as the browser's BREAK and
+// MIN_SEG, in cells)
+const BREAK = 1
+const MIN_STRETCH = 2
+
+// the stretches of time that hold data: the sorted times, split where two lie more than `gap` apart
+function stretches(sorted, gap) {
+  const out = []
+  for (const t of sorted) {
+    const last = out.at(-1)
+    if (last && t - last[1] <= gap) last[1] = t
+    else out.push([t, t])
+  }
+  return out
+}
+
+function scaleOf(from, to, cols, unit, segs = null) {
+  const broken = segs ? brokenScale(from, to, cols, unit, segs) : null
+  if (broken) return broken
   const len = Math.max(1e-9, to - from)
   const step = len / cols
   const x = (t) => Math.min(cols - 1, Math.max(0, Math.floor(((t - from) / len) * cols)))
@@ -1441,43 +1496,148 @@ function scaleOf(from, to, cols, unit) {
     step,
     x,
     t: (cx) => from + (cx + 0.5) * step,
+    // where a time stands in cells, unrounded, and the time at such a place: the window's edges, a pan, a zoom
+    fx: (t) => ((t - from) / len) * cols,
+    tx: (f) => from + (f / cols) * len,
+    broken: false,
+    breaks: [],
     binOf: (t) => (t < from || t > to ? -1 : x(t)),
     /** Ticks at least `gap` cells apart: `[{t, x, label}]`, the label as precise as the tick step needs, the date on
      *  the first tick and where the day changes. */
     ticks(gap = 14) {
-      if (unit === 'n') {
-        const raw = (gap * len) / cols
-        const p = 10 ** Math.floor(Math.log10(raw))
-        const tick = [1, 2, 5, 10].map((m) => m * p).find((v) => v >= raw) || 10 * p
-        const out = []
-        for (let t = Math.ceil(from / tick) * tick; t <= to; t += tick) out.push({ t, x: x(t), label: num(t) })
-        return out
-      }
-      const tick = TICKS.find((s) => s / step >= gap) || TICKS.at(-1)
-      const out = []
-      let lastDay = ''
-      for (let t = Math.ceil(from / tick) * tick; t <= to; t += tick) {
-        const day = dayOf(t)
-        const label = tick >= 86400 ? when(t, 86400).split(' ').slice(0, 2).join(' ') : day !== lastDay ? when(t, tick) : when(t, tick).split(' ').slice(2).join(' ')
-        lastDay = day
-        out.push({ t, x: x(t), label })
-      }
-      return out
+      return tickList([[from, to]], step, gap, unit, x)
     },
   }
 }
 
-/** The chart's axis under it: the ticks' labels dim at their cells, `gutter` cells in, none overlapping; then, with
- *  `marks` ([{t, label}]), their labels on a row of their own, each a control when `onMark(mark)` is given. */
+// the ticks of the stretches `spans` ([a, b] each) at `step` time per cell, at least `gap` cells apart: the date on a
+// stretch's first tick and where the day changes, as precise as the tick step needs
+function tickList(spans, step, gap, unit, x) {
+  const out = []
+  if (unit === 'n') {
+    const raw = gap * step
+    const p = 10 ** Math.floor(Math.log10(raw))
+    const tick = [1, 2, 5, 10].map((m) => m * p).find((v) => v >= raw) || 10 * p
+    for (const [a, b] of spans) for (let t = Math.ceil(a / tick) * tick; t <= b; t += tick) out.push({ t, x: x(t), label: num(t) })
+    return out
+  }
+  const tick = TICKS.find((s) => s / step >= gap) || TICKS.at(-1)
+  for (const [a, b] of spans) {
+    let lastDay = ''
+    for (let t = Math.ceil(a / tick) * tick; t <= b; t += tick) {
+      const day = dayOf(t)
+      const label = tick >= 86400 ? when(t, 86400).split(' ').slice(0, 2).join(' ') : day !== lastDay ? when(t, tick) : when(t, tick).split(' ').slice(2).join(' ')
+      lastDay = day
+      out.push({ t, x: x(t), label })
+    }
+  }
+  return out
+}
+
+// a scale whose stretches of data (`segs`, [a, b] each) share the cells, the empty time between two of them a break of
+// one cell, so bursts far apart share one axis (the browser's scale with `gap`); null when the range holds fewer than
+// two stretches or the cells cannot hold them, for a plain scale
+function brokenScale(from, to, cols, unit, segs) {
+  const parts = []
+  for (const [a0, b0] of segs) {
+    const a = Math.max(from, a0)
+    const b = Math.min(to, b0)
+    if (b > a || (b === a && a > from && b < to)) parts.push([a, b])
+  }
+  const n = parts.length
+  const room = cols - BREAK * (n - 1)
+  if (n < 2 || room < n * MIN_STRETCH) return null
+  const total = parts.reduce((s, [a, b]) => s + (b - a), 0)
+  let ws = parts.map(([a, b]) => (total > 0 ? ((b - a) / total) * room : room / n))
+  // a stretch too short to see takes MIN_STRETCH cells, from the others in proportion
+  let short = 0
+  let long = 0
+  for (const w of ws) {
+    if (w < MIN_STRETCH) short += MIN_STRETCH - w
+    else long += w
+  }
+  if (short && long > short) ws = ws.map((w) => (w < MIN_STRETCH ? MIN_STRETCH : w - (w / long) * short))
+  // whole cells: each stretch from where the one before it ended, x1 its first cell past it, a break between two
+  const sg = []
+  let acc = 0
+  let c0 = 0
+  parts.forEach(([a, b], k) => {
+    acc += ws[k]
+    const c1 = Math.max(c0 + 1, Math.round(acc))
+    sg.push({ a, b, x0: c0 + k * BREAK, x1: c1 + k * BREAK })
+    c0 = c1
+  })
+  if (sg.at(-1).x1 > cols) return null
+  sg.at(-1).x1 = cols
+  const step = total > 0 ? total / room : (to - from) / cols
+  const x = (t) => {
+    for (let k = 0; k < sg.length; k++) {
+      const g = sg[k]
+      if (t < g.a) return k ? sg[k - 1].x1 : g.x0
+      if (t <= g.b) return g.b > g.a ? Math.min(g.x1 - 1, g.x0 + Math.floor(((t - g.a) / (g.b - g.a)) * (g.x1 - g.x0))) : g.x0
+    }
+    return cols - 1
+  }
+  const fx = (t) => {
+    for (let k = 0; k < sg.length; k++) {
+      const g = sg[k]
+      if (t < g.a) {
+        if (!k) return g.x0
+        const p = sg[k - 1]
+        return p.x1 + ((t - p.b) / (g.a - p.b)) * (g.x0 - p.x1)
+      }
+      if (t <= g.b) return g.b > g.a ? g.x0 + ((t - g.a) / (g.b - g.a)) * (g.x1 - g.x0) : g.x0
+    }
+    return cols
+  }
+  const tx = (f) => {
+    for (let k = 0; k < sg.length; k++) {
+      const g = sg[k]
+      if (f < g.x0) {
+        if (!k) return g.a
+        const p = sg[k - 1]
+        return p.b + ((f - p.x1) / (g.x0 - p.x1)) * (g.a - p.b)
+      }
+      if (f <= g.x1) return g.x1 > g.x0 ? g.a + ((f - g.x0) / (g.x1 - g.x0)) * (g.b - g.a) : g.a
+    }
+    return sg.at(-1).b
+  }
+  return {
+    from,
+    to,
+    cols,
+    step,
+    x,
+    t: (cx) => tx(cx + 0.5),
+    fx,
+    tx,
+    broken: true,
+    /** The cells of the breaks, one between two stretches of time. */
+    breaks: sg.slice(0, -1).map((g) => g.x1),
+    binOf: (t) => (t < from || t > to ? -1 : x(t)),
+    ticks(gap = 14) {
+      return tickList(sg.map((g) => [g.a, g.b]), step, gap, unit, x)
+    },
+  }
+}
+
+/** The chart's axis under it: the ticks' labels dim at their cells, `gutter` cells in, none overlapping, and a break of
+ *  the scale as `│` in the rule gray; then, with `marks` ([{t, label}]), their labels on a row of their own, each a
+ *  control when `onMark(mark)` is given. */
 export function axis(d, scale, o = {}) {
   const gutter = o.gutter || 0
   const row = d.row().gap(gutter)
+  const breaks = scale.breaks || []
+  const put = []
   let end = 0
   for (const tk of scale.ticks(o.gap || 12)) {
-    if (tk.x < end || tk.x + width(tk.label) > scale.cols) continue
-    row.at(gutter + tk.x).add(tk.label, { d: true })
-    end = tk.x + width(tk.label) + 2
+    const w = width(tk.label)
+    if (tk.x < end || tk.x + w > scale.cols || breaks.some((b) => b >= tk.x - 1 && b <= tk.x + w)) continue
+    put.push({ x: tk.x, s: tk.label, style: { d: true } })
+    end = tk.x + w + 2
   }
+  for (const b of breaks) put.push({ x: b, s: '│', style: { fg: COLORS.rule } })
+  for (const p of put.sort((a, b) => a.x - b.x)) row.at(gutter + p.x).add(p.s, p.style)
   row.end()
   const marks = (o.marks || []).filter((m) => m.t >= scale.from && m.t <= scale.to).sort((a, b) => a.t - b.t)
   if (!marks.length) return
@@ -1647,6 +1807,9 @@ export function list(opts = {}) {
         if (end >= top + height) top = end - height + 1
         // a heading right above the chosen row comes with it
         if (top === at[0] && top > 0 && items[spans.find(([a]) => a === top - 1)?.[2]]?.heading) top -= 1
+        // a row its details keep in view (d.focus) shows, with the chosen row above it where both fit
+        const f = inner.focusY
+        if (f !== null && f > at[0] && f <= at[1] && f >= top + height) top = f - at[0] < height ? at[0] : f - Math.floor(height / 3)
       }
       s.top = top = Math.max(0, Math.min(top, last))
       const y0 = d.y
@@ -1878,9 +2041,14 @@ export function search(opts = {}) {
 /**
  * A choice among values in a row (`incident  INC-312`): its title dim, the value chosen a control that opens a menu
  * of `all` (the words for no choice) and the values; `key` the letter that opens it; onChange(value), null for all.
+ * With `all: false` the menu holds the values alone (the kind of record a view lists): the choice opens on `initial`,
+ * else the first value, and Reset puts it back there.
  */
 export function choice(opts = {}) {
-  const s = { value: null, values: Array.isArray(opts.values) ? opts.values.slice() : [] }
+  const valueOf = (v) => (v !== null && typeof v === 'object' ? v.value ?? v.name : v)
+  const some = opts.all !== false
+  const first = some ? null : opts.initial !== undefined ? opts.initial : Array.isArray(opts.values) && opts.values.length ? valueOf(opts.values[0]) : null
+  const s = { value: first, values: Array.isArray(opts.values) ? opts.values.slice() : [] }
   const onChange = typeof opts.onChange === 'function' ? opts.onChange : () => {}
   const all = opts.all || 'all'
   const api = {
@@ -1893,26 +2061,26 @@ export function choice(opts = {}) {
     get values() {
       return s.values.slice()
     },
-    /** Choose a value (null for all); onChange follows. */
+    /** Choose a value (null for all, or the first with `all: false`); onChange follows. */
     set(v) {
-      const next = v === undefined ? null : v
+      const next = v === undefined || v === null ? first : v
       if (next === s.value) return
       s.value = next
       onChange(next)
       redraw()
     },
     add(r) {
-      const items = () => [{ name: all, v: null }, ...s.values.map((v) => (typeof v === 'object' ? { name: v.name, v: v.value ?? v.name, right: v.right } : { name: String(v), v }))]
+      const items = () => [...(some ? [{ name: all, v: null }] : []), ...s.values.map((v) => (typeof v === 'object' ? { name: v.name, v: valueOf(v), right: v.right } : { name: String(v), v }))]
       const open = () => toggleMenu(api, Math.max(0, items().findIndex((it) => it.v === s.value)))
       if (opts.title) r.add(opts.title, { d: true }).gap()
       const shown = items().find((it) => it.v === s.value)
-      r.add(shown ? shown.name : all, {}, { on: open, tip: opts.tip || `choose ${opts.title || 'one'}` })
+      r.add(shown ? shown.name : some ? all : String(s.value ?? ''), {}, { on: open, tip: opts.tip || `choose ${opts.title || 'one'}` })
       if (opts.key) r.d.key(opts.key, `for ${opts.title || 'the choice'}`, open)
       r.menus.push((d) => drawMenu(d, api, items(), (it) => it && api.set(it.v), opts.key || null, 'to select'))
       return r
     },
   }
-  state.resets.push({ changed: () => s.value !== null, reset: () => { s.value = null }, after: () => onChange(null) })
+  state.resets.push({ changed: () => s.value !== first, reset: () => { s.value = first }, after: () => onChange(first) })
   return api
 }
 

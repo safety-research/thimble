@@ -311,6 +311,46 @@ describe('the time range', () => {
     for (let i = 1; i < ticks.length; i++) expect(ticks[i].x - ticks[i - 1].x).toBeGreaterThanOrEqual(12)
     expect(ticks.some((t: any) => /^17 May/.test(t.label))).toBe(true)
   })
+
+  test('with a gap, the empty time between bursts is a break of one cell: the bursts share the strip and the scale, a pan crosses a break', async () => {
+    // three bursts of five hours, a day apart
+    const bursts = [0, 1, 2].flatMap((day) => Array.from({ length: 6 }, (_, h) => T0 + day * 86400 + (9 + h) * 3600))
+    const range = kit.timeRange({ gap: 4 * 3600 })
+    range.data({ times: bursts })
+    kit.draw((d: any) => {
+      range.draw(d)
+      kit.axis(d, range.scale(d.cols))
+    })
+    await tick()
+    const strip = last().lines[1].slice(1)
+    const cells = strip.flatMap((s: any) => [...s.s].map((ch) => ({ ch, fg: s.fg })))
+    const breaks = cells.flatMap((c: any, i: number) => (c.ch === '│' ? [i] : []))
+    // two breaks in the rule gray, the three bursts in the cells between them, about a third of the strip each
+    expect(breaks.length).toBe(2)
+    expect(breaks.every((i: number) => cells[i].fg === 'subtle')).toBe(true)
+    expect(breaks[0]).toBeGreaterThan(20)
+    expect(breaks[1]).toBeLessThan(60)
+    const sc = range.scale(80)
+    expect(sc.broken).toBe(true)
+    expect(sc.breaks).toEqual(breaks)
+    expect(sc.x(bursts[0])).toBe(0)
+    expect(sc.x(bursts[5])).toBe(breaks[0] - 1)
+    expect(sc.x(bursts[6])).toBe(breaks[0] + 1)
+    expect(sc.x(bursts.at(-1))).toBe(79)
+    // each burst's first tick gives its date; the axis draws the breaks and no label runs into one
+    const days = sc.ticks(8).filter((t: any) => / May /.test(t.label)).map((t: any) => t.label.split(' ')[0])
+    expect(days).toEqual(['16', '17', '18'])
+    expect([...text()[2].slice(2)].flatMap((ch, i) => (ch === '│' ? [i] : []))).toEqual(breaks)
+    // zoomed to the first burst, ] pans across the break into the second
+    range.set(bursts[0], bursts[5])
+    expect(range.scale(80).broken).toBe(false)
+    await key(']')
+    await key(']')
+    await key(']')
+    await key(']')
+    expect(range.from).toBeGreaterThan(bursts[5])
+    expect(range.to).toBeLessThan(bursts[11] + 3600)
+  })
 })
 
 describe('the list', () => {
@@ -404,6 +444,30 @@ describe('the list', () => {
     expect(list.open).toBe(7)
     expect(text().some((r: string) => r.startsWith('    more on event 7'))).toBe(true)
   })
+
+  test('a row its details keep in view (d.focus) shows however far down the details it is, with the chosen row where both fit', async () => {
+    init({ rows: 10 })
+    const list = kit.list({ key: (e: any) => e.id })
+    let at = 30
+    kit.draw((d: any) => list.draw(d, {
+      items: items.slice(0, 5),
+      row: (e: any, r: any) => r.add(e.text),
+      detail: (e: any, dd: any) => {
+        for (let i = 0; i < 40; i++) {
+          if (i === at) dd.focus()
+          dd.line(`line ${i} of ${e.text}`)
+        }
+      },
+    }))
+    list.show(2)
+    await tick()
+    expect(text().some((r: string) => r.includes('line 30 of event 2'))).toBe(true)
+    at = 6
+    kit.redraw()
+    await tick()
+    expect(text()[0]).toMatch(/^❯ event 2/)
+    expect(text().some((r: string) => r.includes('line 6 of event 2'))).toBe(true)
+  })
 })
 
 describe('search and choices', () => {
@@ -455,6 +519,31 @@ describe('search and choices', () => {
     await key('return')
     expect(got).toEqual(['INC-312'])
     expect(text()).toEqual(['  incident  INC-312'])
+  })
+
+  test('a choice with all: false holds its values alone, opens on the first, and Reset puts it back there', async () => {
+    const got: unknown[] = []
+    const kind = kit.choice({ title: 'items', all: false, key: 'i', values: [{ name: 'pull requests', value: 'pulls' }, { name: 'issues', value: 'issues' }], onChange: (v: unknown) => got.push(v) })
+    kit.draw((d: any) => {
+      const r = d.row()
+      kind.add(r)
+      r.end()
+    })
+    await tick()
+    expect(kind.value).toBe('pulls')
+    expect(kit.changed()).toBe(false)
+    expect(text()[0]).toBe('  items  pull requests')
+    await key('i')
+    expect(text().slice(1).map((r: string) => r.trim())).toEqual(['❯ pull requests', 'issues'])
+    await key('down')
+    await key('return')
+    expect(got).toEqual(['issues'])
+    expect(text()).toEqual(['  items  issues'])
+    expect(kit.changed()).toBe(true)
+    kit.reset()
+    await tick()
+    expect(kind.value).toBe('pulls')
+    expect(got.at(-1)).toBe('pulls')
   })
 })
 

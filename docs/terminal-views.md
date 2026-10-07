@@ -74,6 +74,7 @@ with a 2-cell margin left of the type area for `❯`. Lines past the rows or the
 | `d.sub(...facts)` | facts for the panel's subtitle under the view's name, dim, parted by ` · ` |
 | `d.typing({text, onText, onKey, hints})` | a part takes typing: the panel's field holds `text` and sends each change to `onText` |
 | `d.inner(indent)`, `d.put(inner)` | a drawing `indent` cells in, put in at the current row (a row's details at A2) |
+| `d.focus()` | keep the next row in view: in a row's details, the record a citation opened, which the list shows however far down it is |
 | `r.add(text, style, {on, tip, drag, row, max})` | text in a style; `on(x)` makes it a control, `tip` the words the pointer shows under it |
 | `r.gap(n)`, `r.at(col)`, `r.right(text, style)` | space, a column, text against R |
 | `r.margin(run)` | the mark in the margin: `❯` and the accent on the chosen row |
@@ -146,7 +147,11 @@ A query names the label colored by, so the reader's `thimble.colour_value` reads
   from its edge moves that edge; `[` `]` pan by a quarter and `+` `-` zoom.
 - `range.data({times, values, span, marks})` gives it the records' times, their Color by values and the incidents or
   other point events; `range.has(t)`, `from`, `to`, `full`, `set(a, b)`, `set(null)`, `fit()` read and set it.
-- `range.scale(cols)` lays the range across a chart's cells: `x(t)`, `t(x)`, `binOf(t)`, `step`, `ticks(gap)`.
+- `range.scale(cols)` lays the range across a chart's cells: `x(t)`, `t(x)`, `binOf(t)`, `step`, `ticks(gap)`, and
+  `breaks`, the cells of its breaks.
+- `timeRange({gap})`: an empty stretch longer than `gap` is a break of one cell, `│` in the rule gray, on the strip, on
+  the range's scale and on its axis, so bursts far apart (runs on different days) share the width. Each stretch's first
+  tick gives its date, and a pan or a zoom goes by the strip's cells, so it crosses a break as it crosses any cell.
 - `axis(d, scale, {gutter, marks, onMark})` draws the chart's axis under it, and the marks' labels on a row of their own.
 - `strip(scale, items, {value, colour, max, guide})` is one row of a chart over time (a lane), `maxBin(scale,
   groups)` the height every lane shares, and `bar(n, max)` one cell's bar.
@@ -174,7 +179,8 @@ A query names the label colored by, so the reader's `thimble.colour_value` reads
 `search({words, onChange})` adds `/ search` to a row: `/` or a click starts typing, and the panel's field then holds
 its text, each change of which reaches the search whole (Enter ends). A part of the program's own takes typing with
 `d.typing({text, onText, onKey})`. `choice({title, all, key, values, onChange})` adds `incident  all` to a row, whose menu
-picks one of its values.
+picks one of its values. With `all: false` its menu holds the values alone (`items  pull requests`, the kind of record a
+view lists): it opens on `initial`, else the first value, and Reset puts it back there.
 
 ## Acts
 
