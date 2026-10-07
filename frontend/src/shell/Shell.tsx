@@ -14,6 +14,7 @@ import { useChatMetas, waitingChats } from '../chat/waiting'
 import { Button } from '../components/Button'
 import type { IconName } from '../components/Icon'
 import { FilesTab } from '../files/FilesTab'
+import { LabelEditorHost } from '../files/LabelEditor'
 import { useViews } from '../files/ViewsBar'
 import { ViewSurface } from '../files/ViewSurface'
 import { bus, type Tab } from '../lib/bus'
@@ -327,6 +328,7 @@ export function Shell({ ws }: { ws: string }) {
       </div>
       {drag && <DragGhost drag={drag} />}
       <CmdPointer ws={ws} />
+      <LabelEditorHost ws={ws} />
       <Toasts />
       <TourHost />
       {!gone && <ServerDown />}

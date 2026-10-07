@@ -1072,6 +1072,21 @@
   font: var(--type-body-sm);
 }
 
+/* the same card in the popover beside the control that opened it (LabelEditor): the popover is its paper, its place
+   and its scroll, at the card's own width */
+.label-editor-pop.popover {
+  padding: 0;
+}
+.label-editor-body {
+  outline: none;
+}
+.label-card.in-popover {
+  position: static;
+  width: auto;
+  max-height: none;
+  overflow: visible;
+}
+
 /* the edit card in a popover on a card (LabelCard LabelSheet): the card's head, the same fields, and each class's
    count before its switch */
 .label-sheet-popover.popover {
