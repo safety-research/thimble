@@ -772,6 +772,32 @@ figure lit at the beat's step, or `read as a page`. At the bottom `all documents
 and `as a story`, which ask main to write it again in that form, their keys hinted by what each retells as (`s slides,
 y story`). No stats row and no file path.
 
+**A document's comments** (a check's, Claude's note from `add_comment`, the analyst's) stand under the passage they are
+on, as the browser's margin shows them (a check's only while the check is on; the citation check's unverified tag
+too): at A2 a `●` in the check's hue (dim for a note) and its name, what it is dim at R (`check`, `comment`, `citation
+check`, then ` · resolved`), its words under the name at A4; a blank row before the words after them, none before a
+card. The title's stand under the header. The subtitle counts them (`4 open comments · 1 resolved`) and names a check
+that runs on the document (`◌ Judgment calls checking`). ↑↓ choose one (`❯`, its name in the accent, its refs as chips
+under its words), scrolled into view, the slide or section that holds it shown first; `r` resolves it, as the margin's
+✓ does, or opens a resolved one again; Enter or `a` asks a side thread about it on its passage; `v` shows the resolved
+ones, dim.
+
+```
+  The corpus is an export of four wikis [ README.md line 3 ]. It holds 4579 pages.
+❯   ● Judgment calls                                                                         check
+      The card counts 4,579 pages across all four wikis; say so, since the sentence reads as one wiki.
+      [ card ]
+  ╭──────────────────────────────────────────────────────────────────────────────────────────────╮
+```
+
+**A report edited** (`e`): its step reads `"<title>" · edit`, the subtitle `editing as Markdown · a card is its line
+![caption](card:<id>)`, then `unsaved edits`. The document's Markdown whole in a field with a border, as tall as the
+pane leaves it, `↑ N more` and `↓ N more` dim where rows are cut off: `# ` its title, `##` a heading, `- ` and `1. ` a
+list, a card its line, citations as written. A click gives it the keys; ctrl+s saves it (`s` once Esc gave the keys
+back), `d` discards the edit, back keeps it for the next `e`. The save goes through the browser editor's route, so a
+passage the edit kept keeps its id and its comments. A document changed meanwhile stops the save with a red `!` row
+until `s` again saves over it.
+
 ### 8. Checks
 
 Testable against what thimble-term draws (`tests/visual.test.ts`, the panel and card tests, and ANSI captures of a live

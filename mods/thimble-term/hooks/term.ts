@@ -427,6 +427,8 @@ export async function loadPanel(cx: Ctx, p: TermPanel): Promise<void> {
         await readSurface(cx, 'docs', 'docs')
         const writer = (await cx.agents()).find(a => a.role === 'writer' && a.state === 'running')
         if (writer?.chat) await readThread(cx, writer.chat)
+        // the checks, which name its comments' checks and say which run on it (report.ts)
+        await readSurface(cx, 'checks', 'checks')
         await readDoc(cx, p.slug)
       }
       return

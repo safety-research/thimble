@@ -112,7 +112,8 @@ export async function actLong<T = Record<string, unknown>>(cx: Ctx, sc: Scope, k
 export const AREAS = {
   cards: [{ dir: 'notebooks' }],
   labels: [{ dir: 'concepts' }, { dir: 'labels' }],
-  docs: [{ dir: 'investigations/main' }],
+  // a document, and a report check made, changed or run on one (report.ts reads its name and its runs)
+  docs: [{ dir: 'investigations/main' }, { dir: 'checks' }],
   chats: [{ dir: 'chats' }],
   agents: [{ dir: 'trusted', names: ['subagents.json', 'module.json'] }, { dir: 'orient', names: ['run.json'] }],
   // a view built (its folder in the local extension) or proposed (proposals.json)

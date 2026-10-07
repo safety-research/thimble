@@ -77,7 +77,9 @@ Claude Code's panel chrome, no right-click menu.
   that ↑↓ and the wheel scroll through the whole file, or the card it names with the cited mark lit, a `follow-up`
   field when opened from a side thread); the threads (a tree with a root per place, `main` or `report "…"`, the selected
   thread under it, `stop` while it answers, `hand back to main` once it answered, the ask field); a label; the documents and one document (a report with its
-  contents, a deck or a story one slide or beat at a time, the retell controls); the file browser (folders that fold,
+  contents, a deck or a story one slide or beat at a time, the retell controls; its comments, a check's, Claude's or the
+  analyst's, under the passages they are on, ↑↓ to choose one, `r` to resolve it, `v` to show the resolved ones; `e`
+  to edit a report as Markdown, its cards as their lines, saved as the browser's editor saves it); the file browser (folders that fold,
   each folder's size, the chosen file's first lines as the file holds them) and a file (`Table`, `Transcript`, `Raw`,
   each line as the file holds it, the chosen record's place and `?`); an agent;
   and the views (a view built in terminal mode drawn by its program, `view.term.js` on the terminal view kit, which
@@ -136,10 +138,13 @@ route for it:
 | `thimble act seen --cwd <dir> {thread}` | the thread's answers read |
 | `thimble act hand-back --cwd <dir> {thread}` | a finished thread's answer sent to main as the analyst's message, `From thread "<question>": <answer>` (the thread's meta then says `hand_back: handed`) |
 | `thimble act stop --cwd <dir> {agent}` | stop one of thimble's agents, or a side thread's fork |
+| `thimble state checks --cwd <dir>` | the report checks route's list: each check's name, colour, `shown` and runs, which name a document's comments |
+| `thimble act comment-resolve --cwd <dir> {doc, comment}` / `comment-reopen` | a document's comment resolved, as the browser's margin's ✓ does, or opened again |
+| `thimble act doc-save --cwd <dir> {doc, title?, blocks}` | a report edited as Markdown, saved as the browser's editor saves it (PUT …/blocks): each block with the id of the unit it was built from, so a kept passage keeps its id and its comments |
 | `thimble view host --cwd <dir>` | thimble's view host, started beside the session the first time a view opens (`$.process.spawn`): it prints `{t: ready, socket, token}`, then the frames a view's program draws on its own; the panel posts `/open`, `/event` and `/close` to the socket (`$.http.fetch`, `hooks/viewhost.ts`) |
 
 It sees a change without starting Python: once a second it lists the workspace's folders (`notebooks`, `concepts`,
-`labels`, `investigations/main`, `chats`, `trusted/subagents.json`, `orient/run.json`, `extension/views`,
+`labels`, `investigations/main`, `checks`, `chats`, `trusted/subagents.json`, `orient/run.json`, `extension/views`,
 `views/proposals.json`, `ui.jsonl`) and reads again only the surfaces a drawing shows.
 
 ## Files
@@ -153,7 +158,7 @@ The drawing itself: `draw.ts` lays out cards and charts as styled lines, `card.t
 drawing's, its title a hot spot, everything but the title below the plot), `cite.ts` and `para.tsx` citations and their
 tips, `home.ts` and `homeview.tsx` home, `chrome.tsx` the panel's chrome, `paint.ts` the colors, `gestures.tsx` what a
 press does, `anim.ts` the mark a citation lights on a card, `nav.ts` the path from home and the threads tree,
-`signal.ts` the `↳` rows' rules, `files.ts` the file a ref cites and the turns a whole-file JSON transcript's view reads, `turns.ts` one drawing of a pane at a time, `lib.ts`
+`signal.ts` the `↳` rows' rules, `report.ts` a document's comments and its edit as Markdown, `docedit.tsx` the document's editor, `files.ts` the file a ref cites and the turns a whole-file JSON transcript's view reads, `turns.ts` one drawing of a pane at a time, `lib.ts`
 the pure helpers, `field.tsx` the text field that shows all of its text (a label's prompt), `kept.ts` what main's
 chat drew under its rows, kept for a resume, `viewhost.ts` thimble's view host and the open view's frame, and
 `viewclient.tsx` a view's frame drawn with its hot regions and tips.

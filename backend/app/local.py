@@ -1154,5 +1154,15 @@ def main(argv: list[str]) -> int:
     return 0
 
 
+# the report in terminal mode (term_report.py): the checks its comments name, a comment resolved or opened again, and
+# the document saved from the panel's edit
+from . import term_report as _term_report  # noqa: E402 — it joins the surfaces and acts above
+
+_SURFACES.update(_term_report.SURFACES)
+_ACTS.update(_term_report.ACTS)
+STATE_USAGE += _term_report.STATE_USAGE
+ACT_USAGE += _term_report.ACT_USAGE
+
+
 if __name__ == "__main__":
     sys.exit(main(sys.argv[1:]))

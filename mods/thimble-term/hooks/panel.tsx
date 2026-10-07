@@ -14,7 +14,8 @@
 //   threads   the threads as a tree under main, the selected one (`thread`) under the second rule, the ask field
 //   label     a label after the browser's label editor: its name, type and scope; its prompt (or pattern or code) to edit;
 //             run on a sample or on all; counts, examples and cards folded. labels: every label
-//   docs      the documents; doc, one document drawn as main's chat draws a reply, its figures as cards
+//   docs      the documents; doc, one document drawn as main's chat draws a reply, its figures as cards, its comments
+//             under the passages they are on (report.ts); its edit as Markdown (`mode: edit`, docedit.tsx)
 //   files     the file browser: folders that fold, the chosen file's first lines; file, a file's lines or its transcript
 //   agent     one of thimble's agents: what it is doing and its latest steps
 //   views     the views, one row each; view, one view as one line (the browser draws views)
@@ -36,7 +37,9 @@ import type { Citation } from './lib'
 import { linesEl, setListKeys, takeListKeys } from './lines'
 import type { LineHit } from './lines'
 import { aroundLine, docUnits, docsOf, labelOf, labelsOf, threadOf } from './model'
-import type { DocFigure, DocSection, DocSentence } from './model'
+import type { DocFigure, DocSection } from './model'
+import { TITLE_ID, beginEdit, checksOf, commentFacts, commentLines, commentWho, commentsOf, discardEdit, draftEdit, editChanged, editOf, flipResolved, passageWords, pickOf, resolvedShown, saveEdit, setComment, setPick, shownComments, stepPick, unitOf, unitParts } from './report'
+import type { DocComment } from './report'
 import type { Focus } from './anim'
 import { NAV_EMPTY, backTarget, crumbSteps, crumbsWidth, fitCrumbs, threadBehind, threadOnTrail, threadTitle, threadTree, withBack } from './nav'
 import { COLORS, paintLines } from './paint'
@@ -274,7 +277,8 @@ function crumbText(s: ChatNavStep): string {
     case 'view':
       return s.title
     case 'doc':
-      return quoted(s.title)
+      // its edit takes the document's step, as a card's code view takes the card's
+      return panelOfStep(s)?.mode === 'edit' ? `${quoted(s.title)} · edit` : quoted(s.title)
     case 'docs':
       return 'documents'
     case 'ask':
@@ -2463,37 +2467,6 @@ async function writerState(cx: Ctx): Promise<{ tools: number; words: string; req
   return { tools, words: words.replace(/\s+/g, ' ').trim(), request: request || str(tt?.meta.title) }
 }
 
-/** A document's unit as Markdown: its heading, its paragraphs (a slide's sentences as a list), each figure where it
- *  stands, its caption italic under it. */
-function unitMarkdown(s: DocSection): string {
-  const figs = s.figures ?? []
-  const placed = new Set<number>()
-  // a section with no heading (a report's opening summary) starts with its words: no empty heading line
-  const head = plainCites(str(s.heading)).trim() ? `## ${str(s.heading)}` : ''
-  const md: string[] = head ? [head] : []
-  const figure = (k: number) => {
-    const f = figs[k]!
-    placed.add(k)
-    const cell = str(f.cell).replace(/^(?:card|cell):/, '')
-    if (cell) md.push(...(md.length ? [''] : []), `[[card:${cell}]]`, ...(f.caption ? [`*${str(f.caption).replace(/\*/g, '')}*`] : []))
-  }
-  for (const para of s.paragraphs ?? []) {
-    const ss = para.sentences ?? []
-    // sentences with bullets are a list, one item a line: a slide's (docUnits put each bullet before its words) and a
-    // report paragraph's (its bullet in `bullet`, not in its words)
-    const item = (x: DocSentence) => {
-      const t = str(x.text).trim()
-      const b = str(x.bullet).trim() || '-'
-      return t.startsWith(`${b} `) ? t : `${b} ${t}`
-    }
-    const words = ss.some(x => x.bullet) ? ss.map(item).join('\n') : ss.map(x => str(x.text)).join(' ')
-    if (words.trim()) md.push(...(md.length ? [''] : []), words)
-    figs.forEach((f, k) => (f.after_paragraph === para.id && !placed.has(k) ? figure(k) : undefined))
-  }
-  figs.forEach((_f, k) => (!placed.has(k) ? figure(k) : undefined))
-  return md.join('\n')
-}
-
 /** The mark each figure of a story's beat lights: the rows, events or nodes its step names (story.step_of). */
 function stepFocus(s: DocSection): Record<string, Focus> {
   const out: Record<string, Focus> = {}
@@ -2506,12 +2479,15 @@ function stepFocus(s: DocSection): Record<string, Focus> {
 }
 
 /** One document (SPEC.md, section 7, "A document"): the title in the accent and bold, wrapped; while its writer
- *  writes, `◌ writing · N tool calls · <its latest words>` (and the request until anything is written). A report:
- *  `Contents` from three headings, each a click (or 1-9) away; each section drawn as main's chat draws a reply. A deck
- *  or a story steps one slide or beat at a time: `‹ 3 of 9 ›`, `previous  next` (p, n), a deck's `notes` (o), a
- *  story's `read as a page` (a), its figure lit at the beat's step. At the bottom `all documents ›` (l) and the retell
- *  controls, `as slides` (s) and `as a story` (y), which ask main to write it again in that form. A passage's "?" asks a
- *  side thread told the document, its section and the passage. */
+ *  writes, `◌ writing · N tool calls · <its latest words>` (and the request until anything is written), else its
+ *  comments' facts (`2 open comments · 1 resolved`, `◌ <check> checking` while a check runs on it). A report:
+ *  `Contents` from three headings, each a click (or 1-9) away; each section drawn as main's chat draws a reply, its
+ *  cards in their frames. A deck or a story steps one slide or beat at a time: `‹ 3 of 9 ›`, `previous  next` (p, n), a
+ *  deck's `notes` (o), a story's `read as a page` (a), its figure lit at the beat's step. The comments (report.ts) stand
+ *  under the passages they are on, as the browser's margin shows them: ↑↓ choose one (`❯`), r resolves it or opens it
+ *  again, Enter or a asks a side thread about it, v shows the resolved ones too. At the bottom `edit` (e, a report),
+ *  `all documents ›` (l) and the retell controls, `as slides` (s) and `as a story` (y), which ask main to write it again
+ *  in that form. A passage's "?" asks a side thread told the document, its section and the passage. */
 async function drawDoc(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElement> {
   const els = cx.els(e) as El
   const { Box, Text, Button } = cx.els(e)
@@ -2526,8 +2502,16 @@ async function drawDoc(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEleme
   const title = str(doc.title) || entry?.title || p.title
   const slug = p.slug ?? ''
   const form = str(doc.renderer) || str(doc.type) || entry?.renderer || 'document'
+  if (p.mode === 'edit' && got?.ok && form === 'document' && !writing) return drawDocEdit(cx, e, p, doc, title)
   const { units } = docUnits(doc)
-  const sub = writing ? subLine([`◌ writing · ${plural(writing.tools, 'tool call')}${writing.words ? ` · ${clip(writing.words, Math.max(20, cols - 30))}` : ''}`]) : undefined
+  // the comments as the browser's margin shows them, the resolved ones too when asked
+  const checksGot = await surfaceValue(cx, 'checks')
+  const checks = checksOf(checksGot?.ok ? checksGot.value : [])
+  const all = got?.ok ? commentsOf(doc, checks) : []
+  const shown = shownComments(all, resolvedShown(slug))
+  const chosen = shown.find(c => c.id === pickOf(slug))
+  const checking = checks.filter(c => c.running.includes(slug)).map(c => `◌ ${c.name} checking`)
+  const sub = writing ? subLine([`◌ writing · ${plural(writing.tools, 'tool call')}${writing.words ? ` · ${clip(writing.words, Math.max(20, cols - 30))}` : ''}`]) : all.length || checking.length ? subLine([...commentFacts(all), ...checking]) : undefined
   const body: RenderElement[] = [...headerEls(els, { title, cols, ...(sub ? { sub } : {}) })]
   if (writing && !units.length && writing.request) body.push(<Text key="doc-request" dimColor wrap="wrap">{`the request: ${clip(writing.request, 600)}`}</Text>)
   const keys: Key[] = []
@@ -2536,12 +2520,53 @@ async function drawDoc(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEleme
   // a passage's thread is told the document, its section and the passage
   const askIn = (u: DocSection) => (tgt: Target) =>
     void openAsk(cx, tgt, tgt.kind === 'sentence' ? { anchor: `report:${slug}${u.id ? `#${u.id}` : ''}`, anchorText: `${quoted(title)} › ${plainCites(str(u.heading))}: ${plainCites(tgt.text ?? '')}`, element: `report:${slug}${u.id ? `#${u.id}` : ''}` } : { element: `report:${slug}${u.id ? `#${u.id}` : ''}` })
-  const drawUnit = async (u: DocSection, i: number, focus?: Record<string, Focus>) => drawReply(cx, e, unitMarkdown(u), cols, { margin: PANEL_MARGIN, prefix: `d${i}-`, ask: askIn(u), open: id => void openThread(cx, id), in: 'report', ...(focus ? { focus } : {}) })
+  // a block of comments under their passage: a click on one chooses it, a click on one of its chips opens the place
+  const blockKey = (key: string) => marginKey(`doc-cm-${key}`)
+  const commentBlock = (list: readonly DocComment[], key: string): RenderElement => {
+    const lines: Line[] = []
+    const hits: LineHit[] = []
+    for (const c of list) {
+      const { lines: ls, chips } = commentLines(c, c.id === chosen?.id, cols)
+      const y0 = lines.length
+      ls.forEach((_l, k) => hits.push({ y: y0 + k, x0: 0, x1: cols + MARGIN_W, row: true, run: () => choose(c, false) }))
+      for (const ch of chips) hits.unshift({ y: y0 + ch.y, x0: ch.x0, x1: ch.x1, row: false, run: () => openCite(cx, ch.ref, null) })
+      lines.push(...ls)
+    }
+    return linesEl(cx, e, blockKey(key), lines, hits, cols + MARGIN_W)
+  }
+  const drawUnit = async (u: DocSection, i: number, focus?: Record<string, Focus>): Promise<RenderElement[]> => {
+    const out: RenderElement[] = []
+    for (const [k, part] of unitParts(u, shown).entries()) {
+      if (part.md.trim()) {
+        const rows = await drawReply(cx, e, part.md, cols, { margin: PANEL_MARGIN, prefix: k ? `d${i}.${k}-` : `d${i}-`, ask: askIn(u), open: id => void openThread(cx, id), in: 'report', ...(focus ? { focus } : {}) })
+        // a blank row between a passage's comments and the words after them; a card's border stands in for one
+        out.push(k && !part.md.startsWith('[[card:') ? <Box key={`doc-part-${i}-${k}`} flexDirection="column" marginTop={1}>{rows}</Box> : <Box key={`doc-part-${i}-${k}`} flexDirection="column">{rows}</Box>)
+      }
+      if (part.after.length) out.push(commentBlock(part.after, `${i}-${k}`))
+    }
+    return out
+  }
   const stepped = units.length > 0 && (form === 'slides' || (form === 'story' && p.mode !== 'page'))
+  // the slide or beat shown, or the section the page starts at
+  const current = Math.max(0, Math.min(units.length - 1, p.start ?? 0))
+  // a comment chosen by the keys: the slide or section that holds it shown first, then its block scrolled into view
+  // once the panel is drawn again (scrollPending; a block's key is its unit's place and the part of it the comment
+  // stands under)
+  const choose = async (c: DocComment, reveal: boolean) => {
+    setPick(slug, c.id)
+    const u = unitOf(doc, c.sid)
+    const part = u >= 0 ? unitParts(units[u]!, shown).findIndex(x => x.after.some(y => y.id === c.id)) : 0
+    if (reveal) docScrollKey = blockKey(u >= 0 ? `${u}-${part}` : 'title')
+    if (reveal && u >= 0 && ((stepped && u !== current) || (!stepped && u < current))) await at(u)
+    else await cx.bumpPanel()
+  }
   const controls: (RenderElement | null)[] = []
   const hints: string[] = []
+  // the comments on the title, under the header
+  const onTitle = shown.filter(c => c.sid === TITLE_ID)
+  if (onTitle.length) body.push(commentBlock(onTitle, 'title'))
   if (stepped) {
-    const i = Math.max(0, Math.min(units.length - 1, p.start ?? 0))
+    const i = current
     const u = units[i]!
     body.push(<Box key={marginKey(`doc-unit-${i}`)} flexDirection="column">{await drawUnit(u, i, form === 'story' ? stepFocus(u) : undefined)}</Box>)
     const notes = str((u as { notes?: unknown }).notes)
@@ -2568,26 +2593,69 @@ async function drawDoc(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEleme
       hints.push('a for the page')
     }
   } else {
-    const from = Math.max(0, Math.min(units.length - 1, p.start ?? 0))
+    const from = current
     // the contents from three headings: each heading a click away (and 1-9), drawing the document from there; a section
     // with no heading (an opening summary) is not listed
     const headed = units.map((u, i) => ({ u, i })).filter(x => plainCites(str(x.u.heading)).trim())
     if (headed.length >= 3) {
       body.push(<Text key="doc-contents" bold>Contents</Text>)
-      const shown = headed.slice(0, 24)
-      const w = String(shown.length).length
-      const lines: Line[] = shown.map((x, k) => [dim(`${String(k + 1).padStart(w)}  `), { s: plainCites(str(x.u.heading)), ...(x.i === from && from > 0 ? { fg: ACCENT } : {}) }])
-      body.push(linesEl(cx, e, 'doc-toc', lines, shown.map((x, k) => ({ y: k, x0: 0, x1: cols, row: true, run: () => at(x.i) })), cols))
-      shown.slice(0, 9).forEach((x, k) => keys.push({ key: `sec${k}`, hotkey: String(k + 1), onPress: () => void at(x.i) }))
+      const shownToc = headed.slice(0, 24)
+      const w = String(shownToc.length).length
+      const lines: Line[] = shownToc.map((x, k) => [dim(`${String(k + 1).padStart(w)}  `), { s: plainCites(str(x.u.heading)), ...(x.i === from && from > 0 ? { fg: ACCENT } : {}) }])
+      body.push(linesEl(cx, e, 'doc-toc', lines, shownToc.map((x, k) => ({ y: k, x0: 0, x1: cols, row: true, run: () => at(x.i) })), cols))
+      shownToc.slice(0, 9).forEach((x, k) => keys.push({ key: `sec${k}`, hotkey: String(k + 1), onPress: () => void at(x.i) }))
       hints.push('1-9 for a section')
     }
     for (const [i, u] of units.entries()) {
       if (i < from) continue
       // one blank row between sections, and between the contents and the first; none above a first section under the
       // header's rule
-      const top = i === from && headed.length < 3 ? 0 : 1
+      const top = i === from && headed.length < 3 && !onTitle.length ? 0 : 1
       body.push(<Box key={marginKey(`doc-sec-${i}`)} flexDirection="column" marginTop={top}>{await drawUnit(u, i)}</Box>)
     }
+  }
+  // the comments' keys: ↑↓ choose one (the list's keys, through the relay), r resolves or reopens the chosen one, Enter
+  // or a asks about it, v shows or hides the resolved ones
+  const story = stepped && form === 'story'
+  if (shown.length && !writing) {
+    setListKeys(k => {
+      if (k === 'up' || k === 'k' || k === 'down' || k === 'j') {
+        const to = stepPick(shown, chosen?.id ?? '', k === 'up' || k === 'k' ? -1 : 1)
+        return to ? choose(to, true) : undefined
+      }
+      if ((k === 'return' || k === 'enter') && chosen) return askComment(cx, doc, slug, chosen)
+    })
+    hints.push('↑↓ to choose a comment')
+  }
+  if (chosen && !writing) {
+    const flip = () => void resolveComment(cx, slug, chosen, shown)
+    if (!chosen.tag) {
+      controls.unshift(<Button key="doc-cm-resolve" label={chosen.open ? 'resolve' : 'reopen'} plain onPress={flip} />)
+      keys.push({ key: 'resolve', hotkey: 'r', onPress: flip })
+      hints.push(chosen.open ? 'r to resolve' : 'r to reopen')
+    }
+    const ask = () => void askComment(cx, doc, slug, chosen)
+    controls.splice(chosen.tag ? 0 : 1, 0, <Button key="doc-cm-ask" label="ask about it" plain onPress={ask} />)
+    if (!story) keys.push({ key: 'cm-ask', hotkey: 'a', onPress: ask })
+    hints.push(story ? 'Enter to ask' : 'Enter or a to ask')
+  }
+  const resolvedN = all.filter(c => !c.open).length
+  if (resolvedN && !writing) {
+    const flip = () => {
+      flipResolved(slug)
+      if (chosen && !chosen.open) setPick(slug, '')
+      void cx.bumpPanel()
+    }
+    controls.push(<Button key="doc-cm-resolved" label={resolvedShown(slug) ? 'hide resolved' : `show resolved (${num(resolvedN)})`} plain onPress={flip} />)
+    keys.push({ key: 'cm-resolved', hotkey: 'v', onPress: flip })
+    hints.push(resolvedShown(slug) ? 'v to hide resolved' : 'v to show resolved')
+  }
+  // edit: the report as Markdown in the panel's editor (drawDocEdit)
+  if (form === 'document' && got?.ok && units.length && !writing) {
+    const edit = () => void openPanel(cx, { ...p, mode: 'edit' })
+    controls.push(<Button key="doc-edit" label={editOf(slug) ? 'edit (unsaved)' : 'edit'} plain onPress={edit} />)
+    keys.push({ key: 'edit', hotkey: 'e', onPress: edit })
+    hints.push('e to edit')
   }
   // retell: main writes the document again in another form (thimble's writer)
   const retell = (to: 'slides' | 'story') => () => void cx.command('thimble:write', `${to} Retell the document "${title}" as ${to === 'slides' ? 'slides' : 'a story'}.`).catch(err => cx.toast(`thimble: could not start the writer: ${String(err).slice(0, 200)}`))
@@ -2607,16 +2675,115 @@ async function drawDoc(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEleme
     hints.push(forms.join(', '))
   }
   // the documents list with this document chosen (live check term-fix10, new quirk 8: it chose the other document)
-  const all = () => {
+  const allDocs = () => {
     docPick = p.slug ?? docPick
     void openList(cx, { view: 'docs', title: 'Documents' })
   }
-  controls.push(<Button key="doc-all" label="all documents ›" plain onPress={all} />)
-  keys.push({ key: 'all', hotkey: 'l', onPress: all })
+  controls.push(<Button key="doc-all" label="all documents ›" plain onPress={allDocs} />)
+  keys.push({ key: 'all', hotkey: 'l', onPress: allDocs })
   hints.push('l for all documents')
-  body.push(...bottomRows(cx, e, cols, controls, [], hints))
+  const said = docSaid.get(slug)
+  body.push(...bottomRows(cx, e, cols, controls, said ? [<Text key="doc-said" color={COLORS.problem} wrap="wrap">{`! ${said}`}</Text>] : [], hints))
   const hk = hiddenKeys(cx, e, keys)
   return <Box flexDirection="column">{[...(hk ? [hk] : []), ...body]}</Box>
+}
+
+// why the last change of a document's comments did not go through, by its slug (shown red at the panel's bottom)
+const docSaid = new Map<string, string>()
+
+// the block of a document's comments the keys chose last, which the pane scrolls into view (scrollPending)
+let docScrollKey = ''
+
+/** After a key the list's relay passed on (register.tsx, with the hook's own context): the comment block it chose
+ *  scrolled into the pane's view, once the panel is drawn again. */
+export function scrollPending(cx: Ctx): void {
+  if (!docScrollKey) return
+  const key = docScrollKey
+  docScrollKey = ''
+  cx.later(60, () => void cx.scroll(key, 'center'))
+}
+
+/** A comment resolved (the margin's ✓) or opened again (`thimble act comment-resolve | comment-reopen`); the document
+ *  read again. A comment resolved while the resolved ones are hidden leaves the choice on the next one shown. */
+async function resolveComment(cx: Ctx, slug: string, c: DocComment, shown: readonly DocComment[]): Promise<void> {
+  if (!rt.sc) return
+  const why = await setComment(cx, rt.sc, slug, c)
+  if (why) docSaid.set(slug, why)
+  else docSaid.delete(slug)
+  if (!why && c.open && !resolvedShown(slug)) {
+    const at = shown.findIndex(x => x.id === c.id)
+    setPick(slug, (shown[at + 1] ?? shown[at - 1])?.id ?? '')
+  }
+  await readDoc(cx, slug)
+  await cx.bumpPanel()
+}
+
+/** A side thread about a comment, as the browser's comment card's reply starts one: on the comment's passage, told the
+ *  passage's words and the comment. */
+async function askComment(cx: Ctx, doc: Obj, slug: string, c: DocComment): Promise<void> {
+  const words = passageWords(doc, c.sid)
+  const anchor = `report:${slug}#${c.sid}`
+  await openAsk(cx, { kind: 'sentence', text: words }, { anchor, anchorText: `${words}\n\n${commentWho(c)}: ${c.text}`, element: anchor, about: `comment ${quoted(clip(c.text, 50))}` })
+}
+
+/** A report edited as Markdown (SPEC.md, section 7, "Documents"; report.ts): the title, `editing as Markdown` and
+ *  `unsaved edits` dim under it; the document's Markdown whole in the editor (docedit.tsx), a window over it the pane's
+ *  height, in a border; at the bottom `save` (ctrl+s in the editor, s outside it) and `discard` (d), then why a save
+ *  did not go through, in red. A save goes through the browser editor's route, so each passage the edit kept keeps its
+ *  id and its comments; back keeps what was typed for the next edit. */
+async function drawDocEdit(cx: Ctx, e: PaneEvent, p: TermPanel, doc: Obj, title: string): Promise<RenderElement> {
+  const els = cx.els(e) as El
+  const { Box, Text, Button } = cx.els(e)
+  const cols = Math.max(30, e.props.bodyColumns)
+  const slug = p.slug ?? ''
+  const ed = beginEdit(slug, doc)
+  const changed = editChanged(ed)
+  const body: RenderElement[] = [...headerEls(els, { title, cols, sub: subLine(['editing as Markdown', 'a card is its line ![caption](card:<id>)', changed ? 'unsaved edits' : null]) })]
+  const save = () => void saveDocEdit(cx, slug)
+  // the edit dropped: the editor holds the document as it stands now
+  const discard = () => {
+    discardEdit(slug)
+    void readDoc(cx, slug).then(() => cx.bumpPanel())
+  }
+  const hints = ['ctrl+s or s to save', ...(changed ? ['d to discard'] : [])]
+  const controls = [<Button key="doc-save" label="save" plain onPress={save} />, changed ? <Button key="doc-discard" label="discard" plain onPress={discard} /> : null]
+  const said = ed.said ? [<Text key="doc-edit-said" color={COLORS.problem} wrap="wrap">{`! ${ed.said}`}</Text>] : []
+  // the editor's rows: what the pane leaves under the header and above the bottom part
+  const rows = Math.max(6, (bodyRows || 30) - 10 - said.length - (hintHeight(hints, cols) - 1))
+  if (e.surface === 'terminal' || e.surface === 'desktop') {
+    const { Client } = cx.els(e)
+    body.push(
+      <Box key="doc-editor" flexDirection="column" borderStyle="round" borderColor={COLORS.rule} paddingX={1}>
+        <Client key={`doc-editor-${slug}`} module="./docedit.tsx" width={cols - 4} props={JSON.parse(JSON.stringify({ slug, text: ed.text, cols: cols - 4, rows }))} />
+      </Box>,
+    )
+  } else body.push(<Text key="doc-editor" wrap="wrap">{ed.text}</Text>)
+  body.push(...bottomRows(cx, e, cols, controls, said, hints))
+  const hk = hiddenKeys(cx, e, [{ key: 'save', hotkey: 's', onPress: save }, ...(changed ? [{ key: 'discard', hotkey: 'd', onPress: discard }] : [])])
+  return <Box flexDirection="column">{[...(hk ? [hk] : []), ...body]}</Box>
+}
+
+/** Save a document's edit (report.ts saveEdit); once saved, the document read again and shown as it now stands. */
+async function saveDocEdit(cx: Ctx, slug: string): Promise<void> {
+  if (!rt.sc) return
+  const why = await saveEdit(cx, rt.sc, slug)
+  if (why) return cx.bumpPanel()
+  await readDoc(cx, slug)
+  const p = await cx.panel()
+  if (p?.view === 'doc' && p.slug === slug && p.mode === 'edit') await navBack(cx)
+  else await cx.bumpPanel()
+}
+
+/** A post of docedit.tsx: what was typed (a draft), or a save (ctrl+s). */
+export async function docEditMessage(cx: Ctx, slug: string, text: string, save: boolean): Promise<void> {
+  const ed = editOf(slug)
+  if (!ed) return
+  const was = editChanged(ed)
+  draftEdit(slug, text)
+  if (save) return saveDocEdit(cx, slug)
+  // the subtitle's `unsaved edits` and the `discard` control follow the first change and its undoing
+  const now = editOf(slug)
+  if (now && editChanged(now) !== was) await cx.bumpPanel()
 }
 
 // ------------------------------------------------------------------------------------------------ files
