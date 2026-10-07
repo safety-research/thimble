@@ -269,6 +269,7 @@ export const api = {
    * module); a subagent of main the analyst started is asked of main. */
   interrupt: (c: string, id: string) => j<{ stopped: boolean; done?: boolean; asked?: 'main'; kind?: string; reason?: string }>(`${ws(c)}/chats/${enc(id)}/interrupt`, { method: 'POST' }),
   askAgain: (c: string, id: string) => j<{ asked: string; event: string; questions: number }>(`${ws(c)}/chats/${enc(id)}/ask-again`, { method: 'POST' }),
+  handBack: (c: string, id: string) => j<{ thread: string; event: string; text: string; hand_back: 'handed' }>(`${ws(c)}/chats/${enc(id)}/hand-back`, { method: 'POST' }),
   /**
      * Send the analyst's Claude Code session an event (`POST /ws/{c}/events {kind, payload}`), e.g. a message typed in main
      * (`main`, {text}) or in a thread (`thread`, {thread, text}). The reply arrives through the chat's log. A 409 says no
