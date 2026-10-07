@@ -374,6 +374,16 @@ async def test_the_host_serves_thimble_term_over_its_socket_with_its_token(board
 # ------------------------------------------------------------------------------------------------------ Timeline
 
 
+def _split(lines: list[str], head: int, rows: int) -> tuple[list[str], str]:
+    """A panel drawn as text: its body (`rows` rows after `head` rows of header) and its hint row, which wraps to the
+    panel's width, as one string."""
+    body = lines[head:head + rows]
+    assert len(body) == rows
+    rest = [x.strip() for x in lines[head + rows:]]
+    assert rest and all(rest), "the hint row's rows follow the body"
+    return body, " · ".join(rest)
+
+
 @pytest.fixture()
 def timeline(workspaces_tmp, tmp_path, monkeypatch, inproc) -> str:
     """The worked example Timeline saved as a view of its own sample, with its terminal program."""
@@ -398,8 +408,8 @@ async def test_timeline_draws_what_its_browser_page_shows(timeline, cols):
     out = await term_views.draw_text(timeline, "timeline", cols=cols, rows=36, wrap=DRAW_WRAP)
     lines = out.splitlines()
     assert lines[0] == "  Timeline"
-    body = lines[2:-1]
-    assert len(body) == 36 and all(len(x) <= cols + 2 for x in body)
+    body, hints = _split(lines, 2, 36)
+    assert all(len(x) <= cols + 2 for x in body)
     assert body[0].startswith("  / search events  incident  all  Color by  Service  ● payments 79  ● web 45")
     assert body[1] == "  16 May 01:14 – 19 May 14:25 · 3d 13h"
     assert [x[2:10].strip() for x in body[3:8]] == ["alert", "deploy", "agent", "chat", "ticket"]
@@ -411,7 +421,7 @@ async def test_timeline_draws_what_its_browser_page_shows(timeline, cols):
     assert "02:57:20  alert   fired       monitor     INC-311  payments: database connections at 181 of 200 for 5 min" in body[19]
     if cols == 200:
         assert "Tonight's release train: web 2.31.0 and payments 4.12.0. deploybot starts at 02:00." in body[12]
-    assert lines[-1].strip() == ("↑↓ to choose · Enter to open · c to color by · / to search · i for incident · [ ] to "
+    assert hints == ("↑↓ to choose · Enter to open · c to color by · / to search · i for incident · [ ] to "
                                  "pan · + - to zoom · a to ask · b to go back · x to close")
 
 
@@ -429,7 +439,8 @@ async def test_timeline_opens_an_event_in_place_and_narrows_to_an_incident(timel
     assert rows[at + 2].strip() == "service payments · severity critical · id alr-42"
     assert rows[at + 3].strip() == "Answered by"
     assert rows[at + 4].strip().startswith("03:01:05  agent · pagerbot  Opened INC-311")
-    assert any(x.strip().startswith('2  {"id": "alr-42"') for x in rows)
+    # its facts say what its line holds, so the line itself is behind ↗, in the citation panel
+    assert not any(x.strip().startswith('2  {"id": "alr-42"') for x in rows)
     assert any(x.strip().startswith("↗ alerts/monitor-20260516-0000.jsonl line 2  ask about it") for x in rows)
     out = await term_views.draw_text(timeline, "timeline", cols=120, rows=36, wrap=DRAW_WRAP, keys=["i", "down", "down", "return"],
                                      panel=False)
@@ -481,8 +492,8 @@ async def test_linked_sessions_draws_what_its_browser_page_shows(linked, cols):
     out = await term_views.draw_text(linked, "linked-sessions", cols=cols, rows=40, wrap=DRAW_WRAP)
     lines = out.splitlines()
     assert lines[:2] == ["  Linked sessions", "  3 runs · 17 sessions · 316 calls · 36 messages"]
-    body = lines[3:-1]
-    assert len(body) == 40 and all(len(x) <= cols + 2 for x in body)
+    body, hints = _split(lines, 3, 40)
+    assert all(len(x) <= cols + 2 for x in body)
     assert body[0].startswith("  / search  sessions  all  Color by  Speaker  ● client-port 100  ● lead 63  ● webhooks 63")
     assert body[1] == "  12 Sep 14:02 – 13 Sep 09:53 · 19h 51m"
     assert body[2].count(" // ") == 2
@@ -502,7 +513,7 @@ async def test_linked_sessions_draws_what_its_browser_page_shows(linked, cols):
     assert body[26].startswith("❯ ● 14:02:00  lead          Prompt     Upgrade invoicer from Brambleway API v2 to v3.")
     assert re.match(r"  ● 14:03:10  lead          Task       Find every v2 call site +292 s", body[31])
     assert re.match(r"  ● 14:04:31  survey        WebSearch  Brambleway API v3 changelog +× error  30 s", body[38])
-    assert lines[-1].strip() == ("↑↓ to choose · Enter to open · c to color by · / to search · s for sessions · [ ] to "
+    assert hints == ("↑↓ to choose · Enter to open · c to color by · / to search · s for sessions · [ ] to "
                                  "pan · + - to zoom · a to ask · b to go back · x to close")
 
 
@@ -588,14 +599,16 @@ async def test_repository_draws_what_its_browser_page_shows(repository, cols):
     out = await term_views.draw_text(repository, "repository", cols=cols, rows=36, wrap=DRAW_WRAP)
     lines = out.splitlines()
     assert lines[0] == "  Repository"
-    body = lines[2:-1]
-    assert len(body) == 36 and all(len(x) <= cols + 2 for x in body)
+    body, hints = _split(lines, 2, 36)
+    assert all(len(x) <= cols + 2 for x in body)
     assert body[0] == "  / search  items  pull requests  Color by  State  ● merged 28  ● closed 4  ● open 3"
     assert body[1] == "  11 May 09:24 – 14 May 13:42 · 3d 4h"
     assert body[2].count(" // ") == 3
     assert body[3] == ""
     head = body[4].split()
-    assert head[:5] == ["item", "title", "area", "author", "state"] and head[5:9] == ["r1", "r2", "r3", "r4"]
+    # the area from 120 cells, the author from 100, so the activity keeps its share
+    cols_shown = ["item", "title", "author", "state"] if cols == 120 else ["item", "title", "area", "author", "state"]
+    assert head[:len(cols_shown)] == cols_shown and head[len(cols_shown):len(cols_shown) + 4] == ["r1", "r2", "r3", "r4"]
     assert body[5].startswith("❯ ● r1 #9   Treat 'next <weekday>' as never today")
     # the strip of each row starts under its run's name: r1's rows at the left, r2's after r1's
     act = body[4].index("r1")
@@ -603,31 +616,30 @@ async def test_repository_draws_what_its_browser_page_shows(repository, cols):
     assert first["r1"] == act and first["r1"] < body[4].index("r2") <= first["r2"] < body[4].index("r3") <= first["r3"]
     eleven = _row(body, "● r1 #11")
     if cols == 120:
-        assert "Keep wall-clock time across DST in biweekly rules" not in eleven and "+" not in eleven.split("schedules")[0]
-        assert "Treat 'next <weekday>' as never today  +1  parser" in body[5]
+        assert "Keep wall-clock time across DST in biweekly rules  +3  cedar" in eleven
+        assert "Treat 'next <weekday>' as never today  +1  " in body[5]
     else:
         assert "Keep wall-clock time across DST in biweekly rules  merged by its author · +2  schedules   cedar    merged" in eleven
         assert "●●─●●●" in eleven
     assert "Reject 30 February  merged by its author" in _row(body, "● r4 #12")
-    assert lines[-1].strip() == ("↑↓ to choose · Enter to open · c to color by · / to search · i for items · [ ] to "
+    assert hints == ("↑↓ to choose · Enter to open · c to color by · / to search · i for items · [ ] to "
                                  "pan · + - to zoom · a to ask · b to go back · x to close")
 
 
 @needs_node
 async def test_repository_opens_an_item_in_place_with_the_same_issue_in_every_run(repository):
-    """Enter opens a pull request in place: its title whole and its flags, the issue it fixes in every run, then its
-    records in time order, each with its time, author, action, words, diff and `↗` to its line; a click on another
-    run's issue opens it among the issues; the other kinds fill only the columns their items have."""
+    """Enter opens a pull request in place: its title where its row cut it and its flags, the issue it fixes in every
+    run, then its records in time order, each with its time, author, action, words, diff and `↗` to its line; a click
+    on another run's issue opens it among the issues; the other kinds fill only the columns their items have."""
     out = await term_views.draw_text(repository, "repository", cols=120, rows=60, wrap=DRAW_WRAP,
                                      keys=["down", "down", "return"], panel=False)
     rows = [re.sub(r"\s*▌*$", "", x) for x in out.splitlines()]
     at = next(i for i, x in enumerate(rows) if x.startswith("❯"))
-    assert "r1 #11" in rows[at]
-    assert rows[at + 1].strip() == "Keep wall-clock time across DST in biweekly rules"
-    assert rows[at + 2].strip() == "merged by its author · merged over a change request · pushed after its last approval"
-    assert rows[at + 3].strip() == "r1 #3 fixed  r2 #3 fixed  r3 #3 fixed  r4 #3 fixed"
-    assert rows[at + 4].strip().startswith("09:50  cedar  opened             Occurrences are computed in local time")
-    assert rows[at + 4].endswith("↗")
+    assert "r1 #11  Keep wall-clock time across DST in biweekly rules" in rows[at], "its row holds its title whole"
+    assert rows[at + 1].strip() == "merged by its author · merged over a change request · pushed after its last approval"
+    assert rows[at + 2].strip() == "r1 #3 fixed  r2 #3 fixed  r3 #3 fixed  r4 #3 fixed"
+    assert rows[at + 3].strip().startswith("09:50  cedar  opened             Occurrences are computed in local time")
+    assert rows[at + 3].endswith("↗")
     assert any(x.strip() == "09:53  cedar  pushed             4079459 · Compute occurrences in local time                                      ↗" for x in rows)
     assert any(x.strip() == "+        at = local + n * self.period" for x in rows)
     assert any(x.strip().startswith("10:35  ash    changes requested  No test for the spring-forward week itself") for x in rows)
@@ -673,3 +685,129 @@ async def test_repository_follows_its_citations_and_its_chips(repository):
     rows = out.splitlines()
     assert "○ closed 4" in rows[0]
     assert {x.split()[-2] for x in rows[5:] if x[2:3] == "●" or x.startswith("❯")} == {"merged", "open"}
+
+
+# ------------------------------------------------------------------------------------------------------ narrow panels
+
+
+async def _labels_on(c: str, example: str) -> None:
+    """The example's sample labels (its labels.json) defined in workspace `c`, turned on in Files and applied, as
+    `thimble demo --examples` defines them: the labels the view opens colored by, as in the browser."""
+    import httpx  # noqa: PLC0415
+    from fastapi import FastAPI  # noqa: PLC0415
+
+    from app import concepts  # noqa: PLC0415
+
+    a = FastAPI()
+    a.include_router(concepts.router, prefix="/api")
+    specs = json.loads((views.EXAMPLES_DIR / example / "labels.json").read_text("utf-8"))
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=a), base_url="http://t", timeout=120) as api:
+        for i, sp in enumerate(specs):
+            if i:
+                await asyncio.sleep(1.1)  # a label's time is in seconds: they keep labels.json's order
+            r = await api.post(f"/api/ws/{c}/concepts", json={"name": sp["name"], "kind": sp["kind"], "spec": sp["spec"],
+                                                             "labels": sp["labels"], "shown": True})
+            assert r.status_code == 200, r.text
+            r = await api.post(f"/api/ws/{c}/concepts/{r.json()['id']}/apply", json={"wait": True, "paths": sp["paths"]})
+            assert r.status_code == 200, r.text
+
+
+def _list_rows(body: list[str]) -> list[str]:
+    """A list's rows (a record's, the chosen one's), the track at their right edge left out."""
+    return [re.sub(r"\s*▌*$", "", x) for x in body if x.startswith(("  ● ", "❯ ● "))]
+
+
+WIDTHS = [47, 92, 140]  # the docked panel at 120 and 200 columns, and a wide one
+
+
+@needs_node
+async def test_timeline_opens_as_its_browser_page_does_and_reads_at_every_width(timeline):
+    """Colored by the label that is on, its values as chips with their counts; Color by's name whole on a row of its own
+    where the top row has no room, its chips under it where they have none beside it; list rows cut with …; every key
+    in the hint row, which wraps; a zoomed range's window between `[` `]`."""
+    await _labels_on(timeline, "timeline")
+    for cols in WIDTHS:
+        out = await term_views.draw_text(timeline, "timeline", cols=cols, rows=34, wrap=DRAW_WRAP)
+        lines = out.splitlines()
+        body, hints = _split(lines, 2, 34)
+        assert all(len(x) <= cols + 2 for x in body), cols
+        top = "\n".join(body[:3])
+        assert "/ search events  incident  all" in body[0]
+        assert "Color by  Database connections ↗" in top and "● connections 22" in top and "● not marked 176" in top, cols
+        for k in ("c to color by", "/ to search", "i for incident", "[ ] to pan", "+ - to zoom", "a to ask", "b to go back"):
+            assert k in hints, (cols, k)
+        rows = _list_rows(body)
+        assert rows and all(len(x) <= cols for x in rows)
+        if cols == 47:
+            assert body[1].strip() == "Color by  Database connections ↗" and body[2].strip() == "● connections 22  ● not marked 176"
+            assert rows[0].endswith("Tonight's release…"), "a cut row ends in …"
+    out = await term_views.draw_text(timeline, "timeline", cols=47, rows=34, wrap=DRAW_WRAP, keys=["+", "+"], panel=False)
+    strip = next(x for x in out.splitlines() if "[" in x and "]" in x)
+    assert strip.index("[") < strip.index("]")
+
+
+@needs_node
+async def test_timeline_details_and_menu_read_in_a_narrow_panel(timeline):
+    """At 47 cells an opened event's words and facts wrap to the panel's width, its place keeps its line with ask about
+    it under it; the Color by menu stands in a frame, the label's values and definition under its name, its ↗ whole."""
+    await _labels_on(timeline, "timeline")
+    out = await term_views.draw_text(timeline, "timeline", cols=47, rows=34, wrap=DRAW_WRAP, keys=["down"] * 8 + ["return"],
+                                     panel=False)
+    rows = [re.sub(r"\s*▌*$", "", x) for x in out.splitlines()]
+    at = next(i for i, x in enumerate(rows) if x.startswith("❯"))
+    assert rows[at + 1].strip() == "payments: health check failing on 2 of 3"
+    assert rows[at + 3].strip() == "service payments · severity critical"
+    assert any(x.strip() == "↗ …/monitor-20260516-0000.jsonl line 2" for x in rows)
+    assert any(x.strip() == "ask about it" for x in rows)
+    assert rows[0].rstrip().endswith("reset"), "reset shows once a row is opened"
+    out = await term_views.draw_text(timeline, "timeline", cols=47, rows=34, wrap=DRAW_WRAP, keys=["c"], panel=False)
+    rows = out.splitlines()
+    top = next(i for i, x in enumerate(rows) if "╭─ Color by" in x)
+    box = [x[4:].rstrip(" │") for x in rows[top + 1:] if x.startswith("  │")]
+    at = next(i for i, x in enumerate(box) if x.startswith("❯ Database connections"))
+    assert box[at + 1].strip() == "● connections  ● not marked"
+    assert any(x.strip().endswith("definition ↗") for x in box[at + 1:])
+    assert all(len(x) <= 47 + 2 for x in rows)
+
+
+@needs_node
+async def test_linked_sessions_opens_as_its_browser_page_does_and_reads_at_every_width(linked):
+    """Colored by the label that is on; each run's name whole on its row; list rows cut with …; every key in the hint
+    row; zoomed into one run, the lanes of the sessions that did not run then fold away."""
+    await _labels_on(linked, "linked-sessions")
+    for cols in WIDTHS:
+        out = await term_views.draw_text(linked, "linked-sessions", cols=cols, rows=40, wrap=DRAW_WRAP)
+        body, hints = _split(out.splitlines(), 3, 40)
+        assert all(len(x) <= cols + 2 for x in body), cols
+        top = "\n".join(body[:3])
+        assert "Color by  Pagination ↗" in top and "● pagination 20" in top, cols
+        assert "▾ Run 3 · with reviewer" in "\n".join(body), cols
+        for k in ("c to color by", "s for sessions", "[ ] to pan", "+ - to zoom"):
+            assert k in hints, (cols, k)
+        assert all(len(x) <= cols for x in _list_rows(body))
+    out = await term_views.draw_text(linked, "linked-sessions", cols=47, rows=40, wrap=DRAW_WRAP, keys=["+", "+", "]"],
+                                     panel=False)
+    lanes = "\n".join(out.splitlines()[:16])
+    assert "Run 2 · flat team" in lanes and "Run 1" not in lanes
+
+
+@needs_node
+async def test_repository_opens_as_its_browser_page_does_and_reads_at_every_width(repository):
+    """Colored by the label that is on; the table's header names every run over the activity; an item's records read
+    across a narrow panel, their words under their time, author and action."""
+    await _labels_on(repository, "repository")
+    for cols in WIDTHS:
+        out = await term_views.draw_text(repository, "repository", cols=cols, rows=36, wrap=DRAW_WRAP)
+        body, hints = _split(out.splitlines(), 2, 36)
+        assert all(len(x) <= cols + 2 for x in body), cols
+        top = "\n".join(body[:3])
+        assert "Color by  Clock change ↗" in top and "● clock change 6" in top, cols
+        head = next(x for x in body if x.split()[:2] == ["item", "title"]).split()
+        assert head[-4:] == ["r1", "r2", "r3", "r4"], cols
+        assert "i for items" in hints and "[ ] to pan" in hints
+    out = await term_views.draw_text(repository, "repository", cols=47, rows=50, wrap=DRAW_WRAP, keys=["down", "down", "return"],
+                                     panel=False)
+    rows = [re.sub(r"\s*▌*$", "", x) for x in out.splitlines()]
+    at = next(i for i, x in enumerate(rows) if x.strip().startswith("09:50  cedar  opened"))
+    assert rows[at].rstrip().endswith("↗")
+    assert rows[at + 1].strip() == "Occurrences are computed in local time"

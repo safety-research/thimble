@@ -15,8 +15,9 @@ const KINDS = [
 ]
 const TAB = { pull: 'pulls', issues: 'issues', discussions: 'discussions', agents: 'agents' } // the kind a key names in its second part
 // the columns between the title and the activity, each shown while an item of the kind has a value in it and the
-// width holds it (`from` cells): the area from 100, the author from 80; the area is gray, as in the browser
-const COLS = [{ key: 'area', from: 100, d: true }, { key: 'author', from: 80 }, { key: 'state', from: 0 }]
+// width holds it (`from` cells): the area from 120, the author from 100, the state from 60 (in a narrower panel Color by
+// State gives it, so the activity keeps its room); the area is gray, as in the browser
+const COLS = [{ key: 'area', from: 120, d: true }, { key: 'author', from: 100 }, { key: 'state', from: 60 }]
 const slug = view().slug || 'repository'
 
 let data = null // the reader's answer for the kind (reader.py _view): {tab, items, counts, runs}
@@ -142,7 +143,8 @@ const plus = (n) => `+${n}`
 const titleWant = (it) => width(it.title) + (it.flags.length ? 2 + width(it.flags[0]) + (it.flags.length > 1 ? 5 : 0) : 0)
 
 // the table's columns for the kind's items at this width: the item, the title, the columns its items fill and the
-// width holds, and the activity, which takes at least 30% and what the titles leave, so it widens rather than the title
+// width holds, and the activity, which takes at least 30% (45% under 110 cells, so the runs' marks keep apart) and what
+// the titles leave, so it widens rather than the title
 function layout(cols, items) {
   const room = cols - 6 // the row after its mark, before the track
   const shown = COLS.filter((c) => room >= c.from && items.some((it) => it[c.key]))
@@ -152,7 +154,7 @@ function layout(cols, items) {
     ...shown.map((c) => Math.min(12, Math.max(width(c.key), ...items.map((it) => width(it[c.key] || ''))))),
   ]
   const fixed = ws.reduce((a, b) => a + b, 0) + 2 * (shown.length + 2)
-  ws[1] = Math.max(12, Math.min(Math.max(5, ...items.map(titleWant)), room - fixed - Math.round(room * 0.3)))
+  ws[1] = Math.max(12, Math.min(Math.max(5, ...items.map(titleWant)), room - fixed - Math.round(room * (room < 110 ? 0.45 : 0.3))))
   const strip = Math.max(8, room - fixed - ws[1])
   const xs = []
   let x = 0
@@ -243,20 +245,27 @@ function detail(it, dd, L) {
   if (titleRuns(it, L.ws[1])[0].s !== it.title) for (const s of wrap(it.title, dd.cols)) dd.line(s)
   if (it.flags.length) for (const s of wrap(it.flags.join(' · '), dd.cols)) dd.line({ s, d: true })
   if (u.elsewhere && u.elsewhere.length) {
-    const r = dd.row()
-    u.elsewhere.forEach((x, i) => {
-      if (i) r.gap()
+    // on the rows they need, none split
+    let r = null
+    u.elsewhere.forEach((x) => {
+      const words = `${x.run} #${x.key.split('/')[2]} ${x.state}`
+      if (r && r.x + 2 + width(words) > dd.cols) r = (r.end(), null)
+      if (r) r.gap()
+      else r = dd.row()
       // the item's own issue is the one in view, so only the others open
-      r.add(`${x.run} #${x.key.split('/')[2]} ${x.state}`, {}, x.key === it.key ? {} : { on: () => show(x.key), tip: 'open it in the list' })
+      r.add(words, {}, x.key === it.key ? {} : { on: () => show(x.key), tip: 'open it in the list' })
     })
-    r.end()
+    if (r) r.end()
   }
   const own = it.key.split('/').at(-1)
   const recs = u.records
   const whoW = Math.min(10, Math.max(1, ...recs.map((x) => width(x.author || ''))))
   const actW = Math.min(22, Math.max(1, ...recs.map((x) => width(actionOf(x, own)))))
-  const textX = 5 + 2 + whoW + 2 + actW + 2
-  const textW = Math.max(10, dd.cols - textX - 3)
+  // a record's words and diff after its time, author and action; where that leaves them under 30 cells, under them at
+  // A2, across the details' width
+  const beside = dd.cols - (5 + 2 + whoW + 2 + actW + 2) - 3 >= 30
+  const textX = beside ? 5 + 2 + whoW + 2 + actW + 2 : 2
+  const textW = beside ? dd.cols - textX - 3 : dd.cols - textX
   for (const x of recs) {
     // the record a citation opened on the selection background, kept in view however far down it is
     const sel = x.ref === focus ? { bg: COLORS.selected } : {}
@@ -267,10 +276,10 @@ function detail(it, dd, L) {
     r.add(x.at.slice(11, 16), { d: true, ...sel }).gap()
     r.add(pad(cut(x.author || '', whoW), whoW), sel).gap()
     r.add(pad(cut(actionOf(x, own), actW), actW), { d: true, ...sel }).gap()
-    if (lines.length) r.add(lines[0], sel)
+    if (lines.length && beside) r.add(lines[0], sel)
     r.right('↗', { fg: COLORS.link }, { on: () => open(x.ref), tip: placeWords(x.ref) })
     r.end()
-    for (const s of lines.slice(1)) dd.row().at(textX).add(s, sel).end()
+    for (const s of beside ? lines.slice(1) : lines) dd.row().at(textX).add(s, sel).end()
     if (x.diff) for (const s of x.diff.replace(/\n$/, '').split('\n')) dd.row().at(textX).add(clip(s, dd.cols - textX), { d: true }).end()
   }
   details(dd, { ask: { ref: `view:${slug}/${it.key}`, text: it.title } })
