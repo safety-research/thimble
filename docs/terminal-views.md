@@ -196,7 +196,7 @@ queries; thimble-term starts it the first time a view opens and talks to it over
 
 | from the program to thimble | |
 |---|---|
-| `frame {seq, ack, lines, hits, hints, hintKeys, keys, typing, field, sub}` | what to draw: rows of runs, hot regions, the keys bound and the hint row, the text of a field that takes typing; `ack` the last event it answers |
+| `frame {seq, ack, lines, hits, hints, hintKeys, keys, typing, field, sub, overflow?}` | what to draw: rows of runs, hot regions, the keys bound and the hint row, the text of a field that takes typing; `ack` the last event it answers; `overflow` `{rows, cols, first}` when the kit cut rows past the rows or wider than the columns |
 | `query {id, q, labels}`, `cancel {id}` | a reader query, and one dropped |
 | `act {n, act}` | a place, a thread or a label's panel, made during event `n` |
 | `state {state}`, `error {message}`, `log {text}` | what the view keeps, an error, a line it printed |

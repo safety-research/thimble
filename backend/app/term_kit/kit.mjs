@@ -302,6 +302,9 @@ export class Drawing {
     this.indent = indent
     this.binds = parent ? parent.binds : []
     this.facts = parent ? parent.facts : []
+    // the rows cut at the columns, in this drawing or one inside it: how many, and the first one's text (the frame's
+    // `overflow`, which the view checks read)
+    this.cutAt = parent ? parent.cutAt : { n: 0, first: '' }
     this.typer = null
   }
 
@@ -318,9 +321,13 @@ export class Drawing {
   /** A line of runs (a string, a run or a list of them), with its hot regions `{x0, x1, on(x), tip, drag, row}` in
    *  cells from A0; `margin` the run in the 2-cell margin (`❯`). */
   line(content, hits = [], margin = null) {
-    const runs = (Array.isArray(content) ? content : [content]).map(segOf).filter(Boolean)
+    const runs = merged((Array.isArray(content) ? content : [content]).map(segOf).filter(Boolean))
     const y = this.lines.length
-    this.lines.push({ margin: margin ? segOf(margin) : null, runs: clipLine(merged(runs), this.cols) })
+    if (lineWidth(runs) > this.cols) {
+      this.cutAt.n += 1
+      if (!this.cutAt.first) this.cutAt.first = runs.map((s) => s.s).join('').trimEnd()
+    }
+    this.lines.push({ margin: margin ? segOf(margin) : null, runs: clipLine(runs, this.cols) })
     for (const h of hits) if (h && (h.on || h.tip || h.drag)) this.hits.push({ ...h, y })
     return y
   }
@@ -571,6 +578,9 @@ export function frame() {
     field: d.typer ? { text: d.typer.text } : null,
     sub: [...new Set(d.facts)],
   }
+  // what the panel cuts: rows past its height, and rows wider than its columns (with the first one's text)
+  const past = d.lines.length - lines.length
+  if (past > 0 || d.cutAt.n) out.overflow = { rows: past, cols: d.cutAt.n, first: d.cutAt.first.slice(0, 300) }
   if (state.textMode) out.text = frameText(out, { ansi: state.textMode === 'ansi', cols: state.cols })
   return out
 }
