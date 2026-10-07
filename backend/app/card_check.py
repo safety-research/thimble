@@ -48,10 +48,11 @@ CHECK_TOOLS = ("add_card", "edit_card")
 # card-check.md's five criteria. The reading states what fails each (empty when the card meets it) rather than a yes or
 # no per question, since a problem statement has no polarity to misread.
 CRITERIA = 5
-# How long a check may run, from its drawing to its replacement's, by the effort it reads the card at (read_effort).
-# A check past its time ends `error` with no mark. The drawing and the replacement's run keep their own limits
-# (render.RENDER_TIMEOUT_S, the card's timeout_s).
-CHECK_TIMEOUT_S = {"low": 45.0, "medium": 45.0, "high": 75.0, "xhigh": 120.0, "max": 180.0}
+# How long a check's own work may run (its reading and its revision's draft), by the effort it reads the card at
+# (read_effort). A check past its time ends `error` with no mark. Its clock stands while the card draws and while a
+# revision's code runs, which keep their own limits (render.RENDER_TIMEOUT_S, the card's timeout_s): a big corpus, or
+# terminal mode's fresh `thimble-run trial` process, would use the check's time otherwise.
+CHECK_TIMEOUT_S = {"low": 90.0, "medium": 120.0, "high": 180.0, "xhigh": 300.0, "max": 420.0}
 # How many readings run at once; a check waiting for one is `queued`, its clock stopped (_slot). The drawing and the
 # revision run outside the slots.
 READ_CONCURRENCY = max(1, int(os.environ.get("THIMBLE_CARD_CHECK_CONCURRENCY", "4") or "4"))
@@ -288,6 +289,22 @@ async def _within(run: _Run, coro: Any, limit: float) -> Any:
                 await task
 
 
+@contextlib.asynccontextmanager
+async def _clock_stands(run: _Run | None) -> Any:
+    """The check's clock stands while the work inside runs (a drawing, a revision's run), which keeps its own limit:
+    the deadline moves by the time it took, as a wait for a reading slot does (_slot)."""
+    if run is None or run.paused_at is not None:
+        yield
+        return
+    loop = asyncio.get_running_loop()
+    run.paused_at = loop.time()
+    try:
+        yield
+    finally:
+        run.deadline += loop.time() - run.paused_at
+        run.paused_at = None
+
+
 def _on_retry(run: _Run) -> Any:
     """model.structured's on_retry for the check's reading: the wait is added to the check's deadline, and the record
     says the check waits for capacity until then, back to `checking` once the wait is over."""
@@ -449,7 +466,8 @@ async def _check(run: _Run) -> None:
     timing = run.timing
     timing.update(card=cid, kind=cell.get("kind"), ts=time.time(), effort=run.effort)
     t0 = time.perf_counter()
-    drawn = await _draw(c, cell)
+    async with _clock_stands(run):
+        drawn = await _draw(c, cell)
     timing["render_ms"] = _ms(t0)
     if drawn is None:
         run.outcome = "skipped"
@@ -771,7 +789,8 @@ async def _replace(run: _Run, cell: dict[str, Any], patch: dict[str, Any], faile
         return
     trial = _spawn(checkstore.candidate(c, cid, patch))
     try:
-        cand = await asyncio.shield(trial)
+        async with _clock_stands(run):
+            cand = await asyncio.shield(trial)
     except asyncio.CancelledError:
         _spawn(_settle_after(c, cid, trial))
         raise
@@ -825,7 +844,8 @@ async def _not_kept(run: _Run, cand: dict[str, Any] | None, typed: str = "") -> 
     c = run.c if run is not None else None
     if typed and cardtypes.canonical(c, _type_of(cand)) != cardtypes.canonical(c, typed):
         return f"it drew no {cardtypes.canonical(c, typed)} card"
-    after = await _draw(run.c, cand)
+    async with _clock_stands(run):
+        after = await _draw(run.c, cand)
     if after is None:
         return "no picture could show the replaced card"
     if not after.ok:
