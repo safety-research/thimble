@@ -72,17 +72,19 @@
 # ticket's message, by the line its text starts on), a JSON value in a chat file (chat/<channel>.json#/messages/<i>,
 # the i-th of its messages from 0) and a row of deploys.csv (deploys.csv#row=<n>, from 1 after the header). `records`
 # answers the page's one question, the events it shows: it reads each record's
-# fields and text back from the file by seeking to its lines, keeps those of the incident and the search the page
-# asks for, and gives each its value under the page's Color by, OVERVIEW_ROWS rows a fetch as columns, so the page
-# draws its lanes, its time range and its list from one answer. A record's details carry its lines as the file holds
-# them, which the page shows beside the fields the reader made of them.
+# fields and text back from the file by seeking to its lines, keeps those the search and the page's Filter by keep, and
+# gives each its value under the page's Color by and its group under the page's Rows, OVERVIEW_ROWS rows a fetch as
+# columns, so the page draws its lanes, its time range and its list from one answer. A record's details carry its
+# lines as the file holds them, which the page shows beside the fields the reader made of them.
 #
-# Places: a line (L<n>), a chat message (/messages/<i>) and a deploy's row (row=<n>), each the record opened in place.
+# Places: a line (L<n>), a chat message (/messages/<i>) and a deploy's row (row=<n>), each the record opened in the side
+# panel.
 # Units: an incident (INC-312), a day (2026-05-16) and a window of time (2026-05-16T08:00..2026-05-16T09:00).
 #
 # Labels: they apply when records are served, never in the index. Every answer keeps only the records thimble.kept(ref)
-# holds for. While a label is the page's Color by, thimble.colour_value gives each record the label's value on it,
-# which the page draws in its lanes and its time range, since thimble cannot see inside them.
+# holds for. While a label is the page's Color by, Filter by or Rows, thimble.colour_value gives each record the
+# label's value on it, which the page draws in its lanes and its time range and filters and groups by, since a label's
+# marks reach the page only on the rows it draws.
 import bisect
 import csv
 import json
@@ -528,40 +530,44 @@ def _kept(index, i, keep=()):
 
 def _overview(index, query, keep):
     """The events the page shows, from row `from` on and at most OVERVIEW_ROWS of them a fetch: the rows the label
-    filter keeps, and those in `keep` (a citation asked for them), of the incident `incident` whose values hold the
-    words `q`, ignoring case. They come as columns: `r` the row, `t` its time in seconds since 1970, `ref`, a column per
-    field, `text` cut to TEXT_MAX characters, and `value`, its value under the page's Color by (`colour`, the page's
-    colour.query()). A row whose value the analyst turned off is left out, and `counts` counts every value for the
-    chips. `next` is the row the next page starts at, None after the last. The first page also holds `span`, the first
-    and the last time of all the rows, and `starts`, each incident's first time."""
+    filter keeps whose values hold the words `q`, ignoring case, and whose values under the page's Filter by (`filter`,
+    its filter.query()) and Color by (`colour`, its colour.query()) the analyst left on; and those in `keep`, which a
+    citation asked for, whatever the filters. They come as columns: `r` the row, `t` its time in seconds since 1970,
+    `ref`, a column per field, `text` cut to TEXT_MAX characters, `value` its value under Color by and `group` its group
+    under the page's Rows (`rows`, its rows.query()). `counts` counts Color by's values for its chips and `fcounts`
+    Filter by's for its toggles, each over the rows the other keeps, so a value turned off keeps its count. `next` is
+    the row the next page starts at, None after the last. The first page also holds `span`, the first and the last time
+    of all the rows, and `starts`, each incident's first time."""
     rows = index["rows"]
-    choice, incident = query.get("colour"), _str(query.get("incident"))
+    choice, only, group_by = query.get("colour"), query.get("filter"), query.get("rows")
     q = _str(query.get("q")).lower()
     start = query.get("from")
     i = start if isinstance(start, int) and not isinstance(start, bool) and start > 0 else 0
-    cols = {k: [] for k in ("r", "t", "ref", *FIELDS, "text", "value")}
-    counts = {}
+    cols = {k: [] for k in ("r", "t", "ref", *FIELDS, "text", "value", "group")}
+    counts, fcounts = {}, {}
     while i < len(rows) and len(cols["r"]) < OVERVIEW_ROWS:
         batch = range(i, min(len(rows), i + OVERVIEW_ROWS - len(cols["r"])))
         got = _read(index, batch)
         i = batch.stop
         for j in batch:
             r, ref = got[j], _ref(index, j)
-            if incident and r.get("incident") != incident:
-                continue
-            if q and q not in " ".join(v for v in r.values() if isinstance(v, str)).lower():
+            asked = j in keep
+            if not asked and q and q not in " ".join(v for v in r.values() if isinstance(v, str)).lower():
                 continue
             if not _kept(index, j, keep):
                 continue
-            value = thimble.colour_value(choice, ref, r)
-            key = "" if value is None else value
-            counts[key] = counts.get(key, 0) + 1
-            if not thimble.colour_on(choice, value):
+            value, shown = thimble.colour_value(choice, ref, r), thimble.colour_value(only, ref, r)
+            on, shows = thimble.colour_on(choice, value), thimble.colour_on(only, shown)
+            if shows:
+                counts[value or ""] = counts.get(value or "", 0) + 1
+            if on:
+                fcounts[shown or ""] = fcounts.get(shown or "", 0) + 1
+            if not (on and shows) and not asked:
                 continue
             for k, v in zip(cols, (j, rows[j][T], ref, *(_text(r, f) for f in FIELDS), _text(r, "text")[:TEXT_MAX],
-                                   value), strict=True):
+                                   value, thimble.colour_value(group_by, ref, r)), strict=True):
                 cols[k].append(v)
-    page = {"cols": cols, "counts": counts, "next": i if i < len(rows) else None}
+    page = {"cols": cols, "counts": counts, "fcounts": fcounts, "next": i if i < len(rows) else None}
     if not start:
         page.update(span=[rows[0][T], rows[-1][T]] if rows else [0, 0],
                     starts={k: rows[a][T] for k, (a, _) in index["units"].items()})
@@ -594,7 +600,7 @@ def _record(index, i, keep):
 
 
 def records(index, query):
-    """{op: overview, from?, colour?, incident?, q?, keep?}: a page of the events the page shows (_overview).
+    """{op: overview, from?, colour?, filter?, rows?, q?, keep?}: a page of the events the page shows (_overview).
     {op: record, r, keep?}: one row in full (_record). `keep` rows are kept whatever the label filter."""
     query = query or {}
     keep = {x for x in query.get("keep") or () if isinstance(x, int) and not isinstance(x, bool)}
@@ -627,8 +633,9 @@ def _at_line(index, fi, n):
 def resolve(index, locator):
     """<file>#L<n>: the record on that line, or the nearest one, chosen in the time around it. <chat file>#/messages/<i>
     and deploys.csv#row=<n>: that message or row.
-    view:<slug>/<incident>: every record of the incident, filtered to it. view:<slug>/<YYYY-MM-DD>: the records of one
-    day in UTC, that day picked. view:<slug>/<from>..<to>: the records between two UTC times, zoomed to them."""
+    view:<slug>/<incident>: every record of the incident, Filter by narrowed to it. view:<slug>/<YYYY-MM-DD>: the
+    records of one day in UTC, that day picked. view:<slug>/<from>..<to>: the records between two UTC times, zoomed to
+    them."""
     rows = index["rows"]
     if "key" in locator:
         key = str(locator["key"])

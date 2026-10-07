@@ -402,55 +402,73 @@ def timeline(workspaces_tmp, tmp_path, monkeypatch, inproc) -> str:
 @needs_node
 @pytest.mark.parametrize("cols", [120, 200])
 async def test_timeline_draws_what_its_browser_page_shows(timeline, cols):
-    """The worked example at 120 and 200 columns: the top row (search, incident, Color by with its chips), the time
-    range's readout and strip, a lane per source, the axis with the incidents' marks, then the events by day, each with
-    its time, source, kind, actor, incident and text; its hint row names only keys the pane passes on."""
+    """The worked example at 120 and 200 columns: the search and Filter by on Incident with its values as toggles; Rows
+    on Source, then Color by with its chips; the time range's readout and strip, a lane per source, the axis with the
+    key's toggle of failed events and the incidents' flags; then what the list shows and how many, its columns'
+    headings, and the events by day, each with its time, source, kind, actor, incident and text; its hint row names
+    only keys the pane passes on."""
     out = await term_views.draw_text(timeline, "timeline", cols=cols, rows=36, wrap=DRAW_WRAP)
     lines = out.splitlines()
     assert lines[0] == "  Timeline"
     body, hints = _split(lines, 2, 36)
     assert all(len(x) <= cols + 2 for x in body)
-    assert body[0].startswith("  / search events  incident  all  Color by  Service  ● payments 79  ● web 45")
-    assert body[1] == "  16 May 01:14 – 19 May 14:25 · 3d 13h"
-    assert [x[2:10].strip() for x in body[3:8]] == ["alert", "deploy", "agent", "chat", "ticket"]
-    assert "17 May 00:00" in body[8] and "18 May 00:00" in body[8]
-    assert body[9].split() == ["INC-311", "INC-312", "INC-313"]
-    assert body[10] == ""
-    assert body[11].startswith("  Sat 16 May 2026")
-    assert body[12].startswith("❯ ● 01:40:12  chat    message     Oona")
-    assert "02:57:20  alert   fired       monitor     INC-311  payments: database connections at 181 of 200 for 5 min" in body[19]
+    assert body[0].startswith("  / search events  Filter by  Incident  ● INC-312 100  ● INC-313 23  ● INC-311 11  ● no incident 64")
+    assert body[1].startswith("  Rows  Source  Color by  Service  ● payments 79  ● web 45")
+    assert body[2] == "  16 May 01:14 – 19 May 14:25 · 3d 13h"
+    assert [x[2:12].strip() for x in body[4:9]] == ["alert", "deploy", "agent", "chat", "ticket"]
+    assert body[9].startswith("  × failed") and "17 May 00:00" in body[9] and "18 May 00:00" in body[9]
+    assert body[10].split() == ["INC-311", "INC-312", "INC-313"]
+    assert body[11] == ""
+    assert body[12] == "  In the range  198 events"
+    assert body[13].split() == ["time", "source", "kind", "actor", "incident", "text"]
+    assert body[14].startswith("  Sat 16 May 2026")
+    assert body[15].startswith("❯ ● 01:40:12  chat    message      Oona")
+    assert "02:57:20  alert   fired        monitor     INC-311   payments: database connections at 181 of 200 for 5 min" in body[22]
     if cols == 200:
-        assert "Tonight's release train: web 2.31.0 and payments 4.12.0. deploybot starts at 02:00." in body[12]
-    assert hints == ("↑↓ to choose · Enter to open · c to color by · / to search · i for incident · [ ] to "
-                                 "pan · + - to zoom · a to ask · b to go back · x to close")
+        assert "Tonight's release train: web 2.31.0 and payments 4.12.0. deploybot starts at 02:00." in body[15]
+    assert hints == ("↑↓ to choose · Enter to open · c to color by · / to search · f to filter by · g for rows · { } to "
+                     "resize the overview · [ ] to pan · + - to zoom · a to ask · b to go back · x to close")
+
+
+def _pane(rows: list[str]) -> list[str]:
+    """The side pane's rows, right of its `│`."""
+    return [x.rsplit("│ ", 1)[1].rstrip() for x in rows if "│ " in x]
 
 
 @needs_node
-async def test_timeline_opens_an_event_in_place_and_narrows_to_an_incident(timeline):
-    """Enter opens the chosen event in place: its words, its facts, the events that answer it, its line as the file
-    holds it and its place; the incident menu narrows to INC-312 and frames its burst; a citation of an incident opens
-    the view narrowed to it."""
+async def test_timeline_opens_an_event_in_the_side_pane_filters_and_picks_a_lane(timeline):
+    """Enter opens the chosen event in the side pane beside the list, never under its row: its words, its facts named
+    plainly, the events that answer it and its place, with no `ask about it` (the place asks); a click on a Filter by
+    value hides its events; a click on a lane's name shows that lane's events, the list naming them; a citation of an
+    incident narrows Filter by to it and frames its burst."""
     out = await term_views.draw_text(timeline, "timeline", cols=120, rows=36, wrap=DRAW_WRAP,
                                      keys=["down"] * 8 + ["return"], panel=False)
-    rows = [re.sub(r"\s*▌*$", "", x) for x in out.splitlines()]
+    rows = out.splitlines()
     at = next(i for i, x in enumerate(rows) if x.startswith("❯"))
-    assert "03:00:48  alert   fired" in rows[at]
-    assert rows[at + 1].strip() == "payments: health check failing on 2 of 3 replicas"
-    assert rows[at + 2].strip() == "service payments · severity critical · id alr-42"
-    assert rows[at + 3].strip() == "Answered by"
-    assert rows[at + 4].strip().startswith("03:01:05  agent · pagerbot  Opened INC-311")
-    # its facts say what its line holds, so the line itself is behind ↗, in the citation panel
-    assert not any(x.strip().startswith('2  {"id": "alr-42"') for x in rows)
-    assert any(x.strip().startswith("↗ alerts/monitor-20260516-0000.jsonl line 2  ask about it") for x in rows)
-    out = await term_views.draw_text(timeline, "timeline", cols=120, rows=36, wrap=DRAW_WRAP, keys=["i", "down", "down", "return"],
+    assert "03:00:48  alert   fired" in rows[at] and rows[at + 1].startswith("  ● 03:01:05  agent"), "nothing opens under the row"
+    pane = _pane(rows)
+    assert pane[0].startswith("alert fired · 03:00:48") and pane[0].endswith("close")
+    assert pane[1:5] == ["payments: health check failing on 2 of 3 replicas", "service payments · severity critical",
+                         "incident INC-311 · by monitor · alert id alr-42", "Responses · 5"]
+    assert pane[5].startswith("03:01:05  agent opened  Opened INC-311")
+    assert "↗ alerts/monitor-20260516-0000.jsonl line 2" in pane
+    assert "ask about it" not in out
+    assert rows[1].rstrip().endswith("reset"), "Reset shows once an event is open"
+    out = await term_views.draw_text(timeline, "timeline", cols=120, rows=36, wrap=DRAW_WRAP, keys=["click:INC-312"],
                                      panel=False)
     rows = out.splitlines()
-    assert "incident  INC-312" in rows[0] and rows[0].rstrip().endswith("reset")
-    assert rows[1].startswith("  16 May 07:30 – 11:39")
-    assert all("INC-312" in x for x in rows if x.startswith(("❯ ●", "  ●")))
+    assert "○ INC-312 100  ● INC-313 23  ● INC-311 11  ● no incident 64" in rows[0] and rows[1].rstrip().endswith("reset")
+    assert "In the range  98 events" in out and not any("INC-312" in x for x in _list_rows(rows))
+    out = await term_views.draw_text(timeline, "timeline", cols=120, rows=36, wrap=DRAW_WRAP, keys=["click:alert"],
+                                     panel=False)
+    assert "  Source: alert  34 events" in out.splitlines()
+    assert {x[14:22].strip() for x in _list_rows(out.splitlines())} == {"alert"}
     out = await term_views.draw_text(timeline, "timeline", cols=120, rows=36, wrap=DRAW_WRAP, ref="view:timeline/INC-313",
                                      panel=False)
-    assert "incident  INC-313" in out.splitlines()[0]
+    rows = out.splitlines()
+    assert "○ INC-312 100  ● INC-313 23  ○ INC-311 11  ○ no incident 64" in rows[0]
+    assert rows[2].startswith("  18 May 06:39 – 09:49")
+    assert all("INC-313" in x for x in _list_rows(rows))
 
 
 # ------------------------------------------------------------------------------------------------------ Linked sessions
@@ -723,23 +741,27 @@ WIDTHS = [47, 92, 140]  # the docked panel at 120 and 200 columns, and a wide on
 @needs_node
 async def test_timeline_opens_as_its_browser_page_does_and_reads_at_every_width(timeline):
     """Colored by the label that is on, its values as chips with their counts; Color by's name whole on a row of its own
-    where the top row has no room, its chips under it where they have none beside it; list rows cut with …; every key
-    in the hint row, which wraps; a zoomed range's window between `[` `]`."""
+    where the row has no room, its chips under it where they have none beside it; Filter by's values behind `+N` where
+    they do not fit; list rows cut with …; every key in the hint row, which wraps; a zoomed range's window between
+    `[` `]`."""
     await _labels_on(timeline, "timeline")
     for cols in WIDTHS:
         out = await term_views.draw_text(timeline, "timeline", cols=cols, rows=34, wrap=DRAW_WRAP)
         lines = out.splitlines()
         body, hints = _split(lines, 2, 34)
         assert all(len(x) <= cols + 2 for x in body), cols
-        top = "\n".join(body[:3])
-        assert "/ search events  incident  all" in body[0]
+        top = "\n".join(body[:4])
+        assert "/ search events  Filter by  Incident" in body[0]
         assert "Color by  Database connections ↗" in top and "● connections 22" in top and "● not marked 176" in top, cols
-        for k in ("c to color by", "/ to search", "i for incident", "[ ] to pan", "+ - to zoom", "a to ask", "b to go back"):
+        for k in ("c to color by", "/ to search", "f to filter by", "g for rows", "{ } to resize the overview", "[ ] to pan",
+                  "+ - to zoom", "a to ask", "b to go back"):
             assert k in hints, (cols, k)
         rows = _list_rows(body)
         assert rows and all(len(x) <= cols for x in rows)
         if cols == 47:
-            assert body[1].strip() == "Color by  Database connections ↗" and body[2].strip() == "● connections 22  ● not marked 176"
+            assert body[0].strip() == "/ search events  Filter by  Incident  +4"
+            assert body[1].strip() == "Rows  Source"
+            assert body[2].strip() == "Color by  Database connections ↗" and body[3].strip() == "● connections 22  ● not marked 176"
             assert rows[0].endswith("Tonight's release…"), "a cut row ends in …"
     out = await term_views.draw_text(timeline, "timeline", cols=47, rows=34, wrap=DRAW_WRAP, keys=["+", "+"], panel=False)
     strip = next(x for x in out.splitlines() if "[" in x and "]" in x)
@@ -748,18 +770,21 @@ async def test_timeline_opens_as_its_browser_page_does_and_reads_at_every_width(
 
 @needs_node
 async def test_timeline_details_and_menu_read_in_a_narrow_panel(timeline):
-    """At 47 cells an opened event's words and facts wrap to the panel's width, its place keeps its line with ask about
-    it under it; the Color by menu stands in a frame, the label's values and definition under its name, its ↗ whole."""
+    """At 47 cells the side pane stands under the list, a rule between them: an opened event's words and facts wrap to
+    the panel's width and its place keeps its line; `{` gives the overview fewer rows and the pane more. The Color by
+    menu stands in a frame, the label's values and definition under its name, its ↗ whole."""
     await _labels_on(timeline, "timeline")
-    out = await term_views.draw_text(timeline, "timeline", cols=47, rows=34, wrap=DRAW_WRAP, keys=["down"] * 8 + ["return"],
-                                     panel=False)
+    out = await term_views.draw_text(timeline, "timeline", cols=47, rows=34, wrap=DRAW_WRAP,
+                                     keys=["{", "{", "{"] + ["down"] * 8 + ["return"], panel=False)
     rows = [re.sub(r"\s*▌*$", "", x) for x in out.splitlines()]
     at = next(i for i, x in enumerate(rows) if x.startswith("❯"))
-    assert rows[at + 1].strip() == "payments: health check failing on 2 of 3"
-    assert rows[at + 3].strip() == "service payments · severity critical"
-    assert any(x.strip() == "↗ …/monitor-20260516-0000.jsonl line 2" for x in rows)
-    assert any(x.strip() == "ask about it" for x in rows)
-    assert rows[0].rstrip().endswith("reset"), "reset shows once a row is opened"
+    assert "03:00:48  alert" in rows[at] and set(rows[at + 1].strip()) == {"─"}
+    assert rows[at + 2].strip().startswith("alert fired · 03:00:48") and rows[at + 2].rstrip().endswith("close")
+    assert rows[at + 3].strip() == "payments: health check failing on 2 of 3"
+    assert rows[at + 5].strip() == "service payments · severity critical"
+    assert any(x.strip() == "↗ alerts/monitor-20260516-0000.jsonl line 2" for x in rows)
+    assert "ask about it" not in out
+    assert rows[1].rstrip().endswith("reset"), "reset shows once a row is opened"
     out = await term_views.draw_text(timeline, "timeline", cols=47, rows=34, wrap=DRAW_WRAP, keys=["c"], panel=False)
     rows = out.splitlines()
     top = next(i for i, x in enumerate(rows) if "╭─ Color by" in x)

@@ -268,7 +268,8 @@ async def test_the_terminal_review_gets_drawings_in_place_of_pictures(timeline, 
     assert "1: the view as it opens, 120 columns wide\n```\n  Timeline" in paths
     assert "2: the view as it opens, 200 columns wide, asked for: the wide panel" in paths
     assert "3: the view after the keys down return, 120 columns wide, asked for: a row" in paths
-    assert "\n4: " not in paths and "ask about it" in paths.split("\n3: ", 1)[1]
+    # the row opens in the side pane beside the list, its place a link that asks too
+    assert "\n4: " not in paths and "│ deploy started · 02:00:05" in paths.split("\n3: ", 1)[1]
     assert "alerts/" in records
     assert views.read_proposal(timeline, "timeline")["review"]["shots"] == 3
     with prompts.rendering("terminal"):
