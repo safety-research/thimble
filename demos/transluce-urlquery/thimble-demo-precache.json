@@ -31,7 +31,7 @@
  "counts": {
   "cards": 9,
   "labels": 1,
-  "views": 2,
+  "views": 1,
   "documents": 1
  },
  "corpus": [
@@ -151,33 +151,23 @@
   },
   {
    "path": "extension/views/activity-timeline/reader.py",
-   "bytes": 25242,
-   "sha256": "3739425bd65c62eb394f0e6e729260c2e8fedbd55e4128418f13cc6ae73662b2"
+   "bytes": 36571,
+   "sha256": "b11a1239f3b4d313cdd5f6ffc0535dd079d45e22f0f781b26c57322deb5b8e68"
   },
   {
    "path": "extension/views/activity-timeline/view.html",
-   "bytes": 65777,
-   "sha256": "d96d490fa2e86bded5c069957aff5c94bebddc6348bc9d4197ec674a6d5159e6"
+   "bytes": 75234,
+   "sha256": "80c072ea76844e3dde7503a81f247cfe246d0f1a0790b120d33da02fc142d129"
   },
   {
    "path": "extension/views/activity-timeline/view.json",
-   "bytes": 2730,
-   "sha256": "442f7b200aee5cf64ca5ad946c4154b67e7f3178323d5269172e59b5cbf41b8a"
+   "bytes": 4472,
+   "sha256": "4a4636513e4107d28d42a1ada2eedaf31136a16c0f6a8752119dc5ea97f9eb08"
   },
   {
-   "path": "extension/views/episode-browser/reader.py",
-   "bytes": 38652,
-   "sha256": "74ffa51ca4ef1e29f03326ddc8dc1e270048fe6e7b87b84cc907623f7abaa39e"
-  },
-  {
-   "path": "extension/views/episode-browser/view.html",
-   "bytes": 85816,
-   "sha256": "6d174e087c1bcabfc9e771ecb9b1b0ac0cd602bdb9af81fae49bd21185e07b05"
-  },
-  {
-   "path": "extension/views/episode-browser/view.json",
-   "bytes": 5545,
-   "sha256": "5dc69b10f0e06bacda48eb1086484bf16b71786298e680b75484977e6d2ff4d6"
+   "path": "extension/views/activity-timeline/view.term.js",
+   "bytes": 23468,
+   "sha256": "226233868fdee136761f89208fa0248f577acb34125647e1a02fbd097e7fedb4"
   },
   {
    "path": "investigations/main/investigation.json",
@@ -415,7 +405,7 @@
     "shared": 90
    },
    {
-    "path": "extension/views/episode-browser/reader.py",
+    "path": "extension/views/activity-timeline/reader.py",
     "chars": 90,
     "shared": 232
    }
@@ -2940,18 +2930,10 @@
   {
    "slug": "activity-timeline",
    "name": "Activity Timeline",
-   "version": "a2ec2f3740e1",
+   "version": "6b7a00d9f544",
    "from": "activity-timeline",
-   "from_version": "a2ec2f3740e1",
-   "picked": "live at a2ec2f3740e1"
-  },
-  {
-   "slug": "episode-browser",
-   "name": "Episode Browser",
-   "version": "40e57ec56555",
-   "from": "episode-browser",
-   "from_version": "40e57ec56555",
-   "picked": "live at 40e57ec56555"
+   "from_version": "6b7a00d9f544",
+   "picked": "live at 6b7a00d9f544"
   }
  ]
 }
