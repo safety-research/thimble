@@ -537,7 +537,7 @@ def _overview(index, query, keep):
     under the page's Rows (`rows`, its rows.query()). `counts` counts Color by's values for its chips and `fcounts`
     Filter by's for its toggles, each over the rows the other keeps, so a value turned off keeps its count. `next` is
     the row the next page starts at, None after the last. The first page also holds `span`, the first and the last time
-    of all the rows, and `starts`, each incident's first time."""
+    of all the rows."""
     rows = index["rows"]
     choice, only, group_by = query.get("colour"), query.get("filter"), query.get("rows")
     q = _str(query.get("q")).lower()
@@ -569,8 +569,7 @@ def _overview(index, query, keep):
                 cols[k].append(v)
     page = {"cols": cols, "counts": counts, "fcounts": fcounts, "next": i if i < len(rows) else None}
     if not start:
-        page.update(span=[rows[0][T], rows[-1][T]] if rows else [0, 0],
-                    starts={k: rows[a][T] for k, (a, _) in index["units"].items()})
+        page["span"] = [rows[0][T], rows[-1][T]] if rows else [0, 0]
     return page
 
 

@@ -10,10 +10,11 @@
   #view { height: 100%; display: flex; flex-direction: column; }
   .top { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; padding: 12px 16px 10px; border-bottom: 1px solid var(--border-subtle); }
   #q { flex: 0 1 180px; min-width: 110px; }
-  #colour { min-width: 300px; }
+  #colour { min-width: min(300px, 100%); max-width: 100%; }
   /* the overview: the readout, the range and its axis over the lanes, one column of time with the lanes' names in its
-     gutter; the time stays put while the lanes scroll under it, and the divider under it sets its height */
-  #overview { flex: none; max-height: 46%; overflow-y: auto; }
+     gutter; the time stays put while the lanes scroll under it, and the divider under it sets its height; it is as wide
+     as the pane, so it never scrolls sideways */
+  #overview { flex: none; max-height: 46%; overflow: hidden auto; }
   .time { position: sticky; top: 0; z-index: 2; display: grid; grid-template-columns: 112px minmax(0, 1fr); padding: 8px 16px 0; background: var(--surface-card); }
   #read { flex-direction: row; gap: 10px; margin-bottom: 4px; }
   #key { align-self: center; }
@@ -25,26 +26,30 @@
   .lhead b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 500 var(--text-sm) / 1.4 var(--font-body); }
   .lhead span { flex: none; color: var(--text-tertiary); font: 400 var(--text-mono-sm) / 1.4 var(--font-mono); font-variant-numeric: tabular-nums; }
   .lhead .btn { flex: none; margin-left: auto; }
-  /* the columns' headings and each event's line share one grid; a narrow list drops the actor and the incident */
-  .cols, .ev { display: grid; grid-template-columns: 64px 50px 84px 96px 60px minmax(0, 1fr); gap: 10px; align-items: center; padding: 0 16px 0 14px; }
+  /* the columns' headings and each event's line share one grid; a narrow list drops the actor and the incident. The
+     time column holds a day's date on its first event, the times right-aligned under it */
+  .cols, .ev { display: grid; grid-template-columns: 116px 50px 84px 96px 60px minmax(0, 1fr); gap: 10px; align-items: center; padding: 0 16px 0 14px; }
+  .cols > :first-child, .ev time { text-align: right; }
   .cols { flex: none; height: 22px; border-bottom: 1px solid var(--border-strong); color: var(--text-tertiary); font: 500 var(--text-xs) / 22px var(--font-body); }
   @container (max-width: 600px) {
-    .cols, .ev { grid-template-columns: 64px 50px 84px minmax(0, 1fr); }
+    .cols, .ev { grid-template-columns: 116px 50px 84px minmax(0, 1fr); }
     .c-actor, .c-inc { display: none; }
   }
-  #list { flex: 1; min-height: 0; overflow: auto; }
+  #list { flex: 1; min-height: 0; overflow: hidden auto; }
   /* as tall as every row; its padding stands for the rows above the ones drawn, so a long list draws only those in view */
   #win { min-height: 100%; }
-  .day, .ev { height: 24px; }
-  .day { padding: 6px 16px 0; border-bottom: 1px solid var(--border-strong); font: 500 var(--text-ui-sm) / 16px var(--font-body); }
-  .ev { border-bottom: 1px solid var(--border-hairline); cursor: pointer; }
+  .ev { height: 24px; border-bottom: 1px solid var(--border-hairline); cursor: pointer; }
   .ev:hover { background: rgba(var(--ink-rgb), 0.03); }
   .ev.is-open { background: var(--surface-selected); }
   .ev > * { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-secondary); font: 400 var(--text-xs) / 1.6 var(--font-body); }
   .ev time, .link time { color: var(--text-tertiary); font: 400 var(--text-mono-sm) / 1.6 var(--font-mono); font-variant-numeric: tabular-nums; }
+  .ev time b { color: var(--text-secondary); font-weight: 400; }
   .ev .text { color: var(--text-primary); font-size: var(--text-sm); }
-  /* a failed outcome in the problem red, as the lanes underline it */
+  /* a failed outcome: ✕ and its kind in the problem red, as the lanes draw ✕ over its mark */
   .ev .failed { color: var(--status-negative); }
+  .fail-x .halo { stroke: var(--surface-card); stroke-width: 3.6; }
+  .fail-x .x { stroke: var(--status-negative); stroke-width: 1.6; }
+  .fail-x path { fill: none; stroke-linecap: round; }
   .empty { padding: 28px 16px; color: var(--text-tertiary); }
   /* an event in the side panel: its words, its facts, the events it answers and that answer it, its lines */
   .words { margin: 0 0 12px; white-space: pre-wrap; overflow-wrap: anywhere; font: 400 var(--text-sm) / 1.5 var(--font-body); }
@@ -93,13 +98,14 @@
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c])
 const hms = (t) => new Date(t * 1000).toISOString().slice(11, 19)
 const dayOf = (t) => new Date(t * 1000).toISOString().slice(0, 10)
+const FAILED = (e) => e.outcome === 'failed'
 const dur = (s) => (s < 60 ? `${s}s` : s < 3600 ? `${Math.floor(s / 60)}m ${s % 60}s` : `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m`)
 const cap = (s) => String(s).charAt(0).toUpperCase() + String(s).slice(1)
 const $ = (id) => document.getElementById(id)
 const q = $('q'), list = $('list'), win = $('win')
-const RH = 24 // a list row's height, a day's heading too, so the list draws only the rows in view
+const RH = 24 // a list row's height, so the list draws only the rows in view
 let E = [] // the events shown, in time order: {r, t, ref, source, kind, actor, service, severity, outcome, incident, text, value, group}
-let span = null, flags = []
+let span = null
 let picked = null // the lane chosen, whose events the list shows: {key, value, name}
 let open = null // the event in the side panel
 let keep = [] // the row a citation opened, kept whatever the filters
@@ -160,12 +166,11 @@ const filter = thimble.filterBy({ mount: '#filter', fields: FIELDS, initial: 'in
 const rows = thimble.rows({ mount: '#rows', fields: FIELDS, initial: 'source', onChange: () => { pick(null); load() } })
 const range = thimble.timeRange({ mount: '#range', readout: '#read', onChange: draw })
 // the lanes draw each event in the value the reader gave it, which holds for a label too, whose marks reach only the
-// rows the list draws; a failed event is underlined in the problem red, and its key entry hides or shows them
+// rows the list draws; a failed event is ✕ in the problem red over its mark (failMarks), always shown
 const painted = { keeps: () => true, valueOf: (e) => e.value, colourOf: (v) => colour.colourOf(v) }
 const lanes = thimble.lanes({
   mount: '#lanes', keyMount: '#key', rows, range, colour: painted, names: 112, follow: '#list',
-  problem: (e) => e.outcome === 'failed', words: { problem: 'failed' },
-  tip: (e) => `${e.kind} · ${e.actor} · ${e.text}`,
+  tip: (e) => `${e.kind}${FAILED(e) ? ' · failed' : ''} · ${e.actor} · ${e.text}`,
   onPick: (lane) => pick(picked && picked.key === lane.key ? null : lane),
   onMark: (e) => show(e.r),
 })
@@ -184,7 +189,7 @@ async function load() {
     do {
       const page = await thimble.fetch({ ...query, from }, { key: 'events' })
       if (my !== seq) return
-      if (page.span) { span = page.span; flags = Object.entries(page.starts).map(([label, t]) => ({ t, label })) }
+      if (page.span) span = page.span
       for (const k in page.cols) (cols[k] = cols[k] || []).push(...page.cols[k])
       for (const k in page.counts) counts[k] = (counts[k] || 0) + page.counts[k]
       for (const k in page.fcounts) fcounts[k] = (fcounts[k] || 0) + page.fcounts[k]
@@ -201,7 +206,7 @@ async function load() {
   filter.counts(fcounts)
   // the overview keeps the whole span whatever the filters keep, so the viewfinder stays where it was
   const pad = (span[1] - span[0]) * 0.005
-  range.data({ times: E.map((e) => e.t), values: E.map((e) => e.value), span: [span[0] - pad, span[1] + pad], marks: flags })
+  range.data({ times: E.map((e) => e.t), values: E.map((e) => e.value), span: [span[0] - pad, span[1] + pad] })
   markLoaded()
   if (narrowTo != null && filter.field === 'incident') narrowNow()
   draw()
@@ -209,26 +214,19 @@ async function load() {
 
 function draw() {
   if (!span) return
-  thimble.timeAxis('#axis', range.scale($('axis').clientWidth), { marks: flags })
+  thimble.timeAxis('#axis', range.scale($('axis').clientWidth))
   lanes.draw(E)
   drawList()
 }
 
-// the list: the events in the range (and in the lane chosen), a heading for each day, every row RH px tall
-let shown = [] // the list's rows in order: {day} or an event
+// the list: the events in the range (and in the lane chosen), every row RH px tall; a day's first event gives its date
+let shown = [] // the list's events in order
 let drawn = '' // the rows last drawn, from..to
 function drawList() {
   const inLane = (e) => !picked || (rows.groupOf(e) ?? null) === picked.value
-  shown = []
-  let day = ''
-  for (const e of E) {
-    if (!range.has(e.t) || !inLane(e)) continue
-    if (dayOf(e.t) !== day) shown.push({ day: range.format(e.t, ((day = dayOf(e.t)), 86400)) })
-    shown.push(e)
-  }
-  // the colored scrollbar takes every row's value, a day's heading the value of the event under it
-  const values = shown.map((x, i) => (x.day ? (shown[i + 1] || {}).value : x.value))
-  colour.strip(list, { rows: values, refs: shown.map((x) => x.ref || null), preview: (i) => (shown[i].day ? shown[i].day : { when: hms(shown[i].t), text: `${shown[i].source} · ${shown[i].text}` }) })
+  shown = E.filter((e) => range.has(e.t) && inLane(e))
+  // the colored scrollbar takes every event's value
+  colour.strip(list, { rows: shown.map((e) => e.value), refs: shown.map((e) => e.ref), preview: (i) => ({ when: hms(shown[i].t), text: `${shown[i].source} · ${shown[i].text}` }) })
   win.style.height = shown.length * RH + 'px'
   head()
   paint(true)
@@ -236,7 +234,7 @@ function drawList() {
 
 // what the list shows, named over it: the lane chosen or every event, its first and last time, and how many
 function head() {
-  const evs = shown.filter((x) => !x.day)
+  const evs = shown
   const what = picked ? `${rows.by ? rows.by.title + ': ' : ''}${picked.name}` : 'In the range'
   const when = evs.length ? `${range.format(evs[0].t, 60)} – ${range.format(evs[evs.length - 1].t, 60)}` : ''
   $('lhead').innerHTML = `<b>${esc(what)}</b>${when ? `<span>${esc(when)}</span>` : ''}<span>${span ? `${evs.length} ${evs.length === 1 ? 'event' : 'events'}` : ''}${busy ? ' · loading…' : ''}</span>` +
@@ -249,17 +247,41 @@ function paint(force) {
   if (!force && drawn === `${a}..${b}`) return
   drawn = `${a}..${b}`
   win.style.paddingTop = a * RH + 'px'
-  win.innerHTML = !span ? '<div class="empty">Loading the events…</div>' : !shown.length ? '<div class="empty">No event</div>' : shown.slice(a, b).map(rowOf).join('')
+  win.innerHTML = !span ? '<div class="empty">Loading the events…</div>' : !shown.length ? '<div class="empty">No event</div>' : shown.slice(a, b).map((x, i) => rowOf(x, a + i)).join('')
 }
-function rowOf(x) {
-  if (x.day) return `<div class="day">${esc(x.day)}</div>`
+// the time, with the date before it on the first event of a day, so no heading row breaks the list
+function rowOf(x, i) {
+  const date = i === 0 || dayOf(shown[i - 1].t) !== dayOf(x.t) ? `<b>${esc(range.format(x.t, 86400))}</b> ` : ''
   return `<div class="ev${x.r === open ? ' is-open' : ''}" data-r="${x.r}" data-t="${x.t}" data-anchor="${esc(x.ref)}" data-anchor-text="${esc(x.text)}"${colour.attr(x)}>` +
-    `<time>${hms(x.t)}</time><span>${esc(x.source)}</span><span${x.outcome === 'failed' ? ' class="failed" title="failed"' : ''}>${esc(x.kind)}</span>` +
+    `<time>${date}${hms(x.t)}</time><span>${esc(x.source)}</span><span${FAILED(x) ? ' class="failed" title="failed"' : ''}>${FAILED(x) ? '✕ ' : ''}${esc(x.kind)}</span>` +
     `<span class="c-actor">${esc(x.actor)}</span><span class="c-inc">${esc(x.incident)}</span><span class="text">${esc(x.text)}</span></div>`
 }
+// a scroll or a resize draws the rows on the next frame, so the rows drawn are never a resize the observer hears in
+// the same one
 let frameReq = null
-list.addEventListener('scroll', () => { if (frameReq == null) frameReq = requestAnimationFrame(() => { frameReq = null; paint() }) }, { passive: true })
-new ResizeObserver(() => paint()).observe(list)
+const soon = () => { if (frameReq == null) frameReq = requestAnimationFrame(() => { frameReq = null; paint() }) }
+list.addEventListener('scroll', soon, { passive: true })
+new ResizeObserver(soon).observe(list)
+
+// a failed event's ✕ over its mark in the lanes, drawn again each time the lanes draw their marks
+const SVG = 'http://www.w3.org/2000/svg'
+function failMarks() {
+  const byKey = new Map(lanes.lanes.map((n) => [String(n.key), n.items || []]))
+  for (const svg of $('lanes').querySelectorAll('svg.thimble-lane-track:not([data-fails])')) {
+    svg.setAttribute('data-fails', '')
+    const its = byKey.get(svg.closest('.thimble-lane')?.getAttribute('data-key')) || []
+    for (const m of svg.querySelectorAll('.thimble-lane-mark[data-i]')) {
+      if (!FAILED(its[+m.getAttribute('data-i')] || {})) continue
+      const x = +m.getAttribute('x') + +m.getAttribute('width') / 2, y = +m.getAttribute('y') + +m.getAttribute('height') / 2
+      const g = document.createElementNS(SVG, 'g')
+      g.setAttribute('class', 'fail-x')
+      const d = `M${x - 3.5} ${y - 3.5}L${x + 3.5} ${y + 3.5}M${x + 3.5} ${y - 3.5}L${x - 3.5} ${y + 3.5}`
+      g.innerHTML = `<path class="halo" d="${d}"/><path class="x" d="${d}"/>`
+      svg.appendChild(g)
+    }
+  }
+}
+new MutationObserver(failMarks).observe($('lanes'), { childList: true, subtree: true })
 
 function pick(lane) {
   picked = lane ? { key: lane.key, value: lane.value, name: lane.name } : null
@@ -318,7 +340,7 @@ $('lhead').addEventListener('click', (ev) => { if (ev.target.closest('[data-all]
 addEventListener('keydown', (ev) => {
   if (open == null || (ev.key !== 'ArrowUp' && ev.key !== 'ArrowDown')) return
   if (ev.target !== document.body && (!ev.target.closest('#body') || ev.target.closest('input, [role="separator"]'))) return
-  const evs = shown.filter((x) => !x.day), i = evs.findIndex((x) => x.r === open)
+  const evs = shown, i = evs.findIndex((x) => x.r === open)
   const next = evs[i + (ev.key === 'ArrowUp' ? -1 : 1)]
   if (i < 0 || !next) return
   ev.preventDefault()
